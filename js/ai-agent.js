@@ -85,7 +85,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     deepThinkEnabled: true,    // 后端 config.deep_think.enabled
     tavilyResearchEnabled: false, // 后端 config.tavily_research.enabled (Tavily Deep Research)
     // ★ M: 深度思考模式 toggle 状态
-    //   寮€鍚悗鏈細璇濇墍鏈夋秷鎭蛋 Planner鈫扺orkers鈫扴ynthesizer 澶?agent 流程
+    //   开启后本会话所有消息走 Planner→Workers→Synthesizer 多 agent 流程
     //   持久化到 localStorage, 重开对话框后恢复
     deepThink: false,
     deepThinkJob: null,         // AbortController for current deep think request
@@ -234,7 +234,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }).join('\n');
   }
 
-  // 绠€鍗?Markdown 鈫?HTML 渲染
+  // 简单 Markdown → HTML 渲染
   function escapeAttr(val) {
     if (!val) return '';
     return String(val).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1361,7 +1361,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           '<div class="ai-msg-footer"></div>' +
         '</div>';
 
-      // header 鏁磋鍙偣鍑诲睍寮€/鎶樺彔
+      // header 点击可展开/折叠
       var headerEl = node.querySelector('.ai-think-header');
       var chevronEl = node.querySelector('.ai-think-chevron');
       headerEl.addEventListener('click', function(e) {
@@ -1486,7 +1486,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           searchLabel += ' · 搜索：' + queryStr;
         }
         searchBar.textContent = searchLabel;
-        // 1 澶╁唴 + 鏈?results 鏁扮粍 鈫?鍙偣鍑诲睍寮€
+        // 1 天内 + 有 results 数组 → 可点击展开
         if (!isExpired && Array.isArray(msg.search_results) && msg.search_results.length > 0) {
           var expandBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
           searchBar.appendChild(expandBtn);
@@ -4254,7 +4254,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (footer) {
           footer.innerHTML = '';
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-          // V2: 绠€娲佹ā寮忔爣绛? 鍘绘帀閲嶅 sparkle
+          // V2: 简洁模式标签，去掉重复 sparkle
           footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
           if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已研究 ' + searchCount + ' 个来源' }));
@@ -7022,7 +7022,7 @@ function showChatMessages() {
           S.conversationId = null;
           if (S.messagesEl) S.messagesEl.innerHTML = '';
           setAiRootState('ai-empty');
-          // 寮€鍚柊瀵硅瘽
+          // 开启新对话
           var r2 = await apiRequest('POST', '/chat/new', null);
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.conversationId = r2.data.conversation_id;
@@ -7954,7 +7954,7 @@ function showChatMessages() {
     // ★ U3 Bug 4 修复: 不再重置 S.deepThink, 保持用户的 toggle 偏好
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
-    // 閲嶇疆鎵€鏈夌姸鎬侊紝閬垮厤閲嶅紑鍚庢畫鐣?
+    // 重置所有状态，避免重开后残留
     S.sending = false;
     S.paused = false;
     S.activeRenderers = [];

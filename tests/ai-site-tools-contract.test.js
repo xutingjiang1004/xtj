@@ -27,7 +27,8 @@ test('search scopes protect private records and direct messages', () => {
   assert.match(server, /p\.visibility !== 'private' \|\| p\.user_name === userName/);
   assert.match(server, /visibleCommentPosts/);
   assert.match(server, /media_type', DM_MARKER/);
-  assert.match(server, /user_name\.eq\.' \+ userName/);
+  // DM 搜索的 or() 过滤用 pgrstQuote 转义用户名，防止注入过滤条件
+  assert.match(server, /user_name\.eq\.' \+ pgrstQuote\(userName\)/);
 });
 
 test('new AI tables are RLS protected and service-role only', () => {

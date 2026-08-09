@@ -11246,7 +11246,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 var loadSeq = ++_dockChatLoadSeq;
-                // 褰撳墠用户浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
+                // 当前用户优先使用 localStorage 缓存的头像
                 if (currentUser) {
                     try {
                         var cachedAvatars = readAvatarCacheFromStorage();
