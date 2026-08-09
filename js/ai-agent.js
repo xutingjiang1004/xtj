@@ -2971,6 +2971,56 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         });
         footer.appendChild(refreshBtn);
       }
+      // 导出：复制研究报告全文
+      var exportBtn = el('button', {
+        type: 'button',
+        class: 'ai-msg-export-research',
+        text: '复制全文',
+        style: 'margin-left:8px;padding:2px 10px;border-radius:999px;border:1px solid rgba(140,196,158,.35);background:rgba(255,255,255,.06);color:var(--ai-text,#35544b);font-size:11px;cursor:pointer;'
+      });
+      exportBtn.addEventListener('click', function() {
+        var text = '';
+        try {
+          var ans = card.querySelector('.ai-think-answer');
+          text = (ans && (ans.innerText || ans.textContent)) || String(answerText || '');
+        } catch (e) {
+          text = String(answerText || '');
+        }
+        text = String(text || '').trim();
+        if (!text) {
+          notify('暂无可复制内容');
+          return;
+        }
+        function ok() {
+          exportBtn.textContent = '已复制';
+          setTimeout(function() { exportBtn.textContent = '复制全文'; }, 1400);
+          notify('研究报告已复制');
+        }
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(ok).catch(function() {
+              var ta = document.createElement('textarea');
+              ta.value = text;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              ta.remove();
+              ok();
+            });
+          } else {
+            var ta2 = document.createElement('textarea');
+            ta2.value = text;
+            document.body.appendChild(ta2);
+            ta2.select();
+            document.execCommand('copy');
+            ta2.remove();
+            ok();
+          }
+        } catch (e2) {
+          notify('复制失败');
+        }
+      });
+      footer.appendChild(exportBtn);
     }
 
     setResearchCardState(card, 'done', { durationMs: durationMs, searchCount: srcs.length, expanded: false, progress: 1 });
@@ -2998,19 +3048,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var modeBar = el('div', { class: 'dt-research-mode-bar', style: 'display:flex;align-items:center;gap:8px;padding:8px 16px 0;flex:0 0 auto;' });
       modeBar.appendChild(el('span', { text: '研究强度', style: 'font-size:11px;color:rgba(100,130,120,.9);flex:0 0 auto;' }));
       var seg = el('div', { style: 'display:inline-flex;gap:2px;padding:2px;border:1px solid rgba(140,196,158,.3);border-radius:12px;background:rgba(140,196,158,.14);' });
-      var modes = [['mini', '快速'], ['pro', '深度'], ['auto', '自动']];
+      var modes = [
+        ['mini', '快速', '约 1 分钟 · 简要结论'],
+        ['pro', '深度', '约 2–3 分钟 · 多角度分析'],
+        ['auto', '自动', '约 1–5 分钟 · 按问题自动调档']
+      ];
       for (var mi = 0; mi < modes.length; mi++) {
-        (function(modeVal, modeText) {
-          var opt = el('button', { type: 'button', class: 'dt-research-mode-opt', text: modeText });
+        (function(modeVal, modeText, modeHint) {
+          var opt = el('button', { type: 'button', class: 'dt-research-mode-opt', text: modeText, title: modeHint });
           opt._mode = modeVal;
+          opt._hint = modeHint;
           opt.addEventListener('click', function() {
             S.dtResearchMode = modeVal;
             syncResearchModeUi(panel);
           });
           seg.appendChild(opt);
-        })(modes[mi][0], modes[mi][1]);
+        })(modes[mi][0], modes[mi][1], modes[mi][2]);
       }
       modeBar.appendChild(seg);
+      var hint = el('div', {
+        class: 'dt-research-mode-hint',
+        text: '深度：约 2–3 分钟 · 多角度分析',
+        style: 'font-size:11px;color:rgba(100,130,120,.85);margin-left:4px;flex:1 1 auto;'
+      });
+      modeBar.appendChild(hint);
       inputBar.parentNode.insertBefore(modeBar, inputBar);
     }
     syncResearchModeUi(panel);
@@ -3020,12 +3081,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!panel) return;
     var isDark = isDeepThinkDarkTheme();
     var opts = panel.querySelectorAll('.dt-research-mode-opt');
+    var activeHint = '';
     for (var i = 0; i < opts.length; i++) {
       var active = opts[i]._mode === S.dtResearchMode;
+      if (active) activeHint = opts[i]._hint || opts[i].getAttribute('title') || '';
       opts[i].style.cssText = active
         ? 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:linear-gradient(135deg,rgba(64,167,116,.95),rgba(82,182,160,.95));color:#fff;font-weight:600;'
         : 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:transparent;color:' + (isDark ? 'rgba(214,236,229,.92)' : 'rgba(66,95,85,.95)') + ';';
     }
+    var hintEl = panel.querySelector('.dt-research-mode-hint');
+    if (hintEl && activeHint) hintEl.textContent = activeHint;
   }
 
   function isDeepThinkDarkTheme() {
@@ -5841,6 +5906,43 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       }
 
+      function attachContinueGenerateBtn(node, msgHost) {
+        if (!node || node.querySelector('.ai-continue-btn')) return;
+        var btn = el('button', { type: 'button', class: 'ai-continue-btn', text: '继续生成' });
+        btn.addEventListener('click', function() {
+          if (S.sending) {
+            notify('正在回复中，请稍候');
+            return;
+          }
+          var lastUser = '';
+          for (var i = S.messages.length - 1; i >= 0; i--) {
+            if (S.messages[i] && S.messages[i].role === 'user') {
+              lastUser = String(S.messages[i].content || '');
+              break;
+            }
+          }
+          if (!lastUser) {
+            notify('没有可继续的消息');
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = '继续中…';
+          var inputEl = S.inputEl || document.getElementById('aiChatInput');
+          var sendEl = S.sendBtnEl || document.getElementById('aiChatSend');
+          var host = msgHost || S.messagesEl || document.getElementById('aiChatMessages');
+          if (inputEl) inputEl.value = '请在上文基础上继续写完，不要重复已说内容。';
+          try {
+            if (typeof handleSendMessage === 'function') handleSendMessage(inputEl, sendEl, host, null);
+            else notify('无法继续，请手动重发');
+          } catch (eSend) {
+            notify('继续失败，请手动重发');
+            btn.disabled = false;
+            btn.textContent = '继续生成';
+          }
+        });
+        node.appendChild(btn);
+      }
+
       function finishAiMessage(node, content, thinking, evt) {
         // P4 修复: 防止重复 finalize
         if (_finalized) return;
@@ -6265,19 +6367,41 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'tool_calls') {
             var toolList = evt.tools || [];
-            var toolDesc = toolList.map(function(t) {
-              var nameMap = { search_web: '联网搜索', tavily_search: 'Tavily搜索', get_weather: '查询天气', get_current_time: '获取时间' };
-              var label = nameMap[t.name] || t.name;
-              if (t.args && t.args.query) return label + ' "' + t.args.query + '"';
-              if (t.args && t.args.location) return label + ' ' + t.args.location;
-              return label;
-            }).join('、');
-            var toolBar = assistantNode.querySelector('.ai-tool-status');
-            if (!toolBar) {
-              toolBar = el('div', { class: 'ai-tool-status' });
-              assistantNode.insertBefore(toolBar, assistantBubble);
+            var nameMapCall = {
+              search_web: '联网搜索', tavily_search: 'Tavily搜索', get_weather: '查询天气',
+              get_current_time: '获取时间', get_exchange_rate: '查询汇率', get_stock_quote: '查询行情'
+            };
+            var timeline = assistantNode.querySelector('.ai-tool-timeline');
+            if (!timeline) {
+              timeline = el('div', { class: 'ai-tool-timeline ai-tool-status', role: 'status', 'aria-live': 'polite' });
+              assistantNode.insertBefore(timeline, assistantBubble);
             }
-            toolBar.textContent = 'AI 正在使用：' + toolDesc;
+            toolList.forEach(function(t) {
+              var label = nameMapCall[t.name] || t.name || '工具';
+              var detail = '';
+              if (t.args && t.args.query) detail = String(t.args.query);
+              else if (t.args && t.args.location) detail = String(t.args.location);
+              else if (t.args && t.args.symbol) detail = String(t.args.symbol);
+              var stepId = 'tool-step-' + String(t.name || 'tool') + '-' + String(detail).slice(0, 24);
+              var existing = timeline.querySelector('[data-tool-step="' + stepId.replace(/"/g, '') + '"]');
+              if (existing) {
+                existing.classList.add('is-running');
+                existing.classList.remove('is-done', 'is-error');
+                var st = existing.querySelector('.ai-tool-step-status');
+                if (st) st.textContent = '进行中';
+                return;
+              }
+              var step = el('div', { class: 'ai-tool-step is-running' });
+              step.setAttribute('data-tool-step', stepId);
+              step.setAttribute('data-tool-name', String(t.name || ''));
+              step.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🔧' }));
+              var body = el('div', { class: 'ai-tool-step-body' });
+              body.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
+              if (detail) body.appendChild(el('div', { class: 'ai-tool-step-detail', text: detail }));
+              body.appendChild(el('div', { class: 'ai-tool-step-status', text: '进行中' }));
+              step.appendChild(body);
+              timeline.appendChild(step);
+            });
             continue;
           }
 
@@ -6299,25 +6423,49 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
 
           if (evt.type === 'tool_pending') {
-            var pendingBar = assistantNode.querySelector('.ai-tool-status');
-            if (!pendingBar) { pendingBar = el('div', { class: 'ai-tool-status' }); assistantNode.insertBefore(pendingBar, assistantBubble); }
-            pendingBar.textContent = 'AI 正在准备：' + (evt.tool_name || '站内工具');
+            var pendingBar = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
+            if (!pendingBar) {
+              pendingBar = el('div', { class: 'ai-tool-timeline ai-tool-status', role: 'status' });
+              assistantNode.insertBefore(pendingBar, assistantBubble);
+            }
+            var pendStep = el('div', { class: 'ai-tool-step is-running' });
+            pendStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '⏳' }));
+            var pendBody = el('div', { class: 'ai-tool-step-body' });
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-title', text: '准备工具' }));
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: evt.tool_name || '站内工具' }));
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '进行中' }));
+            pendStep.appendChild(pendBody);
+            pendingBar.appendChild(pendStep);
             continue;
           }
 
           if (evt.type === 'tool_error') {
             notify((evt.tool_name || 'AI 工具') + '：' + (evt.error || '执行失败'));
+            var errTimeline = assistantNode.querySelector('.ai-tool-timeline');
+            if (errTimeline) {
+              var errStep = el('div', { class: 'ai-tool-step is-error' });
+              errStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '⚠️' }));
+              var errBody = el('div', { class: 'ai-tool-step-body' });
+              errBody.appendChild(el('div', { class: 'ai-tool-step-title', text: evt.tool_name || '工具' }));
+              errBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '失败' }));
+              if (evt.error) errBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(evt.error).slice(0, 120) }));
+              errStep.appendChild(errBody);
+              errTimeline.appendChild(errStep);
+            }
             continue;
           }
 
           if (evt.type === 'tool_result') {
-            var toolBar2 = assistantNode.querySelector('.ai-tool-status');
+            var toolBar2 = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
             if (!toolBar2) {
-              toolBar2 = el('div', { class: 'ai-tool-status' });
+              toolBar2 = el('div', { class: 'ai-tool-timeline ai-tool-status' });
               assistantNode.insertBefore(toolBar2, assistantBubble);
             }
-            var nameMap = { search_web: '已联网搜索', tavily_search: '已Tavily搜索', get_weather: '已查询天气', get_current_time: '已获取时间' };
-            var label = nameMap[evt.tool_name] || evt.tool_name;
+            var nameMap = {
+              search_web: '联网搜索', tavily_search: 'Tavily搜索', get_weather: '查询天气',
+              get_current_time: '获取时间', get_exchange_rate: '查询汇率', get_stock_quote: '查询行情'
+            };
+            var label = nameMap[evt.tool_name] || evt.tool_name || '工具';
             var summaryText = '';
             if (evt.success) {
               if (evt.count > 0) {
@@ -6328,8 +6476,37 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             } else {
               summaryText = label + ' · 失败' + (evt.error ? (': ' + evt.error.slice(0, 80)) : '');
             }
-            toolBar2.innerHTML = '';
-            toolBar2.textContent = summaryText;
+            // Update timeline step + keep expandable result card below
+            var matchStep = null;
+            var steps = toolBar2.querySelectorAll('.ai-tool-step');
+            for (var si = steps.length - 1; si >= 0; si--) {
+              if ((steps[si].getAttribute('data-tool-name') || '') === String(evt.tool_name || '')) {
+                matchStep = steps[si];
+                break;
+              }
+            }
+            if (!matchStep) {
+              matchStep = el('div', { class: 'ai-tool-step' });
+              matchStep.setAttribute('data-tool-name', String(evt.tool_name || ''));
+              matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: evt.success ? '✅' : '⚠️' }));
+              var mbody = el('div', { class: 'ai-tool-step-body' });
+              mbody.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
+              mbody.appendChild(el('div', { class: 'ai-tool-step-status', text: evt.success ? '完成' : '失败' }));
+              matchStep.appendChild(mbody);
+              toolBar2.appendChild(matchStep);
+            } else {
+              matchStep.classList.remove('is-running');
+              matchStep.classList.add(evt.success ? 'is-done' : 'is-error');
+              var iconEl = matchStep.querySelector('.ai-tool-step-icon');
+              if (iconEl) iconEl.textContent = evt.success ? '✅' : '⚠️';
+              var stEl = matchStep.querySelector('.ai-tool-step-status');
+              if (stEl) stEl.textContent = evt.success ? '完成' : '失败';
+            }
+            var resultCard = el('div', { class: 'ai-tool-result-card' });
+            resultCard.appendChild(el('div', { class: 'ai-tool-result-card-title', text: summaryText }));
+            toolBar2.appendChild(resultCard);
+            // Expandable result list attaches to the result card
+            toolBar2 = resultCard;
             var itemsArr = evt.items;
             var queryStr2 = evt.query || '';
             if (itemsArr && itemsArr.length > 0) {
@@ -6530,7 +6707,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // 中断/未保存提示
             if (streamInterrupted && aiContent) {
               var interrNote = el('div', { class: 'ai-interrupt-note' }, '回复中断，内容可能不完整');
-              if (assistantNode) assistantNode.appendChild(interrNote);
+              if (assistantNode) {
+                assistantNode.appendChild(interrNote);
+                try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eCont) {}
+              }
             }
             if (!streamSaved && aiContent) {
               var saveNote = el('div', { class: 'ai-save-note' }, '本次回复未保存，刷新后可能丢失');
@@ -6569,6 +6749,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var timeoutNote = el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），已保留部分回复');
           try { assistantNode.appendChild(timeoutNote); } catch (e) {}
           finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eC1) {}
         } else {
           try { assistantNode.remove(); } catch (e) {}
           S.messages.pop();
@@ -6639,6 +6820,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var connNote = el('div', { class: 'ai-error-note' }, '连接中断，已保留部分回复');
           try { assistantNode.appendChild(connNote); } catch (e) {}
           finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eC2) {}
         } else {
           try { assistantNode.remove(); } catch (e) {}
           S.messages.pop();

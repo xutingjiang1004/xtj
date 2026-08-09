@@ -111,6 +111,7 @@ const JS_FILES = [
   'js/features.js',
   'js/core-animations.js',
   'js/ui-effects.js',
+  'js/ux-features.js',
   'js/login-device.js',
    'js/ai-agent.js',
   'js/theme-toggle.js',
