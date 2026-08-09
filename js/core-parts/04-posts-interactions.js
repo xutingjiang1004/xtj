@@ -3075,11 +3075,30 @@
                     : function(p) { return p; };
 
                 // 优先使用后端 API（支持私密帖子可见性过滤）
+                // 公开首屏：裸 fetch + 硬超时，避免登录态 refresh / optionalAuth 路径拖死 skeleton
                 try {
-                    var apiResp = await window.xtjOptionalAuthFetch('/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE, {
-                        timeoutMs: FEED_NET_TIMEOUT_MS
-                    });
-                    if (apiResp.ok) {
+                    var feedPath = '/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE;
+                    var apiResp = null;
+                    var knownUser = '';
+                    try {
+                        knownUser = String((typeof currentUser === 'string' ? currentUser : '') || (window.safeStorage && window.safeStorage.get('xtj_user')) || '').trim();
+                    } catch (eUser) { knownUser = ''; }
+                    var hasToken = false;
+                    try { hasToken = !!(typeof getUserToken === 'function' && getUserToken()); } catch (eTok) { hasToken = false; }
+
+                    if (!knownUser && !hasToken) {
+                        var feedUrl = (window.API_BASE || (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin || '').replace(/\/$/, '') + feedPath;
+                        var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
+                        apiResp = await doFetch(feedUrl, { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json' } }, FEED_NET_TIMEOUT_MS);
+                    } else if (typeof window.xtjOptionalAuthFetch === 'function') {
+                        apiResp = await window.xtjOptionalAuthFetch(feedPath, { timeoutMs: FEED_NET_TIMEOUT_MS });
+                    } else {
+                        var feedUrl2 = (window.API_BASE || window.location.origin || '').replace(/\/$/, '') + feedPath;
+                        var doFetch2 = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
+                        apiResp = await doFetch2(feedUrl2, { method: 'GET', credentials: 'include' }, FEED_NET_TIMEOUT_MS);
+                    }
+
+                    if (apiResp && apiResp.ok) {
                         var apiData = await apiResp.json();
                         if (apiData && apiData.ok) {
                             posts = normalizePosts(apiData.posts || []);
@@ -3917,8 +3936,21 @@
                 try {
                     feedPageFetchPending = true;
                     var chunk = await fetchFeedPageChunk(0, requestId, true);
-                    if (!chunk) return;
-                    if (requestId !== feedLoadRequestId) return;
+                    if (!chunk || requestId !== feedLoadRequestId) {
+                        // 竞态取消时不要把 HTML skeleton 永久留住
+                        if (feed && !hadLiveFeed) {
+                            var stillSkeleton = /xtj-loading-skeleton|xtj-skeleton-card|内容加载中/.test(feed.innerHTML || '');
+                            if (stillSkeleton && requestId === feedLoadRequestId) {
+                                feed.innerHTML = '<div class="loading feed-load-more-error" id="feedBootError" role="button" tabindex="0" style="color:#ff3b60;cursor:pointer;">加载中断，点击重试</div>';
+                                var bootErr = document.getElementById('feedBootError');
+                                if (bootErr && !bootErr.__xtjBound) {
+                                    bootErr.__xtjBound = true;
+                                    bootErr.addEventListener('click', function() { loadFeed(true); });
+                                }
+                            }
+                        }
+                        return;
+                    }
                     // A publish may finish while this request is in flight.
                     // Preserve current state and merge this page when that happens.
                     if (stateVersionAtRequest === feedStateVersion) {
