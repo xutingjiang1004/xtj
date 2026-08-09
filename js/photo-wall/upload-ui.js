@@ -583,6 +583,10 @@
     result.dataset.state = s;
     var titleMap = { success: '上传成功', partial: '部分上传成功', error: '上传失败' };
     if (titleEl) titleEl.textContent = titleMap[s] || titleMap.success;
+    // 全站照片墙：上传成功庆祝（轻量 confetti，尊重 perf-lite）
+    if (s === 'success' && typeof window.__xtjPhotoUploadCelebrate === 'function') {
+      try { window.__xtjPhotoUploadCelebrate(); } catch (_) {}
+    }
     var parts = text.split(/\n|[。;；]/).map(function(p){ return p.trim(); }).filter(Boolean);
     if (detailEl) detailEl.textContent = parts.length > 1 ? parts.join('\n') : text;
     if (actionsEl) actionsEl.hidden = (s === 'success');
