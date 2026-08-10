@@ -449,6 +449,82 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  /**
+   * 对话内「已联网」状态：默认极小胶囊，不塞长 query / 不撑满整行。
+   * opts: { count, query, results, expired, statusText, simple }
+   * - simple: 仅状态文案（搜索中/内置搜索等），不可展开
+   */
+  function buildSearchStatusBar(opts) {
+    opts = opts || {};
+    var expired = !!opts.expired;
+    var bar = el('div', { class: 'ai-search-status' + (expired ? ' expired' : '') });
+    var head = el('div', { class: 'ai-search-status-head' });
+    var count = typeof opts.count === 'number' ? opts.count : 0;
+    var labelText = opts.statusText;
+    if (!labelText) {
+      if (count > 0) labelText = '已联网 · ' + count;
+      else labelText = '联网完成';
+      if (expired) labelText += '（过期）';
+    }
+    head.appendChild(el('span', { class: 'ai-search-status-label', text: labelText }));
+    bar.appendChild(head);
+
+    if (opts.simple) return bar;
+
+    var queryStr = String(opts.query || '').trim();
+    var results = Array.isArray(opts.results) ? opts.results : [];
+    var canExpand = !expired && (results.length > 0 || !!queryStr);
+    if (!canExpand) return bar;
+
+    var toggleBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
+    head.appendChild(toggleBtn);
+    var detail = el('div', { class: 'ai-search-detail', hidden: true });
+    if (queryStr) {
+      detail.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
+    }
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i] || {};
+      var item = el('div', { class: 'ai-search-detail-item' });
+      var href = safeSearchUrl(r.url) || '#';
+      item.appendChild(el('a', {
+        class: 'ai-search-detail-title',
+        href: href,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        text: r.title || '无标题'
+      }));
+      if (r.snippet) {
+        item.appendChild(el('div', {
+          class: 'ai-search-detail-snippet',
+          text: String(r.snippet).slice(0, 200)
+        }));
+      }
+      var meta = (r.source || '') + (r.published_at ? ' · ' + r.published_at : '');
+      if (meta) item.appendChild(el('div', { class: 'ai-search-detail-source', text: meta }));
+      detail.appendChild(item);
+    }
+    bar.appendChild(detail);
+    bar.style.cursor = 'pointer';
+    bar.addEventListener('click', function(ev) {
+      if (ev && ev.target && (ev.target.tagName === 'A' ||
+          (ev.target.classList && ev.target.classList.contains('ai-search-detail-title')))) return;
+      var open = bar.classList.toggle('is-open');
+      if (open) detail.removeAttribute('hidden');
+      else detail.setAttribute('hidden', '');
+      try { toggleBtn.textContent = open ? '收起' : '展开'; } catch (eT) {}
+    });
+    return bar;
+  }
+
+  /** 就地替换已有搜索条（保留 DOM 位置） */
+  function replaceSearchStatusBar(oldBar, opts) {
+    var fresh = buildSearchStatusBar(opts);
+    if (oldBar && oldBar.parentNode) {
+      oldBar.parentNode.replaceChild(fresh, oldBar);
+    }
+    return fresh;
+  }
+
   function isSupportedAiFile(file) {
     if (!file) return false;
     var name = String(file.name || '').toLowerCase();
@@ -1683,51 +1759,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var nowMs = Date.now();
         var expiresAt = typeof msg.search_expires_at === 'number' ? msg.search_expires_at : 0;
         var isExpired = expiresAt > 0 && nowMs > expiresAt;
-        var searchBar = el('div', { class: 'ai-search-status' + (isExpired ? ' expired' : '') });
-        var queryStr = msg.search_query || '';
-        // 紧凑标题行 + 可选展开列表（避免整条变成超长宽框）
-        var labelText = '已联网 · ' + msg.search_count + ' 条';
-        if (isExpired) labelText += '（过期）';
-        var headEl = el('div', { class: 'ai-search-status-head' });
-        headEl.appendChild(el('span', { class: 'ai-search-status-label', text: labelText }));
-        if (queryStr && !isExpired) {
-          var qShow = queryStr.length > 22 ? (queryStr.slice(0, 22) + '…') : queryStr;
-          headEl.appendChild(el('span', { class: 'ai-search-status-query', text: qShow, title: queryStr }));
-        }
-        searchBar.appendChild(headEl);
-
-        if (!isExpired && Array.isArray(msg.search_results) && msg.search_results.length > 0) {
-          var expandBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
-          headEl.appendChild(expandBtn);
-          var listEl = el('div', { class: 'ai-search-detail', hidden: true });
-          for (var si = 0; si < msg.search_results.length; si++) {
-            var sr = msg.search_results[si] || {};
-            var safeSrUrl = safeSearchUrl(sr.url);
-            var item = el('a', {
-              class: 'ai-search-detail-item',
-              href: safeSrUrl || '#',
-              target: '_blank',
-              rel: 'noopener noreferrer'
-            });
-            item.appendChild(el('span', { class: 'ai-search-detail-title', text: sr.title || '(无标题)' }));
-            var snippet = sr.snippet || '';
-            if (snippet.length > 140) snippet = snippet.slice(0, 140) + '...';
-            if (snippet) item.appendChild(el('span', { class: 'ai-search-detail-snippet', text: snippet }));
-            var meta = (sr.source ? sr.source : '') + (sr.published_at ? ' · ' + sr.published_at : '');
-            if (meta) item.appendChild(el('span', { class: 'ai-search-detail-source', text: meta }));
-            listEl.appendChild(item);
-          }
-          searchBar.appendChild(listEl);
-          searchBar.style.cursor = 'pointer';
-          searchBar.addEventListener('click', function(ev) {
-            if (ev && ev.target && (ev.target.tagName === 'A' || ev.target.classList && ev.target.classList.contains('ai-search-detail-title'))) return;
-            var open = searchBar.classList.toggle('is-open');
-            if (open) listEl.removeAttribute('hidden');
-            else listEl.setAttribute('hidden', '');
-            try { expandBtn.textContent = open ? '收起' : '展开'; } catch (e) {}
-          });
-        }
-        node.appendChild(searchBar);
+        node.appendChild(buildSearchStatusBar({
+          count: msg.search_count,
+          query: isExpired ? '' : (msg.search_query || ''),
+          results: isExpired ? [] : (msg.search_results || []),
+          expired: isExpired
+        }));
       }
       // 搜索到此结束
       var thinkingMode = getMessageThinkingMode(msg);
@@ -6584,24 +6621,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (liveSearchBar) {
             node.appendChild(liveSearchBar);
           } else if (searchCount > 0) {
-            // 没有直播搜索条（如历史重建），创建一个简版
-            var sb = el('div', { class: 'ai-search-status', text: '已联网搜索 · ' + searchCount + ' 条结果' });
-            var sq = searchQuery || '';
-            if (sq) {
-              var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▸');
-              sb.appendChild(toggleBtn);
-              sb.style.cursor = 'pointer';
-              var panel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
-              sb.appendChild(panel);
-              panel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + sq }));
-              sb.onclick = function(e) {
-                if (e.target.tagName === 'A') return;
-                var h = panel.style.display === 'none';
-                panel.style.display = h ? '' : 'none';
-                toggleBtn.textContent = h ? ' ▾' : ' ▸';
-              };
-            }
-            node.appendChild(sb);
+            node.appendChild(buildSearchStatusBar({
+              count: searchCount,
+              query: searchQuery || '',
+              results: searchResults || []
+            }));
           }
           var footer = el('div', { class: 'ai-msg-footer' });
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
@@ -6761,15 +6785,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'multi_agent') {
             var maStatus = assistantNode.querySelector('.ai-search-status');
-            if (!maStatus) {
-              maStatus = el('div', { class: 'ai-search-status' });
-              assistantNode.insertBefore(maStatus, assistantBubble);
-            }
             if (evt.action === 'searching') {
               var qs = evt.queries || [];
-              maStatus.textContent = '多 Agent 协作：正在并行搜索 ' + qs.join('、');
-              // ★ 优化：把拆解的查询词同步展示进思考过程，让用户看到
-              // "拆了哪些词、搜了什么"，而不是只看一个状态条。
+              var maLabel = qs.length
+                ? ('并行搜索 · ' + qs.length)
+                : '多 Agent 搜索中…';
+              var maBar = buildSearchStatusBar({ statusText: maLabel, simple: true });
+              if (maStatus && maStatus.parentNode) maStatus.parentNode.replaceChild(maBar, maStatus);
+              else assistantNode.insertBefore(maBar, assistantBubble);
+              // 把拆解词放进思考过程，不撑宽状态条
               try {
                 if (qs.length) {
                   var maThink = ensureReasoningNode();
@@ -6811,89 +6835,51 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'search_status') {
             // DeepSeek 内置 web_search 状态（黑盒：结果不外吐，仅提示状态）
             var stBar = assistantNode.querySelector('.ai-search-status');
-            if (!stBar) {
-              stBar = el('div', { class: 'ai-search-status' });
-              assistantNode.insertBefore(stBar, assistantBubble);
-            }
-            if (evt.status === 'searching') {
-              stBar.textContent = '正在联网搜索…';
-            } else if (evt.status === 'completed') {
-              stBar.textContent = '已联网（内置搜索）';
-            }
+            var stText = evt.status === 'completed' ? '已联网' : '联网中…';
+            var stFresh = buildSearchStatusBar({ statusText: stText, simple: true });
+            if (stBar && stBar.parentNode) stBar.parentNode.replaceChild(stFresh, stBar);
+            else assistantNode.insertBefore(stFresh, assistantBubble);
             continue;
           }
 
           if (evt.type === 'search') {
-            // 显示搜索状态条（紧凑胶囊，可展开）
             var searchCount = evt.count;
             var searchBar = assistantNode.querySelector('.ai-search-status');
-            if (!searchBar) {
-              searchBar = el('div', { class: 'ai-search-status' });
-              assistantNode.insertBefore(searchBar, assistantBubble);
-            }
-            searchBar.innerHTML = '';
-            searchBar.classList.remove('is-open');
-            var resultsArr = evt.results;
-            var queryStr = evt.query || '';
-            var headEl = el('div', { class: 'ai-search-status-head' });
-            var labelText = searchCount > 0
-              ? ('已联网 · ' + searchCount + ' 条')
-              : '联网完成 · 无结果';
-            headEl.appendChild(el('span', { class: 'ai-search-status-label', text: labelText }));
-            if (queryStr) {
-              var qShow = queryStr.length > 22 ? (queryStr.slice(0, 22) + '…') : queryStr;
-              headEl.appendChild(el('span', { class: 'ai-search-status-query', text: qShow, title: queryStr }));
-            }
-            searchBar.appendChild(headEl);
-            if (resultsArr && resultsArr.length > 0) {
-              var toggleBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
-              headEl.appendChild(toggleBtn);
-              var detailPanel = el('div', { class: 'ai-search-detail', hidden: true });
-              for (var ri = 0; ri < resultsArr.length; ri++) {
-                var r = resultsArr[ri];
-                var itemEl = el('div', { class: 'ai-search-detail-item' });
-                var linkEl = el('a', { class: 'ai-search-detail-title', href: safeSearchUrl(r.url) || '#', target: '_blank', rel: 'noopener noreferrer', text: r.title || '无标题' });
-                itemEl.appendChild(linkEl);
-                if (r.snippet) {
-                  itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r.snippet.slice(0, 200) }));
-                }
-                itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (r.source || '') + ' · ' + (r.published_at || '') }));
-                detailPanel.appendChild(itemEl);
-              }
-              searchBar.appendChild(detailPanel);
-              searchBar.style.cursor = 'pointer';
-              searchBar.onclick = function(e) {
-                if (e.target.tagName === 'A') return;
-                var open = searchBar.classList.toggle('is-open');
-                if (open) detailPanel.removeAttribute('hidden');
-                else detailPanel.setAttribute('hidden', '');
-                toggleBtn.textContent = open ? '收起' : '展开';
-              };
-            }
+            var searchFresh = buildSearchStatusBar({
+              count: searchCount,
+              query: evt.query || '',
+              results: evt.results || []
+            });
+            if (searchBar && searchBar.parentNode) searchBar.parentNode.replaceChild(searchFresh, searchBar);
+            else assistantNode.insertBefore(searchFresh, assistantBubble);
             continue;
           }
           
           if (evt.type === 'search_error') {
             var searchDiag2 = evt.diagnostics;
+            var errLabel = evt.error || '联网失败';
+            if (errLabel.length > 16) errLabel = errLabel.slice(0, 16) + '…';
             var searchBar2 = assistantNode.querySelector('.ai-search-status');
-            if (!searchBar2) {
-              searchBar2 = el('div', { class: 'ai-search-status' });
-              assistantNode.insertBefore(searchBar2, assistantBubble);
-            }
-            searchBar2.textContent = evt.error || '联网搜索失败';
-            // 显示详细失败原因（可展开）
+            var errOpts = { statusText: errLabel, simple: true };
+            // 有诊断信息时放到 detail（避免长错误撑宽）
             if (searchDiag2) {
-              var errorDetail = el('div', { style: 'font-size:10px;color:#999;margin-top:2px;max-height:60px;overflow:hidden;text-overflow:ellipsis;line-height:1.3;' });
+              var errDetail = '';
               if (searchDiag2.provider_errors && searchDiag2.provider_errors.length) {
-                errorDetail.textContent = searchDiag2.provider_errors.map(function(pe) {
-                  var shortErr = (pe.error || '').slice(0, 60);
-                  return pe.provider + ': ' + shortErr;
-                }).join(' | ');
+                errDetail = searchDiag2.provider_errors.map(function(pe) {
+                  return pe.provider + ': ' + String(pe.error || '').slice(0, 80);
+                }).join('\n');
               } else if (searchDiag2.missing_env && searchDiag2.missing_env.length) {
-                errorDetail.textContent = '未配置: ' + searchDiag2.missing_env.join(', ');
+                errDetail = '未配置: ' + searchDiag2.missing_env.join(', ');
               }
-              if (errorDetail.textContent) searchBar2.appendChild(errorDetail);
+              if (errDetail) {
+                errOpts.simple = false;
+                errOpts.query = errDetail;
+                errOpts.results = [];
+              }
             }
+            var errFresh = buildSearchStatusBar(errOpts);
+            if (searchBar2 && searchBar2.parentNode) searchBar2.parentNode.replaceChild(errFresh, searchBar2);
+            else assistantNode.insertBefore(errFresh, assistantBubble);
             continue;
           }
           
@@ -8136,9 +8122,7 @@ function showChatMessages() {
       if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 会员' : '开通 Pro';
       if (proDesc) {
         if (q.is_pro) {
-          proDesc.textContent = searchUnlimited
-            ? (formatTokenCount(limit) + ' · 无限搜')
-            : (formatTokenCount(limit) + ' · ' + Math.max(0, searchLimit) + ' 搜');
+          proDesc.textContent = searchUnlimited ? '已开通' : ('搜 ' + Math.max(0, searchLimit) + '/日');
         } else {
           proDesc.textContent = '邀请码';
         }
@@ -8152,7 +8136,7 @@ function showChatMessages() {
       if (!plusBtn || !panelShell || !panelShell.parentNode) return;
       var btnRect = plusBtn.getBoundingClientRect();
       var bar = panelShell.parentNode.getBoundingClientRect();
-      var panelW = Math.min(288, Math.max(240, bar.width - 16));
+      var panelW = Math.min(272, Math.max(236, bar.width - 20));
       panelShell.style.width = panelW + 'px';
       var left = btnRect.left - bar.left + btnRect.width / 2 - 24;
       var maxLeft = Math.max(8, bar.width - panelW - 8);
