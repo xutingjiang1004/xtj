@@ -8073,9 +8073,129 @@ function showChatMessages() {
       }, 280);
     }
 
+    function closeInviteModal() {
+      var m = document.getElementById('aiInviteModal');
+      if (m && m.parentNode) m.parentNode.removeChild(m);
+    }
+
+    function showInviteCodeModal() {
+      try { closeInviteModal(); } catch (e0) {}
+      var modal = document.createElement('div');
+      modal.id = 'aiInviteModal';
+      modal.className = 'ai-invite-modal';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.innerHTML =
+        '<div class="ai-invite-modal-box">' +
+          '<div class="ai-invite-modal-head">' +
+            '<b>开通 Pro</b>' +
+            '<button type="button" class="ai-invite-modal-close" aria-label="关闭">×</button>' +
+          '</div>' +
+          '<div class="ai-invite-modal-body">' +
+            '<p class="ai-invite-modal-tip">输入管理员发放的邀请码，激活后获得对应额度的 Pro 权限</p>' +
+            '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="请输入邀请码" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" />' +
+            '<div class="ai-invite-code-feedback" id="aiInviteCodeFeedback"></div>' +
+          '</div>' +
+          '<div class="ai-invite-modal-foot">' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel">取消</button>' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiInviteConfirmBtn">激活</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(modal);
+
+      var input = modal.querySelector('#aiInviteCodeInput');
+      var feedback = modal.querySelector('#aiInviteCodeFeedback');
+      var confirmBtn = modal.querySelector('#aiInviteConfirmBtn');
+      var validating = false;
+      var validateTimer = null;
+      var validCodeInfo = null;
+
+      function close() {
+        if (validateTimer) clearTimeout(validateTimer);
+        if (modal.parentNode) modal.parentNode.removeChild(modal);
+      }
+      modal.querySelector('.ai-invite-modal-close').addEventListener('click', close);
+      modal.querySelector('.ai-invite-modal-cancel').addEventListener('click', close);
+      modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
+      modal.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') close();
+        if (e.key === 'Enter' && e.target === input) doRedeem();
+      });
+
+      function doValidate() {
+        if (validating) return;
+        var code = input.value.trim();
+        feedback.className = 'ai-invite-code-feedback';
+        if (!code) { feedback.textContent = ''; return; }
+        validating = true;
+        apiRequest('POST', '/invite/validate', { code: code })
+          .then(function(r) {
+            validating = false;
+            var payload = (r && r.data) || {};
+            if (payload && payload.ok) {
+              validCodeInfo = payload;
+              feedback.className = 'ai-invite-code-feedback is-ok';
+              feedback.textContent = payload.message || '邀请码有效';
+            } else {
+              validCodeInfo = null;
+              feedback.className = 'ai-invite-code-feedback is-bad';
+              feedback.textContent = (payload && payload.message) || '邀请码无效';
+            }
+          })
+          .catch(function() {
+            validating = false;
+            validCodeInfo = null;
+            feedback.className = 'ai-invite-code-feedback is-bad';
+            feedback.textContent = '校验失败，请稍后重试';
+          });
+      }
+
+      input.addEventListener('input', function() {
+        validCodeInfo = null;
+        if (validateTimer) clearTimeout(validateTimer);
+        var code = input.value.trim();
+        feedback.className = 'ai-invite-code-feedback';
+        if (!code) { feedback.textContent = ''; return; }
+        validateTimer = setTimeout(doValidate, 350);
+      });
+
+      function doRedeem() {
+        if (confirmBtn.disabled) return;
+        var code = input.value.trim();
+        if (!code) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入邀请码'; return; }
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = '激活中…';
+        apiRequest('POST', '/invite/redeem', { code: code })
+          .then(function(r) {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = '激活';
+            var payload = (r && r.data) || {};
+            if (payload && payload.ok) {
+              close();
+              if (payload.quota) applyQuota(payload.quota, { forceCeremony: true, skipRefetch: true });
+              else fetchAiQuota(true).then(function(q) { if (q && q.is_pro) applyQuota(q, { forceCeremony: true, skipRefetch: true }); });
+              notify('Pro 开通成功，额度已刷新');
+            } else {
+              feedback.className = 'ai-invite-code-feedback is-bad';
+              feedback.textContent = (payload && payload.message) || '激活失败';
+              setTimeout(function() { fetchAiQuota(true); }, 300);
+            }
+          })
+          .catch(function() {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = '激活';
+            feedback.className = 'ai-invite-code-feedback is-bad';
+            feedback.textContent = '激活失败，请稍后重试';
+          });
+      }
+
+      confirmBtn.addEventListener('click', doRedeem);
+      setTimeout(function() { try { input.focus(); } catch (e1) {} }, 50);
+    }
+
     async function openProCheckout() {
       try {
-        // 先强制刷新，支付成功回跳后能立刻看到最新额度
+        // 先强制刷新，激活成功后能立刻看到最新额度
         await fetchAiQuota(true);
         var r = await apiRequest('POST', '/pro/checkout', {});
         var payload = (r && r.data) || {};
@@ -8088,30 +8208,7 @@ function showChatMessages() {
           notify('Pro 已生效，额度已刷新');
           return;
         }
-        if (payload.checkout && payload.checkout.url) {
-          // 爱发电跳转支付：提示在下单留言框填用户名，便于回调自动开通
-          var hint = (payload.checkout && payload.checkout.message) || '请在下单留言框填写你的用户名，支付成功后自动开通 Pro';
-          notify(hint);
-          // 支付回跳后：监听 focus 强制刷新 + 动画
-          var onFocus = function() {
-            window.removeEventListener('focus', onFocus);
-            setTimeout(async function() {
-              var q = await fetchAiQuota(true);
-              if (q && q.is_pro) {
-                applyQuota(q, { forceCeremony: true, skipRefetch: true });
-                notify('Pro 开通成功，额度已刷新');
-              }
-            }, 400);
-          };
-          window.addEventListener('focus', onFocus);
-          window.open(payload.checkout.url, '_blank', 'noopener');
-          return;
-        }
-        var msg = payload.message || payload.error || r.error || 'Pro 支付通道即将接入 Stripe';
-        notify(msg);
-        if (payload.quota) applyQuota(payload.quota);
-        // 联调：管理员可直接 activate 时，主动再拉一次
-        setTimeout(function() { fetchAiQuota(true); }, 300);
+        showInviteCodeModal();
       } catch (e) {
         notify('Pro 开通入口暂不可用');
       }
