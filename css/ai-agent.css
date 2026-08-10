@@ -1153,7 +1153,24 @@
    + 号按钮 & 展开面板（液态玻璃效果）
    ============================================================ */
 
-/* + 号按钮 — 与发送按钮风格一致 */
+/* 原生系统选择器：几乎不可见，但仍在布局中（showPicker 要求元素可渲染） */
+.ai-native-picker {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0.01;
+  z-index: 0;
+  pointer-events: none;
+  color: transparent;
+  background: transparent;
+}
+
+/* + 号按钮 — 与发送按钮风格一致；菜单本身走系统 select，无自定义面板 */
 .ai-plus-btn {
   flex: 0 0 auto;
   width: 40px;
