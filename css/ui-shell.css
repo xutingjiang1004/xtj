@@ -614,38 +614,12 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  pointer-events: none; /* 点击交给叠层 select */
+  pointer-events: auto;
+  cursor: pointer;
   background: rgba(255, 255, 255, .42);
   border-color: rgba(111, 157, 151, .22);
   color: var(--text-main);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .62), 0 5px 13px rgba(74, 119, 111, .05);
-}
-
-/* 透明 select 铺满 AI 按钮，系统列表一次点开 */
-#panelPosts.active .ai-tools-select-hit,
-.ai-tools-select-hit {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  opacity: 0.01;
-  border: 0;
-  border-radius: inherit;
-  cursor: pointer;
-  z-index: 3;
-  font-size: 16px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  color: transparent;
-}
-
-#panelPosts.active .ai-tools-select-hit:focus-visible {
-  opacity: 0.12;
-  outline: 2px solid rgba(66, 155, 122, 0.45);
-  outline-offset: 2px;
 }
 
 #panelPosts.active .ai-tools-trigger-icon { inline-size: 20px; block-size: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -657,6 +631,11 @@
   border-color: rgba(65, 137, 113, .42);
   color: rgb(38, 110, 88);
   transform: translateY(-1px);
+}
+
+#panelPosts.active .ai-tools-trigger:focus-visible {
+  outline: 2px solid rgba(66, 155, 122, 0.45);
+  outline-offset: 2px;
 }
 
 #panelPosts.active .ai-tools-menu {
@@ -1264,12 +1243,64 @@
 
   #panelPosts .wrap,
   #panelPosts.active .wrap {
-    gap: 16px !important;
+    gap: 12px !important;
     padding-inline: 0 !important;
+    /* Prevent a flex child from stretching the compose box into empty space. */
+    align-items: stretch !important;
   }
 
-  #panelPosts .publish-box {
-    padding: 18px !important;
+  /* Compact compose area: the empty textarea was eating half the phone screen. */
+  #panelPosts .publish-box,
+  #panelPosts.active .publish-box,
+  #panelPosts .publish-box.glass {
+    padding: 12px 14px 12px !important;
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+
+  #panelPosts .publish-box textarea,
+  #panelPosts #postInp {
+    min-height: 56px !important;
+    max-height: 120px !important;
+    height: auto !important;
+    font-size: 16px !important; /* iOS: avoid auto-zoom on focus */
+    line-height: 1.45 !important;
+    field-sizing: content;
+  }
+
+  #panelPosts .post-compose-row {
+    margin-top: 8px !important;
+    margin-bottom: 4px !important;
+  }
+
+  #panelPosts .publish-footer {
+    padding-top: 10px !important;
+    margin-top: 2px !important;
+  }
+
+  #panelPosts .post-filter-bar {
+    padding: 10px 12px !important;
+  }
+
+  /* Posts must paint immediately on touch layouts. Opacity-0 + content-visibility
+     left empty white slabs when IntersectionObserver lagged or early-feed ran first. */
+  #panelPosts .post,
+  #panelPosts .post.glass,
+  #panelPosts #feed > .post {
+    opacity: 1 !important;
+    transform: none !important;
+    content-visibility: visible !important;
+    contain: none !important;
+    contain-intrinsic-size: none !important;
+    min-height: 0 !important;
+    flex: 0 0 auto !important;
+  }
+
+  #panelPosts .feed,
+  #panelPosts #feed {
+    gap: 12px !important;
+    min-height: 0 !important;
   }
 
   #panelPosts .post-filter-toggle-row {

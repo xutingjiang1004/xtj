@@ -46,15 +46,15 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=6a8c1be8fc" />
+    <link rel="stylesheet" href="css/style.min.css?v=cdb3b86775" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=6a8c1be8fc" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=2fa2c37cc6" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=cdb3b86775" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=99be903948" /></noscript>
     <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=6852b8abab" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=a1d7b43990" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=3aef244d42" media="print" onload="this.media='all'">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=2fa2c37cc6">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=1f40d3d886">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=3460441178" media="print" onload="this.media='all'">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=99be903948">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=b21ba6de2f">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=c7f6c6babd">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=36ec270e61">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=708b593ff5">
@@ -144,17 +144,25 @@
                         </span>
                     </button>
                     <div class="ai-tools-nav" id="aiToolsNav">
-                        <!-- 透明 select 叠在按钮上，桌面/iOS 一次点开系统列表（同小猫 + 方案 A） -->
-                        <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-hidden="true" tabindex="-1">
+                        <!-- 自定义下拉：Win 原生 select 会空弹「选择…」 -->
+                        <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-label="AI 工具" aria-haspopup="menu" aria-expanded="false" aria-controls="aiToolsMenu">
                             <svg class="ai-tools-trigger-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.7-5.3 1.7L12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z"></path><path d="m18.3 15 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg>
                             <span class="ai-tools-sr-only">AI 工具</span>
                         </button>
-                        <select id="aiToolsNativeSelect" class="ai-tools-select-hit" aria-label="AI 工具">
-                            <option value="">选择 AI 工具…</option>
-                            <option value="chat">小猫AI · 对话与历史</option>
-                            <option value="research">深度研究</option>
-                            <option value="search">站内搜索</option>
-                        </select>
+                        <div class="ai-tools-menu" id="aiToolsMenu" role="menu" aria-label="AI 工具" hidden>
+                            <button type="button" role="menuitem" data-ai-tool="chat">
+                                <span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
+                                <span><b>小猫AI</b><small>对话与历史</small></span>
+                            </button>
+                            <button type="button" role="menuitem" data-ai-tool="research">
+                                <span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></span>
+                                <span><b>深度研究</b><small>多步检索与长文分析</small></span>
+                            </button>
+                            <button type="button" role="menuitem" data-ai-tool="search">
+                                <span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg></span>
+                                <span><b>站内搜索</b><small>搜帖子与评论</small></span>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right:8px; position:relative; z-index:3; pointer-events:auto;">
@@ -299,7 +307,7 @@
                     </div>
                 </div>
                 <!-- 首屏并行拉帖：不依赖 core.js / supabase，避免大包未下载完时永久 skeleton -->
-                <script src="js/early-feed.min.js?v=eb3a0c457c"></script>
+                <script src="js/early-feed.min.js?v=ed5bae88dc"></script>
             </div>
         </div>
 
@@ -1084,7 +1092,7 @@
     <script defer src="js/config.min.js?v=6d3726a5b3"></script>
     <script defer src="js/performance.min.js?v=ee09d8d2d7"></script>
     <script defer src="js/core-utils.min.js?v=20846db068"></script>
-    <script defer src="js/core.min.js?v=50d90aa8a1"></script>
+    <script defer src="js/core.min.js?v=f33797b92c"></script>
     <script defer src="js/login-device.min.js?v=42ede07462"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=2aa0efaa93"></script>
