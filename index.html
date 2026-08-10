@@ -46,15 +46,15 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=07326f992a" />
+    <link rel="stylesheet" href="css/style.min.css?v=6bf18ceda9" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=07326f992a" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=f728dab985" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=6bf18ceda9" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=393b088f3d" /></noscript>
     <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=6852b8abab" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=a1d7b43990" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=c79b13b5f8" media="print" onload="this.media='all'">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=f728dab985">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=9e42a59bf0">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=393b088f3d">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=be0aed1a20">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=c7f6c6babd">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=36ec270e61">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=708b593ff5">
@@ -144,15 +144,17 @@
                         </span>
                     </button>
                     <div class="ai-tools-nav" id="aiToolsNav">
-                        <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-label="AI 工具" aria-haspopup="menu" aria-expanded="false">
+                        <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-label="AI 工具" aria-haspopup="listbox" aria-controls="aiToolsNativeSelect">
                             <svg class="ai-tools-trigger-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.7-5.3 1.7L12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z"></path><path d="m18.3 15 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg>
                             <span class="ai-tools-sr-only">AI 工具</span>
                         </button>
-                        <div class="ai-tools-menu" id="aiToolsMenu" role="menu" aria-label="AI 工具" hidden>
-                            <button type="button" role="menuitem" data-ai-tool="chat"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 18.5 3.5 21l4.1-1.3A8.4 8.4 0 1 0 4 16.4"></path><path d="M8 12h.01M12 12h.01M16 12h.01"></path></svg></span><span><b>小猫AI</b><small>对话与历史记录</small></span></button>
-                            <button type="button" role="menuitem" data-ai-tool="research"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="7" cy="7" r="2"></circle><circle cx="17" cy="7" r="2"></circle><circle cx="12" cy="17" r="2"></circle><path d="m8.7 8.5 2.1 6M15.3 8.5l-2.1 6M9 7h6"></path></svg></span><span><b>深度研究</b><small>多阶段分析与研究</small></span></button>
-                            <button type="button" role="menuitem" data-ai-tool="search"><span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="5.8"></circle><path d="m15.2 15.2 4.3 4.3M8.5 10.8h4.6M10.8 8.5v4.6"></path></svg></span><span><b>站内搜索</b><small>搜索帖子、聊天与 AI 历史</small></span></button>
-                        </div>
+                        <!-- 系统级选择列表（iOS showPicker / 液态玻璃），不再用自定义下拉 -->
+                        <select id="aiToolsNativeSelect" class="xtj-native-picker" aria-label="AI 工具" tabindex="-1">
+                            <option value="">选择 AI 工具…</option>
+                            <option value="chat">小猫AI · 对话与历史</option>
+                            <option value="research">深度研究</option>
+                            <option value="search">站内搜索</option>
+                        </select>
                     </div>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right:8px; position:relative; z-index:3; pointer-events:auto;">
@@ -1082,7 +1084,7 @@
     <script defer src="js/config.min.js?v=6d3726a5b3"></script>
     <script defer src="js/performance.min.js?v=ee09d8d2d7"></script>
     <script defer src="js/core-utils.min.js?v=20846db068"></script>
-    <script defer src="js/core.min.js?v=e4f5c82c9a"></script>
+    <script defer src="js/core.min.js?v=09867d4c6c"></script>
     <script defer src="js/login-device.min.js?v=42ede07462"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=2aa0efaa93"></script>

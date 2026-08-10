@@ -1,5 +1,10 @@
 const { test, expect } = require('@playwright/test');
 
+async function pickAiTool(page, value) {
+  await page.locator('#aiToolsBtn').click();
+  await page.locator('#aiToolsNativeSelect').selectOption(value);
+}
+
 async function prepareAuthenticatedPage(page) {
   await page.addInitScript(() => {
     localStorage.setItem('xtj_user', 'ai-tools-user');
@@ -29,37 +34,34 @@ test('top AI tools menu opens independent pages without switching away from post
   });
   expect(order).toBe(true);
   await expect(page.locator('#aiToolsBtn .ai-tools-trigger-icon')).toBeVisible();
+  await expect(page.locator('#aiToolsNativeSelect')).toHaveCount(1);
 
-  await page.locator('#aiToolsBtn').click();
-  await expect(page.locator('#aiToolsMenu')).toBeVisible();
-  await page.getByRole('menuitem', { name: /小猫/ }).click();
+  await pickAiTool(page, 'chat');
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await expect(page.locator('#panelPosts')).toHaveClass(/active/);
   await expect(page.locator('#panelChat')).not.toHaveClass(/active/);
 
   await page.locator('.ai-chat-back').click();
-  await page.locator('#aiToolsBtn').click();
-  await page.getByRole('menuitem', { name: /深度研究/ }).click();
+  await pickAiTool(page, 'research');
   await expect(page.locator('#panelDeepThink')).toHaveClass(/active/);
   await expect(page.locator('#panelPosts')).toHaveClass(/active/);
 
   await page.locator('#dtBackBtn').click();
-  await page.locator('#aiToolsBtn').click();
-  await page.getByRole('menuitem', { name: /站内搜索/ }).click();
+  await pickAiTool(page, 'search');
   await expect(page.locator('#aiSiteSearchPanel')).toBeVisible();
   await expect(page.locator('#aiChatRoot')).toHaveCount(0);
   await expect(page.locator('#panelPosts')).toHaveClass(/active/);
 });
 
-test('top AI tools menu remains within a mobile viewport', async ({ page }) => {
+test('top AI tools uses native select (no custom popup panel required)', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await prepareAuthenticatedPage(page);
-  await page.locator('#aiToolsBtn').click();
-  const bounds = await page.locator('#aiToolsMenu').boundingBox();
-  expect(bounds).not.toBeNull();
-  expect(bounds.x).toBeGreaterThanOrEqual(0);
-  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
-  await page.getByRole('menuitem', { name: /小猫/ }).click();
+  await expect(page.locator('#aiToolsNativeSelect')).toBeAttached();
+  const legacy = page.locator('#aiToolsMenu');
+  if (await legacy.count()) {
+    await expect(legacy).toBeHidden();
+  }
+  await pickAiTool(page, 'chat');
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await expect(page.locator('#panelPosts')).toHaveClass(/active/);
 });
@@ -77,8 +79,7 @@ test('site search has its own result page and opens a matching post without chan
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, messages: [], has_more: false }) });
   });
 
-  await page.locator('#aiToolsBtn').click();
-  await page.getByRole('menuitem', { name: /站内搜索/ }).click();
+  await pickAiTool(page, 'search');
   await page.locator('#aiSiteSearchInput').fill('广州旅行');
   await page.locator('#aiSiteSearchForm').press('Enter');
   await expect(page.locator('.ai-site-search-result')).toContainText('广州旅行记录');
@@ -104,8 +105,7 @@ test('site search shows a lightweight loading transition until results arrive', 
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: { messages: [], has_more: false } }) });
   });
 
-  await page.locator('#aiToolsBtn').click();
-  await page.getByRole('menuitem', { name: /站内搜索/ }).click();
+  await pickAiTool(page, 'search');
   await page.locator('#aiSiteSearchInput').fill('加载');
   await page.locator('#aiSiteSearchForm').press('Enter');
   await expect(page.locator('.ai-site-search-skeleton')).toHaveCount(3);
@@ -133,8 +133,7 @@ test('deep research never imports regular chat history', async ({ page }) => {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: { messages: [], has_more: false } }) });
   });
 
-  await page.locator('#aiToolsBtn').click();
-  await page.getByRole('menuitem', { name: /深度研究/ }).click();
+  await pickAiTool(page, 'research');
   await expect(page.locator('#panelDeepThink')).toHaveClass(/active/);
   await expect(page.locator('#dtMessages')).not.toContainText('普通聊天内容');
   expect(historyModes).toEqual(['deep_think']);
@@ -162,8 +161,7 @@ test('restored site-search cards retain source metadata and open a photo preview
     }) });
   });
 
-  await page.locator('#aiToolsBtn').click();
-  await page.getByRole('menuitem', { name: /小猫/ }).click();
+  await pickAiTool(page, 'chat');
   await expect(page.locator('.ai-tool-card')).toBeVisible();
   await expect(page.locator('.ai-tool-result-meta')).toContainText(/photos/);
   await page.locator('.ai-tool-result').click();

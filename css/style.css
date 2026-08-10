@@ -1,4 +1,22 @@
 
+        /* 系统原生选择器：几乎不可见，由按钮 showPicker() 唤起 iOS/Android 系统列表 */
+        .xtj-native-picker,
+        .ai-native-picker {
+            position: fixed;
+            left: 0;
+            bottom: 0;
+            width: 1px;
+            height: 1px;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            opacity: 0.01;
+            z-index: 0;
+            pointer-events: none;
+            color: transparent;
+            background: transparent;
+        }
+
         html, body {
             touch-action: pan-y;
             overscroll-behavior: none;
