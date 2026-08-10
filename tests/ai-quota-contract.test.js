@@ -114,11 +114,14 @@ test('frontend + menu has quota bar, pro card, ceremony, and secondary model/thi
   assert.match(agentSource, /fetchAiQuota/);
   assert.match(agentSource, /canSendWithQuota/);
   assert.match(agentSource, /startQuotaPolling/);
-  assert.match(agentSource, /\/pro\/checkout/);
-  assert.match(agentSource, /今日 AI 额度/);
+  assert.match(agentSource, /showInviteCodeModal|invite\/redeem/);
   assert.match(agentSource, /playProActivatedCeremony/);
   assert.match(agentSource, /ai-pro-activate-overlay/);
   assert.match(agentSource, /forceCeremony/);
+  // Pro 庆祝弹窗只在开通当下播一次，禁止每次进站用 null→pro 误触发
+  assert.match(agentSource, /hadPriorQuota/);
+  assert.match(agentSource, /markProCeremonySeen/);
+  assert.match(agentSource, /already_redeemed/);
 });
 
 test('quota error messages distinguish token and search limits', () => {

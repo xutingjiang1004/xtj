@@ -182,6 +182,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
+  function proCeremonyStorageKey() {
+    var uid = '';
+    try {
+      var u = window.currentUser;
+      if (u) uid = String(u.id || u.user_id || u.uid || '');
+    } catch (e) {}
+    if (!uid) {
+      try { uid = String(localStorage.getItem('xtj_user_id') || localStorage.getItem('xtj_user') || ''); } catch (e2) {}
+    }
+    return 'xtj_ai_pro_ceremony_seen:' + (uid || 'anon');
+  }
+
+  function hasSeenProCeremony() {
+    try { return localStorage.getItem(proCeremonyStorageKey()) === '1'; } catch (e) { return false; }
+  }
+
+  function markProCeremonySeen() {
+    try { localStorage.setItem(proCeremonyStorageKey(), '1'); } catch (e) {}
+  }
+
+  function clearProCeremonySeen() {
+    try { localStorage.removeItem(proCeremonyStorageKey()); } catch (e) {}
+  }
+
   function playProActivatedCeremony(quota) {
     try {
       // 移除旧动画层
@@ -194,14 +218,26 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     overlay.className = 'ai-pro-activate-overlay';
     overlay.setAttribute('role', 'status');
     overlay.setAttribute('aria-live', 'polite');
+
+    var descText = '额度已刷新，可立即使用';
+    if (quota) {
+      var dLimit = Number(quota.tokens_limit) || PRO_TOKEN_DEFAULT;
+      var dSearchUnlim = quota.search_unlimited === true || Number(quota.search_limit) < 0;
+      var dSearchLimit = Number(quota.search_limit);
+      descText = '额度已刷新：每日 ' + formatTokenCount(dLimit) + ' tokens'
+        + (dSearchUnlim ? ' · 无限搜索' : (' · 搜索 ' + Math.max(0, dSearchLimit) + ' 次/日'));
+    }
+
     overlay.innerHTML =
       '<div class="ai-pro-activate-card">' +
         '<div class="ai-pro-activate-burst" aria-hidden="true"></div>' +
         '<div class="ai-pro-activate-badge">PRO</div>' +
         '<div class="ai-pro-activate-title">Pro 已开通</div>' +
-        '<div class="ai-pro-activate-desc">额度已刷新，可立即使用 10 倍 Token 与无限搜索</div>' +
+        '<div class="ai-pro-activate-desc"></div>' +
         '<div class="ai-pro-activate-quota" id="aiProActivateQuotaLine"></div>' +
       '</div>';
+    var descEl = overlay.querySelector('.ai-pro-activate-desc');
+    if (descEl) descEl.textContent = descText;
     document.body.appendChild(overlay);
 
     var line = overlay.querySelector('#aiProActivateQuotaLine');
@@ -252,6 +288,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function applyQuota(quota, opts) {
     opts = opts || {};
     if (!quota || typeof quota !== 'object') return S.quota;
+    // S.quota === null 表示「还没拉过额度」，不能当成免费→Pro
+    var hadPriorQuota = S.quota != null;
     var wasPro = !!(S.quota && S.quota.is_pro);
     S.quota = Object.assign(defaultQuotaShape(), quota);
     S.quotaFetchedAt = Date.now();
@@ -264,11 +302,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (typeof S._renderQuotaUI === 'function') {
       try { S._renderQuotaUI(); } catch (e2) {}
     }
-    // 免费 → Pro：播开通动画，并强制立刻拉一次最新额度
-    if (nowPro && (!wasPro || opts.forceCeremony)) {
-      playProActivatedCeremony(S.quota);
-      if (!opts.skipRefetch) {
-        setTimeout(function() { fetchAiQuota(true); }, 80);
+
+    // Pro 掉级：清标记，下次真正再开通还能播一次
+    if (hadPriorQuota && wasPro && !nowPro) {
+      clearProCeremonySeen();
+    }
+
+    // 只在真正「开通当下」播一次：
+    // 1) 邀请码激活 forceCeremony
+    // 2) 本会话内已知 free → pro
+    // 首次打开网页拉到已是 Pro：只记状态，绝不弹窗
+    if (nowPro && !hadPriorQuota) {
+      markProCeremonySeen();
+    } else if (nowPro && (opts.forceCeremony || (hadPriorQuota && !wasPro))) {
+      if (opts.forceCeremony || !hasSeenProCeremony()) {
+        playProActivatedCeremony(S.quota);
+        markProCeremonySeen();
+        if (!opts.skipRefetch) {
+          setTimeout(function() { fetchAiQuota(true); }, 80);
+        }
       }
     }
     return S.quota;
@@ -8306,8 +8358,12 @@ function showChatMessages() {
             var payload = (r && r.data) || r || {};
             if (payload && payload.ok) {
               close();
-              if (payload.quota) applyQuota(payload.quota, { forceCeremony: true, skipRefetch: true });
-              else fetchAiQuota(true).then(function(q) { if (q && q.is_pro) applyQuota(q, { forceCeremony: true, skipRefetch: true }); });
+              // 只有「首次真正开通」才弹庆祝；已激活过该码只 toast，不再弹窗
+              var celebrate = !payload.already_redeemed;
+              if (payload.quota) applyQuota(payload.quota, { forceCeremony: celebrate, skipRefetch: true });
+              else fetchAiQuota(true).then(function(q) {
+                if (q && q.is_pro) applyQuota(q, { forceCeremony: celebrate, skipRefetch: true });
+              });
               notify(payload.already_redeemed ? '你已激活过该码，Pro 仍有效' : 'Pro 开通成功，额度已刷新');
             } else {
               feedback.className = 'ai-invite-code-feedback is-bad';
