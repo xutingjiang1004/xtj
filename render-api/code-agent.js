@@ -3348,6 +3348,40 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
   var rateLimit = deps.rateLimit;
   var authenticateUser = deps.authenticateUser;
   var sanitizeError = deps.sanitizeError;
+  // 与小猫 AI / 深入研究共用日额度
+  var enforceAiChatAccess = typeof deps.enforceAiChatAccess === 'function' ? deps.enforceAiChatAccess : null;
+  var recordAiTurnUsage = typeof deps.recordAiTurnUsage === 'function' ? deps.recordAiTurnUsage : null;
+  var getAiQuotaErrorMessage = typeof deps.getAiQuotaErrorMessage === 'function'
+    ? deps.getAiQuotaErrorMessage
+    : function(reason) { return reason === 'token_limit' ? '今日 AI 额度已用完' : '请求过于频繁'; };
+
+  async function gateCodeQuota(userName) {
+    if (!enforceAiChatAccess) return { allowed: true, reason: null, quota: null };
+    try {
+      return await enforceAiChatAccess(userName, { needSearch: false });
+    } catch (e) {
+      console.error('[code-agent] quota gate failed:', e && e.message);
+      return { allowed: false, reason: 'quota_unavailable', quota: null };
+    }
+  }
+
+  async function billCodeUsage(userName, usage, options) {
+    if (!recordAiTurnUsage || !userName) return null;
+    try {
+      var billUsage = Object.assign({}, usage || {});
+      if (options && options.reasoning_tokens && !billUsage.reasoning_tokens) {
+        billUsage.reasoning_tokens = options.reasoning_tokens;
+      }
+      return await recordAiTurnUsage(userName, billUsage, Object.assign({
+        source: 'code_chat',
+        did_search: false,
+        search_count: 0
+      }, options || {}));
+    } catch (e) {
+      console.error('[code-agent] quota bill failed:', e && e.message);
+      return null;
+    }
+  }
 
   var multer = require('multer');
   var upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DOCUMENT_UPLOAD_BYTES, files: 1, fields: 10 } });
@@ -3884,6 +3918,18 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       var body = req.body;
       if (!body || typeof body !== 'object' || Array.isArray(body)) return sendError('INVALID_REQUEST', '请求无效', 400);
 
+      // Code 与小猫 AI 共用 token 额度
+      var codeGate = await gateCodeQuota(req.userName);
+      if (!codeGate.allowed) {
+        return res.status(429).json({
+          ok: false,
+          code: codeGate.reason || 'token_limit',
+          error: getAiQuotaErrorMessage(codeGate.reason),
+          quota: codeGate.quota || null,
+          requestId: requestId
+        });
+      }
+
       var msgResult = validateString(body.message, MAX_MESSAGE_LEN, '消息内容');
       if (!msgResult.ok) return sendError('INVALID_MESSAGE', msgResult.error, 400);
       if (!msgResult.value) return sendError('EMPTY_MESSAGE', '消息内容不能为空', 400);
@@ -4249,6 +4295,15 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         var cacheTotal = usage.prompt_cache_hit_tokens + (Number(usage.prompt_cache_miss_tokens) || 0);
         usage.prompt_cache_hit_ratio = cacheTotal > 0 ? usage.prompt_cache_hit_tokens / cacheTotal : 0;
       }
+      var codeQuota = await billCodeUsage(req.userName, usage, {
+        conversation_id: conversationId || null,
+        model: aiResult.model || model,
+        message: message,
+        content: reply,
+        reasoning: (aiResult && aiResult.reasoning) || '',
+        reasoning_tokens: (aiResult && typeof aiResult.reasoning_tokens === 'number') ? aiResult.reasoning_tokens : 0,
+        source: 'code_chat'
+      });
       var caps = buildCodeCapabilities(deps, {
         requestSucceeded: true,
         model: aiResult.model || model
@@ -4294,6 +4349,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         reply: reply.trim(),
         operations: operations,
         usage: usage,
+        quota: codeQuota || codeGate.quota || null,
         capabilities: capabilities,
         runtime: runtimeInfo,
         tool_trace: sanitizeToolTraceForClient(toolTrace),
@@ -4911,6 +4967,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (!msgResult.value) { sendStreamError('EMPTY_MESSAGE', '消息内容不能为空', 'validation'); return; }
       var message = msgResult.value;
 
+      // Code 流式与小猫 AI 共用 token 额度（预检）
+      var streamQuotaGate = await gateCodeQuota(userId);
+      if (!streamQuotaGate.allowed) {
+        sendStreamError(
+          streamQuotaGate.reason || 'token_limit',
+          getAiQuotaErrorMessage(streamQuotaGate.reason),
+          'quota'
+        );
+        return;
+      }
+
       var wsResult = validateString(body.workspace_name, 200, '工作区名称');
       if (!wsResult.ok) { sendStreamError('INVALID_WORKSPACE', wsResult.error, 'validation'); return; }
       var workspaceName = wsResult.value || '';
@@ -5345,6 +5412,22 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         total_duration_ms: Date.now() - requestStartTime
       });
 
+      // 扣减共用额度（输入 + 思考 + 输出）
+      var streamQuota = await billCodeUsage(userId, usage, {
+        conversation_id: conversationId || null,
+        model: aiResult.model || model,
+        message: message,
+        content: reply,
+        reasoning: (aiResult && aiResult.reasoning) || '',
+        reasoning_tokens: (aiResult && typeof aiResult.reasoning_tokens === 'number') ? aiResult.reasoning_tokens : 0,
+        source: 'code_chat_stream'
+      });
+      if (streamQuota) {
+        try {
+          sendSSE('quota', streamQuota);
+        } catch (eQuotaSse) {}
+      }
+
       if (operations.length === 0) sendPhase('finalizing', '正在保存结果并完成会话');
 
       // Persist the terminal event and session state before exposing done to
@@ -5382,7 +5465,8 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
           canReadPdf: capabilities.canReadPdf === true,
           canWritePdf: capabilities.canWritePdf === true
         },
-        usage: usage
+        usage: usage,
+        quota: streamQuota || undefined
       });
 
     } catch (err) {

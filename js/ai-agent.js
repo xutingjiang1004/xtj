@@ -182,10 +182,80 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
-  function applyQuota(quota) {
+  function playProActivatedCeremony(quota) {
+    try {
+      // 移除旧动画层
+      var old = document.getElementById('aiProActivateOverlay');
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+    } catch (e0) {}
+
+    var overlay = document.createElement('div');
+    overlay.id = 'aiProActivateOverlay';
+    overlay.className = 'ai-pro-activate-overlay';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+    overlay.innerHTML =
+      '<div class="ai-pro-activate-card">' +
+        '<div class="ai-pro-activate-burst" aria-hidden="true"></div>' +
+        '<div class="ai-pro-activate-badge">PRO</div>' +
+        '<div class="ai-pro-activate-title">Pro 已开通</div>' +
+        '<div class="ai-pro-activate-desc">额度已刷新，可立即使用 10 倍 Token 与无限搜索</div>' +
+        '<div class="ai-pro-activate-quota" id="aiProActivateQuotaLine"></div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    var line = overlay.querySelector('#aiProActivateQuotaLine');
+    if (line && quota) {
+      var limit = Number(quota.tokens_limit) || PRO_TOKEN_DEFAULT;
+      var used = Number(quota.tokens_used) || 0;
+      var remain = Math.max(0, limit - used);
+      line.textContent = '今日可用 ' + formatTokenCount(remain) + ' / ' + formatTokenCount(limit) + ' tokens';
+    }
+
+    // 强制 reflow 再播动画
+    try { void overlay.offsetWidth; } catch (e1) {}
+    requestAnimationFrame(function() {
+      overlay.classList.add('is-visible');
+    });
+
+    // 额度条脉冲
+    try {
+      var card = document.getElementById('aiQuotaCard');
+      if (card) {
+        card.classList.remove('ai-quota-just-pro');
+        void card.offsetWidth;
+        card.classList.add('ai-quota-just-pro');
+        setTimeout(function() {
+          try { card.classList.remove('ai-quota-just-pro'); } catch (e2) {}
+        }, 1800);
+      }
+      var fill = document.getElementById('aiQuotaBarFill');
+      if (fill) {
+        fill.classList.add('ai-quota-fill-boost');
+        setTimeout(function() {
+          try { fill.classList.remove('ai-quota-fill-boost'); } catch (e3) {}
+        }, 1400);
+      }
+    } catch (e4) {}
+
+    setTimeout(function() {
+      try {
+        overlay.classList.remove('is-visible');
+        overlay.classList.add('is-leaving');
+      } catch (e5) {}
+      setTimeout(function() {
+        try { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (e6) {}
+      }, 420);
+    }, 2200);
+  }
+
+  function applyQuota(quota, opts) {
+    opts = opts || {};
     if (!quota || typeof quota !== 'object') return S.quota;
+    var wasPro = !!(S.quota && S.quota.is_pro);
     S.quota = Object.assign(defaultQuotaShape(), quota);
     S.quotaFetchedAt = Date.now();
+    var nowPro = !!S.quota.is_pro;
     try {
       if (typeof window.dispatchEvent === 'function') {
         window.dispatchEvent(new CustomEvent('xtj-ai-quota', { detail: S.quota }));
@@ -193,6 +263,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } catch (e) {}
     if (typeof S._renderQuotaUI === 'function') {
       try { S._renderQuotaUI(); } catch (e2) {}
+    }
+    // 免费 → Pro：播开通动画，并强制立刻拉一次最新额度
+    if (nowPro && (!wasPro || opts.forceCeremony)) {
+      playProActivatedCeremony(S.quota);
+      if (!opts.skipRefetch) {
+        setTimeout(function() { fetchAiQuota(true); }, 80);
+      }
     }
     return S.quota;
   }
@@ -7998,20 +8075,40 @@ function showChatMessages() {
 
     async function openProCheckout() {
       try {
+        // 先强制刷新，支付成功回跳后能立刻看到最新额度
+        await fetchAiQuota(true);
         var r = await apiRequest('POST', '/pro/checkout', {});
         var payload = (r && r.data) || {};
         if (payload.already_pro) {
-          notify('你已经是 Pro 会员');
-          if (payload.quota) applyQuota(payload.quota);
+          if (payload.quota) applyQuota(payload.quota, { forceCeremony: true, skipRefetch: false });
+          else {
+            await fetchAiQuota(true);
+            if (S.quota && S.quota.is_pro) applyQuota(S.quota, { forceCeremony: true, skipRefetch: true });
+          }
+          notify('Pro 已生效，额度已刷新');
           return;
         }
         if (payload.checkout && payload.checkout.url) {
+          // Stripe 回跳后：监听 focus 强制刷新 + 动画
+          var onFocus = function() {
+            window.removeEventListener('focus', onFocus);
+            setTimeout(async function() {
+              var q = await fetchAiQuota(true);
+              if (q && q.is_pro) {
+                applyQuota(q, { forceCeremony: true, skipRefetch: true });
+                notify('Pro 开通成功，额度已刷新');
+              }
+            }, 400);
+          };
+          window.addEventListener('focus', onFocus);
           window.open(payload.checkout.url, '_blank', 'noopener');
           return;
         }
         var msg = payload.message || payload.error || r.error || 'Pro 支付通道即将接入 Stripe';
         notify(msg);
         if (payload.quota) applyQuota(payload.quota);
+        // 联调：管理员可直接 activate 时，主动再拉一次
+        setTimeout(function() { fetchAiQuota(true); }, 300);
       } catch (e) {
         notify('Pro 开通入口暂不可用');
       }

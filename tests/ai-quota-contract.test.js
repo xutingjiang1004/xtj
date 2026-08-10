@@ -76,9 +76,26 @@ test('server wires token quota gates, recording, and Stripe stubs', () => {
   assert.match(serverSource, /stripe_not_configured/);
   assert.match(serverSource, /token_limit/);
   assert.match(serverSource, /search_limit/);
+  // 深入研究共用额度
+  assert.match(serverSource, /app\.post\('\/api\/agent\/research\/stream'/);
+  assert.match(serverSource, /researchGate = await enforceAiChatAccess/);
+  assert.match(serverSource, /source: 'deep_research'/);
+  assert.match(serverSource, /accumulateResearchUsage/);
+  // Code 路由注入共用额度
+  assert.match(serverSource, /enforceAiChatAccess: enforceAiChatAccess/);
+  assert.match(serverSource, /recordAiTurnUsage: recordAiTurnUsage/);
 });
 
-test('frontend + menu has quota bar, pro card, and secondary model/think pages', () => {
+test('code agent bills shared token quota', () => {
+  const codeSource = fs.readFileSync(path.join(ROOT, 'render-api', 'code-agent.js'), 'utf8');
+  assert.match(codeSource, /gateCodeQuota/);
+  assert.match(codeSource, /billCodeUsage/);
+  assert.match(codeSource, /source: 'code_chat'/);
+  assert.match(codeSource, /source: 'code_chat_stream'/);
+  assert.match(codeSource, /token_limit/);
+});
+
+test('frontend + menu has quota bar, pro card, ceremony, and secondary model/think pages', () => {
   assert.match(agentSource, /aiQuotaCard/);
   assert.match(agentSource, /aiQuotaBarFill/);
   assert.match(agentSource, /aiProOpenBtn/);
@@ -89,6 +106,9 @@ test('frontend + menu has quota bar, pro card, and secondary model/think pages',
   assert.match(agentSource, /startQuotaPolling/);
   assert.match(agentSource, /\/pro\/checkout/);
   assert.match(agentSource, /今日 AI 额度/);
+  assert.match(agentSource, /playProActivatedCeremony/);
+  assert.match(agentSource, /ai-pro-activate-overlay/);
+  assert.match(agentSource, /forceCeremony/);
 });
 
 test('quota error messages distinguish token and search limits', () => {
