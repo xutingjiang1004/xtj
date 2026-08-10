@@ -5089,20 +5089,21 @@ async function initAdminClient() {
             };
 
             window._aiAdminCancelPro = async function(userName) {
-                if (!window.showConfirm) {
+                async function doCancel() {
                     try {
-                        await apiCall('POST', '/api/agent/pro/activate', { user_name: userName, active: false });
+                        // 管理端走 verifyToken 的专用接口，不要调用户侧 /api/agent/pro/activate
+                        var res = await apiCall('POST', '/admin/ai-agent/pro-users/cancel', { user_name: userName });
+                        if (res && res.ok === false) throw new Error(res.error || '取消失败');
                         showToast('已取消 Pro');
                         renderAiAdminInvite(content);
                     } catch(e) { showToast('取消失败: ' + e.message); }
+                }
+                if (!window.showConfirm) {
+                    await doCancel();
                     return;
                 }
-                window.showConfirm('取消 Pro', '确定取消 ' + userName + ' 的 Pro 会员吗？', '取消Pro', async function() {
-                    try {
-                        await apiCall('POST', '/api/agent/pro/activate', { user_name: userName, active: false });
-                        showToast('已取消 Pro');
-                        renderAiAdminInvite(content);
-                    } catch(e) { showToast('取消失败: ' + e.message); }
+                window.showConfirm('取消 Pro', '确定取消 ' + userName + ' 的 Pro 会员吗？', '取消Pro', function() {
+                    doCancel();
                 });
             };
         } catch(e) {
