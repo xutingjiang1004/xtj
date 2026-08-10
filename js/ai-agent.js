@@ -7595,7 +7595,7 @@ function showChatMessages() {
             '</button>' +
           '</div>' +
           '<div class="ai-panel-separator" role="separator"></div>' +
-          '<div class="ai-panel-section-label">思考程度（同页直选，无二级菜单）</div>' +
+          '<div class="ai-panel-section-label">思考程度</div>' +
           '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择思考程度">' +
             '<button type="button" class="ai-panel-option" role="radio" data-think="off" aria-checked="false">' +
               '<span class="ai-panel-option-body"><span class="ai-panel-option-label">关闭</span><span class="ai-panel-option-desc">不展示思考过程，回复更快</span></span>' +
