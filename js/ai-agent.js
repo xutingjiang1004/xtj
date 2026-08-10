@@ -450,7 +450,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   /**
-   * 对话内「已联网」状态：默认极小胶囊，不塞长 query / 不撑满整行。
+   * 对话内「已联网」状态：纯文字元信息（不要胶囊/边框）。
    * opts: { count, query, results, expired, statusText, simple }
    * - simple: 仅状态文案（搜索中/内置搜索等），不可展开
    */
@@ -462,7 +462,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var count = typeof opts.count === 'number' ? opts.count : 0;
     var labelText = opts.statusText;
     if (!labelText) {
-      if (count > 0) labelText = '已联网 · ' + count;
+      if (count > 0) labelText = '已联网搜索 · ' + count + ' 条';
       else labelText = '联网完成';
       if (expired) labelText += '（过期）';
     }
@@ -477,6 +477,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!canExpand) return bar;
 
     var toggleBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
+    head.appendChild(document.createTextNode(' · '));
     head.appendChild(toggleBtn);
     var detail = el('div', { class: 'ai-search-detail', hidden: true });
     if (queryStr) {
