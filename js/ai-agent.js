@@ -8089,7 +8089,10 @@ function showChatMessages() {
           return;
         }
         if (payload.checkout && payload.checkout.url) {
-          // Stripe 回跳后：监听 focus 强制刷新 + 动画
+          // 爱发电跳转支付：提示在下单留言框填用户名，便于回调自动开通
+          var hint = (payload.checkout && payload.checkout.message) || '请在下单留言框填写你的用户名，支付成功后自动开通 Pro';
+          notify(hint);
+          // 支付回跳后：监听 focus 强制刷新 + 动画
           var onFocus = function() {
             window.removeEventListener('focus', onFocus);
             setTimeout(async function() {
