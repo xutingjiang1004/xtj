@@ -46,15 +46,15 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=6bf18ceda9" />
+    <link rel="stylesheet" href="css/style.min.css?v=6a8c1be8fc" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=6bf18ceda9" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=2fa2c37cc6" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=6a8c1be8fc" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=2fa2c37cc6" /></noscript>
     <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=6852b8abab" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=a1d7b43990" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=c79b13b5f8" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=3aef244d42" media="print" onload="this.media='all'">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=2fa2c37cc6">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=765ea806e1">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=1f40d3d886">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=c7f6c6babd">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=36ec270e61">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=708b593ff5">
@@ -144,12 +144,12 @@
                         </span>
                     </button>
                     <div class="ai-tools-nav" id="aiToolsNav">
-                        <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-label="AI 工具" aria-haspopup="listbox" aria-controls="aiToolsNativeSelect">
+                        <!-- 透明 select 叠在按钮上，桌面/iOS 一次点开系统列表（同小猫 + 方案 A） -->
+                        <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-hidden="true" tabindex="-1">
                             <svg class="ai-tools-trigger-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.7-5.3 1.7L12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z"></path><path d="m18.3 15 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg>
                             <span class="ai-tools-sr-only">AI 工具</span>
                         </button>
-                        <!-- 系统级选择列表（iOS showPicker / 液态玻璃），不再用自定义下拉 -->
-                        <select id="aiToolsNativeSelect" class="xtj-native-picker" aria-label="AI 工具" tabindex="-1">
+                        <select id="aiToolsNativeSelect" class="ai-tools-select-hit" aria-label="AI 工具">
                             <option value="">选择 AI 工具…</option>
                             <option value="chat">小猫AI · 对话与历史</option>
                             <option value="research">深度研究</option>
@@ -1084,7 +1084,7 @@
     <script defer src="js/config.min.js?v=6d3726a5b3"></script>
     <script defer src="js/performance.min.js?v=ee09d8d2d7"></script>
     <script defer src="js/core-utils.min.js?v=20846db068"></script>
-    <script defer src="js/core.min.js?v=09867d4c6c"></script>
+    <script defer src="js/core.min.js?v=50d90aa8a1"></script>
     <script defer src="js/login-device.min.js?v=42ede07462"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=2aa0efaa93"></script>

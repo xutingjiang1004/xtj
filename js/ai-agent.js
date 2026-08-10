@@ -5764,18 +5764,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function bindTopAiTools() {
-    // 顶栏 AI 工具已由 core bootstrap 绑定原生 select；此处仅在 core 未绑定时兜底
+    // 顶栏 AI 工具已由 core bootstrap 绑定；仅未绑定时兜底（透明 select 叠层）
     var nav = document.getElementById('aiToolsNav');
-    var trigger = document.getElementById('aiToolsBtn');
-    if (!nav || !trigger || nav.__xtjAiToolsBound) return;
+    if (!nav || nav.__xtjAiToolsBound) return;
     nav.__xtjAiToolsBound = true;
     var select = document.getElementById('aiToolsNativeSelect');
     if (!select) {
       select = el('select', {
         id: 'aiToolsNativeSelect',
-        class: 'xtj-native-picker',
-        'aria-label': 'AI 工具',
-        tabindex: '-1'
+        class: 'ai-tools-select-hit',
+        'aria-label': 'AI 工具'
       });
       select.innerHTML =
         '<option value="">选择 AI 工具…</option>' +
@@ -5783,26 +5781,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         '<option value="research">深度研究</option>' +
         '<option value="search">站内搜索</option>';
       nav.appendChild(select);
+    } else {
+      select.className = 'ai-tools-select-hit';
     }
-    var legacyMenu = document.getElementById('aiToolsMenu');
-    if (legacyMenu) {
-      legacyMenu.hidden = true;
-      legacyMenu.setAttribute('aria-hidden', 'true');
-    }
-    function openNativePicker(sel) {
-      try {
-        if (typeof sel.showPicker === 'function') {
-          sel.showPicker();
-          return;
-        }
-      } catch (e1) {}
-      try { sel.focus({ preventScroll: true }); sel.click(); } catch (e2) {}
-    }
-    trigger.addEventListener('click', function(event) {
-      event.preventDefault();
-      event.stopPropagation();
+    select.addEventListener('mousedown', function() {
       try { select.value = ''; } catch (e0) {}
-      openNativePicker(select);
     });
     select.addEventListener('change', async function() {
       var tool = select.value;

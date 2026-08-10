@@ -1605,38 +1605,29 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
         function bindTopAiToolsLauncher() {
             var nav = document.getElementById('aiToolsNav');
             var trigger = document.getElementById('aiToolsBtn');
-            if (!nav || !trigger || nav.__xtjAiToolsBound) return;
+            if (!nav || nav.__xtjAiToolsBound) return;
             nav.__xtjAiToolsBound = true;
 
-            // 系统选择器（与小猫 AI + 菜单同一路线）：iOS 液态玻璃列表
+            // 透明 select 叠在按钮上（与小猫 + 相同）：不依赖 showPicker，桌面/iOS 一次点开
             var select = document.getElementById('aiToolsNativeSelect');
             if (!select) {
                 select = document.createElement('select');
                 select.id = 'aiToolsNativeSelect';
-                select.className = 'xtj-native-picker';
+                select.className = 'ai-tools-select-hit';
                 select.setAttribute('aria-label', 'AI 工具');
-                select.tabIndex = -1;
                 select.innerHTML =
                     '<option value="">选择 AI 工具…</option>' +
                     '<option value="chat">小猫AI · 对话与历史</option>' +
                     '<option value="research">深度研究</option>' +
                     '<option value="search">站内搜索</option>';
                 nav.appendChild(select);
+            } else {
+                select.className = 'ai-tools-select-hit';
+                select.removeAttribute('tabindex');
             }
-            var legacyMenu = document.getElementById('aiToolsMenu');
-            if (legacyMenu) {
-                legacyMenu.hidden = true;
-                legacyMenu.setAttribute('aria-hidden', 'true');
-            }
-
-            function openNativePicker(sel) {
-                try {
-                    if (typeof sel.showPicker === 'function') {
-                        sel.showPicker();
-                        return;
-                    }
-                } catch (e1) {}
-                try { sel.focus({ preventScroll: true }); sel.click(); } catch (e2) {}
+            if (trigger) {
+                trigger.setAttribute('tabindex', '-1');
+                trigger.setAttribute('aria-hidden', 'true');
             }
 
             function runTool(tool) {
@@ -1658,12 +1649,13 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 ensureAiAgentLoaded().catch(function() {});
             });
 
-            trigger.addEventListener('click', function(event) {
-                event.preventDefault();
-                event.stopPropagation();
-                ensureAiAgentLoaded().catch(function() {});
+            // 打开列表前复位 value，保证每次都能选
+            select.addEventListener('mousedown', function() {
                 try { select.value = ''; } catch (e0) {}
-                openNativePicker(select);
+                ensureAiAgentLoaded().catch(function() {});
+            });
+            select.addEventListener('focus', function() {
+                ensureAiAgentLoaded().catch(function() {});
             });
 
             select.addEventListener('change', function() {

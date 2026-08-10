@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 async function pickAiTool(page, value) {
-  await page.locator('#aiToolsBtn').click();
+  // 透明 select 叠在按钮上，直接 selectOption 即可（无需点不可点的视觉按钮）
   await page.locator('#aiToolsNativeSelect').selectOption(value);
 }
 
