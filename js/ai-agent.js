@@ -7967,23 +7967,7 @@ function showChatMessages() {
       '</span>';
     plusWrap.appendChild(plusBtn);
 
-    // 系统级选择器：模型 / 思考（iOS 原生滚轮，桌面原生下拉）
-    function openNativePicker(selectEl) {
-      if (!selectEl || !selectEl.isConnected) return false;
-      try {
-        if (typeof selectEl.showPicker === 'function') {
-          selectEl.showPicker();
-          return true;
-        }
-      } catch (e1) {}
-      try {
-        selectEl.focus({ preventScroll: true });
-        selectEl.click();
-        return true;
-      } catch (e2) {
-        return false;
-      }
-    }
+    // 系统级选择器：透明 select 铺满整行，iOS/桌面都能直接点开（不靠脆弱 showPicker）
     function fillSelect(sel, options, selectedValue) {
       sel.innerHTML = '';
       for (var si = 0; si < options.length; si++) {
@@ -7995,31 +7979,6 @@ function showChatMessages() {
         sel.appendChild(o);
       }
     }
-    var modelSelect = el('select', {
-      id: 'aiPlusModelSelect',
-      class: 'ai-native-picker',
-      'aria-label': '选择模型',
-      tabindex: '-1'
-    });
-    var thinkSelect = el('select', {
-      id: 'aiPlusThinkSelect',
-      class: 'ai-native-picker',
-      'aria-label': '选择思考程度',
-      tabindex: '-1'
-    });
-    fillSelect(modelSelect, [
-      { value: 'deepseek-v4-flash', label: 'V4 Flash' },
-      { value: 'deepseek-v4-pro', label: 'V4 Pro' }
-    ], S.selectedModel || 'deepseek-v4-flash');
-    fillSelect(thinkSelect, [
-      { value: 'off', label: '关闭' },
-      { value: 'low', label: '轻度' },
-      { value: 'medium', label: '中度' },
-      { value: 'high', label: '深度' },
-      { value: 'max', label: '极致' }
-    ], S.thinkingMode || 'medium');
-    plusWrap.appendChild(modelSelect);
-    plusWrap.appendChild(thinkSelect);
 
     var panelShell = el('div', {
       class: 'ai-plus-panel-shell',
@@ -8044,6 +8003,7 @@ function showChatMessages() {
         '</span>'
       );
     }
+    // 模型 / 思考行：视觉层 + 透明 select 全行热区
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
@@ -8076,22 +8036,24 @@ function showChatMessages() {
                 '<span class="ai-panel-row-title">上传文件</span>' +
                 rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
               '</button>' +
-              '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-model">' +
+              '<div class="ai-panel-row ai-panel-row--select" data-action="open-model">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
                 rowEnd(
                   '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">V4 Flash</span>',
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
-              '</button>' +
-              '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-think">' +
+                '<select id="aiPlusModelSelect" class="ai-panel-row-select-hit" aria-label="选择模型"></select>' +
+              '</div>' +
+              '<div class="ai-panel-row ai-panel-row--select" data-action="open-think">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.think + '</span>' +
                 '<span class="ai-panel-row-title">思考</span>' +
                 rowEnd(
                   '<span class="ai-panel-row-value ai-panel-row-value--think" id="aiThinkSummary">轻度</span>',
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
-              '</button>' +
+                '<select id="aiPlusThinkSelect" class="ai-panel-row-select-hit" aria-label="选择思考程度"></select>' +
+              '</div>' +
               '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
@@ -8105,6 +8067,20 @@ function showChatMessages() {
         '</div>' +
       '</div>';
 
+    var modelSelect = panelShell.querySelector('#aiPlusModelSelect');
+    var thinkSelect = panelShell.querySelector('#aiPlusThinkSelect');
+    fillSelect(modelSelect, [
+      { value: 'deepseek-v4-flash', label: 'V4 Flash' },
+      { value: 'deepseek-v4-pro', label: 'V4 Pro' }
+    ], S.selectedModel || 'deepseek-v4-flash');
+    fillSelect(thinkSelect, [
+      { value: 'off', label: '关闭' },
+      { value: 'low', label: '轻度' },
+      { value: 'medium', label: '中度' },
+      { value: 'high', label: '深度' },
+      { value: 'max', label: '极致' }
+    ], S.thinkingMode || 'medium');
+
     var panelOpen = false;
     var panelClosing = false;
     var closeTimer = null;
@@ -8116,12 +8092,12 @@ function showChatMessages() {
     }
 
     function updateModelUI() {
-      try { modelSelect.value = S.selectedModel || 'deepseek-v4-flash'; } catch (eM) {}
+      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-v4-flash'; } catch (eM) {}
       var sum = panelShell.querySelector('#aiModelSummary');
       if (sum) sum.textContent = modelLabels[S.selectedModel] || S.selectedModel;
     }
     function updateThinkUI() {
-      try { thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT) {}
+      try { if (thinkSelect) thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT) {}
       var sum = panelShell.querySelector('#aiThinkSummary');
       if (sum) sum.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
     }
@@ -8215,12 +8191,9 @@ function showChatMessages() {
       }
       if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 会员' : '开通 Pro';
       if (proDesc) {
+        // 右侧只放短文案，避免盖住标题
         if (q.is_pro) {
-          var descParts = [];
-          if (tokensUnlimited) descParts.push('Token 无限');
-          else descParts.push(formatTokenCount(limit) + '/日');
-          descParts.push(searchUnlimited ? '无限搜索' : '搜 ' + Math.max(0, searchLimit) + '/日');
-          proDesc.textContent = descParts.join(' · ');
+          proDesc.textContent = searchUnlimited ? '无限搜索' : ('搜' + Math.max(0, searchLimit) + '/日');
         } else {
           proDesc.textContent = '邀请码';
         }
@@ -8478,46 +8451,55 @@ function showChatMessages() {
       else openPanel();
     });
 
-    modelSelect.addEventListener('change', function() {
-      var model = modelSelect.value;
-      if (!model) return;
-      if (model !== S.selectedModel) {
-        S.selectedModel = model;
-        S._userPickedModel = true;
-        try { localStorage.setItem('xtj_ai_model', model); } catch (err) {}
-        notify('模型：' + (modelLabels[model] || model));
-      }
-      updateModelUI();
-    });
-    thinkSelect.addEventListener('change', function() {
-      var think = thinkSelect.value;
-      if (!think) return;
-      if (think !== S.thinkingMode) {
-        S.thinkingMode = think;
-        S._userPickedThinkingMode = true;
-        try { localStorage.setItem('xtj_ai_thinking_mode', think); } catch (err) {}
-        notify('思考程度：' + (thinkLabels[think] || think));
-      }
-      updateThinkUI();
-    });
+    // 透明 select 直接点选：打开前同步当前值，change 后更新
+    function syncSelectValues() {
+      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-v4-flash'; } catch (eM0) {}
+      try { if (thinkSelect) thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT0) {}
+    }
+    if (modelSelect) {
+      modelSelect.addEventListener('mousedown', syncSelectValues);
+      modelSelect.addEventListener('touchstart', syncSelectValues, { passive: true });
+      modelSelect.addEventListener('focus', syncSelectValues);
+      modelSelect.addEventListener('change', function() {
+        var model = modelSelect.value;
+        if (!model) return;
+        if (model !== S.selectedModel) {
+          S.selectedModel = model;
+          S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model', model); } catch (err) {}
+          notify('模型：' + (modelLabels[model] || model));
+        }
+        updateModelUI();
+      });
+    }
+    if (thinkSelect) {
+      thinkSelect.addEventListener('mousedown', syncSelectValues);
+      thinkSelect.addEventListener('touchstart', syncSelectValues, { passive: true });
+      thinkSelect.addEventListener('focus', syncSelectValues);
+      thinkSelect.addEventListener('change', function() {
+        var think = thinkSelect.value;
+        if (!think) return;
+        if (think !== S.thinkingMode) {
+          S.thinkingMode = think;
+          S._userPickedThinkingMode = true;
+          try { localStorage.setItem('xtj_ai_thinking_mode', think); } catch (err) {}
+          notify('思考程度：' + (thinkLabels[think] || think));
+        }
+        updateThinkUI();
+      });
+    }
 
     panelShell.addEventListener('click', function(e) {
       e.stopPropagation();
+      // select 自己处理模型/思考，不要拦截
+      if (e.target && (e.target.tagName === 'SELECT' || e.target.closest('select'))) return;
+
       var t = e.target.closest('[data-action]');
       if (!t) return;
 
       var action = t.getAttribute('data-action');
-      if (action === 'open-model') {
-        // 系统级 select：同步于用户手势，iOS 原生滚轮
-        updateModelUI();
-        try { modelSelect.value = S.selectedModel || 'deepseek-v4-flash'; } catch (eM0) {}
-        openNativePicker(modelSelect);
-        return;
-      }
-      if (action === 'open-think') {
-        updateThinkUI();
-        try { thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT0) {}
-        openNativePicker(thinkSelect);
+      if (action === 'open-model' || action === 'open-think') {
+        // 点击落在视觉层时，把事件交给覆盖的 select（一般不需要，热区 select 已铺满）
         return;
       }
       if (action === 'pro') {
