@@ -13621,6 +13621,9 @@ app.get('/api/agent/profile', authenticateUser, async (req, res) => {
 app.get('/api/agent/quota', authenticateUser, async (req, res) => {
   try {
     var quota = await aiQuota.getQuota(req.userName);
+    if (quota && quota.ok === false) {
+      return res.status(503).json({ ok: false, error: '额度服务暂不可用' });
+    }
     return res.json({
       ok: true,
       quota: quota,
@@ -13628,9 +13631,9 @@ app.get('/api/agent/quota', authenticateUser, async (req, res) => {
         free_tokens_daily: FREE_TOKEN_LIMIT,
         pro_tokens_daily: PRO_TOKEN_LIMIT,
         free_search_daily: FREE_SEARCH_LIMIT,
-        pro_search_unlimited: true,
+        pro_search_unlimited: !!(quota && quota.search_unlimited),
         pro_multiplier: 10,
-        stripe_ready: false
+        invite_mode: true
       }
     });
   } catch (e) {
@@ -13641,9 +13644,14 @@ app.get('/api/agent/quota', authenticateUser, async (req, res) => {
 
 // POST /api/agent/pro/checkout — 邀请码激活入口（替代爱发电支付）
 // 前端点击"开通 Pro"后调用：已是 Pro 直接返回，否则返回可激活状态。
+// 注意：前端 js/ai-agent.js 已不再调用本端点（邀请码入口统一走 /invite/validate + /invite/redeem），
+// 保留端点以满足契约测试；若被旧客户端调用仍返回 invite_mode 激活入口。
 app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
   try {
     var quota = await aiQuota.getQuota(req.userName);
+    if (quota && quota.ok === false) {
+      return res.status(503).json({ ok: false, error: '额度服务暂不可用' });
+    }
     if (quota && quota.is_pro) {
       return res.json({
         ok: true,
@@ -13660,7 +13668,7 @@ app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
         free_tokens_daily: FREE_TOKEN_LIMIT,
         pro_tokens_daily: PRO_TOKEN_LIMIT,
         free_search_daily: FREE_SEARCH_LIMIT,
-        pro_search_unlimited: true,
+        pro_search_unlimited: !!(quota && quota.search_unlimited),
         pro_multiplier: 10
       },
       quota: quota
@@ -13722,11 +13730,8 @@ app.post('/api/agent/invite/redeem', authenticateUser, async (req, res) => {
     });
     if (result.error) {
       console.error('[INVITE] redeem error:', result.error.message);
-      // 常见：未跑 044 迁移时 lower 匹配失败 / 函数不存在
-      return res.status(500).json({
-        ok: false,
-        error: '激活失败，请确认已执行 043/044 迁移：' + (result.error.message || '请稍后重试')
-      });
+      // 不向客户端回显数据库原始错误（可能泄露 schema / 迁移信息）
+      return res.status(500).json({ ok: false, error: '激活失败，请稍后重试' });
     }
     var data = result.data || {};
     if (!data.ok) {
@@ -13774,13 +13779,12 @@ function formatBigNumber(n) {
   return String(n);
 }
 
-// POST /api/agent/pro/activate — 服务端内部/管理员手动开通（Stripe 接通前用于联调）
+// POST /api/agent/pro/activate — 服务端内部/管理员手动开通
+// 仅 ADMIN_USERNAME 可调（原 secret 分支已移除：任何登录用户知道 secret 即可越权开通/取消 Pro）。
+// 前端管理后台已改用 /admin/ai-agent/pro-users/cancel（verifyToken），不依赖本端点。
 app.post('/api/agent/pro/activate', authenticateUser, async (req, res) => {
   try {
-    var isAdmin = String(req.userName || '') === String(ADMIN_USERNAME || '');
-    var secret = String(process.env.AI_PRO_ACTIVATE_SECRET || '').trim();
-    var provided = String((req.body && req.body.secret) || req.get('x-pro-activate-secret') || '').trim();
-    if (!isAdmin && (!secret || provided !== secret)) {
+    if (String(req.userName || '') !== String(ADMIN_USERNAME || '')) {
       return res.status(403).json({ ok: false, error: '无权开通 Pro' });
     }
     var target = String((req.body && req.body.user_name) || req.userName || '').trim();
@@ -13843,20 +13847,37 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
       ? new Date(Date.now() + expiresDays * 86400000).toISOString()
       : null;
 
-    // 生成不重复的码
+    // 生成不重复的码：本地 Set 去重 + 一次批量查库去重，避免每候选码串行查库（count=100 时最多
+    // 数百次串行查询拖垮接口）。冲突候选（已存在的码）补生成最多 2 轮，仍不足则按已生成数返回。
     var codes = [];
-    var existing = await supabase
-      .from('ai_invite_codes')
-      .select('code')
-      .in('code', []); // 占位，实际用循环查重
-    var attempts = 0;
-    while (codes.length < count && attempts < count * 20) {
-      attempts++;
-      var candidate = generateInviteCode(codeLength);
-      if (codes.indexOf(candidate) !== -1) continue;
-      var dup = await supabase.from('ai_invite_codes').select('code').eq('code', candidate).maybeSingle();
-      if (dup.error) break;
-      if (!dup.data) codes.push(candidate);
+    var seen = {};
+    var rounds = 0;
+    while (codes.length < count && rounds < 3) {
+      rounds++;
+      var pool = [];
+      var need = count - codes.length;
+      var guard = 0;
+      while (pool.length < need && guard < need * 20) {
+        guard++;
+        var candidate = String(generateInviteCode(codeLength)).toUpperCase();
+        if (seen[candidate]) continue;
+        seen[candidate] = true;
+        pool.push(candidate);
+      }
+      if (pool.length === 0) break;
+      var existing = await supabase
+        .from('ai_invite_codes')
+        .select('code')
+        .in('code', pool);
+      if (existing.error) {
+        console.error('[INVITE-ADMIN] dedup error:', existing.error.message);
+        break;
+      }
+      var taken = {};
+      (existing.data || []).forEach(function(r) { taken[String(r.code).toUpperCase()] = true; });
+      pool.forEach(function(c) {
+        if (codes.length < count && !taken[c]) codes.push(c);
+      });
     }
     if (codes.length === 0) {
       return res.status(500).json({ ok: false, error: '生成失败，请重试' });
@@ -13898,7 +13919,11 @@ app.get('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
     var to = from + pageSize - 1;
 
     var query = supabase.from('ai_invite_codes').select('*', { count: 'exact' });
-    if (q) query = query.or('code.ilike.%' + q + '%,note.ilike.%' + q + '%');
+    if (q) {
+      // pgrstQuote 转义 q 中的逗号 / 引号 / 反斜杠，防止用户输入逃逸出 PostgREST .or() 过滤表达式
+      var pattern = '%' + q + '%';
+      query = query.or('code.ilike.' + pgrstQuote(pattern) + ',note.ilike.' + pgrstQuote(pattern));
+    }
     var result = await query.order('created_at', { ascending: false }).range(from, to);
     if (result.error) {
       console.error('[INVITE-ADMIN] list error:', result.error.message);
@@ -13922,18 +13947,31 @@ app.delete('/admin/ai-agent/invite-codes/:code', verifyToken, async (req, res) =
   try {
     var code = String(req.params.code || '').trim();
     if (!code) return res.status(400).json({ ok: false, error: '缺少邀请码' });
-    // 先删激活记录，避免外键阻止删除（大小写不敏感）
-    var delR = await supabase.from('ai_invite_redemptions').delete().ilike('code', code);
-    if (delR.error) {
-      console.error('[INVITE-ADMIN] delete redemptions error:', delR.error.message);
-      return res.status(500).json({ ok: false, error: '删除激活记录失败' });
-    }
-    var del = await supabase.from('ai_invite_codes').delete().ilike('code', code);
-    if (del.error) {
-      console.error('[INVITE-ADMIN] delete error:', del.error.message);
+    // 精确匹配删除（ilike 会把 %/_ 当通配符误删其它码）
+    var existR = await supabase
+      .from('ai_invite_codes')
+      .select('code')
+      .eq('code', code)
+      .maybeSingle();
+    if (existR.error) {
+      console.error('[INVITE-ADMIN] delete lookup error:', existR.error.message);
       return res.status(500).json({ ok: false, error: '删除失败' });
     }
-    return res.json({ ok: true });
+    if (!existR.data) {
+      return res.status(404).json({ ok: false, error: '邀请码不存在' });
+    }
+    // 先删激活记录，避免外键阻止删除；两步非原子，先子表后主表，任一失败返回 500 提示
+    var delR = await supabase.from('ai_invite_redemptions').delete().eq('code', code);
+    if (delR.error) {
+      console.error('[INVITE-ADMIN] delete redemptions error:', delR.error.message);
+      return res.status(500).json({ ok: false, error: '删除激活记录失败，请重试' });
+    }
+    var del = await supabase.from('ai_invite_codes').delete().eq('code', code);
+    if (del.error) {
+      console.error('[INVITE-ADMIN] delete error:', del.error.message);
+      return res.status(500).json({ ok: false, error: '删除失败，请重试（激活记录可能已删除）' });
+    }
+    return res.json({ ok: true, deleted: del.data ? del.data.length : 1 });
   } catch (e) {
     console.error('[INVITE-ADMIN] delete exception:', e && e.message);
     return res.status(500).json({ ok: false, error: '删除失败' });
@@ -13960,7 +13998,24 @@ app.post('/admin/ai-agent/pro-users/cancel', verifyToken, async (req, res) => {
       return res.status(500).json({ ok: false, error: '取消失败' });
     }
     console.log('[INVITE-ADMIN] cancelled pro for', target, 'by', req.adminName);
-    return res.json({ ok: true, user_name: target });
+    // 取消 Pro 后同步清零当日已用额度（ai_user_quota_daily），否则重度用户当天按 free 限额
+    // 会被残留的已用 token 锁死。日界以服务端 RPC ai_quota_shanghai_day() 为准（Asia/Shanghai）。
+    var dayR = await supabase.rpc('ai_quota_shanghai_day');
+    if (dayR.error) {
+      console.error('[INVITE-ADMIN] cancel pro day lookup error:', dayR.error.message);
+      return res.status(500).json({ ok: false, error: '取消失败，请重试（当日额度未清零）' });
+    }
+    var dayKey = dayR.data;
+    var delDaily = await supabase
+      .from('ai_user_quota_daily')
+      .delete()
+      .eq('user_name', target)
+      .eq('day_key', dayKey);
+    if (delDaily.error) {
+      console.error('[INVITE-ADMIN] cancel pro daily reset error:', delDaily.error.message);
+      return res.status(500).json({ ok: false, error: '取消失败，请重试（当日额度未清零）' });
+    }
+    return res.json({ ok: true, user_name: target, daily_reset: true });
   } catch (e) {
     console.error('[INVITE-ADMIN] cancel pro exception:', e && e.message);
     return res.status(500).json({ ok: false, error: '取消失败' });
