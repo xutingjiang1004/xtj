@@ -16543,6 +16543,14 @@ async function runResearchSubAgent(opts) {
 
   var sources = [];
   var queries = [];
+  var subUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0 };
+  function addSubUsage(u) {
+    if (!u || typeof u !== 'object') return;
+    subUsage.prompt_tokens += Number(u.prompt_tokens) || Number(u.input_tokens) || 0;
+    subUsage.completion_tokens += Number(u.completion_tokens) || Number(u.output_tokens) || 0;
+    subUsage.total_tokens += Number(u.total_tokens) || 0;
+    subUsage.reasoning_tokens += Number(u.reasoning_tokens) || 0;
+  }
 
   // 阶段一：海量联网检索，多源收集资料（thinking 必须 off 才能挂内置 web_search）
   var searchSystem = sharedPrefix + '\n\n---\n\n你是 XTJ 深入研究模式派出的 [' + agent.role + '] 调研员。\n' +
@@ -16569,6 +16577,7 @@ async function runResearchSubAgent(opts) {
       onSearchStatus: function (s) { if (s === 'completed') { searchCount++; onSearch(); } }
     });
     if (!rawMaterial && r1 && r1.content) rawMaterial = r1.content;
+    if (r1 && r1.usage) addSubUsage(r1.usage);
   } catch (e) {
     console.error('[SELF-RESEARCH] sub-agent search failed:', agent.role, e && e.message);
   }
@@ -16582,8 +16591,16 @@ async function runResearchSubAgent(opts) {
         { role: 'user', content: '已收集资料要点:\n' + (rawMaterial || '(无)').slice(0, 4000) + '\n\n请给出简要分析。' }
       ], { thinking_mode: 'off', max_tokens: 1200, onContentChunk: function (c) { quick += c; } });
       if (!quick && rq && rq.content) quick = rq.content;
+      if (rq && rq.usage) addSubUsage(rq.usage);
     } catch (e) { console.error('[SELF-RESEARCH] sub-agent quick failed:', agent.role, e && e.message); }
-    return { content: (quick && quick.trim()) ? quick : rawMaterial, raw: rawMaterial, searchCount: searchCount, sources: sources, queries: queries };
+    return {
+      content: (quick && quick.trim()) ? quick : rawMaterial,
+      raw: rawMaterial,
+      searchCount: searchCount,
+      sources: sources,
+      queries: queries,
+      usage: subUsage
+    };
   }
 
   // 阶段二（深度模式）：基于资料做自主深度思考与批判性分析，形成独立研判
@@ -16606,11 +16623,22 @@ async function runResearchSubAgent(opts) {
       onContentChunk: function (c) { analysis += c; }
     });
     if (!analysis && r2 && r2.content) analysis = r2.content;
+    if (r2 && r2.usage) addSubUsage(r2.usage);
+    if (r2 && typeof r2.reasoning_tokens === 'number') {
+      subUsage.reasoning_tokens += Math.max(0, r2.reasoning_tokens);
+    }
   } catch (e) {
     console.error('[SELF-RESEARCH] sub-agent analysis failed:', agent.role, e && e.message);
     analysis = '';
   }
-  return { content: (analysis && analysis.trim()) ? analysis : rawMaterial, raw: rawMaterial, searchCount: searchCount, sources: sources, queries: queries };
+  return {
+    content: (analysis && analysis.trim()) ? analysis : rawMaterial,
+    raw: rawMaterial,
+    searchCount: searchCount,
+    sources: sources,
+    queries: queries,
+    usage: subUsage
+  };
 }
 
 // 自托管深度研究主流程：返回 { answer, sources, queries, agents }
@@ -16638,8 +16666,20 @@ async function runSelfResearchFlow(opts) {
     auto: { min: 2, max: 5 }
   };
   var range = modeMap[model] || modeMap.pro;
+  // 累计全链路 token：规划/改写/子智能体/汇总 都计入账户额度
+  var researchUsageAgg = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0 };
+  function accumulateResearchUsage(u) {
+    if (!u || typeof u !== 'object') return;
+    researchUsageAgg.prompt_tokens += Math.max(0, Number(u.prompt_tokens) || Number(u.input_tokens) || 0);
+    researchUsageAgg.completion_tokens += Math.max(0, Number(u.completion_tokens) || Number(u.output_tokens) || 0);
+    researchUsageAgg.total_tokens += Math.max(0, Number(u.total_tokens) || 0);
+    researchUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || 0);
+    if (u.completion_tokens_details && typeof u.completion_tokens_details.reasoning_tokens === 'number') {
+      researchUsageAgg.reasoning_tokens += Math.max(0, u.completion_tokens_details.reasoning_tokens);
+    }
+  }
 
-  if (isCancelled()) return { answer: '', sources: [], agents: [] };
+  if (isCancelled()) return { answer: '', sources: [], agents: [], usage: researchUsageAgg, search_count: 0 };
 
   // 1. 主智能体理解 + 改写问题
   sseSend({ type: 'research_stage', stage: 'rewrite', message: '总指挥正在理解并拆解研究任务…' });
@@ -16649,11 +16689,16 @@ async function runSelfResearchFlow(opts) {
       var rq = await rewriteResearchQuery(query);
       if (rq && rq !== query) {
         researchQuery = rq;
+        // 改写走独立 fetch，usage 常不可用；按字符做保守估算计入额度
+        var rewriteEst = Math.max(8, Math.ceil((String(query).length + String(rq).length) / 4));
+        researchUsageAgg.prompt_tokens += Math.ceil(String(query).length / 4);
+        researchUsageAgg.completion_tokens += Math.ceil(String(rq).length / 4);
+        researchUsageAgg.total_tokens += rewriteEst;
         sseSend({ type: 'research_stage', stage: 'rewrite_done', message: '任务已拆解，准备派出研究小队…' });
       }
     } catch (e) { /* 改写失败静默回退原 query */ }
   }
-  if (isCancelled()) return { answer: '', sources: [], agents: [] };
+  if (isCancelled()) return { answer: '', sources: [], agents: [], usage: researchUsageAgg, search_count: 0 };
 
   // 2. 主智能体 (Planner) 拆分 1-5 个子任务
   sseSend({ type: 'research_stage', stage: 'collect', message: '总指挥派出 ' + range.min + '-' + range.max + ' 个研究子智能体并行调研中…' });
@@ -16672,6 +16717,10 @@ async function runSelfResearchFlow(opts) {
       }
     );
     plannerContent = plannerRes.content || '';
+    if (plannerRes && plannerRes.usage) accumulateResearchUsage(plannerRes.usage);
+    if (plannerRes && typeof plannerRes.reasoning_tokens === 'number') {
+      researchUsageAgg.reasoning_tokens += Math.max(0, plannerRes.reasoning_tokens);
+    }
   } catch (e) {
     console.error('[SELF-RESEARCH] planner failed:', e && e.message);
     plannerContent = '{"agents":[]}';
@@ -16714,6 +16763,7 @@ async function runSelfResearchFlow(opts) {
     }).then(function (wr) {
       if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
       if (wr && wr.queries) wr.queries.forEach(function (q) { if (allQueries.indexOf(q) < 0) allQueries.push(q); });
+      if (wr && wr.usage) accumulateResearchUsage(wr.usage);
       return { role: agent.role, status: 'success', content: wr ? wr.content : '', sources: wr ? wr.sources : [] };
     }).catch(function (e) {
       console.error('[SELF-RESEARCH] sub-agent failed:', agent.role, e && e.message);
@@ -16721,7 +16771,7 @@ async function runSelfResearchFlow(opts) {
     });
   });
   workerResults = await Promise.all(workerPromises);
-  if (isCancelled()) return { answer: '', sources: allSources, agents: agents };
+  if (isCancelled()) return { answer: '', sources: allSources, agents: agents, usage: researchUsageAgg, search_count: searchCountTotal };
 
   // 3.5 查漏补缺（仅深度档）：总指挥先审视一手材料，识别影响结论可靠性的关键缺口，至多再派 2 个补充调研
   if (deepMode) {
@@ -16741,6 +16791,7 @@ async function runSelfResearchFlow(opts) {
         ],
         { thinking_mode: 'high', max_tokens: 1500, response_format: { type: 'json_object' }, model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER) }
       );
+      if (gapRes && gapRes.usage) accumulateResearchUsage(gapRes.usage);
       var gapPlan = null;
       try { gapPlan = JSON.parse(gapRes.content || '{}'); } catch (e) {
         try { var _gm = String(gapRes.content || '').match(/\{[\s\S]*\}/); if (_gm) gapPlan = JSON.parse(_gm[0]); } catch (e2) {}
@@ -16834,6 +16885,10 @@ async function runSelfResearchFlow(opts) {
       }
     });
     if (!finalAnswer && synthRes && synthRes.content) finalAnswer = synthRes.content;
+    if (synthRes && synthRes.usage) accumulateResearchUsage(synthRes.usage);
+    if (synthRes && typeof synthRes.reasoning_tokens === 'number') {
+      researchUsageAgg.reasoning_tokens += Math.max(0, synthRes.reasoning_tokens);
+    }
   } catch (e) {
     console.error('[SELF-RESEARCH] synthesizer failed:', e && e.message);
     // 兜底：直接拼接各子智能体结果
@@ -16843,9 +16898,24 @@ async function runSelfResearchFlow(opts) {
   } finally {
     if (cancelToken && cancelToken._onSynthCancel) delete cancelToken._onSynthCancel;
   }
-  if (isCancelled()) return { answer: finalAnswer, sources: allSources, agents: agents };
+  if (isCancelled()) {
+    return {
+      answer: finalAnswer,
+      sources: allSources,
+      agents: agents,
+      usage: researchUsageAgg,
+      search_count: searchCountTotal
+    };
+  }
   if (!finalAnswer || !finalAnswer.trim()) finalAnswer = '（研究未完成，请重试）';
-  return { answer: finalAnswer, sources: allSources, queries: allQueries, agents: agents };
+  return {
+    answer: finalAnswer,
+    sources: allSources,
+    queries: allQueries,
+    agents: agents,
+    usage: researchUsageAgg,
+    search_count: searchCountTotal
+  };
 }
 
 // POST /api/agent/research/stream - 自托管多智能体深度研究（SSE 流式，事件契约兼容旧 Tavily 代理）
@@ -16894,6 +16964,20 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
   res.on('close', function() { if (!res.writableEnded) markStreamDisconnected(); });
 
   try {
+    var userName = req.userName || '';
+    // 深入研究与小猫/Code 共用日额度；研究默认会联网搜索，免费用户需有搜索余量
+    var researchGate = await enforceAiChatAccess(userName, { needSearch: true });
+    if (!researchGate.allowed) {
+      writeSse(res, {
+        type: 'error',
+        error: researchGate.reason || 'rate_limited',
+        code: researchGate.reason || 'rate_limited',
+        message: getAiQuotaErrorMessage(researchGate.reason),
+        quota: researchGate.quota || null
+      });
+      return safeEnd();
+    }
+
     var vq = validateString(req.body && req.body.query, 500, '研究主题');
     if (!vq || vq.error) {
       writeSse(res, { type: 'error', error: 'invalid_query', message: vq && vq.error || '研究主题不能为空（1-500 字）' });
@@ -16907,7 +16991,6 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
     if (mode !== 'direct') mode = 'hybrid';
     // rewrite：默认 true（DeepSeek 查询改写预处理）
     var rewrite = !(req.body && req.body.rewrite === false);
-    var userName = req.userName || '';
     // 会话持久化：沿用请求 conversation_id（合法时），否则生成新的（对齐 /api/agent/chat/new 的 genConvId）
     var convId = String(req.body && req.body.conversation_id || '').trim();
     if (!convId || !/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
@@ -16965,8 +17048,41 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
     var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources);
     if (aborted) return safeEnd();
     researchCacheSet(cacheKey, selfResult.answer, selfResult.sources);
+
+    // 扣减深入研究全链路 token（输入/思考/输出）与实际搜索次数
+    var researchQuota = null;
+    try {
+      var researchUsage = (selfResult && selfResult.usage) || null;
+      var researchSearchHits = Math.max(
+        0,
+        Math.floor(Number(selfResult && selfResult.search_count) || 0)
+      );
+      if (!researchSearchHits && selfResult && Array.isArray(selfResult.sources) && selfResult.sources.length) {
+        researchSearchHits = 1;
+      }
+      researchQuota = await recordAiTurnUsage(userName, researchUsage, {
+        conversation_id: convId,
+        model: 'research_' + model,
+        source: 'deep_research',
+        message: query,
+        content: selfResult.answer || '',
+        reasoning: '',
+        search_count: researchSearchHits,
+        did_search: researchSearchHits > 0
+      });
+    } catch (eResearchQ) {
+      console.error('[AI-QUOTA] research record failed:', eResearchQ && eResearchQ.message);
+    }
+
     writeSse(res, { type: 'research_sources', sources: selfResult.sources });
-    writeSse(res, { type: 'research_done', answer: selfResult.answer, sources: selfResult.sources, message_id: msgId });
+    writeSse(res, {
+      type: 'research_done',
+      answer: selfResult.answer,
+      sources: selfResult.sources,
+      message_id: msgId,
+      usage: selfResult.usage || null,
+      quota: researchQuota || undefined
+    });
     return safeEnd();
   } catch (e) {
     if (!aborted) {
@@ -18347,6 +18463,10 @@ registerCodeAgentRoutes(app, {
   rateLimit,
   authenticateUser,
   sanitizeError,
+  // 与小猫 AI / 深入研究共用同一套日额度（token + 搜索）
+  enforceAiChatAccess: enforceAiChatAccess,
+  recordAiTurnUsage: recordAiTurnUsage,
+  getAiQuotaErrorMessage: getAiQuotaErrorMessage,
   getDeepSeekModel: function () {
     return getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER);
   },
