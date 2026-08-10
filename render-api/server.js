@@ -68,7 +68,6 @@ const {
   PRO_TOKEN_LIMIT,
   FREE_SEARCH_LIMIT
 } = require('./ai-quota');
-const afdianPay = require('./afdian-pay');
 const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
@@ -13640,8 +13639,8 @@ app.get('/api/agent/quota', authenticateUser, async (req, res) => {
   }
 });
 
-// POST /api/agent/pro/checkout — 爱发电跳转支付（替代 Stripe 占位）
-// 返回 checkout.url 供前端新窗口打开；回跳后前端监听 focus 自动刷新额度。
+// POST /api/agent/pro/checkout — 邀请码激活入口（替代爱发电支付）
+// 前端点击"开通 Pro"后调用：已是 Pro 直接返回，否则返回可激活状态。
 app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
   try {
     var quota = await aiQuota.getQuota(req.userName);
@@ -13653,36 +13652,10 @@ app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
         quota: quota
       });
     }
-    var afdianUserId = String(process.env.AFDIAN_USER_ID || '').trim();
-    var afdianPlanId = String(process.env.AFDIAN_PLAN_ID || '').trim();
-    if (!afdianUserId) {
-      return res.status(501).json({
-        ok: false,
-        code: 'afdian_not_configured',
-        error: 'Pro 支付通道（爱发电）尚未配置，请稍后再试',
-        message: 'Pro 支付通道（爱发电）尚未配置，请稍后再试',
-        checkout: null,
-        features: {
-          free_tokens_daily: FREE_TOKEN_LIMIT,
-          pro_tokens_daily: PRO_TOKEN_LIMIT,
-          free_search_daily: FREE_SEARCH_LIMIT,
-          pro_search_unlimited: true,
-          pro_multiplier: 10
-        },
-        quota: quota
-      });
-    }
-    var checkoutUrl = afdianPay.buildCheckoutUrl({
-      userId: afdianUserId,
-      planId: afdianPlanId
-    });
     return res.json({
       ok: true,
-      checkout: {
-        url: checkoutUrl,
-        provider: 'afdian',
-        message: '前往爱发电完成支付，支付成功后自动开通 Pro'
-      },
+      invite_mode: true,
+      message: '请输入邀请码激活 Pro',
       features: {
         free_tokens_daily: FREE_TOKEN_LIMIT,
         pro_tokens_daily: PRO_TOKEN_LIMIT,
@@ -13698,88 +13671,97 @@ app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
   }
 });
 
-// POST /api/agent/pro/webhook — 爱发电支付回调
-// 官方 Webhook 不强制验签 Token：若配置了 AFDIAN_WEBHOOK_TOKEN 则校验
-// X-Afdian-Token 头（防第三方伪造），未配置则放行（靠订单号幂等 + status/plan 校验兜底）。
-// 幂等：同一订单只开通一次（order 号存 membership 记录）。
-app.post('/api/agent/pro/webhook', async (req, res) => {
+// POST /api/agent/invite/validate — 校验邀请码（前端输入时实时反馈）
+app.post('/api/agent/invite/validate', authenticateUser, async (req, res) => {
   try {
-    var webhookToken = String(process.env.AFDIAN_WEBHOOK_TOKEN || '').trim();
-    if (webhookToken && !afdianPay.verifyWebhookToken(req, webhookToken)) {
-      console.error('[AFDIAN] webhook 验签失败');
-      return res.status(403).json({ ok: false, error: 'invalid webhook token' });
-    }
-    var body = req.body || {};
-    var parsed = afdianPay.parseOrderNotification(body, {
-      planId: process.env.AFDIAN_PLAN_ID
+    var code = String((req.body && req.body.code) || '').trim();
+    if (!code) return res.json({ ok: false, reason: 'empty_code', message: '请输入邀请码' });
+    var result = await supabase.rpc('validate_ai_invite_code', {
+      p_code: code,
+      p_user_name: String(req.userName || '')
     });
-    if (!parsed.ok) {
-      // 非成功订单/plan 不匹配：返回 ec 200 避免平台反复重试
-      console.error('[AFDIAN] 订单解析失败:', parsed.reason, parsed.plan_id || '');
-      return res.json({ ec: 200, em: 'ignored' });
+    if (result.error) {
+      console.error('[INVITE] validate error:', result.error.message);
+      return res.status(500).json({ ok: false, error: '校验失败，请稍后重试' });
     }
-    var order = parsed.order;
-    var outTradeNo = String(order.out_trade_no || '').trim();
-
-    // 从订单 remark 提取本站用户名（用户下单时在留言填用户名，格式：用户名）
-    // 也兼容 remark 为 JSON（{"user_name":"xxx"}）的扩展。
-    var userName = '';
-    var remark = String(order.remark || '').trim();
-    try {
-      var remarkJson = JSON.parse(remark);
-      if (remarkJson && typeof remarkJson.user_name === 'string') userName = remarkJson.user_name.trim();
-    } catch (_) { /* 非 JSON */ }
-    if (!userName) {
-      // 纯文本：取首行，去空白
-      userName = remark.split(/[\n\r,，;；]/)[0].trim();
+    var data = result.data || {};
+    var msgMap = {
+      not_found: '邀请码不存在',
+      expired: '邀请码已过期',
+      exhausted: '邀请码使用次数已用完',
+      already_used: '你已使用过该邀请码'
+    };
+    if (!data.ok) {
+      return res.json({ ok: false, reason: data.reason, message: msgMap[data.reason] || '邀请码无效' });
     }
-    if (!userName) {
-      // 爱发电不保证有 remark —— 无法自动关联用户名，只能记录订单待人工处理
-      console.error('[AFDIAN] 订单无用户名，无法自动开通:', outTradeNo);
-      return res.json({ ec: 200, em: 'no_user_name' });
-    }
-
-    // 幂等：查一下该订单号是否已开通过（存在 membership 且 stripe_subscription_id = outTradeNo）
-    var dupCheck = await supabase
-      .from('ai_user_membership')
-      .select('user_name')
-      .eq('stripe_subscription_id', outTradeNo)
-      .maybeSingle();
-    if (dupCheck.error) {
-      console.error('[AFDIAN] 幂等查询失败:', dupCheck.error.message);
-      return res.status(500).json({ ok: false, error: 'idempotency check failed' });
-    }
-    if (dupCheck.data) {
-      // 已处理过，直接确认
-      return res.json({ ec: 200, em: 'duplicated' });
-    }
-
-    var expiresAt = afdianPay.computeExpiry(order.month, Date.now());
-    var quota = await aiQuota.setPro(userName, true, {
-      expires_at: expiresAt,
-      // 复用 stripe 字段存爱发电订单信息（不新增列，保持兼容）
-      stripe_customer_id: 'afdian:' + String(order.user_id || ''),
-      stripe_subscription_id: outTradeNo
+    return res.json({
+      ok: true,
+      code: data.code,
+      days: data.days,
+      token_limit_daily: data.token_limit_daily,
+      search_limit_daily: data.search_limit_daily,
+      message: formatInviteCodeInfo(data)
     });
-    if (!quota || !quota.ok) {
-      console.error('[AFDIAN] 开通 Pro 失败:', quota && quota.reason);
-      return res.status(500).json({ ok: false, error: 'activate failed' });
-    }
-    // 标记支付渠道（provider 列）
-    await supabase
-      .from('ai_user_membership')
-      .update({ provider: 'afdian', updated_at: new Date().toISOString() })
-      .eq('user_name', userName)
-      .then(function(r) {
-        if (r.error) console.error('[AFDIAN] 更新 provider 失败:', r.error.message);
-      });
-    console.log('[AFDIAN] 订单开通成功:', outTradeNo, '->', userName, 'expires', expiresAt);
-    return res.json({ ec: 200, em: 'ok' });
   } catch (e) {
-    console.error('[AFDIAN] webhook 处理异常:', e && e.message);
-    return res.status(500).json({ ok: false, error: 'webhook error' });
+    console.error('[INVITE] validate exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '校验失败，请稍后重试' });
   }
 });
+
+// POST /api/agent/invite/redeem — 激活邀请码（开通 Pro）
+app.post('/api/agent/invite/redeem', authenticateUser, async (req, res) => {
+  try {
+    var code = String((req.body && req.body.code) || '').trim();
+    if (!code) return res.json({ ok: false, reason: 'empty_code', message: '请输入邀请码' });
+    var result = await supabase.rpc('redeem_ai_invite_code', {
+      p_code: code,
+      p_user_name: String(req.userName || ''),
+      p_free_token_limit: FREE_TOKEN_LIMIT,
+      p_pro_token_limit: PRO_TOKEN_LIMIT,
+      p_free_search_limit: FREE_SEARCH_LIMIT
+    });
+    if (result.error) {
+      console.error('[INVITE] redeem error:', result.error.message);
+      return res.status(500).json({ ok: false, error: '激活失败，请稍后重试' });
+    }
+    var data = result.data || {};
+    if (!data.ok) {
+      var msgMap = {
+        not_found: '邀请码不存在',
+        expired: '邀请码已过期',
+        exhausted: '邀请码使用次数已用完',
+        already_used: '你已使用过该邀请码',
+        no_user: '请先登录'
+      };
+      return res.json({ ok: false, reason: data.reason, message: msgMap[data.reason] || '邀请码无效' });
+    }
+    var quota = aiQuota.normalizeQuotaPayload(data);
+    return res.json({ ok: true, message: 'Pro 开通成功', quota: quota, days: data.days || null });
+  } catch (e) {
+    console.error('[INVITE] redeem exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '激活失败，请稍后重试' });
+  }
+});
+
+function formatInviteCodeInfo(data) {
+  var parts = ['开通 Pro ' + (data.days || 1) + ' 天'];
+  if (data.token_limit_daily != null && data.token_limit_daily > 0) {
+    parts.push('每日 ' + formatBigNumber(data.token_limit_daily) + ' token');
+  } else {
+    parts.push('每日 ' + formatBigNumber(PRO_TOKEN_LIMIT) + ' token');
+  }
+  if (data.search_limit_daily === -1) parts.push('无限搜索');
+  else if (data.search_limit_daily != null && data.search_limit_daily >= 0) parts.push('每日 ' + data.search_limit_daily + ' 次搜索');
+  else parts.push('无限搜索');
+  return parts.join(' · ');
+}
+
+function formatBigNumber(n) {
+  n = Math.max(0, Math.floor(Number(n) || 0));
+  if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k';
+  return String(n);
+}
 
 // POST /api/agent/pro/activate — 服务端内部/管理员手动开通（Stripe 接通前用于联调）
 app.post('/api/agent/pro/activate', authenticateUser, async (req, res) => {
@@ -13801,12 +13783,191 @@ app.post('/api/agent/pro/activate', authenticateUser, async (req, res) => {
     var quota = await aiQuota.setPro(target, active, {
       expires_at: expires,
       stripe_customer_id: (req.body && req.body.stripe_customer_id) || null,
-      stripe_subscription_id: (req.body && req.body.stripe_subscription_id) || null
+      stripe_subscription_id: (req.body && req.body.stripe_subscription_id) || null,
+      token_limit_daily: req.body && req.body.token_limit_daily !== undefined ? req.body.token_limit_daily : undefined,
+      search_limit_daily: req.body && req.body.search_limit_daily !== undefined ? req.body.search_limit_daily : undefined
     });
     return res.json({ ok: true, quota: quota, activated: active, expires_at: expires });
   } catch (e) {
     console.error('[AI-QUOTA] POST /api/agent/pro/activate error:', e && e.message);
     return res.status(500).json({ ok: false, error: '开通失败' });
+  }
+});
+
+// ===================== 邀请码管理（管理员） =====================
+// 生成邀请码字符集：去掉易混淆的 0/O/1/I
+var INVITE_CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+function generateInviteCode(length) {
+  length = Math.max(4, Math.min(16, parseInt(length, 10) || 6));
+  var out = '';
+  var bytes = crypto.randomBytes(length);
+  for (var i = 0; i < length; i++) {
+    out += INVITE_CODE_CHARS[bytes[i] % INVITE_CODE_CHARS.length];
+  }
+  return out;
+}
+
+// POST /admin/ai-agent/invite-codes — 批量生成邀请码
+app.post('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
+  try {
+    var body = req.body || {};
+    var count = Math.max(1, Math.min(100, parseInt(body.count, 10) || 1));
+    var days = Math.max(1, Math.min(3650, parseInt(body.days, 10) || 30));
+    var maxUses = Math.max(1, Math.min(10000, parseInt(body.max_uses, 10) || 1));
+    var codeLength = Math.max(4, Math.min(16, parseInt(body.code_length, 10) || 6));
+    var tokenLimit = body.token_limit_daily === undefined || body.token_limit_daily === null || body.token_limit_daily === ''
+      ? null
+      : Math.max(1, Math.floor(Number(body.token_limit_daily) || 0));
+    var searchLimitRaw = body.search_limit_daily;
+    var searchLimit = null;
+    if (searchLimitRaw === 'unlimited' || searchLimitRaw === -1) {
+      searchLimit = -1;
+    } else if (searchLimitRaw !== undefined && searchLimitRaw !== null && searchLimitRaw !== '') {
+      searchLimit = Math.max(0, Math.floor(Number(searchLimitRaw) || 0));
+    }
+    var note = String(body.note || '').slice(0, 200);
+    var expiresDays = parseInt(body.expires_days, 10);
+    var expiresAt = (expiresDays && expiresDays > 0)
+      ? new Date(Date.now() + expiresDays * 86400000).toISOString()
+      : null;
+
+    // 生成不重复的码
+    var codes = [];
+    var existing = await supabase
+      .from('ai_invite_codes')
+      .select('code')
+      .in('code', []); // 占位，实际用循环查重
+    var attempts = 0;
+    while (codes.length < count && attempts < count * 20) {
+      attempts++;
+      var candidate = generateInviteCode(codeLength);
+      if (codes.indexOf(candidate) !== -1) continue;
+      var dup = await supabase.from('ai_invite_codes').select('code').eq('code', candidate).maybeSingle();
+      if (dup.error) break;
+      if (!dup.data) codes.push(candidate);
+    }
+    if (codes.length === 0) {
+      return res.status(500).json({ ok: false, error: '生成失败，请重试' });
+    }
+
+    var rows = codes.map(function(c) {
+      return {
+        code: c,
+        days: days,
+        token_limit_daily: tokenLimit,
+        search_limit_daily: searchLimit,
+        max_uses: maxUses,
+        expires_at: expiresAt,
+        note: note,
+        created_by: String(req.adminName || '')
+      };
+    });
+    var ins = await supabase.from('ai_invite_codes').insert(rows);
+    if (ins.error) {
+      console.error('[INVITE-ADMIN] insert error:', ins.error.message);
+      return res.status(500).json({ ok: false, error: '保存失败：' + ins.error.message });
+    }
+    console.log('[INVITE-ADMIN] generated', codes.length, 'codes by', req.adminName);
+    return res.json({ ok: true, count: codes.length, codes: codes });
+  } catch (e) {
+    console.error('[INVITE-ADMIN] create exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '生成失败' });
+  }
+});
+
+// GET /admin/ai-agent/invite-codes — 邀请码列表（分页 + 搜索）
+app.get('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
+  try {
+    var page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    var pageSize = Math.max(1, Math.min(200, parseInt(req.query.page_size, 10) || 50));
+    var q = String(req.query.q || '').trim();
+    var from = (page - 1) * pageSize;
+    var to = from + pageSize - 1;
+
+    var query = supabase.from('ai_invite_codes').select('*', { count: 'exact' });
+    if (q) query = query.or('code.ilike.%' + q + '%,note.ilike.%' + q + '%');
+    var result = await query.order('created_at', { ascending: false }).range(from, to);
+    if (result.error) {
+      console.error('[INVITE-ADMIN] list error:', result.error.message);
+      return res.status(500).json({ ok: false, error: '查询失败' });
+    }
+    return res.json({
+      ok: true,
+      list: result.data || [],
+      total: result.count || 0,
+      page: page,
+      page_size: pageSize
+    });
+  } catch (e) {
+    console.error('[INVITE-ADMIN] list exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '查询失败' });
+  }
+});
+
+// DELETE /admin/ai-agent/invite-codes/:code — 删除邀请码
+app.delete('/admin/ai-agent/invite-codes/:code', verifyToken, async (req, res) => {
+  try {
+    var code = String(req.params.code || '').trim();
+    if (!code) return res.status(400).json({ ok: false, error: '缺少邀请码' });
+    var del = await supabase.from('ai_invite_codes').delete().eq('code', code);
+    if (del.error) {
+      console.error('[INVITE-ADMIN] delete error:', del.error.message);
+      return res.status(500).json({ ok: false, error: '删除失败' });
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[INVITE-ADMIN] delete exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '删除失败' });
+  }
+});
+
+// GET /admin/ai-agent/pro-users — Pro 会员列表
+app.get('/admin/ai-agent/pro-users', verifyToken, async (req, res) => {
+  try {
+    var result = await supabase
+      .from('ai_user_membership')
+      .select('*')
+      .eq('plan', 'pro')
+      .order('updated_at', { ascending: false })
+      .limit(500);
+    if (result.error) {
+      console.error('[INVITE-ADMIN] pro-users error:', result.error.message);
+      return res.status(500).json({ ok: false, error: '查询失败' });
+    }
+    return res.json({ ok: true, list: result.data || [] });
+  } catch (e) {
+    console.error('[INVITE-ADMIN] pro-users exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '查询失败' });
+  }
+});
+
+// GET /admin/ai-agent/invite-redemptions — 激活记录
+app.get('/admin/ai-agent/invite-redemptions', verifyToken, async (req, res) => {
+  try {
+    var page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    var pageSize = Math.max(1, Math.min(200, parseInt(req.query.page_size, 10) || 50));
+    var from = (page - 1) * pageSize;
+    var to = from + pageSize - 1;
+    var result = await supabase
+      .from('ai_invite_redemptions')
+      .select('*, ai_invite_codes(days, token_limit_daily, search_limit_daily, note)', { count: 'exact' })
+      .order('redeemed_at', { ascending: false })
+      .range(from, to);
+    if (result.error) {
+      console.error('[INVITE-ADMIN] redemptions error:', result.error.message);
+      return res.status(500).json({ ok: false, error: '查询失败' });
+    }
+    return res.json({
+      ok: true,
+      list: result.data || [],
+      total: result.count || 0,
+      page: page,
+      page_size: pageSize
+    });
+  } catch (e) {
+    console.error('[INVITE-ADMIN] redemptions exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '查询失败' });
   }
 });
 

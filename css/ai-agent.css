@@ -1640,6 +1640,139 @@
   color: #fcd34d;
 }
 
+/* ===== 邀请码弹窗 ===== */
+.ai-invite-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 16, 0.55);
+  backdrop-filter: blur(3px);
+  animation: aiInviteFadeIn 180ms ease;
+}
+@keyframes aiInviteFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.ai-invite-modal-box {
+  width: min(90vw, 360px);
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fffdf7;
+  border: 1px solid rgba(217, 119, 6, 0.22);
+  box-shadow: 0 22px 60px rgba(40, 30, 10, 0.25);
+  animation: aiInvitePop 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes aiInvitePop {
+  from { transform: translateY(14px) scale(0.95); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+.ai-invite-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  font-size: 15px;
+  color: #7c4a0a;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border-bottom: 1px solid rgba(217, 119, 6, 0.15);
+}
+.ai-invite-modal-close {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  color: #92400e;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+.ai-invite-modal-close:hover { background: rgba(146, 64, 14, 0.1); }
+.ai-invite-modal-body {
+  padding: 16px 16px 8px;
+}
+.ai-invite-modal-tip {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+.ai-invite-code-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  background: #fff;
+  font-size: 16px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #1f2937;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.ai-invite-code-input:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25);
+}
+.ai-invite-code-feedback {
+  min-height: 18px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: #6b7280;
+}
+.ai-invite-code-feedback.is-ok { color: #15803d; }
+.ai-invite-code-feedback.is-bad { color: #dc2626; }
+.ai-invite-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 16px 16px;
+}
+.ai-invite-modal-btn {
+  padding: 9px 18px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: filter 150ms ease, transform 80ms ease;
+}
+.ai-invite-modal-btn:active { transform: scale(0.97); }
+.ai-invite-modal-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.ai-invite-modal-cancel {
+  color: #4b5563;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+.ai-invite-modal-confirm {
+  color: #78350f;
+  background: linear-gradient(135deg, #fde68a, #fbbf24);
+  border-color: rgba(217, 119, 6, 0.3);
+}
+.ai-invite-modal-confirm:hover:not(:disabled) { filter: brightness(1.05); }
+[data-theme="dark"] .ai-invite-modal-box {
+  background: #1c1917;
+  border-color: rgba(251, 191, 36, 0.25);
+}
+[data-theme="dark"] .ai-invite-modal-head {
+  color: #fde68a;
+  background: linear-gradient(135deg, #3b2c10, #2c2110);
+}
+[data-theme="dark"] .ai-invite-modal-tip { color: #a8a29e; }
+[data-theme="dark"] .ai-invite-code-input {
+  background: #292524;
+  border-color: rgba(251, 191, 36, 0.3);
+  color: #f5f5f4;
+}
+[data-theme="dark"] .ai-invite-modal-cancel {
+  color: #d6d3d1;
+  background: #292524;
+  border-color: #44403c;
+}
+
 .ai-panel-option {
   display: flex;
   align-items: center;

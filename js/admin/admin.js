@@ -4347,7 +4347,7 @@ async function initAdminClient() {
     };
 
     // ===================== AI 管理 Tab =====================
-    var _aiAdminSubTab = 'settings'; // 'settings' | 'users'
+    var _aiAdminSubTab = 'settings'; // 'settings' | 'users' | 'invite'
     var _aiAdminConvUser = null;
     var _aiAdminConvId = null;
 
@@ -4357,6 +4357,7 @@ async function initAdminClient() {
             '<div class="ai-admin-tabs">',
             '<button class="ai-admin-tab' + (_aiAdminSubTab === 'settings' ? ' active' : '') + '" id="aiSubTabSettingsBtn" onclick="window._switchAiAdminSubTab(\'settings\')">智能体设置</button>',
             '<button class="ai-admin-tab' + (_aiAdminSubTab === 'users' ? ' active' : '') + '" id="aiSubTabUsersBtn" onclick="window._switchAiAdminSubTab(\'users\')">用户对话记录</button>',
+            '<button class="ai-admin-tab' + (_aiAdminSubTab === 'invite' ? ' active' : '') + '" id="aiSubTabInviteBtn" onclick="window._switchAiAdminSubTab(\'invite\')">邀请码</button>',
             '</div>',
             '<div id="aiAdminContent"></div>'
         ].join('');
@@ -4368,8 +4369,10 @@ async function initAdminClient() {
                 _aiAdminConvId = null;
                 var settingsBtn = document.getElementById('aiSubTabSettingsBtn');
                 var usersBtn = document.getElementById('aiSubTabUsersBtn');
+                var inviteBtn = document.getElementById('aiSubTabInviteBtn');
                 if (settingsBtn) settingsBtn.className = 'ai-admin-tab' + (sub === 'settings' ? ' active' : '');
                 if (usersBtn) usersBtn.className = 'ai-admin-tab' + (sub === 'users' ? ' active' : '');
+                if (inviteBtn) inviteBtn.className = 'ai-admin-tab' + (sub === 'invite' ? ' active' : '');
                 renderAiAdminContent();
             };
         }
@@ -4382,6 +4385,8 @@ async function initAdminClient() {
         if (!content) return;
         if (_aiAdminSubTab === 'settings') {
             renderAiAdminSettings(content);
+        } else if (_aiAdminSubTab === 'invite') {
+            renderAiAdminInvite(content);
         } else if (_aiAdminSubTab === 'users') {
             if (_aiAdminConvId && _aiAdminConvUser) {
                 renderAiAdminConvDetail(content);
@@ -4876,6 +4881,230 @@ async function initAdminClient() {
                     });
                 }
             });
+        } catch(e) {
+            content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    // ===================== AI 邀请码管理 =====================
+    function fmtAdminNum(n) {
+        n = Math.max(0, Math.floor(Number(n) || 0));
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+        return String(n);
+    }
+
+    function fmtAdminSearchLimit(v) {
+        if (v === -1) return '无限';
+        if (v == null) return '无限(Pro)';
+        return v + ' 次/天';
+    }
+
+    function fmtAdminTokenLimit(v) {
+        if (v == null) return '默认 Pro';
+        return fmtAdminNum(v) + '/天';
+    }
+
+    function fmtAdminExpiry(iso) {
+        if (!iso) return '永不过期';
+        try { return new Date(iso).toLocaleString(); } catch(e) { return iso; }
+    }
+
+    function fmtAdminCodeStatus(row) {
+        if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+            return '<span style="color:var(--danger)">已过期</span>';
+        }
+        if (row.used_count >= row.max_uses) {
+            return '<span style="color:var(--warning)">已用完</span>';
+        }
+        return '<span style="color:var(--success)">可用</span>';
+    }
+
+    async function renderAiAdminInvite(content) {
+        if (!content) return;
+        content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        try {
+            var [codesData, redemptionsData, proUsersData] = await Promise.all([
+                apiCall('GET', '/admin/ai-agent/invite-codes?page=1&page_size=50'),
+                apiCall('GET', '/admin/ai-agent/invite-redemptions?page=1&page_size=20'),
+                apiCall('GET', '/admin/ai-agent/pro-users')
+            ]);
+
+            var codes = (codesData && codesData.list) || [];
+            var redemptions = (redemptionsData && redemptionsData.list) || [];
+            var proUsers = (proUsersData && proUsersData.list) || [];
+
+            var html = [];
+
+            // ---- 生成表单 ----
+            html.push(
+                '<div class="card"><h3>生成邀请码</h3>',
+                '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">',
+                '<div><label style="font-size:12px;color:var(--text-muted)">数量</label><br><input type="number" id="aiInviteCount" value="1" min="1" max="100" style="width:70px;padding:6px"></div>',
+                '<div><label style="font-size:12px;color:var(--text-muted)">有效天数</label><br><input type="number" id="aiInviteDays" value="30" min="1" max="3650" style="width:80px;padding:6px"></div>',
+                '<div><label style="font-size:12px;color:var(--text-muted)">每日 Token（留空=默认Pro）</label><br><input type="number" id="aiInviteTokenLimit" placeholder="如 100000" min="1" style="width:140px;padding:6px"></div>',
+                '<div><label style="font-size:12px;color:var(--text-muted)">每日搜索（留空=无限）</label><br><input type="number" id="aiInviteSearchLimit" placeholder="如 50，-1=无限" min="-1" style="width:120px;padding:6px"></div>',
+                '<div><label style="font-size:12px;color:var(--text-muted)">每人可用次数</label><br><input type="number" id="aiInviteMaxUses" value="1" min="1" max="10000" style="width:80px;padding:6px"></div>',
+                '<div><label style="font-size:12px;color:var(--text-muted)">码过期天数（留空=不过期）</label><br><input type="number" id="aiInviteExpiresDays" placeholder="如 90" min="1" style="width:100px;padding:6px"></div>',
+                '<div><label style="font-size:12px;color:var(--text-muted)">备注</label><br><input type="text" id="aiInviteNote" placeholder="给谁/用途" style="width:160px;padding:6px"></div>',
+                '<div><button class="admin-btn admin-btn-primary" onclick="window._aiAdminGenInvite()">生成</button></div>',
+                '</div>',
+                '<div id="aiInviteGenResult" style="margin-top:10px;font-size:13px"></div>',
+                '</div>'
+            );
+
+            // ---- 邀请码列表 ----
+            html.push('<div class="card"><h3>邀请码列表（' + codes.length + '）</h3>');
+            if (!codes.length) {
+                html.push('<div style="padding:15px;color:var(--text-muted)">暂无邀请码</div>');
+            } else {
+                html.push('<div class="table-wrap"><table><thead><tr>' +
+                    '<th>邀请码</th><th>天数</th><th>每日Token</th><th>每日搜索</th><th>已用/总</th><th>状态</th><th>过期时间</th><th>备注</th><th>创建</th><th>操作</th>' +
+                    '</tr></thead><tbody>');
+                codes.forEach(function(c) {
+                    var used = (c.used_count || 0) + '/' + c.max_uses;
+                    html.push(
+                        '<tr>' +
+                        '<td><b style="letter-spacing:1px">' + escapeHtml(c.code) + '</b></td>' +
+                        '<td>' + c.days + '</td>' +
+                        '<td>' + fmtAdminTokenLimit(c.token_limit_daily) + '</td>' +
+                        '<td>' + fmtAdminSearchLimit(c.search_limit_daily) + '</td>' +
+                        '<td>' + used + '</td>' +
+                        '<td>' + fmtAdminCodeStatus(c) + '</td>' +
+                        '<td>' + fmtAdminExpiry(c.expires_at) + '</td>' +
+                        '<td>' + escapeHtml(c.note || '') + '</td>' +
+                        '<td>' + escapeHtml(c.created_by || '') + '</td>' +
+                        '<td><button class="admin-btn admin-btn-danger" onclick="window._aiAdminDeleteInvite(\'' + escapeHtml(c.code) + '\')">删除</button></td>' +
+                        '</tr>'
+                    );
+                });
+                html.push('</tbody></table></div>');
+            }
+            html.push('</div>');
+
+            // ---- 激活记录 ----
+            html.push('<div class="card"><h3>最近激活记录（' + redemptions.length + '）</h3>');
+            if (!redemptions.length) {
+                html.push('<div style="padding:15px;color:var(--text-muted)">暂无激活记录</div>');
+            } else {
+                html.push('<div class="table-wrap"><table><thead><tr>' +
+                    '<th>邀请码</th><th>用户名</th><th>激活时间</th>' +
+                    '</tr></thead><tbody>');
+                redemptions.forEach(function(r) {
+                    var rCode = (r.ai_invite_codes && r.ai_invite_codes.days) ? r.code : r.code;
+                    var redeemedAt = r.redeemed_at ? new Date(r.redeemed_at).toLocaleString() : '';
+                    html.push(
+                        '<tr>' +
+                        '<td><b>' + escapeHtml(r.code) + '</b></td>' +
+                        '<td>' + escapeHtml(r.user_name) + '</td>' +
+                        '<td>' + escapeHtml(redeemedAt) + '</td>' +
+                        '</tr>'
+                    );
+                });
+                html.push('</tbody></table></div>');
+            }
+            html.push('</div>');
+
+            // ---- Pro 会员列表 ----
+            html.push('<div class="card"><h3>Pro 会员（' + proUsers.length + '）</h3>');
+            if (!proUsers.length) {
+                html.push('<div style="padding:15px;color:var(--text-muted)">暂无 Pro 会员</div>');
+            } else {
+                html.push('<div class="table-wrap"><table><thead><tr>' +
+                    '<th>用户名</th><th>到期时间</th><th>每日Token</th><th>每日搜索</th><th>操作</th>' +
+                    '</tr></thead><tbody>');
+                proUsers.forEach(function(u) {
+                    var expired = u.pro_expires_at && new Date(u.pro_expires_at).getTime() < Date.now();
+                    var expColor = expired ? 'var(--danger)' : 'inherit';
+                    html.push(
+                        '<tr>' +
+                        '<td>' + escapeHtml(u.user_name) + '</td>' +
+                        '<td style="color:' + expColor + '">' + (u.pro_expires_at ? new Date(u.pro_expires_at).toLocaleString() : '永久') + '</td>' +
+                        '<td>' + fmtAdminTokenLimit(u.token_limit_daily) + '</td>' +
+                        '<td>' + fmtAdminSearchLimit(u.search_limit_daily) + '</td>' +
+                        '<td><button class="admin-btn admin-btn-danger" onclick="window._aiAdminCancelPro(\'' + escapeHtml(u.user_name) + '\')">取消Pro</button></td>' +
+                        '</tr>'
+                    );
+                });
+                html.push('</tbody></table></div>');
+            }
+            html.push('</div>');
+
+            content.innerHTML = html.join('');
+
+            // 注册全局操作函数
+            window._aiAdminGenInvite = async function() {
+                var count = parseInt(document.getElementById('aiInviteCount').value, 10) || 1;
+                var days = parseInt(document.getElementById('aiInviteDays').value, 10) || 30;
+                var tokenLimit = document.getElementById('aiInviteTokenLimit').value;
+                var searchLimit = document.getElementById('aiInviteSearchLimit').value;
+                var maxUses = parseInt(document.getElementById('aiInviteMaxUses').value, 10) || 1;
+                var expiresDays = document.getElementById('aiInviteExpiresDays').value;
+                var note = document.getElementById('aiInviteNote').value;
+
+                var body = {
+                    count: count,
+                    days: days,
+                    token_limit_daily: tokenLimit === '' ? null : Number(tokenLimit),
+                    search_limit_daily: searchLimit === '' ? null : Number(searchLimit),
+                    max_uses: maxUses,
+                    expires_days: expiresDays === '' ? null : Number(expiresDays),
+                    note: note
+                };
+                try {
+                    var res = await apiCall('POST', '/admin/ai-agent/invite-codes', body);
+                    if (res && res.ok) {
+                        var resultBox = document.getElementById('aiInviteGenResult');
+                        if (resultBox) {
+                            resultBox.innerHTML = '<span style="color:var(--success)">已生成 ' + res.count + ' 个邀请码：</span><br><b style="word-break:break-all;color:var(--success)">' +
+                                (res.codes || []).map(escapeHtml).join('<br>') + '</b>';
+                        }
+                        showToast('邀请码生成成功');
+                        renderAiAdminInvite(content);
+                    } else {
+                        showToast((res && res.error) || '生成失败');
+                    }
+                } catch(e) {
+                    showToast('生成失败: ' + e.message);
+                }
+            };
+
+            window._aiAdminDeleteInvite = async function(code) {
+                if (!window.showConfirm) {
+                    // 无确认弹窗时直接删
+                    try {
+                        await apiCall('DELETE', '/admin/ai-agent/invite-codes/' + encodeURIComponent(code));
+                        showToast('已删除');
+                        renderAiAdminInvite(content);
+                    } catch(e) { showToast('删除失败: ' + e.message); }
+                    return;
+                }
+                window.showConfirm('删除邀请码', '确定删除邀请码 ' + code + ' 吗？', '删除', async function() {
+                    try {
+                        await apiCall('DELETE', '/admin/ai-agent/invite-codes/' + encodeURIComponent(code));
+                        showToast('已删除');
+                        renderAiAdminInvite(content);
+                    } catch(e) { showToast('删除失败: ' + e.message); }
+                });
+            };
+
+            window._aiAdminCancelPro = async function(userName) {
+                if (!window.showConfirm) {
+                    try {
+                        await apiCall('POST', '/api/agent/pro/activate', { user_name: userName, active: false });
+                        showToast('已取消 Pro');
+                        renderAiAdminInvite(content);
+                    } catch(e) { showToast('取消失败: ' + e.message); }
+                    return;
+                }
+                window.showConfirm('取消 Pro', '确定取消 ' + userName + ' 的 Pro 会员吗？', '取消Pro', async function() {
+                    try {
+                        await apiCall('POST', '/api/agent/pro/activate', { user_name: userName, active: false });
+                        showToast('已取消 Pro');
+                        renderAiAdminInvite(content);
+                    } catch(e) { showToast('取消失败: ' + e.message); }
+                });
+            };
         } catch(e) {
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
