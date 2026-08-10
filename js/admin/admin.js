@@ -4924,19 +4924,64 @@ async function initAdminClient() {
         return '<span class="ai-status-pill is-ok">可用</span>';
     }
 
+    /** 前端同款：token 进度条 + 网页搜索用量 */
+    function renderAdminQuotaUsageBlock(quota, opts) {
+        opts = opts || {};
+        if (!quota || typeof quota !== 'object') {
+            return '<div class="ai-usage-mini ai-usage-mini--empty">暂无今日用量</div>';
+        }
+        var used = Math.max(0, Number(quota.tokens_used) || 0);
+        var limit = quota.tokens_limit == null ? 0 : Number(quota.tokens_limit);
+        var unlimitedTok = limit < 0 || quota.tokens_unlimited === true;
+        var pct = unlimitedTok
+            ? 0
+            : (typeof quota.tokens_percent === 'number'
+                ? Math.min(100, Math.max(0, quota.tokens_percent))
+                : (limit > 0 ? Math.min(100, Math.round((used * 1000) / limit) / 10) : 0));
+        var barCls = 'ai-usage-mini-bar-fill';
+        if (!unlimitedTok && pct >= 92) barCls += ' is-danger';
+        else if (!unlimitedTok && pct >= 70) barCls += ' is-warn';
+        var tokenText = unlimitedTok
+            ? (fmtAdminNum(used) + ' tokens · 无限')
+            : (fmtAdminNum(used) + ' / ' + fmtAdminNum(Math.max(0, limit)) + ' tokens');
+        var pctText = unlimitedTok ? '∞' : (pct + '%');
+        var sUsed = Math.max(0, Number(quota.search_used) || 0);
+        var sLimit = quota.search_limit == null ? 0 : Number(quota.search_limit);
+        var sUnlim = quota.search_unlimited === true || sLimit < 0;
+        var searchText = sUnlim
+            ? ('网页搜索：' + sUsed + ' · 无限')
+            : ('网页搜索：' + sUsed + ' / ' + Math.max(0, sLimit) + ' 次');
+        var plan = quota.is_pro ? 'Pro' : '免费';
+        var planCls = quota.is_pro ? 'is-pro' : '';
+        return [
+            '<div class="ai-usage-mini">',
+            '<div class="ai-usage-mini-head">',
+            '<span class="ai-usage-mini-title">' + (opts.title ? escapeHtml(opts.title) : '今日额度') + '</span>',
+            '<span class="ai-usage-mini-badge ' + planCls + '">' + plan + '</span>',
+            '</div>',
+            '<div class="ai-usage-mini-bar" aria-hidden="true"><i class="' + barCls + '" style="width:' + (unlimitedTok ? 8 : pct) + '%"></i></div>',
+            '<div class="ai-usage-mini-meta"><span>' + tokenText + '</span><span>' + pctText + '</span></div>',
+            '<div class="ai-usage-mini-search">' + searchText + '</div>',
+            '</div>'
+        ].join('');
+    }
+
     async function renderAiAdminInvite(content) {
         if (!content) return;
         content.innerHTML = '<div class="ai-invite-empty">加载中...</div>';
         try {
-            var [codesData, redemptionsData, proUsersData] = await Promise.all([
+            var [codesData, redemptionsData, proUsersData, dailyUsageData] = await Promise.all([
                 apiCall('GET', '/admin/ai-agent/invite-codes?page=1&page_size=50'),
-                apiCall('GET', '/admin/ai-agent/invite-redemptions?page=1&page_size=20'),
-                apiCall('GET', '/admin/ai-agent/pro-users')
+                apiCall('GET', '/admin/ai-agent/invite-redemptions?page=1&page_size=30'),
+                apiCall('GET', '/admin/ai-agent/pro-users'),
+                apiCall('GET', '/admin/ai-agent/daily-usage?limit=80').catch(function() { return null; })
             ]);
 
             var codes = (codesData && codesData.list) || [];
             var redemptions = (redemptionsData && redemptionsData.list) || [];
             var proUsers = (proUsersData && proUsersData.list) || [];
+            var dailyUsage = (dailyUsageData && dailyUsageData.list) || [];
+            var dayKey = (dailyUsageData && dailyUsageData.day_key) || '';
 
             var html = ['<div class="ai-invite-page">'];
 
@@ -4988,27 +5033,67 @@ async function initAdminClient() {
             }
             html.push('</div>');
 
+            // ---- 最近激活记录和使用情况 ----
             html.push(
                 '<div class="ai-invite-card">',
-                '<div class="ai-invite-card-head"><h3>最近激活记录</h3><span class="count-pill">' + redemptions.length + '</span></div>'
+                '<div class="ai-invite-card-head"><h3>最近激活记录和使用情况</h3><span class="count-pill">' + redemptions.length + '</span></div>'
             );
             if (!redemptions.length) {
                 html.push('<div class="ai-invite-empty">暂无激活记录</div>');
             } else {
-                html.push('<div class="ai-invite-table-wrap"><table><thead><tr>' +
-                    '<th>邀请码</th><th>用户名</th><th>激活时间</th>' +
-                    '</tr></thead><tbody>');
+                html.push('<div class="ai-usage-user-list">');
                 redemptions.forEach(function(r) {
                     var redeemedAt = r.redeemed_at ? new Date(r.redeemed_at).toLocaleString() : '';
+                    var codeMeta = r.ai_invite_codes || {};
+                    var note = codeMeta.note ? (' · ' + codeMeta.note) : '';
                     html.push(
-                        '<tr>' +
-                        '<td><span class="ai-invite-code">' + escapeHtml(r.code) + '</span></td>' +
-                        '<td>' + escapeHtml(r.user_name) + '</td>' +
-                        '<td>' + escapeHtml(redeemedAt) + '</td>' +
-                        '</tr>'
+                        '<div class="ai-usage-user-card">',
+                        '<div class="ai-usage-user-top">',
+                        '<div class="ai-usage-user-who">',
+                        '<span class="ai-usage-user-name">' + escapeHtml(r.user_name || '—') + '</span>',
+                        '<span class="ai-usage-user-sub">邀请码 <span class="ai-invite-code">' + escapeHtml(r.code || '') + '</span>' + escapeHtml(note) + '</span>',
+                        '<span class="ai-usage-user-sub">激活于 ' + escapeHtml(redeemedAt) + '</span>',
+                        '</div>',
+                        '</div>',
+                        renderAdminQuotaUsageBlock(r.quota, { title: '今日额度' }),
+                        '</div>'
                     );
                 });
-                html.push('</tbody></table></div>');
+                html.push('</div>');
+            }
+            html.push('</div>');
+
+            // ---- 今日用户使用（含普通 free） ----
+            var freeDaily = dailyUsage.filter(function(u) {
+                return !(u.quota && u.quota.is_pro);
+            });
+            var proDaily = dailyUsage.filter(function(u) {
+                return !!(u.quota && u.quota.is_pro);
+            });
+            html.push(
+                '<div class="ai-invite-card">',
+                '<div class="ai-invite-card-head"><h3>今日用户使用情况</h3><span class="count-pill">' + dailyUsage.length + '</span></div>',
+                dayKey ? ('<div class="ai-usage-day-hint">统计日（上海）：' + escapeHtml(String(dayKey)) + ' · Pro ' + proDaily.length + ' · 免费 ' + freeDaily.length + '</div>') : ''
+            );
+            if (!dailyUsage.length) {
+                html.push('<div class="ai-invite-empty">今日暂无额度消耗记录</div>');
+            } else {
+                html.push('<div class="ai-usage-user-list">');
+                dailyUsage.forEach(function(u) {
+                    var q = u.quota || null;
+                    html.push(
+                        '<div class="ai-usage-user-card">',
+                        '<div class="ai-usage-user-top">',
+                        '<div class="ai-usage-user-who">',
+                        '<span class="ai-usage-user-name">' + escapeHtml(u.user_name || '—') + '</span>',
+                        '<span class="ai-usage-user-sub">' + ((q && q.is_pro) ? 'Pro 会员' : '普通用户') + '</span>',
+                        '</div>',
+                        '</div>',
+                        renderAdminQuotaUsageBlock(q, { title: '今日额度' }),
+                        '</div>'
+                    );
+                });
+                html.push('</div>');
             }
             html.push('</div>');
 

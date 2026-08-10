@@ -360,6 +360,138 @@
     .ai-invite-del-btn:hover {
         background: rgba(239,68,68,0.12);
     }
+
+    /* --- 激活记录 + 用量：与前端小猫额度卡一致 --- */
+    .ai-usage-day-hint {
+        margin: -6px 0 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+    }
+    .ai-usage-user-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .ai-usage-user-card {
+        padding: 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(5,150,105,0.1);
+        background: #f8fbfa;
+    }
+    .ai-usage-user-top {
+        margin-bottom: 10px;
+    }
+    .ai-usage-user-who {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+    .ai-usage-user-name {
+        font-size: 14px;
+        font-weight: 750;
+        color: var(--text);
+    }
+    .ai-usage-user-sub {
+        font-size: 12px;
+        color: var(--text-muted);
+        line-height: 1.4;
+    }
+    .ai-usage-mini {
+        margin: 0;
+        padding: 12px 14px 11px;
+        border-radius: 14px;
+        border: 1px solid rgba(120, 177, 170, 0.14);
+        background: #ffffff;
+    }
+    .ai-usage-mini--empty {
+        color: var(--text-muted);
+        font-size: 12.5px;
+        text-align: center;
+        padding: 16px;
+    }
+    .ai-usage-mini-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+    .ai-usage-mini-title {
+        font-size: 14px;
+        font-weight: 650;
+        color: #1f3a34;
+    }
+    .ai-usage-mini-badge {
+        min-width: 40px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: rgba(58, 146, 113, 0.08);
+        border: 1px solid rgba(58, 146, 113, 0.28);
+        color: #2f8a66;
+        font-size: 11px;
+        font-weight: 700;
+        text-align: center;
+        line-height: 1.2;
+    }
+    .ai-usage-mini-badge.is-pro {
+        background: linear-gradient(135deg, rgba(250, 204, 21, 0.28), rgba(251, 146, 60, 0.22));
+        border-color: rgba(217, 119, 6, 0.28);
+        color: #9a5b12;
+    }
+    .ai-usage-mini-bar {
+        position: relative;
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(120, 160, 150, 0.12);
+        overflow: hidden;
+    }
+    .ai-usage-mini-bar-fill {
+        display: block;
+        height: 100%;
+        width: 0%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #34a57a, #5ed0a4);
+        transition: width 320ms ease;
+    }
+    .ai-usage-mini-bar-fill.is-warn {
+        background: linear-gradient(90deg, #d97706, #fbbf24);
+    }
+    .ai-usage-mini-bar-fill.is-danger {
+        background: linear-gradient(90deg, #dc2626, #f87171);
+    }
+    .ai-usage-mini-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 7px;
+        font-size: 12px;
+        font-weight: 550;
+        color: rgba(70, 100, 92, 0.78);
+    }
+    .ai-usage-mini-search {
+        margin-top: 3px;
+        font-size: 12px;
+        font-weight: 550;
+        color: rgba(95, 120, 112, 0.72);
+    }
+    [data-theme="dark"] .ai-usage-user-card {
+        background: rgba(20, 40, 36, 0.55);
+        border-color: rgba(140, 200, 185, 0.12);
+    }
+    [data-theme="dark"] .ai-usage-mini {
+        background: rgba(24, 42, 38, 0.96);
+        border-color: rgba(140, 200, 185, 0.14);
+    }
+    [data-theme="dark"] .ai-usage-mini-title {
+        color: #e7f4f1;
+    }
+    [data-theme="dark"] .ai-usage-mini-meta,
+    [data-theme="dark"] .ai-usage-mini-search {
+        color: rgba(200, 224, 216, 0.85);
+    }
+
     @media (max-width: 720px) {
         .ai-invite-field--wide { grid-column: span 1; }
         .ai-invite-form-grid {
