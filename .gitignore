@@ -8,6 +8,7 @@ node_modules/
 .DS_Store
 
 .codex/
+.workbuddy/
 
 # Command Code 工具配置目录（本地工具产物，不进版本库）
 .commandcode/
