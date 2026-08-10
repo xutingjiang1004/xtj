@@ -7942,7 +7942,14 @@ function showChatMessages() {
       'aria-controls': 'aiPlusPanelShell',
       title: '额度、模型、思考、搜索与 Pro'
     });
-    plusBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    // 固定 24 图标盒 + 用 rotate 在 + / × 之间切换，避免宽高跳动
+    plusBtn.innerHTML =
+      '<span class="ai-plus-btn-icon" aria-hidden="true">' +
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
+          '<line x1="12" y1="5" x2="12" y2="19"/>' +
+          '<line x1="5" y1="12" x2="19" y2="12"/>' +
+        '</svg>' +
+      '</span>';
 
     var panelShell = el('div', {
       class: 'ai-plus-panel-shell',
@@ -7950,23 +7957,26 @@ function showChatMessages() {
       role: 'menu',
       'aria-label': '更多选项'
     });
-    // 菜单图标：清新彩色圆底（星 / 云上传 / 立方体 / 大脑 / 地球）
+    // 简洁可辨识图标（星 / 云上传 / 立方体 / 大脑 / 地球）
     var ICO = {
-      // 星：Pro（实心）
-      pro: '<svg class="ai-panel-svg ai-panel-svg--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.45 5.55 6.05.55-4.6 3.95 1.4 5.85L12 15.55 6.7 18.7l1.4-5.85-4.6-3.95 6.05-.55L12 2.8z"/></svg>',
-      // 云上传
-      upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 17.2A4.2 4.2 0 0 1 7.8 9a5.4 5.4 0 0 1 10.5 1.5 3.4 3.4 0 0 1 .2 6.7H7.5z"/><path d="M12 15.2V9.6"/><path d="M9.6 11.6L12 9.2l2.4 2.4"/></svg>',
-      // 3D 立方体：模型
-      model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2L4.8 7.2v9.6L12 20.8l7.2-4V7.2L12 3.2z"/><path d="M4.8 7.2L12 11.2l7.2-4"/><path d="M12 11.2V20.8"/></svg>',
-      // 大脑：思考程度
-      think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.2 4.8a2.8 2.8 0 0 0-2.7 3.4A2.6 2.6 0 0 0 5 10.6c0 1.1.6 2 1.5 2.5-.2.5-.3 1-.3 1.5 0 1.7 1.2 3.1 2.9 3.4"/><path d="M14.8 4.8a2.8 2.8 0 0 1 2.7 3.4A2.6 2.6 0 0 1 19 10.6c0 1.1-.6 2-1.5 2.5.2.5.3 1 .3 1.5 0 1.7-1.2 3.1-2.9 3.4"/><path d="M9.4 18v1.4c0 .7.6 1.2 1.2 1.2h2.8c.7 0 1.2-.5 1.2-1.2V18"/><path d="M12 5.2v9.2"/><path d="M9.6 9.2c.6-.6 1.4-.9 2.4-.9s1.8.3 2.4.9"/><path d="M9.6 12.4c.6-.5 1.4-.8 2.4-.8s1.8.3 2.4.8"/></svg>',
-      // 地球：网页搜索
-      search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.2 2.4 3.4 5.2 3.4 8.2S14.2 17.8 12 20.2C9.8 17.8 8.6 15 8.6 12S9.8 6.2 12 3.8z"/></svg>',
+      pro: '<svg class="ai-panel-svg ai-panel-svg--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.1l2.2 5.1 5.5.5-4.2 3.6 1.3 5.4L12 14.9 7.2 17.7l1.3-5.4-4.2-3.6 5.5-.5L12 3.1z"/></svg>',
+      upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 17.5h8.2a3.3 3.3 0 0 0 .3-6.6 5 5 0 0 0-9.6-1.3A3.6 3.6 0 0 0 8 17.5z"/><path d="M12 15.2V9.8"/><path d="M9.8 11.6L12 9.4l2.2 2.2"/></svg>',
+      model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L5 7.2v9.6L12 20.5l7-3.7V7.2L12 3.5z"/><path d="M5 7.2l7 3.8 7-3.8"/><path d="M12 11v9.5"/></svg>',
+      think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5.2a3 3 0 0 0-2.8 4.1A2.7 2.7 0 0 0 5.2 12c0 1.4.9 2.5 2.2 2.9-.1.4-.2.8-.2 1.2 0 1.8 1.3 3.2 3 3.4"/><path d="M14.5 5.2a3 3 0 0 1 2.8 4.1A2.7 2.7 0 0 1 18.8 12c0 1.4-.9 2.5-2.2 2.9.1.4.2.8.2 1.2 0 1.8-1.3 3.2-3 3.4"/><path d="M9.8 18.3h4.4"/><path d="M12 6.2v8.6"/><path d="M9.8 10c.7-.7 1.5-1 2.2-1s1.5.3 2.2 1"/><path d="M9.8 13c.7-.6 1.5-.9 2.2-.9s1.5.3 2.2.9"/></svg>',
+      search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M4.5 12h15"/><path d="M12 4.5c2 2.2 3.1 4.7 3.1 7.5s-1.1 5.3-3.1 7.5C10 17.3 8.9 14.8 8.9 12S10 6.7 12 4.5z"/></svg>',
       chev: '<svg class="ai-panel-chev-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
     };
+    function rowEnd(valueHtml, trailHtml) {
+      return (
+        '<span class="ai-panel-row-end">' +
+          (valueHtml || '') +
+          (trailHtml || '') +
+        '</span>'
+      );
+    }
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
-        // ===== 一级页：额度 + 清新单行设置列表 =====
+        // ===== 一级页：额度 + 两张设置卡（Pro / 功能）=====
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
           '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
             '<div class="ai-quota-card-head">' +
@@ -7981,38 +7991,45 @@ function showChatMessages() {
             '<div class="ai-quota-search-line" id="aiQuotaSearchLine">搜索 —</div>' +
           '</div>' +
           '<div class="ai-panel-menu-list" role="group" aria-label="功能选项">' +
-            '<div class="ai-panel-group ai-panel-group--solo">' +
+            '<div class="ai-panel-group">' +
               '<button type="button" class="ai-panel-row ai-panel-row--pro" data-action="pro" id="aiProOpenBtn">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--pro" aria-hidden="true">' + ICO.pro + '</span>' +
                 '<span class="ai-panel-row-title" id="aiProCardTitle">开通 Pro</span>' +
-                '<span class="ai-panel-row-value ai-panel-row-value--pro" id="aiProCardDesc">邀请码</span>' +
-                '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value ai-panel-row-value--pro" id="aiProCardDesc">邀请码</span>',
+                  '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
+                ) +
               '</button>' +
             '</div>' +
             '<div class="ai-panel-group">' +
               '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--upload" aria-hidden="true">' + ICO.upload + '</span>' +
                 '<span class="ai-panel-row-title">上传文件</span>' +
-                '<span class="ai-panel-row-value" aria-hidden="true"></span>' +
-                '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+                rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
               '</button>' +
               '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-model">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
-                '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">Flash</span>' +
-                '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">V4 Flash</span>',
+                  '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
+                ) +
               '</button>' +
               '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-think">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.think + '</span>' +
                 '<span class="ai-panel-row-title">思考</span>' +
-                '<span class="ai-panel-row-value ai-panel-row-value--think" id="aiThinkSummary">轻度</span>' +
-                '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value ai-panel-row-value--think" id="aiThinkSummary">轻度</span>',
+                  '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
+                ) +
               '</button>' +
               '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
-                '<span class="ai-panel-row-value" id="aiSearchRemainHint">—</span>' +
-                '<span class="ai-search-switch" id="aiSearchStatus" aria-hidden="true"><i></i></span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value" id="aiSearchRemainHint">—</span>',
+                  '<span class="ai-search-switch" id="aiSearchStatus" aria-hidden="true"><i></i></span>'
+                ) +
               '</button>' +
             '</div>' +
           '</div>' +
@@ -8207,21 +8224,27 @@ function showChatMessages() {
       if (!plusBtn || !panelShell || !panelShell.parentNode) return;
       var btnRect = plusBtn.getBoundingClientRect();
       var bar = panelShell.parentNode.getBoundingClientRect();
-      var panelW = Math.min(300, Math.max(260, bar.width - 20));
+      var panelW = Math.min(308, Math.max(268, bar.width - 16));
       panelShell.style.width = panelW + 'px';
-      var left = btnRect.left - bar.left + btnRect.width / 2 - 24;
+      // 贴着 + 按钮左侧对齐，超出则右缩，避免跑出屏幕
+      var left = btnRect.left - bar.left;
       var maxLeft = Math.max(8, bar.width - panelW - 8);
       if (left > maxLeft) left = maxLeft;
       if (left < 8) left = 8;
       panelShell.style.left = left + 'px';
       panelShell.style.right = 'auto';
-      var originX = Math.round(btnRect.left + btnRect.width / 2 - bar.left - left);
-      panelShell.style.transformOrigin = originX + 'px 100%';
+      // 动画用底部上移，不再用动态 transform-origin 缩放（易抖、难看）
+      panelShell.style.transformOrigin = 'left bottom';
     }
 
     function openPanel() {
       if (panelOpen || panelClosing) return;
+      if (closeTimer) {
+        clearTimeout(closeTimer);
+        closeTimer = null;
+      }
       panelOpen = true;
+      panelClosing = false;
       showPanelPage('primary');
       updateModelUI();
       updateThinkUI();
@@ -8229,29 +8252,24 @@ function showChatMessages() {
       renderQuotaUI();
       fetchAiQuota(true);
       positionPanel();
-      panelShell.classList.remove('is-closing', 'open');
-      panelShell.classList.add('is-opening');
+      panelShell.classList.remove('is-closing');
+      // 先落到关闭态，再在下一帧打开，保证 transition 触发
+      panelShell.classList.remove('open');
       plusBtn.classList.add('active');
       plusBtn.setAttribute('aria-expanded', 'true');
+      // 强制 reflow，避免同帧 toggle 吃掉动画
+      void panelShell.offsetWidth;
       requestAnimationFrame(function() {
-        requestAnimationFrame(function() {
-          if (!panelOpen) return;
-          panelShell.classList.add('open');
-        });
+        if (!panelOpen) return;
+        panelShell.classList.add('open');
       });
-      if (closeTimer) clearTimeout(closeTimer);
-      closeTimer = setTimeout(function() {
-        panelShell.classList.remove('is-opening');
-        closeTimer = null;
-      }, 320);
     }
 
     function closePanel(animate) {
-      if (!panelOpen || panelClosing) return;
+      if (!panelOpen && !panelClosing) return;
+      if (!panelOpen && panelClosing) return;
       panelClosing = true;
       panelOpen = false;
-      panelShell.classList.remove('is-opening');
-      panelShell.classList.add('is-closing');
       panelShell.classList.remove('open');
       plusBtn.classList.remove('active');
       plusBtn.setAttribute('aria-expanded', 'false');
@@ -8259,14 +8277,19 @@ function showChatMessages() {
       if (animate === false) {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
+        if (closeTimer) {
+          clearTimeout(closeTimer);
+          closeTimer = null;
+        }
         return;
       }
+      panelShell.classList.add('is-closing');
       if (closeTimer) clearTimeout(closeTimer);
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         closeTimer = null;
-      }, 280);
+      }, 220);
     }
 
     function closeInviteModal() {
