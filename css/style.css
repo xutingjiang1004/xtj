@@ -7228,11 +7228,23 @@
             .pw-upload-sheet-close,
             .pw-upload-sheet-btn,
         ):not(:disabled):not([aria-disabled="true"]):active {
-            /* 保留轻量按下反馈；去掉 inset/中心玻璃阴影（点哪都像中间按下，观感差） */
+            /* 仅极轻缩放；禁止换背景/阴影，避免中间脏斑 */
             transform: translateY(0) scale(0.98);
-            background: var(--button-glass-bg-active);
-            box-shadow: none;
-            filter: none;
+            box-shadow: none !important;
+            filter: none !important;
+        }
+        /* 帖子操作按钮（评论/置顶等）：按下只变背景透明度，无中心反馈 */
+        .action-btn:active,
+        .action-btn.xtj-pressing {
+            transform: scale(0.98) !important;
+            box-shadow: none !important;
+            filter: none !important;
+            background: rgba(140, 196, 158, 0.12) !important;
+            background-image: none !important;
+        }
+        .action-btn.liked:active,
+        .action-btn.liked.xtj-pressing {
+            background: linear-gradient(135deg, rgba(255, 59, 96, 0.18), rgba(255, 105, 135, 0.14)) !important;
         }
         :is(
             button:not(.dock-tab),
@@ -7390,13 +7402,14 @@
             padding: 6px 10px;
             font-weight: 600;
             color: var(--text-muted);
-            background:
-                linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.05) 58%, rgba(255, 255, 255, 0.02) 100%),
-                var(--button-glass-bg);
-            box-shadow: var(--button-glass-highlight), 0 4px 12px rgba(0, 0, 0, 0.03);
+            /* 去掉 glass inset 高光，按下时不会在中间显脏斑 */
+            background: rgba(255, 255, 255, 0.55);
+            box-shadow: none;
         }
         .action-btn:hover {
             color: var(--text-main);
+            background: rgba(255, 255, 255, 0.72);
+            box-shadow: none;
         }
         .action-btn.liked {
             color: var(--like-color);
@@ -10713,7 +10726,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   transform: translateZ(0);
 }
 
-/* Button ripple effect */
+/* 全局点击反馈：仅保留轻缩放，禁止中心 radial / 中间阴影波纹 */
 :where(
   button:not(.dock-tab),
   [role="button"]:not(.dock-tab),
@@ -10735,6 +10748,8 @@ body.ios-chat-keyboard-open .chat-input-area {
 ) {
   -webkit-tap-highlight-color: transparent;
 }
+/* 已移除：:active::after 中心 radial-gradient 点击反馈
+   （点哪都在按钮中间亮一块，观感很差；评论等 action-btn 尤其明显） */
 :where(
   button:not(.dock-tab),
   [role="button"]:not(.dock-tab),
@@ -10752,38 +10767,15 @@ body.ios-chat-keyboard-open .chat-input-area {
   .profile-activity-btn,
   .user-filter-btn,
   .search-toggle,
-  .filter-toggle
+  .filter-toggle,
+  .ai-panel-option,
+  .ai-tools-menu button
 )::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background: radial-gradient(circle at 50% 50%, rgba(45,160,103,0.12) 0%, transparent 60%);
-  opacity: 0;
-  transition: opacity 0s;
-}
-:where(
-  button:not(.dock-tab),
-  [role="button"]:not(.dock-tab),
-  .file-label,
-  .photo-wall-btn,
-  .chat-img-btn,
-  .send-btn,
-  .action-btn,
-  .report-btn,
-  .report-type-tab,
-  .report-reason-btn,
-  .report-submit-btn,
-  .stat-record-action,
-  .profile-activity-more,
-  .profile-activity-btn,
-  .user-filter-btn,
-  .search-toggle,
-  .filter-toggle
-):active::after {
-  opacity: 1;
-  transition: opacity 0s;
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  opacity: 0 !important;
+  box-shadow: none !important;
 }
 
 

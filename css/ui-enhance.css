@@ -481,7 +481,20 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   transform: scale(0.98) !important;
   box-shadow: none !important;
   filter: none !important;
+  /* 禁止额外 inset/中心阴影类反馈 */
+  background-image: none !important;
   transition: transform .12s ease, background .12s ease !important;
+}
+.action-btn.xtj-pressing {
+  background: rgba(140, 196, 158, 0.12) !important;
+}
+/* 菜单/选项：按下只做轻缩放，不要中心高光 */
+.ai-panel-option:active,
+.ai-tools-menu button:active,
+.ai-panel-option.xtj-pressing {
+  box-shadow: none !important;
+  filter: none !important;
+  background-image: none !important;
 }
 
 .xtj-img-soft { transition: opacity .28s ease; }

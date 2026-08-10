@@ -107,21 +107,33 @@
     z-index: 5;
   }
   #panelPosts .post > .actions .action-btn {
-    border-radius: 6px;
-    background: var(--btn-soft, #f1f3f5);
-    border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.06));
+    border-radius: 10px;
+    background: rgba(241, 245, 243, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.04);
     color: var(--text-muted, #555);
-    box-shadow: none;
+    box-shadow: none !important;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     font-size: 12px;
     padding: 6px 12px;
     min-height: 32px;
   }
+  #panelPosts .post > .actions .action-btn:active,
+  #panelPosts .post > .actions .action-btn.xtj-pressing {
+    transform: scale(0.98);
+    box-shadow: none !important;
+    background: rgba(220, 232, 226, 0.95) !important;
+    filter: none !important;
+  }
+  #panelPosts .post > .actions .action-btn::after {
+    content: none !important;
+    display: none !important;
+  }
   @media (hover: hover) and (pointer: fine) {
     #panelPosts .post > .actions .action-btn:hover {
-      background: var(--btn-soft-hover, #e6e9ec);
-      border-color: var(--border-soft-hover, rgba(0, 0, 0, 0.12));
+      background: rgba(230, 238, 234, 0.98);
+      border-color: rgba(0, 0, 0, 0.06);
+      box-shadow: none !important;
     }
   }
   /* 宸茬偣璧炵姸鎬?鈥?鐢ㄦ煍鍜岀殑绾㈣壊锛屼笉鍒虹溂 */

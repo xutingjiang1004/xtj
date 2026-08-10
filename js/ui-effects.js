@@ -64,42 +64,9 @@
     }, 820);
   }
 
-  function ripple(target, event) {
-    if (reduced() || !target || isDock(target)) return;
-    var btn = target.closest
-      ? target.closest('button, .btn, .action-btn, .send-btn, .desktop-nav-item, .profile-setting-item, .ai-chat-send, .dt-action-btn')
-      : null;
-    if (!btn || isDock(btn)) return;
-    var style = window.getComputedStyle(btn);
-    if (style.position === 'static') btn.style.position = 'relative';
-    if (style.overflow === 'visible') btn.style.overflow = 'hidden';
-    var rect = btn.getBoundingClientRect();
-    var x = (event && event.clientX != null ? event.clientX : rect.left + rect.width / 2) - rect.left;
-    var y = (event && event.clientY != null ? event.clientY : rect.top + rect.height / 2) - rect.top;
-    var size = Math.max(rect.width, rect.height) * 1.4;
-    var wave = document.createElement('span');
-    wave.className = 'xtj-ripple-wave';
-    wave.style.cssText = [
-      'position:absolute',
-      'left:' + (x - size / 2) + 'px',
-      'top:' + (y - size / 2) + 'px',
-      'width:' + size + 'px',
-      'height:' + size + 'px',
-      'border-radius:50%',
-      'background:rgba(255,255,255,.35)',
-      'transform:scale(0)',
-      'opacity:.7',
-      'pointer-events:none',
-      'transition:transform .45s ease, opacity .45s ease'
-    ].join(';');
-    btn.appendChild(wave);
-    requestAnimationFrame(function () {
-      wave.style.transform = 'scale(1)';
-      wave.style.opacity = '0';
-    });
-    setTimeout(function () {
-      if (wave.parentNode) wave.remove();
-    }, 480);
+  /* 全局 ripple / 中心波纹已全面关闭（用户明确不要中间固定阴影反馈） */
+  function ripple() {
+    return;
   }
 
   window.xtjHeartBurst = heartBurst;
@@ -109,18 +76,5 @@
     heartBurst: heartBurst
   };
 
-  if (!window.__xtjUiEffectsBound) {
-    window.__xtjUiEffectsBound = true;
-    document.addEventListener(
-      'pointerdown',
-      function (e) {
-        if (!e.target) return;
-        if (isDock(e.target)) return;
-        try {
-          ripple(e.target, e);
-        } catch (err) {}
-      },
-      true
-    );
-  }
+  /* 不再绑定 pointerdown ripple；仅保留点赞心形粒子 */
 })();
