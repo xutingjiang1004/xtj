@@ -1684,18 +1684,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var expiresAt = typeof msg.search_expires_at === 'number' ? msg.search_expires_at : 0;
         var isExpired = expiresAt > 0 && nowMs > expiresAt;
         var searchBar = el('div', { class: 'ai-search-status' + (isExpired ? ' expired' : '') });
-        var searchLabel = '已联网搜索 · ' + msg.search_count + ' 条结果';
-        if (isExpired) searchLabel += '（结果已过期）';
         var queryStr = msg.search_query || '';
+        // 紧凑标题行 + 可选展开列表（避免整条变成超长宽框）
+        var labelText = '已联网 · ' + msg.search_count + ' 条';
+        if (isExpired) labelText += '（过期）';
+        var headEl = el('div', { class: 'ai-search-status-head' });
+        headEl.appendChild(el('span', { class: 'ai-search-status-label', text: labelText }));
         if (queryStr && !isExpired) {
-          searchLabel += ' · 搜索：' + queryStr;
+          var qShow = queryStr.length > 22 ? (queryStr.slice(0, 22) + '…') : queryStr;
+          headEl.appendChild(el('span', { class: 'ai-search-status-query', text: qShow, title: queryStr }));
         }
-        searchBar.textContent = searchLabel;
-        // 1 天内 + 有 results 数组 → 可点击展开
+        searchBar.appendChild(headEl);
+
         if (!isExpired && Array.isArray(msg.search_results) && msg.search_results.length > 0) {
           var expandBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
-          searchBar.appendChild(expandBtn);
-          var listEl = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+          headEl.appendChild(expandBtn);
+          var listEl = el('div', { class: 'ai-search-detail', hidden: true });
           for (var si = 0; si < msg.search_results.length; si++) {
             var sr = msg.search_results[si] || {};
             var safeSrUrl = safeSearchUrl(sr.url);
@@ -1716,10 +1720,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           searchBar.appendChild(listEl);
           searchBar.style.cursor = 'pointer';
           searchBar.addEventListener('click', function(ev) {
-            if (ev && ev.target && (ev.target.tagName === 'A' || ev.target.className === 'ai-search-detail-title')) return;
-            var isShown = listEl.style.display !== 'none';
-            listEl.style.display = isShown ? 'none' : 'block';
-            try { expandBtn.textContent = isShown ? '展开' : '收起'; } catch (e) {}
+            if (ev && ev.target && (ev.target.tagName === 'A' || ev.target.classList && ev.target.classList.contains('ai-search-detail-title'))) return;
+            var open = searchBar.classList.toggle('is-open');
+            if (open) listEl.removeAttribute('hidden');
+            else listEl.setAttribute('hidden', '');
+            try { expandBtn.textContent = open ? '收起' : '展开'; } catch (e) {}
           });
         }
         node.appendChild(searchBar);
@@ -6819,43 +6824,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
 
           if (evt.type === 'search') {
-            // 显示搜索状态条
+            // 显示搜索状态条（紧凑胶囊，可展开）
             var searchCount = evt.count;
-            var searchDiag = evt.diagnostics;
             var searchBar = assistantNode.querySelector('.ai-search-status');
             if (!searchBar) {
               searchBar = el('div', { class: 'ai-search-status' });
               assistantNode.insertBefore(searchBar, assistantBubble);
             }
-            var summaryText = '';
-            if (searchCount > 0) {
-              summaryText = '已联网搜索 · ' + searchCount + ' 条结果';
-            } else {
-              summaryText = '联网搜索完成 · 没有找到相关结果';
-            }
-            // 显示使用的 provider
-            if (searchDiag && searchDiag.provider_results && searchDiag.provider_results.length) {
-              var firstProv = searchDiag.provider_results[0];
-              if (firstProv && firstProv.provider) {
-                summaryText += ' (' + firstProv.provider + ')';
-              }
-            }
-            // 清空并重建（避免重复 append）
             searchBar.innerHTML = '';
-            searchBar.textContent = summaryText;
+            searchBar.classList.remove('is-open');
             var resultsArr = evt.results;
             var queryStr = evt.query || '';
+            var headEl = el('div', { class: 'ai-search-status-head' });
+            var labelText = searchCount > 0
+              ? ('已联网 · ' + searchCount + ' 条')
+              : '联网完成 · 无结果';
+            headEl.appendChild(el('span', { class: 'ai-search-status-label', text: labelText }));
+            if (queryStr) {
+              var qShow = queryStr.length > 22 ? (queryStr.slice(0, 22) + '…') : queryStr;
+              headEl.appendChild(el('span', { class: 'ai-search-status-query', text: qShow, title: queryStr }));
+            }
+            searchBar.appendChild(headEl);
             if (resultsArr && resultsArr.length > 0) {
-              var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▸');
-              searchBar.appendChild(toggleBtn);
-              searchBar.style.cursor = 'pointer';
-              var detailPanel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
-              searchBar.appendChild(detailPanel);
-              // 显示搜索关键词
-              if (queryStr) {
-                detailPanel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
-              }
-              // 列表
+              var toggleBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
+              headEl.appendChild(toggleBtn);
+              var detailPanel = el('div', { class: 'ai-search-detail', hidden: true });
               for (var ri = 0; ri < resultsArr.length; ri++) {
                 var r = resultsArr[ri];
                 var itemEl = el('div', { class: 'ai-search-detail-item' });
@@ -6867,14 +6860,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (r.source || '') + ' · ' + (r.published_at || '') }));
                 detailPanel.appendChild(itemEl);
               }
-              searchBar.toggleFn = function() {
-                var isHidden = detailPanel.style.display === 'none';
-                detailPanel.style.display = isHidden ? '' : 'none';
-                toggleBtn.textContent = isHidden ? ' ▾' : ' ▸';
-              };
+              searchBar.appendChild(detailPanel);
+              searchBar.style.cursor = 'pointer';
               searchBar.onclick = function(e) {
                 if (e.target.tagName === 'A') return;
-                if (this.toggleFn) this.toggleFn();
+                var open = searchBar.classList.toggle('is-open');
+                if (open) detailPanel.removeAttribute('hidden');
+                else detailPanel.setAttribute('hidden', '');
+                toggleBtn.textContent = open ? '收起' : '展开';
               };
             }
             continue;
@@ -7924,11 +7917,11 @@ function showChatMessages() {
     };
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
-        // ===== 一级页 =====
+        // ===== 一级页：额度 + 简洁单行设置列表 =====
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
           '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
             '<div class="ai-quota-card-head">' +
-              '<span class="ai-quota-card-title">今日 AI 额度</span>' +
+              '<span class="ai-quota-card-title">今日额度</span>' +
               '<span class="ai-quota-plan-badge" id="aiQuotaPlanBadge">免费</span>' +
             '</div>' +
             '<div class="ai-quota-bar" aria-hidden="true"><i id="aiQuotaBarFill"></i></div>' +
@@ -7936,49 +7929,40 @@ function showChatMessages() {
               '<span id="aiQuotaTokenText">加载中…</span>' +
               '<span id="aiQuotaPercentText">—</span>' +
             '</div>' +
-            '<div class="ai-quota-search-line" id="aiQuotaSearchLine">网页搜索：—</div>' +
+            '<div class="ai-quota-search-line" id="aiQuotaSearchLine">搜索 —</div>' +
           '</div>' +
           '<div class="ai-panel-menu-list" role="group" aria-label="功能选项">' +
-            '<button type="button" class="ai-panel-row" data-action="pro" id="aiProOpenBtn">' +
+            '<button type="button" class="ai-panel-row ai-panel-row--pro" data-action="pro" id="aiProOpenBtn">' +
               '<span class="ai-panel-row-icon ai-panel-row-icon--pro" aria-hidden="true">' + ICO.pro + '</span>' +
-              '<span class="ai-panel-row-main">' +
-                '<span class="ai-panel-row-title" id="aiProCardTitle">开通 Pro</span>' +
-                '<span class="ai-panel-row-sub" id="aiProCardDesc">10 倍额度 · 无限搜索</span>' +
-              '</span>' +
+              '<span class="ai-panel-row-title" id="aiProCardTitle">开通 Pro</span>' +
+              '<span class="ai-panel-row-value" id="aiProCardDesc">邀请码</span>' +
               '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
             '</button>' +
-            '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload">' +
-              '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.upload + '</span>' +
-              '<span class="ai-panel-row-main">' +
+            '<div class="ai-panel-group">' +
+              '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload">' +
+                '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.upload + '</span>' +
                 '<span class="ai-panel-row-title">上传文件</span>' +
-                '<span class="ai-panel-row-sub">图片 / PDF / 文档</span>' +
-              '</span>' +
-              '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
-            '</button>' +
-            '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-model">' +
-              '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.model + '</span>' +
-              '<span class="ai-panel-row-main">' +
+                '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+              '</button>' +
+              '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-model">' +
+                '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
-                '<span class="ai-panel-row-sub" id="aiModelSummary">V4 Flash</span>' +
-              '</span>' +
-              '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
-            '</button>' +
-            '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-think">' +
-              '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.think + '</span>' +
-              '<span class="ai-panel-row-main">' +
-                '<span class="ai-panel-row-title">思考程度</span>' +
-                '<span class="ai-panel-row-sub" id="aiThinkSummary">轻度</span>' +
-              '</span>' +
-              '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
-            '</button>' +
-            '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
-              '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.search + '</span>' +
-              '<span class="ai-panel-row-main">' +
+                '<span class="ai-panel-row-value" id="aiModelSummary">Flash</span>' +
+                '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+              '</button>' +
+              '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-think">' +
+                '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.think + '</span>' +
+                '<span class="ai-panel-row-title">思考</span>' +
+                '<span class="ai-panel-row-value" id="aiThinkSummary">轻度</span>' +
+                '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+              '</button>' +
+              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
+                '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
-                '<span class="ai-panel-row-sub" id="aiSearchRemainHint">今日剩余 — 次</span>' +
-              '</span>' +
-              '<span class="ai-search-status" id="aiSearchStatus">关</span>' +
-            '</button>' +
+                '<span class="ai-panel-row-value" id="aiSearchRemainHint">—</span>' +
+                '<span class="ai-search-status" id="aiSearchStatus">关</span>' +
+              '</button>' +
+            '</div>' +
           '</div>' +
         '</div>' +
         // ===== 模型二级页 =====
@@ -8089,16 +8073,16 @@ function showChatMessages() {
       }
       if (hint) {
         if (q && (q.search_unlimited === true || Number(q.search_limit) < 0)) {
-          hint.textContent = '无限搜索';
+          hint.textContent = '无限';
         } else if (q && q.search_limit != null) {
           var rem = typeof q.search_remaining === 'number'
             ? Math.max(0, q.search_remaining)
             : Math.max(0, Number(q.search_limit) - (Number(q.search_used) || 0));
-          hint.textContent = '今日剩余 ' + rem + ' / ' + Math.max(0, Number(q.search_limit)) + ' 次';
+          hint.textContent = rem + '/' + Math.max(0, Number(q.search_limit));
         } else if (q) {
-          hint.textContent = '今日剩余 ' + Math.max(0, q.search_remaining || 0) + ' 次';
+          hint.textContent = String(Math.max(0, q.search_remaining || 0));
         } else {
-          hint.textContent = '每日有次数限制';
+          hint.textContent = '—';
         }
       }
       if (plusBtn) {
@@ -8149,16 +8133,14 @@ function showChatMessages() {
         planBadge.textContent = q.is_pro ? 'Pro' : '免费';
         planBadge.classList.toggle('is-pro', !!q.is_pro);
       }
-      if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 已开通' : '开通 Pro';
+      if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 会员' : '开通 Pro';
       if (proDesc) {
         if (q.is_pro) {
-          var tokenPart = '每日 ' + formatTokenCount(limit) + ' tokens';
-          var searchPart = searchUnlimited
-            ? '无限搜索'
-            : ('每日 ' + Math.max(0, searchLimit) + ' 次搜索');
-          proDesc.textContent = tokenPart + ' · ' + searchPart;
+          proDesc.textContent = searchUnlimited
+            ? (formatTokenCount(limit) + ' · 无限搜')
+            : (formatTokenCount(limit) + ' · ' + Math.max(0, searchLimit) + ' 搜');
         } else {
-          proDesc.textContent = '邀请码开通 · 更高额度';
+          proDesc.textContent = '邀请码';
         }
       }
       if (proBtn) proBtn.classList.toggle('is-pro', !!q.is_pro);
