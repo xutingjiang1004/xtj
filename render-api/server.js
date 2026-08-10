@@ -14064,7 +14064,7 @@ app.get('/admin/ai-agent/pro-users', verifyToken, async (req, res) => {
   }
 });
 
-// GET /admin/ai-agent/invite-redemptions — 激活记录
+// GET /admin/ai-agent/invite-redemptions — 激活记录（附带今日额度使用情况）
 app.get('/admin/ai-agent/invite-redemptions', verifyToken, async (req, res) => {
   try {
     var page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -14080,15 +14080,91 @@ app.get('/admin/ai-agent/invite-redemptions', verifyToken, async (req, res) => {
       console.error('[INVITE-ADMIN] redemptions error:', result.error.message);
       return res.status(500).json({ ok: false, error: '查询失败' });
     }
+    var list = result.data || [];
+    // 批量附加每位用户今日额度（token / 搜索），供管理端进度条展示
+    var nameSet = {};
+    list.forEach(function(row) {
+      var n = String((row && row.user_name) || '').trim().toLowerCase();
+      if (n) nameSet[n] = true;
+    });
+    var names = Object.keys(nameSet);
+    var quotaByUser = {};
+    await Promise.all(names.map(async function(name) {
+      try {
+        quotaByUser[name] = await aiQuota.getQuota(name);
+      } catch (qe) {
+        quotaByUser[name] = aiQuota.normalizeQuotaPayload(null);
+      }
+    }));
+    list = list.map(function(row) {
+      var n = String((row && row.user_name) || '').trim().toLowerCase();
+      return Object.assign({}, row, { quota: quotaByUser[n] || null });
+    });
     return res.json({
       ok: true,
-      list: result.data || [],
+      list: list,
       total: result.count || 0,
       page: page,
       page_size: pageSize
     });
   } catch (e) {
     console.error('[INVITE-ADMIN] redemptions exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '查询失败' });
+  }
+});
+
+// GET /admin/ai-agent/daily-usage — 今日所有用户额度使用（含普通 free 用户）
+app.get('/admin/ai-agent/daily-usage', verifyToken, async (req, res) => {
+  try {
+    var limit = Math.max(1, Math.min(300, parseInt(req.query.limit, 10) || 80));
+    var dayR = await supabase.rpc('ai_quota_shanghai_day');
+    if (dayR.error) {
+      console.error('[INVITE-ADMIN] daily-usage day error:', dayR.error.message);
+      return res.status(500).json({ ok: false, error: '查询失败' });
+    }
+    var dayKey = dayR.data;
+    var daily = await supabase
+      .from('ai_user_quota_daily')
+      .select('user_name, day_key, tokens_used, search_used, updated_at')
+      .eq('day_key', dayKey)
+      .order('tokens_used', { ascending: false })
+      .limit(limit);
+    if (daily.error) {
+      console.error('[INVITE-ADMIN] daily-usage query error:', daily.error.message);
+      return res.status(500).json({ ok: false, error: '查询失败' });
+    }
+    var rows = daily.data || [];
+    var list = [];
+    await Promise.all(rows.map(async function(row) {
+      var name = String(row.user_name || '').trim().toLowerCase();
+      if (!name) return;
+      var quota = null;
+      try { quota = await aiQuota.getQuota(name); } catch (e0) {
+        quota = aiQuota.normalizeQuotaPayload({
+          ok: true,
+          user_name: name,
+          day_key: dayKey,
+          tokens_used: row.tokens_used,
+          search_used: row.search_used
+        });
+      }
+      list.push({
+        user_name: name,
+        day_key: dayKey,
+        tokens_used_raw: row.tokens_used,
+        search_used_raw: row.search_used,
+        updated_at: row.updated_at || null,
+        quota: quota
+      });
+    }));
+    list.sort(function(a, b) {
+      var ta = (a.quota && a.quota.tokens_used) || 0;
+      var tb = (b.quota && b.quota.tokens_used) || 0;
+      return tb - ta;
+    });
+    return res.json({ ok: true, day_key: dayKey, list: list });
+  } catch (e) {
+    console.error('[INVITE-ADMIN] daily-usage exception:', e && e.message);
     return res.status(500).json({ ok: false, error: '查询失败' });
   }
 });
