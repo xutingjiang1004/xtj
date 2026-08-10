@@ -7945,23 +7945,23 @@ function showChatMessages() {
       role: 'menu',
       'aria-label': '更多选项'
     });
-    // 菜单图标：更直观的通用符号（星 / 回形针 / 芯片 / 灯泡 / 放大镜）
+    // 菜单图标：清新彩色圆底（星 / 云上传 / 立方体 / 大脑 / 地球）
     var ICO = {
-      // 星：Pro
-      pro: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.1 4.9 5.3.5-4 3.5 1.2 5.2L12 14.9 7.4 17.3l1.2-5.2-4-3.5 5.3-.5L12 3.2z"/></svg>',
-      // 回形针：上传附件
-      upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.6 3.6 0 0 1 5.1 5.1l-9.2 9.2a1.7 1.7 0 1 1-2.4-2.4l8.1-8.1"/></svg>',
-      // 四层方块：模型（比芯片针脚更易认）
-      model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
-      // 灯泡：思考程度
-      think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.8c.6.5 1 1.2 1.1 2h4.8c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3z"/></svg>',
-      // 放大镜：网页搜索
-      search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2"/><path d="M16.2 16.2L21 21"/></svg>',
+      // 星：Pro（实心）
+      pro: '<svg class="ai-panel-svg ai-panel-svg--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.45 5.55 6.05.55-4.6 3.95 1.4 5.85L12 15.55 6.7 18.7l1.4-5.85-4.6-3.95 6.05-.55L12 2.8z"/></svg>',
+      // 云上传
+      upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 17.2A4.2 4.2 0 0 1 7.8 9a5.4 5.4 0 0 1 10.5 1.5 3.4 3.4 0 0 1 .2 6.7H7.5z"/><path d="M12 15.2V9.6"/><path d="M9.6 11.6L12 9.2l2.4 2.4"/></svg>',
+      // 3D 立方体：模型
+      model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2L4.8 7.2v9.6L12 20.8l7.2-4V7.2L12 3.2z"/><path d="M4.8 7.2L12 11.2l7.2-4"/><path d="M12 11.2V20.8"/></svg>',
+      // 大脑：思考程度
+      think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.2 4.8a2.8 2.8 0 0 0-2.7 3.4A2.6 2.6 0 0 0 5 10.6c0 1.1.6 2 1.5 2.5-.2.5-.3 1-.3 1.5 0 1.7 1.2 3.1 2.9 3.4"/><path d="M14.8 4.8a2.8 2.8 0 0 1 2.7 3.4A2.6 2.6 0 0 1 19 10.6c0 1.1-.6 2-1.5 2.5.2.5.3 1 .3 1.5 0 1.7-1.2 3.1-2.9 3.4"/><path d="M9.4 18v1.4c0 .7.6 1.2 1.2 1.2h2.8c.7 0 1.2-.5 1.2-1.2V18"/><path d="M12 5.2v9.2"/><path d="M9.6 9.2c.6-.6 1.4-.9 2.4-.9s1.8.3 2.4.9"/><path d="M9.6 12.4c.6-.5 1.4-.8 2.4-.8s1.8.3 2.4.8"/></svg>',
+      // 地球：网页搜索
+      search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.2 2.4 3.4 5.2 3.4 8.2S14.2 17.8 12 20.2C9.8 17.8 8.6 15 8.6 12S9.8 6.2 12 3.8z"/></svg>',
       chev: '<svg class="ai-panel-chev-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
     };
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
-        // ===== 一级页：额度 + 简洁单行设置列表 =====
+        // ===== 一级页：额度 + 清新单行设置列表 =====
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
           '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
             '<div class="ai-quota-card-head">' +
@@ -7976,35 +7976,38 @@ function showChatMessages() {
             '<div class="ai-quota-search-line" id="aiQuotaSearchLine">搜索 —</div>' +
           '</div>' +
           '<div class="ai-panel-menu-list" role="group" aria-label="功能选项">' +
-            '<button type="button" class="ai-panel-row ai-panel-row--pro" data-action="pro" id="aiProOpenBtn">' +
-              '<span class="ai-panel-row-icon ai-panel-row-icon--pro" aria-hidden="true">' + ICO.pro + '</span>' +
-              '<span class="ai-panel-row-title" id="aiProCardTitle">开通 Pro</span>' +
-              '<span class="ai-panel-row-value" id="aiProCardDesc">邀请码</span>' +
-              '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
-            '</button>' +
+            '<div class="ai-panel-group ai-panel-group--solo">' +
+              '<button type="button" class="ai-panel-row ai-panel-row--pro" data-action="pro" id="aiProOpenBtn">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--pro" aria-hidden="true">' + ICO.pro + '</span>' +
+                '<span class="ai-panel-row-title" id="aiProCardTitle">开通 Pro</span>' +
+                '<span class="ai-panel-row-value ai-panel-row-value--pro" id="aiProCardDesc">邀请码</span>' +
+                '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+              '</button>' +
+            '</div>' +
             '<div class="ai-panel-group">' +
               '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload">' +
-                '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.upload + '</span>' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--upload" aria-hidden="true">' + ICO.upload + '</span>' +
                 '<span class="ai-panel-row-title">上传文件</span>' +
+                '<span class="ai-panel-row-value" aria-hidden="true"></span>' +
                 '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
               '</button>' +
               '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-model">' +
-                '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.model + '</span>' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
-                '<span class="ai-panel-row-value" id="aiModelSummary">Flash</span>' +
+                '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">Flash</span>' +
                 '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
               '</button>' +
               '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-think">' +
-                '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.think + '</span>' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.think + '</span>' +
                 '<span class="ai-panel-row-title">思考</span>' +
-                '<span class="ai-panel-row-value" id="aiThinkSummary">轻度</span>' +
+                '<span class="ai-panel-row-value ai-panel-row-value--think" id="aiThinkSummary">轻度</span>' +
                 '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
               '</button>' +
               '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
-                '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.search + '</span>' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
                 '<span class="ai-panel-row-value" id="aiSearchRemainHint">—</span>' +
-                '<span class="ai-search-status" id="aiSearchStatus">关</span>' +
+                '<span class="ai-search-switch" id="aiSearchStatus" aria-hidden="true"><i></i></span>' +
               '</button>' +
             '</div>' +
           '</div>' +
@@ -8105,7 +8108,12 @@ function showChatMessages() {
       var hint = panelShell.querySelector('#aiSearchRemainHint');
       var q = S.quota;
       if (st) {
-        st.textContent = S.webSearchEnabled ? '开' : '关';
+        // 开关形态：不再写「开/关」文字，用 .on 控制样式
+        if (st.tagName === 'SPAN' && st.classList.contains('ai-search-switch')) {
+          st.setAttribute('data-on', S.webSearchEnabled ? '1' : '0');
+        } else {
+          st.textContent = S.webSearchEnabled ? '开' : '关';
+        }
         st.classList.toggle('on', !!S.webSearchEnabled);
       }
       if (btn) {
@@ -8194,7 +8202,7 @@ function showChatMessages() {
       if (!plusBtn || !panelShell || !panelShell.parentNode) return;
       var btnRect = plusBtn.getBoundingClientRect();
       var bar = panelShell.parentNode.getBoundingClientRect();
-      var panelW = Math.min(272, Math.max(236, bar.width - 20));
+      var panelW = Math.min(300, Math.max(260, bar.width - 20));
       panelShell.style.width = panelW + 'px';
       var left = btnRect.left - bar.left + btnRect.width / 2 - 24;
       var maxLeft = Math.max(8, bar.width - panelW - 8);
