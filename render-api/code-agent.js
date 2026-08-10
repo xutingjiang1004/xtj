@@ -3351,9 +3351,17 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
   // 与小猫 AI / 深入研究共用日额度
   var enforceAiChatAccess = typeof deps.enforceAiChatAccess === 'function' ? deps.enforceAiChatAccess : null;
   var recordAiTurnUsage = typeof deps.recordAiTurnUsage === 'function' ? deps.recordAiTurnUsage : null;
-  var getAiQuotaErrorMessage = typeof deps.getAiQuotaErrorMessage === 'function'
-    ? deps.getAiQuotaErrorMessage
-    : function(reason) { return reason === 'token_limit' ? '今日 AI 额度已用完' : '请求过于频繁'; };
+  // 额度失败文案：quota_unavailable / hourly_limit / daily_limit 单独映射（对齐 ai-quota.getTokenQuotaErrorMessage），
+  // 其余 reason（token_limit / search_limit 等）委托 deps，未注入时使用默认兜底。
+  var getAiQuotaErrorMessage = function(reason) {
+    if (reason === 'quota_unavailable') return '额度服务暂不可用，请稍后重试';
+    if (reason === 'hourly_limit') return '请求太频繁，请稍后再试';
+    if (reason === 'daily_limit') return '今日请求次数已达上限';
+    if (typeof deps.getAiQuotaErrorMessage === 'function') return deps.getAiQuotaErrorMessage(reason);
+    if (reason === 'token_limit') return '今日 AI 额度已用完';
+    if (reason === 'search_limit') return '今日网页搜索次数已达上限';
+    return '请求过于频繁';
+  };
 
   async function gateCodeQuota(userName) {
     if (!enforceAiChatAccess) return { allowed: true, reason: null, quota: null };
@@ -3372,10 +3380,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       if (options && options.reasoning_tokens && !billUsage.reasoning_tokens) {
         billUsage.reasoning_tokens = options.reasoning_tokens;
       }
+      var didSearchTurn = !!(options && options.did_search === true);
       return await recordAiTurnUsage(userName, billUsage, Object.assign({
         source: 'code_chat',
-        did_search: false,
-        search_count: 0
+        did_search: didSearchTurn,
+        search_count: didSearchTurn ? 1 : 0
       }, options || {}));
     } catch (e) {
       console.error('[code-agent] quota bill failed:', e && e.message);
@@ -4302,7 +4311,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         content: reply,
         reasoning: (aiResult && aiResult.reasoning) || '',
         reasoning_tokens: (aiResult && typeof aiResult.reasoning_tokens === 'number') ? aiResult.reasoning_tokens : 0,
-        source: 'code_chat'
+        source: 'code_chat',
+        // 本次回合调用过 web_search 工具则计入 1 次搜索额度（与小猫 AI / 深入研究一致）
+        did_search: toolTrace.some(function(entry) { return entry.tool === 'web_search'; })
       });
       var caps = buildCodeCapabilities(deps, {
         requestSucceeded: true,
@@ -5420,7 +5431,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         content: reply,
         reasoning: (aiResult && aiResult.reasoning) || '',
         reasoning_tokens: (aiResult && typeof aiResult.reasoning_tokens === 'number') ? aiResult.reasoning_tokens : 0,
-        source: 'code_chat_stream'
+        source: 'code_chat_stream',
+        // 本次回合调用过 web_search 工具则计入 1 次搜索额度（与小猫 AI / 深入研究一致）
+        did_search: toolTrace.some(function(entry) { return entry.tool === 'web_search'; })
       });
       if (streamQuota) {
         try {

@@ -70,7 +70,9 @@ test('deep research close invalidates callbacks, aborts streams, and clears tran
 test('search result links are restricted to http(s)', () => {
   assert.match(source, /function safeSearchUrl\(value\)/);
   assert.match(source, /parsed\.protocol !== 'http:' && parsed\.protocol !== 'https:'/);
-  assert.match(source, /href:\s*safeSrUrl \|\| '#'/);
+  // ★ 重构后：不安全 URL 直接不渲染链接（if (safeSrUrl) 条件），比旧版 `safeSrUrl || '#'`
+  // 更严格——仍强制链接 href 只来自 safeSearchUrl 白名单结果。
+  assert.match(source, /href="' \+ escapeHtml\(safeSrUrl\) \+ '/);
   assert.doesNotMatch(source, /href="' \+ escapeHtml\(sr\.url\)/);
   assert.doesNotMatch(source, /href:\s*r2\.url\s*\|\|\s*'#'/);
 });

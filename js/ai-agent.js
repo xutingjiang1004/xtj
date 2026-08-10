@@ -143,7 +143,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     quota: null,
     quotaFetchedAt: 0,
     _quotaTimer: null,
-    _quotaInflight: null
+    _quotaInflight: null,
+    _quotaInflightStartedAt: 0
   };
 
   var QUOTA_POLL_MS = 90000;
@@ -152,7 +153,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var FREE_SEARCH_DEFAULT = 100;
 
   function formatTokenCount(n) {
-    n = Math.max(0, Math.floor(Number(n) || 0));
+    var num = Number(n);
+    if (num === Infinity || num === -Infinity) return '∞';
+    n = Math.max(0, Math.floor(num || 0));
     if (n >= 1000000) {
       var m = n / 1000000;
       return (Math.round(m * 10) / 10) + 'M';
@@ -334,7 +337,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 15000) {
       return S.quota;
     }
-    if (S._quotaInflight) return S._quotaInflight;
+    if (S._quotaInflight && (Date.now() - S._quotaInflightStartedAt) < 20000) return S._quotaInflight;
+    S._quotaInflightStartedAt = Date.now();
     S._quotaInflight = (async function() {
       try {
         var r = await apiRequest('GET', '/quota');
@@ -352,6 +356,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         try { if (AI_DEBUG) console.warn('[AI] quota fetch failed', e); } catch (e2) {}
       } finally {
         S._quotaInflight = null;
+        S._quotaInflightStartedAt = 0;
       }
       return S.quota;
     })();
@@ -8303,6 +8308,7 @@ function showChatMessages() {
       var validating = false;
       var validateTimer = null;
       var validCodeInfo = null;
+      var validateSeq = 0;
 
       function close() {
         if (validateTimer) clearTimeout(validateTimer);
@@ -8322,9 +8328,11 @@ function showChatMessages() {
         feedback.className = 'ai-invite-code-feedback';
         if (!code) { feedback.textContent = ''; return; }
         validating = true;
+        var seq = ++validateSeq;
         feedback.textContent = '校验中…';
         apiRequest('POST', '/invite/validate', { code: code })
           .then(function(r) {
+            if (seq !== validateSeq) return; // 丢弃过期响应
             validating = false;
             // 兼容 data 包一层 / 扁平两种返回
             var payload = (r && r.data) || r || {};
@@ -8339,6 +8347,7 @@ function showChatMessages() {
             }
           })
           .catch(function() {
+            if (seq !== validateSeq) return; // 丢弃过期响应
             validating = false;
             validCodeInfo = null;
             feedback.className = 'ai-invite-code-feedback is-bad';

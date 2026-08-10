@@ -222,7 +222,7 @@ function createAiQuota(supabase) {
       if (meta.token_limit_daily !== undefined || meta.search_limit_daily !== undefined) {
         var patch = { updated_at: new Date().toISOString() };
         if (meta.token_limit_daily !== undefined) patch.token_limit_daily = meta.token_limit_daily === null ? null : Math.max(0, Math.floor(Number(meta.token_limit_daily) || 0));
-        if (meta.search_limit_daily !== undefined) patch.search_limit_daily = meta.search_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.search_limit_daily) || -1));
+        if (meta.search_limit_daily !== undefined) patch.search_limit_daily = meta.search_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.search_limit_daily)));
         var up = await supabase.from('ai_user_membership').update(patch).eq('user_name', String(userName || ''));
         if (up.error) console.error('[AI-QUOTA] setPro custom limits update failed:', up.error.message);
       }
