@@ -4,6 +4,8 @@
 
 > **关于付费业务**：本站全面免费，不再收费。支付宝支付、VIP 订单、Pro 会员激活等相关业务代码已移除（`alipay-sdk` 依赖、`alipay_private_key.pem` 私钥文件均已删除）。
 
+> **关于仓库历史（2026-08-10 维护）**：历史中曾误提交 `node_modules`，`.git` 一度达 408MB。已用 git-filter-repo 剔除所有 >10MB 大文件，`.git` 瘦身至 43MB，2121 个提交时间线完整保留。清理前完整历史保存在 `backup/pre-cleanup-20260810` 分支；main 提交 hash 已全部改变（内容不变），本地与远端已分叉，暂未强推远端。详见 `CHANGELOG.md` v0.93.1。
+
 
 
 ## 项目结构
