@@ -1228,12 +1228,12 @@
   position: absolute;
   left: 10px;
   bottom: calc(100% + 10px);
-  width: min(312px, calc(100vw - 20px));
-  max-height: min(82vh, 720px);
-  border-radius: 18px;
+  width: min(280px, calc(100vw - 24px));
+  max-height: min(78vh, 640px);
+  border-radius: 16px;
   /* 实色底，避免 backdrop-filter 导致悬浮文字发糊 */
-  border: 1px solid rgba(120, 170, 155, 0.22);
-  background: #f7fbf9;
+  border: 1px solid rgba(120, 170, 155, 0.2);
+  background: #f4f9f7;
   z-index: 30;
   opacity: 0;
   visibility: hidden;
@@ -1245,8 +1245,8 @@
     transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
     visibility 0s linear 220ms;
   box-shadow:
-    0 18px 40px rgba(40, 80, 70, 0.14),
-    0 2px 8px rgba(40, 80, 70, 0.06);
+    0 14px 32px rgba(40, 80, 70, 0.12),
+    0 2px 6px rgba(40, 80, 70, 0.05);
   isolation: isolate;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -1277,10 +1277,10 @@
 .ai-plus-panel-content {
   position: relative;
   min-height: 0;
-  max-height: min(78vh, 640px);
+  max-height: min(74vh, 560px);
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
+  padding: 6px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
 }
@@ -1312,36 +1312,35 @@
   text-transform: none;
 }
 
-/* ===== AI 额度卡 / Pro 卡 ===== */
+/* ===== AI 额度卡：扁平信息条，不抢菜单主体 ===== */
 .ai-quota-card {
-  margin: 4px 4px 8px;
-  padding: 12px 12px 10px;
-  border-radius: 14px;
-  border: 1px solid rgba(120, 177, 170, 0.2);
-  background:
-    linear-gradient(160deg, rgba(255, 255, 255, 0.72), rgba(236, 250, 245, 0.88));
-  box-shadow: 0 6px 16px rgba(48, 110, 96, 0.06);
+  margin: 2px 2px 6px;
+  padding: 10px 12px 9px;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 177, 170, 0.16);
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
 }
 .ai-quota-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .ai-quota-card-title {
-  font-size: 12px;
-  font-weight: 750;
-  color: rgba(45, 84, 74, 0.92);
-  letter-spacing: 0.02em;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(45, 84, 74, 0.78);
+  letter-spacing: 0.03em;
 }
 .ai-quota-plan-badge {
-  min-width: 40px;
-  padding: 2px 8px;
+  min-width: 36px;
+  padding: 1px 7px;
   border-radius: 999px;
-  background: rgba(120, 160, 150, 0.14);
-  color: rgba(70, 105, 96, 0.95);
-  font-size: 11px;
+  background: rgba(120, 160, 150, 0.12);
+  color: rgba(70, 105, 96, 0.92);
+  font-size: 10.5px;
   font-weight: 750;
   text-align: center;
 }
@@ -1351,9 +1350,9 @@
 }
 .ai-quota-bar {
   position: relative;
-  height: 8px;
+  height: 5px;
   border-radius: 999px;
-  background: rgba(120, 160, 150, 0.14);
+  background: rgba(120, 160, 150, 0.12);
   overflow: hidden;
 }
 .ai-quota-bar > i {
@@ -1362,61 +1361,61 @@
   width: 0%;
   border-radius: inherit;
   background: linear-gradient(90deg, #3a9271, #5ec4a0);
-  box-shadow: 0 0 10px rgba(58, 146, 113, 0.35);
+  box-shadow: none;
   transition: width 420ms cubic-bezier(0.22, 1, 0.36, 1), background 200ms ease;
 }
 .ai-quota-bar > i.is-warn {
   background: linear-gradient(90deg, #d97706, #fbbf24);
-  box-shadow: 0 0 10px rgba(217, 119, 6, 0.28);
+  box-shadow: none;
 }
 .ai-quota-bar > i.is-danger {
   background: linear-gradient(90deg, #dc2626, #f87171);
-  box-shadow: 0 0 10px rgba(220, 38, 38, 0.28);
+  box-shadow: none;
 }
 .ai-quota-meta {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 7px;
-  font-size: 11px;
-  font-weight: 650;
-  color: rgba(70, 100, 92, 0.9);
+  margin-top: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(70, 100, 92, 0.82);
 }
 .ai-quota-search-line {
-  margin-top: 6px;
-  font-size: 11px;
+  margin-top: 4px;
+  font-size: 10.5px;
   font-weight: 600;
-  color: rgba(95, 120, 112, 0.88);
+  color: rgba(95, 120, 112, 0.78);
 }
 
-/* 一级菜单：设置列表风格（单行、右对齐值） */
+/* 一级菜单：iOS 设置式单行列表，一组搞定，不堆多层卡片 */
 .ai-panel-menu-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 2px 0 0;
+  gap: 6px;
+  margin: 0;
 }
 .ai-panel-group {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 4px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
+  gap: 0;
+  padding: 2px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(120, 170, 155, 0.12);
   overflow: hidden;
 }
 .ai-panel-row {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
   align-items: center;
-  column-gap: 10px;
+  column-gap: 8px;
   width: 100%;
-  min-height: 44px;
+  min-height: 40px;
   margin: 0;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 11px;
   background: transparent;
   color: #1f3a34;
   text-align: left;
@@ -1425,30 +1424,45 @@
   touch-action: manipulation;
   transition: background-color 120ms ease;
 }
+.ai-panel-row + .ai-panel-row {
+  border-top: 1px solid rgba(120, 160, 150, 0.08);
+  border-radius: 0;
+}
+.ai-panel-group > .ai-panel-row:first-child {
+  border-radius: 11px 11px 0 0;
+}
+.ai-panel-group > .ai-panel-row:last-child {
+  border-radius: 0 0 11px 11px;
+}
+.ai-panel-group > .ai-panel-row:only-child {
+  border-radius: 11px;
+}
 .ai-panel-row:hover,
 .ai-panel-row:focus-visible {
-  background: rgba(58, 146, 113, 0.09);
+  background: rgba(58, 146, 113, 0.08);
   outline: none;
   transform: none !important;
   filter: none !important;
   text-shadow: none !important;
 }
 .ai-panel-row:active {
-  background: rgba(58, 146, 113, 0.13);
+  background: rgba(58, 146, 113, 0.12);
   transform: none !important;
 }
+/* Pro 单独一行，轻量色块，不做成第二张大卡 */
 .ai-panel-row--pro {
-  min-height: 46px;
-  border: 1px solid rgba(251, 191, 36, 0.22);
-  background: rgba(255, 251, 235, 0.72);
+  min-height: 40px;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: 12px !important;
+  background: rgba(255, 251, 235, 0.65);
 }
 .ai-panel-row--pro:hover,
 .ai-panel-row--pro:focus-visible {
-  background: rgba(254, 243, 199, 0.9);
+  background: rgba(254, 243, 199, 0.85);
 }
 .ai-panel-row.is-pro {
-  border-color: rgba(58, 146, 113, 0.22);
-  background: rgba(232, 250, 242, 0.85);
+  border-color: rgba(58, 146, 113, 0.2);
+  background: rgba(232, 250, 242, 0.72);
 }
 .ai-panel-row.is-disabled {
   opacity: 0.5;
@@ -1458,9 +1472,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
   background: transparent;
   color: #2f7a5f;
 }
@@ -1468,11 +1482,11 @@
   color: #b45309;
 }
 .ai-panel-svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: 1.85;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -1482,17 +1496,20 @@
 }
 .ai-panel-row-title {
   min-width: 0;
-  font-size: 14px;
-  font-weight: 650;
+  font-size: 13.5px;
+  font-weight: 600;
   line-height: 1.2;
   color: #1c3530;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ai-panel-row-value {
-  max-width: 7.5em;
+  max-width: 6.5em;
   font-size: 12px;
-  font-weight: 600;
-  color: rgba(70, 105, 95, 0.72);
+  font-weight: 550;
+  color: rgba(70, 105, 95, 0.62);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1502,38 +1519,44 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  color: rgba(70, 110, 98, 0.38);
+  width: 14px;
+  color: rgba(70, 110, 98, 0.32);
 }
 .ai-panel-chev-svg {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2.1;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* 菜单内开关徽章：小 pill，别和对话搜索条样式串了 */
 .ai-panel-row .ai-search-status,
 .ai-panel-row #aiSearchStatus {
-  min-width: 32px;
-  height: 24px;
-  padding: 0 9px;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
+  border: 0;
   font-size: 11px;
   font-weight: 750;
   background: rgba(120, 140, 135, 0.12);
   color: rgba(70, 95, 88, 0.92);
+  box-shadow: none;
+  width: auto;
+  max-width: none;
+  margin: 0;
 }
 .ai-panel-row .ai-search-status.on,
 .ai-panel-row #aiSearchStatus.on {
   background: rgba(58, 146, 113, 0.16);
   color: #1f6b4f;
 }
-.ai-panel-row-sub { display: none; }
+.ai-panel-row-sub { display: none !important; }
 .ai-panel-row-main { display: contents; }
 .ai-panel-back {
   display: flex;
@@ -2775,44 +2798,48 @@
   animation: none !important;
 }
 
-/* 对话内搜索状态：默认紧凑胶囊，展开后才变卡片（不撑满整行） */
+/* 对话内搜索状态：内容自适应的小胶囊，绝不比消息气泡还宽一长条 */
 .ai-msg .ai-search-status,
 .ai-chat-messages > .ai-search-status {
   display: inline-flex;
   flex-direction: column;
   align-items: stretch;
+  align-self: flex-start;
   box-sizing: border-box;
-  flex: 0 1 auto;
-  width: auto;
-  max-width: min(100%, 420px);
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: min(100%, 240px);
   min-width: 0;
-  margin: 6px 0 2px;
+  margin: 4px 0 2px;
   padding: 0;
-  border: 1px solid rgba(120, 160, 150, 0.16);
+  border: 1px solid rgba(120, 160, 150, 0.18);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.78);
   color: #5a726a;
   font-size: 12px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.3;
   overflow: hidden;
-  transition: border-radius 0.16s ease, background 0.16s ease, max-width 0.16s ease;
+  box-shadow: 0 1px 4px rgba(60, 100, 90, 0.05);
+  transition: border-radius 0.14s ease, background 0.14s ease, max-width 0.14s ease, width 0.14s ease;
 }
 .ai-msg .ai-search-status.is-open,
 .ai-chat-messages > .ai-search-status.is-open {
-  max-width: min(100%, 480px);
-  width: min(100%, 480px);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.88);
+  max-width: min(100%, 360px);
+  width: min(100%, 360px);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
 }
 .ai-msg .ai-search-status.expired {
-  opacity: 0.72;
+  opacity: 0.7;
 }
 .ai-tool-status {
   display: inline-flex;
-  max-width: min(100%, 420px);
-  margin: 6px 0 2px;
-  padding: 5px 12px;
+  align-self: flex-start;
+  width: max-content;
+  max-width: min(100%, 240px);
+  margin: 4px 0 2px;
+  padding: 4px 10px;
   border: 1px solid rgba(120, 160, 150, 0.16);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.55);
@@ -2821,40 +2848,37 @@
   font-weight: 600;
 }
 .ai-search-status-head {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  width: max-content;
   max-width: 100%;
-  padding: 5px 10px 5px 12px;
+  min-width: 0;
+  padding: 4px 8px 4px 10px;
 }
 .ai-search-status-label {
   flex: 0 0 auto;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 700;
   color: #3d6b5a;
+  letter-spacing: 0.01em;
 }
+/* 折叠态不展示 query（避免胶囊被撑成长条）；展开后在 detail 里看 */
 .ai-search-status-query {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 550;
-  color: rgba(90, 115, 105, 0.78);
+  display: none;
 }
 .ai-search-toggle {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 10.5px;
   user-select: none;
-  margin-left: 2px;
-  padding: 1px 6px;
+  margin-left: 0;
+  padding: 1px 7px;
   border-radius: 999px;
   color: #2f8a68;
   font-weight: 750;
-  background: rgba(58, 146, 113, 0.1);
+  background: rgba(58, 146, 113, 0.12);
+  line-height: 1.4;
 }
 .ai-search-detail {
   display: none;
@@ -2866,6 +2890,8 @@
   padding: 8px 10px 10px;
   border-radius: 0;
   background: transparent;
+  width: 100%;
+  box-sizing: border-box;
 }
 .ai-search-status.is-open .ai-search-detail,
 .ai-search-status.is-open .ai-search-detail:not([hidden]) {
@@ -2876,10 +2902,12 @@
 }
 .ai-search-detail-query {
   font-size: 11px;
-  color: #aaa;
-  margin-bottom: 4px;
-  padding: 2px 4px;
-  word-break: break-all;
+  color: #8a9e96;
+  margin-bottom: 6px;
+  padding: 2px 2px 6px;
+  word-break: break-word;
+  line-height: 1.4;
+  border-bottom: 1px dashed rgba(120, 160, 150, 0.15);
 }
 .ai-search-detail-item {
   padding: 3px 4px;
@@ -5649,20 +5677,28 @@
     grid-column: 1 / -1;
   }
 
+  /* 桌面侧栏：搜索/工具状态也保持小胶囊，别撑成整列大卡片 */
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-search-status,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-tool-status {
     grid-column: 2;
-    width: 100%;
+    width: max-content;
+    max-width: 100%;
     box-sizing: border-box;
     align-self: start;
-    margin: 8px 0;
-    padding: 12px 14px;
-    border: 1px solid rgba(91, 151, 131, .18);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, .62);
+    justify-self: start;
+    margin: 6px 0;
+    padding: 0;
+    border: 1px solid rgba(91, 151, 131, .16);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .72);
     color: rgba(71, 103, 93, .84);
     text-align: left;
-    box-shadow: 0 8px 22px rgba(61, 113, 99, .06);
+    box-shadow: 0 1px 4px rgba(61, 113, 99, .05);
+  }
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-search-status.is-open {
+    width: min(100%, 280px);
+    max-width: 100%;
+    border-radius: 12px;
   }
 
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-tool-status {
