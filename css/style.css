@@ -1,5 +1,5 @@
 
-        /* 系统原生选择器：几乎不可见，由按钮 showPicker() 唤起 iOS/Android 系统列表 */
+        /* 离屏二级 select（仅 showPicker 用）；主菜单请用 .ai-tools-select-hit / .ai-plus-select-hit 叠层 */
         .xtj-native-picker,
         .ai-native-picker {
             position: fixed;
@@ -11,10 +11,41 @@
             padding: 0;
             border: 0;
             opacity: 0.01;
-            z-index: 0;
-            pointer-events: none;
+            z-index: 40;
+            font-size: 16px;
             color: transparent;
             background: transparent;
+        }
+
+        /* 顶栏 AI 工具：非 panelPosts 布局时也要可点 */
+        .ai-tools-nav {
+            position: relative;
+            display: inline-flex;
+            width: 42px;
+            height: 42px;
+            flex: 0 0 42px;
+        }
+        .ai-tools-nav .ai-tools-trigger {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+        .ai-tools-select-hit {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            opacity: 0.01;
+            border: 0;
+            cursor: pointer;
+            z-index: 3;
+            font-size: 16px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            color: transparent;
         }
 
         html, body {

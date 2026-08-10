@@ -36,8 +36,7 @@ test('AI entry renders a visible state while history is slow and offers retry on
   });
 
   await expect(page.locator('.ai-agent-entry')).toHaveCount(0);
-  await page.locator('#aiToolsBtn').click();
-  await page.getByRole('menuitem', { name: /AI/ }).first().click();
+  await page.locator('#aiToolsNativeSelect').selectOption('chat');
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await expect(page.locator('#aiChatMessagesArea')).toContainText('正在加载聊天记录');
   await expect(page.locator('.ai-history-retry')).toBeVisible({ timeout: 4000 });
