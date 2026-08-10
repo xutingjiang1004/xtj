@@ -16,76 +16,98 @@
     /* --- 标签页切换 --- */
     .ai-admin-tabs {
         display: flex;
-        gap: 6px;
-        margin-bottom: 18px;
-        background: var(--card-bg);
-        border-radius: 12px;
-        padding: 4px;
-        border: 1px solid var(--border);
-        backdrop-filter: blur(12px);
-        width: fit-content;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 20px;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        width: 100%;
     }
     .ai-admin-tab {
-        padding: 8px 20px;
-        border: none;
-        border-radius: 9px;
-        background: transparent;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        border: 1px solid rgba(5,150,105,0.12);
+        border-radius: 12px;
+        background: #fff;
         color: var(--text-muted);
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 650;
         cursor: pointer;
-        transition: all 0.2s;
+        transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
         white-space: nowrap;
+        box-shadow: 0 1px 2px rgba(20,40,36,0.04);
+    }
+    .ai-admin-tab .ai-admin-tab-ico {
+        display: inline-flex;
+        width: 18px;
+        height: 18px;
+        color: inherit;
+        opacity: 0.85;
+    }
+    .ai-admin-tab .ai-admin-tab-ico svg {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
     }
     .ai-admin-tab.active {
-        background: var(--primary);
+        background: linear-gradient(145deg, #10b981, #059669);
         color: #fff;
-        box-shadow: 0 2px 8px rgba(5,150,105,0.25);
+        border-color: transparent;
+        box-shadow: 0 6px 16px rgba(5,150,105,0.22);
     }
     .ai-admin-tab:not(.active):hover {
-        background: rgba(128,128,128,0.08);
-        color: var(--text);
+        background: rgba(5,150,105,0.06);
+        border-color: rgba(5,150,105,0.22);
+        color: var(--primary);
     }
 
     /* --- 设置页 --- */
     .ai-admin-settings {
-        max-width: 720px;
+        max-width: 820px;
         margin: 0 auto;
+        padding-bottom: 80px;
     }
     .ai-admin-settings .form-group {
-        margin-bottom: 16px;
+        margin-bottom: 14px;
     }
     .ai-admin-settings label:not(.ai-inline-label) {
         display: block;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 650;
         color: var(--text-muted);
-        margin-bottom: 5px;
-        letter-spacing: 0.3px;
+        margin-bottom: 6px;
+        letter-spacing: 0.2px;
     }
     .ai-admin-settings input,
     .ai-admin-settings textarea,
     .ai-admin-settings select {
         width: 100%;
-        padding: 10px 13px;
-        border-radius: 10px;
-        border: 1px solid var(--border);
-        background: var(--card-bg);
+        padding: 11px 13px;
+        border-radius: 12px;
+        border: 1px solid rgba(5,150,105,0.14);
+        background: #fff;
         color: var(--text);
         font-size: 13px;
         outline: none;
         box-sizing: border-box;
         font-family: inherit;
-        transition: border-color 0.2s;
+        transition: border-color 0.15s, box-shadow 0.15s;
     }
     .ai-admin-settings input:focus,
     .ai-admin-settings textarea:focus,
     .ai-admin-settings select:focus {
         border-color: var(--primary);
-        box-shadow: 0 0 0 3px rgba(5,150,105,0.1);
+        box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
     }
     .ai-admin-settings textarea {
-        min-height: 80px;
+        min-height: 88px;
         resize: vertical;
         line-height: 1.6;
     }
@@ -94,21 +116,24 @@
         appearance: auto;
     }
     .ai-settings-section {
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 18px 20px;
-        margin-bottom: 12px;
-        backdrop-filter: blur(12px);
+        background: #fff;
+        border: 1px solid rgba(5,150,105,0.1);
+        border-radius: 16px;
+        padding: 18px 20px 16px;
+        margin-bottom: 14px;
+        box-shadow: 0 2px 10px rgba(20,40,36,0.03);
     }
-    .ai-settings-section h4 {
-        font-size: 13px;
-        font-weight: 700;
-        margin-bottom: 12px;
-        color: var(--text);
+    .ai-settings-section h4,
+    .ai-settings-section .ai-settings-section-title {
+        font-size: 14px !important;
+        font-weight: 750 !important;
+        margin: 0 0 14px !important;
+        padding: 0 0 10px !important;
+        border-bottom: 1px solid rgba(5,150,105,0.1) !important;
+        color: var(--text) !important;
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
     }
     .ai-settings-section .ai-inline-group {
         display: flex;
@@ -116,26 +141,230 @@
         gap: 8px;
         align-items: center;
     }
-    .ai-admin-settings .save-btn {
-        min-height: 42px;
+    .ai-admin-settings .save-btn,
+    .ai-admin-savebar .save-btn {
+        min-height: 44px;
         padding: 0 28px;
-        border-radius: 10px;
+        border-radius: 12px;
         border: none;
-        background: var(--primary);
+        background: linear-gradient(145deg, #10b981, #059669);
         color: #fff;
         font-size: 14px;
         font-weight: 700;
         cursor: pointer;
-        transition: all 0.2s;
-        letter-spacing: 0.3px;
+        transition: all 0.15s;
+        letter-spacing: 0.2px;
+        box-shadow: 0 6px 16px rgba(5,150,105,0.22);
     }
-    .ai-admin-settings .save-btn:hover {
-        filter: brightness(1.1);
-        box-shadow: 0 4px 14px rgba(5,150,105,0.3);
+    .ai-admin-settings .save-btn:hover,
+    .ai-admin-savebar .save-btn:hover {
+        filter: brightness(1.05);
         transform: translateY(-1px);
     }
     .ai-admin-settings .save-btn:active {
         transform: translateY(0);
+    }
+    .ai-admin-savebar {
+        position: sticky;
+        bottom: 12px;
+        z-index: 5;
+        display: flex;
+        justify-content: flex-end;
+        padding: 10px 0 0;
+        margin-top: 8px;
+    }
+
+    /* --- 邀请码页 --- */
+    .ai-invite-page {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 1100px;
+    }
+    .ai-invite-card {
+        background: #fff;
+        border: 1px solid rgba(5,150,105,0.1);
+        border-radius: 16px;
+        padding: 18px 20px 16px;
+        box-shadow: 0 2px 10px rgba(20,40,36,0.03);
+    }
+    .ai-invite-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+    .ai-invite-card-head h3 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 750;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .ai-invite-card-head .count-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 0 9px;
+        border-radius: 999px;
+        background: rgba(5,150,105,0.1);
+        color: #047857;
+        font-size: 12px;
+        font-weight: 700;
+    }
+    .ai-invite-form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px 12px;
+        align-items: end;
+    }
+    .ai-invite-field label {
+        display: block;
+        font-size: 11.5px;
+        font-weight: 650;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+        line-height: 1.35;
+    }
+    .ai-invite-field input {
+        width: 100%;
+        box-sizing: border-box;
+        height: 40px;
+        padding: 0 11px;
+        border-radius: 11px;
+        border: 1px solid rgba(5,150,105,0.16);
+        background: #f8fbfa;
+        color: var(--text);
+        font-size: 13px;
+        outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+    .ai-invite-field input:focus {
+        border-color: var(--primary);
+        background: #fff;
+        box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
+    }
+    .ai-invite-field--wide {
+        grid-column: span 2;
+    }
+    .ai-invite-actions {
+        display: flex;
+        align-items: end;
+        gap: 8px;
+    }
+    .ai-invite-actions .admin-btn,
+    .ai-invite-gen-btn {
+        height: 40px;
+        min-width: 96px;
+        padding: 0 18px;
+        border: 0;
+        border-radius: 11px;
+        background: linear-gradient(145deg, #10b981, #059669);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(5,150,105,0.2);
+    }
+    .ai-invite-gen-btn:hover { filter: brightness(1.05); }
+    .ai-invite-result {
+        margin-top: 12px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: rgba(5,150,105,0.06);
+        border: 1px solid rgba(5,150,105,0.14);
+        font-size: 13px;
+        line-height: 1.55;
+        color: #047857;
+        word-break: break-all;
+    }
+    .ai-invite-result:empty { display: none; }
+    .ai-invite-empty {
+        padding: 28px 16px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+    .ai-invite-table-wrap {
+        overflow-x: auto;
+        border-radius: 12px;
+        border: 1px solid rgba(5,150,105,0.08);
+    }
+    .ai-invite-table-wrap table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+        min-width: 760px;
+    }
+    .ai-invite-table-wrap thead th {
+        text-align: left;
+        padding: 10px 12px;
+        background: #f3faf7;
+        color: #3d6b5a;
+        font-weight: 700;
+        font-size: 11.5px;
+        border-bottom: 1px solid rgba(5,150,105,0.1);
+        white-space: nowrap;
+    }
+    .ai-invite-table-wrap tbody td {
+        padding: 11px 12px;
+        border-bottom: 1px solid rgba(5,150,105,0.06);
+        color: var(--text);
+        vertical-align: middle;
+    }
+    .ai-invite-table-wrap tbody tr:last-child td { border-bottom: 0; }
+    .ai-invite-table-wrap tbody tr:hover td {
+        background: rgba(5,150,105,0.03);
+    }
+    .ai-invite-code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        color: #047857;
+    }
+    .ai-status-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+    }
+    .ai-status-pill.is-ok {
+        background: rgba(5,150,105,0.12);
+        color: #047857;
+    }
+    .ai-status-pill.is-warn {
+        background: rgba(245,158,11,0.14);
+        color: #b45309;
+    }
+    .ai-status-pill.is-bad {
+        background: rgba(239,68,68,0.12);
+        color: #b91c1c;
+    }
+    .ai-invite-del-btn {
+        height: 30px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(239,68,68,0.22);
+        background: rgba(239,68,68,0.06);
+        color: #dc2626;
+        font-size: 12px;
+        font-weight: 650;
+        cursor: pointer;
+    }
+    .ai-invite-del-btn:hover {
+        background: rgba(239,68,68,0.12);
+    }
+    @media (max-width: 720px) {
+        .ai-invite-field--wide { grid-column: span 1; }
+        .ai-invite-form-grid {
+            grid-template-columns: 1fr 1fr;
+        }
     }
 
     /* --- 概览页统计卡片 --- */
@@ -644,7 +873,7 @@
     #tabPhotosBtn { --tab-icon-color: #14a089; --tab-icon-bg: rgba(20,160,137,0.12); --tab-icon-bg-hover: rgba(20,160,137,0.18); }
     #tabEmailBtn { --tab-icon-color: #e86f2c; --tab-icon-bg: rgba(232,111,44,0.12); --tab-icon-bg-hover: rgba(232,111,44,0.18); }
     #tabBehaviorBtn { --tab-icon-color: #3b9f8c; --tab-icon-bg: rgba(59,159,140,0.12); --tab-icon-bg-hover: rgba(59,159,140,0.18); }
-    #tabAiBtn { --tab-icon-color: #7c3aed; --tab-icon-bg: rgba(124,58,237,0.12); --tab-icon-bg-hover: rgba(124,58,237,0.18); }
+    #tabAiBtn { --tab-icon-color: #059669; --tab-icon-bg: rgba(5,150,105,0.12); --tab-icon-bg-hover: rgba(5,150,105,0.18); }
     .dash-header .dh-right button[onclick="toggleTheme()"] {
         --tab-icon-color: #d6a414;
         --tab-icon-bg: rgba(214,164,20,0.12);

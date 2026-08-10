@@ -4353,11 +4353,14 @@ async function initAdminClient() {
 
     function renderAiTab(el) {
         if (!el) return;
+        var icoSettings = '<span class="ai-admin-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span>';
+        var icoUsers = '<span class="ai-admin-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg></span>';
+        var icoInvite = '<span class="ai-admin-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.2l1.8 4.2 4.5.4-3.4 2.9 1 4.4L12 12.9 8.1 15.1l1-4.4-3.4-2.9 4.5-.4L12 3.2z"/></svg></span>';
         el.innerHTML = [
             '<div class="ai-admin-tabs">',
-            '<button class="ai-admin-tab' + (_aiAdminSubTab === 'settings' ? ' active' : '') + '" id="aiSubTabSettingsBtn" onclick="window._switchAiAdminSubTab(\'settings\')">智能体设置</button>',
-            '<button class="ai-admin-tab' + (_aiAdminSubTab === 'users' ? ' active' : '') + '" id="aiSubTabUsersBtn" onclick="window._switchAiAdminSubTab(\'users\')">用户对话记录</button>',
-            '<button class="ai-admin-tab' + (_aiAdminSubTab === 'invite' ? ' active' : '') + '" id="aiSubTabInviteBtn" onclick="window._switchAiAdminSubTab(\'invite\')">邀请码</button>',
+            '<button type="button" class="ai-admin-tab' + (_aiAdminSubTab === 'settings' ? ' active' : '') + '" id="aiSubTabSettingsBtn" onclick="window._switchAiAdminSubTab(\'settings\')">' + icoSettings + '<span>智能体设置</span></button>',
+            '<button type="button" class="ai-admin-tab' + (_aiAdminSubTab === 'users' ? ' active' : '') + '" id="aiSubTabUsersBtn" onclick="window._switchAiAdminSubTab(\'users\')">' + icoUsers + '<span>用户对话记录</span></button>',
+            '<button type="button" class="ai-admin-tab' + (_aiAdminSubTab === 'invite' ? ' active' : '') + '" id="aiSubTabInviteBtn" onclick="window._switchAiAdminSubTab(\'invite\')">' + icoInvite + '<span>邀请码</span></button>',
             '</div>',
             '<div id="aiAdminContent"></div>'
         ].join('');
@@ -4584,7 +4587,7 @@ async function initAdminClient() {
                 '</div>',
 
                 // ---- 模块10: 保存按钮 ----
-                '<button class="save-btn" id="aiCfgSaveBtn">保存配置</button>',
+                '<div class="ai-admin-savebar"><button class="save-btn" id="aiCfgSaveBtn">保存配置</button></div>',
 
                 // ---- 模块11: 当前生效 Prompt 预览 ----
                 '<div class="ai-settings-section" style="margin-top:20px;">',
@@ -4913,17 +4916,17 @@ async function initAdminClient() {
 
     function fmtAdminCodeStatus(row) {
         if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
-            return '<span style="color:var(--danger)">已过期</span>';
+            return '<span class="ai-status-pill is-bad">已过期</span>';
         }
         if (row.used_count >= row.max_uses) {
-            return '<span style="color:var(--warning)">已用完</span>';
+            return '<span class="ai-status-pill is-warn">已用完</span>';
         }
-        return '<span style="color:var(--success)">可用</span>';
+        return '<span class="ai-status-pill is-ok">可用</span>';
     }
 
     async function renderAiAdminInvite(content) {
         if (!content) return;
-        content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        content.innerHTML = '<div class="ai-invite-empty">加载中...</div>';
         try {
             var [codesData, redemptionsData, proUsersData] = await Promise.all([
                 apiCall('GET', '/admin/ai-agent/invite-codes?page=1&page_size=50'),
@@ -4935,47 +4938,49 @@ async function initAdminClient() {
             var redemptions = (redemptionsData && redemptionsData.list) || [];
             var proUsers = (proUsersData && proUsersData.list) || [];
 
-            var html = [];
+            var html = ['<div class="ai-invite-page">'];
 
-            // ---- 生成表单 ----
             html.push(
-                '<div class="card"><h3>生成邀请码</h3>',
-                '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">',
-                '<div><label style="font-size:12px;color:var(--text-muted)">数量</label><br><input type="number" id="aiInviteCount" value="1" min="1" max="100" style="width:70px;padding:6px"></div>',
-                '<div><label style="font-size:12px;color:var(--text-muted)">有效天数</label><br><input type="number" id="aiInviteDays" value="30" min="1" max="3650" style="width:80px;padding:6px"></div>',
-                '<div><label style="font-size:12px;color:var(--text-muted)">每日 Token（留空=默认Pro，-1=无限）</label><br><input type="number" id="aiInviteTokenLimit" placeholder="如 100000 或 -1" min="-1" style="width:140px;padding:6px"></div>',
-                '<div><label style="font-size:12px;color:var(--text-muted)">每日搜索（留空=无限）</label><br><input type="number" id="aiInviteSearchLimit" placeholder="如 50，-1=无限" min="-1" style="width:120px;padding:6px"></div>',
-                '<div><label style="font-size:12px;color:var(--text-muted)">每人可用次数</label><br><input type="number" id="aiInviteMaxUses" value="1" min="1" max="10000" style="width:80px;padding:6px"></div>',
-                '<div><label style="font-size:12px;color:var(--text-muted)">码过期天数（留空=不过期）</label><br><input type="number" id="aiInviteExpiresDays" placeholder="如 90" min="1" style="width:100px;padding:6px"></div>',
-                '<div><label style="font-size:12px;color:var(--text-muted)">备注</label><br><input type="text" id="aiInviteNote" placeholder="给谁/用途" style="width:160px;padding:6px"></div>',
-                '<div><button class="admin-btn admin-btn-primary" onclick="window._aiAdminGenInvite()">生成</button></div>',
+                '<div class="ai-invite-card">',
+                '<div class="ai-invite-card-head"><h3>生成邀请码</h3></div>',
+                '<div class="ai-invite-form-grid">',
+                '<div class="ai-invite-field"><label>数量</label><input type="number" id="aiInviteCount" value="1" min="1" max="100"></div>',
+                '<div class="ai-invite-field"><label>有效天数</label><input type="number" id="aiInviteDays" value="30" min="1" max="3650"></div>',
+                '<div class="ai-invite-field"><label>每日 Token（空=默认Pro，-1=无限）</label><input type="number" id="aiInviteTokenLimit" placeholder="100000 或 -1" min="-1"></div>',
+                '<div class="ai-invite-field"><label>每日搜索（空=无限）</label><input type="number" id="aiInviteSearchLimit" placeholder="50 或 -1" min="-1"></div>',
+                '<div class="ai-invite-field"><label>每人可用次数</label><input type="number" id="aiInviteMaxUses" value="1" min="1" max="10000"></div>',
+                '<div class="ai-invite-field"><label>码过期天数（空=不过期）</label><input type="number" id="aiInviteExpiresDays" placeholder="如 90" min="1"></div>',
+                '<div class="ai-invite-field ai-invite-field--wide"><label>备注</label><input type="text" id="aiInviteNote" placeholder="给谁 / 用途"></div>',
+                '<div class="ai-invite-actions"><button type="button" class="ai-invite-gen-btn" onclick="window._aiAdminGenInvite()">生成</button></div>',
                 '</div>',
-                '<div id="aiInviteGenResult" style="margin-top:10px;font-size:13px"></div>',
+                '<div class="ai-invite-result" id="aiInviteGenResult"></div>',
                 '</div>'
             );
 
-            // ---- 邀请码列表 ----
-            html.push('<div class="card"><h3>邀请码列表（' + codes.length + '）</h3>');
+            html.push(
+                '<div class="ai-invite-card">',
+                '<div class="ai-invite-card-head"><h3>邀请码列表</h3><span class="count-pill">' + codes.length + '</span></div>'
+            );
             if (!codes.length) {
-                html.push('<div style="padding:15px;color:var(--text-muted)">暂无邀请码</div>');
+                html.push('<div class="ai-invite-empty">暂无邀请码，先在上方生成</div>');
             } else {
-                html.push('<div class="table-wrap"><table><thead><tr>' +
+                html.push('<div class="ai-invite-table-wrap"><table><thead><tr>' +
                     '<th>邀请码</th><th>天数</th><th>每日Token</th><th>每日搜索</th><th>已用/总</th><th>状态</th><th>过期时间</th><th>备注</th><th>创建</th><th>操作</th>' +
                     '</tr></thead><tbody>');
                 codes.forEach(function(c) {
                     var used = (c.used_count || 0) + '/' + c.max_uses;
                     html.push(
                         '<tr>' +
-                        '<td><b style="letter-spacing:1px">' + escapeHtml(c.code) + '</b></td>' +
+                        '<td><span class="ai-invite-code">' + escapeHtml(c.code) + '</span></td>' +
                         '<td>' + c.days + '</td>' +
                         '<td>' + fmtAdminTokenLimit(c.token_limit_daily) + '</td>' +
                         '<td>' + fmtAdminSearchLimit(c.search_limit_daily) + '</td>' +
                         '<td>' + used + '</td>' +
                         '<td>' + fmtAdminCodeStatus(c) + '</td>' +
                         '<td>' + fmtAdminExpiry(c.expires_at) + '</td>' +
-                        '<td>' + escapeHtml(c.note || '') + '</td>' +
-                        '<td>' + escapeHtml(c.created_by || '') + '</td>' +
-                        '<td><button class="admin-btn admin-btn-danger" onclick="window._aiAdminDeleteInvite(\'' + escapeHtml(c.code) + '\')">删除</button></td>' +
+                        '<td>' + escapeHtml(c.note || '—') + '</td>' +
+                        '<td>' + escapeHtml(c.created_by || '—') + '</td>' +
+                        '<td><button type="button" class="ai-invite-del-btn" onclick="window._aiAdminDeleteInvite(\'' + escapeHtml(c.code) + '\')">删除</button></td>' +
                         '</tr>'
                     );
                 });
@@ -4983,20 +4988,21 @@ async function initAdminClient() {
             }
             html.push('</div>');
 
-            // ---- 激活记录 ----
-            html.push('<div class="card"><h3>最近激活记录（' + redemptions.length + '）</h3>');
+            html.push(
+                '<div class="ai-invite-card">',
+                '<div class="ai-invite-card-head"><h3>最近激活记录</h3><span class="count-pill">' + redemptions.length + '</span></div>'
+            );
             if (!redemptions.length) {
-                html.push('<div style="padding:15px;color:var(--text-muted)">暂无激活记录</div>');
+                html.push('<div class="ai-invite-empty">暂无激活记录</div>');
             } else {
-                html.push('<div class="table-wrap"><table><thead><tr>' +
+                html.push('<div class="ai-invite-table-wrap"><table><thead><tr>' +
                     '<th>邀请码</th><th>用户名</th><th>激活时间</th>' +
                     '</tr></thead><tbody>');
                 redemptions.forEach(function(r) {
-                    var rCode = (r.ai_invite_codes && r.ai_invite_codes.days) ? r.code : r.code;
                     var redeemedAt = r.redeemed_at ? new Date(r.redeemed_at).toLocaleString() : '';
                     html.push(
                         '<tr>' +
-                        '<td><b>' + escapeHtml(r.code) + '</b></td>' +
+                        '<td><span class="ai-invite-code">' + escapeHtml(r.code) + '</span></td>' +
                         '<td>' + escapeHtml(r.user_name) + '</td>' +
                         '<td>' + escapeHtml(redeemedAt) + '</td>' +
                         '</tr>'
@@ -5006,30 +5012,34 @@ async function initAdminClient() {
             }
             html.push('</div>');
 
-            // ---- Pro 会员列表 ----
-            html.push('<div class="card"><h3>Pro 会员（' + proUsers.length + '）</h3>');
+            html.push(
+                '<div class="ai-invite-card">',
+                '<div class="ai-invite-card-head"><h3>Pro 会员</h3><span class="count-pill">' + proUsers.length + '</span></div>'
+            );
             if (!proUsers.length) {
-                html.push('<div style="padding:15px;color:var(--text-muted)">暂无 Pro 会员</div>');
+                html.push('<div class="ai-invite-empty">暂无 Pro 会员</div>');
             } else {
-                html.push('<div class="table-wrap"><table><thead><tr>' +
+                html.push('<div class="ai-invite-table-wrap"><table><thead><tr>' +
                     '<th>用户名</th><th>到期时间</th><th>每日Token</th><th>每日搜索</th><th>操作</th>' +
                     '</tr></thead><tbody>');
                 proUsers.forEach(function(u) {
                     var expired = u.pro_expires_at && new Date(u.pro_expires_at).getTime() < Date.now();
-                    var expColor = expired ? 'var(--danger)' : 'inherit';
+                    var expHtml = u.pro_expires_at
+                        ? ('<span class="ai-status-pill ' + (expired ? 'is-bad' : 'is-ok') + '">' + escapeHtml(new Date(u.pro_expires_at).toLocaleString()) + '</span>')
+                        : '<span class="ai-status-pill is-ok">永久</span>';
                     html.push(
                         '<tr>' +
                         '<td>' + escapeHtml(u.user_name) + '</td>' +
-                        '<td style="color:' + expColor + '">' + (u.pro_expires_at ? new Date(u.pro_expires_at).toLocaleString() : '永久') + '</td>' +
+                        '<td>' + expHtml + '</td>' +
                         '<td>' + fmtAdminTokenLimit(u.token_limit_daily) + '</td>' +
                         '<td>' + fmtAdminSearchLimit(u.search_limit_daily) + '</td>' +
-                        '<td><button class="admin-btn admin-btn-danger" onclick="window._aiAdminCancelPro(\'' + escapeHtml(u.user_name) + '\')">取消Pro</button></td>' +
+                        '<td><button type="button" class="ai-invite-del-btn" onclick="window._aiAdminCancelPro(\'' + escapeHtml(u.user_name) + '\')">取消 Pro</button></td>' +
                         '</tr>'
                     );
                 });
                 html.push('</tbody></table></div>');
             }
-            html.push('</div>');
+            html.push('</div></div>');
 
             content.innerHTML = html.join('');
 
@@ -5057,7 +5067,7 @@ async function initAdminClient() {
                     if (res && res.ok) {
                         var resultBox = document.getElementById('aiInviteGenResult');
                         if (resultBox) {
-                            resultBox.innerHTML = '<span style="color:var(--success)">已生成 ' + res.count + ' 个邀请码：</span><br><b style="word-break:break-all;color:var(--success)">' +
+                            resultBox.innerHTML = '已生成 ' + res.count + ' 个邀请码：<br><b>' +
                                 (res.codes || []).map(escapeHtml).join('<br>') + '</b>';
                         }
                         showToast('邀请码生成成功');
