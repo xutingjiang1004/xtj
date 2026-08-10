@@ -246,9 +246,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     overlay.innerHTML =
       '<div class="ai-pro-activate-card">' +
-        '<div class="ai-pro-activate-glow" aria-hidden="true"></div>' +
-        '<div class="ai-pro-activate-sparkles" aria-hidden="true">' +
-          '<i></i><i></i><i></i><i></i><i></i><i></i>' +
+        '<div class="ai-pro-activate-check" aria-hidden="true">' +
+          '<svg viewBox="0 0 48 48" width="48" height="48">' +
+            '<circle class="ai-pro-activate-ring" cx="24" cy="24" r="20" fill="none"/>' +
+            '<path class="ai-pro-activate-tick" d="M15 24.5l6 6 12-13" fill="none"/>' +
+          '</svg>' +
         '</div>' +
         '<div class="ai-pro-activate-badge">PRO</div>' +
         '<div class="ai-pro-activate-title">开通成功</div>' +
@@ -274,14 +276,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         card.classList.add('ai-quota-just-pro');
         setTimeout(function() {
           try { card.classList.remove('ai-quota-just-pro'); } catch (e2) {}
-        }, 1800);
+        }, 1600);
       }
       var fill = document.getElementById('aiQuotaBarFill');
       if (fill) {
         fill.classList.add('ai-quota-fill-boost');
         setTimeout(function() {
           try { fill.classList.remove('ai-quota-fill-boost'); } catch (e3) {}
-        }, 1400);
+        }, 1200);
       }
     } catch (e4) {}
 
@@ -292,8 +294,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } catch (e5) {}
       setTimeout(function() {
         try { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (e6) {}
-      }, 420);
-    }, 2400);
+      }, 380);
+    }, 2200);
   }
 
   function applyQuota(quota, opts) {
@@ -8300,11 +8302,7 @@ function showChatMessages() {
       modal.setAttribute('aria-labelledby', 'aiInviteModalTitle');
       modal.innerHTML =
         '<div class="ai-invite-modal-box">' +
-          '<button type="button" class="ai-invite-modal-close" aria-label="关闭">' +
-            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' +
-          '</button>' +
           '<div class="ai-invite-modal-hero" aria-hidden="true">' +
-            '<div class="ai-invite-modal-orb"></div>' +
             '<span class="ai-invite-modal-hero-badge">PRO</span>' +
             '<p class="ai-invite-modal-hero-sub">解锁更高额度</p>' +
           '</div>' +
@@ -8312,9 +8310,7 @@ function showChatMessages() {
             '<h3 id="aiInviteModalTitle" class="ai-invite-modal-title">输入邀请码</h3>' +
             '<p class="ai-invite-modal-tip">向管理员获取邀请码，激活后立即生效</p>' +
             '<label class="ai-invite-code-label" for="aiInviteCodeInput">邀请码</label>' +
-            '<div class="ai-invite-code-field">' +
-              '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="A3K9M2" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" inputmode="text" />' +
-            '</div>' +
+            '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="A3K9M2" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" inputmode="text" />' +
             '<div class="ai-invite-code-feedback" id="aiInviteCodeFeedback" aria-live="polite"></div>' +
           '</div>' +
           '<div class="ai-invite-modal-foot">' +
@@ -8337,9 +8333,12 @@ function showChatMessages() {
 
       function close() {
         if (validateTimer) clearTimeout(validateTimer);
-        if (modal.parentNode) modal.parentNode.removeChild(modal);
+        modal.classList.remove('is-ready');
+        modal.classList.add('is-leaving');
+        setTimeout(function() {
+          if (modal.parentNode) modal.parentNode.removeChild(modal);
+        }, 180);
       }
-      modal.querySelector('.ai-invite-modal-close').addEventListener('click', close);
       modal.querySelector('.ai-invite-modal-cancel').addEventListener('click', close);
       modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
       modal.addEventListener('keydown', function(e) {
