@@ -7532,532 +7532,166 @@ function showChatMessages() {
       S.webSearchEnabled = savedWebSearch === 'true';
     } catch (e) {}
 
-    // 创建 + 号按钮
+    // + 菜单：与 Code 工作区一致，走系统级原生控件
+    // - 主菜单 / 模型 / 思考 / 搜索：HTML <select> → iOS/Android 系统选择器（液态玻璃）
+    // - 上传文件：input[type=file] → 系统文件窗口
+    // 不再维护自定义玻璃面板动画与二级页 UI
+    var modelLabels = {
+      'deepseek-v4-flash': 'V4 Flash',
+      'deepseek-v4-pro': 'V4 Pro'
+    };
+    var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
+
+    function openNativePicker(selectEl) {
+      if (!selectEl) return false;
+      try {
+        if (typeof selectEl.showPicker === 'function') {
+          selectEl.showPicker();
+          return true;
+        }
+      } catch (e1) {}
+      try {
+        selectEl.focus({ preventScroll: true });
+        selectEl.click();
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    }
+
+    function buildNativeSelect(id, ariaLabel, options, value) {
+      var sel = el('select', {
+        id: id,
+        class: 'ai-native-picker',
+        'aria-label': ariaLabel,
+        tabindex: '-1'
+      });
+      for (var oi = 0; oi < options.length; oi++) {
+        var opt = options[oi];
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (String(opt.value) === String(value)) o.selected = true;
+        sel.appendChild(o);
+      }
+      return sel;
+    }
+
     var plusBtn = el('button', {
       type: 'button',
       class: 'ai-plus-btn',
       id: 'aiPlusBtn',
       'aria-label': '更多选项',
-      'aria-expanded': 'false',
-      'aria-controls': 'aiPlusPanelShell',
-      title: '上传文件、切换模型、思考程度、网页搜索'
+      'aria-haspopup': 'listbox',
+      title: '上传文件、模型、思考程度、网页搜索'
     });
-    // ★ SVG 修复: 加 display:block, 明确的 xmlns 和 stroke-linejoin:round，
-    //   避免 inline svg 在 flex 容器内的 baseline 对齐问题（之前会渲染成小点）
     plusBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 
-    // 创建面板外壳（玻璃 + 动画容器）
-    var panelShell = el('div', {
-      class: 'ai-plus-panel-shell',
-      id: 'aiPlusPanelShell'
-    });
-    panelShell.innerHTML = '<div class="ai-plus-panel-content">' +
-      '<div class="ai-panel-page ai-panel-page-primary is-active" id="aiPanelPrimary" aria-hidden="false">' +
-      '<button class="ai-panel-option" role="menuitem" data-action="upload">' +
-      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg><span>上传文件</span>' +
-      '</button>' +
-      '<div class="ai-panel-separator"></div>' +
-      '<button class="ai-panel-option" role="menuitem" data-action="model">' +
-      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span>模型</span>' +
-      '<span class="ai-panel-option-value">V4 Flash</span>' +
-      '<svg class="ai-panel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>' +
-      '</button>' +
-      '<button class="ai-panel-option" role="menuitem" data-action="think">' +
-      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>思考程度</span>' +
-      '<span class="ai-panel-option-value">深度</span>' +
-      '<svg class="ai-panel-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>' +
-      '</button>' +
-      '<div class="ai-panel-separator"></div>' +
-      '<button class="ai-panel-option" role="menuitem" data-action="search">' +
-      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>网页搜索</span>' +
-      '<span class="ai-search-status" id="aiSearchStatus">○ 关</span>' +
-      '</button>' +
-      '</div>' +
-      '<div class="ai-panel-page ai-panel-page-secondary" id="aiPanelModel" hidden aria-hidden="true">' +
-      '<button class="ai-panel-back" aria-label="返回">' +
-      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg><span>模型</span>' +
-      '</button>' +
-      '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择模型">' +
-      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="deepseek-v4-flash">' +
-      '<div class="ai-panel-option-body">' +
-      '<span class="ai-panel-option-label">DeepSeek V4 Flash</span>' +
-      '<span class="ai-panel-option-desc">速度较快，适合普通聊天</span>' +
-      '</div>' +
-      '<svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
-      '</button>' +
-      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="deepseek-v4-pro">' +
-      '<div class="ai-panel-option-body">' +
-      '<span class="ai-panel-option-label">DeepSeek V4 Pro</span>' +
-      '<span class="ai-panel-option-desc">能力更强，适合复杂任务</span>' +
-      '</div>' +
-      '<svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
-      '</button>' +
-      '</div>' +
-      '</div>' +
-      '<div class="ai-panel-page ai-panel-page-secondary" id="aiPanelThink" hidden aria-hidden="true">' +
-      '<button class="ai-panel-back" aria-label="返回">' +
-      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg><span>思考程度</span>' +
-      '</button>' +
-      '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择思考程度">' +
-      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="off"><span>关闭</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
-      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="low"><span>轻度</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
-      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="medium"><span>中度</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
-      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="high"><span>深度</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
-      '<button class="ai-panel-option" role="radio" aria-checked="false" data-value="max"><span>极致</span><svg class="ai-panel-check" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>' +
-      '</div>' +
-      '</div>' +
-      '</div>';
-
-    // ★ P0-2/3/4 重写: 面板状态机 + 关闭动画 + 事件清理
-    //   状态机: currentPage ∈ {'primary','model','think'}
-    //   CSS Grid 重叠所有页面到同一 grid-area，用 is-active/is-entering/is-leaving 管理动画
-    //   离场完成后设置 hidden + aria-hidden，进入页面设置 aria-hidden=false 并聚焦首个可操作项
-    //   所有 DOM 查询限定在 panelShell 内
-    //   动画超时兜底（不依赖 transitionend），双层 rAF 启动动画（不读 offsetHeight 强制回流）
-    var panelOpen = false;
-    var panelClosing = false;
-    var currentPage = 'primary';
-    var closeTimer = null;
-    var closeFallbackTimer = null;
-    var openFallbackTimer = null;
-    var pageTransitionTimers = {};   // pageId -> timeout id（页面切换兜底）
-    var panelResizeRaf = 0;
-    var pageRafQueue = [];            // 跟踪所有 showPage 的 rAF，cleanup 时取消
-
-    // 双层 requestAnimationFrame 启动动画，替代 offsetHeight 强制回流
-    function nextFrame(cb) {
-      var id = requestAnimationFrame(function() {
-        // 从队列移除
-        var idx = pageRafQueue.indexOf(id);
-        if (idx >= 0) pageRafQueue.splice(idx, 1);
-        id = requestAnimationFrame(function() {
-          idx = pageRafQueue.indexOf(id);
-          if (idx >= 0) pageRafQueue.splice(idx, 1);
-          try { cb(); } catch (e) { /* 防止 callback 抛错导致后续动画卡死 */ }
-        });
-        pageRafQueue.push(id);
-      });
-      pageRafQueue.push(id);
-      return id;
-    }
-
-    // 页面元素引用（全部限定在 panelShell 内）
-    var pageEls = {
-      primary: panelShell.querySelector('#aiPanelPrimary'),
-      model: panelShell.querySelector('#aiPanelModel'),
-      think: panelShell.querySelector('#aiPanelThink')
-    };
-
-    function clearPageTransitionTimer(pageId) {
-      if (pageTransitionTimers[pageId]) {
-        clearTimeout(pageTransitionTimers[pageId]);
-        delete pageTransitionTimers[pageId];
+    // 单次系统选择器列出全部选项（避免 iOS 二次 showPicker 丢用户手势）
+    function rebuildActionOptions() {
+      var curModel = S.selectedModel || 'deepseek-v4-flash';
+      var curThink = S.thinkingMode || 'max';
+      var wsOn = !!S.webSearchEnabled;
+      var opts = [
+        { value: '', label: '选择操作…' },
+        { value: 'upload', label: '上传文件' },
+        { value: 'model:deepseek-v4-flash', label: (curModel === 'deepseek-v4-flash' ? '✓ ' : '') + '模型 · V4 Flash（更快）' },
+        { value: 'model:deepseek-v4-pro', label: (curModel === 'deepseek-v4-pro' ? '✓ ' : '') + '模型 · V4 Pro（更强）' },
+        { value: 'think:off', label: (curThink === 'off' ? '✓ ' : '') + '思考 · 关闭' },
+        { value: 'think:low', label: (curThink === 'low' ? '✓ ' : '') + '思考 · 轻度' },
+        { value: 'think:medium', label: (curThink === 'medium' ? '✓ ' : '') + '思考 · 中度' },
+        { value: 'think:high', label: (curThink === 'high' ? '✓ ' : '') + '思考 · 深度' },
+        { value: 'think:max', label: (curThink === 'max' ? '✓ ' : '') + '思考 · 极致' },
+        { value: 'search:on', label: (wsOn ? '✓ ' : '') + '网页搜索 · 开' },
+        { value: 'search:off', label: (!wsOn ? '✓ ' : '') + '网页搜索 · 关' }
+      ];
+      actionSelect.innerHTML = '';
+      for (var oi = 0; oi < opts.length; oi++) {
+        var o = document.createElement('option');
+        o.value = opts[oi].value;
+        o.textContent = opts[oi].label;
+        actionSelect.appendChild(o);
       }
-    }
-    function clearAllPageTransitionTimers() {
-      Object.keys(pageTransitionTimers).forEach(function(k) {
-        clearTimeout(pageTransitionTimers[k]);
-        delete pageTransitionTimers[k];
-      });
+      actionSelect.value = '';
     }
 
-    // 设置页面为隐藏终态（离场动画完成后调用）
-    function setHiddenPage(pageEl) {
-      if (!pageEl) return;
-      pageEl.classList.remove('is-entering', 'is-leaving', 'is-active');
-      pageEl.setAttribute('hidden', '');
-      pageEl.setAttribute('aria-hidden', 'true');
-    }
-    // 显示页面（进入动画）
-    function showPage(pageEl, focusFirst) {
-      if (!pageEl) return;
-      pageEl.removeAttribute('hidden');
-      pageEl.setAttribute('aria-hidden', 'false');
-      // ★ 关键修复：若该页此前正在离场（快速来回切换），必须清除 is-leaving，
-      //   否则 opacity:0 + position:absolute 会让页面重新进入后仍显示空白。
-      pageEl.classList.remove('is-leaving');
-      pageEl.classList.add('is-entering');
-      // 双层 rAF 触发 transition，避免强制回流
-      nextFrame(function() {
-        pageEl.classList.remove('is-entering');
-        pageEl.classList.add('is-active');
-      });
-      if (focusFirst) {
-        nextFrame(function() {
-          try {
-            var focusable = pageEl.querySelector('button, [role="radio"], [tabindex]:not([tabindex="-1"])');
-            if (focusable) focusable.focus();
-          } catch (e) {}
-        });
-      }
-    }
+    var actionSelect = buildNativeSelect('aiPlusActionSelect', '更多选项', [
+      { value: '', label: '选择操作…' }
+    ], '');
+    rebuildActionOptions();
 
-    // 切换到指定页面（支持向前进入和向后返回）
-    // target: 'primary' | 'model' | 'think'
-    function navigateTo(target) {
-      if (!pageEls[target]) return;
-      if (currentPage === target) return;
-      var fromPage = pageEls[currentPage];
-      var toPage = pageEls[target];
-      if (!fromPage || !toPage) return;
-
-      // 清理目标页的旧过渡计时器
-      clearPageTransitionTimer(target);
-      clearPageTransitionTimer(currentPage);
-
-      // 离场：fromPage
-      fromPage.classList.remove('is-entering', 'is-active');
-      fromPage.classList.add('is-leaving');
-      // 兜底：280ms 后强制隐藏（防止 transitionend 不触发）
-      var fromId = currentPage;
-      pageTransitionTimers[fromId] = setTimeout(function() {
-        setHiddenPage(fromPage);
-        clearPageTransitionTimer(fromId);
-      }, 300);
-
-      // 进入：toPage
-      showPage(toPage, true);
-
-      // 监听离场 transitionend（opacity/transform）以提前隐藏
-      var done = false;
-      function onLeaveEnd(ev) {
-        if (done) return;
-        // 只响应 fromPage 自身的 transform/opacity 过渡
-        if (ev && ev.target !== fromPage) return;
-        done = true;
-        fromPage.removeEventListener('transitionend', onLeaveEnd);
-        // ★ 关键修复：transitionend 触发时，若该页已被重新激活（快速来回切换），
-        //   不得再把它隐藏，否则会出现"切回来后突然空白"的闪烁。
-        if (fromPage.classList.contains('is-active')) return;
-        setHiddenPage(fromPage);
-        clearPageTransitionTimer(fromId);
-      }
-      fromPage.addEventListener('transitionend', onLeaveEnd);
-
-      currentPage = target;
-    }
-
-    function goToPrimaryPage(animate) {
-      if (animate === false) {
-        // 即时重置（无动画）：关闭后或打开时初始化
-        clearAllPageTransitionTimers();
-        Object.keys(pageEls).forEach(function(key) {
-          var p = pageEls[key];
-          if (!p) return;
-          if (key === 'primary') {
-            p.removeAttribute('hidden');
-            p.setAttribute('aria-hidden', 'false');
-            p.classList.remove('is-entering', 'is-leaving');
-            p.classList.add('is-active');
-          } else {
-            setHiddenPage(p);
-          }
-        });
-        currentPage = 'primary';
-        return;
-      }
-      navigateTo('primary');
-    }
-
-    function goToSecondaryPage(pageId) {
-      navigateTo(pageId);
-    }
-
-    // Apple 风格打开/关闭动画 — will-change 生命周期管理
-    // 在 transitionend 移除 is-opening / is-closing class（避免永久合成层）
-    function onPanelOpenEnd(ev) {
-      if (ev && ev.target !== panelShell) return;
-      // 接受 transform / opacity / clip-path 任一过渡结束即移除 класс
-      if (ev && ev.propertyName && ev.propertyName !== 'transform' && ev.propertyName !== 'opacity' && ev.propertyName !== 'clip-path') return;
-      panelShell.removeEventListener('transitionend', onPanelOpenEnd);
-      panelShell.classList.remove('is-opening');
-    }
-    function onPanelCloseEnd(ev) {
-      if (ev && ev.target !== panelShell) return;
-      if (ev && ev.propertyName && ev.propertyName !== 'transform' && ev.propertyName !== 'opacity' && ev.propertyName !== 'clip-path') return;
-      panelShell.removeEventListener('transitionend', onPanelCloseEnd);
-      panelShell.classList.remove('is-closing');
-    }
-
-    function openPanel() {
-      if (panelOpen) return;
-      // P0-3: 动画未结束时重新打开，取消旧关闭任务并保持正确页面
-      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-      if (closeFallbackTimer) { clearTimeout(closeFallbackTimer); closeFallbackTimer = null; }
-      panelClosing = false;
-      panelOpen = true;
-      // 重置到主页（即时，无动画）
-      goToPrimaryPage(false);
-      // ★ 同步设置 clip-path 内联样式（设定动画起点），再添加 .open 触发 CSS transition
-      adjustPanelPosition();
-      // 标记 opening 状态，提升合成层；动画结束后移除
-      panelShell.classList.remove('is-closing');
-      panelShell.classList.add('is-opening', 'open');
-      plusBtn.classList.add('active');
-      plusBtn.setAttribute('aria-expanded', 'true');
-      // 监听 transitionend，移除 is-opening
-      panelShell.addEventListener('transitionend', onPanelOpenEnd);
-      // 兜底 400ms 后强制移除（clip-path 最长 380ms + 余量）
-      if (openFallbackTimer) clearTimeout(openFallbackTimer);
-      openFallbackTimer = setTimeout(function() {
-        panelShell.classList.remove('is-opening');
-        openFallbackTimer = null;
-      }, 400);
-    }
-
-    // P0-3 + 交互修复 + Apple 风格关闭动画: 关闭面板
-    // 关闭动画: clip-path + translateY + opacity 回到关闭状态
-    // 完成信号: 面板外壳 transitionend + 400ms 兜底
-    function closePanel(animate) {
-      if (!panelOpen || panelClosing) return;
-      panelClosing = true;
-      panelOpen = false;
-      // 二级页面 → 即时回到主页（不走页面切换动画）。
-      // ★ 修复动画 bug：此前 navigateTo('primary') 的 280ms 页面切换动画与
-      // 外壳 400ms 关闭动画叠加，出现"先切页再收拢"的视觉跳动/闪烁。
-      // 关闭时只保留外壳的收拢动画，页面即时复位。
-      goToPrimaryPage(false);
-      // 标记 closing 状态提升合成层
-      panelShell.classList.remove('is-opening');
-      panelShell.classList.add('is-closing');
-      panelShell.classList.remove('open');
-      plusBtn.classList.remove('active');
-      plusBtn.setAttribute('aria-expanded', 'false');
-      if (animate === false) {
-        panelShell.classList.remove('is-closing');
-        panelClosing = false;
-        return;
-      }
-      var done = false;
-      function onShellEnd(ev) {
-        if (done) return;
-        // 只响应外壳自身的 opacity/transform/clip-path（避免子元素冒泡干扰）
-        if (ev && ev.target !== panelShell) return;
-        if (ev && ev.propertyName && ev.propertyName !== 'transform' && ev.propertyName !== 'opacity' && ev.propertyName !== 'clip-path') return;
-        done = true;
-        panelShell.removeEventListener('transitionend', onShellEnd);
-        panelShell.removeEventListener('transitionend', onPanelCloseEnd);
-        if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-        panelShell.classList.remove('is-closing');
-        panelClosing = false;
-        // 关闭后强制重置所有页面到 primary（防止二级页 is-leaving 卡住）
-        goToPrimaryPage(false);
-      }
-      panelShell.addEventListener('transitionend', onShellEnd);
-      // 兜底 400ms（clip-path 最长 380ms + 余量）
-      closeTimer = setTimeout(function() {
-        if (done) return;
-        done = true;
-        panelShell.removeEventListener('transitionend', onShellEnd);
-        closeTimer = null;
-        panelShell.classList.remove('is-closing');
-        panelClosing = false;
-        goToPrimaryPage(false);
-      }, 400);
-    }
-
-    // 模型选择逻辑
-    var modelLabels = {
-      'deepseek-v4-flash': 'V4 Flash',
-      'deepseek-v4-pro': 'V4 Pro'
-    };
-
-    function updateModelUI() {
-      var modelValue = panelShell.querySelector('[data-action="model"] .ai-panel-option-value');
-      if (modelValue) modelValue.textContent = modelLabels[S.selectedModel] || S.selectedModel;
-      var radios = panelShell.querySelectorAll('#aiPanelModel [role="radio"]');
-      for (var i = 0; i < radios.length; i++) {
-        var val = radios[i].getAttribute('data-value');
-        radios[i].setAttribute('aria-checked', val === S.selectedModel ? 'true' : 'false');
-      }
-    }
-
-    panelShell.querySelector('[data-action="model"]').addEventListener('click', function(e) {
-      e.preventDefault(); e.stopPropagation();
-      goToSecondaryPage('model');
-    });
-
-    var modelRadios = panelShell.querySelectorAll('#aiPanelModel [role="radio"]');
-    for (var mi = 0; mi < modelRadios.length; mi++) {
-      modelRadios[mi].addEventListener('click', function(e) {
-        e.preventDefault(); e.stopPropagation();
-        var newModel = this.getAttribute('data-value');
-        if (newModel && newModel !== S.selectedModel) {
-          S.selectedModel = newModel;
-          S._userPickedModel = true;
-          try { localStorage.setItem('xtj_ai_model', newModel); } catch (e) {}
-          updateModelUI();
-          notify('模型切换: ' + (modelLabels[newModel] || newModel));
-        }
-        goToPrimaryPage();
-      });
-    }
-
-    // 思考程度选择逻辑
-    var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
-
-    function updateThinkUI() {
-      var thinkValue = panelShell.querySelector('[data-action="think"] .ai-panel-option-value');
-      if (thinkValue) thinkValue.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
-      var radios = panelShell.querySelectorAll('#aiPanelThink [role="radio"]');
-      for (var i = 0; i < radios.length; i++) {
-        var val = radios[i].getAttribute('data-value');
-        radios[i].setAttribute('aria-checked', val === S.thinkingMode ? 'true' : 'false');
-      }
-    }
-
-    panelShell.querySelector('[data-action="think"]').addEventListener('click', function(e) {
-      e.preventDefault(); e.stopPropagation();
-      goToSecondaryPage('think');
-    });
-
-    var thinkRadios = panelShell.querySelectorAll('#aiPanelThink [role="radio"]');
-    for (var ti = 0; ti < thinkRadios.length; ti++) {
-      thinkRadios[ti].addEventListener('click', function(e) {
-        e.preventDefault(); e.stopPropagation();
-        var newMode = this.getAttribute('data-value');
-        if (newMode && newMode !== S.thinkingMode) {
-          S.thinkingMode = newMode;
-          S._userPickedThinkingMode = true;
-          try { localStorage.setItem('xtj_ai_thinking_mode', newMode); } catch (e) {}
-          updateThinkUI();
-          notify('思考程度: ' + (thinkLabels[newMode] || newMode));
-        }
-        goToPrimaryPage();
-      });
-    }
-
-    // 返回按钮逻辑
-    var backBtns = panelShell.querySelectorAll('.ai-panel-back');
-    for (var bi = 0; bi < backBtns.length; bi++) {
-      backBtns[bi].addEventListener('click', function(e) {
-        e.preventDefault(); e.stopPropagation();
-        goToPrimaryPage();
-      });
-    }
-
-    // 网页搜索开关
+    function updateModelUI() { rebuildActionOptions(); }
+    function updateThinkUI() { rebuildActionOptions(); }
     function updateSearchStatus() {
-      var statusEl = panelShell.querySelector('#aiSearchStatus');
-      if (statusEl) {
-        statusEl.textContent = S.webSearchEnabled ? '开' : '关';
-        statusEl.className = 'ai-search-status' + (S.webSearchEnabled ? ' on' : '');
-      }
-      var btn = panelShell.querySelector('[data-action="search"]');
-      if (btn) {
-        if (S.webSearchEnabled) btn.classList.add('active');
-        else btn.classList.remove('active');
-      }
-      // 开启态：+ 号按钮显示绿色状态光点，输入区可一眼看到网页搜索处于开启
+      rebuildActionOptions();
       if (plusBtn) {
         if (S.webSearchEnabled) plusBtn.classList.add('ws-on');
         else plusBtn.classList.remove('ws-on');
       }
     }
 
-    panelShell.querySelector('[data-action="search"]').addEventListener('click', function(e) {
-      e.preventDefault(); e.stopPropagation();
-      S.webSearchEnabled = !S.webSearchEnabled;
-      try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (e) {}
-      updateSearchStatus();
-      notify(S.webSearchEnabled ? '网页搜索已开启' : '网页搜索已关闭');
-    });
-
-    // 上传文件
-    panelShell.querySelector('[data-action="upload"]').addEventListener('click', function(e) {
-      e.preventDefault(); e.stopPropagation();
-      closePanel();
-      fileInput.click();
-    });
-
-    // + 号按钮点击
     plusBtn.addEventListener('click', function(e) {
-      e.preventDefault(); e.stopPropagation();
-      if (panelOpen) {
-        closePanel();
-      } else {
-        openPanel();
+      e.preventDefault();
+      e.stopPropagation();
+      rebuildActionOptions();
+      openNativePicker(actionSelect);
+    });
+
+    actionSelect.addEventListener('change', function() {
+      var v = actionSelect.value;
+      try { actionSelect.value = ''; } catch (eReset) {}
+      if (!v) return;
+
+      if (v === 'upload') {
+        // 同一次用户手势内打开系统文件窗口
+        try {
+          var fi = document.getElementById('aiChatFileInp');
+          if (fi) fi.click();
+          else setTimeout(function() {
+            var fi2 = document.getElementById('aiChatFileInp');
+            if (fi2) fi2.click();
+          }, 0);
+        } catch (eUp) {}
+        return;
+      }
+
+      if (v.indexOf('model:') === 0) {
+        var newModel = v.slice(6);
+        if (newModel && newModel !== S.selectedModel) {
+          S.selectedModel = newModel;
+          S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model', newModel); } catch (e) {}
+          notify('模型切换: ' + (modelLabels[newModel] || newModel));
+        }
+        updateModelUI();
+        return;
+      }
+
+      if (v.indexOf('think:') === 0) {
+        var newMode = v.slice(6);
+        if (newMode && newMode !== S.thinkingMode) {
+          S.thinkingMode = newMode;
+          S._userPickedThinkingMode = true;
+          try { localStorage.setItem('xtj_ai_thinking_mode', newMode); } catch (e) {}
+          notify('思考程度: ' + (thinkLabels[newMode] || newMode));
+        }
+        updateThinkUI();
+        return;
+      }
+
+      if (v === 'search:on' || v === 'search:off') {
+        S.webSearchEnabled = v === 'search:on';
+        try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (e) {}
+        updateSearchStatus();
+        notify(S.webSearchEnabled ? '网页搜索已开启' : '网页搜索已关闭');
       }
     });
 
-    // P0-4: 统一事件清理 — AbortController + window/visualViewport 监听 + 计时器 + 页面切换回调
-    var panelAbortController = new AbortController();
-    var panelSignal = panelAbortController.signal;
-    var _vvResizeHandler = null;
+    S._panelCleanup = function() {};
+    S._panelAbortController = null;
+    var nativePickers = [actionSelect];
 
-    function schedulePanelPosition() {
-      if (panelResizeRaf) return;
-      panelResizeRaf = requestAnimationFrame(function() {
-        panelResizeRaf = 0;
-        adjustPanelPosition();
-      });
-    }
-
-    function adjustPanelPosition() {
-      if (!panelShell) return;
-      var rect = panelShell.getBoundingClientRect();
-      var vw = window.innerWidth;
-      if (rect.right > vw - 8) {
-        panelShell.style.left = 'auto';
-        panelShell.style.right = '4px';
-        // 右边对齐: clip-path 起点从右下角 (按钮位置) 展开
-        // ★ 用 CSS 变量而非 inline clip-path：inline 会覆盖 .open 规则的 clip-path: inset(0)
-        //   导致面板打开后仍被完全裁剪（菜单打不开的根因）
-        panelShell.style.setProperty('--panel-clip-start', 'inset(100% 0 0 75% round 22px)');
-      } else {
-        panelShell.style.left = '10px';
-        panelShell.style.right = 'auto';
-        // 左边对齐: clip-path 起点从左下角 (按钮位置) 展开
-        panelShell.style.setProperty('--panel-clip-start', 'inset(100% 75% 0 0 round 22px)');
-      }
-    }
-
-    document.addEventListener('click', function(e) {
-      if (panelOpen && !panelShell.contains(e.target) && e.target !== plusBtn && !plusBtn.contains(e.target)) {
-        closePanel();
-      }
-    }, { signal: panelSignal });
-
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        if (currentPage !== 'primary') {
-          goToPrimaryPage();
-        } else if (panelOpen) {
-          closePanel();
-          try { plusBtn.focus(); } catch (e2) {}
-        }
-      }
-    }, { signal: panelSignal });
-
-    // P0-4: window resize / visualViewport resize 通过 AbortController 统一清理
-    window.addEventListener('resize', schedulePanelPosition, { signal: panelSignal });
-    if (window.visualViewport) {
-      _vvResizeHandler = schedulePanelPosition;
-      window.visualViewport.addEventListener('resize', _vvResizeHandler, { signal: panelSignal });
-    }
-
-    S._panelAbortController = panelAbortController;
-
-    // P0-4: 统一面板清理函数 — 关闭聊天/重建 UI/登出时调用
-    //   确保 20 次重开聊天后无重复监听、无旧 DOM 引用
-    function panelCleanup() {
-      try { if (panelAbortController) panelAbortController.abort(); } catch (e) {}
-      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-      if (closeFallbackTimer) { clearTimeout(closeFallbackTimer); closeFallbackTimer = null; }
-      clearAllPageTransitionTimers();
-      if (panelResizeRaf) { try { cancelAnimationFrame(panelResizeRaf); } catch (e) {} panelResizeRaf = 0; }
-      // 取消所有 showPage 待执行的 rAF（防止 detached DOM 上操作）
-      if (pageRafQueue && pageRafQueue.length) {
-        pageRafQueue.forEach(function(id) { try { cancelAnimationFrame(id); } catch (e2) {} });
-        pageRafQueue = [];
-      }
-      panelOpen = false;
-      panelClosing = false;
-      currentPage = 'primary';
-    }
-    S._panelCleanup = panelCleanup;
-
-    var inputBar = el('div', { class: 'ai-chat-input-bar' });
+var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
     // 文件上传按钮 (隐藏，通过 + 面板触发)
     var fileBtn = el('button', {
@@ -8181,7 +7815,7 @@ function showChatMessages() {
     });
 
     inputBar.appendChild(plusBtn);
-    inputBar.appendChild(panelShell);
+    for (var _np = 0; _np < nativePickers.length; _np++) inputBar.appendChild(nativePickers[_np]);
 
     // 初始化 UI
     updateModelUI();
