@@ -211,7 +211,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function playProActivatedCeremony(quota) {
     try {
-      // 移除旧动画层
       var old = document.getElementById('aiProActivateOverlay');
       if (old && old.parentNode) old.parentNode.removeChild(old);
     } catch (e0) {}
@@ -229,41 +228,44 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var dLimit = dTokUnlim ? -1 : (dTokLim || PRO_TOKEN_DEFAULT);
       var dSearchUnlim = quota.search_unlimited === true || Number(quota.search_limit) < 0;
       var dSearchLimit = Number(quota.search_limit);
-      descText = '额度已刷新：' + (dTokUnlim ? 'Token 无限' : ('每日 ' + formatTokenCount(dLimit) + ' tokens'))
+      descText = (dTokUnlim ? 'Token 无限' : ('每日 ' + formatTokenCount(dLimit) + ' tokens'))
         + (dSearchUnlim ? ' · 无限搜索' : (' · 搜索 ' + Math.max(0, dSearchLimit) + ' 次/日'));
     }
 
-    overlay.innerHTML =
-      '<div class="ai-pro-activate-card">' +
-        '<div class="ai-pro-activate-burst" aria-hidden="true"></div>' +
-        '<div class="ai-pro-activate-badge">PRO</div>' +
-        '<div class="ai-pro-activate-title">Pro 已开通</div>' +
-        '<div class="ai-pro-activate-desc"></div>' +
-        '<div class="ai-pro-activate-quota" id="aiProActivateQuotaLine"></div>' +
-      '</div>';
-    var descEl = overlay.querySelector('.ai-pro-activate-desc');
-    if (descEl) descEl.textContent = descText;
-    document.body.appendChild(overlay);
-
-    var line = overlay.querySelector('#aiProActivateQuotaLine');
-    if (line && quota) {
+    var quotaLine = '';
+    if (quota) {
       var tokLim = Number(quota.tokens_limit);
       var tokUnlim = tokLim === -1;
       var limit = tokUnlim ? -1 : (tokLim || PRO_TOKEN_DEFAULT);
       var used = Number(quota.tokens_used) || 0;
       var remain = tokUnlim ? -1 : Math.max(0, limit - used);
-      line.textContent = tokUnlim
-        ? '今日已用 ' + formatTokenCount(used) + ' tokens · 无限额度'
-        : '今日可用 ' + formatTokenCount(remain) + ' / ' + formatTokenCount(limit) + ' tokens';
+      quotaLine = tokUnlim
+        ? '今日已用 ' + formatTokenCount(used) + ' · 无限额度'
+        : '今日可用 ' + formatTokenCount(remain) + ' / ' + formatTokenCount(limit);
     }
 
-    // 强制 reflow 再播动画
+    overlay.innerHTML =
+      '<div class="ai-pro-activate-card">' +
+        '<div class="ai-pro-activate-glow" aria-hidden="true"></div>' +
+        '<div class="ai-pro-activate-sparkles" aria-hidden="true">' +
+          '<i></i><i></i><i></i><i></i><i></i><i></i>' +
+        '</div>' +
+        '<div class="ai-pro-activate-badge">PRO</div>' +
+        '<div class="ai-pro-activate-title">开通成功</div>' +
+        '<div class="ai-pro-activate-desc"></div>' +
+        (quotaLine ? '<div class="ai-pro-activate-quota" id="aiProActivateQuotaLine"></div>' : '') +
+      '</div>';
+    var descEl = overlay.querySelector('.ai-pro-activate-desc');
+    if (descEl) descEl.textContent = descText;
+    var line = overlay.querySelector('#aiProActivateQuotaLine');
+    if (line) line.textContent = quotaLine;
+    document.body.appendChild(overlay);
+
     try { void overlay.offsetWidth; } catch (e1) {}
     requestAnimationFrame(function() {
       overlay.classList.add('is-visible');
     });
 
-    // 额度条脉冲
     try {
       var card = document.getElementById('aiQuotaCard');
       if (card) {
@@ -291,7 +293,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       setTimeout(function() {
         try { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (e6) {}
       }, 420);
-    }, 2200);
+    }, 2400);
   }
 
   function applyQuota(quota, opts) {
@@ -8325,15 +8327,21 @@ function showChatMessages() {
       modal.setAttribute('aria-labelledby', 'aiInviteModalTitle');
       modal.innerHTML =
         '<div class="ai-invite-modal-box">' +
-          '<button type="button" class="ai-invite-modal-close" aria-label="关闭">×</button>' +
+          '<button type="button" class="ai-invite-modal-close" aria-label="关闭">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' +
+          '</button>' +
           '<div class="ai-invite-modal-hero" aria-hidden="true">' +
+            '<div class="ai-invite-modal-orb"></div>' +
             '<span class="ai-invite-modal-hero-badge">PRO</span>' +
+            '<p class="ai-invite-modal-hero-sub">解锁更高额度</p>' +
           '</div>' +
           '<div class="ai-invite-modal-body">' +
             '<h3 id="aiInviteModalTitle" class="ai-invite-modal-title">输入邀请码</h3>' +
-            '<p class="ai-invite-modal-tip">向管理员获取邀请码，激活后立即获得对应 Pro 额度</p>' +
+            '<p class="ai-invite-modal-tip">向管理员获取邀请码，激活后立即生效</p>' +
             '<label class="ai-invite-code-label" for="aiInviteCodeInput">邀请码</label>' +
-            '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="例如 A3K9M2" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" inputmode="text" />' +
+            '<div class="ai-invite-code-field">' +
+              '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="A3K9M2" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" inputmode="text" />' +
+            '</div>' +
             '<div class="ai-invite-code-feedback" id="aiInviteCodeFeedback" aria-live="polite"></div>' +
           '</div>' +
           '<div class="ai-invite-modal-foot">' +
@@ -8342,6 +8350,9 @@ function showChatMessages() {
           '</div>' +
         '</div>';
       document.body.appendChild(modal);
+      requestAnimationFrame(function() {
+        try { modal.classList.add('is-ready'); } catch (eR) {}
+      });
 
       var input = modal.querySelector('#aiInviteCodeInput');
       var feedback = modal.querySelector('#aiInviteCodeFeedback');
@@ -8467,24 +8478,46 @@ function showChatMessages() {
       else openPanel();
     });
 
+    modelSelect.addEventListener('change', function() {
+      var model = modelSelect.value;
+      if (!model) return;
+      if (model !== S.selectedModel) {
+        S.selectedModel = model;
+        S._userPickedModel = true;
+        try { localStorage.setItem('xtj_ai_model', model); } catch (err) {}
+        notify('模型：' + (modelLabels[model] || model));
+      }
+      updateModelUI();
+    });
+    thinkSelect.addEventListener('change', function() {
+      var think = thinkSelect.value;
+      if (!think) return;
+      if (think !== S.thinkingMode) {
+        S.thinkingMode = think;
+        S._userPickedThinkingMode = true;
+        try { localStorage.setItem('xtj_ai_thinking_mode', think); } catch (err) {}
+        notify('思考程度：' + (thinkLabels[think] || think));
+      }
+      updateThinkUI();
+    });
+
     panelShell.addEventListener('click', function(e) {
       e.stopPropagation();
-      var t = e.target.closest('[data-action], [data-model], [data-think]');
+      var t = e.target.closest('[data-action]');
       if (!t) return;
 
       var action = t.getAttribute('data-action');
-      if (action === 'back') {
-        showPanelPage('primary');
-        return;
-      }
       if (action === 'open-model') {
-        showPanelPage('model');
+        // 系统级 select：同步于用户手势，iOS 原生滚轮
         updateModelUI();
+        try { modelSelect.value = S.selectedModel || 'deepseek-v4-flash'; } catch (eM0) {}
+        openNativePicker(modelSelect);
         return;
       }
       if (action === 'open-think') {
-        showPanelPage('think');
         updateThinkUI();
+        try { thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT0) {}
+        openNativePicker(thinkSelect);
         return;
       }
       if (action === 'pro') {
@@ -8509,39 +8542,13 @@ function showChatMessages() {
         try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (err) {}
         updateSearchStatus();
         notify(S.webSearchEnabled ? '网页搜索已开启' : '网页搜索已关闭');
-        return;
-      }
-
-      var model = t.getAttribute('data-model');
-      if (model) {
-        if (model !== S.selectedModel) {
-          S.selectedModel = model;
-          S._userPickedModel = true;
-          try { localStorage.setItem('xtj_ai_model', model); } catch (err) {}
-          notify('模型：' + (modelLabels[model] || model));
-        }
-        updateModelUI();
-        showPanelPage('primary');
-        return;
-      }
-
-      var think = t.getAttribute('data-think');
-      if (think) {
-        if (think !== S.thinkingMode) {
-          S.thinkingMode = think;
-          S._userPickedThinkingMode = true;
-          try { localStorage.setItem('xtj_ai_thinking_mode', think); } catch (err) {}
-          notify('思考程度：' + (thinkLabels[think] || think));
-        }
-        updateThinkUI();
-        showPanelPage('primary');
       }
     });
 
     var panelAbortController = new AbortController();
     document.addEventListener('click', function(e) {
       if (!panelOpen) return;
-      if (panelShell.contains(e.target) || plusBtn.contains(e.target) || e.target === plusBtn) return;
+      if (panelShell.contains(e.target) || plusWrap.contains(e.target) || plusBtn.contains(e.target) || e.target === plusBtn) return;
       closePanel();
     }, { signal: panelAbortController.signal });
     document.addEventListener('keydown', function(e) {
@@ -8686,7 +8693,7 @@ function showChatMessages() {
       reader.readAsDataURL(f);
     });
 
-    inputBar.appendChild(plusBtn);
+    inputBar.appendChild(plusWrap);
     inputBar.appendChild(panelShell);
     inputBar.appendChild(fileBtn);
     inputBar.appendChild(fileInput);
