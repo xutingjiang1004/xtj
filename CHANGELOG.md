@@ -1,7 +1,17 @@
 # 更新日志
 
-## v0.92 - 2026-06-27
-AI 括号动作清洗 + 搜索 Provider 架构重构 + 流式响应加固 + 长期记忆系统 + 照片墙预览安全兜底
+## v0.93.1 - 2026-08-10
+Git 仓库维护：历史瘦身 + 分支清理
+
+### 维护
+- **`.git` 体积瘦身 90%**：从 408MB 降至 43MB。历史上曾误提交 `node_modules`（含 19MB libvips DLL 等大文件），使用 git-filter-repo 剔除全部历史中 >10MB 的 blob，2121 个提交时间线完整保留。
+- **杂散分支清理**：删除远端 9 个 codex/-pr-#229 等临时分支，远端仅保留 `main` 与 `xtj-hotfix`。
+- **xtj-hotfix 合入 main**：其 2 个未合入提交（DeepSeek reasoning_effort 400 修复、.gitignore 更新）已并入 main。
+- **完整历史备份**：`backup/pre-cleanup-20260810` 分支保存清理前完整历史，可随时回溯。
+- **注意**：历史重写使 main 提交 hash 全部改变（内容不变），本地与远端已分叉，暂未强推远端；如需同步需 `git push --force`。
+
+## v0.93 - 2026-08-10
+全面 Bug 审计修复 + 安全加固
 
 ### 新增
 - **搜索 Provider 架构**：Tavily > Brave > Serper > Custom API > SearXNG > Bing HTML 六层降级链，按环境变量自动选择可用 Provider
