@@ -16811,6 +16811,7 @@ async function runSelfResearchFlow(opts) {
             onSearch: function () { searchCountTotal++; }
           }).then(function (wr) {
             if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
+            if (wr && wr.usage) accumulateResearchUsage(wr.usage);
             return { role: '补充查证·' + String(g.role || ''), status: 'success', content: wr ? wr.content : '' };
           }).catch(function (e) {
             console.error('[SELF-RESEARCH] gap agent failed:', g.role, e && e.message);
@@ -16823,7 +16824,7 @@ async function runSelfResearchFlow(opts) {
       console.error('[SELF-RESEARCH] gap-check failed:', e && e.message);
     }
   }
-  if (isCancelled()) return { answer: '', sources: allSources, agents: agents };
+  if (isCancelled()) return { answer: '', sources: allSources, agents: agents, usage: researchUsageAgg, search_count: searchCountTotal };
   allSources = cleanSearchResults(allSources, 50);
   allQueries = allQueries.slice(0, 20);
   // 内置 web_search 不暴露来源 URL，用检索次数构造占位来源以呈现"网页搜索 N"
