@@ -4901,6 +4901,7 @@ async function initAdminClient() {
     }
 
     function fmtAdminTokenLimit(v) {
+        if (v === -1) return '无限';
         if (v == null) return '默认 Pro';
         return fmtAdminNum(v) + '/天';
     }
@@ -4942,7 +4943,7 @@ async function initAdminClient() {
                 '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">',
                 '<div><label style="font-size:12px;color:var(--text-muted)">数量</label><br><input type="number" id="aiInviteCount" value="1" min="1" max="100" style="width:70px;padding:6px"></div>',
                 '<div><label style="font-size:12px;color:var(--text-muted)">有效天数</label><br><input type="number" id="aiInviteDays" value="30" min="1" max="3650" style="width:80px;padding:6px"></div>',
-                '<div><label style="font-size:12px;color:var(--text-muted)">每日 Token（留空=默认Pro）</label><br><input type="number" id="aiInviteTokenLimit" placeholder="如 100000" min="1" style="width:140px;padding:6px"></div>',
+                '<div><label style="font-size:12px;color:var(--text-muted)">每日 Token（留空=默认Pro，-1=无限）</label><br><input type="number" id="aiInviteTokenLimit" placeholder="如 100000 或 -1" min="-1" style="width:140px;padding:6px"></div>',
                 '<div><label style="font-size:12px;color:var(--text-muted)">每日搜索（留空=无限）</label><br><input type="number" id="aiInviteSearchLimit" placeholder="如 50，-1=无限" min="-1" style="width:120px;padding:6px"></div>',
                 '<div><label style="font-size:12px;color:var(--text-muted)">每人可用次数</label><br><input type="number" id="aiInviteMaxUses" value="1" min="1" max="10000" style="width:80px;padding:6px"></div>',
                 '<div><label style="font-size:12px;color:var(--text-muted)">码过期天数（留空=不过期）</label><br><input type="number" id="aiInviteExpiresDays" placeholder="如 90" min="1" style="width:100px;padding:6px"></div>',

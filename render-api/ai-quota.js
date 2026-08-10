@@ -68,22 +68,27 @@ function normalizeQuotaPayload(raw) {
   }
   var isPro = raw.is_pro === true || raw.plan === 'pro';
   var tokensUsed = Math.max(0, Number(raw.tokens_used) || 0);
-  var tokensLimit = Math.max(1, Number(raw.tokens_limit) || (isPro ? PRO_TOKEN_LIMIT : FREE_TOKEN_LIMIT));
+  // tokens_limit: -1 = 无限（与 search 语义一致）；0+ = 上限
+  var tokensLimit = raw.tokens_limit == null
+    ? (isPro ? PRO_TOKEN_LIMIT : FREE_TOKEN_LIMIT)
+    : Number(raw.tokens_limit);
   var searchUsed = Math.max(0, Number(raw.search_used) || 0);
   // 自定义搜索额度：Pro 也可能不是无限（邀请码可配每日 N 次）
   var searchLimit = raw.search_limit == null
     ? (isPro ? -1 : FREE_SEARCH_LIMIT)
     : Number(raw.search_limit);
-  var tokensRemaining = Math.max(0, tokensLimit - tokensUsed);
+  var tokensUnlimited = tokensLimit < 0;
+  var tokensRemaining = tokensUnlimited ? -1 : Math.max(0, tokensLimit - tokensUsed);
   var searchRemaining = searchLimit < 0 ? -1 : Math.max(0, searchLimit - searchUsed);
-  var percent = tokensLimit > 0 ? Math.min(100, Math.round((tokensUsed * 1000) / tokensLimit) / 10) : 100;
+  var percent = !tokensUnlimited && tokensLimit > 0 ? Math.min(100, Math.round((tokensUsed * 1000) / tokensLimit) / 10) : 0;
   var searchUnlimited = searchLimit < 0;
   var canSearch = searchUnlimited || searchUsed < searchLimit;
-  var canChat = tokensUsed < tokensLimit;
+  var canChat = tokensUnlimited || tokensUsed < tokensLimit;
   // 优先采用服务端 RPC 的权威字段
   if (typeof raw.can_search === 'boolean') canSearch = raw.can_search;
   if (typeof raw.can_chat === 'boolean') canChat = raw.can_chat;
   if (typeof raw.search_unlimited === 'boolean') searchUnlimited = raw.search_unlimited;
+  if (typeof raw.tokens_unlimited === 'boolean') tokensUnlimited = raw.tokens_unlimited;
   return {
     ok: raw.ok !== false,
     user_name: raw.user_name || null,
@@ -221,7 +226,10 @@ function createAiQuota(supabase) {
       // 自定义额度列（邀请码激活写入）——RPC 不感知，这里单独透传
       if (meta.token_limit_daily !== undefined || meta.search_limit_daily !== undefined) {
         var patch = { updated_at: new Date().toISOString() };
-        if (meta.token_limit_daily !== undefined) patch.token_limit_daily = meta.token_limit_daily === null ? null : Math.max(0, Math.floor(Number(meta.token_limit_daily) || 0));
+        if (meta.token_limit_daily !== undefined) {
+          // -1 = 无限；0+ = 自定义上限；null = 清除
+          patch.token_limit_daily = meta.token_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.token_limit_daily)));
+        }
         if (meta.search_limit_daily !== undefined) patch.search_limit_daily = meta.search_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.search_limit_daily)));
         var up = await supabase.from('ai_user_membership').update(patch).eq('user_name', String(userName || ''));
         if (up.error) console.error('[AI-QUOTA] setPro custom limits update failed:', up.error.message);
