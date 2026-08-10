@@ -61,6 +61,13 @@ const { writeSse } = require('./sse-write');
 const { getMailTransporter, GMAIL_USER, GMAIL_APP_PASSWORD } = require('./mail-transport');
 const { isNormalPost, applyNormalPostAllowlist, applyPublicPostExclusions, NORMAL_POST_MEDIA_TYPES } = require('./post-query');
 const { safeJsonParse, toTimeMs, pickEarlierIso, pickLaterIso, getUtcDateKey } = require('./util-helpers');
+const {
+  createAiQuota,
+  getTokenQuotaErrorMessage,
+  FREE_TOKEN_LIMIT,
+  PRO_TOKEN_LIMIT,
+  FREE_SEARCH_LIMIT
+} = require('./ai-quota');
 const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
@@ -157,6 +164,8 @@ const supabase = createClient(
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY
 );
+// Token 额度 + Pro 会员（Stripe 接入点预留）
+const aiQuota = createAiQuota(supabase);
 
 // ===================== DeepSeek AI 配置 =====================
 // ★ DeepSeek API Key 只能放后端环境变量，绝对不能放前端
@@ -1336,6 +1345,31 @@ async function finishStream(res, opt) {
   // 发送 done
   var totalMs = typeof opt.startTime === 'number' ? Date.now() - opt.startTime : 0;
   try { console.log('[SRV-DONE] hasContent:', hasContent, 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'filtered:', contentWasFiltered, 'total_ms:', totalMs); } catch(_) {}
+
+  // 精确扣减 token（输入 + 思考 + 输出）与搜索次数
+  var doneUsage = opt.usage && typeof opt.usage === 'object' && Object.keys(opt.usage).length ? opt.usage : null;
+  var quotaAfter = null;
+  if (hasContent && opt.userName) {
+    try {
+      var searchHits = 0;
+      if (searchMeta && (searchMeta.count > 0 || (Array.isArray(searchMeta.results) && searchMeta.results.length))) {
+        searchHits = 1;
+      }
+      quotaAfter = await recordAiTurnUsage(opt.userName, doneUsage, {
+        conversation_id: opt.convId,
+        model: usedModel,
+        source: 'chat_stream',
+        message: opt.message,
+        content: content,
+        reasoning: reasoning,
+        search_count: searchHits,
+        did_search: searchHits > 0
+      });
+    } catch (eQuota) {
+      console.error('[AI-QUOTA] finishAgentStream record failed:', eQuota && eQuota.message);
+    }
+  }
+
   writeSse(res, {
     type: 'done',
     complete: isComplete,
@@ -1348,7 +1382,7 @@ async function finishStream(res, opt) {
     reasoning: thinkingMode !== 'off' ? reasoning : '',
     // 流式响应也回传真实 usage（DeepSeek 流式末尾带 usage 字段），
     // 否则管理后台对普通聊天（走 stream 的对话）永远统计不到 token/cost，用量报表失真
-    usage: opt.usage && typeof opt.usage === 'object' && Object.keys(opt.usage).length ? opt.usage : null,
+    usage: doneUsage,
     model: usedModel,
     thinking_mode: thinkingMode,
     requested_thinking_mode: thinkingMode,
@@ -1361,7 +1395,8 @@ async function finishStream(res, opt) {
     //   前端可立即渲染徽章和结果列表
     search_results: searchMeta && Array.isArray(searchMeta.results) ? searchMeta.results : undefined,
     search_expires_at: searchMeta && typeof searchMeta.expires_at === 'number' ? searchMeta.expires_at : undefined,
-    total_ms: totalMs || undefined
+    total_ms: totalMs || undefined,
+    quota: quotaAfter || undefined
   });
 
   // 异步更新会话摘要（仅成功保存时）
@@ -1370,7 +1405,7 @@ async function finishStream(res, opt) {
     maybeUpdateConversationSummary(opt.userName, opt.convId, histArr).catch(function() {});
   }
 
-  return { saved: saved, content: content };
+  return { saved: saved, content: content, quota: quotaAfter };
 }
 
 // Search query helpers: see ./search-providers.js
@@ -6641,11 +6676,11 @@ async function runDeepThinkWorker(opts) {
 }
 
 // ===================== AI 用户级限流（按 userName 而非 IP） =====================
-// ★ AI 智能体调用按 userName 限流，避免 IP 共享用户互相挤占额度
-// 限流维度：每用户每天 AI_AGENT_DAILY_LIMIT 次 / 每小时 AI_AGENT_HOURLY_LIMIT 次
+// ★ 两层额度：
+//   1) token/search 日额度（免费 100k token + 100 次搜索；Pro 1M + 无限搜索）
+//   2) 请求次数兜底（防刷），仍走 consume_ai_chat_quota
 // Quotas are consumed by a database RPC so limits survive restarts and are
-// shared by all Render instances.  The old in-memory counter was race-safe
-// only within one process and therefore was not an enforcement boundary.
+// shared by all Render instances.
 async function checkAiUserRateLimit(userName) {
   if (!userName) return { allowed: false, reason: 'no_user' };
   try {
@@ -6665,10 +6700,59 @@ async function checkAiUserRateLimit(userName) {
   }
 }
 
+/**
+ * Enforce token budget (+ optional search) then request-count rate limit.
+ * @param {string} userName
+ * @param {{ needSearch?: boolean }} [opts]
+ */
+async function enforceAiChatAccess(userName, opts) {
+  opts = opts || {};
+  var tokenGate = await aiQuota.checkBeforeChat(userName, !!opts.needSearch);
+  if (!tokenGate.allowed) {
+    return {
+      allowed: false,
+      reason: tokenGate.reason || 'token_limit',
+      quota: tokenGate.quota || null,
+      remainingHour: null,
+      remainingDay: null
+    };
+  }
+  var rl = await checkAiUserRateLimit(userName);
+  if (!rl.allowed) {
+    return {
+      allowed: false,
+      reason: rl.reason || 'rate_limited',
+      quota: tokenGate.quota || null,
+      remainingHour: rl.remainingHour,
+      remainingDay: rl.remainingDay
+    };
+  }
+  return {
+    allowed: true,
+    reason: null,
+    quota: tokenGate.quota || null,
+    remainingHour: rl.remainingHour,
+    remainingDay: rl.remainingDay
+  };
+}
+
+async function recordAiTurnUsage(userName, usage, options) {
+  try {
+    return await aiQuota.recordUsage(userName, usage || {}, options || {});
+  } catch (e) {
+    console.error('[AI-QUOTA] recordAiTurnUsage failed:', e && e.message);
+    return null;
+  }
+}
+
 function getAiQuotaErrorMessage(reason) {
+  if (reason === 'token_limit' || reason === 'search_limit') {
+    return getTokenQuotaErrorMessage(reason);
+  }
   if (reason === 'hourly_limit') return '小猫太忙了，休息一下';
   if (reason === 'concurrent') return '请等待上一个请求完成';
   if (reason === 'quota_unavailable') return '小猫服务配额暂不可用，请稍后重试';
+  if (reason === 'no_user') return getTokenQuotaErrorMessage('no_user');
   return '今日小猫聊天次数已达上限';
 }
 
@@ -13533,6 +13617,103 @@ app.get('/api/agent/profile', authenticateUser, async (req, res) => {
     return res.status(500).json({ error: '服务器内部错误' });
   }});
 
+// GET /api/agent/quota — 今日 token / 搜索额度 + Pro 状态（前端 1–2 分钟轮询）
+app.get('/api/agent/quota', authenticateUser, async (req, res) => {
+  try {
+    var quota = await aiQuota.getQuota(req.userName);
+    return res.json({
+      ok: true,
+      quota: quota,
+      features: {
+        free_tokens_daily: FREE_TOKEN_LIMIT,
+        pro_tokens_daily: PRO_TOKEN_LIMIT,
+        free_search_daily: FREE_SEARCH_LIMIT,
+        pro_search_unlimited: true,
+        pro_multiplier: 10,
+        stripe_ready: false
+      }
+    });
+  } catch (e) {
+    console.error('[AI-QUOTA] GET /api/agent/quota error:', e && e.message);
+    return res.status(500).json({ ok: false, error: '额度查询失败' });
+  }
+});
+
+// POST /api/agent/pro/checkout — Stripe 接入预留（Codex 后续接支付）
+app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
+  try {
+    var quota = await aiQuota.getQuota(req.userName);
+    if (quota && quota.is_pro) {
+      return res.json({
+        ok: true,
+        already_pro: true,
+        message: '你已经是 Pro 会员',
+        quota: quota
+      });
+    }
+    return res.status(501).json({
+      ok: false,
+      code: 'stripe_not_configured',
+      error: 'Pro 支付通道即将接入 Stripe，请稍后再试',
+      message: 'Pro 支付通道即将接入 Stripe，请稍后再试',
+      checkout: null,
+      features: {
+        free_tokens_daily: FREE_TOKEN_LIMIT,
+        pro_tokens_daily: PRO_TOKEN_LIMIT,
+        free_search_daily: FREE_SEARCH_LIMIT,
+        pro_search_unlimited: true,
+        pro_multiplier: 10
+      },
+      quota: quota
+    });
+  } catch (e) {
+    console.error('[AI-QUOTA] POST /api/agent/pro/checkout error:', e && e.message);
+    return res.status(500).json({ ok: false, error: '开通入口暂不可用' });
+  }
+});
+
+// POST /api/agent/pro/webhook — Stripe webhook 预留
+app.post('/api/agent/pro/webhook', async (req, res) => {
+  try {
+    return res.status(501).json({
+      ok: false,
+      code: 'stripe_not_configured',
+      error: 'Stripe webhook not configured yet'
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'webhook error' });
+  }
+});
+
+// POST /api/agent/pro/activate — 服务端内部/管理员手动开通（Stripe 接通前用于联调）
+app.post('/api/agent/pro/activate', authenticateUser, async (req, res) => {
+  try {
+    var isAdmin = String(req.userName || '') === String(ADMIN_USERNAME || '');
+    var secret = String(process.env.AI_PRO_ACTIVATE_SECRET || '').trim();
+    var provided = String((req.body && req.body.secret) || req.get('x-pro-activate-secret') || '').trim();
+    if (!isAdmin && (!secret || provided !== secret)) {
+      return res.status(403).json({ ok: false, error: '无权开通 Pro' });
+    }
+    var target = String((req.body && req.body.user_name) || req.userName || '').trim();
+    if (!target) return res.status(400).json({ ok: false, error: '缺少用户名' });
+    var days = Math.max(1, Math.min(3650, parseInt((req.body && req.body.days) || '30', 10) || 30));
+    var active = req.body && req.body.active === false ? false : true;
+    var expires = null;
+    if (active) {
+      expires = new Date(Date.now() + days * 86400000).toISOString();
+    }
+    var quota = await aiQuota.setPro(target, active, {
+      expires_at: expires,
+      stripe_customer_id: (req.body && req.body.stripe_customer_id) || null,
+      stripe_subscription_id: (req.body && req.body.stripe_subscription_id) || null
+    });
+    return res.json({ ok: true, quota: quota, activated: active, expires_at: expires });
+  } catch (e) {
+    console.error('[AI-QUOTA] POST /api/agent/pro/activate error:', e && e.message);
+    return res.status(500).json({ ok: false, error: '开通失败' });
+  }
+});
+
 // GET /api/agent/config - 普通用户获取当前 AI 公共配置（不含 system_prompt）
 app.get('/api/agent/config', authenticateUser, async (req, res) => {
   try {
@@ -13949,14 +14130,20 @@ async function handleDeepThinkChat(req, res) {
   });
 
   try {
-    // 1. 用户级限流
-    var rl = await checkAiUserRateLimit(userName);
+    // 1. token/搜索额度 + 请求次数兜底
+    var needSearchDeep = req.body && req.body.web_search === true;
+    var rl = await enforceAiChatAccess(userName, { needSearch: needSearchDeep });
     if (!rl.allowed) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      sseSend({ type: 'error', error: getAiQuotaErrorMessage(rl.reason), code: rl.reason || 'rate_limited' });
+      sseSend({
+        type: 'error',
+        error: getAiQuotaErrorMessage(rl.reason),
+        code: rl.reason || 'rate_limited',
+        quota: rl.quota || null
+      });
       activeDeepThinkJobs.delete(convId);
       return safeEnd();
     }
@@ -14256,6 +14443,21 @@ async function handleDeepThinkChat(req, res) {
 
     // 11. 推 done 事件
     if (!aborted) {
+      var deepQuota = null;
+      try {
+        deepQuota = await recordAiTurnUsage(userName, synthUsage, {
+          conversation_id: convId,
+          model: normalizeDeepSeekUsageModel(flowResult.model || DEEPSEEK_MODEL_REASONER, flowResult.model || DEEPSEEK_MODEL_REASONER),
+          source: 'deep_think',
+          message: message,
+          content: finalContent,
+          reasoning: '',
+          search_count: (flowResult.sources && flowResult.sources.length) ? 1 : 0,
+          did_search: !!(flowResult.sources && flowResult.sources.length)
+        });
+      } catch (eDeepQ) {
+        console.error('[AI-QUOTA] deep think record failed:', eDeepQ && eDeepQ.message);
+      }
       sseSend({
         type: 'done',
         content: finalContent,
@@ -14277,7 +14479,8 @@ async function handleDeepThinkChat(req, res) {
         search_results: flowResult.sources ? flowResult.sources.slice(0, 50) : [],
         search_expires_at: nowTs + 86400000,
         duration_ms: totalDurationMs,
-        remaining: { hour: rl.remainingHour, day: rl.remainingDay }
+        remaining: { hour: rl.remainingHour, day: rl.remainingDay },
+        quota: deepQuota || rl.quota || null
       });
     }
     activeDeepThinkJobs.delete(convId);
@@ -14339,14 +14542,16 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
   try {
     var userName = req.userName;
 
-    // 1. 用户级限流
-    var rl = await checkAiUserRateLimit(userName);
+    // 1. 用户级 token/搜索额度 + 请求次数兜底
+    var needSearchGate = req.body && req.body.web_search === true;
+    var rl = await enforceAiChatAccess(userName, { needSearch: needSearchGate });
     if (!rl.allowed) {
       return res.status(429).json({
         error: getAiQuotaErrorMessage(rl.reason),
         code: rl.reason || 'rate_limited',
         remainingHour: rl.remainingHour,
-        remainingDay: rl.remainingDay
+        remainingDay: rl.remainingDay,
+        quota: rl.quota || null
       });
     }
 
@@ -14604,6 +14809,21 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       console.error('[AGENT-CHAT] save messages failed:', e.message);
     }
 
+    var chatQuota = null;
+    try {
+      chatQuota = await recordAiTurnUsage(userName, usage, {
+        conversation_id: convId,
+        model: usedModel,
+        source: 'chat_json',
+        message: message,
+        content: reply,
+        reasoning: reasoning,
+        search_count: searchResultsCollected.length > 0 ? 1 : 0,
+        did_search: searchResultsCollected.length > 0
+      });
+    } catch (eChatQ) {
+      console.error('[AI-QUOTA] chat json record failed:', eChatQ && eChatQ.message);
+    }
     var respBody = {
       ok: true,
       reply: reply,
@@ -14615,7 +14835,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       tool_calls_info: toolCallsInfo,
       search_count: searchResultsCollected.length,
       search_query: searchQueriesCollected.length > 0 ? searchQueriesCollected[0] : '',
-      remaining: { hour: rl.remainingHour, day: rl.remainingDay }
+      remaining: { hour: rl.remainingHour, day: rl.remainingDay },
+      quota: chatQuota || rl.quota || null
     };
     if (searchResultsCollected.length > 0) {
       respBody.search_results = searchResultsCollected.slice(0, 50);
@@ -14684,14 +14905,20 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   });
   
   try {
-    // 限流
-    var rl = await checkAiUserRateLimit(userName);
+    // token/搜索额度 + 请求次数兜底
+    var needSearchStream = req.body && req.body.web_search === true;
+    var rl = await enforceAiChatAccess(userName, { needSearch: needSearchStream });
     if (!rl.allowed) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      writeSse(res, { type: 'error', error: getAiQuotaErrorMessage(rl.reason), code: rl.reason || 'rate_limited' });
+      writeSse(res, {
+        type: 'error',
+        error: getAiQuotaErrorMessage(rl.reason),
+        code: rl.reason || 'rate_limited',
+        quota: rl.quota || null
+      });
       return safeEnd();
     }
     
@@ -15121,6 +15348,21 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         console.error('[AGENT-STREAM] save messages failed:', e.message);
       }
 
+      var responsesQuota = null;
+      try {
+        responsesQuota = await recordAiTurnUsage(userName, responsesUsage, {
+          conversation_id: convId,
+          model: usedModel,
+          source: 'chat_stream_responses',
+          message: message,
+          content: responsesContent,
+          reasoning: responsesReasoning,
+          search_count: searchResultsCollected.length > 0 ? 1 : 0,
+          did_search: searchResultsCollected.length > 0
+        });
+      } catch (eRq) {
+        console.error('[AI-QUOTA] responses path record failed:', eRq && eRq.message);
+      }
       writeSse(res, {
         type: 'done',
         complete: true,
@@ -15142,7 +15384,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         search_results: searchResultsCollected.length > 0 ? searchResultsCollected.slice(0, 50) : undefined,
         search_expires_at: searchMetaToStore && typeof searchMetaToStore.expires_at === 'number' ? searchMetaToStore.expires_at : undefined,
         web_search: webSearchEnabled,
-        total_ms: Date.now() - T0
+        total_ms: Date.now() - T0,
+        quota: responsesQuota || undefined
       });
       return safeEnd();
     }

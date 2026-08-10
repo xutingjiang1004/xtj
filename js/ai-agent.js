@@ -138,8 +138,124 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     webSearchEnabled: false,
     selectedModel: resolveInitialModel(),
     _userPickedThinkingMode: false,
-    _userPickedModel: false
+    _userPickedModel: false,
+    // AI 额度 / Pro（服务端权威；前端 90s 轮询 + done 事件即时刷新）
+    quota: null,
+    quotaFetchedAt: 0,
+    _quotaTimer: null,
+    _quotaInflight: null
   };
+
+  var QUOTA_POLL_MS = 90000;
+  var FREE_TOKEN_DEFAULT = 100000;
+  var PRO_TOKEN_DEFAULT = 1000000;
+  var FREE_SEARCH_DEFAULT = 100;
+
+  function formatTokenCount(n) {
+    n = Math.max(0, Math.floor(Number(n) || 0));
+    if (n >= 1000000) {
+      var m = n / 1000000;
+      return (Math.round(m * 10) / 10) + 'M';
+    }
+    if (n >= 1000) {
+      var k = n / 1000;
+      return (k >= 100 ? Math.round(k) : (Math.round(k * 10) / 10)) + 'k';
+    }
+    return String(n);
+  }
+
+  function defaultQuotaShape() {
+    return {
+      ok: true,
+      plan: 'free',
+      is_pro: false,
+      tokens_used: 0,
+      tokens_limit: FREE_TOKEN_DEFAULT,
+      tokens_remaining: FREE_TOKEN_DEFAULT,
+      tokens_percent: 0,
+      search_used: 0,
+      search_limit: FREE_SEARCH_DEFAULT,
+      search_remaining: FREE_SEARCH_DEFAULT,
+      search_unlimited: false,
+      can_chat: true,
+      can_search: true
+    };
+  }
+
+  function applyQuota(quota) {
+    if (!quota || typeof quota !== 'object') return S.quota;
+    S.quota = Object.assign(defaultQuotaShape(), quota);
+    S.quotaFetchedAt = Date.now();
+    try {
+      if (typeof window.dispatchEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('xtj-ai-quota', { detail: S.quota }));
+      }
+    } catch (e) {}
+    if (typeof S._renderQuotaUI === 'function') {
+      try { S._renderQuotaUI(); } catch (e2) {}
+    }
+    return S.quota;
+  }
+
+  async function fetchAiQuota(force) {
+    if (!window.currentUser) return S.quota;
+    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 20000 && S._quotaInflight) {
+      return S._quotaInflight;
+    }
+    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 15000) {
+      return S.quota;
+    }
+    if (S._quotaInflight) return S._quotaInflight;
+    S._quotaInflight = (async function() {
+      try {
+        var r = await apiRequest('GET', '/quota');
+        var payload = r && r.data ? r.data : null;
+        if (r && r.ok && payload && payload.quota) {
+          applyQuota(payload.quota);
+          if (payload.features) {
+            if (payload.features.free_tokens_daily) FREE_TOKEN_DEFAULT = payload.features.free_tokens_daily;
+            if (payload.features.pro_tokens_daily) PRO_TOKEN_DEFAULT = payload.features.pro_tokens_daily;
+            if (payload.features.free_search_daily != null) FREE_SEARCH_DEFAULT = payload.features.free_search_daily;
+          }
+          return S.quota;
+        }
+      } catch (e) {
+        try { if (AI_DEBUG) console.warn('[AI] quota fetch failed', e); } catch (e2) {}
+      } finally {
+        S._quotaInflight = null;
+      }
+      return S.quota;
+    })();
+    return S._quotaInflight;
+  }
+
+  function startQuotaPolling() {
+    stopQuotaPolling();
+    fetchAiQuota(true);
+    S._quotaTimer = setInterval(function() {
+      if (!S.active) return;
+      fetchAiQuota(false);
+    }, QUOTA_POLL_MS);
+  }
+
+  function stopQuotaPolling() {
+    if (S._quotaTimer) {
+      try { clearInterval(S._quotaTimer); } catch (e) {}
+      S._quotaTimer = null;
+    }
+  }
+
+  function canSendWithQuota() {
+    var q = S.quota;
+    if (!q) return { ok: true };
+    if (q.can_chat === false || (typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0)) {
+      return { ok: false, reason: 'token_limit', message: '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度' };
+    }
+    if (S.webSearchEnabled && q.can_search === false && !q.search_unlimited) {
+      return { ok: false, reason: 'search_limit', message: '今日网页搜索次数已达上限，开通 Pro 可无限搜索' };
+    }
+    return { ok: true };
+  }
 
   function getAiStatusText() {
     if (S.serviceStatus === 'ready') return '在线';
@@ -1107,7 +1223,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (r.status === 403) return '当前账号没有执行此操作的权限';
     if (r.status === 404) return 'AI 接口不存在，请检查 API_BASE 或部署域名';
     if (r.status === 405) return 'AI 接口方法不允许，请检查 API_BASE 或部署域名';
-    if (r.status === 429) return '小猫调用次数已达上限，请稍后再试';
+    if (r.status === 429) {
+      if (r && (r.code === 'token_limit' || (r.quota && r.quota.can_chat === false))) {
+        return '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
+      }
+      if (r && r.code === 'search_limit') {
+        return '今日网页搜索次数已达上限，开通 Pro 可无限搜索';
+      }
+      return '小猫调用额度已达上限，请稍后再试或开通 Pro';
+    }
     if (r.status === 502) return 'AI 服务调用失败，请检查配置或服务日志';
     if (r.status === 500) return '服务端错误，请稍后再试';
     if (r.status === 0 || r.error_code === 'timeout' || r.error_code === 'network_error') {
@@ -5850,6 +5974,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return;
     }
 
+    // 额度预检（服务端仍是权威；此处避免无额度空请求）
+    try {
+      if (!S.quota || (Date.now() - S.quotaFetchedAt) > 120000) {
+        await fetchAiQuota(true);
+      }
+    } catch (eQ) {}
+    var qGate = canSendWithQuota();
+    if (!qGate.ok) {
+      notify(qGate.message || '今日额度已用完');
+      S.sending = false;
+      return;
+    }
+
     // ★ 立即标记发送中，防止并发竞态
     // P1: UI立即显示，认证异步执行
     S.sending = true;
@@ -6026,9 +6163,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           if (errJson && errJson.error) responseMessage = String(errJson.error);
           if (errJson && errJson.code) errorCode = String(errJson.code);
+          if (errJson && errJson.quota) applyQuota(errJson.quota);
+          if (errorCode === 'token_limit') {
+            responseMessage = '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
+          } else if (errorCode === 'search_limit') {
+            responseMessage = '今日网页搜索次数已达上限，开通 Pro 可无限搜索';
+          }
         } catch(e) {}
         // Phase 3: Use shared error classification when enabled
-        if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+        // （额度类 429 保留专用文案，不被通用分类覆盖）
+        if (errorCode !== 'token_limit' && errorCode !== 'search_limit' &&
+            window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
           var classified = window.XtjAiCore.Errors.classify(new Error(responseMessage), {
             httpStatus: resp.status,
             requestId: reqId,
@@ -6047,7 +6192,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S.messages.pop();
         removeLastUserMessage(messagesEl);
         restoreInputText();
-        notify(errorCode ? '[' + errorCode + '] ' + responseMessage : responseMessage);
+        notify(responseMessage);
         resetSendingIfCurrent();
         return;
       }
@@ -6886,6 +7031,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if ((!aiReasoning || !String(aiReasoning).trim()) && evt.reasoning) {
                 aiReasoning = String(evt.reasoning);
               }
+              if (evt.quota) applyQuota(evt.quota);
+              else fetchAiQuota(true);
             } catch (e) {}
             
             var _sanitizedRendered = false;
@@ -7541,10 +7688,7 @@ function showChatMessages() {
       S.webSearchEnabled = savedWebSearch === 'true';
     } catch (e) {}
 
-    // + 菜单：自定义一级面板
-    // - Win 原生 <select> 会空弹/闪退；系统列表也无法「选完不关」
-    // - 全部选项平铺在一页：上传 / 模型 / 思考程度 / 网页搜索
-    // - 模型、思考、搜索切换后菜单保持打开，方便连续设置
+    // + 菜单：一级放额度/Pro/搜索/折叠入口，模型与思考各自二级页
     var modelLabels = {
       'deepseek-v4-flash': 'V4 Flash',
       'deepseek-v4-pro': 'V4 Pro'
@@ -7559,7 +7703,7 @@ function showChatMessages() {
       'aria-haspopup': 'menu',
       'aria-expanded': 'false',
       'aria-controls': 'aiPlusPanelShell',
-      title: '上传文件、模型、思考程度、网页搜索'
+      title: '额度、模型、思考、搜索与 Pro'
     });
     plusBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 
@@ -7571,13 +7715,63 @@ function showChatMessages() {
     });
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
+        // ===== 一级页 =====
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
+          '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
+            '<div class="ai-quota-card-head">' +
+              '<span class="ai-quota-card-title">今日 AI 额度</span>' +
+              '<span class="ai-quota-plan-badge" id="aiQuotaPlanBadge">免费</span>' +
+            '</div>' +
+            '<div class="ai-quota-bar" aria-hidden="true"><i id="aiQuotaBarFill"></i></div>' +
+            '<div class="ai-quota-meta">' +
+              '<span id="aiQuotaTokenText">加载中…</span>' +
+              '<span id="aiQuotaPercentText">—</span>' +
+            '</div>' +
+            '<div class="ai-quota-search-line" id="aiQuotaSearchLine">网页搜索：—</div>' +
+          '</div>' +
+          '<button type="button" class="ai-panel-pro-card" data-action="pro" id="aiProOpenBtn">' +
+            '<span class="ai-panel-pro-icon" aria-hidden="true">✨</span>' +
+            '<span class="ai-panel-pro-body">' +
+              '<b id="aiProCardTitle">开通 Pro</b>' +
+              '<small id="aiProCardDesc">10 倍 Token + 无限网页搜索</small>' +
+            '</span>' +
+            '<span class="ai-panel-chevron" aria-hidden="true">›</span>' +
+          '</button>' +
+          '<div class="ai-panel-separator" role="separator"></div>' +
           '<button type="button" class="ai-panel-option" role="menuitem" data-action="upload">' +
             '<span class="ai-panel-option-icon" aria-hidden="true">📎</span>' +
             '<span class="ai-panel-option-text">上传文件</span>' +
           '</button>' +
-          '<div class="ai-panel-separator" role="separator"></div>' +
-          '<div class="ai-panel-section-label">模型</div>' +
+          '<button type="button" class="ai-panel-option ai-panel-nav" role="menuitem" data-action="open-model">' +
+            '<span class="ai-panel-option-icon" aria-hidden="true">🧠</span>' +
+            '<span class="ai-panel-option-body">' +
+              '<span class="ai-panel-option-label">模型</span>' +
+              '<span class="ai-panel-option-desc" id="aiModelSummary">V4 Flash</span>' +
+            '</span>' +
+            '<span class="ai-panel-chevron" aria-hidden="true">›</span>' +
+          '</button>' +
+          '<button type="button" class="ai-panel-option ai-panel-nav" role="menuitem" data-action="open-think">' +
+            '<span class="ai-panel-option-icon" aria-hidden="true">💭</span>' +
+            '<span class="ai-panel-option-body">' +
+              '<span class="ai-panel-option-label">思考程度</span>' +
+              '<span class="ai-panel-option-desc" id="aiThinkSummary">极致</span>' +
+            '</span>' +
+            '<span class="ai-panel-chevron" aria-hidden="true">›</span>' +
+          '</button>' +
+          '<button type="button" class="ai-panel-option ai-panel-option-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
+            '<span class="ai-panel-option-icon" aria-hidden="true">🌐</span>' +
+            '<span class="ai-panel-option-body">' +
+              '<span class="ai-panel-option-label">网页搜索</span>' +
+              '<span class="ai-panel-option-desc" id="aiSearchRemainHint">每日有次数限制</span>' +
+            '</span>' +
+            '<span class="ai-search-status" id="aiSearchStatus">关</span>' +
+          '</button>' +
+        '</div>' +
+        // ===== 模型二级页 =====
+        '<div class="ai-panel-page" id="aiPanelModel" data-page="model" hidden>' +
+          '<button type="button" class="ai-panel-back" data-action="back" aria-label="返回">' +
+            '<span aria-hidden="true">‹</span><span>模型</span>' +
+          '</button>' +
           '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择模型">' +
             '<button type="button" class="ai-panel-option" role="radio" data-model="deepseek-v4-flash" aria-checked="false">' +
               '<span class="ai-panel-option-body">' +
@@ -7594,8 +7788,12 @@ function showChatMessages() {
               '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
             '</button>' +
           '</div>' +
-          '<div class="ai-panel-separator" role="separator"></div>' +
-          '<div class="ai-panel-section-label">思考程度</div>' +
+        '</div>' +
+        // ===== 思考二级页 =====
+        '<div class="ai-panel-page" id="aiPanelThink" data-page="think" hidden>' +
+          '<button type="button" class="ai-panel-back" data-action="back" aria-label="返回">' +
+            '<span aria-hidden="true">‹</span><span>思考程度</span>' +
+          '</button>' +
           '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择思考程度">' +
             '<button type="button" class="ai-panel-option" role="radio" data-think="off" aria-checked="false">' +
               '<span class="ai-panel-option-body"><span class="ai-panel-option-label">关闭</span><span class="ai-panel-option-desc">不展示思考过程，回复更快</span></span>' +
@@ -7618,18 +7816,26 @@ function showChatMessages() {
               '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
             '</button>' +
           '</div>' +
-          '<div class="ai-panel-separator" role="separator"></div>' +
-          '<button type="button" class="ai-panel-option ai-panel-option-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
-            '<span class="ai-panel-option-icon" aria-hidden="true">🌐</span>' +
-            '<span class="ai-panel-option-text">网页搜索</span>' +
-            '<span class="ai-search-status" id="aiSearchStatus">关</span>' +
-          '</button>' +
         '</div>' +
       '</div>';
 
     var panelOpen = false;
     var panelClosing = false;
     var closeTimer = null;
+    var currentPanelPage = 'primary';
+
+    function showPanelPage(page) {
+      currentPanelPage = page || 'primary';
+      var pages = panelShell.querySelectorAll('.ai-panel-page');
+      for (var i = 0; i < pages.length; i++) {
+        var p = pages[i];
+        var on = p.getAttribute('data-page') === currentPanelPage;
+        p.classList.toggle('is-active', on);
+        if (on) p.removeAttribute('hidden');
+        else p.setAttribute('hidden', '');
+      }
+      panelShell.classList.toggle('is-subpage', currentPanelPage !== 'primary');
+    }
 
     function updateModelUI() {
       var radios = panelShell.querySelectorAll('[data-model]');
@@ -7638,6 +7844,8 @@ function showChatMessages() {
         radios[i].setAttribute('aria-checked', on ? 'true' : 'false');
         radios[i].classList.toggle('is-selected', on);
       }
+      var sum = panelShell.querySelector('#aiModelSummary');
+      if (sum) sum.textContent = modelLabels[S.selectedModel] || S.selectedModel;
     }
     function updateThinkUI() {
       var radios = panelShell.querySelectorAll('[data-think]');
@@ -7646,10 +7854,14 @@ function showChatMessages() {
         radios[i].setAttribute('aria-checked', on ? 'true' : 'false');
         radios[i].classList.toggle('is-selected', on);
       }
+      var sum = panelShell.querySelector('#aiThinkSummary');
+      if (sum) sum.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
     }
     function updateSearchStatus() {
       var st = panelShell.querySelector('#aiSearchStatus');
       var btn = panelShell.querySelector('[data-action="search"]');
+      var hint = panelShell.querySelector('#aiSearchRemainHint');
+      var q = S.quota;
       if (st) {
         st.textContent = S.webSearchEnabled ? '开' : '关';
         st.classList.toggle('on', !!S.webSearchEnabled);
@@ -7657,12 +7869,66 @@ function showChatMessages() {
       if (btn) {
         btn.setAttribute('aria-checked', S.webSearchEnabled ? 'true' : 'false');
         btn.classList.toggle('is-selected', !!S.webSearchEnabled);
+        var blocked = !!(q && !q.search_unlimited && q.can_search === false);
+        btn.classList.toggle('is-disabled', blocked);
+        btn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+      }
+      if (hint) {
+        if (q && q.search_unlimited) hint.textContent = 'Pro · 无限搜索';
+        else if (q) hint.textContent = '今日剩余 ' + Math.max(0, q.search_remaining || 0) + ' 次';
+        else hint.textContent = '每日有次数限制';
       }
       if (plusBtn) {
         if (S.webSearchEnabled) plusBtn.classList.add('ws-on');
         else plusBtn.classList.remove('ws-on');
       }
     }
+
+    function renderQuotaUI() {
+      var q = S.quota || defaultQuotaShape();
+      var used = Math.max(0, Number(q.tokens_used) || 0);
+      var limit = Math.max(1, Number(q.tokens_limit) || FREE_TOKEN_DEFAULT);
+      var pct = typeof q.tokens_percent === 'number'
+        ? Math.min(100, Math.max(0, q.tokens_percent))
+        : Math.min(100, Math.round((used * 1000) / limit) / 10);
+      var fill = panelShell.querySelector('#aiQuotaBarFill');
+      var tokenText = panelShell.querySelector('#aiQuotaTokenText');
+      var pctText = panelShell.querySelector('#aiQuotaPercentText');
+      var searchLine = panelShell.querySelector('#aiQuotaSearchLine');
+      var planBadge = panelShell.querySelector('#aiQuotaPlanBadge');
+      var proTitle = panelShell.querySelector('#aiProCardTitle');
+      var proDesc = panelShell.querySelector('#aiProCardDesc');
+      var proBtn = panelShell.querySelector('#aiProOpenBtn');
+      if (fill) {
+        fill.style.width = pct + '%';
+        fill.classList.toggle('is-warn', pct >= 70 && pct < 92);
+        fill.classList.toggle('is-danger', pct >= 92);
+      }
+      if (tokenText) {
+        tokenText.textContent = formatTokenCount(used) + ' / ' + formatTokenCount(limit) + ' tokens';
+      }
+      if (pctText) pctText.textContent = pct + '%';
+      if (searchLine) {
+        if (q.search_unlimited || q.is_pro) {
+          searchLine.textContent = '网页搜索：无限';
+        } else {
+          searchLine.textContent = '网页搜索：' + (q.search_used || 0) + ' / ' + (q.search_limit != null ? q.search_limit : FREE_SEARCH_DEFAULT);
+        }
+      }
+      if (planBadge) {
+        planBadge.textContent = q.is_pro ? 'Pro' : '免费';
+        planBadge.classList.toggle('is-pro', !!q.is_pro);
+      }
+      if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 已开通' : '开通 Pro';
+      if (proDesc) {
+        proDesc.textContent = q.is_pro
+          ? ('每日 ' + formatTokenCount(PRO_TOKEN_DEFAULT) + ' tokens · 无限搜索')
+          : ('10 倍额度 ' + formatTokenCount(PRO_TOKEN_DEFAULT) + ' · 无限搜索');
+      }
+      if (proBtn) proBtn.classList.toggle('is-pro', !!q.is_pro);
+      updateSearchStatus();
+    }
+    S._renderQuotaUI = renderQuotaUI;
 
     function positionPanel() {
       if (!plusBtn || !panelShell || !panelShell.parentNode) return;
@@ -7683,9 +7949,12 @@ function showChatMessages() {
     function openPanel() {
       if (panelOpen || panelClosing) return;
       panelOpen = true;
+      showPanelPage('primary');
       updateModelUI();
       updateThinkUI();
       updateSearchStatus();
+      renderQuotaUI();
+      fetchAiQuota(true);
       positionPanel();
       panelShell.classList.remove('is-closing', 'open');
       panelShell.classList.add('is-opening');
@@ -7713,6 +7982,7 @@ function showChatMessages() {
       panelShell.classList.remove('open');
       plusBtn.classList.remove('active');
       plusBtn.setAttribute('aria-expanded', 'false');
+      showPanelPage('primary');
       if (animate === false) {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
@@ -7724,6 +7994,27 @@ function showChatMessages() {
         panelClosing = false;
         closeTimer = null;
       }, 280);
+    }
+
+    async function openProCheckout() {
+      try {
+        var r = await apiRequest('POST', '/pro/checkout', {});
+        var payload = (r && r.data) || {};
+        if (payload.already_pro) {
+          notify('你已经是 Pro 会员');
+          if (payload.quota) applyQuota(payload.quota);
+          return;
+        }
+        if (payload.checkout && payload.checkout.url) {
+          window.open(payload.checkout.url, '_blank', 'noopener');
+          return;
+        }
+        var msg = payload.message || payload.error || r.error || 'Pro 支付通道即将接入 Stripe';
+        notify(msg);
+        if (payload.quota) applyQuota(payload.quota);
+      } catch (e) {
+        notify('Pro 开通入口暂不可用');
+      }
     }
 
     plusBtn.addEventListener('click', function(e) {
@@ -7739,6 +8030,24 @@ function showChatMessages() {
       if (!t) return;
 
       var action = t.getAttribute('data-action');
+      if (action === 'back') {
+        showPanelPage('primary');
+        return;
+      }
+      if (action === 'open-model') {
+        showPanelPage('model');
+        updateModelUI();
+        return;
+      }
+      if (action === 'open-think') {
+        showPanelPage('think');
+        updateThinkUI();
+        return;
+      }
+      if (action === 'pro') {
+        openProCheckout();
+        return;
+      }
       if (action === 'upload') {
         closePanel();
         setTimeout(function() {
@@ -7748,11 +8057,15 @@ function showChatMessages() {
         return;
       }
       if (action === 'search') {
+        var q = S.quota;
+        if (!S.webSearchEnabled && q && !q.search_unlimited && q.can_search === false) {
+          notify('今日网页搜索次数已用完，开通 Pro 可无限搜索');
+          return;
+        }
         S.webSearchEnabled = !S.webSearchEnabled;
         try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (err) {}
         updateSearchStatus();
         notify(S.webSearchEnabled ? '网页搜索已开启' : '网页搜索已关闭');
-        // 保持菜单打开，方便继续改模型/思考
         return;
       }
 
@@ -7765,6 +8078,7 @@ function showChatMessages() {
           notify('模型：' + (modelLabels[model] || model));
         }
         updateModelUI();
+        showPanelPage('primary');
         return;
       }
 
@@ -7777,6 +8091,7 @@ function showChatMessages() {
           notify('思考程度：' + (thinkLabels[think] || think));
         }
         updateThinkUI();
+        showPanelPage('primary');
       }
     });
 
@@ -7804,6 +8119,7 @@ function showChatMessages() {
     updateModelUI();
     updateThinkUI();
     updateSearchStatus();
+    renderQuotaUI();
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
     // 文件上传按钮 (隐藏，通过 + 面板触发)
@@ -7997,6 +8313,7 @@ function showChatMessages() {
     S.statusTimer = setInterval(updateAiStatus, 60000);
     if (S._configRefreshTimer) { try { clearInterval(S._configRefreshTimer); } catch(e) {} }
     S._configRefreshTimer = setInterval(function() { ensureConfig().then(applyConfigToUI).catch(function(){}); }, CONFIG_REFRESH_INTERVAL);
+    startQuotaPolling();
 
     if (S.viewportCleanup) {
       try { S.viewportCleanup(); } catch (e3) {}
@@ -8092,6 +8409,7 @@ function showChatMessages() {
     S.historyRequestId += 1;
     S.conversationRequestId += 1;
     window.__xtjAiChatActive = false;
+    stopQuotaPolling();
     clearReplyTimer();
     // 页面级关闭：完整清理主聊天 + 深度思考两套状态
     abortAllAiRequests();
