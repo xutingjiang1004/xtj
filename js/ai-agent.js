@@ -2288,6 +2288,56 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     syncResearchCardAnimatorState(card);
   }
 
+  /**
+   * 把深入研究阶段写入「查看思考过程」日志，并更新步数。
+   * 之前只改了状态条文案，details 一直是 0 步，用户展开什么都没有。
+   */
+  function appendResearchThinkingEntry(card, roleLabel, text, options) {
+    if (!isResearchCard(card)) return 0;
+    options = options || {};
+    var refs = ensureResearchCardRefs(card);
+    var body = (refs && refs.thinkingBody) || card.querySelector('.ai-think-thinking-body');
+    var summary = (refs && refs.summaryText) || card.querySelector('.ai-thinking-summary-text');
+    var details = (refs && refs.details) || card.querySelector('.ai-think-thinking');
+    if (!body) return 0;
+    var msg = String(text || '').trim();
+    if (!msg) return body.children.length;
+    var role = String(roleLabel || '研究进程').trim() || '研究进程';
+
+    // 同角色连续阶段：合并到最后一条，避免刷屏
+    var last = body.lastElementChild;
+    if (last && last._role === role && !options.forceNew) {
+      var chunk = last.querySelector('.ai-thought-chunk');
+      if (chunk) {
+        var prev = String(chunk.textContent || '');
+        chunk.textContent = prev && prev !== msg ? (prev + '\n' + msg) : msg;
+      }
+    } else {
+      var entry = document.createElement('div');
+      entry.className = 'ai-thought-entry';
+      entry._role = role;
+      entry.innerHTML = '<div class="ai-thought-role"></div><div class="ai-thought-chunk"></div>';
+      entry.querySelector('.ai-thought-role').textContent = role;
+      entry.querySelector('.ai-thought-chunk').textContent = msg;
+      body.appendChild(entry);
+    }
+
+    var n = body.children.length;
+    if (summary) summary.textContent = '查看思考过程 (' + n + ' 步)';
+    if (card._researchState) {
+      card._researchState.canToggle = true;
+      card._researchState.stepCount = n;
+      // 研究进行中默认展开思考过程，方便实时看
+      if (options.autoOpen !== false && !card._researchState.userPinnedClosed) {
+        card._researchState.persistExpanded = true;
+        if (details) details.open = true;
+        card.classList.add('expanded');
+        card.classList.remove('collapsed');
+      }
+    }
+    return n;
+  }
+
   function resetResearchCardDisclosure(root) {
     if (!root || !root.querySelectorAll) return;
     var cards = root.querySelectorAll('.ai-research-card');
@@ -3470,7 +3520,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function handleEvent(evt) {
       if (!evt || !evt.type) return;
       if (evt.type === 'research_step') {
-        if (onProgress) { try { onProgress({ step: Math.max(0, Math.min(2, Number(evt.step) || 0)) }); } catch (e) {} }
+        var stepN = Math.max(0, Math.min(3, Number(evt.step != null ? evt.step : evt.phase) || 0));
+        var toolN = evt.tool != null ? String(evt.tool) : (evt.name != null ? String(evt.name) : '');
+        if (onProgress) {
+          try { onProgress({ step: stepN, tool: toolN }); } catch (e) {}
+        }
       } else if (evt.type === 'research_content') {
         var chunk = evt.content != null ? String(evt.content) : (evt.text != null ? String(evt.text) : '');
         if (chunk) content += chunk;
@@ -3485,8 +3539,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var finalAnswer = (content && String(content).trim()) ? content : (evt.answer || '');
         succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id != null ? evt.message_id : undefined });
       } else if (evt.type === 'error') {
-        var ee = new Error(evt.error || '研究失败');
+        var ee = new Error(evt.error || evt.message || '研究失败');
         ee.tavilyError = true;
+        // 额度/搜索不足时把 reason 带上，便于上层提示
+        if (evt.code) ee.code = evt.code;
+        if (evt.quota) ee.quota = evt.quota;
         fail(ee);
       }
       // heartbeat / 其他事件: 忽略
@@ -3651,25 +3708,78 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     // 三阶段状态展示 (新协议 research_stage 事件; 未知 stage 忽略, 保持原行为)
+    // 同时写入「查看思考过程」日志，避免一直显示 0 步
     function handleResearchStage(stage, message) {
       if (!isResearchCard(progressCard)) return;
+      var msg = message != null ? String(message) : '';
       if (stage === 'rewrite') {
-        setResearchCardState(progressCard, 'thinking', { statusText: '正在优化研究问题…', progress: 0.25 });
+        setResearchCardState(progressCard, 'thinking', {
+          statusText: msg || '正在优化研究问题…',
+          progress: 0.25,
+          allowToggle: true
+        });
         setResearchSteps(progressCard, 0, 0);
+        appendResearchThinkingEntry(progressCard, '总指挥 · 拆解问题', msg || '正在理解并拆解研究任务…', { forceNew: true });
       } else if (stage === 'rewrite_done') {
-        setResearchCardState(progressCard, 'thinking', { statusText: '问题已优化，开始多智能体研究…', progress: 0.32 });
+        setResearchCardState(progressCard, 'thinking', {
+          statusText: msg || '问题已优化，开始多智能体研究…',
+          progress: 0.32,
+          allowToggle: true
+        });
         setResearchSteps(progressCard, 0, 0);
+        appendResearchThinkingEntry(progressCard, '总指挥 · 任务规划', msg || '任务已拆解，准备派出研究小队…', { forceNew: true });
       } else if (stage === 'collect') {
         if (progressCard._researchState) progressCard._researchState.researchTick = 0;
-        setResearchCardState(progressCard, 'researching', { statusText: '多智能体并行研究中…', progress: 0.5 });
+        setResearchCardState(progressCard, 'researching', {
+          statusText: msg || '多智能体并行研究中…',
+          progress: 0.5,
+          allowToggle: true
+        });
         setResearchSteps(progressCard, 1, 1);
+        appendResearchThinkingEntry(progressCard, '研究小队 · 并行调研', msg || '子智能体正在联网检索与整理材料…', { forceNew: true });
+      } else if (stage === 'gapfill') {
+        setResearchCardState(progressCard, 'researching', {
+          statusText: msg || '发现信息缺口，正在补充查证…',
+          progress: 0.68,
+          allowToggle: true
+        });
+        setResearchSteps(progressCard, 2, 2);
+        appendResearchThinkingEntry(progressCard, '总指挥 · 查漏补缺', msg || '正在对关键缺口做补充检索…', { forceNew: true });
       } else if (stage === 'synthesize') {
         responding = true;
-        setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: false, progress: 0.96 });
+        setResearchCardState(progressCard, 'responding', {
+          durationMs: Date.now() - startedAt,
+          expanded: true,
+          allowToggle: true,
+          progress: 0.96
+        });
         var synthStatus = progressCard.querySelector('.ai-research-status');
-        if (synthStatus) synthStatus.textContent = '正在综合生成中文报告…';
+        if (synthStatus) synthStatus.textContent = msg || '正在综合生成中文报告…';
         setResearchSteps(progressCard, 3, 3);
+        appendResearchThinkingEntry(progressCard, '总指挥 · 生成报告', msg || '正在交叉验证材料并撰写研究报告…', { forceNew: true });
+      } else if (stage || msg) {
+        // 未知 stage：仍记入思考日志，避免静默丢事件
+        appendResearchThinkingEntry(
+          progressCard,
+          stage ? ('研究进程 · ' + stage) : '研究进程',
+          msg || ('阶段：' + stage),
+          { forceNew: true }
+        );
       }
+    }
+
+    function handleResearchStepEvent(step, tool) {
+      if (!isResearchCard(progressCard)) return;
+      var toolName = tool ? String(tool) : '';
+      var labels = ['拆解问题', '分析信息', '组织结构', '生成回答'];
+      var idx = Math.max(0, Math.min(3, Number(step) || 0));
+      var label = labels[idx] || ('步骤 ' + (idx + 1));
+      appendResearchThinkingEntry(
+        progressCard,
+        '流程 · ' + label,
+        toolName ? ('工具：' + toolName) : ('进入「' + label + '」阶段'),
+        { forceNew: true }
+      );
     }
 
     // 流式渲染: research_content 小块实时追加到报告区 (纯文本; done 后整体 markdown 替换)
@@ -3698,6 +3808,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         retryFn: function() { handleDeepThinkPageSend(originalUserText, fileData); }
       });
       progressCard.classList.add('dt-animate-in');
+      // 研究一开始就允许展开思考过程（不再锁死 0 步）
+      if (progressCard._researchState) {
+        progressCard._researchState.canToggle = true;
+      }
+      appendResearchThinkingEntry(progressCard, '研究启动', '已收到研究任务，正在连接多智能体流水线…', { forceNew: true });
       S.deepThinkProgressCard = progressCard;
       dtMessagesEl.appendChild(progressCard);
       scrollToBottom(dtMessagesEl, true);
@@ -3719,15 +3834,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           if (!prog) return;
           if (prog.stage) handleResearchStage(prog.stage, prog.message);
-          if (typeof prog.step === 'number') setStep(prog.step);
+          if (typeof prog.step === 'number') {
+            setStep(prog.step);
+            if (prog.tool) handleResearchStepEvent(prog.step, prog.tool);
+          }
           if (prog.content) {
             answer += String(prog.content);
             appendStreamChunk(String(prog.content));
             if (!responding) {
               responding = true;
               if (isResearchCard(progressCard)) {
-                setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: false });
+                setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: true, allowToggle: true });
                 setResearchSteps(progressCard, 3, 3);
+                appendResearchThinkingEntry(progressCard, '总指挥 · 生成报告', '开始流式输出研究报告…', { forceNew: true });
               }
             }
           }
@@ -3757,15 +3876,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (!prog) return;
         if (prog.stage) handleResearchStage(prog.stage, prog.message);
-        if (typeof prog.step === 'number') setStep(prog.step);
+        if (typeof prog.step === 'number') {
+          setStep(prog.step);
+          if (prog.tool) handleResearchStepEvent(prog.step, prog.tool);
+        }
         if (prog.content) {
           answer += String(prog.content);
           appendStreamChunk(String(prog.content));
           if (!responding) {
             responding = true;
             if (isResearchCard(progressCard)) {
-              setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: false });
+              setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: true, allowToggle: true });
               setResearchSteps(progressCard, 3, 3);
+              appendResearchThinkingEntry(progressCard, '总指挥 · 生成报告', '开始流式输出研究报告…', { forceNew: true });
             }
           }
         }
