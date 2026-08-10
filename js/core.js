@@ -11342,7 +11342,7 @@ function renderProfileActivityList(kind) {
                             } catch (e2) {}
                         });
                 });
-                // 帖子区 skeleton 看门狗：网络/代理挂起时最多 10s 给出可点重试，不再无限转圈
+                // 帖子区看门狗：skeleton 卡住 / 白屏空 feed 时给出可点重试（含 Render 冷启动）
                 (function setupFeedBootWatchdog() {
                     if (window.__xtjFeedBootWatchdog) return;
                     window.__xtjFeedBootWatchdog = true;
@@ -11355,18 +11355,19 @@ function renderProfileActivityList(kind) {
                             return;
                         }
                         var hasPosts = !!feedEl.querySelector('.post');
-                        var hasSkeleton = !!feedEl.querySelector('.xtj-loading-skeleton, .xtj-skeleton-card, .xtj-magic-loading')
-                            || /内容加载中/.test(feedEl.innerHTML || '');
-                        var hasError = !!feedEl.querySelector('#feedBootError, #feedInitError, .feed-load-more-error')
-                            || /加载失败|加载中断|启动加载失败/.test(feedEl.innerText || '');
+                        var hasSkeleton = !!feedEl.querySelector('.xtj-loading-skeleton, .xtj-skeleton-card, .xtj-magic-loading, .loading')
+                            || /内容加载中|加载中/.test(feedEl.innerHTML || '');
+                        var hasError = !!feedEl.querySelector('#feedBootError, #feedInitError, #feedWatchdogError, .feed-load-more-error')
+                            || /加载失败|加载中断|启动加载失败|加载超时/.test(feedEl.innerText || '');
+                        var isEmpty = !hasPosts && !hasError && String(feedEl.textContent || '').trim().length < 8;
                         if (hasPosts || hasError) {
                             clearInterval(timer);
                             return;
                         }
-                        if (tries >= 10 && hasSkeleton) {
+                        if ((tries >= 10 && hasSkeleton) || (tries >= 8 && isEmpty)) {
                             clearInterval(timer);
-                            console.warn('[XTJ] feed boot watchdog: still skeleton after 10s, forcing recovery');
-                            feedEl.innerHTML = '<div class="loading" id="feedWatchdogError" role="button" tabindex="0" style="color:#ff3b60;cursor:pointer;padding:24px;text-align:center;">帖子加载超时（可能是系统代理/网络问题），点击重试<br><small style="opacity:.7">也可关闭系统代理 127.0.0.1:7890 后刷新</small></div>';
+                            console.warn('[XTJ] feed boot watchdog: recovery after ' + tries + 's');
+                            feedEl.innerHTML = '<div class="loading" id="feedWatchdogError" role="button" tabindex="0" style="color:#ff3b60;cursor:pointer;padding:24px;text-align:center;">帖子加载超时，点击重试<br><small style="opacity:.7">若底部一直显示「正在等待…」，多半是 Render 冷启动或网络慢，请稍候再点</small></div>';
                             var w = document.getElementById('feedWatchdogError');
                             if (w) {
                                 w.onclick = function() {
@@ -11377,7 +11378,6 @@ function renderProfileActivityList(kind) {
                                     }
                                 };
                             }
-                            // 后台再试一次直连接口
                             try {
                                 if (typeof window.loadFeed === 'function') {
                                     window.loadFeed(true).catch(function() {});
