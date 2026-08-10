@@ -13853,7 +13853,8 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
 
     var rows = codes.map(function(c) {
       return {
-        code: c,
+        // 统一大写存储，RPC 按 upper() 匹配
+        code: String(c).toUpperCase(),
         days: days,
         token_limit_daily: tokenLimit,
         search_limit_daily: searchLimit,
@@ -13910,7 +13911,13 @@ app.delete('/admin/ai-agent/invite-codes/:code', verifyToken, async (req, res) =
   try {
     var code = String(req.params.code || '').trim();
     if (!code) return res.status(400).json({ ok: false, error: '缺少邀请码' });
-    var del = await supabase.from('ai_invite_codes').delete().eq('code', code);
+    // 先删激活记录，避免外键阻止删除（大小写不敏感）
+    var delR = await supabase.from('ai_invite_redemptions').delete().ilike('code', code);
+    if (delR.error) {
+      console.error('[INVITE-ADMIN] delete redemptions error:', delR.error.message);
+      return res.status(500).json({ ok: false, error: '删除激活记录失败' });
+    }
+    var del = await supabase.from('ai_invite_codes').delete().ilike('code', code);
     if (del.error) {
       console.error('[INVITE-ADMIN] delete error:', del.error.message);
       return res.status(500).json({ ok: false, error: '删除失败' });
@@ -13919,6 +13926,33 @@ app.delete('/admin/ai-agent/invite-codes/:code', verifyToken, async (req, res) =
   } catch (e) {
     console.error('[INVITE-ADMIN] delete exception:', e && e.message);
     return res.status(500).json({ ok: false, error: '删除失败' });
+  }
+});
+
+// POST /admin/ai-agent/pro-users/cancel — 管理员取消 Pro（verifyToken，非用户 JWT）
+app.post('/admin/ai-agent/pro-users/cancel', verifyToken, async (req, res) => {
+  try {
+    var target = String((req.body && req.body.user_name) || '').trim().toLowerCase();
+    if (!target) return res.status(400).json({ ok: false, error: '缺少用户名' });
+    var up = await supabase
+      .from('ai_user_membership')
+      .update({
+        plan: 'free',
+        pro_expires_at: null,
+        token_limit_daily: null,
+        search_limit_daily: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_name', target);
+    if (up.error) {
+      console.error('[INVITE-ADMIN] cancel pro error:', up.error.message);
+      return res.status(500).json({ ok: false, error: '取消失败' });
+    }
+    console.log('[INVITE-ADMIN] cancelled pro for', target, 'by', req.adminName);
+    return res.json({ ok: true, user_name: target });
+  } catch (e) {
+    console.error('[INVITE-ADMIN] cancel pro exception:', e && e.message);
+    return res.status(500).json({ ok: false, error: '取消失败' });
   }
 });
 

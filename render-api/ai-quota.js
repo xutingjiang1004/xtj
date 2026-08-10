@@ -70,10 +70,20 @@ function normalizeQuotaPayload(raw) {
   var tokensUsed = Math.max(0, Number(raw.tokens_used) || 0);
   var tokensLimit = Math.max(1, Number(raw.tokens_limit) || (isPro ? PRO_TOKEN_LIMIT : FREE_TOKEN_LIMIT));
   var searchUsed = Math.max(0, Number(raw.search_used) || 0);
-  var searchLimit = raw.search_limit == null ? (isPro ? -1 : FREE_SEARCH_LIMIT) : Number(raw.search_limit);
+  // 自定义搜索额度：Pro 也可能不是无限（邀请码可配每日 N 次）
+  var searchLimit = raw.search_limit == null
+    ? (isPro ? -1 : FREE_SEARCH_LIMIT)
+    : Number(raw.search_limit);
   var tokensRemaining = Math.max(0, tokensLimit - tokensUsed);
   var searchRemaining = searchLimit < 0 ? -1 : Math.max(0, searchLimit - searchUsed);
   var percent = tokensLimit > 0 ? Math.min(100, Math.round((tokensUsed * 1000) / tokensLimit) / 10) : 100;
+  var searchUnlimited = searchLimit < 0;
+  var canSearch = searchUnlimited || searchUsed < searchLimit;
+  var canChat = tokensUsed < tokensLimit;
+  // 优先采用服务端 RPC 的权威字段
+  if (typeof raw.can_search === 'boolean') canSearch = raw.can_search;
+  if (typeof raw.can_chat === 'boolean') canChat = raw.can_chat;
+  if (typeof raw.search_unlimited === 'boolean') searchUnlimited = raw.search_unlimited;
   return {
     ok: raw.ok !== false,
     user_name: raw.user_name || null,
@@ -88,9 +98,9 @@ function normalizeQuotaPayload(raw) {
     search_used: searchUsed,
     search_limit: searchLimit,
     search_remaining: searchRemaining,
-    search_unlimited: searchLimit < 0 || isPro,
-    can_chat: tokensUsed < tokensLimit,
-    can_search: isPro || searchUsed < (searchLimit < 0 ? Infinity : searchLimit),
+    search_unlimited: searchUnlimited,
+    can_chat: canChat,
+    can_search: canSearch,
     limits: limits()
   };
 }

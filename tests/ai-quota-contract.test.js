@@ -127,6 +127,43 @@ test('quota error messages distinguish token and search limits', () => {
   assert.match(quotaMod.getTokenQuotaErrorMessage('quota_unavailable'), /暂不可用/);
 });
 
+test('invite-code Pro flow is wired and payment channels removed', () => {
+  const mig043 = fs.readFileSync(path.join(ROOT, 'supabase/migrations/043_invite_code_pro.sql'), 'utf8');
+  const mig044 = fs.readFileSync(path.join(ROOT, 'supabase/migrations/044_invite_code_case_and_idempotent.sql'), 'utf8');
+  assert.match(mig043, /ai_invite_codes/);
+  assert.match(mig043, /ai_invite_redemptions/);
+  assert.match(mig043, /token_limit_daily/);
+  assert.match(mig044, /upper\(code\)/);
+  assert.match(mig044, /already_redeemed/);
+  assert.match(serverSource, /\/api\/agent\/invite\/validate/);
+  assert.match(serverSource, /\/api\/agent\/invite\/redeem/);
+  assert.match(serverSource, /\/admin\/ai-agent\/invite-codes/);
+  assert.match(serverSource, /\/admin\/ai-agent\/pro-users\/cancel/);
+  assert.doesNotMatch(serverSource, /afdian-pay|AFDIAN_/);
+  assert.match(agentSource, /showInviteCodeModal|aiInviteModal/);
+  assert.match(agentSource, /\/invite\/redeem/);
+});
+
+test('normalizeQuotaPayload respects custom Pro search limits', () => {
+  const q = quotaMod.normalizeQuotaPayload({
+    ok: true,
+    is_pro: true,
+    plan: 'pro',
+    tokens_used: 10,
+    tokens_limit: 50000,
+    search_used: 20,
+    search_limit: 20,
+    can_chat: true,
+    can_search: false,
+    search_unlimited: false
+  });
+  assert.equal(q.is_pro, true);
+  assert.equal(q.tokens_limit, 50000);
+  assert.equal(q.search_limit, 20);
+  assert.equal(q.search_unlimited, false);
+  assert.equal(q.can_search, false);
+});
+
 test('invite migration defines tables and RPCs', () => {
   const inviteMigration = fs.readFileSync(
     path.join(ROOT, 'supabase', 'migrations', '043_invite_code_pro.sql'),

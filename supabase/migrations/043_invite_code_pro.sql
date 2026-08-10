@@ -160,7 +160,8 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_code text := lower(trim(coalesce(p_code, '')));
+  -- 大小写不敏感匹配（生成码为大写，用户可能小写输入）
+  v_code text := upper(trim(coalesce(p_code, '')));
   v_user text := lower(trim(coalesce(p_user_name, '')));
   v_row public.ai_invite_codes%ROWTYPE;
   v_used boolean := false;
@@ -172,7 +173,7 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'reason', 'no_user');
   END IF;
 
-  SELECT * INTO v_row FROM public.ai_invite_codes WHERE code = v_code;
+  SELECT * INTO v_row FROM public.ai_invite_codes WHERE upper(code) = v_code;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'not_found');
   END IF;
@@ -187,7 +188,7 @@ BEGIN
 
   SELECT EXISTS (
     SELECT 1 FROM public.ai_invite_redemptions r
-    WHERE r.code = v_code AND r.user_name = v_user
+    WHERE upper(r.code) = v_code AND r.user_name = v_user
   ) INTO v_used;
   IF v_used THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'already_used');
@@ -195,7 +196,7 @@ BEGIN
 
   RETURN jsonb_build_object(
     'ok', true,
-    'code', v_code,
+    'code', v_row.code,
     'days', v_row.days,
     'token_limit_daily', v_row.token_limit_daily,
     'search_limit_daily', v_row.search_limit_daily
@@ -216,11 +217,12 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_code text := lower(trim(coalesce(p_code, '')));
+  v_code text := upper(trim(coalesce(p_code, '')));
   v_user text := lower(trim(coalesce(p_user_name, '')));
   v_row public.ai_invite_codes%ROWTYPE;
   v_used boolean := false;
   v_expires_at timestamptz;
+  v_quota jsonb;
 BEGIN
   IF v_code = '' THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'empty_code');
@@ -232,7 +234,7 @@ BEGIN
   -- 事务内原子：避免并发重复激活
   PERFORM pg_advisory_xact_lock(hashtext('ai_invite:' || v_code));
 
-  SELECT * INTO v_row FROM public.ai_invite_codes WHERE code = v_code;
+  SELECT * INTO v_row FROM public.ai_invite_codes WHERE upper(code) = v_code;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'not_found');
   END IF;
@@ -241,26 +243,33 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'reason', 'expired');
   END IF;
 
+  SELECT EXISTS (
+    SELECT 1 FROM public.ai_invite_redemptions r
+    WHERE upper(r.code) = v_code AND r.user_name = v_user
+  ) INTO v_used;
+  -- 同码同人：幂等成功（返回当前额度，不重复扣次数）
+  IF v_used THEN
+    v_quota := public.get_ai_user_quota(v_user, p_free_token_limit, p_pro_token_limit, p_free_search_limit);
+    RETURN v_quota || jsonb_build_object(
+      'ok', true,
+      'code', v_row.code,
+      'days', v_row.days,
+      'already_redeemed', true
+    );
+  END IF;
+
   IF v_row.used_count >= v_row.max_uses THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'exhausted');
   END IF;
 
-  SELECT EXISTS (
-    SELECT 1 FROM public.ai_invite_redemptions r
-    WHERE r.code = v_code AND r.user_name = v_user
-  ) INTO v_used;
-  IF v_used THEN
-    RETURN jsonb_build_object('ok', false, 'reason', 'already_used');
-  END IF;
-
-  -- 记录激活
+  -- 记录激活（存库内原始 code 大小写）
   INSERT INTO public.ai_invite_redemptions (code, user_name)
-  VALUES (v_code, v_user);
+  VALUES (v_row.code, v_user);
 
   -- 使用次数 +1
   UPDATE public.ai_invite_codes
     SET used_count = used_count + 1
-  WHERE code = v_code;
+  WHERE code = v_row.code;
 
   -- 开通 Pro：到期时间 = now + days（若已有更长有效期则保留更长）
   v_expires_at := now() + make_interval(days => v_row.days);
@@ -284,7 +293,7 @@ BEGIN
     updated_at = now();
 
   RETURN public.get_ai_user_quota(v_user, p_free_token_limit, p_pro_token_limit, p_free_search_limit)
-    || jsonb_build_object('ok', true, 'code', v_code, 'days', v_row.days);
+    || jsonb_build_object('ok', true, 'code', v_row.code, 'days', v_row.days, 'already_redeemed', false);
 END;
 $$;
 
