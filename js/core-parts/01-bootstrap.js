@@ -1599,32 +1599,42 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
         function bindTopAiToolsLauncher() {
             var nav = document.getElementById('aiToolsNav');
             var trigger = document.getElementById('aiToolsBtn');
-            var menu = document.getElementById('aiToolsMenu');
-            if (!nav || !trigger || !menu || nav.__xtjAiToolsBound) return;
+            if (!nav || !trigger || nav.__xtjAiToolsBound) return;
             nav.__xtjAiToolsBound = true;
-            function setOpen(open) {
-                nav.classList.toggle('is-open', !!open);
-                menu.hidden = !open;
-                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-                // Start loading as soon as the menu is useful, not after a tool is clicked.
-                if (open) ensureAiAgentLoaded().catch(function() {});
+
+            // 系统选择器（与小猫 AI + 菜单同一路线）：iOS 液态玻璃列表
+            var select = document.getElementById('aiToolsNativeSelect');
+            if (!select) {
+                select = document.createElement('select');
+                select.id = 'aiToolsNativeSelect';
+                select.className = 'xtj-native-picker';
+                select.setAttribute('aria-label', 'AI 工具');
+                select.tabIndex = -1;
+                select.innerHTML =
+                    '<option value="">选择 AI 工具…</option>' +
+                    '<option value="chat">小猫AI · 对话与历史</option>' +
+                    '<option value="research">深度研究</option>' +
+                    '<option value="search">站内搜索</option>';
+                nav.appendChild(select);
             }
-            nav.addEventListener('pointerenter', function() {
-                ensureAiAgentLoaded().catch(function() {});
-            }, { passive: true });
-            nav.addEventListener('focusin', function() {
-                ensureAiAgentLoaded().catch(function() {});
-            });
-            trigger.addEventListener('click', function(event) {
-                event.stopPropagation();
-                setOpen(menu.hidden);
-            });
-            menu.addEventListener('click', function(event) {
-                var button = event.target.closest('[data-ai-tool]');
-                if (!button) return;
-                var tool = button.getAttribute('data-ai-tool');
-                setOpen(false);
-                ensureAiAgentLoaded().then(function() {
+            var legacyMenu = document.getElementById('aiToolsMenu');
+            if (legacyMenu) {
+                legacyMenu.hidden = true;
+                legacyMenu.setAttribute('aria-hidden', 'true');
+            }
+
+            function openNativePicker(sel) {
+                try {
+                    if (typeof sel.showPicker === 'function') {
+                        sel.showPicker();
+                        return;
+                    }
+                } catch (e1) {}
+                try { sel.focus({ preventScroll: true }); sel.click(); } catch (e2) {}
+            }
+
+            function runTool(tool) {
+                return ensureAiAgentLoaded().then(function() {
                     if (tool === 'research' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openDeepThink === 'function') return window.__xtjAiAgent.openDeepThink();
                     if (tool === 'search' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') return window.__xtjAiAgent.openSiteSearch();
                     if (tool === 'chat' && window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') return window.__xtjAiAgent.open();
@@ -1633,12 +1643,28 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     console.error('[XTJ] top AI tools load failed:', error);
                     if (typeof window.showToast === 'function') window.showToast('AI 工具加载失败，请重试');
                 });
+            }
+
+            nav.addEventListener('pointerenter', function() {
+                ensureAiAgentLoaded().catch(function() {});
+            }, { passive: true });
+            nav.addEventListener('focusin', function() {
+                ensureAiAgentLoaded().catch(function() {});
             });
-            document.addEventListener('click', function(event) {
-                if (!nav.contains(event.target)) setOpen(false);
+
+            trigger.addEventListener('click', function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                ensureAiAgentLoaded().catch(function() {});
+                try { select.value = ''; } catch (e0) {}
+                openNativePicker(select);
             });
-            document.addEventListener('keydown', function(event) {
-                if (event.key === 'Escape') setOpen(false);
+
+            select.addEventListener('change', function() {
+                var tool = select.value;
+                try { select.value = ''; } catch (e1) {}
+                if (!tool) return;
+                runTool(tool);
             });
         }
         bindTopAiToolsLauncher();

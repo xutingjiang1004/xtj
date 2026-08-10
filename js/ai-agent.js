@@ -5764,38 +5764,53 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function bindTopAiTools() {
+    // 顶栏 AI 工具已由 core bootstrap 绑定原生 select；此处仅在 core 未绑定时兜底
     var nav = document.getElementById('aiToolsNav');
     var trigger = document.getElementById('aiToolsBtn');
-    var menu = document.getElementById('aiToolsMenu');
-    if (!nav || !trigger || !menu || nav.__xtjAiToolsBound) return;
+    if (!nav || !trigger || nav.__xtjAiToolsBound) return;
     nav.__xtjAiToolsBound = true;
-    function setOpen(open) {
-      nav.classList.toggle('is-open', !!open);
-      menu.hidden = !open;
-      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    var select = document.getElementById('aiToolsNativeSelect');
+    if (!select) {
+      select = el('select', {
+        id: 'aiToolsNativeSelect',
+        class: 'xtj-native-picker',
+        'aria-label': 'AI 工具',
+        tabindex: '-1'
+      });
+      select.innerHTML =
+        '<option value="">选择 AI 工具…</option>' +
+        '<option value="chat">小猫AI · 对话与历史</option>' +
+        '<option value="research">深度研究</option>' +
+        '<option value="search">站内搜索</option>';
+      nav.appendChild(select);
+    }
+    var legacyMenu = document.getElementById('aiToolsMenu');
+    if (legacyMenu) {
+      legacyMenu.hidden = true;
+      legacyMenu.setAttribute('aria-hidden', 'true');
+    }
+    function openNativePicker(sel) {
+      try {
+        if (typeof sel.showPicker === 'function') {
+          sel.showPicker();
+          return;
+        }
+      } catch (e1) {}
+      try { sel.focus({ preventScroll: true }); sel.click(); } catch (e2) {}
     }
     trigger.addEventListener('click', function(event) {
+      event.preventDefault();
       event.stopPropagation();
-      setOpen(menu.hidden);
+      try { select.value = ''; } catch (e0) {}
+      openNativePicker(select);
     });
-    menu.addEventListener('click', async function(event) {
-      var button = event.target.closest('[data-ai-tool]');
-      if (!button) return;
-      setOpen(false);
-      var tool = button.getAttribute('data-ai-tool');
-      if (tool === 'research') {
-        await openDeepThinkPage();
-      } else if (tool === 'search') {
-        await openSiteSearchPage();
-      } else {
-        await openAiChat();
-      }
-    });
-    document.addEventListener('click', function(event) {
-      if (!nav.contains(event.target)) setOpen(false);
-    });
-    document.addEventListener('keydown', function(event) {
-      if (event.key === 'Escape') setOpen(false);
+    select.addEventListener('change', async function() {
+      var tool = select.value;
+      try { select.value = ''; } catch (e1) {}
+      if (!tool) return;
+      if (tool === 'research') await openDeepThinkPage();
+      else if (tool === 'search') await openSiteSearchPage();
+      else await openAiChat();
     });
   }
 
