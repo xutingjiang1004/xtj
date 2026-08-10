@@ -147,7 +147,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     _quotaInflightStartedAt: 0
   };
 
-  var QUOTA_POLL_MS = 90000;
+  var QUOTA_POLL_MS = 30000;
   var FREE_TOKEN_DEFAULT = 100000;
   var PRO_TOKEN_DEFAULT = 1000000;
   var FREE_SEARCH_DEFAULT = 100;
@@ -224,10 +224,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     var descText = '额度已刷新，可立即使用';
     if (quota) {
-      var dLimit = Number(quota.tokens_limit) || PRO_TOKEN_DEFAULT;
+      var dTokLim = Number(quota.tokens_limit);
+      var dTokUnlim = dTokLim === -1;
+      var dLimit = dTokUnlim ? -1 : (dTokLim || PRO_TOKEN_DEFAULT);
       var dSearchUnlim = quota.search_unlimited === true || Number(quota.search_limit) < 0;
       var dSearchLimit = Number(quota.search_limit);
-      descText = '额度已刷新：每日 ' + formatTokenCount(dLimit) + ' tokens'
+      descText = '额度已刷新：' + (dTokUnlim ? 'Token 无限' : ('每日 ' + formatTokenCount(dLimit) + ' tokens'))
         + (dSearchUnlim ? ' · 无限搜索' : (' · 搜索 ' + Math.max(0, dSearchLimit) + ' 次/日'));
     }
 
@@ -245,10 +247,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     var line = overlay.querySelector('#aiProActivateQuotaLine');
     if (line && quota) {
-      var limit = Number(quota.tokens_limit) || PRO_TOKEN_DEFAULT;
+      var tokLim = Number(quota.tokens_limit);
+      var tokUnlim = tokLim === -1;
+      var limit = tokUnlim ? -1 : (tokLim || PRO_TOKEN_DEFAULT);
       var used = Number(quota.tokens_used) || 0;
-      var remain = Math.max(0, limit - used);
-      line.textContent = '今日可用 ' + formatTokenCount(remain) + ' / ' + formatTokenCount(limit) + ' tokens';
+      var remain = tokUnlim ? -1 : Math.max(0, limit - used);
+      line.textContent = tokUnlim
+        ? '今日已用 ' + formatTokenCount(used) + ' tokens · 无限额度'
+        : '今日可用 ' + formatTokenCount(remain) + ' / ' + formatTokenCount(limit) + ' tokens';
     }
 
     // 强制 reflow 再播动画
@@ -1435,6 +1441,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (r.status === 404) return 'AI 接口不存在，请检查 API_BASE 或部署域名';
     if (r.status === 405) return 'AI 接口方法不允许，请检查 API_BASE 或部署域名';
     if (r.status === 429) {
+      // 额度类 429：立即刷新一次额度（管理员取消 Pro / 额度变更后快速感知），节流防递归
+      var nowMs = Date.now();
+      if (nowMs - (S._lastQuotaErrorRefreshAt || 0) > 10000) {
+        S._lastQuotaErrorRefreshAt = nowMs;
+        try { fetchAiQuota(true); } catch (e) {}
+      }
       if (r && (r.code === 'token_limit' || (r.quota && r.quota.can_chat === false))) {
         return '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
       }
@@ -7925,13 +7937,15 @@ function showChatMessages() {
       S.webSearchEnabled = savedWebSearch === 'true';
     } catch (e) {}
 
-    // + 菜单：一级放额度/Pro/搜索/折叠入口，模型与思考各自二级页
+    // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
     var modelLabels = {
       'deepseek-v4-flash': 'V4 Flash',
       'deepseek-v4-pro': 'V4 Pro'
     };
     var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
 
+    // 固定盒包一层，杜绝 active 阴影/描边把 + 按钮顶得上下抽
+    var plusWrap = el('div', { class: 'ai-plus-wrap', id: 'aiPlusWrap' });
     var plusBtn = el('button', {
       type: 'button',
       class: 'ai-plus-btn',
@@ -7942,7 +7956,6 @@ function showChatMessages() {
       'aria-controls': 'aiPlusPanelShell',
       title: '额度、模型、思考、搜索与 Pro'
     });
-    // 固定 24 图标盒 + 用 rotate 在 + / × 之间切换，避免宽高跳动
     plusBtn.innerHTML =
       '<span class="ai-plus-btn-icon" aria-hidden="true">' +
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
@@ -7950,6 +7963,61 @@ function showChatMessages() {
           '<line x1="5" y1="12" x2="19" y2="12"/>' +
         '</svg>' +
       '</span>';
+    plusWrap.appendChild(plusBtn);
+
+    // 系统级选择器：模型 / 思考（iOS 原生滚轮，桌面原生下拉）
+    function openNativePicker(selectEl) {
+      if (!selectEl || !selectEl.isConnected) return false;
+      try {
+        if (typeof selectEl.showPicker === 'function') {
+          selectEl.showPicker();
+          return true;
+        }
+      } catch (e1) {}
+      try {
+        selectEl.focus({ preventScroll: true });
+        selectEl.click();
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    }
+    function fillSelect(sel, options, selectedValue) {
+      sel.innerHTML = '';
+      for (var si = 0; si < options.length; si++) {
+        var opt = options[si];
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (selectedValue != null && String(opt.value) === String(selectedValue)) o.selected = true;
+        sel.appendChild(o);
+      }
+    }
+    var modelSelect = el('select', {
+      id: 'aiPlusModelSelect',
+      class: 'ai-native-picker',
+      'aria-label': '选择模型',
+      tabindex: '-1'
+    });
+    var thinkSelect = el('select', {
+      id: 'aiPlusThinkSelect',
+      class: 'ai-native-picker',
+      'aria-label': '选择思考程度',
+      tabindex: '-1'
+    });
+    fillSelect(modelSelect, [
+      { value: 'deepseek-v4-flash', label: 'V4 Flash' },
+      { value: 'deepseek-v4-pro', label: 'V4 Pro' }
+    ], S.selectedModel || 'deepseek-v4-flash');
+    fillSelect(thinkSelect, [
+      { value: 'off', label: '关闭' },
+      { value: 'low', label: '轻度' },
+      { value: 'medium', label: '中度' },
+      { value: 'high', label: '深度' },
+      { value: 'max', label: '极致' }
+    ], S.thinkingMode || 'medium');
+    plusWrap.appendChild(modelSelect);
+    plusWrap.appendChild(thinkSelect);
 
     var panelShell = el('div', {
       class: 'ai-plus-panel-shell',
@@ -7976,7 +8044,6 @@ function showChatMessages() {
     }
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
-        // ===== 一级页：额度 + 两张设置卡（Pro / 功能）=====
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
           '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
             '<div class="ai-quota-card-head">' +
@@ -8034,56 +8101,6 @@ function showChatMessages() {
             '</div>' +
           '</div>' +
         '</div>' +
-        // ===== 模型二级页 =====
-        '<div class="ai-panel-page" id="aiPanelModel" data-page="model" hidden>' +
-          '<button type="button" class="ai-panel-back" data-action="back" aria-label="返回">' +
-            '<span aria-hidden="true">‹</span><span>模型</span>' +
-          '</button>' +
-          '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择模型">' +
-            '<button type="button" class="ai-panel-option" role="radio" data-model="deepseek-v4-flash" aria-checked="false">' +
-              '<span class="ai-panel-option-body">' +
-                '<span class="ai-panel-option-label">DeepSeek V4 Flash</span>' +
-                '<span class="ai-panel-option-desc">速度更快，适合日常聊天</span>' +
-              '</span>' +
-              '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
-            '</button>' +
-            '<button type="button" class="ai-panel-option" role="radio" data-model="deepseek-v4-pro" aria-checked="false">' +
-              '<span class="ai-panel-option-body">' +
-                '<span class="ai-panel-option-label">DeepSeek V4 Pro</span>' +
-                '<span class="ai-panel-option-desc">能力更强，适合复杂任务</span>' +
-              '</span>' +
-              '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
-            '</button>' +
-          '</div>' +
-        '</div>' +
-        // ===== 思考二级页 =====
-        '<div class="ai-panel-page" id="aiPanelThink" data-page="think" hidden>' +
-          '<button type="button" class="ai-panel-back" data-action="back" aria-label="返回">' +
-            '<span aria-hidden="true">‹</span><span>思考程度</span>' +
-          '</button>' +
-          '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择思考程度">' +
-            '<button type="button" class="ai-panel-option" role="radio" data-think="off" aria-checked="false">' +
-              '<span class="ai-panel-option-body"><span class="ai-panel-option-label">关闭</span><span class="ai-panel-option-desc">不展示思考过程，回复更快</span></span>' +
-              '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
-            '</button>' +
-            '<button type="button" class="ai-panel-option" role="radio" data-think="low" aria-checked="false">' +
-              '<span class="ai-panel-option-body"><span class="ai-panel-option-label">轻度</span><span class="ai-panel-option-desc">简单推理</span></span>' +
-              '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
-            '</button>' +
-            '<button type="button" class="ai-panel-option" role="radio" data-think="medium" aria-checked="false">' +
-              '<span class="ai-panel-option-body"><span class="ai-panel-option-label">中度</span><span class="ai-panel-option-desc">日常问题默认推荐</span></span>' +
-              '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
-            '</button>' +
-            '<button type="button" class="ai-panel-option" role="radio" data-think="high" aria-checked="false">' +
-              '<span class="ai-panel-option-body"><span class="ai-panel-option-label">深度</span><span class="ai-panel-option-desc">更仔细的分析</span></span>' +
-              '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
-            '</button>' +
-            '<button type="button" class="ai-panel-option" role="radio" data-think="max" aria-checked="false">' +
-              '<span class="ai-panel-option-body"><span class="ai-panel-option-label">极致</span><span class="ai-panel-option-desc">最强推理，耗时更长</span></span>' +
-              '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
-            '</button>' +
-          '</div>' +
-        '</div>' +
       '</div>';
 
     var panelOpen = false;
@@ -8093,34 +8110,16 @@ function showChatMessages() {
 
     function showPanelPage(page) {
       currentPanelPage = page || 'primary';
-      var pages = panelShell.querySelectorAll('.ai-panel-page');
-      for (var i = 0; i < pages.length; i++) {
-        var p = pages[i];
-        var on = p.getAttribute('data-page') === currentPanelPage;
-        p.classList.toggle('is-active', on);
-        if (on) p.removeAttribute('hidden');
-        else p.setAttribute('hidden', '');
-      }
       panelShell.classList.toggle('is-subpage', currentPanelPage !== 'primary');
     }
 
     function updateModelUI() {
-      var radios = panelShell.querySelectorAll('[data-model]');
-      for (var i = 0; i < radios.length; i++) {
-        var on = radios[i].getAttribute('data-model') === S.selectedModel;
-        radios[i].setAttribute('aria-checked', on ? 'true' : 'false');
-        radios[i].classList.toggle('is-selected', on);
-      }
+      try { modelSelect.value = S.selectedModel || 'deepseek-v4-flash'; } catch (eM) {}
       var sum = panelShell.querySelector('#aiModelSummary');
       if (sum) sum.textContent = modelLabels[S.selectedModel] || S.selectedModel;
     }
     function updateThinkUI() {
-      var radios = panelShell.querySelectorAll('[data-think]');
-      for (var i = 0; i < radios.length; i++) {
-        var on = radios[i].getAttribute('data-think') === S.thinkingMode;
-        radios[i].setAttribute('aria-checked', on ? 'true' : 'false');
-        radios[i].classList.toggle('is-selected', on);
-      }
+      try { thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT) {}
       var sum = panelShell.querySelector('#aiThinkSummary');
       if (sum) sum.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
     }
@@ -8168,10 +8167,13 @@ function showChatMessages() {
     function renderQuotaUI() {
       var q = S.quota || defaultQuotaShape();
       var used = Math.max(0, Number(q.tokens_used) || 0);
-      var limit = Math.max(1, Number(q.tokens_limit) || FREE_TOKEN_DEFAULT);
-      var pct = typeof q.tokens_percent === 'number'
-        ? Math.min(100, Math.max(0, q.tokens_percent))
-        : Math.min(100, Math.round((used * 1000) / limit) / 10);
+      // tokens_limit: -1 = 无限（与 search 的 -1 语义一致）
+      var tokensUnlimited = Number(q.tokens_limit) === -1;
+      var limit = tokensUnlimited ? -1 : Math.max(1, Number(q.tokens_limit) || FREE_TOKEN_DEFAULT);
+      var pct = tokensUnlimited ? 0
+        : (typeof q.tokens_percent === 'number'
+          ? Math.min(100, Math.max(0, q.tokens_percent))
+          : Math.min(100, Math.round((used * 1000) / limit) / 10));
       var fill = panelShell.querySelector('#aiQuotaBarFill');
       var tokenText = panelShell.querySelector('#aiQuotaTokenText');
       var pctText = panelShell.querySelector('#aiQuotaPercentText');
@@ -8186,7 +8188,9 @@ function showChatMessages() {
         fill.classList.toggle('is-danger', pct >= 92);
       }
       if (tokenText) {
-        tokenText.textContent = formatTokenCount(used) + ' / ' + formatTokenCount(limit) + ' tokens';
+        tokenText.textContent = tokensUnlimited
+          ? formatTokenCount(used) + ' / 无限 tokens'
+          : formatTokenCount(used) + ' / ' + formatTokenCount(limit) + ' tokens';
       }
       if (pctText) pctText.textContent = pct + '%';
       // 搜索额度：只看 search_unlimited / search_limit，不要用 is_pro 一刀切成「无限」
@@ -8210,7 +8214,11 @@ function showChatMessages() {
       if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 会员' : '开通 Pro';
       if (proDesc) {
         if (q.is_pro) {
-          proDesc.textContent = searchUnlimited ? '已开通' : ('搜 ' + Math.max(0, searchLimit) + '/日');
+          var descParts = [];
+          if (tokensUnlimited) descParts.push('Token 无限');
+          else descParts.push(formatTokenCount(limit) + '/日');
+          descParts.push(searchUnlimited ? '无限搜索' : '搜 ' + Math.max(0, searchLimit) + '/日');
+          proDesc.textContent = descParts.join(' · ');
         } else {
           proDesc.textContent = '邀请码';
         }
@@ -8226,15 +8234,19 @@ function showChatMessages() {
       var bar = panelShell.parentNode.getBoundingClientRect();
       var panelW = Math.min(308, Math.max(268, bar.width - 16));
       panelShell.style.width = panelW + 'px';
-      // 贴着 + 按钮左侧对齐，超出则右缩，避免跑出屏幕
+      // 菜单左缘尽量贴 + 按钮
       var left = btnRect.left - bar.left;
       var maxLeft = Math.max(8, bar.width - panelW - 8);
       if (left > maxLeft) left = maxLeft;
       if (left < 8) left = 8;
       panelShell.style.left = left + 'px';
       panelShell.style.right = 'auto';
-      // 动画用底部上移，不再用动态 transform-origin 缩放（易抖、难看）
-      panelShell.style.transformOrigin = 'left bottom';
+      // Hero：从 + 按钮中心飞出/收回（matched geometry）
+      var originX = Math.round(btnRect.left + btnRect.width / 2 - bar.left - left);
+      if (originX < 12) originX = 12;
+      if (originX > panelW - 12) originX = panelW - 12;
+      panelShell.style.transformOrigin = originX + 'px 100%';
+      panelShell.style.setProperty('--hero-ox', originX + 'px');
     }
 
     function openPanel() {
@@ -8252,17 +8264,22 @@ function showChatMessages() {
       renderQuotaUI();
       fetchAiQuota(true);
       positionPanel();
-      panelShell.classList.remove('is-closing');
-      // 先落到关闭态，再在下一帧打开，保证 transition 触发
-      panelShell.classList.remove('open');
+      panelShell.classList.remove('is-closing', 'open');
+      panelShell.classList.add('is-opening');
       plusBtn.classList.add('active');
+      plusWrap.classList.add('is-open');
       plusBtn.setAttribute('aria-expanded', 'true');
-      // 强制 reflow，避免同帧 toggle 吃掉动画
+      // 强制 reflow，保证 hero scale 过渡从关闭态起算
       void panelShell.offsetWidth;
       requestAnimationFrame(function() {
         if (!panelOpen) return;
         panelShell.classList.add('open');
       });
+      if (closeTimer) clearTimeout(closeTimer);
+      closeTimer = setTimeout(function() {
+        panelShell.classList.remove('is-opening');
+        closeTimer = null;
+      }, 340);
     }
 
     function closePanel(animate) {
@@ -8270,8 +8287,10 @@ function showChatMessages() {
       if (!panelOpen && panelClosing) return;
       panelClosing = true;
       panelOpen = false;
-      panelShell.classList.remove('open');
+      panelShell.classList.remove('is-opening', 'open');
+      panelShell.classList.add('is-closing');
       plusBtn.classList.remove('active');
+      plusWrap.classList.remove('is-open');
       plusBtn.setAttribute('aria-expanded', 'false');
       showPanelPage('primary');
       if (animate === false) {
@@ -8283,13 +8302,12 @@ function showChatMessages() {
         }
         return;
       }
-      panelShell.classList.add('is-closing');
       if (closeTimer) clearTimeout(closeTimer);
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         closeTimer = null;
-      }, 220);
+      }, 320);
     }
 
     function closeInviteModal() {

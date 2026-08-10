@@ -13761,7 +13761,9 @@ app.post('/api/agent/invite/redeem', authenticateUser, async (req, res) => {
 
 function formatInviteCodeInfo(data) {
   var parts = ['开通 Pro ' + (data.days || 1) + ' 天'];
-  if (data.token_limit_daily != null && data.token_limit_daily > 0) {
+  if (data.token_limit_daily === -1) {
+    parts.push('Token 无限');
+  } else if (data.token_limit_daily != null && data.token_limit_daily > 0) {
     parts.push('每日 ' + formatBigNumber(data.token_limit_daily) + ' token');
   } else {
     parts.push('每日 ' + formatBigNumber(PRO_TOKEN_LIMIT) + ' token');
@@ -13773,7 +13775,10 @@ function formatInviteCodeInfo(data) {
 }
 
 function formatBigNumber(n) {
-  n = Math.max(0, Math.floor(Number(n) || 0));
+  var num = Number(n);
+  if (num === Infinity || num === -Infinity) return '∞';
+  if (num < 0) return '无限';
+  n = Math.max(0, Math.floor(num || 0));
   if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k';
   return String(n);
@@ -13833,13 +13838,27 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
     var codeLength = Math.max(4, Math.min(16, parseInt(body.code_length, 10) || 6));
     var tokenLimit = body.token_limit_daily === undefined || body.token_limit_daily === null || body.token_limit_daily === ''
       ? null
-      : Math.max(1, Math.floor(Number(body.token_limit_daily) || 0));
+      : (function() {
+          var t = Number(body.token_limit_daily);
+          // -1 = 无限 token（与 search 的 -1 语义一致）；否则必须为正整数
+          if (!Number.isFinite(t)) return null;
+          if (t === -1) return -1;
+          if (t < 1) return null;
+          // 超 JS 安全整数无法精确表示：明确报错（避免静默存错值/PostgREST 类型错误）
+          if (t > Number.MAX_SAFE_INTEGER) {
+            var err = new Error('token_limit_daily 超出可表示范围');
+            err.statusCode = 400;
+            throw err;
+          }
+          return Math.floor(t);
+        })();
     var searchLimitRaw = body.search_limit_daily;
     var searchLimit = null;
     if (searchLimitRaw === 'unlimited' || searchLimitRaw === -1) {
       searchLimit = -1;
     } else if (searchLimitRaw !== undefined && searchLimitRaw !== null && searchLimitRaw !== '') {
-      searchLimit = Math.max(0, Math.floor(Number(searchLimitRaw) || 0));
+      var s = Number(searchLimitRaw);
+      if (Number.isFinite(s)) searchLimit = Math.max(0, Math.floor(s));
     }
     var note = String(body.note || '').slice(0, 200);
     var expiresDays = parseInt(body.expires_days, 10);
@@ -13905,6 +13924,9 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
     return res.json({ ok: true, count: codes.length, codes: codes });
   } catch (e) {
     console.error('[INVITE-ADMIN] create exception:', e && e.message);
+    if (e && e.statusCode === 400) {
+      return res.status(400).json({ ok: false, error: e.message || '参数不合法' });
+    }
     return res.status(500).json({ ok: false, error: '生成失败' });
   }
 });
