@@ -13674,7 +13674,7 @@ app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
 // POST /api/agent/invite/validate — 校验邀请码（前端输入时实时反馈）
 app.post('/api/agent/invite/validate', authenticateUser, async (req, res) => {
   try {
-    var code = String((req.body && req.body.code) || '').trim();
+    var code = String((req.body && req.body.code) || '').trim().toUpperCase().replace(/\s+/g, '');
     if (!code) return res.json({ ok: false, reason: 'empty_code', message: '请输入邀请码' });
     var result = await supabase.rpc('validate_ai_invite_code', {
       p_code: code,
@@ -13711,7 +13711,7 @@ app.post('/api/agent/invite/validate', authenticateUser, async (req, res) => {
 // POST /api/agent/invite/redeem — 激活邀请码（开通 Pro）
 app.post('/api/agent/invite/redeem', authenticateUser, async (req, res) => {
   try {
-    var code = String((req.body && req.body.code) || '').trim();
+    var code = String((req.body && req.body.code) || '').trim().toUpperCase().replace(/\s+/g, '');
     if (!code) return res.json({ ok: false, reason: 'empty_code', message: '请输入邀请码' });
     var result = await supabase.rpc('redeem_ai_invite_code', {
       p_code: code,
@@ -13722,21 +13722,32 @@ app.post('/api/agent/invite/redeem', authenticateUser, async (req, res) => {
     });
     if (result.error) {
       console.error('[INVITE] redeem error:', result.error.message);
-      return res.status(500).json({ ok: false, error: '激活失败，请稍后重试' });
+      // 常见：未跑 044 迁移时 lower 匹配失败 / 函数不存在
+      return res.status(500).json({
+        ok: false,
+        error: '激活失败，请确认已执行 043/044 迁移：' + (result.error.message || '请稍后重试')
+      });
     }
     var data = result.data || {};
     if (!data.ok) {
       var msgMap = {
-        not_found: '邀请码不存在',
+        not_found: '邀请码不存在（请核对后台生成的码，并确认已跑 SQL 044）',
         expired: '邀请码已过期',
         exhausted: '邀请码使用次数已用完',
         already_used: '你已使用过该邀请码',
-        no_user: '请先登录'
+        no_user: '请先登录',
+        empty_code: '请输入邀请码'
       };
       return res.json({ ok: false, reason: data.reason, message: msgMap[data.reason] || '邀请码无效' });
     }
     var quota = aiQuota.normalizeQuotaPayload(data);
-    return res.json({ ok: true, message: 'Pro 开通成功', quota: quota, days: data.days || null });
+    return res.json({
+      ok: true,
+      message: data.already_redeemed ? '你已激活过该码' : 'Pro 开通成功',
+      quota: quota,
+      days: data.days || null,
+      already_redeemed: !!data.already_redeemed
+    });
   } catch (e) {
     console.error('[INVITE] redeem exception:', e && e.message);
     return res.status(500).json({ ok: false, error: '激活失败，请稍后重试' });

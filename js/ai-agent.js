@@ -7790,6 +7790,15 @@ function showChatMessages() {
       role: 'menu',
       'aria-label': '更多选项'
     });
+    // SF Symbols 风格线标（统一 24 描边）
+    var ICO = {
+      pro: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.1 4.9 5.3.5-4 3.5 1.2 5.2L12 14.9 7.4 17.3l1.2-5.2-4-3.5 5.3-.5L12 3.2z"/></svg>',
+      upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5l-5.8 5.8a3.2 3.2 0 0 0 4.5 4.5l6.2-6.2a4.6 4.6 0 0 0-6.5-6.5L7 9.5"/><path d="M9 15l-1.2 1.2"/></svg>',
+      model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5"/><path d="M9 2.8v2.2M15 2.8v2.2M9 19v2.2M15 19v2.2M2.8 9H5M2.8 15H5M19 9h2.2M19 15h2.2M9 9h6v6H9z"/></svg>',
+      think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5M10 21h4"/><path d="M8.2 15.2A5.8 5.8 0 1 1 15.8 15c0 1.6-.7 2.5-1.5 3.4-.5.6-.8 1.2-.8 1.6H10.5c0-.5-.3-1.1-.8-1.7-.8-.9-1.5-1.8-1.5-3.3z"/></svg>',
+      search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2"/><path d="M16.2 16.2L21 21"/></svg>',
+      chev: '<svg class="ai-panel-chev-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
+    };
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
         // ===== 一级页 =====
@@ -7806,43 +7815,48 @@ function showChatMessages() {
             '</div>' +
             '<div class="ai-quota-search-line" id="aiQuotaSearchLine">网页搜索：—</div>' +
           '</div>' +
-          '<button type="button" class="ai-panel-pro-card" data-action="pro" id="aiProOpenBtn">' +
-            '<span class="ai-panel-pro-icon" aria-hidden="true">✨</span>' +
-            '<span class="ai-panel-pro-body">' +
-              '<b id="aiProCardTitle">开通 Pro</b>' +
-              '<small id="aiProCardDesc">10 倍 Token + 无限网页搜索</small>' +
-            '</span>' +
-            '<span class="ai-panel-chevron" aria-hidden="true">›</span>' +
-          '</button>' +
-          '<div class="ai-panel-separator" role="separator"></div>' +
-          '<button type="button" class="ai-panel-option" role="menuitem" data-action="upload">' +
-            '<span class="ai-panel-option-icon" aria-hidden="true">📎</span>' +
-            '<span class="ai-panel-option-text">上传文件</span>' +
-          '</button>' +
-          '<button type="button" class="ai-panel-option ai-panel-nav" role="menuitem" data-action="open-model">' +
-            '<span class="ai-panel-option-icon" aria-hidden="true">🧠</span>' +
-            '<span class="ai-panel-option-body">' +
-              '<span class="ai-panel-option-label">模型</span>' +
-              '<span class="ai-panel-option-desc" id="aiModelSummary">V4 Flash</span>' +
-            '</span>' +
-            '<span class="ai-panel-chevron" aria-hidden="true">›</span>' +
-          '</button>' +
-          '<button type="button" class="ai-panel-option ai-panel-nav" role="menuitem" data-action="open-think">' +
-            '<span class="ai-panel-option-icon" aria-hidden="true">💭</span>' +
-            '<span class="ai-panel-option-body">' +
-              '<span class="ai-panel-option-label">思考程度</span>' +
-              '<span class="ai-panel-option-desc" id="aiThinkSummary">极致</span>' +
-            '</span>' +
-            '<span class="ai-panel-chevron" aria-hidden="true">›</span>' +
-          '</button>' +
-          '<button type="button" class="ai-panel-option ai-panel-option-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
-            '<span class="ai-panel-option-icon" aria-hidden="true">🌐</span>' +
-            '<span class="ai-panel-option-body">' +
-              '<span class="ai-panel-option-label">网页搜索</span>' +
-              '<span class="ai-panel-option-desc" id="aiSearchRemainHint">每日有次数限制</span>' +
-            '</span>' +
-            '<span class="ai-search-status" id="aiSearchStatus">关</span>' +
-          '</button>' +
+          '<div class="ai-panel-menu-list" role="group" aria-label="功能选项">' +
+            '<button type="button" class="ai-panel-row" data-action="pro" id="aiProOpenBtn">' +
+              '<span class="ai-panel-row-icon ai-panel-row-icon--pro" aria-hidden="true">' + ICO.pro + '</span>' +
+              '<span class="ai-panel-row-main">' +
+                '<span class="ai-panel-row-title" id="aiProCardTitle">开通 Pro</span>' +
+                '<span class="ai-panel-row-sub" id="aiProCardDesc">10 倍额度 · 无限搜索</span>' +
+              '</span>' +
+              '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+            '</button>' +
+            '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload">' +
+              '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.upload + '</span>' +
+              '<span class="ai-panel-row-main">' +
+                '<span class="ai-panel-row-title">上传文件</span>' +
+                '<span class="ai-panel-row-sub">图片 / PDF / 文档</span>' +
+              '</span>' +
+              '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+            '</button>' +
+            '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-model">' +
+              '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.model + '</span>' +
+              '<span class="ai-panel-row-main">' +
+                '<span class="ai-panel-row-title">模型</span>' +
+                '<span class="ai-panel-row-sub" id="aiModelSummary">V4 Flash</span>' +
+              '</span>' +
+              '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+            '</button>' +
+            '<button type="button" class="ai-panel-row" role="menuitem" data-action="open-think">' +
+              '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.think + '</span>' +
+              '<span class="ai-panel-row-main">' +
+                '<span class="ai-panel-row-title">思考程度</span>' +
+                '<span class="ai-panel-row-sub" id="aiThinkSummary">轻度</span>' +
+              '</span>' +
+              '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>' +
+            '</button>' +
+            '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
+              '<span class="ai-panel-row-icon" aria-hidden="true">' + ICO.search + '</span>' +
+              '<span class="ai-panel-row-main">' +
+                '<span class="ai-panel-row-title">网页搜索</span>' +
+                '<span class="ai-panel-row-sub" id="aiSearchRemainHint">今日剩余 — 次</span>' +
+              '</span>' +
+              '<span class="ai-search-status" id="aiSearchStatus">关</span>' +
+            '</button>' +
+          '</div>' +
         '</div>' +
         // ===== 模型二级页 =====
         '<div class="ai-panel-page" id="aiPanelModel" data-page="model" hidden>' +
@@ -8085,20 +8099,23 @@ function showChatMessages() {
       modal.className = 'ai-invite-modal';
       modal.setAttribute('role', 'dialog');
       modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-labelledby', 'aiInviteModalTitle');
       modal.innerHTML =
         '<div class="ai-invite-modal-box">' +
-          '<div class="ai-invite-modal-head">' +
-            '<b>开通 Pro</b>' +
-            '<button type="button" class="ai-invite-modal-close" aria-label="关闭">×</button>' +
+          '<button type="button" class="ai-invite-modal-close" aria-label="关闭">×</button>' +
+          '<div class="ai-invite-modal-hero" aria-hidden="true">' +
+            '<span class="ai-invite-modal-hero-badge">PRO</span>' +
           '</div>' +
           '<div class="ai-invite-modal-body">' +
-            '<p class="ai-invite-modal-tip">输入管理员发放的邀请码，激活后获得对应额度的 Pro 权限</p>' +
-            '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="请输入邀请码" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" />' +
-            '<div class="ai-invite-code-feedback" id="aiInviteCodeFeedback"></div>' +
+            '<h3 id="aiInviteModalTitle" class="ai-invite-modal-title">输入邀请码</h3>' +
+            '<p class="ai-invite-modal-tip">向管理员获取邀请码，激活后立即获得对应 Pro 额度</p>' +
+            '<label class="ai-invite-code-label" for="aiInviteCodeInput">邀请码</label>' +
+            '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="例如 A3K9M2" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" inputmode="text" />' +
+            '<div class="ai-invite-code-feedback" id="aiInviteCodeFeedback" aria-live="polite"></div>' +
           '</div>' +
           '<div class="ai-invite-modal-foot">' +
             '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel">取消</button>' +
-            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiInviteConfirmBtn">激活</button>' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiInviteConfirmBtn">立即激活</button>' +
           '</div>' +
         '</div>';
       document.body.appendChild(modal);
@@ -8124,22 +8141,24 @@ function showChatMessages() {
 
       function doValidate() {
         if (validating) return;
-        var code = input.value.trim();
+        var code = String(input.value || '').trim().toUpperCase();
         feedback.className = 'ai-invite-code-feedback';
         if (!code) { feedback.textContent = ''; return; }
         validating = true;
+        feedback.textContent = '校验中…';
         apiRequest('POST', '/invite/validate', { code: code })
           .then(function(r) {
             validating = false;
-            var payload = (r && r.data) || {};
+            // 兼容 data 包一层 / 扁平两种返回
+            var payload = (r && r.data) || r || {};
             if (payload && payload.ok) {
               validCodeInfo = payload;
               feedback.className = 'ai-invite-code-feedback is-ok';
-              feedback.textContent = payload.message || '邀请码有效';
+              feedback.textContent = payload.message || '邀请码有效，可以激活';
             } else {
               validCodeInfo = null;
               feedback.className = 'ai-invite-code-feedback is-bad';
-              feedback.textContent = (payload && payload.message) || '邀请码无效';
+              feedback.textContent = (payload && (payload.message || payload.error)) || '邀请码无效';
             }
           })
           .catch(function() {
@@ -8151,67 +8170,63 @@ function showChatMessages() {
       }
 
       input.addEventListener('input', function() {
+        // 输入时自动转大写，去掉空格
+        var raw = String(input.value || '').toUpperCase().replace(/\s+/g, '');
+        if (input.value !== raw) input.value = raw;
         validCodeInfo = null;
         if (validateTimer) clearTimeout(validateTimer);
-        var code = input.value.trim();
+        var code = raw.trim();
         feedback.className = 'ai-invite-code-feedback';
         if (!code) { feedback.textContent = ''; return; }
-        validateTimer = setTimeout(doValidate, 350);
+        validateTimer = setTimeout(doValidate, 280);
       });
 
       function doRedeem() {
         if (confirmBtn.disabled) return;
-        var code = input.value.trim();
+        var code = String(input.value || '').trim().toUpperCase();
         if (!code) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入邀请码'; return; }
         confirmBtn.disabled = true;
         confirmBtn.textContent = '激活中…';
         apiRequest('POST', '/invite/redeem', { code: code })
           .then(function(r) {
             confirmBtn.disabled = false;
-            confirmBtn.textContent = '激活';
-            var payload = (r && r.data) || {};
+            confirmBtn.textContent = '立即激活';
+            var payload = (r && r.data) || r || {};
             if (payload && payload.ok) {
               close();
               if (payload.quota) applyQuota(payload.quota, { forceCeremony: true, skipRefetch: true });
               else fetchAiQuota(true).then(function(q) { if (q && q.is_pro) applyQuota(q, { forceCeremony: true, skipRefetch: true }); });
-              notify('Pro 开通成功，额度已刷新');
+              notify(payload.already_redeemed ? '你已激活过该码，Pro 仍有效' : 'Pro 开通成功，额度已刷新');
             } else {
               feedback.className = 'ai-invite-code-feedback is-bad';
-              feedback.textContent = (payload && payload.message) || '激活失败';
+              feedback.textContent = (payload && (payload.message || payload.error)) || '激活失败';
               setTimeout(function() { fetchAiQuota(true); }, 300);
             }
           })
           .catch(function() {
             confirmBtn.disabled = false;
-            confirmBtn.textContent = '激活';
+            confirmBtn.textContent = '立即激活';
             feedback.className = 'ai-invite-code-feedback is-bad';
             feedback.textContent = '激活失败，请稍后重试';
           });
       }
 
       confirmBtn.addEventListener('click', doRedeem);
-      setTimeout(function() { try { input.focus(); } catch (e1) {} }, 50);
+      setTimeout(function() { try { input.focus(); } catch (e1) {} }, 30);
     }
 
-    async function openProCheckout() {
-      try {
-        // 先强制刷新，激活成功后能立刻看到最新额度
-        await fetchAiQuota(true);
-        var r = await apiRequest('POST', '/pro/checkout', {});
-        var payload = (r && r.data) || {};
-        if (payload.already_pro) {
-          if (payload.quota) applyQuota(payload.quota, { forceCeremony: true, skipRefetch: false });
-          else {
-            await fetchAiQuota(true);
-            if (S.quota && S.quota.is_pro) applyQuota(S.quota, { forceCeremony: true, skipRefetch: true });
-          }
-          notify('Pro 已生效，额度已刷新');
-          return;
-        }
-        showInviteCodeModal();
-      } catch (e) {
-        notify('Pro 开通入口暂不可用');
+    function openProCheckout() {
+      // 已是 Pro：轻量提示，不阻塞
+      if (S.quota && S.quota.is_pro) {
+        notify('你已经是 Pro 会员');
+        applyQuota(S.quota, { forceCeremony: false, skipRefetch: true });
+        fetchAiQuota(true);
+        return;
       }
+      // 立刻弹出邀请码，额度在后台刷新（避免等网络）
+      try { closePanel(false); } catch (e0) {}
+      showInviteCodeModal();
+      fetchAiQuota(false);
     }
 
     plusBtn.addEventListener('click', function(e) {
