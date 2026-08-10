@@ -7945,12 +7945,17 @@ function showChatMessages() {
       role: 'menu',
       'aria-label': '更多选项'
     });
-    // SF Symbols 风格线标（统一 24 描边）
+    // 菜单图标：更直观的通用符号（星 / 回形针 / 芯片 / 灯泡 / 放大镜）
     var ICO = {
+      // 星：Pro
       pro: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.1 4.9 5.3.5-4 3.5 1.2 5.2L12 14.9 7.4 17.3l1.2-5.2-4-3.5 5.3-.5L12 3.2z"/></svg>',
-      upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5l-5.8 5.8a3.2 3.2 0 0 0 4.5 4.5l6.2-6.2a4.6 4.6 0 0 0-6.5-6.5L7 9.5"/><path d="M9 15l-1.2 1.2"/></svg>',
-      model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5"/><path d="M9 2.8v2.2M15 2.8v2.2M9 19v2.2M15 19v2.2M2.8 9H5M2.8 15H5M19 9h2.2M19 15h2.2M9 9h6v6H9z"/></svg>',
-      think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5M10 21h4"/><path d="M8.2 15.2A5.8 5.8 0 1 1 15.8 15c0 1.6-.7 2.5-1.5 3.4-.5.6-.8 1.2-.8 1.6H10.5c0-.5-.3-1.1-.8-1.7-.8-.9-1.5-1.8-1.5-3.3z"/></svg>',
+      // 回形针：上传附件
+      upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.6 3.6 0 0 1 5.1 5.1l-9.2 9.2a1.7 1.7 0 1 1-2.4-2.4l8.1-8.1"/></svg>',
+      // 四层方块：模型（比芯片针脚更易认）
+      model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+      // 灯泡：思考程度
+      think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.8c.6.5 1 1.2 1.1 2h4.8c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3z"/></svg>',
+      // 放大镜：网页搜索
       search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2"/><path d="M16.2 16.2L21 21"/></svg>',
       chev: '<svg class="ai-panel-chev-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
     };
