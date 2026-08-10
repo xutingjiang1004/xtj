@@ -7965,9 +7965,18 @@ function showChatMessages() {
         btn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
       }
       if (hint) {
-        if (q && q.search_unlimited) hint.textContent = 'Pro · 无限搜索';
-        else if (q) hint.textContent = '今日剩余 ' + Math.max(0, q.search_remaining || 0) + ' 次';
-        else hint.textContent = '每日有次数限制';
+        if (q && (q.search_unlimited === true || Number(q.search_limit) < 0)) {
+          hint.textContent = '无限搜索';
+        } else if (q && q.search_limit != null) {
+          var rem = typeof q.search_remaining === 'number'
+            ? Math.max(0, q.search_remaining)
+            : Math.max(0, Number(q.search_limit) - (Number(q.search_used) || 0));
+          hint.textContent = '今日剩余 ' + rem + ' / ' + Math.max(0, Number(q.search_limit)) + ' 次';
+        } else if (q) {
+          hint.textContent = '今日剩余 ' + Math.max(0, q.search_remaining || 0) + ' 次';
+        } else {
+          hint.textContent = '每日有次数限制';
+        }
       }
       if (plusBtn) {
         if (S.webSearchEnabled) plusBtn.classList.add('ws-on');
@@ -7999,11 +8008,18 @@ function showChatMessages() {
         tokenText.textContent = formatTokenCount(used) + ' / ' + formatTokenCount(limit) + ' tokens';
       }
       if (pctText) pctText.textContent = pct + '%';
+      // 搜索额度：只看 search_unlimited / search_limit，不要用 is_pro 一刀切成「无限」
+      // （邀请码可给 Pro + 自定义每日搜索次数，例如 10 次/天）
+      var searchUsed = Math.max(0, Number(q.search_used) || 0);
+      var searchLimit = q.search_limit == null
+        ? (q.is_pro ? -1 : FREE_SEARCH_DEFAULT)
+        : Number(q.search_limit);
+      var searchUnlimited = q.search_unlimited === true || searchLimit < 0;
       if (searchLine) {
-        if (q.search_unlimited || q.is_pro) {
+        if (searchUnlimited) {
           searchLine.textContent = '网页搜索：无限';
         } else {
-          searchLine.textContent = '网页搜索：' + (q.search_used || 0) + ' / ' + (q.search_limit != null ? q.search_limit : FREE_SEARCH_DEFAULT);
+          searchLine.textContent = '网页搜索：' + searchUsed + ' / ' + Math.max(0, searchLimit) + ' 次';
         }
       }
       if (planBadge) {
@@ -8012,9 +8028,15 @@ function showChatMessages() {
       }
       if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 已开通' : '开通 Pro';
       if (proDesc) {
-        proDesc.textContent = q.is_pro
-          ? ('每日 ' + formatTokenCount(PRO_TOKEN_DEFAULT) + ' tokens · 无限搜索')
-          : ('10 倍额度 ' + formatTokenCount(PRO_TOKEN_DEFAULT) + ' · 无限搜索');
+        if (q.is_pro) {
+          var tokenPart = '每日 ' + formatTokenCount(limit) + ' tokens';
+          var searchPart = searchUnlimited
+            ? '无限搜索'
+            : ('每日 ' + Math.max(0, searchLimit) + ' 次搜索');
+          proDesc.textContent = tokenPart + ' · ' + searchPart;
+        } else {
+          proDesc.textContent = '邀请码开通 · 更高额度';
+        }
       }
       if (proBtn) proBtn.classList.toggle('is-pro', !!q.is_pro);
       updateSearchStatus();
