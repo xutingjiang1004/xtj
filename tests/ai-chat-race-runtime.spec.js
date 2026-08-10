@@ -40,7 +40,8 @@ test('AI rapid conversation switching ignores a late response from the old conve
     window.switchDockTab('posts', true);
   });
   await expect(page.locator('.ai-agent-entry')).toHaveCount(0);
-  await page.locator('#aiToolsNativeSelect').selectOption('chat');
+  await page.locator('#aiToolsBtn').click();
+  await page.locator('#aiToolsMenu [data-ai-tool="chat"]').click();
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await page.locator('.ai-chat-hist-btn').click();
   await expect(page.locator('.ai-conv-item')).toHaveCount(2);
@@ -71,7 +72,8 @@ test('closing AI while history is pending does not reopen or mutate the removed 
     window.switchDockTab('posts', true);
   });
   await expect(page.locator('.ai-agent-entry')).toHaveCount(0);
-  await page.locator('#aiToolsNativeSelect').selectOption('chat');
+  await page.locator('#aiToolsBtn').click();
+  await page.locator('#aiToolsMenu [data-ai-tool="chat"]').click();
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await page.locator('.ai-chat-back').click();
   await page.waitForTimeout(650);

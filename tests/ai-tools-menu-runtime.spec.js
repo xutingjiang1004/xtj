@@ -1,8 +1,13 @@
 const { test, expect } = require('@playwright/test');
 
 async function pickAiTool(page, value) {
-  // 透明 select 叠在按钮上，直接 selectOption 即可（无需点不可点的视觉按钮）
-  await page.locator('#aiToolsNativeSelect').selectOption(value);
+  // 自定义下拉：先点星芒按钮，再点对应菜单项
+  const menu = page.locator('#aiToolsMenu');
+  if (!(await menu.isVisible().catch(() => false))) {
+    await page.locator('#aiToolsBtn').click();
+  }
+  await expect(menu).toBeVisible();
+  await page.locator(`#aiToolsMenu [data-ai-tool="${value}"]`).click();
 }
 
 async function prepareAuthenticatedPage(page) {
@@ -34,7 +39,8 @@ test('top AI tools menu opens independent pages without switching away from post
   });
   expect(order).toBe(true);
   await expect(page.locator('#aiToolsBtn .ai-tools-trigger-icon')).toBeVisible();
-  await expect(page.locator('#aiToolsNativeSelect')).toHaveCount(1);
+  await expect(page.locator('#aiToolsMenu')).toHaveCount(1);
+  await expect(page.locator('#aiToolsNativeSelect')).toHaveCount(0);
 
   await pickAiTool(page, 'chat');
   await expect(page.locator('#aiChatRoot')).toBeVisible();
@@ -53,15 +59,16 @@ test('top AI tools menu opens independent pages without switching away from post
   await expect(page.locator('#panelPosts')).toHaveClass(/active/);
 });
 
-test('top AI tools uses native select (no custom popup panel required)', async ({ page }) => {
+test('top AI tools uses custom popup panel (not native select)', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await prepareAuthenticatedPage(page);
-  await expect(page.locator('#aiToolsNativeSelect')).toBeAttached();
-  const legacy = page.locator('#aiToolsMenu');
-  if (await legacy.count()) {
-    await expect(legacy).toBeHidden();
-  }
-  await pickAiTool(page, 'chat');
+  await expect(page.locator('#aiToolsNativeSelect')).toHaveCount(0);
+  await page.locator('#aiToolsBtn').click();
+  await expect(page.locator('#aiToolsMenu')).toBeVisible();
+  await expect(page.locator('#aiToolsMenu [data-ai-tool="chat"]')).toBeVisible();
+  await expect(page.locator('#aiToolsMenu [data-ai-tool="research"]')).toBeVisible();
+  await expect(page.locator('#aiToolsMenu [data-ai-tool="search"]')).toBeVisible();
+  await page.locator('#aiToolsMenu [data-ai-tool="chat"]').click();
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await expect(page.locator('#panelPosts')).toHaveClass(/active/);
 });

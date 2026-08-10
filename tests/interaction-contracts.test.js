@@ -43,8 +43,9 @@ test('AI tools prewarm, render immediately, and bound history requests', () => {
   const openChat = between(aiAgent, 'async function openAiChat()', 'function applyConfigToUI');
   const openResearch = between(aiAgent, 'async function openDeepThinkPage()', 'function closeDeepThinkPage');
   const history = between(aiAgent, 'async function loadHistory(messagesEl, before)', 'async function fetchConversations');
-  // 顶栏 AI 工具改为原生 select.showPicker()，预热仍在 pointerenter / 点击时触发
-  assert.match(launcher, /showPicker|aiToolsNativeSelect|xtj-native-picker/);
+  // 顶栏 AI 工具使用自定义下拉（Win 原生 select 会空弹）；预热仍在 pointerenter / 点击时触发
+  assert.match(launcher, /aiToolsMenu|data-ai-tool|setOpen/);
+  assert.doesNotMatch(launcher, /showPicker|ai-tools-select-hit/);
   assert.match(launcher, /nav\.addEventListener\('pointerenter'/);
   assert.match(launcher, /ensureAiAgentLoaded/);
   assert.ok(openChat.indexOf("aiPanel.classList.add('active')") < openChat.indexOf('ensureUserAuthOrNotify()'));

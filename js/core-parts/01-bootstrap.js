@@ -1328,11 +1328,26 @@ const ADMIN_NAME = "xxz";
             return postDwellObserver;
         }
         function observePostViewportState(nodes) {
-            Array.from(nodes || []).forEach(function(post) {
-                if (!post) return;
+            var list = Array.from(nodes || []).filter(Boolean);
+            // Paint the first few posts immediately so mobile users never sit on
+            // blank opacity-0 cards while IntersectionObserver catches up.
+            list.slice(0, 6).forEach(function(post) {
+                if (!post.classList.contains('visible')) post.classList.add('visible');
+            });
+            list.forEach(function(post) {
                 getPostVisibilityObserver().observe(post);
                 getPostDwellObserver().observe(post);
             });
+            // Failsafe: any remaining hidden posts become visible shortly after.
+            if (list.some(function(post) { return !post.classList.contains('visible'); })) {
+                setTimeout(function() {
+                    list.forEach(function(post) {
+                        if (post && post.isConnected && !post.classList.contains('visible')) {
+                            post.classList.add('visible');
+                        }
+                    });
+                }, 400);
+            }
         }
         const CACHE_KEY = "xtj_feed_cache_v7";
         const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
@@ -1599,32 +1614,34 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
         function bindTopAiToolsLauncher() {
             var nav = document.getElementById('aiToolsNav');
             var trigger = document.getElementById('aiToolsBtn');
-            if (!nav || nav.__xtjAiToolsBound) return;
+            var menu = document.getElementById('aiToolsMenu');
+            if (!nav || !trigger || !menu || nav.__xtjAiToolsBound) return;
             nav.__xtjAiToolsBound = true;
 
-            // 透明 select 叠在按钮上（与小猫 + 相同）：不依赖 showPicker，桌面/iOS 一次点开
-            var select = document.getElementById('aiToolsNativeSelect');
-            if (!select) {
-                select = document.createElement('select');
-                select.id = 'aiToolsNativeSelect';
-                select.className = 'ai-tools-select-hit';
-                select.setAttribute('aria-label', 'AI 工具');
-                select.innerHTML =
-                    '<option value="">选择 AI 工具…</option>' +
-                    '<option value="chat">小猫AI · 对话与历史</option>' +
-                    '<option value="research">深度研究</option>' +
-                    '<option value="search">站内搜索</option>';
-                nav.appendChild(select);
-            } else {
-                select.className = 'ai-tools-select-hit';
-                select.removeAttribute('tabindex');
+            // 去掉遗留的 Win 空弹原生 select
+            var legacySelect = document.getElementById('aiToolsNativeSelect');
+            if (legacySelect && legacySelect.parentNode) {
+                try { legacySelect.parentNode.removeChild(legacySelect); } catch (eRem) {}
             }
-            if (trigger) {
-                trigger.setAttribute('tabindex', '-1');
-                trigger.setAttribute('aria-hidden', 'true');
+
+            trigger.removeAttribute('aria-hidden');
+            trigger.removeAttribute('tabindex');
+            trigger.setAttribute('aria-haspopup', 'menu');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.setAttribute('aria-controls', 'aiToolsMenu');
+
+            var open = false;
+
+            function setOpen(next) {
+                open = !!next;
+                menu.hidden = !open;
+                menu.setAttribute('aria-hidden', open ? 'false' : 'true');
+                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+                nav.classList.toggle('is-open', open);
             }
 
             function runTool(tool) {
+                setOpen(false);
                 return ensureAiAgentLoaded().then(function() {
                     if (tool === 'research' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openDeepThink === 'function') return window.__xtjAiAgent.openDeepThink();
                     if (tool === 'search' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') return window.__xtjAiAgent.openSiteSearch();
@@ -1643,20 +1660,29 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 ensureAiAgentLoaded().catch(function() {});
             });
 
-            // 打开列表前复位 value，保证每次都能选
-            select.addEventListener('mousedown', function() {
-                try { select.value = ''; } catch (e0) {}
+            trigger.addEventListener('click', function(event) {
+                event.preventDefault();
+                event.stopPropagation();
                 ensureAiAgentLoaded().catch(function() {});
-            });
-            select.addEventListener('focus', function() {
-                ensureAiAgentLoaded().catch(function() {});
+                setOpen(!open);
             });
 
-            select.addEventListener('change', function() {
-                var tool = select.value;
-                try { select.value = ''; } catch (e1) {}
+            menu.addEventListener('click', function(event) {
+                event.stopPropagation();
+                var btn = event.target && event.target.closest ? event.target.closest('[data-ai-tool]') : null;
+                if (!btn) return;
+                var tool = btn.getAttribute('data-ai-tool');
                 if (!tool) return;
                 runTool(tool);
+            });
+
+            document.addEventListener('click', function(event) {
+                if (!open) return;
+                if (nav.contains(event.target)) return;
+                setOpen(false);
+            });
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape' && open) setOpen(false);
             });
         }
         bindTopAiToolsLauncher();

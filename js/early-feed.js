@@ -92,7 +92,7 @@
           time = p.created_at ? new Date(p.created_at).toLocaleString() : '';
         } catch (e) {}
         return (
-          '<div class="post glass" data-post-id="' +
+          '<div class="post glass visible" data-post-id="' +
           esc(p.id) +
           '" data-early="1">' +
           '<div class="post-header"><span class="avatar">' +
