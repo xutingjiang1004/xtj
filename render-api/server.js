@@ -68,6 +68,7 @@ const {
   PRO_TOKEN_LIMIT,
   FREE_SEARCH_LIMIT
 } = require('./ai-quota');
+const afdianPay = require('./afdian-pay');
 const sharp = require('sharp');
 var nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch(e) { console.warn('[INIT] nodemailer not available, email disabled'); }
@@ -13639,7 +13640,8 @@ app.get('/api/agent/quota', authenticateUser, async (req, res) => {
   }
 });
 
-// POST /api/agent/pro/checkout — Stripe 接入预留（Codex 后续接支付）
+// POST /api/agent/pro/checkout — 爱发电跳转支付（替代 Stripe 占位）
+// 返回 checkout.url 供前端新窗口打开；回跳后前端监听 focus 自动刷新额度。
 app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
   try {
     var quota = await aiQuota.getQuota(req.userName);
@@ -13651,12 +13653,36 @@ app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
         quota: quota
       });
     }
-    return res.status(501).json({
-      ok: false,
-      code: 'stripe_not_configured',
-      error: 'Pro 支付通道即将接入 Stripe，请稍后再试',
-      message: 'Pro 支付通道即将接入 Stripe，请稍后再试',
-      checkout: null,
+    var afdianUserId = String(process.env.AFDIAN_USER_ID || '').trim();
+    var afdianPlanId = String(process.env.AFDIAN_PLAN_ID || '').trim();
+    if (!afdianUserId) {
+      return res.status(501).json({
+        ok: false,
+        code: 'afdian_not_configured',
+        error: 'Pro 支付通道（爱发电）尚未配置，请稍后再试',
+        message: 'Pro 支付通道（爱发电）尚未配置，请稍后再试',
+        checkout: null,
+        features: {
+          free_tokens_daily: FREE_TOKEN_LIMIT,
+          pro_tokens_daily: PRO_TOKEN_LIMIT,
+          free_search_daily: FREE_SEARCH_LIMIT,
+          pro_search_unlimited: true,
+          pro_multiplier: 10
+        },
+        quota: quota
+      });
+    }
+    var checkoutUrl = afdianPay.buildCheckoutUrl({
+      userId: afdianUserId,
+      planId: afdianPlanId
+    });
+    return res.json({
+      ok: true,
+      checkout: {
+        url: checkoutUrl,
+        provider: 'afdian',
+        message: '前往爱发电完成支付，支付成功后自动开通 Pro'
+      },
       features: {
         free_tokens_daily: FREE_TOKEN_LIMIT,
         pro_tokens_daily: PRO_TOKEN_LIMIT,
@@ -13672,15 +13698,85 @@ app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
   }
 });
 
-// POST /api/agent/pro/webhook — Stripe webhook 预留
+// POST /api/agent/pro/webhook — 爱发电支付回调
+// 官方 Webhook 不强制验签 Token：若配置了 AFDIAN_WEBHOOK_TOKEN 则校验
+// X-Afdian-Token 头（防第三方伪造），未配置则放行（靠订单号幂等 + status/plan 校验兜底）。
+// 幂等：同一订单只开通一次（order 号存 membership 记录）。
 app.post('/api/agent/pro/webhook', async (req, res) => {
   try {
-    return res.status(501).json({
-      ok: false,
-      code: 'stripe_not_configured',
-      error: 'Stripe webhook not configured yet'
+    var webhookToken = String(process.env.AFDIAN_WEBHOOK_TOKEN || '').trim();
+    if (webhookToken && !afdianPay.verifyWebhookToken(req, webhookToken)) {
+      console.error('[AFDIAN] webhook 验签失败');
+      return res.status(403).json({ ok: false, error: 'invalid webhook token' });
+    }
+    var body = req.body || {};
+    var parsed = afdianPay.parseOrderNotification(body, {
+      planId: process.env.AFDIAN_PLAN_ID
     });
+    if (!parsed.ok) {
+      // 非成功订单/plan 不匹配：返回 ec 200 避免平台反复重试
+      console.error('[AFDIAN] 订单解析失败:', parsed.reason, parsed.plan_id || '');
+      return res.json({ ec: 200, em: 'ignored' });
+    }
+    var order = parsed.order;
+    var outTradeNo = String(order.out_trade_no || '').trim();
+
+    // 从订单 remark 提取本站用户名（用户下单时在留言填用户名，格式：用户名）
+    // 也兼容 remark 为 JSON（{"user_name":"xxx"}）的扩展。
+    var userName = '';
+    var remark = String(order.remark || '').trim();
+    try {
+      var remarkJson = JSON.parse(remark);
+      if (remarkJson && typeof remarkJson.user_name === 'string') userName = remarkJson.user_name.trim();
+    } catch (_) { /* 非 JSON */ }
+    if (!userName) {
+      // 纯文本：取首行，去空白
+      userName = remark.split(/[\n\r,，;；]/)[0].trim();
+    }
+    if (!userName) {
+      // 爱发电不保证有 remark —— 无法自动关联用户名，只能记录订单待人工处理
+      console.error('[AFDIAN] 订单无用户名，无法自动开通:', outTradeNo);
+      return res.json({ ec: 200, em: 'no_user_name' });
+    }
+
+    // 幂等：查一下该订单号是否已开通过（存在 membership 且 stripe_subscription_id = outTradeNo）
+    var dupCheck = await supabase
+      .from('ai_user_membership')
+      .select('user_name')
+      .eq('stripe_subscription_id', outTradeNo)
+      .maybeSingle();
+    if (dupCheck.error) {
+      console.error('[AFDIAN] 幂等查询失败:', dupCheck.error.message);
+      return res.status(500).json({ ok: false, error: 'idempotency check failed' });
+    }
+    if (dupCheck.data) {
+      // 已处理过，直接确认
+      return res.json({ ec: 200, em: 'duplicated' });
+    }
+
+    var expiresAt = afdianPay.computeExpiry(order.month, Date.now());
+    var quota = await aiQuota.setPro(userName, true, {
+      expires_at: expiresAt,
+      // 复用 stripe 字段存爱发电订单信息（不新增列，保持兼容）
+      stripe_customer_id: 'afdian:' + String(order.user_id || ''),
+      stripe_subscription_id: outTradeNo
+    });
+    if (!quota || !quota.ok) {
+      console.error('[AFDIAN] 开通 Pro 失败:', quota && quota.reason);
+      return res.status(500).json({ ok: false, error: 'activate failed' });
+    }
+    // 标记支付渠道（provider 列）
+    await supabase
+      .from('ai_user_membership')
+      .update({ provider: 'afdian', updated_at: new Date().toISOString() })
+      .eq('user_name', userName)
+      .then(function(r) {
+        if (r.error) console.error('[AFDIAN] 更新 provider 失败:', r.error.message);
+      });
+    console.log('[AFDIAN] 订单开通成功:', outTradeNo, '->', userName, 'expires', expiresAt);
+    return res.json({ ec: 200, em: 'ok' });
   } catch (e) {
+    console.error('[AFDIAN] webhook 处理异常:', e && e.message);
     return res.status(500).json({ ok: false, error: 'webhook error' });
   }
 });

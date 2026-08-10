@@ -65,7 +65,7 @@ test('migration defines token quota tables and RPCs', () => {
   assert.match(migration, /1000000/);
 });
 
-test('server wires token quota gates, recording, and Stripe stubs', () => {
+test('server wires token quota gates, recording, and Afdian pay integration', () => {
   assert.match(serverSource, /createAiQuota/);
   assert.match(serverSource, /enforceAiChatAccess/);
   assert.match(serverSource, /recordAiTurnUsage/);
@@ -73,7 +73,9 @@ test('server wires token quota gates, recording, and Stripe stubs', () => {
   assert.match(serverSource, /app\.post\('\/api\/agent\/pro\/checkout'/);
   assert.match(serverSource, /app\.post\('\/api\/agent\/pro\/webhook'/);
   assert.match(serverSource, /app\.post\('\/api\/agent\/pro\/activate'/);
-  assert.match(serverSource, /stripe_not_configured/);
+  assert.match(serverSource, /afdian_not_configured/);
+  assert.match(serverSource, /AFDIAN_USER_ID/);
+  assert.match(serverSource, /AFDIAN_WEBHOOK_TOKEN/);
   assert.match(serverSource, /token_limit/);
   assert.match(serverSource, /search_limit/);
   // 深入研究共用额度
@@ -115,4 +117,75 @@ test('quota error messages distinguish token and search limits', () => {
   assert.match(quotaMod.getTokenQuotaErrorMessage('token_limit'), /额度已用完/);
   assert.match(quotaMod.getTokenQuotaErrorMessage('search_limit'), /搜索次数/);
   assert.match(quotaMod.getTokenQuotaErrorMessage('quota_unavailable'), /暂不可用/);
+});
+
+test('afdian pay module signs, verifies, and parses orders', () => {
+  const afdian = require(path.join(ROOT, 'render-api', 'afdian-pay.js'));
+
+  // 签名：sign = md5(token + "params" + params + "ts" + ts + "user_id" + user_id)
+  // 官方示例：token=123, params={"a":333}, ts=1624339905, user_id=abc
+  // sign = md5('123params{"a":333}ts1624339905user_idabc') = a4acc28b81598b7e5d84ebdc3e91710c
+  assert.equal(
+    afdian.buildApiSign('abc', '123', '{"a":333}', 1624339905),
+    'a4acc28b81598b7e5d84ebdc3e91710c'
+  );
+
+  // Webhook 验签：Header X-Afdian-Token
+  assert.equal(afdian.verifyWebhookToken({ headers: { 'x-afdian-token': 'tok123' } }, 'tok123'), true);
+  assert.equal(afdian.verifyWebhookToken({ headers: { 'x-afdian-token': 'wrong' } }, 'tok123'), false);
+  assert.equal(afdian.verifyWebhookToken({ headers: {}, query: { afdian_token: 'tok123' } }, 'tok123'), true);
+
+  // 订单解析：status 2 成功 + plan 匹配
+  var ok = afdian.parseOrderNotification({
+    ec: 200, em: 'ok',
+    data: {
+      type: 'order',
+      order: { out_trade_no: 'ABC123', plan_id: 'plan_x', month: 1, status: 2 }
+    }
+  }, { planId: 'plan_x' });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.order.out_trade_no, 'ABC123');
+
+  // status 非 2 → 不通过
+  var unpaid = afdian.parseOrderNotification({
+    data: { order: { out_trade_no: 'X', plan_id: 'plan_x', status: 1 } }
+  }, { planId: 'plan_x' });
+  assert.equal(unpaid.ok, false);
+
+  // plan 不匹配 → 不通过
+  var wrongPlan = afdian.parseOrderNotification({
+    data: { order: { out_trade_no: 'X', plan_id: 'other', status: 2 } }
+  }, { planId: 'plan_x' });
+  assert.equal(wrongPlan.ok, false);
+
+  // 到期计算：month 数
+  var expiry = afdian.computeExpiry(1, Date.UTC(2026, 0, 1));
+  assert.ok(new Date(expiry).getTime() > Date.UTC(2026, 0, 1));
+
+  // 跳转链接
+  assert.match(afdian.buildCheckoutUrl({ userId: 'u123', planId: 'p1' }), /afdian\.com\/a\/u123/);
+});
+
+test('afdian order dedupe skips already-processed orders', async () => {
+  const afdian = require(path.join(ROOT, 'render-api', 'afdian-pay.js'));
+  var marked = [];
+  var first = await afdian.handleOrderDedupe(
+    async () => false,
+    async (no, meta) => { marked.push([no, meta]); },
+    { out_trade_no: 'T1', month: 1 },
+    {}, Date.UTC(2026, 0, 1)
+  );
+  assert.equal(first.ok, true);
+  assert.equal(first.duplicated, false);
+  assert.equal(marked.length, 1);
+
+  var second = await afdian.handleOrderDedupe(
+    async () => true,
+    async () => {},
+    { out_trade_no: 'T1', month: 1 },
+    {}, Date.UTC(2026, 0, 1)
+  );
+  assert.equal(second.ok, true);
+  assert.equal(second.duplicated, true);
+  assert.equal(marked.length, 1);
 });
