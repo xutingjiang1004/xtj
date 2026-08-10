@@ -17,6 +17,40 @@ var OCR_MAX_INPUT_BYTES = 4 * 1024 * 1024;
 var OCR_TIMEOUT_MS = 20000;
 var OCR_TEXT_MAX = 8000;
 
+/**
+ * OCR 常把中文竖排/识别噪点拆成「一字一行」。合并单字行，避免前端卡版式崩坏。
+ */
+function normalizeOcrText(raw) {
+  var text = String(raw || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (!text.trim()) return '';
+  var lines = text.split('\n');
+  var out = [];
+  var singleRun = [];
+  function flushSingles() {
+    if (!singleRun.length) return;
+    // 连续单字行拼成一行（保留合理换行）
+    out.push(singleRun.join(''));
+    singleRun = [];
+  }
+  for (var i = 0; i < lines.length; i++) {
+    var line = String(lines[i] || '').replace(/[ \t]+/g, ' ').trim();
+    if (!line) {
+      flushSingles();
+      if (out.length && out[out.length - 1] !== '') out.push('');
+      continue;
+    }
+    // 单字或极短（含标点）→ 视为竖排碎片
+    if (line.length <= 2 && !/[a-zA-Z0-9]{2,}/.test(line)) {
+      singleRun.push(line);
+      continue;
+    }
+    flushSingles();
+    out.push(line);
+  }
+  flushSingles();
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function httpsFormPost(hostname, pathName, formFields, timeoutMs) {
   return new Promise(function(resolve, reject) {
     var boundary = '----xtjocr' + Date.now().toString(16) + Math.random().toString(16).slice(2);
@@ -150,7 +184,7 @@ async function ocrImageBuffer(buffer, mimeType, fileName, deps) {
       var t = results[i] && results[i].ParsedText;
       if (t && String(t).trim()) parts.push(String(t).trim());
     }
-    var text = parts.join('\n').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, OCR_TEXT_MAX);
+    var text = normalizeOcrText(parts.join('\n')).slice(0, OCR_TEXT_MAX);
     if (!text) {
       return {
         text: '',
@@ -179,5 +213,6 @@ async function ocrImageBuffer(buffer, mimeType, fileName, deps) {
 
 module.exports = {
   ocrImageBuffer: ocrImageBuffer,
+  normalizeOcrText: normalizeOcrText,
   OCR_MAX_INPUT_BYTES: OCR_MAX_INPUT_BYTES
 };

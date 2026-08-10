@@ -1030,9 +1030,10 @@ async function executeToolCall(toolCall, context) {
         var contentForModel = '【网页阅读结果】\n标题：' + pageTitle +
           '\nURL：' + page.url +
           '\n类型：' + (page.content_type || '') +
+          (page.via_jina ? '\n（已用增强阅读器）' : '') +
           (page.truncated ? '\n（正文已截断）' : '') +
           '\n\n' + pageText +
-          '\n\n要求：必须基于以上网页正文回答，不准编造页面中没有的内容。引用时标明来源标题或 URL。';
+          '\n\n要求：必须基于以上网页正文回答，不准编造页面中没有的内容；禁止声称“工具打不开链接”。引用时标明来源标题或 URL。';
         return {
           tool_name: name,
           url: page.url,
@@ -1045,7 +1046,8 @@ async function executeToolCall(toolCall, context) {
             snippet: pageText.slice(0, 360),
             bytes: page.bytes,
             truncated: !!page.truncated,
-            content_type: page.content_type || ''
+            content_type: page.content_type || '',
+            via_jina: !!page.via_jina
           })]
         };
       } catch (e) {
@@ -3528,23 +3530,27 @@ async function extractEmbeddedFiles(text) {
           // DeepSeek 聊天路径暂无多模态：图片理解走 OCR 文字通道
           var ocr = await ocrImageBuffer(buffer, mimeType, fileName, { sharp: sharp });
           if (ocr && ocr.text) {
+            // 明确：这是图片内容文字，不是让模型去搜「OCR 技术/准确率」
             extractedText =
-              '【图片 OCR 识别结果 · ' + fileName + '】\n' +
-              '（说明：当前模型无多模态看图能力，以下为 OCR 提取的文字，请基于文字回答用户关于图片的问题）\n' +
-              ocr.text;
-            cards.push(aiSiteCard('image_ocr', '图片文字识别', {
+              '【用户上传图片的可读文字 · ' + fileName + '】\n' +
+              '任务：直接根据下列文字回答用户关于这张图的问题（订单/客服/截图含义等）。\n' +
+              '禁止：禁止联网搜索 OCR、文字识别、准确率、ocr.space 等技术话题；禁止把本段说明当成搜索关键词。\n' +
+              '--- 图片文字开始 ---\n' +
+              ocr.text +
+              '\n--- 图片文字结束 ---';
+            cards.push(aiSiteCard('image_ocr', '图片文字', {
               file_name: fileName,
-              text: ocr.text.slice(0, 2000),
+              text: ocr.text.slice(0, 2400),
               provider: ocr.provider || 'ocr.space',
               chars: ocr.chars || ocr.text.length
             }));
           } else {
             var ocrErr = (ocr && ocr.error) ? String(ocr.error).slice(0, 160) : '未识别到文字';
             extractedText =
-              '[用户上传图片: ' + fileName + ' (' + mimeType + ')]\n' +
-              '图片理解通道（OCR）未得到可用文字：' + ocrErr + '\n' +
-              '说明：DeepSeek 当前 API 不支持多模态看图；若图中有清晰印刷体中文/英文，可重试或换更清晰截图。';
-            cards.push(aiSiteCard('image_ocr', '图片识别未完成', {
+              '【用户上传图片 · ' + fileName + '】\n' +
+              '未能从图片中提取可用文字（' + ocrErr + '）。\n' +
+              '请告知用户：当前看图依赖文字识别，纯图/模糊图可能失败；可换更清晰截图。禁止为此去搜索 OCR 技术资料。';
+            cards.push(aiSiteCard('image_ocr', '图片文字未识别', {
               file_name: fileName,
               text: '',
               error: ocrErr,
@@ -3611,6 +3617,95 @@ function unwrapAttachmentExtract(result) {
     return { text: result.text, cards: Array.isArray(result.cards) ? result.cards : [] };
   }
   return { text: typeof result === 'string' ? result : '', cards: [] };
+}
+
+/** 去掉附件/OCR/dataURL，得到适合当搜索词的用户原话 */
+function stripAttachmentNoiseForSearch(message) {
+  return String(message || '')
+    .replace(/【用户上传文件:[\s\S]*?【文件结束】/g, ' ')
+    .replace(/【用户上传图片的可读文字[\s\S]*?--- 图片文字结束 ---/g, ' ')
+    .replace(/【用户上传图片 ·[\s\S]*?(?=【|$)/g, ' ')
+    .replace(/【图片 OCR[\s\S]*?(?=【|$)/g, ' ')
+    .replace(/!?\[[^\]]*\]\(data:[^)]+\)/g, ' ')
+    .replace(/\[图片:[^\]]*\]/g, ' ')
+    .replace(/\[附件[^\]]*\]/g, ' ')
+    .replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function messageHasImageOcrContent(message) {
+  return /用户上传图片的可读文字|图片文字开始|【图片 OCR|用户上传图片 ·/i.test(String(message || ''));
+}
+
+function extractHttpsUrlsFromMessage(message) {
+  var matches = String(message || '').match(/https:\/\/[^\s<>"'）】\]]+/gi) || [];
+  var out = [];
+  var seen = {};
+  for (var i = 0; i < matches.length; i++) {
+    var u = matches[i].replace(/[.,;:!?，。；：！？）】\]]+$/g, '');
+    if (!u || seen[u]) continue;
+    // 跳过 data: 和明显非页面
+    if (u.length > 2000) continue;
+    seen[u] = true;
+    out.push(u);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+/**
+ * 服务端主动阅读用户消息里的 HTTPS 链接（思考模式不能挂 tools 时也能读）。
+ * 返回 { messagesInject: [...], cards: [...] }
+ */
+async function prefetchUserLinks(message) {
+  var urls = extractHttpsUrlsFromMessage(message);
+  if (!urls.length) return { messagesInject: [], cards: [] };
+  var inject = [];
+  var cards = [];
+  for (var i = 0; i < urls.length; i++) {
+    var url = urls[i];
+    try {
+      var page = await fetchSafeWebPage(url);
+      var title = page.title || url;
+      var body = String(page.content || '').slice(0, 12000);
+      inject.push({
+        role: 'system',
+        content:
+          '【网页阅读结果 · 已由服务端工具完成】\n' +
+          '标题：' + title + '\n' +
+          'URL：' + page.url + '\n' +
+          (page.via_jina ? '（已用增强阅读器提取正文）\n' : '') +
+          (page.truncated ? '（正文已截断）\n' : '') +
+          '\n' + body +
+          '\n\n要求：必须基于以上正文回答用户关于该链接的问题；禁止声称“打不开链接/无法访问网页/工具不能读链接”。若正文仍像空壳 SPA，可如实说明“只抓到壳页面，正文很少”。'
+      });
+      cards.push(aiSiteCard('page_read', '已阅读网页', {
+        title: title,
+        url: page.url,
+        snippet: body.slice(0, 360),
+        bytes: page.bytes,
+        truncated: !!page.truncated,
+        content_type: page.content_type || '',
+        via_jina: !!page.via_jina
+      }));
+    } catch (e) {
+      var errMsg = (e && e.message) ? String(e.message).slice(0, 160) : '网页阅读失败';
+      inject.push({
+        role: 'system',
+        content:
+          '【网页阅读失败】\nURL：' + url + '\n原因：' + errMsg +
+          '\n请如实告知用户本次未能读到该页正文，可建议换可公开访问的链接；不要编造页面内容，也不要谎称“系统禁止打开任意链接”。'
+      });
+      cards.push(aiSiteCard('page_read', '网页阅读失败', {
+        title: url,
+        url: url,
+        snippet: errMsg,
+        error: errMsg
+      }));
+    }
+  }
+  return { messagesInject: inject, cards: cards };
 }
 
 // ===================== 1. DeepSeek 统一封装 =====================
@@ -13594,9 +13689,10 @@ function buildAiCorePrompt(config) {
     sysPrompt ? '用户额外指令：' + sysPrompt : '',
     '当前风格：' + style + '。每条 ≤ ' + (rs.max_reply_chars || 1200) + ' 字。',
     allowWebSearch
-      ? '可用工具：search_web / tavily_search / read_web_page / get_weather / get_current_time / get_exchange_rate / get_stock_quote。用户发具体 HTTPS 链接时优先 read_web_page 阅读正文；时效问题先搜索再按需读页。'
-      : '可用工具：get_weather / get_current_time / get_exchange_rate / get_stock_quote / read_web_page（读用户给出的链接）。',
+      ? '可用工具：search_web / tavily_search / read_web_page / get_weather / get_current_time / get_exchange_rate / get_stock_quote。用户发具体 HTTPS 链接时必须用 read_web_page 读正文，禁止声称“工具打不开链接/不能访问网页”。时效问题先搜索再按需读页。'
+      : '可用工具：get_weather / get_current_time / get_exchange_rate / get_stock_quote / read_web_page。用户发 HTTPS 链接时必须 read_web_page，禁止声称无法打开链接。',
     emojiRule,
+    '【图片规则】若消息含「用户上传图片的可读文字」，只根据那段文字回答业务问题，禁止搜索 OCR/识别准确率/引擎。',
     '【输出硬性规则】1) 一条回复只表达一个核心观点，不要分点罗列。2) 短句为主，别写长段落。3) 不写"作为一个 AI"开场白。4) 不写括号动作描写（如 "*笑了笑*"）。',
     '只回答对话内容；不编造已执行的操作；拒绝查他人记录。中文回复。'
   ];
@@ -14689,11 +14785,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // 搜索意图识别（口语「搜一下」等）
     // ★ 策略：优先模型内置搜索；第三方可辅助补充。搜索意图不再强制关思考，
     //   思考态用服务端预搜注入 + reasoning；非思考态挂内置 web_search / tools。
-    var explicitSearchIntent = /搜索|搜一下|搜搜|搜一搜|查找|找一下|查一下|查查|查资料|联网|帮我搜|请搜索|google|百度一下|谷歌一下/i.test(message);
-    var liveInfoIntent = /最新|实时|今天|现在|当前|新闻|资讯|价格|多少钱|汇率|天气|温度|赛程|比分|发布|上市|官宣/i.test(message);
-    var siteToolIntent = /私信|发送消息|草稿|公告|维修任务/i.test(message);
+    // 搜索意图只用「用户原话」，剔除 OCR/附件噪声，避免把「OCR 识别结果」拿去联网搜
+    var searchCleanMessage = stripAttachmentNoiseForSearch(message);
+    var hasImageOcrMsg = messageHasImageOcrContent(message);
+    var explicitSearchIntent = /搜索|搜一下|搜搜|搜一搜|查找|找一下|查一下|查查|查资料|联网|帮我搜|请搜索|google|百度一下|谷歌一下/i.test(searchCleanMessage);
+    var liveInfoIntent = /最新|实时|今天|现在|当前|新闻|资讯|价格|多少钱|汇率|天气|温度|赛程|比分|发布|上市|官宣/i.test(searchCleanMessage);
+    var siteToolIntent = /私信|发送消息|草稿|公告|维修任务/i.test(searchCleanMessage);
     // 仅站内动作与 thinking+tools 冲突时关思考；普通「搜一下」保留思考过程展示
     if (siteToolIntent) thinkingMode = 'off';
+    // 上传图片识别场景：默认不主动联网，除非用户明确说「搜一下」
+    var blockAutoSearchForOcr = hasImageOcrMsg && !explicitSearchIntent;
 
     // A bounded middle gear for normal chat. This is intentionally not the
     // deep_think multi-agent route and keeps provider/tool compatibility.
@@ -14730,28 +14831,46 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //   false → 优先模型内置搜索；需要时仍可借助第三方作补充（不禁止）
     var allowSearch = adminSearchAllowed;
     var webSearchPref = req.body && req.body.web_search;
-    // 主动预搜：开开关，或消息有搜索/时效意图
-    var proactiveSearch = allowSearch && (webSearchPref === true || explicitSearchIntent || liveInfoIntent);
+    // 主动预搜：开开关，或消息有搜索/时效意图；图片 OCR 默认不预搜
+    var proactiveSearch = allowSearch && !blockAutoSearchForOcr && (webSearchPref === true || explicitSearchIntent || liveInfoIntent);
 
     // ★ P3: 思考态提前 fire 搜索（与后续 DeepSeek 并行），不阻塞首包
     var _preloadedSearchPromise = null;
     var _preloadedSearchResults = null;
     var _preloadedQuery = '';
     if (useThinking && proactiveSearch && !aborted) {
-      var _quickSearchHint = explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|搜搜|最新|今天|现在|当前|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|攻略|旅游|景点|推荐|百科|介绍|区别|对比|vs|排行|教程|方法|怎么办|如何|怎么|政策|公告|电影|电视剧|综艺|纪录片|动漫|动画|番剧|iPhone|iPad|Mac|安卓|苹果|三星|华为|小米|oppo|vivo|荣耀|百度|google|谷歌|查查|查资料/i.test(message);
-      if (_quickSearchHint) {
-        var _psQuery = message.slice(0, 80);
-        var _psStripped = message.replace(/^(?:搜索|搜一下|搜搜|搜一搜|查一下|搜搜|百度|google|谷歌|查询|查查|查资料|帮我搜|请搜索)\s*/i, '').trim().slice(0, 150);
+      var _quickSearchHint = explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|搜搜|最新|今天|现在|当前|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|攻略|旅游|景点|推荐|百科|介绍|区别|对比|vs|排行|教程|方法|怎么办|如何|怎么|政策|公告|电影|电视剧|综艺|纪录片|动漫|动画|番剧|iPhone|iPad|Mac|安卓|苹果|三星|华为|小米|oppo|vivo|荣耀|百度|google|谷歌|查查|查资料/i.test(searchCleanMessage);
+      if (_quickSearchHint && searchCleanMessage.length >= 2) {
+        var _psQuery = searchCleanMessage.slice(0, 80);
+        var _psStripped = searchCleanMessage.replace(/^(?:搜索|搜一下|搜搜|搜一搜|查一下|搜搜|百度|google|谷歌|查询|查查|查资料|帮我搜|请搜索)\s*/i, '').trim().slice(0, 150);
         if (_psStripped.length >= 3) {
           _psQuery = _psStripped;
         }
-        _preloadedQuery = _psQuery;
-        _preloadedSearchPromise = searchWeb(_psQuery, 20).then(function(r) {
-          _preloadedSearchResults = r;
-          return r;
-        }).catch(function(e) {
-          try { console.error('[AGENT-STREAM] preload search error:', e && e.message); } catch (_) {}
-          return null;
+        // 搜索词太短/仍像附件噪声 → 跳过
+        if (_psQuery.length >= 2 && !/png|jpeg|ocr\.space|base64/i.test(_psQuery)) {
+          _preloadedQuery = _psQuery;
+          _preloadedSearchPromise = searchWeb(_psQuery, 20).then(function(r) {
+            _preloadedSearchResults = r;
+            return r;
+          }).catch(function(e) {
+            try { console.error('[AGENT-STREAM] preload search error:', e && e.message); } catch (_) {}
+            return null;
+          });
+        }
+      }
+    }
+
+    // 用户消息里的 HTTPS 链接：服务端直接读（思考模式不能挂 tools 也能读）
+    var linkPrefetch = { messagesInject: [], cards: [] };
+    if (!aborted && extractHttpsUrlsFromMessage(message).length) {
+      try {
+        linkPrefetch = await prefetchUserLinks(message);
+      } catch (eLink) {
+        try { console.warn('[AGENT-STREAM] link prefetch error:', eLink && eLink.message); } catch (_) {}
+      }
+      if (linkPrefetch.cards && linkPrefetch.cards.length) {
+        linkPrefetch.cards.forEach(function(card) {
+          try { writeSse(res, { type: 'card', card: card }); } catch (_) {}
         });
       }
     }
@@ -14783,12 +14902,23 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     messages.push({ role: 'user', content: message });
 
-    // ★ 缓存优化：动态内容（天气结果、时间）放在 user 之后，破坏的只是尾部一小段缓存
+    // ★ 缓存优化：动态内容（天气结果、时间、链接正文）放在 user 之后，破坏的只是尾部一小段缓存
     if (weatherResult) {
       messages.push({ role: 'user', content: weatherResult });
     }
     if (timeContext) {
       messages.push({ role: 'user', content: timeContext });
+    }
+    if (linkPrefetch.messagesInject && linkPrefetch.messagesInject.length) {
+      for (var _li = 0; _li < linkPrefetch.messagesInject.length; _li++) {
+        messages.push(linkPrefetch.messagesInject[_li]);
+      }
+    }
+    if (hasImageOcrMsg && !explicitSearchIntent) {
+      messages.push({
+        role: 'system',
+        content: '【图片任务约束】本轮用户消息含图片文字识别结果。请只根据图片文字回答用户问题，禁止调用搜索工具去查 OCR、文字识别准确率、ocr.space 或任何与识别引擎相关的资料。'
+      });
     }
 
     // ★ 搜索策略（用户确认）：
@@ -14820,13 +14950,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       // - 搜索意图：轻量预搜作补充（不替代内置）
       var tavilyPromise = null;
       var tavilyResults = null;
-      var shouldServerSearch = allowSearch && (
-        useTavilyCluster
+      var shouldServerSearch = allowSearch && !blockAutoSearchForOcr && (
+        (useTavilyCluster && !hasImageOcrMsg)
         || (useThinking && proactiveSearch)
         || (explicitSearchIntent || liveInfoIntent)
       );
-      if (shouldServerSearch) {
-        var tavilyQuery = (_preloadedQuery || message).slice(0, 150);
+      // 开关开但搜索词是附件噪声时也不搜
+      var tavilyQueryBase = _preloadedQuery || searchCleanMessage || '';
+      if (shouldServerSearch && tavilyQueryBase.length >= 2 && !/png|jpeg|ocr\.space|base64|用户上传文件/i.test(tavilyQueryBase)) {
+        var tavilyQuery = tavilyQueryBase.slice(0, 150);
         tavilyPromise = (_preloadedSearchPromise || searchWeb(tavilyQuery, 20)).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
           return r;
@@ -14933,7 +15065,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         try { await tavilyPromise; } catch (e) {}
         if (tavilyResults && tavilyResults.length > 0) {
           searchResultsCollected = searchResultsCollected.concat(tavilyResults.slice(0, 20));
-          writeSse(res, { type: 'search', count: tavilyResults.length, source: 'tavily', results: tavilyResults.slice(0, 5), query: message.slice(0, 100) });
+          writeSse(res, { type: 'search', count: tavilyResults.length, source: 'tavily', results: tavilyResults.slice(0, 5), query: (tavilyQueryBase || searchCleanMessage || '').slice(0, 100) });
         }
       }
 
@@ -15035,6 +15167,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var siteToolCards = [];
     if (attachmentCardsStream && attachmentCardsStream.length) {
       attachmentCardsStream.forEach(function(c) { siteToolCards.push(c); });
+    }
+    if (linkPrefetch.cards && linkPrefetch.cards.length) {
+      linkPrefetch.cards.forEach(function(c) { siteToolCards.push(c); });
     }
     var hasFCFallbackContent = false;
     var fcFallbackContent = null;

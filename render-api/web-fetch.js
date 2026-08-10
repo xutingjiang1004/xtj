@@ -242,24 +242,87 @@ async function fetchSafeWebPage(rawUrl, options) {
       ? (response.headers.get('content-type') || '')
       : '';
     var normalized = normalizeWebText(response.body, contentType);
-    if (!normalized.text) throw new Error('未能从页面提取可读文本');
+    var content = normalized.text || '';
+    var title = normalized.title || '';
+    var usedFallback = false;
+
+    // SPA / 壳页面常几乎无正文：用 Jina Reader 公共代理再抽一次（仍走 SSRF 校验）
+    if (content.replace(/\s+/g, '').length < 120 && options.allowJinaFallback !== false) {
+      try {
+        var jina = await fetchViaJinaReader(parsed.toString(), {
+          lookupImpl: lookupImpl,
+          maxBytes: Math.min(maxBytes, 900 * 1024),
+          timeoutMs: Math.min(timeoutMs, 14000)
+        });
+        if (jina && jina.content && jina.content.replace(/\s+/g, '').length > content.replace(/\s+/g, '').length) {
+          content = jina.content;
+          if (jina.title) title = jina.title;
+          usedFallback = true;
+        }
+      } catch (_) { /* keep direct extract */ }
+    }
+
+    if (!content) throw new Error('未能从页面提取可读文本');
 
     return {
       ok: true,
       url: parsed.toString(),
-      title: normalized.title || '',
-      content: normalized.text,
+      title: title || '',
+      content: content,
       content_type: contentType.split(';')[0] || 'text/html',
       bytes: response.body.length,
       truncated: normalized.truncated || response.body.length >= maxBytes,
-      status: response.status
+      status: response.status,
+      via_jina: usedFallback
     };
   }
   throw new Error('网页重定向失败');
 }
 
+/**
+ * Jina Reader: https://r.jina.ai/<url>
+ * 用于 SPA 空壳页的可读正文兜底。目标仍是公网 HTTPS，DNS pin 到 jina 主机。
+ */
+async function fetchViaJinaReader(targetUrl, options) {
+  options = options || {};
+  var jinaUrl = 'https://r.jina.ai/' + String(targetUrl || '').replace(/^https?:\/\//i, 'https://');
+  var safe = await assertSafeWebUrl(jinaUrl, options.lookupImpl);
+  // jina 主机本身不能是内网；assertSafeWebUrl 已保证
+  var response = await requestPinnedHttps(
+    safe.parsed,
+    safe.addresses,
+    options.maxBytes || WEB_MAX_BYTES,
+    options.timeoutMs || WEB_TIMEOUT_MS,
+    {
+      Accept: 'text/plain,text/markdown,text/html;q=0.8,*/*;q=0.5',
+      'X-Return-Format': 'markdown'
+    }
+  );
+  if (!response || !response.ok) throw new Error('Jina 阅读失败 HTTP ' + (response && response.status || 0));
+  var raw = response.body.toString('utf8');
+  var title = '';
+  var tm = raw.match(/^Title:\s*(.+)$/im) || raw.match(/^#\s+(.+)$/m);
+  if (tm) title = tm[1].trim().slice(0, 200);
+  var text = raw
+    .replace(/^URL Source:.*$/gim, '')
+    .replace(/^Markdown Content:\s*/im, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, WEB_TEXT_MAX);
+  // 保留段落感
+  text = raw
+    .replace(/^URL Source:.*$/gim, '')
+    .replace(/^Title:.*$/gim, '')
+    .replace(/^Markdown Content:\s*/im, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, WEB_TEXT_MAX);
+  return { title: title, content: text, bytes: response.body.length };
+}
+
 module.exports = {
   fetchSafeWebPage: fetchSafeWebPage,
+  fetchViaJinaReader: fetchViaJinaReader,
   isPrivateAddress: isPrivateAddress,
   isBlockedWebHost: isBlockedWebHost,
   assertSafeWebUrl: assertSafeWebUrl

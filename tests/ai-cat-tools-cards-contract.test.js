@@ -26,7 +26,7 @@ test('read_web_page tool is registered and executed with SSRF-safe fetch', () =>
 test('image understanding uses OCR channel (no DeepSeek multimodal claim)', () => {
   assert.match(server, /ocrImageBuffer/);
   assert.match(server, /require\('\.\/image-ocr'\)/);
-  assert.match(server, /图片 OCR 识别结果/);
+  assert.match(server, /用户上传图片的可读文字/);
   assert.doesNotMatch(server, /当前暂不支持图片识别/);
   assert.match(imageOcr, /api\.ocr\.space/);
   assert.match(imageOcr, /OCR_SPACE_API_KEY/);
@@ -59,4 +59,19 @@ test('attachment extract returns cards and stream merges them', () => {
   assert.match(server, /function unwrapAttachmentExtract/);
   assert.match(server, /attachmentCardsStream/);
   assert.match(server, /writeSse\(res, \{ type: 'card', card: card \}/);
+});
+
+test('image OCR does not trigger OCR-tech web search and strips attachment noise', () => {
+  assert.match(server, /function stripAttachmentNoiseForSearch/);
+  assert.match(server, /function messageHasImageOcrContent/);
+  assert.match(server, /blockAutoSearchForOcr/);
+  assert.match(server, /禁止联网搜索 OCR/);
+  assert.match(server, /function prefetchUserLinks/);
+  assert.match(server, /extractHttpsUrlsFromMessage/);
+});
+
+test('OCR card uses dedicated body class and text normalize exists', () => {
+  assert.match(client, /ai-tool-card-ocr-text/);
+  assert.match(imageOcr, /function normalizeOcrText/);
+  assert.match(webFetch, /fetchViaJinaReader|via_jina|r\.jina\.ai/);
 });

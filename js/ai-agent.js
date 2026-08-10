@@ -5517,24 +5517,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           shell.appendChild(link);
         }
       }
-      if (data.snippet) {
+      if (data.error && !data.snippet) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-summary ai-tool-card-summary--warn', text: String(data.error).slice(0, 200) }));
+      } else if (data.snippet) {
         shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: String(data.snippet).slice(0, 360) }));
       }
       var pageMeta = [];
+      if (data.via_jina) pageMeta.push('增强阅读');
       if (data.truncated) pageMeta.push('正文已截断');
       if (data.bytes) pageMeta.push((data.bytes > 1024 ? (data.bytes / 1024).toFixed(1) + ' KB' : data.bytes + ' B'));
       if (pageMeta.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: pageMeta.join(' · ') }));
     } else if (type === 'image_ocr') {
       if (data.error && !data.text) {
-        shell.appendChild(el('div', { class: 'ai-tool-card-summary ai-tool-card-summary--warn', text: '识别未完成：' + String(data.error).slice(0, 200) }));
+        shell.appendChild(el('div', { class: 'ai-tool-card-summary ai-tool-card-summary--warn', text: '未识别到文字：' + String(data.error).slice(0, 200) }));
       } else {
-        shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: String(data.text || '').slice(0, 800) || '（无文字）' }));
+        var ocrBody = el('div', { class: 'ai-tool-card-ocr-text' });
+        ocrBody.textContent = String(data.text || '').slice(0, 1200) || '（无文字）';
+        shell.appendChild(ocrBody);
       }
-      appendKvGrid([
-        ['文件', data.file_name],
-        ['引擎', data.provider],
-        ['字数', data.chars != null ? data.chars : '']
-      ]);
+      var ocrMeta = el('div', { class: 'ai-tool-card-meta ai-tool-card-ocr-meta' });
+      var metaBits = [];
+      if (data.file_name) metaBits.push(String(data.file_name).slice(0, 48));
+      if (data.chars != null) metaBits.push(data.chars + ' 字');
+      if (data.provider) metaBits.push(String(data.provider));
+      ocrMeta.textContent = metaBits.join(' · ');
+      if (metaBits.length) shell.appendChild(ocrMeta);
     } else if (type === 'web_search' && Array.isArray(data.results)) {
       if (data.query) {
         shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '搜索：' + String(data.query).slice(0, 120) }));

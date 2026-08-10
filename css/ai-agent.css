@@ -84,16 +84,15 @@
   gap: 10px;
   padding: 12px 14px 10px;
   min-height: 58px;
-  /* Apple 液态玻璃：半透明 + 强模糊，聊天字可从背后透出 */
+  /* 液态玻璃顶栏：更通透、边缘更干净 */
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(248, 253, 251, 0.28)),
-    rgba(255, 255, 255, 0.22);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.38);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.58) 0%, rgba(248, 253, 251, 0.36) 55%, rgba(255, 255, 255, 0.22) 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.45) inset,
-    0 8px 28px rgba(40, 90, 70, 0.06);
+    0 1px 0 rgba(255, 255, 255, 0.55) inset,
+    0 10px 30px rgba(40, 90, 70, 0.07);
   pointer-events: auto;
   isolation: isolate;
 }
@@ -937,16 +936,15 @@
   align-items: flex-end;
   gap: 8px;
   padding: 8px 12px max(10px, env(safe-area-inset-bottom));
-  /* 底部液态玻璃，与顶栏统一 */
+  /* 底部液态玻璃，与顶栏统一语感 */
   background:
-    linear-gradient(0deg, rgba(255, 255, 255, 0.48), rgba(248, 253, 251, 0.28)),
-    rgba(255, 255, 255, 0.2);
-  border-top: 1px solid rgba(255, 255, 255, 0.4);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+    linear-gradient(0deg, rgba(255, 255, 255, 0.58) 0%, rgba(248, 253, 251, 0.34) 50%, rgba(255, 255, 255, 0.2) 100%);
+  border-top: 1px solid rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
   box-shadow:
-    0 -1px 0 rgba(255, 255, 255, 0.4) inset,
-    0 -10px 32px rgba(40, 90, 70, 0.06);
+    0 -1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 -12px 34px rgba(40, 90, 70, 0.07);
   position: relative;
   z-index: 5;
   touch-action: manipulation;
@@ -4966,6 +4964,28 @@
 .ai-tool-card--page_read { border-color: rgba(74, 128, 124, .3); }
 .ai-tool-card--image_ocr { border-color: rgba(110, 100, 180, .28); }
 .ai-tool-card--web_search { border-color: rgba(60, 120, 160, .25); }
+.ai-tool-card-ocr-text {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-primary, #203633);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.ai-tool-card-ocr-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted, #7a908b);
+}
+[data-theme="dark"] .ai-tool-card-ocr-text {
+  background: rgba(8, 28, 26, 0.5);
+  color: #e7f4f1;
+}
 [data-theme="dark"] .ai-tool-card {
   background: linear-gradient(165deg, rgba(28, 52, 48, .88), rgba(18, 38, 36, .82));
   border-color: rgba(137, 207, 194, .2);
@@ -5115,11 +5135,14 @@
     min-height: 74px;
     padding: 14px 24px;
     gap: 12px;
-    border-bottom: 1px solid rgba(91, 151, 131, .18);
-    background: rgba(255, 255, 255, .72);
-    box-shadow: 0 10px 28px rgba(61, 113, 99, .06);
-    backdrop-filter: blur(22px) saturate(135%);
-    -webkit-backdrop-filter: blur(22px) saturate(135%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.42);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(248, 253, 251, 0.4) 100%);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.55) inset,
+      0 10px 28px rgba(61, 113, 99, .06);
+    backdrop-filter: blur(32px) saturate(180%);
+    -webkit-backdrop-filter: blur(32px) saturate(180%);
   }
 
   .ai-secondary-panel #aiChatRoot > .ai-chat-header .ai-chat-header-info {
@@ -5336,11 +5359,14 @@
     grid-row: 3;
     min-width: 0;
     padding: 14px clamp(24px, 4vw, 64px) 18px;
-    border-top-color: rgba(91, 151, 131, .16);
-    background: rgba(255, 255, 255, .76);
-    box-shadow: 0 -10px 26px rgba(61, 113, 99, .06);
-    backdrop-filter: blur(20px) saturate(135%);
-    -webkit-backdrop-filter: blur(20px) saturate(135%);
+    border-top: 1px solid rgba(255, 255, 255, 0.42);
+    background:
+      linear-gradient(0deg, rgba(255, 255, 255, 0.62) 0%, rgba(248, 253, 251, 0.38) 100%);
+    box-shadow:
+      0 -1px 0 rgba(255, 255, 255, 0.5) inset,
+      0 -12px 28px rgba(61, 113, 99, .06);
+    backdrop-filter: blur(32px) saturate(180%);
+    -webkit-backdrop-filter: blur(32px) saturate(180%);
   }
 
   .ai-secondary-panel #aiChatRoot:has(.ai-conv-item, .ai-no-history) > .ai-chat-input-bar {
