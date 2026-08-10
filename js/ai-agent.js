@@ -8310,7 +8310,7 @@ function showChatMessages() {
             '<h3 id="aiInviteModalTitle" class="ai-invite-modal-title">输入邀请码</h3>' +
             '<p class="ai-invite-modal-tip">向管理员获取邀请码，激活后立即生效</p>' +
             '<label class="ai-invite-code-label" for="aiInviteCodeInput">邀请码</label>' +
-            '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="A3K9M2" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" inputmode="text" />' +
+            '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="请输入邀请码" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" inputmode="text" />' +
             '<div class="ai-invite-code-feedback" id="aiInviteCodeFeedback" aria-live="polite"></div>' +
           '</div>' +
           '<div class="ai-invite-modal-foot">' +

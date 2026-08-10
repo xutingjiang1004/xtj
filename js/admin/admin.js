@@ -5014,9 +5014,11 @@ async function initAdminClient() {
                     '</tr></thead><tbody>');
                 codes.forEach(function(c) {
                     var used = (c.used_count || 0) + '/' + c.max_uses;
+                    var codeSafe = escapeHtml(c.code);
                     html.push(
                         '<tr>' +
-                        '<td><span class="ai-invite-code">' + escapeHtml(c.code) + '</span></td>' +
+                        '<td><div class="ai-invite-code-cell"><span class="ai-invite-code">' + codeSafe + '</span>' +
+                        '<button type="button" class="ai-invite-copy-btn" data-code="' + codeSafe + '">复制</button></div></td>' +
                         '<td>' + c.days + '</td>' +
                         '<td>' + fmtAdminTokenLimit(c.token_limit_daily) + '</td>' +
                         '<td>' + fmtAdminSearchLimit(c.search_limit_daily) + '</td>' +
@@ -5025,7 +5027,7 @@ async function initAdminClient() {
                         '<td>' + fmtAdminExpiry(c.expires_at) + '</td>' +
                         '<td>' + escapeHtml(c.note || '—') + '</td>' +
                         '<td>' + escapeHtml(c.created_by || '—') + '</td>' +
-                        '<td><button type="button" class="ai-invite-del-btn" onclick="window._aiAdminDeleteInvite(\'' + escapeHtml(c.code) + '\')">删除</button></td>' +
+                        '<td><button type="button" class="ai-invite-del-btn" onclick="window._aiAdminDeleteInvite(\'' + codeSafe + '\')">删除</button></td>' +
                         '</tr>'
                     );
                 });
@@ -5128,6 +5130,88 @@ async function initAdminClient() {
 
             content.innerHTML = html.join('');
 
+            function copyText(text) {
+                text = String(text || '');
+                if (!text) return Promise.reject(new Error('empty'));
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    return navigator.clipboard.writeText(text);
+                }
+                return new Promise(function(resolve, reject) {
+                    try {
+                        var ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.setAttribute('readonly', '');
+                        ta.style.position = 'fixed';
+                        ta.style.left = '-9999px';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        var ok = document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        if (ok) resolve();
+                        else reject(new Error('copy failed'));
+                    } catch (e) { reject(e); }
+                });
+            }
+
+            function bindInviteCopyButtons(root) {
+                if (!root) return;
+                root.querySelectorAll('.ai-invite-copy-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var code = btn.getAttribute('data-code') || '';
+                        copyText(code).then(function() {
+                            var old = btn.textContent;
+                            btn.textContent = '已复制';
+                            btn.classList.add('is-copied');
+                            showToast('已复制：' + code);
+                            setTimeout(function() {
+                                btn.textContent = old || '复制';
+                                btn.classList.remove('is-copied');
+                            }, 1200);
+                        }).catch(function() {
+                            showToast('复制失败，请手动选择');
+                        });
+                    });
+                });
+            }
+            bindInviteCopyButtons(content);
+
+            function fillInviteGenResult(codes) {
+                var resultBox = document.getElementById('aiInviteGenResult');
+                if (!resultBox) return;
+                codes = codes || [];
+                if (!codes.length) {
+                    resultBox.innerHTML = '';
+                    return;
+                }
+                var rows = codes.map(function(code) {
+                    var safe = escapeHtml(code);
+                    return '<div class="ai-invite-gen-row">' +
+                        '<span class="ai-invite-code">' + safe + '</span>' +
+                        '<button type="button" class="ai-invite-copy-btn" data-code="' + safe + '">复制</button>' +
+                        '</div>';
+                }).join('');
+                resultBox.innerHTML =
+                    '<div class="ai-invite-gen-head">已生成 ' + codes.length + ' 个邀请码，点复制即可粘贴到前端</div>' +
+                    rows +
+                    (codes.length > 1
+                        ? '<button type="button" class="ai-invite-copy-all-btn" data-codes="' + escapeHtml(codes.join('\\n')) + '">全部复制</button>'
+                        : '');
+                bindInviteCopyButtons(resultBox);
+                var allBtn = resultBox.querySelector('.ai-invite-copy-all-btn');
+                if (allBtn) {
+                    allBtn.addEventListener('click', function() {
+                        var all = (allBtn.getAttribute('data-codes') || '').replace(/\\n/g, '\n');
+                        copyText(all).then(function() {
+                            allBtn.textContent = '已全部复制';
+                            showToast('已复制全部邀请码');
+                            setTimeout(function() { allBtn.textContent = '全部复制'; }, 1200);
+                        }).catch(function() { showToast('复制失败'); });
+                    });
+                }
+            }
+
             // 注册全局操作函数
             window._aiAdminGenInvite = async function() {
                 var count = parseInt(document.getElementById('aiInviteCount').value, 10) || 1;
@@ -5150,13 +5234,11 @@ async function initAdminClient() {
                 try {
                     var res = await apiCall('POST', '/admin/ai-agent/invite-codes', body);
                     if (res && res.ok) {
-                        var resultBox = document.getElementById('aiInviteGenResult');
-                        if (resultBox) {
-                            resultBox.innerHTML = '已生成 ' + res.count + ' 个邀请码：<br><b>' +
-                                (res.codes || []).map(escapeHtml).join('<br>') + '</b>';
-                        }
+                        var genCodes = res.codes || [];
                         showToast('邀请码生成成功');
-                        renderAiAdminInvite(content);
+                        // 先刷新列表，再回填「可复制」结果区（避免被重绘清掉）
+                        await renderAiAdminInvite(content);
+                        fillInviteGenResult(genCodes);
                     } else {
                         showToast((res && res.error) || '生成失败');
                     }
