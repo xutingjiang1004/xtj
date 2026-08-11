@@ -228,3 +228,24 @@ test('audit: code-agent web_search is quota-enforced via userId passthrough', ()
 test('audit: post-tools 429 carries quota for frontend refresh', () => {
   assert.match(serverSource, /toolAccess\.quota \|\| null/);
 });
+
+test('audit: deep-think workers and FC preflight searches are quota-enforced', () => {
+  // buildToolExecutor 透传 userName → executeToolCall 做搜索配额校验（S1 修复）
+  assert.match(serverSource, /buildToolExecutor\(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName\)/);
+  assert.match(serverSource, /buildToolExecutor\(sseSend, agent\.role, sources, queries, searchCountAccum, userName\)/);
+  assert.match(serverSource, /executeToolCall\(tc, \{ userName: userName \|\| '' \}\)/);
+  // FC 预检的补全/扩展搜索改用 searchWebForUser（S2 修复）
+  assert.match(serverSource, /searchWebForUser\(userName, firstQuery, 20\)/);
+  assert.match(serverSource, /searchWebForUser\(userName, eq, 20\)/);
+  // autoSupplementSearch 支持 userName 配额透传
+  assert.match(serverSource, /function autoSupplementSearch\(originalQuery, currentResults, maxR, userName\)/);
+});
+
+test('audit: search tool results filter non-http(s) URLs', () => {
+  // search_web / tavily_search 的 URL 协议白名单（L3 修复）
+  assert.match(serverSource, /var safeUrl = \/\^https\?:\\\/\\\/\/i\.test\(rawUrl\)/);
+  assert.match(serverSource, /var tSafeUrl = \/\^https\?:\\\/\\\/\/i\.test\(tRawUrl\)/);
+  // 错误信息脱敏：不把底层 provider 细节透传
+  assert.match(serverSource, /搜索服务暂时不可用/);
+  assert.doesNotMatch(serverSource, /error: e && e\.message \|\| '搜索失败'/);
+});
