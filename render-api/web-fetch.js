@@ -82,11 +82,23 @@ async function assertSafeWebUrl(rawUrl, lookupImpl) {
   };
 }
 
-function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers) {
+function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, externalSignal) {
   return new Promise(function(resolve, reject) {
     var chunks = [];
     var total = 0;
     var settled = false;
+    function onExternalAbort() {
+      if (!settled) {
+        settled = true;
+        request.destroy(new Error('请求已取消'));
+      }
+    }
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        return reject(new Error('请求已取消'));
+      }
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
     var request = https.request({
       protocol: 'https:',
       hostname: parsed.hostname,
@@ -155,6 +167,13 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers) {
       }
     });
     request.end();
+    // 请求结束后移除外部 abort 监听，避免泄漏
+    var _cleanup = function() {
+      if (externalSignal) {
+        try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+      }
+    };
+    Promise.resolve().then(_cleanup);
   });
 }
 
@@ -216,6 +235,7 @@ async function fetchSafeWebPage(rawUrl, options) {
   var lookupImpl = options.lookupImpl || dns.lookup;
   var maxBytes = options.maxBytes || WEB_MAX_BYTES;
   var timeoutMs = options.timeoutMs || WEB_TIMEOUT_MS;
+  var externalSignal = options.signal || null;
   var current = String(rawUrl || '').trim();
 
   for (var redirect = 0; redirect <= WEB_MAX_REDIRECTS; redirect++) {
@@ -228,7 +248,8 @@ async function fetchSafeWebPage(rawUrl, options) {
         safeTarget.addresses,
         maxBytes,
         timeoutMs,
-        options.headers || {}
+        options.headers || {},
+        externalSignal
       );
     } catch (err) {
       throw new Error((err && err.message) || '网页请求失败');

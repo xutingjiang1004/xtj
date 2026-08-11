@@ -538,9 +538,9 @@ function buildDefaultAgents(message) {
 }
 
 function buildToolExecutor(sseSend, agentRole, sourcesAccum, queriesAccum, searchCountAccum, userName) {
-  return async function(tc) {
+  return async function(tc, signal) {
     var tRes = null;
-    try { tRes = await executeToolCall(tc, { userName: userName || '' }); } catch (e) {
+    try { tRes = await executeToolCall(tc, { userName: userName || '', signal: signal || null }); } catch (e) {
       tRes = { tool_name: (tc.function && tc.function.name) || '', error: (e && e.message) || '工具执行失败' };
     }
     if (tc.function && tc.function.name === 'search_web') {
@@ -1095,7 +1095,8 @@ async function executeToolCall(toolCall, context) {
       var pageUrl = String(args.url || '').trim().slice(0, 2000);
       if (!pageUrl) return { tool_name: name, error: '网址为空' };
       try {
-        var page = await fetchSafeWebPage(pageUrl);
+        // 透传工具级 abort signal：工具超时/请求取消时中断底层抓取，避免悬空连接
+        var page = await fetchSafeWebPage(pageUrl, { signal: (context && context.signal) || null });
         var pageText = page.content || '';
         var pageTitle = page.title || pageUrl;
         var contentForModel = '【网页阅读结果】\n标题：' + pageTitle +
@@ -5038,17 +5039,21 @@ async function callDeepSeek(messages, options) {
       }
       var abortListeners = [];
       var toolTimeout = null;
+      // 工具级 AbortController：超时/外部取消时 abort，让底层 fetch（search/weather 等）尽早中断
+      var toolAbortCtrl = new AbortController();
       var abortPromise = new Promise(function(_, reject) {
         // Per-tool timeout
         toolTimeout = setTimeout(function() {
           var toolTimeoutErr = new Error('Tool execution timeout');
           toolTimeoutErr.name = 'ToolTimeoutError';
+          try { toolAbortCtrl.abort(); } catch (_) {}
           reject(toolTimeoutErr);
         }, SINGLE_TOOL_TIMEOUT_MS);
         abortSignals.forEach(function(signal) {
           var abortListener = function() {
             var cancelled = new Error('AI request cancelled');
             cancelled.name = 'AbortError';
+            try { toolAbortCtrl.abort(); } catch (_) {}
             reject(cancelled);
           };
           abortListeners.push({ signal: signal, listener: abortListener });
@@ -5057,7 +5062,7 @@ async function callDeepSeek(messages, options) {
       });
       onProgress();
       try {
-        var result = await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall); }), abortPromise]);
+        var result = await Promise.race([Promise.resolve().then(function() { return toolExecutor(toolCall, toolAbortCtrl.signal); }), abortPromise]);
         onProgress();
         return result;
       } finally {

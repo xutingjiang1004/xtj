@@ -6638,7 +6638,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!target) return;
         var statuses = target.querySelectorAll('.ai-enhanced-status, .ai-tool-status, .ai-search-supplement');
         for (var statusIndex = 0; statusIndex < statuses.length; statusIndex++) {
-          try { statuses[statusIndex].remove(); } catch (eStatus) {}
+          // 保留工具结果卡片（.ai-tool-result-card）：回复完成后用户仍能看到搜索/天气/汇率结果
+          var statusEl = statuses[statusIndex];
+          var keepCard = statusEl.querySelector('.ai-tool-result-card');
+          if (keepCard && keepCard.parentNode) {
+            try {
+              var clone = keepCard.cloneNode(true);
+              statusEl.parentNode.insertBefore(clone, statusEl);
+            } catch (eClone) {}
+          }
+          try { statusEl.remove(); } catch (eStatus) {}
         }
       }
 
@@ -7208,8 +7217,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (queryStr2) {
                 detailPanel2.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr2 }));
               }
-              for (var ri2 = 0; ri2 < itemsArr.length; ri2++) {
-                var r2 = itemsArr[ri2];
+              var maxItems2 = 10; // 条目上限：避免后端异常/聚合返回上百条时一次性创建大量 DOM
+              var shown2 = itemsArr.slice(0, maxItems2);
+              for (var ri2 = 0; ri2 < shown2.length; ri2++) {
+                var r2 = shown2[ri2];
                 var itemEl2 = el('div', { class: 'ai-search-detail-item' });
                 var linkEl2 = el('a', { class: 'ai-search-detail-title', href: safeSearchUrl(r2.url) || '#', target: '_blank', rel: 'noopener noreferrer', text: r2.title || '无标题' });
                 itemEl2.appendChild(linkEl2);
@@ -7218,6 +7229,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 }
                 itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: (r2.source || '') + ' · ' + (r2.published_at || '') }));
                 detailPanel2.appendChild(itemEl2);
+              }
+              if (itemsArr.length > maxItems2) {
+                detailPanel2.appendChild(el('div', { class: 'ai-search-detail-more', text: '还有 ' + (itemsArr.length - maxItems2) + ' 条结果未显示' }));
               }
               toolBar2.toggleFn = function() {
                 var isHidden = detailPanel2.style.display === 'none';
