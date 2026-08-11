@@ -307,25 +307,21 @@ npm start
 
 ## 当前维护注意点
 
-- 照片墙预览当前缺少未压缩源文件 `js/photo-wall/preview.js`，仓库内只有：
-  - `preview.min.js`
-  - `preview-hotfix.js`
-- `npm run build` 目前会跳过若干缺失源文件，例如：
-  - `js/photo-wall/preview.js`
-  - `js/photo-wall/data.js`
-  - `js/photo-wall/render.js`
-  - `js/photo-wall/upload.js`
-  - `js/photo-wall/photo-wall.js`
+- 照片墙预览的未压缩源文件 `js/photo-wall/preview.js` 已补齐，仓库内同时维护：
+  - `preview.js`（源文件，改完需执行 `npm run build`）
+  - `preview.min.js`（构建产物）
+  - `preview-hotfix.js`（历史热修复入口，仍保留引用）
+- `npm run build` 的构建清单中，`js/photo-wall/*` 源文件（`data.js`、`render.js`、`photo-wall.js`、`upload-ui.js`、`preview.js`、`preview-hotfix.js`）当前均已就位，不再存在"跳过缺失源文件"的情况。
+- `scripts/build.js` 仍保留 3 个 optional 条目（`upload-ui.js`、`preview.js`、`preview-hotfix.js`），仅作为未来源文件可能缺省时的降级保护；一旦缺失，构建日志会输出 `[SKIP]` 提示。
 
 这表示：
 
-- 现阶段照片墙预览问题优先通过 `preview-hotfix.js` 做热修复更稳
-- 如果后续要彻底重建照片墙构建链，应该先补齐这些源文件，再统一收口 minified 产物
+- 照片墙构建链已完整，可直接修改上述源文件后执行 `npm run build` 重新产出 minified 产物。
 
 ## 环境与配置注意
 
 - 项目使用 Supabase。
-- Render 部署依赖 `render-api/.env` 中的后端环境变量。
+- Render 部署的环境变量来自 `render.yaml` 声明 + Render Dashboard 手动配置，**不依赖**仓库内的 `render-api/.env`（该文件不存在，也不应提交）。
 - `render.yaml` 中要求手动配置的关键变量包括：
   - `ADMIN_PASSWORD`
   - `SUPABASE_SERVICE_KEY`
@@ -336,7 +332,7 @@ npm start
 额外提醒：
 
 - `API_SECRET` 如果在部署更新后被重置，会导致后台登录态失效。
-- 当前仓库存在 `render-api/.env` 与支付密钥文件，发布前应确认是否符合你的实际安全策略。
+- 仓库内不存在 `render-api/.env` 或任何支付/密钥文件（已核对），密钥一律通过 Render Dashboard、CI secrets 或环境变量注入，不要将密钥文件提交到仓库。
 
 ## 文档同步约定
 

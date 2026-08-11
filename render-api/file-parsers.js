@@ -24,9 +24,30 @@ function getXlsxParser() {
 }
 
 // code-agent.js 专用：PDF buffer 解析
-// ★ 安全加固：体积上限 + 解析超时，防止恶意 PDF（zip-bomb/深层嵌套）OOM 或挂死事件循环
-var MAX_PDF_BUFFER_BYTES = 15 * 1024 * 1024; // 15MB
-var PDF_PARSE_TIMEOUT_MS = 20000;
+// ★ 安全加固：体积上限 + 解析超时 + 并发信号量，防止恶意 PDF（zip-bomb/深层嵌套）
+//   OOM 或挂死事件循环。pdf-parse 的同步解析无法被 Promise.race 中断，
+//   因此用信号量限制同时解析数，把单事件循环被占满的窗口收敛到固定上限（审计 🟠）
+var MAX_PDF_BUFFER_BYTES = 8 * 1024 * 1024; // 8MB（由 15MB 下调）
+var PDF_PARSE_TIMEOUT_MS = 15000;
+var MAX_CONCURRENT_PDF_PARSES = 2;
+var _pdfParseInFlight = 0;
+var _pdfParseWaiters = [];
+
+// 进程级并发信号量：最多 MAX_CONCURRENT_PDF_PARSES 个 PDF 同时解析，
+// 超出排队等待，防止并发恶意 PDF 反复占满事件循环。
+async function withPdfParseSlot(fn) {
+  if (_pdfParseInFlight >= MAX_CONCURRENT_PDF_PARSES) {
+    await new Promise(function(resolve) { _pdfParseWaiters.push(resolve); });
+  }
+  _pdfParseInFlight++;
+  try {
+    return await fn();
+  } finally {
+    _pdfParseInFlight--;
+    var next = _pdfParseWaiters.shift();
+    if (next) next();
+  }
+}
 
 async function parsePdfBuffer(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0 || buffer.length > MAX_PDF_BUFFER_BYTES) {
@@ -34,21 +55,23 @@ async function parsePdfBuffer(buffer) {
   }
   var library = getPdfParser();
   if (!library) throw new Error('PDF 解析库不可用');
-  if (typeof library === 'function') {
-    return await withTimeout(Promise.resolve(library(buffer)), PDF_PARSE_TIMEOUT_MS, 'PDF 解析超时');
-  }
-  if (typeof library.PDFParse !== 'function') throw new Error('PDF 解析库版本不兼容');
-  var parser = new library.PDFParse({ data: new Uint8Array(buffer) });
-  try {
-    var result = await withTimeout(parser.getText(), PDF_PARSE_TIMEOUT_MS, 'PDF 解析超时');
-    return {
-      text: result && result.text || '',
-      numpages: result && Number(result.total) || 0,
-      info: {}
-    };
-  } finally {
-    try { await parser.destroy(); } catch (_) {}
-  }
+  return await withPdfParseSlot(async function() {
+    if (typeof library === 'function') {
+      return await withTimeout(Promise.resolve(library(buffer)), PDF_PARSE_TIMEOUT_MS, 'PDF 解析超时');
+    }
+    if (typeof library.PDFParse !== 'function') throw new Error('PDF 解析库版本不兼容');
+    var parser = new library.PDFParse({ data: new Uint8Array(buffer) });
+    try {
+      var result = await withTimeout(parser.getText(), PDF_PARSE_TIMEOUT_MS, 'PDF 解析超时');
+      return {
+        text: result && result.text || '',
+        numpages: result && Number(result.total) || 0,
+        info: {}
+      };
+    } finally {
+      try { await parser.destroy(); } catch (_) {}
+    }
+  });
 }
 
 function withTimeout(promise, ms, message) {

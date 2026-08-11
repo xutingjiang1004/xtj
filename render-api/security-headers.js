@@ -12,7 +12,13 @@ var CSP = [
   // 放进 script-src 等于允许「上传 JS → 白名单源加载」；supabase 仅用于 API 调用，
   // 由 connect-src 放行。jsdelivr/npmmirror 承载 supabase-js/Monaco/GSAP，必须保留。
   // H-16: 已移除 'unsafe-eval'（WebLLM 的 WASM 编译由 'wasm-unsafe-eval' 覆盖）。
-  // 'unsafe-inline' 因存在内联脚本暂留，后续改为 nonce 白名单后再移除。
+  // 审计 🟡 CSP 记录（跳过原因）：
+  //   'unsafe-inline' 暂未移除——前端 index.html/admin.html 存在内联脚本（含 WebLLM
+  //   worker 初始化片段与直接内联的事件绑定），本环境无法确认其全部内联依赖；
+  //   迁移到外部文件 + nonce 白名单属于前端 HTML 联动改造，需与前端一起排期。
+  //   jsdelivr/npmmirror 为 supabase-js/Monaco/GSAP 加载源，已通过 connect-src 限定
+  //   用途；script-src 对第三方 CDN 无法做路径级收窄（CSP 规范忽略 script-src 的路径），
+  //   后续优先为固定版本资源加 Subresource Integrity (SRI)。
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://registry.npmmirror.com",
   "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
@@ -44,6 +50,8 @@ var SECURITY_HEADERS = {
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
   'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  // 审计 🟡：补充 COOP/COEP 家族的 COOP，配合 frame-ancestors 'none' 隔离跨源窗口
+  'Cross-Origin-Opener-Policy': 'same-origin',
   'Content-Security-Policy': CSP
 };
 

@@ -2,6 +2,9 @@
 
 const crypto = require('crypto');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// 与 server.js 的 STORAGE_CLEANUP_MAX_ATTEMPTS 对齐：合并/重排 job 时不再重置 attempts，
+// 让 worker 的 attempts 上限判定能最终触发，避免"失败路径被反复并入并重置计数"导致无限重试。
+const MAX_CLEANUP_JOB_ATTEMPTS = 5;
 
 function normalizePhotoId(value, bucket, paths) {
   const candidate = String(value || '').trim();
@@ -94,7 +97,8 @@ async function enqueueStorageCleanupJob(supabase, options) {
         try {
           merged = await supabase.from('storage_cleanup_jobs').update({
             status: 'pending',
-            attempts: 0,
+            // 审计 🟡：不再重置 attempts，避免"持续失败路径被反复并入并归零计数"→ worker 永不触发上限
+            attempts: Math.min(Number(existing.data.attempts || 0), MAX_CLEANUP_JOB_ATTEMPTS),
             paths: normalizePaths((existing.data.paths || []).concat(paths)),
             last_error: payload.last_error,
             updated_at: payload.updated_at,
@@ -113,7 +117,7 @@ async function enqueueStorageCleanupJob(supabase, options) {
         // 终态 job 允许重新排队重试
         let update;
         try {
-          update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', attempts: 0, paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
+          update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', attempts: Math.min(Number(existing.data.attempts || 0), MAX_CLEANUP_JOB_ATTEMPTS), paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
         } catch (error) {
           return { ok: false, queued: false, failed: true, paths: paths, error: error };
         }
@@ -124,7 +128,7 @@ async function enqueueStorageCleanupJob(supabase, options) {
       // pending / 其他状态：M-2b 幂等合并必须做并集，不能整体覆盖（否则旧路径被丢弃）
       let update;
       try {
-        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', attempts: 0, paths: normalizePaths((existing.data.paths || []).concat(paths)), last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
+        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', attempts: Math.min(Number(existing.data.attempts || 0), MAX_CLEANUP_JOB_ATTEMPTS), paths: normalizePaths((existing.data.paths || []).concat(paths)), last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
       } catch (error) {
         return { ok: false, queued: false, failed: true, paths: paths, error: error };
       }
@@ -166,18 +170,26 @@ async function removeStorageWithQueue(supabase, options) {
     if (!removedEntries.length) {
       return { ok: true, removed: true, cleanup_pending: false, paths: paths };
     }
-    // remove 返回项可能只含 basename（如 "abc.webp"）也可能含完整路径，
-    // 比对同时接受两种形态；每个返回项最多抵消一个请求路径，避免同名 basename
-    // 把未删掉的路径误判为已删。
+    // remove 返回项可能只含 basename（如 "abc.webp"）也可能含完整路径。
+    // 审计 🟡：basename 跨目录同名文件（photos/a/x.webp vs photos/b/x.webp）会互相
+    // 抵消导致"未删文件被误判已删"→ 孤儿永不被清理。修复：优先按完整路径精确匹配；
+    // basename 兜底仅当返回项不含目录、且该 basename 在请求路径中唯一时启用。
     const removedMatches = removedEntries.map(function(item) {
       const raw = String(item && (item.name || item.path) || '').trim().replace(/^\/+/, '');
       if (!raw) return null;
-      return { full: raw, base: raw.split('/').pop() };
+      return { full: raw, base: raw.split('/').pop(), hasDir: raw.indexOf('/') >= 0 };
     }).filter(Boolean);
+    const baseCount = {};
+    paths.forEach(function(p) {
+      const base = String(p).trim().replace(/^\/+/, '').split('/').pop();
+      baseCount[base] = (baseCount[base] || 0) + 1;
+    });
     const remaining = paths.filter(function(p) {
       const clean = String(p).trim().replace(/^\/+/, '');
       const idx = removedMatches.findIndex(function(m) {
-        return m.full === clean || m.base === clean.split('/').pop();
+        if (m.full === clean) return true;
+        if (!m.hasDir && m.base === clean.split('/').pop() && baseCount[m.base] === 1) return true;
+        return false;
       });
       if (idx === -1) return true;
       removedMatches.splice(idx, 1);

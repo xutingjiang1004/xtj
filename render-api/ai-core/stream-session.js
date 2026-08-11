@@ -727,6 +727,8 @@ function sanitizeEventData(type, data) {
   // （旧实现 indexOf('key') 会误伤 monkey/keyboard/keyCode/keyframes/hockey/key_name）。
   // 规范化：小写 + 去 [-_]。判定 = 精确命中清单，或以 token/secret/password 等
   // 高信号后缀结尾；'key' 只允许精确键名（apiKey/accessKey/secretKey 等）命中。
+  // 审计 ⚪ 文档说明：'auth' 作为精确敏感键——嵌套对象里 { auth: {...} } 会被整体
+  // [redacted]。对事件完整性是安全取舍：宁可误伤业务 auth 字段，也不能让凭据结构泄漏。
   var SENSITIVE_KEY_EXACT = [
     'key', 'apikey', 'accesskey', 'secretkey', 'privatekey', 'sessionkey',
     'token', 'accesstoken', 'apitoken', 'refreshtoken', 'idtoken', 'awssessiontoken',

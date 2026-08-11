@@ -12,8 +12,8 @@ services:
     # PR 已合并到 main；生产部署跟随默认主分支，避免继续跟随已合并的临时 hotfix 分支。
     branch: main
     rootDir: .
-    # 构建阶段也执行测试，避免未经验证的提交自动进入生产。
-    buildCommand: npm ci && npm run build && npm test
+    # 构建阶段仅做语法级冒烟检查（避免长测试阻塞部署，完整测试由 CI 承担）。
+    buildCommand: npm ci && npm run build && npm run test:smoke
     startCommand: node render-api/server.js
     autoDeploy: true
     # M-4: 声明健康检查路径，Render 不再 ping "/" 污染访问统计

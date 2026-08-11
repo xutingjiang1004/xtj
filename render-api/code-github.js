@@ -7,7 +7,11 @@ const path = require('node:path');
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
-const REPO_PART_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9_.-])?$/;
+// 审计 🟡：tree?recursive=1 最多 10 万条（JSON 可达数十 MB），响应体设字节上限，
+// 超限截断并提示，避免响应体消耗浏览器与 Node 内存。
+const MAX_TREE_RESPONSE_BYTES = 10 * 1024 * 1024;
+// 审计 🟢：收紧仓库名规则——禁连续 ..、禁以 . 结尾（GitHub 官方规则）
+const REPO_PART_RE = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9_-])?$/;
 const REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const GIT_OBJECT_SHA_RE = /^[a-f0-9]{40,64}$/i;
 // 全站共享 GITHUB_TOKEN（GitHub 5k requests/hour 配额）。每用户滑动窗口配额：
@@ -46,7 +50,8 @@ function parseRepo(value) {
   if (parts.length !== 2 || !REPO_PART_RE.test(parts[0]) || !REPO_PART_RE.test(parts[1])) {
     return null;
   }
-  if (parts[0] === '.' || parts[0] === '..' || parts[1] === '.' || parts[1] === '..') {
+  if (parts[0] === '.' || parts[0] === '..' || parts[1] === '.' || parts[1] === '..' ||
+      parts[0].indexOf('..') >= 0 || parts[1].indexOf('..') >= 0) {
     return null;
   }
   return { owner: parts[0], repo: parts[1], fullName: parts[0] + '/' + parts[1] };
@@ -146,8 +151,12 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
     // 每用户配额：保护共享 token 的 GitHub 小时配额不被单个用户耗尽
     // G4 修复：配额 key 只认认证身份 req.userName，不接受 query 参数伪造
     // （旧逻辑允许 ?user_name=xxx 刷新配额，且数组参数可完全绕过配额）。
+    // 审计 🟡：匿名/未设置 req.userName 时按 IP 兜底，禁止无配额放行。
     var quotaUser = String((req.userName || '') || '').trim();
-    if (quotaUser && !consumeGithubUserQuota(quotaUser)) {
+    if (!quotaUser) {
+      quotaUser = 'ip:' + String(req.ip || (req.socket && req.socket.remoteAddress) || 'unknown');
+    }
+    if (!consumeGithubUserQuota(quotaUser)) {
       res.status(429).json({ ok: false, code: 'github_quota_exceeded', error: 'GitHub 请求过于频繁，请稍后再试' });
       return null;
     }
@@ -328,23 +337,37 @@ module.exports = function registerCodeGithubRoutes(app, deps) {
         truncatedError.code = 'github_tree_truncated';
         throw truncatedError;
       }
+      var mappedEntries = entries.map(function(entry) {
+        return {
+          path: entry.path || entry.name || '',
+          name: entry.name || String(entry.path || '').split('/').pop(),
+          type: entry.type === 'tree' || entry.type === 'dir' ? 'tree' : 'blob',
+          sha: entry.sha || '',
+          size: Number(entry.size) || 0,
+          mode: entry.mode || '',
+          url: entry.url || ''
+        };
+      });
+      // 审计 🟡：响应体字节上限——逐条累计序列化字节，超限截断并打标提示，
+      // 防止 100k 条目的 tree JSON（数十 MB）直接透传给浏览器
+      var out = [];
+      var bytes = 0;
+      for (var mi = 0; mi < mappedEntries.length; mi++) {
+        var itemJson = JSON.stringify(mappedEntries[mi]);
+        if (bytes + Buffer.byteLength(itemJson, 'utf8') > MAX_TREE_RESPONSE_BYTES) break;
+        bytes += Buffer.byteLength(itemJson, 'utf8');
+        out.push(mappedEntries[mi]);
+      }
       return {
         ok: true,
         repo: ctx.repo.fullName,
         ref: ctx.ref,
         path: ctx.path,
-        truncated: data && data.truncated === true,
-        tree: entries.map(function(entry) {
-          return {
-            path: entry.path || entry.name || '',
-            name: entry.name || String(entry.path || '').split('/').pop(),
-            type: entry.type === 'tree' || entry.type === 'dir' ? 'tree' : 'blob',
-            sha: entry.sha || '',
-            size: Number(entry.size) || 0,
-            mode: entry.mode || '',
-            url: entry.url || ''
-          };
-        })
+        truncated: out.length < mappedEntries.length,
+        truncation_notice: out.length < mappedEntries.length
+          ? '仓库文件树过大，已截断至前 ' + out.length + ' 条'
+          : null,
+        tree: out
       };
     });
   }

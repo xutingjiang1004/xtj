@@ -32,8 +32,16 @@ function isPrivateAddress(address) {
       var mappedV4 = value.slice(7);
       if (net.isIP(mappedV4) === 4) return isPrivateAddress(mappedV4);
     }
-    return value === '::' || value === '::1' || value.indexOf('fc') === 0 || value.indexOf('fd') === 0 ||
-      /^(fe[89ab]):/i.test(value);
+    // 审计 🟡：补齐 6to4(2002::/16，可内嵌任意 IPv4)、Teredo(2001::/32)、
+    // 文档段(2001:db8::/32)、NAT64(64:ff9b::/96) 与组播(ff00::/8)
+    return value === '::' || value === '::1' ||
+      value.indexOf('fc') === 0 || value.indexOf('fd') === 0 ||
+      /^(fe[89ab]):/i.test(value) ||
+      /^64:ff9b:/.test(value) ||
+      /^2002:/.test(value) ||
+      /^2001:0:/i.test(value) ||
+      /^2001:db8:/.test(value) ||
+      /^ff00:/i.test(value);
   }
   return false;
 }

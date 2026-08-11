@@ -65,6 +65,13 @@ const MAX_PPTX_ENTRIES = 2000;
 const MAX_PPTX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
 const MAX_OFFICE_ARCHIVE_ENTRIES = 5000;
 const MAX_OFFICE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
+// 审计 🟡：Office 修改/提取的 CPU/内存量级上限。
+// xlsx 在 read/sheet_to_csv 前先用 !ref 范围预检行列数；docx 的 document.xml 单文件
+// 单独设上限（zip 总量 100MB 不约束 CPU 量，正则反复解析超大 XML 会拖垮事件循环）。
+const MAX_XLSX_ROWS = 100000;      // 单工作表行数上限
+const MAX_XLSX_COLS = 1000;        // 单工作表列数上限
+const MAX_XLSX_CELLS = 2000000;    // 单工作表单元格数上限（range 面积）
+const MAX_DOCX_XML_BYTES = 20 * 1024 * 1024; // word/document.xml 单文件上限（20MB）
 // 生产环境不下发 Supabase 等底层错误 details，避免内部细节外泄
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const OP_TYPES_ALLOWED = new Set(['replace_range', 'update', 'create', 'document']);
@@ -1641,6 +1648,14 @@ async function validateOfficeArchive(buffer, kind) {
   if (required && !zip.files[required]) {
     throw new Error(String(kind || 'Office').toUpperCase() + ' 文件结构无效');
   }
+  // 审计 🟡：docx 的 document.xml 是逐操作全量正则解析的 CPU 大户，
+  // 在 zip 总量 100MB 之外单独设 20MB 上限，防超大 XML 反复回溯拖垮事件循环
+  if (kind === 'docx') {
+    var docEntry = zip.files['word/document.xml'];
+    if (docEntry && !docEntry.dir && Number(docEntry._data && docEntry._data.uncompressedSize) > MAX_DOCX_XML_BYTES) {
+      throw new Error('DOCX 文档正文过大');
+    }
+  }
   if (kind === 'pptx' && !names.some(function(name) { return /^ppt\/slides\/slide\d+\.xml$/i.test(name); })) {
     throw new Error('PPTX 文件中没有可读取的幻灯片');
   }
@@ -1696,7 +1711,8 @@ async function extractDocumentText(buffer, mimeType, fileName) {
       }
       var xlsx = getXlsxParser();
       var workbook = xlsx.read(buffer, { type: 'buffer' });
-      if (workbook.SheetNames.length > MAX_WORKBOOK_SHEETS) throw new Error('工作表数量超过 ' + MAX_WORKBOOK_SHEETS + ' 个');
+      // 审计 🟡：遍历前预检行列数/单元格数（含工作表数量上限）
+      assertWorkbookBounds(workbook, xlsx);
       var sheets = [];
       metadata = { sheetNames: workbook.SheetNames, sheetCount: workbook.SheetNames.length };
       workbook.SheetNames.forEach(function(sName) {
@@ -1812,6 +1828,30 @@ var FORMULA_WHITELIST = [
   'DATE', 'DATEVALUE', 'YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND', 'TODAY', 'NOW',
   'WEEKDAY', 'WEEKNUM', 'DATEDIF', 'EDATE', 'EOMONTH', 'NETWORKDAYS', 'WORKDAY'
 ];
+// 公式整体长度上限：超长公式直接拒绝按公式写入（按文本写入），防止公式负载滥用
+var MAX_FORMULA_LEN = 5000;
+
+// 公式安全校验（审计 🟠）：
+// ① 递归提取公式中**所有**函数名（\b[A-Z]+\( 全部命中），逐一要求在白名单内——
+//    修复"仅校验头部函数，嵌套 WEBSERVICE/HYPERLINK 等直接放行"的绕过；
+// ② 禁止 DDE / 外部引用特征串：cmd|（老版本 Excel 打开即执行）、UNC 反斜杠路径、
+//    外部 URL scheme、'! 外部工作簿引用，避免无括号表达式绕过白名单。
+function isFormulaSafe(body) {
+  var names = [];
+  var nameRe = /\b([A-Z][A-Z0-9._]*)\s*\(/g;
+  var match;
+  while ((match = nameRe.exec(body)) !== null) {
+    names.push(match[1].toUpperCase());
+  }
+  for (var i = 0; i < names.length; i++) {
+    if (FORMULA_WHITELIST.indexOf(names[i]) < 0) return false;
+  }
+  if (/cmd\|/i.test(body) || body.indexOf("'!") >= 0 || body.indexOf('\\') >= 0 ||
+      /(?:https?|ftp):\/\//i.test(body) || /file:\/\//i.test(body)) {
+    return false;
+  }
+  return true;
+}
 
 function validateCellRef(cell) {
   if (!cell || typeof cell !== 'string') return false;
@@ -1837,6 +1877,29 @@ function validateSheetName(name) {
   if (SHEET_NAME_FORBIDDEN.test(trimmed)) return false;
   if (trimmed === '__proto__' || trimmed === 'constructor' || trimmed === 'prototype') return false;
   return true;
+}
+
+// 审计 🟡：xlsx.read 后、任何 sheet_to_csv 全量遍历前，用 !ref 范围预检行列数。
+// 超限直接抛错，避免百万单元格/超大范围让 sheet_to_csv 长时间遍历占满 CPU。
+function assertWorkbookBounds(workbook, xlsx) {
+  if (!workbook || !xlsx) return;
+  if (workbook.SheetNames.length > MAX_WORKBOOK_SHEETS) {
+    throw new Error('工作表数量超过 ' + MAX_WORKBOOK_SHEETS + ' 个');
+  }
+  for (var i = 0; i < workbook.SheetNames.length; i++) {
+    var sheet = workbook.Sheets[workbook.SheetNames[i]];
+    if (!sheet || !sheet['!ref']) continue;
+    var range;
+    try { range = xlsx.utils.decode_range(sheet['!ref']); } catch (_) { continue; }
+    var rows = range.e.r - range.s.r + 1;
+    var cols = range.e.c - range.s.c + 1;
+    if (rows > MAX_XLSX_ROWS || cols > MAX_XLSX_COLS) {
+      throw new Error('工作表 "' + workbook.SheetNames[i] + '" 行列数超出限制');
+    }
+    if (rows * cols > MAX_XLSX_CELLS) {
+      throw new Error('工作表 "' + workbook.SheetNames[i] + '" 单元格数量超出限制');
+    }
+  }
 }
 
 function updateSheetRef(workbook, sheetName, xlsx) {
@@ -1867,6 +1930,8 @@ async function applyXlsxOperations(buffer, operations, fileName) {
 
   try {
     workbook = xlsx.read(buffer, { type: 'buffer' });
+    // 审计 🟡：遍历前预检行列数/单元格数，防百万单元格 workbook 占满 CPU
+    assertWorkbookBounds(workbook, xlsx);
 
     var beforeParts = [];
     workbook.SheetNames.forEach(function(sName) {
@@ -1922,16 +1987,13 @@ async function applyXlsxOperations(buffer, operations, fileName) {
             // IF/ROUND/SUMIF 等），禁止 WEBSERVICE/HYPERLINK/IMPORTXML/DDE 等
             // 会触发外部请求或命令执行的函数，防止公式注入。
             var formulaBody = String(value).slice(1);
-            // 仅对函数调用（含左括号的 head）做白名单校验；纯单元格引用/算术/比较/拼接
-            // 表达式（=A1+B1、=1+1、=Sheet2!A1、="a"&"b"）无左括号，直接放行。
-            // 含左括号的 =WEBSERVICE(...)/=HYPERLINK(...) 等危险函数仍被白名单拦截。
-            var lpIndex = formulaBody.indexOf('(');
-            var formulaHead = lpIndex >= 0 ? formulaBody.slice(0, lpIndex).toUpperCase() : '';
-            if (lpIndex < 0 || FORMULA_WHITELIST.indexOf(formulaHead) >= 0) {
-              workbook.Sheets[sheetName][cell] = { t: 'n', f: formulaBody };
-            } else {
-              changes.push({ type: 'cell_update', sheet: sheetName, cell: cell, error: '公式函数不在白名单内，已按普通文本写入' });
+            // 递归校验公式内**所有**函数名 + 整体长度上限 + DDE/外部引用特征串；
+            // 任一不合格即按普通文本写入，绝不以公式形式落盘
+            if (formulaBody.length > MAX_FORMULA_LEN || !isFormulaSafe(formulaBody)) {
+              changes.push({ type: 'cell_update', sheet: sheetName, cell: cell, error: '公式包含不允许的函数或引用，已按普通文本写入' });
               workbook.Sheets[sheetName][cell] = { t: 's', v: String(value) };
+            } else {
+              workbook.Sheets[sheetName][cell] = { t: 'n', f: formulaBody };
             }
           } else if (typeof value === 'string' && value.startsWith('=')) {
             // 公式注入防护：未显式声明 is_formula 时，以 = 开头的文本一律作为普通字符串写入，
@@ -2526,6 +2588,10 @@ async function applyDocxOperations(buffer, operations, fileName) {
     }
 
     var xml = await documentXml.async('string');
+    // 审计 🟡：逐操作全量正则解析超大 XML 是 CPU/内存 DoS 向量，提前设上限拒绝
+    if (xml.length > MAX_DOCX_XML_BYTES) {
+      return { ok: false, error: 'DOCX 文档正文过大，无法修改' };
+    }
     var originalXml = xml;
     var appliedOps = [];
     var changes = [];
@@ -3363,10 +3429,30 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
     return '请求过于频繁';
   };
 
+  // 审计 🟠 配额 TOCTOU：check（gateCodeQuota）与 consume（billCodeUsage）是两次独立
+  // RPC，中间是整段 AI 调用，并发请求可同时通过预检并放大日额度消耗。原子化的
+  // "校验+扣减" RPC 属于 server.js/数据库层改造，本模块先用"每用户进行中的
+  // check→consume 窗口数"计数兜底：超出上限的并发请求直接拒绝，把放大窗口收敛到
+  // 固定数量。计数带 TTL 自愈，避免请求在校验后失败（未走到 consume）时永久泄漏。
+  var _userPendingQuota = new Map(); // key -> { count, expiresAt }
+  var MAX_USER_PENDING_QUOTA = 2;
+  var USER_PENDING_QUOTA_TTL_MS = 5 * 60 * 1000;
+
   async function gateCodeQuota(userName) {
     if (!enforceAiChatAccess) return { allowed: true, reason: null, quota: null };
+    var key = String(userName || '');
+    var now = Date.now();
+    var entry = _userPendingQuota.get(key);
+    if (entry && entry.expiresAt <= now) { _userPendingQuota.delete(key); entry = null; }
+    var pending = entry ? entry.count : 0;
+    if (pending >= MAX_USER_PENDING_QUOTA) {
+      return { allowed: false, reason: 'hourly_limit', quota: null };
+    }
     try {
-      return await enforceAiChatAccess(userName, { needSearch: false });
+      var gate = await enforceAiChatAccess(userName, { needSearch: false });
+      if (!gate || !gate.allowed) return gate;
+      _userPendingQuota.set(key, { count: pending + 1, expiresAt: now + USER_PENDING_QUOTA_TTL_MS });
+      return gate;
     } catch (e) {
       console.error('[code-agent] quota gate failed:', e && e.message);
       return { allowed: false, reason: 'quota_unavailable', quota: null };
@@ -3375,6 +3461,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
 
   async function billCodeUsage(userName, usage, options) {
     if (!recordAiTurnUsage || !userName) return null;
+    // 无论 consume 是否成功都先释放该用户的并发 quota 窗口，避免计数泄漏
+    var key = String(userName || '');
+    var entry = _userPendingQuota.get(key);
+    if (entry) {
+      if (entry.count <= 1) _userPendingQuota.delete(key);
+      else { entry.count -= 1; _userPendingQuota.set(key, entry); }
+    }
     try {
       var billUsage = Object.assign({}, usage || {});
       if (options && options.reasoning_tokens && !billUsage.reasoning_tokens) {
@@ -4191,7 +4284,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
             aiResult.thinking_mode = 'off';
             aiResult.thinkingFallbackReason = parsedError;
           } catch (fallbackErr) {
-            console.error('[code-agent] Thinking fallback also failed:', fallbackErr && fallbackErr.message);
+            console.error('[code-agent] Thinking fallback also failed:', JSON.stringify({ message: String(fallbackErr && fallbackErr.message || '').replace(/[\r\n]+/g, ' ').slice(0, 500) }));
             fallbackErr.parsedCode = parsedError;
             throw fallbackErr;
           }
@@ -4397,7 +4490,13 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       }
       var errMsg = err && err.message ? err.message : '';
       var errCode = err && err.code ? err.code : '';
-      console.error('[code-agent] Unhandled error:', errMsg || err, 'phase:', requestPhase);
+      // 审计 🟡：原始错误消息可能含换行/控制字符，伪造日志行或夹带敏感回显，
+      // 统一 JSON.stringify（转义换行）后输出，并截断长度
+      console.error('[code-agent] Unhandled error:', JSON.stringify({
+        message: String(errMsg || err || '').replace(/[\r\n]+/g, ' ').slice(0, 500),
+        code: errCode,
+        phase: requestPhase
+      }));
       logPhase('error', { errorMessage: errMsg, errorCode: errCode || 'UNKNOWN' });
 
       // Phase 2: Map known error patterns to structured error codes
@@ -5492,7 +5591,11 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         return;
       }
       var errMsg = err && err.message ? err.message : String(err);
-      console.error('[code-agent-stream] Error:', errMsg, 'phase:', finalized ? 'finalized' : 'active');
+      // 审计 🟡：原始错误消息可能含换行/控制字符，统一 JSON.stringify 后输出
+      console.error('[code-agent-stream] Error:', JSON.stringify({
+        message: String(errMsg).replace(/[\r\n]+/g, ' ').slice(0, 500),
+        phase: finalized ? 'finalized' : 'active'
+      }));
       var structured = aiCoreErrorMapper.classifyError(err, { requestId: requestId, phase: 'stream' });
       sendStreamError(structured.code, structured.error, structured.phase);
     }

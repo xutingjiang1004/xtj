@@ -188,7 +188,39 @@ async function createPhotoThumbnail(options) {
   }
   var downloaded = await options.supabase.storage.from('uploads').download(storagePath);
   if (!downloaded || downloaded.error || !downloaded.data) throw sourceError;
-  var input = Buffer.from(await downloaded.data.arrayBuffer());
+  // 探测失败（size 为 null）时不再降级为全量下载：改为流式限量读取，逐块累计，
+  // 超 MAX_IMAGE_SIZE 立即 cancel() 并抛错，OOM 防护与探测结果解耦（审计 🟠）
+  var blobLike = downloaded.data;
+  if (blobLike && Number.isSafeInteger(blobLike.size) && blobLike.size > MAX_IMAGE_SIZE) {
+    throw tooLargeError;
+  }
+  var input;
+  var stream = (blobLike && typeof blobLike.getReader === 'function') ? blobLike
+    : (blobLike && typeof blobLike.stream === 'function' ? blobLike.stream() : null);
+  if (stream && typeof stream.getReader === 'function') {
+    var reader = stream.getReader();
+    var chunks = [];
+    var totalBytes = 0;
+    var overLimit = false;
+    try {
+      while (true) {
+        var read = await reader.read();
+        if (read.done) break;
+        if (!read.value) continue;
+        totalBytes += read.value.byteLength;
+        if (totalBytes > MAX_IMAGE_SIZE) { overLimit = true; break; }
+        chunks.push(Buffer.from(read.value));
+      }
+    } finally {
+      try { if (overLimit) await reader.cancel(); } catch (_) {}
+      try { if (typeof reader.releaseLock === 'function') reader.releaseLock(); } catch (_) {}
+    }
+    if (overLimit) throw tooLargeError;
+    input = Buffer.concat(chunks, totalBytes);
+  } else {
+    // 兜底：无 ReadableStream 能力的客户端（极少见），保留全量读取 + 大小校验
+    input = Buffer.from(await blobLike.arrayBuffer());
+  }
   // 服务端核对真实文件大小：客户端声称值不可信，防止超大文件/解压炸弹拖垮内存（下载后兜底校验）
   if (input.length > MAX_IMAGE_SIZE) {
     throw tooLargeError;
@@ -510,11 +542,22 @@ async function createPhotoRecord(options) {
         return { status: 503, body: { ok: false, error: '图片处理暂时不可用，请稍后重试', code: 'PHOTO_PROCESSING_RETRYABLE', retryable: true } };
       }
       var failedDerivativePaths = getPhotoDerivativePaths(storagePath);
-      var processingCleanup = await cleanupPhotoPaths(Object.assign({}, options, { cleanupPhotoId: actorKey }), [
+      var failedCleanupPaths = [
         storagePath,
         failedDerivativePaths.thumbnailPath,
         failedDerivativePaths.rotatedPath
-      ].concat(error && error.cleanupPaths || []));
+      ].concat(error && error.cleanupPaths || []);
+      // ★ 审计 🟡 双引用竞态：创建失败要删除原图前，二次执行引用检查——
+      // 首次检查（createRefs）到失败之间仍可能有人并发引用了同一 storagePath，
+      // 此时必须保留原图（它属于他人帖子），只清理本次衍生的缩略图/旋转图。
+      var failureRefs = await findStoragePathRefs(options.supabase, storagePath, null);
+      if (!failureRefs.ok) {
+        return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
+      }
+      if (hasOtherOwnerRef(failureRefs, options.userName)) {
+        failedCleanupPaths = failedCleanupPaths.filter(function (p) { return p !== storagePath; });
+      }
+      var processingCleanup = await cleanupPhotoPaths(Object.assign({}, options, { cleanupPhotoId: actorKey }), failedCleanupPaths);
       if (processingCleanup.queue_failed) {
         return { status: 503, body: { ok: false, error: 'Image processing failed and cleanup could not be queued', code: 'PHOTO_CLEANUP_QUEUE_FAILED', retryable: true } };
       }
@@ -560,11 +603,20 @@ async function createPhotoRecord(options) {
   }
 
   // 真正失败: 清理 storage (幂等)
-  var cleanupResult = await cleanupPhotoPaths(Object.assign({}, options, { cleanupPhotoId: actorKey }), [
+  var insertFailPaths = [
     thumbnail && thumbnail.path,
     thumbnail && thumbnail.rotatedPath,
     storagePath
-  ]);
+  ];
+  // ★ 审计 🟡 双引用竞态：插入失败要删原图前二次引用检查，他人已并发引用时保留原图
+  var insertFailRefs = await findStoragePathRefs(options.supabase, storagePath, null);
+  if (!insertFailRefs.ok) {
+    return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
+  }
+  if (hasOtherOwnerRef(insertFailRefs, options.userName)) {
+    insertFailPaths = insertFailPaths.filter(function (p) { return p !== storagePath; });
+  }
+  var cleanupResult = await cleanupPhotoPaths(Object.assign({}, options, { cleanupPhotoId: actorKey }), insertFailPaths);
   if (cleanupResult.queue_failed) {
     return { status: 503, body: { ok: false, error: 'Photo save failed and cleanup could not be queued', code: 'PHOTO_CLEANUP_QUEUE_FAILED', retryable: true, cleanup_pending: false } };
   }

@@ -134,12 +134,18 @@ async function ocrImageBuffer(buffer, mimeType, fileName, deps) {
       try { sharpLib = require('sharp'); } catch (_) { sharpLib = null; }
     }
     if (sharpLib && buffer.length > 400 * 1024) {
-      workBuf = await sharpLib(buffer)
-        .rotate()
-        .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 82 })
-        .toBuffer();
-      mime = 'image/jpeg';
+      // 审计 🟢：pipeline 完成后显式 destroy()，避免 libvips 句柄/内存滞留 GC
+      var shrinkImage = sharpLib(buffer);
+      try {
+        workBuf = await shrinkImage
+          .rotate()
+          .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 82 })
+          .toBuffer();
+        mime = 'image/jpeg';
+      } finally {
+        try { shrinkImage.destroy(); } catch (_) {}
+      }
     }
   } catch (e) {
     workBuf = buffer;
