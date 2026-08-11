@@ -184,3 +184,47 @@ test('invite migration defines tables and RPCs', () => {
   assert.match(inviteMigration, /v_custom_token/);
   assert.match(inviteMigration, /v_custom_search/);
 });
+
+// ===================== 审计回归（2026-08-11） =====================
+
+test('audit: -1 unlimited token does not block sending (frontend canSendWithQuota)', () => {
+  // 回归：tokens_remaining = -1 时 `tokens_remaining <= 0` 会误拦无限额度用户
+  const unlimited = quotaMod.normalizeQuotaPayload({
+    ok: true, is_pro: true, plan: 'pro',
+    tokens_used: 100, tokens_limit: -1, tokens_remaining: -1,
+    search_used: 0, search_limit: -1, search_unlimited: true,
+    can_chat: true, can_search: true
+  });
+  assert.equal(unlimited.tokens_limit, -1);
+  assert.equal(unlimited.tokens_remaining, -1);
+  assert.equal(unlimited.can_chat, true);
+  // 前端判定逻辑：-1 时不能因 remaining<=0 拦截
+  assert.ok(!(unlimited.tokens_remaining <= 0 && unlimited.tokens_limit !== -1));
+});
+
+test('audit: cancel-Pro is a transactional RPC (049)', () => {
+  const mig049 = fs.readFileSync(path.join(ROOT, 'supabase/migrations/049_audit_fixes.sql'), 'utf8');
+  assert.match(mig049, /cancel_ai_user_pro/);
+  assert.match(mig049, /UPDATE public\.ai_user_membership/);
+  assert.match(mig049, /DELETE FROM public\.ai_user_quota_daily/);
+  // server.js 的 cancel 端点必须调 RPC（而非两条裸 SQL）
+  assert.match(serverSource, /rpc\('cancel_ai_user_pro'/);
+  // set_ai_user_pro 新增 limits 参数
+  assert.match(mig049, /p_token_limit_daily/);
+  assert.match(mig049, /p_search_limit_daily/);
+  // limit 列 CHECK 约束
+  assert.match(mig049, /ai_invite_codes_token_limit_daily_check/);
+  assert.match(mig049, /ai_user_membership_token_limit_daily_check/);
+});
+
+test('audit: code-agent web_search is quota-enforced via userId passthrough', () => {
+  const codeSource = fs.readFileSync(path.join(ROOT, 'render-api/code-agent.js'), 'utf8');
+  assert.match(codeSource, /userId: scope && scope\.userId/);
+  assert.match(codeSource, /options\.webSearch\(/);
+  assert.match(codeSource, /options\.userId \|\| ''/);
+  assert.match(serverSource, /searchWebForUser\(userId, query, maxResults\)/);
+});
+
+test('audit: post-tools 429 carries quota for frontend refresh', () => {
+  assert.match(serverSource, /toolAccess\.quota \|\| null/);
+});
