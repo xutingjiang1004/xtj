@@ -233,7 +233,7 @@ test('audit: deep-think workers and FC preflight searches are quota-enforced', (
   // buildToolExecutor 透传 userName → executeToolCall 做搜索配额校验（S1 修复）
   assert.match(serverSource, /buildToolExecutor\(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName\)/);
   assert.match(serverSource, /buildToolExecutor\(sseSend, agent\.role, sources, queries, searchCountAccum, userName\)/);
-  assert.match(serverSource, /executeToolCall\(tc, \{ userName: userName \|\| '' \}\)/);
+  assert.match(serverSource, /executeToolCall\(tc, \{ userName: userName \|\| '', signal: signal \|\| null \}\)/);
   // FC 预检的补全/扩展搜索改用 searchWebForUser（S2 修复）
   assert.match(serverSource, /searchWebForUser\(userName, firstQuery, 20\)/);
   assert.match(serverSource, /searchWebForUser\(userName, eq, 20\)/);
@@ -248,4 +248,23 @@ test('audit: search tool results filter non-http(s) URLs', () => {
   // 错误信息脱敏：不把底层 provider 细节透传
   assert.match(serverSource, /搜索服务暂时不可用/);
   assert.doesNotMatch(serverSource, /error: e && e\.message \|\| '搜索失败'/);
+});
+
+test('audit: tool timeout aborts underlying fetch (read_web_page signal)', () => {
+  // 工具级 AbortController：超时/取消时 abort 底层请求（M1 修复）
+  assert.match(serverSource, /var toolAbortCtrl = new AbortController\(\);/);
+  assert.match(serverSource, /toolExecutor\(toolCall, toolAbortCtrl\.signal\)/);
+  assert.match(serverSource, /fetchSafeWebPage\(pageUrl, \{ signal: \(context && context\.signal\) \|\| null \}\)/);
+  const webFetch = fs.readFileSync(path.join(ROOT, 'render-api/web-fetch.js'), 'utf8');
+  assert.match(webFetch, /externalSignal\.addEventListener\('abort', onExternalAbort/);
+  assert.match(webFetch, /request\.destroy\(new Error\('请求已取消'\)\)/);
+});
+
+test('audit: code-agent sensitive-file blacklist matches path segments', () => {
+  const codeSource = fs.readFileSync(path.join(ROOT, 'render-api/code-agent.js'), 'utf8');
+  assert.match(codeSource, /逐段匹配/);
+  assert.match(codeSource, /\.npmrc/);
+  assert.match(codeSource, /\.git-credentials/);
+  assert.match(codeSource, /database/);
+  assert.match(codeSource, /search_count: toolTrace\.filter\(function\(entry\) \{ return entry\.tool === 'web_search'; \}\)\.length/);
 });

@@ -24,13 +24,19 @@ const MAX_FILES_TOTAL_CONTENT = 900 * 1024; // Kept only for legacy fallback war
 const MAX_SINGLE_FILE_CONTENT = 2 * 1024 * 1024;
 // 敏感文件名黑名单（大小写不敏感）：命中即拒绝读取，防止 Code Agent 被诱导
 // 读取 .env / 私钥 / 凭据文件后把内容泄露给模型与客户端。
-// 匹配依据：去掉目录前缀后的 basename（如 .env、.env.local、server.key、id_rsa）。
-const SENSITIVE_FILE_BASENAME_RE = /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx)$|credentials.*|id_rsa.*|id_ed25519.*|secrets.*)$/i;
+// 匹配依据：对路径的每一段（而非仅 basename）做匹配——`config/credentials.json`、
+// `aws/keys.txt` 这类嵌套敏感文件也能命中；补充常见敏感命名：.npmrc、.htpasswd、
+// .git-credentials、database.yml、*.pub 之外的私钥/凭据类命名。
+const SENSITIVE_FILE_BASENAME_RE = /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|p8|jks|keystore|asc|gpg)$|credentials.*|credential.*|id_rsa.*|id_ed25519.*|secrets.*|secret.*|\.npmrc|\.htpasswd|\.git-credentials|\.netrc|database\.ya?ml|docker-config\.json|\.kubeconfig|service-account.*|\.aws\/credentials|keys?\.(?:txt|json|ya?ml)|token.*|passwd|shadow|\.pgpass|\.my\.cnf)$/i;
 function isSensitiveFilePath(p) {
   if (typeof p !== 'string' || !p.trim()) return false;
   var s = p.replace(/\\/g, '/');
-  var basename = s.split('/').pop() || '';
-  return SENSITIVE_FILE_BASENAME_RE.test(basename);
+  // 逐段匹配：任一目录段或 basename 命中敏感规则即拒绝
+  var segments = s.split('/').filter(Boolean);
+  for (var i = 0; i < segments.length; i++) {
+    if (SENSITIVE_FILE_BASENAME_RE.test(segments[i])) return true;
+  }
+  return false;
 }
 const MAX_OPERATIONS = 10;
 const MAX_NEW_CONTENT_LEN = 2 * 1024 * 1024;
@@ -3476,10 +3482,14 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         billUsage.reasoning_tokens = options.reasoning_tokens;
       }
       var didSearchTurn = !!(options && options.did_search === true);
+      // 搜索按真实调用次数扣减（多轮 web_search 不再只计 1 次）
+      var searchCount = (options && typeof options.search_count === 'number')
+        ? Math.max(0, Math.floor(options.search_count))
+        : (didSearchTurn ? 1 : 0);
       return await recordAiTurnUsage(userName, billUsage, Object.assign({
         source: 'code_chat',
-        did_search: didSearchTurn,
-        search_count: didSearchTurn ? 1 : 0
+        did_search: didSearchTurn || searchCount > 0,
+        search_count: searchCount
       }, options || {}));
     } catch (e) {
       console.error('[code-agent] quota bill failed:', e && e.message);
@@ -4407,8 +4417,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         reasoning: (aiResult && aiResult.reasoning) || '',
         reasoning_tokens: (aiResult && typeof aiResult.reasoning_tokens === 'number') ? aiResult.reasoning_tokens : 0,
         source: 'code_chat',
-        // 本次回合调用过 web_search 工具则计入 1 次搜索额度（与小猫 AI / 深入研究一致）
-        did_search: toolTrace.some(function(entry) { return entry.tool === 'web_search'; })
+        // 按真实搜索次数扣减（多轮 web_search 各自计入）
+        did_search: toolTrace.some(function(entry) { return entry.tool === 'web_search'; }),
+        search_count: toolTrace.filter(function(entry) { return entry.tool === 'web_search'; }).length
       });
       var caps = buildCodeCapabilities(deps, {
         requestSucceeded: true,
@@ -5533,8 +5544,9 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
         reasoning: (aiResult && aiResult.reasoning) || '',
         reasoning_tokens: (aiResult && typeof aiResult.reasoning_tokens === 'number') ? aiResult.reasoning_tokens : 0,
         source: 'code_chat_stream',
-        // 本次回合调用过 web_search 工具则计入 1 次搜索额度（与小猫 AI / 深入研究一致）
-        did_search: toolTrace.some(function(entry) { return entry.tool === 'web_search'; })
+        // 按真实搜索次数扣减（多轮 web_search 各自计入）
+        did_search: toolTrace.some(function(entry) { return entry.tool === 'web_search'; }),
+        search_count: toolTrace.filter(function(entry) { return entry.tool === 'web_search'; }).length
       });
       if (streamQuota) {
         try {
