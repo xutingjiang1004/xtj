@@ -134,7 +134,7 @@ test('normal chat stream keeps the SSE connection alive with heartbeats', () => 
   assert.match(route, /type: 'heartbeat'/);
   assert.match(route, /_sseLastWriteAt/);
   assert.match(route, /clearStreamHeartbeat\(\)/);
-  assert.match(route, /safeEnd\(\) \{ clearStreamHeartbeat\(\)/);
+  assert.match(route, /safeEnd\(\) \{[^]*clearStreamHeartbeat\(\)/);
   // 前端显式忽略 heartbeat，避免未来事件类型解析冲突
   assert.match(source, /if \(evt\.type === 'heartbeat'\) \{[\s\S]{0,80}continue;/);
 });

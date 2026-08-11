@@ -11187,12 +11187,151 @@ function renderProfileActivityList(kind) {
                 if (restoreFocus !== false && input) input.focus();
             }
 
+            /** Normalize clipboard/drag files (often nameless blobs) and assign into #dockChatFileInp. */
+            function normalizeDockChatMediaFile(file) {
+                if (!file) return null;
+                var type = String(file.type || '');
+                var name = String(file.name || '').trim();
+                if (!name || name === 'blob' || name === 'image') {
+                    var ext = 'bin';
+                    if (type.indexOf('image/') === 0) {
+                        ext = (type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+                    } else if (type.indexOf('video/') === 0) {
+                        ext = (type.split('/')[1] || 'mp4').split(';')[0];
+                    } else if (type.indexOf('audio/') === 0) {
+                        ext = (type.split('/')[1] || 'mp3').split(';')[0];
+                    }
+                    name = 'paste-' + Date.now() + '.' + ext;
+                    try {
+                        return new File([file], name, { type: type || 'application/octet-stream', lastModified: Date.now() });
+                    } catch (e) {
+                        return file;
+                    }
+                }
+                return file;
+            }
+
+            function assignDockChatFile(rawFile) {
+                var fileInput = document.getElementById('dockChatFileInp');
+                if (!fileInput || !rawFile) return false;
+                var file = normalizeDockChatMediaFile(rawFile);
+                var maxFileSize = 50 * 1024 * 1024;
+                if (file.size > maxFileSize) { showToast('文件大小不能超过50MB'); return false; }
+                var allowedTypes = ['image/', 'video/', 'audio/'];
+                var typeOk = allowedTypes.some(function(t) { return String(file.type || '').indexOf(t) === 0; });
+                if (!typeOk) { showToast('不支持的文件类型，仅支持图片、视频、音频'); return false; }
+                try {
+                    var dt = new DataTransfer();
+                    dt.items.add(file);
+                    fileInput.files = dt.files;
+                } catch (e) {
+                    showToast('当前浏览器不支持粘贴/拖拽上传，请点 📷 选择文件');
+                    return false;
+                }
+                showDockChatFilePreview(file);
+                return true;
+            }
+
+            function pickFirstDockChatMedia(fileList) {
+                if (!fileList || !fileList.length) return null;
+                for (var i = 0; i < fileList.length; i++) {
+                    var f = fileList[i];
+                    if (f && /^(image|video|audio)\//.test(String(f.type || ''))) return f;
+                }
+                return null;
+            }
+
+            function extractClipboardMediaFile(clipboardData) {
+                if (!clipboardData) return null;
+                var items = clipboardData.items;
+                if (items && items.length) {
+                    for (var i = 0; i < items.length; i++) {
+                        var item = items[i];
+                        if (item && item.kind === 'file' && /^(image|video|audio)\//.test(String(item.type || ''))) {
+                            var asFile = item.getAsFile && item.getAsFile();
+                            if (asFile) return asFile;
+                        }
+                    }
+                }
+                return pickFirstDockChatMedia(clipboardData.files);
+            }
+
+            function bindDockChatPasteAndDrop() {
+                var input = document.getElementById('dockChatInput');
+                var dropZone = document.querySelector('#dockChatDetailView .chat-input-area') ||
+                    document.querySelector('#panelChat .chat-input-area');
+                var dragDepth = 0;
+
+                function onPaste(e) {
+                    var clip = e.clipboardData || (window.clipboardData || null);
+                    var media = extractClipboardMediaFile(clip);
+                    if (!media) return;
+                    e.preventDefault();
+                    assignDockChatFile(media);
+                }
+
+                function hasDragFiles(e) {
+                    var types = e.dataTransfer && e.dataTransfer.types;
+                    if (!types) return false;
+                    if (typeof types.contains === 'function') return types.contains('Files');
+                    for (var i = 0; i < types.length; i++) {
+                        if (types[i] === 'Files') return true;
+                    }
+                    return false;
+                }
+
+                function setDropActive(on) {
+                    if (!dropZone) return;
+                    if (on) dropZone.classList.add('is-file-dragover');
+                    else dropZone.classList.remove('is-file-dragover');
+                }
+
+                if (input) {
+                    input.addEventListener('paste', onPaste);
+                }
+                if (dropZone) {
+                    dropZone.addEventListener('paste', onPaste);
+                    dropZone.addEventListener('dragenter', function(e) {
+                        if (!hasDragFiles(e)) return;
+                        e.preventDefault();
+                        dragDepth++;
+                        setDropActive(true);
+                    });
+                    dropZone.addEventListener('dragover', function(e) {
+                        if (!hasDragFiles(e)) return;
+                        e.preventDefault();
+                        try { e.dataTransfer.dropEffect = 'copy'; } catch (err) {}
+                        setDropActive(true);
+                    });
+                    dropZone.addEventListener('dragleave', function(e) {
+                        if (!hasDragFiles(e) && dragDepth === 0) return;
+                        e.preventDefault();
+                        dragDepth = Math.max(0, dragDepth - 1);
+                        if (dragDepth === 0) setDropActive(false);
+                    });
+                    dropZone.addEventListener('drop', function(e) {
+                        if (!hasDragFiles(e)) return;
+                        e.preventDefault();
+                        dragDepth = 0;
+                        setDropActive(false);
+                        var media = pickFirstDockChatMedia(e.dataTransfer && e.dataTransfer.files);
+                        if (media) assignDockChatFile(media);
+                        else showToast('请拖入图片、视频或音频文件');
+                    });
+                    dropZone.addEventListener('dragend', function() {
+                        dragDepth = 0;
+                        setDropActive(false);
+                    });
+                }
+            }
+
             try {
                 var _dsb = document.getElementById('dockChatSendBtn'); if (_dsb) _dsb.addEventListener('click', sendDockChatMessage);
                 var _dci = document.getElementById('dockChatInput'); if (_dci) _dci.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDockChatMessage(); } });
                 var _dib = document.getElementById('dockChatImgBtn'); if (_dib) _dib.addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
                 var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
+                bindDockChatPasteAndDrop();
             } catch(e) {
             }
 

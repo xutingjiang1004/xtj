@@ -1095,7 +1095,11 @@ async function assertSafeWebUrl(rawUrl, lookupImpl) {
   if (parsed.port && parsed.port !== '443') throw new Error('仅支持标准 443 端口');
   if (parsed.username || parsed.password) throw new Error('网址不允许包含凭据');
   if (isBlockedWebHost(parsed.hostname) || !hostAllowed(parsed.hostname)) throw new Error('网址主机不在允许范围内');
-  var lookup = lookupImpl || dns.lookup;
+  // Node dns.lookup 必须传 callback；无 callback 时不会返回 Promise。
+  var lookup = lookupImpl || (dns.promises && dns.promises.lookup
+    ? function(host, opts) { return dns.promises.lookup(host, opts || { all: true, verbatim: true }); }
+    : null);
+  if (!lookup) throw new Error('无法解析网页主机');
   var addresses;
   try { addresses = await lookup(parsed.hostname, { all: true, verbatim: true }); } catch (_) { throw new Error('无法解析网页主机'); }
   if (!Array.isArray(addresses) || !addresses.length || addresses.some(function (item) { return isPrivateAddress(item && item.address); })) {
@@ -1165,7 +1169,9 @@ function normalizeWebText(buffer, contentType) {
 
 async function fetchSafeWebPage(rawUrl, options) {
   options = options || {};
-  var lookupImpl = options.lookupImpl || dns.lookup;
+  var lookupImpl = options.lookupImpl || (dns.promises && dns.promises.lookup
+    ? function(host, opts) { return dns.promises.lookup(host, opts || { all: true, verbatim: true }); }
+    : null);
   var current = String(rawUrl || '');
   for (var redirect = 0; redirect <= WEB_MAX_REDIRECTS; redirect++) {
     var safeTarget = await assertSafeWebUrl(current, lookupImpl);

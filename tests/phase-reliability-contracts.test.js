@@ -330,6 +330,25 @@ test('P6-06: audio preview does not use img', function () {
     'audio preview must not use <img> tag');
 });
 
+test('P6-06b: dock chat supports paste image and drag-drop upload', function () {
+  var s = read('js/core.js');
+  assert.ok(s.indexOf('function assignDockChatFile') >= 0, 'assignDockChatFile helper required');
+  assert.ok(s.indexOf('function bindDockChatPasteAndDrop') >= 0, 'paste/drop binder required');
+  assert.ok(s.indexOf('extractClipboardMediaFile') >= 0, 'clipboard media extractor required');
+  assert.ok(/is-file-dragover/.test(s), 'dragover visual class required');
+  assert.ok(/DataTransfer/.test(s), 'DataTransfer assign into file input required');
+});
+
+test('P6-06c: AI chat composer supports paste image and drag-drop upload', function () {
+  var s = read('js/ai-agent.js');
+  assert.ok(s.indexOf('function bindAiComposerPasteDrop') >= 0, 'AI paste/drop binder required');
+  assert.ok(s.indexOf('function extractClipboardAiFile') >= 0, 'AI clipboard extractor required');
+  assert.ok(s.indexOf('function readAiAttachmentFile') >= 0, 'shared AI file reader required');
+  assert.ok(/is-file-dragover/.test(s), 'AI dragover visual class required');
+  assert.ok(/acceptAiChatFile/.test(s) && /acceptDtFile/.test(s),
+    'normal chat and deep-think must both accept dropped/pasted files');
+});
+
 test('P6-07: target query error returns retryable 503', function () {
   var s = read('render-api/server.js');
   var dmSendBlock = s.slice(s.indexOf("app.post('/api/dm/send'"));

@@ -14,6 +14,15 @@ var WEB_TIMEOUT_MS = 12000;
 var WEB_MAX_REDIRECTS = 3;
 var WEB_TEXT_MAX = 24000;
 
+/**
+ * Promise-based DNS lookup. Node's dns.lookup REQUIRES a callback and does NOT
+ * return a Promise when omitted (throws ERR_INVALID_ARG_TYPE) — so await dns.lookup
+ * silently breaks every web tool. Always use dns.promises (or an injected impl).
+ */
+function defaultDnsLookup(hostname, options) {
+  return dns.promises.lookup(hostname, options || { all: true, verbatim: true });
+}
+
 function isPrivateAddress(address) {
   var value = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (net.isIP(value) === 4) {
@@ -65,15 +74,27 @@ async function assertSafeWebUrl(rawUrl, lookupImpl) {
   if (parsed.username || parsed.password) throw new Error('网址不允许包含凭据');
   if (isBlockedWebHost(parsed.hostname)) throw new Error('网址主机不在允许范围内');
 
-  var lookup = lookupImpl || dns.lookup;
-  var addresses;
-  try {
-    addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
-  } catch (_) {
+  var lookup = lookupImpl || defaultDnsLookup;
+  var addresses = null;
+  var lastLookupError = null;
+  // Free-tier cold starts / transient resolver blips: retry DNS a couple times.
+  for (var attempt = 0; attempt < 3; attempt++) {
+    try {
+      addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
+      lastLookupError = null;
+      break;
+    } catch (err) {
+      lastLookupError = err;
+      addresses = null;
+      if (attempt < 2) {
+        await new Promise(function(resolve) { setTimeout(resolve, 180 * (attempt + 1)); });
+      }
+    }
+  }
+  if (lastLookupError || !Array.isArray(addresses) || !addresses.length) {
     throw new Error('无法解析网页主机');
   }
-  if (!Array.isArray(addresses) || !addresses.length ||
-      addresses.some(function(item) { return isPrivateAddress(item && item.address); })) {
+  if (addresses.some(function(item) { return isPrivateAddress(item && item.address); })) {
     throw new Error('网页主机解析到禁止访问的内网地址');
   }
   return {
@@ -232,7 +253,7 @@ function normalizeWebText(buffer, contentType) {
  */
 async function fetchSafeWebPage(rawUrl, options) {
   options = options || {};
-  var lookupImpl = options.lookupImpl || dns.lookup;
+  var lookupImpl = options.lookupImpl || defaultDnsLookup;
   var maxBytes = options.maxBytes || WEB_MAX_BYTES;
   var timeoutMs = options.timeoutMs || WEB_TIMEOUT_MS;
   var externalSignal = options.signal || null;
@@ -354,5 +375,6 @@ module.exports = {
   fetchViaJinaReader: fetchViaJinaReader,
   isPrivateAddress: isPrivateAddress,
   isBlockedWebHost: isBlockedWebHost,
-  assertSafeWebUrl: assertSafeWebUrl
+  assertSafeWebUrl: assertSafeWebUrl,
+  defaultDnsLookup: defaultDnsLookup
 };
