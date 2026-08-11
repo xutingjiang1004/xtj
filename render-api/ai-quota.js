@@ -106,6 +106,9 @@ function normalizeQuotaPayload(raw) {
     search_unlimited: searchUnlimited,
     can_chat: canChat,
     can_search: canSearch,
+    // 消费结果透传（recordUsage 后前端可知道实际扣了多少，尤其被 045/048 截断时）
+    consumed_tokens: typeof raw.consumed_tokens === 'number' ? Number(raw.consumed_tokens) : null,
+    consumed_search: typeof raw.consumed_search === 'number' ? Number(raw.consumed_search) : null,
     limits: limits()
   };
 }
@@ -220,27 +223,27 @@ function createAiQuota(supabase) {
     // 审计要求：记录 setPro 调用，便于发现非管理/webhook 入口的提权调用
     console.warn('[AI-QUOTA] setPro invoked (caller must be admin or trusted webhook-gated):', String(userName || ''), 'active=' + !!active);
     try {
+      // 049 起 set_ai_user_pro 支持自定义额度列与 env limits，一次 RPC 原子完成，
+      // 不再需要二次 UPDATE（此前二次写入还可能因大小写不一致匹配不到行）。
       var result = await supabase.rpc('set_ai_user_pro', {
         p_user_name: String(userName || ''),
         p_active: !!active,
         p_expires_at: meta.expires_at || null,
         p_stripe_customer_id: meta.stripe_customer_id || null,
-        p_stripe_subscription_id: meta.stripe_subscription_id || null
+        p_stripe_subscription_id: meta.stripe_subscription_id || null,
+        p_free_token_limit: FREE_TOKEN_LIMIT,
+        p_pro_token_limit: PRO_TOKEN_LIMIT,
+        p_free_search_limit: FREE_SEARCH_LIMIT,
+        p_token_limit_daily: meta.token_limit_daily !== undefined
+          ? (meta.token_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.token_limit_daily))))
+          : null,
+        p_search_limit_daily: meta.search_limit_daily !== undefined
+          ? (meta.search_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.search_limit_daily))))
+          : null
       });
       if (result.error || !result.data) {
         console.error('[AI-QUOTA] setPro unavailable:', result.error && result.error.message);
         return { ok: false, reason: 'quota_unavailable' };
-      }
-      // 自定义额度列（邀请码激活写入）——RPC 不感知，这里单独透传
-      if (meta.token_limit_daily !== undefined || meta.search_limit_daily !== undefined) {
-        var patch = { updated_at: new Date().toISOString() };
-        if (meta.token_limit_daily !== undefined) {
-          // -1 = 无限；0+ = 自定义上限；null = 清除
-          patch.token_limit_daily = meta.token_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.token_limit_daily)));
-        }
-        if (meta.search_limit_daily !== undefined) patch.search_limit_daily = meta.search_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.search_limit_daily)));
-        var up = await supabase.from('ai_user_membership').update(patch).eq('user_name', String(userName || ''));
-        if (up.error) console.error('[AI-QUOTA] setPro custom limits update failed:', up.error.message);
       }
       return normalizeQuotaPayload(result.data);
     } catch (e) {

@@ -14030,8 +14030,6 @@ app.post('/api/agent/pro/activate', authenticateUser, async (req, res) => {
     }
     var quota = await aiQuota.setPro(target, active, {
       expires_at: expires,
-      stripe_customer_id: (req.body && req.body.stripe_customer_id) || null,
-      stripe_subscription_id: (req.body && req.body.stripe_subscription_id) || null,
       token_limit_daily: req.body && req.body.token_limit_daily !== undefined ? req.body.token_limit_daily : undefined,
       search_limit_daily: req.body && req.body.search_limit_daily !== undefined ? req.body.search_limit_daily : undefined
     });
@@ -14233,39 +14231,19 @@ app.post('/admin/ai-agent/pro-users/cancel', verifyToken, async (req, res) => {
   try {
     var target = String((req.body && req.body.user_name) || '').trim().toLowerCase();
     if (!target) return res.status(400).json({ ok: false, error: '缺少用户名' });
-    var up = await supabase
-      .from('ai_user_membership')
-      .update({
-        plan: 'free',
-        pro_expires_at: null,
-        token_limit_daily: null,
-        search_limit_daily: null,
-        updated_at: new Date().toISOString()
-      })
-      .eq('user_name', target);
-    if (up.error) {
-      console.error('[INVITE-ADMIN] cancel pro error:', up.error.message);
+    // 049 起改为事务 RPC：取消 Pro + 清零当日用量原子完成，
+    // 避免此前两条 SQL 非事务导致"取消成功但当日额度残留"锁死用户。
+    var rpc = await supabase.rpc('cancel_ai_user_pro', { p_user_name: target });
+    if (rpc.error) {
+      console.error('[INVITE-ADMIN] cancel pro rpc error:', rpc.error.message);
       return res.status(500).json({ ok: false, error: '取消失败' });
     }
+    var data = rpc.data || {};
+    if (data.ok !== true) {
+      return res.status(400).json({ ok: false, error: '取消失败：' + (data.reason || '未知原因') });
+    }
     console.log('[INVITE-ADMIN] cancelled pro for', target, 'by', req.adminName);
-    // 取消 Pro 后同步清零当日已用额度（ai_user_quota_daily），否则重度用户当天按 free 限额
-    // 会被残留的已用 token 锁死。日界以服务端 RPC ai_quota_shanghai_day() 为准（Asia/Shanghai）。
-    var dayR = await supabase.rpc('ai_quota_shanghai_day');
-    if (dayR.error) {
-      console.error('[INVITE-ADMIN] cancel pro day lookup error:', dayR.error.message);
-      return res.status(500).json({ ok: false, error: '取消失败，请重试（当日额度未清零）' });
-    }
-    var dayKey = dayR.data;
-    var delDaily = await supabase
-      .from('ai_user_quota_daily')
-      .delete()
-      .eq('user_name', target)
-      .eq('day_key', dayKey);
-    if (delDaily.error) {
-      console.error('[INVITE-ADMIN] cancel pro daily reset error:', delDaily.error.message);
-      return res.status(500).json({ ok: false, error: '取消失败，请重试（当日额度未清零）' });
-    }
-    return res.json({ ok: true, user_name: target, daily_reset: true });
+    return res.json({ ok: true, user_name: target, daily_reset: !!data.daily_reset });
   } catch (e) {
     console.error('[INVITE-ADMIN] cancel pro exception:', e && e.message);
     return res.status(500).json({ ok: false, error: '取消失败' });
@@ -17998,7 +17976,7 @@ app.post('/api/agent/post-tools', authenticateUser, rateLimit(60000, 20), async 
     // ★ 计量修复：翻译/锐评消耗 DeepSeek token，必须接入用户额度与请求次数兜底
     var toolAccess = await enforceAiChatAccess(req.userName, { needSearch: false });
     if (!toolAccess.allowed) {
-      return res.status(429).json({ error: getAiQuotaErrorMessage(toolAccess.reason), code: toolAccess.reason || 'rate_limited' });
+      return res.status(429).json({ error: getAiQuotaErrorMessage(toolAccess.reason), code: toolAccess.reason || 'rate_limited', quota: toolAccess.quota || null });
     }
     var postId = aiSiteText(req.body && req.body.post_id, 80);
     var action = aiSiteText(req.body && req.body.action, 32);
@@ -19265,7 +19243,12 @@ registerCodeAgentRoutes(app, {
   callDeepSeek: callDeepSeek,
   // Code Agent 复用小猫 AI 已使用的联网搜索管线（同一组后端 provider、缓存和密钥）。
   // 不把搜索密钥或 provider 配置暴露给浏览器，也不要求 Code 单独配置一套搜索服务。
-  webSearch: searchWeb
+  // 第三个参数 userId（code-agent 的 searchWebForCode 传入）：执行搜索配额校验，
+  // 避免 Code 的 web_search 工具绕过小猫 AI 的每日搜索额度。
+  webSearch: function (query, maxResults, userId) {
+    if (userId) return searchWebForUser(userId, query, maxResults);
+    return searchWeb(query, maxResults);
+  }
 });
 registerCodeGitHubRoutes(app, {
   authenticateUser: authenticateUser

@@ -1205,7 +1205,7 @@ async function searchWebForCode(query, maxResults, options) {
   if (typeof options.webSearch !== 'function') {
     return { ok: false, code: 'WEB_SEARCH_NOT_CONFIGURED', error: '网站联网搜索服务未接入，请检查服务器搜索供应商配置' };
   }
-  var injected = await options.webSearch(String(query || '').slice(0, 240), Math.min(maxResults || 5, 10));
+  var injected = await options.webSearch(String(query || '').slice(0, 240), Math.min(maxResults || 5, 10), options.userId || '');
   if (injected && injected.error && !(Array.isArray(injected.results) && injected.results.length)) {
     return { ok: false, code: 'WEB_SEARCH_FAILED', error: '搜索失败，无法核实最新信息，请明确告知用户，禁止编造虚假信息或日期。' };
   }
@@ -1552,7 +1552,9 @@ function createCodeToolExecutor(scope, activePath, openFiles, attachments, trace
       } else if (name === 'web_search') {
       result = await searchWebForCode(String(args.query || ''), Math.min(Math.max(Number(args.max_results) || 5, 1), 10), {
         webSearch: deps.webSearch,
-        lookupImpl: deps.lookupImpl
+        lookupImpl: deps.lookupImpl,
+        // 传入当前用户，让 server.js 注入的 webSearch 闭包执行搜索配额校验
+        userId: scope && scope.userId ? String(scope.userId) : ''
       });
       } else if (name === 'fetch_web_page') {
       try {

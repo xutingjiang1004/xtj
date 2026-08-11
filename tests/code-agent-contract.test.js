@@ -45,7 +45,9 @@ test('server.js requires and registers code-agent', () => {
   assert.match(server, /require\('\.\/code-agent'\)/);
   assert.match(server, /registerCodeAgentRoutes/);
   assert.match(server, /registerCodeAgentRoutes\(app,\s*\{/);
-  assert.match(server, /webSearch:\s*searchWeb/);
+  // webSearch 注入为带配额校验的闭包（searchWebForUser），防止 Code 搜索绕过额度
+  assert.match(server, /webSearch:\s*function/);
+  assert.match(server, /searchWebForUser\(userId, query, maxResults\)/);
 });
 
 test('Code Agent JSON payload has a scoped large-body parser', () => {
@@ -275,7 +277,8 @@ test('code-agent accepts deps (supabase, rateLimit, authenticateUser, sanitizeEr
 
 test('Code Agent web tools are server-only, freshness-guided, and key-authenticated', () => {
   assert.match(codeAgent, /options\.webSearch/);
-  assert.match(server, /webSearch:\s*searchWeb/);
+  assert.match(codeAgent, /userId: scope && scope\.userId/);
+  assert.match(server, /webSearch:\s*function/);
   assert.match(codeAgent, /published_at/);
   assert.match(codeAgent, /fetch_web_page/);
   assert.match(codeAgent, /isFreshnessQuery/);
