@@ -212,9 +212,13 @@ async function assertSafeProviderHost(hostname, lookupImpl) {
   if (isHostBlocked(host)) {
     return { ok: false, error: 'BLOCKED_BASE_URL' };
   }
-  var lookup = lookupImpl || dns.lookup;
+  // Node dns.lookup 必须传 callback；默认走 dns.promises.lookup。
+  var lookup = lookupImpl || (dns.promises && dns.promises.lookup
+    ? function(h, opts) { return dns.promises.lookup(h, opts || { all: true, verbatim: true }); }
+    : null);
   var addresses;
   try {
+    if (!lookup) throw new Error('no dns lookup');
     addresses = await lookup(host, { all: true, verbatim: true });
   } catch (_) {
     return { ok: false, error: 'DNS_RESOLVE_FAILED' };

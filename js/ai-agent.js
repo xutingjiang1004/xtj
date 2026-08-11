@@ -600,6 +600,208 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return /\.(pdf|docx|txt|csv|xlsx)$/.test(name);
   }
 
+  var AI_FILE_MAX_BYTES = 7 * 1024 * 1024;
+
+  function normalizeAiAttachmentFile(file) {
+    if (!file) return null;
+    var type = String(file.type || '');
+    var name = String(file.name || '').trim();
+    if (!name || name === 'blob' || name === 'image') {
+      var ext = 'bin';
+      if (type.indexOf('image/') === 0) {
+        ext = (type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+      } else if (/\.pdf$/i.test(name)) {
+        ext = 'pdf';
+      } else {
+        ext = (type.split('/')[1] || 'bin').split(';')[0] || 'bin';
+      }
+      name = 'paste-' + Date.now() + '.' + ext;
+      try {
+        return new File([file], name, { type: type || 'application/octet-stream', lastModified: Date.now() });
+      } catch (e) {
+        return file;
+      }
+    }
+    return file;
+  }
+
+  function pickFirstAiAttachment(fileList) {
+    if (!fileList || !fileList.length) return null;
+    for (var i = 0; i < fileList.length; i++) {
+      if (isSupportedAiFile(fileList[i])) return fileList[i];
+    }
+    return null;
+  }
+
+  function extractClipboardAiFile(clipboardData) {
+    if (!clipboardData) return null;
+    var items = clipboardData.items;
+    if (items && items.length) {
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        if (!item || item.kind !== 'file') continue;
+        var asFile = item.getAsFile && item.getAsFile();
+        if (asFile && isSupportedAiFile(asFile)) return asFile;
+        // Clipboard screenshots often only advertise image/* on the item.
+        if (asFile && String(item.type || '').indexOf('image/') === 0) return asFile;
+      }
+    }
+    return pickFirstAiAttachment(clipboardData.files);
+  }
+
+  function dataTransferHasFiles(e) {
+    var types = e && e.dataTransfer && e.dataTransfer.types;
+    if (!types) return false;
+    if (typeof types.contains === 'function') return types.contains('Files');
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'Files') return true;
+    }
+    return false;
+  }
+
+  /**
+   * Shared file-preview loader for normal chat + deep-think composers.
+   * onLoaded({ name, type, dataUrl }) is called after FileReader finishes.
+   */
+  function readAiAttachmentFile(rawFile, onLoaded, opts) {
+    opts = opts || {};
+    var file = normalizeAiAttachmentFile(rawFile);
+    if (!file) return false;
+    if (!isSupportedAiFile(file) && String(file.type || '').indexOf('image/') !== 0) {
+      notify(opts.rejectMsg || '仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件');
+      return false;
+    }
+    if (file.size > AI_FILE_MAX_BYTES) {
+      notify(opts.sizeMsg || '文件不能超过 7MB');
+      return false;
+    }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        onLoaded({ name: file.name, type: file.type || 'application/octet-stream', dataUrl: e.target.result, size: file.size });
+      } catch (err) {}
+    };
+    reader.onerror = function() {
+      notify('读取文件失败，请重试');
+    };
+    reader.readAsDataURL(file);
+    return true;
+  }
+
+  function renderAiFilePreview(filePreview, fileData, onRemove) {
+    if (!filePreview || !fileData) return;
+    filePreview.innerHTML = '';
+    var thumb = String(fileData.type || '').indexOf('image/') === 0
+      ? el('img', { src: fileData.dataUrl, class: 'ai-file-thumb' })
+      : el('div', { class: 'ai-file-icon' }, '📄');
+    var sizeLabel = fileData.size
+      ? Math.round(fileData.size / 1024)
+      : Math.round(((fileData.dataUrl || '').length * 3 / 4) / 1024);
+    var info = el('span', { class: 'ai-file-info', text: fileData.name + ' (' + sizeLabel + 'KB)' });
+    var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
+    removeBtn.addEventListener('click', function() {
+      if (typeof onRemove === 'function') onRemove();
+    });
+    filePreview.appendChild(thumb);
+    filePreview.appendChild(info);
+    filePreview.appendChild(removeBtn);
+    filePreview.style.display = 'flex';
+  }
+
+  function bindAiComposerPasteDrop(targets, onFile) {
+    var list = (Array.isArray(targets) ? targets : [targets]).filter(Boolean);
+    var dragDepth = 0;
+    var dropHost = null;
+    var cleanups = [];
+    for (var t = 0; t < list.length; t++) {
+      if (list[t] && list[t].classList && (
+        list[t].classList.contains('ai-chat-input-bar') ||
+        list[t].classList.contains('dt-input-bar') ||
+        list[t].classList.contains('dt-input-area') ||
+        list[t].classList.contains('dt-composer')
+      )) {
+        dropHost = list[t];
+        break;
+      }
+    }
+    if (!dropHost) {
+      for (var u = 0; u < list.length; u++) {
+        if (list[u]) { dropHost = list[u]; break; }
+      }
+    }
+
+    function setDropActive(on) {
+      if (!dropHost) return;
+      if (on) dropHost.classList.add('is-file-dragover');
+      else dropHost.classList.remove('is-file-dragover');
+    }
+
+    function onPaste(e) {
+      var media = extractClipboardAiFile(e.clipboardData || window.clipboardData);
+      if (!media) return;
+      e.preventDefault();
+      onFile(media);
+    }
+
+    function onDragEnter(e) {
+      if (!dataTransferHasFiles(e)) return;
+      e.preventDefault();
+      dragDepth++;
+      setDropActive(true);
+    }
+    function onDragOver(e) {
+      if (!dataTransferHasFiles(e)) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'copy'; } catch (err) {}
+      setDropActive(true);
+    }
+    function onDragLeave(e) {
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDropActive(false);
+    }
+    function onDrop(e) {
+      if (!dataTransferHasFiles(e)) return;
+      e.preventDefault();
+      dragDepth = 0;
+      setDropActive(false);
+      var media = pickFirstAiAttachment(e.dataTransfer && e.dataTransfer.files);
+      if (media) onFile(media);
+      else notify('请拖入图片或支持的文件');
+    }
+    function onDragEnd() {
+      dragDepth = 0;
+      setDropActive(false);
+    }
+
+    list.forEach(function(node) {
+      if (!node || !node.addEventListener) return;
+      node.addEventListener('paste', onPaste);
+      cleanups.push(function() { node.removeEventListener('paste', onPaste); });
+    });
+
+    if (dropHost) {
+      dropHost.addEventListener('dragenter', onDragEnter);
+      dropHost.addEventListener('dragover', onDragOver);
+      dropHost.addEventListener('dragleave', onDragLeave);
+      dropHost.addEventListener('drop', onDrop);
+      dropHost.addEventListener('dragend', onDragEnd);
+      cleanups.push(function() {
+        dropHost.removeEventListener('dragenter', onDragEnter);
+        dropHost.removeEventListener('dragover', onDragOver);
+        dropHost.removeEventListener('dragleave', onDragLeave);
+        dropHost.removeEventListener('drop', onDrop);
+        dropHost.removeEventListener('dragend', onDragEnd);
+        setDropActive(false);
+      });
+    }
+
+    return function cleanupAiComposerPasteDrop() {
+      cleanups.forEach(function(fn) { try { fn(); } catch (e) {} });
+      cleanups = [];
+    };
+  }
+
   function renderMarkdown(txt) {
     if (!txt) return '';
     var s = String(txt);
@@ -5720,38 +5922,32 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       handleDeepThinkPageSend(text, fData);
     }
 
-    // 文件上传
+    // 文件上传（按钮选择 / 粘贴 / 拖拽）
+    function clearDtFilePreview() {
+      _dtFileData = null;
+      if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+      if (fileInput) fileInput.value = '';
+    }
+    function acceptDtFile(rawFile) {
+      readAiAttachmentFile(rawFile, function(fileData) {
+        _dtFileData = { name: fileData.name, type: fileData.type, dataUrl: fileData.dataUrl };
+        if (filePreview) renderAiFilePreview(filePreview, fileData, clearDtFilePreview);
+      }, { sizeMsg: '文件不能超过 7MB（data URL 编码后）' });
+    }
     if (fileBtn && fileInput) {
-      fileBtn.addEventListener('click', function() { fileInput.click(); });
-      fileInput.addEventListener('change', function() {
+      addDtListener(fileBtn, 'click', function() { fileInput.click(); });
+      addDtListener(fileInput, 'change', function() {
         var f = this.files && this.files[0];
         if (!f) return;
         if (!isSupportedAiFile(f)) { notify('仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件'); this.value = ''; return; }
-        if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB（data URL 编码后）'); return; }
-        var reader = new FileReader();
-        reader.onload = function(e) {
-          _dtFileData = { name: f.name, type: f.type, dataUrl: e.target.result };
-          if (filePreview) {
-            filePreview.innerHTML = '';
-            var thumb = f.type.startsWith('image/')
-              ? el('img', { src: e.target.result, class: 'ai-file-thumb' })
-              : el('div', { class: 'ai-file-icon' }, '📄');
-            var info = el('span', { class: 'ai-file-info', text: f.name + ' (' + Math.round(f.size / 1024) + 'KB)' });
-            var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
-            removeBtn.addEventListener('click', function() {
-              _dtFileData = null;
-              filePreview.style.display = 'none';
-              filePreview.innerHTML = '';
-              fileInput.value = '';
-            });
-            filePreview.appendChild(thumb);
-            filePreview.appendChild(info);
-            filePreview.appendChild(removeBtn);
-            filePreview.style.display = 'flex';
-          }
-        };
-        reader.readAsDataURL(f);
+        acceptDtFile(f);
       });
+    }
+    // Deep-think input area: paste image + drag-drop onto the composer row.
+    var dtInputArea = document.querySelector('#panelDeepThink .dt-input-bar') || (input && input.parentElement);
+    if (dtInputArea || input) {
+      var unbindPasteDrop = bindAiComposerPasteDrop([dtInputArea, input].filter(Boolean), acceptDtFile);
+      if (typeof unbindPasteDrop === 'function') _dtListeners.push(unbindPasteDrop);
     }
 
     if (backBtn) backBtn.addEventListener('click', function(ev) {
@@ -5996,6 +6192,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       appendKvGrid([
         ['名称', data.name],
         ['代码', data.symbol],
+        ['CNY', data.price_cny],
         ['今开', data.open],
         ['最高', data.high],
         ['最低', data.low],
@@ -6004,9 +6201,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       ]);
     } else if (type === 'time') {
       appendKvGrid([
+        ['当地时间', data.local_time || data.beijing_time],
         ['北京时间', data.beijing_time],
         ['星期', data.weekday],
         ['时区', data.timezone]
+      ]);
+    } else if (type === 'calculate') {
+      var calcHero = el('div', { class: 'ai-tool-card-hero' });
+      calcHero.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: data.result != null ? String(data.result) : '—' }));
+      calcHero.appendChild(el('span', { class: 'ai-tool-card-hero-sub', text: String(data.expression || '') }));
+      shell.appendChild(calcHero);
+    } else if (type === 'unit_convert') {
+      var unitHero = el('div', { class: 'ai-tool-card-hero' });
+      unitHero.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: data.result != null ? String(data.result) + ' ' + String(data.to_unit || '') : '—' }));
+      unitHero.appendChild(el('span', { class: 'ai-tool-card-hero-sub', text: (data.value != null ? data.value : '') + ' ' + (data.from_unit || '') + ' → ' + (data.to_unit || '') }));
+      shell.appendChild(unitHero);
+      appendKvGrid([
+        ['类别', data.category],
+        ['原值', data.value != null ? data.value + ' ' + (data.from_unit || '') : ''],
+        ['结果', data.result != null ? data.result + ' ' + (data.to_unit || '') : '']
       ]);
     } else if (type === 'page_read') {
       var pageTitle = el('div', { class: 'ai-tool-card-page-title', text: String(data.title || '网页') });
@@ -7057,7 +7270,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var nameMapCall = {
               search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
               get_weather: '查询天气', get_current_time: '获取时间',
-              get_exchange_rate: '查询汇率', get_stock_quote: '查询行情'
+              get_exchange_rate: '查询汇率', get_stock_quote: '查询行情',
+              calculate: '精确计算', convert_units: '单位换算'
             };
             var timeline = assistantNode.querySelector('.ai-tool-timeline');
             if (!timeline) {
@@ -7162,7 +7376,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var nameMap = {
               search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
               get_weather: '查询天气', get_current_time: '获取时间',
-              get_exchange_rate: '查询汇率', get_stock_quote: '查询行情'
+              get_exchange_rate: '查询汇率', get_stock_quote: '查询行情',
+              calculate: '精确计算', convert_units: '单位换算'
             };
             var label = nameMap[evt.tool_name] || evt.tool_name || '工具';
             var summaryText = '';
@@ -8763,39 +8978,28 @@ function showChatMessages() {
     });
     input.addEventListener('input', autoresize);
 
-    // 文件上传逻辑
+    // 文件上传逻辑（按钮选择 / 粘贴 / 拖拽）
     var _aiChatFileData = null; // { name, type, dataUrl }
+    function clearAiChatFilePreview() {
+      _aiChatFileData = null;
+      filePreview.style.display = 'none';
+      filePreview.innerHTML = '';
+      fileInput.value = '';
+    }
+    function acceptAiChatFile(rawFile) {
+      readAiAttachmentFile(rawFile, function(fileData) {
+        _aiChatFileData = { name: fileData.name, type: fileData.type, dataUrl: fileData.dataUrl };
+        renderAiFilePreview(filePreview, fileData, clearAiChatFilePreview);
+      });
+    }
     fileBtn.addEventListener('click', function() { fileInput.click(); });
     fileInput.addEventListener('change', function() {
       var f = this.files && this.files[0];
       if (!f) return;
       if (!isSupportedAiFile(f)) { notify('仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件'); this.value = ''; return; }
-      if (f.size > 7 * 1024 * 1024) { notify('文件不能超过 7MB'); return; }
-      var reader = new FileReader();
-      reader.onload = function(e) {
-        _aiChatFileData = { name: f.name, type: f.type, dataUrl: e.target.result };
-        filePreview.innerHTML = '';
-        var thumb;
-        if (f.type.startsWith('image/')) {
-          thumb = el('img', { src: e.target.result, class: 'ai-file-thumb' });
-        } else {
-          thumb = el('div', { class: 'ai-file-icon' }, '📄');
-        }
-        var info = el('span', { class: 'ai-file-info', text: f.name + ' (' + Math.round(f.size / 1024) + 'KB)' });
-        var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
-        removeBtn.addEventListener('click', function() {
-          _aiChatFileData = null;
-          filePreview.style.display = 'none';
-          filePreview.innerHTML = '';
-          fileInput.value = '';
-        });
-        filePreview.appendChild(thumb);
-        filePreview.appendChild(info);
-        filePreview.appendChild(removeBtn);
-        filePreview.style.display = 'flex';
-      };
-      reader.readAsDataURL(f);
+      acceptAiChatFile(f);
     });
+    bindAiComposerPasteDrop([inputBar, input], acceptAiChatFile);
 
     inputBar.appendChild(plusWrap);
     inputBar.appendChild(panelShell);

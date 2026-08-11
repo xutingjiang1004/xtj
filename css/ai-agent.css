@@ -951,8 +951,26 @@
   z-index: 5;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 0.16s ease, padding 0.16s ease, border-color 0.16s ease;
+  transition: transform 0.16s ease, padding 0.16s ease, border-color 0.16s ease, box-shadow 0.15s ease, background 0.15s ease;
   isolation: isolate;
+}
+
+.ai-chat-input-bar.is-file-dragover,
+.dt-input-bar.is-file-dragover {
+  box-shadow:
+    0 -1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 -12px 34px rgba(40, 90, 70, 0.07),
+    inset 0 0 0 2px rgba(5, 150, 105, 0.5);
+  background:
+    linear-gradient(0deg, rgba(220, 250, 236, 0.82) 0%, rgba(236, 252, 245, 0.55) 50%, rgba(255, 255, 255, 0.35) 100%);
+}
+
+[data-theme="dark"] .ai-chat-input-bar.is-file-dragover,
+[data-theme="dark"] .dt-input-bar.is-file-dragover {
+  box-shadow:
+    inset 0 0 0 2px rgba(52, 211, 153, 0.55),
+    0 -12px 34px rgba(0, 0, 0, 0.25);
+  background: rgba(16, 48, 38, 0.72);
 }
 
 .ai-chat-input-bar::before {

@@ -21,6 +21,35 @@ test('read_web_page tool is registered and executed with SSRF-safe fetch', () =>
   assert.match(webFetch, /function fetchSafeWebPage/);
   assert.match(webFetch, /isPrivateAddress/);
   assert.match(webFetch, /仅支持 HTTPS/);
+  // Critical: Node dns.lookup requires callback — must use dns.promises.lookup
+  assert.match(webFetch, /dns\.promises\.lookup|defaultDnsLookup/);
+  assert.doesNotMatch(webFetch, /lookupImpl \|\| dns\.lookup/);
+});
+
+test('new usability tools calculate + convert_units are registered', () => {
+  assert.match(server, /name:\s*'calculate'/);
+  assert.match(server, /case 'calculate':/);
+  assert.match(server, /name:\s*'convert_units'/);
+  assert.match(server, /case 'convert_units':/);
+  assert.match(server, /aiSiteCard\('calculate'/);
+  assert.match(server, /aiSiteCard\('unit_convert'/);
+  assert.match(client, /type === 'calculate'/);
+  assert.match(client, /type === 'unit_convert'/);
+  assert.match(client, /calculate: '精确计算'/);
+  assert.match(client, /convert_units: '单位换算'/);
+  // Safe math: no Function/eval injection path
+  assert.match(server, /function safeEvalMath/);
+  assert.doesNotMatch(server, /Function\(['"]use strict['"]; return \(/);
+  // Model prompt lists the new tools
+  assert.match(server, /calculate \/ convert_units|calculate \/ convert_units|\/ calculate \/ convert_units/);
+  assert.match(server, /function normalizeMarketSymbol/);
+});
+
+test('weather supports geocoding beyond fixed city list', () => {
+  assert.match(weather, /geocoding-api\.open-meteo\.com/);
+  assert.match(weather, /function geocodeCity/);
+  assert.match(weather, /function resolveCity|async function resolveCity/);
+  assert.match(weather, /成都/);
 });
 
 test('image understanding uses OCR channel (no DeepSeek multimodal claim)', () => {
@@ -40,6 +69,8 @@ test('tool results emit structured cards for weather/rate/stock/page/ocr/search'
   assert.match(server, /aiSiteCard\('image_ocr'/);
   assert.match(server, /aiSiteCard\('web_search'/);
   assert.match(server, /aiSiteCard\('time'/);
+  assert.match(server, /aiSiteCard\('calculate'/);
+  assert.match(server, /aiSiteCard\('unit_convert'/);
   assert.match(weather, /function queryWeatherData/);
 });
 

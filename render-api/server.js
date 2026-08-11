@@ -731,11 +731,11 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'get_weather',
-      description: '查询某个城市的当前天气和今日天气预报，包括温度、湿度、风速、天气状况、降雨概率。只有在用户明确询问天气时才使用。',
+      description: '查询某个城市的当前天气和今日天气预报，包括温度、湿度、风速、天气状况、降雨概率。支持国内外城市名（中英文）。只有在用户明确询问天气时才使用。',
       parameters: {
         type: 'object',
         properties: {
-          location: { type: 'string', description: '城市名称或地区名称，如北京、上海、巴黎、东京等' }
+          location: { type: 'string', description: '城市名称或地区名称，如北京、上海、成都、巴黎、东京、New York 等' }
         },
         required: ['location']
       }
@@ -745,10 +745,13 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'get_current_time',
-      description: '获取当前的日期、时间、星期几、时区信息。当用户问"几点了""今天几号""今天星期几""现在几点"等时间相关问题时使用。',
+      description: '获取当前的日期、时间、星期几、时区信息。当用户问"几点了""今天几号""今天星期几""现在几点""纽约现在几点"等时间相关问题时使用。可传 timezone/city 查询外地时间。',
       parameters: {
         type: 'object',
-        properties: {}
+        properties: {
+          timezone: { type: 'string', description: '可选时区或城市，如 Asia/Tokyo、纽约、伦敦、UTC；默认北京时间' },
+          city: { type: 'string', description: '可选城市别名，如 东京、纽约、伦敦（与 timezone 二选一）' }
+        }
       }
     }
   },
@@ -756,12 +759,12 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'get_exchange_rate',
-      description: '查询实时汇率。当用户问"1美元等于多少人民币""日元对人民币汇率""欧元汇率"等货币换算问题时使用。返回指定货币对的最新汇率与换算结果。',
+      description: '查询实时汇率。当用户问"1美元等于多少人民币""日元对人民币汇率""欧元汇率"等货币换算问题时使用。返回指定货币对的最新汇率与换算结果。支持 ISO 代码（USD/CNY）或中文名（美元/人民币）。',
       parameters: {
         type: 'object',
         properties: {
-          from: { type: 'string', description: '源货币代码，如 USD、CNY、JPY、EUR、GBP、HKD 等，默认 USD' },
-          to: { type: 'string', description: '目标货币代码，如 CNY、USD、JPY、EUR 等，默认 CNY' },
+          from: { type: 'string', description: '源货币代码或中文名，如 USD、CNY、美元、人民币，默认 USD' },
+          to: { type: 'string', description: '目标货币代码或中文名，如 CNY、USD、日元、欧元，默认 CNY' },
           amount: { type: 'number', description: '换算金额（可选），默认 1' }
         },
         required: ['from', 'to']
@@ -772,11 +775,11 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'get_stock_quote',
-      description: '查询 A 股/港股/美股/加密货币的实时行情。当用户问"腾讯股价""茅台今天多少钱""比特币价格""上证指数"等行情问题时使用。代码规则：A股用 600519 或 600519.SH，港股用 00700.HK，美股用 AAPL.US，加密货币用 BTC/USDT。',
+      description: '查询 A 股/港股/美股/加密货币的实时行情。当用户问"腾讯股价""茅台今天多少钱""比特币价格""上证指数"等行情问题时使用。代码规则：A股用 600519 或 600519.SH，港股用 00700.HK，美股用 AAPL 或 AAPL.US，加密货币用 BTC、ETH、BTC/USDT。',
       parameters: {
         type: 'object',
         properties: {
-          symbol: { type: 'string', description: '证券代码，如 600519.SH、00700.HK、AAPL.US、BTC/USDT、000001.SZ' }
+          symbol: { type: 'string', description: '证券代码，如 600519.SH、00700.HK、AAPL、AAPL.US、BTC、BTC/USDT、000001.SZ' }
         },
         required: ['symbol']
       }
@@ -793,6 +796,36 @@ const AI_TOOLS = [
           url: { type: 'string', description: '完整的 HTTPS 网址，例如 https://example.com/article' }
         },
         required: ['url']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calculate',
+      description: '精确计算数学表达式，避免口算误差。当用户要求算数、百分比、幂次、复杂四则运算时使用。只支持数字与 + - * / ( ) 和 ^（幂）。不要用它处理单位换算（用 convert_units）或货币换算（用 get_exchange_rate）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          expression: { type: 'string', description: '数学表达式，如 (1280-960)/960*100 或 2^10 + 3*5' }
+        },
+        required: ['expression']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'convert_units',
+      description: '单位换算：温度/长度/重量/数据量。当用户问"100华氏度等于多少摄氏度""5英里多少公里""2GB是多少MB"时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          value: { type: 'number', description: '数值' },
+          from_unit: { type: 'string', description: '源单位，如 C/F/K、m/km/mi/ft/cm/inch、kg/g/lb/oz、B/KB/MB/GB/TB' },
+          to_unit: { type: 'string', description: '目标单位' }
+        },
+        required: ['value', 'from_unit', 'to_unit']
       }
     }
   }
@@ -856,6 +889,117 @@ function buildResponsesInput(messagesArr, instructionsContent) {
     items.push({ type: 'message', role: m.role === 'developer' ? 'system' : m.role, content: String(m.content) });
   }
   return items;
+}
+
+/** Safe arithmetic evaluator (no Function/eval). Supports + - * / ^ ( ) and scientific notation. */
+function safeEvalMath(expression) {
+  var expr = String(expression || '').replace(/\s+/g, '');
+  if (!expr) throw new Error('表达式为空');
+  if (expr.length > 120) throw new Error('表达式过长');
+  if (!/^[0-9+\-*/().^eE]+$/.test(expr)) throw new Error('只支持数字与 + - * / ( ) ^ 运算');
+  var i = 0;
+  function peek() { return expr.charAt(i) || ''; }
+  function consume() { return expr.charAt(i++) || ''; }
+  function parseNumber() {
+    var start = i;
+    while (/[0-9]/.test(peek())) i++;
+    if (peek() === '.') {
+      i++;
+      if (!/[0-9]/.test(peek()) && start === i - 1 && !/[0-9]/.test(expr.charAt(start))) {
+        throw new Error('数字无效');
+      }
+      while (/[0-9]/.test(peek())) i++;
+    }
+    if (peek() === 'e' || peek() === 'E') {
+      i++;
+      if (peek() === '+' || peek() === '-') i++;
+      var expStart = i;
+      while (/[0-9]/.test(peek())) i++;
+      if (i === expStart) throw new Error('科学计数法无效');
+    }
+    var numStr = expr.slice(start, i);
+    if (!numStr || numStr === '.' || numStr === '+' || numStr === '-') throw new Error('数字无效');
+    var n = Number(numStr);
+    if (!isFinite(n)) throw new Error('数字无效');
+    if (Math.abs(n) > 1e15) throw new Error('数字过大');
+    return n;
+  }
+  function parseFactor() {
+    if (peek() === '+') { consume(); return parseFactor(); }
+    if (peek() === '-') { consume(); return -parseFactor(); }
+    if (peek() === '(') {
+      consume();
+      var inner = parseExpr();
+      if (peek() !== ')') throw new Error('括号不匹配');
+      consume();
+      return inner;
+    }
+    return parseNumber();
+  }
+  function parsePower() {
+    var base = parseFactor();
+    if (peek() === '^') {
+      consume();
+      var exp = parsePower();
+      if (Math.abs(exp) > 100) throw new Error('指数过大');
+      if (Math.abs(base) > 1e6 && Math.abs(exp) > 12) throw new Error('指数过大');
+      var powered = Math.pow(base, exp);
+      if (!isFinite(powered)) throw new Error('结果溢出');
+      return powered;
+    }
+    return base;
+  }
+  function parseTerm() {
+    var v = parsePower();
+    while (peek() === '*' || peek() === '/') {
+      var op = consume();
+      var rhs = parsePower();
+      if (op === '/') {
+        if (rhs === 0) throw new Error('除以零');
+        v = v / rhs;
+      } else {
+        v = v * rhs;
+      }
+      if (!isFinite(v)) throw new Error('结果溢出');
+    }
+    return v;
+  }
+  function parseExpr() {
+    var v = parseTerm();
+    while (peek() === '+' || peek() === '-') {
+      var op = consume();
+      var rhs = parseTerm();
+      v = op === '+' ? v + rhs : v - rhs;
+      if (!isFinite(v)) throw new Error('结果溢出');
+    }
+    return v;
+  }
+  var result = parseExpr();
+  if (i !== expr.length) throw new Error('表达式格式无效');
+  if (typeof result !== 'number' || !isFinite(result)) throw new Error('计算结果无效');
+  // 去掉浮点毛刺：0.1+0.2 → 0.3
+  if (Math.abs(result) < 1e12) {
+    var rounded = Math.round(result * 1e10) / 1e10;
+    if (Math.abs(rounded - result) < 1e-9) result = rounded;
+  }
+  return result;
+}
+
+function normalizeMarketSymbol(raw) {
+  var sym = String(raw || '').trim().slice(0, 32);
+  if (!sym) return '';
+  var ALIASES = {
+    '茅台': '600519', '贵州茅台': '600519', '腾讯': '00700.HK', '腾讯控股': '00700.HK',
+    '阿里': '09988.HK', '阿里巴巴': '09988.HK', '美团': '03690.HK',
+    '宁德时代': '300750', '比亚迪': '002594', '平安银行': '000001',
+    '上证': '000001.SH', '上证指数': '000001.SH', '深成指': '399001.SZ',
+    '比特币': 'BTC', '以太坊': 'ETH', '狗狗币': 'DOGE', '苹果': 'AAPL',
+    '特斯拉': 'TSLA', '英伟达': 'NVDA', '微软': 'MSFT', '谷歌': 'GOOGL', '谷歌a': 'GOOGL'
+  };
+  if (ALIASES[sym]) return ALIASES[sym];
+  var lower = sym.toLowerCase();
+  if (ALIASES[lower]) return ALIASES[lower];
+  return sym;
 }
 
 // Function Calling 工具执行器
@@ -965,7 +1109,7 @@ async function executeToolCall(toolCall, context) {
             cards: [aiSiteCard('weather', weatherData.city + ' 天气', weatherData)]
           };
         }
-        return { tool_name: name, location: loc, error: '暂不支持该城市天气查询，支持的城市：北京、上海、广州、深圳、杭州、湖州、安吉、东京、大阪、首尔、济州岛、巴黎、伦敦、纽约' };
+        return { tool_name: name, location: loc, error: '未找到该地点的天气，请换更具体的城市名再试（如「成都」「大阪」「Los Angeles」）' };
       } catch (e) {
         // 服务端故障与"城市不支持"区分开：不把底层错误透传
         return { tool_name: name, location: loc, error: '天气服务暂时不可用，请稍后重试' };
@@ -973,29 +1117,85 @@ async function executeToolCall(toolCall, context) {
     }
     case 'get_current_time': {
       var now = new Date();
-      var cnf = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
-      // ★ 时区修复：星期也用 Asia/Shanghai 计算，避免服务器 UTC 时区跨午夜不一致
-      var weekday = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long' }).format(now);
-      var timeResult = '【当前时间】\n北京时间：' + cnf + '\n星期：' + weekday + '\n时区：Asia/Shanghai (UTC+8)';
+      var TZ_ALIASES = {
+        '北京': 'Asia/Shanghai', '上海': 'Asia/Shanghai', '中国': 'Asia/Shanghai', 'cst': 'Asia/Shanghai',
+        '东京': 'Asia/Tokyo', '日本': 'Asia/Tokyo', '首尔': 'Asia/Seoul', '韩国': 'Asia/Seoul',
+        '纽约': 'America/New_York', '美东': 'America/New_York', '洛杉矶': 'America/Los_Angeles', '美西': 'America/Los_Angeles',
+        '伦敦': 'Europe/London', '巴黎': 'Europe/Paris', '柏林': 'Europe/Berlin',
+        '新加坡': 'Asia/Singapore', '香港': 'Asia/Hong_Kong', '台北': 'Asia/Taipei',
+        '悉尼': 'Australia/Sydney', 'utc': 'UTC', 'gmt': 'UTC'
+      };
+      var tzRaw = String(args.timezone || args.location || args.city || '').trim();
+      var tz = 'Asia/Shanghai';
+      if (tzRaw) {
+        if (TZ_ALIASES[tzRaw] || TZ_ALIASES[tzRaw.toLowerCase()]) {
+          tz = TZ_ALIASES[tzRaw] || TZ_ALIASES[tzRaw.toLowerCase()];
+        } else if (/^[A-Za-z_]+\/[A-Za-z_]+$/.test(tzRaw) || tzRaw.toUpperCase() === 'UTC') {
+          tz = tzRaw.toUpperCase() === 'UTC' ? 'UTC' : tzRaw;
+        }
+      }
+      var fmtOpts = { timeZone: tz, year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+      var localTime;
+      try {
+        localTime = new Intl.DateTimeFormat('zh-CN', fmtOpts).format(now);
+      } catch (eTz) {
+        tz = 'Asia/Shanghai';
+        localTime = new Intl.DateTimeFormat('zh-CN', Object.assign({}, fmtOpts, { timeZone: tz })).format(now);
+      }
+      // ★ 时区修复：星期也用目标时区计算，避免服务器 UTC 时区跨午夜不一致
+      var weekday = new Intl.DateTimeFormat('zh-CN', { timeZone: tz, weekday: 'long' }).format(now);
+      var beijingTime = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai', year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+      }).format(now);
+      var timeResult = '【当前时间】\n当地时间：' + localTime +
+        '\n星期：' + weekday +
+        '\n时区：' + tz +
+        (tz !== 'Asia/Shanghai' ? '\n北京时间：' + beijingTime : '');
       return {
         tool_name: name,
         content: timeResult,
         cards: [aiSiteCard('time', '当前时间', {
-          beijing_time: cnf,
+          local_time: localTime,
+          beijing_time: beijingTime,
           weekday: weekday,
-          timezone: 'Asia/Shanghai (UTC+8)'
+          timezone: tz
         })]
       };
     }
     case 'get_exchange_rate': {
       // ★ 实时汇率（open.er-api.com 免费层，无需 API key）
-      var fromCur = String(args.from || 'USD').trim().toUpperCase().slice(0, 5);
-      var toCur = String(args.to || 'CNY').trim().toUpperCase().slice(0, 5);
+      var CURRENCY_ALIASES = {
+        '美元': 'USD', '美金': 'USD', '刀': 'USD', '人民币': 'CNY', '块': 'CNY', '元': 'CNY',
+        '日元': 'JPY', '欧': 'EUR', '欧元': 'EUR', '英镑': 'GBP', '港币': 'HKD', '港元': 'HKD',
+        '澳元': 'AUD', '加元': 'CAD', '韩元': 'KRW', '台币': 'TWD', '新台币': 'TWD',
+        '瑞郎': 'CHF', '新加坡元': 'SGD', '泰铢': 'THB', '卢布': 'RUB'
+      };
+      function normalizeCurrencyCode(raw, fallback) {
+        var s = String(raw || '').trim();
+        if (!s) return fallback;
+        if (CURRENCY_ALIASES[s]) return CURRENCY_ALIASES[s];
+        var up = s.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
+        return up || fallback;
+      }
+      var fromCur = normalizeCurrencyCode(args.from, 'USD');
+      var toCur = normalizeCurrencyCode(args.to, 'CNY');
       var amount = Number(args.amount);
       if (!amount || !isFinite(amount) || amount <= 0) amount = 1;
+      if (fromCur === toCur) {
+        var samePayload = { from: fromCur, to: toCur, amount: amount, rate: 1, converted: amount, updated_at: 'same_currency' };
+        return {
+          tool_name: name,
+          from: fromCur,
+          to: toCur,
+          rate: 1,
+          content: '【实时汇率】\n' + amount + ' ' + fromCur + ' = ' + amount + ' ' + toCur + '（同一货币）',
+          cards: [aiSiteCard('exchange_rate', fromCur + ' → ' + toCur, samePayload)]
+        };
+      }
       try {
         var erResp = await fetch('https://open.er-api.com/v6/latest/' + encodeURIComponent(fromCur), { signal: AbortSignal.timeout(8000) });
-        if (!erResp.ok) return { tool_name: name, from: fromCur, to: toCur, error: '汇率服务暂不可用（HTTP ' + erResp.status + '）' };
+        if (!erResp.ok) return { tool_name: name, from: fromCur, to: toCur, error: '汇率服务暂不可用' };
         var erData = await erResp.json();
         if (!erData || erData.result !== 'success' || !erData.rates || !erData.rates[toCur]) {
           return { tool_name: name, from: fromCur, to: toCur, error: '不支持的货币代码：' + fromCur + '/' + toCur };
@@ -1027,17 +1227,65 @@ async function executeToolCall(toolCall, context) {
       }
     }
     case 'get_stock_quote': {
-      // ★ 实时行情（腾讯行情接口，免费无 key）
-      var sym = String(args.symbol || '').trim().slice(0, 20);
+      // ★ 实时行情：A/港/美股走腾讯接口；加密货币走 CoinGecko；支持中文别名
+      var sym = normalizeMarketSymbol(args.symbol);
       if (!sym) return { tool_name: name, error: '证券代码为空' };
       try {
-        // 归一化代码 → 腾讯行情格式: sh600519 / hk00700 / usAAPL / btcusdt
+        var CRYPTO_IDS = {
+          btc: 'bitcoin', bitcoin: 'bitcoin', eth: 'ethereum', ethereum: 'ethereum',
+          sol: 'solana', doge: 'dogecoin', xrp: 'ripple', bnb: 'binancecoin',
+          ada: 'cardano', 'doge/usdt': 'dogecoin', 'btc/usdt': 'bitcoin', 'eth/usdt': 'ethereum',
+          '比特币': 'bitcoin', '以太坊': 'ethereum', '狗狗币': 'dogecoin'
+        };
+        var CRYPTO_LABELS = {
+          bitcoin: '比特币', ethereum: '以太坊', solana: 'Solana', dogecoin: '狗狗币',
+          ripple: 'XRP', binancecoin: 'BNB', cardano: 'Cardano'
+        };
+        var lowerSym = sym.toLowerCase().replace(/\s+/g, '');
+        var cryptoId = CRYPTO_IDS[lowerSym] || CRYPTO_IDS[sym] || CRYPTO_IDS[lowerSym.split('/')[0]] || null;
+        if (cryptoId || /^[a-z]{2,10}\/usdt$/i.test(sym) || /^(btc|eth|sol|doge|xrp|bnb)$/i.test(sym)) {
+          var cgId = cryptoId || String(lowerSym.split('/')[0] || lowerSym);
+          var cgResp = await fetch(
+            'https://api.coingecko.com/api/v3/simple/price?ids=' + encodeURIComponent(cgId) +
+            '&vs_currencies=usd,cny&include_24hr_change=true',
+            { signal: AbortSignal.timeout(8000), headers: { Accept: 'application/json' } }
+          );
+          if (!cgResp.ok) return { tool_name: name, symbol: sym, error: '加密货币行情暂不可用（HTTP ' + cgResp.status + '）' };
+          var cgData = await cgResp.json();
+          var cgRow = cgData && cgData[cgId];
+          if (!cgRow || cgRow.usd == null) {
+            return { tool_name: name, symbol: sym, error: '未找到该加密货币行情（可试 BTC / ETH / SOL）' };
+          }
+          var chg24 = cgRow.usd_24h_change != null ? Number(cgRow.usd_24h_change) : null;
+          var cryptoLabel = CRYPTO_LABELS[cgId] || cgId;
+          var cryptoPayload = {
+            name: cryptoLabel,
+            symbol: sym.toUpperCase(),
+            price: String(cgRow.usd),
+            change: chg24 != null ? String(chg24.toFixed(2)) : '-',
+            change_pct: chg24 != null ? String(chg24.toFixed(2)) : '-',
+            open: '-',
+            high: '-',
+            low: '-',
+            prev_close: '-',
+            time: new Date().toISOString(),
+            price_cny: cgRow.cny != null ? String(cgRow.cny) : ''
+          };
+          var cryptoText = '【加密货币行情】' + cryptoLabel + '（' + sym.toUpperCase() + '）\n' +
+            'USD：' + cgRow.usd + (cgRow.cny != null ? '\nCNY：' + cgRow.cny : '') +
+            (chg24 != null ? '\n24h 涨跌：' + chg24.toFixed(2) + '%' : '') +
+            '\n（CoinGecko 数据，仅供参考）';
+          return {
+            tool_name: name,
+            symbol: sym,
+            content: cryptoText,
+            cards: [aiSiteCard('stock_quote', cryptoLabel + ' 行情', cryptoPayload)]
+          };
+        }
+
+        // 归一化代码 → 腾讯行情格式: sh600519 / hk00700 / usAAPL
         var tencentSym = sym;
-        var lower = sym.toLowerCase();
-        if (/^btc|^eth|^usdt/i.test(sym) || lower.indexOf('/') >= 0) {
-          var base = lower.split('/')[0] || lower;
-          tencentSym = (base + 'usdt').replace(/[^a-z0-9]/g, '');
-        } else if (/\.(sh|sz|bj)$/i.test(sym)) {
+        if (/\.(sh|sz|bj)$/i.test(sym)) {
           var m1 = sym.match(/^(\d+)(\.(sh|sz|bj))$/i);
           if (m1) tencentSym = m1[2].toLowerCase().replace('.', '') + m1[1];
         } else if (/\.(hk|us)$/i.test(sym)) {
@@ -1045,6 +1293,12 @@ async function executeToolCall(toolCall, context) {
           if (m2) tencentSym = (m2[3].toLowerCase() === 'hk' ? 'hk' : 'us') + m2[1];
         } else if (/^\d{6}$/.test(sym)) {
           tencentSym = (sym.charAt(0) === '6' || sym.charAt(0) === '9' || sym.charAt(0) === '5') ? 'sh' + sym : 'sz' + sym;
+        } else if (/^\d{1,5}$/.test(sym)) {
+          // 港股纯数字 700 / 00700
+          tencentSym = 'hk' + ('00000' + sym).slice(-5);
+        } else if (/^[A-Za-z]{1,5}$/.test(sym)) {
+          // 美股裸代码 AAPL / TSLA
+          tencentSym = 'us' + sym.toUpperCase();
         }
         var sqResp = await fetch('https://qt.gtimg.cn/q=' + encodeURIComponent(tencentSym), { signal: AbortSignal.timeout(8000) });
         if (!sqResp.ok) return { tool_name: name, symbol: sym, error: '行情服务暂不可用（HTTP ' + sqResp.status + '）' };
@@ -1089,6 +1343,97 @@ async function executeToolCall(toolCall, context) {
         };
       } catch (e) {
         return { tool_name: name, symbol: sym, error: e && e.message || '行情查询失败' };
+      }
+    }
+    case 'calculate': {
+      var expr = String(args.expression || '').trim().slice(0, 200);
+      if (!expr) return { tool_name: name, error: '表达式为空' };
+      try {
+        var calcVal = safeEvalMath(expr);
+        var calcPayload = { expression: expr, result: calcVal };
+        var calcText = '【计算结果】\n' + expr + ' = ' + calcVal;
+        return {
+          tool_name: name,
+          content: calcText,
+          cards: [aiSiteCard('calculate', '计算结果', calcPayload)]
+        };
+      } catch (e) {
+        return { tool_name: name, error: (e && e.message) || '无法计算该表达式' };
+      }
+    }
+    case 'convert_units': {
+      var rawVal = Number(args.value);
+      var fromU = String(args.from_unit || '').trim().toLowerCase();
+      var toU = String(args.to_unit || '').trim().toLowerCase();
+      if (!isFinite(rawVal)) return { tool_name: name, error: '数值无效' };
+      if (!fromU || !toU) return { tool_name: name, error: '请提供源单位和目标单位' };
+      try {
+        var UNIT_ALIASES = {
+          '℃': 'c', '°c': 'c', celsius: 'c', '摄氏度': 'c', '度': 'c',
+          '℉': 'f', '°f': 'f', fahrenheit: 'f', '华氏度': 'f',
+          k: 'k', kelvin: 'k', '开尔文': 'k',
+          m: 'm', meter: 'm', metres: 'm', meters: 'm', '米': 'm',
+          km: 'km', kilometer: 'km', kilometres: 'km', '公里': 'km', '千米': 'km',
+          cm: 'cm', centimeter: 'cm', '厘米': 'cm',
+          mm: 'mm', millimeter: 'mm', '毫米': 'mm',
+          mi: 'mi', mile: 'mi', miles: 'mi', '英里': 'mi',
+          ft: 'ft', foot: 'ft', feet: 'ft', '英尺': 'ft',
+          in: 'in', inch: 'in', inches: 'in', '英寸': 'in',
+          kg: 'kg', kilogram: 'kg', '千克': 'kg', '公斤': 'kg',
+          g: 'g', gram: 'g', '克': 'g',
+          lb: 'lb', lbs: 'lb', pound: 'lb', '磅': 'lb',
+          oz: 'oz', ounce: 'oz', '盎司': 'oz',
+          b: 'b', byte: 'b', bytes: 'b',
+          kb: 'kb', kib: 'kb',
+          mb: 'mb', mib: 'mb',
+          gb: 'gb', gib: 'gb',
+          tb: 'tb', tib: 'tb'
+        };
+        fromU = UNIT_ALIASES[fromU] || fromU;
+        toU = UNIT_ALIASES[toU] || toU;
+        var resultVal = null;
+        var category = '';
+        // Temperature
+        if ((fromU === 'c' || fromU === 'f' || fromU === 'k') && (toU === 'c' || toU === 'f' || toU === 'k')) {
+          category = 'temperature';
+          var celsius = fromU === 'c' ? rawVal : (fromU === 'f' ? (rawVal - 32) * 5 / 9 : rawVal - 273.15);
+          resultVal = toU === 'c' ? celsius : (toU === 'f' ? celsius * 9 / 5 + 32 : celsius + 273.15);
+        } else {
+          var LENGTH_TO_M = { m: 1, km: 1000, cm: 0.01, mm: 0.001, mi: 1609.344, ft: 0.3048, in: 0.0254 };
+          var WEIGHT_TO_KG = { kg: 1, g: 0.001, lb: 0.45359237, oz: 0.028349523125 };
+          var DATA_TO_B = { b: 1, kb: 1024, mb: 1024 * 1024, gb: 1024 * 1024 * 1024, tb: 1024 * 1024 * 1024 * 1024 };
+          if (LENGTH_TO_M[fromU] && LENGTH_TO_M[toU]) {
+            category = 'length';
+            resultVal = rawVal * LENGTH_TO_M[fromU] / LENGTH_TO_M[toU];
+          } else if (WEIGHT_TO_KG[fromU] && WEIGHT_TO_KG[toU]) {
+            category = 'weight';
+            resultVal = rawVal * WEIGHT_TO_KG[fromU] / WEIGHT_TO_KG[toU];
+          } else if (DATA_TO_B[fromU] && DATA_TO_B[toU]) {
+            category = 'data';
+            resultVal = rawVal * DATA_TO_B[fromU] / DATA_TO_B[toU];
+          }
+        }
+        if (resultVal == null || !isFinite(resultVal)) {
+          return { tool_name: name, error: '无法在单位 ' + fromU + ' 与 ' + toU + ' 之间换算（需同类单位）' };
+        }
+        var rounded = Math.abs(resultVal) >= 1000 || Math.abs(resultVal) < 0.001
+          ? Number(resultVal.toPrecision(8))
+          : Number(resultVal.toFixed(6));
+        var cuPayload = {
+          value: rawVal,
+          from_unit: fromU,
+          to_unit: toU,
+          result: rounded,
+          category: category
+        };
+        var cuText = '【单位换算】\n' + rawVal + ' ' + fromU + ' = ' + rounded + ' ' + toU;
+        return {
+          tool_name: name,
+          content: cuText,
+          cards: [aiSiteCard('unit_convert', '单位换算', cuPayload)]
+        };
+      } catch (e) {
+        return { tool_name: name, error: e && e.message || '单位换算失败' };
       }
     }
     case 'read_web_page': {
@@ -1416,7 +1761,9 @@ async function finishStream(res, opt) {
   if (hasContent && opt.userName) {
     try {
       var searchHits = 0;
-      if (searchMeta && (searchMeta.count > 0 || (Array.isArray(searchMeta.results) && searchMeta.results.length))) {
+      if (searchMeta && typeof searchMeta.count === 'number' && searchMeta.count > 0) {
+        searchHits = searchMeta.count;
+      } else if (searchMeta && Array.isArray(searchMeta.results) && searchMeta.results.length) {
         searchHits = 1;
       }
       quotaAfter = await recordAiTurnUsage(opt.userName, doneUsage, {
@@ -2115,12 +2462,21 @@ const AI_SITE_TOOL_REGISTRY = {
   search_everything: { write: false }
 };
 
+var AI_SITE_TOOL_DESCRIPTIONS = {
+  search_posts: '搜索站内帖子/动态（仅当前用户可见范围），按关键词检索正文与作者。',
+  search_comments: '搜索站内评论（仅当前用户有权看到的内容）。',
+  search_photos: '搜索照片墙图片描述与相关信息。',
+  search_dm_messages: '搜索当前用户的私信对话记录（仅本人相关）。',
+  search_ai_history: '搜索当前用户与小猫的历史对话摘要。',
+  search_users: '按用户名检索站内用户资料（公开信息）。',
+  search_everything: '综合搜索站内帖子、评论、照片、私信与 AI 历史（仅当前用户权限内）。'
+};
 Object.keys(AI_SITE_TOOL_REGISTRY).forEach(function(name) {
   AI_TOOLS.push({
     type: 'function',
     function: {
       name: name,
-      description: name.replace(/_/g, ' ') + '，只检索当前用户有权访问的站内数据，不执行写入操作。',
+      description: (AI_SITE_TOOL_DESCRIPTIONS[name] || (name.replace(/_/g, ' ') + ' 站内检索')) + ' 不执行写入操作。',
       parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 40 } }, required: ['query'] }
     }
   });
@@ -5614,11 +5970,18 @@ async function callDeepSeek(messages, options) {
 function responsesUsageToInternal(u) {
   if (!u || typeof u !== 'object') return null;
   return {
-    prompt_tokens: Math.max(0, Number(u.input_tokens) || Number(u.prompt_tokens) || 0),
-    completion_tokens: Math.max(0, Number(u.output_tokens) || Number(u.completion_tokens) || 0),
+    input_tokens: Math.max(0, Number(u.input_tokens) || Number(u.prompt_tokens) || 0),
+    output_tokens: Math.max(0, Number(u.output_tokens) || Number(u.completion_tokens) || 0),
     total_tokens: Math.max(0, Number(u.total_tokens) || 0),
     input_tokens_details: u.input_tokens_details || null,
-    output_tokens_details: u.output_tokens_details || null
+    output_tokens_details: u.output_tokens_details || null,
+    // ★ P2 修复：Responses API 将推理 token 放在 output_tokens_details.reasoning_tokens，
+    //   展平为顶层 reasoning_tokens，使 computeBillableTokens 计入推理费用。
+    reasoning_tokens: Math.max(0,
+      Number(u.reasoning_tokens) ||
+      Number(u.output_tokens_details && u.output_tokens_details.reasoning_tokens) ||
+      Number(u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) ||
+      0)
   };
 }
 
@@ -14544,8 +14907,8 @@ function buildAiCorePrompt(config) {
     sysPrompt ? '用户额外指令：' + sysPrompt : '',
     '当前风格：' + style + '。每条 ≤ ' + (rs.max_reply_chars || 1200) + ' 字。',
     allowWebSearch
-      ? '可用工具：search_web / tavily_search / read_web_page / get_weather / get_current_time / get_exchange_rate / get_stock_quote。用户发具体 HTTPS 链接时必须用 read_web_page 读正文，禁止声称“工具打不开链接/不能访问网页”。时效问题先搜索再按需读页。'
-      : '可用工具：get_weather / get_current_time / get_exchange_rate / get_stock_quote / read_web_page。用户发 HTTPS 链接时必须 read_web_page，禁止声称无法打开链接。',
+      ? '可用工具：search_web / tavily_search / read_web_page / get_weather / get_current_time / get_exchange_rate / get_stock_quote / calculate / convert_units。用户发具体 HTTPS 链接时必须用 read_web_page 读正文，禁止声称“工具打不开链接/不能访问网页”。时效问题先搜索再按需读页。算数用 calculate，单位换算用 convert_units，别口算。'
+      : '可用工具：get_weather / get_current_time / get_exchange_rate / get_stock_quote / read_web_page / calculate / convert_units。用户发 HTTPS 链接时必须 read_web_page，禁止声称无法打开链接。算数用 calculate，单位换算用 convert_units。',
     emojiRule,
     '【图片规则】若消息含「用户上传图片的可读文字」，只根据那段文字回答业务问题，禁止搜索 OCR/识别准确率/引擎。',
     '【输出硬性规则】1) 一条回复只表达一个核心观点，不要分点罗列。2) 短句为主，别写长段落。3) 不写"作为一个 AI"开场白。4) 不写括号动作描写（如 "*笑了笑*"）。',
@@ -15562,10 +15925,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   // 导致开启网页搜索的流式请求在 15235 行引用未定义变量，抛出 ReferenceError，
   // 被外层 catch 包装成 "AI 连接中断，请稍后重试"。
   var requestAbortCtrl = new AbortController();
-  var clientReqId = req.body && req.body.client_request_id;
+  var clientReqId = String((req.body && req.body.client_request_id) || '').trim();
   var streamSeq = 0;
+  // ★ P0 修复：client_request_id 防串流去重
+  //   客户端因超时/重试会复用同一 client_request_id，但服务器此前仅用于日志，
+  //   未做去重 → 并发启动多个完整 SSE 流，引发重复计费/消息串流。
+  //   加 in-flight Map<userName:clientReqId, AbortController>：活跃时返回 409。
+  var inFlightStreams = global.__inFlightStreams || (global.__inFlightStreams = new Map());
   
-  var _controller, _reader, _timer, _fcTimer;
+  var _controller, _reader, _timer, _fcTimer, _totalTimer;
   // ★ 心跳保活：普通聊天与深度思考不同，此前没有任何 keep-alive 事件。
   //   DeepSeek 思考模型（尤其 high/max effort）首个 token 前可能沉默 20-60s，
   //   期间代理/网络会切断空闲 SSE 连接 → 前端收到干净 EOF 且无任何事件 →
@@ -15585,7 +15953,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
     }, 4000);
   }
-  function safeEnd() { clearStreamHeartbeat(); if (!res.writableEnded) res.end(); }
+  function safeEnd() {
+    clearStreamHeartbeat();
+    try { clearTimeout(_totalTimer); } catch (e) {}
+    try { _totalTimer = null; } catch (e) {}
+    // ★ P0：清理去重注册，避免 Map 無限增長
+    if (clientReqId && userName) {
+      try { inFlightStreams.delete(userName + ':' + clientReqId); } catch (e) {}
+    }
+    if (!res.writableEnded) res.end();
+  }
   
   function markStreamDisconnected() {
     if (aborted) return;
@@ -15597,6 +15974,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     try { _reader && _reader.cancel(); } catch (e) {}
     try { clearTimeout(_timer); } catch (e) {}
     try { clearTimeout(_fcTimer); } catch (e) {}
+    try { clearTimeout(_totalTimer); } catch (e) {}
   }
   req.on('aborted', markStreamDisconnected);
   res.on('close', function() {
@@ -15630,6 +16008,20 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       writeSse(res, { type: 'error', error: (message && message.error) || '消息内容不能为空或过长' });
       return safeEnd();
+    }
+
+    // ★ P0：client_request_id 防串流 —— 活跃请求时返回 409，防止并发刷流
+    if (clientReqId && userName) {
+      var sKey = userName + ':' + clientReqId;
+      if (inFlightStreams.has(sKey)) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        if (typeof res.flushHeaders === 'function') res.flushHeaders();
+        writeSse(res, { type: 'error', error: '请求正在处理中，请勿重复提交', code: 'duplicate_request' });
+        return safeEnd();
+      }
+      inFlightStreams.set(sKey, requestAbortCtrl);
     }
 
     // 会话管理（尽早生成 convId，便于立刻 flush SSE，降低首包等待）
@@ -16097,7 +16489,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var hasHttpsUrl = /https:\/\/[^\s<>"']+/i.test(message);
     var fcQuickIntent = !isShortMsg && (explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|股价|行情|比特币|股票|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何|总结|阅读|打开这个链接|看看这个/i.test(message));
     var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
-    var fcLocalToolIntent = /汇率|换算|美元|日元|欧元|港币|股价|行情|股票|比特币|以太坊|上证|深证|几点|现在时间|今天几号|星期几/i.test(message);
+    var fcLocalToolIntent = /汇率|换算|美元|日元|欧元|港币|股价|行情|股票|比特币|以太坊|茅台|腾讯|特斯拉|上证|深证|几点|现在时间|今天几号|星期几|等于多少|算一下|计算|多少度|华氏|摄氏|公里|英里|公斤|磅|GB|MB/i.test(message);
     var needsFcCheck = !useThinking && !aborted && (
       (allowSearch && (fcQuickIntent || fcWeatherIntent || siteToolIntent || hasHttpsUrl)) ||
       hasHttpsUrl ||
@@ -16622,7 +17014,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //   多轮工具调用之间正文必须累积——若放在循环体内，每轮迭代都会重新赋值
     //   清空上一轮已推送的"前言"，finishStream 落库只会存最后一轮正文。
     var contentBuffer = '';
-    
+    // ★ P1 修复：thinking 模式下多轮工具调用 + idle-timer reset 会让单个流无限延长。
+    //   加一个 while 循环级的总超时（180s），硬上限防止 DeepSeek reasoning chain 长时间挂起。
+    var totalTimer = setTimeout(function() { aborted = true; try { controller && controller.abort(); } catch (e) {} }, 180000);
+    _totalTimer = totalTimer;
+
     while (toolRound < MAX_TOOL_ROUNDS && !aborted) {
 
     // 本轮开始前的 contentBuffer 长度：contentBuffer 跨轮累积，而 role:'assistant'
@@ -16897,16 +17293,29 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       for (var ti = 0; ti < toolResults.length; ti++) {
         var toolResult = toolResults[ti].result;
         
-        // 捕获 search_web 工具的搜索结果元数据
+        // 捕获 search_web / tavily_search 工具的搜索结果元数据
+        // 累加多次工具调用的结果（而非覆盖）——多轮搜索应计为多次配额
         if ((toolResult.tool_name === 'search_web' || toolResult.tool_name === 'tavily_search') && !toolResult.error && toolResult.results_count > 0) {
           var _parsedResults = null;
           try { _parsedResults = JSON.parse(toolResult.content || '[]'); } catch (e) {}
-          _toolSearchMeta = {
-            count: toolResult.results_count,
-            query: toolResult.query || toolResults[ti].name,
-            results: Array.isArray(_parsedResults) ? _parsedResults.slice(0, 50) : null,
-            expires_at: Date.now() + 86400000
-          };
+          var _parsedArr = Array.isArray(_parsedResults) ? _parsedResults.slice(0, 50) : null;
+          if (!_toolSearchMeta) {
+            _toolSearchMeta = {
+              count: toolResult.results_count,
+              query: toolResult.query || toolResults[ti].name,
+              results: _parsedArr ? _parsedArr.slice() : null,
+              expires_at: Date.now() + 86400000
+            };
+          } else {
+            _toolSearchMeta.count += toolResult.results_count;
+            if (_parsedArr && _parsedArr.length) {
+              _toolSearchMeta.results = (_toolSearchMeta.results || []).concat(_parsedArr).slice(0, 100);
+            }
+            if (!_toolSearchMeta.query && toolResult.query) {
+              _toolSearchMeta.query = toolResult.query || toolResults[ti].name;
+            }
+            _toolSearchMeta.expires_at = Date.now() + 86400000;
+          }
         }
         
         res.write('data: ' + JSON.stringify({
