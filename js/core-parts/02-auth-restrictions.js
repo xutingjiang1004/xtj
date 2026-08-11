@@ -412,6 +412,10 @@
                     window._lastKnownUser = currentUser;
                     window.safeStorage.set("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
+                    // ★ 审计修复：登录成功必须置位认证状态，否则 touchUserSession/_xtjAuthState 仍停留
+                    //   在 auth_pending/unauthenticated，导致会话续写失效、长会话可能被 30 天 TTL 误登出
+                    window._xtjAuthState = 'authenticated';
+                    window._xtjCanonicalUser = confirmedUser;
                     await loadCurrentUserInfoSnapshot(currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function" && confirmedUser !== ADMIN_NAME) {
@@ -507,6 +511,9 @@
                     window._lastKnownUser = currentUser;
                     window.safeStorage.set("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
+                    // ★ 审计修复：注册成功同样置位认证状态（与登录路径对称）
+                    window._xtjAuthState = 'authenticated';
+                    window._xtjCanonicalUser = currentUser;
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
                             window.logLoginEventSafe(currentUser, "register_success");

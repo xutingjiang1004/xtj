@@ -174,7 +174,9 @@ function createAiQuota(supabase) {
     // One chat turn that actually searched counts as 1 search credit.
     if (options.did_search && searchCount < 1) searchCount = 1;
     if (billable <= 0 && searchCount <= 0) {
-      return getQuota(userName);
+      // 审计 🟠：零扣费路径兜底——即使 provider 完全没返回 usage 且无文本可估算，
+      // 也至少计 1 token，避免"只读额度不消费"让请求永远绕开扣费。
+      billable = 1;
     }
     var prompt = Math.max(0, Math.floor(Number(usage && usage.prompt_tokens) || Number(usage && usage.input_tokens) || 0));
     var completion = Math.max(0, Math.floor(Number(usage && usage.completion_tokens) || Number(usage && usage.output_tokens) || 0));
@@ -209,8 +211,14 @@ function createAiQuota(supabase) {
     }
   }
 
+  // ⚠️ 权限说明（审计 🟡）：本函数直接写 ai_user_membership（含 is_pro 与自定义额度
+  // expires_at / token_limit_daily / search_limit_daily），模块内**不做任何角色校验**。
+  // 调用方必须已通过管理员校验（requireAdmin）或来自受信任的 Stripe webhook /
+  // 邀请码发放流程；禁止在未做权限判断的普通用户路由中调用本函数。
   async function setPro(userName, active, meta) {
     meta = meta || {};
+    // 审计要求：记录 setPro 调用，便于发现非管理/webhook 入口的提权调用
+    console.warn('[AI-QUOTA] setPro invoked (caller must be admin or trusted webhook-gated):', String(userName || ''), 'active=' + !!active);
     try {
       var result = await supabase.rpc('set_ai_user_pro', {
         p_user_name: String(userName || ''),

@@ -4,7 +4,10 @@
 // 集中处理普通帖子 / 总动态 / 后台管理 / 统计 端点需要排除的 system media_type
 // 与前端 applyVisiblePostQueryFilters 保持一致（22 个 marker）
 // 必须放在所有 marker 常量定义之后、路由定义之前
-// 正常帖子白名单：只允许这些 media_type 作为帖子出现在搜索结果中
+// 审计 ⚪ 单一真源说明：post-markers.js 已新增 PUBLIC_POST_MEDIA_TYPES 作为"允许对外"类型的唯一来源，
+// 新增代码请优先消费该常量（require('./post-markers').PUBLIC_POST_MEDIA_TYPES）。
+// 注意：NORMAL_POST_MEDIA_TYPES 被契约测试以"数组字面量赋值"形式锚定（tests/complete-tests.js），
+// 必须保持下方字面量写法、不可改为 require 派生；两处需人工同步（新增/退役 marker 时同时更新）。
 var NORMAL_POST_MEDIA_TYPES = ['text', 'image', 'video', 'audio', 'photo', 'album'];
 var NORMAL_POST_EMPTY_MEDIA_FILTER = 'media_type.eq.""';
 function isNormalPost(row) {

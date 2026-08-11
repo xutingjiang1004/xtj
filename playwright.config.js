@@ -3,6 +3,9 @@ const { defineConfig } = require('@playwright/test');
 module.exports = defineConfig({
   testDir: './tests',
   testMatch: /.*\.spec\.js/,
+  // ★ 2026-08-10 审计修复：这 7 个 spec 已废弃（曾混入 npm test 静默空跑，现已从
+  //   package.json scripts.test 移除）。此处继续显式排除，避免 test:ui 误跑废弃用例；
+  //   如需重新启用请先核对页面/接口仍存在，再移除对应条目或单独维护一条 CI 用例。
   testIgnore: /.*(ai-frontend-fixes|auth-account-switch|cat-ai-realtime|comment-mention-autocomplete|desktop-nav-refresh|photo-upload-status|photo-wall-fixes)\.spec\.js/,
   // ★ 禁止提交 .only：防止 CI 中被聚焦的用例静默跳过其余回归
   forbidOnly: true,

@@ -39,6 +39,9 @@ test-results/
 *.lnk
 /null
 
+# User-data backup output from cleanup/maintenance scripts
+backups/
+
 # Python cache
 __pycache__/
 *.py[cod]

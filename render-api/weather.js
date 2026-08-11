@@ -26,6 +26,8 @@ var WEATHER_CODES = {
   71: '小雪', 73: '中雪', 75: '大雪', 80: '阵雨', 81: '中阵雨', 82: '大阵雨',
   85: '小阵雪', 86: '大阵雪', 95: '雷暴', 96: '雷暴加小冰雹', 99: '雷暴加大冰雹'
 };
+// 审计 🟢：外部 API 响应大小上限（Open-Meteo 正常 < 100KB，留足余量）
+var MAX_WEATHER_RESPONSE_BYTES = 512 * 1024;
 
 function formatWeatherText(data) {
   if (!data) return null;
@@ -61,7 +63,13 @@ async function queryWeatherData(query) {
 
     var resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
     if (!resp.ok) return null;
-    var data = await resp.json();
+    // 审计 🟢：先查 content-length，再限量读取 body，异常大响应直接丢弃
+    var declaredLen = Number(resp.headers && resp.headers.get && resp.headers.get('content-length'));
+    if (Number.isFinite(declaredLen) && declaredLen > MAX_WEATHER_RESPONSE_BYTES) return null;
+    var rawBody = await resp.text();
+    if (Buffer.byteLength(rawBody, 'utf8') > MAX_WEATHER_RESPONSE_BYTES) return null;
+    var data;
+    try { data = JSON.parse(rawBody); } catch (_) { return null; }
     if (!data || !data.current) return null;
 
     var current = data.current;

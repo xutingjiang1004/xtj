@@ -40,6 +40,9 @@ function getMailTransporter() {
   return mailTransporter;
 }
 
+// 审计 🟢：GMAIL_USER / GMAIL_APP_PASSWORD 曾被建议不导出，但 server.js 多处
+// 直接 import 它们（发件人地址、SMTP auth、健康检查），移除会破坏现有调用契约，
+// 故保留导出。约束：凭据仅在模块内使用，不得进入响应体/日志（启动日志只打"已设置/未设置"）。
 module.exports = {
   getMailTransporter: getMailTransporter,
   GMAIL_USER: GMAIL_USER,

@@ -366,6 +366,47 @@ const DEEP_THINK_CONFIG = {
 // 全局活跃深度思考任务 (按 conv_id 索引) — 用于 cancel
 const activeDeepThinkJobs = new Map(); // conv_id → { cancelled, startTime, controller }
 
+// ★ 深度研究/深度思考并发上限：防止单用户多开 + 多子智能体并行放大成本。
+//   全局最多 5 个研究/思考任务同时进行，每用户最多 1 个。
+const DEEP_RESEARCH_MAX_GLOBAL = 5;
+const DEEP_RESEARCH_MAX_PER_USER = 1;
+var activeDeepResearchCount = 0;
+var activeDeepResearchByUser = new Map(); // userName -> count
+
+// 尝试获取研究并发名额；成功返回 release 函数，超限返回 null
+function tryAcquireDeepResearch(userName) {
+  if (!userName) return null;
+  var userCount = activeDeepResearchByUser.get(userName) || 0;
+  if (userCount >= DEEP_RESEARCH_MAX_PER_USER || activeDeepResearchCount >= DEEP_RESEARCH_MAX_GLOBAL) {
+    return null;
+  }
+  activeDeepResearchCount++;
+  activeDeepResearchByUser.set(userName, userCount + 1);
+  var released = false;
+  return function() {
+    if (released) return;
+    released = true;
+    activeDeepResearchCount = Math.max(0, activeDeepResearchCount - 1);
+    var next = (activeDeepResearchByUser.get(userName) || 1) - 1;
+    if (next <= 0) activeDeepResearchByUser.delete(userName);
+    else activeDeepResearchByUser.set(userName, next);
+  };
+}
+
+// activeDeepThinkJobs 容量上限：异常任务（未结束也未断开）会持续累积，超限时拒绝新任务
+const ACTIVE_DEEP_THINK_JOBS_MAX = 200;
+function trackActiveDeepThinkJob(convId, job) {
+  if (activeDeepThinkJobs.size >= ACTIVE_DEEP_THINK_JOBS_MAX) {
+    var oldestKey = activeDeepThinkJobs.keys().next().value;
+    if (oldestKey !== undefined) {
+      var oldJob = activeDeepThinkJobs.get(oldestKey);
+      if (oldJob) { oldJob.cancelled = true; try { if (typeof oldJob._onAgentCancel === 'function') oldJob._onAgentCancel(); } catch (e) {} }
+      activeDeepThinkJobs.delete(oldestKey);
+    }
+  }
+  activeDeepThinkJobs.set(convId, job);
+}
+
 // 简单 exact-match 缓存 (TTL 5 分钟)
 // 安全规则：有历史、搜索、附件、外部上下文、时效性问题时不缓存
 // 注意：项目中存在多个独立缓存（aiResponseCache、persistenceRateLimitCache、agentSessionCache、
@@ -833,6 +874,13 @@ async function executeToolCall(toolCall, context) {
       var q = String(args.query || '').trim().slice(0, 200);
       var maxR = Math.min(Math.max(parseInt(args.max_results, 10) || 20, 1), 20);
       if (!q) return { tool_name: name, error: '搜索关键词为空' };
+      // ★ 搜索配额下沉：模型自主调 search_web 也受用户搜索额度约束
+      if (context && context.userName) {
+        var swGate = await enforceSearchQuota(context.userName);
+        if (!swGate.allowed) {
+          return { tool_name: name, query: q, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: swGate.reason === 'search_limit', quota: swGate.quota || null };
+        }
+      }
       try {
         var result = await searchWeb(q, maxR);
         var resultsArr = result && result.results ? result.results : [];
@@ -861,6 +909,13 @@ async function executeToolCall(toolCall, context) {
       var tMax = Math.min(Math.max(parseInt(args.max_results, 10) || 5, 1), 10);
       if (!tq) return { tool_name: name, error: '搜索关键词为空' };
       if (!process.env.TAVILY_API_KEY) return { tool_name: name, query: tq, error: 'Tavily 未配置（缺少 TAVILY_API_KEY 环境变量）' };
+      // ★ 搜索配额下沉：tavily_search 同样受用户搜索额度约束
+      if (context && context.userName) {
+        var tsGate = await enforceSearchQuota(context.userName);
+        if (!tsGate.allowed) {
+          return { tool_name: name, query: tq, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: tsGate.reason === 'search_limit', quota: tsGate.quota || null };
+        }
+      }
       try {
         var tavilyResult = await searchTavily(tq, tMax, {
           search_depth: args.search_depth,
@@ -2605,6 +2660,22 @@ async function resolveIpLocation(ip) {
 // IP 地区解析（优先 HTTPS 数据源，ip-api.com 仅作最后兼容 fallback）
 // ★ 记录每个 Provider 的诊断信息
 var ipProviderDiagnostics = {};
+var IP_PROVIDER_DIAGNOSTICS_MAX = 500;
+// ★ 修复：诊断对象此前只写不清理，随机 IP 打登录即可无界增长导致 OOM。
+//   加上限（超过时重置为仅保留最近 500 条）+ 定时清空。
+function setIpProviderDiagnostics(ip, diagnostics) {
+  try {
+    if (ipProviderDiagnostics[ip] === undefined && Object.keys(ipProviderDiagnostics).length >= IP_PROVIDER_DIAGNOSTICS_MAX) {
+      var keys = Object.keys(ipProviderDiagnostics);
+      var dropCount = keys.length - Math.floor(IP_PROVIDER_DIAGNOSTICS_MAX / 2);
+      for (var i = 0; i < dropCount; i++) delete ipProviderDiagnostics[keys[i]];
+    }
+    ipProviderDiagnostics[ip] = diagnostics;
+  } catch (e) {}
+}
+setInterval(function() {
+  ipProviderDiagnostics = {};
+}, 10 * 60 * 1000).unref();
 var IP_CACHE_TTL_OK = 3600000;
 var IP_CACHE_TTL_FAIL = 120000;
 async function resolveIpLocationUncached(ip) {
@@ -2673,7 +2744,7 @@ async function resolveIpLocationUncached(ip) {
     try {
       var result = await fetchers[i]();
       var parts = [result.country, result.region, result.city].filter(Boolean);
-      ipProviderDiagnostics[ip] = diagnostics;
+      setIpProviderDiagnostics(ip, diagnostics);
       return {
         country: result.country,
         region: result.region,
@@ -5524,6 +5595,20 @@ async function callDeepSeek(messages, options) {
 // ===================== Responses API（内置 web_search） =====================
 // ★ 网页搜索改造：使用 /responses 端点，支持内置 web_search + 自定义 function tools
 // 将 OpenAI Chat 格式的 messages 转换为 Responses API 的 input/instructions 格式
+
+// Responses API 的 usage 字段名为 input_tokens/output_tokens（无 prompt_tokens/
+// completion_tokens）。统一映射到内部字段，保证配额扣减与用量报表口径一致。
+function responsesUsageToInternal(u) {
+  if (!u || typeof u !== 'object') return null;
+  return {
+    prompt_tokens: Math.max(0, Number(u.input_tokens) || Number(u.prompt_tokens) || 0),
+    completion_tokens: Math.max(0, Number(u.output_tokens) || Number(u.completion_tokens) || 0),
+    total_tokens: Math.max(0, Number(u.total_tokens) || 0),
+    input_tokens_details: u.input_tokens_details || null,
+    output_tokens_details: u.output_tokens_details || null
+  };
+}
+
 async function callDeepSeekViaResponses(messages, options) {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('AI 调用参数无效');
@@ -5760,7 +5845,7 @@ async function callDeepSeekViaResponses(messages, options) {
             // 完成事件
             if (evtType === 'response.completed') {
               if (sJson.response && sJson.response.usage) {
-                lastUsage = sJson.response.usage;
+                lastUsage = responsesUsageToInternal(sJson.response.usage);
                 totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
                 totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
                 totalUsage.total_tokens += lastUsage.total_tokens || 0;
@@ -5768,7 +5853,7 @@ async function callDeepSeekViaResponses(messages, options) {
             }
             // 通用 usage
             if (sJson.usage && !lastUsage) {
-              lastUsage = sJson.usage;
+              lastUsage = responsesUsageToInternal(sJson.usage);
               totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
               totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
               totalUsage.total_tokens += lastUsage.total_tokens || 0;
@@ -5782,7 +5867,7 @@ async function callDeepSeekViaResponses(messages, options) {
         // ===== 非流式 =====
         var data = await resp.json().catch(function() { return {}; });
         if (data.usage) {
-          lastUsage = data.usage;
+          lastUsage = responsesUsageToInternal(data.usage);
           totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
           totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
           totalUsage.total_tokens += lastUsage.total_tokens || 0;
@@ -6086,11 +6171,17 @@ async function runMultiAgentFlow(opts) {
       };
     } catch (e) {
       directFinished = true;
-      var isDirectAborted = (directAbortController && directAbortController.signal.aborted) || (e && (e.name === 'AbortError' || e.code === 'ABORT_ERR'));
+      // ★ 修复：超时也会 abort controller，若 signal.aborted 直接判定为"用户取消"，
+      //   3 分钟超时会被前端误显示为已中断。先区分 DIRECT_TIMEOUT。
+      var isDirectTimeout = e && e.code === 'DIRECT_TIMEOUT';
+      var isDirectAborted = !isDirectTimeout && ((directAbortController && directAbortController.signal.aborted) || (e && (e.name === 'AbortError' || e.code === 'ABORT_ERR')));
       if (isCancelled() || isDirectAborted) {
         return { cancelled: true, partial: true, finalContent: '', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER), search_count: 0, search_results: [], sources: [], queries: [] };
       }
-      return { cancelled: false, finalContent: '（AI 无法回答: ' + (e.message || '') + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER), search_count: 0, search_results: [], sources: [], queries: [] };
+      // ★ 错误信息脱敏：不再把内部异常 message 直接透传给用户
+      var directFriendlyMsg = isDirectTimeout ? '深度分析超时，请简化问题后重试' : 'AI 暂时无法回答，请稍后重试';
+      console.error('[MULTI-AGENT] direct analysis failed:', e && e.message);
+      return { cancelled: false, finalContent: '（' + directFriendlyMsg + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER), search_count: 0, search_results: [], sources: [], queries: [] };
     } finally {
       if (directTimeoutId) { clearTimeout(directTimeoutId); directTimeoutId = null; }
       if (cancelToken && cancelToken._onDirectCancel === _directOnCancel) { delete cancelToken._onDirectCancel; }
@@ -6102,6 +6193,12 @@ async function runMultiAgentFlow(opts) {
   // 5. 有 agent → 并行执行 Workers
   sseSend({ type: 'deep_think_stage', stage: 'agent', message: '正在并行研究 (' + agentCount + ' 个方向)...' });
 
+  // ★ 取消中断：客户端断开/取消时 abort 所有 worker 在途 DeepSeek 调用
+  var workerAbortCtrl = new AbortController();
+  var _workerOnCancel = function() { try { workerAbortCtrl.abort(); } catch (e) {} };
+  if (isCancelled()) workerAbortCtrl.abort();
+  cancelToken._onWorkerCancel = _workerOnCancel;
+
   var workerPromises = agents.map(function(agent, idx) {
     return runDeepThinkWorker({
       agent: agent,
@@ -6109,6 +6206,7 @@ async function runMultiAgentFlow(opts) {
       cancelToken: cancelToken,
       timeLeft: timeLeft,
       sseSend: sseSend,
+      externalSignal: workerAbortCtrl.signal,
       onRound: function(round) {
         sseSend({ type: 'deep_think_stage', stage: 'agent', message: '[' + agent.role + '] 第 ' + round + ' 轮分析...' });
       },
@@ -6568,6 +6666,8 @@ async function runDeepThinkWorker(opts) {
   var workerHistoryContext = opts.historyContext || '';
   var workerMaxToolRounds = opts.workerMaxToolRounds || DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS;
   var sharedPrefix = opts.sharedPrefix || '';
+  // ★ 取消中断：来自 runMultiAgentFlow 的 workerAbortCtrl，客户端断开/取消时立即 abort
+  var externalAbortSignal = opts.externalSignal || null;
 
   var sources = [];
   var queries = [];
@@ -6623,6 +6723,14 @@ async function runDeepThinkWorker(opts) {
       }
       workerAbortController = new AbortController();
       if (cancelToken.cancelled) workerAbortController.abort();
+      var _workerExtAbortHandler = null;
+      if (externalAbortSignal) {
+        if (externalAbortSignal.aborted) workerAbortController.abort();
+        else {
+          _workerExtAbortHandler = function() { try { workerAbortController && workerAbortController.abort(); } catch (e) {} };
+          externalAbortSignal.addEventListener('abort', _workerExtAbortHandler, { once: true });
+        }
+      }
       callOpts.signal = workerAbortController.signal;
       var callPromise = callDeepSeek(messages, callOpts);
       var timeoutPromise = new Promise(function(_, reject) {
@@ -6643,6 +6751,9 @@ async function runDeepThinkWorker(opts) {
       throw e;
     } finally {
       if (workerTimeoutId) { clearTimeout(workerTimeoutId); workerTimeoutId = null; }
+      if (externalAbortSignal && _workerExtAbortHandler) {
+        try { externalAbortSignal.removeEventListener('abort', _workerExtAbortHandler); } catch (e) {}
+      }
     }
 
     if (cancelToken.cancelled) break;
@@ -6754,6 +6865,30 @@ function getAiQuotaErrorMessage(reason) {
   if (reason === 'quota_unavailable') return '小猫服务配额暂不可用，请稍后重试';
   if (reason === 'no_user') return getTokenQuotaErrorMessage('no_user');
   return '今日小猫聊天次数已达上限';
+}
+
+// ★ 搜索配额下沉：所有联网搜索路径（模型工具调用、服务端预搜、正则兜底、
+//   多 Agent 搜索）统一在此校验，防止只显式开启 web_search 才校验导致无限免费搜索。
+async function enforceSearchQuota(userName) {
+  if (!userName || userName === ADMIN_USERNAME) return { allowed: true, reason: null, quota: null };
+  try {
+    var quota = await aiQuota.getQuota(userName);
+    if (quota.search_unlimited) return { allowed: true, reason: null, quota: quota };
+    if (quota.search_remaining <= 0) return { allowed: false, reason: 'search_limit', quota: quota };
+    return { allowed: true, reason: null, quota: quota };
+  } catch (e) {
+    console.error('[SEARCH-QUOTA] check exception:', e && e.message);
+    return { allowed: false, reason: 'quota_unavailable', quota: null };
+  }
+}
+
+// 带配额校验的搜索封装：超限返回带 search_quota_exceeded 标记的空结果
+async function searchWebForUser(userName, query, maxResults) {
+  var gate = await enforceSearchQuota(userName);
+  if (!gate.allowed) {
+    return { results: [], error: gate.reason || 'search_limit', search_quota_exceeded: gate.reason === 'search_limit', quota: gate.quota };
+  }
+  return searchWeb(query, maxResults);
 }
 
 // ===================== Token 管理（无状态签名令牌，服务重启不掉登录） =====================
@@ -7192,6 +7327,32 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
 });
 
 // ===================== 用户 Token 认证（JWT access_token + refresh_token） =====================
+
+// 查询用户限制状态（封禁/禁言/拉黑）。服务端强制：写端点与登录/刷新均需校验，
+// 防止攻击者绕过前端本地禁点直接调用 API。
+async function loadUserRestrictions(userName) {
+  if (!userName || userName === ADMIN_USERNAME) return { is_banned: false, is_blacklisted: false, is_muted: false };
+  try {
+    var r = await supabase.rpc('get_user_restrictions', { p_user_name: String(userName) });
+    if (r.error || !r.data) {
+      console.warn('[auth] restrictions query unavailable for', userName, ':', r.error && r.error.message);
+      return { is_banned: false, is_blacklisted: false, is_muted: false, unavailable: true };
+    }
+    return r.data;
+  } catch (e) {
+    console.warn('[auth] restrictions query exception for', userName, ':', e && e.message);
+    return { is_banned: false, is_blacklisted: false, is_muted: false, unavailable: true };
+  }
+}
+
+// 返回用户是否被服务端封禁（用于写端点统一拦截）
+function userBanError(req) {
+  if (req.userRestrictions && req.userRestrictions.is_banned) {
+    return { code: 'account_banned', message: '该账号已被封禁，无法执行此操作' };
+  }
+  return null;
+}
+
 async function authenticateUser(req, res, next) {
   if (!(await waitForRevocationState(res))) return;
   // 1. 验证 Authorization header 中的 access token（短期）
@@ -7231,6 +7392,9 @@ async function authenticateUser(req, res, next) {
         return res.status(500).json({ error: '认证查询失败' });
       }
       req.userName = payload.user_name;
+      try {
+        req.userRestrictions = await loadUserRestrictions(req.userName);
+      } catch (_) {}
       return next();
     }
   }
@@ -7423,6 +7587,11 @@ app.post('/api/user/login', rateLimit(60000, 10), async (req, res) => {
         .eq('media_url', authRec.media_url);
       if (verifierError) return res.status(503).json({ error: '登录凭证升级失败，请重试' });
     }
+    // ★ 封禁强制：被封禁用户禁止登录（前端本地禁点可被绕过，服务端必须兜底）
+    var loginRestrictions = await loadUserRestrictions(userNameVal);
+    if (loginRestrictions.is_banned) {
+      return res.status(403).json({ error: '该账号已被封禁，无法登录', code: 'account_banned' });
+    }
     return res.json(await issueUserSession(res, userNameVal));
   } catch(e) {
     console.error('[API] 用户登录失败:', e.message);
@@ -7504,6 +7673,12 @@ app.post('/api/user/refresh', rateLimit(60000, 30), async (req, res) => {
     if (!payload || !payload.user_name) {
       res.clearCookie('xtj_user_refresh', { path: '/api/user' });
       return res.status(401).json({ error: 'refresh token 无效或已过期' });
+    }
+    // ★ 封禁强制：被封禁用户即使持有有效 refresh token 也不得续期
+    var refreshRestrictions = await loadUserRestrictions(payload.user_name);
+    if (refreshRestrictions.is_banned) {
+      res.clearCookie('xtj_user_refresh', { path: '/api/user' });
+      return res.status(403).json({ error: '该账号已被封禁，无法继续使用', code: 'account_banned' });
     }
     // 检查是否已撤销
     if (await isRefreshTokenRevoked(refreshToken)) {
@@ -7983,6 +8158,8 @@ app.delete('/admin/photo/:id', verifyToken, securityRateLimit(60000, 30), async 
 // ===================== 用户照片上传 API（使用 service_role 绕过 RLS） ======================
 app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
+    var banCheck = userBanError(req);
+    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
     var createResult = await createPhotoRecord({
       body: req.body,
       userName: req.userName,
@@ -8075,11 +8252,30 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
               return p.indexOf(uploadId) >= 0;
             });
             if (toClean.length > 0) {
-              var cleanupResult = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: toClean, photoId: photo.id });
-              if (!cleanupResult.ok && !cleanupResult.cleanup_pending) {
-                return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo cleanup could not be queued' });
+              // ★ 越权删除修复（C3）：删除前必须确认 toClean 中的每个文件都未被
+              //   "任何用户"的照片记录引用。否则攻击者可提取他人公开照片 URL 中的
+              //   upload_id 复用，删除任意用户的照片文件。DB 查询失败时同样拒绝清理。
+              var refByAny = false;
+              for (var rc = 0; rc < toClean.length; rc++) {
+                var escPath = toClean[rc].replace(/[\\%_]/g, '\\$&');
+                var refPattern = '%' + escPath + '%';
+                var refPair = await Promise.all([
+                  supabase.from('posts').select('id').eq('media_type', '__photo_wall__').ilike('content', refPattern).limit(1),
+                  supabase.from('posts').select('id').eq('media_type', '__photo_wall__').ilike('media_url', refPattern).limit(1)
+                ]);
+                if (refPair.some(function(r) { return !r || r.error; })) { refByAny = true; break; }
+                if (refPair.some(function(r) { return r.data && r.data.length > 0; })) { refByAny = true; break; }
               }
-              if (cleanupResult.cleanup_pending) photo.cleanup_pending = true;
+              if (refByAny) {
+                // 存在引用（可能属于其他用户）或无法确认 → 不清理，避免跨用户删除
+                console.warn('[PhotoWall] status cleanup skipped: files referenced or ownership unverifiable', 'uploadId:', uploadId);
+              } else {
+                var cleanupResult = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: toClean, photoId: photo.id });
+                if (!cleanupResult.ok && !cleanupResult.cleanup_pending) {
+                  return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo cleanup could not be queued' });
+                }
+                if (cleanupResult.cleanup_pending) photo.cleanup_pending = true;
+              }
             }
           }
         }
@@ -8574,6 +8770,9 @@ async function fetchLatestUserIpLocationFallback(userName) {
 
 app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
+    // ★ 封禁强制：服务端写端点必须校验限制状态，防止绕过前端本地禁点
+    var banCheck = userBanError(req);
+    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
     var content = String(req.body && req.body.content || '');
     var mediaUrl = String(req.body && req.body.media_url || '');
     var mediaType = String(req.body && req.body.media_type || '');
@@ -9016,6 +9215,8 @@ app.post('/api/post/delete-status', authenticateUser, rateLimit(60000, 60), asyn
 
 app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
+    var banCheck = userBanError(req);
+    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
     var postId = normalizePostId(req.body && req.body.post_id);
     var content = String(req.body && req.body.content || '').trim();
     if (!postId) return res.status(400).json({ error: 'post_id must be a UUID', code: 'invalid_post_id' });
@@ -9867,6 +10068,8 @@ async function cleanupDmMediaAfterFailedSend(registryRow, storagePath, reason) {
 
 app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
+    var banCheck = userBanError(req);
+    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
     var sender = req.userName;
     var targetUser = String(req.body && req.body.target_user || '').trim();
     var content = String(req.body && req.body.content || '').trim();
@@ -13410,9 +13613,15 @@ app.post('/admin/email-recipient-history/clear', verifyToken, rateLimit(60000, 1
   }
 });
 
-// ===================== 客户端错误监控 (允许匿名, IP 限流) =====================
+// ===================== 客户端错误监控 (允许匿名, IP 限流 + DB 持久化限流) =====================
 app.post('/api/client-error-log', rateLimit(60000, 20), async (req, res) => {
   try {
+    // ★ 匿名可写加固：进程内限流可被多 IP/多实例绕过，叠加 DB 持久化限流
+    var _celLimit = await checkPersistentRateLimit('client-error-log:' + getRealIp(req), 60000, 20);
+    if (_celLimit.limited) {
+      res.setHeader('Retry-After', _celLimit.retryAfter);
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: _celLimit.retryAfter });
+    }
     var { type, message, stack, url, line, col, user_agent, timestamp } = req.body;
     var errorType = String(type || 'unknown').slice(0, 50);
     var errorMsg = String(message || '').slice(0, 500);
@@ -13428,6 +13637,13 @@ app.post('/api/client-error-log', rateLimit(60000, 20), async (req, res) => {
     if (_SENSITIVE_RE.test(errorStack)) errorStack = '[filtered: sensitive]';
     if (_SENSITIVE_RE.test(pageUrl)) pageUrl = pageUrl.replace(_SENSITIVE_RE, '[REDACTED]');
     if (_SENSITIVE_RE.test(ua)) ua = ua.replace(_SENSITIVE_RE, '[REDACTED]');
+    // ★ line/col/timestamp 类型与长度约束，防止无界字段填充超长 JSON
+    var lineVal = null;
+    var colVal = null;
+    if (/^\d{1,9}$/.test(String(line || ''))) lineVal = Number(line);
+    if (/^\d{1,9}$/.test(String(col || ''))) colVal = Number(col);
+    var tsVal = String(timestamp || '').slice(0, 32);
+    if (tsVal && !/^\d{4}-\d{2}-\d{2}T/.test(tsVal) && !/^\d{10,13}$/.test(tsVal)) tsVal = '';
 
     await supabase.from('posts').insert([{
       user_name: 'system',
@@ -13438,10 +13654,10 @@ app.post('/api/client-error-log', rateLimit(60000, 20), async (req, res) => {
         message: errorMsg,
         stack: errorStack,
         url: pageUrl,
-        line: line || null,
-        col: col || null,
+        line: lineVal,
+        col: colVal,
         user_agent: ua,
-        timestamp: timestamp || new Date().toISOString()
+        timestamp: tsVal || new Date().toISOString()
       }),
       actor_key: 'cl_err_' + Date.now()
     }]);
@@ -13477,12 +13693,13 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
       return {
         id: row.id,
         type: info.type || row.media_url,
-        message: info.message || '',
-        stack: info.stack || '',
-        url: info.url || '',
+        // ★ 匿名上报内容可能含 HTML 注入，管理端渲染前统一转义，防存储型 XSS
+        message: escapeHtml(info.message || ''),
+        stack: escapeHtml(info.stack || ''),
+        url: escapeHtml(info.url || ''),
         line: info.line,
         col: info.col,
-        user_agent: info.user_agent || '',
+        user_agent: escapeHtml(info.user_agent || ''),
         timestamp: info.timestamp || row.created_at,
         created_at: row.created_at
       };
@@ -13493,6 +13710,17 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
     return res.status(500).json({ error: '查询失败' });
   }
 });
+
+// ★ 客户端错误日志自动 TTL 清理：匿名上报会持续写入 posts 表，按保留期定期清理
+setInterval(function() {
+  var cutoff = new Date(Date.now() - ERROR_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  supabase.from('posts').delete()
+    .eq('media_type', CLIENT_ERROR_MARKER)
+    .lt('created_at', cutoff)
+    .then(function() {}, function(e) {
+      console.warn('[ERROR-LOG] TTL cleanup failed:', e && e.message);
+    });
+}, 6 * 60 * 60 * 1000).unref();
 
 // ===================== AI 聊天接口（徐旭泽的小猫）=====================
 // ★ 所有 AI 路由必须：
@@ -14562,10 +14790,28 @@ async function handleDeepThinkChat(req, res) {
   var convId = String(req.body && req.body.conversation_id || '').trim();
   if (!convId) convId = genConvId();
   if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
-  activeDeepThinkJobs.set(convId, cancelToken);
+  trackActiveDeepThinkJob(convId, cancelToken);
+
+  // ★ 并发上限：每用户 1 个深度思考任务，超限直接返回 concurrent
+  var releaseDeep = tryAcquireDeepResearch(userName);
+  if (!releaseDeep) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    sseSend({ type: 'error', error: '请等待上一个请求完成', code: 'concurrent' });
+    releaseDeepResearch();
+    return safeEnd();
+  }
 
   function safeEnd() { if (!res.writableEnded) { try { res.end(); } catch (e) {} } }
   function sseSend(obj) { if (!res.writableEnded) { try { writeSse(res, obj); } catch (e) {} } }
+
+  // 统一收尾：从活跃任务表移除并释放并发名额（防泄漏）
+  function releaseDeepResearch() {
+    try { if (releaseDeep) releaseDeep(); } catch (e) {}
+    try { activeDeepThinkJobs.delete(convId); } catch (e) {}
+  }
 
   function markDeepThinkDisconnected() {
     if (aborted) return;
@@ -14577,7 +14823,8 @@ async function handleDeepThinkChat(req, res) {
     try { if (typeof cancelToken._onSynthCancel === 'function') cancelToken._onSynthCancel(); } catch (e) {}
     try { if (typeof cancelToken._onDirectCancel === 'function') cancelToken._onDirectCancel(); } catch (e) {}
     try { if (typeof cancelToken._onAgentCancel === 'function') cancelToken._onAgentCancel(); } catch (e) {}
-    activeDeepThinkJobs.delete(convId);
+    try { if (typeof cancelToken._onWorkerCancel === 'function') cancelToken._onWorkerCancel(); } catch (e) {}
+    releaseDeepResearch();
   }
   req.on('aborted', markDeepThinkDisconnected);
   res.on('close', function() {
@@ -14599,7 +14846,7 @@ async function handleDeepThinkChat(req, res) {
         code: rl.reason || 'rate_limited',
         quota: rl.quota || null
       });
-      activeDeepThinkJobs.delete(convId);
+      releaseDeepResearch();
       return safeEnd();
     }
 
@@ -14611,7 +14858,7 @@ async function handleDeepThinkChat(req, res) {
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       sseSend({ type: 'error', error: message.error });
-      activeDeepThinkJobs.delete(convId);
+      releaseDeepResearch();
       return safeEnd();
     }
     if (!message) {
@@ -14620,7 +14867,7 @@ async function handleDeepThinkChat(req, res) {
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       sseSend({ type: 'error', error: '消息内容不能为空' });
-      activeDeepThinkJobs.delete(convId);
+      releaseDeepResearch();
       return safeEnd();
     }
 
@@ -14631,7 +14878,7 @@ async function handleDeepThinkChat(req, res) {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
+    if (aborted) { releaseDeepResearch(); return safeEnd(); }
     sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
     _heartbeatTimer = setInterval(function() {
       if (!res.writableEnded) {
@@ -14649,7 +14896,7 @@ async function handleDeepThinkChat(req, res) {
     // 4. 读取配置和上下文
     var config = await getAiConfig();
     var ctx = await loadAiContext(userName, convId);
-    if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
+    if (aborted) { releaseDeepResearch(); return safeEnd(); }
 
     // ★ P 改: 提前计算思考程度 (后面 usage 和 done 事件也要用)
     var clientThinkingMode = (req.body && req.body.thinking_mode) || '';
@@ -14718,7 +14965,7 @@ async function handleDeepThinkChat(req, res) {
       // ★ 修复：缓存命中提前返回前必须清理心跳定时器，否则每个命中请求
       // 泄漏一个常驻 setInterval（res 结束后仍每 1.5s 空转）。
       try { if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; } } catch (_) {}
-      activeDeepThinkJobs.delete(convId);
+      releaseDeepResearch();
       return safeEnd();
     }
 
@@ -14792,13 +15039,13 @@ async function handleDeepThinkChat(req, res) {
         console.error('[DEEP-THINK] fallback also failed:', fallbackErr && fallbackErr.message);
         try { clearInterval(_heartbeatTimer); } catch (e2) {}
         sseSend({ type: 'error', error: '深度研究失败: ' + (e && e.message || '未知错误') });
-        activeDeepThinkJobs.delete(convId);
+        releaseDeepResearch();
         return safeEnd();
       }
     }
 
     try { clearInterval(_heartbeatTimer); } catch (e) {}
-    if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
+    if (aborted) { releaseDeepResearch(); return safeEnd(); }
 
     // 7. 清洗最终内容 (R 架构: 单智能体直接 finalContent; M 架构: synth_content)
     //   兼容: runDeepThinkAgent 返回 finalContent, runMultiAgentFlow 返回 synth_content
@@ -14938,7 +15185,7 @@ async function handleDeepThinkChat(req, res) {
         quota: deepQuota || rl.quota || null
       });
     }
-    activeDeepThinkJobs.delete(convId);
+    releaseDeepResearch();
     return safeEnd();
   } catch (e) {
     console.error('[DEEP-THINK] handleDeepThinkChat exception:', e && e.message);
@@ -14951,7 +15198,7 @@ async function handleDeepThinkChat(req, res) {
         sseSend({ type: 'error', error: '深度研究异常: ' + (e && e.message || '请稍后重试') });
       }
     } catch (e3) {}
-    activeDeepThinkJobs.delete(convId);
+    releaseDeepResearch();
     return safeEnd();
   }
 }
@@ -14968,6 +15215,12 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
         return res.status(403).json({ error: '无权取消其他用户的深度思考' });
       }
       job.cancelled = true;
+      // ★ 取消必须触发各阶段 abort 回调，立即中止在途 DeepSeek 调用（否则只能等阶段超时）
+      try { if (typeof job._onPlannerCancel === 'function') job._onPlannerCancel(); } catch (e) {}
+      try { if (typeof job._onSynthCancel === 'function') job._onSynthCancel(); } catch (e) {}
+      try { if (typeof job._onDirectCancel === 'function') job._onDirectCancel(); } catch (e) {}
+      try { if (typeof job._onAgentCancel === 'function') job._onAgentCancel(); } catch (e) {}
+      try { if (typeof job._onWorkerCancel === 'function') job._onWorkerCancel(); } catch (e) {}
       return res.json({ ok: true, cancelled: true });
     }
     res.json({ ok: true, cancelled: false, message: 'no active deep think job' });
@@ -15082,7 +15335,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       var tavilyResults = null;
       if (useTavilyCluster) {
         var tavilyQuery = message.slice(0, 150);
-        tavilyPromise = searchWeb(tavilyQuery, 20).then(function(r) {
+        tavilyPromise = searchWebForUser(userName, tavilyQuery, 20).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
           return r;
         }).catch(function(e) {
@@ -15531,7 +15784,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         // 搜索词太短/仍像附件噪声 → 跳过
         if (_psQuery.length >= 2 && !/png|jpeg|ocr\.space|base64/i.test(_psQuery)) {
           _preloadedQuery = _psQuery;
-          _preloadedSearchPromise = searchWeb(_psQuery, 20).then(function(r) {
+          _preloadedSearchPromise = searchWebForUser(userName, _psQuery, 20).then(function(r) {
             _preloadedSearchResults = r;
             return r;
           }).catch(function(e) {
@@ -15641,7 +15894,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var tavilyQueryBase = _preloadedQuery || searchCleanMessage || '';
       if (shouldServerSearch && tavilyQueryBase.length >= 2 && !/png|jpeg|ocr\.space|base64|用户上传文件/i.test(tavilyQueryBase)) {
         var tavilyQuery = tavilyQueryBase.slice(0, 150);
-        tavilyPromise = (_preloadedSearchPromise || searchWeb(tavilyQuery, 20)).then(function(r) {
+        tavilyPromise = (_preloadedSearchPromise || searchWebForUser(userName, tavilyQuery, 20)).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
           return r;
         }).catch(function(e) {
@@ -15910,7 +16163,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               try { a = JSON.parse(tc.function.arguments); } catch (e) { a = {}; }
               return { id: tc.id, name: tc.function.name, args: a };
             });
-            res.write('data: ' + JSON.stringify({ type: 'tool_calls', tools: toolCallsInfo }) + '\n\n');
+            if (!writeSse(res, { type: 'tool_calls', tools: toolCallsInfo })) { aborted = true; return safeEnd(); }
 
             messages.push({
               role: 'assistant',
@@ -15932,7 +16185,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch(e) {
                 try { console.warn('[AI-FC] parse tool result error:', e && e.message); } catch(ee) {}
               }
-              res.write('data: ' + JSON.stringify({
+              if (!writeSse(res, {
                 type: 'tool_result',
                 tool_name: item.toolResult.tool_name || '',
                 success: !item.toolResult.error,
@@ -15941,7 +16194,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 location: item.toolResult.location || null,
                 query: item.toolResult.query || null,
                 items: trItems && trItems.length > 0 ? trItems.slice(0, 20) : null
-              }) + '\n\n');
+              })) { aborted = true; return safeEnd(); }
               if (Array.isArray(item.toolResult.cards)) {
                 item.toolResult.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
               }
@@ -16013,7 +16266,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   // 以 role:'tool' 发送会被 DeepSeek 判定消息序列非法（invalid tool_call_id）。
                   // 改为 system 消息注入，语义不变且协议合法。
                   messages.push({ role: 'system', content: '【多Agent自动补充搜索结果】' + extraContent });
-                  res.write('data: ' + JSON.stringify({
+                  if (!writeSse(res, {
                     type: 'tool_result',
                     tool_name: 'search_web',
                     success: true,
@@ -16022,7 +16275,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                     location: null,
                     query: '多 Agent 并行搜索',
                     items: newItems.slice(0, 20)
-                  }) + '\n\n');
+                  })) { aborted = true; }
                 }
               }
             }
@@ -16057,7 +16310,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         var fcChunkSize = 20;
         for (var fcCi = 0; fcCi < fcFallbackSanitized.length; fcCi += fcChunkSize) {
           if (aborted) break;
-          res.write('data: ' + JSON.stringify({ type: 'content', text: fcFallbackSanitized.slice(fcCi, fcCi + fcChunkSize) }) + '\n\n');
+          if (!writeSse(res, { type: 'content', text: fcFallbackSanitized.slice(fcCi, fcCi + fcChunkSize) })) { aborted = true; break; }
         }
         var fcModel = fcFallbackUsage && fcFallbackUsage.model ? fcFallbackUsage.model : usedModel;
         await finishStream(res, {
@@ -16117,7 +16370,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var sDiag = null;
       if (needsSearch && !aborted) {
         try {
-          srObj = await searchWeb(searchQuery, 20);
+          srObj = await searchWebForUser(userName, searchQuery, 20);
           sResults = srObj && srObj.results ? srObj.results : [];
           sDiag = srObj && srObj.diagnostics ? srObj.diagnostics : null;
           // 结果不足时自动补全
@@ -16140,7 +16393,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           sResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
           '\n\n要求：必须优先使用以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。不能编造新闻、价格、天气、日期。';
         messages.push({ role: 'system', content: sCtx });
-        res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null, query: searchQuery }) + '\n\n');
+        if (!writeSse(res, { type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null, query: searchQuery })) { aborted = true; }
       } else if (needsSearch) {
         var hasProviderErrors2 = sDiag && sDiag.provider_errors && sDiag.provider_errors.length > 0;
         var hasProviderMissing2 = sDiag && sDiag.missing_env && sDiag.missing_env.length > 0;
@@ -16148,10 +16401,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           var errSum = sDiag.provider_errors.map(function(pe) { return pe.provider + ':' + pe.error; }).join(' / ');
           if (hasProviderMissing2) errSum += ' / 未配置:' + sDiag.missing_env.join(',');
           messages.push({ role: 'system', content: '【联网搜索】本次联网搜索失败（' + errSum + '）。不能编造实时信息。' });
-          res.write('data: ' + JSON.stringify({ type: 'search_error', error: '联网搜索失败: ' + errSum, diagnostics: sDiag }) + '\n\n');
+          if (!writeSse(res, { type: 'search_error', error: '联网搜索失败: ' + errSum, diagnostics: sDiag })) { aborted = true; }
         } else {
           messages.push({ role: 'system', content: '【联网搜索】本次搜索没有返回有效结果。你必须如实告诉用户没有搜到。' });
-          res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], diagnostics: sDiag, query: message }) + '\n\n');
+          if (!writeSse(res, { type: 'search', count: 0, results: [], diagnostics: sDiag, query: message })) { aborted = true; }
         }
       }
     }
@@ -16188,9 +16441,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (Array.isArray(searchQueries) && searchQueries.length > 0 && searchQueries.length <= 5) {
             // 并行执行所有搜索
             var allResults = [];
-            res.write('data: ' + JSON.stringify({ type: 'multi_agent', action: 'searching', queries: searchQueries }) + '\n\n');
+            if (!writeSse(res, { type: 'multi_agent', action: 'searching', queries: searchQueries })) { aborted = true; }
             var searchPromises = searchQueries.map(function(q) {
-              return searchWeb(String(q).trim(), 20).then(function(sr) {
+              return searchWebForUser(userName, String(q).trim(), 20).then(function(sr) {
                 return (sr && Array.isArray(sr.results) ? sr.results : []).slice(0, 20);
               }).catch(function() { return []; });
             });
@@ -16289,7 +16542,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       try {
         // ★ P3 修复 bug 3: 8s 超时 + 优先复用 line 8145 预加载的 promise 避免重复 fire searchWeb
         var _psSr = await Promise.race([
-          _preloadedSearchPromise || searchWeb(_psQuery, 20),
+          _preloadedSearchPromise || searchWebForUser(userName, _psQuery, 20),
           new Promise(function(_, reject) {
             setTimeout(function() { reject(new Error('search_timeout_8s')); }, 8000);
           })
@@ -16304,7 +16557,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             writeSse(res, { type: 'tool_pending', tool_name: 'search_web' });
             var _enhancedLists = await Promise.all(_enhancedQueries.map(function(_enhancedQuery) {
               return Promise.race([
-                searchWeb(_enhancedQuery, 6).then(function(_enhancedResult) {
+                searchWebForUser(userName, _enhancedQuery, 6).then(function(_enhancedResult) {
                   return _enhancedResult && Array.isArray(_enhancedResult.results) ? _enhancedResult.results : [];
                 }).catch(function() { return []; }),
                 new Promise(function(resolve) { setTimeout(function() { resolve([]); }, 6000); })
@@ -16373,8 +16626,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (!useThinking) {
       apiBody.tools = AI_TOOLS;
     }
+
+    // ★ H-3 修复（真正生效）：contentBuffer 必须在 while 循环外初始化。
+    //   多轮工具调用之间正文必须累积——若放在循环体内，每轮迭代都会重新赋值
+    //   清空上一轮已推送的"前言"，finishStream 落库只会存最后一轮正文。
+    var contentBuffer = '';
     
     while (toolRound < MAX_TOOL_ROUNDS && !aborted) {
+
+    // 本轮开始前的 contentBuffer 长度：contentBuffer 跨轮累积，而 role:'assistant'
+    // 工具消息只应包含本轮新增正文（否则第 2 轮起会把前几轮正文重复塞给模型）。
+    var roundContentStart = contentBuffer.length;
 
     // 清理上一轮的泄漏（var 提升导致旧 controller/reader 不会被 GC）
     if (typeof _reader !== 'undefined' && _reader) { try { _reader.cancel(); } catch (e) {} }
@@ -16432,12 +16694,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var buffer = '';
     var usageInStream = null;
     var hasReasoningContent = false;
-    // ★ H-3 修复：多轮工具调用之间正文必须累积——原实现每轮 `var contentBuffer=''`
-    //   把上一轮已推送的"前言"清空，最终 finishStream 落库只存最后一轮正文。
-    //   var 声明提升到函数作用域，仅首轮初始化，后续轮不清空。
-    //   （★ 修复 2026-08-05：此前 H-3 只留了 if 检查、var 声明被误删，导致
-    //     读取未声明变量必抛 ReferenceError，/api/agent/chat/stream 主路径崩溃）
-    var contentBuffer = '';
+    // ★ H-3 修复：多轮工具调用之间正文必须累积。contentBuffer 已移到 while
+    //   循环之前初始化（var 声明提升到函数作用域，但初始化赋值必须只执行一次），
+    //   此处仅保留推理/状态变量按轮次重置。
     var reasoningBuffer = persistentReasoning || '';
     var reasoningSent = false;
     var reasoningStartedAt = 0;
@@ -16643,7 +16902,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       // 携带 tool_calls 的 role:'assistant' 消息之后。此前先 push tool 结果、
       // 再 push assistant(tool_calls)，第二轮请求必然 400（消息序列非法）。
       // 先 push assistant(tool_calls)，再依次 push 各 tool 结果。
-      roundMessages.push({ role: 'assistant', content: contentBuffer || '', tool_calls: toolCallsArr.map(function(t) { return { id: t.id, type: 'function', function: { name: t.name, arguments: t.args } }; }) });
+      roundMessages.push({ role: 'assistant', content: contentBuffer.slice(roundContentStart) || '', tool_calls: toolCallsArr.map(function(t) { return { id: t.id, type: 'function', function: { name: t.name, arguments: t.args } }; }) });
       for (var ti = 0; ti < toolResults.length; ti++) {
         var toolResult = toolResults[ti].result;
         
@@ -16996,6 +17255,24 @@ async function runResearchSubAgent(opts) {
   var onSearch = opts.onSearch || function () {};
   var deep = opts.deep !== false; // pro/auto 走双阶段(海量检索→自主深度思考)；mini 走单阶段(检索→简要结论)
 
+  // ★ 取消中断：客户端断开/取消时立即 abort 在途 DeepSeek 调用，避免跑满超时继续烧 token
+  var subAbortCtrl = new AbortController();
+  var extAbortSignal = opts.signal || null;
+  var extAbortHandler = null;
+  if (extAbortSignal) {
+    if (extAbortSignal.aborted) subAbortCtrl.abort();
+    else {
+      extAbortHandler = function() { try { subAbortCtrl.abort(); } catch (e) {} };
+      extAbortSignal.addEventListener('abort', extAbortHandler, { once: true });
+    }
+  }
+  if (cancelToken.cancelled) subAbortCtrl.abort();
+  function subAbortCleanup() {
+    if (extAbortSignal && extAbortHandler) {
+      try { extAbortSignal.removeEventListener('abort', extAbortHandler); } catch (e) {}
+    }
+  }
+
   var sources = [];
   var queries = [];
   var subUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0 };
@@ -17028,6 +17305,7 @@ async function runResearchSubAgent(opts) {
       max_tokens: 6000,
       max_tool_rounds: 8,
       total_timeout_ms: 420000, // 海量多轮检索阶段放宽到 7 分钟
+      signal: subAbortCtrl.signal,
       onContentChunk: function (c) { rawMaterial += c; },
       onSearchStatus: function (s) { if (s === 'completed') { searchCount++; onSearch(); } }
     });
@@ -17044,10 +17322,11 @@ async function runResearchSubAgent(opts) {
       var rq = await callDeepSeekViaResponses([
         { role: 'system', content: sharedPrefix + '\n\n你是 [' + agent.role + '] 调研员，基于已收集资料给出简要结论（200-400 字，结构：【结论】→【依据】→【不确定点】）。' },
         { role: 'user', content: '已收集资料要点:\n' + (rawMaterial || '(无)').slice(0, 4000) + '\n\n请给出简要分析。' }
-      ], { thinking_mode: 'off', max_tokens: 1200, onContentChunk: function (c) { quick += c; } });
+      ], { thinking_mode: 'off', max_tokens: 1200, signal: subAbortCtrl.signal, onContentChunk: function (c) { quick += c; } });
       if (!quick && rq && rq.content) quick = rq.content;
       if (rq && rq.usage) addSubUsage(rq.usage);
     } catch (e) { console.error('[SELF-RESEARCH] sub-agent quick failed:', agent.role, e && e.message); }
+    subAbortCleanup();
     return {
       content: (quick && quick.trim()) ? quick : rawMaterial,
       raw: rawMaterial,
@@ -17075,6 +17354,7 @@ async function runResearchSubAgent(opts) {
     var r2 = await callDeepSeekViaResponses(analysisMessages, {
       thinking_mode: 'high',
       max_tokens: 4000,
+      signal: subAbortCtrl.signal,
       onContentChunk: function (c) { analysis += c; }
     });
     if (!analysis && r2 && r2.content) analysis = r2.content;
@@ -17086,6 +17366,7 @@ async function runResearchSubAgent(opts) {
     console.error('[SELF-RESEARCH] sub-agent analysis failed:', agent.role, e && e.message);
     analysis = '';
   }
+  subAbortCleanup();
   return {
     content: (analysis && analysis.trim()) ? analysis : rawMaterial,
     raw: rawMaterial,
@@ -17107,6 +17388,12 @@ async function runSelfResearchFlow(opts) {
   var cancelToken = opts.cancelToken || { cancelled: false };
   var rewrite = opts.rewrite !== false;
   var sharedPrefix = buildAiCorePrompt(config);
+
+  // ★ 流程级取消中断：断开/取消时 abort 所有子智能体在途调用（配合 runResearchSubAgent 的 signal）
+  var flowAbortCtrl = new AbortController();
+  var flowCancelHandler = function() { try { flowAbortCtrl.abort(); } catch (e) {} };
+  if (cancelToken.cancelled) flowAbortCtrl.abort();
+  cancelToken._onSubCancel = flowCancelHandler;
 
   function sseSend(obj) {
     if (res.writableEnded) return;
@@ -17214,7 +17501,8 @@ async function runSelfResearchFlow(opts) {
   var workerPromises = agents.map(function (agent) {
     return runResearchSubAgent({
       agent: agent, originalMessage: researchQuery, sharedPrefix: sharedPrefix,
-      cancelToken: cancelToken, deep: deepMode, onSearch: function () { searchCountTotal++; }
+      cancelToken: cancelToken, deep: deepMode, signal: flowAbortCtrl.signal,
+      onSearch: function () { searchCountTotal++; }
     }).then(function (wr) {
       if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
       if (wr && wr.queries) wr.queries.forEach(function (q) { if (allQueries.indexOf(q) < 0) allQueries.push(q); });
@@ -17262,6 +17550,7 @@ async function runSelfResearchFlow(opts) {
             originalMessage: researchQuery,
             sharedPrefix: sharedPrefix,
             cancelToken: cancelToken,
+            signal: flowAbortCtrl.signal,
             deep: false, // 补充轮只补事实，不再做二次长思考（控制时延）
             onSearch: function () { searchCountTotal++; }
           }).then(function (wr) {
@@ -17328,6 +17617,10 @@ async function runSelfResearchFlow(opts) {
   try {
     var synthAbort = new AbortController();
     if (isCancelled()) synthAbort.abort();
+    // 流程级取消也要中断 Synthesizer 在途调用
+    var _synthFlowAbortHandler = function() { try { synthAbort.abort(); } catch (e) {} };
+    if (flowAbortCtrl.signal.aborted) synthAbort.abort();
+    else flowAbortCtrl.signal.addEventListener('abort', _synthFlowAbortHandler, { once: true });
     cancelToken._onSynthCancel = function () { try { synthAbort.abort(); } catch (e) {} };
     var synthRes = await callDeepSeekViaResponses(synthMessages, {
       thinking_mode: 'high',
@@ -17353,6 +17646,8 @@ async function runSelfResearchFlow(opts) {
     }).join('\n');
   } finally {
     if (cancelToken && cancelToken._onSynthCancel) delete cancelToken._onSynthCancel;
+    if (cancelToken && cancelToken._onSubCancel === flowCancelHandler) delete cancelToken._onSubCancel;
+    try { flowAbortCtrl.signal.removeEventListener('abort', _synthFlowAbortHandler); } catch (e) {}
   }
   if (isCancelled()) {
     return {
@@ -17387,6 +17682,7 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };
+  var researchRelease = null; // 并发名额释放函数（safeEnd 统一释放）
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -17407,7 +17703,11 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
       }
     }, 4000);
   }
-  function safeEnd() { clearStreamHeartbeat(); if (!res.writableEnded) { try { res.end(); } catch (e) {} } }
+  function safeEnd() {
+    clearStreamHeartbeat();
+    if (researchRelease) { try { researchRelease(); } catch (e) {} researchRelease = null; }
+    if (!res.writableEnded) { try { res.end(); } catch (e) {} }
+  }
 
   function markStreamDisconnected() {
     if (aborted) return;
@@ -17415,12 +17715,21 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
     cancelToken.cancelled = true;
     clearStreamHeartbeat();
     try { _researchAbort.abort(); } catch (_) {}
+    try { if (typeof cancelToken._onSubCancel === 'function') cancelToken._onSubCancel(); } catch (_) {}
+    try { if (typeof cancelToken._onSynthCancel === 'function') cancelToken._onSynthCancel(); } catch (_) {}
+    if (researchRelease) { try { researchRelease(); } catch (e) {} researchRelease = null; }
   }
   req.on('aborted', markStreamDisconnected);
   res.on('close', function() { if (!res.writableEnded) markStreamDisconnected(); });
 
   try {
     var userName = req.userName || '';
+    // ★ 并发上限：每用户最多 1 个研究任务、全局最多 5 个，超限返回 concurrent
+    researchRelease = tryAcquireDeepResearch(userName);
+    if (!researchRelease) {
+      writeSse(res, { type: 'error', error: 'concurrent', code: 'concurrent', message: '请等待上一个研究请求完成' });
+      return safeEnd();
+    }
     // 深入研究与小猫/Code 共用日额度；研究默认会联网搜索，免费用户需有搜索余量
     var researchGate = await enforceAiChatAccess(userName, { needSearch: true });
     if (!researchGate.allowed) {
@@ -17686,6 +17995,11 @@ async function loadPostToolPost(postId, userName) {
 
 app.post('/api/agent/post-tools', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
+    // ★ 计量修复：翻译/锐评消耗 DeepSeek token，必须接入用户额度与请求次数兜底
+    var toolAccess = await enforceAiChatAccess(req.userName, { needSearch: false });
+    if (!toolAccess.allowed) {
+      return res.status(429).json({ error: getAiQuotaErrorMessage(toolAccess.reason), code: toolAccess.reason || 'rate_limited' });
+    }
     var postId = aiSiteText(req.body && req.body.post_id, 80);
     var action = aiSiteText(req.body && req.body.action, 32);
     if (!postId || ['translate', 'report_scan'].indexOf(action) < 0) return res.status(400).json({ error: 'invalid_post_tool_request' });
@@ -17701,10 +18015,12 @@ app.post('/api/agent/post-tools', authenticateUser, rateLimit(60000, 20), async 
       if (cached && cached.expiresAt > Date.now()) return res.json({ ok: true, cached: true, translation: cached.translation });
       var translation = await callDeepSeekAI({ system: '当前场景：帖子翻译。\n准确翻译为简洁中文，保留段落、标点、emoji、人名和语气，不要添加评论。', messages: [{ role: 'user', content: content }], max_tokens: 1600, thinking_mode: 'off' });
       if (!translation) return res.status(502).json({ error: 'translation_failed' });
+      recordAiTurnUsage(req.userName, null, { model: DEEPSEEK_MODEL_REASONER, source: 'post_tools', message: content.slice(0, 500), content: translation, reasoning: '', search_count: 0, did_search: false }).catch(function() {});
       postTranslationCache.set(cacheKey, { translation: translation, expiresAt: Date.now() + 6 * 60 * 60 * 1000 });
       return res.json({ ok: true, translation: translation });
     }
     var scanRaw = await callDeepSeekAI({ system: 'Review this post only for a user report form. Return JSON with suspected(boolean), risk_level(low|medium|high), categories(string array), summary(string), evidence(string array), suggested_reason(string). Do not recommend enforcement.', messages: [{ role: 'user', content: content }], jsonMode: true, max_tokens: 700, thinking_mode: 'off' });
+    recordAiTurnUsage(req.userName, null, { model: DEEPSEEK_MODEL_REASONER, source: 'post_tools', message: content.slice(0, 500), content: JSON.stringify(scanRaw || {}), reasoning: '', search_count: 0, did_search: false }).catch(function() {});
     return res.json({ ok: true, scan: scanRaw || { suspected: false, risk_level: 'low', categories: [], summary: 'AI 检测暂不可用。', evidence: [], suggested_reason: '' } });
   } catch (e) {
     var code = String(e && e.message || 'post_tool_failed');
@@ -17743,6 +18059,15 @@ app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), 
   res.setHeader('Connection', 'keep-alive');
   var streamed = false;
   try {
+    // ★ 计量修复：帖子锐评消耗 DeepSeek token，必须接入用户额度与请求次数兜底
+    var critiqueAccess = await enforceAiChatAccess(req.userName, { needSearch: false });
+    if (!critiqueAccess.allowed) {
+      if (!closed) {
+        res.write('event: error\ndata: ' + JSON.stringify({ error: getAiQuotaErrorMessage(critiqueAccess.reason), code: critiqueAccess.reason || 'rate_limited' }) + '\n\n');
+      }
+      res.end();
+      return;
+    }
     var postId = aiSiteText(req.body && req.body.post_id, 80);
     var initial = req.body && req.body.initial === true;
     var followup = aiSiteText(req.body && req.body.message, 1200);
@@ -17776,7 +18101,10 @@ app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), 
         res.write('event: message\ndata: ' + JSON.stringify({ post_id: post.id, conversation_id: conversationId, content: sanitizePostCritique(reply) || '暂时无法生成分析。' }) + '\n\n');
       }
     }
-    if (!closed) res.write('event: done\ndata: {}\n\n');
+    if (!closed) {
+      res.write('event: done\ndata: {}\n\n');
+      recordAiTurnUsage(req.userName, null, { model: DEEPSEEK_MODEL_REASONER, source: 'post_chat', message: prompt.slice(0, 500), content: sanitizePostCritique(reply || ''), reasoning: '', search_count: 0, did_search: false }).catch(function() {});
+    }
   } catch (e) {
     if (!closed) {
       if (streamed) {

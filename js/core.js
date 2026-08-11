@@ -46,16 +46,18 @@
                 }
             }
             // ★ 修复 M6：检查配置完整性，避免静默失败。
-            // 占位符 key（含省略号，如 "eyJhbG...yDDA"）是构建期未注入 env 的标志——
-            // 本地开发/静态托管时降级继续（REST 主流程可用），不硬失败；其余格式错误 fail-fast
+            // 占位符 key（含省略号，如 "eyJhbG...yDDA"）是构建期未注入 env 的标志。
+            // ★ 审计修复：不再显式容忍占位符——真实 anon key 由构建/部署注入，
+            // 本地/CI 遇到占位符一律 console.error 硬警告（fail-fast），
+            // 避免 Supabase 全链路（Realtime/Storage/anon 直连）静默失效掩盖故障。
             var _anonKey = String(SUPABASE_ANON_KEY || '');
             var _sbConfigOk = !!SUPABASE_URL && !!_anonKey && (
               /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(_anonKey)
               || /^sb_publishable_/.test(_anonKey)
-              || _anonKey.indexOf('...') > -1
             );
             if (!_sbConfigOk) {
                 console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
+                console.error('[XTJ] SUPABASE_ANON_KEY 当前为' + (_anonKey ? '占位符/无效 key（需在构建/部署时注入真实 anon key）' : '空值'));
                 sb = null;
                 document.addEventListener('DOMContentLoaded', function () {
                     var _feedEl = document.getElementById('feed');
@@ -338,18 +340,12 @@ const ADMIN_NAME = "xxz";
             const USER_SESSION_KEY = "xtj_user_session";
             const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
-            var USER_TOKEN_KEY = 'xtj_user_token';
-            var USER_TOKEN_TS_KEY = 'xtj_user_token_ts';
             var memoryUserToken = '';
             var memoryUserTokenIssuedAt = 0;
-            // 共享 refresh promise，避免多个 API 同时刷新
-            var _refreshPromise = null;
             var _protectedAuthFailureHandled = false;
             var _lastRefreshAuthResult = { ok: false, reason: 'not_attempted', status: 0 };
             // ★ 刷新时服务端返回的规范 user_name
             var _lastRefreshUser = '';
-            // 持久化登录标记（用户选择"保持登录"）
-            var PERSISTENT_AUTH_KEY = 'xtj_persistent_auth';
             // 会话写入时间戳。声明上移，保证 clearUserToken（TDZ 安全）
             // 及其后续所有引用均在此 let 声明之后。
             let lastUserSessionWriteAt = 0;
@@ -386,38 +382,19 @@ const ADMIN_NAME = "xxz";
                         }
                     } catch(e) {}
                     // 通知其他模块用户认证已就绪（用于自动定位等）
+                    // ★ 审计修复：事件 detail 不再携带明文 access token（任何脚本均可监听窃取），
+                    // 需要 token 的模块直接调 window.getUserToken()。
                     try {
                         window.__xtjAuthReady = true;
-                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { token: String(token) } }));
+                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { authenticated: true, user_name: String(window.currentUser || window._lastKnownUser || '') } }));
                     } catch(e) {}
                 }
-            }
-
-            function setPersistentAuth(enabled) {
-                try {
-                    if (enabled) {
-                        window.safeStorage.set(PERSISTENT_AUTH_KEY, '1');
-                    } else {
-                        window.safeStorage.remove(PERSISTENT_AUTH_KEY);
-                    }
-                } catch(e) {}
-            }
-
-            function isPersistentAuth() {
-                try {
-                    return window.safeStorage.get(PERSISTENT_AUTH_KEY) === '1';
-                } catch(e) { return false; }
             }
 
             function clearUserToken() {
                 memoryUserToken = '';
                 memoryUserTokenIssuedAt = 0;
                 lastUserSessionWriteAt = 0;
-                try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
-                try { sessionStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
-                try { window.safeStorage.remove(USER_TOKEN_KEY); } catch(e) {}
-                try { window.safeStorage.remove(USER_TOKEN_TS_KEY); } catch(e) {}
-                try { window.safeStorage.remove(PERSISTENT_AUTH_KEY); } catch(e) {}
             }
 
             // Clear all browser-side authentication state in one place. Password
@@ -464,9 +441,12 @@ const ADMIN_NAME = "xxz";
                 if (revokeRemote) try {
                     var logoutHeaders = {};
                     if (tokenForRevocation) logoutHeaders.Authorization = 'Bearer ' + tokenForRevocation;
-                    fetch(API_BASE + '/api/user/logout', {
+                    // ★ 审计修复：logout 请求复用 xtjFetch 超时封装（8s），
+                    // 避免 VPN/半开连接下 fetch 永不 settle（与 doLogout 的 8s 超时对齐）。
+                    var logoutFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
+                    logoutFetch(API_BASE + '/api/user/logout', {
                         method: 'POST', credentials: 'include', headers: logoutHeaders
-                    }).catch(function(){});
+                    }, 8000).catch(function(){});
                 } catch(e) {}
 
                 // ★ 广播退出事件到其他标签页（仅当非远程同步触发时）
@@ -1147,6 +1127,12 @@ const ADMIN_NAME = "xxz";
                         });
                     } catch (e) {}
                 };
+                // ★ 审计修复：页面卸载时关闭 BroadcastChannel，避免 bfcache 往返/多实例累积
+                try {
+                    window.addEventListener('pagehide', function() {
+                        try { authChannel.close(); } catch (eClose) {}
+                    }, { once: true });
+                } catch (eBind) {}
             } catch (e) {
                 // BroadcastChannel 不可用（旧浏览器），静默降级
             }
@@ -1206,34 +1192,10 @@ const ADMIN_NAME = "xxz";
             } catch(e) {}
         }
 
-        // 前端攻击检测（无后端API时记录到Supabase）
-        var _attackClickTimes = [];
-        var _attackLoggedToday = false;
-        function logFrontendAttack(type, detail) {
-            if (typeof API_BASE !== 'undefined' && API_BASE) return;
-            if (!sb) return;
-            var today = new Date().toISOString().slice(0, 10);
-            try {
-                sb.from('posts').insert([{
-                    user_name: 'frontend',
-                    content: JSON.stringify({ type: type, detail: String(detail || '').slice(0, 200), date: today }),
-                    media_type: '__attack__',
-                    media_url: type,
-                    actor_key: 'fa_' + Date.now()
-                }]).then(function(){}, function(){});
-            } catch(e) {}
-        }
-        // 检测异常快速点击（>8次/秒）
-        document.addEventListener('click', function() {
-            var now = Date.now();
-            _attackClickTimes.push(now);
-            _attackClickTimes = _attackClickTimes.filter(function(t) { return now - t < 1000; });
-            if (_attackClickTimes.length > 8 && !_attackLoggedToday) {
-                _attackLoggedToday = true;
-                logFrontendAttack('RAPID_CLICK', '异常高频点击 ' + _attackClickTimes.length + '次/秒');
-                setTimeout(function() { _attackLoggedToday = false; }, 60000);
-            }
-        }, true);
+        // ★ 审计修复：原"前端攻击检测"（RAPID_CLICK >8次/秒 写 Supabase）是死逻辑——
+        // logFrontendAttack 首行 `if (typeof API_BASE !== 'undefined' && API_BASE) return;`
+        // 而 API_BASE 恒存在，检测从未生效，却长期占用一个全局 capture click 监听。
+        // 已删除该死代码与全局监听；如确需攻击检测，应改走后端 API 上报。
 
         let dockChatListCacheTime = 0;
         const DOCK_CHAT_CACHE_DURATION = 120000;
@@ -1454,6 +1416,8 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
+            // TODO(安全): gsap 外部 CDN 暂未加 SRI（integrity）——需在部署环境计算真实 hash 后补充，
+            // 或改为同源自托管；错误的 hash 会导致加载失败，故不在源码中伪造。
             gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }
         };
         var xtjModulePromises = Object.create(null);
@@ -2108,8 +2072,7 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             set currentUser(v) { window.currentUser = v; },
             get photoWallData() { return window.photoWallData; },
             set photoWallData(v) { window.photoWallData = v; },
-            get deviceId() { return window.deviceId; },
-            _listeners: {}
+            get deviceId() { return window.deviceId; }
         };
         function safeText(str) {
             return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -2734,6 +2697,10 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     window._lastKnownUser = currentUser;
                     window.safeStorage.set("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
+                    // ★ 审计修复：登录成功必须置位认证状态，否则 touchUserSession/_xtjAuthState 仍停留
+                    //   在 auth_pending/unauthenticated，导致会话续写失效、长会话可能被 30 天 TTL 误登出
+                    window._xtjAuthState = 'authenticated';
+                    window._xtjCanonicalUser = confirmedUser;
                     await loadCurrentUserInfoSnapshot(currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function" && confirmedUser !== ADMIN_NAME) {
@@ -2829,6 +2796,9 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     window._lastKnownUser = currentUser;
                     window.safeStorage.set("xtj_user", currentUser);
                     writeUserSession(currentUser, { resetLoginAt: true });
+                    // ★ 审计修复：注册成功同样置位认证状态（与登录路径对称）
+                    window._xtjAuthState = 'authenticated';
+                    window._xtjCanonicalUser = currentUser;
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
                             window.logLoginEventSafe(currentUser, "register_success");

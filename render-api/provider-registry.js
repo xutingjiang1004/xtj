@@ -42,6 +42,8 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 const crypto = require('crypto');
+const dns = require('dns');
+const net = require('net');
 
 // ── Encryption ──────────────────────────────────────────────────────────
 // AES-256-GCM requires: 32-byte key, 12-byte IV, produces 16-byte auth tag.
@@ -150,63 +152,93 @@ function getDefaultConfig(providerType) {
 }
 
 // ── SSRF hostname 判定 ─────────────────────────────────────────────────
-// 提取 IPv6 中内嵌的 IPv4 地址，无内嵌 IPv4 时返回 null。
-// 覆盖两种形式：
-//   1) IPv4-mapped  ::ffff:xxxx:xxxx / ::ffff:a.b.c.d
-//   2) IPv4-compatible ::xxxx:xxxx / ::a.b.c.d（RFC 4291 已废弃）
-// 只处理 :: 或 ::ffff: 前缀的短尾形式（尾部恰好 2 个 hextet 或点分四段），
-// 不触碰 2606:4700::a00:1 这类"全局前缀 + 巧合十六进制尾"的地址，避免误伤。
-function extractMappedIpv4(hostname) {
-  var m = hostname.match(/^::(?:ffff:)?(.+)$/);
-  if (!m) return null;
-  var tail = m[1];
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(tail)) return tail; // 点分四段（兜底）
-  var parts = tail.split(':');
-  if (parts.length !== 2) return null;
-  var hi = parseInt(parts[0], 16);
-  var lo = parseInt(parts[1], 16);
-  if (isNaN(hi) || isNaN(lo) || hi > 0xffff || lo > 0xffff) return null;
-  var v = hi * 65536 + lo;
-  return ((v >>> 24) & 255) + '.' + ((v >>> 16) & 255) + '.' + ((v >>> 8) & 255) + '.' + (v & 255);
+
+// 判断单条 IP 地址是否为内网/回环/保留段（IPv4/IPv6）。与 web-fetch.js 的
+// isPrivateAddress 保持同一套覆盖标准：IPv4 全部分段 + IPv6 的 mapped 内嵌、
+// ULA(fc/fd)、链路本地(fe8-feB)、NAT64(64:ff9b::/96)、6to4(2002::/16)、
+// Teredo(2001::/32)、文档段(2001:db8::/32) 与组播(ff00::/8)。
+function isPrivateIpAddress(address) {
+  var value = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (net.isIP(value) === 4) {
+    var octets = value.split('.').map(Number);
+    var first = octets[0];
+    return first === 0 || first === 10 || first === 127 || first >= 224 ||
+      (first === 100 && octets[1] >= 64 && octets[1] <= 127) ||
+      (first === 169 && octets[1] === 254) ||
+      (first === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (first === 192 && (octets[1] === 168 || (octets[1] === 0 && octets[2] === 0) || (octets[1] === 0 && octets[2] === 2))) ||
+      (first === 198 && (octets[1] === 18 || octets[1] === 19 || octets[1] === 51)) ||
+      (first === 203 && octets[1] === 0 && octets[2] === 113);
+  }
+  if (net.isIP(value) === 6) {
+    if (value.indexOf('::ffff:') === 0) {
+      var mappedV4 = value.slice(7);
+      if (net.isIP(mappedV4) === 4) return isPrivateIpAddress(mappedV4);
+    }
+    return value === '::' || value === '::1' ||
+      /^f[cd][0-9a-f]{2}:/.test(value) ||  // fc00::/7 ULA（fc00-fdff 前缀全段）
+      /^fe[89ab]:/.test(value) ||          // fe80::/10 链路本地
+      /^64:ff9b:/.test(value) ||           // NAT64 well-known 前缀
+      /^2002:/.test(value) ||              // 6to4（2002::/16，可内嵌任意 IPv4）
+      /^2001:0:/i.test(value) ||           // Teredo（2001::/32）
+      /^2001:db8:/.test(value) ||          // 文档/示例保留段
+      /^ff00:/i.test(value);               // 组播
+  }
+  return false;
 }
 
-// 统一的 SSRF hostname 黑名单判定（IPv4 / IPv6 / localhost / 保留域名）。
+// 统一的 SSRF hostname 判定（IPv4 / IPv6 / localhost / 保留域名）。
 // 传入的 hostname 应为去除方括号、小写化后的主机名。
+// 修复（审计 🟠）：net.isIP 拒绝一切 IP 字面量——包括 IPv6 的完整书写形式
+// （0:0:0:0:0:0:0:1、0000:...:0001）与 8 段完整 IPv4-mapped（0:0:0:0:0:ffff:7f00:1），
+// 不再依赖字符串前缀匹配；非 IP 域名强制走 DNS 解析后再校验（见 assertSafeProviderHost）。
 function isHostBlocked(hostname) {
-  if (hostname === 'localhost' || hostname === '0.0.0.0' || hostname === '::1' ||
-      hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+  var host = String(hostname || '').toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
+  if (!host || host === 'localhost' || host === '0.0.0.0' ||
+      host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') ||
+      host === 'metadata.google.internal' || host === 'metadata') {
     return true;
   }
-  // 直接 IPv4 字面量一律拒绝（含 127.0.0.1、169.254.169.254 等，强制走 DNS 域名）
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return true;
-  if (hostname.indexOf(':') < 0) return false; // 其余纯域名放行
-  // IPv6 保留段：未指定 ::、链路本地 fe80::/10（fe80-febf 全段）、
-  // 唯一本地地址 fc00::/7、NAT64 64:ff9b::/96（含 64:ff9b:1::/48 本地 NAT64）
-  if (/^::$/.test(hostname) || /^fe[89ab][0-9a-f]:/.test(hostname) ||
-      /^f[cd][0-9a-f]{2}:/.test(hostname) || /^64:ff9b:/.test(hostname)) {
-    return true;
-  }
-  // 尾部点分四段内嵌 IPv4（::ffff:10.0.0.1、::10.0.0.1、0:0:0:0:0:ffff:169.254.169.254 等）：
-  // 内嵌 IPv4 按字面量一律拒绝
-  var tail = hostname.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (tail && /^\d+\.\d+\.\d+\.\d+$/.test(tail[1])) return true;
-  // IPv4-mapped/compatible 十六进制内嵌（::ffff:a00:1 = 10.0.0.1 等）：
-  // ::/96 与 ::ffff:0:0/96 均为保留空间，不会承载真实单播主机，内嵌 IPv4 一律按字面量拒绝
-  if (extractMappedIpv4(hostname)) return true;
-  return false; // 其余全局 IPv6 放行
+  // 任何合法 IPv4/IPv6 字面量一律拒绝（强制走 DNS 域名；十六进制/八进制/十进制
+  // 整数 IP 变体也被 net.isIP 以字面量形式拒绝）
+  if (net.isIP(host) !== 0) return true;
+  return false;
 }
 
-// URL 规范化：使用 URL 对象解析，要求 https，拒绝内网地址
-function normalizeProviderUrl(rawUrl) {
+// 域名级 SSRF 校验：解析全部 A/AAAA 记录，任一地址为内网/回环/保留段即拒绝。
+// 防止攻击者用攻击者可控 DNS 的公网域名做 DNS rebinding 到内网。
+async function assertSafeProviderHost(hostname, lookupImpl) {
+  var host = String(hostname || '').toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
+  if (isHostBlocked(host)) {
+    return { ok: false, error: 'BLOCKED_BASE_URL' };
+  }
+  var lookup = lookupImpl || dns.lookup;
+  var addresses;
+  try {
+    addresses = await lookup(host, { all: true, verbatim: true });
+  } catch (_) {
+    return { ok: false, error: 'DNS_RESOLVE_FAILED' };
+  }
+  if (!Array.isArray(addresses) || !addresses.length ||
+      addresses.some(function(item) { return isPrivateIpAddress(item && item.address); })) {
+    return { ok: false, error: 'BLOCKED_BASE_URL' };
+  }
+  return { ok: true, addresses: addresses.map(function(item) { return item.address; }) };
+}
+
+// URL 规范化：使用 URL 对象解析，要求 https，拒绝内网地址（含 DNS 解析后校验）
+async function normalizeProviderUrl(rawUrl) {
   if (!rawUrl) return null;
   var parsed;
   try { parsed = new URL(rawUrl); } catch (_) { return { error: 'INVALID_BASE_URL' }; }
   if (parsed.protocol !== 'https:') return { error: 'INVALID_BASE_URL' };
   // URL.hostname 对 IPv6 字面量会带方括号（如 [::1]），先去括号再判定
   var hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  // SSRF 防护：拒绝 localhost、内网 IP、IPv4-mapped/NAT64/链路本地等 IPv6 保留段
-  if (isHostBlocked(hostname)) {
-    return { error: 'BLOCKED_BASE_URL' };
+  // SSRF 防护：拒绝 IP 字面量 / localhost / 内网保留段 / 云元数据，并对域名做
+  // DNS 解析后地址校验（与 web-fetch.assertSafeWebUrl 同标准）
+  var hostCheck = await assertSafeProviderHost(hostname);
+  if (!hostCheck.ok) {
+    return { error: hostCheck.error === 'DNS_RESOLVE_FAILED' ? 'INVALID_BASE_URL' : 'BLOCKED_BASE_URL' };
   }
   // 去除尾斜杠，保留路径
   var normalized = parsed.origin + parsed.pathname.replace(/\/+$/, '');
@@ -310,9 +342,9 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
       // 填充默认值
       var defaults = getDefaultConfig(providerType);
       if (!baseUrl) baseUrl = defaults.base_url;
-      // URL 规范化 + SSRF 防护
+      // URL 规范化 + SSRF 防护（含 DNS 解析后地址校验）
       if (baseUrl) {
-        var urlResult = normalizeProviderUrl(baseUrl);
+        var urlResult = await normalizeProviderUrl(baseUrl);
         if (!urlResult) { return res.status(400).json({ error: 'base_url 无效', code: 'INVALID_BASE_URL' }); }
         if (urlResult.error) { return res.status(400).json({ error: urlResult.error === 'BLOCKED_BASE_URL' ? '不允许的 base_url 地址' : 'base_url 格式无效', code: urlResult.error }); }
         baseUrl = urlResult.url;
@@ -404,7 +436,8 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
         return res.status(400).json({ error: '自定义提供商需要提供 base_url', code: 'MISSING_BASE_URL' });
       }
 
-      // SSRF 防护：仅允许 https，拒绝 IP 字面量 / localhost / 内网保留段 / 云元数据地址
+      // SSRF 防护：仅允许 https，拒绝 IP 字面量 / localhost / 内网保留段 / 云元数据地址，
+      // 并对域名做 DNS 解析后地址校验（防 DNS rebinding 到内网）
       var parsedTestUrl = null;
       try { parsedTestUrl = new URL(testUrl); } catch (_) {
         return res.status(400).json({ error: 'base_url 不是合法的 URL', code: 'INVALID_BASE_URL' });
@@ -414,10 +447,10 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
       }
       // URL.hostname 对 IPv6 字面量会带方括号（如 [::1]），先去括号再判定
       var hostname = parsedTestUrl.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-      // SSRF 防护：拒绝 IP 字面量 / localhost / 内网保留段 / 云元数据 /
-      // IPv4-mapped(::ffff:x.x.x.x) / NAT64(64:ff9b::/96) / 链路本地(fe80::/10)
-      var hostIsBlocked = isHostBlocked(hostname);
-      if (hostIsBlocked) {
+      // SSRF 防护：net.isIP 拒绝一切 IP 字面量（含 IPv6 完整书写形式），
+      // 域名再走 dns.lookup 校验全部解析地址均为公网
+      var hostCheck = await assertSafeProviderHost(hostname);
+      if (!hostCheck.ok) {
         return res.status(400).json({ error: 'base_url 指向不允许的主机', code: 'BLOCKED_BASE_URL' });
       }
 
@@ -551,7 +584,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
       if (body.base_url !== undefined) {
         var updateUrl = String(body.base_url).trim();
         if (updateUrl) {
-          var updateUrlResult = normalizeProviderUrl(updateUrl);
+          var updateUrlResult = await normalizeProviderUrl(updateUrl);
           if (!updateUrlResult || updateUrlResult.error) {
             return res.status(400).json({ error: updateUrlResult && updateUrlResult.error === 'BLOCKED_BASE_URL' ? '不允许的 base_url 地址' : 'base_url 格式无效', code: updateUrlResult ? updateUrlResult.error : 'INVALID_BASE_URL' });
           }

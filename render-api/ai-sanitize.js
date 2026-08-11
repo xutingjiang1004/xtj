@@ -1,14 +1,34 @@
 /**
  * Clean AI assistant visible text: strip stage-direction / action prose in parentheses.
  * Pure function — no DB or request state.
+ *
+ * 审计 🟡 XSS 职责声明：AI 输出是不可信数据（且受提示词注入影响）。本函数在第 0 步
+ * 剥离危险标签/属性/协议（script、style、iframe、object、embed、on* 事件、
+ * javascript:/data:text/html），这是主防线；前端 AI 回复经 renderMarkdown 后以
+ * innerHTML 渲染，第 0 步剥离保证注入不落地。HTML 实体转义（&<>"'）以
+ * options.escapeHtml=true 显式开启，供需要直接按纯文本（非 markdown）innerHTML
+ * 渲染的消费方使用——实体转义会破坏 markdown 语法，故默认关闭。
+ * **本函数不承担完整的 XSS 防护职责**——最终安全取决于渲染层与 markdown 渲染器。
  */
 'use strict';
 
 function sanitizeAssistantVisibleText(text, options) {
   var s = String(text || '');
   if (!s) return s;
-  // When roleplay is on, skip action cleanup so backend does not rewrite RP style.
   options = options || {};
+
+  // 0. Strip dangerous HTML payloads (prompt-injection -> stored-XSS guard).
+  //    These tags/attributes are never legitimate markdown, so removing them
+  //    (including their inner content) cannot corrupt normal rendering.
+  s = s.replace(/<\s*(script|style|iframe|object|embed)\b[^>]*>[\s\S]*?<\s*\/\s*(script|style|iframe|object|embed)\s*>/gi, '');
+  s = s.replace(/<\s*(script|style|iframe|object|embed)\b[^>]*\/?\s*>/gi, '');
+  // Remove event-handler attributes (onclick/onerror/...).
+  s = s.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
+  // Neutralize dangerous URL protocols that survive markdown rendering.
+  s = s.replace(/\bjavascript\s*:/gi, ' ');
+  s = s.replace(/\bdata\s*:\s*text\/html\b/gi, ' ');
+
+  // When roleplay is on, skip action cleanup so backend does not rewrite RP style.
   if (options.skipActionCleanup) return s;
 
   // 1. Drop standalone parenthetical lines (full/half width / square brackets, ≥3 chars).
@@ -50,7 +70,17 @@ function sanitizeAssistantVisibleText(text, options) {
   // 4. Collapse excess blank lines
   s = s.replace(/\n{3,}/g, '\n\n').trim();
 
-  // 5. Empty after cleanup → fixed user-facing notice
+  // 5. 上下文感知的 HTML 实体转义（审计 🟡）：仅当消费方显式启用时才转义 <>&"'，
+  //    因实体转义会破坏 markdown 语法；前端 AI 回复走 renderMarkdown，默认不开启。
+  if (options.escapeHtml === true) {
+    s = s.replace(/&/g, '&amp;')
+         .replace(/</g, '&lt;')
+         .replace(/>/g, '&gt;')
+         .replace(/"/g, '&quot;')
+         .replace(/'/g, '&#39;');
+  }
+
+  // 6. Empty after cleanup → fixed user-facing notice
   if (!s) return '我刚刚生成了不合规的动作描写，已自动删除。请重新问一次。';
 
   return s;

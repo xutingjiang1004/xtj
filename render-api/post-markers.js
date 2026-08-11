@@ -34,6 +34,11 @@ const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
 const AI_ENGLISH_LEARNING_MARKER = '__ai_english_learning__';
 const REVOKED_TOKEN_MARKER = '__revoked_token__';
 
+// 审计 ⚪ 单一真源：允许出现在公开信息流/搜索结果/统计中的"正常帖子" media_type 白名单。
+// system marker（上方全部 __xxx__）一律排除在公开 feed 之外；此处只描述普通用户可见类型，
+// post-query.js 消费本集合，避免新增/退役 marker 时两处白名单漏同步。
+var PUBLIC_POST_MEDIA_TYPES = ['text', 'image', 'video', 'audio', 'photo', 'album'];
+
 module.exports = {
   REPORT_MARKER,
   DM_MARKER,
@@ -58,5 +63,6 @@ module.exports = {
   AI_AGENT_CONFIG_MARKER,
   AI_AGENT_CONV_SUMMARY_MARKER,
   AI_ENGLISH_LEARNING_MARKER,
-  REVOKED_TOKEN_MARKER
+  REVOKED_TOKEN_MARKER,
+  PUBLIC_POST_MEDIA_TYPES
 };

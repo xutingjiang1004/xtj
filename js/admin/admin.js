@@ -212,6 +212,10 @@
     }
 
     // ===================== Session 超时管理（24小时无操作自动登出） =====================
+    // TTL 口径说明：ADMIN_SESSION_TTL_MS 控制 localStorage 会话标记有效期（72h），
+    // 页面打开期间由 SESSION_TIMEOUT_MS（24h）无操作自动登出；
+    // 因此"页面一直开着 24h 无操作"会强制登出，但关闭页面 24h 后再打开仍可凭服务器 cookie 恢复会话。
+    // 若产品要求"24h 无操作必须重新登录"，需在 hasSession() 同时校验不活动标记（当前为有意设计）。
     var ADMIN_SESSION_TTL_MS = 72 * 60 * 60 * 1000; // 72小时
     var SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24小时无操作自动退出
     var lastActivityTime = Date.now();
@@ -242,6 +246,9 @@
     var adminTabSwitchGeneration = 0;
     var adminClipboardPage = 1, adminClipboardTotal = 0, adminClipboardPages = 1;
     var searchUser = '', searchPost = '';
+    // 主 Tab 白名单：refreshAdminTab / switchTab / initAdminClient 共用，避免三份名单漂移
+    // （blacklist 已下线并入 bans，不出现在名单中）
+    var allowedTabs = ['ann','stats','users','clipboard','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','ai','online','profile'];
 
     function getTabDomName(tab) {
         if (tab === 'errorlog') return 'ErrorLog';
@@ -628,7 +635,7 @@
             saveCurrentTab();
             showToast('正在刷新数据...', 'info');
 
-            var allTabs = ['ann','stats','users','clipboard','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','ai'];
+            var allTabs = allowedTabs;
             allTabs.forEach(function(t) {
                 var panel = document.getElementById('tab' + getTabDomName(t));
                 var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
@@ -677,8 +684,7 @@ async function initAdminClient() {
         startSessionTimeoutMonitor();
         installAdminTabDoubleClickRefresh();
         
-        // ★ 修复：与 switchTab 白名单对齐，补上 online/profile/behavior，会话恢复时不再回落到默认 tab
-        var allowedTabs = ['ann','stats','users','clipboard','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','photos','email','ai','online','profile','behavior'];
+        // ★ 修复：与全局 allowedTabs 白名单对齐（含 online/profile/behavior），会话恢复时不再回落到默认 tab
         var savedTab = localStorage.getItem(TAB_KEY);
         if (savedTab && allowedTabs.indexOf(savedTab) !== -1) {
             currentTab = savedTab;
@@ -791,13 +797,17 @@ async function initAdminClient() {
         });
     };
 
-    window.doAdminLogout = function() {
-        if (API_BASE) {
-            var _token = getToken();
-            var _opts = { method: 'POST' };
-            if (_token) _opts.headers = { 'Authorization': 'Bearer ' + _token };
-            fetch(API_BASE + '/admin/logout', _opts).catch(function() {});
-        }
+    window.doAdminLogout = async function() {
+        try {
+            if (API_BASE) {
+                var _token = getToken();
+                // ★ 修复：跨域登出必须携带 Cookie（credentials:'include'）并 await，
+                // 确保服务端会话被注销后再清理本地状态，否则共享电脑的下一人仍可直连 /admin/* 接口
+                var _opts = { method: 'POST', credentials: 'include' };
+                if (_token) _opts.headers = { 'Authorization': 'Bearer ' + _token };
+                await fetch(API_BASE + '/admin/logout', _opts).catch(function() {});
+            }
+        } catch(e) { /* 忽略登出请求异常，仍继续清理本地状态 */ }
         stopRegisterAlertPolling();
         // 清理定时器和事件监听
         if (_adminSessionTimer) { clearInterval(_adminSessionTimer); _adminSessionTimer = null; }
@@ -1625,13 +1635,39 @@ async function initAdminClient() {
         });
     };
 
+    // ★ 修复：搜索框 200ms 防抖 + 重绘后 rAF 恢复焦点并置光标尾部，
+    // 避免每敲一个字符整表重渲染导致输入框被替换、焦点丢失（多关键字搜索不可用）
+    var _userSearchTimer = null;
+    var _postSearchTimer = null;
     window.searchUserInp = function() {
-        searchUser = document.getElementById('userSearchInp').value.trim();
-        renderTab('users');
+        var inp = document.getElementById('userSearchInp');
+        searchUser = (inp ? inp.value : searchUser).trim();
+        if (_userSearchTimer) clearTimeout(_userSearchTimer);
+        _userSearchTimer = setTimeout(function() {
+            renderTab('users');
+            requestAnimationFrame(function() {
+                var el = document.getElementById('userSearchInp');
+                if (el) {
+                    var len = el.value.length;
+                    try { el.focus(); el.setSelectionRange(len, len); } catch(e) {}
+                }
+            });
+        }, 200);
     };
     window.searchPostInp = function() {
-        searchPost = document.getElementById('postSearchInp').value.trim();
-        renderTab('posts');
+        var inp = document.getElementById('postSearchInp');
+        searchPost = (inp ? inp.value : searchPost).trim();
+        if (_postSearchTimer) clearTimeout(_postSearchTimer);
+        _postSearchTimer = setTimeout(function() {
+            renderTab('posts');
+            requestAnimationFrame(function() {
+                var el = document.getElementById('postSearchInp');
+                if (el) {
+                    var len = el.value.length;
+                    try { el.focus(); el.setSelectionRange(len, len); } catch(e) {}
+                }
+            });
+        }, 200);
     };
 
     window.toggleTheme = function() {
@@ -1692,61 +1728,8 @@ async function initAdminClient() {
         }
     }
 
-    window.handleReportDetail = function(id) {
-        var r = reportsData.find(function(x) { return x.id === id; });
-        if (!r) return;
-        
-        var modal = document.createElement('div');
-        modal.className = 'report-detail-modal';
-        modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
-        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
-        
-        var box = document.createElement('div');
-        box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
-        box.onclick = function(e) { e.stopPropagation(); };
-        
-        var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
-        var statusLabel = r.status === 'pending' ? '待处理' : r.status === 'actioned' ? '已处理' : r.status === 'dismissed' ? '已驳回' : r.status;
-        
-        var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h3 style="margin:0;">举报详情</h3><button onclick="this.closest(\'.report-detail-modal\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
-        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px;">';
-        html += '<div><strong>举报人：</strong>' + escapeHtml(r.reporter_name) + '</div>';
-        html += '<div><strong>被举报人：</strong>' + escapeHtml(r.target_user || '-') + '</div>';
-        html += '<div><strong>类型：</strong>' + typeLabel + '</div>';
-        html += '<div><strong>分类：</strong>' + escapeHtml(r.report_category) + '</div>';
-        html += '<div><strong>状态：</strong>' + statusLabel + '</div>';
-        html += '<div><strong>时间：</strong>' + formatTime(r.created_at) + '</div>';
-        html += '</div>';
-        html += '<div style="margin-bottom:12px;"><strong>目标ID：</strong><code>' + escapeHtml(r.target_id) + '</code></div>';
-        html += '<div style="margin-bottom:12px;padding:10px;background:rgba(0,0,0,0.05);border-radius:8px;"><strong>举报原因：</strong>' + escapeHtml(r.report_reason || '-') + '</div>';
-        if (r.admin_response) {
-            html += '<div style="margin-bottom:12px;padding:10px;background:rgba(5,150,105,0.08);border-radius:8px;"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div>';
-        }
-        if (r.reviewed_by) {
-            html += '<div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);">处理人：' + escapeHtml(r.reviewed_by) + ' · 处理时间：' + formatTime(r.reviewed_at) + '</div>';
-        }
-        
-        html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">';
-        if (r.status === 'pending') {
-            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + String(r.id).replace(/'/g, "\\'") + '\')">删除内容</button>';
-            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + String(r.id).replace(/'/g, "\\'") + '\')">封禁用户</button>';
-            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + String(r.id).replace(/'/g, "\\'") + '\')">标记已处理</button>';
-        }
-        html += '<button class="btn-sm" style="margin-left:auto;" onclick="this.closest(\'.report-detail-modal\').remove()">关闭</button>';
-        html += '</div>';
-        
-        if (r.status === 'pending') {
-            html += '<div style="border-top:1px solid rgba(0,0,0,0.1);padding-top:12px;margin-top:8px;">';
-            html += '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">回复举报人（选填）</label>';
-            html += '<textarea id="reportResponse_' + r.id + '" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);font-size:13px;resize:vertical;font-family:inherit;" placeholder="输入回复内容..."></textarea>';
-            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">回复并处理</button>';
-            html += '</div>';
-        }
-        
-        box.innerHTML = html;
-        modal.appendChild(box);
-        document.body.appendChild(modal);
-    };
+    // ★ 修复：此处的旧版 window.handleReportDetail 为重复定义（被后文覆盖，永不生效），
+    // 已删除；仅保留后文完整版本（含「分类 report_category」字段、escapeHtml 转义）。
 
     window.doDeleteReportPost = function(id) {
         var r = reportsData.find(function(x) { return x.id === id; });
@@ -1764,7 +1747,7 @@ async function initAdminClient() {
     window.doBanReportUser = function(id) {
         var r = reportsData.find(function(x) { return x.id === id; });
         if (!r || !r.target_user) { showToast('无法确定被举报用户', 'error'); return; }
-        showConfirm('封禁用户', '确认封禁用户 ' + r.target_user + '？\n\n选择封禁时长：', '确认封禁', async function() {
+        showConfirm('封禁用户', '确认封禁用户 ' + r.target_user + '？\n\n将封禁 72 小时（3 天）。', '确认封禁', async function() {
             try {
                 if (!API_BASE) {
                     throw new Error('API 未配置，拒绝操作');
@@ -2121,7 +2104,6 @@ async function initAdminClient() {
     // ===================== 数据统计仪表盘 =====================
     window.statsDateStart = window.statsDateStart || '';
     window.statsDateEnd = window.statsDateEnd || '';
-    window.statsChartMode = window.statsChartMode || 'visits'; // visits | attacks | posts | comments | likes
 
     // 安全设置
     var securitySettings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true, security_alerts: true };
@@ -2159,7 +2141,7 @@ async function initAdminClient() {
 
     // 安全中心
     var securityTypeFilter = 'all';
-    renderSecurityTab = function(el) {
+    window.renderSecurityTab = function(el) {
         var alerts = allSecurityAlerts.slice();
         var now = new Date();
         // G8 修复：created_at 是 UTC（ISO 字符串），比较前必须把"本地今日零点"转为
@@ -2292,7 +2274,7 @@ async function initAdminClient() {
         }
     };
 
-    renderBlacklistTab = async function(el) {
+    window.renderBlacklistTab = async function(el) {
         if (!blacklistData.length) await loadBlacklistData();
         var active = blacklistData.filter(function(b) { return b.is_active; }).length;
         var h = '<div class="stats-row">';
@@ -2316,17 +2298,10 @@ async function initAdminClient() {
         el.innerHTML = h;
     };
 
-    window.buildUserTagMarkup = function(flags) {
-        // G11 修复：与 1292 行首个定义合并，补回丢失的"黑名单"标签分支
-        var html = '';
-        if (flags.isBanned) html += '<span class="tag tag-banned">封禁中</span>';
-        if (flags.isMuted) html += '<span class="tag tag-muted">禁言中</span>';
-        if (flags.isBlacklisted) html += '<span class="tag tag-banned">黑名单</span>';
-        return html;
-    };
-    buildUserTagMarkup = window.buildUserTagMarkup;
+    // ★ 修复：buildUserTagMarkup 收敛为文件首处（1336 行附近）的唯一局部定义，删除此重复 window 赋值，
+    // 避免两份实现漂移（该函数仅内部调用，无需暴露到全局）
 
-    renderUsersTab = function(el) {
+    window.renderUsersTab = function(el) {
         var h = '<div class="stats-row">';
         h += '<div class="stat-box"><div class="val">' + allUsers.length + '</div><div class="lbl">注册用户</div></div>';
         h += '<div class="stat-box"><div class="val">' + allPosts.length + '</div><div class="lbl">帖子总数</div></div>';
@@ -2367,6 +2342,12 @@ async function initAdminClient() {
         if (!filtered.length) { h += '<div class="empty">没有匹配用户</div>'; }
         else {
             h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>地区</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
+            // ★ 修复：按 user_name 一次性建索引，避免循环内 filter(allLoginEvents) 的 O(用户数×事件数)
+            var loginEventsByUser = {};
+            allLoginEvents.forEach(function(ev) {
+                if (!loginEventsByUser[ev.user_name]) loginEventsByUser[ev.user_name] = [];
+                loginEventsByUser[ev.user_name].push(ev);
+            });
             filtered.forEach(function(u) {
                 var stats = getUserActivityStats(u.name);
                 var flags = getUserStateFlags(u.name);
@@ -2381,8 +2362,8 @@ async function initAdminClient() {
                     : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button><button class="btn-sm del" onclick="confirmDeleteUser(\'' + safeName + '\')">删除账号</button>';
                 var regTime = getAdminUserEffectiveRegTime(u.info);
 
-                // 最近登录设备 & IP（从 allLoginEvents 筛选并排序）
-                var userEvents = allLoginEvents.filter(function(ev) { return ev.user_name === u.name; });
+                // 最近登录设备 & IP（从 allLoginEvents 索引取该用户事件并排序）
+                var userEvents = loginEventsByUser[u.name] ? loginEventsByUser[u.name].slice() : [];
                 userEvents.sort(function(a, b) {
                     var infoA = {}; try { infoA = JSON.parse(a.content || '{}'); } catch(e) {}
                     var infoB = {}; try { infoB = JSON.parse(b.content || '{}'); } catch(e) {}
@@ -2434,7 +2415,7 @@ async function initAdminClient() {
         el.innerHTML = h;
     };
 
-    renderBansTab = async function(el) {
+    window.renderBansTab = async function(el) {
         if (!bansData.length) await loadBansData();
         var active = bansData.filter(function(b) { return b.is_active; }).length;
         var h = '<div class="stats-row">';
@@ -2456,7 +2437,7 @@ async function initAdminClient() {
         el.innerHTML = h;
     };
 
-    renderMutesTab = async function(el) {
+    window.renderMutesTab = async function(el) {
         if (!mutesData.length) await loadMutesData();
         var active = mutesData.filter(function(m) { return m.is_active; }).length;
         var h = '<div class="stats-row">';
@@ -2479,7 +2460,8 @@ async function initAdminClient() {
     };
 
     function renderAdminTabLoading(panel, tab) {
-        if (!panel || panel.childElementCount > 0) return;
+        // ★ 修复：切换回已渲染过的 Tab 也先清空再显示骨架屏，避免旧数据停留而无加载提示（慢网络下易误判）
+        if (!panel) return;
         panel.setAttribute('aria-busy', 'true');
         panel.innerHTML = '<div class="admin-tab-loading" role="status" aria-live="polite">' +
             '<div class="admin-tab-loading-card skeleton-pulse"></div>' +
@@ -2497,7 +2479,7 @@ async function initAdminClient() {
 
     window.switchTab = async function(tab) {
         var normalized = tab;
-        var allTabs = ['ann','stats','users','clipboard','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','blacklist','ai','online','profile'];
+        var allTabs = allowedTabs;
         if (allTabs.indexOf(normalized) === -1) return;
         var switchGeneration = ++adminTabSwitchGeneration;
         currentTab = normalized;
@@ -2581,10 +2563,10 @@ async function initAdminClient() {
         return '📎';
     }
 
-    renderPostsTab = async function(el) {
+    window.renderPostsTab = async function(el) {
         var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__user_behavior__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
-        h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
+        h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" value="' + escapeHtml(searchPost) + '" /></div>';
         var filtered = visiblePosts;
         if (searchPost) {
             var q = searchPost.toLowerCase();
@@ -2613,7 +2595,7 @@ async function initAdminClient() {
         el.innerHTML = h;
     };
 
-    renderLikesTab = async function(el) {
+    window.renderLikesTab = async function(el) {
         var h = '<div class="card"><h3>点赞记录（' + allLikes.length + '条）</h3>';
         if (!allLikes.length) {
             h += '<div class="empty">暂无点赞数据</div>';
@@ -2637,7 +2619,7 @@ async function initAdminClient() {
         el.innerHTML = h;
     };
 
-    loadReportsData = async function() {
+    window.loadReportsData = async function() {
         try {
             var data = await apiCall('GET', '/admin/reports');
             reportsData = Array.isArray(data.data) ? data.data : [];
@@ -2647,7 +2629,7 @@ async function initAdminClient() {
         updateReportBadge();
     };
 
-    loadUserVisitStats = async function(el) {
+    window.loadUserVisitStats = async function(el) {
         var container = document.createElement('div');
         container.id = 'userVisitStatsCard';
         container.className = 'card';
@@ -2690,7 +2672,7 @@ async function initAdminClient() {
         }
     };
 
-    renderStatsTab = async function(el) {
+    window.renderStatsTab = async function(el) {
         var skeletonHtml = '<div class="card"><div class="date-filter-row"><div class="skeleton-pulse" style="height:36px;width:100%;background:rgba(255,255,255,0.05);border-radius:12px;"></div></div></div>';
         skeletonHtml += '<div class="stats-row">';
         ['用户数量', '帖子数量', '评论数量', '点赞数量', '照片数量', '访问总次数'].forEach(function(l) {
@@ -2752,7 +2734,7 @@ async function initAdminClient() {
         return '-';
     }
 
-    renderReportsTab = async function(el) {
+    window.renderReportsTab = async function(el) {
         if (!reportsData.length && !adminTabDataLoaded.reports) {
             await _loadSingleDataType('reports');
         }
@@ -2814,6 +2796,7 @@ async function initAdminClient() {
         html += '<div><strong>举报人：</strong>' + escapeHtml(r.reporter_name || '-') + '</div>';
         html += '<div><strong>被举报人：</strong>' + escapeHtml(r.target_user || '-') + '</div>';
         html += '<div><strong>类型：</strong>' + escapeHtml(typeLabel) + '</div>';
+        html += '<div><strong>分类：</strong>' + escapeHtml(r.report_category || '-') + '</div>';
         html += '<div><strong>状态：</strong>' + escapeHtml(statusLabel) + '</div>';
         html += '<div><strong>时间：</strong>' + formatTime(r.created_at) + '</div>';
         html += '</div>';
@@ -2836,7 +2819,7 @@ async function initAdminClient() {
         if (r.status === 'pending') {
             html += '<div style="border-top:1px solid rgba(0,0,0,0.1);padding-top:12px;margin-top:8px;">';
             html += '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">回复举报人（选填）</label>';
-            html += '<textarea id="reportResponse_' + r.id + '" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);font-size:13px;resize:vertical;font-family:inherit;" placeholder="输入回复内容..."></textarea>';
+            html += '<textarea id="reportResponse_' + escapeHtml(String(r.id)) + '" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);font-size:13px;resize:vertical;font-family:inherit;" placeholder="输入回复内容..."></textarea>';
             html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">回复并处理</button>';
             html += '</div>';
         }
@@ -3094,7 +3077,7 @@ async function initAdminClient() {
     };
 
     var auditTypeFilter = 'all';
-    renderAuditTab = function(el) {
+    window.renderAuditTab = function(el) {
         var h = '<div class="card"><h3>📋 操作审计日志</h3>';
         if (!allAuditLogs.length) {
             h += '<div class="empty">暂无审计记录</div>';
@@ -3232,7 +3215,7 @@ async function initAdminClient() {
         return target;
     }
 
-    renderBehaviorTab = function(el) {
+    window.renderBehaviorTab = function(el) {
         var allBehaviorItems = [];
         allBehaviorEvents.forEach(function(row) {
             try {
@@ -3315,7 +3298,7 @@ async function initAdminClient() {
     };
 
     var errorLogTypeFilter = 'all';
-    renderErrorLogTab = function(el) {
+    window.renderErrorLogTab = function(el) {
         var errors = allErrorLogs.slice();
         if (errorLogTypeFilter !== 'all') {
             errors = errors.filter(function(e) { return e.type === errorLogTypeFilter; });
@@ -3411,7 +3394,7 @@ async function initAdminClient() {
         } else {
             h += '<div class="admin-clipboard-list">';
             allClipboardEntries.forEach(function(entry, index) {
-                h += '<article class="admin-clipboard-item"><header><strong>' + escapeHtml(entry.user_name || '未知用户') + '</strong><time>' + escapeHtml(entry.captured_at ? formatTime(entry.captured_at) : '时间未知') + '</time></header><pre>' + escapeHtml(entry.text.slice(0, 10000)) + '</pre><footer><span>' + entry.text.length + ' 字符</span><button class="btn-sm" type="button" onclick="adminCopyClipboardSnapshot(' + index + ')">复制</button><button class="btn-sm del" type="button" onclick="adminDeleteClipboardUser(\'' + escapeHtml(entry.user_name || '') + '\')">删除该用户</button></footer></article>';
+                h += '<article class="admin-clipboard-item"><header><strong>' + escapeHtml(entry.user_name || '未知用户') + '</strong><time>' + escapeHtml(entry.captured_at ? formatTime(entry.captured_at) : '时间未知') + '</time></header><pre>' + escapeHtml(entry.text.slice(0, 10000)) + '</pre><footer><span>' + entry.text.length + ' 字符</span><button class="btn-sm" type="button" onclick="adminCopyClipboardSnapshot(' + index + ')">复制</button><button class="btn-sm del" type="button" onclick="adminDeleteClipboardUser(\'' + safeJsStr(entry.user_name || '') + '\')">删除该用户</button></footer></article>';
             });
             h += '</div>';
             if (adminClipboardPages > 1) {
@@ -3437,7 +3420,8 @@ async function initAdminClient() {
         if (!userName) return;
         if (!confirm('确定要永久删除用户 "' + userName + '" 的所有剪贴板数据吗？此操作不可恢复。')) return;
         try {
-            var resp = await apiCall('DELETE', '/admin/clipboard-data', { user_name: userName });
+            // ★ 修复：DELETE 不携带 body，user_name 改放 query 参数，避免网关/代理丢弃 body 导致误报成功
+            var resp = await apiCall('DELETE', '/admin/clipboard-data?user_name=' + encodeURIComponent(userName));
             if (resp && resp.ok) {
                 showToast(resp.message || '已删除', 'success');
                 adminTabDataLoaded.clipboard = false;
@@ -3459,7 +3443,7 @@ async function initAdminClient() {
         var failed = 0;
         for (var i = 0; i < userList.length; i++) {
             try {
-                var resp = await apiCall('DELETE', '/admin/clipboard-data', { user_name: userList[i] });
+                var resp = await apiCall('DELETE', '/admin/clipboard-data?user_name=' + encodeURIComponent(userList[i]));
                 if (!resp || !resp.ok) failed++;
             } catch (e) { failed++; }
         }
@@ -4243,7 +4227,7 @@ async function initAdminClient() {
       if (!suggestions.length) { list.innerHTML = ''; return; }
       var h = '';
       suggestions.forEach(function(s) {
-        h += '<span class="email-suffix-item" onclick="emailSelectSuggestion(\'' + s.full.replace(/'/g,"\\'") + '\')" style="cursor:pointer;padding:3px 8px;background:rgba(47,109,246,0.08);border:1px solid rgba(47,109,246,0.15);border-radius:6px;font-size:12px;">' + escapeHtml(s.display) + '</span>';
+        h += '<span class="email-suffix-item" onclick="emailSelectSuggestion(\'' + safeJsStr(s.full) + '\')" style="cursor:pointer;padding:3px 8px;background:rgba(47,109,246,0.08);border:1px solid rgba(47,109,246,0.15);border-radius:6px;font-size:12px;">' + escapeHtml(s.display) + '</span>';
       });
       list.innerHTML = h;
     };
@@ -4348,6 +4332,7 @@ async function initAdminClient() {
 
     // ===================== AI 管理 Tab =====================
     var _aiAdminSubTab = 'settings'; // 'settings' | 'users' | 'invite'
+    var _aiAdminSubTabGeneration = 0; // ★ 修复：AI 子 Tab 代数计数，防快速切换被旧请求覆盖
     var _aiAdminConvUser = null;
     var _aiAdminConvId = null;
 
@@ -4386,6 +4371,8 @@ async function initAdminClient() {
     function renderAiAdminContent() {
         var content = document.getElementById('aiAdminContent');
         if (!content) return;
+        // ★ 修复：每次子视图切换/刷新都递增代数，过期请求据此丢弃，防止旧数据覆盖新子 Tab
+        _aiAdminSubTabGeneration++;
         if (_aiAdminSubTab === 'settings') {
             renderAiAdminSettings(content);
         } else if (_aiAdminSubTab === 'invite') {
@@ -4422,6 +4409,7 @@ async function initAdminClient() {
     async function renderAiAdminSettings(content) {
         if (!content) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
         try {
             var data = await apiCall('GET', '/admin/ai-agent/config');
             var cfg = data && data.config ? data.config : {
@@ -4602,6 +4590,7 @@ async function initAdminClient() {
 
                 '</div>'
             ].join('\n');
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = html;
 
             // 头像上传
@@ -4731,6 +4720,8 @@ async function initAdminClient() {
                         var r = await apiCall('POST', '/admin/ai-agent/config', configPayload);
                         if (r && r.ok) {
                             showToast('配置已保存，用户端刷新后生效');
+                            // ★ 修复：保存成功后重新拉取配置回填，保证模型名迁移等字段与页面同步
+                            await renderAiAdminSettings(content);
                         } else {
                             showToast('保存失败');
                         }
@@ -4783,12 +4774,18 @@ async function initAdminClient() {
                         }
                         resultEl.textContent = parts.join(' | ');
                 } catch (e) {
-                    resultEl.textContent = '检查失败: ' + (e && e.message || '网络错误');
+                    // ★ 修复：健康检查走用户侧 /api/agent/* 鉴权，凭证不可用时给出可执行的友好提示
+                    var _healthErr = (e && e.message) || '网络错误';
+                    if (String(_healthErr).indexOf('用户访问凭证') >= 0) {
+                        resultEl.textContent = '检查失败：用户访问凭证不可用（健康检查走用户侧接口），请重新登录后重试。';
+                    } else {
+                        resultEl.textContent = '检查失败: ' + _healthErr;
+                    }
                 } finally {
                     _searchHealthChecking = false;
                 }
             }
-            // 暴露到全局
+            // 函数声明提升保证 onclick 渲染时可访问；此处显式挂到 window 供内联 onclick 调用
             window.checkSearchHealth = checkSearchHealth;
 
             // 查看当前生效 Prompt
@@ -4817,6 +4814,7 @@ async function initAdminClient() {
             }
 
         } catch(e) {
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
@@ -4824,6 +4822,7 @@ async function initAdminClient() {
     async function renderAiAdminUsageSummary(content) {
         if (!content) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
         try {
             // 加载统计 + 用户列表
             var [summaryData, usersData] = await Promise.all([
@@ -4871,6 +4870,7 @@ async function initAdminClient() {
             }
             html.push('');
 
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = html.join('\n');
 
             // 绑定点击
@@ -4885,6 +4885,7 @@ async function initAdminClient() {
                 }
             });
         } catch(e) {
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
@@ -4969,6 +4970,7 @@ async function initAdminClient() {
     async function renderAiAdminInvite(content) {
         if (!content) return;
         content.innerHTML = '<div class="ai-invite-empty">加载中...</div>';
+        var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
         try {
             var [codesData, redemptionsData, proUsersData, dailyUsageData] = await Promise.all([
                 apiCall('GET', '/admin/ai-agent/invite-codes?page=1&page_size=50'),
@@ -5027,7 +5029,7 @@ async function initAdminClient() {
                         '<td>' + fmtAdminExpiry(c.expires_at) + '</td>' +
                         '<td>' + escapeHtml(c.note || '—') + '</td>' +
                         '<td>' + escapeHtml(c.created_by || '—') + '</td>' +
-                        '<td><button type="button" class="ai-invite-del-btn" onclick="window._aiAdminDeleteInvite(\'' + codeSafe + '\')">删除</button></td>' +
+                        '<td><button type="button" class="ai-invite-del-btn" onclick="window._aiAdminDeleteInvite(\'' + safeJsStr(c.code) + '\')">删除</button></td>' +
                         '</tr>'
                     );
                 });
@@ -5120,7 +5122,7 @@ async function initAdminClient() {
                         '<td>' + expHtml + '</td>' +
                         '<td>' + fmtAdminTokenLimit(u.token_limit_daily) + '</td>' +
                         '<td>' + fmtAdminSearchLimit(u.search_limit_daily) + '</td>' +
-                        '<td><button type="button" class="ai-invite-del-btn" onclick="window._aiAdminCancelPro(\'' + escapeHtml(u.user_name) + '\')">取消 Pro</button></td>' +
+                        '<td><button type="button" class="ai-invite-del-btn" onclick="window._aiAdminCancelPro(\'' + safeJsStr(u.user_name) + '\')">取消 Pro</button></td>' +
                         '</tr>'
                     );
                 });
@@ -5128,6 +5130,7 @@ async function initAdminClient() {
             }
             html.push('</div></div>');
 
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = html.join('');
 
             function copyText(text) {
@@ -5285,6 +5288,7 @@ async function initAdminClient() {
                 });
             };
         } catch(e) {
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
@@ -5292,6 +5296,7 @@ async function initAdminClient() {
     async function renderAiAdminUserConvs(content) {
         if (!content || !_aiAdminConvUser) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
         try {
             var data = await apiCall('GET', '/admin/ai-agent/conversations?user_name=' + encodeURIComponent(_aiAdminConvUser));
             var convs = data && data.conversations ? data.conversations : [];
@@ -5310,7 +5315,7 @@ async function initAdminClient() {
                     var created = c.created_at ? new Date(c.created_at).toLocaleString() : '';
                     var lastAt = c.last_at ? new Date(c.last_at).toLocaleString() : '';
                     html.push('<div class="ai-conversation-item" data-conv-id="' + cid + '">');
-                    html.push('<div class="conv-id">' + (c.conversation_id === 'legacy' ? '旧数据' : (c.conversation_id ? String(c.conversation_id).slice(0, 14) : '-')) + '</div>');
+                    html.push('<div class="conv-id">' + (c.conversation_id === 'legacy' ? '旧数据' : (c.conversation_id ? escapeHtml(String(c.conversation_id).slice(0, 14)) : '-')) + '</div>');
                     html.push('<div class="ai-conv-time">' + created + '</div></div>');
                     html.push('<div class="conv-stats">');
                     html.push('<span>' + c.message_count + ' 条</span>');
@@ -5323,6 +5328,7 @@ async function initAdminClient() {
                 html.push('</div>');
             }
 
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = html.join('\n');
 
             // 绑定点击
@@ -5344,6 +5350,7 @@ async function initAdminClient() {
                 };
             }
         } catch(e) {
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
@@ -5351,6 +5358,7 @@ async function initAdminClient() {
     async function renderAiAdminConvDetail(content) {
         if (!content || !_aiAdminConvUser || !_aiAdminConvId) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
         try {
             var data = await apiCall('GET', '/admin/ai-agent/conversation?user_name=' + encodeURIComponent(_aiAdminConvUser) + '&conversation_id=' + encodeURIComponent(_aiAdminConvId));
             var msgs = data && data.messages ? data.messages : [];
@@ -5366,7 +5374,7 @@ async function initAdminClient() {
 
             var html = [
                 '<button class="ai-admin-back" onclick="window._backAiConvList()">← 返回会话列表</button>',
-                '<div class="ai-conv-header"><h3>' + escapeHtml(_aiAdminConvUser) + ' · ' + _aiAdminConvId.slice(0, 14) + '</h3><div class="conv-stat-line">' + msgs.length + ' 条消息 · ' + (totalTokens || 0).toLocaleString() + ' tokens · ¥' + totalCost.toFixed(6) + '</div></div>',
+                '<div class="ai-conv-header"><h3>' + escapeHtml(_aiAdminConvUser) + ' · ' + escapeHtml(_aiAdminConvId.slice(0, 14)) + '</h3><div class="conv-stat-line">' + msgs.length + ' 条消息 · ' + (totalTokens || 0).toLocaleString() + ' tokens · ¥' + totalCost.toFixed(6) + '</div></div>',
                 '<div class="ai-conv-view">'
             ];
 
@@ -5378,9 +5386,12 @@ async function initAdminClient() {
                 html.push('<div class="msg-content-wrap">');
                 // 思考过程（与前端一致的可折叠样式）
                 if (m.reasoning) {
-                    var rId = 'think_' + (m.id || Math.random().toString(36).slice(2, 8));
-                    html.push('<div class="ai-thinking-admin" id="' + rId + '">');
-                    html.push('<button type="button" class="ai-thinking-toggle-admin" onclick="var p=document.getElementById(\'' + rId + '\');p.classList.toggle(\'expanded\');" aria-expanded="false">');
+                    var rIdRaw = String(m.id || '') || Math.random().toString(36).slice(2, 8);
+                    // ★ 修复：id 属性用 escapeHtml，onclick JS 字符串参数用 safeJsStr，两端取同一原始 id
+                    var rIdAttr = 'think_' + escapeHtml(rIdRaw);
+                    var rIdJs = 'think_' + safeJsStr(rIdRaw);
+                    html.push('<div class="ai-thinking-admin" id="' + rIdAttr + '">');
+                    html.push('<button type="button" class="ai-thinking-toggle-admin" onclick="var p=document.getElementById(\'' + rIdJs + '\');p.classList.toggle(\'expanded\');" aria-expanded="false">');
                     html.push('<span class="ai-thinking-label-admin">思考</span>');
                     html.push('<span class="ai-thinking-caret-admin">▾</span>');
                     html.push('</button>');
@@ -5401,6 +5412,7 @@ async function initAdminClient() {
             });
 
             html.push('</div>');
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = html.join('\n');
 
             if (!window._backAiConvList) {
@@ -5410,6 +5422,7 @@ async function initAdminClient() {
                 };
             }
         } catch(e) {
+            if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }

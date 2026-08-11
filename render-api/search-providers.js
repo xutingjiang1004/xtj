@@ -4,6 +4,10 @@
  */
 'use strict';
 
+// 审计 🟡：SEARCH_API_URL 是用户请求触发的服务端出站请求目标，复用 web-fetch 的
+// assertSafeWebUrl（协议 + DNS 解析 + 私有地址校验），与全站 SSRF 防护标准一致。
+const { assertSafeWebUrl } = require('./web-fetch');
+
 function buildSearchQuery(message) {
   var q = String(message || '').trim();
   var hasTimeWord = /今天|现在|当前|实时|最新/i.test(q);
@@ -46,7 +50,8 @@ function cleanSearchResults(results, maxCount) {
     if (colonIdx < 0) return true; // 相对路径
     var proto = lower.slice(0, colonIdx + 1);
     for (var i = 0; i < ALLOWED_URL_PROTOCOLS.length; i++) {
-      if (proto === ALLOWED_URL_PROTOCOLS[i]) return true;
+      // 审计 ⚪：协议后必须紧跟 //，拒绝 http:evil.com 这类"伪协议"写法
+      if (proto === ALLOWED_URL_PROTOCOLS[i] && lower.slice(colonIdx + 1).indexOf('//') === 0) return true;
     }
     return false;
   }
@@ -223,7 +228,10 @@ async function searchCustomApi(query, maxResults) {
   try {
     var parsedUrl = new URL(apiUrl);
     if (parsedUrl.protocol !== 'https:') return { results: [], error: 'CustomApi must use https' };
-    if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(parsedUrl.hostname)) return { results: [], error: 'CustomApi invalid hostname' };
+    // 审计 🟡：复用 assertSafeWebUrl（DNS 解析 + 私有/内网地址校验），
+    // 替代仅靠 hostname 字符集正则的校验——原实现允许 10.0.0.5 / intranet-host 直连内网
+    try { await assertSafeWebUrl(apiUrl); }
+    catch (_) { return { results: [], error: 'CustomApi invalid host' }; }
     apiUrl = apiUrl.replace(/\/+$/, '');
     var url = apiUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&pageno=1&categories=general';
     var resp = await fetch(url, {
@@ -261,7 +269,8 @@ async function searchSearxng(query, maxResults) {
     try {
       var parsedUrl = new URL(process.env.SEARCH_API_URL);
       if (parsedUrl.protocol !== 'https:') throw new Error('must be https');
-      if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(parsedUrl.hostname)) throw new Error('invalid hostname');
+      // 审计 🟡：复用 assertSafeWebUrl（DNS + 私有地址校验），拒绝指向内网的实例
+      await assertSafeWebUrl(process.env.SEARCH_API_URL);
       var customUrl = process.env.SEARCH_API_URL.replace(/\/+$/, '');
       if (instances.indexOf(customUrl) < 0) instances.unshift(customUrl);
     } catch (e) {

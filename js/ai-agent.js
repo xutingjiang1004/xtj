@@ -1165,6 +1165,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   window.clearAiHistoryCacheForUser = clearAiHistoryCacheForUser;
 
+  // ★ activeRenderers 按通道隔离：普通聊天与深页流式渲染共用同一个
+  // S.activeRenderers，深页取消/完成时只能清理 deep 通道的渲染器，
+  // 否则会误伤普通聊天正在流式输出的渲染器（暂停/继续按钮与
+  // abortAllAiRequests 的 cancel 兜底都依赖数组中的活跃渲染器）。
+  function resetActiveRenderersByChannel(channel) {
+    var keep = [];
+    var arr = S.activeRenderers || [];
+    for (var i = 0; i < arr.length; i++) {
+      var r = arr[i];
+      if (!r) continue;
+      if (r.channel && r.channel !== channel) {
+        keep.push(r);
+        continue;
+      }
+      if (typeof r.cancel === 'function') {
+        try { r.cancel(); } catch (eCancel) {}
+      }
+    }
+    S.activeRenderers = keep;
+  }
+
   function abortCurrentRequest() {
     clearStreamCleanup();
     // Phase 1: Cancel shared controller in-flight request
@@ -1778,7 +1799,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       footer.innerHTML = '';
       if (msg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
       var badge = el('span', { class: 'ai-msg-thinking-badge' });
-      badge.innerHTML = AI_THINK_ICON + ' ' + finalThinkingMode;
+      // ★ XSS 修复：服务端回传的 thinking_mode 一律 textContent 写入，
+      // SVG 图标为本文件常量（硬编码字符串），单独用 insertAdjacentHTML 插入。
+      badge.insertAdjacentHTML('afterbegin', AI_THINK_ICON);
+      badge.appendChild(document.createTextNode(' ' + finalThinkingMode));
       footer.appendChild(badge);
       if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
       if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索：' + (msg.search_count || 0) }));
@@ -2136,6 +2160,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     var api = {
+      // ★ 渲染器通道标记：'chat'（普通聊天）/ 'deep'（深页），供按通道清理
+      channel: options.channel || 'chat',
       append: function(text) {
         if (cancelled || !targetEl || !text || finished) return;
         pending += String(text);
@@ -2358,6 +2384,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // 鏋勯€犳繁搴︽€濊€冭繘搴﹀崱鐗?(鏋佺畝椋庢牸)
   // ★ U2 重做: 4 角凸起 sparkle (ChatGPT/Claude 风格, 替代菱形)
   var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none" style="vertical-align:-2px"><ellipse cx="8" cy="11.2" rx="3.4" ry="2.7"/><circle cx="4.6" cy="6.6" r="1.5"/><circle cx="8" cy="5" r="1.5"/><circle cx="11.4" cy="6.6" r="1.5"/></svg>';
+  // ★ 流式正文内容长度上限：与 reasoning 200k 上限对齐，防止超长回复/异常流
+  // 让字符串无限累积并导致每帧 renderMarkdown 的 O(n²) 渲染越来越卡。
+  var AI_CONTENT_MAX_LEN = 500000;
+  // 带上限追加：返回截断到 cap 以内的新字符串
+  function appendCapped(base, chunk, cap) {
+    base = base || '';
+    if (!chunk) return base;
+    cap = cap || AI_CONTENT_MAX_LEN;
+    var room = cap - base.length;
+    if (room <= 0) return base;
+    var c = String(chunk);
+    return base + (c.length > room ? c.slice(0, room) : c);
+  }
   var AI_RESEARCH_STEPS = ['拆解问题', '分析信息', '组织结构', '生成回答'];
   var AI_RESEARCH_THINKING_TEXTS = ['正在拆解问题', '正在分析上下文', '正在组织思路', '正在构建回答结构'];
   var AI_RESEARCH_RESEARCH_TEXTS = ['正在检索相关信息', '正在归纳研究要点', '正在生成研究结论'];
@@ -3022,10 +3061,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         retryFn: options.retryFn
       });
       researchCard._researchState.startedAt = Date.now();
-      researchCard._researchState.elapsedTimer = setInterval(function() {
-        if (researchCard._done) return;
+      var elapsedTimer = setInterval(function() {
+        // ★ 定时器泄漏修复：_done 后自清理，避免历史回看卡片空转永久驻留
+        if (researchCard._done) { try { clearInterval(elapsedTimer); } catch (e) {} researchCard._researchState.elapsedTimer = null; return; }
         syncResearchElapsed(researchCard, Date.now() - researchCard._researchState.startedAt);
       }, 1000);
+      researchCard._researchState.elapsedTimer = elapsedTimer;
       researchCard._researchState.animator = createResearchCardAnimator(researchCard);
       researchCard._cleanupTimer = function() {
         stopResearchCardAnimation(researchCard);
@@ -3194,7 +3235,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Reset sending state so user can send again
     S.sending = false;
     S.paused = false;
-    S.activeRenderers = [];
+    // ★ 只清理 deep 通道渲染器，避免误伤普通聊天正在流式输出的渲染器
+    resetActiveRenderersByChannel('deep');
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
     // ★ 修复：cancelDeepThink 只清深页独立 controller，不影响普通聊天
@@ -3560,6 +3602,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(dtMessagesEl, true);
     var label = '历史研究记录' + (item.query ? '：' + String(item.query).slice(0, 48) : '');
     renderTavilyResearchReport(card, item.answer, item.sources, null, label, item.mode || S.dtResearchMode);
+    // ★ 定时器/动画泄漏修复：历史回看完成后显式清理 interval 与 canvas rAF，
+    // 否则每次点击一条历史研究都会残留一个每秒空转的 setInterval + 常驻动画帧。
+    try { if (card._cleanupTimer) card._cleanupTimer(); } catch (eCleanup) {}
+    try { stopResearchCardAnimation(card); } catch (eAnim) {}
     try { card._done = true; } catch (e) {}
     scrollToBottom(dtMessagesEl, true);
   }
@@ -3582,6 +3628,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var idleTimer = null;
     var timedOut = false;
     var content = '';
+    var contentCapped = false;
     var sources = [];
 
     var resolveDone, rejectDone;
@@ -3643,8 +3690,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       } else if (evt.type === 'research_content') {
         var chunk = evt.content != null ? String(evt.content) : (evt.text != null ? String(evt.text) : '');
-        if (chunk) content += chunk;
-        if (onProgress) { try { onProgress({ content: chunk }); } catch (e) {} }
+        // ★ 内容长度上限：与普通/深页正文 500k 上限对齐，防止异常流无限累积
+        if (chunk) {
+          if (!contentCapped && content.length >= AI_CONTENT_MAX_LEN) {
+            contentCapped = true;
+            notify('回复过长，已截断');
+          }
+          var room = AI_CONTENT_MAX_LEN - content.length;
+          var accepted = room > 0 ? chunk.slice(0, room) : '';
+          if (accepted) {
+            content += accepted;
+            if (onProgress) { try { onProgress({ content: accepted }); } catch (e) {} }
+          }
+        }
       } else if (evt.type === 'research_sources') {
         var srcs = Array.isArray(evt.sources) ? evt.sources : (Array.isArray(evt.data) ? evt.data : []);
         if (srcs.length) sources = srcs;
@@ -4041,7 +4099,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
 
   // ===================== 共享 SSE 处理循环 =====================
-  // 琚?handleSendDeepThink 鍜?handleDeepThinkPageSend 共用
+  // 被 handleSendDeepThink（历史死代码）与 handleDeepThinkPageSend 共用
   async function processDeepThinkSSE(opts) {
     var reader = opts.reader;
     var controller = opts.controller;
@@ -4065,6 +4123,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var decoder = new TextDecoder();
     var buffer = '';
     var timedOut = false;
+    var contentTruncated = false;
     var MAX_EVENT_SIZE = 512 * 1024; // 512KB
 
     function safeRemoveProgressCard(removeNode) {
@@ -4167,7 +4226,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } else {
           if (contentRendererRef.value) { try { contentRendererRef.value.stop(); } catch (e8) {} }
           answerEl.innerHTML = '';
-          contentRendererRef.value = createSmoothTextRenderer(answerEl, { minChunk: 8, maxChunk: 64, charsPerMs: 3.4, onDone: function() { finalizeAnswer(); } });
+          contentRendererRef.value = createSmoothTextRenderer(answerEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 3.4, onDone: function() { finalizeAnswer(); } });
           contentRendererRef.value.append(contentForRender);
           contentRendererRef.value.finish(contentForRender);
           contentRendererRef.value = null;
@@ -4328,15 +4387,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var aEl = aiNodeRef.value.querySelector('.ai-think-answer');
           if (aEl && !answerRendererRef.value) {
             aEl.innerHTML = '';
-            answerRendererRef.value = createSmoothTextRenderer(aEl, { minChunk: 8, maxChunk: 64, charsPerMs: 3.2, plainStream: true });
+            answerRendererRef.value = createSmoothTextRenderer(aEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 3.2, plainStream: true });
           }
-          aiContentRef.value += String(evt.chunk);
-          if (answerRendererRef.value) answerRendererRef.value.append(evt.chunk);
+          if (!contentTruncated && aiContentRef.value.length >= AI_CONTENT_MAX_LEN) {
+            contentTruncated = true;
+            notify('回复过长，已截断');
+          }
+          var room = AI_CONTENT_MAX_LEN - aiContentRef.value.length;
+          var accepted = room > 0 ? String(evt.chunk).slice(0, room) : '';
+          aiContentRef.value += accepted;
+          if (answerRendererRef.value && accepted) answerRendererRef.value.append(accepted);
           scrollToBottom(scrollEl, false);
           return;
         }
         if (evt.type === 'content') {
-          aiContentRef.value += evt.text || '';
+          if (!contentTruncated && aiContentRef.value.length >= AI_CONTENT_MAX_LEN) {
+            contentTruncated = true;
+            notify('回复过长，已截断');
+          }
+          var room2 = AI_CONTENT_MAX_LEN - aiContentRef.value.length;
+          var accepted2 = room2 > 0 ? String(evt.text || '').slice(0, room2) : '';
+          aiContentRef.value += accepted2;
           ensureThinkCardNode();
           if (!answerStartedRef.value && evt.text) {
             answerStartedRef.value = true;
@@ -4374,7 +4445,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (evt.type === 'done') {
           safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
-          S.sending = false; S.paused = false; S.activeRenderers = []; S._dtAbortController = null; S.deepThinkJob = null; S.deepThinkProgressCard = null;
+          S.sending = false; S.paused = false; resetActiveRenderersByChannel('deep'); S._dtAbortController = null; S.deepThinkJob = null; S.deepThinkProgressCard = null;
           if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
           if (progressCard) { try { progressCard._done = true; } catch (e) {} }
           try {
@@ -5179,7 +5250,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S.deepThinkProgressCard = null;
         S._dtAbortController = null;
         S.paused = false;
-        S.activeRenderers = [];
+        resetActiveRenderersByChannel('deep');
         var dtPB = document.getElementById('dtPauseBtn');
         if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '暂停'; }
       }
@@ -5389,7 +5460,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
             answerEl.innerHTML = '';
             contentRenderer = createSmoothTextRenderer(answerEl, {
-              minChunk: 8, maxChunk: 64, charsPerMs: 3.4,
+              channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 3.4,
               onDone: function() { finalizeAnswer(); }
             });
             contentRenderer.append(contentForRender);
@@ -6323,7 +6394,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S.sending = false;
         S.abortController = null;
         S.paused = false;
-        S.activeRenderers = [];
+        resetActiveRenderersByChannel('chat');
         if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
       }
     }
@@ -6427,6 +6498,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Phase 1: Shared request controller + telemetry (feature-flagged)
     var sharedCtrl = null;
     var telemetry = null;
+    var sharedAbortHandler = null;
     if (window.XtjAiCore && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
       sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: reqId,
@@ -6440,6 +6512,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (window.XtjAiCore.Telemetry) {
         telemetry = window.XtjAiCore.Telemetry.create();
         telemetry.start(reqId, 'cr_' + S.clientRequestId);
+      }
+      // ★ 双 AbortController 统一：fetch 始终绑定本地 controller.signal，
+      // sharedCtrl 的超时/取消通过 externalSignal 转发到同一个 controller（参考 sendOnce 转发模式），
+      // 避免看门狗 abort 落空导致 300s 绝对超时失效。
+      if (sharedCtrl && sharedCtrl.signal) {
+        sharedAbortHandler = function() {
+          try {
+            controller._abortReason = (sharedCtrl.getCancelReason && sharedCtrl.getCancelReason()) || 'shared';
+            try { controller.abort(controller._abortReason); } catch (e) {}
+          } catch (eShared) {}
+        };
+        if (sharedCtrl.signal.aborted) sharedAbortHandler();
+        else if (typeof sharedCtrl.signal.addEventListener === 'function') sharedCtrl.signal.addEventListener('abort', sharedAbortHandler, { once: true });
       }
     }
 
@@ -6463,7 +6548,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         method: 'POST',
         headers: headers,
         body: fetchBody,
-        signal: sharedCtrl ? sharedCtrl.signal : controller.signal
+        signal: controller.signal
       });
       
       if (!resp.ok) {
@@ -6530,6 +6615,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var buffer = '';
       var aiContent = '';
       var aiReasoning = '';
+      var contentTruncated = false;
       var reasoningStarted = false;
       // P5: using assistantNode (single DOM node)
       // P5: using assistantBubble (single DOM node)
@@ -7251,9 +7337,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             var contentChunk = evt.text || '';
             if (!contentChunk) continue;
-            aiContent += contentChunk;
-            ensureAssistantBubbleReady();
-            if (contentRenderer) contentRenderer.append(contentChunk);
+            // ★ 内容长度上限：防止超长回复/异常流无限累积
+            if (!contentTruncated && aiContent.length >= AI_CONTENT_MAX_LEN) {
+              contentTruncated = true;
+              notify('回复过长，已截断');
+            }
+            var room = AI_CONTENT_MAX_LEN - aiContent.length;
+            var accepted = room > 0 ? String(contentChunk).slice(0, room) : '';
+            aiContent += accepted;
+            if (accepted) {
+              ensureAssistantBubbleReady();
+              if (contentRenderer) contentRenderer.append(accepted);
+            }
             continue;
           }
           
@@ -7261,7 +7356,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             hideAssistantTyping();
             S.sending = false;
             S.paused = false;
-            S.activeRenderers = [];
+            resetActiveRenderersByChannel('chat');
             S.abortController = null;
             if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
@@ -7456,13 +7551,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (telemetry) { telemetry.finalize('error', { code: 'STREAM_INTERRUPTED', phase: 'stream_read', message: String(fetchErr && fetchErr.message || '') }); }
         }
       } else {
-        // AbortError: 用户主动停止
+        // AbortError: 用户主动停止，或 sharedCtrl 300s 绝对超时
+        var sharedTimedOut = !!(sharedCtrl && typeof sharedCtrl.getCancelReason === 'function' && sharedCtrl.getCancelReason() === 'timeout');
+        var ctrlReason = (controller && controller._abortReason) || '';
+        var timedOut300 = sharedTimedOut || ctrlReason === 'timeout';
         if (sharedCtrl) {
-          sharedCtrl.cancel('user_cancelled');
-          if (telemetry) { telemetry.finalize('cancelled', { code: 'REQUEST_CANCELLED', phase: 'stream_read', message: '用户取消' }); }
+          sharedCtrl.cancel(timedOut300 ? 'timeout' : 'user_cancelled');
+          if (telemetry) { telemetry.finalize(timedOut300 ? 'timeout' : 'cancelled', { code: timedOut300 ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED', phase: 'stream_read', message: timedOut300 ? '思考超时' : '用户取消' }); }
         }
+        // ★ 300s 绝对超时与用户取消区分：给出明确提示，避免用户误以为
+        // AI 未回复而重发导致重复扣费/重复请求。
+        if (timedOut300) notify('思考超时（超过 5 分钟），请重试');
         if (aiContent) {
           finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+          if (timedOut300) {
+            try {
+              assistantNode.appendChild(el('div', { class: 'ai-error-note' }, '思考超时，回复可能不完整'));
+            } catch (eTimeoutNote) {}
+          }
         } else {
           hideAssistantTyping();
           try { if (assistantNode) assistantNode.remove(); } catch (eAbortNode) {}
@@ -7473,6 +7579,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     
     if (sharedCtrl) {
+      if (sharedAbortHandler && typeof sharedCtrl.signal.removeEventListener === 'function') {
+        try { sharedCtrl.signal.removeEventListener('abort', sharedAbortHandler); } catch (eRemoveShared) {}
+      }
       window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', sharedCtrl);
       sharedCtrl.dispose();
     }

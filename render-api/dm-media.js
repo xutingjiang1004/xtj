@@ -91,8 +91,10 @@ async function verifyStorageObject(supabase, storagePath, expected) {
     return { ok: false, state: 'invalid', code: 'media_size_unverified', error: 'Media object size could not be verified' };
   }
   if (size > MAX_DM_MEDIA_SIZE) return { ok: false, state: 'invalid', code: 'media_too_large', error: 'Media file is too large' };
-  const expectedMime = String(expected && (expected.mimeType || expected.mime_type) || '').trim().toLowerCase();
-  const actualMime = String(metadata.mimetype || metadata.mimeType || metadata.contentType || '').trim().toLowerCase();
+  // 审计 🟡：MIME 归一——storage content_type 常见大小写/参数（;charset=...）差异，
+  // split(';')[0] + trim + lowercase 后再精确比较，避免存储元数据正常波动误拒合法媒体
+  const expectedMime = String(expected && (expected.mimeType || expected.mime_type) || '').trim().toLowerCase().split(';')[0].trim();
+  const actualMime = String(metadata.mimetype || metadata.mimeType || metadata.contentType || '').trim().toLowerCase().split(';')[0].trim();
   if (expectedMime && (!actualMime || actualMime !== expectedMime)) {
     return { ok: false, state: 'invalid', code: 'media_mime_unverified', error: 'Media object MIME type does not match the registered upload' };
   }
@@ -257,7 +259,15 @@ async function reserveDmMediaUpload(supabase, options) {
         message_id: null,
         updated_at: new Date().toISOString()
       }).eq('id', row.id).eq('status', 'sending');
-      if (row.updated_at) query.eq('updated_at', row.updated_at);
+      // 审计 🟡：JS 的 toISOString() 只有毫秒精度，而 PostgreSQL timestamptz 是微秒精度，
+      // 精确 .eq('updated_at', row.updated_at) 在精度差异下恒不匹配会导致租约无法回收、
+      // 发送卡死到租约过期。改用 ±1ms 容差范围做 CAS：既允许微秒精度差异，
+      // 又能在并发写入时间差 >1ms 时正确判定冲突。
+      const casMs = Date.parse(String(row.updated_at || ''));
+      if (Number.isFinite(casMs)) {
+        query.gte('updated_at', new Date(casMs - 1).toISOString())
+             .lte('updated_at', new Date(casMs + 1).toISOString());
+      }
       reclaim = await query.select('*').maybeSingle();
     } catch (error) {
       return { ok: false, state: 'query_failed', code: 'media_registry_reserve_failed', error: error };
