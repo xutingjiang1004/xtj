@@ -537,10 +537,10 @@ function buildDefaultAgents(message) {
   return agents;
 }
 
-function buildToolExecutor(sseSend, agentRole, sourcesAccum, queriesAccum, searchCountAccum) {
+function buildToolExecutor(sseSend, agentRole, sourcesAccum, queriesAccum, searchCountAccum, userName) {
   return async function(tc) {
     var tRes = null;
-    try { tRes = await executeToolCall(tc); } catch (e) {
+    try { tRes = await executeToolCall(tc, { userName: userName || '' }); } catch (e) {
       tRes = { tool_name: (tc.function && tc.function.name) || '', error: (e && e.message) || '工具执行失败' };
     }
     if (tc.function && tc.function.name === 'search_web') {
@@ -885,13 +885,16 @@ async function executeToolCall(toolCall, context) {
         var result = await searchWeb(q, maxR);
         var resultsArr = result && result.results ? result.results : [];
         var webItems = resultsArr.slice(0, 20).map(function(r) {
+          var rawUrl = String(r.url || r.link || '');
+          // URL 协议白名单：只保留 http/https，其余丢弃（防 javascript:/data: 直达前端）
+          var safeUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl.slice(0, 2000) : '';
           return {
             title: String(r.title || '').slice(0, 200),
-            url: String(r.url || r.link || '').slice(0, 2000),
+            url: safeUrl,
             snippet: String(r.snippet || r.description || '').slice(0, 300),
             source: String(r.source || '').slice(0, 80)
           };
-        });
+        }).filter(function(it) { return it.url; });
         return {
           tool_name: name,
           query: q,
@@ -901,7 +904,8 @@ async function executeToolCall(toolCall, context) {
           cards: webItems.length ? [aiSiteCard('web_search', '联网搜索', { query: q, results: webItems })] : []
         };
       } catch (e) {
-        return { tool_name: name, query: q, error: e && e.message || '搜索失败' };
+        // 脱敏：不把底层 provider/状态码透传给模型与前端
+        return { tool_name: name, query: q, error: '搜索服务暂时不可用' };
       }
     }
     case 'tavily_search': {
@@ -926,13 +930,15 @@ async function executeToolCall(toolCall, context) {
         if (tavilyResult.error) return { tool_name: name, query: tq, error: tavilyResult.error };
         var tArr = tavilyResult.results || [];
         var tItems = tArr.slice(0, 10).map(function(r) {
+          var tRawUrl = String(r.url || r.link || '');
+          var tSafeUrl = /^https?:\/\//i.test(tRawUrl) ? tRawUrl.slice(0, 2000) : '';
           return {
             title: String(r.title || '').slice(0, 200),
-            url: String(r.url || r.link || '').slice(0, 2000),
+            url: tSafeUrl,
             snippet: String(r.snippet || r.content || r.description || '').slice(0, 300),
             source: 'Tavily'
           };
-        });
+        }).filter(function(it) { return it.url; });
         return {
           tool_name: name,
           query: tq,
@@ -942,7 +948,7 @@ async function executeToolCall(toolCall, context) {
           cards: tItems.length ? [aiSiteCard('web_search', 'Tavily 搜索', { query: tq, results: tItems })] : []
         };
       } catch (e) {
-        return { tool_name: name, query: tq, error: e && e.message || 'Tavily 搜索失败' };
+        return { tool_name: name, query: tq, error: 'Tavily 搜索服务暂时不可用' };
       }
     }
     case 'get_weather': {
@@ -961,14 +967,15 @@ async function executeToolCall(toolCall, context) {
         }
         return { tool_name: name, location: loc, error: '暂不支持该城市天气查询，支持的城市：北京、上海、广州、深圳、杭州、湖州、安吉、东京、大阪、首尔、济州岛、巴黎、伦敦、纽约' };
       } catch (e) {
-        return { tool_name: name, location: loc, error: e && e.message || '天气查询失败' };
+        // 服务端故障与"城市不支持"区分开：不把底层错误透传
+        return { tool_name: name, location: loc, error: '天气服务暂时不可用，请稍后重试' };
       }
     }
     case 'get_current_time': {
       var now = new Date();
-      var weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
       var cnf = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
-      var weekday = weekdays[now.getDay()];
+      // ★ 时区修复：星期也用 Asia/Shanghai 计算，避免服务器 UTC 时区跨午夜不一致
+      var weekday = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long' }).format(now);
       var timeResult = '【当前时间】\n北京时间：' + cnf + '\n星期：' + weekday + '\n时区：Asia/Shanghai (UTC+8)';
       return {
         tool_name: name,
@@ -1124,7 +1131,7 @@ async function executeToolCall(toolCall, context) {
 }
 
 // 搜索结果自动补全：当结果不足时，从已有结果提取关键词补充搜索
-async function autoSupplementSearch(originalQuery, currentResults, maxR) {
+async function autoSupplementSearch(originalQuery, currentResults, maxR, userName) {
   if (!Array.isArray(currentResults)) currentResults = [];
   if (currentResults.length >= 5) return currentResults;
   // 从已有结果的标题/摘要中提取中文关键词
@@ -1145,10 +1152,11 @@ async function autoSupplementSearch(originalQuery, currentResults, maxR) {
   if (newKeywords.length === 0) return currentResults;
   var existingUrls = {};
   currentResults.forEach(function(r) { if (r.url) existingUrls[r.url] = true; });
-  // 并行补充搜索
+  // 并行补充搜索（带配额：userName 传入时走 searchWebForUser）
   var supplementPromises = newKeywords.map(function(kw) {
-    return searchWeb(kw, Math.ceil(maxR / 2)).then(function(sr) {
-      return (sr && sr.results) || [];
+    var p = userName ? searchWebForUser(userName, kw, Math.ceil(maxR / 2)) : searchWeb(kw, Math.ceil(maxR / 2));
+    return p.then(function(sr) {
+      return (sr && (sr.results || [])) || [];
     });
   });
   var extraResultsArrays = await Promise.all(supplementPromises);
@@ -6523,7 +6531,7 @@ async function runDeepThinkAgent(opts) {
     if (!disableSearch) {
       deepSeekOpts.tools = AI_TOOLS;
       deepSeekOpts.tool_choice = 'auto';
-      deepSeekOpts.tool_executor = buildToolExecutor(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum);
+      deepSeekOpts.tool_executor = buildToolExecutor(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName);
     }
     var agentPromise = callDeepSeek(
       [
@@ -6719,7 +6727,7 @@ async function runDeepThinkWorker(opts) {
       if (needSearch) {
         callOpts.tools = AI_TOOLS;
         callOpts.tool_choice = 'auto';
-        callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum);
+        callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum, userName);
       }
       workerAbortController = new AbortController();
       if (cancelToken.cancelled) workerAbortController.abort();
@@ -16204,21 +16212,21 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
               var parallelTasks = [];
 
-              // 任务1：结果不足时自动补全
+              // 任务1：结果不足时自动补全（带配额）
               if (allResults.length > 0 && allResults.length < 5 && firstQuery) {
                 parallelTasks.push(
-                  autoSupplementSearch(firstQuery, allResults.slice(), 20).then(function(supplemented) {
-                    return supplemented.length > allResults.length ? supplemented.slice(allResults.length) : [];
+                  searchWebForUser(userName, firstQuery, 20).then(function(supplemented) {
+                    return supplemented && supplemented.results ? supplemented.results.slice(allResults.length) : [];
                   })
                 );
               }
 
-              // 任务2：AI 只搜了 1-2 个词时，自动扩展多个方向并行搜索
+              // 任务2：AI 只搜了 1-2 个词时，自动扩展多个方向并行搜索（带配额）
               if (allQueries.length <= 2) {
                 var expandedQueries = generateExpandedQueries(message, allQueries, 3);
                 expandedQueries.forEach(function(eq) {
                   parallelTasks.push(
-                    searchWeb(eq, 20).then(function(sr) {
+                    searchWebForUser(userName, eq, 20).then(function(sr) {
                       return (sr && sr.results) || [];
                     })
                   );
@@ -16351,9 +16359,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           srObj = await searchWebForUser(userName, searchQuery, 20);
           sResults = srObj && srObj.results ? srObj.results : [];
           sDiag = srObj && srObj.diagnostics ? srObj.diagnostics : null;
-          // 结果不足时自动补全
+          // 结果不足时自动补全（带配额）
           if (sResults && sResults.length > 0 && sResults.length < 5) {
-            sResults = await autoSupplementSearch(searchQuery, sResults, 20);
+            sResults = await autoSupplementSearch(searchQuery, sResults, 20, userName);
           }
           sResults = cleanSearchResults(sResults, 20);
         } catch (e) { sResults = []; }
