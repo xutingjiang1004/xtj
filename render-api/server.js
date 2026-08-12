@@ -7310,8 +7310,8 @@ function getAiQuotaErrorMessage(reason) {
   return '今日小猫聊天次数已达上限';
 }
 
-// ★ 搜索配额下沉：所有联网搜索路径（模型工具调用、服务端预搜、正则兜底、
-//   多 Agent 搜索）统一在此校验，防止只显式开启 web_search 才校验导致无限免费搜索。
+// ★ 搜索配额下沉：仅约束「第三方」搜索（Tavily/Serper/search_web 工具、服务端预搜等）。
+// 模型内置 web_search（Responses API）不受此限制；额度用尽后仍可走内置搜索。
 async function enforceSearchQuota(userName) {
   if (!userName || userName === ADMIN_USERNAME) return { allowed: true, reason: null, quota: null };
   try {
@@ -7323,6 +7323,12 @@ async function enforceSearchQuota(userName) {
     console.error('[SEARCH-QUOTA] check exception:', e && e.message);
     return { allowed: false, reason: 'quota_unavailable', quota: null };
   }
+}
+
+/** 是否仍可调用第三方搜索（额度未用尽） */
+async function canUseThirdPartySearch(userName) {
+  var gate = await enforceSearchQuota(userName);
+  return !!(gate && gate.allowed);
 }
 
 // 带配额校验的搜索封装：超限返回带 search_quota_exceeded 标记的空结果
@@ -15535,8 +15541,8 @@ async function handleDeepThinkChat(req, res) {
     }
 
     // 2. token/搜索额度 + 请求次数兜底
-    var needSearchDeep = req.body && req.body.web_search === true;
-    var rl = await enforceAiChatAccess(userName, { needSearch: needSearchDeep });
+    // 搜索额度不阻断深度思考整轮（第三方搜索在工具/预搜层单独拦截）
+    var rl = await enforceAiChatAccess(userName, { needSearch: false });
     if (!rl.allowed) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -15950,9 +15956,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       return res.status(400).json({ error: (messageEarly && messageEarly.error) || '消息内容不能为空或过长' });
     }
 
-    // 2. 用户级 token/搜索额度 + 请求次数兜底
-    var needSearchGate = req.body && req.body.web_search === true;
-    var rl = await enforceAiChatAccess(userName, { needSearch: needSearchGate });
+    // 2. 用户级 token + 请求次数兜底。
+    // 搜索额度只约束第三方搜索，不因 search_limit 整段拒绝聊天（额度用尽后仍走内置 web_search）。
+    var rl = await enforceAiChatAccess(userName, { needSearch: false });
     if (!rl.allowed) {
       return res.status(429).json({
         error: getAiQuotaErrorMessage(rl.reason),
@@ -16343,9 +16349,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       return safeEnd();
     }
 
-    // token/搜索额度 + 请求次数兜底
-    var needSearchStream = req.body && req.body.web_search === true;
-    var rl = await enforceAiChatAccess(userName, { needSearch: needSearchStream });
+    // token + 请求次数兜底（搜索额度不在此拦截整轮聊天）
+    var rl = await enforceAiChatAccess(userName, { needSearch: false });
     if (!rl.allowed) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -16501,12 +16506,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var webSearchPref = req.body && req.body.web_search;
     // 主动预搜：开开关，或消息有搜索/时效意图；图片 OCR 默认不预搜
     var proactiveSearch = allowSearch && !blockAutoSearchForOcr && (webSearchPref === true || explicitSearchIntent || liveInfoIntent);
+    // 第三方搜索日额度（免费默认 10 次）；用尽后仅保留模型内置 web_search
+    var thirdPartySearchOkEarly = await canUseThirdPartySearch(userName);
 
-    // ★ P3: 思考态提前 fire 搜索（与后续 DeepSeek 并行），不阻塞首包
+    // ★ P3: 思考态提前 fire 第三方搜索（与后续 DeepSeek 并行），不阻塞首包
     var _preloadedSearchPromise = null;
     var _preloadedSearchResults = null;
     var _preloadedQuery = '';
-    if (useThinking && proactiveSearch && !aborted) {
+    if (thirdPartySearchOkEarly && useThinking && proactiveSearch && !aborted) {
       var _quickSearchHint = explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|搜搜|最新|今天|现在|当前|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|攻略|旅游|景点|推荐|百科|介绍|区别|对比|vs|排行|教程|方法|怎么办|如何|怎么|政策|公告|电影|电视剧|综艺|纪录片|动漫|动画|番剧|iPhone|iPad|Mac|安卓|苹果|三星|华为|小米|oppo|vivo|荣耀|百度|google|谷歌|查查|查资料/i.test(searchCleanMessage);
       if (_quickSearchHint && searchCleanMessage.length >= 2) {
         var _psQuery = searchCleanMessage.slice(0, 80);
@@ -16598,7 +16605,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       || (webSearchPref === false && validatedModel === DEEPSEEK_RESPONSES_MODEL)
       || (proactiveSearch && validatedModel === DEEPSEEK_RESPONSES_MODEL);
     // 开开关：全力第三方双通道；关开关：仅在搜索意图时允许第三方作补充
-    var useTavilyCluster = (webSearchPref === true) || (webSearchPref === false && proactiveSearch);
+    // 第三方搜索受日额度约束：用尽后 force 关闭第三方，仅保留模型内置 web_search
+    var thirdPartySearchOk = thirdPartySearchOkEarly;
+    var useTavilyCluster = thirdPartySearchOk && ((webSearchPref === true) || (webSearchPref === false && proactiveSearch));
     var webSearchEnabled = (webSearchPref === true);
     if (webSearchPref === true && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
       validatedModel = DEEPSEEK_RESPONSES_MODEL;
@@ -16612,13 +16621,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var searchResultsCollected = [];
       var searchQueriesCollected = [];
 
-      // 服务端预搜补充：
-      // - 开关开：Tavily 双通道
-      // - 思考开：thinking 不能挂 tools，用预搜注入保证有实时资料，同时保留思考过程
-      // - 搜索意图：轻量预搜作补充（不替代内置）
+      // 服务端预搜补充（仅第三方额度未用尽时）
       var tavilyPromise = null;
       var tavilyResults = null;
-      var shouldServerSearch = allowSearch && !blockAutoSearchForOcr && (
+      var shouldServerSearch = thirdPartySearchOk && allowSearch && !blockAutoSearchForOcr && (
         (useTavilyCluster && !hasImageOcrMsg)
         || (useThinking && proactiveSearch)
         || (explicitSearchIntent || liveInfoIntent)
@@ -16634,14 +16640,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           console.error('[AGENT-STREAM] server presearch error:', e && e.message);
           return null;
         });
+      } else {
+        _preloadedSearchPromise = null;
       }
 
-      // 思考开时不挂 tools（API 限制），非思考才挂内置 web_search + 可选 tavily 工具
+      // 思考开时不挂 tools；非思考：内置 web_search +（有额度时）tavily 工具
       var responsesOptions = {
         use_responses_api: true,
         model: validatedModel,
         thinking_mode: thinkingMode,
-        tools: useThinking ? [] : aiToolsForSearch(!!useTavilyCluster),
+        tools: useThinking ? [] : aiToolsForSearch(!!useTavilyCluster && thirdPartySearchOk),
         tool_choice: useThinking ? undefined : 'auto',
         max_tool_rounds: 4,
         signal: requestAbortCtrl ? requestAbortCtrl.signal : null,

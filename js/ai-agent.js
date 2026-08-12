@@ -150,7 +150,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var QUOTA_POLL_MS = 30000;
   var FREE_TOKEN_DEFAULT = 100000;
   var PRO_TOKEN_DEFAULT = 1000000;
-  var FREE_SEARCH_DEFAULT = 100;
+  var FREE_SEARCH_DEFAULT = 10;
 
   function formatTokenCount(n) {
     var num = Number(n);
@@ -1239,6 +1239,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (v) localStorage.setItem(key, v);
       else localStorage.removeItem(key);
     } catch (e) {}
+  }
+
+  function readConvId() {
+    try {
+      var un = readUserName();
+      var key = CONV_ID_KEY + (un ? ':' + encodeURIComponent(un) : '');
+      var v = localStorage.getItem(key);
+      if (v && /^[A-Z0-9\-]{6,}$/i.test(v)) return v;
+      // 兼容旧版无用户名前缀的键
+      var legacy = localStorage.getItem(CONV_ID_KEY);
+      if (legacy && /^[A-Z0-9\-]{6,}$/i.test(legacy)) return legacy;
+    } catch (e) {}
+    return '';
   }
 
   function readUserName() {
@@ -4833,6 +4846,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var nowIso = new Date().toISOString();
     var userMsg = { role: 'user', content: text, created_at: nowIso };
     S.messages.push(userMsg);
+    try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache2) {}
     appendMessage(messagesEl, userMsg);
     S.autoScrollPinned = true;
     scrollToBottom(messagesEl, true);
@@ -6643,6 +6657,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var nowIso = new Date().toISOString();
     var userMsg = { role: 'user', content: displayText, created_at: nowIso };
     S.messages.push(userMsg);
+    try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache) {}
     appendMessage(messagesEl, userMsg);
     S.autoScrollPinned = true;
     scrollToBottom(messagesEl, true);
@@ -7011,6 +7026,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           })
         };
         S.messages.push(aiMsg);
+        // 流式完成后立刻写本地缓存，避免关面板/重进时服务端尚未落库导致「上一条不见了」
+        try { setAiHistoryCache(S.conversationId, S.messages); } catch (eCache) {}
         
         if (node) {
           // 如果有搜索结果，把已有的搜索条移入消息节点（而非单独在 container 里）
@@ -7853,10 +7870,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.historyController = loadController;
 
     var hasCache = false;
+    var cachedMsgs = null;
     if (!before && messagesEl) {
       messagesEl.setAttribute('aria-busy', 'true');
       var cachedData = getAiHistoryCache(S.conversationId);
-      var cachedMsgs = cachedData && cachedData.messages;
+      cachedMsgs = cachedData && cachedData.messages;
       
       if (cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
         hasCache = true;
@@ -7920,11 +7938,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var msgs = r.data.messages || [];
 
       if (!msgs.length && !before) {
+        // 服务端暂无消息时：若本地/缓存已有完整对话，保留不擦掉（刚聊完尚未落库、或短暂查询空窗）
+        var keepLocal = (S.messages && S.messages.length > 0)
+          ? S.messages
+          : (hasCache && cachedMsgs && cachedMsgs.length ? cachedMsgs : null);
+        if (keepLocal && keepLocal.length) {
+          S.messages = keepLocal;
+          if (!messagesEl.querySelector('.ai-msg')) {
+            messagesEl.innerHTML = '';
+            var keepFrag = document.createDocumentFragment();
+            keepLocal.forEach(function(m) { keepFrag.appendChild(buildMessageNode(m, messagesEl)); });
+            messagesEl.appendChild(keepFrag);
+          }
+          try { setAiHistoryCache(S.conversationId || (r.data && r.data.conversation_id), keepLocal); } catch (eKeep) {}
+          return;
+        }
         S.messages = [];
         messagesEl.innerHTML = '';
         appendEmptyState(messagesEl);
-        var remKey = getAiHistoryCacheKey(S.conversationId);
-        if (remKey) { try { sessionStorage.removeItem(remKey); } catch (e) {} }
         return;
       }
 
@@ -9062,6 +9093,13 @@ function showChatMessages() {
     var lifecycleId = ++S.lifecycleId;
     window.__xtjAiChatActive = true;
     S.autoScrollPinned = true;
+    // 恢复上次会话 id，避免每次重进变成「无 conversation_id」只靠服务端猜最近一条
+    try {
+      if (!S.conversationId) {
+        var restoredCid = readConvId();
+        if (restoredCid) S.conversationId = restoredCid;
+      }
+    } catch (eRest) {}
 
     try { closeSiteSearch(); } catch (e) {}
     var aiPanel = document.getElementById('panelAiChat');

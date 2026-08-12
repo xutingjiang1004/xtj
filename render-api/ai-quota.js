@@ -1,7 +1,8 @@
 /**
  * AI token quota + Pro membership helpers.
- * Free: 100k tokens/day + 100 web searches/day
- * Pro:  1M tokens/day + unlimited searches
+ * Free: 100k tokens/day + 10 third-party web searches/day
+ * Pro:  1M tokens/day + unlimited third-party searches
+ * 搜索额度仅约束第三方搜索（Tavily/Serper 等）；额度用尽后仍可用模型内置 web_search。
  *
  * Stripe is intentionally NOT wired here — only membership storage + stubs.
  */
@@ -9,7 +10,7 @@
 
 var FREE_TOKEN_LIMIT = Math.max(1000, parseInt(process.env.AI_FREE_TOKEN_DAILY || '100000', 10) || 100000);
 var PRO_TOKEN_LIMIT = Math.max(FREE_TOKEN_LIMIT, parseInt(process.env.AI_PRO_TOKEN_DAILY || '1000000', 10) || 1000000);
-var FREE_SEARCH_LIMIT = Math.max(0, parseInt(process.env.AI_FREE_SEARCH_DAILY || '100', 10) || 100);
+var FREE_SEARCH_LIMIT = Math.max(0, parseInt(process.env.AI_FREE_SEARCH_DAILY || '10', 10) || 10);
 
 function limits() {
   return {
@@ -115,7 +116,7 @@ function normalizeQuotaPayload(raw) {
 
 function getTokenQuotaErrorMessage(reason) {
   if (reason === 'token_limit') return '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
-  if (reason === 'search_limit') return '今日网页搜索次数已达上限，开通 Pro 可无限搜索';
+  if (reason === 'search_limit') return '今日第三方网页搜索次数已达上限，仍可用模型内置搜索；开通 Pro 可无限第三方搜索';
   if (reason === 'quota_unavailable') return '额度服务暂不可用，请稍后重试';
   if (reason === 'no_user') return '请先登录后再使用小猫 AI';
   if (reason === 'hourly_limit') return '小猫太忙了，休息一下';

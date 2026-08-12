@@ -43,14 +43,14 @@ test('billable tokens include prompt + completion + reasoning and never undercou
   assert.ok(est >= 1);
 });
 
-test('quota defaults match free 100k / pro 1M / free search 100', () => {
+test('quota defaults match free 100k / pro 1M / free search 10', () => {
   assert.equal(quotaMod.FREE_TOKEN_LIMIT, 100000);
   assert.equal(quotaMod.PRO_TOKEN_LIMIT, 1000000);
-  assert.equal(quotaMod.FREE_SEARCH_LIMIT, 100);
+  assert.equal(quotaMod.FREE_SEARCH_LIMIT, 10);
   var lim = quotaMod.limits();
   assert.equal(lim.free_token_limit, 100000);
   assert.equal(lim.pro_token_limit, 1000000);
-  assert.equal(lim.free_search_limit, 100);
+  assert.equal(lim.free_search_limit, 10);
 });
 
 test('migration defines token quota tables and RPCs', () => {

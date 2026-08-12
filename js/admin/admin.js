@@ -4974,18 +4974,15 @@ async function initAdminClient() {
         content.innerHTML = '<div class="ai-invite-empty">加载中...</div>';
         var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
         try {
-            var [codesData, redemptionsData, proUsersData, dailyUsageData] = await Promise.all([
+            var [codesData, redemptionsData, proUsersData] = await Promise.all([
                 apiCall('GET', '/admin/ai-agent/invite-codes?page=1&page_size=50'),
                 apiCall('GET', '/admin/ai-agent/invite-redemptions?page=1&page_size=30'),
-                apiCall('GET', '/admin/ai-agent/pro-users'),
-                apiCall('GET', '/admin/ai-agent/daily-usage?limit=80').catch(function() { return null; })
+                apiCall('GET', '/admin/ai-agent/pro-users')
             ]);
 
             var codes = (codesData && codesData.list) || [];
             var redemptions = (redemptionsData && redemptionsData.list) || [];
             var proUsers = (proUsersData && proUsersData.list) || [];
-            var dailyUsage = (dailyUsageData && dailyUsageData.list) || [];
-            var dayKey = (dailyUsageData && dailyUsageData.day_key) || '';
 
             var html = ['<div class="ai-invite-page">'];
 
@@ -5069,39 +5066,7 @@ async function initAdminClient() {
             }
             html.push('</div>');
 
-            // ---- 今日用户使用（含普通 free） ----
-            var freeDaily = dailyUsage.filter(function(u) {
-                return !(u.quota && u.quota.is_pro);
-            });
-            var proDaily = dailyUsage.filter(function(u) {
-                return !!(u.quota && u.quota.is_pro);
-            });
-            html.push(
-                '<div class="ai-invite-card">',
-                '<div class="ai-invite-card-head"><h3>今日用户使用情况</h3><span class="count-pill">' + dailyUsage.length + '</span></div>',
-                dayKey ? ('<div class="ai-usage-day-hint">统计日（上海）：' + escapeHtml(String(dayKey)) + ' · Pro ' + proDaily.length + ' · 免费 ' + freeDaily.length + '</div>') : ''
-            );
-            if (!dailyUsage.length) {
-                html.push('<div class="ai-invite-empty">今日暂无额度消耗记录</div>');
-            } else {
-                html.push('<div class="ai-usage-user-list">');
-                dailyUsage.forEach(function(u) {
-                    var q = u.quota || null;
-                    html.push(
-                        '<div class="ai-usage-user-card">',
-                        '<div class="ai-usage-user-top">',
-                        '<div class="ai-usage-user-who">',
-                        '<span class="ai-usage-user-name">' + escapeHtml(u.user_name || '—') + '</span>',
-                        '<span class="ai-usage-user-sub">' + ((q && q.is_pro) ? 'Pro 会员' : '普通用户') + '</span>',
-                        '</div>',
-                        '</div>',
-                        renderAdminQuotaUsageBlock(q, { title: '今日额度' }),
-                        '</div>'
-                    );
-                });
-                html.push('</div>');
-            }
-            html.push('</div>');
+            // 「今日用户使用情况」与上方「最近激活记录和使用情况」重复，已移除
 
             html.push(
                 '<div class="ai-invite-card">',
