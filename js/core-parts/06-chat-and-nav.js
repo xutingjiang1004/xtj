@@ -2046,16 +2046,27 @@
                 }
 
                 try {
-                    // content 存为 JSON：{title, content}（posts 表只有 title 字段）
-                    const storeData = JSON.stringify({ title: title, content: content });
-                    const { error } = await sb.from('posts').insert([{
-                        user_name: ADMIN_NAME,
-                        content: storeData,
-                        media_type: ANN_MARKER,
-                        media_url: '',
-                        actor_key: 'admin_' + Date.now()
-                    }]);
-                    if (error) throw error;
+                    // 走后端 /api/admin/announcement（access token + ADMIN_USERNAME），禁止 anon 直写
+                    var resp;
+                    if (typeof window.xtjProtectedFetch === 'function') {
+                        resp = await window.xtjProtectedFetch('/api/admin/announcement', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ title: title, content: content })
+                        });
+                    } else {
+                        var authHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
+                        resp = await fetch((window.API_BASE || '').replace(/\/$/, '') + '/api/admin/announcement', {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
+                            body: JSON.stringify({ title: title, content: content })
+                        });
+                    }
+                    var data = await resp.json().catch(function() { return {}; });
+                    if (!resp.ok || !data || data.ok === false) {
+                        throw new Error((data && data.error) || ('发布失败 (' + resp.status + ')'));
+                    }
                     titleInput.value = '';
                     contentInput.value = '';
                     showToast('公告发布成功');
@@ -2070,11 +2081,22 @@
                 if (!window.isAdmin()) { if (window.showToast) showToast('无权限'); return; }
                 showConfirm('删除公告', '确定要删除这条公告吗？', '确定', async function() {
                     try {
-                        const { error } = await sb.rpc('delete_post_with_actor', {
-                            p_post_id: ann.id,
-                            p_actor_key: ann.actor_key || 'admin_' + Date.now()
-                        });
-                        if (error) throw error;
+                        var delPath = '/api/admin/announcement/' + encodeURIComponent(ann.id);
+                        var delResp;
+                        if (typeof window.xtjProtectedFetch === 'function') {
+                            delResp = await window.xtjProtectedFetch(delPath, { method: 'DELETE' });
+                        } else {
+                            var delAuth = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
+                            delResp = await fetch((window.API_BASE || '').replace(/\/$/, '') + delPath, {
+                                method: 'DELETE',
+                                credentials: 'include',
+                                headers: delAuth || {}
+                            });
+                        }
+                        var delData = await delResp.json().catch(function() { return {}; });
+                        if (!delResp.ok || (delData && delData.ok === false)) {
+                            throw new Error((delData && delData.error) || ('删除失败 (' + delResp.status + ')'));
+                        }
 
                         const readIds = getReadAnnouncements();
                         var annReadId = window.getAnnouncementId ? window.getAnnouncementId(ann) : ('a_' + ann.id);

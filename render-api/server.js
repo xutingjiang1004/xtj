@@ -2414,12 +2414,25 @@ setInterval(function() {
     rateLimitStore.forEach(function(record, key) {
         if (now > record.resetAt) rateLimitStore.delete(key);
     });
-    // Add size limit to prevent OOM
+    // Add size limit to prevent OOM：优先淘汰已过期与最近最少使用的条目，
+    // 避免"删前 5000 个 Map 插入序 key"被攻击者用多 path 挤出后绕过。
     if (rateLimitStore.size > 10000) {
-        let count = 0;
-        for (let key of rateLimitStore.keys()) {
-            if (count++ > 5000) break;
-            rateLimitStore.delete(key);
+        var now2 = Date.now();
+        var entries = [];
+        rateLimitStore.forEach(function(record, key) {
+          entries.push({ key: key, resetAt: (record && record.resetAt) || 0, count: (record && record.count) || 0 });
+        });
+        entries.sort(function(a, b) {
+          // 已过期优先删；否则 resetAt 更早（更旧窗口）优先；再比 count
+          var aExp = a.resetAt <= now2 ? 0 : 1;
+          var bExp = b.resetAt <= now2 ? 0 : 1;
+          if (aExp !== bExp) return aExp - bExp;
+          if (a.resetAt !== b.resetAt) return a.resetAt - b.resetAt;
+          return a.count - b.count;
+        });
+        var toDelete = Math.min(5000, entries.length);
+        for (var di = 0; di < toDelete; di++) {
+          rateLimitStore.delete(entries[di].key);
         }
     }
 }, 300000);
@@ -3877,16 +3890,16 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
           persistenceRateLimitCache.set(cacheKey, { count: 1, resetAt: resetAt });
           return { limited: false };
         }
-        // 唯一索引冲突（并发方已插入）→ 重读该行；其他错误降级不限流，避免误伤
+        // 唯一索引冲突（并发方已插入）→ 重读该行；其他错误 fail-closed
         if (ins.error && !isDuplicateKeyError(ins.error)) {
-          return { limited: false, degraded: true };
+          return { limited: true, retryAfter: Math.ceil(windowMs / 1000), degraded: true, failClosed: true };
         }
         var reread = await supabase.from('posts')
           .select('id, content, created_at')
           .eq('media_type', DB_RATE_LIMIT_MARKER)
           .eq('media_url', actorKey)
           .maybeSingle();
-        if (reread.error) return { limited: false, degraded: true };
+        if (reread.error) return { limited: true, retryAfter: Math.ceil(windowMs / 1000), degraded: true, failClosed: true };
         rowToUpdate = reread.data;
         if (!rowToUpdate) continue; // 行被并发清理，重试插入
       }
@@ -3917,14 +3930,29 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
       // 乐观锁冲突：强制下一轮重读
       rowToUpdate = null;
     }
-    // 重试耗尽：本次不计入，避免放大；不缓存。
-    // 有意降级为 fail-open（不拦截请求），避免持久化限流故障时误伤正常流量。
-    // TODO(未来迁移)：改用迁移 039 的 atomic RPC（单一原子操作完成读-判-写）彻底消除
-    // 并发冲突与 CAS 重试；届时可移除本 fail-open 分支，让耗尽场景按 DB 判定结果返回。
-    return { limited: false };
+    // 重试耗尽：安全敏感路径 fail-closed，避免并发冲突被当成"未限流"。
+    // 优先尝试迁移 039 的 atomic RPC；失败则按超限处理（带短 retry）。
+    try {
+      var keyDigest2 = crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 32);
+      var actorKey2 = 'rl_' + keyDigest2;
+      var rpc = await supabase.rpc('atomic_increment_rate_limit', {
+        p_media_url: actorKey2,
+        p_user_name: 'system',
+        p_ttl_seconds: Math.max(1, Math.ceil(windowMs / 1000))
+      });
+      if (!rpc.error && rpc.data && rpc.data.ok === true) {
+        var atomicCount = Number(rpc.data.count) || 0;
+        persistenceRateLimitCache.set(cacheKey, { count: atomicCount, resetAt: now + windowMs });
+        if (atomicCount > maxRequests) {
+          return { limited: true, retryAfter: Math.ceil(windowMs / 1000) };
+        }
+        return { limited: false };
+      }
+    } catch (_rpcErr) { /* fall through to fail-closed */ }
+    return { limited: true, retryAfter: Math.ceil(windowMs / 1000), degraded: true, failClosed: true };
   } catch(e) {
-    // DB 不可用时降级为仅本地限流
-    return { limited: false, degraded: true };
+    // DB 不可用：安全路径 fail-closed（调用方 securityRateLimit 会 503/429）
+    return { limited: true, retryAfter: 30, degraded: true, failClosed: true, unavailable: true };
   }
 }
 
@@ -3944,8 +3972,12 @@ function securityRateLimit(windowMs, maxRequests) {
     var result = await checkPersistentRateLimit(key, windowMs, maxRequests);
     if (result.limited) {
       logAttack(key, 'DB_RATE_LIMIT', req.method + ' ' + req.path);
-      res.setHeader('Retry-After', result.retryAfter);
-      return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: result.retryAfter });
+      var retryAfter = result.retryAfter || 30;
+      res.setHeader('Retry-After', retryAfter);
+      if (result.unavailable) {
+        return res.status(503).json({ error: '安全限流服务暂不可用，请稍后重试', code: 'RATE_LIMIT_UNAVAILABLE', retry_after: retryAfter });
+      }
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: retryAfter });
     }
     // 本地限流已通过，持久化限流也通过了
     next();
@@ -7285,17 +7317,22 @@ async function enforceSearchQuota(userName) {
 }
 
 // 带配额校验的搜索封装：超限返回带 search_quota_exceeded 标记的空结果
-// F-1: searchApiCounter 为可选的请求级计数器对象（{ n }），每次成功发起真实
-// 搜索 API 调用即自增，供 recordAiTurnUsage 按真实次数而非"轮次"记账。
+// F-1: searchApiCounter 为可选的请求级计数器对象（{ n }），仅在真实发起搜索后自增，
+// 供 recordAiTurnUsage 按真实次数而非"轮次"记账（失败/未发起不计）。
 async function searchWebForUser(userName, query, maxResults, searchApiCounter) {
   var gate = await enforceSearchQuota(userName);
   if (!gate.allowed) {
     return { results: [], error: gate.reason || 'search_limit', search_quota_exceeded: gate.reason === 'search_limit', quota: gate.quota };
   }
-  if (searchApiCounter && typeof searchApiCounter === 'object') {
-    searchApiCounter.n = (typeof searchApiCounter.n === 'number' ? searchApiCounter.n : 0) + 1;
+  var result = await searchWeb(query, maxResults);
+  // 有 diagnostics 或 results 数组均视为已发起（含 provider 失败），缓存命中也算一次业务搜索
+  if (searchApiCounter && typeof searchApiCounter === 'object' && result) {
+    var initiated = Array.isArray(result.results) || (result.diagnostics && typeof result.diagnostics === 'object');
+    if (initiated && !result.search_quota_exceeded) {
+      searchApiCounter.n = (typeof searchApiCounter.n === 'number' ? searchApiCounter.n : 0) + 1;
+    }
   }
-  return searchWeb(query, maxResults);
+  return result;
 }
 
 // ===================== Token 管理（无状态签名令牌，服务重启不掉登录） =====================
@@ -7754,14 +7791,59 @@ async function loadUserRestrictions(userName) {
 
 // 返回用户是否被服务端封禁/禁言（用于写端点统一拦截）
 // S-3: 禁言 is_muted 同样做服务端强制 —— 补齐第一轮"仅 is_banned 一维"的缺口。
-function userBanError(req) {
-  if (req.userRestrictions && req.userRestrictions.is_banned) {
-    return { code: 'account_banned', message: '该账号已被封禁，无法执行此操作' };
+// opts.blockMuted: 默认 true（社交写操作）；AI/code 写路径传 false，仅拦截封禁。
+// unavailable 对写路径 fail-closed（503），避免 DB 抖动时被封用户放行。
+function userBanError(req, opts) {
+  opts = opts || {};
+  var blockMuted = opts.blockMuted !== false;
+  if (req.userRestrictions && req.userRestrictions.unavailable) {
+    return {
+      code: 'restrictions_unavailable',
+      message: '账号状态暂时无法校验，请稍后重试',
+      status: 503
+    };
   }
-  if (req.userRestrictions && req.userRestrictions.is_muted) {
-    return { code: 'account_muted', message: '该账号已被禁言，无法执行此操作' };
+  if (req.userRestrictions && req.userRestrictions.is_banned) {
+    return { code: 'account_banned', message: '该账号已被封禁，无法执行此操作', status: 403 };
+  }
+  if (blockMuted && req.userRestrictions && req.userRestrictions.is_muted) {
+    return { code: 'account_muted', message: '该账号已被禁言，无法执行此操作', status: 403 };
   }
   return null;
+}
+
+// 认证成功后的写路径限制：封禁/禁言/状态不可用时拒绝。
+// 放行 logout/refresh/cancel 等必须可用的写接口。
+function shouldSkipWriteRestriction(req) {
+  var path = String((req.originalUrl || req.url || '').split('?')[0] || '');
+  var allow = [
+    '/api/user/logout',
+    '/api/user/refresh',
+    '/api/agent/chat/cancel',
+    '/api/code/stream/cancel',
+    '/api/code/chat/cancel',
+    '/api/announcements/read'
+  ];
+  for (var i = 0; i < allow.length; i++) {
+    if (path === allow[i] || path.indexOf(allow[i] + '/') === 0) return true;
+  }
+  // 允许取消类路径（兼容不同 code 路由命名）
+  if (/\/cancel\/?$/.test(path) && (path.indexOf('/api/agent/') === 0 || path.indexOf('/api/code/') === 0)) {
+    return true;
+  }
+  return false;
+}
+
+function applyAuthenticatedWriteRestrictions(req, res) {
+  var method = String(req.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
+  if (shouldSkipWriteRestriction(req)) return null;
+  var path = String((req.originalUrl || req.url || '').split('?')[0] || '');
+  // AI / Code：仅封禁拦截（禁言用户仍可用助手）；其余写操作：封禁+禁言
+  var blockMuted = !(path.indexOf('/api/agent/') === 0 || path.indexOf('/api/code/') === 0);
+  var ban = userBanError(req, { blockMuted: blockMuted });
+  if (!ban) return null;
+  return res.status(ban.status || 403).json({ error: ban.message, code: ban.code });
 }
 
 async function authenticateUser(req, res, next) {
@@ -7805,7 +7887,11 @@ async function authenticateUser(req, res, next) {
       req.userName = payload.user_name;
       try {
         req.userRestrictions = await loadUserRestrictions(req.userName);
-      } catch (_) {}
+      } catch (_) {
+        req.userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false, unavailable: true };
+      }
+      // 写路径统一封禁/禁言/状态不可用拦截（含 AI / 改删帖等此前遗漏路由）
+      if (applyAuthenticatedWriteRestrictions(req, res)) return;
       return next();
     }
   }
@@ -8244,54 +8330,74 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
 });
 
 // ===================== 公告管理 ======================
-app.post('/admin/announcement', verifyToken, rateLimit(60000, 20), async (req, res) => {
+async function createAnnouncementHandler(req, res) {
   try {
-  const { title, content } = req.body;
-  if (!title && !content) {
-    return res.status(400).json({ error: '请至少填写标题或内容' });
-  }
-  
-  const titleVal = validateString(title, MAX_TITLE_LEN, '标题');
-  if (titleVal && titleVal.error) return res.status(400).json({ error: titleVal.error });
-  const contentVal = validateString(content, MAX_CONTENT_LEN, '内容');
-  if (contentVal && contentVal.error) return res.status(400).json({ error: contentVal.error });
-  
-  const storeData = JSON.stringify({ title: titleVal || '', content: contentVal || '' });
-  const { data, error } = await supabase.from('posts').insert([{
-    user_name: ADMIN_USERNAME,
-    content: storeData,
-    media_type: '__ann__',
-    media_url: '',
-    actor_key: 'admin_' + Date.now()
-  }]).select().single();
-  
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
-  return res.json({ ok: true, data });
+    const { title, content } = req.body || {};
+    if (!title && !content) {
+      return res.status(400).json({ error: '请至少填写标题或内容' });
+    }
+    const titleVal = validateString(title, MAX_TITLE_LEN, '标题');
+    if (titleVal && titleVal.error) return res.status(400).json({ error: titleVal.error });
+    const contentVal = validateString(content, MAX_CONTENT_LEN, '内容');
+    if (contentVal && contentVal.error) return res.status(400).json({ error: contentVal.error });
+
+    const storeData = JSON.stringify({ title: titleVal || '', content: contentVal || '' });
+    const { data, error } = await supabase.from('posts').insert([{
+      user_name: ADMIN_USERNAME,
+      content: storeData,
+      media_type: '__ann__',
+      media_url: '',
+      actor_key: 'admin_' + Date.now()
+    }]).select().single();
+
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true, data });
   } catch (e) {
     console.error('Unhandled route error:', e.message);
     return res.status(500).json({ error: '服务器内部错误' });
-  }});
-
-app.delete('/admin/announcement/:id', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
-  try {
-  const { id } = req.params;
-  const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
-  if (!post) return res.status(404).json({ error: '公告不存在', code: 'not_found' });
-  const actorKey = post.actor_key;
-  if (!actorKey) return res.status(500).json({ error: '记录缺少 actor_key' });
-  const { data: rpcData, error } = await supabase.rpc('delete_post_with_actor', {
-    p_post_id: id,
-    p_actor_key: actorKey
-  });
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
-  if (!rpcData || rpcData.ok !== true) {
-    var code = (rpcData && rpcData.code) || 'delete_failed';
-    var status = code === 'not_found' ? 404 : code === 'forbidden' ? 403 : 500;
-    return res.status(status).json({ error: (rpcData && rpcData.error) || '删除失败', code: code });
   }
-  return res.json({ ok: true });
-  } catch (e) { console.error('[admin] delete_announcement:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
-});
+}
+
+async function deleteAnnouncementHandler(req, res) {
+  try {
+    const { id } = req.params;
+    const { data: post } = await supabase.from('posts').select('actor_key, media_type').eq('id', id).maybeSingle();
+    if (!post) return res.status(404).json({ error: '公告不存在', code: 'not_found' });
+    if (post.media_type && post.media_type !== '__ann__') {
+      return res.status(400).json({ error: '目标不是公告', code: 'not_announcement' });
+    }
+    const actorKey = post.actor_key;
+    if (!actorKey) return res.status(500).json({ error: '记录缺少 actor_key' });
+    const { data: rpcData, error } = await supabase.rpc('delete_post_with_actor', {
+      p_post_id: id,
+      p_actor_key: actorKey
+    });
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (!rpcData || rpcData.ok !== true) {
+      var code = (rpcData && rpcData.code) || 'delete_failed';
+      var status = code === 'not_found' ? 404 : code === 'forbidden' ? 403 : 500;
+      return res.status(status).json({ error: (rpcData && rpcData.error) || '删除失败', code: code });
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[admin] delete_announcement:', e && e.message);
+    return res.status(500).json({ error: '服务器内部错误' });
+  }
+}
+
+// 管理后台 cookie/token
+app.post('/admin/announcement', verifyToken, rateLimit(60000, 20), createAnnouncementHandler);
+app.delete('/admin/announcement/:id', verifyToken, securityRateLimit(60000, 30), deleteAnnouncementHandler);
+
+// 主站：管理员用户 access token（req.userName === ADMIN_USERNAME）
+function requireAdminUser(req, res, next) {
+  if (req.userName !== ADMIN_USERNAME) {
+    return res.status(403).json({ error: '需要管理员账号', code: 'admin_required' });
+  }
+  return next();
+}
+app.post('/api/admin/announcement', authenticateUser, requireAdminUser, rateLimit(60000, 20), createAnnouncementHandler);
+app.delete('/api/admin/announcement/:id', authenticateUser, requireAdminUser, securityRateLimit(60000, 30), deleteAnnouncementHandler);
 
 // ===================== 公告已读（跨设备同步） ======================
 // 复用 posts marker（media_type=__ann_read__, media_url=announcementId）
@@ -8570,7 +8676,7 @@ app.delete('/admin/photo/:id', verifyToken, securityRateLimit(60000, 30), async 
 app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
     var banCheck = userBanError(req);
-    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
+    if (banCheck) return res.status(banCheck.status || 403).json({ error: banCheck.message, code: banCheck.code });
     var createResult = await createPhotoRecord({
       body: req.body,
       userName: req.userName,
@@ -9183,7 +9289,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
   try {
     // ★ 封禁强制：服务端写端点必须校验限制状态，防止绕过前端本地禁点
     var banCheck = userBanError(req);
-    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
+    if (banCheck) return res.status(banCheck.status || 403).json({ error: banCheck.message, code: banCheck.code });
     var content = String(req.body && req.body.content || '');
     var mediaUrl = String(req.body && req.body.media_url || '');
     var mediaType = String(req.body && req.body.media_type || '');
@@ -9476,22 +9582,23 @@ app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, re
         || rpcError.code === '42501'
         || /set_post_pin|schema cache|could not find the function|invalid input syntax.*bigint/i.test(rpcMessage);
       if (migrationMissing) {
-        // Compatibility path for deployments where the RPC migration has not
-        // reached the database yet. Service-role writes still enforce owner
-        // permission and converge to one pinned post for this author.
+        // 兼容路径：无 RPC 时尽量收敛为单 pinned。置顶先写目标再清其它，
+        // 避免"先全清后写"窗口出现短暂零 pinned；仍非完美事务，生产应 apply set_post_pin。
         if (isPinned) {
-          var clearResult = await supabase.from('posts').update({ is_pinned: false, pinned_at: null })
-            .eq('user_name', post.user_name).eq('is_pinned', true).neq('id', postId).select('id');
-          if (clearResult.error) return res.status(500).json({ error: sanitizeError(clearResult.error), code: 'pin_failed' });
           var pinResult = await supabase.from('posts').update({ is_pinned: true, pinned_at: new Date().toISOString() })
             .eq('id', postId).select('*').single();
           if (pinResult.error) return res.status(500).json({ error: sanitizeError(pinResult.error), code: 'pin_failed' });
-          return res.json({ ok: true, data: pinResult.data, unpinned_post_ids: (clearResult.data || []).map(function(row) { return row.id; }) });
+          var clearResult = await supabase.from('posts').update({ is_pinned: false, pinned_at: null })
+            .eq('user_name', post.user_name).eq('is_pinned', true).neq('id', postId).select('id');
+          if (clearResult.error) {
+            console.warn('[API] post pin clear-others failed:', clearResult.error.message);
+          }
+          return res.json({ ok: true, data: pinResult.data, unpinned_post_ids: (clearResult.data || []).map(function(row) { return row.id; }), degraded: true });
         }
         var unpinResult = await supabase.from('posts').update({ is_pinned: false, pinned_at: null })
           .eq('id', postId).select('*').single();
         if (unpinResult.error) return res.status(500).json({ error: sanitizeError(unpinResult.error), code: 'pin_failed' });
-        return res.json({ ok: true, data: unpinResult.data, unpinned_post_ids: [] });
+        return res.json({ ok: true, data: unpinResult.data, unpinned_post_ids: [], degraded: true });
       }
       var rpcStatus = rpcError.code === '23505' ? 409 : 500;
       return res.status(rpcStatus).json({ error: sanitizeError(rpcError), code: rpcStatus === 409 ? 'pin_conflict' : 'pin_failed' });
@@ -9627,7 +9734,7 @@ app.post('/api/post/delete-status', authenticateUser, rateLimit(60000, 60), asyn
 app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var banCheck = userBanError(req);
-    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
+    if (banCheck) return res.status(banCheck.status || 403).json({ error: banCheck.message, code: banCheck.code });
     var postId = normalizePostId(req.body && req.body.post_id);
     var content = String(req.body && req.body.content || '').trim();
     if (!postId) return res.status(400).json({ error: 'post_id must be a UUID', code: 'invalid_post_id' });
@@ -9745,7 +9852,7 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
   try {
     // S-3: 点赞此前完全未调 ban 检查，补上封禁/禁言服务端拦截
     var banCheck = userBanError(req);
-    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
+    if (banCheck) return res.status(banCheck.status || 403).json({ error: banCheck.message, code: banCheck.code });
     var rawPostId = req.body && req.body.post_id;
     var liked = req.body && req.body.liked;
     var postId = normalizePostId(rawPostId);
@@ -9753,9 +9860,17 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
       return res.status(400).json({ error: 'post_id must be a UUID and liked must be boolean', code: 'invalid_request' });
     }
 
-    var { data: post, error: postError } = await supabase.from('posts').select('id').eq('id', postId).maybeSingle();
+    // 与 comment 对齐：校验可见性 + 普通帖；私密帖/系统 marker 统一 404，避免存在性侧信道
+    var { data: post, error: postError } = await supabase.from('posts')
+      .select('id, user_name, visibility, media_type')
+      .eq('id', postId)
+      .maybeSingle();
     if (postError) return res.status(500).json({ error: sanitizeError(postError), code: 'post_lookup_failed' });
     if (!post) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
+    if (!isNormalPost(post)) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
+    if (post.visibility === 'private' && post.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+      return res.status(404).json({ error: 'Post not found', code: 'not_found' });
+    }
 
     if (liked) {
       var existingLike = await supabase.from('likes').select('id')
@@ -9790,17 +9905,20 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
 
 // Authenticated feed statistics snapshot. System marker rows are excluded from
 // posts, while visit marker rows are exposed only as minimal event metadata.
+// 非管理员：互动明细字段最小化（去掉他人评论全文/浏览图谱），防止全站社交图谱导出。
 app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
-    var limit = Math.min(Math.max(parseInt(req.query.limit || '500', 10) || 500, 1), 1000);
+    var isAdmin = req.userName === ADMIN_USERNAME;
+    var limit = Math.min(Math.max(parseInt(req.query.limit || '500', 10) || 500, 1), isAdmin ? 1000 : 500);
+    var interactionLimit = isAdmin ? 5000 : 1000;
     const [postsResult, likesResult, commentsResult, visitsResult] = await Promise.all([
       applyPublicPostExclusions(supabase.from('posts')
         .select('id, user_name, content, media_url, media_type, visibility, views, actor_key, created_at, is_pinned, pinned_at'))
         .order('created_at', { ascending: false }).limit(limit),
-      supabase.from('likes').select('id, post_id, user_name, created_at').order('created_at', { ascending: false }).limit(5000),
-      supabase.from('comments').select('id, post_id, user_name, content, created_at').order('created_at', { ascending: false }).limit(5000),
+      supabase.from('likes').select('id, post_id, user_name, created_at').order('created_at', { ascending: false }).limit(interactionLimit),
+      supabase.from('comments').select('id, post_id, user_name, content, created_at').order('created_at', { ascending: false }).limit(interactionLimit),
       supabase.from('posts').select('id, user_name, media_url, content, created_at').eq('media_type', POST_VIEW_MARKER)
-        .order('created_at', { ascending: false }).limit(5000)
+        .order('created_at', { ascending: false }).limit(interactionLimit)
     ]);
     var failed = postsResult.error || likesResult.error || commentsResult.error || visitsResult.error;
     if (failed) return res.status(500).json({ error: sanitizeError(failed), code: 'stats_snapshot_failed' });
@@ -9809,9 +9927,33 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
       return !post.visibility || post.visibility === 'public' || post.user_name === req.userName;
     });
     var postIds = new Set(posts.map(function(post) { return String(post.id); }));
+    var ownPostIds = new Set(posts.filter(function(p) { return p.user_name === req.userName; }).map(function(p) { return String(p.id); }));
     var likes = (likesResult.data || []).filter(function(row) { return postIds.has(String(row.post_id)); });
     var comments = (commentsResult.data || []).filter(function(row) { return postIds.has(String(row.post_id)); });
-    var viewEvents = (visitsResult.data || []).filter(function(row) { return postIds.has(String(row.media_url)); });
+    var viewEvents = (visitsResult.data || []).filter(function(row) {
+      // 浏览事件仅暴露：别人浏览了「我的帖」；管理员可见全量（仍限公开帖集合）
+      if (!postIds.has(String(row.media_url))) return false;
+      if (isAdmin) return true;
+      return ownPostIds.has(String(row.media_url));
+    });
+    if (!isAdmin) {
+      // 非管理员：他人评论只保留截断摘要，避免全文导出
+      comments = comments.map(function(row) {
+        if (row.user_name === req.userName) return row;
+        var c = String(row.content || '');
+        return {
+          id: row.id,
+          post_id: row.post_id,
+          user_name: row.user_name,
+          content: c.length > 80 ? c.slice(0, 80) + '…' : c,
+          created_at: row.created_at
+        };
+      });
+      // 浏览事件去掉 content 细节，仅保留 id/media_url/created_at
+      viewEvents = viewEvents.map(function(row) {
+        return { id: row.id, media_url: row.media_url, created_at: row.created_at, user_name: row.user_name };
+      });
+    }
     var totalViews = viewEvents.length;
     return res.json({
       ok: true,
@@ -10153,6 +10295,25 @@ app.post('/api/avatar', authenticateUser, rateLimit(60000, 10), async (req, res)
     }
     var userName = req.userName;
     if (!userName) return res.status(401).json({ error: '未登录', code: 'auth_expired' });
+    // 归属校验：文件名需含当前用户前缀（新上传），或为旧版时间戳文件且未被其他用户占用
+    var safeUserPrefix = String(userName).replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, '_').slice(0, 32);
+    var hasUserPrefix = safeUserPrefix && decodedName.indexOf(safeUserPrefix + '_') === 0;
+    var isLegacyTimestampName = /^\d{10,}_/.test(decodedName);
+    if (!hasUserPrefix && !isLegacyTimestampName) {
+      return res.status(400).json({ error: '头像文件不属于当前用户', code: 'avatar_not_owned' });
+    }
+    if (!hasUserPrefix) {
+      var claimed = await supabase.from('posts')
+        .select('id, user_name')
+        .eq('media_type', '__avatar__')
+        .eq('media_url', mediaUrl)
+        .neq('user_name', userName)
+        .limit(1)
+        .maybeSingle();
+      if (claimed && claimed.data) {
+        return res.status(403).json({ error: '该头像已被其他用户使用', code: 'avatar_not_owned' });
+      }
+    }
     var insertRes = await supabase.from('posts').insert([{
       user_name: userName,
       content: '用户头像',
@@ -10483,10 +10644,11 @@ async function cleanupDmMediaAfterFailedSend(registryRow, storagePath, reason) {
 app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var banCheck = userBanError(req);
-    if (banCheck) return res.status(403).json({ error: banCheck.message, code: banCheck.code });
+    if (banCheck) return res.status(banCheck.status || 403).json({ error: banCheck.message, code: banCheck.code });
     // S-3: 拉黑双向禁止私信 —— 被拉黑方也不能向对方发送私信
     if (req.userRestrictions && req.userRestrictions.is_blacklisted) {
-      return res.status(403).json({ error: '您已被对方拉黑，无法发送私信', code: 'account_blacklisted' });
+      // 站点级 blacklist（非用户对用户拉黑）
+      return res.status(403).json({ error: '该账号已被限制私信功能', code: 'account_blacklisted' });
     }
     var sender = req.userName;
     var targetUser = String(req.body && req.body.target_user || '').trim();
@@ -13783,7 +13945,8 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     if (invalidRecipients.length) {
       return res.status(400).json({ error: '存在无效的收件人邮箱', invalid: invalidRecipients.map(function(r) { return r && r.email; }).slice(0, 20) });
     }
-    const subjectVal = subject.trim().slice(0, 200);
+    // 剥离 CRLF，防止 SMTP 头注入（Bcc 等额外头）
+    const subjectVal = String(subject || '').replace(/[\r\n\u0000]+/g, ' ').trim().slice(0, 200);
     const isHtml = content_type === 'html';
     const bodyText = isHtml ? emailHtmlToText(content) : content;
     const bodyHtml = isHtml ? sanitizeEmailHtml(content) : content.split('\n').map(function(l) { return '<p>' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>'; }).join('');
@@ -15296,9 +15459,11 @@ async function handleDeepThinkChat(req, res) {
   var convId = String(req.body && req.body.conversation_id || '').trim();
   if (!convId) convId = genConvId();
   if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
-  trackActiveDeepThinkJob(convId, cancelToken);
 
-  // ★ 并发上限：每用户 1 个深度思考任务，超限直接返回 concurrent
+  function safeEnd() { if (!res.writableEnded) { try { res.end(); } catch (e) {} } }
+  function sseSend(obj) { if (!res.writableEnded) { try { writeSse(res, obj); } catch (e) {} } }
+
+  // ★ 并发上限：先 acquire，成功后再 track，避免同 conv 覆盖进行中任务的 cancel 句柄
   var releaseDeep = tryAcquireDeepResearch(userName);
   if (!releaseDeep) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -15306,17 +15471,27 @@ async function handleDeepThinkChat(req, res) {
     res.setHeader('Connection', 'keep-alive');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
     sseSend({ type: 'error', error: '请等待上一个请求完成', code: 'concurrent' });
-    releaseDeepResearch();
     return safeEnd();
   }
-
-  function safeEnd() { if (!res.writableEnded) { try { res.end(); } catch (e) {} } }
-  function sseSend(obj) { if (!res.writableEnded) { try { writeSse(res, obj); } catch (e) {} } }
+  if (activeDeepThinkJobs.has(convId)) {
+    try { releaseDeep(); } catch (e) {}
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    sseSend({ type: 'error', error: '该会话已有进行中的深度思考，请稍候', code: 'concurrent' });
+    return safeEnd();
+  }
+  trackActiveDeepThinkJob(convId, cancelToken);
 
   // 统一收尾：从活跃任务表移除并释放并发名额（防泄漏）
+  // 仅删除自己写入的 cancelToken，避免误删他人/新任务
   function releaseDeepResearch() {
     try { if (releaseDeep) releaseDeep(); } catch (e) {}
-    try { activeDeepThinkJobs.delete(convId); } catch (e) {}
+    try {
+      var cur = activeDeepThinkJobs.get(convId);
+      if (cur === cancelToken) activeDeepThinkJobs.delete(convId);
+    } catch (e) {}
   }
 
   function markDeepThinkDisconnected() {
@@ -15338,7 +15513,19 @@ async function handleDeepThinkChat(req, res) {
   });
 
   try {
-    // 1. token/搜索额度 + 请求次数兜底
+    // 1. 先验证输入，避免空消息/非法参数仍扣配额
+    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+    if (message && message.error) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      sseSend({ type: 'error', error: message.error });
+      releaseDeepResearch();
+      return safeEnd();
+    }
+
+    // 2. token/搜索额度 + 请求次数兜底
     var needSearchDeep = req.body && req.body.web_search === true;
     var rl = await enforceAiChatAccess(userName, { needSearch: needSearchDeep });
     if (!rl.allowed) {
@@ -15356,17 +15543,6 @@ async function handleDeepThinkChat(req, res) {
       return safeEnd();
     }
 
-    // 2. 验证输入
-    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
-    if (message && message.error) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      sseSend({ type: 'error', error: message.error });
-      releaseDeepResearch();
-      return safeEnd();
-    }
     if (!message) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -15759,7 +15935,13 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // F-1: 请求级搜索 API 调用计数器（供 recordAiTurnUsage 按真实次数记账）
     req._searchApiCalls = { n: 0 };
 
-    // 1. 用户级 token/搜索额度 + 请求次数兜底
+    // 1. 先验证输入，避免空消息仍扣配额
+    var messageEarly = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+    if (!messageEarly || messageEarly.error) {
+      return res.status(400).json({ error: (messageEarly && messageEarly.error) || '消息内容不能为空或过长' });
+    }
+
+    // 2. 用户级 token/搜索额度 + 请求次数兜底
     var needSearchGate = req.body && req.body.web_search === true;
     var rl = await enforceAiChatAccess(userName, { needSearch: needSearchGate });
     if (!rl.allowed) {
@@ -15772,10 +15954,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       });
     }
 
-    // 2. 验证输入
-    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
-    if (message && message.error) return res.status(400).json({ error: message.error });
-    if (!message) return res.status(400).json({ error: '消息内容不能为空' });
+    // 3. 使用已校验消息继续（附件解析可能改写正文）
+    var message = messageEarly;
     var _attachJson = unwrapAttachmentExtract(await extractChatAttachments(message, req.body && req.body.attachments));
     message = _attachJson.text;
     // JSON 非流式路径：OCR 卡片随最终响应一并返回（无 SSE）
@@ -16143,6 +16323,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   });
   
   try {
+    // 先验证输入，避免空消息/非法参数仍扣配额
+    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+    if (!message || message.error) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      writeSse(res, { type: 'error', error: (message && message.error) || '消息内容不能为空或过长' });
+      return safeEnd();
+    }
+
     // token/搜索额度 + 请求次数兜底
     var needSearchStream = req.body && req.body.web_search === true;
     var rl = await enforceAiChatAccess(userName, { needSearch: needSearchStream });
@@ -16157,17 +16348,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         code: rl.reason || 'rate_limited',
         quota: rl.quota || null
       });
-      return safeEnd();
-    }
-    
-    // 验证输入
-    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
-    if (!message || message.error) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      writeSse(res, { type: 'error', error: (message && message.error) || '消息内容不能为空或过长' });
       return safeEnd();
     }
 

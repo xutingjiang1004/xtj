@@ -472,12 +472,14 @@ describe('processCatReplyJob no buildSummaryQuery', function() {
 describe('no runtime buildSummaryQuery outside admin stats', function() {
   const server = read('render-api/server.js');
 
-  it('POST /api/like 不得调用 buildSummaryQuery', function() {
-    // 找到 POST /api/like 路由处理函数
-    const likeStart = server.indexOf("app.post('/api/like'");
-    const likeEnd = server.indexOf("app.get('/api/likes/", likeStart);
+  it('POST /api/post/like 不得调用 buildSummaryQuery', function() {
+    // 真实路由为 POST /api/post/like（旧 /api/like 已废弃）
+    const likeStart = server.indexOf("app.post('/api/post/like'");
+    assert.notEqual(likeStart, -1, 'POST /api/post/like 路由必须存在');
+    const likeEnd = server.indexOf("app.get('/api/stats/snapshot'", likeStart);
     const block = server.slice(likeStart, likeEnd > likeStart ? likeEnd : likeStart + 5000);
-    assert.doesNotMatch(block, /\bbuildSummaryQuery\s*\(/, 'POST /api/like 不得调用 buildSummaryQuery');
+    assert.ok(block.length > 0, 'like 路由代码块不可为空');
+    assert.doesNotMatch(block, /\bbuildSummaryQuery\s*\(/, 'POST /api/post/like 不得调用 buildSummaryQuery');
   });
 
   it('DELETE /admin/user/:userName 不得调用 buildSummaryQuery', function() {

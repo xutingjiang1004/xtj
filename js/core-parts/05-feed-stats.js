@@ -169,8 +169,13 @@
                 return base + ext;
             }
 
-            function buildStorageUploadPath(scope, fileName) {
-                return String(scope || "misc") + "/" + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
+            function buildStorageUploadPath(scope, fileName) {
+                var userPart = '';
+                try {
+                    var u = String(window.currentUser || '').trim();
+                    if (u) userPart = u.replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, '_').slice(0, 32) + '_';
+                } catch (_e) {}
+                return String(scope || "misc") + "/" + userPart + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
             }
 
             function parseDMContentPayload(raw) {
