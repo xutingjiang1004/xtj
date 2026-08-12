@@ -1849,7 +1849,8 @@
                 var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
                 if (sPosts) sPosts.textContent = posts.length;
                 if (sViews) sViews.textContent = totalViews;
-                if (sLikes) sLikes.textContent = totalLikes + totalComments;
+                // 只显示点赞数；互动合计见统计弹层文案
+                if (sLikes) sLikes.textContent = totalLikes;
             }
 
             async function initialLoad(skipCache = false) {
@@ -2562,6 +2563,9 @@
                 updatePostFilterStateFromDom();
                 feedPage = 1;
                 feedEndReached = false;
+                feedLoadMoreFailed = false;
+                var errEl = document.getElementById('feedLoadMoreError');
+                if (errEl && errEl.parentNode) errEl.parentNode.removeChild(errEl);
                 var feed = document.getElementById("feed");
                 if (feed) {
                     feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
@@ -2589,6 +2593,11 @@
                 };
                 feedPage = 1;
                 feedEndReached = false;
+                feedLoadMoreFailed = false;
+                try {
+                    var clearErr = document.getElementById('feedLoadMoreError');
+                    if (clearErr && clearErr.parentNode) clearErr.parentNode.removeChild(clearErr);
+                } catch (_eClr) {}
                 var panel = document.getElementById("postFilterPanel");
                 if (panel) panel.style.display = "none";
                 var btn = document.getElementById("filterToggleBtn");
@@ -2859,7 +2868,7 @@
             // 集中维护，避免漏掉 __pro_gift__ / __pro_gift_claim__ / __vip_plan__ 等
             function applyVisiblePostQueryFilters(query) {
                 if (!query || typeof query.neq !== 'function') return query;
-                return query
+                query = query
                     .neq("media_type", AUTH_MARKER)
                     .neq("media_type", ADMIN_AUTH_MARKER)
                     .neq("media_type", ADMIN_META_MARKER)
@@ -2898,6 +2907,19 @@
                     .neq("media_type", "__revoked_token__")
                     .neq("media_type", "__ai_english_learning__")  // 退役模块，保留过滤防止旧数据泄漏
                     .neq("media_type", "__location_task__");
+                // 回退查询显式加可见性 fortify：公开帖 + 本人私密帖（不单依赖 RLS）
+                try {
+                    var me = String(window.currentUser || '').trim();
+                    if (typeof query.or === 'function') {
+                        if (me) {
+                            var safeMe = me.replace(/[,.()]/g, '');
+                            query = query.or('visibility.is.null,visibility.eq.public,and(visibility.eq.private,user_name.eq.' + safeMe + ')');
+                        } else {
+                            query = query.or('visibility.is.null,visibility.eq.public');
+                        }
+                    }
+                } catch (_visErr) {}
+                return query;
             }
             window.applyVisiblePostQueryFilters = applyVisiblePostQueryFilters;
 
@@ -3806,6 +3828,12 @@
                 //   feedPage 残留旧值，加载更多按旧页码计算导致误判 feedEndReached，
                 //   无限滚动永久失效（"没有更多帖子"）直至刷新页面。
                 feedPage = 1;
+                // 重置"加载更多失败"标志，避免 feed 重绘后哨兵永久不再触发
+                feedLoadMoreFailed = false;
+                try {
+                    var moreErr = document.getElementById('feedLoadMoreError');
+                    if (moreErr && moreErr.parentNode) moreErr.parentNode.removeChild(moreErr);
+                } catch (_eMore) {}
                 var now = Date.now();
                 var requestId = ++feedLoadRequestId;
                 var stateVersionAtRequest = feedStateVersion;

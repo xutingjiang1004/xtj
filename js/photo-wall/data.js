@@ -616,10 +616,12 @@
   function handleExternalSync(message){
     if (!message || typeof message !== 'object' || typeof message.type !== 'string') return;
     if (message.type !== 'photo_deleted' && message.type !== 'photo_added') return;
-    if (message.type === 'photo_deleted' && (typeof message.photoId !== 'string' || message.photoId === '')) return;
-    if (message.type === 'photo_deleted' && message.photoId != null) {
-      addDeletedPhotoId(message.photoId);
-      removePhotoLocal(message.photoId, true);
+    // photoId 兼容 string / number / uuid 对象字符串化
+    if (message.type === 'photo_deleted') {
+      var deletedId = message.photoId == null ? '' : String(message.photoId);
+      if (!deletedId) return;
+      addDeletedPhotoId(deletedId);
+      removePhotoLocal(deletedId, true);
       setTimeout(function(){
         loadPhotoWallData(true).then(function(){
           if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();

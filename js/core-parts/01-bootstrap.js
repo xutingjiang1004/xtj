@@ -346,15 +346,16 @@ const ADMIN_NAME = "xxz";
 
             function getUserToken() {
                 // 仅从内存读取（会话内缓存；持久化令牌机制已移除）
+                // 过期时不主动销毁：由 ensureUserToken / 401 刷新路径处理，
+                // 避免同步上报路径静默丢 Authorization 且无法触发 refresh。
                 var token = memoryUserToken || '';
-                // 检查是否过期
                 if (token) {
                     var ts = memoryUserTokenIssuedAt;
                     if (ts && (Date.now() - ts > 15 * 60 * 1000)) {
-                        // access token 可能已过期，尝试刷新
-                        memoryUserToken = '';
-                        memoryUserTokenIssuedAt = 0;
-                        token = '';
+                        // 标记可能过期，仍返回 token 让服务端判定；调用方应优先 ensureUserToken
+                        try { window.__xtjAccessTokenMaybeStale = true; } catch (e) {}
+                    } else {
+                        try { window.__xtjAccessTokenMaybeStale = false; } catch (e) {}
                     }
                 }
                 return token;
@@ -462,11 +463,13 @@ const ADMIN_NAME = "xxz";
             window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 
             async function ensureUserToken() {
-                var existingToken = getUserToken();
-                if (existingToken) return existingToken;
-                // 尝试用 refresh token 刷新
+                var existingToken = memoryUserToken || '';
+                var ts = memoryUserTokenIssuedAt;
+                var maybeStale = !!(existingToken && ts && (Date.now() - ts > 15 * 60 * 1000));
+                if (existingToken && !maybeStale) return existingToken;
+                // 无 token 或可能过期：用 refresh cookie 刷新
                 var result = await refreshUserTokenViaCookie();
-                return (result && result.token) || '';
+                return (result && result.token) || existingToken || '';
             }
 
             // 通过 HttpOnly cookie 中的 refresh token 刷新 access token

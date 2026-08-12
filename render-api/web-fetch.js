@@ -111,7 +111,12 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
     function onExternalAbort() {
       if (!settled) {
         settled = true;
-        request.destroy(new Error('请求已取消'));
+        try { request.destroy(new Error('请求已取消')); } catch (_) {}
+        // abort 路径同样拆除监听，避免泄漏
+        try {
+          if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+        } catch (_) {}
+        reject(new Error('请求已取消'));
       }
     }
     if (externalSignal) {
@@ -141,6 +146,7 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
       if (Number.isFinite(declared) && declared > maxBytes) {
         settled = true;
         request.destroy();
+        cleanupExternalAbort();
         reject(new Error('网页内容超过大小限制'));
         return;
       }
@@ -150,6 +156,7 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
           request.destroy();
           if (!settled) {
             settled = true;
+            cleanupExternalAbort();
             reject(new Error('网页内容超过大小限制'));
           }
           return;
@@ -159,6 +166,7 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
       response.on('end', function() {
         if (settled) return;
         settled = true;
+        cleanupExternalAbort();
         var body = Buffer.concat(chunks, total);
         resolve({
           status: response.statusCode || 0,
@@ -174,6 +182,7 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
       response.on('error', function(err) {
         if (!settled) {
           settled = true;
+          cleanupExternalAbort();
           reject(err);
         }
       });
@@ -184,17 +193,18 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
     request.on('error', function(err) {
       if (!settled) {
         settled = true;
+        cleanupExternalAbort();
         reject(err);
       }
     });
-    request.end();
-    // 请求结束后移除外部 abort 监听，避免泄漏
-    var _cleanup = function() {
+    // 仅在请求真正结束（settled）后移除 abort 监听；
+    // 此前错误地在 end() 后 microtask 立即 cleanup，导致用户取消无效。
+    function cleanupExternalAbort() {
       if (externalSignal) {
         try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
       }
-    };
-    Promise.resolve().then(_cleanup);
+    }
+    request.end();
   });
 }
 
