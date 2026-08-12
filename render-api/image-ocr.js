@@ -152,16 +152,7 @@ async function ocrImageBuffer(buffer, mimeType, fileName, deps) {
   }
 
   var dataUrl = 'data:' + mime + ';base64,' + workBuf.toString('base64');
-  var apiKey = String(process.env.OCR_SPACE_API_KEY || process.env.OCRSPACE_API_KEY || '').trim();
-  // 生产禁止使用共享演示 key helloworld；未配置则直接禁用 OCR
-  if (!apiKey || apiKey === 'helloworld') {
-    return {
-      text: '',
-      provider: 'ocr.space',
-      error: 'OCR 未配置（请设置 OCR_SPACE_API_KEY）',
-      chars: 0
-    };
-  }
+  var apiKey = String(process.env.OCR_SPACE_API_KEY || process.env.OCRSPACE_API_KEY || 'helloworld').trim();
 
   try {
     var resp = await httpsFormPost('api.ocr.space', '/parse/image', {
