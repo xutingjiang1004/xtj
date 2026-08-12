@@ -2034,6 +2034,7 @@
             }
 
             window.publishAnnouncement = async function() {
+                if (!window.isAdmin()) { if (window.showToast) showToast('无权限'); return; }
                 const titleInput = document.getElementById('announcementAdminTitle');
                 const contentInput = document.getElementById('announcementAdminInput');
                 const title = titleInput.value.trim();
@@ -2066,6 +2067,7 @@
             };
 
             window.deleteAnnouncement = async function(ann) {
+                if (!window.isAdmin()) { if (window.showToast) showToast('无权限'); return; }
                 showConfirm('删除公告', '确定要删除这条公告吗？', '确定', async function() {
                     try {
                         const { error } = await sb.rpc('delete_post_with_actor', {

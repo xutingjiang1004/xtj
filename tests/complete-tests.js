@@ -718,8 +718,8 @@ test('照片墙云端请求失败时保留缓存', function(){
 });
 test('照片墙合并时按 id/cloudId 去重', function(){
   var s = read('js/photo-wall/data.js');
-  assert.ok(s.indexOf('function mergePhotoLists') >= 0 && s.indexOf('map.has(String(item.id))') >= 0 && s.indexOf('cloudId') >= 0, 'must deduplicate by id/cloudId');
-  assert.ok(s.indexOf('按 id/cloudId 去重') >= 0, 'must have deduplication comment');
+  assert.ok(s.indexOf('function mergePhotoLists') >= 0 && s.indexOf('map.has(identity)') >= 0 && s.indexOf('cloudId') >= 0, 'must deduplicate by id/cloudId');
+  assert.ok(s.indexOf('Tombstones must therefore reject stale cloud') >= 0, 'must have deduplication comment');
 });
 
 console.log('\n=== Photo Wall Init Guards ===');

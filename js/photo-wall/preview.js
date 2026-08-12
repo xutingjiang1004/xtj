@@ -278,7 +278,6 @@
     }
     function V() {
         if (e) {
-            if (window.__xtjPhotoPreviewHotfixInstalled && typeof window.closePhotoPreview === 'function') return e = !1, window.closePhotoPreview();
             e = !1;
             var t = document.getElementById("photoPreviewOverlay");
             if (t) {
@@ -859,7 +858,6 @@
             }, 320);
         }
     }, window.shareCurrentPhoto = function() {
-        if (window.__xtjPhotoPreviewHotfixInstalled && typeof window.shareCurrentPhoto === 'function') return window.shareCurrentPhoto();
         var e = t;
         if (e && e.imageUrl) {
             if ("vibrate" in navigator && "function" == typeof navigator.vibrate) try {
@@ -895,7 +893,6 @@
         window.deletePhotoFromPreview();
     }, window.deletePhotoFromPreview = function() {
         if (e) {
-            if (window.__xtjPhotoPreviewHotfixInstalled && typeof window.deletePhotoFromPreview === 'function') return window.deletePhotoFromPreview();
             Y(10);
             var t = document.getElementById("ppDeleteBtn"), o = t ? t.getBoundingClientRect() : null;
             if (o) {

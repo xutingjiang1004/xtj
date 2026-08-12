@@ -146,9 +146,7 @@
           store.createIndex('workspaceKey', 'workspaceKey', { unique: false });
           store.createIndex('path', 'path', { unique: false });
         }
-        if (!db.objectStoreNames.contains('code_drafts')) {
-          db.createObjectStore('code_drafts', { keyPath: 'id' });
-        }
+
       };
       request.onsuccess = function (e) {
         _indexedDB = e.target.result;
@@ -311,6 +309,39 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  // ★ 审计 🟡：state.messages 上限保护——超过 MAX_STATE_MESSAGES 时裁剪最旧的
+  //   user/assistant 对，保留最近 N 条，并同步清理指向已裁剪消息的 lastToolTrace。
+  var MAX_STATE_MESSAGES = 200;
+  function appendStateMessage(msg) {
+    state.messages[state.messages.length] = msg;
+    trimStateMessages();
+  }
+  function trimStateMessages() {
+    while (state.messages.length > MAX_STATE_MESSAGES) {
+      var removedAt = -1;
+      for (var i = 0; i < state.messages.length; i++) {
+        if (state.messages[i] && state.messages[i].role === 'user') { removedAt = i; break; }
+      }
+      if (removedAt < 0) { state.messages.shift(); continue; }
+      state.messages.splice(removedAt, 1);
+      // 成对裁剪：移除紧随其后的 assistant 回复
+      for (var j = removedAt; j < state.messages.length; j++) {
+        if (state.messages[j] && state.messages[j].role === 'assistant') {
+          state.messages.splice(j, 1);
+          break;
+        }
+      }
+    }
+    // 同步清理 lastToolTrace：若其引用的消息已被裁剪则丢弃
+    if (state.lastToolTrace && state.lastToolTrace.length) {
+      var referenced = false;
+      for (var k = state.messages.length - 1; k >= 0 && k >= state.messages.length - 5; k--) {
+        if (state.messages[k] && state.messages[k].toolTrace === state.lastToolTrace) { referenced = true; break; }
+      }
+      if (!referenced) state.lastToolTrace = [];
+    }
   }
 
   function getMonacoTheme() {
@@ -480,10 +511,12 @@
   // Monaco lazy-load
   // ──────────────────────────────────────────────
   // Monaco CDN URLs in priority order — 国内/国际双重备用
+  // ★ 审计 🟠：三个 CDN 的 loader.js 内容一致（sha384 已实测一致，版本固定不可变），
+  //   均启用 SRI；脚本以 crossorigin="anonymous" 加载，防止 CDN 供应链被攻破后注入任意脚本。
   var MONACO_CDN_URLS = [
-    { vs: 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs', loader: 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs/loader.js' },
-    { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs', loader: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js' },
-    { vs: 'https://unpkg.com/monaco-editor@0.45.0/min/vs', loader: 'https://unpkg.com/monaco-editor@0.45.0/min/vs/loader.js' }
+    { vs: 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs', loader: 'https://registry.npmmirror.com/monaco-editor/0.45.0/files/min/vs/loader.js', integrity: 'sha384-SF/kPhqG3NMxqsYAbQqHkdF53WQx8yTkY0Ys+M+ayeC20QNujPyyxIuUEdEf0eG/' },
+    { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs', loader: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js', integrity: 'sha384-SF/kPhqG3NMxqsYAbQqHkdF53WQx8yTkY0Ys+M+ayeC20QNujPyyxIuUEdEf0eG/' },
+    { vs: 'https://unpkg.com/monaco-editor@0.45.0/min/vs', loader: 'https://unpkg.com/monaco-editor@0.45.0/min/vs/loader.js', integrity: 'sha384-SF/kPhqG3NMxqsYAbQqHkdF53WQx8yTkY0Ys+M+ayeC20QNujPyyxIuUEdEf0eG/' }
   ];
 
   function loadMonaco(callback) {
@@ -564,6 +597,9 @@
 
           var script = document.createElement('script');
           script.src = cdn.loader;
+          // ★ 审计 🟠：SRI 依赖 CORS 模式，跨域脚本必须带 crossorigin 才参与完整性校验
+          script.crossOrigin = 'anonymous';
+          if (cdn.integrity) script.setAttribute('integrity', cdn.integrity);
           script.setAttribute('data-xtj-monaco-loader', '1');
 
           script.onload = function () {
@@ -1283,6 +1319,8 @@
     state.snapshots = {};
     state._documentStates = {};
     state.messages = [];
+    // 审计 🟢：conversationId 重置会让旧草稿 key 残留，按前缀清理当前工作区旧 key
+    clearAllComposerDraftsForWorkspace();
     state.conversationId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'c_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     state.lastFailedMessage = '';
     state._isReadOnly = false;
@@ -3174,6 +3212,19 @@
     }
   }
 
+  // ★ 审计 🟡：输入事件只局部更新受影响 tab 的 .modified 类，不整栏重建，
+  //   避免大文件连续输入 / IME 合成期间每次按键触发完整 DOM 重建与焦点丢失。
+  function updateTabModified(path, dirty) {
+    if (!_dom.tabBar || !path) return;
+    var els = _dom.tabBar.querySelectorAll('.code-tab');
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].getAttribute('data-path') === path) {
+        els[i].classList.toggle('modified', !!dirty);
+        return;
+      }
+    }
+  }
+
   // ──────────────────────────────────────────────
   // renderEditor()
   // ──────────────────────────────────────────────
@@ -3366,13 +3417,13 @@
             tab.modified = true;
             tab._currentContent = newContent;
             tab._contentVersion = (tab._contentVersion || 0) + 1;
-            renderTabs();
+            updateTabModified(tab.path, true);
           } else {
             // ★ 恢复原文时复位 modified（对比基准为最近一次保存内容）
             tab.modified = false;
             tab._currentContent = undefined;
             tab._contentVersion = 0;
-            renderTabs();
+            updateTabModified(tab.path, false);
           }
         });
 
@@ -3421,13 +3472,13 @@
         tab.modified = true;
         tab._currentContent = newContent;
         tab._contentVersion = (tab._contentVersion || 0) + 1;
-        renderTabs();
+        updateTabModified(tab.path, true);
       } else {
         // ★ 恢复原文时复位 modified（对比基准为最近一次保存内容）
         tab.modified = false;
         tab._currentContent = undefined;
         tab._contentVersion = 0;
-        renderTabs();
+        updateTabModified(tab.path, false);
       }
     });
 
@@ -3987,6 +4038,17 @@
     for (var batchIndex = 0; batchIndex < files.length; batchIndex++) {
       var fileBytes = 0;
       try { fileBytes = JSON.stringify(files[batchIndex]).length; } catch (e) { fileBytes = 0; }
+      // ★ 审计 🟡：单个文件序列化已超批上限时强制单独成批，避免整批 400/413；
+      //   压批后即使该文件仍超限，也不会拖累同批其它文件。
+      if (fileBytes > MAX_INDEX_BATCH_BYTES) {
+        if (currentBatch.length) {
+          batches.push(currentBatch);
+          currentBatch = [];
+          currentBytes = 0;
+        }
+        batches.push([files[batchIndex]]);
+        continue;
+      }
       if (currentBatch.length && currentBytes + fileBytes > MAX_INDEX_BATCH_BYTES) {
         batches.push(currentBatch);
         currentBatch = [];
@@ -4037,6 +4099,152 @@
     }, Promise.resolve());
   }
 
+  // ★ 审计 🟠：边扫描边上送——正文经 onTextFile 回调即时组批上传，批次发出后
+  //   引用即释放；内存与 IDB 清单只保留元数据（path/size/sha256），
+  //   避免大工作区把全部文本正文常驻内存（旧实现 1000×2MB≈2GB 峰值）。
+  //   仅用于默认全量路径（CODE_PERSISTENT_INDEX_ENABLED=false）。
+  function buildProjectIndexStreaming(fs, ctx, controller, workspaceId, wsGen, buildKey) {
+    var streamingMetadata = [];
+    var pendingBatch = [];
+    var pendingBytes = 0;
+    var batchIndex = 0;
+    var truncated = false;
+    var scanResultRef = null;
+    var uploadChain = Promise.resolve();
+
+    function flushStreamingBatch(finalize) {
+      if (!pendingBatch.length) return Promise.resolve();
+      var batch = pendingBatch;
+      pendingBatch = [];
+      pendingBytes = 0;
+      var thisIndex = batchIndex++;
+      uploadChain = uploadChain.then(function () {
+        if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+        ctx.status = 'uploading';
+        ctx.batchIndex = thisIndex;
+        ctx.phase = '正在上传索引 (' + (thisIndex + 1) + '/...)...';
+        syncBuildContextToUI(ctx);
+        var payload = {
+          workspaceId: workspaceId,
+          workspaceGeneration: wsGen,
+          files: batch,
+          truncated: truncated === true,
+          append: true,
+          finalize: finalize === true,
+          batchIndex: thisIndex,
+          batchCount: 0
+        };
+        return postJson('/api/code/index/build', payload, controller.signal)
+          .then(function (response) { return responseJson(response, 'index build failed'); });
+      });
+      return uploadChain;
+    }
+
+    return fs.streamIndexFiles(8, 1000, controller.signal, function onTextFile(entry) {
+      if (!isBuildContextCurrent(ctx)) return;
+      streamingMetadata.push({
+        path: entry.path,
+        size: entry.size || 0,
+        modifiedAt: entry.modifiedAt || null,
+        sha256: entry.sha256 || ''
+      });
+      var fileBytes = 0;
+      try { fileBytes = JSON.stringify(entry).length; } catch (e) { fileBytes = 0; }
+      if (pendingBatch.length && pendingBytes + fileBytes > MAX_INDEX_BATCH_BYTES) {
+        flushStreamingBatch(false);
+      }
+      pendingBatch.push(entry);
+      pendingBytes += fileBytes;
+    }).then(function (scanResult) {
+      if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
+      scanResultRef = scanResult;
+      truncated = scanResult.truncated === true;
+      // 合并非 text 文件的元数据（text 已由回调收集，避免重复）
+      var resultFiles = (scanResult && Array.isArray(scanResult.files)) ? scanResult.files : [];
+      var seenPaths = {};
+      for (var i = 0; i < streamingMetadata.length; i++) seenPaths[streamingMetadata[i].path] = true;
+      for (var j = 0; j < resultFiles.length; j++) {
+        var f = resultFiles[j];
+        if (!f) continue;
+        if (!seenPaths[f.path]) {
+          seenPaths[f.path] = true;
+          streamingMetadata.push({
+            path: f.path,
+            size: f.size || 0,
+            modifiedAt: f.modifiedAt || null,
+            sha256: f.sha256 || ''
+          });
+        }
+      }
+      ctx.status = 'uploading';
+      ctx.scannedFiles = resultFiles.length;
+      ctx.indexableFiles = streamingMetadata.length;
+      ctx.phase = '正在上传索引...';
+      syncBuildContextToUI(ctx);
+      // 发送最后一个批次并 finalize
+      return flushStreamingBatch(true);
+    }).then(function () {
+      if (!isBuildContextCurrent(ctx)) return null;
+      var builtAt = new Date().toISOString();
+      ctx.status = 'ready';
+      ctx.phase = '索引构建完成';
+      ctx.totalFiles = streamingMetadata.length;
+      ctx.totalChunks = batchIndex;
+      ctx.builtAt = builtAt;
+      ctx.skippedFiles = 0;
+      ctx.failedFiles = 0;
+      ctx.truncated = truncated;
+      syncBuildContextToUI(ctx);
+      // 只存元数据，不存正文
+      saveFileManifestToIDB(streamingMetadata).catch(function (err) {
+        console.warn('[CODE-INDEXEDDB] saveFileManifestToIDB failed, marking non-persistent:', err && err.name);
+      });
+      saveWorkspaceToIDB(workspaceId).catch(function (err) {
+        console.warn('[CODE-INDEXEDDB] saveWorkspaceToIDB failed, marking non-persistent:', err && err.name);
+      });
+      return {
+        ok: true,
+        totalFiles: streamingMetadata.length,
+        totalChunks: batchIndex,
+        builtAt: builtAt,
+        workspaceId: workspaceId,
+        generation: wsGen,
+        scannedFiles: scanResultRef ? (scanResultRef.totalFiles || (scanResultRef.files ? scanResultRef.files.length : 0) || 0) : 0,
+        indexedFiles: streamingMetadata.length,
+        skippedFiles: 0,
+        failedFiles: 0,
+        truncated: truncated,
+        status: 'ready',
+        totalBytes: 0,
+        batchComplete: true
+      };
+    }).catch(function (err) {
+      if (err && err.name === 'AbortError') {
+        if (isBuildContextCurrent(ctx)) {
+          ctx.status = 'cancelled';
+          ctx.phase = '索引构建已取消';
+          syncBuildContextToUI(ctx);
+        }
+        return null;
+      }
+      if (!isBuildContextCurrent(ctx)) return null;
+      console.error('[code-workspace] Index build failed:', err);
+      ctx.status = 'failed';
+      ctx.errorCode = 'INDEX_BUILD_FAILED';
+      ctx.errorMessage = (err && err.message) || '索引构建失败';
+      ctx.phase = '索引构建失败';
+      syncBuildContextToUI(ctx);
+      return null;
+    }).then(function (buildResult) {
+      // Only cleanup if this build is still the registered one
+      if (state._indexBuildKey === buildKey) {
+        state._indexBuildPromise = null;
+        state._indexController = null;
+      }
+      return buildResult;
+    });
+  }
+
   function buildProjectIndex(options) {
     options = options || {};
     var force = options.force === true;
@@ -4073,11 +4281,18 @@
     state._indexBuildKey = buildKey;
     syncBuildContextToUI(ctx);
 
-    var listPromise = fs.listAllFilesWithMetadata
-      ? fs.listAllFilesWithMetadata(8, 1000, controller.signal)
-      : fs.listAllFiles(8, 1000, controller.signal);
+    var promise;
+    if (!CODE_PERSISTENT_INDEX_ENABLED && fs && typeof fs.streamIndexFiles === 'function') {
+      // 审计 🟠：默认全量路径走「边扫描边上送」——正文经回调即时组批上传，批次发出后
+      // 引用即释放；内存与 IDB 清单只保留元数据（path/size/sha256）。
+      promise = buildProjectIndexStreaming(fs, ctx, controller, workspaceId, wsGen, buildKey);
+    } else {
+      promise = (function () {
+      var listPromise = fs.listAllFilesWithMetadata
+        ? fs.listAllFilesWithMetadata(8, 1000, controller.signal)
+        : fs.listAllFiles(8, 1000, controller.signal);
 
-    var promise = listPromise.then(function (result) {
+      return listPromise.then(function (result) {
       if (!isBuildContextCurrent(ctx)) throw createNamedAbortError();
       var sourceFiles = result && Array.isArray(result.files) ? result.files : [];
       var files = [];
@@ -4250,7 +4465,15 @@
       if (CODE_PERSISTENT_INDEX_ENABLED && !buildResult.unchanged) {
         // Save from the original scan (files may have been filtered to
         // changed files by the incremental manifest comparison).
-        saveFileManifestToIDB(allFiles).catch(function (err) {
+        // 审计 🟠：只存元数据，不保留正文。
+        saveFileManifestToIDB(allFiles.map(function (mf) {
+          return {
+            path: mf.path,
+            size: mf.size || 0,
+            modifiedAt: mf.modifiedAt || null,
+            sha256: mf.sha256 || ''
+          };
+        })).catch(function (err) {
           console.warn('[CODE-INDEXEDDB] saveFileManifestToIDB failed, marking non-persistent:', err && err.name);
         });
         saveWorkspaceToIDB(workspaceId).catch(function (err) {
@@ -4276,14 +4499,16 @@
       ctx.phase = '索引构建失败';
       syncBuildContextToUI(ctx);
       return null;
-    }).then(function (buildResult) {
-      // Only cleanup if this build is still the registered one
-      if (state._indexBuildKey === buildKey) {
-        state._indexBuildPromise = null;
-        state._indexController = null;
-      }
-      return buildResult;
-    });
+      }).then(function (buildResult) {
+        // Only cleanup if this build is still the registered one
+        if (state._indexBuildKey === buildKey) {
+          state._indexBuildPromise = null;
+          state._indexController = null;
+        }
+        return buildResult;
+      });
+      })();
+    }
 
     state._indexBuildPromise = promise;
     return promise;
@@ -5403,6 +5628,18 @@
     return 'xtj_code_draft:' + encodeURIComponent(readComposerUserScope()) + ':' + encodeURIComponent(getWorkspaceId()) + ':' + encodeURIComponent(state.conversationId || 'new');
   }
 
+  // 审计 🟢：conversationId 每次重置变化导致旧草稿 key 在 sessionStorage 残留，
+  // 重置时按前缀清理当前用户+工作区下的全部旧 key。
+  function clearAllComposerDraftsForWorkspace() {
+    try {
+      var prefix = 'xtj_code_draft:' + encodeURIComponent(readComposerUserScope()) + ':' + encodeURIComponent(getWorkspaceId()) + ':';
+      for (var i = sessionStorage.length - 1; i >= 0; i--) {
+        var key = sessionStorage.key(i);
+        if (key && key.indexOf(prefix) === 0) sessionStorage.removeItem(key);
+      }
+    } catch (e) {}
+  }
+
   function saveComposerDraft() {
     try { sessionStorage.setItem(composerDraftKey(), state.composerDraft || ''); } catch (e) {}
   }
@@ -5703,9 +5940,7 @@
           else if (state.pinnedFiles.indexOf(state.activePath) < 0) state.pinnedFiles.push(state.activePath);
           else if (action === 'pin') state.pinnedFiles.splice(state.pinnedFiles.indexOf(state.activePath), 1);
         }
-        if (false && action === 'open') {
-          state.openTabs.forEach(function(tab) { if (tab.path && state.pinnedFiles.indexOf(tab.path) < 0) state.pinnedFiles.push(tab.path); });
-        }
+
         if (action === 'pinned') {
           showToast(state.pinnedFiles.length ? ('已固定：' + state.pinnedFiles.map(function(path) { return path.split('/').pop(); }).join('、')) : '当前没有固定文件', 'info');
         }
@@ -6518,7 +6753,7 @@
           ctx.streamState.fail('PROVIDER_TIMEOUT', 'AI 响应超时，请稍后重试', true);
         } else {
           restoreFailedMessage(ctx.originalMessage);
-          state.messages.push({
+          appendStateMessage({
             role: 'assistant', content: 'AI 响应超时，请稍后重试',
             time: '', errorCode: 'PROVIDER_TIMEOUT', retryable: true,
             retryMessage: ctx.originalMessage,
@@ -6554,7 +6789,7 @@
     // A retry reuses the already-rendered user message and must not insert a
     // duplicate. Normal sends append exactly one user message.
     if (!isRetry) {
-      state.messages.push({ role: 'user', content: message, time: timeStr });
+      appendStateMessage({ role: 'user', content: message, time: timeStr });
       input.value = '';
       input.style.height = 'auto';
       clearComposerDraft();
@@ -6645,7 +6880,7 @@
       removeTypingIndicator();
       var errMsg = (err && err.message) ? err.message : String(err);
       var errCode = (err && err.code) ? err.code : 'CONTEXT_ERROR';
-      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: errCode, retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
+      appendStateMessage({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: errCode, retryable: true, retryMessage: ctx.originalMessage, retryBody: ctx.originalBody ? Object.assign({}, ctx.originalBody) : null });
       finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
       renderChatPanel();
       return null;
@@ -6710,7 +6945,7 @@
       ctx.streamState.cancel();
     } else {
       removeTypingIndicator();
-      state.messages.push({ role: 'assistant', content: '（已停止）', time: ctx.timeStr || '', stopped: true });
+      appendStateMessage({ role: 'assistant', content: '（已停止）', time: ctx.timeStr || '', stopped: true });
       finalizeRequest(ctx, { cancelled: true, cancelReason: 'user_cancelled' });
       renderChatPanel();
     }
@@ -7175,7 +7410,7 @@
       // Replace any partial stream with an explicit terminal error in the
       // canonical state so the subsequent render cannot leave a blank/ambiguous bubble.
       answerBuffer = '';
-      state.messages.push({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body), toolTrace: streamToolTrace });
+      appendStateMessage({ role: 'assistant', content: answerBuffer || '（请求超时）', time: timeStr, errorCode: 'PROVIDER_TIMEOUT', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body), toolTrace: streamToolTrace });
       discardStreamingMessageNode(assistantNode);
       cleanupStream();
       finalizeRequest(ctx, { errorCode: 'PROVIDER_TIMEOUT', error: 'AI 响应超时' });
@@ -7233,7 +7468,7 @@
           }
           showError(errCode, errMsg, json && json.retryable);
           answerBuffer = '';
-          state.messages.push({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode, retryable: json && json.retryable !== false, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+          appendStateMessage({ role: 'assistant', content: answerBuffer || ('抱歉，' + errMsg), time: timeStr, errorCode: errCode, retryable: json && json.retryable !== false, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
           discardStreamingMessageNode(assistantNode);
           cleanupStream();
           finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
@@ -7323,7 +7558,7 @@
               _doneHandled = true;
               var eofError = 'AI 响应不完整，请重新生成';
               showError('STREAM_ENDED_WITHOUT_DONE', eofError, true, true);
-              state.messages.push({
+              appendStateMessage({
                 role: 'assistant',
                 content: eofError,
                 time: timeStr,
@@ -7376,7 +7611,7 @@
             } else {
               showError('STREAM_INTERRUPTED', '流式连接中断', true);
               answerBuffer = '';
-              state.messages.push({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+              appendStateMessage({ role: 'assistant', content: answerBuffer || '（连接中断）', time: timeStr, errorCode: 'STREAM_INTERRUPTED', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
               discardStreamingMessageNode(assistantNode);
               cleanupStream();
               finalizeRequest(ctx, { error: '流式连接中断', errorCode: 'STREAM_INTERRUPTED' });
@@ -7477,7 +7712,7 @@
             if (!completedReply) {
               var emptyReplyError = 'AI 未返回有效内容，请重新生成';
               showError('EMPTY_RESPONSE', emptyReplyError, true, true);
-              state.messages.push({ role: 'assistant', content: emptyReplyError, time: timeStr, errorCode: 'EMPTY_RESPONSE', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
+              appendStateMessage({ role: 'assistant', content: emptyReplyError, time: timeStr, errorCode: 'EMPTY_RESPONSE', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body) });
               state.pendingOperations = [];
               cleanupStream();
               finalizeRequest(ctx, { error: emptyReplyError, errorCode: 'EMPTY_RESPONSE' });
@@ -7496,7 +7731,7 @@
             state.lastSentAttachmentPaths = state.attachments.filter(function (a) { return !a.pinned; }).map(function (a) { return a.path; });
             consumeTransientAttachments();
             state.lastFailedMessage = '';
-            state.messages.push({
+            appendStateMessage({
               role: 'assistant',
               content: completedReply,
               time: timeStr,
@@ -7553,7 +7788,7 @@
               } else if (errCode === 'STREAM_INTERRUPTED') {
                 streamErrorContent = '连接中断，请检查网络后重试。';
               }
-              state.messages.push({
+              appendStateMessage({
                 role: 'assistant',
                 content: answerBuffer || ('抱歉，[' + errCode + '] ' + errMsg),
                 time: timeStr,
@@ -7592,7 +7827,7 @@
         setStreamStatus('已停止生成', 'cancelled', false);
         assistantNode.setAttribute('data-state', 'cancelled');
         if (contentEl && !String(answerBuffer || '').trim()) contentEl.textContent = '（已停止）';
-        state.messages.push({
+        appendStateMessage({
           role: 'assistant',
           content: answerBuffer || '（已停止）',
           time: timeStr,
@@ -7680,7 +7915,7 @@
       }
       var errMsg = (err && err.message) ? err.message : String(err);
       showError('NETWORK_ERROR', errMsg, true);
-      state.messages.push({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body), toolTrace: streamToolTrace });
+      appendStateMessage({ role: 'assistant', content: '抱歉，' + errMsg, time: timeStr, errorCode: 'NETWORK_ERROR', retryable: true, retryMessage: ctx.originalMessage, retryBody: Object.assign({}, ctx.originalBody || body), toolTrace: streamToolTrace });
       discardStreamingMessageNode(assistantNode);
       finalizeRequest(ctx, { error: errMsg, errorCode: 'NETWORK_ERROR' });
       renderChatPanel();
@@ -7828,6 +8063,11 @@
       return;
     }
 
+    // ★ 审计 🟠：恢复状态检查/轮询期间占用发送通道，防止并发新请求
+    state.sending = true;
+    state.requestStatus = 'loading';
+    updateChatRequestControls();
+
     var fetchFn = window.xtjProtectedFetch || fetch;
     var statusParams = 'workspace_id=' + encodeURIComponent(scope.workspace_id || '') +
       '&workspace_generation=' + (scope.workspace_generation || 0);
@@ -7842,7 +8082,7 @@
     function reportRecoveryFailure(code, message, preserveState) {
       var originalMessage = String(savedState.originalMessage || '').trim();
       state.lastFailedMessage = originalMessage;
-      state.messages.push({
+      appendStateMessage({
         role: 'assistant',
         content: message || '上一次流式请求未能恢复，请重新生成。',
         time: '',
@@ -7856,6 +8096,14 @@
       } else {
         clearStreamState();
       }
+      // ★ 审计 🟠：状态检查失败也需复位发送通道，避免恢复期间一直占用
+      state.sending = false;
+      state.requestStatus = 'idle';
+      state.activeRequest = null;
+      state._abortController = null;
+      state._sharedCtrl = null;
+      state._telemetry = null;
+      updateChatRequestControls();
       if (_dom.chatPanel) renderChatPanel();
     }
 
@@ -7945,6 +8193,32 @@
     var recoveredToolByIndex = Object.create(null);
     var streamDone = false;
     var abortController = new AbortController();
+
+    // ★ 审计 🟠：恢复期间占用发送通道——置 state.sending 并挂只读占位 activeRequest，
+    //   阻止用户在恢复轮询期间并发发出新请求；恢复完成/失败统一复位。
+    state.sending = true;
+    state.requestStatus = 'loading';
+    var recoveryCtx = {
+      requestId: requestId,
+      sharedCtrl: null,
+      telemetry: null,
+      abortController: abortController,
+      watchdogTimer: null,
+      cancelled: false,
+      cancelReason: '',
+      _finalized: false,
+      isRecoveryPlaceholder: true,
+      streamState: {
+        cancel: function () {
+          try { abortController.abort(); } catch (_) {}
+        }
+      }
+    };
+    state.activeRequest = recoveryCtx;
+    state._abortController = abortController;
+    state._sharedCtrl = null;
+    state._telemetry = null;
+    updateChatRequestControls();
 
     var assistantNode = document.createElement('div');
     assistantNode.className = 'code-chat-message assistant streaming';
@@ -8048,6 +8322,7 @@
 
     function recoveryDone(reply, operations, usage, toolTrace, phaseSequence) {
       if (streamDone) return;
+      if (recoveryStopStale()) return;
       streamDone = true;
       updateStreamPhaseRail(assistantNode, 'complete', true, phaseSequence);
       if (spinner) spinner.style.display = 'none';
@@ -8069,7 +8344,7 @@
       assistantNode.classList.remove('streaming');
       assistantNode.classList.add('completed');
       assistantNode.setAttribute('data-state', 'complete');
-      state.messages.push({
+      appendStateMessage({
         role: 'assistant',
         content: finalContent,
         time: timeStr,
@@ -8087,12 +8362,14 @@
       state.recoveredOperations = (operations || []).slice();
       state.pendingOperations = [];
       clearStreamState();
+      resetRecoveryActiveRequest();
       renderChatPanel();
       renderDiffView();
     }
 
     function recoveryError(code, message, retryable) {
       if (streamDone) return;
+      if (recoveryStopStale()) return;
       streamDone = true;
       updateStreamPhaseRail(assistantNode, 'error');
       if (spinner) spinner.style.display = 'none';
@@ -8109,7 +8386,7 @@
       }
       var originalMessage = String(savedState.originalMessage || '').trim();
       state.lastFailedMessage = originalMessage;
-      state.messages.push({
+      appendStateMessage({
         role: 'assistant',
         content: message || '上一次流式请求未能恢复，请重新生成。',
         time: timeStr,
@@ -8122,11 +8399,13 @@
       discardStreamingMessageNode(assistantNode);
       if (retryable === false) clearStreamState();
       else saveStreamState(Object.assign({}, getStreamState() || savedState, { lastEventId: lastEventId }));
+      resetRecoveryActiveRequest();
       renderChatPanel();
     }
 
     function recoveryCancelled() {
       if (streamDone) return;
+      if (recoveryStopStale()) return;
       streamDone = true;
       updateStreamPhaseRail(assistantNode, 'cancelled');
       if (spinner) spinner.style.display = 'none';
@@ -8135,7 +8414,7 @@
       assistantNode.classList.add('cancelled');
       assistantNode.setAttribute('data-state', 'cancelled');
       contentEl.innerHTML = '<em>上一次请求已取消</em>';
-      state.messages.push({
+      appendStateMessage({
         role: 'assistant',
         content: '（已取消）',
         time: timeStr,
@@ -8144,11 +8423,39 @@
       });
       discardStreamingMessageNode(assistantNode);
       clearStreamState();
+      resetRecoveryActiveRequest();
       renderChatPanel();
+    }
+
+    // ★ 审计 🟠：workspaceGeneration 隔离——用户切换工作区后立即停止恢复，
+    //   不向新工作区的 state.messages 写入任何内容。
+    function recoveryGenerationStale() {
+      return savedState.workspaceGeneration != null && savedState.workspaceGeneration !== state.workspaceGeneration;
+    }
+    function recoveryStopStale() {
+      if (!recoveryGenerationStale()) return false;
+      streamDone = true;
+      try { abortController.abort(); } catch (_) {}
+      discardStreamingMessageNode(assistantNode);
+      clearStreamState();
+      resetRecoveryActiveRequest();
+      return true;
+    }
+    // ★ 审计 🟠：复位恢复期间占用的发送通道（占位 activeRequest / sending）。
+    function resetRecoveryActiveRequest() {
+      if (state.activeRequest === recoveryCtx) state.activeRequest = null;
+      if (state._abortController === abortController) state._abortController = null;
+      state._sharedCtrl = null;
+      state._telemetry = null;
+      state.sending = false;
+      state.requestStatus = 'idle';
+      updateChatRequestControls();
+      renderProjectStatus();
     }
 
     function processEvent(event) {
       if (streamDone) return;
+      if (recoveryStopStale()) return;
       if (event.event_id && event.event_id > 0 && event.event_id <= lastEventId) return;
       if (event.event_id && event.event_id > 0) lastEventId = event.event_id;
 
@@ -8235,6 +8542,7 @@
 
     function pollResume() {
       if (streamDone) return;
+      if (recoveryStopStale()) return;
       resumePollCount += 1;
       if (resumePollCount > MAX_RESUME_POLLS) {
         recoveryError('RESUME_TIMEOUT', '流恢复等待超时，请重新生成', true);
@@ -8282,6 +8590,7 @@
           }
         }).catch(function(err) {
           if (streamDone) return;
+          if (recoveryStopStale()) return;
           if (err && err.name === 'AbortError') {
             recoveryCancelled();
             return;
@@ -8359,7 +8668,7 @@
       if (data && data.runtime) state.lastRuntime = data.runtime;
       state.lastToolTrace = data && Array.isArray(data.tool_trace) ? data.tool_trace : [];
       if (data && data.capabilities) state.capabilities = data.capabilities;
-      state.messages.push({
+      appendStateMessage({
         role: 'assistant', content: replyContent, time: timeStr,
         operations: state.pendingOperations,
         toolTrace: state.lastToolTrace,
@@ -8386,7 +8695,7 @@
       }
       if (err && err.name === 'AbortError') {
         removeTypingIndicator();
-        state.messages.push({ role: 'assistant', content: '（已停止）', time: timeStr, stopped: true });
+        appendStateMessage({ role: 'assistant', content: '（已停止）', time: timeStr, stopped: true });
         finalizeRequest(ctx, { cancelled: true, cancelReason: ctx.cancelReason || 'aborted' });
         renderChatPanel();
         return null;
@@ -8422,7 +8731,7 @@
       }
       var assistantMsg = { role: 'assistant', content: userFriendlyMsg, time: timeStr, errorCode: errCode, retryable: err.retryable !== false, retryMessage: ctx.originalMessage || body.message || '', retryBody: Object.assign({}, ctx.originalBody || body || {}), requestId: err.requestId || '' };
       if (err && Array.isArray(err.toolTrace) && err.toolTrace.length) assistantMsg.toolTrace = err.toolTrace;
-      state.messages.push(assistantMsg);
+      appendStateMessage(assistantMsg);
       finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
       renderChatPanel();
       return null;
@@ -8444,9 +8753,12 @@
   }
 
   function removeTypingIndicator() {
-    var el = document.getElementById('codeTypingIndicator');
-    if (el) {
-      try { el.remove(); } catch (e) { /* ignore */ }
+    // 审计 🟢：原实现引用的 #codeTypingIndicator 从未创建，属无效清理。
+    // 改为清理真实存在的 .code-chat-message.streaming 节点（错误/取消路径的残留卡片）。
+    if (typeof document === 'undefined' || !document.querySelectorAll) return;
+    var streamingNodes = document.querySelectorAll('.code-chat-message.streaming');
+    for (var i = 0; i < streamingNodes.length; i++) {
+      try { streamingNodes[i].remove(); } catch (e) { /* ignore */ }
     }
   }
 
@@ -8854,8 +9166,19 @@
         var disposition = resp.headers.get('Content-Disposition') || '';
         
         // Extract filename from disposition if present
+        // ★ 审计 🟡：decodeURIComponent 遇非法转义会抛 URIError，需兜底；
+        //   文件名再做 safeAttachmentName 式净化（剥离 /、\、控制字符），防止
+        //   后端响应头携带路径段时意外创建子目录（"另存副本"语义只在原目录）。
         var match = disposition.match(/filename="([^"]+)"/);
-        var returnedFileName = match ? decodeURIComponent(match[1]) : op.path.split('/').pop();
+        var returnedFileName;
+        if (match) {
+          try { returnedFileName = decodeURIComponent(match[1]); } catch (e) { returnedFileName = match[1]; }
+        } else {
+          returnedFileName = op.path.split('/').pop();
+        }
+        returnedFileName = String(returnedFileName || '')
+          .replace(/[\/\\\u0000-\u001f\u007f]/g, '_')
+          .slice(0, 180);
         
         return resp.arrayBuffer().then(function (ab) {
            return {
@@ -8898,6 +9221,12 @@
         // Save as new file (don't overwrite original)
         var parentPath = op.path.indexOf('/') >= 0 ? op.path.substring(0, op.path.lastIndexOf('/') + 1) : '';
         var newPath = parentPath + newFileName; // The backend already append _AI修改版
+        // ★ 审计 🟡：拼接后再次校验落盘路径，拒绝穿越/越界
+        try {
+          validatePath(newPath);
+        } catch (e) {
+          throw new Error('保存文件名不合法，无法另存副本');
+        }
 
         // P2 #10: if file already exists, generate unique name (e.g., _AI修改版_2.xlsx)
         return findAvailableBinaryPath(fs, newPath).then(function (availablePath) {

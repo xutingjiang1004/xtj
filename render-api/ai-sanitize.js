@@ -23,10 +23,19 @@ function sanitizeAssistantVisibleText(text, options) {
   s = s.replace(/<\s*(script|style|iframe|object|embed)\b[^>]*>[\s\S]*?<\s*\/\s*(script|style|iframe|object|embed)\s*>/gi, '');
   s = s.replace(/<\s*(script|style|iframe|object|embed)\b[^>]*\/?\s*>/gi, '');
   // Remove event-handler attributes (onclick/onerror/...).
-  s = s.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
+  // 审计 🟡 属性分隔符放宽：旧 `\s+on...` 要求 "on" 前有空白，`<img/onerror=...>`（无空白
+  // 分隔符）绕过；`\S*on...` 覆盖 `/`、引号、括号等紧邻分隔形式。代价是可能误伤形如
+  // "phone=" 的词（"on" 前有字母），由前端渲染层最终兜底，此处主防线优先保证剥离。
+  s = s.replace(/\S*on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
   // Neutralize dangerous URL protocols that survive markdown rendering.
+  // ① 实体编码 scheme 绕过（javascript&#58; / javascript&#x3a;）：markdown 链接
+  // `[x](javascript&#58;alert(1))` 渲染后浏览器解码属性值为 javascript: 即恢复执行。
+  // 先把危险 scheme 后的冒号数字实体（&#58;/&#x3a;）归一化为字面冒号供下方正则命中。
+  s = s.replace(/(javascript|vbscript|data)\s*(?:&#(?:0*58|x0*3a);?)/gi, '$1:');
   s = s.replace(/\bjavascript\s*:/gi, ' ');
-  s = s.replace(/\bdata\s*:\s*text\/html\b/gi, ' ');
+  // ③ 补充 vbscript:（IE 时代脚本协议）与可内嵌脚本的 data:image/svg+xml 中和
+  s = s.replace(/\bvbscript\s*:/gi, ' ');
+  s = s.replace(/\bdata\s*:\s*(?:text\/html|image\/svg\+xml)\b/gi, ' ');
 
   // When roleplay is on, skip action cleanup so backend does not rewrite RP style.
   if (options.skipActionCleanup) return s;

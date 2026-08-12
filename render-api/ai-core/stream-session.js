@@ -530,7 +530,6 @@ function createEventLogger(supabase, streamId, userId) {
 
   var pendingDeltas = [];
   var lastFlushTime = 0;
-  var flushTimer = null;
   var flushed = false;
   var pendingWriteTasks = [];
   var writeTaskStats = { total: 0, succeeded: 0, failed: 0, retryable: false, lastError: null };
@@ -598,7 +597,6 @@ function createEventLogger(supabase, streamId, userId) {
     var combined = pendingDeltas.join('');
     pendingDeltas = [];
     lastFlushTime = 0;
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     // The event id belongs to the last delta that created this batch. It is
     // already allocated by the SSE writer, so no synthetic id can collide
     // with a later done/error event.
@@ -683,7 +681,6 @@ function createEventLogger(supabase, streamId, userId) {
 
   function flush() {
     if (flushPromise) return flushPromise;
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     flushPromise = (async function() {
       await writeChain;
       await collectWriteTasks(); // 在途任务 settle 后其统计已并入 writeTaskStats
@@ -717,7 +714,7 @@ function createEventLogger(supabase, streamId, userId) {
     logEvent: logEvent,
     flush: flush,
     flushDeltas: flushDeltas,
-    getEvents: function() { return getEventsAfter(supabase, streamId, 0); }
+    getEvents: function() { return getEventsAfter(supabase, streamId, 0, undefined, userId); }
   };
 }
 
@@ -778,7 +775,11 @@ function sanitizeEventData(type, data) {
     if (typeof value === 'string') {
       var masked = maskSensitiveValues(value);
       if (masked !== value) return masked;
-      if (isSensitiveKey(key) || value.length > 10000) {
+      // 审计 ⚪：旧分支 `isSensitiveKey(key) || value.length > 10000` 中的 isSensitiveKey
+      // 不可达——sanitizeValue 仅在顶层/对象属性经 isSensitiveKey 短路（[redacted]）后才被
+      // 调用，传入的 key 恒为非敏感键；且即便到达也只是截断而非脱敏（潜在错误实现）。
+      // 删除该分支，仅保留超长字符串截断。
+      if (value.length > 10000) {
         return value.slice(0, 10000) + '...[truncated]';
       }
       return value;
@@ -858,14 +859,17 @@ function truncateEventPayload(payload, maxBytes) {
   return out;
 }
 
-function getEventsAfter(supabase, streamId, afterEventId, pageSize) {
+function getEventsAfter(supabase, streamId, afterEventId, pageSize, userId) {
   if (!isResumeEnabled() || !supabase) return Promise.resolve({ ok: true, events: [], retryable: false, error: null, next_after_event_id: null, has_more: false });
   var limit = Math.min(Math.max(Number(pageSize) || RESUME_PAGE_SIZE, 1), 500);
   return runPersistenceQuery(function() {
-    return supabase.from('ai_stream_events').select('event_id, event_type, event_data')
+    var query = supabase.from('ai_stream_events').select('event_id, event_type, event_data')
       .eq('stream_id', String(streamId))
-      .gt('event_id', Number(afterEventId) || 0)
-      .order('event_id', { ascending: true })
+      .gt('event_id', Number(afterEventId) || 0);
+    // 审计 🟡 用户作用域隔离：恢复读取必须限定 user_id，防止他人 stream 事件越权读出。
+    // 可选参数，未传时不加过滤以保持向后兼容（旧调用方由 code-agent.js 另一个 Agent 负责）。
+    if (userId) query = query.eq('user_id', String(userId));
+    return query.order('event_id', { ascending: true })
       .limit(limit + 1); // 多取 1 条判断 has_more
   }).then(function(result) {
     if (!result.ok) return { ok: false, events: null, retryable: true, error: result.error, attempts: result.attempts, next_after_event_id: null, has_more: false };

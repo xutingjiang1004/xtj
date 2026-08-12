@@ -10,6 +10,23 @@
 // 必须保持下方字面量写法、不可改为 require 派生；两处需人工同步（新增/退役 marker 时同时更新）。
 var NORMAL_POST_MEDIA_TYPES = ['text', 'image', 'video', 'audio', 'photo', 'album'];
 var NORMAL_POST_EMPTY_MEDIA_FILTER = 'media_type.eq.""';
+// 审计 🟡 双白名单一致性：NORMAL_POST_MEDIA_TYPES 被契约测试以"数组字面量赋值"锚定
+// （tests/complete-tests.js），不可改为 require 派生；post-markers.js 的
+// PUBLIC_POST_MEDIA_TYPES 为唯一真源。新增/退役 marker 时需人工同步两处，此处加载时
+// 做一次运行时一致性检查，不一致时 console.error 告警，防止静默漂移导致 system marker
+// 泄入公开 feed。
+try {
+  var POST_MARKERS_TYPES = require('./post-markers').PUBLIC_POST_MEDIA_TYPES;
+  var _syncOk = Array.isArray(POST_MARKERS_TYPES)
+    && POST_MARKERS_TYPES.length === NORMAL_POST_MEDIA_TYPES.length
+    && POST_MARKERS_TYPES.every(function(t) { return NORMAL_POST_MEDIA_TYPES.indexOf(t) >= 0; });
+  if (!_syncOk) {
+    console.error('[post-query] NORMAL_POST_MEDIA_TYPES 与 post-markers.PUBLIC_POST_MEDIA_TYPES 不一致，'
+      + '请人工同步（post-markers.js 为唯一真源）');
+  }
+} catch (e) {
+  console.error('[post-query] 白名单一致性检查失败（require post-markers）:', e && e.message);
+}
 function isNormalPost(row) {
   if (!row) return false;
   var mt = row.media_type;

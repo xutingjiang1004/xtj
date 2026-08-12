@@ -30,6 +30,9 @@ function assemble() {
     chunks.push(text.replace(/\s+$/, '') + '\n');
   });
 
+  // 非阻断告警：跨 part 的重复顶层函数 / window.x = 定义（防"覆盖式双定义"回归陷阱）
+  warnDuplicateDefinitions(manifest.parts, chunks);
+
   let out = chunks.join('\n');
   if (!out.endsWith('\n')) out += '\n';
 
@@ -48,6 +51,33 @@ function assemble() {
       ' lines)'
   );
   return true;
+}
+
+function warnDuplicateDefinitions(parts, chunks) {
+  const byName = {};
+  const FUNC_RE = /(?:^|\n)\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g;
+  const ASSIGN_RE = /(?:^|\n)\s*(?:window\.)?([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?function\s*\(/g;
+  parts.forEach(function (rel, idx) {
+    const text = chunks[idx];
+    let m;
+    FUNC_RE.lastIndex = 0;
+    while ((m = FUNC_RE.exec(text))) {
+      const name = m[1];
+      (byName[name] = byName[name] || []).push(rel + ' (function ' + name + ')');
+    }
+    ASSIGN_RE.lastIndex = 0;
+    while ((m = ASSIGN_RE.exec(text))) {
+      const name = m[1];
+      (byName[name] = byName[name] || []).push(rel + ' (window.' + name + ' = fn)');
+    }
+  });
+  Object.keys(byName).forEach(function (name) {
+    const seen = byName[name];
+    const files = seen.filter(function (v, i) { return seen.indexOf(v) === i; });
+    if (files.length > 1) {
+      console.warn('[assemble-core] ⚠ 重复定义（覆盖式双定义风险）: ' + name + ' 出现在 ' + files.join(' 与 '));
+    }
+  });
 }
 
 if (require.main === module) {

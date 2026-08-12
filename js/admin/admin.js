@@ -1395,7 +1395,7 @@ async function initAdminClient() {
             return [
                 '<div class="user-card admin-action-card' + (flags.isBanned ? ' is-banned' : '') + (flags.isMuted ? ' is-muted' : '') + '">',
                 '<div class="user-card-head">',
-                '<div class="user-avatar' + (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : '')) + '" data-avatar-user="' + escapeHtml(u.name) + '">' + (adminAvatarCache[u.name] ? '<img src="' + escapeHtml(adminAvatarCache[u.name]) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '\'">' : escapeHtml((u.name || '?').slice(0, 1).toUpperCase())) + '</div>',
+                '<div class="user-avatar' + (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : '')) + '" data-avatar-user="' + escapeHtml(u.name) + '">' + (adminAvatarCache[u.name] ? '<img src="' + escapeHtml(adminAvatarCache[u.name]) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + safeJsStr((u.name || '?').slice(0, 1).toUpperCase()) + '\'">' : escapeHtml((u.name || '?').slice(0, 1).toUpperCase())) + '</div>',
                 '<div class="user-card-name"><strong>' + escapeHtml(u.name) + '</strong><div class="user-tags">' + buildUserTagMarkup(flags) + '</div></div>',
                 '</div>',
                 '<div class="user-card-stats"><div class="user-stat-item"><div class="num">' + stats.posts + '</div><div class="lbl">帖子</div></div><div class="user-stat-item"><div class="num">' + stats.likes + '</div><div class="lbl">点赞</div></div><div class="user-stat-item"><div class="num">' + stats.comments + '</div><div class="lbl">评论</div></div></div>',
@@ -2763,10 +2763,10 @@ async function initAdminClient() {
                 h += '<td>' + statusBadge + '</td>';
                 h += '<td style="white-space:nowrap;">';
                 if (r.status === 'pending') {
-                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + String(r.id).replace(/'/g, "\\'") + '\')">处理</button> ';
-                    h += '<button class="btn-sm" onclick="dismissReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">驳回</button>';
+                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + safeJsStr(String(r.id)) + '\')">处理</button> ';
+                    h += '<button class="btn-sm" onclick="dismissReport(\'' + safeJsStr(String(r.id)) + '\')">驳回</button>';
                 } else {
-                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + String(r.id).replace(/'/g, "\\'") + '\')">详情</button>';
+                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + safeJsStr(String(r.id)) + '\')">详情</button>';
                 }
                 h += '</td></tr>';
             });
@@ -2810,9 +2810,9 @@ async function initAdminClient() {
         }
         html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">';
         if (r.status === 'pending') {
-            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + String(r.id).replace(/'/g, "\\'") + '\')">删除内容</button>';
-            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + String(r.id).replace(/'/g, "\\'") + '\')">封禁用户</button>';
-            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + String(r.id).replace(/'/g, "\\'") + '\')">标记已处理</button>';
+            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + safeJsStr(String(r.id)) + '\')">删除内容</button>';
+            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + safeJsStr(String(r.id)) + '\')">封禁用户</button>';
+            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + safeJsStr(String(r.id)) + '\')">标记已处理</button>';
         }
         html += '<button class="btn-sm" style="margin-left:auto;" onclick="this.closest(\'.report-detail-modal\').remove()">关闭</button>';
         html += '</div>';
@@ -2820,7 +2820,7 @@ async function initAdminClient() {
             html += '<div style="border-top:1px solid rgba(0,0,0,0.1);padding-top:12px;margin-top:8px;">';
             html += '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">回复举报人（选填）</label>';
             html += '<textarea id="reportResponse_' + escapeHtml(String(r.id)) + '" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);font-size:13px;resize:vertical;font-family:inherit;" placeholder="输入回复内容..."></textarea>';
-            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + String(r.id).replace(/'/g, "\\'") + '\')">回复并处理</button>';
+            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + safeJsStr(String(r.id)) + '\')">回复并处理</button>';
             html += '</div>';
         }
         box.innerHTML = html;
@@ -4012,6 +4012,8 @@ async function initAdminClient() {
             recipients.push({ email: tag.dataset.email, user_name: tag.dataset.email });
         });
 
+        // 批量发送前二次确认，防止误操作群发
+        showConfirm('发送邮件', '确认向 ' + recipients.length + ' 位收件人发送邮件？\n\n主题：' + subject + '\n\n发送后不可撤回。', '确认发送', async function() {
         btn.disabled = true;
         btn.textContent = '⏳ 发送中...';
         resultEl.className = '';
@@ -4084,6 +4086,7 @@ async function initAdminClient() {
             btn.disabled = false;
             btn.textContent = '📤 发送邮件';
         }
+        });
     };
 
     // 加载邮件发送记录
@@ -4435,7 +4438,7 @@ async function initAdminClient() {
                 '<div class="form-group"><label>头像图片</label>',
                 '<div style="display:flex;align-items:center;gap:12px;">',
                 '<div id="aiAvatarPreview" style="width:60px;height:60px;border-radius:50%;overflow:hidden;background:#f0f8ef;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;">',
-                (cfg.avatar_url ? '<img src="' + escapeHtml(cfg.avatar_url) + '?v=' + (cfg.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml(cfg.avatar || '🐱') + '\'">' : escapeHtml(cfg.avatar || '🐱')),
+                (cfg.avatar_url ? '<img src="' + escapeHtml(cfg.avatar_url) + '?v=' + (cfg.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + safeJsStr(cfg.avatar || '🐱') + '\'">' : escapeHtml(cfg.avatar || '🐱')),
                 '</div>',
                 '<input type="file" id="aiAvatarFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />',
                 '<button class="btn" id="aiAvatarUploadBtn" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;">选择图片</button>',
@@ -4716,7 +4719,6 @@ async function initAdminClient() {
                         if (configPayload.persona.length > 500) { showToast('人设不超过500字'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
                         if (configPayload.system_prompt.length > 2000) { showToast('系统提示词不超过2000字'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
                         if (!configPayload.model.reasoner_model) { showToast('请填写模型名称'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
-                        configPayload.allow_web_search = configPayload.search.allow_web_search;
                         var r = await apiCall('POST', '/admin/ai-agent/config', configPayload);
                         if (r && r.ok) {
                             showToast('配置已保存，用户端刷新后生效');

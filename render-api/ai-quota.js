@@ -123,8 +123,35 @@ function getTokenQuotaErrorMessage(reason) {
   return '今日小猫聊天额度已达上限';
 }
 
+// 归一化自定义日额度（setPro 的 token_limit_daily / search_limit_daily）：
+// 非有限值（NaN / ±Infinity / 非数字字符串）回退 null（使用默认额度），
+// 防止把 NaN 透传入库污染 ai_user_membership（审计 🟡：旧实现 Math.max(-1, NaN) = NaN）。
+function normalizeDailyLimit(value) {
+  if (value === null || value === undefined) return null;
+  var num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.max(-1, Math.floor(num));
+}
+
 function createAiQuota(supabase) {
   if (!supabase) throw new Error('ai-quota requires supabase client');
+
+  // 审计 🟠 TOCTOU 缓解（check/consume）：check_ai_token_quota 与 consume_ai_token_usage
+  // 是两次独立 RPC，并发下 N 个请求可全部通过 check 再各自 consume，放大免费日额度。
+  // 进程内按用户串行化（Map<userName, Promise>）只能缓解单进程内的竞态；
+  // 真正修复依赖 DB 端把扣减原子化（consume_ai_token_usage 内以
+  // UPDATE ... WHERE remaining >= cost RETURNING 原子扣减，超出本模块可见范围）。
+  // 多进程部署仍需 RPC 侧原子性，本互斥不构成安全边界。
+  var quotaChains = {}; // userName -> 链尾 Promise
+  function runQuotaSerialized(userName, task) {
+    var key = String(userName || '');
+    var prev = quotaChains[key] || Promise.resolve();
+    var next = prev.then(task, task);
+    // 吞掉链尾拒绝：失败结果由任务自身返回给调用方，不能让链尾拒绝阻塞后续排队任务
+    next.catch(function() {});
+    quotaChains[key] = next;
+    return next;
+  }
 
   async function getQuota(userName) {
     try {
@@ -146,28 +173,30 @@ function createAiQuota(supabase) {
   }
 
   async function checkBeforeChat(userName, needSearch) {
-    try {
-      var result = await supabase.rpc('check_ai_token_quota', {
-        p_user_name: String(userName || ''),
-        p_need_search: !!needSearch,
-        p_free_token_limit: FREE_TOKEN_LIMIT,
-        p_pro_token_limit: PRO_TOKEN_LIMIT,
-        p_free_search_limit: FREE_SEARCH_LIMIT
-      });
-      if (result.error || !result.data) {
-        console.error('[AI-QUOTA] check unavailable:', result.error && result.error.message);
+    return runQuotaSerialized(userName, async function() {
+      try {
+        var result = await supabase.rpc('check_ai_token_quota', {
+          p_user_name: String(userName || ''),
+          p_need_search: !!needSearch,
+          p_free_token_limit: FREE_TOKEN_LIMIT,
+          p_pro_token_limit: PRO_TOKEN_LIMIT,
+          p_free_search_limit: FREE_SEARCH_LIMIT
+        });
+        if (result.error || !result.data) {
+          console.error('[AI-QUOTA] check unavailable:', result.error && result.error.message);
+          return { allowed: false, reason: 'quota_unavailable', quota: normalizeQuotaPayload(null) };
+        }
+        var data = result.data;
+        return {
+          allowed: data.allowed === true,
+          reason: data.reason || null,
+          quota: normalizeQuotaPayload(data.quota || data)
+        };
+      } catch (e) {
+        console.error('[AI-QUOTA] check exception:', e && e.message);
         return { allowed: false, reason: 'quota_unavailable', quota: normalizeQuotaPayload(null) };
       }
-      var data = result.data;
-      return {
-        allowed: data.allowed === true,
-        reason: data.reason || null,
-        quota: normalizeQuotaPayload(data.quota || data)
-      };
-    } catch (e) {
-      console.error('[AI-QUOTA] check exception:', e && e.message);
-      return { allowed: false, reason: 'quota_unavailable', quota: normalizeQuotaPayload(null) };
-    }
+    });
   }
 
   async function recordUsage(userName, usage, options) {
@@ -188,30 +217,34 @@ function createAiQuota(supabase) {
       Number(usage && usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens) ||
       0
     ));
-    try {
-      var result = await supabase.rpc('consume_ai_token_usage', {
-        p_user_name: String(userName || ''),
-        p_tokens: billable,
-        p_search_count: searchCount,
-        p_conversation_id: options.conversation_id || null,
-        p_prompt_tokens: prompt,
-        p_completion_tokens: completion,
-        p_reasoning_tokens: reasoning,
-        p_model: options.model || null,
-        p_source: options.source || 'chat',
-        p_free_token_limit: FREE_TOKEN_LIMIT,
-        p_pro_token_limit: PRO_TOKEN_LIMIT,
-        p_free_search_limit: FREE_SEARCH_LIMIT
-      });
-      if (result.error || !result.data) {
-        console.error('[AI-QUOTA] consume unavailable:', result.error && result.error.message);
+    // 扣减 RPC 按用户串行化（与 checkBeforeChat 共用同一互斥链），缓解 check→consume
+    // TOCTOU 并发放大；原子性仍依赖 DB RPC（见 createAiQuota 顶部注释）。
+    return runQuotaSerialized(userName, async function() {
+      try {
+        var result = await supabase.rpc('consume_ai_token_usage', {
+          p_user_name: String(userName || ''),
+          p_tokens: billable,
+          p_search_count: searchCount,
+          p_conversation_id: options.conversation_id || null,
+          p_prompt_tokens: prompt,
+          p_completion_tokens: completion,
+          p_reasoning_tokens: reasoning,
+          p_model: options.model || null,
+          p_source: options.source || 'chat',
+          p_free_token_limit: FREE_TOKEN_LIMIT,
+          p_pro_token_limit: PRO_TOKEN_LIMIT,
+          p_free_search_limit: FREE_SEARCH_LIMIT
+        });
+        if (result.error || !result.data) {
+          console.error('[AI-QUOTA] consume unavailable:', result.error && result.error.message);
+          return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
+        }
+        return normalizeQuotaPayload(result.data);
+      } catch (e) {
+        console.error('[AI-QUOTA] consume exception:', e && e.message);
         return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
       }
-      return normalizeQuotaPayload(result.data);
-    } catch (e) {
-      console.error('[AI-QUOTA] consume exception:', e && e.message);
-      return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
-    }
+    });
   }
 
   // ⚠️ 权限说明（审计 🟡）：本函数直接写 ai_user_membership（含 is_pro 与自定义额度
@@ -235,10 +268,10 @@ function createAiQuota(supabase) {
         p_pro_token_limit: PRO_TOKEN_LIMIT,
         p_free_search_limit: FREE_SEARCH_LIMIT,
         p_token_limit_daily: meta.token_limit_daily !== undefined
-          ? (meta.token_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.token_limit_daily))))
+          ? normalizeDailyLimit(meta.token_limit_daily)
           : null,
         p_search_limit_daily: meta.search_limit_daily !== undefined
-          ? (meta.search_limit_daily === null ? null : Math.max(-1, Math.floor(Number(meta.search_limit_daily))))
+          ? normalizeDailyLimit(meta.search_limit_daily)
           : null
       });
       if (result.error || !result.data) {

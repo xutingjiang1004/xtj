@@ -5,6 +5,8 @@
 // ai-core/sse.js 的 createSSEWriter（上限 4MB，含连接关闭/心跳管理）。两者实现近似
 // 但缓冲上限与关闭语义不同，长期维护易漂移。本模块服务于较旧路由；新代码应优先
 // 使用 ai-core/sse.js。统一为单一时需按"路由实际事件量级"确认上限，此处暂不合并。
+// 2026-08-12 修复：drain 回调改为命名函数 onDrain（原 arguments.callee 在严格模式
+// 下同步抛 TypeError，导致二次背压时监听器未注册、缓冲永不复排）。
 
 const MAX_SSE_BUFFER_BYTES = 256 * 1024;
 function writeSse(res, payload) {
@@ -32,7 +34,10 @@ function writeSse(res, payload) {
         res._sseBufferBytes += Buffer.byteLength(data, 'utf8');
         if (!res._sseDrainQueued) {
           res._sseDrainQueued = true;
-          res.once('drain', function() {
+          // 命名函数而非 arguments.callee：后者在 'use strict'（本文件第 2 行）下
+          // 访问会同步抛 TypeError，导致二次背压时 drain 监听器未真正注册，
+          // 后续写入被推入 _sseBuffer 却永不复排、连接关闭时静默丢失。
+          function onDrain() {
             res._sseDrainQueued = false;
             if (res._sseBuffer && res._sseBuffer.length > 0) {
               var buf = res._sseBuffer.slice();
@@ -47,14 +52,15 @@ function writeSse(res, payload) {
                     res._sseBufferBytes = res._sseBuffer.reduce(function(n, d) { return n + Buffer.byteLength(d, 'utf8'); }, 0);
                     if (!res.writableEnded && res._sseBuffer.length) {
                       res._sseDrainQueued = true;
-                      res.once('drain', arguments.callee);
+                      res.once('drain', onDrain);
                     }
                     break;
                   }
                 } catch (_) { break; }
               }
             }
-          });
+          }
+          res.once('drain', onDrain);
         }
       }
       return true;

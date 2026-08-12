@@ -538,9 +538,7 @@
       document.querySelector('.photo-preview-overlay, .pp-overlay, #ppOverlay');
     if (!overlay) return;
     if (overlay.querySelector('.xtj-photo-preview-actions')) return;
-    if (overlay.style.display === 'none' || overlay.classList.contains('hidden') || !overlay.classList.contains('active') && !overlay.classList.contains('show')) {
-      // still inject; visibility controlled with parent
-    }
+    // (死分支已删：该条件为空操作，可见性由父容器控制)
     var bar = document.createElement('div');
     bar.className = 'xtj-photo-preview-actions';
     bar.innerHTML =

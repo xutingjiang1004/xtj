@@ -178,7 +178,7 @@
       // rows as well as cached rows; UUIDs are never reused for uploads.
       var identity = item.cloudId != null ? String(item.cloudId) : String(item.id);
       if (deleted.indexOf(identity) >= 0 || deleted.indexOf(String(item.id)) >= 0 || isDeletedOrPendingPhoto(item)) return;
-      if (!map.has(String(item.id))) map.set(String(item.id), item);
+      if (!map.has(identity)) map.set(identity, item);
     }
     (Array.isArray(primary) ? primary : []).forEach(add);
     (Array.isArray(fallback) ? fallback : []).forEach(add);
@@ -578,7 +578,8 @@
     var count = Number(item.views || 0);
     var header = byId('photoPreviewViewsCount');
     if (header && window.photoPreviewCurrent && String(window.photoPreviewCurrent.id) === String(item.id)) header.textContent = count;
-    var card = document.querySelector('.photo-wall-item[data-photo-id="' + String(item.id).replace(/"/g, '\\"') + '"] .pw-view-count');
+    var safeId = (window.CSS && typeof window.CSS.escape === 'function') ? window.CSS.escape(String(item.id)) : String(item.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/]/g, '\\]');
+    var card = document.querySelector('.photo-wall-item[data-photo-id="' + safeId + '"] .pw-view-count');
     if (card) card.textContent = count;
   }
 
@@ -613,7 +614,9 @@
   }
 
   function handleExternalSync(message){
-    if (!message || !message.type) return;
+    if (!message || typeof message !== 'object' || typeof message.type !== 'string') return;
+    if (message.type !== 'photo_deleted' && message.type !== 'photo_added') return;
+    if (message.type === 'photo_deleted' && (typeof message.photoId !== 'string' || message.photoId === '')) return;
     if (message.type === 'photo_deleted' && message.photoId != null) {
       addDeletedPhotoId(message.photoId);
       removePhotoLocal(message.photoId, true);
