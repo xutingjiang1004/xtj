@@ -16023,11 +16023,13 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     //   web_search 明确为 true 或 false → 走 Responses API 启用内置 web_search；
     //   true 时再叠加 Tavily 第三方集群搜索；未传 → 走原标准路径（向后兼容）。
     var webSearchPref = req.body && req.body.web_search;
+    var thirdPartySearchOk = await canUseThirdPartySearch(userName);
     // ★ 修正：只有用户明确打开网页搜索时才走 Responses API（它需要内置 web_search 工具）。
     //   web_search === false 时回退标准 Chat Completions 路径，该路径能显式禁用 reasoning，
     //   避免 Responses API 省略 reasoning 参数导致推理模型仍默认思考，同时响应更快。
+    //   第三方搜索受日额度约束：用尽后关闭第三方搜索，仅保留模型内置 web_search。
+    var useTavilyCluster = thirdPartySearchOk && (webSearchPref === true);
     var useBuiltInSearch = (webSearchPref === true);
-    var useTavilyCluster = (webSearchPref === true);
     var webSearchEnabled = (webSearchPref === true);
     if (useBuiltInSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
       // ★ 网页搜索改造：Responses API 目前仅支持 deepseek-v4-flash，强制回退避免 400
@@ -16135,7 +16137,11 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var deepSeekOptions = {
       model: validatedModel,
       thinking_mode: thinkingMode,
-      tools: AI_TOOLS,
+      // ★ 搜索配额：额度用尽时过滤掉 search_web / tavily_search，避免模型调用第三方 API
+      tools: thirdPartySearchOk ? AI_TOOLS : AI_TOOLS.filter(function(t) {
+        var name = t && t.function ? t.function.name : '';
+        return name !== 'search_web' && name !== 'tavily_search';
+      }),
       tool_choice: 'auto',
       max_tool_rounds: 4,
       signal: requestAbortCtrl.signal,
@@ -16601,17 +16607,24 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //   web_search=true  → 内置 + Tavily 双通道加强，必要时 flash（Responses 限制）
     //   web_search=false → 仍优先走内置（flash/Responses）；第三方仅作轻量补充
     //   思考开时 tools 不能并存 → 服务端预搜注入 + 保留 reasoning 流
-    var useBuiltInSearch = (webSearchPref === true)
-      || (webSearchPref === false && validatedModel === DEEPSEEK_RESPONSES_MODEL)
-      || (proactiveSearch && validatedModel === DEEPSEEK_RESPONSES_MODEL);
     // 开开关：全力第三方双通道；关开关：仅在搜索意图时允许第三方作补充
     // 第三方搜索受日额度约束：用尽后 force 关闭第三方，仅保留模型内置 web_search
     var thirdPartySearchOk = thirdPartySearchOkEarly;
     var useTavilyCluster = thirdPartySearchOk && ((webSearchPref === true) || (webSearchPref === false && proactiveSearch));
     var webSearchEnabled = (webSearchPref === true);
+    // 切换模型：web_search=true 或 第三方额度用尽但有搜索意图 → 强制 flash（Responses API 内置搜索）
     if (webSearchPref === true && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
       validatedModel = DEEPSEEK_RESPONSES_MODEL;
     }
+    // ★ 修复：第三方搜索额度用尽但有搜索意图时，强制切 flash 走内置搜索，
+    //   避免回退到标准路径（带 search_web/tavily_search 工具）导致模型调用第三方 API
+    if (!thirdPartySearchOk && proactiveSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
+      validatedModel = DEEPSEEK_RESPONSES_MODEL;
+    }
+    // useBuiltInSearch 必须在 validatedModel 变更之后计算
+    var useBuiltInSearch = (webSearchPref === true)
+      || (webSearchPref === false && validatedModel === DEEPSEEK_RESPONSES_MODEL)
+      || (proactiveSearch && validatedModel === DEEPSEEK_RESPONSES_MODEL);
     if (useBuiltInSearch && !aborted) {
       // ===== Responses API 路径（优先内置 web_search；第三方可补充） =====
       var responsesContent = '';
@@ -17377,8 +17390,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       messages: roundMessages,
       stream: true
     };
+    // ★ 修复：关闭思考时必须显式 thinking:disabled，否则 DeepSeek 默认开启推理
+    //   且与 tools 并存时可能返回空 content（仅有 reasoning_content，前端过滤后气泡为空）
+    apiBody.thinking = { type: useThinking ? 'enabled' : 'disabled' };
     if (useThinking) {
-      apiBody.thinking = { type: 'enabled' };
       // DeepSeek API reasoning_effort 仅接受 low/medium/high，max 映射为 high
       apiBody.reasoning_effort = thinkingMode === 'max' ? 'high' : thinkingMode;
     }
