@@ -6160,9 +6160,18 @@ async function callDeepSeekViaResponses(messages, options) {
       if (!useThinking) apiBody.tools = tools;
       if (workingInstructions) apiBody.instructions = workingInstructions;
       if (useStream) apiBody.stream_options = { include_usage: true };
+      // Responses API：reasoning.effort 仅支持 none/low/high/max（无 medium）。
+      // 关闭思考必须显式 effort:none（V4 默认常为开启）；未传时默认思考 + tools
+      // 会 HTTP 400，前端误报「请关闭思考」——用户已是 off 仍失败。
       if (useThinking) {
-        // Responses API 的 reasoning effort 取值到 high 为止，max 映射为 high
-        apiBody.reasoning = { effort: thinkingLevel === 'max' ? 'high' : thinkingLevel };
+        var effort = String(thinkingLevel || 'high').toLowerCase();
+        // medium 映射到 high；非法值回落 high
+        if (effort === 'medium') effort = 'high';
+        if (effort === 'max') effort = 'max'; // Responses 支持 max
+        if (['low', 'high', 'max'].indexOf(effort) < 0) effort = 'high';
+        apiBody.reasoning = { effort: effort };
+      } else {
+        apiBody.reasoning = { effort: 'none' };
       }
       if (options && typeof options.temperature === 'number' && Number.isFinite(options.temperature)) {
         apiBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
@@ -16704,14 +16713,29 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } catch (e) {
         if (aborted) return safeEnd();
         var _respErrMsg = (e && e.message) ? String(e.message).slice(0, 180) : '';
-        console.error('[AGENT-STREAM] Responses API failed:', _respErrMsg);
+        var _respErrCode = (e && e.code) ? String(e.code) : '';
+        console.error('[AGENT-STREAM] Responses API failed:', _respErrMsg, _respErrCode, 'thinking=', thinkingMode);
+        var _thinkingOn = thinkingMode !== 'off';
         var _friendly = 'AI 调用失败，请稍后再试';
-        if (/timeout|超时|abort|idle/i.test(_respErrMsg)) _friendly = 'AI 响应超时，请稍后重试或关闭思考模式';
-        else if (/thinking|reasoning/i.test(_respErrMsg)) _friendly = '当前模型不支持该思考配置，请关闭思考或换模型后重试';
-        else if (/401|403|key|auth|unauthorized/i.test(_respErrMsg)) _friendly = 'AI 服务鉴权失败，请联系管理员';
-        else if (/429|rate/i.test(_respErrMsg)) _friendly = 'AI 请求过于频繁，请稍后再试';
-        else if (/HTTP 4\d\d/.test(_respErrMsg)) _friendly = 'AI 请求参数被拒绝，请关闭思考后重试或换模型';
-        writeSse(res, { type: 'error', error: _friendly });
+        if (/timeout|超时|abort|idle/i.test(_respErrMsg)) {
+          _friendly = _thinkingOn
+            ? 'AI 响应超时，请稍后重试或关闭思考模式'
+            : 'AI 响应超时，请稍后重试或切换模型';
+        } else if (_respErrCode === 'PROVIDER_INVALID_THINKING_MODE' || /thinking|reasoning/i.test(_respErrMsg)) {
+          _friendly = _thinkingOn
+            ? '当前模型不支持该思考配置，请关闭思考或换模型后重试'
+            : '当前模型请求参数无效，请换模型后重试，或稍后再试';
+        } else if (/401|403|key|auth|unauthorized/i.test(_respErrMsg)) {
+          _friendly = 'AI 服务鉴权失败，请联系管理员';
+        } else if (/429|rate/i.test(_respErrMsg)) {
+          _friendly = 'AI 请求过于频繁，请稍后再试';
+        } else if (/HTTP 4\d\d/.test(_respErrMsg)) {
+          // 已关闭思考时不要再提示「请关闭思考」
+          _friendly = _thinkingOn
+            ? 'AI 请求参数被拒绝，请关闭思考后重试或换模型'
+            : 'AI 请求参数被拒绝，请换模型后重试，或稍后重试';
+        }
+        writeSse(res, { type: 'error', error: _friendly, code: _respErrCode || undefined, thinking_mode: thinkingMode });
         return safeEnd();
       }
       if (aborted) return safeEnd();
@@ -17393,7 +17417,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var _fetchErr = (fetchErr && fetchErr.message) ? String(fetchErr.message) : '';
       console.error('[AGENT-STREAM] fetch failed:', _fetchErr);
       var _fetchFriendly = /abort|timeout/i.test(_fetchErr)
-        ? 'AI 响应超时，请稍后重试或关闭思考模式'
+        ? (useThinking ? 'AI 响应超时，请稍后重试或关闭思考模式' : 'AI 响应超时，请稍后重试或切换模型')
         : 'AI 连接失败，请检查网络后重试';
       res.write('data: ' + JSON.stringify({ type: 'error', error: _fetchFriendly }) + '\n\n');
       return safeEnd();
@@ -17404,13 +17428,20 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       try {
         var errData = await streamResp.json().catch(function(){ return {}; });
         var errMsg = errData && errData.error && errData.error.message ? String(errData.error.message).slice(0, 200) : '';
-        console.error('[AGENT-STREAM] API error', streamResp.status, errMsg);
+        console.error('[AGENT-STREAM] API error', streamResp.status, errMsg, 'thinking=', thinkingMode);
         if (useThinking && (errMsg.indexOf('thinking') >= 0 || errMsg.indexOf('reasoning_effort') >= 0)) {
           res.write('data: ' + JSON.stringify({ type: 'error', error: '当前模型不支持思考模式，请关闭思考模式后重试' }) + '\n\n');
         } else if (streamResp.status === 429) {
           res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 请求过于频繁，请稍后再试' }) + '\n\n');
         } else if (streamResp.status === 401 || streamResp.status === 403) {
           res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 服务鉴权失败，请联系管理员' }) + '\n\n');
+        } else if (streamResp.status >= 400 && streamResp.status < 500) {
+          res.write('data: ' + JSON.stringify({
+            type: 'error',
+            error: useThinking
+              ? 'AI 请求参数被拒绝，请关闭思考后重试或换模型'
+              : 'AI 请求参数被拒绝，请换模型后重试，或稍后重试'
+          }) + '\n\n');
         } else {
           res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败（' + streamResp.status + '），请稍后重试' }) + '\n\n');
         }
