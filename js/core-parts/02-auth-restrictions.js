@@ -167,6 +167,13 @@
             }
 
             async function saveUserInfo(name, isNewUser, email) {
+                // ★ 隐私/防伪守卫：仅允许写入"当前登录用户"或"登录流程中的规范用户"的
+                //   __user_info__ 行，禁止经控制台伪造他人注册信息（RLS 侧亦应强制归属）。
+                var actingUser = String(window.currentUser || '').trim() || String(window._xtjCanonicalUser || '').trim();
+                if (!name || (actingUser && String(name).trim() !== actingUser)) {
+                    console.warn('[saveUserInfo] blocked write for non-self user:', name);
+                    return;
+                }
                 try {
                     var regTime = null;
 

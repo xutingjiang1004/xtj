@@ -1917,6 +1917,200 @@
   }
 
   // ──────────────────────────────────────────────
+  // streamIndexFiles — 边扫描边回调（审计 🟠：索引全量读入内存问题）
+  // 与 listAllFilesWithMetadata 同款扫描，但对每个 text 文件读取后立即通过
+  // onTextFile(entry) 回调把正文上送调用方（批次上传后即释放），allFiles 只保留
+  // 元数据（path/name/type/size/sha256），避免大工作区把全部文件正文常驻内存。
+  // ──────────────────────────────────────────────
+  function streamIndexFiles(maxDepth, maxFiles, signal, onTextFile) {
+    if (!_dirHandle) {
+      return Promise.reject(new Error('streamIndexFiles: no workspace selected'));
+    }
+    maxDepth = maxDepth || 4;
+    maxFiles = maxFiles || 500;
+
+    var allFiles = [];
+    var allDirs = [];
+    var discoveredFiles = 0;
+    var activeReads = 0;
+    var readQueue = [];
+    var MAX_CONCURRENT_READS = 8;
+    var aborted = false;
+
+    function isAborted() {
+      return aborted || (signal && signal.aborted);
+    }
+
+    function rejectQueuedAndClear() {
+      aborted = true;
+      while (readQueue.length) {
+        var queued = readQueue.shift();
+        try { queued.reject(createAbortError()); } catch (e) {}
+      }
+    }
+
+    if (signal) {
+      if (signal.aborted) return Promise.reject(createAbortError());
+      signal.addEventListener('abort', rejectQueuedAndClear);
+    }
+
+    function withReadSlot(task) {
+      return new Promise(function (resolve, reject) {
+        if (isAborted()) { reject(createAbortError()); return; }
+        readQueue.push({ task: task, resolve: resolve, reject: reject });
+        pumpReadQueue();
+      });
+    }
+
+    function pumpReadQueue() {
+      while (!isAborted() && activeReads < MAX_CONCURRENT_READS && readQueue.length) {
+        var queued = readQueue.shift();
+        activeReads++;
+        Promise.resolve().then(queued.task).then(
+          function(result) { activeReads--; if (!isAborted()) queued.resolve(result); pumpReadQueue(); },
+          function(err) { activeReads--; queued.reject(err); pumpReadQueue(); }
+        );
+      }
+    }
+
+    function scanDir(dirHandle, currentPath, depth) {
+      if (isAborted()) return Promise.reject(createAbortError());
+      if (depth > maxDepth || discoveredFiles >= maxFiles) {
+        return Promise.resolve();
+      }
+
+      return new Promise(function (res, rej) {
+        var items = [];
+        var it;
+        try {
+          it = dirHandle.values();
+        } catch (e) {
+          try { it = dirHandle.entries(); } catch (e2) { res(); return; }
+        }
+
+        function pump() {
+          if (isAborted()) { rej(createAbortError()); return; }
+          it.next().then(function (result) {
+            if (isAborted()) { rej(createAbortError()); return; }
+            if (result.done) {
+              var promises = [];
+              for (var i = 0; i < items.length; i++) {
+                if (isAborted()) break;
+                var handle = items[i];
+                var entryPath = currentPath ? currentPath + '/' + handle.name : handle.name;
+                if (handle.kind === 'directory') {
+                  if (!shouldSkip(handle.name)) {
+                    allDirs.push({ path: entryPath, name: handle.name });
+                    if (depth < maxDepth) {
+                      promises.push(scanDir(handle, entryPath, depth + 1));
+                    }
+                  }
+                } else {
+                  if (discoveredFiles >= maxFiles) break;
+                  discoveredFiles++;
+                  if (shouldSkipFile(handle.name)) {
+                    continue;
+                  }
+
+                  var fileType = getFileType(handle.name);
+                  if (fileType === 'text') {
+                    promises.push((function (capturedHandle, capturedPath, capturedType) {
+                      return withReadSlot(function () {
+                        if (isAborted()) throw createAbortError();
+                        return readFile(capturedHandle);
+                      }).then(function (fileResult) {
+                        if (isAborted()) return;
+                        if (fileResult && fileResult.type === 'text') {
+                          var meta = {
+                            path: capturedPath,
+                            name: capturedHandle.name,
+                            type: 'text',
+                            size: fileResult.size || 0,
+                            sha256: fileResult.sha256 || '',
+                            language: getLanguageFromExt(capturedHandle.name)
+                          };
+                          // 正文经回调即时上送，随后即释放，不进入 allFiles
+                          if (typeof onTextFile === 'function') {
+                            onTextFile({
+                              path: meta.path,
+                              name: meta.name,
+                              type: 'text',
+                              size: meta.size,
+                              sha256: meta.sha256,
+                              language: meta.language,
+                              content: fileResult.content || ''
+                            });
+                          }
+                          allFiles.push(meta);
+                        } else {
+                          allFiles.push({
+                            path: capturedPath,
+                            name: capturedHandle.name,
+                            type: capturedType,
+                            size: 0
+                          });
+                        }
+                      }).catch(function (err) {
+                        if (err && err.name === 'AbortError') throw err;
+                        if (isAborted()) return;
+                        allFiles.push({
+                          path: capturedPath,
+                          name: capturedHandle.name,
+                          type: capturedType,
+                          size: 0
+                        });
+                      });
+                    })(handle, entryPath, fileType));
+                  } else {
+                    allFiles.push({
+                      path: entryPath,
+                      name: handle.name,
+                      type: fileType,
+                      size: 0
+                    });
+                  }
+                }
+              }
+              if (isAborted()) { rej(createAbortError()); return; }
+              Promise.all(promises).then(function () { res(); }).catch(rej);
+            } else {
+              var handle;
+              if (Array.isArray(result.value)) handle = result.value[1];
+              else handle = result.value;
+              items.push(handle);
+              pump();
+            }
+          }).catch(function (err) {
+            rej(err);
+          });
+        }
+        pump();
+      });
+    }
+
+    return scanDir(_dirHandle, '', 0).then(function () {
+      if (signal) {
+        try { signal.removeEventListener('abort', rejectQueuedAndClear); } catch (e) {}
+      }
+      allFiles.sort(function (a, b) { return a.path.toLowerCase().localeCompare(b.path.toLowerCase()); });
+      allDirs.sort(function (a, b) { return a.path.toLowerCase().localeCompare(b.path.toLowerCase()); });
+      return {
+        files: allFiles.slice(0, maxFiles),
+        directories: allDirs,
+        totalFiles: allFiles.length,
+        returnedFiles: Math.min(allFiles.length, maxFiles),
+        totalCount: allFiles.length,
+        truncated: discoveredFiles >= maxFiles
+      };
+    }).catch(function (err) {
+      if (signal) {
+        try { signal.removeEventListener('abort', rejectQueuedAndClear); } catch (e) {}
+      }
+      throw err;
+    });
+  }
+
+  // ──────────────────────────────────────────────
   // shouldSkipFile — exclude files that shouldn't be indexed
   // ──────────────────────────────────────────────
   function shouldSkipFile(fileName) {
@@ -2141,6 +2335,7 @@
     expandDirectory: expandDirectory,
     listAllFiles: listAllFiles,
     listAllFilesWithMetadata: listAllFilesWithMetadata,
+    streamIndexFiles: streamIndexFiles,
 
     // File reading
     getFileType: getFileType,

@@ -29,7 +29,7 @@
   MOJIBAKE_PAIRS.forEach(function (pair) {
     // ★ 仅剔除单字映射（如 '淇'→'修复'，会误伤人名/地名如"淇河"）；
     // 双字乱码组合（如 '閿欒'→'错误'）在合法中文中几乎不可能出现，保留以维持修复能力
-    if (!pair[0] || pair[0] === pair[1] || replacements[pair[0]] || pair[0].length < 2) return;
+    if (!pair[0] || pair[0] === pair[1] || replacements[pair[0]] || pair[0].length < 2 || pair[0].indexOf('?') !== -1) return;
     replacements[pair[0]] = pair[1];
     patterns.push(pair[0]);
   });
@@ -106,7 +106,7 @@
       if (window.currentUser) {
         name.textContent = window.currentUser;
         if (status) status.textContent = '查看资料';
-        if (avatar) avatar.textContent = window.currentUser[0].toUpperCase();
+        if (avatar) avatar.textContent = String(window.currentUser || '').slice(0, 1).toUpperCase() || '?';
       } else {
         name.textContent = '未登录';
         if (status) status.textContent = '请先登录';

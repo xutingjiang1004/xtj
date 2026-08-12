@@ -126,7 +126,10 @@
         window.__xtjRefreshRate = bucket;
     }
 
+    var _refreshRateMeasured = false;
     function measureRefreshRate() {
+        if (_refreshRateMeasured) return; // 只测一次并缓存（避免每次页面可见都跑 16 帧）
+        _refreshRateMeasured = true;
         if (document.hidden) return;
         if (refreshFrameId) cancelAnimationFrame(refreshFrameId);
         var stamps = [];

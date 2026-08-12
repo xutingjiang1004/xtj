@@ -8,6 +8,8 @@
 // 23505 unique_violation, 42501 insufficient_privilege, 23503 foreign_key_violation,
 // 23502 not_null_violation, 22P02 invalid_text_representation, 23514 exclusion_violation,
 // 42P01 undefined_table, 42703 undefined_column
+// 审计 ⚪：该常量在 isRetryableError 中显式短路返回不可重试（原先仅导出未使用，
+// 属死导出；现作为"明确不可重试"清单参与判定，白名单外的其他码仍默认不可重试）。
 var NON_RETRYABLE_CODES = ['23505', '42501', '23503', '23502', '22P02', '23514', '42P01', '42703'];
 
 // 白名单判定 retryable：
@@ -21,6 +23,8 @@ function isRetryableError(error) {
   var code = error.code ? String(error.code) : '';
   var message = error.message ? String(error.message) : String(error);
   if (code) {
+    // 明确不可重试的语义性错误（见 NON_RETRYABLE_CODES 定义），先短路返回
+    if (NON_RETRYABLE_CODES.indexOf(code) >= 0) return false;
     if (/^08/.test(code)) return true;
     if (code === '40001') return true;
     // PostgREST 连接类错误（PGRST100 无响应 / PGRST102 网络错误 / PGRST205 连接终止，

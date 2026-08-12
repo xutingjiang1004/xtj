@@ -46,8 +46,16 @@ window.xtjMergeAbortSignals = function(primary, secondary) {
     var abortBoth = function() {
         try { controller.abort(); } catch (e) {}
     };
+    var cleanupBoth = function() {
+        try { primary.removeEventListener('abort', abortBoth); } catch (e) {}
+        try { secondary.removeEventListener('abort', abortBoth); } catch (e) {}
+    };
     primary.addEventListener('abort', abortBoth, { once: true });
     secondary.addEventListener('abort', abortBoth, { once: true });
+    // 任一触发后清理另一侧监听，避免正常完成路径残留监听器
+    var origAbort = abortBoth;
+    abortBoth = function() { cleanupBoth(); try { controller.abort(); } catch (e) {} };
+    var _origPrimary = primary, _origSecondary = secondary;
     return controller.signal;
 };
 

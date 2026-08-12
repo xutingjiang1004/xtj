@@ -120,11 +120,7 @@
 
   function applyToCoreIfReady() {
     if (!state.data || state.status !== 'ok') return;
-    if (typeof window.loadFeed === 'function' && window.__xtjConsumeEarlyFeed) {
-      try {
-        window.__xtjConsumeEarlyFeed(state.data);
-      } catch (e) {}
-    }
+    // (死钩子已删：core 实际消费路径为 window.__xtjEarlyFeed，见 __xtjEarlyFeedPromise)
   }
 
   var resolveEarly;

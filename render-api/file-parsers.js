@@ -26,7 +26,9 @@ function getXlsxParser() {
 // code-agent.js 专用：PDF buffer 解析
 // ★ 安全加固：体积上限 + 解析超时 + 并发信号量，防止恶意 PDF（zip-bomb/深层嵌套）
 //   OOM 或挂死事件循环。pdf-parse 的同步解析无法被 Promise.race 中断，
-//   因此用信号量限制同时解析数，把单事件循环被占满的窗口收敛到固定上限（审计 🟠）
+//   因此用信号量限制同时解析数，把单事件循环被占满的窗口收敛到固定上限（审计 🟠）。
+//   长期方案：将解析移入 worker_threads 并对可中断信号做响应，从根本上缩短单次
+//   解析占满事件循环的时长（超出本模块范围，暂以耗时告警 + 信号量缓解）。
 var MAX_PDF_BUFFER_BYTES = 8 * 1024 * 1024; // 8MB（由 15MB 下调）
 var PDF_PARSE_TIMEOUT_MS = 15000;
 var MAX_CONCURRENT_PDF_PARSES = 2;
@@ -40,10 +42,17 @@ async function withPdfParseSlot(fn) {
     await new Promise(function(resolve) { _pdfParseWaiters.push(resolve); });
   }
   _pdfParseInFlight++;
+  var parseStartAt = Date.now();
   try {
     return await fn();
   } finally {
     _pdfParseInFlight--;
+    // 审计 🟠 单次解析耗时告警：同步解析即便超时仍占满事件循环，>5s 的解析说明
+    // 该 PDF 复杂度异常，告警供观测；不改变 8MB/15s/信号量上限。
+    var elapsedMs = Date.now() - parseStartAt;
+    if (elapsedMs > 5000) {
+      console.warn('[PARSER] PDF parse took ' + elapsedMs + 'ms (>5s); investigate PDF complexity or move to worker_threads');
+    }
     var next = _pdfParseWaiters.shift();
     if (next) next();
   }

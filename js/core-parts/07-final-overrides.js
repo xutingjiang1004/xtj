@@ -351,8 +351,22 @@
                     return l && visiblePostIds.has(String(l.post_id));
                 });
                 if (Array.isArray(viewEvents)) {
+                    // 本人过滤：仅保留"他人浏览了我（当前用户）的帖子"的记录，
+                    // 避免泄露全站任意用户间的浏览关系（post_author 存于 content JSON）。
+                    var me = String(window.currentUser || '').trim();
                     statViewEvents = viewEvents.filter(function(event) {
-                        return event && visiblePostIds.has(String(event.media_url));
+                        if (!event) return false;
+                        if (!visiblePostIds.has(String(event.media_url))) return false;
+                        if (!me) return false; // 未登录时不展示任何浏览记录
+                        var author = '';
+                        try {
+                            var parsed = JSON.parse(String(event.content || '{}'));
+                            if (parsed && typeof parsed === 'object') author = String(parsed.post_author || '').trim();
+                        } catch (e) {}
+                        if (author) return author === me;
+                        // content 缺失时按帖子归属兜底
+                        var owner = postInfoCache && postInfoCache[String(event.media_url)] && postInfoCache[String(event.media_url)].user_name;
+                        return owner ? String(owner) === me : false;
                     });
                 }
                 var postsCountEl = document.getElementById('sPosts');

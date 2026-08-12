@@ -157,9 +157,13 @@ function createSSEWriter(res, req) {
 // ── SSE Event Formatting ─────────────────────────────────────────────────
 function formatSSEEvent(event) {
   var lines = [];
-  if (event.id !== undefined && event.id !== null) lines.push('id: ' + event.id);
+  // 审计 ⚪ 字段单行化消毒：id/event 若含换行会破坏 SSE 帧结构（可伪造出新的
+  // id:/event:/data: 行）。data 字段下方按行前缀 'data: '，天然安全，无需处理。
+  if (event.id !== undefined && event.id !== null) {
+    lines.push('id: ' + String(event.id).replace(/[\r\n]+/g, ' '));
+  }
   var eventName = event.event || event.type;
-  if (eventName) lines.push('event: ' + eventName);
+  if (eventName) lines.push('event: ' + String(eventName).replace(/[\r\n]+/g, ' '));
   if (event.data !== undefined) {
     // Structured AI events are consumed from data.type/data.data by the Code
     // client. Keep the legacy { event, data } shape as a payload-only event.

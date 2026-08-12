@@ -40,7 +40,7 @@ test('bigint comment ID is validated with regex and not converted with parseInt 
 // 4: completed returns full cat_ai comment format
 test('retry completed status returns full cat_ai comment data structure', () => {
   const retrySource = routeSource('post', '/api/comments/ai-reply-retry', "async function callDeepSeek(messages, options)");
-  assert.match(retrySource, /\.eq\('user_name', 'cat_ai'\)/);
+  assert.match(retrySource, /\.eq\('user_name', (?:'cat_ai'|CAT_AI_USERNAME)\)/);
   assert.match(retrySource, /\.eq\('generated_by_ai', true\)/);
   assert.match(retrySource, /data: aiReplyComment/);
 });

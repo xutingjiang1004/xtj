@@ -1380,20 +1380,9 @@
                 } catch(e) { return []; }
             }
 
-            function saveViewHistory(entry) {
-                const history = getViewHistory();
-                // 避免重复记录相同 post_id + user_name 的浏览记录
-                const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
-                if (!exists) {
-                    history.unshift(normalizeViewHistoryEntry(entry));
-                    // 只保留最近 500 条
-                    if (history.length > 500) history.length = 500;
-                    window.safeStorage.set(VIEW_HISTORY_KEY, JSON.stringify(history));
-                }
-            }
-
             // ===================== 浏览历史加载 =====================
             // 保存浏览历史：分页加载相关变量
+            // (已收敛单一实现：旧 function saveViewHistory 声明为死代码，删除)
             saveViewHistory = function(entry) {
                 const history = getViewHistory();
                 var normalized = normalizeViewHistoryEntry(entry);
@@ -1737,7 +1726,7 @@
                     '</button>'
                 ];
                 users.forEach(function(username) {
-                    var safeJsName = String(username).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+                    var safeJsName = safeJsStr(String(username));
                     html.push(
                         '<button type="button" class="post-user-chip' + (activeUser === username ? ' is-active' : '') + '" onclick="selectPostFilterUser(\'' + safeJsName + '\')">' +
                             getPostFilterUserAvatar(username) +
@@ -1818,84 +1807,6 @@
                 return escapeHtml(String(content || ''));
             }
             window.buildPostContentHtml = buildPostContentHtml;
-
-            function renderFeedWithAvatars(visiblePosts, comments, likes) {
-                const feed = document.getElementById("feed");
-                const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
-
-                var htmlChunks = [];
-                visiblePosts.forEach(function(post) {
-                    try {
-                        const p = normalizePost(post);
-                        const pLikes = likeMap[p.id] || [];
-                        const pComms = commentMap[p.id] || [];
-                        const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
-                        const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
-                        var commentsHtml = '';
-                        if (pComms.length) {
-                            var parentComments = pComms.filter(function(c) { return !c.parent_comment_id; });
-                            var aiCommentMap = {};
-                            pComms.forEach(function(c) {
-                                if (c.parent_comment_id && c.user_name === 'cat_ai' && c.generated_by_ai) {
-                                    var key = String(c.parent_comment_id);
-                                    if (!aiCommentMap[key]) aiCommentMap[key] = [];
-                                    aiCommentMap[key].push(c);
-                                }
-                            });
-                            commentsHtml = '\n                  <div class="comments">\n                    ' + parentComments.map(function(c) {
-                                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(c.id) + '\', this)">删除</button>' : '';
-                                var html = '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + delBtn + '\n                    ';
-                                var aiReplies = aiCommentMap[String(c.id)] || [];
-                                if (aiReplies.length > 0) {
-                                    html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">';
-                                    aiReplies.forEach(function(reply) {
-                                        if (typeof renderCatAiComment === 'function') {
-                                            html += renderCatAiComment(reply);
-                                        }
-                                    });
-                                    html += '</div>';
-                                }
-                                html += '\n                    </div>\n                    ';
-                                return html;
-                            }).join('') + '\n                  </div>\n                  ';
-                        }
-                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + window.safeParseDate(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + buildPostContentHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + commentsHtml + '\n                </div>\n              ');
-                    } catch (e) {
-                        console.error('[feed-render] failed post:', {
-                            postId: post && post.id,
-                            userName: post && post.user_name,
-                            error: e
-                        });
-                    }
-                });
-
-                // Before replacing feed innerHTML:
-                var detachedPanels = [];
-                feed.querySelectorAll('.post-tool-critique, .post-tool-translation').forEach(function(panel) {
-                    var post = panel.closest('.post');
-                    var postId = post ? post.getAttribute('data-post-id') : null;
-                    if (postId) {
-                        panel.parentNode.removeChild(panel);
-                        detachedPanels.push({ id: postId, panel: panel });
-                    }
-                });
-
-                feed.innerHTML = htmlChunks.length ? htmlChunks.join('') : '<div class="loading">快来发布第一条动态吧~</div>';
-
-                // Reattach:
-                detachedPanels.forEach(function(item) {
-                    // L9 修复：CSS 选择器里不能用 escapeHtml（HTML 实体是字面字符永不匹配），
-                    // 应转义选择器特殊字符（对齐 6573 行的 replace(/"/g,'\\"') 模式）
-                    var _pid = String(item.id == null ? '' : item.id).replace(/"/g, '\\"');
-                    var post = feed.querySelector('.post[data-post-id="' + _pid + '"]');
-                    if (post) {
-                        var actions = post.querySelector('.actions');
-                        if (actions) actions.insertAdjacentElement('afterend', item.panel);
-                    }
-                });
-
-                initPostScrollAnimation();
-            }
 
             function initPostScrollAnimation() {
                 var posts = document.querySelectorAll('.post');
@@ -2465,6 +2376,8 @@
                 if (!selectTarget() && reportList) {
                     var observer = new MutationObserver(function() { if (selectTarget()) observer.disconnect(); });
                     observer.observe(reportList, { childList: true, subtree: true });
+                    // 兜底：目标始终未出现时 5s 强制断开，避免监听器常驻泄漏
+                    window.setTimeout(function() { try { observer.disconnect(); } catch (e) {} }, 5000);
                 }
                 postToolFetch({ post_id: postId, action: 'report_scan' }).then(function(data) {
                     window.__xtjReportAiScan = data.scan || null;
@@ -3818,6 +3731,9 @@
                     var media_url = "";
                     var media_type = "";
                     if (file) {
+                        // ★ 类型黑名单：anon 直传 Storage 拒绝可执行/脚本类文件（svg/svgz/html/xml/swf）
+                        var blockedUpload = /\.(svgz?|html?|xml|swf)$/i.test(String(file && file.name || '')) || /^image\/svg\+xml/i.test(String(file && file.type || ''));
+                        if (blockedUpload) throw new Error('file type not allowed');
                         var path = buildStorageUploadPath('posts', file.name);
                         var uploadRes = await sb.storage.from("uploads").upload(path, file);
                         if (uploadRes.error) throw uploadRes.error;

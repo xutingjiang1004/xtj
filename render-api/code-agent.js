@@ -1060,15 +1060,30 @@ function isPrivateAddress(address) {
       (first === 203 && octets[1] === 0 && octets[2] === 113);
   }
   if (net.isIP(value) === 6) {
-    // ★ H-5 修复：IPv4-mapped IPv6（::ffff:x.x.x.x）必须先还原成 IPv4 再走私网判定。
-    //   原实现只兜底 ::ffff:127./10./192.168./169.254. 前缀，::ffff:172.16.0.1、
-    //   ::ffff:100.64.0.1、::ffff:198.18.0.1 等会被漏判为公网 → SSRF 可访问内网。
-    if (value.indexOf('::ffff:') === 0) {
-      var mappedV4 = value.slice(7);
-      if (net.isIP(mappedV4) === 4) return isPrivateAddress(mappedV4);
+    // ★ 审计 🟠：IPv4-mapped IPv6 无论简写（::ffff:x.x.x.x / ::ffff:7f00:1）
+    //   还是全 8 段（0:0:0:0:0:ffff:127.0.0.1 / 0:0:0:0:0:ffff:7f00:1），
+    //   都先还原成 IPv4 再走私网判定，防止映射地址绕过 SSRF 防线。
+    if (value.indexOf('ffff:') >= 0) {
+      var mappedTail = value.split('ffff:')[1] || '';
+      if (net.isIP(mappedTail) === 4) return isPrivateAddress(mappedTail);
+      var mappedHex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(mappedTail);
+      if (mappedHex) {
+        var mappedHi = parseInt(mappedHex[1], 16);
+        var mappedLo = parseInt(mappedHex[2], 16);
+        return isPrivateAddress((mappedHi >> 8) + '.' + (mappedHi & 255) + '.' + (mappedLo >> 8) + '.' + (mappedLo & 255));
+      }
     }
-    return value === '::' || value === '::1' || value.indexOf('fc') === 0 || value.indexOf('fd') === 0 ||
-      /^(fe[89ab]):/i.test(value);
+    // 审计 🟠：补齐链路本地（fe80::/10，fe8x-febx）、组播（ff00::/8，ffxx 全段）、
+    // NAT64（64:ff9b::/96）、6to4（2002::/16）、Teredo（2001::/32）、文档段（2001:db8::/32）、
+    // ULA（fc00::/7）。与 web-fetch/provider-registry 保持同一覆盖标准。
+    return value === '::' || value === '::1' ||
+      /^f[cd][0-9a-f]{2}:/.test(value) ||
+      /^fe[89ab]/.test(value) ||
+      /^64:ff9b:/.test(value) ||
+      /^2002:/.test(value) ||
+      /^2001:0:/i.test(value) ||
+      /^2001:db8:/.test(value) ||
+      /^ff[0-9a-f][0-9a-f]:/i.test(value);
   }
   return false;
 }
@@ -5678,7 +5693,7 @@ module.exports = function registerCodeAgentRoutes(app, deps) {
       }
 
       // Get events after the given event_id (分页)
-      var eventsResult = await streamSession.getEventsAfter(supabase, streamId, afterEventId, pageSize);
+      var eventsResult = await streamSession.getEventsAfter(supabase, streamId, afterEventId, pageSize, userId);
       if (eventsResult && eventsResult.ok === false) {
         return res.status(503).json({ ok: false, code: 'STREAM_EVENTS_QUERY_FAILED', error: 'Stream event query failed; retry later', retryable: true, details: IS_PRODUCTION ? null : (eventsResult.error || null) });
       }

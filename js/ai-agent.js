@@ -802,6 +802,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
+  // 仅解码本文件 escapeHtml/escapeAttr 会引入的五个实体（用于显示场景还原，
+  // 不引入任意实体解码，避免二次注入面）。
+  function aiDecodeHtmlEntities(str) {
+    return String(str == null ? '' : str)
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#x27;/g, "'");
+  }
+
   function renderMarkdown(txt) {
     if (!txt) return '';
     var s = String(txt);
@@ -810,17 +822,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
       var idx = codeBlocks.length;
       // 代码块只转义一次
-      codeBlocks.push('<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>');
+      codeBlocks.push('<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;') + '</code></pre>');
       return '%%%CODEBLOCK' + idx + '%%%';
     });
     // ★ 普通正文：HTML 转义
-    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
     // 图片: 只允许 data:image/ 协议
     s = s.replace(/!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g, function(m, alt, ext, b64) {
-      return '<img src="data:image/' + escapeAttr(ext) + ';base64,' + escapeAttr(b64) + '" alt="' + escapeAttr(alt) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
+      return '<img src="data:image/' + escapeAttr(ext) + ';base64,' + escapeAttr(b64) + '" alt="' + escapeAttr(aiDecodeHtmlEntities(alt)) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
     });
     // 链接: 使用 DOM API 防 XSS, 白名单协议: http:, https:, mailto:
     // ★ 安全: 用 new URL() 解析协议而非字符串前缀匹配。前缀匹配会被
@@ -836,14 +848,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         protocolOk = (proto === 'http:' || proto === 'https:' || proto === 'mailto:');
       } catch (_) { protocolOk = false; }
       if (!protocolOk) {
-        if (cleanHref.toLowerCase().indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeAttr(label) + '">' + escapeHtml(label) + '</span>';
-        return '<span class="ai-blocked-link" title="' + escapeAttr(label) + '">' + escapeHtml(label) + '</span>';
+        if (cleanHref.toLowerCase().indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeAttr(aiDecodeHtmlEntities(label)) + '">' + escapeHtml(aiDecodeHtmlEntities(label)) + '</span>';
+        return '<span class="ai-blocked-link" title="' + escapeAttr(aiDecodeHtmlEntities(label)) + '">' + escapeHtml(aiDecodeHtmlEntities(label)) + '</span>';
       }
       var a = document.createElement('a');
       a.href = cleanHref;
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = label;
+      a.textContent = aiDecodeHtmlEntities(label);
       return a.outerHTML;
     });
     s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
@@ -5470,8 +5482,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var userNode = el('div', { class: 'dt-msg user' });
     userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
     var userContent = el('div', { class: 'dt-msg-content' });
-    // 渲染 markdown (包含图片 data URL 鎴栨枃浠跺崰浣?
-    var renderFn = window.renderMarkdown || renderMarkdown;
+    // 渲染 markdown (包含图片 data URL 或文件占位)
+    // ★ 校验委托目标类型：window.renderMarkdown 可能被第三方/旧脚本覆盖为非函数，调用前必须判型
+    var renderFn = (typeof window.renderMarkdown === 'function') ? window.renderMarkdown : renderMarkdown;
     userContent.innerHTML = renderFn(displayText);
     userNode.appendChild(userContent);
     dtMessagesEl.appendChild(userNode);
@@ -7286,8 +7299,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               else if (t.args && t.args.location) detail = String(t.args.location);
               else if (t.args && t.args.symbol) detail = String(t.args.symbol);
               else if (t.args && t.args.from && t.args.to) detail = String(t.args.from) + '→' + String(t.args.to);
-              var stepId = 'tool-step-' + String(t.name || 'tool') + '-' + String(detail).slice(0, 24);
-              var existing = timeline.querySelector('[data-tool-step="' + stepId.replace(/"/g, '') + '"]');
+              // ★ 生成时即净化 stepId：剔除引号/反斜杠/方括号等选择器特殊字符与控制字符，
+              // 保证 setAttribute 与 querySelector 取值恒等，杜绝属性选择器注入/失配
+              var stepId = ('tool-step-' + String(t.name || 'tool') + '-' + String(detail).slice(0, 24))
+                .replace(/["\\\]\[\r\n\t]/g, '').replace(/\s+/g, '_');
+              var existing = timeline.querySelector('[data-tool-step="' + stepId + '"]');
               if (existing) {
                 existing.classList.add('is-running');
                 existing.classList.remove('is-done', 'is-error');
@@ -7919,6 +7935,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           setAiHistoryCache(S.conversationId, msgs);
         } catch (e) {}
       } else {
+        // 加载更早历史：DOM 前置 + 同步 S.messages（避免内存历史与 DOM 不一致）
+        if (msgs.length) S.messages = msgs.concat(S.messages);
         var oldScroll = messagesEl.scrollHeight;
         var frag = document.createDocumentFragment();
         for (var mi = 0; mi < msgs.length; mi++) {

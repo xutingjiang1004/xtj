@@ -554,19 +554,33 @@ function recoverIndex(supabase, workspaceId) {
 
 // ── Content Security ──────────────────────────────────────────────────────
 
+// 审计 🟡 敏感内容模式（2026-08-12 放宽）：旧实现只认"带引号且值 ≥20 字符"的赋值，
+// 无引号（DB_PASSWORD=hunter2）、短密钥、client_secret=、BASIC_AUTH、私钥片段均绕过。
+// 放宽策略：① 允许无引号 env 风格赋值（值含数字或长值，降低纯英文普通变量误报）；
+// ② 带引号赋值阈值 20 → 12；③ 补充 BASIC_AUTH / AKIA / PEM 正文片段等模式。
 var SENSITIVE_PATTERNS = [
-  /-----BEGIN\s+(?:RSA|EC|DSA|OPENSSH)\s+PRIVATE\s+KEY-----/i,
+  // 私钥/证书块
+  /-----BEGIN\s+(?:RSA|EC|DSA|OPENSSH|PGP)\s+PRIVATE\s+KEY-----/i,
   /-----BEGIN\s+CERTIFICATE-----/i,
-  /api[_-]?key\s*[:=]\s*['"][A-Za-z0-9_\-]{20,}['"]/i,
-  /secret\s*[:=]\s*['"][A-Za-z0-9_\-]{20,}['"]/i,
-  /password\s*[:=]\s*['"][^'"]+['"]/i,
-  /token\s*[:=]\s*['"][A-Za-z0-9_\-.]{20,}['"]/i,
-  /sk-[A-Za-z0-9]{20,}/i,
-  /ghp_[A-Za-z0-9]{20,}/i,
-  /gho_[A-Za-z0-9]{20,}/i,
-  /ghu_[A-Za-z0-9]{20,}/i,
-  /ghs_[A-Za-z0-9]{20,}/i,
-  /ghr_[A-Za-z0-9]{20,}/i
+  // 高信号字段名 + 带引号赋值：阈值 20 → 12（短密钥/凭据不再绕过），client_secret 显式纳入
+  /(?:api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret|secret)\s*[:=]\s*['"][A-Za-z0-9_\-./+]{12,}['"]/i,
+  // password 字段名信号最强，保持任意长度（含短密码）
+  /(?:password|passwd|pwd)\s*[:=]\s*['"][^'"]+['"]/i,
+  /token\s*[:=]\s*['"][A-Za-z0-9_\-./+]{12,}['"]/i,
+  // 无引号赋值（env 风格）：DB_PASSWORD=hunter2 / SECRET_KEY=xyz...。
+  // (?:^|[^A-Za-z0-9]) 允许下划线前缀的 env 变量名（DB_PASSWORD 的 _ 是 \w，\b 匹配不到）；
+  // (?=...\d) 要求值含数字、(?!\s*\() 排除函数调用赋值（password = getPassword()），
+  // 以平衡误报率。
+  /(?:^|[^A-Za-z0-9])(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?access[_-]?key[_-]?id)\s*=\s*(?=[A-Za-z0-9_\-./+]*\d)[A-Za-z0-9_\-./+]{6,}\b(?!\s*\()/i,
+  // BASIC_AUTH 环境变量名本身即凭据载体
+  /\bBASIC_AUTH\b/i,
+  // AWS 访问密钥 ID（AKIA/ASIA 前缀 + 16 位）
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/i,
+  // 密钥前缀（阈值 20 → 12；sk- 后的值允许连字符，如 sk-ant-api03-...）
+  /sk-[A-Za-z0-9_-]{12,}/i,
+  /gh[pousr]_[A-Za-z0-9]{12,}/i,
+  // 私钥 PEM 正文片段（MII 开头 base64 块）
+  /\bMII[A-Za-z0-9+/]{30,}/i
 ];
 
 function isSensitiveContent(content) {

@@ -60,11 +60,13 @@
     '.comments'
   ].join(',');
 
-  var _origOpenModal = window.openModal;
+  // 捕获既有实现（若此前模块已定义），再统一包装；调用时经引用惰性解析，避免加载顺序问题
+  if (!window.__xtjOrigOpenModal && typeof window.openModal === 'function') window.__xtjOrigOpenModal = window.openModal;
   window.openModal = function (id) {
     var overlay = document.getElementById(id);
     if (!overlay) return;
-    if (_origOpenModal) _origOpenModal(id);
+    var orig = window.__xtjOrigOpenModal;
+    if (typeof orig === 'function') orig(id);
     else { overlay.style.display = ''; overlay.classList.add('active'); }
     if (perfMode() === 'lite') return;
     var overlayRef = overlay;

@@ -81,10 +81,20 @@
         // H-35: 先执行再置位 —— 用户取消确认（cleanup 返回 false）时不置标志，
         // 否则 cleanup 永不再次执行，造成 Monaco/resizer/监听器泄漏。
         try {
-          if (window.__xtjCodeWorkspaceAPI.cleanup() === false) return;
-        } catch (_) { return; }
+          if (window.__xtjCodeWorkspaceAPI.cleanup() === false) {
+            // H-35 补丁：用户取消未保存确认时记录时间戳，3 秒内抑制重复弹窗
+            codeModuleState._cleanupDeclinedAt = Date.now();
+            return;
+          }
+        } catch (_) { codeModuleState._cleanupDeclinedAt = Date.now(); return; }
         codeModuleState._codeCleanupExecuted = true;
       }
+    }
+    // 用户刚取消过未保存确认（3 秒内）→ 不再重复提示，直接同步 tab
+    if (codeModuleState._cleanupDeclinedAt && Date.now() - codeModuleState._cleanupDeclinedAt < 3000) {
+      codeModuleState.currentTab = tab;
+      if (tab === 'code') scheduleVisibleCodeWorkspaceLoad();
+      return;
     }
     codeModuleState.currentTab = tab;
     // Bootstrap a restored Code tab even when no click event fires.
@@ -631,7 +641,7 @@
   function renderErrorPage(message, showRefresh) {
     var pc = document.getElementById('panelCode');
     if (!pc) return;
-    var escapedMsg = String(message || '未知错误').replace(/</g, '&lt;');
+    var escapedMsg = String(message || '未知错误').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     var state = showRefresh ? 'damaged' : 'error';
     var html = '<div class="code-loading-state" data-code-loader-state="' + state + '"><p>Code 工作区加载失败: ' + escapedMsg + '</p>';
     if (showRefresh) {

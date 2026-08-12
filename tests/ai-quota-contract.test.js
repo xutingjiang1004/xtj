@@ -234,11 +234,11 @@ test('audit: deep-think workers and FC preflight searches are quota-enforced', (
   assert.match(serverSource, /buildToolExecutor\(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName\)/);
   assert.match(serverSource, /buildToolExecutor\(sseSend, agent\.role, sources, queries, searchCountAccum, userName\)/);
   assert.match(serverSource, /executeToolCall\(tc, \{ userName: userName \|\| '', signal: signal \|\| null \}\)/);
-  // FC 预检的补全/扩展搜索改用 searchWebForUser（S2 修复）
-  assert.match(serverSource, /searchWebForUser\(userName, firstQuery, 20\)/);
-  assert.match(serverSource, /searchWebForUser\(userName, eq, 20\)/);
-  // autoSupplementSearch 支持 userName 配额透传
-  assert.match(serverSource, /function autoSupplementSearch\(originalQuery, currentResults, maxR, userName\)/);
+  // FC 预检的补全/扩展搜索改用 searchWebForUser（S2 修复；F-1 后新增第 4 参 req._searchApiCalls 计数）
+  assert.match(serverSource, /searchWebForUser\(userName, firstQuery, 20(?:,[^)]*)?\)/);
+  assert.match(serverSource, /searchWebForUser\(userName, eq, 20(?:,[^)]*)?\)/);
+  // autoSupplementSearch 支持 userName 配额透传（F-1 后新增第 5 参 searchApiCounter 计数）
+  assert.match(serverSource, /function autoSupplementSearch\(originalQuery, currentResults, maxR, userName(?:,[^)]*)?\)/);
 });
 
 test('audit: search tool results filter non-http(s) URLs', () => {
