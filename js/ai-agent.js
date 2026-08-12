@@ -6758,11 +6758,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var auth = await getUserAuthPayload({ forceNoToken: false });
     var headers = auth.headers || {};
 
+    // thinking_mode 必须显式传 'off'；不能用 || 'max'（'off' 虽为真值，
+    // 但非法/空值应回落默认，不能把用户「关闭思考」误当成 max）。
+    var _sendThinkingMode = (ALLOWED_THINKING_MODES.indexOf(S.thinkingMode) >= 0)
+      ? S.thinkingMode
+      : DEFAULT_THINKING_MODE;
     var fetchBody = JSON.stringify({
       message: text,
       conversation_id: S.conversationId,
       client_request_id: reqId,
-      thinking_mode: S.thinkingMode || 'max',
+      thinking_mode: _sendThinkingMode,
       response_profile: S.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
       attachments: attachmentPayload || undefined,
       web_search: S.webSearchEnabled,
