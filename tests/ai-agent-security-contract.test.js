@@ -39,8 +39,8 @@ test('AI attachments are sent as structured payloads and consumed only after suc
 });
 
 test('server extracts structured attachments on normal, stream, and deep routes', () => {
-  assert.match(serverSource, /async function extractChatAttachments\(message, attachments\)/);
-  assert.equal((serverSource.match(/extractChatAttachments\(message, req\.body && req\.body\.attachments\)/g) || []).length, 3);
+  assert.match(serverSource, /async function extractChatAttachments\(message, attachments, opts\)/);
+  assert.equal((serverSource.match(/extractChatAttachments\(message, req\.body && req\.body\.attachments(?:, \{[^}]*\})?\)/g) || []).length, 3);
   assert.match(serverSource, /缺少文件数据/);
   assert.match(serverSource, /文件数据格式无效/);
   assert.match(serverSource, /attachments\.length, 10/);

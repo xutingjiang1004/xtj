@@ -4021,8 +4021,10 @@ function securityRateLimit(windowMs, maxRequests) {
 // - 错误信息统一脱敏，不暴露 DeepSeek 原始错误给前端调用方
 // ===================== 文件内容提取 (PDF/DOCX/XLSX/TXT + 图片 OCR) =====================
 // 返回 { text, cards }；cards 供 SSE 结果卡展示（图片 OCR 等）
-async function extractEmbeddedFiles(text) {
+// opts.skipImageOcr = true 时，图片不再走 OCR 文字通道（由视觉模型直接看图），不生成 image_ocr 卡片
+async function extractEmbeddedFiles(text, opts) {
   if (!text || typeof text !== 'string') return { text: text || '', cards: [] };
+  var skipImageOcr = !!(opts && opts.skipImageOcr);
   var result = text;
   var cards = [];
   // 匹配 ![](data:...) 和 [](data:...) 模式
@@ -4063,35 +4065,43 @@ async function extractEmbeddedFiles(text) {
         } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
           extractedText = buffer.toString('utf-8');
         } else if (mimeType.startsWith('image/')) {
-          // DeepSeek 聊天路径暂无多模态：图片理解走 OCR 文字通道
-          var ocr = await ocrImageBuffer(buffer, mimeType, fileName, { sharp: sharp });
-          if (ocr && ocr.text) {
-            // 明确：这是图片内容文字，不是让模型去搜「OCR 技术/准确率」
-            extractedText =
-              '【用户上传图片的可读文字 · ' + fileName + '】\n' +
-              '任务：直接根据下列文字回答用户关于这张图的问题（订单/客服/截图含义等）。\n' +
-              '禁止：禁止联网搜索 OCR、文字识别、准确率、ocr.space 等技术话题；禁止把本段说明当成搜索关键词。\n' +
-              '--- 图片文字开始 ---\n' +
-              ocr.text +
-              '\n--- 图片文字结束 ---';
-            cards.push(aiSiteCard('image_ocr', '图片文字', {
-              file_name: fileName,
-              text: ocr.text.slice(0, 2400),
-              provider: ocr.provider || 'ocr.space',
-              chars: ocr.chars || ocr.text.length
-            }));
-          } else {
-            var ocrErr = (ocr && ocr.error) ? String(ocr.error).slice(0, 160) : '未识别到文字';
+          if (skipImageOcr) {
+            // 视觉模型直传图片（chat/stream 已把图片以 image_url 发给视觉模型），
+            // 不再走 OCR 文字通道，也不生成「图片文字未识别」鸡肋卡片。
             extractedText =
               '【用户上传图片 · ' + fileName + '】\n' +
-              '系统没有从这张图里提取到可用的文字。请根据图片本身尽量作答；若确实看不出、或这是一张纯图/截图不清晰，就简短请用户改用文字描述，或换一张更清晰、含文字的截图。';
-            cards.push(aiSiteCard('image_ocr', '图片文字未识别', {
-              file_name: fileName,
-              text: '',
-              error: ocrErr,
-              provider: (ocr && ocr.provider) || 'ocr.space',
-              chars: 0
-            }));
+              '用户上传了图片，请直接查看图片内容并回答。';
+          } else {
+            // DeepSeek 非视觉路径（如 V4 Pro）或非聊天路径：图片理解走 OCR 文字通道
+            var ocr = await ocrImageBuffer(buffer, mimeType, fileName, { sharp: sharp });
+            if (ocr && ocr.text) {
+              // 明确：这是图片内容文字，不是让模型去搜「OCR 技术/准确率」
+              extractedText =
+                '【用户上传图片的可读文字 · ' + fileName + '】\n' +
+                '任务：直接根据下列文字回答用户关于这张图的问题（订单/客服/截图含义等）。\n' +
+                '禁止：禁止联网搜索 OCR、文字识别、准确率、ocr.space 等技术话题；禁止把本段说明当成搜索关键词。\n' +
+                '--- 图片文字开始 ---\n' +
+                ocr.text +
+                '\n--- 图片文字结束 ---';
+              cards.push(aiSiteCard('image_ocr', '图片文字', {
+                file_name: fileName,
+                text: ocr.text.slice(0, 2400),
+                provider: ocr.provider || 'ocr.space',
+                chars: ocr.chars || ocr.text.length
+              }));
+            } else {
+              var ocrErr = (ocr && ocr.error) ? String(ocr.error).slice(0, 160) : '未识别到文字';
+              extractedText =
+                '【用户上传图片 · ' + fileName + '】\n' +
+                '系统没有从这张图里提取到可用的文字。请根据图片本身尽量作答；若确实看不出、或这是一张纯图/截图不清晰，就简短请用户改用文字描述，或换一张更清晰、含文字的截图。';
+              cards.push(aiSiteCard('image_ocr', '图片文字未识别', {
+                file_name: fileName,
+                text: '',
+                error: ocrErr,
+                provider: (ocr && ocr.provider) || 'ocr.space',
+                chars: 0
+              }));
+            }
           }
         } else {
           try {
@@ -4117,10 +4127,10 @@ async function extractEmbeddedFiles(text) {
 // Normalize them into the existing, size-limited extractor so DOCX/PDF/XLSX/TXT
 // uploads follow exactly the same validation and parsing path as legacy embeds.
 // 返回 { text, cards }
-async function extractChatAttachments(message, attachments) {
+async function extractChatAttachments(message, attachments, opts) {
   var base = typeof message === 'string' ? message : '';
   if (!Array.isArray(attachments) || attachments.length === 0) {
-    return extractEmbeddedFiles(base);
+    return extractEmbeddedFiles(base, opts);
   }
   var chunks = [base];
   var maxCount = Math.min(attachments.length, 10);
@@ -4144,7 +4154,7 @@ async function extractChatAttachments(message, attachments) {
   if (attachments.length > maxCount) {
     chunks.push('\n\n[附件数量超过 10 个，已跳过多余文件]\n');
   }
-  return extractEmbeddedFiles(chunks.join(''));
+  return extractEmbeddedFiles(chunks.join(''), opts);
 }
 
 function unwrapAttachmentExtract(result) {
@@ -16507,8 +16517,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // 附件解析与 config/ctx 并行，无附件时 extract 应快速返回
+    // ★ 视觉模型（V4 Flash / V4 Flash Vision）带图时跳过图片 OCR，不再生成「图片文字未识别」卡片
+    var _visionEligibleEarly = (req.body && req.body.model) === DEEPSEEK_MODEL_VISION || (req.body && req.body.model) === DEEPSEEK_MODEL_FLASH;
     T_stage.config_start = Date.now();
-    var attachPromise = extractChatAttachments(message, req.body && req.body.attachments);
+    var attachPromise = extractChatAttachments(message, req.body && req.body.attachments, { skipImageOcr: _visionEligibleEarly && _visionImageUrls.length > 0 });
     var configPromise = getAiConfig();
     var ctxPromise = loadAiContext(userName, convId);
     var _parallelPrep = await Promise.all([attachPromise, configPromise, ctxPromise]);
