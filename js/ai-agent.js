@@ -8110,6 +8110,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S.hasMore = !!r.data.has_more;
       S.oldestCursor = r.data.oldest || S.oldestCursor;
       var msgs = r.data.messages || [];
+      // ★ 历史图片消息：把后端带回来的 vision_urls 转成 attachments，
+      //   供「重新生成」时复用原图（历史/刷新后加载的图片消息同样可重新生成）。
+      msgs = msgs.map(function(m) {
+        if (m && m.role === 'user' && Array.isArray(m.vision_urls) && m.vision_urls.length) {
+          var atts = m.vision_urls.map(function(url, ui) {
+            var mime = 'image/png';
+            var m2 = String(url || '').match(/^data:([^;,]+);/);
+            if (m2 && m2[1]) mime = m2[1];
+            return { name: '图片' + (ui + 1), type: mime, data_url: url };
+          });
+          m.attachments = atts;
+        }
+        return m;
+      });
 
       if (!msgs.length && !before) {
         // 服务端暂无消息时：若本地/缓存已有完整对话，保留不擦掉（刚聊完尚未落库、或短暂查询空窗）
@@ -8727,10 +8741,9 @@ function showChatMessages() {
         for (var i = 0; i < QUICK_PRESETS.length; i++) {
           if (QUICK_PRESETS[i].id === qc) { insertQuickTemplate(QUICK_PRESETS[i].template); break; }
         }
-        setTimeout(function() {
-          var fi = document.getElementById('aiChatFileInp');
-          if (fi) fi.click();
-        }, 80);
+        // 必须同步触发：iOS/iPadOS Safari 对 setTimeout 后的 file.click() 可能拦截
+        var fi = document.getElementById('aiChatFileInp');
+        if (fi) { try { fi.click(); } catch (eF) {} }
         return;
       }
       for (var j = 0; j < QUICK_PRESETS.length; j++) {
@@ -8804,6 +8817,24 @@ function showChatMessages() {
         }
       });
     }
+    // ★ 生图服务地址：优先读前端配置 AI_IMAGE_GEN_BASE（可替换为自有服务），
+    //   未配置时回退内置默认地址。
+    function genImageApiUrl(prompt) {
+      var base = '';
+      try { base = (window.XTJ_CONFIG && window.XTJ_CONFIG.AI_IMAGE_GEN_BASE) || ''; } catch (e) {}
+      if (!base || typeof base !== 'string') base = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image';
+      base = base.replace(/\/+$/, '');
+      return base + '?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd';
+    }
+    // ★ 生成图片（预载验证可用性后回调）
+    function loadGenImage(prompt, onOk, onErr) {
+      var url = genImageApiUrl(prompt);
+      var img = new Image();
+      var done = false;
+      img.onload = function() { if (!done) { done = true; onOk(url); } };
+      img.onerror = function() { if (!done) { done = true; onErr(); } };
+      img.src = url;
+    }
     function openImageGenModal() {
       closeQuickModal('aiGenImgModal');
       var modal = document.createElement('div');
@@ -8835,9 +8866,7 @@ function showChatMessages() {
         var previewEl = modal.querySelector('#aiGenPreview');
         statusEl.textContent = '正在生成图片，请稍候…';
         previewEl.style.display = 'none';
-        var genUrl = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=' + encodeURIComponent(prompt) + '&image_size=square_hd';
-        var img = new Image();
-        img.onload = function() {
+        loadGenImage(prompt, function(genUrl) {
           statusEl.textContent = '生成完成';
           previewEl.innerHTML = '';
           previewEl.appendChild(el('img', { class: 'ai-genimg-result', src: genUrl, alt: 'AI 生成图片', loading: 'lazy' }));
@@ -8851,20 +8880,13 @@ function showChatMessages() {
           row.appendChild(insertBtn);
           previewEl.appendChild(row);
           previewEl.style.display = 'block';
-        };
-        img.onerror = function() {
-          statusEl.textContent = '生成失败，请稍后重试或换一个描述';
-        };
-        img.src = genUrl;
+        }, function() {
+          statusEl.textContent = '生成失败：图片服务不可用或已被拦截（生产环境可配置 AI_IMAGE_GEN_BASE 换用自有生图服务），请稍后重试';
+        });
       });
     }
-    function insertGeneratedImage(genUrl, prompt) {
-      closeQuickModal('aiGenImgModal');
-      var nowIso = new Date().toISOString();
-      var userMsg = { role: 'user', content: '生成图片：' + prompt, created_at: nowIso };
-      S.messages.push(userMsg);
-      try { setAiHistoryCache(S.conversationId, S.messages); } catch (e) {}
-      if (S.messagesEl) appendMessage(S.messagesEl, userMsg);
+    // ★ 构建 AI 生图回复卡片（含「打开原图 / 复制链接 / 再生成一张」）
+    function buildGenImageCard(genUrl, prompt) {
       var card = el('div', { class: 'ai-msg assistant entering' });
       var bubble = el('div', { class: 'ai-msg-bubble ai-genimg-bubble' });
       bubble.innerHTML =
@@ -8874,15 +8896,47 @@ function showChatMessages() {
           '<div class="ai-genimg-card-actions">' +
             '<a class="ai-genimg-dl" href="' + escapeAttr(genUrl) + '" target="_blank" rel="noopener">打开原图</a>' +
             '<button type="button" class="ai-genimg-copy" data-url="' + escapeAttr(genUrl) + '">复制链接</button>' +
+            '<button type="button" class="ai-genimg-regen">再生成一张</button>' +
           '</div>' +
         '</div>';
       card.appendChild(bubble);
+      var copyLnk = bubble.querySelector('.ai-genimg-copy');
+      if (copyLnk) copyLnk.addEventListener('click', function() { doCopy(copyLnk.getAttribute('data-url')); });
+      // ★ 再生成一张：用同一描述生成新图并追加到对话
+      var regenBtn = bubble.querySelector('.ai-genimg-regen');
+      if (regenBtn) {
+        regenBtn.addEventListener('click', function(ev) {
+          ev.preventDefault(); ev.stopPropagation();
+          if (S.sending) { notify('正在回复中，请稍候'); return; }
+          regenBtn.disabled = true;
+          regenBtn.textContent = '生成中…';
+          loadGenImage(prompt, function(newUrl) {
+            try { regenBtn.disabled = false; regenBtn.textContent = '再生成一张'; } catch (eRb) {}
+            var newCard = buildGenImageCard(newUrl, prompt);
+            if (S.messagesEl) {
+              S.messagesEl.appendChild(newCard);
+              try { scrollToBottom(S.messagesEl, true); } catch (eSc) {}
+            }
+          }, function() {
+            try { regenBtn.disabled = false; regenBtn.textContent = '再生成一张'; } catch (eRb) {}
+            notify('生成失败：图片服务不可用，请稍后重试');
+          });
+        });
+      }
+      return card;
+    }
+    function insertGeneratedImage(genUrl, prompt) {
+      closeQuickModal('aiGenImgModal');
+      var nowIso = new Date().toISOString();
+      var userMsg = { role: 'user', content: '生成图片：' + prompt, created_at: nowIso };
+      S.messages.push(userMsg);
+      try { setAiHistoryCache(S.conversationId, S.messages); } catch (e) {}
+      if (S.messagesEl) appendMessage(S.messagesEl, userMsg);
+      var card = buildGenImageCard(genUrl, prompt);
       if (S.messagesEl) {
         S.messagesEl.appendChild(card);
         try { scrollToBottom(S.messagesEl, true); } catch (e) {}
       }
-      var copyLnk = bubble.querySelector('.ai-genimg-copy');
-      if (copyLnk) copyLnk.addEventListener('click', function() { doCopy(copyLnk.getAttribute('data-url')); });
       notify('图片已生成并插入对话');
     }
     function exportConversationMarkdown() {

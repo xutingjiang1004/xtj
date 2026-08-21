@@ -19425,6 +19425,9 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           search_expires_at: typeof m.search_expires_at === 'number' ? m.search_expires_at : 0,
           site_cards: Array.isArray(m.site_cards) ? m.site_cards : [],
           thinking_elapsed_ms: m.thinking_elapsed_ms || 0,
+          // ★ 多模态：把用户消息里保存的图片 data URL 带回，前端用于
+          //   历史图片消息的「重新生成」时复用原图。
+          vision_urls: (m.role === 'user' && Array.isArray(m.vision_urls)) ? m.vision_urls : [],
           // ★ 深度思考消息恢复所需字段
           deep_think: m.deep_think === true,
           agent_count: m.agent_count || 0,
