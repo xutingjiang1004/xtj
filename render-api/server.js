@@ -16067,7 +16067,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var requestedModel = req.body && req.body.model;
-    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'];
     var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
     var reasoning = '';
     var toolCallsInfo = [];
@@ -16512,7 +16512,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var requestedModel = req.body && req.body.model;
-    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'];
     var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
 
     // 搜索意图识别（口语「搜一下」等）
