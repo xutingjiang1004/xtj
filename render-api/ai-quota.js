@@ -154,6 +154,51 @@ function createAiQuota(supabase) {
     return next;
   }
 
+  // ★ 配额判定兜底（051）：RPC get_ai_user_quota 的旧实现里自定义额度
+  //   search_limit_daily / token_limit_daily 仅对 pro 生效（若生产库尚未执行
+  //   051 迁移，free 用户会被静默回退默认值，导致"设 2 次实际 10 次/无限"）。
+  //   此处直接读 ai_user_membership 自定义列覆盖 RPC 结果，不依赖迁移执行；
+  //   迁移执行后 RPC 结果已正确，覆盖逻辑幂等（自定义值一致，重算结果相同）。
+  async function applyMembershipOverride(quota, userName) {
+    if (!quota || typeof quota !== 'object' || !userName) return quota;
+    try {
+      var memRes = await supabase
+        .from('ai_user_membership')
+        .select('plan, pro_expires_at, search_limit_daily, token_limit_daily')
+        .eq('user_name', String(userName).trim().toLowerCase())
+        .maybeSingle();
+      if (memRes.error || !memRes.data) return quota;
+      var row = memRes.data;
+      var patched = Object.assign({}, quota);
+      var customSearch = row.search_limit_daily;
+      if (customSearch !== null && customSearch !== undefined) {
+        var sLimit = Number(customSearch);
+        if (Number.isFinite(sLimit)) {
+          var sUsed = Math.max(0, Number(quota.search_used) || 0);
+          patched.search_limit = sLimit;
+          patched.search_remaining = sLimit < 0 ? -1 : Math.max(0, sLimit - sUsed);
+          patched.search_unlimited = sLimit < 0;
+          patched.can_search = sLimit < 0 || sUsed < sLimit;
+        }
+      }
+      var customToken = row.token_limit_daily;
+      if (customToken !== null && customToken !== undefined) {
+        var tLimit = Number(customToken);
+        if (Number.isFinite(tLimit)) {
+          var tUsed = Math.max(0, Number(quota.tokens_used) || 0);
+          patched.tokens_limit = tLimit;
+          patched.tokens_remaining = tLimit < 0 ? -1 : Math.max(0, tLimit - tUsed);
+          patched.can_chat = tLimit < 0 || tUsed < tLimit;
+          patched.tokens_percent = tLimit <= 0 ? 100 : Math.min(100, Math.round((tUsed * 1000) / tLimit) / 10);
+        }
+      }
+      return patched;
+    } catch (e) {
+      console.warn('[AI-QUOTA] membership override failed, fallback to RPC:', e && e.message);
+      return quota;
+    }
+  }
+
   async function getQuota(userName) {
     try {
       var result = await supabase.rpc('get_ai_user_quota', {
@@ -166,7 +211,7 @@ function createAiQuota(supabase) {
         console.error('[AI-QUOTA] get unavailable:', result.error && result.error.message);
         return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
       }
-      return normalizeQuotaPayload(result.data);
+      return await applyMembershipOverride(normalizeQuotaPayload(result.data), userName);
     } catch (e) {
       console.error('[AI-QUOTA] get exception:', e && e.message);
       return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
@@ -188,10 +233,16 @@ function createAiQuota(supabase) {
           return { allowed: false, reason: 'quota_unavailable', quota: normalizeQuotaPayload(null) };
         }
         var data = result.data;
+        // 051 兜底：覆盖自定义额度后重算 can_search，needSearch 时超限按 search_limit 拒绝
+        var qPatched = await applyMembershipOverride(normalizeQuotaPayload(data.quota || data), userName);
+        var allowed = data.allowed === true;
+        if (allowed && !!needSearch && qPatched.can_search === false) {
+          allowed = false;
+        }
         return {
-          allowed: data.allowed === true,
-          reason: data.reason || null,
-          quota: normalizeQuotaPayload(data.quota || data)
+          allowed: allowed,
+          reason: (allowed ? null : (qPatched.can_search === false && !!needSearch ? 'search_limit' : (data.reason || null))),
+          quota: qPatched
         };
       } catch (e) {
         console.error('[AI-QUOTA] check exception:', e && e.message);
@@ -240,7 +291,7 @@ function createAiQuota(supabase) {
           console.error('[AI-QUOTA] consume unavailable:', result.error && result.error.message);
           return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
         }
-        return normalizeQuotaPayload(result.data);
+        return await applyMembershipOverride(normalizeQuotaPayload(result.data), userName);
       } catch (e) {
         console.error('[AI-QUOTA] consume exception:', e && e.message);
         return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
