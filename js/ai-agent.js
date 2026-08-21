@@ -2389,6 +2389,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var api = {
       // ★ 渲染器通道标记：'chat'（普通聊天）/ 'deep'（深页），供按通道清理
       channel: options.channel || 'chat',
+      // ★ 是否会被取消：cancel() 会置位。收尾判定是否仍可安全对目标写内容。
+      isCancelled: false,
       append: function(text) {
         if (cancelled || !targetEl || !text || finished) return;
         pending += String(text);
@@ -2446,6 +2448,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (idx2 !== -1) S.activeRenderers.splice(idx2, 1);
         if (cancelled) return;
         cancelled = true;
+        api.isCancelled = true;
         clearFrame();
         removeCursor();
         pending = '';
@@ -6951,14 +6954,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var hasThinking = !!(thinking && String(thinking).trim().length > 0);
         var fallbackText = hasThinking ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复，请重试。';
 
-        if (contentRenderer) {
+        if (contentRenderer && !contentRenderer.isCancelled) {
           if (hasContent) {
             contentRenderer.finish(content);
           } else {
             contentRenderer.finish(fallbackText);
           }
         } else {
-          // P4 修复: 仅在无 contentRenderer 时才直接覆盖 innerHTML
+          // P4 修复: 无 contentRenderer，或渲染器已被 cancel()（done 收尾前的
+          // resetActiveRenderersByChannel('chat') 会清掉整段流式文本）。此时
+          // finish() 因 cancelled 直接 return，必须回退到直接以最终 content 重绘，
+          // 否则气泡被清空且内容丢失。
           if (assistantBubble) {
             assistantBubble.innerHTML = renderMarkdown(hasContent ? content : fallbackText);
           }
