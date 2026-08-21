@@ -1003,6 +1003,10 @@ function normalizeMarketSymbol(raw) {
 
 // Function Calling 工具执行器
 async function executeToolCall(toolCall, context) {
+  // ★ 配额绕过修复：context 可能是 undefined 或裸 AbortSignal（历史调用方传法），
+  // 统一规整为对象并初始化请求级已用搜索计数，防止单请求内多轮工具调用超发。
+  context = context || {};
+  context.searchConsumed = context.searchConsumed || 0;
   var name = toolCall.function && toolCall.function.name ? toolCall.function.name : '';
   var rawArgs = toolCall.function && toolCall.function.arguments ? toolCall.function.arguments : '{}';
   var args;
@@ -1017,13 +1021,12 @@ async function executeToolCall(toolCall, context) {
       var q = String(args.query || '').trim().slice(0, 200);
       var maxR = Math.min(Math.max(parseInt(args.max_results, 10) || 20, 1), 20);
       if (!q) return { tool_name: name, error: '搜索关键词为空' };
-      // ★ 搜索配额下沉：模型自主调 search_web 也受用户搜索额度约束
-      if (context && context.userName) {
-        var swGate = await enforceSearchQuota(context.userName);
-        if (!swGate.allowed) {
-          return { tool_name: name, query: q, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: swGate.reason === 'search_limit', quota: swGate.quota || null };
-        }
+      // ★ 搜索配额下沉：模型自主调 search_web 也受用户搜索额度约束（含请求内已用计数）
+      var swGate = await enforceSearchQuota(context.userName, context.searchConsumed);
+      if (!swGate.allowed) {
+        return { tool_name: name, query: q, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: swGate.reason === 'search_limit', quota: swGate.quota || null };
       }
+      context.searchConsumed++;
       try {
         var result = await searchWeb(q, maxR);
         var resultsArr = result && result.results ? result.results : [];
@@ -1056,13 +1059,12 @@ async function executeToolCall(toolCall, context) {
       var tMax = Math.min(Math.max(parseInt(args.max_results, 10) || 5, 1), 10);
       if (!tq) return { tool_name: name, error: '搜索关键词为空' };
       if (!process.env.TAVILY_API_KEY) return { tool_name: name, query: tq, error: 'Tavily 未配置（缺少 TAVILY_API_KEY 环境变量）' };
-      // ★ 搜索配额下沉：tavily_search 同样受用户搜索额度约束
-      if (context && context.userName) {
-        var tsGate = await enforceSearchQuota(context.userName);
-        if (!tsGate.allowed) {
-          return { tool_name: name, query: tq, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: tsGate.reason === 'search_limit', quota: tsGate.quota || null };
-        }
+      // ★ 搜索配额下沉：tavily_search 同样受用户搜索额度约束（含请求内已用计数）
+      var tsGate = await enforceSearchQuota(context.userName, context.searchConsumed);
+      if (!tsGate.allowed) {
+        return { tool_name: name, query: tq, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: tsGate.reason === 'search_limit', quota: tsGate.quota || null };
       }
+      context.searchConsumed++;
       try {
         var tavilyResult = await searchTavily(tq, tMax, {
           search_depth: args.search_depth,
@@ -1498,9 +1500,11 @@ async function autoSupplementSearch(originalQuery, currentResults, maxR, userNam
   if (newKeywords.length === 0) return currentResults;
   var existingUrls = {};
   currentResults.forEach(function(r) { if (r.url) existingUrls[r.url] = true; });
-  // 并行补充搜索（带配额：userName 传入时走 searchWebForUser）
+  // 并行补充搜索（带配额：统一走 searchWebForUser，内部 gate 拒绝空 userName）
+  // ★ 配额绕过修复：userName 假值不再降级直连 searchWeb（无配额直通），
+  //   改为走 searchWebForUser——空 userName 时 gate 返回 no_user，补充搜索返回空结果。
   var supplementPromises = newKeywords.map(function(kw) {
-    var p = userName ? searchWebForUser(userName, kw, Math.ceil(maxR / 2), searchApiCounter) : searchWeb(kw, Math.ceil(maxR / 2));
+    var p = searchWebForUser(userName, kw, Math.ceil(maxR / 2), searchApiCounter);
     return p.then(function(sr) {
       return (sr && (sr.results || [])) || [];
     });
@@ -5167,7 +5171,14 @@ async function callDeepSeek(messages, options) {
   var reasoningEffort = useThinking ? thinkingLevel : '';
   var useTools = !!(options && options.tools && Array.isArray(options.tools) && options.tools.length > 0);
   var toolChoice = (options && options.tool_choice) || (useTools ? 'auto' : null);
-  var toolExecutor = (options && typeof options.tool_executor === 'function') ? options.tool_executor : executeToolCall;
+  // ★ 配额绕过修复：默认 executor 不再把裸 AbortSignal 当 context 传给 executeToolCall
+  //   （那会导致 context.userName=undefined 而跳过搜索配额 gate）。
+  //   构造请求级共享 context：userName + searchConsumed，同一请求内多轮工具调用共享计数。
+  var toolCallCtx = { userName: (options && options._userName) || '', searchConsumed: 0 };
+  var toolExecutor = (options && typeof options.tool_executor === 'function') ? options.tool_executor : function(toolCall, signal) {
+    toolCallCtx.signal = signal;
+    return executeToolCall(toolCall, toolCallCtx);
+  };
   // ★ 防止爆：tool_use 最多循环 4 次
   var maxToolRounds = Math.min(Math.max(parseInt(options && options.max_tool_rounds) || 4, 1), 8);
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
@@ -7312,12 +7323,16 @@ function getAiQuotaErrorMessage(reason) {
 
 // ★ 搜索配额下沉：仅约束「第三方」搜索（Tavily/Serper/search_web 工具、服务端预搜等）。
 // 模型内置 web_search（Responses API）不受此限制；额度用尽后仍可走内置搜索。
-async function enforceSearchQuota(userName) {
-  if (!userName || userName === ADMIN_USERNAME) return { allowed: true, reason: null, quota: null };
+async function enforceSearchQuota(userName, extraUsed) {
+  // ★ 配额绕过修复：空 userName 不再放行第三方搜索（仅 ADMIN_USERNAME 豁免）。
+  if (!userName) return { allowed: false, reason: 'no_user', quota: null };
+  if (userName === ADMIN_USERNAME) return { allowed: true, reason: null, quota: null };
   try {
     var quota = await aiQuota.getQuota(userName);
     if (quota.search_unlimited) return { allowed: true, reason: null, quota: quota };
-    if (quota.search_remaining <= 0) return { allowed: false, reason: 'search_limit', quota: quota };
+    // extraUsed：请求内已用第三方搜索次数（gate 层预扣），防止单请求多轮工具调用打穿配额
+    var usedNow = (typeof extraUsed === 'number' && extraUsed > 0) ? extraUsed : 0;
+    if (quota.search_remaining - usedNow <= 0) return { allowed: false, reason: 'search_limit', quota: quota };
     return { allowed: true, reason: null, quota: quota };
   } catch (e) {
     console.error('[SEARCH-QUOTA] check exception:', e && e.message);
@@ -16541,19 +16556,20 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
     }
 
-    // 用户消息里的 HTTPS 链接：服务端直接读（思考模式不能挂 tools 也能读）
+    // 用户消息里的 HTTPS 链接：服务端直接读（思考模式不能挂 tools 也能读）。
+    // ★ 配额绕过修复/响应提速：prefetch 改为 fire-and-forget，不再同步 await 阻塞主响应流
+    //   （原实现最长阻塞 12s）；卡片在 prefetch 完成后异步推送，失败仅 console.warn。
     var linkPrefetch = { messagesInject: [], cards: [] };
     if (!aborted && extractHttpsUrlsFromMessage(message).length) {
-      try {
-        linkPrefetch = await prefetchUserLinks(message);
-      } catch (eLink) {
+      prefetchUserLinks(message).then(function(_pfResult) {
+        if (_pfResult && _pfResult.cards && _pfResult.cards.length) {
+          _pfResult.cards.forEach(function(card) {
+            try { writeSse(res, { type: 'card', card: card }); } catch (_) {}
+          });
+        }
+      }).catch(function(eLink) {
         try { console.warn('[AGENT-STREAM] link prefetch error:', eLink && eLink.message); } catch (_) {}
-      }
-      if (linkPrefetch.cards && linkPrefetch.cards.length) {
-        linkPrefetch.cards.forEach(function(card) {
-          try { writeSse(res, { type: 'card', card: card }); } catch (_) {}
-        });
-      }
+      });
     }
 
     // ★ 修复：角色扮演默认开启，后端不干预扮演行为。
@@ -18549,6 +18565,19 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
       });
       return safeEnd();
     }
+    // ★ 配额绕过修复：深入研究前强制过第三方搜索配额 gate（空 userName 也拒绝，不再默认放行）
+    var researchSearchGate = await enforceSearchQuota(userName);
+    if (!researchSearchGate.allowed) {
+      var researchSearchMsg = researchSearchGate.reason === 'search_limit' ? '今日搜索次数已达上限' : getAiQuotaErrorMessage(researchSearchGate.reason || 'search_limit');
+      writeSse(res, {
+        type: 'error',
+        error: researchSearchGate.reason || 'search_limit',
+        code: researchSearchGate.reason || 'search_limit',
+        message: researchSearchMsg,
+        quota: researchSearchGate.quota || null
+      });
+      return safeEnd();
+    }
 
     var vq = validateString(req.body && req.body.query, 500, '研究主题');
     if (!vq || vq.error) {
@@ -20133,8 +20162,9 @@ registerCodeAgentRoutes(app, {
   // 第三个参数 userId（code-agent 的 searchWebForCode 传入）：执行搜索配额校验，
   // 避免 Code 的 web_search 工具绕过小猫 AI 的每日搜索额度。
   webSearch: function (query, maxResults, userId) {
-    if (userId) return searchWebForUser(userId, query, maxResults);
-    return searchWeb(query, maxResults);
+    // ★ 配额绕过修复：userId 假值不再降级直连 searchWeb（无配额直通），返回明确错误。
+    if (!userId) return Promise.resolve({ results: [], error: 'no_user', search_quota_exceeded: false, quota: null });
+    return searchWebForUser(userId, query, maxResults);
   }
 });
 registerCodeGitHubRoutes(app, {

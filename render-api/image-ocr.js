@@ -7,13 +7,13 @@
  * the model context; the UI can show an image_ocr result card.
  *
  * Env:
- *   OCR_SPACE_API_KEY  optional free key from https://ocr.space/ocrapi
- *                      falls back to demo key (rate-limited)
+ *   OCR_SPACE_API_KEY  free key from https://ocr.space/ocrapi
+ *                      未配置时直接返回明确错误，不再回落 demo key 静默撞限流
  */
 
 var https = require('https');
 
-var OCR_MAX_INPUT_BYTES = 4 * 1024 * 1024;
+var OCR_MAX_INPUT_BYTES = 6 * 1024 * 1024;
 var OCR_TIMEOUT_MS = 20000;
 var OCR_TEXT_MAX = 8000;
 
@@ -118,7 +118,7 @@ async function ocrImageBuffer(buffer, mimeType, fileName, deps) {
     return { text: '', provider: 'none', error: '空图片', chars: 0 };
   }
   if (buffer.length > OCR_MAX_INPUT_BYTES) {
-    return { text: '', provider: 'none', error: '图片超过 4MB，无法 OCR', chars: 0 };
+    return { text: '', provider: 'none', error: '图片超过 6MB，无法 OCR', chars: 0 };
   }
 
   var mime = String(mimeType || 'image/jpeg').split(';')[0].toLowerCase();
@@ -133,7 +133,7 @@ async function ocrImageBuffer(buffer, mimeType, fileName, deps) {
     if (!sharpLib) {
       try { sharpLib = require('sharp'); } catch (_) { sharpLib = null; }
     }
-    if (sharpLib && buffer.length > 400 * 1024) {
+    if (sharpLib && buffer.length > 200 * 1024) {
       // 审计 🟢：pipeline 完成后显式 destroy()，避免 libvips 句柄/内存滞留 GC
       var shrinkImage = sharpLib(buffer);
       try {
@@ -152,7 +152,10 @@ async function ocrImageBuffer(buffer, mimeType, fileName, deps) {
   }
 
   var dataUrl = 'data:' + mime + ';base64,' + workBuf.toString('base64');
-  var apiKey = String(process.env.OCR_SPACE_API_KEY || process.env.OCRSPACE_API_KEY || 'helloworld').trim();
+  var apiKey = String(process.env.OCR_SPACE_API_KEY || process.env.OCRSPACE_API_KEY || '').trim();
+  if (!apiKey) {
+    return { text: '', provider: 'none', error: 'OCR 服务未配置（未设置 OCR_SPACE_API_KEY）', chars: 0 };
+  }
 
   try {
     var resp = await httpsFormPost('api.ocr.space', '/parse/image', {
