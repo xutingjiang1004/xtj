@@ -899,6 +899,17 @@ function buildResponsesInput(messagesArr, instructionsContent) {
     if (!m || !m.role || m.role === 'tool') continue;
     if (m.role === 'system' && instructionsContent && m.content === instructionsContent) continue;
     if (m.content === null || m.content === undefined || m.content === '') continue;
+    // 多模态内容数组→Responses 仅支持字符串：保留 text 块、图片块降级为提示文案，避免 String() 变成 "[object Object]"
+    if (Array.isArray(m.content)) {
+      var _textParts = [];
+      for (var _pi = 0; _pi < m.content.length; _pi++) {
+        var _p = m.content[_pi];
+        if (_p && _p.type === 'text' && _p.text) _textParts.push(String(_p.text));
+        else if (_p && _p.type === 'image_url' && _p.image_url && _p.image_url.url) _textParts.push('（用户上传了一张图片）');
+      }
+      items.push({ type: 'message', role: m.role === 'developer' ? 'system' : m.role, content: _textParts.join('\n') || '' });
+      continue;
+    }
     items.push({ type: 'message', role: m.role === 'developer' ? 'system' : m.role, content: String(m.content) });
   }
   return items;
@@ -4073,8 +4084,7 @@ async function extractEmbeddedFiles(text) {
             var ocrErr = (ocr && ocr.error) ? String(ocr.error).slice(0, 160) : '未识别到文字';
             extractedText =
               '【用户上传图片 · ' + fileName + '】\n' +
-              '未能从图片中提取可用文字（' + ocrErr + '）。\n' +
-              '请告知用户：当前看图依赖文字识别，纯图/模糊图可能失败；可换更清晰截图。禁止为此去搜索 OCR 技术资料。';
+              '系统没有从这张图里提取到可用的文字。请根据图片本身尽量作答；若确实看不出、或这是一张纯图/截图不清晰，就简短请用户改用文字描述，或换一张更清晰、含文字的截图。';
             cards.push(aiSiteCard('image_ocr', '图片文字未识别', {
               file_name: fileName,
               text: '',
@@ -4179,6 +4189,12 @@ function stripAttachmentNoiseForSearch(message) {
 
 function messageHasImageOcrContent(message) {
   return /用户上传图片的可读文字|图片文字开始|【图片 OCR|用户上传图片 ·/i.test(String(message || ''));
+}
+
+// 是否真的提取到了"可读图片文字"（区别于 OCR 失败占位）。成功标记为
+// 「用户上传图片的可读文字」「图片文字开始」；失败标记为「用户上传图片 ·」。
+function messageHasReadableImageOcr(message) {
+  return /图片文字开始|用户上传图片的可读文字/i.test(String(message || ''));
 }
 
 function extractHttpsUrlsFromMessage(message) {
@@ -16667,7 +16683,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //   此时强制使用视觉模型：因为 vision 就是 flash 的视觉版、同价，能"直接看图"。
     //   V4 Pro 无视觉版，仍走原 OCR 通道。
     var _visionEligible = validatedModel === DEEPSEEK_MODEL_VISION || validatedModel === DEEPSEEK_MODEL_FLASH;
+    var _visionEngaged = false;
     if (_visionEligible && _visionImageUrls.length) {
+      _visionEngaged = true;
       usedModel = DEEPSEEK_MODEL_VISION;
       var _visionTextPart = stripAttachmentNoiseForSearch(_visionRawText) || '（用户上传了一张图片，请查看并回答）';
       var _visionContent = [{ type: 'text', text: _visionTextPart }];
@@ -16691,7 +16709,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         messages.push(linkPrefetch.messagesInject[_li]);
       }
     }
-    if (hasImageOcrMsg && !explicitSearchIntent) {
+    if (hasImageOcrMsg && !explicitSearchIntent && !_visionEngaged && messageHasReadableImageOcr(message)) {
       messages.push({
         role: 'system',
         content: '【图片任务约束】本轮用户消息含图片文字识别结果。请只根据图片文字回答用户问题，禁止调用搜索工具去查 OCR、文字识别准确率、ocr.space 或任何与识别引擎相关的资料。'
