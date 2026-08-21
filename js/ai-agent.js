@@ -1350,12 +1350,34 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return resultMsgs;
   }
 
+  // ★ 缓存体积保护：图片 data URL 可能达数 MB，而 sessionStorage 配额约 5MB，
+  //   序列化前把内联图片替换为占位标记，避免缓存静默失败导致刷新后本地历史缺失。
+  function sanitizeCacheMsgs(msgs) {
+    var out = [];
+    for (var si = 0; si < msgs.length; si++) {
+      var m = msgs[si];
+      if (!m) { out.push(m); continue; }
+      var c = String(m.content || '');
+      if (c.indexOf('data:') === -1 && !/!\[[^\]]*\]\(data:/.test(c)) { out.push(m); continue; }
+      var sanitized = c
+        .replace(/!\[([^\]]*)\]\(data:[^)]+\)/g, '[图片: $1]')
+        .replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[图片数据]');
+      var copy = {};
+      for (var k in m) {
+        if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
+      }
+      copy.content = sanitized;
+      out.push(copy);
+    }
+    return out;
+  }
+
   function setAiHistoryCache(cid, msgs) {
     var mode = arguments.length > 2 && arguments[2] ? String(arguments[2]) : 'normal';
     var key = getAiHistoryCacheKey(cid, mode);
     if (!key) return;
     try {
-      var completeMsgs = extractCompleteTurns(msgs, 6);
+      var completeMsgs = sanitizeCacheMsgs(extractCompleteTurns(msgs, 6));
       if (!completeMsgs.length) {
         sessionStorage.removeItem(key);
         return;
@@ -9446,7 +9468,8 @@ function showChatMessages() {
     voiceBtn.addEventListener('click', function() {
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SR) {
-        notify('当前浏览器不支持语音输入，请使用 Chrome/Edge 或 Safari');
+        // iOS/iPadOS 全系 WebKit 均不支持 SpeechRecognition（含 iPhone/iPad 上的 Chrome/Edge）
+        notify('当前设备不支持语音输入（iOS/iPadOS 均不支持），请使用桌面版 Chrome 或 Edge');
         return;
       }
       if (_voiceListening) {
