@@ -10018,6 +10018,13 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
   }
 });
 
+// 进程内浏览去重缓存（key: viewKey -> 最近记录时间戳）。
+// 用于防并发双击双计：DB 层 actor_key 无唯一约束（view 记录不匹配 photo_ 前缀的 partial unique index），
+// dupCheck+insert 之间存在 TOCTOU 窗口，进程内缓存把同一 key 的并发请求收敛到单次记录。
+// 不进 DB 迁移，只做代码层加固；缓存窗口很短，天然定期过期，不会无限增长。
+var POST_VIEW_DUP_CACHE = new Map();
+var POST_VIEW_DUP_WINDOW_MS = 30 * 1000;
+
 app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
     var postId = normalizePostId(req.body && req.body.post_id);
@@ -10036,6 +10043,15 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
     var now = new Date().toISOString();
     var dayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD 自然日去重
     var viewKey = 'pview_' + String(postId) + '_' + String(req.userName || '').toLowerCase() + '_' + dayKey;
+    // 进程内去重：同一 viewKey 在最近窗口内已记录则跳过（防并发双击双计，不改 DB）
+    var _viewLastRecorded = POST_VIEW_DUP_CACHE.get(viewKey);
+    if (_viewLastRecorded && (Date.now() - _viewLastRecorded) < POST_VIEW_DUP_WINDOW_MS) {
+      var _dupCached = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
+      if (!_dupCached.error) {
+        return res.json({ ok: true, recorded: false, reason: 'already_viewed_today', views: Number(_dupCached.data && _dupCached.data.views) || 0 });
+      }
+      // 查询失败不阻塞主流程，继续走 DB 检查
+    }
     // 当日同一用户对同一帖子只记录一次浏览，防止刷新刷量
     var dupCheck = await supabase.from('posts')
       .select('id')
@@ -10070,6 +10086,8 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
       if (eventResult.data && eventResult.data.id) await supabase.from('posts').delete().eq('id', eventResult.data.id).eq('media_type', POST_VIEW_MARKER);
       return res.status(500).json({ error: sanitizeError(incrementResult.error), code: 'post_view_increment_failed' });
     }
+    // 记录成功后再写进程内去重缓存（失败回滚时不应缓存）
+    POST_VIEW_DUP_CACHE.set(viewKey, Date.now());
     var countResult = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
     if (countResult.error) return res.status(500).json({ error: sanitizeError(countResult.error), code: 'post_view_count_failed' });
     return res.json({ ok: true, recorded: true, id: eventResult.data && eventResult.data.id, viewed_at: eventResult.data && eventResult.data.created_at || now, views: Number(countResult.data && countResult.data.views) || 0 });
@@ -10110,7 +10128,11 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     ];
 
     // 构建查询：数据库层排除系统标记 + 可见性过滤 + 分页
-    var query = supabase.from('posts').select('*', { count: 'exact' });
+    // count: 'estimated' 避免全表精确计数（大数据量下翻页慢）；字段白名单避免
+    // 返回 ip_resolved_at/ip_region_error 等内部字段。白名单覆盖前端渲染全部依赖字段
+    // （id/user_name/media_*/content/actor_key/created_at/updated_at/visibility/is_deleted/views/
+    //  is_pinned/pinned_at/location_*/ip_region_*/ip_province/ip_city/ip_lookup_started_at）。
+    var query = supabase.from('posts').select('id, user_name, media_type, media_url, content, actor_key, created_at, updated_at, visibility, is_deleted, views, is_pinned, pinned_at, location_name, location_province, location_city, location_district, location_level, ip_province, ip_city, ip_region_text, ip_region_status, ip_lookup_started_at', { count: 'estimated' });
 
     // 白名单过滤：只允许正常帖子 media_type（NULL 或已知类型）
     // 即使系统记录的 marker 被写错，白名单也能兜底过滤
@@ -10132,7 +10154,8 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       }
     }
 
-    query = query.order('created_at', { ascending: false }).range(from, to);
+    // created_at DESC + id DESC 二级排序：同时间戳帖子跨页不再重复/丢页
+    query = query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to);
 
     var { data: posts, error: postsErr, count: totalCount } = await query;
 
@@ -10189,18 +10212,21 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
 // ===================== 照片墙接口（修复 RLS 权限问题） ======================
 // GET /api/photos/wall/:userName - 获取用户照片墙（需登录）
 // 可见性：查看自己的照片墙返回全部；查看他人的仅返回公开照片。
-app.get('/api/photos/wall/:userName', authenticateUser, async (req, res) => {
+app.get('/api/photos/wall/:userName', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
     const targetUser = String(req.params.userName || '').trim();
     if (!targetUser) return res.status(400).json({ error: '缺少用户名' });
+    // 可选分页：参数缺省时维持现状（limit 200，上限 500）；offset 供需要翻页的调用方使用
     const limit = parseInt(req.query.limit, 10) || 200;
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const pageLimit = limit > 0 ? Math.min(limit, 500) : 200;
     let query = supabase.from('posts')
       .select('id, user_name, content, media_url, media_type, created_at')
       .eq('user_name', targetUser)
       .eq('media_type', '__photo_wall__')
       .or('is_deleted.is.null,is_deleted.eq.false')
       .order('created_at', { ascending: false })
-      .limit(limit > 0 ? Math.min(limit, 500) : 200);
+      .range(offset, offset + pageLimit - 1);
     // 查看他人的照片墙时仅返回公开照片（私密照片只有本人可见）
     if (String(req.userName || '') !== String(targetUser)) {
       query = query.eq('visibility', 'public');

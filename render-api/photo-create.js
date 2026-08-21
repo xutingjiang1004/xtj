@@ -10,8 +10,10 @@ const MAX_UPLOAD_ID_LENGTH = 128;
 const UPLOAD_ID_RE = /^[a-zA-Z0-9_\-]{6,128}$/;
 const STORAGE_PUBLIC_PHOTO_PREFIX = '/storage/v1/object/public/uploads/photos/';
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
-// 照片墙只接受位图图片；SVG 可内嵌 <script>/onload，上传后原图 URL 直接打开即存储型 XSS 载体，显式拒绝
-const IMAGE_MIME_TYPE = /^image\/(?!svg\+xml)(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tiff?|x-ms-bmp)[a-z0-9!#$&^_.+-]{0,126}$/i;
+// 照片墙只接受位图图片；SVG 可内嵌 <script>/onload，上传后原图 URL 直接打开即存储型 XSS 载体，显式拒绝。
+// 收紧为常见图片类型精确白名单，不再允许任意长后缀（如 image/jpegmalware）。
+// 服务端仍以 sharp 解码出的真实格式兜底校验（见 createPhotoThumbnail 的 M-8a）。
+const IMAGE_MIME_TYPE = /^image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)$/i;
 
 function invalid(error, code) {
   const body = { ok: false, error: error };

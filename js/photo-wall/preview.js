@@ -119,7 +119,7 @@
             }
             function handleError() {
                 n || e._ppLoadGen !== a || e._ppUrl !== t || (cleanup(), (i = (H[t] || 0) + 1) <= S ? (H[t] = i, r = setTimeout(function() {
-                    e._ppUrl === t && e._ppLoadGen === a && (n = !1, e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = t + (-1 === t.indexOf("?") ? "?t=" : "&t=") + Date.now());
+                    e._ppUrl === t && e._ppLoadGen === a && (n = !1, e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.removeAttribute("src"), e.src = t);
                 }, 500 * i)) : (n = !0, e._ppUrl = null, delete H[t], function(e) {
                     if (!e) return;
                     e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
@@ -920,7 +920,7 @@
                             return e && String(e.id) !== String(t.id);
                         }), window.photoWallData && (window.photoWallData = window.photoWallData.filter(function(p) {
                             return p && String(p.id) !== String(t.id);
-                        })), V(), window.renderPhotoWallWithoutReload ? window.renderPhotoWallWithoutReload() : window.renderPhotoWall && window.renderPhotoWall(),
+                        })), V(),
                         window.showToast("照片已从照片墙删除")) : (o && (o.disabled = !1), a && (a.disabled = !1));
                     }
                 }

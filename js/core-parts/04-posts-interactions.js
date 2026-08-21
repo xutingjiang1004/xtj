@@ -1,9 +1,3 @@
-/**
- * core-parts/04-posts-interactions.js
- * Likes, post tools, delete, image viewer, view history, feed helpers
- * Lines from original core.js: 4753-8928
- * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
- */
             // ===================== 点赞 =====================
             function getCurrentLikeIdentityValues() {
                 var values = [];
@@ -1804,7 +1798,9 @@
             };
 
             function buildPostContentHtml(content) {
-                return escapeHtml(String(content || ''));
+                // ★ 修复：多行帖正文换行——escapeHtml 后把 \n 替换为 <br>（与 early-feed.js 行为一致）；
+                // 仅作用于 feed 正文渲染，评论/标题等不走本函数，不受影响。
+                return escapeHtml(String(content || '')).replace(/\n/g, '<br>');
             }
             window.buildPostContentHtml = buildPostContentHtml;
 
@@ -2461,9 +2457,11 @@
                     if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
                     return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
                 }
+                // ★ 修复：媒体 URL 复用 sanitizeUrl 清洗（拒绝 javascript:/data: 等非白名单协议）
+                var safeMediaUrl = sanitizeUrl(normalized.media_url || '');
                 var mediaDataAttrs = [
                     'data-post-id="' + escapeHtml(String(normalized.id)) + '"',
-                    'data-media-url="' + escapeHtml(String(normalized.media_url || "")) + '"',
+                    'data-media-url="' + escapeHtml(safeMediaUrl) + '"',
                     'data-post-user="' + escapeHtml(String(normalized.user_name || "")) + '"',
                     'data-post-created-at="' + escapeHtml(String(normalized.created_at || "")) + '"',
                     'data-post-views="' + escapeHtml(String(normalized.views || 0)) + '"',
@@ -2471,10 +2469,10 @@
                     'data-original-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.originalSize) || "")) + '"'
                 ].join(" ");
                 var mediaMarkup = '';
-                if (normalized.media_url) {
-                    if (normalized.media_type === 'video') mediaMarkup = '<div class="media"><video src="' + escapeHtml(normalized.media_url) + '" controls preload="none" playsinline></video></div>';
-                    else if (normalized.media_type === 'audio') mediaMarkup = '<div class="media"><audio src="' + escapeHtml(normalized.media_url) + '" controls preload="metadata"></audio></div>';
-                    else mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(normalized.media_url) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(normalized.media_url) + '\', this)"></div>';
+                if (safeMediaUrl) {
+                    if (normalized.media_type === 'video') mediaMarkup = '<div class="media"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="none" playsinline></video></div>';
+                    else if (normalized.media_type === 'audio') mediaMarkup = '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
+                    else mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)"></div>';
                 }
                 return `
                 <div class="post glass" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
@@ -2965,6 +2963,9 @@
                 var likes = [];
                 var endReached = false;
                 var usedApi = false;
+                // ★ 修复：记录服务端返回的"下一页起始绝对偏移"（已含页宽），
+                // 仅 API/early 路径设置；start 保持为本次请求的起始偏移，不再被改写。
+                var serverNextOffset = null;
                 var FEED_NET_TIMEOUT_MS = 18000;
                 var withTimeout = (typeof window.xtjWithTimeout === 'function')
                     ? window.xtjWithTimeout
@@ -2981,7 +2982,7 @@
                         likes = early.likes || [];
                         endReached = early.endReached || false;
                         if (typeof early.total_post_count === 'number') window._xtjTotalPostCount = early.total_post_count;
-                        start = early.next_offset != null ? early.next_offset : start + posts.length;
+                        serverNextOffset = early.next_offset != null ? Number(early.next_offset) : null;
                         usedApi = true;
                     } else if (page === 0 && !usedApi && window.__xtjEarlyFeedPromise) {
                         try {
@@ -2994,7 +2995,7 @@
                                 likes = early2.likes || [];
                                 endReached = early2.endReached || false;
                                 if (typeof early2.total_post_count === 'number') window._xtjTotalPostCount = early2.total_post_count;
-                                start = early2.next_offset != null ? early2.next_offset : start + posts.length;
+                                serverNextOffset = early2.next_offset != null ? Number(early2.next_offset) : null;
                                 usedApi = true;
                             }
                         } catch (earlyErr) {
@@ -3031,8 +3032,8 @@
                             likes = apiData.likes || [];
                             endReached = apiData.endReached || false;
                             if (typeof apiData.total_post_count === 'number') window._xtjTotalPostCount = apiData.total_post_count;
-                            // 使用服务器返回的 next_offset，不自行计算
-                            start = apiData.next_offset != null ? apiData.next_offset : start + posts.length;
+                            // 使用服务器返回的 next_offset，不自行计算、不再叠加 posts.length
+                            serverNextOffset = apiData.next_offset != null ? Number(apiData.next_offset) : null;
                             usedApi = true;
                         }
                     }
@@ -3064,6 +3065,21 @@
                     } catch(e) {}
                 }
 
+                // ★ 修复：计算下一次请求的起始偏移。
+                // 服务端 next_offset 已是"下一页起始绝对偏移"，直接作为下一次请求起点；
+                // 为 null/0/不大于当前起点（无前进）时视为已到末尾，停止加载，避免死循环/丢页。
+                var computedNextOffset;
+                if (usedApi && typeof serverNextOffset === 'number' && serverNextOffset > start) {
+                    computedNextOffset = serverNextOffset;
+                } else if (usedApi) {
+                    endReached = true;
+                    computedNextOffset = null;
+                } else {
+                    // Supabase 回退：无服务端游标，按实际拉取条数推进
+                    computedNextOffset = start + posts.length;
+                    if (!posts.length) endReached = true;
+                }
+
                 if (requestId && requestId !== feedLoadRequestId) return null;
                 var postIds = posts.map(function(post) { return String(post.id); }).filter(Boolean);
                 var relatedPromise = null;
@@ -3084,7 +3100,7 @@
                             posts: posts,
                             comments: comments,
                             likes: likes,
-                            nextOffset: start + posts.length,
+                            nextOffset: computedNextOffset,
                             endReached: endReached,
                             postIds: postIds,
                             relatedPromise: relatedPromise
@@ -3104,7 +3120,7 @@
                     posts: posts,
                     comments: comments,
                     likes: likes,
-                    nextOffset: start + posts.length,
+                    nextOffset: computedNextOffset,
                     endReached: endReached,
                     postIds: postIds
                 };
@@ -3153,7 +3169,12 @@
                         postIds: pagePostIds
                     }]).sort(function(a, b) { return a.offset - b.offset; });
                 }
-                feedNextOffset = Math.max(feedNextOffset || 0, chunk.nextOffset || 0);
+                // ★ 修复：nextOffset 为 null/0/缺失时视为已到末尾，禁止退化为 0 无限重拉 page0
+                if (chunk.nextOffset == null || chunk.nextOffset <= 0) {
+                    feedEndReached = true;
+                } else {
+                    feedNextOffset = Math.max(feedNextOffset || 0, chunk.nextOffset);
+                }
                 if (chunk.endReached) feedEndReached = true;
                 (chunk.posts || []).forEach(syncPostInfoCache);
                 markFeedStateChanged();
@@ -3164,11 +3185,21 @@
                 return !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
             }
 
+            // ★ 修复：单轮最多拉 3 页 + 2s 节流，避免筛选开启且匹配不足时哨兵
+            // 反复进视口触发整批重拉，撞 /api/feed 限流。
+            var FEED_COVERAGE_MAX_PAGES_PER_RUN = 3;
+            var FEED_COVERAGE_THROTTLE_MS = 2000;
+            var _feedCoverageLastFetchAt = 0;
+
             async function ensureFeedCoverageForVisibleSlice(minVisiblePosts, requestId) {
                 var target = Math.max(Number(minVisiblePosts) || 0, FEED_PAGE_SIZE);
+                var filteredPosts = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
+                if (filteredPosts.length >= target) return true;
+                var now = Date.now();
+                if (_feedCoverageLastFetchAt && now - _feedCoverageLastFetchAt < FEED_COVERAGE_THROTTLE_MS) return true;
                 var guard = 0;
-                while (!feedEndReached && guard < 12) {
-                    var filteredPosts = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
+                while (!feedEndReached && guard < FEED_COVERAGE_MAX_PAGES_PER_RUN) {
+                    filteredPosts = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
                     if (filteredPosts.length >= target) break;
                     var chunk = await fetchFeedPageChunk(feedNextOffset, requestId);
                     if (!chunk) return false;
@@ -3179,6 +3210,7 @@
                     mergeFeedPageIntoState(chunk);
                     guard++;
                 }
+                _feedCoverageLastFetchAt = Date.now();
                 writeFeedCacheSnapshot();
                 return true;
             }
@@ -3842,6 +3874,15 @@
                     // Keep the rendered feed intact until a replacement page succeeds.
                     // A transient empty response must not turn a populated page into an empty one.
                     feedPageFetchPending = false;
+                    // ★ 修复：强制刷新时 early-feed 快照已过期（发帖/删除/置顶后仍复用旧快照
+                    // 会拿到旧数据），标记过期并清空，强制走真实 API 重新请求。
+                    try {
+                        if (window.__xtjEarlyFeed) {
+                            window.__xtjEarlyFeed.status = 'stale';
+                            window.__xtjEarlyFeed.data = null;
+                        }
+                        window.__xtjEarlyFeedPromise = null;
+                    } catch (_ef) {}
                 }
                 bindPostFilterEvents();
                 if (!forceRefresh) {
@@ -4113,7 +4154,8 @@
                 filteredPosts.forEach(function(p) { visiblePostIds.add(String(p.id)); });
                 var scopedLikes = (payload.likes || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
                 var sLikesEl = document.getElementById("sLikes");
-                if (sLikesEl) sLikesEl.textContent = scopedLikes.length + visibleComments.length;
+                // ★ 修复：首屏统计只显示点赞数，与 updateFeedStats（6624 行）口径一致，不再混入评论数
+                if (sLikesEl) sLikesEl.textContent = scopedLikes.length;
                 filteredPosts.forEach(function(post) {
                     postInfoCache[post.id] = {
                         content: post.content,
@@ -4175,3 +4217,6 @@
 
             // 统计预加载（使用后端快照接口，避免全量读取）
 
+/**
+
+/**
