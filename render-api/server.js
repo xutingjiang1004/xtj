@@ -16768,19 +16768,26 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var thirdPartySearchOk = thirdPartySearchOkEarly;
     var useTavilyCluster = thirdPartySearchOk && ((webSearchPref === true) || (webSearchPref === false && proactiveSearch));
     var webSearchEnabled = (webSearchPref === true);
+    // ★ 修复：视觉直传（多模态图片内容块）时不强制切 Responses API——
+    //   Responses 路径对 content 做 String() 会把多模态数组毁成 "[object Object]"，
+    //   图片丢失。视觉直传时保留标准路径（roundMessages 直接透传数组，图片可达模型），
+    //   网页搜索由标准路径的第三方工具 + 预搜注入承担。
+    var _webSearchForceResponses = !_visionEngaged;
     // 切换模型：web_search=true 或 第三方额度用尽但有搜索意图 → 强制 flash（Responses API 内置搜索）
-    if (webSearchPref === true && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
+    if (_webSearchForceResponses && webSearchPref === true && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
       validatedModel = DEEPSEEK_RESPONSES_MODEL;
     }
     // ★ 修复：第三方搜索额度用尽但有搜索意图时，强制切 flash 走内置搜索，
     //   避免回退到标准路径（带 search_web/tavily_search 工具）导致模型调用第三方 API
-    if (!thirdPartySearchOk && proactiveSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
+    if (_webSearchForceResponses && !thirdPartySearchOk && proactiveSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
       validatedModel = DEEPSEEK_RESPONSES_MODEL;
     }
     // useBuiltInSearch 必须在 validatedModel 变更之后计算
-    var useBuiltInSearch = (webSearchPref === true)
-      || (webSearchPref === false && validatedModel === DEEPSEEK_RESPONSES_MODEL)
-      || (proactiveSearch && validatedModel === DEEPSEEK_RESPONSES_MODEL);
+    var useBuiltInSearch = _webSearchForceResponses && (
+        (webSearchPref === true)
+        || (webSearchPref === false && validatedModel === DEEPSEEK_RESPONSES_MODEL)
+        || (proactiveSearch && validatedModel === DEEPSEEK_RESPONSES_MODEL)
+      );
     if (useBuiltInSearch && !aborted) {
       // ===== Responses API 路径（优先内置 web_search；第三方可补充） =====
       var responsesContent = '';
