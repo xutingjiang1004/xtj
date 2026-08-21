@@ -2133,6 +2133,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (parts.length) footer.appendChild(el('span', { class: 'ai-msg-usage', text: parts.join(' · ') }));
       }
     }
+    // ★ 新增：AI 回复底部「复制 / 分享」显式操作按钮
+    if (role === 'assistant') {
+      var actionRow = el('div', { class: 'ai-msg-actions' });
+      var copyBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-copy', 'aria-label': '复制回复', text: '复制' });
+      copyBtn.addEventListener('click', function(ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        var t = (bubble.textContent || '').trim();
+        if (!t) return;
+        doCopy(t);
+        copyBtn.textContent = '已复制';
+        setTimeout(function() { copyBtn.textContent = '复制'; }, 2000);
+      });
+      actionRow.appendChild(copyBtn);
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        var shareBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-share', 'aria-label': '分享回复', text: '分享' });
+        shareBtn.addEventListener('click', function(ev) {
+          ev.preventDefault(); ev.stopPropagation();
+          var t = (bubble.textContent || '').trim();
+          if (!t) return;
+          navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function() {});
+        });
+        actionRow.appendChild(shareBtn);
+      }
+      footer.appendChild(actionRow);
+    }
     if (footer.children.length > 0) node.appendChild(footer);
     return node;
   }
@@ -8062,6 +8087,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   
   // 切换会话
+  // ★ 新增：会话自定义标题（localStorage 覆盖，仅本设备生效，不动后端）
+  function getConversationTitleOverride(cid) {
+    if (!cid) return '';
+    try { var m = JSON.parse(localStorage.getItem('xtj_ai_conv_titles') || '{}'); return m[cid] || ''; } catch (e) { return ''; }
+  }
+  function setConversationTitleOverride(cid, title) {
+    if (!cid) return;
+    try {
+      var m = JSON.parse(localStorage.getItem('xtj_ai_conv_titles') || '{}');
+      var clean = String(title || '').trim();
+      if (clean) m[cid] = clean.slice(0, 40); else delete m[cid];
+      localStorage.setItem('xtj_ai_conv_titles', JSON.stringify(m));
+    } catch (e) {}
+  }
+  function renameConversation(cid) {
+    if (!cid) return;
+    var current = getConversationTitleOverride(cid) || '';
+    var next = prompt('输入新的会话名称（留空恢复默认）：', current);
+    if (next === null) return;
+    setConversationTitleOverride(cid, next);
+    if (S.conversationsEl) renderConversationListStyled(S.conversationsEl);
+  }
+
   function renderConversationListStyled(container) {
     container.innerHTML = '';
     if (!S.conversations.length) {
@@ -8087,11 +8135,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           class: 'ai-conv-item' + (conv.conversation_id === S.conversationId ? ' active' : ''),
           'data-conv-id': conv.conversation_id
         });
-        item.appendChild(el('div', { class: 'ai-conv-title', text: conv.title || '新对话' }));
+        item.appendChild(el('div', { class: 'ai-conv-title', text: (getConversationTitleOverride(conv.conversation_id) || conv.title || '新对话') }));
         item.appendChild(el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
         item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
         var meta = el('div', { class: 'ai-conv-meta' });
         meta.appendChild(el('span', { class: 'ai-conv-count', text: getConversationCountText(conv) }));
+        // ★ 新增：重命名按钮
+        var renameBtn = el('span', { class: 'ai-conv-rename', title: '重命名此对话', 'aria-label': '重命名对话' }, '✎');
+        (function(cid) {
+          renameBtn.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            renameConversation(cid);
+          });
+        })(conv.conversation_id);
+        meta.appendChild(renameBtn);
         // 删除按钮
         var delBtn = el('span', { class: 'ai-conv-del', title: '删除此对话', 'aria-label': '删除对话' }, '×');
         (function(cid, elRef) {
@@ -8521,9 +8578,241 @@ function showChatMessages() {
                 ) +
               '</button>' +
             '</div>' +
+            '<div class="ai-panel-group ai-panel-group--quick">' +
+              '<div class="ai-panel-group-title">快捷指令</div>' +
+              '<div class="ai-quick-grid" id="aiQuickGrid"></div>' +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</div>';
+
+    // ★ 新增：快捷指令（预设 + 自定义 + 识物/调Bug 识图场景）、AI 生图、导出对话
+    var QUICK_PRESETS = [
+      { id: 'sum', label: '总结', template: '请帮我总结以下内容，输出要点清单：\n' },
+      { id: 'trans', label: '翻译', template: '请将以下内容翻译成：\n' },
+      { id: 'polish', label: '润色', template: '请帮我润色以下文字，使其更通顺自然：\n' },
+      { id: 'code', label: '写代码', template: '请帮我编写代码：\n' },
+      { id: 'title', label: '起标题', template: '请根据以下内容起一个吸引人的标题：\n' },
+      { id: 'photo', label: '识物', template: '（请查看我上传的图片）请识别图片内容并详细讲解这是什么、有什么用途。' },
+      { id: 'debug', label: '调Bug', template: '（请查看我上传的截图）请分析截图中的报错或代码，定位问题并给出修复方案。' }
+    ];
+    function loadCustomQuickCommands() {
+      try { var arr = JSON.parse(localStorage.getItem('xtj_ai_quick_custom') || '[]'); return Array.isArray(arr) ? arr : []; } catch (e) { return []; }
+    }
+    function saveCustomQuickCommands(arr) {
+      try { localStorage.setItem('xtj_ai_quick_custom', JSON.stringify((arr || []).slice(0, 12))); } catch (e) {}
+    }
+    function renderQuickChips() {
+      var grid = panelShell.querySelector('#aiQuickGrid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      QUICK_PRESETS.forEach(function(p) {
+        grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip', 'data-qc': p.id, text: p.label }));
+      });
+      var customs = loadCustomQuickCommands();
+      customs.forEach(function(c, idx) {
+        grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--custom', 'data-custom': idx, text: c.label }));
+      });
+      grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--gen', 'data-qc': 'genimg', text: 'AI生图' }));
+      grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--export', 'data-qc': 'export', text: '导出对话' }));
+      grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--manage', 'data-qc': 'custom', text: '管理指令' }));
+    }
+    function insertQuickTemplate(templateText) {
+      var existing = String(input.value || '');
+      if (existing.trim()) input.value = existing.replace(/\s+$/, '') + '\n' + templateText;
+      else input.value = templateText;
+      autoresize();
+      closePanel();
+      try { input.focus(); } catch (e) {}
+    }
+    function handleQuickCommand(qc) {
+      if (qc === 'genimg') { closePanel(); openImageGenModal(); return; }
+      if (qc === 'export') { closePanel(); exportConversationMarkdown(); return; }
+      if (qc === 'custom') { openCustomCommandModal(); return; }
+      if (qc === 'photo' || qc === 'debug') {
+        for (var i = 0; i < QUICK_PRESETS.length; i++) {
+          if (QUICK_PRESETS[i].id === qc) { insertQuickTemplate(QUICK_PRESETS[i].template); break; }
+        }
+        setTimeout(function() {
+          var fi = document.getElementById('aiChatFileInp');
+          if (fi) fi.click();
+        }, 80);
+        return;
+      }
+      for (var j = 0; j < QUICK_PRESETS.length; j++) {
+        if (QUICK_PRESETS[j].id === qc) { insertQuickTemplate(QUICK_PRESETS[j].template); return; }
+      }
+    }
+    function closeQuickModal(id) {
+      var m = document.getElementById(id);
+      if (m && m.parentNode) m.parentNode.removeChild(m);
+    }
+    function openCustomCommandModal() {
+      closeQuickModal('aiCustomCmdModal');
+      var modal = document.createElement('div');
+      modal.id = 'aiCustomCmdModal';
+      modal.className = 'ai-invite-modal';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      var customs = loadCustomQuickCommands();
+      var listHtml = '';
+      customs.forEach(function(c, idx) {
+        listHtml += '<div class="ai-cmd-row" data-idx="' + idx + '">' +
+          '<div class="ai-cmd-row-main">' +
+            '<div class="ai-cmd-row-label">' + escapeHtml(c.label) + '</div>' +
+            '<div class="ai-cmd-row-tpl">' + escapeHtml(String(c.template || '').slice(0, 40)) + '</div>' +
+          '</div>' +
+          '<button type="button" class="ai-cmd-row-del" data-del="' + idx + '">删除</button>' +
+        '</div>';
+      });
+      if (!listHtml) listHtml = '<div class="ai-cmd-empty">还没有自定义指令，先添加一个吧</div>';
+      modal.innerHTML =
+        '<div class="ai-invite-modal-box ai-cmd-modal-box">' +
+          '<div class="ai-invite-modal-hero" aria-hidden="true"><span class="ai-invite-modal-hero-badge">指令</span><p class="ai-invite-modal-hero-sub">自定义快捷指令</p></div>' +
+          '<div class="ai-invite-modal-body">' +
+            '<h3 class="ai-invite-modal-title">快捷指令管理</h3>' +
+            '<div class="ai-cmd-list" id="aiCmdList">' + listHtml + '</div>' +
+            '<label class="ai-cmd-label" for="aiCmdLabelInp">指令名</label>' +
+            '<input type="text" id="aiCmdLabelInp" class="ai-invite-code-input" placeholder="例如：写周报" maxlength="12" />' +
+            '<label class="ai-cmd-label" for="aiCmdTplInp">指令内容（发送给 AI 的话）</label>' +
+            '<textarea id="aiCmdTplInp" class="ai-cmd-tpl-inp" rows="3" placeholder="例如：请帮我写一篇本周工作周报，包含完成事项、遇到的问题、下周计划。" maxlength="300"></textarea>' +
+          '</div>' +
+          '<div class="ai-invite-modal-foot">' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel" id="aiCmdCancel">关闭</button>' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiCmdAdd">添加指令</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(modal);
+      requestAnimationFrame(function() { try { modal.classList.add('is-ready'); } catch (e) {} });
+      modal.querySelector('#aiCmdCancel').addEventListener('click', function() { closeQuickModal('aiCustomCmdModal'); });
+      modal.querySelector('#aiCmdAdd').addEventListener('click', function() {
+        var label = String(modal.querySelector('#aiCmdLabelInp').value || '').trim();
+        var tpl = String(modal.querySelector('#aiCmdTplInp').value || '').trim();
+        if (!label) { notify('请填写指令名'); return; }
+        if (!tpl) { notify('请填写指令内容'); return; }
+        var arr = loadCustomQuickCommands();
+        arr.push({ label: label, template: tpl });
+        saveCustomQuickCommands(arr);
+        renderQuickChips();
+        closeQuickModal('aiCustomCmdModal');
+        notify('已添加指令：' + label);
+      });
+      modal.addEventListener('click', function(ev) {
+        var del = ev.target.closest('[data-del]');
+        if (del) {
+          var idx = parseInt(del.getAttribute('data-del'), 10);
+          var arr = loadCustomQuickCommands();
+          if (idx >= 0 && idx < arr.length) arr.splice(idx, 1);
+          saveCustomQuickCommands(arr);
+          renderQuickChips();
+          var row = del.closest('.ai-cmd-row');
+          if (row && row.parentNode) row.parentNode.removeChild(row);
+        }
+      });
+    }
+    function openImageGenModal() {
+      closeQuickModal('aiGenImgModal');
+      var modal = document.createElement('div');
+      modal.id = 'aiGenImgModal';
+      modal.className = 'ai-invite-modal';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.innerHTML =
+        '<div class="ai-invite-modal-box ai-genimg-modal-box">' +
+          '<div class="ai-invite-modal-hero" aria-hidden="true"><span class="ai-invite-modal-hero-badge">生图</span><p class="ai-invite-modal-hero-sub">AI 生成图片</p></div>' +
+          '<div class="ai-invite-modal-body">' +
+            '<h3 class="ai-invite-modal-title">描述你想生成的图片</h3>' +
+            '<textarea id="aiGenPromptInp" class="ai-cmd-tpl-inp" rows="3" placeholder="例如：一只戴眼镜的橘猫在写代码，卡通风格" maxlength="500"></textarea>' +
+            '<div class="ai-genimg-preview" id="aiGenPreview" style="display:none"></div>' +
+            '<div class="ai-genimg-status" id="aiGenStatus" aria-live="polite"></div>' +
+          '</div>' +
+          '<div class="ai-invite-modal-foot">' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel" id="aiGenClose">关闭</button>' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiGenRun">生成图片</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(modal);
+      requestAnimationFrame(function() { try { modal.classList.add('is-ready'); } catch (e) {} });
+      modal.querySelector('#aiGenClose').addEventListener('click', function() { closeQuickModal('aiGenImgModal'); });
+      modal.querySelector('#aiGenRun').addEventListener('click', function() {
+        var prompt = String(modal.querySelector('#aiGenPromptInp').value || '').trim();
+        if (!prompt) { notify('请先描述要生成的图片'); return; }
+        var statusEl = modal.querySelector('#aiGenStatus');
+        var previewEl = modal.querySelector('#aiGenPreview');
+        statusEl.textContent = '正在生成图片，请稍候…';
+        previewEl.style.display = 'none';
+        var genUrl = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=' + encodeURIComponent(prompt) + '&image_size=square_hd';
+        var img = new Image();
+        img.onload = function() {
+          statusEl.textContent = '生成完成';
+          previewEl.innerHTML = '';
+          previewEl.appendChild(el('img', { class: 'ai-genimg-result', src: genUrl, alt: 'AI 生成图片', loading: 'lazy' }));
+          var row = el('div', { class: 'ai-genimg-result-actions' });
+          row.appendChild(el('a', { class: 'ai-genimg-dl', href: genUrl, target: '_blank', rel: 'noopener', text: '打开原图' }));
+          var copyLnk = el('button', { type: 'button', class: 'ai-genimg-copy', text: '复制链接' });
+          copyLnk.addEventListener('click', function() { doCopy(genUrl); });
+          row.appendChild(copyLnk);
+          var insertBtn = el('button', { type: 'button', class: 'ai-genimg-insert', text: '发到对话' });
+          insertBtn.addEventListener('click', function() { insertGeneratedImage(genUrl, prompt); });
+          row.appendChild(insertBtn);
+          previewEl.appendChild(row);
+          previewEl.style.display = 'block';
+        };
+        img.onerror = function() {
+          statusEl.textContent = '生成失败，请稍后重试或换一个描述';
+        };
+        img.src = genUrl;
+      });
+    }
+    function insertGeneratedImage(genUrl, prompt) {
+      closeQuickModal('aiGenImgModal');
+      var nowIso = new Date().toISOString();
+      var userMsg = { role: 'user', content: '生成图片：' + prompt, created_at: nowIso };
+      S.messages.push(userMsg);
+      try { setAiHistoryCache(S.conversationId, S.messages); } catch (e) {}
+      if (S.messagesEl) appendMessage(S.messagesEl, userMsg);
+      var card = el('div', { class: 'ai-msg assistant entering' });
+      var bubble = el('div', { class: 'ai-msg-bubble ai-genimg-bubble' });
+      bubble.innerHTML =
+        '<div class="ai-genimg-card">' +
+          '<div class="ai-genimg-card-head">AI 生成图片</div>' +
+          '<img class="ai-genimg-card-img" src="' + escapeAttr(genUrl) + '" alt="AI 生成图片" loading="lazy">' +
+          '<div class="ai-genimg-card-actions">' +
+            '<a class="ai-genimg-dl" href="' + escapeAttr(genUrl) + '" target="_blank" rel="noopener">打开原图</a>' +
+            '<button type="button" class="ai-genimg-copy" data-url="' + escapeAttr(genUrl) + '">复制链接</button>' +
+          '</div>' +
+        '</div>';
+      card.appendChild(bubble);
+      if (S.messagesEl) {
+        S.messagesEl.appendChild(card);
+        try { scrollToBottom(S.messagesEl, true); } catch (e) {}
+      }
+      var copyLnk = bubble.querySelector('.ai-genimg-copy');
+      if (copyLnk) copyLnk.addEventListener('click', function() { doCopy(copyLnk.getAttribute('data-url')); });
+      notify('图片已生成并插入对话');
+    }
+    function exportConversationMarkdown() {
+      var msgs = (S.messages || []).filter(function(m) { return m && m.content; });
+      if (!msgs.length) { notify('当前对话还没有内容'); return; }
+      var displayName = (S.config && S.config.name) || AI_DISPLAY_NAME;
+      var lines = ['# ' + displayName + ' 对话记录', '', '导出时间：' + new Date().toLocaleString(), '模型：' + (modelLabels[S.selectedModel] || S.selectedModel), ''];
+      msgs.forEach(function(m) {
+        var role = m.role === 'assistant' ? '🤖 ' + displayName : '🧑 我';
+        lines.push('## ' + role + (m.created_at ? ' · ' + fmtTime(m.created_at) : ''));
+        lines.push('');
+        lines.push(String(m.content || ''));
+        lines.push('');
+      });
+      var blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = displayName + '对话_' + (S.conversationId ? S.conversationId.slice(-6) : new Date().getTime().toString(36)) + '.md';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() { try { URL.revokeObjectURL(a.href); } catch (e) {} if (a.parentNode) a.parentNode.removeChild(a); }, 500);
+      notify('已导出 Markdown 文件');
+    }
+    renderQuickChips();
 
     var modelSelect = panelShell.querySelector('#aiPlusModelSelect');
     var thinkSelect = panelShell.querySelector('#aiPlusThinkSelect');
@@ -8950,6 +9239,21 @@ function showChatMessages() {
       // select 自己处理模型/思考，不要拦截
       if (e.target && (e.target.tagName === 'SELECT' || e.target.closest('select'))) return;
 
+      // ★ 新增：快捷指令芯片
+      var chip = e.target.closest('.ai-quick-chip');
+      if (chip) {
+        var qcId = chip.getAttribute('data-qc');
+        if (qcId) { handleQuickCommand(qcId); return; }
+        var customIdx = chip.getAttribute('data-custom');
+        if (customIdx != null) {
+          var customs = loadCustomQuickCommands();
+          var customCmd = customs[parseInt(customIdx, 10)];
+          if (customCmd) insertQuickTemplate(customCmd.template);
+          return;
+        }
+        return;
+      }
+
       var t = e.target.closest('[data-action]');
       if (!t) return;
 
@@ -9056,6 +9360,69 @@ function showChatMessages() {
       style: 'display:none'
     }, '暂停');
 
+    // ★ 新增：语音输入按钮（Web Speech API，点击开始/停止聆听）
+    var voiceBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-voice',
+      id: 'aiChatVoiceBtn',
+      'aria-label': '语音输入',
+      title: '语音输入'
+    });
+    voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
+    var _voiceRecognition = null;
+    var _voiceListening = false;
+    voiceBtn.addEventListener('click', function() {
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        notify('当前浏览器不支持语音输入，请使用 Chrome/Edge 或 Safari');
+        return;
+      }
+      if (_voiceListening) {
+        try { if (_voiceRecognition) _voiceRecognition.stop(); } catch (e) {}
+        return;
+      }
+      try {
+        var rec = new SR();
+        _voiceRecognition = rec;
+        rec.lang = 'zh-CN';
+        rec.interimResults = true;
+        rec.continuous = false;
+        _voiceListening = true;
+        voiceBtn.classList.add('listening');
+        notify('正在聆听…');
+        rec.onresult = function(ev) {
+          var interim = '';
+          for (var i = 0; i < ev.results.length; i++) {
+            if (ev.results[i] && ev.results[i][0]) interim += ev.results[i][0].transcript;
+          }
+          if (!interim) return;
+          var existing = String(input.value || '');
+          if (existing.trim()) {
+            input.value = existing.replace(/\s+$/, '') + ' ' + interim;
+          } else {
+            input.value = interim;
+          }
+          autoresize();
+        };
+        rec.onend = function() {
+          _voiceListening = false;
+          voiceBtn.classList.remove('listening');
+        };
+        rec.onerror = function(ev) {
+          _voiceListening = false;
+          voiceBtn.classList.remove('listening');
+          if (ev && ev.error && ev.error !== 'aborted' && ev.error !== 'no-speech') {
+            notify('语音识别失败：' + ev.error);
+          }
+        };
+        rec.start();
+      } catch (e) {
+        _voiceListening = false;
+        voiceBtn.classList.remove('listening');
+        notify('语音输入不可用');
+      }
+    });
+
     function autoresize() {
       try {
         input.style.height = 'auto';
@@ -9134,6 +9501,7 @@ function showChatMessages() {
     inputBar.appendChild(fileInput);
     inputBar.appendChild(filePreview);
     inputBar.appendChild(input);
+    inputBar.appendChild(voiceBtn);
     inputBar.appendChild(sendBtn);
     inputBar.appendChild(pauseBtn);
     root.appendChild(inputBar);
