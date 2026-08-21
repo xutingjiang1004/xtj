@@ -874,6 +874,17 @@ function aiToolsForSearch(includeTavily) {
   return filtered;
 }
 
+// ★ 搜索配额过滤：allowed=true 返回全量 AI_TOOLS；false 排除第三方搜索工具
+// （search_web / tavily_search），仅保留内置 web_search 与其他非搜索工具，
+// 使配额用尽后模型不会反复尝试第三方搜索而浪费轮次。
+function aiToolsFilteredForThirdParty(allowed) {
+  if (allowed) return AI_TOOLS;
+  return AI_TOOLS.filter(function(t) {
+    var n = t && t.function ? t.function.name : '';
+    return n !== 'search_web' && n !== 'tavily_search';
+  });
+}
+
 // 将 OpenAI 风格 messages 数组转换为 Responses API 的 input items：
 // - instructions 单独传（首条 system 即 corePrompt，跳过避免重复）
 // - system 消息直接保留为 message item（Responses 协议允许 system 角色）
@@ -6975,7 +6986,8 @@ async function runDeepThinkAgent(opts) {
     var searchCountAccum = { count: 0 };
     // ★ P 改: 思考程度 low 时不传 tools(禁止搜索), 其他级别正常传
     if (!disableSearch) {
-      deepSeekOpts.tools = AI_TOOLS;
+      var thirdPartyOk = await canUseThirdPartySearch(userName || '');
+      deepSeekOpts.tools = aiToolsFilteredForThirdParty(thirdPartyOk);
       deepSeekOpts.tool_choice = 'auto';
       deepSeekOpts.tool_executor = buildToolExecutor(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName);
     }
@@ -7171,7 +7183,8 @@ async function runDeepThinkWorker(opts) {
         max_tool_rounds: 1
       };
       if (needSearch) {
-        callOpts.tools = AI_TOOLS;
+        var workerThirdPartyOk = await canUseThirdPartySearch(userName || '');
+        callOpts.tools = aiToolsFilteredForThirdParty(workerThirdPartyOk);
         callOpts.tool_choice = 'auto';
         callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum, userName);
       }
@@ -16919,7 +16932,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         model: usedModel,
         messages: messages,
         stream: false,
-        tools: AI_TOOLS,
+        tools: aiToolsFilteredForThirdParty(thirdPartySearchOkEarly),
         tool_choice: 'auto'
       };
 
@@ -17416,7 +17429,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // 思考模式下不同时发 tools（DeepSeek reasoning 模型不支持
     // thinking + tools 并存，会返回 400），搜索靠 regex 回退注入
     if (!useThinking) {
-      apiBody.tools = AI_TOOLS;
+      apiBody.tools = aiToolsFilteredForThirdParty(thirdPartySearchOkEarly);
     }
 
     // ★ H-3 修复（真正生效）：contentBuffer 必须在 while 循环外初始化。
