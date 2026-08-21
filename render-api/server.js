@@ -172,6 +172,9 @@ const aiQuota = createAiQuota(supabase);
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const DEEPSEEK_MODEL_FLASH = 'deepseek-v4-flash';
 const DEEPSEEK_MODEL_PRO = 'deepseek-v4-pro';
+// DeepSeek 首个多模态视觉模型（实验版）：公众号/官方 2026-08-21 上线，
+// OpenAI 兼容格式，支持 image_url + base64 内联图片。
+const DEEPSEEK_MODEL_VISION = 'deepseek-v4-flash-vision-exp';
 function normalizeDeepSeekModelName(model) {
   var key = String(model || '').trim().toLowerCase();
   if (!key) return '';
@@ -4139,6 +4142,24 @@ function unwrapAttachmentExtract(result) {
     return { text: result.text, cards: Array.isArray(result.cards) ? result.cards : [] };
   }
   return { text: typeof result === 'string' ? result : '', cards: [] };
+}
+
+// 多模态：从 attachments 中筛出可内联的图片 data URL（限 JPEG/PNG/GIF/WebP，
+// 与 DeepSeek 视觉模型支持格式一致）。仅收集完整 data URL，绝不传入任意文本。
+function extractVisionImageUrls(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  var urls = [];
+  var maxCount = Math.min(attachments.length, 10);
+  for (var vi = 0; vi < maxCount; vi++) {
+    var item = attachments[vi];
+    if (!item || typeof item.data_url !== 'string') continue;
+    var type = String(item.type || '');
+    if (!/^image\/(jpeg|png|gif|webp)$/i.test(type)) continue;
+    var dataUrl = item.data_url.trim();
+    if (!/^data:[^,;\s]+;base64,[A-Za-z0-9+/=\s]+$/.test(dataUrl)) continue;
+    urls.push(dataUrl);
+  }
+  return urls;
 }
 
 /** 去掉附件/OCR/dataURL，得到适合当搜索词的用户原话 */
@@ -16409,6 +16430,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       return safeEnd();
     }
 
+    // ★ 多模态：在 extractChatAttachments overwrite message 之前，先取出可内联的
+    //   图片 data URL，并保留用户原始文本（供视觉模型以 image_url 内容块直传）。
+    var _visionImageUrls = extractVisionImageUrls(req.body && req.body.attachments);
+    var _visionRawText = String((req.body && req.body.message) || '');
+
     // token + 请求次数兜底（搜索额度不在此拦截整轮聊天）
     var rl = await enforceAiChatAccess(userName, { needSearch: false });
     if (!rl.allowed) {
@@ -16636,7 +16662,22 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var usedModel = normalizeDeepSeekUsageModel(validatedModel, validatedModel);
     if (aborted) return safeEnd();
 
-    messages.push({ role: 'user', content: message });
+    // ★ 多模态：选视觉模型，或选了 V4 Flash 基础文本模型，只要本次带图片，
+    //   就把图片直接以 image_url 内容块传给视觉模型（否则图片经 OCR 转文字，无图可看）。
+    //   此时强制使用视觉模型：因为 vision 就是 flash 的视觉版、同价，能"直接看图"。
+    //   V4 Pro 无视觉版，仍走原 OCR 通道。
+    var _visionEligible = validatedModel === DEEPSEEK_MODEL_VISION || validatedModel === DEEPSEEK_MODEL_FLASH;
+    if (_visionEligible && _visionImageUrls.length) {
+      usedModel = DEEPSEEK_MODEL_VISION;
+      var _visionTextPart = stripAttachmentNoiseForSearch(_visionRawText) || '（用户上传了一张图片，请查看并回答）';
+      var _visionContent = [{ type: 'text', text: _visionTextPart }];
+      for (var _vi = 0; _vi < _visionImageUrls.length; _vi++) {
+        _visionContent.push({ type: 'image_url', image_url: { url: _visionImageUrls[_vi] } });
+      }
+      messages.push({ role: 'user', content: _visionContent });
+    } else {
+      messages.push({ role: 'user', content: message });
+    }
 
     // ★ 缓存优化：动态内容（天气结果、时间、链接正文）放在 user 之后，破坏的只是尾部一小段缓存
     if (weatherResult) {
