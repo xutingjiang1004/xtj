@@ -46,7 +46,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var DEFAULT_THINKING_MODE = 'max';
   var DEFAULT_AI_MODEL = 'deepseek-v4-flash';
   var ALLOWED_THINKING_MODES = ['off', 'low', 'medium', 'high', 'max'];
-  var ALLOWED_AI_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+  var ALLOWED_AI_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'];
 
   // 初始化思考程度：localStorage > 默认值（后端配置在 applyConfigToUI 中再覆盖）
   //   注意：初始化只发生一次；后端配置到达后会通过 applyConfigToUI 显式赋值，
@@ -8399,7 +8399,8 @@ function showChatMessages() {
     // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
     var modelLabels = {
       'deepseek-v4-flash': 'V4 Flash',
-      'deepseek-v4-pro': 'V4 Pro'
+      'deepseek-v4-pro': 'V4 Pro',
+      'deepseek-v4-flash-vision-exp': 'V4 Flash Vision'
     };
     var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
 
@@ -8528,7 +8529,8 @@ function showChatMessages() {
     var thinkSelect = panelShell.querySelector('#aiPlusThinkSelect');
     fillSelect(modelSelect, [
       { value: 'deepseek-v4-flash', label: 'V4 Flash' },
-      { value: 'deepseek-v4-pro', label: 'V4 Pro' }
+      { value: 'deepseek-v4-pro', label: 'V4 Pro' },
+      { value: 'deepseek-v4-flash-vision-exp', label: 'V4 Flash Vision' }
     ], S.selectedModel || 'deepseek-v4-flash');
     fillSelect(thinkSelect, [
       { value: 'off', label: '关闭' },
