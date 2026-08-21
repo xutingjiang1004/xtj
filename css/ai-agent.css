@@ -6497,7 +6497,8 @@
 }
 .ai-genimg-dl,
 .ai-genimg-copy,
-.ai-genimg-insert {
+.ai-genimg-insert,
+.ai-genimg-regen {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6512,7 +6513,9 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 .ai-genimg-dl:hover,
-.ai-genimg-copy:hover { background: rgba(126, 191, 172, 0.22); }
+.ai-genimg-copy:hover,
+.ai-genimg-regen:hover { background: rgba(126, 191, 172, 0.22); }
+.ai-genimg-regen:disabled { opacity: 0.6; cursor: not-allowed; }
 .ai-genimg-insert {
   border-color: rgba(66, 155, 122, 0.86);
   background: linear-gradient(135deg, rgba(66, 155, 122, 0.96), rgba(84, 176, 158, 0.96));
