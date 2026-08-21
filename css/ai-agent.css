@@ -6310,12 +6310,28 @@
   -webkit-tap-highlight-color: transparent;
 }
 .ai-msg-act:hover { background: rgba(126, 191, 172, 0.14); color: rgba(46, 130, 105, 0.98); }
+/* 重新生成：稍显主色，与复制/分享区分 */
+.ai-msg-act-regen {
+  border-color: rgba(78, 168, 142, 0.45);
+  background: rgba(228, 246, 238, 0.9);
+  color: rgba(38, 130, 104, 0.98);
+}
+.ai-msg-act-regen:hover {
+  background: rgba(126, 191, 172, 0.24);
+  color: rgba(24, 108, 86, 1);
+}
 [data-theme="dark"] .ai-msg-act {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(140, 196, 158, 0.24);
   color: rgba(190, 214, 208, 0.86);
 }
 [data-theme="dark"] .ai-msg-act:hover { background: rgba(126, 191, 172, 0.18); color: #9fe3c8; }
+[data-theme="dark"] .ai-msg-act-regen {
+  border-color: rgba(112, 200, 170, 0.5);
+  background: rgba(30, 84, 68, 0.55);
+  color: #9fe3c8;
+}
+[data-theme="dark"] .ai-msg-act-regen:hover { background: rgba(78, 168, 142, 0.32); color: #c4f0dd; }
 
 /* 语音输入按钮 */
 .ai-chat-voice {
