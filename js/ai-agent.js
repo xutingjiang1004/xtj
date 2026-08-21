@@ -2156,10 +2156,52 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         });
         actionRow.appendChild(shareBtn);
       }
+      // ★ 重新生成：重新发送本条回复对应的上一条用户消息
+      var regenBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-regen', 'aria-label': '重新生成回复', text: '重新生成' });
+      regenBtn.addEventListener('click', function(ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        triggerRegenerate(messagesEl, msg);
+      });
+      actionRow.appendChild(regenBtn);
       footer.appendChild(actionRow);
     }
     if (footer.children.length > 0) node.appendChild(footer);
     return node;
+  }
+
+  // ★ 重新生成：定位当前 assistant 消息之前最近的一条用户消息，重新发送
+  //   live 会话中的用户消息带有 attachments（含图片 data URL），可原样复用；
+  //   历史/跨端加载的消息无附件，则退回纯文本重发。
+  function triggerRegenerate(messagesEl, anchorMsg) {
+    try {
+      if (S.sending) { try { notify('请等待当前回复完成后重试'); } catch (eRg) {} return; }
+      var msgs = Array.isArray(S.messages) ? S.messages : [];
+      var idx = anchorMsg ? msgs.indexOf(anchorMsg) : -1;
+      if (idx < 0) idx = msgs.length - 1;
+      var userMsg = null;
+      for (var ri = idx - 1; ri >= 0; ri--) {
+        if (msgs[ri] && msgs[ri].role === 'user') { userMsg = msgs[ri]; break; }
+      }
+      if (!userMsg) { try { notify('未找到可重新生成的消息'); } catch (eNo) {} return; }
+      var raw = String(userMsg.content || '');
+      // 去掉图片/文件标记，还原纯文本
+      var plain = raw
+        .replace(/!\[[^\]]*\]\(data:[^)]+\)/g, ' ')
+        .replace(/\[图片:[^\]]*\]/g, ' ')
+        .replace(/\[文件:[^\]]*\]/g, ' ')
+        .replace(/\[📄[^\]]*\]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      var atts = (userMsg.attachments && userMsg.attachments.length) ? userMsg.attachments : null;
+      if (!plain && !atts) { try { notify('这条消息无法重新生成'); } catch (eEmp) {} return; }
+      if (typeof S._resendFn === 'function') {
+        S._resendFn(plain || raw, atts);
+      } else {
+        try { notify('重新生成暂不可用，请手动重发'); } catch (eNoFn) {}
+      }
+    } catch (e) {
+      try { notify('重新生成失败，请手动重发'); } catch (e2) {}
+    }
   }
 
   function buildEmptyState(tipText) {
@@ -6732,7 +6774,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 认证和Token获取异步进行，不阻塞UI反馈
     // ============================================================
     var nowIso = new Date().toISOString();
-    var userMsg = { role: 'user', content: displayText, created_at: nowIso };
+    // ★ 记录附件（含图片 data URL），供「重新生成」时原样复用
+    var userMsg = { role: 'user', content: displayText, created_at: nowIso, attachments: attachmentPayload || null };
     S.messages.push(userMsg);
     try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache) {}
     appendMessage(messagesEl, userMsg);
@@ -7133,6 +7176,35 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var usageLine = buildUsageLine(aiMsg.usage);
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
           }
+          // ★ 直播回复底部操作按钮：复制 / 分享 / 重新生成
+          var actionRow = el('div', { class: 'ai-msg-actions' });
+          var copyBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-copy', 'aria-label': '复制回复', text: '复制' });
+          copyBtn.addEventListener('click', function(ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            var t = (assistantBubble.textContent || '').trim();
+            if (!t) return;
+            doCopy(t);
+            copyBtn.textContent = '已复制';
+            setTimeout(function() { copyBtn.textContent = '复制'; }, 2000);
+          });
+          actionRow.appendChild(copyBtn);
+          if (typeof navigator !== 'undefined' && navigator.share) {
+            var shareBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-share', 'aria-label': '分享回复', text: '分享' });
+            shareBtn.addEventListener('click', function(ev) {
+              ev.preventDefault(); ev.stopPropagation();
+              var t = (assistantBubble.textContent || '').trim();
+              if (!t) return;
+              navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function() {});
+            });
+            actionRow.appendChild(shareBtn);
+          }
+          var regenBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-regen', 'aria-label': '重新生成回复', text: '重新生成' });
+          regenBtn.addEventListener('click', function(ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            triggerRegenerate(messagesEl, aiMsg);
+          });
+          actionRow.appendChild(regenBtn);
+          footer.appendChild(actionRow);
           if (footer.children.length > 0) node.appendChild(footer);
         }
       }
@@ -9447,6 +9519,27 @@ function showChatMessages() {
       }
             handleSendMessage(input, sendBtn, messagesEl, fileData);
     }
+    // ★ 重新生成：把指定文本（及可选附件）填入输入框并发起发送。
+    //   供 assistant 消息上的「重新生成」按钮调用，复用现有发送与附件预览机制。
+    S._resendFn = function(resendText, resendAttachments) {
+      try {
+        if (S.sending) { notify('请等待当前回复完成后重试'); return; }
+        var t = String(resendText || '').trim();
+        if (!t && !(resendAttachments && resendAttachments.length)) return;
+        if (_aiChatFileData) clearAiChatFilePreview();
+        if (resendAttachments && resendAttachments.length && resendAttachments[0] && resendAttachments[0].data_url) {
+          var att = resendAttachments[0];
+          _aiChatFileData = { name: att.name, type: att.type, dataUrl: att.data_url };
+          renderAiFilePreview(filePreview, _aiChatFileData, clearAiChatFilePreview);
+        }
+        input.value = t;
+        autoresize();
+        try { input.focus(); } catch (eFocus) {}
+        doSend();
+      } catch (eRes) {
+        try { notify('重新生成失败，请手动重发'); } catch (eR2) {}
+      }
+    };
     sendBtn.addEventListener('click', doSend);
     pauseBtn.addEventListener('click', function() {
       if (!S.sending && !S.paused) return;

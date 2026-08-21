@@ -14607,6 +14607,11 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
     if (typeof extra.think_duration_ms === 'number' && extra.think_duration_ms > 0) {
       obj.think_duration_ms = extra.think_duration_ms;
     }
+    // ★ 多模态连续追问：记录本条用户消息内联的图片 data URL，
+    //   后续轮次从历史中把图重新以 image_url 内容块发回模型，实现「图片连续追问」。
+    if (Array.isArray(extra.vision_urls) && extra.vision_urls.length) {
+      obj.vision_urls = extra.vision_urls.slice(0, 3);
+    }
   }
   return JSON.stringify(obj);
 }
@@ -15534,7 +15539,13 @@ async function loadAiContext(userName, convId) {
         // ★ 缓存优化：标准化空白字符，确保历史消息在重新加载时字符串完全一致
         // 否则 unicode 空白/换行差异会导致缓存前缀不匹配
         var normalized = content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
-        return { role: meta.role || 'user', content: normalized };
+        var entry = { role: meta.role || 'user', content: normalized };
+        // ★ 多模态连续追问：把历史里保存的图片 data URL 一并带回，
+        //   后续轮次组装消息时可重新以 image_url 内容块发给视觉模型。
+        if (entry.role === 'user' && Array.isArray(meta.vision_urls) && meta.vision_urls.length) {
+          entry.vision_urls = meta.vision_urls.slice(0, 3);
+        }
+        return entry;
       });
       // ★ 优化：固定 20 条在长对话下截断严重（20×4000 字符≈120k 字符，
       // 但 DeepSeek 上下文窗口有限，实际能容纳的轮次远少于 20 条完整消息）。
@@ -15548,6 +15559,10 @@ async function loadAiContext(userName, convId) {
       for (var hi = parsedRows.length - 1; hi >= 0; hi--) {
         var row = parsedRows[hi];
         var cost = row.content.length;
+        // 图片约占较多 token，按 ~1600 字符/张计入预算，避免图片消息撑爆上下文
+        if (row.role === 'user' && Array.isArray(row.vision_urls) && row.vision_urls.length) {
+          cost += row.vision_urls.length * 1600;
+        }
         if (usedChars + cost > budgetChars && kept.length > 0) break;
         kept.push(row);
         usedChars += cost;
@@ -16556,18 +16571,33 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       { role: 'system', content: corePrompt }
     ];
 
+    // 模型选择提前校验：供历史图片「连续追问」判断当前是否视觉可用
+    var requestedModel = req.body && req.body.model;
+    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'];
+    var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
+    var _historyVisionEligible = validatedModel === DEEPSEEK_MODEL_VISION || validatedModel === DEEPSEEK_MODEL_FLASH;
+
     var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
     for (var h = 0; h < histSlice.length; h++) {
-      messages.push({ role: histSlice[h].role, content: histSlice[h].content });
+      var hrow = histSlice[h];
+      // ★ 多模态连续追问：历史里带图（vision_urls）且当前模型视觉可用时，
+      //   把图片重新以 image_url 内容块发回模型，用户可继续追问图片内容。
+      if (hrow.role === 'user' && Array.isArray(hrow.vision_urls) && hrow.vision_urls.length && _historyVisionEligible) {
+        var hText = stripAttachmentNoiseForSearch(hrow.content) || '（用户上传了一张图片，请查看并回答）';
+        var hContent = [{ type: 'text', text: hText }];
+        for (var hvi = 0; hvi < hrow.vision_urls.length; hvi++) {
+          hContent.push({ type: 'image_url', image_url: { url: hrow.vision_urls[hvi] } });
+        }
+        messages.push({ role: 'user', content: hContent });
+      } else {
+        messages.push({ role: hrow.role, content: hrow.content });
+      }
     }
 
     // 思考模式
     // ★ M: fallback 从 max 改成 low
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
-    var requestedModel = req.body && req.body.model;
-    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'];
-    var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
 
     // 搜索意图识别（口语「搜一下」等）
     // ★ 策略：优先模型内置搜索；第三方可辅助补充。搜索意图不再强制关思考，
@@ -16927,13 +16957,19 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
 
       var _responsesSaved = false;
+      // ★ 多模态连续追问：把本条用户消息内联的图片 data URL 存进会话历史，
+      //   后续轮次可把图重新发回视觉模型，实现「图片连续追问」。
+      var _userSaveExtra = { chat_mode: 'normal', web_search: webSearchEnabled };
+      if (_visionEngaged && _visionImageUrls.length) {
+        _userSaveExtra.vision_urls = _visionImageUrls.slice(0, 3);
+      }
       try {
         var _responsesSaveResult = await supabase.from('posts').insert([
           {
             user_name: userName,
             content: message,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: 'normal', web_search: webSearchEnabled }),
+            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, _userSaveExtra),
             actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
           },
           {
