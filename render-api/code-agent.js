@@ -59,7 +59,7 @@ const MAX_HISTORY_MSG_CHARS = 64 * 1024; // 每条历史消息 content 上限（
 const MAX_HISTORY_TOTAL_BYTES = 1024 * 1024; // 单会话历史总字节上限（1MB），防止 200 会话 × 64KB 级膨胀到 GB 级内存
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const WEB_FETCH_HOSTS = String(process.env.CODE_AGENT_WEB_FETCH_HOSTS || '').split(',').map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
-const WEB_TIMEOUT_MS = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_TIMEOUT_MS) || 8000, 1000), 30000);
+const WEB_TIMEOUT_MS = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_TIMEOUT_MS) || 12000, 1000), 30000);
 const WEB_MAX_BYTES = Math.min(Math.max(Number(process.env.CODE_AGENT_WEB_MAX_BYTES) || 2 * 1024 * 1024, 32 * 1024), 8 * 1024 * 1024);
 const WEB_MAX_REDIRECTS = 3;
 const MAX_REQUEST_OVERLAY_BYTES = 8 * 1024 * 1024;
@@ -1200,8 +1200,15 @@ async function fetchSafeWebPage(rawUrl, options) {
       var requestHeaders = Object.assign({ Accept: 'text/html,application/xhtml+xml,text/plain,application/json' }, options.headers || {});
       response = await requestPinnedHttps(parsed, safeTarget.addresses, options.maxBytes || WEB_MAX_BYTES, options.timeoutMs || WEB_TIMEOUT_MS, requestHeaders);
     } catch (err) {
-      if (err && err.name === 'AbortError') throw new Error('网页请求超时');
-      throw new Error('网页请求失败');
+      var fetchErrMsg = err && err.message ? String(err.message) : '';
+      // 超时：requestPinnedHttps 内部 setTimeout destroy 抛出 '网页请求超时'（并非 AbortError）
+      if (fetchErrMsg === '网页请求超时' || (err && err.name === 'AbortError')) {
+        throw new Error('网页请求超时（超过 ' + Math.round((options.timeoutMs || WEB_TIMEOUT_MS) / 1000) + ' 秒），请稍后重试');
+      }
+      // 大小超限等已明确的错误原样透传，避免语义被笼统吞掉
+      if (fetchErrMsg === '网页内容超过大小限制') throw err;
+      // 其余归为网络错误，附带底层原因便于排查
+      throw new Error('网页请求失败（网络错误：' + (fetchErrMsg || '连接异常') + '）');
     } finally { clearTimeout(timer); }
     if (response && response.status >= 300 && response.status < 400) {
       if (redirect === WEB_MAX_REDIRECTS) throw new Error('网页重定向次数过多');
@@ -1233,6 +1240,9 @@ async function searchWebForCode(query, maxResults, options) {
     return { ok: false, code: 'WEB_SEARCH_NOT_CONFIGURED', error: '网站联网搜索服务未接入，请检查服务器搜索供应商配置' };
   }
   var injected = await options.webSearch(String(query || '').slice(0, 240), Math.min(maxResults || 5, 10), options.userId || '');
+  if (injected && injected.search_quota_exceeded) {
+    return { ok: false, code: 'WEB_SEARCH_QUOTA_EXCEEDED', error: '今日搜索次数已达上限，请开通 Pro 或明日再试' };
+  }
   if (injected && injected.error && !(Array.isArray(injected.results) && injected.results.length)) {
     return { ok: false, code: 'WEB_SEARCH_FAILED', error: '搜索失败，无法核实最新信息，请明确告知用户，禁止编造虚假信息或日期。' };
   }
@@ -1760,8 +1770,18 @@ async function extractDocumentText(buffer, mimeType, fileName) {
     } else if (mimeType === 'text/csv' || mimeType === 'text/plain') {
       if (buffer.includes(0)) throw new Error('文本文件包含二进制内容');
       text = buffer.toString('utf-8');
+    } else if (String(mimeType || '').indexOf('image/') === 0) {
+      // 图片走 OCR 通道：复用 image-ocr.js 的 ocrImageBuffer（入参为 Buffer）。
+      // OCR 失败返回明确错误（422）而非 415「不支持的文件类型」。
+      var imageOcr = require('./image-ocr');
+      var ocrResult = await imageOcr.ocrImageBuffer(buffer, mimeType, fileName);
+      if (ocrResult && ocrResult.error) {
+        return { ok: false, error: '图片文字识别失败：' + ocrResult.error };
+      }
+      text = (ocrResult && ocrResult.text) || '';
+      metadata = { ocr: true, provider: (ocrResult && ocrResult.provider) || 'ocr.space', chars: (ocrResult && ocrResult.chars) || 0 };
     } else {
-      return { ok: false, error: '不支持的文件类型: ' + (mimeType || '未知') + '（支持 PDF、DOCX、XLSX、XLS、PPTX、CSV、TXT、MD）' };
+      return { ok: false, error: '不支持的文件类型: ' + (mimeType || '未知') + '（支持 PDF、DOCX、XLSX、XLS、PPTX、CSV、TXT、MD、图片）' };
     }
   } catch (e) {
     console.error('[code-agent] Document extraction error:', e && e.message ? e.message : e);

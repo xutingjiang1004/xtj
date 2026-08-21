@@ -306,6 +306,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var wasPro = !!(S.quota && S.quota.is_pro);
     S.quota = Object.assign(defaultQuotaShape(), quota);
     S.quotaFetchedAt = Date.now();
+    // ★ 修复: 轮询/刷新拉到的新额度若显示搜索已不可用（search_remaining<=0 且非无限），
+    //   自动关闭搜索开关（覆盖「原本已开启、额度刚耗尽」的场景），并同步持久化；
+    //   随后 S._renderQuotaUI 会以关闭后的状态刷新 UI。避免带着超限开关继续触发第三方搜索。
+    if (S.webSearchEnabled && searchQuotaExhausted(S.quota)) {
+      S.webSearchEnabled = false;
+      try { localStorage.setItem('xtj_ai_web_search', 'false'); } catch (eLS) {}
+      notify('网页搜索次数已达上限，已为你关闭搜索');
+    }
     var nowPro = !!S.quota.is_pro;
     try {
       if (typeof window.dispatchEvent === 'function') {
@@ -389,13 +397,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  function isSearchUnlimited(q) {
+    return !!(q && (q.search_unlimited === true || Number(q.search_limit) < 0));
+  }
+
+  // 搜索额度是否已耗尽：仅当额度信息存在且非无限时判断（can_search===false 或 search_remaining<=0）
+  function searchQuotaExhausted(q) {
+    if (!q || isSearchUnlimited(q)) return false;
+    if (q.can_search === false) return true;
+    if (typeof q.search_remaining === 'number' && q.search_remaining <= 0) return true;
+    return false;
+  }
+
   function canSendWithQuota() {
     var q = S.quota;
-    if (!q) return { ok: true };
+    if (!q) {
+      // 额度信息缺失（拉取失败/未完成）：开启搜索时一律不放行，避免绕过第三方搜索次数限制
+      if (S.webSearchEnabled) {
+        return { ok: false, reason: 'quota_unavailable', message: '额度信息暂不可用，请稍后重试或刷新页面' };
+      }
+      return { ok: true };
+    }
     if (q.can_chat === false || (typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0)) {
       return { ok: false, reason: 'token_limit', message: '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度' };
     }
-    if (S.webSearchEnabled && q.can_search === false && !q.search_unlimited) {
+    if (S.webSearchEnabled && searchQuotaExhausted(q)) {
       return { ok: false, reason: 'search_limit', message: '今日网页搜索次数已达上限，开通 Pro 可无限搜索' };
     }
     return { ok: true };
@@ -5450,6 +5476,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); S.sending = false; return; }
 
+    // ★ 修复: 深页发送同样受每日第三方搜索次数限制。开启搜索时先做额度预检，
+    //   与主聊天发送一致（复用 S.quota 缓存，过期则强制刷新），超限则阻止发送。
+    if (S.webSearchEnabled) {
+      try {
+        if (!S.quota || (Date.now() - S.quotaFetchedAt) > 120000) {
+          await fetchAiQuota(true);
+        }
+      } catch (eQ) {}
+      var qGateDT = canSendWithQuota();
+      if (!qGateDT.ok) {
+        notify(qGateDT.message || '今日额度已用完');
+        S.sending = false;
+        return;
+      }
+    }
+
     var originalText = text;
     function restoreInputText() {
       input.value = originalUserText;
@@ -5522,20 +5564,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       else { try { input.focus(); } catch (e2) {} }
 
       var tavilyOutcome;
-      try {
-        tavilyOutcome = await runTavilyResearchFlow({
-          messagesEl: dtMessagesEl,
-          text: text,
-          originalUserText: originalUserText,
-          fileData: fileData,
-          reqId: reqId,
-          model: S.dtResearchMode || 'pro',
-          mode: 'hybrid',
-          rewrite: true
-        });
-      } catch (eTavily) {
-        console.warn('[AI] Tavily research flow error, fallback to deep think:', eTavily && eTavily.message);
+      // ★ 修复: Tavily 深度研究同样消耗每日第三方搜索次数。超限时不发起研究请求，
+      //   直接回退到下方深度思考流程（与 Tavily 流程失败时的行为一致）。
+      if (S.quota && searchQuotaExhausted(S.quota)) {
+        notify('今日网页搜索次数已达上限，开通 Pro 可无限搜索');
         tavilyOutcome = 'fallback';
+      } else {
+        try {
+          tavilyOutcome = await runTavilyResearchFlow({
+            messagesEl: dtMessagesEl,
+            text: text,
+            originalUserText: originalUserText,
+            fileData: fileData,
+            reqId: reqId,
+            model: S.dtResearchMode || 'pro',
+            mode: 'hybrid',
+            rewrite: true
+          });
+        } catch (eTavily) {
+          console.warn('[AI] Tavily research flow error, fallback to deep think:', eTavily && eTavily.message);
+          tavilyOutcome = 'fallback';
+        }
       }
       if (tavilyOutcome !== 'fallback') {
         // 成功 / 取消 / 超时: Tavily 流程已收尾, 结束本次发送
@@ -8337,6 +8386,14 @@ function showChatMessages() {
     try {
       var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
       S.webSearchEnabled = savedWebSearch === 'true';
+      // ★ 修复: 恢复搜索开关时校验额度。若额度显示搜索已不可用，自动关闭该开关，
+      //   避免刷新后带着超限状态继续触发第三方搜索。额度未拉到（S.quota 为 null）时
+      //   交给 applyQuota 在额度到达后兜底关闭。
+      if (S.webSearchEnabled && S.quota && searchQuotaExhausted(S.quota)) {
+        S.webSearchEnabled = false;
+        try { localStorage.setItem('xtj_ai_web_search', 'false'); } catch (e2) {}
+        notify('网页搜索次数已达上限，已为你关闭搜索');
+      }
     } catch (e) {}
 
     // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
@@ -8913,9 +8970,17 @@ function showChatMessages() {
       }
       if (action === 'search') {
         var q = S.quota;
-        if (!S.webSearchEnabled && q && !q.search_unlimited && q.can_search === false) {
-          notify('今日网页搜索次数已用完，开通 Pro 可无限搜索');
-          return;
+        if (!S.webSearchEnabled) {
+          // ★ 修复: 从关到开时完整校验搜索额度（can_search===false 或 search_remaining<=0），
+          //   同时额度信息缺失（拉取失败）时也不放行，避免绕过第三方搜索次数限制。
+          if (!q) {
+            notify('额度信息暂不可用，请稍后重试或刷新页面');
+            return;
+          }
+          if (searchQuotaExhausted(q)) {
+            notify('今日网页搜索次数已用完，开通 Pro 可无限搜索');
+            return;
+          }
         }
         S.webSearchEnabled = !S.webSearchEnabled;
         try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (err) {}

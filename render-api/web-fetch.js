@@ -6,6 +6,7 @@
  */
 
 var dns = require('dns');
+var http = require('http');
 var https = require('https');
 var net = require('net');
 
@@ -69,8 +70,9 @@ async function assertSafeWebUrl(rawUrl, lookupImpl) {
   } catch (_) {
     throw new Error('网址格式无效');
   }
-  if (parsed.protocol !== 'https:') throw new Error('仅支持 HTTPS 链接');
-  if (parsed.port && parsed.port !== '443') throw new Error('仅支持标准 443 端口');
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('仅支持 HTTP/HTTPS 链接');
+  var isHttps = parsed.protocol === 'https:';
+  if (parsed.port && parsed.port !== (isHttps ? '443' : '80')) throw new Error('仅支持标准端口（HTTP 80 / HTTPS 443）');
   if (parsed.username || parsed.password) throw new Error('网址不允许包含凭据');
   if (isBlockedWebHost(parsed.hostname)) throw new Error('网址主机不在允许范围内');
 
@@ -125,18 +127,21 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
       }
       externalSignal.addEventListener('abort', onExternalAbort, { once: true });
     }
-    var request = https.request({
-      protocol: 'https:',
+    var isHttps = parsed.protocol !== 'http:';
+    var transport = isHttps ? https : http;
+    var request = transport.request({
+      protocol: parsed.protocol,
       hostname: parsed.hostname,
-      port: 443,
+      port: isHttps ? 443 : 80,
       path: parsed.pathname + parsed.search,
       method: 'GET',
       servername: parsed.hostname,
       rejectUnauthorized: true,
       headers: Object.assign({
         Host: parsed.host,
-        'User-Agent': 'XTJ-CatAI-Reader/1.0 (+https://xtj)',
-        Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
       }, headers || {}),
       lookup: function(_hostname, _options, callback) {
         callback(null, addresses[0], net.isIP(addresses[0]) || 4);
@@ -235,8 +240,67 @@ function extractTitle(html) {
   return decodeHtmlEntities(m[1]).replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
+function getTextDecoder() {
+  try {
+    var utilMod = require('util');
+    if (utilMod && typeof utilMod.TextDecoder === 'function') return utilMod.TextDecoder;
+  } catch (_) {}
+  try {
+    if (typeof global.TextDecoder === 'function') return global.TextDecoder;
+  } catch (_) {}
+  return null;
+}
+
+function normalizeCharset(name) {
+  var n = String(name || '').trim().toLowerCase().replace(/["'\s]/g, '');
+  if (!n) return '';
+  var aliases = {
+    'utf8': 'utf-8',
+    'utf8-sig': 'utf-8',
+    'gb2312': 'gb18030',
+    'gb_2312': 'gb18030',
+    'gb_2312-80': 'gb18030',
+    'csgb2312': 'gb18030',
+    'chinese': 'gb18030',
+    'windows-31j': 'shift_jis'
+  };
+  return aliases[n] || n;
+}
+
+function detectCharset(buffer, contentTypeHeader) {
+  // 1. BOM（字节级事实，最可靠）
+  if (buffer && buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) return 'utf-8';
+  if (buffer && buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) return 'utf-16le';
+  if (buffer && buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) return 'utf-16be';
+  // 2. HTTP 响应头 Content-Type 的 charset
+  var header = String(contentTypeHeader || '').match(/charset\s*=\s*["']?\s*([a-zA-Z0-9_\-]+)/i);
+  var charset = header ? normalizeCharset(header[1]) : '';
+  // 3. HTML <meta charset> / http-equiv 声明（仅看前 8KB，取首个命中）
+  if (!charset && buffer && buffer.length) {
+    // latin1 按字节无损映射，避免非 UTF-8 内容在切片时已被破坏
+    var head = buffer.slice(0, 8192).toString('latin1');
+    var m = head.match(/<meta[^>]+charset\s*=\s*["']?\s*([a-zA-Z0-9_\-]+)/i)
+      || head.match(/<meta[^>]+http-equiv\s*=\s*["']?content-type["']?[^>]+content\s*=\s*["'][^"']*charset\s*=\s*([a-zA-Z0-9_\-]+)/i)
+      || head.match(/<meta[^>]+content\s*=\s*["'][^"']*charset\s*=\s*([a-zA-Z0-9_\-]+)[^"']*["'][^>]+http-equiv\s*=\s*["']?content-type["']?/i);
+    if (m) charset = normalizeCharset(m[1]);
+  }
+  return charset;
+}
+
+function decodeBuffer(buffer, charset) {
+  if (!charset || /^utf-?8$/i.test(charset) || !Buffer.isBuffer(buffer)) return buffer.toString('utf8');
+  var TextDecoderCtor = getTextDecoder();
+  if (!TextDecoderCtor) return buffer.toString('utf8');
+  try {
+    return new TextDecoderCtor(charset, { fatal: false }).decode(buffer);
+  } catch (_) {
+    return buffer.toString('utf8');
+  }
+}
+
 function normalizeWebText(buffer, contentType) {
-  var raw = buffer.toString('utf8');
+  var charset = detectCharset(buffer, contentType);
+  var raw = decodeBuffer(buffer, charset);
   var title = '';
   var text = raw;
   if (/html/i.test(contentType || '') || /<\s*html[\s>]/i.test(raw.slice(0, 2000))) {
@@ -306,8 +370,9 @@ async function fetchSafeWebPage(rawUrl, options) {
     var title = normalized.title || '';
     var usedFallback = false;
 
-    // SPA / 壳页面常几乎无正文：用 Jina Reader 公共代理再抽一次（仍走 SSRF 校验）
-    if (content.replace(/\s+/g, '').length < 120 && options.allowJinaFallback !== false) {
+    // SPA / 壳页面常几乎无正文：用 Jina Reader 公共代理再抽一次（仍走 SSRF 校验）。
+    // 阈值降到 40 字，避免正常短页（短新闻 / API 返回）被误判为空壳
+    if (content.replace(/\s+/g, '').length < 40 && options.allowJinaFallback !== false) {
       try {
         var jina = await fetchViaJinaReader(parsed.toString(), {
           lookupImpl: lookupImpl,
@@ -345,7 +410,9 @@ async function fetchSafeWebPage(rawUrl, options) {
  */
 async function fetchViaJinaReader(targetUrl, options) {
   options = options || {};
-  var jinaUrl = 'https://r.jina.ai/' + String(targetUrl || '').replace(/^https?:\/\//i, 'https://');
+  // 截掉 hash（对抓取无意义）后整体 encodeURIComponent 作为 r.jina.ai 的 path，
+  // 避免 query/hash 被 URL 解析器当成 r.jina.ai 自身的参数
+  var jinaUrl = 'https://r.jina.ai/' + encodeURIComponent(String(targetUrl || '').split('#')[0]);
   var safe = await assertSafeWebUrl(jinaUrl, options.lookupImpl);
   // jina 主机本身不能是内网；assertSafeWebUrl 已保证
   var response = await requestPinnedHttps(
@@ -363,14 +430,8 @@ async function fetchViaJinaReader(targetUrl, options) {
   var title = '';
   var tm = raw.match(/^Title:\s*(.+)$/im) || raw.match(/^#\s+(.+)$/m);
   if (tm) title = tm[1].trim().slice(0, 200);
-  var text = raw
-    .replace(/^URL Source:.*$/gim, '')
-    .replace(/^Markdown Content:\s*/im, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, WEB_TEXT_MAX);
   // 保留段落感
-  text = raw
+  var text = raw
     .replace(/^URL Source:.*$/gim, '')
     .replace(/^Title:.*$/gim, '')
     .replace(/^Markdown Content:\s*/im, '')
