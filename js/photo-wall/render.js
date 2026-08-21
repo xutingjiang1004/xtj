@@ -2,6 +2,10 @@
   'use strict';
 
   var FALLBACK_IMG = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cpath fill="%23c9d5cf" d="M86 285h228L248 198l-42 55-31-39-89 71Z"/%3E%3Ccircle cx="132" cy="128" r="28" fill="%23bccbc4"/%3E%3C/svg%3E';
+  // P6: 加载超时后的内置占位图（"加载失败 / 点击重试"），点击卡片可重试原 URL
+  var ERROR_IMG = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cg text-anchor="middle" font-family="sans-serif"%3E%3Ctext x="200" y="190" font-size="26" fill="%23c0392b"%3E%E5%8A%A0%E8%BD%BD%E5%A4%B1%E8%B4%A5%3C/text%3E%3Ctext x="200" y="230" font-size="16" fill="%2395a5a0"%3E%E7%82%B9%E5%87%BB%E9%87%8D%E8%AF%95%3C/text%3E%3C/g%3E%3C/svg%3E';
+  // P6: DOM 卡片数量上限 — 超过后不再 append 新卡片，避免数组/DOM 无限增长
+  var MAX_DOM_PHOTOS = 500;
 
   function esc(value){
     if (window.escapeHtml) return window.escapeHtml(String(value == null ? '' : value));
@@ -223,6 +227,20 @@
     applyPhotoWallAspect(img);
   }
 
+  // P6: 点击加载失败的占位图，重新加载原 URL
+  function retryImageLoad(img){
+    if (!img || !img.isConnected) return;
+    var url = img.getAttribute('data-src');
+    if (!url) return;
+    img._pwLoadFailed = false;
+    img._pwQueued = false;
+    img.classList.remove('pw-load-error', 'pw-load-timeout');
+    img.style.cursor = '';
+    img.onclick = null;
+    queueImage(img);
+    pumpImages();
+  }
+
   function pumpImages(){
     if (activeLoads >= MAX_LOADS || !pendingImgs.length) return;
     var item = pendingImgs.shift();
@@ -247,7 +265,27 @@
     img._pwActiveLoad = _pwRenderGeneration;
     var settled = false;
     var fallbackTimer = setTimeout(function(){
-      if (!settled && img && img.isConnected) img.classList.add('pw-load-timeout');
+      if (!settled && img && img.isConnected) {
+        if (!img.getAttribute('data-src')) {
+          img.classList.add('pw-load-timeout');
+          return;
+        }
+        // P6: 超时后释放加载槽，换成内置占位图，支持点击重试原 URL
+        if (img._pwActiveLoad === _pwRenderGeneration) {
+          activeLoads = Math.max(0, activeLoads - 1);
+          img._pwActiveLoad = 0;
+        }
+        img._pwQueued = false;
+        if (imgObserver) imgObserver.unobserve(img);
+        img._pwLoadFailed = true;
+        img.classList.add('pw-load-timeout', 'pw-load-error');
+        img.style.cursor = 'pointer';
+        img.src = ERROR_IMG;
+        img.onclick = function(ev){
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          retryImageLoad(img);
+        };
+      }
     }, 10000);
     function settleImage(failed){
       if (settled) return;
@@ -260,6 +298,8 @@
       }
       img.onload = null;
       img.onerror = null;
+      img.onclick = null;
+      img.style.cursor = '';
       if (failed) img.src = FALLBACK_IMG;
       img.removeAttribute('data-src');
       // ★ 只有 img 还在 DOM 中且属于当前 generation 才完成
@@ -269,9 +309,12 @@
       pumpImages();
     }
     img.onload = function(){
+      // 占位图自身加载完成不进入正常结算流程
+      if (img._pwLoadFailed) return;
       settleImage(false);
     };
     img.onerror = function(){
+      if (img._pwLoadFailed) return;
       settleImage(true);
     };
     img.src = url;
@@ -314,6 +357,7 @@
         var img = allImgs[i];
         img._pwQueued = false;
         img._pwActiveLoad = 0;
+        img._pwObserved = false;
         img._pwGeneration = _pwRenderGeneration;
         if (img.onload) img.onload = null;
         if (img.onerror) img.onerror = null;
@@ -327,9 +371,15 @@
         });
         pumpImages();
       }, { rootMargin:'500px 0px', threshold:0.05 });
-      container.querySelectorAll('.pw-blur-in').forEach(function(img){ imgObserver.observe(img); });
+      container.querySelectorAll('.pw-blur-in').forEach(function(img){
+        img._pwObserved = true;
+        imgObserver.observe(img);
+      });
     } else {
-      container.querySelectorAll('.pw-blur-in').forEach(queueImage);
+      container.querySelectorAll('.pw-blur-in').forEach(function(img){
+        img._pwObserved = true;
+        queueImage(img);
+      });
       pumpImages();
     }
   }
@@ -384,7 +434,8 @@
               return;
             }
           }
-          renderPhotoWallWithoutReload();
+          // P6: 增量追加新卡片（不动旧节点/不重放 stagger/不重建观察器）
+          appendPhotoWallMore();
         } else {
           setSentinelText('暂无更多', false);
         }
@@ -419,6 +470,103 @@
     loadMoreObserver.observe(sentinel);
   }
 
+  // ★ P6: loadMore 增量追加 — 只 append 本次新增的照片卡片，
+  // 不动已渲染节点、不重放 stagger 动画、不重建 IntersectionObserver。
+  function collectDomPhotoIds(grid){
+    var ids = [];
+    var cards = grid.querySelectorAll('.photo-wall-item[data-photo-id]');
+    for (var i = 0; i < cards.length; i++) {
+      var id = cards[i].getAttribute('data-photo-id');
+      if (id != null) ids.push(id);
+    }
+    return ids;
+  }
+
+  // 校验 DOM 中已有卡片与排序列表前缀一致；不一致（如非日期排序下新项插入中间）
+  // 时增量追加不安全，回退全量重建。
+  function sortedPrefixMatches(list, domIds){
+    if (domIds.length > list.length) return false;
+    for (var i = 0; i < domIds.length; i++) {
+      var item = list[i];
+      var id = item ? String(item.id == null ? '' : item.id) : '';
+      if (id !== domIds[i]) return false;
+    }
+    return true;
+  }
+
+  function resetSentinelText(grid, text, retryable){
+    var sent = grid && grid.querySelector('.pw-load-more-sentinel');
+    if (!sent) return;
+    var ind = sent.querySelector('.pw-load-more-indicator');
+    if (ind) ind.textContent = text;
+    sent.classList.toggle('pw-load-more-error', !!retryable);
+  }
+
+  function observeAppendedImages(grid){
+    if (!grid) return;
+    var imgs = grid.querySelectorAll('.photo-wall-item img.pw-blur-in[data-src]');
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      if (img._pwObserved) continue;
+      img._pwObserved = true;
+      if (imgObserver) imgObserver.observe(img);
+      else queueImage(img);
+    }
+    pumpImages();
+  }
+
+  function appendNewPhotoCards(grid, list, domIds){
+    var existingCount = domIds.length;
+    var newOnes = list.slice(existingCount);
+    if (!newOnes.length) { resetSentinelText(grid, '加载更多...', false); return; }
+    var html = photoCardHtml(newOnes, existingCount);
+    var sentinel = grid.querySelector('.pw-load-more-sentinel');
+    if (sentinel && sentinel.parentNode === grid) {
+      sentinel.insertAdjacentHTML('beforebegin', html);
+    } else {
+      grid.insertAdjacentHTML('beforeend', html);
+    }
+    // 不重放 stagger 动画：立即结算新增卡片（移除 enter 类，避免插入即播放动画）
+    var newCards = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
+    for (var k = 0; k < newCards.length; k++) {
+      newCards[k].classList.add('pw-stagger-done');
+      newCards[k].classList.remove('pw-stagger-enter');
+    }
+    observeAppendedImages(grid);
+    resetSentinelText(grid, '加载更多...', false);
+  }
+
+  function appendPhotoWallMore(){
+    var grid = document.getElementById('photoGrid');
+    if (!grid) return;
+    var domIds = collectDomPhotoIds(grid);
+    // P6: DOM 数量上限 — 达到后不再追加新卡片，标记已到末尾
+    if (domIds.length >= MAX_DOM_PHOTOS) {
+      resetSentinelText(grid, '暂无更多', false);
+      if (loadMoreObserver) loadMoreObserver.disconnect();
+      return;
+    }
+    var key = window.pwSortKey || 'date_desc';
+    var sortedAll = sortPhotoWallData(window.photoWallData || [], key);
+
+    if (!window.pwAlbumView) {
+      if (!sortedPrefixMatches(sortedAll, domIds)) { renderSorted(sortedAll); return; }
+      window.pwCurrentSortedPhotos = sortedAll.slice();
+      appendNewPhotoCards(grid, sortedAll, domIds);
+      return;
+    }
+    if (window.pwAlbumGroupKey) {
+      var groups = groupByDate(sortedAll);
+      var group = groups.find(function(g){ return g.key === window.pwAlbumGroupKey; });
+      if (!group || !sortedPrefixMatches(group.photos, domIds)) { renderSorted(sortedAll); return; }
+      window.pwCurrentSortedPhotos = group.photos.slice();
+      appendNewPhotoCards(grid, group.photos, domIds);
+      return;
+    }
+    // 相册视图：新照片可能构成新相册组，走全量重建（相册卡片数量远小于照片卡片）
+    renderSorted(sortedAll);
+  }
+
   function renderSorted(photos){
     var grid = document.getElementById('photoGrid');
     if (!grid) return;
@@ -438,7 +586,7 @@
           : emptyHtml();
         return;
       }
-      grid.innerHTML = photoCardHtml(photos, 0);
+      grid.innerHTML = photoCardHtml(photos.slice(0, MAX_DOM_PHOTOS), 0);
       revealCards(grid);
       observeImages(grid);
       installLoadMoreSentinel(grid);
@@ -465,7 +613,7 @@
     }
 
     window.pwCurrentSortedPhotos = group.photos.slice();
-    grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" onclick="openPhotoAlbumGroup(\'\')">返回相册</button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos, 0);
+    grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" onclick="openPhotoAlbumGroup(\'\')">返回相册</button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos.slice(0, MAX_DOM_PHOTOS), 0);
     revealCards(grid);
     observeImages(grid);
     // H-33: 相册分组详情页同样需要哨兵，滚动到底继续加载更多照片

@@ -33,6 +33,14 @@
 
   function byId(id){ return document.getElementById(id); }
 
+  // P6: 拼接 URL 时统一去除 API_BASE 尾斜杠，避免 //api 偶发 404（与 upload-ui.js 一致）
+  function apiUrl(path) {
+    var base = (typeof window.API_BASE === 'string' && window.API_BASE)
+      ? window.API_BASE.replace(/\/$/, '')
+      : '';
+    return base + path;
+  }
+
   function toast(message){
     if (typeof window.showToast === 'function') window.showToast(message);
     else console.log('[PhotoWall]', message);
@@ -242,7 +250,7 @@
         if (externalSignal.aborted) throw createPhotoAbortError();
         externalSignal.addEventListener('abort', onAbort);
       }
-      var resp = await fetch((window.API_BASE || '') + '/api/photos/public?page=' + page + '&limit=' + limit, { signal: controller.signal });
+      var resp = await fetch(apiUrl('/api/photos/public?page=' + page + '&limit=' + limit), { signal: controller.signal });
       // P5: 如果 generation 已变化（被新请求替代），丢弃结果
       if (!isCurrentRequest()) throw createPhotoAbortError();
       var result = await resp.json();
@@ -469,7 +477,7 @@
     var controller = new AbortController();
     var timeoutId = setTimeout(function() { controller.abort(); }, 20000);
     try {
-      var response = await fetch((window.API_BASE || '') + '/api/photo/delete', {
+      var response = await fetch(apiUrl('/api/photo/delete'), {
         method: 'POST',
         headers: Object.assign({ 'Content-Type':'application/json' }, authHeaders || {}),
         body: JSON.stringify({ photoId:id }),
@@ -486,7 +494,7 @@
         try {
           var statusController = new AbortController();
           var statusTimeoutId = setTimeout(function() { statusController.abort(); }, 12000);
-          var statusResponse = await fetch((window.API_BASE || '') + '/api/photo/delete-status?photo_id=' + encodeURIComponent(id), {
+          var statusResponse = await fetch(apiUrl('/api/photo/delete-status?photo_id=' + encodeURIComponent(id)), {
             method: 'GET',
             headers: Object.assign({}, authHeaders || {}),
             signal: statusController.signal

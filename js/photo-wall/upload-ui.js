@@ -266,7 +266,7 @@
           var controller = new AbortController();
           var timeoutId = setTimeout(function() { controller.abort(); }, 15000);
           var authHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-          var resp = await fetch((window.API_BASE || '') + '/api/photo/status', {
+          var resp = await fetch(apiUrl('/api/photo/status'), {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
             body: JSON.stringify({ upload_id: entry.uploadId }),
@@ -295,7 +295,7 @@
               _cleanupInProgress[entry.uploadId] = cleanupToken;
               try {
                 var cleanupAuthHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-                var cleanupResp = await fetch((window.API_BASE || '') + '/api/photo/cleanup', {
+                var cleanupResp = await fetch(apiUrl('/api/photo/cleanup'), {
                   method: 'POST',
                   headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupAuthHeaders || {}),
                   body: JSON.stringify({ path: entry.path, upload_id: entry.uploadId })
@@ -373,7 +373,7 @@
           controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
           timeoutId = controller ? setTimeout(function() { controller.abort(); }, 15000) : null;
           var authHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-          var resp = await fetch((window.API_BASE || '') + '/api/photo/status', {
+          var resp = await fetch(apiUrl('/api/photo/status'), {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
             body: JSON.stringify({ upload_id: entry.uploadId }),
@@ -391,7 +391,7 @@
               var cleanupTimeoutId = cleanupController ? setTimeout(function() { cleanupController.abort(); }, 15000) : null;
               try {
                 var cleanupAuthHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-                var cleanupResp = await fetch((window.API_BASE || '') + '/api/photo/cleanup', {
+                var cleanupResp = await fetch(apiUrl('/api/photo/cleanup'), {
                   method: 'POST',
                   headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupAuthHeaders || {}),
                   body: JSON.stringify({ path: entry.path, upload_id: entry.uploadId }),
@@ -732,6 +732,101 @@
     openSheet(c.accepted, c.skipped);
   }
 
+  // P6: 上传前图片预处理 — 压缩 + EXIF 方向矫正
+  // - GIF 动图保持原样（不压缩）
+  // - <200KB 小图跳过压缩，仅在 createImageBitmap 可用时尝试矫正 EXIF 方向
+  // - 优先 createImageBitmap({imageOrientation:'from-image'}) 自动矫正 EXIF 方向；
+  //   不支持时回退 Image+objectURL（仅压缩、不矫正方向）
+  // - 长边 > 2048 等比缩到 2048，canvas.toBlob('image/jpeg', 0.8)；PNG 输出 PNG
+  function scaleImageToCanvas(source, maxSide){
+    var max = maxSide || 2048;
+    var w = source.width || source.naturalWidth || 1;
+    var h = source.height || source.naturalHeight || 1;
+    var longest = Math.max(w, h);
+    var scale = (longest > max) ? (max / longest) : 1;
+    var cw = Math.max(1, Math.round(w * scale));
+    var ch = Math.max(1, Math.round(h * scale));
+    var canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    var ctx = canvas.getContext('2d');
+    if (ctx) ctx.drawImage(source, 0, 0, cw, ch);
+    return canvas;
+  }
+
+  function canvasToBlob(canvas, mimeType){
+    return new Promise(function(resolve, reject){
+      try {
+        canvas.toBlob(function(blob){ blob ? resolve(blob) : reject(new Error('canvas_to_blob_failed')); }, mimeType, 0.8);
+      } catch (e) { reject(e); }
+    });
+  }
+
+  function preprocessImageFile(file){
+    return new Promise(function(resolve){
+      if (!isImage(file)) return resolve(file);
+      var type = String(file.type || '').toLowerCase();
+      if (type === 'image/gif') return resolve(file); // GIF 动图不压缩
+      var isSmall = Number(file.size) < 200 * 1024;
+      var outMime = (type === 'image/png') ? 'image/png' : 'image/jpeg';
+
+      // 编码后体积大于原图时保留原图；keepEvenIfLarger 用于小图方向矫正场景
+      function toProcessed(blob, keepEvenIfLarger){
+        if (!blob || !blob.size) return file;
+        if (!keepEvenIfLarger && blob.size >= file.size) return file;
+        if (blob.type === outMime) return blob;
+        try { return new Blob([blob], { type: outMime }); } catch (_) { return blob; }
+      }
+
+      function encodeFrom(source, cap, keepEvenIfLarger){
+        try {
+          var canvas = scaleImageToCanvas(source, cap);
+          return canvasToBlob(canvas, outMime).then(function(blob){
+            return toProcessed(blob, keepEvenIfLarger);
+          }, function(){ return file; });
+        } catch (_) { return Promise.resolve(file); }
+      }
+
+      function fallbackCompress(){
+        // 无 createImageBitmap：仅压缩、不矫正方向（旧浏览器）
+        if (isSmall) return Promise.resolve(file);
+        var url = null;
+        try { url = URL.createObjectURL(file); } catch (_) { return Promise.resolve(file); }
+        var img = new Image();
+        return new Promise(function(resolveImg){
+          img.onload = function(){
+            URL.revokeObjectURL(url);
+            encodeFrom(img, 2048, false).then(resolveImg);
+          };
+          img.onerror = function(){ URL.revokeObjectURL(url); resolveImg(file); };
+          img.src = url;
+        });
+      }
+
+      if (!(window.createImageBitmap && typeof window.createImageBitmap === 'function')) {
+        resolve(fallbackCompress());
+        return;
+      }
+      var bitmapPromise;
+      try { bitmapPromise = Promise.resolve(createImageBitmap(file, { imageOrientation: 'from-image' })); }
+      catch (_) { resolve(fallbackCompress()); return; }
+      bitmapPromise.then(function(bitmap){
+        try {
+          var maxSide = isSmall ? Math.max(bitmap.width, bitmap.height) : 2048;
+          encodeFrom(bitmap, maxSide, isSmall).then(function(result){
+            if (bitmap.close) try { bitmap.close(); } catch (_) {}
+            resolve(result);
+          });
+        } catch (_) {
+          if (bitmap.close) try { bitmap.close(); } catch (_) {}
+          resolve(file);
+        }
+      }, function(){
+        resolve(fallbackCompress());
+      });
+    });
+  }
+
   async function uploadOnePhotoWallFile(job, signal){
     var file = job.file;
     var uploadId = job.uploadId;
@@ -740,10 +835,20 @@
     if (!Number.isFinite(Number(file.size)) || Number(file.size) > MAX_PHOTO_UPLOAD_BYTES) throw createPhotoUploadError('file_too_large');
     var path = 'photos/' + safeFileName(file, inferExt(file), uploadId);
     job.storagePath = path;
+    var uploadFile = file;
     var type = isImage(file) && file.type ? file.type : 'image/jpeg';
+    // P6: 压缩 + 方向矫正，失败时静默回退原图直传（storage path/文件名不变）
+    if (isImage(file)) {
+      try {
+        var processed = await preprocessImageFile(file);
+        if (processed && processed !== file) uploadFile = processed;
+      } catch (_) {}
+      if (uploadFile && uploadFile.type) type = uploadFile.type;
+    }
+    if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
     var upload;
     try {
-      upload = await window.sb.storage.from('uploads').upload(path, file, {
+      upload = await window.sb.storage.from('uploads').upload(path, uploadFile, {
         contentType: type, cacheControl: '31536000', upsert: false,
         // P4: pass the AbortController signal so that cancelCurrentUpload()
         // truly aborts the in-flight Storage network request, instead of
@@ -782,7 +887,7 @@
         body: JSON.stringify({
           media_url: publicUrl,
           upload_id: uploadId,
-          file_size: file.size || 0,
+          file_size: uploadFile.size || file.size || 0,
           original_size: file.size || 0,
           mime_type: type
         }),
@@ -919,7 +1024,14 @@
         processed += 1; ok += 1; job.status = 'success'; job.succeeded = true; job.result = row;
         onProgress && onProgress(processed, ok, fail);
       }, function(err){
-        processed += 1; fail += 1; job.status = 'failed'; job.error = err;
+        processed += 1;
+        // P6: 用户取消不计失败、不进 failedJobs，只有真实错误才记失败
+        var isCancel = state.cancelRequested || !!(err && (err.photoUploadCode === 'cancelled' || err.name === 'AbortError'));
+        if (isCancel) {
+          job.status = 'cancelled'; job.error = null;
+        } else {
+          fail += 1; job.status = 'failed'; job.error = err;
+        }
         onProgress && onProgress(processed, ok, fail);
       }).then(runOne);
     }
@@ -1052,7 +1164,7 @@
       var statusData = null;
       try {
         var statusHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-        var statusResp = await fetch((window.API_BASE || '') + '/api/photo/status', {
+        var statusResp = await fetch(apiUrl('/api/photo/status'), {
           method: 'POST',
           headers: Object.assign({ 'Content-Type': 'application/json' }, statusHeaders || {}),
           body: JSON.stringify({ upload_id: j.uploadId })
@@ -1092,7 +1204,7 @@
       if (j.storagePath) {
         try {
           var cleanupHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-          var cleanupResp = await fetch((window.API_BASE || '') + '/api/photo/cleanup', {
+          var cleanupResp = await fetch(apiUrl('/api/photo/cleanup'), {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupHeaders || {}),
             body: JSON.stringify({ path: j.storagePath, upload_id: j.uploadId })
