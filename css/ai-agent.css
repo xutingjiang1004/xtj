@@ -2818,6 +2818,9 @@
 
 [data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
   border-color: rgba(127, 187, 172, 0.12);
+  /* 显式锁定深底浅字，保证任何容器继承下回复都清晰可读 */
+  color: #eef6f3;
+  background: linear-gradient(135deg, rgba(30, 38, 44, 0.95), rgba(37, 47, 55, 0.92));
 }
 
 [data-theme="dark"] .ai-msg-footer .ai-msg-usage {

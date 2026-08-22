@@ -627,6 +627,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   var AI_FILE_MAX_BYTES = 7 * 1024 * 1024;
+  /* 照片附件优化：大图客户端压缩降采样后再附加。
+     源文件上限放宽到 50MB（与照片墙一致），不再被 7MB 卡的难受；
+     同时压缩后的 DataURL 体积远低于后端 12MB 请求体上限。 */
+  var AI_IMAGE_NOCOMPRESS_BYTES = 2 * 1024 * 1024;   // 小于该值不压缩
+  var AI_IMAGE_SOURCE_MAX_BYTES = 50 * 1024 * 1024;  // 源图片大小上限
+  var AI_IMAGE_MAX_SIDE = 1600;                      // 压缩后最大边长
+  var AI_IMAGE_QUALITY = 0.85;                       // JPEG 质量
 
   function normalizeAiAttachmentFile(file) {
     if (!file) return null;
