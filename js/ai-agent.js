@@ -7117,7 +7117,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           assistantBubble.style.opacity = '1';
           assistantBubble.style.display = 'block';
           assistantBubble.style.visibility = 'visible';
-          assistantBubble.style.color = '#1f2937';
+          // ★ 修复：不要内联写死气泡文字颜色。CSS 已用 `color: var(--ai-text)` 随主题切换
+          //   （浅色 #223130 / 深色 #edf2ef），这里之前写死 '#1f2937' 会覆盖暗色模式变量，
+          //   导致深色背景下回复文字对比度不足看不清。
+          assistantBubble.style.removeProperty('color');
           assistantBubble.style.fontSize = '14px';
         }
         setAiRootState('ai-idle');
