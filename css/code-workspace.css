@@ -3178,7 +3178,8 @@
 }
 .code-resizer:hover::before,
 .code-resizer.is-resizing::before {
-  background: #fff;
+  /* ★ 修复：改为主题变量，浅色主题下纯白手柄在近白背景上不可见 */
+  background: var(--cw-accent);
 }
 
 .code-resizer:focus-visible {

@@ -1882,7 +1882,9 @@
     if (state._isReadOnly) {
       var banner = document.createElement('div');
       banner.className = 'code-readonly-banner';
-      banner.style.cssText = 'background:#fff3cd;color:#856404;padding:8px 12px;font-size:12px;text-align:center;border-bottom:1px solid var(--cw-border);';
+      // ★ 修复：移除硬编码浅黄配色，改由 .code-readonly-banner 主题变量控制，
+      //   避免深色模式下出现突兀亮黄横条
+      banner.style.cssText = 'padding:8px 12px;font-size:12px;text-align:center;border-bottom:1px solid var(--cw-border);';
       banner.innerHTML = '当前浏览器使用只读文件夹模式。可以查看和分析文件，但不能直接保存修改。建议使用最新版 Chrome 或 Edge 获得完整读写能力。';
       shell.appendChild(banner);
     }
@@ -7798,9 +7800,21 @@
                 retryBody: Object.assign({}, ctx.originalBody || body),
                 toolTrace: (Array.isArray(finalToolTrace) && finalToolTrace.length) ? finalToolTrace : streamToolTrace
               });
-              // Keep provider codes and raw diagnostics out of the visible
-              // message; they remain available through errorCode/details.
-              state.messages[state.messages.length - 1].content = streamErrorContent;
+              // ★ 修复：此前无条件用通用文案覆盖 content，导致服务端返回的
+              //   可读原因（如配额/限流/文档解析的具体 message）被吞掉。
+              //   现保留友好映射文案，如存在非默认 errMsg 则一并展示，避免用户
+              //   只看到"请稍后重试"而不知具体失败原因。provider 原始 code 仍走
+              //   errorCode 字段并可在详情展开。
+              var hasFriendlyMapping = streamErrorContent !== 'AI 请求失败，请稍后重试。';
+              var finalErrorContent;
+              if (errMsg && errMsg !== '请求失败') {
+                finalErrorContent = hasFriendlyMapping
+                  ? (streamErrorContent + ' [' + errCode + '] ' + errMsg)
+                  : ('抱歉，[' + errCode + '] ' + errMsg);
+              } else {
+                finalErrorContent = streamErrorContent;
+              }
+              state.messages[state.messages.length - 1].content = finalErrorContent;
               cleanupStream();
               finalizeRequest(ctx, { error: errMsg, errorCode: errCode });
               // The streaming node already contains the error UI. Reconcile

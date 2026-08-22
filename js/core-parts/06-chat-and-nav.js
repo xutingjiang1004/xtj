@@ -667,17 +667,33 @@
             }
 
             function mergeDockChatMessages(userName, msgs) {
+                // ★ 修复：发送成功会把乐观消息替换成服务端真实消息（不再带 __optimistic）。
+                //   此前该函数只保留带 __optimistic 的缓存消息，若此刻刚好有「更早快照」的
+                //   /api/dm/messages 请求在途并写回缓存，刚提交的新消息会从会话里消失。
+                //   现改为：以服务端快照为底，把缓存中仍缺失的「乐观消息」以及「比快照更近
+                //   （窗口期新提交）的非乐观消息」按 id 合并回去，避免发送成功即丢失。
                 var cacheKey = getDockChatCacheKey(userName);
-                var optimisticMsgs = ((_chatCache[cacheKey] || []).filter(function(m) {
-                    return m && m.__optimistic;
-                }));
-                if (!optimisticMsgs.length) return sortDockChatMessages(msgs || []);
-                var merged = (msgs || []).slice();
-                optimisticMsgs.forEach(function(msg) {
+                var cached = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
+                var snapshot = (msgs || []).slice();
+                // 快照为空时以快照为准，避免整段恢复已删除/过期缓存
+                if (!snapshot.length) return sortDockChatMessages(snapshot);
+                var snapshotNewestAt = 0;
+                var lastMsg = snapshot[snapshot.length - 1];
+                if (lastMsg && lastMsg.created_at) {
+                    var lastTs = Date.parse(lastMsg.created_at);
+                    if (!isNaN(lastTs)) snapshotNewestAt = lastTs;
+                }
+                var merged = snapshot.slice();
+                cached.forEach(function(msg) {
+                    if (!msg || !msg.id) return;
                     var exists = merged.some(function(existing) {
-                        return existing && msg && existing.id && msg.id && existing.id === msg.id;
+                        return existing && existing.id && msg.id && existing.id === msg.id;
                     });
-                    if (!exists) merged.push(msg);
+                    if (exists) return; // 快照已是服务端权威
+                    if (msg.__optimistic) { merged.push(msg); return; }
+                    var ts = msg.created_at ? Date.parse(msg.created_at) : NaN;
+                    // 仅合并比快照新（发送成功后才落库的窗口期消息），不复活旧历史
+                    if (!isNaN(ts) && ts >= snapshotNewestAt) merged.push(msg);
                 });
                 return sortDockChatMessages(merged);
             }
@@ -725,7 +741,7 @@
             function buildDockChatBodyMarkup(message) {
                 var payload = getDMMessagePayload(message);
                 if (payload && payload.withdrawn) {
-                    return '<span class="msg-text withdrawn" style="color: #999; font-style: italic;">[此消息已被撤回]</span>';
+                    return '<span class="msg-text withdrawn">[此消息已被撤回]</span>';
                 }
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);

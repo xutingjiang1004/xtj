@@ -367,15 +367,20 @@
                             if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
                                 showNotification(m.user_name, getDockChatMessagePreview(m));
                             }
-                            window.dockChatListCacheTime = 0;
-                            if (dockChatActiveUser && dockChatActiveUser === otherUser) {
-                                loadDockChatMessages(otherUser, false);
-                            } else if (!dockChatActiveUser) {
-                                window.dockChatListCacheTime = 0;
-                                loadDockChatList();
-                                updateUnreadBadge();
-                            } else {
-                                updateUnreadBadge();
+                            window.dockChatListCacheTime = 0;
+                            if (dockChatActiveUser && dockChatActiveUser === otherUser) {
+                                loadDockChatMessages(otherUser, false);
+                            } else if (!dockChatActiveUser) {
+                                window.dockChatListCacheTime = 0;
+                                loadDockChatList();
+                                updateUnreadBadge();
+                            } else {
+                                // ★ 修复：正在看 A 的会话、B 发来新消息时，仅加未读数不刷新
+                                //   会话列表，导致列表排序/预览/B 红点停留在旧快照。缓存已失效，
+                                //   这里补一次列表刷新，回到列表页即可看到最新会话。
+                                window.dockChatListCacheTime = 0;
+                                loadDockChatList();
+                                updateUnreadBadge();
                             }
                         })
                         .subscribe(function(status, err) {
