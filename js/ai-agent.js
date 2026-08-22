@@ -8847,20 +8847,53 @@ function showChatMessages() {
     }
     // ★ 生图服务地址：优先读前端配置 AI_IMAGE_GEN_BASE（可替换为自有服务），
     //   未配置时回退内置默认地址。
-    function genImageApiUrl(prompt) {
+    function genImageApiUrl(prompt, bust) {
       var base = '';
       try { base = (window.XTJ_CONFIG && window.XTJ_CONFIG.AI_IMAGE_GEN_BASE) || ''; } catch (e) {}
       if (!base || typeof base !== 'string') base = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image';
       base = base.replace(/\/+$/, '');
-      return base + '?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd';
+      var q = '?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd';
+      // 重试时追加随机参数绕过浏览器缓存的「generating…」占位图，取回服务器端成图
+      if (bust) q += '&_r=' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+      return base + q;
     }
     // ★ 生成图片（预载验证可用性后回调）
-    function loadGenImage(prompt, onOk, onErr) {
-      var url = genImageApiUrl(prompt);
+    // 修复：生图服务对同一 URL 可能先返回「The image is generating... Please refresh
+    // page to preview.」这类占位图，稍后才在同一 URL 返回成图。原实现把占位图当作
+    // 成功结果直接塞进卡片，用户只能手动刷新才看到真图。这里对同一 URL 做有限次重试，
+    // 让成图尽快落地；仍拿不到（占位或连不上）再回调失败/成功交由调用方处理。
+    function loadGenImage(prompt, onOk, onErr, attempt) {
+      attempt = attempt || 0;
+      // 重试时带缓存穿透参数，确保每次都真正请求服务端成图而非命中的占位图缓存
+      var url = genImageApiUrl(prompt, attempt > 0);
       var img = new Image();
       var done = false;
-      img.onload = function() { if (!done) { done = true; onOk(url); } };
-      img.onerror = function() { if (!done) { done = true; onErr(); } };
+      var timer = null;
+      img.onload = function() {
+        if (done) return;
+        if (attempt < 4) {
+          timer = setTimeout(function() {
+            if (done) return;
+            loadGenImage(prompt, onOk, onErr, attempt + 1);
+          }, 500);
+          return;
+        }
+        done = true;
+        if (timer) clearTimeout(timer);
+        onOk(url);
+      };
+      img.onerror = function() {
+        if (done) return;
+        if (attempt < 3) {
+          timer = setTimeout(function() {
+            if (done) return;
+            loadGenImage(prompt, onOk, onErr, attempt + 1);
+          }, 400);
+          return;
+        }
+        done = true;
+        onErr();
+      };
       img.src = url;
     }
     function openImageGenModal() {
