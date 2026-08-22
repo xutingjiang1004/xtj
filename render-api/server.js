@@ -14749,6 +14749,33 @@ app.post('/api/agent/invite/redeem', authenticateUser, async (req, res) => {
       };
       return res.json({ ok: false, reason: data.reason, message: msgMap[data.reason] || '邀请码无效' });
     }
+    // ★ 修复：新邀请码首次激活后重置「今日已用额度」，让新码的开通额度立即生效。
+    //   此前 redeem_ai_invite_code 只更新会员档位/额度上限，不清除当日 ai_user_quota_daily
+    //   已用量，导致日额度用尽后即便换新码激活仍被 check_ai_token_quota 判为不足。
+    //   只对「首次激活（非幂等 already_redeemed）」生效，防重放。
+    if (data.ok && !data.already_redeemed && req.userName) {
+      try {
+        var resetDay = await supabase.rpc('ai_quota_shanghai_day');
+        var resetDayVal = (resetDay && resetDay.data) ? resetDay.data : null;
+        if (resetDayVal) {
+          await supabase
+            .from('ai_user_quota_daily')
+            .delete()
+            .eq('user_name', String(req.userName).trim().toLowerCase())
+            .eq('day_key', resetDayVal);
+          // 重置后重取额度，返回给前端的剩余额度基于新档位
+          var freshQuota = await aiQuota.getQuota(String(req.userName).trim());
+          if (freshQuota) {
+            var q2 = aiQuota.normalizeQuotaPayload(data);
+            freshQuota.consumed_tokens = q2.consumed_tokens;
+            freshQuota.consumed_search = q2.consumed_search;
+            data = Object.assign({}, data, freshQuota);
+          }
+        }
+      } catch (eReset) {
+        console.warn('[INVITE] reset daily quota failed (non-fatal):', eReset && eReset.message);
+      }
+    }
     var quota = aiQuota.normalizeQuotaPayload(data);
     return res.json({
       ok: true,
