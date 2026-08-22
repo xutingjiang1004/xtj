@@ -2379,10 +2379,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     // V6: 流水跟包 — 高吞吐 + 积压追赶，避免打字机一顿一顿
     var lastFrameTime = 0;
-    // ~180–240 字/秒量级；plain 思考略慢仍远高于旧 0.55
+    // 以网络到达为准：最大程度跟上 DeepSeek 输出节奏；积压追赶与 50ms markdown 门限仍防卡顿
     var charsPerMs = options.charsPerMs != null
       ? options.charsPerMs
-      : (options.plainStream ? 2.2 : 3.2);
+      : 100;
     // plainStream 模式：单文本节点复用，避免每帧 createTextNode 触发 reflow
     var plainTextNode = null;
     var plainTextBuffer = '';
@@ -4571,7 +4571,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } else {
           if (contentRendererRef.value) { try { contentRendererRef.value.stop(); } catch (e8) {} }
           answerEl.innerHTML = '';
-          contentRendererRef.value = createSmoothTextRenderer(answerEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 3.4, onDone: function() { finalizeAnswer(); } });
+          contentRendererRef.value = createSmoothTextRenderer(answerEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100, onDone: function() { finalizeAnswer(); } });
           contentRendererRef.value.append(contentForRender);
           contentRendererRef.value.finish(contentForRender);
           contentRendererRef.value = null;
@@ -4732,7 +4732,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var aEl = aiNodeRef.value.querySelector('.ai-think-answer');
           if (aEl && !answerRendererRef.value) {
             aEl.innerHTML = '';
-            answerRendererRef.value = createSmoothTextRenderer(aEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 3.2, plainStream: true });
+            answerRendererRef.value = createSmoothTextRenderer(aEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100, plainStream: true });
           }
           if (!contentTruncated && aiContentRef.value.length >= AI_CONTENT_MAX_LEN) {
             contentTruncated = true;
@@ -5143,7 +5143,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
             answerEl.innerHTML = '';
             contentRenderer = createSmoothTextRenderer(answerEl, {
-              minChunk: 8, maxChunk: 64, charsPerMs: 3.4,
+              minChunk: 8, maxChunk: 64, charsPerMs: 100,
               onDone: function() { finalizeAnswer(); }
             });
             contentRenderer.append(contentForRender);
@@ -5830,7 +5830,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
             answerEl.innerHTML = '';
             contentRenderer = createSmoothTextRenderer(answerEl, {
-              channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 3.4,
+              channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100,
               onDone: function() { finalizeAnswer(); }
             });
             contentRenderer.append(contentForRender);
@@ -7295,7 +7295,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           contentRenderer = createSmoothTextRenderer(assistantBubble, {
             minChunk: 8,
             maxChunk: 64,
-            charsPerMs: 3.4,
+            charsPerMs: 100,
             streamClass: 'ai-streaming-soft',
             onRender: function() {
               scrollToBottom(messagesEl, false);
@@ -7759,7 +7759,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 reasoningRenderer = createSmoothTextRenderer(body, {
                 minChunk: 6,
                 maxChunk: 48,
-                charsPerMs: 2.6,
+                charsPerMs: 100,
                 plainStream: true,
                 onRender: function() {
                   scrollToBottom(messagesEl, false);

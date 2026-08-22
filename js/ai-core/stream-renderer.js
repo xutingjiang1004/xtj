@@ -39,7 +39,7 @@
     var lastFrameTime = 0;
     var charsPerMs = options.charsPerMs != null
       ? options.charsPerMs
-      : (options.plainStream ? 2.2 : 3.2);
+      : 100;
     // plainStream mode: reuse single text node to avoid per-frame reflow
     var plainTextNode = null;
     var plainTextBuffer = '';
