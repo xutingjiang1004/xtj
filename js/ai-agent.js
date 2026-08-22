@@ -8112,6 +8112,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var msgs = r.data.messages || [];
       // ★ 历史图片消息：把后端带回来的 vision_urls 转成 attachments，
       //   供「重新生成」时复用原图（历史/刷新后加载的图片消息同样可重新生成）。
+      //   ★ 修 bug：图片消息在历史里应渲染为真实图片，而不是内部占位标签 + 服务端注入说明。
       msgs = msgs.map(function(m) {
         if (m && m.role === 'user' && Array.isArray(m.vision_urls) && m.vision_urls.length) {
           var atts = m.vision_urls.map(function(url, ui) {
@@ -8121,6 +8122,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             return { name: '图片' + (ui + 1), type: mime, data_url: url };
           });
           m.attachments = atts;
+          // 清掉 [图片:...]/[文件:...] 内部标签与【用户上传…→【文件结束】/OCR 注入文本，
+          // 保留用户真实文字，再用 vision_urls 重建 markdown 图片（与 live 会话 displayText 一致）。
+          var visualText = String(m.content || '')
+            .replace(/\[图片:[^\]]*\]/g, ' ')
+            .replace(/\[文件:[^\]]*\]/g, ' ')
+            .replace(/\[📄[^\]]*\]/g, ' ')
+            .replace(/【用户上传文件:[\s\S]*?【文件结束】/g, ' ')
+            .replace(/【用户上传图片的可读文字[\s\S]*?--- 图片文字结束 ---/g, ' ')
+            .replace(/【用户上传图片 ·[\s\S]*?(?=【|$)/g, ' ')
+            .replace(/【图片 OCR[\s\S]*?(?=【|$)/g, ' ')
+            .replace(/!\[[^\]]*\]\(data:[^)]+\)/g, ' ')
+            .replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          var imgMarkdown = atts.map(function(a, i) { return '![图片' + (i + 1) + '](' + a.data_url + ')'; }).join('\n');
+          m.content = (visualText ? visualText + '\n' : '') + imgMarkdown;
         }
         return m;
       });
