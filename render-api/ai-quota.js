@@ -38,7 +38,13 @@ function computeBillableTokens(usage, opts) {
   var total = Math.max(0, Math.floor(Number(usage.total_tokens) || 0));
   var sumParts = prompt + completion + reasoning;
   if (total > 0 || sumParts > 0) {
-    return Math.max(total, sumParts);
+    // 仅当 provider 同时给出 total 时以 total 为准。OpenAI/DeepSeek 兼容接口的
+    // total_tokens 已 = prompt + completion，且 completion 已包含 reasoning_tokens
+    //（reasoning 是 completion 的子字段）。若这里取 Math.max(total, sumParts)，
+    // sumParts = prompt+completion+reasoning = total+reasoning 恒大于 total，
+    // 会按 thinking 数量重复扣费、导致额度提前耗尽。因此采用 total；仅当缺失
+    // total 时才退回 prompt+completion+reasoning 兜底。
+    return total > 0 ? total : sumParts;
   }
   // Fallback only when provider omitted usage entirely (should be rare).
   var msg = String(opts.message || '');

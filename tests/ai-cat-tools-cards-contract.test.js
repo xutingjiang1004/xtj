@@ -20,7 +20,8 @@ test('read_web_page tool is registered and executed with SSRF-safe fetch', () =>
   assert.match(server, /require\('\.\/web-fetch'\)/);
   assert.match(webFetch, /function fetchSafeWebPage/);
   assert.match(webFetch, /isPrivateAddress/);
-  assert.match(webFetch, /仅支持 HTTPS/);
+  // 契约：仅允许 HTTP/HTTPS（且带 SSRF 锁定），与实现一致
+  assert.match(webFetch, /仅支持 HTTP\/HTTPS 链接/);
   // Critical: Node dns.lookup requires callback — must use dns.promises.lookup
   assert.match(webFetch, /dns\.promises\.lookup|defaultDnsLookup/);
   assert.doesNotMatch(webFetch, /lookupImpl \|\| dns\.lookup/);

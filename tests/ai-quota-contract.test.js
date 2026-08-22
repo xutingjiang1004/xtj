@@ -14,25 +14,36 @@ const migration = fs.readFileSync(
   'utf8'
 );
 
-test('billable tokens include prompt + completion + reasoning and never undercount total', () => {
+test('billable tokens prefer provider total and never double-count reasoning', () => {
+  // 无 total 时按 prompt + completion + reasoning 兜底
   assert.equal(quotaMod.computeBillableTokens({
     prompt_tokens: 100,
     completion_tokens: 50,
     reasoning_tokens: 30
   }), 180);
 
+  // 有 total 时以 total 为准（total 属优先口径）
   assert.equal(quotaMod.computeBillableTokens({
     prompt_tokens: 100,
     completion_tokens: 50,
     total_tokens: 200
   }), 200);
 
+  // OpenAI/DeepSeek 兼容：total 已含 completion(含 reasoning)，不能把 reasoning 再加一遍。
+  // 旧实现 Math.max(total, prompt+completion+reasoning) 会按 total+reasoning 重复扣费。
+  assert.equal(quotaMod.computeBillableTokens({
+    prompt_tokens: 100,
+    completion_tokens: 50,
+    reasoning_tokens: 30,
+    total_tokens: 150
+  }), 150);
+
   assert.equal(quotaMod.computeBillableTokens({
     prompt_tokens: 10,
     completion_tokens: 5,
     reasoning_tokens: 20,
     total_tokens: 15
-  }), 35);
+  }), 15);
 
   // fallback estimate when provider omits usage
   var est = quotaMod.computeBillableTokens(null, {

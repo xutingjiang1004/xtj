@@ -1099,7 +1099,7 @@ async function executeToolCall(toolCall, context) {
           time_range: ['day', 'week', 'month', 'year'].indexOf(args.time_range) >= 0 ? args.time_range : null,
           topic: args.topic === 'news' ? 'news' : null
         });
-        if (tavilyResult.error) return { tool_name: name, query: tq, error: tavilyResult.error };
+        if (tavilyResult.error) return { tool_name: name, query: tq, error: '网页搜索服务暂时不可用' };
         var tArr = tavilyResult.results || [];
         var tItems = tArr.slice(0, 10).map(function(r) {
           var tRawUrl = String(r.url || r.link || '');
@@ -1251,7 +1251,7 @@ async function executeToolCall(toolCall, context) {
           cards: [aiSiteCard('exchange_rate', fromCur + ' → ' + toCur, erPayload)]
         };
       } catch (e) {
-        return { tool_name: name, from: fromCur, to: toCur, error: e && e.message || '汇率查询失败' };
+        return { tool_name: name, from: fromCur, to: toCur, error: '汇率服务暂时不可用' };
       }
     }
     case 'get_stock_quote': {
@@ -1370,7 +1370,7 @@ async function executeToolCall(toolCall, context) {
           cards: [aiSiteCard('stock_quote', stockName + ' 行情', sqPayload)]
         };
       } catch (e) {
-        return { tool_name: name, symbol: sym, error: e && e.message || '行情查询失败' };
+        return { tool_name: name, symbol: sym, error: '行情服务暂时不可用' };
       }
     }
     case 'calculate': {
@@ -16259,7 +16259,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         signal: requestAbortCtrl.signal,
         _userName: userName,
         tool_executor: async function(toolCall) {
-          var res = await executeToolCall(toolCall, { userName: userName });
+          // ★ 请求级搜索配额计数：同一请求内多轮工具调用共享计数，防止超发
+          if (!req._searchToolCtx) req._searchToolCtx = { userName: userName, searchConsumed: 0 };
+          var res = await executeToolCall(toolCall, req._searchToolCtx);
           // F-1: 模型驱动 tavily_search 计入请求级搜索调用计数器
           if (res && res.tool_name === 'tavily_search' && !res.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
           if (res && (res.tool_name === 'tavily_search' || res.tool_name === 'get_weather' || res.tool_name === 'get_current_time')) {
@@ -16929,7 +16931,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           try { writeSse(res, { type: 'search_status', status: status }); } catch (e) {}
         },
         tool_executor: async function(toolCall) {
-          var tcResult = await executeToolCall(toolCall, { userName: userName });
+          // ★ 请求级搜索配额计数：同一请求内多轮工具调用共享计数，防止超发
+          if (!req._searchToolCtx) req._searchToolCtx = { userName: userName, searchConsumed: 0 };
+          var tcResult = await executeToolCall(toolCall, req._searchToolCtx);
           // F-1: 模型驱动 tavily_search 计入请求级搜索调用计数器
           if (tcResult && tcResult.tool_name === 'tavily_search' && !tcResult.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
           if (tcResult && (tcResult.tool_name === 'tavily_search' || tcResult.tool_name === 'get_weather' || tcResult.tool_name === 'get_current_time')) {
@@ -17937,7 +17941,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       // 并行执行所有工具
       var toolResults = await Promise.all(toolCallsArr.map(async function(tc) {
         var tcExec = { function: { name: tc.name, arguments: tc.args } };
-        var execResult = await executeToolCall(tcExec, { userName: userName });
+        // ★ 请求级搜索配额计数：同一请求内多轮工具调用共享计数，防止超发
+        if (!req._searchToolCtx) req._searchToolCtx = { userName: userName, searchConsumed: 0 };
+        var execResult = await executeToolCall(tcExec, req._searchToolCtx);
         // F-1: 标准流式路径工具驱动的真实搜索调用计入请求级计数器
         if (execResult && (execResult.tool_name === 'search_web' || execResult.tool_name === 'tavily_search') && !execResult.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
         return { result: execResult, id: tc.id, name: tc.name };
