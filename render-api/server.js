@@ -16407,6 +16407,162 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// POST /api/agent/custom-chat/stream — 自定义第三方模型流式对话
+// 用户在前端「模型」菜单中添加第三方 API Key（千问/豆包/DeepSeek/Kimi/GPT 等
+// OpenAI 兼容接口），密钥仅保存在浏览器 localStorage，本路由不落库。
+// 前端把 { provider, api_key, model, message } 传来，本路由直接以 OpenAI
+// 兼容 chat/completions 流式格式转发，再把 token 转成前端 chat/stream 的
+// SSE 契约（type: content/done/error）。不消耗本站 AI 配额，也不持久化。
+// ─────────────────────────────────────────────────────────────
+app.post('/api/agent/custom-chat/stream', async (req, res) => {
+  var aborted = false;
+  var _heartbeatTimer = null;
+  function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
+  function startHeartbeat() {
+    if (_heartbeatTimer) return;
+    _heartbeatTimer = setInterval(function() {
+      if (res.writableEnded || aborted) { clearHeartbeat(); return; }
+      var lastWrite = res._sseLastWriteAt || 0;
+      if (Date.now() - lastWrite >= 8000) { try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {} }
+    }, 4000);
+  }
+  function safeEnd() {
+    clearHeartbeat();
+    if (!res.writableEnded) res.end();
+  }
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+  req.on('aborted', function() { aborted = true; clearHeartbeat(); });
+  res.on('close', function() { if (!res.writableEnded) aborted = true; });
+
+  var body = (req && req.body) || {};
+  var provider = String(body.provider || '').trim();
+  var apiKey = String(body.api_key || '').trim();
+  var model = String(body.model || '').trim();
+  var message = validateString(body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+  if (message && message.error) { writeSse(res, { type: 'error', error: message.error }); return safeEnd(); }
+  var text = String(body.message || '').trim();
+  if (!provider || !apiKey || !model || !text) {
+    writeSse(res, { type: 'error', error: '缺少自定义模型参数，请重新配置' });
+    return safeEnd();
+  }
+
+  // 预置的 OpenAI 兼容端点（只存 base URL，Key 由用户前端填写）
+  var CUSTOM_ENDPOINTS = {
+    qwen:    { base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',        defaultModel: 'qwen-plus' },
+    doubao:  { base: 'https://ark.cn-beijing.volces.com/api/v3',                   defaultModel: 'doubao-1-5-pro-32k' },
+    deepseek: { base: 'https://api.deepseek.com',                                 defaultModel: 'deepseek-chat' },
+    kimi:    { base: 'https://api.moonshot.cn/v1',                                defaultModel: 'moonshot-v1-8k' },
+    zhipu:   { base: 'https://open.bigmodel.cn/api/paas/v4',                      defaultModel: 'glm-4-flash' },
+    openai:  { base: 'https://api.openai.com/v1',                                 defaultModel: 'gpt-4o-mini' },
+    custom:  { base: '' }
+  };
+  var ep = CUSTOM_ENDPOINTS[provider];
+  var baseUrl = (ep && ep.base) ? ep.base : (String(body.base_url || '').trim());
+  if (!baseUrl) { writeSse(res, { type: 'error', error: '该服务商未配置接口地址' }); return safeEnd(); }
+  baseUrl = baseUrl.replace(/\/+$/, '');
+  var chosenModel = model || (ep && ep.defaultModel) || '';
+
+  // 轻量 SSRF 防护：拒绝指向本机/内网/保留地址的 base_url（防被当作内网代理）。
+  // 只对「自定义(OpenAI兼容)」用户填写的地址生效，不影响预置服务商公网端点。
+  try {
+    var _u = new URL(baseUrl);
+    var _hostname = _u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    var _loopback = _hostname === 'localhost' || _hostname === '::1' || _hostname === '0.0.0.0' || /^127\./.test(_hostname) || /^::ffff:127\./.test(_hostname);
+    var _ipv4 = _hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    var _privateIp = false;
+    if (_ipv4) {
+      var a = Number(_ipv4[1]), b = Number(_ipv4[2]);
+      _privateIp = a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && _ipv4[2] === '254') || a === 0;
+    }
+    if (_loopback || _privateIp) {
+      writeSse(res, { type: 'error', error: '接口地址不允许指向本机或内网地址', code: 'CUSTOM_BAD_BASE_URL' });
+      return safeEnd();
+    }
+  } catch (eUrl) {
+    writeSse(res, { type: 'error', error: '接口地址格式无效', code: 'CUSTOM_BAD_BASE_URL' });
+    return safeEnd();
+  }
+
+  var timeoutMs = Math.max(15000, Math.min(Number(body.timeout_ms) || 120000, 300000));
+  var controller = new AbortController();
+  var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
+  var reqId = String(body.client_request_id || '').slice(0, 64);
+  try {
+    var upstream = await fetch(baseUrl + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify({
+        model: chosenModel,
+        messages: [{ role: 'user', content: text }],
+        stream: true
+      }),
+      signal: controller.signal
+    });
+    if (!upstream.ok) {
+      var errText = '';
+      try { errText = (await upstream.text()).slice(0, 500); } catch (e) {}
+      writeSse(res, { type: 'error', error: '第三方模型请求失败(' + upstream.status + ') ' + errText, code: 'CUSTOM_UPSTREAM_ERROR' });
+      return safeEnd();
+    }
+    if (!upstream.body) { writeSse(res, { type: 'error', error: '第三方模型无响应流' }); return safeEnd(); }
+    startHeartbeat();
+    var reader = upstream.body.getReader();
+    var decoder = new TextDecoder('utf-8');
+    var buf = '';
+    var doneFlag = false;
+    while (!aborted && !doneFlag) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      var lines = buf.split('\n');
+      buf = lines.pop();
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li].trim();
+        if (!line || line.indexOf('data:') !== 0) continue;
+        var data = line.slice(5).trim();
+        if (data === '[DONE]') { doneFlag = true; break; }
+        var json;
+        try { json = JSON.parse(data); } catch (e) { continue; }
+        var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
+        if (!delta) continue;
+        var piece = delta.content || '';
+        if (piece) {
+          if (res.writableEnded || aborted) break;
+          writeSse(res, { type: 'content', text: piece });
+        }
+      }
+    }
+    // 兜底：上游正常结束（无 [DONE]）也判定完成
+    if (!aborted && !res.writableEnded) {
+      writeSse(res, {
+        type: 'done',
+        model: chosenModel,
+        provider: provider,
+        complete: true,
+        saved: true,
+        custom: true,
+        reasoning_effort: 'off'
+      });
+    }
+  } catch (eUp) {
+    if (!aborted && !res.writableEnded) {
+      var reason = (eUp && eUp.name === 'AbortError') ? '第三方模型响应超时，请重试' : '第三方模型连接失败，请检查 API Key 或网络';
+      writeSse(res, { type: 'error', error: reason, code: 'CUSTOM_STREAM_ERROR' });
+    }
+  } finally {
+    try { clearTimeout(timer); } catch (e) {}
+    try { if (reader && reader.cancel) reader.cancel().catch(function() {}); } catch (e) {}
+    safeEnd();
+  }
+});
+
 // POST /api/agent/chat/stream - 流式 SSE 输出
 app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var T0 = Date.now();
