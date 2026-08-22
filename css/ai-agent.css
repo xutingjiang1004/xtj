@@ -6285,53 +6285,84 @@
 
 /* ===================== 新增：复制/分享 · 语音 · 快捷指令 · AI生图 · 导出 · 重命名 ===================== */
 
-/* AI 回复底部操作按钮（复制 / 分享） */
+/* AI 回复底部操作按钮（复制 / 分享 / 重新生成）
+   改为一个整体分段组（segmented group）：共享一个圆角胶囊外壳，
+   内部为扁平按钮 + 发丝分隔线，避免"三颗独立胶囊"的割裂感。 */
 .ai-msg-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 0;
   margin-left: auto;
+  padding: 1px 2px;
+  border: 1px solid rgba(126, 191, 172, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 1px 2px rgba(30, 60, 52, 0.04) inset;
 }
-.ai-msg-act {
+.ai-msg-actions .ai-msg-act {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px 8px;
-  border: 1px solid rgba(126, 191, 172, 0.28);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.55);
-  color: rgba(85, 116, 110, 0.86);
+  gap: 3px;
+  padding: 3px 9px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(85, 116, 110, 0.88);
   font-size: 11px;
   line-height: 1.5;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+  position: relative;
+  transition: background 0.16s ease, color 0.16s ease;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
-.ai-msg-act:hover { background: rgba(126, 191, 172, 0.14); color: rgba(46, 130, 105, 0.98); }
-/* 重新生成：稍显主色，与复制/分享区分 */
-.ai-msg-act-regen {
-  border-color: rgba(78, 168, 142, 0.45);
-  background: rgba(228, 246, 238, 0.9);
-  color: rgba(38, 130, 104, 0.98);
+/* 按钮之间的发丝分隔线（属于后一个按钮左侧） */
+.ai-msg-actions .ai-msg-act + .ai-msg-act::before {
+  content: "";
+  position: absolute;
+  left: -0.5px;
+  top: 22%;
+  bottom: 22%;
+  width: 1px;
+  background: rgba(126, 191, 172, 0.2);
+  pointer-events: none;
 }
-.ai-msg-act-regen:hover {
-  background: rgba(126, 191, 172, 0.24);
+.ai-msg-actions .ai-msg-act:hover,
+.ai-msg-actions .ai-msg-act:focus-visible {
+  background: rgba(126, 191, 172, 0.14);
+  color: rgba(46, 130, 105, 0.98);
+}
+/* 重新生成：同一组的扁平项，仅靠文字色稍作强调，不另起胶囊 */
+.ai-msg-actions .ai-msg-act-regen { color: rgba(43, 128, 103, 0.96); }
+.ai-msg-actions .ai-msg-act-regen:hover,
+.ai-msg-actions .ai-msg-act-regen:focus-visible {
+  background: rgba(126, 191, 172, 0.22);
   color: rgba(24, 108, 86, 1);
 }
-[data-theme="dark"] .ai-msg-act {
+[data-theme="dark"] .ai-msg-actions {
   background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(140, 196, 158, 0.24);
+  border-color: rgba(140, 196, 158, 0.2);
+}
+[data-theme="dark"] .ai-msg-actions .ai-msg-act {
   color: rgba(190, 214, 208, 0.86);
 }
-[data-theme="dark"] .ai-msg-act:hover { background: rgba(126, 191, 172, 0.18); color: #9fe3c8; }
-[data-theme="dark"] .ai-msg-act-regen {
-  border-color: rgba(112, 200, 170, 0.5);
-  background: rgba(30, 84, 68, 0.55);
+[data-theme="dark"] .ai-msg-actions .ai-msg-act + .ai-msg-act::before {
+  background: rgba(140, 196, 158, 0.18);
+}
+[data-theme="dark"] .ai-msg-actions .ai-msg-act-regen { color: #9fe3c8; }
+[data-theme="dark"] .ai-msg-actions .ai-msg-act:hover,
+[data-theme="dark"] .ai-msg-actions .ai-msg-act:focus-visible {
+  background: rgba(126, 191, 172, 0.18);
   color: #9fe3c8;
 }
-[data-theme="dark"] .ai-msg-act-regen:hover { background: rgba(78, 168, 142, 0.32); color: #c4f0dd; }
+[data-theme="dark"] .ai-msg-actions .ai-msg-act-regen:hover,
+[data-theme="dark"] .ai-msg-actions .ai-msg-act-regen:focus-visible {
+  background: rgba(78, 168, 142, 0.32);
+  color: #c4f0dd;
+}
 
 /* 语音输入按钮 */
 .ai-chat-voice {
