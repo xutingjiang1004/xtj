@@ -44,9 +44,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   之前 S 对象内出现两个 thinkingMode 字段 (low/medium)，后者静默覆盖前者，
   //   注释却又声称默认 max。此处删除重复字段，建立唯一真源。
   var DEFAULT_THINKING_MODE = 'max';
-  var DEFAULT_AI_MODEL = 'deepseek-v4-flash';
+  var DEFAULT_AI_MODEL = 'deepseek-v4-flash-vision-exp';
   var ALLOWED_THINKING_MODES = ['off', 'low', 'medium', 'high', 'max'];
-  var ALLOWED_AI_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'];
+  var ALLOWED_AI_MODELS = ['deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'];
 
   // 初始化思考程度：localStorage > 默认值（后端配置在 applyConfigToUI 中再覆盖）
   //   注意：初始化只发生一次；后端配置到达后会通过 applyConfigToUI 显式赋值，
@@ -4794,7 +4794,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
           if (progressCard) { try { progressCard._done = true; } catch (e) {} }
           try {
-            finalModelRef.value = evt.model || 'deepseek-v4-flash';
+            finalModelRef.value = evt.model || 'deepseek-v4-flash-vision-exp';
             finalThinkingModeRef.value = evt.thinking_mode || opts.defaultThinkingMode || 'max';
             aiContentRef.value = evt.sanitized_content || evt.content || '';
             if (finalMetaRef) finalMetaRef.value = evt;
@@ -8563,7 +8563,6 @@ function showChatMessages() {
 
     // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
     var modelLabels = {
-      'deepseek-v4-flash': 'V4 Flash',
       'deepseek-v4-pro': 'V4 Pro',
       'deepseek-v4-flash-vision-exp': 'V4 Flash Vision'
     };
@@ -8965,10 +8964,9 @@ function showChatMessages() {
     var modelSelect = panelShell.querySelector('#aiPlusModelSelect');
     var thinkSelect = panelShell.querySelector('#aiPlusThinkSelect');
     fillSelect(modelSelect, [
-      { value: 'deepseek-v4-flash', label: 'V4 Flash' },
       { value: 'deepseek-v4-pro', label: 'V4 Pro' },
       { value: 'deepseek-v4-flash-vision-exp', label: 'V4 Flash Vision' }
-    ], S.selectedModel || 'deepseek-v4-flash');
+    ], S.selectedModel || 'deepseek-v4-flash-vision-exp');
     fillSelect(thinkSelect, [
       { value: 'off', label: '关闭' },
       { value: 'low', label: '轻度' },
@@ -8988,7 +8986,7 @@ function showChatMessages() {
     }
 
     function updateModelUI() {
-      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-v4-flash'; } catch (eM) {}
+      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-v4-flash-vision-exp'; } catch (eM) {}
       var sum = panelShell.querySelector('#aiModelSummary');
       if (sum) sum.textContent = modelLabels[S.selectedModel] || S.selectedModel;
     }
@@ -9346,7 +9344,7 @@ function showChatMessages() {
 
     // 透明 select 直接点选：打开前同步当前值，change 后更新
     function syncSelectValues() {
-      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-v4-flash'; } catch (eM0) {}
+      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-v4-flash-vision-exp'; } catch (eM0) {}
       try { if (thinkSelect) thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT0) {}
     }
     if (modelSelect) {

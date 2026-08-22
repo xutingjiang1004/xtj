@@ -170,16 +170,18 @@ const aiQuota = createAiQuota(supabase);
 // ===================== DeepSeek AI 配置 =====================
 // ★ DeepSeek API Key 只能放后端环境变量，绝对不能放前端
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
-const DEEPSEEK_MODEL_FLASH = 'deepseek-v4-flash';
-const DEEPSEEK_MODEL_PRO = 'deepseek-v4-pro';
-// DeepSeek 首个多模态视觉模型（实验版）：公众号/官方 2026-08-21 上线，
-// OpenAI 兼容格式，支持 image_url + base64 内联图片。
+// ★ 已统一切换到多模态视觉模型：旧版 DEEPSEEK_MODEL_FLASH（deepseek-v4-flash）不再使用。
+// V4 Flash Vision 既能纯文本对话（fast tier），也原生支持 image_url 识图，故作为唯一 flash 级模型。
 const DEEPSEEK_MODEL_VISION = 'deepseek-v4-flash-vision-exp';
+const DEEPSEEK_MODEL_FLASH = DEEPSEEK_MODEL_VISION;
+const DEEPSEEK_MODEL_PRO = 'deepseek-v4-pro';
 function normalizeDeepSeekModelName(model) {
   var key = String(model || '').trim().toLowerCase();
   if (!key) return '';
   if (key === 'deepseek-chat' || key === 'deepseek-reasoner') return DEEPSEEK_MODEL_FLASH;
-  if (key === DEEPSEEK_MODEL_FLASH || key === DEEPSEEK_MODEL_PRO) return key;
+  // ★ 旧版 flash 已删除：存量配置里若还有 deepseek-v4-flash，统一迁移到 V4 Flash Vision
+  if (key === 'deepseek-v4-flash' || key === DEEPSEEK_MODEL_FLASH || key === DEEPSEEK_MODEL_VISION) return DEEPSEEK_MODEL_VISION;
+  if (key === DEEPSEEK_MODEL_PRO) return key;
   return key;
 }
 function getPreferredDeepSeekModel(model) {
@@ -215,10 +217,10 @@ let deepseekModelCatalog = {
 };
 let deepseekModelProbePromise = null;
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
-// ★ 网页搜索改造：DeepSeek 内置 web_search 仅在 Responses API（/responses）可用，
-//   且目前仅支持 deepseek-v4-flash 模型（v4-pro 预计 2026-08 初支持）。
+// ★ 网页搜索改造：DeepSeek 内置 web_search 仅在 Responses API（/responses）可用。
+//   flash 级模型已统一为 V4 Flash Vision，Responses 路径随 DEEPSEEK_MODEL_FLASH 指向视觉模型。
 const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com/responses';
-const DEEPSEEK_RESPONSES_MODEL = 'deepseek-v4-flash';
+const DEEPSEEK_RESPONSES_MODEL = DEEPSEEK_MODEL_FLASH;
 const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = parseInt(process.env.AI_AGENT_DAILY_LIMIT || '300', 10) || 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = parseInt(process.env.AI_AGENT_HOURLY_LIMIT || '50', 10) || 50; // 每用户每小时 AI 调用次数
@@ -16129,7 +16131,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var requestedModel = req.body && req.body.model;
-    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'];
+    var allowedModels = [DEEPSEEK_MODEL_VISION, 'deepseek-v4-pro'];
     var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
     var reasoning = '';
     var toolCallsInfo = [];
@@ -16148,7 +16150,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var useBuiltInSearch = (webSearchPref === true);
     var webSearchEnabled = (webSearchPref === true);
     if (useBuiltInSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
-      // ★ 网页搜索改造：Responses API 目前仅支持 deepseek-v4-flash，强制回退避免 400
+      // ★ 网页搜索改造：Responses API 目前仅支持 V4 Flash Vision，强制回退避免 400
       validatedModel = DEEPSEEK_RESPONSES_MODEL;
     }
     if (useBuiltInSearch && !aborted) {
@@ -16573,7 +16575,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // 模型选择提前校验：供历史图片「连续追问」判断当前是否视觉可用
     var requestedModel = req.body && req.body.model;
-    var allowedModels = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'];
+    var allowedModels = [DEEPSEEK_MODEL_VISION, 'deepseek-v4-pro'];
     var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
     var _historyVisionEligible = validatedModel === DEEPSEEK_MODEL_VISION || validatedModel === DEEPSEEK_MODEL_FLASH;
 

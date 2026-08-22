@@ -25,7 +25,7 @@ function loadCallDeepSeek(fetchImpl) {
   const dependencies = [
     "var DEEPSEEK_API_KEY = 'test-key';",
     "var DEEPSEEK_API_URL = 'https://api.deepseek.test/chat/completions';",
-    "var DEEPSEEK_MODEL_REASONER = 'deepseek-v4-flash';",
+    "var DEEPSEEK_MODEL_REASONER = 'deepseek-v4-flash-vision-exp';",
     'var DEEPSEEK_TIMEOUT_MS = 5000;',
     'var DEEPSEEK_INPUT_PRICE_PER_1M = 1;',
     'var DEEPSEEK_OUTPUT_PRICE_PER_1M = 2;',
@@ -78,7 +78,7 @@ test('streaming requests include usage and preserve cache counters from the empt
 
   const result = await callDeepSeek(
     [{ role: 'user', content: '测试' }],
-    { model: 'deepseek-v4-flash', temperature: 0.25, onContentChunk() {} }
+    { model: 'deepseek-v4-flash-vision-exp', temperature: 0.25, onContentChunk() {} }
   );
 
   assert.equal(requestBody.stream, true);
@@ -97,7 +97,7 @@ test('thinking mode is explicit and carries the requested effort level', async (
   const callDeepSeek = loadCallDeepSeek(async (_url, init) => {
     requestBody = JSON.parse(init.body);
     return jsonResponse({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       choices: [{ message: { content: '已完成', reasoning_content: '先分析' } }],
       usage: { prompt_tokens: 4, completion_tokens: 3, total_tokens: 7 }
     });
@@ -105,7 +105,7 @@ test('thinking mode is explicit and carries the requested effort level', async (
 
   const result = await callDeepSeek(
     [{ role: 'user', content: '请分析' }],
-    { model: 'deepseek-v4-flash', thinking_mode: 'low' }
+    { model: 'deepseek-v4-flash-vision-exp', thinking_mode: 'low' }
   );
 
   assert.deepEqual(requestBody.thinking, { type: 'enabled' });
@@ -118,7 +118,7 @@ test('multi-round tool calls aggregate usage and cache counters', async () => {
   const requests = [];
   const responses = [
     jsonResponse({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       choices: [{
         message: {
           content: '',
@@ -128,7 +128,7 @@ test('multi-round tool calls aggregate usage and cache counters', async () => {
       usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12, prompt_cache_hit_tokens: 4, prompt_cache_miss_tokens: 6 }
     }),
     jsonResponse({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       choices: [{ message: { content: '工具完成', tool_calls: [] } }],
       usage: { prompt_tokens: 20, completion_tokens: 3, total_tokens: 23, prompt_cache_hit_tokens: 8, prompt_cache_miss_tokens: 12 }
     })
@@ -141,7 +141,7 @@ test('multi-round tool calls aggregate usage and cache counters', async () => {
   const result = await callDeepSeek(
     [{ role: 'user', content: '查酒店' }],
     {
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       tools: [{ type: 'function', function: { name: 'lookup', parameters: { type: 'object' } } }],
       tool_choice: 'auto',
       max_tool_rounds: 4,
@@ -164,12 +164,12 @@ test('DSML content tool calls are parsed server-side, executed, and never return
   const requests = [];
   const responses = [
     jsonResponse({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       choices: [{ message: { content: '<|DSML|tool_calls><|DSML|invoke name="read_file_range"><|DSML|parameter name="path" value="src/app.js"><|DSML|parameter name="start_line" value="12"><|DSML|parameter name="end_line" value="24"><|DSML|end>' } }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
     }),
     jsonResponse({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       choices: [{ message: { content: '我已读取 src/app.js 的第 12 到 24 行。' } }],
       usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 }
     })
@@ -271,7 +271,7 @@ test('malformed tool calls are normalized before the next provider round', async
   const requests = [];
   const responses = [
     jsonResponse({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       choices: [{ message: {
         content: '',
         tool_calls: [{ type: 'function', function: { name: 'lookup', arguments: '{broken' } }]
@@ -279,7 +279,7 @@ test('malformed tool calls are normalized before the next provider round', async
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
     }),
     jsonResponse({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       choices: [{ message: { content: '宸插畬鎴愭煡璇�', tool_calls: [] } }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
     })
@@ -292,7 +292,7 @@ test('malformed tool calls are normalized before the next provider round', async
   await callDeepSeek(
     [{ role: 'user', content: '璇锋煡璇�' }],
     {
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       tools: [{ type: 'function', function: { name: 'lookup', parameters: { type: 'object' } } }],
       tool_executor: async tc => ({ ok: true, received: tc.function.arguments })
     }
@@ -311,14 +311,14 @@ test('max_tokens is finite and clamped to the provider output limit', async () =
   const callDeepSeek = loadCallDeepSeek(async (_url, init) => {
     requestBody = JSON.parse(init.body);
     return jsonResponse({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       choices: [{ message: { content: 'ok', tool_calls: [] } }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
     });
   });
 
   await callDeepSeek([{ role: 'user', content: 'test' }], {
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4-flash-vision-exp',
     max_tokens: 999999
   });
   assert.equal(requestBody.max_tokens, 384000);
@@ -363,7 +363,7 @@ test('external cancellation is distinguished from an internal timeout', async ()
 
 test('external cancellation interrupts a pending tool round', async () => {
   const callDeepSeek = loadCallDeepSeek(async () => jsonResponse({
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4-flash-vision-exp',
     choices: [{ message: {
       content: '',
       tool_calls: [{ id: 'call_pending', type: 'function', function: { name: 'lookup', arguments: '{}' } }]
@@ -395,7 +395,7 @@ test('external cancellation propagates through the no-tool recovery request', as
     requestCount += 1;
     if (requestCount === 1) {
       return jsonResponse({
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-v4-flash-vision-exp',
         choices: [{ message: {
           content: '',
           tool_calls: [{ id: 'call_recovery', type: 'function', function: { name: 'lookup', arguments: '{}' } }]

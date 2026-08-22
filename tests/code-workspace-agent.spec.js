@@ -21,15 +21,15 @@ test.describe('Code workspace Agent browser flow', () => {
       agentEnabled: true,
       toolCallingEnabled: true,
       provider: 'DeepSeek',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       maxToolRounds: 8,
       maxContextTokens: 1000000,
       supportedDocuments: ['docx', 'pdf', 'xlsx', 'pptx', 'txt', 'csv', 'md', 'json']
     }));
     await page.route('**/api/code/models', (route) => json(route, 200, {
       ok: true,
-      default_model: 'deepseek-v4-flash',
-      models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
+      default_model: 'deepseek-v4-flash-vision-exp',
+      models: [{ id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
     }));
 
     await page.route('**/api/code/github/repos/xutingjiang1004/xtj**', async (route) => {
@@ -118,7 +118,7 @@ test.describe('Code workspace Agent browser flow', () => {
           agentEnabled: true,
           toolCallingEnabled: true,
           provider: 'DeepSeek',
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-v4-flash-vision-exp',
           maxToolRounds: 8
         },
         tool_trace: [{

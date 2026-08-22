@@ -23,7 +23,7 @@ function createApp(callDeepSeek, capabilitySnapshot, extras) {
       next();
     },
     sanitizeError: err => err && err.message ? err.message : 'error',
-    getDeepSeekModel: () => 'deepseek-v4-flash',
+    getDeepSeekModel: () => 'deepseek-v4-flash-vision-exp',
     getDeepSeekApiUrl: () => 'https://api.deepseek.com/chat/completions',
     getDeepSeekApiKey: () => 'test-key',
     getDeepSeekCapabilities: capabilitySnapshot ? () => capabilitySnapshot : undefined,
@@ -50,7 +50,7 @@ test('stream progress exposes a monotonic phase cursor and stable tool index', a
       id: 'tool-stream-1',
       function: { name: 'get_open_files', arguments: '{}' }
     });
-    return { content: 'stream timeline complete', model: 'deepseek-v4-flash', usage: {} };
+    return { content: 'stream timeline complete', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   });
 
   const response = await request(app).post('/api/code/chat/stream').set('x-test-user', 'alice').send({
@@ -107,7 +107,7 @@ test('generated edits are preflighted against supplied files before they reach A
       }
     ]
     }),
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4-flash-vision-exp',
     usage: {}
   }));
 
@@ -135,7 +135,7 @@ test('freshness questions select web_search and return structured server results
       id: 'web-1',
       function: { name: 'web_search', arguments: JSON.stringify({ query: 'today Guangzhou weather', max_results: 2 }) }
     });
-    return { content: '根据联网结果回答', model: 'deepseek-v4-flash', usage: {} };
+    return { content: '根据联网结果回答', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   }, null, {
     webSearch: async () => ({ results: [{ title: 'Weather', url: 'https://example.com/weather', snippet: 'Sunny', published_at: '2026-07-26T08:00:00Z' }] })
   });
@@ -154,7 +154,7 @@ test('web tools fail clearly when search is not configured', async () => {
   let toolResult;
   const app = createApp(async (_messages, options) => {
     toolResult = await options.tool_executor({ id: 'web-2', function: { name: 'web_search', arguments: JSON.stringify({ query: 'latest news' }) } });
-    return { content: '未配置', model: 'deepseek-v4-flash', usage: {} };
+    return { content: '未配置', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   });
   const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
     workspace_name: 'travel', workspace_id: 'local:travel', workspace_generation: 2,
@@ -174,7 +174,7 @@ test('fetch_web_page rejects localhost and private-network targets before fetch'
     assert.equal(result.ok, false);
     assert.equal(result.code, 'WEB_FETCH_FAILED');
     assert.match(result.error, /主机/);
-    return { content: '已拒绝', model: 'deepseek-v4-flash', usage: {} };
+    return { content: '已拒绝', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   }, null, { fetchImpl: async () => { throw new Error('must not fetch'); } });
   const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
     workspace_name: 'travel', workspace_id: 'local:travel', workspace_generation: 3,
@@ -190,7 +190,7 @@ test('fetch_web_page rejects DNS rebinding to private addresses', async () => {
     const result = await options.tool_executor({ id: 'web-4', function: { name: 'fetch_web_page', arguments: JSON.stringify({ url: 'https://public.example/page' }) } });
     assert.equal(result.ok, false);
     assert.match(result.error, /内网地址/);
-    return { content: '已拒绝', model: 'deepseek-v4-flash', usage: {} };
+    return { content: '已拒绝', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   }, null, {
     lookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
     fetchImpl: async () => { fetched = true; throw new Error('must not fetch'); }
@@ -205,7 +205,7 @@ test('fetch_web_page rejects DNS rebinding to private addresses', async () => {
 
 test('capabilities distinguish configured from verified model availability', async () => {
   const app = createApp(async () => ({ content: 'unused' }), {
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4-flash-vision-exp',
     probeStatus: 'error',
     probeError: 'HTTP 503',
     modelAvailable: null,
@@ -227,7 +227,7 @@ test('capabilities distinguish configured from verified model availability', asy
 
 test('capabilities disable an agent when a successful model probe excludes its model', async () => {
   const app = createApp(async () => ({ content: 'unused' }), {
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4-flash-vision-exp',
     probeStatus: 'ready',
     modelAvailable: false,
     verifiedAvailable: false
@@ -271,7 +271,7 @@ test('runs a real multi-step code tool flow and reports actual reads plus cache 
 
     return {
       content: '我读取了 src/example.js，它导出了 planTrip。',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       usage: {
         prompt_tokens: 1200,
         completion_tokens: 80,
@@ -335,7 +335,7 @@ test('forces a first directory tool call for broad project questions', async () 
   let receivedOptions;
   const app = createApp(async (_messages, options) => {
     receivedOptions = options;
-    return { content: 'project inspected', model: 'deepseek-v4-flash' };
+    return { content: 'project inspected', model: 'deepseek-v4-flash-vision-exp' };
   });
   const source = 'const project = true;';
   const build = await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
@@ -355,7 +355,7 @@ test('forces a first directory tool call for broad Chinese project questions', a
   let receivedOptions;
   const app = createApp(async (_messages, options) => {
     receivedOptions = options;
-    return { content: '项目已检查', model: 'deepseek-v4-flash' };
+    return { content: '项目已检查', model: 'deepseek-v4-flash-vision-exp' };
   });
   const source = 'const project = true;';
   const build = await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
@@ -375,7 +375,7 @@ test('forces a first active-file read for explicit current-file questions', asyn
   let receivedOptions;
   const app = createApp(async (_messages, options) => {
     receivedOptions = options;
-    return { content: 'active file inspected', model: 'deepseek-v4-flash' };
+    return { content: 'active file inspected', model: 'deepseek-v4-flash-vision-exp' };
   });
   const source = 'const app = true;';
   const build = await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
@@ -427,7 +427,7 @@ test('keeps indexes isolated by authenticated user and asks for rebuild after re
 });
 
 test('accepts bounded index batches and keeps partial indexes private until finalization', async () => {
-  const app = createApp(async () => ({ content: 'ok', model: 'deepseek-v4-flash' }));
+  const app = createApp(async () => ({ content: 'ok', model: 'deepseek-v4-flash-vision-exp' }));
   const firstSource = 'const first = true;';
   const secondSource = 'const second = true;';
   const makeFile = (path, content) => ({ path, content, size: Buffer.byteLength(content), sha256: sha(content) });
@@ -469,7 +469,7 @@ test('uploaded travel documents are available to tools without a project index',
     assert.match(read.content, /陈家祠/);
     return {
       content: '根据资料，建议第一天游览陈家祠。',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       usage: null
     };
   });
@@ -499,8 +499,8 @@ test('Code models endpoint exposes only the deployment-configured model', async 
   const app = createApp(async () => ({ content: 'unused' }));
   const response = await request(app).get('/api/code/models').set('x-test-user', 'alice');
   assert.equal(response.status, 200);
-  assert.equal(response.body.default_model, 'deepseek-v4-flash');
-  assert.deepEqual(response.body.models.map(model => model.id), ['deepseek-v4-flash']);
+  assert.equal(response.body.default_model, 'deepseek-v4-flash-vision-exp');
+  assert.deepEqual(response.body.models.map(model => model.id), ['deepseek-v4-flash-vision-exp']);
   assert.equal(response.body.models[0].supports_thinking, true);
   assert.equal(response.body.models[0].availability, 'degraded');
   assert.equal(response.body.models[0].probe_status, 'idle');
@@ -513,7 +513,7 @@ test('Code chat rejects an unknown model id and invalid thinking mode before pro
   const unknownModel = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send(Object.assign({}, base, { model_id: 'not-configured' }));
   assert.equal(unknownModel.status, 400);
   assert.equal(unknownModel.body.code, 'MODEL_NOT_AVAILABLE');
-  const invalidThinking = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send(Object.assign({}, base, { model_id: 'deepseek-v4-flash', thinking_mode: 'unsafe-value' }));
+  const invalidThinking = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send(Object.assign({}, base, { model_id: 'deepseek-v4-flash-vision-exp', thinking_mode: 'unsafe-value' }));
   assert.equal(invalidThinking.status, 400);
   assert.equal(invalidThinking.body.code, 'INVALID_THINKING_MODE');
   assert.equal(calls, 0);
@@ -533,7 +533,7 @@ test('open file overlay provides safe list and search fallbacks without a projec
       id: 'search-open',
       function: { name: 'search_code', arguments: JSON.stringify({ query: 'render', path: 'src/main.js' }) }
     });
-    return { content: 'open context inspected', model: 'deepseek-v4-flash' };
+    return { content: 'open context inspected', model: 'deepseek-v4-flash-vision-exp' };
   });
   const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
     workspace_id: 'overlay-only', workspace_generation: 1, active_path: 'src/main.js',
@@ -568,7 +568,7 @@ test('open-file overlays normalize paths and safely back tools without a project
       function: { name: 'read_file', arguments: JSON.stringify({ path: 'src\\app.js' }) }
     });
     toolResults = { listed, searched, read };
-    return { content: 'overlay inspected', model: 'deepseek-v4-flash', usage: {} };
+    return { content: 'overlay inspected', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   });
   const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
     workspace_name: 'overlay', workspace_id: 'local:overlay', workspace_generation: 1,
@@ -606,7 +606,7 @@ test('tools return explicit index and unsupported-tool errors when no safe fallb
       id: 'malformed-json',
       function: { name: 'list_files', arguments: '{"directory":' }
     });
-    return { content: 'tool errors handled', model: 'deepseek-v4-flash', usage: {} };
+    return { content: 'tool errors handled', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   });
   const response = await request(app).post('/api/code/chat').set('x-test-user', 'alice').send({
     workspace_name: 'no-index', workspace_id: 'local:no-index', workspace_generation: 1,
@@ -628,7 +628,7 @@ test('tools return explicit index and unsupported-tool errors when no safe fallb
 
 test('response includes runtime identity with provider=deepseek and model', async () => {
   const app = createApp(async (_messages, _options) => {
-    return { content: '我是 XTJ Code Agent，运行在 DeepSeek 平台上。', model: 'deepseek-v4-flash', usage: { prompt_tokens: 100, completion_tokens: 50 } };
+    return { content: '我是 XTJ Code Agent，运行在 DeepSeek 平台上。', model: 'deepseek-v4-flash-vision-exp', usage: { prompt_tokens: 100, completion_tokens: 50 } };
   });
   // Build a minimal index so the chat request is accepted
   const source = 'const x = 1;';
@@ -664,8 +664,8 @@ test('get_runtime_capabilities tool returns real server data', async () => {
       id: 'cap-1',
       function: { name: 'get_runtime_capabilities', arguments: '{}' }
     });
-    return { content: '根据运行时数据，我是 deepseek-v4-flash。', model: 'deepseek-v4-flash', usage: {} };
-  }, { provider: 'deepseek', model: 'deepseek-v4-flash', verifiedAvailable: true, providerContextTokens: 128000, providerMaxOutputTokens: 32768, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
+    return { content: '根据运行时数据，我是 deepseek-v4-flash-vision-exp。', model: 'deepseek-v4-flash-vision-exp', usage: {} };
+  }, { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp', verifiedAvailable: true, providerContextTokens: 128000, providerMaxOutputTokens: 32768, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
   // Build a minimal index
   var source = 'const x = 1;';
   await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
@@ -680,7 +680,7 @@ test('get_runtime_capabilities tool returns real server data', async () => {
   assert.ok(toolResult, 'get_runtime_capabilities should have been called');
   assert.equal(toolResult.ok, true);
   assert.equal(toolResult.provider, 'deepseek');
-  assert.equal(toolResult.model, 'deepseek-v4-flash');
+  assert.equal(toolResult.model, 'deepseek-v4-flash-vision-exp');
   assert.equal(toolResult.configured, true);
   assert.equal(toolResult.agentEnabled, true);
   assert.equal(toolResult.toolCallingEnabled, true);
@@ -695,8 +695,8 @@ test('get_runtime_capabilities returns null for unknown providerContextTokens', 
       id: 'cap-2',
       function: { name: 'get_runtime_capabilities', arguments: '{}' }
     });
-    return { content: '服务器未提供理论上下文上限。', model: 'deepseek-v4-flash', usage: {} };
-  }, { provider: 'deepseek', model: 'deepseek-v4-flash', verifiedAvailable: true, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
+    return { content: '服务器未提供理论上下文上限。', model: 'deepseek-v4-flash-vision-exp', usage: {} };
+  }, { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp', verifiedAvailable: true, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
   // Build a minimal index
   var source = 'const x = 1;';
   await request(app).post('/api/code/index/build').set('x-test-user', 'alice').send({
@@ -718,10 +718,10 @@ test('runtime response includes remainingEstimatedTokens when data is complete',
   const app = createApp(async (_messages, _options) => {
     return {
       content: '上下文分析完成。',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       usage: { prompt_tokens: 500, completion_tokens: 200, prompt_cache_hit_tokens: 300, prompt_cache_miss_tokens: 100 }
     };
-  }, { provider: 'deepseek', model: 'deepseek-v4-flash', verifiedAvailable: true, providerContextTokens: 128000, providerMaxOutputTokens: 32768, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
+  }, { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp', verifiedAvailable: true, providerContextTokens: 128000, providerMaxOutputTokens: 32768, apiFormat: 'openai-chat-completions', probeStatus: 'ready' });
   // Build a minimal index
   var source = 'const x = 1;';
   await request(app).post('/api/code/index/build').send({
@@ -743,7 +743,7 @@ test('runtime response includes remainingEstimatedTokens when data is complete',
 
 test('context_info.runtime separates project index from model context', async () => {
   const app = createApp(async (_messages, _options) => {
-    return { content: '项目有 3 个文件，但本轮只读了 1 个。', model: 'deepseek-v4-flash', usage: { prompt_tokens: 200, completion_tokens: 80 } };
+    return { content: '项目有 3 个文件，但本轮只读了 1 个。', model: 'deepseek-v4-flash-vision-exp', usage: { prompt_tokens: 200, completion_tokens: 80 } };
   });
   // Build index via API
   var source = 'const c = 3;\n'.repeat(50);
@@ -781,7 +781,7 @@ test('first_tool_choice for identity question should call get_runtime_capabiliti
 
 test('runtime info is present even when no tools were called', async () => {
   const app = createApp(async (_messages, _options) => {
-    return { content: '你好！', model: 'deepseek-v4-flash', usage: { prompt_tokens: 50, completion_tokens: 10 } };
+    return { content: '你好！', model: 'deepseek-v4-flash-vision-exp', usage: { prompt_tokens: 50, completion_tokens: 10 } };
   });
   // Build a minimal index
   var source = 'const x = 1;';
@@ -808,7 +808,7 @@ test('P0: client history takes priority over server cache — no merging', async
     callCount++;
     // Verify the history used is exactly what the client sent (2 items), not merged with cache
     // The message array should have: system + 2 history + 1 user = 4 messages
-    return { content: 'Response', model: 'deepseek-v4-flash', usage: {}, finalMessages: messages };
+    return { content: 'Response', model: 'deepseek-v4-flash-vision-exp', usage: {}, finalMessages: messages };
   });
   // First request: establish cache with 3 history items
   var source = 'const a = 1;';
@@ -843,7 +843,7 @@ test('P0: client_request_id prevents duplicate model calls', async () => {
   var callCount = 0;
   const app = createApp(async () => {
     callCount++;
-    return { content: 'Response', model: 'deepseek-v4-flash', usage: {} };
+    return { content: 'Response', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   });
   var source = 'const b = 2;';
   await request(app).post('/api/code/index/build').send({
@@ -879,7 +879,7 @@ test('P0: thinking mode high is sent in request and verified in response', async
     receivedThinkingMode = options.thinking_mode;
     return {
       content: 'Response',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-flash-vision-exp',
       thinking_mode: 'high',
       reasoning: 'deep thinking trace...',
       reasoning_tokens: 150,
@@ -928,7 +928,7 @@ test('P0: thinking mode off is respected', async () => {
   var receivedThinkingMode = null;
   const app = createApp(async (_messages, options) => {
     receivedThinkingMode = options.thinking_mode;
-    return { content: 'Response', model: 'deepseek-v4-flash', usage: {} };
+    return { content: 'Response', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   });
   var source = 'const d = 4;';
   await request(app).post('/api/code/index/build').send({
@@ -947,7 +947,7 @@ test('P0: thinking mode off is respected', async () => {
 
 test('P0: switching workspace generation discards old cached history', async () => {
   const app = createApp(async () => {
-    return { content: 'Response', model: 'deepseek-v4-flash', usage: {} };
+    return { content: 'Response', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   });
   var source = 'const e = 5;';
   await request(app).post('/api/code/index/build').send({
@@ -981,7 +981,7 @@ test('P0: switching workspace generation discards old cached history', async () 
 
 test('P0: new conversation ID creates fresh history, does not carry over old', async () => {
   const app = createApp(async () => {
-    return { content: 'Response', model: 'deepseek-v4-flash', usage: {} };
+    return { content: 'Response', model: 'deepseek-v4-flash-vision-exp', usage: {} };
   });
   var source = 'const f = 6;';
   await request(app).post('/api/code/index/build').send({
