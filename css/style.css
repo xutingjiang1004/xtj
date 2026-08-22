@@ -1566,6 +1566,13 @@
         }
         .chat-msg video.msg-img:hover { transform: none; }
         .chat-msg .msg-text { word-break: break-word; }
+        .chat-msg .msg-text.withdrawn {
+            font-style: italic;
+            color: var(--xtj-text-muted, #8a8f8f);
+        }
+        [data-theme="dark"] .chat-msg .msg-text.withdrawn {
+            color: var(--xtj-text-muted, #9aa5a2);
+        }
         .chat-msg .msg-time {
             font-size: 10px; opacity: 0.55; margin-top: 5px; display: block;
             text-align: right;
