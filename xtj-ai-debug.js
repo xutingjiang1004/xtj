@@ -59,7 +59,7 @@ function sseResponse(chunks, delay) {
     const sseStr = [
       'data: ' + JSON.stringify({ type: 'meta', conversation_id: 'conv-check' }) + '\n\n',
       'data: ' + JSON.stringify({ type: 'content', text: reply }) + '\n\n',
-      'data: ' + JSON.stringify({ type: 'done', content: reply, model: 'deepseek-v4-flash', thinking_mode: 'off', usage: {} }) + '\n\n'
+      'data: ' + JSON.stringify({ type: 'done', content: reply, model: 'deepseek-v4-flash-vision-exp', thinking_mode: 'off', usage: {} }) + '\n\n'
     ].join('');
     return r.fulfill({ status: 200, contentType: 'text/event-stream', body: sseStr });
   });

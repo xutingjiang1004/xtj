@@ -26,7 +26,7 @@ const block = `    // + 菜单：自定义二级面板（系统 <select> 无法�
     // 主页：上传 / 模型 / 思考程度 / 网页搜索开关
     // 二级：模型列表、思考程度列表；选择后停留在菜单，方便连着改
     var modelLabels = {
-      'deepseek-v4-flash': 'V4 Flash',
+      'deepseek-v4-flash-vision-exp': 'V4 Flash Vision',
       'deepseek-v4-pro': 'V4 Pro'
     };
     var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
@@ -81,8 +81,8 @@ const block = `    // + 菜单：自定义二级面板（系统 <select> 无法�
             '<span aria-hidden="true">‹</span><span>模型</span>' +
           '</button>' +
           '<div class="ai-panel-options-group" role="radiogroup" aria-label="选择模型">' +
-            '<button type="button" class="ai-panel-option" role="radio" data-model="deepseek-v4-flash" aria-checked="false">' +
-              '<span class="ai-panel-option-body"><span class="ai-panel-option-label">DeepSeek V4 Flash</span><span class="ai-panel-option-desc">速度更快，适合日常聊天</span></span>' +
+            '<button type="button" class="ai-panel-option" role="radio" data-model="deepseek-v4-flash-vision-exp" aria-checked="false">' +
+              '<span class="ai-panel-option-body"><span class="ai-panel-option-label">DeepSeek V4 Flash Vision</span><span class="ai-panel-option-desc">速度更快，支持识图，适合日常聊天</span></span>' +
               '<span class="ai-panel-check" aria-hidden="true">✓</span>' +
             '</button>' +
             '<button type="button" class="ai-panel-option" role="radio" data-model="deepseek-v4-pro" aria-checked="false">' +

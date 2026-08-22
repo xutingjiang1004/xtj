@@ -31,7 +31,7 @@ const block = `    // + 菜单方案 A：系统级 <select>
     // - 二级：选「思考程度…」后再弹系统思考列表（showPicker / 回退 click）
     // - 模型、搜索在主列表直接选，避免全挤二级又关菜单
     var modelLabels = {
-      'deepseek-v4-flash': 'V4 Flash',
+      'deepseek-v4-flash-vision-exp': 'V4 Flash Vision',
       'deepseek-v4-pro': 'V4 Pro'
     };
     var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
@@ -92,13 +92,13 @@ const block = `    // + 菜单方案 A：系统级 <select>
     });
 
     function rebuildActionOptions() {
-      var curModel = S.selectedModel || 'deepseek-v4-flash';
+      var curModel = S.selectedModel || 'deepseek-v4-flash-vision-exp';
       var curThink = S.thinkingMode || 'max';
       var wsOn = !!S.webSearchEnabled;
       fillSelect(actionSelect, [
         { value: '', label: '选择操作…' },
         { value: 'upload', label: '上传文件' },
-        { value: 'model:deepseek-v4-flash', label: (curModel === 'deepseek-v4-flash' ? '✓ ' : '') + '模型 · V4 Flash（更快）' },
+        { value: 'model:deepseek-v4-flash-vision-exp', label: (curModel === 'deepseek-v4-flash-vision-exp' ? '✓ ' : '') + '模型 · V4 Flash Vision（更快）' },
         { value: 'model:deepseek-v4-pro', label: (curModel === 'deepseek-v4-pro' ? '✓ ' : '') + '模型 · V4 Pro（更强）' },
         { value: 'think', label: '思考程度 · ' + (thinkLabels[curThink] || curThink) + ' ›' },
         { value: 'search:on', label: (wsOn ? '✓ ' : '') + '网页搜索 · 开' },

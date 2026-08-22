@@ -132,8 +132,8 @@ var PROVIDER_DEFAULTS = {
   },
   deepseek: {
     base_url: 'https://api.deepseek.com/v1',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
-    capabilities: ['chat', 'thinking', 'tools']
+    models: ['deepseek-v4-flash-vision-exp', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
+    capabilities: ['chat', 'thinking', 'tools', 'vision']
   },
   anthropic: {
     base_url: 'https://api.anthropic.com/v1',

@@ -72,7 +72,7 @@ function sseResponse(chunks, delay) {
       'data: ' + JSON.stringify({ type: 'content', text: reply.slice(0, 20) }) + '\n\n',
       'data: ' + JSON.stringify({ type: 'content', text: reply.slice(20, 40) }) + '\n\n',
       'data: ' + JSON.stringify({ type: 'content', text: reply.slice(40) }) + '\n\n',
-      'data: ' + JSON.stringify({ type: 'done', content: reply, model: 'deepseek-v4-flash', thinking_mode: 'off', usage: {} }) + '\n\n'
+      'data: ' + JSON.stringify({ type: 'done', content: reply, model: 'deepseek-v4-flash-vision-exp', thinking_mode: 'off', usage: {} }) + '\n\n'
     ].join('');
     return r.fulfill({ status: 200, contentType: 'text/event-stream', body: sseStr });
   });

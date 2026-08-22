@@ -124,7 +124,7 @@ function startMockDeepSeekServer() {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             data: [
-              { id: 'deepseek-v4-flash', display_name: 'DeepSeek V4 Flash', supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] },
+              { id: 'deepseek-v4-flash-vision-exp', display_name: 'DeepSeek V4 Flash', supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] },
               { id: 'deepseek-v4-pro', display_name: 'DeepSeek V4 Pro', supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }
             ]
           }));
@@ -153,7 +153,7 @@ function startMockDeepSeekServer() {
           } else {
             // JSON 非流式响应
             var response = {
-              model: 'deepseek-v4-flash',
+              model: 'deepseek-v4-flash-vision-exp',
               choices: [{
                 index: 0,
                 message: {
@@ -621,8 +621,8 @@ test.describe('Cat AI 聊天验证', function () {
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        default_model: 'deepseek-v4-flash',
-        models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
+        default_model: 'deepseek-v4-flash-vision-exp',
+        models: [{ id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
       })
     }));
 
@@ -650,8 +650,8 @@ test.describe('Cat AI 聊天验证', function () {
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        default_model: 'deepseek-v4-flash',
-        models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
+        default_model: 'deepseek-v4-flash-vision-exp',
+        models: [{ id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
       })
     }));
 
@@ -678,8 +678,8 @@ test.describe('Cat AI 聊天验证', function () {
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        default_model: 'deepseek-v4-flash',
-        models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
+        default_model: 'deepseek-v4-flash-vision-exp',
+        models: [{ id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash', enabled: true, supports_thinking: true, supported_thinking_modes: ['auto', 'off', 'low', 'medium', 'high'] }]
       })
     }));
 
