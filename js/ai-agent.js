@@ -8833,23 +8833,49 @@ function showChatMessages() {
         }
       });
     }
-    // ★ 生图服务地址：优先读前端配置 AI_IMAGE_GEN_BASE（可替换为自有服务），
-    //   未配置时回退内置默认地址。
-    function genImageApiUrl(prompt) {
-      var base = '';
-      try { base = (window.XTJ_CONFIG && window.XTJ_CONFIG.AI_IMAGE_GEN_BASE) || ''; } catch (e) {}
-      if (!base || typeof base !== 'string') base = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image';
-      base = base.replace(/\/+$/, '');
-      return base + '?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd';
+    // ★ 生图服务地址：优先读前端配置 AI_IMAGE_GEN_BASE（可替换为自有服务，
+    //   契约：?prompt=&image_size= 直接返回图片）。未配置时走后端代理
+    //   /api/agent/image-gen——服务端会识别上游占位图（"The image is
+    //   generating... Please refresh page to preview."），避免把占位图当成
+    //   生成成功展示。
+    function customImageGenBase() {
+      try {
+        var base = (window.XTJ_CONFIG && window.XTJ_CONFIG.AI_IMAGE_GEN_BASE) || '';
+        return (typeof base === 'string' && base) ? base.replace(/\/+$/, '') : '';
+      } catch (e) { return ''; }
     }
-    // ★ 生成图片（预载验证可用性后回调）
+    // ★ 生成图片（预载验证可用性后回调）：onOk(url) / onErr(message)
     function loadGenImage(prompt, onOk, onErr) {
-      var url = genImageApiUrl(prompt);
-      var img = new Image();
-      var done = false;
-      img.onload = function() { if (!done) { done = true; onOk(url); } };
-      img.onerror = function() { if (!done) { done = true; onErr(); } };
-      img.src = url;
+      var customBase = customImageGenBase();
+      if (customBase) {
+        // 自定义生图服务：保持直连契约
+        var url = customBase + '?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd';
+        var img = new Image();
+        var done = false;
+        img.onload = function() { if (!done) { done = true; onOk(url); } };
+        img.onerror = function() { if (!done) { done = true; onErr('图片服务不可用或已被拦截，请检查 AI_IMAGE_GEN_BASE 配置'); } };
+        img.src = url;
+        return;
+      }
+      // 默认上游：走后端代理，占位图/上游异常时返回明确错误
+      apiRequest('GET', '/image-gen?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd', null, { timeoutMs: 60000 })
+        .then(function(r) {
+          var genUrl = (r && r.ok && r.data && r.data.url) ? String(r.data.url) : '';
+          if (!genUrl) {
+            onErr((r && r.error) ? String(r.error) : '图片服务不可用，请稍后重试');
+            return;
+          }
+          var pre = new Image();
+          var settled = false;
+          pre.onload = function() { if (!settled) { settled = true; onOk(genUrl); } };
+          pre.onerror = function() {
+            if (settled) return;
+            settled = true;
+            onErr('生成的图片加载失败，请稍后重试');
+          };
+          pre.src = genUrl;
+        })
+        .catch(function() { onErr('网络异常，请稍后重试'); });
     }
     function openImageGenModal() {
       closeQuickModal('aiGenImgModal');
@@ -8896,8 +8922,8 @@ function showChatMessages() {
           row.appendChild(insertBtn);
           previewEl.appendChild(row);
           previewEl.style.display = 'block';
-        }, function() {
-          statusEl.textContent = '生成失败：图片服务不可用或已被拦截（生产环境可配置 AI_IMAGE_GEN_BASE 换用自有生图服务），请稍后重试';
+        }, function(errMsg) {
+          statusEl.textContent = '生成失败：' + (errMsg || '图片服务不可用，请稍后重试');
         });
       });
     }
@@ -8933,9 +8959,9 @@ function showChatMessages() {
               S.messagesEl.appendChild(newCard);
               try { scrollToBottom(S.messagesEl, true); } catch (eSc) {}
             }
-          }, function() {
+          }, function(errMsg) {
             try { regenBtn.disabled = false; regenBtn.textContent = '再生成一张'; } catch (eRb) {}
-            notify('生成失败：图片服务不可用，请稍后重试');
+            notify('生成失败：' + (errMsg || '图片服务不可用，请稍后重试'));
           });
         });
       }

@@ -14614,6 +14614,106 @@ app.get('/api/agent/profile', authenticateUser, async (req, res) => {
     return res.status(500).json({ error: '服务器内部错误' });
   }});
 
+// ===================== AI 生图代理（修复占位图 bug） =====================
+// 背景：默认上游（trae-api-cn.mchost.guru /text_to_image）对未授权请求不再返回真实图片，
+// 而是 302 跳转到静态占位图 .../page_image/default.jpeg（内容为
+// "The image is generating... Please refresh page to preview."）。
+// 旧前端用 <img src> 直连，占位图也是合法 JPEG，onload 照常触发，导致把占位图当成
+// 生成成功展示给用户。此端点在服务端请求上游并识别占位图/鉴权失败，
+// 只有拿到真实图片 URL（或图片本体）才返回给前端，否则返回明确错误。
+const AI_IMAGE_GEN_DEFAULT_UPSTREAM = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image';
+const AI_IMAGE_GEN_TIMEOUT_MS = 45000;
+const AI_IMAGE_GEN_MAX_BYTES = 10 * 1024 * 1024; // 直传图片本体时的大小上限（10MB）
+const AI_IMAGE_GEN_SIZES = ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'];
+// 已知占位图文件名（上游生成中/鉴权失败时 302 到该静态资源）
+function isAiImageGenPlaceholderUrl(url) {
+  try {
+    var u = new URL(url);
+    return /^https?:$/.test(u.protocol) && /\/page_image\/default\.(jpe?g|png|webp)$/i.test(u.pathname);
+  } catch (e) {
+    return false;
+  }
+}
+
+// GET /api/agent/image-gen?prompt=...&image_size=square_hd
+// 成功：{ ok: true, url: <可直接用于 <img> 的图片地址（上游重定向目标或 data: URL）> }
+// 失败：{ ok: false, code, error }，占位图/上游不可用返回 502
+app.get('/api/agent/image-gen', authenticateUser, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var prompt = String((req.query && req.query.prompt) || '').trim();
+    if (!prompt) return res.status(400).json({ ok: false, code: 'invalid_prompt', error: '请先描述要生成的图片' });
+    if (prompt.length > 500) return res.status(400).json({ ok: false, code: 'invalid_prompt', error: '图片描述过长（最多 500 字）' });
+    var size = String((req.query && req.query.image_size) || 'square_hd');
+    if (AI_IMAGE_GEN_SIZES.indexOf(size) < 0) size = 'square_hd';
+
+    var base = String(process.env.AI_IMAGE_GEN_BASE || AI_IMAGE_GEN_DEFAULT_UPSTREAM).replace(/\/+$/, '');
+    var upstreamUrl = base + '?prompt=' + encodeURIComponent(prompt) + '&image_size=' + encodeURIComponent(size);
+
+    var upstreamResp;
+    try {
+      upstreamResp = await fetchWithTimeout(upstreamUrl, {
+        method: 'GET',
+        redirect: 'manual', // 不自动跟随跳转：需要检查 Location 是否为占位图
+        headers: { 'Accept': 'image/*, application/json' }
+      }, AI_IMAGE_GEN_TIMEOUT_MS);
+    } catch (eFetch) {
+      console.error('[AI-IMAGE-GEN] upstream fetch failed:', eFetch && eFetch.message);
+      return res.status(502).json({ ok: false, code: 'IMAGE_GEN_UPSTREAM_UNAVAILABLE', error: '生图服务暂时不可用，请稍后重试' });
+    }
+
+    // 情况一：上游 302/301 跳转（默认上游的正常行为）
+    if (upstreamResp.status >= 300 && upstreamResp.status < 400) {
+      var location = upstreamResp.headers.get('location') || '';
+      var target = '';
+      try { target = new URL(location, upstreamUrl).href; } catch (eUrl) { target = ''; }
+      if (!target || !/^https?:/.test(target)) {
+        console.error('[AI-IMAGE-GEN] upstream redirect without valid location:', String(location).slice(0, 200));
+        return res.status(502).json({ ok: false, code: 'IMAGE_GEN_UPSTREAM_UNAVAILABLE', error: '生图服务返回异常（无效跳转），请稍后重试' });
+      }
+      if (isAiImageGenPlaceholderUrl(target)) {
+        // 占位图 = 上游未授权/生成通道关闭。不再把占位图当成功结果下发。
+        console.warn('[AI-IMAGE-GEN] upstream returned placeholder image (auth/generating), status:', upstreamResp.status);
+        return res.status(502).json({
+          ok: false,
+          code: 'IMAGE_GEN_UPSTREAM_UNAVAILABLE',
+          error: '生图服务暂不可用（上游未授权或已限流），请稍后重试；管理员可配置 AI_IMAGE_GEN_BASE 替换为自有生图服务'
+        });
+      }
+      return res.json({ ok: true, url: target });
+    }
+
+    // 情况二：上游直接返回图片本体（自有生图服务契约）
+    if (upstreamResp.ok) {
+      var contentType = String(upstreamResp.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (contentType.indexOf('image/') === 0) {
+        var buf = Buffer.from(await upstreamResp.arrayBuffer());
+        if (buf.length > AI_IMAGE_GEN_MAX_BYTES) {
+          console.error('[AI-IMAGE-GEN] upstream image too large:', buf.length);
+          return res.status(502).json({ ok: false, code: 'IMAGE_GEN_UPSTREAM_UNAVAILABLE', error: '生成图片过大，请稍后重试' });
+        }
+        return res.json({ ok: true, url: 'data:' + contentType + ';base64,' + buf.toString('base64') });
+      }
+      // 非图片响应（多为上游 JSON 错误，如 {"code":1001,"message":"Authentication failed"}）
+      var errText = '';
+      try { errText = (await upstreamResp.text()).slice(0, 300); } catch (eText) {}
+      console.error('[AI-IMAGE-GEN] upstream non-image response:', upstreamResp.status, contentType, errText);
+      var upMsg = '';
+      try { var upJson = JSON.parse(errText); upMsg = String(upJson.message || upJson.error || ''); } catch (eJson) {}
+      return res.status(502).json({
+        ok: false,
+        code: 'IMAGE_GEN_UPSTREAM_UNAVAILABLE',
+        error: upMsg ? ('生图服务返回错误：' + upMsg.slice(0, 120)) : '生图服务暂不可用，请稍后重试'
+      });
+    }
+
+    console.error('[AI-IMAGE-GEN] upstream http error:', upstreamResp.status);
+    return res.status(502).json({ ok: false, code: 'IMAGE_GEN_UPSTREAM_UNAVAILABLE', error: '生图服务暂时不可用，请稍后重试' });
+  } catch (e) {
+    console.error('[AI-IMAGE-GEN] error:', e && e.message);
+    return res.status(500).json({ ok: false, code: 'image_gen_failed', error: '生成图片失败，请稍后重试' });
+  }
+});
+
 // GET /api/agent/quota — 今日 token / 搜索额度 + Pro 状态（前端 1–2 分钟轮询）
 app.get('/api/agent/quota', authenticateUser, async (req, res) => {
   try {
