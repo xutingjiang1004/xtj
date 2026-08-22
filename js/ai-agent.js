@@ -626,14 +626,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return /\.(pdf|docx|txt|csv|xlsx)$/.test(name);
   }
 
-  var AI_FILE_MAX_BYTES = 7 * 1024 * 1024;
+  var AI_FILE_MAX_BYTES = 7 * 1024 * 1024;          // 附加后最终载荷上限（压缩后）
+  var AI_IMAGE_NO_COMPRESS_BYTES = 2.5 * 1024 * 1024; // 小于该值的小图直接使用，跳过解码压缩
+  var AI_IMAGE_SOURCE_MAX_BYTES = 50 * 1024 * 1024;  // 源图片大小上限（对齐照片墙）
+  var AI_IMAGE_MAX_SIDE = 1600;                      // 压缩后最大边长
+  var AI_IMAGE_QUALITY = 0.85;                       // JPEG 质量
+
   /* 照片附件优化：大图客户端压缩降采样后再附加。
      源文件上限放宽到 50MB（与照片墙一致），不再被 7MB 卡的难受；
      同时压缩后的 DataURL 体积远低于后端 12MB 请求体上限。 */
-  var AI_IMAGE_NOCOMPRESS_BYTES = 2 * 1024 * 1024;   // 小于该值不压缩
-  var AI_IMAGE_SOURCE_MAX_BYTES = 50 * 1024 * 1024;  // 源图片大小上限
-  var AI_IMAGE_MAX_SIDE = 1600;                      // 压缩后最大边长
-  var AI_IMAGE_QUALITY = 0.85;                       // JPEG 质量
 
   function normalizeAiAttachmentFile(file) {
     if (!file) return null;
@@ -693,31 +694,88 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   /**
-   * Shared file-preview loader for normal chat + deep-think composers.
-   * onLoaded({ name, type, dataUrl }) is called after FileReader finishes.
+   * 大图降采样压缩：把超出载荷上限的图片缩放为 AI_IMAGE_MAX_SIDE 以内的 JPEG。
+   * 压缩不了或压完没变小则 resolve(null)（调用方退回原图）。
    */
+  function compressAiAttachmentImage(file) {
+    return new Promise(function(resolve) {
+      try {
+        var passthrough = !file ||
+          String(file.type || '').indexOf('image/') !== 0 ||
+          /\.(gif|svg)$/i.test(file.name || '') ||
+          file.size <= AI_IMAGE_NO_COMPRESS_BYTES;
+        if (passthrough) return resolve(null);
+        var url = URL.createObjectURL(file);
+        var img = new Image();
+        img.onload = function() {
+          try {
+            var w = img.naturalWidth || img.width || 0;
+            var h = img.naturalHeight || img.height || 0;
+            if (!w || !h) { URL.revokeObjectURL(url); return resolve(null); }
+            var scale = Math.min(1, AI_IMAGE_MAX_SIDE / Math.max(w, h));
+            if (scale >= 1) {
+              // 尺寸已在限内：仅当 bytes 仍超载荷上限才转 JPEG 压缩
+              if (file.size <= AI_FILE_MAX_BYTES) { URL.revokeObjectURL(url); return resolve(null); }
+            }
+            var nw = Math.max(1, Math.round(w * scale));
+            var nh = Math.max(1, Math.round(h * scale));
+            var cv = document.createElement('canvas');
+            cv.width = nw; cv.height = nh;
+            var ctx = cv.getContext('2d');
+            if (!ctx) { URL.revokeObjectURL(url); return resolve(null); }
+            ctx.drawImage(img, 0, 0, nw, nh);
+            cv.toBlob(function(blob) {
+              URL.revokeObjectURL(url);
+              if (!blob) return resolve(null);
+              var nf = new File([blob], file.name, { type: 'image/jpeg', lastModified: file.lastModified });
+              if (nf.size >= file.size) return resolve(null); // 没变小则用原图
+              resolve(nf);
+            }, 'image/jpeg', AI_IMAGE_QUALITY);
+          } catch (err) { URL.revokeObjectURL(url); resolve(null); }
+        };
+        img.onerror = function() { URL.revokeObjectURL(url); resolve(null); };
+        img.src = url;
+      } catch (err) { resolve(null); }
+    });
+  }
+
   function readAiAttachmentFile(rawFile, onLoaded, opts) {
     opts = opts || {};
     var file = normalizeAiAttachmentFile(rawFile);
     if (!file) return false;
-    if (!isSupportedAiFile(file) && String(file.type || '').indexOf('image/') !== 0) {
+    var isImage = String(file.type || '').indexOf('image/') === 0;
+    if (!isSupportedAiFile(file) && !isImage) {
       notify(opts.rejectMsg || '仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件');
       return false;
     }
-    if (file.size > AI_FILE_MAX_BYTES) {
-      notify(opts.sizeMsg || '文件不能超过 7MB');
+    // 源文件硬门禁：图片放宽到 50MB（配合压缩降采样），非图片保持 7MB
+    if (file.size > (isImage ? AI_IMAGE_SOURCE_MAX_BYTES : AI_FILE_MAX_BYTES)) {
+      notify(opts.sizeMsg || (isImage ? '图片过大，请压缩后重试' : '文件不能超过 7MB'));
       return false;
     }
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      try {
-        onLoaded({ name: file.name, type: file.type || 'application/octet-stream', dataUrl: e.target.result, size: file.size });
-      } catch (err) {}
+    var deliver = function(finalFile) {
+      if (finalFile.size > AI_FILE_MAX_BYTES) {
+        notify(opts.sizeMsg || '文件不能超过 7MB');
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          onLoaded({ name: file.name, type: finalFile.type || file.type || 'application/octet-stream', dataUrl: e.target.result, size: finalFile.size });
+        } catch (err) {}
+      };
+      reader.onerror = function() {
+        notify('读取文件失败，请重试');
+      };
+      reader.readAsDataURL(finalFile);
     };
-    reader.onerror = function() {
-      notify('读取文件失败，请重试');
-    };
-    reader.readAsDataURL(file);
+    if (isImage) {
+      compressAiAttachmentImage(file).then(function(eff) {
+        deliver(eff || file);
+      }).catch(function() { deliver(file); });
+    } else {
+      deliver(file);
+    }
     return true;
   }
 

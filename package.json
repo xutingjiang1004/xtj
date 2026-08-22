@@ -31,8 +31,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.106.2",
     "@mlc-ai/web-llm": "^0.2.0",
+    "@supabase/supabase-js": "^2.106.2",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "jszip": "^3.10.1",
@@ -49,6 +49,6 @@
     "playwright": "^1.45.3",
     "playwright-core": "^1.45.3",
     "supertest": "^7.2.2",
-    "terser": "^5.48.0"
+    "terser": "^5.50.0"
   }
 }
