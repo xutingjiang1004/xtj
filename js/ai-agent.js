@@ -5428,6 +5428,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (hasMessages) {
           msgs.innerHTML = '';
           hist.data.messages.forEach(function(msg) {
+            // ★ 修复：深度研究记录只持久化了 assistant 一条（无单独 user 行），
+            //   这里按服务端还原出的 research_query 补出「你」的问题气泡，
+            //   避免历史里只有研究报告、没有原始提问，观感残缺。
+            if (msg.is_research && msg.research_query) {
+              var qNode = el('div', { class: 'dt-msg user' });
+              qNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+              qNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.research_query }));
+              msgs.appendChild(qNode);
+            }
             if (msg.role === 'user') {
               var userNode = el('div', { class: 'dt-msg user' });
               userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));

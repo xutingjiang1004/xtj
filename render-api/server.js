@@ -1697,7 +1697,10 @@ async function persistResearchRecord(userName, convId, query, answer, sources) {
       user_name: userName,
       content: payload,
       media_type: AI_AGENT_MESSAGE_MARKER,
-      media_url: JSON.stringify({ role: 'assistant', convId: convId, type: 'tavily_research' }),
+      // ★ 修复：研究记录归属深度研究(deep_think)会话。此前漏写 chat_mode 导致
+      //   /chat/history?mode=deep_think 按会话模式过滤时把整段研究历史丢弃，
+      //   前端退出再进入后表现为「历史研究记录消失」。这里显式标记，便于按会话聚合。
+      media_url: JSON.stringify({ role: 'assistant', convId: convId, type: 'tavily_research', chat_mode: 'deep_think' }),
       actor_key: actorKey,
       created_at: new Date(nowTs).toISOString()
     }).select('id');
@@ -14560,6 +14563,10 @@ function getConversationStorageMode(rows) {
   for (var i = 0; i < (rows || []).length; i++) {
     var meta = parseMsgMeta(rows[i]);
     if (meta && meta.chat_mode === 'deep_think') return 'deep_think';
+    // ★ 修复：兼容修复前已持久化的研究记录（media_url 未带 chat_mode，
+    //   只有 role=assistant + type=tavily_research）。将其一并归入深度研究会话，
+    //   避免 /chat/history?mode=deep_think 把既有研究历史整段过滤掉。
+    if (meta && meta.role === 'assistant' && meta.type === 'tavily_research') return 'deep_think';
   }
   return 'normal';
 }
@@ -19386,11 +19393,21 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
         var m = parseMsgMeta(r);
         var content = r.content || '';
         var reasoning = m.reasoning || '';
+        // 深度研究记录的来源与原问题（tavily_research 类型还原用）
+        var researchQuery = '';
+        var researchSources = [];
         // 兼容旧格式：assistant 消息 content 可能为 JSON { reply, reasoning }
         if (m.role === 'assistant' && !reasoning) {
           try {
             var c = JSON.parse(r.content || '{}');
-            if (c && typeof c.reply === 'string') {
+            if (c && c.type === 'tavily_research' && typeof c.answer === 'string') {
+              // ★ 修复：深度研究记录 content 为 { type, query, answer, sources }。
+              //   此前未映射成 answer，历史卡片会显示原始 JSON；这里还原正文章节，
+              //   并把研究来源数量/原问题带出，供前端历史卡片展示。
+              content = c.answer;
+              researchQuery = typeof c.query === 'string' ? c.query : '';
+              researchSources = Array.isArray(c.sources) ? c.sources : [];
+            } else if (c && typeof c.reply === 'string') {
               reasoning = c.reasoning || '';
               content = c.reply;
             }
@@ -19423,7 +19440,11 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           agent_count: m.agent_count || 0,
           thinking_log: Array.isArray(m.thinking_log) ? m.thinking_log : [],
           worker_results: Array.isArray(m.worker_results) ? m.worker_results : [],
-          think_duration_ms: typeof m.think_duration_ms === 'number' ? m.think_duration_ms : 0
+          think_duration_ms: typeof m.think_duration_ms === 'number' ? m.think_duration_ms : 0,
+          // ★ 深度研究历史：还原出的原问题与来源列表（tavily_research 记录）
+          research_query: researchQuery,
+          research_sources: researchSources,
+          is_research: !!researchQuery || (m.type === 'tavily_research')
         };
       })
     });
