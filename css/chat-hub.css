@@ -397,6 +397,51 @@
 }
 .hub-quota:hover { color: var(--hub-text); background: var(--hub-item-hover); }
 .hub-pro { color: #b8860b; }
+/* 左下角「＋」菜单 */
+.hub-plus { position: relative; flex-shrink: 0; }
+.hub-plusbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px; height: 40px;
+  border: 1px solid var(--hub-line);
+  border-radius: 10px;
+  background: var(--hub-surface);
+  color: var(--hub-text);
+  cursor: pointer;
+}
+.hub-plusbtn svg { width: 22px; height: 22px; display: block; }
+.hub-plusbtn:hover { background: var(--hub-item-hover); border-color: var(--hub-add-border); }
+.hub-plusmenu {
+  position: absolute;
+  left: 0; bottom: calc(100% + 8px);
+  min-width: 210px;
+  background: var(--hub-modal-bg);
+  border: 1px solid var(--hub-line);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(16,24,40,.16);
+  padding: 6px;
+  z-index: 60;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(6px) scale(.98);
+  transform-origin: bottom left;
+  transition: opacity .15s ease, transform .15s ease, visibility .15s;
+}
+.hub-plusmenu.open { visibility: visible; opacity: 1; transform: none; }
+.hub-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--hub-text);
+  cursor: pointer;
+}
+.hub-menu-item:hover { background: var(--hub-item-hover); }
 
 /* 弹窗 / toast */
 .hub-modal-bg {

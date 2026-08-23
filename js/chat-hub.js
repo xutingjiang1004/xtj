@@ -866,62 +866,15 @@ window.__xtjChatHub = (function () {
     siteSearchBtn.addEventListener('click', function () {
       if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') window.__xtjAiAgent.openSiteSearch();
     });
-    var exportBtn = document.createElement('button');
-    exportBtn.type = 'button';
-    exportBtn.className = 'hub-tool';
-    exportBtn.id = 'hubExportBtn';
-    exportBtn.textContent = '📤 导出对话';
-    exportBtn.title = '导出当前对话为 Markdown 文件';
-    exportBtn.addEventListener('click', exportConversation);
     var codeBtn = document.createElement('button');
     codeBtn.type = 'button';
     codeBtn.className = 'hub-tool hub-codebtn';
     codeBtn.textContent = '⌨ 进入代码工作区';
     codeBtn.addEventListener('click', function () { if (onEnterCode) onEnterCode(); });
-    var newChatBtn = document.createElement('button');
-    newChatBtn.type = 'button';
-    newChatBtn.className = 'hub-tool';
-    newChatBtn.id = 'hubNewChatBtn';
-    newChatBtn.textContent = '＋ 新对话';
-    newChatBtn.title = '新建对话';
-    newChatBtn.addEventListener('click', function () { newConversation(); });
-    var genImgBtn = document.createElement('button');
-    genImgBtn.type = 'button';
-    genImgBtn.className = 'hub-tool';
-    genImgBtn.id = 'hubGenImgBtn';
-    genImgBtn.textContent = '🎨 AI生图';
-    genImgBtn.title = 'AI 生成图片';
-    genImgBtn.addEventListener('click', function () {
-      if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openImageGen === 'function') window.__xtjAiAgent.openImageGen();
-      else showToast('AI生图暂不可用');
-    });
-    tools.appendChild(newChatBtn);
     tools.appendChild(searchBtn); tools.appendChild(thinkSel);
     tools.appendChild(researchBtn); tools.appendChild(siteSearchBtn);
-    tools.appendChild(exportBtn); tools.appendChild(genImgBtn); tools.appendChild(codeBtn);
-    // 额度徽章 + 开通 Pro
-    var quotaBadge = document.createElement('button');
-    quotaBadge.type = 'button';
-    quotaBadge.className = 'hub-quota';
-    quotaBadge.id = 'hubQuotaBadge';
-    quotaBadge.title = '点击刷新今日额度';
-    quotaBadge.textContent = '额度…';
-    quotaBadge.addEventListener('click', loadQuota);
-    var proBadge = document.createElement('button');
-    proBadge.type = 'button';
-    proBadge.className = 'hub-tool hub-pro';
-    proBadge.id = 'hubProBadge';
-    proBadge.textContent = '⭐ 开通 Pro';
-    proBadge.addEventListener('click', function () {
-      if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openPro === 'function') window.__xtjAiAgent.openPro();
-      else showToast('Pro 暂不可用');
-    });
-    var headRight = document.createElement('div');
-    headRight.className = 'hub-headright';
-    headRight.appendChild(quotaBadge); headRight.appendChild(proBadge);
-    _els.quotaBadge = quotaBadge;
+    tools.appendChild(codeBtn);
     header.appendChild(pick); header.appendChild(tools);
-    header.appendChild(headRight);
 
     var thread = document.createElement('div');
     thread.className = 'hub-thread';
@@ -940,24 +893,58 @@ window.__xtjChatHub = (function () {
     voiceBtn.id = 'hubVoiceBtn';
     voiceBtn.title = '语音输入' + (window.SpeechRecognition || window.webkitSpeechRecognition ? '' : '（当前浏览器不支持）');
     voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
-    var attachBtn = document.createElement('button');
-    attachBtn.type = 'button';
-    attachBtn.className = 'hub-attach';
-    attachBtn.id = 'hubAttachBtn';
-    attachBtn.title = '上传照片或文件';
-    attachBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.4 11.05 12.71 19.7a5 5 0 0 1-7.07-7.07l8.26-8.26a3 3 0 0 1 4.24 4.24l-8.26 8.26a1 1 0 0 1-1.41-1.41l8.26-8.26"/></svg>';
     var fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.id = 'hubAttachInput';
     fileInput.accept = 'image/*,.pdf,.docx,.txt,.csv,.xlsx,audio/*';
     fileInput.multiple = false;
     fileInput.style.display = 'none';
-    attachBtn.addEventListener('click', function () { fileInput.click(); });
     fileInput.addEventListener('change', function () {
       var f = this.files && this.files[0];
       if (f) readAttachmentFile(f);
       this.value = '';
     });
+    // 左下角「＋」菜单（上传 / 生图 / 新对话 / 导出 / 开通Pro / 额度）
+    var plusWrap = document.createElement('div');
+    plusWrap.className = 'hub-plus';
+    var plusBtn = document.createElement('button');
+    plusBtn.type = 'button';
+    plusBtn.className = 'hub-plusbtn';
+    plusBtn.id = 'hubPlusBtn';
+    plusBtn.title = '更多选项';
+    plusBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    var plusMenu = document.createElement('div');
+    plusMenu.className = 'hub-plusmenu';
+    plusMenu.id = 'hubPlusMenu';
+    function hidePlusMenu() { if (_els.plus) _els.plus.classList.remove('open'); }
+    function menuItem(label, fn) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'hub-menu-item';
+      b.textContent = label;
+      b.addEventListener('click', function () { hidePlusMenu(); fn(); });
+      plusMenu.appendChild(b);
+      return b;
+    }
+    menuItem('📎 上传照片或文件', function () { fileInput.click(); });
+    menuItem('🎨 AI生图', function () {
+      if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openImageGen === 'function') window.__xtjAiAgent.openImageGen();
+      else showToast('AI生图暂不可用');
+    });
+    menuItem('＋ 新对话', function () { newConversation(); });
+    menuItem('📤 导出对话', function () { exportConversation(); });
+    menuItem('⭐ 开通 Pro', function () {
+      if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openPro === 'function') window.__xtjAiAgent.openPro();
+      else showToast('Pro 暂不可用');
+    });
+    var quotaItem = menuItem('额度…', function () { loadQuota(); });
+    _els.quotaBadge = quotaItem;
+    plusBtn.addEventListener('click', function (ev) { ev.stopPropagation(); plusMenu.classList.toggle('open'); });
+    document.addEventListener('click', function (ev) {
+      if (_els.plus && !_els.plus.contains(ev.target) && _els.plusBtn && !_els.plusBtn.contains(ev.target)) hidePlusMenu();
+    });
+    plusWrap.appendChild(plusBtn); plusWrap.appendChild(plusMenu);
+    _els.plus = plusMenu; _els.plusBtn = plusBtn;
     var filePreview = document.createElement('div');
     filePreview.className = 'hub-file-preview';
     filePreview.id = 'hubAttachPreview';
@@ -979,8 +966,8 @@ window.__xtjChatHub = (function () {
     sendBtn.addEventListener('click', function () {
       if (streaming) stopStream(); else send();
     });
+    composer.appendChild(plusWrap);
     composer.appendChild(voiceBtn);
-    composer.appendChild(attachBtn);
     composer.appendChild(fileInput);
     composer.appendChild(ta);
     composer.appendChild(sendBtn);
