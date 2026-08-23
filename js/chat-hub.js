@@ -46,6 +46,7 @@ window.__xtjChatHub = (function () {
   var streaming = false;
   var aborter = null;
   var conversations = [];
+  var _attachFile = null;   // 当前待发送附件 { name, type, dataUrl, size }
   var _els = {};
 
   function isLoggedIn() {
@@ -293,12 +294,18 @@ window.__xtjChatHub = (function () {
   async function send() {
     var input = _els.input;
     var text = (input.value || '').trim();
-    if (!text || streaming) return;
+    var attach = _attachFile;
+    if ((!text && !attach) || streaming) return;
     if (input) input.value = '';
     autoGrow();
-    messages.push({ role: 'user', content: text });
+    var display = text || (attach ? '🖼 上传了 ' + attach.name : '');
+    messages.push({ role: 'user', content: display });
     renderMessages();
-    startStream(text);
+    if (text) { input.value = ''; autoGrow(); }
+    // 发送后清空附件并隐藏预览
+    _attachFile = null;
+    renderAttachPreview();
+    startStream(text, attach);
   }
 
   function stopStream() {
@@ -322,7 +329,7 @@ window.__xtjChatHub = (function () {
     return hl;
   }
 
-  async function startStream(text) {
+  async function startStream(text, attach) {
     // 标记这条 user 为待回复
     messages[messages.length - 1]._pending = true;
     var isCustom = selected.type === 'custom' && selected.custom;
@@ -336,15 +343,22 @@ window.__xtjChatHub = (function () {
 
     var payload;
     if (isCustom) {
+      // 第三方模型：图片以 dataURL 内联进消息，保证视觉可用
+      var fwdText = text;
+      if (attach && String(attach.type).indexOf('image/') === 0) {
+        fwdText = (text ? text + '\n' : '') + '![image](' + attach.dataUrl + ')';
+      } else if (!text && attach) {
+        fwdText = '[附件: ' + attach.name + ']';
+      }
       payload = {
         provider: selected.custom.provider,
         api_key: selected.custom.api_key,
         model: selected.custom.model,
         base_url: selected.custom.base_url,
-        message: text,
+        message: fwdText,
         messages: messages.map(function (mm) {
           return mm.role === 'user' && mm._pending
-            ? { role: 'user', content: text }
+            ? { role: 'user', content: fwdText }
             : { role: mm.role, content: String(mm.content || '') };
         }).filter(function (mm) { return (mm.content || '').trim(); }),
         thinking_mode: thinkMode,
@@ -354,12 +368,13 @@ window.__xtjChatHub = (function () {
       };
     } else {
       payload = {
-        message: text,
+        message: text || (attach ? '（上传了附件：' + attach.name + '，请查看并回复）' : ''),
         conversation_id: convId || undefined,
         client_request_id: reqId,
         thinking_mode: thinkMode,
         web_search: webSearch === true,
-        model: selected.value
+        model: selected.value,
+        attachments: attach ? [{ name: attach.name, type: attach.type, data_url: attach.dataUrl }] : undefined
       };
     }
 
@@ -649,6 +664,70 @@ window.__xtjChatHub = (function () {
     showToast('已导出 Markdown 文件');
   }
 
+  // ─── 附件 / 语音（从原聊天界面迁回） ───
+  function readAttachmentFile(rawFile) {
+    var type = String(rawFile.type || '');
+    var isImage = type.indexOf('image/') === 0;
+    var okName = /\.(pdf|docx|txt|csv|xlsx?)$/i.test(rawFile.name || '');
+    if (!isImage && !okName) { showToast('仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件'); return; }
+    if (rawFile.size > 7 * 1024 * 1024) { showToast('文件不能超过 7MB'); return; }
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      _attachFile = { name: rawFile.name, type: type || 'application/octet-stream', dataUrl: e.target.result, size: rawFile.size };
+      renderAttachPreview();
+    };
+    reader.onerror = function () { showToast('读取文件失败，请重试'); };
+    reader.readAsDataURL(rawFile);
+  }
+
+  function renderAttachPreview() {
+    var fp = _els.filePreview;
+    if (!fp) return;
+    if (!_attachFile) { fp.style.display = 'none'; fp.innerHTML = ''; return; }
+    fp.innerHTML = '';
+    var isImage = String(_attachFile.type).indexOf('image/') === 0;
+    var thumb = isImage ? '<img class="hub-file-thumb" src="' + _attachFile.dataUrl + '">' : '<span class="hub-file-icon">📄</span>';
+    var kb = Math.round((_attachFile.dataUrl.length * 3 / 4) / 1024);
+    fp.innerHTML = thumb + '<span class="hub-file-info">' + esc(_attachFile.name) + ' (' + kb + 'KB)</span><button type="button" class="hub-file-remove" title="移除">×</button>';
+    fp.style.display = 'flex';
+    var rm = fp.querySelector('.hub-file-remove');
+    if (rm) rm.addEventListener('click', function () { _attachFile = null; renderAttachPreview(); });
+  }
+
+  function bindVoiceInput(btn, input) {
+    if (!btn || !input) return;
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var rec = null;
+    var listening = false;
+    var baseText = '';
+    btn.addEventListener('click', function () {
+      if (!SR) { showToast('当前浏览器不支持语音输入，请用桌面版 Chrome 或 Edge'); return; }
+      if (listening) { try { rec.stop(); } catch (e) {} return; }
+      try {
+        rec = new SR();
+        rec.lang = 'zh-CN';
+        rec.interimResults = true;
+        rec.continuous = false;
+        listening = true;
+        baseText = String(input.value || '').replace(/\s+$/, '');
+        btn.classList.add('listening');
+        rec.onresult = function (ev) {
+          var transcript = '';
+          for (var i = 0; i < ev.results.length; i++) { if (ev.results[i] && ev.results[i][0]) transcript += ev.results[i][0].transcript; }
+          if (!transcript) return;
+          input.value = baseText ? (baseText + ' ' + transcript) : transcript;
+          autoGrow();
+        };
+        rec.onend = function () { listening = false; btn.classList.remove('listening'); };
+        rec.onerror = function (ev) {
+          listening = false; btn.classList.remove('listening');
+          if (ev && ev.error && ev.error !== 'aborted' && ev.error !== 'no-speech') showToast('语音识别失败：' + ev.error);
+        };
+        rec.start();
+      } catch (e) { listening = false; btn.classList.remove('listening'); showToast('语音输入不可用'); }
+    });
+  }
+
   // ─── DOM ───
   function autoGrow() {
     var t = _els.input;
@@ -792,6 +871,42 @@ window.__xtjChatHub = (function () {
 
     var composer = document.createElement('footer');
     composer.className = 'hub-composer';
+    var voiceBtn = document.createElement('button');
+    voiceBtn.type = 'button';
+    voiceBtn.className = 'hub-voice';
+    voiceBtn.id = 'hubVoiceBtn';
+    voiceBtn.title = '语音输入' + (window.SpeechRecognition || window.webkitSpeechRecognition ? '' : '（当前浏览器不支持）');
+    voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
+    var attachPhotoBtn = document.createElement('button');
+    attachPhotoBtn.type = 'button';
+    attachPhotoBtn.className = 'hub-attach';
+    attachPhotoBtn.id = 'hubPhotoBtn';
+    attachPhotoBtn.title = '上传照片';
+    attachPhotoBtn.textContent = '🖼';
+    var attachFileBtn = document.createElement('button');
+    attachFileBtn.type = 'button';
+    attachFileBtn.className = 'hub-attach';
+    attachFileBtn.id = 'hubFileBtn';
+    attachFileBtn.title = '上传文件';
+    attachFileBtn.textContent = '📎';
+    var fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.id = 'hubAttachInput';
+    fileInput.accept = 'image/*,.pdf,.docx,.txt,.csv,.xlsx';
+    fileInput.multiple = false;
+    fileInput.style.display = 'none';
+    attachPhotoBtn.addEventListener('click', function () { fileInput.click(); });
+    attachFileBtn.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () {
+      var f = this.files && this.files[0];
+      if (f) readAttachmentFile(f);
+      this.value = '';
+    });
+    var filePreview = document.createElement('div');
+    filePreview.className = 'hub-file-preview';
+    filePreview.id = 'hubAttachPreview';
+    filePreview.style.display = 'none';
+    _els.filePreview = filePreview;
     var ta = document.createElement('textarea');
     ta.id = 'hubInput';
     ta.rows = 1;
@@ -808,8 +923,15 @@ window.__xtjChatHub = (function () {
     sendBtn.addEventListener('click', function () {
       if (streaming) stopStream(); else send();
     });
-    composer.appendChild(ta); composer.appendChild(sendBtn);
+    composer.appendChild(voiceBtn);
+    composer.appendChild(attachPhotoBtn);
+    composer.appendChild(attachFileBtn);
+    composer.appendChild(fileInput);
+    composer.appendChild(ta);
+    composer.appendChild(sendBtn);
     _els.input = ta; _els.sendBtn = sendBtn;
+    bindVoiceInput(voiceBtn, ta);
+    composer.insertBefore(filePreview, ta);
 
     main.appendChild(header); main.appendChild(thread); main.appendChild(composer);
     root.appendChild(aside); root.appendChild(main);

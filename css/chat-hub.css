@@ -338,6 +338,42 @@
 }
 .hub-send:hover { background: var(--hub-send-hover); }
 .hub-send.is-busy { background: var(--hub-send-busy); }
+/* 输入区附加功能：语音 / 照片 / 文件 */
+.hub-voice, .hub-attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px; height: 38px;
+  flex-shrink: 0;
+  border: 1px solid var(--hub-line);
+  border-radius: 10px;
+  background: var(--hub-surface);
+  color: var(--hub-sub);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  margin-bottom: 0;
+}
+.hub-voice:hover, .hub-attach:hover { background: var(--hub-item-hover); color: var(--hub-text); }
+.hub-voice.listening { color: var(--hub-red); border-color: var(--hub-red); background: rgba(229,72,77,.1); }
+.hub-file-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid var(--hub-line);
+  border-radius: 8px;
+  background: var(--hub-side);
+  color: var(--hub-text);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.hub-file-thumb { width: 26px; height: 26px; object-fit: cover; border-radius: 6px; }
+.hub-file-icon { font-size: 16px; line-height: 1; }
+.hub-file-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.hub-file-remove { border: 0; background: transparent; color: var(--hub-sub); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+.hub-file-remove:hover { color: var(--hub-red); }
 
 /* 弹窗 / toast */
 .hub-modal-bg {
