@@ -8968,20 +8968,27 @@ function showChatMessages() {
     // page to preview.」这类占位图，稍后才在同一 URL 返回成图。原实现把占位图当作
     // 成功结果直接塞进卡片，用户只能手动刷新才看到真图。这里对同一 URL 做有限次重试，
     // 让成图尽快落地；仍拿不到（占位或连不上）再回调失败/成功交由调用方处理。
-    function loadGenImage(prompt, onOk, onErr, attempt) {
+    function loadGenImage(prompt, onOk, onErr, attempt, fixedUrl) {
       attempt = attempt || 0;
-      // 重试时带缓存穿透参数，确保每次都真正请求服务端成图而非命中的占位图缓存
-      var url = genImageApiUrl(prompt, attempt > 0);
+      // 复用同一个 URL 轮询：生图服务按 URL（含 prompt/image_size）去重，
+      // 同一 URL 会先返回「generating…」占位、稍后才返回成图。
+      // 若每次重试都追加上新的 _r 缓存穿透参数，会改变 URL、被认为是新生成
+      // 任务，导致永远拿不到成图。因此仅在首次允许一次缓存穿透取原 URL，
+      // 之后重试必须复用同一 URL 等待服务端把成图落到该地址。
+      var url = fixedUrl || genImageApiUrl(prompt, true);
       var img = new Image();
       var done = false;
       var timer = null;
       img.onload = function() {
         if (done) return;
-        if (attempt < 4) {
+        // 生成通常需数秒，递增间隔多次重试（总等待约 12s）命中最终成图，
+        // 避免用户手动刷新页面才看到图。
+        if (attempt < 10) {
+          var delay = 500 + attempt * 1100;
           timer = setTimeout(function() {
             if (done) return;
-            loadGenImage(prompt, onOk, onErr, attempt + 1);
-          }, 500);
+            loadGenImage(prompt, onOk, onErr, attempt + 1, url);
+          }, delay);
           return;
         }
         done = true;
@@ -8990,17 +8997,25 @@ function showChatMessages() {
       };
       img.onerror = function() {
         if (done) return;
-        if (attempt < 3) {
+        if (attempt < 6) {
+          var errDelay = 500 + attempt * 900;
           timer = setTimeout(function() {
             if (done) return;
-            loadGenImage(prompt, onOk, onErr, attempt + 1);
-          }, 400);
+            loadGenImage(prompt, onOk, onErr, attempt + 1, url);
+          }, errDelay);
           return;
         }
         done = true;
         onErr();
       };
       img.src = url;
+      // 若首次带缓存穿透的参数仍拿到占位，且重试同 URL 也被浏览器缓存命中，
+      // 需要强制 no-cache 拉取最新成图：给 img 附加 cache-buster 仅用于本次加载。
+      var pendingBust = genImageApiUrl(prompt, true);
+      if (pendingBust !== url && attempt > 0) {
+        img.src = pendingBust;
+        setTimeout(function() { if (!done) img.src = url; }, 600);
+      }
     }
     function openImageGenModal() {
       closeQuickModal('aiGenImgModal');

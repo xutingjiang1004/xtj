@@ -637,9 +637,24 @@ window.__xtjChatHub = (function () {
 
     var aside = document.createElement('aside');
     aside.className = 'hub-sidebar';
+    var logoRow = document.createElement('div');
+    logoRow.className = 'hub-logo-row';
     var logo = document.createElement('div');
     logo.className = 'hub-logo';
     logo.textContent = 'AI 对话中转站';
+    var foldBtn = document.createElement('button');
+    foldBtn.type = 'button';
+    foldBtn.className = 'hub-fold';
+    foldBtn.title = '折叠 / 展开最近对话';
+    foldBtn.innerHTML = '<span class="hub-fold-caret">‹</span>';
+    foldBtn.addEventListener('click', function () {
+      var list = _els.list;
+      if (!list) return;
+      var collapsed = !list.classList.contains('hub-collapsed');
+      list.classList.toggle('hub-collapsed', collapsed);
+      foldBtn.classList.toggle('is-collapsed', collapsed);
+    });
+    logoRow.appendChild(logo); logoRow.appendChild(foldBtn);
     var newBtn = document.createElement('button');
     newBtn.type = 'button';
     newBtn.className = 'hub-new';
@@ -651,7 +666,7 @@ window.__xtjChatHub = (function () {
     var asideBottom = document.createElement('div');
     asideBottom.className = 'hub-sidebar-foot';
     asideBottom.textContent = isLoggedIn() ? '已登录' : '未登录';
-    aside.appendChild(logo); aside.appendChild(newBtn);
+    aside.appendChild(logoRow); aside.appendChild(newBtn);
     aside.appendChild(listWrap); aside.appendChild(asideBottom);
     _els.list = listWrap;
 
