@@ -370,6 +370,8 @@
     // P0: 每个模块独立状态
     modules: {
       'code-fs':      { status: 'idle', url: '', startTime: 0 },
+      'chat-hub':     { status: 'idle', url: '', startTime: 0 },
+      'chat-hub-css': { status: 'idle', url: '', startTime: 0 },
       'code-workspace': { status: 'idle', url: '', startTime: 0 },
       'code-css':     { status: 'idle', url: '', startTime: 0 },
       'code-claude-css': { status: 'idle', url: '', startTime: 0 }
@@ -530,6 +532,12 @@
     var loadPromise = Promise.all([
       loadModuleWithTimeout('code-fs', 'xtj-module-code-fs', function () {
         return loadModuleScript('code-fs', 'xtj-module-code-fs');
+      }),
+      loadModuleWithTimeout('chat-hub', 'xtj-module-chat-hub', function () {
+        return loadModuleScript('chat-hub', 'xtj-module-chat-hub');
+      }),
+      loadModuleWithTimeout('chat-hub-css', 'xtj-module-chat-hub-style', function () {
+        return loadModuleStyle('chat-hub-css', 'xtj-module-chat-hub-style');
       }),
       loadModuleWithTimeout('code-workspace', 'xtj-module-code-workspace', function () {
         return loadModuleScript('code-workspace', 'xtj-module-code-workspace');
@@ -870,6 +878,9 @@
   function verifyModule(id) {
     if (id === 'code-fs') {
       return !!(window.__xtjCodeFS && typeof window.__xtjCodeFS.readFileByPath === 'function');
+    }
+    if (id === 'chat-hub') {
+      return !!(window.__xtjChatHub && typeof window.__xtjChatHub.init === 'function');
     }
     if (id === 'code-workspace') {
       return !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
