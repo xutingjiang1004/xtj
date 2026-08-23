@@ -16491,6 +16491,25 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
   var controller = new AbortController();
   var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
   var reqId = String(body.client_request_id || '').slice(0, 64);
+
+  // ★ 多轮上下文：优先使用前端传来的 messages 历史；否则退化为单轮。
+  //   逐条 sanitize，仅保留 {role, content}，限制条数与单条长度，防止超长/注入。
+  var fwdMessages = [{ role: 'user', content: text }];
+  if (Array.isArray(body.messages) && body.messages.length) {
+    var built = [];
+    var srcMsgs = body.messages.slice(-20);
+    for (var _mi = 0; _mi < srcMsgs.length; _mi++) {
+      var _m = srcMsgs[_mi];
+      if (!_m || typeof _m.content !== 'string') continue;
+      var _role = String(_m.role || '');
+      if (_role !== 'user' && _role !== 'assistant') continue;
+      var _c = _m.content.trim();
+      if (!_c) continue;
+      built.push({ role: _role, content: _c.slice(0, 8000) });
+    }
+    if (built.length) fwdMessages = built;
+  }
+
   try {
     var upstream = await fetch(baseUrl + '/chat/completions', {
       method: 'POST',
@@ -16500,7 +16519,7 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
       },
       body: JSON.stringify({
         model: chosenModel,
-        messages: [{ role: 'user', content: text }],
+        messages: fwdMessages,
         stream: true
       }),
       signal: controller.signal
