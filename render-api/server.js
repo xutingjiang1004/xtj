@@ -17854,6 +17854,36 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     clearTimeout(timer);
     
     if (!streamResp.ok) {
+      // ★ 降级重试：部分 DeepSeek 端点/网关不认 thinking / reasoning_effort / tools 等
+      //   附加字段，普通对话（思考 off、无搜索）也可能返回 4xx「请求参数被拒绝」。
+      //   在此剥离这些字段、用最简 body 重试一次；成功则继续正常流式读取，
+      //   避免「AI 请求参数被拒绝」反复出现、用户无法对话。
+      if (streamResp.status >= 400 && streamResp.status < 500
+          && streamResp.status !== 401 && streamResp.status !== 403 && streamResp.status !== 429) {
+        var _cleanBody = { model: apiBody.model, messages: apiBody.messages, stream: true };
+        try {
+          clearTimeout(timer);
+          timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+          var _degradedResp = await fetch(DEEPSEEK_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+            body: JSON.stringify(_cleanBody),
+            signal: controller.signal
+          });
+          clearTimeout(timer);
+          if (_degradedResp && _degradedResp.ok) {
+            streamResp = _degradedResp;
+          } else {
+            if (_degradedResp && _degradedResp.body && _degradedResp.body.cancel) { try { await _degradedResp.body.cancel(); } catch (_) {} }
+          }
+        } catch (_d) {
+          clearTimeout(timer);
+          if (aborted) return safeEnd();
+        }
+      }
+    }
+
+    if (!streamResp.ok) {
       try {
         var errData = await streamResp.json().catch(function(){ return {}; });
         var errMsg = errData && errData.error && errData.error.message ? String(errData.error.message).slice(0, 200) : '';
