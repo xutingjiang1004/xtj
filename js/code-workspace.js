@@ -778,11 +778,12 @@
   // ──────────────────────────────────────────────
   // AI 对话中转站（默认首页）与「进入代码工作区」切换
   // ──────────────────────────────────────────────
-  function renderChatHub() {
+  function renderChatHub(force) {
     var hub = window.__xtjChatHub;
     if (!hub || typeof hub.init !== 'function') return false;
     if (!_dom.panelCode) return false;
-    if (hub.isActive && hub.isActive()) return true;
+    // force（如从代码工作区点「返回对话」）时忽略 isActive，强制重建中转站
+    if (!force && hub.isActive && hub.isActive()) return true;
     var res;
     try {
       res = hub.init(_dom.panelCode, { onEnterCode: enterCodeWorkspace });
@@ -901,6 +902,7 @@
     welcome.className = 'code-welcome';
 
     welcome.innerHTML =
+      '<button class="code-back-hub-btn" type="button" title="返回 AI 对话">← 返回 AI 对话</button>' +
       '<div class="welcome-icon">📁</div>' +
       '<h2 class="welcome-title">Code</h2>' +
       '<p class="welcome-desc">选择 GitHub 仓库、本地文件夹或单个文件，浏览和编辑内容，或使用 AI 助手进行代码操作。</p>' +
@@ -920,6 +922,12 @@
     _dom.panelCode.appendChild(welcome);
 
     // Bind GitHub repo button
+    var backHubBtn2 = welcome.querySelector('.code-back-hub-btn');
+    if (backHubBtn2) {
+      backHubBtn2.addEventListener('click', function () {
+        renderChatHub(true);
+      });
+    }
     var githubBtn = document.getElementById('codeWelcomeGitHubBtn');
     if (githubBtn) {
       githubBtn.addEventListener('click', function () {
@@ -1944,6 +1952,7 @@
         '<button class="folder-picker-btn file-picker-btn" title="直接打开文件">📄</button>' +
         '<button class="folder-picker-btn new-file-btn" title="新建文件" aria-label="新建文件"></button>' +
         '<button class="folder-picker-btn refresh-tree-btn" title="刷新文件树" aria-label="刷新文件树"></button>' +
+        '<button class="folder-picker-btn back-hub-btn" title="返回 AI 对话" aria-label="返回 AI 对话"></button>' +
         '<button class="code-panel-action-btn fold-sidebar-btn" title="折叠侧边栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>' +
       '</span>';
     
@@ -1965,6 +1974,16 @@
       refreshTreeBtn.addEventListener('click', function () {
         refreshFileTree();
         showToast('文件树已刷新', 'success');
+      });
+    }
+    var backHubBtn = sidebarHeader.querySelector('.back-hub-btn');
+    if (backHubBtn) {
+      backHubBtn.innerHTML = '↩';
+      backHubBtn.style.fontSize = '16px';
+      backHubBtn.style.lineHeight = '1';
+      backHubBtn.addEventListener('click', function () {
+        // 返回 AI 对话页（中转站 / 小猫AI 首页）
+        renderChatHub(true);
       });
     }
     var foldSidebarBtn = sidebarHeader.querySelector('.fold-sidebar-btn');

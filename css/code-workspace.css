@@ -2391,6 +2391,7 @@
   padding: 48px 32px;
   text-align: center;
   color: var(--cw-text-muted);
+  position: relative;
 }
 
 .code-welcome .welcome-icon {
@@ -2406,6 +2407,22 @@
   opacity: 0.2;
   margin-bottom: 8px;
 }
+.code-back-hub-btn {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 5;
+  border: 1px solid var(--cw-border, rgba(128,128,128,.3));
+  background: var(--cw-surface, #ffffff);
+  color: var(--cw-text, #1f2329);
+  font-size: 13px;
+  line-height: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.code-back-hub-btn:hover { background: var(--cw-item-hover, rgba(128,128,128,.12)); }
 
 .code-welcome .welcome-icon svg,
 .code-placeholder-icon svg {

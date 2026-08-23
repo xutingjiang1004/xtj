@@ -77,6 +77,14 @@
 .hub-fold .hub-fold-caret { display: inline-block; transition: transform .2s; }
 .hub-fold.is-collapsed .hub-fold-caret { transform: rotate(180deg); }
 .hub-conv-list.hub-collapsed { display: none; }
+/* 折叠整个左侧栏：仅保留折叠按钮，最大化对话区宽度 */
+.hub-sidebar { transition: width .2s ease, min-width .2s ease; }
+.hub-sidebar.hub-collapsed { width: 44px; min-width: 44px; }
+.hub-sidebar.hub-collapsed .hub-logo,
+.hub-sidebar.hub-collapsed .hub-new,
+.hub-sidebar.hub-collapsed .hub-conv-list,
+.hub-sidebar.hub-collapsed .hub-sidebar-foot { display: none; }
+.hub-sidebar.hub-collapsed .hub-logo-row { padding: 18px 6px 12px; justify-content: center; }
 .hub-new {
   margin: 4px 12px 10px;
   padding: 10px 12px;

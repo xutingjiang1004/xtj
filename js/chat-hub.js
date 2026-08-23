@@ -641,17 +641,18 @@ window.__xtjChatHub = (function () {
     logoRow.className = 'hub-logo-row';
     var logo = document.createElement('div');
     logo.className = 'hub-logo';
-    logo.textContent = 'AI 对话中转站';
+    logo.textContent = 'AI 对话';
     var foldBtn = document.createElement('button');
     foldBtn.type = 'button';
     foldBtn.className = 'hub-fold';
-    foldBtn.title = '折叠 / 展开最近对话';
+    foldBtn.title = '折叠 / 展开左侧栏';
     foldBtn.innerHTML = '<span class="hub-fold-caret">‹</span>';
     foldBtn.addEventListener('click', function () {
-      var list = _els.list;
-      if (!list) return;
-      var collapsed = !list.classList.contains('hub-collapsed');
-      list.classList.toggle('hub-collapsed', collapsed);
+      // ★ 折叠整个左侧栏（含 AI 对话、新建对话、历史列表），而非只收起最近对话
+      var sb = _els.sidebar;
+      if (!sb) return;
+      var collapsed = !sb.classList.contains('hub-collapsed');
+      sb.classList.toggle('hub-collapsed', collapsed);
       foldBtn.classList.toggle('is-collapsed', collapsed);
     });
     logoRow.appendChild(logo); logoRow.appendChild(foldBtn);
@@ -668,7 +669,7 @@ window.__xtjChatHub = (function () {
     asideBottom.textContent = isLoggedIn() ? '已登录' : '未登录';
     aside.appendChild(logoRow); aside.appendChild(newBtn);
     aside.appendChild(listWrap); aside.appendChild(asideBottom);
-    _els.list = listWrap;
+    _els.sidebar = aside; _els.list = listWrap;
 
     var main = document.createElement('section');
     main.className = 'hub-main';
@@ -718,12 +719,32 @@ window.__xtjChatHub = (function () {
     });
     thinkSel.value = thinkMode;
     thinkSel.addEventListener('change', function () { thinkMode = thinkSel.value; });
+    var researchBtn = document.createElement('button');
+    researchBtn.type = 'button';
+    researchBtn.className = 'hub-tool';
+    researchBtn.id = 'hubResearchBtn';
+    researchBtn.textContent = '🔎 深度研究';
+    researchBtn.title = '多步检索与长文分析';
+    researchBtn.addEventListener('click', function () {
+      if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openDeepThink === 'function') window.__xtjAiAgent.openDeepThink();
+    });
+    var siteSearchBtn = document.createElement('button');
+    siteSearchBtn.type = 'button';
+    siteSearchBtn.className = 'hub-tool';
+    siteSearchBtn.id = 'hubSiteSearchBtn';
+    siteSearchBtn.textContent = '🔍 站内搜索';
+    siteSearchBtn.title = '搜帖子与评论';
+    siteSearchBtn.addEventListener('click', function () {
+      if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') window.__xtjAiAgent.openSiteSearch();
+    });
     var codeBtn = document.createElement('button');
     codeBtn.type = 'button';
     codeBtn.className = 'hub-tool hub-codebtn';
     codeBtn.textContent = '⌨ 进入代码工作区';
     codeBtn.addEventListener('click', function () { if (onEnterCode) onEnterCode(); });
-    tools.appendChild(searchBtn); tools.appendChild(thinkSel); tools.appendChild(codeBtn);
+    tools.appendChild(searchBtn); tools.appendChild(thinkSel);
+    tools.appendChild(researchBtn); tools.appendChild(siteSearchBtn);
+    tools.appendChild(codeBtn);
     header.appendChild(pick); header.appendChild(tools);
 
     var thread = document.createElement('div');
