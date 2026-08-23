@@ -7034,6 +7034,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         base_url: customCfg.base_url,
         message: text,
         messages: hl,
+        thinking_mode: _sendThinkingMode,
+        web_search: S.webSearchEnabled === true,
         client_request_id: reqId,
         timeout_ms: 180000
       });
