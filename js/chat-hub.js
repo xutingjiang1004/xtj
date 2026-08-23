@@ -428,22 +428,30 @@ window.__xtjChatHub = (function () {
             continue;
           }
           if (evt.type === 'reasoning') {
-            assistant.reasoning += String(evt.reasoning || evt.delta || '');
+            // 后端 reasoning 事件字段是 text（如 {type:'reasoning', text}）
+            assistant.reasoning += String(evt.text || evt.reasoning || evt.delta || '');
             updateStreamingRow(status, assistant);
             continue;
           }
           if (evt.type === 'content') {
-            var d = String(evt.delta || evt.content || '');
+            // 后端 content 事件字段是 text（{type:'content', text}），此前误用 delta/content 读不到内容
+            var d = String(evt.text || evt.delta || evt.content || '');
             if (d) { sawContent = true; assistant.content += d; updateStreamingRow(status, assistant); }
             continue;
           }
           if (evt.type === 'broken') {
-            assistant.content += String(evt.delta || evt.reasoning_part || '');
+            assistant.content += String(evt.text || evt.delta || evt.reasoning_part || '');
             updateStreamingRow(status, assistant);
             continue;
           }
           if (evt.type === 'done') {
             if (evt.conversation_id) convId = evt.conversation_id;
+            // 兜底：流式 delta 若未捕获到正文（缺包/清空），用 done 携带的完整内容补全
+            if (evt.content && !assistant.content) {
+              assistant.content = String(evt.content);
+              sawContent = true;
+              updateStreamingRow(status, assistant);
+            }
             done = true;
             // 清除待回复标记
             clearPendingFlag();
