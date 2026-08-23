@@ -485,7 +485,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       return { ok: true };
     }
-    if (q.can_chat === false || (typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0)) {
+    // tokens_limit === -1 表示无限额度（与 search 一致）。此时服务端把
+    // tokens_remaining 置为 -1，旧判断 `tokens_remaining <= 0` 会把「无限」误判为
+    // 「已用完」而拦截，导致兑换无限额邀请码后仍提示额度不足。改为以 can_chat 为主，
+    // 仅在非无限时再判 remaining<=0。
+    var _tokUnlimited = q.tokens_unlimited === true || Number(q.tokens_limit) === -1;
+    if (q.can_chat === false ||
+        (!_tokUnlimited && typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0)) {
       return { ok: false, reason: 'token_limit', message: '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度' };
     }
     if (S.webSearchEnabled && searchQuotaExhausted(q)) {
