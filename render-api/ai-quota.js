@@ -233,15 +233,20 @@ function createAiQuota(supabase) {
           return { allowed: false, reason: 'quota_unavailable', quota: normalizeQuotaPayload(null) };
         }
         var data = result.data;
-        // 051 兜底：覆盖自定义额度后重算 can_search，needSearch 时超限按 search_limit 拒绝
+        // 051 兜底：以覆盖了自定义额度后的 patched 结果为准判定是否可用，
+        // 而不是裸信 RPC 的 data.allowed。RPC check_ai_token_quota 的旧实现
+        // 对免费用户可能忽略 membership 里由邀请码写入的自定义无限/调额
+        // （token_limit_daily=-1），导致"换了新无限码仍被判不足"。覆盖后
+        // qPatched.can_chat 已正确反映当前 membership 档位，据此重判 allowed。
         var qPatched = await applyMembershipOverride(normalizeQuotaPayload(data.quota || data), userName);
-        var allowed = data.allowed === true;
+        // can_chat 权威判定：false 一律拒绝；true（含无限与足额）放行。
+        var allowed = qPatched.can_chat !== false;
         if (allowed && !!needSearch && qPatched.can_search === false) {
           allowed = false;
         }
         return {
           allowed: allowed,
-          reason: (allowed ? null : (qPatched.can_search === false && !!needSearch ? 'search_limit' : (data.reason || null))),
+          reason: (allowed ? null : (qPatched.can_search === false && !!needSearch ? 'search_limit' : (data.reason || 'token_limit'))),
           quota: qPatched
         };
       } catch (e) {
