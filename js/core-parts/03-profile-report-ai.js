@@ -290,13 +290,29 @@
                 showToast('正在压缩并上传头像..');
                 
                 try {
-                    const path = buildStorageUploadPath('avatars', file.name);
+                    // ★ 修复：compressImage 此前定义了却从未被调用，原图直传（浪费带宽/存储）。
+                    // 仅对大文件（>1.5MB）压缩为 JPEG 再上传；小图保持原样避免透明背景被压平，
+                    // 压缩失败则回退原图上传，不影响可用性。
+                    var uploadFile = file;
+                    var path = buildStorageUploadPath('avatars', file.name);
+                    if (file.size > 1.5 * 1024 * 1024) {
+                        try {
+                            var compressedDataUrl = await compressImage(file, 1024, 1024, 0.82);
+                            if (compressedDataUrl && compressedDataUrl.length > 0) {
+                                var compressedBlob = await (await window.fetch(compressedDataUrl)).blob();
+                                if (compressedBlob && compressedBlob.size > 0 && compressedBlob.size < file.size) {
+                                    uploadFile = compressedBlob;
+                                    path = buildStorageUploadPath('avatars', 'avatar-' + Date.now() + '.jpg');
+                                }
+                            }
+                        } catch (compressErr) { console.warn('[avatar] compress failed, upload raw', compressErr); }
+                    }
                     
                     // 上传到 Supabase Storage
                     if (/\.(svgz?|html?|xml|swf)$/i.test(String(file && file.name || '')) || /^image\/svg\+xml/i.test(String(file && file.type || ''))) {
                         throw new Error('file type not allowed');
                     }
-                    const { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
+                    const { error: uploadErr } = await sb.storage.from('uploads').upload(path, uploadFile);
                     if (uploadErr) throw uploadErr;
                     
                     // 获取 Public URL
@@ -1563,7 +1579,9 @@ function renderProfileActivityList(kind) {
             }
             window.__xtjRetryCatAi = async function(commentId, postId) {
                 var commentIdStr = String(commentId);
-                var statusEl = document.getElementById('cat-ai-status-' + commentIdStr);
+                // ★ 修复：状态元素由 showCatAiStatus 创建，类名为 cat-ai-status + data-comment-id，
+                // 不存在 id="cat-ai-status-<id>" 的元素，改用 querySelector 定位。
+                var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + commentIdStr + '"]');
                 if (statusEl) statusEl.innerHTML = '小猫正在恢复……';
                 try {
                     var resp = await window.xtjProtectedFetch('/api/comments/ai-reply-retry', {

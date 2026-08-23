@@ -521,11 +521,29 @@
                     }
                 };
                 document.addEventListener('click', _mentionGlobalClick, true);
+                // ★ 修复：监听器泄漏。feed 重渲染会直接替换 #feed.innerHTML，正在
+                // 展开的 .inline-comment-box 被整体丢弃，不会触发 box.remove()，导致
+                // document 级 capture 点击监听反复累积。这里把清理函数登记到全局
+                // 注册表，渲染 feed 前统一执行（见 renderFeed* 入口）。
+                window.__xtjMentionCleanups = window.__xtjMentionCleanups || [];
+                var _mentionCleanup = function() {
+                    document.removeEventListener('click', _mentionGlobalClick, true);
+                };
+                window.__xtjMentionCleanups.push(_mentionCleanup);
+                if (!window.__xtjRunMentionCleanups) {
+                    window.__xtjRunMentionCleanups = function() {
+                        var _arr = window.__xtjMentionCleanups || [];
+                        for (var _ci = 0; _ci < _arr.length; _ci++) { try { _arr[_ci](); } catch (_ce) {} }
+                        window.__xtjMentionCleanups = [];
+                    };
+                }
                 // 帖子关闭或重绘时关闭 + 移除全局监听器
                 var _origBoxRemove = box.remove;
                 box.remove = function() {
                     closeMentionDropdown();
-                    document.removeEventListener('click', _mentionGlobalClick, true);
+                    _mentionCleanup();
+                    var _ri = window.__xtjMentionCleanups ? window.__xtjMentionCleanups.indexOf(_mentionCleanup) : -1;
+                    if (_ri !== -1) window.__xtjMentionCleanups.splice(_ri, 1);
                     _origBoxRemove.call(box);
                 };
                 
@@ -2492,23 +2510,37 @@
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${(function(){
-                      var roots = pComms.filter(function(c) { return !c.parent_comment_id; });
-                      var children = pComms.filter(function(c) { return c.parent_comment_id; });
-                      var html = '';
-                      roots.forEach(function(r) {
-                        html += '<div class="comment-item" data-comment-id="' + escapeHtml(r.id) + '"><div><b>' + escapeHtml(r.user_name) + ':</b> ' + escapeHtml(r.content) + '</div>' + commentDeleteButton(r);
-                        var replies = children.filter(function(c) { return String(c.parent_comment_id) === String(r.id); });
-                        if (replies.length > 0) {
-                          html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + replies.map(function(c) {
-                            if (c.user_name === 'cat_ai' && c.generated_by_ai) {
-                               return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
-                            }
-                            return '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
-                          }).join('') + '</div>';
+                      // ★ 修复：递归建树渲染评论。旧实现只把 parent 是 root 的回复当
+                      // 子节点，回复的回复（grandchild）被当成 root 直接子级错乱嵌套；
+                      // 父评论缺失/已删的回复既不渲染却仍计入评论数（数量不一致）。
+                      // 现按 parent_comment_id 递归建树：父缺失的回复提升为顶层展示，
+                      // 全部 pComms 均被渲染，评论数口径与实际渲染一致。
+                      var _byId = {};
+                      pComms.forEach(function(c) { _byId[String(c.id)] = c; });
+                      var _childrenOf = {};
+                      var _roots = [];
+                      pComms.forEach(function(c) {
+                        var _pid = (c.parent_comment_id != null && String(c.parent_comment_id) !== '') ? String(c.parent_comment_id) : '';
+                        if (_pid && _byId[_pid]) {
+                          (_childrenOf[_pid] = _childrenOf[_pid] || []).push(c);
+                        } else {
+                          _roots.push(c);
                         }
-                        html += '</div>';
                       });
-                      return html;
+                      function _renderCommentNode(c) {
+                        var _node;
+                        if (c.user_name === 'cat_ai' && c.generated_by_ai) {
+                          _node = '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
+                        } else {
+                          _node = '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
+                        }
+                        var _kids = _childrenOf[String(c.id)] || [];
+                        if (_kids.length) {
+                          _node += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + _kids.map(_renderCommentNode).join('') + '</div>';
+                        }
+                        return _node;
+                      }
+                      return _roots.map(_renderCommentNode).join('');
                   })()}</div>` : ''}
                 </div>`;
             }
@@ -3825,7 +3857,6 @@
                     uploadedPath = '';
                     touchUserSession(false);
                     resetPostComposer();
-                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     if (!insertPublishedPostIntoFeed(insertRes.data)) {
                         clearFeedCache();
@@ -3851,6 +3882,9 @@
                     btn.setAttribute('aria-busy', 'false');
                     btn.textContent = btn.dataset.originalText || "发布动态";
                     delete btn.dataset.originalText;
+                    // ★ 修复：成功/失败路径统一回收 postPreviewUrls（blob:），
+                    // 避免反复发帖失败时 blob URL 内存累积。幂等，重复调用安全。
+                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                 }
             };
 
@@ -4126,6 +4160,7 @@
             };
 
             renderFeedWithAvatars = function(visiblePosts, comments, likes) {
+                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 var feed = document.getElementById("feed");
                 var scopedComments = getRenderableComments(comments, visiblePosts);
                 var maps = buildPostMaps(scopedComments, likes);
@@ -4142,6 +4177,7 @@
             };
 
             renderFeed = async function(payload) {
+                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 bindPostFilterEvents();
                 var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);

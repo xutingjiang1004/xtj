@@ -19,7 +19,13 @@
                 }
                 if (tab === 'ai') {
                     if (!window.currentUser) {
-                        renderPhotoWallLockedState();
+                        // ★ 修复：未登录时不再把整个 photoGrid 替换成"登录提示"锁定页
+                        // （破坏网格且登录后不自动恢复），与 05 双击刷新分支策略对齐：
+                        // 仅提示登录并做可见性兜底，保留网格结构。
+                        if (typeof window.showToast === 'function') window.showToast('请先登录');
+                        ensurePhotoWallVisibleContent().catch(function(err) {
+                            console.warn('[photo-wall] visibility check failed', err);
+                        });
                     } else {
                         setPhotoWallLockedState(false);
                         ensurePhotoWallLoaded().then(function() {
@@ -470,7 +476,7 @@
                 if (avatarUrl) {
                     var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     if (safeAvatarUrl) {
-                        return '<img loading="lazy" decoding="async" src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml(String(userName || '?').slice(0, 1).toUpperCase()) + '\'">';
+                        return '<img loading="lazy" decoding="async" src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + safeJsStr(String(userName || '?').slice(0, 1).toUpperCase()) + '\'">';
                     }
                 }
                 // 无头像时显示首字母（xxz → X）
@@ -949,6 +955,11 @@
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
                 if (file) {
+                    // ★ 修复：显式拒绝 SVG（image/svg+xml 会通过 image/ 前缀白名单），
+                    // 后端 dm-media 拒绝 SVG 后文件已先落桶，留下 Storage 孤儿 + 公共桶
+                    // 存储型 XSS 窗口。这里与照片墙 upload-ui 的拒绝策略对齐。
+                    var svgBlocked = /^image\/svg\+xml/i.test(String(file.type || '')) || /\.svgz?$/i.test(String(file.name || '').toLowerCase());
+                    if (svgBlocked) { showToast("不支持 SVG 文件，仅支持图片、视频、音频"); return; }
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
@@ -1051,6 +1062,16 @@
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
                     }
                 } catch(e) {
+                    // ★ 修复：发送失败时回收已上传的 Storage 文件，避免孤儿媒体永久泄漏
+                    //   （前端先直传 Storage、后调 /api/dm/send；若 send 失败/超时，后端
+                    //   从未感知该路径，文件会残留在公共桶）。
+                    if (storagePath) {
+                        try {
+                            var dmOrphanRes = await sb.storage.from('uploads').remove([storagePath]);
+                            if (dmOrphanRes && dmOrphanRes.error) console.warn('[dm-send] orphan media cleanup failed', dmOrphanRes.error);
+                        } catch (dmCleanupErr) { console.warn('[dm-send] orphan media cleanup failed', dmCleanupErr); }
+                        storagePath = null;
+                    }
                     removeDockChatCacheMessage(targetUser, tempId);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     // ★ 修复：发送失败恢复输入框内容时，若用户失败提示期间已输入新内容，
@@ -3633,7 +3654,7 @@
                 if (selected && !_reportTargetUser) _reportTargetUser = item.user_name;
                 var isTextOnly = !item.thumb && item.type !== 'photo';
                 var thumbHtml = item.thumb
-                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;rc-thumb rc-thumb--text&quot; aria-hidden=&quot;true&quot;><span>' + escapeHtml((item.user_name || '?').slice(0,1).toUpperCase()) + '</span></div>\'">'
+                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;rc-thumb rc-thumb--text&quot; aria-hidden=&quot;true&quot;><span>' + safeJsStr((item.user_name || '?').slice(0,1).toUpperCase()) + '</span></div>\'">'
                     : '<div class="rc-thumb rc-thumb--text" aria-hidden="true"><span>' + getReportTextThumbLabel(item.user_name) + '</span></div>';
                 h += '<div class="report-content-item' + selected + (isTextOnly ? ' report-content-item--text' : '') + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
                 h += thumbHtml;

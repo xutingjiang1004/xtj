@@ -53,7 +53,7 @@ const {
   withSearchProviderTimeout
 } = require('./search-providers');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
-const { fetchSafeWebPage } = require('./web-fetch');
+const { fetchSafeWebPage, assertSafeWebUrl } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
 const { getMailTransporter, GMAIL_USER, GMAIL_APP_PASSWORD } = require('./mail-transport');
@@ -340,7 +340,7 @@ function getDeepSeekCapabilitySnapshot() {
   };
 }
 // 文件解析器 — 共用模块
-const { getPdfParser, getMammothParser, getXlsxParser } = require('./file-parsers');
+const { getPdfParser, getMammothParser, getXlsxParser, parsePdfBuffer } = require('./file-parsers');
 
 // ===================== P: 深度研究模式 (Deep Research / Multi-Agent) =====================
 // P 改动:
@@ -4030,9 +4030,11 @@ async function extractEmbeddedFiles(text, opts) {
         extractedText = '\n\n【文件: ' + fileName + ' 超过大小限制，跳过解析】\n\n';
       } else {
         var buffer = Buffer.from(base64Data, 'base64');
-        if (mimeType === 'application/pdf' && getPdfParser()) {
-          var pdfData = await getPdfParser()(buffer);
-          extractedText = pdfData.text || '';
+        if (mimeType === 'application/pdf') {
+          // 统一走 file-parsers 受保护入口（8MB 上限 / 15s 超时 / 并发信号量），
+          // 避免裸同步解析被构造 PDF（深层嵌套/zip 炸弹）占满事件循环造成拒绝服务
+          var pdfData = await parsePdfBuffer(buffer);
+          extractedText = (pdfData && pdfData.text) || '';
         } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && getMammothParser()) {
           var mammothResult = await getMammothParser().extractRawText({ buffer: buffer });
           extractedText = mammothResult.value || '';
@@ -16391,7 +16393,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 // 兼容 chat/completions 流式格式转发，再把 token 转成前端 chat/stream 的
 // SSE 契约（type: content/done/error）。不消耗本站 AI 配额，也不持久化。
 // ─────────────────────────────────────────────────────────────
-app.post('/api/agent/custom-chat/stream', async (req, res) => {
+app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -16442,24 +16444,17 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
   baseUrl = baseUrl.replace(/\/+$/, '');
   var chosenModel = model || (ep && ep.defaultModel) || '';
 
-  // 轻量 SSRF 防护：拒绝指向本机/内网/保留地址的 base_url（防被当作内网代理）。
-  // 只对「自定义(OpenAI兼容)」用户填写的地址生效，不影响预置服务商公网端点。
+  // 统一 SSRF 防护：复用 web-fetch.assertSafeWebUrl（协议白名单 + 标准端口 +
+  // 禁凭据 + 禁内网/回环/保留域名 + DNS 全记录私有地址校验，防 DNS rebinding
+  // 到内网/云元数据）。本路由仅转发 OpenAI 兼容对话端点，一律要求 https。
   try {
-    var _u = new URL(baseUrl);
-    var _hostname = _u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    var _loopback = _hostname === 'localhost' || _hostname === '::1' || _hostname === '0.0.0.0' || /^127\./.test(_hostname) || /^::ffff:127\./.test(_hostname);
-    var _ipv4 = _hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    var _privateIp = false;
-    if (_ipv4) {
-      var a = Number(_ipv4[1]), b = Number(_ipv4[2]);
-      _privateIp = a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && _ipv4[2] === '254') || a === 0;
-    }
-    if (_loopback || _privateIp) {
-      writeSse(res, { type: 'error', error: '接口地址不允许指向本机或内网地址', code: 'CUSTOM_BAD_BASE_URL' });
+    var _safeCheck = await assertSafeWebUrl(baseUrl);
+    if (_safeCheck.parsed.protocol !== 'https:') {
+      writeSse(res, { type: 'error', error: '接口地址仅支持 https://', code: 'CUSTOM_BAD_BASE_URL' });
       return safeEnd();
     }
   } catch (eUrl) {
-    writeSse(res, { type: 'error', error: '接口地址格式无效', code: 'CUSTOM_BAD_BASE_URL' });
+    writeSse(res, { type: 'error', error: '接口地址无效或指向不允许的主机', code: 'CUSTOM_BAD_BASE_URL' });
     return safeEnd();
   }
 
@@ -16537,9 +16532,8 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
       signal: controller.signal
     });
     if (!upstream.ok) {
-      var errText = '';
-      try { errText = (await upstream.text()).slice(0, 500); } catch (e) {}
-      writeSse(res, { type: 'error', error: '第三方模型请求失败(' + upstream.status + ') ' + errText, code: 'CUSTOM_UPSTREAM_ERROR' });
+      // 不回显上游响应体（防止 SSRF 探测结果外带），只返回状态码
+      writeSse(res, { type: 'error', error: '第三方模型请求失败(HTTP ' + upstream.status + ')', code: 'CUSTOM_UPSTREAM_ERROR' });
       return safeEnd();
     }
     if (!upstream.body) { writeSse(res, { type: 'error', error: '第三方模型无响应流' }); return safeEnd(); }

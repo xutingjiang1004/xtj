@@ -939,7 +939,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   绕过,交给浏览器解析后可能执行。URL 解析后浏览器会对协议做
     //   规范化,这里再校验最终协议,双重防护。
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
-      var cleanHref = String(href).trim();
+      // ★ 修复：正文先整体 HTML 转义（&→&amp;），此处提取到的 href 含实体，
+      // 若直接赋给 a.href（DOM 属性赋值不做实体解码），带 & 查询参数会被
+      // 请求为 ...&amp;b=2 而损坏。赋前先还原实体。
+      var cleanHref = aiDecodeHtmlEntities(String(href).trim());
       var protocolOk = false;
       try {
         var parsedUrl = new URL(cleanHref, window.location && window.location.origin ? window.location.origin : 'https://xtj.local');
@@ -1820,10 +1823,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S._lastQuotaErrorRefreshAt = nowMs;
         try { fetchAiQuota(true); } catch (e) {}
       }
-      if (r && (r.code === 'token_limit' || (r.quota && r.quota.can_chat === false))) {
+      // ★ 修复：code/quota 可能出现在顶层或 data 内层（不同接口返回形状不同），
+      // 两个层级都读取，否则 429 永远只显示通用文案。
+      var _quotaCode = r.code || (r.data && r.data.code);
+      var _quotaData = r.quota || (r.data && r.data.quota);
+      if (_quotaCode === 'token_limit' || (_quotaData && _quotaData.can_chat === false)) {
         return '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
       }
-      if (r && r.code === 'search_limit') {
+      if (_quotaCode === 'search_limit') {
         return '今日网页搜索次数已达上限，开通 Pro 可无限搜索';
       }
       return '小猫调用额度已达上限，请稍后再试或开通 Pro';
@@ -4863,7 +4870,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (evt.type === 'done') {
           safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
-          S.sending = false; S.paused = false; resetActiveRenderersByChannel('deep'); S._dtAbortController = null; S.deepThinkJob = null; S.deepThinkProgressCard = null;
+          S.sending = false; S.paused = false; S._dtAbortController = null; S.deepThinkJob = null; S.deepThinkProgressCard = null;
           if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
           if (progressCard) { try { progressCard._done = true; } catch (e) {} }
           try {
@@ -4874,7 +4881,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           } catch (e) {}
           if (!aiNodeRef.value) ensureThinkCardNode();
           if (!aiContentRef.value || !String(aiContentRef.value).trim()) aiContentRef.value = 'AI 只返回了思考过程，没有生成正文回复。';
+          // ★ 修复：必须先 finish 再 reset。resetActiveRenderersByChannel('deep') 会对
+          // deep 通道渲染器调用 cancel()（清空 DOM、置 targetEl=null），若先执行，
+          // 后续 finishThinkCard 里 answerRenderer.finish() 因已取消而空操作，
+          // 已流式渲染的最终答案会被清空且不再重绘（答案区空白）。
           finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
+          resetActiveRenderersByChannel('deep');
           if (typeof opts.onSuccess === 'function') { try { opts.onSuccess(evt); } catch (eSuccess) {} }
           if (doneReceivedRef) doneReceivedRef.value = true;
           if (evtHandledRef) evtHandledRef.value = true;
@@ -6028,7 +6040,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               console.warn('[AI] Non-JSON error response', { status: resp.status, contentType: resp.headers.get('content-type'), bodyPreview: rawErrText.slice(0, 200) });
             }
           }
-          if (S._currentReqId !== reqId) return;
+          if (S._dtCurrentReqId !== reqId) return;
           if (isResearchCard(progressCard)) markResearchCardOutcome(progressCard, 'interrupted', String((ej&&ej.error) || ('AI 失败 (' + resp.status + ')')));
           else { safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); }
         } catch(e){}
@@ -6069,7 +6081,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         resetSendingIfCurrent();
         return;
       }
-      if (S._currentReqId !== reqId || ab.value) {
+      if (S._dtCurrentReqId !== reqId || ab.value) {
         if (ab.value && isResearchCard(progressCard)) {
           // ★ 修复：120s 绝对超时中止时标记卡片状态，避免卡在"深入研究中"
           if (controller && controller._abortReason === 'timeout' && progressCard._researchState.state !== 'cancelled') {
@@ -6103,7 +6115,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       }
     } catch (fetchErr) {
-      if (S._currentReqId !== reqId) { safeRemoveProgressCard(); return; }
+      if (S._dtCurrentReqId !== reqId) { safeRemoveProgressCard(); return; }
       safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
       if (progressCard) try { progressCard._done = true; } catch(e){}
       if (fetchErr && fetchErr.name !== 'AbortError') {
@@ -8854,10 +8866,18 @@ function showChatMessages() {
       var grid = panelShell.querySelector('#aiQuickGrid');
       if (!grid) return;
       grid.innerHTML = '';
-      // 快捷指令只保留三项：AI生图 / 导出对话 / 增加快捷指令
+      // 快捷指令：固定三项 + 用户自定义指令（最多展示 6 个，避免面板拥挤）
       grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--gen', 'data-qc': 'genimg', text: 'AI生图' }));
       grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--export', 'data-qc': 'export', text: '导出对话' }));
       grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--manage', 'data-qc': 'custom', text: '增加快捷指令' }));
+      // ★ 修复：用户通过「增加快捷指令」弹窗保存的指令此前从不渲染（添加后不显示、
+      // 无法触发），而点击处理器已有 data-custom 分支（死代码）。这里补上渲染。
+      var customs = loadCustomQuickCommands();
+      var showCount = Math.min(customs.length, 6);
+      for (var ci = 0; ci < showCount; ci++) {
+        var c = customs[ci];
+        grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--custom', 'data-custom': String(ci), text: String(c && c.label || '指令') }));
+      }
     }
     function insertQuickTemplate(templateText) {
       var existing = String(input.value || '');
@@ -9009,13 +9029,9 @@ function showChatMessages() {
         onErr();
       };
       img.src = url;
-      // 若首次带缓存穿透的参数仍拿到占位，且重试同 URL 也被浏览器缓存命中，
-      // 需要强制 no-cache 拉取最新成图：给 img 附加 cache-buster 仅用于本次加载。
-      var pendingBust = genImageApiUrl(prompt, true);
-      if (pendingBust !== url && attempt > 0) {
-        img.src = pendingBust;
-        setTimeout(function() { if (!done) img.src = url; }, 600);
-      }
+      // ★ 修复：删除原先的 pendingBust 覆盖逻辑——它每次都生成带新 _r 的 URL，
+      // 与"重试复用同一 URL 等成图落地"的策略直接矛盾（新 URL 会被生图服务当作
+      // 新任务，固定 url 反而永远拿不到成图）。重试已统一复用上方传入的 url。
     }
     function openImageGenModal() {
       closeQuickModal('aiGenImgModal');
@@ -9622,7 +9638,8 @@ function showChatMessages() {
           html += '<div class="ai-cm-item" data-uid="' + m.uid + '">' +
                     '<div class="ai-cm-item-info"><div class="ai-cm-item-name"></div><div class="ai-cm-item-sub"></div></div>' +
                     '<button type="button" class="ai-cm-item-del" title="删除" aria-label="删除">' +
-                      '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+                      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+                      '<span>删除</span>' +
                     '</button>' +
                   '</div>';
         }

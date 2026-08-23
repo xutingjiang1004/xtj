@@ -1415,21 +1415,43 @@ async function initAdminClient() {
     }
 
     window.applyBanToUser = function(userName) {
+        // ★ 修复：快捷封禁卡片此前依赖只存在于"添加封禁"弹窗里的
+        // #banUserName/#banDuration/#banReason，弹窗未打开时 addBan() 会因
+        // null.value 抛 TypeError 崩溃。弹窗元素不存在时回退 quickBanUser
+        // （prompt + 确认框，不依赖弹窗 DOM）。
         var input = document.getElementById('banUserName');
-        if (input) input.value = userName;
-        window.addBan();
+        if (input && document.getElementById('banDuration') && document.getElementById('banReason')) {
+            input.value = userName;
+            window.addBan();
+        } else if (typeof window.quickBanUser === 'function') {
+            window.quickBanUser(userName);
+        } else {
+            showToast('请先在封禁管理页打开添加封禁弹窗', 'error');
+        }
     };
 
     window.applyMuteToUser = function(userName) {
         var input = document.getElementById('muteUserName');
-        if (input) input.value = userName;
-        window.addMute();
+        if (input && document.getElementById('muteDuration') && document.getElementById('muteReason')) {
+            input.value = userName;
+            window.addMute();
+        } else if (typeof window.quickMuteUser === 'function') {
+            window.quickMuteUser(userName);
+        } else {
+            showToast('请先在禁言管理页打开添加禁言弹窗', 'error');
+        }
     };
 
     window.applyBlacklistToUser = function(userName) {
         var input = document.getElementById('blacklistUserName');
-        if (input) input.value = userName;
-        window.addBlacklist();
+        if (input && document.getElementById('blacklistReason')) {
+            input.value = userName;
+            window.addBlacklist();
+        } else if (typeof window.quickBlacklistUser === 'function') {
+            window.quickBlacklistUser(userName);
+        } else {
+            showToast('请先打开添加黑名单弹窗', 'error');
+        }
     };
 
     window.liftBanByUser = function(userName) {

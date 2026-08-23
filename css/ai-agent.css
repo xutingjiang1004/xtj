@@ -2360,17 +2360,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
+  gap: 3px;
   height: 30px;
+  padding: 0 9px;
   border: none;
   border-radius: 9px;
   background: transparent;
   color: #b45454;
   cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
   transition: background-color 120ms ease, color 120ms ease;
 }
+.ai-cm-item-del span { font-size: 12px; font-weight: 600; }
 .ai-cm-item-del:hover { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
 .ai-cm-feedback { min-height: 18px; margin-top: 6px; }
+.ai-empty-fallback { color: #6b857a; font-size: 13px; padding: 8px 4px; }
 [data-theme="dark"] .ai-custommodel-body .ai-cm-select {
   background-color: #1a2a25;
   border-color: rgba(140, 200, 185, 0.22);
