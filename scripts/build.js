@@ -127,6 +127,7 @@ const JS_FILES = [
   'js/admin/admin.js',
   'js/code-file-system.js',
   'js/code-workspace.js',
+  'js/chat-hub.js',
   'js/ai-core/errors.js',
   'js/ai-core/request-controller.js',
   'js/ai-core/transport.js',
@@ -171,7 +172,8 @@ const CSS_FILES = [
   'css/ui-shell.css',
   'css/photo-preview.css',
   'css/code-workspace.css',
-  'css/code-claude-style.css'
+  'css/code-claude-style.css',
+  'css/chat-hub.css'
 ];
 
 function minifyJS(filePath, optional) {

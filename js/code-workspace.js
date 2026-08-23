@@ -751,8 +751,13 @@
 
     // P0: 先立即显示欢迎页，IndexedDB 恢复在后台进行
     // Phase 6: 手机端直接渲染聊天工作区（仅聊天面板），跳过欢迎页
+    // AI中转站：桌面端默认进入「AI 对话中转站」（ChatGPT 式首页），
+    // 顶部「进入代码工作区」可切换到经典 Code 首页。
+    var hubShown = false;
     if (state._phoneMode) {
       renderWorkspace();
+    } else if (renderChatHub()) {
+      hubShown = true;
     } else {
       renderWelcome();
     }
@@ -760,7 +765,43 @@
     // P0: 后台尝试恢复工作区，使用 restoreGeneration 防止覆盖用户新选择
     var restoreGeneration = ++state.restoreGeneration;
 
-    tryRestoreWorkspace().then(function (result) {
+    if (hubShown) {
+      // 对话中转站作为默认首页：不自动恢复旧工作区，
+      // 交由用户点击「进入代码工作区」后统一处理恢复。
+    } else {
+      startRestore(restoreGeneration);
+    }
+
+    return Promise.resolve({ status: 'ok' });
+  }
+
+  // ──────────────────────────────────────────────
+  // AI 对话中转站（默认首页）与「进入代码工作区」切换
+  // ──────────────────────────────────────────────
+  function renderChatHub() {
+    var hub = window.__xtjChatHub;
+    if (!hub || typeof hub.init !== 'function') return false;
+    if (!_dom.panelCode) return false;
+    if (hub.isActive && hub.isActive()) return true;
+    var res;
+    try {
+      res = hub.init(_dom.panelCode, { onEnterCode: enterCodeWorkspace });
+    } catch (e) {
+      return false;
+    }
+    if (!res || res.status !== 'ok') return false;
+    return true;
+  }
+
+  function enterCodeWorkspace() {
+    if (!_dom.panelCode) return;
+    renderWelcome();
+    ++state.restoreGeneration;
+    startRestore(state.restoreGeneration);
+  }
+
+  function startRestore(restoreGeneration) {
+    return tryRestoreWorkspace().then(function (result) {
       if (restoreGeneration !== state.restoreGeneration) return;
       if (!state.active) return;
 
@@ -780,8 +821,6 @@
     }).catch(function () {
       // 欢迎页已经显示，忽略恢复错误
     });
-
-    return Promise.resolve({ status: 'ok' });
   }
 
   function tryRestoreWorkspace() {

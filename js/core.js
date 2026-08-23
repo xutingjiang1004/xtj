@@ -1411,8 +1411,10 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
             // Code must load its filesystem bridge before evaluating the workspace.
             'code-fs': { scripts: ['xtj-module-code-fs'] },
+            // AI 对话中转站：ChatGPT 式默认首页，作为 code-workspace 的依赖先加载。
+            'chat-hub': { styles: ['xtj-module-chat-hub-style'], scripts: ['xtj-module-chat-hub'] },
             'code-workspace': {
-                dependencies: ['code-fs'],
+                dependencies: ['code-fs', 'chat-hub'],
                 styles: ['xtj-module-code-style', 'xtj-module-code-claude-style'],
                 scripts: ['xtj-module-code-workspace']
             },
@@ -1537,6 +1539,7 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     var valid = true;
                     if (moduleName === 'ai-agent') valid = !!(window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function');
                     if (moduleName === 'code-fs') valid = !!(window.__xtjCodeFS && typeof window.__xtjCodeFS.readFileByPath === 'function');
+                    if (moduleName === 'chat-hub') valid = !!(window.__xtjChatHub && typeof window.__xtjChatHub.init === 'function');
                     if (moduleName === 'code-workspace') valid = !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
                     if (!valid) throw new Error('module_export_missing:' + moduleName);
                     return { name: moduleName, loadedAt: Date.now() };
