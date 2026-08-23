@@ -91,18 +91,6 @@ test('server wires token quota gates, recording, and invite-code integration', (
   assert.match(serverSource, /researchGate = await enforceAiChatAccess/);
   assert.match(serverSource, /source: 'deep_research'/);
   assert.match(serverSource, /accumulateResearchUsage/);
-  // Code 路由注入共用额度
-  assert.match(serverSource, /enforceAiChatAccess: enforceAiChatAccess/);
-  assert.match(serverSource, /recordAiTurnUsage: recordAiTurnUsage/);
-});
-
-test('code agent bills shared token quota', () => {
-  const codeSource = fs.readFileSync(path.join(ROOT, 'render-api', 'code-agent.js'), 'utf8');
-  assert.match(codeSource, /gateCodeQuota/);
-  assert.match(codeSource, /billCodeUsage/);
-  assert.match(codeSource, /source: 'code_chat'/);
-  assert.match(codeSource, /source: 'code_chat_stream'/);
-  assert.match(codeSource, /token_limit/);
 });
 
 test('frontend + menu has quota bar, pro card, ceremony, and secondary model/think pages', () => {
@@ -217,14 +205,6 @@ test('audit: cancel-Pro is a transactional RPC (049)', () => {
   assert.match(mig049, /ai_user_membership_token_limit_daily_check/);
 });
 
-test('audit: code-agent web_search is quota-enforced via userId passthrough', () => {
-  const codeSource = fs.readFileSync(path.join(ROOT, 'render-api/code-agent.js'), 'utf8');
-  assert.match(codeSource, /userId: scope && scope\.userId/);
-  assert.match(codeSource, /options\.webSearch\(/);
-  assert.match(codeSource, /options\.userId \|\| ''/);
-  assert.match(serverSource, /searchWebForUser\(userId, query, maxResults\)/);
-});
-
 test('audit: post-tools 429 carries quota for frontend refresh', () => {
   assert.match(serverSource, /toolAccess\.quota \|\| null/);
 });
@@ -258,13 +238,4 @@ test('audit: tool timeout aborts underlying fetch (read_web_page signal)', () =>
   const webFetch = fs.readFileSync(path.join(ROOT, 'render-api/web-fetch.js'), 'utf8');
   assert.match(webFetch, /externalSignal\.addEventListener\('abort', onExternalAbort/);
   assert.match(webFetch, /request\.destroy\(new Error\('请求已取消'\)\)/);
-});
-
-test('audit: code-agent sensitive-file blacklist matches path segments', () => {
-  const codeSource = fs.readFileSync(path.join(ROOT, 'render-api/code-agent.js'), 'utf8');
-  assert.match(codeSource, /逐段匹配/);
-  assert.match(codeSource, /\.npmrc/);
-  assert.match(codeSource, /\.git-credentials/);
-  assert.match(codeSource, /database/);
-  assert.match(codeSource, /search_count: toolTrace\.filter\(function\(entry\) \{ return entry\.tool === 'web_search'; \}\)\.length/);
 });

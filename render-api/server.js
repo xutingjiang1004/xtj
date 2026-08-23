@@ -12,8 +12,6 @@ const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
 const { claimDmMediaUpload, reserveDmMediaUpload, validateDmStoragePath, validateDmMediaKind, MEDIA_KINDS: ALLOWED_KINDS } = require('./dm-media');
 const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError } = require('./storage-cleanup');
 const { applySecurityHeaders } = require('./security-headers');
-const registerCodeAgentRoutes = require('./code-agent');
-const registerCodeGitHubRoutes = require('./code-github');
 const registerProviderRegistryRoutes = require('./provider-registry');
 const {
   REPORT_MARKER,
@@ -255,7 +253,7 @@ async function refreshDeepSeekModelCatalog(force) {
       error: 'missing_api_key',
       // Never advertise provider models when this deployment cannot call the
       // provider. The configured preferred name remains visible to diagnostics
-      // only; /api/code/models must return an empty usable catalog.
+      // only.
       models: [],
       availableSet: new Set()
     };
@@ -325,12 +323,8 @@ function getDeepSeekCapabilitySnapshot() {
   // Provider limits must come from deployment configuration (or a future
   // model-catalog response), never from a frontend claim. Keep them unknown
   // when the deployment has not declared them.
-  // Keep the capability endpoint aligned with both the provider-specific
-  // names and the CODE_AI_* names used by render.yaml/code-agent.js. Without
-  // the latter, the deployed UI reported null limits even though the service
-  // had a configured context/output budget.
-  var configuredContext = Number(process.env.DEEPSEEK_PROVIDER_CONTEXT_TOKENS || process.env.DEEPSEEK_CONTEXT_TOKENS || process.env.CODE_AI_CONTEXT_TOKENS);
-  var configuredOutput = Number(process.env.DEEPSEEK_PROVIDER_MAX_OUTPUT_TOKENS || process.env.DEEPSEEK_MAX_OUTPUT_TOKENS || process.env.CODE_AI_MAX_OUTPUT_TOKENS);
+  var configuredContext = Number(process.env.DEEPSEEK_PROVIDER_CONTEXT_TOKENS || process.env.DEEPSEEK_CONTEXT_TOKENS);
+  var configuredOutput = Number(process.env.DEEPSEEK_PROVIDER_MAX_OUTPUT_TOKENS || process.env.DEEPSEEK_MAX_OUTPUT_TOKENS);
   var providerContextTokens = Number.isSafeInteger(configuredContext) && configuredContext > 0 ? configuredContext : null;
   var providerMaxOutputTokens = Number.isSafeInteger(configuredOutput) && configuredOutput > 0 ? configuredOutput : null;
   return {
@@ -345,7 +339,7 @@ function getDeepSeekCapabilitySnapshot() {
     apiFormat: 'openai-chat-completions'
   };
 }
-// 文件解析器 — 共用模块（与 code-agent.js 共享，避免重复定义）
+// 文件解析器 — 共用模块
 const { getPdfParser, getMammothParser, getXlsxParser } = require('./file-parsers');
 
 // ===================== P: 深度研究模式 (Deep Research / Multi-Agent) =====================
@@ -2291,22 +2285,6 @@ app.use(function corsErrorHandler(err, req, res, next) {
   next(err);
 });
 
-// Code workspace indexing uploads the selected text files as one JSON payload.
-// Keep the normal API body limit conservative, but give Code Agent its own
-// bounded parser so a real project (up to the indexer's 32MB content budget)
-// is not rejected before /api/code/index/build can validate it.
-// 安全：在 64mb 解析器之前先按 content-length 拦截超大 body，
-//   避免无凭证请求先被缓冲进内存（鉴权之前就应限制体积）。
-app.use('/api/code', function(req, res, next) {
-  var len = parseInt(req.headers['content-length'], 10);
-  // 与下方 express.json limit 一致（64mb）：不能低于业务合法上限——
-  // 文档上传允许 20MB（code-agent MAX_DOCUMENT_UPLOAD_BYTES）、项目索引预算 32MB（MAX_INDEX_TOTAL_BYTES）
-  if (Number.isFinite(len) && len > 64 * 1024 * 1024) {
-    return res.status(413).json({ error: 'payload_too_large' });
-  }
-  next();
-});
-app.use('/api/code', express.json({ limit: '64mb' }));
 // Cat AI accepts one browser-encoded document (the UI caps files at 7 MB;
 // base64 adds ~33% plus JSON overhead). Keep this bounded while avoiding a
 // predictable 413 for valid DOCX/PDF uploads.
@@ -5820,7 +5798,7 @@ async function callDeepSeek(messages, options) {
           finalContent = content;
           // ★ 修复：defer 模式下最终内容必须完整推送给 onContentChunk（原代码 slice(0,4000)
           // 截断，>4000 字符的回答流式显示残缺；断线/异常路径下状态只保存前 4000 字符导致
-          // 内容永久丢失）。code-agent.js 的 H-12 拆分（MAX_DELTA_CHARS=4000）负责切分下发。
+          // 内容永久丢失）。流式下发按需切分，此处推送完整内容。
           try { if (deferToolRoundContent && hasContentCb && content) options.onContentChunk(content); } catch (e) {}
         }
         break;
@@ -7903,15 +7881,13 @@ function shouldSkipWriteRestriction(req) {
     '/api/user/logout',
     '/api/user/refresh',
     '/api/agent/chat/cancel',
-    '/api/code/stream/cancel',
-    '/api/code/chat/cancel',
     '/api/announcements/read'
   ];
   for (var i = 0; i < allow.length; i++) {
     if (path === allow[i] || path.indexOf(allow[i] + '/') === 0) return true;
   }
-  // 允许取消类路径（兼容不同 code 路由命名）
-  if (/\/cancel\/?$/.test(path) && (path.indexOf('/api/agent/') === 0 || path.indexOf('/api/code/') === 0)) {
+  // 允许取消类路径
+  if (/\/cancel\/?$/.test(path) && path.indexOf('/api/agent/') === 0) {
     return true;
   }
   return false;
@@ -7922,8 +7898,8 @@ function applyAuthenticatedWriteRestrictions(req, res) {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
   if (shouldSkipWriteRestriction(req)) return null;
   var path = String((req.originalUrl || req.url || '').split('?')[0] || '');
-  // AI / Code：仅封禁拦截（禁言用户仍可用助手）；其余写操作：封禁+禁言
-  var blockMuted = !(path.indexOf('/api/agent/') === 0 || path.indexOf('/api/code/') === 0);
+  // AI：仅封禁拦截（禁言用户仍可用助手）；其余写操作：封禁+禁言
+  var blockMuted = path.indexOf('/api/agent/') !== 0;
   var ban = userBanError(req, { blockMuted: blockMuted });
   if (!ban) return null;
   return res.status(ban.status || 403).json({ error: ban.message, code: ban.code });
@@ -20541,42 +20517,6 @@ function startDmUnreadNotifier() {
   dmUnreadNotifyTimer = setInterval(checkUnreadDmForAdmin, DM_UNREAD_NOTIFY_INTERVAL);
   checkUnreadDmForAdmin(); // 立即执行一次
 }
-
-// ── Code workspace AI agent routes ──
-registerCodeAgentRoutes(app, {
-  supabase,
-  rateLimit,
-  authenticateUser,
-  sanitizeError,
-  // 与小猫 AI / 深入研究共用同一套日额度（token + 搜索）
-  enforceAiChatAccess: enforceAiChatAccess,
-  recordAiTurnUsage: recordAiTurnUsage,
-  getAiQuotaErrorMessage: getAiQuotaErrorMessage,
-  getDeepSeekModel: function () {
-    return getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER);
-  },
-  getDeepSeekApiUrl: function () {
-    return DEEPSEEK_API_URL;
-  },
-  getDeepSeekApiKey: function () {
-    return DEEPSEEK_API_KEY;
-  },
-  getDeepSeekCapabilities: getDeepSeekCapabilitySnapshot,
-  getDeepSeekModelCatalog: getDeepSeekProbeSnapshot,
-  callDeepSeek: callDeepSeek,
-  // Code Agent 复用小猫 AI 已使用的联网搜索管线（同一组后端 provider、缓存和密钥）。
-  // 不把搜索密钥或 provider 配置暴露给浏览器，也不要求 Code 单独配置一套搜索服务。
-  // 第三个参数 userId（code-agent 的 searchWebForCode 传入）：执行搜索配额校验，
-  // 避免 Code 的 web_search 工具绕过小猫 AI 的每日搜索额度。
-  webSearch: function (query, maxResults, userId) {
-    // ★ 配额绕过修复：userId 假值不再降级直连 searchWeb（无配额直通），返回明确错误。
-    if (!userId) return Promise.resolve({ results: [], error: 'no_user', search_quota_exceeded: false, quota: null });
-    return searchWebForUser(userId, query, maxResults);
-  }
-});
-registerCodeGitHubRoutes(app, {
-  authenticateUser: authenticateUser
-});
 
 // ── Provider Registry routes ──
 registerProviderRegistryRoutes(app, {

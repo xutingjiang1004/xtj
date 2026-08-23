@@ -18,7 +18,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 // ─── 配置：源码 → 产物映射 ──────────────────────────────
 // 清单与 build.js 共享（require build.js 导出的 JS_FILES/CSS_FILES），
-// 避免两处维护导致遗漏（如 css/code-claude-style.css）。
+// 避免两处维护导致遗漏。
 const buildManifest = require('./build.js');
 const JS_FILES = buildManifest.JS_FILES || [];
 const CSS_FILES = buildManifest.CSS_FILES || [];
@@ -205,31 +205,8 @@ function checkHtmlHashes(htmlFile) {
 const htmlContent = checkHtmlHashes('index.html');
 checkHtmlHashes('admin.html');
 
-// ─── 3. 检查 Code 模块专用 meta 配置 ────────────────────────
-console.log('\n=== 3. Code 模块 meta 配置检查 ===');
-const codeMetaNames = [
-  'xtj-module-code-fs',
-  'xtj-module-code-workspace',
-  'xtj-module-code-style'
-];
-
-for (const metaName of codeMetaNames) {
-  const metaTag = htmlContent.match(new RegExp('<meta[^>]+name="' + metaName + '"[^>]+content="([^"]+)"[^>]*>'));
-  if (!metaTag) {
-    error('Missing meta tag: ' + metaName);
-    continue;
-  }
-  const content = metaTag[1];
-  const filePath = path.join(ROOT, content.split('?v=')[0]);
-  if (!fileExists(filePath)) {
-    error('Code module file not found: ' + content + ' (meta: ' + metaName + ')');
-  } else {
-    console.log('  OK: ' + metaName + ' = ' + content);
-  }
-}
-
-// ─── 4. 检查关键模块导出 ────────────────────────────────────
-console.log('\n=== 4. 关键模块导出检查 ===');
+// ─── 3. 检查关键模块导出 ────────────────────────────────────
+console.log('\n=== 3. 关键模块导出检查 ===');
 function checkSourceExport(filePath, exportName) {
   const fullPath = path.join(ROOT, filePath);
   if (!fileExists(fullPath)) return false;
@@ -238,9 +215,7 @@ function checkSourceExport(filePath, exportName) {
 }
 
 const requiredExports = [
-  { file: 'js/code-file-system.js', name: '__xtjCodeFS', api: 'readFileByPath' },
-  { file: 'js/code-workspace.js', name: '__xtjCodeWorkspaceAPI', api: 'init' },
-  { file: 'js/code-workspace.js', name: '__xtjCodeInit' },
+  { file: 'js/ai-agent.js', name: '__xtjAiAgent', api: 'open' },
 ];
 
 for (const exp of requiredExports) {
@@ -251,8 +226,8 @@ for (const exp of requiredExports) {
   }
 }
 
-// ─── 5. 检查 desktop-shell.js 关键功能 ──────────────────────
-console.log('\n=== 5. desktop-shell 关键功能检查 ===');
+// ─── 4. 检查 desktop-shell.js 关键功能 ──────────────────────
+console.log('\n=== 4. desktop-shell 关键功能检查 ===');
 const dshellPath = path.join(ROOT, 'js/desktop-shell.js');
 const dshellMinPath = path.join(ROOT, 'js/desktop-shell.min.js');
 
@@ -261,16 +236,11 @@ if (fileExists(dshellPath) && fileExists(dshellMinPath)) {
   const dshellMinContent = fs.readFileSync(dshellMinPath, 'utf-8');
 
   const checks = [
-    { name: 'loadModuleWithTimeout', pattern: 'loadModuleWithTimeout' },
-    { name: 'per-module state tracking', pattern: 'modules:' },
-    { name: 'detailed timeout error', pattern: '已等待' },
-    { name: 'code error listeners', pattern: '_installCodeErrorListeners' },
-    { name: 'pending promise tracking', pattern: '_pendingModulePromises' },
-    { name: 'script deduplication', pattern: 'data-xtj-loading' },
-    { name: 'CSS multi-dimension verify', pattern: 'code-welcome' },
-    { name: 'currentTab tracking', pattern: 'currentTab' },
-    { name: 'dual visibility check', pattern: 'offsetParent' },
-    { name: 'retry function', pattern: 'retryCodeModuleLoad' },
+    { name: 'openTab function', pattern: 'function openTab' },
+    { name: 'syncActiveTab function', pattern: 'function syncActiveTab' },
+    { name: 'performRefresh function', pattern: 'function performRefresh' },
+    { name: 'dock tab click handling', pattern: 'data-desktop-tab' },
+    { name: 'ai-chat action handling', pattern: 'data-desktop-action' },
     { name: 'correct execution order', pattern: 'openTab(tab)' },
   ];
 
@@ -282,7 +252,7 @@ if (fileExists(dshellPath) && fileExists(dshellMinPath)) {
     }
     // 检查 min.js 是否也包含（允许变量名被混淆）
     // 对于字符串常量，检查 min.js
-    if (check.pattern === '已等待' || check.pattern === 'data-xtj-loading' || check.pattern === 'code-welcome') {
+    if (check.pattern === 'data-desktop-tab' || check.pattern === 'data-desktop-action') {
       if (dshellMinContent.includes(check.pattern)) {
         console.log('  OK: ' + check.name + ' found in min.js');
       } else {
