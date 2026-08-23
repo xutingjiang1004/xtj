@@ -273,7 +273,15 @@ window.__xtjChatHub = (function () {
     }
     var content = document.createElement('div');
     content.className = 'hub-msg-content';
-    content.innerHTML = isStreaming ? '' : md(m.content || '');
+    var bodyHtml;
+    if (isStreaming) {
+      bodyHtml = '';
+    } else {
+      // AI 消息缺失正文时显示占位，避免点进历史/流中断后看起来"空白没显示"
+      var hasBody = (m.content && String(m.content).trim());
+      bodyHtml = md(hasBody ? m.content : (m.role === 'assistant' ? '(AI 暂无回复正文)' : ''));
+    }
+    content.innerHTML = bodyHtml;
     if (isStreaming) { content.className += ' is-streaming'; }
     body.appendChild(content);
     wrap.appendChild(body);
@@ -469,7 +477,13 @@ window.__xtjChatHub = (function () {
       if (e && e.name === 'AbortError') {
         finalizeStream({ ok: false, err: '已取消', aborted: true });
       } else {
-        finalizeStream({ ok: false, err: '读取流失败' });
+        // 流中断：保留已收到的内容并给出准确提示，不再笼统报错丢内容
+        var keepContent = !!(assistant && (assistant.content || assistant.reasoning));
+        finalizeStream({
+          ok: !!keepContent,
+          err: keepContent ? null : '读取流失败，请重试',
+          notice: keepContent ? '连接中断，回复可能不完整' : null
+        });
       }
     }
   }
@@ -514,10 +528,10 @@ window.__xtjChatHub = (function () {
     // 移除临时思考行占位，重新按最终内容渲染
     renderMessages();
     if (result) {
-      if (!result.ok && result.err && !result.aborted) {
+      if (result.notice && !result.aborted) {
+        showToast(result.notice);
+      } else if (!result.ok && result.err && !result.aborted) {
         showToast(result.err);
-      } else if (result.ok) {
-        // 尝试刷新消息尾部
       }
     }
     refreshConversations();
