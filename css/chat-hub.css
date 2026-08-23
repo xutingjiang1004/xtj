@@ -243,6 +243,7 @@
   font-weight: 600;
 }
 #hubResearchBtn:hover { background: var(--hub-item-active); border-color: var(--hub-accent); }
+.hub-research-icon { vertical-align: -2px; margin-right: 4px; display: inline-block; }
 
 /* 消息区 */
 .hub-thread {

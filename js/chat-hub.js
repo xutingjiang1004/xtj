@@ -852,8 +852,8 @@ window.__xtjChatHub = (function () {
     researchBtn.type = 'button';
     researchBtn.className = 'hub-tool';
     researchBtn.id = 'hubResearchBtn';
-    researchBtn.textContent = '🔎 深度研究';
-    researchBtn.title = '多步检索与长文分析';
+    researchBtn.title = '深度研究：多步检索与长文分析';
+    researchBtn.innerHTML = '<svg class="hub-research-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><ellipse cx="12" cy="17" rx="5.2" ry="4.4"/><circle cx="6.4" cy="9.6" r="1.7"/><circle cx="10" cy="6.5" r="1.8"/><circle cx="14" cy="6.5" r="1.8"/><circle cx="17.6" cy="9.6" r="1.7"/></svg> 深度研究';
     researchBtn.addEventListener('click', function () {
       if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openDeepThink === 'function') window.__xtjAiAgent.openDeepThink();
     });
