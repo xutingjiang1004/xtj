@@ -8723,7 +8723,7 @@ function showChatMessages() {
     });
     plusBtn.innerHTML =
       '<span class="ai-plus-btn-icon" aria-hidden="true">' +
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
           '<line x1="12" y1="5" x2="12" y2="19"/>' +
           '<line x1="5" y1="12" x2="19" y2="12"/>' +
         '</svg>' +
@@ -10005,6 +10005,35 @@ function showChatMessages() {
       }
             handleSendMessage(input, sendBtn, messagesEl, fileData);
     }
+    // ★ 发送安全网：handleSendMessage 是 async，其未捕获的 reject 若不被接管，
+    //   会导致 S.sending 停留在 true，用户「发了消息后无任何回应」。此安全网
+    //   确保任何异常都复位状态并给出可见提示。
+    function safeSendHandler(event) {
+      if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+      var t = String(input.value || '').trim();
+      if (event && event.key && event.key !== 'Enter') return;
+      if (event && event.type === 'keydown' && (event.shiftKey || event.isComposing)) return;
+      if (!t && !_aiChatFileData) return;
+      if (event && event.preventDefault) event.preventDefault();
+      try {
+        var p = handleSendMessage(input, sendBtn, messagesEl, _aiChatFileData);
+        if (p && typeof p.catch === 'function') {
+          p.catch(function(rejectErr) {
+            console.error('[AI-SEND] unhandled send error:', rejectErr);
+            try { S.sending = false; } catch (e) {}
+            try {
+              var visErr = ((rejectErr && rejectErr.message) || String(rejectErr || '发送失败，请重试')).slice(0, 160);
+              if (typeof window.showToast === 'function') window.showToast(visErr, 'error');
+            } catch (e2) {}
+          });
+        }
+      } catch (syncErr) {
+        console.error('[AI-SEND] sync send error:', syncErr);
+        try { S.sending = false; } catch (e) {}
+      }
+    }
+    sendBtn.addEventListener('click', safeSendHandler);
+    input.addEventListener('keydown', safeSendHandler);
     // ★ 重新生成：把指定文本（及可选附件）填入输入框并发起发送。
     //   供 assistant 消息上的「重新生成」按钮调用，复用现有发送与附件预览机制。
     S._resendFn = function(resendText, resendAttachments) {
@@ -10026,7 +10055,6 @@ function showChatMessages() {
         try { notify('重新生成失败，请手动重发'); } catch (eR2) {}
       }
     };
-    sendBtn.addEventListener('click', doSend);
     pauseBtn.addEventListener('click', function() {
       if (!S.sending && !S.paused) return;
       var anyPaused = S.activeRenderers && S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
@@ -10041,12 +10069,6 @@ function showChatMessages() {
         if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
         S.paused = true;
         pauseBtn.textContent = '继续';
-      }
-    });
-    input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        doSend();
       }
     });
     input.addEventListener('input', autoresize);

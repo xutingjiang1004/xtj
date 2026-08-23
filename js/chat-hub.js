@@ -892,7 +892,7 @@ window.__xtjChatHub = (function () {
     voiceBtn.className = 'hub-voice';
     voiceBtn.id = 'hubVoiceBtn';
     voiceBtn.title = '语音输入' + (window.SpeechRecognition || window.webkitSpeechRecognition ? '' : '（当前浏览器不支持）');
-    voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
+    voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
     var fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.id = 'hubAttachInput';
@@ -912,15 +912,15 @@ window.__xtjChatHub = (function () {
     plusBtn.className = 'hub-plusbtn';
     plusBtn.id = 'hubPlusBtn';
     plusBtn.title = '更多选项';
-    plusBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    plusBtn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
     var plusMenu = document.createElement('div');
     plusMenu.className = 'hub-plusmenu';
     plusMenu.id = 'hubPlusMenu';
     function hidePlusMenu() { if (_els.plus) _els.plus.classList.remove('open'); }
-    function menuItem(label, fn) {
+    function menuItem(label, fn, className) {
       var b = document.createElement('button');
       b.type = 'button';
-      b.className = 'hub-menu-item';
+      b.className = 'hub-menu-item' + (className ? ' ' + className : '');
       b.textContent = label;
       b.addEventListener('click', function () { hidePlusMenu(); fn(); });
       plusMenu.appendChild(b);
@@ -936,7 +936,7 @@ window.__xtjChatHub = (function () {
     menuItem('⭐ 开通 Pro', function () {
       if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openPro === 'function') window.__xtjAiAgent.openPro();
       else showToast('Pro 暂不可用');
-    });
+    }, 'hub-menu-item--pro');
     var quotaItem = menuItem('额度…', function () { loadQuota(); });
     _els.quotaBadge = quotaItem;
     plusBtn.addEventListener('click', function (ev) { ev.stopPropagation(); plusMenu.classList.toggle('open'); });

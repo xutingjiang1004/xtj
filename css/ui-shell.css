@@ -650,6 +650,13 @@
   background: color-mix(in srgb, var(--xtj-content-surface) 97%, transparent);
   box-shadow: 0 14px 34px rgba(27, 56, 46, .16);
   backdrop-filter: blur(16px);
+  transform-origin: top left;
+  animation: aiToolsMenuIn .16s ease-out;
+}
+
+@keyframes aiToolsMenuIn {
+  from { opacity: 0; transform: translateY(-4px) scale(.98); }
+  to   { opacity: 1; transform: none; }
 }
 
 #panelPosts.active .ai-tools-menu[hidden] { display: none; }
