@@ -283,7 +283,7 @@ window.__xtjChatHub = (function () {
     } else {
       // AI 消息缺失正文时显示占位，避免点进历史/流中断后看起来"空白没显示"
       var hasBody = (m.content && String(m.content).trim());
-      bodyHtml = md(hasBody ? m.content : (m.role === 'assistant' ? '(AI 暂无回复正文)' : ''));
+      bodyHtml = md(hasBody ? m.content : (m.role === 'assistant' ? '（AI 未生成正文，可重新生成重试）' : ''));
     }
     content.innerHTML = bodyHtml;
     if (isStreaming) { content.className += ' is-streaming'; }

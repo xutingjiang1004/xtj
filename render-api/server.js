@@ -16681,10 +16681,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (_heartbeatTimer) return;
     _heartbeatTimer = setInterval(function() {
       if (res.writableEnded || aborted) { clearStreamHeartbeat(); return; }
-      var lastWrite = res._sseLastWriteAt || 0;
-      if (Date.now() - lastWrite >= 8000) {
-        try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {}
-      }
+      // ★ 深度思考/长推理期间连接可能长时间无事件（推理→正文之间的停顿），
+      //   中间反代/负载均衡的空闲超时会掐断 SSE。改为每 4s 无条件发一次
+      //   heartbeat，保证连接永不空闲，避免前端读到"连接中断"。
+      writeSse(res, { type: 'heartbeat', t: Date.now() });
     }, 4000);
   }
   function safeEnd() {
@@ -18966,10 +18966,10 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
     if (_heartbeatTimer) return;
     _heartbeatTimer = setInterval(function() {
       if (res.writableEnded || aborted) { clearStreamHeartbeat(); return; }
-      var lastWrite = res._sseLastWriteAt || 0;
-      if (Date.now() - lastWrite >= 8000) {
-        try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {}
-      }
+      // ★ 深度思考/长推理期间连接可能长时间无事件（推理→正文之间的停顿），
+      //   中间反代/负载均衡的空闲超时会掐断 SSE。改为每 4s 无条件发一次
+      //   heartbeat，保证连接永不空闲，避免前端读到"连接中断"。
+      writeSse(res, { type: 'heartbeat', t: Date.now() });
     }, 4000);
   }
   function safeEnd() {
