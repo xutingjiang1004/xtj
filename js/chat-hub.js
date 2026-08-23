@@ -622,6 +622,33 @@ window.__xtjChatHub = (function () {
 
   function closePop() { if (_els.pop) { _els.pop.classList.remove('open'); } }
 
+  // ─── 导出对话（Markdown） ───
+  function exportConversation() {
+    var msgs = (messages || []).filter(function (m) { return m && m.content && (m.role === 'user' || m.role === 'assistant'); });
+    if (!msgs.length) { showToast('当前对话还没有可导出的内容'); return; }
+    var displayName = 'AI 对话';
+    var modelLabel = currentModelLabel();
+    function fmtHms(t) {
+      try { var d = new Date(t); return d.toLocaleString(); } catch (e) { return ''; }
+    }
+    var lines = ['# ' + displayName + ' 记录', '', '导出时间：' + new Date().toLocaleString(), '模型：' + modelLabel, ''];
+    msgs.forEach(function (m) {
+      var role = m.role === 'assistant' ? '🤖 ' + displayName : '🧑 我';
+      lines.push('## ' + role + (m.created_at ? ' · ' + fmtHms(m.created_at) : ''));
+      lines.push('');
+      lines.push(String(m.content));
+      lines.push('');
+    });
+    var blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '对话_' + (convId ? convId.slice(-6) : new Date().getTime().toString(36)) + '.md';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} if (a.parentNode) a.parentNode.removeChild(a); }, 500);
+    showToast('已导出 Markdown 文件');
+  }
+
   // ─── DOM ───
   function autoGrow() {
     var t = _els.input;
@@ -737,6 +764,13 @@ window.__xtjChatHub = (function () {
     siteSearchBtn.addEventListener('click', function () {
       if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openSiteSearch === 'function') window.__xtjAiAgent.openSiteSearch();
     });
+    var exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'hub-tool';
+    exportBtn.id = 'hubExportBtn';
+    exportBtn.textContent = '📤 导出对话';
+    exportBtn.title = '导出当前对话为 Markdown 文件';
+    exportBtn.addEventListener('click', exportConversation);
     var codeBtn = document.createElement('button');
     codeBtn.type = 'button';
     codeBtn.className = 'hub-tool hub-codebtn';
@@ -744,7 +778,7 @@ window.__xtjChatHub = (function () {
     codeBtn.addEventListener('click', function () { if (onEnterCode) onEnterCode(); });
     tools.appendChild(searchBtn); tools.appendChild(thinkSel);
     tools.appendChild(researchBtn); tools.appendChild(siteSearchBtn);
-    tools.appendChild(codeBtn);
+    tools.appendChild(exportBtn); tools.appendChild(codeBtn);
     header.appendChild(pick); header.appendChild(tools);
 
     var thread = document.createElement('div');
