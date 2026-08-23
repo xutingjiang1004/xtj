@@ -16563,8 +16563,34 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
     if (!upstream.ok) {
       var errText = '';
       try { errText = (await upstream.text()).slice(0, 500); } catch (e) {}
-      writeSse(res, { type: 'error', error: '第三方模型请求失败(' + upstream.status + ') ' + errText, code: 'CUSTOM_UPSTREAM_ERROR' });
-      return safeEnd();
+      // ★ 降级重试：部分 OpenAI 兼容端点不认思考档位/联网搜索等附加字段，会以
+      //   4xx「请求参数被拒绝」中断对话。遇到 4xx（排除鉴权/限流）时，剥离附加
+      //   参数、用最简 body 重试一次；成功则继续正常流式读取，避免第三方模型无法对话。
+      if (upstream.status >= 400 && upstream.status < 500
+          && upstream.status !== 401 && upstream.status !== 403 && upstream.status !== 429) {
+        try {
+          clearTimeout(timer);
+          timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
+          var _retryResp = await fetch(baseUrl + '/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+            body: JSON.stringify({ model: chosenModel, messages: fwdMessages, stream: true }),
+            signal: controller.signal
+          });
+          clearTimeout(timer);
+          if (_retryResp && _retryResp.ok) {
+            upstream = _retryResp;
+          } else {
+            if (_retryResp && _retryResp.body && _retryResp.body.cancel) { try { await _retryResp.body.cancel(); } catch (e) {} }
+          }
+        } catch (eRetry) {
+          clearTimeout(timer);
+        }
+      }
+      if (!upstream.ok) {
+        writeSse(res, { type: 'error', error: '第三方模型请求失败(' + upstream.status + ') ' + errText, code: 'CUSTOM_UPSTREAM_ERROR' });
+        return safeEnd();
+      }
     }
     if (!upstream.body) { writeSse(res, { type: 'error', error: '第三方模型无响应流' }); return safeEnd(); }
     startHeartbeat();
