@@ -16492,6 +16492,42 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
   var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
   var reqId = String(body.client_request_id || '').slice(0, 64);
 
+  // ★ 自定义第三方模型的「深度思考」档位 + 「网页搜索」开关：
+  //   把前端面板的 thinking_mode(off/low/medium/high/max) 与 web_search 映射成
+  //   各供应商原生参数。对不支持/忽略未知字段的厂商是安全的（多数 OpenAI 兼容网关
+  //   会忽略多余字段），仅在明确支持处加专用参数。
+  var _THINK_MODES = { off: 1, low: 1, medium: 1, high: 1, max: 1 };
+  var _thinkMode = String(body.thinking_mode || '').toLowerCase();
+  if (!_THINK_MODES[_thinkMode]) _thinkMode = 'off';
+  var _webSearch = body.web_search === true;
+  function buildCustomExtras() {
+    var extra = {};
+    if (_thinkMode !== 'off') {
+      var _effort = (_thinkMode === 'max' || _thinkMode === 'high') ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low');
+      if (provider === 'qwen') {
+        // 千问(DashScope兼容模式)：enable_thinking + thinking_budget 控制思考档位
+        extra.enable_thinking = true;
+        extra.thinking_budget = _thinkMode === 'max' ? 8192 : (_thinkMode === 'high' ? 4096 : (_thinkMode === 'medium' ? 2048 : 1024));
+      } else {
+        // 其余 OpenAI 兼容：reasoning_effort（低/中/高）
+        extra.reasoning_effort = _effort;
+      }
+    } else if (provider === 'qwen') {
+      extra.enable_thinking = false; // 千问支持显式关闭思考
+    }
+    if (_webSearch) {
+      if (provider === 'qwen') {
+        // 千问兼容模式原生联网搜索
+        extra.enable_search = true;
+      } else if (provider === 'kimi') {
+        // Kimi(Moonshot) 内置联网搜索函数
+        extra.tools = [{ type: 'builtin_function', function: { name: '$web_search' } }];
+      }
+      // deepseek 等 chat/completions 无标准内置搜索参数：交由模型自身能力，
+      // 不伪造 tools 以免 400 中断对话。
+    }
+    return extra;
+  }
   // ★ 多轮上下文：优先使用前端传来的 messages 历史；否则退化为单轮。
   //   逐条 sanitize，仅保留 {role, content}，限制条数与单条长度，防止超长/注入。
   var fwdMessages = [{ role: 'user', content: text }];
@@ -16517,11 +16553,11 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + apiKey
       },
-      body: JSON.stringify({
+      body: JSON.stringify(Object.assign({
         model: chosenModel,
         messages: fwdMessages,
         stream: true
-      }),
+      }, buildCustomExtras())),
       signal: controller.signal
     });
     if (!upstream.ok) {
@@ -16567,7 +16603,9 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
         complete: true,
         saved: true,
         custom: true,
-        reasoning_effort: 'off'
+        thinking_mode: _thinkMode,
+        web_search: _webSearch === true,
+        reasoning_effort: _thinkMode === 'off' ? 'off' : (_thinkMode === 'max' || _thinkMode === 'high' ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low'))
       });
     }
   } catch (eUp) {
