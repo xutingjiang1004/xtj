@@ -14,7 +14,7 @@ function read(p){ return fs.readFileSync(path.join(ROOT, p),'utf8'); }
 function hash(p){ return crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT, p))).digest('hex').slice(0,10); }
 
 console.log('\n=== Syntax Checks ===');
-['render-api/server.js','render-api/db-result.js','render-api/code-agent.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/code-file-system.js','js/code-workspace.js','js/features.js','js/photo-wall/preview.js'].forEach(function(f){
+['render-api/server.js','render-api/db-result.js','scripts/build.js','js/core.js','js/login-device.js','js/ai-agent.js','js/features.js','js/photo-wall/preview.js'].forEach(function(f){
   test(f, function(){ cp.execSync('node --check '+f, {stdio:'pipe'}); });
 });
 
@@ -304,7 +304,8 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
   assert.ok(source.indexOf('await new Promise(function(resolve){ setTimeout(resolve, 180); });') >= 0, 'final 100 percent state is not painted before close');
 });
 test('Dock changes stay inside the approved selection-feedback scope', function(){
-  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak" ":(exclude)tests/**"', {encoding:'utf8'});
+  // 删除大文件批量时 diff 输出可能超过 execSync 默认 1MB 缓冲上限（ENOBUFS），显式扩容
+  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak" ":(exclude)tests/**"', {encoding:'utf8', maxBuffer: 50 * 1024 * 1024});
   var changedLines = diff.split(/\r?\n/).filter(function(line) {
     return /^[+-](?!\+\+\+|---)/.test(line);
   });

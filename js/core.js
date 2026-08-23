@@ -1409,15 +1409,6 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
-            // Code must load its filesystem bridge before evaluating the workspace.
-            'code-fs': { scripts: ['xtj-module-code-fs'] },
-            // AI 对话中转站：ChatGPT 式默认首页，作为 code-workspace 的依赖先加载。
-            'chat-hub': { styles: ['xtj-module-chat-hub-style'], scripts: ['xtj-module-chat-hub'] },
-            'code-workspace': {
-                dependencies: ['code-fs', 'chat-hub'],
-                styles: ['xtj-module-code-style', 'xtj-module-code-claude-style'],
-                scripts: ['xtj-module-code-workspace']
-            },
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
@@ -1426,8 +1417,6 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }
         };
         var xtjModulePromises = Object.create(null);
-        // Render can take longer than 15 seconds to cold-deliver the lazy Code bundle.
-        // Keep one bounded retry window instead of failing into an empty Code surface.
         var XTJ_MODULE_LOAD_TIMEOUT = 45000;
 
         function moduleAssetUrl(metaName) {
@@ -1538,9 +1527,6 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 return Promise.all([cssPromise, jsPromise]).then(function() {
                     var valid = true;
                     if (moduleName === 'ai-agent') valid = !!(window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function');
-                    if (moduleName === 'code-fs') valid = !!(window.__xtjCodeFS && typeof window.__xtjCodeFS.readFileByPath === 'function');
-                    if (moduleName === 'chat-hub') valid = !!(window.__xtjChatHub && typeof window.__xtjChatHub.init === 'function');
-                    if (moduleName === 'code-workspace') valid = !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
                     if (!valid) throw new Error('module_export_missing:' + moduleName);
                     return { name: moduleName, loadedAt: Date.now() };
                 });
@@ -10189,11 +10175,6 @@ function renderProfileActivityList(kind) {
                     }
                 }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); loadProfileActivity(false); if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge(); }
-                if (tab === 'code') {
-                    if (typeof window.__xtjCodeInit === 'function' && (!window.__xtjCodeWorkspaceAPI || !window.__xtjCodeWorkspaceAPI.getState() || !window.__xtjCodeWorkspaceAPI.getState().active)) {
-                        Promise.resolve().then(function() { window.__xtjCodeInit(); });
-                    }
-                }
             };
 
             // Animation class mapping

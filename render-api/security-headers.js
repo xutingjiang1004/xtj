@@ -25,7 +25,7 @@ var CSP = [
   "media-src 'self' https:",
   "worker-src 'self' blob:",
   "object-src 'none'",
-  // frame-src 放行同源与 blob:——Code 工作台用 iframe + blob URL 渲染 PDF 预览（js/code-workspace.js renderPdfPreview）
+  // frame-src 放行同源与 blob:
   "frame-src 'self' blob:",
   // WebLLM 本地 Qwen：模型元数据在 huggingface.co，权重会重定向到区域 *.hf.co CDN，WASM 模型库在 raw.githubusercontent.com。
   "connect-src 'self' https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",

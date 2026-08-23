@@ -13,60 +13,6 @@ const ROOT = path.resolve(__dirname, '..');
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
 
 // ──────────────────────────────────────────────
-// Phase 2: Request / Module / Diff lifecycle
-// ──────────────────────────────────────────────
-
-test('P2-08: render error path finalizes before rendering', function () {
-  var s = read('js/code-workspace.js');
-  // The catch block in sendMessage must call finalizeRequest BEFORE renderChatPanel.
-  var m = s.match(/removeTypingIndicator\(\);\s*var errMsg[\s\S]*?finalizeRequest\(ctx,\s*\{\s*error:\s*errMsg[\s\S]*?\}\);\s*renderChatPanel\(\);/);
-  assert.ok(m, 'sendMessage catch must finalize BEFORE renderChatPanel');
-  // Ensure the OLD order (render then finalize) is gone.
-  var oldOrder = s.match(/renderChatPanel\(\);\s*finalizeRequest\(ctx,\s*\{\s*error:\s*errMsg/);
-  assert.ok(!oldOrder, 'old render-then-finalize order must be removed');
-});
-
-test('P2-09: retryCodeModuleLoad resets state.active before calling init', function () {
-  var s = read('js/desktop-shell.js');
-  assert.ok(/retryCodeModuleLoad[\s\S]*?_wsState\.active\s*=\s*false/.test(s),
-    'retryCodeModuleLoad must reset state.active before calling init()');
-  // Verify generation is incremented AFTER cleanup check, not before.
-  assert.ok(/if\s*\(\s*window\.__xtjCodeWorkspaceAPI\.cleanup\(\)\s*===\s*false\s*\)\s*return;[\s\S]*?codeModuleState\.generation\+\+/.test(s),
-    'generation++ must come AFTER cleanup() return-value check');
-});
-
-test('P2-10: pendingOperations carry client metadata', function () {
-  var s = read('js/code-workspace.js');
-  assert.ok(s.indexOf('attachPendingOpMetadata') >= 0, 'attachPendingOpMetadata helper must exist');
-  assert.ok(/_requestId/.test(s) && /_workspaceId/.test(s) && /_workspaceGeneration/.test(s) && /_conversationId/.test(s),
-    'ops must carry _requestId, _workspaceId, _workspaceGeneration, _conversationId');
-});
-
-test('P2-11: applyOperation guards stale diffs by generation and conversation', function () {
-  var s = read('js/code-workspace.js');
-  assert.ok(/op\._workspaceGeneration\s*!==\s*state\.workspaceGeneration/.test(s),
-    'applyOperation must reject ops from a different workspace generation');
-  assert.ok(/op\._conversationId\s*&&\s*op\._conversationId\s*!==\s*state\.conversationId/.test(s),
-    'applyOperation must reject ops from a different conversation');
-  assert.ok(/assertGenerationUnchanged/.test(s),
-    'applyOperation must check generation inside async continuations');
-});
-
-test('P2-12: sendMessage gives user feedback instead of silent drop', function () {
-  var s = read('js/code-workspace.js');
-  assert.ok(/state\.sending[\s\S]*?showToast\('正在发送中/.test(s),
-    'sendMessage must show toast when state.sending is true');
-});
-
-test('P2-13: code-workspace has requestStatus state machine', function () {
-  var s = read('js/code-workspace.js');
-  assert.ok(/requestStatus:\s*'idle'/.test(s), 'state must init requestStatus to idle');
-  assert.ok(/state\.requestStatus\s*=\s*'loading'/.test(s), 'sendMessage must set requestStatus to loading');
-  assert.ok(/state\.requestStatus\s*=\s*'failed'/.test(s), 'finalizeRequest must set requestStatus to failed on error');
-  assert.ok(/state\.requestStatus\s*=\s*'ready'/.test(s), 'finalizeRequest must set requestStatus to ready on success');
-});
-
-// ──────────────────────────────────────────────
 // Phase 4: Photo wall & media
 // ──────────────────────────────────────────────
 
