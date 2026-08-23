@@ -8846,16 +8846,10 @@ function showChatMessages() {
       var grid = panelShell.querySelector('#aiQuickGrid');
       if (!grid) return;
       grid.innerHTML = '';
-      QUICK_PRESETS.forEach(function(p) {
-        grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip', 'data-qc': p.id, text: p.label }));
-      });
-      var customs = loadCustomQuickCommands();
-      customs.forEach(function(c, idx) {
-        grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--custom', 'data-custom': idx, text: c.label }));
-      });
+      // 快捷指令只保留三项：AI生图 / 导出对话 / 增加快捷指令
       grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--gen', 'data-qc': 'genimg', text: 'AI生图' }));
       grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--export', 'data-qc': 'export', text: '导出对话' }));
-      grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--manage', 'data-qc': 'custom', text: '管理指令' }));
+      grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--manage', 'data-qc': 'custom', text: '增加快捷指令' }));
     }
     function insertQuickTemplate(templateText) {
       var existing = String(input.value || '');
