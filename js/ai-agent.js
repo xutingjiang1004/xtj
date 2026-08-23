@@ -7003,12 +7003,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       : DEFAULT_THINKING_MODE;
     var fetchBody;
     if (isCustomModel && customCfg) {
+      // ★ 多轮上下文：把当前会话历史传给第三方便于衔接（自定义模型无本站持久化，
+      //   但前端缓存了 role/content，可拼装本次会话上下文）。限制最近 20 条避免超长。
+      var hl = [];
+      try {
+        var _tail = S.messages.slice(-20);
+        for (var _hi = 0; _hi < _tail.length; _hi++) {
+          var _hm = _tail[_hi];
+          if (!_hm || !_hm.content) continue;
+          var _role = String(_hm.role || '');
+          if (_role !== 'user' && _role !== 'assistant') continue;
+          var _c = String(_hm.content);
+          if (!_c.trim()) continue;
+          if (_role === 'user' && _hm.attachments && Array.isArray(_hm.attachments) && _hm.attachments.length && !/\[(本地)?(图片|文件)[所已]?上传/.test(_c)) continue;
+          hl.push({ role: _role, content: _c.slice(0, 8000) });
+        }
+      } catch (eHist) {}
+      // 兜底：历史没拼出有效内容时，用当前消息
+      if (!hl.length) hl.push({ role: 'user', content: text });
       fetchBody = JSON.stringify({
         provider: customCfg.provider,
         api_key: customCfg.api_key,
         model: customCfg.model,
         base_url: customCfg.base_url,
         message: text,
+        messages: hl,
         client_request_id: reqId,
         timeout_ms: 180000
       });
@@ -9089,7 +9108,7 @@ function showChatMessages() {
       var msgs = (S.messages || []).filter(function(m) { return m && m.content; });
       if (!msgs.length) { notify('当前对话还没有内容'); return; }
       var displayName = (S.config && S.config.name) || AI_DISPLAY_NAME;
-      var lines = ['# ' + displayName + ' 对话记录', '', '导出时间：' + new Date().toLocaleString(), '模型：' + (modelLabels[S.selectedModel] || S.selectedModel), ''];
+      var lines = ['# ' + displayName + ' 对话记录', '', '导出时间：' + new Date().toLocaleString(), '模型：' + (isCustomModelId(S.selectedModel) ? (customModelDisplayName(S.selectedModel) || S.selectedModel) : (modelLabels[S.selectedModel] || S.selectedModel)), ''];
       msgs.forEach(function(m) {
         var role = m.role === 'assistant' ? '🤖 ' + displayName : '🧑 我';
         lines.push('## ' + role + (m.created_at ? ' · ' + fmtTime(m.created_at) : ''));
@@ -9127,7 +9146,15 @@ function showChatMessages() {
     function repopulateModelSelect(keepValue) {
       if (!modelSelect) return;
       var current = keepValue || S.selectedModel || 'deepseek-v4-flash-vision-exp';
-      fillSelect(modelSelect, buildModelOptions(), isCustomModelId(current) && findCustomModel(current.slice(CUSTOM_MODEL_PREFIX.length)) ? current : 'deepseek-v4-flash-vision-exp');
+      // 正确保留当前选择：自定义模型需仍存在；内置模型需仍在标签表里；
+      // 否则回落到默认 flash。
+      var target = 'deepseek-v4-flash-vision-exp';
+      if (isCustomModelId(current)) {
+        if (findCustomModel(current.slice(CUSTOM_MODEL_PREFIX.length))) target = current;
+      } else if (modelLabels[current]) {
+        target = current;
+      }
+      fillSelect(modelSelect, buildModelOptions(), target);
     }
     repopulateModelSelect();
 
