@@ -487,7 +487,8 @@
 
     var panelCode = document.getElementById('panelCode');
     if (panelCode) {
-      panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
+      // ★ 极简加载态：去掉「正在加载 Code 工作区…」文字，避免加载观感
+      panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div></div>';
     }
 
     var loadStartTime = Date.now();
@@ -628,7 +629,8 @@
     if (codeModuleState.status === 'loading') return;
     var panelCode = document.getElementById('panelCode');
     if (panelCode && codeModuleState.status === 'idle') {
-      panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
+      // ★ 极简加载态：去掉文字，避免加载观感
+      panelCode.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div></div>';
     }
     window.requestAnimationFrame(function () {
       window.requestAnimationFrame(function () {
@@ -952,14 +954,14 @@
         event.preventDefault();
         var tab = tabButton.getAttribute('data-desktop-tab');
         if (tab === 'code') {
-          // P0: 先打开面板，再用 requestAnimationFrame 延迟加载模块
-          // 确保面板可见后再开始加载，避免 offsetParent 检查失败
+          // P0: 先打开面板，再用 requestAnimationFrame 渲染内容
           openTab(tab);
-          // Do not let the static welcome markup look like a ready workspace
-          // while the asynchronously injected modules are still loading.
           var codePanel = document.getElementById('panelCode');
-          if (codePanel && (!window.__xtjCodeWorkspaceAPI || typeof window.__xtjCodeWorkspaceAPI.init !== 'function')) {
-            codePanel.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div><p>正在加载 Code 工作区...</p></div>';
+          // ★ 若模块已就绪（空闲预加载命中），立即渲染，不再写入「正在加载」占位
+          var codeReady = !!(window.__xtjCodeWorkspaceAPI && typeof window.__xtjCodeWorkspaceAPI.init === 'function');
+          if (!codeReady && codePanel) {
+            // 仅当模块确实未加载时才显示极简加载态（去掉了文字，避免「正在加载 CODE 工作栏」观感）
+            codePanel.innerHTML = '<div class="code-loading-state"><div class="loading-spinner"></div></div>';
           }
           window.requestAnimationFrame(function () {
             window.requestAnimationFrame(function () {
@@ -971,6 +973,9 @@
                   if (!codeState || !codeState.active) {
                     window.__xtjCodeWorkspaceAPI.init();
                   }
+                } else if (codePanel && !codePanel.querySelector('.code-loading-state') && !codePanel.querySelector('.hub-root')) {
+                  // 兜底：确保面板不会因任何异常停留在空白
+                  codePanel.innerHTML = '';
                 }
               }).catch(function () {
                 // 错误已在 ensureCodeModulesLoaded 中处理

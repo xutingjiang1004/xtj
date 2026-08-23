@@ -352,7 +352,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px; height: 40px;
+  width: 44px; height: 44px;
   flex-shrink: 0;
   border: 1px solid var(--hub-line);
   border-radius: 10px;
@@ -363,7 +363,7 @@
   line-height: 1;
   margin-bottom: 0;
 }
-.hub-voice svg, .hub-attach svg { width: 22px; height: 22px; display: block; }
+.hub-voice svg, .hub-attach svg { width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex: 0 0 auto; display: block; }
 .hub-voice:hover, .hub-attach:hover { background: var(--hub-item-hover); border-color: var(--hub-add-border); }
 .hub-voice.listening { color: var(--hub-red); border-color: var(--hub-red); background: rgba(229,72,77,.1); }
 .hub-file-preview {
@@ -404,14 +404,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px; height: 40px;
+  width: 44px; height: 44px;
   border: 1px solid var(--hub-line);
   border-radius: 10px;
   background: var(--hub-surface);
   color: var(--hub-text);
   cursor: pointer;
 }
-.hub-plusbtn svg { width: 22px; height: 22px; display: block; }
+.hub-plusbtn svg { width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex: 0 0 auto; display: block; }
 .hub-plusbtn:hover { background: var(--hub-item-hover); border-color: var(--hub-add-border); }
 .hub-plusmenu {
   position: absolute;
@@ -443,6 +443,24 @@
   cursor: pointer;
 }
 .hub-menu-item:hover { background: var(--hub-item-hover); }
+/* ★ 开通 Pro 专属强调样式：金色主题，区分于普通菜单项
+   需加 .hub-plusmenu 前缀提升特异性，避免被 style.css 的 :is(button:not(.dock-tab)...)
+   玻璃拟态按钮规则(0,1,1)覆盖 color/background。 */
+.hub-plusmenu .hub-menu-item--pro {
+  margin-top: 2px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #b8860b;
+  background: linear-gradient(90deg, rgba(255, 214, 102, 0.12), rgba(255, 178, 66, 0.05));
+  font-weight: 600;
+  border-left: 3px solid #e0a93f;
+}
+[data-theme="dark"] .hub-plusmenu .hub-menu-item--pro {
+  color: #e6bf6a;
+  background: linear-gradient(90deg, rgba(224, 169, 63, 0.2), rgba(224, 169, 63, 0.06));
+  border-left-color: #e6bf6a;
+}
+.hub-plusmenu .hub-menu-item--pro:hover { background: rgba(224, 169, 63, 0.16); }
 
 /* 弹窗 / toast */
 .hub-modal-bg {

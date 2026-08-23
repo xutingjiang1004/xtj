@@ -1663,6 +1663,9 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
         }
         bindTopAiToolsLauncher();
         scheduleAiPreload();
+        // ★ 空闲时预加载 CODE 工作台模块，使点击「小猫AI」导航后能立即渲染内容，
+        //   不再让用户停留在「正在加载 Code 工作区…」占位。
+        scheduleCodeWorkspacePreload();
 
         function ensureCoreAnimationsLoaded() {
             return loadXtjModule('enhancements');
@@ -1824,6 +1827,30 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
         }
         // 在消息页面加载后触发预加载
         window.__xtjScheduleAiPreload = scheduleAiPreload;
+
+        // ★ 空闲时预加载 CODE 工作台模块（含依赖 code-fs / chat-hub），
+        //   使点击「小猫AI」导航后能立即渲染 ChatGPT 式对话界面，不再停于加载占位。
+        var _codeWorkspacePreloadScheduled = false;
+        function scheduleCodeWorkspacePreload() {
+            if (_codeWorkspacePreloadScheduled) return;
+            _codeWorkspacePreloadScheduled = true;
+            var preloadFn = function() {
+                try {
+                    loadXtjModule('code-workspace').then(function() {
+                        console.log('[XTJ] CODE workspace module preloaded');
+                    }).catch(function(err) {
+                        console.warn('[XTJ] CODE workspace preload failed:', err && err.message);
+                    });
+                } catch(e) {}
+            };
+            if (typeof requestIdleCallback === 'function') {
+                // 延迟稍放宽：CODE 工作台体积较大，浏览器空闲时优先下载
+                requestIdleCallback(preloadFn, { timeout: 4000 });
+            } else {
+                setTimeout(preloadFn, 2500);
+            }
+        }
+        window.__xtjScheduleCodeWorkspacePreload = scheduleCodeWorkspacePreload;
 
         function lazyPhotoUploadLauncher() {
             ensurePhotoWallUploadLoaded().then(function() {
