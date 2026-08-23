@@ -132,7 +132,8 @@ test('normal chat stream keeps the SSE connection alive with heartbeats', () => 
   const route = serverSource.slice(routeStart, routeEnd);
   assert.match(route, /startStreamHeartbeat\(\)/);
   assert.match(route, /type: 'heartbeat'/);
-  assert.match(route, /_sseLastWriteAt/);
+  // ★ 心跳现已为无条件每 4s 发送（不再依赖 _sseLastWriteAt 沉默阈值标记）
+  assert.match(route, /,\s*4000\)/);
   assert.match(route, /clearStreamHeartbeat\(\)/);
   assert.match(route, /safeEnd\(\) \{[^]*clearStreamHeartbeat\(\)/);
   // 前端显式忽略 heartbeat，避免未来事件类型解析冲突
