@@ -1,6 +1,8 @@
 /* =========================================================================
  * chat-hub.css —「AI 对话中转站」Hub（CODE工作台首页）
  * 作用域统一为 .hub-*，避免污染 code-workspace / 全局样式。
+ * 颜色一律走 .hub-* 变量，并在末尾用 [data-theme="dark"] 覆盖成深色，
+ * 与站点其余面板保持一致。
  * ------------------------------------------------------------------ */
 .hub-root {
   --hub-bg: #ffffff;
@@ -11,6 +13,24 @@
   --hub-accent: #4f6bff;
   --hub-ai: #f2f4f8;
   --hub-red: #e5484d;
+  --hub-surface: #ffffff;      /* 按钮 / 输入框 / 弹窗白底 */
+  --hub-surface-hover: #f0f2f7;
+  --hub-item-hover: #eceef4;
+  --hub-item-active: #e4e9ff;
+  --hub-pop-hover: #f2f4f9;
+  --hub-add-border: #c9cfdd;
+  --hub-add-hover: #f4f6ff;
+  --hub-tool-on-bg: #f0f3ff;
+  --hub-codebtn: #5b6472;
+  --hub-conv-time: #b6bcc7;
+  --hub-custom: #0b7a3c;
+  --hub-reason-border: #cbd4ff;
+  --hub-reason-bg: rgba(79,107,255,.05);
+  --hub-modal-bg: #ffffff;
+  --hub-inline-bg: #e4e6eb;
+  --hub-inline-color: #c0341d;
+  --hub-send-hover: #3d58e6;
+  --hub-send-busy: #d9534f;
   display: flex;
   width: 100%;
   height: 100%;
@@ -41,7 +61,7 @@
   padding: 10px 12px;
   border: 1px solid var(--hub-line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--hub-surface);
   font-size: 14px;
   color: var(--hub-text);
   cursor: pointer;
@@ -50,7 +70,7 @@
   gap: 6px;
   transition: background .15s;
 }
-.hub-new:hover { background: #f0f2f7; }
+.hub-new:hover { background: var(--hub-surface-hover); }
 .hub-new-plus { color: var(--hub-accent); font-weight: 700; }
 .hub-conv-list {
   flex: 1;
@@ -71,11 +91,11 @@
   cursor: pointer;
   display: block;
 }
-.hub-conv-item:hover { background: #eceef4; }
-.hub-conv-item.is-active { background: #e4e9ff; }
+.hub-conv-item:hover { background: var(--hub-item-hover); }
+.hub-conv-item.is-active { background: var(--hub-item-active); }
 .hub-conv-title { font-size: 13px; color: var(--hub-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hub-conv-sub { font-size: 12px; color: var(--hub-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-.hub-conv-time { font-size: 11px; color: #b6bcc7; margin-top: 2px; }
+.hub-conv-time { font-size: 11px; color: var(--hub-conv-time); margin-top: 2px; }
 .hub-conv-del {
   position: absolute;
   right: 8px; top: 50%;
@@ -112,13 +132,13 @@
   padding: 8px 16px;
   border: 1px solid var(--hub-line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--hub-surface);
   font-size: 14px;
   color: var(--hub-text);
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(16,24,40,.04);
 }
-.hub-modelbtn:hover { border-color: #d9dce3; }
+.hub-modelbtn:hover { border-color: var(--hub-add-border); }
 .hub-modelpop {
   display: none;
   position: absolute;
@@ -126,7 +146,7 @@
   min-width: 260px;
   max-height: 400px;
   overflow-y: auto;
-  background: #fff;
+  background: var(--hub-modal-bg);
   border: 1px solid var(--hub-line);
   border-radius: 12px;
   box-shadow: 0 8px 28px rgba(16,24,40,.14);
@@ -149,15 +169,15 @@
   color: var(--hub-text);
   cursor: pointer;
 }
-.hub-pop-item:hover { background: #f2f4f9; }
-.hub-pop-item.is-sel { background: #e4e9ff; font-weight: 600; }
-.hub-pop-item-custom { color: #0b7a3c; }
+.hub-pop-item:hover { background: var(--hub-pop-hover); }
+.hub-pop-item.is-sel { background: var(--hub-item-active); font-weight: 600; }
+.hub-pop-item-custom { color: var(--hub-custom); }
 .hub-pop-del { color: var(--hub-sub); cursor: pointer; padding: 0 4px; }
 .hub-pop-del:hover { color: var(--hub-red); }
 .hub-pop-add {
   width: 100%;
   margin-top: 8px;
-  border: 1px dashed #c9cfdd;
+  border: 1px dashed var(--hub-add-border);
   border-radius: 8px;
   background: transparent;
   padding: 9px 10px;
@@ -165,22 +185,22 @@
   color: var(--hub-accent);
   cursor: pointer;
 }
-.hub-pop-add:hover { background: #f4f6ff; }
+.hub-pop-add:hover { background: var(--hub-add-hover); }
 
 .hub-tools { display: flex; align-items: center; gap: 8px; }
 .hub-tool {
   padding: 7px 12px;
   border: 1px solid var(--hub-line);
   border-radius: 9px;
-  background: #fff;
+  background: var(--hub-surface);
   font-size: 13px;
   color: var(--hub-color, var(--hub-text));
   cursor: pointer;
 }
-.hub-tool.is-on { border-color: var(--hub-accent); color: var(--hub-accent); background: #f0f3ff; }
+.hub-tool.is-on { border-color: var(--hub-accent); color: var(--hub-accent); background: var(--hub-tool-on-bg); }
 .hub-select { height: 34px; }
-.hub-codebtn { color: #5b6472; }
-.hub-codebtn:hover { background: #f2f4f9; }
+.hub-codebtn { color: var(--hub-codebtn); }
+.hub-codebtn:hover { background: var(--hub-pop-hover); }
 
 /* 消息区 */
 .hub-thread {
@@ -208,7 +228,7 @@
 .hub-suggest-chip {
   border: 1px solid var(--hub-line);
   border-radius: 20px;
-  background: #fff;
+  background: var(--hub-surface);
   padding: 8px 14px;
   font-size: 13px;
   color: var(--hub-sub);
@@ -236,11 +256,11 @@
   padding: 10px 12px; overflow-x: auto; margin: 8px 0; font-size: 12.5px;
 }
 .hub-msg-content code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.hub-msg-content :not(pre) > code { background: #e4e6eb; color: #c0341d; padding: 1px 5px; border-radius: 5px; }
+.hub-msg-content :not(pre) > code { background: var(--hub-inline-bg); color: var(--hub-inline-color); padding: 1px 5px; border-radius: 5px; }
 
 .hub-reason {
-  border-left: 2px solid #cbd4ff;
-  background: rgba(79,107,255,.05);
+  border-left: 2px solid var(--hub-reason-border);
+  background: var(--hub-reason-bg);
   border-radius: 6px;
   padding: 6px 10px;
   margin-bottom: 10px;
@@ -268,7 +288,7 @@
   line-height: 1.5;
   max-height: 200px;
   outline: none;
-  background: #fff;
+  background: var(--hub-surface);
   color: var(--hub-text);
 }
 .hub-composer textarea:focus { border-color: var(--hub-accent); box-shadow: 0 0 0 3px rgba(79,107,255,.12); }
@@ -282,8 +302,8 @@
   cursor: pointer;
   flex-shrink: 0;
 }
-.hub-send:hover { background: #3d58e6; }
-.hub-send.is-busy { background: #d9534f; }
+.hub-send:hover { background: var(--hub-send-hover); }
+.hub-send.is-busy { background: var(--hub-send-busy); }
 
 /* 弹窗 / toast */
 .hub-modal-bg {
@@ -294,12 +314,12 @@
 }
 .hub-modal {
   width: min(420px, 92vw);
-  background: #fff;
+  background: var(--hub-modal-bg);
   border-radius: 16px;
   padding: 20px;
   box-shadow: 0 20px 60px rgba(16,24,40,.3);
 }
-.hub-modal-title { font-size: 17px; font-weight: 700; margin-bottom: 16px; }
+.hub-modal-title { font-size: 17px; color: var(--hub-text); font-weight: 700; margin-bottom: 16px; }
 .hub-field { display: block; font-size: 13px; color: var(--hub-sub); margin-bottom: 12px; }
 .hub-field input,
 .hub-field select {
@@ -311,13 +331,14 @@
   font: inherit;
   font-size: 13.5px;
   color: var(--hub-text);
+  background: var(--hub-surface);
   outline: none;
   box-sizing: border-box;
 }
 .hub-field input:focus, .hub-field select:focus { border-color: var(--hub-accent); }
 .hub-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .hub-btn { border: 1px solid var(--hub-line); border-radius: 9px; padding: 9px 18px; font-size: 13.5px; cursor: pointer; }
-.hub-btn.ghost { background: #fff; color: var(--hub-text); }
+.hub-btn.ghost { background: var(--hub-surface); color: var(--hub-text); }
 .hub-btn.primary { background: var(--hub-accent); border-color: var(--hub-accent); color: #fff; }
 
 .hub-toast {
@@ -332,6 +353,35 @@
   transition: opacity .3s;
 }
 .hub-toast-hide { opacity: 0; }
+
+/* ★ 深色模式：与站点 [data-theme="dark"] 对齐 */
+[data-theme="dark"] .hub-root {
+  --hub-bg: #0d1418;
+  --hub-side: #131b21;
+  --hub-line: #26313a;
+  --hub-text: #e4e9ee;
+  --hub-sub: #8f9aa6;
+  --hub-accent: #6b82ff;
+  --hub-ai: #1b252b;
+  --hub-red: #ff5c5f;
+  --hub-surface: #1a242b;
+  --hub-surface-hover: #222e37;
+  --hub-item-hover: #202b33;
+  --hub-item-active: #263248;
+  --hub-pop-hover: #202b33;
+  --hub-add-border: #3a4750;
+  --hub-add-hover: #1f2b3a;
+  --hub-tool-on-bg: #1d2a42;
+  --hub-codebtn: #aab4bf;
+  --hub-conv-time: #5a6672;
+  --hub-custom: #5bd48c;
+  --hub-reason-border: #3a4678;
+  --hub-reason-bg: rgba(107,130,255,.08);
+  --hub-modal-bg: #161f26;
+  --hub-inline-bg: #333d46;
+  --hub-inline-color: #ff8b7e;
+  --hub-send-hover: #5a70e8;
+}
 
 @media (max-width: 720px) {
   .hub-sidebar { width: 78px; }
