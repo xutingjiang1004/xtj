@@ -47,6 +47,33 @@ window.__xtjChatHub = (function () {
   var streamingAssistant = null;   // 流式进行中累积的 AI 回复，完成后提交进 messages
   var _streamSeq = 0;
   var activeStreamId = 0;          // 当前生效的流号，旧请求 finalize 据此忽略，防止串扰新流
+
+  // ─── 用户偏好持久化（思考档位 / 模型 / 联网） ───
+  function loadHubPrefs() {
+    try {
+      var t = localStorage.getItem('xtj_hub_think_mode');
+      if (t && THINK_MODES && THINK_MODES.indexOf(t) >= 0) thinkMode = t;
+      var ws = localStorage.getItem('xtj_hub_web_search');
+      webSearch = (ws === '1');
+      var vt = localStorage.getItem('xtj_hub_model_type');
+      var vv = localStorage.getItem('xtj_hub_model_value');
+      if (vt === 'custom' && vv) {
+        var cm = loadCustomModels().filter(function (x) { return x.uid === vv; })[0];
+        if (cm) selected = { type: 'custom', value: 'custom:' + cm.uid, custom: cm };
+      } else if (vv) {
+        var bm = BUILTIN_MODELS.filter(function (b) { return b.value === vv; })[0];
+        if (bm) selected = { type: 'builtin', value: vv, custom: null };
+      }
+    } catch (e) {}
+  }
+  function saveHubPrefs() {
+    try {
+      localStorage.setItem('xtj_hub_think_mode', thinkMode);
+      localStorage.setItem('xtj_hub_web_search', webSearch ? '1' : '0');
+      localStorage.setItem('xtj_hub_model_type', selected.type);
+      localStorage.setItem('xtj_hub_model_value', selected.type === 'custom' ? (selected.custom && selected.custom.uid) : selected.value);
+    } catch (e) {}
+  }
   var aborter = null;
   var conversations = [];
   var _attachFile = null;   // 当前待发送附件 { name, type, dataUrl, size }
@@ -596,6 +623,7 @@ window.__xtjChatHub = (function () {
         selected = { type: 'builtin', value: b.value, custom: null };
         _els.modelBtn.textContent = currentModelLabel();
         closePop();
+        saveHubPrefs();
         refreshConversations();
       });
       _els.pop.appendChild(item);
@@ -621,6 +649,7 @@ window.__xtjChatHub = (function () {
           if (selected.type === 'custom' && selected.custom && selected.custom.uid === m.uid) {
             selected = { type: 'builtin', value: 'deepseek-v4-flash-vision-exp', custom: null };
             _els.modelBtn.textContent = currentModelLabel();
+            saveHubPrefs();
           }
           renderModelPop();
           refreshConversations();
@@ -630,6 +659,7 @@ window.__xtjChatHub = (function () {
           selected = { type: 'custom', value: 'custom:' + m.uid, custom: m };
           _els.modelBtn.textContent = currentModelLabel();
           closePop();
+          saveHubPrefs();
         });
         _els.pop.appendChild(item);
       });
@@ -838,6 +868,7 @@ window.__xtjChatHub = (function () {
   function focusInput() { if (_els.input) { try { _els.input.focus(); } catch (e) {} } }
 
   function build() {
+    loadHubPrefs();
     root.innerHTML = '';
     root.classList.add('hub-scale', 'hub-root');
 
@@ -910,9 +941,11 @@ window.__xtjChatHub = (function () {
     searchBtn.className = 'hub-tool';
     searchBtn.id = 'hubSearchBtn';
     searchBtn.textContent = '🌐 联网';
+    searchBtn.classList.toggle('is-on', webSearch);
     searchBtn.addEventListener('click', function () {
       webSearch = !webSearch;
       searchBtn.classList.toggle('is-on', webSearch);
+      saveHubPrefs();
     });
     var thinkSel = document.createElement('select');
     thinkSel.className = 'hub-tool hub-select';
@@ -924,7 +957,7 @@ window.__xtjChatHub = (function () {
       thinkSel.appendChild(o);
     });
     thinkSel.value = thinkMode;
-    thinkSel.addEventListener('change', function () { thinkMode = thinkSel.value; });
+    thinkSel.addEventListener('change', function () { thinkMode = thinkSel.value; saveHubPrefs(); });
     var researchBtn = document.createElement('button');
     researchBtn.type = 'button';
     researchBtn.className = 'hub-tool';
