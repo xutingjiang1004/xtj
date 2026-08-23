@@ -235,6 +235,14 @@
 .hub-select { height: 34px; }
 .hub-codebtn { color: var(--hub-codebtn); }
 .hub-codebtn:hover { background: var(--hub-pop-hover); }
+/* 深度研究入口：更醒目的强调样式 */
+#hubResearchBtn {
+  border-color: rgba(79,107,255,.45);
+  color: var(--hub-accent);
+  background: linear-gradient(135deg, rgba(79,107,255,.10), rgba(79,107,255,.03));
+  font-weight: 600;
+}
+#hubResearchBtn:hover { background: var(--hub-item-active); border-color: var(--hub-accent); }
 
 /* 消息区 */
 .hub-thread {
@@ -343,18 +351,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px; height: 38px;
+  width: 40px; height: 40px;
   flex-shrink: 0;
   border: 1px solid var(--hub-line);
   border-radius: 10px;
   background: var(--hub-surface);
-  color: var(--hub-sub);
+  color: var(--hub-text);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
   margin-bottom: 0;
 }
-.hub-voice:hover, .hub-attach:hover { background: var(--hub-item-hover); color: var(--hub-text); }
+.hub-voice svg, .hub-attach svg { width: 22px; height: 22px; display: block; }
+.hub-voice:hover, .hub-attach:hover { background: var(--hub-item-hover); border-color: var(--hub-add-border); }
 .hub-voice.listening { color: var(--hub-red); border-color: var(--hub-red); background: rgba(229,72,77,.1); }
 .hub-file-preview {
   display: inline-flex;
