@@ -17821,6 +17821,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (useThinking) {
       // DeepSeek API reasoning_effort 仅接受 low/medium/high，max 映射为 high
       apiBody.reasoning_effort = thinkingMode === 'max' ? 'high' : thinkingMode;
+      // ★ 深度思考必须给足输出上限：DeepSeek 思考(reasoning)会先消耗大量 token，
+      //   默认 max_tokens 较小会被思考占满，导致"只见思考、正文为空"。给 16384 保障正文。
+      apiBody.max_tokens = 16384;
     }
     // 思考模式下不同时发 tools（DeepSeek reasoning 模型不支持
     // thinking + tools 并存，会返回 400），搜索靠 regex 回退注入
@@ -17840,8 +17843,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //   清空上一轮已推送的"前言"，finishStream 落库只会存最后一轮正文。
     var contentBuffer = '';
     // ★ P1 修复：thinking 模式下多轮工具调用 + idle-timer reset 会让单个流无限延长。
-    //   加一个 while 循环级的总超时（180s），硬上限防止 DeepSeek reasoning chain 长时间挂起。
-    var totalTimer = setTimeout(function() { aborted = true; try { controller && controller.abort(); } catch (e) {} }, 180000);
+    //   加一个 while 循环级的总超时硬上限防止 DeepSeek reasoning chain 长时间挂起。
+    //   深度思考(useThinking)推理可能较长，放宽到 7 分钟，避免推理快到正文时被硬掐断
+    //   造成前端"连接中断、正文为空"。普通对话保持 3 分钟。
+    var totalTimer = setTimeout(function() { aborted = true; try { controller && controller.abort(); } catch (e) {} }, useThinking ? 420000 : 180000);
     _totalTimer = totalTimer;
 
     while (toolRound < MAX_TOOL_ROUNDS && !aborted) {
