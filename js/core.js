@@ -3130,13 +3130,29 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 showToast('正在压缩并上传头像..');
                 
                 try {
-                    const path = buildStorageUploadPath('avatars', file.name);
+                    // ★ 修复：compressImage 此前定义了却从未被调用，原图直传（浪费带宽/存储）。
+                    // 仅对大文件（>1.5MB）压缩为 JPEG 再上传；小图保持原样避免透明背景被压平，
+                    // 压缩失败则回退原图上传，不影响可用性。
+                    var uploadFile = file;
+                    var path = buildStorageUploadPath('avatars', file.name);
+                    if (file.size > 1.5 * 1024 * 1024) {
+                        try {
+                            var compressedDataUrl = await compressImage(file, 1024, 1024, 0.82);
+                            if (compressedDataUrl && compressedDataUrl.length > 0) {
+                                var compressedBlob = await (await window.fetch(compressedDataUrl)).blob();
+                                if (compressedBlob && compressedBlob.size > 0 && compressedBlob.size < file.size) {
+                                    uploadFile = compressedBlob;
+                                    path = buildStorageUploadPath('avatars', 'avatar-' + Date.now() + '.jpg');
+                                }
+                            }
+                        } catch (compressErr) { console.warn('[avatar] compress failed, upload raw', compressErr); }
+                    }
                     
                     // 上传到 Supabase Storage
                     if (/\.(svgz?|html?|xml|swf)$/i.test(String(file && file.name || '')) || /^image\/svg\+xml/i.test(String(file && file.type || ''))) {
                         throw new Error('file type not allowed');
                     }
-                    const { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
+                    const { error: uploadErr } = await sb.storage.from('uploads').upload(path, uploadFile);
                     if (uploadErr) throw uploadErr;
                     
                     // 获取 Public URL
@@ -4403,7 +4419,9 @@ function renderProfileActivityList(kind) {
             }
             window.__xtjRetryCatAi = async function(commentId, postId) {
                 var commentIdStr = String(commentId);
-                var statusEl = document.getElementById('cat-ai-status-' + commentIdStr);
+                // ★ 修复：状态元素由 showCatAiStatus 创建，类名为 cat-ai-status + data-comment-id，
+                // 不存在 id="cat-ai-status-<id>" 的元素，改用 querySelector 定位。
+                var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + commentIdStr + '"]');
                 if (statusEl) statusEl.innerHTML = '小猫正在恢复……';
                 try {
                     var resp = await window.xtjProtectedFetch('/api/comments/ai-reply-retry', {
@@ -5281,11 +5299,29 @@ function renderProfileActivityList(kind) {
                     }
                 };
                 document.addEventListener('click', _mentionGlobalClick, true);
+                // ★ 修复：监听器泄漏。feed 重渲染会直接替换 #feed.innerHTML，正在
+                // 展开的 .inline-comment-box 被整体丢弃，不会触发 box.remove()，导致
+                // document 级 capture 点击监听反复累积。这里把清理函数登记到全局
+                // 注册表，渲染 feed 前统一执行（见 renderFeed* 入口）。
+                window.__xtjMentionCleanups = window.__xtjMentionCleanups || [];
+                var _mentionCleanup = function() {
+                    document.removeEventListener('click', _mentionGlobalClick, true);
+                };
+                window.__xtjMentionCleanups.push(_mentionCleanup);
+                if (!window.__xtjRunMentionCleanups) {
+                    window.__xtjRunMentionCleanups = function() {
+                        var _arr = window.__xtjMentionCleanups || [];
+                        for (var _ci = 0; _ci < _arr.length; _ci++) { try { _arr[_ci](); } catch (_ce) {} }
+                        window.__xtjMentionCleanups = [];
+                    };
+                }
                 // 帖子关闭或重绘时关闭 + 移除全局监听器
                 var _origBoxRemove = box.remove;
                 box.remove = function() {
                     closeMentionDropdown();
-                    document.removeEventListener('click', _mentionGlobalClick, true);
+                    _mentionCleanup();
+                    var _ri = window.__xtjMentionCleanups ? window.__xtjMentionCleanups.indexOf(_mentionCleanup) : -1;
+                    if (_ri !== -1) window.__xtjMentionCleanups.splice(_ri, 1);
                     _origBoxRemove.call(box);
                 };
                 
@@ -7252,23 +7288,37 @@ function renderProfileActivityList(kind) {
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${(function(){
-                      var roots = pComms.filter(function(c) { return !c.parent_comment_id; });
-                      var children = pComms.filter(function(c) { return c.parent_comment_id; });
-                      var html = '';
-                      roots.forEach(function(r) {
-                        html += '<div class="comment-item" data-comment-id="' + escapeHtml(r.id) + '"><div><b>' + escapeHtml(r.user_name) + ':</b> ' + escapeHtml(r.content) + '</div>' + commentDeleteButton(r);
-                        var replies = children.filter(function(c) { return String(c.parent_comment_id) === String(r.id); });
-                        if (replies.length > 0) {
-                          html += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + replies.map(function(c) {
-                            if (c.user_name === 'cat_ai' && c.generated_by_ai) {
-                               return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
-                            }
-                            return '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
-                          }).join('') + '</div>';
+                      // ★ 修复：递归建树渲染评论。旧实现只把 parent 是 root 的回复当
+                      // 子节点，回复的回复（grandchild）被当成 root 直接子级错乱嵌套；
+                      // 父评论缺失/已删的回复既不渲染却仍计入评论数（数量不一致）。
+                      // 现按 parent_comment_id 递归建树：父缺失的回复提升为顶层展示，
+                      // 全部 pComms 均被渲染，评论数口径与实际渲染一致。
+                      var _byId = {};
+                      pComms.forEach(function(c) { _byId[String(c.id)] = c; });
+                      var _childrenOf = {};
+                      var _roots = [];
+                      pComms.forEach(function(c) {
+                        var _pid = (c.parent_comment_id != null && String(c.parent_comment_id) !== '') ? String(c.parent_comment_id) : '';
+                        if (_pid && _byId[_pid]) {
+                          (_childrenOf[_pid] = _childrenOf[_pid] || []).push(c);
+                        } else {
+                          _roots.push(c);
                         }
-                        html += '</div>';
                       });
-                      return html;
+                      function _renderCommentNode(c) {
+                        var _node;
+                        if (c.user_name === 'cat_ai' && c.generated_by_ai) {
+                          _node = '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
+                        } else {
+                          _node = '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
+                        }
+                        var _kids = _childrenOf[String(c.id)] || [];
+                        if (_kids.length) {
+                          _node += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + _kids.map(_renderCommentNode).join('') + '</div>';
+                        }
+                        return _node;
+                      }
+                      return _roots.map(_renderCommentNode).join('');
                   })()}</div>` : ''}
                 </div>`;
             }
@@ -8585,7 +8635,6 @@ function renderProfileActivityList(kind) {
                     uploadedPath = '';
                     touchUserSession(false);
                     resetPostComposer();
-                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     if (!insertPublishedPostIntoFeed(insertRes.data)) {
                         clearFeedCache();
@@ -8611,6 +8660,9 @@ function renderProfileActivityList(kind) {
                     btn.setAttribute('aria-busy', 'false');
                     btn.textContent = btn.dataset.originalText || "发布动态";
                     delete btn.dataset.originalText;
+                    // ★ 修复：成功/失败路径统一回收 postPreviewUrls（blob:），
+                    // 避免反复发帖失败时 blob URL 内存累积。幂等，重复调用安全。
+                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                 }
             };
 
@@ -8886,6 +8938,7 @@ function renderProfileActivityList(kind) {
             };
 
             renderFeedWithAvatars = function(visiblePosts, comments, likes) {
+                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 var feed = document.getElementById("feed");
                 var scopedComments = getRenderableComments(comments, visiblePosts);
                 var maps = buildPostMaps(scopedComments, likes);
@@ -8902,6 +8955,7 @@ function renderProfileActivityList(kind) {
             };
 
             renderFeed = async function(payload) {
+                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 bindPostFilterEvents();
                 var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);
@@ -9340,8 +9394,8 @@ function renderProfileActivityList(kind) {
                 var _dmMaxReconnectAttempts = 10;
 
                 function createDmChannel() {
-                    chatRealtime = sb.channel('chat-dms')
-                        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, function(payload) {
+                    chatRealtime = sb.channel('chat-dms')
+                        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: 'media_type=eq.' + DM_MARKER }, function(payload) {
                             var m = payload.new || payload.old;
                             if (m.media_type !== DM_MARKER) return;
                             if (!window.currentUser) return;
@@ -9670,9 +9724,11 @@ function renderProfileActivityList(kind) {
                     reportBadge.style.display = 'none';
                     reportBadge.textContent = '0';
                 }
-                // 标记服务器端通知为已读
-                // 立即重新检测以更新角标
-                setTimeout(checkReportReplies, 200);
+                // 标记服务器端通知为已读
+                // ★ 修复：原 200ms 内后端未必完成"已读"落库，checkReportReplies
+                // 会读到旧 unread>0 把刚清掉的红点又点亮（闪烁/残留）。
+                // 延迟重查让后端落库完成；本地角标已即时清空。
+                setTimeout(checkReportReplies, 3000);
                 }).catch(function() {});
             }
 
@@ -10140,7 +10196,13 @@ function renderProfileActivityList(kind) {
                 }
                 if (tab === 'ai') {
                     if (!window.currentUser) {
-                        renderPhotoWallLockedState();
+                        // ★ 修复：未登录时不再把整个 photoGrid 替换成"登录提示"锁定页
+                        // （破坏网格且登录后不自动恢复），与 05 双击刷新分支策略对齐：
+                        // 仅提示登录并做可见性兜底，保留网格结构。
+                        if (typeof window.showToast === 'function') window.showToast('请先登录');
+                        ensurePhotoWallVisibleContent().catch(function(err) {
+                            console.warn('[photo-wall] visibility check failed', err);
+                        });
                     } else {
                         setPhotoWallLockedState(false);
                         ensurePhotoWallLoaded().then(function() {
@@ -10591,7 +10653,7 @@ function renderProfileActivityList(kind) {
                 if (avatarUrl) {
                     var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     if (safeAvatarUrl) {
-                        return '<img loading="lazy" decoding="async" src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml(String(userName || '?').slice(0, 1).toUpperCase()) + '\'">';
+                        return '<img loading="lazy" decoding="async" src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + safeJsStr(String(userName || '?').slice(0, 1).toUpperCase()) + '\'">';
                     }
                 }
                 // 无头像时显示首字母（xxz → X）
@@ -11070,6 +11132,11 @@ function renderProfileActivityList(kind) {
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
                 if (file) {
+                    // ★ 修复：显式拒绝 SVG（image/svg+xml 会通过 image/ 前缀白名单），
+                    // 后端 dm-media 拒绝 SVG 后文件已先落桶，留下 Storage 孤儿 + 公共桶
+                    // 存储型 XSS 窗口。这里与照片墙 upload-ui 的拒绝策略对齐。
+                    var svgBlocked = /^image\/svg\+xml/i.test(String(file.type || '')) || /\.svgz?$/i.test(String(file.name || '').toLowerCase());
+                    if (svgBlocked) { showToast("不支持 SVG 文件，仅支持图片、视频、音频"); return; }
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
@@ -11172,6 +11239,16 @@ function renderProfileActivityList(kind) {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
                     }
                 } catch(e) {
+                    // ★ 修复：发送失败时回收已上传的 Storage 文件，避免孤儿媒体永久泄漏
+                    //   （前端先直传 Storage、后调 /api/dm/send；若 send 失败/超时，后端
+                    //   从未感知该路径，文件会残留在公共桶）。
+                    if (storagePath) {
+                        try {
+                            var dmOrphanRes = await sb.storage.from('uploads').remove([storagePath]);
+                            if (dmOrphanRes && dmOrphanRes.error) console.warn('[dm-send] orphan media cleanup failed', dmOrphanRes.error);
+                        } catch (dmCleanupErr) { console.warn('[dm-send] orphan media cleanup failed', dmCleanupErr); }
+                        storagePath = null;
+                    }
                     removeDockChatCacheMessage(targetUser, tempId);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     // ★ 修复：发送失败恢复输入框内容时，若用户失败提示期间已输入新内容，
@@ -13754,7 +13831,7 @@ function renderProfileActivityList(kind) {
                 if (selected && !_reportTargetUser) _reportTargetUser = item.user_name;
                 var isTextOnly = !item.thumb && item.type !== 'photo';
                 var thumbHtml = item.thumb
-                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;rc-thumb rc-thumb--text&quot; aria-hidden=&quot;true&quot;><span>' + escapeHtml((item.user_name || '?').slice(0,1).toUpperCase()) + '</span></div>\'">'
+                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;rc-thumb rc-thumb--text&quot; aria-hidden=&quot;true&quot;><span>' + safeJsStr((item.user_name || '?').slice(0,1).toUpperCase()) + '</span></div>\'">'
                     : '<div class="rc-thumb rc-thumb--text" aria-hidden="true"><span>' + getReportTextThumbLabel(item.user_name) + '</span></div>';
                 h += '<div class="report-content-item' + selected + (isTextOnly ? ' report-content-item--text' : '') + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
                 h += thumbHtml;

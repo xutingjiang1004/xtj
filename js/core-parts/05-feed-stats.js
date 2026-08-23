@@ -357,8 +357,8 @@
                 var _dmMaxReconnectAttempts = 10;
 
                 function createDmChannel() {
-                    chatRealtime = sb.channel('chat-dms')
-                        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, function(payload) {
+                    chatRealtime = sb.channel('chat-dms')
+                        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: 'media_type=eq.' + DM_MARKER }, function(payload) {
                             var m = payload.new || payload.old;
                             if (m.media_type !== DM_MARKER) return;
                             if (!window.currentUser) return;
@@ -687,9 +687,11 @@
                     reportBadge.style.display = 'none';
                     reportBadge.textContent = '0';
                 }
-                // 标记服务器端通知为已读
-                // 立即重新检测以更新角标
-                setTimeout(checkReportReplies, 200);
+                // 标记服务器端通知为已读
+                // ★ 修复：原 200ms 内后端未必完成"已读"落库，checkReportReplies
+                // 会读到旧 unread>0 把刚清掉的红点又点亮（闪烁/残留）。
+                // 延迟重查让后端落库完成；本地角标已即时清空。
+                setTimeout(checkReportReplies, 3000);
                 }).catch(function() {});
             }
 

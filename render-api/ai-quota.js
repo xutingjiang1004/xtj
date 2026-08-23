@@ -144,8 +144,10 @@ function createAiQuota(supabase) {
   // UPDATE ... WHERE remaining >= cost RETURNING 原子扣减，超出本模块可见范围）。
   // 多进程部署仍需 RPC 侧原子性，本互斥不构成安全边界。
   var quotaChains = {}; // userName -> 链尾 Promise
+  var quotaChainAccess = {}; // userName -> lastUsedAt
   function runQuotaSerialized(userName, task) {
     var key = String(userName || '');
+    quotaChainAccess[key] = Date.now();
     var prev = quotaChains[key] || Promise.resolve();
     var next = prev.then(task, task);
     // 吞掉链尾拒绝：失败结果由任务自身返回给调用方，不能让链尾拒绝阻塞后续排队任务
@@ -153,6 +155,17 @@ function createAiQuota(supabase) {
     quotaChains[key] = next;
     return next;
   }
+  // 定期清理长时间未访问的串行化链尾，防止用户数增长时内存缓慢泄漏
+  var _chainCleanupTimer = setInterval(function() {
+    var now = Date.now();
+    Object.keys(quotaChainAccess).forEach(function(k) {
+      if (now - quotaChainAccess[k] > 30 * 60 * 1000) {
+        delete quotaChains[k];
+        delete quotaChainAccess[k];
+      }
+    });
+  }, 30 * 60 * 1000);
+  if (_chainCleanupTimer && typeof _chainCleanupTimer.unref === 'function') _chainCleanupTimer.unref();
 
   // ★ 配额判定兜底（051）：RPC get_ai_user_quota 的旧实现里自定义额度
   //   search_limit_daily / token_limit_daily 仅对 pro 生效（若生产库尚未执行
