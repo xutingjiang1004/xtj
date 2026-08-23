@@ -7207,7 +7207,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (thinkingTimer) {
           finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
         }
-        if (reasoningRenderer) reasoningRenderer.finish(thinking || '');
+        if (reasoningRenderer && thinking) reasoningRenderer.finish(thinking || '');
 
         // 判断是否有有效正文；没有时给出兜底提示，避免气泡完全空白
         var hasContent = !!(content && String(content).trim().length > 0);
@@ -7269,10 +7269,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               setThinkingStatus(rNode, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
             }
           }
-        } else if (reasoningContainer) {
-          if (thinkingTimer) thinkingTimer.cancel();
-          try { reasoningContainer.remove(); } catch (e) {}
-          reasoningContainer = null;
+        } else {
+          // 思考关闭 / 无思考：清理所有残留思考节点（含 search_supplement 后遗留的旧节点）
+          if (thinkingTimer) { try { thinkingTimer.cancel(); } catch (e) {} thinkingTimer = null; }
+          if (reasoningContainer) { try { reasoningContainer.remove(); } catch (e) {} reasoningContainer = null; }
+          if (node) {
+            var staleReason = node.querySelector('.ai-thinking');
+            if (staleReason && staleReason.isConnected) { try { staleReason.remove(); } catch (eStale) {} }
+          }
         }
         
         var searchCount = evt ? evt.search_count : 0;
@@ -7282,7 +7286,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var aiMsg = {
           role: 'assistant',
           content: content,
-          reasoning: (finalThinkingMode !== 'off' ? thinking : ''),
+          reasoning: (S.thinkingMode !== 'off' ? thinking : ''),
           created_at: new Date().toISOString(),
           thinking_mode: finalThinkingMode,
           search_count: searchCount,

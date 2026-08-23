@@ -45,6 +45,8 @@ window.__xtjChatHub = (function () {
   var webSearch = false;
   var streaming = false;
   var streamingAssistant = null;   // 流式进行中累积的 AI 回复，完成后提交进 messages
+  var _streamSeq = 0;
+  var activeStreamId = 0;          // 当前生效的流号，旧请求 finalize 据此忽略，防止串扰新流
   var aborter = null;
   var conversations = [];
   var _attachFile = null;   // 当前待发送附件 { name, type, dataUrl, size }
@@ -244,6 +246,8 @@ window.__xtjChatHub = (function () {
       });
       _els.empty.textContent = '开始一段新对话';
       _els.empty.appendChild(suggest);
+      // ★ 修复：renderMessages 开头 thread.innerHTML='' 已把 empty 移出 DOM，须重新挂回，否则欢迎屏永久空白
+      _els.thread.appendChild(_els.empty);
       return;
     }
     _els.empty.classList.add('hidden');
@@ -350,6 +354,13 @@ window.__xtjChatHub = (function () {
     var status = appendStreamingRow({});
     var assistant = { role: 'assistant', content: '', reasoning: '' };
     streamingAssistant = assistant;
+    // ★ 竞态隔离：记录本请求流号，旧请求最终的 finalize 不得串扰新流
+    var streamId = ++_streamSeq;
+    activeStreamId = streamId;
+    function doFinalize(result) {
+      if (activeStreamId !== streamId) return; // 旧请求被新流取代时忽略
+      finalizeStream(result);
+    }
 
     var payload;
     if (isCustom) {
@@ -396,7 +407,7 @@ window.__xtjChatHub = (function () {
       if (needToken && !isLoggedIn()) { throw new Error('NO_LOGIN'); }
       resp = await fetch(url, { method: 'POST', headers: h, body: JSON.stringify(payload), signal: aborter.signal });
     } catch (e) {
-      finalizeStream({ ok: false, err: (e && e.message === 'NO_LOGIN') ? '请先登录后再使用内置模型' : '网络错误，请重试' });
+      doFinalize({ ok: false, err: (e && e.message === 'NO_LOGIN') ? '请先登录后再使用内置模型' : '网络错误，请重试' });
       return;
     }
 
@@ -406,7 +417,7 @@ window.__xtjChatHub = (function () {
         var ej = await resp.json().catch(function () { return null; });
         if (ej && ej.error) msg = String(ej.error);
       } catch (e) {}
-      finalizeStream({ ok: false, err: msg });
+      doFinalize({ ok: false, err: msg });
       return;
     }
 
@@ -466,20 +477,20 @@ window.__xtjChatHub = (function () {
             break;
           }
           if (evt.type === 'error') {
-            finalizeStream({ ok: false, err: String(evt.error || '出错了'), reason: evt.code });
+            doFinalize({ ok: false, err: String(evt.error || '出错了'), reason: evt.code });
             return;
           }
         }
         if (done) break;
       }
-      finalizeStream({ ok: true });
+      doFinalize({ ok: true });
     } catch (e) {
       if (e && e.name === 'AbortError') {
-        finalizeStream({ ok: false, err: '已取消', aborted: true });
+        doFinalize({ ok: false, err: '已取消', aborted: true });
       } else {
         // 流中断：保留已收到的内容并给出准确提示，不再笼统报错丢内容
         var keepContent = !!(assistant && (assistant.content || assistant.reasoning));
-        finalizeStream({
+        doFinalize({
           ok: !!keepContent,
           err: keepContent ? null : '读取流失败，请重试',
           notice: keepContent ? '连接中断，回复可能不完整' : null
@@ -492,14 +503,40 @@ window.__xtjChatHub = (function () {
     for (var i = 0; i < messages.length; i++) { if (messages[i] && messages[i]._pending) messages[i]._pending = false; }
   }
 
+  function ensureStreamReasonEl(wrap, contentEl) {
+    var reasonEl = wrap.querySelector('.hub-reason');
+    if (!reasonEl) {
+      reasonEl = document.createElement('div');
+      reasonEl.className = 'hub-reason open';
+      var rt = document.createElement('div');
+      rt.className = 'hub-reason-title';
+      rt.textContent = '⧉ 深度思考';
+      var rc = document.createElement('div');
+      rc.className = 'hub-reason-content';
+      reasonEl.appendChild(rt); reasonEl.appendChild(rc);
+      wrap.insertBefore(reasonEl, contentEl);
+      (function(el){ rt.addEventListener('click', function(){ el.classList.toggle('open'); }); })(reasonEl);
+    }
+    return reasonEl;
+  }
+
   function updateStreamingRow(status, assistant) {
     if (!status || !status.contentEl) return;
     status.contentEl.innerHTML = '';
     var fragment = document.createElement('div');
     fragment.innerHTML = md(assistant.content || '');
     status.contentEl.appendChild(fragment);
-    // 思考块刷新
-    status.wrap.querySelector('.hub-reason-content').innerHTML = md(assistant.reasoning || '');
+    // 思考块刷新：节点缺失时先创建，避免 querySelector 返回 null 抛 TypeError 中断整个流
+    var reasonText = String(assistant.reasoning || '');
+    var reasonEl = status.wrap.querySelector('.hub-reason');
+    if (reasonText && !reasonEl) {
+      reasonEl = ensureStreamReasonEl(status.wrap, status.contentEl);
+    }
+    if (!reasonText && reasonEl) { try { reasonEl.remove(); } catch (eRe) {} reasonEl = null; }
+    if (reasonEl) {
+      var rc = reasonEl.querySelector('.hub-reason-content');
+      if (rc) rc.innerHTML = md(reasonText);
+    }
     scrollBottom();
   }
 
@@ -512,17 +549,15 @@ window.__xtjChatHub = (function () {
     var pending = streamingAssistant;
     streamingAssistant = null;
     try {
-      if (pending && (pending.content || pending.reasoning)) {
+      if (pending && !pending._committed && (pending.content || pending.reasoning)) {
         var committed = {
           role: 'assistant',
           content: pending.content || '',
           reasoning: pending.reasoning || '',
           created_at: new Date().toISOString()
         };
-        // 避免成功完成后重复提交（error/abort 分支也走这里）
-        var lastIdx = messages.length - 1;
-        var isAlreadyCommitted = lastIdx >= 0 && messages[lastIdx] === pending;
-        if (!isAlreadyCommitted) messages.push(committed);
+        pending._committed = true; // 可靠去重：同一 pending 只提交一次
+        messages.push(committed);
       }
     } catch (eCommit) {}
     // 移除临时思考行占位，重新按最终内容渲染
@@ -1044,6 +1079,10 @@ window.__xtjChatHub = (function () {
       return { status: 'ok' };
     },
     enterCode: function (cb) { if (typeof cb === 'function') onEnterCode = cb; if (onEnterCode) onEnterCode(); },
-    isActive: function () { return active; }
+    isActive: function () {
+      // ★ 修复：需同时校验 .hub-root 仍挂在文档中。否则面板被 loading/欢迎态覆写后
+      // active 仍为 true，会错误地短路跳过 re-init，导致界面停留在空白/加载态。
+      return active && !!(root && root.isConnected);
+    }
   };
 })();
