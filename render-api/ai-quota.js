@@ -151,6 +151,10 @@ function createAiQuota(supabase) {
     // 吞掉链尾拒绝：失败结果由任务自身返回给调用方，不能让链尾拒绝阻塞后续排队任务
     next.catch(function() {});
     quotaChains[key] = next;
+    // ★ 审计 🟠 无淘汰修复：链尾完成后若仍是当前链尾（后续无新任务排队），立即
+    //   从 map 删除该 key，避免随用户量长期累积链尾 Promise 造成内存泄漏。
+    next.then(function() { if (quotaChains[key] === next) delete quotaChains[key]; },
+              function() { if (quotaChains[key] === next) delete quotaChains[key]; });
     return next;
   }
 

@@ -19,7 +19,7 @@ function getMammothParser() {
 }
 
 function getXlsxParser() {
-  if (!xlsxParserLoaded) { xlsxParser = loadFileParser('xlsx'); xlsxParserLoaded = true; }
+  if (!xlsxParserLoaded) { xlsxParser = loadFileParser('@e965/xlsx'); xlsxParserLoaded = true; }
   return xlsxParser;
 }
 

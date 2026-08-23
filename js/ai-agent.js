@@ -940,18 +940,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   规范化,这里再校验最终协议,双重防护。
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
       var cleanHref = String(href).trim();
+      // ★ 修复双重转义污染：正文在 928 行已整体做 HTML 转义，这里若直接把
+      //   cleanHref 交给 new URL / a.href，赋给 DOM 属性后再 outerHTML 序列化
+      //   会对 & 再转义一次，得到 &amp;amp; 之类的污染结果。先反解码还原真实
+      //   URL，再进行协议校验与赋值，保证只序列化一次、输出干净 href。
+      var decodedHref = aiDecodeHtmlEntities(cleanHref);
       var protocolOk = false;
       try {
-        var parsedUrl = new URL(cleanHref, window.location && window.location.origin ? window.location.origin : 'https://xtj.local');
+        var parsedUrl = new URL(decodedHref, window.location && window.location.origin ? window.location.origin : 'https://xtj.local');
         var proto = String(parsedUrl.protocol || '').toLowerCase();
         protocolOk = (proto === 'http:' || proto === 'https:' || proto === 'mailto:');
       } catch (_) { protocolOk = false; }
       if (!protocolOk) {
-        if (cleanHref.toLowerCase().indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeAttr(aiDecodeHtmlEntities(label)) + '">' + escapeHtml(aiDecodeHtmlEntities(label)) + '</span>';
+        if (decodedHref.toLowerCase().indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeAttr(aiDecodeHtmlEntities(label)) + '">' + escapeHtml(aiDecodeHtmlEntities(label)) + '</span>';
         return '<span class="ai-blocked-link" title="' + escapeAttr(aiDecodeHtmlEntities(label)) + '">' + escapeHtml(aiDecodeHtmlEntities(label)) + '</span>';
       }
       var a = document.createElement('a');
-      a.href = cleanHref;
+      a.href = decodedHref;
       a.target = '_blank';
       a.rel = 'noopener';
       a.textContent = aiDecodeHtmlEntities(label);

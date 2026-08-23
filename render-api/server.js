@@ -6216,6 +6216,12 @@ async function callDeepSeekViaResponses(messages, options) {
         input: workingInput,
         stream: useStream
       };
+      // ★ P0 关键修复：Responses API 的 max_output_tokens 上限同时包含
+      //   思考 token + 正文 token。思考模式（尤其 low/medium/high）下推理会先
+      //   消耗大量 token，默认预算易被思考吃光 → 上游发 response.incomplete 截断
+      //   → 正文为空 → 前端误报"AI 只返回了思考过程"。对齐 chat/completions 路径
+      //   的 16384，给足思考 + 正文空间。
+      apiBody.max_output_tokens = 16384;
       // ★ 思考模式下不带 tools：DeepSeek reasoning 模式与 tools 并存会返回 400，
       //   该模式下搜索由调用方的 Tavily 并行注入承担；非思考模式才挂内置
       //   web_search + function 工具（模型自主决定是否搜索）。
@@ -6272,6 +6278,10 @@ async function callDeepSeekViaResponses(messages, options) {
         var sBuffer = '';
         var streamDone = false;
         var currentEventType = '';
+        // ★ 记录 Responses API 终止事件：response.completed / response.incomplete /
+        //   response.failed。官方会在达到 max_output_tokens 截断时发 response.incomplete，
+        //   若不识别会导致正文为空仍被当作正常完成，前端误报"AI 只返回了思考过程"。
+        var streamTerminalStatus = '';
 
         while (!streamDone) {
           var rd;
@@ -6342,12 +6352,29 @@ async function callDeepSeekViaResponses(messages, options) {
             }
             // 完成事件
             if (evtType === 'response.completed') {
+              streamTerminalStatus = 'completed';
               if (sJson.response && sJson.response.usage) {
                 lastUsage = responsesUsageToInternal(sJson.response.usage);
                 totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
                 totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
                 totalUsage.total_tokens += lastUsage.total_tokens || 0;
               }
+            }
+            // ★ 截断事件：达到 max_output_tokens 时官方发送 response.incomplete，
+            //   同时给出已产出的 usage。若思考消耗过大导致正文为空，需显式识别并
+            //   抛出可读错误，而不是当作正常完成返回空正文。
+            if (evtType === 'response.incomplete') {
+              streamTerminalStatus = 'incomplete';
+              if (sJson.response && sJson.response.usage) {
+                lastUsage = responsesUsageToInternal(sJson.response.usage);
+                totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
+                totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
+                totalUsage.total_tokens += lastUsage.total_tokens || 0;
+              }
+            }
+            // 失败事件：上游运行时错误
+            if (evtType === 'response.failed') {
+              streamTerminalStatus = 'failed';
             }
             // 通用 usage
             if (sJson.usage && !lastUsage) {
@@ -6394,6 +6421,34 @@ async function callDeepSeekViaResponses(messages, options) {
           }
         }
         finalReasoning = roundReasoning;
+      }
+
+      // --- 非流式路径：检查顶层 status 是否"响应被截断/失败" ---
+      if (!useStream) {
+        if (data.status === 'incomplete' || data.status === 'failed') {
+          streamTerminalStatus = data.status;
+        }
+        if (streamTerminalStatus === 'failed' && data.error && data.error.message) {
+          var failedMsg = String(data.error.message).slice(0, 300);
+          var failedErr = new Error('AI 生成失败：' + failedMsg);
+          failedErr.code = 'RESPONSES_FAILED';
+          throw failedErr;
+        }
+      }
+
+      // ★ 终止事件兜底：识别 response.incomplete / response.failed。
+      //   思考档位高或超长输入时，思考消耗 token 会吃光 max_output_tokens，
+      //   正文被截断为空。此时抛出可读错误，避免上层拿到只有 reasoning
+      //   （无 content）的"完成"结果，导致前端误报"AI 只返回思考过程"。
+      if (streamTerminalStatus === 'incomplete' && !content) {
+        var incompleteErr = new Error('AI 响应因内容过长被截断，未生成正文。请降低思考档位后重试。');
+        incompleteErr.code = 'RESPONSES_TRUNCATED';
+        throw incompleteErr;
+      }
+      if (streamTerminalStatus === 'failed' && !content) {
+        var failedErr2 = new Error('AI 生成失败，请稍后再试。');
+        failedErr2.code = 'RESPONSES_FAILED';
+        throw failedErr2;
       }
 
       // 没 function_calls：最终回复
@@ -16423,8 +16478,10 @@ app.post('/api/agent/custom-chat/stream', async (req, res) => {
     if (_heartbeatTimer) return;
     _heartbeatTimer = setInterval(function() {
       if (res.writableEnded || aborted) { clearHeartbeat(); return; }
-      var lastWrite = res._sseLastWriteAt || 0;
-      if (Date.now() - lastWrite >= 8000) { try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {} }
+      // ★ 对齐 /api/agent/chat/stream 与 /api/agent/research/stream：深度思考/长推理
+      //   期间连接可能长时间无事件（推理→正文停顿），中间反代空闲超时会掐断 SSE。
+      //   改为每 4s 无条件发一次 heartbeat，保证连接永不空闲，避免前端读到"连接中断"。
+      try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {}
     }, 4000);
   }
   function safeEnd() {

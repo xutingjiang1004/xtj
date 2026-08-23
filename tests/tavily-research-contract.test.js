@@ -58,10 +58,11 @@ test('POST /api/agent/research/stream is authenticated, rate-limited and SSE-for
   assert.match(source, /rateLimit\(3600000,\s*20\)/);
   assert.match(source, /text\/event-stream/);
   assert.match(source, /flushHeaders\(\)/);
-  // 心跳：每 4s 检查，沉默 ≥8s 发 heartbeat
+  // 心跳：每 4s 无条件发 heartbeat（对齐 /api/agent/chat/stream，深度思考期间
+  // 连接可能长时间无事件，改为无条件保活避免中间反代空闲超时掐断 SSE）
   assert.match(source, /setInterval/);
   assert.match(source, /heartbeat/);
-  assert.match(source, />= 8000/);
+  assert.match(source, /,\s*4000\)/);
   // 校验 query（1-500 字）与 model 白名单
   assert.match(source, /validateString\(req\.body && req\.body\.query,\s*500/);
   assert.match(source, /'pro',\s*'mini',\s*'auto'/);

@@ -43,7 +43,8 @@ test('Claude Code tokens override legacy workspace tokens safely', () => {
 // ============================================================
 test('desktop nav has Code button with data-desktop-tab="code"', () => {
   assert.match(indexHtml, /data-desktop-tab="code"/);
-  assert.match(indexHtml, /<span>Code<\/span>/);
+  // Code 模块入口已重命名为「小猫AI」（后端仍用 data-desktop-tab="code" 触发 code-workspace 面板）
+  assert.match(indexHtml, /<span>小猫AI<\/span>/);
 });
 
 // ============================================================
@@ -852,16 +853,16 @@ test('read-only Code workspaces do not expose write controls', () => {
 // ============================================================
 // Real behavior tests — Code icon
 // ============================================================
-test('Code icon is hand-drawn code icon, not monitor', () => {
-  // The Code icon should use polyline/lines (code brackets), not a rect (monitor)
+test('Code icon is AI flower icon, not monitor', () => {
+  // The Code entry icon is now the 「小猫AI」flower icon (6 ellipse petals + circle),
+  // not a monitor rect. Backend still drives the code-workspace panel from data-desktop-tab="code".
   assert.match(indexHtml, /data-desktop-tab="code"/);
-  // Should contain code-like elements (polyline/line), not monitor rect
+  // Should contain AI-flower-like elements (ellipse/circle), not a monitor rect
   var codeBtnMatch = indexHtml.match(/data-desktop-tab="code"[\s\S]*?<\/button>/);
   assert.ok(codeBtnMatch, 'Code button should exist');
   var codeBtn = codeBtnMatch[0];
-  assert.match(codeBtn, /<polyline/);
-  assert.match(codeBtn, /fill="none"/);
-  assert.match(codeBtn, /stroke="currentColor"/);
+  assert.match(codeBtn, /<ellipse/);
+  assert.match(codeBtn, /<circle/);
   // Should NOT be a monitor (rect-based icon)
   assert.ok(!/<rect/.test(codeBtn), 'Code icon should not be a monitor rect');
 });
