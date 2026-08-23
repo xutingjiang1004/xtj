@@ -44,6 +44,7 @@ window.__xtjChatHub = (function () {
   var thinkMode = 'off';
   var webSearch = false;
   var streaming = false;
+  var streamingAssistant = null;   // 流式进行中累积的 AI 回复，完成后提交进 messages
   var aborter = null;
   var conversations = [];
   var _attachFile = null;   // 当前待发送附件 { name, type, dataUrl, size }
@@ -340,6 +341,7 @@ window.__xtjChatHub = (function () {
     aborter = new AbortController();
     var status = appendStreamingRow({});
     var assistant = { role: 'assistant', content: '', reasoning: '' };
+    streamingAssistant = assistant;
 
     var payload;
     if (isCustom) {
@@ -483,6 +485,24 @@ window.__xtjChatHub = (function () {
     streaming = false;
     setStreamingUI(false);
     clearPendingFlag();
+    // ★ 修复：把流式累积的 AI 回复提交进 messages。此前 assistant 只渲染在临时
+    //   流式行里，从未写入 messages，renderMessages() 重绘后回复即消失。
+    var pending = streamingAssistant;
+    streamingAssistant = null;
+    try {
+      if (pending && (pending.content || pending.reasoning)) {
+        var committed = {
+          role: 'assistant',
+          content: pending.content || '',
+          reasoning: pending.reasoning || '',
+          created_at: new Date().toISOString()
+        };
+        // 避免成功完成后重复提交（error/abort 分支也走这里）
+        var lastIdx = messages.length - 1;
+        var isAlreadyCommitted = lastIdx >= 0 && messages[lastIdx] === pending;
+        if (!isAlreadyCommitted) messages.push(committed);
+      }
+    } catch (eCommit) {}
     // 移除临时思考行占位，重新按最终内容渲染
     renderMessages();
     if (result) {

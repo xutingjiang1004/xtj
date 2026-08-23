@@ -235,14 +235,10 @@
 .hub-select { height: 34px; }
 .hub-codebtn { color: var(--hub-codebtn); }
 .hub-codebtn:hover { background: var(--hub-pop-hover); }
-/* 深度研究入口：更醒目的强调样式 */
+/* 深度研究入口：默认与普通工具一致，开启后经 .is-on 显示强调态 */
 #hubResearchBtn {
-  border-color: rgba(79,107,255,.45);
-  color: var(--hub-accent);
-  background: linear-gradient(135deg, rgba(79,107,255,.10), rgba(79,107,255,.03));
   font-weight: 600;
 }
-#hubResearchBtn:hover { background: var(--hub-item-active); border-color: var(--hub-accent); }
 .hub-research-icon { vertical-align: -2px; margin-right: 4px; display: inline-block; }
 
 /* 消息区 */
