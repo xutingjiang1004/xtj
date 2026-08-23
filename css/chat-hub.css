@@ -374,6 +374,20 @@
 .hub-file-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
 .hub-file-remove { border: 0; background: transparent; color: var(--hub-sub); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
 .hub-file-remove:hover { color: var(--hub-red); }
+/* 头部右区：额度徽章 / 开通Pro */
+.hub-headright { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; flex-wrap: wrap; }
+.hub-quota {
+  border: 1px solid var(--hub-line);
+  border-radius: 9px;
+  background: var(--hub-surface);
+  color: var(--hub-sub);
+  font-size: 12px;
+  padding: 7px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.hub-quota:hover { color: var(--hub-text); background: var(--hub-item-hover); }
+.hub-pro { color: #b8860b; }
 
 /* 弹窗 / toast */
 .hub-modal-bg {

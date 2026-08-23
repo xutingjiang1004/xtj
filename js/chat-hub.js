@@ -728,6 +728,29 @@ window.__xtjChatHub = (function () {
     });
   }
 
+  // ─── 额度获取与显示 ───
+  function loadQuota() {
+    var badge = _els.quotaBadge;
+    if (!badge) return;
+    badge.textContent = '额度…';
+    tokenHeaders().then(function (h) {
+      return fetch(API_BASE + '/quota', { method: 'GET', headers: h });
+    }).then(function (r) {
+      return r.ok ? r.json().catch(function () { return {}; }) : null;
+    }).then(function (data) {
+      var q = data && data.quota ? data.quota : null;
+      if (!q) { badge.textContent = '额度—'; return; }
+      var tUsage = Number(q.tokens_used) || 0;
+      var tLimit = Number(q.tokens_limit);
+      var tStr = tLimit > 0 ? (Math.max(0, tLimit - tUsage) + ' 剩余') : '不限量';
+      var sUsed = Number(q.search_used) || 0;
+      var sLimit = Number(q.search_limit);
+      var sStr = (q.search_unlimited === true || sLimit < 0) ? '搜索不限' : ('搜索剩 ' + Math.max(0, (sLimit - sUsed)));
+      var plan = q.is_pro ? 'Pro' : '免费';
+      badge.textContent = plan + ' · ' + tStr + ' · ' + sStr;
+    }).catch(function () { badge.textContent = '额度—'; });
+  }
+
   // ─── DOM ───
   function autoGrow() {
     var t = _els.input;
@@ -855,10 +878,50 @@ window.__xtjChatHub = (function () {
     codeBtn.className = 'hub-tool hub-codebtn';
     codeBtn.textContent = '⌨ 进入代码工作区';
     codeBtn.addEventListener('click', function () { if (onEnterCode) onEnterCode(); });
+    var newChatBtn = document.createElement('button');
+    newChatBtn.type = 'button';
+    newChatBtn.className = 'hub-tool';
+    newChatBtn.id = 'hubNewChatBtn';
+    newChatBtn.textContent = '＋ 新对话';
+    newChatBtn.title = '新建对话';
+    newChatBtn.addEventListener('click', function () { newConversation(); });
+    var genImgBtn = document.createElement('button');
+    genImgBtn.type = 'button';
+    genImgBtn.className = 'hub-tool';
+    genImgBtn.id = 'hubGenImgBtn';
+    genImgBtn.textContent = '🎨 AI生图';
+    genImgBtn.title = 'AI 生成图片';
+    genImgBtn.addEventListener('click', function () {
+      if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openImageGen === 'function') window.__xtjAiAgent.openImageGen();
+      else showToast('AI生图暂不可用');
+    });
+    tools.appendChild(newChatBtn);
     tools.appendChild(searchBtn); tools.appendChild(thinkSel);
     tools.appendChild(researchBtn); tools.appendChild(siteSearchBtn);
-    tools.appendChild(exportBtn); tools.appendChild(codeBtn);
+    tools.appendChild(exportBtn); tools.appendChild(genImgBtn); tools.appendChild(codeBtn);
+    // 额度徽章 + 开通 Pro
+    var quotaBadge = document.createElement('button');
+    quotaBadge.type = 'button';
+    quotaBadge.className = 'hub-quota';
+    quotaBadge.id = 'hubQuotaBadge';
+    quotaBadge.title = '点击刷新今日额度';
+    quotaBadge.textContent = '额度…';
+    quotaBadge.addEventListener('click', loadQuota);
+    var proBadge = document.createElement('button');
+    proBadge.type = 'button';
+    proBadge.className = 'hub-tool hub-pro';
+    proBadge.id = 'hubProBadge';
+    proBadge.textContent = '⭐ 开通 Pro';
+    proBadge.addEventListener('click', function () {
+      if (window.__xtjAiAgent && typeof window.__xtjAiAgent.openPro === 'function') window.__xtjAiAgent.openPro();
+      else showToast('Pro 暂不可用');
+    });
+    var headRight = document.createElement('div');
+    headRight.className = 'hub-headright';
+    headRight.appendChild(quotaBadge); headRight.appendChild(proBadge);
+    _els.quotaBadge = quotaBadge;
     header.appendChild(pick); header.appendChild(tools);
+    header.appendChild(headRight);
 
     var thread = document.createElement('div');
     thread.className = 'hub-thread';
@@ -940,6 +1003,7 @@ window.__xtjChatHub = (function () {
     renderModelPop();
     renderMessages();
     refreshConversations();
+    loadQuota();
     return root;
   }
 

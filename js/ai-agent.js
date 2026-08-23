@@ -10459,6 +10459,10 @@ function showChatMessages() {
     getConversationId: function() { return S.conversationId; },
     openDeepThink: openDeepThinkPage,
     openSiteSearch: openSiteSearchPage,
+    openImageGen: function() { try { openImageGenModal(); } catch (e) {} },
+    openPro: function() { try { openProCheckout(); } catch (e) {} },
+    fetchQuota: function(force) { try { return fetchAiQuota(force === true); } catch (e) { return Promise.resolve(S.quota); } },
+    getQuotaNow: function() { return S.quota; },
     openConversation: async function(conversationId, mode) {
       if (!conversationId) return false;
       if (mode === 'deep_think') {
