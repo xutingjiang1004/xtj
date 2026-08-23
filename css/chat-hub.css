@@ -56,6 +56,27 @@
   font-weight: 700;
   letter-spacing: .5px;
 }
+.hub-logo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 12px;
+}
+.hub-fold {
+  border: 0;
+  background: transparent;
+  color: var(--hub-sub);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: background .15s, transform .2s;
+}
+.hub-fold:hover { background: var(--hub-item-hover); }
+.hub-fold .hub-fold-caret { display: inline-block; transition: transform .2s; }
+.hub-fold.is-collapsed .hub-fold-caret { transform: rotate(180deg); }
+.hub-conv-list.hub-collapsed { display: none; }
 .hub-new {
   margin: 4px 12px 10px;
   padding: 10px 12px;

@@ -17798,8 +17798,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     // 思考模式下不同时发 tools（DeepSeek reasoning 模型不支持
     // thinking + tools 并存，会返回 400），搜索靠 regex 回退注入
+    // ★ 修复：非思考且无搜索需求时不再 attach function tools —— 部分接入的
+    //   DeepSeek 兼容模型会对「普通闲聊 + 附加工具」返回 4xx「请求参数被拒绝」。
+    //   普通聊天不需要工具即可作答；仅明确要搜索 / 时效追问时才挂工具，
+    //   使中转站默认（思考 off、未开搜索）也能直接正常对话。
     if (!useThinking) {
-      apiBody.tools = aiToolsFilteredForThirdParty(thirdPartySearchOkEarly);
+      var _needToolsOff = (webSearchPref === true) || explicitSearchIntent || liveInfoIntent;
+      if (_needToolsOff) {
+        apiBody.tools = aiToolsFilteredForThirdParty(thirdPartySearchOkEarly);
+      }
     }
 
     // ★ H-3 修复（真正生效）：contentBuffer 必须在 while 循环外初始化。
