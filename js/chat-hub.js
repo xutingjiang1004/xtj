@@ -597,6 +597,28 @@ window.__xtjChatHub = (function () {
       }
     }
     refreshConversations();
+    // ★ 兜底：深度思考/长连接若因跨境网络中断未收到正文，自动用会话历史把
+    //   完整回复补回，避免用户只看到思考 + "未生成正文"占位。
+    try {
+      var _lastAi = messages[messages.length - 1];
+      if (_lastAi && _lastAi.role === 'assistant' && !(_lastAi.content && String(_lastAi.content).trim()) && convId) {
+        apiGet('/chat/history?conversation_id=' + encodeURIComponent(convId)).then(function(res) {
+          try {
+            var hmsgs = (res.ok && res.data && Array.isArray(res.data.messages)) ? res.data.messages : [];
+            for (var hi = hmsgs.length - 1; hi >= 0; hi--) {
+              if (hmsgs[hi] && hmsgs[hi].role === 'assistant' && hmsgs[hi].content && String(hmsgs[hi].content).trim()) {
+                var curAi = messages[messages.length - 1];
+                if (curAi && curAi.role === 'assistant' && !(curAi.content && String(curAi.content).trim())) {
+                  curAi.content = String(hmsgs[hi].content);
+                  renderMessages();
+                }
+                break;
+              }
+            }
+          } catch (eR) {}
+        });
+      }
+    } catch (eH) {}
     focusInput();
   }
 
