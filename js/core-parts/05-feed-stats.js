@@ -961,8 +961,27 @@
 
             var dockPanelTransitionTimer = null;
             var dockPanelAnimation = null;
-            window.switchDockTab = function(tab, skipReturn, options) {
-                options = options || {};
+            window.switchDockTab = function(tab, skipReturn, options) {
+                options = options || {};
+                // ★ 小猫AI dock 中间 tab：打开独立二级浮层(panelAiChat)，不走 dock-panel 显隐
+                if (tab === 'ai-chat') {
+                    document.querySelectorAll('.dock-tab').forEach(function(t) { t.classList.remove('active'); });
+                    var aicBtn = document.querySelector('.dock-tab[data-tab="ai-chat"]');
+                    if (aicBtn) aicBtn.classList.add('active');
+                    currentDockTab = 'ai-chat';
+                    window.safeStorage.set('xtj_current_tab', 'ai-chat');
+                    requestAnimationFrame(syncDockIndicator);
+                    var _opener = window.__xtjOpenAiChatFromDock || window.__xtjOpenAiChat;
+                    if (typeof _opener === 'function') { try { _opener(); } catch (eDock) { console.warn('[dock] open ai-chat failed', eDock); } }
+                    else { try { window.__xtjPendingAiChatOpen = true; } catch (ePend) {} }
+                    return;
+                }
+                // 离开小猫AI 到其它 tab → 关闭小猫AI 浮层
+                if (currentDockTab === 'ai-chat') {
+                    if (typeof window.__xtjCloseAiChat === 'function') {
+                        try { window.__xtjCloseAiChat(); } catch (eClose) {}
+                    }
+                }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
