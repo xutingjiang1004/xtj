@@ -90,3 +90,64 @@ test('移动端：小猫AI 作为首页打开时无多余左上返回按钮但�
   assert.match(agentSource, /S\._dockMode = !!!?\(opts && opts\.dock\)/);
   assert.match(agentSource, /_dockMode = false/); // 关闭时复位 dock 标记
 });
+
+// ── P0/P1 运行时行为契约（直接执行 server.js 中真实的 aiChatHistoryBudget）──
+// 不从 require server.js（它 require 即 listen），改为从源码提取该纯函数在隔离作用域运行。
+function loadAiChatHistoryBudget() {
+  const src = serverSource;
+  const start = src.indexOf('function aiChatHistoryBudget(ctx, maxMode) {');
+  assert.ok(start > -1, '未找到 aiChatHistoryBudget');
+  const brace = src.indexOf('{', start);
+  assert.ok(src[brace] === '{', '函数体起始应为 {');
+  let depth = 0, i = brace;
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth--; if (depth === 0) break; }
+  }
+  const body = src.slice(start, i + 1);
+  // 该函数体只引用这些模块级常量 → 作为参数构造，在隔离作用域运行
+  const factory = new Function(
+    'AI_CHAT_HISTORY_LIMIT', 'AI_CHAT_HISTORY_LIMIT_MAX',
+    'AI_CHAT_HISTORY_MSG_MAX_CHARS', 'AI_CHAT_HISTORY_MSG_MAX_CHARS_MAX',
+    'return (' + body + ');'
+  );
+  return factory(256, 2048, 4000, 32000);
+}
+
+test('运行时：aiChatHistoryBudget 默认限制 256 条，思考Max 放大条数上限', () => {
+  const budget = loadAiChatHistoryBudget();
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({ role: 'user', content: 'm' + i }));
+  const normal = budget({ history: mk(300) }, false);
+  assert.equal(normal.length, 256, '默认应裁剪到 256 条');
+  const maxed = budget({ history: mk(300) }, true);
+  assert.equal(maxed.length, 300, '思考Max 应保留全部 300 条（不裁剪条数）');
+});
+
+test('运行时：aiChatHistoryBudget 超出字符预算丢弃更早内容且保底保留最近一条', () => {
+  const budget = loadAiChatHistoryBudget();
+  // 60 条 × 5000 字符：默认总预算 220000 会被约 44 条打满，更早的整条被丢弃
+  const big = Array.from({ length: 60 }, (_, i) => ({ role: 'user', content: 'x'.repeat(5000) }));
+  const out = budget({ history: big }, false);
+  assert.ok(out.length > 0, '至少保底保留一条');
+  assert.equal(out[out.length - 1].content.length, 5000, '保底保留最近一条不应被丢');
+  assert.equal(out.length, 44, '默认预算 220000 应保留 44 条 5000 字符消息');
+  // vision_urls 必须被保留（多模态连续追问依赖）
+  const multi = [
+    { role: 'user', content: '图', vision_urls: ['data:image/png;base64,AAA'] },
+    { role: 'assistant', content: 'ok' }
+  ];
+  const kept = budget({ history: multi }, true);
+  assert.equal(kept[0].role, 'user');
+  assert.ok(Array.isArray(kept[0].vision_urls) && kept[0].vision_urls.length === 1, 'vision_urls 应保留');
+});
+
+test('后端接线：loadAiContext 单条截断随思考Max 放大（P0 修复不回归）', () => {
+  // ① 单条截断显式按 maxMode 二选一（4000 / 32000）
+  assert.match(serverSource, /var _msgCap = maxMode \? AI_CHAT_HISTORY_MSG_MAX_CHARS_MAX : AI_CHAT_HISTORY_MSG_MAX_CHARS;/);
+  // ② 行级行前预算随 maxMode 放大，避免旧逻辑掐掉长消息
+  assert.match(serverSource, /var HISTORY_TOKEN_BUDGET = maxMode \? 200000 : 12000;/);
+  // ③ loadAiContext 第三个参数透传 maxMode，且两条聊天路由都穿 thinking_max
+  assert.match(serverSource, /async function loadAiContext\(userName, convId, maxMode\)/);
+  const passes = (serverSource.match(/loadAiContext\(userName, convId, !!!?\(req\.body && req\.body\.thinking_max === true\)\)/g) || []).length;
+  assert.ok(passes >= 2, '至少两条聊天路由透传 maxMode，实得 ' + passes);
+});

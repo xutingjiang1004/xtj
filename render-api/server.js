@@ -15511,7 +15511,7 @@ async function getAiConfig() {
 }
 
 
-async function loadAiContext(userName, convId) {
+async function loadAiContext(userName, convId, maxMode) {
   var ctx = { history: [] };
 
   try {
@@ -15558,7 +15558,10 @@ async function loadAiContext(userName, convId) {
         }
         // ★ 缓存优化：标准化空白字符，确保历史消息在重新加载时字符串完全一致
         // 否则 unicode 空白/换行差异会导致缓存前缀不匹配
-        var normalized = content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
+        // ★ P0 修复：单条截断上限随思考Max 放大（maxMode→∞ 32000，否则 4000），
+        //   AI_CHAT_HISTORY_MSG_MAX_CHARS_MAX 承载思考Max 的单条放大，避免收益被 4000 掐掉
+        var _msgCap = maxMode ? AI_CHAT_HISTORY_MSG_MAX_CHARS_MAX : AI_CHAT_HISTORY_MSG_MAX_CHARS;
+        var normalized = content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, _msgCap);
         var entry = { role: meta.role || 'user', content: normalized };
         // ★ 多模态连续追问：把历史里保存的图片 data URL 一并带回，
         //   后续轮次组装消息时可重新以 image_url 内容块发给视觉模型。
@@ -15569,9 +15572,10 @@ async function loadAiContext(userName, convId) {
       });
       // ★ 优化：固定 20 条在长对话下截断严重（20×4000 字符≈120k 字符，
       // 但 DeepSeek 上下文窗口有限，实际能容纳的轮次远少于 20 条完整消息）。
-      // 改为按 token 预算从"最新"往前累积：优先保留最近的完整对话，
-      // 超出预算时丢弃更早的轮次。中文按 1.5 字符/token 估算，预算 12000 tokens。
-      var HISTORY_TOKEN_BUDGET = 12000;
+      // ★ 估算口径统一（P1）：行级预选按「估算字符 = tokens × 1.5」从最新往前累积，
+      // 最终字符预算由 aiChatHistoryBudget 权威控制。思考Max 时放大行级预算，
+      // 否则旧的 12000-token 预算会把开启思考Max 后的完整长消息提前掐掉（P0）。
+      var HISTORY_TOKEN_BUDGET = maxMode ? 200000 : 12000;
       var CHAR_PER_TOKEN_EST = 1.5;
       var budgetChars = HISTORY_TOKEN_BUDGET * CHAR_PER_TOKEN_EST;
       var kept = [];
@@ -15728,7 +15732,7 @@ async function handleDeepThinkChat(req, res) {
 
     // 4. 读取配置和上下文
     var config = await getAiConfig();
-    var ctx = await loadAiContext(userName, convId);
+    var ctx = await loadAiContext(userName, convId, !!(req.body && req.body.thinking_max === true));
     if (aborted) { releaseDeepResearch(); return safeEnd(); }
 
     // ★ P 改: 提前计算思考程度 (后面 usage 和 done 事件也要用)
@@ -16122,7 +16126,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var config = await getAiConfig();
 
     // 5. 读取上下文（按 conversation_id 过滤）
-    var ctx = await loadAiContext(userName, convId);
+    var _ctxMaxSite1 = !!(req.body && req.body.thinking_max === true);
+    var ctx = await loadAiContext(userName, convId, _ctxMaxSite1);
 
     // 5b. 当前时间
     var _now = new Date();
@@ -16137,7 +16142,6 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       { role: 'system', content: corePrompt },
       { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
     ];
-    var _ctxMaxSite1 = !!(req.body && req.body.thinking_max === true);
     var histSlice = aiChatHistoryBudget(ctx, _ctxMaxSite1);
     for (var h = 0; h < histSlice.length; h++) {
       messages.push({ role: histSlice[h].role, content: histSlice[h].content });
@@ -16763,7 +16767,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     T_stage.config_start = Date.now();
     var attachPromise = extractChatAttachments(message, req.body && req.body.attachments, { skipImageOcr: _visionEligibleEarly && _visionImageUrls.length > 0 });
     var configPromise = getAiConfig();
-    var ctxPromise = loadAiContext(userName, convId);
+    var ctxPromise = loadAiContext(userName, convId, !!(req.body && req.body.thinking_max === true));
     var _parallelPrep = await Promise.all([attachPromise, configPromise, ctxPromise]);
     var _attachStream = unwrapAttachmentExtract(_parallelPrep[0]);
     message = _attachStream.text;

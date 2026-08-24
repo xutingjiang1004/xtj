@@ -9900,7 +9900,7 @@ function showChatMessages() {
         S.thinkMax = !S.thinkMax;
         try { localStorage.setItem('xtj_ai_think_max', S.thinkMax ? 'true' : 'false'); } catch (err) {}
         updateThinkMaxStatus();
-        notify(S.thinkMax ? '思考Max 已开启：不压缩上下文，榨干模型性能' : '思考Max 已关闭：上下文限制在 256 并自动压缩');
+        notify(S.thinkMax ? '思考Max 已开启：尽量保留全部上下文（更聪明，但消耗更多额度、更慢）' : '思考Max 已关闭：上下文限制在 256 并自动压缩（便宜/更快）');
         return;
       }
       if (action === 'search') {
