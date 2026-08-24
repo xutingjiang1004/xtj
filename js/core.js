@@ -10011,6 +10011,18 @@ function renderProfileActivityList(kind) {
                     var _opener = window.__xtjOpenAiChatFromDock || window.__xtjOpenAiChat;
                     if (typeof _opener === 'function') { try { _opener(); } catch (eDock) { console.warn('[dock] open ai-chat failed', eDock); } }
                     else { try { window.__xtjPendingAiChatOpen = true; } catch (ePend) {} }
+                    // ★ 小猫AI 点击动画
+                    if (aicBtn) {
+                        if (typeof triggerTabAnimation === 'function') {
+                            try { triggerTabAnimation(aicBtn, 'ai-chat'); } catch (eAnim) {}
+                        } else {
+                            try {
+                                aicBtn.classList.remove('anim-brain'); void aicBtn.offsetWidth;
+                                aicBtn.classList.add('anim-brain');
+                                setTimeout(function() { aicBtn.classList.remove('anim-brain'); }, 950);
+                            } catch (eAnim2) {}
+                        }
+                    }
                     return;
                 }
                 // 离开小猫AI 到其它 tab → 关闭小猫AI 浮层
@@ -10259,11 +10271,11 @@ function renderProfileActivityList(kind) {
             };
 
             // Animation class mapping
-            var animClassMap = { posts: 'anim-post', chat: 'anim-chat', ai: 'anim-ai', profile: 'anim-profile' };
+            var animClassMap = { posts: 'anim-post', chat: 'anim-chat', ai: 'anim-ai', 'ai-chat': 'anim-brain', profile: 'anim-profile' };
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 900, chat: 900, ai: 900, profile: 900 };
+            var animDurations = { posts: 900, chat: 900, ai: 900, 'ai-chat': 900, profile: 900 };
             var dockTabAnimationTimers = {};
             var dockTabAnimationElements = {};
             var dockTabAnimationGeneration = 0;

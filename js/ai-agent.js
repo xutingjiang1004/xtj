@@ -10180,10 +10180,8 @@ function showChatMessages() {
   async function openAiChat(opts) {
     if (S.active) return;
     S._dockMode = !!(opts && opts.dock);
-    if (!window.currentUser) {
-      notify('请先登录后再和小猫聊天');
-      return;
-    }
+    // ★ 小猫AI 页面始终可打开（即使未登录也进入独立页面；随后 ensureUserAuthOrNotify
+    //   会在未登录/凭证失效时提示登录并在面板内给出提示，而不是什么都不发生）。
     // ★ M: 恢复深度思考模式状态
     restoreDeepThinkState();
     S.active = true;
