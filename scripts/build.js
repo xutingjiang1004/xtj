@@ -115,6 +115,7 @@ const JS_FILES = [
   'js/ux-features.js',
   'js/login-device.js',
    'js/ai-agent.js',
+  'js/code-workbench.js',
   'js/theme-toggle.js',
   'js/desktop-shell.js',
   'js/config.js',
