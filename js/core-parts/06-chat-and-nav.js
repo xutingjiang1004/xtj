@@ -63,11 +63,11 @@
             };
 
             // Animation class mapping
-            var animClassMap = { posts: 'anim-post', chat: 'anim-chat', ai: 'anim-ai', profile: 'anim-profile' };
+            var animClassMap = { posts: 'anim-post', chat: 'anim-chat', ai: 'anim-ai', 'ai-chat': 'anim-brain', profile: 'anim-profile' };
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 900, chat: 900, ai: 900, profile: 900 };
+            var animDurations = { posts: 900, chat: 900, ai: 900, 'ai-chat': 900, profile: 900 };
             var dockTabAnimationTimers = {};
             var dockTabAnimationElements = {};
             var dockTabAnimationGeneration = 0;

@@ -6720,14 +6720,21 @@
     top: 0;
     left: 0;
     right: 0;
-    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
-    height: auto;
+    bottom: 0;
+    height: 100dvh;
     border-radius: 0;
     z-index: 60;
   }
   #panelAiChat.ai-secondary-panel .ai-chat-root {
     height: 100%;
     border-radius: 0;
+    /* 底部为 dock 预留空间，保证输入栏不被 dock 遮挡 */
+    padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+  }
+  /* dock 模式打开小猫AI（等同首页 tab）：底部 dock 需要悬浮在 AI 全屏面板之上，
+     保持可见且可点击，用于切换返回其它板块（dock 模式面板头部没有返回按钮）。 */
+  .dock-bar {
+    z-index: 70;
   }
 }
 

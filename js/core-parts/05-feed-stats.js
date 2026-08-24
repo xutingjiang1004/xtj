@@ -974,6 +974,18 @@
                     var _opener = window.__xtjOpenAiChatFromDock || window.__xtjOpenAiChat;
                     if (typeof _opener === 'function') { try { _opener(); } catch (eDock) { console.warn('[dock] open ai-chat failed', eDock); } }
                     else { try { window.__xtjPendingAiChatOpen = true; } catch (ePend) {} }
+                    // ★ 小猫AI 点击动画
+                    if (aicBtn) {
+                        if (typeof triggerTabAnimation === 'function') {
+                            try { triggerTabAnimation(aicBtn, 'ai-chat'); } catch (eAnim) {}
+                        } else {
+                            try {
+                                aicBtn.classList.remove('anim-brain'); void aicBtn.offsetWidth;
+                                aicBtn.classList.add('anim-brain');
+                                setTimeout(function() { aicBtn.classList.remove('anim-brain'); }, 950);
+                            } catch (eAnim2) {}
+                        }
+                    }
                     return;
                 }
                 // 离开小猫AI 到其它 tab → 关闭小猫AI 浮层
