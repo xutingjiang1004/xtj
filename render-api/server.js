@@ -8750,6 +8750,42 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
   } catch (e) { return res.status(500).json({ error: '服务器错误' }); }
 });
 
+// ★ 2026-08: 照片墙服务端存储上传（回退路径）。
+// 此前照片墙直连 Supabase Storage 上传依赖 window.sb（前端 anon key）；当部署未注入
+// SUPABASE_ANON_KEY 时 window.sb 为 null，上传会报「Supabase 未加载」。本接口接收原始
+// 图片字节并复用 service_role 直接上传到 uploads bucket，前端在 window.sb 缺失/失败时
+// 回退到本接口，保证照片墙上传不依赖 anon key 注入。
+app.post('/api/photo/upload', express.raw({ type: 'application/octet-stream', limit: '55mb' }), authenticateUser, rateLimit(3600000, 60), async (req, res) => {
+  try {
+    var userName = req.userName;
+    if (!userName) return res.status(401).json({ error: '未登录', code: 'auth_expired' });
+    var buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) return res.status(400).json({ error: '缺少文件数据', code: 'INVALID_INPUT' });
+    if (buf.length > 50 * 1024 * 1024) return res.status(400).json({ error: '文件过大，单张不超过 50MB', code: 'file_too_large' });
+    var path = String(req.query.path || '').trim().slice(0, 300);
+    var mimeType = String(req.query.mime_type || '').trim().slice(0, 50);
+    if (!/^photos\/[A-Za-z0-9._-]{1,200}$/.test(path)) return res.status(400).json({ error: '存储路径不合法', code: 'INVALID_INPUT' });
+    // 与 photo-create.js 的 MIME 白名单保持一致，拒绝 SVG 防存储型 XSS
+    if (!/^image\/(jpeg|png|gif|webp|avif)$/i.test(mimeType)) return res.status(400).json({ error: '不支持的图片类型', code: 'INVALID_INPUT' });
+    var uploadId = String(req.query.upload_id || '').trim().slice(0, 64);
+    if (uploadId) {
+      if (!/^[A-Za-z0-9_-]{4,64}$/.test(uploadId)) return res.status(400).json({ error: 'upload_id 格式无效', code: 'INVALID_INPUT' });
+      // 归属校验：路径需包含 uploadId 或用户名前缀，防止任意文件写入他人目录
+      var safeUserPrefix = String(userName).replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, '_').slice(0, 32);
+      if (path.indexOf(uploadId) < 0 && path.indexOf(safeUserPrefix) < 0) {
+        return res.status(403).json({ error: '文件不属于当前用户', code: 'photo_not_owned' });
+      }
+    }
+    var upload = await supabase.storage.from('uploads').upload(path, buf, { contentType: mimeType || 'image/jpeg', cacheControl: '31536000', upsert: false });
+    if (upload && upload.error) return res.status(500).json({ error: '存储上传失败', code: 'storage_upload_failed' });
+    var publicUrl = supabase.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+    return res.json({ ok: true, public_url: publicUrl });
+  } catch (e) {
+    console.error('[photo-upload] server upload failed:', e && e.message);
+    return res.status(500).json({ error: '上传失败，请稍后重试', code: 'photo_upload_failed' });
+  }
+});
+
 // ===================== 用户照片删除 API（使用 service_role 绕过 RLS） ======================
 // 照片上传状态查询（按 upload_id 查询是否已提交）
 async function listStorageObjectsPaged(bucket, directory, search) {
