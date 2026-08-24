@@ -48,6 +48,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var ALLOWED_THINKING_MODES = ['off', 'low', 'medium', 'high', 'max'];
   var ALLOWED_AI_MODELS = ['deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'];
 
+  // ── 思考Max 上下文边界 ─────────────────────────────────────────────────
+  // 关闭思考Max（默认）：上下文限制在 CONTEXT_LIMIT_NORMAL(256) 条，
+  //   超过即自动压缩（只保留最近 256 条）；每条按 MSG_MAX_CHARS_NORMAL 截断，便宜更快。
+  // 开启思考Max：不自动压缩，尽量保留全部上下文，每条上限放大到 MSG_MAX_CHARS_MAX，
+  //   服务端同步用 thinking_max 字段联动（挤干模型性能、更聪明但更贵）。
+  var CONTEXT_LIMIT_NORMAL = 256;
+  var CONTEXT_LIMIT_MAX = 2048;
+  var MSG_MAX_CHARS_NORMAL = 4000;
+  var MSG_MAX_CHARS_MAX = 32000;
+
   // ── 自定义第三方模型（千问/豆包/DeepSeek/Kimi/智谱/OpenAI/自定义）────────────
   // 用户添加的模型只保存在浏览器 localStorage（xtj_ai_custom_models），
   // 密钥不落服务器数据库；选择后经后端 /api/agent/custom-chat/stream 转发调用。
@@ -203,6 +213,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     lastSendFingerprint: '',
     lastSendAt: 0,
     webSearchEnabled: false,
+    // ★ 思考Max：开启后不自动压缩上下文，尽量榨干模型性能；关闭时上下文限制在
+    //    CONTEXT_LIMIT_NORMAL 并在接近上限时自动压缩（便宜/更快但略笨）。
+    thinkMax: false,
+    // ★ 小猫AI dock 模式：作为移动端 dock 中间 tab 打开时置为 true，隐藏多余返回按钮
+    _dockMode: false,
     selectedModel: resolveInitialModel(),
     _userPickedThinkingMode: false,
     _userPickedModel: false,
@@ -7021,11 +7036,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       : DEFAULT_THINKING_MODE;
     var fetchBody;
     if (isCustomModel && customCfg) {
-      // ★ 多轮上下文：把当前会话历史传给第三方便于衔接（自定义模型无本站持久化，
-      //   但前端缓存了 role/content，可拼装本次会话上下文）。限制最近 20 条避免超长。
+      // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
+      //   关闭时限制在 CONTEXT_LIMIT_NORMAL 条（256），超过即自动压缩丢弃更早内容，
+      //   每条再按字符上限截断防止超长，兼顾便宜与稳定。
       var hl = [];
       try {
-        var _tail = S.messages.slice(-20);
+        var _ctxCap = S.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
+        var _ctxChars = S.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
+        var _tail = S.messages.slice(-_ctxCap);
         for (var _hi = 0; _hi < _tail.length; _hi++) {
           var _hm = _tail[_hi];
           if (!_hm || !_hm.content) continue;
@@ -7034,7 +7052,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var _c = String(_hm.content);
           if (!_c.trim()) continue;
           if (_role === 'user' && _hm.attachments && Array.isArray(_hm.attachments) && _hm.attachments.length && !/\[(本地)?(图片|文件)[所已]?上传/.test(_c)) continue;
-          hl.push({ role: _role, content: _c.slice(0, 8000) });
+          hl.push({ role: _role, content: _c.slice(0, _ctxChars) });
         }
       } catch (eHist) {}
       // 兜底：历史没拼出有效内容时，用当前消息
@@ -7047,6 +7065,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         message: text,
         messages: hl,
         thinking_mode: _sendThinkingMode,
+        thinking_max: S.thinkMax === true,
         web_search: S.webSearchEnabled === true,
         client_request_id: reqId,
         timeout_ms: 180000
@@ -7057,6 +7076,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         conversation_id: S.conversationId,
         client_request_id: reqId,
         thinking_mode: _sendThinkingMode,
+        thinking_max: S.thinkMax === true,
         response_profile: S.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
         attachments: attachmentPayload || undefined,
         web_search: S.webSearchEnabled,
@@ -8521,16 +8541,20 @@ function showChatMessages() {
       try { old.remove(); } catch (e) {}
     }
 
-    var root = el('div', { id: 'aiChatRoot', class: 'ai-chat-root ai-idle' });
+    var root = el('div', { id: 'aiChatRoot', class: 'ai-chat-root ai-idle' + (S._dockMode ? ' ai-chat-dock' : '') });
 
     var header = el('div', { class: 'ai-chat-header' });
-    var backBtn = el('button', { type: 'button', class: 'ai-chat-back', 'aria-label': '返回', text: '‹' });
-    backBtn.addEventListener('click', function(ev) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      closeAiChat();
-    });
-    header.appendChild(backBtn);
+    // ★ dock 模式：作为移动端 dock 中间 tab 打开（等同首页），无需额外返回按钮，
+    //   底部 dock 即导航，可切换到其它板块；其它入口（上下文菜单/桌面）保留返回。
+    if (!S._dockMode) {
+      var backBtn = el('button', { type: 'button', class: 'ai-chat-back', 'aria-label': '返回', text: '‹' });
+      backBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeAiChat();
+      });
+      header.appendChild(backBtn);
+    }
 
     var avatarEl = el('div', { class: 'ai-chat-header-avatar', id: 'aiChatHeaderAvatar' });
     renderHeaderAvatar(avatarEl, S.config && S.config.avatar_url, S.config && S.config.avatar_version);
@@ -8714,6 +8738,12 @@ function showChatMessages() {
       }
     } catch (e) {}
 
+    // ★ 思考Max 持久化恢复
+    try {
+      var savedThinkMax = localStorage.getItem('xtj_ai_think_max');
+      S.thinkMax = savedThinkMax === 'true';
+    } catch (eThinkMax) {}
+
     // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
     var modelLabels = {
       'deepseek-v4-pro': 'V4 Pro',
@@ -8768,6 +8798,7 @@ function showChatMessages() {
       model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L5 7.2v9.6L12 20.5l7-3.7V7.2L12 3.5z"/><path d="M5 7.2l7 3.8 7-3.8"/><path d="M12 11v9.5"/></svg>',
       think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5.2a3 3 0 0 0-2.8 4.1A2.7 2.7 0 0 0 5.2 12c0 1.4.9 2.5 2.2 2.9-.1.4-.2.8-.2 1.2 0 1.8 1.3 3.2 3 3.4"/><path d="M14.5 5.2a3 3 0 0 1 2.8 4.1A2.7 2.7 0 0 1 18.8 12c0 1.4-.9 2.5-2.2 2.9.1.4.2.8.2 1.2 0 1.8-1.3 3.2-3 3.4"/><path d="M9.8 18.3h4.4"/><path d="M12 6.2v8.6"/><path d="M9.8 10c.7-.7 1.5-1 2.2-1s1.5.3 2.2 1"/><path d="M9.8 13c.7-.6 1.5-.9 2.2-.9s1.5.3 2.2.9"/></svg>',
       search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M4.5 12h15"/><path d="M12 4.5c2 2.2 3.1 4.7 3.1 7.5s-1.1 5.3-3.1 7.5C10 17.3 8.9 14.8 8.9 12S10 6.7 12 4.5z"/></svg>',
+      thinkMax: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5h5L8.5 22 19 10.5h-5L13 2z"/><path d="M12 13h2l-1 4 3-3"/></svg>',
       chev: '<svg class="ai-panel-chev-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
     };
     function rowEnd(valueHtml, trailHtml) {
@@ -8829,6 +8860,14 @@ function showChatMessages() {
                 ) +
                 '<select id="aiPlusThinkSelect" class="ai-panel-row-select-hit" aria-label="选择思考程度"></select>' +
               '</div>' +
+              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="think-max" aria-checked="false">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.thinkMax + '</span>' +
+                '<span class="ai-panel-row-title">思考Max</span>' +
+                rowEnd(
+                  '',
+                  '<span class="ai-search-switch" id="aiThinkMaxStatus" aria-hidden="true"><i></i></span>'
+                ) +
+              '</button>' +
               '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
@@ -9260,6 +9299,18 @@ function showChatMessages() {
       if (plusBtn) {
         if (S.webSearchEnabled) plusBtn.classList.add('ws-on');
         else plusBtn.classList.remove('ws-on');
+      }
+    }
+    function updateThinkMaxStatus() {
+      var st = panelShell.querySelector('#aiThinkMaxStatus');
+      var btn = panelShell.querySelector('[data-action="think-max"]');
+      if (st) {
+        st.setAttribute('data-on', S.thinkMax ? '1' : '0');
+        st.classList.toggle('on', !!S.thinkMax);
+      }
+      if (btn) {
+        btn.setAttribute('aria-checked', S.thinkMax ? 'true' : 'false');
+        btn.classList.toggle('is-selected', !!S.thinkMax);
       }
     }
 
@@ -9845,6 +9896,13 @@ function showChatMessages() {
         }, 50);
         return;
       }
+      if (action === 'think-max') {
+        S.thinkMax = !S.thinkMax;
+        try { localStorage.setItem('xtj_ai_think_max', S.thinkMax ? 'true' : 'false'); } catch (err) {}
+        updateThinkMaxStatus();
+        notify(S.thinkMax ? '思考Max 已开启：不压缩上下文，榨干模型性能' : '思考Max 已关闭：上下文限制在 256 并自动压缩');
+        return;
+      }
       if (action === 'search') {
         var q = S.quota;
         if (!S.webSearchEnabled) {
@@ -9890,6 +9948,7 @@ function showChatMessages() {
     updateModelUI();
     updateThinkUI();
     updateSearchStatus();
+    updateThinkMaxStatus();
     renderQuotaUI();
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';
@@ -10118,8 +10177,9 @@ function showChatMessages() {
     };
   }
 
-  async function openAiChat() {
+  async function openAiChat(opts) {
     if (S.active) return;
+    S._dockMode = !!(opts && opts.dock);
     if (!window.currentUser) {
       notify('请先登录后再和小猫聊天');
       return;
@@ -10260,6 +10320,7 @@ function showChatMessages() {
     var activePanel = document.getElementById('panelAiChat');
     var panelIsVisible = !!(activePanel && activePanel.classList.contains('active') && !activePanel.classList.contains('hidden'));
     if (!S.active && !panelIsVisible) return;
+    S._dockMode = false;
     S.active = false;
     S.lifecycleId += 1;
     S.historyRequestId += 1;
@@ -10491,9 +10552,25 @@ function showChatMessages() {
   };
   window.__xtjOpenAiChat = openAiChat;
   window.__xtjCloseAiChat = closeAiChat;
+  // ★ 小猫AI dock 入口（移动端 dock 中间 tab）：隐藏多余返回按钮
+  window.__xtjOpenAiChatFromDock = function() {
+    return openAiChat({ dock: true });
+  };
+
+  function flushPendingAiChatDock() {
+    // 移动端 dock 恢复 last tab=ai-chat 时，可能早于本模块就绪；补一次打开
+    try {
+      if (window.__xtjPendingAiChatOpen === true) {
+        window.__xtjPendingAiChatOpen = false;
+        if (window.__xtjOpenAiChatFromDock) window.__xtjOpenAiChatFromDock();
+      }
+    } catch (eF) {}
+  }
 
   function bootstrap() {
     try { diagPrintContext('boot'); } catch (e) {}
+    flushPendingAiChatDock();
+    setTimeout(flushPendingAiChatDock, 900);
     ensureConfig().then(function(cfg) {
       S.config = cfg;
       scheduleInsertEntry();

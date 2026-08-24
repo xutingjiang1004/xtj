@@ -6711,3 +6711,34 @@
 }
 .ai-conv-item:hover .ai-conv-rename { opacity: 1; }
 .ai-conv-rename:hover { background: rgba(78, 168, 142, 0.14); color: rgba(46, 130, 105, 0.98); }
+
+/* ===================== 小猫AI dock 中间 tab（移动端） =====================
+   打开小猫AI 即等同首页主 tab：面板上移到底部 dock 之上，dock 保持可见可点击，
+   这样即便隐藏了面板自身的返回按钮，用户仍可通过 dock 切换其它板块。 */
+@media (max-width: 767.98px) {
+  #panelAiChat.ai-secondary-panel {
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    height: auto;
+    border-radius: 0;
+    z-index: 60;
+  }
+  #panelAiChat.ai-secondary-panel .ai-chat-root {
+    height: 100%;
+    border-radius: 0;
+  }
+}
+
+/* 打开小猫AI 的过渡动画：进入时轻微上移淡入 */
+#panelAiChat.ai-secondary-panel.active .ai-chat-root {
+  animation: xtj-ai-dock-enter 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes xtj-ai-dock-enter {
+  from { opacity: 0; transform: translate3d(0, 16px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* dock 模式：即便意外渲染出返回按钮也隐藏（底部 dock 即导航） */
+#panelAiChat .ai-chat-root.ai-chat-dock .ai-chat-back { display: none; }

@@ -14478,13 +14478,38 @@ const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
   Math.max(parseInt(process.env.AI_CHAT_MESSAGE_MAX_LEN || '50000', 10) || 50000, 1000),
   100000
 );
-// ★ 缓存优化：历史消息保留 20 条 (原 10)，更稳定的前缀，命中率更高
+// ★ 缓存优化：历史消息默认保留 256 条（原 20），更稳定的前缀，命中率更高
 // 同时每条历史消息截断到 4000 字符 (~1500 tokens)，防止单条长消息撑爆请求
-const AI_CHAT_HISTORY_LIMIT = 20;
+// ★ 思考Max：前端请求携带 thinking_max=true 时（不压缩、榨干模型性能），
+//   历史条数上限放大到 AI_CHAT_HISTORY_LIMIT_MAX、单条截断上限放大到
+//   AI_CHAT_HISTORY_MSG_MAX_CHARS_MAX；未携带时走默认(256+4000)，超限自动压缩。
+const AI_CHAT_HISTORY_LIMIT = 256;
 const AI_CHAT_HISTORY_MSG_MAX_CHARS = 4000;
+const AI_CHAT_HISTORY_LIMIT_MAX = 2048;
+const AI_CHAT_HISTORY_MSG_MAX_CHARS_MAX = 32000;
 const AI_CHAT_HOURLY_IP_LIMIT = 200;
 const AI_CHAT_HISTORY_FETCH_BUFFER = 24;
 const AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT = 60;
+
+// ★ 思考Max：切历史上下文，先按条数上限（256/2048）取最近，再从旧到新累计，
+//   总字符超过预算就自动丢弃更早的内容（“自动压缩”），保底保留最近一条。
+//   返回完整历史对象（保留 role/content/vision_urls 等字段，多模态连续追问不受影响）。
+function aiChatHistoryBudget(ctx, maxMode) {
+  var histRaw = (ctx && Array.isArray(ctx.history)) ? ctx.history : [];
+  var limit = maxMode ? AI_CHAT_HISTORY_LIMIT_MAX : AI_CHAT_HISTORY_LIMIT;
+  var totalBudget = maxMode ? 500000 : 220000;   // 字符预算，思考Max 更大
+  var tail = histRaw.slice(-limit);
+  var out = [];
+  var total = 0;
+  for (var i = tail.length - 1; i >= 0; i--) {
+    var content = String(tail[i] && tail[i].content || '');
+    if (i > 0 && total + content.length > totalBudget) break; // 保底保留最近一条
+    out.push(tail[i]);
+    total += content.length;
+  }
+  out.reverse();
+  return out;
+}
 
 // 生成简短的 conversation_id
 function genConvId() {
@@ -16112,7 +16137,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       { role: 'system', content: corePrompt },
       { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
     ];
-    var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
+    var _ctxMaxSite1 = !!(req.body && req.body.thinking_max === true);
+    var histSlice = aiChatHistoryBudget(ctx, _ctxMaxSite1);
     for (var h = 0; h < histSlice.length; h++) {
       messages.push({ role: histSlice[h].role, content: histSlice[h].content });
     }
@@ -16777,7 +16803,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
     var _historyVisionEligible = validatedModel === DEEPSEEK_MODEL_VISION || validatedModel === DEEPSEEK_MODEL_FLASH;
 
-    var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
+    var _ctxMaxSite2 = !!(req.body && req.body.thinking_max === true);
+    var histSlice = aiChatHistoryBudget(ctx, _ctxMaxSite2);
     for (var h = 0; h < histSlice.length; h++) {
       var hrow = histSlice[h];
       // ★ 多模态连续追问：历史里带图（vision_urls）且当前模型视觉可用时，
