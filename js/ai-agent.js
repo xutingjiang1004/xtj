@@ -7091,17 +7091,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // ★ 自定义第三方模型：走独立转发路由，不消耗本站配额
     var isCustomModel = isCustomModelId(S.selectedModel);
     var customCfg = isCustomModel ? resolveCustomModelConfig(S.selectedModel) : null;
-    var url = isCustomModel
-      ? (API_BASE + '/custom-chat/stream')
-      : (API_BASE + '/chat/stream');
-    var auth = await getUserAuthPayload({ forceNoToken: false });
-    var headers = auth.headers || {};
-
     // thinking_mode 必须显式传 'off'；不能用 || 'max'（'off' 虽为真值，
     // 但非法/空值应回落默认，不能把用户「关闭思考」误当成 max）。
     var _sendThinkingMode = (ALLOWED_THINKING_MODES.indexOf(S.thinkingMode) >= 0)
       ? S.thinkingMode
       : DEFAULT_THINKING_MODE;
+    // ★ 自定义模型 + 思考「极致(max)」档 → 多智能体深度研究
+    //   （Planner 拆解 → 并行 Workers 联网研究 → Synthesizer 汇总，类似 ChatGPT/豆包深度思考）
+    var customDeepResearch = isCustomModel && customCfg && _sendThinkingMode === 'max';
+    var url = isCustomModel
+      ? (customDeepResearch ? (API_BASE + '/custom-chat/deep-stream') : (API_BASE + '/custom-chat/stream'))
+      : (API_BASE + '/chat/stream');
+    var auth = await getUserAuthPayload({ forceNoToken: false });
+    var headers = auth.headers || {};
     var fetchBody;
     if (isCustomModel && customCfg) {
       // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
@@ -7135,8 +7137,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         thinking_mode: _sendThinkingMode,
         thinking_max: S.thinkMax === true,
         web_search: S.webSearchEnabled === true,
+        tools_enabled: (S.webSearchEnabled === true || S.thinkMax === true),
         client_request_id: reqId,
-        timeout_ms: 180000
+        timeout_ms: 240000
       });
     } else {
       fetchBody = JSON.stringify({
