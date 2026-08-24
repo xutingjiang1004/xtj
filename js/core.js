@@ -1409,6 +1409,7 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
+            'code-workbench': { dependencies: ['ai-agent'], scripts: ['xtj-module-code-workbench'] },
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },

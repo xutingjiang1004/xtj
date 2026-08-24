@@ -49,12 +49,13 @@
     <link rel="stylesheet" href="css/style.min.css?v=5968e80769" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=5968e80769" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=b1549ac85d" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=5968e80769" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=bd490206d4" /></noscript>
     <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=3c3914938a" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=cb918a3ded" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=3460441178" media="print" onload="this.media='all'">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=b1549ac85d">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=64af73010b">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=bd490206d4">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=30f14053ba">
+    <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=9a9e12f4c3">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=c7f6c6babd">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=619b22047d">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=708b593ff5">
@@ -1101,7 +1102,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=e8aa6a3986"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=459a81ff6f"></script>
+    <script defer src="js/core.min.js?v=d25ecd9b60"></script>
     <script defer src="js/login-device.min.js?v=42ede07462"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b89afcfcce"></script>
@@ -1140,6 +1141,9 @@
 
 <!-- AI 聊天作为独立二级页面，不复用底部私聊面板。 -->
 <div class="ai-secondary-panel hidden" id="panelAiChat" aria-hidden="true"></div>
+
+<!-- Code 代码工作区：云端 GitHub 代码查看/修改/提交（独立二级页面）。 -->
+<div class="ai-secondary-panel hidden" id="panelCode" aria-hidden="true"></div>
 
 <!-- 站内搜索拥有独立界面，结果只通过已验证的服务端搜索接口加载。 -->
 <section class="ai-site-search-panel hidden" id="aiSiteSearchPanel" aria-hidden="true" aria-labelledby="aiSiteSearchTitle">

@@ -2889,9 +2889,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.deepThink = false;
   }
 
+  // ===================== Code 云端代码工作区入口 =====================
+  // 打开 Code 工作区二级页面。code-workbench 以独立模块懒加载，避免拖慢首屏。
+  function openCodeWorkbench() {
+    if (!window.currentUser) {
+      notify('请先登录后再使用代码工作区');
+      return;
+    }
+    function tryOpen() {
+      if (window.xtjCodeWorkbench && typeof window.xtjCodeWorkbench.open === 'function') {
+        window.xtjCodeWorkbench.open();
+        return true;
+      }
+      return false;
+    }
+    if (tryOpen()) return;
+    if (window.XTJModuleLoader && typeof window.XTJModuleLoader.load === 'function') {
+      notify('正在加载代码工作区...');
+      window.XTJModuleLoader.load('code-workbench').then(function() {
+        if (!tryOpen()) notify('代码工作区加载失败，请刷新后重试');
+      }).catch(function() {
+        notify('代码工作区加载失败，请刷新后重试');
+      });
+      return;
+    }
+    notify('代码工作区暂不可用');
+  }
+
   // 鏋勯€犳繁搴︽€濊€冭繘搴﹀崱鐗?(鏋佺畝椋庢牸)
   // ★ U2 重做: 4 角凸起 sparkle (ChatGPT/Claude 风格, 替代菱形)
   var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none" style="vertical-align:-2px"><ellipse cx="8" cy="11.2" rx="3.4" ry="2.7"/><circle cx="4.6" cy="6.6" r="1.5"/><circle cx="8" cy="5" r="1.5"/><circle cx="11.4" cy="6.6" r="1.5"/></svg>';
+  // Code 工作区入口图标（< / > 代码括号）
+  var AI_CODE_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none" style="vertical-align:-2px"><path d="M4.7 5.2 2 8l2.7 2.8-.9.9L.2 8l3.6-3.7z"/><path d="M11.3 5.2 14 8l-2.7 2.8.9.9 3.6-3.7-3.6-3.7z"/><path d="M9.7 2.4 6.9 13.6h1.4L11.1 2.4z"/></svg>';
   // ★ 流式正文内容长度上限：与 reasoning 200k 上限对齐，防止超长回复/异常流
   // 让字符串无限累积并导致每帧 renderMarkdown 的 O(n²) 渲染越来越卡。
   var AI_CONTENT_MAX_LEN = 500000;
@@ -8654,6 +8683,25 @@ function showChatMessages() {
       toggleDeepThink();
     });
     header.appendChild(deepThinkBtn);
+
+    // Code 代码工作区入口按钮（放在深度思考左侧）
+    var codeBtn = el('button', {
+      type: 'button',
+      class: 'ai-code-toggle',
+      'aria-label': '代码工作区',
+      title: '代码工作区 - 连接 GitHub 仓库，AI 查看 / 修改 / 提交代码',
+      id: 'aiCodeToggle'
+    });
+    var codeIcon = el('span', { class: 'ai-code-icon' });
+    codeIcon.innerHTML = AI_CODE_ICON;
+    codeBtn.appendChild(codeIcon);
+    codeBtn.appendChild(el('span', { class: 'ai-code-label', text: 'Code' }));
+    codeBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openCodeWorkbench();
+    });
+    header.insertBefore(codeBtn, deepThinkBtn);
 
     // 历史会话按钮
     var histBtn = el('button', {
