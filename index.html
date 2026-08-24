@@ -46,15 +46,15 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=30e4dc2592" />
+    <link rel="stylesheet" href="css/style.min.css?v=5968e80769" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/style.min.css?v=30e4dc2592" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=348a92b1d0" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.min.css?v=5968e80769" /><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=b1549ac85d" /></noscript>
     <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=3c3914938a" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=cb918a3ded" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=3460441178" media="print" onload="this.media='all'">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=348a92b1d0">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=2e0d8e2b08">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=b1549ac85d">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=c33511cbe6">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=c7f6c6babd">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=619b22047d">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=708b593ff5">
@@ -655,9 +655,14 @@
             </span>
             <span class="dt-label">小猫AI</span>
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
-                <g class="al-person" transform="translate(40, 30)" opacity="0">
-                    <circle cx="0" cy="-8" r="5" fill="currentColor"/>
-                    <path d="M-7,2 a7,6 0 0,1 14,0" fill="currentColor"/>
+                <g class="al-person" transform="translate(40, 30)">
+                    <circle class="al-person-head" cx="0" cy="-8" r="5" fill="currentColor" opacity="0"/>
+                    <path class="al-person-body" d="M-7,2 a7,6 0 0,1 14,0" fill="currentColor" opacity="0"/>
+                    <!-- AI 思考火花：点击时从头顶/两侧迸发 -->
+                    <g class="al-spark-0" opacity="0"><circle cx="0" cy="-14" r="1.8" fill="#FBBF24"/></g>
+                    <g class="al-spark-1" opacity="0"><circle cx="7" cy="-10" r="1.5" fill="#60A5FA"/></g>
+                    <g class="al-spark-2" opacity="0"><circle cx="-7" cy="-10" r="1.5" fill="#34D399"/></g>
+                    <g class="al-spark-3" opacity="0"><circle cx="4" cy="-16" r="1.2" fill="#F472B6"/></g>
                 </g>
             </svg>
         </button>

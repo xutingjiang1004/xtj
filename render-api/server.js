@@ -16616,6 +16616,189 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
   }
 });
 
+// ── 自定义第三方 AI 模型：账号级同步存储（API Key 加密）──────────────────────
+// 原实现只存浏览器 localStorage，换设备/更新即丢失。此处把模型配置（含 API Key）
+// 加密后按账号写到 posts 表的 __custom_ai_models__ 标记行，登录后任何设备可恢复。
+// Key 不落明文数据库：用 AES-256-GCM 加密，密钥由 API_SECRET（或
+// SUPABASE_SERVICE_KEY）派生；解密密钥变化会导致旧数据无法解密（返回空 Key），
+// 前端会提示重新填写，不会崩溃。
+var CUSTOM_AI_MODELS_MARKER = '__custom_ai_models__';
+var _aiModelsKey = null;
+function aiModelsEncryptionKey() {
+  if (_aiModelsKey) return _aiModelsKey;
+  var secret = process.env.API_SECRET || process.env.SUPABASE_SERVICE_KEY || '';
+  if (!secret) {
+    console.warn('[ai-models] 未配置 API_SECRET/SUPABASE_SERVICE_KEY，自定义模型 Key 将以内置弱密钥加密（不推荐）');
+    secret = 'xtj-ai-models-dev-fallback';
+  }
+  _aiModelsKey = crypto.createHash('sha256').update('xtj:ai-models:v1:' + secret).digest();
+  return _aiModelsKey;
+}
+function encryptAiModelSecret(plain) {
+  var key = aiModelsEncryptionKey();
+  var iv = crypto.randomBytes(12);
+  var cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  var enc = Buffer.concat([cipher.update(String(plain || ''), 'utf8'), cipher.final()]);
+  var tag = cipher.getAuthTag();
+  return { iv: iv.toString('base64'), tag: tag.toString('base64'), data: enc.toString('base64') };
+}
+function decryptAiModelSecret(blob) {
+  try {
+    if (!blob || typeof blob !== 'object' || !blob.iv || !blob.tag || !blob.data) return '';
+    var key = aiModelsEncryptionKey();
+    var decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(blob.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(blob.tag, 'base64'));
+    return Buffer.concat([decipher.update(Buffer.from(blob.data, 'base64')), decipher.final()]).toString('utf8');
+  } catch (e) {
+    console.warn('[ai-models] 解密自定义模型 Key 失败:', e && e.message);
+    return '';
+  }
+}
+function cleanAiModelIn(m) {
+  if (!m || typeof m !== 'object') return null;
+  var uid = String(m.uid || '').trim().slice(0, 64);
+  var provider = String(m.provider || '').trim().slice(0, 32);
+  var model = String(m.model || '').trim().slice(0, 64);
+  var apiKey = String(m.api_key || '').trim().slice(0, 512);
+  if (!uid || !provider || !model || !apiKey) return null;
+  return {
+    uid: uid,
+    provider: provider,
+    provider_label: String(m.provider_label || '').trim().slice(0, 40),
+    label: String(m.label || model).trim().slice(0, 40),
+    model: model,
+    base_url: String(m.base_url || '').trim().slice(0, 200),
+    api_key_enc: encryptAiModelSecret(apiKey)
+  };
+}
+// GET /api/agent/custom-models - 读取当前账号的自定义模型（解密 Key 后返回）
+app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var lookup = await supabase.from('posts').select('content')
+      .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (lookup.error) throw lookup.error;
+    var content = {};
+    if (lookup.data) { try { content = JSON.parse(lookup.data.content || '{}'); } catch (_) {} }
+    var models = Array.isArray(content.models) ? content.models : [];
+    var out = models.map(function(m) {
+      var copy = Object.assign({}, m);
+      if (copy.api_key_enc) { copy.api_key = decryptAiModelSecret(copy.api_key_enc); delete copy.api_key_enc; }
+      else { copy.api_key = String(copy.api_key || ''); }
+      return copy;
+    });
+    return res.json({ ok: true, models: out });
+  } catch (e) {
+    console.error('[ai-models] 读取失败:', e && e.message);
+    return res.status(500).json({ error: '读取自定义模型失败', code: 'ai_models_read_error' });
+  }
+});
+// PUT /api/agent/custom-models - 整体保存当前账号的自定义模型（整体替换，原子性由删除+插入保证）
+app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var body = req.body || {};
+    var raw = Array.isArray(body.models) ? body.models : [];
+    if (raw.length > 20) return res.status(400).json({ error: '自定义模型数量过多', code: 'ai_models_too_many' });
+    var models = [];
+    for (var i = 0; i < raw.length; i++) {
+      var clean = cleanAiModelIn(raw[i]);
+      if (clean) models.push(clean);
+    }
+    var del = await supabase.from('posts').delete()
+      .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER);
+    if (del.error && String(del.error.code) !== 'PGRST116') {
+      console.warn('[ai-models] 清理旧记录失败(继续):', del.error && del.error.message);
+    }
+    if (models.length) {
+      var ins = await supabase.from('posts').insert([{
+        user_name: req.userName,
+        media_type: CUSTOM_AI_MODELS_MARKER,
+        content: JSON.stringify({ models: models }),
+        actor_key: 'ai_models_' + Date.now()
+      }]);
+      if (ins.error) throw ins.error;
+    }
+    var echo = models.map(function(m) {
+      var copy = Object.assign({}, m);
+      copy.api_key = decryptAiModelSecret(copy.api_key_enc);
+      delete copy.api_key_enc;
+      return copy;
+    });
+    return res.json({ ok: true, models: echo });
+  } catch (e) {
+    console.error('[ai-models] 保存失败:', e && e.message);
+    return res.status(500).json({ error: '保存自定义模型失败', code: 'ai_models_write_error' });
+  }
+});
+
+// GET /api/agent/image - AI 生图代理（占位图检测 + 带退避重试）
+// 前端「AI生图」此前直连第三方生图服务，第三方经常重定向到 default.jpeg 占位图，
+// 前端用 new Image() 无法区分占位图与真图，导致一直"生成中"却永远不交付真图。
+// 本路由在服务端转发生图请求，可识别占位图（重定向到 default.jpeg）并带退避重试
+// 取回真图；仍拿不到时返回明确错误，前端据此显示"生成失败/服务繁忙"而非无限等待。
+// 上游服务可经环境变量 AI_IMAGE_GEN_BASE 替换为自有生图服务（需支持
+// ?prompt=&image_size= 查询参数并直接返回图片或重定向到图片）。
+// 说明：本接口不做登录鉴权，仅按 IP 限频——前端要用 <img src> 直接展示成图，
+// 无法携带 Authorization 头；且旧实现本就是前端无鉴权直连第三方，未降低安全水位。
+app.get('/api/agent/image', rateLimit(3600000, 40), async (req, res) => {
+  var prompt = String(req.query.prompt || '').trim().slice(0, 500);
+  if (!prompt) return res.status(400).json({ error: '缺少生图描述', code: 'invalid_prompt' });
+  var allowedSizes = { square_hd: 1, square: 1, portrait_4_3: 1, portrait_16_9: 1, landscape_4_3: 1, landscape_16_9: 1 };
+  var imageSize = String(req.query.image_size || '').trim();
+  if (!allowedSizes[imageSize]) imageSize = 'square_hd';
+  var base = String(process.env.AI_IMAGE_GEN_BASE || '').trim().replace(/\/+$/, '');
+  if (!base) base = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image';
+  var delays = [0, 2500, 4000, 6000, 8000];
+  var controller = new AbortController();
+  var overallTimer = setTimeout(function() { try { controller.abort(); } catch (_) {} }, 45000);
+  function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+  try {
+    for (var i = 0; i < delays.length; i++) {
+      if (i > 0) { try { await sleep(delays[i]); } catch (_) {} }
+      var bust = Date.now() + '_' + Math.floor(Math.random() * 1e6);
+      var url = base + '?prompt=' + encodeURIComponent(prompt) + '&image_size=' + imageSize + '&_r=' + bust;
+      var upstream;
+      try {
+        upstream = await fetch(url, { redirect: 'follow', signal: controller.signal, headers: { Accept: 'image/*,*/*' } });
+      } catch (eNet) {
+        if (controller.signal.aborted) break;
+        continue;
+      }
+      if (!upstream.ok) {
+        if (i >= delays.length - 1) {
+          return res.status(502).json({ error: '生图服务暂时不可用(HTTP ' + upstream.status + ')，请稍后重试', code: 'image_upstream_error' });
+        }
+        continue;
+      }
+      var cType = String(upstream.headers.get('content-type') || '');
+      var finalUrl = upstream.url || '';
+      var isPlaceholder = /\/default\.jpe?g(\?|#|$)/i.test(finalUrl);
+      if (!/^image\//.test(cType)) {
+        if (i >= delays.length - 1) {
+          return res.status(502).json({ error: '生图服务返回了非图片内容，请稍后重试', code: 'image_bad_response' });
+        }
+        continue;
+      }
+      if (isPlaceholder) {
+        if (i >= delays.length - 1) {
+          return res.status(503).json({ error: '图片服务繁忙，暂时无法生成，请稍后重试', code: 'image_busy' });
+        }
+        continue;
+      }
+      // 拿到真图：透传给前端
+      var buf = Buffer.from(await upstream.arrayBuffer());
+      res.setHeader('Content-Type', cType);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Image-Proxy', '1');
+      return res.end(buf);
+    }
+    return res.status(503).json({ error: '图片服务繁忙，暂时无法生成，请稍后重试', code: 'image_busy' });
+  } finally {
+    clearTimeout(overallTimer);
+  }
+});
+
+
 // POST /api/agent/chat/stream - 流式 SSE 输出
 app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var T0 = Date.now();

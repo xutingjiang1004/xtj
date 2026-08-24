@@ -4391,6 +4391,89 @@
             100% { transform: translate(0,0); opacity: 0; }
         }
 
+        /* ========== 小猫AI 专属点击动画（anim-brain）：AI 思考火花迸发 ========== */
+        .dock-tab.anim-brain .anim-layer {
+            animation: brainLayerFade 0.9s ease forwards;
+        }
+        @keyframes brainLayerFade {
+            0%, 45% { opacity: 1; }
+            60% { opacity: 0.6; }
+            75% { opacity: 0.2; }
+            85% { opacity: 0.05; }
+            100% { opacity: 0; }
+        }
+        .dock-tab.anim-brain .dt-svg {
+            animation: brainIconPulse 0.9s ease forwards;
+            transform-origin: center;
+        }
+        @keyframes brainIconPulse {
+            0%   { opacity: 1; transform: scale(1); }
+            8%   { opacity: 0.85; transform: scale(0.92); }
+            16%  { opacity: 1; transform: scale(1.18); }
+            24%  { opacity: 1; transform: scale(1); }
+            45%  { opacity: 1; transform: scale(1); }
+            60%  { opacity: 0.6; transform: scale(0.96); }
+            80%  { opacity: 1; transform: scale(1); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        /* 头像（头部+身体）弹动 */
+        .dock-tab.anim-brain .al-person-head,
+        .dock-tab.anim-brain .al-person-body {
+            animation: brainPersonPop 0.9s ease forwards;
+        }
+        @keyframes brainPersonPop {
+            0%   { opacity: 0; transform: scale(0.5); }
+            6%   { opacity: 1; transform: scale(1.05); }
+            12%  { opacity: 1; transform: scale(1.25); }
+            18%  { opacity: 1; transform: scale(0.95); }
+            24%  { opacity: 1; transform: scale(1); }
+            50%  { opacity: 0.85; transform: scale(1); }
+            68%  { opacity: 0.5; transform: scale(1); }
+            85%  { opacity: 0; transform: scale(1); }
+            100% { opacity: 0; transform: scale(1); }
+        }
+        /* AI 思考火花四散（头顶/两侧） */
+        .dock-tab.anim-brain .al-spark-0 { animation: brainSpark0 0.9s ease forwards; }
+        .dock-tab.anim-brain .al-spark-1 { animation: brainSpark1 0.9s ease forwards; }
+        .dock-tab.anim-brain .al-spark-2 { animation: brainSpark2 0.9s ease forwards; }
+        .dock-tab.anim-brain .al-spark-3 { animation: brainSpark3 0.9s ease forwards; }
+        @keyframes brainSpark0 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            10%  { transform: translate(0,0); opacity: 1; }
+            28%  { transform: translate(0,-15px); opacity: 0.95; }
+            45%  { transform: translate(1px,-11px); opacity: 0.6; }
+            65%  { transform: translate(0,-4px); opacity: 0.25; }
+            85%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes brainSpark1 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            10%  { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(11px,-9px); opacity: 0.9; }
+            50%  { transform: translate(8px,-6px); opacity: 0.55; }
+            70%  { transform: translate(2px,-1px); opacity: 0.2; }
+            90%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes brainSpark2 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            10%  { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(-11px,-9px); opacity: 0.9; }
+            50%  { transform: translate(-8px,-6px); opacity: 0.55; }
+            70%  { transform: translate(-2px,-1px); opacity: 0.2; }
+            90%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes brainSpark3 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            10%  { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(7px,-13px); opacity: 0.85; }
+            52%  { transform: translate(5px,-9px); opacity: 0.5; }
+            74%  { transform: translate(1px,-3px); opacity: 0.18; }
+            92%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+
         /* ========== "我的"页面样式 ========== */
         .dock-profile-container {
             --profile-glass-bg: rgba(255,255,255,0.92);
@@ -13296,7 +13379,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   border-color: transparent !important;
 }
 
-.dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile) .anim-layer {
+.dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-brain):not(.anim-profile) .anim-layer {
   opacity: 0 !important;
   visibility: hidden !important;
 }
@@ -13304,6 +13387,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 .dock-bar .dock-tab.anim-post .anim-layer,
 .dock-bar .dock-tab.anim-chat .anim-layer,
 .dock-bar .dock-tab.anim-ai .anim-layer,
+.dock-bar .dock-tab.anim-brain .anim-layer,
 .dock-bar .dock-tab.anim-profile .anim-layer {
   visibility: visible !important;
 }
