@@ -84,7 +84,7 @@ test('AI tools keep chat and site search as independent pages instead of changin
   assert.match(client, /function openSiteSearchPage/);
   assert.match(client, /apiRequest\('POST', '\/site-search'/);
   assert.match(client, /openSiteSearch: openSiteSearchPage/);
-  const openAiChat = client.slice(client.indexOf('async function openAiChat()'), client.indexOf('function applyConfigToUI'));
+  const openAiChat = client.slice(client.indexOf('async function openAiChat('), client.indexOf('function applyConfigToUI'));
   assert.doesNotMatch(openAiChat, /switchDockTab\('chat'/);
   assert.match(openAiChat, /aiPanel\.appendChild\(r\.root\)/);
 });

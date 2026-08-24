@@ -40,7 +40,7 @@ test('feed refresh preserves visible posts while reconciliation is pending', () 
 
 test('AI tools prewarm, render immediately, and bound history requests', () => {
   const launcher = between(core, 'function bindTopAiToolsLauncher()', 'bindTopAiToolsLauncher();');
-  const openChat = between(aiAgent, 'async function openAiChat()', 'function applyConfigToUI');
+  const openChat = between(aiAgent, 'async function openAiChat(', 'function applyConfigToUI');
   const openResearch = between(aiAgent, 'async function openDeepThinkPage()', 'function closeDeepThinkPage');
   const history = between(aiAgent, 'async function loadHistory(messagesEl, before)', 'async function fetchConversations');
   // 顶栏 AI 工具使用自定义下拉（Win 原生 select 会空弹）；预热仍在 pointerenter / 点击时触发
