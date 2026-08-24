@@ -59,8 +59,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var MSG_MAX_CHARS_MAX = 32000;
 
   // ── 自定义第三方模型（千问/豆包/DeepSeek/Kimi/智谱/OpenAI/自定义）────────────
-  // 用户添加的模型只保存在浏览器 localStorage（xtj_ai_custom_models），
-  // 密钥不落服务器数据库；选择后经后端 /api/agent/custom-chat/stream 转发调用。
+  // ★ 账号级同步：模型配置（含 API Key）既存本地 localStorage，也在登录后同步到
+  //   服务端（/api/agent/custom-models，Key 加密存储），换设备/更新后自动恢复。
+  //   未登录或同步失败时静默降级为仅本地，不影响离线使用。
   var CUSTOM_MODELS_KEY = 'xtj_ai_custom_models';
   var CUSTOM_MODEL_PREFIX = 'custom:';
   // 预置服务商模板：用户只需填 API Key（可改模型名）
@@ -82,8 +83,75 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return list.filter(function(m) { return m && m.uid && m.api_key; });
     } catch (e) { return []; }
   }
+  function saveCustomModelsLocal(list) {
+    try { localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify((list || []).slice(0, 12))); } catch (e) {}
+  }
+  function modelsEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    var keyOf = function(m) {
+      return [m && m.uid, m && m.provider, m && m.model, m && m.base_url, m && m.api_key, m && m.label, m && m.provider_label].join('|');
+    };
+    var sa = a.map(keyOf).sort().join('\n');
+    var sb = b.map(keyOf).sort().join('\n');
+    return sa === sb;
+  }
+  // 本地保存 + 账号同步（未登录/失败时静默降级为仅本地）
   function saveCustomModels(list) {
-    try { localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(list || [])); } catch (e) {}
+    saveCustomModelsLocal(list);
+    pushServerCustomModels(list).catch(function() {});
+  }
+  async function pushServerCustomModels(list) {
+    try {
+      var auth = await getUserAuthPayload({ forceNoToken: false });
+      if (!auth.token) return false;
+      var resp = await fetch(API_BASE + '/agent/custom-models', {
+        method: 'PUT',
+        headers: auth.headers,
+        body: JSON.stringify({ models: (list || []).slice(0, 20) })
+      });
+      if (!resp.ok) return false;
+      var data = await resp.json();
+      return !!(data && data.ok);
+    } catch (e) { return false; }
+  }
+  async function fetchServerCustomModels() {
+    try {
+      var auth = await getUserAuthPayload({ forceNoToken: false });
+      if (!auth.token) return null;
+      var resp = await fetch(API_BASE + '/agent/custom-models', { method: 'GET', headers: auth.headers });
+      if (!resp.ok) return null;
+      var data = await resp.json();
+      if (data && data.ok && Array.isArray(data.models)) {
+        return data.models.filter(function(m) { return m && m.uid && m.api_key; });
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+  // 登录后合并账号与本地模型（同 uid 本地优先），并把差异回写到服务端
+  async function syncCustomModelsFromServer() {
+    try {
+      var server = await fetchServerCustomModels();
+      if (server === null) return false; // 未登录或网络失败，保持本地
+      var local = loadCustomModels();
+      var mergedMap = {};
+      server.forEach(function(m) { if (m && m.uid) mergedMap[m.uid] = m; });
+      local.forEach(function(m) { if (m && m.uid) mergedMap[m.uid] = m; });
+      var merged = Object.keys(mergedMap).map(function(k) { return mergedMap[k]; });
+      saveCustomModelsLocal(merged);
+      if (!modelsEqual(merged, server)) {
+        await pushServerCustomModels(merged);
+      }
+      // 当前选中的自定义模型 uid 若已不存在，回退到第一个自定义模型或默认模型
+      if (S.selectedModel && isCustomModelId(S.selectedModel)) {
+        var uid = S.selectedModel.slice(CUSTOM_MODEL_PREFIX.length);
+        if (!findCustomModel(uid)) {
+          var first = loadCustomModels()[0];
+          S.selectedModel = first ? (CUSTOM_MODEL_PREFIX + first.uid) : DEFAULT_AI_MODEL;
+          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (eLs) {}
+        }
+      }
+      return true;
+    } catch (e) { return false; }
   }
   function genCustomModelUid() {
     return 'cm_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e6).toString(36);
@@ -9010,67 +9078,36 @@ function showChatMessages() {
         }
       });
     }
-    // ★ 生图服务地址：优先读前端配置 AI_IMAGE_GEN_BASE（可替换为自有服务），
-    //   未配置时回退内置默认地址。
+    // ★ 生图服务地址：改走自建后端代理 /api/agent/image。
+    //   服务端负责转发生图请求、识别 default.jpeg 占位图并带退避重试取回真图，
+    //   拿不到时返回明确错误，前端据此提示"生成失败/服务繁忙"，不再无限"生成中"。
     function genImageApiUrl(prompt, bust) {
-      var base = '';
-      try { base = (window.XTJ_CONFIG && window.XTJ_CONFIG.AI_IMAGE_GEN_BASE) || ''; } catch (e) {}
-      if (!base || typeof base !== 'string') base = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image';
-      base = base.replace(/\/+$/, '');
+      var base = API_BASE + '/agent/image';
       var q = '?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd';
-      // 重试时追加随机参数绕过浏览器缓存的「generating…」占位图，取回服务器端成图
+      // 重试时追加随机参数绕过浏览器缓存，避免复用旧响应
       if (bust) q += '&_r=' + Date.now() + '_' + Math.floor(Math.random() * 100000);
       return base + q;
     }
     // ★ 生成图片（预载验证可用性后回调）
-    // 修复：生图服务对同一 URL 可能先返回「The image is generating... Please refresh
-    // page to preview.」这类占位图，稍后才在同一 URL 返回成图。原实现把占位图当作
-    // 成功结果直接塞进卡片，用户只能手动刷新才看到真图。这里对同一 URL 做有限次重试，
-    // 让成图尽快落地；仍拿不到（占位或连不上）再回调失败/成功交由调用方处理。
-    function loadGenImage(prompt, onOk, onErr, attempt, fixedUrl) {
-      attempt = attempt || 0;
-      // 复用同一个 URL 轮询：生图服务按 URL（含 prompt/image_size）去重，
-      // 同一 URL 会先返回「generating…」占位、稍后才返回成图。
-      // 若每次重试都追加上新的 _r 缓存穿透参数，会改变 URL、被认为是新生成
-      // 任务，导致永远拿不到成图。因此仅在首次允许一次缓存穿透取原 URL，
-      // 之后重试必须复用同一 URL 等待服务端把成图落到该地址。
-      var url = fixedUrl || genImageApiUrl(prompt, true);
+    // 修复：旧实现直连第三方并用 new Image() 轮询同一 URL 等"成图落地"，但第三方
+    // 服务常返回 default.jpeg 占位图（可正常 onload），前端无法区分，导致一直显示
+    // "生成中"却永远不交付真图。现在占位图检测/重试全部收敛到后端代理，前端只需
+    // 加载一次：onload 即真图，onerror 即失败（服务端已返回明确错误）。
+    function loadGenImage(prompt, onOk, onErr) {
+      var url = genImageApiUrl(prompt, true);
       var img = new Image();
       var done = false;
-      var timer = null;
       img.onload = function() {
         if (done) return;
-        // 生成通常需数秒，递增间隔多次重试（总等待约 12s）命中最终成图，
-        // 避免用户手动刷新页面才看到图。
-        if (attempt < 10) {
-          var delay = 500 + attempt * 1100;
-          timer = setTimeout(function() {
-            if (done) return;
-            loadGenImage(prompt, onOk, onErr, attempt + 1, url);
-          }, delay);
-          return;
-        }
         done = true;
-        if (timer) clearTimeout(timer);
         onOk(url);
       };
       img.onerror = function() {
         if (done) return;
-        if (attempt < 6) {
-          var errDelay = 500 + attempt * 900;
-          timer = setTimeout(function() {
-            if (done) return;
-            loadGenImage(prompt, onOk, onErr, attempt + 1, url);
-          }, errDelay);
-          return;
-        }
         done = true;
-        onErr();
+        onErr('生成失败：图片服务繁忙或不可用，请稍后重试');
       };
       img.src = url;
-      // ★ 修复：删除原先的 pendingBust 覆盖逻辑——它每次都生成带新 _r 的 URL，
-      // 与"重试复用同一 URL 等成图落地"的策略直接矛盾（新 URL 会被生图服务当作
-      // 新任务，固定 url 反而永远拿不到成图）。重试已统一复用上方传入的 url。
     }
     function openImageGenModal() {
       closeQuickModal('aiGenImgModal');
@@ -9117,8 +9154,8 @@ function showChatMessages() {
           row.appendChild(insertBtn);
           previewEl.appendChild(row);
           previewEl.style.display = 'block';
-        }, function() {
-          statusEl.textContent = '生成失败：图片服务不可用或已被拦截（生产环境可配置 AI_IMAGE_GEN_BASE 换用自有生图服务），请稍后重试';
+        }, function(errMsg) {
+          statusEl.textContent = errMsg || '生成失败：图片服务繁忙或不可用，请稍后重试';
         });
       });
     }
@@ -9154,9 +9191,9 @@ function showChatMessages() {
               S.messagesEl.appendChild(newCard);
               try { scrollToBottom(S.messagesEl, true); } catch (eSc) {}
             }
-          }, function() {
+          }, function(errMsg) {
             try { regenBtn.disabled = false; regenBtn.textContent = '再生成一张'; } catch (eRb) {}
-            notify('生成失败：图片服务不可用，请稍后重试');
+            notify(errMsg || '生成失败：图片服务繁忙或不可用，请稍后重试');
           });
         });
       }
@@ -9620,7 +9657,7 @@ function showChatMessages() {
         '<div class="ai-invite-modal-box ai-custommodel-box">' +
           '<div class="ai-invite-modal-body ai-custommodel-body">' +
             '<h3 id="aiCustomModelTitle" class="ai-invite-modal-title">添加自定义模型</h3>' +
-            '<p class="ai-invite-modal-tip">选择服务商并填入 API Key，即可直接调用第三方 AI 模型（密钥仅保存在本地浏览器，不上传服务器）。</p>' +
+            '<p class="ai-invite-modal-tip">选择服务商并填入 API Key，即可直接调用第三方 AI 模型。模型配置（含 API Key）会加密同步到你的账号，换设备后自动恢复。</p>' +
             '<label class="ai-invite-code-label" for="aiCmProvider">服务商</label>' +
             '<select id="aiCmProvider" class="ai-cm-select">' + providerOptions + '</select>' +
             '<label class="ai-invite-code-label" for="aiCmApiKey">API Key</label>' +
@@ -10173,7 +10210,9 @@ function showChatMessages() {
       inputBar: inputBar,
       input: input,
       sendBtn: sendBtn,
-      pauseBtn: pauseBtn
+      pauseBtn: pauseBtn,
+      repopulate: repopulateModelSelect,
+      updateModelUI: updateModelUI
     };
   }
 
@@ -10251,6 +10290,13 @@ function showChatMessages() {
         // 打开面板时预拉取会话列表，修复"历史对话"点开后才加载、易误判为列表消失的问题
         fetchConversations().catch(function(e) {
           try { console.warn('[AI-CONV] 预拉取会话列表失败:', e && e.message); } catch (ee) {}
+        }),
+        // ★ 账号级同步第三方自定义模型（跨设备恢复），完成后刷新模型下拉
+        syncCustomModelsFromServer().then(function() {
+          if (lifecycleId === S.lifecycleId && S.active && r.repopulate) {
+            try { r.repopulate(); } catch (eR) {}
+            try { if (r.updateModelUI) r.updateModelUI(); } catch (eU) {}
+          }
         })
       ]);
     }).then(function() {

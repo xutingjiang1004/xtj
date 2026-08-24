@@ -6738,12 +6738,21 @@
   }
 }
 
-/* 打开小猫AI 的过渡动画：进入时轻微上移淡入 */
+/* 打开小猫AI 的过渡动画（修复"闪白 + 跳动"）：
+   1) 整面板快速淡入，与下方上一板块形成交叉淡化，避免先瞬间闪出浅色底再淡入内容；
+   2) 内容层只做轻微上移、不从 opacity:0 起，避免内容明显滞后于底色造成"闪白"。 */
+#panelAiChat.ai-secondary-panel.active {
+  animation: xtj-ai-panel-enter 0.22s ease-out;
+}
+@keyframes xtj-ai-panel-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 #panelAiChat.ai-secondary-panel.active .ai-chat-root {
-  animation: xtj-ai-dock-enter 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: xtj-ai-dock-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes xtj-ai-dock-enter {
-  from { opacity: 0; transform: translate3d(0, 16px, 0); }
+  from { opacity: 0.35; transform: translate3d(0, 10px, 0); }
   to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
