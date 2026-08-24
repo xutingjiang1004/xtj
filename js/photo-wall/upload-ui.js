@@ -505,6 +505,32 @@
     return '';
   }
 
+  // ★ 照片墙存储上传：优先直连 Supabase（window.sb），缺失/失败时回退服务端上传。
+  //   保证即使部署未注入 SUPABASE_ANON_KEY（window.sb 为 null）也能正常传图。
+  async function uploadPhotoToStorage(path, file, type, signal) {
+    if (window.sb) {
+      var up = await window.sb.storage.from('uploads').upload(path, file, {
+        contentType: type, cacheControl: '31536000', upsert: false, signal: signal || undefined
+      });
+      if (up && up.error) { up.error.photoUploadStage = 'storage'; throw up.error; }
+      return window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+    }
+    // 服务端上传（复用 service_role，不依赖 anon key）
+    var authHeaders = (typeof window.getUserAuthHeaders === 'function') ? window.getUserAuthHeaders() : {};
+    var headers = Object.assign({}, await Promise.resolve(authHeaders), { 'Content-Type': 'application/octet-stream' });
+    var qs = 'path=' + encodeURIComponent(path) + '&mime_type=' + encodeURIComponent(type || 'image/jpeg');
+    var resp = await fetch(apiUrl('/api/photo/upload') + '?' + qs, {
+      method: 'POST', headers: headers, body: file, signal: signal || undefined
+    });
+    var data = await resp.json().catch(function () { return {}; });
+    if (!resp.ok || !data.ok || !data.public_url) {
+      var err = new Error((data && data.error) || '图片上传失败');
+      err.photoUploadStage = 'storage';
+      throw err;
+    }
+    return data.public_url;
+  }
+
   function revoke(listName){
     var list = state[listName];
     if (!Array.isArray(list)) return;
@@ -846,26 +872,18 @@
       if (uploadFile && uploadFile.type) type = uploadFile.type;
     }
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
-    var upload;
+    var publicUrl;
     try {
-      upload = await window.sb.storage.from('uploads').upload(path, uploadFile, {
-        contentType: type, cacheControl: '31536000', upsert: false,
-        // P4: pass the AbortController signal so that cancelCurrentUpload()
-        // truly aborts the in-flight Storage network request, instead of
-        // letting it run to completion and then deleting the uploaded file.
-        signal: signal || undefined
-      });
+      publicUrl = await uploadPhotoToStorage(path, uploadFile, type, signal);
     } catch (storageError) {
       storageError.photoUploadStage = 'storage';
       throw storageError;
     }
-    if (upload && upload.error) { upload.error.photoUploadStage = 'storage'; throw upload.error; }
     if (state.cancelRequested || (signal && signal.aborted)) {
       // 取消上传：必须走后端 /api/photo/cleanup 校验路径归属，禁止前端 anon key 直删 Storage
       await cleanupStorage(path, uploadId);
       throw createPhotoUploadError('cancelled');
     }
-    var publicUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
     var cleanupAfterCreateOptions = {
       serverOnly: true,
       pendingInfo: { uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type }
@@ -1127,7 +1145,7 @@
     if (isBusy()) { toast('正在上传，请等待'); return; }
     var user = getCurrentUser();
     if (!user) { toast('请先登录'); return; }
-    if (!window.sb) { toast('Supabase 未加载，请刷新页面'); return; }
+    // ★ 上传不再强制依赖 window.sb：直连缺失时回退服务端上传（/api/photo/upload）
     if (!state.photoFiles.length) { toast('请选择照片'); return; }
     var jobs = state.photoFiles.map(function(f){
       return { file: f, uploadId: genUploadId(), status: 'pending' };
