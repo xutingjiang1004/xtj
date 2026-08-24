@@ -10504,11 +10504,15 @@ function showChatMessages() {
     var original = window.switchDockTab;
     window.switchDockTab = function(tab, skipReturn, options) {
       var result = original.apply(this, arguments);
-      if (tab !== 'chat' && S.active) {
+      // ★ 修复：切到小猫AI 自身 tab（ai-chat）时保持 AI 页面打开。
+      //   original 已负责打开/恢复 AI 页面（S.active 同步置 true），
+      //   若此处不排除 ai-chat，会在打开后立刻被 closeAiChat() 关掉，
+      //   表现为移动端点击小猫AI「无反应」。
+      if (tab !== 'chat' && tab !== 'ai-chat' && S.active) {
         try { closeAiChat(); } catch (e) {}
       }
-      // 切换出聊天 tab 时一并关闭深度思考二级页面
-      if (tab !== 'chat') {
+      // 切换出聊天 tab 时一并关闭深度思考二级页面（ai-chat 属于 AI 页面子级，需保留）
+      if (tab !== 'chat' && tab !== 'ai-chat') {
         try { closeDeepThinkPage(); } catch (e) {}
       }
       return result;
