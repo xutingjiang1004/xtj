@@ -16419,6 +16419,15 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 // 兼容 chat/completions 流式格式转发，再把 token 转成前端 chat/stream 的
 // SSE 契约（type: content/done/error）。不消耗本站 AI 配额，也不持久化。
 // ─────────────────────────────────────────────────────────────
+// ★ 增强：
+//  1) 思考过程可视化：上游推理模型返回的 delta.reasoning_content / delta.reasoning /
+//     delta.thinking 会被透传为 reasoning_start + reasoning SSE 事件（并在 done 回填
+//     完整 reasoning），前端据此渲染"思考过程"折叠卡，用户可确认思考档位真实生效。
+//  2) 工具调用：tools_enabled=true 时给上游挂 Function Calling 工具（联网搜索/天气/
+//     时间/汇率/行情/读网页/计算/单位换算 等，复用内置 AI_TOOLS），收到 tool_calls
+//     后服务端执行并把结果回喂模型继续推理（多轮，最多 CUSTOM_TOOL_MAX_ROUNDS 轮），
+//     同时推送 tool_calls/tool_pending/tool_result/tool_error SSE 供前端展示时间线。
+//     上游不支持 function calling（400/404/422）时自动回退为不带工具重试。
 app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var aborted = false;
   var _heartbeatTimer = null;
@@ -16484,7 +16493,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
     return safeEnd();
   }
 
-  var timeoutMs = Math.max(15000, Math.min(Number(body.timeout_ms) || 120000, 300000));
+  var timeoutMs = Math.max(15000, Math.min(Number(body.timeout_ms) || 180000, 300000));
   var controller = new AbortController();
   var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
   var reqId = String(body.client_request_id || '').slice(0, 64);
@@ -16520,8 +16529,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
         // Kimi(Moonshot) 内置联网搜索函数
         extra.tools = [{ type: 'builtin_function', function: { name: '$web_search' } }];
       }
-      // deepseek 等 chat/completions 无标准内置搜索参数：交由模型自身能力，
-      // 不伪造 tools 以免 400 中断对话。
+      // deepseek 等 chat/completions 无标准内置搜索参数：交由 Function Calling 工具兜底
     }
     return extra;
   }
@@ -16543,54 +16551,145 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
     if (built.length) fwdMessages = built;
   }
 
-  try {
-    var upstream = await fetch(baseUrl + '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey
-      },
-      body: JSON.stringify(Object.assign({
-        model: chosenModel,
-        messages: fwdMessages,
-        stream: true
-      }, buildCustomExtras())),
-      signal: controller.signal
-    });
+  // ★ 工具调用：仅当 tools_enabled 时挂载 Function Calling 工具。
+  //   复用内置 AI_TOOLS 中与第三方模型兼容的通用工具（不含站内私有工具）。
+  var toolsEnabled = body.tools_enabled === true;
+  var TOOL_ROUNDS_MAX = 6;
+  var CUSTOM_TOOL_NAMES = {
+    search_web: 1, tavily_search: 1, read_web_page: 1,
+    get_weather: 1, get_current_time: 1, get_exchange_rate: 1,
+    get_stock_quote: 1, calculate: 1, convert_units: 1
+  };
+  function buildCustomTools() {
+    var out = [];
+    for (var tI = 0; tI < AI_TOOLS.length; tI++) {
+      var t = AI_TOOLS[tI];
+      var nm = t && t.function && t.function.name;
+      if (nm && CUSTOM_TOOL_NAMES[nm]) out.push(t);
+    }
+    return out;
+  }
+  var customTools = toolsEnabled ? buildCustomTools() : null;
+  var toolContext = { userName: req.userName || '', signal: controller.signal, searchConsumed: 0 };
+  var conversation = fwdMessages.slice();
+  var reasoningText = '';
+  var reasoningSentStart = false;
+  var reasoningEffortFinal = _thinkMode === 'off' ? 'off' : (_thinkMode === 'max' || _thinkMode === 'high' ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low'));
+
+  // 单轮转发：返回 { stop } 表示整体结束；{ continueRound } 表示执行了工具需下一轮；
+  // { retryWithoutTools } 表示上游拒绝工具需回退。
+  async function runCustomRound(useTools) {
+    var payload = { model: chosenModel, messages: conversation, stream: true };
+    Object.assign(payload, buildCustomExtras());
+    if (useTools && customTools) {
+      payload.tools = customTools;
+      payload.tool_choice = 'auto';
+    }
+    var upstream;
+    try {
+      upstream = await fetch(baseUrl + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+    } catch (eNet) {
+      throw eNet;
+    }
     if (!upstream.ok) {
       // 不回显上游响应体（防止 SSRF 探测结果外带），只返回状态码
+      // 带工具被拒绝 → 回退不带工具重试一次
+      if (useTools && customTools && (upstream.status === 400 || upstream.status === 404 || upstream.status === 422)) {
+        return { retryWithoutTools: true };
+      }
       writeSse(res, { type: 'error', error: '第三方模型请求失败(HTTP ' + upstream.status + ')', code: 'CUSTOM_UPSTREAM_ERROR' });
-      return safeEnd();
+      return { stop: true };
     }
-    if (!upstream.body) { writeSse(res, { type: 'error', error: '第三方模型无响应流' }); return safeEnd(); }
+    if (!upstream.body) { writeSse(res, { type: 'error', error: '第三方模型无响应流' }); return { stop: true }; }
     startHeartbeat();
     var reader = upstream.body.getReader();
     var decoder = new TextDecoder('utf-8');
     var buf = '';
     var doneFlag = false;
-    while (!aborted && !doneFlag) {
-      var chunk = await reader.read();
-      if (chunk.done) break;
-      buf += decoder.decode(chunk.value, { stream: true });
-      var lines = buf.split('\n');
-      buf = lines.pop();
-      for (var li = 0; li < lines.length; li++) {
-        var line = lines[li].trim();
-        if (!line || line.indexOf('data:') !== 0) continue;
-        var data = line.slice(5).trim();
-        if (data === '[DONE]') { doneFlag = true; break; }
-        var json;
-        try { json = JSON.parse(data); } catch (e) { continue; }
-        var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
-        if (!delta) continue;
-        var piece = delta.content || '';
-        if (piece) {
-          if (res.writableEnded || aborted) break;
-          writeSse(res, { type: 'content', text: piece });
+    var assistantContent = '';
+    var toolCallsAcc = [];
+    var toolCallsSeen = false;
+    try {
+      while (!aborted && !doneFlag) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buf += decoder.decode(chunk.value, { stream: true });
+        var lines = buf.split('\n');
+        buf = lines.pop();
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li].trim();
+          if (!line || line.indexOf('data:') !== 0) continue;
+          var data = line.slice(5).trim();
+          if (data === '[DONE]') { doneFlag = true; break; }
+          var json;
+          try { json = JSON.parse(data); } catch (e) { continue; }
+          var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
+          if (!delta) continue;
+          // ★ 思考过程透传：DeepSeek/Qwen-qwq 等用 reasoning_content，部分厂商用 reasoning/thinking
+          var rPiece = delta.reasoning_content || delta.reasoning || delta.thinking || '';
+          if (rPiece) {
+            if (!reasoningSentStart) { reasoningSentStart = true; writeSse(res, { type: 'reasoning_start' }); }
+            reasoningText = (reasoningText + rPiece).slice(-400000);
+            if (!res.writableEnded && !aborted) writeSse(res, { type: 'reasoning', text: rPiece });
+          }
+          var piece = delta.content || '';
+          if (piece) {
+            assistantContent += piece;
+            if (!res.writableEnded && !aborted) writeSse(res, { type: 'content', text: piece });
+          }
+          // ★ 工具调用流式累积
+          if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+            toolCallsSeen = true;
+            for (var ti = 0; ti < delta.tool_calls.length; ti++) {
+              var tcd = delta.tool_calls[ti];
+              var idx = (typeof tcd.index === 'number') ? tcd.index : toolCallsAcc.length;
+              if (!toolCallsAcc[idx]) toolCallsAcc[idx] = { index: idx, id: '', name: '', arguments: '' };
+              if (tcd.id) toolCallsAcc[idx].id = tcd.id;
+              if (tcd.function && tcd.function.name) toolCallsAcc[idx].name = tcd.function.name;
+              if (tcd.function && tcd.function.arguments) toolCallsAcc[idx].arguments += tcd.function.arguments;
+            }
+          }
         }
       }
+    } finally {
+      try { if (reader.cancel) reader.cancel().catch(function() {}); } catch (e) {}
     }
-    // 兜底：上游正常结束（无 [DONE]）也判定完成
+
+    // 需要执行工具：组装 assistant 工具调用消息 + 各工具结果，追加进会话后继续下一轮
+    var readyCalls = toolCallsAcc.filter(function(t) { return t && t.name; });
+    if (toolCallsSeen && readyCalls.length) {
+      var tcs = readyCalls.map(function(t) {
+        return { id: t.id || ('call_' + Date.now().toString(36) + '_' + t.index), type: 'function', function: { name: t.name, arguments: t.arguments || '{}' } };
+      });
+      conversation.push({ role: 'assistant', content: assistantContent || null, tool_calls: tcs });
+      // 前端时间线：先展示"进行中"
+      writeSse(res, { type: 'tool_calls', tools: tcs.map(function(t) { var a = {}; try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {} return { name: t.function.name, args: a }; }) });
+      for (var rI = 0; rI < tcs.length; rI++) {
+        var tcRaw = { function: { name: tcs[rI].function.name, arguments: tcs[rI].function.arguments } };
+        writeSse(res, { type: 'tool_pending', tool_name: tcs[rI].function.name });
+        var tRes;
+        try { tRes = await executeToolCall(tcRaw, toolContext); } catch (e) { tRes = { tool_name: tcs[rI].function.name, error: '工具执行失败' }; }
+        if (tRes && tRes.error) {
+          writeSse(res, { type: 'tool_error', tool_name: tcs[rI].function.name, error: String(tRes.error).slice(0, 200) });
+        } else {
+          var toolCount = (tRes && (tRes.results_count || (Array.isArray(tRes.results) ? tRes.results.length : 0))) || 0;
+          writeSse(res, { type: 'tool_result', tool_name: tcs[rI].function.name, success: true, count: toolCount, location: (tRes && tRes.location) || '' });
+        }
+        var toolBody = '';
+        if (tRes && tRes.content) toolBody = tRes.content;
+        else if (tRes && tRes.error) toolBody = JSON.stringify({ error: tRes.error });
+        else toolBody = JSON.stringify(tRes || {});
+        conversation.push({ role: 'tool', tool_call_id: tcs[rI].id, content: String(toolBody).slice(0, 12000) });
+      }
+      return { continueRound: true };
+    }
+
+    // 正常结束
     if (!aborted && !res.writableEnded) {
       writeSse(res, {
         type: 'done',
@@ -16601,8 +16700,22 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
         custom: true,
         thinking_mode: _thinkMode,
         web_search: _webSearch === true,
-        reasoning_effort: _thinkMode === 'off' ? 'off' : (_thinkMode === 'max' || _thinkMode === 'high' ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low'))
+        reasoning_effort: reasoningEffortFinal,
+        reasoning: reasoningText.slice(0, 400000)
       });
+    }
+    return { stop: true };
+  }
+
+  var toolsInUse = !!customTools;
+  var rounds = 0;
+  try {
+    while (rounds <= TOOL_ROUNDS_MAX) {
+      var rr = await runCustomRound(toolsInUse);
+      if (rr.stop) break;
+      if (rr.retryWithoutTools) { toolsInUse = false; continue; }
+      if (rr.continueRound) { rounds++; continue; }
+      break;
     }
   } catch (eUp) {
     if (!aborted && !res.writableEnded) {
@@ -16611,7 +16724,273 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
     }
   } finally {
     try { clearTimeout(timer); } catch (e) {}
-    try { if (reader && reader.cancel) reader.cancel().catch(function() {}); } catch (e) {}
+    safeEnd();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/agent/custom-chat/deep-stream — 自定义第三方模型「多智能体深度研究」
+// 类似 ChatGPT 深度思考 / 豆包深度思考：Planner 拆解 → 并行 Workers（每个带联网搜索）
+// → Synthesizer 汇总。不依赖第三方模型自身支持 Function Calling，改为服务端编排 +
+// 把 searchWeb 结果注入上下文，因此对任意 OpenAI 兼容 chat/completions 模型都可用，
+// 让"思考 Max / 深度档"真正具备多 agent 并行检索研究的"聪明度与智慧程度"。
+// 前端：自定义模型 + thinking_mode='max' 时路由到本接口，用现有深度研究进度卡渲染。
+// SSE 契约（复用前端深度思考卡渲染）：
+//   meta / deep_think_init / deep_think_stage / deep_think_planned / deep_think_tool /
+//   thinking_chunk{agent_role} / answer_chunk / content / done{agent_count,sources,search_count} / error
+// ─────────────────────────────────────────────────────────────
+app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+  var aborted = false;
+  var _heartbeatTimer = null;
+  function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
+  function startHeartbeat() {
+    if (_heartbeatTimer) return;
+    _heartbeatTimer = setInterval(function() {
+      if (res.writableEnded || aborted) { clearHeartbeat(); return; }
+      var lastWrite = res._sseLastWriteAt || 0;
+      if (Date.now() - lastWrite >= 8000) { try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {} }
+    }, 4000);
+  }
+  function safeEnd() {
+    clearHeartbeat();
+    if (!res.writableEnded) res.end();
+  }
+  function sseSend(obj) { try { if (!res.writableEnded && !aborted) writeSse(res, obj); } catch (_) {} }
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+  req.on('aborted', function() { aborted = true; clearHeartbeat(); });
+  res.on('close', function() { if (!res.writableEnded) aborted = true; });
+
+  var body = (req && req.body) || {};
+  var provider = String(body.provider || '').trim();
+  var apiKey = String(body.api_key || '').trim();
+  var model = String(body.model || '').trim();
+  var text = String(body.message || '').trim();
+  if (!provider || !apiKey || !model || !text) {
+    sseSend({ type: 'error', error: '缺少自定义模型参数，请重新配置' });
+    return safeEnd();
+  }
+  var CUSTOM_DP_ENDPOINTS = {
+    qwen:    { base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',        defaultModel: 'qwen-plus' },
+    doubao:  { base: 'https://ark.cn-beijing.volces.com/api/v3',                   defaultModel: 'doubao-1-5-pro-32k' },
+    deepseek: { base: 'https://api.deepseek.com',                                 defaultModel: 'deepseek-chat' },
+    kimi:    { base: 'https://api.moonshot.cn/v1',                                defaultModel: 'moonshot-v1-8k' },
+    zhipu:   { base: 'https://open.bigmodel.cn/api/paas/v4',                      defaultModel: 'glm-4-flash' },
+    openai:  { base: 'https://api.openai.com/v1',                                 defaultModel: 'gpt-4o-mini' },
+    custom:  { base: '' }
+  };
+  var ep = CUSTOM_DP_ENDPOINTS[provider];
+  var baseUrl = (ep && ep.base) ? ep.base : (String(body.base_url || '').trim());
+  if (!baseUrl) { sseSend({ type: 'error', error: '该服务商未配置接口地址' }); return safeEnd(); }
+  baseUrl = baseUrl.replace(/\/+$/, '');
+  var chosenModel = model || (ep && ep.defaultModel) || '';
+  try {
+    var _safe2 = await assertSafeWebUrl(baseUrl);
+    if (_safe2.parsed.protocol !== 'https:') { sseSend({ type: 'error', error: '接口地址仅支持 https://', code: 'CUSTOM_BAD_BASE_URL' }); return safeEnd(); }
+  } catch (eUrl2) {
+    sseSend({ type: 'error', error: '接口地址无效或指向不允许的主机', code: 'CUSTOM_BAD_BASE_URL' });
+    return safeEnd();
+  }
+
+  var timeoutMs = Math.max(30000, Math.min(Number(body.timeout_ms) || 240000, 300000));
+  var controller = new AbortController();
+  var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
+
+  // ★ 对任意 OpenAI 兼容 chat/completions 模型的通用调用
+  function buildFetch(msgs, options) {
+    options = options || {};
+    var payload = {
+      model: chosenModel,
+      messages: msgs,
+      temperature: typeof options.temperature === 'number' ? options.temperature : 0.6,
+      max_tokens: options.maxTokens || 2000
+    };
+    if (options.stream) payload.stream = true;
+    return fetch(baseUrl + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  }
+  async function callCustomChat(msgs, options) {
+    var upstream = await buildFetch(msgs, options);
+    if (!upstream.ok) {
+      var eTxt = '';
+      try { eTxt = (await upstream.text()).slice(0, 200); } catch (_) {}
+      throw new Error('HTTP ' + upstream.status + (eTxt ? ' ' + eTxt : ''));
+    }
+    var data = await upstream.json();
+    var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    return String(content || '').trim();
+  }
+  async function callCustomChatStream(msgs, onChunk, options) {
+    var upstream = await buildFetch(msgs, Object.assign({}, options, { stream: true }));
+    if (!upstream.ok) {
+      var eTxt2 = '';
+      try { eTxt2 = (await upstream.text()).slice(0, 200); } catch (_) {}
+      throw new Error('HTTP ' + upstream.status + (eTxt2 ? ' ' + eTxt2 : ''));
+    }
+    if (!upstream.body) throw new Error('empty stream');
+    var reader = upstream.body.getReader();
+    var decoder = new TextDecoder('utf-8');
+    var buf = '';
+    while (!aborted) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      var lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li].trim();
+        if (!line || line.indexOf('data:') !== 0) continue;
+        var data = line.slice(5).trim();
+        if (data === '[DONE]') return;
+        var json;
+        try { json = JSON.parse(data); } catch (e) { continue; }
+        var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
+        if (!delta) continue;
+        var piece = delta.content || '';
+        var rPiece = delta.reasoning_content || delta.reasoning || delta.thinking || '';
+        onChunk(piece, rPiece);
+      }
+    }
+  }
+
+  var CUSTOM_PLANNER_PROMPT = '你是深度研究任务规划器。判断问题复杂度并拆解为多个可并行研究的子任务。只输出严格 JSON（无 markdown、无多余文字）：{"complexity":"low|medium|high","reasoning":"简短说明","agents":[{"role":"角色名(2-6字)","task_description":"负责研究什么(60字内)","need_search":true,"search_queries":["关键词1","关键词2"]}]}。规则：复杂/需最新信息的问题 agents 用 2-5 个且 need_search=true；简单问题 1 个即可。原始问题：';
+  var CUSTOM_WORKER_PROMPT = '你是深度研究子智能体。基于提供的检索资料与自身知识，针对分配的任务给出严谨、有条理的分析结论（要点式，600 字内）。如果检索资料不够，明确说明"资料有限，结合已有知识作答"。不要编造不存在的来源。';
+  var CUSTOM_SYNTH_PROMPT = '你是深度研究总智能体。把多个子智能体的研究成果整合成一份完整、结构化、通俗易懂的中文研究报告：先用一段总述，再按主题分节论述，最后给结论与建议。引用来源时标注 [来源N]。如果某个方向没有有效信息，如实说明。要求条理清晰、有深度。';
+
+  function parsePlannerJson(raw) {
+    if (!raw) return null;
+    var s = raw;
+    var m = s.match(/\{[\s\S]*\}/);
+    if (m) s = m[0];
+    try { var o = JSON.parse(s); if (o && Array.isArray(o.agents)) return o; } catch (e) {}
+    try {
+      var a = s.indexOf('{'); var b = s.lastIndexOf('}');
+      if (a >= 0 && b > a) { var o2 = JSON.parse(s.slice(a, b + 1)); if (o2 && Array.isArray(o2.agents)) return o2; }
+    } catch (e2) {}
+    return null;
+  }
+  function buildDefaultAgents() {
+    return [
+      { role: '资料检索', task_description: '围绕原始问题检索并整理关键资料', need_search: true, search_queries: [text.slice(0, 40)] },
+      { role: '分析论证', task_description: '结合资料与已有知识进行深入分析', need_search: false, search_queries: [] }
+    ];
+  }
+
+  var searchCount = 0;
+  var sources = [];
+  var thinkingAcc = '';
+  var reasoningStartedFlag = false;
+  function emitReasoning(textChunk) {
+    var s = String(textChunk || '');
+    if (!s) return;
+    if (!reasoningStartedFlag) { reasoningStartedFlag = true; sseSend({ type: 'reasoning_start' }); }
+    thinkingAcc = (thinkingAcc + s).slice(-400000);
+    sseSend({ type: 'reasoning', text: s });
+  }
+  try {
+    sseSend({ type: 'meta', deep_think: true, model: chosenModel, provider: provider });
+    emitReasoning('\n【总指挥 · Planner】正在拆解问题、规划多智能体并行研究方案...\n');
+
+    // 1) Planner
+    var plannerRaw = '';
+    try { plannerRaw = await callCustomChat([{ role: 'user', content: CUSTOM_PLANNER_PROMPT + text }], { maxTokens: 2000, temperature: 0.4 }); } catch (eP) { plannerRaw = ''; }
+    var plan = parsePlannerJson(plannerRaw);
+    var agents = (plan && Array.isArray(plan.agents) && plan.agents.length) ? plan.agents.slice(0, 6) : buildDefaultAgents();
+    emitReasoning('已规划 ' + agents.length + ' 个研究方向：' + agents.map(function(a) { return a.role; }).join('、') + '\n');
+
+    // 2) 并行 Workers（每个带联网搜索）
+    emitReasoning('▶ 正在并行研究 (' + agents.length + ' 个方向)...\n');
+    async function runCustomWorker(agent, idx) {
+      var role = String(agent.role || ('方向 ' + (idx + 1)));
+      var contextParts = [];
+      if (agent.need_search && Array.isArray(agent.search_queries) && agent.search_queries.length) {
+        var queries = agent.search_queries.slice(0, 3);
+        for (var qi = 0; qi < queries.length; qi++) {
+          var q = String(queries[qi] || '').trim().slice(0, 100);
+          if (!q) continue;
+          var gate = await enforceSearchQuota(req.userName, searchCount);
+          if (!gate.allowed) break;
+          searchCount += 1;
+          // 工具时间线 + 搜索状态条（主聊天循环兼容事件）
+          sseSend({ type: 'tool_calls', tools: [{ name: 'search_web', args: { query: q } }] });
+          var sr = null;
+          try { sr = await searchWeb(q, 5); } catch (_) { sr = null; }
+          var items = (sr && Array.isArray(sr.results) ? sr.results : []).slice(0, 5);
+          items.forEach(function(it) {
+            if (it && it.url) sources.push({ title: it.title || '', url: it.url, snippet: it.snippet || '', source: it.source || '' });
+          });
+          sseSend({ type: 'tool_result', tool_name: 'search_web', success: true, count: items.length, location: '' });
+          sseSend({ type: 'search', count: searchCount, query: q, results: [] });
+          emitReasoning('【' + role + '】搜索「' + q + '」命中 ' + items.length + ' 条\n');
+          contextParts.push('【搜索: ' + q + '】\n' + items.map(function(it) { return '- ' + (it.title || '') + '\n  ' + (it.url || '') + '\n  ' + (it.snippet || ''); }).join('\n'));
+        }
+      }
+      var taskDesc = String(agent.task_description || '').trim();
+      var userMsg = (contextParts.length ? ('以下是相关检索资料（可能不完整，可结合自身知识补全）：\n\n' + contextParts.join('\n\n') + '\n\n') : '') + '分配的任务：' + (taskDesc || '围绕原始问题展开研究') + '\n原始问题：' + text;
+      var answer = '';
+      try {
+        answer = await callCustomChat([{ role: 'system', content: CUSTOM_WORKER_PROMPT }, { role: 'user', content: userMsg }], { maxTokens: 1600, temperature: 0.5 });
+      } catch (eW) {
+        answer = '（该方向分析失败：' + String((eW && eW.message) || '未知错误').slice(0, 120) + '）';
+      }
+      emitReasoning('\n【' + role + '】\n' + answer.slice(0, 600) + '\n');
+      return { role: role, content: answer || '' };
+    }
+    var workerResults = await Promise.all(agents.map(function(a, i) { return runCustomWorker(a, i); }));
+
+    // 3) Synthesizer（流式输出最终报告）
+    emitReasoning('\n【总指挥 · Synthesizer】正在整合各方向结果、撰写最终报告...\n');
+    var synthInput = '原始问题：' + text + '\n\n各方向研究结果：\n\n';
+    workerResults.forEach(function(w, i) {
+      synthInput += '【' + w.role + '】\n' + String(w.content || '').slice(0, 1500) + '\n\n';
+    });
+    if (sources.length) {
+      synthInput += '参考资料：\n' + sources.map(function(s, i) { return '[' + (i + 1) + '] ' + (s.title || '') + ' ' + (s.url || ''); }).slice(0, 20).join('\n') + '\n';
+    }
+    var finalContent = '';
+    try {
+      await callCustomChatStream(
+        [{ role: 'system', content: CUSTOM_SYNTH_PROMPT }, { role: 'user', content: synthInput }],
+        function(piece, rPiece) {
+          if (rPiece) emitReasoning(rPiece);
+          if (piece) {
+            finalContent = (finalContent + piece).slice(-32000);
+            sseSend({ type: 'content', text: piece });
+          }
+        },
+        { maxTokens: 4000, temperature: 0.5 }
+      );
+    } catch (eS) {
+      sseSend({ type: 'error', error: '研究报告生成失败，请稍后重试', code: 'CUSTOM_DEEP_SYNTH_ERROR' });
+      return safeEnd();
+    }
+    sseSend({ type: 'content', text: finalContent });
+    sseSend({
+      type: 'done',
+      complete: true,
+      saved: false,
+      custom: true,
+      model: chosenModel,
+      provider: provider,
+      thinking_mode: 'max',
+      agent_count: agents.length,
+      search_count: searchCount,
+      sources: sources.slice(0, 30),
+      reasoning: thinkingAcc.slice(0, 200000),
+      content: finalContent
+    });
+  } catch (eFatal) {
+    if (!aborted && !res.writableEnded) {
+      sseSend({ type: 'error', error: '深度研究失败，请稍后重试', code: 'CUSTOM_DEEP_ERROR' });
+    }
+  } finally {
+    try { clearTimeout(timer); } catch (e) {}
     safeEnd();
   }
 });
