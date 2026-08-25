@@ -1325,24 +1325,46 @@
     notify('已开始新对话');
   }
 
+  // 生成当前分支的完整文件清单，让 AI 一眼看到所有文件
+  function buildFileTreeText() {
+    if (!state.tree || !state.tree.length) return '';
+    var files = [];
+    for (var i = 0; i < state.tree.length; i++) {
+      if (state.tree[i].type === 'blob') files.push(state.tree[i].path);
+    }
+    if (!files.length) return '';
+    files.sort();
+    if (files.length > 5000) files = files.slice(0, 5000);
+    return files.join('\n');
+  }
+
   function buildAiPrompt(request) {
     var lines = [];
     if (state.repo) lines.push('仓库：' + state.repo.full_name + '（当前分支：' + state.repo.branch + '）');
     if (state.currentPath) {
       lines.push('当前打开文件：' + state.currentPath);
     } else {
-      lines.push('当前打开文件：无（请在左侧选择文件后再让 AI 修改）');
+      lines.push('当前打开文件：无');
+    }
+    // 注入当前分支的完整文件清单，AI 可直接在整个仓库范围内工作，无需用户逐一手动选文件
+    var treeText = buildFileTreeText();
+    if (treeText) {
+      lines.push('');
+      lines.push('当前分支全部文件清单（你可在其中任意文件上直接修改；修改某个文件时，在代码块第一行用注释标出目标路径，例如：// path: src/foo.js）：');
+      lines.push('```');
+      lines.push(treeText);
+      lines.push('```');
     }
     lines.push('');
     if (state.currentPath && state.currentContent) {
       var ctx = state.currentContent;
       if (ctx.length > MAX_AI_FILE_CHARS) ctx = ctx.slice(0, MAX_AI_FILE_CHARS) + '\n...（内容过长已截断）';
-      lines.push('当前文件内容：\n```\n' + ctx + '\n```');
+      lines.push('当前打开文件内容：\n```\n' + ctx + '\n```');
       lines.push('');
     }
     lines.push('用户需求：' + request);
     lines.push('');
-    lines.push('规则：若需求涉及修改代码，请输出修改后的完整文件内容，放在单个代码块中，不要省略任何代码；若只是查看/解释，则直接回答。');
+    lines.push('规则：若需求涉及修改某文件，请输出该文件的完整新内容放在单个代码块中，并在代码块首行用注释标注目标文件路径 // path: xxx；不得省略任何代码；若只是查看/解释则直接回答。');
     return lines.join('\n');
   }
 
@@ -1472,17 +1494,30 @@
       appendChatMessage('assistant', finalText);
       // 移除临时的 streaming 气泡
       try { if (aiWrap.parentNode) aiWrap.parentNode.removeChild(aiWrap); } catch (e) {}
-      // 若 AI 返回了代码块，展示"应用到编辑器"按钮
+      // 自动识别 AI 要改的目标文件并应用，尽量免去手动选文件
       var fenced = extractCodeBlock(finalText);
-      if (fenced && state.currentPath) {
-        var applyWrap = el('div', { class: 'cw-msg cw-msg-apply' });
-        var applyBtn = el('button', { type: 'button', class: 'cw-mini-btn cw-mini-btn-primary', text: '将 AI 结果应用到编辑器' });
-        applyBtn.addEventListener('click', function () {
+      var targetPath = extractTargetPath(fenced);
+      var targetKnown = !!(targetPath && isKnownFilePath(targetPath));
+      if (fenced && (targetKnown || state.currentPath)) {
+        var finalPath = targetKnown ? targetPath : state.currentPath;
+        function showApplyButton(txt) {
+          var applyWrap = el('div', { class: 'cw-msg cw-msg-apply' });
+          var applyBtn = el('button', { type: 'button', class: 'cw-mini-btn cw-mini-btn-primary', text: '将 AI 结果应用到「' + (finalPath || '编辑器') + '」' });
+          applyBtn.addEventListener('click', function () { applyAiOutput(txt || fenced); });
+          applyWrap.appendChild(applyBtn);
+          ui.chatMsgs.appendChild(applyWrap);
+          scrollChat();
+        }
+        if (targetKnown && finalPath !== state.currentPath) {
+          // 自动打开 AI 指定的目标文件后应用
+          openFile(finalPath).then(function () {
+            applyAiOutput(fenced);
+          }).catch(function () {
+            showApplyButton();
+          });
+        } else {
           applyAiOutput(fenced);
-        });
-        applyWrap.appendChild(applyBtn);
-        ui.chatMsgs.appendChild(applyWrap);
-        scrollChat();
+        }
       }
     } else if (!finalText && !done) {
       contentDiv.textContent = 'AI 没有返回内容，请重试';
@@ -1503,9 +1538,44 @@
     return '';
   }
 
+  // 从 AI 输出的代码块首行解析目标文件路径（// path: a/b.js、# path: ...、<!-- path: ... -->）
+  function extractTargetPath(code) {
+    if (!code) return '';
+    var firstLine = '\n' + code.split('\n')[0];
+    // 仅处理首行出现 path: 标记的情况
+    if (firstLine.indexOf('path:') === -1 && firstLine.indexOf('路径') === -1) return '';
+    var m = firstLine.match(/(?:path|文件路径|保存为|保存到)\s*[:：]\s*([^\s`"'<>|;]+)/i);
+    if (!m) return '';
+    var p = String(m[1]).trim();
+    // 去掉可能粘贴的结尾注释 / 分号
+    p = p.replace(/\/\/.*$/, '').replace(/;\s*$/, '').trim();
+    if (!p) return '';
+    return p;
+  }
+
+  // 检查目标路径当前是否合法（在当前分支文件清单中）
+  function isKnownFilePath(p) {
+    if (!p) return false;
+    for (var i = 0; i < state.tree.length; i++) {
+      if (state.tree[i].type === 'blob' && state.tree[i].path === p) return true;
+    }
+    return false;
+  }
+
+  // 去掉代码块首行的路径标记（// path: xxx），避免写进文件
+  function stripPathMarker(code) {
+    if (!code) return code;
+    var lines = code.split('\n');
+    if (lines.length && /(path|文件路径|保存为|保存到)\s*[:：]/i.test(lines[0])) {
+      lines.shift();
+    }
+    return lines.join('\n');
+  }
+
   function applyAiOutput(code) {
     if (!state.currentPath) { notify('请先在左侧选择一个文件'); return; }
     if (!code) { notify('AI 结果中没有可用的代码'); return; }
+    code = stripPathMarker(code);
     ui.codePre.classList.add('hidden');
     ui.editor.classList.remove('hidden');
     ui.editor.value = code;
