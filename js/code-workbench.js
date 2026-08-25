@@ -28,6 +28,7 @@
   var LS_HISTORY = 'xtj_code_history';
   var LS_PR = 'xtj_code_pr_mode';
   var LS_THINK = 'xtj_code_think';
+  var LS_SPLIT = 'xtj_code_split';
 
   var DEFAULT_MODEL = 'deepseek-v4-flash-vision-exp';
   var DEFAULT_THINK = 'high'; // 默认开启深度思考（与主站档位一致）
@@ -81,6 +82,8 @@
     abortCtrl: null,
     aiLastOutput: ''
   };
+
+  var splittersReady = false;
 
   // ── 基础工具 ──────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
@@ -188,6 +191,15 @@
     return (v && ok[v]) ? v : DEFAULT_THINK;
   }
   function saveThink(t) { if (t) safeStorageSet(LS_THINK, t); else safeStorageRemove(LS_THINK); }
+  function loadSplitLayout() {
+    try {
+      var raw = safeStorageGet(LS_SPLIT);
+      if (!raw) return { sidebarW: 0, chatH: 0 };
+      var p = JSON.parse(raw);
+      return { sidebarW: Number(p.sidebarW) || 0, chatH: Number(p.chatH) || 0 };
+    } catch (e) { return { sidebarW: 0, chatH: 0 }; }
+  }
+  function saveSplitLayout(l) { safeStorageSet(LS_SPLIT, JSON.stringify({ sidebarW: l.sidebarW || 0, chatH: l.chatH || 0 })); }
 
   // ── 模型工具 ──────────────────────────────────────────────────
   function loadCustomModels() {
@@ -502,6 +514,8 @@
     var historyBox = el('div', { class: 'cw-history hidden', id: 'cwHistory' });
     sidebar.appendChild(historyBox);
     workspace.appendChild(sidebar);
+    var splitV = el('div', { class: 'cw-split cw-split-v', id: 'cwSplitV', title: '拖动调整侧栏宽度' });
+    workspace.appendChild(splitV);
 
     var main = el('main', { class: 'cw-main' });
     var viewer = el('div', { class: 'cw-viewer' });
@@ -543,6 +557,8 @@
     viewer.appendChild(editor);
     viewer.appendChild(commitBar);
     main.appendChild(viewer);
+    var splitH = el('div', { class: 'cw-split cw-split-h', id: 'cwSplitH', title: '拖动调整 AI 对话高度' });
+    main.appendChild(splitH);
 
     var chat = el('div', { class: 'cw-chat' });
     var chatHead = el('div', { class: 'cw-chat-head' });
@@ -589,6 +605,11 @@
     ui = {
       connectView: connectView,
       workspace: workspace,
+      sidebarEl: sidebar,
+      mainEl: main,
+      chatEl: chat,
+      splitV: splitV,
+      splitH: splitH,
       repoInput: repoInput,
       tokenInput: tokenInput,
       modelSelect: modelSelect,
@@ -657,6 +678,56 @@
     fill(ui.thinkSel, state.thinking);
   }
 
+  // 可拖动的分割条：左侧文件列表 / 查看器 / AI 对话都可自由缩放，尺寸本地记忆
+  function initSplitters() {
+    if (!ui.workspace || !ui.sidebarEl || !ui.mainEl || !ui.chatEl) return;
+    // 恢复上次尺寸
+    var layout = loadSplitLayout();
+    if (layout.sidebarW > 120) { try { ui.sidebarEl.style.flexBasis = layout.sidebarW + 'px'; } catch (e) {} }
+    if (layout.chatH > 100) { try { ui.chatEl.style.flex = '0 1 ' + layout.chatH + 'px'; } catch (e) {} }
+    if (splittersReady) return;
+    splittersReady = true;
+
+    function attach(handle, onDrag) {
+      if (!handle) return;
+      handle.addEventListener('pointerdown', function (ev) {
+        ev.preventDefault();
+        try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
+        handle.classList.add('active');
+        function move(ev2) { onDrag(ev2); }
+        function up() {
+          handle.classList.remove('active');
+          handle.removeEventListener('pointermove', move);
+          handle.removeEventListener('pointerup', up);
+          handle.removeEventListener('pointercancel', up);
+        }
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', up);
+        handle.addEventListener('pointercancel', up);
+      });
+    }
+
+    // 横向分割条（侧栏 | 主区）：拖拽调侧栏宽度
+    attach(ui.splitV, function (ev) {
+      var wr = ui.workspace.getBoundingClientRect();
+      var w = ev.clientX - wr.left;
+      if (w < 130) w = 130;
+      if (w > wr.width - 280) w = wr.width - 280;
+      ui.sidebarEl.style.flexBasis = w + 'px';
+      saveSplitLayout({ sidebarW: w, chatH: loadSplitLayout().chatH });
+    });
+
+    // 纵向分割条（查看器 | AI 对话）：拖拽调 AI 对话高度
+    attach(ui.splitH, function (ev) {
+      var mr = ui.mainEl.getBoundingClientRect();
+      var h = ev.clientY - mr.top;
+      if (h < 100) h = 100;
+      if (h > mr.height - 160) h = mr.height - 160;
+      ui.chatEl.style.flex = '0 1 ' + h + 'px';
+      saveSplitLayout({ sidebarW: loadSplitLayout().sidebarW, chatH: h });
+    });
+  }
+
   // ── 打开 / 关闭 ───────────────────────────────────────────────
   function open() {
     var panel = document.getElementById('panelCode');
@@ -679,6 +750,7 @@
     state.thinking = loadThink();
     populateModelSelects();
     populateThinkingSelects();
+    initSplitters();
     ui.prCheck.checked = state.prMode;
 
     if (state.repo) {
@@ -1289,6 +1361,15 @@
     // 创建 AI 气泡
     var aiWrap = el('div', { class: 'cw-msg cw-msg-ai generating' });
     aiWrap.appendChild(el('div', { class: 'cw-msg-label', text: '小猫 AI' }));
+    // 思考过程折叠面板
+    var thinkBody = el('div', { class: 'cw-think-body' });
+    var thinkArrow = el('span', { class: 'cw-think-arrow', text: '▾' });
+    var thinkHead = el('div', { class: 'cw-think-head' }, [thinkArrow, el('span', { text: '思考过程' })]);
+    thinkHead.addEventListener('click', function () { thinkArrow.textContent = thinkBody.classList.toggle('hidden') ? '▸' : '▾'; });
+    var thinkWrap = el('div', { class: 'cw-think hidden' });
+    thinkWrap.appendChild(thinkHead);
+    thinkWrap.appendChild(thinkBody);
+    aiWrap.appendChild(thinkWrap);
     var contentDiv = el('div', { class: 'cw-msg-content cw-msg-stream' });
     contentDiv.textContent = '思考中...';
     aiWrap.appendChild(contentDiv);
@@ -1353,6 +1434,13 @@
     var done = false;
     try {
       await streamAi(payload, {
+        onReasoning: function (chunk) {
+          if (chunk) {
+            thinkWrap.classList.remove('hidden');
+            thinkBody.textContent = (thinkBody.textContent || '') + chunk;
+            scrollChat();
+          }
+        },
         onContent: function (chunk) {
           accumulated += chunk;
           if (typeof window.renderMarkdown === 'function') {
