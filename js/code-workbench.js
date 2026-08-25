@@ -27,8 +27,17 @@
   var LS_CONV = 'xtj_code_conversation';
   var LS_HISTORY = 'xtj_code_history';
   var LS_PR = 'xtj_code_pr_mode';
+  var LS_THINK = 'xtj_code_think';
 
   var DEFAULT_MODEL = 'deepseek-v4-flash-vision-exp';
+  var DEFAULT_THINK = 'high'; // 默认开启深度思考（与主站档位一致）
+  var THINK_LEVELS = [
+    { id: 'off',    label: '关闭' },
+    { id: 'low',    label: '轻度' },
+    { id: 'medium', label: '中度' },
+    { id: 'high',   label: '深度' },
+    { id: 'max',    label: '极致' }
+  ];
   var BUILTIN_MODELS = [
     { id: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash（内置）' },
     { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro（内置）' }
@@ -62,6 +71,7 @@
     token: '',
     model: DEFAULT_MODEL,
     prMode: false,
+    thinking: DEFAULT_THINK,
     tree: [],            // [{ path, type: 'blob'|'tree' }]
     currentPath: '',
     currentSha: '',
@@ -172,6 +182,12 @@
   }
   function saveHistory(arr) { safeStorageSet(LS_HISTORY, JSON.stringify((arr || []).slice(-200))); }
   function loadPrMode() { return safeStorageGet(LS_PR) === '1'; }
+  function loadThink() {
+    var v = safeStorageGet(LS_THINK);
+    var ok = { off: 1, low: 1, medium: 1, high: 1, max: 1 };
+    return (v && ok[v]) ? v : DEFAULT_THINK;
+  }
+  function saveThink(t) { if (t) safeStorageSet(LS_THINK, t); else safeStorageRemove(LS_THINK); }
 
   // ── 模型工具 ──────────────────────────────────────────────────
   function loadCustomModels() {
@@ -432,6 +448,17 @@
     modelField.appendChild(modelSelect);
     card.appendChild(modelField);
 
+    var thinkField = el('div', { class: 'cw-field' });
+    thinkField.appendChild(el('label', { text: '思考程度' }));
+    var thinkSelect = el('select', { id: 'cwThink', class: 'cw-select' });
+    thinkSelect.addEventListener('change', function () {
+      state.thinking = thinkSelect.value;
+      saveThink(state.thinking);
+      try { if (ui.thinkSel) ui.thinkSel.value = state.thinking; } catch (e) {}
+    });
+    thinkField.appendChild(thinkSelect);
+    card.appendChild(thinkField);
+
     var prRow = el('label', { class: 'cw-pr-row' });
     var prCheck = el('input', { type: 'checkbox', id: 'cwPrMode' });
     prRow.appendChild(prCheck);
@@ -523,6 +550,14 @@
     var chatModelSel = el('select', { id: 'cwModelSel', class: 'cw-chat-model-sel' });
     chatModelSel.addEventListener('change', function () { state.model = chatModelSel.value; saveModel(state.model); });
     chatHead.appendChild(chatModelSel);
+    var thinkSel = el('select', { id: 'cwThinkSel', class: 'cw-chat-model-sel' });
+    thinkSel.setAttribute('title', '思考程度');
+    thinkSel.addEventListener('change', function () {
+      state.thinking = thinkSel.value;
+      saveThink(state.thinking);
+      try { if (ui.thinkSelect) ui.thinkSelect.value = state.thinking; } catch (e) {}
+    });
+    chatHead.appendChild(thinkSel);
     var newChatBtn = el('button', { type: 'button', class: 'cw-mini-btn', id: 'cwNewChat', text: '新对话' });
     newChatBtn.addEventListener('click', function () { resetConversation(); });
     chatHead.appendChild(newChatBtn);
@@ -557,6 +592,8 @@
       repoInput: repoInput,
       tokenInput: tokenInput,
       modelSelect: modelSelect,
+      thinkSelect: thinkSelect,
+      thinkSel: thinkSel,
       prCheck: prCheck,
       connectBtn: connectBtn,
       refreshBtn: refreshBtn,
@@ -605,6 +642,21 @@
     fill(ui.chatModelSel, state.model);
   }
 
+  function populateThinkingSelects() {
+    var fill = function (sel, current) {
+      if (!sel) return;
+      sel.innerHTML = '';
+      THINK_LEVELS.forEach(function (o) {
+        var opt = el('option', { value: o.id, text: o.label });
+        if (o.id === current) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.value = current;
+    };
+    fill(ui.thinkSelect, state.thinking);
+    fill(ui.thinkSel, state.thinking);
+  }
+
   // ── 打开 / 关闭 ───────────────────────────────────────────────
   function open() {
     var panel = document.getElementById('panelCode');
@@ -624,7 +676,9 @@
     state.token = loadToken();
     state.model = loadModel() || DEFAULT_MODEL;
     state.prMode = loadPrMode();
+    state.thinking = loadThink();
     populateModelSelects();
+    populateThinkingSelects();
     ui.prCheck.checked = state.prMode;
 
     if (state.repo) {
@@ -1245,7 +1299,7 @@
           base_url: cfg.base_url,
           message: prompt,
           messages: fullMsgs,
-          thinking_mode: 'off',
+          thinking_mode: state.thinking,
           web_search: false,
           tools_enabled: false,
           client_request_id: 'cw_' + Date.now().toString(36),
@@ -1258,7 +1312,8 @@
         body: {
           message: prompt,
           history: history,
-          model: state.model
+          model: state.model,
+          thinking_mode: state.thinking
         }
       };
     }
