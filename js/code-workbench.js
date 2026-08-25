@@ -832,14 +832,22 @@
     var loading = el('div', { class: 'cw-tree-loading', text: '加载中...' });
     ui.treeBox.appendChild(loading);
     try {
-      var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/git/trees/' + encodeURIComponent(state.repo.branch) + '?recursive=1');
+      var owner = state.repo.owner, repoName = state.repo.repo, branch = state.repo.branch;
+      var r = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/git/trees/' + encodeURIComponent(branch) + '?recursive=1');
       if (!r.ok) {
         ui.treeBox.innerHTML = '';
         ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '文件树加载失败：' + esc((r.error && r.error.message) || '未知错误') }));
         return;
       }
       var flat = (r.data && r.data.tree) || [];
-      var files = flat.filter(function (item) {
+      var truncated = !!(r.data && r.data.truncated);
+      var myItems = flat;
+      // 递归树被截断：逐层遍历所有子树，确保当前分支的全部文件都被列出
+      if (truncated) {
+        var walked = await walkFullTree(owner, repoName, branch);
+        if (walked && walked.length) myItems = walked;
+      }
+      var files = myItems.filter(function (item) {
         if (!item || !item.path) return false;
         if (item.type === 'tree') return !TREE_SKIP_DIRS.test(item.path);
         if (TREE_SKIP_DIRS.test(item.path)) return false;
@@ -848,13 +856,37 @@
       });
       state.tree = files.map(function (f) { return { path: f.path, type: f.type }; });
       renderTree();
-      if (r.data && r.data.truncated) {
-        ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '提示：仓库文件较多，GitHub 单次仅返回部分文件。可刷新，或让 AI 直接按已知路径修改。' }));
+      if (truncated) {
+        ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '仓库较大，已全量加载所有文件。' }));
       }
     } catch (e) {
       ui.treeBox.innerHTML = '';
       ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '文件树加载失败' }));
     }
+  }
+
+  // 全量遍历仓库目录树，返回所有文件（配合 truncated 兜底，不受 10 万项上限限制）
+  async function walkFullTree(owner, repoName, branch) {
+    var items = [];
+    var refRes = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/commits/' + encodeURIComponent(branch));
+    var treeSha = (refRes.data && refRes.data.commit && refRes.data.commit.tree && refRes.data.commit.tree.sha) || branch;
+    async function walk(sha, prefix) {
+      if (!sha) return;
+      var rr = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/git/trees/' + sha);
+      if (!rr.ok || !rr.data || !Array.isArray(rr.data.tree)) return;
+      var entries = rr.data.tree;
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        if (!e || !e.path) continue;
+        if (e.type === 'tree') {
+          await walk(e.sha, prefix + e.path + '/');
+        } else if (e.type === 'blob') {
+          items.push({ path: prefix + e.path, type: 'blob' });
+        }
+      }
+    }
+    await walk(treeSha, '');
+    return items;
   }
 
   function renderTree() {
