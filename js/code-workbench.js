@@ -305,11 +305,15 @@
         try { if (state.abortCtrl === controller) state.abortCtrl = null; } catch (e) {}
         if (ok) resolve(val); else reject(val);
       }
-      fetch(API_BASE + payload.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload.body),
-        signal: controller.signal
+      // 站点已登录鉴权头（/api/code/ai 与 /api/agent/custom-chat/stream 都需
+      // authenticateUser，不带 Bearer 会被 401 拒绝，AI 助手将无法工作）
+      authHeaders().then(function (headers) {
+        return fetch(API_BASE + payload.url, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(payload.body),
+          signal: controller.signal
+        });
       }).then(function (resp) {
         if (!resp.ok) {
           return resp.text().then(function (t) {
@@ -790,6 +794,9 @@
       });
       state.tree = files.map(function (f) { return { path: f.path, type: f.type }; });
       renderTree();
+      if (r.data && r.data.truncated) {
+        ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '提示：仓库文件较多，GitHub 单次仅返回部分文件。可刷新，或让 AI 直接按已知路径修改。' }));
+      }
     } catch (e) {
       ui.treeBox.innerHTML = '';
       ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '文件树加载失败' }));
@@ -1044,7 +1051,7 @@
         ts: Date.now(),
         path: state.currentPath,
         message: message,
-        branch: state.prMode ? targetBranch : targetBranch,
+        branch: targetBranch,
         base_branch: baseBranch,
         pr_mode: !!state.prMode,
         url: createdPr ? createdPr.html_url : ((commitResult.data && commitResult.data.commit && commitResult.data.commit.html_url) || ''),
