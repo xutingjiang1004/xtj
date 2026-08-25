@@ -21266,11 +21266,14 @@ app.post('/api/code/ai', authenticateUser, rateLimit(60000, 12), async (req, res
     msgs.push({ role: 'user', content: text });
     var streamed = false;
     var reply = '';
+    var cwThinkAllowed = { off: 1, low: 1, medium: 1, high: 1, max: 1 };
+    var cwThinking = String(((req.body && req.body.thinking_mode) || 'off')).toLowerCase();
+    if (!cwThinkAllowed[cwThinking]) cwThinking = 'off';
     await callDeepSeekAI({
       system: CODE_WORKBENCH_SYSTEM_PROMPT,
       messages: msgs,
       max_tokens: 4096,
-      thinking_mode: 'off',
+      thinking_mode: cwThinking,
       temperature: 0.2,
       signal: requestAbort.signal,
       stream: true,
