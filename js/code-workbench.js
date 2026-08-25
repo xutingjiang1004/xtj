@@ -60,7 +60,8 @@
   var TREE_SKIP_DIRS = /(^|\/)(node_modules|\.git|dist|build|\.next|\.nuxt|\.output|coverage|target|\.cache|\.idea|\.vscode|__pycache__|\.venv|venv|env|Pods|\.gradle|\.terraform|vendor)(\/|$)/i;
   var TREE_SKIP_FILES = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|\.DS_Store|npm-shrinkwrap\.json|\.gitignore|\.gitattributes)$/i;
   var MAX_FILE_BYTES = 2 * 1024 * 1024; // 查看/编辑单文件上限
-  var MAX_AI_FILE_CHARS = 28000;        // 注入 AI 上下文的单文件字符上限
+  var MAX_AI_FILE_CHARS = 200000;        // 注入 AI 上下文的单文件字符上限（保证大文件正文完整）
+  var MAX_AI_CONTEXT_CHARS = 450000;     // 单次注入所有文件内容的总预算（防超模型上下文）
 
   var API_BASE = '';
   try { API_BASE = String((window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin || '').replace(/\/$/, ''); }
@@ -80,7 +81,8 @@
     busy: false,
     streaming: false,
     abortCtrl: null,
-    aiLastOutput: ''
+    aiLastOutput: '',
+    referencedFiles: []   // 用户提问中提到/需要读取的其它文件内容 [{path, content}]
   };
 
   var splittersReady = false;
@@ -1338,6 +1340,40 @@
     return files.join('\n');
   }
 
+  // 解析用户提问中提到（或 AI 上一轮要求）的文件路径，自动读取其内容注入上下文
+  async function attachReferencedFiles(request) {
+    state.referencedFiles = [];
+    if (!state.repo || !state.tree || !state.tree.length) return;
+    var matched = [];
+    for (var i = 0; i < state.tree.length; i++) {
+      if (state.tree[i].type !== 'blob') continue;
+      var p = state.tree[i].path;
+      if (!p) continue;
+      var base = p.indexOf('/') >= 0 ? p.split('/').pop() : p;
+      if (request && request.length) {
+        if (request.indexOf(p) !== -1) { matched.push(p); continue; }
+        if (base.length > 2 && request.indexOf(base) !== -1) matched.push(p);
+      }
+    }
+    matched = matched.filter(function (v, ix) { return matched.indexOf(v) === ix; }).slice(0, 6);
+    if (!matched.length) return;
+    var owner = state.repo.owner, repo = state.repo.repo, branch = state.repo.branch;
+    var out = [];
+    for (var j = 0; j < matched.length; j++) {
+      if (matched[j] === state.currentPath) continue; // 当前已打开的文件由 buildAiPrompt 单独注入
+      var r = await ghRequest('GET', '/repos/' + owner + '/' + repo + '/contents/' + encodePath(matched[j]) + '?ref=' + encodeURIComponent(branch));
+      if (!r.ok || !r.data) continue;
+      var content = '';
+      if (r.data.encoding === 'base64' && r.data.content) {
+        try { content = decodeURIComponent(escape(atob(r.data.content.replace(/\s/g, '')))); } catch (e2) {
+          try { content = atob(r.data.content.replace(/\s/g, '')); } catch (e3) { content = ''; }
+        }
+      } else if (r.data.content) content = r.data.content;
+      out.push({ path: matched[j], content: content });
+    }
+    state.referencedFiles = out;
+  }
+
   function buildAiPrompt(request) {
     var lines = [];
     if (state.repo) lines.push('仓库：' + state.repo.full_name + '（当前分支：' + state.repo.branch + '）');
@@ -1356,10 +1392,25 @@
       lines.push('```');
     }
     lines.push('');
+    var usedChars = 0;
     if (state.currentPath && state.currentContent) {
       var ctx = state.currentContent;
       if (ctx.length > MAX_AI_FILE_CHARS) ctx = ctx.slice(0, MAX_AI_FILE_CHARS) + '\n...（内容过长已截断）';
+      usedChars += ctx.length;
       lines.push('当前打开文件内容：\n```\n' + ctx + '\n```');
+      lines.push('');
+    }
+    // 追加用户本次提问提到的其它文件全文，让 AI 无需用户手动打开即可读取
+    var refs = state.referencedFiles || [];
+    for (var r = 0; r < refs.length && usedChars < MAX_AI_CONTEXT_CHARS; r++) {
+      var rp = refs[r], rt = rp.content || '';
+      if (!rt) continue;
+      if (rt.length > MAX_AI_FILE_CHARS) rt = rt.slice(0, MAX_AI_FILE_CHARS) + '\n...（内容过长已截断）';
+      if (usedChars + rt.length > MAX_AI_CONTEXT_CHARS) {
+        rt = rt.slice(0, Math.max(0, MAX_AI_CONTEXT_CHARS - usedChars)) + '\n...（单次上下文预算截断）';
+      }
+      usedChars += rt.length;
+      lines.push('文件 ' + rp.path + ' 内容：\n```\n' + rt + '\n```');
       lines.push('');
     }
     lines.push('用户需求：' + request);
@@ -1378,6 +1429,8 @@
     ui.chatInput.value = '';
     autoResizeChat();
     var prompt = buildAiPrompt(text);
+    try { await attachReferencedFiles(text); } catch (e) {}
+    prompt = buildAiPrompt(text);
     appendChatMessage('user', text);
 
     // 创建 AI 气泡
