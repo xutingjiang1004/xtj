@@ -23,10 +23,19 @@ describe('cat-ai-reply-status API behavior', function() {
     assert.ok(completedSelect, 'completed 分支必须 select 完整字段');
   });
 
-  it('not_triggered 分支也必须 select 完整字段', function() {
-    // 检查 not_triggered（jobRes.data 为空）分支中的 select
-    const notTriggeredSelect = server.match(/\.select\('id,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai[^)]*'\)/g);
-    assert.ok(notTriggeredSelect && notTriggeredSelect.length >= 2, 'not_triggered 和 completed 分支都必须 select 完整字段');
+  it('统一查询函数 fetchCatReplyByParent 必须存在并过滤 cat_ai/generated_by_ai、String 化父 id、order+limit 容错多行（B3/B5）', function() {
+    const fnStart = server.indexOf('async function fetchCatReplyByParent');
+    assert.ok(fnStart !== -1, '必须存在统一查询函数 fetchCatReplyByParent');
+    const fnBlock = server.slice(fnStart, fnStart + 1200);
+    assert.match(fnBlock, /\.eq\('generated_by_ai', true\)/, '必须过滤 generated_by_ai');
+    assert.match(fnBlock, /\.eq\('user_name', CAT_AI_USERNAME\)/, '必须限定 user_name=cat_ai（B5）');
+    assert.match(fnBlock, /String\(parentCommentId\)/, '父 id 必须 String 化，防 BigInt');
+    assert.match(fnBlock, /\.order\('created_at'[\s\S]*?\.limit\(1\)/, '必须 order+limit(1) 容错历史重复行（B3）');
+    assert.doesNotMatch(fnBlock, /maybeSingle/, '统一查询不得再用 maybeSingle（多行即报错卡死）');
+  });
+  it('所有取小猫回复的分支都必须走统一函数（定义 1 处 + 调用不少于 6 处）', function() {
+    const calls = server.match(/fetchCatReplyByParent\(/g) || [];
+    assert.ok(calls.length >= 7, 'worker/duplicate/reconcile/no-job/recovered/completed/retry 都应走统一函数，实际 ' + calls.length);
   });
 
   it('completed 后必须验证 reply 字段完整性', function() {
@@ -41,10 +50,11 @@ describe('cat-ai-reply-status API behavior', function() {
     assert.ok(server.includes('repair_required'), 'completed 无有效回复必须返回 repair_required');
   });
 
-  it('不会返回只有 id 的空对象', function() {
-    // 验证 completed 分支的 select 返回完整字段，不再使用 buildSummaryQuery
-    const completedSelect = server.match(/\.select\('id,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai[^)]*'\)/g);
-    assert.ok(completedSelect && completedSelect.length >= 2, 'completed 分支必须使用完整 select 替代 buildSummaryQuery');
+  it('统一查询不得返回只有 id 的精简对象（必须 select 完整列）', function() {
+    const fnStart = server.indexOf('async function fetchCatReplyByParent');
+    const fnBlock = server.slice(fnStart, fnStart + 1200);
+    // 必须包含完整字段（含 updated_at），杜绝只 select id 的 buildSummaryQuery 式精简查询
+    assert.match(fnBlock, /id,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*updated_at,\s*parent_comment_id,\s*generated_by_ai/, '统一函数必须 select 完整列');
   });
 });
 
@@ -88,10 +98,11 @@ describe('cat-ai frontend reply behavior', function() {
     assert.ok(core.includes('aiComment.parent_comment_id'), '必须验证 parent_comment_id');
   });
 
-  it('polling 页面隐藏时使用 accumulatedRunTime 而非 Date.now() 绝对时间', function() {
-    assert.ok(core.includes('accumulatedRunTime'), '必须使用 accumulatedRunTime');
-    assert.ok(core.includes('pausedAt'), '必须使用 pausedAt 记录暂停时间');
-    assert.ok(core.includes('accumulatedRunTime += Date.now() - lastPollStart'), '恢复时必须补回暂停时间');
+  it('polling 以前台活跃耗时计上限、后台隐藏不计入（F1）', function() {
+    assert.ok(core.includes('accumulatedRunTime'), '必须使用 accumulatedRunTime 累计活跃耗时');
+    assert.ok(core.includes('pausedAt'), '必须使用 pausedAt 记录后台暂停');
+    assert.ok(core.includes('activeTickStart'), '必须用活跃计时点把请求+等待间隔都计入');
+    assert.ok(core.includes('accumulatedRunTime += nowTs - activeTickStart'), '前台连续轮询必须把上一轮请求+等待计入，避免名义90s实际空转十几分钟');
   });
 
   it('页面隐藏时保留 polling 任务', function() {
@@ -430,18 +441,17 @@ describe('processCatReplyJob no buildSummaryQuery', function() {
     assert.doesNotMatch(block, /\bbuildSummaryQuery\s*\(/, 'processCatReplyJob 不得调用 buildSummaryQuery');
   });
 
-  it('processCatReplyJob 必须使用 supabase.from(\'comments\') 查询已有 AI 回复', function() {
+  it('processCatReplyJob 必须通过 fetchCatReplyByParent 查询已有 AI 回复（B3）', function() {
     const start = server.indexOf('async function processCatReplyJob');
     const end = server.indexOf('async function recoverStaleCatJobs', start);
     const block = server.slice(start, end > start ? end : start + 4000);
-    assert.match(block, /supabase\.from\('comments'\)/, '必须使用 supabase.from(\'comments\')');
+    assert.match(block, /fetchCatReplyByParent\(workingJob\.source_comment_id\)/, '必须调用统一查询函数 fetchCatReplyByParent');
   });
 
-  it('已有 AI 回复查询必须 select 完整字段', function() {
-    const start = server.indexOf('async function processCatReplyJob');
-    const end = server.indexOf('async function recoverStaleCatJobs', start);
-    const block = server.slice(start, end > start ? end : start + 4000);
-    assert.match(block, /\.select\(['"]id,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*parent_comment_id,\s*generated_by_ai['"]\)/, '必须 select 完整字段');
+  it('已有 AI 回复查询必须 select 完整字段（由统一函数保证）', function() {
+    const fnStart = server.indexOf('async function fetchCatReplyByParent');
+    const fnBlock = server.slice(fnStart, fnStart + 1200);
+    assert.match(fnBlock, /\.select\(['"]id,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai['"]\)/, '统一函数必须 select 完整字段');
   });
 
   it('查询已有 AI 回复必须检查 error', function() {
@@ -452,11 +462,10 @@ describe('processCatReplyJob no buildSummaryQuery', function() {
     assert.match(block, /existing AI reply lookup failed/, 'error 分支必须抛出具名错误');
   });
 
-  it('parent_comment_id 必须使用 String() 转换', function() {
-    const start = server.indexOf('async function processCatReplyJob');
-    const end = server.indexOf('async function recoverStaleCatJobs', start);
-    const block = server.slice(start, end > start ? end : start + 4000);
-    assert.match(block, /String\(job\.source_comment_id\)/, 'parent_comment_id 必须使用 String() 转换');
+  it('parent_comment_id 必须使用 String() 转换防 BigInt（由统一函数保证）', function() {
+    const fnStart = server.indexOf('async function fetchCatReplyByParent');
+    const fnBlock = server.slice(fnStart, fnStart + 1200);
+    assert.match(fnBlock, /String\(parentCommentId\)/, '统一查询必须对父 id 做 String 转换');
   });
 
   it('已存在 AI 回复时必须将 job 标为 completed 并返回', function() {

@@ -66,25 +66,41 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var CUSTOM_MODEL_PREFIX = 'custom:';
   // 预置服务商模板：用户只需填 API Key（可改模型名）
   var CUSTOM_MODEL_PROVIDERS = [
-    { key: 'qwen',    label: '千问 Qwen',      base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus' },
-    { key: 'doubao',  label: '豆包 Doubao',     base: 'https://ark.cn-beijing.volces.com/api/v3',           defaultModel: 'doubao-1-5-pro-32k' },
-    { key: 'deepseek',label: 'DeepSeek',        base: 'https://api.deepseek.com',                           defaultModel: 'deepseek-chat' },
-    { key: 'kimi',    label: 'Kimi 月之暗面',    base: 'https://api.moonshot.cn/v1',                         defaultModel: 'moonshot-v1-8k' },
-    { key: 'zhipu',   label: '智谱 GLM',        base: 'https://open.bigmodel.cn/api/paas/v4',               defaultModel: 'glm-4-flash' },
-    { key: 'openai',  label: 'OpenAI',          base: 'https://api.openai.com/v1',                          defaultModel: 'gpt-4o-mini' },
-    { key: 'custom',  label: '自定义(OpenAI兼容)', base: '',                                                 defaultModel: '' }
+    { key: 'qwen',    label: '千问 Qwen',      base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', models: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'] },
+    { key: 'doubao',  label: '豆包 Doubao',     base: 'https://ark.cn-beijing.volces.com/api/v3',           defaultModel: 'doubao-1-5-pro-32k', models: ['doubao-1-5-pro-32k', 'doubao-1-5-lite-32k', 'doubao-pro-32k'] },
+    { key: 'deepseek',label: 'DeepSeek',        base: 'https://api.deepseek.com',                           defaultModel: 'deepseek-chat', models: ['deepseek-chat', 'deepseek-reasoner'] },
+    { key: 'kimi',    label: 'Kimi 月之暗面',    base: 'https://api.moonshot.cn/v1',                         defaultModel: 'moonshot-v1-8k', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
+    { key: 'zhipu',   label: '智谱 GLM',        base: 'https://open.bigmodel.cn/api/paas/v4',               defaultModel: 'glm-4-flash', models: ['glm-4-flash', 'glm-4-air', 'glm-4', 'glm-4-plus'] },
+    { key: 'openai',  label: 'OpenAI',          base: 'https://api.openai.com/v1',                          defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
+    { key: 'custom',  label: '自定义(OpenAI兼容)', base: '',                                                 defaultModel: '', models: [] }
   ];
+  // 统一服务商显示字段：本地惯用驼峰 providerLabel，服务端存储用下划线 provider_label
+  function normalizeCustomModelRecord(m) {
+    if (!m) return m;
+    var pl = m.providerLabel || m.provider_label || '';
+    m.providerLabel = pl;
+    m.provider_label = pl;
+    return m;
+  }
+  function toStoredModel(m) {
+    if (!m) return m;
+    var pl = m.providerLabel || m.provider_label || '';
+    return Object.assign({}, m, { providerLabel: pl, provider_label: pl });
+  }
   function loadCustomModels() {
     try {
       var raw = localStorage.getItem(CUSTOM_MODELS_KEY);
       if (!raw) return [];
       var list = JSON.parse(raw);
       if (!Array.isArray(list)) return [];
-      return list.filter(function(m) { return m && m.uid && m.api_key; });
+      return list.filter(function(m) { return m && m.uid && m.api_key; }).map(normalizeCustomModelRecord);
     } catch (e) { return []; }
   }
   function saveCustomModelsLocal(list) {
-    try { localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify((list || []).slice(0, 12))); } catch (e) {}
+    try {
+      var stored = (list || []).map(toStoredModel).slice(0, 12);
+      localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(stored));
+    } catch (e) {}
   }
   function modelsEqual(a, b) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
@@ -107,7 +123,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var resp = await fetch(API_BASE + '/agent/custom-models', {
         method: 'PUT',
         headers: auth.headers,
-        body: JSON.stringify({ models: (list || []).slice(0, 20) })
+        body: JSON.stringify({ models: (list || []).map(toStoredModel).slice(0, 20) })
       });
       if (!resp.ok) return false;
       var data = await resp.json();
@@ -122,7 +138,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!resp.ok) return null;
       var data = await resp.json();
       if (data && data.ok && Array.isArray(data.models)) {
-        return data.models.filter(function(m) { return m && m.uid && m.api_key; });
+        return data.models.filter(function(m) { return m && m.uid && m.api_key; }).map(normalizeCustomModelRecord);
       }
       return null;
     } catch (e) { return null; }
@@ -133,9 +149,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var server = await fetchServerCustomModels();
       if (server === null) return false; // 未登录或网络失败，保持本地
       var local = loadCustomModels();
+      var completeness = function(x) {
+        if (!x) return 0;
+        return (x.api_key ? 1 : 0) + (x.model ? 1 : 0) + (x.base_url ? 1 : 0) + (x.label ? 1 : 0) + (x.provider ? 1 : 0);
+      };
       var mergedMap = {};
       server.forEach(function(m) { if (m && m.uid) mergedMap[m.uid] = m; });
-      local.forEach(function(m) { if (m && m.uid) mergedMap[m.uid] = m; });
+      local.forEach(function(m) {
+        if (!m || !m.uid) return;
+        var sv = mergedMap[m.uid];
+        // 账号里没有（离线新增）→ 用本地；同 uid → 字段更完整者优先，避免残缺数据覆盖
+        if (!sv || completeness(m) > completeness(sv)) mergedMap[m.uid] = m;
+      });
       var merged = Object.keys(mergedMap).map(function(k) { return mergedMap[k]; });
       saveCustomModelsLocal(merged);
       if (!modelsEqual(merged, server)) {
@@ -7125,12 +7150,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var _sendThinkingMode = (ALLOWED_THINKING_MODES.indexOf(S.thinkingMode) >= 0)
       ? S.thinkingMode
       : DEFAULT_THINKING_MODE;
-    // ★ 自定义模型 + 思考「极致(max)」档 → 多智能体深度研究
-    //   （Planner 拆解 → 并行 Workers 联网研究 → Synthesizer 汇总，类似 ChatGPT/豆包深度思考）
-    var customDeepResearch = isCustomModel && customCfg && _sendThinkingMode === 'max';
-    var url = isCustomModel
-      ? (customDeepResearch ? (API_BASE + '/custom-chat/deep-stream') : (API_BASE + '/custom-chat/stream'))
-      : (API_BASE + '/chat/stream');
+    // 思考「极致(max)」档只代表模型厂商原生的最大 reasoning effort，不再因此强制改走
+    // 多智能体“深入研究”(deep-stream) 流程；是否更多搜索/工具协作由 webSearch / thinkMax 决定。
+    var url = isCustomModel ? (API_BASE + '/custom-chat/stream') : (API_BASE + '/chat/stream');
     var auth = await getUserAuthPayload({ forceNoToken: false });
     var headers = auth.headers || {};
     var fetchBody;
@@ -9708,21 +9730,23 @@ function showChatMessages() {
         '<div class="ai-invite-modal-box ai-custommodel-box">' +
           '<div class="ai-invite-modal-body ai-custommodel-body">' +
             '<h3 id="aiCustomModelTitle" class="ai-invite-modal-title">添加自定义模型</h3>' +
-            '<p class="ai-invite-modal-tip">选择服务商并填入 API Key，即可直接调用第三方 AI 模型。模型配置（含 API Key）会加密同步到你的账号，换设备后自动恢复。</p>' +
+            '<p class="ai-invite-modal-tip">选择服务商并填入 API Key，即可直接调用第三方 AI 模型。模型配置（含 API Key）会加密同步到你的账号，换设备后自动恢复；所有字段后续都可在下方列表点“编辑”修改。</p>' +
             '<label class="ai-invite-code-label" for="aiCmProvider">服务商</label>' +
             '<select id="aiCmProvider" class="ai-cm-select">' + providerOptions + '</select>' +
+            '<label class="ai-invite-code-label" for="aiCmLabel">显示名称（便于自己辨认，可选）</label>' +
+            '<input type="text" id="aiCmLabel" class="ai-invite-code-input ai-cm-input" placeholder="如：我的千问" autocomplete="off" spellcheck="false" maxlength="40" />' +
             '<label class="ai-invite-code-label" for="aiCmApiKey">API Key</label>' +
             '<input type="password" id="aiCmApiKey" class="ai-invite-code-input ai-cm-input" placeholder="sk-…" autocomplete="off" spellcheck="false" />' +
-            '<label class="ai-invite-code-label" for="aiCmModel">模型名称</label>' +
-            '<input type="text" id="aiCmModel" class="ai-invite-code-input ai-cm-input" placeholder="如 qwen-plus" autocomplete="off" spellcheck="false" />' +
-            '<div class="ai-cm-base-row" id="aiCmBaseRow">' +
-              '<label class="ai-invite-code-label" for="aiCmBase">接口地址（OpenAI 兼容）</label>' +
-              '<input type="text" id="aiCmBase" class="ai-invite-code-input ai-cm-input" placeholder="https://…/v1" autocomplete="off" spellcheck="false" />' +
-            '</div>' +
+            '<label class="ai-invite-code-label" for="aiCmModel">模型名称（可从候选选择或手动填写）</label>' +
+            '<input type="text" id="aiCmModel" class="ai-invite-code-input ai-cm-input" list="aiCmModelList" placeholder="如 qwen-plus" autocomplete="off" spellcheck="false" maxlength="64" />' +
+            '<datalist id="aiCmModelList"></datalist>' +
+            '<label class="ai-invite-code-label" for="aiCmBase">接口地址（OpenAI 兼容，一般无需修改）</label>' +
+            '<input type="text" id="aiCmBase" class="ai-invite-code-input ai-cm-input" placeholder="https://…/v1" autocomplete="off" spellcheck="false" />' +
             '<div class="ai-cm-list" id="aiCmList"></div>' +
             '<div class="ai-invite-code-feedback ai-cm-feedback" id="aiCmFeedback" aria-live="polite"></div>' +
           '</div>' +
           '<div class="ai-invite-modal-foot">' +
+            '<button type="button" class="ai-invite-modal-btn ai-cm-edit-cancel" id="aiCmEditCancel" style="display:none">放弃编辑</button>' +
             '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel">取消</button>' +
             '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiCmSaveBtn">保存并使用</button>' +
           '</div>' +
@@ -9730,14 +9754,18 @@ function showChatMessages() {
       document.body.appendChild(modal);
       requestAnimationFrame(function() { try { modal.classList.add('is-ready'); } catch (eR) {} });
 
+      var editingUid = null;
       var providerSelect = modal.querySelector('#aiCmProvider');
+      var labelInput = modal.querySelector('#aiCmLabel');
       var apiKeyInput = modal.querySelector('#aiCmApiKey');
       var modelInput = modal.querySelector('#aiCmModel');
-      var baseRow = modal.querySelector('#aiCmBaseRow');
       var baseInput = modal.querySelector('#aiCmBase');
+      var modelList = modal.querySelector('#aiCmModelList');
       var listBox = modal.querySelector('#aiCmList');
       var feedback = modal.querySelector('#aiCmFeedback');
       var saveBtn = modal.querySelector('#aiCmSaveBtn');
+      var editCancelBtn = modal.querySelector('#aiCmEditCancel');
+      var titleEl = modal.querySelector('#aiCustomModelTitle');
 
       function currentProvider() {
         var key = providerSelect.value;
@@ -9746,23 +9774,37 @@ function showChatMessages() {
         }
         return null;
       }
+      function refreshModelCandidates() {
+        var p = currentProvider();
+        var arr = (p && p.models) || [];
+        modelList.innerHTML = arr.map(function(mm) { return '<option value="' + mm + '"></option>'; }).join('');
+      }
       function syncProviderUI() {
         var p = currentProvider();
         var isCustom = !!(p && p.key === 'custom');
-        baseRow.style.display = isCustom ? '' : 'none';
-        // 非自定义服务商：若用户未手动改过模型名，跟随默认模型
-        if (!isCustom && p && p.defaultModel && (!modelInput.value || modelInput.dataset.auto === '1')) {
-          modelInput.value = p.defaultModel;
-          modelInput.dataset.auto = '1';
+        // 接口地址始终可查看/修改；预置服务商默认填官方地址，自定义服务商必填
+        baseInput.placeholder = (p && p.base) ? p.base : 'https://…/v1';
+        if (!isCustom && p) {
+          if (!baseInput.value || baseInput.dataset.auto === '1') baseInput.value = p.base || '';
+          if (p.defaultModel && (!modelInput.value || modelInput.dataset.auto === '1') && !editingUid) {
+            modelInput.value = p.defaultModel;
+            modelInput.dataset.auto = '1';
+          }
         }
-        if (isCustom && (!modelInput.value || modelInput.dataset.auto === '1')) {
+        if (isCustom && !editingUid && (!modelInput.value || modelInput.dataset.auto === '1')) {
           modelInput.value = '';
           modelInput.dataset.auto = '1';
         }
         apiKeyInput.placeholder = p && p.key === 'openai' ? 'sk-…' : '请输入 API Key';
+        refreshModelCandidates();
       }
-      providerSelect.addEventListener('change', syncProviderUI);
+      providerSelect.addEventListener('change', function() {
+        baseInput.dataset.auto = '1';
+        if (!editingUid) modelInput.dataset.auto = '1';
+        syncProviderUI();
+      });
       modelInput.addEventListener('input', function() { modelInput.dataset.auto = '0'; });
+      baseInput.addEventListener('input', function() { baseInput.dataset.auto = '0'; });
 
       function renderList() {
         var customs = loadCustomModels();
@@ -9773,9 +9815,12 @@ function showChatMessages() {
         var html = '';
         for (var i = 0; i < customs.length; i++) {
           var m = customs[i];
-          var name = (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '');
           html += '<div class="ai-cm-item" data-uid="' + m.uid + '">' +
                     '<div class="ai-cm-item-info"><div class="ai-cm-item-name"></div><div class="ai-cm-item-sub"></div></div>' +
+                    '<button type="button" class="ai-cm-item-edit" title="编辑" aria-label="编辑">' +
+                      '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
+                      '<span>编辑</span>' +
+                    '</button>' +
                     '<button type="button" class="ai-cm-item-del" title="删除" aria-label="删除">' +
                       '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
                       '<span>删除</span>' +
@@ -9798,8 +9843,13 @@ function showChatMessages() {
               e.stopPropagation();
               doDelete(uid);
             });
+            var editBtn = item.querySelector('.ai-cm-item-edit');
+            if (editBtn) editBtn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              startEdit(uid);
+            });
             item.addEventListener('click', function() {
-              // 点击条目 = 切换使用该模型
+              // 点击条目主体 = 切换使用该模型
               S.selectedModel = CUSTOM_MODEL_PREFIX + uid;
               S._userPickedModel = true;
               try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
@@ -9812,14 +9862,54 @@ function showChatMessages() {
         }
       }
 
+      function startEdit(uid) {
+        var m = findCustomModel(uid);
+        if (!m) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '未找到该模型配置'; return; }
+        editingUid = uid;
+        var matched = 'custom';
+        for (var k = 0; k < CUSTOM_MODEL_PROVIDERS.length; k++) { if (CUSTOM_MODEL_PROVIDERS[k].key === m.provider) { matched = m.provider; break; } }
+        providerSelect.value = matched;
+        labelInput.value = (m.label && m.label !== m.model) ? m.label : '';
+        apiKeyInput.value = m.api_key || '';
+        modelInput.value = m.model || '';
+        modelInput.dataset.auto = '0';
+        baseInput.value = m.base_url || '';
+        baseInput.dataset.auto = '0';
+        syncProviderUI();
+        titleEl.textContent = '编辑自定义模型';
+        saveBtn.textContent = '保存修改';
+        editCancelBtn.style.display = '';
+        feedback.className = 'ai-invite-code-feedback';
+        feedback.textContent = '正在编辑：' + (m.label || m.model || '自定义模型') + '（保存后即时生效）';
+        try { modal.querySelector('.ai-custommodel-body').scrollTop = 0; } catch (eS) {}
+        setTimeout(function() { try { modelInput.focus(); } catch (eF) {} }, 30);
+      }
+      function resetForm() {
+        editingUid = null;
+        providerSelect.value = CUSTOM_MODEL_PROVIDERS[0].key;
+        labelInput.value = '';
+        apiKeyInput.value = '';
+        modelInput.value = '';
+        modelInput.dataset.auto = '1';
+        baseInput.value = '';
+        baseInput.dataset.auto = '1';
+        syncProviderUI();
+        titleEl.textContent = '添加自定义模型';
+        saveBtn.textContent = '保存并使用';
+        editCancelBtn.style.display = 'none';
+        feedback.className = 'ai-invite-code-feedback';
+        feedback.textContent = '';
+      }
+
       function doDelete(uid) {
         var customs = loadCustomModels();
         var idx = -1;
         for (var i = 0; i < customs.length; i++) { if (customs[i].uid === uid) { idx = i; break; } }
         if (idx < 0) return;
+        var removed = customs[idx];
         customs.splice(idx, 1);
         saveCustomModels(customs);
-        // 若删的是当前选中模型，回落到默认模型
+        if (editingUid === uid) resetForm();
         if (S.selectedModel === CUSTOM_MODEL_PREFIX + uid) {
           S.selectedModel = 'deepseek-v4-flash-vision-exp';
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
@@ -9827,7 +9917,7 @@ function showChatMessages() {
         repopulateModelSelect();
         updateModelUI();
         renderList();
-        notify('已删除该自定义模型');
+        notify('已删除：' + (removed ? (removed.label || removed.model) : '该自定义模型'));
       }
 
       function close() {
@@ -9836,6 +9926,10 @@ function showChatMessages() {
         setTimeout(function() { if (modal.parentNode) modal.parentNode.removeChild(modal); }, 180);
       }
       modal.querySelector('.ai-invite-modal-cancel').addEventListener('click', close);
+      editCancelBtn.addEventListener('click', function() {
+        resetForm();
+        setTimeout(function() { try { apiKeyInput.focus(); } catch (e) {} }, 0);
+      });
       modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
       modal.addEventListener('keydown', function(e) { if (e.key === 'Escape') close(); });
 
@@ -9848,30 +9942,51 @@ function showChatMessages() {
         var isCustom = p.key === 'custom';
         if (!model && !isCustom) model = p.defaultModel || '';
         if (!model) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入模型名称'; return; }
-        if (isCustom && !String(baseInput.value || '').trim()) {
-          feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请填写接口地址'; return;
-        }
-        var label = model;
+        var baseValue = String(baseInput.value || '').trim();
+        if (!baseValue) baseValue = isCustom ? '' : (p.base || '');
+        if (isCustom && !baseValue) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请填写接口地址'; return; }
+        var labelVal = String(labelInput.value || '').trim();
+        var label = labelVal || model;
         var customs = loadCustomModels();
-        customs.push({
-          uid: genCustomModelUid(),
+        var record = {
           provider: p.key,
           providerLabel: p.label,
           label: label,
           api_key: apiKey,
           model: model,
-          base_url: isCustom ? String(baseInput.value || '').trim() : (p.base || '')
-        });
-        saveCustomModels(customs);
-        // 保存后自动切换到新模型，立即可用
-        var newUid = customs[customs.length - 1].uid;
-        S.selectedModel = CUSTOM_MODEL_PREFIX + newUid;
-        S._userPickedModel = true;
-        try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
-        repopulateModelSelect();
-        updateModelUI();
-        close();
-        notify('已添加并切换到：' + label + '（' + p.label + '）');
+          base_url: baseValue
+        };
+        var targetUid = editingUid;
+        var existIdx = -1;
+        if (targetUid) {
+          for (var ei = 0; ei < customs.length; ei++) { if (customs[ei].uid === targetUid) { existIdx = ei; break; } }
+        }
+        if (targetUid && existIdx >= 0) {
+          // 编辑：保留原 uid，覆盖全部可编辑字段，账号侧随之同步更新
+          record.uid = targetUid;
+          customs[existIdx] = record;
+          saveCustomModels(customs);
+          S.selectedModel = CUSTOM_MODEL_PREFIX + targetUid;
+          S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+          repopulateModelSelect();
+          updateModelUI();
+          renderList();
+          resetForm();
+          notify('已保存修改：' + label);
+        } else {
+          record.uid = genCustomModelUid();
+          customs.push(record);
+          saveCustomModels(customs);
+          var newUid = record.uid;
+          S.selectedModel = CUSTOM_MODEL_PREFIX + newUid;
+          S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+          repopulateModelSelect();
+          updateModelUI();
+          close();
+          notify('已添加并切换到：' + label + '（' + p.label + '）');
+        }
       });
 
       syncProviderUI();
@@ -10393,14 +10508,10 @@ function showChatMessages() {
         // ★ Tavily Deep Research: 同步后端配置 (config.tavily_research.enabled)
         S.tavilyResearchEnabled = !!(cfg.tavily_research && cfg.tavily_research.enabled);
       }
-      var cfgVer = (cfg && cfg.config_version) || 0;
-      var backendDefaultMode = cfg.model && cfg.model.default_thinking_mode;
-      var backendModeValid = backendDefaultMode && ALLOWED_THINKING_MODES.indexOf(backendDefaultMode) >= 0;
-      // 仅在 (a) 首次应用配置 或 (b) 配置版本变化 且 用户未在本轮显式选择 时，才用后端默认覆盖
-      if (backendModeValid && cfgVer !== S._lastConfigVersion && !S._userPickedThinkingMode) {
-        S.thinkingMode = backendDefaultMode;
-        try { localStorage.setItem('xtj_ai_thinking_mode', backendDefaultMode); } catch (e3) {}
-      }
+      // 思考程度档位是网站固定预设（关闭/轻度/中度/深度/极致），以用户本人选择为准
+      // （localStorage > 网站默认 DEFAULT_THINKING_MODE），不再被后端“系统默认思考档”自动覆盖，
+      // 避免系统级下发在多处造成菜单显示与实际档位不一致。深度思考二级页的 deepThinkEffort
+      // 已在上方由 cfg.deep_think 独立同步，与主聊天档位互不影响。
     } catch (e) { /* 容错 */ }
 
     // ★ P 新增: 如果后端禁用了深度思考，强制关闭 toggle
@@ -10682,6 +10793,9 @@ function showChatMessages() {
       };
       scheduleInsertEntry();
     });
+    // 启动即尝试把账号内的第三方自定义模型同步到本地（换设备/刷新后尽早恢复，不阻塞 UI；
+    // 未登录或失败时 syncCustomModelsFromServer 内部会安全降级为仅本地）
+    try { syncCustomModelsFromServer().catch(function() {}); } catch (eBootSync) {}
     bindTopAiTools();
     hookChatList();
     hookAiTabVisibility();

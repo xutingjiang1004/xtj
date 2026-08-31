@@ -4318,6 +4318,9 @@ const CAT_AI_DESCRIPTION = '徐旭泽的犀利毒舌 AI 分身';
 // Phase 3-P0-6: Fix regex — old lookahead rejected Chinese chars after 小猫,
 // so @小猫帮我看看 did not match. Now only exclude 猫 (to reject @小猫咪).
 const CAT_AI_MENTION_PATTERN = /[@＠]小猫(?![猫咪])/;
+// B9：与判定同口径的全局剔除正则（吃掉尾部空白），供“提取问题 / 清洗 AI 自身回复”复用，
+// 避免一处只认半角 @、另一处认全角 ＠ 的不一致。
+const CAT_AI_MENTION_GLOBAL = /[@＠]小猫(?![猫咪])\s*/g;
 const CAT_AI_MAX_REPLY_LENGTH = 300;
 const CAT_AI_TASK_TIMEOUT_MS = 45000;
 const CAT_AI_USER_HOURLY_LIMIT = 10;
@@ -4348,7 +4351,29 @@ function hasCatMention(content) {
 // 提取用户去掉 @小猫 后真正的问题
 function extractCatQuestion(content) {
   if (!content) return '';
-  return content.replace(/[@＠]小猫\s*/g, '').trim();
+  // B9：使用与 hasCatMention 同口径的全局正则（同时覆盖全角 ＠ 与负向前瞻）
+  return content.replace(CAT_AI_MENTION_GLOBAL, '').trim();
+}
+
+// B3：按父评论取唯一一条小猫回复。
+// 历史上 comments 的部分唯一索引晚于功能上线（020 上线、017/032 才补索引），
+// 若补索引前已产生重复 AI 回复，maybeSingle() 会因“命中多行”直接报错，
+// 进而让 Worker 反复 requeue、状态接口反复 503 而永久卡死。这里固定取最早一条容错，
+// 存量重复由迁移 052 清理、并由部分唯一索引兜底；返回形状与 maybeSingle 一致 { data, error }。
+async function fetchCatReplyByParent(parentCommentId) {
+  try {
+    var res = await supabase.from('comments')
+      .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+      .eq('parent_comment_id', String(parentCommentId))
+      .eq('generated_by_ai', true)
+      .eq('user_name', CAT_AI_USERNAME)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (res.error) return { data: null, error: res.error };
+    return { data: (res.data && res.data[0]) || null, error: null };
+  } catch (e) {
+    return { data: null, error: e };
+  }
 }
 
 // 判断是否为有效触发（排除误触发）
@@ -4480,6 +4505,26 @@ async function blockCatJobAfterCommentDelete(sourceCommentId, reason) {
   }
 }
 
+// B4：生成任务因服务端原因（provider 故障 / 非法返回 / DB 抖动）重试耗尽转 failed 时，
+// 返还触发时预占的一次每小时配额。安全拦截(blocked)与限流不会走到这里——blocked 走独立
+// CAS，限流时 consume 返回 allowed=false、根本没写入 ai_cat_rate_limits。
+// 用 quota_refunded 列做幂等标记，保证一个任务最多返还一次；列/RPC 尚未部署时安全降级。
+async function refundCatQuotaOnce(failedJob) {
+  try {
+    var userName = failedJob && failedJob.request_user_id;
+    if (!userName || !failedJob.id) return;
+    var mark = await supabase.from('ai_comment_reply_jobs')
+      .update({ quota_refunded: true })
+      .eq('id', failedJob.id)
+      .eq('quota_refunded', false)
+      .select('id')
+      .maybeSingle();
+    if (mark.error || !mark.data) return; // 已返还或被其它路径处理，不重复返还
+    var refund = await supabase.rpc('refund_cat_comment_quota', { p_user_name: userName });
+    if (refund.error) console.warn('[CAT_AI] quota refund rpc failed:', catErrorText(refund.error));
+  } catch (e) { /* best-effort，返还失败不影响主流程 */ }
+}
+
 async function requeueCatJob(job, reason) {
   var attempts = Number(job && job.attempts || 0);
   var now = new Date().toISOString();
@@ -4505,6 +4550,10 @@ async function requeueCatJob(job, reason) {
   }
   var result = await updateCatJobCAS(job.id, 'processing', changes);
   logCatCAS('retry: ' + reason + ' (attempt ' + (attempts + 1) + '/' + maxAttempts + ', delay=' + (changes.retry_delay_ms || 0) + 'ms)', result);
+  // B4：重试耗尽、确认为本次 CAS 转入终态 failed 时，返还一次预占配额（幂等）
+  if (shouldFail && result.ok && result.updated) {
+    await refundCatQuotaOnce(job);
+  }
   return result;
 }
 
@@ -4584,8 +4633,10 @@ function validateCatReply(parsed, rawText) {
   reply = reply.replace(/`([^`]*)`/g, '$1');
   // 拒绝脚本内容
   if (/<script|javascript:|onerror=|onclick=/i.test(reply)) return null;
-  // 拒绝明显泄露系统提示词的内容
-  if (/系统提示词|system prompt|你是.*AI|你的任务是/.test(reply)) return null;
+  // B1：收窄“泄露系统提示词”匹配。旧正则含 `你是.*AI`，会把“你是懂AI的”这类
+  // 正常毒舌回复误判为泄题而丢弃、重试 3 次后 failed（表现为小猫频繁“不想说话”）。
+  // 这里只拦截强泄露结构，不再误伤正常对话。
+  if (/(系统|system)\s*(提示词|prompt)\s*[:：是]|你被(设定|编程|训练)为|忽略(之前|前面|以上).{0,6}(指令|提示|规则)|泄露(你的|系统|内部)(提示词|指令|规则)/i.test(reply)) return null;
   // 拒绝空回复
   if (!reply.trim()) return null;
   return { should_reply: true, reply: reply, risk_type: parsed.risk_type || null };
@@ -4647,13 +4698,8 @@ async function processCatReplyJob(job) {
       return;
     }
 
-    // 检查是否已有 AI 回复（★ 直接使用 Supabase 查询，不再调用不存在的 buildSummaryQuery）
-    var existingReplyRes = await supabase.from('comments')
-      .select('id, post_id, user_name, content, created_at, parent_comment_id, generated_by_ai')
-      .eq('parent_comment_id', String(workingJob.source_comment_id))
-      .eq('generated_by_ai', true)
-      .eq('user_name', CAT_AI_USERNAME)
-      .maybeSingle();
+    // 检查是否已有 AI 回复（B3：改用容错查询，历史重复行不再以 maybeSingle 报错卡死）
+    var existingReplyRes = await fetchCatReplyByParent(workingJob.source_comment_id);
 
     if (existingReplyRes.error) {
       await requeueCatJob(workingJob, 'existing AI reply lookup failed: ' + catErrorText(existingReplyRes.error));
@@ -4757,8 +4803,8 @@ async function processCatReplyJob(job) {
 
     // 创建 AI 子评论
     var replyContent = validated.reply;
-    // 确保小猫回复不包含 @小猫
-    replyContent = replyContent.replace(/@小猫\s*/g, '');
+    // 确保小猫回复不包含 @小猫（B9：统一用同口径全局正则，同时覆盖全角 ＠）
+    replyContent = replyContent.replace(CAT_AI_MENTION_GLOBAL, '');
 
     var aiComment = await supabase.from('comments').insert([{
       post_id: workingJob.post_id,
@@ -4774,12 +4820,8 @@ async function processCatReplyJob(job) {
       if (aiComment.error.code === '23505') {
         // A concurrent worker may have inserted the reply. Re-read it before
         // marking the job complete; the failed insert response has no id.
-        var duplicateReply = await supabase.from('comments')
-          .select('id, content, parent_comment_id, generated_by_ai, user_name')
-          .eq('parent_comment_id', sourceCommentId)
-          .eq('generated_by_ai', true)
-          .eq('user_name', CAT_AI_USERNAME)
-          .maybeSingle();
+        // B3：容错取最早一条，重复行不再让 maybeSingle 报错
+        var duplicateReply = await fetchCatReplyByParent(sourceCommentId);
         if (duplicateReply.error) {
           await requeueCatJob(workingJob, 'duplicate reply query failed: ' + catErrorText(duplicateReply.error));
         } else if (duplicateReply.data && duplicateReply.data.id) {
@@ -4860,12 +4902,7 @@ async function reconcileCatJobs() {
       var j = jobs[i];
       var replyRow = null;
       var replyQueryError = null;
-      var replyByParent = await supabase.from('comments')
-        .select('id, content, parent_comment_id, generated_by_ai, user_name')
-        .eq('parent_comment_id', String(j.source_comment_id))
-        .eq('generated_by_ai', true)
-        .eq('user_name', CAT_AI_USERNAME)
-        .maybeSingle();
+      var replyByParent = await fetchCatReplyByParent(j.source_comment_id); // B3 容错
       replyRow = replyByParent.data;
       replyQueryError = replyByParent.error;
       if (replyQueryError) {
@@ -4936,10 +4973,25 @@ async function processNextCatJob() {
 }
 
 // 小猫任务 worker（每 3 秒）
+// B8：旧实现每个 tick 只领取 1 个任务，突发多条 @小猫 时即便并发上限是 3 也会逐条排队。
+// processNextCatJob 在 await 之前同步占用一个 worker 名额，因此这里按空闲名额循环补满，
+// 达到 MAX_CAT_AI_WORKERS 即停。
 setInterval(function() {
   recoverStaleCatJobs().catch(function() {});
-  processNextCatJob().catch(function() {});
+  for (var __i = 0; __i < MAX_CAT_AI_WORKERS; __i++) {
+    if (currentCatAiWorkers >= MAX_CAT_AI_WORKERS) break;
+    processNextCatJob().catch(function() {});
+  }
 }, 3000);
+
+// D2：配额表兜底清理。生产优先用 pg_cron（迁移 039 已在扩展可用时注册每小时任务），
+// 这里在后端进程内再做一层每小时清理，避免无 pg_cron 时 ai_cat_rate_limits 无限膨胀。
+setInterval(function() {
+  try {
+    var cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    supabase.from('ai_cat_rate_limits').delete().lt('created_at', cutoff).then(function() {}, function() {});
+  } catch (e) { /* best-effort */ }
+}, 60 * 60 * 1000);
 
 // 小猫 AI 回复状态查询接口
 app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
@@ -4968,9 +5020,7 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     if (jobRes.error) return res.status(503).json({ error: 'AI reply status temporarily unavailable', code: 'job_query_failed', retryable: true });
     if (!jobRes.data) {
       // 检查是否已有 AI 回复 - 必须返回完整字段
-      var replyRes = await supabase.from('comments')
-        .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
-        .eq('parent_comment_id', commentId).eq('generated_by_ai', true).eq('user_name', CAT_AI_USERNAME).maybeSingle();
+      var replyRes = await fetchCatReplyByParent(commentId); // B3 容错
       if (replyRes.error) return res.status(503).json({ error: 'AI reply lookup temporarily unavailable', code: 'reply_query_failed', retryable: true });
       if (replyRes.data) {
         var r = replyRes.data;
@@ -4987,12 +5037,7 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
       // A comment can be committed before the job CAS. Treat that durable
       // child as authoritative even if the worker or stale-job recovery has
       // already moved the job to failed.
-      var recoveredReply = await supabase.from('comments')
-        .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
-        .eq('parent_comment_id', commentId)
-        .eq('generated_by_ai', true)
-        .eq('user_name', CAT_AI_USERNAME)
-        .maybeSingle();
+      var recoveredReply = await fetchCatReplyByParent(commentId); // B3 容错
       if (recoveredReply.error) return res.status(503).json({ error: 'AI reply lookup temporarily unavailable', code: 'reply_query_failed', retryable: true });
       var recovered = recoveredReply.data;
       if (recovered && recovered.id && typeof recovered.content === 'string' && recovered.content.trim() && recovered.user_name === CAT_AI_USERNAME && recovered.generated_by_ai === true && String(recovered.parent_comment_id) === String(commentId)) {
@@ -5006,9 +5051,8 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
     else if (status === 'completed') {
       // The job table has no reply_comment_id column in the committed schema;
       // resolve the real child comment from its immutable parent relationship.
-      var replyRes = await supabase.from('comments')
-        .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
-        .eq('parent_comment_id', commentId).eq('generated_by_ai', true).maybeSingle();
+      // B3 容错 + B5：补齐 user_name=cat_ai 过滤，避免把其他 AI 的子评论误当小猫回复
+      var replyRes = await fetchCatReplyByParent(commentId);
       if (replyRes.error) return res.status(503).json({ error: 'AI reply lookup temporarily unavailable', code: 'reply_query_failed', retryable: true });
       if (replyRes.data) {
         var rr = replyRes.data;
@@ -5025,7 +5069,7 @@ app.get('/api/comments/ai-reply-status', authenticateUser, async (req, res) => {
       // completed 但没有有效回复 → 数据不一致
       return res.json({ status: 'reply_missing', reply_comment_id: null, message: '回复记录缺失，可点击重试' });
     } else if (status === 'failed') message = '小猫暂时不想说话';
-    else if (status === 'blocked') message = '';
+    else if (status === 'blocked') message = '这个问题小猫不方便接话，换个问法试试';
     return res.json({ status: status, reply_comment_id: null, message: message });
   } catch (e) {
     console.error('[CAT_AI] status error:', e && e.message);
@@ -5075,12 +5119,9 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
     if (jobErr) return res.status(503).json({ error: sanitizeError(jobErr), code: 'job_query_failed', retryable: true });
 
     // 5. 查找现有 AI 评论
-    var { data: aiReplyComment, error: replyErr } = await supabase.from('comments')
-      .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
-      .eq('parent_comment_id', commentId)
-      .eq('generated_by_ai', true)
-      .eq('user_name', CAT_AI_USERNAME)
-      .maybeSingle();
+    // B3 容错：解构出 data/error，形状与原 maybeSingle 一致
+    var __aiReplyQuery = await fetchCatReplyByParent(commentId);
+    var aiReplyComment = __aiReplyQuery.data, replyErr = __aiReplyQuery.error;
     if (replyErr) return res.status(503).json({ error: sanitizeError(replyErr), code: 'reply_query_failed', retryable: true });
 
     // 6. Only a verified child comment is terminal success. A completed job
@@ -9861,6 +9902,18 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
     // this keeps generated replies, empty authors, and @小猫咪/@小猫猫 from
     // entering the queue through the public comment route.
     if (isValidCatTrigger(inserted.data) && req.userName !== CAT_AI_USERNAME) {
+      // B6：主触发路径补齐作者限制校验（与 isValidCatTrigger 的 fail-closed 设计对齐）。
+      // 被封禁/拉黑/禁言的用户不创建小猫任务、不消耗配额；RPC 自身故障时不阻断正常触发
+      // （评论能否发布已由上游把关，避免 DB 抖动让小猫功能整体停摆）。
+      var catRestrRes = await supabase.rpc('get_user_restrictions', { p_user_name: req.userName });
+      var catRestr = (catRestrRes && catRestrRes.data) || {};
+      if (!catRestrRes.error && (catRestr.is_banned || catRestr.is_blacklisted || catRestr.is_muted)) {
+        return res.status(201).json({
+          ok: true,
+          data: inserted.data,
+          cat_ai: { triggered: false, skipped: 'author_restricted', source_comment_id: String(inserted.data.id) }
+        });
+      }
       var rateLimit = await checkCatRateLimit(req.userName, postId);
       if (rateLimit.allowed) {
         var job = await createCatReplyJob(inserted.data.id, postId, req.userName);
@@ -9872,7 +9925,9 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
         });
       } else {
         // 限流时记录 failed 任务以便前端 poll 能收到 rate_limited 状态
-        await supabase.from('ai_comment_reply_jobs').insert({
+        // B7：容错落库——唯一冲突(23505，说明已存在 job)或其它错误都不得冒泡成 500，
+        // 因为评论本身已经发布成功，cat_ai 仅为附加元信息。
+        var rlJobRes = await supabase.from('ai_comment_reply_jobs').insert({
           source_comment_id: inserted.data.id,
           post_id: postId,
           request_user_id: req.userName,
@@ -9881,7 +9936,10 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
           error_message: rateLimit.reason,
           model: DEEPSEEK_MODEL_REASONER || 'deepseek-chat',
           attempts: 1
-        });
+        }).select('id').maybeSingle();
+        if (rlJobRes.error && rlJobRes.error.code !== '23505') {
+          console.warn('[CAT_AI] record rate-limited job failed (comment still ok):', sanitizeError(rlJobRes.error));
+        }
         return res.status(201).json({
           ok: true,
           data: inserted.data,
@@ -17079,7 +17137,7 @@ function cleanAiModelIn(m) {
   return {
     uid: uid,
     provider: provider,
-    provider_label: String(m.provider_label || '').trim().slice(0, 40),
+    provider_label: String(m.provider_label || m.providerLabel || '').trim().slice(0, 40),
     label: String(m.label || model).trim().slice(0, 40),
     model: model,
     base_url: String(m.base_url || '').trim().slice(0, 200),
@@ -17089,13 +17147,30 @@ function cleanAiModelIn(m) {
 // GET /api/agent/custom-models - 读取当前账号的自定义模型（解密 Key 后返回）
 app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   try {
-    var lookup = await supabase.from('posts').select('content')
+    // 拉取该账号全部快照行（历史“先删后插”在并发/失败时可能残留多行），按时间倒序，
+    // 逐行解析并按 uid 合并（最新快照中的同 uid 优先）。单行损坏或多行残留都不影响读取，
+    // 也不再依赖 maybeSingle 命中多行即报错，换设备/刷新都能稳定恢复。
+    var lookup = await supabase.from('posts').select('content,created_at')
       .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      .order('created_at', { ascending: false }).limit(20);
     if (lookup.error) throw lookup.error;
-    var content = {};
-    if (lookup.data) { try { content = JSON.parse(lookup.data.content || '{}'); } catch (_) {} }
-    var models = Array.isArray(content.models) ? content.models : [];
+    var rows = Array.isArray(lookup.data) ? lookup.data : [];
+    var mergedByUid = {};
+    var uidOrder = [];
+    for (var ri = 0; ri < rows.length; ri++) {
+      var parsed = {};
+      try { parsed = JSON.parse(rows[ri].content || '{}'); } catch (_) { continue; }
+      var rowModels = Array.isArray(parsed.models) ? parsed.models : [];
+      for (var mi = 0; mi < rowModels.length; mi++) {
+        var rm = rowModels[mi];
+        if (!rm || !rm.uid) continue;
+        if (!Object.prototype.hasOwnProperty.call(mergedByUid, rm.uid)) {
+          mergedByUid[rm.uid] = rm;
+          uidOrder.push(rm.uid);
+        }
+      }
+    }
+    var models = uidOrder.map(function(uid) { return mergedByUid[uid]; });
     var out = models.map(function(m) {
       var copy = Object.assign({}, m);
       if (copy.api_key_enc) { copy.api_key = decryptAiModelSecret(copy.api_key_enc); delete copy.api_key_enc; }
@@ -17119,19 +17194,32 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
       var clean = cleanAiModelIn(raw[i]);
       if (clean) models.push(clean);
     }
-    var del = await supabase.from('posts').delete()
-      .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER);
-    if (del.error && String(del.error.code) !== 'PGRST116') {
-      console.warn('[ai-models] 清理旧记录失败(继续):', del.error && del.error.message);
-    }
     if (models.length) {
+      // 先立后破：先插入本次完整快照并拿回 id，成功后再删除其它旧快照行；
+      // 旧实现“先全删再插”在插入失败/并发时会把整份模型清空（表现为换设备/刷新后莫名丢失）。
       var ins = await supabase.from('posts').insert([{
         user_name: req.userName,
         media_type: CUSTOM_AI_MODELS_MARKER,
         content: JSON.stringify({ models: models }),
         actor_key: 'ai_models_' + Date.now()
-      }]);
+      }]).select('id').maybeSingle();
       if (ins.error) throw ins.error;
+      var keepId = ins.data && ins.data.id;
+      var delQ = supabase.from('posts').delete()
+        .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER);
+      if (keepId != null) delQ = delQ.neq('id', keepId);
+      var del = await delQ;
+      if (del.error && String(del.error.code) !== 'PGRST116') {
+        // 旧快照清理失败不影响本次保存（GET 会按 uid 合并多行，最新行优先）
+        console.warn('[ai-models] 清理旧快照失败(不影响本次保存):', del.error && del.error.message);
+      }
+    } else {
+      // 用户主动清空（列表为空）：删除全部快照行
+      var delAll = await supabase.from('posts').delete()
+        .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER);
+      if (delAll.error && String(delAll.error.code) !== 'PGRST116') {
+        console.warn('[ai-models] 清空快照失败:', delAll.error && delAll.error.message);
+      }
     }
     var echo = models.map(function(m) {
       var copy = Object.assign({}, m);

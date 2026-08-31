@@ -8,9 +8,11 @@
 --      hashtextextended(int8)，消除不同用户名的哈希碰撞导致的无谓串行
 -- 全部语句幂等，可重复执行；仅 service_role 具备数据/RPC 权限。
 -- ============================================================================
+
 -- ---------------------------------------------------------------------------
 -- B3 + D1：数据清理。必须先清理，下面的部分唯一索引才能在“历史曾产生重复”时建成功。
 -- ---------------------------------------------------------------------------
+
 -- D1：删除历史孤儿 AI 回复。
 -- 020/017 时期外键为 ON DELETE SET NULL，父评论删除后 AI 子回复的
 -- parent_comment_id 被置空、成为顶层“漂浮”小猫回复；021 才改为 CASCADE。
@@ -19,6 +21,7 @@
 DELETE FROM public.comments
 WHERE generated_by_ai = true
   AND parent_comment_id IS NULL;
+
 -- B3：同一父评论下若存在多条小猫回复，只保留最早一条（按 created_at、id 排序），
 -- 删除其余重复行，避免 maybeSingle()/前端去重遭遇多行而永久卡死。
 DELETE FROM public.comments AS c
@@ -34,16 +37,19 @@ USING (
 ) AS d
 WHERE c.id = d.id
   AND d.rn > 1;
+
 -- 清理完成后确保部分唯一索引存在（017/032 曾尝试创建，但若当时已有重复行会创建失败；
 -- 此刻重复已清空，IF NOT EXISTS 可补齐）。
 CREATE UNIQUE INDEX IF NOT EXISTS idx_comments_unique_ai_reply
   ON public.comments (parent_comment_id)
   WHERE generated_by_ai = true;
+
 -- ---------------------------------------------------------------------------
 -- B4：任务表增加“配额是否已返还”幂等标记
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.ai_comment_reply_jobs
   ADD COLUMN IF NOT EXISTS quota_refunded boolean NOT NULL DEFAULT false;
+
 -- B4：返还一次触发时预占的每小时配额。
 -- 删除该用户最近 1 小时内“最新一条”限流记录（即最近一次预占），返回实际删除条数。
 -- 由后端在任务因服务端原因重试耗尽转 failed、且 CAS 标记 quota_refunded 成功后调用，
@@ -74,8 +80,10 @@ BEGIN
   RETURN v_deleted;
 END;
 $$;
+
 REVOKE ALL ON FUNCTION public.refund_cat_comment_quota(text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.refund_cat_comment_quota(text) TO service_role;
+
 -- ---------------------------------------------------------------------------
 -- D2：咨询锁升级为 hashtextextended(bigint)，消除 int4 哈希碰撞造成的跨用户串行。
 -- 函数签名保持不变，后端调用无需改动。
@@ -110,5 +118,6 @@ BEGIN
   RETURN jsonb_build_object('allowed', true);
 END;
 $$;
+
 REVOKE ALL ON FUNCTION public.consume_cat_comment_quota(text, uuid, integer, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.consume_cat_comment_quota(text, uuid, integer, integer) TO service_role;

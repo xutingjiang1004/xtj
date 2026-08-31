@@ -4233,7 +4233,7 @@ function renderProfileActivityList(kind) {
                 }
             }
 
-            function pollCatAiReply(commentId, postId) {
+            function pollCatAiReply(commentId, postId, immediate) {
                 // 清理旧轮询
                 if (window.__catAiPollTimers[commentId]) {
                     clearTimeout(window.__catAiPollTimers[commentId]);
@@ -4245,9 +4245,13 @@ function renderProfileActivityList(kind) {
                 var baseInterval = 2000; // 基础间隔2秒
                 var retryCount = 0;
                 var maxRetries = 5;
-                // ★ 使用实际运行时间，页面隐藏时不消耗超时
+                // F1：以“前台活跃耗时”作为超时口径。旧实现只累加单次请求飞行耗时、漏掉了
+                // 两次轮询之间的等待间隔，名义 90s 实际可空转十几分钟；现在每轮把“上一轮请求
+                // + 等待间隔”一并计入。页面隐藏（后台 setTimeout 被挂起）期间仍不计入，避免切
+                // 后台很久回来被立即判超时（保留 pausedAt 机制）。
                 var accumulatedRunTime = 0;
-                var maxRunTime = 90000; // 最多实际运行90秒
+                var activeTickStart = Date.now();
+                var maxRunTime = 90000; // 前台累计活跃最多 90 秒
                 var lastPollStart = 0;
                 var pausedAt = 0;
                 var notTriggeredCount = 0; // not_triggered 连续计数
@@ -4278,10 +4282,18 @@ function renderProfileActivityList(kind) {
                         window.__catAiPollTimers[commentIdStr] = setTimeout(poll, 3000);
                         return;
                     }
-                    // ★ 恢复可见时，清空暂停标记，不把隐藏时间加入运行时间
+                    // F1：活跃时间核算
+                    var nowTs = Date.now();
                     if (pausedAt) {
+                        // 刚从隐藏恢复：丢弃后台挂起区间，重置活跃起点
                         pausedAt = 0;
+                        activeTickStart = nowTs;
+                    } else {
+                        // 前台连续轮询：把上一轮“请求 + 等待间隔”计入活跃耗时
+                        accumulatedRunTime += nowTs - activeTickStart;
                     }
+                    activeTickStart = nowTs;
+                    // 前台累计活跃到点必停，避免超长空转
                     if (accumulatedRunTime > maxRunTime) {
                         showCatAiStatus(commentIdStr, '小猫暂时无法回复，点击重试', true);
                         retryBtnSetup(commentIdStr, postId);
@@ -4301,12 +4313,12 @@ function renderProfileActivityList(kind) {
                             // Phase 3-P0-2: 迟到回调防护——任务已取消则跳过，避免清理后仍写入状态
                             if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
                                 (window.__catAiCancelledByComment[commentIdStr] || 0) !== myCommentEpoch) { clearTimeout(timeoutId); return null; }
-                            // ★ 计入实际运行时间（仅请求耗时）
-                            accumulatedRunTime += Date.now() - lastPollStart;
+                            // F1：请求耗时在下一轮 poll 开头统一计入 accumulatedRunTime，此处不累加
                             // ★ 先检查 HTTP 状态码，400 不是网络错误
                             if (!r.ok) {
                                 return r.json().catch(function() { return {}; }).then(function(payload) {
                                     if (r.status === 400 && (payload.code === 'invalid_comment_id')) {
+                                        clearTimeout(timeoutId); // F5：终态分支同步清掉 abort 定时器，避免冗余 abort
                                         console.error('[CatAI] invalid comment_id:', commentIdStr);
                                         showCatAiStatus(commentIdStr, '评论ID格式错误，请刷新页面重试', true);
                                         delete window.__catAiPollTimers[commentIdStr];
@@ -4340,11 +4352,18 @@ function renderProfileActivityList(kind) {
                                     window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
                                 }
                             } else if (data.status === 'not_triggered') {
-                                // ★ 前10秒内 not_triggered 视为任务尚未同步，继续轮询
+                                // F4：not_triggered 视为“任务尚未同步”，继续轮询。
+                                // 旧实现 commentAge 为 NaN（后端缺字段/弱网）时比较恒 false 会过早判失败，
+                                // 这里对未知年龄兜底继续轮询，并把同步窗口由 10s 放宽到 15s、次数到 8 次。
                                 notTriggeredCount++;
                                 var commentAge = 0;
-                                try { commentAge = Date.now() - new Date(data.comment_created_at).getTime(); } catch(e) {}
-                                if (notTriggeredCount <= 5 && commentAge < 10000) {
+                                var catAgeKnown = true;
+                                try {
+                                    var catCreatedTs = data.comment_created_at ? new Date(data.comment_created_at).getTime() : NaN;
+                                    catAgeKnown = !isNaN(catCreatedTs);
+                                    commentAge = catAgeKnown ? Date.now() - catCreatedTs : 0;
+                                } catch(e) { catAgeKnown = false; }
+                                if (notTriggeredCount <= 8 && (catAgeKnown === false || commentAge < 15000)) {
                                     showCatAiStatus(commentIdStr, '小猫正在准备回复……');
                                     window.__catAiPollTimers[commentIdStr] = setTimeout(poll, 1500);
                                 } else {
@@ -4363,7 +4382,8 @@ function renderProfileActivityList(kind) {
                                 delete window.__catAiPollTimers[commentIdStr];
                                 delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'blocked') {
-                                removeCatAiStatus(commentIdStr);
+                                // B2：安全拦截不再静默移除——展示后端温和文案并在 3s 后淡出，停止轮询
+                                showCatAiStatus(commentIdStr, data.message || '这个问题小猫不方便接话，换个问法试试', true);
                                 delete window.__catAiPollTimers[commentIdStr];
                                 delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'reply_deleted' || data.status === 'reply_missing') {
@@ -4379,8 +4399,13 @@ function renderProfileActivityList(kind) {
                                 delete window.__catAiPollTimers[commentIdStr];
                                 delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'processing' || data.status === 'pending') {
+                                // F2：每次 processing/pending 都维持进行中提示。旧实现仅在含“同步”时才
+                                // show，期间一次普通评论触发的全量重绘会把状态气泡冲掉且不再出现，看起来像卡死。
+                                // showCatAiStatus 对已存在节点只更新文本，不会重复创建。
                                 if (data.message && data.message.includes('同步')) {
                                     showCatAiStatus(commentIdStr, '回复已生成，正在同步……');
+                                } else {
+                                    showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
                                 }
                                 window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
                             } else {
@@ -4394,7 +4419,7 @@ function renderProfileActivityList(kind) {
                             // Phase 3-P0-2: 迟到回调防护——任务已取消则跳过，避免清理后重新调度轮询
                             if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
                                 (window.__catAiCancelledByComment[commentIdStr] || 0) !== myCommentEpoch) { return; }
-                            accumulatedRunTime += Date.now() - lastPollStart;
+                            // F1：请求与退避等待耗时在下一轮 poll 开头统一计入 accumulatedRunTime
                             // 指数退避重试，而不是永久终止
                             if (retryCount < maxRetries) {
                                 retryCount++;
@@ -4408,7 +4433,8 @@ function renderProfileActivityList(kind) {
                             }
                         });
                 }
-                window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
+                // F3：immediate=true（页面从隐藏恢复）时立即首查，不再固定等 2s
+                window.__catAiPollTimers[commentIdStr] = setTimeout(poll, immediate ? 0 : baseInterval);
             }
 
             // ★ 显示重试按钮
@@ -9447,6 +9473,10 @@ function renderProfileActivityList(kind) {
 
             function subscribeToComments() {
                 if (!sb) return;
+                // F6：订阅代次。断线 backoff 等待期间若又因可见性变化重建订阅，
+                // 旧 backoff 到期不得再建通道，避免并存多个 feed-comments 通道。
+                window.__commentSubEpoch = (window.__commentSubEpoch || 0) + 1;
+                var mySubEpoch = window.__commentSubEpoch;
                 if (commentRealtime) {
                     try { sb.removeChannel(commentRealtime); } catch(e) {}
                     commentRealtime = null;
@@ -9455,6 +9485,7 @@ function renderProfileActivityList(kind) {
                 var _maxReconnectAttempts = 10;
 
                 function createChannel() {
+                    if (mySubEpoch !== window.__commentSubEpoch) return; // 已被更新的订阅取代
                     commentRealtime = sb.channel('feed-comments')
                         .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, function(payload) {
                             var row = payload.new || payload.old;
@@ -9484,10 +9515,16 @@ function renderProfileActivityList(kind) {
                                     return String(comment && comment.id) !== commentId;
                                 });
                                 feedAllComments.push(row);
-                                // ★ 如果是 AI 评论，使用统一 upsert 函数
-                                if (row.generated_by_ai === true && row.user_name === 'cat_ai' && row.parent_comment_id && row.post_id != null) {
+                                // F7：先判定“是否小猫回复行”，是则无论 post_id 是否齐全都先移除进行中状态，
+                                // 避免缺 post_id 时落到普通全量刷新分支、导致“正在组织”气泡残留。
+                                var isCatAiReplyRow = row.generated_by_ai === true && row.user_name === 'cat_ai' && row.parent_comment_id;
+                                if (isCatAiReplyRow) {
                                     removeCatAiStatus(String(row.parent_comment_id));
-                                    upsertAiComment(row, String(row.parent_comment_id), row.post_id);
+                                    if (row.post_id != null) {
+                                        upsertAiComment(row, String(row.parent_comment_id), row.post_id);
+                                    } else if (typeof renderFeedFromMemoryState === 'function') {
+                                        renderFeedFromMemoryState().catch(function() {});
+                                    }
                                 } else {
                                     // 普通评论，全量刷新
                                     if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
@@ -9510,6 +9547,7 @@ function renderProfileActivityList(kind) {
                                     _reconnectAttempts++;
                                     var backoff = Math.min(1000 * Math.pow(2, _reconnectAttempts), 30000);
                                     setTimeout(function() {
+                                        if (mySubEpoch !== window.__commentSubEpoch) return;
                                         if (commentRealtime) {
                                             try { sb.removeChannel(commentRealtime); } catch(e) {}
                                             commentRealtime = null;
@@ -9546,7 +9584,7 @@ function renderProfileActivityList(kind) {
                         try {
                             var pid = (statusMap[k] && statusMap[k].postId) || null;
                             if (pid) {
-                                pollCatAiReply(k, pid);
+                                pollCatAiReply(k, pid, true); // F3：恢复可见时立即首查
                             }
                         } catch(e) {}
                     });
