@@ -409,6 +409,10 @@
 
             function subscribeToComments() {
                 if (!sb) return;
+                // F6：订阅代次。断线 backoff 等待期间若又因可见性变化重建订阅，
+                // 旧 backoff 到期不得再建通道，避免并存多个 feed-comments 通道。
+                window.__commentSubEpoch = (window.__commentSubEpoch || 0) + 1;
+                var mySubEpoch = window.__commentSubEpoch;
                 if (commentRealtime) {
                     try { sb.removeChannel(commentRealtime); } catch(e) {}
                     commentRealtime = null;
@@ -417,6 +421,7 @@
                 var _maxReconnectAttempts = 10;
 
                 function createChannel() {
+                    if (mySubEpoch !== window.__commentSubEpoch) return; // 已被更新的订阅取代
                     commentRealtime = sb.channel('feed-comments')
                         .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, function(payload) {
                             var row = payload.new || payload.old;
@@ -446,10 +451,16 @@
                                     return String(comment && comment.id) !== commentId;
                                 });
                                 feedAllComments.push(row);
-                                // ★ 如果是 AI 评论，使用统一 upsert 函数
-                                if (row.generated_by_ai === true && row.user_name === 'cat_ai' && row.parent_comment_id && row.post_id != null) {
+                                // F7：先判定“是否小猫回复行”，是则无论 post_id 是否齐全都先移除进行中状态，
+                                // 避免缺 post_id 时落到普通全量刷新分支、导致“正在组织”气泡残留。
+                                var isCatAiReplyRow = row.generated_by_ai === true && row.user_name === 'cat_ai' && row.parent_comment_id;
+                                if (isCatAiReplyRow) {
                                     removeCatAiStatus(String(row.parent_comment_id));
-                                    upsertAiComment(row, String(row.parent_comment_id), row.post_id);
+                                    if (row.post_id != null) {
+                                        upsertAiComment(row, String(row.parent_comment_id), row.post_id);
+                                    } else if (typeof renderFeedFromMemoryState === 'function') {
+                                        renderFeedFromMemoryState().catch(function() {});
+                                    }
                                 } else {
                                     // 普通评论，全量刷新
                                     if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
@@ -472,6 +483,7 @@
                                     _reconnectAttempts++;
                                     var backoff = Math.min(1000 * Math.pow(2, _reconnectAttempts), 30000);
                                     setTimeout(function() {
+                                        if (mySubEpoch !== window.__commentSubEpoch) return;
                                         if (commentRealtime) {
                                             try { sb.removeChannel(commentRealtime); } catch(e) {}
                                             commentRealtime = null;
@@ -508,7 +520,7 @@
                         try {
                             var pid = (statusMap[k] && statusMap[k].postId) || null;
                             if (pid) {
-                                pollCatAiReply(k, pid);
+                                pollCatAiReply(k, pid, true); // F3：恢复可见时立即首查
                             }
                         } catch(e) {}
                     });

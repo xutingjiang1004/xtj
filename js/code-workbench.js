@@ -61,6 +61,21 @@
   var TREE_SKIP_FILES = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|\.DS_Store|npm-shrinkwrap\.json|\.gitignore|\.gitattributes)$/i;
   var MAX_FILE_BYTES = 2 * 1024 * 1024; // 查看/编辑单文件上限
   var MAX_AI_FILE_CHARS = 28000;        // 注入 AI 上下文的单文件字符上限
+  // ── 批量读取整库代码（供 AI 全局分析/改 bug）──
+  var BULK_MAX_FILES = 60;              // 单次最多加载文件数，控制 GitHub 请求量
+  var BULK_MAX_FILE_BYTES = 120 * 1024; // 单文件读取上限
+  var BULK_AI_TOTAL_CHARS = 120000;     // 一次性注入 AI 的全部文件总字符上限
+  var BULK_CONCURRENCY = 5;             // 并发拉取数
+  var CODE_FILE_RE = /\.(js|jsx|mjs|cjs|ts|tsx|vue|svelte|py|java|kt|go|rs|c|h|cpp|cc|hpp|cs|rb|php|swift|scala|sh|bash|zsh|sql|html?|css|scss|less|json|ya?ml|xml|md|txt|ini|toml|gradle|dart|lua|exs?|prisma|graphql|gql|proto)$/i;
+  var BULK_SKIP_RE = /(^|\/)(node_modules|dist|build|out|vendor|coverage|\.next|\.nuxt|target|bin|obj|\.git)(\/|$)/i;
+  var LOCKFILE_RE = /(package-lock|yarn\.lock|pnpm-lock|composer\.lock|Gemfile\.lock|poetry\.lock|Cargo\.lock)/i;
+  function isCodeFileForBulk(p) {
+    p = String(p || '');
+    if (!p || BULK_SKIP_RE.test(p) || LOCKFILE_RE.test(p)) return false;
+    var base = p.split('/').pop() || '';
+    if (/^(dockerfile|makefile|rakefile|gemfile)$/i.test(base)) return true;
+    return CODE_FILE_RE.test(p);
+  }
 
   var API_BASE = '';
   try { API_BASE = String((window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin || '').replace(/\/$/, ''); }
@@ -77,6 +92,8 @@
     currentPath: '',
     currentSha: '',
     currentContent: '',
+    bulkFiles: {},        // 批量读取的 {path: content}，供 AI 全局分析
+    bulkBranch: '',       // bulkFiles 对应的分支，分支不一致时不注入
     busy: false,
     streaming: false,
     abortCtrl: null,
@@ -496,6 +513,10 @@
     var branchSel = el('select', { id: 'cwBranchSel', class: 'cw-branch-sel' });
     branchSel.addEventListener('change', function () { switchBranch(); });
     repoBranchWrap.appendChild(branchSel);
+    var mergeBtn = el('button', { type: 'button', class: 'cw-mini-btn', id: 'cwMergeBtn', text: '合并' });
+    mergeBtn.setAttribute('title', '把其它分支合并到目标分支');
+    mergeBtn.addEventListener('click', function () { openMergeBox(); });
+    repoBranchWrap.appendChild(mergeBtn);
     repoRow.appendChild(repoName);
     repoRow.appendChild(repoBranchWrap);
     sidebar.appendChild(repoRow);
@@ -508,6 +529,39 @@
     tabs.appendChild(tabTree);
     tabs.appendChild(tabHist);
     sidebar.appendChild(tabs);
+
+    var treeTools = el('div', { class: 'cw-tree-tools' });
+    var bulkBtn = el('button', { type: 'button', class: 'cw-mini-btn', id: 'cwBulkBtn', text: '读取全部代码' });
+    bulkBtn.setAttribute('title', '批量读取当前分支的代码文件，供 AI 全局分析与改 bug');
+    bulkBtn.addEventListener('click', function () { bulkLoadAll(); });
+    var bulkStatus = el('span', { class: 'cw-bulk-status', id: 'cwBulkStatus', text: '' });
+    treeTools.appendChild(bulkBtn);
+    treeTools.appendChild(bulkStatus);
+    sidebar.appendChild(treeTools);
+
+    var mergeBox = el('div', { class: 'cw-merge-box hidden', id: 'cwMergeBox' });
+    mergeBox.appendChild(el('div', { class: 'cw-merge-title', text: '合并分支（在 GitHub 上直接合并）' }));
+    var mergeRow1 = el('div', { class: 'cw-merge-row' });
+    mergeRow1.appendChild(el('span', { text: '合入' }));
+    var mergeBaseSel = el('select', { class: 'cw-merge-sel', id: 'cwMergeBase' });
+    mergeRow1.appendChild(mergeBaseSel);
+    mergeBox.appendChild(mergeRow1);
+    var mergeRow2 = el('div', { class: 'cw-merge-row' });
+    mergeRow2.appendChild(el('span', { text: '来源' }));
+    var mergeHeadSel = el('select', { class: 'cw-merge-sel', id: 'cwMergeHead' });
+    mergeRow2.appendChild(mergeHeadSel);
+    mergeBox.appendChild(mergeRow2);
+    var mergeMsg = el('input', { type: 'text', class: 'cw-input cw-merge-msg', id: 'cwMergeMsg', placeholder: '合并说明（可选）', autocomplete: 'off', spellcheck: 'false' });
+    mergeBox.appendChild(mergeMsg);
+    var mergeBtns = el('div', { class: 'cw-merge-btns' });
+    var mergeDoBtn = el('button', { type: 'button', class: 'cw-mini-btn cw-mini-btn-primary', id: 'cwMergeDo', text: '确认合并' });
+    mergeDoBtn.addEventListener('click', function () { doMerge(); });
+    var mergeCancelBtn = el('button', { type: 'button', class: 'cw-mini-btn', id: 'cwMergeCancel', text: '取消' });
+    mergeCancelBtn.addEventListener('click', function () { closeMergeBox(); });
+    mergeBtns.appendChild(mergeDoBtn);
+    mergeBtns.appendChild(mergeCancelBtn);
+    mergeBox.appendChild(mergeBtns);
+    sidebar.appendChild(mergeBox);
 
     var treeBox = el('div', { class: 'cw-tree', id: 'cwTree' });
     sidebar.appendChild(treeBox);
@@ -621,6 +675,14 @@
       repoName: repoName,
       branchSel: branchSel,
       treeBox: treeBox,
+      bulkBtn: bulkBtn,
+      bulkStatus: bulkStatus,
+      mergeBtn: mergeBtn,
+      mergeBox: mergeBox,
+      mergeBaseSel: mergeBaseSel,
+      mergeHeadSel: mergeHeadSel,
+      mergeMsg: mergeMsg,
+      mergeDoBtn: mergeDoBtn,
       historyBox: historyBox,
       tabTree: tabTree,
       tabHist: tabHist,
@@ -893,6 +955,7 @@
     state.repo.branch = ui.branchSel.value;
     state.repo.branch_sha = '';
     saveRepo(state.repo);
+    resetBulkCache();
     clearFileView();
     loadTree();
   }
@@ -1239,6 +1302,128 @@
     }
   }
 
+  // ── 批量读取整库代码 + 分支合并 ─────────────────────────────
+  function decodeGhContent(item) {
+    if (!item) return '';
+    if (item.encoding === 'base64' && item.content) {
+      try { return decodeURIComponent(escape(atob(item.content.replace(/\s/g, '')))); }
+      catch (e) { try { return atob(item.content.replace(/\s/g, '')); } catch (e2) { return ''; } }
+    }
+    return item.content || '';
+  }
+  function resetBulkCache() {
+    state.bulkFiles = {};
+    state.bulkBranch = '';
+    updateBulkStatus();
+  }
+  function updateBulkStatus() {
+    if (!ui.bulkStatus) return;
+    var n = state.bulkFiles ? Object.keys(state.bulkFiles).length : 0;
+    ui.bulkStatus.textContent = n ? ('已载入 ' + n + ' 个文件' + (state.bulkBranch ? ' · ' + state.bulkBranch : '')) : '';
+  }
+  async function bulkLoadAll() {
+    if (!state.repo || !state.tree || !state.tree.length) { notify('请先连接仓库并加载文件树'); return; }
+    var candidates = [];
+    for (var i = 0; i < state.tree.length; i++) {
+      var node = state.tree[i];
+      if (node.type !== 'blob') continue;
+      if (!isCodeFileForBulk(node.path)) continue;
+      if (node.size && node.size > BULK_MAX_FILE_BYTES) continue;
+      candidates.push(node);
+    }
+    // 优先读小文件，保证在文件数上限内覆盖尽量多的核心代码
+    candidates.sort(function (a, b) { return (a.size || 0) - (b.size || 0); });
+    if (candidates.length > BULK_MAX_FILES) candidates = candidates.slice(0, BULK_MAX_FILES);
+    if (!candidates.length) { notify('当前分支没有可批量读取的代码文件'); return; }
+    state.bulkFiles = {};
+    state.bulkBranch = state.repo.branch;
+    if (ui.bulkBtn) ui.bulkBtn.disabled = true;
+    var total = candidates.length, done = 0, failed = 0;
+    if (ui.bulkStatus) ui.bulkStatus.textContent = '0/' + total;
+    async function fetchOne(n) {
+      try {
+        var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/contents/' + encodePath(n.path) + '?ref=' + encodeURIComponent(state.repo.branch));
+        if (r.ok && r.data) {
+          var c = decodeGhContent(r.data);
+          if (c.length > BULK_MAX_FILE_BYTES) c = c.slice(0, BULK_MAX_FILE_BYTES);
+          state.bulkFiles[n.path] = c;
+        } else { failed++; }
+      } catch (e) { failed++; }
+      done++;
+      if (ui.bulkStatus) ui.bulkStatus.textContent = done + '/' + total;
+    }
+    var idx = 0;
+    async function worker() { while (idx < candidates.length) { await fetchOne(candidates[idx++]); } }
+    var pool = [];
+    for (var w = 0; w < BULK_CONCURRENCY; w++) pool.push(worker());
+    await Promise.all(pool);
+    if (ui.bulkBtn) ui.bulkBtn.disabled = false;
+    var loaded = Object.keys(state.bulkFiles).length;
+    updateBulkStatus();
+    notify(loaded ? ('已读取 ' + loaded + ' 个代码文件，AI 可全局分析' + (failed ? '，' + failed + ' 个跳过' : '')) : '读取失败，请检查 Token 权限');
+  }
+  function currentBranchNames() {
+    var names = [];
+    if (ui.branchSel) for (var i = 0; i < ui.branchSel.options.length; i++) names.push(ui.branchSel.options[i].value);
+    return names.filter(Boolean);
+  }
+  function fillMergeSelect(sel, names, selected) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    names.forEach(function (nm) {
+      var o = el('option', { value: nm, text: nm });
+      if (nm === selected) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+  function openMergeBox() {
+    if (!state.repo) { notify('请先连接仓库'); return; }
+    var names = currentBranchNames();
+    if (names.length < 2) { notify('该仓库目前只有一个分支，没有可合并的来源分支'); return; }
+    fillMergeSelect(ui.mergeBaseSel, names, state.repo.branch);
+    var other = names.filter(function (nm) { return nm !== state.repo.branch; })[0] || names[0];
+    fillMergeSelect(ui.mergeHeadSel, names, other);
+    ui.mergeBox.classList.remove('hidden');
+  }
+  function closeMergeBox() { if (ui.mergeBox) ui.mergeBox.classList.add('hidden'); }
+  async function doMerge() {
+    if (!state.repo) return;
+    var base = ui.mergeBaseSel.value;
+    var head = ui.mergeHeadSel.value;
+    var msg = (ui.mergeMsg.value || '').trim();
+    if (!base || !head) { notify('请选择合入分支与来源分支'); return; }
+    if (base === head) { notify('合入分支与来源分支不能相同'); return; }
+    ui.mergeDoBtn.disabled = true;
+    ui.mergeDoBtn.textContent = '合并中...';
+    try {
+      var body = { base: base, head: head };
+      if (msg) body.commit_message = msg;
+      var r = await ghRequest('POST', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/merges', body);
+      if (r.ok && r.data) {
+        notify('已将 ' + head + ' 合并到 ' + base);
+        var rec = {
+          ts: Date.now(), path: '(分支合并)', message: 'merge ' + head + ' -> ' + base,
+          branch: base, base_branch: base, pr_mode: false,
+          url: r.data.html_url || '', sha: (r.data.commit && r.data.commit.sha) || ''
+        };
+        var h = loadHistory(); h.unshift(rec); saveHistory(h); renderHistoryList();
+        closeMergeBox();
+        if (state.repo.branch === base) loadTree();
+      } else if (r.status === 204) {
+        notify('无需合并：' + head + ' 已包含在 ' + base + ' 中');
+      } else if (r.status === 409) {
+        notify('合并冲突：请先在本地解决 ' + head + ' 与 ' + base + ' 的冲突后再合并');
+      } else {
+        notify('合并失败：' + ((r.error && r.error.message) || ('HTTP ' + r.status)));
+      }
+    } catch (e) {
+      notify('合并失败：' + ((e && e.message) || '未知错误'));
+    } finally {
+      ui.mergeDoBtn.disabled = false;
+      ui.mergeDoBtn.textContent = '确认合并';
+    }
+  }
+
   // ── 修改历史 ──────────────────────────────────────────────────
   function switchTab(tab) {
     ui.tabTree.classList.toggle('on', tab === 'tree');
@@ -1354,6 +1539,26 @@
       lines.push('```');
       lines.push(treeText);
       lines.push('```');
+    }
+    // 用户点“读取全部代码”后，把当前分支已读取文件的完整内容注入，支持全局改 bug
+    if (state.bulkFiles && state.bulkBranch === (state.repo && state.repo.branch)) {
+      var bulkPaths = Object.keys(state.bulkFiles).sort();
+      var bulkBudget = BULK_AI_TOTAL_CHARS, bulkUsed = 0, bulkInjected = 0;
+      var bulkOut = [];
+      for (var bi = 0; bi < bulkPaths.length; bi++) {
+        var bpth = bulkPaths[bi];
+        var bcontent = String(state.bulkFiles[bpth] || '');
+        if (!bcontent.trim()) continue;
+        if (bcontent.length > MAX_AI_FILE_CHARS) bcontent = bcontent.slice(0, MAX_AI_FILE_CHARS) + '\n...（该文件过长已截断）';
+        if (bulkUsed + bcontent.length > bulkBudget) { bulkOut.push('...（其余文件超出上下文预算已省略，可点名要求查看某个文件）'); break; }
+        bulkUsed += bcontent.length; bulkInjected++;
+        bulkOut.push('// ===== 文件: ' + bpth + ' =====\n' + bcontent);
+      }
+      if (bulkInjected) {
+        lines.push('当前分支已读取的 ' + bulkInjected + ' 个代码文件完整内容如下（修改时仍在代码块首行用 // path: 标注目标文件，并输出该文件完整新内容，不得省略）：');
+        lines.push(bulkOut.join('\n\n'));
+        lines.push('');
+      }
     }
     lines.push('');
     if (state.currentPath && state.currentContent) {
