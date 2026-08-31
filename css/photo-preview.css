@@ -3,6 +3,33 @@ html.xtj-photo-preview-ready #photoPreviewOverlay * {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ── 全局箭头定位（触摸 / 无 hover 设备兜底）──
+   历史上箭头的 position / left / right 只写在 (hover:hover) and (pointer:fine)
+   鼠标媒体块内，平板、手机等无 hover 设备不命中，箭头退回文档流堆叠在左侧。
+   这里提供全局绝对定位与左右分列；桌面鼠标端由后文 (min-width:1280px) and
+   (hover:hover) and (pointer:fine) 媒体块以相同特异性覆盖，桌面布局不变。 */
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow {
+  position: absolute;
+  top: 50%;
+  margin-top: -22px; /* 44px 半高，匹配触摸端默认尺寸 */
+  transform: none;
+  z-index: 30;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-prev {
+  left: max(12px, env(safe-area-inset-left, 0px));
+  right: auto;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-next {
+  right: max(12px, env(safe-area-inset-right, 0px));
+  left: auto;
+}
+/* 窄屏触摸端箭头为 60px（ui-shell 规定），半高 30px */
+@media (max-width: 480px) and (pointer: coarse) {
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow {
+    margin-top: -30px;
+  }
+}
+
 html.xtj-photo-preview-ready #photoPreviewOverlay,
 html.xtj-photo-preview-ready #ppImageWrapper,
 html.xtj-photo-preview-ready #ppSlideTrack,
