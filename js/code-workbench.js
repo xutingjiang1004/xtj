@@ -66,6 +66,12 @@
   var BULK_MAX_FILE_BYTES = 120 * 1024; // 单文件读取上限
   var BULK_AI_TOTAL_CHARS = 120000;     // 一次性注入 AI 的全部文件总字符上限
   var BULK_CONCURRENCY = 5;             // 并发拉取数
+  var WALK_CONCURRENCY = 4;             // 大目录树递归遍历并发
+  var TREE_AI_MAX_CHARS = 15000;        // 注入 AI 的“文件清单”字符预算
+  var CONTENTS_API_BYTES = 1024 * 1024; // GitHub Contents API 单次写入约 1MB，超过走 Git Database
+  var BRANCH_PAGE_MAX = 500;            // 分支列表最多拉取数量（分页兜底）
+  // 二进制/不可在线文本编辑的扩展名（图片/音视频/压缩包/字体/可执行等）
+  var BINARY_EXT_RE = /.(png|jpe?g|gif|webp|bmp|ico|avif|svgz?|mp[34]|wav|ogg|flac|aac|m4a|avi|mov|mkv|webm|zip|rar|7z|gz|tar|bz2|xz|pdf|doc[xm]?|xls[xm]?|ppt[xm]?|ttf|otf|woff2?|eot|wasm|exe|dll|so|dylib|class|jar|bin|dat|apk|ipa|dmg|iso)$/i;
   var CODE_FILE_RE = /\.(js|jsx|mjs|cjs|ts|tsx|vue|svelte|py|java|kt|go|rs|c|h|cpp|cc|hpp|cs|rb|php|swift|scala|sh|bash|zsh|sql|html?|css|scss|less|json|ya?ml|xml|md|txt|ini|toml|gradle|dart|lua|exs?|prisma|graphql|gql|proto)$/i;
   var BULK_SKIP_RE = /(^|\/)(node_modules|dist|build|out|vendor|coverage|\.next|\.nuxt|target|bin|obj|\.git)(\/|$)/i;
   var LOCKFILE_RE = /(package-lock|yarn\.lock|pnpm-lock|composer\.lock|Gemfile\.lock|poetry\.lock|Cargo\.lock)/i;
@@ -94,6 +100,11 @@
     currentContent: '',
     bulkFiles: {},        // 批量读取的 {path: content}，供 AI 全局分析
     bulkBranch: '',       // bulkFiles 对应的分支，分支不一致时不注入
+    bulkFailed: [],       // 批量读取失败/跳过的文件路径
+    fileSeq: 0,           // 文件内容请求代次（防快速切换竞态）
+    treeSeq: 0,           // 文件树请求代次（防快速切分支竞态）
+    isNewFile: false,     // 当前编辑器是否为“新建文件”态（提交时不带 sha）
+    undo: null,           // 最近一次 AI 应用前的编辑器快照 {path, content}
     busy: false,
     streaming: false,
     abortCtrl: null,
@@ -335,6 +346,27 @@
     return String(p).split('/').map(function (seg) { return encodeURIComponent(seg); }).join('/');
   }
 
+  // 代理返回的 error 是字符串；统一取出可读信息，避免 r.error.message 恒为 undefined
+  function ghErr(r, fallback) {
+    if (!r) return fallback || '请求失败';
+    if (typeof r.error === 'string' && r.error) return r.error;
+    if (r.error && typeof r.error.message === 'string' && r.error.message) return r.error.message;
+    if (r.data && r.data.message) return r.data.message;
+    return fallback || ('HTTP ' + (r.status || 0));
+  }
+  function isBinaryPath(p) { return BINARY_EXT_RE.test(String(p || '').split('?')[0]); }
+  // 内容探测：含 NUL 或控制字符占比过高即视为二进制，避免 atob 乱码
+  function looksBinaryText(str) {
+    if (!str) return false;
+    if (str.indexOf('\x00') >= 0) return true;
+    var sample = str.slice(0, 4096), bad = 0;
+    for (var i = 0; i < sample.length; i++) {
+      var c = sample.charCodeAt(i);
+      if (c < 9 || (c > 13 && c < 32)) bad++;
+    }
+    return sample.length > 0 && bad / sample.length > 0.02;
+  }
+
   // ── 通用 SSE 流式读取器（兼容 /api/code/ai 与 /api/agent/custom-chat/stream）──
   function streamAi(payload, callbacks) {
     return new Promise(function (resolve, reject) {
@@ -469,6 +501,12 @@
     tokenField.appendChild(el('label', { text: 'GitHub Personal Access Token' }));
     var tokenInput = el('input', { type: 'password', id: 'cwToken', class: 'cw-input', placeholder: 'ghp_... 或 github_pat_...', autocomplete: 'off', spellcheck: 'false' });
     tokenField.appendChild(tokenInput);
+    var rememberToken = el('label', { class: 'cw-remember' });
+    var rememberCheck = el('input', { type: 'checkbox', id: 'cwRememberToken' });
+    rememberCheck.checked = true;
+    rememberToken.appendChild(rememberCheck);
+    rememberToken.appendChild(el('span', { text: '记住 Token（取消勾选则仅本次会话保留，更安全）' }));
+    tokenField.appendChild(rememberToken);
     card.appendChild(tokenField);
 
     var modelField = el('div', { class: 'cw-field' });
@@ -553,6 +591,10 @@
     mergeBox.appendChild(mergeRow2);
     var mergeMsg = el('input', { type: 'text', class: 'cw-input cw-merge-msg', id: 'cwMergeMsg', placeholder: '合并说明（可选）', autocomplete: 'off', spellcheck: 'false' });
     mergeBox.appendChild(mergeMsg);
+    var mergePreview = el('div', { class: 'cw-merge-preview', id: 'cwMergePreview', text: '' });
+    mergeBox.appendChild(mergePreview);
+    mergeBaseSel.addEventListener('change', function () { updateMergePreview(); });
+    mergeHeadSel.addEventListener('change', function () { updateMergePreview(); });
     var mergeBtns = el('div', { class: 'cw-merge-btns' });
     var mergeDoBtn = el('button', { type: 'button', class: 'cw-mini-btn cw-mini-btn-primary', id: 'cwMergeDo', text: '确认合并' });
     mergeDoBtn.addEventListener('click', function () { doMerge(); });
@@ -582,7 +624,17 @@
     cancelEditBtn.addEventListener('click', function () { exitEditMode(); });
     var saveBtn = el('button', { type: 'button', class: 'cw-mini-btn cw-mini-btn-primary hidden', id: 'cwSaveBtn', text: '保存到仓库' });
     saveBtn.addEventListener('click', function () { startCommit(); });
+    var newFileBtn = el('button', { type: 'button', class: 'cw-mini-btn', id: 'cwNewFileBtn', text: '+ 新建' });
+    newFileBtn.setAttribute('title', '在当前分支新建文件');
+    newFileBtn.addEventListener('click', function () { newFile(); });
+    var deleteFileBtn = el('button', { type: 'button', class: 'cw-mini-btn cw-danger-btn hidden', id: 'cwDeleteFileBtn', text: '删除' });
+    deleteFileBtn.addEventListener('click', function () { deleteFile(); });
+    var undoAiBtn = el('button', { type: 'button', class: 'cw-mini-btn hidden', id: 'cwUndoAiBtn', text: '撤销AI' });
+    undoAiBtn.addEventListener('click', function () { undoAiApply(); });
     viewerActions.appendChild(editBtn);
+    viewerActions.appendChild(newFileBtn);
+    viewerActions.appendChild(deleteFileBtn);
+    viewerActions.appendChild(undoAiBtn);
     viewerActions.appendChild(cancelEditBtn);
     viewerActions.appendChild(saveBtn);
     viewerHead.appendChild(filePath);
@@ -666,6 +718,7 @@
       splitH: splitH,
       repoInput: repoInput,
       tokenInput: tokenInput,
+      rememberCheck: rememberCheck,
       modelSelect: modelSelect,
       thinkSelect: thinkSelect,
       thinkSel: thinkSel,
@@ -683,6 +736,7 @@
       mergeHeadSel: mergeHeadSel,
       mergeMsg: mergeMsg,
       mergeDoBtn: mergeDoBtn,
+      mergePreview: mergePreview,
       historyBox: historyBox,
       tabTree: tabTree,
       tabHist: tabHist,
@@ -693,6 +747,9 @@
       editBtn: editBtn,
       cancelEditBtn: cancelEditBtn,
       saveBtn: saveBtn,
+      newFileBtn: newFileBtn,
+      deleteFileBtn: deleteFileBtn,
+      undoAiBtn: undoAiBtn,
       commitBar: commitBar,
       commitMsg: commitMsg,
       commitHint: commitHint,
@@ -876,7 +933,7 @@
       if (!r.ok) {
         if (r.status === 401) notify('Token 无效或已过期，请检查后重试');
         else if (r.status === 404) notify('仓库不存在，或当前 Token 无权访问该仓库');
-        else notify((r.error && r.error.message) ? r.error.message : '连接仓库失败，请检查网络');
+        else notify(ghErr(r, '连接仓库失败，请检查网络'));
         return;
       }
       var info = r.data;
@@ -892,13 +949,12 @@
       };
       state.prMode = ui.prCheck.checked;
       saveRepo(state.repo);
-      saveToken(state.token);
+      if (ui.rememberCheck && ui.rememberCheck.checked) saveToken(state.token); else saveToken('');
       safeStorageSet(LS_PR, state.prMode ? '1' : '0');
       ui.repoName.textContent = state.repo.full_name;
       ui.connectView.classList.add('hidden');
       ui.workspace.classList.remove('hidden');
-      await loadBranches();
-      await loadTree();
+      await Promise.all([loadBranches(), loadTree()]);
       notify('仓库连接成功：' + state.repo.full_name);
     } finally {
       state.busy = false;
@@ -928,11 +984,19 @@
   // ── 分支 ──────────────────────────────────────────────────────
   async function loadBranches() {
     if (!state.repo) return;
-    var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/branches?per_page=100');
-    if (r.ok && Array.isArray(r.data)) {
+    // 分页拉取全部分支（默认每页 100，>100 分支的仓库也不丢）
+    var all = [], page = 1;
+    while (page <= 5) {
+      var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/branches?per_page=100&page=' + page);
+      if (!r.ok || !Array.isArray(r.data) || !r.data.length) break;
+      all = all.concat(r.data);
+      if (r.data.length < 100 || all.length >= BRANCH_PAGE_MAX) break;
+      page++;
+    }
+    if (all.length) {
       ui.branchSel.innerHTML = '';
       var found = false;
-      r.data.forEach(function (b) {
+      all.forEach(function (b) {
         var name = b.name;
         var opt = el('option', { value: name, text: name });
         if (name === state.repo.branch) { opt.selected = true; found = true; }
@@ -943,7 +1007,7 @@
         ui.branchSel.insertBefore(curOpt, ui.branchSel.firstChild);
       }
     }
-    // 记录当前分支 head sha（PR 模式创建分支用）
+    // 记录当前分支最新 head sha（PR 模式创建分支用）
     try {
       var headRef = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/git/ref/heads/' + encodeURIComponent(state.repo.branch));
       if (headRef.ok && headRef.data && headRef.data.object) state.repo.branch_sha = headRef.data.object.sha;
@@ -954,6 +1018,7 @@
     if (!ui.branchSel.value || ui.branchSel.value === state.repo.branch) return;
     state.repo.branch = ui.branchSel.value;
     state.repo.branch_sha = '';
+    state.treeSeq++; // 作废在途的旧分支文件树
     saveRepo(state.repo);
     resetBulkCache();
     clearFileView();
@@ -963,15 +1028,17 @@
   // ── 文件树 ────────────────────────────────────────────────────
   async function loadTree() {
     if (!state.repo) return;
+    var seq = ++state.treeSeq;
     ui.treeBox.innerHTML = '';
     var loading = el('div', { class: 'cw-tree-loading', text: '加载中...' });
     ui.treeBox.appendChild(loading);
     try {
       var owner = state.repo.owner, repoName = state.repo.repo, branch = state.repo.branch;
       var r = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/git/trees/' + encodeURIComponent(branch) + '?recursive=1');
+      if (seq !== state.treeSeq) return; // 已切换分支/刷新，丢弃过期响应
       if (!r.ok) {
         ui.treeBox.innerHTML = '';
-        ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '文件树加载失败：' + esc((r.error && r.error.message) || '未知错误') }));
+        ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '文件树加载失败：' + esc(ghErr(r, '未知错误')) }));
         return;
       }
       var flat = (r.data && r.data.tree) || [];
@@ -1004,23 +1071,32 @@
   async function walkFullTree(owner, repoName, branch) {
     var items = [];
     var refRes = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/commits/' + encodeURIComponent(branch));
-    var treeSha = (refRes.data && refRes.data.commit && refRes.data.commit.tree && refRes.data.commit.tree.sha) || branch;
-    async function walk(sha, prefix) {
-      if (!sha) return;
-      var rr = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/git/trees/' + sha);
-      if (!rr.ok || !rr.data || !Array.isArray(rr.data.tree)) return;
-      var entries = rr.data.tree;
-      for (var i = 0; i < entries.length; i++) {
-        var e = entries[i];
-        if (!e || !e.path) continue;
-        if (e.type === 'tree') {
-          await walk(e.sha, prefix + e.path + '/');
-        } else if (e.type === 'blob') {
-          items.push({ path: prefix + e.path, type: 'blob' });
+    var rootSha = (refRes.data && refRes.data.commit && refRes.data.commit.tree && refRes.data.commit.tree.sha) || branch;
+    // BFS 队列 + 固定并发池；递归前用 TREE_SKIP_DIRS 剪枝，避免钻进 node_modules 等浪费请求
+    var queue = [{ sha: rootSha, prefix: '' }];
+    async function worker() {
+      while (queue.length) {
+        var job = queue.shift();
+        if (!job) return;
+        var rr = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/git/trees/' + job.sha);
+        if (!rr.ok || !rr.data || !Array.isArray(rr.data.tree)) continue;
+        var entries = rr.data.tree;
+        for (var i = 0; i < entries.length; i++) {
+          var e = entries[i];
+          if (!e || !e.path) continue;
+          var full = job.prefix + e.path;
+          if (e.type === 'tree') {
+            if (TREE_SKIP_DIRS.test(full + '/')) continue;
+            queue.push({ sha: e.sha, prefix: full + '/' });
+          } else if (e.type === 'blob') {
+            items.push({ path: full, type: 'blob' });
+          }
         }
       }
     }
-    await walk(treeSha, '');
+    var pool = [];
+    for (var w = 0; w < WALK_CONCURRENCY; w++) pool.push(worker());
+    await Promise.all(pool);
     return items;
   }
 
@@ -1096,11 +1172,16 @@
     ui.editBtn.classList.add('hidden');
     ui.cancelEditBtn.classList.add('hidden');
     ui.saveBtn.classList.add('hidden');
+    if (ui.deleteFileBtn) ui.deleteFileBtn.classList.add('hidden');
+    if (ui.undoAiBtn) ui.undoAiBtn.classList.add('hidden');
     ui.commitBar.classList.add('hidden');
   }
 
   async function openFile(path) {
     if (!state.repo) return;
+    var seq = ++state.fileSeq; // 请求代次：快速连点文件时，慢返回的旧请求作废
+    state.isNewFile = false;
+    state.undo = null;
     state.currentPath = path;
     state.currentSha = '';
     state.currentContent = '';
@@ -1118,14 +1199,17 @@
     ui.saveBtn.classList.add('hidden');
     ui.commitBar.classList.add('hidden');
     ui.editor.classList.add('hidden');
+    if (ui.undoAiBtn) ui.undoAiBtn.classList.add('hidden');
     try {
       var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/contents/' + encodePath(path) + '?ref=' + encodeURIComponent(state.repo.branch));
+      if (seq !== state.fileSeq) return; // 已切换到其它文件，丢弃过期响应
       if (!r.ok) {
-        ui.codePre.textContent = '加载失败：' + esc((r.error && r.error.message) || '未知错误');
+        ui.codePre.textContent = '加载失败：' + esc(ghErr(r, '未知错误'));
         return;
       }
       var item = r.data;
       var isTruncated = false;
+      var overContentsApi = false;
       var content = '';
       if (item.encoding === 'base64' && item.content) {
         try {
@@ -1136,7 +1220,16 @@
       } else if (item.content) {
         content = item.content;
       }
+      // 二进制文件：不做文本展示/编辑，避免 atob 乱码
+      if (isBinaryPath(path) || looksBinaryText(content)) {
+        state.currentSha = item.sha || '';
+        state.currentContent = '';
+        ui.codePre.textContent = '二进制文件（' + Math.round((item.size || 0) / 1024) + 'KB），不支持在线查看与编辑，可在本地处理后上传，或点“删除”移除。';
+        if (ui.deleteFileBtn) ui.deleteFileBtn.classList.remove('hidden');
+        return;
+      }
       var size = item.size || content.length;
+      if (size > CONTENTS_API_BYTES) overContentsApi = true;
       if (size > MAX_FILE_BYTES) {
         isTruncated = true;
         content = content.slice(0, MAX_FILE_BYTES);
@@ -1145,7 +1238,9 @@
       state.currentContent = content;
       ui.codePre.textContent = content || '（空文件）';
       if (isTruncated) ui.codePre.textContent += '\n\n...（文件过大，仅展示前 ' + Math.round(MAX_FILE_BYTES / 1024) + 'KB）';
+      else if (overContentsApi) ui.codePre.textContent += '\n\n...（该文件超过 Contents 接口约 1MB 上限，提交时将自动改用 Git 接口）';
       ui.editBtn.classList.remove('hidden');
+      if (ui.deleteFileBtn) ui.deleteFileBtn.classList.remove('hidden');
     } catch (e) {
       ui.codePre.textContent = '加载失败';
     }
@@ -1209,96 +1304,179 @@
     }
   }
 
+  // 通过 Git Database API 在指定分支一次性提交多个文件（绕开 Contents 接口约 1MB 上限，支持多文件/新建/删除）
+  // changes: [{ path, content }]，content 为 null 表示删除该文件
+  async function gitApiCommitMany(owner, repoName, branch, changes, message) {
+    var ref = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/git/ref/heads/' + encodeURIComponent(branch));
+    if (!ref.ok) return ref;
+    var parentSha = ref.data.object.sha;
+    var parentCommit = await ghRequest('GET', '/repos/' + owner + '/' + repoName + '/git/commits/' + parentSha);
+    if (!parentCommit.ok) return parentCommit;
+    var baseTree = parentCommit.data.tree.sha;
+    var treeItems = [];
+    for (var i = 0; i < changes.length; i++) {
+      var ch = changes[i];
+      if (ch.content === null || ch.content === undefined) {
+        treeItems.push({ path: ch.path, mode: '100644', type: 'blob', sha: null }); // sha:null = 删除
+      } else {
+        var blob = await ghRequest('POST', '/repos/' + owner + '/' + repoName + '/git/blobs', { content: b64encode(ch.content), encoding: 'base64' });
+        if (!blob.ok) return blob;
+        treeItems.push({ path: ch.path, mode: '100644', type: 'blob', sha: blob.data.sha });
+      }
+    }
+    var tree = await ghRequest('POST', '/repos/' + owner + '/' + repoName + '/git/trees', { base_tree: baseTree, tree: treeItems });
+    if (!tree.ok) return tree;
+    var newCommit = await ghRequest('POST', '/repos/' + owner + '/' + repoName + '/git/commits', { message: message, tree: tree.data.sha, parents: [parentSha] });
+    if (!newCommit.ok) return newCommit;
+    // force:false 快进更新；若期间分支又被推进，GitHub 返回 409/422，提示刷新，避免覆盖他人提交
+    var upd = await ghRequest('PATCH', '/repos/' + owner + '/' + repoName + '/git/refs/heads/' + encodeURIComponent(branch), { sha: newCommit.data.sha, force: false });
+    if (!upd.ok) return upd;
+    return { ok: true, status: 200, data: { commit: newCommit.data } };
+  }
+
+  // Contents API 单次写入约 1MB；超过则自动改用 Git Database，保证大文件也能提交
+  function shouldUseGitApi(content) {
+    try { return b64encode(String(content == null ? '' : content)).length > 900000; } catch (e) { return false; }
+  }
+  async function commitOneFile(owner, repoName, branch, path, content, message, existingSha) {
+    if (shouldUseGitApi(content)) return await gitApiCommitMany(owner, repoName, branch, [{ path: path, content: content }], message);
+    var body = { message: message, content: b64encode(content), branch: branch };
+    if (existingSha) body.sha = existingSha; // 新建文件不带 sha
+    return await ghRequest('PUT', '/repos/' + owner + '/' + repoName + '/contents/' + encodePath(path), body);
+  }
+
   async function doCommit() {
     if (!state.repo || !state.currentPath) return;
     var message = ui.commitMsg.value.trim();
     if (!message) { notify('请填写提交信息'); return; }
     var newContent = ui.editor.value;
-    if (state.currentContent === newContent) { notify('内容未变化，无需提交'); return; }
+    var wasNew = state.isNewFile;
+    if (!newContent.trim()) { notify('内容为空，无需提交'); return; }
+    if (!wasNew && state.currentContent === newContent) { notify('内容未变化，无需提交'); return; }
+    // 直接推送到默认分支前二次确认，避免误改主分支
+    if (!state.prMode && state.repo.branch === state.repo.default_branch) {
+      if (!window.confirm('即将直接提交到默认分支「' + state.repo.default_branch + '」，是否继续？（也可勾选连接页的“创建 PR”模式以走评审）')) return;
+    }
     ui.commitBtn.disabled = true;
     ui.commitBtn.textContent = '提交中...';
     try {
       var owner = state.repo.owner, repo = state.repo.repo, baseBranch = state.repo.branch;
-      var commitResult;
       var targetBranch = baseBranch;
-      var createdPr = null;
+      var createdPr = null, prCreateFailed = false, leftoverBranch = '';
+      var commitResult;
       if (state.prMode) {
-        // 创建新分支
         targetBranch = 'code-wb-' + Date.now().toString(36);
-        if (!state.repo.branch_sha) {
-          var headRef = await ghRequest('GET', '/repos/' + owner + '/' + repo + '/git/ref/heads/' + encodeURIComponent(baseBranch));
-          if (headRef.ok && headRef.data && headRef.data.object) state.repo.branch_sha = headRef.data.object.sha;
-        }
-        var refRes = await ghRequest('POST', '/repos/' + owner + '/' + repo + '/git/refs', {
-          ref: 'refs/heads/' + targetBranch,
-          sha: state.repo.branch_sha
-        });
-        if (!refRes.ok) {
-          notify('创建分支失败：' + esc((refRes.error && refRes.error.message) || '未知错误'));
-          return;
-        }
-        commitResult = await ghRequest('PUT', '/repos/' + owner + '/' + repo + '/contents/' + encodePath(state.currentPath), {
-          message: message,
-          content: b64encode(newContent),
-          branch: targetBranch,
-          sha: state.currentSha || undefined
-        });
+        // 每次都取基线分支最新 head，避免从旧点拉分支而丢失最新提交
+        var headRef = await ghRequest('GET', '/repos/' + owner + '/' + repo + '/git/ref/heads/' + encodeURIComponent(baseBranch));
+        var baseSha = (headRef.ok && headRef.data && headRef.data.object) ? headRef.data.object.sha : state.repo.branch_sha;
+        if (!baseSha) { notify('无法获取基线分支最新提交，请刷新后重试'); return; }
+        var refRes = await ghRequest('POST', '/repos/' + owner + '/' + repo + '/git/refs', { ref: 'refs/heads/' + targetBranch, sha: baseSha });
+        if (!refRes.ok) { notify('创建分支失败：' + ghErr(refRes, '未知错误')); return; }
+        leftoverBranch = targetBranch;
+        commitResult = await commitOneFile(owner, repo, targetBranch, state.currentPath, newContent, message, wasNew ? '' : state.currentSha);
         if (commitResult.ok) {
           var prRes = await ghRequest('POST', '/repos/' + owner + '/' + repo + '/pulls', {
-            title: message,
-            head: targetBranch,
-            base: baseBranch,
-            body: '由 小猫AI Code 工作区自动创建'
+            title: message, head: targetBranch, base: baseBranch, body: '由 小猫AI Code 工作区自动创建'
           });
-          if (prRes.ok) createdPr = prRes.data;
+          if (prRes.ok) { createdPr = prRes.data; leftoverBranch = ''; }
+          else prCreateFailed = true;
         }
       } else {
-        commitResult = await ghRequest('PUT', '/repos/' + owner + '/' + repo + '/contents/' + encodePath(state.currentPath), {
-          message: message,
-          content: b64encode(newContent),
-          branch: targetBranch,
-          sha: state.currentSha || undefined
-        });
+        commitResult = await commitOneFile(owner, repo, targetBranch, state.currentPath, newContent, message, wasNew ? '' : state.currentSha);
       }
       if (!commitResult.ok) {
-        var errMsg = (commitResult.error && commitResult.error.message) || '提交失败';
+        var errMsg = ghErr(commitResult, '提交失败');
         if (commitResult.status === 409) errMsg = '提交冲突：文件已在远端被修改，请刷新后重试';
-        else if (commitResult.status === 422) errMsg = '提交被拒绝：请检查 Token 的写入权限（需 repo/contents 权限）';
+        else if (commitResult.status === 422) errMsg = '提交被拒绝：请检查 Token 的 Contents 写入权限，或文件是否超出限制';
+        if (leftoverBranch) errMsg += '（分支 ' + leftoverBranch + ' 已创建但提交未完成，可在 GitHub 删除）';
         notify(errMsg);
         return;
       }
-      // 记录修改历史
-      var record = {
-        ts: Date.now(),
-        path: state.currentPath,
-        message: message,
-        branch: targetBranch,
-        base_branch: baseBranch,
-        pr_mode: !!state.prMode,
-        url: createdPr ? createdPr.html_url : ((commitResult.data && commitResult.data.commit && commitResult.data.commit.html_url) || ''),
-        sha: (createdPr ? createdPr.head && createdPr.head.sha : (commitResult.data && commitResult.data.commit && commitResult.data.commit.sha)) || ''
-      };
-      var hist = loadHistory();
-      hist.unshift(record);
-      saveHistory(hist);
-      // 更新本地内容为最新
-      state.currentSha = (commitResult.data && commitResult.data.content && commitResult.data.content.sha) || '';
-      state.currentContent = newContent;
-      notify(createdPr ? '已创建 Pull Request' : '已提交到 ' + targetBranch);
-      exitEditMode();
-      if (state.prMode) {
-        // PR 模式回到原分支并刷新
-        state.repo.branch = baseBranch;
-        ui.branchSel.value = baseBranch;
-        saveRepo(state.repo);
+      var newSha = '';
+      if (commitResult.data) {
+        if (commitResult.data.content && commitResult.data.content.sha) newSha = commitResult.data.content.sha;
+        else if (commitResult.data.commit && commitResult.data.commit.sha) newSha = commitResult.data.commit.sha;
       }
+      var record = {
+        ts: Date.now(), path: state.currentPath, message: message,
+        branch: targetBranch, base_branch: baseBranch, pr_mode: !!state.prMode,
+        url: createdPr ? createdPr.html_url : ((commitResult.data && commitResult.data.commit && commitResult.data.commit.html_url) || ''),
+        sha: (createdPr && createdPr.head && createdPr.head.sha) || newSha || ''
+      };
+      var hist = loadHistory(); hist.unshift(record); saveHistory(hist);
+      state.currentSha = newSha;
+      state.currentContent = newContent;
+      // 同步整库缓存，避免 AI 继续基于旧内容分析
+      if (state.bulkFiles && Object.prototype.hasOwnProperty.call(state.bulkFiles, state.currentPath)) state.bulkFiles[state.currentPath] = newContent;
+      state.isNewFile = false;
+      if (createdPr) notify('已创建 Pull Request：' + (createdPr.html_url || ''));
+      else if (prCreateFailed) notify('代码已提交到分支 ' + targetBranch + '，但 Pull Request 创建失败，可到 GitHub 手动发起');
+      else notify((wasNew ? '已新建并提交到 ' : '已提交到 ') + targetBranch);
+      exitEditMode();
+      if (state.prMode) { state.repo.branch = baseBranch; ui.branchSel.value = baseBranch; saveRepo(state.repo); }
       renderHistoryList();
       loadTree();
     } catch (e) {
-      notify('提交失败：' + esc((e && e.message) || '未知错误'));
+      notify('提交失败：' + ((e && e.message) || '未知错误'));
     } finally {
       ui.commitBtn.disabled = false;
       ui.commitBtn.textContent = '确认提交';
+    }
+  }
+
+  // 新建文件：填写路径后进入空白编辑器，提交时不带 sha 即由 GitHub 创建
+  function newFile() {
+    if (!state.repo) { notify('请先连接仓库'); return; }
+    var p = window.prompt('新文件路径（相对仓库根，例如 src/foo.js）：');
+    if (p === null) return;
+    p = String(p || '').trim().replace(/^\/+\s*/, '');
+    if (!p) return;
+    if (isBinaryPath(p)) { notify('二进制文件不支持在线新建，请在本地上传'); return; }
+    if (isKnownFilePath(p)) { openFile(p); return; }
+    state.fileSeq++;
+    state.currentPath = p; state.currentSha = ''; state.currentContent = ''; state.isNewFile = true; state.undo = null;
+    ui.filePath.textContent = p + '（新文件）';
+    ui.viewerEmpty.classList.add('hidden');
+    ui.codePre.classList.add('hidden');
+    ui.editor.classList.remove('hidden');
+    ui.editor.value = '';
+    ui.editBtn.classList.add('hidden');
+    ui.cancelEditBtn.classList.remove('hidden');
+    ui.saveBtn.classList.remove('hidden');
+    ui.commitBar.classList.add('hidden');
+    if (ui.undoAiBtn) ui.undoAiBtn.classList.add('hidden');
+    autoResizeEditor();
+    try { ui.editor.focus(); } catch (e) {}
+    notify('新文件：填写内容后点「保存到仓库」提交');
+  }
+
+  // 删除当前文件：小文件走 contents DELETE（后端仅放行该类删除），大文件走 Git Database
+  async function deleteFile() {
+    if (!state.repo || !state.currentPath || state.isNewFile) return;
+    if (!window.confirm('确定从分支「' + state.repo.branch + '」删除文件 ' + state.currentPath + ' ？')) return;
+    var msg = window.prompt('提交信息：', 'chore: 删除 ' + state.currentPath);
+    if (msg === null) return;
+    msg = String(msg).trim() || ('chore: 删除 ' + state.currentPath);
+    ui.saveBtn.disabled = true;
+    try {
+      var owner = state.repo.owner, repo = state.repo.repo, br = state.repo.branch;
+      var r;
+      if (shouldUseGitApi(state.currentContent)) {
+        r = await gitApiCommitMany(owner, repo, br, [{ path: state.currentPath, content: null }], msg);
+      } else {
+        r = await ghRequest('DELETE', '/repos/' + owner + '/' + repo + '/contents/' + encodePath(state.currentPath), { message: msg, branch: br, sha: state.currentSha });
+      }
+      if (!r.ok) { notify('删除失败：' + ghErr(r, '未知错误')); return; }
+      if (state.bulkFiles) { try { delete state.bulkFiles[state.currentPath]; } catch (e) {} }
+      var h = loadHistory();
+      h.unshift({ ts: Date.now(), path: state.currentPath, message: msg, branch: br, base_branch: br, pr_mode: false, url: '', sha: '', deleted: true });
+      saveHistory(h);
+      notify('已删除 ' + state.currentPath);
+      clearFileView(); loadTree(); renderHistoryList();
+    } catch (e) {
+      notify('删除失败：' + ((e && e.message) || '未知错误'));
+    } finally {
+      ui.saveBtn.disabled = false;
     }
   }
 
@@ -1319,7 +1497,8 @@
   function updateBulkStatus() {
     if (!ui.bulkStatus) return;
     var n = state.bulkFiles ? Object.keys(state.bulkFiles).length : 0;
-    ui.bulkStatus.textContent = n ? ('已载入 ' + n + ' 个文件' + (state.bulkBranch ? ' · ' + state.bulkBranch : '')) : '';
+    ui.bulkStatus.textContent = n ? ('已载入 ' + n + ' 个文件' + (state.bulkBranch ? ' · ' + state.bulkBranch : '') + ((state.bulkFailed && state.bulkFailed.length) ? ' · ' + state.bulkFailed.length + ' 个未读' : '')) : '';
+    ui.bulkStatus.title = (state.bulkFailed && state.bulkFailed.length) ? ('未读取：\n' + state.bulkFailed.slice(0, 50).join('\n')) : '';
   }
   async function bulkLoadAll() {
     if (!state.repo || !state.tree || !state.tree.length) { notify('请先连接仓库并加载文件树'); return; }
@@ -1336,6 +1515,7 @@
     if (candidates.length > BULK_MAX_FILES) candidates = candidates.slice(0, BULK_MAX_FILES);
     if (!candidates.length) { notify('当前分支没有可批量读取的代码文件'); return; }
     state.bulkFiles = {};
+    state.bulkFailed = [];
     state.bulkBranch = state.repo.branch;
     if (ui.bulkBtn) ui.bulkBtn.disabled = true;
     var total = candidates.length, done = 0, failed = 0;
@@ -1347,8 +1527,8 @@
           var c = decodeGhContent(r.data);
           if (c.length > BULK_MAX_FILE_BYTES) c = c.slice(0, BULK_MAX_FILE_BYTES);
           state.bulkFiles[n.path] = c;
-        } else { failed++; }
-      } catch (e) { failed++; }
+        } else { failed++; state.bulkFailed.push(n.path); }
+      } catch (e) { failed++; state.bulkFailed.push(n.path); }
       done++;
       if (ui.bulkStatus) ui.bulkStatus.textContent = done + '/' + total;
     }
@@ -1384,6 +1564,23 @@
     var other = names.filter(function (nm) { return nm !== state.repo.branch; })[0] || names[0];
     fillMergeSelect(ui.mergeHeadSel, names, other);
     ui.mergeBox.classList.remove('hidden');
+    updateMergePreview();
+  }
+  // 合并前预检：对比 base...head，展示领先/落后/分叉与变更文件数
+  async function updateMergePreview() {
+    if (!ui.mergePreview || ui.mergeBox.classList.contains('hidden')) return;
+    var base = ui.mergeBaseSel.value, head = ui.mergeHeadSel.value;
+    if (!base || !head) { ui.mergePreview.textContent = ''; return; }
+    if (base === head) { ui.mergePreview.textContent = '合入分支与来源分支相同'; return; }
+    ui.mergePreview.textContent = '正在对比两个分支...';
+    var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/compare/' + encodeURIComponent(base) + '...' + encodeURIComponent(head));
+    if (!r.ok) { ui.mergePreview.textContent = '对比失败：' + ghErr(r, '未知错误'); return; }
+    var d = r.data || {};
+    var statusMap = { identical: '内容一致（无需合并）', ahead: '可快进合并', behind: '来源落后于目标', diverged: '已分叉（可能存在冲突）' };
+    var line = statusMap[d.status] || ('状态：' + (d.status || '未知'));
+    if (d.status !== 'identical') line += '：' + head + ' 领先 ' + (d.ahead_by || 0) + ' / 落后 ' + (d.behind_by || 0) + '，变更文件 ' + (Array.isArray(d.files) ? d.files.length : 0) + ' 个';
+    ui.mergePreview.textContent = line;
+    ui.mergePreview.classList.toggle('cw-merge-warn', d.status === 'diverged');
   }
   function closeMergeBox() { if (ui.mergeBox) ui.mergeBox.classList.add('hidden'); }
   async function doMerge() {
@@ -1414,7 +1611,7 @@
       } else if (r.status === 409) {
         notify('合并冲突：请先在本地解决 ' + head + ' 与 ' + base + ' 的冲突后再合并');
       } else {
-        notify('合并失败：' + ((r.error && r.error.message) || ('HTTP ' + r.status)));
+        notify('合并失败：' + ghErr(r, 'HTTP ' + r.status));
       }
     } catch (e) {
       notify('合并失败：' + ((e && e.message) || '未知错误'));
@@ -1519,8 +1716,13 @@
     }
     if (!files.length) return '';
     files.sort();
-    if (files.length > 5000) files = files.slice(0, 5000);
-    return files.join('\n');
+    var out = [], used = 0;
+    for (var fi = 0; fi < files.length; fi++) {
+      var ln = files[fi];
+      if (used + ln.length + 1 > TREE_AI_MAX_CHARS) { out.push('...（文件清单过长，已省略其余 ' + (files.length - fi) + ' 项，可点名要求查看某个文件）'); break; }
+      out.push(ln); used += ln.length + 1;
+    }
+    return out.join('\n');
   }
 
   function buildAiPrompt(request) {
@@ -1697,31 +1899,28 @@
     if (!done && finalText) {
       state.aiLastOutput = finalText;
       appendChatMessage('assistant', finalText);
-      // 移除临时的 streaming 气泡
       try { if (aiWrap.parentNode) aiWrap.parentNode.removeChild(aiWrap); } catch (e) {}
-      // 自动识别 AI 要改的目标文件并应用，尽量免去手动选文件
+      var truncated = isAiOutputTruncated(finalText);
+      var groups = extractAllCodeBlocks(finalText);
       var fenced = extractCodeBlock(finalText);
-      var targetPath = extractTargetPath(fenced);
-      var targetKnown = !!(targetPath && isKnownFilePath(targetPath));
-      if (fenced && (targetKnown || state.currentPath)) {
-        var finalPath = targetKnown ? targetPath : state.currentPath;
-        function showApplyButton(txt) {
-          var applyWrap = el('div', { class: 'cw-msg cw-msg-apply' });
-          var applyBtn = el('button', { type: 'button', class: 'cw-mini-btn cw-mini-btn-primary', text: '将 AI 结果应用到「' + (finalPath || '编辑器') + '」' });
-          applyBtn.addEventListener('click', function () { applyAiOutput(txt || fenced); });
-          applyWrap.appendChild(applyBtn);
-          ui.chatMsgs.appendChild(applyWrap);
-          scrollChat();
-        }
-        if (targetKnown && finalPath !== state.currentPath) {
-          // 自动打开 AI 指定的目标文件后应用
-          openFile(finalPath).then(function () {
-            applyAiOutput(fenced);
-          }).catch(function () {
-            showApplyButton();
-          });
-        } else {
-          applyAiOutput(fenced);
+      if (truncated) {
+        // ① 输出疑似截断：绝不自动覆盖，防止半截代码写坏文件
+        ui.chatMsgs.appendChild(el('div', { class: 'cw-msg cw-msg-warn', text: '⚠ AI 输出疑似不完整（代码块未闭合，可能达到输出长度上限）。已暂停自动应用：可让 AI“继续”，或点下方按钮强行应用。' }));
+        if (fenced) addApplyBar(fenced);
+        scrollChat();
+      } else if (groups.length >= 2) {
+        // ② 一次改多个文件：清单化，逐个应用或一次性提交
+        renderMultiFileBar(groups);
+      } else if (fenced) {
+        // ③ 单文件：编辑器存在未保存手动修改时先确认，避免被覆盖；否则自动应用保持流畅
+        var tp = extractTargetPath(fenced);
+        var tpKnown = !!(tp && isKnownFilePath(tp));
+        var editorDirty = !ui.editor.classList.contains('hidden') && ui.editor.value !== state.currentContent && !!ui.editor.value.trim();
+        if (editorDirty && (!tpKnown || tp === state.currentPath)) {
+          addApplyBar(fenced);
+          notify('检测到编辑器有未保存修改，已暂停自动覆盖，请确认后点“应用”');
+        } else if (tpKnown || state.currentPath) {
+          applyAiOutput(fenced, tpKnown ? tp : state.currentPath);
         }
       }
     } else if (!finalText && !done) {
@@ -1741,6 +1940,81 @@
     // 无代码块：若内容看起来像代码，直接整体使用
     if (/[{};=<>]/g.test(text) && text.split('\n').length > 1) return text.trim();
     return '';
+  }
+
+  var AI_FENCE = String.fromCharCode(96).repeat(3);
+  // 解析输出中所有带 path 标记的代码块，返回 [{path, code}]，同路径保留最后一次
+  function extractAllCodeBlocks(text) {
+    if (!text) return [];
+    var re = new RegExp(AI_FENCE + '[a-zA-Z0-9+#.\\-_]*\\s*\\n([\\s\\S]*?)' + AI_FENCE, 'g'), m, raw, res = [];
+    while ((m = re.exec(text)) !== null) {
+      raw = m[1].replace(/^\n+/, '');
+      var p = extractTargetPath(raw);
+      if (p) res.push({ path: p, code: stripPathMarker(raw) });
+    }
+    var map = {}, order = [];
+    res.forEach(function (x) { if (!Object.prototype.hasOwnProperty.call(map, x.path)) order.push(x.path); map[x.path] = x.code; });
+    return order.map(function (p) { return { path: p, code: map[p] }; });
+  }
+  // 代码围栏数量为奇数 => 存在未闭合代码块，输出疑似被 max_tokens 截断
+  function isAiOutputTruncated(text) {
+    if (!text) return false;
+    var fences = text.match(new RegExp(AI_FENCE, 'g'));
+    return !!(fences && fences.length % 2 === 1);
+  }
+  // 单个“应用到文件”按钮条
+  function addApplyBar(code) {
+    var p = extractTargetPath(code), known = !!(p && isKnownFilePath(p));
+    var finalPath = known ? p : state.currentPath;
+    var wrap = el('div', { class: 'cw-msg cw-msg-apply' });
+    var btn = el('button', { type: 'button', class: 'cw-mini-btn cw-mini-btn-primary', text: '应用到「' + (finalPath || '请先选择文件') + '」' });
+    btn.addEventListener('click', function () { applyAiOutput(code, finalPath); });
+    wrap.appendChild(btn);
+    ui.chatMsgs.appendChild(wrap);
+    scrollChat();
+  }
+  // 多文件改动清单：逐个应用 / 一次性提交
+  function renderMultiFileBar(groups) {
+    var wrap = el('div', { class: 'cw-msg cw-msg-apply cw-multi-apply' });
+    wrap.appendChild(el('div', { class: 'cw-multi-title', text: 'AI 一次修改了 ' + groups.length + ' 个文件：' }));
+    groups.forEach(function (g) {
+      var row = el('div', { class: 'cw-multi-row' });
+      var known = isKnownFilePath(g.path);
+      var b = el('button', { type: 'button', class: 'cw-mini-btn', text: (known ? '应用' : '新建') + '：' + g.path });
+      b.addEventListener('click', function () { applyAiOutput(g.code, g.path); });
+      row.appendChild(b); wrap.appendChild(row);
+    });
+    var all = el('button', { type: 'button', class: 'cw-mini-btn cw-mini-btn-primary', text: '一次性提交全部 ' + groups.length + ' 个文件' });
+    all.addEventListener('click', function () { commitAllGroups(groups, all); });
+    wrap.appendChild(all);
+    ui.chatMsgs.appendChild(wrap);
+    scrollChat();
+  }
+  async function commitAllGroups(groups, btn) {
+    if (!state.repo || !groups || !groups.length) return;
+    var input = window.prompt('本次提交信息：', 'fix: AI 批量修改 ' + groups.length + ' 个文件');
+    if (input === null) return;
+    var msg = String(input).trim() || ('fix: AI 批量修改 ' + groups.length + ' 个文件');
+    var br = state.repo.branch;
+    if (br === state.repo.default_branch) {
+      if (!window.confirm('将直接提交 ' + groups.length + ' 个文件到默认分支「' + br + '」，是否继续？')) return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+    try {
+      var changes = groups.map(function (g) { return { path: g.path, content: stripPathMarker(g.code) }; });
+      var r = await gitApiCommitMany(state.repo.owner, state.repo.repo, br, changes, msg);
+      if (!r.ok) { notify('批量提交失败：' + ghErr(r, '未知错误')); return; }
+      groups.forEach(function (g) { if (state.bulkFiles) state.bulkFiles[g.path] = g.code; });
+      var h = loadHistory();
+      h.unshift({ ts: Date.now(), path: groups.map(function (g) { return g.path; }).join(', '), message: msg, branch: br, base_branch: br, pr_mode: false, multi: groups.length, url: (r.data && r.data.commit && r.data.commit.html_url) || '', sha: (r.data && r.data.commit && r.data.commit.sha) || '' });
+      saveHistory(h);
+      notify('已一次性提交 ' + groups.length + ' 个文件到 ' + br);
+      renderHistoryList(); loadTree();
+    } catch (e) {
+      notify('批量提交失败：' + ((e && e.message) || '未知错误'));
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '一次性提交全部 ' + groups.length + ' 个文件'; }
+    }
   }
 
   // 从 AI 输出的代码块首行解析目标文件路径（// path: a/b.js、# path: ...、<!-- path: ... -->）
@@ -1777,20 +2051,53 @@
     return lines.join('\n');
   }
 
-  function applyAiOutput(code) {
-    if (!state.currentPath) { notify('请先在左侧选择一个文件'); return; }
+  function applyAiOutput(code, targetPath) {
+    var path = targetPath || state.currentPath;
+    if (!path) { notify('请先在左侧选择一个文件，或让 AI 在代码块首行标注 // path:'); return; }
     if (!code) { notify('AI 结果中没有可用的代码'); return; }
     code = stripPathMarker(code);
+    var known = isKnownFilePath(path);
+    var apply = function () {
+      // 记录覆盖前快照，供一键还原，避免 AI 覆盖手动修改后无法找回
+      state.undo = {
+        path: state.currentPath,
+        isNew: state.isNewFile,
+        content: state.isNewFile ? '' : (ui.editor.classList.contains('hidden') ? state.currentContent : ui.editor.value)
+      };
+      state.currentPath = path;
+      state.isNewFile = !known;
+      state.currentSha = known ? state.currentSha : '';
+      if (!known) state.currentContent = '';
+      ui.filePath.textContent = path + (known ? '' : '（新文件）');
+      ui.codePre.classList.add('hidden');
+      ui.editor.classList.remove('hidden');
+      ui.editor.value = code;
+      ui.editBtn.classList.add('hidden');
+      ui.cancelEditBtn.classList.remove('hidden');
+      ui.saveBtn.classList.remove('hidden');
+      ui.commitBar.classList.add('hidden');
+      if (ui.undoAiBtn) ui.undoAiBtn.classList.remove('hidden');
+      autoResizeEditor();
+      notify('已应用到编辑器，确认无误后点「保存到仓库」提交');
+      try { ui.editor.focus(); } catch (e) {}
+    };
+    if (known && path !== state.currentPath) openFile(path).then(apply);
+    else apply();
+  }
+  // 还原最近一次 AI 应用前的内容
+  function undoAiApply() {
+    if (!state.undo) { notify('没有可还原的 AI 修改'); return; }
+    var u = state.undo;
+    state.currentPath = u.path;
+    state.isNewFile = u.isNew;
+    ui.filePath.textContent = u.path + (u.isNew ? '（新文件）' : '');
     ui.codePre.classList.add('hidden');
     ui.editor.classList.remove('hidden');
-    ui.editor.value = code;
-    ui.editBtn.classList.add('hidden');
-    ui.cancelEditBtn.classList.remove('hidden');
-    ui.saveBtn.classList.remove('hidden');
-    ui.commitBar.classList.add('hidden');
+    ui.editor.value = u.content || '';
+    state.undo = null;
+    if (ui.undoAiBtn) ui.undoAiBtn.classList.add('hidden');
     autoResizeEditor();
-    notify('已应用到编辑器，可继续编辑后点「保存到仓库」提交');
-    try { ui.editor.focus(); } catch (e) {}
+    notify('已还原 AI 修改前的内容');
   }
 
   // ── 刷新 ──────────────────────────────────────────────────────
@@ -1799,9 +2106,12 @@
     ui.repoName.textContent = state.repo.full_name;
     ui.refreshBtn.disabled = true;
     ui.refreshBtn.textContent = '刷新中...';
+    var prevPath = state.currentPath;
     try {
-      await loadBranches();
-      await loadTree();
+      await Promise.all([loadBranches(), loadTree()]);
+      // 远端可能已更新：重新拉取当前打开文件；整库缓存作废，避免 AI 基于旧代码
+      resetBulkCache();
+      if (prevPath) { try { await openFile(prevPath); } catch (e) {} }
       notify('已刷新');
     } finally {
       ui.refreshBtn.disabled = false;

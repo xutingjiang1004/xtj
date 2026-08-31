@@ -14569,8 +14569,8 @@ setInterval(function() {
 // 4. 数据存 posts 表 + AI_AGENT_*_MARKER（已加入 applyPublicPostExclusions 过滤）
 
 const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
-  Math.max(parseInt(process.env.AI_CHAT_MESSAGE_MAX_LEN || '50000', 10) || 50000, 1000),
-  100000
+  Math.max(parseInt(process.env.AI_CHAT_MESSAGE_MAX_LEN || '200000', 10) || 200000, 1000),
+  200000
 );
 // ★ 缓存优化：历史消息默认保留 256 条（原 20），更稳定的前缀，命中率更高
 // 同时每条历史消息截断到 4000 字符 (~1500 tokens)，防止单条长消息撑爆请求
@@ -21232,6 +21232,10 @@ function startDmUnreadNotifier() {
 // /repos、/user、/rate_limit），不在服务端记录 token，也不向其它主机发起转发。
 var CODE_GH_ALLOWED_METHODS = { GET: 1, POST: 1, PATCH: 1, PUT: 1, DELETE: 1 };
 var CODE_GH_PATH_OK = /^\/?(repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/.*)?|user(\/.*)?|rate_limit(\/.*)?)$/;
+// 高危方法最小授权：DELETE 仅允许删除仓库内单个文件(contents)，禁止删库/删分支/删标签；
+// PATCH 仅允许更新分支引用(git/refs，Git Database 多文件提交需要)。
+var CODE_GH_DELETE_PATH_OK = /^\/?repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/contents\//;
+var CODE_GH_PATCH_PATH_OK = /^\/?repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/git\/refs\//;
 async function proxyGithubApi(req, res) {
   try {
     var body = (req && req.body) || {};
@@ -21259,6 +21263,12 @@ async function proxyGithubApi(req, res) {
     if (!CODE_GH_PATH_OK.test(parsed.pathname)) {
       return res.status(400).json({ error: '仅支持仓库/用户接口路径', code: 'INVALID_INPUT' });
     }
+    if (method === 'DELETE' && !CODE_GH_DELETE_PATH_OK.test(parsed.pathname)) {
+      return res.status(400).json({ error: '删除操作仅限仓库内文件（contents），不允许删除仓库/分支/标签等', code: 'INVALID_INPUT' });
+    }
+    if (method === 'PATCH' && !CODE_GH_PATCH_PATH_OK.test(parsed.pathname)) {
+      return res.status(400).json({ error: 'PATCH 仅限更新分支引用（git/refs）', code: 'INVALID_INPUT' });
+    }
     // 请求体（如 contents 更新的 base64 内容）过大则拒绝
     if (ghBody !== undefined) {
       var ghBodySize = 0;
@@ -21281,7 +21291,8 @@ async function proxyGithubApi(req, res) {
       ghResp = await fetch('https://api.github.com' + upstreamPath, {
         method: method,
         headers: upstreamHeaders,
-        body: (method === 'GET' || method === 'DELETE') ? undefined : (ghBody === undefined ? undefined : JSON.stringify(ghBody)),
+        // GET 不带 body；DELETE 已被路径白名单严格限定为 contents 删文件，需携带 message/branch/sha
+        body: (method === 'GET') ? undefined : (ghBody === undefined ? undefined : JSON.stringify(ghBody)),
         signal: ghController.signal
       });
     } catch (eFetch) {
@@ -21339,7 +21350,7 @@ app.post('/api/code/ai', authenticateUser, rateLimit(60000, 12), async (req, res
       return;
     }
     var text = String((req.body && req.body.message) || '').trim();
-    if (!text || text.length > 50000) throw new Error('invalid_code_ai_request');
+    if (!text || text.length > 200000) throw new Error('invalid_code_ai_request');
     var history = Array.isArray(req.body && req.body.history) ? req.body.history : [];
     var msgs = [];
     for (var _ci = 0; _ci < history.length && msgs.length < 24; _ci++) {
@@ -21357,10 +21368,13 @@ app.post('/api/code/ai', authenticateUser, rateLimit(60000, 12), async (req, res
     var cwThinkAllowed = { off: 1, low: 1, medium: 1, high: 1, max: 1 };
     var cwThinking = String(((req.body && req.body.thinking_mode) || 'off')).toLowerCase();
     if (!cwThinkAllowed[cwThinking]) cwThinking = 'off';
+    // 代码助手需输出“完整文件”，按思考档位给足输出预算，避免长文件输出到一半被截断写坏
+    var CW_MAX_TOKENS = { off: 8192, low: 8192, medium: 16384, high: 16384, max: 32768 };
+    var cwMaxTokens = CW_MAX_TOKENS[cwThinking] || 8192;
     await callDeepSeekAI({
       system: CODE_WORKBENCH_SYSTEM_PROMPT,
       messages: msgs,
-      max_tokens: 4096,
+      max_tokens: cwMaxTokens,
       thinking_mode: cwThinking,
       temperature: 0.2,
       signal: requestAbort.signal,

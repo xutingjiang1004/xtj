@@ -7071,6 +7071,26 @@
 .cw-merge-btns { display: flex; gap: 8px; }
 .cw-merge-btns .cw-mini-btn { flex: 1 1 0; }
 [data-theme="dark"] .cw-merge-box { background: #1a2a25; border-color: rgba(140, 200, 185, 0.2); }
+
+/* ── Code 工作区增强：删除/记住Token/合并预检/多文件应用/截断警告 ── */
+.cw-danger-btn { color: #b42318 !important; border-color: rgba(180,35,24,.35) !important; }
+.cw-danger-btn:hover { border-color: rgba(180,35,24,.6) !important; background: rgba(180,35,24,.06) !important; }
+.cw-remember { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #4f6b62; margin-top: 6px; cursor: pointer; }
+.cw-remember input { margin: 0; }
+.cw-merge-preview { font-size: 12px; line-height: 1.5; color: #0f766e; background: rgba(15,118,110,.08); border-radius: 8px; padding: 6px 8px; word-break: break-all; }
+.cw-merge-preview.cw-merge-warn { color: #b45309; background: rgba(180,83,9,.1); }
+.cw-msg-warn { align-self: flex-start; max-width: 92%; font-size: 12px; line-height: 1.55; color: #92400e; background: #fef3c7; border: 1px solid rgba(180,83,9,.25); border-radius: 10px; padding: 8px 10px; }
+.cw-multi-apply { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-width: 94%; }
+.cw-multi-title { font-size: 12px; font-weight: 700; color: #3f554e; }
+.cw-multi-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.cw-multi-row .cw-mini-btn { font-size: 12px; }
+[data-theme="dark"] .cw-danger-btn { color: #fca5a5 !important; border-color: rgba(252,165,165,.4) !important; }
+[data-theme="dark"] .cw-remember { color: #9fc3b4; }
+[data-theme="dark"] .cw-merge-preview { background: rgba(45,150,140,.16); color: #7fd6c8; }
+[data-theme="dark"] .cw-merge-preview.cw-merge-warn { background: rgba(180,120,40,.18); color: #f0c08a; }
+[data-theme="dark"] .cw-msg-warn { background: rgba(180,120,40,.16); color: #f0d2a0; border-color: rgba(200,150,80,.3); }
+[data-theme="dark"] .cw-multi-title { color: #cfe3da; }
+
 [data-theme="dark"] .cw-merge-title { color: #e8f6f0; }
 [data-theme="dark"] .cw-merge-sel,
 [data-theme="dark"] .cw-merge-msg { background: #1f332d; border-color: rgba(140, 200, 185, 0.22); color: #e8f6f0; }
