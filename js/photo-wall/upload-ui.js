@@ -576,19 +576,22 @@
     if (options.restoreFocus !== false) focusUploadButton();
   }
 
-  function setUploadResult(message, isError){
+  function setUploadResult(message, s, detailMsg){
     var result = byId('pwUploadResult');
     if (!result) return;
     var titleEl = byId('pwUploadResultTitle');
     var detailEl = byId('pwUploadResultDetail');
+    // 兼容布尔(旧)与状态串('success'/'partial'/'error'，新)：内部统一转成一次 setUploadResultState，
+    // 避免调用方再单独调一次造成二次渲染/成功庆祝触发两次。
+    var state = typeof s === 'boolean' ? (s ? 'error' : 'success') : (s || 'success');
     if (!titleEl || !detailEl) {
       result.textContent = message || '';
       result.hidden = !message;
-      result.classList.toggle('is-error', !!isError);
-      if (result.dataset) result.dataset.state = !message ? 'idle' : (isError ? 'error' : 'success');
+      result.classList.toggle('is-error', state === 'error');
+      if (result.dataset) result.dataset.state = !message ? 'idle' : state;
       return;
     }
-    setUploadResultState(message, isError ? 'error' : 'success');
+    setUploadResultState(detailMsg || message, state);
   }
 
   function setUploadResultState(message, s){
@@ -1141,8 +1144,9 @@
     }
     failures.slice(0, 5).forEach(function(f){ details.push(f.name + '（' + f.reason + '）'); });
     var fullMsg = summary + (details.length ? '\n' + details.join('；') : '');
-    setUploadResult(summary, resultState === 'error');
-    setUploadResultState(fullMsg, resultState);
+    // 单次渲染：setUploadResult 内部统一处理 dataset/title/detail/庆祝，
+    // 避免旧写法(setUploadResult + setUploadResultState 连续调用)二次写入、成功庆祝触发两次。
+    setUploadResult(summary, resultState, fullMsg);
     toast(summary);
     await new Promise(function(resolve){ setTimeout(resolve, 180); });
   }
