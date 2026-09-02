@@ -64,6 +64,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   未登录或同步失败时静默降级为仅本地，不影响离线使用。
   var CUSTOM_MODELS_KEY = 'xtj_ai_custom_models';
   var CUSTOM_MODEL_PREFIX = 'custom:';
+  // ★ 账号级隔离：自定义模型（含 API Key）按当前登录账号存 localStorage，
+  //   换账号互不可见；旧版全局键仅作回退，首次写入后自动迁移并清除。
+  function aiStorageScopeName() {
+    var u = '';
+    try { u = String(window.currentUser || window._xtjCanonicalUser || '').trim(); } catch (e) {}
+    if (!u) u = 'guest';
+    u = String(u).replace(/[^a-zA-Z0-9_@\-\u4e00-\u9fa5]/g, '_').slice(0, 64);
+    return u || 'guest';
+  }
+  function scopedStorageGet(base) {
+    try {
+      var k = String(base) + '__' + aiStorageScopeName();
+      var v = localStorage.getItem(k);
+      if (v === null || v === undefined) return localStorage.getItem(base);
+      return v;
+    } catch (e) { return null; }
+  }
+  function scopedStorageSet(base, value) {
+    try {
+      var k = String(base) + '__' + aiStorageScopeName();
+      localStorage.setItem(k, value);
+      if (localStorage.getItem(base) !== null) localStorage.removeItem(base);
+    } catch (e) {}
+  }
   // 预置服务商模板：用户只需填 API Key（可改模型名）
   var CUSTOM_MODEL_PROVIDERS = [
     { key: 'qwen',    label: '千问 Qwen',      base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', models: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'] },
@@ -89,7 +113,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   function loadCustomModels() {
     try {
-      var raw = localStorage.getItem(CUSTOM_MODELS_KEY);
+      var raw = scopedStorageGet(CUSTOM_MODELS_KEY);
       if (!raw) return [];
       var list = JSON.parse(raw);
       if (!Array.isArray(list)) return [];
@@ -99,7 +123,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function saveCustomModelsLocal(list) {
     try {
       var stored = (list || []).map(toStoredModel).slice(0, 12);
-      localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(stored));
+      scopedStorageSet(CUSTOM_MODELS_KEY, JSON.stringify(stored));
     } catch (e) {}
   }
   function modelsEqual(a, b) {
@@ -802,9 +826,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function isSupportedAiFile(file) {
     if (!file) return false;
-    var name = String(file.name || '').toLowerCase();
-    if (String(file.type || '').indexOf('image/') === 0) return true;
-    return /\.(pdf|docx|txt|csv|xlsx)$/.test(name);
+    // ★ 全格式支持：任意文件都可上传（图片直传视觉模型/OCR，PDF/DOCX/XLSX/TXT
+    // 经服务端解析器提取文字，其余二进制文件回退 UTF-8 文本探测并说明）。
+    var name = String(file.name || '').trim();
+    return name.length > 0 && name !== 'blob';
   }
 
   var AI_FILE_MAX_BYTES = 7 * 1024 * 1024;
@@ -875,7 +900,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var file = normalizeAiAttachmentFile(rawFile);
     if (!file) return false;
     if (!isSupportedAiFile(file) && String(file.type || '').indexOf('image/') !== 0) {
-      notify(opts.rejectMsg || '仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件');
+      notify(opts.rejectMsg || '不支持该文件');
       return false;
     }
     if (file.size > AI_FILE_MAX_BYTES) {
@@ -10193,7 +10218,7 @@ function showChatMessages() {
       style: 'display:none'
     });
     fileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
-    var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', accept: 'image/*,.pdf,.docx,.txt,.csv,.xlsx', style: 'display:none' });
+    var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', style: 'display:none' });
     var filePreview = el('div', { class: 'ai-chat-file-preview', id: 'aiChatFilePreview', style: 'display:none' });
     var input = el('textarea', {
       class: 'ai-chat-input',
