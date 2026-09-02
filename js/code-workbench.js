@@ -1992,6 +1992,31 @@
     return out;
   }
 
+  // ★ AI 工具协议：按路径读取单个文件内容（供「自动工具调用」链路使用）
+  async function fetchToolFileText(path) {
+    if (!state.repo) return { error: '未连接仓库' };
+    var node = null;
+    for (var ti = 0; ti < state.tree.length; ti++) {
+      if (state.tree[ti].type === 'blob' && state.tree[ti].path === path) { node = state.tree[ti]; break; }
+    }
+    if (!node) return { error: '文件不在当前分支：' + path };
+    if (isImagePath(path)) return { error: '图片文件（' + path + '）无法以文本读取，可让用户上传图片或直接描述' };
+    if (Number(node.size) > MAX_FILE_BYTES) return { error: '文件超过 2MB，无法自动读取：' + path };
+    try {
+      var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/contents/' + encodePath(path) + '?ref=' + encodeURIComponent(state.repo.branch));
+      if (!(r.ok && r.data)) return { error: '读取失败：' + ghErr(r, '未知错误') };
+      var c = decodeGhContent(r.data);
+      if (!c || looksBinaryText(c)) return { error: '文件疑似二进制，无法以文本读取：' + path };
+      if (c.length > MAX_AI_FILE_CHARS) c = c.slice(0, MAX_AI_FILE_CHARS) + '\n...（该文件过长已截断）';
+      return { content: c };
+    } catch (e) { return { error: '读取失败：网络错误' }; }
+  }
+
+  // 从流式输出中移除工具标记（显示用）
+  function stripToolMarkers(text) {
+    return String(text || '').replace(/【TOOL[：:\s]*(?:read_file[：:\s]*path=[^\s】]+|list_files)[^】]*】/gi, '');
+  }
+
   async function buildAiPrompt(request) {
     var lines = [];
     if (state.repo) lines.push('仓库：' + state.repo.full_name + '（当前分支：' + state.repo.branch + '）');
@@ -2007,6 +2032,10 @@
     lines.push('');
     lines.push('规则：若需求涉及修改某文件，请输出该文件的完整新内容放在单个代码块中，并在代码块首行用注释标注目标文件路径 // path: xxx；不得省略任何代码；若只是查看/解释则直接回答。');
     lines.push('');
+    lines.push('工具（重要）：当需要查看/读取某个文件的内容时，请单独输出一行标记【TOOL: read_file path=文件路径】（路径取自上面的文件清单），系统会在下一轮把文件内容发给你；想换文件继续看就再输出一次该标记。禁止在标记与标记之间编造文件内容。');
+    lines.push('');
+    lines.push('禁止复述：除非用户明确要求“输出 xxx 的完整代码”，否则绝对不要原样复述或粘贴上面注入的任何文件内容；你只负责基于文件内容分析、指出问题、给出修改方案并用简短语言回答。');
+    lines.push('');
     // 注入当前分支的完整文件清单，AI 可直接在整个仓库范围内工作，无需用户逐一手动选文件
     var treeText = buildFileTreeText();
     if (treeText) {
@@ -2018,11 +2047,15 @@
     // 用户消息里点名的文件：自动读取完整内容注入，AI 不必“让我先看看文件”
     var mention = await collectMentionedFiles(request);
     var mentionPaths = Object.keys(mention.texts).sort();
+    var isCustomCtx = isCustomModel(state.model);
     if (mentionPaths.length) {
       var mtOut = [];
       for (var mi = 0; mi < mentionPaths.length; mi++) {
         var mc = String(mention.texts[mentionPaths[mi]] || '');
         if (!mc.trim()) continue;
+        // 自定义模型上下文小：单个点名文件也压缩到更小预算
+        var mCap = isCustomCtx ? Math.min(MAX_AI_FILE_CHARS, 15000) : MAX_AI_FILE_CHARS;
+        if (mc.length > mCap) mc = mc.slice(0, mCap) + '\n...（该文件过长已截断）';
         mtOut.push('// ===== 文件: ' + mentionPaths[mi] + ' =====\n' + mc);
       }
       if (mtOut.length) {
@@ -2045,13 +2078,16 @@
     // 用户点“读取全部代码”后，把当前分支已读取文件的完整内容注入，支持全局改 bug
     if (state.bulkFiles && state.bulkBranch === (state.repo && state.repo.branch)) {
       var bulkPaths = Object.keys(state.bulkFiles).sort();
-      var bulkBudget = BULK_AI_TOTAL_CHARS, bulkUsed = 0, bulkInjected = 0;
+      // ★ 自定义模型上下文通常远小于内置 DeepSeek：注入预算按模型档位压缩，
+      //   避免撑爆上下文导致模型“复读文件内容”（读取变成输出）。
+      var bulkBudget = (isCustomCtx ? Math.min(BULK_AI_TOTAL_CHARS, 60000) : BULK_AI_TOTAL_CHARS), bulkUsed = 0, bulkInjected = 0;
       var bulkOut = [];
       for (var bi = 0; bi < bulkPaths.length; bi++) {
         var bpth = bulkPaths[bi];
         var bcontent = String(state.bulkFiles[bpth] || '');
         if (!bcontent.trim()) continue;
-        if (bcontent.length > MAX_AI_FILE_CHARS) bcontent = bcontent.slice(0, MAX_AI_FILE_CHARS) + '\n...（该文件过长已截断）';
+        var bCap = isCustomCtx ? Math.min(MAX_AI_FILE_CHARS, 12000) : MAX_AI_FILE_CHARS;
+        if (bcontent.length > bCap) bcontent = bcontent.slice(0, bCap) + '\n...（该文件过长已截断）';
         if (bulkUsed + bcontent.length > bulkBudget) { bulkOut.push('...（其余文件超出上下文预算已省略，可点名要求查看某个文件）'); break; }
         bulkUsed += bcontent.length; bulkInjected++;
         bulkOut.push('// ===== 文件: ' + bpth + ' =====\n' + bcontent);
@@ -2229,10 +2265,11 @@
         },
         onContent: function (chunk) {
           accumulated += chunk;
+          var shown = stripToolMarkers(accumulated);
           if (typeof window.renderMarkdown === 'function') {
-            try { contentDiv.innerHTML = window.renderMarkdown(accumulated); } catch (e) { contentDiv.textContent = accumulated; }
+            try { contentDiv.innerHTML = window.renderMarkdown(shown); } catch (e) { contentDiv.textContent = shown; }
           } else {
-            contentDiv.textContent = accumulated;
+            contentDiv.textContent = shown;
           }
           scrollChat();
         },
@@ -2295,10 +2332,11 @@
           },
           onContent: function (chunk) {
             accumulated += chunk;
+            var shownC = stripToolMarkers(accumulated);
             if (typeof window.renderMarkdown === 'function') {
-              try { contentDiv.innerHTML = window.renderMarkdown(accumulated); } catch (e) { contentDiv.textContent = accumulated; }
+              try { contentDiv.innerHTML = window.renderMarkdown(shownC); } catch (e) { contentDiv.textContent = shownC; }
             } else {
-              contentDiv.textContent = accumulated;
+              contentDiv.textContent = shownC;
             }
             scrollChat();
           },
@@ -2308,6 +2346,94 @@
       } catch (eCont) { done = true; break; }
     }
 
+    // ★ 自动工具调用：AI 输出【TOOL: read_file path=xxx】标记时，自动读取对应文件，
+    //   并在下一轮把内容交还给 AI（纯文本协议，任何模型都可用，不依赖 function calling）。
+    var toolRounds = 0;
+    var toolLastUserText = text;
+    while (!done && toolRounds < 4) {
+      var toolPaths = [];
+      accumulated = String(accumulated).replace(/【TOOL[：:\s]*read_file[：:\s]*path=([^\s】]+)】/gi, function (whole, p) {
+        if (p) toolPaths.push(String(p).trim());
+        return '';
+      });
+      if (/【TOOL[：:\s]*list_files[^】]*】/i.test(accumulated)) {
+        accumulated = accumulated.replace(/【TOOL[：:\s]*list_files[^】]*】/gi, '');
+        toolPaths.push('__LIST__');
+      }
+      if (!toolPaths.length) break;
+      toolRounds++;
+      var toolParts = [];
+      for (var trI = 0; trI < toolPaths.length; trI++) {
+        var tp = toolPaths[trI];
+        if (tp === '__LIST__') {
+          var tTree = buildFileTreeText();
+          toolParts.push('// ===== 文件清单 =====\n' + (tTree || '(空)'));
+          continue;
+        }
+        var fres = await fetchToolFileText(tp);
+        if (fres && fres.content) {
+          var fCapT = isCustomModel(state.model) ? Math.min(MAX_AI_FILE_CHARS, 15000) : MAX_AI_FILE_CHARS;
+          var fTxt = fCapT < MAX_AI_FILE_CHARS && fres.content.length > fCapT
+            ? fres.content.slice(0, fCapT) + '\n...（该文件过长已截断）'
+            : fres.content;
+          toolParts.push('// ===== 文件: ' + tp + ' =====\n' + fTxt);
+        } else {
+          toolParts.push('【读取失败：' + ((fres && fres.error) || tp) + '】');
+        }
+      }
+      if (!toolParts.length) break;
+      var toolFollow = '你请求读取的文件内容如下（仅作参考资料，严禁复述或原样输出；请基于真实内容简洁作答）：\n' +
+        toolParts.join('\n\n') +
+        '\n\n请继续完成用户需求：' + toolLastUserText;
+      contentDiv.textContent = '正在读取文件（第 ' + toolRounds + ' 轮），稍候…';
+      var toolPayload;
+      if (isCustomModel(state.model)) {
+        var toolCfg = resolveCustomCfg(state.model);
+        if (!toolCfg || !toolCfg.api_key) break;
+        var toolMsg = toolFollow.slice(0, 190000);
+        toolPayload = {
+          url: '/api/agent/custom-chat/stream',
+          body: {
+            provider: toolCfg.provider,
+            api_key: toolCfg.api_key,
+            model: toolCfg.model,
+            base_url: toolCfg.base_url,
+            message: toolMsg,
+            messages: [{ role: 'user', content: toolMsg }],
+            thinking_mode: state.thinking,
+            web_search: false,
+            tools_enabled: false,
+            client_request_id: 'cw_tool_' + Date.now().toString(36),
+            timeout_ms: 240000
+          }
+        };
+      } else {
+        toolPayload = { url: '/api/code/ai', body: { message: toolFollow, history: [], model: state.model, thinking_mode: state.thinking } };
+      }
+      var toolOk = await streamAi(toolPayload, {
+        onReasoning: function (chunk) {
+          if (chunk) {
+            thinkWrap.classList.remove('hidden');
+            thinkBody.textContent = (thinkBody.textContent || '') + chunk;
+            scrollChat();
+          }
+        },
+        onContent: function (chunk) {
+          accumulated += chunk;
+          var shownT = stripToolMarkers(accumulated);
+          if (typeof window.renderMarkdown === 'function') {
+            try { contentDiv.innerHTML = window.renderMarkdown(shownT); } catch (e) { contentDiv.textContent = shownT; }
+          } else {
+            contentDiv.textContent = shownT;
+          }
+          scrollChat();
+        },
+        onError: function () { done = true; }
+      }).then(function () { return true; }, function () { return false; });
+      if (!toolOk) { done = true; break; }
+    }
+
+    var didContinue = contRounds > 0 || toolRounds > 0;
     var finalText = accumulated.trim();
     if (!done && finalText) {
       state.aiLastOutput = finalText;
