@@ -107,6 +107,9 @@
             var o = C[t];
             if (o && o.naturalWidth > 0) return e._ppCleanup && e._ppCleanup(), e.style.transition = "none", e.src = t, void (e.style.opacity = "1");
             e.style.transition = "none", e.removeAttribute("src"), e.style.opacity = "0";
+            // 重置该 URL 的失败预算：每次导航到(或重载)此图都重新获得完整的重试次数，
+            // 避免"看坏图→切走→再切回"时 H[url] 沿用旧值导致只试 1 次就显示占位图。
+            delete H[t];
             var n = !1, i = 0, a = (e._ppLoadGen || 0) + 1, r = null;
             e._ppLoadGen = a;
             function cleanup() {
