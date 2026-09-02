@@ -333,7 +333,9 @@
           window.photoWallData = local;
         }
       }
-      var deletedRows = rows.filter(function(row){ return row && row.media_url === '__deleted__'; });
+      // 用 normalizePhotoWallRow 同口径采集"已删除"墓碑（is_deleted / __deleted__ / __pw_del__），
+      // 否则 is_deleted 软删行的 id 不会进入墓碑集合，导致它从本地缓存被合并"复活"。
+      var deletedRows = rows.filter(function(row){ return !!(row && row.id != null && normalizePhotoWallRow(row).deleted); });
       deletedRows.forEach(function(row){ addDeletedPhotoId(row.id); });
       var cloud = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
       // 过滤本地已删除的ID：云端快照可能滞后于本地删除操作
