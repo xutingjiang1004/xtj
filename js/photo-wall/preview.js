@@ -77,6 +77,29 @@
         });
         return _[e] = t, t;
     }
+    // 预览"即时揭示 + 后台升级原画质(HDR)"：
+    // 慢网 / 大原图时，先用轻量缩略图把照片显示出来，再用独立 Image 预载原图，
+    // 仅在成功后把显示源升级到原画质；失败则保留已显示的缩略图，
+    // 绝不因等待或失败原图而让预览长时间空白（"照片一直加载不出来"）。
+    function ppUpgradeFull(img, photo) {
+        if (!img || !photo) return;
+        var full = photo.imageUrl || '';
+        var thumb = photo.thumbUrl || photo.thumb || '';
+        if (!full || full === thumb) return;
+        if (C[full] && C[full].naturalWidth > 0) return;
+        if (img._ppUpgrading) return;
+        img._ppUpgrading = true;
+        var probe = new Image();
+        probe.onload = function() {
+            img._ppUpgrading = false;
+            if (probe.naturalWidth > 0 && !C[full]) cachePreviewImage(full, probe);
+            if (img.isConnected && probe.naturalWidth > 0) {
+                try { img.src = full; } catch (e) {}
+            }
+        };
+        probe.onerror = function() { img._ppUpgrading = false; };
+        probe.src = full;
+    }
     function clearPreviewImageLoad(image, resetSource) {
         if (!image) return;
         image._ppCleanup && image._ppCleanup(), image._ppCleanup = null, image._ppLoadGen = (image._ppLoadGen || 0) + 1,
@@ -718,7 +741,12 @@
             if (J && S && S.imageUrl) {
                 clearPreviewImageLoad(J, !1);
                 var oe = C[S.imageUrl];
-                if (J.style.transition = "none", J.style.opacity = "0", J.src = S.imageUrl, oe || J.complete) {
+                // 渐进加载：原图已缓存就直接用原图（含入场动画）；否则先用轻量缩略图即时
+                // 显示，避免慢网等待大原图导致预览长时间空白，再在后台升回原画质(HDR)。
+                var ppThumb = S.thumbUrl || S.thumb || '';
+                var ppFullReady = !!(oe && oe.naturalWidth > 0);
+                var ppInit = (!ppFullReady && ppThumb && ppThumb !== S.imageUrl) ? ppThumb : S.imageUrl;
+                if (J.style.transition = "none", J.style.opacity = "0", J.src = ppInit, ppFullReady) {
                     if (J.offsetHeight, D) {
                         var ne = J.getBoundingClientRect();
                         if (ne && ne.width > 0) {
@@ -729,12 +757,43 @@
                     }
                     J.offsetHeight, D && J.getBoundingClientRect().width > 0 ? (_.style.transition = "opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1)",
                     J.style.transition = "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
-                    J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", $ = setTimeout(re, 220)) : (J.style.opacity = "1",
-                    $ = setTimeout(re, 150));
+                    J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", $ = setTimeout(function(){ re(); ppUpgradeFull(J, S); }, 220)) : (J.style.opacity = "1",
+                    $ = setTimeout(function(){ re(); ppUpgradeFull(J, S); }, 150));
                 } else {
-                    J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
-                        _._openLoadGen === ee && (cleanupOpenListeners(), re());
-                    }, 8e3);
+                    // 目标源未就绪：先让轻量源（缩略图）加载完成即揭示照片，
+                    // 再后台升级原画质(HDR)；无论何种情况都能快速看到照片，不再"一直转圈"。
+                    J.style.transition = "none";
+                    var revealed = false;
+                    function revealOpen() {
+                        if (revealed || _._openLoadGen !== ee || !J) return;
+                        revealed = true;
+                        cleanupOpenListeners();
+                        J.offsetHeight;
+                        J.style.opacity = "1";
+                        re();
+                        ppUpgradeFull(J, S);
+                    }
+                    var firstLoad = function() {
+                        J.removeEventListener("load", firstLoad);
+                        J.removeEventListener("error", firstErr);
+                        if (_._openLoadGen !== ee || revealed) return;
+                        revealOpen();
+                    };
+                    var firstErr = function() {
+                        J.removeEventListener("load", firstLoad);
+                        J.removeEventListener("error", firstErr);
+                        if (_._openLoadGen !== ee || revealed) return;
+                        // 轻量源失败：回退直接加载原图并揭示，仍不永久空白
+                        if (ppInit !== S.imageUrl) { try { J.src = S.imageUrl; } catch (e) {} }
+                        revealOpen();
+                    };
+                    J.addEventListener("load", firstLoad);
+                    J.addEventListener("error", firstErr);
+                    // 已在分支起始设置了 src；若轻量源恰好立即完成，同步揭示
+                    if (J.complete && J.naturalWidth > 0) { firstLoad(); }
+                    else $ = setTimeout(function() {
+                        if (_._openLoadGen === ee && !revealed) revealOpen();
+                    }, 4e3);
                 }
             } else re();
         } else if (e) {
