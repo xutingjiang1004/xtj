@@ -1,1 +1,273 @@
-IyBYVEog5Luj56CB57Si5byVIChDT0RFX0lOREVYKQoKPiDmnKzpobnnm67mlofku7bovoPlpKcs5q2k57Si5byV55So5LqO5b+r6YCf5a6a5L2N5Luj56CB44CCKirooYzlj7fkvJrpmo/mlLnliqjmvILnp7ss5a6a5L2N5ZCO6K+355So5paH5Lu25YaF5pCc57SiKOWmgiBgLy8gPT09PT0g5YiG5q615ZCNYCDmiJblh73mlbDlkI0p5LqM5qyh56Gu6K6k44CCKioKPgo+ICoq4pqg77iPIOaLhuWIhuitpuWRiioqOnNlcnZlci5qcyDnmoTniannkIbmi4bliIYqKuWPl+Wlkee6pua1i+ivlemUgeWumioqKOivpuingSDCpzkp44CC5pS55Yqo5YmN5b+F6K+744CCCgojIyAxLiDpobnnm67mnrbmnoTmgLvop4gKCmBgYArmtY/op4jlmaggKGluZGV4Lmh0bWwpCiDilJzilIAganMvZWFybHktZmVlZC5taW4uanMgICAgICDpppblsY/lubbooYzmi4nluJYo5LiN5L6d6LWWIGNvcmUuanMpCiDilJzilIAganMvYWktY29yZS8qLm1pbi5qcyAgICAgICA3IOS4qiBBSSDlhbHkuqvmqKHlnZcoZXJyb3JzL3RyYW5zcG9ydC9tYXJrZG93biDnrYkpCiDilJzilIAganMvdmVuZG9yL3N1cGFiYXNlLm1pbi5qcyBTdXBhYmFzZSBTREso5YmN56uv55u06L+eLOWPlyBSTFMg57qm5p2fKQog4pSc4pSAIGpzL2NvcmUubWluLmpzICAgICAgICAgICAg5qC45b+D6YC76L6RKOeUsSBqcy9jb3JlLXBhcnRzLyouanMg57uE6KOFLOingSDCpzMpCiDilJzilIAganMvYWktYWdlbnQubWluLmpzICAgICAgICDlsI/njKtBSSDogYrlpKkv5rex5bqm56CU56m2KOWNleS9kyBJSUZFLMKnNikKIOKUnOKUgCBqcy9jb2RlLXdvcmtzcGFjZS5taW4uanMgIENvZGUg5bel5L2c5Yy6KOWNleS9kyBJSUZFLMKnNykKIOKUlOKUgCBqcy9waG90by13YWxsLyoubWluLmpzICAgIOeFp+eJh+WimeaooeWdlwogICAgICAgIOKGkwrlkI7nq68gKFJlbmRlciDmiZjnrqEsIHJlbmRlci1hcGkvKQog4pSc4pSAIHNlcnZlci5qcyAgICAgICAgIOS4u+WFpeWPozrlhajpg6jot6/nlLEgKyBBSSDlh73mlbAowqcyLDE3MTk2IOihjCkKIOKUnOKUgCBjb2RlLWFnZW50LmpzICAgICAgQ29kZSBBSSDku6PnkIYoNTYyMSDooYwscmVnaXN0ZXIg5qih5byPKQog4pSc4pSAIGNvZGUtaW5kZXguanMgICAgICBDb2RlIOmhueebrue0ouW8lSgxNjM5IOihjCkKIOKUnOKUgCBwcm92aWRlci1yZWdpc3RyeS5qcyDmqKHlnovkvpvlupTllYbms6jlhowoNjYyIOihjCkKIOKUnOKUgCBwaG90by1jcmVhdGUuanMgICAg54Wn54mH5Yib5bu6L+e8qeeVpeWbvig1ODEg6KGMKQog4pSc4pSAIHNlYXJjaC1wcm92aWRlcnMuanMg6IGU572R5pCc57SiIHByb3ZpZGVyKDQ1NCDooYwpCiDilJTilIAg5YW25L2Z5bel5YW35qih5Z2XKOingSDCpzUpCiAgICAgICAg4oaTClN1cGFiYXNlIChQb3N0Z3JlU1FMICsgU3RvcmFnZSkKIOKUnOKUgCBwb3N0cyDooaggICAgICAgICDlhajnq5nmlbDmja7nmoQi5aSn6KGoIijluJblrZAv6K+E6K66L+eCuei1ni9ETS/nhafniYcv57O757uf5qCH6K6wLOeUqCBtZWRpYV90eXBlIOWMuuWIhikKIOKUlOKUgCBzdG9yYWdlIGJ1Y2tldCAgIOS4iuS8oOaWh+S7tijnhafniYcv5aS05YOPL0RNIOWqkuS9kyxwdWJsaWMpCmBgYAoKKirmoLjlv4Porr7orqEqKjrlhajnq5nmlbDmja4o5biW5a2Q44CB6K+E6K6644CB56eB5L+h44CB54Wn54mH44CB57O757uf6K6w5b2VKemDveWtmCBTdXBhYmFzZSDnmoQgYHBvc3RzYCDooags55SoIGBtZWRpYV90eXBlYCDlrZfmrrXljLrliIbkuJrliqHnsbvlnoso5bi46YeP6KeBIGByZW5kZXItYXBpL3Bvc3QtbWFya2Vycy5qc2Ap44CC5YmN56uv55u06L+eIFN1cGFiYXNlIOi1sCBSTFMs5ZCO56uv55SoIHNlcnZpY2Vfcm9sZSBrZXkg57uV6L+HIFJMUyDmiafooYzlj5fmjqfmk43kvZzjgIIKCi0tLQoKIyMgMi4gcmVuZGVyLWFwaS9zZXJ2ZXIuanMg5YiG5q6157Si5byVKDE3MTk2IOihjCkKCj4g5omA5pyJ5YiG5q6155SoIGAvLyA9PT09PT09PT09PT09PT09PT09PT0g5qCH6aKYID09PT09PT09PT09PT09PT09PT09PWAg5YiG6ZqU44CC5pCc57Si5pa55rOVOuWcqCBzZXJ2ZXIuanMg6YeM5pCcIGAvLyA9PT09PSDmoIfpophgIOaIluaMieS4i+aWueihjOWPt+i3s+i9rOOAggoKIyMjIDJhLiDphY3nva7kuI4gQUkg5Ye95pWwKDEtNjQwMCDooYwp4oCUIOi+heWKqeWHveaVsOWMuizot6/nlLHlnKggwqcyYi8yYwoKfCDooYzlj7cgfCDliIbmrrUgfCDlhoXlrrkgfAp8LS0tfC0tLXwtLS18CnwgMS05MCB8IOWvvOWFpS/liJ3lp4vljJYgfCBleHByZXNz44CBc3VwYWJhc2Ug5a6i5oi356uv44CBY29va2llIOino+aekOOAgXRydXN0IHByb3h5IHwKfCA5Mi0xNTggfCDphY3nva4gfCBBRE1JTl9VU0VSTkFNRS9QQVNTV09SROOAgUFQSV9TRUNSRVTjgIFTVVBBQkFTRV9VUkzjgIFBTExPV0VEX09SSUdJTlMgfAp8IDE1OS0zMzQgfCBEZWVwU2VlayBBSSDphY3nva4gfCBBUEkga2V544CB5qih5Z6L55uu5b2V44CBYHJlZnJlc2hEZWVwU2Vla01vZGVsQ2F0YWxvZ2AgfAp8IDMzNS00MDkgfCDmt7HluqbnoJTnqbbmqKHlvI8gKE0vUiDmnrbmnoQpIHwgYGFjdGl2ZURlZXBUaGlua0pvYnNg44CBYWdlbnQg5p6E5bu644CB57yT5a2YIHwKfCA0MTAtNjQxIHwg5YWx5Lqr5bel5YW35Ye95pWwIHwgYGNhblVzZUFpQ2FjaGVg44CBYGJ1aWxkSGlzdG9yeUNvbnRleHRg44CBYGJ1aWxkVG9vbEV4ZWN1dG9yYCB8CnwgNjQyLTczNCB8IERlZXBTZWVrIEZ1bmN0aW9uIENhbGxpbmcg5bel5YW35a6a5LmJIHwgYEFJX1RPT0xTYOOAgWBleGVjdXRlVG9vbENhbGxgIHwKfCA3MzUtMTA1NCB8IFJlc3BvbnNlcyBBUEkg6L6F5YqpIHwgYGJ1aWxkUmVzcG9uc2VzSW5wdXRg44CBYGF1dG9TdXBwbGVtZW50U2VhcmNoYCB8CnwgMTA1NS0xMjY2IHwgVGF2aWx5IFJlc2VhcmNoIOWinuW8uua1geawtOe6vyB8IGByZXNlYXJjaENhY2hlYOOAgWByZXdyaXRlUmVzZWFyY2hRdWVyeWAgfAp8IDEyNjctMTY1NCB8IOi+k+WFpeagoemqjCB8IGBtZXJnZVVzZXJJbmZvYOOAgWBsb2dWaXNpdGDjgIFgbG9nQXR0YWNrYOOAgWBzYW5pdGl6ZUVycm9yYOOAgWBwZ3JzdFF1b3RlYCB8CnwgMTY1NS0yMjEyIHwg5Lit6Ze05Lu2IHwgYHJhdGVMaW1pdGDjgIFgZ2V0Q2xpZW50SXBg44CBYEFJX1NJVEVfVE9PTF9SRUdJU1RSWWDjgIFgYWlTaXRlU2VhcmNoYCB8CnwgMjIxMy0yNjYxIHwg5biW5a2Q6K+m5oOFIEFQSSArIElQIOWxnuWcsCB8IGAvYXBpL3Bvc3QvZGV0YWlsLzppZGDjgIFgcmVzb2x2ZUlwTG9jYXRpb25g44CBYHJldHJ5SXBSZWdpb25Bc3luY2AgfAp8IDI2NjItMzM2NiB8IOWuieWFqOajgOa1i+mAu+i+kSB8IGBjaGVja1NhbWVJcE11bHRpVXNlcnNg44CBYHJ1blNlY3VyaXR5Q2hlY2tzYOOAgWBzZWN1cml0eVJhdGVMaW1pdGAgfAp8IDMzNjctMzUxNiB8IERlZXBTZWVrIOe7n+S4gOiwg+eUqOWwgeijhSB8IGBjYWxsRGVlcFNlZWtBSWDjgIFgZXh0cmFjdEVtYmVkZGVkRmlsZXNgIHwKfCAzNTE3LTUyNDYgfCAqKuWwj+eMqyBBSSDor4TorrrljLroh6rliqjlm57lpI0qKiB8IGBDQVRfQUlfKmDjgIFgcHJvY2Vzc0NhdFJlcGx5Sm9iYOOAgWByZWNvdmVyU3RhbGVDYXRKb2JzYCB8CnwgNTI0Ny01NjIzIHwgUmVzcG9uc2VzIEFQSSDosIPnlKggfCBgY2FsbERlZXBTZWVrVmlhUmVzcG9uc2VzYCB8CnwgNTYyNC01OTkxIHwgTTog5rex5bqm56CU56m25aSa5pm66IO95L2TIHwgYHJ1bk11bHRpQWdlbnRGbG93YCB8CnwgNTk5Mi02NDAwIHwgUjog5rex5bqm56CU56m25Y2V5pm66IO95L2TIHwgYHJ1bkRlZXBUaGlua0FnZW50YOOAgWBydW5EZWVwVGhpbmtXb3JrZXJgIHwKCiMjIyAyYi4g6K6k6K+B5LiO5qC45b+DIEFQSSg2NDAxLTkxODAg6KGMKQoKfCDooYzlj7cgfCDliIbmrrUgfCDlhoXlrrkgfAp8LS0tfC0tLXwtLS18CnwgNjQwMS02NDMyIHwgQUkg55So5oi357qn6ZmQ5rWBIHwgYGNoZWNrQWlVc2VyUmF0ZUxpbWl0YCB8CnwgNjQzMy02NzAxIHwgKipUb2tlbiDnrqHnkIYo5qC45b+DKSoqIHwgYF9zaWduUGF5bG9hZGDjgIFgc2lnblVzZXJBY2Nlc3NUb2tlbmDjgIFgdmVyaWZ5VG9rZW5g44CB5ZCK6ZSAIHwKfCA2NzAyLTY3OTQgfCDlgaXlurfmo4Dmn6UgfCBgL2hlYWx0aGAgfAp8IDY3OTUtNjg1MyB8IOeuoeeQhuWRmOeZu+W9lSB8IGAvYWRtaW4vbG9naW5gIHwKfCA2ODU0LTcyMzYgfCDnlKjmiLcgVG9rZW4g6K6k6K+BIHwgYC9hcGkvdXNlci9sb2dpbi9yZWdpc3Rlci9yZWZyZXNoL2xvZ291dGAgfAp8IDcyMzctNzI1OSB8IOiHquWKqOi/h+acn+WHveaVsCB8IHwKfCA3MjYwLTcyOTQgfCDmlbDmja7liqDovb0o5Y+q6K+76K6k6K+BKSB8IHwKfCA3Mjk1LTczNDQgfCDlhazlkYrnrqHnkIYgfCBgL2FkbWluL2Fubm91bmNlbWVudGAgfAp8IDczNDUtNzQ0MyB8IOWFrOWRiuW3suivu+i3qOiuvuWkh+WQjOatpSB8IHwKfCA3NDQ0LTc0NzkgfCDluJblrZDnrqHnkIYgfCDliKDluJYv5bCB56aB55u45YWzIHwKfCA3NDgwLTc0OTQgfCDor4TorrrnrqHnkIYgfCB8CnwgNzQ5NS03NTEyIHwg5Li+5oql6YCa55+l6L6F5YqpIHwgfAp8IDc1MTMtNzU2MyB8IOS4vuaKpemAmuefpeafpeivoiBBUEkgfCB8CnwgNzU2NC03NjE3IHwg54Wn54mH566h55CGIHwgfAp8IDc2MTgtNzYzMiB8IOeUqOaIt+eFp+eJh+S4iuS8oCBBUEkgfCB8CnwgNzYzMy04MTQ0IHwgKirnlKjmiLfnhafniYfliKDpmaQv5riF55CGIEFQSSoqIHwgYC9hcGkvcGhvdG8vZGVsZXRlYOOAgWAvYXBpL3Bob3RvL2NsZWFudXBgIHwKfCA4MTQ1LTg0MjkgfCBQMDog5biW5a2Q57yW6L6RL+WIoOmZpCBBUEkgfCBgL2FwaS9wb3N0L3VwZGF0ZS9kZWxldGVgIHwKfCA4NDMwLTg1NDUgfCBBdG9taWMgcG9zdCBwaW4gQVBJIHwgYC9hcGkvcG9zdC9waW5gIHwKfCA4NTQ2LTg4OTEgfCDngrnotZ7mjqXlj6MgfCBgL2FwaS9wb3N0L2xpa2Vg44CBYC9hcGkvc3RhdHMvc25hcHNob3RgIHwKfCA4ODkyLTg5OTggfCAqKuW4luWtkOWIl+ihqOaOpeWPoyjmoLjlv4MpKiogfCBgL2FwaS9mZWVkYCjnu5/kuIDlj6/op4HmgKfov4fmu6QpIHwKfCA4OTk5LTkwMzcgfCDnhafniYflopnmjqXlj6MgfCBgL2FwaS9waG90b3Mvd2FsbC86dXNlck5hbWVg44CBYC9hcGkvcGhvdG9zL3B1YmxpY2AgfAp8IDkwMzgtOTE3MyB8IOWktOWDj+aOpeWPoyB8IGAvYXBpL2F2YXRhci8qYOOAgWAvYXBpL2F2YXRhci9iYXRjaGAgfAoKIyMjIDJjLiDnp4Hkv6Ev566h55CGL+e7n+iuoS9BSSDot6/nlLEoOTE3NC0xNzEwMCDooYwpCgp8IOihjOWPtyB8IOWIhuautSB8IOWGheWuuSB8CnwtLS18LS0tfC0tLXwKfCA5MTc0LTk4NjYgfCDnp4Hkv6HliJfooagv5raI5oGvL+WPkemAgS/mkqTlm54gfCBgL2FwaS9kbS8qYCB8CnwgOTg2Ny0xMDExOCB8IOWwgeemgS/npoHoqIAv6buR5ZCN5Y2V566h55CGIHwgYC9hZG1pbi9iYW5g44CBYC9hZG1pbi9tdXRlYOOAgWAvYWRtaW4vYmxhY2tsaXN0YCB8CnwgMTAxMTktMTAzMTggfCDnrqHnkIblkZjliKDpmaTnlKjmiLfotKblj7cgfCBgL2FkbWluL3VzZXIvOnVzZXJOYW1lYCB8CnwgMTAzMTktMTA2MzYgfCDkuL7miqXnrqHnkIYgfCBgL2FkbWluL3JlcG9ydHNgIHwKfCAxMDYzNy0xMDkzNSB8IOeUqOaIt+aVsOaNrijlj6ror7spIHwgYC9hcGkvbXktcmVwb3J0c2DjgIFgL2FkbWluL3VzZXItZGF0YWAgfAp8IDEwNjUwLTEwOTM1IHwg5pWw5o2u57uf6K6hIEFQSSB8IGAvYWRtaW4vc3RhdHMvKmAgfAp8IDEwOTM2LTExNTIyIHwg55So5oi36K6/6Zeu5pel5b+XIHwgYC9hcGkvbG9nLXVzZXItdmlzaXRgIHwKfCAxMTUyMy0xMTYxOSB8IOeUqOaIt+eUu+WDj+iBmuWQiCBBUEkgfCB8CnwgMTE2MjAtMTE4NTggfCDlrp7ml7blnKjnur/nlKjmiLcgQVBJIHwgYC9hZG1pbi9zdGF0cy9vbmxpbmVgIHwKfCAxMTg1OS0xMjA4NSB8IOeZu+W9leiuvuWkhy9JUCDorrDlvZUgfCBgL2FwaS9sb2ctbG9naW4tZXZlbnRgIHwKfCAxMjA4Ni0xMjExMiB8IOWuieWFqOiuvue9rijliY3nq6/lhazlvIDor7vlj5YpIHwgYC9hcGkvc2VjdXJpdHktc2V0dGluZ3NgIHwKfCAxMjExMy0xMjE3OCB8IOeZu+W9leS6i+S7tuafpeivoijnrqHnkIblkZgpIHwgYC9hZG1pbi9sb2dpbi1ldmVudHNgIHwKfCAxMjE3OS0xMjMxMyB8IOWuieWFqOaPkOmGki/orr7nva7nrqHnkIYgfCBgL2FkbWluL3NlY3VyaXR5LSpgIHwKfCAxMjMxNC0xMjM3MCB8IOaXpeW/l+a4heeQhiB8IGAvYWRtaW4vY2xlYW51cC1sb2dzYCB8CnwgMTIzNzEtMTI0MDAgfCDlrqHorqHml6Xlv5fmn6Xor6IgfCBgL2FkbWluL2F1ZGl0LWxvZ3NgIHwKfCAxMjQwMS0xMjQ4NSB8IOeUqOaIt+iuv+mXrue7n+iuoSjnrqHnkIblkZgpIHwgYC9hZG1pbi9zdGF0cy91c2Vyc2AgfAp8IDEyNDg2LTEyOTAzIHwg566h55CG5ZGY6YKu5Lu26YCa55+lIEFQSSB8IGAvYWRtaW4vc2VuZC1lbWFpbGDjgIFgL2FkbWluL2VtYWlsLWhpc3RvcnlgIHwKfCAxMjkwNC0xMzAxNCB8IOeuoeeQhuWRmOmCruS7tuaUtuS7tuS6uuWOhuWPsiB8IHwKfCAxMzAxNS0xMzA5MiB8IOWuouaIt+err+mUmeivr+ebkeaOpyB8IGAvYXBpL2NsaWVudC1lcnJvci1sb2dgKOWMv+WQjeWPr+WGmSkgfAp8IDEzMDkzLTEzMzc5IHwgKipBSSDogYrlpKnmjqXlj6MqKiB8IGAvYXBpL2FnZW50L2NoYXRg44CBYC9hcGkvYWdlbnQvY2hhdC9zdHJlYW1gIHwKfCAxMzM4MC0xNTgwNyB8IOWFqOWxgCBBSSDphY3nva4v5Lya6K+dIHwgYC9hcGkvYWdlbnQvY29uZmlnYOOAgWAvYXBpL2FnZW50L2NoYXQvaGlzdG9yeWAgfAp8IDE1ODA4LTE2NDQwIHwg6Ieq5omY566h5aSa5pm66IO95L2T5rex5bqm56CU56m2IHwgYC9hcGkvYWdlbnQvcmVzZWFyY2gvc3RyZWFtYCB8CnwgMTY0NDEtMTY4NzYgfCBBSSBzaXRlLXRvb2wgQVBJcyB8IGAvYXBpL2FnZW50L3Bvc3QtdG9vbHNg44CBYC9hcGkvYWdlbnQvYWN0aW9ucy86aWQvY29uZmlybWAgfAp8IDE2ODc3LTE3NTMwIHwg566h55CG5ZGYIEFJIOeuoeeQhuaOpeWPoyB8IGAvYWRtaW4vYWktYWdlbnQvKmAgfAoKIyMjIDJkLiDlsL7pg6goMTc1MzEtMTc3NzAg6KGMKQoKfCDooYzlj7cgfCDliIbmrrUgfCDlhoXlrrkgfAp8LS0tfC0tLXwtLS18CnwgMTc1MzEtMTc2MDEgfCDlhajlsYDplJnor6/lpITnkIYgfCB1bmNhdWdodEV4Y2VwdGlvbi91bmhhbmRsZWRSZWplY3Rpb24g6Ziy5bSp5rqDIHwKfCAxNzYwMi0xNzc3MCB8IOWQr+WKqCB8IGBhcHAubGlzdGVuYOOAgURNIOacquivu+mCruS7tuaPkOmGkuOAgWBzdGFydExvY2F0aW9uVGFza1Byb2Nlc3NvcmDjgIFgcmVnaXN0ZXJDb2RlQWdlbnRSb3V0ZXNgIOetiSB8CgotLS0KCiMjIDMuIGpzL2NvcmUuanMoMTg5Nzcg6KGMKeKAlCDnlLEganMvY29yZS1wYXJ0cy8g57uE6KOFCgoqKuS4jeimgeebtOaOpee8lui+kSBjb3JlLmpzKioh5a6D55SxIGBzY3JpcHRzL2Fzc2VtYmxlLWNvcmUuanNgIOaMiSBganMvY29yZS1wYXJ0cy9NQU5JRkVTVC5qc29uYCDpobrluo/mi7zmjqXjgILmlLnku6PnoIHljrvmlLnlr7nlupTnmoQgcGFydCDmlofku7Ys54S25ZCO6LeRIGBub2RlIHNjcmlwdHMvYXNzZW1ibGUtY29yZS5qc2Ao5oiWIGBucG0gcnVuIGJ1aWxkYCnjgIIKCnwgcGFydCDmlofku7YgfCDlhoXlrrkgfAp8LS0tfC0tLXwKfCBgMDEtYm9vdHN0cmFwLmpzYCB8IOWQr+WKqOW6j+WIl+OAgXRva2VuIOeuoeeQhihgbWVtb3J5VXNlclRva2VuYCnjgIHkvJror53mgaLlpI3jgIHkuLvpopggfAp8IGAwMi1hdXRoLXJlc3RyaWN0aW9ucy5qc2AgfCDnmbvlvZXmgIHjgIHlsIHnpoHpmZDliLbjgIHnlKjmiLfkv6Hmga8gfAp8IGAwMy1wcm9maWxlLXJlcG9ydC1haS5qc2AgfCDkuKrkurrotYTmlpnjgIHkuL7miqXjgIHnjKsgQUkg6L2u6K+iIHwKfCBgMDQtcG9zdHMtaW50ZXJhY3Rpb25zLmpzYCB8ICoqZmVlZCDliqDovb3jgIHluJblrZDmuLLmn5Mv54K56LWeL+ivhOiuui/liKDpmaQqKijmoLjlv4MpIHwKfCBgMDUtZmVlZC1zdGF0cy5qc2AgfCDnu5/orqHjgIHlj4zlh7vliLfmlrDjgIFBSSB0YWIgfAp8IGAwNi1jaGF0LWFuZC1uYXYuanNgIHwgZG9jayDogYrlpKnjgIF0YWIg5YiH5o2i44CB5YWs5ZGKIHwKfCBgMDctZmluYWwtb3ZlcnJpZGVzLmpzYCB8IOacgOe7iOimhuebli/lhbzlrrnlsYIgfAoKKirmib7liY3nq6/pgLvovpHnmoTpobrluo8qKjrlhYjlnKggwqczIOWumuS9jeaYr+WTquS4qiBwYXJ0LOWGjeaQnOWHveaVsOWQjeOAggoKLS0tCgojIyA0LiBqcy9waG90by13YWxsLyDnhafniYflopnmqKHlnZcKCnwg5paH5Lu2IHwg5YaF5a65IHwKfC0tLXwtLS18CnwgYGRhdGEuanNgIHwg5pWw5o2u5Yqg6L2944CBYGxvYWRQaG90b1dhbGxEYXRhYOOAgWBmZXRjaFBob3RvUGFnZWDjgIFgbWVyZ2VQaG90b0xpc3RzYCB8CnwgYHJlbmRlci5qc2AgfCDmuLLmn5PjgIFgcmVuZGVyUGhvdG9XYWxsYOOAgeWIhue7hChhbGJ1bSnjgIHmh5LliqDovb3lm77niYcgfAp8IGBwaG90by13YWxsLmpzYCB8IOWFpeWPo+OAgWBpbml0UGhvdG9XYWxsYCB8CnwgYHVwbG9hZC11aS5qc2AgfCDkuIrkvKAgVUnjgIHmibnph4/kuIrkvKDjgIFgdXBsb2FkUGhvdG9XYWxsRmlsZXNgIHwKfCBgcHJldmlldy5qc2AgfCDlhajlsY/pooTop4ggYFEoKWAvYGNsb3NlUGhvdG9QcmV2aWV3YCjooqsgaG90Zml4IOimhueblikgfAp8IGBwcmV2aWV3LWhvdGZpeC5qc2AgfCDpooTop4jkv67lpI3lsYIo5YyF6KOFIHByZXZpZXcuanMpIHwKCi0tLQoKIyMgNS4gcmVuZGVyLWFwaS8g5YW25LuW5qih5Z2XCgp8IOaWh+S7tiB8IOWGheWuuSB8IOWkh+azqCB8CnwtLS18LS0tfC0tLXwKfCB+fmNvZGUtYWdlbnQuanMgLyBjb2RlLWluZGV4LmpzIC8gY29kZS1naXRodWIuanN+fiB8ICoq5bey5bm25YWlIHNlcnZlci5qcyoq77yIQ09ERV9JTkRFWCDmoLjlrp7kuo4gMjAyNi0wOe+8jC9hcGkvY29kZS9haSDkuI4gL2FwaS9jb2RlL2doLXByb3h5IOWGheiBlOWcqCBzZXJ2ZXIuanMg57qmIDIxMzgxIOihjO+8iSB8IHwKfCBgcHJvdmlkZXItcmVnaXN0cnkuanNgIHwg5qih5Z6L5L6b5bqU5ZWG5rOo5YaMIHwgfAp8IGBwaG90by1jcmVhdGUuanNgIHwg54Wn54mH5Yib5bu6L+e8qeeVpeWbvi9zaGFycCDmoKHpqowgfCB8CnwgYGRtLW1lZGlhLmpzYCB8IERNIOWqkuS9k+S4iuS8oOagoemqjCB8IHwKfCBgc2VhcmNoLXByb3ZpZGVycy5qc2AgfCDogZTnvZHmkJzntKIoYmluZy90YXZpbHkvc2VhcnhuZyDnrYkpIHwgfAp8IGBzdG9yYWdlLWNsZWFudXAuanNgIHwgU3RvcmFnZSDlraTlhL/mlofku7bmuIXnkIYgfCB8CnwgYHBvc3QtbWFya2Vycy5qc2AgfCAqKuaJgOaciSBtZWRpYV90eXBlIOagh+iusOW4uOmHjyoqIHwg57O757uf5qCH6K6w5riF5Y2V5rqQ5aS0IHwKfCBgcG9zdC1xdWVyeS5qc2AgfCDluJblrZDnmb3lkI3ljZXov4fmu6TovoXliqkgfCB8CnwgYHNlY3VyaXR5LWhlYWRlcnMuanNgIHwgQ1NQL+WuieWFqOWktCB8IHwKfCBgc3NlLXdyaXRlLmpzYCB8IFNTRSDlhpnlhaXovoXliqkgfCB8CnwgYG1haWwtdHJhbnNwb3J0LmpzYCB8IOmCruS7tuWPkemAgSB8IHwKfCBgd2VhdGhlci5qc2AgfCDlpKnmsJTmn6Xor6IgfCB8CnwgYHV0aWwtaGVscGVycy5qc2AgfCDpgJrnlKjlt6XlhbcgfCB8CnwgYGFpLXNhbml0aXplLmpzYCB8IEFJIOi+k+WHuua4hea0lyB8IHwKCi0tLQoKIyMgNi4ganMvYWktYWdlbnQuanMoODM3OSDooYwp4oCUIOWwj+eMq0FJIOWNleS9kyBJSUZFCgo+IOaVtOS4quaWh+S7tuaYr+S4gOS4quWkpyBJSUZFLOWGhemDqOeKtuaAgSBgU2Ag5a+56LGh5oyB5pyJ5omA5pyJIFVJL+S8muivneeKtuaAgeOAguaXoOWIhuauteazqOmHiueahOmDqOWIhuaMieS4i+aWueWHveaVsOWumuS9jeOAggoKfCDooYzlj7cgfCDlhoXlrrkgfAp8LS0tfC0tLXwKfCAyNC0xNTAgfCDluLjph4/kuI7nirbmgIEgYFNgIHwKfCAxNjEtMzQ4IHwgYGVsKClgIOWuieWFqCBET00g5p6E5bu644CBYHJlbmRlck1hcmtkb3duYCjml6fniYgs5rOo5oSPIFhTUykgfAp8IDQ4NC03MDAgfCBBSSDmoLnoioLngrnjgIHlpLTlg4/jgIHkvJror50ga2V5IHwKfCAxOTk1LTI4NzAgfCDmt7HluqbmgJ3ogIPmqKHlvI8gdG9nZ2xlL2NhbmNlbCB8CnwgMjg3MS0zNTg4IHwgVGF2aWx5IERlZXAgUmVzZWFyY2ggfAp8IDM1ODktNDA1MSB8IFNTRSDmtYHop6PmnpDlvqrnjq8gfAp8IDQwNTItNDQ2NyB8IOWkmuaZuuiDveS9k+aooeW8j+WunueOsCB8CnwgNDQ2OC04Mzc5IHwg5LqM57qn6aG16Z2i44CB5Y6G5Y+y44CB5pCc57Si44CB5bel5YW35Y2hIHwKCioq5om+IEFJIOmAu+i+kemhuuW6jyoqOuaQnCBgZnVuY3Rpb24gPOWKn+iDveWQjT5gIOaIliBgUy54eHhgIOeKtuaAgeWtl+auteOAggoKLS0tCgojIyA3LiBqcy9jb2RlLXdvcmtiZW5jaC5qcygyMTI5IOihjCnigJQgQ29kZSDlt6XkvZzljLrljZXkvZMgSUlGRe+8iOaXp+e0ouW8leivr+WGmeS4uiBjb2RlLXdvcmtzcGFjZS5qcy85NTIxIOihjO+8jOW3suaguOWunuS/ruato++8iQoKfCDooYzlj7cgfCDlhoXlrrkgfAp8LS0tfC0tLXwKfCAxMzQtNjg4IHwgSW5kZXhlZERC44CBTW9uYWNvIOWKoOi9veOAgeW3peWFt+WHveaVsCB8CnwgNjg4LTEwMDQgfCBgaW5pdCgpYOOAgWB0cnlSZXN0b3JlV29ya3NwYWNlYOOAgWBjbGVhbnVwYOOAgeasoui/jumhtSB8CnwgMTAwNS0xMzAzIHwg5paH5Lu25omT5byAL0FQSS/lt6XkvZzljLogfAp8IDE1MTAtMTc4NSB8IOW4g+WxgOezu+e7nyh0b2dnbGUv6YeN572uKSB8CnwgMTgxMi0yMzcwIHwgYHJlbmRlcldvcmtzcGFjZWDjgIFyZXNpemVyIHwKfCAyMzcwLTI5NTAgfCDmlofku7bmoJHjgIFgcmVuZGVyRmlsZVRyZWVg44CB5Y+z6ZSu6I+c5Y2VIHwKfCAyOTUyLTM0NTQgfCDmiZPlvIAv5YWz6ZetIHRhYuOAgee8lui+keWZqOa4suafkyB8CnwgMzQ1NS0zNzkwIHwg5L+d5a2Y44CB5Zu+54mHL1BERi/mlofmoaPpooTop4ggfAp8IDM5MTMtNDYxMiB8IOmhueebrue0ouW8lSBgYnVpbGRQcm9qZWN0SW5kZXhgIHwKfCA0NjEzLTQ4MTMgfCBHaXRIdWIg5bel5L2c5Yy6IHwKfCA0ODE0LTU2MTEgfCDmqKHlnosv6IO95YqbL+mZhOS7tiB8CnwgNTE2OS02NDM1IHwg6IGK5aSp6Z2i5p2/44CBY29tcG9zZXLjgIFgc2VuZE1lc3NhZ2VgIHwKfCA2NDM2LTgyOTUgfCDmtYHlvI/or7fmsYIgYHNlbmRTdHJlYW1pbmdSZXF1ZXN0YOOAgeaBouWkjeOAgXdhdGNoZG9nIHwKfCA4Mjk2LTk0NzAgfCBBUEkg6K+35rGC44CBZGlmZuOAgeaWh+aho+aTjeS9nChgYXBwbHlEb2N1bWVudE9wZXJhdGlvbmApIHwKCi0tLQoKIyMgOC4gQUkg5om+IGJ1ZyDlv6vpgJ/lr7zoiKoKCiMjIyDnlKjmiLflj6/op4HnmoQi5omT5LiN5byAL+WNoeatuyLnsbsKLSDpobXpnaLljaHmrbsg4oaSIGBqcy91eC1mZWF0dXJlcy5qc2AoTXV0YXRpb25PYnNlcnZlciDkv67lpI3lpIQp44CBYGpzL3BlcmZvcm1hbmNlLmpzYOOAgWBqcy9jb3JlLXBhcnRzLzA2YCh3YXRjaGRvZykKLSBmZWVkIOS4jeaYvuekuiDihpIgYGpzL2NvcmUtcGFydHMvMDRgKGBmZXRjaEZlZWRQYWdlQ2h1bmtgKeOAgWBqcy9lYXJseS1mZWVkLmpzYOOAgWByZW5kZXItYXBpL3NlcnZlci5qcyDCpzg4OTIgL2FwaS9mZWVkYAotIOeZu+W9leeKtuaAgeW8guW4uCDihpIgYGpzL2NvcmUtcGFydHMvMDFgKHRva2VuL+S8muivnSnjgIFgcmVuZGVyLWFwaS9zZXJ2ZXIuanMgwqc2ODU0YAoKIyMjIOWuieWFqOexuyjlrqHorqHlt7Llj5HnjrApCi0g5rOo5YaM5o+Q5p2DIOKGkiDinIUg5bey5L+u5aSN77yaYHJlbmRlci1hcGkvc2VydmVyLmpzYCDnuqYgODIzOSDooYwgcmVnaXN0ZXIg5oum5oiqIEFETUlOX1VTRVJOQU1F77yI5pen6KGM5Y+3IDcwNzMg5bey6L+H5pe277yJCi0g54Wn54mH5aKZ6LaK5p2DIOKGkiDinIUg5bey5L+u5aSN77yaYHNlcnZlci5qc2Ag57qmIDEwMzg0IOihjOW3suWvueS7luS6uuWKoCB2aXNpYmlsaXR5PSdwdWJsaWMnIOi/h+a7pO+8iOaXp+ihjOWPtyA5MDAxIOW3sui/h+aXtu+8iQotIHBob3RvIGNsZWFudXAg6LaK5p2D5YigIOKGkiDinIUg5bey5L+u5aSN77yaYHNlcnZlci5qc2Ag57qmIDg5ODQg6KGM5LuF6K6kIHJlcS51c2VyTmFtZe+8iOaXp+ihjOWPtyA3NzM2IOW3sui/h+aXtu+8iQotIEFJIG1hcmtkb3duIFhTUyDihpIg4pyFIOW3sue8k+ino++8mmBqcy9haS1hZ2VudC5qczoxMDM2YCDotbcgZXNjYXBlLWZpcnN0IOmHjeWGme+8m+aXpyByZW5kZXJNYXJrZG93biDnjrDlrprkuYnlnKggMTAyNCDooYzvvIjml6fooYzlj7cgMjg3IOW3sui/h+aXtu+8iQoKIyMjIOaVsOaNrua1gei/vei4qgoxLiDluJblrZA65YmN56uvIGAwNC1wb3N0cy1pbnRlcmFjdGlvbnMuanNgIOKGkiBgL2FwaS9mZWVkYChzZXJ2ZXIuanMgODg5MinihpIgU3VwYWJhc2UgcG9zdHMg6KGoCjIuIOengeS/oTrliY3nq68gYDA2LWNoYXQtYW5kLW5hdi5qc2Ag4oaSIGAvYXBpL2RtLypgKHNlcnZlci5qcyA5MTc0KeKGkiBwb3N0cyDooaggYF9fZG1fX2Ag6KGMCjMuIOeFp+eJhzrliY3nq68gYHBob3RvLXdhbGwvKmAg4oaSIGAvYXBpL3Bob3Rvcy8qYChzZXJ2ZXIuanMgODk5OSnihpIgcG9zdHMg6KGoIGBfX3Bob3RvX3dhbGxfX2Ag6KGMICsgU3RvcmFnZQoKLS0tCgojIyA5LiBzZXJ2ZXIuanMg5ouG5YiG5Y+v6KGM5oCnKOmHjeimgSkKCioq57uT6K66OnNlcnZlci5qcyDnmoTniannkIbmi4bliIYo5oqK6Lev55Sx5q6156e75Yiw54us56uL5paH5Lu2KeWPl+Wlkee6pua1i+ivlemUgeWumizlvZPliY3kuI3lj6/ooYzjgIIqKiDnkIbnlLE6CgoxLiAqKui3r+eUseWtl+espuS4sumUmueCuSoqOue6piAyMCDlpITmtYvor5Xnm7TmjqUgYGZzLnJlYWRGaWxlU3luYygncmVuZGVyLWFwaS9zZXJ2ZXIuanMnKWAg5ZCOIGBpbmRleE9mKCJhcHAuZ2V0KCcvYXBpL2ZlZWQnIilgIOetiSzku6PnoIHnp7votbDljbPmlq3oqIDlpLHotKXjgIIKMi4gKirliIbmrrXms6jph4rovrnnlYzplJrngrkqKjrmtYvor5XnlKggYGluZGV4T2YoJy8vID09PT09PT09PT09PT09PT09PT09PSDnhafniYflopknKWAg562JKirliIbmrrXms6jph4rkvZzkuLogc2xpY2Ug57uT5p2f6L6555WMKiooYGludGVyYWN0aW9uLWNvbnRyYWN0c2DjgIFgcGhhc2UyNDYtY29udHJhY3RzYOOAgWBjb21wbGV0ZS10ZXN0c2Ag562JIDEwKyDmlofku7Yp44CC56e75Yqo6Lev55SxID0g5YiG5q615L2N572u5Y+Y5YyWID0g6L6555WM5aSx5pWI44CCCjMuICoqQUkg5Ye95pWw6ZSa54K5Kio6YGRlZXBzZWVrLWNhbGwtcnVudGltZS50ZXN0LmpzYCg0MCsg5aSEKeOAgWB0YXZpbHktc2VhcmNoLXRvb2wtY29udHJhY3Rg44CBYHByMzU3LXJlZ3Jlc3Npb24tY29udHJhY3RzYCDplJrlrpogYGFzeW5jIGZ1bmN0aW9uIGNhbGxEZWVwU2Vla2DjgIFgZXhlY3V0ZVRvb2xDYWxsYCDnrYkgQUkg6L6F5Yqp5Ye95pWw4oCU4oCUQUkg5q61KDE2MC02NDAwIOihjCnmmK8qKuWHveaVsOS4jui3r+eUseS6pOe7h+acgOWvhioq55qE5Yy65Z+fLOWQjOagt+aLhuS4jeW+l+OAggo0LiAqKumAmueUqOmUmueCuSoqOumDqOWIhua1i+ivleebtOaOpeaQnOesrOS4gOS4qiBgLy8gPT09PT09PT09PT09PT09PT09PT09YCDkvZzkuLrovrnnlYwo5aaCIGBhaS1zaXRlLXRvb2xzLWNvbnRyYWN0LnRlc3QuanM6OTNgKSzov54i57uZ5YiG5q615Yqg57yW5Y+35rOo6YeKIumDveWPr+iDveegtOWdj+OAggoKIyMjIOacquadpeiLpeWdmuaMgeaLhuWIhueahOadoeS7tgotIOW/hemhuyoq5ZCM5q2l6YeN5YaZ5omA5pyJ5Y+X5b2x5ZON5rWL6K+VKioo57qmIDEwLTE1IOS4quaWh+S7tiks5oqKIGBmcy5yZWFkRmlsZVN5bmMoJ3NlcnZlci5qcycpYCDmlLnkuLror7vmlrDmqKHlnZfmlofku7Ys5bm26YeN5bu6IHNsaWNlIOi+ueeVjAotIOW7uuiuruWFiOi3kSBgbnBtIHRlc3RgIOiusOW9leWfuue6vyzmi4bkuIDmrrXpqozor4HkuIDmrrUKLSDlt7LmjIkgYHJlZ2lzdGVyWHh4Um91dGVzKGFwcCwgZGVwcylgIOaooeW8j+aLhuWHuueahOaooeWdlzpgcHJvdmlkZXItcmVnaXN0cnkuanNg77yIY29kZS1hZ2VudC9jb2RlLWdpdGh1YiDlt7Llm57lubYgc2VydmVyLmpz77yJ4oCU4oCUKirmlrDot6/nlLHlupTkvJjlhYjlhpnov5vni6znq4vmlofku7Ys5LiN6KaB5YaN5aCG6L+bIHNlcnZlci5qcyoqCgojIyMg5rWL6K+V6ZSa5a6a55qEIHNlcnZlci5qcyDmrrUo5ouG5YiG57qi57q/KQoKfCBzZXJ2ZXIuanMg5q61IHwg6ZSa5a6a5rWL6K+VIHwKfC0tLXwtLS18CnwgYC9hcGkvZmVlZGAoODg5MikgfCBjb21wbGV0ZS10ZXN0cyg1IOWkhCBzbGljZSkgfAp8IGAvYXBpL3Bvc3QvY3JlYXRlYCg4MTg1KSB8IGNvbXBsZXRlLXRlc3RzKDU5MykgfAp8IGAvYXBpL3Bob3Rvcy93YWxsfHB1YmxpY2AoODk5OSkgfCBiYWNrZW5kLWFwaS1jb250cmFjdCgxNzUtMTc2KeOAgXBoYXNlMjQ2KDE4OCkgfAp8IGAvYXBpL2F2YXRhci9iYXRjaGAoOTA4MCkgfCBwaGFzZTI0NigxODggc2xpY2Ug6LW354K5KSB8CnwgYC9hcGkvZG0vKmAoOTE3NCspIHwgaW50ZXJhY3Rpb24tY29udHJhY3RzKDc1KSB8CnwgYC9hcGkvcG9zdC9saWtlYCg4NTQ2KSB8IGludGVyYWN0aW9uLWNvbnRyYWN0cyg4OCkgfAp8IGAvYXBpL2FnZW50L2NoYXQvaGlzdG9yeWAgfCBhaS1zaXRlLXRvb2xzLWNvbnRyYWN0KDkzKeOAgWludGVyYWN0aW9uLWNvbnRyYWN0cyg1NikgfAp8IGBhc3luYyBmdW5jdGlvbiBjYWxsRGVlcFNlZWtgKDQzNzkpIHwgZGVlcHNlZWstY2FsbC1ydW50aW1lKDQwKyDlpIQpIHwKfCBgYXN5bmMgZnVuY3Rpb24gdmVyaWZ5VG9rZW5gKDY2NjcpIHwgb3B0aW9uYWwtYXV0aC1yZWdyZXNzaW9uKDM0KSB8CnwgYGFzeW5jIGZ1bmN0aW9uIGFpU2l0ZVBlcnNpc3RSZXN1bHRzYCgyMDE1KSB8IGFpLXNpdGUtdG9vbHMtY29udHJhY3QoMTcwKSB8CnwgYEFJX1NJVEVfVE9PTF9SRUdJU1RSWWAoMTg5OSkgfCBhaS1zaXRlLXRvb2xzLWNvbnRyYWN0KDU2KSB8CnwgYC9hZG1pbi9jbGVhbnVwLWxvZ3NgKDEyMzE0KSB8IGRiLXJlc3VsdC1jb250cmFjdCgxNzYpIHwKfCBg55m75b2V6K6+5aSHL0lQYCDliIbmrrUoMTE4NTkpIHwgc2FmZS1hbmFseXRpY3MtY29udHJhY3QoMjYpIHwKfCBgdmVyaWZ5VG9rZW5gL2BvcHRpb25hbEF1dGhgIOetieS4remXtOS7tiB8IGNvbXBsZXRlLXRlc3RzKDUzOSnjgIFvcHRpb25hbC1hdXRoLXJlZ3Jlc3Npb24gfAoKKirnu5PorroqKjpzZXJ2ZXIuanMg5L+d5oyB5Y2V5paH5Lu2ICsg5pys57Si5byV5a+86IiqLOaYr+W9k+WJjemjjumZqeacgOS9juOAgeaUtuebiuacgOmrmOeahOW9ouaAgeOAguaWsOWinuWKn+iDveivt+S8mOWFiOaUviBgcmVuZGVyLWFwaS9gIOeLrOeri+aooeWdl+aIluWkjeeUqCBgcmVnaXN0ZXJYeHhSb3V0ZXNgIOaooeW8j+OAggo=
+# XTJ 代码索引 (CODE_INDEX)
+
+> 本项目文件较大,此索引用于快速定位代码。**行号会随改动漂移,定位后请用文件内搜索(如 `// ===== 分段名` 或函数名)二次确认。**
+>
+> **⚠️ 拆分警告**:server.js 的物理拆分**受契约测试锁定**(详见 §9)。改动前必读。
+
+## 1. 项目架构总览
+
+```
+浏览器 (index.html)
+ ├─ js/early-feed.min.js      首屏并行拉帖(不依赖 core.js)
+ ├─ js/ai-core/*.min.js       7 个 AI 共享模块(errors/transport/markdown 等)
+ ├─ js/vendor/supabase.min.js Supabase SDK(前端直连,受 RLS 约束)
+ ├─ js/core.min.js            核心逻辑(由 js/core-parts/*.js 组装,见 §3)
+ ├─ js/ai-agent.min.js        小猫AI 聊天/深度研究(单体 IIFE,§6)
+ ├─ js/code-workspace.min.js  Code 工作区(单体 IIFE,§7)
+ └─ js/photo-wall/*.min.js    照片墙模块
+        ↓
+后端 (Render 托管, render-api/)
+ ├─ server.js         主入口:全部路由 + AI 函数(§2,17196 行)
+ ├─ code-agent.js      Code AI 代理(5621 行,register 模式)
+ ├─ code-index.js      Code 项目索引(1639 行)
+ ├─ provider-registry.js 模型供应商注册(662 行)
+ ├─ photo-create.js    照片创建/缩略图(581 行)
+ ├─ search-providers.js 联网搜索 provider(454 行)
+ └─ 其余工具模块(见 §5)
+        ↓
+Supabase (PostgreSQL + Storage)
+ ├─ posts 表         全站数据的"大表"(帖子/评论/点赞/DM/照片/系统标记,用 media_type 区分)
+ └─ storage bucket   上传文件(照片/头像/DM 媒体,public)
+```
+
+**核心设计**:全站数据(帖子、评论、私信、照片、系统记录)都存 Supabase 的 `posts` 表,用 `media_type` 字段区分业务类型(常量见 `render-api/post-markers.js`)。前端直连 Supabase 走 RLS,后端用 service_role key 绕过 RLS 执行受控操作。
+
+---
+
+## 2. render-api/server.js 分段索引(17196 行)
+
+> 所有分段用 `// ===================== 标题 =====================` 分隔。搜索方法:在 server.js 里搜 `// ===== 标题` 或按下方行号跳转。
+
+### 2a. 配置与 AI 函数(1-6400 行)— 辅助函数区,路由在 §2b/2c
+
+| 行号 | 分段 | 内容 |
+|---|---|---|
+| 1-90 | 导入/初始化 | express、supabase 客户端、cookie 解析、trust proxy |
+| 92-158 | 配置 | ADMIN_USERNAME/PASSWORD、API_SECRET、SUPABASE_URL、ALLOWED_ORIGINS |
+| 159-334 | DeepSeek AI 配置 | API key、模型目录、`refreshDeepSeekModelCatalog` |
+| 335-409 | 深度研究模式 (M/R 架构) | `activeDeepThinkJobs`、agent 构建、缓存 |
+| 410-641 | 共享工具函数 | `canUseAiCache`、`buildHistoryContext`、`buildToolExecutor` |
+| 642-734 | DeepSeek Function Calling 工具定义 | `AI_TOOLS`、`executeToolCall` |
+| 735-1054 | Responses API 辅助 | `buildResponsesInput`、`autoSupplementSearch` |
+| 1055-1266 | Tavily Research 增强流水线 | `researchCache`、`rewriteResearchQuery` |
+| 1267-1654 | 输入校验 | `mergeUserInfo`、`logVisit`、`logAttack`、`sanitizeError`、`pgrstQuote` |
+| 1655-2212 | 中间件 | `rateLimit`、`getClientIp`、`AI_SITE_TOOL_REGISTRY`、`aiSiteSearch` |
+| 2213-2661 | 帖子详情 API + IP 属地 | `/api/post/detail/:id`、`resolveIpLocation`、`retryIpRegionAsync` |
+| 2662-3366 | 安全检测逻辑 | `checkSameIpMultiUsers`、`runSecurityChecks`、`securityRateLimit` |
+| 3367-3516 | DeepSeek 统一调用封装 | `callDeepSeekAI`、`extractEmbeddedFiles` |
+| 3517-5246 | **小猫 AI 评论区自动回复** | `CAT_AI_*`、`processCatReplyJob`、`recoverStaleCatJobs` |
+| 5247-5623 | Responses API 调用 | `callDeepSeekViaResponses` |
+| 5624-5991 | M: 深度研究多智能体 | `runMultiAgentFlow` |
+| 5992-6400 | R: 深度研究单智能体 | `runDeepThinkAgent`、`runDeepThinkWorker` |
+
+### 2b. 认证与核心 API(6401-9180 行)
+
+| 行号 | 分段 | 内容 |
+|---|---|---|
+| 6401-6432 | AI 用户级限流 | `checkAiUserRateLimit` |
+| 6433-6701 | **Token 管理(核心)** | `_signPayload`、`signUserAccessToken`、`verifyToken`、吊销 |
+| 6702-6794 | 健康检查 | `/health` |
+| 6795-6853 | 管理员登录 | `/admin/login` |
+| 6854-7236 | 用户 Token 认证 | `/api/user/login/register/refresh/logout` |
+| 7237-7259 | 自动过期函数 | |
+| 7260-7294 | 数据加载(只读认证) | |
+| 7295-7344 | 公告管理 | `/admin/announcement` |
+| 7345-7443 | 公告已读跨设备同步 | |
+| 7444-7479 | 帖子管理 | 删帖/封禁相关 |
+| 7480-7494 | 评论管理 | |
+| 7495-7512 | 举报通知辅助 | |
+| 7513-7563 | 举报通知查询 API | |
+| 7564-7617 | 照片管理 | |
+| 7618-7632 | 用户照片上传 API | |
+| 7633-8144 | **用户照片删除/清理 API** | `/api/photo/delete`、`/api/photo/cleanup` |
+| 8145-8429 | P0: 帖子编辑/删除 API | `/api/post/update/delete` |
+| 8430-8545 | Atomic post pin API | `/api/post/pin` |
+| 8546-8891 | 点赞接口 | `/api/post/like`、`/api/stats/snapshot` |
+| 8892-8998 | **帖子列表接口(核心)** | `/api/feed`(统一可见性过滤) |
+| 8999-9037 | 照片墙接口 | `/api/photos/wall/:userName`、`/api/photos/public` |
+| 9038-9173 | 头像接口 | `/api/avatar/*`、`/api/avatar/batch` |
+
+### 2c. 私信/管理/统计/AI 路由(9174-17100 行)
+
+| 行号 | 分段 | 内容 |
+|---|---|---|
+| 9174-9866 | 私信列表/消息/发送/撤回 | `/api/dm/*` |
+| 9867-10118 | 封禁/禁言/黑名单管理 | `/admin/ban`、`/admin/mute`、`/admin/blacklist` |
+| 10119-10318 | 管理员删除用户账号 | `/admin/user/:userName` |
+| 10319-10636 | 举报管理 | `/admin/reports` |
+| 10637-10935 | 用户数据(只读) | `/api/my-reports`、`/admin/user-data` |
+| 10650-10935 | 数据统计 API | `/admin/stats/*` |
+| 10936-11522 | 用户访问日志 | `/api/log-user-visit` |
+| 11523-11619 | 用户画像聚合 API | |
+| 11620-11858 | 实时在线用户 API | `/admin/stats/online` |
+| 11859-12085 | 登录设备/IP 记录 | `/api/log-login-event` |
+| 12086-12112 | 安全设置(前端公开读取) | `/api/security-settings` |
+| 12113-12178 | 登录事件查询(管理员) | `/admin/login-events` |
+| 12179-12313 | 安全提醒/设置管理 | `/admin/security-*` |
+| 12314-12370 | 日志清理 | `/admin/cleanup-logs` |
+| 12371-12400 | 审计日志查询 | `/admin/audit-logs` |
+| 12401-12485 | 用户访问统计(管理员) | `/admin/stats/users` |
+| 12486-12903 | 管理员邮件通知 API | `/admin/send-email`、`/admin/email-history` |
+| 12904-13014 | 管理员邮件收件人历史 | |
+| 13015-13092 | 客户端错误监控 | `/api/client-error-log`(匿名可写) |
+| 13093-13379 | **AI 聊天接口** | `/api/agent/chat`、`/api/agent/chat/stream` |
+| 13380-15807 | 全局 AI 配置/会话 | `/api/agent/config`、`/api/agent/chat/history` |
+| 15808-16440 | 自托管多智能体深度研究 | `/api/agent/research/stream` |
+| 16441-16876 | AI site-tool APIs | `/api/agent/post-tools`、`/api/agent/actions/:id/confirm` |
+| 16877-17530 | 管理员 AI 管理接口 | `/admin/ai-agent/*` |
+
+### 2d. 尾部(17531-17770 行)
+
+| 行号 | 分段 | 内容 |
+|---|---|---|
+| 17531-17601 | 全局错误处理 | uncaughtException/unhandledRejection 防崩溃 |
+| 17602-17770 | 启动 | `app.listen`、DM 未读邮件提醒、`startLocationTaskProcessor`、`registerCodeAgentRoutes` 等 |
+
+---
+
+## 3. js/core.js(18977 行)— 由 js/core-parts/ 组装
+
+**不要直接编辑 core.js**!它由 `scripts/assemble-core.js` 按 `js/core-parts/MANIFEST.json` 顺序拼接。改代码去改对应的 part 文件,然后跑 `node scripts/assemble-core.js`(或 `npm run build`)。
+
+| part 文件 | 内容 |
+|---|---|
+| `01-bootstrap.js` | 启动序列、token 管理(`memoryUserToken`)、会话恢复、主题 |
+| `02-auth-restrictions.js` | 登录态、封禁限制、用户信息 |
+| `03-profile-report-ai.js` | 个人资料、举报、猫 AI 轮询 |
+| `04-posts-interactions.js` | **feed 加载、帖子渲染/点赞/评论/删除**(核心) |
+| `05-feed-stats.js` | 统计、双击刷新、AI tab |
+| `06-chat-and-nav.js` | dock 聊天、tab 切换、公告 |
+| `07-final-overrides.js` | 最终覆盖/兼容层 |
+
+**找前端逻辑的顺序**:先在 §3 定位是哪个 part,再搜函数名。
+
+---
+
+## 4. js/photo-wall/ 照片墙模块
+
+| 文件 | 内容 |
+|---|---|
+| `data.js` | 数据加载、`loadPhotoWallData`、`fetchPhotoPage`、`mergePhotoLists` |
+| `render.js` | 渲染、`renderPhotoWall`、分组(album)、懒加载图片 |
+| `photo-wall.js` | 入口、`initPhotoWall` |
+| `upload-ui.js` | 上传 UI、批量上传、`uploadPhotoWallFiles` |
+| `preview.js` | 全屏预览 `Q()`/`closePhotoPreview`(被 hotfix 覆盖) |
+| `preview-hotfix.js` | 预览修复层(包装 preview.js) |
+
+---
+
+## 5. render-api/ 其他模块
+
+| 文件 | 内容 | 备注 |
+|---|---|---|
+| ~~code-agent.js / code-index.js / code-github.js~~ | **已并入 server.js**（CODE_INDEX 核实于 2026-09，/api/code/ai 与 /api/code/gh-proxy 内联在 server.js 约 21381 行） | |
+| `provider-registry.js` | 模型供应商注册 | |
+| `photo-create.js` | 照片创建/缩略图/sharp 校验 | |
+| `dm-media.js` | DM 媒体上传校验 | |
+| `search-providers.js` | 联网搜索(bing/tavily/searxng 等) | |
+| `storage-cleanup.js` | Storage 孤儿文件清理 | |
+| `post-markers.js` | **所有 media_type 标记常量** | 系统标记清单源头 |
+| `post-query.js` | 帖子白名单过滤辅助 | |
+| `security-headers.js` | CSP/安全头 | |
+| `sse-write.js` | SSE 写入辅助 | |
+| `mail-transport.js` | 邮件发送 | |
+| `weather.js` | 天气查询 | |
+| `util-helpers.js` | 通用工具 | |
+| `ai-sanitize.js` | AI 输出清洗 | |
+
+---
+
+## 6. js/ai-agent.js(8379 行)— 小猫AI 单体 IIFE
+
+> 整个文件是一个大 IIFE,内部状态 `S` 对象持有所有 UI/会话状态。无分段注释的部分按下方函数定位。
+
+| 行号 | 内容 |
+|---|---|
+| 24-150 | 常量与状态 `S` |
+| 161-348 | `el()` 安全 DOM 构建、`renderMarkdown`(旧版,注意 XSS) |
+| 484-700 | AI 根节点、头像、会话 key |
+| 1995-2870 | 深度思考模式 toggle/cancel |
+| 2871-3588 | Tavily Deep Research |
+| 3589-4051 | SSE 流解析循环 |
+| 4052-4467 | 多智能体模式实现 |
+| 4468-8379 | 二级页面、历史、搜索、工具卡 |
+
+**找 AI 逻辑顺序**:搜 `function <功能名>` 或 `S.xxx` 状态字段。
+
+---
+
+## 7. js/code-workbench.js(2129 行)— Code 工作区单体 IIFE（旧索引误写为 code-workspace.js/9521 行，已核实修正）
+
+| 行号 | 内容 |
+|---|---|
+| 134-688 | IndexedDB、Monaco 加载、工具函数 |
+| 688-1004 | `init()`、`tryRestoreWorkspace`、`cleanup`、欢迎页 |
+| 1005-1303 | 文件打开/API/工作区 |
+| 1510-1785 | 布局系统(toggle/重置) |
+| 1812-2370 | `renderWorkspace`、resizer |
+| 2370-2950 | 文件树、`renderFileTree`、右键菜单 |
+| 2952-3454 | 打开/关闭 tab、编辑器渲染 |
+| 3455-3790 | 保存、图片/PDF/文档预览 |
+| 3913-4612 | 项目索引 `buildProjectIndex` |
+| 4613-4813 | GitHub 工作区 |
+| 4814-5611 | 模型/能力/附件 |
+| 5169-6435 | 聊天面板、composer、`sendMessage` |
+| 6436-8295 | 流式请求 `sendStreamingRequest`、恢复、watchdog |
+| 8296-9470 | API 请求、diff、文档操作(`applyDocumentOperation`) |
+
+---
+
+## 8. AI 找 bug 快速导航
+
+### 用户可见的"打不开/卡死"类
+- 页面卡死 → `js/ux-features.js`(MutationObserver 修复处)、`js/performance.js`、`js/core-parts/06`(watchdog)
+- feed 不显示 → `js/core-parts/04`(`fetchFeedPageChunk`)、`js/early-feed.js`、`render-api/server.js §8892 /api/feed`
+- 登录状态异常 → `js/core-parts/01`(token/会话)、`render-api/server.js §6854`
+
+### 安全类(审计已发现)
+- 注册提权 → ✅ 已修复：`render-api/server.js` 约 8239 行 register 拦截 ADMIN_USERNAME（旧行号 7073 已过时）
+- 照片墙越权 → ✅ 已修复：`server.js` 约 10384 行已对他人加 visibility='public' 过滤（旧行号 9001 已过时）
+- photo cleanup 越权删 → ✅ 已修复：`server.js` 约 8984 行仅认 req.userName（旧行号 7736 已过时）
+- AI markdown XSS → ✅ 已缓解：`js/ai-agent.js:1036` 起 escape-first 重写；旧 renderMarkdown 现定义在 1024 行（旧行号 287 已过时）
+
+### 数据流追踪
+1. 帖子:前端 `04-posts-interactions.js` → `/api/feed`(server.js 8892)→ Supabase posts 表
+2. 私信:前端 `06-chat-and-nav.js` → `/api/dm/*`(server.js 9174)→ posts 表 `__dm__` 行
+3. 照片:前端 `photo-wall/*` → `/api/photos/*`(server.js 8999)→ posts 表 `__photo_wall__` 行 + Storage
+
+---
+
+## 9. server.js 拆分可行性(重要)
+
+**结论:server.js 的物理拆分(把路由段移到独立文件)受契约测试锁定,当前不可行。** 理由:
+
+1. **路由字符串锚点**:约 20 处测试直接 `fs.readFileSync('render-api/server.js')` 后 `indexOf("app.get('/api/feed'")` 等,代码移走即断言失败。
+2. **分段注释边界锚点**:测试用 `indexOf('// ===================== 照片墙')` 等**分段注释作为 slice 结束边界**(`interaction-contracts`、`phase246-contracts`、`complete-tests` 等 10+ 文件)。移动路由 = 分段位置变化 = 边界失效。
+3. **AI 函数锚点**:`deepseek-call-runtime.test.js`(40+ 处)、`tavily-search-tool-contract`、`pr357-regression-contracts` 锚定 `async function callDeepSeek`、`executeToolCall` 等 AI 辅助函数——AI 段(160-6400 行)是**函数与路由交织最密**的区域,同样拆不得。
+4. **通用锚点**:部分测试直接搜第一个 `// =====================` 作为边界(如 `ai-site-tools-contract.test.js:93`),连"给分段加编号注释"都可能破坏。
+
+### 未来若坚持拆分的条件
+- 必须**同步重写所有受影响测试**(约 10-15 个文件),把 `fs.readFileSync('server.js')` 改为读新模块文件,并重建 slice 边界
+- 建议先跑 `npm test` 记录基线,拆一段验证一段
+- 已按 `registerXxxRoutes(app, deps)` 模式拆出的模块:`provider-registry.js`（code-agent/code-github 已回并 server.js）——**新路由应优先写进独立文件,不要再堆进 server.js**
+
+### 测试锚定的 server.js 段(拆分红线)
+
+| server.js 段 | 锚定测试 |
+|---|---|
+| `/api/feed`(8892) | complete-tests(5 处 slice) |
+| `/api/post/create`(8185) | complete-tests(593) |
+| `/api/photos/wall|public`(8999) | backend-api-contract(175-176)、phase246(188) |
+| `/api/avatar/batch`(9080) | phase246(188 slice 起点) |
+| `/api/dm/*`(9174+) | interaction-contracts(75) |
+| `/api/post/like`(8546) | interaction-contracts(88) |
+| `/api/agent/chat/history` | ai-site-tools-contract(93)、interaction-contracts(56) |
+| `async function callDeepSeek`(4379) | deepseek-call-runtime(40+ 处) |
+| `async function verifyToken`(6667) | optional-auth-regression(34) |
+| `async function aiSitePersistResults`(2015) | ai-site-tools-contract(170) |
+| `AI_SITE_TOOL_REGISTRY`(1899) | ai-site-tools-contract(56) |
+| `/admin/cleanup-logs`(12314) | db-result-contract(176) |
+| `登录设备/IP` 分段(11859) | safe-analytics-contract(26) |
+| `verifyToken`/`optionalAuth` 等中间件 | complete-tests(539)、optional-auth-regression |
+
+**结论**:server.js 保持单文件 + 本索引导航,是当前风险最低、收益最高的形态。新增功能请优先放 `render-api/` 独立模块或复用 `registerXxxRoutes` 模式。

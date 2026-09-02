@@ -1,1 +1,115 @@
-LS0gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQotLSAwMDEg5Z+656GAIHNjaGVtYSDlv6vnhafvvIjku4XkvpvlhajmlrDnjq/looPliJ3lp4vljJbvvIkKLS0gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQotLSDimqDvuI8g6YeN6KaB77ya5pys5paH5Lu25LuF55So5LqO44CM5YWo5paw546v5aKDIC8g54G+6Zq+5oGi5aSN44CN5LuO6Zu25Zue5pS+5pe255qE5Z+656GA5bu66KGo5b+r54Wn44CCCi0tICAgIOeUn+S6p+W6k+S4juW3suW6lOeUqOWOhuWPsui/geenu+eahOW6k+OAkOivt+WLv+aJp+ihjOOAkeKAlOKAlOWug+S7rOeahOWOhuWPsui/geenu+mTvuW3sumakOW8j+WtmOWcqAotLSAgICDov5nkupvooajvvIhwb3N0cy9saWtlcy9jb21tZW50cy9iYW5zL2JsYWNrbGlzdC9tdXRlc++8ie+8jOmHjeWkjeaJp+ihjOacrOW/q+eFpwotLSAgICDlm6Dkvb/nlKggQ1JFQVRFIFRBQkxFIElGIE5PVCBFWElTVFMg5LiN5Lya5oql6ZSZ77yM5L2G5peg6ZyA5Lmf5LiN5bqU5YaN5omn6KGM44CCCi0tCi0tIOiDjOaZr++8iOWuoeiuoSAwN2MtaW5mcmEtYnVpbGQubWQg8J+UtO+8ie+8muWOhuWPsui/geenu+S7pSAwMDIg5byA5aS077yM57y65aSxIDAwMSDln7rnoYDooagKLS0gICAg5a6a5LmJ77yM5qC45b+D6KGoIHBvc3RzL2xpa2VzL2NvbW1lbnRzL2JhbnMvYmxhY2tsaXN0L211dGVzIOWdh+aXoCBDUkVBVEUgVEFCTEUKLS0gICAg6L+B56e777yb5YW25LitIGJsYWNrbGlzdC9tdXRlcyDooqsgMDMyIGdldF91c2VyX3Jlc3RyaWN0aW9ucyDkuI4KLS0gICAgcmVuZGVyLWFwaS9zZXJ2ZXIuanMg566h55CG6Lev55Sx55u05o6l6K+75YaZ77yM5bu65bqT5pe25ryP6KGl5Y2z5oqlCi0tICAgICJyZWxhdGlvbiBkb2VzIG5vdCBleGlzdCLjgIIKLS0KLS0g5pys5b+r54Wn5Y+q5YGa44CM5YiX5a6a5LmJICsg5Li76ZSu44CN55qE5pyA5bCP57uT5p6E77yM5YiX5Lul5pyA57uI5oCB5Li65YeG77yI5L6d5o2uIHNlcnZlci5qcwotLSAgICDmn6Xor6Iv5YaZ5YWl5a2X5q615LiO5ZCE6L+B56e7IEFMVEVSIOe7k+aenO+8ieOAgue6puadn+OAgee0ouW8leOAgVJMUyDnrZbnlaXjgIHmnYPpmZDmlLblj6MKLS0gICAg5LuN55Sx5ZCO57ut5a+55bqU6L+B56e777yIMDA4LzAwOS8wMTUvMDE2LzAxN2IvMDIwLzAyMS8wMzIvMDM0LzAzOeKApu+8iei0n+i0o++8jAotLSAgICDpgb/lhY3kuI7mnKzmlofku7bph43lpI3lrprkuYnlr7zoh7Tlkb3lkI0v6K+t5LmJ5YiG5Y+J44CCCi0tID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0KCkJFR0lOOwoKLS0gPT09PT09PT09PT09IHBvc3RzID09PT09PT09PT09PQpDUkVBVEUgVEFCTEUgSUYgTk9UIEVYSVNUUyBwdWJsaWMucG9zdHMgKAogIGlkIHV1aWQgUFJJTUFSWSBLRVkgREVGQVVMVCBnZW5fcmFuZG9tX3V1aWQoKSwKICB1c2VyX25hbWUgICAgICAgICAgICAgdGV4dCwKICBtZWRpYV90eXBlICAgICAgICAgICAgdGV4dCwKICBtZWRpYV91cmwgICAgICAgICAgICAgdGV4dCwKICBjb250ZW50ICAgICAgICAgICAgICAgdGV4dCwKICBhY3Rvcl9rZXkgICAgICAgICAgICAgdGV4dCwKICBjcmVhdGVkX2F0ICAgICAgICAgICAgdGltZXN0YW1wdHogTk9UIE5VTEwgREVGQVVMVCBub3coKSwKICB1cGRhdGVkX2F0ICAgICAgICAgICAgdGltZXN0YW1wdHosCiAgdmlzaWJpbGl0eSAgICAgICAgICAgIHRleHQgREVGQVVMVCAncHVibGljJywKICBpc19kZWxldGVkICAgICAgICAgICAgYm9vbGVhbiBOT1QgTlVMTCBERUZBVUxUIGZhbHNlLAogIHZpZXdzICAgICAgICAgICAgICAgICBiaWdpbnQgTk9UIE5VTEwgREVGQVVMVCAwLAogIGlzX3Bpbm5lZCAgICAgICAgICAgICBib29sZWFuIE5PVCBOVUxMIERFRkFVTFQgZmFsc2UsCiAgcGlubmVkX2F0ICAgICAgICAgICAgIHRpbWVzdGFtcHR6LAogIC0tIOW4luWtkOWumuS9jeS4jiBJUCDlsZ7lnLDvvIgwMTYvMDE3YiDlvJXlhaXvvIzlhajpg6jlj6/nqbrlhbzlrrnljoblj7LmlbDmja7vvIkKICBsb2NhdGlvbl9uYW1lICAgICAgICAgdGV4dCwKICBsb2NhdGlvbl9wcm92aW5jZSAgICAgdGV4dCwKICBsb2NhdGlvbl9jaXR5ICAgICAgICAgdGV4dCwKICBsb2NhdGlvbl9kaXN0cmljdCAgICAgdGV4dCwKICBsb2NhdGlvbl9sZXZlbCAgICAgICAgdGV4dCwKICBpcF9wcm92aW5jZSAgICAgICAgICAgdGV4dCwKICBpcF9jaXR5ICAgICAgICAgICAgICAgdGV4dCwKICBpcF9yZWdpb25fdGV4dCAgICAgICAgdGV4dCwKICBpcF9yZWdpb25fc3RhdHVzICAgICAgdGV4dCwKICBpcF9yZXNvbHZlZF9hdCAgICAgICAgdGltZXN0YW1wdHosCiAgaXBfbG9va3VwX3N0YXJ0ZWRfYXQgIHRpbWVzdGFtcHR6LAogIGlwX3JlZ2lvbl9lcnJvciAgICAgICB0ZXh0Cik7CgotLSA9PT09PT09PT09PT0gbGlrZXMgPT09PT09PT09PT09CkNSRUFURSBUQUJMRSBJRiBOT1QgRVhJU1RTIHB1YmxpYy5saWtlcyAoCiAgaWQgICAgICAgICAgYmlnaW50IEdFTkVSQVRFRCBCWSBERUZBVUxUIEFTIElERU5USVRZIFBSSU1BUlkgS0VZLAogIHBvc3RfaWQgICAgIGJpZ2ludCwKICB1c2VyX25hbWUgICB0ZXh0LAogIGNyZWF0ZWRfYXQgIHRpbWVzdGFtcHR6IE5PVCBOVUxMIERFRkFVTFQgbm93KCkKKTsKCi0tID09PT09PT09PT09PSBjb21tZW50cyA9PT09PT09PT09PT0KQ1JFQVRFIFRBQkxFIElGIE5PVCBFWElTVFMgcHVibGljLmNvbW1lbnRzICgKICBpZCAgICAgICAgICAgICAgICBiaWdpbnQgR0VORVJBVEVEIEJZIERFRkFVTFQgQVMgSURFTlRJVFkgUFJJTUFSWSBLRVksCiAgcG9zdF9pZCAgICAgICAgICAgYmlnaW50LAogIHVzZXJfbmFtZSAgICAgICAgIHRleHQsCiAgY29udGVudCAgICAgICAgICAgdGV4dCwKICBjcmVhdGVkX2F0ICAgICAgICB0aW1lc3RhbXB0eiBOT1QgTlVMTCBERUZBVUxUIG5vdygpLAogIHBhcmVudF9jb21tZW50X2lkIGJpZ2ludCwKICBnZW5lcmF0ZWRfYnlfYWkgICBib29sZWFuIE5PVCBOVUxMIERFRkFVTFQgZmFsc2UKKTsKCi0tID09PT09PT09PT09PSBiYW5zID09PT09PT09PT09PQpDUkVBVEUgVEFCTEUgSUYgTk9UIEVYSVNUUyBwdWJsaWMuYmFucyAoCiAgaWQgICAgICAgICAgICAgICAgICBiaWdpbnQgR0VORVJBVEVEIEJZIERFRkFVTFQgQVMgSURFTlRJVFkgUFJJTUFSWSBLRVksCiAgdXNlcl9uYW1lICAgICAgICAgICB0ZXh0LAogIGJhbl90eXBlICAgICAgICAgICAgdGV4dCwKICBiYW5fcmVhc29uICAgICAgICAgIHRleHQsCiAgYmFuX2R1cmF0aW9uX2hvdXJzICBpbnRlZ2VyLAogIGJhbm5lZF9ieSAgICAgICAgICAgdGV4dCwKICBiYW5uZWRfYXQgICAgICAgICAgIHRpbWVzdGFtcHR6IE5PVCBOVUxMIERFRkFVTFQgbm93KCksCiAgZXhwaXJlc19hdCAgICAgICAgICB0aW1lc3RhbXB0eiwKICBpc19hY3RpdmUgICAgICAgICAgIGJvb2xlYW4gTk9UIE5VTEwgREVGQVVMVCB0cnVlLAogIGxpZnRlZF9hdCAgICAgICAgICAgdGltZXN0YW1wdHosCiAgbGlmdGVkX2J5ICAgICAgICAgICB0ZXh0Cik7CgotLSA9PT09PT09PT09PT0gYmxhY2tsaXN0ID09PT09PT09PT09PQpDUkVBVEUgVEFCTEUgSUYgTk9UIEVYSVNUUyBwdWJsaWMuYmxhY2tsaXN0ICgKICBpZCAgICAgICAgICAgICAgICBiaWdpbnQgR0VORVJBVEVEIEJZIERFRkFVTFQgQVMgSURFTlRJVFkgUFJJTUFSWSBLRVksCiAgdXNlcl9uYW1lICAgICAgICAgdGV4dCwKICByZWFzb24gICAgICAgICAgICB0ZXh0LAogIGR1cmF0aW9uX2hvdXJzICAgIGludGVnZXIsCiAgYWRkZWRfYnkgICAgICAgICAgdGV4dCwKICBjcmVhdGVkX2F0ICAgICAgICB0aW1lc3RhbXB0eiBOT1QgTlVMTCBERUZBVUxUIG5vdygpLAogIGV4cGlyZXNfYXQgICAgICAgIHRpbWVzdGFtcHR6LAogIGlzX2FjdGl2ZSAgICAgICAgIGJvb2xlYW4gTk9UIE5VTEwgREVGQVVMVCB0cnVlLAogIGxpZnRlZF9hdCAgICAgICAgIHRpbWVzdGFtcHR6LAogIGxpZnRlZF9ieSAgICAgICAgIHRleHQKKTsKCi0tID09PT09PT09PT09PSBtdXRlcyA9PT09PT09PT09PT0KQ1JFQVRFIFRBQkxFIElGIE5PVCBFWElTVFMgcHVibGljLm11dGVzICgKICBpZCAgICAgICAgICAgICAgICBiaWdpbnQgR0VORVJBVEVEIEJZIERFRkFVTFQgQVMgSURFTlRJVFkgUFJJTUFSWSBLRVksCiAgdXNlcl9uYW1lICAgICAgICAgdGV4dCwKICByZWFzb24gICAgICAgICAgICB0ZXh0LAogIGR1cmF0aW9uX2hvdXJzICAgIGludGVnZXIsCiAgbXV0ZWRfYnkgICAgICAgICAgdGV4dCwKICBjcmVhdGVkX2F0ICAgICAgICB0aW1lc3RhbXB0eiBOT1QgTlVMTCBERUZBVUxUIG5vdygpLAogIGV4cGlyZXNfYXQgICAgICAgIHRpbWVzdGFtcHR6LAogIGlzX2FjdGl2ZSAgICAgICAgIGJvb2xlYW4gTk9UIE5VTEwgREVGQVVMVCB0cnVlLAogIGxpZnRlZF9hdCAgICAgICAgIHRpbWVzdGFtcHR6LAogIGxpZnRlZF9ieSAgICAgICAgIHRleHQKKTsKCkNPTU1JVDsK
+-- ============================================================================
+-- 001 基础 schema 快照（仅供全新环境初始化）
+-- ----------------------------------------------------------------------------
+-- ⚠️ 重要：本文件仅用于「全新环境 / 灾难恢复」从零回放时的基础建表快照。
+--    生产库与已应用历史迁移的库【请勿执行】——它们的历史迁移链已隐式存在
+--    这些表（posts/likes/comments/bans/blacklist/mutes），重复执行本快照
+--    因使用 CREATE TABLE IF NOT EXISTS 不会报错，但无需也不应再执行。
+--
+-- 背景（审计 07c-infra-build.md 🔴）：历史迁移以 002 开头，缺失 001 基础表
+--    定义，核心表 posts/likes/comments/bans/blacklist/mutes 均无 CREATE TABLE
+--    迁移；其中 blacklist/mutes 被 032 get_user_restrictions 与
+--    render-api/server.js 管理路由直接读写，建库时漏补即报
+--    "relation does not exist"。
+--
+-- 本快照只做「列定义 + 主键」的最小结构，列以最终态为准（依据 server.js
+--    查询/写入字段与各迁移 ALTER 结果）。约束、索引、RLS 策略、权限收口
+--    仍由后续对应迁移（008/009/015/016/017b/020/021/032/034/039…）负责，
+--    避免与本文件重复定义导致命名/语义分叉。
+-- ============================================================================
+
+BEGIN;
+
+-- ============ posts ============
+CREATE TABLE IF NOT EXISTS public.posts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_name             text,
+  media_type            text,
+  media_url             text,
+  content               text,
+  actor_key             text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz,
+  visibility            text DEFAULT 'public',
+  is_deleted            boolean NOT NULL DEFAULT false,
+  views                 bigint NOT NULL DEFAULT 0,
+  is_pinned             boolean NOT NULL DEFAULT false,
+  pinned_at             timestamptz,
+  -- 帖子定位与 IP 属地（016/017b 引入，全部可空兼容历史数据）
+  location_name         text,
+  location_province     text,
+  location_city         text,
+  location_district     text,
+  location_level        text,
+  ip_province           text,
+  ip_city               text,
+  ip_region_text        text,
+  ip_region_status      text,
+  ip_resolved_at        timestamptz,
+  ip_lookup_started_at  timestamptz,
+  ip_region_error       text
+);
+
+-- ============ likes ============
+CREATE TABLE IF NOT EXISTS public.likes (
+  id          bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  post_id     bigint,
+  user_name   text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- ============ comments ============
+CREATE TABLE IF NOT EXISTS public.comments (
+  id                bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  post_id           bigint,
+  user_name         text,
+  content           text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  parent_comment_id bigint,
+  generated_by_ai   boolean NOT NULL DEFAULT false
+);
+
+-- ============ bans ============
+CREATE TABLE IF NOT EXISTS public.bans (
+  id                  bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  user_name           text,
+  ban_type            text,
+  ban_reason          text,
+  ban_duration_hours  integer,
+  banned_by           text,
+  banned_at           timestamptz NOT NULL DEFAULT now(),
+  expires_at          timestamptz,
+  is_active           boolean NOT NULL DEFAULT true,
+  lifted_at           timestamptz,
+  lifted_by           text
+);
+
+-- ============ blacklist ============
+CREATE TABLE IF NOT EXISTS public.blacklist (
+  id                bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  user_name         text,
+  reason            text,
+  duration_hours    integer,
+  added_by          text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  expires_at        timestamptz,
+  is_active         boolean NOT NULL DEFAULT true,
+  lifted_at         timestamptz,
+  lifted_by         text
+);
+
+-- ============ mutes ============
+CREATE TABLE IF NOT EXISTS public.mutes (
+  id                bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  user_name         text,
+  reason            text,
+  duration_hours    integer,
+  muted_by          text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  expires_at        timestamptz,
+  is_active         boolean NOT NULL DEFAULT true,
+  lifted_at         timestamptz,
+  lifted_by         text
+);
+
+COMMIT;

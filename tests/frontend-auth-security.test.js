@@ -1,1 +1,48 @@
-Y29uc3QgdGVzdCA9IHJlcXVpcmUoJ25vZGU6dGVzdCcpOwpjb25zdCBhc3NlcnQgPSByZXF1aXJlKCdub2RlOmFzc2VydC9zdHJpY3QnKTsKY29uc3QgZnMgPSByZXF1aXJlKCdub2RlOmZzJyk7Cgpjb25zdCBjb3JlID0gZnMucmVhZEZpbGVTeW5jKCdqcy9jb3JlLmpzJywgJ3V0ZjgnKTsKY29uc3QgZGV2aWNlID0gZnMucmVhZEZpbGVTeW5jKCdqcy9sb2dpbi1kZXZpY2UuanMnLCAndXRmOCcpOwpjb25zdCBhaSA9IGZzLnJlYWRGaWxlU3luYygnanMvYWktYWdlbnQuanMnLCAndXRmOCcpOwoKdGVzdCgnbG9naW4gYW5kIHJlZ2lzdHJhdGlvbiBzZW5kIHRoZSB1c2VyLWVudGVyZWQgcGFzc3dvcmQgb25seSB0byBkZWRpY2F0ZWQgYXV0aCBBUElzJywgKCkgPT4gewogIC8vIE00OO+8mueZu+W9leivt+axgui1sOW4pui2heaXtueahCBmZXRjaFdpdGhUaW1lb3V077yI5a+G56CB5LuN5Y+q5Y+R5b6A5LiT5bGe6K6k6K+B5o6l5Y+j77yJCiAgYXNzZXJ0Lm1hdGNoKGNvcmUsIC9mZXRjaCg/OldpdGhUaW1lb3V0KT9cKEFQSV9CQVNFIFwrICdcL2FwaVwvdXNlclwvbG9naW4nW1xzXFNdKj9KU09OXC5zdHJpbmdpZnlcKFx7IHVzZXJfbmFtZTogbmFtZSwgcGFzc3dvcmQ6IHB3IFx9XCkvKTsKICAvLyDms6jlhozlj6/pmYTluKblj6/pgIkgZW1haWzvvIjlkI7nq6/moKHpqozmoLzlvI/lubbljp/lrZDlhpnlhaUgdXNlcl9pbmZv77yJ77yM5a+G56CB5LuF5Y+R5b6A5rOo5YaM5o6l5Y+jCiAgYXNzZXJ0Lm1hdGNoKGNvcmUsIC9mZXRjaCg/OldpdGhUaW1lb3V0KT9cKEFQSV9CQVNFIFwrICdcL2FwaVwvdXNlclwvcmVnaXN0ZXInW1xzXFNdKj9KU09OXC5zdHJpbmdpZnlcKFx7IHVzZXJfbmFtZTogbmFtZSwgcGFzc3dvcmQ6IHB3LCBlbWFpbDogZW1haWwgXHxcfCB1bmRlZmluZWQgXH1cKS8pOwogIGFzc2VydC5kb2VzTm90TWF0Y2goY29yZSwgL2ZpbmRBdXRoUmVjb3JkfGhhc2hQYXNzd29yZFdpdGhTYWx0fHZlcmlmeVBhc3N3b3JkfGF1dGhQYXNzd29yZEhhc2gvKTsKICBhc3NlcnQuZG9lc05vdE1hdGNoKGNvcmUsIC9cLmluc2VydFwoXFtce1tcc1xTXXswLDIwMH1tZWRpYV90eXBlOlxzKkFVVEhfTUFSS0VSLyk7Cn0pOwoKdGVzdCgncnVudGltZSBtb2R1bGVzIG5ldmVyIHJlYWQgb3Igc2VuZCBwYXNzd29yZC1lcXVpdmFsZW50IGhhc2hlcycsICgpID0+IHsKICBbZGV2aWNlLCBhaV0uZm9yRWFjaCgoc291cmNlKSA9PiB7CiAgICBhc3NlcnQuZG9lc05vdE1hdGNoKHNvdXJjZSwgL3Bhc3N3b3JkX2hhc2h8eHRqX3B3X2hhc2h8eHRqX3Bhc3N3b3JkX2hhc2gvKTsKICB9KTsKICAvLyBDb3JlIHJldGFpbnMgcmVtb3ZlSXRlbSBjYWxscyBzb2xlbHkgdG8gcHVyZ2UgdmFsdWVzIGxlZnQgYnkgb2xkIGNsaWVudHMuCiAgYXNzZXJ0LmRvZXNOb3RNYXRjaChjb3JlLCAvZ2V0SXRlbVwoWyciXXh0al9wd19oYXNofHNldEl0ZW1cKFsnIl14dGpfcHdfaGFzaC8pOwogIGFzc2VydC5kb2VzTm90TWF0Y2goY29yZSwgL3Bhc3N3b3JkX2hhc2hccyo6Lyk7Cn0pOwoKdGVzdCgnYWNjZXNzIHRva2VucyByZW1haW4gaW4gbWVtb3J5IGFuZCBhcmUgbm90IHBlcnNpc3RlZCBpbiBXZWIgU3RvcmFnZScsICgpID0+IHsKICBhc3NlcnQubWF0Y2goY29yZSwgL3ZhciBtZW1vcnlVc2VyVG9rZW4gPSAnJy8pOwogIGFzc2VydC5tYXRjaChjb3JlLCAvbWVtb3J5VXNlclRva2VuID0gU3RyaW5nXCh0b2tlblwpLyk7CiAgYXNzZXJ0LmRvZXNOb3RNYXRjaChjb3JlLCAvKD86bG9jYWxTdG9yYWdlfHNlc3Npb25TdG9yYWdlKVwuc2V0SXRlbVwoVVNFUl9UT0tFTl9LRVkvKTsKICBhc3NlcnQuZG9lc05vdE1hdGNoKGNvcmUsIC8oPzpsb2NhbFN0b3JhZ2V8c2Vzc2lvblN0b3JhZ2UpXC5nZXRJdGVtXChVU0VSX1RPS0VOX0tFWS8pOwp9KTsKCnRlc3QoJ2RldmljZSB0ZWxlbWV0cnkgaXMgdG9rZW4gYXV0aGVudGljYXRlZCBhbmQgY2FuIHJlZnJlc2ggdmlhIHRoZSBzaGFyZWQgaGVscGVyJywgKCkgPT4gewogIGFzc2VydC5tYXRjaChkZXZpY2UsIC93aW5kb3dcLmVuc3VyZVVzZXJUb2tlbi8pOwogIGFzc2VydC5tYXRjaChkZXZpY2UsIC9BdXRob3JpemF0aW9uLipCZWFyZXIvKTsKICBhc3NlcnQubWF0Y2goZGV2aWNlLCAvY3JlZGVudGlhbHM6XHMqJ2luY2x1ZGUnLyk7Cn0pOwoKdGVzdCgnYWRtaW5pc3RyYXRvciBsb2dpbiByZWNlaXZlcyBhIHNlcGFyYXRlIHVzZXIgYWNjZXNzIHNlc3Npb24gd2l0aG91dCBicm93c2VyIGhhc2ggc3RvcmFnZScsICgpID0+IHsKICBhc3NlcnQubWF0Y2goY29yZSwgL3NldFVzZXJUb2tlblwobG9naW5SZXNcLnVzZXJfdG9rZW5cKS8pOwogIGFzc2VydC5kb2VzTm90TWF0Y2goY29yZSwgL0FETUlOX1RPS0VOX0tFWS8pOwp9KTsKCnRlc3QoJ2xvZ291dCBwcmVzZW50cyB0aGUgYWNjZXNzIHRva2VuIGJlZm9yZSBjbGVhcmluZyBsb2NhbCBzdGF0ZScsICgpID0+IHsKICBhc3NlcnQubWF0Y2goY29yZSwgL3ZhciB0b2tlbkZvclJldm9jYXRpb24gPSBnZXRVc2VyVG9rZW5cKFwpO1tcc1xTXSo/Y2xlYXJVc2VyVG9rZW5cKFwpLyk7CiAgYXNzZXJ0Lm1hdGNoKGNvcmUsIC9sb2dvdXRIZWFkZXJzXC5BdXRob3JpemF0aW9uID0gJ0JlYXJlciAnIFwrIHRva2VuRm9yUmV2b2NhdGlvbi8pOwp9KTsK
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+const core = fs.readFileSync('js/core.js', 'utf8');
+const device = fs.readFileSync('js/login-device.js', 'utf8');
+const ai = fs.readFileSync('js/ai-agent.js', 'utf8');
+
+test('login and registration send the user-entered password only to dedicated auth APIs', () => {
+  // M48：登录请求走带超时的 fetchWithTimeout（密码仍只发往专属认证接口）
+  assert.match(core, /fetch(?:WithTimeout)?\(API_BASE \+ '\/api\/user\/login'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw \}\)/);
+  // 注册可附带可选 email（后端校验格式并原子写入 user_info），密码仅发往注册接口
+  assert.match(core, /fetch(?:WithTimeout)?\(API_BASE \+ '\/api\/user\/register'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw, email: email \|\| undefined \}\)/);
+  assert.doesNotMatch(core, /findAuthRecord|hashPasswordWithSalt|verifyPassword|authPasswordHash/);
+  assert.doesNotMatch(core, /\.insert\(\[\{[\s\S]{0,200}media_type:\s*AUTH_MARKER/);
+});
+
+test('runtime modules never read or send password-equivalent hashes', () => {
+  [device, ai].forEach((source) => {
+    assert.doesNotMatch(source, /password_hash|xtj_pw_hash|xtj_password_hash/);
+  });
+  // Core retains removeItem calls solely to purge values left by old clients.
+  assert.doesNotMatch(core, /getItem\(['"]xtj_pw_hash|setItem\(['"]xtj_pw_hash/);
+  assert.doesNotMatch(core, /password_hash\s*:/);
+});
+
+test('access tokens remain in memory and are not persisted in Web Storage', () => {
+  assert.match(core, /var memoryUserToken = ''/);
+  assert.match(core, /memoryUserToken = String\(token\)/);
+  assert.doesNotMatch(core, /(?:localStorage|sessionStorage)\.setItem\(USER_TOKEN_KEY/);
+  assert.doesNotMatch(core, /(?:localStorage|sessionStorage)\.getItem\(USER_TOKEN_KEY/);
+});
+
+test('device telemetry is token authenticated and can refresh via the shared helper', () => {
+  assert.match(device, /window\.ensureUserToken/);
+  assert.match(device, /Authorization.*Bearer/);
+  assert.match(device, /credentials:\s*'include'/);
+});
+
+test('administrator login receives a separate user access session without browser hash storage', () => {
+  assert.match(core, /setUserToken\(loginRes\.user_token\)/);
+  assert.doesNotMatch(core, /ADMIN_TOKEN_KEY/);
+});
+
+test('logout presents the access token before clearing local state', () => {
+  assert.match(core, /var tokenForRevocation = getUserToken\(\);[\s\S]*?clearUserToken\(\)/);
+  assert.match(core, /logoutHeaders\.Authorization = 'Bearer ' \+ tokenForRevocation/);
+});

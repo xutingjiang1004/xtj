@@ -1,1 +1,118 @@
-LS0gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQotLSAwNTQg6YWN6aKd6K+t5LmJ5LiOIENIRUNLIOS/ruWkje+8iDIwMjYtMDnvvIkKLS0gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQotLSAxKSAwNDkg55qEIHRva2VuX2xpbWl0X2RhaWx5IENIRUNLIOemgeatoiAw77yI5Y+q5YWB6K64IE5VTEwvLTEvPjDvvInvvIzogIwgMDUxLwotLSAgICBTVVBBQkFTRV9GSVhfMDUxIOeahOmAu+i+keS7pSAiMCA9IOemgeeUqCIg5Li65YmN5o+QIOKGkiDor63kuYnnn5vnm77vvJvkuJToi6XlrZjph4/lrZjlnKgKLS0gICAgMCDlgLzooYzvvIwwNDkg55qEIEFERCBDSEVDSyDkvJrlm6Dljoblj7LmlbDmja7lpLHotKXjgILov5nph4wgRFJPUCDlkI7ph43lu7rlhYHorrggMOOAggotLSAyKSBjb25zdW1lX2FpX3Rva2VuX3VzYWdlIOWPquWvuSB0b2tlbiDlgZrkuobliankvZnpop3luqbmiKrmlq3vvIxzZWFyY2hfY291bnQg5LuO5LiNCi0tICAgIOaIquaWre+8iDA0NTo2MC02NSAvIDA0ODo2NC02Oe+8ieKGkiDlubblj5HkuIvlhY3otLnml6XmkJzntKLpop3luqblj6/ooqvnqoHnoLTjgIIKLS0gICAg5pys6L+B56e75oyJIDA0OCDniYjlh73mlbDkuLrln7rnur/ph43lrprkuYnvvIzkuLogc2VhcmNoX2NvdW50IOWinuWKoOS4jiB0b2tlbiDlrozlhagKLS0gICAg5a+556ew55qE5oiq5pat6YC76L6R77yILTEg5peg6ZmQ5LiN5oiq5pat77yJ77yM562+5ZCNL+i/lOWbnue7k+aehC/mnYPpmZDlnYfkuI3lj5jjgIIKLS0gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQoKQkVHSU47CgotLSAxKSBDSEVDSyDor63kuYnkuI4gMDUxICIwPeemgeeUqCIg5a+56b2Q77yIdG9rZW4g5YWB6K64IE5VTEwgLyAtMSAvIDAgLyA+MO+8iQpBTFRFUiBUQUJMRSBwdWJsaWMuYWlfaW52aXRlX2NvZGVzCiAgRFJPUCBDT05TVFJBSU5UIElGIEVYSVNUUyBhaV9pbnZpdGVfY29kZXNfdG9rZW5fbGltaXRfZGFpbHlfY2hlY2ssCiAgQUREIENPTlNUUkFJTlQgYWlfaW52aXRlX2NvZGVzX3Rva2VuX2xpbWl0X2RhaWx5X2NoZWNrCiAgICBDSEVDSyAodG9rZW5fbGltaXRfZGFpbHkgSVMgTlVMTCBPUiB0b2tlbl9saW1pdF9kYWlseSA9IC0xIE9SIHRva2VuX2xpbWl0X2RhaWx5ID0gMCBPUiB0b2tlbl9saW1pdF9kYWlseSA+IDApOwoKQUxURVIgVEFCTEUgcHVibGljLmFpX3VzZXJfbWVtYmVyc2hpcAogIERST1AgQ09OU1RSQUlOVCBJRiBFWElTVFMgYWlfdXNlcl9tZW1iZXJzaGlwX3Rva2VuX2xpbWl0X2RhaWx5X2NoZWNrLAogIEFERCBDT05TVFJBSU5UIGFpX3VzZXJfbWVtYmVyc2hpcF90b2tlbl9saW1pdF9kYWlseV9jaGVjawogICAgQ0hFQ0sgKHRva2VuX2xpbWl0X2RhaWx5IElTIE5VTEwgT1IgdG9rZW5fbGltaXRfZGFpbHkgPSAtMSBPUiB0b2tlbl9saW1pdF9kYWlseSA9IDAgT1IgdG9rZW5fbGltaXRfZGFpbHkgPiAwKTsKCi0tIDIpIGNvbnN1bWVfYWlfdG9rZW5fdXNhZ2XvvJpzZWFyY2hfY291bnQg5Ymp5L2Z6aKd5bqm5oiq5pat77yIMDQ4IOeJiOWfuue6v++8iQpDUkVBVEUgT1IgUkVQTEFDRSBGVU5DVElPTiBwdWJsaWMuY29uc3VtZV9haV90b2tlbl91c2FnZSgKICBwX3VzZXJfbmFtZSB0ZXh0LAogIHBfdG9rZW5zIGludGVnZXIsCiAgcF9zZWFyY2hfY291bnQgaW50ZWdlciBERUZBVUxUIDAsCiAgcF9jb252ZXJzYXRpb25faWQgdGV4dCBERUZBVUxUIE5VTEwsCiAgcF9wcm9tcHRfdG9rZW5zIGludGVnZXIgREVGQVVMVCAwLAogIHBfY29tcGxldGlvbl90b2tlbnMgaW50ZWdlciBERUZBVUxUIDAsCiAgcF9yZWFzb25pbmdfdG9rZW5zIGludGVnZXIgREVGQVVMVCAwLAogIHBfbW9kZWwgdGV4dCBERUZBVUxUIE5VTEwsCiAgcF9zb3VyY2UgdGV4dCBERUZBVUxUICdjaGF0JywKICBwX2ZyZWVfdG9rZW5fbGltaXQgYmlnaW50IERFRkFVTFQgMTAwMDAwLAogIHBfcHJvX3Rva2VuX2xpbWl0IGJpZ2ludCBERUZBVUxUIDEwMDAwMDAsCiAgcF9mcmVlX3NlYXJjaF9saW1pdCBpbnRlZ2VyIERFRkFVTFQgMTAwCikgUkVUVVJOUyBqc29uYgpMQU5HVUFHRSBwbHBnc3FsClNFQ1VSSVRZIERFRklORVIKU0VUIHNlYXJjaF9wYXRoID0gcHVibGljCkFTICQkCkRFQ0xBUkUKICB2X3VzZXIgdGV4dCA6PSBsb3dlcih0cmltKGNvYWxlc2NlKHBfdXNlcl9uYW1lLCAnJykpKTsKICB2X2RheSBkYXRlIDo9IHB1YmxpYy5haV9xdW90YV9zaGFuZ2hhaV9kYXkoKTsKICB2X3Rva2VucyBpbnRlZ2VyIDo9IGdyZWF0ZXN0KDAsIGNvYWxlc2NlKHBfdG9rZW5zLCAwKSk7CiAgdl9zZWFyY2ggaW50ZWdlciA6PSBncmVhdGVzdCgwLCBjb2FsZXNjZShwX3NlYXJjaF9jb3VudCwgMCkpOwogIHZfcm93IHB1YmxpYy5haV91c2VyX3F1b3RhX2RhaWx5JVJPV1RZUEU7CiAgdl9xIGpzb25iOwogIHZfcmVtYWluaW5nIGJpZ2ludDsKICB2X3NlYXJjaF9yZW1haW5pbmcgYmlnaW50OwpCRUdJTgogIElGIHZfdXNlciA9ICcnIFRIRU4KICAgIFJFVFVSTiBqc29uYl9idWlsZF9vYmplY3QoJ29rJywgZmFsc2UsICdyZWFzb24nLCAnbm9fdXNlcicpOwogIEVORCBJRjsKICBJRiB2X3Rva2VucyA9IDAgQU5EIHZfc2VhcmNoID0gMCBUSEVOCiAgICBSRVRVUk4gcHVibGljLmdldF9haV91c2VyX3F1b3RhKHZfdXNlciwgcF9mcmVlX3Rva2VuX2xpbWl0LCBwX3Byb190b2tlbl9saW1pdCwgcF9mcmVlX3NlYXJjaF9saW1pdCkKICAgICAgfHwganNvbmJfYnVpbGRfb2JqZWN0KCdvaycsIHRydWUsICdjb25zdW1lZF90b2tlbnMnLCAwLCAnY29uc3VtZWRfc2VhcmNoJywgMCk7CiAgRU5EIElGOwoKICBQRVJGT1JNIHBnX2Fkdmlzb3J5X3hhY3RfbG9jayhoYXNodGV4dCgnYWlfdG9rZW46JyB8fCB2X3VzZXIpKTsKCiAgLS0g5Zyo5o+S5YWlL+e0r+WKoOWJjeWfuuS6juW9k+WJjemineW6puiuoeeul+WJqeS9mSB0b2tlbu+8m+i2heminemDqOWIhuaIquaWre+8jOe7neS4jeaJo+aIkOi0n+aVsOOAggogIC0tIDA0OCDkv67lpI3vvJp2X3JlbWFpbmluZyA8IDDvvIgwNDYg5byV5YWl55qEIHRva2VuX2xpbWl0X2RhaWx5PS0xIOaXoOmZkOmineW6pu+8ieaXtgogIC0tIOi3s+i/h+aIquaWre+8jOaMieWOn+WniyB2X3Rva2VucyDntK/liqDvvIzpgb/lhY0gdG9rZW5zX3VzZWQg6KKr5YaZ5oiQIC0xIOi0n+WQkee0r+WKoOOAggogIHZfcSA6PSBwdWJsaWMuZ2V0X2FpX3VzZXJfcXVvdGEodl91c2VyLCBwX2ZyZWVfdG9rZW5fbGltaXQsIHBfcHJvX3Rva2VuX2xpbWl0LCBwX2ZyZWVfc2VhcmNoX2xpbWl0KTsKICB2X3JlbWFpbmluZyA6PSBjb2FsZXNjZSgodl9xLT4+J3Rva2Vuc19yZW1haW5pbmcnKTo6YmlnaW50LCAwKTsKICBJRiB2X3JlbWFpbmluZyA+PSAwIEFORCB2X3Rva2Vuczo6YmlnaW50ID4gdl9yZW1haW5pbmcgVEhFTgogICAgLS0g6L+b5YWl5q2k5YiG5pSv5pe2IDAgPD0gdl9yZW1haW5pbmcgPCB2X3Rva2VucyA8PSBpbnQ0IOS4iumZkO+8jOaVheW8uui9rCBpbnQ0IOWuieWFqAogICAgdl90b2tlbnMgOj0gdl9yZW1haW5pbmc6OmludGVnZXI7CiAgRU5EIElGOwoKICAtLSDimIUgMDU0IOS/ruWkje+8mnNlYXJjaF9jb3VudCDlkIzmoLfmjInliankvZnpop3luqbmiKrmlq3vvIjmraTliY3lj6rmiKrmlq0gdG9rZW7vvIwKICAtLSDlpJrlrp7kvovlubblj5HkuIvml6XmkJzntKLpop3luqblj6/ooqvpgJDmrKHntK/liqDnqoHnoLTvvInjgIItMe+8iOaXoOmZkO+8ieS4jeaIquaWreOAggogIHZfc2VhcmNoX3JlbWFpbmluZyA6PSBjb2FsZXNjZSgodl9xLT4+J3NlYXJjaF9yZW1haW5pbmcnKTo6YmlnaW50LCAwKTsKICBJRiB2X3NlYXJjaF9yZW1haW5pbmcgPj0gMCBBTkQgdl9zZWFyY2g6OmJpZ2ludCA+IHZfc2VhcmNoX3JlbWFpbmluZyBUSEVOCiAgICB2X3NlYXJjaCA6PSB2X3NlYXJjaF9yZW1haW5pbmc6OmludGVnZXI7CiAgRU5EIElGOwoKICBJTlNFUlQgSU5UTyBwdWJsaWMuYWlfdXNlcl9xdW90YV9kYWlseSAodXNlcl9uYW1lLCBkYXlfa2V5LCB0b2tlbnNfdXNlZCwgc2VhcmNoX3VzZWQsIHVwZGF0ZWRfYXQpCiAgVkFMVUVTICh2X3VzZXIsIHZfZGF5LCB2X3Rva2Vucywgdl9zZWFyY2gsIG5vdygpKQogIE9OIENPTkZMSUNUICh1c2VyX25hbWUsIGRheV9rZXkpIERPIFVQREFURQogICAgU0VUIHRva2Vuc191c2VkID0gcHVibGljLmFpX3VzZXJfcXVvdGFfZGFpbHkudG9rZW5zX3VzZWQgKyBFWENMVURFRC50b2tlbnNfdXNlZCwKICAgICAgICBzZWFyY2hfdXNlZCA9IHB1YmxpYy5haV91c2VyX3F1b3RhX2RhaWx5LnNlYXJjaF91c2VkICsgRVhDTFVERUQuc2VhcmNoX3VzZWQsCiAgICAgICAgdXBkYXRlZF9hdCA9IG5vdygpCiAgUkVUVVJOSU5HICogSU5UTyB2X3JvdzsKCiAgSU5TRVJUIElOVE8gcHVibGljLmFpX3Rva2VuX3VzYWdlX2V2ZW50cyAoCiAgICB1c2VyX25hbWUsIGRheV9rZXksIGNvbnZlcnNhdGlvbl9pZCwKICAgIHByb21wdF90b2tlbnMsIGNvbXBsZXRpb25fdG9rZW5zLCByZWFzb25pbmdfdG9rZW5zLCB0b3RhbF90b2tlbnMsCiAgICBzZWFyY2hfY291bnQsIG1vZGVsLCBzb3VyY2UKICApIFZBTFVFUyAoCiAgICB2X3VzZXIsIHZfZGF5LCBudWxsaWYodHJpbShjb2FsZXNjZShwX2NvbnZlcnNhdGlvbl9pZCwgJycpKSwgJycpLAogICAgZ3JlYXRlc3QoMCwgY29hbGVzY2UocF9wcm9tcHRfdG9rZW5zLCAwKSksCiAgICBncmVhdGVzdCgwLCBjb2FsZXNjZShwX2NvbXBsZXRpb25fdG9rZW5zLCAwKSksCiAgICBncmVhdGVzdCgwLCBjb2FsZXNjZShwX3JlYXNvbmluZ190b2tlbnMsIDApKSwKICAgIHZfdG9rZW5zLAogICAgdl9zZWFyY2gsCiAgICBudWxsaWYodHJpbShjb2FsZXNjZShwX21vZGVsLCAnJykpLCAnJyksCiAgICBjb2FsZXNjZShudWxsaWYodHJpbShjb2FsZXNjZShwX3NvdXJjZSwgJycpKSwgJycpLCAnY2hhdCcpCiAgKTsKCiAgdl9xIDo9IHB1YmxpYy5nZXRfYWlfdXNlcl9xdW90YSh2X3VzZXIsIHBfZnJlZV90b2tlbl9saW1pdCwgcF9wcm9fdG9rZW5fbGltaXQsIHBfZnJlZV9zZWFyY2hfbGltaXQpOwogIFJFVFVSTiB2X3EgfHwganNvbmJfYnVpbGRfb2JqZWN0KAogICAgJ29rJywgdHJ1ZSwKICAgICdjb25zdW1lZF90b2tlbnMnLCB2X3Rva2VucywKICAgICdjb25zdW1lZF9zZWFyY2gnLCB2X3NlYXJjaAogICk7CkVORDsKJCQ7CgotLSDmnYPpmZDkuI4gMDQ1IOS4gOiHtO+8muS7hSBzZXJ2aWNlX3JvbGUKUkVWT0tFIEFMTCBPTiBGVU5DVElPTiBwdWJsaWMuY29uc3VtZV9haV90b2tlbl91c2FnZSh0ZXh0LCBpbnRlZ2VyLCBpbnRlZ2VyLCB0ZXh0LCBpbnRlZ2VyLCBpbnRlZ2VyLCBpbnRlZ2VyLCB0ZXh0LCB0ZXh0LCBiaWdpbnQsIGJpZ2ludCwgaW50ZWdlcikgRlJPTSBQVUJMSUMsIGFub24sIGF1dGhlbnRpY2F0ZWQ7CkdSQU5UIEVYRUNVVEUgT04gRlVOQ1RJT04gcHVibGljLmNvbnN1bWVfYWlfdG9rZW5fdXNhZ2UodGV4dCwgaW50ZWdlciwgaW50ZWdlciwgdGV4dCwgaW50ZWdlciwgaW50ZWdlciwgaW50ZWdlciwgdGV4dCwgdGV4dCwgYmlnaW50LCBiaWdpbnQsIGludGVnZXIpIFRPIHNlcnZpY2Vfcm9sZTsKCkNPTU1JVDsK
+-- ============================================================================
+-- 054 配额语义与 CHECK 修复（2026-09）
+-- ----------------------------------------------------------------------------
+-- 1) 049 的 token_limit_daily CHECK 禁止 0（只允许 NULL/-1/>0），而 051/
+--    SUPABASE_FIX_051 的逻辑以 "0 = 禁用" 为前提 → 语义矛盾；且若存量存在
+--    0 值行，049 的 ADD CHECK 会因历史数据失败。这里 DROP 后重建允许 0。
+-- 2) consume_ai_token_usage 只对 token 做了剩余额度截断，search_count 从不
+--    截断（045:60-65 / 048:64-69）→ 并发下免费日搜索额度可被突破。
+--    本迁移按 048 版函数为基线重定义，为 search_count 增加与 token 完全
+--    对称的截断逻辑（-1 无限不截断），签名/返回结构/权限均不变。
+-- ============================================================================
+
+BEGIN;
+
+-- 1) CHECK 语义与 051 "0=禁用" 对齐（token 允许 NULL / -1 / 0 / >0）
+ALTER TABLE public.ai_invite_codes
+  DROP CONSTRAINT IF EXISTS ai_invite_codes_token_limit_daily_check,
+  ADD CONSTRAINT ai_invite_codes_token_limit_daily_check
+    CHECK (token_limit_daily IS NULL OR token_limit_daily = -1 OR token_limit_daily = 0 OR token_limit_daily > 0);
+
+ALTER TABLE public.ai_user_membership
+  DROP CONSTRAINT IF EXISTS ai_user_membership_token_limit_daily_check,
+  ADD CONSTRAINT ai_user_membership_token_limit_daily_check
+    CHECK (token_limit_daily IS NULL OR token_limit_daily = -1 OR token_limit_daily = 0 OR token_limit_daily > 0);
+
+-- 2) consume_ai_token_usage：search_count 剩余额度截断（048 版基线）
+CREATE OR REPLACE FUNCTION public.consume_ai_token_usage(
+  p_user_name text,
+  p_tokens integer,
+  p_search_count integer DEFAULT 0,
+  p_conversation_id text DEFAULT NULL,
+  p_prompt_tokens integer DEFAULT 0,
+  p_completion_tokens integer DEFAULT 0,
+  p_reasoning_tokens integer DEFAULT 0,
+  p_model text DEFAULT NULL,
+  p_source text DEFAULT 'chat',
+  p_free_token_limit bigint DEFAULT 100000,
+  p_pro_token_limit bigint DEFAULT 1000000,
+  p_free_search_limit integer DEFAULT 100
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user text := lower(trim(coalesce(p_user_name, '')));
+  v_day date := public.ai_quota_shanghai_day();
+  v_tokens integer := greatest(0, coalesce(p_tokens, 0));
+  v_search integer := greatest(0, coalesce(p_search_count, 0));
+  v_row public.ai_user_quota_daily%ROWTYPE;
+  v_q jsonb;
+  v_remaining bigint;
+  v_search_remaining bigint;
+BEGIN
+  IF v_user = '' THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'no_user');
+  END IF;
+  IF v_tokens = 0 AND v_search = 0 THEN
+    RETURN public.get_ai_user_quota(v_user, p_free_token_limit, p_pro_token_limit, p_free_search_limit)
+      || jsonb_build_object('ok', true, 'consumed_tokens', 0, 'consumed_search', 0);
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('ai_token:' || v_user));
+
+  -- 在插入/累加前基于当前额度计算剩余 token；超额部分截断，绝不扣成负数。
+  -- 048 修复：v_remaining < 0（046 引入的 token_limit_daily=-1 无限额度）时
+  -- 跳过截断，按原始 v_tokens 累加，避免 tokens_used 被写成 -1 负向累加。
+  v_q := public.get_ai_user_quota(v_user, p_free_token_limit, p_pro_token_limit, p_free_search_limit);
+  v_remaining := coalesce((v_q->>'tokens_remaining')::bigint, 0);
+  IF v_remaining >= 0 AND v_tokens::bigint > v_remaining THEN
+    -- 进入此分支时 0 <= v_remaining < v_tokens <= int4 上限，故强转 int4 安全
+    v_tokens := v_remaining::integer;
+  END IF;
+
+  -- ★ 054 修复：search_count 同样按剩余额度截断（此前只截断 token，
+  -- 多实例并发下日搜索额度可被逐次累加突破）。-1（无限）不截断。
+  v_search_remaining := coalesce((v_q->>'search_remaining')::bigint, 0);
+  IF v_search_remaining >= 0 AND v_search::bigint > v_search_remaining THEN
+    v_search := v_search_remaining::integer;
+  END IF;
+
+  INSERT INTO public.ai_user_quota_daily (user_name, day_key, tokens_used, search_used, updated_at)
+  VALUES (v_user, v_day, v_tokens, v_search, now())
+  ON CONFLICT (user_name, day_key) DO UPDATE
+    SET tokens_used = public.ai_user_quota_daily.tokens_used + EXCLUDED.tokens_used,
+        search_used = public.ai_user_quota_daily.search_used + EXCLUDED.search_used,
+        updated_at = now()
+  RETURNING * INTO v_row;
+
+  INSERT INTO public.ai_token_usage_events (
+    user_name, day_key, conversation_id,
+    prompt_tokens, completion_tokens, reasoning_tokens, total_tokens,
+    search_count, model, source
+  ) VALUES (
+    v_user, v_day, nullif(trim(coalesce(p_conversation_id, '')), ''),
+    greatest(0, coalesce(p_prompt_tokens, 0)),
+    greatest(0, coalesce(p_completion_tokens, 0)),
+    greatest(0, coalesce(p_reasoning_tokens, 0)),
+    v_tokens,
+    v_search,
+    nullif(trim(coalesce(p_model, '')), ''),
+    coalesce(nullif(trim(coalesce(p_source, '')), ''), 'chat')
+  );
+
+  v_q := public.get_ai_user_quota(v_user, p_free_token_limit, p_pro_token_limit, p_free_search_limit);
+  RETURN v_q || jsonb_build_object(
+    'ok', true,
+    'consumed_tokens', v_tokens,
+    'consumed_search', v_search
+  );
+END;
+$$;
+
+-- 权限与 045 一致：仅 service_role
+REVOKE ALL ON FUNCTION public.consume_ai_token_usage(text, integer, integer, text, integer, integer, integer, text, text, bigint, bigint, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.consume_ai_token_usage(text, integer, integer, text, integer, integer, integer, text, text, bigint, bigint, integer) TO service_role;
+
+COMMIT;

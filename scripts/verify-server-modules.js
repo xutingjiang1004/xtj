@@ -1,1 +1,39 @@
-Y29uc3QgZnMgPSByZXF1aXJlKCdmcycpOwpjb25zdCBzZXJ2ZXIgPSBmcy5yZWFkRmlsZVN5bmMoJ3JlbmRlci1hcGkvc2VydmVyLmpzJywgJ3V0ZjgnKTsKY29uc3Qgc2VhcmNoID0gZnMucmVhZEZpbGVTeW5jKCdyZW5kZXItYXBpL3NlYXJjaC1wcm92aWRlcnMuanMnLCAndXRmOCcpOwpjb25zb2xlLmxvZygnc2VydmVyIGxpbmVzJywgc2VydmVyLnNwbGl0KC9cbi8pLmxlbmd0aCwgJ2J5dGVzJywgQnVmZmVyLmJ5dGVMZW5ndGgoc2VydmVyKSk7CmNvbnNvbGUubG9nKCdoYXMgcmVzZWFyY2gnLCBzZXJ2ZXIuaW5jbHVkZXMoJ1RhdmlseSBSZXNlYXJjaCcpKTsKY29uc29sZS5sb2coJ2hhcyByZXNlYXJjaENhY2hlS2V5Jywgc2VydmVyLmluY2x1ZGVzKCdmdW5jdGlvbiByZXNlYXJjaENhY2hlS2V5JykpOwpjb25zb2xlLmxvZygnaGFzIHBlcnNpc3RSZXNlYXJjaCcsIHNlcnZlci5pbmNsdWRlcygnZnVuY3Rpb24gcGVyc2lzdFJlc2VhcmNoUmVjb3JkJykpOwpjb25zb2xlLmxvZygnaGFzIHJlcXVpcmUgc2VhcmNoJywgc2VydmVyLmluY2x1ZGVzKCJyZXF1aXJlKCcuL3NlYXJjaC1wcm92aWRlcnMnKSIpKTsKY29uc29sZS5sb2coJ2lubGluZSBzZWFyY2hXZWInLCBzZXJ2ZXIuaW5jbHVkZXMoJ2FzeW5jIGZ1bmN0aW9uIHNlYXJjaFdlYignKSk7CmNvbnNvbGUubG9nKCdpbmxpbmUgd3JpdGVTc2UnLCBzZXJ2ZXIuaW5jbHVkZXMoJ2Z1bmN0aW9uIHdyaXRlU3NlJykpOwpjb25zb2xlLmxvZygnaW5saW5lIHF1ZXJ5V2VhdGhlcicsIHNlcnZlci5pbmNsdWRlcygnZnVuY3Rpb24gcXVlcnlXZWF0aGVyJykpOwpjb25zb2xlLmxvZygnaW5saW5lIGdldE1haWwnLCBzZXJ2ZXIuaW5jbHVkZXMoJ2Z1bmN0aW9uIGdldE1haWxUcmFuc3BvcnRlcicpKTsKY29uc29sZS5sb2coJ2lubGluZSBzYWZlSnNvblBhcnNlJywgc2VydmVyLmluY2x1ZGVzKCdmdW5jdGlvbiBzYWZlSnNvblBhcnNlJykpOwpjb25zb2xlLmxvZygnaW5saW5lIGlzTm9ybWFsUG9zdCcsIHNlcnZlci5pbmNsdWRlcygnZnVuY3Rpb24gaXNOb3JtYWxQb3N0JykpOwpjb25zb2xlLmxvZygnc2VhcmNoIG1vZHVsZSBidWlsZFNlYXJjaFF1ZXJ5IGNvdW50JywgKHNlYXJjaC5tYXRjaCgvZnVuY3Rpb24gYnVpbGRTZWFyY2hRdWVyeS9nKSB8fCBbXSkubGVuZ3RoKTsKY29uc29sZS5sb2coJ3NlYXJjaCBtb2R1bGUgc2VhcmNoV2ViIGNvdW50JywgKHNlYXJjaC5tYXRjaCgvYXN5bmMgZnVuY3Rpb24gc2VhcmNoV2ViL2cpIHx8IFtdKS5sZW5ndGgpOwpjb25zb2xlLmxvZygnc2VhcmNoIG1vZHVsZSBoYXMgcmVzZWFyY2gnLCBzZWFyY2guaW5jbHVkZXMoJ1RhdmlseSBSZXNlYXJjaCcpKTsKCmNvbnN0IHNwID0gcmVxdWlyZSgnLi4vcmVuZGVyLWFwaS9zZWFyY2gtcHJvdmlkZXJzJyk7CmNvbnNvbGUubG9nKCdzZWFyY2hXZWIgdHlwZScsIHR5cGVvZiBzcC5zZWFyY2hXZWIpOwpjb25zb2xlLmxvZygnYnVpbGRTZWFyY2hRdWVyeSB3ZWF0aGVyID0+JywgSlNPTi5zdHJpbmdpZnkoc3AuYnVpbGRTZWFyY2hRdWVyeSgn5LuK5aSp5aSp5rCU5oCO5LmI5qC3JykpKTsKY29uc29sZS5sb2coJ2J1aWxkU2VhcmNoUXVlcnkgbmV3cyA9PicsIEpTT04uc3RyaW5naWZ5KHNwLmJ1aWxkU2VhcmNoUXVlcnkoJ+acgOaWsOaWsOmXuycpKSk7Cgpjb25zdCB3ID0gcmVxdWlyZSgnLi4vcmVuZGVyLWFwaS93ZWF0aGVyJyk7CmNvbnNvbGUubG9nKCdDSVRZX0NPT1JEUyBCZWlqaW5nJywgISF3LkNJVFlfQ09PUkRTWyfljJfkuqwnXSk7Cgpjb25zdCByID0gcmVxdWlyZSgnLi4vcmVuZGVyLWFwaS91dGlsLWhlbHBlcnMnKTsKY29uc29sZS5sb2coJ3NhZmVKc29uUGFyc2UnLCByLnNhZmVKc29uUGFyc2UoJ3siYSI6MX0nKSk7Cgpjb25zdCBwcSA9IHJlcXVpcmUoJy4uL3JlbmRlci1hcGkvcG9zdC1xdWVyeScpOwpjb25zb2xlLmxvZygnaXNOb3JtYWxQb3N0IGltYWdlJywgcHEuaXNOb3JtYWxQb3N0KHsgbWVkaWFfdHlwZTogJ2ltYWdlJyB9KSk7CmNvbnNvbGUubG9nKCdpc05vcm1hbFBvc3QgcmVwb3J0JywgcHEuaXNOb3JtYWxQb3N0KHsgbWVkaWFfdHlwZTogJ19fcmVwb3J0X18nIH0pKTsKCmNvbnN0IHNzZSA9IHJlcXVpcmUoJy4uL3JlbmRlci1hcGkvc3NlLXdyaXRlJyk7CmNvbnNvbGUubG9nKCd3cml0ZVNzZSB0eXBlJywgdHlwZW9mIHNzZS53cml0ZVNzZSk7Cgpjb25zdCBtYWlsID0gcmVxdWlyZSgnLi4vcmVuZGVyLWFwaS9tYWlsLXRyYW5zcG9ydCcpOwpjb25zb2xlLmxvZygnZ2V0TWFpbFRyYW5zcG9ydGVyIHR5cGUnLCB0eXBlb2YgbWFpbC5nZXRNYWlsVHJhbnNwb3J0ZXIpOwpjb25zb2xlLmxvZygnT0snKTsK
+const fs = require('fs');
+const server = fs.readFileSync('render-api/server.js', 'utf8');
+const search = fs.readFileSync('render-api/search-providers.js', 'utf8');
+console.log('server lines', server.split(/\n/).length, 'bytes', Buffer.byteLength(server));
+console.log('has research', server.includes('Tavily Research'));
+console.log('has researchCacheKey', server.includes('function researchCacheKey'));
+console.log('has persistResearch', server.includes('function persistResearchRecord'));
+console.log('has require search', server.includes("require('./search-providers')"));
+console.log('inline searchWeb', server.includes('async function searchWeb('));
+console.log('inline writeSse', server.includes('function writeSse'));
+console.log('inline queryWeather', server.includes('function queryWeather'));
+console.log('inline getMail', server.includes('function getMailTransporter'));
+console.log('inline safeJsonParse', server.includes('function safeJsonParse'));
+console.log('inline isNormalPost', server.includes('function isNormalPost'));
+console.log('search module buildSearchQuery count', (search.match(/function buildSearchQuery/g) || []).length);
+console.log('search module searchWeb count', (search.match(/async function searchWeb/g) || []).length);
+console.log('search module has research', search.includes('Tavily Research'));
+
+const sp = require('../render-api/search-providers');
+console.log('searchWeb type', typeof sp.searchWeb);
+console.log('buildSearchQuery weather =>', JSON.stringify(sp.buildSearchQuery('今天天气怎么样')));
+console.log('buildSearchQuery news =>', JSON.stringify(sp.buildSearchQuery('最新新闻')));
+
+const w = require('../render-api/weather');
+console.log('CITY_COORDS Beijing', !!w.CITY_COORDS['北京']);
+
+const r = require('../render-api/util-helpers');
+console.log('safeJsonParse', r.safeJsonParse('{"a":1}'));
+
+const pq = require('../render-api/post-query');
+console.log('isNormalPost image', pq.isNormalPost({ media_type: 'image' }));
+console.log('isNormalPost report', pq.isNormalPost({ media_type: '__report__' }));
+
+const sse = require('../render-api/sse-write');
+console.log('writeSse type', typeof sse.writeSse);
+
+const mail = require('../render-api/mail-transport');
+console.log('getMailTransporter type', typeof mail.getMailTransporter);
+console.log('OK');

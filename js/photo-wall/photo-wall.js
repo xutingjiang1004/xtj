@@ -1,1 +1,118 @@
-KGZ1bmN0aW9uKCl7CiAgJ3VzZSBzdHJpY3QnOwoKICB2YXIgaW5pdGlhbGl6ZWQgPSBmYWxzZTsKICB2YXIgaW5pdGlhbGl6aW5nUHJvbWlzZSA9IG51bGw7CiAgdmFyIHdhcm1UaW1lciA9IG51bGw7CiAgLy8g4piFIOWIneWni+WMliBnZW5lcmF0aW9u77yM55So5LqO6Ziy5q2i5bm25Y+R56ue5oCBCiAgdmFyIF9pbml0R2VuZXJhdGlvbiA9IDA7CgogIGZ1bmN0aW9uIHdhcm1WaXNpYmxlSW1hZ2VzKCl7CiAgICBpZiAod2FybVRpbWVyKSBjbGVhclRpbWVvdXQod2FybVRpbWVyKTsKICAgIHdhcm1UaW1lciA9IHNldFRpbWVvdXQoZnVuY3Rpb24oKXsKICAgICAgd2FybVRpbWVyID0gbnVsbDsKICAgICAgdmFyIHNjaGVkdWxlID0gd2luZG93LnJlcXVlc3RJZGxlQ2FsbGJhY2sgfHwgd2luZG93LnJlcXVlc3RBbmltYXRpb25GcmFtZTsKICAgICAgc2NoZWR1bGUoZnVuY3Rpb24oKXsKICAgICAgICBpZiAodHlwZW9mIHdpbmRvdy5sb2FkVmlzaWJsZVBob3RvV2FsbEltYWdlcyA9PT0gJ2Z1bmN0aW9uJykgewogICAgICAgICAgd2luZG93LmxvYWRWaXNpYmxlUGhvdG9XYWxsSW1hZ2VzKGRvY3VtZW50LmdldEVsZW1lbnRCeUlkKCdwaG90b0dyaWQnKSwgNik7CiAgICAgICAgfQogICAgICB9KTsKICAgIH0sIDgwKTsKICB9CgogIHdpbmRvdy5pbml0UGhvdG9XYWxsID0gZnVuY3Rpb24oZm9yY2UpIHsKICAgIGlmIChpbml0aWFsaXplZCAmJiAhZm9yY2UpIHsKICAgICAgaWYgKHR5cGVvZiB3aW5kb3cucmVuZGVyUGhvdG9XYWxsV2l0aG91dFJlbG9hZCA9PT0gJ2Z1bmN0aW9uJykgewogICAgICAgIHdpbmRvdy5yZW5kZXJQaG90b1dhbGxXaXRob3V0UmVsb2FkKCk7CiAgICAgIH0KICAgICAgd2FybVZpc2libGVJbWFnZXMoKTsKICAgICAgcmV0dXJuIFByb21pc2UucmVzb2x2ZSh0cnVlKTsKICAgIH0KCiAgICBpZiAoaW5pdGlhbGl6aW5nUHJvbWlzZSAmJiAhZm9yY2UpIHJldHVybiBpbml0aWFsaXppbmdQcm9taXNlOwoKICAgIC8vIOKYhSDlvLrliLbliLfmlrDml7bvvIzlop7liqAgZ2VuZXJhdGlvbiDlup/lvIPml6fku7vliqEKICAgIF9pbml0R2VuZXJhdGlvbisrOwogICAgdmFyIGN1cnJlbnRHZW4gPSBfaW5pdEdlbmVyYXRpb247CgogICAgaW5pdGlhbGl6aW5nUHJvbWlzZSA9IFByb21pc2UucmVzb2x2ZSgpLnRoZW4oYXN5bmMgZnVuY3Rpb24oKSB7CiAgICAgIC8vIOKYhSDmo4Dmn6UgZ2VuZXJhdGlvbu+8jOaXp+S7u+WKoeebtOaOpei/lOWbngogICAgICBpZiAoY3VycmVudEdlbiAhPT0gX2luaXRHZW5lcmF0aW9uKSByZXR1cm4gdHJ1ZTsKCiAgICAgIHZhciBncmlkID0gZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ3Bob3RvR3JpZCcpOwogICAgICBpZiAoIWdyaWQpIHRocm93IG5ldyBFcnJvcigncGhvdG9fZ3JpZF9taXNzaW5nJyk7CgogICAgICBpZiAodHlwZW9mIHdpbmRvdy5yZW5kZXJQaG90b1dhbGwgIT09ICdmdW5jdGlvbicpIHsKICAgICAgICB0aHJvdyBuZXcgRXJyb3IoJ3Bob3RvX3JlbmRlcmVyX25vdF9sb2FkZWQnKTsKICAgICAgfQoKICAgICAgYXdhaXQgd2luZG93LnJlbmRlclBob3RvV2FsbCgpOwoKICAgICAgLy8g4piFIOWGjeasoeajgOafpSBnZW5lcmF0aW9uCiAgICAgIGlmIChjdXJyZW50R2VuICE9PSBfaW5pdEdlbmVyYXRpb24pIHJldHVybiB0cnVlOwoKICAgICAgaW5pdGlhbGl6ZWQgPSB0cnVlOwoKICAgICAgaWYgKCFncmlkLmNoaWxkcmVuLmxlbmd0aCkgewogICAgICAgIHRocm93IG5ldyBFcnJvcigncGhvdG9fZ3JpZF9ub3RfcmVuZGVyZWQnKTsKICAgICAgfQoKICAgICAgaWYgKHR5cGVvZiB3aW5kb3cuYmluZFBob3RvV2FsbFNjcm9sbCA9PT0gJ2Z1bmN0aW9uJykgewogICAgICAgIHdpbmRvdy5iaW5kUGhvdG9XYWxsU2Nyb2xsKCk7CiAgICAgIH0KCiAgICAgIHdhcm1WaXNpYmxlSW1hZ2VzKCk7CiAgICAgIHJldHVybiB0cnVlOwogICAgfSkuY2F0Y2goZnVuY3Rpb24oZXJyb3IpIHsKICAgICAgLy8g4piFIOaXpyBnZW5lcmF0aW9uIOeahOmUmeivr+S4jeWkhOeQhgogICAgICBpZiAoY3VycmVudEdlbiAhPT0gX2luaXRHZW5lcmF0aW9uKSByZXR1cm4gZmFsc2U7CgogICAgICBpbml0aWFsaXplZCA9IGZhbHNlOwoKICAgICAgdmFyIGdyaWQgPSBkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgncGhvdG9HcmlkJyk7CiAgICAgIGlmIChncmlkKSB7CiAgICAgICAgZ3JpZC5pbm5lckhUTUwgPQogICAgICAgICAgJzxkaXYgY2xhc3M9InBob3RvLXdhbGwtZW1wdHkiPicgKwogICAgICAgICAgJzxkaXY+54Wn54mH5aKZ5Yqg6L295aSx6LSlPC9kaXY+JyArCiAgICAgICAgICAnPGJ1dHRvbiB0eXBlPSJidXR0b24iIG9uY2xpY2s9IndpbmRvdy5pbml0UGhvdG9XYWxsKHRydWUpIj7ph43mlrDliqDovb08L2J1dHRvbj4nICsKICAgICAgICAgICc8L2Rpdj4nOwogICAgICB9CgogICAgICBjb25zb2xlLmVycm9yKCdbUGhvdG9XYWxsXSBpbml0aWFsaXphdGlvbiBmYWlsZWQ6JywgZXJyb3IgJiYgZXJyb3IubWVzc2FnZSA/IGVycm9yLm1lc3NhZ2UgOiBlcnJvcik7CiAgICAgIHJldHVybiBmYWxzZTsgLy8g4piFIOS/ruWkje+8mumUmeivryBVSSDlt7LmuLLmn5PvvIzkuI3lho0gcmV0aHJvd++8iOmBv+WFjSB1bmhhbmRsZWQgcmVqZWN0aW9u77yJCiAgICB9KS5maW5hbGx5KGZ1bmN0aW9uKCkgewogICAgICAvLyDimIUg5Y+q5pyJ5pyA5pawIGdlbmVyYXRpb24g55qE5Lu75Yqh5omN5riF6ZmkIHByb21pc2UKICAgICAgaWYgKGN1cnJlbnRHZW4gPT09IF9pbml0R2VuZXJhdGlvbikgewogICAgICAgIGluaXRpYWxpemluZ1Byb21pc2UgPSBudWxsOwogICAgICB9CiAgICB9KTsKCiAgICByZXR1cm4gaW5pdGlhbGl6aW5nUHJvbWlzZTsKICB9OwoKICAvLyDimIUg54Wn54mH5aKZ5by65Yi25ZCM5q2l5Ye95pWw77yI5L6b5qGM6Z2i5a+86Iiq5Y+M5Ye75Yi35paw6LCD55So77yJCiAgd2luZG93Ll9feHRqUGhvdG9XYWxsRm9yY2VTeW5jID0gYXN5bmMgZnVuY3Rpb24oKSB7CiAgICAvLyDimIUg5aKe5YqgIGdlbmVyYXRpb24g5bqf5byD5pen5Lu75Yqh77yM5L2G5LiN5omL5Yqo5riF56m6IGluaXRpYWxpemluZ1Byb21pc2UKICAgIF9pbml0R2VuZXJhdGlvbisrOwogICAgaW5pdGlhbGl6ZWQgPSBmYWxzZTsKICAgIHRyeSB7CiAgICAgIGF3YWl0IHdpbmRvdy5pbml0UGhvdG9XYWxsKHRydWUpOwogICAgfSBjYXRjaCAoZSkgewogICAgICBjb25zb2xlLmVycm9yKCdbUGhvdG9XYWxsXSBmb3JjZSBzeW5jIGZhaWxlZCcsIGUpOwogICAgfQogIH07CgogIGZ1bmN0aW9uIHdyYXBSZW5kZXIobmFtZSl7CiAgICB2YXIgb3JpZ2luYWwgPSB3aW5kb3dbbmFtZV07CiAgICBpZiAodHlwZW9mIG9yaWdpbmFsICE9PSAnZnVuY3Rpb24nIHx8IG9yaWdpbmFsLl9feHRqUGhvdG9XYXJtV3JhcHBlZCkgcmV0dXJuOwogICAgdmFyIHdyYXBwZWQgPSBmdW5jdGlvbigpewogICAgICB2YXIgcmVzdWx0ID0gb3JpZ2luYWwuYXBwbHkodGhpcywgYXJndW1lbnRzKTsKICAgICAgcmV0dXJuIFByb21pc2UucmVzb2x2ZShyZXN1bHQpLnRoZW4oZnVuY3Rpb24odmFsdWUpeyB3YXJtVmlzaWJsZUltYWdlcygpOyByZXR1cm4gdmFsdWU7IH0pOwogICAgfTsKICAgIHdyYXBwZWQuX194dGpQaG90b1dhcm1XcmFwcGVkID0gdHJ1ZTsKICAgIHdpbmRvd1tuYW1lXSA9IHdyYXBwZWQ7CiAgfQoKICB3cmFwUmVuZGVyKCdyZW5kZXJQaG90b1dhbGwnKTsKICB3cmFwUmVuZGVyKCdyZW5kZXJQaG90b1dhbGxXaXRob3V0UmVsb2FkJyk7Cn0pKCk7
+(function(){
+  'use strict';
+
+  var initialized = false;
+  var initializingPromise = null;
+  var warmTimer = null;
+  // ★ 初始化 generation，用于防止并发竞态
+  var _initGeneration = 0;
+
+  function warmVisibleImages(){
+    if (warmTimer) clearTimeout(warmTimer);
+    warmTimer = setTimeout(function(){
+      warmTimer = null;
+      var schedule = window.requestIdleCallback || window.requestAnimationFrame;
+      schedule(function(){
+        if (typeof window.loadVisiblePhotoWallImages === 'function') {
+          window.loadVisiblePhotoWallImages(document.getElementById('photoGrid'), 6);
+        }
+      });
+    }, 80);
+  }
+
+  window.initPhotoWall = function(force) {
+    if (initialized && !force) {
+      if (typeof window.renderPhotoWallWithoutReload === 'function') {
+        window.renderPhotoWallWithoutReload();
+      }
+      warmVisibleImages();
+      return Promise.resolve(true);
+    }
+
+    if (initializingPromise && !force) return initializingPromise;
+
+    // ★ 强制刷新时，增加 generation 废弃旧任务
+    _initGeneration++;
+    var currentGen = _initGeneration;
+
+    initializingPromise = Promise.resolve().then(async function() {
+      // ★ 检查 generation，旧任务直接返回
+      if (currentGen !== _initGeneration) return true;
+
+      var grid = document.getElementById('photoGrid');
+      if (!grid) throw new Error('photo_grid_missing');
+
+      if (typeof window.renderPhotoWall !== 'function') {
+        throw new Error('photo_renderer_not_loaded');
+      }
+
+      await window.renderPhotoWall();
+
+      // ★ 再次检查 generation
+      if (currentGen !== _initGeneration) return true;
+
+      initialized = true;
+
+      if (!grid.children.length) {
+        throw new Error('photo_grid_not_rendered');
+      }
+
+      if (typeof window.bindPhotoWallScroll === 'function') {
+        window.bindPhotoWallScroll();
+      }
+
+      warmVisibleImages();
+      return true;
+    }).catch(function(error) {
+      // ★ 旧 generation 的错误不处理
+      if (currentGen !== _initGeneration) return false;
+
+      initialized = false;
+
+      var grid = document.getElementById('photoGrid');
+      if (grid) {
+        grid.innerHTML =
+          '<div class="photo-wall-empty">' +
+          '<div>照片墙加载失败</div>' +
+          '<button type="button" onclick="window.initPhotoWall(true)">重新加载</button>' +
+          '</div>';
+      }
+
+      console.error('[PhotoWall] initialization failed:', error && error.message ? error.message : error);
+      return false; // ★ 修复：错误 UI 已渲染，不再 rethrow（避免 unhandled rejection）
+    }).finally(function() {
+      // ★ 只有最新 generation 的任务才清除 promise
+      if (currentGen === _initGeneration) {
+        initializingPromise = null;
+      }
+    });
+
+    return initializingPromise;
+  };
+
+  // ★ 照片墙强制同步函数（供桌面导航双击刷新调用）
+  window.__xtjPhotoWallForceSync = async function() {
+    // ★ 增加 generation 废弃旧任务，但不手动清空 initializingPromise
+    _initGeneration++;
+    initialized = false;
+    try {
+      await window.initPhotoWall(true);
+    } catch (e) {
+      console.error('[PhotoWall] force sync failed', e);
+    }
+  };
+
+  function wrapRender(name){
+    var original = window[name];
+    if (typeof original !== 'function' || original.__xtjPhotoWarmWrapped) return;
+    var wrapped = function(){
+      var result = original.apply(this, arguments);
+      return Promise.resolve(result).then(function(value){ warmVisibleImages(); return value; });
+    };
+    wrapped.__xtjPhotoWarmWrapped = true;
+    window[name] = wrapped;
+  }
+
+  wrapRender('renderPhotoWall');
+  wrapRender('renderPhotoWallWithoutReload');
+})();
