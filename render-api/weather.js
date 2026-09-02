@@ -1,1 +1,212 @@
-LyoqIE9wZW4tTWV0ZW8gZnJlZSB3ZWF0aGVyIGxvb2t1cCAobm8gQVBJIGtleSkuICovCid1c2Ugc3RyaWN0JzsKCi8vIE9wZW4tTWV0ZW8g5YWN6LS55aSp5rCU5p+l6K+i77yI5peg6ZyAIEFQSSBLZXnvvIkKLy8g5Z+O5biC5Z2Q5qCH5pig5bCEIOKAlCDluLjnlKjln47luILkvJjlhYjlkb3kuK3vvJvmnKrlkb3kuK3ml7botbAgZ2VvY29kaW5nLWFwaSDop6PmnpDku7vmhI/ln47luILlkI3jgIIKdmFyIENJVFlfQ09PUkRTID0gewogICfljJfkuqwnOiB7IGxhdDogMzkuOTA0MiwgbG9uOiAxMTYuNDA3NCB9LAogICfkuIrmtbcnOiB7IGxhdDogMzEuMjMwNCwgbG9uOiAxMjEuNDczNyB9LAogICflub/lt54nOiB7IGxhdDogMjMuMTI5MSwgbG9uOiAxMTMuMjY0NCB9LAogICfmt7HlnLMnOiB7IGxhdDogMjIuNTQzMSwgbG9uOiAxMTQuMDU3OSB9LAogICfmna3lt54nOiB7IGxhdDogMzAuMjc0MSwgbG9uOiAxMjAuMTU1MSB9LAogICfmuZblt54nOiB7IGxhdDogMzAuODkzMiwgbG9uOiAxMjAuMDk2MyB9LAogICflronlkIknOiB7IGxhdDogMzAuNjI0OSwgbG9uOiAxMTkuNjc2NiB9LAogICfljZfkuqwnOiB7IGxhdDogMzIuMDYwMywgbG9uOiAxMTguNzk2OSB9LAogICfoi4/lt54nOiB7IGxhdDogMzEuMjk4OSwgbG9uOiAxMjAuNTg1MyB9LAogICfmiJDpg70nOiB7IGxhdDogMzAuNTcyOCwgbG9uOiAxMDQuMDY2OCB9LAogICfph43luoYnOiB7IGxhdDogMjkuNTYzMCwgbG9uOiAxMDYuNTUxNiB9LAogICfmrabmsYknOiB7IGxhdDogMzAuNTkyOCwgbG9uOiAxMTQuMzA1NSB9LAogICfopb/lroknOiB7IGxhdDogMzQuMzQxNiwgbG9uOiAxMDguOTM5OCB9LAogICflpKnmtKUnOiB7IGxhdDogMzkuMzQzNCwgbG9uOiAxMTcuMzYxNiB9LAogICfpnZLlspsnOiB7IGxhdDogMzYuMDY3MSwgbG9uOiAxMjAuMzgyNiB9LAogICfljqbpl6gnOiB7IGxhdDogMjQuNDc5OCwgbG9uOiAxMTguMDg5NCB9LAogICfplb/mspknOiB7IGxhdDogMjguMjI4MiwgbG9uOiAxMTIuOTM4OCB9LAogICfpg5Hlt54nOiB7IGxhdDogMzQuNzQ2NiwgbG9uOiAxMTMuNjI1NCB9LAogICflkIjogqUnOiB7IGxhdDogMzEuODIwNiwgbG9uOiAxMTcuMjI3MiB9LAogICfnpo/lt54nOiB7IGxhdDogMjYuMDc0NSwgbG9uOiAxMTkuMjk2NSB9LAogICfmmIbmmI4nOiB7IGxhdDogMjUuMDM4OSwgbG9uOiAxMDIuNzE4MyB9LAogICflpKfov54nOiB7IGxhdDogMzguOTE0MCwgbG9uOiAxMjEuNjE0NyB9LAogICflroHms6InOiB7IGxhdDogMjkuODY4MywgbG9uOiAxMjEuNTQ0MCB9LAogICfml6DplKEnOiB7IGxhdDogMzEuNDkxMiwgbG9uOiAxMjAuMzExOSB9LAogICfkuJzkuqwnOiB7IGxhdDogMzUuNjc2MiwgbG9uOiAxMzkuNjUwMyB9LAogICflpKfpmKonOiB7IGxhdDogMzQuNjkzNywgbG9uOiAxMzUuNTAyMyB9LAogICfpppblsJQnOiB7IGxhdDogMzcuNTY2NSwgbG9uOiAxMjYuOTc4IH0sCiAgJ+a1juW3nuWymyc6IHsgbGF0OiAzMy40ODksIGxvbjogMTI2LjQ5ODMgfSwKICAn5be06buOJzogeyBsYXQ6IDQ4Ljg1NjYsIGxvbjogMi4zNTIyIH0sCiAgJ+S8puaVpic6IHsgbGF0OiA1MS41MDc0LCBsb246IC0wLjEyNzggfSwKICAn57q957qmJzogeyBsYXQ6IDQwLjcxMjgsIGxvbjogLTc0LjAwNiB9LAogICfmlrDliqDlnaEnOiB7IGxhdDogMS4zNTIxLCBsb246IDEwMy44MTk4IH0sCiAgJ+mmmea4ryc6IHsgbGF0OiAyMi4zMTkzLCBsb246IDExNC4xNjk0IH0sCiAgJ+WPsOWMlyc6IHsgbGF0OiAyNS4wMzMwLCBsb246IDEyMS41NjU0IH0sCiAgJ+a0m+adieeftic6IHsgbGF0OiAzNC4wNTIyLCBsb246IC0xMTguMjQzNyB9LAogICfml6fph5HlsbEnOiB7IGxhdDogMzcuNzc0OSwgbG9uOiAtMTIyLjQxOTQgfSwKICAn5oKJ5bC8JzogeyBsYXQ6IC0zMy44Njg4LCBsb246IDE1MS4yMDkzIH0sCiAgJ+abvOiwtyc6IHsgbGF0OiAxMy43NTYzLCBsb246IDEwMC41MDE4IH0KfTsKCi8vIOiLseaWhy/mi7zpn7PliKvlkI0g4oaSIOS4reaWh+WfjuW4guWQje+8iOWRveS4reWGhee9ruWdkOagh++8iQp2YXIgQ0lUWV9BTElBU0VTID0gewogIGJlaWppbmc6ICfljJfkuqwnLCBzaGFuZ2hhaTogJ+S4iua1tycsIGd1YW5nemhvdTogJ+W5v+W3nicsIHNoZW56aGVuOiAn5rex5ZyzJywKICBoYW5nemhvdTogJ+adreW3nicsIGh1emhvdTogJ+a5luW3nicsIGFuamk6ICflronlkIknLCBuYW5qaW5nOiAn5Y2X5LqsJywKICBzdXpob3U6ICfoi4/lt54nLCBjaGVuZ2R1OiAn5oiQ6YO9JywgY2hvbmdxaW5nOiAn6YeN5bqGJywgd3VoYW46ICfmrabmsYknLAogIHhpYW46ICfopb/lroknLCAieGknYW4iOiAn6KW/5a6JJywgdGlhbmppbjogJ+Wkqea0pScsIHFpbmdkYW86ICfpnZLlspsnLAogIHhpYW1lbjogJ+WOpumXqCcsIGNoYW5nc2hhOiAn6ZW/5rKZJywgemhlbmd6aG91OiAn6YOR5beeJywgaGVmZWk6ICflkIjogqUnLAogIGZ1emhvdTogJ+emj+W3nicsIGt1bm1pbmc6ICfmmIbmmI4nLCBkYWxpYW46ICflpKfov54nLCBuaW5nYm86ICflroHms6InLAogIHd1eGk6ICfml6DplKEnLCB0b2t5bzogJ+S4nOS6rCcsIG9zYWthOiAn5aSn6ZiqJywgc2VvdWw6ICfpppblsJQnLAogIGplanU6ICfmtY7lt57lspsnLCBwYXJpczogJ+W3tOm7jicsIGxvbmRvbjogJ+S8puaVpicsICduZXcgeW9yayc6ICfnur3nuqYnLAogIG5ld3lvcms6ICfnur3nuqYnLCBueWM6ICfnur3nuqYnLCBzaW5nYXBvcmU6ICfmlrDliqDlnaEnLCBob25na29uZzogJ+mmmea4rycsCiAgJ2hvbmcga29uZyc6ICfpppnmuK8nLCB0YWlwZWk6ICflj7DljJcnLCAnbG9zIGFuZ2VsZXMnOiAn5rSb5p2J55+2JywgbGE6ICfmtJvmnYnnn7YnLAogICdzYW4gZnJhbmNpc2NvJzogJ+aXp+mHkeWxsScsIHNmOiAn5pen6YeR5bGxJywgc3lkbmV5OiAn5oKJ5bC8JywgYmFuZ2tvazogJ+abvOiwtycKfTsKCnZhciBXRUFUSEVSX0NPREVTID0gewogIDA6ICfmmbTlpKknLCAxOiAn5aSn6YOo5pm0JywgMjogJ+WkmuS6kScsIDM6ICfpmLTlpKknLCA0NTogJ+mbvicsIDQ4OiAn6Zu+5YeHJywKICA1MTogJ+Wwj+avm+avm+mbqCcsIDUzOiAn5Lit5q+b5q+b6ZuoJywgNTU6ICflpKfmr5vmr5vpm6gnLCA2MTogJ+Wwj+mbqCcsIDYzOiAn5Lit6ZuoJywgNjU6ICflpKfpm6gnLAogIDcxOiAn5bCP6ZuqJywgNzM6ICfkuK3pm6onLCA3NTogJ+Wkp+mbqicsIDgwOiAn6Zi16ZuoJywgODE6ICfkuK3pmLXpm6gnLCA4MjogJ+Wkp+mYtembqCcsCiAgODU6ICflsI/pmLXpm6onLCA4NjogJ+Wkp+mYtembqicsIDk1OiAn6Zu35pq0JywgOTY6ICfpm7fmmrTliqDlsI/lhrDpm7knLCA5OTogJ+mbt+aatOWKoOWkp+WGsOmbuScKfTsKLy8g5a6h6K6hIPCfn6LvvJrlpJbpg6ggQVBJIOWTjeW6lOWkp+Wwj+S4iumZkO+8iE9wZW4tTWV0ZW8g5q2j5bi4IDwgMTAwS0LvvIznlZnotrPkvZnph4/vvIkKdmFyIE1BWF9XRUFUSEVSX1JFU1BPTlNFX0JZVEVTID0gNTEyICogMTAyNDsKdmFyIEdFT0NPREVfQ0FDSEUgPSBPYmplY3QuY3JlYXRlKG51bGwpOwp2YXIgR0VPQ09ERV9DQUNIRV9NQVggPSA4MDsKCmZ1bmN0aW9uIGZvcm1hdFdlYXRoZXJUZXh0KGRhdGEpIHsKICBpZiAoIWRhdGEpIHJldHVybiBudWxsOwogIHZhciByZXN1bHQgPSAn44CQ5aSp5rCU5bel5YW357uT5p6c44CRXG7mn6Xor6Lml7bpl7TvvJonICsgZGF0YS5xdWVyaWVkX2F0ICsgJ++8iOWMl+S6rOaXtumXtO+8iVxu5Zyw54K577yaJyArIGRhdGEuY2l0eSArCiAgICAnXG7lpKnmsJTnirblhrXvvJonICsgZGF0YS5jb25kaXRpb24gKwogICAgJ1xu5b2T5YmN5rip5bqm77yaJyArIGRhdGEudGVtcGVyYXR1cmVfYyArICfCsENcbua5v+W6pu+8micgKyBkYXRhLmh1bWlkaXR5ICsgJyVcbumjjumAn++8micgKyBkYXRhLndpbmRfa21oICsgJ2ttL2gnOwogIGlmIChkYXRhLmhpZ2hfYyAhPT0gdW5kZWZpbmVkICYmIGRhdGEuaGlnaF9jICE9PSBudWxsKSByZXN1bHQgKz0gJ1xu5LuK5pel5pyA6auY77yaJyArIGRhdGEuaGlnaF9jICsgJ8KwQyc7CiAgaWYgKGRhdGEubG93X2MgIT09IHVuZGVmaW5lZCAmJiBkYXRhLmxvd19jICE9PSBudWxsKSByZXN1bHQgKz0gJ1xu5LuK5pel5pyA5L2O77yaJyArIGRhdGEubG93X2MgKyAnwrBDJzsKICBpZiAoZGF0YS5wcmVjaXBfcHJvYiAhPT0gdW5kZWZpbmVkICYmIGRhdGEucHJlY2lwX3Byb2IgIT09IG51bGwpIHJlc3VsdCArPSAnXG7pmY3pm6jmpoLnjofvvJonICsgZGF0YS5wcmVjaXBfcHJvYiArICclJzsKICByZXN1bHQgKz0gJ1xuXG7opoHmsYLvvJrlv4Xpobvln7rkuo7ku6XkuIrlt6Xlhbfnu5Pmnpzlm57nrZTvvIzkuI3lh4bnvJbpgKDlpKnmsJTmlbDmja7jgIInOwogIHJldHVybiByZXN1bHQ7Cn0KCmZ1bmN0aW9uIG1hdGNoQnVpbHRpbkNpdHkocXVlcnkpIHsKICB2YXIgcSA9IFN0cmluZyhxdWVyeSB8fCAnJykudHJpbSgpOwogIGlmICghcSkgcmV0dXJuIG51bGw7CiAgdmFyIGxvd2VyID0gcS50b0xvd2VyQ2FzZSgpOwogIGlmIChDSVRZX0FMSUFTRVNbbG93ZXJdKSB7CiAgICB2YXIgYWxpYXNOYW1lID0gQ0lUWV9BTElBU0VTW2xvd2VyXTsKICAgIHJldHVybiB7IG5hbWU6IGFsaWFzTmFtZSwgY29vcmRzOiBDSVRZX0NPT1JEU1thbGlhc05hbWVdIH07CiAgfQogIHZhciBjaXR5TmFtZXMgPSBPYmplY3Qua2V5cyhDSVRZX0NPT1JEUykuc29ydChmdW5jdGlvbihhLCBiKSB7IHJldHVybiBiLmxlbmd0aCAtIGEubGVuZ3RoOyB9KTsKICBmb3IgKHZhciBpID0gMDsgaSA8IGNpdHlOYW1lcy5sZW5ndGg7IGkrKykgewogICAgdmFyIGNpdHlOYW1lID0gY2l0eU5hbWVzW2ldOwogICAgaWYgKHEuaW5kZXhPZihjaXR5TmFtZSkgPj0gMCkgewogICAgICByZXR1cm4geyBuYW1lOiBjaXR5TmFtZSwgY29vcmRzOiBDSVRZX0NPT1JEU1tjaXR5TmFtZV0gfTsKICAgIH0KICB9CiAgcmV0dXJuIG51bGw7Cn0KCi8qKiBSZXNvbHZlIGFueSBjaXR5IG5hbWUgdmlhIE9wZW4tTWV0ZW8gZ2VvY29kaW5nIChjYWNoZWQpLiAqLwphc3luYyBmdW5jdGlvbiBnZW9jb2RlQ2l0eShxdWVyeSkgewogIHZhciBxID0gU3RyaW5nKHF1ZXJ5IHx8ICcnKS50cmltKCkuc2xpY2UoMCwgNjApOwogIGlmICghcSkgcmV0dXJuIG51bGw7CiAgdmFyIGNhY2hlS2V5ID0gcS50b0xvd2VyQ2FzZSgpOwogIGlmIChHRU9DT0RFX0NBQ0hFW2NhY2hlS2V5XSkgcmV0dXJuIEdFT0NPREVfQ0FDSEVbY2FjaGVLZXldOwogIHRyeSB7CiAgICB2YXIgdXJsID0gJ2h0dHBzOi8vZ2VvY29kaW5nLWFwaS5vcGVuLW1ldGVvLmNvbS92MS9zZWFyY2g/bmFtZT0nICsKICAgICAgZW5jb2RlVVJJQ29tcG9uZW50KHEpICsgJyZjb3VudD0xJmxhbmd1YWdlPXpoJmZvcm1hdD1qc29uJzsKICAgIHZhciByZXNwID0gYXdhaXQgZmV0Y2godXJsLCB7IHNpZ25hbDogQWJvcnRTaWduYWwudGltZW91dCg4MDAwKSB9KTsKICAgIGlmICghcmVzcC5vaykgcmV0dXJuIG51bGw7CiAgICAvLyDimIUg5a6h6K6h5L+u5aSN77yaZ2VvY29kZSDliIbmlK/mraTliY3nm7TmjqUgcmVzcC5qc29uKCkg5peg5aSn5bCP5LiK6ZmQ77yI5LiOIGZvcmVjYXN0IOWIhuaUrwogICAgLy8g55qEIE1BWF9XRUFUSEVSX1JFU1BPTlNFX0JZVEVTIOmZkOmHj+S4jeS4gOiHtO+8ie+8m+aUueS4uuS4jiBmb3JlY2FzdCDnm7jlkIznmoTpmZDph4/or7vlj5bjgIIKICAgIHZhciBnZW9jb2RlRGVjbGFyZWRMZW4gPSBOdW1iZXIocmVzcC5oZWFkZXJzICYmIHJlc3AuaGVhZGVycy5nZXQgJiYgcmVzcC5oZWFkZXJzLmdldCgnY29udGVudC1sZW5ndGgnKSk7CiAgICBpZiAoTnVtYmVyLmlzRmluaXRlKGdlb2NvZGVEZWNsYXJlZExlbikgJiYgZ2VvY29kZURlY2xhcmVkTGVuID4gTUFYX1dFQVRIRVJfUkVTUE9OU0VfQllURVMpIHJldHVybiBudWxsOwogICAgdmFyIGdlb2NvZGVSYXcgPSBhd2FpdCByZXNwLnRleHQoKTsKICAgIGlmIChCdWZmZXIuYnl0ZUxlbmd0aChnZW9jb2RlUmF3LCAndXRmOCcpID4gTUFYX1dFQVRIRVJfUkVTUE9OU0VfQllURVMpIHJldHVybiBudWxsOwogICAgdmFyIGRhdGE7CiAgICB0cnkgeyBkYXRhID0gSlNPTi5wYXJzZShnZW9jb2RlUmF3KTsgfSBjYXRjaCAoXykgeyByZXR1cm4gbnVsbDsgfQogICAgdmFyIGhpdCA9IGRhdGEgJiYgQXJyYXkuaXNBcnJheShkYXRhLnJlc3VsdHMpICYmIGRhdGEucmVzdWx0c1swXTsKICAgIGlmICghaGl0IHx8IGhpdC5sYXRpdHVkZSA9PSBudWxsIHx8IGhpdC5sb25naXR1ZGUgPT0gbnVsbCkgcmV0dXJuIG51bGw7CiAgICB2YXIgbGFiZWxQYXJ0cyA9IFtoaXQubmFtZV07CiAgICBpZiAoaGl0LmFkbWluMSAmJiBoaXQuYWRtaW4xICE9PSBoaXQubmFtZSkgbGFiZWxQYXJ0cy5wdXNoKGhpdC5hZG1pbjEpOwogICAgaWYgKGhpdC5jb3VudHJ5ICYmIGhpdC5jb3VudHJ5ICE9PSBoaXQubmFtZSkgbGFiZWxQYXJ0cy5wdXNoKGhpdC5jb3VudHJ5KTsKICAgIHZhciByZXNvbHZlZCA9IHsKICAgICAgbmFtZTogbGFiZWxQYXJ0cy5qb2luKCcgwrcgJyksCiAgICAgIGNvb3JkczogeyBsYXQ6IE51bWJlcihoaXQubGF0aXR1ZGUpLCBsb246IE51bWJlcihoaXQubG9uZ2l0dWRlKSB9CiAgICB9OwogICAgdmFyIGtleXMgPSBPYmplY3Qua2V5cyhHRU9DT0RFX0NBQ0hFKTsKICAgIGlmIChrZXlzLmxlbmd0aCA+PSBHRU9DT0RFX0NBQ0hFX01BWCkgZGVsZXRlIEdFT0NPREVfQ0FDSEVba2V5c1swXV07CiAgICBHRU9DT0RFX0NBQ0hFW2NhY2hlS2V5XSA9IHJlc29sdmVkOwogICAgcmV0dXJuIHJlc29sdmVkOwogIH0gY2F0Y2ggKGUpIHsKICAgIGNvbnNvbGUuZXJyb3IoJ1tXRUFUSEVSXSBnZW9jb2RlIGVycm9yOicsIGUgJiYgZS5tZXNzYWdlKTsKICAgIHJldHVybiBudWxsOwogIH0KfQoKYXN5bmMgZnVuY3Rpb24gcmVzb2x2ZUNpdHkocXVlcnkpIHsKICB2YXIgYnVpbHRpbiA9IG1hdGNoQnVpbHRpbkNpdHkocXVlcnkpOwogIGlmIChidWlsdGluKSByZXR1cm4gYnVpbHRpbjsKICByZXR1cm4gZ2VvY29kZUNpdHkocXVlcnkpOwp9Cgphc3luYyBmdW5jdGlvbiBmZXRjaEZvcmVjYXN0KG1hdGNoZWRDaXR5KSB7CiAgdmFyIGxhdCA9IG1hdGNoZWRDaXR5LmNvb3Jkcy5sYXQ7CiAgdmFyIGxvbiA9IG1hdGNoZWRDaXR5LmNvb3Jkcy5sb247CiAgdmFyIHdlYXRoZXJVcmwgPSAnaHR0cHM6Ly9hcGkub3Blbi1tZXRlby5jb20vdjEvZm9yZWNhc3Q/bGF0aXR1ZGU9JyArIGxhdCArICcmbG9uZ2l0dWRlPScgKyBsb24gKwogICAgJyZjdXJyZW50PXRlbXBlcmF0dXJlXzJtLHJlbGF0aXZlX2h1bWlkaXR5XzJtLHdpbmRfc3BlZWRfMTBtLHdlYXRoZXJfY29kZScgKwogICAgJyZkYWlseT10ZW1wZXJhdHVyZV8ybV9tYXgsdGVtcGVyYXR1cmVfMm1fbWluLHByZWNpcGl0YXRpb25fcHJvYmFiaWxpdHlfbWF4JnRpbWV6b25lPUFzaWElMkZTaGFuZ2hhaSc7CgogIHZhciByZXNwID0gYXdhaXQgZmV0Y2god2VhdGhlclVybCwgeyBzaWduYWw6IEFib3J0U2lnbmFsLnRpbWVvdXQoMTAwMDApIH0pOwogIGlmICghcmVzcC5vaykgcmV0dXJuIG51bGw7CiAgLy8g5a6h6K6hIPCfn6LvvJrlhYjmn6UgY29udGVudC1sZW5ndGjvvIzlho3pmZDph4/or7vlj5YgYm9kee+8jOW8guW4uOWkp+WTjeW6lOebtOaOpeS4ouW8gwogIHZhciBkZWNsYXJlZExlbiA9IE51bWJlcihyZXNwLmhlYWRlcnMgJiYgcmVzcC5oZWFkZXJzLmdldCAmJiByZXNwLmhlYWRlcnMuZ2V0KCdjb250ZW50LWxlbmd0aCcpKTsKICBpZiAoTnVtYmVyLmlzRmluaXRlKGRlY2xhcmVkTGVuKSAmJiBkZWNsYXJlZExlbiA+IE1BWF9XRUFUSEVSX1JFU1BPTlNFX0JZVEVTKSByZXR1cm4gbnVsbDsKICB2YXIgcmF3Qm9keSA9IGF3YWl0IHJlc3AudGV4dCgpOwogIGlmIChCdWZmZXIuYnl0ZUxlbmd0aChyYXdCb2R5LCAndXRmOCcpID4gTUFYX1dFQVRIRVJfUkVTUE9OU0VfQllURVMpIHJldHVybiBudWxsOwogIHZhciBkYXRhOwogIHRyeSB7IGRhdGEgPSBKU09OLnBhcnNlKHJhd0JvZHkpOyB9IGNhdGNoIChfKSB7IHJldHVybiBudWxsOyB9CiAgaWYgKCFkYXRhIHx8ICFkYXRhLmN1cnJlbnQpIHJldHVybiBudWxsOwoKICB2YXIgY3VycmVudCA9IGRhdGEuY3VycmVudDsKICB2YXIgZGFpbHkgPSBkYXRhLmRhaWx5OwogIHZhciB3bW9Db2RlID0gY3VycmVudC53ZWF0aGVyX2NvZGU7CiAgdmFyIHdlYXRoZXJEZXNjID0gV0VBVEhFUl9DT0RFU1t3bW9Db2RlXSB8fCAoJ+WkqeawlOS7o+eggSAnICsgd21vQ29kZSk7CiAgdmFyIHF1ZXJpZWRBdCA9IG5ldyBEYXRlKCkudG9Mb2NhbGVTdHJpbmcoJ3poLUNOJywgewogICAgdGltZVpvbmU6ICdBc2lhL1NoYW5naGFpJywgeWVhcjogJ251bWVyaWMnLCBtb250aDogJzItZGlnaXQnLCBkYXk6ICcyLWRpZ2l0JywKICAgIGhvdXI6ICcyLWRpZ2l0JywgbWludXRlOiAnMi1kaWdpdCcsIGhvdXIxMjogZmFsc2UKICB9KTsKCiAgcmV0dXJuIHsKICAgIGNpdHk6IG1hdGNoZWRDaXR5Lm5hbWUsCiAgICBjb25kaXRpb246IHdlYXRoZXJEZXNjLAogICAgdGVtcGVyYXR1cmVfYzogY3VycmVudC50ZW1wZXJhdHVyZV8ybSwKICAgIGh1bWlkaXR5OiBjdXJyZW50LnJlbGF0aXZlX2h1bWlkaXR5XzJtLAogICAgd2luZF9rbWg6IGN1cnJlbnQud2luZF9zcGVlZF8xMG0sCiAgICBoaWdoX2M6IGRhaWx5ICYmIGRhaWx5LnRlbXBlcmF0dXJlXzJtX21heCA/IGRhaWx5LnRlbXBlcmF0dXJlXzJtX21heFswXSA6IG51bGwsCiAgICBsb3dfYzogZGFpbHkgJiYgZGFpbHkudGVtcGVyYXR1cmVfMm1fbWluID8gZGFpbHkudGVtcGVyYXR1cmVfMm1fbWluWzBdIDogbnVsbCwKICAgIHByZWNpcF9wcm9iOiBkYWlseSAmJiBkYWlseS5wcmVjaXBpdGF0aW9uX3Byb2JhYmlsaXR5X21heCA/IGRhaWx5LnByZWNpcGl0YXRpb25fcHJvYmFiaWxpdHlfbWF4WzBdIDogbnVsbCwKICAgIHdlYXRoZXJfY29kZTogd21vQ29kZSwKICAgIHF1ZXJpZWRfYXQ6IHF1ZXJpZWRBdAogIH07Cn0KCi8qKiBTdHJ1Y3R1cmVkIHdlYXRoZXIgZm9yIHJlc3VsdCBjYXJkcyArIG1vZGVsIGNvbnRlbnQuICovCmFzeW5jIGZ1bmN0aW9uIHF1ZXJ5V2VhdGhlckRhdGEocXVlcnkpIHsKICB0cnkgewogICAgdmFyIG1hdGNoZWRDaXR5ID0gYXdhaXQgcmVzb2x2ZUNpdHkocXVlcnkpOwogICAgaWYgKCFtYXRjaGVkQ2l0eSkgcmV0dXJuIG51bGw7CiAgICByZXR1cm4gYXdhaXQgZmV0Y2hGb3JlY2FzdChtYXRjaGVkQ2l0eSk7CiAgfSBjYXRjaCAoZSkgewogICAgY29uc29sZS5lcnJvcignW1dFQVRIRVJdIHF1ZXJ5IGVycm9yOicsIGUgJiYgZS5tZXNzYWdlKTsKICAgIHJldHVybiBudWxsOwogIH0KfQoKYXN5bmMgZnVuY3Rpb24gcXVlcnlXZWF0aGVyKHF1ZXJ5KSB7CiAgdmFyIGRhdGEgPSBhd2FpdCBxdWVyeVdlYXRoZXJEYXRhKHF1ZXJ5KTsKICByZXR1cm4gZm9ybWF0V2VhdGhlclRleHQoZGF0YSk7Cn0KCm1vZHVsZS5leHBvcnRzID0gewogIHF1ZXJ5V2VhdGhlcjogcXVlcnlXZWF0aGVyLAogIHF1ZXJ5V2VhdGhlckRhdGE6IHF1ZXJ5V2VhdGhlckRhdGEsCiAgZm9ybWF0V2VhdGhlclRleHQ6IGZvcm1hdFdlYXRoZXJUZXh0LAogIG1hdGNoQnVpbHRpbkNpdHk6IG1hdGNoQnVpbHRpbkNpdHksCiAgZ2VvY29kZUNpdHk6IGdlb2NvZGVDaXR5LAogIENJVFlfQ09PUkRTOiBDSVRZX0NPT1JEUwp9Owo=
+/** Open-Meteo free weather lookup (no API key). */
+'use strict';
+
+// Open-Meteo 免费天气查询（无需 API Key）
+// 城市坐标映射 — 常用城市优先命中；未命中时走 geocoding-api 解析任意城市名。
+var CITY_COORDS = {
+  '北京': { lat: 39.9042, lon: 116.4074 },
+  '上海': { lat: 31.2304, lon: 121.4737 },
+  '广州': { lat: 23.1291, lon: 113.2644 },
+  '深圳': { lat: 22.5431, lon: 114.0579 },
+  '杭州': { lat: 30.2741, lon: 120.1551 },
+  '湖州': { lat: 30.8932, lon: 120.0963 },
+  '安吉': { lat: 30.6249, lon: 119.6766 },
+  '南京': { lat: 32.0603, lon: 118.7969 },
+  '苏州': { lat: 31.2989, lon: 120.5853 },
+  '成都': { lat: 30.5728, lon: 104.0668 },
+  '重庆': { lat: 29.5630, lon: 106.5516 },
+  '武汉': { lat: 30.5928, lon: 114.3055 },
+  '西安': { lat: 34.3416, lon: 108.9398 },
+  '天津': { lat: 39.3434, lon: 117.3616 },
+  '青岛': { lat: 36.0671, lon: 120.3826 },
+  '厦门': { lat: 24.4798, lon: 118.0894 },
+  '长沙': { lat: 28.2282, lon: 112.9388 },
+  '郑州': { lat: 34.7466, lon: 113.6254 },
+  '合肥': { lat: 31.8206, lon: 117.2272 },
+  '福州': { lat: 26.0745, lon: 119.2965 },
+  '昆明': { lat: 25.0389, lon: 102.7183 },
+  '大连': { lat: 38.9140, lon: 121.6147 },
+  '宁波': { lat: 29.8683, lon: 121.5440 },
+  '无锡': { lat: 31.4912, lon: 120.3119 },
+  '东京': { lat: 35.6762, lon: 139.6503 },
+  '大阪': { lat: 34.6937, lon: 135.5023 },
+  '首尔': { lat: 37.5665, lon: 126.978 },
+  '济州岛': { lat: 33.489, lon: 126.4983 },
+  '巴黎': { lat: 48.8566, lon: 2.3522 },
+  '伦敦': { lat: 51.5074, lon: -0.1278 },
+  '纽约': { lat: 40.7128, lon: -74.006 },
+  '新加坡': { lat: 1.3521, lon: 103.8198 },
+  '香港': { lat: 22.3193, lon: 114.1694 },
+  '台北': { lat: 25.0330, lon: 121.5654 },
+  '洛杉矶': { lat: 34.0522, lon: -118.2437 },
+  '旧金山': { lat: 37.7749, lon: -122.4194 },
+  '悉尼': { lat: -33.8688, lon: 151.2093 },
+  '曼谷': { lat: 13.7563, lon: 100.5018 }
+};
+
+// 英文/拼音别名 → 中文城市名（命中内置坐标）
+var CITY_ALIASES = {
+  beijing: '北京', shanghai: '上海', guangzhou: '广州', shenzhen: '深圳',
+  hangzhou: '杭州', huzhou: '湖州', anji: '安吉', nanjing: '南京',
+  suzhou: '苏州', chengdu: '成都', chongqing: '重庆', wuhan: '武汉',
+  xian: '西安', "xi'an": '西安', tianjin: '天津', qingdao: '青岛',
+  xiamen: '厦门', changsha: '长沙', zhengzhou: '郑州', hefei: '合肥',
+  fuzhou: '福州', kunming: '昆明', dalian: '大连', ningbo: '宁波',
+  wuxi: '无锡', tokyo: '东京', osaka: '大阪', seoul: '首尔',
+  jeju: '济州岛', paris: '巴黎', london: '伦敦', 'new york': '纽约',
+  newyork: '纽约', nyc: '纽约', singapore: '新加坡', hongkong: '香港',
+  'hong kong': '香港', taipei: '台北', 'los angeles': '洛杉矶', la: '洛杉矶',
+  'san francisco': '旧金山', sf: '旧金山', sydney: '悉尼', bangkok: '曼谷'
+};
+
+var WEATHER_CODES = {
+  0: '晴天', 1: '大部晴', 2: '多云', 3: '阴天', 45: '雾', 48: '雾凇',
+  51: '小毛毛雨', 53: '中毛毛雨', 55: '大毛毛雨', 61: '小雨', 63: '中雨', 65: '大雨',
+  71: '小雪', 73: '中雪', 75: '大雪', 80: '阵雨', 81: '中阵雨', 82: '大阵雨',
+  85: '小阵雪', 86: '大阵雪', 95: '雷暴', 96: '雷暴加小冰雹', 99: '雷暴加大冰雹'
+};
+// 审计 🟢：外部 API 响应大小上限（Open-Meteo 正常 < 100KB，留足余量）
+var MAX_WEATHER_RESPONSE_BYTES = 512 * 1024;
+var GEOCODE_CACHE = Object.create(null);
+var GEOCODE_CACHE_MAX = 80;
+
+function formatWeatherText(data) {
+  if (!data) return null;
+  var result = '【天气工具结果】\n查询时间：' + data.queried_at + '（北京时间）\n地点：' + data.city +
+    '\n天气状况：' + data.condition +
+    '\n当前温度：' + data.temperature_c + '°C\n湿度：' + data.humidity + '%\n风速：' + data.wind_kmh + 'km/h';
+  if (data.high_c !== undefined && data.high_c !== null) result += '\n今日最高：' + data.high_c + '°C';
+  if (data.low_c !== undefined && data.low_c !== null) result += '\n今日最低：' + data.low_c + '°C';
+  if (data.precip_prob !== undefined && data.precip_prob !== null) result += '\n降雨概率：' + data.precip_prob + '%';
+  result += '\n\n要求：必须基于以上工具结果回答，不准编造天气数据。';
+  return result;
+}
+
+function matchBuiltinCity(query) {
+  var q = String(query || '').trim();
+  if (!q) return null;
+  var lower = q.toLowerCase();
+  if (CITY_ALIASES[lower]) {
+    var aliasName = CITY_ALIASES[lower];
+    return { name: aliasName, coords: CITY_COORDS[aliasName] };
+  }
+  var cityNames = Object.keys(CITY_COORDS).sort(function(a, b) { return b.length - a.length; });
+  for (var i = 0; i < cityNames.length; i++) {
+    var cityName = cityNames[i];
+    if (q.indexOf(cityName) >= 0) {
+      return { name: cityName, coords: CITY_COORDS[cityName] };
+    }
+  }
+  return null;
+}
+
+/** Resolve any city name via Open-Meteo geocoding (cached). */
+async function geocodeCity(query) {
+  var q = String(query || '').trim().slice(0, 60);
+  if (!q) return null;
+  var cacheKey = q.toLowerCase();
+  if (GEOCODE_CACHE[cacheKey]) return GEOCODE_CACHE[cacheKey];
+  try {
+    var url = 'https://geocoding-api.open-meteo.com/v1/search?name=' +
+      encodeURIComponent(q) + '&count=1&language=zh&format=json';
+    var resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    // ★ 审计修复：geocode 分支此前直接 resp.json() 无大小上限（与 forecast 分支
+    // 的 MAX_WEATHER_RESPONSE_BYTES 限量不一致）；改为与 forecast 相同的限量读取。
+    var geocodeDeclaredLen = Number(resp.headers && resp.headers.get && resp.headers.get('content-length'));
+    if (Number.isFinite(geocodeDeclaredLen) && geocodeDeclaredLen > MAX_WEATHER_RESPONSE_BYTES) return null;
+    var geocodeRaw = await resp.text();
+    if (Buffer.byteLength(geocodeRaw, 'utf8') > MAX_WEATHER_RESPONSE_BYTES) return null;
+    var data;
+    try { data = JSON.parse(geocodeRaw); } catch (_) { return null; }
+    var hit = data && Array.isArray(data.results) && data.results[0];
+    if (!hit || hit.latitude == null || hit.longitude == null) return null;
+    var labelParts = [hit.name];
+    if (hit.admin1 && hit.admin1 !== hit.name) labelParts.push(hit.admin1);
+    if (hit.country && hit.country !== hit.name) labelParts.push(hit.country);
+    var resolved = {
+      name: labelParts.join(' · '),
+      coords: { lat: Number(hit.latitude), lon: Number(hit.longitude) }
+    };
+    var keys = Object.keys(GEOCODE_CACHE);
+    if (keys.length >= GEOCODE_CACHE_MAX) delete GEOCODE_CACHE[keys[0]];
+    GEOCODE_CACHE[cacheKey] = resolved;
+    return resolved;
+  } catch (e) {
+    console.error('[WEATHER] geocode error:', e && e.message);
+    return null;
+  }
+}
+
+async function resolveCity(query) {
+  var builtin = matchBuiltinCity(query);
+  if (builtin) return builtin;
+  return geocodeCity(query);
+}
+
+async function fetchForecast(matchedCity) {
+  var lat = matchedCity.coords.lat;
+  var lon = matchedCity.coords.lon;
+  var weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon +
+    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code' +
+    '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai';
+
+  var resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
+  if (!resp.ok) return null;
+  // 审计 🟢：先查 content-length，再限量读取 body，异常大响应直接丢弃
+  var declaredLen = Number(resp.headers && resp.headers.get && resp.headers.get('content-length'));
+  if (Number.isFinite(declaredLen) && declaredLen > MAX_WEATHER_RESPONSE_BYTES) return null;
+  var rawBody = await resp.text();
+  if (Buffer.byteLength(rawBody, 'utf8') > MAX_WEATHER_RESPONSE_BYTES) return null;
+  var data;
+  try { data = JSON.parse(rawBody); } catch (_) { return null; }
+  if (!data || !data.current) return null;
+
+  var current = data.current;
+  var daily = data.daily;
+  var wmoCode = current.weather_code;
+  var weatherDesc = WEATHER_CODES[wmoCode] || ('天气代码 ' + wmoCode);
+  var queriedAt = new Date().toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  });
+
+  return {
+    city: matchedCity.name,
+    condition: weatherDesc,
+    temperature_c: current.temperature_2m,
+    humidity: current.relative_humidity_2m,
+    wind_kmh: current.wind_speed_10m,
+    high_c: daily && daily.temperature_2m_max ? daily.temperature_2m_max[0] : null,
+    low_c: daily && daily.temperature_2m_min ? daily.temperature_2m_min[0] : null,
+    precip_prob: daily && daily.precipitation_probability_max ? daily.precipitation_probability_max[0] : null,
+    weather_code: wmoCode,
+    queried_at: queriedAt
+  };
+}
+
+/** Structured weather for result cards + model content. */
+async function queryWeatherData(query) {
+  try {
+    var matchedCity = await resolveCity(query);
+    if (!matchedCity) return null;
+    return await fetchForecast(matchedCity);
+  } catch (e) {
+    console.error('[WEATHER] query error:', e && e.message);
+    return null;
+  }
+}
+
+async function queryWeather(query) {
+  var data = await queryWeatherData(query);
+  return formatWeatherText(data);
+}
+
+module.exports = {
+  queryWeather: queryWeather,
+  queryWeatherData: queryWeatherData,
+  formatWeatherText: formatWeatherText,
+  matchBuiltinCity: matchBuiltinCity,
+  geocodeCity: geocodeCity,
+  CITY_COORDS: CITY_COORDS
+};

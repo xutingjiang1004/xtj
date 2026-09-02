@@ -1,1 +1,47 @@
-Y29uc3QgdGVzdCA9IHJlcXVpcmUoJ25vZGU6dGVzdCcpOwpjb25zdCBhc3NlcnQgPSByZXF1aXJlKCdub2RlOmFzc2VydC9zdHJpY3QnKTsKY29uc3QgZnMgPSByZXF1aXJlKCdub2RlOmZzJyk7CmNvbnN0IHBhdGggPSByZXF1aXJlKCdub2RlOnBhdGgnKTsKCmNvbnN0IHJvb3QgPSBwYXRoLmpvaW4oX19kaXJuYW1lLCAnLi4nKTsKY29uc3QgY29yZSA9IGZzLnJlYWRGaWxlU3luYyhwYXRoLmpvaW4ocm9vdCwgJ2pzJywgJ2NvcmUuanMnKSwgJ3V0ZjgnKTsKY29uc3Qgc2VydmVyID0gZnMucmVhZEZpbGVTeW5jKHBhdGguam9pbihyb290LCAncmVuZGVyLWFwaScsICdzZXJ2ZXIuanMnKSwgJ3V0ZjgnKTsKCnRlc3QoJ3Bvc3QgYWN0aW9ucyBleHBvc2Ugb25seSB0aGUgZml4ZWQgdG9vbHMgbWVudSBhbmQgbm8gZWRpdCBlbnRyeScsICgpID0+IHsKICBjb25zdCBhY3Rpb25Tb3VyY2UgPSBjb3JlLnNsaWNlKGNvcmUuaW5kZXhPZignZnVuY3Rpb24gYnVpbGRQb3N0QWN0aW9uSHRtbCcpLCBjb3JlLmluZGV4T2YoJ2Z1bmN0aW9uIGJ1aWxkUG9zdExvY2F0aW9uSHRtbCcpKTsKICBhc3NlcnQubWF0Y2goYWN0aW9uU291cmNlLCAvZGF0YS1wb3N0LXRvb2w9InRyYW5zbGF0ZSIvKTsKICBhc3NlcnQubWF0Y2goYWN0aW9uU291cmNlLCAvZGF0YS1wb3N0LXRvb2w9ImFzay1haSIvKTsKICBhc3NlcnQubWF0Y2goYWN0aW9uU291cmNlLCAvZGF0YS1wb3N0LXRvb2w9InJlcG9ydCIvKTsKICBhc3NlcnQuZG9lc05vdE1hdGNoKGFjdGlvblNvdXJjZSwgL29wZW5FZGl0UG9zdHznvJbovpEvKTsKfSk7Cgp0ZXN0KCdwb3N0IHRvb2xzIGFyZSBzZXJ2ZXItYXV0aG9yaXRhdGl2ZSBhbmQgZXhwb3NlIGFuIFNTRSBwb3N0IGNoYXQgZW5kcG9pbnQnLCAoKSA9PiB7CiAgYXNzZXJ0Lm1hdGNoKHNlcnZlciwgL2FwcFwucG9zdFwoJ1wvYXBpXC9hZ2VudFwvcG9zdC10b29scycsIGF1dGhlbnRpY2F0ZVVzZXIvKTsKICBhc3NlcnQubWF0Y2goc2VydmVyLCAvYXBwXC5wb3N0XCgnXC9hcGlcL2FnZW50XC9wb3N0LWNoYXRcL3N0cmVhbScsIGF1dGhlbnRpY2F0ZVVzZXIvKTsKICBhc3NlcnQubWF0Y2goc2VydmVyLCAvbG9hZFBvc3RUb29sUG9zdFwocG9zdElkLCByZXFcLnVzZXJOYW1lXCkvKTsKICBhc3NlcnQubWF0Y2goc2VydmVyLCAvcG9zdFwuaXNfZGVsZXRlZCA9PT0gdHJ1ZS8pOwogIGFzc2VydC5tYXRjaChzZXJ2ZXIsIC9hbHJlYWR5X2NoaW5lc2UvKTsKICAvLyDimIUgMjAyNiDkv67lpI3vvJpTU0Ug5bin57uf5LiA5pS56LWwIHdyaXRlU3NlKHJlcywgcGF5bG9hZCwgZXZlbnROYW1lKe+8iOW4puiDjOWOi+S4iumZkO+8ie+8jAogIC8vIOS6i+S7tuWQjeeUsSBzc2Utd3JpdGUuanMg6L+Q6KGM5pe255Sf5oiQ77yb5aWR57qm5LiN5Y+Y77yI5a6i5oi356uv5LuN5pS25YiwIGV2ZW50OiBtZXNzYWdlL2RlbHRh77yJ44CCCiAgY29uc3Qgc3NlV3JpdGUgPSBmcy5yZWFkRmlsZVN5bmMocGF0aC5qb2luKHJvb3QsICdyZW5kZXItYXBpJywgJ3NzZS13cml0ZS5qcycpLCAndXRmOCcpOwogIGFzc2VydC5tYXRjaChzc2VXcml0ZSwgL2V2ZW50OiAnIFwrIGV2ZW50TmFtZS8pOwogIGFzc2VydC5tYXRjaChzZXJ2ZXIsIC93cml0ZVNzZVwocmVzLCBce1tefV0qY29udmVyc2F0aW9uX2lkW159XSpcfSwgJ21lc3NhZ2UnXCkvKTsKICBhc3NlcnQubWF0Y2goc2VydmVyLCAvd3JpdGVTc2VcKHJlcywgXHtbXn1dKmNvbnZlcnNhdGlvbl9pZFtefV0qXH0sICdkZWx0YSdcKS8pOwogIGFzc2VydC5tYXRjaChzZXJ2ZXIsIC9yZXF1ZXN0QWJvcnRcLmFib3J0XChcKS8pOwp9KTsKCnRlc3QoJ3Bvc3QgdG9vbHMgZ3VhcmQgYWdhaW5zdCBkdXBsaWNhdGUgVUkgZWxlbWVudHMnLCAoKSA9PiB7CiAgYXNzZXJ0Lm1hdGNoKGNvcmUsIC92YXIgaG9zdCA9IGFuY2hvclwuY2xvc2VzdFwoJ1wucG9zdCdcKS8pOwogIGFzc2VydC5tYXRjaChjb3JlLCAvYWN0aW9uc1wuaW5zZXJ0QWRqYWNlbnRFbGVtZW50XCgnYWZ0ZXJlbmQnLCBwYW5lbFwpLyk7CiAgYXNzZXJ0Lm1hdGNoKGNvcmUsIC92YXIgZXhpc3RpbmcgPSBob3N0XC5xdWVyeVNlbGVjdG9yXCgnXC5wb3N0LXRvb2wtY3JpdGlxdWUnXCkvKTsKfSk7Cgp0ZXN0KCdwb3N0IGNoYXQgU1NFIGNvcnJlY3RseSBkZXRlY3RzIGVtcHR5IHN0cmVhbXMgdG8gYXZvaWQgaW5maW5pdGUgbG9hZGluZycsICgpID0+IHsKICBhc3NlcnQubWF0Y2goY29yZSwgL3ZhciByZWNlaXZlZENvbnRlbnQgPSBmYWxzZTsvKTsKICBhc3NlcnQubWF0Y2goY29yZSwgL2lmIFwoIXJlY2VpdmVkQ29udGVudFwpLyk7CiAgYXNzZXJ0Lm1hdGNoKGNvcmUsIC9yZWNlaXZlZENvbnRlbnQgPSB0cnVlOy8pOwp9KTsKCnRlc3QoJ3NlcnZlciBwb3N0IGNoYXQgc3RyZWFtIGF2b2lkcyBwcmVtYXR1cmUgYWJvcnQgb24gcmVxLmNsb3NlJywgKCkgPT4gewogIGFzc2VydC5tYXRjaChzZXJ2ZXIsIC9yZXNcLm9uXCgnY2xvc2UnLCBmdW5jdGlvblwoXCkgXHsgaWYgXCghcmVzXC53cml0YWJsZUVuZGVkXCkvKTsKfSk7Cg==
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.join(__dirname, '..');
+const core = fs.readFileSync(path.join(root, 'js', 'core.js'), 'utf8');
+const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
+
+test('post actions expose only the fixed tools menu and no edit entry', () => {
+  const actionSource = core.slice(core.indexOf('function buildPostActionHtml'), core.indexOf('function buildPostLocationHtml'));
+  assert.match(actionSource, /data-post-tool="translate"/);
+  assert.match(actionSource, /data-post-tool="ask-ai"/);
+  assert.match(actionSource, /data-post-tool="report"/);
+  assert.doesNotMatch(actionSource, /openEditPost|编辑/);
+});
+
+test('post tools are server-authoritative and expose an SSE post chat endpoint', () => {
+  assert.match(server, /app\.post\('\/api\/agent\/post-tools', authenticateUser/);
+  assert.match(server, /app\.post\('\/api\/agent\/post-chat\/stream', authenticateUser/);
+  assert.match(server, /loadPostToolPost\(postId, req\.userName\)/);
+  assert.match(server, /post\.is_deleted === true/);
+  assert.match(server, /already_chinese/);
+  // ★ 2026 修复：SSE 帧统一改走 writeSse(res, payload, eventName)（带背压上限），
+  // 事件名由 sse-write.js 运行时生成；契约不变（客户端仍收到 event: message/delta）。
+  const sseWrite = fs.readFileSync(path.join(root, 'render-api', 'sse-write.js'), 'utf8');
+  assert.match(sseWrite, /event: ' \+ eventName/);
+  assert.match(server, /writeSse\(res, \{[^}]*conversation_id[^}]*\}, 'message'\)/);
+  assert.match(server, /writeSse\(res, \{[^}]*conversation_id[^}]*\}, 'delta'\)/);
+  assert.match(server, /requestAbort\.abort\(\)/);
+});
+
+test('post tools guard against duplicate UI elements', () => {
+  assert.match(core, /var host = anchor\.closest\('\.post'\)/);
+  assert.match(core, /actions\.insertAdjacentElement\('afterend', panel\)/);
+  assert.match(core, /var existing = host\.querySelector\('\.post-tool-critique'\)/);
+});
+
+test('post chat SSE correctly detects empty streams to avoid infinite loading', () => {
+  assert.match(core, /var receivedContent = false;/);
+  assert.match(core, /if \(!receivedContent\)/);
+  assert.match(core, /receivedContent = true;/);
+});
+
+test('server post chat stream avoids premature abort on req.close', () => {
+  assert.match(server, /res\.on\('close', function\(\) \{ if \(!res\.writableEnded\)/);
+});

@@ -1,1 +1,85 @@
-LyoqIFNTRSB3cml0ZSBoZWxwZXIgd2l0aCBiYWNrcHJlc3N1cmUgcHJvdGVjdGlvbi4gKi8KJ3VzZSBzdHJpY3QnOwoKLy8g5a6h6K6hIOKaqu+8muacrOmhueebruWtmOWcqOS4pOWllyBTU0Ugd3JpdGVy4oCU4oCU5pys5qih5Z2X77yIc3NlLXdyaXRlLmpz77yM57yT5Yay5LiK6ZmQIDI1NktC77yJ5LiOCi8vIGFpLWNvcmUvc3NlLmpzIOeahCBjcmVhdGVTU0VXcml0ZXLvvIjkuIrpmZAgNE1C77yM5ZCr6L+e5o6l5YWz6ZetL+W/g+i3s+euoeeQhu+8ieOAguS4pOiAheWunueOsOi/keS8vAovLyDkvYbnvJPlhrLkuIrpmZDkuI7lhbPpl63or63kuYnkuI3lkIzvvIzplb/mnJ/nu7TmiqTmmJPmvILnp7vjgILmnKzmqKHlnZfmnI3liqHkuo7ovoPml6fot6/nlLHvvJvmlrDku6PnoIHlupTkvJjlhYgKLy8g5L2/55SoIGFpLWNvcmUvc3NlLmpz44CC57uf5LiA5Li65Y2V5LiA5pe26ZyA5oyJIui3r+eUseWunumZheS6i+S7tumHj+e6pyLnoa7orqTkuIrpmZDvvIzmraTlpITmmoLkuI3lkIjlubbjgIIKLy8gMjAyNi0wOC0xMiDkv67lpI3vvJpkcmFpbiDlm57osIPmlLnkuLrlkb3lkI3lh73mlbAgb25EcmFpbu+8iOWOnyBhcmd1bWVudHMuY2FsbGVlIOWcqOS4peagvOaooeW8jwovLyDkuIvlkIzmraXmipsgVHlwZUVycm9y77yM5a+86Ie05LqM5qyh6IOM5Y6L5pe255uR5ZCs5Zmo5pyq5rOo5YaM44CB57yT5Yay5rC45LiN5aSN5o6S77yJ44CCCgpjb25zdCBNQVhfU1NFX0JVRkZFUl9CWVRFUyA9IDI1NiAqIDEwMjQ7Ci8vIOKYhSAyMDI2IOS/ruWkje+8muaUr+aMgeWPr+mAiSBldmVudCDlkI3vvIjmraTliY3lj6rlhpkgJ2RhdGE6ICcg5bin77yM5bim5LqL5Lu25ZCN55qE6Lev55Sx5Y+q6IO96KO4IHJlcy53cml0ZQovLyDnu5Xov4fog4zljovkuIrpmZDvvInjgILlkJHlkI7lhbzlrrnvvJrmnKrkvKAgZXZlbnROYW1lIOaXtuihjOS4uuS4juaXp+eJiOWujOWFqOS4gOiHtOOAggpmdW5jdGlvbiB3cml0ZVNzZShyZXMsIHBheWxvYWQsIGV2ZW50TmFtZSkgewogIHRyeSB7CiAgICBpZiAocmVzICYmICFyZXMud3JpdGFibGVFbmRlZCAmJiByZXMuaGVhZGVyc1NlbnQpIHsKICAgICAgLy8g6K6w5b2V5pyA6L+R5LiA5qyhIFNTRSDlhpnlhaXml7bpl7TvvIzkvpvot6/nlLHnuqflv4Pot7Plrprml7blmajliKTmlq0i5rKJ6buY5pyfIgogICAgICB0cnkgeyByZXMuX3NzZUxhc3RXcml0ZUF0ID0gRGF0ZS5ub3coKTsgfSBjYXRjaCAoXykge30KICAgICAgdmFyIGRhdGEgPSBldmVudE5hbWUKICAgICAgICA/ICdldmVudDogJyArIGV2ZW50TmFtZSArICdcbmRhdGE6ICcgKyBKU09OLnN0cmluZ2lmeShwYXlsb2FkKSArICdcblxuJwogICAgICAgIDogJ2RhdGE6ICcgKyBKU09OLnN0cmluZ2lmeShwYXlsb2FkKSArICdcblxuJzsKICAgICAgaWYgKCFyZXMuX3NzZUJ1ZmZlcikgeyByZXMuX3NzZUJ1ZmZlciA9IFtdOyByZXMuX3NzZUJ1ZmZlckJ5dGVzID0gMDsgfQogICAgICAvLyBBIHNsb3cvZGlzY29ubmVjdGVkIGNsaWVudCBtdXN0IG5vdCB0dXJuIG9uZSBzdHJlYW0gaW50byBhbiB1bmJvdW5kZWQKICAgICAgLy8gaW4tcHJvY2VzcyBxdWV1ZS4gIENsb3NpbmcgaXMgc2FmZXIgdGhhbiByZXRhaW5pbmcgZ2VuZXJhdGVkIGNvbnRlbnQuCiAgICAgIGlmICgocmVzLl9zc2VCdWZmZXJCeXRlcyB8fCAwKSArIEJ1ZmZlci5ieXRlTGVuZ3RoKGRhdGEsICd1dGY4JykgPiBNQVhfU1NFX0JVRkZFUl9CWVRFUykgewogICAgICAgIGNvbnNvbGUud2FybignW1NTRV0gY2xpZW50IGJhY2twcmVzc3VyZSBsaW1pdCBleGNlZWRlZDsgY2xvc2luZyBzdHJlYW0nKTsKICAgICAgICB0cnkgeyByZXMuZW5kKCk7IH0gY2F0Y2ggKF8pIHt9CiAgICAgICAgcmV0dXJuIGZhbHNlOwogICAgICB9CiAgICAgIC8vIOazqOaEj++8muWRveWQjeWHveaVsCBvbkRyYWluIOS7o+abvyBhcmd1bWVudHMuY2FsbGVl77yI5ZCO6ICF5ZyoICd1c2Ugc3RyaWN0JyDkuIvorr/pl67kvJrlkIzmraXmipsKICAgICAgLy8gVHlwZUVycm9y77yM5a+86Ie05LqM5qyh6IOM5Y6L5pe2IGRyYWluIOebkeWQrOWZqOacquazqOWGjOOAgee8k+WGsuawuOS4jeWkjeaOkuOAgei/nuaOpeWFs+mXreaXtumdmem7mOS4ouWkse+8ieOAggogICAgICBmdW5jdGlvbiBvbkRyYWluKCkgewogICAgICAgIHJlcy5fc3NlRHJhaW5RdWV1ZWQgPSBmYWxzZTsKICAgICAgICBpZiAocmVzLl9zc2VCdWZmZXIgJiYgcmVzLl9zc2VCdWZmZXIubGVuZ3RoID4gMCkgewogICAgICAgICAgdmFyIGJ1ZiA9IHJlcy5fc3NlQnVmZmVyLnNsaWNlKCk7CiAgICAgICAgICByZXMuX3NzZUJ1ZmZlciA9IFtdOwogICAgICAgICAgcmVzLl9zc2VCdWZmZXJCeXRlcyA9IDA7CiAgICAgICAgICBmb3IgKHZhciBpID0gMDsgaSA8IGJ1Zi5sZW5ndGg7IGkrKykgewogICAgICAgICAgICB0cnkgewogICAgICAgICAgICAgIGlmIChyZXMud3JpdGFibGVFbmRlZCB8fCAhcmVzLndyaXRlKGJ1ZltpXSkpIHsKICAgICAgICAgICAgICAgIC8vIFJlLXF1ZXVlIG9ubHkgdGhlIHN0aWxsLXBlbmRpbmcgdGFpbDsgZG8gbm90IHJlY3Vyc2l2ZWx5CiAgICAgICAgICAgICAgICAvLyB3cml0ZSBhZnRlciBiYWNrcHJlc3N1cmUgcmV0dXJucy4KICAgICAgICAgICAgICAgIHJlcy5fc3NlQnVmZmVyID0gYnVmLnNsaWNlKGkgKyAxKTsKICAgICAgICAgICAgICAgIHJlcy5fc3NlQnVmZmVyQnl0ZXMgPSByZXMuX3NzZUJ1ZmZlci5yZWR1Y2UoZnVuY3Rpb24obiwgZCkgeyByZXR1cm4gbiArIEJ1ZmZlci5ieXRlTGVuZ3RoKGQsICd1dGY4Jyk7IH0sIDApOwogICAgICAgICAgICAgICAgaWYgKCFyZXMud3JpdGFibGVFbmRlZCAmJiByZXMuX3NzZUJ1ZmZlci5sZW5ndGgpIHsKICAgICAgICAgICAgICAgICAgcmVzLl9zc2VEcmFpblF1ZXVlZCA9IHRydWU7CiAgICAgICAgICAgICAgICAgIHJlcy5vbmNlKCdkcmFpbicsIG9uRHJhaW4pOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgYnJlYWs7CiAgICAgICAgICAgICAgfQogICAgICAgICAgICB9IGNhdGNoIChfKSB7IGJyZWFrOyB9CiAgICAgICAgICB9CiAgICAgICAgfQogICAgICB9CiAgICAgIC8vIOW3suWkhOS6juiDjOWOi+aOkumYn+aAge+8iOe8k+WGsuWMuumdnuepuuaIluato+etieW+hSBkcmFpbu+8ie+8muacrOW4p+WFpemYn++8jOeUsSBvbkRyYWluIOe7n+S4gOWGmeWHuu+8jAogICAgICAvLyDov5nmoLcgTUFYX1NTRV9CVUZGRVJfQllURVMg5YaF5a2Y5LiK6ZmQ5omN6IO95YWc5L2P5oWi5a6i5oi356uv44CCCiAgICAgIGlmIChyZXMuX3NzZUJ1ZmZlci5sZW5ndGggPiAwIHx8IHJlcy5fc3NlRHJhaW5RdWV1ZWQpIHsKICAgICAgICByZXMuX3NzZUJ1ZmZlci5wdXNoKGRhdGEpOwogICAgICAgIHJlcy5fc3NlQnVmZmVyQnl0ZXMgKz0gQnVmZmVyLmJ5dGVMZW5ndGgoZGF0YSwgJ3V0ZjgnKTsKICAgICAgICBpZiAoIXJlcy5fc3NlRHJhaW5RdWV1ZWQpIHsKICAgICAgICAgIHJlcy5fc3NlRHJhaW5RdWV1ZWQgPSB0cnVlOwogICAgICAgICAgcmVzLm9uY2UoJ2RyYWluJywgb25EcmFpbik7CiAgICAgICAgfQogICAgICAgIHJldHVybiB0cnVlOwogICAgICB9CiAgICAgIHZhciBvayA9IHJlcy53cml0ZShkYXRhKTsKICAgICAgaWYgKCFvaykgewogICAgICAgIC8vIHdyaXRlKCk9PT1mYWxzZSDku4XooajnpLrmlbDmja7lt7LmjpLlhaUgTm9kZSDlhoXpg6jnvJPlhrLvvIjpmo/lkI7kvJroh6rliqggZmx1c2jvvInvvIzlubbpnZ4i5YaZ5YWl5aSx6LSlIuOAggogICAgICAgIC8vIOW9k+WJjeW4p+W3suiiq+aOpeWPl++8jOe7neS4jeiDvemHjeWkjeWFpemYn++8iOWQpuWImSBkcmFpbiDml7bph43lpI3lhpnlh7rvvIzlrqLmiLfnq6/mlLbliLDph43lpI3kuovku7bvvInjgIIKICAgICAgICAvLyDku4XnmbvorrAgZHJhaW4g5qCH6K6w77yM5L2/5ZCO57ut5bin6LWw5LiK6Z2i55qE5o6S6Zif5YiG5pSv77yM5LuO6ICM5L+d55WZ6IOM5Y6L5LiL55qE5YaF5a2Y5LiK6ZmQ5L+d5oqk44CCCiAgICAgICAgcmVzLl9zc2VEcmFpblF1ZXVlZCA9IHRydWU7CiAgICAgICAgcmVzLm9uY2UoJ2RyYWluJywgb25EcmFpbik7CiAgICAgIH0KICAgICAgcmV0dXJuIHRydWU7CiAgICB9CiAgfSBjYXRjaCAoZSkgewogICAgY29uc29sZS5lcnJvcignW1NTRV0gd3JpdGUgZXJyb3I6JywgZSAmJiBlLm1lc3NhZ2UpOwogIH0KICByZXR1cm4gZmFsc2U7Cn0KCm1vZHVsZS5leHBvcnRzID0gewogIHdyaXRlU3NlOiB3cml0ZVNzZSwKICBNQVhfU1NFX0JVRkZFUl9CWVRFUzogTUFYX1NTRV9CVUZGRVJfQllURVMKfTsK
+/** SSE write helper with backpressure protection. */
+'use strict';
+
+// 审计 ⚪：本项目存在两套 SSE writer——本模块（sse-write.js，缓冲上限 256KB）与
+// ai-core/sse.js 的 createSSEWriter（上限 4MB，含连接关闭/心跳管理）。两者实现近似
+// 但缓冲上限与关闭语义不同，长期维护易漂移。本模块服务于较旧路由；新代码应优先
+// 使用 ai-core/sse.js。统一为单一时需按"路由实际事件量级"确认上限，此处暂不合并。
+// 2026-08-12 修复：drain 回调改为命名函数 onDrain（原 arguments.callee 在严格模式
+// 下同步抛 TypeError，导致二次背压时监听器未注册、缓冲永不复排）。
+
+const MAX_SSE_BUFFER_BYTES = 256 * 1024;
+// ★ 2026 修复：支持可选 event 名（此前只写 'data: ' 帧，带事件名的路由只能裸 res.write
+// 绕过背压上限）。向后兼容：未传 eventName 时行为与旧版完全一致。
+function writeSse(res, payload, eventName) {
+  try {
+    if (res && !res.writableEnded && res.headersSent) {
+      // 记录最近一次 SSE 写入时间，供路由级心跳定时器判断"沉默期"
+      try { res._sseLastWriteAt = Date.now(); } catch (_) {}
+      var data = eventName
+        ? 'event: ' + eventName + '\ndata: ' + JSON.stringify(payload) + '\n\n'
+        : 'data: ' + JSON.stringify(payload) + '\n\n';
+      if (!res._sseBuffer) { res._sseBuffer = []; res._sseBufferBytes = 0; }
+      // A slow/disconnected client must not turn one stream into an unbounded
+      // in-process queue.  Closing is safer than retaining generated content.
+      if ((res._sseBufferBytes || 0) + Buffer.byteLength(data, 'utf8') > MAX_SSE_BUFFER_BYTES) {
+        console.warn('[SSE] client backpressure limit exceeded; closing stream');
+        try { res.end(); } catch (_) {}
+        return false;
+      }
+      // 注意：命名函数 onDrain 代替 arguments.callee（后者在 'use strict' 下访问会同步抛
+      // TypeError，导致二次背压时 drain 监听器未注册、缓冲永不复排、连接关闭时静默丢失）。
+      function onDrain() {
+        res._sseDrainQueued = false;
+        if (res._sseBuffer && res._sseBuffer.length > 0) {
+          var buf = res._sseBuffer.slice();
+          res._sseBuffer = [];
+          res._sseBufferBytes = 0;
+          for (var i = 0; i < buf.length; i++) {
+            try {
+              if (res.writableEnded || !res.write(buf[i])) {
+                // Re-queue only the still-pending tail; do not recursively
+                // write after backpressure returns.
+                res._sseBuffer = buf.slice(i + 1);
+                res._sseBufferBytes = res._sseBuffer.reduce(function(n, d) { return n + Buffer.byteLength(d, 'utf8'); }, 0);
+                if (!res.writableEnded && res._sseBuffer.length) {
+                  res._sseDrainQueued = true;
+                  res.once('drain', onDrain);
+                }
+                break;
+              }
+            } catch (_) { break; }
+          }
+        }
+      }
+      // 已处于背压排队态（缓冲区非空或正等待 drain）：本帧入队，由 onDrain 统一写出，
+      // 这样 MAX_SSE_BUFFER_BYTES 内存上限才能兜住慢客户端。
+      if (res._sseBuffer.length > 0 || res._sseDrainQueued) {
+        res._sseBuffer.push(data);
+        res._sseBufferBytes += Buffer.byteLength(data, 'utf8');
+        if (!res._sseDrainQueued) {
+          res._sseDrainQueued = true;
+          res.once('drain', onDrain);
+        }
+        return true;
+      }
+      var ok = res.write(data);
+      if (!ok) {
+        // write()===false 仅表示数据已排入 Node 内部缓冲（随后会自动 flush），并非"写入失败"。
+        // 当前帧已被接受，绝不能重复入队（否则 drain 时重复写出，客户端收到重复事件）。
+        // 仅登记 drain 标记，使后续帧走上面的排队分支，从而保留背压下的内存上限保护。
+        res._sseDrainQueued = true;
+        res.once('drain', onDrain);
+      }
+      return true;
+    }
+  } catch (e) {
+    console.error('[SSE] write error:', e && e.message);
+  }
+  return false;
+}
+
+module.exports = {
+  writeSse: writeSse,
+  MAX_SSE_BUFFER_BYTES: MAX_SSE_BUFFER_BYTES
+};

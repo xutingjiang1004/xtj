@@ -1,1 +1,163 @@
-J3VzZSBzdHJpY3QnOwoKdmFyIGh0dHAgPSByZXF1aXJlKCdodHRwJyk7CnZhciBmcyA9IHJlcXVpcmUoJ2ZzJyk7CnZhciBwYXRoID0gcmVxdWlyZSgncGF0aCcpOwovLyDmnKzlnLDpnZnmgIHmnI3liqHkvb/nlKjlkKvlm57njq/lnLDlnYDmlL7ooYznmoQgQ1NQX0xPQ0FM77yI55Sf5Lqn54mIIENTUCDkuI3mlL7ooYwgbG9jYWxob3N077yJCnZhciB7IFNFQ1VSSVRZX0hFQURFUlNfTE9DQUwgfSA9IHJlcXVpcmUoIi4uL3JlbmRlci1hcGkvc2VjdXJpdHktaGVhZGVycyIpOwoKdmFyIHJvb3QgPSBwYXRoLnJlc29sdmUoX19kaXJuYW1lLCAnLi4nKTsKdmFyIG1pbWUgPSB7CiAgJy5jc3MnOiAndGV4dC9jc3M7IGNoYXJzZXQ9dXRmLTgnLAogICcuaHRtbCc6ICd0ZXh0L2h0bWw7IGNoYXJzZXQ9dXRmLTgnLAogICcuanMnOiAnYXBwbGljYXRpb24vamF2YXNjcmlwdDsgY2hhcnNldD11dGYtOCcsCiAgJy5tanMnOiAndGV4dC9qYXZhc2NyaXB0OyBjaGFyc2V0PXV0Zi04JywKICAnLmpzb24nOiAnYXBwbGljYXRpb24vanNvbjsgY2hhcnNldD11dGYtOCcsCiAgJy5tYXAnOiAnYXBwbGljYXRpb24vanNvbjsgY2hhcnNldD11dGYtOCcsCiAgJy53YXNtJzogJ2FwcGxpY2F0aW9uL3dhc20nLAogICcudHh0JzogJ3RleHQvcGxhaW47IGNoYXJzZXQ9dXRmLTgnLAogICcuaWNvJzogJ2ltYWdlL3gtaWNvbicsCiAgJy53b2ZmMic6ICdmb250L3dvZmYyJywKICAnLnBuZyc6ICdpbWFnZS9wbmcnLAogICcuanBnJzogJ2ltYWdlL2pwZWcnLAogICcuanBlZyc6ICdpbWFnZS9qcGVnJywKICAnLnN2Zyc6ICdpbWFnZS9zdmcreG1sJywKICAnLndlYnAnOiAnaW1hZ2Uvd2VicCcKfTsKCi8vIOaVj+aEn+i3r+W+hOaLkue7neWJjee8gO+8muaMiSBVUkwg6Lev5b6E5q615Yy56YWN77yM5ZG95Lit55u05o6lIDQwM++8jOmYsuatoua6kOeggS/lh63mja4v5p6E5bu66ISa5pys5rOE6ZyyCnZhciBTRU5TSVRJVkVfU0VHTUVOVFMgPSBbJy5naXQnLCAnLmVudicsICdub2RlX21vZHVsZXMnLCAncmVuZGVyLWFwaScsICd0ZXN0cycsICdzY3JpcHRzJywgJ21jcC1zZXJ2ZXJzJywgJ3N1cGFiYXNlJywgJ2JhY2t1cHMnLCAnb3V0cHV0J107CmZ1bmN0aW9uIGhhc1NlbnNpdGl2ZVNlZ21lbnQodXJsUGF0aCkgewogIC8vIOKYhSDkv67lpI3vvJrnu5/kuIDlj43mlpzmnaDlubblpKflsI/lhpnkuI3mlY/mhJ/mr5TovoPvvIjmraTliY0gJTVjIOino+eggeWQjueahCBcXCDot6/lvoTkuI4gLy5FTlYg562J5aSn5bCP5YaZ5Y+Y5L2T5Y+v57uV6L+H5ZCN5Y2V77yJCiAgdmFyIG5vcm1hbGl6ZWRQYXRoID0gU3RyaW5nKHVybFBhdGggfHwgJycpLnJlcGxhY2UoL1xcL2csICcvJykudG9Mb3dlckNhc2UoKTsKICByZXR1cm4gbm9ybWFsaXplZFBhdGguc3BsaXQoJy8nKS5zb21lKGZ1bmN0aW9uIChzZWcpIHsgcmV0dXJuIFNFTlNJVElWRV9TRUdNRU5UUy5pbmRleE9mKHNlZykgPj0gMDsgfSk7Cn0KCi8vIOWQjuerryBBUEkg5Luj55CG55uu5qCH77yIQ0kg546v5aKD5LitIHJlbmRlci1hcGkvc2VydmVyLmpzIOebkeWQrCAzMDAwIOerr+WPo++8iQp2YXIgQVBJX1BST1hZX1RBUkdFVCA9IHByb2Nlc3MuZW52LkFQSV9QUk9YWV9UQVJHRVQgfHwgJ2h0dHA6Ly8xMjcuMC4wLjE6MzAwMCc7CihmdW5jdGlvbiB2YWxpZGF0ZVByb3h5VGFyZ2V0KCkgewogIHRyeSB7CiAgICB2YXIgdSA9IG5ldyBVUkwoQVBJX1BST1hZX1RBUkdFVCk7CiAgICBpZiAodS5wcm90b2NvbCAhPT0gJ2h0dHA6JyAmJiB1LnByb3RvY29sICE9PSAnaHR0cHM6JykgdGhyb3cgbmV3IEVycm9yKCd1bnN1cHBvcnRlZCBwcm90b2NvbCcpOwogIH0gY2F0Y2ggKGUpIHsKICAgIGNvbnNvbGUuZXJyb3IoJ1tzZXJ2ZS1zdGF0aWNdIGludmFsaWQgQVBJX1BST1hZX1RBUkdFVCAobXVzdCBiZSBhbiBodHRwL2h0dHBzIFVSTCk6ICcgKyBBUElfUFJPWFlfVEFSR0VUKTsKICAgIHByb2Nlc3MuZXhpdCgxKTsKICB9Cn0pKCk7Cgp2YXIgc2VydmVyID0gaHR0cC5jcmVhdGVTZXJ2ZXIoZnVuY3Rpb24gKHJlcSwgcmVzKSB7CiAgdmFyIHBhdGhuYW1lOwogIHRyeSB7CiAgICBwYXRobmFtZSA9IGRlY29kZVVSSUNvbXBvbmVudChuZXcgVVJMKHJlcS51cmwsICdodHRwOi8vMTI3LjAuMC4xJykucGF0aG5hbWUpOwogIH0gY2F0Y2ggKF8pIHsKICAgIHJlcy53cml0ZUhlYWQoNDAwLCBTRUNVUklUWV9IRUFERVJTX0xPQ0FMKS5lbmQoJ0JhZCByZXF1ZXN0Jyk7CiAgICByZXR1cm47CiAgfQoKICAvLyDku6PnkIYgL2FwaS8qIOivt+axguWIsOWQjuerr+acjeWKoeWZqAogIGlmIChwYXRobmFtZS5pbmRleE9mKCcvYXBpLycpID09PSAwKSB7CiAgICB2YXIgcHJveHlUYXJnZXQ7CiAgICB0cnkgewogICAgICAvLyDnlKjop4TojIPljJYgcGF0aG5hbWUrc2VhcmNoIOmHjeW7uiBVUkzvvIzpgb/lhY3nm7TmjqXmiorljp/lp4sgcmVxLnVybCDmi7zlnKggdGFyZ2V0IOWQjgogICAgICB2YXIgcmVxUGFyc2VkID0gbmV3IFVSTChyZXEudXJsLCAnaHR0cDovLzEyNy4wLjAuMScpOwogICAgICBwcm94eVRhcmdldCA9IEFQSV9QUk9YWV9UQVJHRVQucmVwbGFjZSgvXC8rJC8sICcnKSArIHJlcVBhcnNlZC5wYXRobmFtZSArIHJlcVBhcnNlZC5zZWFyY2g7CiAgICB9IGNhdGNoIChfKSB7CiAgICAgIHJlcy53cml0ZUhlYWQoNDAwLCBTRUNVUklUWV9IRUFERVJTX0xPQ0FMKS5lbmQoJ0JhZCByZXF1ZXN0Jyk7CiAgICAgIHJldHVybjsKICAgIH0KICAgIC8vIOS4jemAj+S8oOWuouaIt+erryBIb3N077yIQVBJX1BST1hZX1RBUkdFVCDnmoQgSG9zdCDmiY3lh4bnoa7vvInvvIzlkIzml7borr4gWC1Gb3J3YXJkZWQtUHJvdG8KICAgIHZhciBwcm94eUhlYWRlcnMgPSBPYmplY3QuYXNzaWduKHt9LCByZXEuaGVhZGVycyk7CiAgICBkZWxldGUgcHJveHlIZWFkZXJzLmhvc3Q7CiAgICBwcm94eUhlYWRlcnNbJ3gtZm9yd2FyZGVkLXByb3RvJ10gPSAnaHR0cCc7CiAgICB2YXIgcHJveHlSZXEgPSBodHRwLnJlcXVlc3QoCiAgICAgIHByb3h5VGFyZ2V0LAogICAgICB7IG1ldGhvZDogcmVxLm1ldGhvZCwgaGVhZGVyczogcHJveHlIZWFkZXJzIH0sCiAgICAgIGZ1bmN0aW9uIChwcm94eVJlcykgewogICAgICAgIHJlcy53cml0ZUhlYWQocHJveHlSZXMuc3RhdHVzQ29kZSwgT2JqZWN0LmFzc2lnbih7fSwgcHJveHlSZXMuaGVhZGVycywgU0VDVVJJVFlfSEVBREVSU19MT0NBTCkpOwogICAgICAgIC8vIEw0IOS/ruWkje+8muebkeWQrOS4iua4uC/kuIvmuLjmtYHplJnor6/vvIzpgb/lhY3lrqLmiLfnq6/kuK3mlq3miJblkI7nq6/ltKnmuoPml7bmnKrmjZXojrcgZXJyb3Ig5a+86Ie06L+b56iL5bSp5rqDCiAgICAgICAgcHJveHlSZXMub24oJ2Vycm9yJywgZnVuY3Rpb24gKGVycikgewogICAgICAgICAgY29uc29sZS5lcnJvcignW3NlcnZlLXN0YXRpY10gdXBzdHJlYW0gc3RyZWFtIGVycm9yOicsIGVyci5tZXNzYWdlKTsKICAgICAgICAgIHRyeSB7IHJlcy5kZXN0cm95KCk7IH0gY2F0Y2ggKF8pIHt9CiAgICAgICAgfSk7CiAgICAgICAgcmVzLm9uKCdlcnJvcicsIGZ1bmN0aW9uIChlcnIpIHsKICAgICAgICAgIGNvbnNvbGUuZXJyb3IoJ1tzZXJ2ZS1zdGF0aWNdIGNsaWVudCBzdHJlYW0gZXJyb3I6JywgZXJyLm1lc3NhZ2UpOwogICAgICAgICAgdHJ5IHsgcHJveHlSZXMuZGVzdHJveSgpOyB9IGNhdGNoIChfKSB7fQogICAgICAgIH0pOwogICAgICAgIHByb3h5UmVzLnBpcGUocmVzKTsKICAgICAgfQogICAgKTsKICAgIC8vIOS7o+eQhuivt+axgui2heaXtuS/neaKpO+8mui2heaXtumUgOavgeW5tui1sCA1MDIg5YiG5pSvCiAgICBwcm94eVJlcS5zZXRUaW1lb3V0KDE1MDAwKTsKICAgIHByb3h5UmVxLm9uKCd0aW1lb3V0JywgZnVuY3Rpb24gKCkgewogICAgICBjb25zb2xlLmVycm9yKCdbc2VydmUtc3RhdGljXSBBUEkgcHJveHkgdGltZW91dCwgYWJvcnRpbmcgcmVxdWVzdCcpOwogICAgICBwcm94eVJlcS5kZXN0cm95KCk7CiAgICB9KTsKICAgIHByb3h5UmVxLm9uKCdlcnJvcicsIGZ1bmN0aW9uIChlcnIpIHsKICAgICAgY29uc29sZS5lcnJvcignW3NlcnZlLXN0YXRpY10gQVBJIHByb3h5IGVycm9yOicsIGVyci5tZXNzYWdlKTsKICAgICAgcmVzLndyaXRlSGVhZCg1MDIsIE9iamVjdC5hc3NpZ24oeyAnQ29udGVudC1UeXBlJzogJ2FwcGxpY2F0aW9uL2pzb24nIH0sIFNFQ1VSSVRZX0hFQURFUlNfTE9DQUwpKTsKICAgICAgcmVzLmVuZChKU09OLnN0cmluZ2lmeSh7IGVycm9yOiAnQmFja2VuZCB1bmF2YWlsYWJsZScsIGNvZGU6ICdwcm94eV9lcnJvcicgfSkpOwogICAgfSk7CiAgICByZXEucGlwZShwcm94eVJlcSk7CiAgICByZXR1cm47CiAgfQogIC8vIOaVj+aEn+i3r+W+hOWJjee8gOebtOaOpSA0MDPvvIguZ2l0IC8gLmVudiAvIG5vZGVfbW9kdWxlcyAvIHJlbmRlci1hcGkgLyB0ZXN0cyAvIHNjcmlwdHMgLyBtY3Atc2VydmVyc++8iQogIGlmIChoYXNTZW5zaXRpdmVTZWdtZW50KHBhdGhuYW1lKSkgewogICAgcmVzLndyaXRlSGVhZCg0MDMsIFNFQ1VSSVRZX0hFQURFUlNfTE9DQUwpLmVuZCgnRm9yYmlkZGVuJyk7CiAgICByZXR1cm47CiAgfQogIHZhciByZWxhdGl2ZTsKICBpZiAocGF0aG5hbWUuaW5kZXhPZignL3ZlbmRvci93ZWJsbG0vJykgPT09IDApIHsKICAgIC8vIOacrOWcsOW8gOWPkemVnOWDj+eUn+S6p+erryByZW5kZXItYXBpL3NlcnZlci5qcyDnmoQgL3ZlbmRvci93ZWJsbG0g6Z2Z5oCB6Lev55Sx77yMCiAgICAvLyDmjIflkJEgbm9kZV9tb2R1bGVzL0BtbGMtYWkvd2ViLWxsbS9saWLvvIjmtY/op4jlmajnq6/mnKzlnLAgQUkgd29ya2VyIOS+nei1lu+8ieOAggogICAgcmVsYXRpdmUgPSAnbm9kZV9tb2R1bGVzL0BtbGMtYWkvd2ViLWxsbS9saWIvJyArIHBhdGhuYW1lLnJlcGxhY2UoL15cL3ZlbmRvclwvd2VibGxtXC8vLCAnJyk7CiAgfSBlbHNlIHsKICAgIHJlbGF0aXZlID0gcGF0aG5hbWUgPT09ICcvJyA/ICdpbmRleC5odG1sJyA6IHBhdGhuYW1lLnJlcGxhY2UoL15cLysvLCAnJyk7CiAgfQogIHZhciBmaWxlID0gcGF0aC5yZXNvbHZlKHJvb3QsIHJlbGF0aXZlKTsKICBpZiAoZmlsZSAhPT0gcm9vdCAmJiBmaWxlLmluZGV4T2Yocm9vdCArIHBhdGguc2VwKSAhPT0gMCkgewogICAgcmVzLndyaXRlSGVhZCg0MDMsIFNFQ1VSSVRZX0hFQURFUlNfTE9DQUwpLmVuZCgnRm9yYmlkZGVuJyk7CiAgICByZXR1cm47CiAgfQogIHRyeSB7CiAgICB2YXIgcmVhbCA9IGZzLnJlYWxwYXRoU3luYyhmaWxlKTsKICAgIGlmIChyZWFsICE9PSBmaWxlICYmIHJlYWwuaW5kZXhPZihyb290ICsgcGF0aC5zZXApICE9PSAwICYmIHJlYWwgIT09IHJvb3QpIHsKICAgICAgcmVzLndyaXRlSGVhZCg0MDMsIFNFQ1VSSVRZX0hFQURFUlNfTE9DQUwpLmVuZCgnRm9yYmlkZGVuJyk7CiAgICAgIHJldHVybjsKICAgIH0KICB9IGNhdGNoIChlKSB7CiAgICAvLyBFTk9FTlTvvJrmlofku7bkuI3lrZjlnKjljZXni6zov5Tlm54gNDA077yM5YW25L2Z77yI5p2D6ZmQ562J77yJ5LuNIDQwMwogICAgaWYgKGUgJiYgZS5jb2RlID09PSAnRU5PRU5UJykgewogICAgICByZXMud3JpdGVIZWFkKDQwNCwgU0VDVVJJVFlfSEVBREVSU19MT0NBTCkuZW5kKCdOb3QgZm91bmQnKTsKICAgIH0gZWxzZSB7CiAgICAgIHJlcy53cml0ZUhlYWQoNDAzLCBTRUNVUklUWV9IRUFERVJTX0xPQ0FMKS5lbmQoJ0ZvcmJpZGRlbicpOwogICAgfQogICAgcmV0dXJuOwogIH0KICBmcy5zdGF0KGZpbGUsIGZ1bmN0aW9uIChzdGF0RXJyb3IsIHN0YXQpIHsKICAgIGlmIChzdGF0RXJyb3IgfHwgIXN0YXQuaXNGaWxlKCkpIHsKICAgICAgcmVzLndyaXRlSGVhZCg0MDQsIFNFQ1VSSVRZX0hFQURFUlNfTE9DQUwpLmVuZCgnTm90IGZvdW5kJyk7CiAgICAgIHJldHVybjsKICAgIH0KICAgIHJlcy53cml0ZUhlYWQoMjAwLCBPYmplY3QuYXNzaWduKAogICAgICB7ICdDb250ZW50LVR5cGUnOiBtaW1lW3BhdGguZXh0bmFtZShmaWxlKS50b0xvd2VyQ2FzZSgpXSB8fCAnYXBwbGljYXRpb24vb2N0ZXQtc3RyZWFtJyB9LAogICAgICBTRUNVUklUWV9IRUFERVJTX0xPQ0FMLAogICAgICB7ICdDYWNoZS1Db250cm9sJzogJ25vLWNhY2hlJyB9CiAgICApKTsKICAgIHZhciBzdHJlYW0gPSBmcy5jcmVhdGVSZWFkU3RyZWFtKGZpbGUpOwogICAgc3RyZWFtLm9uKCdlcnJvcicsIGZ1bmN0aW9uKCkgewogICAgICBpZiAoIXJlcy5oZWFkZXJzU2VudCkgcmVzLndyaXRlSGVhZCg0MDQsIFNFQ1VSSVRZX0hFQURFUlNfTE9DQUwpLmVuZCgnTm90IGZvdW5kJyk7CiAgICAgIGVsc2UgcmVzLmRlc3Ryb3koKTsKICAgIH0pOwogICAgc3RyZWFtLnBpcGUocmVzKTsKICB9KTsKfSk7CnZhciBQT1JUID0gcHJvY2Vzcy5lbnYuUE9SVCB8fCA0MTczOwpzZXJ2ZXIub24oJ2Vycm9yJywgZnVuY3Rpb24gKGVycikgewogIGlmIChlcnIgJiYgZXJyLmNvZGUgPT09ICdFQUREUklOVVNFJykgewogICAgY29uc29sZS5lcnJvcignW3NlcnZlLXN0YXRpY10gUG9ydCAnICsgUE9SVCArICcgYWxyZWFkeSBpbiB1c2UgKEVBRERSSU5VU0UpOiAnICsgZXJyLm1lc3NhZ2UpOwogIH0gZWxzZSB7CiAgICBjb25zb2xlLmVycm9yKCdbc2VydmUtc3RhdGljXSBTZXJ2ZXIgZXJyb3I6ICcgKyAoZXJyICYmIGVyci5tZXNzYWdlID8gZXJyLm1lc3NhZ2UgOiBlcnIpKTsKICB9CiAgcHJvY2Vzcy5leGl0KDEpOwp9KTsKc2VydmVyLmxpc3RlbihQT1JULCAnMTI3LjAuMC4xJyk7Cg==
+'use strict';
+
+var http = require('http');
+var fs = require('fs');
+var path = require('path');
+// 本地静态服务使用含回环地址放行的 CSP_LOCAL（生产版 CSP 不放行 localhost）
+var { SECURITY_HEADERS_LOCAL } = require("../render-api/security-headers");
+
+var root = path.resolve(__dirname, '..');
+var mime = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.txt': 'text/plain; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp'
+};
+
+// 敏感路径拒绝前缀：按 URL 路径段匹配，命中直接 403，防止源码/凭据/构建脚本泄露
+var SENSITIVE_SEGMENTS = ['.git', '.env', 'node_modules', 'render-api', 'tests', 'scripts', 'mcp-servers', 'supabase', 'backups', 'output'];
+function hasSensitiveSegment(urlPath) {
+  // ★ 修复：统一反斜杠并大小写不敏感比较（此前 %5c 解码后的 \\ 路径与 /.ENV 等大小写变体可绕过名单）
+  var normalizedPath = String(urlPath || '').replace(/\\/g, '/').toLowerCase();
+  return normalizedPath.split('/').some(function (seg) { return SENSITIVE_SEGMENTS.indexOf(seg) >= 0; });
+}
+
+// 后端 API 代理目标（CI 环境中 render-api/server.js 监听 3000 端口）
+var API_PROXY_TARGET = process.env.API_PROXY_TARGET || 'http://127.0.0.1:3000';
+(function validateProxyTarget() {
+  try {
+    var u = new URL(API_PROXY_TARGET);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('unsupported protocol');
+  } catch (e) {
+    console.error('[serve-static] invalid API_PROXY_TARGET (must be an http/https URL): ' + API_PROXY_TARGET);
+    process.exit(1);
+  }
+})();
+
+var server = http.createServer(function (req, res) {
+  var pathname;
+  try {
+    pathname = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname);
+  } catch (_) {
+    res.writeHead(400, SECURITY_HEADERS_LOCAL).end('Bad request');
+    return;
+  }
+
+  // 代理 /api/* 请求到后端服务器
+  if (pathname.indexOf('/api/') === 0) {
+    var proxyTarget;
+    try {
+      // 用规范化 pathname+search 重建 URL，避免直接把原始 req.url 拼在 target 后
+      var reqParsed = new URL(req.url, 'http://127.0.0.1');
+      proxyTarget = API_PROXY_TARGET.replace(/\/+$/, '') + reqParsed.pathname + reqParsed.search;
+    } catch (_) {
+      res.writeHead(400, SECURITY_HEADERS_LOCAL).end('Bad request');
+      return;
+    }
+    // 不透传客户端 Host（API_PROXY_TARGET 的 Host 才准确），同时设 X-Forwarded-Proto
+    var proxyHeaders = Object.assign({}, req.headers);
+    delete proxyHeaders.host;
+    proxyHeaders['x-forwarded-proto'] = 'http';
+    var proxyReq = http.request(
+      proxyTarget,
+      { method: req.method, headers: proxyHeaders },
+      function (proxyRes) {
+        res.writeHead(proxyRes.statusCode, Object.assign({}, proxyRes.headers, SECURITY_HEADERS_LOCAL));
+        // L4 修复：监听上游/下游流错误，避免客户端中断或后端崩溃时未捕获 error 导致进程崩溃
+        proxyRes.on('error', function (err) {
+          console.error('[serve-static] upstream stream error:', err.message);
+          try { res.destroy(); } catch (_) {}
+        });
+        res.on('error', function (err) {
+          console.error('[serve-static] client stream error:', err.message);
+          try { proxyRes.destroy(); } catch (_) {}
+        });
+        proxyRes.pipe(res);
+      }
+    );
+    // 代理请求超时保护：超时销毁并走 502 分支
+    proxyReq.setTimeout(15000);
+    proxyReq.on('timeout', function () {
+      console.error('[serve-static] API proxy timeout, aborting request');
+      proxyReq.destroy();
+    });
+    proxyReq.on('error', function (err) {
+      console.error('[serve-static] API proxy error:', err.message);
+      res.writeHead(502, Object.assign({ 'Content-Type': 'application/json' }, SECURITY_HEADERS_LOCAL));
+      res.end(JSON.stringify({ error: 'Backend unavailable', code: 'proxy_error' }));
+    });
+    req.pipe(proxyReq);
+    return;
+  }
+  // 敏感路径前缀直接 403（.git / .env / node_modules / render-api / tests / scripts / mcp-servers）
+  if (hasSensitiveSegment(pathname)) {
+    res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
+    return;
+  }
+  var relative;
+  if (pathname.indexOf('/vendor/webllm/') === 0) {
+    // 本地开发镜像生产端 render-api/server.js 的 /vendor/webllm 静态路由，
+    // 指向 node_modules/@mlc-ai/web-llm/lib（浏览器端本地 AI worker 依赖）。
+    relative = 'node_modules/@mlc-ai/web-llm/lib/' + pathname.replace(/^\/vendor\/webllm\//, '');
+  } else {
+    relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  }
+  var file = path.resolve(root, relative);
+  if (file !== root && file.indexOf(root + path.sep) !== 0) {
+    res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
+    return;
+  }
+  try {
+    var real = fs.realpathSync(file);
+    if (real !== file && real.indexOf(root + path.sep) !== 0 && real !== root) {
+      res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
+      return;
+    }
+  } catch (e) {
+    // ENOENT：文件不存在单独返回 404，其余（权限等）仍 403
+    if (e && e.code === 'ENOENT') {
+      res.writeHead(404, SECURITY_HEADERS_LOCAL).end('Not found');
+    } else {
+      res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
+    }
+    return;
+  }
+  fs.stat(file, function (statError, stat) {
+    if (statError || !stat.isFile()) {
+      res.writeHead(404, SECURITY_HEADERS_LOCAL).end('Not found');
+      return;
+    }
+    res.writeHead(200, Object.assign(
+      { 'Content-Type': mime[path.extname(file).toLowerCase()] || 'application/octet-stream' },
+      SECURITY_HEADERS_LOCAL,
+      { 'Cache-Control': 'no-cache' }
+    ));
+    var stream = fs.createReadStream(file);
+    stream.on('error', function() {
+      if (!res.headersSent) res.writeHead(404, SECURITY_HEADERS_LOCAL).end('Not found');
+      else res.destroy();
+    });
+    stream.pipe(res);
+  });
+});
+var PORT = process.env.PORT || 4173;
+server.on('error', function (err) {
+  if (err && err.code === 'EADDRINUSE') {
+    console.error('[serve-static] Port ' + PORT + ' already in use (EADDRINUSE): ' + err.message);
+  } else {
+    console.error('[serve-static] Server error: ' + (err && err.message ? err.message : err));
+  }
+  process.exit(1);
+});
+server.listen(PORT, '127.0.0.1');
