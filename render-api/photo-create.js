@@ -529,9 +529,10 @@ async function createPhotoRecord(options) {
       contentObj.width = thumbnail.width || null;
       contentObj.height = thumbnail.height || null;
       if (thumbnail.exif) contentObj.exif = thumbnail.exif;
-      // Phase 5: 如果创建了旋转版，更新 media_url 指向旋转后的文件
+      // Phase 5: 保留原上传文件作为显示源(media_url)，保证预览放大/下载为原画质。
+      // 旋转版(rotatedUrl,webp)仅作为低质量兜底缩略元数据保留，不再覆盖 media_url——
+      // 否则带 EXIF 方向的照片会被替换成"最长边4096 + webp q85"的有损版本，放大即模糊。
       if (thumbnail.rotatedUrl) {
-        validated.mediaUrl = thumbnail.rotatedUrl;
         contentObj.rotatedUrl = thumbnail.rotatedUrl;
         contentObj.rotatedPath = thumbnail.rotatedPath || '';
         contentObj.rotatedFileSize = thumbnail.rotatedFileSize;
