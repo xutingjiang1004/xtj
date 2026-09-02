@@ -46,11 +46,15 @@ test('server extracts structured attachments on normal, stream, and deep routes'
   assert.match(serverSource, /attachments\.length, 10/);
 });
 
-test('AI upload controls only advertise formats supported by the extractor', () => {
+test('AI upload controls accept any file format (size-capped, backend-validated)', () => {
   assert.match(source, /function isSupportedAiFile\(file\)/);
-  assert.match(source, /\\\.\(pdf\|docx\|txt\|csv\|xlsx\)\$/);
+  // ★ 全格式支持：前端不再用扩展名白名单拦截文件（仅保留 7MB 大小上限与完整 data URL 校验），
+  //   文件内容由后端受保护解析器（PDF/DOCX/XLSX/TXT/图片 OCR/视觉直传/UTF-8 探测）处理。
+  assert.doesNotMatch(source, /\\\.\(pdf\|docx\|txt\|csv\|xlsx\)\$/);
+  assert.doesNotMatch(source, /仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件/);
   assert.doesNotMatch(source, /accept: ['"]image\/\*\.pdf/);
   assert.doesNotMatch(source, /accept: ['"]image\/\*,\.pdf,\.doc,\.docx/);
+  assert.match(source, /AI_FILE_MAX_BYTES/);
 });
 
 test('deep research close invalidates callbacks, aborts streams, and clears transient files', () => {
