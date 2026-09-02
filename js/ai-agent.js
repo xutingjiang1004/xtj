@@ -6967,7 +6967,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
     var originalUserText = text;
-    var sendFingerprint = originalUserText + '\u0000' + (fileData ? String(fileData.name || '') + ':' + String(fileData.dataUrl || '').length : '');
+    // ★ 多文件/文件夹：支持数组（最多 10 个），兼容旧的单文件调用
+    var fileList = Array.isArray(fileData) ? fileData.slice(0, 10) : (fileData ? [fileData] : []);
+    var sendFingerprint = originalUserText + '\u0000' + fileList.map(function(f) {
+      return String(f.name || '') + ':' + String(f.dataUrl || '').length;
+    }).join('|');
     if (S.sending && S.lastSendFingerprint === sendFingerprint && Date.now() - S.lastSendAt < 1500) {
       try { notify('已发送，请勿重复点击'); } catch (eDuplicate) {}
       return;
@@ -6985,24 +6989,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息'); } catch(e) {}
     var displayText = text;
     var attachmentPayload = null;
-    // 如果有文件: 区分: UI 显示用完整 data URL 或文件占位，发送给服务器用简短标记
-    if (fileData) {
-      var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
-      var isImage = fileData.type.startsWith('image/');
-      // 估算文件大小（data URL 绾?4/3 倍原始大小）
-      var sizeKB = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
-      // UI 显示
-      if (isImage) {
-        displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
-      } else {
-        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' · ' + sizeKB + 'KB]';
+    // 如果有文件（单/多/文件夹）: UI 显示占位，发送给服务器用附带 data_url 的结构化附件
+    if (fileList.length) {
+      attachmentPayload = [];
+      var uiLines = [];
+      var serverTags = [];
+      for (var fli = 0; fli < fileList.length; fli++) {
+        var oneFile = fileList[fli];
+        if (!oneFile || !oneFile.dataUrl) continue;
+        var safeName = String(oneFile.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+        var isImage = String(oneFile.type || '').indexOf('image/') === 0;
+        // 估算文件大小（data URL 约 4/3 倍原始大小）
+        var sizeKB = Math.round((oneFile.dataUrl.length * 3 / 4) / 1024);
+        // UI 显示：首图为内联缩略，其余为文件条目
+        uiLines.push(isImage ? '![' + safeName + '](' + oneFile.dataUrl + ')' : '[📄 ' + safeName + ' · ' + sizeKB + 'KB]');
+        serverTags.push(isImage ? '[图片: ' + safeName + ' · ' + sizeKB + 'KB]' : '[文件: ' + safeName + ' · ' + sizeKB + 'KB]');
+        attachmentPayload.push({ name: safeName, type: oneFile.type || 'application/octet-stream', data_url: oneFile.dataUrl });
       }
-      // 发送给服务器: 简短标记，不含大 data URL
-      var serverTag = isImage
-        ? '[图片: ' + safeName + ' · ' + sizeKB + 'KB]'
-        : '[文件: ' + safeName + ' · ' + sizeKB + 'KB]';
-      text = text ? text + '\n' + serverTag : serverTag;
-      attachmentPayload = [{ name: safeName, type: fileData.type || 'application/octet-stream', data_url: fileData.dataUrl }];
+      if (attachmentPayload.length) {
+        displayText = text ? text + '\n' + uiLines.join('\n') : uiLines.join('\n');
+        text = text ? text + '\n' + serverTags.join(' ') : serverTags.join(' ');
+      } else {
+        attachmentPayload = null;
+      }
     }
     if (!text) { S.sending = false; return; }
     if (text.length > 50000) {
@@ -7334,6 +7343,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var finalThinkingMode = '';
       var streamConvId = null;
       var doneReceived = false;
+      var _eofReached = false; // ★ 修复：SSE EOF flush 前置标志此前未声明（严格模式下 EOF 即抛 ReferenceError）
       var evtHandled = false;
       var _finalized = false;
 
@@ -8860,7 +8870,7 @@ function showChatMessages() {
       newBtn.disabled = true;
       try {
         // Pending attachments belong to the current conversation only.
-        _aiChatFileData = null;
+        _aiChatFiles = [];
         if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
         if (fileInput) fileInput.value = '';
         var r = await apiRequest('POST', '/chat/new', null);
@@ -8968,6 +8978,7 @@ function showChatMessages() {
 
     // 系统级选择器：透明 select 铺满整行，iOS/桌面都能直接点开（不靠脆弱 showPicker）
     function fillSelect(sel, options, selectedValue) {
+      if (!sel) return;
       sel.innerHTML = '';
       for (var si = 0; si < options.length; si++) {
         var opt = options[si];
@@ -8989,6 +9000,7 @@ function showChatMessages() {
     var ICO = {
       pro: '<svg class="ai-panel-svg ai-panel-svg--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.1l2.2 5.1 5.5.5-4.2 3.6 1.3 5.4L12 14.9 7.2 17.7l1.3-5.4-4.2-3.6 5.5-.5L12 3.1z"/></svg>',
       upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 17.5h8.2a3.3 3.3 0 0 0 .3-6.6 5 5 0 0 0-9.6-1.3A3.6 3.6 0 0 0 8 17.5z"/><path d="M12 15.2V9.8"/><path d="M9.8 11.6L12 9.4l2.2 2.2"/></svg>',
+      folder: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.4h8.8A1.5 1.5 0 0 1 21 8.9v8.1a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17z"/></svg>',
       model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L5 7.2v9.6L12 20.5l7-3.7V7.2L12 3.5z"/><path d="M5 7.2l7 3.8 7-3.8"/><path d="M12 11v9.5"/></svg>',
       think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5.2a3 3 0 0 0-2.8 4.1A2.7 2.7 0 0 0 5.2 12c0 1.4.9 2.5 2.2 2.9-.1.4-.2.8-.2 1.2 0 1.8 1.3 3.2 3 3.4"/><path d="M14.5 5.2a3 3 0 0 1 2.8 4.1A2.7 2.7 0 0 1 18.8 12c0 1.4-.9 2.5-2.2 2.9.1.4.2.8.2 1.2 0 1.8-1.3 3.2-3 3.4"/><path d="M9.8 18.3h4.4"/><path d="M12 6.2v8.6"/><path d="M9.8 10c.7-.7 1.5-1 2.2-1s1.5.3 2.2 1"/><path d="M9.8 13c.7-.6 1.5-.9 2.2-.9s1.5.3 2.2.9"/></svg>',
       search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M4.5 12h15"/><path d="M12 4.5c2 2.2 3.1 4.7 3.1 7.5s-1.1 5.3-3.1 7.5C10 17.3 8.9 14.8 8.9 12S10 6.7 12 4.5z"/></svg>',
@@ -9036,23 +9048,26 @@ function showChatMessages() {
                 '<span class="ai-panel-row-title">上传文件</span>' +
                 rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
               '</button>' +
-              '<div class="ai-panel-row ai-panel-row--select" data-action="open-model">' +
+              '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload-folder">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--upload" aria-hidden="true">' + ICO.folder + '</span>' +
+                '<span class="ai-panel-row-title">选择文件夹</span>' +
+                rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
+              '</button>' +
+              '<div class="ai-panel-row ai-panel-row--select" data-action="open-model" role="button" tabindex="0" aria-haspopup="listbox">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
                 rowEnd(
                   '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">V4 Flash</span>',
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
-                '<select id="aiPlusModelSelect" class="ai-panel-row-select-hit" aria-label="选择模型"></select>' +
               '</div>' +
-              '<div class="ai-panel-row ai-panel-row--select" data-action="open-think">' +
+              '<div class="ai-panel-row ai-panel-row--select" data-action="open-think" role="button" tabindex="0" aria-haspopup="listbox">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.think + '</span>' +
                 '<span class="ai-panel-row-title">思考</span>' +
                 rowEnd(
                   '<span class="ai-panel-row-value ai-panel-row-value--think" id="aiThinkSummary">轻度</span>',
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
-                '<select id="aiPlusThinkSelect" class="ai-panel-row-select-hit" aria-label="选择思考程度"></select>' +
               '</div>' +
               '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="think-max" aria-checked="false">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.thinkMax + '</span>' +
@@ -9559,6 +9574,87 @@ function showChatMessages() {
       panelShell.style.setProperty('--hero-ox', originX + 'px');
     }
 
+    // ── 自定义「模型 / 思考」选择弹层 ★（替代系统原生 select：部分设备原生下拉
+    //    渲染不全/错位；改用站点自绘选项列表，跨设备一致）──
+    var _selectPopEl = null;
+    function closeSelectPopup() {
+      if (_selectPopEl && _selectPopEl.parentNode) _selectPopEl.parentNode.removeChild(_selectPopEl);
+      _selectPopEl = null;
+    }
+    function openSelectPopup(kind, anchor) {
+      closeSelectPopup();
+      var options = kind === 'model'
+        ? buildModelOptions()
+        : [
+            { value: 'off', label: '关闭' },
+            { value: 'low', label: '轻度' },
+            { value: 'medium', label: '中度' },
+            { value: 'high', label: '深度' },
+            { value: 'max', label: '极致' }
+          ];
+      var current = kind === 'model'
+        ? (S.selectedModel || 'deepseek-v4-flash-vision-exp')
+        : (S.thinkingMode || 'medium');
+      var listEl = el('div', { class: 'ai-select-pop-list', role: 'listbox' });
+      options.forEach(function(opt) {
+        var isOn = String(opt.value) === String(current);
+        var item = el('button', {
+          type: 'button',
+          class: 'ai-select-pop-item' + (isOn ? ' on' : ''),
+          role: 'option',
+          'aria-selected': isOn ? 'true' : 'false'
+        });
+        item.appendChild(el('span', { text: opt.label }));
+        item.appendChild(el('span', { class: 'ai-select-pop-check', text: isOn ? '✓' : '' }));
+        item.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          applySelectChoice(kind, opt.value);
+        });
+        listEl.appendChild(item);
+      });
+      _selectPopEl = el('div', { class: 'ai-select-pop', role: 'menu', 'aria-label': kind === 'model' ? '选择模型' : '选择思考程度' });
+      _selectPopEl.appendChild(listEl);
+      document.body.appendChild(_selectPopEl);
+      var rect = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+      var width = Math.max(rect ? rect.width : 260, 260);
+      var left = rect ? Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)) : 12;
+      var top = rect ? Math.min(rect.bottom + 6, window.innerHeight - 360) : 60;
+      _selectPopEl.style.left = left + 'px';
+      _selectPopEl.style.top = top + 'px';
+      _selectPopEl.style.minWidth = width + 'px';
+    }
+    function applySelectChoice(kind, value) {
+      closeSelectPopup();
+      if (kind === 'model') {
+        if (value === '__add_custom__') { showCustomModelModal(); return; }
+        if (value && value !== S.selectedModel) {
+          S.selectedModel = value;
+          S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model', value); } catch (err) {}
+          notify('模型：' + (isCustomModelId(value) ? customModelDisplayName(value) : (modelLabels[value] || value)));
+        }
+        updateModelUI();
+      } else {
+        if (value && value !== S.thinkingMode) {
+          S.thinkingMode = value;
+          S._userPickedThinkingMode = true;
+          try { localStorage.setItem('xtj_ai_thinking_mode', value); } catch (err) {}
+          notify('思考程度：' + (thinkLabels[value] || value));
+        }
+        updateThinkUI();
+      }
+    }
+    document.addEventListener('pointerdown', function(ev) {
+      if (!_selectPopEl) return;
+      if (_selectPopEl.contains(ev.target)) return;
+      closeSelectPopup();
+    }, true);
+    document.addEventListener('keydown', function(ev) {
+      if (!_selectPopEl) return;
+      if (ev.key === 'Escape') { ev.preventDefault(); closeSelectPopup(); }
+    }, true);
+
     function openPanel() {
       if (panelOpen || panelClosing) return;
       if (closeTimer) {
@@ -9595,6 +9691,7 @@ function showChatMessages() {
     function closePanel(animate) {
       if (!panelOpen && !panelClosing) return;
       if (!panelOpen && panelClosing) return;
+      closeSelectPopup();
       panelClosing = true;
       panelOpen = false;
       panelShell.classList.remove('is-opening', 'open');
@@ -10137,7 +10234,8 @@ function showChatMessages() {
 
       var action = t.getAttribute('data-action');
       if (action === 'open-model' || action === 'open-think') {
-        // 点击落在视觉层时，把事件交给覆盖的 select（一般不需要，热区 select 已铺满）
+        // ★ 自定义选项弹层（不再交给系统原生 select）
+        openSelectPopup(action === 'open-model' ? 'model' : 'think', t);
         return;
       }
       if (action === 'pro') {
@@ -10148,6 +10246,14 @@ function showChatMessages() {
         closePanel();
         setTimeout(function() {
           var fi = document.getElementById('aiChatFileInp');
+          if (fi) fi.click();
+        }, 50);
+        return;
+      }
+      if (action === 'upload-folder') {
+        closePanel();
+        setTimeout(function() {
+          var fi = document.getElementById('aiChatFolderInp');
           if (fi) fi.click();
         }, 50);
         return;
@@ -10324,18 +10430,12 @@ function showChatMessages() {
     function doSend() {
       if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
       var text = String(input.value || '').trim();
-      if (!text && !_aiChatFileData) return;
-      var fileData = _aiChatFileData;
-      if (fileData) {
-        fileData.onSuccess = function() {
-          if (_aiChatFileData !== fileData) return;
-          _aiChatFileData = null;
-          filePreview.style.display = 'none';
-          filePreview.innerHTML = '';
-          fileInput.value = '';
-        };
-      }
-            handleSendMessage(input, sendBtn, messagesEl, fileData);
+      var fileList = (_aiChatFiles && _aiChatFiles.length) ? _aiChatFiles.slice(0, 10) : [];
+      if (!text && !fileList.length) return;
+      // ★ 多文件/文件夹：附件已在 handleSendMessage 同步复制进请求体，
+      //   发送后立即清理预览（保证不阻塞连续发送）
+      handleSendMessage(input, sendBtn, messagesEl, fileList);
+      clearAiChatFilePreview();
     }
     // ★ 重新生成：把指定文本（及可选附件）填入输入框并发起发送。
     //   供 assistant 消息上的「重新生成」按钮调用，复用现有发送与附件预览机制。
@@ -10344,11 +10444,12 @@ function showChatMessages() {
         if (S.sending) { notify('请等待当前回复完成后重试'); return; }
         var t = String(resendText || '').trim();
         if (!t && !(resendAttachments && resendAttachments.length)) return;
-        if (_aiChatFileData) clearAiChatFilePreview();
+        if (_aiChatFiles.length) clearAiChatFilePreview();
         if (resendAttachments && resendAttachments.length && resendAttachments[0] && resendAttachments[0].data_url) {
-          var att = resendAttachments[0];
-          _aiChatFileData = { name: att.name, type: att.type, dataUrl: att.data_url };
-          renderAiFilePreview(filePreview, _aiChatFileData, clearAiChatFilePreview);
+          _aiChatFiles = resendAttachments.slice(0, 10).map(function(a) {
+            return { name: a.name || 'file', type: a.type || '', dataUrl: a.data_url, size: a.size || 0 };
+          });
+          renderAiMultiFilePreview(_aiChatFiles);
         }
         input.value = t;
         autoresize();
@@ -10383,33 +10484,92 @@ function showChatMessages() {
     });
     input.addEventListener('input', autoresize);
 
-    // 文件上传逻辑（按钮选择 / 粘贴 / 拖拽）
-    var _aiChatFileData = null; // { name, type, dataUrl }
+    // 文件上传逻辑（按钮多选 / 选择文件夹 / 粘贴 / 拖拽）—— 支持任意格式、多文件与文件夹
+    var _aiChatFiles = []; // [{ name, type, dataUrl, size }]
     function clearAiChatFilePreview() {
-      _aiChatFileData = null;
+      _aiChatFiles = [];
       filePreview.style.display = 'none';
       filePreview.innerHTML = '';
       fileInput.value = '';
+      try { if (folderInput) folderInput.value = ''; } catch (eF) {}
     }
-    function acceptAiChatFile(rawFile) {
-      readAiAttachmentFile(rawFile, function(fileData) {
-        _aiChatFileData = { name: fileData.name, type: fileData.type, dataUrl: fileData.dataUrl };
-        renderAiFilePreview(filePreview, fileData, clearAiChatFilePreview);
-      });
+    function renderAiMultiFilePreview(files) {
+      filePreview.innerHTML = '';
+      if (!files.length) { filePreview.style.display = 'none'; return; }
+      var first = files[0];
+      var thumb = String(first.type || '').indexOf('image/') === 0
+        ? el('img', { src: first.dataUrl, class: 'ai-file-thumb' })
+        : el('div', { class: 'ai-file-icon' }, '📄');
+      var totalKB = 0;
+      for (var fi = 0; fi < files.length; fi++) totalKB += Math.round(((files[fi].dataUrl || '').length * 3 / 4) / 1024);
+      var label = files.length === 1
+        ? (first.name + ' (' + Math.max(1, Math.round((first.size || totalKB) / 1024)) + 'KB)')
+        : (first.name + ' 等 ' + files.length + ' 个文件（约 ' + Math.round(totalKB / 1024) + 'KB）');
+      var info = el('span', { class: 'ai-file-info', text: label });
+      var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
+      removeBtn.addEventListener('click', clearAiChatFilePreview);
+      filePreview.appendChild(thumb);
+      filePreview.appendChild(info);
+      filePreview.appendChild(removeBtn);
+      filePreview.style.display = 'flex';
     }
+    function acceptAiChatFiles(rawFiles) {
+      var list = Array.prototype.slice.call(rawFiles || []);
+      if (!list.length) { notify('没有可上传的文件'); return; }
+      var attachments = [];
+      var totalBytes = 0;
+      var skipped = 0;
+      function next(i) {
+        if (i >= list.length) {
+          if (!attachments.length) {
+            notify(list.length ? '文件都超过 7MB 或数量超限（最多 10 个、合计约 9MB），请选择更小的文件' : '没有可上传的文件');
+            return;
+          }
+          _aiChatFiles = attachments;
+          renderAiMultiFilePreview(attachments);
+          notify('已选择 ' + attachments.length + ' 个文件' + (skipped ? '（' + skipped + ' 个超限已跳过）' : ''));
+          return;
+        }
+        var f = list[i];
+        var pass = true;
+        if (String(f.size || 0) > AI_FILE_MAX_BYTES) { skipped++; pass = false; }
+        if (attachments.length >= 10) { skipped++; pass = false; }
+        var est = Math.ceil(Number(f.size || 0) * 4 / 3);
+        if (pass && totalBytes + est > 9 * 1024 * 1024) { skipped++; pass = false; }
+        if (!pass) { next(i + 1); return; }
+        var okRead = readAiAttachmentFile(f, function(fileData) {
+          if (fileData) {
+            attachments.push({ name: fileData.name, type: fileData.type || 'application/octet-stream', dataUrl: fileData.dataUrl, size: Number(f.size || 0) });
+            totalBytes += Math.ceil((fileData.dataUrl.length * 3) / 4);
+          } else { skipped++; }
+          next(i + 1);
+        }, { sizeMsg: '文件不能超过 7MB' });
+        if (!okRead) { skipped++; next(i + 1); }
+      }
+      next(0);
+    }
+    var folderInput = el('input', { type: 'file', id: 'aiChatFolderInp', style: 'display:none' });
+    try { folderInput.setAttribute('webkitdirectory', ''); } catch (eDir) {}
     fileBtn.addEventListener('click', function() { fileInput.click(); });
     fileInput.addEventListener('change', function() {
-      var f = this.files && this.files[0];
-      if (!f) return;
-      if (!isSupportedAiFile(f)) { notify('不支持该文件'); this.value = ''; return; }
-      acceptAiChatFile(f);
+      var fs = this.files;
+      if (!fs || !fs.length) return;
+      acceptAiChatFiles(Array.prototype.slice.call(fs));
+      this.value = '';
     });
-    bindAiComposerPasteDrop([inputBar, input], acceptAiChatFile);
+    folderInput.addEventListener('change', function() {
+      var fs = this.files;
+      if (!fs || !fs.length) return;
+      acceptAiChatFiles(Array.prototype.slice.call(fs).slice(0, 40));
+      this.value = '';
+    });
+    bindAiComposerPasteDrop([inputBar, input], function(rawFile) { acceptAiChatFiles([rawFile]); });
 
     inputBar.appendChild(plusWrap);
     inputBar.appendChild(panelShell);
     inputBar.appendChild(fileBtn);
     inputBar.appendChild(fileInput);
+    inputBar.appendChild(folderInput);
     inputBar.appendChild(filePreview);
     inputBar.appendChild(input);
     inputBar.appendChild(voiceBtn);

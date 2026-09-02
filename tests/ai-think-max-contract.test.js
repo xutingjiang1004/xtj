@@ -47,10 +47,10 @@ test('前端：存在思考Max 状态、持久化键与 256 上下文常量', ()
 
 test('前端：加号菜单含思考Max 开关行，且位于思考 与 网页搜索 之间', () => {
   const thinkRow = agentSource.indexOf('data-action="think-max"');
-  const thinkSelect = agentSource.indexOf('aiPlusThinkSelect');
+  const thinkRowSel = agentSource.indexOf('data-action="open-think"');
   const searchBtn = agentSource.indexOf('data-action="search"');
   assert.ok(thinkRow > -1, '思考Max 行缺失');
-  assert.ok(thinkRow > thinkSelect, '思考Max 应位于 思考 之后');
+  assert.ok(thinkRow > thinkRowSel, '思考Max 应位于 思考 之后');
   assert.ok(searchBtn > thinkRow, '思考Max 应位于 网页搜索 之前');
   assert.match(agentSource, /updateThinkMaxStatus/);
 });
