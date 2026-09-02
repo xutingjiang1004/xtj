@@ -157,7 +157,8 @@
     for (var i = 0; i < photos.length; i++) {
       var p = photos[i];
       if (!isRenderablePhoto(p)) continue;
-      var realUrl = p.imageUrl || p.thumbUrl || p.thumb || '';
+      // 墙格子优先用轻量缩略图(960 webp)加载提速；点击预览/放大仍走 imageUrl=原图，保留细节。
+      var realUrl = p.thumbUrl || p.thumb || p.imageUrl || '';
       var username = p.username || '未知用户';
       var time = formatPhotoTime(p.timestamp);
       var index = base + i;
