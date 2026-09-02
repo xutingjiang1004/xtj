@@ -60,18 +60,31 @@
   var TREE_SKIP_DIRS = /(^|\/)(node_modules|\.git|dist|build|\.next|\.nuxt|\.output|coverage|target|\.cache|\.idea|\.vscode|__pycache__|\.venv|venv|env|Pods|\.gradle|\.terraform|vendor)(\/|$)/i;
   var TREE_SKIP_FILES = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|\.DS_Store|npm-shrinkwrap\.json|\.gitignore|\.gitattributes)$/i;
   var MAX_FILE_BYTES = 2 * 1024 * 1024; // 查看/编辑单文件上限
-  var MAX_AI_FILE_CHARS = 28000;        // 注入 AI 上下文的单文件字符上限
+  var MAX_AI_FILE_CHARS = 40000;        // 注入 AI 上下文的单文件字符上限
   // ── 批量读取整库代码（供 AI 全局分析/改 bug）──
-  var BULK_MAX_FILES = 60;              // 单次最多加载文件数，控制 GitHub 请求量
-  var BULK_MAX_FILE_BYTES = 120 * 1024; // 单文件读取上限
-  var BULK_AI_TOTAL_CHARS = 120000;     // 一次性注入 AI 的全部文件总字符上限
+  var BULK_MAX_FILES = 80;              // 单次最多加载文件数，控制 GitHub 请求量
+  var BULK_MAX_FILE_BYTES = 200 * 1024; // 单文件读取上限
+  var BULK_AI_TOTAL_CHARS = 200000;     // 一次性注入 AI 的全部文件总字符上限
   var BULK_CONCURRENCY = 5;             // 并发拉取数
   var WALK_CONCURRENCY = 4;             // 大目录树递归遍历并发
-  var TREE_AI_MAX_CHARS = 15000;        // 注入 AI 的“文件清单”字符预算
+  var TREE_AI_MAX_CHARS = 20000;        // 注入 AI 的“文件清单”字符预算
+  // ── 用户消息里点名文件的自动注入 ──
+  var MENTION_MAX_FILES = 6;            // 一次最多自动读取的点名文件数
+  var MENTION_TEXT_TOTAL_CHARS = 60000; // 点名文件注入 AI 的总字符预算
+  var MENTION_IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 点名图片传给视觉模型的大小上限
+  var ATTACH_MAX_BYTES = 7 * 1024 * 1024;        // 聊天附件大小上限（与主站小猫 AI 一致）
   var CONTENTS_API_BYTES = 1024 * 1024; // GitHub Contents API 单次写入约 1MB，超过走 Git Database
   var BRANCH_PAGE_MAX = 500;            // 分支列表最多拉取数量（分页兜底）
   // 二进制/不可在线文本编辑的扩展名（图片/音视频/压缩包/字体/可执行等）
   var BINARY_EXT_RE = /.(png|jpe?g|gif|webp|bmp|ico|avif|svgz?|mp[34]|wav|ogg|flac|aac|m4a|avi|mov|mkv|webm|zip|rar|7z|gz|tar|bz2|xz|pdf|doc[xm]?|xls[xm]?|ppt[xm]?|ttf|otf|woff2?|eot|wasm|exe|dll|so|dylib|class|jar|bin|dat|apk|ipa|dmg|iso)$/i;
+  // 可在查看器预览、并可直接传给视觉模型识别的图片扩展名
+  var IMAGE_MIME_MAP = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' };
+  function imageMimeFor(p) {
+    var m = String(p || '').match(/\.([a-z0-9]+)$/i);
+    if (!m) return '';
+    return IMAGE_MIME_MAP[m[1].toLowerCase()] || '';
+  }
+  function isImagePath(p) { return !!imageMimeFor(p); }
   var CODE_FILE_RE = /\.(js|jsx|mjs|cjs|ts|tsx|vue|svelte|py|java|kt|go|rs|c|h|cpp|cc|hpp|cs|rb|php|swift|scala|sh|bash|zsh|sql|html?|css|scss|less|json|ya?ml|xml|md|txt|ini|toml|gradle|dart|lua|exs?|prisma|graphql|gql|proto)$/i;
   var BULK_SKIP_RE = /(^|\/)(node_modules|dist|build|out|vendor|coverage|\.next|\.nuxt|target|bin|obj|\.git)(\/|$)/i;
   var LOCKFILE_RE = /(package-lock|yarn\.lock|pnpm-lock|composer\.lock|Gemfile\.lock|poetry\.lock|Cargo\.lock)/i;
@@ -105,8 +118,10 @@
     treeSeq: 0,           // 文件树请求代次（防快速切分支竞态）
     isNewFile: false,     // 当前编辑器是否为“新建文件”态（提交时不带 sha）
     undo: null,           // 最近一次 AI 应用前的编辑器快照 {path, content}
+    pendingAttachment: null, // 待发送的聊天附件 {name,type,dataUrl,size}
     busy: false,
     streaming: false,
+    sendingChat: false,
     abortCtrl: null,
     aiLastOutput: ''
   };
@@ -176,10 +191,34 @@
     try { window.localStorage.removeItem(key); } catch (e) {}
   }
 
-  // ── 本地持久化 ────────────────────────────────────────────────
+  // ── 账号级本地存储 ────────────────────────────────────────────
+  // 仓库地址 / Token / 模型 / 思考档位 / 对话历史等全部按“当前登录账号”隔离：
+  // 换账号登录后各自看到自己的配置，Token 不会在账号之间串用。
+  // 旧版全局键（xtj_code_*）作为回退：首次读写后自动迁移到账号键并删除旧键。
+  function storageScopeName() {
+    var u = '';
+    try { u = String(window.currentUser || window._xtjCanonicalUser || '').trim(); } catch (e) {}
+    if (!u) u = 'guest';
+    u = String(u).replace(/[^a-zA-Z0-9_@\-\u4e00-\u9fa5]/g, '_').slice(0, 64);
+    return u || 'guest';
+  }
+  function scopedKey(base) { return String(base) + '__' + storageScopeName(); }
+  function storageGet(base) {
+    var v = safeStorageGet(scopedKey(base));
+    if (v === null || v === undefined) return safeStorageGet(base); // 兼容旧版全局键
+    return v;
+  }
+  function storageSet(base, value) {
+    safeStorageSet(scopedKey(base), value);
+    // 迁移：写账号键成功后清除旧全局键，避免账号间串读
+    if (safeStorageGet(base) !== null) safeStorageRemove(base);
+  }
+  function storageRemove(base) { safeStorageRemove(scopedKey(base)); }
+
+  // ── 本地持久化（均按当前账号隔离）───────────────────────────────
   function loadRepo() {
     try {
-      var raw = safeStorageGet(LS_REPO);
+      var raw = storageGet(LS_REPO);
       if (!raw) return null;
       var r = JSON.parse(raw);
       if (r && r.owner && r.repo) return r;
@@ -187,52 +226,53 @@
     return null;
   }
   function saveRepo(r) {
-    if (r) safeStorageSet(LS_REPO, JSON.stringify(r));
-    else safeStorageRemove(LS_REPO);
+    if (r) storageSet(LS_REPO, JSON.stringify(r));
+    else storageRemove(LS_REPO);
   }
-  function loadToken() { return safeStorageGet(LS_TOKEN) || ''; }
-  function saveToken(t) { if (t) safeStorageSet(LS_TOKEN, t); else safeStorageRemove(LS_TOKEN); }
-  function loadModel() { return safeStorageGet(LS_MODEL) || DEFAULT_MODEL; }
-  function saveModel(m) { safeStorageSet(LS_MODEL, m); }
+  function loadToken() { return storageGet(LS_TOKEN) || ''; }
+  function saveToken(t) { if (t) storageSet(LS_TOKEN, t); else storageRemove(LS_TOKEN); }
+  function loadModel() { return storageGet(LS_MODEL) || DEFAULT_MODEL; }
+  function saveModel(m) { storageSet(LS_MODEL, m); }
   function loadConversation() {
     try {
-      var raw = safeStorageGet(LS_CONV);
+      var raw = storageGet(LS_CONV);
       if (!raw) return [];
       var arr = JSON.parse(raw);
       return Array.isArray(arr) ? arr.slice(-100) : [];
     } catch (e) { return []; }
   }
-  function saveConversation(arr) { safeStorageSet(LS_CONV, JSON.stringify((arr || []).slice(-100))); }
+  function saveConversation(arr) { storageSet(LS_CONV, JSON.stringify((arr || []).slice(-100))); }
   function loadHistory() {
     try {
-      var raw = safeStorageGet(LS_HISTORY);
+      var raw = storageGet(LS_HISTORY);
       if (!raw) return [];
       var arr = JSON.parse(raw);
       return Array.isArray(arr) ? arr.slice(-200) : [];
     } catch (e) { return []; }
   }
-  function saveHistory(arr) { safeStorageSet(LS_HISTORY, JSON.stringify((arr || []).slice(-200))); }
-  function loadPrMode() { return safeStorageGet(LS_PR) === '1'; }
+  function saveHistory(arr) { storageSet(LS_HISTORY, JSON.stringify((arr || []).slice(-200))); }
+  function loadPrMode() { return storageGet(LS_PR) === '1'; }
+  function savePrMode(v) { storageSet(LS_PR, v ? '1' : '0'); }
   function loadThink() {
-    var v = safeStorageGet(LS_THINK);
+    var v = storageGet(LS_THINK);
     var ok = { off: 1, low: 1, medium: 1, high: 1, max: 1 };
     return (v && ok[v]) ? v : DEFAULT_THINK;
   }
-  function saveThink(t) { if (t) safeStorageSet(LS_THINK, t); else safeStorageRemove(LS_THINK); }
+  function saveThink(t) { if (t) storageSet(LS_THINK, t); else storageRemove(LS_THINK); }
   function loadSplitLayout() {
     try {
-      var raw = safeStorageGet(LS_SPLIT);
+      var raw = storageGet(LS_SPLIT);
       if (!raw) return { sidebarW: 0, chatH: 0 };
       var p = JSON.parse(raw);
       return { sidebarW: Number(p.sidebarW) || 0, chatH: Number(p.chatH) || 0 };
     } catch (e) { return { sidebarW: 0, chatH: 0 }; }
   }
-  function saveSplitLayout(l) { safeStorageSet(LS_SPLIT, JSON.stringify({ sidebarW: l.sidebarW || 0, chatH: l.chatH || 0 })); }
+  function saveSplitLayout(l) { storageSet(LS_SPLIT, JSON.stringify({ sidebarW: l.sidebarW || 0, chatH: l.chatH || 0 })); }
 
   // ── 模型工具 ──────────────────────────────────────────────────
   function loadCustomModels() {
     try {
-      var raw = safeStorageGet(CUSTOM_MODELS_KEY);
+      var raw = storageGet(CUSTOM_MODELS_KEY);
       if (!raw) return [];
       var list = JSON.parse(raw);
       if (!Array.isArray(list)) return [];
@@ -689,7 +729,20 @@
     chat.appendChild(chatMsgs);
 
     var chatInputBar = el('div', { class: 'cw-chat-input' });
-    var chatInput = el('textarea', { id: 'cwChatInput', class: 'cw-chat-textarea', rows: '1', placeholder: '让 AI 修改代码，例如：把首页标题改成「小猫」' });
+    // 附件区（任意格式文件 / 图片，AI 可直接读取内容）
+    var attachRow = el('div', { class: 'cw-attach-row hidden', id: 'cwAttachRow' });
+    var attachPreview = el('span', { class: 'cw-attach-chip', id: 'cwAttachPreview', text: '' });
+    var attachRemove = el('button', { type: 'button', class: 'cw-attach-remove', id: 'cwAttachRemove', text: '×' });
+    attachRemove.addEventListener('click', function () { clearPendingAttachment(); });
+    attachRow.appendChild(attachPreview);
+    attachRow.appendChild(attachRemove);
+    chatInputBar.appendChild(attachRow);
+    var chatInputWrap = el('div', { class: 'cw-chat-input-wrap' });
+    var attachBtn = el('button', { type: 'button', class: 'cw-attach-btn', id: 'cwAttachBtn', text: '📎', title: '上传任意格式文件/图片给 AI 查看' });
+    var attachInput = el('input', { type: 'file', id: 'cwAttachInput', style: 'display:none' });
+    attachInput.addEventListener('change', function () { onAttachPicked(); });
+    attachBtn.addEventListener('click', function () { try { attachInput.click(); } catch (e) {} });
+    var chatInput = el('textarea', { id: 'cwChatInput', class: 'cw-chat-textarea', rows: '1', placeholder: '让 AI 修改代码，例如：把首页标题改成「小猫」；也可点名任意文件让 AI 读取，如「读取 js/core.js 并检查 bug」' });
     var sendBtn = el('button', { type: 'button', class: 'cw-send-btn', id: 'cwChatSend', text: '发送' });
     sendBtn.addEventListener('click', function () { sendChat(); });
     chatInput.addEventListener('keydown', function (e) {
@@ -699,8 +752,10 @@
       }
     });
     chatInput.addEventListener('input', function () { autoResizeChat(); });
-    chatInputBar.appendChild(chatInput);
-    chatInputBar.appendChild(sendBtn);
+    chatInputWrap.appendChild(attachBtn);
+    chatInputWrap.appendChild(chatInput);
+    chatInputWrap.appendChild(sendBtn);
+    chatInputBar.appendChild(chatInputWrap);
     chat.appendChild(chatInputBar);
     main.appendChild(chat);
 
@@ -758,7 +813,11 @@
       chatMsgs: chatMsgs,
       chatModelSel: chatModelSel,
       chatInput: chatInput,
-      sendBtn: sendBtn
+      sendBtn: sendBtn,
+      attachRow: attachRow,
+      attachPreview: attachPreview,
+      attachBtn: attachBtn,
+      attachInput: attachInput
     };
     return rootNode;
   }
@@ -950,7 +1009,7 @@
       state.prMode = ui.prCheck.checked;
       saveRepo(state.repo);
       if (ui.rememberCheck && ui.rememberCheck.checked) saveToken(state.token); else saveToken('');
-      safeStorageSet(LS_PR, state.prMode ? '1' : '0');
+      savePrMode(state.prMode);
       ui.repoName.textContent = state.repo.full_name;
       ui.connectView.classList.add('hidden');
       ui.workspace.classList.remove('hidden');
@@ -1066,7 +1125,7 @@
         if (item.type === 'blob' && TREE_SKIP_FILES.test(item.path)) return false;
         return item.type === 'blob' || item.type === 'tree';
       });
-      state.tree = files.map(function (f) { return { path: f.path, type: f.type }; });
+      state.tree = files.map(function (f) { return { path: f.path, type: f.type, sha: f.sha || '', size: Number(f.size) || 0 }; });
       renderTree();
       if (truncated) {
         ui.treeBox.appendChild(el('div', { class: 'cw-tree-empty', text: '仓库较大，已全量加载所有文件。' }));
@@ -1099,7 +1158,7 @@
             if (TREE_SKIP_DIRS.test(full + '/')) continue;
             queue.push({ sha: e.sha, prefix: full + '/' });
           } else if (e.type === 'blob') {
-            items.push({ path: full, type: 'blob' });
+            items.push({ path: full, type: 'blob', sha: e.sha || '', size: Number(e.size) || 0 });
           }
         }
       }
@@ -1230,6 +1289,54 @@
         }
       } else if (item.content) {
         content = item.content;
+      }
+      // 图片文件：直接在查看器渲染预览（不再提示“二进制不支持”）
+      if (isImagePath(path)) {
+        state.currentSha = item.sha || '';
+        state.currentContent = '';
+        state.currentFileTruncated = false;
+        ui.codePre.classList.remove('hidden');
+        ui.codePre.innerHTML = '';
+        var rawB64 = String(item.content || '').replace(/\s/g, '');
+        if (item.encoding === 'base64' && rawB64 && item.size > 0) {
+          var imgWrap = el('div', { class: 'cw-img-wrap' });
+          var img = el('img', { src: 'data:' + imageMimeFor(path) + ';base64,' + rawB64, alt: path, class: 'cw-img-view', loading: 'lazy' });
+          img.onerror = function () {
+            ui.codePre.textContent = '图片预览失败（' + esc(path) + '），可选中该文件后让 AI 直接查看。';
+          };
+          imgWrap.appendChild(img);
+          var imgMeta = el('div', { class: 'cw-img-meta', text: Math.round((item.size || 0) / 1024) + 'KB · 图片 ' + esc(path) + '（可选中后让 AI 查看内容）' });
+          imgWrap.appendChild(imgMeta);
+          ui.codePre.appendChild(imgWrap);
+          if (ui.deleteFileBtn) ui.deleteFileBtn.classList.remove('hidden');
+          return;
+        }
+        // Contents 接口拿不到大图内容（>1MB 返回空 content）：走 Git Blob 拉取
+        try {
+          var blobUrl = '';
+          if (item.sha) {
+            var blobR = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/git/blobs/' + encodeURIComponent(item.sha));
+            if (blobR.ok && blobR.data && blobR.data.content && blobR.data.encoding === 'base64') {
+              blobUrl = 'data:' + imageMimeFor(path) + ';base64,' + String(blobR.data.content).replace(/\s/g, '');
+            }
+          }
+          if (blobUrl) {
+            ui.codePre.innerHTML = '';
+            var imgWrap2 = el('div', { class: 'cw-img-wrap' });
+            var img2 = el('img', { src: blobUrl, alt: path, class: 'cw-img-view', loading: 'lazy' });
+            img2.onerror = function () {
+              ui.codePre.textContent = '图片预览失败（' + esc(path) + '），可选中该文件后让 AI 直接查看。';
+            };
+            imgWrap2.appendChild(img2);
+            imgWrap2.appendChild(el('div', { class: 'cw-img-meta', text: '图片 ' + esc(path) + '（可选中后让 AI 查看内容）' }));
+            ui.codePre.appendChild(imgWrap2);
+            if (ui.deleteFileBtn) ui.deleteFileBtn.classList.remove('hidden');
+            return;
+          }
+        } catch (eImg) {}
+        ui.codePre.textContent = '图片（' + Math.round((item.size || 0) / 1024) + 'KB），无法在预览中加载，可选中该文件后让 AI 直接查看。';
+        if (ui.deleteFileBtn) ui.deleteFileBtn.classList.remove('hidden');
+        return;
       }
       // 二进制文件：不做文本展示/编辑，避免 atob 乱码
       if (isBinaryPath(path) || looksBinaryText(content)) {
@@ -1742,7 +1849,150 @@
     return out.join('\n');
   }
 
-  function buildAiPrompt(request) {
+  // ── 聊天附件（本地文件，任意格式）────────────────────────────
+  function clearPendingAttachment() {
+    state.pendingAttachment = null;
+    if (ui.attachInput) { try { ui.attachInput.value = ''; } catch (e) {} }
+    if (ui.attachRow) ui.attachRow.classList.add('hidden');
+    if (ui.attachPreview) ui.attachPreview.textContent = '';
+  }
+  function renderAttachChip() {
+    var a = state.pendingAttachment;
+    if (!a) { clearPendingAttachment(); return; }
+    if (ui.attachPreview) {
+      ui.attachPreview.textContent = a.name + ' (' + Math.max(1, Math.round((a.size || 0) / 1024)) + 'KB)';
+      ui.attachPreview.title = a.type || '';
+    }
+    if (ui.attachRow) ui.attachRow.classList.remove('hidden');
+  }
+  function onAttachPicked() {
+    var inp = ui.attachInput;
+    var file = inp && inp.files && inp.files[0];
+    if (!file) return;
+    if (file.size > ATTACH_MAX_BYTES) { notify('附件不能超过 7MB'); try { inp.value = ''; } catch (e) {} return; }
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        state.pendingAttachment = {
+          name: String(file.name || 'file_' + Date.now()),
+          type: String(file.type || ''),
+          dataUrl: String(e.target.result || ''),
+          size: file.size
+        };
+        renderAttachChip();
+      } catch (err) {}
+    };
+    reader.onerror = function () { notify('读取附件失败，请重试'); };
+    reader.readAsDataURL(file);
+  }
+  function dataUrlToUtf8(dataUrl) {
+    var m = String(dataUrl || '').match(/^data:[^,;]+;base64,(.+)$/);
+    if (!m) return '';
+    try { return decodeURIComponent(escape(atob(m[1].replace(/\s/g, '')))); }
+    catch (e) { try { return atob(m[1].replace(/\s/g, '')); } catch (e2) { return ''; } }
+  }
+  function isTextLikeFile(p) {
+    p = String(p || '');
+    if (isCodeFileForBulk(p)) return true;
+    return /\.(md|txt|log|csv|tsv|toml|ini|cfg|conf|env|properties|srt|vtt|sh|bat|cmd|ps1)$/i.test(p);
+  }
+
+  // 用户消息里点名的文件自动读取：精确路径 / 唯一文件名命中即注入，
+  // 图片转为视觉附件（内置模型原生识图），文本文件注入完整内容。
+  async function collectMentionedFiles(text) {
+    var out = { texts: {}, images: [], skipped: [] };
+    if (!state.repo || !state.tree || !state.tree.length) return out;
+    var lower = String(text || '').toLowerCase();
+    var blobs = [];
+    for (var i = 0; i < state.tree.length; i++) {
+      if (state.tree[i].type === 'blob') blobs.push(state.tree[i]);
+    }
+    if (!blobs.length) return out;
+    var byPath = {};
+    var byBase = {};
+    blobs.forEach(function (n) {
+      byPath[n.path.toLowerCase()] = n;
+      var b = (n.path.split('/').pop() || '').toLowerCase();
+      if (b && b.length >= 3) (byBase[b] = byBase[b] || []).push(n);
+    });
+    var picks = [], seen = {};
+    function pick(p) {
+      if (picks.length >= MENTION_MAX_FILES) return;
+      if (seen[p]) return;
+      seen[p] = true;
+      picks.push(p);
+    }
+    // ① 精确路径命中（含反引号/引号包裹与裸路径）
+    for (var pi = 0; pi < blobs.length; pi++) {
+      if (picks.length >= MENTION_MAX_FILES) break;
+      var lp = blobs[pi].path.toLowerCase();
+      if (lp.length < 3) continue;
+      if (lower.indexOf(lp) >= 0) pick(blobs[pi].path);
+    }
+    // ② 唯一 basename 命中（用户只写文件名，如“读取 config.js”）
+    if (picks.length < MENTION_MAX_FILES) {
+      for (var bkey in byBase) {
+        if (!Object.prototype.hasOwnProperty.call(byBase, bkey)) continue;
+        if (picks.length >= MENTION_MAX_FILES) break;
+        if (byBase[bkey].length !== 1) continue;
+        if (lower.indexOf(bkey) < 0) continue;
+        var cand = byBase[bkey][0].path;
+        if (!seen[cand]) pick(cand);
+      }
+    }
+    if (!picks.length) return out;
+    var textBudget = MENTION_TEXT_TOTAL_CHARS;
+    for (var pk = 0; pk < picks.length; pk++) {
+      var path = picks[pk];
+      var node = byPath[path.toLowerCase()];
+      if (!node) continue;
+      // 已在批量缓存中：直接用缓存内容，不再重复请求
+      if (state.bulkFiles && Object.prototype.hasOwnProperty.call(state.bulkFiles, path) && String(state.bulkFiles[path] || '').trim()) {
+        var cached = String(state.bulkFiles[path] || '');
+        if (cached.length > MAX_AI_FILE_CHARS) cached = cached.slice(0, MAX_AI_FILE_CHARS) + '\n...（该文件过长已截断）';
+        out.texts[path] = cached;
+        continue;
+      }
+      if (isImagePath(path)) {
+        // 图片：走 Git Blob 拿原始字节并作为视觉附件（Contents API 对 >1MB 返回空内容）
+        try {
+          if (node.sha) {
+            var br = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/git/blobs/' + encodeURIComponent(node.sha));
+            if (br.ok && br.data && br.data.content && br.data.encoding === 'base64') {
+              var b64 = String(br.data.content).replace(/\s/g, '');
+              var estBytes = Math.ceil(b64.length * 0.75);
+              if (estBytes <= MENTION_IMAGE_MAX_BYTES) {
+                var mime = imageMimeFor(path) || 'image/png';
+                out.images.push({ name: path, type: mime, data_url: 'data:' + mime + ';base64,' + b64, size: Number(br.data.size || estBytes) });
+              } else {
+                out.skipped.push(path);
+              }
+            } else { out.skipped.push(path); }
+          } else { out.skipped.push(path); }
+        } catch (e) { out.skipped.push(path); }
+        continue;
+      }
+      if (Number(node.size) > MAX_FILE_BYTES) { out.skipped.push(path); continue; }
+      try {
+        var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/contents/' + encodePath(path) + '?ref=' + encodeURIComponent(state.repo.branch));
+        if (r.ok && r.data) {
+          var c = decodeGhContent(r.data);
+          if (c && !looksBinaryText(c)) {
+            if (c.length > MAX_AI_FILE_CHARS) c = c.slice(0, MAX_AI_FILE_CHARS) + '\n...（该文件过长已截断）';
+            if (textBudget - c.length >= 0 || !Object.keys(out.texts).length) {
+              out.texts[path] = c;
+              textBudget -= c.length;
+            } else {
+              out.skipped.push(path);
+            }
+          } else { out.skipped.push(path); }
+        } else { out.skipped.push(path); }
+      } catch (e) { out.skipped.push(path); }
+    }
+    return out;
+  }
+
+  async function buildAiPrompt(request) {
     var lines = [];
     if (state.repo) lines.push('仓库：' + state.repo.full_name + '（当前分支：' + state.repo.branch + '）');
     if (state.currentPath) {
@@ -1750,14 +2000,47 @@
     } else {
       lines.push('当前打开文件：无');
     }
+    // ★ 用户需求与规则放最前面：上下文超预算截断时只截尾部文件内容，
+    //   绝不截掉“修改哪个文件 / 输出规则”，避免 AI 漏输出导致半截代码。
+    lines.push('');
+    lines.push('用户需求：' + request);
+    lines.push('');
+    lines.push('规则：若需求涉及修改某文件，请输出该文件的完整新内容放在单个代码块中，并在代码块首行用注释标注目标文件路径 // path: xxx；不得省略任何代码；若只是查看/解释则直接回答。');
+    lines.push('');
     // 注入当前分支的完整文件清单，AI 可直接在整个仓库范围内工作，无需用户逐一手动选文件
     var treeText = buildFileTreeText();
     if (treeText) {
-      lines.push('');
       lines.push('当前分支全部文件清单（你可在其中任意文件上直接修改；修改某个文件时，在代码块第一行用注释标出目标路径，例如：// path: src/foo.js）：');
       lines.push('```');
       lines.push(treeText);
       lines.push('```');
+    }
+    // 用户消息里点名的文件：自动读取完整内容注入，AI 不必“让我先看看文件”
+    var mention = await collectMentionedFiles(request);
+    var mentionPaths = Object.keys(mention.texts).sort();
+    if (mentionPaths.length) {
+      var mtOut = [];
+      for (var mi = 0; mi < mentionPaths.length; mi++) {
+        var mc = String(mention.texts[mentionPaths[mi]] || '');
+        if (!mc.trim()) continue;
+        mtOut.push('// ===== 文件: ' + mentionPaths[mi] + ' =====\n' + mc);
+      }
+      if (mtOut.length) {
+        lines.push('');
+        lines.push('用户点名的文件（已自动读取完整内容，请严格基于真实内容作答，不得编造）：');
+        lines.push(mtOut.join('\n\n'));
+        lines.push('');
+      }
+    }
+    var imgNames = [];
+    for (var imi = 0; imi < mention.images.length; imi++) imgNames.push(mention.images[imi].name);
+    if (imgNames.length) {
+      lines.push('（用户点名查看的图片：' + imgNames.join('、') + '，已作为图片随消息附上，请直接看图作答）');
+      lines.push('');
+    }
+    if (mention.skipped.length) {
+      lines.push('（以下文件过大或无法自动读取，未注入内容：' + mention.skipped.join('、') + '）');
+      lines.push('');
     }
     // 用户点“读取全部代码”后，把当前分支已读取文件的完整内容注入，支持全局改 bug
     if (state.bulkFiles && state.bulkBranch === (state.repo && state.repo.branch)) {
@@ -1786,14 +2069,11 @@
       lines.push('当前打开文件内容：\n```\n' + ctx + '\n```');
       lines.push('');
     }
-    lines.push('用户需求：' + request);
-    lines.push('');
-    lines.push('规则：若需求涉及修改某文件，请输出该文件的完整新内容放在单个代码块中，并在代码块首行用注释标注目标文件路径 // path: xxx；不得省略任何代码；若只是查看/解释则直接回答。');
-    return lines.join('\n');
+    return { prompt: lines.join('\n'), images: mention.images };
   }
 
   async function sendChat() {
-    if (state.streaming) { notify('AI 正在回复，请稍候'); return; }
+    if (state.streaming || state.sendingChat) { notify('AI 正在回复，请稍候'); return; }
     var text = ui.chatInput.value.trim();
     if (!text) return;
     if (text.length > 3000) { notify('消息过长（最多 3000 字）'); return; }
@@ -1801,7 +2081,23 @@
     if (!okAuth) { notify('请先登录后再使用 AI 助手'); return; }
     ui.chatInput.value = '';
     autoResizeChat();
-    var prompt = buildAiPrompt(text);
+    // 构建提示词（异步：自动读取用户点名的任意文件/图片）
+    var built;
+    state.sendingChat = true;
+    try { built = await buildAiPrompt(text); } finally { state.sendingChat = false; }
+    var prompt = built.prompt;
+    // 组装附件：仓库里点名图片 + 本地聊天附件（任意格式，后端统一解析/识图）
+    var attachments = [];
+    var repoImages = built.images || [];
+    for (var ai1 = 0; ai1 < repoImages.length; ai1++) {
+      var rim = repoImages[ai1];
+      attachments.push({ name: String(rim.name || '').replace(/[\\\[\]\(\)\r\n]/g, '_').slice(0, 120), type: rim.type || 'application/octet-stream', data_url: rim.data_url, size: rim.size || 0 });
+    }
+    if (state.pendingAttachment) {
+      var pa = state.pendingAttachment;
+      attachments.push({ name: String(pa.name || '').replace(/[\\\[\]\(\)\r\n]/g, '_').slice(0, 120), type: pa.type || 'application/octet-stream', data_url: pa.dataUrl, size: pa.size || 0 });
+    }
+    if (attachments.length > 10) attachments = attachments.slice(0, 10);
     appendChatMessage('user', text);
 
     // 创建 AI 气泡
@@ -1846,9 +2142,41 @@
         ui.sendBtn.textContent = '发送';
         return;
       }
+      // 自定义模型通道：图片转 image_url 内容块（OpenAI 兼容），文本类附件注入原文，
+      // 其余二进制附件仅提示（第三方端点不做服务端解析）。
+      var customPrompt = prompt;
+      var customImages = [];
+      var customNotes = [];
+      for (var ai2 = 0; ai2 < attachments.length; ai2++) {
+        var att2 = attachments[ai2];
+        var attType = String(att2.type || '').toLowerCase();
+        if (attType.indexOf('image/') === 0) {
+          if (/^image\/(jpeg|png|gif|webp)$/.test(attType)) customImages.push(att2.data_url);
+          else customNotes.push('【附件 ' + att2.name + ' 为图片（' + (attType || '未知格式') + '），当前自定义模型通道无法识图，可用内置小猫 AI 模型查看】');
+        } else if (isTextLikeFile(att2.name) && String(att2.data_url || '').length < 350000) {
+          var atext = dataUrlToUtf8(att2.data_url);
+          if (atext && atext.trim() && atext.length <= MAX_AI_FILE_CHARS) {
+            customNotes.push('// ===== 附件文件: ' + att2.name + ' =====\n' + atext);
+          } else {
+            customNotes.push('【附件 ' + att2.name + '（' + Math.round((att2.size || 0) / 1024) + 'KB）无法以文本读取】');
+          }
+        } else {
+          customNotes.push('【附件 ' + att2.name + ' 为二进制文件（' + Math.round((att2.size || 0) / 1024) + 'KB，' + (attType || '未知格式') + '），当前模型无法解析，可换用内置小猫 AI 模型读取】');
+        }
+      }
+      if (customNotes.length) customPrompt = prompt + '\n\n' + customNotes.join('\n\n');
+      if (customPrompt.length > 190000) customPrompt = customPrompt.slice(0, 190000) + '\n...（上下文预算截断）';
       var fullMsgs = [];
       history.forEach(function (h) { fullMsgs.push({ role: h.role, content: h.content }); });
-      fullMsgs.push({ role: 'user', content: prompt });
+      if (customImages.length) {
+        var lastContent = [{ type: 'text', text: customPrompt }];
+        for (var ci = 0; ci < customImages.length; ci++) {
+          lastContent.push({ type: 'image_url', image_url: { url: customImages[ci] } });
+        }
+        fullMsgs.push({ role: 'user', content: lastContent });
+      } else {
+        fullMsgs.push({ role: 'user', content: customPrompt });
+      }
       payload = {
         url: '/api/agent/custom-chat/stream',
         body: {
@@ -1856,7 +2184,7 @@
           api_key: cfg.api_key,
           model: cfg.model,
           base_url: cfg.base_url,
-          message: prompt,
+          message: customPrompt,
           messages: fullMsgs,
           thinking_mode: state.thinking,
           web_search: false,
@@ -1866,18 +2194,22 @@
         }
       };
     } else {
+      var builtinPrompt = prompt;
+      if (builtinPrompt.length > 390000) builtinPrompt = builtinPrompt.slice(0, 390000) + '\n...（上下文预算截断）';
       payload = {
         url: '/api/code/ai',
         body: {
-          message: prompt,
+          message: builtinPrompt,
           history: history,
           model: state.model,
           thinking_mode: state.thinking
         }
       };
+      if (attachments.length) payload.body.attachments = attachments;
     }
 
     var done = false;
+    clearPendingAttachment();
     try {
       await streamAi(payload, {
         onReasoning: function (chunk) {

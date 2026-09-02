@@ -21672,19 +21672,49 @@ app.post('/api/code/ai', authenticateUser, rateLimit(60000, 12), async (req, res
       return;
     }
     var text = String((req.body && req.body.message) || '').trim();
-    if (!text || text.length > 200000) throw new Error('invalid_code_ai_request');
+    if (!text || text.length > 400000) throw new Error('invalid_code_ai_request');
+    var cwModelRaw = String((req.body && req.body.model) || '').trim();
+    var cwModel = normalizeDeepSeekModelName(cwModelRaw);
+    if (!cwModel) cwModel = DEEPSEEK_MODEL_VISION;
+    var cwVisionEligible = (cwModel === DEEPSEEK_MODEL_VISION || cwModel === DEEPSEEK_MODEL_FLASH);
+    // 附件：图片优先以 image_url 直传视觉模型（免 OCR 文字通道）；
+    // 其余文件（PDF/DOCX/XLSX/TXT/二进制）走与主站一致的受保护解析器提取文字后注入上下文。
+    var cwAttachments = Array.isArray(req.body && req.body.attachments) ? req.body.attachments.slice(0, 10) : [];
+    var cwVisionUrls = extractVisionImageUrls(cwAttachments);
     var history = Array.isArray(req.body && req.body.history) ? req.body.history : [];
     var msgs = [];
-    for (var _ci = 0; _ci < history.length && msgs.length < 24; _ci++) {
+    for (var _ci = 0; _ci < history.length && msgs.length < 20; _ci++) {
       var _ch = history[_ci];
       if (!_ch || typeof _ch.content !== 'string') continue;
       var _cr = String(_ch.role || '');
       if (_cr !== 'user' && _cr !== 'assistant') continue;
       var _cc = _ch.content.trim();
       if (!_cc) continue;
-      msgs.push({ role: _cr, content: _cc.slice(0, 8000) });
+      msgs.push({ role: _cr, content: _cc.slice(0, 6000) });
     }
-    msgs.push({ role: 'user', content: text });
+    var cwFinalText = text;
+    if (cwAttachments.length) {
+      var cwExtracted = await extractChatAttachments(text, cwAttachments, { skipImageOcr: cwVisionEligible && cwVisionUrls.length > 0 });
+      cwFinalText = (cwExtracted && cwExtracted.text) || text;
+    }
+    // ★ 上下文总预算：本轮提示词（含附件注入文本）优先，历史消息按剩余额度保留，
+    //   防止多轮 + 长文件叠加超过模型上下文上限导致请求失败或输出半截。
+    var CW_BUDGET_CHARS = 350000;
+    var histChars = 0;
+    for (var _hi = 0; _hi < msgs.length; _hi++) histChars += String(msgs[_hi].content || '').length;
+    var promptBudget = Math.max(60000, CW_BUDGET_CHARS - histChars);
+    if (cwFinalText.length > promptBudget) {
+      cwFinalText = cwFinalText.slice(0, promptBudget) + '\n...（上下文预算截断，可减少“读取全部代码”范围或点名具体文件）';
+    }
+    if (cwVisionEligible && cwVisionUrls.length) {
+      var cwContent = [{ type: 'text', text: cwFinalText }];
+      for (var cvI = 0; cvI < cwVisionUrls.length; cvI++) {
+        cwContent.push({ type: 'image_url', image_url: { url: cwVisionUrls[cvI] } });
+      }
+      msgs.push({ role: 'user', content: cwContent });
+    } else {
+      msgs.push({ role: 'user', content: cwFinalText });
+    }
     var streamed = false;
     var reply = '';
     var cwThinkAllowed = { off: 1, low: 1, medium: 1, high: 1, max: 1 };
@@ -21696,6 +21726,7 @@ app.post('/api/code/ai', authenticateUser, rateLimit(60000, 12), async (req, res
     await callDeepSeekAI({
       system: CODE_WORKBENCH_SYSTEM_PROMPT,
       messages: msgs,
+      model: cwModel,
       max_tokens: cwMaxTokens,
       thinking_mode: cwThinking,
       temperature: 0.2,
@@ -21715,7 +21746,7 @@ app.post('/api/code/ai', authenticateUser, rateLimit(60000, 12), async (req, res
     });
     if (!closed && !res.writableEnded) {
       writeSse(res, { type: 'done', complete: true, saved: false, streamed: streamed, content: reply }, 'done');
-      recordAiTurnUsage(req.userName, null, { model: DEEPSEEK_MODEL_REASONER, source: 'code_workbench', message: text.slice(0, 500), content: reply, reasoning: '', search_count: 0, did_search: false }).catch(function() {});
+      recordAiTurnUsage(req.userName, null, { model: normalizeDeepSeekUsageModel(cwModel, DEEPSEEK_MODEL_VISION), source: 'code_workbench', message: text.slice(0, 500), content: reply, reasoning: '', search_count: 0, did_search: false }).catch(function() {});
     }
   } catch (e) {
     if (!closed && !res.writableEnded) {
