@@ -1536,7 +1536,9 @@ function renderProfileActivityList(kind) {
                                 delete window.__catAiPollTimers[commentIdStr];
                                 delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'failed') {
-                                showCatAiStatus(commentIdStr, '小猫暂时不想说话', true);
+                                // 文案必须含"重试"二字：showCatAiStatus 据此抑制 fadeOut，
+                                // 否则 3 秒后整个元素(含 retryBtnSetup 刚插入的重试按钮)被移除。
+                                showCatAiStatus(commentIdStr, '小猫暂时不想说话，点击重试', true);
                                 retryBtnSetup(commentIdStr, postId);
                                 delete window.__catAiPollTimers[commentIdStr];
                                 delete window.__catAiPollControllers[commentIdStr];

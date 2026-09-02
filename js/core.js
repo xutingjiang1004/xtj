@@ -4377,7 +4377,9 @@ function renderProfileActivityList(kind) {
                                 delete window.__catAiPollTimers[commentIdStr];
                                 delete window.__catAiPollControllers[commentIdStr];
                             } else if (data.status === 'failed') {
-                                showCatAiStatus(commentIdStr, '小猫暂时不想说话', true);
+                                // 文案必须含"重试"二字：showCatAiStatus 据此抑制 fadeOut，
+                                // 否则 3 秒后整个元素(含 retryBtnSetup 刚插入的重试按钮)被移除。
+                                showCatAiStatus(commentIdStr, '小猫暂时不想说话，点击重试', true);
                                 retryBtnSetup(commentIdStr, postId);
                                 delete window.__catAiPollTimers[commentIdStr];
                                 delete window.__catAiPollControllers[commentIdStr];
@@ -7142,7 +7144,12 @@ function renderProfileActivityList(kind) {
                             if (data.content) {
                                 receivedContent = true;
                                 session.conversationId = data.conversation_id || session.conversationId;
-                                session.output.textContent = event.indexOf('event: delta') === 0 ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
+                                // 按 event: 行判定增量/整段，而不是对整块字符串做 indexOf 前缀匹配。
+                                // 后者在事件块前有 SSE 心跳注释(: ...)或空白行时会误判为整段覆盖，
+                                // 导致锐评"闪一下"或只剩半句。
+                                var eventLine = event.split('\n').filter(function(line) { return line.indexOf('event: ') === 0; })[0];
+                                var isDeltaEvent = !!(eventLine && eventLine.slice(7).trim() === 'delta');
+                                session.output.textContent = isDeltaEvent ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
                             }
                             if (data.error) { session.output.textContent = 'AI 暂时不可用。'; session.output.classList.add('is-error'); }
                         });
