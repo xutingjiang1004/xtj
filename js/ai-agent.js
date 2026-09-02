@@ -6371,7 +6371,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       addDtListener(fileInput, 'change', function() {
         var f = this.files && this.files[0];
         if (!f) return;
-        if (!isSupportedAiFile(f)) { notify('仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件'); this.value = ''; return; }
+        if (!isSupportedAiFile(f)) { notify('不支持该文件'); this.value = ''; return; }
         acceptDtFile(f);
       });
     }
@@ -10401,7 +10401,7 @@ function showChatMessages() {
     fileInput.addEventListener('change', function() {
       var f = this.files && this.files[0];
       if (!f) return;
-      if (!isSupportedAiFile(f)) { notify('仅支持图片、PDF、DOCX、TXT、CSV 和 XLSX 文件'); this.value = ''; return; }
+      if (!isSupportedAiFile(f)) { notify('不支持该文件'); this.value = ''; return; }
       acceptAiChatFile(f);
     });
     bindAiComposerPasteDrop([inputBar, input], acceptAiChatFile);
