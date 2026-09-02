@@ -1030,7 +1030,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var idx = codeBlocks.length;
       // 代码块只转义一次
       codeBlocks.push('<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;') + '</code></pre>');
-      return '%%%CODEBLOCK' + idx + '%%%';
+      return '\x00XCB' + idx + '\x00';
     });
     // ★ 普通正文：HTML 转义
     s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -1106,7 +1106,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
     s = s.replace(/\n/g, '<br>');
     // ★ 恢复代码块
-    s = s.replace(/%%%CODEBLOCK(\d+)%%%/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
+    s = s.replace(/\x00XCB(\d+)\x00/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
     return s;
   }
 

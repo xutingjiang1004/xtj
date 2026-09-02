@@ -6663,9 +6663,10 @@ function renderProfileActivityList(kind) {
             if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
         });
     }
-                var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
-                var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
-                var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
+                // 缓存引用前先校验节点仍在文档中，避免节点被 innerHTML 重写后写入已脱离文档的旧节点
+                var sPosts = (_cachedSPosts && document.body.contains(_cachedSPosts)) ? _cachedSPosts : (_cachedSPosts = document.getElementById('sPosts'));
+                var sViews = (_cachedSViews && document.body.contains(_cachedSViews)) ? _cachedSViews : (_cachedSViews = document.getElementById('sViews'));
+                var sLikes = (_cachedSLikes && document.body.contains(_cachedSLikes)) ? _cachedSLikes : (_cachedSLikes = document.getElementById('sLikes'));
                 if (sPosts) sPosts.textContent = posts.length;
                 if (sViews) sViews.textContent = totalViews;
                 // 只显示点赞数；互动合计见统计弹层文案
@@ -10768,7 +10769,7 @@ function renderProfileActivityList(kind) {
             }
 
             function buildDockChatListItemMarkup(conversation, index) {
-                var safeUser = String(conversation.other_user || '').replace(/'/g, "\\'");
+                var safeUser = safeJsStr(conversation.other_user);
                 var signature = buildDockChatConversationSignature(conversation);
                 return [
                     '<div class="chat-list-item" data-chat-user="', escapeHtml(conversation.other_user), '" data-signature="', escapeHtml(signature),

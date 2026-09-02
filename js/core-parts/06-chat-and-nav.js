@@ -521,7 +521,7 @@
             }
 
             function buildDockChatListItemMarkup(conversation, index) {
-                var safeUser = String(conversation.other_user || '').replace(/'/g, "\\'");
+                var safeUser = safeJsStr(conversation.other_user);
                 var signature = buildDockChatConversationSignature(conversation);
                 return [
                     '<div class="chat-list-item" data-chat-user="', escapeHtml(conversation.other_user), '" data-signature="', escapeHtml(signature),

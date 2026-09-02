@@ -262,7 +262,8 @@
       clearTimeout(timer);
       if (externalSignal) externalSignal.removeEventListener('abort', onAbort);
       if (requestState && _fetchPhotoPageState[stateKey] === requestState) {
-        requestState.controller = null;
+        // 请求完成且未被新请求顶替：删除条目，避免翻页时 _fetchPhotoPageState 无限膨胀
+        delete _fetchPhotoPageState[stateKey];
       }
     }
   }
