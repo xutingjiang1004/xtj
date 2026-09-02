@@ -1,4 +1,4 @@
-﻿const { execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -115,6 +115,7 @@ const JS_FILES = [
   'js/ux-features.js',
   'js/login-device.js',
    'js/ai-agent.js',
+  'js/ai-orb.js',
   'js/code-workbench.js',
   'js/theme-toggle.js',
   'js/desktop-shell.js',

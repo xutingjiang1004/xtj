@@ -7001,6 +7001,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Lock synchronously before the first await (auth/token acquisition), so
     // two clicks in the same event loop cannot create two streams.
     S.sending = true;
+    // ★ 思考模式状态胶囊：开始生成时点亮（思考档位开启时）
+    if (S.thinkingMode && S.thinkingMode !== 'off') { try { aiThinkingOrb(true); } catch (eOrb) {} }
     // ★ 修复：遥测不再上传提问内容（原 30 字符随行为记录上行，AI 提问可能含敏感信息）
     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息'); } catch(e) {}
     var displayText = text;
@@ -8080,6 +8082,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'reasoning_start' && !reasoningStarted) {
             reasoningStarted = true;
+            // ★ 思考模式状态胶囊：推理开始（思考档位开启时已点亮，此处兜底）
+            try { aiThinkingOrb(true); } catch (eOrb) {}
             // C 修复：用户关闭思考时，仅记录状态、不创建/渲染思考节点
             if (S.thinkingMode === 'off') continue;
             var rnStart = ensureReasoningNode();
@@ -8251,6 +8255,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (doneReceived || aborted || _eofReached) break;
       }
       
+      // ★ 思考模式状态胶囊：本轮生成结束，回到待机动画
+      try { aiThinkingOrb(false); } catch (eOrbF) {}
       try { clearInterval(_idleCheckTimer); } catch (e) {}
 
       // H-25: 45s 无数据超时 — 清理节点、复位状态并提示，避免永久"处理中"
@@ -8747,6 +8753,17 @@ function showChatMessages() {
     var root = el('div', { id: 'aiChatRoot', class: 'ai-chat-root ai-idle' + (S._dockMode ? ' ai-chat-dock' : '') });
 
     var header = el('div', { class: 'ai-chat-header' });
+    // ★ 思考模式状态胶囊（Liquid Orb WebGPU 动画 + Thinking… 文字）：
+    //   悬挂在二级页面上，仅当「思考程度 != 关闭」且面板打开时显示。
+    try {
+      var orbPanelHost = document.getElementById('panelAiChat');
+      if (orbPanelHost && !orbPanelHost.querySelector('.ai-thinking-pill')) {
+        var orbPill = el('div', { class: 'ai-thinking-pill hidden', 'aria-hidden': 'true' });
+        orbPill.appendChild(el('div', { class: 'ai-thinking-orb-host' }));
+        orbPill.appendChild(el('span', { class: 'ai-thinking-pill-text', text: 'Thinking…' }));
+        orbPanelHost.appendChild(orbPill);
+      }
+    } catch (eOrb) {}
     // ★ dock 模式：作为移动端 dock 中间 tab 打开（等同首页），无需额外返回按钮，
     //   底部 dock 即导航，可切换到其它板块；其它入口（上下文菜单/桌面）保留返回。
     if (!S._dockMode) {
@@ -10658,6 +10675,8 @@ function showChatMessages() {
     S.sendBtnEl = r.sendBtn;
     updateInputMetrics();
     setAiRootState('ai-idle');
+    // ★ 思考模式状态胶囊：面板打开后按「思考程度」档位显示
+    try { syncAiThinkingPill(); } catch (eSync) {}
 
     if (S.statusTimer) {
       try { clearInterval(S.statusTimer); } catch (e2) {}
@@ -10707,9 +10726,36 @@ function showChatMessages() {
     });
   }
 
+  // ── 思考模式状态胶囊（Liquid Orb）──────
+  function syncAiThinkingPill() {
+    try {
+      var host = document.getElementById('panelAiChat');
+      var pill = host && host.querySelector('.ai-thinking-pill');
+      if (!pill) return;
+      var thinkingOn = !!S.thinkingMode && S.thinkingMode !== 'off';
+      var open = !!host && host.classList.contains('active') && !host.classList.contains('hidden');
+      if (thinkingOn && open) {
+        pill.classList.remove('hidden');
+        try {
+          if (window.xtjAiOrb && typeof window.xtjAiOrb.attach === 'function') {
+            var orbHost = pill.querySelector('.ai-thinking-orb-host');
+            if (orbHost) window.xtjAiOrb.attach(orbHost, { thinking: false });
+          }
+        } catch (eOrb) {}
+      } else {
+        pill.classList.add('hidden');
+        try { if (window.xtjAiOrb && typeof window.xtjAiOrb.detach === 'function') window.xtjAiOrb.detach(); } catch (eOrb) {}
+      }
+    } catch (eSync) {}
+  }
+  function aiThinkingOrb(on) {
+    try {
+      if (window.xtjAiOrb && typeof window.xtjAiOrb.setThinking === 'function') window.xtjAiOrb.setThinking(!!on);
+    } catch (eOrb) {}
+  }
+
   function applyConfigToUI(cfg) {
-    if (!cfg) return;
-    var avatarEl = document.getElementById('aiChatHeaderAvatar');
+    if (!cfg) return;    var avatarEl = document.getElementById('aiChatHeaderAvatar');
     var nameEl = document.getElementById('aiChatHeaderName');
     if (avatarEl) renderHeaderAvatar(avatarEl, cfg.avatar_url, cfg.avatar_version);
     if (nameEl) nameEl.textContent = AI_DISPLAY_NAME;
@@ -10753,6 +10799,7 @@ function showChatMessages() {
     try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
       try { refreshDeepThinkToggle(); } catch (e) {}
     }
+    try { syncAiThinkingPill(); } catch (eSync) {}
   }
 
   function closeAiChat() {
@@ -10830,6 +10877,8 @@ function showChatMessages() {
       aiPanel.classList.remove('active');
       aiPanel.setAttribute('aria-hidden', 'true');
     }
+    // ★ 思考模式状态胶囊：关闭页面时停止动画
+    try { syncAiThinkingPill(); } catch (eSync) {}
     // ★ 修复：关闭后恢复主内容显示
     try { document.body.classList.remove('xtj-ai-page-open'); } catch (eBody) {}
     updateSecondaryPageState(false, 'ai-chat');

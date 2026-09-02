@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
@@ -49,12 +49,12 @@
     <link rel="stylesheet" href="css/style.min.css?v=5968e80769" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=52bc68e4fc" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=cb918a3ded" /><link rel="stylesheet" href="css/ui-shell.min.css?v=3fae28cf52" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=d6758f5616" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=cb918a3ded" /><link rel="stylesheet" href="css/ui-shell.min.css?v=3fae28cf52" /></noscript>
     <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=0bf256a5f1" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=cb918a3ded" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=3fae28cf52" media="print" onload="this.media='all'">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=52bc68e4fc">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=6ea8ee9284">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=d6758f5616">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=293cf747eb">
     <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=066fb19ab5">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=f3f2ac73cc">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=40f52156a8">
@@ -1086,6 +1086,7 @@
         })();
     </script>
     <!-- AI Core shared modules (must load before ai-agent) -->
+    <script defer src="js/ai-orb.min.js?v=e68148b33f"></script>
     <script defer src="js/ai-core/errors.min.js?v=c054599831"></script>
     <script defer src="js/ai-core/request-controller.min.js?v=81e0ead2b2"></script>
     <script defer src="js/ai-core/transport.min.js?v=3cf8166348"></script>
