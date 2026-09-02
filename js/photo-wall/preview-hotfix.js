@@ -683,6 +683,12 @@
         toolbar.appendChild(button);
       }
     });
+    // ★ 修复：隐藏两个不明确的缩放按钮（− / +）——照片在角落里被误认为“不明按钮”，
+    // 缩放仍可通过 双击 / 滚轮 / 双指捏合 使用，工具栏只保留 信息/旋转/分享/删除。
+    ['ppZoomOutBtn', 'ppZoomInBtn'].forEach(function (id) {
+      var zoomBtn = root.querySelector('#' + id);
+      if (zoomBtn) zoomBtn.style.display = 'none';
+    });
     // ★ 修复：内联固定工具栏/关闭钮/指示器位置——新样式表（photo-preview.css）未加载或
     // 加载失败时，style.css 里的旧版规则会把工具栏挤到错误位置（贴底被裁、关闭钮错位）。
     // 内联样式优先级高于任何类规则，保证控件永远落在正确位置。
@@ -900,6 +906,26 @@
     body.innerHTML = buildPhotoInfoHtml(photo);
     modal.classList.remove('closing');
     modal.classList.add('pp-info-prep');
+    // ★ 修复：照片详情面板锚定在 ⓘ 按钮正上方（此前固定全屏居中/左上角，
+    //   与按钮脱节）；用按钮实时位置计算，任何屏幕尺寸都贴合。
+    try {
+      var infoBtn = document.getElementById('ppInfoBtn');
+      if (infoBtn) {
+        var btnRect = infoBtn.getBoundingClientRect();
+        var modalRight = Math.max(12, window.innerWidth - btnRect.right);
+        var modalBottom = Math.max(12, window.innerHeight - btnRect.top + 14);
+        modal.style.position = 'fixed';
+        modal.style.inset = 'auto';
+        modal.style.left = 'auto';
+        modal.style.top = 'auto';
+        modal.style.right = modalRight + 'px';
+        modal.style.bottom = modalBottom + 'px';
+        modal.style.alignItems = 'flex-end';
+        modal.style.justifyContent = 'flex-start';
+        modal.style.zIndex = '60';
+        modal.style.maxWidth = 'min(360px, calc(100vw - 24px))';
+      }
+    } catch (eAnchor) {}
     modal.style.display = 'flex';
     modal.setAttribute('aria-hidden', 'false');
     modal.style.pointerEvents = 'auto';

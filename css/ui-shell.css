@@ -2269,3 +2269,32 @@ html.xtj-ios-viewport .dock-panel {
     scrollbar-gutter: stable;
   }
 }
+
+/* ★★★★★ 全面宽度适配（电脑端）★★★★★
+   此前仅小猫AI 占满侧栏右侧内容区，照片墙 / 聊天 / 我的 / 帖子等板块仍被
+   手机版宽度规则约束（~640px 卡片贴左、右侧大面积留白）。这里统一强制：
+   1) 所有 .dock-panel 填满侧栏右侧内容区；
+   2) 各板块内部容器统一 1280px 居中阅读宽度。
+   仅作用于 min-width:768px 的桌面/平板，不触碰移动端底部导航。 */
+@media (min-width: 768px) {
+  #dockPanels > .dock-panel {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    box-sizing: border-box;
+  }
+
+  #panelAi .photo-wall-container,
+  #panelChat .dock-chat-container,
+  #panelProfile .dock-profile-container,
+  #panelPosts .wrap {
+    width: min(100%, 1280px) !important;
+    max-width: 1280px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+
+  #panelAi .photo-wall-grid {
+    width: 100%;
+  }
+}

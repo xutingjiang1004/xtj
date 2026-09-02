@@ -2081,6 +2081,14 @@
     if (!okAuth) { notify('请先登录后再使用 AI 助手'); return; }
     ui.chatInput.value = '';
     autoResizeChat();
+    // ★ 全局读取意图：用户说「全部代码/所有文件…」时自动批量读取（无需先点按钮）
+    if (state.repo && /全部代码|所有代码|全部文件|所有文件|整个项目|所有源码|打开全部|全部源码|全部内容|所有内容|全部看|统统看|全都看|全部读取|读取全部|所有代码和文件/i.test(text)) {
+      var bulkReady = !!(state.bulkFiles && Object.keys(state.bulkFiles).length && state.bulkBranch === state.repo.branch);
+      if (!bulkReady) {
+        notify('正在批量读取当前分支代码，供 AI 全局分析…');
+        try { await bulkLoadAll(); } catch (eBulk) {}
+      }
+    }
     // 构建提示词（异步：自动读取用户点名的任意文件/图片）
     var built;
     state.sendingChat = true;
@@ -2244,29 +2252,89 @@
       ui.sendBtn.textContent = '发送';
     }
 
+    // ★ 自动续写：输出疑似被截断（代码块未闭合）时，自动追加「继续输出」请求并拼接，
+    //   无需用户手动点“继续”即可拿到完整文件（长文件不再出现半截代码）。
+    var contRounds = 0;
+    while (!done && contRounds < 3 && isAiOutputTruncated(accumulated)) {
+      contRounds++;
+      try {
+        var contTail = accumulated.slice(-2500);
+        var contMsg = '上一次输出在代码块中间被截断。以下是我上次输出的最后部分（可能不完整）：\n"""\n' + contTail +
+          '\n"""\n请紧接着从断点继续输出（不要重复上面内容；若涉及文件修改，仍请在本轮代码块首行用 // path: 标注同一目标文件；若其实已经完整，只需回复“已完成”）。';
+        var contPayload;
+        if (isCustomModel(state.model)) {
+          var contCfg = resolveCustomCfg(state.model);
+          if (!contCfg || !contCfg.api_key) break;
+          contPayload = {
+            url: '/api/agent/custom-chat/stream',
+            body: {
+              provider: contCfg.provider,
+              api_key: contCfg.api_key,
+              model: contCfg.model,
+              base_url: contCfg.base_url,
+              message: contMsg.slice(0, 190000),
+              messages: [{ role: 'user', content: contMsg.slice(0, 190000) }],
+              thinking_mode: state.thinking,
+              web_search: false,
+              tools_enabled: false,
+              client_request_id: 'cw_cont_' + Date.now().toString(36),
+              timeout_ms: 240000
+            }
+          };
+        } else {
+          contPayload = { url: '/api/code/ai', body: { message: contMsg, history: [], model: state.model, thinking_mode: state.thinking } };
+        }
+        contentDiv.textContent = '输出较长（第 ' + contRounds + ' 段），正在继续生成余下部分…';
+        var contOk = await streamAi(contPayload, {
+          onReasoning: function (chunk) {
+            if (chunk) {
+              thinkWrap.classList.remove('hidden');
+              thinkBody.textContent = (thinkBody.textContent || '') + chunk;
+              scrollChat();
+            }
+          },
+          onContent: function (chunk) {
+            accumulated += chunk;
+            if (typeof window.renderMarkdown === 'function') {
+              try { contentDiv.innerHTML = window.renderMarkdown(accumulated); } catch (e) { contentDiv.textContent = accumulated; }
+            } else {
+              contentDiv.textContent = accumulated;
+            }
+            scrollChat();
+          },
+          onError: function () { done = true; }
+        }).then(function () { return true; }, function () { return false; });
+        if (!contOk) { done = true; break; }
+      } catch (eCont) { done = true; break; }
+    }
+
     var finalText = accumulated.trim();
     if (!done && finalText) {
       state.aiLastOutput = finalText;
       appendChatMessage('assistant', finalText);
       try { if (aiWrap.parentNode) aiWrap.parentNode.removeChild(aiWrap); } catch (e) {}
       var truncated = isAiOutputTruncated(finalText);
-      var groups = extractAllCodeBlocks(finalText);
+      // 自动续写后同一文件会出现多段代码块：按顺序合并拼接，避免只取最后一段
+      var groups = contRounds ? mergeCodeBlocksForApply(finalText) : extractAllCodeBlocks(finalText);
       var fenced = extractCodeBlock(finalText);
       if (truncated) {
-        // ① 输出疑似截断：绝不自动覆盖，防止半截代码写坏文件
-        ui.chatMsgs.appendChild(el('div', { class: 'cw-msg cw-msg-warn', text: '⚠ AI 输出疑似不完整（代码块未闭合，可能达到输出长度上限）。已暂停自动应用：可让 AI“继续”，或点下方按钮强行应用。' }));
-        if (fenced) addApplyBar(fenced);
+        // ① 输出仍疑似截断：绝不自动覆盖，防止半截代码写坏文件
+        ui.chatMsgs.appendChild(el('div', { class: 'cw-msg cw-msg-warn', text: '⚠ AI 输出仍疑似不完整（代码块未闭合）。已暂停自动应用：可点下方按钮查看/应用已生成部分，或让 AI“继续”。' }));
+        if (groups.length) renderMultiFileBar(groups);
+        else if (fenced) addApplyBar(fenced);
         scrollChat();
       } else if (groups.length >= 2) {
         // ② 一次改多个文件：清单化，逐个应用或一次性提交
         renderMultiFileBar(groups);
-      } else if (fenced) {
+      } else if (fenced || (contRounds && groups.length === 1)) {
         // ③ 单文件：编辑器存在未保存手动修改时先确认，避免被覆盖；否则自动应用保持流畅
-        var tp = extractTargetPath(fenced);
+        // （自动续写后同一文件的多段内容已合并为 groups[0].code，优先使用合并结果）
+        var singleCode = (contRounds && groups.length === 1) ? groups[0].code : fenced;
+        var tp = extractTargetPath(singleCode);
         var tpKnown = !!(tp && isKnownFilePath(tp));
         var editorDirty = !ui.editor.classList.contains('hidden') && ui.editor.value !== state.currentContent && !!ui.editor.value.trim();
         if (editorDirty && (!tpKnown || tp === state.currentPath)) {
-          addApplyBar(fenced);
+          addApplyBar(singleCode);
           notify('检测到编辑器有未保存修改，已暂停自动覆盖，请确认后点“应用”');
         } else if (tpKnown || state.currentPath) {
           var applyPath = tpKnown ? tp : state.currentPath;
@@ -2274,9 +2342,9 @@
           // 无确认写入可能误覆盖工作区内容）；用户取消则改为手动"应用"条。
           if (applyPath === state.currentPath && state.currentPath &&
               !window.confirm('AI 建议代码将应用到当前打开的文件「' + applyPath + '」，是否覆盖？')) {
-            addApplyBar(fenced);
+            addApplyBar(singleCode);
           } else {
-            applyAiOutput(fenced, applyPath);
+            applyAiOutput(singleCode, applyPath);
           }
         }
       }
@@ -2318,6 +2386,36 @@
     if (!text) return false;
     var fences = text.match(new RegExp(AI_FENCE, 'g'));
     return !!(fences && fences.length % 2 === 1);
+  }
+  // ★ 自动续写 / 多段输出：同一路径的多段代码块按出现顺序拼接，并纳入末尾
+  //   未闭合代码块（截断续写场景），返回 [{path, code}]（每路径一段合并内容）。
+  function mergeCodeBlocksForApply(text) {
+    if (!text) return [];
+    var re = new RegExp(AI_FENCE + '[a-zA-Z0-9+#.\\-_]*\\s*\\n([\\s\\S]*?)' + AI_FENCE, 'g');
+    var m, order = [], map = {};
+    while ((m = re.exec(text)) !== null) {
+      var raw = m[1].replace(/^\n+/, '');
+      var p = extractTargetPath(raw);
+      if (!p) continue;
+      var body = stripPathMarker(raw);
+      if (Object.prototype.hasOwnProperty.call(map, p)) map[p] = map[p] + '\n' + body;
+      else { map[p] = body; order.push(p); }
+    }
+    // 末尾未闭合块（可能出现于最后一段截断）
+    var openFences = text.match(new RegExp(AI_FENCE, 'g'));
+    if (openFences && openFences.length % 2 === 1) {
+      var lastIdx = text.lastIndexOf(AI_FENCE);
+      if (lastIdx >= 0) {
+        var tail = text.slice(lastIdx + AI_FENCE.length).replace(/^[a-zA-Z0-9+#.\-_]*\s*\n/, '');
+        var tailP = extractTargetPath(tail);
+        if (tailP) {
+          var tailBody = stripPathMarker(tail);
+          if (Object.prototype.hasOwnProperty.call(map, tailP)) map[tailP] = map[tailP] + '\n' + tailBody;
+          else { map[tailP] = tailBody; order.push(tailP); }
+        }
+      }
+    }
+    return order.map(function (p) { return { path: p, code: map[p] }; });
   }
   // 单个“应用到文件”按钮条
   function addApplyBar(code) {
