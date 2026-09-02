@@ -23,45 +23,49 @@ function writeSse(res, payload) {
         try { res.end(); } catch (_) {}
         return false;
       }
-      if (res._sseBuffer.length > 0) {
-        res._sseBuffer.push(data);
-        res._sseBufferBytes += Buffer.byteLength(data, 'utf8');
-        return true;
+      // 注意：命名函数 onDrain 代替 arguments.callee（后者在 'use strict' 下访问会同步抛
+      // TypeError，导致二次背压时 drain 监听器未注册、缓冲永不复排、连接关闭时静默丢失）。
+      function onDrain() {
+        res._sseDrainQueued = false;
+        if (res._sseBuffer && res._sseBuffer.length > 0) {
+          var buf = res._sseBuffer.slice();
+          res._sseBuffer = [];
+          res._sseBufferBytes = 0;
+          for (var i = 0; i < buf.length; i++) {
+            try {
+              if (res.writableEnded || !res.write(buf[i])) {
+                // Re-queue only the still-pending tail; do not recursively
+                // write after backpressure returns.
+                res._sseBuffer = buf.slice(i + 1);
+                res._sseBufferBytes = res._sseBuffer.reduce(function(n, d) { return n + Buffer.byteLength(d, 'utf8'); }, 0);
+                if (!res.writableEnded && res._sseBuffer.length) {
+                  res._sseDrainQueued = true;
+                  res.once('drain', onDrain);
+                }
+                break;
+              }
+            } catch (_) { break; }
+          }
+        }
       }
-      var ok = res.write(data);
-      if (!ok) {
+      // 已处于背压排队态（缓冲区非空或正等待 drain）：本帧入队，由 onDrain 统一写出，
+      // 这样 MAX_SSE_BUFFER_BYTES 内存上限才能兜住慢客户端。
+      if (res._sseBuffer.length > 0 || res._sseDrainQueued) {
         res._sseBuffer.push(data);
         res._sseBufferBytes += Buffer.byteLength(data, 'utf8');
         if (!res._sseDrainQueued) {
           res._sseDrainQueued = true;
-          // 命名函数而非 arguments.callee：后者在 'use strict'（本文件第 2 行）下
-          // 访问会同步抛 TypeError，导致二次背压时 drain 监听器未真正注册，
-          // 后续写入被推入 _sseBuffer 却永不复排、连接关闭时静默丢失。
-          function onDrain() {
-            res._sseDrainQueued = false;
-            if (res._sseBuffer && res._sseBuffer.length > 0) {
-              var buf = res._sseBuffer.slice();
-              res._sseBuffer = [];
-              res._sseBufferBytes = 0;
-              for (var i = 0; i < buf.length; i++) {
-                try {
-                  if (res.writableEnded || !res.write(buf[i])) {
-                    // Re-queue only the still-pending tail; do not recursively
-                    // write after backpressure returns.
-                    res._sseBuffer = buf.slice(i + 1);
-                    res._sseBufferBytes = res._sseBuffer.reduce(function(n, d) { return n + Buffer.byteLength(d, 'utf8'); }, 0);
-                    if (!res.writableEnded && res._sseBuffer.length) {
-                      res._sseDrainQueued = true;
-                      res.once('drain', onDrain);
-                    }
-                    break;
-                  }
-                } catch (_) { break; }
-              }
-            }
-          }
           res.once('drain', onDrain);
         }
+        return true;
+      }
+      var ok = res.write(data);
+      if (!ok) {
+        // write()===false 仅表示数据已排入 Node 内部缓冲（随后会自动 flush），并非"写入失败"。
+        // 当前帧已被接受，绝不能重复入队（否则 drain 时重复写出，客户端收到重复事件）。
+        // 仅登记 drain 标记，使后续帧走上面的排队分支，从而保留背压下的内存上限保护。
+        res._sseDrainQueued = true;
+        res.once('drain', onDrain);
       }
       return true;
     }

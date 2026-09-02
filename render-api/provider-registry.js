@@ -509,6 +509,10 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
                 if (bodyBytes > maxBodyBytes) { overLimit = true; break; }
                 chunks.push(Buffer.from(chunk.value));
               }
+              if (overLimit && reader && typeof reader.cancel === 'function') {
+                // 超限跳出后释放 reader，避免连接/流一直占用
+                try { await reader.cancel(); } catch (_) {}
+              }
               if (!overLimit) {
                 var bodyText = Buffer.concat(chunks).toString('utf8');
                 try { modelsData = JSON.parse(bodyText); } catch (_) {}

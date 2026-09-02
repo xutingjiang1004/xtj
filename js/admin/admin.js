@@ -2499,6 +2499,9 @@ async function initAdminClient() {
             '<button class="btn-sm primary" type="button" onclick="refreshAdminTab(\'' + safeJsStr(tab) + '\')">重新加载</button></div>';
     }
 
+    // 供模板内联 onclick 使用（如统计页「刷新缓存」），必须导出，否则全局作用域 ReferenceError
+    window.apiCall = apiCall;
+
     window.switchTab = async function(tab) {
         var normalized = tab;
         var allTabs = allowedTabs;

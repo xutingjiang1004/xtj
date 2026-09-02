@@ -81,9 +81,13 @@ function httpsFormPost(hostname, pathName, formFields, timeoutMs) {
     }, function(res) {
       var chunks = [];
       var total = 0;
+      // 超限后置位，拦截后续 data/end/error 回调，避免重复 reject 与监听残留
+      var overLimit = false;
       res.on('data', function(chunk) {
+        if (overLimit) return;
         total += chunk.length;
         if (total > 2 * 1024 * 1024) {
+          overLimit = true;
           req.destroy();
           reject(new Error('OCR 响应过大'));
           return;
@@ -91,10 +95,14 @@ function httpsFormPost(hostname, pathName, formFields, timeoutMs) {
         chunks.push(chunk);
       });
       res.on('end', function() {
+        if (overLimit) return;
         var raw = Buffer.concat(chunks).toString('utf8');
         resolve({ status: res.statusCode || 0, body: raw });
       });
-      res.on('error', reject);
+      res.on('error', function(err) {
+        if (overLimit) return;
+        reject(err);
+      });
     });
     req.setTimeout(timeoutMs || OCR_TIMEOUT_MS, function() {
       req.destroy(new Error('OCR 请求超时'));

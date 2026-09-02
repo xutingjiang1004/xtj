@@ -409,12 +409,14 @@ async function searchWeb(query, maxResults) {
   var mergedResults = [];
   var usedProvider = null;
 
-  // 整体搜索总超时 25 秒
+  // 整体搜索总超时 25 秒。仅置标志并不能中断在途 await，须在每次循环用剩余预算
+  // 收紧单 provider 的超时，才能真正把总耗时约束在 25s 内。
+  var deadline = Date.now() + 25000;
   var searchTimedOut = false;
   var searchTimer = setTimeout(function() { searchTimedOut = true; }, 25000);
 
   for (var pi = 0; pi < providerList.length; pi++) {
-    if (searchTimedOut) break;
+    if (searchTimedOut || Date.now() >= deadline) break;
     var provider = providerList[pi];
     if (!provider.enabled) {
       diagnostics.missing_env.push(provider.requiresEnv);
@@ -423,8 +425,9 @@ async function searchWeb(query, maxResults) {
     diagnostics.enabled_providers.push(provider.name);
     try {
       // M-6: 每个 provider 单独套 12s 超时——整体 25s 定时器只在循环间检查，
-      // 单个无自带超时的 provider 挂起会永久卡住 await 且泄漏 25s 定时器
-      var result = await withSearchProviderTimeout(provider.fn, 12000);
+      // 单个无自带超时的 provider 挂起会永久卡住 await 且泄漏 25s 定时器。
+      // 这里用剩余预算(deadline-now)与 12s 取较小值，保证总超时真实生效。
+      var result = await withSearchProviderTimeout(provider.fn, Math.max(100, Math.min(12000, deadline - Date.now())));
       if (result.error) {
         diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
       } else if (result.results && result.results.length > 0) {
