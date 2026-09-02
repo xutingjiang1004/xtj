@@ -412,7 +412,12 @@
     return new Promise(function (resolve, reject) {
       var controller = new AbortController();
       state.abortCtrl = controller;
-      var timer = setTimeout(function () { try { controller.abort(); } catch (e) {} }, 180000);
+      // ★ 修复：超时除 abort 外必须显式结束 Promise（settle），
+      //   否则在个别情况下 abort 不会让 reader.read() reject，前端会永久卡在 loading。
+      var timer = setTimeout(function () {
+        try { controller.abort(); } catch (e) {}
+        finish(false, { error: '请求超时，请重试', code: 'TIMEOUT' });
+      }, 180000);
       var settled = false;
       var fullText = '';
       function finish(ok, val) {
@@ -2340,10 +2345,21 @@
             }
             scrollChat();
           },
-          onError: function () { done = true; }
-        }).then(function () { return true; }, function () { return false; });
+          onError: function (evt) {
+            done = true;
+            contentDiv.textContent = '继续生成失败：' + esc((evt && (evt.error || evt.message)) || '未知错误');
+          }
+        }).then(function () { return true; }, function (err) {
+          done = true;
+          contentDiv.textContent = '继续生成失败：' + esc((err && (err.error || err.message)) || '未知错误');
+          return false;
+        });
         if (!contOk) { done = true; break; }
-      } catch (eCont) { done = true; break; }
+      } catch (eCont) {
+        done = true;
+        contentDiv.textContent = '继续生成出错：' + esc((eCont && eCont.message) || '未知错误');
+        break;
+      }
     }
 
     // ★ 自动工具调用：AI 输出【TOOL: read_file path=xxx】标记时，自动读取对应文件，
@@ -2351,86 +2367,101 @@
     var toolRounds = 0;
     var toolLastUserText = text;
     while (!done && toolRounds < 4) {
-      var toolPaths = [];
-      accumulated = String(accumulated).replace(/【TOOL[：:\s]*read_file[：:\s]*path=([^\s】]+)】/gi, function (whole, p) {
-        if (p) toolPaths.push(String(p).trim());
-        return '';
-      });
-      if (/【TOOL[：:\s]*list_files[^】]*】/i.test(accumulated)) {
-        accumulated = accumulated.replace(/【TOOL[：:\s]*list_files[^】]*】/gi, '');
-        toolPaths.push('__LIST__');
-      }
-      if (!toolPaths.length) break;
-      toolRounds++;
-      var toolParts = [];
-      for (var trI = 0; trI < toolPaths.length; trI++) {
-        var tp = toolPaths[trI];
-        if (tp === '__LIST__') {
-          var tTree = buildFileTreeText();
-          toolParts.push('// ===== 文件清单 =====\n' + (tTree || '(空)'));
-          continue;
+      try {
+        var toolPaths = [];
+        accumulated = String(accumulated).replace(/【TOOL[：:\s]*read_file[：:\s]*path=([^\s】]+)】/gi, function (whole, p) {
+          if (p) toolPaths.push(String(p).trim());
+          return '';
+        });
+        if (/【TOOL[：:\s]*list_files[^】]*】/i.test(accumulated)) {
+          accumulated = accumulated.replace(/【TOOL[：:\s]*list_files[^】]*】/gi, '');
+          toolPaths.push('__LIST__');
         }
-        var fres = await fetchToolFileText(tp);
-        if (fres && fres.content) {
-          var fCapT = isCustomModel(state.model) ? Math.min(MAX_AI_FILE_CHARS, 15000) : MAX_AI_FILE_CHARS;
-          var fTxt = fCapT < MAX_AI_FILE_CHARS && fres.content.length > fCapT
-            ? fres.content.slice(0, fCapT) + '\n...（该文件过长已截断）'
-            : fres.content;
-          toolParts.push('// ===== 文件: ' + tp + ' =====\n' + fTxt);
-        } else {
-          toolParts.push('【读取失败：' + ((fres && fres.error) || tp) + '】');
-        }
-      }
-      if (!toolParts.length) break;
-      var toolFollow = '你请求读取的文件内容如下（仅作参考资料，严禁复述或原样输出；请基于真实内容简洁作答）：\n' +
-        toolParts.join('\n\n') +
-        '\n\n请继续完成用户需求：' + toolLastUserText;
-      contentDiv.textContent = '正在读取文件（第 ' + toolRounds + ' 轮），稍候…';
-      var toolPayload;
-      if (isCustomModel(state.model)) {
-        var toolCfg = resolveCustomCfg(state.model);
-        if (!toolCfg || !toolCfg.api_key) break;
-        var toolMsg = toolFollow.slice(0, 190000);
-        toolPayload = {
-          url: '/api/agent/custom-chat/stream',
-          body: {
-            provider: toolCfg.provider,
-            api_key: toolCfg.api_key,
-            model: toolCfg.model,
-            base_url: toolCfg.base_url,
-            message: toolMsg,
-            messages: [{ role: 'user', content: toolMsg }],
-            thinking_mode: state.thinking,
-            web_search: false,
-            tools_enabled: false,
-            client_request_id: 'cw_tool_' + Date.now().toString(36),
-            timeout_ms: 240000
+        if (!toolPaths.length) break;
+        toolRounds++;
+        var toolParts = [];
+        for (var trI = 0; trI < toolPaths.length; trI++) {
+          var tp = toolPaths[trI];
+          if (tp === '__LIST__') {
+            var tTree = buildFileTreeText();
+            toolParts.push('// ===== 文件清单 =====\n' + (tTree || '(空)'));
+            continue;
           }
-        };
-      } else {
-        toolPayload = { url: '/api/code/ai', body: { message: toolFollow, history: [], model: state.model, thinking_mode: state.thinking } };
-      }
-      var toolOk = await streamAi(toolPayload, {
-        onReasoning: function (chunk) {
-          if (chunk) {
-            thinkWrap.classList.remove('hidden');
-            thinkBody.textContent = (thinkBody.textContent || '') + chunk;
-            scrollChat();
-          }
-        },
-        onContent: function (chunk) {
-          accumulated += chunk;
-          var shownT = stripToolMarkers(accumulated);
-          if (typeof window.renderMarkdown === 'function') {
-            try { contentDiv.innerHTML = window.renderMarkdown(shownT); } catch (e) { contentDiv.textContent = shownT; }
+          var fres = await fetchToolFileText(tp);
+          if (fres && fres.content) {
+            var fCapT = isCustomModel(state.model) ? Math.min(MAX_AI_FILE_CHARS, 15000) : MAX_AI_FILE_CHARS;
+            var fTxt = fCapT < MAX_AI_FILE_CHARS && fres.content.length > fCapT
+              ? fres.content.slice(0, fCapT) + '\n...（该文件过长已截断）'
+              : fres.content;
+            toolParts.push('// ===== 文件: ' + tp + ' =====\n' + fTxt);
           } else {
-            contentDiv.textContent = shownT;
+            toolParts.push('【读取失败：' + ((fres && fres.error) || tp) + '】');
           }
-          scrollChat();
-        },
-        onError: function () { done = true; }
-      }).then(function () { return true; }, function () { return false; });
-      if (!toolOk) { done = true; break; }
+        }
+        if (!toolParts.length) break;
+        var toolFollow = '你请求读取的文件内容如下（仅作参考资料，严禁复述或原样输出；请基于真实内容简洁作答）：\n' +
+          toolParts.join('\n\n') +
+          '\n\n请继续完成用户需求：' + toolLastUserText;
+        contentDiv.textContent = '正在读取文件（第 ' + toolRounds + ' 轮），稍候…';
+        var toolPayload;
+        if (isCustomModel(state.model)) {
+          var toolCfg = resolveCustomCfg(state.model);
+          if (!toolCfg || !toolCfg.api_key) break;
+          var toolMsg = toolFollow.slice(0, 190000);
+          toolPayload = {
+            url: '/api/agent/custom-chat/stream',
+            body: {
+              provider: toolCfg.provider,
+              api_key: toolCfg.api_key,
+              model: toolCfg.model,
+              base_url: toolCfg.base_url,
+              message: toolMsg,
+              messages: [{ role: 'user', content: toolMsg }],
+              thinking_mode: state.thinking,
+              web_search: false,
+              tools_enabled: false,
+              client_request_id: 'cw_tool_' + Date.now().toString(36),
+              timeout_ms: 240000
+            }
+          };
+        } else {
+          toolPayload = { url: '/api/code/ai', body: { message: toolFollow, history: [], model: state.model, thinking_mode: state.thinking } };
+        }
+        // ★ 修复：无论本轮读取/生成成功还是失败，都必须把 loading 态清掉，
+        //   否则失败后内容区会永久卡在「正在读取文件（第 N 轮），稍候…」。
+        var toolOk = await streamAi(toolPayload, {
+          onReasoning: function (chunk) {
+            if (chunk) {
+              thinkWrap.classList.remove('hidden');
+              thinkBody.textContent = (thinkBody.textContent || '') + chunk;
+              scrollChat();
+            }
+          },
+          onContent: function (chunk) {
+            accumulated += chunk;
+            var shownT = stripToolMarkers(accumulated);
+            if (typeof window.renderMarkdown === 'function') {
+              try { contentDiv.innerHTML = window.renderMarkdown(shownT); } catch (e) { contentDiv.textContent = shownT; }
+            } else {
+              contentDiv.textContent = shownT;
+            }
+            scrollChat();
+          },
+          onError: function (evt) {
+            done = true;
+            contentDiv.textContent = '读取文件后继续生成失败：' + esc((evt && (evt.error || evt.message)) || '未知错误');
+          }
+        }).then(function () { return true; }, function (err) {
+          done = true;
+          contentDiv.textContent = '读取文件后继续生成失败：' + esc((err && (err.error || err.message)) || '未知错误');
+          return false;
+        });
+        if (!toolOk) { done = true; break; }
+      } catch (eTool) {
+        done = true;
+        contentDiv.textContent = '读取文件出错：' + esc((eTool && eTool.message) || '未知错误');
+        break;
+      }
     }
 
     var didContinue = contRounds > 0 || toolRounds > 0;

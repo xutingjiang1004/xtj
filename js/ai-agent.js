@@ -8754,7 +8754,7 @@ function showChatMessages() {
 
     var header = el('div', { class: 'ai-chat-header' });
     // ★ 思考模式状态胶囊（Liquid Orb WebGPU 动画 + Thinking… 文字）：
-    //   悬挂在二级页面上，仅当「思考程度 != 关闭」且面板打开时显示。
+    //   悬挂在二级页面上，仅当「思考程度 != 关闭」且「AI 正在生成」且面板打开时显示。
     try {
       var orbPanelHost = document.getElementById('panelAiChat');
       if (orbPanelHost && !orbPanelHost.querySelector('.ai-thinking-pill')) {
@@ -10727,19 +10727,27 @@ function showChatMessages() {
   }
 
   // ── 思考模式状态胶囊（Liquid Orb）──────
+  // ★ 修复：胶囊只在「思考档位 ≠ 关闭」且「AI 正在流式生成」同时成立时显示。
+  //   档位切换 / 面板打开只改变“是否允许显示”，不直接触发显示；
+  //   生成结束（正常结束 / 出错 / 中断）后立即隐藏。
   function syncAiThinkingPill() {
     try {
       var host = document.getElementById('panelAiChat');
       var pill = host && host.querySelector('.ai-thinking-pill');
       if (!pill) return;
       var thinkingOn = !!S.thinkingMode && S.thinkingMode !== 'off';
+      var streaming = !!S.sending; // AI 正在生成回复（streaming 进行中）
       var open = !!host && host.classList.contains('active') && !host.classList.contains('hidden');
-      if (thinkingOn && open) {
+      if (thinkingOn && streaming && open) {
         pill.classList.remove('hidden');
         try {
-          if (window.xtjAiOrb && typeof window.xtjAiOrb.attach === 'function') {
-            var orbHost = pill.querySelector('.ai-thinking-orb-host');
-            if (orbHost) window.xtjAiOrb.attach(orbHost, { thinking: false });
+          var orbHost = pill.querySelector('.ai-thinking-orb-host');
+          if (window.xtjAiOrb) {
+            if (typeof window.xtjAiOrb.isActive === 'function' && window.xtjAiOrb.isActive()) {
+              if (typeof window.xtjAiOrb.setThinking === 'function') window.xtjAiOrb.setThinking(true);
+            } else if (orbHost && typeof window.xtjAiOrb.attach === 'function') {
+              window.xtjAiOrb.attach(orbHost, { thinking: true });
+            }
           }
         } catch (eOrb) {}
       } else {
@@ -10750,7 +10758,31 @@ function showChatMessages() {
   }
   function aiThinkingOrb(on) {
     try {
-      if (window.xtjAiOrb && typeof window.xtjAiOrb.setThinking === 'function') window.xtjAiOrb.setThinking(!!on);
+      // ★ 修复：生成开始/结束直接联动胶囊显隐 + 球体动画状态。
+      //   生成开始（thinking=true）：思考档位开启时显示胶囊并切到紫罗兰熔核；
+      //   生成结束（thinking=false）：立即隐藏胶囊、停止动画。
+      var host = document.getElementById('panelAiChat');
+      var pill = host && host.querySelector('.ai-thinking-pill');
+      if (pill) {
+        var thinkingOn = !!S.thinkingMode && S.thinkingMode !== 'off';
+        var show = thinkingOn && !!on;
+        if (show) {
+          pill.classList.remove('hidden');
+          var orbHost = pill.querySelector('.ai-thinking-orb-host');
+          if (window.xtjAiOrb) {
+            if (typeof window.xtjAiOrb.isActive === 'function' && window.xtjAiOrb.isActive()) {
+              if (typeof window.xtjAiOrb.setThinking === 'function') window.xtjAiOrb.setThinking(true);
+            } else if (orbHost && typeof window.xtjAiOrb.attach === 'function') {
+              window.xtjAiOrb.attach(orbHost, { thinking: true });
+            }
+          }
+        } else {
+          pill.classList.add('hidden');
+          try { if (window.xtjAiOrb && typeof window.xtjAiOrb.detach === 'function') window.xtjAiOrb.detach(); } catch (eOrb2) {}
+        }
+      } else if (on && window.xtjAiOrb && typeof window.xtjAiOrb.setThinking === 'function') {
+        window.xtjAiOrb.setThinking(true);
+      }
     } catch (eOrb) {}
   }
 
