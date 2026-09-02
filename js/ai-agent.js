@@ -120,7 +120,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try {
       var auth = await getUserAuthPayload({ forceNoToken: false });
       if (!auth.token) return false;
-      var resp = await fetch(API_BASE + '/agent/custom-models', {
+      var resp = await fetch(API_BASE + '/custom-models', {
         method: 'PUT',
         headers: auth.headers,
         body: JSON.stringify({ models: (list || []).map(toStoredModel).slice(0, 20) })
@@ -134,7 +134,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try {
       var auth = await getUserAuthPayload({ forceNoToken: false });
       if (!auth.token) return null;
-      var resp = await fetch(API_BASE + '/agent/custom-models', { method: 'GET', headers: auth.headers });
+      var resp = await fetch(API_BASE + '/custom-models', { method: 'GET', headers: auth.headers });
       if (!resp.ok) return null;
       var data = await resp.json();
       if (data && data.ok && Array.isArray(data.models)) {
@@ -9155,7 +9155,7 @@ function showChatMessages() {
     //   服务端负责转发生图请求、识别 default.jpeg 占位图并带退避重试取回真图，
     //   拿不到时返回明确错误，前端据此提示"生成失败/服务繁忙"，不再无限"生成中"。
     function genImageApiUrl(prompt, bust) {
-      var base = API_BASE + '/agent/image';
+      var base = API_BASE + '/image';
       var q = '?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd';
       // 重试时追加随机参数绕过浏览器缓存，避免复用旧响应
       if (bust) q += '&_r=' + Date.now() + '_' + Math.floor(Math.random() * 100000);
