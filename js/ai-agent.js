@@ -834,6 +834,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   var AI_FILE_MAX_BYTES = 7 * 1024 * 1024;
 
+  // 部分系统不上报 MIME（type 为空）：按扩展名推断，保证后端解析器能正确识别
+  function mimeFromFilename(name) {
+    var n = String(name || '').toLowerCase();
+    if (/\.pdf$/i.test(n)) return 'application/pdf';
+    if (/\.docx$/i.test(n)) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (/\b\.xlsx$/i.test(n)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (/\.(txt|md|log|srt|vtt)$/i.test(n)) return 'text/plain';
+    if (/\.csv$/i.test(n)) return 'text/csv';
+    if (/\.json$/i.test(n)) return 'application/json';
+    if (/\.(png|jpg|jpeg|gif|webp|bmp|ico|avif|svg)$/i.test(n)) {
+      var ext = n.match(/\.([a-z0-9]+)$/i)[1];
+      return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' })[ext] || 'image/png';
+    }
+    return '';
+  }
+
   function normalizeAiAttachmentFile(file) {
     if (!file) return null;
     var type = String(file.type || '');
@@ -910,7 +926,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var reader = new FileReader();
     reader.onload = function(e) {
       try {
-        onLoaded({ name: file.name, type: file.type || 'application/octet-stream', dataUrl: e.target.result, size: file.size });
+        onLoaded({ name: file.name, type: file.type || mimeFromFilename(file.name) || 'application/octet-stream', dataUrl: e.target.result, size: file.size });
       } catch (err) {}
     };
     reader.onerror = function() {
@@ -5811,7 +5827,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // 如果有文件: 区分: UI 显示用完整 data URL 或文件占位，发送给服务器用简短标记
     if (fileData) {
-      var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+      var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5\u3040-\u30ff]/g, '_').slice(0, 80);
       var isImage2 = fileData.type.startsWith('image/');
       var sizeKB2 = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
       // UI 显示
@@ -6997,7 +7013,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       for (var fli = 0; fli < fileList.length; fli++) {
         var oneFile = fileList[fli];
         if (!oneFile || !oneFile.dataUrl) continue;
-        var safeName = String(oneFile.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+        var safeName = String(oneFile.name || 'file').replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5\u3040-\u30ff]/g, '_').slice(0, 80);
         var isImage = String(oneFile.type || '').indexOf('image/') === 0;
         // 估算文件大小（data URL 约 4/3 倍原始大小）
         var sizeKB = Math.round((oneFile.dataUrl.length * 3 / 4) / 1024);
@@ -7239,6 +7255,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         thinking_max: S.thinkMax === true,
         web_search: S.webSearchEnabled === true,
         tools_enabled: (S.webSearchEnabled === true || S.thinkMax === true),
+        // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
+        attachments: attachmentPayload || undefined,
         client_request_id: reqId,
         timeout_ms: 240000
       });
