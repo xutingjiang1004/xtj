@@ -758,18 +758,17 @@
     openSheet(c.accepted, c.skipped);
   }
 
-  // P6: 上传前图片预处理 — 压缩 + EXIF 方向矫正
+  // P6: 上传前图片预处理 — 原画质优先 + EXIF 方向矫正
   // - GIF 动图保持原样（不压缩）
-  // - <200KB 小图跳过压缩，仅在 createImageBitmap 可用时尝试矫正 EXIF 方向
-  // - 优先 createImageBitmap({imageOrientation:'from-image'}) 自动矫正 EXIF 方向；
-  //   不支持时回退 Image+objectURL（仅压缩、不矫正方向）
-  // - 长边 > 2048 等比缩到 2048，canvas.toBlob('image/jpeg', 0.8)；PNG 输出 PNG
+  // - JPEG/PNG/WebP 不缩放、不转码，直接上传原文件（保留原画质；现代浏览器对 <img> 自动应用 EXIF 方向）
+  // - 其余格式(HEIC/BMP/TIFF 等)为跨浏览器可显示，仅做格式归一化并保留原始分辨率、高质量输出
   function scaleImageToCanvas(source, maxSide){
-    var max = maxSide || 2048;
+    // maxSide<=0 表示不缩放，保留原始分辨率（原画质）
+    var max = maxSide || 0;
     var w = source.width || source.naturalWidth || 1;
     var h = source.height || source.naturalHeight || 1;
     var longest = Math.max(w, h);
-    var scale = (longest > max) ? (max / longest) : 1;
+    var scale = (max > 0 && longest > max) ? (max / longest) : 1;
     var cw = Math.max(1, Math.round(w * scale));
     var ch = Math.max(1, Math.round(h * scale));
     var canvas = document.createElement('canvas');
@@ -783,7 +782,7 @@
   function canvasToBlob(canvas, mimeType){
     return new Promise(function(resolve, reject){
       try {
-        canvas.toBlob(function(blob){ blob ? resolve(blob) : reject(new Error('canvas_to_blob_failed')); }, mimeType, 0.8);
+        canvas.toBlob(function(blob){ blob ? resolve(blob) : reject(new Error('canvas_to_blob_failed')); }, mimeType, 0.92);
       } catch (e) { reject(e); }
     });
   }
@@ -793,6 +792,13 @@
       if (!isImage(file)) return resolve(file);
       var type = String(file.type || '').toLowerCase();
       if (type === 'image/gif') return resolve(file); // GIF 动图不压缩
+      // 原画质直传：浏览器普遍支持的格式不做任何缩放/转码，直接上传原文件，
+      // 现代浏览器(2020+)对 <img> 会自动应用 EXIF 方向，因而无需在此旋转。
+      if (type === 'image/jpeg' || type === 'image/png' || type === 'image/webp') {
+        return resolve(file);
+      }
+      // 仅 exotic 格式(heic/bmp/tiff 等)需转码为可跨浏览器显示的 jpeg/png，
+      // 但仍保留原始分辨率、以高质量导出。
       var isSmall = Number(file.size) < 200 * 1024;
       var outMime = (type === 'image/png') ? 'image/png' : 'image/jpeg';
 
@@ -822,7 +828,7 @@
         return new Promise(function(resolveImg){
           img.onload = function(){
             URL.revokeObjectURL(url);
-            encodeFrom(img, 2048, false).then(resolveImg);
+            encodeFrom(img, 0, false).then(resolveImg);
           };
           img.onerror = function(){ URL.revokeObjectURL(url); resolveImg(file); };
           img.src = url;
@@ -838,7 +844,7 @@
       catch (_) { resolve(fallbackCompress()); return; }
       bitmapPromise.then(function(bitmap){
         try {
-          var maxSide = isSmall ? Math.max(bitmap.width, bitmap.height) : 2048;
+          var maxSide = isSmall ? Math.max(bitmap.width, bitmap.height) : 0; // 0=不缩放，保留原分辨率
           encodeFrom(bitmap, maxSide, isSmall).then(function(result){
             if (bitmap.close) try { bitmap.close(); } catch (_) {}
             resolve(result);
