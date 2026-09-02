@@ -7778,6 +7778,9 @@ function probeDatabaseConnectivity() {
 }
 
 app.get('/health', async (req, res) => {
+  // ★ 加固：路由级 try/catch。probeDatabaseConnectivity 自身不会 reject，
+  //   但兜底任何意外同步/异步异常，避免健康探针挂起。
+  try {
   var nodeStatus = {
     ok: true,
     status: 'running',
@@ -7806,6 +7809,10 @@ app.get('/health', async (req, res) => {
       error: dbProbe.error
     }
   });
+  } catch (e) {
+    console.error('[health] exception:', e && e.message);
+    if (!res.headersSent) return res.status(503).json({ ok: false, error: 'health_check_failed' });
+  }
 });
 
 // 邮件配置健康检查（需管理员鉴权）
@@ -8381,6 +8388,9 @@ app.get('/admin/verify', verifyToken, (req, res) => {
 
 // 管理员登出
 app.post('/admin/logout', verifyToken, async (req, res) => {
+  // ★ 加固：路由级 try/catch，与其他管理路由对齐（persistRevokedToken 当前不 reject，
+  //   但未来重构或 Map/Cookie 操作异常时应返回 500 而非挂起请求）。
+  try {
   var token = req.adminToken;
   adminTokens.delete(token);
   var payload = verifySignedToken(token);
@@ -8392,6 +8402,7 @@ app.post('/admin/logout', verifyToken, async (req, res) => {
   }
   res.clearCookie('xtj_admin_token', { path: '/' });
   return res.json({ ok: true });
+  } catch (e) { console.error('[admin] logout:', e && e.message); return res.status(500).json({ error: '退出失败，请稍后重试' }); }
 });
 
 // ===================== 自动过期函数 ======================
@@ -11267,6 +11278,10 @@ app.get('/admin/bans', verifyToken, async (req, res) => {
 });
 
 app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
+  // ★ 修复：补全路由级 try/catch。此前仅 token 解析有局部 try，后续多个 await
+  //   supabase 若 reject（网络/DB 故障）会变成 unhandledRejection，请求挂起而非返回 500，
+  //   与 /admin/ban/:id/lift、/admin/blacklist 等同类管理路由的错误处理标准对齐。
+  try {
   var auditUser = 'unknown';
   try {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
@@ -11337,6 +11352,7 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
   revokeAllUserRefreshTokens(userNameVal).catch(function(){});
   await logAdminAudit('ban_user', auditUser, 'user:' + userNameVal);
   return res.json({ ok: true });
+  } catch (e) { console.error('[admin] ban:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 app.put('/admin/ban/:id/lift', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
@@ -11370,6 +11386,8 @@ app.get('/admin/mutes', verifyToken, async (req, res) => {
 });
 
 app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
+  // ★ 修复：与 /admin/ban 同样补全路由级 try/catch，防止 await supabase reject 时请求挂起。
+  try {
   var auditUser = 'unknown';
   try {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
@@ -11411,6 +11429,7 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   
   await logAdminAudit('mute_user', auditUser, 'user:' + userNameVal);
   return res.json({ ok: true });
+  } catch (e) { console.error('[admin] mute:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
 app.put('/admin/mute/:id/lift', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
@@ -17326,6 +17345,12 @@ app.get('/api/agent/image', rateLimit(3600000, 40), async (req, res) => {
       return res.end(buf);
     }
     return res.status(503).json({ error: '图片服务繁忙，暂时无法生成，请稍后重试', code: 'image_busy' });
+  } catch (eImg) {
+    // ★ 修复：原外层 try 只有 finally 没有 catch。upstream.arrayBuffer() 在响应体
+    //   读取途中连接中断时会 reject，此前会穿透为 unhandledRejection、请求挂起。
+    if (controller.signal.aborted) return res.status(504).json({ error: '生图超时，请重试', code: 'image_timeout' });
+    console.error('[agent-image] upstream body read failed:', eImg && eImg.message);
+    if (!res.headersSent) return res.status(502).json({ error: '生图服务响应中断，请重试', code: 'image_upstream_error' });
   } finally {
     clearTimeout(overallTimer);
   }

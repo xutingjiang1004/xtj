@@ -31,7 +31,10 @@ function assemble() {
   });
 
   // 非阻断告警：跨 part 的重复顶层函数 / window.x = 定义（防"覆盖式双定义"回归陷阱）
-  warnDuplicateDefinitions(manifest.parts, chunks);
+  // ★ 修复：chunks[0] 是文件头注释块，part 正文从 chunks[1] 开始，必须 slice(1)
+  //   才能与 manifest.parts 按相同下标对齐；此前直接传 chunks 导致整体错位 1，
+  //   每个 part 的重复定义都被错误标注成下一个 part 的文件名，误导排查。
+  warnDuplicateDefinitions(manifest.parts, chunks.slice(1));
 
   let out = chunks.join('\n');
   if (!out.endsWith('\n')) out += '\n';
