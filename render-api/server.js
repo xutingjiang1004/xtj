@@ -4505,6 +4505,22 @@ async function blockCatJobAfterCommentDelete(sourceCommentId, reason) {
   }
 }
 
+// 退还预占配额，带迁移 053 的向后兼容回退：
+// 新库(refund_cat_comment_quota 支持 p_post_id)按 (user, post) 精确退还本次触发对应记录，
+// 旧库(仅 p_user_name)自动回退到"删该用户最新一条"。任一失败都返回 null，绝不抛出扰乱主流程。
+async function callCatQuotaRefund(userName, postId, sourceCommentId) {
+  if (postId) {
+    try {
+      var r = await supabase.rpc('refund_cat_comment_quota', {
+        p_user_name: userName, p_post_id: postId, p_source_comment_id: sourceCommentId || null
+      });
+      if (!r.error) return r.data;
+    } catch (_) {}
+  }
+  try { return await supabase.rpc('refund_cat_comment_quota', { p_user_name: userName }); }
+  catch (_) { return null; }
+}
+
 // B4：生成任务因服务端原因（provider 故障 / 非法返回 / DB 抖动）重试耗尽转 failed 时，
 // 返还触发时预占的一次每小时配额。安全拦截(blocked)与限流不会走到这里——blocked 走独立
 // CAS，限流时 consume 返回 allowed=false、根本没写入 ai_cat_rate_limits。
@@ -4520,8 +4536,7 @@ async function refundCatQuotaOnce(failedJob) {
       .select('id')
       .maybeSingle();
     if (mark.error || !mark.data) return; // 已返还或被其它路径处理，不重复返还
-    var refund = await supabase.rpc('refund_cat_comment_quota', { p_user_name: userName });
-    if (refund.error) console.warn('[CAT_AI] quota refund rpc failed:', catErrorText(refund.error));
+    await callCatQuotaRefund(userName, failedJob.post_id, failedJob.source_comment_id);
   } catch (e) { /* best-effort，返还失败不影响主流程 */ }
 }
 
@@ -4869,14 +4884,13 @@ async function recoverStaleCatJobs() {
   try {
     var staleTime = new Date(Date.now() - CAT_AI_TASK_TIMEOUT_MS).toISOString();
     var { data: staleJobs } = await supabase.from('ai_comment_reply_jobs')
-      .select('id').eq('status', 'processing').lt('started_at', staleTime).limit(5);
+      .select('id, attempts, request_user_id').eq('status', 'processing').lt('started_at', staleTime).limit(5);
     if (staleJobs && staleJobs.length) {
       for (var i = 0; i < staleJobs.length; i++) {
-        var staleResult = await updateCatJobCAS(staleJobs[i].id, 'processing', {
-          status: 'failed', error_message: 'task timeout',
-          completed_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        });
-        logCatCAS('stale -> failed', staleResult);
+        // 修复：超时任务不直接标 failed。复用 requeueCatJob——前 3 次带退避重试，
+        // 重试耗尽转终态 failed 时退还原预占配额(refundCatQuotaOnce)，避免用户丢次数且无回复。
+        var staleResult = await requeueCatJob(staleJobs[i], 'task timeout');
+        logCatCAS('stale -> ' + (staleResult && staleResult.ok && staleResult.updated ? 'pending/failed' : 'no-op'), staleResult);
       }
     }
   } catch (e) { /* non-critical */ }
@@ -5195,7 +5209,12 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
       return res.json({ ok: true, status: 'pending', job_id: existingJob.id, source_comment_id: commentId });
     }
 
-    // 10. 无 Job — 复用 createCatReplyJob 创建新任务
+    // 10. 无 Job — 复用 createCatReplyJob 创建新任务。
+    // 修复：与"有 job 的失败重试"(步骤9)一致，先占配额，避免从未建过 job 的重试绕过每小时限制。
+    var newJobQuota = await checkCatRateLimit(sourceComment.user_name, sourceComment.post_id);
+    if (!newJobQuota.allowed) {
+      return res.status(429).json({ ok: false, code: newJobQuota.reason || 'rate_limited', error: '小猫当前无法重试，请稍后再试', source_comment_id: commentId });
+    }
     var newJob = await createCatReplyJob(commentId, sourceComment.post_id, userName);
     if (!newJob) {
       var { data: doubleCheck, error: doubleCheckErr } = await supabase.from('ai_comment_reply_jobs')
@@ -5206,6 +5225,8 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
       if (doubleCheck) {
         return res.json({ ok: true, status: doubleCheck.status, job_id: doubleCheck.id, source_comment_id: commentId });
       }
+      // 建任务失败且确认无既有任务：退还上面刚预占的配额，避免在此路径泄漏配额
+      await callCatQuotaRefund(sourceComment.user_name, sourceComment.post_id, String(commentId));
       return res.status(503).json({ error: '创建重试任务失败或触发频率限制', code: 'create_job_failed', retryable: true });
     }
 
@@ -9918,6 +9939,15 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
       if (rateLimit.allowed) {
         var job = await createCatReplyJob(inserted.data.id, postId, req.userName);
         if (job) await recordCatRateLimit(req.userName, postId);
+        else {
+          // 修复：createCatReplyJob 失败(唯一冲突 23505 除外)时，确认"确实没有对应任务"
+          // 才退还刚预占的配额，避免用户丢一次机会且没有任何任务；23505 表示已有任务则不退。
+          var chkCatJob = await supabase.from('ai_comment_reply_jobs')
+            .select('id').eq('source_comment_id', inserted.data.id).maybeSingle();
+          if (!chkCatJob.error && !chkCatJob.data) {
+            await callCatQuotaRefund(req.userName, postId, String(inserted.data.id));
+          }
+        }
         return res.status(201).json({
           ok: true,
           data: inserted.data,
