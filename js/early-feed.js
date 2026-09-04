@@ -23,7 +23,8 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;'); // L 级加固：单引号同样转义，防止拼接进单引号属性时逃逸
   }
 
   function postText(content) {

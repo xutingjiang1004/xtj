@@ -131,16 +131,52 @@ async function fetchAllRows(supabase) {
   return rows;
 }
 
+// 只读解析仓库 HEAD（不执行 git 命令，兼容非 git 部署目录）
+function readRepoHead() {
+  try {
+    const gitDir = path.join(ROOT, '.git');
+    const headFile = path.join(gitDir, 'HEAD');
+    if (!fs.existsSync(headFile)) return null;
+    const headContent = fs.readFileSync(headFile, 'utf8').trim();
+    const refMatch = headContent.match(/^ref:\s*(.+)$/);
+    if (refMatch) {
+      const refPath = path.join(gitDir, refMatch[1]);
+      if (!fs.existsSync(refPath)) return null;
+      return fs.readFileSync(refPath, 'utf8').trim();
+    }
+    return /^[0-9a-f]+$/i.test(headContent) ? headContent : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function isCommitRef(value) {
+  return /^[0-9a-f]{40}$/.test(value) || /^[0-9a-f]{64}$/.test(value);
+}
+
 async function main() {
-  // 默认 dry-run；必须显式 --apply 且带 --confirm=<项目ref> 二次确认才执行真实删除
+  // 默认 dry-run；真实删除需 --apply 且 --confirm 精确匹配当前仓库 HEAD（二次确认）
   const APPLY = process.argv.includes('--apply');
   const confirmArg = process.argv.find((a) => a.indexOf('--confirm=') === 0);
   const confirmRef = confirmArg ? confirmArg.slice('--confirm='.length) : '';
-  if (!APPLY || !confirmRef) {
+  const repoHead = readRepoHead();
+  let confirmOk = APPLY && isCommitRef(confirmRef);
+  if (repoHead && confirmOk) confirmOk = confirmRef === repoHead;
+  if (!confirmOk) {
     console.log('[DRY-RUN] 默认安全模式：仅预览，不执行实际删除操作。');
-    console.log('[DRY-RUN] 执行真实删除需：--apply --confirm=<项目ref>（如 git rev-parse HEAD 的输出）。');
+    if (repoHead) {
+      console.log('[DRY-RUN] 执行真实删除需：--apply --confirm=' + repoHead + '（当前仓库 HEAD）');
+    } else {
+      console.log('[DRY-RUN] 执行真实删除需：--apply --confirm=<40/64 位 git commit 哈希>');
+    }
+    if (APPLY && confirmRef && !isCommitRef(confirmRef)) {
+      console.log('[DRY-RUN] 提示：--confirm 必须是 commit 哈希格式，已拒绝非哈希值。');
+    }
+    if (repoHead && confirmRef && isCommitRef(confirmRef) && confirmRef !== repoHead) {
+      console.log('[DRY-RUN] 提示：--confirm 与当前 HEAD 不一致（HEAD=' + repoHead + '），已拒绝执行。');
+    }
   }
-  const dryRun = !APPLY || !confirmRef;
+  const dryRun = !confirmOk;
 
   loadRuntimeEnv();
   const supabaseUrl = process.env.SUPABASE_URL;

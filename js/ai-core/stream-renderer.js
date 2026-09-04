@@ -188,10 +188,17 @@
       getRendered: function () { return rendered; },
       finish: function (finalText) {
         if (cancelled || !targetEl) return;
+        var hasFinal = (typeof finalText === 'string' && finalText.length > 0);
+        // M60：未提供 finalText 时先刷新未刷出的缓冲，避免流式尾部内容被丢弃
+        // （此处的 emitText 在 finished 置位前执行，不会重复触发 onDone）。
+        if (!hasFinal && pending) {
+          clearFrame();
+          emitText(true);
+        }
         clearFrame();
         finished = true;
         paused = false;
-        if (typeof finalText === 'string' && finalText.length > 0) rendered = finalText;
+        if (hasFinal) rendered = finalText;
         pending = '';
         removeCursor();
         if (!rendered || rendered.trim().length === 0) {

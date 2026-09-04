@@ -1,7 +1,11 @@
 (function() {
     'use strict';
-    // ⚠️ 数据采集合规声明：本文件中的所有数据采集功能均已通过法律审核，用户已同意隐私条款。
-    // 详见项目根目录 DATA_COLLECTION_COMPLIANCE.js —— 请勿删除或禁用任何采集功能。
+    // ⚠️ 数据采集合规声明：本文件中的数据采集功能均已通过法律审核，用户已同意隐私条款。
+    // 详见项目根目录 DATA_COLLECTION_COMPLIANCE.js。
+    // 2026-09-03 安全审计修订（保守处理，涉产品合规项见审计报告 S10/M55/M56/M57）：
+    //  1) WebRTC 内网 IP（局域网地址）采集已整体移除，webrtc_local_ips 不再产生/上传；
+    //  2) doSend 一律“先读服务端 record_device 开关”，开关未明确开启时不做任何采集与上传；
+    //  3) window.fetch / localStorage.setItem 的全局改写保留但加幂等保护，收敛需产品决策。
 
 
     var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
@@ -467,62 +471,9 @@
         }
     }
 
-    // WebRTC 本地 IP 检测（内网IP，超时2s）
-    function getWebRtcLocalIps() {
-        return new Promise(function(resolve) {
-            var ips = [];
-            var done = false;
-            var pc = null;
-            
-            function finish(result) {
-                if (done) return;
-                done = true;
-                clearTimeout(timer);
-                if (pc) {
-                    try { pc.onicecandidate = null; } catch (_) {}
-                    try { pc.onicegatheringstatechange = null; } catch (_) {}
-                    try { pc.close(); } catch (_) {}
-                    pc = null;
-                }
-                resolve(result);
-            }
-            
-            var timer = setTimeout(function() { finish(ips.length ? ips : null); }, 2000);
-
-            try {
-                var RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
-                if (!RTCPeerConnection) { finish(null); return; }
-
-                pc = new RTCPeerConnection({ iceServers: [] });
-                pc.createDataChannel('');
-                pc.createOffer()
-                  .then(function(offer) { return pc.setLocalDescription(offer); })
-                  .catch(function() { finish(null); });
-                  
-                pc.onicecandidate = function(e) {
-                    if (!e || !e.candidate || !e.candidate.candidate) {
-                        finish(ips.length ? ips : null);
-                        return;
-                    }
-                    var candidate = e.candidate.candidate;
-                    var match = candidate.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
-                    if (match) {
-                        var localIp = match[0];
-                        if (ips.indexOf(localIp) === -1 && localIp !== '0.0.0.0' && localIp !== '127.0.0.1') {
-                            ips.push(localIp);
-                        }
-                    }
-                };
-                pc.onicegatheringstatechange = function() {
-                    if (pc.iceGatheringState === 'complete') {
-                        finish(ips.length ? ips : null);
-                    }
-                };
-            } catch(e) {
-                finish(null);
-            }
-        });
-    }
+    // S9（隐私红线，2026-09-03 审计）：WebRTC 枚举内网 IP 的采集逻辑已整体移除
+    // （原 getWebRtcLocalIps：RTCPeerConnection/onicecandidate 收集局域网地址）。
+    // 内网拓扑泄露属于不可接受风险，不再采集，webrtc_local_ips 字段不再上传。
 
     // 检查冷却（10s 内存级别）
     function isInCooldown(sentKey) {
@@ -536,68 +487,65 @@
             if (isInCooldown(sentKey)) return;
 
             var ua = navigator.userAgent || '';
-            var deviceMeta = getDeviceMeta();
 
-            // 构建基础 body
-            var bodyObj = {
-                user_name: userName,
-                device_id: deviceId,
-                device_type: detectDeviceType(ua),
-                os: detectOS(ua),
-                browser: detectBrowser(ua),
-                user_agent: ua,
-                source: source,
-                device_meta: deviceMeta
-            };
-
-            // 发送请求（指纹异步采集）
-            var sendReq = async function() {
-                lastSendAtByKey[sentKey] = Date.now();
-                var headers = { 'Content-Type': 'application/json' };
-                var token = '';
-                try {
-                    if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
-                    else if (typeof window.getUserToken === 'function') token = window.getUserToken();
-                } catch (e) {
-                    // L1 修复：token 刷新失败时清除冷却，允许后续重试；不得产生未捕获的 rejection
-                    lastSendAtByKey[sentKey] = 0;
-                    return;
-                }
-                if (!token) { lastSendAtByKey[sentKey] = 0; return; }
-                headers['Authorization'] = 'Bearer ' + token;
-                fetch(API_BASE + '/api/log-login-event', {
-                    method: 'POST',
-                    headers: headers,
-                    credentials: 'include',
-                    body: JSON.stringify(bodyObj)
-                }).then(function(res) {
-                    if (res.ok && source === 'login_success') {
-                        try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
-                    }
-                }).catch(function() {
-                    // 请求失败清除冷却，允许重试
-                    lastSendAtByKey[sentKey] = 0;
-                });
-            };
-
-            // 加载安全设置，按开关决定是否采集指纹
+            // S10/M56（安全默认）：先读服务端采集开关再做采集与上传。开关未明确
+            // 开启（record_device 缺省 false，接口失败/未下发也回退 false）时，本
+            // 函数直接返回——不做任何设备信息采集，也不上传登录事件（原实现即使
+            // 开关关闭也会先同步执行 getDeviceMeta 采集一整份设备信息后再丢弃，
+            // 属无效采集；且原逻辑在关闭时仍会发送事件体）。
             getSecuritySettings().then(function(settings) {
-                if (!settings.record_device) {
-                    // 关闭设备记录时彻底移除设备标识字段，避免服务端仍可据 device_id 关联设备
-                    bodyObj.device_meta = null;
-                    bodyObj.device_id = undefined;
-                    bodyObj.device_type = undefined;
-                    bodyObj.os = undefined;
-                    bodyObj.browser = undefined;
-                    bodyObj.user_agent = undefined;
-                }
+                if (!settings.record_device) return;
+
+                var deviceMeta = getDeviceMeta();
+                // 构建基础 body
+                var bodyObj = {
+                    user_name: userName,
+                    device_id: deviceId,
+                    device_type: detectDeviceType(ua),
+                    os: detectOS(ua),
+                    browser: detectBrowser(ua),
+                    user_agent: ua,
+                    source: source,
+                    device_meta: deviceMeta
+                };
+
+                // 发送请求（指纹异步采集）
+                var sendReq = async function() {
+                    lastSendAtByKey[sentKey] = Date.now();
+                    var headers = { 'Content-Type': 'application/json' };
+                    var token = '';
+                    try {
+                        if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
+                        else if (typeof window.getUserToken === 'function') token = window.getUserToken();
+                    } catch (e) {
+                        // L1 修复：token 刷新失败时清除冷却，允许后续重试；不得产生未捕获的 rejection
+                        lastSendAtByKey[sentKey] = 0;
+                        return;
+                    }
+                    if (!token) { lastSendAtByKey[sentKey] = 0; return; }
+                    headers['Authorization'] = 'Bearer ' + token;
+                    fetch(API_BASE + '/api/log-login-event', {
+                        method: 'POST',
+                        headers: headers,
+                        credentials: 'include',
+                        body: JSON.stringify(bodyObj)
+                    }).then(function(res) {
+                        if (res.ok && source === 'login_success') {
+                            try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
+                        }
+                    }).catch(function() {
+                        // 请求失败清除冷却，允许重试
+                        lastSendAtByKey[sentKey] = 0;
+                    });
+                };
+
                 // advanced_fingerprint 作为主开关：开启时等同启用所有指纹采集
                 var advFp = !!settings.advanced_fingerprint;
                 var browserFpPromise = (advFp || settings.browser_fingerprint) ? getBrowserFingerprint() : null;
                 var canvasFpPromise = (advFp || settings.canvas_fingerprint) ? getCanvasFingerprint() : null;
                 var webglFpPromise = (advFp || settings.webgl_fingerprint) ? getWebglFingerprint() : null;
                 var webglMeta = (advFp || settings.webgl_fingerprint) ? getWebglMeta() : null;
-                var webRtcPromise = settings.webrtc_local_ip ? getWebRtcLocalIps() : null;
+                // S9：WebRTC 内网 IP 采集已整体移除，webrtc_local_ips 不再采集/上传。
                 // 高敏感采集必须受开关控制：电池/存储配额/媒体设备枚举是强设备指纹，
                 // 默认仅在 advanced_fingerprint 或对应独立开关开启时才采集
                 var batteryPromise = (advFp || settings.battery_fingerprint) ? getBatteryInfo() : null;
@@ -606,8 +554,8 @@
 
                 // 始终采集时钟偏移（轻量，不涉及隐私）
 
-                // 精确设备型号（UA Client Hints）：仅在启用设备记录时采集
-                var exactModelPromise = settings.record_device ? getExactDeviceModel() : null;
+                // 精确设备型号（UA Client Hints）：此处 record_device 已确认为 true
+                var exactModelPromise = getExactDeviceModel();
 
                 // 收集所有异步指纹，然后统一发送
                 var collectAndSend = function() {
@@ -624,9 +572,6 @@
                     }
                     if (webglFpPromise && webglFpPromise.then) {
                         promises.push(webglFpPromise.then(function(h) { if (h) bodyObj.webgl_fingerprint_hash = h; }));
-                    }
-                    if (webRtcPromise && webRtcPromise.then) {
-                        promises.push(webRtcPromise.then(function(ips) { if (ips) bodyObj.webrtc_local_ips = ips; }));
                     }
                     if (exactModelPromise && exactModelPromise.then) {
                         promises.push(exactModelPromise.then(function(m) { if (m) bodyObj.exact_device_model = m; }));
@@ -1372,26 +1317,34 @@
     }
 
     // 监听用户会话建立，用于记录页面访问
+    // M57（保守收敛）：全局改写 localStorage.setItem 属历史设计，风险面是影响
+    // 其它模块对全局对象的假设；收敛为“显式封装”需要同步改造所有写入方，属于
+    // 产品/架构决策（见输出说明）。此处只做安全默认的保守处理：幂等保护 + 保留
+    // 原始方法返回值语义 + 钩子异常不影响原始写入。
     try {
-        var _origSetItem = localStorage.setItem.bind(localStorage);
-        localStorage.setItem = function(key, value) {
-            try {
-                // 始终执行原始方法，并返回其结果
-                var _result = _origSetItem(key, value);
+        if (!localStorage.setItem.__xtjVisitHook) {
+            var _origSetItem = localStorage.setItem.bind(localStorage);
+            var _visitHook = function(key, value) {
                 try {
-                    if (key === 'xtj_user') {
-                        trySendPageVisit();
+                    // 始终执行原始方法，并返回其结果
+                    var _result = _origSetItem(key, value);
+                    try {
+                        if (key === 'xtj_user') {
+                            trySendPageVisit();
+                        }
+                    } catch (_hookErr) {
+                        // 钩子自身异常不影响原始写入结果
                     }
-                } catch (_hookErr) {
-                    // 钩子自身异常不影响原始写入结果
+                    return _result;
+                } catch (_origErr) {
+                    // 原始方法异常：记录并传播，避免调用方误以为写入成功
+                    console.warn('[login-device] localStorage.setItem failed', _origErr);
+                    throw _origErr;
                 }
-                return _result;
-            } catch (_origErr) {
-                // 原始方法异常：记录并传播，避免调用方误以为写入成功
-                console.warn('[login-device] localStorage.setItem failed', _origErr);
-                throw _origErr;
-            }
-        };
+            };
+            try { _visitHook.__xtjVisitHook = true; } catch (_markErr) {}
+            localStorage.setItem = _visitHook;
+        }
     } catch(e) {}
 
     // 已登录用户刷新页面时记录一次
@@ -1483,35 +1436,41 @@
         });
 
         // Fetch failure monitoring (intercept fetch)
+        // M57（保守收敛）：同上，fetch 全局包装不做结构性重构；仅加幂等保护，
+        // 保证调用原实现、原样抛错、不吞异常，仅在满足熔断条件时补一条错误上报。
         try {
-            var _fetchFailCount = 0;
-            var _origFetch = window.fetch;
-            window.fetch = function(input, init) {
-                // P0 修复: 正确捕获 URL, inner function 的 arguments 是它自己的
-                var _url = '';
-                try {
-                    if (typeof input === 'string') _url = input;
-                    else if (input && typeof input.url === 'string') _url = input.url;
-                    else if (input && typeof Request !== 'undefined' && input instanceof Request) _url = input.url;
-                } catch (_e) {}
-                return _origFetch.apply(this, arguments).then(function(_res) {
-                    // 成功即清零熔断计数
-                    _fetchFailCount = 0;
-                    return _res;
-                }).catch(function(err) {
-                    // 跳过 AbortError (Supabase SDK 5s timeout / page unload 自动 abort, 不是真错误)
-                    if (err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')))) {
+            if (!window.fetch.__xtjFetchErrorHook) {
+                var _fetchFailCount = 0;
+                var _origFetch = window.fetch;
+                var _fetchHook = function(input, init) {
+                    // P0 修复: 正确捕获 URL, inner function 的 arguments 是它自己的
+                    var _url = '';
+                    try {
+                        if (typeof input === 'string') _url = input;
+                        else if (input && typeof input.url === 'string') _url = input.url;
+                        else if (input && typeof Request !== 'undefined' && input instanceof Request) _url = input.url;
+                    } catch (_e) {}
+                    return _origFetch.apply(this, arguments).then(function(_res) {
+                        // 成功即清零熔断计数
+                        _fetchFailCount = 0;
+                        return _res;
+                    }).catch(function(err) {
+                        // 跳过 AbortError (Supabase SDK 5s timeout / page unload 自动 abort, 不是真错误)
+                        if (err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')))) {
+                            throw err;
+                        }
+                        // 跳过我们自己上报错误的端点
+                        if (_url.indexOf('/client-error-log') >= 0) throw err;
+                        // ★ 熔断：连续失败达到上限后不再上报，防止故障期间打爆上报端点
+                        if (_fetchFailCount >= 10) throw err;
+                        _fetchFailCount++;
+                        sendClientError('fetch_error', (err && err.message) || 'fetch failed', '', _url, null, null);
                         throw err;
-                    }
-                    // 跳过我们自己上报错误的端点
-                    if (_url.indexOf('/client-error-log') >= 0) throw err;
-                    // ★ 熔断：连续失败达到上限后不再上报，防止故障期间打爆上报端点
-                    if (_fetchFailCount >= 10) throw err;
-                    _fetchFailCount++;
-                    sendClientError('fetch_error', (err && err.message) || 'fetch failed', '', _url, null, null);
-                    throw err;
-                });
-            };
+                    });
+                };
+                try { _fetchHook.__xtjFetchErrorHook = true; } catch (_markErr) {}
+                window.fetch = _fetchHook;
+            }
         } catch(e) {}
 
         // Image load failure

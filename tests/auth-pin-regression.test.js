@@ -17,7 +17,8 @@ test('protected auth only clears a genuinely expired session', () => {
 });
 
 test('login establishes the HttpOnly refresh-cookie session', () => {
-  assert.match(core, /fetch\(API_BASE \+ '\/api\/user\/login',[\s\S]*?credentials: 'include'/);
+  // 登录走 fetchWithTimeout 并携带 credentials:'include'（HttpOnly refresh-cookie 会话）
+  assert.match(core, /fetchWithTimeout\(API_BASE \+ '\/api\/user\/login',[\s\S]*?credentials: 'include'/);
 });
 
 test('pin uses the shared protected request with one 401 refresh retry', () => {
@@ -26,9 +27,11 @@ test('pin uses the shared protected request with one 401 refresh retry', () => {
   assert.match(core, /xtjProtectedFetch\('\/api\/post\/pin'/);
 });
 
-test('missing or wrongly typed pin RPC uses the authenticated compatibility path', () => {
-  assert.match(server, /rpcError\.code === '22P02'/);
-  assert.match(server, /migrationMissing[\s\S]*clearResult[\s\S]*pinResult/);
+test('missing pin RPC (PGRST202/42883) uses the authenticated compatibility path', () => {
+  // ★ 审计修复 M13 后的契约：仅"函数/迁移缺失"（PGRST202/42883）才降级 service_role
+  //   直写兼容路径；42501（权限不足）/22P02（类型错误）为真实业务错误，禁止降级。
+  assert.match(server, /var migrationMissing = rpcError\.code === 'PGRST202'/);
+  assert.match(server, /migrationMissing[\s\S]*pinResult[\s\S]*unpinResult/);
   assert.match(server, /unpinResult/);
 });
 

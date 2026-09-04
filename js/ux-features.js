@@ -368,8 +368,8 @@
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
         if (!k) continue;
-        // keep auth keys
-        if (/^xtj_user$|^xtj_.*token|^xtj_theme|^xtj_font_scale|^xtj_motion|^xtj-notif/.test(k)) continue;
+        // keep auth keys（M63：xtj_user_session 等会话/身份键此前被 ^xtj_user$ 精确匹配漏保而误删，导致用户被登出）
+        if (/^xtj_user$|^xtj_user_session$|^xtj_admin_session$|^xtj_username$|^xtj_user_name$|^xtj_user_id$|^xtj_pw_hash$|^xtj_.*token|^xtj_theme|^xtj_font_scale|^xtj_motion|^xtj-notif/.test(k)) continue;
         if (k.indexOf('xtj_') === 0 || k.indexOf('xtj-') === 0) keys.push(k);
       }
       keys.forEach(function (k) {

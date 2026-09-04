@@ -122,6 +122,12 @@
           if (buffer) {
             buffer = processSSEBuffer(buffer, onEvent, options, sseState) || '';
           }
+          // M59：processSSEBuffer 会把末行当作“未完成行”留在 buffer 里直接丢弃，
+          // 流结束时应把残余行补一个换行再送进处理，避免最后一条事件（不带
+          // 结尾换行的 data/event 行）被截断。
+          if (buffer) {
+            buffer = processSSEBuffer(buffer + '\n', onEvent, options, sseState) || '';
+          }
           flushPendingEvent();
           cleanup();
           return;

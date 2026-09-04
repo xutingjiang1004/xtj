@@ -243,6 +243,7 @@
     var adminDataLoading = false;
     var adminTabDataLoaded = {};
     var adminDataLoadPromises = {};
+    var _allDataLoadPromise = null; // ★ M51：loadAllData in-flight Promise（复用，替代仅布尔锁）
     var adminTabSwitchGeneration = 0;
     var adminClipboardPage = 1, adminClipboardTotal = 0, adminClipboardPages = 1;
     var searchUser = '', searchPost = '';
@@ -677,7 +678,23 @@
         }, true);
     }
 
-async function initAdminClient() {
+    // ★ M48：visibilitychange 改为命名处理函数（保存引用），登录时可先移除再注册、
+    // logout 时能精确 removeEventListener，避免匿名监听器随每次登录累积造成泄漏
+    function _handleAdminVisibilityChange() {
+        if (!document.hidden) {
+            refreshRegisterAlerts().catch(function() {});
+            if (_adminReportPollTimer) {
+                loadReportsData().then(function() {
+                    if (currentTab === 'reports') {
+                        var el = document.getElementById('tabReports');
+                        if (el) renderReportsTab(el);
+                    }
+                }).catch(function() {});
+            }
+        }
+    }
+
+    async function initAdminClient() {
         document.getElementById('loginWrap').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         resetActivityTimer();
@@ -725,19 +742,9 @@ async function initAdminClient() {
             } catch (e) { /* 静默, 下次重试 */ }
         }, 30000);
         // 恢复可见时立即补一轮（此前隐藏期间的变更要等下一个轮询周期）
-        document.addEventListener('visibilitychange', function() {
-            if (!document.hidden) {
-                refreshRegisterAlerts().catch(function() {});
-                if (_adminReportPollTimer) {
-                    loadReportsData().then(function() {
-                        if (currentTab === 'reports') {
-                            var el = document.getElementById('tabReports');
-                            if (el) renderReportsTab(el);
-                        }
-                    }).catch(function() {});
-                }
-            }
-        });
+        // ★ M48：先移除再注册，防止同页面多次登录/初始化叠加重复监听器
+        document.removeEventListener('visibilitychange', _handleAdminVisibilityChange);
+        document.addEventListener('visibilitychange', _handleAdminVisibilityChange);
     }
 
     // ===================== 管理员登录（通过 API 或本地回退） =====================
@@ -833,6 +840,8 @@ async function initAdminClient() {
         sessionTimeoutMonitorStarted = false;
         if (_adminReportPollTimer) { clearInterval(_adminReportPollTimer); _adminReportPollTimer = null; }
         if (onlineRefreshTimer) { clearInterval(onlineRefreshTimer); onlineRefreshTimer = null; }
+        // ★ M48：登出时移除 visibilitychange 监听（用命名函数精确移除，防止随登录累积）
+        document.removeEventListener('visibilitychange', _handleAdminVisibilityChange);
         ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
             document.removeEventListener(evt, resetActivityTimer);
         });
@@ -842,6 +851,8 @@ async function initAdminClient() {
         annList = [];
         adminTabDataLoaded = {}
         adminDataLoadPromises = {};
+        _allDataLoadPromise = null;
+        adminDataLoading = false;
         adminTabSwitchGeneration++;
         clearSession();
         document.getElementById('loginWrap').style.display = 'flex';
@@ -879,9 +890,16 @@ async function initAdminClient() {
     });
 
     async function loadAllData(keepTab) {
-        if (adminDataLoading) return;
+        // ★ M51：加载中重复调用不再直接 return（否则并发触发的刷新会被静默丢弃），
+        // 改为复用 in-flight Promise，与 _loadSingleDataType 的 adminDataLoadPromises 模式保持一致。
+        if (_allDataLoadPromise) return _allDataLoadPromise;
         adminDataLoading = true;
-        var lockTimeout = setTimeout(function() { adminDataLoading = false; }, 30000);
+        var lockTimeout = setTimeout(function() {
+            // 30s 安全阀：请求挂起时解除占用，允许后续调用重新发起加载
+            adminDataLoading = false;
+            _allDataLoadPromise = null;
+        }, 30000);
+        var pending = (async function() {
         try {
             if (!API_BASE) {
             throw new Error('API 未配置或未登录，拒绝加载数据');
@@ -903,12 +921,15 @@ async function initAdminClient() {
             allPosts.forEach(function(p) { userMap[p.user_name] = true; });
             allLikes.forEach(function(l) { userMap[l.user_name] = true; });
             allComments.forEach(function(c) { userMap[c.user_name] = true; });
-            
+
+            // ★ M50：重建 allUsers 时按 name 合并已有对象，保留此前合并的 info
+            //（如 /admin/users 拉取、用户详情弹窗补充的授权/注册信息），避免刷新后被置空导致详情闪烁
+            var prevUserByName = {};
+            allUsers.forEach(function(u) {
+                if (u && u.name && !prevUserByName[u.name]) prevUserByName[u.name] = u;
+            });
             allUsers = Object.keys(userMap).sort().map(function(u) {
-                return {
-                    name: u,
-                    info: null
-                };
+                return prevUserByName[u] || { name: u, info: null };
             });
 
             if (!keepTab) {
@@ -935,6 +956,13 @@ async function initAdminClient() {
         } finally {
             adminDataLoading = false;
             try { clearTimeout(lockTimeout); } catch (e) {}
+        }
+        })();
+        _allDataLoadPromise = pending;
+        try {
+            return await pending;
+        } finally {
+            if (_allDataLoadPromise === pending) _allDataLoadPromise = null;
         }
     }
 
@@ -1316,12 +1344,14 @@ async function initAdminClient() {
     }
 
     var _userFlagsCache = null;
-    var _lastFlagLengths = null;
+    var _flagDataRefs = null;
     function getUserStateFlags(userName) {
-        var flagLengths = (bansData || []).length + ',' + (mutesData || []).length + ',' + (blacklistData || []).length;
-        if (!_userFlagsCache || _lastFlagLengths !== flagLengths) {
+        // ★ M49：失效键不再用“数组长度”——封禁/禁言/黑名单状态翻转但长度不变时标签会陈旧。
+        // 本文件内三个名单数组只在接口加载后整体重新赋值（无 push / 原地 is_active 翻转），
+        // 因此以“数组引用”做失效指纹：引用变化即视为内容可能变化并重建缓存，判定为 O(1)。
+        if (!_userFlagsCache || !_flagDataRefs || _flagDataRefs.bans !== bansData || _flagDataRefs.mutes !== mutesData || _flagDataRefs.blacklist !== blacklistData) {
             _userFlagsCache = { bans: {}, mutes: {}, blacklist: {} };
-            _lastFlagLengths = flagLengths;
+            _flagDataRefs = { bans: bansData, mutes: mutesData, blacklist: blacklistData };
             (bansData || []).forEach(function(b) { if (b && b.is_active && b.user_name) _userFlagsCache.bans[b.user_name] = true; });
             (mutesData || []).forEach(function(m) { if (m && m.is_active && m.user_name) _userFlagsCache.mutes[m.user_name] = true; });
             (blacklistData || []).forEach(function(bl) { if (bl && bl.is_active && bl.user_name) _userFlagsCache.blacklist[bl.user_name] = true; });
@@ -3361,7 +3391,7 @@ async function initAdminClient() {
         h += '<span class="filter-chip' + (errorLogTypeFilter === 'all' ? ' active' : '') + '" onclick="window.setErrorLogTypeFilter(\'all\')">全部</span>';
         types.slice(0, 8).forEach(function(t) {
             var label = t === 'js_error' ? 'JS错误' : (t === 'unhandled_rejection' ? 'Promise异常' : (t === 'fetch_error' ? '请求失败' : (t === 'img_error' ? '图片失败' : (t === 'blank_page' ? '白屏' : t))));
-            h += '<span class="filter-chip' + (errorLogTypeFilter === t ? ' active' : '') + '" onclick="window.setErrorLogTypeFilter(\'' + t + '\')">' + label + ' (' + typeCounts[t] + ')</span>';
+            h += '<span class="filter-chip' + (errorLogTypeFilter === t ? ' active' : '') + '" onclick="window.setErrorLogTypeFilter(\'' + safeJsStr(t) + '\')">' + escapeHtml(label) + ' (' + typeCounts[t] + ')</span>';
         });
         h += '</div>';
 

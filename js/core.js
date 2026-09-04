@@ -9254,10 +9254,16 @@ function renderProfileActivityList(kind) {
             // 安全地过滤 URL，防止 javascript: 等 XSS 攻击
             function sanitizeUrl(url) {
                 var s = String(url == null ? '' : url).trim();
-                // 只允许 http://, https://, data:, blob: 协议
-                if (/^(https?:|data:|blob:)/i.test(s)) return s;
-                // 相对路径也允许（以 / 或 ./ 开头，但排除协议相对 URL //）
-                if (/^\./.test(s) || (/^\//.test(s) && !/^\/\//.test(s))) return s;
+                // ★ M45：收紧协议白名单——http/https 与 blob:（本地媒体对象）放行
+                if (/^https?:/i.test(s)) return s;
+                if (/^blob:/i.test(s)) return s;
+                // data: 仅放行可安全内联的位图类型，禁止 data:text/html 等可执行载荷
+                // （svg+xml 可能携带脚本面，一并拒绝）
+                if (/^data:image\/(png|jpeg|gif|webp)(;|,)/i.test(s)) return s;
+                // 相对路径（./ 或 ../ 开头，排除 .evil 这类裸点开头写法）
+                if (/^\.\.?\//.test(s)) return s;
+                // 以单个 / 开头的站内路径也允许（但排除协议相对 URL //）
+                if (/^\//.test(s) && !/^\/\//.test(s)) return s;
                 return '';
             }
             window.sanitizeUrl = sanitizeUrl;
