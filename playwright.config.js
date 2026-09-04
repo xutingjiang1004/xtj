@@ -1,3 +1,10 @@
+// ★ 2026-09-04 审计 M69 修复：本地/CI 测试严禁连真实 Supabase。
+//   下方 webServer env 全部使用测试专用假值常量，不再从 process.env 回退，
+//   避免开发者本机或 CI 环境注入了真实 SUPABASE_SERVICE_KEY 时测试直连真库
+//   （写入/删除/改额度的用例可能污染生产数据）。
+const TEST_ONLY_API_SECRET = 'xtj-test-only-api-secret-not-for-production';
+const TEST_ONLY_SUPABASE_KEY = 'xtj-test-only-supabase-service-key-not-for-production';
+
 const { defineConfig } = require('@playwright/test');
 
 module.exports = defineConfig({
@@ -39,8 +46,10 @@ module.exports = defineConfig({
       timeout: 60000,
       env: {
         PORT: '10000',
-        API_SECRET: process.env.API_SECRET || 'test-secret',
-        SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY || 'test-key',
+        // ★ M69：强制测试假值。若某个用例确实需要真实凭据（如与真实第三方联调），
+        //   请单独显式命名并注释用途，禁止使用 process.env.X || 'xxx' 形式的静默回退。
+        API_SECRET: TEST_ONLY_API_SECRET,
+        SUPABASE_SERVICE_KEY: TEST_ONLY_SUPABASE_KEY,
         ALLOWED_ORIGINS: 'http://127.0.0.1:4173'
       }
     }

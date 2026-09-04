@@ -165,6 +165,23 @@ if (parts[parts.length - 1].end !== lastLine) {
 }
 
 // Write parts
+// ★ 2026-09-04 可重跑守卫：core-parts/*.js 与 core-utils.js 是切分后继续人工
+//   编辑的源文件；若已存在（说明先前已 split，其中可能含手工改动），重跑会
+//   整目录删除重建并覆盖手工内容，属于破坏性操作 → 必须显式 --force 才继续。
+if (!process.argv.includes('--force')) {
+  const existingParts = fs.existsSync(partsDir)
+    ? fs.readdirSync(partsDir).filter((f) => f.endsWith('.js'))
+    : [];
+  const utilsExists = fs.existsSync(utilsPath) && fs.statSync(utilsPath).size > 0;
+  if (existingParts.length > 0 || utilsExists) {
+    console.error(
+      '[abort] 检测到已存在的拆分产物（js/core-parts/*.js 或 js/core-utils.js）。\n' +
+      '[abort] 重新运行会整目录删除重建并覆盖其中可能的手工修改，已中止。\n' +
+      '[abort] 如确认要重新切分，请追加 --force 参数。'
+    );
+    process.exit(1);
+  }
+}
 fs.mkdirSync(partsDir, { recursive: true });
 // clean old parts
 fs.readdirSync(partsDir).forEach(function (f) {

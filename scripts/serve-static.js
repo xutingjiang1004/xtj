@@ -26,11 +26,23 @@ var mime = {
 };
 
 // 敏感路径拒绝前缀：按 URL 路径段匹配，命中直接 403，防止源码/凭据/构建脚本泄露
-var SENSITIVE_SEGMENTS = ['.git', '.env', 'node_modules', 'render-api', 'tests', 'scripts', 'mcp-servers', 'supabase', 'backups', 'output'];
+// ★ 2026-09-04 审计修复：补 audit-reports（审计报告含内网/弱口令细节）
+var SENSITIVE_SEGMENTS = ['.git', '.env', 'node_modules', 'render-api', 'tests', 'scripts', 'mcp-servers', 'supabase', 'backups', 'output', 'audit-reports'];
 function hasSensitiveSegment(urlPath) {
   // ★ 修复：统一反斜杠并大小写不敏感比较（此前 %5c 解码后的 \\ 路径与 /.ENV 等大小写变体可绕过名单）
   var normalizedPath = String(urlPath || '').replace(/\\/g, '/').toLowerCase();
   return normalizedPath.split('/').some(function (seg) { return SENSITIVE_SEGMENTS.indexOf(seg) >= 0; });
+}
+
+// ★ 2026-09-04 审计修复：根级敏感文件后缀/文件名拦截（仓库根托管时这些文件
+//   不在目录黑名单内，须按文件粒度拒绝）：
+//   - *.sql（含仓库根 SUPABASE_FIX_051.sql 等修复脚本，可能携带生产修复 SQL）
+//   - package.json / package-lock.json（依赖元信息与潜在 scripts 探测面）
+function hasSensitiveFile(urlPath) {
+  var lower = String(urlPath || '').toLowerCase();
+  if (/\.sql$/.test(lower)) return true;
+  if (/(^|\/)package(-lock)?\.json$/.test(lower)) return true;
+  return false;
 }
 
 // 后端 API 代理目标（CI 环境中 render-api/server.js 监听 3000 端口）
@@ -100,8 +112,8 @@ var server = http.createServer(function (req, res) {
     req.pipe(proxyReq);
     return;
   }
-  // 敏感路径前缀直接 403（.git / .env / node_modules / render-api / tests / scripts / mcp-servers）
-  if (hasSensitiveSegment(pathname)) {
+  // 敏感路径前缀直接 403（.git / .env / node_modules / render-api / tests / scripts / mcp-servers / audit-reports）
+  if (hasSensitiveSegment(pathname) || hasSensitiveFile(pathname)) {
     res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
     return;
   }

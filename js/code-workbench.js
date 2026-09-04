@@ -172,6 +172,23 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // S8：用户消息 / AI 流式输出可能复述仓库恶意代码或第三方不可信文本，
+  // 在赋 innerHTML 前统一“先转义再交给渲染器”（与 ai-agent.js 的 escape-first
+  // 思路一致）。window.renderMarkdown 由外部脚本提供，是否自行转义不受本文件
+  // 控制，因此先对原文 esc() 能保证：即便渲染器对个别输入“短路透传”原始片段，
+  // 也不会有可执行 HTML 注入。代价是若渲染器自身也已转义，个别 & / < 字符可能
+  // 显示为转义形态（纯属观感问题，不构成注入）。返回 null 表示没有可用渲染器，
+  // 调用方应回退到 textContent（纯文本）。
+  function renderMarkdownEscFirst(text) {
+    var renderFn = (typeof window.renderMarkdown === 'function') ? window.renderMarkdown : null;
+    if (!renderFn) return null;
+    try {
+      return renderFn(esc(String(text == null ? '' : text)));
+    } catch (e) {
+      return null;
+    }
+  }
+
   function fmtTime(ts) {
     try {
       var d = new Date(ts);
@@ -189,6 +206,19 @@
   }
   function safeStorageRemove(key) {
     try { window.localStorage.removeItem(key); } catch (e) {}
+  }
+
+  // S9：GitHub Token 等敏感凭据不再明文持久化到 localStorage。
+  // 改用 sessionStorage——本标签页内刷新保留（等价原有“记住”体验），
+  // 关闭标签页即清除，任意 XSS 也无法跨会话偷走长期令牌。
+  function safeSessionGet(key) {
+    try { return window.sessionStorage.getItem(key); } catch (e) { return null; }
+  }
+  function safeSessionSet(key, value) {
+    try { window.sessionStorage.setItem(key, value); } catch (e) {}
+  }
+  function safeSessionRemove(key) {
+    try { window.sessionStorage.removeItem(key); } catch (e) {}
   }
 
   // ── 账号级本地存储 ────────────────────────────────────────────
@@ -229,19 +259,76 @@
     if (r) storageSet(LS_REPO, JSON.stringify(r));
     else storageRemove(LS_REPO);
   }
-  function loadToken() { return storageGet(LS_TOKEN) || ''; }
-  function saveToken(t) { if (t) storageSet(LS_TOKEN, t); else storageRemove(LS_TOKEN); }
+  function loadToken() {
+    // 优先 sessionStorage；旧版 localStorage 残留仅做一次性迁移并清除
+    var v = safeSessionGet(LS_TOKEN);
+    if (v) return v;
+    var legacy = storageGet(LS_TOKEN);
+    if (legacy) { saveToken(legacy); storageRemove(LS_TOKEN); }
+    return legacy || '';
+  }
+  function saveToken(t) {
+    if (t) safeSessionSet(LS_TOKEN, t);
+    else safeSessionRemove(LS_TOKEN);
+    // 清除旧的 localStorage 落点（账号隔离键与旧版全局键），避免明文凭据长期残留
+    storageRemove(LS_TOKEN);
+    safeStorageRemove(LS_TOKEN);
+  }
   function loadModel() { return storageGet(LS_MODEL) || DEFAULT_MODEL; }
   function saveModel(m) { storageSet(LS_MODEL, m); }
+  // M54：聊天历史改为“内存数组优先 + 写入前合并去重”。原实现每次全量读改写
+  // localStorage 且无锁，多标签页各自保存会相互整段覆盖；现内存缓存做单页主副本，
+  // 落盘前重读 storage，把其它标签页新增的消息合并进去（按 role+content+ts 去重）。
+  var convCache = null; // null = 尚未从 storage 载入
   function loadConversation() {
+    if (convCache !== null) return convCache;
+    var arr = [];
     try {
       var raw = storageGet(LS_CONV);
-      if (!raw) return [];
-      var arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr.slice(-100) : [];
-    } catch (e) { return []; }
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) arr = parsed;
+      }
+    } catch (e) {}
+    convCache = arr.slice(-100);
+    return convCache;
   }
-  function saveConversation(arr) { storageSet(LS_CONV, JSON.stringify((arr || []).slice(-100))); }
+  function saveConversation(arr) {
+    var next = (arr || []).slice(-100);
+    convCache = next;
+    try {
+      // 读一次磁盘：若其它标签页写入了本页尚未见过的消息，合并后再落盘，避免互相覆盖
+      var fresh = [];
+      var raw = storageGet(LS_CONV);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) fresh = parsed;
+      }
+      var seen = {};
+      var merged = [];
+      function pushOne(m) {
+        if (!m || typeof m.content !== 'string') return;
+        var k = String(m.role || '') + '\u0001' + m.content + '\u0001' + Number(m.ts || 0);
+        if (seen[k]) return;
+        seen[k] = true;
+        merged.push(m);
+      }
+      next.forEach(pushOne);   // 本页为主（先出现者优先）
+      fresh.forEach(pushOne);  // 并入其它标签页新增消息
+      merged.sort(function (a, b) { return (Number(a.ts) || 0) - (Number(b.ts) || 0); });
+      merged = merged.slice(-100);
+      storageSet(LS_CONV, JSON.stringify(merged));
+      convCache = merged; // 内存缓存与合并后的落盘内容保持一致
+    } catch (e) {
+      storageSet(LS_CONV, JSON.stringify(next));
+      convCache = next;
+    }
+  }
+  function clearConversation() {
+    convCache = [];
+    storageRemove(LS_CONV);
+    safeStorageRemove(LS_CONV); // 旧版全局键
+  }
   function loadHistory() {
     try {
       var raw = storageGet(LS_HISTORY);
@@ -408,90 +495,151 @@
   }
 
   // ── 通用 SSE 流式读取器（兼容 /api/code/ai 与 /api/agent/custom-chat/stream）──
+  // M53：网络瞬断（未产出任何正文前断流）指数退避重连（首次 + 最多 3 次），
+  // 已产出正文后断流不重连（避免同一请求从头再生成导致内容重复），
+  // 用户主动取消 / 超时 / 服务端错误一律不重连，保持原有取消语义。
   function streamAi(payload, callbacks) {
     return new Promise(function (resolve, reject) {
-      var controller = new AbortController();
-      state.abortCtrl = controller;
-      var timer = setTimeout(function () { try { controller.abort(); } catch (e) {} }, 180000);
+      var MAX_ATTEMPTS = 4;   // 首次请求 + 3 次重试
+      var attempt = 0;
       var settled = false;
+      var userStopped = false;
+      var gotContent = false; // 已产出用户可见正文 → 不再重连
+      var abortReason = '';   // '' | 'timeout' | 'user'
       var fullText = '';
+      var timer = null;
+      var controller = null;
+
+      function clearTimer() {
+        if (timer) { clearTimeout(timer); timer = null; }
+      }
       function finish(ok, val) {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        clearTimer();
         try { if (state.abortCtrl === controller) state.abortCtrl = null; } catch (e) {}
         if (ok) resolve(val); else reject(val);
       }
-      // 站点已登录鉴权头（/api/code/ai 与 /api/agent/custom-chat/stream 都需
-      // authenticateUser，不带 Bearer 会被 401 拒绝，AI 助手将无法工作）
-      authHeaders().then(function (headers) {
-        return fetch(API_BASE + payload.url, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(payload.body),
-          signal: controller.signal
+      function onAbort() {
+        userStopped = true;
+        finish(false, {
+          error: abortReason === 'timeout' ? '生成超时，请重试' : '已停止生成',
+          code: 'ABORTED'
         });
-      }).then(function (resp) {
-        if (!resp.ok) {
-          return resp.text().then(function (t) {
-            var err = { error: 'HTTP ' + resp.status, code: 'HTTP_' + resp.status };
-            try { var j = JSON.parse(t); if (j && j.error) { err.error = j.error; if (j.code) err.code = j.code; } } catch (e) {}
-            finish(false, err);
-          });
+      }
+      function handleTransportError(err) {
+        if (settled || userStopped) return;
+        // 主动取消 / 超时触发的 abort：不重连
+        if (err && (err.name === 'AbortError' || /abort/i.test(String(err && err.message || '')))) {
+          onAbort();
+          return;
         }
-        var reader = resp.body.getReader();
-        var decoder = new TextDecoder();
-        var buffer = '';
-        function processEvents() {
-          var idx;
-          while ((idx = buffer.indexOf('\n\n')) >= 0) {
-            var raw = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 2);
-            var eventName = 'message';
-            var dataLines = [];
-            raw.split('\n').forEach(function (line) {
-              if (line.indexOf('event:') === 0) eventName = line.slice(6).trim();
-              else if (line.indexOf('data:') === 0) dataLines.push(line.slice(5).trim());
+        if (!gotContent && attempt < MAX_ATTEMPTS) {
+          // 指数退避：0.5s / 1s / 2s（最多再等约 3.5s 后放弃）
+          var delay = Math.min(4000, 500 * Math.pow(2, attempt - 1));
+          clearTimer();
+          setTimeout(function () {
+            if (settled) return;
+            startAttempt();
+          }, delay);
+          return;
+        }
+        finish(false, {
+          error: gotContent ? '流式连接中断' : '网络异常，请重试',
+          code: gotContent ? 'ABORTED' : 'NETWORK'
+        });
+      }
+
+      function startAttempt() {
+        if (settled || userStopped) return;
+        attempt++;
+        controller = new AbortController();
+        state.abortCtrl = controller;
+        abortReason = '';
+        controller.signal.addEventListener('abort', onAbort);
+        clearTimer();
+        // 单次尝试上限：180s（网络重连期间计时重新开始）
+        timer = setTimeout(function () {
+          abortReason = 'timeout';
+          try { controller.abort(); } catch (e) {}
+        }, 180000);
+        // 站点已登录鉴权头（/api/code/ai 与 /api/agent/custom-chat/stream 都需
+        // authenticateUser，不带 Bearer 会被 401 拒绝，AI 助手将无法工作）
+        authHeaders().then(function (headers) {
+          return fetch(API_BASE + payload.url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(payload.body),
+            signal: controller.signal
+          });
+        }).then(function (resp) {
+          if (settled) return;
+          if (!resp.ok) {
+            return resp.text().then(function (t) {
+              if (settled) return;
+              var err = { error: 'HTTP ' + resp.status, code: 'HTTP_' + resp.status };
+              try { var j = JSON.parse(t); if (j && j.error) { err.error = j.error; if (j.code) err.code = j.code; } } catch (e) {}
+              finish(false, err);
             });
-            if (!dataLines.length) continue;
-            var evt = null;
-            try { evt = JSON.parse(dataLines.join('\n')); } catch (e) { continue; }
-            var type = evt.type || eventName;
-            if (type === 'content') {
-              if (evt.text) { fullText += evt.text; if (callbacks.onContent) callbacks.onContent(evt.text); }
-            } else if (type === 'delta') {
-              if (evt.content) { fullText += evt.content; if (callbacks.onContent) callbacks.onContent(evt.content); }
-            } else if (type === 'reasoning') {
-              if (evt.text && callbacks.onReasoning) callbacks.onReasoning(evt.text);
-            } else if (type === 'message') {
-              if (evt.content) { fullText += evt.content; if (callbacks.onContent) callbacks.onContent(evt.content); }
-            } else if (type === 'done') {
-              if (callbacks.onDone) callbacks.onDone(evt, fullText);
-            } else if (type === 'error') {
-              if (callbacks.onError) callbacks.onError(evt);
-            }
-            // heartbeat / search_status / meta / reasoning_start 等事件忽略
           }
-        }
-        function pump() {
-          return reader.read().then(function (result) {
-            if (result.done) {
-              processEvents();
-              if (callbacks.onEof) callbacks.onEof(fullText);
-              finish(true, fullText);
-              return;
+          var reader = resp.body.getReader();
+          var decoder = new TextDecoder();
+          var buffer = '';
+          function processEvents() {
+            var idx;
+            while ((idx = buffer.indexOf('\n\n')) >= 0) {
+              var raw = buffer.slice(0, idx);
+              buffer = buffer.slice(idx + 2);
+              var eventName = 'message';
+              var dataLines = [];
+              raw.split('\n').forEach(function (line) {
+                if (line.indexOf('event:') === 0) eventName = line.slice(6).trim();
+                else if (line.indexOf('data:') === 0) dataLines.push(line.slice(5).trim());
+              });
+              if (!dataLines.length) continue;
+              var evt = null;
+              try { evt = JSON.parse(dataLines.join('\n')); } catch (e) { continue; }
+              var type = evt.type || eventName;
+              if (type === 'content') {
+                if (evt.text) { gotContent = true; fullText += evt.text; if (callbacks.onContent) callbacks.onContent(evt.text); }
+              } else if (type === 'delta') {
+                if (evt.content) { gotContent = true; fullText += evt.content; if (callbacks.onContent) callbacks.onContent(evt.content); }
+              } else if (type === 'reasoning') {
+                if (evt.text && callbacks.onReasoning) callbacks.onReasoning(evt.text);
+              } else if (type === 'message') {
+                if (evt.content) { gotContent = true; fullText += evt.content; if (callbacks.onContent) callbacks.onContent(evt.content); }
+              } else if (type === 'done') {
+                if (callbacks.onDone) callbacks.onDone(evt, fullText);
+              } else if (type === 'error') {
+                if (callbacks.onError) callbacks.onError(evt);
+              }
+              // heartbeat / search_status / meta / reasoning_start 等事件忽略
             }
-            buffer += decoder.decode(result.value, { stream: true });
-            processEvents();
-            return pump();
-          }).catch(function (e) {
-            finish(false, { error: '流式连接中断', code: 'ABORTED' });
-          });
-        }
-        pump();
-      }).catch(function (e) {
-        finish(false, { error: '网络异常，请重试', code: 'NETWORK' });
-      });
+          }
+          function pump() {
+            return reader.read().then(function (result) {
+              if (settled) return;
+              if (result.done) {
+                processEvents();
+                if (callbacks.onEof) callbacks.onEof(fullText);
+                finish(true, fullText);
+                return;
+              }
+              buffer += decoder.decode(result.value, { stream: true });
+              processEvents();
+              return pump();
+            }).catch(function (e) {
+              // 流中段读取出错：未产出内容前可重连
+              handleTransportError(e);
+            });
+          }
+          pump();
+        }).catch(function (e) {
+          // 请求建立失败 / 被取消
+          handleTransportError(e);
+        });
+      }
+      startAttempt();
     });
   }
 
@@ -1474,6 +1622,11 @@
       return;
     }
     var newContent = ui.editor.value;
+    // M52：捕获提交目标（path/sha/isNew）。提交过程包含多个 await（拉分支 head、
+    // 建分支/建 blob/建 tree…），期间用户可能点击文件树切换文件；写入必须校验
+    // 仍是同一文件，避免“新 path + 旧内容”把修改写到/覆盖到错误的文件上。
+    var commitPath = state.currentPath;
+    var commitSha = state.currentSha;
     var wasNew = state.isNewFile;
     if (!newContent.trim()) { notify('内容为空，无需提交'); return; }
     if (!wasNew && state.currentContent === newContent) { notify('内容未变化，无需提交'); return; }
@@ -1488,8 +1641,13 @@
       var targetBranch = baseBranch;
       var createdPr = null, prCreateFailed = false, leftoverBranch = '';
       var commitResult;
+      // M52：提交写入前校验仍是同一文件
+      function stillSameFile() {
+        return state.currentPath === commitPath && state.isNewFile === wasNew;
+      }
       if (state.prMode) {
         targetBranch = 'code-wb-' + Date.now().toString(36);
+        if (!stillSameFile()) { notify('提交期间已切换到其它文件，已取消本次提交'); return; }
         // 每次都取基线分支最新 head，避免从旧点拉分支而丢失最新提交
         var headRef = await ghRequest('GET', '/repos/' + owner + '/' + repo + '/git/ref/heads/' + encodeURIComponent(baseBranch));
         var baseSha = (headRef.ok && headRef.data && headRef.data.object) ? headRef.data.object.sha : state.repo.branch_sha;
@@ -1497,7 +1655,8 @@
         var refRes = await ghRequest('POST', '/repos/' + owner + '/' + repo + '/git/refs', { ref: 'refs/heads/' + targetBranch, sha: baseSha });
         if (!refRes.ok) { notify('创建分支失败：' + ghErr(refRes, '未知错误')); return; }
         leftoverBranch = targetBranch;
-        commitResult = await commitOneFile(owner, repo, targetBranch, state.currentPath, newContent, message, wasNew ? '' : state.currentSha);
+        if (!stillSameFile()) { notify('提交期间已切换到其它文件，已取消本次提交'); return; }
+        commitResult = await commitOneFile(owner, repo, targetBranch, commitPath, newContent, message, wasNew ? '' : commitSha);
         if (commitResult.ok) {
           var prRes = await ghRequest('POST', '/repos/' + owner + '/' + repo + '/pulls', {
             title: message, head: targetBranch, base: baseBranch, body: '由 小猫AI Code 工作区自动创建'
@@ -1506,7 +1665,8 @@
           else prCreateFailed = true;
         }
       } else {
-        commitResult = await commitOneFile(owner, repo, targetBranch, state.currentPath, newContent, message, wasNew ? '' : state.currentSha);
+        if (!stillSameFile()) { notify('提交期间已切换到其它文件，已取消本次提交'); return; }
+        commitResult = await commitOneFile(owner, repo, targetBranch, commitPath, newContent, message, wasNew ? '' : commitSha);
       }
       if (!commitResult.ok) {
         var errMsg = ghErr(commitResult, '提交失败');
@@ -1522,21 +1682,24 @@
         else if (commitResult.data.commit && commitResult.data.commit.sha) newSha = commitResult.data.commit.sha;
       }
       var record = {
-        ts: Date.now(), path: state.currentPath, message: message,
+        ts: Date.now(), path: commitPath, message: message,
         branch: targetBranch, base_branch: baseBranch, pr_mode: !!state.prMode,
         url: createdPr ? createdPr.html_url : ((commitResult.data && commitResult.data.commit && commitResult.data.commit.html_url) || ''),
         sha: (createdPr && createdPr.head && createdPr.head.sha) || newSha || ''
       };
       var hist = loadHistory(); hist.unshift(record); saveHistory(hist);
-      state.currentSha = newSha;
-      state.currentContent = newContent;
-      // 同步整库缓存，避免 AI 继续基于旧内容分析
-      if (state.bulkFiles && Object.prototype.hasOwnProperty.call(state.bulkFiles, state.currentPath)) state.bulkFiles[state.currentPath] = newContent;
-      state.isNewFile = false;
+      // M52：仅当提交后用户仍停留在这同一文件时才更新编辑态；已切换则不打扰新文件的视图
+      if (stillSameFile()) {
+        state.currentSha = newSha;
+        state.currentContent = newContent;
+        // 同步整库缓存，避免 AI 继续基于旧内容分析
+        if (state.bulkFiles && Object.prototype.hasOwnProperty.call(state.bulkFiles, commitPath)) state.bulkFiles[commitPath] = newContent;
+        state.isNewFile = false;
+      }
       if (createdPr) notify('已创建 Pull Request：' + (createdPr.html_url || ''));
       else if (prCreateFailed) notify('代码已提交到分支 ' + targetBranch + '，但 Pull Request 创建失败，可到 GitHub 手动发起');
       else notify((wasNew ? '已新建并提交到 ' : '已提交到 ') + targetBranch);
-      exitEditMode();
+      if (stillSameFile()) exitEditMode();
       if (state.prMode) { state.repo.branch = baseBranch; ui.branchSel.value = baseBranch; saveRepo(state.repo); }
       renderHistoryList();
       loadTree();
@@ -1800,9 +1963,9 @@
     var wrap = el('div', { class: 'cw-msg ' + (role === 'user' ? 'cw-msg-user' : 'cw-msg-ai') });
     wrap.appendChild(el('div', { class: 'cw-msg-label', text: role === 'user' ? '你' : '小猫 AI' }));
     var contentDiv = el('div', { class: 'cw-msg-content' });
-    var renderFn = (typeof window.renderMarkdown === 'function') ? window.renderMarkdown : null;
-    if (renderFn) {
-      try { contentDiv.innerHTML = renderFn(text); } catch (e) { contentDiv.textContent = text; }
+    var mdHtml = renderMarkdownEscFirst(text);
+    if (mdHtml !== null) {
+      contentDiv.innerHTML = mdHtml;
     } else {
       contentDiv.textContent = text;
       contentDiv.style.whiteSpace = 'pre-wrap';
@@ -1825,7 +1988,7 @@
 
   function resetConversation() {
     abortStream();
-    saveConversation([]);
+    clearConversation(); // 清空（含内存缓存），避免与其它标签页的历史合并后“删不掉”
     state.aiLastOutput = '';
     renderConversation();
     notify('已开始新对话');
@@ -2266,11 +2429,8 @@
         onContent: function (chunk) {
           accumulated += chunk;
           var shown = stripToolMarkers(accumulated);
-          if (typeof window.renderMarkdown === 'function') {
-            try { contentDiv.innerHTML = window.renderMarkdown(shown); } catch (e) { contentDiv.textContent = shown; }
-          } else {
-            contentDiv.textContent = shown;
-          }
+          var mdHtml = renderMarkdownEscFirst(shown);
+          if (mdHtml !== null) contentDiv.innerHTML = mdHtml; else contentDiv.textContent = shown;
           scrollChat();
         },
         onError: function (evt) {
@@ -2333,11 +2493,8 @@
           onContent: function (chunk) {
             accumulated += chunk;
             var shownC = stripToolMarkers(accumulated);
-            if (typeof window.renderMarkdown === 'function') {
-              try { contentDiv.innerHTML = window.renderMarkdown(shownC); } catch (e) { contentDiv.textContent = shownC; }
-            } else {
-              contentDiv.textContent = shownC;
-            }
+            var mdHtmlC = renderMarkdownEscFirst(shownC);
+            if (mdHtmlC !== null) contentDiv.innerHTML = mdHtmlC; else contentDiv.textContent = shownC;
             scrollChat();
           },
           onError: function () { done = true; }
@@ -2421,11 +2578,8 @@
         onContent: function (chunk) {
           accumulated += chunk;
           var shownT = stripToolMarkers(accumulated);
-          if (typeof window.renderMarkdown === 'function') {
-            try { contentDiv.innerHTML = window.renderMarkdown(shownT); } catch (e) { contentDiv.textContent = shownT; }
-          } else {
-            contentDiv.textContent = shownT;
-          }
+          var mdHtmlT = renderMarkdownEscFirst(shownT);
+          if (mdHtmlT !== null) contentDiv.innerHTML = mdHtmlT; else contentDiv.textContent = shownT;
           scrollChat();
         },
         onError: function () { done = true; }
@@ -2715,6 +2869,16 @@
   window.xtjCodeWorkbench = {
     open: open,
     close: close,
-    getState: function () { return state; }
+    // S9：getState 不再全量返回内部 state（state.token 为 GitHub PAT，属敏感凭据）。
+    // 需要取凭据的代码在本文件闭包内直接读 state，外部一律拿不到 token。
+    getState: function () {
+      var snapshot = {};
+      for (var k in state) {
+        if (!Object.prototype.hasOwnProperty.call(state, k)) continue;
+        if (k === 'token') continue; // 敏感字段剔除
+        snapshot[k] = state[k];
+      }
+      return snapshot;
+    }
   };
 })();
