@@ -15890,7 +15890,13 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
           probe: getDeepSeekProbeSnapshot()
         },
         tavily_research: {
-          enabled: !!process.env.TAVILY_API_KEY,
+          // ★ 2026-09-11 修复（深入研究不可用根因）：本流程自 2026-08 重构后已完全自托管
+          //   （Planner → 子智能体 DeepSeek 内置 web_search → Synthesizer），不再依赖 Tavily 编排/搜索。
+          //   但开关仍绑定 process.env.TAVILY_API_KEY，未配置该环境变量时
+          //   enabled=false → 前端 S.tavilyResearchEnabled=false → 直接跳过整条研究链路
+          //   （ai-agent.js:5928），表现为"无法正常对话、看不到最终结果"。
+          //   改为默认启用，支持 AI 管理后台 config.tavily_research.enabled 显式关闭。
+          enabled: !(config.tavily_research && config.tavily_research.enabled === false),
           models: ['pro', 'mini', 'auto']
         }
       }
@@ -20101,6 +20107,10 @@ async function runSelfResearchFlow(opts) {
   if (isCancelled()) return { answer: '', sources: [], agents: [], usage: researchUsageAgg, search_count: 0 };
 
   // 1. 主智能体理解 + 改写问题
+  // ★ 2026-09-11 修复：实时路径此前从不发送 research_step，只有缓存回放路径发
+  //   （见 /research/stream 的 cached 分支）。前端 handleResearchStepEvent 依赖该事件
+  //   推进步骤条与思考日志，缺失导致实时研究"进度条永远停在 0 步"。
+  sseSend({ type: 'research_step', tool: 'Planning', phase: 0 });
   sseSend({ type: 'research_stage', stage: 'rewrite', message: '总指挥正在理解并拆解研究任务…' });
   var researchQuery = query;
   if (rewrite) {
@@ -20120,6 +20130,7 @@ async function runSelfResearchFlow(opts) {
   if (isCancelled()) return { answer: '', sources: [], agents: [], usage: researchUsageAgg, search_count: 0 };
 
   // 2. 主智能体 (Planner) 拆分 1-5 个子任务
+  sseSend({ type: 'research_step', tool: 'WebSearch', phase: 1 });
   sseSend({ type: 'research_stage', stage: 'collect', message: '总指挥派出 ' + range.min + '-' + range.max + ' 个研究子智能体并行调研中…' });
   var plannerContent = '';
   try {
@@ -20262,6 +20273,7 @@ async function runSelfResearchFlow(opts) {
   }
 
   // 4. 主智能体 (Synthesizer) 汇总所有子结果 → 最终中文报告（流式）
+  sseSend({ type: 'research_step', tool: 'Generating', phase: 2 });
   sseSend({ type: 'research_stage', stage: 'synthesize', message: '总指挥正在交叉验证与深度研判，生成最终报告…' });
   var materialCount = workerResults.length || agentCount;
   var synthTemplate = deepMode ? SELF_RESEARCH_SYNTH_PROMPT_DEEP : SELF_RESEARCH_SYNTH_PROMPT_FAST;
