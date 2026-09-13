@@ -447,5 +447,152 @@ module.exports = {
   isPrivateAddress: isPrivateAddress,
   isBlockedWebHost: isBlockedWebHost,
   assertSafeWebUrl: assertSafeWebUrl,
-  defaultDnsLookup: defaultDnsLookup
+  defaultDnsLookup: defaultDnsLookup,
+  requestPinnedJson: requestPinnedJson,
+  createPinnedAgent: createPinnedAgent
 };
+
+// ── 已校验地址的 HTTPS Agent 工厂（供 fetch 复用，消除 SSRF TOCTOU）──────────
+// ★ 2026-09-13 修复 S-1：
+//   fetch(https://...) 内部会自行做一次 DNS 解析，与 assertSafeWebUrl 的解析
+//   相互独立 → 校验通过后仍可能连到内网（TOCTOU / DNS rebinding）。
+//   把「已校验过的地址」通过 Agent.lookup 固定下来，使 fetch 复用同一组地址，
+//   校验与连接不再分离。同时强制 rejectUnauthorized，保持与主链路一致。
+//
+// 用法：fetch(url, { agent: createPinnedAgent(addresses), redirect: 'manual' })
+function createPinnedAgent(addresses) {
+  if (!Array.isArray(addresses) || !addresses.length) {
+    throw new Error('createPinnedAgent 需要非空的已校验地址列表');
+  }
+  return new https.Agent({
+    keepAlive: false,
+    // 强制使用已校验地址，杜绝 fetch 内部二次解析
+    lookup: function(_hostname, _options, callback) {
+      callback(null, addresses[0], net.isIP(addresses[0]) || 4);
+    }
+  });
+}
+
+// ── DNS-pinned JSON 请求（供自定义模型 base_url 调用）────────────────────────
+// ★ 2026-09-13 修复 S-1（SSRF TOCTOU）：
+//   原实现先用 assertSafeWebUrl() 做一次「解析 + 校验私有地址」，随后用全局
+//   fetch(baseUrl + path) 独立发起连接 —— 两次 DNS 解析相互独立。攻击者控制的
+//   域名可让第一次返回公网 IP（校验通过）、第二次返回 127.0.0.1 / 169.254.169.254
+//   → 校验与连接分离（TOCTOU），可 SSRF 到内网与云元数据。
+//   本函数把「解析 → 校验 → 连接」绑定到同一组已解析地址（lookup 覆写 pin），
+//   与 web-fetch 主链路 requestPinnedHttps 使用同一套安全模型。
+//
+// 参数：parsedUrl(URL) / addresses(已校验的地址数组) / opts{method, headers, body, timeoutMs, maxBytes, signal}
+// 返回：{ status, headers: {get(k)}, text }
+// 注意：本函数不做重定向跟随（重定向交由调用方显式拒绝），避免绕过校验。
+function requestPinnedJson(parsedUrl, addresses, opts) {
+  opts = opts || {};
+  var maxBytes = Number(opts.maxBytes) > 0 ? Number(opts.maxBytes) : 2 * 1024 * 1024;
+  var timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 180000;
+  var bodyBuf = null;
+  if (opts.body !== undefined && opts.body !== null) {
+    bodyBuf = Buffer.isBuffer(opts.body) ? opts.body : Buffer.from(String(opts.body), 'utf8');
+  }
+  return new Promise(function(resolve, reject) {
+    var chunks = [];
+    var total = 0;
+    var settled = false;
+    var externalSignal = opts.signal;
+    function onExternalAbort() {
+      if (!settled) {
+        settled = true;
+        try { request.destroy(new Error('请求已取消')); } catch (_) {}
+        try { if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+        reject(new Error('请求已取消'));
+      }
+    }
+    function cleanupExternalAbort() {
+      if (externalSignal) {
+        try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+      }
+    }
+    if (externalSignal) {
+      if (externalSignal.aborted) return reject(new Error('请求已取消'));
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+    var headers = Object.assign({
+      Host: parsedUrl.host,
+      'User-Agent': 'xtj-server/1.0',
+      Accept: 'application/json,text/plain,*/*;q=0.8'
+    }, opts.headers || {});
+    if (bodyBuf) {
+      headers['Content-Length'] = bodyBuf.length;
+      if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    }
+    var request = https.request({
+      protocol: 'https:',
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port ? Number(parsedUrl.port) : 443,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: String(opts.method || 'GET').toUpperCase(),
+      servername: parsedUrl.hostname,
+      rejectUnauthorized: true,
+      headers: headers,
+      // ★ 关键：DNS pin —— 强制使用已校验过的地址，杜绝二次解析被劫持
+      lookup: function(_hostname, _options, callback) {
+        callback(null, addresses[0], net.isIP(addresses[0]) || 4);
+      }
+    }, function(response) {
+      var declared = Number(response.headers['content-length']);
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        settled = true;
+        request.destroy();
+        cleanupExternalAbort();
+        reject(new Error('响应超过大小限制'));
+        return;
+      }
+      response.on('data', function(chunk) {
+        total += chunk.length;
+        if (total > maxBytes) {
+          request.destroy();
+          if (!settled) {
+            settled = true;
+            cleanupExternalAbort();
+            reject(new Error('响应超过大小限制'));
+          }
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', function() {
+        if (settled) return;
+        settled = true;
+        cleanupExternalAbort();
+        var text = Buffer.concat(chunks).toString('utf8');
+        resolve({
+          status: response.statusCode,
+          headers: {
+            get: function(key) {
+              return response.headers[String(key).toLowerCase()] || null;
+            }
+          },
+          text: text
+        });
+      });
+      response.on('error', function(err) {
+        if (!settled) {
+          settled = true;
+          cleanupExternalAbort();
+          reject(err);
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, function() {
+      request.destroy(new Error('请求超时'));
+    });
+    request.on('error', function(err) {
+      if (!settled) {
+        settled = true;
+        cleanupExternalAbort();
+        reject(err);
+      }
+    });
+    if (bodyBuf) request.write(bodyBuf);
+    request.end();
+  });
+}
