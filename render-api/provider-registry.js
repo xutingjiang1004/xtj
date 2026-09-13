@@ -43,7 +43,21 @@
 
 const crypto = require('crypto');
 const dns = require('dns');
+const https = require('https');
 const net = require('net');
+
+// ★ 修复 M-1（2026-09-13）：把已校验过的地址 pin 到连接上，消除
+//   「assertSafeProviderHost 解析一次 → fetch 再独立解析一次」的 SSRF TOCTOU 窗口。
+//   与 web-fetch.createPinnedAgent 同一安全模型（本模块独立实现，避免跨模块耦合）。
+function createPinnedAgentFromAddresses(addresses) {
+  if (!Array.isArray(addresses) || !addresses.length) return null;
+  return new https.Agent({
+    keepAlive: false,
+    lookup: function(_hostname, _options, callback) {
+      callback(null, addresses[0], net.isIP(addresses[0]) || 4);
+    }
+  });
+}
 
 // ── Encryption ──────────────────────────────────────────────────────────
 // AES-256-GCM requires: 32-byte key, 12-byte IV, produces 16-byte auth tag.
@@ -236,6 +250,12 @@ async function normalizeProviderUrl(rawUrl) {
   var parsed;
   try { parsed = new URL(rawUrl); } catch (_) { return { error: 'INVALID_BASE_URL' }; }
   if (parsed.protocol !== 'https:') return { error: 'INVALID_BASE_URL' };
+  // ★ 修复 M-1（2026-09-13）：与 web-fetch.assertSafeWebUrl 对齐，补齐两项此前缺失的校验。
+  //   (1) 端口限制：原实现允许任意端口 → 可指定 https://host:8443/ 探测云上非标端口
+  //       （6443 k8s API、8500 Consul、9200 ES 等）。web-fetch 侧一直是「仅标准端口」。
+  if (parsed.port && parsed.port !== '443') return { error: 'BLOCKED_BASE_URL' };
+  //   (2) 凭据禁入：https://user:pass@host/ 会把凭据序列化进请求，且原实现未拒绝。
+  if (parsed.username || parsed.password) return { error: 'BLOCKED_BASE_URL' };
   // URL.hostname 对 IPv6 字面量会带方括号（如 [::1]），先去括号再判定
   var hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   // SSRF 防护：拒绝 IP 字面量 / localhost / 内网保留段 / 云元数据，并对域名做
@@ -263,6 +283,16 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
   var verifyToken = deps.verifyToken;
   var rateLimit = deps.rateLimit;
   var sanitizeError = deps.sanitizeError;
+  // ★ 修复 S-2（2026-09-13）：下列路由的注释一直写着「管理员专用」，但实现只挂了
+  //   verifyToken（任意登录用户即可通过）→ 普通用户能注册/篡改/删除提供商配置，
+  //   而 base_url 决定服务端出站请求目标（配合 S-3 构成 SSRF 与凭据外带的落点）。
+  //   现补齐 requireAdmin：未注入时退化为「拒绝」，避免调用方漏传导致静默失去防护。
+  var requireAdmin = (typeof deps.requireAdmin === 'function')
+    ? deps.requireAdmin
+    : function(req, res, next) {
+        console.error('[PROVIDER] requireAdmin 未注入，已按 fail-closed 拒绝 provider 管理请求');
+        return res.status(500).json({ error: '服务未正确配置', code: 'ADMIN_GUARD_MISSING' });
+      };
 
   // ── GET /api/provider/models ──────────────────────────────────────────
   // 返回所有已启用的提供商及其可用模型（公开接口，无需管理员权限，需 IP 限流）
@@ -299,7 +329,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
 
   // ── GET /api/provider/list ────────────────────────────────────────────
   // 列出所有已配置的提供商（管理员专用，不暴露 API Key）
-  app.get('/api/provider/list', verifyToken, rateLimit(60000, 30), async function(req, res) {
+  app.get('/api/provider/list', verifyToken, requireAdmin, rateLimit(60000, 30), async function(req, res) {
     try {
       var { data, error } = await supabase
         .from('provider_registry')
@@ -319,7 +349,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
 
   // ── POST /api/provider/register ───────────────────────────────────────
   // 注册一个新的提供商（管理员专用）
-  app.post('/api/provider/register', verifyToken, rateLimit(60000, 20), async function(req, res) {
+  app.post('/api/provider/register', verifyToken, requireAdmin, rateLimit(60000, 20), async function(req, res) {
     try {
       var body = req.body || {};
       var name = String(body.name || '').trim();
@@ -419,7 +449,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
 
   // ── POST /api/provider/test ───────────────────────────────────────────
   // 测试 API Key 是否有效（管理员专用）
-  app.post('/api/provider/test', verifyToken, rateLimit(60000, 10), async function(req, res) {
+  app.post('/api/provider/test', verifyToken, requireAdmin, rateLimit(60000, 10), async function(req, res) {
     try {
       var body = req.body || {};
       var providerType = String(body.provider_type || '').trim().toLowerCase();
@@ -449,6 +479,13 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
       if (parsedTestUrl.protocol !== 'https:') {
         return res.status(400).json({ error: '仅支持 https:// 的 base_url', code: 'INVALID_BASE_URL' });
       }
+      // ★ 修复 M-1（2026-09-13）：与 normalizeProviderUrl / web-fetch 对齐端口与凭据校验
+      if (parsedTestUrl.port && parsedTestUrl.port !== '443') {
+        return res.status(400).json({ error: 'base_url 仅支持标准端口 443', code: 'BLOCKED_BASE_URL' });
+      }
+      if (parsedTestUrl.username || parsedTestUrl.password) {
+        return res.status(400).json({ error: 'base_url 不允许包含凭据', code: 'BLOCKED_BASE_URL' });
+      }
       // URL.hostname 对 IPv6 字面量会带方括号（如 [::1]），先去括号再判定
       var hostname = parsedTestUrl.hostname.toLowerCase().replace(/^\[|\]$/g, '');
       // SSRF 防护：net.isIP 拒绝一切 IP 字面量（含 IPv6 完整书写形式），
@@ -457,6 +494,8 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
       if (!hostCheck.ok) {
         return res.status(400).json({ error: 'base_url 指向不允许的主机', code: 'BLOCKED_BASE_URL' });
       }
+      // ★ 修复 M-1：复用已校验地址发起连接（消除校验-连接之间的 DNS 二次解析）
+      var _testPinnedAgent = createPinnedAgentFromAddresses(hostCheck.addresses);
 
       // 移除末尾的 /v1 等路径以获取基础 URL
       var modelsUrl = testUrl.replace(/\/+$/, '');
@@ -477,7 +516,9 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
           },
           signal: controller.signal,
           // 不跟随重定向：3xx 一律视为失败，防止重定向到内网/云元数据地址
-          redirect: 'manual'
+          redirect: 'manual',
+          // ★ 修复 M-1：已校验地址 pin（防 DNS rebinding 绕过上面的内网判定）
+          agent: _testPinnedAgent || undefined
         };
 
         // Anthropic 使用 x-api-key 头
@@ -560,7 +601,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
 
   // ── PUT /api/provider/:id ─────────────────────────────────────────────
   // 更新提供商配置（管理员专用）
-  app.put('/api/provider/:id', verifyToken, rateLimit(60000, 20), async function(req, res) {
+  app.put('/api/provider/:id', verifyToken, requireAdmin, rateLimit(60000, 20), async function(req, res) {
     try {
       var providerId = req.params.id;
       if (!providerId || isNaN(Number(providerId))) {
@@ -659,7 +700,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
 
   // ── DELETE /api/provider/:id ──────────────────────────────────────────
   // 删除提供商（管理员专用）
-  app.delete('/api/provider/:id', verifyToken, rateLimit(60000, 10), async function(req, res) {
+  app.delete('/api/provider/:id', verifyToken, requireAdmin, rateLimit(60000, 10), async function(req, res) {
     try {
       var providerId = req.params.id;
       if (!providerId || isNaN(Number(providerId))) {

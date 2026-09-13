@@ -53,7 +53,7 @@ const {
   withSearchProviderTimeout
 } = require('./search-providers');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
-const { fetchSafeWebPage, assertSafeWebUrl } = require('./web-fetch');
+const { fetchSafeWebPage, assertSafeWebUrl, createPinnedAgent } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
 const { getMailTransporter, GMAIL_USER, GMAIL_APP_PASSWORD } = require('./mail-transport');
@@ -17279,12 +17279,17 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
   // 统一 SSRF 防护：复用 web-fetch.assertSafeWebUrl（协议白名单 + 标准端口 +
   // 禁凭据 + 禁内网/回环/保留域名 + DNS 全记录私有地址校验，防 DNS rebinding
   // 到内网/云元数据）。本路由仅转发 OpenAI 兼容对话端点，一律要求 https。
+  // ★ 2026-09-13 修复 S-1（SSRF TOCTOU）：校验通过后必须把「已校验地址」固定到
+  //   连接的 DNS lookup 上，否则 fetch 会独立二次解析，攻击者控制的域名可让
+  //   两次解析返回不同结果（校验时公网 IP、连接时内网 IP）→ 绕过防护。
+  var _pinnedAgent = null;
   try {
     var _safeCheck = await assertSafeWebUrl(baseUrl);
     if (_safeCheck.parsed.protocol !== 'https:') {
       writeSse(res, { type: 'error', error: '接口地址仅支持 https://', code: 'CUSTOM_BAD_BASE_URL' });
       return safeEnd();
     }
+    _pinnedAgent = createPinnedAgent(_safeCheck.addresses);
   } catch (eUrl) {
     writeSse(res, { type: 'error', error: '接口地址无效或指向不允许的主机', code: 'CUSTOM_BAD_BASE_URL' });
     return safeEnd();
@@ -17419,7 +17424,10 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
         signal: controller.signal,
         // ★ 修复：不跟随重定向（此前默认 follow，初始 host 校验后 302 到内网/云元数据
         // 即完成 SSRF）；配合上方 assertSafeWebUrl 一次性校验，重定向一律拒绝。
-        redirect: 'manual'
+        redirect: 'manual',
+        // ★ 修复 S-1（SSRF TOCTOU）：复用已校验地址的 pinned Agent，使 fetch 不再
+        //   独立二次解析 DNS（否则校验与连接分离可被 DNS rebinding 绕过）。
+        agent: _pinnedAgent || undefined
       });
     } catch (eNet) {
       throw eNet;
@@ -17635,9 +17643,12 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
   if (!baseUrl) { sseSend({ type: 'error', error: '该服务商未配置接口地址' }); return safeEnd(); }
   baseUrl = baseUrl.replace(/\/+$/, '');
   var chosenModel = model || (ep && ep.defaultModel) || '';
+  // ★ 修复 S-1（SSRF TOCTOU）：同 /custom-chat/stream，把已校验地址 pin 到连接上。
+  var _pinnedAgent2 = null;
   try {
     var _safe2 = await assertSafeWebUrl(baseUrl);
     if (_safe2.parsed.protocol !== 'https:') { sseSend({ type: 'error', error: '接口地址仅支持 https://', code: 'CUSTOM_BAD_BASE_URL' }); return safeEnd(); }
+    _pinnedAgent2 = createPinnedAgent(_safe2.addresses);
   } catch (eUrl2) {
     sseSend({ type: 'error', error: '接口地址无效或指向不允许的主机', code: 'CUSTOM_BAD_BASE_URL' });
     return safeEnd();
@@ -17664,7 +17675,10 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
       signal: controller.signal,
       // ★ 修复：禁止跟随重定向（防 SSRF 经 302 跳到内网；校验-连接分离的 DNS
       // 翻转窗口同时被收窄，与 web-fetch.js 的 redirect:'manual' 模式一致）
-      redirect: 'manual'
+      redirect: 'manual',
+      // ★ 修复 S-1（SSRF TOCTOU）：用已校验地址的 pinned Agent 发起连接，
+      //   彻底消除「校验用一次解析、连接又用另一次解析」的 DNS rebinding 窗口。
+      agent: _pinnedAgent2 || undefined
     });
   }
   async function callCustomChat(msgs, options) {
@@ -22419,7 +22433,10 @@ registerProviderRegistryRoutes(app, {
   supabase,
   verifyToken,
   rateLimit,
-  sanitizeError
+  sanitizeError,
+  // ★ 修复 S-2：provider 管理路由（list/register/test/put/delete）补管理员守卫。
+  //   此前仅 verifyToken，任意登录用户可注册 provider 并控制 base_url 出站目标。
+  requireAdmin: requireAdminUser
 });
 
 // Keep API failures machine-readable even when a route or body parser throws.
