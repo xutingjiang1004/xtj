@@ -254,12 +254,46 @@
         }, 0);
     }
 
+    // ★ 2026-09-11 修复（S-1）：bfcache 恢复时清理陈旧的小猫 AI 轮询状态。
+    // 原理：轮询状态（timer / AbortController / 状态缓存）存放在 window 上，页面进入
+    // bfcache 时 window 被整体冻结保留。若用户在轮询进行中离开页面再返回，旧 setTimeout
+    // 句柄在恢复瞬间已全部失效（属于已销毁的执行上下文），但对象仍在 window.__catAiPollTimers
+    // 里"看起来存活"：
+    //   1) visibilitychange 恢复分支遍历到这些死句柄 → 调用 pollCatAiReply → 触发新请求
+    //      （白跑一次网络请求 + 可能凭空把已结束的任务重新点亮）；
+    //   2) 同时旧状态残留会让"进行中"气泡卡在 DOM 上永不消失（用户看到假死）。
+    // 这里在 bfcache 恢复路径上先做一次全局取消（清 timer / abort controller / 移除状态
+    // DOM / 清状态缓存），把 window 状态归零，再交由后续 reconcile 走正常渲染。
+    // 注意：仅在 e.persisted 为真时执行，正常首次加载与 visibilitychange 不受影响。
+    window.__xtjResetCatAiPollStateForBfcache = function() {
+        try {
+            window.__catAiPollTimers = {};
+            window.__catAiPollControllers = {};
+            window.__catAiPollStatus = {};
+            window.__catAiCancelledByComment = {};
+            window._catAiCancelled = (window._catAiCancelled || 0) + 1;
+        } catch (e) {}
+        try {
+            if (typeof window.cancelCatAiTask === 'function') {
+                window.cancelCatAiTask(null, 'bfcache restore');
+            } else {
+                var els = document.querySelectorAll('.cat-ai-status');
+                Array.prototype.forEach.call(els, function(el) {
+                    if (el && el.parentNode) el.parentNode.removeChild(el);
+                });
+            }
+        } catch (e) {}
+    };
+
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scheduleRestore);
     else scheduleRestore();
     // pageshow 恢复逻辑：browser back/forward 时重新检测
     window.addEventListener('pageshow', function(e) {
         // 仅当从 bfcache 恢复时才需要重新 reconcile
-        if (e.persisted) scheduleRestore();
+        if (e.persisted) {
+            window.__xtjResetCatAiPollStateForBfcache();
+            scheduleRestore();
+        }
     });
     document.addEventListener('visibilitychange', function() {
         if (document.visibilityState === 'visible') scheduleRestore();
@@ -4626,6 +4660,19 @@ function renderProfileActivityList(kind) {
                 if (fadeOut && typeof message === 'string' && message.indexOf('重试') !== -1) {
                     fadeOut = false;
                 }
+                // ★ 2026-09-11 修复（S-2）：文案不含"重试"但需要挂重试按钮的状态
+                // （如 blocked / rate_limited 后用户手动再点、后端返回自定义 message）
+                // 由调用方在 showCatAiStatus 之后再调 retryBtnSetup 注入 <button>。
+                // 旧实现里 3000ms 定时器是"先调度后插入按钮"，一旦按钮被插入，
+                // 定时器仍会把整个容器（含按钮）摘掉 —— 表现为"重试按钮一闪就没"。
+                // 修复：定时器回调里二次判定 —— 只要容器内已经存在重试按钮，
+                // 就放弃移除并保持常驻，交由用户操作或新状态覆盖。
+                var _catAiHasRetryBtn = function(el) {
+                    if (!el) return false;
+                    if (el.querySelector && el.querySelector('.cat-ai-retry-btn')) return true;
+                    if (el.textContent && el.textContent.indexOf('重试') !== -1) return true;
+                    return false;
+                };
                 // Phase 3-P0-5: retryable 状态持久化到 localStorage，避免评论重渲染后丢失。
                 // 仅对带"重试"的状态持久化（真正的 retryable 状态）。
                 if (typeof message === 'string' && message.indexOf('重试') !== -1) {
@@ -4641,7 +4688,12 @@ function renderProfileActivityList(kind) {
                     existing.textContent = message;
                     if (fadeOut) {
                         existing.classList.add('cat-ai-fade-out');
-                        setTimeout(function() { if (existing.parentNode) existing.parentNode.removeChild(existing); }, 3000);
+                        setTimeout(function() {
+                            if (!existing.parentNode) return;
+                            // S-2：定时器到期时二次判定，按钮已存在则不移除
+                            if (_catAiHasRetryBtn(existing)) return;
+                            existing.parentNode.removeChild(existing);
+                        }, 3000);
                     }
                     return;
                 }
@@ -4654,7 +4706,12 @@ function renderProfileActivityList(kind) {
                 statusEl.style.cssText = 'font-size:12px;color:var(--text-muted);padding:4px 0 4px 8px;font-style:italic;margin-left:36px;animation:catAiPulse 1.5s ease-in-out infinite;';
                 if (fadeOut) {
                     statusEl.classList.add('cat-ai-fade-out');
-                    setTimeout(function() { if (statusEl.parentNode) statusEl.parentNode.removeChild(statusEl); }, 3000);
+                    setTimeout(function() {
+                        if (!statusEl.parentNode) return;
+                        // S-2：同上，retryBtnSetup 在这 3 秒窗口内注入的按钮不能被摘掉
+                        if (_catAiHasRetryBtn(statusEl)) return;
+                        statusEl.parentNode.removeChild(statusEl);
+                    }, 3000);
                 }
                 commentEl.parentNode.insertBefore(statusEl, commentEl.nextSibling);
             }

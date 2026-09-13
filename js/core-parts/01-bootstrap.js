@@ -248,12 +248,46 @@
         }, 0);
     }
 
+    // ★ 2026-09-11 修复（S-1）：bfcache 恢复时清理陈旧的小猫 AI 轮询状态。
+    // 原理：轮询状态（timer / AbortController / 状态缓存）存放在 window 上，页面进入
+    // bfcache 时 window 被整体冻结保留。若用户在轮询进行中离开页面再返回，旧 setTimeout
+    // 句柄在恢复瞬间已全部失效（属于已销毁的执行上下文），但对象仍在 window.__catAiPollTimers
+    // 里"看起来存活"：
+    //   1) visibilitychange 恢复分支遍历到这些死句柄 → 调用 pollCatAiReply → 触发新请求
+    //      （白跑一次网络请求 + 可能凭空把已结束的任务重新点亮）；
+    //   2) 同时旧状态残留会让"进行中"气泡卡在 DOM 上永不消失（用户看到假死）。
+    // 这里在 bfcache 恢复路径上先做一次全局取消（清 timer / abort controller / 移除状态
+    // DOM / 清状态缓存），把 window 状态归零，再交由后续 reconcile 走正常渲染。
+    // 注意：仅在 e.persisted 为真时执行，正常首次加载与 visibilitychange 不受影响。
+    window.__xtjResetCatAiPollStateForBfcache = function() {
+        try {
+            window.__catAiPollTimers = {};
+            window.__catAiPollControllers = {};
+            window.__catAiPollStatus = {};
+            window.__catAiCancelledByComment = {};
+            window._catAiCancelled = (window._catAiCancelled || 0) + 1;
+        } catch (e) {}
+        try {
+            if (typeof window.cancelCatAiTask === 'function') {
+                window.cancelCatAiTask(null, 'bfcache restore');
+            } else {
+                var els = document.querySelectorAll('.cat-ai-status');
+                Array.prototype.forEach.call(els, function(el) {
+                    if (el && el.parentNode) el.parentNode.removeChild(el);
+                });
+            }
+        } catch (e) {}
+    };
+
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scheduleRestore);
     else scheduleRestore();
     // pageshow 恢复逻辑：browser back/forward 时重新检测
     window.addEventListener('pageshow', function(e) {
         // 仅当从 bfcache 恢复时才需要重新 reconcile
-        if (e.persisted) scheduleRestore();
+        if (e.persisted) {
+            window.__xtjResetCatAiPollStateForBfcache();
+            scheduleRestore();
+        }
     });
     document.addEventListener('visibilitychange', function() {
         if (document.visibilityState === 'visible') scheduleRestore();
