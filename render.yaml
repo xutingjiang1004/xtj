@@ -40,6 +40,19 @@ services:
       - key: API_SECRET
         sync: false
 
+      # ⚠️ 加密主密钥（第三方 Provider API Key 落库加密）— 在 Render Dashboard 手动设置
+      # 用途：AES-256-GCM 加解密用户配置的第三方模型供应商密钥（provider-registry.js）。
+      # ★ 2026-09-11 起显式声明：此前未声明，运行时只能从 API_SECRET 降级派生
+      #   （sha256('provider-key-derivation:' + API_SECRET)）。降级本身可用，但存在两个隐患：
+      #   1) 轮换 API_SECRET（例如怀疑 token 泄露需重置）会**连带导致所有已加密的
+      #      Provider 密钥无法解密**，属于强耦合；
+      #   2) 一个密钥同时承担"会话签名"与"数据加密"两种用途，违反密钥分离原则。
+      # 建议：填入一个随机字符串（>=32 字节）作为独立密钥。
+      # ⚠️ 迁移注意：一旦从降级路径切到独立密钥，**存量已加密数据将无法解密**，
+      #    需先执行密钥轮换脚本重新加密，或确认当前无存量加密数据后再切换。
+      - key: ENCRYPTION_KEY
+        sync: false
+
       - key: DEEPSEEK_API_KEY
         sync: false
       - key: DEEPSEEK_MODEL
