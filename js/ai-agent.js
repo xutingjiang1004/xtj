@@ -10882,51 +10882,11 @@ function showChatMessages() {
     } catch (e2) {}
   }
 
-  function insertEntry() {
-    var list = document.getElementById('dockChatList');
-    if (!list) return;
-    removeAllAiEntries();
-
-    var cfg = S.config || { avatar: '🐈', description: '小猫 智能体' };
-    var name = AI_DISPLAY_NAME;
-    var avatar = cfg.avatar || '🐈';
-    var desc = cfg.description || 'AI 智能体';
-
-    var item = el('div', {
-      class: 'chat-list-item ai-agent-entry',
-      'data-chat-user': '__ai_agent__',
-      role: 'button',
-      tabindex: '0',
-      'aria-label': '打开 ' + name
-    });
-    var listAvatar = el('span', { class: 'cli-avatar' });
-    renderCatAvatarNode(listAvatar, '', cfg.avatar_url, cfg.avatar_version);
-    item.appendChild(listAvatar);
-    var meta = el('div', { class: 'cli-info' });
-    meta.appendChild(el('div', { class: 'cli-name', text: name }));
-    meta.appendChild(el('div', { class: 'cli-preview', text: desc }));
-    item.appendChild(meta);
-    var right = el('div', { class: 'cli-right' });
-    right.appendChild(el('span', { class: 'cli-time', text: 'AI' }));
-    item.appendChild(right);
-
-    function onActivate() {
-      if (!window.currentUser) {
-        notify('请先登录后再和' + name + ' 聊天');
-        return;
-      }
-      openAiChat();
-    }
-
-    item.addEventListener('click', onActivate);
-    item.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onActivate();
-      }
-    });
-    list.insertBefore(item, list.firstChild);
-  }
+  // ★ 2026-09-11 死代码清理（P-03）：insertEntry 是已退役功能的遗留实现。
+  // AI 现在只从首页工具菜单启动（见 scheduleInsertEntry 注释），不再作为 dock
+  // 聊天列表的伪联系人在插。该函数此前仅通过 window.__xtjAiAgent.insertEntry
+  // 对外暴露，而全仓库（含测试、脚本、HTML）无任何调用点，已删除。
+  // 注：removeAllAiEntries 仍在使用，保留。
 
   function scheduleInsertEntry() {
     // AI is launched only from the homepage tools menu. This keeps cached
@@ -10974,21 +10934,12 @@ function showChatMessages() {
     window.__xtjAiTabVisibilityHooked = true;
   }
 
-  window.__debugAiClick = function() {
-    try {
-      var x = window.innerWidth / 2;
-      var y = window.innerHeight - 80;
-      var node = document.elementFromPoint(x, y);
-      return node;
-    } catch (e2) {
-      return null;
-    }
-  };
+  // ★ 2026-09-11 死代码清理（P-03）：__debugAiClick 是早期调试残留，
+  // 全仓库（含测试、脚本、HTML）零引用，已删除。
 
   window.__xtjAiAgent = {
     open: openAiChat,
     close: closeAiChat,
-    insertEntry: insertEntry,
     getConfig: function() { return S.config; },
     getConversationId: function() { return S.conversationId; },
     openDeepThink: openDeepThinkPage,

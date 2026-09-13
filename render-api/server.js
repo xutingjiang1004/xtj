@@ -426,7 +426,7 @@ setInterval(function() {
     if (now > val.expiresAt) aiResponseCache.delete(key);
   });
   limitAiCacheSize();
-}, 5 * 60 * 1000);
+}, 5 * 60 * 1000).unref(); // ★ M12：常驻清理任务不应阻止进程退出/拖慢关停
 
 // 判断是否允许使用缓存
 function canUseAiCache(ctx, reqBody) {
@@ -1936,7 +1936,7 @@ setInterval(function() {
     if (entry.waiters <= 0 && now - entry.ts > 60000) keysToDelete.push(key);
   });
   keysToDelete.forEach(function(key) { _mergeUserInfoLocks.delete(key); });
-}, 60000);
+}, 60000).unref(); // ★ M13：常驻清理任务不应阻止进程退出
 // user_info 合并字段白名单：仅允许服务端已知的业务字段。
 // 此前 mergeUserInfo 的 RPC 与回退路径都对 patch 无任何键白名单
 // （Object.assign 全量合并），外部输入一旦拼入 patch 可任意写入键。
@@ -2541,7 +2541,7 @@ setInterval(function() {
           }
         }
     }
-}, 300000);
+}, 300000).unref(); // ★ M13：限流表清理不应阻止进程退出
 // ★ 审计修复（M3）：getRealIp 与 getClientIp 原为两套实现（一个裸 req.ip、
 // 一个归一化），导致限流键与安全检测的 IP 不一致、按 IP 聚合失效。
 // 现在 getRealIp 内部委托 getClientIp，保证全站 IP 取值口径唯一。
@@ -3399,7 +3399,7 @@ setInterval(async function() {
       }
     }
   } catch (_) {}
-}, 60000);
+}, 60000).unref(); // ★ M12：IP 区域超时清理不应阻止进程退出
 
 // ===================== 安全检测逻辑 =====================
 
@@ -4555,11 +4555,9 @@ async function checkCatRateLimit(userName, postId) {
   }
 }
 
-// 记录限流
-async function recordCatRateLimit(userName, postId) {
-  // Kept as a compatibility no-op for callers predating consume_cat_comment_quota.
-  // The RPC has already atomically recorded the reservation.
-}
+// ★ 2026-09-11 死代码清理（M22）：recordCatRateLimit 曾是 no-op 兼容占位
+// （注释自述 "Kept as a compatibility no-op"），调用点已移除，函数一并删除。
+// 配额策略统一由 consume_cat_comment_quota RPC 在 checkCatRateLimit 内原子完成。
 
 // 创建小猫 AI 回复任务
 async function createCatReplyJob(sourceCommentId, postId, requestUserName) {
@@ -10278,9 +10276,11 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
       }
       var rateLimit = await checkCatRateLimit(req.userName, postId);
       if (rateLimit.allowed) {
+        // ★ 2026-09-11 死代码清理（M22）：原先此处会调用 recordCatRateLimit()，
+        // 但那是个空函数（no-op）—— 额度已在 checkCatRateLimit 内部经
+        // consume_cat_comment_quota RPC 原子预占，无需二次记录。
         var job = await createCatReplyJob(inserted.data.id, postId, req.userName);
-        if (job) await recordCatRateLimit(req.userName, postId);
-        else {
+        if (!job) {
           // 修复：createCatReplyJob 失败(唯一冲突 23505 除外)时，确认"确实没有对应任务"
           // 才退还刚预占的配额，避免用户丢一次机会且没有任何任务；23505 表示已有任务则不退。
           var chkCatJob = await supabase.from('ai_comment_reply_jobs')
