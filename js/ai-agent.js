@@ -44,9 +44,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   之前 S 对象内出现两个 thinkingMode 字段 (low/medium)，后者静默覆盖前者，
   //   注释却又声称默认 max。此处删除重复字段，建立唯一真源。
   var DEFAULT_THINKING_MODE = 'max';
-  var DEFAULT_AI_MODEL = 'deepseek-v4-flash-vision-exp';
+  // ★ 2026-09-11 模型升级：DeepSeek 官方发布 V4.1-Flash（GA 2026-09-10），
+  //   旧 ID deepseek-v4-flash / deepseek-v4-flash-vision-exp 已下线（仅保留临时兼容别名），
+  //   新正规 ID 为 deepseek-flash。V4.1-Flash 原生支持多模态，无需单独 vision-exp ID。
+  var DEFAULT_AI_MODEL = 'deepseek-flash';
+  var LEGACY_AI_MODEL_ALIASES = {
+    'deepseek-v4-flash-vision-exp': 'deepseek-flash',
+    'deepseek-v4-flash': 'deepseek-flash',
+    'deepseek-flash-4.1': 'deepseek-flash',
+    'deepseek-v4.1-flash': 'deepseek-flash',
+    'deepseek-v4-1-flash': 'deepseek-flash',
+    'deepseek-chat': 'deepseek-flash',
+    'deepseek-reasoner': 'deepseek-flash'
+  };
+  // 把历史 localStorage / 服务端配置里的旧模型 ID 收敛到新 ID，避免命中已下线模型。
+  function normalizeAiModelId(id) {
+    var key = String(id || '').trim();
+    if (!key) return '';
+    return LEGACY_AI_MODEL_ALIASES[key.toLowerCase()] || key;
+  }
   var ALLOWED_THINKING_MODES = ['off', 'low', 'medium', 'high', 'max'];
-  var ALLOWED_AI_MODELS = ['deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'];
+  var ALLOWED_AI_MODELS = ['deepseek-flash', 'deepseek-v4-pro'];
 
   // ── 思考Max 上下文边界 ─────────────────────────────────────────────────
   // 关闭思考Max（默认）：上下文限制在 CONTEXT_LIMIT_NORMAL(256) 条，
@@ -250,6 +268,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function resolveInitialModel() {
     try {
       var saved = localStorage.getItem('xtj_ai_model');
+      // ★ 2026-09-11 迁移：存量 localStorage 里可能是已下线的旧模型 ID
+      //   （deepseek-v4-flash-vision-exp 等）。先归一化到当前 ID 再校验，
+      //   否则老用户会被静默踢回默认模型、且旧值一直残留在存储里。
+      if (saved) {
+        var migrated = normalizeAiModelId(saved);
+        if (migrated !== saved) {
+          saved = migrated;
+          try { localStorage.setItem('xtj_ai_model', migrated); } catch (eMig) {}
+        }
+      }
       if (saved && ALLOWED_AI_MODELS.indexOf(saved) >= 0) return saved;
       // 自定义第三方模型：校验该 uid 仍存在
       if (saved && isCustomModelId(saved)) {
@@ -2064,10 +2092,35 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return !!(msg && msg.reasoning && getMessageThinkingMode(msg) !== 'off');
   }
 
+  // ★ 2026-09-11：工具进展自动跟随所需的两个状态（见 followToolProgress 注释）。
+  //   _aiUserPinnedUp        —— 用户是否【主动】上翻查看历史（工具进展此时不再打扰）
+  //   _aiAwayFromBottomCount —— 连续"不在底部"的 scroll 事件计数，用于把
+  //                             "容器长高导致的程序性偏离"与"用户真实上翻"区分开
+  var _aiUserPinnedUp = false;
+  var _aiAwayFromBottomCount = 0;
+
   function isNearBottom(container, threshold) {
     if (!container) return true;
     var gap = Math.max(24, threshold || 72);
     return container.scrollHeight - container.scrollTop - container.clientHeight <= gap;
+  }
+
+  // ★ 2026-09-11 修复（用户报障：调用工具时页面不跟着走，要手动往下拉）：
+  //   工具调用会产生 4 类 DOM 变化——tool_calls（时间线新增步骤）、tool_pending（⏳ 准备工具）、
+  //   tool_result（结果卡片，含可展开列表）、card（工具结果卡片）。这些节点全部插在
+  //   assistantBubble 【之前】，会让整个回复容器瞬间长高。
+  //   此前这 4 个分支内没有任何滚动调用，而普通正文流式渲染只会在 onRender 时滚动；
+  //   于是"工具阶段"页面始终停在旧位置，必须用户手动下拉才能看到工具进展。
+  //   这里统一封装：工具节点变更后把视口跟到底部。
+  //   与普通流式滚动的区别：工具事件是"离散的、低频的、用户明确想看到的进展"，
+  //   因此即便 autoScrollPinned 因上一次滚动校准被置 false，也强制跟随一次；
+  //   但若用户【明确向上翻看历史】（userPinnedUp）则尊重用户意图不打扰。
+  function followToolProgress(container, userPinnedUp) {
+    if (!container) return;
+    if (userPinnedUp) return;
+    // 直接强制滚动到底：该 helper 每次调用会被 requestAnimationFrame 合并，
+    // 连续多个工具事件不会造成抖动。
+    scrollToBottom(container, true);
   }
 
   function scrollToBottom(container, force) {
@@ -4228,6 +4281,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (hp) { try { hp.remove(); } catch (e) {} }
   }
 
+  // ★ 2026-09-11 修复（深度研究"连接中断"根因之二）：
+  //   深度研究流水线包含「Planner 拆解 → 3-5 个子智能体并行检索 → 查漏补缺 → Synthesizer 汇总」，
+  //   其中末段 Synthesizer 以 thinking_mode:'high' 生成 16K 长报告，服务端为其预留了
+  //   最长 10 分钟（total_timeout_ms: 600000）。原前端 idle 阈值仅 45 秒，
+  //   在"子智能体检索完毕 → 汇总开始输出"的静默窗口（含模型深度思考）极容易被误判为超时，
+  //   前端随即渲染「连接中断 / 超过 45 秒未收到新数据」。
+  //   阈值放宽到 180 秒：既能容忍 high 思考期的长静默，又仍能在服务端真实挂死时
+  //   及时收束（服务端 heartbeat 每 8s 一次，正常情况下该计时器根本不会触发）。
+  var RESEARCH_IDLE_TIMEOUT_MS = 180000;
+
   // Tavily Deep Research SSE 调用
   //   resolve({ answer, sources, message_id }); reject(Error) — err.cancelled / err.tavilyTimeout / err.networkError / err.status
   function runTavilyResearch(query, onProgress, opts) {
@@ -4263,10 +4326,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       idleTimer = setTimeout(function() {
         if (settled) return;
         timedOut = true;
-        var te = new Error('研究超时（45 秒未收到数据）');
+        var te = new Error('研究超时（' + Math.round(RESEARCH_IDLE_TIMEOUT_MS / 1000) + ' 秒未收到数据）');
         te.tavilyTimeout = true;
         fail(te);
-      }, 45000);
+      }, RESEARCH_IDLE_TIMEOUT_MS);
     }
 
     // 取消支持: promise.cancel() 或外部直接 abort controller (如 cancelDeepThink)
@@ -4281,7 +4344,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (settled) return;
       if (controller._abortReason === 'timeout') {
         timedOut = true;
-        var te2 = new Error('研究超时（45 秒未收到数据）');
+        var te2 = new Error('研究超时（' + Math.round(RESEARCH_IDLE_TIMEOUT_MS / 1000) + ' 秒未收到数据）');
         te2.tavilyTimeout = true;
         fail(te2);
         return;
@@ -4324,10 +4387,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var finalAnswer = (content && String(content).trim()) ? content : (evt.answer || '');
         succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id != null ? evt.message_id : undefined });
       } else if (evt.type === 'error') {
-        var ee = new Error(evt.error || evt.message || '研究失败');
+        // ★ 2026-09-11：错误文案优先级修正。后端并发分支发的是
+        //   { error: 'concurrent', code: 'concurrent', message: '请等待上一个研究请求完成' }，
+        //   此前用 evt.error 作文案 → 用户直接看到英文码 "concurrent"。
+        //   改为优先取可读的 message，其次 error；同时把错误码统一收敛到 ee.code。
+        var ee = new Error(evt.message || evt.error || '研究失败');
         ee.tavilyError = true;
         // 额度/搜索不足时把 reason 带上，便于上层提示
         if (evt.code) ee.code = evt.code;
+        else if (evt.error) ee.code = String(evt.error);
         if (evt.quota) ee.quota = evt.quota;
         fail(ee);
       }
@@ -4400,7 +4468,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             } catch (e) {
               // abort: cancel / timeout 已由 fail() 处理, 这里兜底
               if (!settled) {
-                if (timedOut) { var te3 = new Error('研究超时（45 秒未收到数据）'); te3.tavilyTimeout = true; fail(te3); }
+                if (timedOut) { var te3 = new Error('研究超时（' + Math.round(RESEARCH_IDLE_TIMEOUT_MS / 1000) + ' 秒未收到数据）'); te3.tavilyTimeout = true; fail(te3); }
                 else { var ae = new Error('研究已中断'); ae.networkError = true; fail(ae); }
               }
               break;
@@ -4695,12 +4763,36 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (err && err.tavilyTimeout) {
         console.warn('[AI] Tavily research timeout:', errMsg);
         if (isResearchCard(progressCard) && cardState !== 'cancelled') {
-          markResearchCardOutcome(progressCard, 'timeout', '超过 45 秒未收到新数据，本次研究已停止。');
+          markResearchCardOutcome(progressCard, 'timeout', '超过 ' + Math.round(RESEARCH_IDLE_TIMEOUT_MS / 1000) + ' 秒未收到新数据，本次研究已停止。');
         }
         try { notify('研究超时，请重试'); } catch (e) {}
         return 'done';
       }
-      // tavily_not_configured / 网络错误 / SSE error → 回退到原有深度思考流程
+      // ★ 2026-09-11 修复（深度研究"连接中断"根因之三）：
+      //   以下错误【回退到 deep think 也没有意义，反而会产生误导】：
+      //   - concurrent：/api/agent/chat(deep_think) 与 /api/agent/research/stream 共用
+      //     tryAcquireDeepResearch 并发闸门，回退过去必然再撞一次同一闸门；
+      //   - 配额类（quota_exceeded / search_limit / rate_limited / daily_limit...）：
+      //     换通道同样会被拦，且用户需要知道的是"额度/次数用完"而不是"连接中断"。
+      //   此前这些错误统一 return 'fallback' → deep think 再次失败 →
+      //   外层把最后一个错误渲染为「连接中断」，用户看到的文案与真实原因完全不符。
+      //   现在直接终结在研究会话卡上，给出可执行的准确提示。
+      var errCode = String((err && (err.code || err.error)) || '');
+      var isConcurrent = errCode === 'concurrent' || /上一个(研究)?请求|请等待上一个/.test(errMsg);
+      var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/.test(errCode)
+        || /次数已达上限|额度|开通 Pro|访问过于频繁/.test(errMsg);
+      if (isConcurrent || isQuota) {
+        console.warn('[AI] Tavily research 终结于不可回退错误:', errCode || errMsg);
+        var terminalMsg = isConcurrent
+          ? '上一个请求仍在进行中，请等它结束后重试'
+          : (errMsg || '当前额度不足，无法发起研究');
+        if (isResearchCard(progressCard) && cardState !== 'cancelled') {
+          markResearchCardOutcome(progressCard, 'interrupted', terminalMsg);
+        }
+        try { notify(terminalMsg); } catch (eNotify) {}
+        return 'done';
+      }
+      // tavily_not_configured / 网络错误 / 其他 SSE error → 回退到原有深度思考流程
       console.warn('[AI] Tavily research 失败，回退到深度思考流程:', errMsg, (err && err.status) ? ('HTTP ' + err.status) : '');
       removeTavilyCard();
       return 'fallback';
@@ -5060,7 +5152,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
           if (progressCard) { try { progressCard._done = true; } catch (e) {} }
           try {
-            finalModelRef.value = evt.model || 'deepseek-v4-flash-vision-exp';
+            finalModelRef.value = evt.model || 'deepseek-flash';
             finalThinkingModeRef.value = evt.thinking_mode || opts.defaultThinkingMode || 'max';
             aiContentRef.value = evt.sanitized_content || evt.content || '';
             if (finalMetaRef) finalMetaRef.value = evt;
@@ -5871,9 +5963,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // ★ 快速防抖去重：同一秒内相同文本的请求忽略
     // H-28: 双发送守卫 — 上一请求仍在进行时拒绝新发送，避免双 Enter
     // 追加第二条用户消息并中止第一个请求。锁在首个 await 之前同步设置。
-    if (S.sending) {
-      try { notify('AI 正在生成回复，请稍候'); } catch (e) {}
+    // ★ 2026-09-11 修复（深度研究"连接中断"根因之四）：
+    //   S.sending 是"主聊天 / 深页"共用标志（主聊天发送函数与本函数都写它）。
+    //   本函数位于【深度思考独立页】内，它真正需要防的是"本页重复发送"，
+    //   而不是"主聊天页正在生成"。原实现无条件拒绝会让用户在别处发起过对话后，
+    //   回到深研页始终发不出消息（提示"AI 正在生成回复，请稍候"），
+    //   或者旧请求异常未复位时永久锁死。
+    //   这里改为：仅当【深页自身】仍有在途请求时才拒绝；主聊天通道占用时给出
+    //   准确提示并允许继续（两通道在后端本就是独立会话，共用标志只会互相误伤）。
+    var dtInFlight = !!S._dtCurrentReqId && S.deepThinkJob;
+    if (dtInFlight) {
+      try { notify('正在生成回复，请稍候'); } catch (e) {}
       return;
+    }
+    if (S.sending && !S._dtCurrentReqId) {
+      // 主聊天通道正在跑：不阻塞深页，但要说清楚，避免用户以为是卡住。
+      try { notify('另一处对话正在生成，本页可继续发送'); } catch (eNote) {}
     }
     S.sending = true;
 
@@ -7875,6 +7980,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               step.appendChild(body);
               timeline.appendChild(step);
             });
+            followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
 
@@ -7900,6 +8006,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 renderAiToolCard(messagesEl, evt.card);
               }
             } catch (cardErr) { notify('AI 卡片加载失败，已保留文字回复'); }
+            followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
 
@@ -7917,6 +8024,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             pendBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '进行中' }));
             pendStep.appendChild(pendBody);
             pendingBar.appendChild(pendStep);
+            followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
 
@@ -7933,6 +8041,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               errStep.appendChild(errBody);
               errTimeline.appendChild(errStep);
             }
+            followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
 
@@ -8027,6 +8136,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 if (this.toggleFn) this.toggleFn();
               };
             }
+            followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
           
@@ -8921,7 +9031,19 @@ function showChatMessages() {
 
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
     messagesEl.addEventListener('scroll', window.throttleRAF(function() {
-      S.autoScrollPinned = isNearBottom(messagesEl, 84);
+      var _nearBottom = isNearBottom(messagesEl, 84);
+      S.autoScrollPinned = _nearBottom;
+      // ★ 2026-09-11：区分"用户主动上翻看历史"与"程序触发的滚动校准"。
+      //   工具事件（tool_calls/tool_result/card）会让容器高度突增，scroll 事件随之
+      //   触发且此刻已不在底部 —— 若把它当成用户意图，工具进展就永远不会自动跟随。
+      //   用户连续两次远离底部才判定为"主动上翻"，此后工具进展不再打扰用户阅读。
+      if (_nearBottom) {
+        _aiUserPinnedUp = false;
+        _aiAwayFromBottomCount = 0;
+      } else {
+        _aiAwayFromBottomCount++;
+        if (_aiAwayFromBottomCount >= 2) _aiUserPinnedUp = true;
+      }
       // ★ 修复 M2：历史会话列表页（messagesEl display:none）或 hasMore 残留时
       // 不得触发历史分页加载，避免拼接错乱/误拉取。offsetParent 为 null 表示元素不可见。
       if (S.showingHistory || !messagesEl.offsetParent) return;
@@ -8969,7 +9091,7 @@ function showChatMessages() {
     // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
     var modelLabels = {
       'deepseek-v4-pro': 'V4 Pro',
-      'deepseek-v4-flash-vision-exp': 'V4 Flash Vision'
+      'deepseek-flash': 'V4.1 Flash'
     };
     var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
 
@@ -9075,7 +9197,7 @@ function showChatMessages() {
                 '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
                 rowEnd(
-                  '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">V4 Flash</span>',
+                  '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">V4.1 Flash</span>',
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
               '</div>' +
@@ -9402,7 +9524,7 @@ function showChatMessages() {
     function buildModelOptions() {
       var opts = [
         { value: 'deepseek-v4-pro', label: 'V4 Pro' },
-        { value: 'deepseek-v4-flash-vision-exp', label: 'V4 Flash Vision' }
+        { value: 'deepseek-flash', label: 'V4.1 Flash' }
       ];
       var customs = loadCustomModels();
       customs.forEach(function(m) {
@@ -9413,10 +9535,10 @@ function showChatMessages() {
     }
     function repopulateModelSelect(keepValue) {
       if (!modelSelect) return;
-      var current = keepValue || S.selectedModel || 'deepseek-v4-flash-vision-exp';
+      var current = keepValue || S.selectedModel || 'deepseek-flash';
       // 正确保留当前选择：自定义模型需仍存在；内置模型需仍在标签表里；
       // 否则回落到默认 flash。
-      var target = 'deepseek-v4-flash-vision-exp';
+      var target = 'deepseek-flash';
       if (isCustomModelId(current)) {
         if (findCustomModel(current.slice(CUSTOM_MODEL_PREFIX.length))) target = current;
       } else if (modelLabels[current]) {
@@ -9445,7 +9567,7 @@ function showChatMessages() {
     }
 
     function updateModelUI() {
-      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-v4-flash-vision-exp'; } catch (eM) {}
+      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-flash'; } catch (eM) {}
       var sum = panelShell.querySelector('#aiModelSummary');
       if (sum) {
         if (isCustomModelId(S.selectedModel)) sum.textContent = customModelDisplayName(S.selectedModel) || '自定义模型';
@@ -9611,7 +9733,7 @@ function showChatMessages() {
             { value: 'max', label: '极致' }
           ];
       var current = kind === 'model'
-        ? (S.selectedModel || 'deepseek-v4-flash-vision-exp')
+        ? (S.selectedModel || 'deepseek-flash')
         : (S.thinkingMode || 'medium');
       var listEl = el('div', { class: 'ai-select-pop-list', role: 'listbox' });
       options.forEach(function(opt) {
@@ -10090,7 +10212,7 @@ function showChatMessages() {
         saveCustomModels(customs);
         if (editingUid === uid) resetForm();
         if (S.selectedModel === CUSTOM_MODEL_PREFIX + uid) {
-          S.selectedModel = 'deepseek-v4-flash-vision-exp';
+          S.selectedModel = 'deepseek-flash';
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
         }
         repopulateModelSelect();
@@ -10196,7 +10318,7 @@ function showChatMessages() {
 
     // 透明 select 直接点选：打开前同步当前值，change 后更新
     function syncSelectValues() {
-      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-v4-flash-vision-exp'; } catch (eM0) {}
+      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-flash'; } catch (eM0) {}
       try { if (thinkSelect) thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT0) {}
     }
     if (modelSelect) {

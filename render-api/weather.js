@@ -41,7 +41,73 @@ var CITY_COORDS = {
   '洛杉矶': { lat: 34.0522, lon: -118.2437 },
   '旧金山': { lat: 37.7749, lon: -122.4194 },
   '悉尼': { lat: -33.8688, lon: 151.2093 },
-  '曼谷': { lat: 13.7563, lon: 100.5018 }
+  '曼谷': { lat: 13.7563, lon: 100.5018 },
+  // ★ 2026-09-11 扩充：常见省市与热门旅游城市，减少对 geocoding 网络请求的依赖。
+  //   内置命中是 0 延迟且 100% 可靠的路径；每多一个内置城市，
+  //   就少一次可能失败的远程解析（此前用户反复遇到"未找到该地点的天气"）。
+  '济南': { lat: 36.6512, lon: 117.1201 },
+  '沈阳': { lat: 41.8057, lon: 123.4315 },
+  '哈尔滨': { lat: 45.8038, lon: 126.5349 },
+  '长春': { lat: 43.8171, lon: 125.3235 },
+  '石家庄': { lat: 38.0428, lon: 114.5149 },
+  '太原': { lat: 37.8706, lon: 112.5489 },
+  '南昌': { lat: 28.6820, lon: 115.8579 },
+  '贵阳': { lat: 26.6470, lon: 106.6302 },
+  '南宁': { lat: 22.8170, lon: 108.3665 },
+  '海口': { lat: 20.0444, lon: 110.1999 },
+  '三亚': { lat: 18.2528, lon: 109.5119 },
+  '兰州': { lat: 36.0611, lon: 103.8343 },
+  '西宁': { lat: 36.6171, lon: 101.7782 },
+  '银川': { lat: 38.4872, lon: 106.2309 },
+  '乌鲁木齐': { lat: 43.8256, lon: 87.6168 },
+  '拉萨': { lat: 29.6520, lon: 91.1721 },
+  '呼和浩特': { lat: 40.8414, lon: 111.7519 },
+  '温州': { lat: 27.9938, lon: 120.6994 },
+  '佛山': { lat: 23.0219, lon: 113.1214 },
+  '东莞': { lat: 23.0209, lon: 113.7518 },
+  '珠海': { lat: 22.2707, lon: 113.5767 },
+  '中山': { lat: 22.5170, lon: 113.3927 },
+  '惠州': { lat: 23.1115, lon: 114.4152 },
+  '泉州': { lat: 24.8741, lon: 118.6757 },
+  '烟台': { lat: 37.4638, lon: 121.4479 },
+  '威海': { lat: 37.5128, lon: 122.1201 },
+  '洛阳': { lat: 34.6197, lon: 112.4540 },
+  '徐州': { lat: 34.2058, lon: 117.2848 },
+  '常州': { lat: 31.8107, lon: 119.9741 },
+  '南通': { lat: 31.9802, lon: 120.8943 },
+  '绍兴': { lat: 30.0303, lon: 120.5802 },
+  '嘉兴': { lat: 30.7522, lon: 120.7500 },
+  '桂林': { lat: 25.2736, lon: 110.2900 },
+  '丽江': { lat: 26.8721, lon: 100.2299 },
+  '张家界': { lat: 29.1170, lon: 110.4791 },
+  '西藏': { lat: 29.6520, lon: 91.1721 },
+  '千岛湖': { lat: 29.6050, lon: 119.0420 },
+  '乌镇': { lat: 30.7450, lon: 120.4870 },
+  '迪拜': { lat: 25.2048, lon: 55.2708 },
+  '多伦多': { lat: 43.6532, lon: -79.3832 },
+  '温哥华': { lat: 49.2827, lon: -123.1207 },
+  '墨尔本': { lat: -37.8136, lon: 144.9631 },
+  '柏林': { lat: 52.5200, lon: 13.4050 },
+  '罗马': { lat: 41.9028, lon: 12.4964 },
+  '米兰': { lat: 45.4642, lon: 9.1900 },
+  '马德里': { lat: 40.4168, lon: -3.7038 },
+  '巴塞罗那': { lat: 41.3874, lon: 2.1686 },
+  '阿姆斯特丹': { lat: 52.3676, lon: 4.9041 },
+  '苏黎世': { lat: 47.3769, lon: 8.5417 },
+  '莫斯科': { lat: 55.7558, lon: 37.6173 },
+  '孟买': { lat: 19.0760, lon: 72.8777 },
+  '新德里': { lat: 28.6139, lon: 77.2090 },
+  '吉隆坡': { lat: 3.1390, lon: 101.6869 },
+  '雅加达': { lat: -6.2088, lon: 106.8456 },
+  '马尼拉': { lat: 14.5995, lon: 120.9842 },
+  '河内': { lat: 21.0278, lon: 105.8342 },
+  '胡志明市': { lat: 10.8231, lon: 106.6297 },
+  '釜山': { lat: 35.1796, lon: 129.0756 },
+  '名古屋': { lat: 35.1815, lon: 136.9066 },
+  '北海道': { lat: 43.0621, lon: 141.3544 },
+  '札幌': { lat: 43.0621, lon: 141.3544 },
+  '京都': { lat: 35.0116, lon: 135.7681 },
+  '冲绳': { lat: 26.2124, lon: 127.6809 }
 };
 
 // 英文/拼音别名 → 中文城市名（命中内置坐标）
@@ -56,8 +122,27 @@ var CITY_ALIASES = {
   jeju: '济州岛', paris: '巴黎', london: '伦敦', 'new york': '纽约',
   newyork: '纽约', nyc: '纽约', singapore: '新加坡', hongkong: '香港',
   'hong kong': '香港', taipei: '台北', 'los angeles': '洛杉矶', la: '洛杉矶',
-  'san francisco': '旧金山', sf: '旧金山', sydney: '悉尼', bangkok: '曼谷'
+  'san francisco': '旧金山', sf: '旧金山', sydney: '悉尼', bangkok: '曼谷',
+  // ★ 2026-09-11 扩充：模型常输出的英文/拼音城市名，命中内置表避免远程解析失败
+  jinan: '济南', shenyang: '沈阳', harbin: '哈尔滨', changchun: '长春',
+  shijiazhuang: '石家庄', taiyuan: '太原', nanchang: '南昌', guiyang: '贵阳',
+  nanning: '南宁', haikou: '海口', sanya: '三亚', lanzhou: '兰州',
+  xining: '西宁', yinchuan: '银川', urumqi: '乌鲁木齐', lhasa: '拉萨',
+  hohhot: '呼和浩特', wenzhou: '温州', foshan: '佛山', dongguan: '东莞',
+  zhuhai: '珠海', zhongshan: '中山', huizhou: '惠州', quanzhou: '泉州',
+  yantai: '烟台', weihai: '威海', luoyang: '洛阳', xuzhou: '徐州',
+  changzhou: '常州', nantong: '南通', shaoxing: '绍兴', jiaxing: '嘉兴',
+  guilin: '桂林', lijiang: '丽江', zhangjiajie: '张家界', tibet: '西藏',
+  dubai: '迪拜', toronto: '多伦多', vancouver: '温哥华', melbourne: '墨尔本',
+  berlin: '柏林', rome: '罗马', milan: '米兰', madrid: '马德里',
+  barcelona: '巴塞罗那', amsterdam: '阿姆斯特丹', zurich: '苏黎世',
+  moscow: '莫斯科', mumbai: '孟买', 'new delhi': '新德里', delhi: '新德里',
+  'kuala lumpur': '吉隆坡', jakarta: '雅加达', manila: '马尼拉',
+  hanoi: '河内', 'ho chi minh': '胡志明市', busan: '釜山',
+  nagoya: '名古屋', hokkaido: '北海道', sapporo: '札幌', kyoto: '京都',
+  okinawa: '冲绳'
 };
+
 
 var WEATHER_CODES = {
   0: '晴天', 1: '大部晴', 2: '多云', 3: '阴天', 45: '雾', 48: '雾凇',
@@ -100,16 +185,119 @@ function matchBuiltinCity(query) {
   return null;
 }
 
+// ★ 2026-09-11 新增：地名清洗与候选生成。
+//   模型（以及用户）给出的地名经常带冗余限定，例如：
+//     「成都市」「四川成都」「中国成都市武侯区」「北京市朝阳区」「Los Angeles, CA」
+//   原实现把整串直接丢给 geocoding API 且 count=1，这类长尾输入常常返回 0 条结果，
+//   于是用户反复看到「未找到该地点的天气，请换更具体的城市名再试」——
+//   讽刺的是提示让用户"换更具体的"，但问题恰恰出在"太具体"。
+//   这里生成由粗到细的候选列表，逐级尝试，显著提升解析成功率。
+var ADMIN_SUFFIX_RE = /(特别行政区|自治区|自治州|自治县|地区|盟|市辖区|新区|开发区|街道|办事处|镇|乡|市|区|县|省|州|盟)$/;
+// 省级 / 直辖市 / 自治区名（用于"省名+城市名"前缀剥离）
+var PROVINCE_NAMES = ['北京', '上海', '天津', '重庆', '河北', '山西', '辽宁', '吉林', '黑龙江',
+  '江苏', '浙江', '安徽', '福建', '江西', '山东', '河南', '湖北', '湖南', '广东', '海南',
+  '四川', '贵州', '云南', '陕西', '甘肃', '青海', '台湾', '内蒙古', '广西', '西藏', '宁夏',
+  '新疆', '香港', '澳门'];
+var PROVINCE_PREFIX_RE = new RegExp('^(' + PROVINCE_NAMES.join('|') + ')');
+function buildGeoQueryCandidates(raw) {
+  var q = String(raw || '').trim();
+  if (!q) return [];
+  var out = [];
+  function push(v) {
+    v = String(v || '').trim();
+    // ★ 防御：单字行政名（「省」「市」「区」）无检索价值，直接丢弃。
+    if (v.length < 2) return;
+    // ★ 防御：以孤立行政后缀开头的残留（「省深圳市南山」）同样丢弃。
+    if (/^[省市区县州盟乡镇]/.test(v)) return;
+    // ★ 防御：丢弃"省名 + 单字残片"的切分产物（「浙江杭」「四川成」）。
+    //   这类候选既不是城市也不是省名，geocoding 只会返回空，白白消耗一次请求。
+    //   注意：纯省名本身（「浙江」「四川」）是有效输入，必须保留。
+    if (PROVINCE_PREFIX_RE.test(v)) {
+      var rest = v.replace(PROVINCE_PREFIX_RE, '');
+      if (rest.length === 1) return;
+    }
+    if (out.indexOf(v) < 0) out.push(v);
+  }
+  push(q);
+
+  // 去掉国家前缀（中国/China）与常见分隔符后缀（Los Angeles, CA / 北京·朝阳）
+  var noCountry = q.replace(/^(中国|china|中华人民共和国)\s*[·,，]?\s*/i, '').trim();
+  push(noCountry);
+  var noComma = q.split(/[·,，]/)[0].trim();
+  push(noComma);
+
+  // 逐级剥离行政后缀：「成都市」→「成都」
+  var stripped = noComma;
+  for (var i = 0; i < 4; i++) {
+    var next = stripped.replace(ADMIN_SUFFIX_RE, '').trim();
+    if (!next || next === stripped) break;
+    stripped = next;
+    push(stripped);
+  }
+
+  // ★ 2026-09-11 补充：处理"行政字内嵌"的复合地名。
+  //   例如「成都市武侯区」按后缀剥离只能得到「成都市武侯」（因为末字是"侯"、
+  //   不匹配任何行政后缀，循环直接退出），仍然无法命中内置的「成都」。
+  //   这类输入的正确切法是【在第一个行政字处截断】：取「成都」。
+  var ADMIN_CHAR_RE = /[省市区县州盟乡镇]/;
+  var cutIdx = noComma.search(ADMIN_CHAR_RE);
+  if (cutIdx >= 2) push(noComma.slice(0, cutIdx));
+  // 对后缀剥离后的形式也做一次同样处理
+  var innerCutIdx = stripped.search(ADMIN_CHAR_RE);
+  if (innerCutIdx >= 2) push(stripped.slice(0, innerCutIdx));
+
+  // ★ 省/自治区名前缀再剥一层：「四川成都武侯」→「成都武侯」，供 geocoding 命中省会。
+  //   仅当去前缀后仍有 ≥2 字时才加入，避免把「西藏」这类本身即为目的地的输入削空。
+  var withoutProvince = stripped.replace(PROVINCE_PREFIX_RE, '').trim();
+  if (withoutProvince && withoutProvince !== stripped && withoutProvince.length >= 2) {
+    push(withoutProvince);
+    // 再对去省后的结果做一次后缀剥离（「成都武侯」→「成都」）
+    var stripped2 = withoutProvince;
+    for (var j = 0; j < 3; j++) {
+      var next2 = stripped2.replace(ADMIN_SUFFIX_RE, '').trim();
+      if (!next2 || next2 === stripped2) break;
+      stripped2 = next2;
+      push(stripped2);
+    }
+  }
+  return out;
+}
+
 /** Resolve any city name via Open-Meteo geocoding (cached). */
 async function geocodeCity(query) {
-  var q = String(query || '').trim().slice(0, 60);
-  if (!q) return null;
-  var cacheKey = q.toLowerCase();
+  var raw = String(query || '').trim().slice(0, 60);
+  if (!raw) return null;
+  var cacheKey = raw.toLowerCase();
   if (GEOCODE_CACHE[cacheKey]) return GEOCODE_CACHE[cacheKey];
+
+  // ★ 2026-09-11：候选列表 + 语言回退。
+  //   language=zh 在部分非中文地名上返回空（例如纯英文长名），
+  //   因此每个候选先试 zh 再试默认语言；命中即返回。
+  var candidates = buildGeoQueryCandidates(raw);
+  var languages = ['zh', ''];
+  for (var ci = 0; ci < candidates.length; ci++) {
+    for (var li = 0; li < languages.length; li++) {
+      var hit = await geocodeOnce(candidates[ci], languages[li]);
+      if (hit) {
+        var keys = Object.keys(GEOCODE_CACHE);
+        if (keys.length >= GEOCODE_CACHE_MAX) delete GEOCODE_CACHE[keys[0]];
+        GEOCODE_CACHE[cacheKey] = hit;
+        return hit;
+      }
+    }
+  }
+  return null;
+}
+
+/** 单次 geocoding 查询（count=3 取最优候选）。 */
+async function geocodeOnce(term, language) {
+  var q = String(term || '').trim().slice(0, 60);
+  if (!q) return null;
   try {
     var url = 'https://geocoding-api.open-meteo.com/v1/search?name=' +
-      encodeURIComponent(q) + '&count=1&language=zh&format=json';
-    var resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      encodeURIComponent(q) + '&count=3&format=json' + (language ? ('&language=' + language) : '');
+    // ★ 2026-09-11：超时由 8s 缩短到 6s，配合多候选轮询控制总耗时。
+    var resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
     if (!resp.ok) return null;
     // ★ 审计修复：geocode 分支此前直接 resp.json() 无大小上限（与 forecast 分支
     // 的 MAX_WEATHER_RESPONSE_BYTES 限量不一致）；改为与 forecast 相同的限量读取。
@@ -119,21 +307,24 @@ async function geocodeCity(query) {
     if (Buffer.byteLength(geocodeRaw, 'utf8') > MAX_WEATHER_RESPONSE_BYTES) return null;
     var data;
     try { data = JSON.parse(geocodeRaw); } catch (_) { return null; }
-    var hit = data && Array.isArray(data.results) && data.results[0];
-    if (!hit || hit.latitude == null || hit.longitude == null) return null;
+    var results = data && Array.isArray(data.results) ? data.results : null;
+    if (!results || !results.length) return null;
+    // 取首个坐标完整的候选（result[0] 相关度最高，保留其优先权）
+    var hit = null;
+    for (var ri = 0; ri < results.length; ri++) {
+      var cand = results[ri];
+      if (cand && cand.latitude != null && cand.longitude != null) { hit = cand; break; }
+    }
+    if (!hit) return null;
     var labelParts = [hit.name];
     if (hit.admin1 && hit.admin1 !== hit.name) labelParts.push(hit.admin1);
     if (hit.country && hit.country !== hit.name) labelParts.push(hit.country);
-    var resolved = {
+    return {
       name: labelParts.join(' · '),
       coords: { lat: Number(hit.latitude), lon: Number(hit.longitude) }
     };
-    var keys = Object.keys(GEOCODE_CACHE);
-    if (keys.length >= GEOCODE_CACHE_MAX) delete GEOCODE_CACHE[keys[0]];
-    GEOCODE_CACHE[cacheKey] = resolved;
-    return resolved;
   } catch (e) {
-    console.error('[WEATHER] geocode error:', e && e.message);
+    console.error('[WEATHER] geocode error:', q, e && e.message);
     return null;
   }
 }
@@ -141,6 +332,14 @@ async function geocodeCity(query) {
 async function resolveCity(query) {
   var builtin = matchBuiltinCity(query);
   if (builtin) return builtin;
+  // ★ 2026-09-11：对带行政后缀的国家/省市组合再试一次内置表。
+  //   例如「中国成都」「四川成都」——matchBuiltinCity 用 indexOf 已能命中"成都"，
+  //   但「西藏」这类只在内置表、且前缀带国家的输入，剥前缀后命中率更高。
+  var candidates = buildGeoQueryCandidates(query);
+  for (var ci = 0; ci < candidates.length; ci++) {
+    var builtin2 = matchBuiltinCity(candidates[ci]);
+    if (builtin2) return builtin2;
+  }
   return geocodeCity(query);
 }
 
@@ -151,8 +350,20 @@ async function fetchForecast(matchedCity) {
     '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code' +
     '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai';
 
-  var resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
-  if (!resp.ok) return null;
+  // ★ 2026-09-11：加一次重试。预报接口偶发抖动/超时时，此前直接返回 null，
+  //   上层把它渲染成「未找到该地点的天气」——把"网络问题"误报为"地名不存在"，
+  //   引导用户去换城市名，永远换不对。重试一次可显著降低这类假失败。
+  var resp = null;
+  for (var attempt = 0; attempt < 2; attempt++) {
+    try {
+      resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
+      if (resp && resp.ok) break;
+    } catch (eFetch) {
+      console.error('[WEATHER] forecast fetch attempt', attempt + 1, 'failed:', eFetch && eFetch.message);
+      resp = null;
+    }
+  }
+  if (!resp || !resp.ok) return null;
   // 审计 🟢：先查 content-length，再限量读取 body，异常大响应直接丢弃
   var declaredLen = Number(resp.headers && resp.headers.get && resp.headers.get('content-length'));
   if (Number.isFinite(declaredLen) && declaredLen > MAX_WEATHER_RESPONSE_BYTES) return null;
@@ -189,17 +400,38 @@ async function fetchForecast(matchedCity) {
 async function queryWeatherData(query) {
   try {
     var matchedCity = await resolveCity(query);
-    if (!matchedCity) return null;
-    return await fetchForecast(matchedCity);
+    if (!matchedCity) {
+      // ★ 2026-09-11：用带 reason 的错误区分两类失败，避免上层一律输出
+      //   「未找到该地点的天气，请换更具体的城市名再试」而误导用户。
+      var notFound = new Error('未找到该地点');
+      notFound.reason = 'city_not_found';
+      throw notFound;
+    }
+    var forecast = await fetchForecast(matchedCity);
+    if (!forecast) {
+      var upstream = new Error('天气服务无响应');
+      upstream.reason = 'upstream_failed';
+      throw upstream;
+    }
+    return forecast;
   } catch (e) {
+    if (e && e.reason) throw e;
     console.error('[WEATHER] query error:', e && e.message);
-    return null;
+    var unknown = new Error('天气服务异常');
+    unknown.reason = 'upstream_failed';
+    throw unknown;
   }
 }
 
 async function queryWeather(query) {
-  var data = await queryWeatherData(query);
-  return formatWeatherText(data);
+  // ★ 2026-09-11：queryWeatherData 现在以异常表达失败（带 reason），
+  //   这里是纯文本包装入口，失败时返回 null 而不是抛出，保持既有调用方不变。
+  try {
+    var data = await queryWeatherData(query);
+    return formatWeatherText(data);
+  } catch (e) {
+    return null;
+  }
 }
 
 module.exports = {
@@ -208,5 +440,8 @@ module.exports = {
   formatWeatherText: formatWeatherText,
   matchBuiltinCity: matchBuiltinCity,
   geocodeCity: geocodeCity,
-  CITY_COORDS: CITY_COORDS
+  // ★ 2026-09-11：导出候选生成器，便于单测覆盖地名清洗逻辑
+  buildGeoQueryCandidates: buildGeoQueryCandidates,
+  CITY_COORDS: CITY_COORDS,
+  CITY_ALIASES: CITY_ALIASES
 };
