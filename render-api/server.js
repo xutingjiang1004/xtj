@@ -1854,6 +1854,48 @@ async function finishStream(res, opt) {
   return { saved: saved, content: content, quota: quotaAfter };
 }
 
+// ★ 2026-09-13 修复（S1–S4/S11/S12/S15 · 簇 A：SSE 断连不记账）：
+//   此前各 SSE 路由的 abort/早退分支普遍写成 `if (aborted) return safeEnd();`，
+//   而计费语句位于正常路径的 finishStream()/recordAiTurnUsage() 中 → 一旦客户端
+//   在响应到达后立刻断开，上游 token 已实际消耗却不扣任何额度，可零成本刷配额
+//   （研究路由成本最高，含多次子智能体调用 + 内置 web_search）。
+//
+//   本函数专用于「流已断开、无法再走 finishStream」的场景：只补记账，不写库、不发 SSE。
+//   与 finishStream 的计费口径保持一致（同一 recordAiTurnUsage、同一 source 命名），
+//   避免出现两套统计。调用方需保证：仅在确实发生过上游调用时才调用（避免空扣）。
+async function recordAbortedStreamUsage(userName, opt) {
+  try {
+    if (!userName) return null;
+    opt = opt || {};
+    var usage = (opt.usage && typeof opt.usage === 'object' && Object.keys(opt.usage).length) ? opt.usage : null;
+    var content = String(opt.content || '');
+    var reasoning = String(opt.reasoning || '');
+    // 无 usage（上游未回传，常见于早期中断）且无任何产出时，说明上游调用未产生可观消耗，
+    // 不补记，避免把「刚发出请求就断开」也记成一笔完整用量。
+    if (!usage && !content && !reasoning) return null;
+    var searchHits = 0;
+    if (typeof opt.searchApiCount === 'number' && opt.searchApiCount >= 0) {
+      searchHits = opt.searchApiCount;
+    } else if (opt.searchMeta && typeof opt.searchMeta.count === 'number' && opt.searchMeta.count > 0) {
+      searchHits = opt.searchMeta.count;
+    }
+    return await recordAiTurnUsage(userName, usage, {
+      conversation_id: opt.convId || null,
+      model: normalizeDeepSeekUsageModel(opt.usedModel || DEEPSEEK_MODEL_REASONER, opt.usedModel || DEEPSEEK_MODEL_REASONER),
+      source: opt.source || 'chat_stream_aborted',
+      message: opt.message || '',
+      content: content,
+      reasoning: reasoning,
+      search_count: searchHits,
+      did_search: searchHits > 0,
+      aborted: true
+    });
+  } catch (e) {
+    console.error('[AI-QUOTA] recordAbortedStreamUsage failed:', e && e.message);
+    return null;
+  }
+}
+
 // Search query helpers: see ./search-providers.js
 
 // Mail transport: see ./mail-transport.js (imported above)
@@ -17709,6 +17751,12 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
     //   且永不落账（recordAiTurnUsage 缺失）→ 免费用户可无限绕过日搜索配额。
     //   先做与其它 AI 路由一致的门禁（token 日额度 + 请求次数兜底）。
     var _customDeepGatePassed = false;
+    // ★ 修复 S12（簇 A）：原判定用「gate 是否放行」，若 enforceAiChatAccess 自身
+    //   抛异常（如数据库抖动），标志保持 false → finally 里直接跳过记账。
+    //   但异常发生在 gate 阶段时确实没有上游消耗，所以真正需要覆盖的是
+    //   「任何一次 callCustomChat 已发生」的情况。这里补一个独立的产出标志，
+    //   与 gate 标志取或，确保只要产生了内容就一定记账。
+    var _customDeepUpstreamUsed = false;
     if (req.userName && req.userName !== ADMIN_USERNAME) {
       var customDeepGate = await enforceAiChatAccess(req.userName, { needSearch: false });
       if (!customDeepGate.allowed) {
@@ -17723,6 +17771,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
     // 1) Planner
     var plannerRaw = '';
     try { plannerRaw = await callCustomChat([{ role: 'user', content: CUSTOM_PLANNER_PROMPT + text }], { maxTokens: 2000, temperature: 0.4 }); } catch (eP) { plannerRaw = ''; }
+    _customDeepUpstreamUsed = true; // ★ S12：首次上游调用已发生，此后无论成败都必须记账
     var plan = parsePlannerJson(plannerRaw);
     // ★ 修复：Planner 输出直接拼入 worker 提示（17263/17273），做净化与长度上限
     var agents = (plan && Array.isArray(plan.agents) && plan.agents.length) ? plan.agents.slice(0, 6).map(function(ca) {
@@ -17827,7 +17876,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
     try { clearTimeout(timer); } catch (e) {}
     // ★ S6 审计修复：结束时统一记账（正常完成/中断/失败路径都覆盖），
     //   把本请求实际发起的搜索次数与估算 token 落入 ai 配额，杜绝"断开免单/永不落账"
-    if (_customDeepGatePassed && req.userName) {
+    if ((_customDeepGatePassed || _customDeepUpstreamUsed) && req.userName) {
       try {
         await recordAiTurnUsage(req.userName, { model: chosenModel }, {
           model: chosenModel,
@@ -18580,7 +18629,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       try {
         responsesResult = await callDeepSeek(messages, responsesOptions);
       } catch (e) {
-        if (aborted) return safeEnd();
+        // ★ 修复 S1/S2（簇 A）：上游调用异常 + 客户端已断开 → 此前直接 return，
+        //   完全不计费。DeepSeek 可能已受理并计费（尤其是超时类异常），
+        //   这里按「无 usage、无产出」由 recordAbortedStreamUsage 自行判定是否补记。
+        if (aborted) {
+          await recordAbortedStreamUsage(userName, {
+            convId: convId, usedModel: usedModel, source: 'chat_stream_aborted',
+            message: message, content: contentBuffer, reasoning: reasoningBuffer,
+            searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0
+          });
+          return safeEnd();
+        }
         var _respErrMsg = (e && e.message) ? String(e.message).slice(0, 180) : '';
         var _respErrCode = (e && e.code) ? String(e.code) : '';
         console.error('[AGENT-STREAM] Responses API failed:', _respErrMsg, _respErrCode, 'thinking=', thinkingMode);
@@ -18607,8 +18666,22 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         writeSse(res, { type: 'error', error: _friendly, code: _respErrCode || undefined, thinking_mode: thinkingMode });
         return safeEnd();
       }
-      if (aborted) return safeEnd();
-
+      // ★ 修复 S1（簇 A）：callDeepSeek 已【成功返回】，说明上游 token 已实际消耗，
+      //   此时客户端断开，此前直接 return safeEnd() 完全不扣费 → 可零成本刷配额。
+      //   这里用上游真实 usage 补记账（优先级最高的资损点）。
+      if (aborted) {
+        await recordAbortedStreamUsage(userName, {
+          convId: convId, usedModel: usedModel,
+          source: 'chat_stream_aborted',
+          message: message,
+          content: contentBuffer || responsesContent,
+          reasoning: reasoningBuffer || responsesReasoning,
+          usage: responsesResult.usage,
+          searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0,
+          searchMeta: searchMeta
+        });
+        return safeEnd();
+      }
       responsesContent = responsesResult.content || '';
       responsesReasoning = responsesResult.reasoning || '';
       responsesUsage = responsesResult.usage;
@@ -19666,7 +19739,18 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     return safeEnd();
   } catch (streamErr) {
-    if (aborted) return safeEnd();
+    // ★ 修复 S2/S11（簇 A）：流读取异常 + 客户端已断开 → 此前直接 return，不记账。
+    //   此时 contentBuffer 可能已有内容、usageInStream 可能已收到上游 usage，
+    //   说明上游确实消耗了 token，必须补记。
+    if (aborted) {
+      await recordAbortedStreamUsage(userName, {
+        convId: convId, usedModel: usedModel, source: 'chat_stream_aborted',
+        message: message, content: contentBuffer, reasoning: persistentReasoning || reasoningBuffer,
+        usage: usageInStream || null,
+        searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0
+      });
+      return safeEnd();
+    }
     var serrText = streamErr && streamErr.message ? String(streamErr.message) : 'unknown';
     console.error('[AGENT-STREAM] stream read error:', serrText, 'reqId:', clientReqId || '?');
     // 已有部分内容时先保存，避免已生成的回复丢失（finishStream 发送 interrupted done）
@@ -20554,7 +20638,20 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
       }
       return safeEnd();
     }
-    if (aborted || (cancelToken && cancelToken.cancelled)) return safeEnd();
+    // ★ 修复 S4（簇 A）：runSelfResearchFlow 已完成整个多智能体链路
+    //   （主 agent 拆解 + 1-5 个子 agent 并行调研，每个子 agent 都会调用 DeepSeek
+    //   内置 web_search），是本仓库【单次成本最高】的路径。客户端在此时断开，
+    //   此前直接 return safeEnd() 不扣任何费用 → 可零成本刷爆研究配额。
+    if (aborted || (cancelToken && cancelToken.cancelled)) {
+      await recordAbortedStreamUsage(userName, {
+        convId: convId, usedModel: model, source: 'research_stream_aborted',
+        message: query,
+        content: (selfResult && selfResult.answer) || '',
+        usage: (selfResult && selfResult.usage) || null,
+        searchApiCount: Math.floor(Number(selfResult && selfResult.search_count) || 0)
+      });
+      return safeEnd();
+    }
     if (!selfResult || !selfResult.answer) {
       if (!aborted) { try { writeSse(res, { type: 'error', error: 'self_research_empty', message: '研究未生成内容' }); } catch (_) {} }
       return safeEnd();
@@ -20562,7 +20659,18 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
 
     // D. 持久化 + 缓存写入 + 结束事件
     var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources);
-    if (aborted) return safeEnd();
+    // ★ 修复 S4（簇 A，续）：持久化已完成 → 本次研究的所有上游费用均已实际发生，
+    //   此处断开同样必须补记账（此前直接 return 会漏掉整笔研究用量）。
+    if (aborted) {
+      await recordAbortedStreamUsage(userName, {
+        convId: convId, usedModel: model, source: 'research_stream_aborted',
+        message: query,
+        content: selfResult.answer || '',
+        usage: (selfResult && selfResult.usage) || null,
+        searchApiCount: Math.floor(Number(selfResult && selfResult.search_count) || 0)
+      });
+      return safeEnd();
+    }
     researchCacheSet(cacheKey, selfResult.answer, selfResult.sources);
 
     // 扣减深入研究全链路 token（输入/思考/输出）与实际搜索次数
@@ -22286,9 +22394,17 @@ app.post('/api/code/ai', authenticateUser, rateLimit(60000, 12), async (req, res
     });
     if (!closed && !res.writableEnded) {
       writeSse(res, { type: 'done', complete: true, saved: false, streamed: streamed, content: reply }, 'done');
+    }
+    // ★ 修复 S3（簇 A）：记账原先写在 `if (!closed && !res.writableEnded)` 内，
+    //   客户端一断开（closed=true）整条计费语句被跳过，而 DeepSeek 调用已完成、
+    //   费用已实际发生 → 可零成本刷 code/ai 配额。
+    //   现移出守卫：无论是否断开都记账（仅在确实产生过输出时记，避免空请求也扣费）。
+    if (reply && String(reply).length > 0) {
       // ★ S5 审计修复：记账必须按消息真实长度估算（原 slice(0,500) 导致 400k 字符输入
       //   只按 500 字符计费 → 配额绕过/成本 DoS）。传实际提交给模型的提示（含附件提取文本）。
-      recordAiTurnUsage(req.userName, null, { model: normalizeDeepSeekUsageModel(cwModel, DEEPSEEK_MODEL_VISION), source: 'code_workbench', message: cwFinalText.slice(0, 300000), content: reply, reasoning: '', search_count: 0, did_search: false }).catch(function() {});
+      var codeAiUsageOpts = { model: normalizeDeepSeekUsageModel(cwModel, DEEPSEEK_MODEL_VISION), source: 'code_workbench', message: cwFinalText.slice(0, 300000), content: reply, reasoning: '', search_count: 0, did_search: false };
+      if (closed) { try { console.log('[AI-QUOTA] code/ai 断连补记账 reply_len:', String(reply).length); } catch (_) {} }
+      recordAiTurnUsage(req.userName, null, codeAiUsageOpts).catch(function() {});
     }
   } catch (e) {
     if (!closed && !res.writableEnded) {
