@@ -3324,7 +3324,10 @@
             h += '<div class="filter-chips" style="margin-bottom:10px;">';
             h += '<span class="filter-chip active" id="behaviorFilterAll" onclick="window.setBehaviorFilter(\'all\')">全部用户</span>';
             uniqueUsers.slice(0, 20).forEach(function(u) {
-                h += '<span class="filter-chip" id="behaviorFilter_' + escapeHtml(u) + '" onclick="window.setBehaviorFilter(\'' + safeJsStr(u) + '\')">' + escapeHtml(u) + '</span>';
+                // ★ 修复 S-02：id 用 escapeHtml(u) 生成、查找用原始 u → 用户名含 & < > 等
+                //   字符时两者不等，getElementById 返回 null，chip 高亮恒失效。
+                //   改用 data-user 属性（值经 escapeHtml）承载原始用户名，查找走属性选择器。
+                h += '<span class="filter-chip" data-user="' + escapeHtml(u) + '" onclick="window.setBehaviorFilter(\'' + safeJsStr(u) + '\')">' + escapeHtml(u) + '</span>';
             });
             if (uniqueUsers.length > 20) {
                 h += '<span class="filter-chip" style="opacity:0.5">+ ' + (uniqueUsers.length - 20) + ' 更多...</span>';
@@ -3358,7 +3361,15 @@
         behaviorFilterUser = user;
         var allChips = document.querySelectorAll('#tabBehavior .filter-chip');
         allChips.forEach(function(chip) { chip.classList.remove('active'); });
-        var activeChip = user === 'all' ? document.getElementById('behaviorFilterAll') : document.getElementById('behaviorFilter_' + user);
+        // ★ 修复 S-02：改用 data-user 精确匹配原始用户名。用 CSS.escape 处理特殊字符，
+        //   并对旧式 id（behaviorFilterAll）保留兼容。
+        var activeChip = null;
+        if (user === 'all') {
+            activeChip = document.getElementById('behaviorFilterAll');
+        } else {
+            var esc = (window.CSS && CSS.escape) ? CSS.escape(user) : String(user).replace(/["\\]/g, '\\$&');
+            try { activeChip = document.querySelector('#tabBehavior .filter-chip[data-user="' + esc + '"]'); } catch (_) { activeChip = null; }
+        }
         if (activeChip) activeChip.classList.add('active');
         renderTab('behavior');
     };
@@ -5293,8 +5304,10 @@
             };
 
             window._aiAdminDeleteInvite = async function(code) {
+                // ★ 修复 M-14：降级分支此前【无任何确认】直接删除邀请码（破坏性操作）。
+                //   改为回退到原生 confirm()，保证「降级」只影响弹窗样式、不影响安全语义。
                 if (!window.showConfirm) {
-                    // 无确认弹窗时直接删
+                    if (!window.confirm('确定删除邀请码 ' + code + ' 吗？')) return;
                     try {
                         await apiCall('DELETE', '/admin/ai-agent/invite-codes/' + encodeURIComponent(code));
                         showToast('已删除');
@@ -5322,6 +5335,8 @@
                     } catch(e) { showToast('取消失败: ' + e.message); }
                 }
                 if (!window.showConfirm) {
+                    // ★ 修复 M-15：同 M-14，降级分支此前无确认直接取消 Pro（影响付费权益）。
+                    if (!window.confirm('确定取消 ' + userName + ' 的 Pro 会员吗？')) return;
                     await doCancel();
                     return;
                 }

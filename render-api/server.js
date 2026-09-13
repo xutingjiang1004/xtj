@@ -13589,7 +13589,11 @@ app.get('/admin/clipboard-data', verifyToken, rateLimit(60000, 20), async (req, 
 // 永久删除指定用户的剪贴板数据
 app.delete('/admin/clipboard-data', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var userName = String(req.body && req.body.user_name || '').trim();
+    // ★ 修复 S-01（2026-09-13）：前端放在 query（DELETE 语义正确、且避免网关/代理
+    //   丢弃 body），后端却只读 req.body → req.body 为 {} → 恒命中 400「用户名无效」，
+    //   导致管理后台「删除该用户剪贴板」与「清空当前页」100% 失败（涉数据合规操作：
+    //   用户撤回授权后必须能删除）。现优先读 query，并保留 body 作为兼容回退。
+    var userName = String((req.query && req.query.user_name) || (req.body && req.body.user_name) || '').trim();
     if (!userName || userName.length > 50) return res.status(400).json({ error: '用户名无效', code: 'invalid_user_name' });
     var existing = await supabase.from('posts').select('id, content')
       .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
