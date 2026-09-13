@@ -6398,13 +6398,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (typeof unbindPasteDrop === 'function') _dtListeners.push(unbindPasteDrop);
     }
 
-    if (backBtn) backBtn.addEventListener('click', function(ev) {
+    if (backBtn) addDtListener(backBtn, 'click', function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
       closeDeepThinkPage();
     });
 
-    if (newBtn) newBtn.addEventListener('click', async function(ev) {
+    if (newBtn) addDtListener(newBtn, 'click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
       if (S.sending) return;
@@ -6429,7 +6429,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     });
 
-    if (delBtn) delBtn.addEventListener('click', async function(ev) {
+    if (delBtn) addDtListener(delBtn, 'click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
       if (!S.dtConversationId) return;
@@ -6457,11 +6457,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     });
 
-    if (sendBtn) sendBtn.addEventListener('click', dtDoSend);
+    if (sendBtn) addDtListener(sendBtn, 'click', dtDoSend);
 
     // 暂停按钮：真正中止（取消）SSE 请求 + 暂停渲染
     if (pauseBtn) {
-      pauseBtn.addEventListener('click', function(ev) {
+      addDtListener(pauseBtn, 'click', function(ev) {
         ev.preventDefault();
         ev.stopPropagation();
         if (!S.sending && !S.paused) return;
@@ -6480,13 +6480,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     if (input) {
-      input.addEventListener('keydown', function(e) {
+      addDtListener(input, 'keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
           e.preventDefault();
           dtDoSend();
         }
       });
-      input.addEventListener('input', function() {
+      addDtListener(input, 'input', function() {
         try {
           input.style.height = 'auto';
           input.style.height = Math.min(input.scrollHeight, 140) + 'px';
