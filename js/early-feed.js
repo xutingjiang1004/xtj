@@ -18,6 +18,22 @@
   };
   window.__xtjEarlyFeed = state;
 
+  // ★ 2026-09-13 修复（S-1）：bfcache 安全网。
+  // 本模块有 4 处游离的 setTimeout 延迟回调（0ms / 2500ms / 300ms / 8000ms），
+  // 它们会按 stillSkeleton 判断决定是否 paintMinimal / showError。进入 bfcache 时
+  // 这些计时器不会随页面卸载而取消，返回后若 DOM 已被浏览器恢复为真实内容、
+  // 或仍处于骨架态，回调可能在错误的时机写入 innerHTML，造成"返回后 feed 闪回
+  // 骨架/错误页"。这里用一个 pagehide 标记让所有延迟回调在页面离开后直接跳过。
+  //
+  // 用标记而非逐个 clearTimeout：这些回调分散在 3 个函数中，逐个持有句柄容易漏；
+  // 且 0ms 回调可能在标记置位前已入队，标记判断能覆盖这种边界。
+  var pageHidden = false;
+  window.addEventListener('pagehide', function () { pageHidden = true; });
+  window.addEventListener('pageshow', function (e) {
+    // 从 bfcache 恢复时复位，让页面重新可见后的正常流程不受影响
+    if (e && e.persisted) pageHidden = false;
+  });
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -142,6 +158,7 @@
     } catch (e2) {}
     // Paint soon if core is slow; core can replace with full cards later.
     setTimeout(function () {
+      if (pageHidden) return; // S-1：页面已进入 bfcache/卸载，不得再改写 DOM
       if (stillSkeleton(feedEl()) || !feedEl() || !feedEl().querySelector('.post')) {
         paintMinimal(data);
       }
@@ -149,6 +166,7 @@
     }, 0);
     // Second chance after core should have loaded
     setTimeout(function () {
+      if (pageHidden) return; // S-1
       if (stillSkeleton(feedEl())) paintMinimal(data);
       applyToCoreIfReady();
     }, 2500);
@@ -161,11 +179,13 @@
       rejectEarly(err);
     } catch (e) {}
     setTimeout(function () {
+      if (pageHidden) return; // S-1
       if (stillSkeleton(feedEl())) {
         showError('帖子加载超时/失败，点击刷新重试');
       }
     }, 300);
     setTimeout(function () {
+      if (pageHidden) return; // S-1
       if (stillSkeleton(feedEl())) {
         showError('帖子加载超时/失败，点击刷新重试');
       }
