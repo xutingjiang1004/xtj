@@ -168,17 +168,33 @@ const aiQuota = createAiQuota(supabase);
 // ===================== DeepSeek AI 配置 =====================
 // ★ DeepSeek API Key 只能放后端环境变量，绝对不能放前端
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
-// ★ 已统一切换到多模态视觉模型：旧版 DEEPSEEK_MODEL_FLASH（deepseek-v4-flash）不再使用。
-// V4 Flash Vision 既能纯文本对话（fast tier），也原生支持 image_url 识图，故作为唯一 flash 级模型。
-const DEEPSEEK_MODEL_VISION = 'deepseek-v4-flash-vision-exp';
-const DEEPSEEK_MODEL_FLASH = DEEPSEEK_MODEL_VISION;
+// ★ 2026-09-11 模型升级：DeepSeek 官方已发布 DeepSeek-V4.1-Flash（GA 2026-09-10），
+//   旧模型 V4-Flash 与 V4-Flash-Vision-Exp 已下线，官方仅保留旧 ID 作临时兼容别名
+//   （请求实际由 V4.1-Flash 服务并按 Flash 单价计费，官方未公布别名移除时间）。
+//   新正规模型 ID 为 deepseek-flash。本处切换到新 ID，避免依赖随时可能失效的兼容别名。
+//   同时 V4.1-Flash 原生支持多模态（vision），无需再单独选 vision-exp ID。
+//   参考：https://api-docs.deepseek.com/quick_start/pricing
+const DEEPSEEK_MODEL_FLASH = 'deepseek-flash';
+// 兼容别名：保留旧常量名供既有代码引用（指向同一个 4.1 Flash 模型）
+const DEEPSEEK_MODEL_VISION = DEEPSEEK_MODEL_FLASH;
 const DEEPSEEK_MODEL_PRO = 'deepseek-v4-pro';
+// ★ 旧模型 ID → 新 ID 迁移映射。官方已下线这些模型，别名路由随时可能被移除，
+//   因此这里把历史存量配置（环境变量 / 数据库里的 model 字段 / 前端 localStorage）
+//   统一收敛到 deepseek-flash，避免直接命中已失效 ID。
+const DEEPSEEK_LEGACY_MODEL_ALIASES = {
+  'deepseek-v4-flash-vision-exp': DEEPSEEK_MODEL_FLASH,
+  'deepseek-v4.1-flash': DEEPSEEK_MODEL_FLASH,
+  'deepseek-v4-1-flash': DEEPSEEK_MODEL_FLASH,
+  'deepseek-flash-4.1': DEEPSEEK_MODEL_FLASH,
+  'deepseek-v4-flash': DEEPSEEK_MODEL_FLASH,
+  'deepseek-chat': DEEPSEEK_MODEL_FLASH,
+  'deepseek-reasoner': DEEPSEEK_MODEL_FLASH,
+  'deepseek-flash': DEEPSEEK_MODEL_FLASH
+};
 function normalizeDeepSeekModelName(model) {
   var key = String(model || '').trim().toLowerCase();
   if (!key) return '';
-  if (key === 'deepseek-chat' || key === 'deepseek-reasoner') return DEEPSEEK_MODEL_FLASH;
-  // ★ 旧版 flash 已删除：存量配置里若还有 deepseek-v4-flash，统一迁移到 V4 Flash Vision
-  if (key === 'deepseek-v4-flash' || key === DEEPSEEK_MODEL_FLASH || key === DEEPSEEK_MODEL_VISION) return DEEPSEEK_MODEL_VISION;
+  if (DEEPSEEK_LEGACY_MODEL_ALIASES[key]) return DEEPSEEK_LEGACY_MODEL_ALIASES[key];
   if (key === DEEPSEEK_MODEL_PRO) return key;
   return key;
 }
@@ -729,11 +745,11 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'get_weather',
-      description: '查询某个城市的当前天气和今日天气预报，包括温度、湿度、风速、天气状况、降雨概率。支持国内外城市名（中英文）。只有在用户明确询问天气时才使用。',
+      description: '查询某个城市的当前天气和今日天气预报，包括温度、湿度、风速、天气状况、降雨概率。支持国内外城市名（中英文）。只有在用户明确询问天气时才使用。\n参数规范（重要）：location 只传【规范城市名】，不要带行政区划后缀或限定词。正确写法：「成都」「上海」「大阪」「Los Angeles」；错误写法：「成都市武侯区」「中国四川省成都市」「北京市朝阳区」。若用户给的是详细地址，请自行提取其中的城市名再调用。',
       parameters: {
         type: 'object',
         properties: {
-          location: { type: 'string', description: '城市名称或地区名称，如北京、上海、成都、巴黎、东京、New York 等' }
+          location: { type: 'string', description: '规范城市名，不带“市/区/县/省”后缀与“中国”前缀。如：北京、上海、成都、大阪、东京、Los Angeles、New York' }
         },
         required: ['location']
       }
@@ -1131,10 +1147,26 @@ async function executeToolCall(toolCall, context) {
             cards: [aiSiteCard('weather', weatherData.city + ' 天气', weatherData)]
           };
         }
+        // ★ 2026-09-11：queryWeatherData 改为抛出带 reason 的错误，正常不会走到这里。
         return { tool_name: name, location: loc, error: '未找到该地点的天气，请换更具体的城市名再试（如「成都」「大阪」「Los Angeles」）' };
       } catch (e) {
-        // 服务端故障与"城市不支持"区分开：不把底层错误透传
-        return { tool_name: name, location: loc, error: '天气服务暂时不可用，请稍后重试' };
+        // ★ 2026-09-11 优化：区分"地名不存在"与"服务暂时故障"。
+        //   此前无论哪种情况都提示用户"换更具体的城市名"，在网络抖动时
+        //   会诱导用户反复改城市名却永远不成功（用户报告的高频问题）。
+        //   现在：service 故障 → 明确说服务问题并建议稍后重试，不再甩锅给城市名。
+        if (e && e.reason === 'city_not_found') {
+          return {
+            tool_name: name,
+            location: loc,
+            error: '未能识别该地点「' + loc + '」。请改用规范的城市名（如「成都」「大阪」「Los Angeles」），或用「城市名+国家」的形式。'
+          };
+        }
+        // 服务端故障：不把底层错误透传，且明确这是服务侧问题
+        return {
+          tool_name: name,
+          location: loc,
+          error: '天气服务暂时不可用（网络或上游接口异常），这是服务侧问题，请稍后重试；无需更换城市名。'
+        };
       }
     }
     case 'get_current_time': {
@@ -6028,7 +6060,23 @@ async function callDeepSeek(messages, options) {
           Math.max(parseInt(options && options.max_tool_result_chars, 10) || 8000, 8000),
           2000000
         );
-        var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, maxToolResultChars) : '{}';
+        var toolContent;
+        if (r.toolResult && r.toolResult.error) {
+          // ★ 2026-09-11 准确性优化（与 /chat/stream 路径对齐）：
+          //   工具失败时补上"可纠正性 + 下一步指令"，显著降低模型
+          //   "复述错误"或"凭猜测编造答案"的概率。
+          var _eText = String(r.toolResult.error);
+          var _recoverable = /未找到|未能识别|位置为空|无效|不存在|不支持|请换|请改用|超时|timeout/i.test(_eText)
+            && !/服务暂时不可用|服务侧问题|上游接口异常/i.test(_eText);
+          toolContent = JSON.stringify(Object.assign({}, r.toolResult, {
+            recoverable: _recoverable,
+            instruction: _recoverable
+              ? '本次工具调用参数未能命中结果。请修正参数后重试一次（例如改用规范的城市名、缩短或放宽查询词、换一个更常见的名称）。若重试仍失败，再如实告知用户。禁止凭猜测编造数据。'
+              : '该工具当前不可用（服务侧故障，与参数无关）。请如实告知用户服务暂时不可用，禁止编造数据，也不要反复重试同一工具。'
+          })).slice(0, maxToolResultChars);
+        } else {
+          toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, maxToolResultChars) : '{}';
+        }
         workingMessages.push({ role: 'tool', tool_call_id: r.tcId, content: toolContent });
       });
     }
@@ -16083,6 +16131,11 @@ function buildAiCorePrompt(config) {
     allowWebSearch
       ? '可用工具：search_web / tavily_search / read_web_page / get_weather / get_current_time / get_exchange_rate / get_stock_quote / calculate / convert_units。用户发具体 HTTPS 链接时必须用 read_web_page 读正文，禁止声称“工具打不开链接/不能访问网页”。时效问题先搜索再按需读页。算数用 calculate，单位换算用 convert_units，别口算。'
       : '可用工具：get_weather / get_current_time / get_exchange_rate / get_stock_quote / read_web_page / calculate / convert_units。用户发 HTTPS 链接时必须 read_web_page，禁止声称无法打开链接。算数用 calculate，单位换算用 convert_units。',
+    // ★ 2026-09-11 工具使用规范（提升准确性与"辩解性"——即工具失败时如何向用户交代）：
+    //   1) 参数规范：减少因参数形态随意导致的工具失败（尤其 get_weather 地名）；
+    //   2) 失败处理：区分 recoverable / unrecoverable，禁止复述英文错误码或编造数据；
+    //   3) 本轮已实测过：模型在工具报错后常直接编造天气/汇率数据，或以"换个城市名"敷衍过去。
+    '工具使用规范：① 查天气时 location 只传规范城市名（如“成都”“大阪”“Los Angeles”），不要传省市区全称、不要带“市/区/县”后缀；② 查汇率/行情只传标准代码（如 USD、CNY、AAPL）；③ 工具返回中若含 recoverable=true，可修正参数重试一次；若 recoverable=false，说明是服务侧故障，直接如实告诉用户“该服务暂时不可用”，绝不编造数据、不反复重试同一工具；④ 绝不要把工具返回里的英文错误码或 JSON 原文念给用户，要用自然中文转述；⑤ 工具失败时告知真实原因（参数问题 vs 服务问题），不要笼统地说“换个城市名试试”来敷衍。',
     '回复规则：一条回复一个核心观点，短句不罗列，不写“作为一个 AI”开场白，不用括号动作描写；图片消息只依据其中文字回答业务问题，不讨论 OCR/识别引擎；只答对话内容，不编造已执行操作，不查他人记录。中文回复。'
   ];
 
@@ -16930,8 +16983,12 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
     if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var requestedModel = req.body && req.body.model;
-    var allowedModels = [DEEPSEEK_MODEL_VISION, 'deepseek-v4-pro'];
-    var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
+    // ★ 2026-09-11 模型升级：白名单改为「先归一化再校验」，让存量请求里的旧模型 ID
+    //   （deepseek-v4-flash-vision-exp / deepseek-chat 等已下线别名）自动收敛到 deepseek-flash，
+    //   而不是被判定为非法后静默回落到 DEEPSEEK_MODEL_REASONER。
+    var allowedModels = [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO];
+    var normalizedRequestedModel = normalizeDeepSeekModelName(requestedModel);
+    var validatedModel = (normalizedRequestedModel && allowedModels.indexOf(normalizedRequestedModel) >= 0) ? normalizedRequestedModel : DEEPSEEK_MODEL_REASONER;
     var reasoning = '';
     var toolCallsInfo = [];
     var searchResultsCollected = [];
@@ -17559,7 +17616,24 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
         }
         var toolBody = '';
         if (tRes && tRes.content) toolBody = tRes.content;
-        else if (tRes && tRes.error) toolBody = JSON.stringify({ error: tRes.error });
+        else if (tRes && tRes.error) {
+          // ★ 2026-09-11 准确性优化：工具失败时不再只回一个裸 error 字符串。
+          //   模型拿到 {"error":"未找到该地点的天气..."} 后常常直接向用户复述错误，
+          //   或者干脆编造一个答案。这里补上明确的"下一步该怎么做"的指令，
+          //   并把可纠正的失败（参数问题）与不可纠正的失败（服务故障）区分开：
+          //     - 可纠正：提示模型换参数重试（例如换规范城市名/改用英文名）
+          //     - 不可纠正：提示模型如实说明服务故障，禁止编造数据
+          var _errText = String(tRes.error);
+          var _recoverable = /未找到|未能识别|位置为空|无效|不存在|不支持|请换|请改用|超时|timeout/i.test(_errText)
+            && !/服务暂时不可用|服务侧问题|上游接口异常/i.test(_errText);
+          toolBody = JSON.stringify({
+            error: _errText,
+            recoverable: _recoverable,
+            instruction: _recoverable
+              ? '本次工具调用参数未能命中结果。请修正参数后重试一次（例如改用规范的城市名、缩短或放宽查询词、换一个更常见的名称）。若重试仍失败，再如实告知用户。禁止凭猜测编造数据。'
+              : '该工具当前不可用（服务侧故障，与参数无关）。请如实告知用户服务暂时不可用，禁止编造数据，也不要反复重试同一工具。'
+          });
+        }
         else toolBody = JSON.stringify(tRes || {});
         conversation.push({ role: 'tool', tool_call_id: tcs[rI].id, content: String(toolBody).slice(0, 12000) });
       }
@@ -18339,8 +18413,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // 模型选择提前校验：供历史图片「连续追问」判断当前是否视觉可用
     var requestedModel = req.body && req.body.model;
-    var allowedModels = [DEEPSEEK_MODEL_VISION, 'deepseek-v4-pro'];
-    var validatedModel = (requestedModel && allowedModels.indexOf(requestedModel) >= 0) ? requestedModel : DEEPSEEK_MODEL_REASONER;
+    // ★ 2026-09-11 模型升级：白名单改为「先归一化再校验」，让存量请求里的旧模型 ID
+    //   （deepseek-v4-flash-vision-exp / deepseek-chat 等已下线别名）自动收敛到 deepseek-flash，
+    //   而不是被判定为非法后静默回落到 DEEPSEEK_MODEL_REASONER。
+    var allowedModels = [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO];
+    var normalizedRequestedModel = normalizeDeepSeekModelName(requestedModel);
+    var validatedModel = (normalizedRequestedModel && allowedModels.indexOf(normalizedRequestedModel) >= 0) ? normalizedRequestedModel : DEEPSEEK_MODEL_REASONER;
     var _historyVisionEligible = validatedModel === DEEPSEEK_MODEL_VISION || validatedModel === DEEPSEEK_MODEL_FLASH;
 
     var _ctxMaxSite2 = !!(req.body && req.body.thinking_max === true);
@@ -20507,6 +20585,11 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  // ★ 2026-09-11 修复（深度研究"连接中断"根因之一）：研究流此前独缺此头，
+  //   而 /api/agent/chat/stream 等路径早已设置。缺少它时 Render 前置反向代理
+  //   （以及任何 nginx 系代理）会缓冲整个响应，导致研究进度帧长时间不下发，
+  //   前端 idle watchdog 触发后显示「连接中断」。
+  res.setHeader('X-Accel-Buffering', 'no');
   try { res.flushHeaders(); } catch (_) {}
 
   // 心跳保活：每 4s 检查一次，沉默 ≥8s 时发送 heartbeat（对齐 /api/agent/chat/stream 模式）

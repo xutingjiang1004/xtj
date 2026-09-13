@@ -50,6 +50,9 @@ function writeSse(res, payload, eventName) {
               }
             } catch (_) { break; }
           }
+          // ★ 2026-09-11：背压恢复后重新排出的这批帧同样需要主动 flush，
+          //   否则会再次被 socket/代理缓冲压住（与上面的首帧 flush 同一根因）。
+          try { if (typeof res.flush === 'function') res.flush(); } catch (_flushErr) {}
         }
       }
       // 已处于背压排队态（缓冲区非空或正等待 drain）：本帧入队，由 onDrain 统一写出，
@@ -64,6 +67,13 @@ function writeSse(res, payload, eventName) {
         return true;
       }
       var ok = res.write(data);
+      // ★ 2026-09-11 修复（深度研究"连接中断"根因之一）：此前 writeSse 只调用 res.write()
+      //   而从不 flush。Node 会先写入 socket 缓冲，配合 CDN/反向代理（Render 前置代理）
+      //   的响应缓冲，SSE 首帧可能被压住数十秒才下发 —— 前端因此看到"长时间无数据"
+      //   并在 idle watchdog 触发后渲染「连接中断」。
+      //   res.flushHeaders() 只在 headers 未发送时有效；此处需用 flush() 主动把
+      //   chunked 编码的当前帧推出去（Node >= 12 的 http.ServerResponse#flush）。
+      try { if (typeof res.flush === 'function') res.flush(); } catch (_flushErr) {}
       if (!ok) {
         // write()===false 仅表示数据已排入 Node 内部缓冲（随后会自动 flush），并非"写入失败"。
         // 当前帧已被接受，绝不能重复入队（否则 drain 时重复写出，客户端收到重复事件）。

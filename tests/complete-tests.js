@@ -229,7 +229,12 @@ test('core has no legacy loaders for static entry modules', function(){
   });
   assert.ok(core.indexOf('function scheduleInteractiveEnhancements') < 0, 'interactive enhancement scheduler remains');
   assert.ok(core.indexOf('function armCoreAnimationLoader') < 0, 'core animation loader remains');
-  assert.ok(core.indexOf("gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }") >= 0, 'GSAP is not owned by the module loader');
+  // ★ 2026-09-11 更新：gsap 条目已从"字符串 URL"升级为"对象 + SRI 子资源完整性校验"
+  //   （见 js/core-parts/01-bootstrap.js 的 gsap.externalScripts）。
+  //   原断言写死了字符串形态，属于"把实现细节固化进测试"；改为断言语义不变的部分：
+  //   gsap 仍由模块加载器（而非旧式 xtjLoadScriptOnce）接管，且 URL 未被迁移走。
+  assert.match(core, /gsap:\s*\{[\s\S]{0,400}cdn\.jsdelivr\.net\/npm\/gsap@[\d.]+\/dist\/gsap\.min\.js/,
+    'GSAP is not owned by the module loader');
 });
 
 test('feature modules have one retryable CSS-first loader', function(){

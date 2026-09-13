@@ -146,7 +146,9 @@ var PROVIDER_DEFAULTS = {
   },
   deepseek: {
     base_url: 'https://api.deepseek.com/v1',
-    models: ['deepseek-v4-flash-vision-exp', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
+    // ★ 2026-09-11：V4 Flash / V4 Flash Vision Exp 已下线，统一升级到 V4.1-Flash（deepseek-flash）。
+    //   旧 ID 仅作临时兼容别名保留在列表中，避免存量自定义模型配置失效。
+    models: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp', 'deepseek-chat', 'deepseek-reasoner'],
     capabilities: ['chat', 'thinking', 'tools', 'vision']
   },
   anthropic: {
