@@ -9268,7 +9268,16 @@ function renderProfileActivityList(kind) {
                     </div>
                 `;
 
+                // ★ 2026-09-13 修复（M-7）：气泡点击需要幂等 + 取消自动隐藏定时器。
+                // 旧实现里点击后 3000ms 的自动移除定时器照常执行，且气泡在 400ms 动画
+                // 期间仍可点击 —— 用户快速连点会反复触发 openChat（每次拉 DM 列表/消息），
+                // 叠加 startDMPolling 造成重复请求。现在：点击即置幂等标记并取消计时器。
+                let autoHideTimer = null;
+                let clicked = false;
                 bubble.addEventListener('click', () => {
+                    if (clicked) return; // 幂等：连点只生效一次
+                    clicked = true;
+                    if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = null; }
                     switchDockTab('chat');
                     openChat(userName);
                     bubble.classList.remove('show');
@@ -9289,7 +9298,10 @@ function renderProfileActivityList(kind) {
                 const notifId = Date.now() + Math.random();
                 activeNotifications.push({ id: notifId, element: bubble });
 
-                setTimeout(() => {
+                autoHideTimer = setTimeout(() => {
+                    // S：若用户已点击过，说明该条目已被处理，跳过自动隐藏（避免对已移除
+                    // 的节点操作，也避免 filter 掉后到的同 id 条目）
+                    if (clicked) return;
                     bubble.classList.remove('show');
                     bubble.classList.add('hide');
                     setTimeout(() => {
