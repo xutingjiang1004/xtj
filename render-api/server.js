@@ -15175,13 +15175,20 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
       return {
         id: row.id,
         type: info.type || row.media_url,
-        // ★ 匿名上报内容可能含 HTML 注入，管理端渲染前统一转义，防存储型 XSS
-        message: escapeHtml(info.message || ''),
-        stack: escapeHtml(info.stack || ''),
-        url: escapeHtml(info.url || ''),
+        // ★ 2026-09-13 修复（M-01 双重转义）：此处【不再】做 escapeHtml。
+        //   原实现在后端转义，而前端 admin.js:3415 渲染时又调用了一次 escapeHtml，
+        //   于是 `&` 被编码成 `&amp;amp;`，管理后台错误日志里用户看到的是
+        //   `&amp;lt;div&amp;gt;` 这类字面量而不是原始堆栈，严重影响排查。
+        //   本仓库规范是「后端返回原始数据，前端渲染时统一转义」——同类接口
+        //   /admin/audit-logs、/admin/reports 均如此。这里对齐该规范。
+        //   安全性不受影响：前端渲染路径已全部转义（admin.js:3415），
+        //   转义职责收敛到唯一出口，反而比"两端各转一次"更不易出错。
+        message: info.message || '',
+        stack: info.stack || '',
+        url: info.url || '',
         line: info.line,
         col: info.col,
-        user_agent: escapeHtml(info.user_agent || ''),
+        user_agent: info.user_agent || '',
         timestamp: info.timestamp || row.created_at,
         created_at: row.created_at
       };
@@ -21713,6 +21720,10 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, securityRateLimit(60000, 3
     return res.json({
       ok: true,
       window_days: useAll ? 'all' : days,
+      // ★ 2026-09-13（M-06）：透出截断事实。此前 limit(10000) 是静默的——
+      //   数据量一旦超过 1 万条，统计值就会偏低而页面毫无提示，
+      //   用户只会觉得"数字对不上"。这里把是否触顶如实告知前端。
+      truncated: Array.isArray(allRows) && allRows.length >= 10000,
       summary: {
         today_calls: todayCalls,
         today_input_tokens: todayInputTokens,
@@ -21810,7 +21821,8 @@ app.get('/admin/ai-agent/users', verifyToken, securityRateLimit(60000, 30), asyn
 
     userList.sort(function(a, b) { return (b.last_at || '').localeCompare(a.last_at || ''); });
 
-    return res.json({ ok: true, users: userList, window_days: days });
+    // ★ 2026-09-13（M-06）：同 usage-summary，把 50000 条上限是否触顶如实告知前端
+    return res.json({ ok: true, users: userList, window_days: days, truncated: Array.isArray(rows) && rows.length >= 50000 });
   } catch (e) {
     console.error('[ADMIN-AI] GET users error:', e.message);
     return res.status(500).json({ error: '查询失败' });

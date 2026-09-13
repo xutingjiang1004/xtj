@@ -355,6 +355,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     historyRequestId: 0,
     conversationRequestId: 0,
     lifecycleId: 0,
+    // ★ 2026-09-13 修复（P-29）：depth 研究页此前与主聊天共用 lifecycleId，
+    //   两边互相 ++ 导致对方的在途回调被判定为"过期"而静默丢弃——
+    //   典型症状：主聊天发着消息时点开深研页，回来发现回复不写入 / 历史不刷新。
+    //   这里给深研页独立计数器，两通道互不干扰。
+    dtLifecycleId: 0,
     lastSendFingerprint: '',
     lastSendAt: 0,
     webSearchEnabled: false,
@@ -1281,6 +1286,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
+  // ★ 2026-09-13 修复（P-23）：分享失败此前被 .catch(function(){}) 完全静默吞掉，
+  //   用户点「分享」后若失败（权限被拒 / 不支持该内容类型 / 非用户取消的真实错误），
+  //   界面毫无反应，只能反复点击。此处区分两类情况：
+  //   - AbortError：用户在系统面板里主动取消 —— 不做任何提示（属正常交互）；
+  //   - 其他错误：明确提示并提供降级（复制到剪贴板），保证用户目标能达成。
+  function handleShareError(err, text) {
+    var name = (err && err.name) || '';
+    if (name === 'AbortError' || /abort|cancel/i.test(String((err && err.message) || ''))) return;
+    try {
+      var msg = '分享失败';
+      if (name === 'NotAllowedError') msg = '分享被系统拒绝（可能未授予权限）';
+      else if (name === 'TypeError') msg = '当前内容不支持分享';
+      else if (err && err.message) msg = '分享失败: ' + err.message;
+      notify(msg + '，已为你复制到剪贴板');
+    } catch (e) {}
+    try { doCopy(text); } catch (e) {}
+  }
+
   function doCopy(text) {
     if (!text) return;
     try {
@@ -1611,15 +1634,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var m = msgs[si];
       if (!m) { out.push(m); continue; }
       var c = String(m.content || '');
-      if (c.indexOf('data:') === -1 && !/!\[[^\]]*\]\(data:/.test(c)) { out.push(m); continue; }
-      var sanitized = c
-        .replace(/!\[([^\]]*)\]\(data:[^)]+\)/g, '[图片: $1]')
-        .replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[图片数据]');
+      var hasDataUrl = c.indexOf('data:') !== -1 || /!\[[^\]]*\]\(data:/.test(c);
+      // ★ 2026-09-13 修复（P-18 残留）：此前只清理 content，漏了 vision_urls。
+      //   用户消息的 vision_urls 存的就是原始 data URL（见历史恢复处构造 attachments），
+      //   单张 7MB 图 × 多张会轻松突破 sessionStorage 约 5MB 配额，
+      //   触发 QuotaExceededError 被 catch 静默吞掉 → 刷新后本地历史整段丢失。
+      var vus = m.vision_urls;
+      var hasVisionData = Array.isArray(vus) && vus.some(function(u) { return String(u || '').indexOf('data:') === 0; });
+      if (!hasDataUrl && !hasVisionData) { out.push(m); continue; }
       var copy = {};
       for (var k in m) {
         if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
       }
-      copy.content = sanitized;
+      if (hasDataUrl) {
+        copy.content = c
+          .replace(/!\[([^\]]*)\]\(data:[^)]+\)/g, '[图片: $1]')
+          .replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[图片数据]');
+      }
+      if (hasVisionData) {
+        // 换成同长度的占位标记，保留数组结构（长度/下标），
+        // 这样缓存命中后仍是"这条消息有几张图"，只是图本身需要联网重取。
+        copy.vision_urls = vus.map(function(u) {
+          return String(u || '').indexOf('data:') === 0 ? '[图片数据]' : u;
+        });
+      }
       out.push(copy);
     }
     return out;
@@ -2464,7 +2502,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           ev.preventDefault(); ev.stopPropagation();
           var t = (bubble.textContent || '').trim();
           if (!t) return;
-          navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function() {});
+          navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function(err) { handleShareError(err, t); });
         });
         actionRow.appendChild(shareBtn);
       }
@@ -4495,6 +4533,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             buffer += decoder.decode(readResult.value, { stream: true });
             var lines = buffer.split('\n');
             buffer = lines.pop() || '';
+            // ★ 2026-09-13 修复（P-12）：单行有 MAX_EVENT_SIZE 上限，但残留在 buffer 里的
+            //   「未闭合尾部」此前无上限。若上游持续发送不含换行的数据（异常实现或被中间人
+            //   篡改的响应），buffer 会无界增长直至 OOM。这里设一个远大于任何合法事件的
+            //   上限，超限即判定为流异常并中断，避免把内存交给不可信的输入。
+            if (buffer.length > MAX_EVENT_SIZE * 2) {
+              var _ovErr = new Error('数据流异常：单条事件超过上限，已中断');
+              _ovErr.networkError = true;
+              fail(_ovErr);
+              break;
+            }
             for (var li = 0; li < lines.length; li++) {
               var line = lines[li].replace(/\r$/, '');
               if (!line || line.startsWith(':')) continue;
@@ -5225,6 +5273,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
       buffer = lines.pop() || '';
+      // ★ 2026-09-13 修复（P-12）：与深研流同样加残留下限，防无换行长数据撑爆内存
+      if (buffer.length > MAX_EVENT_SIZE * 2) {
+        if (!abortedRef || !abortedRef.value) {
+          try { controller.abort(new Error('数据流异常：单条事件超过上限')); } catch (_oe) {}
+        }
+        break;
+      }
 
       for (var li = 0; li < lines.length; li++) {
         var line = lines[li];
@@ -5749,8 +5804,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // A reopened panel belongs to a new lifecycle.  This prevents a late
     // history/SSE callback from writing into the next session's DOM.
     panel._dtClosed = false;
-    S.lifecycleId++;
-    var pageLifecycle = S.lifecycleId;
+    // ★ P-29：改用深研页独立计数器（原 S.lifecycleId++ 会连带作废主聊天在途回调）
+    S.dtLifecycleId++;
+    var pageLifecycle = S.dtLifecycleId;
 
     // Enter the research surface immediately; auth and history can complete in the background.
     panel.classList.remove('hidden');
@@ -5760,7 +5816,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) return;
-    if (S.lifecycleId !== pageLifecycle || panel._dtClosed) return;
+    if (S.dtLifecycleId !== pageLifecycle || panel._dtClosed) return;
 
     // 先从 localStorage 恢复会话 ID（刷新页面后也能恢复）
     if (!S.dtConversationId) {
@@ -5776,7 +5832,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       msgs.appendChild(loadHint);
       try {
         var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think', null, { timeoutMs: 8000 });
-        if (S.lifecycleId !== pageLifecycle || panel._dtClosed) return;
+        if (S.dtLifecycleId !== pageLifecycle || panel._dtClosed) return;
         var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
         if (!hasMessages) {
           S.dtConversationId = null;
@@ -5821,7 +5877,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       resetDeepThinkPageEmpty();
       try {
         var r = await apiRequest('POST', '/chat/new', null);
-        if (S.lifecycleId !== pageLifecycle || panel._dtClosed) return;
+        if (S.dtLifecycleId !== pageLifecycle || panel._dtClosed) return;
         if (r && r.ok && r.data && r.data.conversation_id) {
           S.dtConversationId = r.data.conversation_id;
           saveDtConvId();
@@ -5859,7 +5915,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try {
       // Invalidate every callback first, then abort the actual network
       // controllers.  Hiding the panel alone leaves a DeepSeek stream alive.
-      S.lifecycleId++;
+      // ★ P-29：只作废深研页自己的在途回调；主聊天用 S.lifecycleId，互不影响。
+      S.dtLifecycleId++;
       S.clientRequestId++;
       // ★ 修复：只清深页独立请求通道，不动普通聊天的 _currentReqId，
       // 避免关闭深页时误杀正在进行的普通聊天流。
@@ -7668,7 +7725,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               ev.preventDefault(); ev.stopPropagation();
               var t = (assistantBubble.textContent || '').trim();
               if (!t) return;
-              navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function() {});
+              navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function(err) { handleShareError(err, t); });
             });
             actionRow.appendChild(shareBtn);
           }
@@ -7803,6 +7860,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         buffer += decoder.decode(readResult.value, { stream: true });
         var lines = buffer.split('\n');
         buffer = lines.pop() || '';
+        // ★ 2026-09-13 修复（P-12）：第三处缓冲同样补上限（前两处已加）。
+        //   单行 512KB 上限只拦"已闭合的行"，残留在 buffer 的尾部才是无界增长点。
+        if (buffer.length > 1024 * 1024) {
+          console.warn('[AI] SSE buffer overflow, aborting stream, length=' + buffer.length);
+          aborted = true;
+          reader.cancel().catch(function(){});
+          break;
+        }
         _lastDataTime = Date.now();
         _receivedAny = true; // B 修复：已收到任意数据，放宽 idle 阈值到 120s
         
