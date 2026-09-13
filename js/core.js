@@ -11868,6 +11868,13 @@ function renderProfileActivityList(kind) {
                             } catch (e3) {}
                         }
                     }, 1000);
+                    // ★ 2026-09-13 修复（S-1）：bfcache 往返时清理看门狗。
+                    // 进入 bfcache 不触发 beforeunload，该 1s 间隔的看门狗会跨页存活；
+                    // 返回后若 feed 已被浏览器恢复为真实内容，看门狗仍可能在检查窗口内
+                    // 判定为 skeleton/空值并写入 innerHTML，覆盖掉恢复后的真实 feed
+                    //（表现为「返回后 feed 闪回错误页」）。pagehide 在进入 bfcache 时
+                    // 同样触发，是可靠时机。
+                    window.addEventListener('pagehide', function() { clearInterval(timer); });
                 })();
                 // 记录访问（用户+IP）
                 if (currentUser) logUserVisitToApi(currentUser);

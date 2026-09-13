@@ -1358,6 +1358,12 @@
             var _now = Date.now();
             Object.keys(errorSent).forEach(function(k) { if (_now - errorSent[k] > 300000) delete errorSent[k]; });
         }, 600000);
+        // ★ 2026-09-13 修复（S-1）：改用 pagehide 清理。
+        // 现代浏览器进入 bfcache（后退/前进）时不触发 beforeunload，旧写法下该 600s
+        // 定时器会跨页存活；配合下面的 errorSent 无上限增长，长会话中内存与上报去重表
+        // 都会持续膨胀。pagehide 在进入 bfcache 时同样会触发，是正确时机。
+        // 双注册 beforeunload 作为兜底：pagehide 在部分旧环境可能缺失。
+        window.addEventListener('pagehide', function() { clearInterval(_errorCleanupTimer); });
         window.addEventListener('beforeunload', function() { clearInterval(_errorCleanupTimer); });
         function sendClientError(type, message, stack, url, line, col) {
             var errKey = (type + '|' + (message || '').slice(0, 100) + '|' + (url || '').slice(0, 100));
@@ -1365,6 +1371,17 @@
             // 去重：同类型同消息5分钟内不重复上报
             if (errorSent[errKey] && (now - errorSent[errKey] < 300000)) return;
             errorSent[errKey] = now;
+            // ★ 2026-09-13 修复（S-1）：去重表增加容量上限。
+            // 原实现只在 600s 定时器里清理超过 5 分钟的条目，但若错误消息本身含动态内容
+            // （如带 id/时间戳的报错），key 会以远快于清理速度的速率新增，在 10 分钟窗口内
+            // 可无限膨胀。超限时按最旧时间戳淘汰，保证内存有界。
+            (function capErrorSent() {
+                var keys = Object.keys(errorSent);
+                if (keys.length <= 500) return;
+                keys.sort(function(a, b) { return errorSent[a] - errorSent[b]; });
+                var drop = keys.length - 400;
+                for (var i = 0; i < drop; i++) delete errorSent[keys[i]];
+            })();
 
             // 清理敏感 URL：移除 query、fragment、Blob URL、Supabase 签名参数
             var cleanUrl = sanitizeUrl(url || (window.location && window.location.href) || '');
