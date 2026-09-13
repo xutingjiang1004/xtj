@@ -11836,6 +11836,9 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
     if (error) return res.status(400).json({ error: sanitizeError(error) });
   }
   
+  // ★ 2026-09-11 修复（S8）：封禁属于高影响管理操作，此前无审计留痕，出问题无法追责
+  await logAdminAudit('blacklist_user', req.adminName || ADMIN_USERNAME,
+    'user:' + userNameVal + ' duration_hours:' + durationHoursVal + ' reason:' + String(reasonVal || '违反社区规定').slice(0, 200));
   return res.json({ ok: true });
   } catch (e) {
     console.error('Unhandled route error:', e.message);
@@ -12747,7 +12750,9 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
 });
 
 // 清除统计缓存
-app.post('/admin/stats/refresh', verifyToken, (req, res) => {
+// ★ 2026-09-11 修复（S9）：该接口会全局清空统计缓存，高频调用可让所有管理员
+// 请求全部击穿到数据库（缓存抖动 / DB 压力放大器），此前无限流保护。
+app.post('/admin/stats/refresh', verifyToken, securityRateLimit(60000, 5), (req, res) => {
   statsCache = { data: null, ts: 0, pending: null };
   return res.json({ ok: true });
 });
@@ -15580,7 +15585,7 @@ function generateInviteCode(length) {
 }
 
 // POST /admin/ai-agent/invite-codes — 批量生成邀请码
-app.post('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
+app.post('/admin/ai-agent/invite-codes', verifyToken, securityRateLimit(60000, 20), async (req, res) => {
   try {
     var body = req.body || {};
     var count = Math.max(1, Math.min(100, parseInt(body.count, 10) || 1));
@@ -15672,6 +15677,10 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
       return res.status(500).json({ ok: false, error: '保存失败：' + ins.error.message });
     }
     console.log('[INVITE-ADMIN] generated', codes.length, 'codes by', req.adminName);
+    // ★ 修复 S5（簇 B）：批量生成邀请码是「发放付费权益」的敏感操作，此前只打
+    //   console.log，未写审计日志 → 事后无法追责/对账。现补 logAdminAudit。
+    await logAdminAudit('ai_agent_invite_generate', req.adminName || 'admin',
+      'count=' + codes.length + ' days=' + days + ' max_uses=' + maxUses + ' codes=' + codes.slice(0, 5).join(',') + (codes.length > 5 ? '...' : ''));
     return res.json({ ok: true, count: codes.length, codes: codes });
   } catch (e) {
     console.error('[INVITE-ADMIN] create exception:', e && e.message);
@@ -15683,7 +15692,7 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/invite-codes — 邀请码列表（分页 + 搜索）
-app.get('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/invite-codes', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
     var page = Math.max(1, parseInt(req.query.page, 10) || 1);
     var pageSize = Math.max(1, Math.min(200, parseInt(req.query.page_size, 10) || 50));
@@ -15716,7 +15725,7 @@ app.get('/admin/ai-agent/invite-codes', verifyToken, async (req, res) => {
 });
 
 // DELETE /admin/ai-agent/invite-codes/:code — 删除邀请码
-app.delete('/admin/ai-agent/invite-codes/:code', verifyToken, async (req, res) => {
+app.delete('/admin/ai-agent/invite-codes/:code', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
     var code = String(req.params.code || '').trim();
     if (!code) return res.status(400).json({ ok: false, error: '缺少邀请码' });
@@ -15744,6 +15753,9 @@ app.delete('/admin/ai-agent/invite-codes/:code', verifyToken, async (req, res) =
       console.error('[INVITE-ADMIN] delete error:', del.error.message);
       return res.status(500).json({ ok: false, error: '删除失败，请重试（激活记录可能已删除）' });
     }
+    // ★ 修复 S6（簇 B）：删除邀请码（含级联删除激活记录）属破坏性操作，
+    //   此前完全无审计日志。补记，保留被删码以便追溯。
+    await logAdminAudit('ai_agent_invite_delete', req.adminName || 'admin', 'code=' + code);
     return res.json({ ok: true, deleted: del.data ? del.data.length : 1 });
   } catch (e) {
     console.error('[INVITE-ADMIN] delete exception:', e && e.message);
@@ -15752,7 +15764,7 @@ app.delete('/admin/ai-agent/invite-codes/:code', verifyToken, async (req, res) =
 });
 
 // POST /admin/ai-agent/pro-users/cancel — 管理员取消 Pro（verifyToken，非用户 JWT）
-app.post('/admin/ai-agent/pro-users/cancel', verifyToken, async (req, res) => {
+app.post('/admin/ai-agent/pro-users/cancel', verifyToken, securityRateLimit(60000, 20), async (req, res) => {
   try {
     var target = String((req.body && req.body.user_name) || '').trim().toLowerCase();
     if (!target) return res.status(400).json({ ok: false, error: '缺少用户名' });
@@ -15768,6 +15780,10 @@ app.post('/admin/ai-agent/pro-users/cancel', verifyToken, async (req, res) => {
       return res.status(400).json({ ok: false, error: '取消失败：' + (data.reason || '未知原因') });
     }
     console.log('[INVITE-ADMIN] cancelled pro for', target, 'by', req.adminName);
+    // ★ 修复 S7（簇 B）：取消 Pro 直接剥夺用户付费权益，是最需要留痕的管理操作之一。
+    //   此前仅有 console.log，补审计日志（含目标用户与当日额度是否重置）。
+    await logAdminAudit('ai_agent_cancel_pro', req.adminName || 'admin',
+      'target_user=' + target + ' daily_reset=' + (!!data.daily_reset));
     return res.json({ ok: true, user_name: target, daily_reset: !!data.daily_reset });
   } catch (e) {
     console.error('[INVITE-ADMIN] cancel pro exception:', e && e.message);
@@ -15776,7 +15792,7 @@ app.post('/admin/ai-agent/pro-users/cancel', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/pro-users — Pro 会员列表
-app.get('/admin/ai-agent/pro-users', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/pro-users', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
     var result = await supabase
       .from('ai_user_membership')
@@ -15796,7 +15812,7 @@ app.get('/admin/ai-agent/pro-users', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/invite-redemptions — 激活记录（附带今日额度使用情况）
-app.get('/admin/ai-agent/invite-redemptions', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/invite-redemptions', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
     var page = Math.max(1, parseInt(req.query.page, 10) || 1);
     var pageSize = Math.max(1, Math.min(200, parseInt(req.query.page_size, 10) || 50));
@@ -15845,7 +15861,7 @@ app.get('/admin/ai-agent/invite-redemptions', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/daily-usage — 今日所有用户额度使用（含普通 free 用户）
-app.get('/admin/ai-agent/daily-usage', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/daily-usage', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
     var limit = Math.max(1, Math.min(300, parseInt(req.query.limit, 10) || 80));
     var dayR = await supabase.rpc('ai_quota_shanghai_day');
@@ -21322,7 +21338,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
 
 // ===================== 管理员 AI 管理接口 =====================
 // GET /admin/ai-agent/config - 管理员获取 AI 完整配置
-app.get('/admin/ai-agent/config', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
     var config = await getAiConfig();
     return res.json({ ok: true, config: config, deepseek_models: getDeepSeekProbeSnapshot() });
@@ -21333,7 +21349,7 @@ app.get('/admin/ai-agent/config', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/effective-prompt — 管理员查看当前生效的系统提示词
-app.get('/admin/ai-agent/effective-prompt', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/effective-prompt', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
     var config = await getAiConfig();
     var corePrompt = buildAiCorePrompt(config);
@@ -21357,7 +21373,7 @@ app.get('/admin/ai-agent/effective-prompt', verifyToken, async (req, res) => {
 });
 
 // POST /admin/ai-agent/config - 管理员更新 AI 配置
-app.post('/admin/ai-agent/config', verifyToken, async (req, res) => {
+app.post('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 20), async (req, res) => {
   try {
     var body = req.body || {};
     var configPayload = migrateConfig(body);
@@ -21526,13 +21542,13 @@ async function handleAvatarUpload(req, res) {
 }
 
 app.post('/api/admin/ai-agent/avatar', verifyToken, express.json({ limit: '10mb' }), handleAvatarUpload);
-app.post('/admin/ai-agent/avatar', verifyToken, express.json({ limit: '10mb' }), handleAvatarUpload);
+app.post('/admin/ai-agent/avatar', verifyToken, securityRateLimit(60000, 20), express.json({ limit: '10mb' }), handleAvatarUpload);
 
 
 // GET /admin/ai-agent/usage-summary - 管理员获取统计
 // 默认只查最近 30 天数据，避免全表扫描拖死接口。
 // 可通过 ?days=30 | 90 | all 切换窗口。
-app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/usage-summary', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
     var daysParam = String(req.query.days || '30').toLowerCase();
     var days;
@@ -21642,7 +21658,7 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/users - 管理员查看有 AI 聊天记录的用户列表（含 tokens 统计）
-app.get('/admin/ai-agent/users', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/users', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
     var days = parseInt(req.query.days, 10);
     if (isNaN(days) || days < 1) days = 90;
@@ -21720,7 +21736,7 @@ app.get('/admin/ai-agent/users', verifyToken, async (req, res) => {
 
 // GET /admin/ai-agent/conversations?user_name=xxx&days=30 - 获取用户对话列表
 // 性能：限制最近 30 天，可通过 days 调整
-app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/conversations', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
     var targetUser = String(req.query.user_name || '').trim();
     if (!targetUser) return res.status(400).json({ error: '缺少 user_name 参数' });
@@ -21814,7 +21830,7 @@ app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/conversation?user_name=xxx&conversation_id=xxx - 获取指定对话详情
-app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
+app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
     var targetUser = String(req.query.user_name || '').trim();
     var convId = String(req.query.conversation_id || '').trim();
@@ -21881,7 +21897,7 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
 
 // POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
 // older_than_days: 默认 30 天
-app.post('/admin/ai-agent/cleanup', verifyToken, async (req, res) => {
+app.post('/admin/ai-agent/cleanup', verifyToken, securityRateLimit(600000, 5), async (req, res) => {
   try {
     // ★ 高危全站物理删除：必须显式确认（confirm === true），防止单请求误触发
     // 不可恢复地清空全站 AI 历史。
