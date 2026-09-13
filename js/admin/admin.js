@@ -1540,7 +1540,7 @@
                 var preview = (displayContent || '').slice(0, 60);
                 if (displayContent && displayContent.length > 60) preview += '...';
                 h += '<tr><td>' + titlePreview + '</td><td>' + escapeHtml(preview || '-') + '</td><td>' + escapeHtml(a.user_name) + '</td><td>' + formatTime(a.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminAnn(\'' + String(a.id).replace(/'/g, "\\'") + '\')">删除</button></td></tr>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminAnn(\'' + safeJsStr(a.id) + '\')">删除</button></td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2113,7 +2113,7 @@
                 var fullUrl = p.media_url || extra.thumb || '';
                 var previewUrl = fullUrl || thumbUrl;
                 var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + safeJsStr(previewUrl) + '\', \'' + safeJsStr(thumbUrl) + '\', \'' + safeJsStr(p.user_name || '') + '\', \'' + safeJsStr(p.created_at || '') + '\')" title="\u70b9\u51fb\u9884\u89c8\u5927\u56fe">' : '-';
-                var actions = '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + String(p.id).replace(/'/g, "\\'") + '\')">\u5220\u9664</button>';
+                var actions = '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + safeJsStr(p.id) + '\')">\u5220\u9664</button>';
                 h += '<tr><td>' + thumbHtml + '</td>';
                 h += '<td>' + escapeHtml(p.user_name || '') + '</td>';
                 h += '<td>' + (extra.fileSize ? (extra.fileSize / (1024 * 1024)).toFixed(2) + 'MB' : '-') + '</td>';
@@ -2297,13 +2297,13 @@
                 if ((a.related_users || []).length > 3) relatedHtml += ' ...';
                 var actionsHtml = '';
                 if (!a.is_read) {
-                    actionsHtml += '<button class="btn-sm" onclick="markSecurityAlertRead(\'' + String(a.id).replace(/'/g, "\\'") + '\')">已读</button>';
+                    actionsHtml += '<button class="btn-sm" onclick="markSecurityAlertRead(\'' + safeJsStr(a.id) + '\')">已读</button>';
                 }
                 var ignored = a.ignored || false;
                 var fpVal = a.false_positive || false;
                 if (!fpVal) {
-                    actionsHtml += '<button class="btn-sm" onclick="setSecurityAlertStatus(\'' + String(a.id).replace(/'/g, "\\'") + '\',\'ignored\')">忽略</button>';
-                    actionsHtml += '<button class="btn-sm del" onclick="setSecurityAlertStatus(\'' + String(a.id).replace(/'/g, "\\'") + '\',\'false_positive\')">误报</button>';
+                    actionsHtml += '<button class="btn-sm" onclick="setSecurityAlertStatus(\'' + safeJsStr(a.id) + '\',\'ignored\')">忽略</button>';
+                    actionsHtml += '<button class="btn-sm del" onclick="setSecurityAlertStatus(\'' + safeJsStr(a.id) + '\',\'false_positive\')">误报</button>';
                 }
                 if (ignored || fpVal) {
                     actionsHtml += '<span style="font-size:10px;color:var(--text-muted);">' + (fpVal ? '已标记误报' : '已忽略') + '</span>';
@@ -2360,7 +2360,7 @@
             blacklistData.forEach(function(b) {
                 var statusBadge = b.is_active ? '<span class="badge badge-red">黑名单中</span>' : '<span class="badge badge-green">已解除</span>';
                 var liftTime = !b.is_active && b.lifted_at ? formatTime(b.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.duration_hours > 0 ? formatDuration(b.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(b.reason || '-') + '</td><td>' + escapeHtml(b.added_by || '-') + '</td><td>' + formatTime(b.created_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm" onclick="liftBlacklist(\'' + String(b.id).replace(/'/g, "\\'") + '\')">解除</button>' : liftTime) + '</td></tr>';
+                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.duration_hours > 0 ? formatDuration(b.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(b.reason || '-') + '</td><td>' + escapeHtml(b.added_by || '-') + '</td><td>' + formatTime(b.created_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm" onclick="liftBlacklist(\'' + safeJsStr(b.id) + '\')">解除</button>' : liftTime) + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2499,7 +2499,7 @@
             bansData.forEach(function(b) {
                 var statusBadge = b.is_active ? '<span class="badge badge-red">封禁中</span>' : '<span class="badge badge-green">已解除</span>';
                 var liftInfo = !b.is_active && b.lifted_at ? formatTime(b.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.ban_type === 'permanent' ? '永久' : formatDuration(b.ban_duration_hours || 0)) + '</td><td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td><td>' + escapeHtml(b.banned_by || '-') + '</td><td>' + formatTime(b.banned_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm del" onclick="liftBan(\'' + String(b.id).replace(/'/g, "\\'") + '\')">解除</button>' : liftInfo) + '</td></tr>';
+                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.ban_type === 'permanent' ? '永久' : formatDuration(b.ban_duration_hours || 0)) + '</td><td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td><td>' + escapeHtml(b.banned_by || '-') + '</td><td>' + formatTime(b.banned_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm del" onclick="liftBan(\'' + safeJsStr(b.id) + '\')">解除</button>' : liftInfo) + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2521,7 +2521,7 @@
             mutesData.forEach(function(m) {
                 var statusBadge = m.is_active ? '<span class="badge badge-red">禁言中</span>' : '<span class="badge badge-green">已解除</span>';
                 var liftInfo = !m.is_active && m.lifted_at ? formatTime(m.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(m.user_name) + '</strong></td><td>' + ((m.duration_hours || 0) > 0 ? formatDuration(m.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(m.reason || '-') + '</td><td>' + escapeHtml(m.muted_by || '-') + '</td><td>' + formatTime(m.created_at) + '</td><td>' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (m.is_active ? '<button class="btn-sm" onclick="liftMute(\'' + String(m.id).replace(/'/g, "\\'") + '\')">解除</button>' : liftInfo) + '</td></tr>';
+                h += '<tr><td><strong>' + escapeHtml(m.user_name) + '</strong></td><td>' + ((m.duration_hours || 0) > 0 ? formatDuration(m.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(m.reason || '-') + '</td><td>' + escapeHtml(m.muted_by || '-') + '</td><td>' + formatTime(m.created_at) + '</td><td>' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (m.is_active ? '<button class="btn-sm" onclick="liftMute(\'' + safeJsStr(m.id) + '\')">解除</button>' : liftInfo) + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2660,7 +2660,7 @@
                 h += '<td>' + buildAdminMediaThumb(p) + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
                 h += '<td>' + formatTime(p.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + String(p.id).replace(/'/g, "\\'") + '\')">删除</button></td></tr>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + safeJsStr(p.id) + '\')">删除</button></td></tr>';
             });
             h += '</tbody></table></div>';
         }
