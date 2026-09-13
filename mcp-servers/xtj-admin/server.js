@@ -32,7 +32,10 @@ if (!API_BASE) {
 let authToken = null;
 let authTokenAt = 0;
 let adminUser = process.env.XTJ_ADMIN_USER || null;
-let adminPass = process.env.XTJ_ADMIN_PASS || null;
+// ★ 2026-09-13（M-4）：不再维护模块级的明文密码变量 adminPass。
+// 旧实现在 login() 里 adminPass = password，使明文密码常驻内存；且 ensureLoggedIn
+// 依赖它自动重登。现改为：自动重登凭据只在需要时从环境变量读取（getAutoLoginCredential），
+// admin_login 工具传入的密码用完即弃，不回存。
 
 // ===================== HTTP 工具 =====================
 async function apiRequest(method, path, body = null) {
@@ -74,8 +77,11 @@ async function ensureLoggedIn() {
     }
   }
   if (!authToken) {
-    if (adminUser && adminPass) {
-      const data = await apiRequest("POST", "/admin/login", { username: adminUser, password: adminPass });
+    // ★ 2026-09-13（M-4）：自动重登只使用环境变量凭据（getAutoLoginCredential），
+    // 不再使用 admin_login 工具传入的密码。且登录成功后立即清空本地明文引用。
+    var cred = getAutoLoginCredential();
+    if (cred) {
+      const data = await apiRequest("POST", "/admin/login", { username: cred.username, password: cred.password });
       if (!data.ok || !data.token) throw new Error("自动登录失败");
       authToken = data.token;
       authTokenAt = Date.now();
@@ -91,7 +97,23 @@ async function login(username, password) {
   authToken = data.token;
   authTokenAt = Date.now();
   adminUser = username;
-  adminPass = password;
+  // ★ 2026-09-13 修复（M-4）：不再把明文密码回存到模块级变量 adminPass。
+  // 旧实现在登录成功后执行 adminPass = password，使管理员明文密码在整个进程
+  // 生命周期内常驻内存，一旦发生 crash dump / 进程内存检查即可直接拿到密码
+  // （而非仅有短期 token）。现在 token 过期后的自动重登只依赖宿主注入的
+  // XTJ_ADMIN_PASS 环境变量，工具调用传入的密码用完即弃。
+  // 副作用：通过 admin_login 工具登录时，24h token 过期后需重新登录一次
+  //（除非宿主设置了 XTJ_ADMIN_PASS）。这是有意的安全取舍。
+}
+
+// 通过 admin_login 工具登录时不回存密码；仅当环境变量提供时才允许自动重登。
+// 若环境变量与本次登录用户名不一致，则丢弃环境变量凭据，避免用错误账号自动重登。
+function getAutoLoginCredential() {
+  var envUser = process.env.XTJ_ADMIN_USER || null;
+  var envPass = process.env.XTJ_ADMIN_PASS || null;
+  if (!envUser || !envPass) return null;
+  if (adminUser && envUser !== adminUser) return null;
+  return { username: envUser, password: envPass };
 }
 
 // ===================== 辅助格式化函数 =====================
@@ -202,6 +224,7 @@ server.tool("admin_delete_comment", "删除指定评论（高风险，需要 con
   if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除评论 ${id} 不可撤销。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   await apiRequest("DELETE", `/admin/comment/${encodeURIComponent(id)}`);
+  logAudit('delete_comment', { id }); // ★ 2026-09-13（M-3）：此前有 confirm 但漏了审计
   return { content: [{ type: "text", text: `✅ 评论 ${id} 已删除` }] };
 });
 
@@ -245,16 +268,29 @@ server.tool("admin_get_bans", "获取封禁列表", {}, async () => {
   return { content: [{ type: "text", text: t }] };
 });
 
-server.tool("admin_ban_user", "封禁用户", { user_name: z.string(), duration_hours: z.number().optional(), reason: z.string().optional() }, async (args) => {
+// ★ 2026-09-13 修复（M-3）：封禁/禁言/拉黑属不可逆高危操作，此前既无 confirm
+// 也无审计。最严重的是 duration_hours 缺省即 0 = 永久，AI 一次不带参数的调用
+// 就能永久封禁用户。现统一要求 confirm=true，且"永久"需再传 confirm_permanent=true
+// 做第二道闸；同时补 logAudit。
+server.tool("admin_ban_user", "封禁用户（高风险！需要传入 confirm=true 确认；永久封禁还需 confirm_permanent=true）", { user_name: z.string(), duration_hours: z.number().optional(), reason: z.string().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+  var isPermanent = (args.duration_hours ?? 0) === 0;
+  if (!args.confirm) {
+    return { content: [{ type: "text", text: `⚠️ 高危操作！用户 ${args.user_name} 将被${isPermanent ? "【永久】" : ` ${args.duration_hours} 小时`}封禁。请在参数中传入 confirm=true 确认。` }] };
+  }
+  if (isPermanent && !args.confirm_permanent) {
+    return { content: [{ type: "text", text: `🛑 ${args.user_name} 将被【永久封禁】，该操作不可自动恢复。\n请显式传入 duration_hours（小时数），或额外传入 confirm_permanent=true 表示确认永久封禁。` }] };
+  }
   await ensureLoggedIn();
-  await apiRequest("POST", "/admin/ban", { user_name: args.user_name, duration_hours: args.duration_hours??0, reason: args.reason||"" });
-  const t = (args.duration_hours??0)===0?"永久封禁":`封禁 ${args.duration_hours} 小时`;
+  const data = await apiRequest("POST", "/admin/ban", { user_name: args.user_name, duration_hours: args.duration_hours ?? 0, reason: args.reason || "" });
+  const t = isPermanent ? "永久封禁" : `封禁 ${args.duration_hours} 小时`;
+  logAudit('ban_user', { userName: args.user_name, durationHours: args.duration_hours ?? 0, permanent: isPermanent, reason: args.reason || "" });
   return { content: [{ type: "text", text: `✅ ${args.user_name} 已被${t}` }] };
 });
 
 server.tool("admin_unban_user", "解除封禁", { id: z.string() }, async ({ id }) => {
   await ensureLoggedIn();
   await apiRequest("PUT", `/admin/ban/${id}/lift`);
+  logAudit('unban_user', { banId: id });
   return { content: [{ type: "text", text: `✅ 封禁记录 ${id} 已解除` }] };
 });
 
@@ -268,16 +304,26 @@ server.tool("admin_get_mutes", "获取禁言列表", {}, async () => {
   return { content: [{ type: "text", text: t }] };
 });
 
-server.tool("admin_mute_user", "禁言用户", { user_name: z.string(), duration_hours: z.number().optional(), reason: z.string().optional() }, async (args) => {
+// ★ 2026-09-13 修复（M-3）：同 admin_ban_user，禁言此前无 confirm 无审计，缺省即永久
+server.tool("admin_mute_user", "禁言用户（高风险！需要传入 confirm=true 确认；永久禁言还需 confirm_permanent=true）", { user_name: z.string(), duration_hours: z.number().optional(), reason: z.string().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+  var isPermanent = (args.duration_hours ?? 0) === 0;
+  if (!args.confirm) {
+    return { content: [{ type: "text", text: `⚠️ 高危操作！用户 ${args.user_name} 将被${isPermanent ? "【永久】" : ` ${args.duration_hours} 小时`}禁言。请在参数中传入 confirm=true 确认。` }] };
+  }
+  if (isPermanent && !args.confirm_permanent) {
+    return { content: [{ type: "text", text: `🛑 ${args.user_name} 将被【永久禁言】。\n请显式传入 duration_hours（小时数），或额外传入 confirm_permanent=true 表示确认永久禁言。` }] };
+  }
   await ensureLoggedIn();
-  await apiRequest("POST", "/admin/mute", { user_name: args.user_name, duration_hours: args.duration_hours??0, reason: args.reason||"" });
-  const t = (args.duration_hours??0)===0?"永久禁言":`禁言 ${args.duration_hours} 小时`;
+  await apiRequest("POST", "/admin/mute", { user_name: args.user_name, duration_hours: args.duration_hours ?? 0, reason: args.reason || "" });
+  const t = isPermanent ? "永久禁言" : `禁言 ${args.duration_hours} 小时`;
+  logAudit('mute_user', { userName: args.user_name, durationHours: args.duration_hours ?? 0, permanent: isPermanent, reason: args.reason || "" });
   return { content: [{ type: "text", text: `✅ ${args.user_name} 已被${t}` }] };
 });
 
 server.tool("admin_unmute_user", "解除禁言", { id: z.string() }, async ({ id }) => {
   await ensureLoggedIn();
   await apiRequest("PUT", `/admin/mute/${id}/lift`);
+  logAudit('unmute_user', { muteId: id });
   return { content: [{ type: "text", text: `✅ 禁言记录 ${id} 已解除` }] };
 });
 
@@ -291,15 +337,25 @@ server.tool("admin_get_blacklist", "获取黑名单列表", {}, async () => {
   return { content: [{ type: "text", text: t }] };
 });
 
-server.tool("admin_add_blacklist", "加入黑名单", { user_name: z.string(), reason: z.string().optional(), duration_hours: z.number().optional() }, async (args) => {
+// ★ 2026-09-13 修复（M-3）：黑名单此前无 confirm 无审计，缺省即永久
+server.tool("admin_add_blacklist", "加入黑名单（高风险！需要传入 confirm=true 确认；永久拉黑还需 confirm_permanent=true）", { user_name: z.string(), reason: z.string().optional(), duration_hours: z.number().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+  var isPermanent = (args.duration_hours ?? 0) === 0;
+  if (!args.confirm) {
+    return { content: [{ type: "text", text: `⚠️ 高危操作！用户 ${args.user_name} 将被加入黑名单${isPermanent ? "（【永久】生效）" : `（${args.duration_hours} 小时）`}。请在参数中传入 confirm=true 确认。` }] };
+  }
+  if (isPermanent && !args.confirm_permanent) {
+    return { content: [{ type: "text", text: `🛑 ${args.user_name} 将被【永久】加入黑名单。\n请显式传入 duration_hours（小时数），或额外传入 confirm_permanent=true 表示确认永久拉黑。` }] };
+  }
   await ensureLoggedIn();
-  await apiRequest("POST", "/admin/blacklist", { user_name: args.user_name, reason: args.reason||"", duration_hours: args.duration_hours??0 });
+  await apiRequest("POST", "/admin/blacklist", { user_name: args.user_name, reason: args.reason || "", duration_hours: args.duration_hours ?? 0 });
+  logAudit('add_blacklist', { userName: args.user_name, durationHours: args.duration_hours ?? 0, permanent: isPermanent, reason: args.reason || "" });
   return { content: [{ type: "text", text: `✅ ${args.user_name} 已加入黑名单` }] };
 });
 
 server.tool("admin_lift_blacklist", "解除黑名单", { id: z.string() }, async ({ id }) => {
   await ensureLoggedIn();
   await apiRequest("PUT", `/admin/blacklist/${id}/lift`);
+  logAudit('lift_blacklist', { blacklistId: id });
   return { content: [{ type: "text", text: `✅ 黑名单记录 ${id} 已解除` }] };
 });
 
@@ -325,16 +381,27 @@ server.tool("admin_respond_report", "回复举报", { id: z.string(), response: 
   return { content: [{ type: "text", text: `✅ 举报 ${id} 已回复` }] };
 });
 
-server.tool("admin_report_delete_post", "处理举报→删除帖子", { id: z.string() }, async ({ id }) => {
+// ★ 2026-09-13 修复（M-3）：举报处置会直接删帖/封人，此前无 confirm 无审计
+server.tool("admin_report_delete_post", "处理举报→删除帖子（高风险，需要 confirm=true 确认）", { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+  if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！举报 ${id} 对应内容将被删除。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   await apiRequest("POST", `/admin/report/${id}/delete-post`);
+  logAudit('report_delete_post', { reportId: id });
   return { content: [{ type: "text", text: `✅ 举报 ${id}: 被举报内容已删除` }] };
 });
 
-server.tool("admin_report_ban_user", "处理举报→封禁用户", { id: z.string(), duration_hours: z.number().optional() }, async ({ id, duration_hours }) => {
+server.tool("admin_report_ban_user", "处理举报→封禁用户（高风险，需要 confirm=true 确认；永久封禁还需 confirm_permanent=true）", { id: z.string(), duration_hours: z.number().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+  var isPermanent = (args.duration_hours ?? 0) === 0;
+  if (!args.confirm) {
+    return { content: [{ type: "text", text: `⚠️ 高危操作！举报 ${args.id} 对应账号将被${isPermanent ? "【永久】" : ` ${args.duration_hours} 小时`}封禁。请在参数中传入 confirm=true 确认。` }] };
+  }
+  if (isPermanent && !args.confirm_permanent) {
+    return { content: [{ type: "text", text: `🛑 举报 ${args.id} 对应账号将被【永久封禁】。\n请显式传入 duration_hours（小时数），或额外传入 confirm_permanent=true 确认。` }] };
+  }
   await ensureLoggedIn();
-  await apiRequest("POST", `/admin/report/${id}/ban-user`, { duration_hours: duration_hours??0 });
-  return { content: [{ type: "text", text: `✅ 举报 ${id}: 被举报用户已处理` }] };
+  await apiRequest("POST", `/admin/report/${args.id}/ban-user`, { duration_hours: args.duration_hours ?? 0 });
+  logAudit('report_ban_user', { reportId: args.id, durationHours: args.duration_hours ?? 0, permanent: isPermanent });
+  return { content: [{ type: "text", text: `✅ 举报 ${args.id}: 被举报用户已处理` }] };
 });
 
 // --- 安全中心 ---
