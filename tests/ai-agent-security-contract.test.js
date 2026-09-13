@@ -61,7 +61,13 @@ test('deep research close invalidates callbacks, aborts streams, and clears tran
   const closeStart = source.indexOf('function closeDeepThinkPage()');
   assert.notEqual(closeStart, -1);
   const closeBody = source.slice(closeStart, source.indexOf('var _dtFileData', closeStart));
-  assert.match(closeBody, /S\.lifecycleId\+\+/);
+  // ★ 2026-09-13 更新（P-29）：此断言原写死 `S.lifecycleId++`，把实现细节固化成契约。
+  //   真实意图是"关闭深研页必须作废该页在途回调"，而非"必须用哪个变量"。
+  //   深研页与主聊天现已拆分计数器（原共用导致互相误伤：开深页会作废主聊天在途流），
+  //   这里改为断言"深研页自己的生命周期计数器被递增"。
+  assert.match(closeBody, /S\.dtLifecycleId\+\+/);
+  // 反向断言：不得再递增主聊天的生命周期计数器（那会误杀主聊天在途回调）
+  assert.doesNotMatch(closeBody, /S\.lifecycleId\+\+/);
   assert.match(closeBody, /S\.clientRequestId\+\+/);
   // ★ 修复后：closeDeepThinkPage 只 abort 深页独立通道（_dtAbortController / deepThinkJob），
   // 不再触碰普通聊天共享的 S.abortController，避免误杀普通聊天流。

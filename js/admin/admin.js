@@ -1100,6 +1100,38 @@
         return String(s).replace(/&/g, '&amp;').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '\\x3C').replace(/>/g, '\\x3E').replace(/\n/g, '\\n');
     }
 
+    // ★ 2026-09-13 修复（M-10）：敏感信息默认遮罩。
+    //   管理后台的「实时在线」「用户画像」等页面此前把 IP 与地理位置完整明文渲染，
+    //   任何时刻打开后台（包括投屏、录屏、他人旁观、共享屏幕排查问题时）都会
+    //   无差别暴露全体用户的精确位置，属于典型的最小必要原则违背。
+    //   策略：默认遮罩关键位，提供「显示」按钮按需展开，展开状态仅存内存（刷新即复原），
+    //   既满足日常排查（一眼扫过不需要精确 IP），也满足定位问题（点一下就能看全）。
+    function maskIp(v) {
+        var ip = String(v == null ? '' : v).trim();
+        if (!ip || ip === '未记录') return ip || '未记录';
+        if (ip.indexOf(':') >= 0) return ip.slice(0, Math.min(10, ip.length)) + '…';   // IPv6
+        var parts = ip.split('.');
+        if (parts.length === 4) return parts[0] + '.' + parts[1] + '.*.*';
+        return ip.slice(0, 3) + '…';
+    }
+    function maskGeo(v) {
+        var t = String(v == null ? '' : v).trim();
+        if (!t || t === '未解析') return t || '未解析';
+        // 保留到"市"一级足够排查（如「四川省成都市」），把区县/街道等精确信息遮掉。
+        // 无法识别层级时只保留前 4 个字符。
+        var m = t.match(/^(.*?[省市自治区](?:.*?[市区县])?)/);
+        if (m && m[1] && m[1].length >= 3) return m[1] + (m[1].length < t.length ? '***' : '');
+        return t.length > 4 ? t.slice(0, 4) + '***' : t;
+    }
+    // 遮罩开关状态（仅内存，不持久化——避免"上次点过显示"变成永久明文）
+    var _showSensitiveInSession = false;
+    function revealSensitive() {
+        _showSensitiveInSession = true;
+        try { showToast('已显示完整 IP 与位置（刷新后自动复原为遮罩）'); } catch (e) {}
+        if (typeof renderAdminTab === 'function' && currentTab) { try { renderAdminTab(currentTab); } catch (e) {} }
+    }
+    window.revealSensitive = revealSensitive;
+
     function getDisplayContent(content) {
         if (!content) return '';
         try {
@@ -2450,22 +2482,26 @@
                     try {
                         var lc = JSON.parse(latestEvent.content || '{}');
                         var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
-                        ipCell = escapeHtml(lc.ip || '-');
+                        // ★ M-10：默认遮罩（点表头「显示」可展开完整值）
+                        ipCell = escapeHtml(_showSensitiveInSession ? (lc.ip || '-') : maskIp(lc.ip));
+                        var _geoRaw = '';
                         if (lc.ip_location && lc.ip_location.text) {
-                            regionCell = escapeHtml(lc.ip_location.text);
+                            _geoRaw = lc.ip_location.text;
                         } else {
                             // 回退：使用用户信息中存储的IP位置或精确定位
                             try {
                                 var ui2 = u.info || {};
                                 if (ui2.last_ip_location && ui2.last_ip_location.text) {
-                                    regionCell = escapeHtml(ui2.last_ip_location.text);
+                                    _geoRaw = ui2.last_ip_location.text;
                                 } else if (ui2.last_location && ui2.last_location.address) {
-                                    regionCell = escapeHtml(ui2.last_location.address);
+                                    _geoRaw = ui2.last_location.address;
                                 } else if (ui2.last_location && ui2.last_location.text) {
-                                    regionCell = escapeHtml(ui2.last_location.text);
+                                    _geoRaw = ui2.last_location.text;
                                 }
                             } catch(e) {}
                         }
+                        // ★ M-10：区域默认遮罩到市级，避免精确位置在后台被无差别暴露
+                        regionCell = escapeHtml(_showSensitiveInSession ? _geoRaw : maskGeo(_geoRaw)) || '-';
                         latestLoginTime = lc.login_at || latestEvent.created_at || '';
                         var escapedName = safeJsStr(u.name);
                         deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + escapedName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceText + '</a>';
@@ -4495,6 +4531,37 @@
         return html;
     }
 
+    // ★ 2026-09-13 修复（M-12）：AI 配置表单读取的 null 兜底。
+    //   「保存配置」原先直接用 document.getElementById('xxx').value 读取约 30 个字段，
+    //   任一元素不存在（配置渲染失败、Tab 切换竞态、后端下发结构缺少某段配置导致
+    //   对应控件未渲染）都会抛出 TypeError: Cannot read properties of null，
+    //   用户只能看到笼统的「保存异常」，完全无法定位是哪个字段。
+    //   统一走 cfgVal/cfgValInt/cfgChecked 读取：元素缺失时回退到默认值并记一条
+    //   精确的缺失清单，保存成功后由调用方以警告形式提示，便于定位而不阻塞保存。
+    function _cfgMissingIds() {
+        if (!window.__xtjCfgMissing) window.__xtjCfgMissing = [];
+        return window.__xtjCfgMissing;
+    }
+    function _cfgNote(id) {
+        var list = _cfgMissingIds();
+        if (list.indexOf(id) < 0) list.push(id);
+    }
+    function cfgVal(id, def) {
+        // 文本/数值/select 控件统一取值；元素缺失返回 def（默认 ''）
+        var el = document.getElementById(id);
+        if (!el || el.value === undefined) { _cfgNote(id); return def === undefined ? '' : def; }
+        return el.value;
+    }
+    function cfgChecked(id, def) {
+        var el = document.getElementById(id);
+        if (!el || el.checked === undefined) { _cfgNote(id); return !!def; }
+        return el.checked;
+    }
+    function cfgInt(id, def) {
+        var v = parseInt(cfgVal(id, ''), 10);
+        return isNaN(v) ? def : v;
+    }
+
     async function renderAiAdminSettings(content) {
         if (!content) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
@@ -4730,73 +4797,75 @@
                 saveBtn.addEventListener('click', async function() {
                     saveBtn.textContent = '保存中...';
                     saveBtn.disabled = true;
+                    // ★ M-12：本次读取前清空缺失清单，避免上一次的残留误报
+                    window.__xtjCfgMissing = [];
                     try {
                         var configPayload = {
-                            name: document.getElementById('aiCfgName').value.trim(),
-                            description: document.getElementById('aiCfgDesc').value.trim(),
-                            welcome_message: document.getElementById('aiCfgWelcome').value.trim(),
-                            persona: document.getElementById('aiCfgPersona').value.trim(),
-                            tone: document.getElementById('aiCfgTone').value.trim(),
-                            system_prompt: document.getElementById('aiCfgSysPrompt').value.trim(),
-                            avatar: document.getElementById('aiCfgAvatar').value.trim(),
+                            name: cfgVal('aiCfgName').trim(),
+                            description: cfgVal('aiCfgDesc').trim(),
+                            welcome_message: cfgVal('aiCfgWelcome').trim(),
+                            persona: cfgVal('aiCfgPersona').trim(),
+                            tone: cfgVal('aiCfgTone').trim(),
+                            system_prompt: cfgVal('aiCfgSysPrompt').trim(),
+                            avatar: cfgVal('aiCfgAvatar').trim(),
                             reply_style: {
-                                directness: document.getElementById('styleDirectness').value,
-                                detail_level: document.getElementById('styleDetail').value,
-                                humor_level: document.getElementById('styleHumor').value,
-                                sarcasm_level: document.getElementById('styleSarcasm').value,
-                                warmth_level: document.getElementById('styleWarmth').value,
-                                use_markdown: document.getElementById('styleMarkdown').checked,
-                                use_emoji: document.getElementById('styleEmoji').checked,
-                                max_reply_chars: parseInt(document.getElementById('styleMaxChars').value) || 1200
+                                directness: cfgVal('styleDirectness'),
+                                detail_level: cfgVal('styleDetail'),
+                                humor_level: cfgVal('styleHumor'),
+                                sarcasm_level: cfgVal('styleSarcasm'),
+                                warmth_level: cfgVal('styleWarmth'),
+                                use_markdown: cfgChecked('styleMarkdown'),
+                                use_emoji: cfgChecked('styleEmoji'),
+                                max_reply_chars: cfgInt('styleMaxChars', 1200)
                             },
                             roleplay: {
-                                enabled: document.getElementById('rpEnabled').checked,
-                                allow_stage_directions: document.getElementById('rpStage').checked,
-                                allow_cat_actions: document.getElementById('rpCat').checked,
-                                forbidden_action_patterns: document.getElementById('rpPatterns').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean)
+                                enabled: cfgChecked('rpEnabled'),
+                                allow_stage_directions: cfgChecked('rpStage'),
+                                allow_cat_actions: cfgChecked('rpCat'),
+                                forbidden_action_patterns: cfgVal('rpPatterns').split(',').map(function(s) { return s.trim(); }).filter(Boolean)
                             },
                             output_rules: {
-                                must: document.getElementById('orMust').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean),
-                                avoid: document.getElementById('orAvoid').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean),
-                                format: document.getElementById('orFormat').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean)
+                                must: cfgVal('orMust').split('\n').map(function(s) { return s.trim(); }).filter(Boolean),
+                                avoid: cfgVal('orAvoid').split('\n').map(function(s) { return s.trim(); }).filter(Boolean),
+                                format: cfgVal('orFormat').split('\n').map(function(s) { return s.trim(); }).filter(Boolean)
                             },
                             search: {
-                                allow_web_search: document.getElementById('searchEnabled').checked,
-                                search_provider: document.getElementById('searchProvider').value.trim() || 'searxng',
-                                max_results: parseInt(document.getElementById('searchMaxResults').value) || 5,
-                                timeout_ms: parseInt(document.getElementById('searchTimeout').value) || 4000,
-                                use_weather_tool: document.getElementById('searchWeather').checked
+                                allow_web_search: cfgChecked('searchEnabled'),
+                                search_provider: cfgVal('searchProvider').trim() || 'searxng',
+                                max_results: cfgInt('searchMaxResults', 5),
+                                timeout_ms: cfgInt('searchTimeout', 4000),
+                                use_weather_tool: cfgChecked('searchWeather')
                             },
 
                             model: {
-                                reasoner_model: document.getElementById('modelReasoner').value.trim(),
-                                default_thinking_mode: document.getElementById('modelThinkingMode').value,
-                                allow_user_thinking_switch: document.getElementById('modelUserSwitch').checked,
-                                multi_agent: document.getElementById('modelMultiAgent').checked
+                                reasoner_model: cfgVal('modelReasoner').trim(),
+                                default_thinking_mode: cfgVal('modelThinkingMode'),
+                                allow_user_thinking_switch: cfgChecked('modelUserSwitch'),
+                                multi_agent: cfgChecked('modelMultiAgent')
                             },
                             // ★ P 新增: 深度思考子配置
                             deep_think: {
-                                enabled: document.getElementById('dtEnabled').checked,
-                                default_thinking_mode: document.getElementById('dtThinkingMode').value,
-                                max_workers: parseInt(document.getElementById('dtMaxWorkers').value) || 6,
-                                min_workers: parseInt(document.getElementById('dtMinWorkers').value) || 0,
-                                force_split_min_length: parseInt(document.getElementById('dtForceSplitLen').value) || 24,
-                                worker_max_tool_rounds: parseInt(document.getElementById('dtWorkerToolRounds').value) || 5,
-                                low_max_tokens: parseInt(document.getElementById('dtLowTokens').value) || 4096,
-                                medium_max_tokens: parseInt(document.getElementById('dtMedTokens').value) || 16384,
-                                high_max_tokens: parseInt(document.getElementById('dtHighTokens').value) || 32768,
-                                low_max_tool_rounds: parseInt(document.getElementById('dtLowToolRounds').value) || 0,
-                                medium_max_tool_rounds: parseInt(document.getElementById('dtMedToolRounds').value) || 2,
-                                high_max_tool_rounds: parseInt(document.getElementById('dtHighToolRounds').value) || 4,
-                                require_history_injection: document.getElementById('dtRequireHistory').checked
+                                enabled: cfgChecked('dtEnabled'),
+                                default_thinking_mode: cfgVal('dtThinkingMode'),
+                                max_workers: cfgInt('dtMaxWorkers', 6),
+                                min_workers: cfgInt('dtMinWorkers', 0),
+                                force_split_min_length: cfgInt('dtForceSplitLen', 24),
+                                worker_max_tool_rounds: cfgInt('dtWorkerToolRounds', 5),
+                                low_max_tokens: cfgInt('dtLowTokens', 4096),
+                                medium_max_tokens: cfgInt('dtMedTokens', 16384),
+                                high_max_tokens: cfgInt('dtHighTokens', 32768),
+                                low_max_tool_rounds: cfgInt('dtLowToolRounds', 0),
+                                medium_max_tool_rounds: cfgInt('dtMedToolRounds', 2),
+                                high_max_tool_rounds: cfgInt('dtHighToolRounds', 4),
+                                require_history_injection: cfgChecked('dtRequireHistory')
                             },
                             security: {
-                                hide_system_prompt_in_reasoning: document.getElementById('secHidePrompt').checked
+                                hide_system_prompt_in_reasoning: cfgChecked('secHidePrompt')
                             },
                             admin_debug: {
-                                show_effective_prompt: document.getElementById('debugPrompt').checked,
-                                show_model_info: document.getElementById('debugModelInfo').checked,
-                                show_reasoning_length: document.getElementById('debugReasonLen').checked
+                                show_effective_prompt: cfgChecked('debugPrompt'),
+                                show_model_info: cfgChecked('debugModelInfo'),
+                                show_reasoning_length: cfgChecked('debugReasonLen')
                             }
                         };
                         if (!configPayload.name || configPayload.name.length > 30) { showToast('名称不能为空且不超过30字'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
@@ -4807,7 +4876,14 @@
                         if (!configPayload.model.reasoner_model) { showToast('请填写模型名称'); saveBtn.textContent = '保存配置'; saveBtn.disabled = false; return; }
                         var r = await apiCall('POST', '/admin/ai-agent/config', configPayload);
                         if (r && r.ok) {
-                            showToast('配置已保存，用户端刷新后生效');
+                            // ★ M-12：若取值时有控件缺失，保存虽成功但部分字段可能被默认值覆盖，
+                            //   必须明确告知缺失清单，否则用户会以为"全都保存好了"。
+                            var _miss = _cfgMissingIds();
+                            if (_miss.length) {
+                                showToast('配置已保存，但 ' + _miss.length + ' 个控件未找到（已用默认值）: ' + _miss.slice(0, 5).join(', ') + (_miss.length > 5 ? ' 等' : ''), 'error');
+                            } else {
+                                showToast('配置已保存，用户端刷新后生效');
+                            }
                             // ★ 修复：保存成功后重新拉取配置回填，保证模型名迁移等字段与页面同步
                             await renderAiAdminSettings(content);
                         } else {
@@ -4911,16 +4987,40 @@
         if (!content) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
         var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
+        // ★ M-05/M-06：时间窗状态（由下拉切换）。此前页面无控件，窗口写死在后端默认值，
+        //   用户既改不了也看不到自己看的是哪段时间的数据。
+        var _win = (window._aiUsageDays === undefined) ? '30' : window._aiUsageDays;
         try {
             // 加载统计 + 用户列表
+            // ★ 关键修复（M-05）：两个接口统一传同一个 days，消除"统计 30 天 / 用户 90 天"的口径分裂
+            var _q = '?days=' + encodeURIComponent(_win);
             var [summaryData, usersData] = await Promise.all([
-                apiCall('GET', '/admin/ai-agent/usage-summary').catch(function() { return null; }),
-                apiCall('GET', '/admin/ai-agent/users').catch(function() { return null; })
+                apiCall('GET', '/admin/ai-agent/usage-summary' + _q).catch(function() { return null; }),
+                apiCall('GET', '/admin/ai-agent/users' + _q).catch(function() { return null; })
             ]);
             var summary = summaryData && summaryData.summary ? summaryData.summary : null;
             var users = usersData && usersData.users ? usersData.users : [];
+            // ★ 2026-09-13（M-05/M-06 增强）：展示后端真实生效的时间窗，
+            //   并透出截断事实。后端 usage-summary 默认 30 天 / 上限 10000 条，
+            //   users 默认 90 天 / 上限 50000 条；两个接口窗口不同，页面必须说清楚，
+            //   否则用户会以为"统计口径不一致是 bug"。
+            var summaryWin = summaryData && summaryData.window_days ? summaryData.window_days : 30;
+            var usersWin = usersData && usersData.window_days ? usersData.window_days : 90;
+            var summaryTruncated = summaryData && summaryData.truncated === true;
+            var usersTruncated = usersData && usersData.truncated === true;
 
             var html = [];
+
+            // ★ M-05/M-06：时间窗切换控件。放在最前，让用户明确知道自己看的是哪段时间的数据。
+            html.push('<div class="ai-usage-toolbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary,#f7f8fa);border-radius:8px;">');
+            html.push('<span style="font-size:12px;color:var(--text-muted)">统计时间窗</span>');
+            html.push('<select id="aiUsageDaysSel" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:#fff;font-size:13px;">');
+            [['1', '今日'], ['7', '近 7 天'], ['30', '近 30 天'], ['90', '近 90 天'], ['365', '近 365 天'], ['all', '全部']].forEach(function(opt) {
+                html.push('<option value="' + opt[0] + '"' + (String(_win) === opt[0] ? ' selected' : '') + '>' + opt[1] + '</option>');
+            });
+            html.push('</select>');
+            html.push('<span style="font-size:12px;color:var(--text-muted)">（统计与用户列表已统一为同一时间窗）</span>');
+            html.push('</div>');
 
             // 统计卡片
             if (summary) {
@@ -4932,13 +5032,22 @@
                 html.push('<div class="ai-usage-card"><div class="lbl">累计 Token</div><div class="val">' + (summary.total_tokens || 0).toLocaleString() + '</div></div>');
                 html.push('<div class="ai-usage-card"><div class="lbl">累计费用</div><div class="val">¥' + (summary.total_cost || 0).toFixed(6) + '</div><div class="sub">用户 ' + (summary.total_users || 0) + ' 人</div></div>');
                 html.push('</div>');
+                // ★ M-05/M-06：标注统计窗口；"今日"卡片始终是当日，与窗口无关，需说明避免误读
+                html.push('<div style="margin:-4px 0 12px;font-size:11px;color:var(--text-muted);">「今日」为当日实时数据，与时间窗无关；「累计」统计范围为 <b>' + (String(summaryWin) === 'all' ? '全部历史' : '近 ' + summaryWin + ' 天') + '</b>。</div>');
+                if (summaryTruncated) {
+                    html.push('<div style="margin:0 0 12px;padding:8px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.28);border-radius:8px;font-size:12px;color:#b45309;">⚠️ 消息记录数已达单次查询上限（10000 条），统计结果可能偏低。请缩短时间窗后查看。</div>');
+                }
             }
 
             // 用户列表
             if (!users.length) {
-                html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">暂无用户 AI 聊天记录</div>');
+                html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">暂无用户 AI 聊天记录（近 ' + usersWin + ' 天）</div>');
             } else {
-                html.push('<div class="ai-section-header">用户列表（' + users.length + ' 人）</div>');
+                // ★ M-06：显式标注两个接口各自的时间窗，并在到达上限时给出截断提示
+                html.push('<div class="ai-section-header">用户列表（' + users.length + ' 人 · 近 ' + usersWin + ' 天）</div>');
+                if (usersTruncated) {
+                    html.push('<div style="margin:0 0 10px;padding:8px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.28);border-radius:8px;font-size:12px;color:#b45309;">⚠️ 记录数已达单次查询上限（50000 条），列表与统计可能不完整。可缩短时间窗（改用下方下拉）或调大 days 参数后重试。</div>');
+                }
                 html.push('<ul class="ai-conv-users-list">');
                 users.forEach(function(u) {
                     var lastAt = u.last_at ? new Date(u.last_at).toLocaleString() : '未知';
@@ -4960,6 +5069,15 @@
 
             if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = html.join('\n');
+
+            // ★ M-05/M-06：时间窗下拉事件。改变窗口后重新拉数据（同一 days 传给两个接口）。
+            var _daysSel = document.getElementById('aiUsageDaysSel');
+            if (_daysSel) {
+                _daysSel.addEventListener('change', function() {
+                    window._aiUsageDays = _daysSel.value;
+                    renderAiAdminContent();
+                });
+            }
 
             // 绑定点击
             content.querySelectorAll('.ai-conv-users-list li').forEach(function(li) {
@@ -5527,13 +5645,14 @@
             h += '</div>';
             
             if (data.users && data.users.length > 0) {
-                h += '<div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border);border-radius:12px"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead style="background:var(--bg-secondary)"><tr><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">用户</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">设备</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">IP</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">位置</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">最后活动</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">操作</th></tr></thead><tbody>';
+                h += '<div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border);border-radius:12px"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead style="background:var(--bg-secondary)"><tr><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">用户</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">设备</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">IP' + (_showSensitiveInSession ? '' : '<button class="btn-sm" type="button" style="margin-left:6px;font-size:11px;padding:1px 7px;border-radius:5px;" onclick="window.revealSensitive()">显示</button>') + '</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">位置</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">最后活动</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">操作</th></tr></thead><tbody>';
                 data.users.forEach(function(u) {
                     h += '<tr style="border-bottom:1px solid var(--border)">';
                     h += '<td style="padding:12px 16px"><b>' + escapeHtml(u.user_name) + '</b></td>';
                     h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(u.device_label || [u.device_type, u.os, u.browser, u.model].filter(Boolean).join(' · ') || '浏览器未提供设备信息') + '</td>';
-                    h += '<td style="padding:12px 16px;font-family:var(--font-mono, monospace);font-size:13px;color:var(--text-secondary)">' + escapeHtml(u.ip || '未记录') + '</td>';
-                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(u.location || '未解析') + '</td>';
+                    // ★ M-10：默认遮罩，需精确值时点「显示完整 IP」
+                    h += '<td style="padding:12px 16px;font-family:var(--font-mono, monospace);font-size:13px;color:var(--text-secondary)">' + escapeHtml(_showSensitiveInSession ? (u.ip || '未记录') : maskIp(u.ip)) + '</td>';
+                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(_showSensitiveInSession ? (u.location || '未解析') : maskGeo(u.location)) + '</td>';
                     h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + formatTime(u.last_active) + '</td>';
                     h += '<td style="padding:12px 16px"><button class="btn-sm" style="border-radius:6px; white-space:nowrap" onclick="loadUserProfile(\'' + safeJsStr(u.user_name) + '\')">画像</button></td></tr>';
                 });
@@ -5614,14 +5733,17 @@
         // 网络卡片
         h += '<div class="card" style="' + cardStyle + '">';
         h += '<div style="' + titleStyle + '"><span style="color:#10b981;display:flex">' + adminIcons.network + '</span>网络信息</div>';
-        h += '<div style="' + rowStyle + '"><span>IP</span><span class="ip-text">' + escapeHtml(p.latest_ip || '') + '</span></div>';
+        // ★ M-10：画像页含 IP / 精确地址 / GPS 坐标 / 邮编，均为高敏感字段，默认全部遮罩。
+        //   排查需要精确值时点标题栏「显示完整信息」（仅本次会话有效，刷新即复原）。
+        h += '<div style="' + rowStyle + '"><span>IP' + (_showSensitiveInSession ? '' : ' <button class="btn-sm" type="button" style="font-size:11px;padding:1px 7px;border-radius:5px;" onclick="window.revealSensitive()">显示</button>') + '</span><span class="ip-text">' + escapeHtml(_showSensitiveInSession ? (p.latest_ip || '') : maskIp(p.latest_ip)) + '</span></div>';
         if (p.latest_location) {
-            h += '<div style="' + rowStyle + ';flex-direction:column;align-items:flex-start;gap:6px"><span>位置</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_location.text || '') + '</span></div>';
+            h += '<div style="' + rowStyle + ';flex-direction:column;align-items:flex-start;gap:6px"><span>位置</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(_showSensitiveInSession ? (p.latest_location.text || '') : maskGeo(p.latest_location.text)) + '</span></div>';
             if (p.latest_location.latitude && p.latest_location.longitude) {
-                h += '<div style="' + rowStyle + '"><span>坐标</span><span style="' + valStyle + '">' + Number(p.latest_location.latitude).toFixed(4) + ', ' + Number(p.latest_location.longitude).toFixed(4) + '</span></div>';
+                // GPS 坐标精确到 4 位小数 ≈ 11 米，等同于精确住址，属于最敏感一档
+                h += '<div style="' + rowStyle + '"><span>坐标</span><span style="' + valStyle + '">' + (_showSensitiveInSession ? (Number(p.latest_location.latitude).toFixed(4) + ', ' + Number(p.latest_location.longitude).toFixed(4)) : '***.***, ***.***（已遮罩）') + '</span></div>';
             }
             if (p.latest_location.country_code) h += '<div style="' + rowStyle + '"><span>国家代码</span><span style="' + valStyle + '">' + escapeHtml(p.latest_location.country_code) + '</span></div>';
-            if (p.latest_location.postal) h += '<div style="' + rowStyle + '"><span>邮编</span><span style="' + valStyle + '">' + escapeHtml(p.latest_location.postal) + '</span></div>';
+            if (p.latest_location.postal) h += '<div style="' + rowStyle + '"><span>邮编</span><span style="' + valStyle + '">' + (_showSensitiveInSession ? escapeHtml(p.latest_location.postal) : escapeHtml(String(p.latest_location.postal).slice(0, 2) + '***')) + '</span></div>';
         }
         if (p.latest_asn) {
             h += '<div style="' + rowStyle + ';flex-direction:column;align-items:flex-start;gap:6px;border-top:1px dashed var(--border);padding-top:8px"><span>ISP</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(p.latest_asn.isp || '') + '</span></div>';
