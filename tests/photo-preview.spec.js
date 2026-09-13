@@ -75,6 +75,25 @@ test('main image error path has no pageerror and cleans open listeners', async (
   expect(errors).toEqual([]);
 });
 
+test('photo with thumbnail paints instantly then upgrades to full image', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/thumb.png**', route => route.fulfill({ status: 200, contentType: 'image/png', body: okPng }));
+  await page.route('**/full-slow.png**', async route => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await route.fulfill({ status: 200, contentType: 'image/png', body: okPng });
+  });
+  await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
+  await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.showToast=function(){}; window.currentUser="tester";' + script });
+  await page.evaluate(() => window.openPhotoPreview(0, [{ imageUrl: '/full-slow.png', thumbUrl: '/thumb.png', username: 'u', timestamp: Date.now() }]));
+  // 原图尚未返回前，主槽应已秒显缩略图
+  await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /thumb\.png/);
+  // 原图后台解码完成后无缝替换为原图
+  await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /full-slow\.png/, { timeout: 5000 });
+  await expect(page.locator('#photoPreviewImage')).toHaveCSS('opacity', '1');
+  expect(errors).toEqual([]);
+});
+
 test('same URL repeated while loading does not remove the only effective listeners', async ({ page }) => {
   const errors = await setup(page);
   await page.evaluate(() => {

@@ -718,7 +718,13 @@
             if (J && S && S.imageUrl) {
                 clearPreviewImageLoad(J, !1);
                 var oe = C[S.imageUrl];
-                if (J.style.transition = "none", J.style.opacity = "0", J.src = S.imageUrl, oe || J.complete) {
+                // 性能优化：原图未解码完成前，先用已缓存的缩略图秒开（墙格卡片通常已加载同一缩略图），
+                // 同时在后台解码原图，就绪后无缝替换，避免每次打开都长时间等待原图下载而黑屏。
+                var thumbSrc = S.thumbUrl || S.thumb || '';
+                var hasThumb = !!(thumbSrc && thumbSrc !== S.imageUrl);
+                J.style.transition = "none", J.style.opacity = "0";
+                if (oe || J.complete) {
+                    J.src = S.imageUrl;
                     if (J.offsetHeight, D) {
                         var ne = J.getBoundingClientRect();
                         if (ne && ne.width > 0) {
@@ -731,6 +737,17 @@
                     J.style.transition = "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
                     J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", $ = setTimeout(re, 220)) : (J.style.opacity = "1",
                     $ = setTimeout(re, 150));
+                } else if (hasThumb) {
+                    // 缩略图秒开（命中浏览器缓存），原图在后台解码，就绪后由 D() 无缝替换
+                    J.src = thumbSrc, J.style.opacity = "1";
+                    $ = setTimeout(re, 120);
+                    var openFullUrl = S.imageUrl;
+                    U(openFullUrl).then(function() {
+                        // 仍停留在同一张照片（未翻页/未关闭）时才替换，防止旧图覆盖新图
+                        if (_._openLoadGen === ee && t === S && J && J.isConnected && J.src !== openFullUrl) {
+                            D(J, openFullUrl);
+                        }
+                    });
                 } else {
                     J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
                         _._openLoadGen === ee && (cleanupOpenListeners(), re());
