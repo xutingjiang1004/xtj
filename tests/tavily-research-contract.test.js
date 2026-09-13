@@ -137,6 +137,12 @@ test('POST /api/agent/research/stream supports rewrite + modes and self-hosted m
   assert.match(flowSource, /stage:\s*'synthesize'/);
   assert.match(flowSource, /总指挥正在交叉验证与深度研判/);
   assert.match(flowSource, /research_content/);
+  // ★ 2026-09-11 修复：实时路径此前从不发送 research_step，只有缓存回放路径发，
+  //   导致前端 handleResearchStepEvent（ai-agent.js:4296）收不到推进信号、
+  //   实时研究进度条恒为 0 步。三个阶段必须齐备且与缓存回放序列一致。
+  assert.match(flowSource, /type:\s*'research_step',\s*tool:\s*'Planning',\s*phase:\s*0/);
+  assert.match(flowSource, /type:\s*'research_step',\s*tool:\s*'WebSearch',\s*phase:\s*1/);
+  assert.match(flowSource, /type:\s*'research_step',\s*tool:\s*'Generating',\s*phase:\s*2/);
   // research_sources / research_done 由路由处理器（缓存命中回放 + 完成路径）发送
   assert.match(source, /research_sources/);
   assert.match(source, /research_done/);
