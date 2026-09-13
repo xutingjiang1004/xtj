@@ -73,15 +73,39 @@ test('POST /api/agent/research/stream is authenticated, rate-limited and SSE-for
 test('GET /api/agent/config exposes tavily_research capability flag', () => {
   const source = routeSource('get', '/api/agent/config', "app.post('/api/agent/profile'");
   assert.match(source, /tavily_research:\s*\{/);
-  assert.match(source, /enabled:\s*!!process\.env\.TAVILY_API_KEY/);
+  // ★ 2026-09-11 修复（S-1）：本流程已自托管（DeepSeek 内置 web_search 多智能体），
+  //   开关【不再】绑定 TAVILY_API_KEY —— 否则未配置该变量时 enabled=false，
+  //   前端 ai-agent.js:5928 会直接跳过整条研究链路（表现为"无法正常对话/看不到最终结果"）。
+  //   现在：AI 管理配置显式 false 才关闭；配了 TAVILY_API_KEY 走 'tavily' 增强，
+  //   未配置则 managed_by='self' 且仍启用内置搜索链路。
+  assert.doesNotMatch(source, /enabled:\s*!!process\.env\.TAVILY_API_KEY/);
+  assert.match(source, /config\.tavily_research\.enabled === false/);
+  assert.match(source, /managed_by:\s*process\.env\.TAVILY_API_KEY\s*\?\s*'tavily'\s*:\s*'self'/);
   assert.match(source, /models:\s*\[\s*'pro',\s*'mini',\s*'auto'\s*\]/);
 });
 
-test('render.yaml declares TAVILY_API_KEY as a manual secret near SUPABASE_ANON_KEY', () => {
+test('tavily_search tool degrades gracefully when TAVILY_API_KEY is absent (self-hosted research stays usable)', () => {
+  const start = server.indexOf("case 'tavily_search': {");
+  assert.notEqual(start, -1, "missing tool handler case 'tavily_search'");
+  const end = server.indexOf('\n    case ', start + 10);
+  const handler = server.slice(start, end > start ? end : start + 2000);
+  // 未配置 TAVILY_API_KEY 时：该第三方工具返回可读错误，但不抛异常、不阻断主链路
+  assert.match(handler, /TAVILY_API_KEY/);
+  assert.match(handler, /error:/);
+  assert.match(handler, /return \{ tool_name: name/);
+});
+
+test('render.yaml keeps TAVILY_API_KEY optional (feature must not depend on it)', () => {
   assert.match(renderYaml, /- key: TAVILY_API_KEY\s*\r?\n\s*sync: false/);
   const anonIdx = renderYaml.indexOf('- key: SUPABASE_ANON_KEY');
   const tavilyIdx = renderYaml.indexOf('- key: TAVILY_API_KEY');
   assert.ok(anonIdx >= 0 && tavilyIdx > anonIdx, 'TAVILY_API_KEY should follow SUPABASE_ANON_KEY');
+  // ★ 2026-09-11：TAVILY_API_KEY 已降级为【可选增强】。故意让该密钥留空也能
+  //   完整使用深入研究（自托管多智能体 + DeepSeek 内置 web_search），
+  //   因此其注释块（位于 key 之前）必须写明"可选"，避免后续误以为它是功能开关。
+  const blockStart = Math.max(0, tavilyIdx - 600);
+  const block = renderYaml.slice(blockStart, tavilyIdx + 120);
+  assert.match(block, /可选/, 'TAVILY_API_KEY block must be documented as optional');
 });
 
 test('POST /api/agent/research/stream supports rewrite + modes and self-hosted multi-agent research flow', () => {
