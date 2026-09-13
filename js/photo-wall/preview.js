@@ -79,6 +79,7 @@
     }
     function clearPreviewImageLoad(image, resetSource) {
         if (!image) return;
+        image._ppObjectUrl && (URL.revokeObjectURL(image._ppObjectUrl), image._ppObjectUrl = null);
         image._ppCleanup && image._ppCleanup(), image._ppCleanup = null, image._ppLoadGen = (image._ppLoadGen || 0) + 1,
         image._ppUrl = null, image._ppListenerUrl = null, image.onload = null, image.onerror = null,
         image.classList.remove("pp-placeholder"), image.style.transition = "none";
@@ -93,11 +94,14 @@
                 return;
             }
             if (e._ppUrl === t) {
+                // 若当前展示的是该 URL 的 Blob 对象图（渐进加载中），保持不动，避免用原 URL 覆盖
+                if (e._ppObjectUrl) return e.style.transition = "none", void (e.style.opacity = "1");
                 if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
                 if (e._ppListenerUrl === t && e._ppCleanup) return;
             } else {
                 // 换 URL 前彻底清旧图，避免切换时残影
                 e._ppCleanup && e._ppCleanup();
+                e._ppObjectUrl && (URL.revokeObjectURL(e._ppObjectUrl), e._ppObjectUrl = null);
                 e.style.transition = "none";
                 e.style.opacity = "0";
                 e.classList.remove("pp-placeholder");
@@ -284,6 +288,9 @@
             e = !1;
             var t = document.getElementById("photoPreviewOverlay");
             if (t) {
+                // ★ 修复：关闭动画的延迟清槽定时器存入 overlay，重开预览时取消，
+                // 防止 220/280ms 后误清掉新打开图片的 src（快速 关→开 竞态）。
+                t._ppCloseWipeTimer && (clearTimeout(t._ppCloseWipeTimer), t._ppCloseWipeTimer = null);
                 t._cleanupPreview && t._cleanupPreview(), t._cleanupOpenListeners && t._cleanupOpenListeners(), t._openLoadGen = (t._openLoadGen || 0) + 1, q();
                 var o = document.getElementById("photoPreviewImage"), n = t._openOrigin, i = t._openOriginImg, a = null;
                 clearPreviewImageLoad(o, !1);
@@ -294,7 +301,7 @@
                     o.style.borderRadius = "0px", o.offsetHeight, t.style.transition = "opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
                     o.style.transition = "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
                     o.style.transform = "translate(" + r + "px, " + s + "px) scale(" + d + ")", o.style.borderRadius = 14 / d + "px",
-                    t.style.opacity = "0", setTimeout(function() {
+                    t.style.opacity = "0", t._ppCloseWipeTimer = setTimeout(function() {
                         i && (i.style.transition = "", i.style.opacity = "");
                         // 关闭后清空三槽，防止下次打开残留
                         ["photoPreviewImage", "ppPrevImg", "ppNextImg"].forEach(function(id) {
@@ -310,7 +317,7 @@
                         t.style.transition = "", t.style.opacity = "", t.classList.remove("active"), document.body.classList.remove("photo-previewing");
                     }, 280);
                 } else t.style.transition = "opacity 0.22s cubic-bezier(0.55, 0, 1, 0.45)", t.style.opacity = "0",
-                setTimeout(function() {
+                t._ppCloseWipeTimer = setTimeout(function() {
                     t.style.opacity = "", t.style.transition = "", t.classList.remove("active");
                     ["photoPreviewImage", "ppPrevImg", "ppNextImg"].forEach(function(id) {
                         var img = document.getElementById(id);
@@ -496,6 +503,8 @@
                 var n = e.querySelector(".pp-info-modal-close");
                 n && n.setAttribute("aria-label", "关闭照片信息");
             }(_);
+            // ★ 修复：取消上一次关闭动画遗留的清槽定时器，防止其清掉本次新打开的图片
+            _._ppCloseWipeTimer && (clearTimeout(_._ppCloseWipeTimer), _._ppCloseWipeTimer = null);
             d || (!function(d) {
                 var b, L;
                 d.querySelector(".photo-preview-image-wrapper");
@@ -723,7 +732,7 @@
                 var thumbSrc = S.thumbUrl || S.thumb || '';
                 var hasThumb = !!(thumbSrc && thumbSrc !== S.imageUrl);
                 J.style.transition = "none", J.style.opacity = "0";
-                if (oe || J.complete) {
+                if (oe || (J.complete && J.naturalWidth > 0)) {
                     J.src = S.imageUrl;
                     if (J.offsetHeight, D) {
                         var ne = J.getBoundingClientRect();
@@ -738,17 +747,33 @@
                     J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", $ = setTimeout(re, 220)) : (J.style.opacity = "1",
                     $ = setTimeout(re, 150));
                 } else if (hasThumb) {
-                    // 缩略图秒开（命中浏览器缓存），原图在后台解码，就绪后由 D() 无缝替换
+                    // 缩略图秒开（命中浏览器缓存），原图在后台以 fetch→Blob→对象URL 无缝替换：
+                    // 避免"同一 URL 换元素重载"时的浏览器内存缓存异常（部分环境复现），
+                    // 生产环境同样更稳（下载功能已用同一 fetch 通道，且命中 HTTP 缓存）。
                     J.src = thumbSrc, J.style.opacity = "1";
-                    $ = setTimeout(re, 120);
                     var openFullUrl = S.imageUrl;
-                    U(openFullUrl).then(function() {
-                        // 仍停留在同一张照片（未翻页/未关闭）时才替换，防止旧图覆盖新图
-                        if (_._openLoadGen === ee && t === S && J && J.isConnected && J.src !== openFullUrl) {
-                            D(J, openFullUrl);
-                        }
-                    });
+                    $ = setTimeout(function() {
+                        // 兜底：原图迟迟未就绪（如超慢网络）时先完成收尾，不无限期阻塞元信息
+                        _._openLoadGen === ee && t === S && re();
+                    }, 4e3);
+                    fetch(openFullUrl, { credentials: "same-origin" }).then(function(resp) {
+                        if (!resp || !resp.ok) return null;
+                        return resp.blob();
+                    }).then(function(blob) {
+                        if (!blob || !blob.size) return;
+                        if (!(_._openLoadGen === ee && t === S && J && J.isConnected)) return;
+                        if (J._ppUrl === openFullUrl) return;
+                        var objectUrl = URL.createObjectURL(blob);
+                        J._ppObjectUrl && (URL.revokeObjectURL(J._ppObjectUrl), J._ppObjectUrl = null);
+                        J._ppObjectUrl = objectUrl;
+                        J._ppUrl = openFullUrl;
+                        J.src = objectUrl;
+                        J.style.transition = "none";
+                        J.style.opacity = "1";
+                        if (_._openLoadGen === ee && t === S) re();
+                    }).catch(function() {});
                 } else {
+                    J.src = S.imageUrl;
                     J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
                         _._openLoadGen === ee && (cleanupOpenListeners(), re());
                     }, 8e3);

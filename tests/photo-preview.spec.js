@@ -78,6 +78,8 @@ test('main image error path has no pageerror and cleans open listeners', async (
 test('photo with thumbnail paints instantly then upgrades to full image', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  const thumbUrl = 'http://127.0.0.1:4173/thumb.png';
+  const fullUrl = 'http://127.0.0.1:4173/full-slow.png';
   await page.route('**/thumb.png**', route => route.fulfill({ status: 200, contentType: 'image/png', body: okPng }));
   await page.route('**/full-slow.png**', async route => {
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -85,11 +87,12 @@ test('photo with thumbnail paints instantly then upgrades to full image', async 
   });
   await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
   await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.showToast=function(){}; window.currentUser="tester";' + script });
-  await page.evaluate(() => window.openPhotoPreview(0, [{ imageUrl: '/full-slow.png', thumbUrl: '/thumb.png', username: 'u', timestamp: Date.now() }]));
+  await page.evaluate(({ thumbUrl, fullUrl }) => window.openPhotoPreview(0, [{ imageUrl: fullUrl, thumbUrl: thumbUrl, username: 'u', timestamp: Date.now() }]), { thumbUrl, fullUrl });
   // 原图尚未返回前，主槽应已秒显缩略图
   await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /thumb\.png/);
-  // 原图后台解码完成后无缝替换为原图
-  await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /full-slow\.png/, { timeout: 5000 });
+  // 原图后台拉取完成后无缝替换（src 为对象 URL），主图已解码显示
+  await expect(page.locator('#photoPreviewImage')).toHaveJSProperty('_ppUrl', fullUrl, { timeout: 5000 });
+  await expect(page.locator('#photoPreviewImage')).toHaveJSProperty('naturalWidth', 1);
   await expect(page.locator('#photoPreviewImage')).toHaveCSS('opacity', '1');
   expect(errors).toEqual([]);
 });
