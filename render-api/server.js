@@ -15890,13 +15890,20 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
           probe: getDeepSeekProbeSnapshot()
         },
         tavily_research: {
-          // ★ 2026-09-11 修复（深入研究不可用根因）：本流程自 2026-08 重构后已完全自托管
-          //   （Planner → 子智能体 DeepSeek 内置 web_search → Synthesizer），不再依赖 Tavily 编排/搜索。
-          //   但开关仍绑定 process.env.TAVILY_API_KEY，未配置该环境变量时
-          //   enabled=false → 前端 S.tavilyResearchEnabled=false → 直接跳过整条研究链路
-          //   （ai-agent.js:5928），表现为"无法正常对话、看不到最终结果"。
-          //   改为默认启用，支持 AI 管理后台 config.tavily_research.enabled 显式关闭。
-          enabled: !(config.tavily_research && config.tavily_research.enabled === false),
+          // ★ 2026-09-11 修复（深入研究不可用根因，S-1）：
+          //   本流程自 2026-08 重构后已完全自托管，主链路是
+          //     Planner → 子智能体（DeepSeek 内置 web_search）→ 查漏补缺 → Synthesizer，
+          //   不再依赖 Tavily 编排/搜索。但开关此前仍绑定 process.env.TAVILY_API_KEY：
+          //   未配置该环境变量时 enabled=false → 前端 S.tavilyResearchEnabled=false
+          //   → ai-agent.js:5928 直接跳过整条研究链路，表现为
+          //   「无法正常对话、看不到最终结果」。
+          //   现在：配置了 TAVILY_API_KEY 时保持旧的 "Tavily 增强" 语义；
+          //   未配置时返回 true + managed_by='self'，让内置搜索的自托管链路照常工作。
+          //   后端 AI 管理配置（config.tavily_research.enabled === false）仍可显式关闭。
+          enabled: (config.tavily_research && config.tavily_research.enabled === false)
+            ? false
+            : (!!process.env.TAVILY_API_KEY || true),
+          managed_by: process.env.TAVILY_API_KEY ? 'tavily' : 'self',
           models: ['pro', 'mini', 'auto']
         }
       }

@@ -55,9 +55,12 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
       
-      # ⚠️ Tavily API Key — 在 Render Dashboard 手动设置
-      # 用途：小猫AI 深入研究（Tavily Deep Research 多agent报告）+ 联网搜索
-      # 获取：https://app.tavily.com → API Keys
+      # ⚠️ Tavily API Key（**可选增强，非功能开关**）— 在 Render Dashboard 手动设置
+      # 用途：为小猫AI 的搜索通道额外增加一个第三方来源（tavily_search 工具）。
+      # ★ 2026-09-11 起：深入研究（多智能体深度报告）已完全自托管——由 DeepSeek
+      #   内置 web_search 驱动 Planner/子智能体/Synthesizer，**不依赖此密钥**。
+      #   留空时：研究工作流照常可用；仅 tavily_search 工具返回"未配置"提示。
+      #   获取：https://app.tavily.com → API Keys
       - key: TAVILY_API_KEY
         sync: false
       
