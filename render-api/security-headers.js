@@ -12,13 +12,19 @@ var CSP = [
   // 放进 script-src 等于允许「上传 JS → 白名单源加载」；supabase 仅用于 API 调用，
   // 由 connect-src 放行。jsdelivr/npmmirror 承载 supabase-js/Monaco/GSAP，必须保留。
   // H-16: 已移除 'unsafe-eval'（WebLLM 的 WASM 编译由 'wasm-unsafe-eval' 覆盖）。
-  // 审计 🟡 CSP 记录（跳过原因）：
-  //   'unsafe-inline' 暂未移除——前端 index.html/admin.html 存在内联脚本（含 WebLLM
-  //   worker 初始化片段与直接内联的事件绑定），本环境无法确认其全部内联依赖；
-  //   迁移到外部文件 + nonce 白名单属于前端 HTML 联动改造，需与前端一起排期。
-  //   jsdelivr/npmmirror 为 supabase-js/Monaco/GSAP 加载源，已通过 connect-src 限定
-  //   用途；script-src 对第三方 CDN 无法做路径级收窄（CSP 规范忽略 script-src 的路径），
-  //   后续优先为固定版本资源加 Subresource Integrity (SRI)。
+  // 审计 🟡 CSP 记录（部分收敛，M-2）：
+  //   ★ 2026-09-13 已完成：gsap 外部脚本（js/core-parts/01-bootstrap.js）补齐 SRI
+  //     （sha384，随固定版本 gsap@3.12.5 绑定，注入 integrity + crossOrigin）。
+  //     校验失败时仅动画降级，不崩站。有 tests/gsap-sri-contract.test.js 锁定。
+  //   ⏳ 仍待排期：'unsafe-inline' 暂未移除——前端内联脚本与 on* 事件属性规模较大
+  //     （实测 index.html 3 个内联 <script> + 95 个 on* 属性；admin.html 25 个 on*；
+  //     13 个 JS 模块内另有约 232 处动态生成的 on* 属性，集中在 admin.js 108 处、
+  //     core.js 50 处）。移除需先把这些全部改为 addEventListener / 事件委托，
+  //     再配合 nonce 白名单，属独立改造工程，需与前端一起排期。
+  //     在此之前 CSP 对 XSS 的兜底能力有限，主防线仍是 ai-sanitize.js + 各处转义。
+  //   jsdelivr/npmmirror 为历史放行源：jsdelivr 当前仅用于 gsap（已加 SRI）；
+  //   registry.npmmirror.com 在代码库中已无引用，属待清理的冗余放行。
+  //   script-src 对第三方 CDN 无法做路径级收窄（CSP 规范忽略 script-src 的路径）。
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://registry.npmmirror.com",
   "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",

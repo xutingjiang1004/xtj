@@ -114,8 +114,14 @@ test('CSP style-src allows self, unsafe-inline, and jsDelivr', () => {
   const styleSrc = csp.split(';').find(function(d) { return d.trim().startsWith('style-src'); });
   assert.ok(styleSrc, 'style-src directive must exist');
   assert.match(styleSrc, /'self'/);
-  assert.match(styleSrc, /'unsafe-inline'/);
   assert.match(styleSrc, /https:\/\/cdn\.jsdelivr\.net/);
+  // ★ 2026-09-13（M-2）：'unsafe-inline' 是已知的待收敛项，而非期望的长期状态。
+  // 前端 index.html/admin.html 与 13 个 JS 模块共约 230 处动态 on* 属性 + 内联脚本，
+  // 移除需先把它们全部改为事件委托/外置文件。此处仍断言其存在，是为了让"被移除"
+  // 这件事必须显式改测试（即显式决策），而不是悄悄生效；一旦完成收敛，
+  // 应把本条改为 doesNotMatch 并把下方 TODO 一并删除。
+  // TODO(M-2): 完成内联脚本外置 + on* 属性事件委托改造后，收紧此处断言。
+  assert.match(styleSrc, /'unsafe-inline'/);
 });
 
 test('CSP font-src permits the exact Monaco font origins', () => {

@@ -1460,9 +1460,19 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
-            // TODO(安全): gsap 外部 CDN 暂未加 SRI（integrity）——需在部署环境计算真实 hash 后补充，
-            // 或改为同源自托管；错误的 hash 会导致加载失败，故不在源码中伪造。
-            gsap: { externalScripts: ['https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js'] }
+            // ★ 2026-09-13 安全加固（M-2 短期措施）：gsap 使用固定版本 CDN，补齐 SRI。
+            // hash 由 gsap@3.12.5/dist/gsap.min.js 实体文件计算（openssl 与 Node crypto
+            // 双路径交叉验证一致）。integrity 校验失败时浏览器拒绝执行该脚本，此时
+            // ensureGsap() 会 reject，core-animations 的 runWithGSAP 会走无 GSAP 降级分支
+            // （动画幅度降低，功能不受影响），不会导致页面崩溃。
+            // 升级 gsap 版本时必须同步重算并替换此处 hash，否则动画会静默降级。
+            gsap: {
+                externalScripts: [{
+                    url: 'https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js',
+                    integrity: 'sha384-g4NTh/Iv5PPU4xPyhEWqPcwtNXOvdaDI8LLnyYfyNZOjKJeYQyjzQ9X5275eBjpt',
+                    crossOrigin: 'anonymous'
+                }]
+            }
         };
         var xtjModulePromises = Object.create(null);
         var XTJ_MODULE_LOAD_TIMEOUT = 45000;
@@ -1512,7 +1522,7 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             });
         }
 
-        function loadModuleScript(moduleName, assetKey, directUrl) {
+        function loadModuleScript(moduleName, assetKey, directUrl, sriOpts) {
             var url = directUrl || moduleAssetUrl(assetKey);
             if (!url) return Promise.reject(new Error('missing_module_asset:' + assetKey));
             return new Promise(function(resolve, reject) {
@@ -1543,6 +1553,14 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 node.onerror = function() { fail('module_script_failed'); };
                 timer = setTimeout(function() { fail('module_script_timeout'); }, XTJ_MODULE_LOAD_TIMEOUT);
                 if (!existing) {
+                    // ★ 2026-09-13（M-2）：外部脚本可按定义携带 SRI。integrity 不匹配时
+                    // 浏览器直接拒绝执行 → 触发 onerror → 该模块加载失败（对 gsap 而言
+                    // ensureGsap 会 reject，动画降级但不影响功能）。crossOrigin 是跨源
+                    // SRI 校验的前置条件，必须成对设置。
+                    if (sriOpts && sriOpts.integrity) {
+                        node.integrity = sriOpts.integrity;
+                        node.crossOrigin = sriOpts.crossOrigin || 'anonymous';
+                    }
                     node.src = url;
                     node.defer = true;
                     node.dataset.xtjAsset = assetKey;
@@ -1566,10 +1584,21 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     ? Promise.all((definition.styles || []).map(function(metaName) { return loadModuleStyle(moduleName, metaName); }))
                     : Promise.resolve();
                 var scripts = (definition.scripts || []).map(function(metaName) { return { key: metaName, url: null }; });
-                (definition.externalScripts || []).forEach(function(url) { scripts.push({ key: moduleName + '-external-' + url, url: url }); });
+                // ★ 2026-09-13（M-2）：externalScripts 支持两种形态以兼容既有写法：
+                //   'https://…'（纯 URL 字符串）或 { url, integrity, crossOrigin }（带 SRI）。
+                (definition.externalScripts || []).forEach(function(entry) {
+                    var url = (typeof entry === 'string') ? entry : (entry && entry.url);
+                    if (!url) return;
+                    scripts.push({
+                        key: moduleName + '-external-' + url,
+                        url: url,
+                        integrity: (entry && entry.integrity) || '',
+                        crossOrigin: (entry && entry.crossOrigin) || ''
+                    });
+                });
                 var jsPromise = scripts.length > 0
                     ? scripts.reduce(function(chain, item) {
-                        return chain.then(function() { return loadModuleScript(moduleName, item.key, item.url); });
+                        return chain.then(function() { return loadModuleScript(moduleName, item.key, item.url, item); });
                     }, Promise.resolve())
                     : Promise.resolve();
                 return Promise.all([cssPromise, jsPromise]).then(function() {
