@@ -9983,7 +9983,13 @@ function showChatMessages() {
         var html = '';
         for (var i = 0; i < customs.length; i++) {
           var m = customs[i];
-          html += '<div class="ai-cm-item" data-uid="' + m.uid + '">' +
+          // ★ 修复 P-04（存储型 XSS）：m.uid 会经 syncCustomModelsFromServer 从服务端
+          //   同步下来且未做格式校验，此前直接拼进 data-uid="..."。若 uid 形如
+          //   `" onmouseover="alert(1)` 即可突破属性边界注入事件处理器（同源存储型 XSS）。
+          //   修法：不再把不可信 uid 写入 DOM，改用数组下标作为索引桥；
+          //   uid 仅保留在闭包内（下方 items 遍历时通过 customs[idx] 取回真实对象），
+          //   既彻底消除注入面，也避免净化 uid 导致 findCustomModel 失配。
+          html += '<div class="ai-cm-item" data-cm-idx="' + i + '">' +
                     '<div class="ai-cm-item-info"><div class="ai-cm-item-name"></div><div class="ai-cm-item-sub"></div></div>' +
                     '<button type="button" class="ai-cm-item-edit" title="编辑" aria-label="编辑">' +
                       '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
@@ -9999,7 +10005,12 @@ function showChatMessages() {
         var items = listBox.querySelectorAll('.ai-cm-item');
         for (var j = 0; j < items.length; j++) {
           (function(item) {
-            var uid = item.getAttribute('data-uid');
+            // ★ P-04：通过下标取回真实记录（customs 是渲染时的权威快照），
+            //   绝不把 DOM 属性里的字符串当作 uid 使用。
+            var _idx = parseInt(item.getAttribute('data-cm-idx'), 10);
+            var _rec = (isFinite(_idx) && customs[_idx]) ? customs[_idx] : null;
+            var uid = _rec ? _rec.uid : '';
+            if (!uid) return;
             var m = findCustomModel(uid);
             var nameEl = item.querySelector('.ai-cm-item-name');
             var subEl = item.querySelector('.ai-cm-item-sub');
