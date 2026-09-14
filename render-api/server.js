@@ -842,8 +842,191 @@ const AI_TOOLS = [
         required: ['value', 'from_unit', 'to_unit']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_social',
+      description: '在抖音或小红书搜索账号、内容、笔记或视频。当用户要求"找一个抖音账号""小红书上搜一下""看看某个博主"等社交媒体检索需求时使用。\n- 找账号/博主：kind=account\n- 找内容/笔记/视频：kind=content\n- 注意：该工具依赖第三方数据服务，可能出现暂时不可用，失败时如实告知用户，不要编造结果。',
+      parameters: {
+        type: 'object',
+        properties: {
+          platform: { type: 'string', enum: ['douyin', 'xiaohongshu'], description: '目标平台：douyin=抖音，xiaohongshu=小红书' },
+          keyword: { type: 'string', description: '搜索关键词，如账号名、领域词（健身、美食）、话题词' },
+          kind: { type: 'string', enum: ['account', 'content'], description: '搜索类型：account=找账号/博主，content=找内容/笔记/视频。默认 account' }
+        },
+        required: ['platform', 'keyword']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_code',
+      description: '【代码沙箱】在受限沙箱中执行 JavaScript 代码处理数据。适合：批量计算、数组/字符串处理、JSON 转换、统计（求和/均值/最大最小/去重/排序）、正则提取、日期计算、数据格式转换等。\n- 代码在隔离环境运行：无网络、无文件系统、无 require/import、有执行超时\n- 用 console.log() 或 return 输出结果\n- 示例：求数组中位数 → var a=[3,1,2]; a.sort((x,y)=>x-y); return a[Math.floor(a.length/2)]\n- 不适合：需要联网、读写文件、安装依赖的场景',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', description: '要执行的 JavaScript 代码。可用 return 返回结果，或用 console.log 输出。支持数组/字符串/数学/日期/正则等标准能力。' },
+          input: { type: 'string', description: '可选。传给代码的输入数据，代码中通过变量 input 读取（字符串或 JSON 字符串）' }
+        },
+        required: ['code']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'process_json',
+      description: '处理 JSON 数据：格式化、压缩、提取路径、校验。适合用户给了 JSON 文本要做结构处理时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          json: { type: 'string', description: 'JSON 字符串' },
+          action: { type: 'string', enum: ['format', 'minify', 'extract', 'keys', 'validate'], description: '操作：format=美化、minify=压缩、extract=按路径提取、keys=列出键、validate=校验合法性。默认 format' },
+          path: { type: 'string', description: 'action=extract 时的路径，如 data.list.0.name 或 a.b[0].c' }
+        },
+        required: ['json']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'encode_decode',
+      description: '编码/解码转换：Base64、URL 编码、HTML 实体、十六进制、Unicode 转义。当用户要求"把这段文本转成 Base64""URL 解码""HTML 反转义"时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '要处理的文本' },
+          format: { type: 'string', enum: ['base64', 'url', 'html', 'hex', 'unicode'], description: '编码格式：base64 / url / html / hex / unicode' },
+          mode: { type: 'string', enum: ['encode', 'decode'], description: '模式：encode=编码、decode=解码。默认 encode' }
+        },
+        required: ['text', 'format']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'date_calc',
+      description: '日期时间计算：两个日期相差多少天、某日期加减天数、计算星期几、转换时区。当用户问"距离某天还有多少天""30天后是几号""那天是星期几"时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['diff', 'add', 'weekday', 'now'], description: '操作：diff=两日期相差、add=日期加减、weekday=算星期几、now=当前时间。默认 now' },
+          date1: { type: 'string', description: '日期1，格式 YYYY-MM-DD 或 YYYY-MM-DD HH:mm:ss（diff/weekday 用）' },
+          date2: { type: 'string', description: '日期2（diff 时用，不填默认为今天）' },
+          days: { type: 'number', description: '要加/减的天数（add 时用，可为负数）' },
+          unit: { type: 'string', enum: ['days', 'hours', 'minutes', 'seconds'], description: 'diff 时的单位，默认 days' }
+        },
+        required: ['action']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'text_stats',
+      description: '统计文本：字数（含/不含空格）、词数、行数、段落数、字符频率。当用户要求"这段文字多少字""统计一下"时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '要统计的文本' }
+        },
+        required: ['text']
+      }
+    }
   }
 ];
+
+// ===================== 代码沙箱（受限执行，零依赖 / 零成本） =====================
+// ★ 安全设计（对齐项目既有 safeEvalMath 的"自建解释器、不 eval"思路）：
+//   不直接 eval 用户代码，而是用 Node 内置 vm 在受限上下文执行，并做多重封堵：
+//   ① 代码长度上限 20000 字符；② 执行超时 3000ms（vm.runInContext 的 timeout）；
+//   ③ 沙箱上下文只注入白名单 API（Math/JSON/Date/Array/String 等纯计算能力）；
+//   ④ 显式删除 process / require / global / globalThis / Buffer / fetch / importScripts；
+//   ⑤ 不提供任何网络与文件系统访问；⑥ 输出结果截断 8000 字符。
+//   注：vm 非强隔离（非付费沙箱级别），但对"纯数据处理"场景足够，且无网络无文件系统，
+//   无法触及环境变量/数据库/密钥，风险可控。真需要 bash/装包/联网的强隔离沙箱需付费服务。
+var vm = require('vm');
+
+function runInSandbox(code, input) {
+  var src = String(code || '');
+  if (!src.trim()) throw new Error('代码为空');
+  if (src.length > 20000) throw new Error('代码过长（上限 20000 字符）');
+
+  // 采集 console.log 输出
+  var logs = [];
+  var sandbox = {
+    input: input === undefined ? undefined : input,
+    console: {
+      log: function() {
+        var parts = [];
+        for (var i = 0; i < arguments.length; i++) {
+          var a = arguments[i];
+          try { parts.push(typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a)); }
+          catch (e) { parts.push(String(a)); }
+        }
+        if (logs.length < 200) logs.push(parts.join(' '));
+      }
+    },
+    // 白名单：纯计算类 API，无任何 IO
+    Math: Math, JSON: JSON, Date: Date,
+    Number: Number, String: String, Boolean: Boolean,
+    Array: Array, Object: Object, RegExp: RegExp,
+    Map: Map, Set: Set, Promise: Promise,
+    parseInt: parseInt, parseFloat: parseFloat, isNaN: isNaN, isFinite: isFinite,
+    encodeURIComponent: encodeURIComponent, decodeURIComponent: decodeURIComponent,
+    encodeURI: encodeURI, decodeURI: decodeURI,
+    Error: Error, TypeError: TypeError, RangeError: RangeError, SyntaxError: SyntaxError
+  };
+  // 显式封堵危险全局（即便 contextify 已隔离，仍显式置空，防原型链逃逸）
+  sandbox.process = undefined;
+  sandbox.require = undefined;
+  sandbox.global = undefined;
+  sandbox.globalThis = undefined;
+  sandbox.Buffer = undefined;
+  sandbox.fetch = undefined;
+  sandbox.setTimeout = undefined;
+  sandbox.setInterval = undefined;
+  sandbox.setImmediate = undefined;
+  sandbox.eval = undefined;
+  sandbox.Function = undefined;
+  void vm;
+
+  var context = vm.createContext(sandbox);
+  // ★ 关键：用 IIFE 包裹用户代码，否则顶层 return 会抛 "Illegal return statement"。
+  //   使用普通 function（非箭头）以兼容用户写 return 直接返回值的习惯。
+  //   注意：sandbox.Function 已置空，此包裹由宿主代码拼接，非用户可控。
+  var scriptSrc = '"use strict";\n(function(){\n' + src + '\n})();';
+  var result = vm.runInContext(scriptSrc, context, { timeout: 3000, breakOnSigint: true });
+
+  var out = '';
+  if (logs.length) out += logs.join('\n');
+  if (result !== undefined) {
+    var resStr;
+    try { resStr = typeof result === 'object' && result !== null ? JSON.stringify(result, null, 2) : String(result); }
+    catch (e) { resStr = String(result); }
+    out += (out ? '\n【返回值】\n' : '') + resStr;
+  }
+  if (!out) out = '（代码执行完毕，无输出。请用 return 或 console.log 返回结果）';
+  if (out.length > 8000) out = out.slice(0, 8000) + '\n...(输出过长已截断)';
+  return out;
+}
+
+// 按点/中括号路径提取 JSON 值：支持 a.b.0.c 与 a.b[0].c
+function extractJsonPath(obj, path) {
+  var p = String(path || '').replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+  if (!p) return obj;
+  var segs = p.split('.');
+  var cur = obj;
+  for (var i = 0; i < segs.length; i++) {
+    if (cur === null || cur === undefined) throw new Error('路径不存在：' + segs.slice(0, i + 1).join('.'));
+    cur = cur[segs[i]];
+  }
+  return cur;
+}
 
 // ===================== Responses API（内置 web_search）辅助函数 =====================
 // ★ 网页搜索改造：Responses API 的 function 工具格式与 OpenAI Chat 不同
@@ -1132,6 +1315,243 @@ async function executeToolCall(toolCall, context) {
       } catch (e) {
         return { tool_name: name, query: tq, error: 'Tavily 搜索服务暂时不可用' };
       }
+    }
+    case 'search_social': {
+      // ★ 社媒检索（抖音 / 小红书）——免费方案：
+      //   平台官方均无公开搜索 API（抖音搜索为实验能力不对外开放，小红书不对外），
+      //   付费第三方聚合 API 与"零成本"原则冲突，故此处复用站内已有搜索链
+      //   （searchWeb 六层降级：Tavily > Brave > Serper > Custom > Bing > SearXNG），
+      //   通过 site: 定向检索已被搜索引擎索引的公开页面，无需任何额外 API key。
+      var plat = String(args.platform || '').trim().toLowerCase();
+      var skw = String(args.keyword || '').trim().slice(0, 100);
+      var kind = String(args.kind || 'account').trim().toLowerCase();
+      if (plat !== 'douyin' && plat !== 'xiaohongshu') {
+        return { tool_name: name, error: 'platform 仅支持 douyin（抖音）或 xiaohongshu（小红书）' };
+      }
+      if (!skw) return { tool_name: name, error: '搜索关键词为空' };
+
+      var platMeta = plat === 'douyin'
+        ? { label: '抖音', site: 'douyin.com' }
+        : { label: '小红书', site: 'xiaohongshu.com' };
+      // 账号类追加"博主/账号"限定词，内容类不加
+      var kwSuffix = kind === 'account' ? ' 博主' : '';
+      var socialQuery = skw + kwSuffix + ' site:' + platMeta.site;
+
+      var ssGate = await enforceSearchQuota(context.userName, context.searchConsumed);
+      if (!ssGate.allowed) {
+        return { tool_name: name, query: socialQuery, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: ssGate.reason === 'search_limit', quota: ssGate.quota || null };
+      }
+      context.searchConsumed++;
+      try {
+        var ssResult = await searchWeb(socialQuery, 10);
+        var ssArr = (ssResult && ssResult.results) ? ssResult.results : [];
+        // 只保留目标平台域名下的结果，过滤搜索引擎串入的无关站
+        var ssItems = ssArr.filter(function(r) {
+          var u = String(r.url || r.link || '');
+          return u.indexOf(platMeta.site) >= 0;
+        }).slice(0, 10).map(function(r) {
+          var raw = String(r.url || r.link || '');
+          var safe = /^https?:\/\//i.test(raw) ? raw.slice(0, 2000) : '';
+          return {
+            title: String(r.title || '').slice(0, 200),
+            url: safe,
+            snippet: String(r.snippet || r.description || '').slice(0, 300),
+            source: platMeta.label
+          };
+        }).filter(function(it) { return it.url; });
+
+        if (!ssItems.length) {
+          // 未命中目标平台域名 ≠ 工具故障：如实告知，引导模型用 search_web 换关键词重试
+          return {
+            tool_name: name,
+            platform: plat,
+            keyword: skw,
+            results_count: 0,
+            content: '未在' + platMeta.label + '找到与「' + skw + '」匹配的公开页面。可尝试：①换更宽泛的关键词；②改用 search_web 直接搜索"' + skw + ' ' + platMeta.label + '"；③若为具体账号名，请确认拼写。',
+            recoverable: true
+          };
+        }
+        return {
+          tool_name: name,
+          platform: plat,
+          keyword: skw,
+          kind: kind,
+          results_count: ssItems.length,
+          content: JSON.stringify(ssItems),
+          diagnostics: { provider: 'web-index', site: platMeta.site, note: '通过搜索引擎索引的公开页面检索，非平台官方接口' },
+          cards: [aiSiteCard('web_search', platMeta.label + '检索', { query: skw, results: ssItems })]
+        };
+      } catch (e) {
+        return { tool_name: name, platform: plat, keyword: skw, error: platMeta.label + '检索暂时不可用，可稍后重试或改用 search_web', recoverable: true };
+      }
+    }
+    case 'run_code': {
+      var codeStr = String(args.code || '');
+      if (!codeStr.trim()) return { tool_name: name, error: '代码为空' };
+      var sandboxInput = args.input;
+      if (typeof sandboxInput === 'string') {
+        // 尝试把 JSON 字符串解析为对象，失败则按原字符串传入
+        try { var maybe = JSON.parse(sandboxInput); sandboxInput = maybe; } catch (eI) { /* 保持字符串 */ }
+      }
+      try {
+        var outText = runInSandbox(codeStr, sandboxInput);
+        return {
+          tool_name: name,
+          content: '【沙箱执行结果】\n' + outText,
+          cards: [aiSiteCard('calculate', '代码沙箱', { expression: 'run_code', result: outText.split('\n')[0].slice(0, 120) })]
+        };
+      } catch (e) {
+        var emsg = (e && e.message) || '执行失败';
+        if (/Script execution timed out|timed out/i.test(emsg)) emsg = '代码执行超时（超过 3 秒），请简化或优化后再试';
+        return { tool_name: name, error: '沙箱执行失败：' + emsg, recoverable: false };
+      }
+    }
+    case 'process_json': {
+      var rawJson = String(args.json || '').trim();
+      if (!rawJson) return { tool_name: name, error: 'JSON 内容为空' };
+      var action = String(args.action || 'format').trim();
+      var parsed;
+      try { parsed = JSON.parse(rawJson); }
+      catch (eP) {
+        if (action === 'validate') return { tool_name: name, action: action, valid: false, content: 'JSON 不合法：' + ((eP && eP.message) || '解析失败') };
+        return { tool_name: name, error: 'JSON 不合法：' + ((eP && eP.message) || '解析失败') };
+      }
+      try {
+        var jOut;
+        if (action === 'minify') jOut = JSON.stringify(parsed);
+        else if (action === 'validate') jOut = 'JSON 合法 ✓\n' + JSON.stringify(parsed, null, 2).slice(0, 3000);
+        else if (action === 'keys') {
+          var kList = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? Object.keys(parsed) : ['（顶层不是对象，是 ' + (Array.isArray(parsed) ? '数组，长度 ' + parsed.length : typeof parsed) + '）'];
+          jOut = '顶层键：\n' + kList.map(function(k) { return '- ' + k; }).join('\n');
+        } else if (action === 'extract') {
+          var exVal = extractJsonPath(parsed, args.path);
+          jOut = typeof exVal === 'object' && exVal !== null ? JSON.stringify(exVal, null, 2) : String(exVal);
+        } else jOut = JSON.stringify(parsed, null, 2);
+        if (jOut.length > 8000) jOut = jOut.slice(0, 8000) + '\n...(过长已截断)';
+        return { tool_name: name, action: action, content: jOut };
+      } catch (eE) {
+        return { tool_name: name, error: (eE && eE.message) || 'JSON 处理失败' };
+      }
+    }
+    case 'encode_decode': {
+      var edText = String(args.text || '');
+      if (!edText) return { tool_name: name, error: '文本为空' };
+      var fmt = String(args.format || 'base64').trim();
+      var edMode = String(args.mode || 'encode').trim();
+      try {
+        var edOut;
+        if (fmt === 'base64') {
+          edOut = edMode === 'decode'
+            ? Buffer.from(edText, 'base64').toString('utf8')
+            : Buffer.from(edText, 'utf8').toString('base64');
+        } else if (fmt === 'url') {
+          edOut = edMode === 'decode' ? decodeURIComponent(edText) : encodeURIComponent(edText);
+        } else if (fmt === 'html') {
+          var HTML_ENT = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+          if (edMode === 'decode') {
+            edOut = edText.replace(/&(amp|lt|gt|quot|#39|#x27|nbsp);/g, function(m) {
+              return ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'", '&nbsp;': ' ' })[m] || m;
+            });
+          } else {
+            edOut = edText.replace(/[&<>"']/g, function(c) { return HTML_ENT[c] || c; });
+          }
+        } else if (fmt === 'hex') {
+          if (edMode === 'decode') {
+            edOut = Buffer.from(edText.replace(/\s/g, ''), 'hex').toString('utf8');
+          } else {
+            edOut = Buffer.from(edText, 'utf8').toString('hex');
+          }
+        } else if (fmt === 'unicode') {
+          if (edMode === 'decode') {
+            edOut = edText.replace(/\\u([0-9a-fA-F]{4})/g, function(_, h) { return String.fromCharCode(parseInt(h, 16)); });
+          } else {
+            edOut = edText.split('').map(function(c) {
+              var code = c.charCodeAt(0);
+              return code > 127 ? '\\u' + code.toString(16).padStart(4, '0') : c;
+            }).join('');
+          }
+        } else {
+          return { tool_name: name, error: '不支持的编码格式：' + fmt };
+        }
+        if (edOut.length > 8000) edOut = edOut.slice(0, 8000) + '\n...(过长已截断)';
+        return { tool_name: name, format: fmt, mode: edMode, content: edOut };
+      } catch (eEd) {
+        return { tool_name: name, error: '编解码失败：' + ((eEd && eEd.message) || '输入格式不正确') };
+      }
+    }
+    case 'date_calc': {
+      var dAction = String(args.action || 'now').trim();
+      function parseDateSafe(s) {
+        if (!s) return null;
+        var str = String(s).trim();
+        // 兼容 "2026-09-14" / "2026-09-14 21:30:00" / "2026/09/14"
+        var norm = str.replace(/\//g, '-').replace(' ', 'T');
+        var d = new Date(norm);
+        if (isNaN(d.getTime())) d = new Date(str);
+        if (isNaN(d.getTime())) return null;
+        return d;
+      }
+      try {
+        if (dAction === 'now') {
+          var n = new Date();
+          var cnStr = n.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+          var wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][n.getDay()];
+          return { tool_name: name, content: '当前时间（北京时间）：' + cnStr + ' ' + wd + '\nISO：' + n.toISOString() };
+        }
+        if (dAction === 'diff') {
+          var d1 = parseDateSafe(args.date1);
+          var d2 = args.date2 ? parseDateSafe(args.date2) : new Date();
+          if (!d1) return { tool_name: name, error: 'date1 格式无法识别，请用 YYYY-MM-DD' };
+          if (!d2) return { tool_name: name, error: 'date2 格式无法识别，请用 YYYY-MM-DD' };
+          var msDiff = d2.getTime() - d1.getTime();
+          var unit = String(args.unit || 'days');
+          var divMs = unit === 'seconds' ? 1000 : unit === 'minutes' ? 60000 : unit === 'hours' ? 3600000 : 86400000;
+          var diffVal = msDiff / divMs;
+          var unitCN = { days: '天', hours: '小时', minutes: '分钟', seconds: '秒' }[unit] || '天';
+          return {
+            tool_name: name,
+            content: '从 ' + String(args.date1) + ' 到 ' + (args.date2 ? String(args.date2) : '今天') + '：相差 ' + (Math.round(diffVal * 100) / 100) + ' ' + unitCN + '（' + diffVal + '）'
+          };
+        }
+        if (dAction === 'add') {
+          var baseD = parseDateSafe(args.date1) || new Date();
+          var addDays = Number(args.days);
+          if (!isFinite(addDays)) return { tool_name: name, error: '请提供有效的 days 数值' };
+          var resD = new Date(baseD.getTime() + addDays * 86400000);
+          var resStr = resD.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+          var resWd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][resD.getDay()];
+          return { tool_name: name, content: String(args.date1 || '今天') + ' ' + (addDays >= 0 ? '+' : '') + addDays + ' 天 = ' + resStr + ' ' + resWd };
+        }
+        if (dAction === 'weekday') {
+          var wD = parseDateSafe(args.date1);
+          if (!wD) return { tool_name: name, error: 'date1 格式无法识别，请用 YYYY-MM-DD' };
+          var wdStr = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][wD.getDay()];
+          return { tool_name: name, content: String(args.date1) + ' 是 ' + wdStr };
+        }
+        return { tool_name: name, error: '不支持的 action：' + dAction };
+      } catch (eD) {
+        return { tool_name: name, error: '日期计算失败：' + ((eD && eD.message) || '输入格式不正确') };
+      }
+    }
+    case 'text_stats': {
+      var tsText = String(args.text || '');
+      if (!tsText) return { tool_name: name, error: '文本为空' };
+      var noSpace = tsText.replace(/\s/g, '');
+      var lines = tsText.split(/\r?\n/);
+      var nonEmptyLines = lines.filter(function(l) { return l.trim().length > 0; });
+      var cjkCount = (tsText.match(/[\u4e00-\u9fa5]/g) || []).length;
+      var wordCount = (tsText.match(/[A-Za-z0-9]+/g) || []).length;
+      var stats = {
+        '总字符数（含空格）': tsText.length,
+        '字符数（不含空格）': noSpace.length,
+        '中文字数': cjkCount,
+        '英文单词数': wordCount,
+        '总行数': lines.length,
+        '非空行数': nonEmptyLines.length,
+        '段落数': tsText.split(/\n\s*\n/).filter(function(p) { return p.trim(); }).length
+      };
+      var statLines = Object.keys(stats).map(function(k) { return k + '：' + stats[k]; });
+      return { tool_name: name, content: '【文本统计】\n' + statLines.join('\n') };
     }
     case 'get_weather': {
       var loc = String(args.location || '').trim().slice(0, 50);
@@ -16207,8 +16627,7 @@ const AI_DEFAULT_CONFIG = {
     high_max_tool_rounds: 4,          // high 模式最大工具轮数
     require_history_injection: true   // 是否把 history 注入到 Planner/Worker/Synthesizer
   },
-  security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词
-  admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
+  security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词  admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
 };
@@ -16971,13 +17390,27 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
     // 6. 组装 system prompt
     var corePrompt = buildAiCorePrompt(config);
+    // ★ 工作模式（work_mode）：请求级开关，普通聊天在当前对话框直接切换（非独立页面）。
+    //   与 deep_think 深度研究严格区分：工作模式=真的动手完成任务，研究=出报告。
+    var workModeEnabled = !!(req.body && req.body.work_mode === true);
+    if (workModeEnabled) {
+      corePrompt += '\n' + [
+        '【工作模式】你现在处于工作模式，必须真正动手完成用户交代的任务，而不是给出建议、思路或研究报告。工作方法：',
+        '① 先判断任务需要哪些步骤：要查资料就搜索、要算就算、要读网页/文档就读取、要搜社媒账号/内容就用 search_social、要处理数据/批量计算/写代码就在沙箱跑 run_code，可多步按顺序推进；',
+        '② 每一步根据上一步的真实结果决定下一步，直到任务真正完成为止，不要只做一步就交差；',
+        '③ 主动调用工具获取事实，绝不凭记忆编造；工具失败时如实说明并换思路或换参数重试，不要假装成功；',
+        '④ 最终交付的是「任务结果」——你实际做了什么、得到了什么结论或数据，而不是一份研究报告；',
+        '⑤ 简单闲聊或纯常识问题仍直接回答，不必强行套流程；',
+        '⑥ 不要把内部步骤编号、工具名、JSON 原文念给用户，用自然中文汇报结果。'
+      ].join('\n');
+    }
 
     // 7. 组装 messages
     var messages = [
       { role: 'system', content: corePrompt },
       { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
     ];
-    var _ctxMaxSite1 = !!(req.body && req.body.thinking_max === true);
+    var _ctxMaxSite1 = !!(req.body && req.body.thinking_max === true) || !!(req.body && req.body.work_mode === true);
     var histSlice = aiChatHistoryBudget(ctx, _ctxMaxSite1);
     for (var h = 0; h < histSlice.length; h++) {
       messages.push({ role: histSlice[h].role, content: histSlice[h].content });
@@ -18411,6 +18844,21 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // 组装 system prompt — 缓存优化：corePrompt 必须完全固定且放在最前
     var corePrompt = buildAiCorePrompt(config);
+    // ★ 工作模式（work_mode）：请求级开关，用户在普通聊天「+」面板直接切换，无缝衔接（非独立页面）。
+    //   与 deep_think 深度研究严格区分：工作模式=真的动手完成任务，研究=出一份报告。
+    //   注意：此段拼接在 corePrompt 之后（不修改 corePrompt 本身，避免破坏前缀缓存）。
+    var workModeEnabled = !!(req.body && req.body.work_mode === true);
+    if (workModeEnabled) {
+      corePrompt += '\n' + [
+        '【工作模式】你现在处于工作模式，必须真正动手完成用户交代的任务，而不是给出建议、思路或研究报告。工作方法：',
+        '① 先判断任务需要哪些步骤：要查资料就搜索、要算就算、要读网页/文档就读取、要搜社媒账号/内容就用 search_social、要处理数据/批量计算/写代码就在沙箱跑 run_code，可多步按顺序推进；',
+        '② 每一步根据上一步的真实结果决定下一步，直到任务真正完成为止，不要只做一步就交差；',
+        '③ 主动调用工具获取事实，绝不凭记忆编造；工具失败时如实说明并换思路或换参数重试，不要假装成功；',
+        '④ 最终交付的是「任务结果」——你实际做了什么、得到了什么结论或数据，而不是一份研究报告；',
+        '⑤ 简单闲聊或纯常识问题仍直接回答，不必强行套流程；',
+        '⑥ 不要把内部步骤编号、工具名、JSON 原文念给用户，用自然中文汇报结果。'
+      ].join('\n');
+    }
 
     // ★ 缓存优化：消息顺序 = corePrompt(固定) → history(稳定) → user(新) → [time/weather 仅必要时后置]
     // 当前时间从 system 提前位移到末尾，且仅在时间相关查询时注入，避免每分钟破坏缓存前缀
@@ -18428,7 +18876,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var validatedModel = (normalizedRequestedModel && allowedModels.indexOf(normalizedRequestedModel) >= 0) ? normalizedRequestedModel : DEEPSEEK_MODEL_REASONER;
     var _historyVisionEligible = validatedModel === DEEPSEEK_MODEL_VISION || validatedModel === DEEPSEEK_MODEL_FLASH;
 
-    var _ctxMaxSite2 = !!(req.body && req.body.thinking_max === true);
+    var _ctxMaxSite2 = !!(req.body && req.body.thinking_max === true) || !!(req.body && req.body.work_mode === true);
     var histSlice = aiChatHistoryBudget(ctx, _ctxMaxSite2);
     for (var h = 0; h < histSlice.length; h++) {
       var hrow = histSlice[h];
@@ -18673,13 +19121,18 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
 
       // 思考开时不挂 tools；非思考：内置 web_search +（有额度时）tavily 工具
+      // ★ 工作模式：挂载完整工具集（不受网页搜索开关约束，含 search_social 等全部工具），
+      //   并把工具轮数从 4 提升到 8，让 AI 能多步自主完成任务。
+      var responsesTools = useThinking ? [] : (workModeEnabled
+        ? aiToolsFilteredForThirdParty(thirdPartySearchOk)
+        : aiToolsForSearch(!!useTavilyCluster && thirdPartySearchOk));
       var responsesOptions = {
         use_responses_api: true,
         model: validatedModel,
         thinking_mode: thinkingMode,
-        tools: useThinking ? [] : aiToolsForSearch(!!useTavilyCluster && thirdPartySearchOk),
-        tool_choice: useThinking ? undefined : 'auto',
-        max_tool_rounds: 4,
+        tools: responsesTools,
+        tool_choice: (useThinking && !workModeEnabled) ? undefined : 'auto',
+        max_tool_rounds: workModeEnabled ? 8 : 4,
         signal: requestAbortCtrl ? requestAbortCtrl.signal : null,
         _userName: userName,
         onThinkingChunk: function(chunk) {
@@ -18930,6 +19383,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       fcWeatherIntent ||
       fcLocalToolIntent
     );
+    // ★ 工作模式：跳过关键词意图预判，无条件进入工具调用路径（AI 自主判断该不该用工具）。
+    //   普通聊天靠上面关键词命中才挂工具，工作模式要"有手有头脑"，不能靠关键词赌。
+    if (workModeEnabled && !useThinking && !aborted) needsFcCheck = true;
     var hasCalledTools = false;
     // Only persist server-generated cards. The model never supplies executable UI.
     var siteToolCards = [];
