@@ -363,8 +363,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     lastSendFingerprint: '',
     lastSendAt: 0,
     webSearchEnabled: false,
-    // ★ 思考Max：开启后不自动压缩上下文，尽量榨干模型性能；关闭时上下文限制在
-    //    CONTEXT_LIMIT_NORMAL 并在接近上限时自动压缩（便宜/更快但略笨）。
+    // ★ 工作模式（work_mode）：在当前对话框直接切换，AI 自主拆解任务并调用全部工具完成，
+    //   输出"任务结果"而非研究报告（区别于深度研究 deep_think，那是独立二级页面出报告）。
+    //   开启时同时继承原「思考Max」的长上下文特性（不自动压缩）。
+    workMode: false,
+    // ★ 思考Max（已并入工作模式，保留字段兼容旧数据/旧逻辑）
     thinkMax: false,
     // ★ 小猫AI dock 模式：作为移动端 dock 中间 tab 打开时置为 true，隐藏多余返回按钮
     _dockMode: false,
@@ -7415,8 +7418,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messages: hl,
         thinking_mode: _sendThinkingMode,
         thinking_max: S.thinkMax === true,
+        work_mode: S.workMode === true,
         web_search: S.webSearchEnabled === true,
-        tools_enabled: (S.webSearchEnabled === true || S.thinkMax === true),
+        tools_enabled: (S.webSearchEnabled === true || S.thinkMax === true || S.workMode === true),
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
         client_request_id: reqId,
@@ -7429,6 +7433,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         client_request_id: reqId,
         thinking_mode: _sendThinkingMode,
         thinking_max: S.thinkMax === true,
+        work_mode: S.workMode === true,
         response_profile: S.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
         attachments: attachmentPayload || undefined,
         web_search: S.webSearchEnabled,
@@ -9147,11 +9152,16 @@ function showChatMessages() {
       }
     } catch (e) {}
 
-    // ★ 思考Max 持久化恢复
+    // ★ 工作模式持久化恢复（兼容旧「思考Max」数据：旧数据自动迁移为工作模式）
     try {
-      var savedThinkMax = localStorage.getItem('xtj_ai_think_max');
-      S.thinkMax = savedThinkMax === 'true';
-    } catch (eThinkMax) {}
+      var savedWorkMode = localStorage.getItem('xtj_ai_work_mode');
+      if (savedWorkMode === null) {
+        // 老用户迁移：曾经开过思考Max 的，视为开工作模式
+        savedWorkMode = localStorage.getItem('xtj_ai_think_max');
+      }
+      S.workMode = savedWorkMode === 'true';
+      S.thinkMax = S.workMode;
+    } catch (eWorkMode) {}
 
     // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
     var modelLabels = {
@@ -9274,12 +9284,12 @@ function showChatMessages() {
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
               '</div>' +
-              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="think-max" aria-checked="false">' +
+              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="work-mode" aria-checked="false" title="工作模式：AI 自主拆解并调用全部工具完成任务">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.thinkMax + '</span>' +
-                '<span class="ai-panel-row-title">思考Max</span>' +
+                '<span class="ai-panel-row-title">工作模式</span>' +
                 rowEnd(
                   '',
-                  '<span class="ai-search-switch" id="aiThinkMaxStatus" aria-hidden="true"><i></i></span>'
+                  '<span class="ai-search-switch" id="aiWorkModeStatus" aria-hidden="true"><i></i></span>'
                 ) +
               '</button>' +
               '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
@@ -9685,15 +9695,15 @@ function showChatMessages() {
       }
     }
     function updateThinkMaxStatus() {
-      var st = panelShell.querySelector('#aiThinkMaxStatus');
-      var btn = panelShell.querySelector('[data-action="think-max"]');
+      var st = panelShell.querySelector('#aiWorkModeStatus');
+      var btn = panelShell.querySelector('[data-action="work-mode"]');
       if (st) {
-        st.setAttribute('data-on', S.thinkMax ? '1' : '0');
-        st.classList.toggle('on', !!S.thinkMax);
+        st.setAttribute('data-on', S.workMode ? '1' : '0');
+        st.classList.toggle('on', !!S.workMode);
       }
       if (btn) {
-        btn.setAttribute('aria-checked', S.thinkMax ? 'true' : 'false');
-        btn.classList.toggle('is-selected', !!S.thinkMax);
+        btn.setAttribute('aria-checked', S.workMode ? 'true' : 'false');
+        btn.classList.toggle('is-selected', !!S.workMode);
       }
     }
 
@@ -10474,11 +10484,14 @@ function showChatMessages() {
         }, 50);
         return;
       }
-      if (action === 'think-max') {
-        S.thinkMax = !S.thinkMax;
+      if (action === 'work-mode') {
+        S.workMode = !S.workMode;
+        // 工作模式继承原「思考Max」语义：开启时不压缩上下文
+        S.thinkMax = S.workMode;
+        try { localStorage.setItem('xtj_ai_work_mode', S.workMode ? 'true' : 'false'); } catch (err) {}
         try { localStorage.setItem('xtj_ai_think_max', S.thinkMax ? 'true' : 'false'); } catch (err) {}
         updateThinkMaxStatus();
-        notify(S.thinkMax ? '思考Max 已开启：不压缩上下文，榨干模型性能' : '思考Max 已关闭：上下文限制在 256 并自动压缩');
+        notify(S.workMode ? '工作模式已开启：AI 将自主拆解并调用工具完成任务' : '工作模式已关闭：恢复普通对话');
         return;
       }
       if (action === 'search') {

@@ -38,33 +38,34 @@ test('后端：aiChatHistoryBudget 实现限量 + 自动压缩 + 保底最近一
   assert.match(serverSource, /保底保留最近一条/);
 });
 
-test('前端：存在思考Max 状态、持久化键与 256 上下文常量', () => {
-  assert.match(agentSource, /thinkMax: false/);
-  assert.match(agentSource, /xtj_ai_think_max/);
+test('前端：存在工作模式状态、持久化键与 256 上下文常量', () => {
+  assert.match(agentSource, /workMode: false/);
+  assert.match(agentSource, /xtj_ai_work_mode/);
   assert.match(agentSource, /var CONTEXT_LIMIT_NORMAL = 256;/);
   assert.match(agentSource, /var CONTEXT_LIMIT_MAX = 2048;/);
 });
 
-test('前端：加号菜单含思考Max 开关行，且位于思考 与 网页搜索 之间', () => {
-  const thinkRow = agentSource.indexOf('data-action="think-max"');
+test('前端：加号菜单含工作模式开关行，且位于思考 与 网页搜索 之间', () => {
+  const workRow = agentSource.indexOf('data-action="work-mode"');
   const thinkRowSel = agentSource.indexOf('data-action="open-think"');
   const searchBtn = agentSource.indexOf('data-action="search"');
-  assert.ok(thinkRow > -1, '思考Max 行缺失');
-  assert.ok(thinkRow > thinkRowSel, '思考Max 应位于 思考 之后');
-  assert.ok(searchBtn > thinkRow, '思考Max 应位于 网页搜索 之前');
+  assert.ok(workRow > -1, '工作模式 行缺失');
+  assert.ok(workRow > thinkRowSel, '工作模式 应位于 思考 之后');
+  assert.ok(searchBtn > workRow, '工作模式 应位于 网页搜索 之前');
   assert.match(agentSource, /updateThinkMaxStatus/);
 });
 
-test('前端：请求体携带 thinking_max，关闭时上下文限制 256 并压缩，开启时放大', () => {
+test('前端：请求体携带 thinking_max / work_mode，关闭时上下文限制 256 并压缩，开启时放大', () => {
   assert.equal((agentSource.match(/thinking_max: S\.thinkMax === true/g) || []).length, 2);
+  assert.equal((agentSource.match(/work_mode: S\.workMode === true/g) || []).length, 2);
   assert.match(agentSource, /var _ctxCap = S\.thinkMax \? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;/);
   assert.match(agentSource, /S\.messages\.slice\(-_ctxCap\)/);
 });
 
-test('前端：思考Max 开关切回默认不自动压缩（think-max 点击处理）', () => {
-  assert.match(agentSource, /if \(action === 'think-max'\)/);
-  assert.match(agentSource, /S\.thinkMax = !S\.thinkMax;/);
-  assert.match(agentSource, /localStorage\.setItem\('xtj_ai_think_max'/);
+test('前端：工作模式开关切回默认不自动压缩（work-mode 点击处理）', () => {
+  assert.match(agentSource, /if \(action === 'work-mode'\)/);
+  assert.match(agentSource, /S\.workMode = !S\.workMode;/);
+  assert.match(agentSource, /localStorage\.setItem\('xtj_ai_work_mode'/);
 });
 
 test('移动端：dock 新增小猫AI 中间按钮 + 打开时隐藏多余返回按钮', () => {
