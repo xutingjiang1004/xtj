@@ -238,6 +238,33 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com/responses';
 const DEEPSEEK_RESPONSES_MODEL = DEEPSEEK_MODEL_FLASH;
 const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
+// ★ 可观测性（遗留 2）：上游非 2xx 时打印 DeepSeek 返回的错误详情。
+//   默认开启——此前 HTTP 400 只留下状态码，定位「reasoning 未回传 / 参数非法」
+//   只能靠猜；错误体本身只有错误说明与 request_id，不含用户消息内容，
+//   打印是安全的。设 CODE_DEBUG_PROVIDER_FORCE=false 可关闭（此时仅
+//   CODE_DEBUG_PROVIDER=true 才打印，保留旧行为）。
+const DEBUG_PROVIDER_ALWAYS = process.env.CODE_DEBUG_PROVIDER_FORCE !== 'false';
+
+// ★ 上游错误详情日志（遗留 2）：把 status / error.code / error.type / message /
+//   request_id 一并落盘。message 截断到 500 字符，不记录请求正文，避免泄漏用户内容。
+function logProviderErrorDetail(tag, status, info) {
+  try {
+    info = info || {};
+    console.error('[' + tag + '] provider error detail:', JSON.stringify({
+      http_status: status,
+      error_code: info.code || '',
+      error_type: info.type || '',
+      error_message: String(info.message || '').slice(0, 500),
+      request_id: info.request_id || '',
+      model: info.model || '',
+      round: (typeof info.round === 'number' ? info.round : null),
+      tools_count: (typeof info.tools_count === 'number' ? info.tools_count : null),
+      input_items: (typeof info.input_items === 'number' ? info.input_items : null),
+      reasoning_effort: info.reasoning_effort || ''
+    }));
+  } catch (e) {}
+}
+
 const AI_AGENT_DAILY_LIMIT = parseInt(process.env.AI_AGENT_DAILY_LIMIT || '300', 10) || 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = parseInt(process.env.AI_AGENT_HOURLY_LIMIT || '50', 10) || 50; // 每用户每小时 AI 调用次数
 // 文件解析库按需加载，避免服务启动阶段加载大体积解析依赖
@@ -1416,16 +1443,18 @@ function aiToolsForWorkMode() {
 //   旧语义：allowed=false 时把 search_web / tavily_search 从工具集里删掉，
 //   使模型"看不见"搜索工具。
 //   问题：allowed 来自 canUseThirdPartySearch() → Supabase 配额 RPC；
-//   当 RPC 不可用（网络抖动 / 库未迁移 / 返回异常）时，enforceSearchQuota 返回
-//   reason='quota_unavailable' 且 allowed=false —— 于是模型可用工具莫名变少，
+//   当 RPC 不可用（网络抖动 / 库未迁移 / 返回异常）时，measureSearchQuota 返回
+//   degraded=true（默认 fail-open 放行，见该函数注释）—— 旧实现返回
+//   reason='quota_unavailable' 且 allowed=false，于是模型可用工具莫名变少，
 //   表现为"AI 说它只有几个工具"，且用户无法从界面看出原因。
 //   更关键的是：即便工具被删，模型仍会因 prompt 里写着"可以搜索"而反复尝试，
 //   只是拿不到工具，反而浪费轮次并产生"我没有联网能力"的错觉。
 //
 //   新语义：**工具可见性恒定**，配额只在真正发起搜索时 gate（executeToolCall
-//   的 search_web / tavily_search 分支已各自调用 enforceSearchQuota 并按
+//   的 search_web / tavily_search 分支已各自调用 measureSearchQuota 并按
 //   searchConsumed 递减），超额时返回明确的"今日搜索次数已达上限"给模型，
 //   模型据此如实告知用户 —— 该路径已有正确实现，无需在装配层提前裁剪。
+//   配额服务故障时按 fail-open 放行，并返回"服务暂不可用"而非冒充"次数用尽"。
 //   参数保留以兼容既有调用点，但不再裁剪。
 // 兼容别名：保留旧函数名以兼容既有调用点 / 测试，语义已统一为"全量工具"。
 // 如需真正裁剪，请显式使用 aiToolsForSearch(includeTavily)。
@@ -1593,10 +1622,12 @@ async function executeToolCall(toolCall, context) {
       var maxR = Math.min(Math.max(parseInt(args.max_results, 10) || 20, 1), 20);
       if (!q) return { tool_name: name, error: '搜索关键词为空' };
       // ★ 搜索配额下沉：模型自主调 search_web 也受用户搜索额度约束（含请求内已用计数）
-      var swGate = await enforceSearchQuota(context.userName, context.searchConsumed);
+      var swGate = await measureSearchQuota(context.userName, context.searchConsumed);
       if (!swGate.allowed) {
-        return { tool_name: name, query: q, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: swGate.reason === 'search_limit', quota: swGate.quota || null };
+        var swQErr = searchQuotaErrorPayload(swGate.reason);
+        return Object.assign({ tool_name: name, query: q }, swQErr, { quota: swGate.quota || null });
       }
+      if (swGate.degraded) { try { console.warn('[SEARCH-QUOTA] search_web fail-open (quota service unavailable)'); } catch (e) {} }
       context.searchConsumed++;
       try {
         var result = await searchWeb(q, maxR);
@@ -1631,10 +1662,12 @@ async function executeToolCall(toolCall, context) {
       if (!tq) return { tool_name: name, error: '搜索关键词为空' };
       if (!process.env.TAVILY_API_KEY) return { tool_name: name, query: tq, error: 'Tavily 未配置（缺少 TAVILY_API_KEY 环境变量）' };
       // ★ 搜索配额下沉：tavily_search 同样受用户搜索额度约束（含请求内已用计数）
-      var tsGate = await enforceSearchQuota(context.userName, context.searchConsumed);
+      var tsGate = await measureSearchQuota(context.userName, context.searchConsumed);
       if (!tsGate.allowed) {
-        return { tool_name: name, query: tq, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: tsGate.reason === 'search_limit', quota: tsGate.quota || null };
+        var tsQErr = searchQuotaErrorPayload(tsGate.reason);
+        return Object.assign({ tool_name: name, query: tq }, tsQErr, { quota: tsGate.quota || null });
       }
+      if (tsGate.degraded) { try { console.warn('[SEARCH-QUOTA] tavily_search fail-open (quota service unavailable)'); } catch (e) {} }
       context.searchConsumed++;
       try {
         var tavilyResult = await searchTavily(tq, tMax, {
@@ -1688,10 +1721,12 @@ async function executeToolCall(toolCall, context) {
       var kwSuffix = kind === 'account' ? ' 博主' : '';
       var socialQuery = skw + kwSuffix + ' site:' + platMeta.site;
 
-      var ssGate = await enforceSearchQuota(context.userName, context.searchConsumed);
+      var ssGate = await measureSearchQuota(context.userName, context.searchConsumed);
       if (!ssGate.allowed) {
-        return { tool_name: name, query: socialQuery, error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: ssGate.reason === 'search_limit', quota: ssGate.quota || null };
+        var ssQErr = searchQuotaErrorPayload(ssGate.reason);
+        return Object.assign({ tool_name: name, query: socialQuery }, ssQErr, { quota: ssGate.quota || null });
       }
+      if (ssGate.degraded) { try { console.warn('[SEARCH-QUOTA] social search fail-open (quota service unavailable)'); } catch (e) {} }
       context.searchConsumed++;
       try {
         var ssResult = await searchWeb(socialQuery, 10);
@@ -7658,6 +7693,26 @@ async function callDeepSeek(messages, options) {
         var fullErrorBody = null;
         try { var ej = await resp.json().catch(function() { return {}; }); fullErrorBody = ej; errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 500) : ''; errCode = (ej && ej.error && ej.error.code) ? String(ej.error.code) : ''; errType = (ej && ej.error && ej.error.type) ? String(ej.error.type) : ''; errRequestId = (ej && ej.request_id) ? String(ej.request_id) : ''; } catch (e) {}
 
+        // ★ 遗留 2：无论是否开 CODE_DEBUG_PROVIDER，都把上游错误详情落盘。
+        //   此前只有一行 "API error 400 <空>"，因为 errTxt 为空时看不出任何线索，
+        //   导致「reasoning 未回传导致的 400」和「参数非法导致的 400」无法区分。
+        if (DEBUG_PROVIDER || DEBUG_PROVIDER_ALWAYS) {
+          logProviderErrorDetail('DEEPSEEK', resp.status, {
+            code: errCode, type: errType, message: errTxt, request_id: errRequestId,
+            model: apiBody.model, round: round,
+            tools_count: apiBody.tools ? apiBody.tools.length : 0,
+            reasoning_effort: (apiBody.reasoning && apiBody.reasoning.effort) || ''
+          });
+        }
+        // 解析失败（返回体非 JSON，如网关 502 HTML / 空体）也要留下证据，
+        // 否则 errTxt 为空时上面那行日志只有状态码，等于没记。
+        if (!errTxt) {
+          try {
+            var _rawBody = fullErrorBody ? JSON.stringify(fullErrorBody).slice(0, 300) : '(non-json or empty body)';
+            console.error('[DEEPSEEK] provider error body (unparsed):', resp.status, _rawBody);
+          } catch (e) {}
+        }
+
         // === CODE_DEBUG_PROVIDER: 打印完整错误响应 ===
         if (DEBUG_PROVIDER) {
           console.error('[DEEPSEEK-DEBUG] error_response:', JSON.stringify({
@@ -7668,7 +7723,6 @@ async function callDeepSeek(messages, options) {
             request_id: errRequestId
           }));
         }
-
         console.error('[DEEPSEEK] API error', resp.status, errTxt, 'round', round);
 
         // P0 Fix: 精细判断 thinking 不兼容 — 仅当错误明确与 thinking 相关时才触发回退
@@ -8417,8 +8471,33 @@ async function callDeepSeekViaResponses(messages, options) {
       if (!resp.ok) {
         var errTxt = '';
         var errCode = '';
-        try { var ej = await resp.json().catch(function() { return {}; }); errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 500) : ''; errCode = (ej && ej.error && ej.error.code) ? String(ej.error.code) : ''; } catch (e) {}
-        console.error('[RESPONSES] API error', resp.status, errTxt, 'round', round);
+        var errType = '';
+        var errRequestId = '';
+        var respErrBody = null;
+        try { var ej = await resp.json().catch(function() { return {}; }); respErrBody = ej; errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 500) : ''; errCode = (ej && ej.error && ej.error.code) ? String(ej.error.code) : ''; errType = (ej && ej.error && ej.error.type) ? String(ej.error.type) : ''; errRequestId = (ej && ej.request_id) ? String(ej.request_id) : ''; } catch (e) {}
+
+        // ★ 遗留 2：Responses 路径同样补全错误详情日志。
+        //   这条路径正是 user 报过的「AI 调用失败（HTTP 400）」发生地：
+        //   旧日志只有 status 与（常为空的）errTxt，区分不出
+        //   ① reasoning 项未回传 ② 参数非法 ③ 模型/tools 不兼容 三种 400。
+        //   现在一并记录 code/type/message/request_id + 本轮请求形态
+        //   （轮次、工具数、input 项数、reasoning.effort），足以定位。
+        if (DEBUG_PROVIDER || DEBUG_PROVIDER_ALWAYS) {
+          logProviderErrorDetail('RESPONSES', resp.status, {
+            code: errCode, type: errType, message: errTxt, request_id: errRequestId,
+            model: apiBody.model, round: round,
+            tools_count: apiBody.tools ? apiBody.tools.length : 0,
+            input_items: (apiBody.input && apiBody.input.length) ? apiBody.input.length : 0,
+            reasoning_effort: (apiBody.reasoning && apiBody.reasoning.effort) || ''
+          });
+        }
+        if (!errTxt) {
+          try {
+            var _respRaw = respErrBody ? JSON.stringify(respErrBody).slice(0, 300) : '(non-json or empty body)';
+            console.error('[RESPONSES] provider error body (unparsed):', resp.status, _respRaw);
+          } catch (e) {}
+        }
+        console.error('[RESPONSES] API error', resp.status, errTxt, 'round', round, 'code=' + errCode);
         // ★ 兜底（工作模式 + 思考 + tools 被上游拒绝）：
         //   若确实是「思考与工具不兼容」类错误，自动降级重试一次：
         //   关闭 reasoning（effort:none），保留 tools —— 宁可少思考也不能没工具，
@@ -8439,7 +8518,27 @@ async function callDeepSeekViaResponses(messages, options) {
             resp = retryResp;
             useThinking = false;
           } else {
-            try { var _rj = await retryResp.json().catch(function() { return {}; }); errTxt = (_rj && _rj.error && _rj.error.message) ? String(_rj.error.message).slice(0, 500) : errTxt; } catch (e) {}
+            var _retryErrTxt = '';
+            try {
+              var _rj = await retryResp.json().catch(function() { return {}; });
+              _retryErrTxt = (_rj && _rj.error && _rj.error.message) ? String(_rj.error.message).slice(0, 500) : '';
+              if (_rj && _rj.error && _rj.error.code) errCode = String(_rj.error.code);
+              // ★ 遗留 2：降级重试仍失败时，也要记录重试那次的错误体与状态码，
+              //   否则最终 400 只反映首次尝试的原因（常常被 errTxt 覆盖成空串）。
+              if (DEBUG_PROVIDER || DEBUG_PROVIDER_ALWAYS) {
+                logProviderErrorDetail('RESPONSES-RETRY', retryResp.status, {
+                  code: (_rj && _rj.error && _rj.error.code) ? String(_rj.error.code) : '',
+                  type: (_rj && _rj.error && _rj.error.type) ? String(_rj.error.type) : '',
+                  message: _retryErrTxt,
+                  request_id: (_rj && _rj.request_id) ? String(_rj.request_id) : '',
+                  model: apiBody.model, round: round,
+                  tools_count: apiBody.tools ? apiBody.tools.length : 0,
+                  input_items: (apiBody.input && apiBody.input.length) ? apiBody.input.length : 0,
+                  reasoning_effort: 'none'
+                });
+              }
+            } catch (e) {}
+            if (_retryErrTxt) errTxt = _retryErrTxt;
           }
         }
       }
@@ -8447,6 +8546,16 @@ async function callDeepSeekViaResponses(messages, options) {
         var apiErr = new Error('AI 调用失败（HTTP ' + resp.status + '）');
         apiErr.code = 'PROVIDER_HTTP_' + resp.status;
         apiErr.status = resp.status;
+        // ★ 遗留 2：把上游错误详情挂到错误对象上，让上层 SSE / 日志能直接取用
+        //   （只含上游错误说明与 request_id，不含请求正文，无用户内容泄漏风险；
+        //     是否回显给终端用户由上层文案层决定，此处仅作诊断传递）。
+        apiErr.providerStatus = resp.status;
+        apiErr.providerCode = errCode || '';
+        apiErr.providerType = errType || '';
+        apiErr.providerMessage = errTxt || '';
+        apiErr.providerRequestId = errRequestId || '';
+        apiErr.round = round;
+        apiErr.toolRoundsInfo = { tools: (apiBody.tools && apiBody.tools.length) || 0, input_items: (apiBody.input && apiBody.input.length) || 0 };
         throw apiErr;
       }
 
@@ -9723,26 +9832,80 @@ function getAiQuotaErrorMessage(reason) {
 
 // ★ 搜索配额下沉：仅约束「第三方」搜索（Tavily/Serper/search_web 工具、服务端预搜等）。
 // 模型内置 web_search（Responses API）不受此限制；额度用尽后仍可走内置搜索。
-async function enforceSearchQuota(userName, extraUsed) {
+//
+// ★ 遗留 1 修复（2026-09-14）：区分「配额用尽」与「配额服务不可用」。
+//   旧实现把两种完全不同的情况混为一谈：
+//     · 用户真的把今日次数用完了 → 应拒绝，并提示开通 Pro；
+//     · Supabase 配额 RPC 抖动 / 超时 / 库未迁移 → 是**服务侧故障**，
+//       却因为 getQuota() 故障降级载荷里 search_remaining=0 而走
+//       `search_remaining - usedNow <= 0` 分支，被误判为「今日次数已达上限」，
+//       用户看到的是"你今天的额度用完了"——事实错误，且平台自己背了锅。
+//   现在：故障时 fail-open（放行本次搜索）并落可观测日志。
+//   计费口径并无损失——真正的次数扣减依赖 DB 侧 consume_ai_token_usage，
+//   故障窗口内极少数搜索会被少记；相比"配额服务抖动等于全员搜索不可用"，
+//   这个代价是值得的。若要改回严格拒绝，把下面的 SEARCH_QUOTA_FAIL_OPEN
+//   置为 false 即可（届时错误文案会正确显示为"服务暂不可用"而非"次数用尽"）。
+var SEARCH_QUOTA_FAIL_OPEN = process.env.SEARCH_QUOTA_FAIL_OPEN !== 'false';
+
+async function measureSearchQuota(userName, extraUsed) {
   // ★ 配额绕过修复：空 userName 不再放行第三方搜索（仅 ADMIN_USERNAME 豁免）。
-  if (!userName) return { allowed: false, reason: 'no_user', quota: null };
-  if (userName === ADMIN_USERNAME) return { allowed: true, reason: null, quota: null };
+  if (!userName) return { allowed: false, reason: 'no_user', quota: null, degraded: false };
+  if (userName === ADMIN_USERNAME) return { allowed: true, reason: null, quota: null, degraded: false };
+  var usedNow = (typeof extraUsed === 'number' && extraUsed > 0) ? extraUsed : 0;
+  var quota = null;
+  var rpcFailed = false;
   try {
-    var quota = await aiQuota.getQuota(userName);
-    if (quota.search_unlimited) return { allowed: true, reason: null, quota: quota };
-    // extraUsed：请求内已用第三方搜索次数（gate 层预扣），防止单请求多轮工具调用打穿配额
-    var usedNow = (typeof extraUsed === 'number' && extraUsed > 0) ? extraUsed : 0;
-    if (quota.search_remaining - usedNow <= 0) return { allowed: false, reason: 'search_limit', quota: quota };
-    return { allowed: true, reason: null, quota: quota };
+    quota = await aiQuota.getQuota(userName);
   } catch (e) {
     console.error('[SEARCH-QUOTA] check exception:', e && e.message);
-    return { allowed: false, reason: 'quota_unavailable', quota: null };
+    rpcFailed = true;
   }
+  // ★ 关键判定：ai-quota.getQuota() 在 RPC 失败时**不抛异常**，而是返回
+  //   normalizeQuotaPayload({ ok:false, reason:'quota_unavailable' }) ——
+  //   其 search_remaining 恒为 0。不显式识别该载荷就会被当成"次数用尽"。
+  if (!rpcFailed && (!quota || quota.ok === false || quota.reason === 'quota_unavailable')) {
+    rpcFailed = true;
+  }
+  if (rpcFailed) {
+    // 故障降级：默认放行（fail-open），避免配额服务抖动导致搜索整体不可用
+    console.error('[SEARCH-QUOTA] quota service unavailable, fail-open=' + (SEARCH_QUOTA_FAIL_OPEN ? 'on' : 'off') + ', user=' + String(userName));
+    return {
+      allowed: !!SEARCH_QUOTA_FAIL_OPEN,
+      reason: SEARCH_QUOTA_FAIL_OPEN ? null : 'quota_unavailable',
+      quota: quota,
+      degraded: true
+    };
+  }
+  if (quota.search_unlimited) return { allowed: true, reason: null, quota: quota, degraded: false };
+  // extraUsed：请求内已用第三方搜索次数（gate 层预扣），防止单请求多轮工具调用打穿配额
+  if (quota.search_remaining - usedNow <= 0) return { allowed: false, reason: 'search_limit', quota: quota, degraded: false };
+  return { allowed: true, reason: null, quota: quota, degraded: false };
 }
 
-/** 是否仍可调用第三方搜索（额度未用尽） */
+// 供工具分支复用：把 gate 结果转成"可读、且不撒谎"的错误载荷。
+//   search_limit      → 确实是次数用尽，提示开通 Pro / 明日再试
+//   quota_unavailable → 服务暂不可用，提示稍后重试（绝不冒充"次数用尽"）
+function searchQuotaErrorPayload(reason) {
+  if (reason === 'quota_unavailable') {
+    return {
+      error: '搜索额度服务暂时不可用，请稍后重试（本次未消耗次数）',
+      search_quota_exceeded: false,
+      quota_service_unavailable: true
+    };
+  }
+  if (reason === 'no_user') {
+    return { error: '请先登录后再使用联网搜索', search_quota_exceeded: false };
+  }
+  return { error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: true };
+}
+
+async function enforceSearchQuota(userName, extraUsed) {
+  return measureSearchQuota(userName, extraUsed);
+}
+
+/** 是否仍可调用第三方搜索（额度未用尽；配额服务故障时按 fail-open 语义放行） */
 async function canUseThirdPartySearch(userName) {
-  var gate = await enforceSearchQuota(userName);
+  var gate = await measureSearchQuota(userName);
   return !!(gate && gate.allowed);
 }
 
@@ -9750,9 +9913,15 @@ async function canUseThirdPartySearch(userName) {
 // F-1: searchApiCounter 为可选的请求级计数器对象（{ n }），仅在真实发起搜索后自增，
 // 供 recordAiTurnUsage 按真实次数而非"轮次"记账（失败/未发起不计）。
 async function searchWebForUser(userName, query, maxResults, searchApiCounter) {
-  var gate = await enforceSearchQuota(userName);
+  var gate = await measureSearchQuota(userName);
   if (!gate.allowed) {
-    return { results: [], error: gate.reason || 'search_limit', search_quota_exceeded: gate.reason === 'search_limit', quota: gate.quota };
+    return {
+      results: [],
+      error: gate.reason || 'search_limit',
+      search_quota_exceeded: gate.reason === 'search_limit',
+      quota_service_unavailable: gate.reason === 'quota_unavailable',
+      quota: gate.quota
+    };
   }
   var result = await searchWeb(query, maxResults);
   // 有 diagnostics 或 results 数组均视为已发起（含 provider 失败），缓存命中也算一次业务搜索
@@ -9761,6 +9930,14 @@ async function searchWebForUser(userName, query, maxResults, searchApiCounter) {
     if (initiated && !result.search_quota_exceeded) {
       searchApiCounter.n = (typeof searchApiCounter.n === 'number' ? searchApiCounter.n : 0) + 1;
     }
+  }
+  // ★ 遗留 1：配额服务故障时，把"降级放行"的事实透传给调用方与前端，
+  //   前端可据此灰显"第三方搜索半可用"，运维侧也能从 SSE 里看到降级发生。
+  if (gate.degraded && result && typeof result === 'object') {
+    try {
+      result.quota_degraded = true;
+      result.diagnostics = Object.assign({}, result.diagnostics || {}, { quota_degraded: true });
+    } catch (e) {}
   }
   return result;
 }
@@ -20081,7 +20258,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
         for (var qi = 0; qi < queries.length; qi++) {
           var q = String(queries[qi] || '').trim().slice(0, 100);
           if (!q) continue;
-          var gate = await enforceSearchQuota(req.userName, searchCount);
+          var gate = await measureSearchQuota(req.userName, searchCount);
           if (!gate.allowed) break;
           searchCount += 1;
           // 工具时间线 + 搜索状态条（主聊天循环兼容事件）
@@ -21029,7 +21206,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
         var _respErrMsg = (e && e.message) ? String(e.message).slice(0, 180) : '';
         var _respErrCode = (e && e.code) ? String(e.code) : '';
-        console.error('[AGENT-STREAM] Responses API failed:', _respErrMsg, _respErrCode, 'thinking=', thinkingMode);
+        // ★ 遗留 2：把上游返回的结构化错误详情一并落盘（HTTP 400 的根因定位全靠它）。
+        //   此前只打 message/code 两段文本，provider 的 error.message（例如
+        //   "reasoning is required when tools are provided"）完全看不到。
+        console.error('[AGENT-STREAM] Responses API failed:', _respErrMsg, _respErrCode, 'thinking=', thinkingMode,
+          'provider_status=' + String((e && e.providerStatus) || ''),
+          'provider_code=' + String((e && e.providerCode) || ''),
+          'provider_message=' + String((e && e.providerMessage) || '').slice(0, 300),
+          'request_id=' + String((e && e.providerRequestId) || ''),
+          'round=' + String((e && e.round) || ''));
         var _thinkingOn = thinkingMode !== 'off';
         var _friendly = 'AI 调用失败，请稍后再试';
         if (/timeout|超时|abort|idle/i.test(_respErrMsg)) {
@@ -21046,9 +21231,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           _friendly = 'AI 请求过于频繁，请稍后再试';
         } else if (/HTTP 4\d\d/.test(_respErrMsg)) {
           // 已关闭思考时不要再提示「请关闭思考」
-          _friendly = _thinkingOn
-            ? 'AI 请求参数被拒绝，请关闭思考后重试或换模型'
-            : 'AI 请求参数被拒绝，请换模型后重试，或稍后重试';
+          // ★ 遗留 2：优先用 provider 的具体错误说明判定原因，比猜状态码准得多。
+          var _pm = String((e && e.providerMessage) || '');
+          if (/tool|function/i.test(_pm) && /reason|think/i.test(_pm)) {
+            _friendly = '工具与思考模式冲突，已自动降级重试仍失败，请关闭思考模式后重试';
+          } else if (/token|length|context/i.test(_pm)) {
+            _friendly = '对话内容超过模型上限，请缩短问题或新开对话后重试';
+          } else {
+            _friendly = _thinkingOn
+              ? 'AI 请求参数被拒绝，请关闭思考后重试或换模型'
+              : 'AI 请求参数被拒绝，请换模型后重试，或稍后重试';
+          }
         }
         writeSse(res, { type: 'error', error: _friendly, code: _respErrCode || undefined, thinking_mode: thinkingMode });
         return safeEnd();
@@ -22925,7 +23118,7 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
       return safeEnd();
     }
     // ★ 配额绕过修复：深入研究前强制过第三方搜索配额 gate（空 userName 也拒绝，不再默认放行）
-    var researchSearchGate = await enforceSearchQuota(userName);
+    var researchSearchGate = await measureSearchQuota(userName);
     if (!researchSearchGate.allowed) {
       var researchSearchMsg = researchSearchGate.reason === 'search_limit' ? '今日搜索次数已达上限' : getAiQuotaErrorMessage(researchSearchGate.reason || 'search_limit');
       writeSse(res, {
