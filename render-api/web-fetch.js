@@ -143,9 +143,13 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
         Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
       }, headers || {}),
-      lookup: function(_hostname, _options, callback) {
-        callback(null, addresses[0], net.isIP(addresses[0]) || 4);
-      }
+      // ★ 2026-09-13 修复 P0（read_web_page 100% 失败 "Invalid IP address: undefined"）：
+      //   Node 22 的 net.connect 在 IPv4/IPv6 双栈场景会传 options.all = true，
+      //   此时 lookup 回调**必须返回对象数组** [{ address, family }]；
+      //   旧实现恒返回 callback(null, addresses[0], family) 的单地址形态，
+      //   Node 取 items[i].address 得到 undefined → new ConnectOpts 抛
+      //   "Invalid IP address: undefined"，导致所有网页读取请求全量失败。
+      lookup: pinnedLookup(addresses)
     }, function(response) {
       var declared = Number(response.headers['content-length']);
       if (Number.isFinite(declared) && declared > maxBytes) {
@@ -444,6 +448,8 @@ async function fetchViaJinaReader(targetUrl, options) {
 module.exports = {
   fetchSafeWebPage: fetchSafeWebPage,
   fetchViaJinaReader: fetchViaJinaReader,
+  fetchSafeRaw: fetchSafeRaw,
+  fetchSafeBuffer: fetchSafeBuffer,
   isPrivateAddress: isPrivateAddress,
   isBlockedWebHost: isBlockedWebHost,
   assertSafeWebUrl: assertSafeWebUrl,
@@ -451,6 +457,89 @@ module.exports = {
   requestPinnedJson: requestPinnedJson,
   createPinnedAgent: createPinnedAgent
 };
+
+// ── 安全二进制下载（供 read_zip / image_info / image_process 使用）───────────
+// ★ 2026-09-13 修复 S-1 遗漏面：与 fetchSafeRaw 同理 —— 把「解析 → 校验 → 连接」
+//   绑定到同一组已解析地址，并拒绝重定向跟随，消除 DNS rebinding 与 302 绕过。
+// 返回：{ status, ok, buffer, bytes }
+async function fetchSafeBuffer(url, options) {
+  options = options || {};
+  var maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 30 * 1024 * 1024;
+  var timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 30000;
+  var safe = await assertSafeWebUrl(url, options.lookupImpl);
+  var response = await requestPinnedHttps(
+    safe.parsed,
+    safe.addresses,
+    maxBytes,
+    timeoutMs,
+    options.headers || {},
+    options.signal || null
+  );
+  var status = response.status;
+  if (status >= 300 && status < 400) {
+    var err = new Error('该地址返回重定向，已拒绝跟随（可能指向内部网络）');
+    err.code = 'REDIRECT_NOT_FOLLOWED';
+    err.status = status;
+    throw err;
+  }
+  return {
+    status: status,
+    ok: status >= 200 && status < 300,
+    buffer: response.body || Buffer.alloc(0),
+    bytes: response.body ? response.body.length : 0
+  };
+}
+
+// ── 安全原始抓取（供 page_meta / extract_links / read_zip / image_* 等使用）────
+// ★ 2026-09-13 修复 S-1 遗漏面：
+//   此前 server.js 里 page_meta / extract_links / read_zip / image_info /
+//   image_process 五处都是「先 await assertSafeWebUrl(url) 校验 → 再裸
+//   fetch(url, { redirect: 'follow' })」。这存在两重问题：
+//     ① TOCTOU：fetch 内部会**独立再解析一次 DNS**，攻击者控制的域名可让
+//        校验那次的解析返回公网 IP（通过），连接那次返回 127.0.0.1 /
+//        169.254.169.254 → 直接 SSRF 到内网与云元数据；
+//     ② redirect:'follow' 让第一次响应可 302 到内网，绕过初始校验。
+//   本函数把「解析 → 校验 → 连接」绑定到同一组已解析地址，并**拒绝重定向**
+//   （交由调用方决定是否自行跟随，主链路一律不跟随）。
+//
+// 返回：{ status, ok, text, bytes, headers: { get(k) } }
+//   ok 语义对齐 fetch：status 200-299 视为 ok。
+// 说明：为兼容既有调用点签名，文本类抓取（HTML 源码）用本函数的 text 字段；
+//   二进制下载另有 requestPinnedBuffer 需求，此处不做（既有调用点均为文本）。
+async function fetchSafeRaw(url, options) {
+  options = options || {};
+  var maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 3 * 1024 * 1024;
+  var timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : WEB_TIMEOUT_MS;
+  var safe = await assertSafeWebUrl(url, options.lookupImpl);
+  var response = await requestPinnedHttps(
+    safe.parsed,
+    safe.addresses,
+    maxBytes,
+    timeoutMs,
+    options.headers || {},
+    options.signal || null
+  );
+  var status = response.status;
+  // 拒绝重定向：3xx 不回传给调用方当正文用（否则会把跳转页当内容解析）。
+  // 若确实需要跟随，调用方应重新走一次 assertSafeWebUrl。
+  if (status >= 300 && status < 400) {
+    var err = new Error('该地址返回重定向，已拒绝跟随（可能指向内部网络）');
+    err.code = 'REDIRECT_NOT_FOLLOWED';
+    err.status = status;
+    throw err;
+  }
+  return {
+    status: status,
+    ok: status >= 200 && status < 300,
+    text: response.body ? response.body.toString('utf8') : '',
+    bytes: response.body ? response.body.length : 0,
+    headers: {
+      get: function(key) {
+        return response.headers.get ? response.headers.get(key) : null;
+      }
+    }
+  };
+}
 
 // ── 已校验地址的 HTTPS Agent 工厂（供 fetch 复用，消除 SSRF TOCTOU）──────────
 // ★ 2026-09-13 修复 S-1：
@@ -467,10 +556,29 @@ function createPinnedAgent(addresses) {
   return new https.Agent({
     keepAlive: false,
     // 强制使用已校验地址，杜绝 fetch 内部二次解析
-    lookup: function(_hostname, _options, callback) {
-      callback(null, addresses[0], net.isIP(addresses[0]) || 4);
-    }
+    lookup: pinnedLookup(addresses)
   });
+}
+
+// ── DNS pin 的 lookup 实现（集中一处，避免三份拷贝各自漂移）────────────────────
+// ★ 2026-09-13 修复 P0：
+//   Node 22 的 net.connect 在双栈场景传 options.all = true，此时回调**必须**
+//   返回对象数组 [{ address, family }]；传 options.all 为空/0 时返回
+//   (err, address, family) 的单地址形态。旧实现在三处都恒返回单地址，
+//   于是每个走 pin 的请求都抛 "Invalid IP address: undefined" ——
+//   这正是 read_web_page 100% 报"工具暂时故障"的根因。
+//
+// 参数 addresses：已通过 assertSafeWebUrl 校验的**地址字符串数组**
+function pinnedLookup(addresses) {
+  return function(_hostname, options, callback) {
+    var first = addresses[0];
+    if (options && options.all) {
+      return callback(null, addresses.map(function(addr) {
+        return { address: addr, family: net.isIP(addr) || 4 };
+      }));
+    }
+    return callback(null, first, net.isIP(first) || 4);
+  };
 }
 
 // ── DNS-pinned JSON 请求（供自定义模型 base_url 调用）────────────────────────
@@ -534,9 +642,7 @@ function requestPinnedJson(parsedUrl, addresses, opts) {
       rejectUnauthorized: true,
       headers: headers,
       // ★ 关键：DNS pin —— 强制使用已校验过的地址，杜绝二次解析被劫持
-      lookup: function(_hostname, _options, callback) {
-        callback(null, addresses[0], net.isIP(addresses[0]) || 4);
-      }
+      lookup: pinnedLookup(addresses)
     }, function(response) {
       var declared = Number(response.headers['content-length']);
       if (Number.isFinite(declared) && declared > maxBytes) {

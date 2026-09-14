@@ -1268,6 +1268,143 @@ function formatBytes(n) {
   return (v / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
+// ===================== 10.1 中文文档交付：HTML 构建 =====================
+// ★ 2026-09-13 新增（修复"生成 PDF 卡壳"）：
+//   问题背景：buildPdfBuffer 使用 PDF 内置的 Helvetica / Courier 字体（WinAnsiEncoding），
+//   这些字体**不含 CJK 字形**。写入中文会渲染成乱码，因此旧逻辑对含中文的内容
+//   直接抛错拒绝（"PDF 生成仅支持英文/数字内容"）。模型拿到硬错误后往往卡住，
+//   用户侧表现为"生成 PDF 卡壳无法使用"。
+//
+//   为什么不内嵌中文字体：完整 Noto Sans CJK 约 19MB，即便子集化到 GB2312
+//   也有 ~3MB，且 CFF/CID 字体的 PDF 嵌入涉及 CIDFontType0 / FontFile3 /
+//   ToUnicode CMap，复杂度与出错面都很大，对一个"交付文档"功能不划算。
+//
+//   采用方案：**HTML 文档交付**。生成一份自包含（字体走系统字体栈）、
+//   带打印样式（@media print）的 HTML 文件，用户下载后用浏览器打开，
+//   「打印 → 另存为 PDF」即可得到排版完美的中文 PDF。
+//   优点：零字体依赖（不挑部署环境）、零额外依赖（不装库）、体积小、绝不会乱码。
+//   纯 ASCII 内容仍走真正的 PDF 路径，保持既有能力不回退。
+function escapeHtmlText(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildHtmlBuffer(title, blocks) {
+  var list = Array.isArray(blocks) ? blocks.slice(0, 500) : [];
+  var body = [];
+
+  if (title) body.push('<h1 class="doc-title">' + escapeHtmlText(title) + '</h1>');
+
+  for (var i = 0; i < list.length; i++) {
+    var b = list[i];
+    if (b === null || b === undefined) continue;
+    if (typeof b === 'string') b = { type: 'p', text: b };
+    var btype = String(b.type || 'p').toLowerCase();
+
+    if (btype === 'h1') {
+      body.push('<h2>' + escapeHtmlText(clampText(b.text, 20000)) + '</h2>');
+    } else if (btype === 'h2') {
+      body.push('<h3>' + escapeHtmlText(clampText(b.text, 20000)) + '</h3>');
+    } else if (btype === 'h3') {
+      body.push('<h4>' + escapeHtmlText(clampText(b.text, 20000)) + '</h4>');
+    } else if (btype === 'ul' || btype === 'ol') {
+      var items = Array.isArray(b.items) ? b.items.slice(0, 300) : [];
+      var tag = btype === 'ol' ? 'ol' : 'ul';
+      var liHtml = items.map(function(it) {
+        return '<li>' + escapeHtmlText(clampText(it, 20000)) + '</li>';
+      }).join('');
+      body.push('<' + tag + '>' + liHtml + '</' + tag + '>');
+    } else if (btype === 'table') {
+      var headers = Array.isArray(b.headers) ? b.headers.slice(0, 12) : [];
+      var rows = Array.isArray(b.rows) ? b.rows.slice(0, 300) : [];
+      var thtml = ['<table>'];
+      if (headers.length) {
+        thtml.push('<thead><tr>' + headers.map(function(h) {
+          return '<th>' + escapeHtmlText(h) + '</th>';
+        }).join('') + '</tr></thead>');
+      }
+      thtml.push('<tbody>');
+      rows.forEach(function(r) {
+        var cells = Array.isArray(r) ? r : [r];
+        thtml.push('<tr>' + cells.map(function(c) {
+          return '<td>' + escapeHtmlText(c === null || c === undefined ? '' : c) + '</td>';
+        }).join('') + '</tr>');
+      });
+      thtml.push('</tbody></table>');
+      body.push(thtml.join(''));
+    } else if (btype === 'hr') {
+      body.push('<hr>');
+    } else if (btype === 'quote') {
+      body.push('<blockquote>' + escapeHtmlText(clampText(b.text, 20000)) + '</blockquote>');
+    } else if (btype === 'code') {
+      body.push('<pre><code>' + escapeHtmlText(clampText(b.text, 20000)) + '</code></pre>');
+    } else {
+      var para = clampText(b.text, 20000);
+      // 段落内换行转为 <br>，保留用户排版意图
+      body.push('<p>' + escapeHtmlText(para).replace(/\r?\n/g, '<br>') + '</p>');
+    }
+  }
+
+  if (!body.length) body.push('<p>（空文档）</p>');
+
+  // 自包含 HTML：CSS 内联，字体走系统字体栈（含中文字体优先级），
+  // 附打印样式，用户「打印 → 另存为 PDF」即得标准 A4 文档。
+  var html = [
+    '<!DOCTYPE html>',
+    '<html lang="zh-CN">',
+    '<head>',
+    '<meta charset="UTF-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<title>' + escapeHtmlText(title || '文档') + '</title>',
+    '<style>',
+    '  :root { color-scheme: light; }',
+    '  body {',
+    '    max-width: 780px; margin: 0 auto; padding: 40px 24px 72px;',
+    '    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",',
+    '                 "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Zen Hei",',
+    '                 "Helvetica Neue", Arial, sans-serif;',
+    '    font-size: 16px; line-height: 1.75; color: #1a1a1a; background: #fff;',
+    '    -webkit-text-size-adjust: 100%;',
+    '  }',
+    '  .doc-title { font-size: 28px; font-weight: 700; margin: 0 0 24px; line-height: 1.35; }',
+    '  h2 { font-size: 22px; margin: 28px 0 12px; }',
+    '  h3 { font-size: 19px; margin: 24px 0 10px; }',
+    '  h4 { font-size: 17px; margin: 20px 0 8px; }',
+    '  p { margin: 0 0 14px; }',
+    '  ul, ol { margin: 0 0 14px; padding-left: 26px; }',
+    '  li { margin: 4px 0; }',
+    '  hr { border: 0; border-top: 1px solid #d8d8d8; margin: 24px 0; }',
+    '  blockquote { margin: 0 0 14px; padding: 8px 16px; border-left: 3px solid #c8c8c8;',
+    '               background: #f7f7f7; color: #444; }',
+    '  pre { background: #f5f5f5; padding: 12px 14px; border-radius: 6px; overflow-x: auto; }',
+    '  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }',
+    '  table { width: 100%; border-collapse: collapse; margin: 0 0 18px; font-size: 15px; }',
+    '  th, td { border: 1px solid #dcdcdc; padding: 8px 10px; text-align: left; vertical-align: top; }',
+    '  th { background: #f2f2f2; font-weight: 600; }',
+    '  tbody tr:nth-child(even) { background: #fafafa; }',
+    '  @media print {',
+    '    @page { size: A4; margin: 18mm 16mm; }',
+    '    body { max-width: none; padding: 0; font-size: 12pt; }',
+    '    .doc-title { font-size: 20pt; }',
+    '    h2 { font-size: 16pt; } h3 { font-size: 14pt; } h4 { font-size: 12.5pt; }',
+    '    pre, blockquote, table { page-break-inside: avoid; }',
+    '    tr, img { page-break-inside: avoid; }',
+    '  }',
+    '</style>',
+    '</head>',
+    '<body>',
+    body.join('\n'),
+    '</body>',
+    '</html>'
+  ].join('\n');
+
+  return Buffer.from(html, 'utf8');
+}
+
 var ZIP_TEXT_EXT = ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'xml', 'html', 'htm', 'css', 'js', 'ts',
   'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'go', 'rs', 'rb', 'php', 'sh', 'bat', 'sql',
   'yml', 'yaml', 'toml', 'ini', 'conf', 'log', 'env', 'gitignore', 'vue', 'svelte', 'scss', 'less'];
@@ -1290,6 +1427,8 @@ module.exports = {
   svgToPngDataUrl: svgToPngDataUrl,
   isPureAscii: isPureAscii,
   buildPdfBuffer: buildPdfBuffer,
+  buildHtmlBuffer: buildHtmlBuffer,
+  escapeHtmlText: escapeHtmlText,
   diffLines: diffLines,
   parseDelimited: parseDelimited,
   buildDelimited: buildDelimited,
