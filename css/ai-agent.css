@@ -5861,6 +5861,89 @@
   margin-bottom: 8px;
 }
 .ai-tool-card-link:hover { text-decoration: underline; }
+/* ── A 档工具卡片：图表 / 二维码 / 图片 / 表格 ── */
+.ai-tool-card-chart,
+.ai-tool-card-qr,
+.ai-tool-card-imgwrap {
+  margin: 8px 0;
+  display: flex;
+  justify-content: center;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px;
+  overflow: hidden;
+}
+.ai-tool-card-chart-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.ai-tool-card-chart svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.ai-tool-card-qr-img {
+  display: block;
+  width: 180px;
+  height: 180px;
+  max-width: 100%;
+  image-rendering: pixelated;
+  border-radius: 6px;
+}
+.ai-tool-card-qr-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+.ai-tool-card-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.ai-tool-card-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 6px 0;
+  display: block;
+  overflow-x: auto;
+}
+.ai-tool-card-table th,
+.ai-tool-card-table td {
+  border: 1px solid rgba(42, 107, 98, 0.18);
+  padding: 5px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+.ai-tool-card-table th {
+  background: rgba(42, 107, 98, 0.07);
+  font-weight: 700;
+}
+.ai-tool-card-table tbody tr:nth-child(even) { background: rgba(42, 107, 98, 0.03); }
+.ai-tool-card-mdtable {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 6px 0;
+  padding: 8px;
+  background: rgba(42, 107, 98, 0.05);
+  border-radius: 8px;
+  max-height: 340px;
+  overflow: auto;
+}
+[data-theme="dark"] .ai-tool-card-chart,
+[data-theme="dark"] .ai-tool-card-qr,
+[data-theme="dark"] .ai-tool-card-imgwrap { background: #14201f; }
+[data-theme="dark"] .ai-tool-card-table th { background: rgba(143, 214, 200, 0.12); }
+[data-theme="dark"] .ai-tool-card-table th,
+[data-theme="dark"] .ai-tool-card-table td { border-color: rgba(143, 214, 200, 0.22); }
+[data-theme="dark"] .ai-tool-card-table tbody tr:nth-child(even) { background: rgba(143, 214, 200, 0.05); }
+[data-theme="dark"] .ai-tool-card-mdtable { background: rgba(143, 214, 200, 0.08); }
 .ai-tool-card-actions { display: flex; gap: 8px; margin-top: 10px; }
 .ai-tool-card-action { border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
 .ai-tool-card-action.confirm { background: #397a70; color: #fff; }

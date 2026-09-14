@@ -6906,6 +6906,159 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         tpList.appendChild(tpRow);
       });
       shell.appendChild(tpList);
+    } else if (type === 'make_chart') {
+      // 图表卡片：优先展示栅格化 PNG，回退到内联 SVG
+      if (data.title) shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.title).slice(0, 120) }));
+      var mcWrap = el('div', { class: 'ai-tool-card-chart' });
+      if (data.image) {
+        var mcImg = el('img', {
+          class: 'ai-tool-card-chart-img',
+          src: String(data.image),
+          alt: String(data.title || data.chart_type || '图表'),
+          loading: 'lazy'
+        });
+        mcWrap.appendChild(mcImg);
+      } else if (data.svg) {
+        // SVG 为后端自产内容，来源可信；仍做基础剔除防止脚本注入
+        mcWrap.innerHTML = String(data.svg).replace(/<script[\s\S]*?<\/script>/gi, '').replace(/on\w+\s*=/gi, 'data-removed=');
+      }
+      if (mcWrap.childNodes.length) shell.appendChild(mcWrap);
+      var mcBits = [];
+      var mcTypeName = { bar: '柱状图', line: '折线图', pie: '饼图', scatter: '散点图' }[String(data.chart_type || '')] || '';
+      if (mcTypeName) mcBits.push(mcTypeName);
+      if (Array.isArray(data.series)) {
+        var mcPt = 0;
+        data.series.forEach(function(s) { if (s && Array.isArray(s.data)) mcPt += s.data.length; });
+        if (mcPt) mcBits.push(mcPt + ' 个数据点');
+      }
+      if (!data.image && data.rasterized === false) mcBits.push('矢量图');
+      if (mcBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: mcBits.join(' · ') }));
+    } else if (type === 'generate_pdf') {
+      shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.filename || '文档.pdf') }));
+      var pdfMeta = [];
+      if (data.bytes) pdfMeta.push(data.bytes > 1048576 ? (data.bytes / 1048576).toFixed(2) + ' MB' : Math.round(data.bytes / 1024) + ' KB');
+      if (data.blocks) pdfMeta.push(data.blocks + ' 个内容块');
+      pdfMeta.push('PDF');
+      shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: pdfMeta.join(' · ') }));
+      if (data.data_url) {
+        shell.appendChild(el('a', {
+          class: 'ai-tool-card-link',
+          href: String(data.data_url),
+          download: String(data.filename || 'document.pdf'),
+          text: '⬇ 下载 ' + String(data.filename || 'PDF 文档')
+        }));
+      }
+    } else if (type === 'qr_code') {
+      var qcWrap = el('div', { class: 'ai-tool-card-qr' });
+      if (data.image) {
+        qcWrap.appendChild(el('img', {
+          class: 'ai-tool-card-qr-img',
+          src: String(data.image),
+          alt: '二维码',
+          loading: 'lazy'
+        }));
+      }
+      shell.appendChild(qcWrap);
+      if (data.text) shell.appendChild(el('div', { class: 'ai-tool-card-summary ai-tool-card-qr-text', text: String(data.text).slice(0, 300) }));
+      var qcBits = [];
+      if (data.version) qcBits.push('版本 ' + data.version);
+      if (data.format) qcBits.push(String(data.format).toUpperCase());
+      if (qcBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: qcBits.join(' · ') }));
+      if (data.image) {
+        shell.appendChild(el('a', {
+          class: 'ai-tool-card-link',
+          href: String(data.image),
+          download: 'qrcode.' + String(data.format || 'png'),
+          text: '⬇ 保存二维码'
+        }));
+      }
+    } else if (type === 'image_process') {
+      shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.filename || '图片') }));
+      if (data.data_url) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-imgwrap' }).appendChild(el('img', {
+          class: 'ai-tool-card-img',
+          src: String(data.data_url),
+          alt: String(data.filename || '处理后的图片'),
+          loading: 'lazy'
+        })).parentNode);
+      }
+      var ipBits = [];
+      if (data.width && data.height) ipBits.push(data.width + ' × ' + data.height);
+      if (data.format) ipBits.push(String(data.format).toUpperCase());
+      if (data.bytes) ipBits.push(data.bytes > 1048576 ? (data.bytes / 1048576).toFixed(2) + ' MB' : Math.round(data.bytes / 1024) + ' KB');
+      if (data.original_bytes && data.bytes) {
+        var ipDiff = data.original_bytes - data.bytes;
+        ipBits.push(ipDiff >= 0 ? '压缩 ' + Math.round((ipDiff / data.original_bytes) * 100) + '%' : '增大 ' + Math.round((Math.abs(ipDiff) / data.original_bytes) * 100) + '%');
+      }
+      if (ipBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: ipBits.join(' · ') }));
+      if (data.data_url) {
+        shell.appendChild(el('a', {
+          class: 'ai-tool-card-link',
+          href: String(data.data_url),
+          download: String(data.filename || 'image'),
+          text: '⬇ 下载 ' + String(data.filename || '图片')
+        }));
+      }
+    } else if (type === 'page_meta') {
+      shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.title || data.url || '网页').slice(0, 160) }));
+      if (data.site_name) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: String(data.site_name).slice(0, 80) }));
+      if (data.url) {
+        var pmHref = '';
+        try {
+          var pmU = new URL(String(data.url));
+          if (pmU.protocol === 'https:' || pmU.protocol === 'http:') pmHref = pmU.toString();
+        } catch (ePmU) {}
+        if (pmHref) {
+          shell.appendChild(el('a', {
+            class: 'ai-tool-card-link',
+            href: pmHref,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            text: pmHref.length > 72 ? pmHref.slice(0, 72) + '…' : pmHref
+          }));
+        }
+      }
+      if (data.description) shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: String(data.description).slice(0, 360) }));
+      if (data.image) {
+        var pmImgHref = '';
+        try {
+          var pmIU = new URL(String(data.image), String(data.url || 'https://x/'));
+          if (pmIU.protocol === 'https:' || pmIU.protocol === 'http:') pmImgHref = pmIU.toString();
+        } catch (ePmI) {}
+        if (pmImgHref) {
+          shell.appendChild(el('div', { class: 'ai-tool-card-imgwrap' }).appendChild(el('img', {
+            class: 'ai-tool-card-img',
+            src: pmImgHref,
+            alt: '预览图',
+            loading: 'lazy'
+          })).parentNode);
+        }
+      }
+    } else if (type === 'markdown_table') {
+      var mtRows = Array.isArray(data.rows_data) ? data.rows_data : (Array.isArray(data.rows) ? data.rows : null);
+      if (mtRows && mtRows.length && typeof mtRows[0] === 'object') {
+        var mtHeaders = Array.isArray(data.headers) ? data.headers : Object.keys(mtRows[0]);
+        var mtTable = el('table', { class: 'ai-tool-card-table' });
+        var mtThead = el('thead');
+        var mtHr = el('tr');
+        mtHeaders.forEach(function(h) { mtHr.appendChild(el('th', { text: String(h) })); });
+        mtThead.appendChild(mtHr);
+        mtTable.appendChild(mtThead);
+        var mtTbody = el('tbody');
+        mtRows.slice(0, 100).forEach(function(r) {
+          var tr = el('tr');
+          mtHeaders.forEach(function(h) { tr.appendChild(el('td', { text: String(r[h] === undefined || r[h] === null ? '' : r[h]) })); });
+          mtTbody.appendChild(tr);
+        });
+        mtTable.appendChild(mtTbody);
+        shell.appendChild(mtTable);
+      } else if (data.markdown) {
+        // 退化：直接渲染 Markdown 文本（等宽字体，保留表格视觉）
+        var mtPre = el('pre', { class: 'ai-tool-card-mdtable' });
+        mtPre.textContent = String(data.markdown).slice(0, 8000);
+        shell.appendChild(mtPre);
+      }
+      if (data.rows) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: data.rows + ' 行数据' }));
     } else if (type === 'web_search' && Array.isArray(data.results)) {
       if (data.query) {
         shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '搜索：' + String(data.query).slice(0, 120) }));
@@ -8058,7 +8211,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               search_social: '社媒检索', run_code: '沙箱计算', process_json: '处理 JSON',
               encode_decode: '编码转换', date_calc: '日期计算', text_stats: '文本统计',
               read_document: '读取文档', make_file: '生成文件', web_extract: '网页提取',
-              task_plan: '任务计划'
+              task_plan: '任务计划',
+              make_chart: '生成图表', generate_pdf: '生成 PDF', read_zip: '读取压缩包',
+              image_info: '图片信息', image_process: '图片处理', diff_text: '文本对比',
+              sort_filter: '数据筛选排序', markdown_table: '生成表格', qr_code: '生成二维码',
+              password_tool: '密码工具', regex_test: '正则测试', url_parse: '网址解析',
+              convert_data: '数据格式转换', batch_calc: '批量计算', page_meta: '网页元信息',
+              extract_links: '提取链接'
             };
             var timeline = assistantNode.querySelector('.ai-tool-timeline');
             if (!timeline) {
@@ -8175,7 +8334,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               search_social: '社媒检索', run_code: '沙箱计算', process_json: '处理 JSON',
               encode_decode: '编码转换', date_calc: '日期计算', text_stats: '文本统计',
               read_document: '读取文档', make_file: '生成文件', web_extract: '网页提取',
-              task_plan: '任务计划'
+              task_plan: '任务计划',
+              make_chart: '生成图表', generate_pdf: '生成 PDF', read_zip: '读取压缩包',
+              image_info: '图片信息', image_process: '图片处理', diff_text: '文本对比',
+              sort_filter: '数据筛选排序', markdown_table: '生成表格', qr_code: '生成二维码',
+              password_tool: '密码工具', regex_test: '正则测试', url_parse: '网址解析',
+              convert_data: '数据格式转换', batch_calc: '批量计算', page_meta: '网页元信息',
+              extract_links: '提取链接'
             };
             var label = nameMap[evt.tool_name] || evt.tool_name || '工具';
             var summaryText = '';
