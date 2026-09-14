@@ -6879,6 +6879,33 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (data.provider) metaBits.push(String(data.provider));
       ocrMeta.textContent = metaBits.join(' · ');
       if (metaBits.length) shell.appendChild(ocrMeta);
+    } else if (type === 'make_file') {
+      var mfName = el('div', { class: 'ai-tool-card-page-title', text: String(data.filename || '数据文件') });
+      shell.appendChild(mfName);
+      var mfMeta = [];
+      if (data.rows != null) mfMeta.push(data.rows + ' 行数据');
+      if (data.format) mfMeta.push(String(data.format).toUpperCase());
+      if (mfMeta.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: mfMeta.join(' · ') }));
+      if (data.data_url) {
+        var mfDl = el('a', {
+          class: 'ai-tool-card-link',
+          href: String(data.data_url),
+          download: String(data.filename || 'data'),
+          text: '⬇ 下载 ' + String(data.filename || '文件')
+        });
+        shell.appendChild(mfDl);
+      }
+    } else if (type === 'task_plan') {
+      if (data.goal) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.goal).slice(0, 200) }));
+      }
+      var tpList = el('div', { class: 'ai-tool-card-list' });
+      (Array.isArray(data.steps) ? data.steps : []).slice(0, 12).forEach(function(step, idx) {
+        var tpRow = el('div', { class: 'ai-tool-result' });
+        tpRow.appendChild(el('b', { text: (idx + 1) + '. ' + String(step).slice(0, 160) }));
+        tpList.appendChild(tpRow);
+      });
+      shell.appendChild(tpList);
     } else if (type === 'web_search' && Array.isArray(data.results)) {
       if (data.query) {
         shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '搜索：' + String(data.query).slice(0, 120) }));
@@ -8012,7 +8039,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
               get_weather: '查询天气', get_current_time: '获取时间',
               get_exchange_rate: '查询汇率', get_stock_quote: '查询行情',
-              calculate: '精确计算', convert_units: '单位换算'
+              calculate: '精确计算', convert_units: '单位换算',
+              search_social: '社媒检索', run_code: '沙箱计算', process_json: '处理 JSON',
+              encode_decode: '编码转换', date_calc: '日期计算', text_stats: '文本统计',
+              read_document: '读取文档', make_file: '生成文件', web_extract: '网页提取',
+              task_plan: '任务计划'
             };
             var timeline = assistantNode.querySelector('.ai-tool-timeline');
             if (!timeline) {
@@ -8125,7 +8156,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
               get_weather: '查询天气', get_current_time: '获取时间',
               get_exchange_rate: '查询汇率', get_stock_quote: '查询行情',
-              calculate: '精确计算', convert_units: '单位换算'
+              calculate: '精确计算', convert_units: '单位换算',
+              search_social: '社媒检索', run_code: '沙箱计算', process_json: '处理 JSON',
+              encode_decode: '编码转换', date_calc: '日期计算', text_stats: '文本统计',
+              read_document: '读取文档', make_file: '生成文件', web_extract: '网页提取',
+              task_plan: '任务计划'
             };
             var label = nameMap[evt.tool_name] || evt.tool_name || '工具';
             var summaryText = '';
