@@ -165,16 +165,46 @@ test('tool-helpers：extractLinksFromHtml 区分内外链', () => {
   assert.ok(r.external_count >= 1, '未识别外链');
 });
 
-test('A 档：generate_pdf 明确拒绝中文内容（避免乱码文件）', () => {
-  assert.match(serverSrc, /isPureAscii\(gpAllText\)/, 'generate_pdf 未做纯 ASCII 校验');
-  assert.match(serverSrc, /PDF 生成仅支持英文\/数字内容/, '缺少中文拒绝提示');
+test('A 档：generate_pdf 对中文改用 HTML 交付（不再硬拒绝）', () => {
+  // ★ 2026-09-13 行为变更：旧实现发现中文直接报错拒绝，导致模型拿到硬错误后卡壳，
+  //   用户侧表现为"生成 PDF 卡壳无法使用"。现改为：
+  //     纯 ASCII → 真 PDF；含中文 → HTML 文档（浏览器可另存为 PDF），两者都成功返回。
+  assert.match(serverSrc, /isPureAscii\(gpAllText\)/, 'generate_pdf 仍应据 isPureAscii 分流');
+  assert.match(serverSrc, /buildHtmlBuffer/, '含中文时应走 buildHtmlBuffer');
+  const idx = serverSrc.indexOf("case 'generate_pdf':");
+  const seg = serverSrc.slice(idx, idx + 5000);
+  assert.doesNotMatch(seg, /error: 'PDF 生成仅支持英文\/数字内容/,
+    '不应再对中文硬拒绝（这是"卡壳"的根因）');
 });
 
 test('A 档：网络类工具做 SSRF 校验', () => {
-  ['read_zip', 'image_info', 'image_process', 'page_meta', 'extract_links'].forEach((name) => {
+  // ★ 2026-09-13 加固：这五个工具原先是「先 assertSafeWebUrl 校验 → 再裸 fetch」，
+  //   存在 TOCTOU（DNS rebinding）与 redirect:'follow' 绕过。
+  //   现统一改用 web-fetch 的 fetchSafeRaw / fetchSafeBuffer ——
+  //   二者内部**已包含 assertSafeWebUrl 的 DNS pin 校验**并拒绝重定向，
+  //   因此断言标准从"必须直接调用 assertSafeWebUrl"改为"必须走安全抓取封装"。
+  const textTools = { page_meta: 'fetchSafeRaw', extract_links: 'fetchSafeRaw' };
+  const binTools = { read_zip: 'fetchSafeBuffer', image_info: 'fetchSafeBuffer', image_process: 'fetchSafeBuffer' };
+  Object.keys(textTools).forEach((name) => {
     const idx = serverSrc.indexOf("case '" + name + "':");
     assert.ok(idx > -1, '未找到分支: ' + name);
-    const seg = serverSrc.slice(idx, idx + 2000);
-    assert.match(seg, /assertSafeWebUrl/, name + ' 缺少 SSRF 校验');
+    const seg = serverSrc.slice(idx, idx + 3000);
+    assert.match(seg, new RegExp(textTools[name]), name + ' 应走安全文本抓取（内置 DNS pin + 拒绝重定向）');
+  });
+  Object.keys(binTools).forEach((name) => {
+    const idx = serverSrc.indexOf("case '" + name + "':");
+    assert.ok(idx > -1, '未找到分支: ' + name);
+    const seg = serverSrc.slice(idx, idx + 3000);
+    assert.match(seg, new RegExp(binTools[name]), name + ' 应走安全二进制抓取（内置 DNS pin + 拒绝重定向）');
+  });
+  // 安全抓取封装本身必须做校验
+  const webFetchSrc = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'render-api', 'web-fetch.js'), 'utf8');
+  ['fetchSafeRaw', 'fetchSafeBuffer'].forEach((fn) => {
+    const idx = webFetchSrc.indexOf('async function ' + fn);
+    assert.ok(idx > -1, 'web-fetch 应导出 ' + fn);
+    const seg = webFetchSrc.slice(idx, idx + 900);
+    assert.match(seg, /assertSafeWebUrl/, fn + ' 内部必须做 SSRF 校验');
+    assert.match(seg, /REDIRECT_NOT_FOLLOWED|已拒绝跟随/, fn + ' 必须拒绝重定向跟随');
   });
 });

@@ -3287,6 +3287,65 @@
 .ai-msg .ai-search-status.expired {
   opacity: 0.65;
 }
+
+/* ★ 2026-09-13 搜索状态收敛与舒缓化（用户反馈：搜完了还显示"正在搜索中"、动画一直闪）
+   问题链：
+     ① `done` 事件从不处理 .ai-search-status；工具轮结束后也不会切状态，
+        状态条永久停在"联网中…"，动画无限循环；
+     ② 运行态动画本身过快、位移明显，观感"太吵"。
+   解决：
+     - 前端在 search / search_status(completed) / search_error / 终态收口
+       （clearAssistantTransientStatus）四处标记 .is-settled 或 .is-running，
+       由 settleSearchStatus() 统一把"进行中"改写为终态；
+     - 这里只保留一个运行态动画（2.4s 柔和呼吸光点），终态彻底无动画。 */
+.ai-msg .ai-search-status.is-running .ai-search-status-label,
+.ai-chat-messages > .ai-search-status.is-running .ai-search-status-label {
+  position: relative;
+  padding-left: 14px;
+}
+.ai-msg .ai-search-status.is-running .ai-search-status-label::before,
+.ai-chat-messages > .ai-search-status.is-running .ai-search-status-label::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: rgba(70, 128, 148, 0.85);
+  box-shadow: 0 0 5px rgba(70, 128, 148, 0.4);
+  /* 柔和呼吸：2.4s 缓慢明暗，无快速闪烁、无跳动 */
+  animation: xtjSearchBreath 2.4s ease-in-out infinite;
+}
+@keyframes xtjSearchBreath {
+  0%, 100% { opacity: 0.35; transform: scale(0.86); }
+  50%      { opacity: 0.9;  transform: scale(1); }
+}
+/* 终态：完成 / 失败 / 已联网 —— 无任何动画 */
+.ai-msg .ai-search-status.is-settled .ai-search-status-label::before,
+.ai-chat-messages > .ai-search-status.is-settled .ai-search-status-label::before {
+  animation: none !important;
+  opacity: 0.75;
+  transform: none;
+}
+.ai-msg .ai-search-status.is-settled,
+.ai-chat-messages > .ai-search-status.is-settled {
+  animation: none !important;
+}
+/* 降级：尊重系统"减少动效"偏好与站内动效开关 */
+@media (prefers-reduced-motion: reduce) {
+  .ai-msg .ai-search-status.is-running .ai-search-status-label::before,
+  .ai-chat-messages > .ai-search-status.is-running .ai-search-status-label::before {
+    animation: none !important;
+    opacity: 0.7;
+  }
+}
+html[data-xtj-motion=off] .ai-search-status .ai-search-status-label::before,
+html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
+  animation: none !important;
+}
+
 .ai-tool-status {
   display: block;
   align-self: flex-start;
@@ -4162,9 +4221,11 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(140, 196, 158, .08), transparent);
-  transform: translateX(-100%);
-  animation: progress-shimmer 2.6s ease-in-out infinite;
+  /* ★ 2026-09-13 降噪：原 2.6s 横扫亮带（translateX -100%→100%）叠加工具步骤的
+     脉动/跑马灯后，同屏多处高频闪动，观感"太吵"。改为 4.2s 更慢、更淡的呼吸，
+     并把位移换成纯透明度变化，不再有"扫过去"的强视觉引导。 */
+  background: linear-gradient(90deg, transparent, rgba(140, 196, 158, .055), transparent);
+  animation: progress-shimmer 4.2s ease-in-out infinite;
   pointer-events: none;
 }
 .ai-progress-card.ai-progress-card-done::after {
@@ -4899,8 +4960,8 @@
 [data-theme="dark"] .ai-copy-btn:hover { background: rgba(255,255,255,0.06); }
 
 @keyframes progress-shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: .55; }
 }
 
 @keyframes dt-bounce-in {

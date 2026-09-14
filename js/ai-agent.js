@@ -860,6 +860,39 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return fresh;
   }
 
+  /**
+   * 搜索状态收敛（★ 2026-09-13 修复"已搜完仍显示正在搜索中"）。
+   *
+   * 问题：搜索状态条只写入"联网中…/正在搜索"，而 `done` 事件从不处理它，
+   * 工具轮结束后也不会切换状态 → 状态条永久停留在"正在搜索中"，动画一直闪。
+   *
+   * 策略（用户确认：保留显示，仅修正状态）：
+   * - 已完成的搜索条：把 running 态清掉、切到静默完成态（不再有动画），保留在会话里。
+   * - 未完成的（仍 running，说明这一轮没搜出结果或被中断）：切到"联网结束"。
+   * 统一入口，供 done / 工具轮完成 / error / 中断 各路径调用。
+   */
+  function settleSearchStatus(node, opts) {
+    if (!node) return;
+    opts = opts || {};
+    var bar = node.querySelector('.ai-search-status');
+    if (!bar) return;
+    // 已经是完成/失败态就跳过（避免每次工具轮都重绘）
+    if (bar.classList.contains('is-settled')) return;
+    var existing = bar.querySelector('.ai-search-status-label');
+    var curText = existing ? String(existing.textContent || '') : '';
+    // 命中"进行中"语义才改写；已是"已联网 / 失败文案"的保持原样，只清动画
+    var isPending = /中|正在|搜索中|联网中/.test(curText) || !curText;
+    if (isPending) {
+      var fail = opts.failed === true;
+      var text = fail ? (opts.failText || '联网失败') : (opts.doneText || '联网完成');
+      var fresh = buildSearchStatusBar({ statusText: text, simple: true });
+      if (bar.parentNode) bar.parentNode.replaceChild(fresh, bar);
+      bar = fresh;
+    }
+    bar.classList.add('is-settled');
+    bar.classList.remove('is-running');
+  }
+
   function isSupportedAiFile(file) {
     if (!file) return false;
     // ★ 全格式支持：任意文件都可上传（图片直传视觉模型/OCR，PDF/DOCX/XLSX/TXT
@@ -6934,18 +6967,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!data.image && data.rasterized === false) mcBits.push('矢量图');
       if (mcBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: mcBits.join(' · ') }));
     } else if (type === 'generate_pdf') {
-      shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.filename || '文档.pdf') }));
+      // ★ 2026-09-13：中文内容改由后端以 HTML 交付（PDF 内置字体无 CJK 字形），
+      //   卡片需按 format / is_html_delivery 自适应文案与提示，避免用户以为下载到的是 PDF。
+      var gpHtml = data.is_html_delivery === true || String(data.format || '').toLowerCase() === 'html';
+      var gpFallbackName = gpHtml ? '文档.html' : '文档.pdf';
+      shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.filename || gpFallbackName) }));
       var pdfMeta = [];
       if (data.bytes) pdfMeta.push(data.bytes > 1048576 ? (data.bytes / 1048576).toFixed(2) + ' MB' : Math.round(data.bytes / 1024) + ' KB');
       if (data.blocks) pdfMeta.push(data.blocks + ' 个内容块');
-      pdfMeta.push('PDF');
+      pdfMeta.push(gpHtml ? 'HTML 文档' : 'PDF');
       shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: pdfMeta.join(' · ') }));
       if (data.data_url) {
         shell.appendChild(el('a', {
           class: 'ai-tool-card-link',
           href: String(data.data_url),
-          download: String(data.filename || 'document.pdf'),
-          text: '⬇ 下载 ' + String(data.filename || 'PDF 文档')
+          download: String(data.filename || gpFallbackName),
+          text: '⬇ 下载 ' + String(data.filename || (gpHtml ? '文档' : 'PDF 文档'))
+        }));
+      }
+      if (gpHtml) {
+        shell.appendChild(el('div', {
+          class: 'ai-tool-card-meta',
+          text: '提示：下载后用浏览器打开，选择「打印 → 另存为 PDF」即可得到中文 PDF'
         }));
       }
     } else if (type === 'qr_code') {
@@ -7720,6 +7763,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       function clearAssistantTransientStatus(node) {
         var target = node || assistantNode;
         if (!target) return;
+        // ★ 2026-09-13 修复（"已搜完仍显示正在搜索中、动画一直闪"）：
+        //   搜索状态条（.ai-search-status）此前不在此函数的清理范围内，且 done 事件
+        //   也不处理它 —— 于是只要走过搜索路径，状态条就永久停留在"联网中…"，
+        //   动画无限循环。用户要求"保留显示但修正状态"，故此处**只收敛状态不删除**：
+        //   把进行中的"联网中…/正在搜索"改写为终态并停掉动画，保留信息可读。
+        try { settleSearchStatus(target); } catch (eSettle2) {}
+        // 同理：工具步骤若因中断/超时没等到 tool_result，is-running 会残留导致
+        // 光晕持续呼吸。终态统一落定为"完成"，停掉动画（信息保留）。
+        try {
+          var runningSteps = target.querySelectorAll('.ai-tool-step.is-running');
+          for (var rsIdx = 0; rsIdx < runningSteps.length; rsIdx++) {
+            var rsEl = runningSteps[rsIdx];
+            rsEl.classList.remove('is-running');
+            rsEl.classList.add('is-done');
+            var rsStatus = rsEl.querySelector('.ai-tool-step-status');
+            if (rsStatus && /进行中/.test(String(rsStatus.textContent || ''))) rsStatus.textContent = '已结束';
+          }
+        } catch (eSettle3) {}
         var statuses = target.querySelectorAll('.ai-enhanced-status, .ai-tool-status, .ai-search-supplement');
         for (var statusIndex = 0; statusIndex < statuses.length; statusIndex++) {
           // 保留工具结果卡片（.ai-tool-result-card）：回复完成后用户仍能看到搜索/天气/汇率结果
@@ -8154,6 +8215,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var stBar = assistantNode.querySelector('.ai-search-status');
             var stText = evt.status === 'completed' ? '已联网' : '联网中…';
             var stFresh = buildSearchStatusBar({ statusText: stText, simple: true });
+            // ★ 修复：区分运行态/完成态，供 settleSearchStatus 判断是否还需收敛。
+            //   completed 时直接标记 is-settled（动画停止），in_progress 时标 is-running。
+            if (evt.status === 'completed') {
+              stFresh.classList.add('is-settled');
+            } else {
+              stFresh.classList.add('is-running');
+            }
             if (stBar && stBar.parentNode) stBar.parentNode.replaceChild(stFresh, stBar);
             else assistantNode.insertBefore(stFresh, assistantBubble);
             continue;
@@ -8167,6 +8235,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               query: evt.query || '',
               results: evt.results || []
             });
+            // ★ 修复：搜索结果已到达 → 直接标记完成态，动画立即停止，
+            //   不再依赖 done 事件（此前 search 事件只更新文字，动画仍在跑）。
+            searchFresh.classList.add('is-settled');
             if (searchBar && searchBar.parentNode) searchBar.parentNode.replaceChild(searchFresh, searchBar);
             else assistantNode.insertBefore(searchFresh, assistantBubble);
             continue;
@@ -8195,6 +8266,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               }
             }
             var errFresh = buildSearchStatusBar(errOpts);
+            // ★ 修复：失败也是终态，停止动画，避免"失败后还在转"
+            errFresh.classList.add('is-settled');
             if (searchBar2 && searchBar2.parentNode) searchBar2.parentNode.replaceChild(errFresh, searchBar2);
             else assistantNode.insertBefore(errFresh, assistantBubble);
             continue;
@@ -8632,6 +8705,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (assistantNode) assistantNode.appendChild(filteredNote);
             }
             
+            // ★ 修复（"已搜完仍显示正在搜索中"）：无论 done 包里有没有搜索信息，
+            //   都在终态把残留的进行中状态条收敛掉，避免动画永久闪烁。
+            try { settleSearchStatus(assistantNode); } catch (eSettle) {}
+
             doneReceived = true;
             evtHandled = true;
             if (sharedCtrl) {

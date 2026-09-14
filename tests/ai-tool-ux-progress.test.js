@@ -178,10 +178,20 @@ test('legacy model ids are migrated rather than silently rejected', function () 
 test('tool UI animations exist and respect motion preferences', function () {
   var css = read('css/ui-enhance.css');
   assert.ok(css.indexOf('@keyframes xtjToolStepIn') >= 0, '缺少步骤进入动画');
-  assert.ok(css.indexOf('@keyframes xtjToolPulse') >= 0, '缺少运行态脉动动画');
+  // ★ 2026-09-13 行为变更：用户反馈动画"太吵"（图标 1.15s 高频闪烁 + 左侧 .75s
+  //   跑马灯，同屏多处高频动效）。已移除 xtjToolPulse / xtjToolBarRun，
+  //   改用单一 2.4s 柔和呼吸光晕 xtjToolGlow。断言随之更新为锁定"舒缓"契约。
+  assert.ok(css.indexOf('@keyframes xtjToolGlow') >= 0, '缺少运行态呼吸光晕动画');
+  assert.strictEqual(css.indexOf('@keyframes xtjToolPulse'), -1,
+    'xtjToolPulse（高频闪烁）应已移除');
+  assert.strictEqual(css.indexOf('@keyframes xtjToolBarRun'), -1,
+    'xtjToolBarRun（跑马灯）应已移除');
   assert.ok(css.indexOf('@keyframes xtjToolResultIn') >= 0, '缺少结果卡片进入动画');
   // 运行态视觉指示
   assert.ok(css.indexOf('.ai-tool-step.is-running::before') >= 0, '缺少运行态进度条');
+  // 呼吸周期必须足够缓慢，否则又变成"吵"
+  var m = css.match(/animation:\s*xtjToolGlow\s+([\d.]+)s/);
+  assert.ok(m && Number(m[1]) >= 2, '呼吸光晕周期应 >= 2s，实际: ' + (m && m[1]));
   // 必须同时尊重 prefers-reduced-motion 与项目自身的 motion 开关
   assert.ok(css.indexOf('html[data-xtj-motion=off] .ai-tool-step') >= 0,
     '工具动画未接入 data-xtj-motion 开关，会在低性能档位继续消耗资源');

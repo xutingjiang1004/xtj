@@ -583,35 +583,45 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   0%   { opacity: 0; transform: translateY(-6px); }
   100% { opacity: 1; transform: translateY(0); }
 }
-@keyframes xtjToolPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: .55; transform: scale(.88); }
+/* ★ 2026-09-13：移除 xtjToolPulse（图标闪烁）与 xtjToolBarRun（跑马灯）。
+   用户反馈原效果"太吵"：图标 1.15s 高频闪烁、左侧条纹 .75s 快速跑动，
+   加上 progress-shimmer，一屏内有三处高频动效同时闪烁。
+   改为「柔和呼吸光晕」：单一 2.4s 缓慢呼吸的淡青光晕，无位移、无闪烁、
+   无跑马灯，视觉上只在"轻柔地活着"，不抢注意力。 */
+@keyframes xtjToolGlow {
+  0%, 100% { opacity: .28; transform: scaleY(.86); }
+  50%      { opacity: .58; transform: scaleY(1); }
 }
 @keyframes xtjToolResultIn {
   0%   { opacity: 0; transform: translateY(6px) scale(.985); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
-@keyframes xtjToolBarRun {
-  0%   { background-position: 0 0; }
-  100% { background-position: 36px 0; }
-}
 
 /* 1) 步骤进入动画 */
 .ai-tool-step { animation: xtjToolStepIn .22s cubic-bezier(.16, 1, .3, 1) both; }
 
-/* 2) 运行中：图标脉动 + 状态文字轻微呼吸，右侧给出动态条纹指示 */
-.ai-tool-step.is-running .ai-tool-step-icon { animation: xtjToolPulse 1.15s ease-in-out infinite; }
+/* 2) 运行中：柔和呼吸光晕（取代原"图标闪烁 + 跑马灯"） */
 .ai-tool-step.is-running {
   position: relative;
   padding-left: 8px;
 }
 .ai-tool-step.is-running::before {
   content: '';
-  position: absolute; left: 0; top: 2px; bottom: 2px; width: 3px;
+  position: absolute;
+  left: 0; top: 2px; bottom: 2px;
+  width: 3px;
   border-radius: 999px;
-  background-image: linear-gradient(90deg, rgba(47,127,158,.85) 0 6px, rgba(47,127,158,.18) 6px 12px);
-  background-size: 12px 100%;
-  animation: xtjToolBarRun .75s linear infinite;
+  background: rgba(47, 127, 158, .85);
+  /* 光晕而非条纹：无 background-position 位移，只有缓慢明暗与纵向轻呼吸 */
+  box-shadow: 0 0 6px rgba(47, 127, 158, .35);
+  transform-origin: center;
+  animation: xtjToolGlow 2.4s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+/* 运行中图标保持稳定，不再闪烁 */
+.ai-tool-step.is-running .ai-tool-step-icon {
+  animation: none;
+  opacity: 1;
 }
 
 /* 3) 状态切换过渡：完成/失败时颜色与位移平滑变化 */
@@ -648,7 +658,12 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   .ai-tool-step.is-done .ai-tool-step-icon,
   .ai-tool-step.is-error .ai-tool-step-icon { animation: none !important; }
   .ai-tool-step.is-running .ai-tool-step-icon { animation: none !important; opacity: 1; }
-  .ai-tool-step.is-running::before { animation: none !important; }
+  .ai-tool-step.is-running::before {
+    animation: none !important;
+    opacity: .5;
+    transform: none;
+    box-shadow: none;
+  }
 }
 html[data-xtj-motion=off] .ai-tool-step,
 html[data-xtj-motion=off] .ai-tool-result-card,

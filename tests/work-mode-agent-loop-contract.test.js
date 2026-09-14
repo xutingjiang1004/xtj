@@ -116,11 +116,35 @@ test('修复③：思考+工具被上游拒绝时有降级重试兜底', () => {
 });
 
 test('修复③：工作模式在非流式 /chat 路径同样生效', () => {
+  // ★ 2026-09-13 行为变更：工作模式不再经 aiToolsFilteredForThirdParty
+  //   （该路径曾按搜索配额裁剪工具可见性，导致"AI 说它只有几个工具"且用户
+  //   无法从界面看出原因），改用专用的 aiToolsForWorkMode() —— 恒定全量工具，
+  //   配额只在真正发起搜索时 gate。断言随之锁定该新契约。
   assert.match(
     serverSrc,
-    /tools: workModeEnabled\s*\n?\s*\?\s*aiToolsFilteredForThirdParty/,
+    /tools: workModeEnabled\s*\n?\s*\?\s*aiToolsForWorkMode\(\)/,
     '非流式路径未按工作模式挂载完整工具集'
   );
+  assert.match(
+    serverSrc,
+    /function aiToolsForWorkMode\(\)\s*\{\s*return AI_TOOLS;/,
+    '工作模式工具集应恒返回全量 AI_TOOLS'
+  );
+});
+
+test('修复③：工具可见性不因第三方搜索配额被裁剪', () => {
+  // 配额 gate 应发生在 executeToolCall 内部（搜索分支各自调 enforceSearchQuota），
+  // 而不是在装配层把工具从模型视野里删掉。
+  const fnIdx = serverSrc.indexOf('function aiToolsFilteredForThirdParty');
+  assert.ok(fnIdx > -1, '应保留兼容别名函数');
+  const seg = serverSrc.slice(fnIdx, fnIdx + 400);
+  assert.match(seg, /return aiToolsForSearch\(true\)/,
+    '兼容别名的语义应统一为"全量工具"，不得再按配额过滤');
+  // 搜索分支内部仍必须有配额 gate（避免真的绕过计费）
+  const swIdx = serverSrc.indexOf("case 'search_web': {");
+  assert.ok(swIdx > -1, '应存在 search_web 分支');
+  const swSeg = serverSrc.slice(swIdx, swIdx + 1500);
+  assert.match(swSeg, /enforceSearchQuota/, 'search_web 内部必须做配额 gate');
 });
 
 test('体验：工具调用进度通过 tool_calls 事件下发（与既有协议一致）', () => {
