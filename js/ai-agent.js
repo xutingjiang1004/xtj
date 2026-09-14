@@ -7553,6 +7553,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var usageResult = null;
       var finalModel = '';
       var finalThinkingMode = '';
+      // ★ 工作模式追踪：记录本次请求是否处于工作模式、实际调用了多少次工具。
+      //   用于回复完成后在底部显示「工作模式」徽标与工具调用次数，
+      //   让用户能直观确认工作模式确实生效（而不是「感觉跟没打开一样」）。
+      var streamWorkMode = S.workMode === true;
+      var streamToolCount = 0;
       var streamConvId = null;
       var doneReceived = false;
       var _eofReached = false; // ★ 修复：SSE EOF flush 前置标志此前未声明（严格模式下 EOF 即抛 ReferenceError）
@@ -7732,6 +7737,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           var footer = el('div', { class: 'ai-msg-footer' });
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+          // ★ 工作模式徽标：让用户能明确看到「这条回复是工作模式产出的」，
+          //   避免开了工作模式却因为界面无变化而误以为没生效。
+          //   优先用本次流式实时记录（streamWorkMode），历史回看回退到消息持久化字段。
+          if (streamWorkMode || aiMsg.work_mode === true) {
+            footer.appendChild(el('span', { class: 'ai-msg-thinking-badge ai-msg-work-badge', text: '工作模式' }));
+          }
+          if (streamToolCount > 0) {
+            footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: '调用工具 ' + streamToolCount + ' 次' }));
+          }
           if (finalThinkingMode && finalThinkingMode !== 'off') {
             footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 ' + finalThinkingMode }));
           }
@@ -8035,6 +8049,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'tool_calls') {
             var toolList = evt.tools || [];
+            streamToolCount += toolList.length;
             var nameMapCall = {
               search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
               get_weather: '查询天气', get_current_time: '获取时间',
@@ -8384,6 +8399,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               usageResult = evt.usage || null;
               finalModel = evt.model || '';
               finalThinkingMode = evt.thinking_mode || evt.applied_thinking_mode || S.thinkingMode;
+              // ★ 工作模式：以后端实际回传为准（后端才真正知道这次是否按工作模式跑的）
+              if (typeof evt.work_mode === 'boolean') streamWorkMode = evt.work_mode;
               // sanitized_content 优先：后端清洗后的正文
               if (evt.sanitized_content) {
                 aiContent = evt.sanitized_content;
