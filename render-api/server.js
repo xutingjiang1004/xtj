@@ -865,7 +865,7 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'run_code',
-      description: '【代码沙箱】在受限沙箱中执行 JavaScript 代码处理数据。适合：批量计算、数组/字符串处理、JSON 转换、统计（求和/均值/最大最小/去重/排序）、正则提取、日期计算、数据格式转换等。\n- 代码在隔离环境运行：无网络、无文件系统、无 require/import、有执行超时\n- 用 console.log() 或 return 输出结果\n- 示例：求数组中位数 → var a=[3,1,2]; a.sort((x,y)=>x-y); return a[Math.floor(a.length/2)]\n- 不适合：需要联网、读写文件、安装依赖的场景',
+      description: '【代码沙箱】在强隔离沙箱中执行 JavaScript 代码处理数据。适合：批量计算、数组/字符串处理、JSON 转换、统计（求和/均值/最大最小/去重/排序）、正则提取、日期计算、数据格式转换等。\n- 代码在 V8 独立隔离环境中运行：无网络、无文件系统、无 require/process，内存限 32MB、超时 3 秒\n- 用 console.log() 或 return 输出结果\n- 🎁 沙箱已预装常用工具库，**直接使用，不要 require**：\n  · `_` 或 `lodash` —— 集合/数组/对象处理（_.chunk/_.groupBy/_.orderBy/_.uniqBy/_.sumBy 等）\n  · `math` 或 `mathjs` —— 数学计算（math.evaluate("sqrt(16)+2^10")、矩阵、单位换算、导数）\n  · `Papa` —— CSV/TSV 解析与生成（Papa.parse(text,{header:true}).data）\n  · `dayjs` —— 日期时间处理（dayjs(x).add(1,"day").format("YYYY-MM-DD")）\n  · `Decimal` —— 高精度小数运算（new Decimal(0.1).plus(0.2)）\n  · `fxp` —— XML 解析（new fxp.XMLParser().parse(xml)）\n- 示例：求数组中位数 → var a=[3,1,2]; a.sort((x,y)=>x-y); return a[Math.floor(a.length/2)]\n- 示例：CSV 统计 → return _.sumBy(Papa.parse(input,{header:true}).data, r => Number(r.amount))\n- 不适合：需要联网、读写本地文件、安装新依赖、执行系统命令的场景',
       parameters: {
         type: 'object',
         properties: {
@@ -1269,77 +1269,25 @@ const AI_TOOLS = [
 
 // ===================== 代码沙箱（受限执行，零依赖 / 零成本） =====================
 // ★ 安全设计（对齐项目既有 safeEvalMath 的"自建解释器、不 eval"思路）：
-//   不直接 eval 用户代码，而是用 Node 内置 vm 在受限上下文执行，并做多重封堵：
-//   ① 代码长度上限 20000 字符；② 执行超时 3000ms（vm.runInContext 的 timeout）；
-//   ③ 沙箱上下文只注入白名单 API（Math/JSON/Date/Array/String 等纯计算能力）；
-//   ④ 显式删除 process / require / global / globalThis / Buffer / fetch / importScripts；
-//   ⑤ 不提供任何网络与文件系统访问；⑥ 输出结果截断 8000 字符。
-//   注：vm 非强隔离（非付费沙箱级别），但对"纯数据处理"场景足够，且无网络无文件系统，
-//   无法触及环境变量/数据库/密钥，风险可控。真需要 bash/装包/联网的强隔离沙箱需付费服务。
-var vm = require('vm');
+//   不直接 eval 用户代码，而是在隔离环境执行，并做多重封堵：
+//   ① 代码长度上限 20000 字符；② 执行超时 3000ms；③ 沙箱上下文只注入白名单 API；
+//   ④ 不提供任何网络与文件系统访问；⑤ 输出结果截断 8000 字符。
+//
+// ★ 2026-09-14 升级（强隔离沙箱）：
+//   原实现用 Node 内置 vm 模块。vm 是"同进程同 Isolate"，存在原型链逃逸风险
+//   （经典攻击：`(function(){}).constructor("return process")()`），且其 timeout
+//   对纯 CPU 死循环并不可靠。
+//   现已迁移到 render-api/sandbox.js：
+//     - 首选 isolated-vm（V8 独立 Isolate）：内存上限 32MB、硬超时、无法逃逸；
+//     - 预装常用计算库（lodash / mathjs / papaparse / dayjs / decimal.js /
+//       fast-xml-parser），AI 可直接调用，无需重复造轮子；
+//     - 若 isolated-vm 加载失败（平台 ABI 不匹配等），自动降级回原 vm 实现，
+//       **绝不让服务起不来**。
+//   下方的 runInSandbox 保留为薄封装，仅负责委派，保证既有调用方零改动。
+var sandboxModule = require('./sandbox');
 
 function runInSandbox(code, input) {
-  var src = String(code || '');
-  if (!src.trim()) throw new Error('代码为空');
-  if (src.length > 20000) throw new Error('代码过长（上限 20000 字符）');
-
-  // 采集 console.log 输出
-  var logs = [];
-  var sandbox = {
-    input: input === undefined ? undefined : input,
-    console: {
-      log: function() {
-        var parts = [];
-        for (var i = 0; i < arguments.length; i++) {
-          var a = arguments[i];
-          try { parts.push(typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a)); }
-          catch (e) { parts.push(String(a)); }
-        }
-        if (logs.length < 200) logs.push(parts.join(' '));
-      }
-    },
-    // 白名单：纯计算类 API，无任何 IO
-    Math: Math, JSON: JSON, Date: Date,
-    Number: Number, String: String, Boolean: Boolean,
-    Array: Array, Object: Object, RegExp: RegExp,
-    Map: Map, Set: Set, Promise: Promise,
-    parseInt: parseInt, parseFloat: parseFloat, isNaN: isNaN, isFinite: isFinite,
-    encodeURIComponent: encodeURIComponent, decodeURIComponent: decodeURIComponent,
-    encodeURI: encodeURI, decodeURI: decodeURI,
-    Error: Error, TypeError: TypeError, RangeError: RangeError, SyntaxError: SyntaxError
-  };
-  // 显式封堵危险全局（即便 contextify 已隔离，仍显式置空，防原型链逃逸）
-  sandbox.process = undefined;
-  sandbox.require = undefined;
-  sandbox.global = undefined;
-  sandbox.globalThis = undefined;
-  sandbox.Buffer = undefined;
-  sandbox.fetch = undefined;
-  sandbox.setTimeout = undefined;
-  sandbox.setInterval = undefined;
-  sandbox.setImmediate = undefined;
-  sandbox.eval = undefined;
-  sandbox.Function = undefined;
-  void vm;
-
-  var context = vm.createContext(sandbox);
-  // ★ 关键：用 IIFE 包裹用户代码，否则顶层 return 会抛 "Illegal return statement"。
-  //   使用普通 function（非箭头）以兼容用户写 return 直接返回值的习惯。
-  //   注意：sandbox.Function 已置空，此包裹由宿主代码拼接，非用户可控。
-  var scriptSrc = '"use strict";\n(function(){\n' + src + '\n})();';
-  var result = vm.runInContext(scriptSrc, context, { timeout: 3000, breakOnSigint: true });
-
-  var out = '';
-  if (logs.length) out += logs.join('\n');
-  if (result !== undefined) {
-    var resStr;
-    try { resStr = typeof result === 'object' && result !== null ? JSON.stringify(result, null, 2) : String(result); }
-    catch (e) { resStr = String(result); }
-    out += (out ? '\n【返回值】\n' : '') + resStr;
-  }
-  if (!out) out = '（代码执行完毕，无输出。请用 return 或 console.log 返回结果）';
-  if (out.length > 8000) out = out.slice(0, 8000) + '\n...(输出过长已截断)';
-  return out;
+  return sandboxModule.runInSandbox(code, input);
 }
 
 // 按点/中括号路径提取 JSON 值：支持 a.b.0.c 与 a.b[0].c
@@ -10008,10 +9956,15 @@ app.get('/health', async (req, res) => {
   var dbProbe = await probeDatabaseConnectivity();
   var dbOk = dbProbe.status === 'ok';
   var overallOk = allConfigOk && dbOk;
+  // 沙箱状态：引擎名 + 可用预装库（不含任何密钥，仅用于确认部署后沙箱能力生效）
+  var sandboxStatus;
+  try { sandboxStatus = sandboxModule.sandboxInfo(); }
+  catch (eS) { sandboxStatus = { engine: 'unknown', error: (eS && eS.message) || 'unavailable' }; }
   return res.status(overallOk ? 200 : 503).json({
     ok: overallOk,
     node: nodeStatus,
     config: Object.assign({ ok: allConfigOk }, configStatus),
+    sandbox: sandboxStatus,
     database: {
       ok: dbOk,
       status: dbProbe.status,
@@ -18958,7 +18911,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         '① 先判断任务需要哪些步骤，可多步按顺序推进，不要只做一步就交差；',
         '② 查资料用 web_search / web_extract（web_extract 能抓网页正文，比摘要更全）；搜社媒账号或内容用 search_social；',
         '③ 读文档用 read_document（支持 PDF / Word / Excel / CSV / TXT，传文件链接即可，会返回正文或表格内容）；',
-        '④ 要算数、处理数据、分析文本用 run_code（在受限沙箱里跑 JavaScript，支持大量计算与格式转换）、process_json、text_stats、date_calc、encode_decode；',
+        '④ 要算数、处理数据、分析文本用 run_code（在强隔离沙箱里跑 JavaScript，支持大量计算与格式转换）、process_json、text_stats、date_calc、encode_decode；',
+        '   ★ run_code 沙箱已预装常用库可直接用（无需 require）：_ / lodash（集合处理）、math / mathjs（数学计算）、Papa（CSV）、dayjs（日期）、Decimal（高精度小数）、fxp（XML 解析）；',
         '⑤ 要交付文件用 make_file（生成 CSV / Excel / TXT 供用户下载，Excel 支持多工作表）；',
         '⑥ 步骤多、任务复杂的，先用 task_plan 列出计划再逐步执行，每完成一步更新进度；',
         '⑦ 每一步根据上一步的真实结果决定下一步，直到任务真正完成为止；',
@@ -20470,7 +20424,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         '① 先判断任务需要哪些步骤，可多步按顺序推进，不要只做一步就交差；',
         '② 查资料用 web_search / web_extract（web_extract 能抓网页正文，比摘要更全）；搜社媒账号或内容用 search_social；',
         '③ 读文档用 read_document（支持 PDF / Word / Excel / CSV / TXT，传文件链接即可，会返回正文或表格内容）；',
-        '④ 要算数、处理数据、分析文本用 run_code（在受限沙箱里跑 JavaScript，支持大量计算与格式转换）、process_json、text_stats、date_calc、encode_decode；',
+        '④ 要算数、处理数据、分析文本用 run_code（在强隔离沙箱里跑 JavaScript，支持大量计算与格式转换）、process_json、text_stats、date_calc、encode_decode；',
+        '   ★ run_code 沙箱已预装常用库可直接用（无需 require）：_ / lodash（集合处理）、math / mathjs（数学计算）、Papa（CSV）、dayjs（日期）、Decimal（高精度小数）、fxp（XML 解析）；',
         '⑤ 要交付文件用 make_file（生成 CSV / Excel / TXT 供用户下载，Excel 支持多工作表）；',
         '⑥ 步骤多、任务复杂的，先用 task_plan 列出计划再逐步执行，每完成一步更新进度；',
         '⑦ 每一步根据上一步的真实结果决定下一步，直到任务真正完成为止；',
