@@ -2466,6 +2466,8 @@ async function finishStream(res, opt) {
   var finishReason = opt.finishReason || 'upstream_closed';
   var thinkingMode = opt.thinkingMode || 'off';
   var useThinking = opt.useThinking || false;
+  // ★ 工作模式标记：优先取调用方显式传入，回退到请求级标记（req._workMode）。
+  var workModeForStream = opt.workMode === true || !!(req && req._workMode === true);
   var usedModel = normalizeDeepSeekUsageModel(opt.usedModel || DEEPSEEK_MODEL_REASONER, opt.usedModel || DEEPSEEK_MODEL_REASONER);
   var isComplete = finishReason === 'stop' || finishReason === 'length' || (hasContent && finishReason === 'upstream_closed') || finishReason === 'idle_timeout' || finishReason === 'partial_content';
   var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
@@ -2480,7 +2482,10 @@ async function finishStream(res, opt) {
         thinking_mode: thinkingMode,
         model: usedModel,
         requested_thinking_mode: thinkingMode,
-        applied_thinking_mode: useThinking ? thinkingMode : 'off'
+        applied_thinking_mode: useThinking ? thinkingMode : 'off',
+        // ★ 工作模式标记随 usage 一起落库：刷新/历史回看时前端仍能显示「工作模式」徽标，
+        //   否则用户在历史记录里看不出哪条是工作模式产出的。
+        work_mode: workModeForStream
       });
       var seqUser = (opt.streamSeq || 0) + 1;
       var seqAssistant = (opt.streamSeq || 0) + 2;
@@ -2569,6 +2574,8 @@ async function finishStream(res, opt) {
     applied_thinking_mode: useThinking ? thinkingMode : 'off',
     reasoning_length: reasoning.length,
     content_length: content.length,
+    // ★ 工作模式标记：前端据此显示「工作模式」徽标，让用户确认开关确实生效。
+    work_mode: workModeForStream,
     search_count: searchMeta ? searchMeta.count : undefined,
     search_query: searchMeta ? searchMeta.query : undefined,
     // ★ P1 关键修复：done 事件带完整 search_results 和 expires_at
@@ -6233,6 +6240,37 @@ async function callDeepSeek(messages, options) {
       }
       return normalized;
     }
+    // ★ DSML 协议探测（全项目唯一口径）
+    //   模型/网关存在多种书写变体，实测至少有：
+    //     ① `<|DSML|invoke>`            标准形式
+    //     ② `<| | DSML | | invoke>`     竖线成对且带空格（截图实测的真实格式）
+    //     ③ `<｜DSML｜invoke>`          全角竖线
+    //   结构可归纳为 `<` [竖线] [空白] [竖线] [空白] `DSML` ... ，即竖线允许出现
+    //   1~2 次且两侧可有任意空白。旧正则只容忍单个竖线，遇到变体②会 0 命中，
+    //   导致工具调用原样泄漏到用户可见区域 —— 这是"工作模式看起来没生效"的直接原因之一。
+    var _DSML_PIPE = '[|\\uff5c]\\s*[|\\uff5c]?\\s*';
+    var _DSML_PROBE = new RegExp('<' + _DSML_PIPE + 'DSML\\s*' + _DSML_PIPE, 'i');
+    // 捕获开/闭标记：closing = '/'，name = 帧名，attrs = 其余属性
+    var _DSML_MARKER_SRC = '<(\\/?)' + _DSML_PIPE + 'DSML\\s*' + _DSML_PIPE + '([A-Za-z_][A-Za-z0-9_\\-]*)([^>]*)>';
+    function containsDsmlProtocol(text) {
+      return _DSML_PROBE.test(String(text || ''));
+    }
+
+    // ★ 思考通道安全闸：判断一段思考文本是否可能包含内部协议痕迹。
+    //   比 containsDsmlProtocol 更宽：除完整 DSML 标记外，还拦截可能被流式
+    //   切碎的半截标记（如单独的 `<|`、`|DSML`、`<| |` 等），因为流式按 chunk
+    //   推送时，一个标记可能被拆到多个 chunk 里，只看单个 chunk 会漏判。
+    function hasThinkingProtocolRisk(text) {
+      var t = String(text || '');
+      if (!t) return false;
+      if (_DSML_PROBE.test(t)) return true;
+      // 半截标记：出现尖括号 + 竖线组合，或 DSML/tool_calls/invoke 等关键字
+      if (/<\s*[|\uff5c]/.test(t)) return true;
+      if (/[|\uff5c]\s*DSML/i.test(t)) return true;
+      if (/DSML\s*[|\uff5c]/i.test(t)) return true;
+      return false;
+    }
+
     // DeepSeek V4 normally returns OpenAI-compatible message.tool_calls.  A
     // provider/proxy compatibility path has also been observed returning the
     // DSML wire representation in message.content instead.  DSML is an
@@ -6242,19 +6280,31 @@ async function callDeepSeek(messages, options) {
     // executed and cannot be mistaken for a final answer.
     function parseDsmlToolCalls(rawText, roundNumber) {
       var raw = String(rawText || '');
-      var marker = /<[|\uff5c]DSML[|\uff5c]([A-Za-z_][A-Za-z0-9_\-]*)([^>]*)>/g;
+      // ★ 兼容多种 DSML 书写变体（不同网关/模型版本差异）：
+      //   `<|DSML|invoke>` / `<| | DSML | | invoke>` / `<｜DSML｜invoke>` / `<|DSML|tool_calls>`
+      //   即竖线（ASCII | 或全角 ｜）之间允许出现任意空白。
+      //   旧正则只认无空格形式，遇到带空格的 `<| | DSML | |` 会 0 命中，
+      //   导致工具调用原样泄漏给用户，这是"工作模式看起来没生效"的直接原因之一。
+      var marker = new RegExp(_DSML_MARKER_SRC, 'g');
+      var dsmlProbe = _DSML_PROBE;
       var records = [];
       var match;
       while ((match = marker.exec(raw)) !== null) {
-        records.push({ name: String(match[1] || '').toLowerCase(), attrs: String(match[2] || ''), start: match.index, end: marker.lastIndex });
+        records.push({ closing: match[1] === '/', name: String(match[2] || '').toLowerCase(), attrs: String(match[3] || ''), start: match.index, end: marker.lastIndex });
       }
       var startIndex = -1;
+      // ★ 起始帧名兼容（截图实测模型会输出简写 `<| | DSML | | calls>`）：
+      //   严格协议里外层是 tool_calls / function_calls，但实测存在 calls 简写。
+      //   旧逻辑只认前两者，遇到 calls 会判定为 incomplete header → 工具调用直接失败，
+      //   这正是"打开工作模式跟没打开一样"的直接原因。
+      //   注意：放宽的只是「帧名识别」，工具白名单/必填参数/类型校验一律不变。
       for (var di = 0; di < records.length; di++) {
-        if (records[di].name === 'tool_calls' || records[di].name === 'function_calls') { startIndex = di; break; }
+        if (records[di].closing) continue;
+        if (records[di].name === 'tool_calls' || records[di].name === 'function_calls' || records[di].name === 'calls') { startIndex = di; break; }
       }
       if (startIndex < 0) {
         // A partial marker is still protocol, not a natural language answer.
-        return { detected: /<[|\uff5c]DSML[|\uff5c]/i.test(raw), calls: [], error: /<[|\uff5c]DSML[|\uff5c]/i.test(raw) ? 'incomplete DSML header' : '', visibleContent: raw };
+        return { detected: dsmlProbe.test(raw), calls: [], error: dsmlProbe.test(raw) ? 'incomplete DSML header' : '', visibleContent: raw };
       }
       function decodeValue(value) {
         var text = String(value === undefined || value === null ? '' : value).trim();
@@ -6311,10 +6361,29 @@ async function callDeepSeek(messages, options) {
       var protocolEnd = raw.length;
       for (var mi = startIndex + 1; mi < records.length; mi++) {
         var record = records[mi];
+        // ★ 结束帧识别：既支持显式 end 帧，也支持闭合标记（`</|DSML|tool_calls>`、
+        //   `</|DSML|invoke>` 等）。全角竖线场景下闭合标记会以 `<｜DSML｜tool_calls>`
+        //   形式出现，若不识别会被当成未知帧而整轮解析失败。
         if (record.name === 'end' || record.name === 'end_tool_calls' || record.name === 'tool_calls_end' || record.name === 'end_function_calls') {
           complete = true;
           protocolEnd = record.end;
           break;
+        }
+        if (record.closing) {
+          // 闭合外层帧（tool_calls/function_calls/calls）→ 协议正常收尾
+          if (record.name === 'tool_calls' || record.name === 'function_calls' || record.name === 'calls') {
+            complete = true;
+            protocolEnd = record.end;
+            break;
+          }
+          // 闭合 invoke → 当前调用收尾，继续等待后续 invoke
+          if (record.name === 'invoke') {
+            if (current) { calls.push(current); current = null; }
+            continue;
+          }
+          // 闭合 parameter → 参数体结束，无需额外处理（body 已按切片取得）
+          if (record.name === 'parameter') continue;
+          continue;
         }
         if (record.name === 'invoke') {
           if (current) calls.push(current);
@@ -6328,16 +6397,43 @@ async function callDeepSeek(messages, options) {
           var nextStart = mi + 1 < records.length ? records[mi + 1].start : raw.length;
           var body = raw.slice(record.end, nextStart).trim();
           var paramName = typeof parameterAttrs.name === 'string' ? parameterAttrs.name : (typeof parameterAttrs.key === 'string' ? parameterAttrs.key : '');
-          var valueKey = Object.prototype.hasOwnProperty.call(parameterAttrs, 'value') ? 'value' :
-            (Object.prototype.hasOwnProperty.call(parameterAttrs, 'string') ? 'string' :
-              (Object.prototype.hasOwnProperty.call(parameterAttrs, 'number') ? 'number' :
-                (Object.prototype.hasOwnProperty.call(parameterAttrs, 'integer') ? 'integer' :
-                  (Object.prototype.hasOwnProperty.call(parameterAttrs, 'boolean') ? 'boolean' :
-                    (Object.prototype.hasOwnProperty.call(parameterAttrs, 'json') ? 'json' : '')))));
+          // ★ 类型标记 vs 值属性的区分（这是"工具调用看起来没生效"的第二个直接原因）：
+          //   某些网关把参数写成 `<|DSML|parameter name="code" string="true">真实代码体</|DSML|parameter>`，
+          //   这里的 string="true" 声明的是「该参数是字符串类型」，真正的值在标签体内。
+          //   旧逻辑把 string 一律当成值属性取值，于是 code 被赋成布尔 true、
+          //   标签体内十几行代码被整段丢弃 → 参数类型校验失败 → 工具调用报错失败。
+          //   判定规则：类型名与 true 同时出现（或该类型属性的值为布尔类型）时，视为类型标记，
+          //   真正的值改从标签体读取；仅当值不是布尔时才按「短写法」取属性值。
+          var TYPE_TAG_KEYS = ['string', 'number', 'integer', 'boolean', 'json'];
+          function isTypeMarker(key) {
+            if (TYPE_TAG_KEYS.indexOf(key) < 0) return false;
+            var raw = parameterAttrs[key];
+            return raw === true || raw === false || raw === 'true' || raw === 'false';
+          }
+          var valueKey = Object.prototype.hasOwnProperty.call(parameterAttrs, 'value') ? 'value' : '';
+          if (!valueKey) {
+            for (var tk = 0; tk < TYPE_TAG_KEYS.length; tk++) {
+              if (Object.prototype.hasOwnProperty.call(parameterAttrs, TYPE_TAG_KEYS[tk])) { valueKey = TYPE_TAG_KEYS[tk]; break; }
+            }
+          }
           var hasValue = !!valueKey;
-          var value = hasValue ? parameterAttrs[valueKey] : (body ? decodeValue(body) : undefined);
-          if (valueKey === 'json' && typeof value === 'string') {
-            try { value = JSON.parse(value); } catch (_) { current.malformed = true; }
+          var isTypeOnly = hasValue && isTypeMarker(valueKey);
+          var value;
+          if (isTypeOnly) {
+            // 类型标记：真值在标签体内，按声明的类型解析
+            value = body ? decodeValue(body) : undefined;
+            var declaredType = valueKey;
+            if (declaredType === 'json' && typeof value === 'string') {
+              try { value = JSON.parse(value); } catch (_) { current.malformed = true; }
+            } else if (declaredType === 'string' && body) {
+              // 字符串类型必须保留原始正文（不解码成数字/布尔），并还原 XML 实体
+              value = body.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+            }
+          } else {
+            value = hasValue ? parameterAttrs[valueKey] : (body ? decodeValue(body) : undefined);
+            if (valueKey === 'json' && typeof value === 'string') {
+              try { value = JSON.parse(value); } catch (_) { current.malformed = true; }
+            }
           }
           if (paramName) {
             if (value === undefined) current.malformed = true;
@@ -6349,6 +6445,16 @@ async function callDeepSeek(messages, options) {
             });
             if (!copied) current.malformed = true;
           }
+          // ★ 块格式（类型标记）必须闭合：`<|DSML|parameter name="x" string="true">值</|DSML|parameter>`。
+          //   若标签体没有对应的闭合帧，说明工具调用被截断，绝不能执行
+          //   （否则会把半截参数当成完整参数用掉，造成静默错误结果）。
+          if (isTypeOnly) {
+            var closed = false;
+            for (var ci2 = mi + 1; ci2 < records.length; ci2++) {
+              if (records[ci2].closing && records[ci2].name === 'parameter') { closed = true; break; }
+            }
+            if (!closed) current.malformed = true;
+          }
           continue;
         }
         // Unknown DSML frames are not safe to reinterpret as prose.
@@ -6357,7 +6463,7 @@ async function callDeepSeek(messages, options) {
       if (current) calls.push(current);
       // Some compatible gateways omit an explicit end frame. Accept only a
       // fully formed final invoke; a dangling partial marker remains an error.
-      if (!complete && /<[|\uff5c]DSML[|\uff5c][^>]*$/.test(raw)) return { detected: true, calls: [], error: 'incomplete DSML frame', visibleContent: raw.slice(0, records[startIndex].start).trim() };
+      if (!complete && dsmlProbe.test(raw) && new RegExp('<' + _DSML_PIPE + 'DSML\\s*' + _DSML_PIPE + '[^>]*$').test(raw)) return { detected: true, calls: [], error: 'incomplete DSML frame', visibleContent: raw.slice(0, records[startIndex].start).trim() };
       if (!calls.length) return { detected: true, calls: [], error: 'missing DSML invoke', visibleContent: (raw.slice(0, records[startIndex].start) + raw.slice(protocolEnd)).trim() };
       var normalizedDsml = [];
       for (var ci = 0; ci < calls.length; ci++) {
@@ -6371,7 +6477,8 @@ async function callDeepSeek(messages, options) {
     function finalReplyContainsInternalProtocol(text) {
       var candidate = String(text || '');
       // 1. DSML protocol markers are always internal
-      if (/<[|\uff5c]DSML[|\uff5c]/i.test(candidate)) return true;
+      //    （兼容 `<|DSML|` 与 `<| | DSML | |` 等竖线间带空格的变体）
+      if (containsDsmlProtocol(candidate)) return true;
       // 2. Only match RAW tool-call JSON that starts/ends cleanly with JSON brackets
       //    AND contains BOTH "function" AND either "tool_calls" or genuine tool-call structure.
       //    This avoids false positives on natural prose that merely mentions field names.
@@ -6571,6 +6678,10 @@ async function callDeepSeek(messages, options) {
       // DSML tool frames can be split across SSE chunks. Never stream a
       // tool-enabled round until the complete content has been classified.
       var deferToolRoundContent = useTools && hasContentCb;
+      // ★ 思考通道延迟推送标记：工具轮次（或思考内容含协议痕迹）时先缓冲，
+      //   等本轮分类完成后再决定是否补推，避免 DSML 原文泄漏给用户。
+      var deferredThinking = false;
+      var thinkingFlushed = false;
 
       if (useStream) {
         // ===== 流式解析 (round 0 with thinking) =====
@@ -6625,10 +6736,20 @@ async function callDeepSeek(messages, options) {
             var sDelta = sChoice.delta || {};
 
             // reasoning_content chunk → 推给回调
+            // ★ 修复：思考通道同样属于「内部协议可能泄漏面」。
+            //   实测存在网关把 DSML 工具调用写进 reasoning_content 的情况，
+            //   旧逻辑无条件推给前端 → 用户直接看到一堆 <| | DSML | | ...> 原文。
+            //   策略：只要本轮挂了工具（useTools），就先累积不推；本轮结束时若确认
+            //   不是工具调用轮次，再补推完整思考过程。含协议片段的思考内容一律不推。
             if (typeof sDelta.reasoning_content === 'string' && sDelta.reasoning_content) {
               roundReasoning += sDelta.reasoning_content;
               onProgress();
-              try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
+              if (useTools || hasThinkingProtocolRisk(sDelta.reasoning_content)) {
+                // 延迟推送：等本轮分类完成（见下方 flushThinkingIfSafe）
+                deferredThinking = true;
+              } else {
+                try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
+              }
             }
             // content chunk → 累积 + V2: 推给 onContentChunk 回调(流式答案)
             if (typeof sDelta.content === 'string' && sDelta.content) {
@@ -6714,6 +6835,12 @@ async function callDeepSeek(messages, options) {
 
       // 没 tool_calls：最终回复
       if (!toolCalls || toolCalls.length === 0) {
+        // ★ 思考通道补推：本轮确认不是工具轮次，若之前被延迟，现在安全补推。
+        //   含协议痕迹（可能是被截断的 DSML）的思考内容一律不推给前端。
+        if (deferredThinking && !thinkingFlushed && useThinking && roundReasoning && !hasThinkingProtocolRisk(roundReasoning)) {
+          try { options.onThinkingChunk(String(roundReasoning).slice(0, 4000)); } catch (e) {}
+          thinkingFlushed = true;
+        }
         if (finalReplyContainsInternalProtocol(content)) {
           console.error('[DEEPSEEK] suppressed internal tool protocol from final reply', 'round', round);
           finalContent = '（工具调用解析失败，请重试。）';
@@ -6725,6 +6852,15 @@ async function callDeepSeek(messages, options) {
           try { if (deferToolRoundContent && hasContentCb && content) options.onContentChunk(content); } catch (e) {}
         }
         break;
+      }
+
+      // ★ 工具轮次：思考内容不推给前端（可能含 DSML 协议痕迹）。
+      //   确认本轮为工具调用后，标记为已处理，避免后续轮次误补推。
+      if (deferredThinking) {
+        if (hasThinkingProtocolRisk(roundReasoning)) {
+          console.error('[DEEPSEEK] suppressed internal tool protocol from thinking channel', 'round', round);
+        }
+        thinkingFlushed = true;
       }
 
       // 有 tool_calls：追加 assistant 消息 → 执行 tool → 进入下一轮
@@ -17675,6 +17811,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // ★ 工作模式（work_mode）：请求级开关，普通聊天在当前对话框直接切换（非独立页面）。
     //   与 deep_think 深度研究严格区分：工作模式=真的动手完成任务，研究=出报告。
     var workModeEnabled = !!(req.body && req.body.work_mode === true);
+    // ★ 挂到 req 上供 finishStream 读取：需要在 done 事件与落库元数据里标记本次为工作模式，
+    //   使前端能显示「工作模式」徽标（否则用户开了开关却看不出任何区别）。
+    req._workMode = workModeEnabled;
     if (workModeEnabled) {
       corePrompt += '\n' + [
         '【工作模式】你现在处于工作模式，必须真正动手完成用户交代的任务，而不是给出建议、思路或研究报告。工作方法：',
@@ -19134,6 +19273,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //   与 deep_think 深度研究严格区分：工作模式=真的动手完成任务，研究=出一份报告。
     //   注意：此段拼接在 corePrompt 之后（不修改 corePrompt 本身，避免破坏前缀缓存）。
     var workModeEnabled = !!(req.body && req.body.work_mode === true);
+    // ★ 挂到 req 上供 finishStream 读取：需要在 done 事件与落库元数据里标记本次为工作模式，
+    //   使前端能显示「工作模式」徽标（否则用户开了开关却看不出任何区别）。
+    req._workMode = workModeEnabled;
     if (workModeEnabled) {
       corePrompt += '\n' + [
         '【工作模式】你现在处于工作模式，必须真正动手完成用户交代的任务，而不是给出建议、思路或研究报告。工作方法：',
