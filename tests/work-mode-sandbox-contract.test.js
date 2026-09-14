@@ -83,10 +83,38 @@ test('沙箱：源码包含安全护栏注释与关键封堵', () => {
 
 test('工作模式：system prompt 注入含工作模式指令与沙箱提示', () => {
   assert.match(serverSrc, /【工作模式】/);
-  assert.match(serverSrc, /沙箱跑 run_code/);
+  assert.match(serverSrc, /run_code（在受限沙箱里跑 JavaScript/);
   // 两条聊天路径均应注入
   const cnt = (serverSrc.match(/【工作模式】/g) || []).length;
   assert.ok(cnt >= 2, '工作模式 prompt 应注入到两条聊天路径，实际: ' + cnt);
+});
+
+test('工具定义：AI_TOOLS 含 read_document / make_file / web_extract / task_plan', () => {
+  ['read_document', 'make_file', 'web_extract', 'task_plan'].forEach((n) => {
+    assert.match(serverSrc, new RegExp("name: '" + n + "'"), '缺少工具定义: ' + n);
+    assert.match(serverSrc, new RegExp("case '" + n + "'"), '缺少执行分支: ' + n);
+  });
+});
+
+test('工作模式：prompt 明确提示文档/文件/网页/计划四类新工具', () => {
+  assert.match(serverSrc, /read_document（支持 PDF \/ Word \/ Excel \/ CSV \/ TXT/);
+  assert.match(serverSrc, /make_file（生成 CSV \/ Excel \/ TXT/);
+  assert.match(serverSrc, /web_extract 能抓网页正文/);
+  assert.match(serverSrc, /task_plan 列出计划/);
+});
+
+test('前端：工具中文名映射覆盖新增工具', () => {
+  const jsSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'ai-agent.js'), 'utf8');
+  ['read_document', 'make_file', 'web_extract', 'task_plan', 'run_code', 'search_social'].forEach((n) => {
+    const cnt = (jsSrc.match(new RegExp(n + ": '", 'g')) || []).length;
+    assert.ok(cnt >= 2, '工具 ' + n + ' 应在两处 nameMap 中都有中文名，实际: ' + cnt);
+  });
+});
+
+test('前端：make_file / task_plan 卡片有渲染分支', () => {
+  const jsSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'ai-agent.js'), 'utf8');
+  assert.match(jsSrc, /type === 'make_file'/);
+  assert.match(jsSrc, /type === 'task_plan'/);
 });
 
 test('工作模式：工具轮数提升到 8 且保留硬上限', () => {
