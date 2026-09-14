@@ -133,7 +133,7 @@ test('修复③：工作模式在非流式 /chat 路径同样生效', () => {
 });
 
 test('修复③：工具可见性不因第三方搜索配额被裁剪', () => {
-  // 配额 gate 应发生在 executeToolCall 内部（搜索分支各自调 enforceSearchQuota），
+  // 配额 gate 应发生在 executeToolCall 内部（搜索分支各自调 measureSearchQuota），
   // 而不是在装配层把工具从模型视野里删掉。
   const fnIdx = serverSrc.indexOf('function aiToolsFilteredForThirdParty');
   assert.ok(fnIdx > -1, '应保留兼容别名函数');
@@ -144,7 +144,9 @@ test('修复③：工具可见性不因第三方搜索配额被裁剪', () => {
   const swIdx = serverSrc.indexOf("case 'search_web': {");
   assert.ok(swIdx > -1, '应存在 search_web 分支');
   const swSeg = serverSrc.slice(swIdx, swIdx + 1500);
-  assert.match(swSeg, /enforceSearchQuota/, 'search_web 内部必须做配额 gate');
+  // ★ 遗留 1：gate 函数改名 measureSearchQuota（返回 degraded 标记以便区分
+  //   「配额用尽」与「配额服务故障」）；enforceSearchQuota 保留为兼容别名。
+  assert.match(swSeg, /measureSearchQuota|enforceSearchQuota/, 'search_web 内部必须做配额 gate');
 });
 
 test('体验：工具调用进度通过 tool_calls 事件下发（与既有协议一致）', () => {
