@@ -204,8 +204,31 @@ function getPreferredDeepSeekModel(model) {
   var normalized = normalizeDeepSeekModelName(model) || DEEPSEEK_MODEL_FLASH;
   var catalog = deepseekModelCatalog || {};
   var available = catalog.availableSet;
-  if (!available || !available.size) return normalized;
+  // ★★★ 2026-09-15 修复（P1-5「内置 Flash 模型显示使用失败，但账户有余额」）：
+  //   症状：用户选择内置 deepseek-v4.1-flash，前端提示"使用失败"，但 DeepSeek
+  //   账户余额充足（排除欠费）；用户截图的模型显示名就是 deepseek-v4.1-flash。
+  //   根因：模型名收敛链是
+  //     deepseek-v4.1-flash →(别名)→ deepseek-flash
+  //   其中 `deepseek-flash` 是本仓库约定的"上游模型 ID"。若该 ID 与上游
+  //   `api.deepseek.com/models` 实际返回的名称不一致（厂商改版/灰度），
+  //   或模型探测失败（availableSet 为空，例如 DEEPSEEK_API_KEY 缺失、探测超时），
+  //   则会把一个上游不认识的模型名原样发给 /chat/completions，
+  //   上游返回 400 model not found → 前端显示"使用失败"。
+  //   修复：
+  //   ① 探测失败（availableSet 为空）时不再盲目发 normalized，
+  //      优先使用环境变量显式配置的模型名（运维可覆盖），再退回默认常量；
+  //   ② 若 normalized 不在可用集中，但常量/环境变量中的候选在可用集中，
+  //      则改用候选，避免"探测成功但名字对不上"导致必败。
+  if (!available || !available.size) {
+    // 探测不可用：以部署环境显式配置为最高优先级
+    var envModel = normalizeDeepSeekModelName(process.env.DEEPSEEK_MODEL || '');
+    if (envModel && envModel !== normalized) return envModel;
+    return normalized;
+  }
   if (available.has(normalized)) return normalized;
+  // normalized 不在上游可用模型里：优先尝试环境变量显式配置
+  var envFallback = normalizeDeepSeekModelName(process.env.DEEPSEEK_MODEL || '');
+  if (envFallback && available.has(envFallback)) return envFallback;
   if (available.has(DEEPSEEK_MODEL_FLASH)) return DEEPSEEK_MODEL_FLASH;
   if (available.has(DEEPSEEK_MODEL_PRO)) return DEEPSEEK_MODEL_PRO;
   return normalized;
@@ -8272,6 +8295,255 @@ function finalReplyContainsInternalProtocolGlobal(text) {
     return /"type"\s*:\s*"function"/.test(candidate) && /"function"\s*:/.test(candidate);
   }
   return false;
+}
+
+// ★★★ 2026-09-15 新增（P0-4「第三方模型把工具调用当正文回复」配套）：
+//   模块级 DSML/XML 文本工具调用解析器。
+//
+//   背景：大量第三方 OpenAI 兼容网关**不支持原生 function calling**，会把工具
+//   调用以文本形式塞进 message.content，实测格式包括：
+//     ① `<tool_calls><invoke name="search_social"><parameter name="platform">douyin</parameter></invoke></tool_calls>`
+//     ② `<|DSML|invoke name="x"><|DSML|parameter name="y">v</|DSML|parameter></|DSML|invoke>`
+//     ③ 裸 JSON： `{"tool_calls":[{"function":{"name":"x","arguments":{...}}}]}`
+//   官方链路 callDeepSeek 内有嵌套实现 parseDsmlToolCalls，但那是函数作用域内
+//   不可复用的；第三方链路此前只能"检测到就丢弃/报错"，导致工具永远无法执行，
+//   且原始 XML 会漏到用户可见区域（用户截图实证的 bug）。
+//
+//   本函数在模块级复刻该能力，供第三方链路调用：
+//   - 同时支持 ① 简易 XML 与 ② DSML 两种协议；
+//   - 支持 ③ 裸 JSON 形式；
+//   - 产出与原生 tool_calls **完全一致**的归一化结构，可走同一执行路径；
+//   - 无法解析时返回 detected=false（不误伤正常正文）。
+//
+//   安全性：工具名必须命中 tools 参数给出的白名单定义，参数必填项与类型做校验，
+//   与官方链路的 invalidDsmlCall 保持同一安全语义。
+function parseDsmlToolCallsGlobal(rawText, roundNumber, toolsList) {
+  var raw = String(rawText || '');
+  var round = (typeof roundNumber === 'number') ? roundNumber : 0;
+  var defs = Array.isArray(toolsList) ? toolsList : [];
+
+  // 协议探测：无任何协议痕迹则直接返回，避免误伤正常正文。
+  var DSML_PROBE = /<\s*[|｜]\s*[|｜]?\s*DSML/i;
+  var XML_PROBE = /<\s*\/?\s*(tool_calls?|function_calls?|invoke)\b/i;
+  var JSON_PROBE = /^\s*[{[]/.test(raw) && /"tool_calls"\s*:/.test(raw) && /"name"\s*:/.test(raw);
+  var hasDsml = DSML_PROBE.test(raw);
+  var hasXml = XML_PROBE.test(raw);
+  if (!hasDsml && !hasXml && !JSON_PROBE) {
+    return { detected: false, calls: [], error: '', visibleContent: raw };
+  }
+
+  function findDef(name) {
+    for (var i = 0; i < defs.length; i++) {
+      if (defs[i] && defs[i].function && defs[i].function.name === name) return defs[i].function;
+    }
+    return null;
+  }
+  function coerceValue(v) {
+    var s = String(v === undefined || v === null ? '' : v).trim();
+    s = s.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    if (/^(?:true|false)$/i.test(s)) return s.toLowerCase() === 'true';
+    if (/^null$/i.test(s)) return null;
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(s)) return Number(s);
+    if ((s.charAt(0) === '{' && s.charAt(s.length - 1) === '}') || (s.charAt(0) === '[' && s.charAt(s.length - 1) === ']')) {
+      try { return JSON.parse(s); } catch (e) {}
+    }
+    return s;
+  }
+  function validate(name, args) {
+    var def = findDef(name);
+    if (!def) return 'unsupported tool: ' + name;
+    var schema = (def.parameters && typeof def.parameters === 'object') ? def.parameters : {};
+    var required = Array.isArray(schema.required) ? schema.required : [];
+    for (var i = 0; i < required.length; i++) {
+      if (!Object.prototype.hasOwnProperty.call(args, required[i]) || args[required[i]] === '' || args[required[i]] === null) {
+        return 'missing required parameter: ' + required[i];
+      }
+    }
+    var props = (schema.properties && typeof schema.properties === 'object') ? schema.properties : {};
+    var keys = Object.keys(args);
+    for (var k = 0; k < keys.length; k++) {
+      var key = keys[k];
+      if (!Object.prototype.hasOwnProperty.call(props, key)) return 'unexpected parameter: ' + key;
+      var expected = props[key] && props[key].type;
+      var value = args[key];
+      if (expected === 'string' && typeof value !== 'string') return 'invalid parameter type: ' + key;
+      if ((expected === 'integer' || expected === 'number') && (!Number.isFinite(value) || (expected === 'integer' && !Number.isInteger(value)))) return 'invalid parameter type: ' + key;
+      if (expected === 'array' && !Array.isArray(value)) return 'invalid parameter type: ' + key;
+      if (expected === 'object' && (typeof value !== 'object' || value === null || Array.isArray(value))) return 'invalid parameter type: ' + key;
+    }
+    if (Object.prototype.hasOwnProperty.call(args, 'path')) {
+      var p = args.path;
+      if (typeof p !== 'string' || !p.trim() || p.indexOf('..') >= 0 || p.indexOf('\\') >= 0 || p.charAt(0) === '/' || /^[A-Za-z]:/.test(p)) return 'invalid path';
+    }
+    return '';
+  }
+
+  var calls = [];
+  var visible = raw;
+  var firstProtoIdx = raw.length;
+
+  // ── 形式 ③：裸 JSON ──
+  if (JSON_PROBE && !hasDsml && !hasXml) {
+    try {
+      var parsedJson = JSON.parse(raw.trim());
+      var arr = Array.isArray(parsedJson) ? parsedJson : (parsedJson && Array.isArray(parsedJson.tool_calls) ? parsedJson.tool_calls : null);
+      if (arr) {
+        for (var ji = 0; ji < arr.length; ji++) {
+          var it = arr[ji];
+          var fn = it && (it.function || it);
+          var nm = fn && fn.name;
+          if (!nm) continue;
+          var ags = fn.arguments;
+          if (typeof ags === 'string') { try { ags = JSON.parse(ags); } catch (e) { ags = {}; } }
+          if (!ags || typeof ags !== 'object') ags = {};
+          var jr = validate(String(nm), ags);
+          if (jr) return { detected: true, calls: [], error: jr, visibleContent: '' };
+          calls.push({ id: 'dsmljson_' + (round + 1) + '_' + (ji + 1), name: String(nm), args: ags });
+        }
+        if (calls.length) {
+          return {
+            detected: true,
+            calls: calls.map(function(c) { return { id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } }; }),
+            error: '',
+            visibleContent: ''
+          };
+        }
+      }
+    } catch (eJson) {}
+    return { detected: true, calls: [], error: 'unparsable JSON tool protocol', visibleContent: raw };
+  }
+
+  // ── 形式 ①②：XML / DSML 文本 ──
+  // 统一先把两种协议归一化成同一种「标签流」，再统一解析。
+  // DSML 变体：`<|DSML|invoke ...>` / `<| | DSML | | invoke ...>` / `<｜DSML｜invoke ...>`
+  // 简易 XML 变体：`<invoke name="...">` / `</invoke>` / `<parameter name="...">...</parameter>`
+  var tagRe = new RegExp(
+    '<\\s*(\\/?)' +                                   // 1: 闭合斜杠
+    '(?:[|｜]\\s*[|｜]?\\s*)?DSML\\s*(?:[|｜]\\s*[|｜]?\\s*)?' +  // 可选的 DSML 前缀（兼容变体②③）
+    '([A-Za-z_][A-Za-z0-9_\\-]*)?' +                  // 2: 帧名（DSML 前缀后）
+    '([^>]*)>' +                                      // 3: 属性
+    '|' +
+    '<\\s*(\\/?)' +                                   // 4: 闭合斜杠（简易 XML）
+    '(invoke|parameter|tool_calls?|function_calls?|calls|end)' +  // 5: 帧名
+    '([^>]*)>',                                       // 6: 属性
+    'gi'
+  );
+  var records = [];
+  var m;
+  while ((m = tagRe.exec(raw)) !== null) {
+    var closing, name, attrs;
+    if (m[2] !== undefined || (m[1] !== undefined && m[3] !== undefined && m[0].indexOf('DSML') >= 0)) {
+      closing = m[1] === '/';
+      name = String(m[2] || '').toLowerCase();
+      attrs = String(m[3] || '');
+    } else {
+      closing = m[4] === '/';
+      name = String(m[5] || '').toLowerCase();
+      attrs = String(m[6] || '');
+    }
+    if (!name && !closing) continue;
+    records.push({ closing: closing, name: name, attrs: attrs, start: m.index, end: tagRe.lastIndex });
+  }
+  if (!records.length) return { detected: true, calls: [], error: 'no parsable protocol tag', visibleContent: raw };
+
+  function parseAttrs(src) {
+    var out = {};
+    var re = /([A-Za-z_][A-Za-z0-9_\-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+    var it;
+    while ((it = re.exec(src)) !== null) out[it[1]] = coerceValue(it[2] !== undefined ? it[2] : it[3]);
+    return out;
+  }
+
+  var startIdx = -1;
+  for (var si = 0; si < records.length; si++) {
+    if (records[si].closing) continue;
+    if (records[si].name === 'tool_calls' || records[si].name === 'function_calls' || records[si].name === 'calls' || records[si].name === 'invoke') {
+      startIdx = si; break;
+    }
+  }
+  // 允许没有外层帧、直接出现 invoke 的写法
+  if (startIdx < 0) return { detected: true, calls: [], error: 'missing tool_calls/invoke frame', visibleContent: raw };
+  firstProtoIdx = records[startIdx].start;
+
+  var cur = null;
+  var protoEnd = raw.length;
+  var pendingParam = null;
+
+  for (var ri = startIdx; ri < records.length; ri++) {
+    var rec = records[ri];
+    if (rec.name === 'end' || rec.name === 'end_tool_calls' || rec.name === 'tool_calls_end' || rec.name === 'end_function_calls') {
+      protoEnd = rec.end; break;
+    }
+    if (rec.closing) {
+      if (rec.name === 'tool_calls' || rec.name === 'function_calls' || rec.name === 'calls') { protoEnd = rec.end; break; }
+      if (rec.name === 'invoke') {
+        if (cur) { calls.push(cur); cur = null; }
+        protoEnd = rec.end;
+        continue;
+      }
+      if (rec.name === 'parameter') {
+        // 闭合时把此前采集的标签体作为参数值写回
+        if (pendingParam && cur) {
+          var bodyClosed = raw.slice(pendingParam.bodyStart, rec.start).trim();
+          cur.args[pendingParam.name] = pendingParam.isTypeOnly ? coerceValue(bodyClosed) : (pendingParam.inlineValue !== undefined ? pendingParam.inlineValue : coerceValue(bodyClosed));
+          pendingParam = null;
+        }
+        continue;
+      }
+      if (rec.name === '') { protoEnd = rec.end; break; }
+      continue;
+    }
+    if (rec.name === 'invoke') {
+      if (cur) calls.push(cur);
+      var ia = parseAttrs(rec.attrs);
+      cur = { name: typeof ia.name === 'string' ? ia.name.trim() : '', args: {}, malformed: !ia.name };
+      protoEnd = rec.end;
+      continue;
+    }
+    if (rec.name === 'parameter') {
+      if (!cur) return { detected: true, calls: [], error: 'parameter without invoke', visibleContent: (raw.slice(0, firstProtoIdx) + raw.slice(protoEnd)).trim() };
+      var pa = parseAttrs(rec.attrs);
+      var pname = typeof pa.name === 'string' ? pa.name : (typeof pa.key === 'string' ? pa.key : '');
+      var TYPE_KEYS = ['string', 'number', 'integer', 'boolean', 'json', 'object', 'array'];
+      var inlineKey = Object.prototype.hasOwnProperty.call(pa, 'value') ? 'value' : '';
+      var isTypeOnly = false;
+      if (!inlineKey) {
+        for (var tk = 0; tk < TYPE_KEYS.length; tk++) {
+          if (Object.prototype.hasOwnProperty.call(pa, TYPE_KEYS[tk]) && (pa[TYPE_KEYS[tk]] === true || pa[TYPE_KEYS[tk]] === false)) { inlineKey = TYPE_KEYS[tk]; isTypeOnly = true; break; }
+        }
+      }
+      if (!pname) { cur.malformed = true; continue; }
+      pendingParam = {
+        name: pname,
+        isTypeOnly: isTypeOnly,
+        inlineValue: isTypeOnly ? undefined : (inlineKey ? pa[inlineKey] : undefined),
+        bodyStart: rec.end
+      };
+      // 短写法（有值属性且非类型标记）可立即落值；块写法等闭合帧
+      if (!isTypeOnly && inlineKey) {
+        cur.args[pname] = pa[inlineKey];
+        pendingParam = null;
+      }
+      protoEnd = rec.end;
+      continue;
+    }
+    // 未知帧：保守起见不当作正文，但也不继续解析
+    protoEnd = rec.end;
+  }
+  if (cur) calls.push(cur);
+
+  visible = (raw.slice(0, firstProtoIdx) + raw.slice(protoEnd)).trim();
+
+  if (!calls.length) return { detected: true, calls: [], error: 'missing invoke', visibleContent: visible };
+  var out = [];
+  for (var ci = 0; ci < calls.length; ci++) {
+    var c = calls[ci];
+    if (!c.name || c.malformed) return { detected: true, calls: [], error: 'malformed invoke', visibleContent: visible };
+    var reason = validate(c.name, c.args);
+    if (reason) return { detected: true, calls: [], error: reason, visibleContent: visible };
+    out.push({ id: 'dsmltxt_' + (round + 1) + '_' + (ci + 1), type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } });
+  }
+  return { detected: true, calls: out, error: '', visibleContent: visible };
 }
 
 // Responses API 的 usage 字段名为 input_tokens/output_tokens（无 prompt_tokens/
@@ -18617,7 +18889,22 @@ async function loadAiContext(userName, convId) {
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .limit(AI_CHAT_HISTORY_FETCH_BUFFER);
-      msgRows = r.data;
+      // ★★★ 2026-09-15 修复（P0-1「上下文丢失」）：
+      //   原代码直接 `msgRows = r.data`，从不检查 `r.error`。
+      //   一旦 Supabase 查询返回 error（网络抖动/RLS 拒绝/字段变更），
+      //   `r.data` 为 null → `Array.isArray(null)` 为 false → 整个解析分支被跳过
+      //   → `ctx.history` 静默保持为 `[]`，且**不留任何日志**。
+      //   后果：AI 每次都只拿到当前这一条 user 消息，表现为"读不到历史上下文"，
+      //   甚至在思考过程中回答用户"这就是一个独立的对话，没有上下文"。
+      //   修复：查询失败时显式记录错误日志，便于线上定位；并保持空历史兜底。
+      if (r && r.error) {
+        try {
+          console.error('[AGENT-CHAT] loadAiContext query error (conv branch):',
+            (r.error && r.error.message) || String(r.error),
+            '| user=', userName, '| conv=', convId);
+        } catch (eLog1) {}
+      }
+      msgRows = (r && r.error) ? [] : (r ? r.data : []);
     } else {
       var r2 = await supabase.from('posts')
         .select('user_name, content, media_url, created_at')
@@ -18626,7 +18913,15 @@ async function loadAiContext(userName, convId) {
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .limit(AI_CHAT_HISTORY_FETCH_BUFFER);
-      msgRows = r2.data;
+      // ★★★ 同上：非 convId 分支同样补错误检查，避免静默丢历史。
+      if (r2 && r2.error) {
+        try {
+          console.error('[AGENT-CHAT] loadAiContext query error (global branch):',
+            (r2.error && r2.error.message) || String(r2.error),
+            '| user=', userName);
+        } catch (eLog2) {}
+      }
+      msgRows = (r2 && r2.error) ? [] : (r2 ? r2.data : []);
     }
     if (Array.isArray(msgRows)) {
       // desc 拿到的是最新在前，reverse 后变正序（旧→新）
@@ -18677,6 +18972,15 @@ async function loadAiContext(userName, convId) {
   } catch (e) {
     console.error('[AGENT-CHAT] loadAiContext exception:', e.message);
   }
+  // ★★★ 2026-09-15 修复（P0-1「上下文丢失」配套诊断）：
+  //   统一输出一行上下文装载结果日志。历史条数异常为 0 时能立刻从日志区分：
+  //   (a) 读库报错 → 上方已有 loadAiContext query error 日志
+  //   (b) convId 不匹配 → 本条日志中 conv 与实际会话 ID 对不上
+  //   (c) 该会话确实没有历史 → 属于正常首次对话
+  try {
+    console.log('[AGENT-CHAT] ctx loaded: user=%s conv=%s history=%d',
+      userName, convId || '(none)', (ctx.history && ctx.history.length) || 0);
+  } catch (eLogCtx) {}
   return ctx;
 }
 
@@ -19786,15 +20090,35 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
   }
 
   // ★ 工具调用：仅当 tools_enabled 时挂载 Function Calling 工具。
-  //   复用内置 AI_TOOLS 中与第三方模型兼容的通用工具（不含站内私有工具）。
   var toolsEnabled = body.tools_enabled === true;
-  var TOOL_ROUNDS_MAX = 6;
+  // ★★★ 2026-09-15 修复（P0-3「第三方模型无法调用系统工具」）：
+  //   旧实现用 CUSTOM_TOOL_NAMES 白名单只放行 9 个工具
+  //   （search_web / tavily_search / read_web_page / get_weather / get_current_time /
+  //     get_exchange_rate / get_stock_quote / calculate / convert_units），
+  //   而系统提示词（buildAiCorePrompt → CAT_AI_TOOL_SUMMARY）是**从全量 AI_TOOLS
+  //   动态生成**的，会向模型宣称"你有 35 个工具"。
+  //   结果：模型读到 35 个工具名，实际只收到 9 个定义 →
+  //   (a) search_social / run_code / read_document / make_file / make_chart /
+  //       task_plan 等 26 个工具彻底不可用；
+  //   (b) 模型对未下发的工具只能靠"幻觉"徒手写 XML 文本，于是
+  //       `<tool_calls><invoke name="search_social">` 这类原始协议文本
+  //       直接漏进正文，用户看到未解析的 XML。
+  //   修复：与官方链路对齐，工作模式下放开全量 35 个工具
+  //   （配额 gate 由 executeToolCall 在实际调用时处理并返回可读提示，
+  //     因此这里不做工具级裁剪是安全且语义正确的）。
+  var TOOL_ROUNDS_MAX = 10;
+  // 保留白名单常量仅供非工作模式（轻量对话）降级使用，避免一次性暴露全部工具。
   var CUSTOM_TOOL_NAMES = {
     search_web: 1, tavily_search: 1, read_web_page: 1,
     get_weather: 1, get_current_time: 1, get_exchange_rate: 1,
     get_stock_quote: 1, calculate: 1, convert_units: 1
   };
+  // ★ 第三方链路读取 work_mode（此前全文零引用，导致工作模式对第三方模型完全失效：
+  //   不注入工作模式 prompt、不放开工具集、轮数固定为 6）。
+  var customWorkMode = body.work_mode === true;
   function buildCustomTools() {
+    // 工作模式：返回完整工具集，语义与官方链路 aiToolsForWorkMode() 一致。
+    if (customWorkMode) return aiToolsForWorkMode();
     var out = [];
     for (var tI = 0; tI < AI_TOOLS.length; tI++) {
       var t = AI_TOOLS[tI];
@@ -19804,6 +20128,10 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
     return out;
   }
   var customTools = toolsEnabled ? buildCustomTools() : null;
+  try {
+    console.log('[CUSTOM-CHAT] tools=%d work_mode=%s tools_enabled=%s',
+      customTools ? customTools.length : 0, String(customWorkMode), String(toolsEnabled));
+  } catch (eLogTools) {}
   var toolContext = { userName: req.userName || '', signal: controller.signal, searchConsumed: 0 };
   var conversation = fwdMessages.slice();
   var reasoningText = '';
@@ -19931,6 +20259,74 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
 
     // 需要执行工具：组装 assistant 工具调用消息 + 各工具结果，追加进会话后继续下一轮
     var readyCalls = toolCallsAcc.filter(function(t) { return t && t.name; });
+    // ★★★ 2026-09-15 修复（P0-4「第三方模型把工具调用当正文回复」）：
+    //   症状（用户截图实证）：正文里直接出现未解析的原始协议文本
+    //     <tool_calls><invoke name="search_social"><parameter name="platform">douyin</parameter>...
+    //     <plugin_info>Tool: read_web_page</plugin_info>
+    //   根因：官方链路 callDeepSeek 有 parseDsmlToolCalls 做 DSML 文本兜底解析
+    //   （很多第三方 OpenAI 兼容网关不支持原生 function calling，会把工具调用
+    //     以 DSML/XML 文本塞进 message.content），但**第三方链路完全没有该兜底**：
+    //   它只有 finalReplyContainsInternalProtocolGlobal 这个"布尔检测器"，
+    //   命中后只能丢弃或替换为失败提示，**没有把文本解析成真实工具调用并执行**。
+    //   于是模型的工具调用永远无法执行，且原始 XML 会漏到用户可见区域。
+    //   修复：原生 tool_calls 为空时，尝试对 assistantContent 做 DSML 解析；
+    //   解析成功则走与原生完全相同的执行路径（同样的参数校验、同样的返回结构）。
+    if ((!toolCallsSeen || !readyCalls.length) && assistantContent && String(assistantContent).trim()) {
+      try {
+        var dsmlProbe = parseDsmlToolCallsGlobal(assistantContent, rounds, customTools);
+        if (dsmlProbe && dsmlProbe.calls && dsmlProbe.calls.length) {
+          console.log('[CUSTOM] DSML fallback parsed %d tool call(s) from text round=%d',
+            dsmlProbe.calls.length, rounds);
+          // 命中 DSML：把解析出的调用规范化成与原生 tool_calls 相同结构。
+          var dsmlTcs = dsmlProbe.calls.map(function(c, ci) {
+            return {
+              id: c.id || ('dsml_' + (rounds + 1) + '_' + (ci + 1)),
+              type: 'function',
+              function: { name: c.function.name, arguments: c.function.arguments || '{}' }
+            };
+          });
+          // 正文只保留协议之外的可见文本（通常是空串或一句引导语），
+          // 绝不能把原始 DSML 文本当作正文推给前端。
+          var dsmlVisible = String(dsmlProbe.visibleContent || '').trim();
+          if (dsmlVisible) {
+            try { if (!res.writableEnded && !aborted) writeSse(res, { type: 'content', text: dsmlVisible + '\n\n' }); } catch (e) {}
+          }
+          conversation.push({ role: 'assistant', content: dsmlVisible || null, tool_calls: dsmlTcs });
+          writeSse(res, {
+            type: 'tool_calls',
+            tools: dsmlTcs.map(function(t) {
+              var a = {};
+              try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {}
+              return { name: t.function.name, args: a };
+            })
+          });
+          for (var drI = 0; drI < dsmlTcs.length; drI++) {
+            var dtcRaw = { function: { name: dsmlTcs[drI].function.name, arguments: dsmlTcs[drI].function.arguments } };
+            writeSse(res, { type: 'tool_pending', tool_name: dsmlTcs[drI].function.name });
+            var dRes;
+            try { dRes = await executeToolCall(dtcRaw, toolContext); } catch (e) { dRes = { tool_name: dsmlTcs[drI].function.name, error: '工具执行失败' }; }
+            if (dRes && dRes.error) {
+              writeSse(res, { type: 'tool_error', tool_name: dsmlTcs[drI].function.name, error: String(dRes.error).slice(0, 200) });
+            } else {
+              var dCount = (dRes && (dRes.results_count || (Array.isArray(dRes.results) ? dRes.results.length : 0))) || 0;
+              writeSse(res, { type: 'tool_result', tool_name: dsmlTcs[drI].function.name, success: true, count: dCount, location: (dRes && dRes.location) || '' });
+            }
+            var dBody = '';
+            if (dRes && dRes.content) dBody = dRes.content;
+            else if (dRes && dRes.error) dBody = JSON.stringify({ error: String(dRes.error) });
+            else dBody = JSON.stringify(dRes || {});
+            conversation.push({ role: 'tool', tool_call_id: dsmlTcs[drI].id, content: String(dBody).slice(0, 12000) });
+          }
+          return { continueRound: true };
+        }
+        if (dsmlProbe && dsmlProbe.detected && dsmlProbe.error) {
+          // 检测到协议痕迹但解析失败：记录明确原因，便于线上定位模型输出格式漂移。
+          console.error('[CUSTOM] DSML detected but not parsed: %s', dsmlProbe.error);
+        }
+      } catch (eDsml) {
+        console.error('[CUSTOM] DSML fallback exception:', eDsml && eDsml.message);
+      }
+    }
     if (toolCallsSeen && readyCalls.length) {
       var tcs = readyCalls.map(function(t) {
         return { id: t.id || ('call_' + Date.now().toString(36) + '_' + t.index), type: 'function', function: { name: t.name, arguments: t.arguments || '{}' } };
