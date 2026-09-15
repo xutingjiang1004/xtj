@@ -712,6 +712,87 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return node;
   }
 
+  // ★★★ 2026-09-15 新增（P1-7「点击下载按钮没有真正下载」核心修复）：
+  //   症状（用户截图实证）：AI 生成的 HTML/PDF/data 文件，卡片上点"⬇ 下载"
+  //   完全没有反应，文件没有下载下来。
+  //   根因：后端把文件编码为 `data:text/html;base64,...` 形式的 data URL，
+  //   前端 `<a href="data:..." download="xxx.html">`。而 **Chromium 出于安全
+  //   限制会忽略 href 为 data: / 跨源 URL 上的 download 属性** —— 浏览器不会
+  //   下载，而是尝试直接导航打开该 data: URL；若导航被拦截（iframe/CSP/沙箱），
+  //   表现就是"点了没反应"。
+  //   修复：拦截点击，把 data URL 解码成 Blob，用同源 blob: URL 触发下载，
+  //   下载结束（或超时 30s）后 revoke 释放内存。对非 data: 的普通 URL
+  //   （如后端签发的同源下载链接）保留原生行为，不做干预。
+  function triggerFileDownload(href, filename) {
+    var url = String(href || '');
+    if (!url) return false;
+    // 仅接管 data: URL；http(s)/blob: 交给浏览器原生处理
+    if (url.indexOf('data:') !== 0) return false;
+    try {
+      var commaIdx = url.indexOf(',');
+      if (commaIdx < 0) return false;
+      var meta = url.slice(5, commaIdx);        // 例如 "text/html;base64"
+      var payload = url.slice(commaIdx + 1);
+      var isBase64 = /;base64/i.test(meta);
+      var mime = meta.replace(/;base64/i, '') || 'application/octet-stream';
+      var bytes;
+      if (isBase64) {
+        var bin = atob(payload);
+        bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      } else {
+        // 非 base64 形式：percent-encoding 解码后按 UTF-8 编码
+        var text = decodeURIComponent(payload);
+        bytes = new TextEncoder().encode(text);
+      }
+      // ★ 关键：用 blob: URL 替换 data: URL，规避 Chromium 对 data: 的 download 限制
+      var blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      var a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = String(filename || 'download');
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      // 释放：立即 revoke 会让部分浏览器来不及读取，延迟 30s 稳妥回收
+      setTimeout(function() {
+        try { URL.revokeObjectURL(blobUrl); } catch (e) {}
+        try { if (a.parentNode) a.parentNode.removeChild(a); } catch (e) {}
+      }, 30000);
+      return true;
+    } catch (eDl) {
+      try { console.warn('[AI-DOWNLOAD] blob download failed, fallback:', eDl && eDl.message); } catch (e) {}
+      return false;
+    }
+  }
+
+  /**
+   * 构造一个"可靠的"文件下载链接元素。
+   * - data: URL → 绑定 click 处理器转 Blob 下载（见 triggerFileDownload）
+   * - 其他 URL → 原生 <a download> 行为
+   * 所有 generate_pdf / make_file / 图片下载卡片统一走此函数，避免各处重复实现。
+   */
+  function buildDownloadLink(dataUrl, filename, linkText) {
+    var a = el('a', {
+      class: 'ai-tool-card-link',
+      href: String(dataUrl),
+      download: String(filename),
+      text: linkText || ('⬇ 下载 ' + filename)
+    });
+    a.addEventListener('click', function(ev) {
+      // 仅拦截 data: URL；其余保持默认跳转/下载
+      if (String(a.getAttribute('href') || '').indexOf('data:') === 0) {
+        var ok = triggerFileDownload(a.getAttribute('href'), filename);
+        if (ok) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+        // ok=false 时走浏览器默认行为（导航打开），至少不会完全无响应
+      }
+    });
+    return a;
+  }
+
   function notify(msg, type, duration) {
     try {
       if (typeof window.showToast === 'function') { window.showToast(msg, type || 'info', duration); return; }
@@ -874,20 +955,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function settleSearchStatus(node, opts) {
     if (!node) return;
     opts = opts || {};
-    var bar = node.querySelector('.ai-search-status');
+    // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」）：
+    //   原实现 `node.querySelector('.ai-search-status')` **只取第一个**匹配节点。
+    //   而实际渲染中会先后插入多个状态容器：
+    //     search_status(8223) / multi_agent(8171) / search_supplement(8194)
+    //   —— 各自 replaceChild 时只处理自己那一个节点，于是同一气泡内可能
+    //   同时存在 2~3 个 .ai-search-status，旧逻辑只收敛第一个，
+    //   剩下的永久停留在"联网中…/正在搜索"，动画无限闪烁。
+    //   修复：改用 querySelectorAll 遍历收敛**全部**状态条；
+    //   同时把 .ai-search-supplement 纳入同一收敛口径（此前它只在 done 被
+    //   remove()，与"保留显示"语义冲突，且工具轮结束后同样会残留动画）。
+    var bars = node.querySelectorAll('.ai-search-status, .ai-search-supplement');
+    for (var bi = 0; bi < bars.length; bi++) {
+      settleOneStatusBar(bars[bi], opts);
+    }
+  }
+
+  /** 收敛单个状态条：清掉 running 态、改写为终态文案、停止动画。 */
+  function settleOneStatusBar(bar, opts) {
     if (!bar) return;
-    // 已经是完成/失败态就跳过（避免每次工具轮都重绘）
-    if (bar.classList.contains('is-settled')) return;
-    var existing = bar.querySelector('.ai-search-status-label');
-    var curText = existing ? String(existing.textContent || '') : '';
-    // 命中"进行中"语义才改写；已是"已联网 / 失败文案"的保持原样，只清动画
-    var isPending = /中|正在|搜索中|联网中/.test(curText) || !curText;
+    opts = opts || {};
+    var label = bar.querySelector('.ai-search-status-label');
+    var curText = label ? String(label.textContent || '') : '';
+    // ★ 早退条件修正：原逻辑只判断 is-settled 就 return，导致
+    //   「已加 is-settled 但 is-running 仍残留」的节点被永久跳过。
+    //   改为：仅在"已终结 且 不含 is-running"时才跳过。
+    var alreadySettled = bar.classList.contains('is-settled') && !bar.classList.contains('is-running');
+    if (alreadySettled) return;
+    var isPending = /中|正在|搜索中|联网中|使用中/.test(curText) || !curText;
     if (isPending) {
       var fail = opts.failed === true;
       var text = fail ? (opts.failText || '联网失败') : (opts.doneText || '联网完成');
-      var fresh = buildSearchStatusBar({ statusText: text, simple: true });
-      if (bar.parentNode) bar.parentNode.replaceChild(fresh, bar);
-      bar = fresh;
+      if (label) label.textContent = text;
     }
     bar.classList.add('is-settled');
     bar.classList.remove('is-running');
@@ -1257,23 +1356,48 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       menu.appendChild(btn);
       document.body.appendChild(menu);
       _copyMenuActive = menu;
+      // ★★★ 2026-09-15 修复（P1-8「复制按钮飘到上面/位置错乱」）：
+      //   症状（用户截图实证）：AI 回复完成后，那个"复制"浮层出现在消息气泡
+      //   **上方的顶部区域**，而不是手指长按的位置附近。
+      //   根因：`position: fixed` 菜单使用 `getBoundingClientRect()` 的视口坐标
+      //   定位（这一步是对的），但**菜单创建后没有任何"跟随/失效"机制**：
+      //   ① 用户长按后页面一旦滚动（或键盘弹出、视口尺寸变化），气泡位置改变，
+      //      菜单却停在原地 → 视觉上就"飘"到了别处（常见于移动端长按后滚动）；
+      //   ② 长按期间 pointermove 取消逻辑不完整时，菜单会在滚动后残留。
+      //      实测表现：气泡已滚到下方，菜单仍停留在滚动前的顶部坐标。
+      //   修复：菜单创建后监听 scroll / resize / 视口变化，任一发生即关闭菜单；
+      //   同时在定位时对 left 做上下界约束，避免小视口下溢出到屏幕外。
       var menuRect = menu.getBoundingClientRect();
       var left = Math.min(rect.left, window.innerWidth - menuRect.width - 8);
       var top = rect.bottom + 4;
       if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 4;
+      // 上下界约束：确保菜单始终完整落在视口内（此前只约束了下界 8）
+      var maxTop = window.innerHeight - menuRect.height - 8;
+      top = Math.min(Math.max(8, top), Math.max(8, maxTop));
       menu.style.left = Math.max(8, left) + 'px';
-      menu.style.top = Math.max(8, top) + 'px';
+      menu.style.top = top + 'px';
       // ★ U3: 用 AbortController 关闭旧的 document 监听器
       if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
       _menuAbort = new AbortController();
       var currentAbort = _menuAbort;
+      var _menuSig = _menuAbort.signal;
+      // 滚动/缩放即关闭：菜单是"瞬时操作入口"，不应在页面变动后残留错位
+      var _onMenuViewportChange = function() {
+        if (currentAbort && !currentAbort.signal.aborted) closeCopyMenu();
+      };
+      window.addEventListener('scroll', _onMenuViewportChange, { signal: _menuSig, passive: true, capture: true });
+      window.addEventListener('resize', _onMenuViewportChange, { signal: _menuSig, passive: true });
+      if (window.visualViewport) {
+        try { window.visualViewport.addEventListener('resize', _onMenuViewportChange, { signal: _menuSig }); } catch (e) {}
+        try { window.visualViewport.addEventListener('scroll', _onMenuViewportChange, { signal: _menuSig, passive: true }); } catch (e) {}
+      }
       setTimeout(function() {
         if (!currentAbort || currentAbort.signal.aborted) return;
         document.addEventListener('click', function onDoc(ce2) {
           if (!menu.contains(ce2.target) && ce2.target !== bubbleEl) {
             closeCopyMenu();
           }
-        }, { signal: _menuAbort.signal, once: true });
+        }, { signal: _menuSig, once: true });
       }, 0);
     }
 
@@ -6920,13 +7044,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (data.format) mfMeta.push(String(data.format).toUpperCase());
       if (mfMeta.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: mfMeta.join(' · ') }));
       if (data.data_url) {
-        var mfDl = el('a', {
-          class: 'ai-tool-card-link',
-          href: String(data.data_url),
-          download: String(data.filename || 'data'),
-          text: '⬇ 下载 ' + String(data.filename || '文件')
-        });
-        shell.appendChild(mfDl);
+        // ★ 2026-09-15 修复（P1-7）：data: URL 转 Blob 下载
+        shell.appendChild(buildDownloadLink(
+          String(data.data_url),
+          String(data.filename || 'data'),
+          '⬇ 下载 ' + String(data.filename || '文件')
+        ));
       }
     } else if (type === 'task_plan') {
       if (data.goal) {
@@ -6978,12 +7101,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       pdfMeta.push(gpHtml ? 'HTML 文档' : 'PDF');
       shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: pdfMeta.join(' · ') }));
       if (data.data_url) {
-        shell.appendChild(el('a', {
-          class: 'ai-tool-card-link',
-          href: String(data.data_url),
-          download: String(data.filename || gpFallbackName),
-          text: '⬇ 下载 ' + String(data.filename || (gpHtml ? '文档' : 'PDF 文档'))
-        }));
+        // ★ 2026-09-15 修复（P1-7）：改用 buildDownloadLink，把 data: URL 转 Blob 下载
+        shell.appendChild(buildDownloadLink(
+          String(data.data_url),
+          String(data.filename || gpFallbackName),
+          '⬇ 下载 ' + String(data.filename || (gpHtml ? '文档' : 'PDF 文档'))
+        ));
       }
       if (gpHtml) {
         shell.appendChild(el('div', {
@@ -7035,12 +7158,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (ipBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: ipBits.join(' · ') }));
       if (data.data_url) {
-        shell.appendChild(el('a', {
-          class: 'ai-tool-card-link',
-          href: String(data.data_url),
-          download: String(data.filename || 'image'),
-          text: '⬇ 下载 ' + String(data.filename || '图片')
-        }));
+        // ★ 2026-09-15 修复（P1-7）：data: URL 转 Blob 下载
+        shell.appendChild(buildDownloadLink(
+          String(data.data_url),
+          String(data.filename || 'image'),
+          '⬇ 下载 ' + String(data.filename || '图片')
+        ));
       }
     } else if (type === 'page_meta') {
       shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.title || data.url || '网页').slice(0, 160) }));
@@ -7781,18 +7904,43 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (rsStatus && /进行中/.test(String(rsStatus.textContent || ''))) rsStatus.textContent = '已结束';
           }
         } catch (eSettle3) {}
+        // ★★★ 2026-09-15 修复（P1-9 根因 + P0-2 语义统一）：
+        //   原实现直接 `statusEl.remove()` 掉 `.ai-enhanced-status / .ai-tool-status /
+        //   .ai-search-supplement` 三类容器。这带来两个严重副作用：
+        //   ① `.ai-tool-status` 同时是**工具结果时间线的容器**（tool_calls 里创建的
+        //      `class: 'ai-tool-timeline ai-tool-status'`）。把它 remove() 会连带
+        //      删掉整条工具时间线，用户看不到"调用了哪些工具"；
+        //   ② 与 settleSearchStatus「保留显示、只收敛状态」的既有语义直接打架 ——
+        //      同一个节点被两条逻辑争夺（一个要留、一个要删），时序不同就出现
+        //      "有时按钮在、有时消失"的随机表现，正是用户截图里按钮消失的成因。
+        //      同时这些容器的移除会改变 DOM 结构，干扰 footer（复制/分享/重新生成）
+        //      的挂载位置。
+        //   修复策略：**统一改为收敛（保留节点 + 停动画 + 置终态）**，不再删除：
+        //   - 先把剩余的 is-running 清干净（停掉呼吸/闪烁动画）；
+        //   - 保留工具结果卡片与时间线，用户仍可回看执行过程；
+        //   - 仅隐藏纯"进行中"占位（无任何内容）的增强状态条，避免留下空壳。
         var statuses = target.querySelectorAll('.ai-enhanced-status, .ai-tool-status, .ai-search-supplement');
         for (var statusIndex = 0; statusIndex < statuses.length; statusIndex++) {
-          // 保留工具结果卡片（.ai-tool-result-card）：回复完成后用户仍能看到搜索/天气/汇率结果
           var statusEl = statuses[statusIndex];
-          var keepCard = statusEl.querySelector('.ai-tool-result-card');
-          if (keepCard && keepCard.parentNode) {
-            try {
-              var clone = keepCard.cloneNode(true);
-              statusEl.parentNode.insertBefore(clone, statusEl);
-            } catch (eClone) {}
+          // ① 清除进行中动画态（这是"动画一直闪"的直接来源）
+          try {
+            statusEl.classList.remove('is-running');
+            var _innerRunning = statusEl.querySelectorAll('.is-running');
+            for (var _ir = 0; _ir < _innerRunning.length; _ir++) _innerRunning[_ir].classList.remove('is-running');
+          } catch (eSettleInner) {}
+          // ② 含有实际内容的容器（工具时间线 / 结果卡片）**保留**，仅收敛状态
+          var hasCard = !!statusEl.querySelector('.ai-tool-result-card');
+          var hasSteps = !!statusEl.querySelector('.ai-tool-step');
+          if (hasCard || hasSteps) {
+            statusEl.classList.add('is-settled');
+            continue;
           }
-          try { statusEl.remove(); } catch (eStatus) {}
+          // ③ 纯占位空壳（无卡片无步骤）：隐藏而非删除，避免破坏 DOM 结构与
+          //    其他逻辑持有的节点引用（删除会让后续 append 落在游离节点上）。
+          try {
+            statusEl.style.display = 'none';
+            statusEl.classList.add('is-settled');
+          } catch (eHide) {}
         }
       }
 
@@ -7997,6 +8145,33 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           actionRow.appendChild(regenBtn);
           footer.appendChild(actionRow);
           if (footer.children.length > 0) node.appendChild(footer);
+          // ★★★ 2026-09-15 修复（P1-9「内置模型回复后 复制/分享/重新生成 按钮消失」）：
+          //   症状（用户截图实证）：用内置模型回复完成后，消息底部的
+          //   「复制 / 分享 / 重新生成」三个操作按钮不见了。
+          //   根因：`clearAssistantTransientStatus(node)`（本函数开头调用）内部会
+          //   对 `.ai-enhanced-status / .ai-tool-status / .ai-search-supplement`
+          //   等节点执行 `remove()`；当这些"状态容器"在 DOM 上恰好是气泡的**兄弟
+          //   或外层包装**时，移除动作会连带影响 footer 的挂载位置；另外
+          //   `node` 若持有脱离文档的陈旧引用（sanitized_content 替换 innerHTML、
+  //   search_supplement 重建等场景），append 上去的 footer 根本不在可见 DOM 里。
+  //   修复：append 后做一次**强制兜底校验**——若操作行不在文档中或数量不足，
+  //   重新挂载到实际可见的气泡容器上，保证三个按钮始终存在。
+          try {
+            var _realNode = (node && node.isConnected) ? node
+              : (assistantBubble && assistantBubble.closest ? assistantBubble.closest('.ai-msg') : null);
+            if (_realNode) {
+              var _actRow = _realNode.querySelector('.ai-msg-actions');
+              if (!_actRow || !_actRow.isConnected) {
+                // footer 丢失或未连接：重建并挂载
+                if (!footer.isConnected) _realNode.appendChild(footer);
+              }
+              // 极端情况下（footer 被清空但仍在 DOM）：重新补齐按钮行
+              var _foot = _realNode.querySelector('.ai-msg-footer');
+              if (_foot && !_foot.querySelector('.ai-msg-actions')) {
+                _foot.appendChild(actionRow);
+              }
+            }
+          } catch (eEnsureActs) {}
         }
       }
 
@@ -8389,6 +8564,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               errStep.appendChild(errBody);
               errTimeline.appendChild(errStep);
             }
+            // ★★★ 2026-09-15 修复（P0-2 配套）：工具**报错**同样属于"本轮结束"，
+            //   必须立即收敛残留的搜索状态条与 is-running 步骤，否则失败的工具
+            //   会让动画一直转下去（与原 bug 表现一致）。
+            try { settleSearchStatus(assistantNode, { failed: true, failText: '联网失败' }); } catch (eSettleErr) {}
+            try {
+              var _errRunSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
+              for (var _ersi = 0; _ersi < _errRunSteps.length; _ersi++) {
+                var _erse = _errRunSteps[_ersi];
+                _erse.classList.remove('is-running');
+                _erse.classList.add('is-error');
+                var _ersSt = _erse.querySelector('.ai-tool-step-status');
+                if (_ersSt && /进行中|准备/.test(String(_ersSt.textContent || ''))) _ersSt.textContent = '失败';
+              }
+            } catch (eSettleErrSteps) {}
             followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
@@ -8455,6 +8644,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var resultCard = el('div', { class: 'ai-tool-result-card' });
             resultCard.appendChild(el('div', { class: 'ai-tool-result-card-title', text: summaryText }));
             toolBar2.appendChild(resultCard);
+            // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」核心修复）：
+            //   此前 `tool_result` 只更新**匹配到 data-tool-name 的那一个** step，
+            //   既不收敛搜索状态条（.ai-search-status），也不处理 tool_pending
+            //   创建的、没有 data-tool-name 的"准备工具"步骤。
+            //   而 settleSearchStatus 全项目只有 2 个调用点（done / finishAiMessage），
+            //   → 工具第一轮成功返回后，到最终 done 之间（多轮工具可达十几秒甚至更久）
+            //     页面上一直显示"正在搜索中/正在使用中"，动画持续闪烁。
+            //   修复：工具一返回就**立即**收敛：
+            //   ① 收敛所有搜索状态条为终态（停动画、保留信息）；
+            //   ② 把所有残留 is-running 的 tool step 置为完成态
+            //      （含无 data-tool-name 的 pending 占位步骤）。
+            try { settleSearchStatus(assistantNode, { doneText: '联网完成' }); } catch (eSettleNow) {}
+            try {
+              var _runSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
+              for (var _rsi = 0; _rsi < _runSteps.length; _rsi++) {
+                var _rse = _runSteps[_rsi];
+                _rse.classList.remove('is-running');
+                _rse.classList.add('is-done');
+                var _rsIcon = _rse.querySelector('.ai-tool-step-icon');
+                if (_rsIcon && _rsIcon.textContent === '⏳') _rsIcon.textContent = '✅';
+                var _rsSt = _rse.querySelector('.ai-tool-step-status');
+                if (_rsSt && /进行中|准备/.test(String(_rsSt.textContent || ''))) _rsSt.textContent = '完成';
+              }
+            } catch (eSettleSteps) {}
             // Expandable result list attaches to the result card
             toolBar2 = resultCard;
             var itemsArr = evt.items;
@@ -8501,7 +8714,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'error') {
             hideAssistantTyping();
             var errMsg = evt.error || 'AI 调用失败';
-            
+            // ★★★ 2026-09-15 修复（P1-6「回复已完整却显示 AI 生成中断」）：
+            //   若本轮的 `done` 事件已经到达（doneReceived === true），说明响应
+            //   已正常收尾，此时再收到的 error 事件属于服务端关闭连接时的
+            //   冗余上报，不得再向用户渲染任何错误文案，否则会出现
+            //   "正文完整 + 底下小字说生成中断"的矛盾表现。
+            if (doneReceived) {
+              if (!_finalized && aiContent) finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+              resetSendingIfCurrent();
+              if (reader) try { reader.cancel(); } catch (e) {}
+              aborted = true;
+              break;
+            }
             if (aiContent) {
               // 已有部分回复，保留内容并追加错误提示
               var errNote = el('div', { class: 'ai-error-note' }, errMsg);
@@ -8674,7 +8898,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               }
             }
             
-            var streamInterrupted = evt.interrupted === true;
+            // ★★★ 2026-09-15 修复（P1-6）：`interrupted` 判定必须与 `complete` 交叉校验。
+            //   后端 complete=true 表示本轮正常收尾；此时即便 interrupted 被误置为
+            //   true（例如上游关闭连接时 finishReason 被记成 upstream_error），
+            //   也不应判定为中断，否则会渲染"回复中断，内容可能不完整"的错误提示。
+            var streamInterrupted = evt.interrupted === true && evt.complete !== true;
             var streamComplete = evt.complete === true;
             var streamSaved = evt.saved === true;
             
@@ -8801,6 +9029,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // 网络错误或 abort
       if (fetchErr && fetchErr.name !== 'AbortError') {
         hideAssistantTyping();
+        // ★★★ 2026-09-15 修复（P1-6「回复已完整却显示 AI 生成中断」）：
+        //   症状（用户截图实证）：AI 把完整回复给完了，底下仍有一行小字
+        //   "连接中断，已保留部分回复" / "AI 连接中断，请稍后重试"。
+        //   根因：后端发完 `done` 事件后**立即关闭 SSE 连接**，此时前端
+        //   reader.read() 会因连接关闭抛出网络错误（非 AbortError），
+        //   于是走进本分支。但**本分支此前没有检查 `doneReceived`**，
+        //   不区分"流是否已正常收尾"，只要 aiContent 非空就无条件追加中断提示。
+        //   修复：只要已经收到 done 事件（doneReceived === true），说明本轮
+        //   响应已正常完成，此时任何后续读取异常都是"服务端正常关闭连接"的
+        //   副产物，必须静默忽略，不得渲染任何中断文案。
+        if (doneReceived) {
+          // 已完成：静默收尾，不加任何中断提示（内容已完整推送给用户）。
+          try { clearInterval(_idleCheckTimer); } catch (e) {}
+          if (!_finalized && aiContent) {
+            finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+          }
+          resetSendingIfCurrent();
+          return;
+        }
         if (aiContent) {
           // 已有部分回复，保留并提示连接中断
           var connNote = el('div', { class: 'ai-error-note' }, '连接中断，已保留部分回复');
