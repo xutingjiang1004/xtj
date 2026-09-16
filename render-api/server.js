@@ -18905,8 +18905,46 @@ async function getAiConfig() {
 }
 
 
-async function loadAiContext(userName, convId) {
+async function loadAiContext(userName, convId, clientHistory) {
   var ctx = { history: [] };
+
+  // ★★★ 2026-09-17 修复（P0「内置模型上下文丢失 / 每条消息都是独立对话」）：
+  //   症状：内置模型（flash / pro）每轮都看不到历史，思考过程中甚至自述
+  //   "这就是一个独立的对话，没有上下文"；而第三方自定义模型上下文正常。
+  //   根因：两条链路取历史的方式根本不同——
+  //     · 第三方链路（/custom-chat/stream）：前端在请求体里**显式带上完整
+  //       历史数组** hl，服务端直接用，不依赖任何服务端状态；
+  //     · 内置链路（/chat/stream）：前端只发当前一条 message + conversation_id，
+  //       服务端靠 loadAiContext() 查库还原历史。
+  //   后者是单点脆弱链路：只要 conversationId 在前端丢失/被重置/未持久化，
+  //   或 Supabase 查询出错，历史就静默变空 —— 全部表现为"没有上下文"。
+  //   修复：让内置链路也接受前端传入的历史（clientHistory），优先使用它；
+  //   前端未传时才回退到查库。语义与第三方链路对齐，彻底摆脱对 convId 的
+  //   强依赖，同时也省掉一次数据库往返（更快）。
+  if (Array.isArray(clientHistory) && clientHistory.length > 0) {
+    try {
+      for (var chi = 0; chi < clientHistory.length; chi++) {
+        var ch = clientHistory[chi];
+        if (!ch) continue;
+        var chRole = String(ch.role || '');
+        if (chRole !== 'user' && chRole !== 'assistant') continue;
+        var chContent = String(ch.content == null ? '' : ch.content);
+        if (!chContent.trim()) continue;
+        ctx.history.push({
+          role: chRole,
+          content: chContent.slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS)
+        });
+      }
+      try {
+        console.log('[AGENT-CHAT] ctx from client: user=%s conv=%s history=%d',
+          userName || '?', convId || '-', ctx.history.length);
+      } catch (_) {}
+      if (ctx.history.length > 0) return ctx;
+    } catch (eClientHist) {
+      try { console.error('[AGENT-CHAT] client history parse error:', eClientHist && eClientHist.message); } catch (_) {}
+      ctx.history = [];
+    }
+  }
 
   try {
     // 验证 convId 防止 LIKE 注入
@@ -21208,7 +21246,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     T_stage.config_start = Date.now();
     var attachPromise = extractChatAttachments(message, req.body && req.body.attachments, { skipImageOcr: _visionEligibleEarly && _visionImageUrls.length > 0 });
     var configPromise = getAiConfig();
-    var ctxPromise = loadAiContext(userName, convId);
+    // ★ 2026-09-17：优先使用前端传入的历史（与第三方链路对齐），
+    //   前端未传时才回退查库 —— 见 loadAiContext 内注释。
+    var ctxPromise = loadAiContext(userName, convId, req.body && req.body.messages);
     var _parallelPrep = await Promise.all([attachPromise, configPromise, ctxPromise]);
     var _attachStream = unwrapAttachmentExtract(_parallelPrep[0]);
     message = _attachStream.text;
@@ -22534,6 +22574,55 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var reasoningBuffer = persistentReasoning || '';
     var reasoningSent = false;
     var reasoningStartedAt = 0;
+    // ★ 2026-09-17 流畅性优化（SSE 小包合并）：
+    //   上游（DeepSeek 等）流式 delta 粒度很细，常见 1~3 字符一个 chunk，
+    //   长回复可产生上千个 SSE 事件。逐包 writeSse 的代价是双重的：
+    //   ① 服务端：每个事件都要序列化 + 写 socket，高频小写放大 CPU 与 syscall；
+    //   ② 客户端：EventSource 每收到一个事件就触发一次解析与回调调度，
+    //      在浏览器主线程上形成大量微任务，反过来挤压 rAF 渲染帧
+    //      —— 这正是「越写越卡、动画不流畅」的根因之一。
+    //   策略：把同一类型的小包在服务端做**时间窗合并**（reasoning 与 content
+    //   各自独立），窗口内累积、窗口到点或达到阈值时一次推送。
+    //   窗口取 40ms（约等于 2 帧）—— 对"实时感"无感（人眼对 <50ms 无感知），
+    //   但能把事件数降低一个数量级，让前端渲染节奏稳定下来。
+    var SSE_COALESCE_MS = 40;
+    var contentCoalesceBuf = '';
+    var contentCoalesceTimer = null;
+    var reasoningCoalesceBuf = '';
+    var reasoningCoalesceTimer = null;
+
+    // 立即把正文缓冲刷出去（含拆解定时器）。返回 false 表示写入失败（应中断生成）。
+    function flushContentCoalesce() {
+      if (contentCoalesceTimer) { try { clearTimeout(contentCoalesceTimer); } catch (_) {} contentCoalesceTimer = null; }
+      if (!contentCoalesceBuf) return true;
+      var _payload = contentCoalesceBuf;
+      contentCoalesceBuf = '';
+      return writeSse(res, { type: 'content', text: _payload });
+    }
+    // 立即把思考缓冲刷出去。思考不因写失败中断（与既有行为保持一致，reasoning 非关键路径）。
+    function flushReasoningCoalesce() {
+      if (reasoningCoalesceTimer) { try { clearTimeout(reasoningCoalesceTimer); } catch (_) {} reasoningCoalesceTimer = null; }
+      if (!reasoningCoalesceBuf) return true;
+      var _payload = reasoningCoalesceBuf;
+      reasoningCoalesceBuf = '';
+      return writeSse(res, { type: 'reasoning', text: _payload });
+    }
+    function scheduleContentCoalesce() {
+      if (contentCoalesceTimer) return;
+      contentCoalesceTimer = setTimeout(function() {
+        contentCoalesceTimer = null;
+        if (res.writableEnded || aborted) return;
+        if (!flushContentCoalesce()) { try { aborted = true; } catch (_) {} }
+      }, SSE_COALESCE_MS);
+    }
+    function scheduleReasoningCoalesce() {
+      if (reasoningCoalesceTimer) return;
+      reasoningCoalesceTimer = setTimeout(function() {
+        reasoningCoalesceTimer = null;
+        if (res.writableEnded || aborted) return;
+        flushReasoningCoalesce();
+      }, SSE_COALESCE_MS);
+    }
     var pendingToolCalls = {};
     var finishReason = '';
     var _streamReadFailed = false;
@@ -22661,12 +22750,23 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               if (!writeSse(res, { type: 'reasoning_start' })) { aborted = true; break; }
               reasoningSent = true;
             }
-            if (!writeSse(res, { type: 'reasoning', text: delta.reasoning_content })) { aborted = true; break; }
+            // ★ 2026-09-17：小包合并（40ms 窗口），降低 SSE 事件密度
+            reasoningCoalesceBuf += delta.reasoning_content;
+            if (!reasoningCoalesceTimer) scheduleReasoningCoalesce();
+            // 阈值兜底：单窗口累积过大时立即刷出，避免首个事件延迟感
+            if (reasoningCoalesceBuf.length >= 160) flushReasoningCoalesce();
           }
         }
         if (delta.content) {
           contentBuffer += delta.content;
-          if (!writeSse(res, { type: 'content', text: delta.content })) { aborted = true; break; }
+          // ★ 2026-09-17：小包合并（40ms 窗口）。注意 contentBuffer（用于落库的
+          //   完整正文）仍在逐片累积，合并只影响 SSE 推送粒度，不影响持久化内容。
+          contentCoalesceBuf += delta.content;
+          if (!contentCoalesceTimer) scheduleContentCoalesce();
+          // 阈值兜底：单窗口累积过大时立即刷出，让长文本仍能快速到达
+          if (contentCoalesceBuf.length >= 240) {
+            if (!flushContentCoalesce()) { aborted = true; break; }
+          }
         }
         
         // 收集 tool calls（思考模式下的搜索请求）
@@ -22693,6 +22793,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           break;
         }
       }
+      // ★ 2026-09-17：循环退出（含 break 到此处）时，务必把合并缓冲里的
+      //   尾部内容立即刷出。否则 40ms 窗口内未到点的最后几个字会被丢弃，
+      //   表现为"回复末尾少字"或"思考正文结尾截断"。
+      flushContentCoalesce();
+      flushReasoningCoalesce();
       if (finishReason === 'tool_calls') break;
       if (finishReason === 'stop' || finishReason === 'length') {
         await finishStream(res, {
@@ -23618,6 +23723,11 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
   }
   function safeEnd() {
     clearStreamHeartbeat();
+    // ★ 2026-09-17：清理 SSE 合并定时器，避免响应已结束后仍有一个 40ms
+    //   定时器持有闭包（短时间内大量请求会累积若干悬挂 timer，
+    //   在 aborted 后仍尝试 writeSse 也会产生无意义告警）。
+    try { if (typeof contentCoalesceTimer !== 'undefined' && contentCoalesceTimer) { clearTimeout(contentCoalesceTimer); contentCoalesceTimer = null; } } catch (_) {}
+    try { if (typeof reasoningCoalesceTimer !== 'undefined' && reasoningCoalesceTimer) { clearTimeout(reasoningCoalesceTimer); reasoningCoalesceTimer = null; } } catch (_) {}
     if (researchRelease) { try { researchRelease(); } catch (e) {} researchRelease = null; }
     if (!res.writableEnded) { try { res.end(); } catch (e) {} }
   }

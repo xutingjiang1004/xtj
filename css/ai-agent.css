@@ -425,7 +425,8 @@
   margin-left: 2px;
   vertical-align: -0.15em;
   border-right: 1px solid rgba(56, 127, 109, 0.34);
-  animation: aiCursorBlink 1.12s infinite;
+  /* ★ 2026-09-17：与 .ai-stream-cursor 统一为柔和呼吸，去掉硬切闪烁 */
+  animation: ai-cursor-breathe 1.15s ease-in-out infinite;
 }
 
 .ai-msg-bubble.ai-streaming-soft,
@@ -572,6 +573,30 @@
   letter-spacing: 0;
 }
 
+/* ★ 2026-09-17 动画优化：思考进行中的实时感。
+   背景高光从右向左匀速流过，明示"模型仍在实时产出"，
+   与"已思考 Xs"的静态终态形成明确区分。
+   用 background-clip:text 实现文字流动，不改变布局、不触发重排。 */
+.ai-thinking.is-thinking .ai-thinking-label {
+  background-image: linear-gradient(
+    100deg,
+    rgba(95, 114, 117, 0.92) 0%,
+    rgba(95, 114, 117, 0.92) 38%,
+    rgba(58, 146, 113, 1) 50%,
+    rgba(95, 114, 117, 0.92) 62%,
+    rgba(95, 114, 117, 0.92) 100%
+  );
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ai-thinking-flow 2.1s linear infinite;
+}
+@keyframes ai-thinking-flow {
+  0% { background-position: 130% 0; }
+  100% { background-position: -30% 0; }
+}
+
 .ai-thinking-icon {
   display: none;
 }
@@ -598,11 +623,14 @@
   max-width: min(82vw, 680px);
   box-sizing: border-box;
   overflow: hidden;
+  /* ★ 2026-09-17：折叠稍快于展开（180ms vs 240ms）。
+     展开是"用户主动点击、期待看到内容"，慢一点更从容；
+     折叠是"正文即将接位、把舞台让出去"，快一点才不会挡住回复的开头。 */
   transition:
-    grid-template-rows var(--ai-motion-panel) var(--ai-ease-standard),
-    opacity var(--ai-motion-base) ease,
-    transform var(--ai-motion-panel) var(--ai-ease-standard),
-    visibility 0s linear var(--ai-motion-panel);
+    grid-template-rows 180ms var(--ai-ease-standard),
+    opacity 150ms ease,
+    transform 180ms var(--ai-ease-standard),
+    visibility 0s linear 180ms;
 }
 
 .ai-thinking:not(.expanded) .ai-thinking-body {
@@ -3156,6 +3184,20 @@
     transform: none !important;
   }
 
+  /* ★ 2026-09-17：光标呼吸与思考标题流动高光在减动效偏好下静止，
+     并恢复为纯色文字（background-clip:text 会让静止状态也变透明） */
+  .ai-stream-cursor,
+  .ai-msg-bubble.ai-typing::after {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  .ai-thinking.is-thinking .ai-thinking-label {
+    animation: none !important;
+    background-image: none !important;
+    -webkit-text-fill-color: currentColor !important;
+    color: rgba(95, 114, 117, 0.92) !important;
+  }
+
   .ai-chat-think-menu {
     opacity: 1;
   }
@@ -3174,11 +3216,6 @@
 @keyframes aiTypingDot {
   0%, 60%, 100% { opacity: 0.28; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-3px); }
-}
-
-@keyframes aiCursorBlink {
-  0%, 50% { opacity: 0.65; }
-  51%, 100% { opacity: 0; }
 }
 
 @keyframes aiCatBreathe {
@@ -6578,8 +6615,24 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 }
 
 /* 流式光标 */
-.ai-stream-cursor { display: inline-block; width: 2px; height: 1em; background: var(--primary); margin-left: 2px; vertical-align: text-bottom; animation: ai-cursor-blink 1s step-end infinite; }
-@keyframes ai-cursor-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+/* ★ 2026-09-17 动画优化：
+   旧实现 step-end 硬切 + 1s 周期，观感是「一闪一闪的电报灯」，
+   与现在更快的吐字节奏（140 chars/ms 峰值）不匹配，显得突兀。
+   改为 1.15s 的 ease 渐变呼吸：淡出更柔和，且淡出时长略短于停留时长，
+   视觉上更像「正在书写」而非「在闪」。 */
+.ai-stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--primary);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: ai-cursor-breathe 1.15s ease-in-out infinite;
+}
+@keyframes ai-cursor-breathe {
+  0%, 42% { opacity: 1; }
+  72%, 100% { opacity: 0.12; }
+}
 
 /* 新内容提示横幅 */
 .ai-new-content-banner { text-align: center; padding: 8px 16px; margin: 4px 0; font-size: 12px; color: var(--text-muted); background: var(--bg-secondary); border-radius: 6px; cursor: pointer; transition: background 0.2s; }

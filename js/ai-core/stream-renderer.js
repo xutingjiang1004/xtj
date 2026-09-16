@@ -107,9 +107,14 @@
         next = pending;
         pending = '';
       } else {
-        var frameBudget = Math.max(8, Math.floor(budget || 24));
-        if (pending.length > 120) frameBudget = Math.max(frameBudget, Math.floor(pending.length * 0.45));
-        else if (pending.length > 48) frameBudget = Math.max(frameBudget, Math.floor(pending.length * 0.28));
+        // ★ 2026-09-17 流动性优化：与 ai-agent.js 内实现保持同一算法
+        //   （积压门槛 64 / 系数 0.62、0.40 / 3 帧追平保护），
+        //   避免两条渲染路径观感不一致。
+        var frameBudget = Math.max(12, Math.floor(budget || 24));
+        if (pending.length > 64) frameBudget = Math.max(frameBudget, Math.floor(pending.length * 0.62));
+        else if (pending.length > 32) frameBudget = Math.max(frameBudget, Math.floor(pending.length * 0.40));
+        else if (pending.length > 12) frameBudget = Math.max(frameBudget, 18);
+        if (pending.length / frameBudget > 3) frameBudget = Math.floor(pending.length / 3);
         var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
@@ -125,8 +130,12 @@
         var node = ensurePlainTextNode();
         try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
+        // ★ 2026-09-17 流动性优化：渲染节流 50ms → 自适应 90ms/140ms，
+        //   与 ai-agent.js 的 Markdown 门限对齐（原 50ms 在该模块虽更快，
+        //   但长文本下仍会因重排堆积出现抖动，统一为按长度自适应的稳定节奏）。
         var now = Date.now();
-        if (!targetEl._lastRender || now - targetEl._lastRender > 50 || !pending) {
+        var _renderGap = rendered.length < 600 ? 90 : 140;
+        if (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending) {
           targetEl.innerHTML = renderRich(rendered);
           targetEl._lastRender = now;
         }

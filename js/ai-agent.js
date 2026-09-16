@@ -2321,6 +2321,84 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(container, true);
   }
 
+  // ★ 2026-09-17 新增：工具轮次状态收敛。
+  //   一个"轮次"= 一次 tool_calls 事件产生的并行工具集合。
+  //   运行中：摘要行显示「并行调用 N 个工具 · x/y 完成」，条目各自显示「搜索中」；
+  //   全部完成：摘要行改为「✅ N 个工具已完成」，整轮加 is-done 停止动画，
+  //   条目图标由 🔍 换成 ✅、状态文字换成「已完成」——即用户要求的
+  //   「全部搜索完之后就把搜索中那些字和图标换成已完成」。
+  function updateToolRoundState(roundBox) {
+    if (!roundBox) return;
+    var steps = roundBox.querySelectorAll('.ai-tool-step');
+    var total = steps.length;
+    if (!total) return;
+    var done = 0, failed = 0;
+    for (var i = 0; i < total; i++) {
+      if (steps[i].classList.contains('is-done')) done++;
+      else if (steps[i].classList.contains('is-error')) failed++;
+    }
+    var settled = (done + failed) >= total;
+    var icon = roundBox.querySelector('.ai-tool-round-icon');
+    var label = roundBox.querySelector('.ai-tool-round-label');
+    var count = roundBox.querySelector('.ai-tool-round-count');
+
+    if (settled) {
+      roundBox.classList.remove('is-running');
+      roundBox.classList.add('is-done');
+      if (icon) icon.textContent = failed > 0 ? '⚠️' : '✅';
+      if (label) {
+        label.textContent = failed > 0
+          ? (total + ' 个工具已完成（' + failed + ' 个失败）')
+          : (total > 1 ? ('已完成 ' + total + ' 个工具') : '工具调用完成');
+      }
+      if (count) count.textContent = '';
+    } else {
+      roundBox.classList.add('is-running');
+      roundBox.classList.remove('is-done');
+      if (icon) icon.textContent = '⏳';
+      if (label) label.textContent = total > 1 ? ('并行调用 ' + total + ' 个工具') : '调用工具';
+      if (count) count.textContent = (done + failed) + '/' + total + ' 完成';
+    }
+  }
+
+  // 找到某条目所属的轮次并刷新它；用于 tool_result / tool_error 之后收敛
+  function refreshOwningToolRound(stepEl) {
+    if (!stepEl) return;
+    var round = stepEl.closest ? stepEl.closest('.ai-tool-round') : null;
+    if (round) updateToolRoundState(round);
+  }
+
+  // ★ 2026-09-15：终态强制收敛某个轮次（用于中断/超时/错误收尾）。
+  //   与 updateToolRoundState 的区别：不依赖子条目状态，直接把整轮置为终态，
+  //   停掉所有跳动动画，避免用户看到"流已结束但轮次还在转圈"。
+  function forceSettleToolRound(roundBox) {
+    if (!roundBox) return;
+    var steps = roundBox.querySelectorAll('.ai-tool-step');
+    for (var i = 0; i < steps.length; i++) {
+      var st = steps[i];
+      if (st.classList.contains('is-running')) {
+        st.classList.remove('is-running');
+        st.classList.add('is-done');
+        var stIcon = st.querySelector('.ai-tool-step-icon');
+        var stStatus = st.querySelector('.ai-tool-step-status');
+        if (stIcon) stIcon.textContent = '✅';
+        if (stStatus) stStatus.textContent = '已完成';
+      }
+    }
+    updateToolRoundState(roundBox);
+    if (roundBox.classList.contains('is-running')) {
+      // 理论上 updateToolRoundState 已处理；这里兜底，防止零条目的空轮次卡住
+      roundBox.classList.remove('is-running');
+      roundBox.classList.add('is-done');
+      var bi = roundBox.querySelector('.ai-tool-round-icon');
+      var bl = roundBox.querySelector('.ai-tool-round-label');
+      var bc = roundBox.querySelector('.ai-tool-round-count');
+      if (bi) bi.textContent = '✅';
+      if (bl) bl.textContent = '工具调用结束';
+      if (bc) bc.textContent = '';
+    }
+  }
+
   function scrollToBottom(container, force) {
     if (!container) return;
     if (!force && !S.autoScrollPinned) return;
@@ -2385,6 +2463,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     label.textContent = text || '思考';
   }
 
+  // ★ 2026-09-17 新增：标记「思考正在进行」。
+  //   作用：① 让 CSS 能给标题加一层轻微流动的高光，明确"还在实时产出"，
+  //         与"思考已结束"的静态观感区分开；
+  //         ② 提供稳定的状态锚点，便于收尾时统一清除，避免残留动画。
+  function setThinkingActive(node, active) {
+    if (!node || !node.classList) return;
+    try {
+      if (active) node.classList.add('is-thinking');
+      else node.classList.remove('is-thinking');
+    } catch (e) {}
+  }
+
   function createThinkingTimer(reasoningNode) {
     var intervalId = null;
     var startedAt = 0;
@@ -2400,6 +2490,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (stopped || intervalId) return;
         startedAt = Date.now();
         update('正在思考中', 0);
+        setThinkingActive(reasoningNode, true);
         intervalId = setInterval(function() {
           if (!reasoningNode || !reasoningNode.isConnected) return;
           update('正在思考中', Date.now() - startedAt);
@@ -2411,6 +2502,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           intervalId = null;
         }
         stopped = true;
+        setThinkingActive(reasoningNode, false);
         return startedAt ? Math.max(0, Date.now() - startedAt) : 0;
       },
       cancel: function() {
@@ -2419,6 +2511,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           intervalId = null;
         }
         stopped = true;
+        setThinkingActive(reasoningNode, false);
       },
       syncFinal: function(ms) {
         if (intervalId) {
@@ -2426,6 +2519,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           intervalId = null;
         }
         stopped = true;
+        setThinkingActive(reasoningNode, false);
         if (reasoningNode && reasoningNode.isConnected) {
           setThinkingStatus(reasoningNode, '已思考 ' + formatThinkingElapsed(ms));
         }
@@ -2923,11 +3017,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         pending = '';
       } else {
         // V6: 流水跟包 — 积压时加速追赶，接近实时；仍按自然断点切块避免生硬
-        var baseBudget = Math.max(8, Math.floor(budget || 24));
-        // 队列积压：尽快追上网络到达速度，避免「一个字一个字」
-        if (pending.length > 120) baseBudget = Math.max(baseBudget, Math.floor(pending.length * 0.45));
-        else if (pending.length > 48) baseBudget = Math.max(baseBudget, Math.floor(pending.length * 0.28));
-        else if (pending.length > 16) baseBudget = Math.max(baseBudget, 20);
+        // ★ 2026-09-17 流动性优化（本轮重点）：
+        //   旧算法的问题在于「增速曲线」——积压首次超过 120 字符才允许加速，
+        //   而 48~120 之间只给 0.28 倍，16~48 只给固定 20 字符/帧。
+        //   实际观感：模型稳定输出时帧预算长期卡在 20 字符左右，
+        //   遇到 markdown 长段落（表格/列表/代码块）就显得一格一格地"顿"。
+        //   新算法改为：
+        //   ① 门槛下调到 64，让加速更早介入；
+        //   ② 系数提高（0.45→0.62 / 0.28→0.40），积压吸收更快、更接近实时；
+        //   ③ 新增「追平保护」：若积压按当前预算 3 帧内仍消化不完，
+        //      直接把预算提到 1/3 积压量，避免尾部越拖越长（用户感知为"卡住"）。
+        var baseBudget = Math.max(12, Math.floor(budget || 24));
+        if (pending.length > 64) baseBudget = Math.max(baseBudget, Math.floor(pending.length * 0.62));
+        else if (pending.length > 32) baseBudget = Math.max(baseBudget, Math.floor(pending.length * 0.40));
+        else if (pending.length > 12) baseBudget = Math.max(baseBudget, 18);
+        // 追平保护：3 帧内消化不完就提额，防止积压雪球越滚越大
+        if (pending.length / baseBudget > 3) baseBudget = Math.floor(pending.length / 3);
         var frameBudget = baseBudget;
         var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
@@ -2948,8 +3053,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } else {
         // P1-4 优化: Markdown 重新渲染节流从 50ms 提升到 200ms，避免长文本越来越卡
         //   且用户正在选中文本时跳过 innerHTML 替换，防止选区被破坏
+        // ★ 2026-09-17 流动性优化：200ms 对"逐字流出"来说太长——一帧要等
+        //   1/5 秒才刷新，观感是"批量跳字"。改为自适应门限：
+        //   - 短文本（<600 字符，绝大多数回复）用 90ms：肉眼已近连续，成本可控；
+        //   - 长文本（≥600）用 140ms：兼顾 markdown 重排开销，仍明显优于 200ms；
+        //   - 每帧仍需真实推进（next 非空）才刷新，空帧不浪费。
+        //   同时保留"用户正在选区"的跳过逻辑不变。
         var now = Date.now();
-        var shouldRender = (!targetEl._lastRender || now - targetEl._lastRender > 200 || !pending);
+        var _renderGap = rendered.length < 600 ? 90 : 140;
+        var shouldRender = (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending);
         if (shouldRender && !isSelectionInTarget(targetEl)) {
           targetEl.innerHTML = renderMarkdown(rendered);
           targetEl._lastRender = now;
@@ -7773,9 +7885,39 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         timeout_ms: 240000
       });
     } else {
+      // ★★★ 2026-09-17 修复（P0「内置模型上下文丢失」）：
+      //   内置链路此前**只发当前一条 message + conversation_id**，历史完全依赖
+      //   服务端按 convId 查库还原。这条链路太脆弱：convId 一旦在前端丢失/被重置/
+      //   未持久化，或 Supabase 查询失败，历史就静默变空 —— 用户感知为"每条消息
+      //   都是独立对话"，而第三方链路（显式带 messages）却一切正常。
+      //   现改为：与第三方链路对齐，把本地已有的对话历史一并发送；
+      //   服务端优先使用它，前端未传时才回退查库。
+      //   复用与自定义模型相同的裁剪策略（条数 + 每条字符上限），
+      //   避免超长历史撑爆 prompt。
+      var _builtinHist = [];
+      try {
+        var _bCtxCap = S.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
+        var _bCtxChars = S.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
+        var _bTail = S.messages.slice(-_bCtxCap);
+        for (var _bi = 0; _bi < _bTail.length; _bi++) {
+          var _bm = _bTail[_bi];
+          if (!_bm || !_bm.content) continue;
+          var _bRole = String(_bm.role || '');
+          if (_bRole !== 'user' && _bRole !== 'assistant') continue;
+          var _bc = String(_bm.content);
+          if (!_bc.trim()) continue;
+          // 带附件的占位消息跳过（附件已单独通过 attachments 传递）
+          if (_bRole === 'user' && _bm.attachments && Array.isArray(_bm.attachments) && _bm.attachments.length && !/\[(本地)?(图片|文件)[所已]?上传/.test(_bc)) continue;
+          _builtinHist.push({ role: _bRole, content: _bc.slice(0, _bCtxChars) });
+        }
+      } catch (eBuiltinHist) {
+        try { console.warn('[AI] builtin history build failed:', eBuiltinHist && eBuiltinHist.message); } catch (_) {}
+      }
       fetchBody = JSON.stringify({
         message: text,
         conversation_id: S.conversationId,
+        // ★ 关键修复：携带历史，服务端优先使用（不再强依赖 convId 查库）
+        messages: _builtinHist.length ? _builtinHist : undefined,
         client_request_id: reqId,
         thinking_mode: _sendThinkingMode,
         thinking_max: S.thinkMax === true,
@@ -7869,6 +8011,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var thinkingTimer = null;
       var thinkingStartedAt = 0;
       var finalThinkingElapsedMs = 0;
+      // ★ 2026-09-17：标记"正文已开始、思考面板已自动收起"，
+      //   保证交接逻辑在同一轮回复里只执行一次。
+      var _thinkingSettledOnContent = false;
       var usageResult = null;
       var finalModel = '';
       var finalThinkingMode = '';
@@ -7890,6 +8035,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // ★ 2026-09-15 新增：工具执行期进度计数（服务端每 3s 推一次 tool_progress），
       //   用于把"进行中"文案更新为"进行中 · 已 12s"，消除长时间静止的假死感。
       var toolProgressTick = 0;
+      // ★ 2026-09-17 新增：工具轮次序号。每次 tool_calls 事件开一个新的轮次容器，
+      //   用于把并行工具按"轮"分组展示（新一轮不覆盖旧一轮，旧轮折叠保留）。
+      var toolRoundSeq = 0;
 
       function clearAssistantTransientStatus(node) {
         var target = node || assistantNode;
@@ -7900,6 +8048,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   动画无限循环。用户要求"保留显示但修正状态"，故此处**只收敛状态不删除**：
         //   把进行中的"联网中…/正在搜索"改写为终态并停掉动画，保留信息可读。
         try { settleSearchStatus(target); } catch (eSettle2) {}
+        // ★ 2026-09-15：工具"轮次"容器同样需要收敛。轮次是第四轮新增的紧凑动画
+        //   容器（.ai-tool-round），其 is-running 由摘要行驱动；若不处理，中断后
+        //   摘要行会永久停留"并行调用 N 个工具 · 2/5 完成"，图标一直是 ⏳。
+        try {
+          var _runningRounds = target.querySelectorAll('.ai-tool-round.is-running');
+          for (var _rr = 0; _rr < _runningRounds.length; _rr++) forceSettleToolRound(_runningRounds[_rr]);
+        } catch (eSettleRound) {}
         // 同理：工具步骤若因中断/超时没等到 tool_result，is-running 会残留导致
         // 光晕持续呼吸。终态统一落定为"完成"，停掉动画（信息保留）。
         try {
@@ -7908,8 +8063,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var rsEl = runningSteps[rsIdx];
             rsEl.classList.remove('is-running');
             rsEl.classList.add('is-done');
+            var rsIcon = rsEl.querySelector('.ai-tool-step-icon');
+            if (rsIcon) rsIcon.textContent = '✅';
             var rsStatus = rsEl.querySelector('.ai-tool-step-status');
-            if (rsStatus && /进行中/.test(String(rsStatus.textContent || ''))) rsStatus.textContent = '已结束';
+            if (rsStatus) rsStatus.textContent = '已完成';
           }
         } catch (eSettle3) {}
         // ★★★ 2026-09-15 修复（P1-9 根因 + P0-2 语义统一）：
@@ -8244,12 +8401,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           assistantBubble.classList.add('ai-typing');
         }
         if (!contentRenderer) {
+          // ★ 2026-09-17：正文渲染期的滚动节流时间戳（每轮回复独立，重进函数即重置）
+          var _lastContentScroll = 0;
           contentRenderer = createSmoothTextRenderer(assistantBubble, {
             minChunk: 8,
             maxChunk: 64,
-            charsPerMs: 100,
+            // ★ 2026-09-17 正文流优化：charsPerMs 100 → 130，配合预算算法提速，
+            //   减少"字一个个蹦"的延迟感；上限仍受 maxChunk 约束不会暴冲。
+            charsPerMs: 130,
             streamClass: 'ai-streaming-soft',
             onRender: function() {
+              // ★ 2026-09-17 滚动节流：原实现每帧都调 scrollToBottom，
+              //   流式高频期间每帧一次布局计算，反而拖慢渲染帧率（越写越卡）。
+              //   改为最多 100ms 一次——跟随依然实时，但不再与渲染抢主线程。
+              var _nowScroll = Date.now();
+              if (_nowScroll - _lastContentScroll < 100) return;
+              _lastContentScroll = _nowScroll;
               scrollToBottom(messagesEl, false);
             }
           });
@@ -8480,6 +8647,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               timeline = el('div', { class: 'ai-tool-timeline ai-tool-status', role: 'status', 'aria-live': 'polite' });
               assistantNode.insertBefore(timeline, assistantBubble);
             }
+            // ★★★ 2026-09-17 重写（P0「工具调用动画全部展开、堆叠占位」）：
+            //   用户诉求：像 ChatGPT / Codex 那样——并行调用 N 个工具时只显示
+            //   N 行紧凑的"正在搜索中…"，全部完成后原地换成"已完成"，
+            //   需要继续调用就再追加新一轮，不要每个工具都展开成一个四行大卡片。
+            //   旧实现的问题：
+            //   ① 每个工具都建一个含「图标+标题+详情+状态」四行的完整卡片，
+            //      并行 5 个就是 20 行，几乎占满整屏；
+            //   ② tool_pending 还会为同一个工具**再建一条**独立步骤，
+            //      于是"准备工具 / 联网搜索 / 社媒检索"反复出现（截图实证）；
+            //   ③ 没有"轮次"概念，多轮工具全部平铺堆积，越长越乱。
+            //   新实现：
+            //   ① 一个"轮次"容器 N 行紧凑条目，单行呈现：状态图标 + 名称 + 查询词；
+            //   ② tool_pending 与 tool_calls 复用同一条目（按工具名归并），去重；
+            //   ③ 同一轮内全部完成后，把整轮收敛为"N 项已完成"，并支持折叠；
+            //   ④ 新一轮工具自动新建轮次容器，历史轮次保持折叠态，不再抢屏幕。
+            var _roundKey = 'r' + (toolRoundSeq++);
+            var roundBox = el('div', { class: 'ai-tool-round is-running' });
+            roundBox.setAttribute('data-tool-round', _roundKey);
+            // 轮次摘要行：展示"N 个工具并行中"，全部完成后改写为"完成"
+            var roundHead = el('div', { class: 'ai-tool-round-head' });
+            roundHead.appendChild(el('span', { class: 'ai-tool-round-icon', text: '⏳' }));
+            roundHead.appendChild(el('span', {
+              class: 'ai-tool-round-label',
+              text: toolList.length > 1 ? ('并行调用 ' + toolList.length + ' 个工具') : '调用工具'
+            }));
+            var roundCountEl = el('span', { class: 'ai-tool-round-count', text: '' });
+            roundHead.appendChild(roundCountEl);
+            roundBox.appendChild(roundHead);
+            var roundList = el('div', { class: 'ai-tool-round-list' });
+            roundBox.appendChild(roundList);
+            timeline.appendChild(roundBox);
+
             toolList.forEach(function(t) {
               var label = nameMapCall[t.name] || t.name || '工具';
               var detail = '';
@@ -8492,25 +8691,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               // 保证 setAttribute 与 querySelector 取值恒等，杜绝属性选择器注入/失配
               var stepId = ('tool-step-' + String(t.name || 'tool') + '-' + String(detail).slice(0, 24))
                 .replace(/["\\\]\[\r\n\t]/g, '').replace(/\s+/g, '_');
+              // 全局去重：同一工具+同一查询词在**任意轮次**里已出现过就复用，
+              // 这是消除"准备工具 / 联网搜索 / 社媒检索"重复条目的关键。
               var existing = timeline.querySelector('[data-tool-step="' + stepId + '"]');
               if (existing) {
                 existing.classList.add('is-running');
                 existing.classList.remove('is-done', 'is-error');
                 var st = existing.querySelector('.ai-tool-step-status');
-                if (st) st.textContent = '进行中';
+                if (st) st.textContent = '搜索中';
+                // 若该条目属于已收敛的旧轮次，把它所在轮次重新置为运行态
+                var hostRound = existing.closest ? existing.closest('.ai-tool-round') : null;
+                if (hostRound) {
+                  hostRound.classList.add('is-running');
+                  hostRound.classList.remove('is-done');
+                  var hostIcon = hostRound.querySelector('.ai-tool-round-icon');
+                  if (hostIcon) hostIcon.textContent = '⏳';
+                }
                 return;
               }
+              // 紧凑单行条目：状态图标 + 名称 +（查询词/参数）
               var step = el('div', { class: 'ai-tool-step is-running' });
               step.setAttribute('data-tool-step', stepId);
               step.setAttribute('data-tool-name', String(t.name || ''));
-              step.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🔧' }));
+              step.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🔍' }));
               var body = el('div', { class: 'ai-tool-step-body' });
               body.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
               if (detail) body.appendChild(el('div', { class: 'ai-tool-step-detail', text: detail }));
-              body.appendChild(el('div', { class: 'ai-tool-step-status', text: '进行中' }));
+              body.appendChild(el('div', { class: 'ai-tool-step-status', text: '搜索中' }));
               step.appendChild(body);
-              timeline.appendChild(step);
+              roundList.appendChild(step);
             });
+            // 轮次计数：运行中显示"x/y 完成"，全完成时收敛整轮
+            updateToolRoundState(roundBox);
             followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
@@ -8543,8 +8755,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
           // ★ 2026-09-15 流畅性优化：服务端在工具执行期间每 3s 推一次 tool_progress。
           //   此前工具执行（read_web_page / run_code / 多路搜索）期间 SSE 无事件，
-          //   前端"进行中"字样长时间静止，用户以为卡死并手动重发。
-          //   现在原地把运行中步骤的状态改成"进行中 · 已 12s"，给出真实进展感，
+          //   前端"搜索中"字样长时间静止，用户以为卡死并手动重发。
+          //   现在原地把运行中步骤的状态改成"搜索中 · 已 12s"，给出真实进展感，
           //   同时该事件本身就是保活信号，可重置前端 idle 看门狗。
           if (evt.type === 'tool_progress') {
             toolProgressTick = (toolProgressTick || 0) + 1;
@@ -8553,27 +8765,71 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             for (var _pi = 0; _pi < _pSteps.length; _pi++) {
               var _pStatusEl = _pSteps[_pi].querySelector('.ai-tool-step-status');
               if (_pStatusEl) {
-                _pStatusEl.textContent = _pElapsed >= 3 ? ('进行中 · 已 ' + _pElapsed + 's') : '进行中';
+                // ★ 2026-09-17：文案与两态模型统一（搜索中 → 已完成），
+                //   进行中只追加计时，不改状态词，避免出现第三、第四种表述。
+                _pStatusEl.textContent = _pElapsed >= 3 ? ('搜索中 · 已 ' + _pElapsed + 's') : '搜索中';
               }
             }
+            // 同步刷新每个轮次摘要上的 x/y 计数
+            try {
+              var _pRounds = assistantNode.querySelectorAll('.ai-tool-round.is-running');
+              for (var _pri = 0; _pri < _pRounds.length; _pri++) updateToolRoundState(_pRounds[_pri]);
+            } catch (eProgRound) {}
             followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
 
           if (evt.type === 'tool_pending') {
+            // ★★★ 2026-09-17 重写（消除重复条目）：
+            //   旧实现为每个 tool_pending **无条件新建**一条"准备工具"步骤，
+            //   而紧随其后的 tool_calls 又会为同一工具新建"联网搜索/社媒检索"，
+            //   于是同一件事在时间线里出现两遍（截图实证：
+            //   "准备工具 search_social" 与 "社媒检索" 反复各出现一次）。
+            //   新实现：pending 只作为「该工具即将执行」的轻量占位——
+            //   若同名工具条目已存在则直接复用并保持运行态；否则只登记一个
+            //   紧凑占位，等 tool_calls 到达时把详情补齐、状态统一为"搜索中"。
             var pendingBar = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
+            var pendName = String(evt.tool_name || '');
+            var pendExisting = pendName
+              ? pendingBar && pendingBar.querySelector('[data-tool-name="' + pendName.replace(/["\\\]\[]/g, '') + '"]')
+              : null;
+            if (pendExisting) {
+              pendExisting.classList.add('is-running');
+              pendExisting.classList.remove('is-done', 'is-error');
+              var pendSt = pendExisting.querySelector('.ai-tool-step-status');
+              if (pendSt) pendSt.textContent = '搜索中';
+              try { refreshOwningToolRound(pendExisting); } catch (ePendRound) {}
+              followToolProgress(messagesEl, _aiUserPinnedUp);
+              continue;
+            }
             if (!pendingBar) {
               pendingBar = el('div', { class: 'ai-tool-timeline ai-tool-status', role: 'status' });
               assistantNode.insertBefore(pendingBar, assistantBubble);
             }
+            // 复用最近一个仍在运行的轮次；没有则新建（避免 pending 单独成轮）
+            var pendRound = pendingBar.querySelector('.ai-tool-round.is-running:last-of-type');
+            if (!pendRound) {
+              pendRound = el('div', { class: 'ai-tool-round is-running' });
+              pendRound.setAttribute('data-tool-round', 'r' + (toolRoundSeq++));
+              var pHead = el('div', { class: 'ai-tool-round-head' });
+              pHead.appendChild(el('span', { class: 'ai-tool-round-icon', text: '⏳' }));
+              pHead.appendChild(el('span', { class: 'ai-tool-round-label', text: '调用工具' }));
+              pHead.appendChild(el('span', { class: 'ai-tool-round-count', text: '' }));
+              pendRound.appendChild(pHead);
+              pendRound.appendChild(el('div', { class: 'ai-tool-round-list' }));
+              pendingBar.appendChild(pendRound);
+            }
+            var pendList = pendRound.querySelector('.ai-tool-round-list');
             var pendStep = el('div', { class: 'ai-tool-step is-running' });
-            pendStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '⏳' }));
+            if (pendName) pendStep.setAttribute('data-tool-name', pendName);
+            pendStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🔍' }));
             var pendBody = el('div', { class: 'ai-tool-step-body' });
             pendBody.appendChild(el('div', { class: 'ai-tool-step-title', text: '准备工具' }));
-            pendBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: evt.tool_name || '站内工具' }));
-            pendBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '进行中' }));
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: pendName || '站内工具' }));
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '搜索中' }));
             pendStep.appendChild(pendBody);
-            pendingBar.appendChild(pendStep);
+            pendList.appendChild(pendStep);
+            updateToolRoundState(pendRound);
             followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
@@ -8582,27 +8838,64 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             notify((evt.tool_name || 'AI 工具') + '：' + (evt.error || '执行失败'));
             var errTimeline = assistantNode.querySelector('.ai-tool-timeline');
             if (errTimeline) {
-              var errStep = el('div', { class: 'ai-tool-step is-error' });
-              errStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '⚠️' }));
-              var errBody = el('div', { class: 'ai-tool-step-body' });
-              errBody.appendChild(el('div', { class: 'ai-tool-step-title', text: evt.tool_name || '工具' }));
-              errBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '失败' }));
-              if (evt.error) errBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(evt.error).slice(0, 120) }));
-              errStep.appendChild(errBody);
-              errTimeline.appendChild(errStep);
+              // ★ 2026-09-17：优先把**同名**的进行中条目就地转为失败态（不新增重复条目）；
+              //   找不到同名条目时才补建一条，保证信息不丢。
+              var errName = String(evt.tool_name || '');
+              var errMatch = errName
+                ? errTimeline.querySelector('[data-tool-name="' + errName.replace(/["\\\]\[]/g, '') + '"]')
+                : null;
+              if (errMatch) {
+                errMatch.classList.remove('is-running', 'is-done');
+                errMatch.classList.add('is-error');
+                var errMatchIcon = errMatch.querySelector('.ai-tool-step-icon');
+                if (errMatchIcon) errMatchIcon.textContent = '⚠️';
+                var errMatchSt = errMatch.querySelector('.ai-tool-step-status');
+                if (errMatchSt) errMatchSt.textContent = '失败';
+                var errMatchDetail = errMatch.querySelector('.ai-tool-step-detail');
+                if (evt.error && !errMatchDetail) {
+                  var errMatchBody = errMatch.querySelector('.ai-tool-step-body');
+                  if (errMatchBody) errMatchBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(evt.error).slice(0, 120) }));
+                }
+                try { refreshOwningToolRound(errMatch); } catch (eErrRound) {}
+              } else {
+                var errStep = el('div', { class: 'ai-tool-step is-error' });
+                errStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '⚠️' }));
+                var errBody = el('div', { class: 'ai-tool-step-body' });
+                errBody.appendChild(el('div', { class: 'ai-tool-step-title', text: evt.tool_name || '工具' }));
+                errBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '失败' }));
+                if (evt.error) errBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(evt.error).slice(0, 120) }));
+                errStep.appendChild(errBody);
+                var errRound2 = errTimeline.querySelector('.ai-tool-round.is-running:last-of-type');
+                if (!errRound2) {
+                  errRound2 = el('div', { class: 'ai-tool-round is-running' });
+                  var eHead = el('div', { class: 'ai-tool-round-head' });
+                  eHead.appendChild(el('span', { class: 'ai-tool-round-icon', text: '⏳' }));
+                  eHead.appendChild(el('span', { class: 'ai-tool-round-label', text: '调用工具' }));
+                  eHead.appendChild(el('span', { class: 'ai-tool-round-count', text: '' }));
+                  errRound2.appendChild(eHead);
+                  errRound2.appendChild(el('div', { class: 'ai-tool-round-list' }));
+                  errTimeline.appendChild(errRound2);
+                }
+                errRound2.querySelector('.ai-tool-round-list').appendChild(errStep);
+                updateToolRoundState(errRound2);
+              }
             }
             // ★★★ 2026-09-15 修复（P0-2 配套）：工具**报错**同样属于"本轮结束"，
             //   必须立即收敛残留的搜索状态条与 is-running 步骤，否则失败的工具
             //   会让动画一直转下去（与原 bug 表现一致）。
             try { settleSearchStatus(assistantNode, { failed: true, failText: '联网失败' }); } catch (eSettleErr) {}
+            // ★ 2026-09-17：与 tool_result 同样只收敛"无名字的占位步骤"，
+            //   不无差别打断其他仍在并行执行的工具的进行态。
             try {
               var _errRunSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
               for (var _ersi = 0; _ersi < _errRunSteps.length; _ersi++) {
                 var _erse = _errRunSteps[_ersi];
+                if (_erse.classList.contains('ai-tool-organizing')) continue;
+                if (_erse.getAttribute('data-tool-name')) continue;
                 _erse.classList.remove('is-running');
                 _erse.classList.add('is-error');
                 var _ersSt = _erse.querySelector('.ai-tool-step-status');
-                if (_ersSt && /进行中|准备/.test(String(_ersSt.textContent || ''))) _ersSt.textContent = '失败';
+                if (_ersSt && /进行中|搜索中|准备/.test(String(_ersSt.textContent || ''))) _ersSt.textContent = '失败';
               }
             } catch (eSettleErrSteps) {}
             followToolProgress(messagesEl, _aiUserPinnedUp);
@@ -8666,7 +8959,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var iconEl = matchStep.querySelector('.ai-tool-step-icon');
               if (iconEl) iconEl.textContent = evt.success ? '✅' : '⚠️';
               var stEl = matchStep.querySelector('.ai-tool-step-status');
-              if (stEl) stEl.textContent = evt.success ? '完成' : '失败';
+              // ★ 2026-09-17：状态文案统一为"已完成"，与用户要求的
+              //   「搜索中 → 已完成」两态切换保持一致。
+              if (stEl) stEl.textContent = evt.success ? '已完成' : '失败';
             }
             var resultCard = el('div', { class: 'ai-tool-result-card' });
             resultCard.appendChild(el('div', { class: 'ai-tool-result-card-title', text: summaryText }));
@@ -8683,16 +8978,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   ② 把所有残留 is-running 的 tool step 置为完成态
             //      （含无 data-tool-name 的 pending 占位步骤）。
             try { settleSearchStatus(assistantNode, { doneText: '联网完成' }); } catch (eSettleNow) {}
+            // ★★★ 2026-09-17 修正（并行工具场景的关键 bug）：
+            //   旧实现把**所有** is-running 的步骤一律置为完成。并行调用 5 个工具时，
+            //   第 1 个工具返回就会把其余 4 个"还没返回"的步骤也标成完成 ——
+            //   用户看到的动画与实际执行状态不符（明明还在搜却显示已完成）。
+            //   现改为：只收敛该工具**自己**的步骤，让其余并行步骤继续显示"搜索中"，
+            //   各自在收到自己的 tool_result 时才逐个转成 ✅。这正是用户要的
+            //   「五个正在搜索 → 搜完一个变一个 → 全部搜完就都变已完成」。
+            try { refreshOwningToolRound(matchStep); } catch (eRound1) {}
+            // 兜底：仍残留的"准备工具"占位（无 data-tool-name）在整轮收敛时统一处理，
+            //   此处不再无差别清除，避免打断其他并行工具的真实进行态。
             try {
-              var _runSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
-              for (var _rsi = 0; _rsi < _runSteps.length; _rsi++) {
-                var _rse = _runSteps[_rsi];
-                _rse.classList.remove('is-running');
-                _rse.classList.add('is-done');
-                var _rsIcon = _rse.querySelector('.ai-tool-step-icon');
-                if (_rsIcon && _rsIcon.textContent === '⏳') _rsIcon.textContent = '✅';
-                var _rsSt = _rse.querySelector('.ai-tool-step-status');
-                if (_rsSt && /进行中|准备/.test(String(_rsSt.textContent || ''))) _rsSt.textContent = '完成';
+              var _orgDoneSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
+              for (var _ods = 0; _ods < _orgDoneSteps.length; _ods++) {
+                var _odsEl = _orgDoneSteps[_ods];
+                if (_odsEl.classList.contains('ai-tool-organizing')) continue;
+                var _odsName = _odsEl.getAttribute('data-tool-name') || '';
+                // 只收敛"无名字的占位步骤"（tool_pending 遗留），有名字的等待自己的结果
+                if (!_odsName) {
+                  _odsEl.classList.remove('is-running');
+                  _odsEl.classList.add('is-done');
+                  var _odsIcon = _odsEl.querySelector('.ai-tool-step-icon');
+                  if (_odsIcon && _odsIcon.textContent === '⏳') _odsIcon.textContent = '✅';
+                  var _odsSt = _odsEl.querySelector('.ai-tool-step-status');
+                  if (_odsSt && /进行中|准备/.test(String(_odsSt.textContent || ''))) _odsSt.textContent = '已完成';
+                }
               }
             } catch (eSettleSteps) {}
             // ★ 2026-09-15 流畅性优化：工具全部返回后，模型还需要时间推理+生成
@@ -8711,7 +9021,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   _orgStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🧠' }));
                   var _orgBody = el('div', { class: 'ai-tool-step-body' });
                   _orgBody.appendChild(el('div', { class: 'ai-tool-step-title', text: '整理检索结果并作答' }));
-                  _orgBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '进行中' }));
+                  _orgBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '整理中' }));
                   _orgStep.appendChild(_orgBody);
                 }
               }
@@ -8866,15 +9176,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (body) {
               if (!reasoningRenderer) {
                 body.textContent = '';
+                // ★ 2026-09-17 思考流优化：
+                //   ① maxChunk 48 → 64、charsPerMs 100 → 140：思考文本往往比正文更
+                //      密集（长推理段落），沿用正文节奏会显得慢半拍；
+                //   ② 新增 onRender 节流：原实现每帧都调 scrollToBottom，
+                //      reasoning 高频到达时每帧触发一次滚动计算，反过来拖慢渲染帧率
+                //      （越滚越卡）。改为最多 120ms 一次，滚动跟随依然及时。
+                var _lastReasonScroll = 0;
                 reasoningRenderer = createSmoothTextRenderer(body, {
-                minChunk: 6,
-                maxChunk: 48,
-                charsPerMs: 100,
-                plainStream: true,
-                onRender: function() {
-                  scrollToBottom(messagesEl, false);
-                }
-              });
+                  minChunk: 6,
+                  maxChunk: 64,
+                  charsPerMs: 140,
+                  plainStream: true,
+                  onRender: function() {
+                    var _now2 = Date.now();
+                    if (_now2 - _lastReasonScroll < 120) return;
+                    _lastReasonScroll = _now2;
+                    scrollToBottom(messagesEl, false);
+                  }
+                });
               }
               // ★ 修复：渲染器按剩余配额接收（200k 上限此前只截累积字符串，渲染器无界增长）
               var _reasonRoom2 = 200000 - aiReasoning.length;
@@ -8901,6 +9221,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 if (_orgStatus) _orgStatus.textContent = '完成';
               }
             } catch (eOrganizeDone) {}
+            // ★★★ 2026-09-17 思考 → 正文交接优化（本轮流动性重点之一）：
+            //   旧行为：思考流全程强制展开，正文一开始输出后，思考面板**仍占满屏幕**
+            //   继续显示，正文只能挤在下方；用户要一路滚动才能看到回复的开头，
+            //   观感上"回复迟迟不出现"，是"不流畅"的重要来源。
+            //   新行为：正文首个 chunk 到达时，把思考面板**自动收起**并给出终态
+            //   （已思考 Xs），让正文自然接位；用户随时可点标题重新展开回看。
+            //   只在"确实有思考内容"时执行，纯正文回复不受影响。
+            if (!_thinkingSettledOnContent && reasoningStarted) {
+              _thinkingSettledOnContent = true;
+              try {
+                var _tn = assistantNode.querySelector('.ai-thinking');
+                if (_tn) {
+                  if (thinkingTimer) {
+                    finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
+                  }
+                  setThinkingActive(_tn, false);
+                  // 收尾思考渲染器：把缓冲里剩余字符一次性落定，避免尾部丢字
+                  if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF) {} }
+                  setThinkingExpanded(_tn, false, messagesEl);
+                }
+              } catch (eThinkSettle) {}
+            }
             var contentChunk = evt.text || '';
             if (!contentChunk) continue;
             // ★ 内容长度上限：防止超长回复/异常流无限累积

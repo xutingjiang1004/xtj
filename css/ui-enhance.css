@@ -570,6 +570,97 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-step.is-running .ai-tool-step-status { color: #2f7f9e; }
 .ai-tool-step.is-error .ai-tool-step-status { color: #c44b5a; }
 
+/* ── 2026-09-17 工具调用「并行轮次」紧凑布局 ─────────────────────────
+   产品诉求（用户原话）："并行搜索五个网页或工具，就直接显示五个正在搜索中，
+   全部搜索之后就把搜索中那些字和图标换成已完成……不要全部展开占很多位置，
+   类似 ChatGPT / Codex 那种"。
+   设计要点：
+   1) 一轮并行工具 = 一个 .ai-tool-round 容器，内含 N 条**单行**紧凑条目；
+   2) 摘要行常驻，显示「并行调用 N 个工具 · x/y 完成」，完成后变「✅ 已完成 N 个工具」；
+   3) 条目单行呈现（图标 + 名称 + 查询词同行），不再每个工具占四行；
+   4) 历史轮次完成后自动收紧（降低视觉权重 + 限制高度可折叠），
+      避免多轮工具把消息撑得过长。 */
+.ai-tool-round {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 10px;
+  transition: background 180ms ease, opacity 180ms ease;
+}
+.ai-tool-round + .ai-tool-round { margin-top: 6px; }
+
+.ai-tool-round-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #3f6b5e;
+  line-height: 1.5;
+  min-height: 20px;
+}
+.ai-tool-round-icon { flex: 0 0 auto; width: 18px; text-align: center; font-size: 12px; }
+.ai-tool-round-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-tool-round-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 650;
+  color: #2f7f9e;
+  font-variant-numeric: tabular-nums;
+}
+.ai-tool-round.is-done .ai-tool-round-head { color: #2f7a5f; }
+.ai-tool-round.is-done .ai-tool-round-count { display: none; }
+
+/* 条目列表：单行紧凑，左侧一条细分隔线形成"组"的视觉归属 */
+.ai-tool-round-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-left: 9px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(91, 151, 131, .18);
+}
+/* 轮次内的步骤改为单行：图标 + 文字块同一基线，取消大间距 */
+.ai-tool-round-list .ai-tool-step {
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 0;
+  min-height: 19px;
+}
+.ai-tool-round-list .ai-tool-step-icon { width: 16px; font-size: 11px; }
+.ai-tool-round-list .ai-tool-step-body {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ai-tool-round-list .ai-tool-step-title { font-size: 12.5px; font-weight: 650; }
+.ai-tool-round-list .ai-tool-step-detail {
+  font-size: 11.5px;
+  margin-top: 0;
+  color: #8299a0;
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-tool-round-list .ai-tool-step-status { font-size: 11px; margin-top: 0; font-variant-numeric: tabular-nums; }
+
+/* 运行中不再用左侧粗光晕（单行条目下会显得笨重），改为图标轻微呼吸。
+   注意：呼吸动画的具体声明放在下方（晚于通用 .is-running .ai-tool-step-icon
+   的 animation:none 规则），以确保层叠顺序正确生效。 */
+.ai-tool-round-list .ai-tool-step.is-running { padding-left: 0; }
+.ai-tool-round-list .ai-tool-step.is-running::before { display: none; }
+@keyframes xtjToolIconBreath {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+
+/* 已完成的历史轮次：视觉降权，让最新一轮保持主角地位 */
+.ai-tool-round.is-done { opacity: .82; }
+.ai-tool-round.is-done .ai-tool-round-list { border-left-color: rgba(91, 151, 131, .12); }
+
 /* ── 2026-09-11 工具调用 UI / 动画优化 ──────────────────────────────
    目标（对应产品反馈："优化调用工具的动画以及显示 UI"）：
    1) 工具步骤出现时有明确的进入动画，用户能立刻感知"AI 正在用工具"；
@@ -622,6 +713,12 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-step.is-running .ai-tool-step-icon {
   animation: none;
   opacity: 1;
+}
+/* ★ 2026-09-17：轮次紧凑条目里，运行中图标改用柔和呼吸（覆盖上面的 none）。
+   放在此处是为了保证在源码顺序上晚于通用规则、选择器也更具体，
+   不依赖 !important 即可稳定生效。 */
+.ai-tool-round-list .ai-tool-step.is-running .ai-tool-step-icon {
+  animation: xtjToolIconBreath 1.6s ease-in-out infinite;
 }
 
 /* 3) 状态切换过渡：完成/失败时颜色与位移平滑变化 */
