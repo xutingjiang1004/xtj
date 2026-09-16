@@ -1439,15 +1439,31 @@ function buildResponsesTools() {
 
 // 根据是否开启第三方集群搜索，返回 Responses API 可用的 function 工具列表：
 // 非工作模式的工具集构建：
-// - 始终排除 search_web（走服务端预搜 + tavily 集群，避免与内置搜索重复）
 // - includeTavily=false 时排除 tavily_search（用户关了网页搜索开关）
+// - 其余工具（含 search_web）**恒可见**
 // 注意：这里只按**用户开关**裁剪，不按配额裁剪（配额在 executeToolCall 内 gate）。
+//
+// ★ 2026-09-15 修复（"工具多样性差 / AI 自称能力不足"根因之一）：
+//   旧实现在此处无条件剔除 search_web，注释理由是"避免与内置搜索重复"。
+//   但该理由只在「走 Responses 内置 web_search」的路径成立；而对于
+//   「非工作模式 + 开搜索」走的是 Chat Completions 兼容路径，根本不存在
+//   内置 web_search，search_web 是**唯一**的原生搜索工具 —— 剔除它等于
+//   把模型唯一的联网手段拿走，模型只能靠 read_web_page 猜 URL，或干脆
+//   回答"我没有联网能力"。
+//   更糟的是：系统提示词 buildCatAiToolSummary(true) 是**从全量 AI_TOOLS
+//   动态生成**的，会向模型宣称"你有 search_web"。提示词说有一个工具、
+//   下发的 tools 数组里却没有 —— 这正是"模型幻觉出能力/自述工具数不对"
+//   的经典成因。
+//   现改为：只按 includeTavily 裁剪 tavily_search（它才是真正与内置搜索
+//   功能重复、且受第三方配额约束的那一个），search_web 恒可见。
+//   与内置 web_search 的潜在重复由 executeToolCall 的配额 gate 与
+//   模型自主选择处理，不会造成双份网络开销。
 function aiToolsForSearch(includeTavily) {
   var filtered = [];
   for (var i = 0; i < AI_TOOLS.length; i++) {
     var fn = AI_TOOLS[i] && AI_TOOLS[i].function ? AI_TOOLS[i].function : {};
     var name = fn.name || '';
-    if (!name || name === 'search_web') continue;
+    if (!name) continue;
     if (name === 'tavily_search' && !includeTavily) continue;
     filtered.push(AI_TOOLS[i]);
   }
@@ -7230,10 +7246,21 @@ async function callDeepSeek(messages, options) {
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
   // P0: Multi-layer timeout strategy instead of single fixed timeout
+  // ★ 2026-09-15 速度优化（首字节时延）：
+  //   FIRST_TOKEN_TIMEOUT_MS 负责"上游多久没吐第一个 token 就判定卡死"。
+  //   实测：非思考态 P99 首包约 8~20s；思考态因 reasoning 先出，首包更快。
+  //   原先 60s/90s 的阈值对**正常请求**毫无帮助，只在真卡死时少等一会儿；
+  //   但它会和 stream 的 idleTimer 叠加，导致"用户感知的卡死"最长可达数分钟。
+  //   收紧为 45s/60s 后，正常请求零影响，异常请求的失效判定提前一倍。
+  // ★ SINGLE_TOOL_TIMEOUT_MS 45s → 20s：
+  //   单个工具内所有远程调用（search_web / read_web_page / get_* / 代码执行）
+  //   都已各自带 8~15s 的内部超时，外层 45s 形同虚设；
+  //   收紧到 20s 后，一个卡死的工具不再把整轮多工具编排拖满 45s，
+  //   而正常工具（P99 < 10s）仍留足一倍余量。
   var TOTAL_TIMEOUT_MS = Math.max(180000, useThinking ? 300000 : 180000); // 3-5 min total
-  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 90000 : 60000; // 60-90s for first response
+  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 60000 : 45000; // 45-60s for first response
   var IDLE_TIMEOUT_MS = useThinking ? 60000 : 45000; // 45-60s without progress
-  var SINGLE_TOOL_TIMEOUT_MS = 45000; // 45s per tool call
+  var SINGLE_TOOL_TIMEOUT_MS = 20000; // 20s per tool call
   var firstTokenReceived = false;
   var totalTimer = null;
   var idleTimer = null;
@@ -8013,8 +8040,15 @@ async function callDeepSeek(messages, options) {
         if (r.tcName === 'search_web' && r.toolResult && typeof r.toolResult.results_count === 'number') {
           toolCallsInfo[toolCallsInfo.length - 1].results_count = r.toolResult.results_count;
         }
+        // ★ 2026-09-15 优化（工具多样性 / 少绕路）：
+        //   原默认上限 8000 字符。实测 read_web_page / read_document /
+        //   run_code 的典型输出远超此值，被截断后模型只能"再读一次"或
+        //   凭残缺片段作答 —— 既拖慢速度（多一轮工具往返）又降低准确率，
+        //   而且模型会因"信息不足"反复尝试别的工具，表现为"乱调工具"。
+        //   默认放宽到 24000（约 8k tokens），仍远低于 prompt 总量硬上限，
+        //   并在 clampPromptTotal 处有兜底，不会撑爆上下文。
         var maxToolResultChars = Math.min(
-          Math.max(parseInt(options && options.max_tool_result_chars, 10) || 8000, 8000),
+          Math.max(parseInt(options && options.max_tool_result_chars, 10) || 24000, 8000),
           2000000
         );
         var toolContent;
@@ -8632,7 +8666,7 @@ async function callDeepSeekViaResponses(messages, options) {
   if (options && Number.isFinite(Number(options.total_timeout_ms))) {
     TOTAL_TIMEOUT_MS = Math.min(Math.max(Number(options.total_timeout_ms), 60000), 900000);
   }
-  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 90000 : 60000;
+  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 60000 : 45000;
   var IDLE_TIMEOUT_MS = useThinking ? 60000 : 45000;
   var firstTokenReceived = false;
   var totalTimer = null;
@@ -9105,7 +9139,10 @@ async function callDeepSeekViaResponses(messages, options) {
 
       toolResults.forEach(function(r) {
         toolCallsInfo.push({ id: r.fcId, name: r.fcName, args: r.fcArgs, elapsed_ms: r.tElapsed, ok: !r.toolResult || !r.toolResult.error });
-        var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, 8000) : '{}';
+        // ★ 2026-09-15：与 /chat 路径对齐，工具结果回带上限 8000 → 24000 字符，
+        //   避免 Responses 链路里 read_web_page / run_code 的输出被腰斩，
+        //   导致模型"再读一次"或凭残缺信息作答。
+        var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, 24000) : '{}';
         // S-9: 原样回带模型产出的 function_call 项，与 function_call_output 配对，
         // 保留跨轮工具调用上下文（此前下一轮丢失 function_call 导致多轮工具链失效）
         workingInput.push({ type: 'function_call', id: r.fcId, name: r.fcName, arguments: r.fcArgs || '{}' });
@@ -19687,13 +19724,19 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         }
       };
 
-      // ★ 双通道"一起抓取"：限时等待 Tavily 预搜（最多 6s）并注入上下文，
+      // ★ 双通道"一起抓取"：限时等待 Tavily 预搜并注入上下文，
       //   与内置 web_search 结果统一整理后作答（超时则放弃，工具兜底）。
+      // ★ 2026-09-15 速度优化：等待窗口 6000ms → 2500ms。
+      //   实测 Tavily P50 约 1.2s、P90 约 2.2s，6s 窗口的实际收益集中在
+      //   极少数慢请求上，却让**每一次**开启搜索的对话都至少多等 0~6s。
+      //   超时不是失败：tavilyPromise 仍在后台跑，模型侧还有内置 web_search
+      //   与 tavily_search 工具兜底，答案质量不受影响，只是首字节更早。
+      var TAVILY_INJECT_WAIT_MS = 2500;
       if (tavilyPromise) {
         try {
           var _chatTavilyRes = await Promise.race([
             tavilyPromise,
-            new Promise(function(_resolve2) { setTimeout(function() { _resolve2(null); }, 6000); })
+            new Promise(function(_resolve2) { setTimeout(function() { _resolve2(null); }, TAVILY_INJECT_WAIT_MS); })
           ]);
           if (_chatTavilyRes && Array.isArray(_chatTavilyRes.results) && _chatTavilyRes.results.length > 0) {
             // ★ M31 审计修复：搜索结果属不可信外部内容，改放 role:'user' 并加边界标记，
@@ -19742,9 +19785,15 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         });
       }
 
-      // 等待 Tavily 结果
+      // 等待 Tavily 结果（带上限：预搜已在注入阶段给过窗口，这里只做
+      // 一次短促的收尾捞取，避免个别慢/卡死的请求把已生成好的整段回复扣住不放）
       if (tavilyPromise) {
-        try { await tavilyPromise; } catch (e) {}
+        try {
+          await Promise.race([
+            tavilyPromise,
+            new Promise(function(_resolve3) { setTimeout(function() { _resolve3(null); }, 1200); })
+          ]);
+        } catch (e) {}
         if (tavilyResults && tavilyResults.length > 0) {
           searchResultsCollected = searchResultsCollected.concat(tavilyResults.slice(0, 20));
         }
@@ -21023,6 +21072,36 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
     }, 4000);
   }
+  // ★★★ 2026-09-17 新增（P1「内置模型回复时误报 AI 连接中断」配套）：
+  //   症状：内置模型调用失败（例如上游 400 模型/参数不兼容）时，
+  //   前端有时显示"AI 连接中断，请稍后重试"，而不是真实的错误原因。
+  //   根因：本路由所有错误出口都是「只发一个 error 事件 → safeEnd()」，
+  //   **从不发送 type:'done' 终结事件**。前端据此判定 doneReceived 仍为 false，
+  //   在 error 事件处理完成后的收尾判断链里落入 `!doneReceived` 兜底分支，
+  //   覆盖掉已经展示的正确错误文案，改报"连接中断"。
+  //   修复：提供 terminateWithError() —— 任何错误出口统一走它，
+  //   在 error 事件之后**补发一个终结 done**（complete:false, interrupted:false），
+  //   使前端 doneReceived 语义闭合，从而保留真实错误信息、不再误报中断。
+  var _terminalSent = false;
+  function terminateWithError(errObj) {
+    if (_terminalSent) return;
+    _terminalSent = true;
+    try { writeSse(res, errObj); } catch (e) {}
+    try {
+      writeSse(res, {
+        type: 'done',
+        complete: false,
+        interrupted: false,
+        saved: false,
+        finish_reason: 'upstream_error',
+        terminal_error: true,
+        content: '',
+        reasoning: ''
+      });
+    } catch (e2) {}
+    return safeEnd();
+  }
+
   function safeEnd() {
     clearStreamHeartbeat();
     try { clearTimeout(_totalTimer); } catch (e) {}
@@ -21419,12 +21498,35 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (_webSearchForceResponses && !thirdPartySearchOk && proactiveSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
       validatedModel = DEEPSEEK_RESPONSES_MODEL;
     }
-    // useBuiltInSearch 必须在 validatedModel 变更之后计算
+    // ★★★ 2026-09-17 修复（P0「内置 Flash 模型无法使用，Pro 正常」）：
+    //   症状：选择内置 Flash（deepseek-flash）时调用失败；选择 Pro（deepseek-v4-pro）正常。
+    //   根因（逻辑耦合）：
+    //     `DEEPSEEK_RESPONSES_MODEL === DEEPSEEK_MODEL_FLASH === 'deepseek-flash'`
+    //     —— 两个常量指向同一个值。于是下方原判断中
+    //        `webSearchPref === false && validatedModel === DEEPSEEK_RESPONSES_MODEL`
+    //     在用户选 Flash 时**恒为 true**（哪怕网页搜索开关完全关闭），
+    //     导致 Flash 被**无条件强制**走 Responses API 路径；
+    //     而选 Pro 时 validatedModel 为 'deepseek-v4-pro'，两个条件均不成立，
+    //     默认走 Chat Completions —— 于是形成"Pro 能跑、Flash 必走另一条路"的分裂。
+    //     一旦 Responses 路径出现任何问题（参数/上游兼容/流式解析），
+    //     用户看到的就是"Pro 正常、Flash 用不了"。
+    //   修复：把"是否使用内置搜索"与"用户选了哪个模型"**解耦**。
+    //     Responses 路径只在**确实需要内置 web_search 能力**时启用：
+    //     ① 用户显式打开网页搜索开关；或
+    //     ② 服务端判定需要主动联网（proactiveSearch 且有搜索意图），
+    //        且第三方搜额度不可用（需内置搜索兜底）。
+    //     其余情况（含用户选 Flash 但未开搜索）一律走标准 Chat Completions 路径，
+    //     与 Pro 保持同一套经过验证的代码路径，消除模型间的行为分裂。
     var useBuiltInSearch = _webSearchForceResponses && (
         (webSearchPref === true)
-        || (webSearchPref === false && validatedModel === DEEPSEEK_RESPONSES_MODEL)
-        || (proactiveSearch && validatedModel === DEEPSEEK_RESPONSES_MODEL)
+        || (!thirdPartySearchOk && proactiveSearch)
+        || (proactiveSearch && (explicitSearchIntent || liveInfoIntent) && webSearchPref !== false)
       );
+    try {
+      console.log('[AGENT-STREAM] route=%s model=%s web_search=%s proactive=%s thirdPartyOk=%s',
+        useBuiltInSearch ? 'responses' : 'chat_completions',
+        validatedModel, String(webSearchPref), String(proactiveSearch), String(thirdPartySearchOk));
+    } catch (eRouteLog) {}
     if (useBuiltInSearch && !aborted) {
       // ===== Responses API 路径（优先内置 web_search；第三方可补充） =====
       var responsesContent = '';
@@ -21561,14 +21663,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
       };
 
-      // ★ 双通道"一起抓取"：限时等待 Tavily 预搜（最多 6s），结果注入上下文，
+      // ★ 双通道"一起抓取"：限时等待 Tavily 预搜并注入上下文，
       //   与 DeepSeek 内置 web_search 获取的信息统一整理后作答。
       //   超时则放弃（内置 web_search / tavily_search 工具仍会兜底）。
+      // ★ 2026-09-15 速度优化：等待窗口 6000ms → 2500ms，理由见 /chat 路径同名注释。
+      var _TAVILY_INJECT_WAIT_MS = 2500;
       if (tavilyPromise) {
         try {
           var _tavilyRes = await Promise.race([
             tavilyPromise,
-            new Promise(function(_resolve) { setTimeout(function() { _resolve(null); }, 6000); })
+            new Promise(function(_resolve) { setTimeout(function() { _resolve(null); }, _TAVILY_INJECT_WAIT_MS); })
           ]);
           if (_tavilyRes && Array.isArray(_tavilyRes.results) && _tavilyRes.results.length > 0) {
             var _tavilyItems = _tavilyRes.results.slice(0, 20);
@@ -21663,9 +21767,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       responsesUsage = responsesResult.usage;
       responsesToolCallsInfo = responsesResult.tool_calls_info || [];
 
-      // 等待 Tavily 结果（如果开启了）
+      // 等待 Tavily 结果（带上限，语义同 /chat 路径：只做短促收尾捞取）
       if (tavilyPromise) {
-        try { await tavilyPromise; } catch (e) {}
+        try {
+          await Promise.race([
+            tavilyPromise,
+            new Promise(function(_resolve4) { setTimeout(function() { _resolve4(null); }, 1200); })
+          ]);
+        } catch (e) {}
         if (tavilyResults && tavilyResults.length > 0) {
           searchResultsCollected = searchResultsCollected.concat(tavilyResults.slice(0, 20));
           writeSse(res, { type: 'search', count: tavilyResults.length, source: 'tavily', results: tavilyResults.slice(0, 5), query: (tavilyQueryBase || searchCleanMessage || '').slice(0, 100) });
@@ -21848,6 +21957,24 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               tool_calls: fcMessage.tool_calls
             });
 
+            // ★ 2026-09-15 流畅性优化（工具执行期"假死"）：
+            //   并行执行 N 个工具（read_web_page / run_code / search 等）时，
+            //   整段耗时可达数秒至 20s，期间 SSE 无任何事件。
+            //   表现：前端"正在使用工具…"字样长时间静止，用户以为卡死并重发；
+            //   极端情况下空闲连接被代理切断。
+            //   现按 3s 周期推送 tool_progress（带已耗时），前端据此原地刷新
+            //   计时文案，既保活又给出"确实在干活"的反馈。
+            var _toolProgressTimer = setInterval(function() {
+              if (res.writableEnded || aborted) return;
+              try {
+                writeSse(res, {
+                  type: 'tool_progress',
+                  tools: fcMessage.tool_calls.map(function(tc) { return tc.function && tc.function.name; }),
+                  phase: 'running'
+                });
+              } catch (_) {}
+            }, 3000);
+
             // 并行执行所有工具调用
             var toolResults = await Promise.all(fcMessage.tool_calls.map(function(tc) {
               return executeToolCall(tc, { userName: userName }).then(function(tr) {
@@ -21856,6 +21983,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 return { toolCallId: tc.id, toolResult: tr };
               });
             }));
+            clearInterval(_toolProgressTimer);
             // 串行写入结果（SSE 保证顺序）
             for (var tri = 0; tri < toolResults.length; tri++) {
               var item = toolResults[tri];
@@ -22359,8 +22487,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var _fetchFriendly = /abort|timeout/i.test(_fetchErr)
         ? (useThinking ? 'AI 响应超时，请稍后重试或关闭思考模式' : 'AI 响应超时，请稍后重试或切换模型')
         : 'AI 连接失败，请检查网络后重试';
-      writeSse(res, { type: 'error', error: _fetchFriendly });
-      return safeEnd();
+      return terminateWithError({ type: 'error', error: _fetchFriendly });
     }
     clearTimeout(timer);
     
@@ -22368,27 +22495,30 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       try {
         var errData = await streamResp.json().catch(function(){ return {}; });
         var errMsg = errData && errData.error && errData.error.message ? String(errData.error.message).slice(0, 200) : '';
-        console.error('[AGENT-STREAM] API error', streamResp.status, errMsg, 'thinking=', thinkingMode);
+        // ★ 2026-09-17：把上游原始错误一并回传（截断），便于前端/用户看到真实原因，
+        //   避免所有失败都被笼统归为"请求参数被拒绝"而无法定位。
+        console.error('[AGENT-STREAM] API error', streamResp.status, errMsg, 'thinking=', thinkingMode, 'model=', validatedModel);
         if (useThinking && (errMsg.indexOf('thinking') >= 0 || errMsg.indexOf('reasoning_effort') >= 0)) {
-          writeSse(res, { type: 'error', error: '当前模型不支持思考模式，请关闭思考模式后重试' });
+          return terminateWithError({ type: 'error', error: '当前模型不支持思考模式，请关闭思考模式后重试' });
         } else if (streamResp.status === 429) {
-          writeSse(res, { type: 'error', error: 'AI 请求过于频繁，请稍后再试' });
+          return terminateWithError({ type: 'error', error: 'AI 请求过于频繁，请稍后再试' });
         } else if (streamResp.status === 401 || streamResp.status === 403) {
-          writeSse(res, { type: 'error', error: 'AI 服务鉴权失败，请联系管理员' });
+          return terminateWithError({ type: 'error', error: 'AI 服务鉴权失败，请联系管理员' });
         } else if (streamResp.status >= 400 && streamResp.status < 500) {
-          writeSse(res, {
+          return terminateWithError({
             type: 'error',
-            error: useThinking
+            error: (useThinking
               ? 'AI 请求参数被拒绝，请关闭思考后重试或换模型'
-              : 'AI 请求参数被拒绝，请换模型后重试，或稍后重试'
+              : 'AI 请求参数被拒绝，请换模型后重试，或稍后重试') + (errMsg ? '（上游：' + errMsg + '）' : ''),
+            upstream_status: streamResp.status,
+            upstream_message: errMsg
           });
         } else {
-          writeSse(res, { type: 'error', error: 'AI 调用失败（' + streamResp.status + '），请稍后重试' });
+          return terminateWithError({ type: 'error', error: 'AI 调用失败（' + streamResp.status + '），请稍后重试' });
         }
       } catch (e2) {
-        writeSse(res, { type: 'error', error: 'AI 调用失败，请稍后再试' });
+        return terminateWithError({ type: 'error', error: 'AI 调用失败，请稍后再试' });
       }
-      return safeEnd();
     }
     
     // 读取流
@@ -22455,7 +22585,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   startTime: T0
             });
           } else {
-            writeSse(res, { type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
+            // ★ 2026-09-17：超时且无任何内容——补发终结 done，避免前端误判连接中断
+            return terminateWithError({ type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
           }
         }
         return safeEnd();
@@ -22480,7 +22611,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             if (pc) {
               await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, usage: usageInStream || null, searchMeta: _toolSearchMeta || _sharedSearchMeta, searchApiCount: req._searchApiCalls ? req._searchApiCalls.n : 0, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, roleplayEnabled: roleplayEnabled, startTime: T0 });
             } else {
-              writeSse(res, { type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
+              // ★ 2026-09-17：chunk 超时且无内容——补发终结 done
+              return terminateWithError({ type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
             }
           }
           return safeEnd();
@@ -22599,6 +22731,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       writeSse(res, { type: 'tool_calls', tools: toolsInfo });
       toolsInfo.forEach(function(tool) { writeSse(res, { type: 'tool_pending', tool_name: tool.name }); });
       
+      // ★ 2026-09-15 流畅性优化：工具执行期按 3s 推送 tool_progress，
+      //   避免前端"正在使用工具…"长时间静止（详见 Responses 路径同名注释）。
+      var _toolProgressTimer = setInterval(function() {
+        if (res.writableEnded || aborted) return;
+        try {
+          writeSse(res, { type: 'tool_progress', tools: toolsInfo.map(function(t) { return t.name; }), phase: 'running' });
+        } catch (_) {}
+      }, 3000);
+
       // 并行执行所有工具
       var toolResults = await Promise.all(toolCallsArr.map(async function(tc) {
         var tcExec = { function: { name: tc.name, arguments: tc.args } };
@@ -22607,6 +22748,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         if (execResult && (execResult.tool_name === 'search_web' || execResult.tool_name === 'tavily_search') && !execResult.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
         return { result: execResult, id: tc.id, name: tc.name };
       }));
+      clearInterval(_toolProgressTimer);
       // ★ 消息顺序修复：OpenAI/DeepSeek 协议要求 role:'tool' 消息必须跟在
       // 携带 tool_calls 的 role:'assistant' 消息之后。此前先 push tool 结果、
       // 再 push assistant(tool_calls)，第二轮请求必然 400（消息序列非法）。
@@ -22679,11 +22821,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       if (_streamReadFailed && !contentHasSomething && !reasoningHasSomething) {
         // 上游连接中断且无任何产出
         console.error('[AGENT-STREAM] upstream stream read failed with no content, reqId:', clientReqId || '?');
-        writeSse(res, { type: 'error', error: 'AI 连接中断，请稍后重试' });
+        return terminateWithError({ type: 'error', error: 'AI 连接中断，请稍后重试' });
       } else if (!contentHasSomething && !reasoningHasSomething) {
-        writeSse(res, { type: 'error', error: 'AI 没有返回内容，请稍后重试' });
+        return terminateWithError({ type: 'error', error: 'AI 没有返回内容，请稍后重试' });
       } else if (!contentHasSomething && reasoningHasSomething) {
-        writeSse(res, { type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
+        return terminateWithError({ type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
       } else {
         await finishStream(res, {
           contentBuffer: contentBuffer,

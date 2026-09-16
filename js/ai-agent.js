@@ -7882,6 +7882,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var _eofReached = false; // ★ 修复：SSE EOF flush 前置标志此前未声明（严格模式下 EOF 即抛 ReferenceError）
       var evtHandled = false;
       var _finalized = false;
+      // ★ 2026-09-17 新增：服务端已明确报错标志 + 最后一条服务端错误文案。
+      //   用于把"服务端已告知的失败"与"连接真的意外中断"区分开，
+      //   避免后者笼统的"AI 连接中断"文案覆盖前者的真实原因。
+      var terminalErrorSeen = false;
+      var lastServerError = '';
+      // ★ 2026-09-15 新增：工具执行期进度计数（服务端每 3s 推一次 tool_progress），
+      //   用于把"进行中"文案更新为"进行中 · 已 12s"，消除长时间静止的假死感。
+      var toolProgressTick = 0;
 
       function clearAssistantTransientStatus(node) {
         var target = node || assistantNode;
@@ -8533,6 +8541,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             continue;
           }
 
+          // ★ 2026-09-15 流畅性优化：服务端在工具执行期间每 3s 推一次 tool_progress。
+          //   此前工具执行（read_web_page / run_code / 多路搜索）期间 SSE 无事件，
+          //   前端"进行中"字样长时间静止，用户以为卡死并手动重发。
+          //   现在原地把运行中步骤的状态改成"进行中 · 已 12s"，给出真实进展感，
+          //   同时该事件本身就是保活信号，可重置前端 idle 看门狗。
+          if (evt.type === 'tool_progress') {
+            toolProgressTick = (toolProgressTick || 0) + 1;
+            var _pElapsed = toolProgressTick * 3;
+            var _pSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
+            for (var _pi = 0; _pi < _pSteps.length; _pi++) {
+              var _pStatusEl = _pSteps[_pi].querySelector('.ai-tool-step-status');
+              if (_pStatusEl) {
+                _pStatusEl.textContent = _pElapsed >= 3 ? ('进行中 · 已 ' + _pElapsed + 's') : '进行中';
+              }
+            }
+            followToolProgress(messagesEl, _aiUserPinnedUp);
+            continue;
+          }
+
           if (evt.type === 'tool_pending') {
             var pendingBar = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
             if (!pendingBar) {
@@ -8668,6 +8695,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 if (_rsSt && /进行中|准备/.test(String(_rsSt.textContent || ''))) _rsSt.textContent = '完成';
               }
             } catch (eSettleSteps) {}
+            // ★ 2026-09-15 流畅性优化：工具全部返回后，模型还需要时间推理+生成
+            //   最终答案（多轮工具场景可达数秒），此前的"联网完成/完成"是终态，
+            //   用户看到静止的完成态会误以为已经答完了。
+            //   这里补一条明确的进行态提示，并把进度计数归零（下一轮工具重新累计）。
+            try {
+              var _organizeBar = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
+              if (_organizeBar && !_organizeBar.querySelector('.ai-tool-organizing')) {
+                _organizeBar.appendChild(el('div', {
+                  class: 'ai-tool-step ai-tool-organizing is-running',
+                  'data-organizing': '1'
+                }));
+                var _orgStep = _organizeBar.querySelector('.ai-tool-organizing');
+                if (_orgStep) {
+                  _orgStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🧠' }));
+                  var _orgBody = el('div', { class: 'ai-tool-step-body' });
+                  _orgBody.appendChild(el('div', { class: 'ai-tool-step-title', text: '整理检索结果并作答' }));
+                  _orgBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '进行中' }));
+                  _orgStep.appendChild(_orgBody);
+                }
+              }
+            } catch (eOrganize) {}
+            toolProgressTick = 0;
             // Expandable result list attaches to the result card
             toolBar2 = resultCard;
             var itemsArr = evt.items;
@@ -8714,11 +8763,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'error') {
             hideAssistantTyping();
             var errMsg = evt.error || 'AI 调用失败';
-            // ★★★ 2026-09-15 修复（P1-6「回复已完整却显示 AI 生成中断」）：
-            //   若本轮的 `done` 事件已经到达（doneReceived === true），说明响应
-            //   已正常收尾，此时再收到的 error 事件属于服务端关闭连接时的
-            //   冗余上报，不得再向用户渲染任何错误文案，否则会出现
-            //   "正文完整 + 底下小字说生成中断"的矛盾表现。
+            // ★★★ 2026-09-17 修复（P1「内置模型回复时误报 AI 连接中断」）：
+            //   症状：内置模型调用失败时，用户有时看到"AI 连接中断，请稍后重试"
+            //   而不是真实的失败原因。
+            //   根因：error 事件分支**没有设置 evtHandled**（对比 done 分支有设），
+            //   也没有设置 doneReceived。error 处理完 break 之后，外层收尾判断链
+            //   `if (evtHandled) {} else if (aiContent) {} else if (doneReceived) {}
+            //    else if (!doneReceived) { notify('AI 连接中断...') }`
+            //   会一路落到最后的 `!doneReceived` 兜底分支，**覆盖掉刚展示的正确错误**，
+            //   改报"连接中断"。尤其当 error 事件与流 EOF 同批到达时（_eofReached
+            //   先触发 while 退出），必然踩中这条兜底。
+            //   修复：① error 分支显式置 evtHandled = true，让收尾链走"已完成"分支；
+            //        ② 新增 terminalErrorSeen 标志，记录"服务端已明确报错"，
+            //           使兜底文案能区分"已知服务端错误"与"真的意外断连"。
             if (doneReceived) {
               if (!_finalized && aiContent) finishAiMessage(assistantNode, aiContent, aiReasoning, null);
               resetSendingIfCurrent();
@@ -8726,6 +8783,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               aborted = true;
               break;
             }
+            // 服务端已明确报错（含补发的终态 done）：标记，避免落入"连接中断"兜底
+            terminalErrorSeen = true;
+            evtHandled = true;
+            lastServerError = errMsg;
             if (aiContent) {
               // 已有部分回复，保留内容并追加错误提示
               var errNote = el('div', { class: 'ai-error-note' }, errMsg);
@@ -8827,6 +8888,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var answerStage = assistantNode.querySelector('.ai-enhanced-status');
               if (answerStage) { answerStage.textContent = '正在组织回答…'; answerStage.setAttribute('data-stage', 'answer'); }
             }
+            // ★ 2026-09-15：正文开始到达 → "整理检索结果并作答"的占位步骤已完成使命，
+            //   就地收敛为完成态（不删除，保留时间线的完整叙事），避免与真实正文并存造成干扰。
+            try {
+              var _orgEl = assistantNode.querySelector('.ai-tool-organizing');
+              if (_orgEl) {
+                _orgEl.classList.remove('is-running');
+                _orgEl.classList.add('is-done');
+                var _orgIcon = _orgEl.querySelector('.ai-tool-step-icon');
+                if (_orgIcon) _orgIcon.textContent = '✍️';
+                var _orgStatus = _orgEl.querySelector('.ai-tool-step-status');
+                if (_orgStatus) _orgStatus.textContent = '完成';
+              }
+            } catch (eOrganizeDone) {}
             var contentChunk = evt.text || '';
             if (!contentChunk) continue;
             // ★ 内容长度上限：防止超长回复/异常流无限累积
@@ -8995,13 +9069,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         finishAiMessage(assistantNode, aiContent, aiReasoning, null);
       } else if (doneReceived) {
         cleanupRenderers();
+      } else if (terminalErrorSeen) {
+        // ★ 2026-09-17 修复：服务端已明确报错（error 事件已展示真实原因），
+        //   此处只做清理，**不得**再弹出"AI 连接中断"覆盖真实错误。
+        cleanupRenderers();
       } else if (!doneReceived) {
         cleanupRenderers();
         try { assistantNode.remove(); } catch (e) {}
         S.messages.pop();
         removeLastUserMessage(messagesEl);
         restoreInputText();
-        // 流意外结束且未收到任何内容：多半是连接被代理/网络切断（而非 AI 拒绝回答）。
+        // 流意外结束且未收到任何内容，且服务端**未**报错过：才是真的连接中断
+        // （多半是连接被代理/网络切断，而非 AI 拒绝回答）。
         // 用户消息已回填输入框，可直接重发。
         notify('AI 连接中断或长时间未响应，请重试');
       }
