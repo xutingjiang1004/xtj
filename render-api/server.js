@@ -8331,6 +8331,31 @@ function finalReplyContainsInternalProtocolGlobal(text) {
   return false;
 }
 
+// ★★★ 2026-09-18 新增（Bug 2「工具执行代码被当作正文展示」配套）：
+//   流式正文的协议清洗器。第三方 OpenAI 兼容网关经常不支持原生 function calling，
+//   会把工具调用以 DSML / 简易 XML / 裸 JSON 文本塞进 message.content；内置模型
+//   /api/agent/chat/stream 是逐包实时下发正文的，若不做清洗，这些「工具执行代码」
+//   会以原文形式泄露给用户。本函数在把内容推给前端前移除这类协议残留，
+//   只保留协议之外的可见文字（如一句引导语）。正常正文不含这些特征，不会被误伤。
+function scrubStreamToolProtocol(text) {
+  var s = String(text || '');
+  if (!s) return s;
+  // ① DSML 指令/标签：<|DSML|invoke ...> 、<| | DSML | | invoke ...> 、</|DSML|invoke>
+  s = s.replace(/<\s*[|｜]\s*[|｜]?\s*DSML\s*[|｜]?\s*[|｜]?\s*[A-Za-z_]*\s*[|｜]?\s*(?:\/?\s*[|｜]\s*)?>/gi, '');
+  // ② 简易 XML 协议块：<tool_calls>...</tool_calls> / <function_calls>...</function_calls>
+  s = s.replace(/<\s*tool_calls?\b[^>]*>[\s\S]*?<\s*\/\s*tool_calls?\s*>/gi, '');
+  s = s.replace(/<\s*function_calls?\b[^>]*>[\s\S]*?<\s*\/\s*function_calls?\s*>/gi, '');
+  // ③ 零散的 <invoke ...> / </invoke> / <parameter ...> 标记
+  s = s.replace(/<\s*\/?\s*invoke\b[^>]*>/gi, '');
+  s = s.replace(/<\s*\/?\s*parameter\b[^>]*>(?:[^<]*<\s*\/\s*parameter\s*>)?/gi, '');
+  // ④ <plugin_info>...</plugin_info> 残留
+  s = s.replace(/<\s*plugin_info\b[^>]*>[\s\S]*?<\s*\/\s*plugin_info\s*>/gi, '');
+  // ⑤ 整段即裸工具参数 JSON（纯内部调用细节）：<| | DSML | |tool_calls>... 常以 JSON 收尾
+  var t = s.trim();
+  if (t && (t.charAt(0) === '{' || t.charAt(0) === '[') && looksLikeToolArgsFragment(t)) return '';
+  return s;
+}
+
 // ★★★ 2026-09-15 新增（P0-4「第三方模型把工具调用当正文回复」配套）：
 //   模块级 DSML/XML 文本工具调用解析器。
 //
@@ -21176,8 +21201,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      writeSse(res, { type: 'error', error: (message && message.error) || '消息内容不能为空或过长' });
-      return safeEnd();
+      // ★ 2026-09-18：统一走 terminateWithError（error 后补发终态 done），
+      //   避免前端收尾判断链落入 !doneReceived 兜底而误报「连接中断」。
+      return terminateWithError({ type: 'error', error: (message && message.error) || '消息内容不能为空或过长' });
     }
 
     // ★ 多模态：在 extractChatAttachments overwrite message 之前，先取出可内联的
@@ -21192,13 +21218,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      writeSse(res, {
+      return terminateWithError({
         type: 'error',
         error: getAiQuotaErrorMessage(rl.reason),
         code: rl.reason || 'rate_limited',
         quota: rl.quota || null
       });
-      return safeEnd();
     }
 
     // ★ P0：client_request_id 防串流 —— 活跃请求时返回 409，防止并发刷流
@@ -21209,8 +21234,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         if (typeof res.flushHeaders === 'function') res.flushHeaders();
-        writeSse(res, { type: 'error', error: '请求正在处理中，请勿重复提交', code: 'duplicate_request' });
-        return safeEnd();
+        return terminateWithError({ type: 'error', error: '请求正在处理中，请勿重复提交', code: 'duplicate_request' });
       }
       inFlightStreams.set(sKey, requestAbortCtrl);
     }
@@ -21783,8 +21807,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               : 'AI 请求参数被拒绝，请换模型后重试，或稍后重试';
           }
         }
-        writeSse(res, { type: 'error', error: _friendly, code: _respErrCode || undefined, thinking_mode: thinkingMode });
-        return safeEnd();
+        return terminateWithError({ type: 'error', error: _friendly, code: _respErrCode || undefined, thinking_mode: thinkingMode });
       }
       // ★ 修复 S1（簇 A）：callDeepSeek 已【成功返回】，说明上游 token 已实际消耗，
       //   此时客户端断开，此前直接 return safeEnd() 完全不扣费 → 可零成本刷配额。
@@ -22595,8 +22618,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     function flushContentCoalesce() {
       if (contentCoalesceTimer) { try { clearTimeout(contentCoalesceTimer); } catch (_) {} contentCoalesceTimer = null; }
       if (!contentCoalesceBuf) return true;
-      var _payload = contentCoalesceBuf;
+      var _payload = scrubStreamToolProtocol(contentCoalesceBuf);
       contentCoalesceBuf = '';
+      // ★ 2026-09-18（Bug 2）：清洗后为空（整窗口都是工具协议/裸参数 JSON）时不下发，
+      //   避免「工具执行代码」以正文形式泄露给用户。
+      if (!_payload) return true;
       return writeSse(res, { type: 'content', text: _payload });
     }
     // 立即把思考缓冲刷出去。思考不因写失败中断（与既有行为保持一致，reasoning 非关键路径）。
@@ -22624,6 +22650,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }, SSE_COALESCE_MS);
     }
     var pendingToolCalls = {};
+    // ★ 2026-09-18（Bug 2）：DSML/XML/裸 JSON 协议文本工具调用兜底。
+    //   原生 delta.tool_calls 为空、但本轮正文含工具协议时，解析成真实工具调用执行，
+    //   避免「工具执行代码」被当作正文展示或入库。
+    var dsmlFallbackCalls = null;
     var finishReason = '';
     var _streamReadFailed = false;
     
@@ -22800,6 +22830,33 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       flushReasoningCoalesce();
       if (finishReason === 'tool_calls') break;
       if (finishReason === 'stop' || finishReason === 'length') {
+        // ★ 2026-09-18（Bug 2）：若本轮产生了原生 tool_calls 则走原生分支（22853+）。
+        //   若原生 tool_calls 为空但正文含工具协议（第三方网关不支持原生 function
+        //   calling，把工具调用以 DSML/XML/裸 JSON 文本塞进 content），解析成真实
+        //   工具调用，与原生路径同一条执行链，避免「工具执行代码」泄露为正文。
+        var _hasNativeCalls = Object.keys(pendingToolCalls).length > 0;
+        if (!_hasNativeCalls && !aborted) {
+          var _roundProto = contentBuffer.slice(roundContentStart);
+          if (_roundProto && String(_roundProto).trim()) {
+            try {
+              var _dsmlProbe = parseDsmlToolCallsGlobal(_roundProto, toolRound, aiToolsForSearch(true));
+              if (_dsmlProbe && _dsmlProbe.detected && _dsmlProbe.calls && _dsmlProbe.calls.length) {
+                dsmlFallbackCalls = _dsmlProbe.calls;
+                // 把本轮正文回写为协议之外的可见文本（通常为空或一句引导语），
+                // 原始协议片段绝不当正文展示，也绝不入库、不下发给模型的历史。
+                contentBuffer = contentBuffer.slice(0, roundContentStart) + String(_dsmlProbe.visibleContent || '').trim();
+                break; // 退出内层 while，到 22853+ 统一走工具执行链
+              }
+              if (_dsmlProbe && _dsmlProbe.detected && _dsmlProbe.error) {
+                // 检测到协议但解析失败：不下发原始协议，用可重试提示替代。
+                console.error('[AGENT-STREAM] DSML tool protocol parse failed:', _dsmlProbe.error, 'round', toolRound);
+                contentBuffer = contentBuffer.slice(0, roundContentStart) + '（工具调用解析失败，请重试。）';
+              }
+            } catch (eDsml) {
+              console.error('[AGENT-STREAM] DSML fallback exception:', eDsml && eDsml.message);
+            }
+          }
+        }
         await finishStream(res, {
           contentBuffer: contentBuffer,
           reasoningBuffer: persistentReasoning || reasoningBuffer,
@@ -22917,6 +22974,70 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
        }
        continue;
     }
+
+    // ★ 2026-09-18（Bug 2）：DSML/裸协议文本工具调用的兜底执行。
+    //   当网关不支持原生 function calling、模型把工具调用以 DSML/XML/裸 JSON
+    //   文本塞进正文时，上方 stop 分支已经解析出 dsmlFallbackCalls 并回写了可见正文。
+    //   这里走与原生 tool_calls 完全相同的执行链：先入队 assistant(tool_calls)，
+    //   再入队各 tool 结果，然后 continue 进入下一轮让模型基于结果作答。
+    if (dsmlFallbackCalls && dsmlFallbackCalls.length && !aborted) {
+      var dsmlToolsInfo = dsmlFallbackCalls.map(function(t) {
+        var a = {};
+        try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {}
+        return { name: t.function.name, args: a };
+      });
+      writeSse(res, { type: 'tool_calls', tools: dsmlToolsInfo });
+      dsmlToolsInfo.forEach(function(tool) { writeSse(res, { type: 'tool_pending', tool_name: tool.name }); });
+      var _dsmlToolProgress = setInterval(function() {
+        if (res.writableEnded || aborted) return;
+        try { writeSse(res, { type: 'tool_progress', tools: dsmlToolsInfo.map(function(t) { return t.name; }), phase: 'running' }); } catch (_) {}
+      }, 3000);
+      var dsmlToolResults = await Promise.all(dsmlFallbackCalls.map(async function(tc) {
+        var tcRaw = { function: { name: tc.function.name, arguments: tc.function.arguments } };
+        var execResult;
+        try { execResult = await executeToolCall(tcRaw, { userName: userName }); } catch (e) { execResult = { tool_name: tc.function.name, error: '工具执行失败' }; }
+        if (execResult && (execResult.tool_name === 'search_web' || execResult.tool_name === 'tavily_search') && !execResult.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
+        return { result: execResult, id: tc.id, name: tc.function.name };
+      }));
+      clearInterval(_dsmlToolProgress);
+      // assistant(tool_calls) 必须先于 role:'tool' 结果入队，保证第二轮请求序列合法
+      roundMessages.push({ role: 'assistant', content: contentBuffer.slice(roundContentStart) || '', tool_calls: dsmlFallbackCalls });
+      for (var dti = 0; dti < dsmlToolResults.length; dti++) {
+        var dTRes = dsmlToolResults[dti].result || {};
+        // 捕获搜索结果元数据（与原生分支一致，多轮搜索按次累计）
+        if ((dTRes.tool_name === 'search_web' || dTRes.tool_name === 'tavily_search') && !dTRes.error && dTRes.results_count > 0) {
+          var _pR = null; try { _pR = JSON.parse(dTRes.content || '[]'); } catch (e) {}
+          var _pA = Array.isArray(_pR) ? _pR.slice(0, 50) : null;
+          if (!_toolSearchMeta) {
+            _toolSearchMeta = { count: dTRes.results_count, query: dTRes.query || dsmlToolResults[dti].name, results: _pA ? _pA.slice() : null, expires_at: Date.now() + 86400000 };
+          } else {
+            _toolSearchMeta.count += dTRes.results_count;
+            if (_pA && _pA.length) _toolSearchMeta.results = (_toolSearchMeta.results || []).concat(_pA).slice(0, 100);
+            if (!_toolSearchMeta.query && dTRes.query) _toolSearchMeta.query = dTRes.query || dsmlToolResults[dti].name;
+            _toolSearchMeta.expires_at = Date.now() + 86400000;
+          }
+        }
+        writeSse(res, {
+          type: 'tool_result',
+          tool_name: dTRes.tool_name || dsmlToolResults[dti].name,
+          success: !dTRes.error,
+          count: dTRes.results_count || 0,
+          items: dTRes.content || '',
+          query: dTRes.query || '',
+          error: dTRes.error || null
+        });
+        if (dTRes.error) writeSse(res, { type: 'tool_error', tool_name: dsmlToolResults[dti].name, error: dTRes.error });
+        if (Array.isArray(dTRes.cards)) dTRes.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
+        roundMessages.push({ role: 'tool', content: JSON.stringify(dTRes), tool_call_id: dsmlToolResults[dti].id });
+      }
+      toolRound++;
+      dsmlFallbackCalls = null;
+      if (useThinking) {
+        var dFreshMsgs = roundMessages.slice();
+        apiBody = { model: usedModel, messages: dFreshMsgs, stream: true };
+      }
+      continue;
+    }
     
     // 流意外结束但没收到 finish_reason
     if (!aborted) {
@@ -22961,7 +23082,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // toolRound 超限兜底
     if (!aborted) {
-      writeSse(res, { type: 'error', error: 'AI 工具调用次数过多，请简化后重试' });
+      return terminateWithError({ type: 'error', error: 'AI 工具调用次数过多，请简化后重试' });
     }
     return safeEnd();
   } catch (streamErr) {
@@ -23004,12 +23125,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         });
       } catch (finishErr) {
         console.error('[AGENT-STREAM] finishStream after stream error failed:', finishErr && finishErr.message);
-        try { writeSse(res, { type: 'error', error: 'AI 连接中断，请稍后重试' }); } catch (_) {}
+        try { terminateWithError({ type: 'error', error: 'AI 连接中断，请稍后重试' }); } catch (_) {}
       }
       return safeEnd();
     }
-    writeSse(res, { type: 'error', error: 'AI 连接中断，请稍后重试' });
-    return safeEnd();
+    return terminateWithError({ type: 'error', error: 'AI 连接中断，请稍后重试' });
   }
 });
 
