@@ -369,7 +369,9 @@
         var k = localStorage.key(i);
         if (!k) continue;
         // keep auth keys（M63：xtj_user_session 等会话/身份键此前被 ^xtj_user$ 精确匹配漏保而误删，导致用户被登出）
-        if (/^xtj_user$|^xtj_user_session$|^xtj_admin_session$|^xtj_username$|^xtj_user_name$|^xtj_user_id$|^xtj_pw_hash$|^xtj_.*token|^xtj_theme|^xtj_font_scale|^xtj_motion|^xtj-notif/.test(k)) continue;
+        // ★ 2026-09-22：xtj_device_id 必须保活 —— 它是"本机 30 天免登录"的锚点，
+        //   一旦被清理，下次登录会生成一个新 ID，等于设备身份丢失。
+        if (/^xtj_user$|^xtj_user_session$|^xtj_admin_session$|^xtj_username$|^xtj_user_name$|^xtj_user_id$|^xtj_pw_hash$|^xtj_device_id$|^xtj_.*token|^xtj_theme|^xtj_font_scale|^xtj_motion|^xtj-notif/.test(k)) continue;
         if (k.indexOf('xtj_') === 0 || k.indexOf('xtj-') === 0) keys.push(k);
       }
       keys.forEach(function (k) {

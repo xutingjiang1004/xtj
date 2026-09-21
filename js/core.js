@@ -512,6 +512,36 @@ const ADMIN_NAME = "xxz";
                 return (result && result.token) || existingToken || '';
             }
 
+            // ★ 2026-09-22：设备标识 —— "本机 30 天免登录"的锚点。
+            //   首次访问生成并写入 localStorage；之后每次登录/刷新都带上，
+            //   服务端把它写进 refresh token（只存哈希），从而实现
+            //   「同一台设备 30 天内不再验证」。写不进去（隐私模式/存储满）时
+            //   返回 ''，服务端按"未绑定设备"处理，不影响正常登录。
+            var DEVICE_ID_KEY = 'xtj_device_id';
+            function getXtjDeviceId() {
+                try {
+                    var existing = '';
+                    try {
+                        existing = (window.safeStorage && window.safeStorage.get(DEVICE_ID_KEY))
+                            || localStorage.getItem(DEVICE_ID_KEY) || '';
+                    } catch (eRead) { existing = ''; }
+                    existing = String(existing || '').trim();
+                    if (existing) return existing;
+                    var generated = '';
+                    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                        generated = window.crypto.randomUUID();
+                    } else {
+                        generated = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+                    }
+                    try { if (window.safeStorage) window.safeStorage.set(DEVICE_ID_KEY, generated); } catch (eSet) {}
+                    try { localStorage.setItem(DEVICE_ID_KEY, generated); } catch (eSet2) {}
+                    return generated;
+                } catch (e) {
+                    return '';
+                }
+            }
+            window.getXtjDeviceId = getXtjDeviceId;
+
             // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
             var _refreshPromise = null;
             // ★ 修复：未登录/会话失效（401/403）后进入 30 秒冷却期，
@@ -523,45 +553,62 @@ const ADMIN_NAME = "xxz";
                     return { token: '', user_name: '' };
                 }
                 _refreshPromise = (async function() {
-                    try {
-                        // VPN/代理下无超时的 refresh 会卡住 ensureUserToken → feed 永久 skeleton
-                        var refreshFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
-                        var res = await refreshFetch(API_BASE + '/api/user/refresh', {
-                            method: 'POST',
-                            credentials: 'include',
-                            headers: { 'Content-Type': 'application/json' }
-                        }, 10000);
-                        if (res.ok) {
-                            var data = await res.json().catch(function(){ return {}; });
-                            if (data && data.token) {
-                                setUserToken(data.token);
-                                // ★ 使用服务端返回的规范 user_name
-                                var serverUserName = (data.user_name || '').trim();
-                                if (serverUserName) {
-                                    _lastRefreshUser = serverUserName;
+                    // ★★ 2026-09-22：瞬时故障不再判定为「登录已失效」。
+                    //   旧实现只要拿到 5xx / 网络异常就返回空 token，上层随即
+                    //   clearAllAuthState + 弹登录框 —— 这就是"刷新一下页面
+                    //   就要重新登录"的直接触发点。后端抖动一次，用户就被踢。
+                    //   现在：5xx / 409（轮换并发冲突）/ 网络异常 → 退避重试 1 次；
+                    //   只有 401 / 403（服务端确证未登录）才进入冷却并视为失效。
+                    var attempts = 0;
+                    while (attempts < 2) {
+                        attempts++;
+                        try {
+                            // VPN/代理下无超时的 refresh 会卡住 ensureUserToken → feed 永久 skeleton
+                            var refreshFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
+                            var res = await refreshFetch(API_BASE + '/api/user/refresh', {
+                                method: 'POST',
+                                credentials: 'include',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ device_id: getXtjDeviceId() })
+                            }, 10000);
+                            if (res.ok) {
+                                var data = await res.json().catch(function(){ return {}; });
+                                if (data && data.token) {
+                                    setUserToken(data.token);
+                                    // ★ 使用服务端返回的规范 user_name
+                                    var serverUserName = (data.user_name || '').trim();
+                                    if (serverUserName) {
+                                        _lastRefreshUser = serverUserName;
+                                    }
+                                    _lastRefreshAuthResult = { ok: true, reason: 'ok', status: res.status };
+                                    return { token: data.token, user_name: serverUserName || '' };
                                 }
-                                _lastRefreshAuthResult = { ok: true, reason: 'ok', status: res.status };
-                                return { token: data.token, user_name: serverUserName || '' };
+                                _lastRefreshAuthResult = { ok: false, reason: 'invalid_response', status: res.status };
+                                return { token: '', user_name: '' };
                             }
-                            _lastRefreshAuthResult = { ok: false, reason: 'invalid_response', status: res.status };
-                            return { token: '', user_name: '' };
+                            if (res.status === 401 || res.status === 403) {
+                                // 服务端确证：没有有效 refresh 会话
+                                _lastRefreshAuthResult = {
+                                    ok: false,
+                                    reason: res.status === 401 ? 'expired' : 'forbidden',
+                                    status: res.status
+                                };
+                                // ★ 修复：401/403（未登录或会话失效）进入冷却期，抑制短时间内的重复刷新请求
+                                _refreshCooldownUntil = Date.now() + 30000;
+                                return { token: '', user_name: '' };
+                            }
+                            // 5xx / 409 / 429 → 可恢复，标记 retryable 后重试
+                            _lastRefreshAuthResult = { ok: false, reason: 'retryable', status: res.status };
+                        } catch(e) {
+                            _lastRefreshAuthResult = { ok: false, reason: 'network_error', status: 0 };
                         }
-                        _lastRefreshAuthResult = {
-                            ok: false,
-                            reason: res.status === 401 ? 'expired' : (res.status === 403 ? 'forbidden' : 'unavailable'),
-                            status: res.status
-                        };
-                        // ★ 修复：401/403（未登录或会话失效）进入冷却期，抑制短时间内的重复刷新请求
-                        if (res.status === 401 || res.status === 403) {
-                            _refreshCooldownUntil = Date.now() + 30000;
+                        if (attempts < 2) {
+                            await new Promise(function(r) { setTimeout(r, 500); });
                         }
-                        return { token: '', user_name: '' };
-                    } catch(e) {
-                        _lastRefreshAuthResult = { ok: false, reason: 'network_error', status: 0 };
-                        return { token: '', user_name: '' };
-                    } finally {
-                        _refreshPromise = null;
                     }
+                    // 两次都失败：仍**不主动登出**——可能只是后端暂时不可用，
+                    // 保留本地会话，下次交互/可见性变化时自然重试。
+                    return { token: '', user_name: '' };
                 })();
                 return _refreshPromise;
             }
@@ -2764,7 +2811,7 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     if (name !== ADMIN_NAME) {
                         var tokenRes = await fetchWithTimeout(API_BASE + '/api/user/login', {
                             method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
-                            body: JSON.stringify({ user_name: name, password: pw })
+                            body: JSON.stringify({ user_name: name, password: pw, device_id: (typeof getXtjDeviceId === 'function' ? getXtjDeviceId() : '') })
                         });
                         var tokenData = await tokenRes.json().catch(function(){ return {}; });
                         if (!tokenRes.ok || !tokenData.token) {
@@ -2868,7 +2915,7 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 try {
                     var registerRes = await fetchWithTimeout(API_BASE + '/api/user/register', {
                         method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({ user_name: name, password: pw, email: email || undefined })
+                        body: JSON.stringify({ user_name: name, password: pw, email: email || undefined, device_id: (typeof getXtjDeviceId === 'function' ? getXtjDeviceId() : '') })
                     }, 10000);
                     var registerData = await registerRes.json().catch(function(){ return {}; });
                     if (!registerRes.ok || !registerData.token) {

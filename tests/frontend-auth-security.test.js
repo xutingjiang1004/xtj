@@ -8,9 +8,12 @@ const ai = fs.readFileSync('js/ai-agent.js', 'utf8');
 
 test('login and registration send the user-entered password only to dedicated auth APIs', () => {
   // M48：登录请求走带超时的 fetchWithTimeout（密码仍只发往专属认证接口）
-  assert.match(core, /fetch(?:WithTimeout)?\(API_BASE \+ '\/api\/user\/login'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw \}\)/);
+  // ★ 2026-09-22：新增 device_id（30 天本机免登录的设备锚点），请求体可携带可选 device_id。
+  assert.match(core, /fetch(?:WithTimeout)?\(API_BASE \+ '\/api\/user\/login'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw(?:, device_id:[^}]*)? \}\)/);
   // 注册可附带可选 email（后端校验格式并原子写入 user_info），密码仅发往注册接口
-  assert.match(core, /fetch(?:WithTimeout)?\(API_BASE \+ '\/api\/user\/register'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw, email: email \|\| undefined \}\)/);
+  assert.match(core, /fetch(?:WithTimeout)?\(API_BASE \+ '\/api\/user\/register'[\s\S]*?JSON\.stringify\(\{ user_name: name, password: pw, email: email \|\| undefined(?:, device_id:[^}]*)? \}\)/);
+  // 设备识别必须真正随登录/注册发出（否则 30 天免登录无法落地）
+  assert.match(core, /JSON\.stringify\(\{ user_name: name, password: pw, device_id:/);
   assert.doesNotMatch(core, /findAuthRecord|hashPasswordWithSalt|verifyPassword|authPasswordHash/);
   assert.doesNotMatch(core, /\.insert\(\[\{[\s\S]{0,200}media_type:\s*AUTH_MARKER/);
 });

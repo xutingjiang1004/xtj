@@ -163,6 +163,17 @@ function formatWeatherText(data) {
   if (data.high_c !== undefined && data.high_c !== null) result += '\n今日最高：' + data.high_c + '°C';
   if (data.low_c !== undefined && data.low_c !== null) result += '\n今日最低：' + data.low_c + '°C';
   if (data.precip_prob !== undefined && data.precip_prob !== null) result += '\n降雨概率：' + data.precip_prob + '%';
+  // ★ 2026-09-22：输出紫外线，避免用户问 UV 时模型被迫去网页里抠
+  var uvNow = (data.uv_index !== undefined && data.uv_index !== null) ? data.uv_index : null;
+  var uvMax = (data.uv_index_max !== undefined && data.uv_index_max !== null) ? data.uv_index_max : null;
+  if (uvNow !== null) {
+    var uvDesc = describeUvIndex(uvNow);
+    result += '\n当前紫外线指数：' + uvNow + (uvDesc ? '（' + uvDesc + '）' : '');
+  }
+  if (uvMax !== null) {
+    var uvMaxDesc = describeUvIndex(uvMax);
+    result += '\n今日紫外线峰值：' + uvMax + (uvMaxDesc ? '（' + uvMaxDesc + '）' : '');
+  }
   result += '\n\n要求：必须基于以上工具结果回答，不准编造天气数据。';
   return result;
 }
@@ -346,15 +357,25 @@ async function resolveCity(query) {
 async function fetchForecast(matchedCity) {
   var lat = matchedCity.coords.lat;
   var lon = matchedCity.coords.lon;
+  // ★ 2026-09-22：补上紫外线字段（uv_index / uv_index_max）。
+  //   此前只请求温湿度风速，用户问「福州天气 紫外线」时工具拿不到 UV，
+  //   模型只能绕道 tavily_search + read_web_page 去网页里抠数据 —— 既慢又容易抠错。
   var weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon +
-    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code' +
-    '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai';
+    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,uv_index' +
+    '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max' +
+    '&timezone=Asia%2FShanghai';
 
   // ★ 2026-09-11：加一次重试。预报接口偶发抖动/超时时，此前直接返回 null，
   //   上层把它渲染成「未找到该地点的天气」——把"网络问题"误报为"地名不存在"，
   //   引导用户去换城市名，永远换不对。重试一次可显著降低这类假失败。
+  // ★ 2026-09-22：2 次 → 3 次，并在重试之间加退避。
+  //   无间隔的连续重试在"上游短暂过载"时几乎必然一起失败；
+  //   退避后再试可把偶发抖动与真实故障区分开，显著降低假失败率。
   var resp = null;
-  for (var attempt = 0; attempt < 2; attempt++) {
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise(function (r) { setTimeout(r, attempt * 600); });
+    }
     try {
       resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
       if (resp && resp.ok) break;
@@ -392,8 +413,21 @@ async function fetchForecast(matchedCity) {
     low_c: daily && daily.temperature_2m_min ? daily.temperature_2m_min[0] : null,
     precip_prob: daily && daily.precipitation_probability_max ? daily.precipitation_probability_max[0] : null,
     weather_code: wmoCode,
+    uv_index: (current && current.uv_index !== undefined && current.uv_index !== null) ? current.uv_index : null,
+    uv_index_max: (daily && daily.uv_index_max && daily.uv_index_max[0] !== undefined) ? daily.uv_index_max[0] : null,
     queried_at: queriedAt
   };
+}
+
+/** 紫外线指数分级（WHO 标准）→ 中文描述 */
+function describeUvIndex(uv) {
+  var v = Number(uv);
+  if (!Number.isFinite(v) || v < 0) return '';
+  if (v < 3) return '低';
+  if (v < 6) return '中等';
+  if (v < 8) return '高';
+  if (v < 11) return '很高';
+  return '极高';
 }
 
 /** Structured weather for result cards + model content. */
@@ -442,6 +476,7 @@ module.exports = {
   geocodeCity: geocodeCity,
   // ★ 2026-09-11：导出候选生成器，便于单测覆盖地名清洗逻辑
   buildGeoQueryCandidates: buildGeoQueryCandidates,
+  describeUvIndex: describeUvIndex,
   CITY_COORDS: CITY_COORDS,
   CITY_ALIASES: CITY_ALIASES
 };

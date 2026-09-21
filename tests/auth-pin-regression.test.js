@@ -11,7 +11,12 @@ const coreMin = fs.readFileSync(path.join(root, 'js', 'core.min.js'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
 
 test('protected auth only clears a genuinely expired session', () => {
-  assert.match(core, /reason:\s*res\.status === 401 \? 'expired' : \(res\.status === 403 \? 'forbidden' : 'unavailable'\)/);
+  // ★ 2026-09-22：刷新失败原因语义收紧。旧实现把 5xx / 网络异常也归到
+  //   'unavailable' 并随之返回空 token（上层触发 clearAllAuthState + 弹登录框），
+  //   这就是「刷新一下就要重新登录」的直接触发点。现改为：401→'expired'、
+  //   403→'forbidden'（二者均确证会话失效，由上层处理）；5xx/409/429/网络异常
+  //   改走重试，不再返回失效信号。契约同步为「401 映射 expired、403 映射 forbidden」。
+  assert.match(core, /reason:\s*res\.status === 401 \? 'expired' : 'forbidden'/);
   assert.match(core, /if \(_lastRefreshAuthResult\.reason === 'expired'\) \{\s*handleProtectedAuthFailure\(\)/);
   assert.match(core, /reason: 'network_error'/);
 });
