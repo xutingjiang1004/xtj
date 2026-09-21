@@ -93,7 +93,16 @@ app.use((req, res, next) => {
 });
 
 // 信任反向代理（Render 会设置 X-Forwarded-For）
-app.set('trust proxy', 1);
+// ★ 2026-09-21 修复（IP 全部落成 10.x 内网地址 → 属地全部解析失败）：
+//   原值 `1` 只信任一跳，但 Render 边缘 → 应用之间实际存在多层内网代理，
+//   导致 req.ip 仍解析成 Render 内网地址（用户数据实证：last_ip = 10.193.27.131）。
+//   私有 IP 送给任何地理数据源都必然失败，表现为：
+//   帖子"IP属地：未知"、管理端"IP 地区解析失败（所有数据源均不可用）"。
+//   改为信任全部私有/保留网段（loopback/linklocal/uniquelocal + CGNAT）：
+//   Express 从 X-Forwarded-For 链**从右往左**跳过所有受信代理地址，
+//   req.ip = 第一个公网地址 = 真实客户端。安全性不变：客户端伪造的
+//   X-Forwarded-For 值只会出现在链最左侧，从右往左扫描永远不会选中它。
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', '100.64.0.0/10']);
 
 // 全局禁用 X-Powered-By（必须在任何路由之前）
 app.disable('x-powered-by');
@@ -4373,30 +4382,55 @@ function getRealIp(req) {
 
 // 获取客户端 IP（仅信任 req.ip：trust proxy=1 时 Express 负责解析 X-Forwarded-For，
 // 客户端无法伪造；不再读取 cf-connecting-ip / x-real-ip 等可任意设置的请求头，防止 IP 伪造污染安全检测）
-function getClientIp(req) {
-  function normalizeClientIpValue(value) {
-    var ip = String(value || '').trim();
-    if (!ip) return '';
-    if (ip.indexOf(',') >= 0) ip = ip.split(',')[0].trim();
-    var colonCount = (ip.match(/:/g) || []).length;
-    if (colonCount === 1 && ip.indexOf(']') < 0 && ip.indexOf('::') < 0) {
-      var hostPortMatch = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
-      if (hostPortMatch) ip = hostPortMatch[1];
-    }
-    if (ip.indexOf('::ffff:') === 0) ip = ip.slice(7);
-    return ip;
+// ★ 2026-09-21 修复（IP 全部落成 10.x 内网地址）：
+//   trust proxy 现已信任全部私有网段（见文件头部 app.set('trust proxy', ...)）。
+//   此处再加一层防御兜底：若 req.ip / socket 地址解析出来仍是私有/保留地址
+//   （代理层数超出信任配置、或部署环境变化），则从 X-Forwarded-For 链
+//   **从右往左**找第一个公网地址。安全性：链右侧由受信代理逐跳追加，
+//   客户端伪造值只会出现在链最左侧，从右往左扫描永远不会选中伪造值。
+// IP 字符串规范化：去端口（仅 IPv4:host 形式）、去 ::ffff: 映射前缀、取逗号分隔首段
+function normalizeClientIpValue(value) {
+  var ip = String(value || '').trim();
+  if (!ip) return '';
+  if (ip.indexOf(',') >= 0) ip = ip.split(',')[0].trim();
+  var colonCount = (ip.match(/:/g) || []).length;
+  if (colonCount === 1 && ip.indexOf(']') < 0 && ip.indexOf('::') < 0) {
+    var hostPortMatch = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+    if (hostPortMatch) ip = hostPortMatch[1];
   }
-  // 只信任 Express 解析后的 req.ip（trust proxy=1）与底层 socket 地址，
-  // 忽略任何客户端可控的转发头（cf-connecting-ip / x-real-ip / x-forwarded-for 等）
+  if (ip.indexOf('::ffff:') === 0) ip = ip.slice(7);
+  return ip;
+}
+
+function firstPublicIpFromForwardedChain(req) {
+  var raw = req && req.headers && req.headers['x-forwarded-for'];
+  if (!raw) return '';
+  var parts = String(raw).split(',');
+  for (var i = parts.length - 1; i >= 0; i--) {
+    var hop = normalizeClientIpValue(parts[i]);
+    if (hop && !isPrivateOrReservedIp(hop)) return hop;
+  }
+  return '';
+}
+
+function getClientIp(req) {
+  // 先取 Express 解析后的 req.ip / socket 地址；但**跳过私有/保留地址**——
+  // 私有地址对属地解析毫无价值（任何数据源都解析不了），只会污染 last_ip。
   var candidates = [
     req && req.ip,
     req && req.socket && req.socket.remoteAddress
   ];
   for (var i = 0; i < candidates.length; i++) {
     var ip = normalizeClientIpValue(candidates[i]);
-    if (ip) return ip;
+    if (ip && !isPrivateOrReservedIp(ip)) return ip;
   }
-  return 'unknown';
+  // 兜底：req.ip/socket 全是私网地址（trust proxy 信任范围仍不够），
+  // 从 X-Forwarded-For 链右往左找第一个公网地址。
+  var chainIp = firstPublicIpFromForwardedChain(req);
+  if (chainIp) return chainIp;
+  // 最终兜底：返回原始 req.ip（哪怕是私网，至少日志/审计可溯源）。
+  var fallback = normalizeClientIpValue(candidates[0]);
+  return fallback || 'unknown';
 }
 
 // AI site tools deliberately keep model selection separate from authorization.
@@ -5156,6 +5190,12 @@ async function resolveIpRegion(ip) {
 async function retryIpRegionAsync(postId, ip, attempt) {
   if (attempt > 3) {
     await setIpRegionFailed(postId, 'max_retries_exceeded');
+    return;
+  }
+  // ★ 2026-09-21：私有/保留地址永远解析不了，直接落定失败态，
+  //   不再安排 30s/5min 两次注定无效的重试（resolveIpRegion 对私有 IP 恒返回 failed）
+  if (isPrivateOrReservedIp(ip)) {
+    await setIpRegionFailed(postId, 'private_ip_unresolvable');
     return;
   }
   try {
@@ -15951,6 +15991,16 @@ app.post('/admin/user/resolve-ip', verifyToken, rateLimit(60000, 10), async (req
       } catch (_) {}
     }
     if (!ip) return res.status(404).json({ error: '未找到该用户的 IP 记录', code: 'no_ip' });
+
+    // ★ 2026-09-21：私有/保留地址直接给出明确结论，不再去打数据源。
+    //   私有 IP（如 Render 内网 10.x）对任何地理数据源都必然失败，
+    //   之前返回"所有数据源均不可用"具有误导性——数据源是好的，是 IP 本身不可解析。
+    if (isPrivateOrReservedIp(ip)) {
+      return res.status(422).json({
+        error: '该记录的 IP（' + ip + '）是内网/保留地址，无法解析属地。这是历史服务端 IP 提取缺陷写入的数据，该用户下次访问后将记录正确的公网 IP',
+        code: 'private_ip'
+      });
+    }
 
     var ipLocation = await resolveIpLocation(ip);
     if (!ipLocation) return res.status(404).json({ error: 'IP 地区解析失败（所有数据源均不可用）', code: 'resolve_failed' });
