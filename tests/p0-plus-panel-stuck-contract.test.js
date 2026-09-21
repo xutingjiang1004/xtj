@@ -55,19 +55,24 @@ test('.open 与 .is-closing 必须用 keyframes 动画且 both 填充', () => {
   assert.match(closingRule[0], /\bboth\b/, '关闭动画需 both 填充锁定终态');
 });
 
-test('开关关键帧终态与基础态一致（可见态 scale(1) / 隐藏态 scale(0.14)）', () => {
+test('开关关键帧终态与基础态一致（可见态 scale(1) / 隐藏态 scale(0.9)）', () => {
   const openKf = cssSrc.match(/@keyframes\s+aiPlusPanelOpen\s*\{[\s\S]*?\n\}/);
   const closeKf = cssSrc.match(/@keyframes\s+aiPlusPanelClose\s*\{[\s\S]*?\n\}/);
   assert.ok(openKf, 'aiPlusPanelOpen 关键帧必须存在');
   assert.ok(closeKf, 'aiPlusPanelClose 关键帧必须存在');
   assert.match(openKf[0], /scale\(1\)/, '打开终态必须是 scale(1)');
-  assert.match(closeKf[0], /scale\(0\.14\)/, '关闭终态必须回到 scale(0.14)');
-  // 基础态仍为隐藏（opacity:0 + visibility:hidden + scale(0.14)）
+  // ★ 2026-09-22：缩放起点从 0.14 放宽到 0.9（0.14 意味着"从 1/7 大小炸开"，
+  //   观感生硬，且中间帧一旦被冻结就是截图里那个畸形小方块）。
+  //   契约本身不变：**关闭终态必须与基础隐藏态完全一致**。
+  assert.match(closeKf[0], /scale\(0\.9\)/, '关闭终态必须回到基础隐藏态 scale(0.9)');
+  // 基础态仍为隐藏（opacity:0 + visibility:hidden + scale(0.9)）
   const base = cssSrc.match(/\.ai-plus-panel-shell\s*\{[^}]*\}/);
   assert.ok(base, '基础规则必须存在');
   assert.match(base[0], /opacity:\s*0/);
   assert.match(base[0], /visibility:\s*hidden/);
-  assert.match(base[0], /transform:\s*scale\(0\.14\)/);
+  assert.match(base[0], /transform:\s*scale\(0\.9\)/);
+  // 打开关键帧的起点同样必须是基础态，杜绝"打开时先闪一下再缩放"
+  assert.match(openKf[0], /scale\(0\.9\)/, '打开起点必须与基础隐藏态一致');
 });
 
 test('reduced-motion 下动画同步降级', () => {

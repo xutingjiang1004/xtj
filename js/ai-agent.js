@@ -2321,6 +2321,51 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(container, true);
   }
 
+  // ★ 2026-09-22 新增：统一构造「工具轮次」容器。
+  //   结构：摘要行（旋转环 + 文案 + 计数 + 折叠箭头）+ 可折叠条目区。
+  //   收起/展开用 grid-template-rows 平滑过渡，完成后自动折叠为一行，
+  //   这是 ChatGPT / Codex 那种"工具步骤可折叠"的手感来源。
+  //   三处创建点（tool_calls / tool_pending / tool_error）此前各写一遍 DOM，
+  //   结构不一致时 CSS 折叠会失效，故统一收敛到本函数。
+  function createToolRound(labelText, roundKey) {
+    var box = el('div', { class: 'ai-tool-round is-running' });
+    if (roundKey) box.setAttribute('data-tool-round', roundKey);
+    var head = el('div', {
+      class: 'ai-tool-round-head',
+      role: 'button',
+      tabindex: '0',
+      'aria-expanded': 'true',
+      title: '点击收起/展开工具明细'
+    });
+    head.appendChild(el('span', { class: 'ai-tool-round-icon', 'aria-hidden': 'true' }));
+    head.appendChild(el('span', { class: 'ai-tool-round-label', text: labelText || '调用工具' }));
+    head.appendChild(el('span', { class: 'ai-tool-round-count', text: '' }));
+    head.appendChild(el('span', { class: 'ai-tool-round-caret', 'aria-hidden': 'true' }));
+    box.appendChild(head);
+    var wrap = el('div', { class: 'ai-tool-round-list-wrap' });
+    var list = el('div', { class: 'ai-tool-round-list' });
+    wrap.appendChild(list);
+    box.appendChild(wrap);
+    function toggleRound() {
+      // 运行中不允许收起：进度是用户此刻唯一想看的东西
+      if (box.classList.contains('is-running')) return;
+      var collapsed = box.classList.toggle('is-collapsed');
+      try { head.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); } catch (eAr) {}
+    }
+    head.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleRound();
+    });
+    head.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+        ev.preventDefault();
+        toggleRound();
+      }
+    });
+    return { box: box, head: head, list: list };
+  }
+
   // ★ 2026-09-17 新增：工具轮次状态收敛。
   //   一个"轮次"= 一次 tool_calls 事件产生的并行工具集合。
   //   运行中：摘要行显示「并行调用 N 个工具 · x/y 完成」，条目各自显示「搜索中」；
@@ -2345,6 +2390,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (settled) {
       roundBox.classList.remove('is-running');
       roundBox.classList.add('is-done');
+      // ★ 2026-09-22：整轮结束后自动折叠为一行（Codex 手感）。
+      //   用户仍可点摘要行展开回看明细，屏幕上不再留一坨历史条目。
+      roundBox.classList.add('is-collapsed');
+      var caretHost = roundBox.querySelector('.ai-tool-round-head');
+      if (caretHost) {
+        try { caretHost.setAttribute('aria-expanded', 'false'); } catch (eAr2) {}
+      }
       if (icon) icon.textContent = failed > 0 ? '⚠️' : '✅';
       if (label) {
         label.textContent = failed > 0
@@ -2354,9 +2406,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (count) count.textContent = '';
     } else {
       roundBox.classList.add('is-running');
-      roundBox.classList.remove('is-done');
+      roundBox.classList.remove('is-done', 'is-collapsed');
+      var caretHost2 = roundBox.querySelector('.ai-tool-round-head');
+      if (caretHost2) {
+        try { caretHost2.setAttribute('aria-expanded', 'true'); } catch (eAr3) {}
+      }
       if (icon) icon.textContent = '⏳';
-      if (label) label.textContent = total > 1 ? ('并行调用 ' + total + ' 个工具') : '调用工具';
+      if (label) label.textContent = total > 1 ? ('正在调用 ' + total + ' 个工具') : '正在调用工具';
       if (count) count.textContent = (done + failed) + '/' + total + ' 完成';
     }
   }
@@ -8663,20 +8719,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   ③ 同一轮内全部完成后，把整轮收敛为"N 项已完成"，并支持折叠；
             //   ④ 新一轮工具自动新建轮次容器，历史轮次保持折叠态，不再抢屏幕。
             var _roundKey = 'r' + (toolRoundSeq++);
-            var roundBox = el('div', { class: 'ai-tool-round is-running' });
-            roundBox.setAttribute('data-tool-round', _roundKey);
-            // 轮次摘要行：展示"N 个工具并行中"，全部完成后改写为"完成"
-            var roundHead = el('div', { class: 'ai-tool-round-head' });
-            roundHead.appendChild(el('span', { class: 'ai-tool-round-icon', text: '⏳' }));
-            roundHead.appendChild(el('span', {
-              class: 'ai-tool-round-label',
-              text: toolList.length > 1 ? ('并行调用 ' + toolList.length + ' 个工具') : '调用工具'
-            }));
-            var roundCountEl = el('span', { class: 'ai-tool-round-count', text: '' });
-            roundHead.appendChild(roundCountEl);
-            roundBox.appendChild(roundHead);
-            var roundList = el('div', { class: 'ai-tool-round-list' });
-            roundBox.appendChild(roundList);
+            // ★ 2026-09-22：轮次容器统一由 createToolRound 构造（含可折叠条目区）
+            var _roundBuilt = createToolRound(
+              toolList.length > 1 ? ('正在调用 ' + toolList.length + ' 个工具') : '正在调用工具',
+              _roundKey
+            );
+            var roundBox = _roundBuilt.box;
+            var roundList = _roundBuilt.list;
             timeline.appendChild(roundBox);
 
             toolList.forEach(function(t) {
@@ -8809,14 +8858,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // 复用最近一个仍在运行的轮次；没有则新建（避免 pending 单独成轮）
             var pendRound = pendingBar.querySelector('.ai-tool-round.is-running:last-of-type');
             if (!pendRound) {
-              pendRound = el('div', { class: 'ai-tool-round is-running' });
-              pendRound.setAttribute('data-tool-round', 'r' + (toolRoundSeq++));
-              var pHead = el('div', { class: 'ai-tool-round-head' });
-              pHead.appendChild(el('span', { class: 'ai-tool-round-icon', text: '⏳' }));
-              pHead.appendChild(el('span', { class: 'ai-tool-round-label', text: '调用工具' }));
-              pHead.appendChild(el('span', { class: 'ai-tool-round-count', text: '' }));
-              pendRound.appendChild(pHead);
-              pendRound.appendChild(el('div', { class: 'ai-tool-round-list' }));
+              // ★ 2026-09-22：统一走 createToolRound，保证折叠结构与 CSS 一致
+              var _pendBuilt = createToolRound('正在调用工具', 'r' + (toolRoundSeq++));
+              pendRound = _pendBuilt.box;
               pendingBar.appendChild(pendRound);
             }
             var pendList = pendRound.querySelector('.ai-tool-round-list');
@@ -8867,13 +8911,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 errStep.appendChild(errBody);
                 var errRound2 = errTimeline.querySelector('.ai-tool-round.is-running:last-of-type');
                 if (!errRound2) {
-                  errRound2 = el('div', { class: 'ai-tool-round is-running' });
-                  var eHead = el('div', { class: 'ai-tool-round-head' });
-                  eHead.appendChild(el('span', { class: 'ai-tool-round-icon', text: '⏳' }));
-                  eHead.appendChild(el('span', { class: 'ai-tool-round-label', text: '调用工具' }));
-                  eHead.appendChild(el('span', { class: 'ai-tool-round-count', text: '' }));
-                  errRound2.appendChild(eHead);
-                  errRound2.appendChild(el('div', { class: 'ai-tool-round-list' }));
+                  // ★ 2026-09-22：统一走 createToolRound，保证折叠结构与 CSS 一致
+                  var _errBuilt = createToolRound('正在调用工具', 'r' + (toolRoundSeq++));
+                  errRound2 = _errBuilt.box;
                   errTimeline.appendChild(errRound2);
                 }
                 errRound2.querySelector('.ai-tool-round-list').appendChild(errStep);
@@ -10603,18 +10643,35 @@ function showChatMessages() {
       panelShell.classList.toggle('is-subpage', currentPanelPage !== 'primary');
     }
 
-    function updateModelUI() {
+    // ★ 2026-09-22：值变更后给一个短暂高亮，让"我选的东西生效了"被看见。
+    //   只在用户主动改动时触发（构造/恢复状态时不闪）。
+    function flashPanelValue(node) {
+      if (!node) return;
+      try {
+        node.classList.remove('is-updated');
+        void node.offsetWidth;
+        node.classList.add('is-updated');
+      } catch (eFlash) {}
+      setTimeout(function() {
+        try { node.classList.remove('is-updated'); } catch (eFlash2) {}
+      }, 520);
+    }
+    function updateModelUI(flash) {
       try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-flash'; } catch (eM) {}
       var sum = panelShell.querySelector('#aiModelSummary');
       if (sum) {
         if (isCustomModelId(S.selectedModel)) sum.textContent = customModelDisplayName(S.selectedModel) || '自定义模型';
         else sum.textContent = modelLabels[S.selectedModel] || S.selectedModel;
+        if (flash) flashPanelValue(sum);
       }
     }
-    function updateThinkUI() {
+    function updateThinkUI(flash) {
       try { if (thinkSelect) thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT) {}
       var sum = panelShell.querySelector('#aiThinkSummary');
-      if (sum) sum.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
+      if (sum) {
+        sum.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
+        if (flash) flashPanelValue(sum);
+      }
     }
     function updateSearchStatus() {
       var st = panelShell.querySelector('#aiSearchStatus');
@@ -10754,12 +10811,30 @@ function showChatMessages() {
     // ── 自定义「模型 / 思考」选择弹层 ★（替代系统原生 select：部分设备原生下拉
     //    渲染不全/错位；改用站点自绘选项列表，跨设备一致）──
     var _selectPopEl = null;
-    function closeSelectPopup() {
-      if (_selectPopEl && _selectPopEl.parentNode) _selectPopEl.parentNode.removeChild(_selectPopEl);
+    var _selectPopCloseTimer = null;
+    // ★ 2026-09-22：关闭改为「先播退场动画再移除节点」。
+    //   旧实现直接 removeChild，弹层是"啪"地消失——和面板的柔和开合完全不搭。
+    //   instant=true 用于"立刻换一个弹层"的场景（避免两个层叠在一起）。
+    function closeSelectPopup(instant) {
+      if (_selectPopCloseTimer) {
+        clearTimeout(_selectPopCloseTimer);
+        _selectPopCloseTimer = null;
+      }
+      if (!_selectPopEl) return;
+      var node = _selectPopEl;
       _selectPopEl = null;
+      if (instant === true || !node.parentNode) {
+        if (node.parentNode) node.parentNode.removeChild(node);
+        return;
+      }
+      try { node.classList.add('is-closing'); } catch (eCls) {}
+      _selectPopCloseTimer = setTimeout(function() {
+        _selectPopCloseTimer = null;
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+      }, 150);
     }
     function openSelectPopup(kind, anchor) {
-      closeSelectPopup();
+      closeSelectPopup(true);
       var options = kind === 'model'
         ? buildModelOptions()
         : [
@@ -10800,6 +10875,11 @@ function showChatMessages() {
       _selectPopEl.style.left = left + 'px';
       _selectPopEl.style.top = top + 'px';
       _selectPopEl.style.minWidth = width + 'px';
+      // ★ 展开原点对齐到锚点行的水平位置，弹层是"从那一行长出来"的
+      if (rect) {
+        var ox = Math.max(8, Math.min(rect.left + rect.width / 2 - left, width - 8));
+        _selectPopEl.style.setProperty('--pop-ox', ox + 'px');
+      }
     }
     function applySelectChoice(kind, value) {
       closeSelectPopup();
@@ -10811,7 +10891,7 @@ function showChatMessages() {
           try { localStorage.setItem('xtj_ai_model', value); } catch (err) {}
           notify('模型：' + (isCustomModelId(value) ? customModelDisplayName(value) : (modelLabels[value] || value)));
         }
-        updateModelUI();
+        updateModelUI(true);
       } else {
         if (value && value !== S.thinkingMode) {
           S.thinkingMode = value;
@@ -10819,7 +10899,7 @@ function showChatMessages() {
           try { localStorage.setItem('xtj_ai_thinking_mode', value); } catch (err) {}
           notify('思考程度：' + (thinkLabels[value] || value));
         }
-        updateThinkUI();
+        updateThinkUI(true);
       }
     }
     document.addEventListener('pointerdown', function(ev) {
@@ -10865,10 +10945,12 @@ function showChatMessages() {
       void panelShell.offsetWidth; // 强制 reflow，保证动画从关闭态起算
       panelShell.classList.add('open');
       if (closeTimer) clearTimeout(closeTimer);
+      // ★ 2026-09-22：与 CSS aiPlusPanelOpen 时长对齐（240ms + 余量）。
+      //   旧值 340ms 比动画本身长 100ms，will-change 白占一层合成层。
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
         closeTimer = null;
-      }, 340);
+      }, 260);
     }
 
     function closePanel(animate) {
@@ -10893,11 +10975,14 @@ function showChatMessages() {
         return;
       }
       if (closeTimer) clearTimeout(closeTimer);
+      // ★ 2026-09-22：关闭动画已缩短到 180ms，这里同步收到 200ms。
+      //   旧值 320ms 意味着"动画早结束了，但 140ms 内再点 + 仍然没反应"——
+      //   那 140ms 的空窗正是"点了没反应"体感的另一半来源。
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         closeTimer = null;
-      }, 320);
+      }, 200);
     }
 
     function closeInviteModal() {
@@ -11198,7 +11283,7 @@ function showChatMessages() {
               S._userPickedModel = true;
               try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
               repopulateModelSelect();
-              updateModelUI();
+              updateModelUI(true);
               notify('已切换到：' + (m ? (m.label || m.model) : '自定义模型'));
               close();
             });
@@ -11259,7 +11344,7 @@ function showChatMessages() {
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
         }
         repopulateModelSelect();
-        updateModelUI();
+        updateModelUI(true);
         renderList();
         notify('已删除：' + (removed ? (removed.label || removed.model) : '该自定义模型'));
       }
@@ -11314,7 +11399,7 @@ function showChatMessages() {
           S._userPickedModel = true;
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
           repopulateModelSelect();
-          updateModelUI();
+          updateModelUI(true);
           renderList();
           resetForm();
           notify('已保存修改：' + label);
@@ -11327,7 +11412,7 @@ function showChatMessages() {
           S._userPickedModel = true;
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
           repopulateModelSelect();
-          updateModelUI();
+          updateModelUI(true);
           close();
           notify('已添加并切换到：' + label + '（' + p.label + '）');
         }
@@ -11383,7 +11468,7 @@ function showChatMessages() {
           try { localStorage.setItem('xtj_ai_model', model); } catch (err) {}
           notify('模型：' + (isCustomModelId(model) ? customModelDisplayName(model) : (modelLabels[model] || model)));
         }
-        updateModelUI();
+        updateModelUI(true);
       });
     }
     if (thinkSelect) {
@@ -11399,7 +11484,7 @@ function showChatMessages() {
           try { localStorage.setItem('xtj_ai_thinking_mode', think); } catch (err) {}
           notify('思考程度：' + (thinkLabels[think] || think));
         }
-        updateThinkUI();
+        updateThinkUI(true);
       });
     }
 

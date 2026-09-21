@@ -556,11 +556,14 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   100% { transform: translate3d(var(--dx, 20px), 110vh, 0) rotate(540deg); opacity: 0; }
 }
 
-/* AI tool timeline + continue */
+/* AI tool timeline + continue
+   ★ 2026-09-22 Codex 化改版：
+     工具进展不再是"一张白底卡片"，而是**气泡正文的一部分**——
+     去掉边框与背景块，只留极淡的容器，让工具行与正文同一呼吸节奏。 */
 .ai-tool-timeline {
-  display: flex; flex-direction: column; gap: 8px; margin: 6px 0 10px;
-  padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(91,151,131,.18);
-  background: rgba(255,255,255,.55); max-width: min(92%, 720px);
+  display: flex; flex-direction: column; gap: 2px; margin: 4px 0 8px;
+  padding: 0; border: 0; border-radius: 0;
+  background: transparent; max-width: min(96%, 720px);
 }
 .ai-tool-step { display: flex; gap: 10px; align-items: flex-start; }
 .ai-tool-step-icon { flex: 0 0 auto; width: 22px; text-align: center; line-height: 1.4; }
@@ -570,36 +573,89 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-step.is-running .ai-tool-step-status { color: #2f7f9e; }
 .ai-tool-step.is-error .ai-tool-step-status { color: #c44b5a; }
 
-/* ── 2026-09-17 工具调用「并行轮次」紧凑布局 ─────────────────────────
+/* ── 工具调用「并行轮次」紧凑布局（Codex 风格）─────────────────────────
    产品诉求（用户原话）："并行搜索五个网页或工具，就直接显示五个正在搜索中，
    全部搜索之后就把搜索中那些字和图标换成已完成……不要全部展开占很多位置，
    类似 ChatGPT / Codex 那种"。
    设计要点：
    1) 一轮并行工具 = 一个 .ai-tool-round 容器，内含 N 条**单行**紧凑条目；
-   2) 摘要行常驻，显示「并行调用 N 个工具 · x/y 完成」，完成后变「✅ 已完成 N 个工具」；
+   2) 摘要行常驻，显示「正在调用 N 个工具 · x/y 完成」，完成后变「已完成 N 个工具」；
    3) 条目单行呈现（图标 + 名称 + 查询词同行），不再每个工具占四行；
-   4) 历史轮次完成后自动收紧（降低视觉权重 + 限制高度可折叠），
-      避免多轮工具把消息撑得过长。 */
+   4) 完成后整轮平滑折叠为一行，点击可展开回看（Codex 的"可折叠步骤"手感）；
+   5) 运行中用纯 CSS 旋转环（不再用 ⏳/🔍 这类会随系统字体变色的 emoji）。 */
 .ai-tool-round {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  border-radius: 10px;
+  gap: 0;
+  border-radius: 8px;
   transition: background 180ms ease, opacity 180ms ease;
 }
-.ai-tool-round + .ai-tool-round { margin-top: 6px; }
+.ai-tool-round + .ai-tool-round { margin-top: 2px; }
 
+/* 摘要行：整轮唯一常驻元素，也是折叠/展开的点击热区 */
 .ai-tool-round-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 650;
   color: #3f6b5e;
   line-height: 1.5;
-  min-height: 20px;
+  min-height: 22px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 160ms ease, color 200ms ease;
 }
-.ai-tool-round-icon { flex: 0 0 auto; width: 18px; text-align: center; font-size: 12px; }
+.ai-tool-round-head:hover { background: rgba(91, 151, 131, .09); }
+.ai-tool-round.is-running .ai-tool-round-head { cursor: default; }
+.ai-tool-round.is-running .ai-tool-round-head:hover { background: transparent; }
+
+/* 摘要图标：emoji 文本置为 font-size:0 隐身，图形全部由 CSS 绘制 */
+.ai-tool-round-icon {
+  flex: 0 0 auto;
+  position: relative;
+  width: 14px; height: 14px;
+  font-size: 0;
+  text-align: center;
+}
+.ai-tool-round-icon::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  border: 1.7px solid rgba(47, 127, 158, .22);
+  border-top-color: rgba(47, 127, 158, .95);
+  animation: xtjToolSpin .72s linear infinite;
+}
+.ai-tool-round.is-done .ai-tool-round-icon::before {
+  content: '✓';
+  position: static;
+  width: auto; height: auto;
+  border: 0; border-radius: 0;
+  font-size: 12px; font-weight: 800;
+  color: #2f9e6e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+.ai-tool-round.is-error .ai-tool-round-icon::before {
+  content: '!';
+  position: static;
+  width: auto; height: auto;
+  border: 0; border-radius: 0;
+  font-size: 12px; font-weight: 800;
+  color: #c0505e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+@keyframes xtjToolSpin { to { transform: rotate(360deg); } }
+@keyframes xtjToolPop {
+  0%   { opacity: 0; transform: scale(.4); }
+  60%  { opacity: 1; transform: scale(1.18); }
+  100% { opacity: 1; transform: scale(1); }
+}
+/* 运行中标题的三点脉冲：比文字"搜索中…"更接近 Codex 的呼吸感 */
 .ai-tool-round-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-tool-round-count {
   flex: 0 0 auto;
@@ -607,15 +663,50 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   font-weight: 650;
   color: #2f7f9e;
   font-variant-numeric: tabular-nums;
+  transition: opacity 180ms ease;
 }
 .ai-tool-round.is-done .ai-tool-round-head { color: #2f7a5f; }
-.ai-tool-round.is-done .ai-tool-round-count { display: none; }
+.ai-tool-round.is-done .ai-tool-round-count { opacity: 0; }
+/* 折叠指示箭头：仅在可折叠（已收敛）时出现 */
+.ai-tool-round-caret {
+  flex: 0 0 auto;
+  width: 12px; height: 12px;
+  font-size: 0;
+  position: relative;
+  opacity: 0;
+  transition: opacity 180ms ease, transform 200ms cubic-bezier(.16, 1, .3, 1);
+}
+.ai-tool-round-caret::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 5px; height: 5px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transform-origin: center;
+}
+.ai-tool-round.is-done .ai-tool-round-caret,
+.ai-tool-round.is-error .ai-tool-round-caret { opacity: .55; }
+.ai-tool-round.is-collapsed .ai-tool-round-caret { transform: rotate(-90deg); }
 
+/* 折叠容器：grid-template-rows 0fr↔1fr 是唯一能平滑过渡"未知高度"的方案
+   （max-height 需要写死数值，条目多时要么裁切要么延迟）。 */
+.ai-tool-round-list-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 240ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
+}
+.ai-tool-round.is-collapsed .ai-tool-round-list-wrap {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
 /* 条目列表：单行紧凑，左侧一条细分隔线形成"组"的视觉归属 */
 .ai-tool-round-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-height: 0;
+  overflow: hidden;
   margin-left: 9px;
   padding-left: 10px;
   border-left: 1px solid rgba(91, 151, 131, .18);
@@ -627,7 +718,41 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   padding-left: 0;
   min-height: 19px;
 }
-.ai-tool-round-list .ai-tool-step-icon { width: 16px; font-size: 11px; }
+/* 步骤图标同样改 CSS 绘制：运行中=旋转环，完成=✓，失败=! */
+.ai-tool-round-list .ai-tool-step-icon {
+  position: relative;
+  width: 11px; height: 11px;
+  font-size: 0;
+  flex: 0 0 auto;
+  align-self: center;
+}
+.ai-tool-round-list .ai-tool-step-icon::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(47, 127, 158, .2);
+  border-top-color: rgba(47, 127, 158, .9);
+  animation: xtjToolSpin .72s linear infinite;
+}
+.ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before {
+  content: '✓';
+  position: static;
+  width: auto; height: auto;
+  border: 0;
+  font-size: 10px; font-weight: 800;
+  color: #2f9e6e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+.ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before {
+  content: '!';
+  position: static;
+  width: auto; height: auto;
+  border: 0;
+  font-size: 10px; font-weight: 800;
+  color: #c0505e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
 .ai-tool-round-list .ai-tool-step-body {
   display: flex;
   align-items: baseline;
@@ -645,11 +770,12 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ai-tool-round-list .ai-tool-step-status { font-size: 11px; margin-top: 0; font-variant-numeric: tabular-nums; }
+.ai-tool-round-list .ai-tool-step-status {
+  font-size: 11px; margin-top: 0; font-variant-numeric: tabular-nums;
+  transition: color .22s ease;
+}
 
-/* 运行中不再用左侧粗光晕（单行条目下会显得笨重），改为图标轻微呼吸。
-   注意：呼吸动画的具体声明放在下方（晚于通用 .is-running .ai-tool-step-icon
-   的 animation:none 规则），以确保层叠顺序正确生效。 */
+/* 单行条目不再需要左侧粗光晕（会显得笨重），改为整行轻微底纹 */
 .ai-tool-round-list .ai-tool-step.is-running { padding-left: 0; }
 .ai-tool-round-list .ai-tool-step.is-running::before { display: none; }
 @keyframes xtjToolIconBreath {
@@ -658,8 +784,16 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 }
 
 /* 已完成的历史轮次：视觉降权，让最新一轮保持主角地位 */
-.ai-tool-round.is-done { opacity: .82; }
+.ai-tool-round.is-done { opacity: .9; }
 .ai-tool-round.is-done .ai-tool-round-list { border-left-color: rgba(91, 151, 131, .12); }
+
+/* 条目错峰进入：并行 5 个工具时是"依次落下"而不是整块砸出来 */
+.ai-tool-round-list .ai-tool-step:nth-child(1) { animation-delay: 0ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(2) { animation-delay: 40ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(3) { animation-delay: 80ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(4) { animation-delay: 120ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(5) { animation-delay: 160ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(n+6) { animation-delay: 200ms; }
 
 /* ── 2026-09-11 工具调用 UI / 动画优化 ──────────────────────────────
    目标（对应产品反馈："优化调用工具的动画以及显示 UI"）：
@@ -670,9 +804,11 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
    4) 结果卡片以轻微上浮淡入呈现，避免与上方时间线"糊"在一起；
    5) 全量遵守 reduced-motion 与项目既有的 data-xtj-motion=off/weak 开关。 */
 
+/* ★ 2026-09-22：进入动画改为「轻微左上滑入」——Codex 的条目是"长出来"的，
+   不是从上方砸下来的；位移量也更小（4px），避免整块抖动。 */
 @keyframes xtjToolStepIn {
-  0%   { opacity: 0; transform: translateY(-6px); }
-  100% { opacity: 1; transform: translateY(0); }
+  0%   { opacity: 0; transform: translate3d(-4px, -3px, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 /* ★ 2026-09-13：移除 xtjToolPulse（图标闪烁）与 xtjToolBarRun（跑马灯）。
    用户反馈原效果"太吵"：图标 1.15s 高频闪烁、左侧条纹 .75s 快速跑动，
@@ -748,7 +884,9 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-result-card-title { font-size: 12px; font-weight: 700; color: #35544b; }
 .ai-search-toggle { display: inline-block; transition: transform .2s ease; color: #5b9783; }
 
-/* 5) 无障碍与性能开关：用户要求减弱/关闭动效时全部停用 */
+/* 5) 无障碍与性能开关：用户要求减弱/关闭动效时全部停用
+   ★ 2026-09-22：新增的 CSS 旋转环 / 落定缩放同样纳入开关管控，
+     否则 prefers-reduced-motion 用户会看到一个永远在转的圈。 */
 @media (prefers-reduced-motion: reduce) {
   .ai-tool-step,
   .ai-tool-result-card,
@@ -761,6 +899,13 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
     transform: none;
     box-shadow: none;
   }
+  .ai-tool-round-icon::before,
+  .ai-tool-round.is-done .ai-tool-round-icon::before,
+  .ai-tool-round.is-error .ai-tool-round-icon::before,
+  .ai-tool-round-list .ai-tool-step-icon::before,
+  .ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before,
+  .ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before { animation: none !important; }
+  .ai-tool-round-list-wrap { transition: none !important; }
 }
 html[data-xtj-motion=off] .ai-tool-step,
 html[data-xtj-motion=off] .ai-tool-result-card,
@@ -768,6 +913,12 @@ html[data-xtj-motion=off] .ai-tool-step.is-running .ai-tool-step-icon,
 html[data-xtj-motion=off] .ai-tool-step.is-running::before,
 html[data-xtj-motion=weak] .ai-tool-step.is-running .ai-tool-step-icon,
 html[data-xtj-motion=weak] .ai-tool-step.is-running::before {
+  animation: none !important;
+}
+html[data-xtj-motion=off] .ai-tool-round-icon::before,
+html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step-icon::before,
+html[data-xtj-motion=weak] .ai-tool-round-icon::before,
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step-icon::before {
   animation: none !important;
 }
 
@@ -788,3 +939,69 @@ html[data-xtj-motion="off"] *::after {
 }
 html[data-xtj-motion="weak"] .xtj-heart-particle,
 html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
+
+/* ── 2026-09-22 Codex 化收尾：整理中占位 + 深色主题配色 ──────────────── */
+
+/* 「整理检索结果并作答」这类收尾占位挂在 timeline 根上，
+   沿用通用 .ai-tool-step 样式会带一条左侧光晕条，与轮次内的条目语言不一致。
+   这里统一成同一个旋转环，视觉上就是"还在动，但已经接近尾声"。 */
+.ai-tool-step.ai-tool-organizing {
+  align-items: center;
+  padding-left: 0;
+  min-height: 20px;
+}
+.ai-tool-step.ai-tool-organizing::before { display: none; }
+.ai-tool-step.ai-tool-organizing .ai-tool-step-icon {
+  position: relative;
+  width: 11px; height: 11px;
+  font-size: 0;
+  flex: 0 0 auto;
+}
+.ai-tool-step.ai-tool-organizing .ai-tool-step-icon::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(91, 151, 131, .22);
+  border-top-color: rgba(91, 151, 131, .9);
+  animation: xtjToolSpin 1.1s linear infinite;
+}
+.ai-tool-step.ai-tool-organizing .ai-tool-step-body {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.ai-tool-step.ai-tool-organizing .ai-tool-step-title { font-size: 12.5px; font-weight: 600; }
+.ai-tool-step.ai-tool-organizing .ai-tool-step-status { margin-top: 0; font-size: 11px; }
+
+/* 深色主题下工具进展的配色（此前工具 UI 全是浅色硬编码） */
+[data-theme="dark"] .ai-tool-round-head { color: #a8c8bd; }
+[data-theme="dark"] .ai-tool-round-head:hover { background: rgba(110, 165, 140, .12); }
+[data-theme="dark"] .ai-tool-round.is-done .ai-tool-round-head { color: #7fc9a5; }
+[data-theme="dark"] .ai-tool-round-icon::before {
+  border-color: rgba(124, 196, 224, .22);
+  border-top-color: rgba(124, 196, 224, .92);
+}
+[data-theme="dark"] .ai-tool-round.is-done .ai-tool-round-icon::before { color: #6ad6a8; }
+[data-theme="dark"] .ai-tool-round.is-error .ai-tool-round-icon::before { color: #e2808c; }
+[data-theme="dark"] .ai-tool-round-count { color: #7cc4dd; }
+[data-theme="dark"] .ai-tool-round-list { border-left-color: rgba(110, 165, 140, .22); }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step-icon::before {
+  border-color: rgba(124, 196, 224, .2);
+  border-top-color: rgba(124, 196, 224, .9);
+}
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before { color: #6ad6a8; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before { color: #e2808c; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step-title { color: #d3e4dd; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step-detail { color: #8fa6a0; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step-status { color: #7fc9a5; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-running .ai-tool-step-status { color: #7cc4dd; }
+[data-theme="dark"] .ai-tool-result-card {
+  background: rgba(24, 40, 36, .82);
+  border-color: rgba(110, 165, 140, .2);
+}
+[data-theme="dark"] .ai-tool-result-card-title { color: #d3e4dd; }
+[data-theme="dark"] .ai-tool-step.ai-tool-organizing .ai-tool-step-icon::before {
+  border-color: rgba(124, 196, 224, .2);
+  border-top-color: rgba(124, 196, 224, .9);
+}

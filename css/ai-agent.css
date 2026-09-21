@@ -1272,7 +1272,9 @@
   height: 20px;
   align-items: center;
   justify-content: center;
-  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* ★ 2026-09-22：轻微过冲的 spring 曲线，让 + → × 的旋转有"咬合"感，
+     不再是匀速转过去的机械感。 */
+  transition: transform 300ms cubic-bezier(0.34, 1.42, 0.64, 1);
   pointer-events: none;
   will-change: transform;
 }
@@ -1315,6 +1317,16 @@
 .ai-plus-btn.ws-on:not(.active) {
   border-color: rgba(66, 155, 122, 0.5);
   background: rgba(220, 245, 235, 1);
+}
+
+/* ★ 2026-09-22：模型/思考值变更后的短暂高亮，确认"选择已生效" */
+@keyframes aiPanelValueUpdate {
+  0%   { color: #1f8a5c; transform: scale(1); }
+  30%  { color: #1f8a5c; transform: scale(1.06); }
+  100% { color: inherit; transform: scale(1); }
+}
+.ai-panel-row-value.is-updated {
+  animation: aiPanelValueUpdate 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* 行内透明 select：铺满整行，直接点开系统选择器 */
@@ -1363,12 +1375,16 @@
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: scale(0.14) translateY(10px);
+  /* ★ 2026-09-22：起点从 scale(.14) 放宽到 scale(.9)。
+     旧值意味着面板要"从 1/7 大小炸开到全屏"——位移量过大，观感是硬弹出，
+     而且一旦动画被浏览器截断，中间帧就是一个畸形的小方块（用户的截图）。
+     Codex/ChatGPT 的 popover 只做 8%~10% 的缩放差 + 几个像素的位移。 */
+  transform: scale(0.9) translateY(8px);
   transform-origin: var(--hero-ox, 20px) 100%;
   transition:
-    opacity 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    transform 320ms cubic-bezier(0.32, 0.72, 0, 1),
-    visibility 0s linear 320ms;
+    opacity 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s linear 200ms;
   box-shadow:
     0 16px 40px rgba(40, 80, 70, 0.14),
     0 4px 12px rgba(40, 80, 70, 0.06);
@@ -1388,15 +1404,28 @@
   visibility: visible;
   pointer-events: auto;
   transform: scale(1) translateY(0);
-  /* ★ 改用 keyframes 而非 transition：动画是时间驱动、必然到达终态（both 填充），
+  /* 仍用 keyframes 而非 transition：动画是时间驱动、必然到达终态（both 填充），
      即使浏览器中断/冻结补间，声明值也锁定在 scale(1) 可见态，
-     从机制上杜绝「transition 被打断 → 面板卡在 scale(0.14) 中间帧」的缺陷 */
-  animation: aiPlusPanelOpen 340ms cubic-bezier(0.32, 0.72, 0, 1) both;
+     从机制上杜绝「transition 被打断 → 面板卡在中间帧」的缺陷 */
+  animation: aiPlusPanelOpen 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @keyframes aiPlusPanelOpen {
-  from { opacity: 0; transform: scale(0.14) translateY(10px); }
+  from { opacity: 0; transform: scale(0.9) translateY(8px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
 }
+/* 面板内容错峰淡入：整块内容"长出来"而不是一次性糊上去 */
+@keyframes aiPlusPanelItemIn {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ai-plus-panel-shell.open .ai-quota-card,
+.ai-plus-panel-shell.open .ai-panel-group {
+  animation: aiPlusPanelItemIn 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ai-plus-panel-shell.open .ai-quota-card { animation-delay: 20ms; }
+.ai-plus-panel-shell.open .ai-panel-group:nth-of-type(1) { animation-delay: 60ms; }
+.ai-plus-panel-shell.open .ai-panel-group:nth-of-type(2) { animation-delay: 110ms; }
+.ai-plus-panel-shell.open .ai-panel-group:nth-of-type(3) { animation-delay: 160ms; }
 /* 仅关闭过程禁点；打开动画期间必须可点（否则模型/思考点不动） */
 .ai-plus-panel-shell.is-opening {
   will-change: transform, opacity;
@@ -1404,12 +1433,15 @@
 .ai-plus-panel-shell.is-closing {
   will-change: transform, opacity;
   pointer-events: none;
-  /* 关闭同样用 keyframes：终态与基础态（隐藏）一致，保证必然走完 */
-  animation: aiPlusPanelClose 320ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  /* 关闭同样用 keyframes：终态与基础态（隐藏）一致，保证必然走完。
+     ★ 关闭比打开更快（180ms）——收起动作不该让用户等，这是 Codex 的手感。 */
+  animation: aiPlusPanelClose 180ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 @keyframes aiPlusPanelClose {
   from { opacity: 1; transform: scale(1) translateY(0); }
-  to   { opacity: 0; transform: scale(0.14) translateY(10px); }
+  /* 终态与基础态完全一致（scale(.9) translateY(8px)），
+     下一次打开必然从同一形态起算，不会出现"越开越小"的漂移。 */
+  to   { opacity: 0; transform: scale(0.9) translateY(8px); }
 }
 .ai-plus-panel-shell > .ai-plus-panel-content {
   position: relative;
@@ -7027,12 +7059,45 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   box-shadow: 0 18px 48px rgba(30, 80, 63, 0.18);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
+  /* ★ 2026-09-22：模型/思考选项弹层此前**完全没有进出场动画**——
+     点击瞬间凭空出现、选中瞬间凭空消失，是"生硬"的直接来源。
+     现在从锚点方向轻微放大淡入，关闭时快速收拢淡出。 */
+  transform-origin: var(--pop-ox, 50%) 0;
+  animation: aiSelectPopIn 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes aiSelectPopIn {
+  from { opacity: 0; transform: scale(0.94) translateY(-6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.ai-select-pop.is-closing {
+  pointer-events: none;
+  animation: aiSelectPopOut 140ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+@keyframes aiSelectPopOut {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to   { opacity: 0; transform: scale(0.96) translateY(-4px); }
 }
 .ai-select-pop-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
+/* 选项错峰落下（最多 5 项，超出统一用最后一段延迟） */
+.ai-select-pop-item {
+  animation: aiSelectItemIn 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ai-select-pop-item:nth-child(1) { animation-delay: 0ms; }
+.ai-select-pop-item:nth-child(2) { animation-delay: 30ms; }
+.ai-select-pop-item:nth-child(3) { animation-delay: 60ms; }
+.ai-select-pop-item:nth-child(4) { animation-delay: 90ms; }
+.ai-select-pop-item:nth-child(n+5) { animation-delay: 120ms; }
+@keyframes aiSelectItemIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* 按下反馈用背景而非 transform：入场动画用 both 填充锁定了 transform，
+   再写 transform 不会生效（动画填充优先级高于普通声明）。 */
+.ai-select-pop-item:active { background: rgba(66, 155, 122, 0.18); }
 .ai-select-pop-item {
   display: flex;
   align-items: center;

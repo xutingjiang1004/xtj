@@ -119,8 +119,22 @@ test('修复③：Responses 请求体不得在思考模式下无条件丢弃 too
 });
 
 test('修复③：思考+工具被上游拒绝时有降级重试兜底', () => {
-  assert.match(serverSrc, /_isToolsThinkingConflict/, '缺少思考+工具冲突识别');
-  assert.match(serverSrc, /tools\+thinking rejected by provider, retrying with reasoning disabled/, '缺少降级重试日志');
+  // ★ 2026-09-22 契约升级：旧的「仅识别 tools+thinking 冲突」降级有两个漏洞——
+  //   ① 触发条件要求上游错误文案命中正则，而 400 经常只回空 message → 永不降级；
+  //   ② 全局一次性开关导致长工具链第 3、4 轮再犯同样错误就没救。
+  //   现升级为「任何 400 都按轮次做一次安全重试」，语义完全覆盖原场景。
+  assert.match(
+    serverSrc,
+    /resp\.status === 400 && !_safe400RetryDone\['r' \+ round\]/,
+    '缺少按轮次记账的 400 安全重试（覆盖思考+工具冲突场景）'
+  );
+  const seg = serverSrc.slice(
+    serverSrc.indexOf("resp.status === 400 && !_safe400RetryDone"),
+    serverSrc.indexOf("resp.status === 400 && !_safe400RetryDone") + 1600
+  );
+  assert.match(seg, /_strippedInput/, '安全重试必须剥离 input 中的 reasoning 项');
+  assert.match(seg, /effort: 'none'/, '安全重试必须关闭 reasoning');
+  assert.match(seg, /safe-retry with reasoning stripped/, '缺少降级重试日志');
 });
 
 test('修复③：工作模式在非流式 /chat 路径同样生效', () => {
