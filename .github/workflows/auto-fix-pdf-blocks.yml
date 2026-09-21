@@ -3,7 +3,7 @@ name: Auto-fix server.js generate_pdf blocks
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/auto-fix-pdf-blocks.yml']
+    paths: ['.github/workflows/auto-fix-pdf-blocks.yml', 'scripts/auto-fix-pdf-blocks.js']
   workflow_dispatch:
 
 permissions:
@@ -21,68 +21,18 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Patch generate_pdf blocks fallback in server.js
-        run: |
-          node -e '
-          const fs = require("fs");
-          const p = "render-api/server.js";
-          let src = fs.readFileSync(p, "utf8");
+      - name: Run patch script
+        run: node scripts/auto-fix-pdf-blocks.js
 
-          const oldCode = `    case '"'"'generate_pdf'"'"': {
-            var gpBlocks = Array.isArray(args.blocks) ? args.blocks.slice(0, 200) : [];
-            if (!gpBlocks.length) return { tool_name: name, error: '"'"'blocks 内容为空'"'"' };`;
-
-          const newCode = `    case '"'"'generate_pdf'"'"': {
-            var gpBlocks = Array.isArray(args.blocks) ? args.blocks.slice(0, 200) : [];
-            // ★ 2026-09-22 修复（generate_pdf 频繁报 "blocks 内容为空"）：
-            //   第三方模型对 function calling 参数结构理解不准，常把内容塞到
-            //   content/text/markdown/html 字段而非 blocks 数组，旧逻辑直接硬拒。
-            //   新策略：blocks 为空时自动从常见替代字段提取并归一化为 blocks。
-            if (!gpBlocks.length) {
-              var gpAltRaw = args.content || args.text || args.markdown || args.html || args.body || '"'"''"'"';
-              if (typeof gpAltRaw === '"'"'string'"'"' && gpAltRaw.trim()) {
-                var gpAltLines = gpAltRaw.split(/\\n{2,}/);
-                for (var gpAi = 0; gpAi < gpAltLines.length && gpBlocks.length < 200; gpAi++) {
-                  var gpLine = gpAltLines[gpAi].trim();
-                  if (!gpLine) continue;
-                  if (/^#{1,3}\\s+/.test(gpLine)) {
-                    var gpLevel = gpLine.match(/^(#+)/)[1].length;
-                    gpBlocks.push({ type: '"'"'h'"'"' + Math.min(gpLevel, 3), text: gpLine.replace(/^#+\\s+/, '"'"''"'"') });
-                  } else if (/^[-*•]\\s+/m.test(gpLine)) {
-                    var gpItems = gpLine.split('"'"'\\n'"'"').map(function(l) { return l.replace(/^[-*•]\\s+/, '"'"''"'"').trim(); }).filter(Boolean);
-                    if (gpItems.length) gpBlocks.push({ type: '"'"'ul'"'"', items: gpItems });
-                  } else {
-                    gpBlocks.push({ type: '"'"'p'"'"', text: gpLine });
-                  }
-                }
-              }
-            }
-            if (!gpBlocks.length) return { tool_name: name, error: '"'"'blocks 内容为空：请传入 blocks 数组，每项形如 {\"type\":\"p\",\"text\":\"段落文字\"}；也可传 content/text 字段由系统自动分段'"'"' };`;
-
-          if (src.indexOf(oldCode) === -1) {
-            console.log("Patch target not found - may already be patched or code has changed.");
-            process.exit(0);
-          }
-          if (src.indexOf("gpAltRaw") !== -1) {
-            console.log("Already patched, skipping.");
-            process.exit(0);
-          }
-          src = src.replace(oldCode, newCode);
-          fs.writeFileSync(p, src, "utf8");
-          console.log("Patched server.js successfully.");
-          '
-
-      - name: Verify syntax
-        run: node -c render-api/server.js
-
-      - name: Commit and push
+      - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add render-api/server.js
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No changes to commit - already patched or target not found."
           else
             git commit -m "[skip ci] fix: generate_pdf blocks参数容错——模型传content/text时自动转blocks"
             git push
+            echo "Successfully pushed fix."
           fi
