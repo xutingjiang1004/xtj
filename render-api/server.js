@@ -23294,14 +23294,28 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }, 3000);
 
       // 并行执行所有工具
-      var toolResults = await Promise.all(toolCallsArr.map(async function(tc) {
-        var tcExec = { function: { name: tc.name, arguments: tc.args } };
-        var execResult = await executeToolCall(tcExec, { userName: userName });
-        // F-1: 标准流式路径工具驱动的真实搜索调用计入请求级计数器
-        if (execResult && (execResult.tool_name === 'search_web' || execResult.tool_name === 'tavily_search') && !execResult.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
-        return { result: execResult, id: tc.id, name: tc.name };
-      }));
-      clearInterval(_toolProgressTimer);
+      // ★ 2026-09-22 修复：单个工具抛异常不能让整批 Promise.all reject，
+      //   否则 tool_result/tool_error 事件全部不发、进度定时器泄漏，前端
+      //   步骤永久停在“搜索中”。内层 catch 把异常转成 error 结果，与
+      //   DeepSeek 路径及第23391行 DSML 兜底路径对齐；外层 finally 保证
+      //   进度定时器在任何情况下都被清理。
+      var toolResults;
+      try {
+        toolResults = await Promise.all(toolCallsArr.map(async function(tc) {
+          var tcExec = { function: { name: tc.name, arguments: tc.args } };
+          var execResult;
+          try {
+            execResult = await executeToolCall(tcExec, { userName: userName });
+          } catch (toolErr) {
+            execResult = { tool_name: tc.name, error: (toolErr && toolErr.message) || '工具执行失败' };
+          }
+          // F-1: 标准流式路径工具驱动的真实搜索调用计入请求级计数器
+          if (execResult && (execResult.tool_name === 'search_web' || execResult.tool_name === 'tavily_search') && !execResult.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
+          return { result: execResult, id: tc.id, name: tc.name };
+        }));
+      } finally {
+        clearInterval(_toolProgressTimer);
+      }
       // ★ 消息顺序修复：OpenAI/DeepSeek 协议要求 role:'tool' 消息必须跟在
       // 携带 tool_calls 的 role:'assistant' 消息之后。此前先 push tool 结果、
       // 再 push assistant(tool_calls)，第二轮请求必然 400（消息序列非法）。
