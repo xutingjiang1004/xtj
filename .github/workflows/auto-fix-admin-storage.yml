@@ -1,0 +1,37 @@
+name: Auto Fix Admin Storage Guards
+
+on:
+  push:
+    paths:
+      - 'scripts/auto-fix-admin-storage.js'
+      - '.github/workflows/auto-fix-admin-storage.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run fix script
+        run: node scripts/auto-fix-admin-storage.js
+
+      - name: Commit patched admin.js
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add js/admin/admin.js
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "fix(admin): guard localStorage/sessionStorage with try/catch [skip ci]"
+            git push
+          fi
