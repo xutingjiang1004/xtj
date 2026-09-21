@@ -2417,6 +2417,46 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  // ★★★ 2026-09-22 修复（用户报障：「工具明明完成了、回复也出来了，'整理检索结果并作答'
+  //   还一直转圈，每条回复、每次用工具都这样，根本停不下来」）：
+  //   根因 —— 这个占位步骤是 append 到 `.ai-tool-timeline`（**轮次容器之外**）的，
+  //   而收敛逻辑有两条且都覆盖不到它：
+  //     ① updateToolRoundState / forceSettleToolRound 只遍历 `.ai-tool-round` 内部的
+  //        `.ai-tool-step`，它是 timeline 的直接子节点，不在任何 round 里 → 永不命中；
+  //     ② clearAssistantTransientStatus 里的 `.ai-tool-status` 容器循环虽然会
+  //        `classList.remove('is-running')`，但 CSS 的旋转动画是挂在
+  //        `.ai-tool-organizing .ai-tool-step-icon::before` 上的**无条件 infinite 动画**，
+  //        只有加 `.is-done` 才会被换成静态 ✓ —— 光去 is-running 完全停不下来。
+  //   另外它唯一被"正常"收敛的时机是 `content` 事件（正文首字到达），而带思考的
+  //   回复正文来得晚（甚至先出一大段 reasoning 再出正文），这段空窗用户看到的就是
+  //   一个永远在转的圈。
+  //   修复：抽出统一的收敛函数，在所有终态路径（done / content / error / 中断 /
+  //   超时 / 切换会话）都调用它，并**必须加 .is-done**（而非只去 is-running）。
+  function settleOrganizingStep(node, opts) {
+    if (!node) return;
+    opts = opts || {};
+    var host = node;
+    // 兼容传入的可能是明细子节点（如 assistantNode 之外的局部容器）
+    var list;
+    try { list = host.querySelectorAll('.ai-tool-organizing'); } catch (eQ) { return; }
+    for (var i = 0; i < list.length; i++) {
+      var step = list[i];
+      if (step.classList.contains('is-done')) continue;
+      var ok = opts.failed !== true;
+      step.classList.remove('is-running');
+      step.classList.add(ok ? 'is-done' : 'is-error');
+      var icon = step.querySelector('.ai-tool-step-icon');
+      // 图标文字在此类步骤里被 font-size:0 隐藏，图形由 CSS ::before 绘制；
+      // 写回文字保持语义完整（同时 .is-done 会覆盖 ::before 为静态 ✓）。
+      if (icon) icon.textContent = ok ? '✍️' : '⚠️';
+      var st = step.querySelector('.ai-tool-step-status');
+      if (st) {
+        var cur = String(st.textContent || '');
+        if (!cur || /整理|中|正在/.test(cur)) st.textContent = ok ? '完成' : '失败';
+      }
+    }
+  }
+
   // 找到某条目所属的轮次并刷新它；用于 tool_result / tool_error 之后收敛
   function refreshOwningToolRound(stepEl) {
     if (!stepEl) return;
@@ -8163,6 +8203,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             statusEl.classList.add('is-settled');
           } catch (eHide) {}
         }
+        // ★ 2026-09-22：收敛"整理检索结果并作答"占位步骤（详见 settleOrganizingStep 注释）。
+        //   它挂在 timeline 上、不在任何 .ai-tool-round 内，上面两段收敛都覆盖不到，
+        //   必须在这里单独处理，否则工具走完 + 正文到达前它会一直转圈。
+        try { settleOrganizingStep(target); } catch (eSettleOrg) {}
       }
 
       function attachContinueGenerateBtn(node, msgHost) {
@@ -9250,17 +9294,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             // ★ 2026-09-15：正文开始到达 → "整理检索结果并作答"的占位步骤已完成使命，
             //   就地收敛为完成态（不删除，保留时间线的完整叙事），避免与真实正文并存造成干扰。
-            try {
-              var _orgEl = assistantNode.querySelector('.ai-tool-organizing');
-              if (_orgEl) {
-                _orgEl.classList.remove('is-running');
-                _orgEl.classList.add('is-done');
-                var _orgIcon = _orgEl.querySelector('.ai-tool-step-icon');
-                if (_orgIcon) _orgIcon.textContent = '✍️';
-                var _orgStatus = _orgEl.querySelector('.ai-tool-step-status');
-                if (_orgStatus) _orgStatus.textContent = '完成';
-              }
-            } catch (eOrganizeDone) {}
+            // ★ 2026-09-22：统一走 settleOrganizingStep，保证与 done/中断路径收敛口径一致
+            //   （此前这里的手写逻辑与 clearAssistantTransientStatus 各写一套，容易走偏）。
+            try { settleOrganizingStep(assistantNode); } catch (eOrganizeDone) {}
             // ★★★ 2026-09-17 思考 → 正文交接优化（本轮流动性重点之一）：
             //   旧行为：思考流全程强制展开，正文一开始输出后，思考面板**仍占满屏幕**
             //   继续显示，正文只能挤在下方；用户要一路滚动才能看到回复的开头，
@@ -9450,10 +9486,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } else if (assistantNode && (aiContent || aiReasoning)) {
         finishAiMessage(assistantNode, aiContent, aiReasoning, null);
       } else if (doneReceived) {
+        // ★ 2026-09-22：此分支不经过 finishAiMessage，需显式收敛"整理中"占位，
+        //   否则流已结束但那个旋转环会一直转下去（用户报障的路径之一）。
+        try { settleOrganizingStep(assistantNode); } catch (eOrgD) {}
         cleanupRenderers();
       } else if (terminalErrorSeen) {
         // ★ 2026-09-17 修复：服务端已明确报错（error 事件已展示真实原因），
         //   此处只做清理，**不得**再弹出"AI 连接中断"覆盖真实错误。
+        // ★ 2026-09-22：同样需要收敛工具/整理占位动画。
+        try { if (assistantNode) clearAssistantTransientStatus(assistantNode); } catch (eOrgE) {}
         cleanupRenderers();
       } else if (!doneReceived) {
         cleanupRenderers();
@@ -10828,6 +10869,7 @@ function showChatMessages() {
         return;
       }
       try { node.classList.add('is-closing'); } catch (eCls) {}
+      // 与 CSS aiSelectPopOut（140ms）对齐，多留 10ms 余量再摘除节点。
       _selectPopCloseTimer = setTimeout(function() {
         _selectPopCloseTimer = null;
         if (node && node.parentNode) node.parentNode.removeChild(node);
@@ -10945,12 +10987,11 @@ function showChatMessages() {
       void panelShell.offsetWidth; // 强制 reflow，保证动画从关闭态起算
       panelShell.classList.add('open');
       if (closeTimer) clearTimeout(closeTimer);
-      // ★ 2026-09-22：与 CSS aiPlusPanelOpen 时长对齐（240ms + 余量）。
-      //   旧值 340ms 比动画本身长 100ms，will-change 白占一层合成层。
+      // 与 CSS aiPlusPanelOpen（340ms）对齐，多留 20ms 余量。
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
         closeTimer = null;
-      }, 260);
+      }, 360);
     }
 
     function closePanel(animate) {
@@ -10975,14 +11016,13 @@ function showChatMessages() {
         return;
       }
       if (closeTimer) clearTimeout(closeTimer);
-      // ★ 2026-09-22：关闭动画已缩短到 180ms，这里同步收到 200ms。
-      //   旧值 320ms 意味着"动画早结束了，但 140ms 内再点 + 仍然没反应"——
-      //   那 140ms 的空窗正是"点了没反应"体感的另一半来源。
+      // 与 CSS aiPlusPanelClose（320ms）对齐，多留 20ms 余量。
+      // 锁定窗口必须 ≥ 动画时长，否则"动画还在播、点击已被放行"会与动画打架。
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         closeTimer = null;
-      }, 200);
+      }, 340);
     }
 
     function closeInviteModal() {
