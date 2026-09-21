@@ -32,9 +32,54 @@ test('P0：function_call 必须归并 output_item.done 的 id（空 id 回传会
 test('P0：function_call_output 回传时空 id 必须有确定性占位兜底', () => {
   assert.match(
     body,
-    /var _pairCallId = r\.fcId \|\| \('call_r'/,
-    'id 缺失时生成确定性占位，保证 function_call 与 function_call_output 配对非空'
+    /var _pairCallId = r\.fcId \|\| r\.fallbackId/,
+    'id 缺失时回落到确定性占位，保证 function_call 与 function_call_output 配对非空'
   );
+  // ★ 2026-09-22：占位 id 必须在 map 内部生成（旧实现在 forEach 里引用 map 的形参 fi，
+  //   作用域外不存在 → 空 id 时抛 ReferenceError，整轮工具被吞成「AI 调用失败」）
+  assert.match(
+    body,
+    /var fallbackId = 'call_r'/,
+    'fallbackId 必须在 Promise.all 的 map 回调内生成并随结果返回'
+  );
+  assert.doesNotMatch(
+    body,
+    /r\.fcId \|\| \('call_r' \+ round \+ '_' \+ r\.fcName \+ '_' \+ fi\)/,
+    '不得在 forEach 作用域内引用 map 的形参 fi（ReferenceError 隐患）'
+  );
+  // ★ 2026-09-22：function_call 回传必须同时写 id 与 call_id，兼容两种上游配对校验
+  assert.match(
+    body,
+    /type: 'function_call', id: _pairCallId, call_id: _pairCallId/,
+    'function_call 项必须同时携带 id 与 call_id（值相同），消除 id/call_id 不一致的 400'
+  );
+});
+
+test('P0：工具轮回填 assistant 消息时不得写入空 content（上游 400）', () => {
+  assert.match(
+    body,
+    /content: \(content && String\(content\)\.trim\(\)\) \? String\(content\) : '（正在调用工具）'/,
+    '模型"只调工具不说话"时必须回传明确占位，而不是空串'
+  );
+});
+
+test('P0：思考已关闭时不得再回填 reasoning 项（effort:none 与 reasoning 冲突会 400）', () => {
+  assert.match(
+    body,
+    /if \(useThinking\) \{\s*\n\s*if \(roundReasoningItems\.length\)/,
+    'reasoning 回填必须受 useThinking 闸门保护'
+  );
+});
+
+test('P0：任何 400 都要按轮次做一次安全重试（剥离 reasoning + 补齐空 content）', () => {
+  assert.match(
+    body,
+    /resp\.status === 400 && !_safe400RetryDone\['r' \+ round\]/,
+    '400 重试必须按轮次记账，长工具链每轮都有自救机会'
+  );
+  const seg = body.slice(body.indexOf("resp.status === 400 && !_safe400RetryDone"), body.indexOf("resp.status === 400 && !_safe400RetryDone") + 1600);
+  assert.match(seg, /_strippedInput/, '安全重试必须剥离 input 中的 reasoning 项');
+  assert.match(seg, /effort: 'none'/, '安全重试必须关闭 reasoning');
 });
 
 test('P0：tools+thinking 被上游 400 拒绝时，降级重试必须同时剥离 reasoning 项', () => {

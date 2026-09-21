@@ -8785,6 +8785,9 @@ async function callDeepSeekViaResponses(messages, options) {
   try {
     var workingInput = inputItems.slice();
     var workingInstructions = instructions;
+    // ★ 2026-09-22：按工具轮次记录的「400 安全重试」账本。
+    //   每个轮次独立一次机会，长工具链每轮都能自救（旧的全局一次性开关做不到）。
+    var _safe400RetryDone = {};
 
     for (var round = 0; round < maxToolRounds; round++) {
       onProgress();
@@ -8901,22 +8904,37 @@ async function callDeepSeekViaResponses(messages, options) {
           } catch (e) {}
         }
         console.error('[RESPONSES] API error', resp.status, errTxt, 'round', round, 'code=' + errCode);
-        // ★ 兜底（工作模式 + 思考 + tools 被上游拒绝）：
-        //   若确实是「思考与工具不兼容」类错误，自动降级重试一次：
-        //   关闭 reasoning（effort:none），保留 tools —— 宁可少思考也不能没工具，
-        //   因为工作模式的核心承诺是"能干活"。降级只针对本轮，不改变全局设置。
-        var _isToolsThinkingConflict = resp.status === 400 && useThinking && apiBody.tools && apiBody.tools.length &&
-          /tool|function|reasoning|thinking|unsupported|not supported|invalid/i.test(errTxt || '');
-        if (_isToolsThinkingConflict && !options.__toolsThinkingFallbackDone) {
-          console.error('[RESPONSES] tools+thinking rejected by provider, retrying with reasoning disabled');
+        // ★★★ 2026-09-22 加固（用户报障："用着用着调工具就突然 AI 调用失败"）：
+        //   旧的 tools+thinking 降级有两个致命漏洞：
+        //   ① 触发条件要求 errTxt 命中正则，但上游 400 经常**只回空 message**
+        //      （日志里 errTxt 恒为空串），正则落空 → 永不降级 → 用户直接看到失败；
+        //   ② __toolsThinkingFallbackDone 是"整条链路一次性"的全局闸，
+        //      多轮工具链里第 3、4 轮再犯同样错误就彻底没救。
+        //   新策略：**任何 400 都做一次安全重试**，且按轮次记账（每轮都有一次自救机会）：
+        //     - 剥离 input 中全部 reasoning 项（Reasoning 回传格式是最常见的 400 源）；
+        //     - 关闭 reasoning（effort:none），保留 tools —— 宁可少思考也不能没工具；
+        //     - 把空的 assistant 文本补成占位，避免空 content 被拒。
+        //   重试仍失败才把真实原因抛出，由上层文案层给出可执行提示。
+        if (resp.status === 400 && !_safe400RetryDone['r' + round]) {
+          _safe400RetryDone['r' + round] = true;
+          console.error('[RESPONSES] 400 on round ' + round + ', safe-retry with reasoning stripped (tools kept)');
           options.__toolsThinkingFallbackDone = true;
-          // ★ 修复：降级重试不能只改 effort —— input 里回传的 reasoning 项
+          // ★ 降级重试不能只改 effort —— input 里回传的 reasoning 项
           //   若正是被拒对象（"reasoning is required"/"invalid reasoning item"），
           //   effort:none 重试同样 400。这里同时剥离 input 中全部 reasoning 项，
           //   牺牲推理上下文换取链路跑通（宁可少思考不能没工具）。
           var _strippedInput = Array.isArray(apiBody.input)
             ? apiBody.input.filter(function(_it) { return !_it || _it.type !== 'reasoning'; })
             : apiBody.input;
+          // 顺带补齐空 assistant 文本（上游拒绝空串 content）
+          if (Array.isArray(_strippedInput)) {
+            for (var _sii = 0; _sii < _strippedInput.length; _sii++) {
+              var _sit = _strippedInput[_sii];
+              if (_sit && _sit.type === 'message' && _sit.role === 'assistant' && !String(_sit.content || '').trim()) {
+                _strippedInput[_sii] = Object.assign({}, _sit, { content: '（继续）' });
+              }
+            }
+          }
           var retryBody = Object.assign({}, apiBody, { reasoning: { effort: 'none' }, input: _strippedInput });
           var retryResp = await fetch(DEEPSEEK_RESPONSES_URL, {
             method: 'POST',
@@ -9077,7 +9095,14 @@ async function callDeepSeekViaResponses(messages, options) {
             // 函数调用开始
             if (evtType === 'response.output_item.added' && sJson.item && sJson.item.type === 'function_call') {
               functionCalls.push({
-                id: sJson.item.id || '',
+                // ★ 2026-09-22 修复：Responses API 的 function_call 项同时携带
+                //   `id`（输出项 id）与 `call_id`（调用标识）。回传时
+                //   function_call_output.call_id 必须与 **call_id** 配对，
+                //   旧实现只取 id，若两者不同（上游实现差异）回传即 400，
+                //   用户看到「思考完 → 调工具 → 突然 AI 调用失败」。
+                //   这里两个字段都记录，回传时优先用 call_id。
+                id: sJson.item.call_id || sJson.item.id || '',
+                itemId: sJson.item.id || '',
                 name: sJson.item.name || '',
                 arguments: sJson.item.arguments || ''
               });
@@ -9106,7 +9131,10 @@ async function callDeepSeekViaResponses(messages, options) {
                 }
               }
               if (_fcIdx >= 0) {
-                if (_fcDone.id && !functionCalls[_fcIdx].id) functionCalls[_fcIdx].id = _fcDone.id;
+                // ★ 2026-09-22：done 事件同样优先取 call_id（详见 added 分支说明）
+                var _fcDoneId = _fcDone.call_id || _fcDone.id || '';
+                if (_fcDoneId && !functionCalls[_fcIdx].id) functionCalls[_fcIdx].id = _fcDoneId;
+                if (_fcDone.id && !functionCalls[_fcIdx].itemId) functionCalls[_fcIdx].itemId = _fcDone.id;
                 if (typeof _fcDone.arguments === 'string' && _fcDone.arguments && !functionCalls[_fcIdx].arguments) functionCalls[_fcIdx].arguments = _fcDone.arguments;
               }
             }
@@ -9227,7 +9255,10 @@ async function callDeepSeekViaResponses(messages, options) {
 
       // 有 function_calls：执行工具调用
       // 添加 assistant 消息到 input
-      var assistantInput = { type: 'message', role: 'assistant', content: content || '' };
+      // ★ 2026-09-22 修复：content 为空串时部分上游实现会直接 400
+      //   （"messages/content must not be empty"）。工具轮里模型只调工具、不说话
+      //   是常态，此时必须回传一个明确的占位而不是空串。
+      var assistantInput = { type: 'message', role: 'assistant', content: (content && String(content).trim()) ? String(content) : '（正在调用工具）' };
       workingInput.push(assistantInput);
 
       // ★★ 修复（"AI 调用失败（HTTP 400）" 根因）：
@@ -9238,18 +9269,24 @@ async function callDeepSeekViaResponses(messages, options) {
       //   工具」一旦进入第 2 轮，若不回传 reasoning 就会 400 —— 表现为用户
       //   看到的"AI 调用失败"，且开关工作模式都一样（因为两条路径都挂工具）。
       //   修复：把本轮收集到的 reasoning 项按 Responses 协议原样回填。
-      if (roundReasoningItems.length) {
-        for (var _rri = 0; _rri < roundReasoningItems.length; _rri++) {
-          var _rItem = roundReasoningItems[_rri];
-          var _rItemObj = { type: 'reasoning' };
-          if (_rItem.id) _rItemObj.id = _rItem.id;
-          if (_rItem.text) _rItemObj.text = _rItem.text;
-          workingInput.push(_rItemObj);
+      // ★ 2026-09-22 修复（反向约束）：上面只保证了"要回传"，但反过来
+      //   —— 本轮若已把 reasoning 关掉（effort:none，例如上一步的 tools+thinking
+      //   冲突降级），再回传 reasoning 项同样是 400（"reasoning 与 effort:none 冲突"）。
+      //   因此这里加一道闸门：思考已关闭时**不再**回填 reasoning，只保留工具上下文。
+      if (useThinking) {
+        if (roundReasoningItems.length) {
+          for (var _rri = 0; _rri < roundReasoningItems.length; _rri++) {
+            var _rItem = roundReasoningItems[_rri];
+            var _rItemObj = { type: 'reasoning' };
+            if (_rItem.id) _rItemObj.id = _rItem.id;
+            if (_rItem.text) _rItemObj.text = _rItem.text;
+            workingInput.push(_rItemObj);
+          }
+        } else if (roundReasoning) {
+          // 兜底：未能拿到结构化 reasoning 项，但确实有推理文本时，
+          // 以纯文本 reasoning 项回填（协议允许 reasoning 项携带 content）。
+          workingInput.push({ type: 'reasoning', text: String(roundReasoning) });
         }
-      } else if (roundReasoning) {
-        // 兜底：未能拿到结构化 reasoning 项，但确实有推理文本时，
-        // 以纯文本 reasoning 项回填（协议允许 reasoning 项携带 content）。
-        workingInput.push({ type: 'reasoning', text: String(roundReasoning) });
       }
 
       // ★ 修复（"明明在使用工具，却变成了回复内容" / 工具轮间前端空白）：
@@ -9287,7 +9324,13 @@ async function callDeepSeekViaResponses(messages, options) {
           toolResult = { tool_name: fc.name, error: (e && e.message) || '工具执行失败' };
         }
         var tElapsed = Date.now() - tStart;
-        return { fcId: fc.id, fcName: fc.name, fcArgs: fc.arguments, toolResult: toolResult, tElapsed: tElapsed };
+        // ★ 2026-09-22 修复（P0 隐性崩溃）：fallbackId 必须在 map 内部生成并随结果返回。
+        //   旧实现在下方 forEach 里写 `r.fcId || ('call_r' + round + '_' + r.fcName + '_' + fi)`，
+        //   而 `fi` 是 map 回调的形参、在 forEach 作用域内**不存在** —— 一旦上游未下发
+        //   call_id（r.fcId 为空），该表达式立即抛 ReferenceError，整个工具轮被 catch，
+        //   用户看到的就是毫无头绪的「AI 调用失败」。这正是"有时调工具突然失败"的来源之一。
+        var fallbackId = 'call_r' + round + '_' + fi + '_' + String(fc.name || 'tool').replace(/[^a-zA-Z0-9_]/g, '');
+        return { fcId: fc.id, fcItemId: fc.itemId, fallbackId: fallbackId, fcName: fc.name, fcArgs: fc.arguments, toolResult: toolResult, tElapsed: tElapsed };
       }));
 
       toolResults.forEach(function(r) {
@@ -9298,11 +9341,13 @@ async function callDeepSeekViaResponses(messages, options) {
         var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, 24000) : '{}';
         // S-9: 原样回带模型产出的 function_call 项，与 function_call_output 配对，
         // 保留跨轮工具调用上下文（此前下一轮丢失 function_call 导致多轮工具链失效）
-        // ★ 兜底：id 缺失（上游 done 事件也没下发）时生成确定性占位，
+        // ★ 兜底：id 缺失（上游 done 事件也没下发）时用 map 内生成的确定性占位，
         //   function_call 与 function_call_output 两处使用同一 id 保证配对；
         //   空串 id 回传会被上游 400 拒绝（"思考完→调工具→突然失败"的又一嫌疑点）。
-        var _pairCallId = r.fcId || ('call_r' + round + '_' + r.fcName + '_' + fi);
-        workingInput.push({ type: 'function_call', id: _pairCallId, name: r.fcName, arguments: r.fcArgs || '{}' });
+        var _pairCallId = r.fcId || r.fallbackId;
+        // ★ 2026-09-22：同时写 id 与 call_id（值相同），兼容两种上游配对校验实现，
+        //   消除"id/call_id 不一致导致回传 400"的间歇性失败。
+        workingInput.push({ type: 'function_call', id: _pairCallId, call_id: _pairCallId, name: r.fcName, arguments: r.fcArgs || '{}' });
         workingInput.push({ type: 'function_call_output', call_id: _pairCallId, output: toolContent });
       });
     }
