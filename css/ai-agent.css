@@ -1375,16 +1375,24 @@
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  /* ★ 2026-09-22 回退：Hero 展开恢复原样（scale(.14) 从 + 按钮原点 spring 生长）。
-     上一版误把它当"位移过大"改成了 scale(.9) 平推，手感被削平——
-     用户明确要求"改回来那个打开跟关闭动画"，故完整还原：
-     起点 0.14、340ms、cubic-bezier(0.32, 0.72, 0, 1)（尾段带轻微过冲的弹簧曲线）。 */
-  transform: scale(0.14) translateY(10px);
-  transform-origin: var(--hero-ox, 20px) 100%;
+  /* ★★ 2026-09-22 恢复原始「流动揭示」动画（8-6 版本，用户要的那个）。
+     关键不是缩放，而是 clip-path: inset() —— 面板内容像被一股流从 + 按钮
+     所在的左下角**推开铺满**，而不是"从小放大"或"炸开"。
+       · 关闭态 inset(100% 82% 0 0)：顶部裁掉 100%、右侧裁掉 82%，
+         只剩左下角一小条（正是 + 按钮的位置）；
+       · 打开态 inset(0)：完整显示。
+     与 scale() 的本质区别：缩放会连带拉伸文字（糊字、形变），
+     clip-path 只做**揭示**，内容本身不变形 —— 这就是"流动感"的来源。
+     打开与关闭共用同一条 transition（双向对称），曲线为平滑减速的
+     cubic-bezier(0.22, 0.61, 0.36, 1)，全程无过冲、无回弹。 */
+  transform: translateY(8px);
+  transform-origin: bottom left;
+  clip-path: inset(100% 82% 0 0 round 18px);
   transition:
-    opacity 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    transform 320ms cubic-bezier(0.32, 0.72, 0, 1),
-    visibility 0s linear 320ms;
+    opacity 240ms ease-out,
+    visibility 0ms 240ms,
+    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
   box-shadow:
     0 16px 40px rgba(40, 80, 70, 0.14),
     0 4px 12px rgba(40, 80, 70, 0.06);
@@ -1414,14 +1422,14 @@
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: scale(1) translateY(0);
-  /* ● 时间驱动：Hero 从 + 按钮原点 spring 展开。
-     与基础隐藏态（scale(.14) translateY(10px)）构成完整的一对开合关键帧。 */
-  animation: aiPlusPanelOpen 340ms cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-@keyframes aiPlusPanelOpen {
-  from { opacity: 0; transform: scale(0.14) translateY(10px); }
-  to   { opacity: 1; transform: scale(1) translateY(0); }
+  transform: translateY(0);
+  /* 揭示完成态：裁切归零，面板完整呈现 */
+  clip-path: inset(0 round 18px);
+  transition:
+    opacity 240ms ease-out,
+    visibility 0ms 0ms,
+    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 /* 面板内容错峰淡入：整块内容"长出来"而不是一次性糊上去 */
 @keyframes aiPlusPanelItemIn {
@@ -1438,18 +1446,30 @@
 .ai-plus-panel-shell.open .ai-panel-group:nth-of-type(3) { animation-delay: 160ms; }
 /* 仅关闭过程禁点；打开动画期间必须可点（否则模型/思考点不动） */
 .ai-plus-panel-shell.is-opening {
-  will-change: transform, opacity;
+  will-change: transform, opacity, clip-path;
 }
 .ai-plus-panel-shell.is-closing {
-  will-change: transform, opacity;
+  will-change: transform, opacity, clip-path;
   pointer-events: none;
-  /* 关闭：与打开同一条 spring 曲线、同时长收回到 + 按钮原点，
-     终态与基础隐藏态严格一致，保证"原路返回"且不会越开越小。 */
-  animation: aiPlusPanelClose 320ms cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-@keyframes aiPlusPanelClose {
-  from { opacity: 1; transform: scale(1) translateY(0); }
-  to   { opacity: 0; transform: scale(0.14) translateY(10px); }
+  /* 关闭 = 打开的**逆过程**：同一条曲线、同一时长，clip-path 收回到
+     左下角那一小条，视觉上是"被流吸回去"，而不是"缩小消失"。
+     用 transition 而非 keyframes：clip-path 揭示必须双向对称才有流动感，
+     keyframes 只能单向播放。
+     ★ 防卡死的保障：关闭终态 = 基础隐藏态（inset(100% 82% 0 0)），
+       且基础态已声明为同一值，即使补间被打断，最终也会落到隐藏态；
+       纵然中途冻结，形态也只是"部分揭示"，不会像 scale(0.14) 那样
+       留下一个畸形小方块。 */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  clip-path: inset(100% 82% 0 0 round 18px);
+  /* 与打开完全对称：同一条曲线、同一时长（320ms），
+     visibility 延迟到动画结束才切到 hidden，避免收起途中突然消失。 */
+  transition:
+    opacity 240ms ease-out,
+    visibility 0ms 320ms,
+    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .ai-plus-panel-shell > .ai-plus-panel-content {
   position: relative;

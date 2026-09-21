@@ -56,6 +56,50 @@ const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = requi
 const { fetchSafeWebPage, assertSafeWebUrl, createPinnedAgent, fetchSafeRaw, fetchSafeBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
+
+/**
+ * ★★★ 2026-09-22 修复（P0「网页搜索/读网页时显示超大板块内容」根因之一）：
+ *   `tool_result` 事件的 items 字段在后端**三条不同路径**上语义完全不一致：
+ *     · 路径 A（FC/工作模式，约 22284 行）：JSON.parse(content) → **数组** ✅
+ *     · 路径 B（Responses，约 23170 行）：toolResult.content → **整段字符串** ❌
+ *     · 路径 C（DSML 兜底，约 23243 行）：dTRes.content  → **整段字符串** ❌
+ *   前端 `if (itemsArr && itemsArr.length > 0)` 里 **字符串也有 .length**，
+ *   于是 .slice(0,10) 切出 10 个**字符**，每个元素的 url/title/snippet 全是
+ *   undefined → 渲染成一堆"无标题 + 碎片文字"的列表，整屏铺开（用户截图实证）。
+ *   更糟的是 r2.snippet.slice(0,200) 会直接抛异常（undefined 没有 slice）。
+ *
+ *   修复：统一出口 —— **只有确认是"结构化结果数组"时才返回 items**，
+ *   其余一律返回 null，让前端走 cards / 纯文本通道，绝不把正文当列表渲染。
+ * @param {*} raw 原始 items 候选值
+ * @param {number} limit 条目上限
+ * @returns {Array|null}
+ */
+function normalizeToolResultItems(raw, limit) {
+  var max = typeof limit === 'number' && limit > 0 ? limit : 12;
+  var arr = raw;
+  // 字符串先尝试按 JSON 解析（少数工具确实把数组序列化成字符串）
+  if (typeof arr === 'string') {
+    var trimmed = arr.trim();
+    if (!trimmed || trimmed[0] !== '[') return null; // 正文文本，不是列表
+    try { arr = JSON.parse(trimmed); } catch (e) { return null; }
+  }
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  var out = [];
+  for (var i = 0; i < arr.length && out.length < max; i++) {
+    var it = arr[i];
+    // 只接受"看起来像搜索结果"的对象：至少有 url 或 title 之一
+    if (!it || typeof it !== 'object') continue;
+    if (!it.url && !it.title) continue;
+    out.push({
+      title: typeof it.title === 'string' ? it.title.slice(0, 200) : '',
+      url: typeof it.url === 'string' ? it.url.slice(0, 2000) : '',
+      snippet: typeof it.snippet === 'string' ? it.snippet.slice(0, 400) : (typeof it.content === 'string' ? it.content.slice(0, 400) : ''),
+      source: typeof it.source === 'string' ? it.source.slice(0, 80) : '',
+      published_at: typeof it.published_at === 'string' ? it.published_at.slice(0, 40) : ''
+    });
+  }
+  return out.length ? out : null;
+}
 const { getMailTransporter, GMAIL_USER, GMAIL_APP_PASSWORD } = require('./mail-transport');
 const { isNormalPost, applyNormalPostAllowlist, applyPublicPostExclusions, NORMAL_POST_MEDIA_TYPES } = require('./post-query');
 const { safeJsonParse, toTimeMs, pickEarlierIso, pickLaterIso, getUtcDateKey } = require('./util-helpers');
@@ -22281,7 +22325,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 error: item.toolResult.error || null,
                 location: item.toolResult.location || null,
                 query: item.toolResult.query || null,
-                items: trItems && trItems.length > 0 ? trItems.slice(0, 20) : null
+                // ★ 2026-09-22：路径 A 虽已是数组，仍走统一出口做字段净化，
+                //   保证三条路径对前端的契约完全一致。
+                items: normalizeToolResultItems(trItems, 12)
               })) { aborted = true; return safeEnd(); }
               if (Array.isArray(item.toolResult.cards)) {
                 item.toolResult.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
@@ -23167,7 +23213,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           tool_name: toolResult.tool_name || '',
           success: !toolResult.error,
           count: toolResult.results_count || 0,
-          items: toolResult.content || '',
+          // ★ 2026-09-22：原先直接把整段正文（content）塞进 items，
+          //   前端当成结果数组渲染 → 整屏碎片文字。改为走统一出口校验。
+          items: normalizeToolResultItems(toolResult.content, 12),
           query: toolResult.query || '',
           error: toolResult.error || null
         });
@@ -23240,7 +23288,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           tool_name: dTRes.tool_name || dsmlToolResults[dti].name,
           success: !dTRes.error,
           count: dTRes.results_count || 0,
-          items: dTRes.content || '',
+          // ★ 2026-09-22：同路径 B，整段正文不得当结果列表下发
+          items: normalizeToolResultItems(dTRes.content, 12),
           query: dTRes.query || '',
           error: dTRes.error || null
         });

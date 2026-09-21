@@ -876,6 +876,28 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   border: 1px solid rgba(91,151,131,.16); background: rgba(248,253,250,.9);
   animation: xtjToolResultIn .24s cubic-bezier(.16, 1, .3, 1) both;
   transition: border-color .25s ease, box-shadow .25s ease;
+  /* ★ 2026-09-22：卡片整体限高 —— 展开的结果列表不得把整屏吃掉 */
+  max-width: min(100%, 560px);
+  overflow: hidden;
+}
+/* ★★★ 2026-09-22 修复（P0「网页搜索时显示很大板块的内容」）：
+   .ai-search-detail 有两条渲染路径，此前**只有 .ai-search-status 那条**限了高
+   （max-height: min(36vh,280px) + overflow-y:auto）；
+   挂在 .ai-tool-result-card 内的这条**完全没有高度约束**，
+   于是展开后整屏铺开（用户截图实证）。
+   这里给卡片内的 detail 补上同样的约束，两条路径口径一致。 */
+.ai-tool-result-card .ai-search-detail {
+  max-height: min(36vh, 280px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+/* 卡片内的长文本（读网页返回的正文片段）同样要夹住，避免单条撑爆 */
+.ai-tool-result-card .ai-search-detail-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .ai-tool-result-card[style*="cursor: pointer"]:hover {
   border-color: rgba(91,151,131,.34);
@@ -978,19 +1000,43 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
    只把 is-running 去掉完全不会停转。必须由 .is-done / .is-error 把
    ::before 换成静态符号（并把标题降权），否则用户看到的就是
    "工具早就完成了、回复都出完了，这里还在一直转圈"。 */
-.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon::before,
-.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon::before {
-  content: none;
-  animation: none;
+/* 用一个 CSS 画的 ✓ 替换旋转环：border 旋转环 -> 只留右侧+下侧边的对勾。
+   ★ 不能写 content: none —— 那样图标位会变成**空心**（就是用户截图里
+     那个"完成"旁边空荡荡的圆圈），必须给出可见的终态图形。 */
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon::before {
+  content: '';
+  position: absolute;
+  inset: 0; margin: auto;
+  width: 7px; height: 4px;
+  border-radius: 0;
+  border: 0;
+  border-left: 1.8px solid #2f9e6e;
+  border-bottom: 1.8px solid #2f9e6e;
+  transform: rotate(-45deg) translate(1px, -1px);
+  transform-origin: center;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
 }
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon::before {
+  content: '!';
+  position: static;
+  width: auto; height: auto;
+  border: 0; border-radius: 0;
+  font-size: 11px; font-weight: 800;
+  color: #c0505e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+/* emoji 文本（🧠/✍️）在终态下隐身，图形全部由 ::before 绘制，
+   避免不同系统字体把 emoji 渲染成不同颜色/形状 */
 .ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon,
 .ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon {
-  font-size: 12px;
+  font-size: 0;
+}
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon {
+  font-size: 11px;
   line-height: 1;
   text-align: center;
-  color: #2f9e6e;
+  color: #c0505e;
 }
-.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon { color: #c0505e; }
 .ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-title { color: #4a6b60; font-weight: 550; }
 .ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-status { color: #7f958d; }
 .ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-title { color: #a83f4d; }
@@ -1025,4 +1071,137 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 [data-theme="dark"] .ai-tool-step.ai-tool-organizing .ai-tool-step-icon::before {
   border-color: rgba(124, 196, 224, .2);
   border-top-color: rgba(124, 196, 224, .9);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ★ 2026-09-22 「流动感」动效层
+   参考目标：iOS 27 Siri（动态岛 orb + 边缘流光）/ ChatGPT·Codex 流式输出
+   设计原则：
+     1) 流动 ≠ 弹跳。用**连续位移的渐变扫过**（background-position /
+        mask-position）表达"还在流"，而不是用 scale 回弹或 opacity 闪烁。
+     2) 全部分级降级：prefers-reduced-motion 与 data-xtj-motion=off/weak
+        必须能彻底停掉，否则无障碍用户会看到永不停歇的光。
+     3) 只在"进行中"存在，终态立刻归零 —— 动画是状态的可视化，
+        不是装饰，流已结束就必须停下来。
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── 1) 工具轮摘要行：流光沿标题扫过（运行中） ──────────────────────────
+   做法：把渐变铺在摘要行上，用 background-position 让它横向平移。
+   之所以用「渐变扫过」而不是「整体呼吸」：呼吸是整块明暗变化（跳），
+   扫过是有方向的连续位移（流）—— 这正是 Siri 边缘光的观感。 */
+.ai-tool-round.is-running .ai-tool-round-label {
+  background-image: linear-gradient(
+    100deg,
+    rgba(47, 127, 158, 0) 0%,
+    rgba(47, 127, 158, 0.16) 38%,
+    rgba(47, 127, 158, 0.30) 50%,
+    rgba(47, 127, 158, 0.16) 62%,
+    rgba(47, 127, 158, 0) 100%
+  );
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  animation: xtjToolFlow 1.5s linear infinite;
+  border-radius: 4px;
+}
+@keyframes xtjToolFlow {
+  from { background-position: 130% 0; }
+  to   { background-position: -30% 0; }
+}
+/* 终态立刻归零：流已结束，光必须停 */
+.ai-tool-round.is-done .ai-tool-round-label,
+.ai-tool-round.is-error .ai-tool-round-label {
+  background-image: none;
+  animation: none;
+}
+[data-theme="dark"] .ai-tool-round.is-running .ai-tool-round-label {
+  background-image: linear-gradient(
+    100deg,
+    rgba(124, 196, 224, 0) 0%,
+    rgba(124, 196, 224, 0.18) 38%,
+    rgba(124, 196, 224, 0.34) 50%,
+    rgba(124, 196, 224, 0.18) 62%,
+    rgba(124, 196, 224, 0) 100%
+  );
+}
+
+/* ── 2) 运行中的步骤：左侧光条改为「向下流动的液柱」 ────────────────────
+   旧实现 xtjToolGlow 是 2.4s 的整体明暗呼吸（没有方向感）。
+   改为渐变位置持续下移，视觉上像液体在管里往下淌。 */
+.ai-tool-round-list .ai-tool-step.is-running::before {
+  background: linear-gradient(
+    180deg,
+    rgba(47, 127, 158, 0.15) 0%,
+    rgba(47, 127, 158, 0.9) 45%,
+    rgba(47, 127, 158, 0.15) 100%
+  );
+  background-size: 100% 200%;
+  animation: xtjToolFlowDown 1.35s linear infinite;
+}
+@keyframes xtjToolFlowDown {
+  from { background-position: 0 -100%; }
+  to   { background-position: 0 100%; }
+}
+
+/* ── 3) 结果卡片：渐进揭示（从左下角擦除式出现） ────────────────────────
+   与 + 面板同一套语言：clip-path inset 揭示，而不是整块淡入。
+   这样工具结果与菜单开合在动效上是**同一套语法**，观感统一。 */
+@keyframes xtjToolResultReveal {
+  from { opacity: 0; clip-path: inset(0 100% 0 0 round 12px); transform: translateY(2px); }
+  to   { opacity: 1; clip-path: inset(0 0 0 0 round 12px);    transform: translateY(0); }
+}
+.ai-tool-result-card {
+  animation: xtjToolResultReveal .34s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* ── 4) 流式正文：光标带柔光（Siri 的"正在书写"感） ────────────────────
+   旧光标是一根 2px 硬竖线在呼吸，太"电报灯"。
+   改为：竖线 + 一圈柔和外发光，发光随时间缓慢脉动；
+   竖线本身保持清晰（保证可读性），光晕负责流动感。 */
+.ai-stream-cursor {
+  width: 2px;
+  border-radius: 1px;
+  background: var(--primary);
+  box-shadow: 0 0 0 2px rgba(66, 155, 122, 0.14);
+  animation:
+    ai-cursor-breathe 1.15s ease-in-out infinite,
+    ai-cursor-halo 1.9s ease-in-out infinite;
+}
+@keyframes ai-cursor-halo {
+  0%, 100% { box-shadow: 0 0 0 1.5px rgba(66, 155, 122, 0.10); }
+  50%      { box-shadow: 0 0 0 3.5px rgba(66, 155, 122, 0.22); }
+}
+
+/* ── 5) 新到达的正文段落：轻微浮起（不是整块砸下） ─────────────────────
+   只对新插入的块生效（ai-streaming-soft 在流式期间挂在容器上），
+   已渲染完的历史内容不动，避免长回复滚动时满屏都在动。 */
+@keyframes xtjBlockRise {
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+.ai-streaming-soft > :where(p, ul, ol, pre, blockquote, h1, h2, h3, h4, table):last-child {
+  animation: xtjBlockRise .26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* ── 6) 无障碍降级：所有流动动画必须能被彻底停掉 ────────────────────────
+   这一条是硬要求 —— 否则 reduced-motion 用户会看到永远在扫的光。 */
+@media (prefers-reduced-motion: reduce) {
+  .ai-tool-round.is-running .ai-tool-round-label,
+  .ai-tool-round-list .ai-tool-step.is-running::before,
+  .ai-tool-result-card,
+  .ai-stream-cursor,
+  .ai-streaming-soft > * { animation: none !important; }
+  .ai-tool-round.is-running .ai-tool-round-label { background-image: none !important; }
+}
+html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label,
+html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step.is-running::before,
+html[data-xtj-motion=off] .ai-tool-result-card,
+html[data-xtj-motion=off] .ai-stream-cursor,
+html[data-xtj-motion=off] .ai-streaming-soft > *,
+html[data-xtj-motion=weak] .ai-tool-round.is-running .ai-tool-round-label,
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step.is-running::before,
+html[data-xtj-motion=weak] .ai-stream-cursor {
+  animation: none !important;
+}
+html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label {
+  background-image: none !important;
 }
