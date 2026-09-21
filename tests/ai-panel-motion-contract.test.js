@@ -309,3 +309,121 @@ test('Items 契约：前端必须校验 Array.isArray 才渲染结果列表', ()
   assert.match(agentSrc, /if \(!Array\.isArray\(itemsArr\)\) itemsArr = null;/,
     '前端必须拒绝非数组的 items（字符串也有 .length，旧判断会被穿透）');
 });
+
+/* ── 7) 思考面板 / 思考程度弹层：开合必须流动，不得硬切 ──────────────────
+   背景（用户二次反馈，2026-09-22）：
+     「不管是打开还是关闭思考模式的时候还是跟以前一样啊，很生硬很丑。」
+   根因（三条）：
+     ① 思考程度弹层用 scale(0.94) 缩放淡入 —— 缩放会拉伸文字，且"整块弹出"
+        的观感偏硬；
+     ② 思考面板收起时 .ai-thinking-body 被 !important 瞬间置为
+        font-size:0 / max-height:0 —— 文字在第 1 帧就蒸发，只剩空盒子在缩，
+        这是"生硬"最直接的来源；
+     ③ 展开 240ms / 收起 180ms 不对称，且 opacity 只有 150ms —— 高度还在动、
+        文字已经先没了，两个动作互相打架。
+   本段把"clip-path 揭示 + 双向对称 + 不得瞬间蒸发"固化成契约。 */
+test('思考程度弹层：进出场必须是 clip-path 揭示（不得用 scale 缩放）', () => {
+  const popRule = agentCss.match(/\.ai-select-pop\s*\{[^}]*\}/);
+  assert.ok(popRule, '.ai-select-pop 规则必须存在');
+  assert.match(popRule[0], /animation:\s*aiSelectPopIn/, '必须有入场动画');
+
+  const inKf = agentCss.match(/@keyframes\s+aiSelectPopIn\s*\{[\s\S]*?\n\}/);
+  const outKf = agentCss.match(/@keyframes\s+aiSelectPopOut\s*\{[\s\S]*?\n\}/);
+  assert.ok(inKf && outKf, '入场 / 退场关键帧都必须存在');
+  // 自上而下抹开：起点裁掉下边 100%，终点完整
+  assert.match(inKf[0], /clip-path:\s*inset\(0 0 100% 0/, '入场必须从锚点那一行自上而下揭示');
+  assert.match(inKf[0], /clip-path:\s*inset\(0 0 0 0/, '入场终态必须完整揭示');
+  assert.match(outKf[0], /clip-path:\s*inset\(0 0 100% 0/, '退场必须收回到锚点那一行');
+  // 不得用 scale：会拉伸弹层里的文字（糊字）
+  assert.doesNotMatch(inKf[0], /scale\(/, '入场不得用 scale（会拉伸文字）');
+  assert.doesNotMatch(outKf[0], /scale\(/, '退场不得用 scale（会拉伸文字）');
+  // 双向对称：同一条曲线、同一时长（曲线写在 .ai-select-pop / .is-closing 规则上，
+  // 关键帧里没有 —— 这是 CSS 的固有写法，故断言落在规则而非 @keyframes 内）
+  const FLOW = /cubic-bezier\(0\.22,\s*0\.61,\s*0\.36,\s*1\)/;
+  const closingRule = agentCss.match(/\.ai-select-pop\.is-closing\s*\{[^}]*\}/);
+  assert.ok(closingRule, '.ai-select-pop.is-closing 规则必须存在');
+  assert.match(popRule[0], FLOW, '入场必须使用流动曲线');
+  assert.match(closingRule[0], FLOW, '退场必须使用同一条流动曲线');
+  const inMs = parseInt((popRule[0].match(/aiSelectPopIn\s+(\d+)ms/) || [])[1], 10);
+  const outMs = parseInt((closingRule[0].match(/aiSelectPopOut\s+(\d+)ms/) || [])[1], 10);
+  assert.ok(inMs > 0 && outMs > 0, '入场与退场都必须有显式时长');
+  assert.strictEqual(inMs, outMs, `入场(${inMs}ms) 与退场(${outMs}ms) 必须同速`);
+});
+
+test('思考程度弹层：JS 移除节点的等待时间必须 ≥ 退场动画时长', () => {
+  const start = agentSrc.indexOf('function closeSelectPopup(');
+  const body = agentSrc.slice(start, start + 1200);
+  const wait = parseInt((body.match(/removeChild\(node\);?\s*\},?\s*(\d+)\)/) || [])[1], 10);
+  assert.ok(wait >= 260, `等待时间必须 ≥ 260ms 动画时长，当前 ${wait}ms`);
+});
+
+test('思考面板：展开与收起共用同一条流动曲线（双向对称）', () => {
+  const base = agentCss.match(/\.ai-thinking-panel\s*\{[^}]*\}/);
+  const open = agentCss.match(/\.ai-thinking\.expanded \.ai-thinking-panel\s*\{[^}]*\}/);
+  assert.ok(base && open, '基础 / expanded 两条规则都必须存在');
+  const FLOW = /cubic-bezier\(0\.22,\s*0\.61,\s*0\.36,\s*1\)/;
+  assert.match(base[0], FLOW, '收起必须使用流动曲线');
+  assert.match(open[0], FLOW, '展开必须使用同一条流动曲线');
+  // 高度、位移、裁切三者同速，才不会"高度还在动、文字已经没了"
+  const baseMs = parseInt((base[0].match(/clip-path\s+(\d+)ms/) || [])[1], 10);
+  const openMs = parseInt((open[0].match(/clip-path\s+(\d+)ms/) || [])[1], 10);
+  assert.ok(baseMs > 0 && openMs > 0, '展开与收起都必须有显式 clip-path 时长');
+  assert.strictEqual(baseMs, openMs, `展开(${openMs}ms) 与收起(${baseMs}ms) 必须同速`);
+  // 自上而下揭示
+  assert.match(base[0], /clip-path:\s*inset\(0 0 100% 0\)/, '收起态必须裁掉下边（自上而下收回）');
+  assert.match(open[0], /clip-path:\s*inset\(0 0 0 0\)/, '展开终态必须完整揭示');
+});
+
+test('思考面板：收起时正文不得瞬间蒸发（禁止 font-size:0 / max-height:0 硬切）', () => {
+  const collapsedRaw = agentCss.match(/\.ai-thinking:not\(\.expanded\) \.ai-thinking-body\s*\{[^}]*\}/);
+  assert.ok(collapsedRaw, '收起态 body 规则必须存在');
+  // 只断言**声明行**：注释里会提到 font-size:0 这类反面写法，不能算命中
+  const collapsed = collapsedRaw[0].replace(/\/\*[\s\S]*?\*\//g, '');
+  // 这三条会让文字在第 1 帧直接消失 —— 是"生硬"的元凶
+  assert.doesNotMatch(collapsed, /font-size:\s*0/, '不得用 font-size:0 让文字瞬间蒸发');
+  assert.doesNotMatch(collapsed, /max-height:\s*0/, '不得用 max-height:0 硬切（高度应由 grid 平滑收回）');
+  assert.doesNotMatch(collapsed, /color:\s*transparent/, '不得用 transparent 一次性抹掉文字');
+  // 改为渐次淡出，且 visibility 延迟到动画结束才切换
+  assert.match(collapsed, /opacity:\s*0/, '正文应淡出');
+  assert.match(collapsed, /visibility:\s*hidden/, '正文最终要隐藏');
+  assert.match(collapsed, /visibility 0s linear \d+ms/, 'visibility 必须延迟到动画结束，避免中途突然消失');
+});
+
+test('思考面板：箭头旋转不得有过冲（回弹抖动）', () => {
+  const caret = agentCss.match(/\.ai-thinking-caret\s*\{[^}]*\}/);
+  assert.ok(caret, '.ai-thinking-caret 规则必须存在');
+  // cubic-bezier 的第二个控制点 y > 1 即为过冲
+  assert.doesNotMatch(caret[0], /cubic-bezier\([^)]*,\s*1\.\d+,/,
+    '箭头旋转不得使用过冲曲线（会回弹抖动，观感生硬）');
+  assert.match(caret[0], /cubic-bezier\(0\.22,\s*0\.61,\s*0\.36,\s*1\)/,
+    '箭头旋转必须与面板同一条流动曲线');
+});
+
+test('+ 面板：打开瞬间必须有流光扫过（光感是"流动"的另一半）', () => {
+  assert.match(agentCss, /@keyframes\s+aiPlusPanelSweep/, '缺少流光扫过关键帧');
+  const rule = agentCss.match(/\.ai-plus-panel-shell\.open::after\s*\{[^}]*\}/);
+  assert.ok(rule, '.open::after 流光层必须存在');
+  assert.match(rule[0], /pointer-events:\s*none/, '流光层不得挡点击');
+  assert.match(rule[0], /animation:\s*aiPlusPanelSweep/, '必须挂上流光动画');
+  assert.match(rule[0], /linear-gradient/, '流光必须是渐变（有方向的连续位移）');
+});
+
+test('新增动效必须受 reduced-motion 管控（含伪元素流光与弹层）', () => {
+  let idx = -1;
+  let from = 0;
+  while (true) {
+    const i = agentCss.indexOf('@media (prefers-reduced-motion: reduce)', from);
+    if (i < 0) break;
+    if (agentCss.slice(i, i + 900).includes('ai-plus-panel-shell')) { idx = i; break; }
+    from = i + 1;
+  }
+  assert.ok(idx > 0, '必须存在覆盖 + 面板的 reduced-motion 块');
+  const block = agentCss.slice(idx, idx + 900);
+  for (const sel of [
+    '.ai-plus-panel-shell.open::after',
+    '.ai-select-pop',
+    '.ai-select-pop-item'
+  ]) {
+    assert.ok(block.includes(sel), `reduced-motion 必须覆盖 ${sel}`);
+  }
+});

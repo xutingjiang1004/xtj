@@ -850,7 +850,7 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'get_weather',
-      description: '查询某个城市的当前天气和今日天气预报，包括温度、湿度、风速、天气状况、降雨概率。支持国内外城市名（中英文）。只有在用户明确询问天气时才使用。\n参数规范（重要）：location 只传【规范城市名】，不要带行政区划后缀或限定词。正确写法：「成都」「上海」「大阪」「Los Angeles」；错误写法：「成都市武侯区」「中国四川省成都市」「北京市朝阳区」。若用户给的是详细地址，请自行提取其中的城市名再调用。',
+      description: '查询某个城市的当前天气和今日天气预报，包括温度、湿度、风速、天气状况、降雨概率、紫外线指数。支持国内外城市名（中英文）。只有在用户明确询问天气时才使用。\n参数规范（重要）：location 只传【规范城市名】，不要带行政区划后缀或限定词。正确写法：「成都」「上海」「大阪」「Los Angeles」；错误写法：「成都市武侯区」「中国四川省成都市」「北京市朝阳区」。若用户给的是详细地址，请自行提取其中的城市名再调用。',
       parameters: {
         type: 'object',
         properties: {
@@ -10556,8 +10556,30 @@ function signUserAccessToken(userName) {
   return _signPayload({ exp: Date.now() + USER_ACCESS_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_access', jti: crypto.randomUUID() });
 }
 
-function signUserRefreshToken(userName) {
-  return _signPayload({ exp: Date.now() + USER_REFRESH_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_refresh', jti: crypto.randomUUID() });
+// ★ 2026-09-22：设备识别 —— 只把设备 ID 的哈希写进令牌，不明文落库/落令牌。
+//   空值（旧客户端 / 隐私模式禁写 localStorage）一律返回 ''，表示"未绑定设备"，
+//   不参与比对，保证存量会话平滑过渡。
+function deviceFingerprint(deviceId) {
+  var raw = String(deviceId || '').trim();
+  if (!raw || raw.length > 200) return '';
+  return crypto.createHash('sha256').update('dev:' + raw).digest('base64url').slice(0, 22);
+}
+function _getDeviceIdFromRequest(req) {
+  var src = (req.body && typeof req.body === 'object') ? req.body : {};
+  var raw = String(src.device_id || src.deviceId || '').trim();
+  return raw ? raw.slice(0, 200) : '';
+}
+
+function signUserRefreshToken(userName, deviceId) {
+  var payload = {
+    exp: Date.now() + USER_REFRESH_TOKEN_EXPIRY_MS,
+    user_name: userName,
+    type: 'user_refresh',
+    jti: crypto.randomUUID()
+  };
+  var did = deviceFingerprint(deviceId);
+  if (did) payload.did = did;
+  return _signPayload(payload);
 }
 
 function verifyUserAccessToken(token) {
@@ -10615,17 +10637,54 @@ async function revokeAllUserRefreshTokens(userName) {
   } catch(e) { console.warn('[RefreshToken] revokeAll failed:', e && e.message); }
 }
 
-async function isRefreshTokenRevoked(refreshToken) {
+/**
+ * 判断 refresh token 是否已被撤销。
+ *
+ * ★★ 2026-09-22 P0 修复（用户报障：「每次更新网站或者刷新网站都有很大很大的
+ *   概率要重新登录」）：
+ *   旧实现是 **fail-closed** 的 —— 只要 Supabase 查询抛异常（冷启动超时、
+ *   网络抖动、限流、连接池打满）就 `return true`（认定"已撤销"），
+ *   /api/user/refresh 随即返回 401 并 **clearCookie 清掉 refresh cookie**，
+ *   于是会话不可恢复，用户被永久登出，只能重新输密码。
+ *   Render 免费层冷启动 + Supabase 抖动叠加，命中率极高，与用户描述完全吻合。
+ *
+ * 现在把三种结果显式分开，避免"基础设施抖一下就把用户踢下线"：
+ *   { revoked: true,  uncertain: false } —— 明确查到该 jti 已不在库中（确证撤销/已轮换），拒绝；
+ *   { revoked: false, uncertain: true  } —— 查询本身失败，无法判定。**放行**并告警：
+ *       令牌本身仍是 HMAC 签名有效的（密钥未泄露即不可伪造），
+ *       轮换与 jti 重用检测仍然生效，故放行不会打开新的攻击面；
+ *   { revoked: false, uncertain: false } —— 令牌仍在库中，正常放行。
+ */
+async function checkRefreshTokenRevoked(refreshToken) {
+  var payload = verifyUserRefreshToken(refreshToken);
+  if (!payload || !payload.jti) {
+    return { revoked: true, uncertain: false, reason: 'invalid_token' };
+  }
   try {
-    var payload = verifyUserRefreshToken(refreshToken);
-    if (!payload || !payload.jti) return true;
-    var { data } = await supabase.from('posts')
+    var { data, error } = await supabase.from('posts')
       .select('id')
       .eq('media_type', REFRESH_TOKEN_MARKER)
       .eq('media_url', payload.jti)
       .maybeSingle();
-    return !data;
-  } catch(e) { return true; }
+    if (error) {
+      // ★ 只把"查询失败"当作不确定，绝不当作已撤销
+      console.warn('[RefreshToken] 撤销状态查询失败，按未撤销放行（避免误踢用户）:',
+        String((error && (error.message || error.code)) || error).slice(0, 160));
+      return { revoked: false, uncertain: true, reason: 'query_failed' };
+    }
+    if (!data) return { revoked: true, uncertain: false, reason: 'not_found' };
+    return { revoked: false, uncertain: false, reason: 'active' };
+  } catch (e) {
+    console.warn('[RefreshToken] 撤销状态查询异常，按未撤销放行（避免误踢用户）:',
+      String((e && e.message) || e).slice(0, 160));
+    return { revoked: false, uncertain: true, reason: 'query_error' };
+  }
+}
+
+// 兼容旧调用点：只关心"确证已撤销"的布尔语义。
+async function isRefreshTokenRevoked(refreshToken) {
+  var verdict = await checkRefreshTokenRevoked(refreshToken);
+  return !!verdict.revoked;
 }
 
 function _getTokenFromRequest(req) {
@@ -11239,19 +11298,27 @@ async function verifyAuthPassword(stored, password, userName) {
 }
 
 // ★ M23：refresh token 持久化失败时返回 null（已写 503），由调用方跳过后续成功响应
-async function issueUserSession(res, userName) {
+async function issueUserSession(res, userName, deviceId) {
   var accessToken = signUserAccessToken(userName);
-  var refreshToken = signUserRefreshToken(userName);
+  var refreshToken = signUserRefreshToken(userName, deviceId);
   var stored = await storeRefreshToken(userName, refreshToken);
   if (!stored) {
     res.status(503).json({ error: '登录服务暂不可用，请稍后重试', code: 'refresh_store_failed' });
     return null;
   }
   res.cookie('xtj_user_refresh', refreshToken, {
-    httpOnly: true, secure: true, sameSite: 'Strict',
+    httpOnly: true, secure: true,
+    // ★ Lax 而非 Strict（同 refresh 接口）：兼顾"从外链/主屏进入"与 CSRF 防护
+    sameSite: 'Lax',
     maxAge: USER_REFRESH_TOKEN_EXPIRY_MS, path: '/api/user'
   });
-  return { ok: true, token: accessToken, user_name: userName, token_type: 'access' };
+  return {
+    ok: true,
+    token: accessToken,
+    user_name: userName,
+    token_type: 'access',
+    expires_in_ms: USER_REFRESH_TOKEN_EXPIRY_MS
+  };
 }
 
 // 用户登录/获取 token。客户端只提交用户输入的密码；不接受 password_hash。
@@ -11313,7 +11380,7 @@ app.post('/api/user/login', securityRateLimit(60000, 10), async (req, res) => {
     if (loginRestrictions.is_banned) {
       return res.status(403).json({ error: '该账号已被封禁，无法登录', code: 'account_banned' });
     }
-    var loginSession = await issueUserSession(res, userNameVal);
+    var loginSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req));
     if (loginSession) return res.json(loginSession);
     return; // issueUserSession 失败时已写 503
   } catch(e) {
@@ -11364,7 +11431,7 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
         console.warn('[API] 注册邮箱写入 user_info 失败:', e && e.message || e);
       }
     }
-    var regSession = await issueUserSession(res, userNameVal);
+    var regSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req));
     if (regSession) return res.status(201).json(regSession);
     return; // issueUserSession 失败时已写 503
   } catch (e) {
@@ -11411,22 +11478,49 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
       res.clearCookie('xtj_user_refresh', { path: '/api/user' });
       return res.status(403).json({ error: '该账号已被封禁，无法继续使用', code: 'account_banned' });
     }
-    // 检查是否已撤销
-    if (await isRefreshTokenRevoked(refreshToken)) {
+    // 检查是否已撤销：必须区分「确证撤销」与「查询不可用」
+    var revokeVerdict = await checkRefreshTokenRevoked(refreshToken);
+    if (revokeVerdict.revoked) {
+      // 只有确证撤销（已轮换 / 已登出）才清 cookie；
+      // 查询失败（uncertain）绝不清 —— 否则一次基础设施抖动就把用户永久踢下线。
       res.clearCookie('xtj_user_refresh', { path: '/api/user' });
-      return res.status(401).json({ error: 'refresh token 已撤销，请重新登录' });
+      return res.status(401).json({ error: 'refresh token 已撤销，请重新登录', code: 'refresh_revoked' });
     }
-    // ★ P2 修复：重用检测——同一 refresh token 在轮换完成前再次被使用
-    //（并发请求或已泄露 token 重放），拒绝并强制重新登录。
+    if (revokeVerdict.uncertain) {
+      console.warn('[auth] refresh 撤销状态不可判定，按有效续期（避免误踢）:', payload.user_name);
+    }
+    // ★ 设备识别（2026-09-22）：换了设备不踢用户，只记录并重新绑定。
+    //   硬绑定会在"用户清了本地存储 / 换了浏览器"时把人锁在外面 —— 那正是
+    //   用户最反感的体验，故此处只做软绑定。
+    var presentedDeviceId = _getDeviceIdFromRequest(req);
+    var presentedDid = deviceFingerprint(presentedDeviceId);
+    if (presentedDid && payload.did && presentedDid !== payload.did) {
+      console.warn('[auth] refresh 设备标识变更，重新绑定:', payload.user_name);
+    }
+    // ★ P2 修复 + 2026-09-22 改进：重用检测
+    //   同一 refresh token 在轮换完成前再次被使用（多标签页并发 / 网络重试 /
+    //   已泄露 token 重放）。旧实现立刻 401 并清 cookie —— 多标签页几乎必然
+    //   撞上，用户被踢下线。现在先短暂等待轮换完成（最多 3 × 250ms），
+    //   仍冲突才拒绝，且**不清 cookie**（旧 token 若仍有效，客户端可稍后重试）。
     if (refreshTokenInUse.has(payload.jti)) {
-      res.clearCookie('xtj_user_refresh', { path: '/api/user' });
-      return res.status(401).json({ error: 'refresh token 已使用，请重新登录', code: 'token_reused' });
+      var reuseWaited = 0;
+      while (refreshTokenInUse.has(payload.jti) && reuseWaited < 750) {
+        await new Promise(function (r) { setTimeout(r, 250); });
+        reuseWaited += 250;
+      }
+      if (refreshTokenInUse.has(payload.jti)) {
+        return res.status(409).json({
+          error: '会话正在更新中，请稍后重试',
+          code: 'token_reused',
+          retryable: true
+        });
+      }
     }
     refreshTokenInUse.add(payload.jti);
     try {
-      // 签发新的 access token + rotating refresh token
+      // 签发新的 access token + rotating refresh token（刷新即续期，滑动 30 天）
       var newAccessToken = signUserAccessToken(payload.user_name);
-      var newRefreshToken = signUserRefreshToken(payload.user_name);
+      var newRefreshToken = signUserRefreshToken(payload.user_name, presentedDeviceId);
       // ★ M23：新 refresh token 持久化失败必须显式 503（旧 token 尚未撤销，
       //   用户可用旧 token 重试），不再静默 warn 后继续签发导致 15 分钟后 401。
       var newTokenStored = await storeRefreshToken(payload.user_name, newRefreshToken);
@@ -11447,12 +11541,22 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
       res.cookie('xtj_user_refresh', newRefreshToken, {
         httpOnly: true,
         secure: true,
-        sameSite: 'Strict',
+        // ★ Lax 而非 Strict：Strict 在"从外链/主屏图标进入站点"等场景下会
+        //   漏发 cookie，导致首屏就判定未登录。Lax 依然不放行跨站 POST，
+        //   CSRF 防护不受影响。
+        sameSite: 'Lax',
         maxAge: USER_REFRESH_TOKEN_EXPIRY_MS,
         path: '/api/user'
       });
 
-      return res.json({ ok: true, token: newAccessToken, user_name: payload.user_name, token_type: 'access' });
+      return res.json({
+        ok: true,
+        token: newAccessToken,
+        user_name: payload.user_name,
+        token_type: 'access',
+        // 让前端能展示"本机已记住 30 天"
+        expires_in_ms: USER_REFRESH_TOKEN_EXPIRY_MS
+      });
     } finally {
       // 轮换完成（无论成败）释放内存锁；成功后旧 token 已从 DB 撤销，
       // 重放会被 isRefreshTokenRevoked 拦截。

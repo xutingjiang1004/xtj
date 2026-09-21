@@ -404,7 +404,7 @@
                     if (name !== ADMIN_NAME) {
                         var tokenRes = await fetchWithTimeout(API_BASE + '/api/user/login', {
                             method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
-                            body: JSON.stringify({ user_name: name, password: pw })
+                            body: JSON.stringify({ user_name: name, password: pw, device_id: (typeof getXtjDeviceId === 'function' ? getXtjDeviceId() : '') })
                         });
                         var tokenData = await tokenRes.json().catch(function(){ return {}; });
                         if (!tokenRes.ok || !tokenData.token) {
@@ -508,7 +508,7 @@
                 try {
                     var registerRes = await fetchWithTimeout(API_BASE + '/api/user/register', {
                         method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({ user_name: name, password: pw, email: email || undefined })
+                        body: JSON.stringify({ user_name: name, password: pw, email: email || undefined, device_id: (typeof getXtjDeviceId === 'function' ? getXtjDeviceId() : '') })
                     }, 10000);
                     var registerData = await registerRes.json().catch(function(){ return {}; });
                     if (!registerRes.ok || !registerData.token) {

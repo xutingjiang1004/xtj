@@ -606,8 +606,10 @@
   color: rgba(110, 130, 132, 0.76);
   font-size: 12px;
   line-height: 1;
+  /* ★ 2026-09-22：去掉 0.34,1.56,0.64,1 的过冲（1.56 > 1 会回弹抖动），
+     换成与面板同步的平滑减速曲线，箭头旋转与内容揭示同一个节奏。 */
   transition:
-    transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
     color 200ms ease;
 }
 
@@ -623,26 +625,38 @@
   max-width: min(82vw, 680px);
   box-sizing: border-box;
   overflow: hidden;
-  /* ★ 2026-09-17：折叠稍快于展开（180ms vs 240ms）。
-     展开是"用户主动点击、期待看到内容"，慢一点更从容；
-     折叠是"正文即将接位、把舞台让出去"，快一点才不会挡住回复的开头。 */
+  /* ★★ 2026-09-22（二次改）：思考面板改为「自上而下的流动揭示」。
+     旧实现的两处硬伤（正是"生硬很丑"的来源）：
+       ① 收起时 .ai-thinking-body 被 !important 瞬间置成 font-size:0 /
+          max-height:0 —— 文字在第 1 帧就蒸发，只剩一个空盒子在缩，
+          观感是"内容啪地没了 + 盒子生硬收拢"；
+       ② 展开 240ms / 收起 180ms 不对称，且 opacity 只有 150ms ——
+          高度还在动、文字已经先没了，两个动作互相打架。
+     现在：高度（grid 0fr→1fr）、裁切（clip-path 自上而下抹开）、位移
+     三者**共用同一条 280ms 平滑减速曲线**，正文靠 overflow:hidden 被
+     "窗帘式"渐次裁掉，不再瞬间蒸发；展开与收起完全对称。 */
+  clip-path: inset(0 0 100% 0);
   transition:
-    grid-template-rows 180ms var(--ai-ease-standard),
-    opacity 150ms ease,
-    transform 180ms var(--ai-ease-standard),
-    visibility 0s linear 180ms;
+    grid-template-rows 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 220ms ease,
+    transform 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    clip-path 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    visibility 0s linear 280ms;
 }
 
 .ai-thinking:not(.expanded) .ai-thinking-body {
-  visibility: hidden !important;
-  opacity: 0 !important;
-  max-height: 0 !important;
+  /* 收起：不再用 font-size:0 / max-height:0 让文字瞬间蒸发。
+     高度由 grid 0fr 平滑收回，正文经 overflow:hidden 被渐次裁掉并淡出；
+     visibility 延迟到动画结束才切换，避免收起途中"啪"地消失。
+     保留 padding/margin 归零与 overflow 裁切，杜绝「思考中」下方的残影。 */
   overflow: hidden !important;
   padding: 0 !important;
   margin: 0 !important;
-  font-size: 0 !important;
-  line-height: 0 !important;
-  color: transparent !important;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 200ms ease,
+    visibility 0s linear 280ms;
 }
 
 /* P0-5 修复: JS 把 ai-motion-window 加到 .ai-think-thinking (details) 上，
@@ -670,20 +684,22 @@
   pointer-events: auto;
   transform: translateY(0);
   overflow: visible;
+  /* 揭示完成态：裁切归零，完整呈现（与收起态同一条曲线、同一时长） */
+  clip-path: inset(0 0 0 0);
   transition:
-    grid-template-rows var(--ai-motion-panel) var(--ai-ease-standard),
-    opacity var(--ai-motion-base) ease,
-    transform var(--ai-motion-panel) var(--ai-ease-standard),
+    grid-template-rows 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 220ms ease,
+    transform 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    clip-path 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
     visibility 0s linear 0s;
 }
 
 .ai-thinking.expanded .ai-thinking-body {
   visibility: visible !important;
   opacity: 1 !important;
-  max-height: none !important;
-  font-size: inherit !important;
-  line-height: 1.55 !important;
-  color: inherit !important;
+  transition:
+    opacity 240ms ease,
+    visibility 0s linear 0s;
 }
 
 /* grid-template-rows 动画的内部容器：min-height:0 允许收缩 */
@@ -1417,6 +1433,29 @@
   );
   pointer-events: none;
   z-index: 0;
+}
+/* ★★ 2026-09-22：打开瞬间一道流光自右上扫到左下 —— 呼应 iOS 26/27 Siri 的
+   「边缘流光」，让"面板是被一股流推开"这件事被真正看见（此前只有几何位移，
+   缺少光感，所以改了也像没改）。一次性、不循环、不挡点击。 */
+.ai-plus-panel-shell.open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(
+    105deg,
+    rgba(120, 220, 180, 0) 34%,
+    rgba(120, 220, 180, 0.34) 50%,
+    rgba(120, 220, 180, 0) 66%
+  );
+  background-size: 240% 100%;
+  animation: aiPlusPanelSweep 560ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes aiPlusPanelSweep {
+  from { background-position: 190% 0; opacity: 0.95; }
+  to   { background-position: -90% 0; opacity: 0; }
 }
 .ai-plus-panel-shell.open {
   opacity: 1;
@@ -2688,12 +2727,16 @@
 @media (prefers-reduced-motion: reduce) {
   .ai-plus-panel-shell,
   .ai-plus-panel-shell.open,
+  .ai-plus-panel-shell.open::after,
   .ai-plus-panel-shell.is-closing,
   .ai-plus-btn,
   .ai-plus-btn-icon,
   .ai-plus-btn svg,
   .ai-search-switch,
-  .ai-search-switch > i {
+  .ai-search-switch > i,
+  .ai-select-pop,
+  .ai-select-pop.is-closing,
+  .ai-select-pop-item {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
@@ -7092,23 +7135,45 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   box-shadow: 0 18px 48px rgba(30, 80, 63, 0.18);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
-  /* ★ 2026-09-22：模型/思考选项弹层此前**完全没有进出场动画**——
-     点击瞬间凭空出现、选中瞬间凭空消失，是"生硬"的直接来源。
-     现在从锚点方向轻微放大淡入，关闭时快速收拢淡出。 */
+  /* ★★ 2026-09-22（二次改）：模型/思考弹层改为「自上而下的流动揭示」。
+     上一版用 scale(0.94) 缩放淡入 —— 缩放会连带拉伸弹层里的文字（糊字），
+     且"整块弹出"的观感偏硬，正是用户说的"生硬很丑"。
+     现在改用 clip-path: inset(0 0 100% 0)：弹层像被一层流从锚点那一行
+     **自上而下抹开**，内容本身零形变；关闭是同一动作的逆过程，
+     收回到锚点行里，而不是"缩小消失"。
+     关键帧只做单向播放，但进出两条用同一条曲线、同一时长，
+     视觉上仍是对称的"展开 / 收回"。 */
   transform-origin: var(--pop-ox, 50%) 0;
-  animation: aiSelectPopIn 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: aiSelectPopIn 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 @keyframes aiSelectPopIn {
-  from { opacity: 0; transform: scale(0.94) translateY(-6px); }
-  to   { opacity: 1; transform: scale(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+    clip-path: inset(0 0 100% 0 round 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    clip-path: inset(0 0 0 0 round 14px);
+  }
 }
 .ai-select-pop.is-closing {
   pointer-events: none;
-  animation: aiSelectPopOut 140ms cubic-bezier(0.4, 0, 1, 1) both;
+  /* 关闭 = 打开的逆过程：同一曲线、同一时长，收回到锚点那一行 */
+  animation: aiSelectPopOut 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 @keyframes aiSelectPopOut {
-  from { opacity: 1; transform: scale(1) translateY(0); }
-  to   { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    clip-path: inset(0 0 0 0 round 14px);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+    clip-path: inset(0 0 100% 0 round 14px);
+  }
 }
 .ai-select-pop-list {
   display: flex;
@@ -7117,13 +7182,13 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 }
 /* 选项错峰落下（最多 5 项，超出统一用最后一段延迟） */
 .ai-select-pop-item {
-  animation: aiSelectItemIn 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: aiSelectItemIn 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
-.ai-select-pop-item:nth-child(1) { animation-delay: 0ms; }
-.ai-select-pop-item:nth-child(2) { animation-delay: 30ms; }
-.ai-select-pop-item:nth-child(3) { animation-delay: 60ms; }
-.ai-select-pop-item:nth-child(4) { animation-delay: 90ms; }
-.ai-select-pop-item:nth-child(n+5) { animation-delay: 120ms; }
+.ai-select-pop-item:nth-child(1) { animation-delay: 40ms; }
+.ai-select-pop-item:nth-child(2) { animation-delay: 75ms; }
+.ai-select-pop-item:nth-child(3) { animation-delay: 110ms; }
+.ai-select-pop-item:nth-child(4) { animation-delay: 145ms; }
+.ai-select-pop-item:nth-child(n+5) { animation-delay: 180ms; }
 @keyframes aiSelectItemIn {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }

@@ -10886,11 +10886,11 @@ function showChatMessages() {
         return;
       }
       try { node.classList.add('is-closing'); } catch (eCls) {}
-      // 与 CSS aiSelectPopOut（140ms）对齐，多留 10ms 余量再摘除节点。
+      // 与 CSS aiSelectPopOut（260ms）对齐，多留 20ms 余量再摘除节点。
       _selectPopCloseTimer = setTimeout(function() {
         _selectPopCloseTimer = null;
         if (node && node.parentNode) node.parentNode.removeChild(node);
-      }, 150);
+      }, 280);
     }
     function openSelectPopup(kind, anchor) {
       closeSelectPopup(true);
