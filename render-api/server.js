@@ -2632,7 +2632,30 @@ async function executeToolCall(toolCall, context) {
     }
     case 'generate_pdf': {
       var gpBlocks = Array.isArray(args.blocks) ? args.blocks.slice(0, 200) : [];
-      if (!gpBlocks.length) return { tool_name: name, error: 'blocks 内容为空' };
+      // ★ 2026-09-22 修复（generate_pdf 频繁报 "blocks 内容为空"）：
+      //   第三方模型对 function calling 参数结构理解不准，常把内容塞到
+      //   content/text/markdown/html 字段而非 blocks 数组，旧逻辑直接硬拒。
+      //   新策略：blocks 为空时自动从常见替代字段提取并归一化为 blocks。
+      if (!gpBlocks.length) {
+        var gpAltRaw = args.content || args.text || args.markdown || args.html || args.body || '';
+        if (typeof gpAltRaw === 'string' && gpAltRaw.trim()) {
+          var gpAltLines = gpAltRaw.split(/\n{2,}/);
+          for (var gpAi = 0; gpAi < gpAltLines.length && gpBlocks.length < 200; gpAi++) {
+            var gpLine = gpAltLines[gpAi].trim();
+            if (!gpLine) continue;
+            if (/^#{1,3}\s+/.test(gpLine)) {
+              var gpLevel = gpLine.match(/^(#+)/)[1].length;
+              gpBlocks.push({ type: 'h' + Math.min(gpLevel, 3), text: gpLine.replace(/^#+\s+/, '') });
+            } else if (/^[-*•]\s+/m.test(gpLine)) {
+              var gpItems = gpLine.split('\n').map(function(l) { return l.replace(/^[-*•]\s+/, '').trim(); }).filter(Boolean);
+              if (gpItems.length) gpBlocks.push({ type: 'ul', items: gpItems });
+            } else {
+              gpBlocks.push({ type: 'p', text: gpLine });
+            }
+          }
+        }
+      }
+      if (!gpBlocks.length) return { tool_name: name, error: 'blocks 内容为空：请传入 blocks 数组，每项形如 {"type":"p","text":"段落文字"}；也可传 content/text 字段由系统自动分段' };
       var gpName = String(args.filename || '文档').replace(/[\\/:*?"<>|]/g, '').slice(0, 60) || '文档';
       var gpTitle = toolHelpers.clampText(args.title || '', 200);
       // ★ 2026-09-13 修复（"生成 PDF 卡壳"）：
