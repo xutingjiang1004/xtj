@@ -10852,12 +10852,18 @@ function showChatMessages() {
       plusBtn.classList.add('active');
       plusWrap.classList.add('is-open');
       plusBtn.setAttribute('aria-expanded', 'true');
-      // 强制 reflow，保证 hero scale 过渡从关闭态起算
-      void panelShell.offsetWidth;
-      requestAnimationFrame(function() {
-        if (!panelOpen) return;
-        panelShell.classList.add('open');
-      });
+      // ★ 修复「+ 面板卡死在左下角极小的页面 / 打不开也关不上」：
+      //   旧实现把 .open 放进 requestAnimationFrame 里补加。rAF 一旦被浏览器
+      //   节流/延迟（切窗口、GPU 忙、原生 select 弹层阻塞渲染循环），
+      //   .open 迟迟不加 → 面板停在 is-opening（opacity:0 不可见），
+      //   用户再点 + 又被 panelOpen=true 守卫挡住，表现为点了没反应；
+      //   而被中断的 transform transition 在部分环境下会把元素留在
+      //   scale(0.14) 的中间帧（可见但极小，正是用户截图的形态）。
+      //   现在：reflow 后同步加 .open（过渡起点仍由 reflow 保证），
+      //   视觉补间改用 keyframes 动画（时间驱动、必然到达终态，
+      //   从机制上杜绝卡在中间态）。
+      void panelShell.offsetWidth; // 强制 reflow，保证动画从关闭态起算
+      panelShell.classList.add('open');
       if (closeTimer) clearTimeout(closeTimer);
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
@@ -11496,6 +11502,14 @@ function showChatMessages() {
       if (closeTimer) clearTimeout(closeTimer);
       panelOpen = false;
       panelClosing = false;
+      // ★ 兜底：清理时连同视觉态一起复位，防止任何路径残留
+      //   open/is-opening/is-closing 类导致面板以错误形态出现
+      try {
+        panelShell.classList.remove('is-opening', 'is-closing', 'open');
+        plusBtn.classList.remove('active');
+        plusWrap.classList.remove('is-open');
+        plusBtn.setAttribute('aria-expanded', 'false');
+      } catch (ePanelCls) {}
     };
 
     updateModelUI();

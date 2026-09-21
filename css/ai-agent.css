@@ -1388,10 +1388,14 @@
   visibility: visible;
   pointer-events: auto;
   transform: scale(1) translateY(0);
-  transition:
-    opacity 180ms ease,
-    transform 340ms cubic-bezier(0.32, 0.72, 0, 1),
-    visibility 0s linear 0s;
+  /* ★ 改用 keyframes 而非 transition：动画是时间驱动、必然到达终态（both 填充），
+     即使浏览器中断/冻结补间，声明值也锁定在 scale(1) 可见态，
+     从机制上杜绝「transition 被打断 → 面板卡在 scale(0.14) 中间帧」的缺陷 */
+  animation: aiPlusPanelOpen 340ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes aiPlusPanelOpen {
+  from { opacity: 0; transform: scale(0.14) translateY(10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 /* 仅关闭过程禁点；打开动画期间必须可点（否则模型/思考点不动） */
 .ai-plus-panel-shell.is-opening {
@@ -1400,6 +1404,12 @@
 .ai-plus-panel-shell.is-closing {
   will-change: transform, opacity;
   pointer-events: none;
+  /* 关闭同样用 keyframes：终态与基础态（隐藏）一致，保证必然走完 */
+  animation: aiPlusPanelClose 320ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes aiPlusPanelClose {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to   { opacity: 0; transform: scale(0.14) translateY(10px); }
 }
 .ai-plus-panel-shell > .ai-plus-panel-content {
   position: relative;
@@ -2613,12 +2623,14 @@
 @media (prefers-reduced-motion: reduce) {
   .ai-plus-panel-shell,
   .ai-plus-panel-shell.open,
+  .ai-plus-panel-shell.is-closing,
   .ai-plus-btn,
   .ai-plus-btn-icon,
   .ai-plus-btn svg,
   .ai-search-switch,
   .ai-search-switch > i {
     transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
   }
 }
 
