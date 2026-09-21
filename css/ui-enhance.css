@@ -973,6 +973,27 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 }
 .ai-tool-step.ai-tool-organizing .ai-tool-step-title { font-size: 12.5px; font-weight: 600; }
 .ai-tool-step.ai-tool-organizing .ai-tool-step-status { margin-top: 0; font-size: 11px; }
+/* ★★★ 2026-09-22：终态覆盖 —— 这条规则是"圈能停下来"的唯一开关。
+   上面那条 ::before 的 xtjToolSpin 是**无条件 infinite** 动画，
+   只把 is-running 去掉完全不会停转。必须由 .is-done / .is-error 把
+   ::before 换成静态符号（并把标题降权），否则用户看到的就是
+   "工具早就完成了、回复都出完了，这里还在一直转圈"。 */
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon::before,
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon::before {
+  content: none;
+  animation: none;
+}
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon,
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon {
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+  color: #2f9e6e;
+}
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon { color: #c0505e; }
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-title { color: #4a6b60; font-weight: 550; }
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-status { color: #7f958d; }
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-title { color: #a83f4d; }
 
 /* 深色主题下工具进展的配色（此前工具 UI 全是浅色硬编码） */
 [data-theme="dark"] .ai-tool-round-head { color: #a8c8bd; }

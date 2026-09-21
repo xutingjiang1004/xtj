@@ -32,14 +32,23 @@ test('+ 面板：打开/关闭必须有独立的 keyframes 进出场动画', () 
   assert.match(closeKf[0], /opacity:\s*0/, '关闭终点必须透明');
 });
 
-test('+ 面板：关闭动画不得慢于打开动画（收起不该让用户等）', () => {
+test('+ 面板：Hero 展开必须保留 spring 曲线，且关闭与打开同速（原路返回）', () => {
   const openRule = agentCss.match(/\.ai-plus-panel-shell\.open\s*\{[^}]*\}/);
   const closeRule = agentCss.match(/\.ai-plus-panel-shell\.is-closing\s*\{[^}]*\}/);
   assert.ok(openRule && closeRule, 'open / is-closing 规则必须存在');
   const openMs = parseInt((openRule[0].match(/aiPlusPanelOpen\s+(\d+)ms/) || [])[1], 10);
   const closeMs = parseInt((closeRule[0].match(/aiPlusPanelClose\s+(\d+)ms/) || [])[1], 10);
   assert.ok(openMs > 0 && closeMs > 0, '两段动画都必须有显式时长');
+  // ★ 2026-09-22：用户要求"改回来那个打开跟关闭动画"——
+  //   Hero 是大位移的 spring 展开（340ms），关闭**同速原路返回**。
+  //   旧断言"关闭不得慢于打开"是为了一版 180ms 的急速收起写的，
+  //   与 Hero 手感冲突（同一条曲线、同一时长才是真正的原路返回），故放宽为不得更慢。
   assert.ok(closeMs <= openMs, `关闭(${closeMs}ms) 不应慢于打开(${openMs}ms)`);
+  // 弹簧曲线是大位移能"弹"起来的关键，不能被换成 ease / linear
+  assert.match(openRule[0], /cubic-bezier\(0\.32,\s*0\.72,\s*0,\s*1\)/,
+    '打开必须使用 Hero spring 曲线');
+  assert.match(closeRule[0], /cubic-bezier\(0\.32,\s*0\.72,\s*0,\s*1\)/,
+    '关闭必须与打开同曲线，保证原路返回');
 });
 
 test('+ 面板：内容块错峰淡入（不是整块糊上去）', () => {
@@ -137,4 +146,62 @@ test('工具进展：新增动画必须受 reduced-motion / 动效开关管控',
   assert.match(reducedBlock, /\.ai-tool-round-list \.ai-tool-step-icon::before/, '步骤旋转环同样要停');
   assert.match(enhanceCss, /html\[data-xtj-motion=off\] \.ai-tool-round-icon::before/,
     '站内动效开关同样必须覆盖');
+});
+
+/* ── 4) 「整理检索结果并作答」占位：必须在所有终态路径收敛 ──────────────
+   背景（用户报障，2026-09-22）：
+     「明明已经工具完成了，并且也回复给我了，但是他还是在这里转圈圈：
+       整理检索结果并作答，每条回复、每次要用工具的时候，他都这样子一直在
+       那里转圈圈，根本就停不下来」
+   根因：
+     · 该占位是 append 到 .ai-tool-timeline（轮次容器**之外**）的，
+       updateToolRoundState / forceSettleToolRound 只遍历 .ai-tool-round
+       内部的 .ai-tool-step → 永远命中不到它；
+     · 它的旋转动画挂在 .ai-tool-organizing .ai-tool-step-icon::before 上，
+       是**无条件 infinite**，只有加 .is-done 才会换成静态 ✓ ——
+       光 classList.remove('is-running') 完全停不下来；
+     · 唯一的正常收敛时机是 content 事件（正文首字到达），带思考的回复
+       正文来得晚，这段空窗就是一个永远在转的圈。
+   本测试把"必须抽成统一收敛函数并在所有终态路径调用"固化成契约。 */
+test('整理占位：必须存在统一的 settleOrganizingStep 收敛函数', () => {
+  assert.match(agentSrc, /function settleOrganizingStep\(node,\s*opts\)/,
+    '必须抽出统一的收敛函数，避免各路径各写一套（此前正是如此走偏的）');
+  const start = agentSrc.indexOf('function settleOrganizingStep(');
+  const body = agentSrc.slice(start, start + 1800);
+  // 关键：必须加 is-done / is-error（只有这两个类会覆盖 CSS 的无条件 infinite 旋转）
+  assert.match(body, /classList\.add\(ok \? 'is-done' : 'is-error'\)/,
+    '必须加 is-done（只去 is-running 停不下 CSS 旋转环）');
+  assert.match(body, /classList\.remove\('is-running'\)/, '同时清除进行中态');
+  assert.match(body, /ai-tool-step-status/, '状态文案要同步落定为终态');
+});
+
+test('整理占位：CSS 旋转环必须只在 is-running 时转（否则无法被收敛）', () => {
+  // 收敛的前提是"动画由状态类驱动"：.is-done / .is-error 必须能覆盖掉旋转
+  assert.match(enhanceCss, /\.ai-tool-step\.ai-tool-organizing\s+\.ai-tool-step-icon::before\s*\{[^}]*animation:\s*xtjToolSpin/,
+    'organizing 图标须有旋转环');
+  assert.match(enhanceCss, /\.ai-tool-step\.ai-tool-organizing\.is-done\s+\.ai-tool-step-icon::before/,
+    '必须存在 .is-done 覆盖规则把旋转环换成静态 ✓（否则永远停不下来）');
+});
+
+test('整理占位：所有终态路径都必须调用收敛（content / done / error / 中断）', () => {
+  // ① content：正文首字到达
+  assert.ok(agentSrc.includes("settleOrganizingStep(assistantNode)"),
+    'content 事件必须调用收敛');
+  // ② clearAssistantTransientStatus（done / 中断 / 超时统一入口）必须调用
+  const clearStart = agentSrc.indexOf('function clearAssistantTransientStatus(');
+  assert.ok(clearStart > 0, 'clearAssistantTransientStatus 必须存在');
+  const clearBody = agentSrc.slice(clearStart, clearStart + 6000);
+  assert.ok(clearBody.includes('settleOrganizingStep(target)'),
+    'clearAssistantTransientStatus 必须调用收敛（覆盖 done/中断/超时）');
+  // ③ 不经过 finishAiMessage 的分支（doneReceived / terminalErrorSeen）也要覆盖
+  assert.match(agentSrc, /settleOrganizingStep\(assistantNode\)/,
+    'doneReceived / terminalErrorSeen 分支必须显式收敛');
+});
+
+test('整理占位：占位必须挂在 timeline 且不在任何 .ai-tool-round 内（这是曾经的漏网原因）', () => {
+  // 固化"它落在轮次之外"这一事实 —— 若将来有人把它挪进轮次，本断言会提醒
+  // 重新评估 updateToolRoundState 的覆盖范围。
+  assert.match(agentSrc, /class:\s*'ai-tool-step ai-tool-organizing is-running'/,
+    'organizing 占位必须仍以该 class 组合创建');
+  assert.match(agentSrc, /_organizeBar\.appendChild/, '占位是 append 到 timeline 的');
 });
