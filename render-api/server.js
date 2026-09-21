@@ -8808,7 +8808,16 @@ async function callDeepSeekViaResponses(messages, options) {
       //   ② 非工作模式 + 思考：保持原策略（不挂 tools，由调用方预搜承担）；
       //   ③ 非工作模式 + 非思考：按搜索开关挂工具。
       //   若上游确实因该组合报 400，下方错误分支会识别并给出可执行提示。
-      var allowToolsWithThinking = workModeEnabled;
+      // ★ 修复（P0「工具调用被当成正文回复」根因之一）：
+      //   原代码 `var allowToolsWithThinking = workModeEnabled;` 引用了未定义的
+      //   workModeEnabled（它只是各请求处理器里的局部变量，不在本函数作用域），
+      //   导致每次进入工具轮循环即抛 ReferenceError —— **所有 use_responses_api
+      //   调用（内置搜索 / 工作模式 / 深度研究）自该代码落地起整体瘫痪**，
+      //   上层 catch 后回退/报错，用户看到「AI 调用失败」「上游有问题」。
+      //   同时按 /responses 端点实测：thinking(effort=none/low/high/max) 与 tools
+      //   可共存（400 仅出现在旧 /chat/completions 路径），调用方显式传入的
+      //   tools 一律下发；若上游仍拒绝，下方已有 effort:none 自动降级重试兜底。
+      var allowToolsWithThinking = true;
       if (tools && tools.length && (!useThinking || allowToolsWithThinking)) apiBody.tools = tools;
       if (workingInstructions) apiBody.instructions = workingInstructions;
       if (useStream) apiBody.stream_options = { include_usage: true };
@@ -21631,11 +21640,20 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     //        且第三方搜额度不可用（需内置搜索兜底）。
     //     其余情况（含用户选 Flash 但未开搜索）一律走标准 Chat Completions 路径，
     //     与 Pro 保持同一套经过验证的代码路径，消除模型间的行为分裂。
-    var useBuiltInSearch = _webSearchForceResponses && (
+    // ★ 修复（P0「工具调用被当成正文回复」根因之三）：
+    //   工作模式必须"有手有头脑"。原逻辑下工作模式 + 思考 + 搜索开关关时
+    //   useBuiltInSearch=false → 落到标准路径 → needsFcCheck 因思考被跳过 →
+    //   全程无工具，模型只能拿 DSML 文本假装调用。工作模式（非视觉直传）一律
+    //   走 Responses 路径（该路径实测 thinking+tools 可共存，且工作模式工具集
+    //   就是按 /responses 设计的），并把模型归一到 DEEPSEEK_RESPONSES_MODEL。
+    if (workModeEnabled && !_visionEngaged && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
+      validatedModel = DEEPSEEK_RESPONSES_MODEL;
+    }
+    var useBuiltInSearch = (workModeEnabled && !_visionEngaged) || (_webSearchForceResponses && (
         (webSearchPref === true)
         || (!thirdPartySearchOk && proactiveSearch)
         || (proactiveSearch && (explicitSearchIntent || liveInfoIntent) && webSearchPref !== false)
-      );
+      ));
     try {
       console.log('[AGENT-STREAM] route=%s model=%s web_search=%s proactive=%s thirdPartyOk=%s',
         useBuiltInSearch ? 'responses' : 'chat_completions',
@@ -21673,25 +21691,22 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         _preloadedSearchPromise = null;
       }
 
-      // 思考开时不挂 tools；非思考：内置 web_search +（有额度时）tavily 工具
-      // ★ 工作模式：挂载完整工具集（不受网页搜索开关约束，含 search_social 等全部工具），
-      //   并把工具轮数从 4 提升到 8，让 AI 能多步自主完成任务。
-      // ★ 关键修复（"打开工作模式跟没打开一样"）：
-      //   原逻辑 `useThinking ? [] : ...` 使得「开着思考 + 开工作模式」时工具集为空，
-      //   模型完全没有工具可调，无论怎么提示都做不了事 —— 这正是大量用户反馈的根因。
-      //   工作模式的语义就是「必须能干活」，因此工作模式下思考开不开都挂工具；
-      //   只有「非工作模式 + 思考」才保持空工具（该组合由服务端预搜代为承担）。
-      var responsesTools = (useThinking && !workModeEnabled)
-        ? []
-        : (workModeEnabled
-          ? aiToolsForWorkMode()
-          : aiToolsForSearch(!!useTavilyCluster && thirdPartySearchOk));
+      // ★ 修复（P0「工具调用被当成正文回复」根因之二）：
+      //   原逻辑 `(useThinking && !workModeEnabled) ? [] : ...` 使「思考开 + 非工作模式」时
+      //   tools 为空，但 system prompt（buildAiCorePrompt）无条件宣称"可用工具（…）"，
+      //   模型被承诺有工具却拿不到 → 只能在正文里输出 DSML 协议文本"假装调用"，
+      //   原文直接泄漏给用户（截图实证）。
+      //   /responses 端点实测 thinking 与 tools 可共存，因此思考模式同样挂工具，
+      //   保证「提示词宣称 ≡ 实际下发」。工作模式恒挂完整工具集。
+      var responsesTools = workModeEnabled
+        ? aiToolsForWorkMode()
+        : aiToolsForSearch(!!useTavilyCluster && thirdPartySearchOk);
       var responsesOptions = {
         use_responses_api: true,
         model: validatedModel,
         thinking_mode: thinkingMode,
         tools: responsesTools,
-        tool_choice: (useThinking && !workModeEnabled) ? undefined : 'auto',
+        tool_choice: 'auto',
         max_tool_rounds: workModeEnabled ? 8 : 4,
         signal: requestAbortCtrl ? requestAbortCtrl.signal : null,
         _userName: userName,
@@ -21994,6 +22009,19 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       return safeEnd();
     }
 
+    // ★ 修复（P0「工具调用被当成正文回复」根因之四）：提示词宣称 ≡ 实际能力。
+    //   标准路径在思考模式下不挂工具（/chat/completions 思考+tools 会 HTTP 400），
+    //   但 system prompt 仍无条件宣称"可用工具（…）"，模型被承诺有工具却拿不到，
+    //   只能在正文里输出 DSML 协议文本"假装调用"，原文直接泄漏给用户（截图实证）。
+    //   思考 + 非工作模式走到标准路径时，把工具宣称改写为"未挂载工具"的如实口径，
+    //   并显式禁止输出任何协议文本。
+    if (useThinking && !workModeEnabled && messages.length && messages[0] && typeof messages[0].content === 'string') {
+      messages[0].content = messages[0].content.replace(
+        /可用工具（[^）]*）。[\s\S]*?不要(?:说自己没有这个能力|声称自己没有该能力)。/,
+        '本次请求未挂载任何工具：不要尝试调用任何工具，也不要在回复里输出任何工具调用协议文本（如 DSML / tool_calls 标记）；需要搜索、计算或读取网页时，用你自身能力尽力回答，并如实说明当前无法联网。'
+      );
+    }
+
     // ===== Function Calling：让 AI 自主决定调用工具 =====
     // 思考关 + 允许搜索时：明显搜索/时效意图走 FC 预检（带 AI_TOOLS）
     // 注意：不再被 web_search 面板开关关掉（开关只控制 Tavily 双通道）
@@ -22011,7 +22039,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     );
     // ★ 工作模式：跳过关键词意图预判，无条件进入工具调用路径（AI 自主判断该不该用工具）。
     //   普通聊天靠上面关键词命中才挂工具，工作模式要"有手有头脑"，不能靠关键词赌。
-    if (workModeEnabled && !useThinking && !aborted) needsFcCheck = true;
+    //   ★ 2026-09-21：去掉 !useThinking 限制——工作模式 + 思考时也不允许"零工具裸跑"
+    //   （视觉直传等工作模式仍走标准路径的场景下，这是最后一道工具挂载防线）。
+    if (workModeEnabled && !aborted) needsFcCheck = true;
     var hasCalledTools = false;
     // Only persist server-generated cards. The model never supplies executable UI.
     var siteToolCards = [];

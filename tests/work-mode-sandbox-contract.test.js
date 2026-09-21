@@ -165,5 +165,7 @@ test('工作模式：工具轮数提升到 8 且保留硬上限', () => {
 });
 
 test('工作模式：绕过关键词意图预判', () => {
-  assert.match(serverSrc, /if \(workModeEnabled && !useThinking && !aborted\) needsFcCheck = true;/);
+  // ★ 2026-09-21：去掉 !useThinking 限制——工作模式 + 思考也不允许"零工具裸跑"，
+  //   否则模型只能在正文里输出 DSML 协议文本假装调用（截图实证的 P0）。
+  assert.match(serverSrc, /if \(workModeEnabled && !aborted\) needsFcCheck = true;/);
 });
