@@ -89,15 +89,23 @@ test('修复②：第三方自定义模型路径同样不得泄漏协议', () =>
 
 test('修复③：工作模式下思考开启时也必须挂载工具集', () => {
   // 旧缺陷：var responsesTools = useThinking ? [] : (...)
+  // ★ 2026-09-21 再升级：思考模式不再清空工具（/responses 实测 thinking+tools 可共存），
+  //   且「提示词宣称 ≡ 实际下发」——旧三元式 `(useThinking && !workModeEnabled) ? []`
+  //   会造成"prompt 宣称有工具但 tools 为空"→ 模型在正文里输出 DSML 假装调用。
   assert.doesNotMatch(
     serverSrc,
     /var responsesTools = useThinking \? \[\]/,
     '工作模式下不得因思考开启而清空工具集'
   );
-  assert.match(
+  assert.doesNotMatch(
     serverSrc,
     /var responsesTools = \(useThinking && !workModeEnabled\)/,
-    '工作模式应无视思考开关挂载工具集'
+    '思考模式不得清空工具集（会造成提示词宣称与实际下发错位）'
+  );
+  assert.match(
+    serverSrc,
+    /var responsesTools = workModeEnabled\s*\n?\s*\?\s*aiToolsForWorkMode\(\)/,
+    '工作模式恒挂完整工具集，非工作模式按搜索配额挂载'
   );
 });
 
