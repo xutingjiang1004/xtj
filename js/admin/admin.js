@@ -588,15 +588,15 @@
     };
 
     function saveSession() {
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ t: Date.now() }));
+        try { localStorage.setItem(SESSION_KEY, JSON.stringify({ t: Date.now() })); } catch(e) {}
     }
 
     function saveCurrentTab() {
-        localStorage.setItem(TAB_KEY, currentTab);
+        try { localStorage.setItem(TAB_KEY, currentTab); } catch(e) {}
     }
 
     function clearSession() {
-        localStorage.removeItem(SESSION_KEY);
+        try { localStorage.removeItem(SESSION_KEY); } catch(e) {}
         clearToken();
     }
 
@@ -704,7 +704,8 @@
         installAdminTabDoubleClickRefresh();
         
         // ★ 修复：与全局 allowedTabs 白名单对齐（含 online/profile/behavior），会话恢复时不再回落到默认 tab
-        var savedTab = localStorage.getItem(TAB_KEY);
+        var savedTab = null;
+        try { savedTab = localStorage.getItem(TAB_KEY); } catch(e) {}
         if (savedTab && allowedTabs.indexOf(savedTab) !== -1) {
             currentTab = savedTab;
             await loadAllData(true);
@@ -1775,12 +1776,13 @@
     window.toggleTheme = function() {
         var html = document.documentElement;
         var isDark = html.getAttribute('data-theme') === 'dark';
-        if (isDark) { html.removeAttribute('data-theme'); localStorage.setItem('xtj-admin-theme', 'light'); }
-        else { html.setAttribute('data-theme', 'dark'); localStorage.setItem('xtj-admin-theme', 'dark'); }
+        if (isDark) { html.removeAttribute('data-theme'); try { localStorage.setItem('xtj-admin-theme', 'light'); } catch(e) {} }
+        else { html.setAttribute('data-theme', 'dark'); try { localStorage.setItem('xtj-admin-theme', 'dark'); } catch(e) {} }
     };
 
     function applySavedAdminTheme() {
-        var saved = localStorage.getItem('xtj-admin-theme');
+        var saved = null;
+        try { saved = localStorage.getItem('xtj-admin-theme'); } catch(e) {}
         if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.setAttribute('data-theme', 'dark');
         }
@@ -3963,8 +3965,11 @@
             '<div class="card"><h4>📨 发送记录</h4><div id="emailHistoryWrap"><div class="empty" style="padding:12px;">正在加载...</div></div></div>';
 
         // 检查是否有草稿
-        var draftSubject = sessionStorage.getItem('xtj_email_draft_subject');
-        var draftContent = sessionStorage.getItem('xtj_email_draft_content');
+        var draftSubject = null, draftContent = null;
+        try {
+            draftSubject = sessionStorage.getItem('xtj_email_draft_subject');
+            draftContent = sessionStorage.getItem('xtj_email_draft_content');
+        } catch(e) {}
         if (draftSubject || draftContent) {
             var bar = document.getElementById('emailDraftBar');
             if (bar) bar.style.display = 'flex';
@@ -3993,8 +3998,11 @@
     };
 
     window.emailRestoreDraft = function() {
-        var sub = sessionStorage.getItem('xtj_email_draft_subject');
-        var con = sessionStorage.getItem('xtj_email_draft_content');
+        var sub = null, con = null;
+        try {
+            sub = sessionStorage.getItem('xtj_email_draft_subject');
+            con = sessionStorage.getItem('xtj_email_draft_content');
+        } catch(e) {}
         var subInp = document.getElementById('emailSubjectInp');
         var conInp = document.getElementById('emailContentInp');
         if (subInp && sub) subInp.value = sub;
@@ -4021,8 +4029,11 @@
     function emailUpdateDraftBarVisibility() {
         var bar = document.getElementById('emailDraftBar');
         if (!bar) return;
-        var sub = sessionStorage.getItem('xtj_email_draft_subject');
-        var con = sessionStorage.getItem('xtj_email_draft_content');
+        var sub = null, con = null;
+        try {
+            sub = sessionStorage.getItem('xtj_email_draft_subject');
+            con = sessionStorage.getItem('xtj_email_draft_content');
+        } catch(e) {}
         bar.style.display = (sub || con) ? 'flex' : 'none';
     }
 
