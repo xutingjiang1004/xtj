@@ -44,41 +44,43 @@ test('openPanel 不得用 requestAnimationFrame 延迟补加 .open', () => {
   );
 });
 
-test('.open 与 .is-closing 必须用 keyframes 动画且 both 填充', () => {
+test('.open 与 .is-closing 必须用 clip-path 揭示过渡（流动感的核心）', () => {
   const openRule = cssSrc.match(/\.ai-plus-panel-shell\.open\s*\{[^}]*\}/);
   const closingRule = cssSrc.match(/\.ai-plus-panel-shell\.is-closing\s*\{[^}]*\}/);
   assert.ok(openRule, '.ai-plus-panel-shell.open 规则必须存在');
   assert.ok(closingRule, '.ai-plus-panel-shell.is-closing 规则必须存在');
-  assert.match(openRule[0], /animation:\s*aiPlusPanelOpen/);
-  assert.match(closingRule[0], /animation:\s*aiPlusPanelClose/);
-  assert.match(openRule[0], /\bboth\b/, '打开动画需 both 填充锁定终态');
-  assert.match(closingRule[0], /\bboth\b/, '关闭动画需 both 填充锁定终态');
+  // 打开：揭示到完整
+  assert.match(openRule[0], /clip-path:\s*inset\(0/, '打开终态必须是 inset(0) 完整揭示');
+  assert.match(openRule[0], /transition:/, '必须用 transition 才能双向对称流动');
+  assert.match(openRule[0], /clip-path\s+320ms/);
+  // 关闭：收回左下角那一小条
+  assert.match(closingRule[0], /clip-path:\s*inset\(100% 82% 0 0/,
+    '关闭终态必须收回到 + 按钮所在的左下角（inset(100% 82% 0 0)）');
+  assert.match(closingRule[0], /opacity:\s*0/, '关闭终态必须透明');
+  assert.match(closingRule[0], /visibility:\s*hidden/, '关闭终态必须不可见');
 });
 
-test('开关关键帧终态与基础态一致（可见态 scale(1) / 隐藏态 scale(0.14)）', () => {
-  const openKf = cssSrc.match(/@keyframes\s+aiPlusPanelOpen\s*\{[\s\S]*?\n\}/);
-  const closeKf = cssSrc.match(/@keyframes\s+aiPlusPanelClose\s*\{[\s\S]*?\n\}/);
-  assert.ok(openKf, 'aiPlusPanelOpen 关键帧必须存在');
-  assert.ok(closeKf, 'aiPlusPanelClose 关键帧必须存在');
-  assert.match(openKf[0], /scale\(1\)/, '打开终态必须是 scale(1)');
-  // ★ 2026-09-22：Hero 展开恢复原样 —— 起点 scale(0.14)、340ms spring 曲线
-  //   （用户明确要求"改回来那个打开跟关闭动画"）。
-  //   契约本身不变：**关闭终态必须与基础隐藏态完全一致**。
-  assert.match(closeKf[0], /scale\(0\.14\)/, '关闭终态必须回到基础隐藏态 scale(0.14)');
-  // 基础态仍为隐藏（opacity:0 + visibility:hidden + scale(0.14)）
+test('开合在同一条流动曲线上双向对称（打开/关闭都流畅）', () => {
   const base = cssSrc.match(/\.ai-plus-panel-shell\s*\{[^}]*\}/);
-  assert.ok(base, '基础规则必须存在');
-  assert.match(base[0], /opacity:\s*0/);
-  assert.match(base[0], /visibility:\s*hidden/);
-  assert.match(base[0], /transform:\s*scale\(0\.14\)/);
-  // 打开关键帧的起点同样必须是基础态，杜绝"打开时先闪一下再缩放"
-  assert.match(openKf[0], /scale\(0\.14\)/, '打开起点必须与基础隐藏态一致');
-  // Hero 展开的弹簧曲线：必须保留 cubic-bezier(0.32, 0.72, 0, 1)，
-  // 它决定了"从 + 按钮原点点弹式生长"的手感，换成线性/ease 会立刻变生硬。
-  assert.match(cssSrc, /aiPlusPanelOpen\s+340ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0,\s*1\)/,
-    '打开动画必须使用 Hero spring 曲线 340ms cubic-bezier(0.32, 0.72, 0, 1)');
-  assert.match(cssSrc, /aiPlusPanelClose\s+320ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0,\s*1\)/,
-    '关闭动画必须与打开同曲线，保证"原路返回"');
+  const openRule = cssSrc.match(/\.ai-plus-panel-shell\.open\s*\{[^}]*\}/);
+  const closingRule = cssSrc.match(/\.ai-plus-panel-shell\.is-closing\s*\{[^}]*\}/);
+  assert.ok(base && openRule && closingRule, '三条规则都必须存在');
+
+  const FLOW = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
+  // 打开态与关闭态必须共用同一条曲线、同一时长 —— 这才是"双向流动"，
+  // 换成 keyframes 就只能单向播放，关闭会变成另一个动作。
+  for (const [name, rule] of [['打开', openRule[0]], ['关闭', closingRule[0]], ['基础', base[0]]]) {
+    assert.match(rule, /cubic-bezier\(0\.22,\s*0\.61,\s*0\.36,\s*1\)/,
+      `${name}态必须使用流动曲线 ${FLOW}`);
+  }
+  // 基础隐藏态 == 关闭终态，杜绝"越开越小/越关越偏"的漂移
+  assert.match(base[0], /clip-path:\s*inset\(100% 82% 0 0/,
+    '基础隐藏态必须与关闭终态一致');
+  assert.match(base[0], /transform-origin:\s*bottom left/,
+    ' reveal 原点必须在 + 按钮所在的左下角');
+  // 位移量要小（8px），配合 clip-path 才有"推开铺满"的感觉
+  assert.match(base[0], /transform:\s*translateY\(8px\)/,
+    '基础态位移必须是 translateY(8px)，不得用大比例 scale（会拉伸糊字）');
 });
 
 test('reduced-motion 下动画同步降级', () => {

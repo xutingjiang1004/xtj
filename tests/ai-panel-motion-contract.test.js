@@ -19,36 +19,53 @@ const agentSrc = fs.readFileSync(path.join(root, 'js', 'ai-agent.js'), 'utf8');
 const agentCss = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8');
 const enhanceCss = fs.readFileSync(path.join(root, 'css', 'ui-enhance.css'), 'utf8');
 
-// ── 1) + 面板：进出场必须有 keyframes 动画 ────────────────────────────
-test('+ 面板：打开/关闭必须有独立的 keyframes 进出场动画', () => {
-  const openKf = agentCss.match(/@keyframes\s+aiPlusPanelOpen\s*\{[\s\S]*?\n\}/);
-  const closeKf = agentCss.match(/@keyframes\s+aiPlusPanelClose\s*\{[\s\S]*?\n\}/);
-  assert.ok(openKf, 'aiPlusPanelOpen 必须存在');
-  assert.ok(closeKf, 'aiPlusPanelClose 必须存在');
-  // 打开：起点与隐藏态一致，终点完全展开
-  assert.match(openKf[0], /opacity:\s*0/, '打开起点必须透明');
-  assert.match(openKf[0], /scale\(1\)/, '打开终点必须完全展开');
-  // 关闭：必须收回到隐藏态（而非瞬间消失）
-  assert.match(closeKf[0], /opacity:\s*0/, '关闭终点必须透明');
-});
-
-test('+ 面板：Hero 展开必须保留 spring 曲线，且关闭与打开同速（原路返回）', () => {
+// ── 1) + 面板：进出场必须是 clip-path 流动揭示（不是缩放弹跳） ──────────
+test('+ 面板：必须有 clip-path 揭示进出场（流动感来源）', () => {
+  const base = agentCss.match(/\.ai-plus-panel-shell\s*\{[^}]*\}/);
   const openRule = agentCss.match(/\.ai-plus-panel-shell\.open\s*\{[^}]*\}/);
   const closeRule = agentCss.match(/\.ai-plus-panel-shell\.is-closing\s*\{[^}]*\}/);
-  assert.ok(openRule && closeRule, 'open / is-closing 规则必须存在');
-  const openMs = parseInt((openRule[0].match(/aiPlusPanelOpen\s+(\d+)ms/) || [])[1], 10);
-  const closeMs = parseInt((closeRule[0].match(/aiPlusPanelClose\s+(\d+)ms/) || [])[1], 10);
-  assert.ok(openMs > 0 && closeMs > 0, '两段动画都必须有显式时长');
-  // ★ 2026-09-22：用户要求"改回来那个打开跟关闭动画"——
-  //   Hero 是大位移的 spring 展开（340ms），关闭**同速原路返回**。
-  //   旧断言"关闭不得慢于打开"是为了一版 180ms 的急速收起写的，
-  //   与 Hero 手感冲突（同一条曲线、同一时长才是真正的原路返回），故放宽为不得更慢。
-  assert.ok(closeMs <= openMs, `关闭(${closeMs}ms) 不应慢于打开(${openMs}ms)`);
-  // 弹簧曲线是大位移能"弹"起来的关键，不能被换成 ease / linear
-  assert.match(openRule[0], /cubic-bezier\(0\.32,\s*0\.72,\s*0,\s*1\)/,
-    '打开必须使用 Hero spring 曲线');
-  assert.match(closeRule[0], /cubic-bezier\(0\.32,\s*0\.72,\s*0,\s*1\)/,
-    '关闭必须与打开同曲线，保证原路返回');
+  assert.ok(base && openRule && closeRule, '基础 / open / is-closing 三条规则都必须存在');
+
+  // 关闭态（起点）= 左下角一小条；打开态（终点）= 完整揭示
+  assert.match(base[0], /clip-path:\s*inset\(100% 82% 0 0/,
+    '隐藏态必须裁到 + 按钮所在的左下角');
+  assert.match(openRule[0], /clip-path:\s*inset\(0/,
+    '打开终态必须完整揭示 inset(0)');
+  assert.match(closeRule[0], /clip-path:\s*inset\(100% 82% 0 0/,
+    '关闭终态必须收回左下角，与隐藏态一致');
+
+  // 用 clip-path 而不是 scale：scale 会拉伸文字（糊字/形变），
+  // clip-path 只做揭示、内容不变形 —— 这是"流动"与"弹跳"的分界。
+  // 注意：只匹配**声明行**（transform: 开头的行），注释里提到 scale() 不算。
+  const decls = [base[0], openRule[0], closeRule[0]]
+    .join('\n')
+    .split('\n')
+    .filter((l) => /^\s*(transform|animation)\s*:/.test(l))
+    .join('\n');
+  assert.doesNotMatch(decls, /scale\(0\.\d+\)/,
+    '不得用大比例 scale 做开合（会拉伸糊字）');
+});
+
+test('+ 面板：打开与关闭共用同一条流动曲线（双向对称流动）', () => {
+  const base = agentCss.match(/\.ai-plus-panel-shell\s*\{[^}]*\}/);
+  const openRule = agentCss.match(/\.ai-plus-panel-shell\.open\s*\{[^}]*\}/);
+  assert.ok(base && openRule, '基础 / open 规则必须存在');
+  const openMs = parseInt((openRule[0].match(/clip-path\s+(\d+)ms/) || [])[1], 10);
+  const closeMs = parseInt((base[0].match(/clip-path\s+(\d+)ms/) || [])[1], 10);
+  assert.ok(openMs > 0 && closeMs > 0, '打开与关闭都必须有 clip-path 显式时长');
+  // 关闭态复用基础态的 transition 声明，故以基础态时长为准；
+  // 两者必须同速，才是真正的双向流动。
+  assert.ok(openMs === closeMs,
+    `打开(${openMs}ms) 与关闭(${closeMs}ms) 必须同速，才是双向流动`);
+  // 曲线：平滑减速，无过冲无回弹
+  const FLOW = /cubic-bezier\(0\.22,\s*0\.61,\s*0\.36,\s*1\)/;
+  assert.match(openRule[0], FLOW, '打开必须使用流动曲线 cubic-bezier(0.22, 0.61, 0.36, 1)');
+  assert.match(base[0], FLOW, '关闭必须复用同一条流动曲线');
+  assert.match(base[0], /transform-origin:\s*bottom left/,
+    'reveal 原点必须在 + 按钮所在的左下角');
+  // 位移量要小（8px），配合 clip-path 才有"推开铺满"的感觉
+  assert.match(base[0], /transform:\s*translateY\(8px\)/,
+    '基础态位移必须是 translateY(8px)');
 });
 
 test('+ 面板：内容块错峰淡入（不是整块糊上去）', () => {
@@ -204,4 +221,91 @@ test('整理占位：占位必须挂在 timeline 且不在任何 .ai-tool-round 
   assert.match(agentSrc, /class:\s*'ai-tool-step ai-tool-organizing is-running'/,
     'organizing 占位必须仍以该 class 组合创建');
   assert.match(agentSrc, /_organizeBar\.appendChild/, '占位是 append 到 timeline 的');
+});
+
+/* ── 5) 流动感动效层（参考 iOS 27 Siri / ChatGPT 流式输出）────────────── */
+test('流动感：工具轮摘要行运行中必须有流光扫过（渐变位移而非闪烁）', () => {
+  assert.match(enhanceCss, /@keyframes\s+xtjToolFlow/,
+    '必须存在流光扫过关键帧');
+  const rule = enhanceCss.match(/\.ai-tool-round\.is-running \.ai-tool-round-label\s*\{[^}]*\}/);
+  assert.ok(rule, '运行中摘要行规则必须存在');
+  assert.match(rule[0], /background-image:\s*linear-gradient/,
+    '流光必须是渐变（有方向的连续位移）');
+  assert.match(rule[0], /animation:\s*xtjToolFlow/, '必须挂上流光动画');
+  // 终态必须归零：流结束了光就得停
+  const done = enhanceCss.match(/\.ai-tool-round\.is-done \.ai-tool-round-label[\s\S]{0,200}?\}/);
+  assert.ok(done, '终态摘要行规则必须存在');
+  assert.match(done[0], /animation:\s*none/, '终态必须停掉流光');
+});
+
+test('流动感：结果卡片改为 clip-path 渐进揭示（与 + 面板同一套语法）', () => {
+  assert.match(enhanceCss, /@keyframes\s+xtjToolResultReveal/,
+    '结果卡片必须有揭示式入场');
+  const kf = enhanceCss.match(/@keyframes\s+xtjToolResultReveal\s*\{[\s\S]*?\n\}/);
+  assert.match(kf[0], /clip-path:\s*inset\(0 100% 0 0/,
+    '必须从一侧擦除式揭示，而不是整块淡入');
+  assert.match(kf[0], /clip-path:\s*inset\(0 0 0 0/, '终态必须完整揭示');
+});
+
+test('流动感：流式光标带柔光晕（不是硬竖线电报灯）', () => {
+  assert.match(enhanceCss, /@keyframes\s+ai-cursor-halo/, '必须有光晕脉动关键帧');
+  const rule = enhanceCss.match(/\.ai-stream-cursor\s*\{[^}]*\}/);
+  assert.ok(rule, '光标规则必须存在');
+  assert.match(rule[0], /ai-cursor-halo/, '光标必须挂上光晕动画');
+  assert.match(rule[0], /box-shadow/, '光晕用 box-shadow 实现');
+});
+
+test('流动感：所有新增动画必须受 reduced-motion 与动效开关管控', () => {
+  // 定位包含流光选择器的 reduced-motion 块
+  let idx = -1;
+  let from = 0;
+  while (true) {
+    const i = enhanceCss.indexOf('@media (prefers-reduced-motion: reduce)', from);
+    if (i < 0) break;
+    if (enhanceCss.slice(i, i + 1200).includes('ai-tool-round-label')) { idx = i; break; }
+    from = i + 1;
+  }
+  assert.ok(idx > 0, '必须存在覆盖流光的 reduced-motion 块');
+  const block = enhanceCss.slice(idx, idx + 1200);
+  for (const sel of ['ai-tool-round-label', 'ai-tool-result-card', 'ai-stream-cursor']) {
+    assert.ok(block.includes(sel), `reduced-motion 必须停掉 ${sel} 的动画`);
+  }
+  assert.match(enhanceCss, /html\[data-xtj-motion=off\] \.ai-stream-cursor/,
+    '站内动效开关同样必须覆盖光标');
+});
+
+/* ── 6) 结果展示不得整屏铺开（P0 回归）──────────────────────────────── */
+test('结果卡片：卡片内的明细必须有高度上限（不得整屏铺开）', () => {
+  const rule = enhanceCss.match(/\.ai-tool-result-card \.ai-search-detail\s*\{[^}]*\}/);
+  assert.ok(rule, '卡片内 detail 规则必须存在');
+  assert.match(rule[0], /max-height/, '必须有 max-height 约束');
+  assert.match(rule[0], /overflow-y:\s*auto/, '超出必须可滚动，而非撑开页面');
+  const cardRule = enhanceCss.match(/\.ai-tool-result-card\s*\{[^}]*\}/);
+  assert.match(cardRule[0], /overflow:\s*hidden/, '卡片本身要裁掉溢出');
+});
+
+test('结果卡片：长片段必须夹住行数（读网页正文不得整屏铺开）', () => {
+  const rule = enhanceCss.match(/\.ai-tool-result-card \.ai-search-detail-snippet\s*\{[^}]*\}/);
+  assert.ok(rule, '卡片内 snippet 规则必须存在');
+  assert.match(rule[0], /-webkit-line-clamp/, '必须用 line-clamp 夹住行数');
+});
+
+test('Items 契约：后端必须统一 items 出口（不得把整段正文当列表下发）', () => {
+  const serverSrc = fs.readFileSync(path.join(root, 'render-api', 'server.js'), 'utf8');
+  assert.match(serverSrc, /function normalizeToolResultItems\(/,
+    '必须存在统一的 items 规范化函数');
+  const fnStart = serverSrc.indexOf('function normalizeToolResultItems(');
+  const body = serverSrc.slice(fnStart, fnStart + 1600);
+  // 字符串必须先判"是不是数组"再决定，正文文本一律返回 null
+  assert.match(body, /trimmed\[0\] !== '\['\)\s*return null/,
+    '非 JSON 数组的正文字符串必须返回 null，不得当列表下发');
+  assert.match(body, /Array\.isArray\(arr\)/, '必须校验确实是数组');
+  // 三条写入路径都必须走这个出口
+  const occurrences = (serverSrc.match(/items:\s*normalizeToolResultItems\(/g) || []).length;
+  assert.ok(occurrences >= 3, `三条 tool_result 路径都必须走统一出口，当前只有 ${occurrences} 处`);
+});
+
+test('Items 契约：前端必须校验 Array.isArray 才渲染结果列表', () => {
+  assert.match(agentSrc, /if \(!Array\.isArray\(itemsArr\)\) itemsArr = null;/,
+    '前端必须拒绝非数组的 items（字符串也有 .length，旧判断会被穿透）');
 });

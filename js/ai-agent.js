@@ -9115,6 +9115,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             toolBar2 = resultCard;
             var itemsArr = evt.items;
             var queryStr2 = evt.query || '';
+            // ★★★ 2026-09-22 修复（P0「网页搜索/读网页显示超大板块」）：
+            //   旧判断 `itemsArr && itemsArr.length > 0` 对**字符串**同样成立
+            //   （字符串也有 .length），于是后端误把整段网页正文放进 items 时，
+            //   这里会把它当数组 .slice(0,10) 切出 10 个**字符**，
+            //   每个元素 url/title/snippet 全 undefined → 渲染成满屏碎片文字，
+            //   且 r2.snippet.slice(0,200) 直接抛异常（被外层 try 吞掉）。
+            //   修复：必须是**数组**才当作结果列表渲染；字符串/对象一律不渲染列表。
+            //   后端已同步加 normalizeToolResultItems 统一契约，这里再兜一层。
+            if (!Array.isArray(itemsArr)) itemsArr = null;
             if (itemsArr && itemsArr.length > 0) {
               var toggleBtn2 = el('span', { class: 'ai-search-toggle' }, ' ▸');
               toolBar2.appendChild(toggleBtn2);
@@ -9127,14 +9136,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var maxItems2 = 10; // 条目上限：避免后端异常/聚合返回上百条时一次性创建大量 DOM
               var shown2 = itemsArr.slice(0, maxItems2);
               for (var ri2 = 0; ri2 < shown2.length; ri2++) {
-                var r2 = shown2[ri2];
+                // 逐项做空值防御：任何一个字段缺失都不能让整段渲染崩掉或漏出 undefined
+                var r2 = shown2[ri2] || {};
                 var itemEl2 = el('div', { class: 'ai-search-detail-item' });
-                var linkEl2 = el('a', { class: 'ai-search-detail-title', href: safeSearchUrl(r2.url) || '#', target: '_blank', rel: 'noopener noreferrer', text: r2.title || '无标题' });
+                var linkEl2 = el('a', {
+                  class: 'ai-search-detail-title',
+                  href: safeSearchUrl(r2.url) || '#',
+                  target: '_blank',
+                  rel: 'noopener noreferrer',
+                  text: (r2.title && String(r2.title)) || (r2.url && String(r2.url)) || '无标题'
+                });
                 itemEl2.appendChild(linkEl2);
-                if (r2.snippet) {
+                if (r2.snippet && typeof r2.snippet === 'string') {
                   itemEl2.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r2.snippet.slice(0, 200) }));
                 }
-                itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: (r2.source || '') + ' · ' + (r2.published_at || '') }));
+                var meta2 = [r2.source, r2.published_at].filter(function(v) { return !!v; }).join(' · ');
+                if (meta2) itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: meta2 }));
                 detailPanel2.appendChild(itemEl2);
               }
               if (itemsArr.length > maxItems2) {
@@ -10987,11 +11004,11 @@ function showChatMessages() {
       void panelShell.offsetWidth; // 强制 reflow，保证动画从关闭态起算
       panelShell.classList.add('open');
       if (closeTimer) clearTimeout(closeTimer);
-      // 与 CSS aiPlusPanelOpen（340ms）对齐，多留 20ms 余量。
+      // 与 CSS clip-path 揭示时长（320ms）对齐，多留 20ms 余量。
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
         closeTimer = null;
-      }, 360);
+      }, 340);
     }
 
     function closePanel(animate) {
@@ -11016,7 +11033,7 @@ function showChatMessages() {
         return;
       }
       if (closeTimer) clearTimeout(closeTimer);
-      // 与 CSS aiPlusPanelClose（320ms）对齐，多留 20ms 余量。
+      // 与 CSS clip-path 揭示时长（320ms）对齐，多留 20ms 余量。
       // 锁定窗口必须 ≥ 动画时长，否则"动画还在播、点击已被放行"会与动画打架。
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-closing');
