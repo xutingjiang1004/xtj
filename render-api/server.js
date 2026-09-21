@@ -8838,15 +8838,38 @@ async function callDeepSeekViaResponses(messages, options) {
         apiBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
       }
 
-      var resp = await fetch(DEEPSEEK_RESPONSES_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
-        },
-        body: JSON.stringify(apiBody),
-        signal: controller.signal
-      });
+      // ★ 修复（"思考后调工具突然报 AI 调用失败"）：5xx 与网络抖动此前无重试，
+      //   Render 出口到 api.deepseek.com 偶发连接重置直接整轮失败。
+      //   这里对「fetch 网络异常」与「HTTP 5xx」做一次短退避重试（仅每轮一次）。
+      var resp = null;
+      for (var _fetchAttempt = 0; _fetchAttempt < 2; _fetchAttempt++) {
+        try {
+          resp = await fetch(DEEPSEEK_RESPONSES_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
+            },
+            body: JSON.stringify(apiBody),
+            signal: controller.signal
+          });
+          if (resp && resp.status >= 500 && _fetchAttempt === 0) {
+            console.error('[RESPONSES] upstream 5xx (' + resp.status + '), retrying once, round', round);
+            await new Promise(function(r) { setTimeout(r, 900); });
+            continue;
+          }
+          break;
+        } catch (_netErr) {
+          if (externalSignal && externalSignal.aborted) throw _netErr;
+          if (_netErr && _netErr.name === 'AbortError') throw _netErr;
+          if (_fetchAttempt === 0) {
+            console.error('[RESPONSES] network error (' + (_netErr && _netErr.message) + '), retrying once, round', round);
+            await new Promise(function(r) { setTimeout(r, 900); });
+            continue;
+          }
+          throw _netErr;
+        }
+      }
 
       if (!resp.ok) {
         var errTxt = '';
@@ -8887,7 +8910,14 @@ async function callDeepSeekViaResponses(messages, options) {
         if (_isToolsThinkingConflict && !options.__toolsThinkingFallbackDone) {
           console.error('[RESPONSES] tools+thinking rejected by provider, retrying with reasoning disabled');
           options.__toolsThinkingFallbackDone = true;
-          var retryBody = Object.assign({}, apiBody, { reasoning: { effort: 'none' } });
+          // ★ 修复：降级重试不能只改 effort —— input 里回传的 reasoning 项
+          //   若正是被拒对象（"reasoning is required"/"invalid reasoning item"），
+          //   effort:none 重试同样 400。这里同时剥离 input 中全部 reasoning 项，
+          //   牺牲推理上下文换取链路跑通（宁可少思考不能没工具）。
+          var _strippedInput = Array.isArray(apiBody.input)
+            ? apiBody.input.filter(function(_it) { return !_it || _it.type !== 'reasoning'; })
+            : apiBody.input;
+          var retryBody = Object.assign({}, apiBody, { reasoning: { effort: 'none' }, input: _strippedInput });
           var retryResp = await fetch(DEEPSEEK_RESPONSES_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
@@ -9058,7 +9088,56 @@ async function callDeepSeekViaResponses(messages, options) {
                 functionCalls[functionCalls.length - 1].arguments += (sJson.delta || '');
               }
             }
+            // ★ 修复（工具轮第 2 轮 400 嫌疑）：output_item.added 时 item.id 在部分
+            //   实现中为空，真正的 id/完整 arguments 在 output_item.done 才下发。
+            //   若不归并，回传的 function_call.id 与 function_call_output.call_id
+            //   都是空串 —— 上游要求两者配对且非空，直接 400，用户看到
+            //   「思考完 → 调工具 → 突然 AI 调用失败」。这里按序号归并补全。
+            if (evtType === 'response.output_item.done' && sJson.item && sJson.item.type === 'function_call') {
+              var _fcDone = sJson.item;
+              // 按 added 顺序找到对应条目：优先匹配名字，其次取第一个 id 为空的
+              var _fcIdx = -1;
+              for (var _fci = 0; _fci < functionCalls.length; _fci++) {
+                if (_fcDone.name && functionCalls[_fci].name === _fcDone.name && (!functionCalls[_fci].id || functionCalls[_fci].id === _fcDone.id)) { _fcIdx = _fci; break; }
+              }
+              if (_fcIdx < 0) {
+                for (var _fcj = 0; _fcj < functionCalls.length; _fcj++) {
+                  if (!functionCalls[_fcj].id) { _fcIdx = _fcj; break; }
+                }
+              }
+              if (_fcIdx >= 0) {
+                if (_fcDone.id && !functionCalls[_fcIdx].id) functionCalls[_fcIdx].id = _fcDone.id;
+                if (typeof _fcDone.arguments === 'string' && _fcDone.arguments && !functionCalls[_fcIdx].arguments) functionCalls[_fcIdx].arguments = _fcDone.arguments;
+              }
+            }
             // 完成事件
+            // ★ 修复（"思考后调工具突然报 AI 调用失败"诊断黑洞）：
+            //   DeepSeek /responses 流式【不以 data:[DONE] 结束】，终止事件为
+            //   response.completed / response.incomplete / response.failed（官方文档）。
+            //   旧代码完全不处理 response.failed —— 上游在流内失败（典型：工具轮
+            //   第 2 轮 reasoning/function_call 回传格式非法，HTTP 仍是 200）时，
+            //   这里静默当"正常结束"，content 为空，真实错误信息被整体吞掉，
+            //   上层只能报笼统的「AI 调用失败，请稍后再试」，日志里也一片空白。
+            //   修复：解析失败事件，把上游错误原文抛出（带 code 与 providerMessage），
+            //   上层 catch 的分类逻辑（thinking/tool/5xx/网络）即可精准命中。
+            if (evtType === 'response.failed') {
+              var _failErr = (sJson.response && sJson.response.error) || sJson.error || {};
+              var _failMsg = String(_failErr.message || _failErr.code || '上游流式响应失败');
+              var _failCode = String(_failErr.code || 'stream_failed');
+              var _streamErr = new Error('AI 调用失败（流内失败: ' + _failMsg.slice(0, 200) + '）');
+              _streamErr.code = 'PROVIDER_STREAM_FAILED';
+              _streamErr.providerStatus = 200;
+              _streamErr.providerCode = _failCode;
+              _streamErr.providerMessage = _failMsg.slice(0, 500);
+              _streamErr.round = round;
+              _streamErr.input_items = (apiBody.input && apiBody.input.length) || 0;
+              throw _streamErr;
+            }
+            if (evtType === 'response.incomplete') {
+              console.error('[RESPONSES] stream incomplete (round ' + round + '), reason=',
+                String((sJson.response && sJson.response.incomplete_details && sJson.response.incomplete_details.reason) || 'unknown'));
+              // 截断类：内容照常使用（max_tokens 截断优于空回复），仅记录
+            }
             if (evtType === 'response.completed') {
               if (sJson.response && sJson.response.usage) {
                 lastUsage = responsesUsageToInternal(sJson.response.usage);
@@ -9219,8 +9298,12 @@ async function callDeepSeekViaResponses(messages, options) {
         var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, 24000) : '{}';
         // S-9: 原样回带模型产出的 function_call 项，与 function_call_output 配对，
         // 保留跨轮工具调用上下文（此前下一轮丢失 function_call 导致多轮工具链失效）
-        workingInput.push({ type: 'function_call', id: r.fcId, name: r.fcName, arguments: r.fcArgs || '{}' });
-        workingInput.push({ type: 'function_call_output', call_id: r.fcId, output: toolContent });
+        // ★ 兜底：id 缺失（上游 done 事件也没下发）时生成确定性占位，
+        //   function_call 与 function_call_output 两处使用同一 id 保证配对；
+        //   空串 id 回传会被上游 400 拒绝（"思考完→调工具→突然失败"的又一嫌疑点）。
+        var _pairCallId = r.fcId || ('call_r' + round + '_' + r.fcName + '_' + fi);
+        workingInput.push({ type: 'function_call', id: _pairCallId, name: r.fcName, arguments: r.fcArgs || '{}' });
+        workingInput.push({ type: 'function_call_output', call_id: _pairCallId, output: toolContent });
       });
     }
 
@@ -21846,7 +21929,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           'round=' + String((e && e.round) || ''));
         var _thinkingOn = thinkingMode !== 'off';
         var _friendly = 'AI 调用失败，请稍后再试';
-        if (/timeout|超时|abort|idle/i.test(_respErrMsg)) {
+        // ★ 修复（诊断黑洞）：三类此前全落笼统兜底的错误，给出精准文案
+        if (_respErrCode === 'PROVIDER_STREAM_FAILED') {
+          // 流内失败（HTTP 200 但 response.failed）：message 已携带上游原因
+          _friendly = _respErrMsg.indexOf('流内失败') >= 0 ? _respErrMsg : ('AI 调用失败（' + _respErrMsg.slice(0, 120) + '）');
+        } else if (/HTTP 5\d\d/.test(_respErrMsg)) {
+          _friendly = 'AI 服务暂时不可用（上游异常，已自动重试仍失败），请稍后重试';
+        } else if (/fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket|network|terminated/i.test(_respErrMsg + ' ' + _respErrCode)) {
+          _friendly = '网络波动，AI 服务暂时不可达，请稍后重试';
+        } else if (/timeout|超时|abort|idle/i.test(_respErrMsg)) {
           _friendly = _thinkingOn
             ? 'AI 响应超时，请稍后重试或关闭思考模式'
             : 'AI 响应超时，请稍后重试或切换模型';
@@ -21872,7 +21963,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               : 'AI 请求参数被拒绝，请换模型后重试，或稍后重试';
           }
         }
-        return terminateWithError({ type: 'error', error: _friendly, code: _respErrCode || undefined, thinking_mode: thinkingMode });
+        // ★ 诊断透出：provider 详情随 error 事件下发（前端 console 可读），
+        //   用户下次截图 toast 时附带 code/provider 摘要即可秒定位根因。
+        return terminateWithError({ type: 'error', error: _friendly, code: _respErrCode || undefined, thinking_mode: thinkingMode, provider_status: String((e && e.providerStatus) || ''), provider_message: String((e && e.providerMessage) || '').slice(0, 200), round: String((e && e.round) || '') });
       }
       // ★ 修复 S1（簇 A）：callDeepSeek 已【成功返回】，说明上游 token 已实际消耗，
       //   此时客户端断开，此前直接 return safeEnd() 完全不扣费 → 可零成本刷配额。
