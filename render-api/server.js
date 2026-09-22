@@ -20498,6 +20498,24 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
     return safeEnd();
   }
 
+  // ★ S6 审计修复：本路由此前既没有 enforceAiChatAccess 请求级门禁，也从不调用
+  //   recordAiTurnUsage —— 而真正扣减搜索额度（DB 侧 consume_ai_token_usage）依赖后者，
+  //   measureSearchQuota 只读不扣 → search_remaining 永不减少 → 第三方搜索额度可被
+  //   无限绕过（前端在"自定义模型 + 联网搜索/思考Max"时会默认 tools_enabled=true；
+  //   攻击者还可用自建 base_url 伪造流式 tool_calls 直接驱动搜索）。
+  //   门禁放在参数校验之后、任何上游调用之前，与同族 deep-stream / chat/stream 一致。
+  var _customGatePassed = false;
+  var _customUpstreamUsed = false;
+  var finalAssistantContent = '';
+  if (req.userName && req.userName !== ADMIN_USERNAME) {
+    var customGate = await enforceAiChatAccess(req.userName, { needSearch: false });
+    if (!customGate.allowed) {
+      writeSse(res, { type: 'error', error: getAiQuotaErrorMessage(customGate.reason || 'rate_limited'), code: customGate.reason || 'rate_limited' });
+      return safeEnd();
+    }
+  }
+  _customGatePassed = true;
+
   // 预置的 OpenAI 兼容端点（只存 base URL，Key 由用户前端填写）
   var CUSTOM_ENDPOINTS = {
     qwen:    { base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',        defaultModel: 'qwen-plus' },
@@ -20671,6 +20689,9 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
   // 单轮转发：返回 { stop } 表示整体结束；{ continueRound } 表示执行了工具需下一轮；
   // { retryWithoutTools } 表示上游拒绝工具需回退。
   async function runCustomRound(useTools) {
+    // ★ S6 审计修复：标记「上游调用已发生」，使 finally 的记账覆盖
+    //   正常完成 / 中断 / 失败全部路径（与 deep-stream 的 _customDeepUpstreamUsed 同构）。
+    _customUpstreamUsed = true;
     var payload = { model: chosenModel, messages: conversation, stream: true };
     Object.assign(payload, buildCustomExtras());
     if (useTools && customTools) {
@@ -20923,6 +20944,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
           _cnFinal = '（工具调用解析失败，请重试。）';
         }
         try { writeSse(res, { type: 'content', text: _cnFinal }); } catch (e) {}
+        finalAssistantContent = _cnFinal; // ★ S6：供 finally 记账时写入落库内容
       }
       writeSse(res, {
         type: 'done',
@@ -20957,6 +20979,24 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
     }
   } finally {
     try { clearTimeout(timer); } catch (e) {}
+    // ★ S6 审计修复：正常完成 / 中断 / 失败路径统一记账。
+    //   search_count 取自 toolContext.searchConsumed —— 与门禁 measureSearchQuota
+    //   同一计数源，因此落账后 search_used 才会真正增长，第三方搜索额度才有效。
+    if ((_customGatePassed || _customUpstreamUsed) && req.userName) {
+      try {
+        await recordAiTurnUsage(req.userName, { model: chosenModel }, {
+          model: chosenModel,
+          source: 'custom_chat_stream',
+          message: text,
+          content: String(finalAssistantContent || '').slice(0, 20000),
+          reasoning: reasoningText ? String(reasoningText).slice(0, 50000) : '',
+          search_count: toolContext.searchConsumed || 0,
+          did_search: (toolContext.searchConsumed || 0) > 0
+        });
+      } catch (eRec) {
+        console.error('[CUSTOM-STREAM] usage record failed:', eRec && eRec.message);
+      }
+    }
     safeEnd();
   }
 });
