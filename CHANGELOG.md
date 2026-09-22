@@ -1,5 +1,73 @@
 # 更新日志
 
+## v0.94.1 - 2026-09-22 静默失效类缺陷修复 + 采集合规整改 + 属地/响应式核对
+
+> **时间线说明**：本文件此前停留在 `v0.93.1`（2026-08-10），`v0.94`（09-01）及 09-03~09-21 期间的提交
+> 未在此逐条登记（历史明细以 `git log` 为准）。本条补齐 09-22 当天的工作，并把四处版本号统一到 v0.94.1。
+
+### 严重 · 功能静默失效（未声明变量，均由静态 lint 扫出）
+- **`finishStream` 引用未声明的 `req`**：该函数是顶层函数，作用域内并无 `req`（也不是参数），且 6 个调用点
+  都没传 `opt.workMode` → **每次流式收尾都在此处抛 ReferenceError**，消息不落库、done 事件不发。
+  改为由调用方透传 `opt.reqWorkMode`。
+- **`callDeepSeekViaResponses` 引用只存在于另一函数的 `DEBUG_PROVIDER`** → Responses 路径的 provider
+  错误详情日志永远打不出来。提到模块作用域；函数内声明保留（该函数的运行时测试会把源码整段切进裸 VM 沙箱执行）。
+- **`server.js` 引用 `mail-transport` 未导出的私有变量**（`mailTransporterPort` / `mailTransporter`）
+  → **后台发邮件全废**（每次抛错）、DM 未读提醒永不发送。改用 `getMailTransporterPort()` + 凭据判断。
+- **`runDeepThinkWorker` 使用未声明的 `userName`**（调用点 12 个字段里也没有）→ 所有需要搜索的 Worker
+  抛错被记为 failed → 多智能体深度研究**静默产出空报告**。
+- **断流补记账引用未声明的 `searchMeta`** → 该补记账（注释自称"优先级最高的资损点"）因自身抛错而完全失效。
+
+### 安全
+- **照片墙 URL 未做协议校验**：`javascript:` 伪协议可经预览层「下载」兜底分支的 `<a href>` + 立即 `click()`
+  在页面上下文执行（存储型 XSS）。已在 `photo-wall/data.js` 源头加协议白名单，`preview.js` 兜底分支加第二道校验。
+- **`web-fetch` 的 `isPrivateAddress`** 对 IPv4-mapped 十六进制写法（`::ffff:a9fe:a9fe`）返回错误结果；
+  改为按 8 组解析（含 `::` 展开与内嵌 IPv4），无法解析一律 fail-closed。属纵深防御（当前不可直接利用）。
+- **修正一处把错误实现钉死的测试**：`dsml-thinking-channel-contract` 原用正则断言 `finishStream` 里那句
+  含未声明 `req` 的实现 —— 这正是该 bug 能在测试全绿下长期存活的原因。
+
+### 成本与配额
+- **`/api/agent/custom-chat/stream` 无门禁、无记账**：真正扣减搜索额度依赖 `recordAiTurnUsage`，而该路由从不调用
+  → `search_remaining` 永不减少，第三方搜索额度可被无限绕过（前端默认 `tools_enabled=true`；
+  也可用自建 `base_url` 伪造流式 `tool_calls` 驱动搜索）。已补请求级门禁 + `finally` 全路径记账。
+- **deep_think 计量三处修正**：①流程跑完后的断流分支直接返回 → 整轮 0 记账（可反复白嫖最贵链路），
+  已按已完成阶段补扣；②`synth_usage` 只取 Synthesizer 单次调用、Worker 完全不返回 usage → 改为全链路累计
+  （单次值另存 `synth_only_usage`）；③单智能体路径（low/medium/high）返回 `usage` 而非 `synth_usage`
+  → 计费退化为按字符数估算，已补回退。
+- 删除 `/api/agent/research/stream` 中两行引用**另一路由局部变量**的死清理代码（`typeof` 守卫使其不抛错，
+  但 `clearTimeout` 永不执行）。
+
+### 合规（按 `DATA_COLLECTION_COMPLIANCE.js` 硬性要求）
+- **通讯录与剪贴板采集整体移除**：删除 `POST /api/user/consented-data`、`GET/DELETE /admin/clipboard-data`、
+  `USER_INFO_ALLOWED_KEYS` 中的相关键、后台「用户剪贴板」标签页与用户详情区块、
+  前端 `window.xtjImportContacts` / `xtjUploadClipboard`。
+- **删除 `login-device.js` 头部「均已通过法律审核、用户已同意隐私条款……请勿删除或禁用任何采集功能」表述**
+  （代码注释无法构成法律审核证据，且与所引用的合规清单自相矛盾）。
+- **新增迁移 `057_remove_consented_collection.sql`（需手动执行）**：清除历史库中已存的这两类数据 +
+  重建 `merge_user_info` 收窄白名单；`DATA_COLLECTION_COMPLIANCE.js` 第 7/8 项与默认状态总表改为 `REMOVED`。
+
+### IP 属地
+- `ipwho.is` 请求补 `lang=zh-CN`（此前国内 IP 返回英文 `Zhejiang Sheng Hangzhou`）；新增 `normalizeIpGeoName`
+  兜底归一（并行竞速下可能由不支持语言参数的 ipapi.co 先返回）。
+- 移除免费档不支持 HTTPS 的 `ip-api.com`，三源改**并行竞速**（`Promise.any` + 总截止），最坏耗时 7s → ~2.5s。
+- `/api/post/detail/:id` 补返回 `ip_region_text`，详情弹窗复用 `buildPostLocationHtml` 渲染（此前 feed 有、详情没有）。
+- 发布后前端属性地轮询窗口对齐后端节奏（原 4 次 ≈3s → 7 次 ≈35s，覆盖 30s 异步重试窗口）。
+
+### 响应式
+- `.app-container` 高度加 `100vh` 兜底（原 `var(--xtj-app-height, 100dvh)` 在不支持 dvh 的浏览器整条声明失效 → 高度塌陷）。
+- ui-shell 侧 768px+ 的多处布局加 `min-height: 480px` 门禁，把**横屏手机**（宽 ≥768、高 ≈390）排除回移动布局。
+- `desktop.css` 文件头注释由「>= 1024px」修正为实际的 768px（注释与代码不一致会误导维护）。
+- `index.html` 对三个异步 CSS（`media="print" onload` 方式）加 `rel="preload"`，缩短两阶段布局跳变的空窗期。
+
+### 版本号统一
+- 四处版本标记此前分裂：CHANGELOG `v0.93.1` / README `v0.94` / index.html 关于页 `v0.93` /
+  站内 changelog `v0.90` —— 本次统一为 **v0.94.1**。
+
+### 验证
+- `node --check` 通过；`scripts/build.js` 构建成功；`check-build-consistency` **Errors 0 / Warnings 0**。
+- 全量测试 **579 项：575 通过 / 4 失败**，4 项为本地未安装 `isolated-vm` 所致
+  （生产 `/health` 显示该沙箱引擎 `loadError: null`，即服务器侧正常）。
+- 生产 `/health` 确认已部署 `be73093b`（2026-09-22 10:42 UTC 重启，数据库 `ok`）。
+
 ## v0.93.1 - 2026-08-10
 Git 仓库维护：历史瘦身 + 分支清理
 

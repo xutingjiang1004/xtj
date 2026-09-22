@@ -48,3 +48,6 @@ __pycache__/
 
 # Temporary visual audit output
 /screenshots/
+
+# 审计报告（本仓库为 public：报告含未修复问题细节、内网/后台信息，仅保留在本地，不进版本库）
+/audit-reports/

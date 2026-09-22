@@ -46,13 +46,20 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=5968e80769" />
+    <link rel="stylesheet" href="css/style.min.css?v=221b39b05a" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
+    <!-- ★ 2026-09-22 响应式修复：下面三个 CSS 是「media="print" onload 切 all」的异步加载，
+         浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
+         这里加 preload 让浏览器解析到本行就立即高优先级抓取，缩短空窗期。
+         注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
+    <link rel="preload" as="style" href="css/visual-refinements.min.css?v=a85c8d0061" />
+    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=6735ecacb5" />
+    <link rel="preload" as="style" href="css/ui-shell.min.css?v=249dea3a22" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=f140b9a972" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=6735ecacb5" /><link rel="stylesheet" href="css/ui-shell.min.css?v=3fae28cf52" /></noscript>
-    <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=0bf256a5f1" />
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=f140b9a972" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=6735ecacb5" /><link rel="stylesheet" href="css/ui-shell.min.css?v=249dea3a22" /></noscript>
+    <link rel="stylesheet" media="(min-width: 768px)" href="css/desktop.min.css?v=25fdfb10d6" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=6735ecacb5" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=3fae28cf52" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=249dea3a22" media="print" onload="this.media='all'">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=f140b9a972">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=f7ad9bbbab">
     <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=bab6500ff9">
@@ -541,7 +548,7 @@
                             </span>
                             <span class="profile-setting-text">关于</span>
                         </div>
-                        <span class="profile-setting-value">xtj v0.93</span>
+                        <span class="profile-setting-value">xtj v0.94.1</span>
                     </div>
                 </div>
                 <div class="profile-totals-bar" id="profileTotalsBar" aria-label="累计互动数据">
@@ -1102,7 +1109,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=e8aa6a3986"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=26a06bd941"></script>
+    <script defer src="js/core.min.js?v=52048ea591"></script>
     <script defer src="js/login-device.min.js?v=3c7f3ca971"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b89afcfcce"></script>

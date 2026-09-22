@@ -234,7 +234,7 @@
   background: rgba(18, 39, 44, 0.56);
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 1024px) and (min-height: 480px) {
   .app-container {
     max-width: min(1520px, calc(100vw - 32px));
     padding: 16px;
@@ -1530,7 +1530,10 @@ html.xtj-ios-viewport .dock-panel {
 .desktop-right-rail > .desktop-ai-card,
 .desktop-overview-card > .desktop-rail-heading { display: none; }
 
-@media (min-width: 768px) {
+/* 2026-09-22 响应式修复：宽度 ≥768 但高度 <480 的设备（横屏手机，如 844×390）
+   不启用桌面工作台——侧栏 236px 会吃掉约 1/3 宽度，内容区过窄过高失衡，
+   回落移动端单列布局。 */
+@media (min-width: 768px) and (min-height: 480px) {
   .app-container {
     --wb-sidebar-width: 236px;
     --wb-inspector-width: 300px;
@@ -1548,6 +1551,8 @@ html.xtj-ios-viewport .dock-panel {
     grid-template-rows: minmax(0, 1fr);
     width: min(100%, 1536px) !important;
     max-width: 1536px !important;
+    /* 100vh 兜底（不支持 dvh 的浏览器整条声明会被丢弃，高度塌陷） */
+    height: 100vh;
     height: 100dvh;
     min-height: 0;
     box-sizing: border-box;
@@ -1961,7 +1966,7 @@ html.xtj-ios-viewport .dock-panel {
 
 /* Compact workbench: tablets use the same desktop information architecture,
    with the optional right rail collapsed to preserve the primary workspace. */
-@media (min-width: 768px) and (max-width: 1279.98px) {
+@media (min-width: 768px) and (max-width: 1279.98px) and (min-height: 480px) {
   .app-container {
     --wb-sidebar-width: clamp(184px, 23vw, 220px);
   }
@@ -2002,6 +2007,14 @@ html.xtj-ios-viewport .dock-panel {
     grid-column: 1 !important;
   }
 
+  /* 2026-09-22 响应式修复：单列模式下 .stats 仍带着 ≥1024 断点里的
+     grid-column: 2 / grid-row: 1 / span 3，会在单列网格里凭空撑出第二列
+     （stats 被挤出画布外不可见）。显式放回第 1 列。 */
+  #panelPosts.active .wrap > .stats {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+  }
+
   #panelPosts.active .desktop-right-rail {
     display: none !important;
   }
@@ -2013,7 +2026,7 @@ html.xtj-ios-viewport .dock-panel {
 }
 
 /* Desktop and tablet deep adaptation. */
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 480px) {
   #panelAi,
   #panelProfile {
     min-height: 0 !important;

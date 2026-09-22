@@ -2268,6 +2268,9 @@
         /* ========== App容器 / Dock / 面板 ========== */
         .app-container {
             display: flex; flex-direction: column;
+            /* 100vh 兜底：不支持 dvh 的旧浏览器上 var(--xtj-app-height, 100dvh) 整条
+               声明会在解析期被丢弃，导致高度塌陷（2026-09-22 响应式修复） */
+            height: 100vh;
             height: var(--xtj-app-height, 100dvh);
             overflow: hidden;
             max-width: 640px; margin: 0 auto;
