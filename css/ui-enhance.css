@@ -536,15 +536,9 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .xtj-photo-grid-polish { gap: 10px !important; }
 .xtj-photo-item-polish { border-radius: 16px !important; overflow: hidden; }
 
-.xtj-photo-preview-actions {
-  position: absolute; left: 50%; bottom: max(18px, env(safe-area-inset-bottom));
-  transform: translateX(-50%); z-index: 20; display: flex; gap: 8px;
-  padding: 8px; border-radius: 999px; background: rgba(20,30,28,.55); backdrop-filter: blur(12px);
-}
-.xtj-photo-preview-actions button {
-  border: 0; border-radius: 999px; padding: 8px 12px; font-size: 12px; font-weight: 650;
-  color: #fff; background: rgba(64,167,116,.92); cursor: pointer;
-}
+/* ★ 2026-09-23 移除 .xtj-photo-preview-actions（「设为头像 / 问小猫描述」）样式。
+   该浮动条 bottom 锚定在预览底部、z-index 20，与 6 个导航按钮的工具栏（z-index 24）
+   几乎完全重叠，看起来像"工具栏背后多出来的两个按钮"。对应 JS 已一并删除。 */
 
 .xtj-confetti-layer { position: fixed; inset: 0; pointer-events: none; z-index: 100050; overflow: hidden; }
 .xtj-confetti-layer i {

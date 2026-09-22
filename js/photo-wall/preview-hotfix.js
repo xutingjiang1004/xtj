@@ -906,25 +906,22 @@
     body.innerHTML = buildPhotoInfoHtml(photo);
     modal.classList.remove('closing');
     modal.classList.add('pp-info-prep');
-    // ★ 修复：照片详情面板锚定在 ⓘ 按钮正上方（此前固定全屏居中/左上角，
-    //   与按钮脱节）；用按钮实时位置计算，任何屏幕尺寸都贴合。
+    // ★ 2026-09-23 改为**全屏居中**：此前把面板锚定在 ⓘ 按钮正上方
+    //   （right = innerWidth − 按钮右边距，bottom = innerHeight − 按钮顶部 + 14），
+    //   而 ⓘ 按钮在工具栏里偏左，结果面板被推到屏幕左侧、还压住照片主体。
+    //   现在按维护者要求居中（.pp-info-modal 在 style.css 里本就是 inset:0 + flex 居中，
+    //   这里用行内样式显式再写一遍，避免历史行内残留把它们覆盖掉）。
     try {
-      var infoBtn = document.getElementById('ppInfoBtn');
-      if (infoBtn) {
-        var btnRect = infoBtn.getBoundingClientRect();
-        var modalRight = Math.max(12, window.innerWidth - btnRect.right);
-        var modalBottom = Math.max(12, window.innerHeight - btnRect.top + 14);
-        modal.style.position = 'fixed';
-        modal.style.inset = 'auto';
-        modal.style.left = 'auto';
-        modal.style.top = 'auto';
-        modal.style.right = modalRight + 'px';
-        modal.style.bottom = modalBottom + 'px';
-        modal.style.alignItems = 'flex-end';
-        modal.style.justifyContent = 'flex-start';
-        modal.style.zIndex = '60';
-        modal.style.maxWidth = 'min(360px, calc(100vw - 24px))';
-      }
+      modal.style.position = 'fixed';
+      modal.style.inset = '0';
+      modal.style.left = '0';
+      modal.style.top = '0';
+      modal.style.right = '0';
+      modal.style.bottom = '0';
+      modal.style.alignItems = 'center';
+      modal.style.justifyContent = 'center';
+      modal.style.zIndex = '60';
+      modal.style.maxWidth = '100%';
     } catch (eAnchor) {}
     modal.style.display = 'flex';
     modal.setAttribute('aria-hidden', 'false');
