@@ -57,19 +57,8 @@ test.describe('CSP Regression (PR #366 production outage)', () => {
     expect(csp).toContain("'wasm-unsafe-eval'");
     expect(csp).toContain("worker-src 'self' blob:");
     expect(csp).toContain("https://cdn.jsdelivr.net");
-  });
-
-  test('vercel.json CSP must not contain strict-dynamic and must match shared policy', async () => {
-    const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
-    const cspHeader = vercel.headers.find(h => h.headers.some(x => x.key === 'Content-Security-Policy'));
-    expect(cspHeader, 'vercel.json must define a Content-Security-Policy').toBeTruthy();
-    const csp = cspHeader.headers.find(x => x.key === 'Content-Security-Policy').value;
-    expect(csp, "vercel.json CSP must NOT contain 'strict-dynamic'").not.toContain("'strict-dynamic'");
-    expect(csp).toContain("script-src 'self' 'unsafe-inline'");
-    expect(csp).toContain("'unsafe-eval'");
-    expect(csp).toContain("'wasm-unsafe-eval'");
-    expect(csp).toContain("worker-src 'self' blob:");
-    expect(csp).toContain("connect-src 'self'");
+    // 2026-09-22：Vercel 已弃用，原「vercel.json 的 CSP 必须等于共享模块」改为
+    // 直接校验「线上响应的 CSP」与 render-api/security-headers.js 完全一致（单一事实来源）。
     expect(csp).toBe(sharedSecurityHeaders.CSP);
   });
 

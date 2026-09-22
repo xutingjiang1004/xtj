@@ -69,8 +69,10 @@
   数据库迁移文件（幂等，可重复执行），代码部署后需手动在 Supabase 执行，见下方“部署后注意事项”。
 - `tests/`
   单元 / 契约 / 回归测试，`npm test` 运行。
-- `vercel.json`
-  Vercel 部署配置。
+- `miniprogram/`
+  微信小程序端（内嵌网页方案），见 [miniprogram/README.md](miniprogram/README.md)。
+- `project.config.json`
+  微信开发者工具项目配置（`miniprogramRoot` 指向 `miniprogram/`）。
 
 ## 启动与构建
 
@@ -111,8 +113,18 @@ npm start
 - 前端静态资源：仓库根目录
 - 后端入口：`render-api/server.js`
 
-### Vercel 部署
-项目同时支持 Vercel，配置见 [vercel.json](vercel.json)，推送到 main 后自动触发构建。前端静态站点与后端 API 的具体路由以 `vercel.json` 为准；环境变量需在 Vercel 项目设置中单独配置（与 Render 互不共享）。
+### 部署（Render + Supabase）
+
+生产环境**只用 Render（应用）+ Supabase（数据库）**：
+
+- 前端静态资源：仓库根目录
+- 后端入口：`render-api/server.js`
+- Render 配置：`render.yaml`；推送到 `main` 后 Render 自动重新部署
+- 数据库迁移：`supabase/migrations/` 下的文件（幂等）需在 Supabase SQL Editor 手动执行
+
+> **Vercel 已弃用（2026-09-22）**：`vercel.json` 已删除，`xtj.vercel.app` 也已无任何部署（实测 404）。
+> 早期那套「Vercel 反代到 Render」的链路不再使用 —— 这一点对 IP 属地很关键：
+> 反代会让 `X-Forwarded-For` 多一跳，属地可能被解析成中间节点机房位置。
 
 > 部署生效有 1–5 分钟构建延迟，页面未更新时先强刷（`Ctrl/Cmd + Shift + R`）排除本地缓存，再到部署平台查看构建状态；构建产物带内容指纹（`?v=hash`），`npm run build` 会自动刷新。
 

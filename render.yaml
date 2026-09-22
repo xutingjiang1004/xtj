@@ -81,9 +81,10 @@ services:
         value: xxz
       
       # CORS 白名单（逗号分隔）。留空则自动检测：
-      # 放行 Render 同域、localhost 及 *.vercel.app 前端（M-2）。
-      # 如实际 Vercel 域名固定，可显式填入，如：
-      #   value: "https://xtj.vercel.app"
+      # 只放行 Render 同域（SERVER_HOSTNAME）；本机 localhost/127.0.0.1 仅非生产环境放行。
+      # 2026-09-22：Vercel 已弃用，不再通配任何第三方托管域。若将来接入自有域名
+      #（例如小程序业务域名），在此显式填入，如：
+      #   value: "https://xtj.yourdomain.com"
       - key: ALLOWED_ORIGINS
         value: ""
       
