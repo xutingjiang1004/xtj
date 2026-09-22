@@ -1032,12 +1032,17 @@
                     clearInterval(o), console.error("Download error:", t), $(), E = !1;
                     try {
                         var i = document.createElement("a");
-                        i.href = e.imageUrl, i.target = "_blank", i.rel = "noopener noreferrer", i.download = "photo_" + Date.now() + ".jpg",
+                        // ★ 安全修复：兜底分支会立即 click()，此前把 imageUrl 原样写入 href，
+                        //   若为 javascript:/data:text/html 等伪协议即在页面上下文执行脚本。
+                        //   只放行 http(s) / blob / 图片 data URL / 站内相对路径，其余替换为 about:blank。
+                        var _rawHref = String(e.imageUrl || "").trim();
+                        var _safeHref = (/^https?:\/\//i.test(_rawHref) || /^blob:/i.test(_rawHref) || /^data:image\//i.test(_rawHref) || /^\/(?!\/)/.test(_rawHref) || /^\.\.?\//.test(_rawHref)) ? _rawHref : "about:blank";
+                        i.href = _safeHref, i.target = "_blank", i.rel = "noopener noreferrer", i.download = "photo_" + Date.now() + ".jpg",
                         document.body.appendChild(i), i.click(), setTimeout(function() {
                             try {
                                 document.body.removeChild(i);
                             } catch (e) {}
-                        }, 100), window.showToast("已在新窗口打开下载");
+                        }, 100), window.showToast(_safeHref === "about:blank" ? "该图片地址无法下载" : "已在新窗口打开下载");
                     } catch (e) {
                         window.showToast("下载失败，请重试");
                     }

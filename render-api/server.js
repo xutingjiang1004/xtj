@@ -100,7 +100,7 @@ function normalizeToolResultItems(raw, limit) {
   }
   return out.length ? out : null;
 }
-const { getMailTransporter, GMAIL_USER, GMAIL_APP_PASSWORD } = require('./mail-transport');
+const { getMailTransporter, getMailTransporterPort, GMAIL_USER, GMAIL_APP_PASSWORD } = require('./mail-transport');
 const { isNormalPost, applyNormalPostAllowlist, applyPublicPostExclusions, NORMAL_POST_MEDIA_TYPES } = require('./post-query');
 const { safeJsonParse, toTimeMs, pickEarlierIso, pickLaterIso, getUtcDateKey } = require('./util-helpers');
 // ★ A 档工具辅助函数（图表 / PDF / 二维码 / diff / 表格 / 公式 等纯计算实现，零新增付费依赖）
@@ -320,6 +320,12 @@ const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 //   打印是安全的。设 CODE_DEBUG_PROVIDER_FORCE=false 可关闭（此时仅
 //   CODE_DEBUG_PROVIDER=true 才打印，保留旧行为）。
 const DEBUG_PROVIDER_ALWAYS = process.env.CODE_DEBUG_PROVIDER_FORCE !== 'false';
+// ★ 修复：该开关原先只声明在 callDeepSeek() 内部（函数局部），但
+//   callDeepSeekViaResponses() 的 8958 / 9023 行同样引用它 —— 不同函数作用域
+//   → 每次走到那两个分支都会抛 ReferenceError（读取未声明标识符必抛），
+//   导致 Responses 路径的 provider 错误详情日志永远打不出来。
+//   提到模块作用域，供两个函数共用。
+const DEBUG_PROVIDER = process.env.CODE_DEBUG_PROVIDER === 'true';
 
 // ★ 上游错误详情日志（遗留 2）：把 status / error.code / error.type / message /
 //   request_id 一并落盘。message 截断到 500 字符，不记录请求正文，避免泄漏用户内容。
@@ -3624,7 +3630,11 @@ async function finishStream(res, opt) {
   var thinkingMode = opt.thinkingMode || 'off';
   var useThinking = opt.useThinking || false;
   // ★ 工作模式标记：优先取调用方显式传入，回退到请求级标记（req._workMode）。
-  var workModeForStream = opt.workMode === true || !!(req && req._workMode === true);
+  //   ★ 修复：原代码直接引用 req，但 finishStream(res, opt) 是顶层函数，
+  //   req 既不是参数也不在其作用域内 → 读取未声明标识符抛 ReferenceError，
+  //   且没有任何调用点传 opt.workMode，导致本函数每次都在此处中断
+  //   （消息不落库、done 事件不发）。改为由调用方透传 req._workMode。
+  var workModeForStream = opt.workMode === true || opt.reqWorkMode === true;
   var usedModel = normalizeDeepSeekUsageModel(opt.usedModel || DEEPSEEK_MODEL_REASONER, opt.usedModel || DEEPSEEK_MODEL_REASONER);
   var isComplete = finishReason === 'stop' || finishReason === 'length' || (hasContent && finishReason === 'upstream_closed') || finishReason === 'idle_timeout' || finishReason === 'partial_content';
   var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
@@ -7335,6 +7345,10 @@ async function callDeepSeek(messages, options) {
   var thinkingLevel = (options && options.thinking_mode) || 'off';
   var useThinking = thinkingLevel !== 'off';
   // CODE_DEBUG_PROVIDER: 脱敏打印完整请求细节
+  // ★ 本行必须保留在函数内：tests/deepseek-call-runtime.test.js 会把 callDeepSeek
+  //   的源码整段切出来放进裸 VM 沙箱运行（沙箱只注入手写依赖，没有模块级变量），
+  //   一旦移除，该测试会因 DEBUG_PROVIDER 未声明而全部失败。
+  //   模块顶部另有一份同名 const，供 callDeepSeekViaResponses 使用（它不在此沙箱内）。
   var DEBUG_PROVIDER = process.env.CODE_DEBUG_PROVIDER === 'true';
   var model = getPreferredDeepSeekModel((options && options.model) || DEEPSEEK_MODEL_REASONER);
   var reasoningEffort = useThinking ? thinkingLevel : '';
@@ -9726,6 +9740,7 @@ async function runMultiAgentFlow(opts) {
   var workerPromises = agents.map(function(agent, idx) {
     return runDeepThinkWorker({
       agent: agent,
+      userName: userName,
       originalMessage: message,
       cancelToken: cancelToken,
       timeLeft: timeLeft,
@@ -10185,6 +10200,10 @@ async function runDeepThinkAgent(opts) {
 // ★ U3: 使用共享 buildToolExecutor + r.finalMessages 修复 tool_result 丢失问题
 async function runDeepThinkWorker(opts) {
   var agent = opts.agent;
+  // ★ 修复：本函数体内多处使用 userName（buildToolExecutor / canUseThirdPartySearch），
+  //   但此前从未声明，调用点也没传 —— 所有 need_search 的 Worker 都会抛
+  //   ReferenceError 被 catch 记为 failed，导致多智能体深度研究静默产出空报告。
+  var userName = opts.userName || '';
   var originalMessage = opts.originalMessage;
   var cancelToken = opts.cancelToken;
   var timeLeft = opts.timeLeft;
@@ -17769,7 +17788,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
       await saveEmailRecipientHistory(recipients);
     } catch(e) { console.warn('[Email] 保存收件人历史失败:', e.message || e); }
 
-    var usedPort = mailTransporterPort;
+    var usedPort = getMailTransporterPort();
     const sent = [];
     const failed = [];
     for (const r of recipients) {
@@ -22241,7 +22260,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           reasoning: reasoningBuffer || responsesReasoning,
           usage: responsesResult.usage,
           searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0,
-          searchMeta: searchMeta
+          searchMeta: _sharedSearchMeta || null
         });
         return safeEnd();
       }
@@ -22622,6 +22641,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
         var fcModel = fcFallbackUsage && fcFallbackUsage.model ? fcFallbackUsage.model : usedModel;
         await finishStream(res, {
+          reqWorkMode: req._workMode === true,
           contentBuffer: fcFallbackSanitized,
           reasoningBuffer: '',
           thinkingMode: 'off',
@@ -23121,6 +23141,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         if (!aborted) {
           if (contentBuffer && contentBuffer.length > 0) {
             await finishStream(res, {
+              reqWorkMode: req._workMode === true,
               contentBuffer: contentBuffer,
               reasoningBuffer: persistentReasoning || reasoningBuffer,
                   thinkingMode: thinkingMode,
@@ -23165,7 +23186,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (!aborted) {
             var pc = contentBuffer && contentBuffer.length > 0;
             if (pc) {
-              await finishStream(res, { contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, usage: usageInStream || null, searchMeta: _toolSearchMeta || _sharedSearchMeta, searchApiCount: req._searchApiCalls ? req._searchApiCalls.n : 0, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, roleplayEnabled: roleplayEnabled, startTime: T0 });
+              await finishStream(res, { reqWorkMode: req._workMode === true, contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, usage: usageInStream || null, searchMeta: _toolSearchMeta || _sharedSearchMeta, searchApiCount: req._searchApiCalls ? req._searchApiCalls.n : 0, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, roleplayEnabled: roleplayEnabled, startTime: T0 });
             } else {
               // ★ 2026-09-17：chunk 超时且无内容——补发终结 done
               return terminateWithError({ type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
@@ -23295,6 +23316,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           }
         }
         await finishStream(res, {
+          reqWorkMode: req._workMode === true,
           contentBuffer: contentBuffer,
           reasoningBuffer: persistentReasoning || reasoningBuffer,
           thinkingMode: thinkingMode,
@@ -23508,6 +23530,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         return terminateWithError({ type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
       } else {
         await finishStream(res, {
+          reqWorkMode: req._workMode === true,
           contentBuffer: contentBuffer,
           reasoningBuffer: persistentReasoning || reasoningBuffer,
           thinkingMode: thinkingMode,
@@ -23558,6 +23581,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (!aborted && contentBuffer && contentBuffer.length > 0) {
       try {
         await finishStream(res, {
+          reqWorkMode: req._workMode === true,
           contentBuffer: contentBuffer,
           reasoningBuffer: persistentReasoning || reasoningBuffer,
           thinkingMode: thinkingMode,
@@ -25923,7 +25947,11 @@ var dmUnreadNotifiedIds = new Set(); // 已通知的消息ID，防止重复发�
 
 async function checkUnreadDmForAdmin() {
   try {
-    if (!mailTransporter && !getMailTransporter()) return; // 邮件服务未配置
+    // ★ 修复：原写法 `!mailTransporter && !getMailTransporter()` 引用了 mail-transport
+    //   的模块私有变量 mailTransporter（未导出）→ ReferenceError 被外层 catch 吞掉
+    //   → DM 未读提醒永不发送。本通知只走 Gmail SMTP，故按凭据判断是否可用。
+    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return; // 邮件服务未配置
+    if (!getMailTransporter()) return;
     var cutoff = new Date(Date.now() - DM_UNREAD_NOTIFY_TIMEOUT).toISOString();
     // 查询未读且未通知的 DM（发给 xxz）
     var { data, error } = await supabase.from('posts')
