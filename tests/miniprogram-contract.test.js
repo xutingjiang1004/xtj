@@ -113,20 +113,26 @@ test('合约：首页 <web-view> 必须独占页面（微信硬性要求）', ()
   assert.doesNotMatch(idx, /<button[\s>]/, 'web-view 页面不能混排其他 <button> 组件');
 });
 
-test('合约：小程序环境适配标记仍在网页侧生效', () => {
-  // 网页侧靠 UA 里的 miniProgram 加 .xtj-miniprogram：顶部空白与底部 Dock 位错位的修复依赖它
+test('合约：微信 webview 适配标记仍在网页侧生效', () => {
+  // 微信内（小程序 web-view 与微信内置浏览器）靠 UA 里的 MicroMessenger 加 .xtj-wechat：
+  // 顶部空白与底部 Dock 错位的修复依赖它。
+  const idx = readRaw('index.html');
   assert.ok(
-    readRaw('index.html').indexOf("classList.add('xtj-miniprogram')") >= 0,
-    'index.html 必须在小程序 UA 下给 <html> 加 .xtj-miniprogram'
+    idx.indexOf("classList.add('xtj-wechat')") >= 0,
+    'index.html 必须在微信 UA 下给 <html> 加 .xtj-wechat'
+  );
+  assert.ok(
+    idx.indexOf('/MicroMessenger/i.test(navigator.userAgent)') >= 0,
+    '判据必须是 MicroMessenger（同时覆盖小程序 web-view 与微信内置浏览器）'
   );
   const shell = readRaw('css/ui-shell.css');
-  assert.ok(shell.indexOf('html.xtj-miniprogram') >= 0, 'ui-shell.css 必须有 .xtj-miniprogram 适配规则');
+  assert.ok(shell.indexOf('html.xtj-wechat') >= 0, 'ui-shell.css 必须有 .xtj-wechat 适配规则');
   assert.ok(
-    readRaw('js/core-parts/06-chat-and-nav.js').indexOf("if (/miniProgram/i.test(navigator.userAgent)) viewportBottom = 0;") >= 0,
-    'core-parts 必须在小程序环境下把 --xtj-visual-bottom 归零'
+    readRaw('js/core-parts/06-chat-and-nav.js').indexOf('if (/MicroMessenger/i.test(navigator.userAgent)) viewportBottom = 0;') >= 0,
+    'core-parts 必须在微信环境下把 --xtj-visual-bottom 归零'
   );
   assert.ok(
-    readRaw('js/core.js').indexOf("if (/miniProgram/i.test(navigator.userAgent)) viewportBottom = 0;") >= 0,
+    readRaw('js/core.js').indexOf('if (/MicroMessenger/i.test(navigator.userAgent)) viewportBottom = 0;') >= 0,
     'js/core.js 需由 scripts/assemble-core.js 重新生成（改完 core-parts 必须重跑）'
   );
 });

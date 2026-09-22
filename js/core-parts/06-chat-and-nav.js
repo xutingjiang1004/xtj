@@ -1503,12 +1503,13 @@
                         var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
                         var viewportBottom = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
-                        // ★ 2026-09-22 小程序适配：微信 web-view 里 window.innerHeight 与
-                        //   visualViewport 的差值**并非键盘造成**（微信导航栏/工具栏不参与
-                        //   visualViewport，差值恒定 > 0），而 .dock-bar 的 bottom 取
-                        //   max(--xtj-visual-bottom, inset-bottom) → Dock 会被顶到屏幕中下部。
-                        //   小程序里按 0 处理（微信的键盘是缩放 webview 而非覆盖布局，不会丢信息）。
-                        if (/miniProgram/i.test(navigator.userAgent)) viewportBottom = 0;
+                        // ★ 2026-09-22 微信 webview 适配（小程序 web-view + 微信内置浏览器）：
+                        //   这两种环境里 window.innerHeight 与 visualViewport 的差值**并非键盘造成**
+                        //   （微信的导航栏/工具栏在 webview 之外、不参与 visualViewport，差值恒定 > 0），
+                        //   而 .dock-bar 的 bottom 取 max(--xtj-visual-bottom, inset-bottom)
+                        //   → Dock 会被顶到屏幕中下部。故在微信内按 0 处理
+                        //   （微信的键盘是缩放 webview 而非覆盖布局，不会丢信息）。
+                        if (/MicroMessenger/i.test(navigator.userAgent)) viewportBottom = 0;
                         root.style.setProperty('--xtj-visual-bottom', viewportBottom + 'px');
                         if (dockBar) {
                             // Reserve the real Dock footprint so the last post never scrolls behind it.
