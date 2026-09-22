@@ -45,6 +45,10 @@ function getMailTransporter() {
 // 故保留导出。约束：凭据仅在模块内使用，不得进入响应体/日志（启动日志只打"已设置/未设置"）。
 module.exports = {
   getMailTransporter: getMailTransporter,
+  // ★ 修复：server.js 的 /admin/send-email 需要知道实际使用的 SMTP 端口（用于提示
+  //   "Render 封锁 465" 的降级建议），此前直接引用了本模块的私有变量
+  //   mailTransporterPort → ReferenceError → 发信接口整体报错。
+  getMailTransporterPort: function() { return mailTransporterPort || process.env.SMTP_PORT || '465'; },
   GMAIL_USER: GMAIL_USER,
   GMAIL_APP_PASSWORD: GMAIL_APP_PASSWORD
 };

@@ -236,7 +236,13 @@ const jsSrcTop = fsTop.readFileSync(pathTop.join(__dirname, '..', 'js', 'ai-agen
 test('后端：done 事件与落库元数据都带 work_mode 标记', () => {
   assert.match(serverSrcTop, /work_mode: workModeForStream/, 'done/落库应带 work_mode');
   assert.match(serverSrcTop, /req\._workMode = workModeEnabled/, '应在请求级记录工作模式');
-  assert.match(serverSrcTop, /var workModeForStream = opt\.workMode === true \|\| !!\(req && req\._workMode === true\)/);
+  // ★ 2026-09-22 修正断言：原断言把错误实现钉死了 —— finishStream(res, opt) 是顶层函数，
+  //   其作用域内没有 req（也不是参数），`!!(req && req._workMode === true)` 每次执行都会
+  //   抛 ReferenceError（读取未声明标识符必抛），而所有调用点又都没传 opt.workMode，
+  //   于是 work_mode 实际从未生效、且 finishStream 每次都在此处中断。
+  //   修正后：由调用方经 opt.reqWorkMode 透传请求级标记。
+  assert.match(serverSrcTop, /var workModeForStream = opt\.workMode === true \|\| opt\.reqWorkMode === true/, 'work_mode 应取 opt.workMode 或调用方透传的 reqWorkMode');
+  assert.match(serverSrcTop, /reqWorkMode: req\._workMode === true/, '各 finishStream 调用点应透传请求级 work_mode');
 });
 
 test('前端：工作模式徽标与工具调用计数已接线', () => {

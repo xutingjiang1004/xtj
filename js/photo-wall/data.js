@@ -134,6 +134,23 @@
     return kind === 'video' || /^video\//.test(type);
   }
 
+  // ★ 安全修复：照片墙 URL 协议白名单。
+  //   imageUrl 会被写入 <img src>、CSS url()，以及预览层"下载"兜底分支的 <a href>
+  //   （该分支会立即 click()）—— 若为 javascript:/vbscript: 伪协议即为存储型 XSS。
+  //   这里在数据源头收口：只放行 http(s)、站内相对路径、blob: 与图片类 data URL。
+  function sanitizePhotoWallUrl(raw){
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    if (/^blob:/i.test(s)) return s;
+    if (/^data:/i.test(s)) return /^data:image\/(?:png|jpe?g|gif|webp|avif);base64,/i.test(s) ? s : '';
+    if (/^\/\//.test(s)) return '';              // 协议相对 URL（//evil.com）
+    if (/^\/(?!\/)/.test(s)) return s;           // 站内绝对路径
+    if (/^\.\.?\//.test(s)) return s;            // ./ 或 ../ 相对路径
+    if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return ''; // 其余带协议的一律拒绝
+    return s;                                    // 无协议的裸相对路径
+  }
+
   function normalizePhotoWallRow(row){
     row = row || {};
     var meta = parseContent(row.content);
@@ -141,7 +158,7 @@
     if (row.is_deleted === true || row.media_url === '__deleted__' || meta.__pw_del__ === true) {
       return { id: row.id, cloudId: row.id, imageUrl: null, deleted: true, is_deleted: true };
     }
-    var url = row.media_url || meta.imageUrl || meta.url || '';
+    var url = sanitizePhotoWallUrl(row.media_url || meta.imageUrl || meta.url || '');
     var mime = meta.mimeType || row.mime_type || '';
     if (isPhotoWallVideoMeta(meta, mime)) {
       return {
@@ -159,8 +176,8 @@
       cloudId: row.id || meta.cloudId || null,
       username: row.user_name || meta.username || '未知用户',
       imageUrl: url,
-      thumbUrl: meta.thumb || meta.thumbUrl || '',
-      thumb: meta.thumb || meta.thumbUrl || '',
+      thumbUrl: sanitizePhotoWallUrl(meta.thumb || meta.thumbUrl || ''),
+      thumb: sanitizePhotoWallUrl(meta.thumb || meta.thumbUrl || ''),
       mediaKind: 'image',
       mimeType: mime,
       duration: meta.duration || null,
