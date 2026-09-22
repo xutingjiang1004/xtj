@@ -9519,6 +9519,22 @@ async function runMultiAgentFlow(opts) {
   var sources = [];
   var searchQueries = [];
 
+  // ★ 计量修复（S8）：本链路的成本 = Planner + 全部 Worker + Synthesizer，但此前
+  //   只把 Synthesizer 单次调用的 usage 作为 synth_usage 返回 → max 档只记约 1/8 用量，
+  //   low/medium/high 走单智能体时甚至没有该字段（退化为按字符数估算）。
+  //   这里累计全链路用量，作为对外计费与展示口径。
+  var flowUsageAgg = { total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0 };
+  function addFlowUsage(u) {
+    if (!u || typeof u !== 'object') return;
+    flowUsageAgg.prompt_tokens += Math.max(0, Number(u.prompt_tokens) || Number(u.input_tokens) || 0);
+    flowUsageAgg.completion_tokens += Math.max(0, Number(u.completion_tokens) || Number(u.output_tokens) || 0);
+    flowUsageAgg.total_tokens += Math.max(0, Number(u.total_tokens) || 0);
+    flowUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || 0);
+    if (u.completion_tokens_details && typeof u.completion_tokens_details.reasoning_tokens === 'number') {
+      flowUsageAgg.reasoning_tokens += Math.max(0, u.completion_tokens_details.reasoning_tokens);
+    }
+  }
+
   function sseSend(obj) {
     if (res.writableEnded) return;
     if (obj && obj.type === 'thinking_chunk') {
@@ -9582,6 +9598,7 @@ async function runMultiAgentFlow(opts) {
     plannerTimeout.catch(function(){}); // Prevent UnhandledRejection if it rejects after race
     var plannerResult = await Promise.race([plannerPromise, plannerTimeout]);
     plannerContent = plannerResult.content || '';
+    if (plannerResult && plannerResult.usage) addFlowUsage(plannerResult.usage);
   } catch (e) {
     console.error('[MULTI-AGENT] Planner failed:', e && e.message);
     sseSend({ type: 'deep_think_stage', stage: 'error', message: '规划失败，回退通用多智能体' });
@@ -9763,6 +9780,8 @@ async function runMultiAgentFlow(opts) {
       }
       // F-1: 累加 worker 真实搜索调用次数
       if (wr && typeof wr.searchCount === 'number') totalWorkerSearchCalls += wr.searchCount;
+      // ★ 计量修复（S8）：累加 Worker 自身多轮 tool_use 的总用量
+      if (wr && wr.usage) addFlowUsage(wr.usage);
       return { role: agent.role, status: 'success', elapsed_ms: 0, content: wr ? wr.content : '', sources: wr ? wr.sources : [] };
     }).catch(function(e) {
       console.error('[MULTI-AGENT] worker failed:', agent.role, e && e.message);
@@ -9850,6 +9869,7 @@ async function runMultiAgentFlow(opts) {
     synthFinished = true;
     synthContent = synthResult.content || '';
     synthUsage = synthResult.usage;
+    if (synthResult && synthResult.usage) addFlowUsage(synthResult.usage);
     synthModel = normalizeDeepSeekUsageModel(synthResult.model || DEEPSEEK_MODEL_REASONER, synthResult.model || DEEPSEEK_MODEL_REASONER);
   } catch (e) {
     synthFinished = true;
@@ -9894,14 +9914,17 @@ async function runMultiAgentFlow(opts) {
     planner: fakePlanner,
     worker_results: fakeWorkerResults,
     thinking_log: thinkingLog,
-    usage: synthUsage,
+    usage: flowUsageAgg,
     model: synthModel,
     search_count: totalWorkerSearchCalls,
     search_results: allSources,
     search_query: allQueries[0] || '',
     sources: allSources,
     queries: allQueries,
-    synth_usage: synthUsage
+    // ★ 计量修复（S8）：synth_usage 改为「全链路累计用量」（Planner + 全部 Worker +
+    //   Synthesizer），与对外计费口径一致；单次 Synthesizer 用量另存备查。
+    synth_usage: flowUsageAgg,
+    synth_only_usage: synthUsage
   };
 }
 
@@ -10221,6 +10244,19 @@ async function runDeepThinkWorker(opts) {
   var sources = [];
   var queries = [];
   var searchCountAccum = { count: 0 };
+  // ★ 计量修复（S8）：Worker 一轮可能包含多次 tool_use 上游调用，此前只返回文本、
+  //   完全不返回 usage → 多智能体链路最终只统计到 Synthesizer 一次调用的 token。
+  var workerUsageAgg = { total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0 };
+  function addWorkerUsage(u) {
+    if (!u || typeof u !== 'object') return;
+    workerUsageAgg.prompt_tokens += Math.max(0, Number(u.prompt_tokens) || Number(u.input_tokens) || 0);
+    workerUsageAgg.completion_tokens += Math.max(0, Number(u.completion_tokens) || Number(u.output_tokens) || 0);
+    workerUsageAgg.total_tokens += Math.max(0, Number(u.total_tokens) || 0);
+    workerUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || 0);
+    if (u.completion_tokens_details && typeof u.completion_tokens_details.reasoning_tokens === 'number') {
+      workerUsageAgg.reasoning_tokens += Math.max(0, u.completion_tokens_details.reasoning_tokens);
+    }
+  }
 
   var searchHint = needSearch
     ? '**本任务需要搜索**: 请调用 search_web 工具获取最新/具体数据 (1-3 次足够, 别刷屏)'
@@ -10306,6 +10342,8 @@ async function runDeepThinkWorker(opts) {
       }
     }
 
+    if (r && r.usage) addWorkerUsage(r.usage); // ★ 计量修复（S8）：累加本轮真实用量
+
     if (cancelToken.cancelled) break;
 
     if (r && r.reasoning && r.reasoning.length > 0) {
@@ -10323,7 +10361,7 @@ async function runDeepThinkWorker(opts) {
     }
 
     var finalText = (r && r.content) || '';
-    return { content: finalText, sources: sources, queries: queries, searchCount: searchCountAccum.count || 0 };
+    return { content: finalText, sources: sources, queries: queries, searchCount: searchCountAccum.count || 0, usage: workerUsageAgg };
   }
 
   var lastAssistant = '';
@@ -10333,7 +10371,7 @@ async function runDeepThinkWorker(opts) {
       break;
     }
   }
-  return { content: lastAssistant || '(无内容)', sources: sources, queries: queries, searchCount: searchCountAccum.count || 0 };
+  return { content: lastAssistant || '(无内容)', sources: sources, queries: queries, searchCount: searchCountAccum.count || 0, usage: workerUsageAgg };
 }
 
 // ===================== AI 用户级限流（按 userName 而非 IP） =====================
@@ -19804,7 +19842,29 @@ async function handleDeepThinkChat(req, res) {
     }
 
     try { clearInterval(_heartbeatTimer); } catch (e) {}
-    if (aborted) { releaseDeepResearch(); return safeEnd(); }
+    if (aborted) {
+      // ★ S7 审计修复：此处整个研究流程已跑完（Planner + 并行 Workers + Synthesizer，
+      //   含多次第三方搜索，是本项目最贵的一条链路），此前直接 return → 整轮 0 记账，
+      //   客户端读完流后在 done 前断开即可反复白嫖（并发名额只限并发、不限累计）。
+      //   按已完成阶段的真实用量补扣；无 usage 且无产出时 recordAbortedStreamUsage
+      //   自身会跳过，不会把"刚发出就断开"也记成一笔完整用量。
+      try {
+        await recordAbortedStreamUsage(userName, {
+          convId: convId,
+          usedModel: (flowResult && flowResult.model) || DEEPSEEK_MODEL_REASONER,
+          source: 'deep_think_aborted',
+          message: message,
+          content: (flowResult && (flowResult.finalContent || flowResult.synth_content)) || '',
+          reasoning: '',
+          usage: flowResult && flowResult.synth_usage,
+          searchApiCount: Math.max(0, Math.floor(Number(flowResult && flowResult.search_count) || 0))
+        });
+      } catch (eAbortQ) {
+        console.error('[AI-QUOTA] deep think aborted record failed:', eAbortQ && eAbortQ.message);
+      }
+      releaseDeepResearch();
+      return safeEnd();
+    }
 
     // 7. 清洗最终内容 (R 架构: 单智能体直接 finalContent; M 架构: synth_content)
     //   兼容: runDeepThinkAgent 返回 finalContent, runMultiAgentFlow 返回 synth_content
@@ -19826,7 +19886,10 @@ async function handleDeepThinkChat(req, res) {
     }
 
     // 9. 构造 usage
-    var synthUsage = flowResult.synth_usage || null;
+    // ★ 计量修复（S8）：runDeepThinkAgent（low/medium/high 单智能体路径）返回的是
+    //   usage 而非 synth_usage，此前只取 synth_usage → 该路径永远拿不到真实用量，
+    //   recordAiTurnUsage 退化为按字符数估算。这里补上回退。
+    var synthUsage = flowResult.synth_usage || flowResult.usage || null;
     var usageToStore = Object.assign({}, synthUsage || {}, {
       thinking_mode: finalThinkingMode,
         model: normalizeDeepSeekUsageModel(flowResult.model || DEEPSEEK_MODEL_REASONER, flowResult.model || DEEPSEEK_MODEL_REASONER),
@@ -24361,11 +24424,11 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
   }
   function safeEnd() {
     clearStreamHeartbeat();
-    // ★ 2026-09-17：清理 SSE 合并定时器，避免响应已结束后仍有一个 40ms
-    //   定时器持有闭包（短时间内大量请求会累积若干悬挂 timer，
-    //   在 aborted 后仍尝试 writeSse 也会产生无意义告警）。
-    try { if (typeof contentCoalesceTimer !== 'undefined' && contentCoalesceTimer) { clearTimeout(contentCoalesceTimer); contentCoalesceTimer = null; } } catch (_) {}
-    try { if (typeof reasoningCoalesceTimer !== 'undefined' && reasoningCoalesceTimer) { clearTimeout(reasoningCoalesceTimer); reasoningCoalesceTimer = null; } } catch (_) {}
+    // ★ 2026-09-22 清理死代码：此处原先还有两行「清理 SSE 合并定时器」的调用，
+    //   但 contentCoalesceTimer / reasoningCoalesceTimer 是 /api/agent/chat/stream
+    //   路由内的函数局部变量（var 声明），本路由作用域内并不存在 —— 那两个 typeof
+    //   守卫永远为 false，clearTimeout 从不执行，属复制粘贴残留。
+    //   本路由只有心跳定时器，已由上方 clearStreamHeartbeat() 处理。
     if (researchRelease) { try { researchRelease(); } catch (e) {} researchRelease = null; }
     if (!res.writableEnded) { try { res.end(); } catch (e) {} }
   }
