@@ -532,49 +532,10 @@
     });
   }
 
-  // 照片墙预览快捷：设为头像 / 问小猫（不改 dock）
-  function ensurePhotoPreviewActions() {
-    var overlay =
-      document.getElementById('photoPreview') ||
-      document.getElementById('photoPreviewOverlay') ||
-      document.querySelector('.photo-preview-overlay, .pp-overlay, #ppOverlay');
-    if (!overlay) return;
-    if (overlay.querySelector('.xtj-photo-preview-actions')) return;
-    // (死分支已删：该条件为空操作，可见性由父容器控制)
-    var bar = document.createElement('div');
-    bar.className = 'xtj-photo-preview-actions';
-    bar.innerHTML =
-      '<button type="button" data-act="avatar">设为头像</button>' +
-      '<button type="button" data-act="ask-ai">问小猫描述</button>';
-    overlay.appendChild(bar);
-    bar.addEventListener('click', function (e) {
-      var act = e.target && e.target.getAttribute('data-act');
-      var img =
-        overlay.querySelector('img.pp-image, img.photo-preview-img, .pp-stage img, .photo-preview-stage img') ||
-        overlay.querySelector('img');
-      var src = img && (img.currentSrc || img.src) || '';
-      if (act === 'avatar') {
-        if (!window.currentUser) {
-          if (typeof window.showToast === 'function') window.showToast('请先登录', 'info');
-          return;
-        }
-        if (typeof window.showToast === 'function') window.showToast('请到「我的」页上传头像（预览快捷入口）', 'info');
-      } else if (act === 'ask-ai') {
-        if (typeof window.__xtjOpenAiChat === 'function') {
-          window.__xtjOpenAiChat();
-          setTimeout(function () {
-            var input = document.getElementById('aiChatInput');
-            if (input) {
-              input.value = '请描述这张照片里的内容，并给一句有趣的评论。' + (src ? '\n图片：' + src : '');
-              try {
-                input.focus();
-              } catch (e2) {}
-            }
-          }, 400);
-        }
-      }
-    });
-  }
+  // ★ 2026-09-23 移除：照片墙预览里那两个「设为头像 / 问小猫描述」浮动按钮。
+  //   它们锚定在预览底部，位置与 6 个导航按钮的工具栏（y≈772）几乎完全重叠，
+  //   看起来像"工具栏背后多出来的两个按钮"，且点了也只是弹提示/跳转，属多余入口。
+  //   原始实现见 git 历史（函数 ensurePhotoPreviewActions + .xtj-photo-preview-actions）。
 
   function boot() {
     patchLoadingHtml();
@@ -588,7 +549,6 @@
     patchChatSend();
     bindChatLongPress();
     polishPhotoWall();
-    ensurePhotoPreviewActions();
     try {
       // 防重入：回调里会对 body 子节点加 class，若直接改会触发自身 mutation
       // → 无限循环占死主线程（线上首页曾因此彻底卡死，F12 都按不出来）。
@@ -596,7 +556,6 @@
       var moBody = new MutationObserver(function () {
         try {
           moBody.disconnect();
-          ensurePhotoPreviewActions();
           polishPhotoWall();
         } finally {
           moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });

@@ -10083,14 +10083,10 @@ function showChatMessages() {
       header.appendChild(backBtn);
     }
 
-    var avatarEl = el('div', { class: 'ai-chat-header-avatar', id: 'aiChatHeaderAvatar' });
-    renderHeaderAvatar(avatarEl, S.config && S.config.avatar_url, S.config && S.config.avatar_version);
-    header.appendChild(avatarEl);
-
-    var info = el('div', { class: 'ai-chat-header-info' });
-    info.appendChild(el('div', { class: 'ai-chat-header-name', id: 'aiChatHeaderName', text: '小猫' }));
-    info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
-    header.appendChild(info);
+    // ★ 2026-09-23 移除头部「头像 + 小猫/在线」：按维护者要求只保留功能入口
+    //   （返回、深度思考、Code、历史、新建/删除等），不再显示头像与在线状态。
+    //   对应的 applyConfigToUI/updateAiStatus 里对 #aiChatHeaderAvatar / Name / Status
+    //   的调用都带 if (el) 守卫，元素不存在时自动跳过，无需改动其它逻辑。
 
     // 深度思考?toggle 按钮
     var deepThinkBtn = el('button', {
