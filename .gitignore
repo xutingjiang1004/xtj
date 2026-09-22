@@ -59,5 +59,6 @@ project.private.config.json
 miniprogram_npm/
 
 # 站点 HTML 打包产物与本地移动端调试脚本（构建/调试产物，非源码，不入版本库）
-# 注：此目录此前已被 git 跟踪，需执行 `git rm -r --cached .trae-html-share-packages` 解除跟踪
+# ★ 2026-09-23：已执行 `git rm -r --cached .trae-html-share-packages` 解除跟踪
+#   （本地文件保留在磁盘上，仅移出版本库）。
 .trae-html-share-packages/
