@@ -2315,31 +2315,33 @@ html.xtj-ios-viewport .dock-panel {
 }
 
 /* ============================================================================
-   微信小程序 web-view 适配（2026-09-22）
+   微信内置 webview 适配（2026-09-22）
    ----------------------------------------------------------------------------
-   背景：小程序 web-view 里页面已经位于微信导航栏「下方」，但 iOS 仍按全屏上报：
-     1) 安全区顶部（env(safe-area-inset-top) ≈ 状态栏高度）被重复计算 ——
+   背景：微信把页面放在自己的导航栏「下方」（小程序 web-view 与微信内置浏览器
+   都是如此），但 iOS 仍按全屏上报，于是：
+     1) 顶部安全区（env(safe-area-inset-top) ≈ 状态栏高度）被重复计算 ——
         上面的 html.xtj-ios-viewport 规则会给 .dock-panel 加
         padding-top: max(52px, inset + 12px)，在微信里这段全是多余空白；
-     2) window.innerHeight 与 visualViewport 的差值恒 > 0（微信导航栏/工具栏不参与
-        visualViewport），而 .dock-bar 的 bottom 取 max(--xtj-visual-bottom, inset-bottom)
-        → Dock 被顶到屏幕中下部，与内容重叠。
-   处理：小程序环境下顶部回到基础间距（24px），Dock 只保留底部 home indicator 的真实安全区。
+     2) window.innerHeight 与 visualViewport 的差值恒 > 0（微信的导航栏/工具栏
+        不参与 visualViewport），而 .dock-bar 的 bottom 取
+        max(--xtj-visual-bottom, inset-bottom) → Dock 被顶到屏幕中下部、与内容重叠。
+   处理：微信环境下顶部回到基础间距（24px），Dock 只保留底部 home indicator 的真实安全区。
    JS 侧同时不再写入那个虚假的 --xtj-visual-bottom（core-parts/06-chat-and-nav.js），
    此处是兜底，保证即使 JS 时序变化也不会再错位。
-   判定依据：UA 含 miniProgram（见 index.html <head> 的早期脚本）。
+   判定依据：UA 含 MicroMessenger（覆盖小程序 web-view 与微信内置浏览器两种场景），
+   见 index.html <head> 的早期脚本。
    ========================================================================== */
 
-html.xtj-miniprogram .dock-panel,
-html.xtj-miniprogram .dock-panel#panelAi,
-html.xtj-miniprogram.xtj-ios-viewport .dock-panel {
+html.xtj-wechat .dock-panel,
+html.xtj-wechat .dock-panel#panelAi,
+html.xtj-wechat.xtj-ios-viewport .dock-panel {
   padding-top: 24px !important;
 }
 
-html.xtj-miniprogram.xtj-ios-viewport #panelPosts .posts-nav.sticky-header {
+html.xtj-wechat.xtj-ios-viewport #panelPosts .posts-nav.sticky-header {
   top: 0 !important;
 }
 
-html.xtj-miniprogram.xtj-ios-viewport .dock-bar {
+html.xtj-wechat.xtj-ios-viewport .dock-bar {
   bottom: max(0px, env(safe-area-inset-bottom, 0px)) !important;
 }
