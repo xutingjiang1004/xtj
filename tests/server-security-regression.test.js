@@ -123,12 +123,16 @@ test('CSP style-src allows self, unsafe-inline, and jsDelivr', () => {
   assert.match(styleSrc, /'unsafe-inline'/);
 });
 
-test('CSP font-src permits the exact Monaco font origins', () => {
+test('CSP font-src permits the exact font origins', () => {
   const fontSrc = csp.split(';').find(function(d) { return d.trim().startsWith('font-src'); });
   assert.ok(fontSrc, 'font-src directive must exist');
   assert.match(fontSrc, /'self'/);
   assert.match(fontSrc, /https:\/\/cdn\.jsdelivr\.net/);
-  assert.match(fontSrc, /https:\/\/registry\.npmmirror\.com/);
+  // ★ 2026-09-23 收敛：registry.npmmirror.com 已从 font-src（及 script-src/style-src）移除。
+  //   原注释理由「Monaco loads its codicon font」不成立 —— monaco 全仓 0 命中，
+  //   该域名只剩 mcp-servers/xtj-admin/package-lock.json（构建期产物，与 CSP 无关）。
+  //   冗余放行即攻击面：任何来源只要出现在 CSP 白名单里，就多一条被利用的路径。
+  assert.doesNotMatch(fontSrc, /npmmirror/, 'npmmirror 属已清理的冗余放行，不得回归');
   assert.doesNotMatch(fontSrc, /\bhttps:\s*(?:;|$)/, 'font-src must not be widened to every HTTPS origin');
 });
 

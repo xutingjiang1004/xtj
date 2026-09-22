@@ -22,11 +22,16 @@ var CSP = [
   //     core.js 50 处）。移除需先把这些全部改为 addEventListener / 事件委托，
   //     再配合 nonce 白名单，属独立改造工程，需与前端一起排期。
   //     在此之前 CSP 对 XSS 的兜底能力有限，主防线仍是 ai-sanitize.js + 各处转义。
-  //   jsdelivr/npmmirror 为历史放行源：jsdelivr 当前仅用于 gsap（已加 SRI）；
-  //   registry.npmmirror.com 在代码库中已无引用，属待清理的冗余放行。
+  //   jsdelivr/npmmirror 为历史放行源：
+  //   ★ 2026-09-23 收敛已完成：`registry.npmmirror.com` 已从 script-src / style-src /
+  //     font-src 全部移除。核实方式：全仓（排除 mcp-servers/*/package-lock.json 这类
+  //     构建期产物）已无任何对该域名的运行时引用；Monaco 编辑器亦从未被引入
+  //     （`monaco` 全仓 0 命中，此前 font-src 的注释理由「Monaco codicon font」不成立）。
+  //     移除后各指令只剩实际使用的来源：jsdelivr（gsap，已加 SRI），
+  //     fonts.googleapis/gstatic（字体）。
   //   script-src 对第三方 CDN 无法做路径级收窄（CSP 规范忽略 script-src 的路径）。
-  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://registry.npmmirror.com",
-  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.googleapis.com",
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' https:",
   "worker-src 'self' blob:",
@@ -35,8 +40,8 @@ var CSP = [
   "frame-src 'self' blob:",
   // WebLLM 本地 Qwen：模型元数据在 huggingface.co，权重会重定向到区域 *.hf.co CDN，WASM 模型库在 raw.githubusercontent.com。
   "connect-src 'self' https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",
-  // Monaco loads its codicon font from the same npm mirror allowed for its script/style assets.
-  "font-src 'self' https://cdn.jsdelivr.net https://registry.npmmirror.com https://fonts.gstatic.com",
+  // Google Fonts 的字形文件从 gstatic.com 取（font-src 只需放行实际使用的两个来源）
+  "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'"
