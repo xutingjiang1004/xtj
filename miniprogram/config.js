@@ -15,5 +15,10 @@ module.exports = {
   // 是否启用内嵌网页模式。
   // true  → 首页直接加载 webviewUrl
   // false → 首页跳到 pages/help/help 显示配置说明（个人主体小程序不能用 web-view，请设为 false）
-  enableWebview: true
+  //
+  // ★ 2026-09-23：已确认为「个人」主体 —— 微信长期规则是个人主体小程序不支持 web-view
+  //   组件，业务域名也无法配置（不是域名/备案问题，是主体问题）。
+  //   故此处改为 false，首页走 pages/help 指引页，与 miniprogram/README.md 第七节结论一致。
+  //   将来主体升级为企业/组织后，再改回 true 并完成域名备案 + 业务域名配置。
+  enableWebview: false
 };

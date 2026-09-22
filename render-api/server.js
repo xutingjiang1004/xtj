@@ -11790,16 +11790,24 @@ app.post('/api/user/logout', rateLimit(60000, 30), async (req, res) => {
     if (refreshToken) {
       var payload = verifyUserRefreshToken(refreshToken);
       if (payload && payload.jti) {
-        await supabase.from('posts').delete()
+        // ★ 加固：refresh token 撤销失败必须让客户端知道，不能静默返回 ok:true。
+        //   否则 DB 抖动时用户以为已登出，refresh token 仍可在 30 天内续期。
+        var delRes = await supabase.from('posts').delete()
           .eq('media_type', REFRESH_TOKEN_MARKER)
           .eq('media_url', payload.jti);
+        if (delRes && delRes.error) {
+          console.error('[API] logout refresh revoke failed:', delRes.error);
+          // 不返回 200：保留 Cookie 让客户端可重试，避免"假登出"
+          return res.status(503).json({ error: '退出状态同步失败，请重试', code: 'logout_sync_failed' });
+        }
       }
     }
     res.clearCookie('xtj_user_refresh', { path: '/api/user' });
     return res.json({ ok: true });
   } catch(e) {
-    res.clearCookie('xtj_user_refresh', { path: '/api/user' });
-    return res.json({ ok: true });
+    console.error('[API] logout exception:', e && e.message);
+    // ★ 加固：异常时不再静默返回 ok:true（避免"假登出"），保留 Cookie 供重试
+    return res.status(503).json({ error: '退出状态同步失败，请重试', code: 'logout_sync_failed' });
   }
 });
 
@@ -13798,6 +13806,19 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     var isLoggedIn = !!req.userName;
 
     // 系统标记过滤列表（在数据库层排除）
+    // ⚠️ 说明（2026-09-23 审计核对）：
+    //   1) 本数组当前**不参与实际过滤**——下方 media_type 白名单
+    //      （text/image/video/audio/photo/album 六类 + NULL/空串）已是 fail-closed：
+    //      任何不在白名单内的 media_type 一律不返回，因此系统标记天然被排除。
+    //   2) 保留它的原因：tests/complete-tests.js 以它为**契约锚点**断言过滤意图
+    //      （要求含 __refresh_token__、__user_info__，并引用本数组名），删除会导致测试红。
+    //   3) 与 post-markers.js 的关系：post-markers.js 的 PUBLIC_POST_MEDIA_TYPES 是
+    //      "允许对外类型"的唯一真源；post-query.js 的 NORMAL_POST_MEDIA_TYPES 受契约测试
+    //      锚定须保持字面量，两者由 post-query.js 的加载期一致性检查告警兜底。
+    //      本数组是**第三份** marker 清单，与上述两份存在漂移（本数组有 __vip__/__avatar__/
+    //      __location_task__ 等 16 项是 post-markers.js 未收录的；反之亦然）。
+    //      由于它不参与过滤，漂移**不构成泄露风险**；新增 marker 时无需强行同步本数组，
+    //      但若未来要让它重新参与过滤，必须先补齐到 post-markers.js 的单一真源。
     var SYSTEM_MARKERS = [
       '__auth__', '__auth_admin__', '__admin_meta__', '__dm__', '__report__',
       '__avatar__', '__user_info__', '__photo_wall__', '__visit__',
@@ -15225,7 +15246,37 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     }
 
     // 撤销被删除用户的所有 refresh token
-    revokeAllUserRefreshTokens(userName).catch(function(){});
+    // ★ 加固：此前为 .catch(function(){}) 静默吞错。若撤销失败，账号数据已删除
+    //   但 refresh token 仍可续期，属于"删号留后门"的中间态。改为显式等待并校验，
+    //   失败时返回 500 + partial，让管理员能感知并重试（幂等，可安全重跑）。
+    var revokeOk = true;
+    try {
+      await revokeAllUserRefreshTokens(userName);
+    } catch (eRevoke) {
+      revokeOk = false;
+      console.error('[admin] 撤销用户 refresh token 失败:', eRevoke && eRevoke.message);
+    }
+
+    // ★ 加固：删后校验——确认核心身份/内容行确实清空，避免"部分删除"被当成成功。
+    var verifyRes = await supabase.from('posts')
+      .select('id').eq('user_name', userName).limit(1);
+    var residual = (verifyRes && verifyRes.data && verifyRes.data.length) ? true : false;
+
+    if (!revokeOk || residual) {
+      await logAdminAudit('delete_user_partial', ADMIN_USERNAME,
+        'user:' + userName + ' revoke_ok:' + revokeOk + ' residual_posts:' + residual
+      );
+      return res.status(500).json({
+        error: !revokeOk
+          ? '删除部分完成：会话撤销失败，请重试（重复执行安全）'
+          : '删除部分完成：仍有残留数据，请重试（重复执行安全）',
+        code: 'delete_user_partial',
+        partial: partialDeleted,
+        revoke_ok: revokeOk,
+        residual_posts: residual
+      });
+    }
+
     // 写入审计日志
     await logAdminAudit('delete_user', ADMIN_USERNAME,
       'user:' + userName +
@@ -25423,7 +25474,7 @@ async function handleAvatarUpload(req, res) {
   }
 }
 
-app.post('/api/admin/ai-agent/avatar', verifyToken, express.json({ limit: '10mb' }), handleAvatarUpload);
+app.post('/api/admin/ai-agent/avatar', verifyToken, securityRateLimit(60000, 20), express.json({ limit: '10mb' }), handleAvatarUpload);
 app.post('/admin/ai-agent/avatar', verifyToken, securityRateLimit(60000, 20), express.json({ limit: '10mb' }), handleAvatarUpload);
 
 

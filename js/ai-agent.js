@@ -11913,6 +11913,12 @@ function showChatMessages() {
 
     // 文件上传逻辑（按钮多选 / 选择文件夹 / 粘贴 / 拖拽）—— 支持任意格式、多文件与文件夹
     var _aiChatFiles = []; // [{ name, type, dataUrl, size }]
+    // ★ 加固：_aiChatFiles 是 renderAiRoot 的闭包变量，closeAiChat 在外部作用域无法直接访问，
+    //   此前关闭聊天/登出后附件数组不会被清理（会话残留）。此处把清理函数挂到 S 上，
+    //   由 closeAiChat 统一调用；函数每次 renderAiRoot 重建，指向当前闭包，无泄漏。
+    S._aiChatFilesCleanup = function() {
+      try { _aiChatFiles = []; } catch (e) {}
+    };
     function clearAiChatFilePreview() {
       _aiChatFiles = [];
       filePreview.style.display = 'none';
@@ -12207,6 +12213,11 @@ function showChatMessages() {
       try { S._panelCleanup(); } catch (ePanel) {}
       S._panelCleanup = null;
       S._panelAbortController = null;
+    }
+    // ★ 加固：清理附件数组，避免关闭聊天/登出后残留上一次会话选中的文件
+    if (S._aiChatFilesCleanup) {
+      try { S._aiChatFilesCleanup(); } catch (eFiles) {}
+      S._aiChatFilesCleanup = null;
     }
     if (S.statusTimer) {
       try { clearInterval(S.statusTimer); } catch (e3) {}
