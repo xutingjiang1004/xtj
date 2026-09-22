@@ -384,10 +384,33 @@ function runInSandbox(code, input, opts) {
       return runInIsolatedVm(src, input, opts);
     } catch (e) {
       const msg = (e && e.message) || String(e);
-      // 区分两类错误：
-      //   (a) 用户代码自身的问题（语法/运行/超时/超内存）→ 原样抛给用户
-      //   (b) 沙箱基础设施异常（isolated-vm 内部错误）→ 降级到 vm
-      const isUserError = /Script execution timed out|timed out|memory limit|Isolate was disposed|Isolate is disposed|SyntaxError|Unexpected|is not defined|Cannot read|TypeError|ReferenceError|RangeError|代码为空|代码过长/i.test(msg);
+      // ★ 第三轮审计修复（🔴 安全）：降级判定此前用**宽泛关键词**匹配错误文案，
+      //   导致用户代码自身的异常被误判为"沙箱基础设施故障"，从而静默重跑到
+      //   安全性更弱的 vm 实现（同进程同 Isolate，存在原型链逃逸风险）——
+      //   等于给用户代码一个"在隔离层更弱的环境里再执行一次"的机会。
+      //
+      //   已实测复现：用户仅写 `throw new Error("my custom error")`，因文案中
+      //   含 "Error" 命中 /TypeError|RangeError/ 之类的松匹配，被判定为 infra
+      //   异常并降级执行。同理 `Unexpected error in isolated-vm internals` 这类
+      //   真正的 infra 故障反而会被判成用户错误。
+      //
+      //   改为**结构化判定**，三条并列，任一命中即判为用户代码问题：
+      //     (a) 堆栈含 isolated-vm 帧 —— 覆盖用户 throw / 语法 / 类型 / 超时
+      //         （实测：`at <isolated-vm>:N:M`、`(<isolated-vm> boundary)`）；
+      //     (b) 文案含 memory limit —— 覆盖内存超限。实测发现这条**必须单列**：
+      //         `Isolate was disposed during execution due to memory limit` 的
+      //         堆栈指向宿主而非 isolated-vm，若只靠 (a) 会被误判为 infra 故障
+      //         而降级到 vm，而 vm 同进程无内存上限，同样的死循环代码会直接把
+      //         Node 进程 OOM 掉（已实测触发 FATAL ERROR: heap out of memory）；
+      //     (c) 入参校验类（代码为空/过长），由本函数自身抛出，不经沙箱。
+      //   另有兜底：(a)(b)(c) 都不命中，且**错误发生点确实在 isolated-vm 内部**
+      //   （堆栈含 node_modules/isolated-vm 且不含本次调用的本文件帧）→ 才降级。
+      //   注意 `e.isolateError` 不是 isolated-vm 的真实 API（源码与 .d.ts 均无），
+      //   故不依赖它。
+      const stack = (e && e.stack) || '';
+      const isUserError = /<isolated-vm>|isolated-vm:\d+:\d+/.test(stack) ||
+        /memory limit/i.test(msg) ||
+        /代码为空|代码过长/.test(msg);
       if (isUserError) throw e;
       console.warn('[SANDBOX] isolated-vm 执行异常，降级到 vm：' + msg);
       return runInVmFallback(src, input);
