@@ -2047,7 +2047,14 @@
                 if (publishedPostIpRefreshTimers[key]) return;
                 publishedPostIpRefreshTimers[key] = true;
                 var attempts = 0;
-                var maxAttempts = 4;
+                // 2026-09-22：轮询窗口对齐后端节奏（发布时同步解析 3s 截止 + 失败后
+                // 30s 一轮异步重试，总计 ~35s）。此前 4 次 ≈3s 即放弃，后端落定后
+                // 卡片仍停在"解析中"，要手动刷新才能看到属地。
+                var maxAttempts = 7;
+                var attemptDelaysMs = [600, 1200, 2500, 5000, 8000, 9000, 9000];
+                function nextDelayMs() {
+                    return attemptDelaysMs[Math.min(attempts, attemptDelaysMs.length) - 1] || 900;
+                }
                 function cleanup() {
                     delete publishedPostIpRefreshTimers[key];
                 }
@@ -2065,20 +2072,20 @@
                         }
                         if (normalized && (ipStatus === 'pending' || String(normalized.ip_lookup_started_at || "").trim())) {
                             if (attempts < maxAttempts) {
-                                setTimeout(run, attempts === 1 ? 600 : 900);
+                                setTimeout(run, nextDelayMs());
                             } else {
                                 cleanup();
                             }
                             return;
                         }
                         if (attempts < maxAttempts) {
-                            setTimeout(run, attempts === 1 ? 600 : 900);
+                            setTimeout(run, nextDelayMs());
                         } else {
                             cleanup();
                         }
                     }).catch(function() {
                         if (attempts < maxAttempts) {
-                            setTimeout(run, 900);
+                            setTimeout(run, nextDelayMs());
                         } else {
                             cleanup();
                         }
@@ -2468,6 +2475,8 @@
                 }
                 return parts.length ? '<div class="post-location-info">' + parts.join('') + '</div>' : '';
             }
+            // 供 core-parts/06 的帖子详情弹窗复用（各 part 为独立 IIFE，跨 part 走 window）
+            window.buildPostLocationHtml = buildPostLocationHtml;
 
             function looksLikeSystemTelemetry(content) {
                 if (!content) return false;

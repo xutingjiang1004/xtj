@@ -4859,7 +4859,11 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
         content: post.content || '', media_type: post.media_type || null,
         media_url: post.media_url || null, visibility: post.visibility || 'public',
         created_at: post.created_at, view_count: post.view_count || 0,
-        like_count: post.like_count || 0, comment_count: post.comment_count || 0
+        like_count: post.like_count || 0, comment_count: post.comment_count || 0,
+        // 2026-09-22：详情弹窗需要与 feed 卡片一致地展示 IP 属地/位置
+        location_name: post.location_name || null,
+        ip_region_text: post.ip_region_text || null,
+        ip_region_status: post.ip_region_status || null
       },
       likes: (likesRes.data || []).map(function(l) { return { id: l.id, user_name: l.user_name, created_at: l.created_at }; }),
       comments: (commentsRes.data || []).map(function(c) { return { id: c.id, user_name: c.user_name, content: c.content, created_at: c.created_at }; })
@@ -5080,7 +5084,10 @@ async function resolveIpLocation(ip) {
   return pending;
 }
 
-// IP 地区解析（优先 HTTPS 数据源，ip-api.com 仅作最后兼容 fallback）
+// IP 地区解析（HTTPS 数据源并行竞速，取最快成功者）
+// ★ 2026-09-22：ipwho.is 加 lang=zh-CN（实测中国 IP 返回「中国/浙江省/杭州」，
+//   此前为「Zhejiang Sheng Hangzhou」英文串）；ip-api.com 免费档不支持 HTTPS
+//   （实测 403）从解析链移除；顺序串行（最坏 2.5+2.5+2=7s）改为并行竞速 + 3s 截止。
 // ★ 记录每个 Provider 的诊断信息
 var ipProviderDiagnostics = {};
 var IP_PROVIDER_DIAGNOSTICS_MAX = 500;
@@ -5132,6 +5139,54 @@ function isPrivateOrReservedIp(ip) {
   if (a === 203 && b === 0 && c === 113) return true;                       // TEST-NET-3
   return false;
 }
+// 2026-09-22：IP 属地中文化映射表 + 归一函数。
+// ipwho.is 带 lang=zh-CN 直接返回中文；但并行竞速下不支持语言参数的
+// ipapi.co 可能先返回英文（"Zhejiang Sheng Hangzhou"），这里兜底归一。
+var IP_GEO_ZH_MAP = {
+  // 省级行政区（含港澳台）
+  'beijing': '北京', 'shanghai': '上海', 'tianjin': '天津', 'chongqing': '重庆',
+  'hebei': '河北', 'shanxi': '山西', 'liaoning': '辽宁', 'jilin': '吉林',
+  'heilongjiang': '黑龙江', 'jiangsu': '江苏', 'zhejiang': '浙江', 'anhui': '安徽',
+  'fujian': '福建', 'jiangxi': '江西', 'shandong': '山东', 'henan': '河南',
+  'hubei': '湖北', 'hunan': '湖南', 'guangdong': '广东', 'hainan': '海南',
+  'sichuan': '四川', 'guizhou': '贵州', 'yunnan': '云南', 'shaanxi': '陕西',
+  'gansu': '甘肃', 'qinghai': '青海', 'taiwan': '台湾', 'inner mongolia': '内蒙古',
+  'guangxi': '广西', 'guangxi zhuang': '广西', 'tibet': '西藏', 'ningxia': '宁夏',
+  'ningxia hui': '宁夏', 'xinjiang': '新疆', 'xinjiang uygur': '新疆',
+  'hong kong': '香港', 'macau': '澳门', 'macao': '澳门',
+  // 常见城市
+  'hangzhou': '杭州', 'ningbo': '宁波', 'wenzhou': '温州', 'shenzhen': '深圳',
+  'guangzhou': '广州', 'dongguan': '东莞', 'foshan': '佛山', 'nanjing': '南京',
+  'suzhou': '苏州', 'wuxi': '无锡', 'chengdu': '成都', 'wuhan': '武汉',
+  'xian': '西安', 'changsha': '长沙', 'zhengzhou': '郑州', 'qingdao': '青岛',
+  'jinan': '济南', 'dalian': '大连', 'shenyang': '沈阳', 'harbin': '哈尔滨',
+  'changchun': '长春', 'shijiazhuang': '石家庄', 'taiyuan': '太原', 'hefei': '合肥',
+  'nanchang': '南昌', 'fuzhou': '福州', 'xiamen': '厦门', 'kunming': '昆明',
+  'nanning': '南宁', 'guiyang': '贵阳', 'lanzhou': '兰州', 'urumqi': '乌鲁木齐',
+  'lasa': '拉萨', 'haikou': '海口',
+  // 国家（海外 IP 属地展示用）
+  'china': '中国', 'united states': '美国', 'japan': '日本', 'south korea': '韩国',
+  'korea': '韩国', 'singapore': '新加坡', 'united kingdom': '英国', 'germany': '德国',
+  'france': '法国', 'canada': '加拿大', 'australia': '澳大利亚', 'russia': '俄罗斯',
+  'india': '印度', 'brazil': '巴西', 'thailand': '泰国', 'vietnam': '越南',
+  'malaysia': '马来西亚', 'indonesia': '印度尼西亚', 'philippines': '菲律宾',
+  'italy': '意大利', 'spain': '西班牙', 'netherlands': '荷兰', 'switzerland': '瑞士',
+  'united arab emirates': '阿联酋', 'new zealand': '新西兰'
+};
+function normalizeIpGeoName(name) {
+  var v = String(name || '').trim();
+  if (!v) return '';
+  if (/[\u4e00-\u9fff]/.test(v)) {
+    // 中文结果：去行政后缀，与主流平台展示一致（"浙江省"→"浙江"、"杭州市"→"杭州"）
+    return v.replace(/(省|市|自治区|壮族自治区|回族自治区|维吾尔自治区|特别行政区)$/, '');
+  }
+  var raw = v.toLowerCase();
+  var key = raw
+    .replace(/\s*(sheng|province|shi|city|municipality|zizhiqu|autonomous region|prefecture)$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return IP_GEO_ZH_MAP[key] || IP_GEO_ZH_MAP[raw] || v;
+}
 async function resolveIpLocationUncached(ip) {
   if (isPrivateOrReservedIp(ip)) return null;
 
@@ -5142,7 +5197,7 @@ async function resolveIpLocationUncached(ip) {
       var timeout = setTimeout(function() { controller.abort(); }, 2500);
       var diag = { provider: 'ipwho.is', resolved_at: new Date().toISOString() };
       try {
-        var resp = await fetch('https://ipwho.is/' + encodeURIComponent(ip), { signal: controller.signal });
+        var resp = await fetch('https://ipwho.is/' + encodeURIComponent(ip) + '?lang=zh-CN', { signal: controller.signal });
         diag.http_status = resp.status;
         if (!resp.ok) { diag.error_code = 'HTTP_' + resp.status; throw new Error('ipwho.is HTTP ' + resp.status); }
         var data = await resp.json();
@@ -5177,53 +5232,55 @@ async function resolveIpLocationUncached(ip) {
         if (data.error) throw new Error('ipapi.co error: ' + (data.reason || data.error));
         return { provider: 'ipapi.co', country: data.country_name || '', region: data.region || '', city: data.city || '', country_code: data.country_code || '', latitude: data.latitude || null, longitude: data.longitude || null, postal: data.postal || '', asn: data.asn || '', isp: data.org || '', org: data.org || '', timezone: data.timezone || '' };
       } finally { clearTimeout(timeout); }
-    },
-    async function() {
-      var controller = new AbortController();
-      var timeout = setTimeout(function() { controller.abort(); }, 2000);
-      try {
-        var resp = await fetch('https://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,countryCode,lat,lon,zip,query,as,org,isp,mobile,proxy,hosting,timezone', { signal: controller.signal });
-        if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
-        var data = await resp.json();
-        if (data.status !== 'success') throw new Error('ip-api.com status: ' + data.status);
-        return { provider: 'ip-api.com', country: data.country || '', region: data.regionName || '', city: data.city || '', country_code: data.countryCode || '', latitude: data.lat || null, longitude: data.lon || null, postal: data.zip || '', asn: data.as || '', isp: data.isp || '', org: data.org || '', is_mobile: !!data.mobile, is_proxy: !!data.proxy, is_hosting: !!data.hosting, timezone: data.timezone || '' };
-      } finally { clearTimeout(timeout); }
     }
   ];
 
-  for (var i = 0; i < fetchers.length; i++) {
-    try {
-      var result = await fetchers[i]();
-      var parts = [result.country, result.region, result.city].filter(Boolean);
-      setIpProviderDiagnostics(ip, diagnostics);
-      return {
-        country: result.country,
-        region: result.region,
-        city: result.city,
-        text: parts.length > 0 ? parts.join(' · ') : '未知',
-        provider: result.provider || '',
-        resolved_at: new Date().toISOString(),
-        precision: 'approximate_city',
-        asn: result.asn || '',
-        isp: result.isp || '',
-        org: result.org || '',
-        is_mobile: result.is_mobile || false,
-        is_proxy: result.is_proxy || false,
-        is_hosting: result.is_hosting || false,
-        is_vpn: result.is_vpn || false,
-        is_tor: result.is_tor || false,
-        timezone: result.timezone || '',
-        country_code: result.country_code || '',
-        latitude: result.latitude || null,
-        longitude: result.longitude || null,
-        postal: result.postal || ''
-      };
-    } catch(e) {
-      console.warn('[IP] 解析源 ' + (i + 1) + ' 失败:', e.message || e);
-    }
+  // 并行竞速：所有数据源同时发起，取第一个成功者；整体 3s 截止。
+  // 超时/全败返回 null，由调用方走 failed/pending + 异步重试路径，不阻塞发帖。
+  var racedResult = null;
+  try {
+    var overallDeadline = new Promise(function(_, reject) {
+      var deadlineTimer = setTimeout(function() { reject(new Error('overall_deadline')); }, 3000);
+      if (deadlineTimer && typeof deadlineTimer.unref === 'function') deadlineTimer.unref();
+    });
+    racedResult = await Promise.race([Promise.any(fetchers.map(function(f) { return f(); })), overallDeadline]);
+  } catch (e) {
+    racedResult = null;
+  }
+  if (racedResult) {
+    // 2026-09-22：竞速下不支持语言参数的 ipapi.co 可能先返回（英文，如
+    // "Zhejiang Sheng"/"Hangzhou"），用映射表把常见中国省/市与国家名归一为
+    // 中文；映射未命中的保留原文（好过显示空白）。
+    racedResult.country = normalizeIpGeoName(racedResult.country);
+    racedResult.region = normalizeIpGeoName(racedResult.region);
+    racedResult.city = normalizeIpGeoName(racedResult.city);
+    var parts = [racedResult.country, racedResult.region, racedResult.city].filter(Boolean);
+    setIpProviderDiagnostics(ip, diagnostics);
+    return {
+      country: racedResult.country,
+      region: racedResult.region,
+      city: racedResult.city,
+      text: parts.length > 0 ? parts.join(' · ') : '未知',
+      provider: racedResult.provider || '',
+      resolved_at: new Date().toISOString(),
+      precision: 'approximate_city',
+      asn: racedResult.asn || '',
+      isp: racedResult.isp || '',
+      org: racedResult.org || '',
+      is_mobile: racedResult.is_mobile || false,
+      is_proxy: racedResult.is_proxy || false,
+      is_hosting: racedResult.is_hosting || false,
+      is_vpn: racedResult.is_vpn || false,
+      is_tor: racedResult.is_tor || false,
+      timezone: racedResult.timezone || '',
+      country_code: racedResult.country_code || '',
+      latitude: racedResult.latitude || null,
+      longitude: racedResult.longitude || null,
+      postal: racedResult.postal || ''
+    };
   }
   ipProviderDiagnostics[ip] = diagnostics;
-  console.warn('[IP] 所有解析源均失败，返回 null:', ip);
+  console.warn('[IP] 所有解析源均失败或超时，返回 null:', ip);
   return null;
 }
 

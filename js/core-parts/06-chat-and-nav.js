@@ -2398,6 +2398,28 @@
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.94.1',
+                    date: '2026-09-22',
+                    content: `
+                        <h4>静默失效类缺陷修复 + 采集合规整改 + 属地/响应式</h4>
+                        <ul>
+                            <li><b>修复 5 处未声明变量</b>：<code>finishStream</code> 引用不存在的 <code>req</code>（每次流式收尾都抛错 → 消息不落库、done 不发）、
+                                <code>DEBUG_PROVIDER</code> 跨函数引用、<code>mail-transport</code> 私有变量（后台发信全废 + DM 提醒失效）、
+                                深研 Worker 的 <code>userName</code>（多智能体研究报告为空）、断流补记账的 <code>searchMeta</code></li>
+                            <li><b>照片墙 XSS 修复</b>：<code>javascript:</code> 伪协议可经预览「下载」兜底分支的 &lt;a href&gt; + 自动 click 执行；
+                                已在数据源头加协议白名单 + 兜底分支二次校验</li>
+                            <li><b>配额修复</b>：自定义模型流式接口此前无门禁也不记账（搜索额度只读不扣，可无限绕过）；深度研究断流不再免单、
+                                用量改为全链路累计</li>
+                            <li><b>合规整改</b>：通讯录与剪贴板采集<b>整体移除</b>（后端接口 / 后台标签页 / 前端入口 / 字段白名单全部删除），
+                                存量数据由迁移 057 清除</li>
+                            <li><b>IP 属地</b>：数据源改并行竞速并补中文参数（不再显示 <code>Zhejiang Sheng Hangzhou</code> 这类英文）、
+                                帖子详情弹窗补显示属地、发布后轮询窗口对齐后端重试节奏</li>
+                            <li><b>响应式</b>：高度单位补 <code>100vh</code> 兜底（旧浏览器不再高度塌陷）、横屏手机排除回移动布局、
+                                次要样式加 preload 减少布局跳变</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.90',
                     date: '2026-06-25',
                     content: `
@@ -4165,6 +4187,8 @@
                     '    </header>',
                     mediaHtml ? '<div class="post-detail-media-card"><div class="post-detail-media">' + mediaHtml + '</div></div>' : '',
                     contentText ? '<div class="post-detail-content">' + escapeHtml(contentText) + '</div>' : '',
+                    // 2026-09-22：详情弹窗与 feed 卡片一致展示位置/IP 属地（此前详情不显示）
+                    (typeof window.buildPostLocationHtml === 'function' ? window.buildPostLocationHtml(normalizedPost) : ''),
                     '    <div class="post-detail-stats">' + buildPostStatsLine(normalizedPost, (likes || []).length, (comments || []).length) + '</div>',
                     detailActions.length ? '<div class="post-detail-actions">' + detailActions.join("") + '</div>' : '',
                     '  </section>',
