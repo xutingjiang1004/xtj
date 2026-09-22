@@ -143,8 +143,11 @@ test('合约：微信 webview 适配标记仍在网页侧生效', () => {
     '不应再退回「只认 MicroMessenger 的 UA 判断」——那样开发者工具模拟器不生效'
   );
 
-  // iOS 竖屏顶部内边距不能再用硬编码 52px（不报顶部安全区的环境会凭空多出 52px 空白）
-  assert.ok(shell.indexOf('max(24px, calc(env(safe-area-inset-top, 0px) + 12px))') >= 0,
+  // iOS 竖屏顶部内边距不能再用硬编码 52px（不报顶部安全区的环境会凭空多出 52px 空白）。
+  // 注意：先剥掉 CSS 注释再判断——注释里会记录"原为 max(52px…)"这类历史说明，不该命中。
+  const shellNoComments = shell.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(shellNoComments.indexOf('max(24px, calc(env(safe-area-inset-top, 0px) + 12px))') >= 0,
     'ui-shell.css 的 iOS 竖屏顶部内边距必须改为 max(24px, inset + 12px)');
-  assert.ok(shell.indexOf('max(52px') < 0, '不应再保留硬编码的 max(52px...)');
+  assert.ok(shellNoComments.indexOf('max(52px') < 0,
+    '不应再保留硬编码的 max(52px...) 声明（注释里的历史说明不算）');
 });
