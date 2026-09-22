@@ -1513,7 +1513,12 @@ html.xtj-ios-viewport .dock-panel {
 
 @media (max-width: 767.98px) and (orientation: portrait) {
   html.xtj-ios-viewport .dock-panel {
-    padding-top: max(52px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;
+    /* 2026-09-22：原为 max(52px, inset + 12px) —— 那个硬编码 52px 是给「全屏 iOS Safari
+       顶出状态栏」用的；但在微信 webview、开发者工具模拟器这类**不报顶部安全区**的环境里，
+       它变成凭空的 52px 空白。改为 max(24px, inset + 12px)：
+       · 真机 iOS Safari（inset≈59）→ 71px，与原来逐像素一致
+       · 微信 / 模拟器（inset=0）→ 24px，回到设计基础间距 */
+    padding-top: max(24px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;
   }
 
   html.xtj-ios-viewport #panelPosts .posts-nav.sticky-header {
@@ -1558,7 +1563,11 @@ html.xtj-ios-viewport .dock-panel {
     height: 100dvh;
     min-height: 0;
     box-sizing: border-box;
-    margin-inline: auto;
+    /* ★ 2026-09-22：必须带 !important —— desktop.css 里有 `.app-container{margin:0 !important}`，
+       它会把下面的 `margin-inline: auto` 压掉，导致宽屏（1920/2560）下 1536px 的容器
+       被钉在屏幕左边、右侧留下上千像素空白。物理属性 + !important 才能稳定居中。 */
+    margin-left: auto !important;
+    margin-right: auto !important;
     border-inline: 1px solid var(--wb-border);
     background: var(--wb-canvas);
     color: var(--wb-text);
