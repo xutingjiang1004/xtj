@@ -8830,7 +8830,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 if (meta2) itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: meta2 }));
                 detailPanel2.appendChild(itemEl2);
               }
-              if (itemsArr.length > maxItems2) {
+              // ★ 第三轮审计：后端此前静默截断（超过 12 条直接丢弃，前端无从得知）。
+              //   现在后端在 tool_result 事件里带 items_total / items_truncated，
+              //   这里如实提示，避免用户以为"就这么多结果"。
+              //   兼容旧后端：字段缺失时退回原有的本地长度推断，行为不变。
+              var totalKnown2 = (typeof evt.items_total === 'number' && evt.items_total > 0) ? evt.items_total : itemsArr.length;
+              if (evt.items_truncated === true) {
+                detailPanel2.appendChild(el('div', {
+                  class: 'ai-search-detail-more',
+                  text: '共 ' + totalKnown2 + ' 条结果，此处展示其中 ' + shown2.length + ' 条（其余已省略）'
+                }));
+              } else if (itemsArr.length > maxItems2) {
                 detailPanel2.appendChild(el('div', { class: 'ai-search-detail-more', text: '还有 ' + (itemsArr.length - maxItems2) + ' 条结果未显示' }));
               }
               toolBar2.toggleFn = function() {
