@@ -19478,8 +19478,35 @@ async function handleDeepThinkChat(req, res) {
   if (!convId) convId = genConvId();
   if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
 
-  function safeEnd() { if (!res.writableEnded) { try { res.end(); } catch (e) {} } }
+  // ★ 2026-09-22 修复（深度研究/深度思考"请等待上一个请求完成"永久卡死）：
+  //   症状：用户在「深度研究」页发消息，卡片显示「连接中断 / 请等待上一个请求完成」，
+  //        且「查看思考过程（0 步）」—— 说明服务端在并发闸门处就被拒了。
+  //        此后点「重试」永远撞同一堵墙，只有重启服务才恢复。
+  //   根因：名额 acquire(下方 19498 行) 发生在 res.on('close') 注册(下方 19557 行)
+  //        之前，两者之间有约 60 行代码（含 trackActiveDeepThinkJob、若干函数定义）。
+  //        若客户端在这个窗口内断开、或这段代码抛异常，名额已占用却**没有任何监听器**
+  //        会调 releaseDeepResearch() → 名额永久泄漏（DEEP_RESEARCH_MAX_PER_USER=1）。
+  //   修法：safeEnd 增加兜底释放。releaseDeepResearch 通过 var 提升可见，
+  //        且其内部 releaseDeep 有 released 幂等标志，重复调用安全。
+  function safeEnd() {
+    try { if (typeof releaseDeepResearch === 'function') releaseDeepResearch(); } catch (e) {}
+    if (!res.writableEnded) { try { res.end(); } catch (e) {} }
+  }
   function sseSend(obj) { if (!res.writableEnded) { try { writeSse(res, obj); } catch (e) {} } }
+
+  // ★ 2026-09-22 修复：把「断开/关闭」监听注册**提前到并发名额 acquire 之前**。
+  //   原顺序是 acquire → …约 60 行（trackActiveDeepThinkJob、函数定义）… → 注册监听，
+  //   中间窗口内若客户端断开（或这段代码抛异常），名额已占用却没有任何监听器会调
+  //   releaseDeepResearch() → 名额永久泄漏（DEEP_RESEARCH_MAX_PER_USER=1），此后该用户
+  //   所有深度研究/深度思考都在闸门处被拒（"请等待上一个请求完成"），点重试也无效。
+  //   注：markDeepThinkDisconnected / releaseDeepResearch 都是函数声明（提升可见）；
+  //   releaseDeepResearch 内部使用 `releaseDeep`（var 提升）与幂等释放，名额尚未 acquire
+  //   时调用为空操作，安全。markDeepThinkDisconnected 内部对 message/_heartbeatTimer
+  //   等未初始化绑定均有 typeof / try 守卫。
+  req.on('aborted', markDeepThinkDisconnected);
+  res.on('close', function() {
+    if (!res.writableEnded) markDeepThinkDisconnected();
+  });
 
   // ★ 并发上限：先 acquire，成功后再 track，避免同 conv 覆盖进行中任务的 cancel 句柄
   var releaseDeep = tryAcquireDeepResearch(userName);
@@ -19541,10 +19568,6 @@ async function handleDeepThinkChat(req, res) {
     try { if (typeof cancelToken._onWorkerCancel === 'function') cancelToken._onWorkerCancel(); } catch (e) {}
     releaseDeepResearch();
   }
-  req.on('aborted', markDeepThinkDisconnected);
-  res.on('close', function() {
-    if (!res.writableEnded) markDeepThinkDisconnected();
-  });
 
   try {
     // 1. 先验证输入，避免空消息/非法参数仍扣配额
