@@ -365,6 +365,48 @@
     syncUser();
     syncChatBadge();
     syncContacts();
+    setupSidebarCollapse();
+  }
+
+  // ★ 2026-09-23 桌面端侧栏可折叠（往左收起）
+  //   折叠：侧栏 display:none + 网格第一列归 0（CSS 在 ui-shell.css 的桌面媒体查询内），
+  //   展开按钮在 <aside> 之外、position:fixed，所以不受侧栏隐藏影响。
+  //   状态存 localStorage['xtj_wb_sidebar']，刷新/重开浏览器后保持。
+  function setupSidebarCollapse() {
+    var app = document.querySelector('.app-container');
+    if (!app) return;
+    var KEY = 'xtj_wb_sidebar';
+    function readSaved() {
+      try { return localStorage.getItem(KEY); } catch (e) { return null; }
+    }
+    function save(v) {
+      try { localStorage.setItem(KEY, v); } catch (e) {}
+    }
+    function apply(collapsed) {
+      var on = !!collapsed;
+      app.classList.toggle('wb-sidebar-collapsed', on);
+      var btnCollapse = document.getElementById('desktopWbCollapse');
+      var btnExpand = document.getElementById('desktopWbExpand');
+      if (btnCollapse) btnCollapse.setAttribute('aria-expanded', on ? 'false' : 'true');
+      if (btnExpand) btnExpand.setAttribute('aria-expanded', on ? 'false' : 'true');
+    }
+    apply(readSaved() === 'collapsed');
+    document.addEventListener('click', function (event) {
+      var t = event.target;
+      if (!t || typeof t.closest !== 'function') return;
+      if (t.closest('#desktopWbCollapse')) {
+        event.preventDefault();
+        apply(true);
+        save('collapsed');
+        return;
+      }
+      if (t.closest('#desktopWbExpand')) {
+        event.preventDefault();
+        apply(false);
+        save('expanded');
+      }
+    });
+    window.__xtjSetSidebarCollapsed = function (v) { apply(v); save(v ? 'collapsed' : 'expanded'); };
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
