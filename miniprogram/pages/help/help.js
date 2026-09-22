@@ -3,7 +3,7 @@ const config = require('../../config.js');
 Page({
   data: {
     url: config.webviewUrl,
-    subjectTip: '个人主体不能用 web-view；企业/组织主体才可以用'
+    subjectTip: '个人（已确认）—— web-view 组件不可用'
   },
 
   copyUrl() {

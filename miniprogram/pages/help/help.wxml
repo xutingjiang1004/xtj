@@ -1,33 +1,31 @@
 <view class="wrap">
   <view class="card">
     <view class="title">小猫AI 小程序</view>
-    <view class="sub">当前为「内嵌网页（web-view）」模式</view>
-
-    <view class="row">
-      <text class="k">目标地址</text>
-      <text class="v">{{url}}</text>
-    </view>
-    <view class="row">
-      <text class="k">小程序主体</text>
-      <text class="v">{{subjectTip}}</text>
-    </view>
+    <view class="sub">主体类型：{{subjectTip}}</view>
   </view>
 
   <view class="card">
-    <view class="h">真机运行必须满足 3 个条件</view>
-    <view class="li">1. 域名<text class="em">已 ICP 备案</text>（工信部备案，onrender.com 不满足）</view>
-    <view class="li">2. 域名是<text class="em">你自己的</text>，能上传微信校验文件到根目录</view>
+    <view class="h">⚠️ 个人主体不能用「内嵌网页」</view>
+    <view class="li">微信的长期规则：<text class="em">个人主体小程序不支持 web-view 组件</text>，业务域名也配不了。</view>
+    <view class="li">所以「买域名 + 备案 + 内嵌整个网页」这条路对个人主体<text class="em">不成立</text>——不是域名问题，是主体问题。</view>
+    <view class="tip">开发者工具里能看到网页，只是因为勾了「不校验合法域名」；真机和发布一律打不开。</view>
+  </view>
+
+  <view class="card">
+    <view class="h">个人主体真正可走的三条路</view>
+    <view class="li">① <text class="em">就用 H5</text>：在微信里直接打开网页版 —— 0 成本、0 工作量、全功能（当前推荐）</view>
+    <view class="li">② <text class="em">原生小程序 + 微信云开发</text>：云函数代理绕开域名限制，免备案免域名，但前端要用 WXML/WXSS 重写</view>
+    <view class="li">③ <text class="em">原生小程序 + 自有备案域名</text>：同上，但域名 + 服务器约 ¥80–130/年</view>
+    <view class="tip">详见项目内 miniprogram/README.md 第七节。</view>
+  </view>
+
+  <view class="card">
+    <view class="h">将来若升级为企业 / 组织主体</view>
+    <view class="li">1. 域名<text class="em">已 ICP 备案</text>（onrender.com 不满足，备不了）</view>
+    <view class="li">2. 域名是<text class="em">你自己的</text>，能把微信校验文件放到根目录</view>
     <view class="li">3. 在「小程序后台 → 开发管理 → 开发设置 → 业务域名」里加入该域名</view>
-    <view class="tip">开发者工具里预览不需要上面 3 条，只要勾选：
-      「详情 → 本地设置 → 不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书」</view>
   </view>
 
-  <view class="card">
-    <view class="h">如果你还看到这一页</view>
-    <view class="li">说明 <text class="em">miniprogram/config.js</text> 里的 enableWebview 被设成了 false，或首页跳转过来了。</view>
-    <view class="li">把 webviewUrl 改成你已备案的域名，并把 enableWebview 设为 true 即可。</view>
-  </view>
-
-  <button class="btn" type="primary" bindtap="copyUrl">复制目标地址</button>
-  <button class="btn ghost" bindtap="goIndex">再试一次</button>
+  <button class="btn" type="primary" bindtap="copyUrl">复制网页版地址（在微信里打开）</button>
+  <button class="btn ghost" bindtap="goIndex">返回首页再试一次</button>
 </view>
