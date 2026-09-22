@@ -1,0 +1,6 @@
+/* 小猫AI 小程序全局样式（尽量少，避免与内嵌网页互相影响） */
+page {
+  background: #f7f9f8;
+  color: #1f2d27;
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}

@@ -1,0 +1,81 @@
+.wrap {
+  padding: 24rpx 24rpx 60rpx;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 20rpx;
+  padding: 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 4rpx 20rpx rgba(19, 70, 48, 0.06);
+}
+
+.title {
+  font-size: 38rpx;
+  font-weight: 600;
+  color: #14603f;
+}
+
+.sub {
+  font-size: 26rpx;
+  color: #6b7d75;
+  margin-top: 8rpx;
+  margin-bottom: 20rpx;
+}
+
+.h {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #1f2d27;
+  margin-bottom: 16rpx;
+}
+
+.row {
+  display: flex;
+  font-size: 26rpx;
+  line-height: 1.7;
+  margin-top: 8rpx;
+}
+
+.k {
+  color: #6b7d75;
+  width: 180rpx;
+  flex-shrink: 0;
+}
+
+.v {
+  color: #1f2d27;
+  word-break: break-all;
+}
+
+.li {
+  font-size: 26rpx;
+  line-height: 1.8;
+  color: #33443c;
+}
+
+.em {
+  color: #c0392b;
+  font-weight: 600;
+}
+
+.tip {
+  margin-top: 16rpx;
+  padding: 16rpx;
+  background: #f0f7f3;
+  border-radius: 12rpx;
+  font-size: 24rpx;
+  line-height: 1.7;
+  color: #2c5c46;
+}
+
+.btn {
+  margin-top: 8rpx;
+  font-size: 30rpx;
+}
+
+.ghost {
+  background: #ffffff;
+  color: #14603f;
+  border: 1rpx solid #cfe3d8;
+}

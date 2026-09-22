@@ -1,0 +1,33 @@
+<view class="wrap">
+  <view class="card">
+    <view class="title">小猫AI 小程序</view>
+    <view class="sub">当前为「内嵌网页（web-view）」模式</view>
+
+    <view class="row">
+      <text class="k">目标地址</text>
+      <text class="v">{{url}}</text>
+    </view>
+    <view class="row">
+      <text class="k">小程序主体</text>
+      <text class="v">{{subjectTip}}</text>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="h">真机运行必须满足 3 个条件</view>
+    <view class="li">1. 域名<text class="em">已 ICP 备案</text>（工信部备案，onrender.com 不满足）</view>
+    <view class="li">2. 域名是<text class="em">你自己的</text>，能上传微信校验文件到根目录</view>
+    <view class="li">3. 在「小程序后台 → 开发管理 → 开发设置 → 业务域名」里加入该域名</view>
+    <view class="tip">开发者工具里预览不需要上面 3 条，只要勾选：
+      「详情 → 本地设置 → 不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书」</view>
+  </view>
+
+  <view class="card">
+    <view class="h">如果你还看到这一页</view>
+    <view class="li">说明 <text class="em">miniprogram/config.js</text> 里的 enableWebview 被设成了 false，或首页跳转过来了。</view>
+    <view class="li">把 webviewUrl 改成你已备案的域名，并把 enableWebview 设为 true 即可。</view>
+  </view>
+
+  <button class="btn" type="primary" bindtap="copyUrl">复制目标地址</button>
+  <button class="btn ghost" bindtap="goIndex">再试一次</button>
+</view>
