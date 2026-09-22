@@ -114,25 +114,37 @@ test('合约：首页 <web-view> 必须独占页面（微信硬性要求）', ()
 });
 
 test('合约：微信 webview 适配标记仍在网页侧生效', () => {
-  // 微信内（小程序 web-view 与微信内置浏览器）靠 UA 里的 MicroMessenger 加 .xtj-wechat：
+  // 微信内（小程序 web-view、微信内置浏览器、开发者工具模拟器）靠 UA 关键字加 .xtj-wechat：
   // 顶部空白与底部 Dock 错位的修复依赖它。
   const idx = readRaw('index.html');
   assert.ok(
     idx.indexOf("classList.add('xtj-wechat')") >= 0,
-    'index.html 必须在微信 UA 下给 <html> 加 .xtj-wechat'
+    'index.html 必须在微信相关 UA 下给 <html> 加 .xtj-wechat'
   );
   assert.ok(
-    idx.indexOf('/MicroMessenger/i.test(navigator.userAgent)') >= 0,
-    '判据必须是 MicroMessenger（同时覆盖小程序 web-view 与微信内置浏览器）'
+    idx.indexOf('/MicroMessenger|miniProgram|wechatdevtools/i.test(navigator.userAgent)') >= 0,
+    '判据必须同时覆盖 MicroMessenger / miniProgram / wechatdevtools（开发者工具模拟器只含后者）'
   );
   const shell = readRaw('css/ui-shell.css');
   assert.ok(shell.indexOf('html.xtj-wechat') >= 0, 'ui-shell.css 必须有 .xtj-wechat 适配规则');
+
+  // Dock 归零必须用「视口差基线」而不是 UA 判断：模拟器/真机/内置浏览器通吃
+  const kBase = 'if (rawDiff < viewportBaseline) viewportBaseline = rawDiff;';
   assert.ok(
-    readRaw('js/core-parts/06-chat-and-nav.js').indexOf('if (/MicroMessenger/i.test(navigator.userAgent)) viewportBottom = 0;') >= 0,
-    'core-parts 必须在微信环境下把 --xtj-visual-bottom 归零'
+    readRaw('js/core-parts/06-chat-and-nav.js').indexOf(kBase) >= 0,
+    'core-parts 必须用视口差基线归零 --xtj-visual-bottom（不依赖 UA）'
   );
   assert.ok(
-    readRaw('js/core.js').indexOf('if (/MicroMessenger/i.test(navigator.userAgent)) viewportBottom = 0;') >= 0,
+    readRaw('js/core.js').indexOf(kBase) >= 0,
     'js/core.js 需由 scripts/assemble-core.js 重新生成（改完 core-parts 必须重跑）'
   );
+  assert.ok(
+    readRaw('js/core.js').indexOf('if (/MicroMessenger/i.test(navigator.userAgent)) viewportBottom = 0;') < 0,
+    '不应再退回「只认 MicroMessenger 的 UA 判断」——那样开发者工具模拟器不生效'
+  );
+
+  // iOS 竖屏顶部内边距不能再用硬编码 52px（不报顶部安全区的环境会凭空多出 52px 空白）
+  assert.ok(shell.indexOf('max(24px, calc(env(safe-area-inset-top, 0px) + 12px))') >= 0,
+    'ui-shell.css 的 iOS 竖屏顶部内边距必须改为 max(24px, inset + 12px)');
+  assert.ok(shell.indexOf('max(52px') < 0, '不应再保留硬编码的 max(52px...)');
 });

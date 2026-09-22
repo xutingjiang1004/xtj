@@ -47,15 +47,17 @@
         })();
     </script>
     <script>
-        // 2026-09-22：微信内置 webview 适配标记（覆盖小程序 web-view 与微信内置浏览器）。
-        // 微信把页面放在自己的导航栏「下方」，但 iOS 仍按「全屏」上报安全区与视口差值：
+        // 2026-09-22：微信内置 webview 适配标记（覆盖小程序 web-view、微信内置浏览器、
+        //           以及微信开发者工具的模拟器）。
+        // 微信把页面放在自己的导航栏「下方」，但 iOS/模拟器仍按「全屏」上报安全区与视口差值：
         // 顶部会多出一块空白（顶部安全区被重复计算），底部 Dock 会被 --xtj-visual-bottom 顶上去。
-        // 判据是 UA 里的 MicroMessenger，它同时覆盖两种场景：
-        //   · 小程序 web-view：UA 含 MicroMessenger + miniProgram
-        //   · 微信内置浏览器（聊天里点开链接）：只有 MicroMessenger
-        // 两者都是「微信的导航栏在 webview 之外」，安全区都会重复；普通浏览器不含该关键字，不受影响。
+        // 判据（三者任一即命中；普通浏览器一个都不含）：
+        //   · MicroMessenger —— 真机微信（小程序 web-view 与微信内置浏览器都含）
+        //   · miniProgram    —— 小程序的 UA 标记
+        //   · wechatdevtools —— 微信开发者工具的模拟器（UA 不含 MicroMessenger，
+        //                       只认 MicroMessenger 会造成"模拟器里没适配"的假象）
         try {
-            if (/MicroMessenger/i.test(navigator.userAgent)) {
+            if (/MicroMessenger|miniProgram|wechatdevtools/i.test(navigator.userAgent)) {
                 document.documentElement.classList.add('xtj-wechat');
             }
         } catch (_) {}
@@ -68,16 +70,16 @@
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=a85c8d0061" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=6735ecacb5" />
-    <link rel="preload" as="style" href="css/ui-shell.min.css?v=e6952619b0" />
+    <link rel="preload" as="style" href="css/ui-shell.min.css?v=38d0aaa2bb" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=66a1363747" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=6735ecacb5" /><link rel="stylesheet" href="css/ui-shell.min.css?v=e6952619b0" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=66a1363747" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=6735ecacb5" /><link rel="stylesheet" href="css/ui-shell.min.css?v=38d0aaa2bb" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=4ee2fa8795" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=6735ecacb5" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=e6952619b0" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=38d0aaa2bb" media="print" onload="this.media='all'">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=66a1363747">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=f7ad9bbbab">
     <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=bab6500ff9">
@@ -1127,7 +1129,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=e8aa6a3986"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=8339483c70"></script>
+    <script defer src="js/core.min.js?v=b59e1d4dcf"></script>
     <script defer src="js/login-device.min.js?v=3c7f3ca971"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b89afcfcce"></script>

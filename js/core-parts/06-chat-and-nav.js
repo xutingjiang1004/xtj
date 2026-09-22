@@ -1492,6 +1492,8 @@
                     const root = document.documentElement;
                     root.classList.add('xtj-ios-viewport');
                     let keyboardOpen = false;
+                    // 环境固有的视口差（非键盘部分），取历史最小值当基线。见 updateIOSViewport。
+                    var viewportBaseline = Infinity;
 
                     function hasActiveInput() {
                         var active = document.activeElement;
@@ -1502,14 +1504,17 @@
                         var vv = window.visualViewport;
                         var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
-                        var viewportBottom = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
-                        // ★ 2026-09-22 微信 webview 适配（小程序 web-view + 微信内置浏览器）：
-                        //   这两种环境里 window.innerHeight 与 visualViewport 的差值**并非键盘造成**
-                        //   （微信的导航栏/工具栏在 webview 之外、不参与 visualViewport，差值恒定 > 0），
-                        //   而 .dock-bar 的 bottom 取 max(--xtj-visual-bottom, inset-bottom)
-                        //   → Dock 会被顶到屏幕中下部。故在微信内按 0 处理
-                        //   （微信的键盘是缩放 webview 而非覆盖布局，不会丢信息）。
-                        if (/MicroMessenger/i.test(navigator.userAgent)) viewportBottom = 0;
+                        var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+                        // ★ 2026-09-22 视口差基线（微信 web-view / 微信内置浏览器 / 开发者工具模拟器通吃）：
+                        //   这些环境里 window.innerHeight 与 visualViewport 存在**环境固有的恒定差值**
+                        //   （微信的导航栏工具栏、调试器里的 iframe 都不参与 visualViewport），
+                        //   它并不是键盘造成的。若直接把它当键盘高度，.dock-bar 的
+                        //   bottom: max(--xtj-visual-bottom, inset-bottom) 就会把 Dock 顶到屏幕中下部。
+                        //   做法：用**历史最小值当基线**，只有超出基线的增量才算真正的键盘。
+                        //   好处：不依赖 UA（模拟器/真机/内置浏览器都成立），纯浏览器里基线恒为 0，
+                        //   行为与修复前逐像素一致。
+                        if (rawDiff < viewportBaseline) viewportBaseline = rawDiff;
+                        var viewportBottom = Math.max(0, rawDiff - viewportBaseline);
                         root.style.setProperty('--xtj-visual-bottom', viewportBottom + 'px');
                         if (dockBar) {
                             // Reserve the real Dock footprint so the last post never scrolls behind it.
