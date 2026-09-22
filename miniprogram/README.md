@@ -107,6 +107,19 @@ miniprogram/                     小程序代码根目录
 - 小程序端不要写 `window` / `document`，那是网页 API。
 - 本项目根目录的 `npm run build` / `npm test` **不会处理** `miniprogram/`（构建脚本用的是显式文件清单，不是通配符），所以两边完全解耦。
 
+### 网页侧为小程序做的适配（2026-09-22）
+
+小程序 web-view 里页面已经在微信导航栏**下方**，但 iOS 仍按「全屏」上报安全区，
+导致网页版的顶部多出一块空白、底部 Dock 被顶到屏幕中下部。已在网页侧修好：
+
+| 位置 | 改动 |
+|---|---|
+| `index.html`（`<head>` 早期脚本） | UA 含 `miniProgram` 时给 `<html>` 加 `.xtj-miniprogram`（公众号/微信内置浏览器不含该关键字，不误伤） |
+| `css/ui-shell.css` | 小程序环境下 `.dock-panel` 顶部回到 24px（原本 iOS 竖屏是 `max(52px, inset+12px)`）、sticky header `top: 0`、`.dock-bar` 的 `bottom` 只保留底部 home indicator 的真实安全区 |
+| `js/core-parts/06-chat-and-nav.js` | 小程序环境下不再把 `innerHeight − visualViewport` 的差值写进 `--xtj-visual-bottom`（微信里该差值恒 >0 且非键盘所致，会把 Dock 顶上去） |
+
+> 改这几个文件后需 `node scripts/assemble-core.js` 再 `npm run build`（`js/core.js` 由 core-parts 拼装生成）。
+
 ---
 
 ## 七、怎么"上线"（三条真实路线）
