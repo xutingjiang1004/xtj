@@ -180,7 +180,19 @@
   // 显示为转义形态（纯属观感问题，不构成注入）。返回 null 表示没有可用渲染器，
   // 调用方应回退到 textContent（纯文本）。
   function renderMarkdownEscFirst(text) {
-    var renderFn = (typeof window.renderMarkdown === 'function') ? window.renderMarkdown : null;
+    // ★ 修复：此前只查 window.renderMarkdown，但全仓库从未有任何脚本给它赋值
+    //   （ai-agent.js 的 renderMarkdown 是 IIFE 内部函数；ai-core 导出的是
+    //   window.XtjAiCore.Markdown.render）。导致本函数恒返回 null，工作台的
+    //   AI 回复一直以纯文本 textContent 呈现，Markdown/代码块静默失效。
+    //   现按优先级解析：① window.renderMarkdown（保持向后兼容）
+    //                 ② window.XtjAiCore.Markdown.render（ai-core 首屏 defer 加载，稳定可用）
+    var renderFn = null;
+    if (typeof window.renderMarkdown === 'function') {
+      renderFn = window.renderMarkdown;
+    } else if (window.XtjAiCore && window.XtjAiCore.Markdown &&
+               typeof window.XtjAiCore.Markdown.render === 'function') {
+      renderFn = window.XtjAiCore.Markdown.render;
+    }
     if (!renderFn) return null;
     try {
       return renderFn(esc(String(text == null ? '' : text)));

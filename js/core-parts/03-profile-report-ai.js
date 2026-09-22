@@ -208,7 +208,7 @@
                             writeAvatarCacheToStorage(cv);
                         } catch(e) {}
                     } else if (!getAvatarUrl(currentUser)) {
-                        avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
+                        avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? escapeHtml(currentUser[0].toUpperCase()) : '?') + '</span>';
                     }
                 } catch(e) {
                     console.error("加载头像失败:", e);
@@ -465,7 +465,7 @@
                                 writeAvatarCacheToStorage(cv);
                             } catch(e) {}
                         } else {
-                            profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
+                            profileAvatar.innerHTML = currentUser ? escapeHtml(currentUser[0].toUpperCase()) : '?';
                         }
                     }
                 } catch(e) {
@@ -1981,8 +1981,8 @@ function renderProfileActivityList(kind) {
                         } else {
                             var profileAvatar = document.getElementById('profileAvatar');
                             var myAvatar = document.getElementById('myAvatar');
-                            if (profileAvatar) profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
-                            if (myAvatar) myAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
+                            if (profileAvatar) profileAvatar.innerHTML = currentUser ? escapeHtml(currentUser[0].toUpperCase()) : '?';
+                            if (myAvatar) myAvatar.innerHTML = currentUser ? escapeHtml(currentUser[0].toUpperCase()) : '?';
                         }
                     }
                 } catch(e) {
