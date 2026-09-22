@@ -8061,8 +8061,9 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 [data-theme="dark"] .cw-msg-content pre { background: rgba(0, 0, 0, 0.35); }
 [data-theme="dark"] .cw-chat-input { background: rgba(18, 27, 24, 0.7); border-top-color: rgba(110, 165, 140, 0.18); }
 
-/* 移动端适配 */
-@media (max-width: 767px) {
+/* 移动端适配（断点统一为 767.98px：与文件内 7102 行、以及全局 768px 的 min-width 规则严格互斥。
+   原写 767px 会留下 767.01~767.99px 的空档，浏览器缩放/系统 DPI 缩放停在门槛附近时两边都不生效） */
+@media (max-width: 767.98px) {
   .cw-sidebar { flex-basis: 46%; max-width: 46%; }
   .cw-main { flex-basis: auto; }
   .cw-viewer { flex-basis: 45%; }

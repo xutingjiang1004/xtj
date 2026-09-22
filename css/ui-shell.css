@@ -1107,7 +1107,9 @@
     transform: translate(-50%, 0) !important; opacity: 1 !important;
   }
 }
-@media (min-width: 1024px) and (max-width: 1279px) {
+/* 断点统一为 1279.98px（原写 1279px，与下方 1969 行的 1279.98px、以及全局 1280px 的
+   min-width 规则之间留下 1279.01~1279.99px 空档，缩放停在门槛附近时两边都不生效） */
+@media (min-width: 1024px) and (max-width: 1279.98px) {
   #panelPosts .wrap, #panelPosts.active .wrap {
     display: grid !important; grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas: "stats" "publish" "filter" "feed" !important;
