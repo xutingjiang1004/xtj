@@ -169,3 +169,27 @@ test('photo cleanup validates generated paths and fails closed on reference look
   assert.match(cleanup, /status\(503\)/);
   assert.doesNotMatch(cleanup, /var refCheck = null/);
 });
+
+test('GitHub 代理按规范化路径鉴权：`..` 路径遍历不得绕过 DELETE/PATCH 最小授权', () => {
+  // 回归背景（第三轮审计）：白名单此前比对 parsed.pathname（字面值），而实际请求
+  // 拼接进 fetch('https://api.github.com' + upstreamPath) 时会被 URL 规范化。
+  // 两者不一致 → `/repos/o/r/contents/../../git/refs/heads/main` 字面匹配
+  // DELETE 白名单（以 contents/ 开头），实际却请求到 /repos/o/git/refs/heads/main，
+  // 使"禁止删分支/标签/仓库"的约束失效。
+  // normalizeGhPath 定义在 proxyGithubApi 之前，故断言范围从它开始
+  const proxy = routeBlock('function normalizeGhPath', 'app.post(\'/api/code/gh-proxy\'');
+  // 必须存在规范化步骤，且全部白名单校验都作用于规范化结果
+  assert.match(proxy, /function normalizeGhPath/, '必须定义路径规范化函数');
+  assert.match(proxy, /var safePath = normalizeGhPath\(parsed\.pathname\)/);
+  assert.match(proxy, /CODE_GH_PATH_OK\.test\(safePath\)/);
+  assert.match(proxy, /CODE_GH_DELETE_PATH_OK\.test\(safePath\)/);
+  assert.match(proxy, /CODE_GH_PATCH_PATH_OK\.test\(safePath\)/);
+  // 不得再对未规范化的 parsed.pathname 做授权判断
+  assert.doesNotMatch(proxy, /_PATH_OK\.test\(parsed\.pathname\)/);
+  // 上游请求路径必须用 safePath，保证"校验的"与"请求的"一致
+  assert.match(proxy, /var upstreamPath = safePath \+ parsed\.search/);
+  assert.doesNotMatch(proxy, /var upstreamPath = parsed\.pathname/);
+  // 拒绝 `.` / `..` 段与编码绕过
+  assert.match(proxy, /segs\[i\] === '\.' \|\| segs\[i\] === '\.\.'/);
+  assert.match(proxy, /%2e\|%2f\|%5c/i);
+});

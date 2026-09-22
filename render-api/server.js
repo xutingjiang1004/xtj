@@ -26277,6 +26277,37 @@ var CODE_GH_PATH_OK = /^\/?(repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/.*)?|user(
 // PATCH 仅允许更新分支引用(git/refs，Git Database 多文件提交需要)。
 var CODE_GH_DELETE_PATH_OK = /^\/?repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/contents\//;
 var CODE_GH_PATCH_PATH_OK = /^\/?repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/git\/refs\//;
+// ★ 第三轮审计修复（🟠 授权绕过）：上述三条路径白名单此前比对的是**未规范化的
+//   字面 pathname**，而实际请求走的是 `fetch('https://api.github.com' + upstreamPath)`，
+//   URL 构造时会把 `..` 段规范化掉 —— 两者不一致即可绕过校验。
+//
+//   实测（Node 22）：
+//     请求 /repos/foo/bar/contents/../../git/refs/heads/main
+//       → 字面路径匹配 CODE_GH_DELETE_PATH_OK（以 contents/ 开头）→ 放行
+//       → 实际请求 /repos/foo/git/refs/heads/main
+//       结果：DELETE 的"仅允许删文件、禁止删分支/标签/仓库"限制被绕过。
+//     同理 /repos/x/y/../../../../user/repos → 实际请求 /user/repos。
+//   （host 仍被固定为 api.github.com，不构成 SSRF；但"最小授权"这层防护失效。）
+//
+//   修复：先把 pathname 规范化，再对**规范化结果**做全部校验，并额外拒绝任何
+//   含 `.` / `..` 段的原始路径（正常 GitHub API 路径不会出现这两种段）。
+function normalizeGhPath(pathname) {
+  var raw = String(pathname || '');
+  if (!raw) return null;
+  // 先解码一次，避免 %2e%2e 之类的编码形式绕过下面的段检查
+  var decoded = raw;
+  try { decoded = decodeURIComponent(raw); } catch (e) { return null; }
+  if (/%2e|%2f|%5c/i.test(raw)) return null; // 仍含编码的点/斜杠 → 直接拒绝
+  var segs = decoded.split('/');
+  for (var i = 0; i < segs.length; i++) {
+    if (segs[i] === '.' || segs[i] === '..') return null;
+    if (segs[i].indexOf('\\') >= 0) return null; // 反斜杠不作为分隔符，出现即异常
+  }
+  // 与 fetch 侧一致：交给 URL 做规范化，确保校验对象与最终请求路径完全相同
+  try {
+    return new URL('https://api.github.com' + decoded).pathname;
+  } catch (e) { return null; }
+}
 async function proxyGithubApi(req, res) {
   try {
     var body = (req && req.body) || {};
@@ -26301,13 +26332,19 @@ async function proxyGithubApi(req, res) {
     if (parsed.username || parsed.password) {
       return res.status(400).json({ error: '网址不允许包含凭据', code: 'INVALID_INPUT' });
     }
-    if (!CODE_GH_PATH_OK.test(parsed.pathname)) {
+    // ★ 关键：以**规范化后**的路径做全部白名单校验（此前用的是 parsed.pathname，
+    //   与 fetch 实际请求路径不一致，可被 `..` 绕过）。
+    var safePath = normalizeGhPath(parsed.pathname);
+    if (!safePath) {
+      return res.status(400).json({ error: '路径不合法（不允许 . / .. / 反斜杠或编码绕过）', code: 'INVALID_INPUT' });
+    }
+    if (!CODE_GH_PATH_OK.test(safePath)) {
       return res.status(400).json({ error: '仅支持仓库/用户接口路径', code: 'INVALID_INPUT' });
     }
-    if (method === 'DELETE' && !CODE_GH_DELETE_PATH_OK.test(parsed.pathname)) {
+    if (method === 'DELETE' && !CODE_GH_DELETE_PATH_OK.test(safePath)) {
       return res.status(400).json({ error: '删除操作仅限仓库内文件（contents），不允许删除仓库/分支/标签等', code: 'INVALID_INPUT' });
     }
-    if (method === 'PATCH' && !CODE_GH_PATCH_PATH_OK.test(parsed.pathname)) {
+    if (method === 'PATCH' && !CODE_GH_PATCH_PATH_OK.test(safePath)) {
       return res.status(400).json({ error: 'PATCH 仅限更新分支引用（git/refs）', code: 'INVALID_INPUT' });
     }
     // 请求体（如 contents 更新的 base64 内容）过大则拒绝
@@ -26318,7 +26355,9 @@ async function proxyGithubApi(req, res) {
         return res.status(413).json({ error: '提交内容过大（单文件不超过约 8MB）', code: 'PAYLOAD_TOO_LARGE' });
       }
     }
-    var upstreamPath = parsed.pathname + parsed.search;
+    // ★ 第三轮审计：改用规范化后的 safePath 拼接上游 URL，保证"校验的路径"
+    //   与"实际请求的路径"完全一致（此前用 parsed.pathname，两者可被 `..` 拉开差异）。
+    var upstreamPath = safePath + parsed.search;
     var upstreamHeaders = {
       'Authorization': 'Bearer ' + token,
       'Accept': 'application/vnd.github+json',
