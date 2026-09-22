@@ -7165,9 +7165,11 @@ async function reconcileCatJobs() {
 }
 
 // 定期运行 reconciliation（每 5 分钟，分散在 worker 循环中）
+// ★ 审计修复：常驻定时器补 .unref()，否则会持有 event loop 引用、阻止进程优雅退出
+//   （与 556/3902/3999/4486 等处已有的 .unref() 模式保持一致）。
 setInterval(function() {
   reconcileCatJobs().catch(function() {});
-}, 300000);
+}, 300000).unref();
 
 let currentCatAiWorkers = 0;
 const MAX_CAT_AI_WORKERS = 3;
@@ -7207,7 +7209,7 @@ setInterval(function() {
     if (currentCatAiWorkers >= MAX_CAT_AI_WORKERS) break;
     processNextCatJob().catch(function() {});
   }
-}, 3000);
+}, 3000).unref(); // ★ 审计修复：worker 轮询不应阻止进程退出
 
 // D2：配额表兜底清理。生产优先用 pg_cron（迁移 039 已在扩展可用时注册每小时任务），
 // 这里在后端进程内再做一层每小时清理，避免无 pg_cron 时 ai_cat_rate_limits 无限膨胀。
@@ -7216,7 +7218,7 @@ setInterval(function() {
     var cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     supabase.from('ai_cat_rate_limits').delete().lt('created_at', cutoff).then(function() {}, function() {});
   } catch (e) { /* best-effort */ }
-}, 60 * 60 * 1000);
+}, 60 * 60 * 1000).unref(); // ★ 审计修复：配额表兜底清理不应阻止进程退出
 
 // 小猫 AI 回复状态查询接口（★ M11：补 rateLimit，防 comment_id 高频遍历放大 DB）
 app.get('/api/comments/ai-reply-status', rateLimit(60000, 30), authenticateUser, async (req, res) => {
@@ -10758,7 +10760,7 @@ setInterval(function() {
   // ★ 修复：吊销哈希 10 分钟才从 DB 重建，导致多实例下"登出即失效"最长有 10 分钟
   // 窗口；改为每 60 秒同步一次，缩短撤销传播延迟。
   loadRevokedTokenHashes().catch(function(){});
-}, 60000);
+}, 60000).unref(); // ★ 审计修复：Admin token 清理不应阻止进程退出
 
 // 生成签名 token：base64(payload) + '.' + HMAC
 function _signPayload(payload) {
@@ -21778,6 +21780,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     try { clearTimeout(_timer); } catch (e) {}
     try { clearTimeout(_fcTimer); } catch (e) {}
     try { clearTimeout(_totalTimer); } catch (e) {}
+    try { if (typeof _toolProgressTimer !== 'undefined' && _toolProgressTimer) clearInterval(_toolProgressTimer); } catch (e) {}
+    try { if (typeof _dsmlToolProgress !== 'undefined' && _dsmlToolProgress) clearInterval(_dsmlToolProgress); } catch (e) {}
   }
   req.on('aborted', markStreamDisconnected);
   res.on('close', function() {
@@ -22650,6 +22654,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             //   极端情况下空闲连接被代理切断。
             //   现按 3s 周期推送 tool_progress（带已耗时），前端据此原地刷新
             //   计时文案，既保活又给出"确实在干活"的反馈。
+            // ★ 审计修复：显式 var 提升到函数作用域后统一在 finally 清理。
+            //   旧写法在 try 块内 var，异常路径（见下方 catch(fcErr)）不会执行
+            //   clearInterval，定时器泄漏并持续每 3s 写一个已废弃的 res。
             var _toolProgressTimer = setInterval(function() {
               if (res.writableEnded || aborted) return;
               try {
@@ -22792,6 +22799,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } catch (fcErr) {
         clearTimeout(_fcTimer);
         console.error('[AGENT-STREAM] FC error:', fcErr && fcErr.message);
+      } finally {
+        // ★ 审计修复：无论正常/异常路径都停掉工具进度定时器，避免泄漏。
+        if (typeof _toolProgressTimer !== 'undefined' && _toolProgressTimer) clearInterval(_toolProgressTimer);
       }
     }
     T_stage.fc_preflight_ms = Date.now() - (T_stage.fc_preflight_start || Date.now());
@@ -23732,6 +23742,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     return safeEnd();
   } catch (streamErr) {
+    // ★ 审计修复：DSML 兜底路径的进度定时器在异常时不会执行到下方 clearInterval，
+    //   会永久泄漏并每 3s 向已结束的响应写事件，这里兜底清理。
+    try { if (typeof _dsmlToolProgress !== 'undefined' && _dsmlToolProgress) clearInterval(_dsmlToolProgress); } catch (e) {}
     // ★ 修复 S2/S11（簇 A）：流读取异常 + 客户端已断开 → 此前直接 return，不记账。
     //   此时 contentBuffer 可能已有内容、usageInStream 可能已收到上游 usage，
     //   说明上游确实消耗了 token，必须补记。
@@ -24914,7 +24927,7 @@ setInterval(function() {
     var toDelete = Array.from(postTranslationCache.keys()).slice(0, postTranslationCache.size - 500);
     toDelete.forEach(function(k) { postTranslationCache.delete(k); });
   }
-}, 10 * 60 * 1000);
+}, 10 * 60 * 1000).unref(); // ★ 审计修复：翻译缓存清理不应阻止进程退出
 
 app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), async (req, res) => {
   var closed = false;
@@ -25949,7 +25962,7 @@ setInterval(function() {
   cleanupOldLogs('visit').catch(function(e) { console.warn('[Cleanup] Auto-cleanup visit failed:', e && e.message); });
   cleanupOldLogs('attack').catch(function(e) { console.warn('[Cleanup] Auto-cleanup attack failed:', e && e.message); });
   cleanupExpiredRateLimitRows().catch(function(e) { console.warn('[Cleanup] rate-limit rows sweep failed:', e && e.message); });
-}, 24 * 60 * 60 * 1000);
+}, 24 * 60 * 60 * 1000).unref(); // ★ 审计修复：日志清理不应阻止进程退出
 
 // 自动清理 AI 聊天记录 (每天一次)
 var _aiCleanupLock = false;
@@ -25987,7 +26000,7 @@ async function autoCleanupAiMessages() {
   } catch (e) { console.warn('[AUTO-CLEANUP] cleanup failed:', e && e.message); }
   _aiCleanupLock = false;
 }
-setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
+setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000).unref(); // ★ 审计修复：AI 消息清理不应阻止进程退出
 // 服务启动 30s 后执行首次清理
 setTimeout(function() { autoCleanupAiMessages().catch(function() {}); }, 30000);
 
