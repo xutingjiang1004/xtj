@@ -9524,11 +9524,29 @@ async function callDeepSeekViaResponses(messages, options) {
       } catch (e) {}
 
       // 并行执行工具调用
+      // ★ 2026-09-23 修复（工具不可取消）：
+      //   此处此前传 `{ userName: (options && options._userName) || '' }` 作为 context，
+      //   相比 Chat 路径（7469-7478 行的 toolCallCtx）缺了 `signal` 字段。
+      //   当 toolExecutor 取默认值 executeToolCall 时，其内部有 8 处依赖
+      //   `context.signal`（2114/2225/2630/2811/2890/2936/3362/3427），
+      //   全部是远程请求的取消/超时信号 —— 缺 signal 意味着这条路径下的工具调用
+      //   **无法被外部 abort 取消**：用户点暂停或请求超时后，已发出的
+      //   read_web_page / search_web 等仍会在后台跑到自身内部超时才结束。
+      //   现补上 signal，与 Chat 路径语义对齐。
+      //
+      //   注意：调用方若自行传入 tool_executor（buildToolExecutor / 20310 / 20427 /
+      //   22271 三处内联实现），它们**只声明 1 个形参**并在内部用自己的闭包 userName
+      //   构造 context，完全忽略本参数 —— 故本次改动不影响这些路径。
+      var respToolCallCtx = {
+        userName: (options && options._userName) || '',
+        searchConsumed: 0,
+        signal: externalSignal || null
+      };
       var toolResults = await Promise.all(functionCalls.map(async function(fc, fi) {
         var tStart = Date.now();
         var toolResult = null;
         try {
-          toolResult = await toolExecutor({ function: { name: fc.name, arguments: fc.arguments } }, { userName: (options && options._userName) || '' });
+          toolResult = await toolExecutor({ function: { name: fc.name, arguments: fc.arguments } }, respToolCallCtx);
         } catch (e) {
           if (externalSignal && externalSignal.aborted) throw e;
           toolResult = { tool_name: fc.name, error: (e && e.message) || '工具执行失败' };
