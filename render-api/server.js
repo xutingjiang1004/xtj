@@ -18725,12 +18725,43 @@ app.post('/api/agent/pro/activate', authenticateUser, async (req, res) => {
     if (active) {
       expires = new Date(Date.now() + days * 86400000).toISOString();
     }
+    // ★ 审计修复（🟠 静默失败）：自定义额度此前直接透传给 aiQuota.setPro，
+    //   非法值被 normalizeDailyLimit 静默降级为 null（= 用默认额度），管理员
+    //   无从得知"设 0 次/false 其实没生效"。此处显式校验并回传实际落库值，
+    //   让调用方能区分「未设置」「已按值设置」「因非法被忽略」三种情况。
+    //   合法范围与 054 迁移的 CHECK 一致：token ∈ {-1, 0, >0}；search ∈ {-1, 0, >0}。
+    function parseIntLimitField(raw, fieldName) {
+      if (raw === undefined || raw === null || raw === '') return { provided: false };
+      var num = (typeof raw === 'number') ? raw
+        : (typeof raw === 'string' && /^[+-]?\d+(\.\d+)?$/.test(raw.trim())) ? Number(raw.trim())
+        : NaN;
+      if (!Number.isFinite(num)) return { provided: true, invalid: true, field: fieldName, raw: raw };
+      var n = Math.floor(num);
+      if (n < -1) return { provided: true, invalid: true, field: fieldName, raw: raw };
+      return { provided: true, value: n };
+    }
+    var tkLimit = parseIntLimitField(req.body && req.body.token_limit_daily, 'token_limit_daily');
+    var shLimit = parseIntLimitField(req.body && req.body.search_limit_daily, 'search_limit_daily');
+    var invalid = [tkLimit, shLimit].filter(function(x) { return x.invalid; });
+    if (invalid.length) {
+      return res.status(400).json({
+        ok: false,
+        error: '自定义额度非法：' + invalid.map(function(x) { return x.field + '=' + JSON.stringify(x.raw); }).join(', ')
+          + '（须为整数 ≥ -1；-1 表示无限，0 表示禁用）'
+      });
+    }
     var quota = await aiQuota.setPro(target, active, {
       expires_at: expires,
-      token_limit_daily: req.body && req.body.token_limit_daily !== undefined ? req.body.token_limit_daily : undefined,
-      search_limit_daily: req.body && req.body.search_limit_daily !== undefined ? req.body.search_limit_daily : undefined
+      token_limit_daily: tkLimit.provided ? tkLimit.value : undefined,
+      search_limit_daily: shLimit.provided ? shLimit.value : undefined
     });
-    return res.json({ ok: true, quota: quota, activated: active, expires_at: expires });
+    return res.json({
+      ok: true, quota: quota, activated: active, expires_at: expires,
+      applied_limits: {
+        token_limit_daily: tkLimit.provided ? tkLimit.value : null,
+        search_limit_daily: shLimit.provided ? shLimit.value : null
+      }
+    });
   } catch (e) {
     console.error('[AI-QUOTA] POST /api/agent/pro/activate error:', e && e.message);
     return res.status(500).json({ ok: false, error: '开通失败' });

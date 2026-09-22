@@ -127,9 +127,29 @@ function getTokenQuotaErrorMessage(reason) {
 // 归一化自定义日额度（setPro 的 token_limit_daily / search_limit_daily）：
 // 非有限值（NaN / ±Infinity / 非数字字符串）回退 null（使用默认额度），
 // 防止把 NaN 透传入库污染 ai_user_membership（审计 🟡：旧实现 Math.max(-1, NaN) = NaN）。
+// ★ 第三轮审计修复（🟠 静默失败）：入参必须显式校验，不能"尽力而为"地解析。
+//   旧实现有三个问题，均会导致**静默写错额度**（管理员以为设成功了）：
+//   1) Number('') === 0、Number('  ') === 0、Number(false) === 0 → 空字符串/布尔
+//      false 被解析成 0；而 0 在 054 迁移的语义里是「禁用」（token 额度 0 = 一天
+//      都用不了），等于把用户锁死而不是回退默认。
+//   2) Number(true) === 1 → 布尔 true 变成"每天 1 token"。
+//   3) Number('0x10') === 16、Number('1e5') === 100000 → 非十进制字面量被当合法数字。
+//   现改为：仅接受 number 类型或**纯十进制数字字符串**；其余一律 null（用默认额度）。
+//   保留 0 与 -1 两个语义值：search 的 0 = 禁用搜索、-1 = 无限（054 迁移语义）。
 function normalizeDailyLimit(value) {
   if (value === null || value === undefined) return null;
-  var num = Number(value);
+  var num;
+  if (typeof value === 'number') {
+    num = value;
+  } else if (typeof value === 'string') {
+    var trimmed = value.trim();
+    // 仅接受十进制整数/小数（可选正负号）；拒绝 ''、'0x10'、'1e5'、'1_000' 等
+    if (!/^[+-]?\d+(\.\d+)?$/.test(trimmed)) return null;
+    num = Number(trimmed);
+  } else {
+    // boolean / object / array / function 等一律拒绝
+    return null;
+  }
   if (!Number.isFinite(num)) return null;
   return Math.max(-1, Math.floor(num));
 }
