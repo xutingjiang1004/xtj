@@ -6747,7 +6747,29 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   background: var(--primary);
   margin-left: 2px;
   vertical-align: text-bottom;
-  animation: ai-cursor-breathe 1.15s ease-in-out infinite;
+  /* ★ 2026-09-22：由"整根明暗呼吸"改为**流动渐变** ——
+     光标本身带一段移动的渐变（background-size 拉宽 + background-position
+     位移），看起来像一线光在往上淌，而不是整块闪。这是 Siri 那种
+     "边缘流光"的最小可用形态，且只作用于光标本身，不碰正文布局。 */
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--primary) 30%, transparent) 0%,
+    var(--primary) 45%,
+    var(--primary) 60%,
+    color-mix(in srgb, var(--primary) 30%, transparent) 100%
+  );
+  background-size: 100% 220%;
+  background-position: 0 0;
+  animation: ai-cursor-flow 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+/* 降级：不支持 color-mix 的老引擎回退到纯色（保持原有观感，不影响功能） */
+@supports not (background: color-mix(in srgb, red 50%, transparent)) {
+  .ai-stream-cursor { background-image: none; background: var(--primary); }
+}
+@keyframes ai-cursor-flow {
+  0%   { background-position: 0 -110%; opacity: 0.55; }
+  50%  { background-position: 0 0;     opacity: 1; }
+  100% { background-position: 0 110%;  opacity: 0.55; }
 }
 @keyframes ai-cursor-breathe {
   0%, 42% { opacity: 1; }

@@ -1171,15 +1171,21 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
   50%      { box-shadow: 0 0 0 3.5px rgba(66, 155, 122, 0.22); }
 }
 
-/* ── 5) 新到达的正文段落：轻微浮起（不是整块砸下） ─────────────────────
-   只对新插入的块生效（ai-streaming-soft 在流式期间挂在容器上），
-   已渲染完的历史内容不动，避免长回复滚动时满屏都在动。 */
+/* ── 5) 新到达的正文：软揭示（不是整块砸下） ───────────────────────────
+   ★ 2026-09-22 修正：原先用 `.ai-streaming-soft > :last-child` 选块元素，
+     但实测 renderMarkdown 的输出里**没有 <p>**（段落是裸文本 + <br>），
+     所以那条规则基本从未生效。
+     现在改由 renderMarkdown 在流式期间把**尾部文本残余**包成
+     `.ai-stream-soft`；由于增量补丁会因内容不同而 replaceChild，
+     该 span 每次更新都是新节点，动画必定重放 ——
+     新文字是"渗"进来的，不是"跳"进来的。 */
 @keyframes xtjBlockRise {
-  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+  from { opacity: 0; transform: translate3d(0, 3px, 0); }
   to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
-.ai-streaming-soft > :where(p, ul, ol, pre, blockquote, h1, h2, h3, h4, table):last-child {
-  animation: xtjBlockRise .26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+.ai-streaming-soft .ai-stream-soft {
+  animation: xtjBlockRise .22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  will-change: opacity, transform;
 }
 
 /* ── 6) 无障碍降级：所有流动动画必须能被彻底停掉 ────────────────────────
@@ -1189,17 +1195,18 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
   .ai-tool-round-list .ai-tool-step.is-running::before,
   .ai-tool-result-card,
   .ai-stream-cursor,
-  .ai-streaming-soft > * { animation: none !important; }
+  .ai-stream-soft { animation: none !important; }
   .ai-tool-round.is-running .ai-tool-round-label { background-image: none !important; }
 }
 html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label,
 html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step.is-running::before,
 html[data-xtj-motion=off] .ai-tool-result-card,
 html[data-xtj-motion=off] .ai-stream-cursor,
-html[data-xtj-motion=off] .ai-streaming-soft > *,
+html[data-xtj-motion=off] .ai-stream-soft,
 html[data-xtj-motion=weak] .ai-tool-round.is-running .ai-tool-round-label,
 html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step.is-running::before,
-html[data-xtj-motion=weak] .ai-stream-cursor {
+html[data-xtj-motion=weak] .ai-stream-cursor,
+html[data-xtj-motion=weak] .ai-stream-soft {
   animation: none !important;
 }
 html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label {
