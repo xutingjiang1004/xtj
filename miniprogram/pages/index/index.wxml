@@ -1,0 +1,5 @@
+<!--
+  ⚠️ 微信规定：<web-view> 必须独占整个页面，不能与其他组件混排。
+  所以本页面只有这一行；需要显示提示时请跳到 pages/help/help。
+-->
+<web-view src="{{url}}" bindload="onLoad" binderror="onError"></web-view>

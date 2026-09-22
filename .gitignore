@@ -51,3 +51,9 @@ __pycache__/
 
 # 审计报告（本仓库为 public：报告含未修复问题细节、内网/后台信息，仅保留在本地，不进版本库）
 /audit-reports/
+
+# 微信开发者工具的本地私有配置（含本机项目名/基础库版本，官方建议不入库）
+project.private.config.json
+
+# 小程序 npm 构建产物
+miniprogram_npm/
