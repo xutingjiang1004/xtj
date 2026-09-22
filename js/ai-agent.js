@@ -1230,15 +1230,32 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       .replace(/&#x27;/g, "'");
   }
 
-  function renderMarkdown(txt) {
+  function renderMarkdown(txt, streaming) {
     if (!txt) return '';
     var s = String(txt);
     // ★ 先提取代码块，避免重复转义
     var codeBlocks = [];
+    function escapeCode(code) {
+      return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    // ★ 2026-09-22 流式容错：未闭合的代码围栏也必须按代码块渲染。
+    //   旧实现只匹配**已闭合**的 ```…```，流式中途（模型刚吐出 ```js\n
+    //   还没给结尾围栏）整块匹配不上，于是裸反引号被当作普通正文转义后
+    //   直接显示给用户 —— 屏幕上先闪出一串 ```，等闭合围栏到达的瞬间又
+    //   整块突变（跳）成 <pre> 代码块。这就是"闪一下 / 跳一下"的直接来源。
+    //   现在：先处理已闭合的，再单独兜住"只有开头围栏"的尾部残余。
     s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
       var idx = codeBlocks.length;
       // 代码块只转义一次
-      codeBlocks.push('<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;') + '</code></pre>');
+      codeBlocks.push('<pre><code>' + escapeCode(code) + '</code></pre>');
+      return '\x00XCB' + idx + '\x00';
+    });
+    // 未闭合围栏：到字符串末尾仍未出现结束 ```（流式进行中的常态）。
+    // 用 [\s\S]*$ 兜住尾部，同样渲染为代码块 —— 闭合到来时只是内容增长，
+    // 不会发生"裸文本 → 代码块"的形态突变。
+    s = s.replace(/```(\w*)\n([\s\S]*)$/, function(m, lang, code) {
+      var idx = codeBlocks.length;
+      codeBlocks.push('<pre><code>' + escapeCode(code.replace(/\n$/, '')) + '</code></pre>');
       return '\x00XCB' + idx + '\x00';
     });
     // ★ 普通正文：HTML 转义
@@ -1316,6 +1333,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     s = s.replace(/\n/g, '<br>');
     // ★ 恢复代码块
     s = s.replace(/\x00XCB(\d+)\x00/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
+    // ★ 2026-09-22 软揭示（C）：
+    //   背景：CSS 那边原本靠 `.ai-streaming-soft > :last-child { animation }`
+    //   做"新块浮起"，但实测 renderMarkdown 的输出里**根本没有 <p>** ——
+    //   段落是裸文本 + <br>，所以那条规则基本没生效过。
+    //   且增量补丁不重建未变节点，一次性入场动画也不会重放。
+    //   做法：流式期间把**尾部的文本残余**包成一个专用 span。它每次内容
+    //   更新都会是"新节点"（旧节点 outerHTML 不同 → 被 replaceChild），
+    //   因此入场动画必定重放 —— 新到达的文字是"渗"进来的，不是"跳"进来的。
+    //   只在 streaming=true 时启用；最终态走 streaming=false，DOM 保持干净。
+    if (streaming && s) {
+      // 只包裹**纯文本尾巴**：从末尾往前扫，遇到第一个 '>' 就停 ——
+      // 即最后一段文本节点（前面必有标签闭合）。
+      // 这样绝不会横跨 </ul> / </pre> 之类的块边界，不会产出非法 HTML；
+      // 若末尾正好是标签收尾（如代码块刚闭合），则本帧不包裹（下一帧再包）。
+      var gt = s.lastIndexOf('>');
+      var tail = gt >= 0 ? s.slice(gt + 1) : s;
+      // 尾巴必须非空、且不含 '<'（确保是纯文本，不夹带标签）
+      if (tail && tail.indexOf('<') < 0) {
+        s = s.slice(0, gt + 1) + '<span class="ai-stream-soft">' + tail + '</span>';
+      }
+    }
     return s;
   }
 
@@ -3205,7 +3243,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var _renderGap = rendered.length < 600 ? 48 : 64;
         var shouldRender = (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending);
         if (shouldRender && !isSelectionInTarget(targetEl)) {
-          patchInnerHTML(targetEl, renderMarkdown(rendered));
+          patchInnerHTML(targetEl, renderMarkdown(rendered, true));
           targetEl._lastRender = now;
         }
       }
