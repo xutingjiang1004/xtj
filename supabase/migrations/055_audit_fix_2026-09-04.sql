@@ -166,6 +166,9 @@ DECLARE
   -- 白名单与 render-api/server.js USER_INFO_ALLOWED_KEYS（约 1898-1903 行）保持一致。
   -- 白名单之外的键一律拒绝合并（含 emails / phones / GPS 轨迹等敏感键——
   -- 它们本就不该被业务写入 __user_info__.content）。
+  -- ★ 注意（2026-09-22）：本数组中的 consented_contacts / consented_clipboard 及其
+  --   history 键已随「通讯录/剪贴板采集功能整体移除」作废，见 057_remove_consented_collection.sql
+  --   （该迁移会重建本函数并收窄白名单）。此处保留原样仅为保持迁移历史可追溯。
   v_allowed_keys CONSTANT text[] := ARRAY[
     'email', 'last_visit', 'last_login', 'last_device', 'last_device_id', 'last_ip',
     'last_ip_location', 'precise_location_history', 'last_precise_location',

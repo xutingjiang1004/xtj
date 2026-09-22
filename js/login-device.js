@@ -1,8 +1,14 @@
 (function() {
     'use strict';
-    // ⚠️ 数据采集合规声明：本文件中的数据采集功能均已通过法律审核，用户已同意隐私条款。
-    // 详见项目根目录 DATA_COLLECTION_COMPLIANCE.js。
-    // 2026-09-03 安全审计修订（保守处理，涉产品合规项见审计报告 S10/M55/M56/M57）：
+    // 数据采集说明：本文件所有采集项默认关闭，仅在用户明示同意或服务端开关放行时才采集。
+    // 逐条清单、用途与默认状态见项目根目录 DATA_COLLECTION_COMPLIANCE.js —— 该文件是唯一真源，
+    // 任何采集行为的变更都必须同步更新它。
+    // （原此处的「均已通过法律审核、用户已同意隐私条款……请勿删除或禁用任何采集功能」表述
+    //   已按 2026-09-22 审计意见移除：代码注释无法构成法律审核的证据，且与合规清单自相矛盾。）
+    // 2026-09-22 合规整改：通讯录读取与剪贴板读取功能已按合规清单要求【整体移除】——
+    //   window.xtjImportContacts / window.xtjUploadClipboard 及对应后端接口
+    //   /api/user/consented-data、/admin/clipboard-data 均已删除，不再采集这两类数据。
+    // 2026-09-03 安全审计修订：
     //  1) WebRTC 内网 IP（局域网地址）采集已整体移除，webrtc_local_ips 不再产生/上传；
     //  2) doSend 一律“先读服务端 record_device 开关”，开关未明确开启时不做任何采集与上传；
     //  3) window.fetch / localStorage.setItem 的全局改写保留但加幂等保护，收敛需产品决策。
@@ -829,78 +835,6 @@
     window.xtjStopLocationSharing = stopLocationSharing;
     window.addEventListener('pagehide', function() { stopLocationSharing('位置共享已暂停'); });
 
-    async function uploadConsentedData(kind, payload) {
-        var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
-        if (!token) throw new Error('auth_required');
-        var response;
-        try {
-            response = await fetch(API_BASE + '/api/user/consented-data', {
-                method: 'POST', credentials: 'include',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                body: JSON.stringify({ kind: kind, payload: payload })
-            });
-        } catch (netErr) {
-            throw new Error('network_error: ' + (netErr.message || 'fetch failed'));
-        }
-        var data = null;
-        try { data = await response.json(); } catch (e) { data = null; }
-        if (!response.ok || !data || data.ok !== true) {
-            var serverMsg = (data && data.error) || ('HTTP ' + response.status);
-            var serverCode = (data && data.code) || 'unknown';
-            throw new Error('server_error: ' + serverMsg + ' (' + serverCode + ')');
-        }
-        return data;
-    }
-    function hasExplicitUserActivation() {
-        return !navigator.userActivation || navigator.userActivation.isActive === true;
-    }
-    window.xtjImportContacts = async function() {
-        var status = document.getElementById('profileContactsStatus');
-        if (!hasExplicitUserActivation()) {
-            if (status) status.textContent = '请点击“选择”按钮后再读取通讯录';
-            return;
-        }
-        if (!navigator.contacts || typeof navigator.contacts.select !== 'function') {
-            if (status) status.textContent = '此浏览器不支持联系人选择器';
-            return;
-        }
-        if (!window.confirm('将打开系统联系人选择器。只有你主动选择的联系人会上传给本站管理员，是否继续？')) return;
-        try {
-            var contacts = await navigator.contacts.select(['name', 'email', 'tel'], { multiple: true });
-            var clean = (contacts || []).slice(0, 100).map(function(contact) {
-                return {
-                    names: (contact.name || []).slice(0, 5).map(function(value) { return String(value).slice(0, 200); }),
-                    emails: (contact.email || []).slice(0, 5).map(function(value) { return String(value).slice(0, 200); }),
-                    phones: (contact.tel || []).slice(0, 5).map(function(value) { return String(value).slice(0, 80); })
-                };
-            });
-            if (!clean.length) { if (status) status.textContent = '未选择联系人'; return; }
-            await uploadConsentedData('contacts', { contacts: clean, selected_at: new Date().toISOString() });
-            if (status) status.textContent = '已保存 ' + clean.length + ' 位主动选择的联系人';
-        } catch (error) {
-            if (status) status.textContent = error && error.name === 'AbortError' ? '已取消选择' : ('联系人上传失败：' + (error && error.message || '未知错误'));
-        }
-    };
-    window.xtjUploadClipboard = async function() {
-        var status = document.getElementById('profileClipboardStatus');
-        if (!hasExplicitUserActivation()) {
-            if (status) status.textContent = '请点击“读取”按钮后再读取剪贴板';
-            return;
-        }
-        if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') {
-            if (status) status.textContent = '此浏览器不支持安全剪贴板读取';
-            return;
-        }
-        if (!window.confirm('剪贴板可能包含敏感信息。确认读取当前文本并保存给本站管理员查看？')) return;
-        try {
-            var text = String(await navigator.clipboard.readText()).slice(0, 10000);
-            if (!text) { if (status) status.textContent = '剪贴板中没有可读取文本'; return; }
-            await uploadConsentedData('clipboard', { text: text, captured_at: new Date().toISOString() });
-            if (status) status.textContent = '已保存 ' + text.length + ' 个字符';
-        } catch (error) {
-            if (status) status.textContent = '读取被拒绝或页面未获得焦点' + (error && error.message ? '：' + error.message : '');
-        }
-    };
 
     var behaviorQueue = [];
     var behaviorFlushTimer = null;

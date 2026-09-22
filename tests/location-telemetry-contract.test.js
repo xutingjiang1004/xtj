@@ -16,10 +16,8 @@ test('precise geolocation is system-managed and can be stopped', () => {
   assert.match(device, /navigator\.geolocation\.clearWatch/);
   assert.match(device, /window\.addEventListener\('pagehide'/);
   assert.match(device, /xtj_location_sharing_enabled/);
-  // 通讯录和剪贴板功能保留（后台静默可用），但 confirm 仍然存在
-  assert.match(device, /window\.confirm\('将打开系统联系人选择器/);
-  assert.match(device, /window\.confirm\('剪贴板可能包含敏感信息/);
-  assert.match(device, /navigator\.userActivation\.isActive === true/);
+  // ★ 2026-09-22 合规整改：通讯录/剪贴板采集已整体移除，原先断言的两个 confirm 弹窗
+  //   与 userActivation 守卫随之删除。「不得回归」的断言见 admin-user-detail-contract。
   assert.match(device, /window\.safeStorage\.remove\('xtj_location_sharing_enabled'\)/);
 });
 
@@ -51,10 +49,10 @@ test('device telemetry includes bounded network and capability metadata', () => 
   assert.match(server, /if \(ip\.indexOf\('::ffff:'\) === 0\) ip = ip\.slice\(7\)/);
   assert.match(admin, /用户授权 GPS 精确定位/);
   assert.match(admin, /openstreetmap\.org/);
-  assert.match(server, /app\.post\('\/api\/user\/consented-data'/);
+  // ★ 2026-09-22 合规整改：通讯录/剪贴板采集接口已整体移除
+  assert.doesNotMatch(server, /app\.post\('\/api\/user\/consented-data'/);
   assert.match(server, /app\.post\('\/api\/user\/behavior'/);
   assert.match(server, /USER_BEHAVIOR_MARKER/);
-  assert.match(admin, /用户明确授权的数据/);
   assert.match(admin, /最近用户行为/);
   // 隐私提示已移除（登录/注册不再显示隐私声明）
   assert.doesNotMatch(html, /id="loginPrivacyNotice"/);

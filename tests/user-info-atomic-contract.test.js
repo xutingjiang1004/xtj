@@ -33,7 +33,8 @@ test('administrator sensitive reads are scoped, authenticated and audited', () =
   assert.match(server, /app\.get\('\/admin\/user-data', verifyToken/);
   assert.match(server, /\.eq\('user_name', userName\)[\s\S]*?USER_INFO_MARKER/);
   assert.match(server, /logAdminAudit\('view_user_sensitive_data'/);
-  assert.match(server, /fields=ip,location,device,behavior,contacts,clipboard/);
+  // ★ 2026-09-22：审计明细中的 contacts/clipboard 已随采集功能移除
+  assert.match(server, /fields=ip,location,device,behavior/);
 });
 
 test('browser roles can select only normal feed rows and cannot mutate posts directly', () => {
