@@ -463,7 +463,13 @@ function getDeepSeekCapabilitySnapshot() {
     verifiedAvailable: !!DEEPSEEK_API_KEY && modelAvailable === true,
     providerContextTokens: providerContextTokens,
     providerMaxOutputTokens: providerMaxOutputTokens,
-    apiFormat: 'openai-chat-completions'
+    // ★ 2026-09-23 修正：此前硬编码为 'openai-chat-completions'，但服务端对 DeepSeek
+    //   实际走**两条**通道 —— callDeepSeek()（/chat/completions）与
+    //   callDeepSeekViaResponses()（/responses，由 options.use_responses_api 触发）。
+    //   固定宣称单一格式会误导排查（"为什么工具行为和 chat-completions 不一样"）。
+    //   注：本函数当前无任何调用方（既无路由暴露、也无内部引用），属预留的
+    //   能力快照；此处如实标注双通道，避免将来接上时传递错误信息。
+    apiFormats: ['openai-chat-completions', 'openai-responses']
   };
 }
 // 文件解析器 — 共用模块
@@ -8907,7 +8913,19 @@ async function callDeepSeekViaResponses(messages, options) {
       var t = options.tools[ti];
       var fn = t && t.function ? t.function : {};
       var name = fn.name || '';
-      if (!name || name === 'search_web') continue;
+      if (!name) continue;
+      // ★ 2026-09-23 修复（两路径工具集不一致）：
+      //   此处此前为 `if (!name || name === 'search_web') continue;`，即**无条件剔除**
+      //   search_web。但调用方传进来的 tools 已经是 aiToolsForSearch(includeTavily) /
+      //   aiToolsForWorkMode() 的产物 —— 它们遵循"search_web 恒可见、只按开关裁
+      //   tavily_search"的约定（见 1520 行 aiToolsForSearch 的注释与实现）。
+      //   结果：同一份 AI_TOOLS 经两条路径下发时，Chat Completions 路径保留 search_web、
+      //   Responses 路径静默丢掉它。而 buildCatAiToolSummary() 是**从全量 AI_TOOLS
+      //   动态生成**的，会向模型宣称"你有 search_web" —— 提示词宣称 ≠ 实际下发，
+      //   正是"模型幻觉能力/自述工具数不对"的经典成因。
+      //   现改为只过滤 Responses API 原生支持的 web_search 类型（本路径工具全部是
+      //   function 工具，此过滤实际不命中，保留作防御），不再裁剪 search_web。
+      if (name === 'web_search') continue;
       tools.push({
         type: 'function',
         name: name,

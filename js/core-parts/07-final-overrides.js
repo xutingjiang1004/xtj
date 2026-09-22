@@ -114,7 +114,11 @@
                 var normalized = post ? normalizePost(post) : null;
                 if (!normalized || !normalized.media_url) return '';
                 if (normalized.media_type === 'image') {
-                    return '<img class="stat-record-thumb" src="' + escapeHtml(normalized.media_url) + '" alt="记录缩略图" loading="lazy">';
+                    // ★ 修复（XSS 防护一致性）：同 03 文件的 profileActivityMedia，
+                    //   媒体 URL 需过 sanitizeUrl 协议白名单，拒绝 javascript:/data:text/html。
+                    var statMediaUrl = sanitizeUrl(normalized.media_url);
+                    if (!statMediaUrl) return '';
+                    return '<img class="stat-record-thumb" src="' + escapeHtml(statMediaUrl) + '" alt="记录缩略图" loading="lazy">';
                 }
                 if (normalized.media_type === 'video') {
                     return '<div class="stat-record-thumb stat-record-thumb--video" aria-hidden="true">视频</div>';

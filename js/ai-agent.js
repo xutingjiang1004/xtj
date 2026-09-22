@@ -5302,7 +5302,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
 
   // ===================== 共享 SSE 处理循环 =====================
-  // 被 handleSendDeepThink（历史死代码）与 handleDeepThinkPageSend 共用
+  // 由 handleDeepThinkPageSend 调用（深度思考页发送流程）
   async function processDeepThinkSSE(opts) {
     var reader = opts.reader;
     var controller = opts.controller;
@@ -5789,422 +5789,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
-  // ===================== M: 深度思考模式发送 =====================
-  // 独立流程: 走 /api/agent/chat (deep_think=true) SSE 长连接
-  //   进度卡实时更新 (1-10 个 agent 状态)
-  //   done 后渲染最终答案 + [来源N] 标注 + 搜索徽章
-  async function handleSendDeepThink(text, input, sendBtn, messagesEl) {
-    var originalText = text;
-    function restoreInputText() {
-      input.value = originalText;
-      input.style.height = 'auto';
-      try { input.style.height = Math.min(input.scrollHeight, 120) + 'px'; if (!_isTouchMobile) input.focus(); } catch (e) {}
-      updateInputMetrics();
-    }
-
-    var authOk = await ensureUserAuthOrNotify();
-    if (!authOk) { S.sending = false; return; }
-
-    // ★ U3 P0-3 修复: 只有存在真实的旧请求时才 abort, 避免误杀自己
-    if (S.abortController || S.deepThinkJob) {
-      abortCurrentRequest();
-      try { await new Promise(function(r) { setTimeout(r, 100); }); } catch (e) {}
-    }
-
-    S.clientRequestId++;
-    var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
-    S._currentReqId = reqId;
-    function resetSendingIfCurrent() {
-      if (S._currentReqId === reqId) {
-        if (dtFetchTimeoutTimer) { clearTimeout(dtFetchTimeoutTimer); dtFetchTimeoutTimer = null; }
-        S.sending = false;
-        S.deepThinkJob = null;
-        S.deepThinkProgressCard = null;
-        S.abortController = null;
-        S.paused = false;
-        S.activeRenderers = [];
-        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
-      }
-    }
-    
-    if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
-    clearReplyTimer();
-
-    // 1. 追加 user 消息
-    var nowIso = new Date().toISOString();
-    var userMsg = { role: 'user', content: text, created_at: nowIso };
-    S.messages.push(userMsg);
-    try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache2) {}
-    appendMessage(messagesEl, userMsg);
-    S.autoScrollPinned = true;
-    scrollToBottom(messagesEl, true);
-
-    // 2. 创建进度卡 (而不是 typing node)
-    var progressCard = buildDeepThinkProgressCard();
-    progressCard.classList.add('dt-animate-in');
-    S.deepThinkProgressCard = progressCard;
-    messagesEl.appendChild(progressCard);
-    scrollToBottom(messagesEl, true);
-
-    // 3. 清空输入框
-    input.value = '';
-    input.style.height = 'auto';
-    updateInputMetrics();
-    if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
-    else { try { input.focus(); } catch (e2) {} }
-
-    // 4. 创建 AbortController
-    var controller = new AbortController();
-    // ★ 修复：旧版深度思考发送也走独立通道，避免覆盖普通聊天状态（此函数为历史死代码，同步保留）
-    S._dtAbortController = controller;
-    S.deepThinkJob = controller;
-    S.currentStreamAborted = false;
-    // 深度思考 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
-    // 请求可无限挂起。这里加 120s 绝对超时兜底（超时只 abort 本次，不清理全局状态）。
-    var dtFetchTimeoutTimer = setTimeout(function() {
-      if (S._dtCurrentReqId !== reqId) return;
-      try { controller.abort('timeout'); } catch (e) {}
-      controller._abortReason = 'timeout';
-    }, 120000);
-    if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
-
-    var url = API_BASE + '/chat';
-    var auth = await getUserAuthPayload({ forceNoToken: false });
-    var headers = auth.headers || {};
-    var fetchBody = JSON.stringify({
-      message: text,
-      conversation_id: S.conversationId,
-      client_request_id: reqId,
-      deep_think: true,
-      chat_mode: 'normal',
-      // ★ P 新增: 传思考程度给后端 runMultiAgentFlow (后端会用这个, 不用 config)
-      thinking_mode: S.deepThinkEffort || 'max',
-      web_search: S.webSearchEnabled,
-      model: S.selectedModel
-    });
-
-    var aborted = false;
-    var aiContent = '';
-    var finalMeta = null;
-    var finalModel = '';
-    // ★ P 改: 用 S.deepThinkEffort (从后端 config 同步) 替代写死 high
-    var finalThinkingMode = S.deepThinkEffort || 'max';
-    var streamConvId = null;
-    // P5: using assistantNode (single DOM node)
-    // P5: using assistantBubble (single DOM node)
-    var contentRenderer = null;
-    var answerRenderer = null;  // V2: 流式答案渲染器 answer_chunk 用
-    var answerStarted = false; // V2: 是否已进入回答阶段
-    var doneReceived = false;
-    var evtHandled = false;
-
-    function safeRemoveProgressCard() {
-      if (progressCard) {
-        try { progressCard.classList.add('ai-progress-card-done'); } catch (e) {}
-        try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
-        try { progressCard.remove(); } catch (e) {}
-        try { progressCard._done = true; } catch (e) {}
-      }
-    }
-
-    function ensureThinkCardNode() {
-      if (aiNodeRef.value) return aiNodeRef.value;
-      if (isResearchCard(progressCard)) {
-        aiNodeRef.value = progressCard;
-        return aiNodeRef.value;
-      }
-      safeRemoveProgressCard();
-      var node = el('div', { class: 'ai-think-card expanded generating' });
-      node.innerHTML =
-        '<div class="ai-think-header">' +
-          '<span class="ai-think-title">思考中…</span>' +
-          '<span class="ai-think-meta"></span>' +
-          '<span class="ai-think-chevron">▾</span>' +
-        '</div>' +
-        '<div class="ai-think-body">' +
-          '<details class="ai-think-thinking">' +
-            '<summary><span>查看思考过程</span></summary>' +
-            '<div class="ai-think-thinking-body"></div>' +
-          '</details>' +
-        '</div>' +
-        '<div class="ai-think-answer"></div>' +
-        '<div class="ai-msg-footer"></div>';
-      var headerEl = node.querySelector('.ai-think-header');
-      var chevronEl = node.querySelector('.ai-think-chevron');
-      headerEl.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        var isCollapsed = node.classList.contains('collapsed');
-        if (isCollapsed) {
-          node.classList.remove('collapsed');
-          node.classList.add('expanded');
-          if (chevronEl) chevronEl.textContent = '▾';
-        } else {
-          node.classList.add('collapsed');
-          node.classList.remove('expanded');
-          if (chevronEl) chevronEl.textContent = '▸';
-        }
-      });
-      messagesEl.appendChild(node);
-      aiNodeRef.value = node;
-      S.autoScrollPinned = true;
-      scrollToBottom(messagesEl, true);
-      return node;
-    }
-
-    // ★ O 修复 Bug 4: 构建 think-card (取代旧的 ai-msg 节点)
-    //   折叠性: 头部显示 "● 已思考 38s · 5 个 agent" + 折叠按钮
-    //   展开式: 顶部思考过程日志 + 底部最终答案(markdown)
-    //   閫€鍑哄璇濇閲嶈繘鍚? think-card 浠?history 恢复
-    function finishThinkCard(node, content, evt) {
-      if (isResearchCard(node) && node._researchState &&
-          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
-      if (node) node.classList.remove('generating');
-      if (node) node.classList.add('done');
-
-      var searchCount = evt ? (evt.search_count || 0) : 0;
-      var searchQuery = evt ? (evt.search_query || '') : '';
-      var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
-      var searchExpiresAt = evt && typeof evt.search_expires_at === 'number' ? evt.search_expires_at : 0;
-      var usage = evt && evt.usage ? evt.usage : null;
-      var agentCount = evt && evt.agent_count ? evt.agent_count : 0;
-      var plannerInfo = evt && evt.planner ? evt.planner : null;
-      var workerResults = evt && Array.isArray(evt.worker_results) ? evt.worker_results : null;
-      var thinkingLog = evt && Array.isArray(evt.thinking_log) ? evt.thinking_log : [];
-      var thinkDurationMs = evt && typeof evt.think_duration_ms === 'number' ? evt.think_duration_ms : 0;
-
-      var aiMsg = {
-        role: 'assistant',
-        content: content,
-        reasoning: '',
-        created_at: new Date().toISOString(),
-        // ★ P 改: 用 finalThinkingMode (后端动态) 替代写死 max
-        thinking_mode: finalThinkingMode,
-        deep_think: true,
-        agent_count: agentCount,
-        planner: plannerInfo,
-        worker_results: workerResults,
-        thinking_log: thinkingLog,
-        think_duration_ms: thinkDurationMs,
-        search_count: searchCount,
-        search_query: searchQuery,
-        search_results: searchResults,
-        search_expires_at: searchExpiresAt,
-        // ★ P 改: usage.thinking_mode 同步实际值
-        usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount })
-      };
-      S.messages.push(aiMsg);
-
-      if (node) {
-        var contentForRender = content || '';
-        var answerEl = node.querySelector('.ai-think-answer');
-        function finalizeAnswer() {
-          setupBubbleCopy(answerEl, messagesEl);
-          var titleEl = node.querySelector('.ai-think-title');
-          if (titleEl) titleEl.textContent = '已思考';
-        }
-        if (answerEl) {
-          if (answerRenderer) {
-            // V2: 流式渲染已在 answer_chunk 进行，done 时只 finish 成 markdown
-            answerRenderer.finish(contentForRender);
-            answerRenderer = null;
-            finalizeAnswer();
-          } else {
-            if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
-            answerEl.innerHTML = '';
-            contentRenderer = createSmoothTextRenderer(answerEl, {
-              minChunk: 8, maxChunk: 64, charsPerMs: 100,
-              onDone: function() { finalizeAnswer(); }
-            });
-            contentRenderer.append(contentForRender);
-            contentRenderer.finish(contentForRender);
-            contentRenderer = null;
-          }
-        }
-
-        // 渲染思考过程日志(放进 <details> 内, 先合并同角色连续条目)
-        var thinkLogBox = node.querySelector('.ai-think-thinking-body');
-        if (thinkLogBox && thinkingLog.length > 0) {
-          thinkLogBox.innerHTML = '';
-          // 合并同角色连续条目
-          var mergedLog = [];
-          for (var tli = 0; tli < thinkingLog.length; tli++) {
-            var mtl = thinkingLog[tli];
-            var mlast = mergedLog[mergedLog.length - 1];
-            if (mlast && mlast.agent_role === (mtl.agent_role || 'AI') && mlast.round === (mtl.round || 0)) {
-              mlast.chunk = (mlast.chunk || '') + (mtl.chunk || '');
-            } else {
-              mergedLog.push({ agent_role: mtl.agent_role || 'AI', chunk: mtl.chunk || '', round: mtl.round || 0 });
-            }
-          }
-          mergedLog.forEach(function(entry, idx) {
-            var entEl = el('div', { class: 'ai-thought-entry' });
-            var roleLabel = entry.agent_role || 'AI';
-            var roundLabel = entry.round ? (' · 第' + entry.round + '轮') : '';
-            entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + escapeHtml(roundLabel) + '</div><div class="ai-thought-chunk"></div>';
-          entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
-            thinkLogBox.appendChild(entEl);
-          });
-          var summaryEl = node.querySelector('.ai-think-thinking summary');
-          if (summaryEl) {
-            var sumSpan = summaryEl.querySelector('span:last-child');
-            if (sumSpan) sumSpan.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
-          }
-        } else {
-          // 没有思考过程, 隐藏 details
-          var detailsEl = node.querySelector('.ai-think-thinking');
-          if (detailsEl) detailsEl.style.display = 'none';
-        }
-
-        var footer = node.querySelector('.ai-msg-footer');
-        if (footer) {
-          footer.innerHTML = '';
-          if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-          // V2: 简洁模式标签，去掉重复 sparkle
-          footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
-          if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
-          if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已研究 ' + searchCount + ' 个来源' }));
-          if (usage || finalModel) {
-            var usageLine = buildUsageLine(aiMsg.usage);
-            if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
-          }
-        }
-
-        // 标签 + 时间 (放 header)
-        // Show search sources in think-card
-        if (searchResults && searchResults.length > 0 && searchQuery) {
-          var searchBox = document.createElement('div');
-          searchBox.className = 'ai-search-supplement';
-          var searchHtml = '🔍 搜索来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果)<br>';
-          var shownResults = searchResults.slice(0, 5);
-          for (var si = 0; si < shownResults.length; si++) {
-            var sr = shownResults[si];
-            var safeSrUrl = safeSearchUrl(sr.url);
-            if (safeSrUrl && sr.title) {
-              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title) + '</a><br>';
-            } else if (safeSrUrl) {
-              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(safeSrUrl) + '</a><br>';
-            }
-          }
-          if (searchResults.length > 5) {
-            searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 条来源</span>';
-          }
-          searchBox.innerHTML = searchHtml;
-          var thinkBody = node.querySelector('.ai-think-body');
-          if (thinkBody) {
-            answerEl = node.querySelector('.ai-think-answer');
-            if (answerEl) {
-              thinkBody.insertBefore(searchBox, answerEl);
-            } else {
-              thinkBody.appendChild(searchBox);
-            }
-          }
-        }
-
-        var durationSec = Math.round(thinkDurationMs / 1000);
-        var min = Math.floor(durationSec / 60);
-        var sec = durationSec % 60;
-        var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
-        var titleEl = node.querySelector('.ai-think-title');
-        var metaEl = node.querySelector('.ai-think-meta');
-        // V2: 去掉重复 sparkle (footer 已有模式标签), header 鍙斁绾枃瀛?已思考 Xs"
-        if (titleEl) titleEl.textContent = '已思考 ' + durationStr;
-        // V2: 去掉重复 1 agent (footer 已有 agent-badge), header meta 留空
-        if (metaEl) metaEl.textContent = '';
-
-        if (node.classList.contains('collapsed')) {
-          node.classList.remove('collapsed');
-          node.classList.add('expanded');
-        }
-      }
-    }
-
-    try {
-      var resp = await fetch(url, {
-        method: 'POST',
-        headers: headers,
-        body: fetchBody,
-        signal: controller.signal
-      });
-      if (!resp.ok) {
-        try {
-          var rawErrText = await resp.text().catch(function(){ return ''; });
-          var ej = null;
-          if (rawErrText) {
-            try { ej = JSON.parse(rawErrText); } catch (parseErr) {
-              console.warn('[AI] Non-JSON error response', { status: resp.status, contentType: resp.headers.get('content-type'), bodyPreview: rawErrText.slice(0, 200) });
-            }
-          }
-          if (S._currentReqId !== reqId) return;
-          safeRemoveProgressCard();
-          notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')')));
-        } catch(e){}
-        resetSendingIfCurrent(); return;
-      }
-      if (!resp.body) {
-        safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
-        if (isResearchCard(progressCard)) {
-          setResearchCardState(progressCard, 'error', { statusText: '研究失败，请重试', expanded: false });
-        } else {
-          notify('AI 没有响应');
-        }
-        resetSendingIfCurrent();
-        return;
-      }
-
-      var reader = resp.body.getReader();
-      var r = { value: null }, c = { value: '' }, fm = {}, fmod = { value: '' }, ft = { value: S.deepThinkEffort || 'max' };
-      var ar = { value: null }, cr = { value: null }, as = { value: false }, dr = { value: false }, eh = { value: false };
-      var sc = { value: null }, ab = { value: false };
-      var sseResult = await processDeepThinkSSE({
-        reader: reader, controller: controller, progressCard: progressCard, reqId: reqId,
-        aiNodeRef: r, aiContentRef: c, finalMetaRef: fm, finalModelRef: fmod, finalThinkingModeRef: ft,
-        answerRendererRef: ar, contentRendererRef: cr, answerStartedRef: as, doneReceivedRef: dr, evtHandledRef: eh,
-        streamConvIdRef: sc, abortedRef: ab, messagesEl: messagesEl, scrollEl: messagesEl,
-        defaultThinkingMode: S.deepThinkEffort || 'max',
-        onErrorNoContent: function() { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); },
-        onResetSending: resetSendingIfCurrent
-      });
-      if (sc.value) { S.conversationId = sc.value; writeConvId(sc.value); }
-      if ((S._currentReqId !== reqId || ab.value) && !eh.value) {
-        // ★ 修复：error 事件已渲染部分回答（evtHandledRef=true）时不得删除节点，
-        // 否则已完成的思考卡片会闪现后消失（服务端也未保存）。
-        if (controller && controller._abortReason === 'timeout' && !isResearchCard(progressCard)) {
-          notify('思考超时，请重试');
-        }
-        safeRemoveProgressCard(); if (ar.value) try { ar.value.cancel(); } catch(e){}
-        if (r.value) try { r.value.remove(); } catch(e){} resetSendingIfCurrent(); return;
-      }
-      safeRemoveProgressCard(); S.paused = false; S.activeRenderers = [];
-      if (progressCard) try { progressCard._done = true; } catch(e){}
-      if (!eh.value) {
-        if (r.value && c.value) { finishThinkCard(r.value, c.value, fm.value); }
-        else if (!dr.value && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
-        else if (!dr.value) { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); notify('AI 暂时没有回应'); }
-      }
-    } catch (fetchErr) {
-      if (S._currentReqId !== reqId) { safeRemoveProgressCard(); return; }
-      safeRemoveProgressCard(); if (progressCard) try { progressCard._done = true; } catch(e){}
-      S.paused = false; S.activeRenderers = [];
-      var dtTimeoutAbort = !!(controller && controller._abortReason === 'timeout');
-      if (fetchErr && fetchErr.name !== 'AbortError') {
-        if (c && c.value) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
-        else { S.messages.pop(); removeLastUserMessage(messagesEl); restoreInputText(); notify('网络异常'); }
-      } else {
-        // 120s 绝对超时（fetch 阶段被 abort）：给用户可见提示并正确收尾
-        if (dtTimeoutAbort) notify('思考超时，请重试');
-        if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
-        else {
-          S.messages.pop(); removeLastUserMessage(messagesEl);
-          if (dtTimeoutAbort) restoreInputText();
-        }
-      }
-    }
-    resetSendingIfCurrent();
-    if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
-    updateInputMetrics();
-    scrollToBottom(messagesEl, false);
-  }
+  // ★ 清理（死代码）：此处原有 handleSendDeepThink(text, input, sendBtn, messagesEl)，
+  //   是「深度思考模式发送」的旧版独立流程。经全仓检索，该函数**无任何调用点**
+  //   （深度思考发送已由 handleDeepThinkPageSend 走 /api/agent/chat + processDeepThinkSSE 承接）。
+  //   且其内部 ensureThinkCardNode() 引用的 `aiNodeRef` 从未在函数作用域内声明
+  //   （aiNodeRef 仅作为 opts 字段传入 processDeepThinkSSE，并非本函数的局部变量），
+  //   一旦被调用即 ReferenceError。为消除误用面一并删除。
+  //
+  //   processDeepThinkSSE 保留 —— 它是活代码，被 handleDeepThinkPageSend 正常调用。
 
   // ===================== 深度思考页 =====================
 
@@ -10331,19 +9923,8 @@ function showChatMessages() {
       '</span>';
     plusWrap.appendChild(plusBtn);
 
-    // 系统级选择器：透明 select 铺满整行，iOS/桌面都能直接点开（不靠脆弱 showPicker）
-    function fillSelect(sel, options, selectedValue) {
-      if (!sel) return;
-      sel.innerHTML = '';
-      for (var si = 0; si < options.length; si++) {
-        var opt = options[si];
-        var o = document.createElement('option');
-        o.value = opt.value;
-        o.textContent = opt.label;
-        if (selectedValue != null && String(opt.value) === String(selectedValue)) o.selected = true;
-        sel.appendChild(o);
-      }
-    }
+    // ★ 清理（死代码）：fillSelect 原用于填充 #aiPlusModelSelect/#aiPlusThinkSelect
+    //   两个透明 select，随该段移除后已无任何调用点，一并删除。
 
     var panelShell = el('div', {
       class: 'ai-plus-panel-shell',
@@ -10732,8 +10313,12 @@ function showChatMessages() {
     }
     renderQuickChips();
 
-    var modelSelect = panelShell.querySelector('#aiPlusModelSelect');
-    var thinkSelect = panelShell.querySelector('#aiPlusThinkSelect');
+    // ★ 清理（死代码）：此处原有一对 `panelShell.querySelector('#aiPlusModelSelect')` /
+    //   `#aiPlusThinkSelect` 取元素 + fillSelect 填值。但这两个 id 在**全仓库 0 命中**
+    //   （面板模板 panelShell.innerHTML 里从未生成过它们），querySelector 恒返回 null，
+    //   fillSelect 首行 `if (!sel) return` 直接短路。模型/思考选择现由
+    //   `openSelectPopup(kind, anchor)` 弹出的 .ai-select-pop-list 承载。
+    //   注意：`buildModelOptions()` 不是死代码（openSelectPopup 10978 行在用），保留。
 
     // ★ 模型下拉：内置模型 + 用户添加的第三方模型 + 「添加自定义模型」入口
     function buildModelOptions() {
@@ -10748,28 +10333,6 @@ function showChatMessages() {
       opts.push({ value: '__add_custom__', label: '＋ 添加自定义模型' });
       return opts;
     }
-    function repopulateModelSelect(keepValue) {
-      if (!modelSelect) return;
-      var current = keepValue || S.selectedModel || 'deepseek-flash';
-      // 正确保留当前选择：自定义模型需仍存在；内置模型需仍在标签表里；
-      // 否则回落到默认 flash。
-      var target = 'deepseek-flash';
-      if (isCustomModelId(current)) {
-        if (findCustomModel(current.slice(CUSTOM_MODEL_PREFIX.length))) target = current;
-      } else if (modelLabels[current]) {
-        target = current;
-      }
-      fillSelect(modelSelect, buildModelOptions(), target);
-    }
-    repopulateModelSelect();
-
-    fillSelect(thinkSelect, [
-      { value: 'off', label: '关闭' },
-      { value: 'low', label: '轻度' },
-      { value: 'medium', label: '中度' },
-      { value: 'high', label: '深度' },
-      { value: 'max', label: '极致' }
-    ], S.thinkingMode || 'medium');
 
     var panelOpen = false;
     var panelClosing = false;
@@ -10795,7 +10358,6 @@ function showChatMessages() {
       }, 520);
     }
     function updateModelUI(flash) {
-      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-flash'; } catch (eM) {}
       var sum = panelShell.querySelector('#aiModelSummary');
       if (sum) {
         if (isCustomModelId(S.selectedModel)) sum.textContent = customModelDisplayName(S.selectedModel) || '自定义模型';
@@ -10804,7 +10366,6 @@ function showChatMessages() {
       }
     }
     function updateThinkUI(flash) {
-      try { if (thinkSelect) thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT) {}
       var sum = panelShell.querySelector('#aiThinkSummary');
       if (sum) {
         sum.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
@@ -11419,7 +10980,6 @@ function showChatMessages() {
               S.selectedModel = CUSTOM_MODEL_PREFIX + uid;
               S._userPickedModel = true;
               try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
-              repopulateModelSelect();
               updateModelUI(true);
               notify('已切换到：' + (m ? (m.label || m.model) : '自定义模型'));
               close();
@@ -11480,7 +11040,6 @@ function showChatMessages() {
           S.selectedModel = 'deepseek-flash';
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
         }
-        repopulateModelSelect();
         updateModelUI(true);
         renderList();
         notify('已删除：' + (removed ? (removed.label || removed.model) : '该自定义模型'));
@@ -11535,7 +11094,6 @@ function showChatMessages() {
           S.selectedModel = CUSTOM_MODEL_PREFIX + targetUid;
           S._userPickedModel = true;
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
-          repopulateModelSelect();
           updateModelUI(true);
           renderList();
           resetForm();
@@ -11548,7 +11106,6 @@ function showChatMessages() {
           S.selectedModel = CUSTOM_MODEL_PREFIX + newUid;
           S._userPickedModel = true;
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
-          repopulateModelSelect();
           updateModelUI(true);
           close();
           notify('已添加并切换到：' + label + '（' + p.label + '）');
@@ -11580,50 +11137,6 @@ function showChatMessages() {
       if (panelOpen) closePanel();
       else openPanel();
     });
-
-    // 透明 select 直接点选：打开前同步当前值，change 后更新
-    function syncSelectValues() {
-      try { if (modelSelect) modelSelect.value = S.selectedModel || 'deepseek-flash'; } catch (eM0) {}
-      try { if (thinkSelect) thinkSelect.value = S.thinkingMode || 'medium'; } catch (eT0) {}
-    }
-    if (modelSelect) {
-      modelSelect.addEventListener('mousedown', syncSelectValues);
-      modelSelect.addEventListener('touchstart', syncSelectValues, { passive: true });
-      modelSelect.addEventListener('focus', syncSelectValues);
-      modelSelect.addEventListener('change', function() {
-        var model = modelSelect.value;
-        if (!model) return;
-        // ★ 新增：选择「添加自定义模型」入口 → 打开管理弹窗，并回到已选模型
-        if (model === '__add_custom__') {
-          showCustomModelModal();
-          repopulateModelSelect();
-          return;
-        }
-        if (model !== S.selectedModel) {
-          S.selectedModel = model;
-          S._userPickedModel = true;
-          try { localStorage.setItem('xtj_ai_model', model); } catch (err) {}
-          notify('模型：' + (isCustomModelId(model) ? customModelDisplayName(model) : (modelLabels[model] || model)));
-        }
-        updateModelUI(true);
-      });
-    }
-    if (thinkSelect) {
-      thinkSelect.addEventListener('mousedown', syncSelectValues);
-      thinkSelect.addEventListener('touchstart', syncSelectValues, { passive: true });
-      thinkSelect.addEventListener('focus', syncSelectValues);
-      thinkSelect.addEventListener('change', function() {
-        var think = thinkSelect.value;
-        if (!think) return;
-        if (think !== S.thinkingMode) {
-          S.thinkingMode = think;
-          S._userPickedThinkingMode = true;
-          try { localStorage.setItem('xtj_ai_thinking_mode', think); } catch (err) {}
-          notify('思考程度：' + (thinkLabels[think] || think));
-        }
-        updateThinkUI(true);
-      });
-    }
 
     panelShell.addEventListener('click', function(e) {
       e.stopPropagation();
@@ -12023,7 +11536,6 @@ function showChatMessages() {
       input: input,
       sendBtn: sendBtn,
       pauseBtn: pauseBtn,
-      repopulate: repopulateModelSelect,
       updateModelUI: updateModelUI
     };
   }
@@ -12105,10 +11617,11 @@ function showChatMessages() {
         fetchConversations().catch(function(e) {
           try { console.warn('[AI-CONV] 预拉取会话列表失败:', e && e.message); } catch (ee) {}
         }),
-        // ★ 账号级同步第三方自定义模型（跨设备恢复），完成后刷新模型下拉
+        // ★ 账号级同步第三方自定义模型（跨设备恢复），完成后刷新模型摘要
+        //   （原先还调 r.repopulate() 重建透明 select，但对应 #aiPlusModelSelect
+        //    元素全仓不存在，该调用恒为空操作，已随死代码一并移除）
         syncCustomModelsFromServer().then(function() {
-          if (lifecycleId === S.lifecycleId && S.active && r.repopulate) {
-            try { r.repopulate(); } catch (eR) {}
+          if (lifecycleId === S.lifecycleId && S.active) {
             try { if (r.updateModelUI) r.updateModelUI(); } catch (eU) {}
           }
         })

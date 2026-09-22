@@ -1725,14 +1725,17 @@
             function getPostFilterUserAvatar(username) {
                 var safeName = escapeHtml(username || "");
                 var avatarUrl = getAvatarUrl(username);
-                if (avatarUrl) {
-                    return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
+                // ★ 修复（XSS 防护一致性）：此前只做 escapeHtml，未过 sanitizeUrl 协议白名单。
+                //   若缓存/服务端下发 `javascript:` 或 `data:text/html` 形态 URL，会直接进 src。
+                //   与本文件 renderAvatarContent（1678 行）保持一致，统一走 sanitizeUrl。
+                if (avatarUrl && sanitizeUrl(avatarUrl)) {
+                    return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarUrl)) + '" alt="' + safeName + '"></span>';
                 }
                 try {
                     var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[username] && cachedAvatars[username].url) {
+                    if (cachedAvatars[username] && cachedAvatars[username].url && sanitizeUrl(cachedAvatars[username].url)) {
                         avatarCache[username] = cachedAvatars[username];
-                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(cachedAvatars[username].url) + '" alt="' + safeName + '"></span>';
+                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[username].url)) + '" alt="' + safeName + '"></span>';
                     }
                 } catch(e) {}
                 return '<span class="post-user-chip-avatar">' + escapeHtml((username || "?").slice(0, 1).toUpperCase()) + '</span>';

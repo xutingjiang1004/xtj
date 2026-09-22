@@ -102,13 +102,15 @@ function limitSearchCacheSize() {
   for (var i = 0; i < overflow && i < keys.length; i++) searchCache.delete(keys[i]);
 }
 // 每 10 分钟清理过期搜索缓存
+// ★ 修复：常驻定时器未 unref，会持有 event loop 引用，阻止进程正常退出
+//   （与 server.js:5164 等处已有的 .unref() 模式保持一致）。
 setInterval(function() {
   var now = Date.now();
   searchCache.forEach(function(val, key) {
     if (val.expiresAt && now > val.expiresAt) searchCache.delete(key);
   });
   limitSearchCacheSize();
-}, 10 * 60 * 1000);
+}, 10 * 60 * 1000).unref();
 
 // ===================== 搜索 Provider 架构 =====================
 // 每个 provider 返回 { results: [...], error: string|null }
@@ -314,14 +316,15 @@ async function searchSearxng(query, maxResults) {
 async function searchBingHtml(query, maxResults) {
   try {
     var url = 'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&count=' + (maxResults || 5) + '&mkt=zh-CN';
+    // ★ 修复：此处 signal 曾被重复定义两次（对象字面量后键覆盖前键），
+    //   虽当前取值相同、行为无差异，但属于明显的复制粘贴残留，删除重复项。
     var resp = await fetch(url, {
       signal: AbortSignal.timeout(15000),
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept': 'text/html,application/xhtml+xml'
-      },
-      signal: AbortSignal.timeout(15000)
+      }
     });
     if (!resp.ok) return { results: [], error: 'BingHtml status=' + resp.status };
     // ★ 审计修复：Bing HTML 整页此前无上限读取入内存后正则扫描；
