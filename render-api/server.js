@@ -74,6 +74,12 @@ const { writeSse } = require('./sse-write');
  * @param {number} limit 条目上限
  * @returns {Array|null}
  */
+// 工具结果条目归一化。
+// ★ 第三轮审计修复（🟡 静默失败）：入参超过 limit 时此前**静默丢弃**多余条目，
+//   前端只拿到截断后的数组，无法区分「本来就这么少」和「被截断过」。
+//   现返回 { items, total, truncated }，调用方把 truncated/total 一并下发；
+//   前端可据此提示"仅展示前 N 条"。返回值语义变化：调用方须取 .items。
+//   （本函数仅 3 处调用，已同步改造；返回 null 表示"不是结果列表"，与旧行为一致。）
 function normalizeToolResultItems(raw, limit) {
   var max = typeof limit === 'number' && limit > 0 ? limit : 12;
   var arr = raw;
@@ -85,11 +91,14 @@ function normalizeToolResultItems(raw, limit) {
   }
   if (!Array.isArray(arr) || arr.length === 0) return null;
   var out = [];
-  for (var i = 0; i < arr.length && out.length < max; i++) {
+  var seen = 0; // 通过"像搜索结果"校验的条目总数（即真正可展示的候选数）
+  for (var i = 0; i < arr.length; i++) {
     var it = arr[i];
     // 只接受"看起来像搜索结果"的对象：至少有 url 或 title 之一
     if (!it || typeof it !== 'object') continue;
     if (!it.url && !it.title) continue;
+    seen++;
+    if (out.length >= max) continue; // 计数继续，但不入数组 —— 用于如实报告 total
     out.push({
       title: typeof it.title === 'string' ? it.title.slice(0, 200) : '',
       url: typeof it.url === 'string' ? it.url.slice(0, 2000) : '',
@@ -98,7 +107,8 @@ function normalizeToolResultItems(raw, limit) {
       published_at: typeof it.published_at === 'string' ? it.published_at.slice(0, 40) : ''
     });
   }
-  return out.length ? out : null;
+  if (!out.length) return null;
+  return { items: out, total: seen, truncated: seen > out.length };
 }
 const { getMailTransporter, getMailTransporterPort, GMAIL_USER, GMAIL_APP_PASSWORD } = require('./mail-transport');
 const { isNormalPost, applyNormalPostAllowlist, applyPublicPostExclusions, NORMAL_POST_MEDIA_TYPES } = require('./post-query');
@@ -22716,6 +22726,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch(e) {
                 try { console.warn('[AI-FC] parse tool result error:', e && e.message); } catch(ee) {}
               }
+              var _n1 = normalizeToolResultItems(trItems, 12);
               if (!writeSse(res, {
                 type: 'tool_result',
                 tool_name: item.toolResult.tool_name || '',
@@ -22726,7 +22737,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 query: item.toolResult.query || null,
                 // ★ 2026-09-22：路径 A 虽已是数组，仍走统一出口做字段净化，
                 //   保证三条路径对前端的契约完全一致。
-                items: normalizeToolResultItems(trItems, 12)
+                // ★ 第三轮审计：改取 { items, total, truncated }，如实上报截断状态。
+                items: _n1 ? _n1.items : null,
+                items_total: _n1 ? _n1.total : 0,
+                items_truncated: _n1 ? _n1.truncated : false
               })) { aborted = true; return safeEnd(); }
               if (Array.isArray(item.toolResult.cards)) {
                 item.toolResult.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
@@ -23627,6 +23641,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           }
         }
         
+        var _n2 = normalizeToolResultItems(toolResult.content, 12);
         writeSse(res, {
           type: 'tool_result',
           tool_name: toolResult.tool_name || '',
@@ -23634,7 +23649,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           count: toolResult.results_count || 0,
           // ★ 2026-09-22：原先直接把整段正文（content）塞进 items，
           //   前端当成结果数组渲染 → 整屏碎片文字。改为走统一出口校验。
-          items: normalizeToolResultItems(toolResult.content, 12),
+          // ★ 第三轮审计：改取 { items, total, truncated }，如实上报截断状态。
+          items: _n2 ? _n2.items : null,
+          items_total: _n2 ? _n2.total : 0,
+          items_truncated: _n2 ? _n2.truncated : false,
           query: toolResult.query || '',
           error: toolResult.error || null
         });
@@ -23702,13 +23720,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             _toolSearchMeta.expires_at = Date.now() + 86400000;
           }
         }
+        var _n3 = normalizeToolResultItems(dTRes.content, 12);
         writeSse(res, {
           type: 'tool_result',
           tool_name: dTRes.tool_name || dsmlToolResults[dti].name,
           success: !dTRes.error,
           count: dTRes.results_count || 0,
           // ★ 2026-09-22：同路径 B，整段正文不得当结果列表下发
-          items: normalizeToolResultItems(dTRes.content, 12),
+          // ★ 第三轮审计：改取 { items, total, truncated }，如实上报截断状态。
+          items: _n3 ? _n3.items : null,
+          items_total: _n3 ? _n3.total : 0,
+          items_truncated: _n3 ? _n3.truncated : false,
           query: dTRes.query || '',
           error: dTRes.error || null
         });
