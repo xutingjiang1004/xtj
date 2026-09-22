@@ -4370,8 +4370,8 @@ app.use(function(req, res, next) {
   if (/%[0-9a-fA-F]{2}/.test(p)) return res.status(404).end();
   // 路径穿越 / 反斜杠兜底（send 对 \ 也会做兼容处理）
   if (p.indexOf('..') !== -1 || p.indexOf('\\') !== -1) return res.status(404).end();
-  // 精确文件匹配
-  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/vercel.json', '/README.md', '/CHANGELOG.md', '/CODE_INDEX.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore', '/.gitattributes', '/playwright.config.js', '/playwright.config.ts'];
+  // 精确文件匹配（2026-09-22：Vercel 已弃用，/vercel.json 条目随文件删除一并移除）
+  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/README.md', '/CHANGELOG.md', '/CODE_INDEX.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore', '/.gitattributes', '/playwright.config.js', '/playwright.config.ts'];
   if (exact.indexOf(p) >= 0) return res.status(404).end();
   // 目录前缀匹配（★ M10 增补：audit-reports/ 等此前未覆盖的敏感目录）
   var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/audit-reports/', '/.git/', '/.github/', '/.codex/', '/.cursor/', '/.agents/', '/.trae/', '/.trae-html-share-packages/', '/.workbuddy/', '/.playwright-cli/', '/output/', '/playwright-report/', '/test-results/', '/.playwright/'];

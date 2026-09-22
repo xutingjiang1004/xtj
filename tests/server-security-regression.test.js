@@ -3,8 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
-const vercel = JSON.parse(fs.readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
-
+// 2026-09-22：Vercel 已弃用（生产只用 Render + Supabase），原先对 vercel.json 的断言随之移除。
 const source = fs.readFileSync(path.join(ROOT, 'render-api/server.js'), 'utf8');
 const authMigration = fs.readFileSync(path.join(ROOT, 'supabase/migrations/011_auth_record_uniqueness.sql'), 'utf8');
 // CSP 已统一收敛到共享模块 security-headers.js（server.js 与 serve-static.js 共用一份）
@@ -160,13 +159,4 @@ test('photo cleanup validates generated paths and fails closed on reference look
   assert.match(cleanup, /refChecks\.some\(function\(result\) \{ return !result \|\| result\.error; \}\)/);
   assert.match(cleanup, /status\(503\)/);
   assert.doesNotMatch(cleanup, /var refCheck = null/);
-});
-
-test('Vercel forwards frontend API and admin requests to the Render backend', () => {
-  const rewrites = vercel.rewrites || [];
-  for (const sourcePath of ['/api/(.*)', '/admin/(.*)']) {
-    const rule = rewrites.find(item => item.source === sourcePath);
-    assert.ok(rule, `missing rewrite for ${sourcePath}`);
-    assert.match(rule.destination, /^https:\/\/xtj\.onrender\.com\/(api|admin)\//);
-  }
 });
