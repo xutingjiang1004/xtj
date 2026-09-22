@@ -237,7 +237,7 @@
         }, 30000); // 每30秒检查一次
     }
 
-    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allBehaviorEvents = [], allClipboardEntries = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
+    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allBehaviorEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
     var adminAvatarCache = {};
     var adminDataLoadedAt = 0;
     var adminDataLoading = false;
@@ -245,11 +245,10 @@
     var adminDataLoadPromises = {};
     var _allDataLoadPromise = null; // ★ M51：loadAllData in-flight Promise（复用，替代仅布尔锁）
     var adminTabSwitchGeneration = 0;
-    var adminClipboardPage = 1, adminClipboardTotal = 0, adminClipboardPages = 1;
     var searchUser = '', searchPost = '';
     // 主 Tab 白名单：refreshAdminTab / switchTab / initAdminClient 共用，避免三份名单漂移
     // （blacklist 已下线并入 bans，不出现在名单中）
-    var allowedTabs = ['ann','stats','users','clipboard','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','ai','online','profile'];
+    var allowedTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','ai','online','profile'];
 
     function getTabDomName(tab) {
         if (tab === 'errorlog') return 'ErrorLog';
@@ -847,7 +846,7 @@
             document.removeEventListener(evt, resetActivityTimer);
         });
         allPosts = []; allLikes = []; allComments = []; allUsers = [];
-        allLoginEvents = []; allBehaviorEvents = []; allClipboardEntries = []; allSecurityAlerts = [];
+        allLoginEvents = []; allBehaviorEvents = []; allSecurityAlerts = [];
         allAuditLogs = []; allErrorLogs = [];
         annList = [];
         adminTabDataLoaded = {}
@@ -980,7 +979,6 @@
             'blacklist': { key: 'blacklist' },
             'stats': { key: 'stats' },
             'users': { key: 'users', loaders: ['users', 'logins', 'security-alerts', 'mutes'] },
-            'clipboard': { key: 'clipboard', loaders: ['users', 'clipboard'] },
             'uservisit': { key: 'users', loaders: ['users', 'logins', 'security-alerts', 'mutes'] },
             'security': { key: 'security-alerts', loaders: ['security-alerts', 'security-settings'] },
             'audit': { key: 'audit-logs' },
@@ -1042,12 +1040,6 @@
                 allBehaviorEvents = (loginRes && loginRes.behavior) || [];
                 adminTabDataLoaded.logins = true;
                 adminTabDataLoaded['login-events'] = true;
-            } else if (dataType === 'clipboard') {
-                var clipboardRes = await apiCall('GET', '/admin/clipboard-data?page=' + adminClipboardPage + '&limit=50');
-                allClipboardEntries = normalizeAdminClipboardEntries(clipboardRes && (clipboardRes.data || clipboardRes.entries || clipboardRes.users) || []);
-                adminClipboardTotal = Math.max(0, Number(clipboardRes && clipboardRes.total) || allClipboardEntries.length);
-                adminClipboardPages = Math.max(1, Number(clipboardRes && clipboardRes.pages) || 1);
-                adminTabDataLoaded.clipboard = true;
             } else if (dataType === 'security-alerts') {
                 var secRes = await apiCall('GET', '/admin/security-alerts');
                 allSecurityAlerts = secRes.data || [];
@@ -2632,7 +2624,6 @@
         switch(normalized) {
             case 'ann': renderAnnTab(el); break;
             case 'users': renderUsersTab(el); break;
-            case 'clipboard': renderClipboardTab(el); break;
             case 'security': renderSecurityTab(el); break;
             case 'posts': renderPostsTab(el); break;
             case 'likes': renderLikesTab(el); break;
@@ -3305,7 +3296,6 @@
             'deletePostBtn': '删除帖子', 'deletePhotoBtn': '删除照片',
             'deleteUserBtn': '删除用户', 'deleteCommentBtn': '删除评论',
             'ipDetailBtn': 'IP详情', 'reResolveBtn': '重新解析',
-            'locationDetailBtn': '位置详情', 'clipboardBtn': '剪贴板查看',
             'behaviorBtn': '行为查看', 'securityBtn': '安全查看',
             'userDetailBtn': '用户详情', 'userEditBtn': '编辑用户',
             'postDetailBtn': '帖子详情', 'photoDetailBtn': '照片详情',
@@ -3313,7 +3303,6 @@
             'pageTopBtn': '回到顶部', 'pageBottomBtn': '滚动到底部',
             'prevPageBtn': '上一页', 'nextPageBtn': '下一页',
             'tabAnnBtn': '公告管理Tab', 'tabStatsBtn': '数据统计Tab',
-            'tabUsersBtn': '用户数据Tab', 'tabClipboardBtn': '用户剪贴板Tab',
             'tabSecurityBtn': '安全中心Tab', 'tabAuditBtn': '操作审计Tab',
             'tabBehaviorBtn': '用户行为Tab', 'tabErrorLogBtn': '错误日志Tab',
             'tabPostsBtn': '帖子管理Tab', 'tabLikesBtn': '点赞数据Tab',
@@ -3485,105 +3474,6 @@
         overlay.classList.add('active');
     }
 
-    function normalizeAdminClipboardEntries(rows) {
-        var entries = [];
-        (Array.isArray(rows) ? rows : []).forEach(function(row) {
-            if (!row) return;
-            var userName = String(row.user_name || row.name || '').trim();
-            var snapshots = Array.isArray(row.consented_clipboard_history) ? row.consented_clipboard_history :
-                (Array.isArray(row.history) ? row.history : (row.text != null ? [row] : (row.consented_clipboard ? [row.consented_clipboard] : [])));
-            snapshots.forEach(function(snapshot) {
-                if (!snapshot || snapshot.text == null) return;
-                entries.push({
-                    user_name: userName,
-                    text: String(snapshot.text),
-                    captured_at: snapshot.captured_at || row.captured_at || '',
-                    source: snapshot.source || row.source || 'explicit_clipboard_permission'
-                });
-            });
-        });
-        entries.sort(function(a, b) { return toAdminTimeMs(b.captured_at) - toAdminTimeMs(a.captured_at); });
-        return entries;
-    }
-
-    function renderClipboardTab(el) {
-        var users = {};
-        allClipboardEntries.forEach(function(entry) { if (entry.user_name) users[entry.user_name] = true; });
-        var h = '<div class="stats-row"><div class="stat-box"><div class="val">' + adminClipboardTotal + '</div><div class="lbl">授权快照</div></div><div class="stat-box"><div class="val">' + Object.keys(users).length + '</div><div class="lbl">本页授权用户</div></div></div>';
-        h += '<div class="card"><div class="admin-card-title-row"><div><h3>用户剪贴板</h3><p>仅显示用户在前端明确授权并成功上传的文本快照。</p></div><div><button class="btn-sm" onclick="adminTabDataLoaded.clipboard=false;refreshAdminTab(\'clipboard\')">刷新</button><button class="btn-sm del" style="margin-left:4px;" onclick="adminDeleteAllClipboard()">清空全部</button></div></div>';
-        if (!allClipboardEntries.length) {
-            h += '<div class="empty">暂无已授权上传的剪贴板内容</div>';
-        } else {
-            h += '<div class="admin-clipboard-list">';
-            allClipboardEntries.forEach(function(entry, index) {
-                h += '<article class="admin-clipboard-item"><header><strong>' + escapeHtml(entry.user_name || '未知用户') + '</strong><time>' + escapeHtml(entry.captured_at ? formatTime(entry.captured_at) : '时间未知') + '</time></header><pre>' + escapeHtml(entry.text.slice(0, 10000)) + '</pre><footer><span>' + entry.text.length + ' 字符</span><button class="btn-sm" type="button" onclick="adminCopyClipboardSnapshot(' + index + ')">复制</button><button class="btn-sm del" type="button" onclick="adminDeleteClipboardUser(\'' + safeJsStr(entry.user_name || '') + '\')">删除该用户</button></footer></article>';
-            });
-            h += '</div>';
-            if (adminClipboardPages > 1) {
-                h += '<nav class="admin-clipboard-pages" aria-label="剪贴板分页"><button class="btn-sm" ' + (adminClipboardPage <= 1 ? 'disabled' : '') + ' onclick="adminChangeClipboardPage(' + (adminClipboardPage - 1) + ')">上一页</button><span>第 ' + adminClipboardPage + ' / ' + adminClipboardPages + ' 页</span><button class="btn-sm" ' + (adminClipboardPage >= adminClipboardPages ? 'disabled' : '') + ' onclick="adminChangeClipboardPage(' + (adminClipboardPage + 1) + ')">下一页</button></nav>';
-            }
-        }
-        h += '</div>';
-        el.innerHTML = h;
-    }
-
-    window.adminCopyClipboardSnapshot = async function(index) {
-        var entry = allClipboardEntries[Number(index)];
-        if (!entry) return;
-        try {
-            await navigator.clipboard.writeText(entry.text);
-            showToast('已复制该快照', 'success');
-        } catch (error) {
-            showToast('复制失败，请手动选择文本', 'error');
-        }
-    };
-
-    window.adminDeleteClipboardUser = async function(userName) {
-        if (!userName) return;
-        if (!confirm('确定要永久删除用户 "' + userName + '" 的所有剪贴板数据吗？此操作不可恢复。')) return;
-        try {
-            // ★ 修复：DELETE 不携带 body，user_name 改放 query 参数，避免网关/代理丢弃 body 导致误报成功
-            var resp = await apiCall('DELETE', '/admin/clipboard-data?user_name=' + encodeURIComponent(userName));
-            if (resp && resp.ok) {
-                showToast(resp.message || '已删除', 'success');
-                adminTabDataLoaded.clipboard = false;
-                window.switchTab('clipboard');
-            } else {
-                showToast('删除失败: ' + ((resp && resp.error) || '未知错误'), 'error');
-            }
-        } catch (e) {
-            showToast('删除请求失败: ' + (e && e.message || '网络错误'), 'error');
-        }
-    };
-
-    window.adminDeleteAllClipboard = async function() {
-        // ★ 修复：仅处理当前页已加载的条目（allClipboardEntries 为当前页数据），
-        // 提示与删除范围保持一致（此前提示"所有用户"但只遍历了当前页）。
-        if (!confirm('确定要清空当前页的剪贴板数据吗？此操作不可恢复。')) return;
-        var users = {};
-        allClipboardEntries.forEach(function(e) { if (e.user_name) users[e.user_name] = true; });
-        var userList = Object.keys(users);
-        if (!userList.length) { showToast('当前页没有可删除的剪贴板数据'); return; }
-        var failed = 0;
-        for (var i = 0; i < userList.length; i++) {
-            try {
-                var resp = await apiCall('DELETE', '/admin/clipboard-data?user_name=' + encodeURIComponent(userList[i]));
-                if (!resp || !resp.ok) failed++;
-            } catch (e) { failed++; }
-        }
-        var deleted = userList.length - failed;
-        showToast('已删除 ' + deleted + ' 个用户的剪贴板数据' + (failed > 0 ? '，' + failed + ' 个失败' : ''), failed > 0 ? 'error' : 'success');
-        adminTabDataLoaded.clipboard = false;
-        window.switchTab('clipboard');
-    };
-
-    window.adminChangeClipboardPage = function(page) {
-        var nextPage = Math.min(adminClipboardPages, Math.max(1, Number(page) || 1));
-        if (nextPage === adminClipboardPage) return;
-        adminClipboardPage = nextPage;
-        adminTabDataLoaded.clipboard = false;
-        window.switchTab('clipboard');
-    };
 
     window.showUserDetailModal = async function(userName) {
         // Find user info
@@ -3782,37 +3672,6 @@
             html += '</div>';
         }
 
-        var contactsHistory = Array.isArray(userInfo.consented_contacts_history) ? userInfo.consented_contacts_history.slice() : [];
-        var clipboardHistory = Array.isArray(userInfo.consented_clipboard_history) ? userInfo.consented_clipboard_history.slice() : [];
-        if (!contactsHistory.length && userInfo.consented_contacts) contactsHistory.push(userInfo.consented_contacts);
-        if (!clipboardHistory.length && userInfo.consented_clipboard) clipboardHistory.push(userInfo.consented_clipboard);
-        contactsHistory.sort(function(a, b) { return toAdminTimeMs(b.selected_at || b.captured_at) - toAdminTimeMs(a.selected_at || a.captured_at); });
-        clipboardHistory.sort(function(a, b) { return toAdminTimeMs(b.captured_at) - toAdminTimeMs(a.captured_at); });
-        if (contactsHistory.length) {
-            html += '<h4 style="margin:12px 0 8px;">用户明确授权的数据</h4>';
-            html += '<h5 style="margin:4px 0 6px;font-size:12px;color:var(--text-muted);">主动选择的联系人</h5>';
-            contactsHistory.slice(0, 20).forEach(function(snapshot, snapshotIndex) {
-                if (!snapshot || !Array.isArray(snapshot.contacts)) return;
-                html += '<div style="font-size:11px;margin-bottom:8px;"><b>联系人快照 #' + (snapshotIndex + 1) + '（' + snapshot.contacts.length + '）</b> · ' + escapeHtml(formatTime(snapshot.selected_at || snapshot.captured_at || '')) + '<div style="max-height:160px;overflow:auto;margin-top:4px;">';
-                snapshot.contacts.slice(0, 100).forEach(function(contact) {
-                    html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);">' + escapeHtml([].concat(contact && contact.names || [], contact && contact.phones || [], contact && contact.emails || []).join(' · ') || '-') + '</div>';
-                });
-                html += '</div></div>';
-            });
-        }
-
-        if (clipboardHistory.length) {
-            if (!contactsHistory.length) html += '<h4 style="margin:12px 0 8px;">用户明确授权的数据</h4>';
-            html += '<h5 style="margin:4px 0 6px;font-size:12px;color:var(--text-muted);">主动上传的剪贴板</h5>';
-            clipboardHistory.slice(0, 20).forEach(function(snapshot, snapshotIndex) {
-                if (!snapshot || snapshot.text == null) return;
-                var text = String(snapshot.text).slice(0, 5000);
-                html += '<div style="font-size:11px;margin-bottom:8px;background:rgba(255,255,255,0.03);border-radius:8px;padding:8px;">';
-                html += '<div style="margin-bottom:4px;color:var(--text-muted);">剪贴板快照 #' + (snapshotIndex + 1) + ' · ' + escapeHtml(formatTime(snapshot.captured_at || '')) + ' · ' + text.length + ' 字符</div>';
-                html += '<pre style="white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;font-size:11px;background:rgba(0,0,0,0.2);padding:6px 8px;border-radius:6px;margin:0;">' + escapeHtml(text) + '</pre>';
-                html += '</div>';
-            });
-        }
 
         var behaviorRows = allBehaviorEvents.filter(function(row) { return row.user_name === userName; }).slice(0, 20);
         if (behaviorRows.length) {
@@ -5773,8 +5632,6 @@
         h += '<div style="' + rowStyle + '"><span>总登录</span><span style="' + valStyle + '">' + (p.total_logins || 0) + ' 次</span></div>';
         h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>首次登录</span><span style="' + valStyle + ';align-self:flex-end">' + formatTime(p.first_login) + '</span></div>';
         h += '<div style="' + rowStyle + ';border-top:1px dashed var(--border);padding-top:8px;border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>最后活动</span><span style="' + valStyle + ';align-self:flex-end">' + formatTime(p.last_login) + '</span></div>';
-        h += '<div style="' + rowStyle + ';border-top:1px dashed var(--border);padding-top:8px"><span>通讯录</span><span style="' + valStyle + '">' + (p.contacts_count || 0) + ' 人</span></div>';
-        h += '<div style="' + rowStyle + ';border-bottom:none"><span>剪贴板</span><span style="' + valStyle + '">' + (p.clipboard_count || 0) + ' 条</span></div>';
         h += '</div></div>';
         // 代理警报
         if (p.proxy_alerts && p.proxy_alerts.length > 0) {

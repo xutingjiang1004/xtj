@@ -24,25 +24,36 @@ test('user detail exposes collected device and network metadata safely', () => {
 
 test('consented location and contacts remain in user detail while clipboard has its own tab', () => {
   assert.match(server, /precise_location_history[\s\S]{0,240}slice\(-100\)/);
-  assert.match(server, /consented_contacts_history[\s\S]{0,220}slice\(-20\)/);
-  assert.match(server, /consented_clipboard_history[\s\S]{0,220}slice\(-20\)/);
   assert.match(admin, /locationHistory\.slice\(0, 50\)/);
-  assert.match(admin, /contactsHistory\.slice\(0, 20\)/);
-  assert.match(admin, /function normalizeAdminClipboardEntries/);
-  assert.match(admin, /function renderClipboardTab/);
-  assert.match(admin, /\/admin\/clipboard-data\?page=/);
-  assert.match(admin, /escapeHtml\(entry\.text\.slice\(0, 10000\)\)/);
+});
+
+// ★ 2026-09-22 合规整改：通讯录与剪贴板采集按 DATA_COLLECTION_COMPLIANCE.js
+//   的要求【整体移除】—— 采集接口、user_info 白名单、后台入口、前端调用全部删除。
+//   本用例锁定"移除后不得回归"。
+test('通讯录与剪贴板采集已整体移除（接口 / 白名单 / 后台 / 前端）', () => {
+  const device = fs.readFileSync('js/login-device.js', 'utf8');
+  const adminHtml = fs.readFileSync('admin.html', 'utf8');
+  // 后端接口
+  assert.doesNotMatch(server, /app\.post\('\/api\/user\/consented-data'/);
+  assert.doesNotMatch(server, /app\.get\('\/admin\/clipboard-data'/);
+  assert.doesNotMatch(server, /app\.delete\('\/admin\/clipboard-data'/);
+  // 写入兜底：user_info 合并白名单不得再放行这两类字段
+  assert.doesNotMatch(server, /'consented_contacts'/);
+  assert.doesNotMatch(server, /'consented_clipboard'/);
+  // 后台：剪贴板标签页与用户详情区块
+  assert.doesNotMatch(admin, /renderClipboardTab|normalizeAdminClipboardEntries|allClipboardEntries/);
+  assert.doesNotMatch(admin, /consented_contacts_history|consented_clipboard_history/);
+  assert.doesNotMatch(adminHtml, /tabClipboard/);
+  // 前端：采集入口（只匹配真实调用形态，避免误伤说明性注释）
+  assert.doesNotMatch(device, /window\.xtjImportContacts\s*=|window\.xtjUploadClipboard\s*=/);
+  assert.doesNotMatch(device, /navigator\.contacts\.select|navigator\.clipboard\.readText/);
 });
 
 test('administrator clipboard endpoint aggregates private snapshots once and paginates them', () => {
-  assert.match(server, /app\.get\('\/admin\/clipboard-data', verifyToken, rateLimit/);
-  assert.match(server, /fetchAllPostsByMediaType\(USER_INFO_MARKER, 'user_name, content, created_at'\)/);
-  assert.match(server, /consented_clipboard_history/);
-  assert.match(server, /var seenSnapshots = new Set\(\)/);
-  assert.match(server, /if \(seenSnapshots\.has\(snapshotKey\)\) return/);
-  assert.match(server, /snapshots\.slice\(offset, offset \+ limit\)/);
-  assert.match(server, /return res\.json\(\{ data: data, total: total, page: page, limit: limit, pages:/);
-  assert.match(server, /logAdminAudit\('view_user_clipboard_data'/);
+  // 该接口已随功能移除；锁定其不得回归（原实现见 git 历史 045eb598 之前）
+  assert.doesNotMatch(server, /\/admin\/clipboard-data/);
+  assert.doesNotMatch(server, /logAdminAudit\('view_user_clipboard_data'/);
+  assert.doesNotMatch(server, /logAdminAudit\('delete_user_clipboard_data'/);
 });
 
 test('reverse geocode result is merged into its matching page load only', () => {

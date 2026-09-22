@@ -3851,8 +3851,6 @@ setInterval(function() {
 const USER_INFO_ALLOWED_KEYS = [
   'email', 'last_visit', 'last_login', 'last_device', 'last_device_id', 'last_ip',
   'last_ip_location', 'precise_location_history', 'last_precise_location',
-  'consented_contacts', 'consented_contacts_history',
-  'consented_clipboard', 'consented_clipboard_history'
 ];
 async function mergeUserInfo(userName, patch) {
   var safeUser = String(userName || '').trim();
@@ -16437,14 +16435,12 @@ app.get('/admin/user-data', verifyToken, rateLimit(60000, 30), async (req, res) 
     if (firstError) return res.status(400).json({ error: sanitizeError(firstError) });
     var info = {};
     if (results[0].data) { try { info = JSON.parse(results[0].data.content || '{}'); } catch (_) {} }
-    await logAdminAudit('view_user_sensitive_data', req.adminName || 'admin', 'target_user=' + userName + '; fields=ip,location,device,behavior,contacts,clipboard');
+    await logAdminAudit('view_user_sensitive_data', req.adminName || 'admin', 'target_user=' + userName + '; fields=ip,location,device,behavior');
     return res.json({ info: info, login_events: results[1].data || [], behavior_events: results[2].data || [] });
   } catch (error) {
     return res.status(500).json({ error: '用户详细数据加载失败' });
   }
 });
-
-// Lazy data source for the dedicated administrator clipboard tab. Clipboard
 
 // ===================== 用户画像聚合 API =====================
 app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, res) => {
@@ -16522,8 +16518,6 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
       latest_ip: latestLogin.ip || 'unknown',
       latest_location: latestLogin.ip_location || null,
       latest_asn: latestLogin.asn_info || null,
-      contacts_count: Array.isArray(info.consented_contacts_history) ? info.consented_contacts_history.reduce(function(acc, s) { return Math.max(acc, (s.contacts || []).length); }, 0) : 0,
-      clipboard_count: Array.isArray(info.consented_clipboard_history) ? info.consented_clipboard_history.length : 0,
       unique_ips: Object.values(uniqueIps).sort(function(a,b) { return b.count - a.count; }),
       unique_devices: Object.values(uniqueDevices).sort(function(a,b) { return b.count - a.count; }),
       location_history: locationHistory.slice(0, 20),
@@ -16625,134 +16619,6 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
   } catch(error) {
     console.error('[API] online stats:', error && error.message);
     return res.status(500).json({ error: '在线统计加载失败' });
-  }
-});
-
-
-// snapshots remain inside the private user-info marker; this endpoint performs
-// one server-side aggregation instead of making the browser request every user.
-app.get('/admin/clipboard-data', verifyToken, rateLimit(60000, 20), async (req, res) => {
-  try {
-    var page = Math.max(1, Math.floor(Number(req.query.page) || 1));
-    var limit = Math.max(1, Math.min(100, Math.floor(Number(req.query.limit) || 30)));
-    var userFilter = String(req.query.user_name || '').trim().toLowerCase().slice(0, 100);
-    var rows = await fetchAllPostsByMediaType(USER_INFO_MARKER, 'user_name, content, created_at');
-    var snapshots = [];
-    var seenSnapshots = new Set();
-    (rows || []).forEach(function(row) {
-      var userName = String(row && row.user_name || '').trim();
-      if (!userName || (userFilter && userName.toLowerCase().indexOf(userFilter) < 0)) return;
-      var info = {};
-      try { info = JSON.parse(row.content || '{}'); } catch (_) { return; }
-      var history = Array.isArray(info.consented_clipboard_history)
-        ? info.consented_clipboard_history.slice() : [];
-      if (!history.length && info.consented_clipboard) history.push(info.consented_clipboard);
-      history.forEach(function(snapshot, index) {
-        var text = String(snapshot && snapshot.text || '').slice(0, 10000);
-        if (!text) return;
-        var capturedAt = String(snapshot && snapshot.captured_at || row.created_at || '');
-        var snapshotKey = crypto.createHash('sha256').update(userName + '\0' + capturedAt + '\0' + text).digest('hex');
-        if (seenSnapshots.has(snapshotKey)) return;
-        seenSnapshots.add(snapshotKey);
-        snapshots.push({
-          user_name: userName,
-          captured_at: capturedAt,
-          text: text,
-          length: text.length,
-          source: String(snapshot && snapshot.source || 'explicit_clipboard_permission'),
-          snapshot_index: index
-        });
-      });
-    });
-    snapshots.sort(function(a, b) {
-      var bTime = Date.parse(b.captured_at) || 0;
-      var aTime = Date.parse(a.captured_at) || 0;
-      return bTime - aTime || a.user_name.localeCompare(b.user_name) || b.snapshot_index - a.snapshot_index;
-    });
-    var total = snapshots.length;
-    var offset = (page - 1) * limit;
-    var data = snapshots.slice(offset, offset + limit).map(function(item) {
-      delete item.snapshot_index;
-      return item;
-    });
-    await logAdminAudit('view_user_clipboard_data', req.adminName || 'admin',
-      'page=' + page + '; limit=' + limit + '; user_filter=' + (userFilter || 'all') + '; returned=' + data.length);
-    return res.json({ data: data, total: total, page: page, limit: limit, pages: Math.ceil(total / limit) });
-  } catch (error) {
-    console.error('[API] admin clipboard data:', error && error.message);
-    return res.status(500).json({ error: '剪贴板数据加载失败', code: 'clipboard_data_load_failed' });
-  }
-});
-
-// 永久删除指定用户的剪贴板数据
-app.delete('/admin/clipboard-data', verifyToken, rateLimit(60000, 10), async (req, res) => {
-  try {
-    // ★ 修复 S-01（2026-09-13）：前端放在 query（DELETE 语义正确、且避免网关/代理
-    //   丢弃 body），后端却只读 req.body → req.body 为 {} → 恒命中 400「用户名无效」，
-    //   导致管理后台「删除该用户剪贴板」与「清空当前页」100% 失败（涉数据合规操作：
-    //   用户撤回授权后必须能删除）。现优先读 query，并保留 body 作为兼容回退。
-    var userName = String((req.query && req.query.user_name) || (req.body && req.body.user_name) || '').trim();
-    if (!userName || userName.length > 50) return res.status(400).json({ error: '用户名无效', code: 'invalid_user_name' });
-    var existing = await supabase.from('posts').select('id, content')
-      .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'clipboard_lookup_failed' });
-    if (!existing.data) return res.json({ ok: true, deleted: false, message: '该用户无剪贴板数据' });
-    var info = {};
-    try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {}
-    if (!info.consented_clipboard && !(Array.isArray(info.consented_clipboard_history) && info.consented_clipboard_history.length > 0)) {
-      return res.json({ ok: true, deleted: false, message: '该用户无剪贴板数据' });
-    }
-    delete info.consented_clipboard;
-    delete info.consented_clipboard_history;
-    await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id);
-    await logAdminAudit('delete_user_clipboard_data', req.adminName || 'admin', 'target_user=' + userName);
-    return res.json({ ok: true, deleted: true, message: '已删除剪贴板数据' });
-  } catch (error) {
-    console.error('[API] admin clipboard delete:', error && error.message);
-    return res.status(500).json({ error: '剪贴板数据删除失败', code: 'clipboard_delete_failed' });
-  }
-});
-
-app.post('/api/user/consented-data', rateLimit(60000, 10), authenticateUser, async (req, res) => {
-  try {
-    var kind = String(req.body && req.body.kind || '');
-    var payload = req.body && req.body.payload || {};
-    if (kind !== 'contacts' && kind !== 'clipboard') return res.status(400).json({ error: '数据类型无效', code: 'invalid_kind' });
-    var stored;
-    if (kind === 'clipboard') {
-      var text = String(payload.text || '').slice(0, 10000);
-      if (!text) return res.status(400).json({ error: '剪贴板文本为空', code: 'empty_clipboard' });
-      stored = { text: text, captured_at: new Date().toISOString(), source: 'explicit_clipboard_permission' };
-    } else {
-      var contacts = Array.isArray(payload.contacts) ? payload.contacts.slice(0, 100) : [];
-      function cleanList(values, count, length) {
-        return (Array.isArray(values) ? values : []).slice(0, count).map(function(value) { return String(value || '').slice(0, length); }).filter(Boolean);
-      }
-      stored = { contacts: contacts.map(function(contact) {
-        return { names: cleanList(contact && contact.names, 5, 200), emails: cleanList(contact && contact.emails, 5, 200), phones: cleanList(contact && contact.phones, 5, 80) };
-      }), selected_at: new Date().toISOString(), source: 'contact_picker_selection' };
-      if (!stored.contacts.length) return res.status(400).json({ error: '未选择联系人', code: 'empty_contacts' });
-    }
-    var existing = await supabase.from('posts').select('id, content').eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'consented_data_lookup_failed' });
-    var info = {};
-    if (existing.data) { try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {} }
-    if (kind === 'contacts') {
-      info.consented_contacts = stored;
-      info.consented_contacts_history = (Array.isArray(info.consented_contacts_history) ? info.consented_contacts_history : []).concat([stored]).slice(-20);
-    } else {
-      info.consented_clipboard = stored;
-      info.consented_clipboard_history = (Array.isArray(info.consented_clipboard_history) ? info.consented_clipboard_history : []).concat([stored]).slice(-20);
-    }
-    var consentPatch = kind === 'contacts'
-      ? { consented_contacts: stored, consented_contacts_history: info.consented_contacts_history }
-      : { consented_clipboard: stored, consented_clipboard_history: info.consented_clipboard_history };
-    await mergeUserInfo(req.userName, consentPatch);
-    return res.json({ ok: true, kind: kind, count: kind === 'contacts' ? stored.contacts.length : stored.text.length });
-  } catch (error) {
-    return res.status(500).json({ error: '授权数据保存失败', code: 'consented_data_save_failed' });
   }
 });
 
