@@ -283,8 +283,12 @@ const renderSource = fs.readFileSync(path.join(ROOT, 'js/photo-wall/render.js'),
 test('cloud delete failure restores the card and re-renders unconditionally', () => {
   // 修复前：失败分支调用 removePhotoLocal（移除而非恢复），且仅在 opts.render !== false 时重渲染；
   // 预览弹窗删除传 {render:false}，导致 DOM 卡片消失但数据仍在。
+  // 二次修复：mergePhotoLists 只接受已 normalize 的项（按 imageUrl 判有效性），
+  // 若传入原始数据库行（media_url 字段）会被静默丢弃 → 照片永久消失。
+  // 故恢复前先 normalizePhotoWallRow，再做合并。
   const failBranch = dataSource.slice(dataSource.indexOf('if (!deleteResult)'), dataSource.indexOf('// 云端删除成功后才标记为已删除'));
-  assert.match(failBranch, /mergePhotoLists\(\[item\]\.concat\(window\.photoWallData \|\| \[\]\), \[\]\)/);
+  assert.match(failBranch, /var restoredItem = normalizePhotoWallRow\(item\)/);
+  assert.match(failBranch, /mergePhotoLists\(\[restoredItem\]\.concat\(window\.photoWallData \|\| \[\]\), \[\]\)/);
   assert.doesNotMatch(failBranch, /removePhotoLocal\(id, opts\.render !== false\)/);
   assert.doesNotMatch(failBranch, /opts\.render !== false &&/);
   assert.match(failBranch, /if \(typeof window\.renderPhotoWallWithoutReload === 'function'\) window\.renderPhotoWallWithoutReload\(\)/);

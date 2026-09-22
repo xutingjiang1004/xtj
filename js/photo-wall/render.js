@@ -335,13 +335,20 @@
     container = container || document.getElementById('photoGrid');
     if (!container) return;
     var images = container.querySelectorAll('.photo-wall-item img[data-src]');
-    var max = Math.min(images.length, Number(limit) || 6);
+    // ★ 修复：原实现先 `Math.min(images.length, limit)` 截断数组、再逐个判视口，
+    //   等于永远只检查列表前 6 张。当首屏可视图片不足 6 张时，
+    //   第 7 张之后的图片即使滚到视口内也**永远不会被预热**（懒加载退化）。
+    //   改为：遍历全部候选，仅在"命中视口"时才消耗预算。
+    var budget = Number(limit) || 6;
     var viewportLimit = Math.max(window.innerHeight * 1.5, 900);
-    for (var i = 0; i < max; i++) {
+    var queued = 0;
+    for (var i = 0; i < images.length && queued < budget; i++) {
       var img = images[i];
+      if (img._pwQueued || !img.getAttribute('data-src')) continue;
       var rect = img.getBoundingClientRect();
       if (rect.top > viewportLimit || rect.bottom < -120) continue;
       queueImage(img);
+      queued++;
     }
     pumpImages();
   }
@@ -458,6 +465,12 @@
     loadMoreObserver = new IntersectionObserver(function(entries){
       for (var i = 0; i < entries.length; i++) {
         if (!entries[i].isIntersecting || loadingMore) continue;
+        // ★ 已达 DOM 上限且服务端仍有更多时：只保留「点击继续加载」入口，
+        //   不让 IO 自动触发 —— 否则会形成 触发→封顶 return→再触发 的空转循环。
+        if (domPhotoLimitReached() && window.hasMorePhotos()) {
+          setSentinelText('已达当前渲染上限，点击继续加载', true);
+          continue;
+        }
         if (!window.hasMorePhotos()) {
           setSentinelText('暂无更多', false);
           continue;
@@ -469,6 +482,19 @@
       }
     }, { rootMargin:'400px 0px' });
     loadMoreObserver.observe(sentinel);
+    // ★ 暴露给外部（resetSentinelText / appendPhotoWallMore 封顶分支）使用，
+    //   避免它们改了文案却点不动（onclick 只在闭包内的 setSentinelText 里绑定）。
+    window.__xtjPhotoWallLoadMore = doLoadMore;
+  }
+
+  // ★ 判断 DOM 卡片数是否已达渲染上限。
+  //   与 hasMorePhotos()（服务端游标）区分：前者是"前端渲染预算用尽"，
+  //   后者是"服务端确实没有更多数据"。二者同时为 true 时，
+  //   说明仍有数据但已停止追加，必须给用户保留手动入口。
+  function domPhotoLimitReached(){
+    var grid = document.getElementById('photoGrid');
+    if (!grid) return false;
+    return collectDomPhotoIds(grid).length >= MAX_DOM_PHOTOS;
   }
 
   // ★ P6: loadMore 增量追加 — 只 append 本次新增的照片卡片，
@@ -495,12 +521,30 @@
     return true;
   }
 
+  // ★ 修复：原实现只改文案与 class，**不设置 onclick**，
+  //   而真正让哨兵可点击的是 renderSorted 闭包内 setSentinelText 的
+  //   `sentinel.onclick = retryable ? doLoadMore : null`。
+  //   因此外部调用者传 retryable=true 时用户仍然点不动（图形上像按钮，
+  //   实际无响应）。这里补上点击绑定，并复用闭包暴露的 doLoadMore。
   function resetSentinelText(grid, text, retryable){
     var sent = grid && grid.querySelector('.pw-load-more-sentinel');
     if (!sent) return;
     var ind = sent.querySelector('.pw-load-more-indicator');
     if (ind) ind.textContent = text;
     sent.classList.toggle('pw-load-more-error', !!retryable);
+    if (retryable) {
+      // 优先复用当前 observer 对应的 doLoadMore（renderSorted 内每次重建）
+      var handler = (typeof window.__xtjPhotoWallLoadMore === 'function')
+        ? window.__xtjPhotoWallLoadMore
+        : null;
+      sent.onclick = handler;
+      sent.setAttribute('role', 'button');
+      sent.setAttribute('tabindex', '0');
+    } else {
+      sent.onclick = null;
+      sent.removeAttribute('role');
+      sent.removeAttribute('tabindex');
+    }
   }
 
   function observeAppendedImages(grid){
@@ -541,10 +585,27 @@
     var grid = document.getElementById('photoGrid');
     if (!grid) return;
     var domIds = collectDomPhotoIds(grid);
-    // P6: DOM 数量上限 — 达到后不再追加新卡片，标记已到末尾
+    // P6: DOM 数量上限 — 达到后不再追加新卡片
+    // ★ 修复：原实现在封顶时直接 resetSentinelText(grid, '暂无更多') + disconnect()，
+    //   但 hasMorePhotos() 依据的是服务端游标（more），与 DOM 截断无关，
+    //   此时它**仍可能为 true**。结果是：用户看到「暂无更多」却其实还有数据，
+    //   且哨兵已被 disconnect，扁平视图下**没有任何入口**能再加载（永久卡死）。
+    //   改为：若服务端仍有更多，则保留哨兵为可点击的「继续加载」入口，
+    //   文案明确区分「达渲染上限」与「真的没有更多」。
     if (domIds.length >= MAX_DOM_PHOTOS) {
-      resetSentinelText(grid, '暂无更多', false);
-      if (loadMoreObserver) loadMoreObserver.disconnect();
+      // ★ 修复：原实现在封顶时直接 resetSentinelText(grid, '暂无更多') + disconnect()，
+      //   但 hasMorePhotos() 依据服务端游标（more），与 DOM 截断无关，
+      //   此时它**仍可能为 true**。结果：用户看到「暂无更多」却其实还有数据，
+      //   且哨兵已 disconnect，扁平视图下**没有任何入口**能再加载（永久卡死）。
+      //   改为：若服务端仍有更多，保留哨兵为可点击入口（不清除 onclick、
+      //   不 disconnect）；真正的"没有更多"才走原逻辑。
+      var serverHasMore = (typeof window.hasMorePhotos === 'function') ? !!window.hasMorePhotos() : false;
+      if (serverHasMore) {
+        resetSentinelText(grid, '已达当前渲染上限，点击继续加载', true);
+      } else {
+        resetSentinelText(grid, '暂无更多', false);
+        if (loadMoreObserver) loadMoreObserver.disconnect();
+      }
       return;
     }
     var key = window.pwSortKey || 'date_desc';
