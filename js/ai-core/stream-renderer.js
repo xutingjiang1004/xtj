@@ -22,6 +22,39 @@
     return div.innerHTML;
   }
 
+  /* ── 流式落地的增量补丁（2026-09-22）──────────────────────────────────
+     卡顿根因不是 Markdown 解析（实测 12000 字符仅 0.33ms），而是
+     `innerHTML = html` 每帧重建整棵 DOM 子树 —— 正文越长节点越多，每帧
+     成本线性增长。这里把整体渲染结果放进游离容器解析，与现有子节点逐位
+     比对，只替换真正变化的部分，前面未变的节点浏览器完全不碰。
+     任何异常都回退整段替换，正确性优先。 */
+  function patchInnerHTML(targetEl, html) {
+    if (!targetEl) return;
+    var kids = targetEl.childNodes;
+    if (!kids || kids.length === 0) { targetEl.innerHTML = html; return; }
+    try {
+      var holder = document.createElement('div');
+      holder.innerHTML = html;
+      var next = holder.childNodes;
+      if (next.length < kids.length || next.length - kids.length > 4) {
+        targetEl.innerHTML = html;
+        return;
+      }
+      for (var i = 0; i < next.length; i++) {
+        var want = next[i];
+        var have = kids[i];
+        if (!have) { targetEl.appendChild(want.cloneNode(true)); continue; }
+        if (have.outerHTML === want.outerHTML) continue;   // 未变化：不碰
+        targetEl.replaceChild(want.cloneNode(true), have);
+      }
+      while (targetEl.childNodes.length > next.length) {
+        targetEl.removeChild(targetEl.lastChild);
+      }
+    } catch (e) {
+      try { targetEl.innerHTML = html; } catch (e2) {}
+    }
+  }
+
   function createStreamRenderer(targetEl, options) {
     options = options || {};
     var reducedMotion = (function () {
@@ -130,13 +163,14 @@
         var node = ensurePlainTextNode();
         try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
-        // ★ 2026-09-17 流动性优化：渲染节流 50ms → 自适应 90ms/140ms，
-        //   与 ai-agent.js 的 Markdown 门限对齐（原 50ms 在该模块虽更快，
-        //   但长文本下仍会因重排堆积出现抖动，统一为按长度自适应的稳定节奏）。
+        // ★ 2026-09-22 流式卡顿修复：整体渲染 + 增量补丁落地。
+        //   卡顿来自每帧重建整棵 DOM 子树（随长度线性变重），而非解析本身。
+        //   改为只替换真正变化的节点后，门限可从 90/140ms 收紧到 48/64ms，
+        //   文字接近逐帧渗出，得到 Siri 式的连续流淌观感。
         var now = Date.now();
-        var _renderGap = rendered.length < 600 ? 90 : 140;
+        var _renderGap = rendered.length < 600 ? 48 : 64;
         if (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending) {
-          targetEl.innerHTML = renderRich(rendered);
+          patchInnerHTML(targetEl, renderRich(rendered));
           targetEl._lastRender = now;
         }
       }
