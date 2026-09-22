@@ -8077,3 +8077,28 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   .cw-action { padding: 5px 9px; font-size: 11.5px; }
 }
 
+/* ============================================================================
+   ★ 2026-09-23 头部功能入口不再被压成竖排文字
+   ----------------------------------------------------------------------------
+   背景：头部原有「头像 + 小猫/在线」占用弹性空间（.ai-chat-header-info 是
+   flex:1 1 auto）。按维护者要求移除后，剩余入口（Code / 深度思考 / 历史 / 删除 / 新）
+   在窄屏上被 flex 压缩——中文可以逐字换行，min-content 只有一个字宽，
+   于是「深度思考」被挤成竖排四行、胶囊被拉长。
+   处理：入口一律不换行、按内容宽度固定；万一真的放不下，头部改为横向滚动而不是压缩。
+   ========================================================================== */
+.ai-chat-header {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.ai-chat-header::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+.ai-chat-header > button,
+.ai-chat-header > .ai-deep-think-toggle,
+.ai-chat-header .ai-deep-think-label,
+.ai-chat-header .ai-deep-think-toggle > span {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
