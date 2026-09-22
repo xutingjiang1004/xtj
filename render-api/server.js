@@ -1804,11 +1804,23 @@ async function executeToolCall(toolCall, context) {
       //   付费第三方聚合 API 与"零成本"原则冲突，故此处复用站内已有搜索链
       //   （searchWeb 六层降级：Tavily > Brave > Serper > Custom > Bing > SearXNG），
       //   通过 site: 定向检索已被搜索引擎索引的公开页面，无需任何额外 API key。
-      var plat = String(args.platform || '').trim().toLowerCase();
+      // ★ 2026-09-23：platform 参数做别名归一。
+      //   工具 schema 里虽然是 enum('douyin','xiaohongshu')，但模型（尤其走 DSML/自定义
+      //   模型路径时）经常传中文或域名（"抖音"、"小红书"、"douyin.com"…），
+      //   原实现的严格白名单会直接报错「platform 仅支持 douyin（抖音）或 xiaohongshu（小红书）」，
+      //   白白浪费一轮工具调用。这里按关键字容错识别。
+      var platRaw = String(args.platform || '').trim().toLowerCase().replace(/[\s（）()【】\[\]]/g, '');
+      var plat = '';
+      if (/douyin|抖音|douyin\.com|dy号|tiktok/.test(platRaw)) plat = 'douyin';
+      else if (/xiaohongshu|小红书|xhs|redbook|rednote|xiaohongshu\.com/.test(platRaw)) plat = 'xiaohongshu';
       var skw = String(args.keyword || '').trim().slice(0, 100);
       var kind = String(args.kind || 'account').trim().toLowerCase();
-      if (plat !== 'douyin' && plat !== 'xiaohongshu') {
-        return { tool_name: name, error: 'platform 仅支持 douyin（抖音）或 xiaohongshu（小红书）' };
+      if (!plat) {
+        return {
+          tool_name: name,
+          error: 'platform 仅支持 douyin（抖音）或 xiaohongshu（小红书）；收到：' + String(args.platform || '').slice(0, 40),
+          recoverable: true
+        };
       }
       if (!skw) return { tool_name: name, error: '搜索关键词为空' };
 
@@ -1845,6 +1857,50 @@ async function executeToolCall(toolCall, context) {
         }).filter(function(it) { return it.url; });
 
         if (!ssItems.length) {
+          // ★ 2026-09-23 放宽重试：`site:douyin.com` 这类限定命中率很低 ——
+          //   抖音/小红书的大量账号页不被搜索引擎收录（页面强 JS、robots 限制），
+          //   于是「明明有这个人却搜不到」。这里在 0 结果时再做一次**不带 site: 限定**
+          //   的检索（平台名进关键词），并把平台域名下的结果排到最前，其余作为线索返回。
+          //   只走这一条补充路径，命中时最多 2 次搜索（配额如实计 2）。
+          try {
+            var wideQuery = skw + ' ' + platMeta.label + (kind === 'account' ? ' 博主' : '');
+            var wideGate = await measureSearchQuota(context.userName, context.searchConsumed);
+            if (wideGate.allowed) {
+              context.searchConsumed++;
+              var wideRes = await searchWeb(wideQuery, 10);
+              var wideArr = (wideRes && wideRes.results) ? wideRes.results : [];
+              var onSite = [], offSite = [];
+              wideArr.forEach(function(r) {
+                var u = String(r.url || r.link || '');
+                (u.indexOf(platMeta.site) >= 0 ? onSite : offSite).push(r);
+              });
+              var wideItems = onSite.concat(offSite).slice(0, 10).map(function(r) {
+                var raw = String(r.url || r.link || '');
+                return {
+                  title: String(r.title || '').slice(0, 200),
+                  url: /^https?:\/\//i.test(raw) ? raw.slice(0, 2000) : '',
+                  snippet: String(r.snippet || r.description || '').slice(0, 300),
+                  source: String(r.url || r.link || '').indexOf(platMeta.site) >= 0 ? platMeta.label : '搜索引擎'
+                };
+              }).filter(function(it) { return it.url; });
+              if (wideItems.length) {
+                return {
+                  tool_name: name,
+                  platform: plat,
+                  keyword: skw,
+                  results_count: wideItems.length,
+                  content: JSON.stringify(wideItems),
+                  diagnostics: {
+                    provider: 'web-index',
+                    site: platMeta.site,
+                    fallback: 'broadened',
+                    note: '站内限定 0 命中，已放宽为「' + platMeta.label + ' + 关键词」检索；平台域名结果排在前面，其余为线索'
+                  },
+                  cards: [aiSiteCard('web_search', platMeta.label + '检索（放宽）', { query: wideQuery, results: wideItems })]
+                };
+              }
+            }
+          } catch (eWide) {}
           // 未命中目标平台域名 ≠ 工具故障：如实告知，引导模型用 search_web 换关键词重试
           return {
             tool_name: name,

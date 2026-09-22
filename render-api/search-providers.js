@@ -92,7 +92,7 @@ function cleanSearchResults(results, maxCount) {
 
 // Web Search 配置
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;   // 有结果缓存 5 分钟
-const SEARCH_EMPTY_CACHE_TTL_MS = 30 * 1000;  // 无结果缓存 30 秒
+const SEARCH_EMPTY_CACHE_TTL_MS = 3 * 60 * 1000; // ★ 2026-09-23：无结果缓存 30 秒 → 3 分钟（模型常反复重试同一查询，30 秒等于每次都把整条降级链重跑一遍，是思考变慢的主要来源之一）
 const searchCache = new Map();
 const SEARCH_CACHE_MAX_SIZE = 1000;
 function limitSearchCacheSize() {
@@ -418,11 +418,12 @@ async function searchWeb(query, maxResults) {
   var mergedResults = [];
   var usedProvider = null;
 
-  // 整体搜索总超时 25 秒。仅置标志并不能中断在途 await，须在每次循环用剩余预算
-  // 收紧单 provider 的超时，才能真正把总耗时约束在 25s 内。
-  var deadline = Date.now() + 25000;
+  // 整体搜索总超时 15 秒（原 25 秒）：provider 是**串行**降级的，最坏耗时就是各段之和。
+  // 仅置标志并不能中断在途 await，须在每次循环用剩余预算收紧单 provider 的超时，
+  // 才能真正把总耗时约束住。
+  var deadline = Date.now() + 15000;
   var searchTimedOut = false;
-  var searchTimer = setTimeout(function() { searchTimedOut = true; }, 25000);
+  var searchTimer = setTimeout(function() { searchTimedOut = true; }, 15000);
 
   for (var pi = 0; pi < providerList.length; pi++) {
     if (searchTimedOut || Date.now() >= deadline) break;
@@ -433,10 +434,11 @@ async function searchWeb(query, maxResults) {
     }
     diagnostics.enabled_providers.push(provider.name);
     try {
-      // M-6: 每个 provider 单独套 12s 超时——整体 25s 定时器只在循环间检查，
-      // 单个无自带超时的 provider 挂起会永久卡住 await 且泄漏 25s 定时器。
-      // 这里用剩余预算(deadline-now)与 12s 取较小值，保证总超时真实生效。
-      var result = await withSearchProviderTimeout(provider.fn, Math.max(100, Math.min(12000, deadline - Date.now())));
+      // M-6: 每个 provider 单独套超时——整体 15s 定时器只在循环间检查，
+      // 单个无自带超时的 provider 挂起会永久卡住 await 并泄漏定时器。
+      // ★ 2026-09-23：单 provider 上限 12s → 8s（provider 是串行的，8s 已经足够覆盖
+      // 正常的 Tavily/Brave 响应；超时即快速降级，避免一次搜索吃掉十几秒）。
+      var result = await withSearchProviderTimeout(provider.fn, Math.max(100, Math.min(8000, deadline - Date.now())));
       if (result.error) {
         diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
       } else if (result.results && result.results.length > 0) {
@@ -465,7 +467,7 @@ async function searchWeb(query, maxResults) {
   clearTimeout(searchTimer);
 
   if (searchTimedOut && mergedResults.length === 0) {
-    console.warn('[SEARCH] total search timeout (25s) for:', searchQuery);
+    console.warn('[SEARCH] total search timeout (15s) for:', searchQuery);
   }
 
   return finalResult;
