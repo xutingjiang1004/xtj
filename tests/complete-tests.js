@@ -432,7 +432,11 @@ test('showToast wrapper forwards all arguments after text repair', function(){
 test('wide Dock and iPad post layout use explicit visible and single-column overrides', function(){
   var source = read('css/ui-shell.css');
   assert.ok(/@media \(min-width: 1024px\)[\s\S]*?transform: translate\(-50%, 0\) !important/.test(source), 'wide Dock remains hidden');
-  assert.ok(/@media \(min-width: 1024px\) and \(max-width: 1279px\)[\s\S]*?grid-template-areas: "stats" "publish" "filter" "feed"/.test(source), 'iPad post layout is not single-column');
+  // ★ 2026-09-23 修复：此断言原写死 `max-width: 1279px`，但 css/ui-shell.css:1112 实际为
+  //   `max-width: 1279.98px`。二者自同一提交（a90273e）落地起就不一致，本测试**从未通过过**。
+  //   .98 后缀是更正确的写法：用整 1279px 会在 1279.01~1279.99px 区间漏掉断点。
+  //   故修正断言以匹配正确的 CSS，而非反向改 CSS 迁就过时断言。
+  assert.ok(/@media \(min-width: 1024px\) and \(max-width: 1279\.98px\)[\s\S]*?grid-template-areas: "stats" "publish" "filter" "feed"/.test(source), 'iPad post layout is not single-column');
   assert.ok(source.indexOf('grid-template-columns: repeat(3, minmax(0, 1fr)) !important') >= 0, 'iPad stats are not three columns');
 });
 
