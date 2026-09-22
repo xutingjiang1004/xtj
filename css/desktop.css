@@ -1,15 +1,22 @@
 /* ============================================================
    desktop.css — PC 端布局
    ============================================================
-   只在屏幕宽度 >= 768px 时生效（与 index.html 的
-   `<link media="(min-width: 768px)">` 加载条件、以及本文件首条 @media 一致）。
-   移动端（< 768px）desktop.css 完全不加载。
+   加载条件：宽度 >= 768px **且高度 >= 480px**，与 index.html 的
+   `<link media="(min-width: 768px) and (min-height: 480px)">` 完全一致。
+   不满足时 desktop.css 完全不加载（移动端 < 768px，以及横屏手机 宽≥768 但高<480）。
 
-   ★ 2026-09-22 修正：此处原写「>= 1024px」，与代码不符 —— 本文件首条断点是
-   `@media (min-width: 768px)`，且 index.html 以 768px 为条件加载它。
-   注释与实现不一致会误导后续维护（以为改 768~1023 区间不会影响桌面布局）。
-   注：横屏手机（宽≥768 但高<480）由 ui-shell.css 侧的 min-height 门禁排除，
-   本文件仅负责 ≥768 宽度下的两列/多列布局本身。
+   ★ 2026-09-22 修正（一）：此处原写「>= 1024px」，与代码不符 —— 本文件首条断点是
+   `@media (min-width: 768px)`。注释与实现不一致会误导后续维护
+   （以为改 768~1023 区间不会影响桌面布局）。
+
+   ★ 2026-09-22 修正（二）：原加载条件只有宽度，于是「横屏手机」（宽≥768、高≈390）
+   也会加载本文件、套上两列栅格；而 ui-shell.css 侧的对应规则已被 min-height:480px
+   门禁排除 → 出现"桌面栅格 + 移动外壳"的混合布局。现已在 index.html 的 <link media>
+   上补同一高度门禁，横屏手机真正落回移动布局。
+
+   注意：本文件内部各 @media 仍只写宽度条件（如 `@media (min-width: 768px)`）——
+   因为入口已带高度门禁，文件内的规则无需重复声明高度；若要单独复用本文件，
+   需自行补 `and (min-height: 480px)`。
 
    设计原则：
    - 仅通过 CSS 调整布局，不动 HTML / JS
@@ -27,11 +34,11 @@
 
   /* ==============================================================
      P2: 帖子面板 — 单列布局（简单阅读流）
-     左侧 (1fr, max 720px 居中) ：publish / filter / feed锛坒eed 鍐?1 列）
-     右侧 (300px) 锛歴tats 绠€娲佸崱鐗?
+     左侧 (1fr, max 720px 居中)：publish / filter / feed（feed 占 1 列）
+     右侧 (300px)：stats 简洁卡片
      ============================================================== */
 
-  /* 鏁翠綋甯冨眬锛? 鍒楃綉鏍硷紙content + stats），左列内主内容居中 720px */
+  /* 整体布局：2 列网格（content + stats），左列内主内容居中 720px */
   #panelPosts .wrap {
     max-width: min(1200px, calc(100vw - 56px - 48px));
     margin: 0 auto;
@@ -47,7 +54,7 @@
     align-items: start;
   }
 
-  /* 左侧三块（publish / filter / feed锛夋暣浣撳眳涓?720px */
+  /* 左侧三块（publish / filter / feed）整体居中 720px */
   #panelPosts .wrap > #publishBox,
   #panelPosts .wrap > #postFilterBar,
   #panelPosts .wrap > #feed {
@@ -57,12 +64,12 @@
     margin-right: auto;
   }
 
-  /* publish / filter / feed 鍗犲乏鍒楀悇鑷竴琛?*/
+  /* publish / filter / feed 占左列各自一行 */
   #panelPosts .wrap > #publishBox    { grid-area: publish; min-width: 0; }
   #panelPosts .wrap > #postFilterBar { grid-area: filter; min-width: 0; }
   #panelPosts .wrap > #feed          { grid-area: feed; min-width: 0; }
 
-  /* stats 寮哄埗鍗犲彸鍒楋紝璺?3 行，sticky 璺熼殢婊氬姩 鈥?绠€娲佹棤鐜荤拑 */
+  /* stats 强制占右列，跨 3 行，sticky 跟随滚动 —— 简洁无玻璃 */
   #panelPosts .wrap > .stats {
     grid-area: stats;
     position: -webkit-sticky;
@@ -86,7 +93,7 @@
     display: block;
   }
 
-  /* 甯栧瓙涔嬮棿淇濇寔璺濈锛岄伩鍏嶈瑙夐粡杩?*/
+  /* 帖子之间保持距离，避免视觉拥挤 */
   #panelPosts .wrap > #feed > .post {
     margin-bottom: 18px;
   }
@@ -94,7 +101,7 @@
     margin-bottom: 0;
   }
 
-  /* 2.1 PC 绔寜閽鏍硷細鏂硅銆佷笉閫忔槑銆佺函鑹茶儗鏅?鈥?璺熸墜鏈哄渾褰㈣兌鍥婂舰鎴愬尯鍒?*/
+  /* 2.1 PC 端按钮：方形、不透明、纯色背景 —— 跟手机圆形胶囊形成区别 */
   #panelPosts .post > .actions {
     display: flex;
     gap: 6px;
@@ -143,7 +150,7 @@
       box-shadow: none !important;
     }
   }
-  /* 宸茬偣璧炵姸鎬?鈥?鐢ㄦ煍鍜岀殑绾㈣壊锛屼笉鍒虹溂 */
+  /* 已点赞状态 —— 用柔和的红色，不刺眼 */
   #panelPosts .post > .actions .action-btn.liked {
     background: rgba(255, 59, 96, 0.08);
     color: #ff3b60;
@@ -176,13 +183,13 @@
     background: transparent;
   }
 
-  /* 甯栧瓙鍗＄墖锛氱揣鍑戝竷灞€ */
+  /* 帖子卡片：紧凑布局 */
   #panelPosts .post {
     padding: 18px;
     border-radius: 14px;
   }
 
-  /* 甯栧瓙澶撮儴锛氬ご鍍?+ 鐢ㄦ埛鍚?+ 鏃堕棿 */
+  /* 帖子头部：头像 + 用户名 + 时间 */
   #panelPosts .post > .post-header {
     display: flex;
     align-items: center;
@@ -190,7 +197,7 @@
     margin-bottom: 12px;
   }
 
-  /* 甯栧瓙鏂囨湰鍐呭 鈥?鍗曞垪鏄剧ず鏇村琛?*/
+  /* 帖子文本内容 —— 单列显示更易读 */
   #panelPosts .post > .content {
     font-size: 14.5px;
     line-height: 1.7;
@@ -208,7 +215,7 @@
     object-fit: cover;
   }
 
-  /* 甯栧瓙鍏冩暟鎹?+ 鎸夐挳 */
+  /* 帖子元数据 + 按钮 */
   #panelPosts .post > .post-stats-text,
   #panelPosts .post > .actions {
     font-size: 12px;
@@ -224,7 +231,7 @@
     font-size: 12px;
   }
 
-  /* stat-card 绱у噾鎺掔増锛氭暟瀛楀ぇ銆佹爣绛惧皬锛屾按骞虫帓鍒?*/
+  /* stat-card 紧凑排版：数字大、标签小，水平排列 */
   #panelPosts .wrap > .stats .stat-card {
     text-align: left;
     padding: 12px 14px;
@@ -246,7 +253,7 @@
     font-size: 13px;
   }
 
-  /* 鍙戝竷妗?*/
+  /* 发布框 */
   #panelPosts .publish-box {
     padding: 24px;
   }
@@ -255,12 +262,12 @@
   }
 
   /* ==============================================================
-     P3: 鑱婂ぉ闈㈡澘 鈥?鍙屽垪甯冨眬锛坙ist 宸?+ detail 右）
+     P3: 聊天面板 —— 双列布局（list 左 + detail 右）
      关键点：
      - .dock-chat-container 改为 grid 2 鍒?
-     - 覆盖 .chat-view.hidden 鍦?PC 端不隐藏（list 涓?detail 濮嬬粓骞舵帓锛?
+     - 覆盖 .chat-view.hidden 在 PC 端不隐藏（list 与 detail 始终并排）
        这样 JS 切换 .hidden 类不影响 PC 端的并排显示
-     - chat-header 璺?2 列，PC 绔殣钘?鈫?杩斿洖鎸夐挳锛堜笉闇€瑕侊級
+     - chat-header 跨 2 列，PC 端隐藏「←」返回按钮（不需要）
      - 绉诲姩绔?(< 1024px) 行为完全不变：list 涓?detail 互斥切换
      ============================================================== */
 
@@ -275,7 +282,7 @@
     gap: 0;
   }
 
-  /* header 璺?2 列，置顶 */
+  /* header 跨 2 列，置顶 */
   #panelChat .chat-header {
     grid-column: 1 / -1;
     grid-row: 1;
@@ -284,7 +291,7 @@
     background: #fff;
   }
 
-  /* PC 绔殣钘忋€屸啇銆嶈繑鍥炴寜閽紙绉诲姩绔繚鐣欙級 */
+  /* PC 端隐藏「←」返回按钮（移动端保留） */
   #panelChat #dockChatBackBtn {
     display: none;
   }
@@ -302,11 +309,11 @@
     overflow: hidden;
     min-height: 0;
   }
-  /* 覆盖 .hidden 鍦?PC 端不隐藏（list 濮嬬粓鏄剧ず锛?*/
+  /* 覆盖 .hidden 在 PC 端不隐藏（list 始终显示） */
   #panelChat #dockChatListView.chat-view.hidden {
     display: flex;
   }
-  /* list 鑷韩鍙粴鍔?*/
+  /* list 自身可滚动 */
   #panelChat #dockChatList {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
@@ -315,7 +322,7 @@
     filter: none;
   }
 
-  /* detail 占右列，永远可见（覆盖移动端默认 hidden锛?*/
+  /* detail 占右列，永远可见（覆盖移动端默认 hidden） */
   #panelChat #dockChatDetailView {
     grid-column: 2;
     grid-row: 2;
@@ -323,7 +330,7 @@
     min-height: 0;
     background: var(--glass-bg, rgba(255, 255, 255, 0.35));
   }
-  /* 覆盖 .hidden 鍦?PC 端不隐藏（detail 濮嬬粓鏄剧ず锛?*/
+  /* 覆盖 .hidden 在 PC 端不隐藏（detail 始终显示） */
   #panelChat #dockChatDetailView.chat-view.hidden {
     display: flex;
   }
@@ -375,9 +382,9 @@
   }
 
   /* ==============================================================
-     P4: 鐓х墖澧欓潰鏉?鈥?header 横向 sticky + 缃戞牸鍔犲鍒?5-6 鍒?
+     P4: 照片墙面板 —— header 横向 sticky + 网格加宽到 5-6 列
      - 整体 max-width 1400px 居中
-     - 鏍囬宸?/ 鎺т欢鍙筹紝鍚搁《
+     - 标题左 / 控件右，吸顶
      - 绉诲姩绔?(< 1024px) 行为完全不变
      ============================================================== */
 
@@ -387,7 +394,7 @@
     padding: 24px 32px 60px;
   }
 
-  /* header 妯悜甯冨眬锛氭爣棰樺乏銆佺姸鎬?鎺т欢鍙?*/
+  /* header 横向布局：标题左、状态/控件右 */
   #panelAi .photo-wall-header {
     display: flex;
     align-items: center;
@@ -412,7 +419,7 @@
     min-width: 0;
   }
 
-  /* 鍚屾鐘舵€佸湪涓棿锛屾帶浠跺湪鍙?*/
+  /* 同步状态在中间，控件在右 */
   #panelAi .photo-wall-sync-status {
     flex: 0 0 auto;
   }
@@ -422,7 +429,7 @@
     gap: 12px;
   }
 
-  /* 鐓х墖缃戞牸锛? 鍒楋紙缁熶竴鍗＄墖澶у皬锛屼究浜庨槄璇伙級 */
+  /* 照片网格：5 列（统一卡片大小，便于阅读） */
   #panelAi .photo-wall-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -454,7 +461,7 @@
     color: var(--text-muted, #777);
   }
 
-  /* 相册分组卡片（pw-album-card锛夆€?缁熶竴绠€娲侀鏍硷細鐭╁舰 + 灏侀潰 + 鏂囧瓧 */
+  /* 相册分组卡片（pw-album-card）—— 统一简洁风格：矩形 + 封面 + 文字 */
   #panelAi .pw-album-card {
     background: var(--panel-bg, #fafafa);
     border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.06));
@@ -524,9 +531,9 @@
   }
 
   /* ==============================================================
-     P5: 鎴戠殑闈㈡澘 鈥?2 鍒?grid 布局
-     左侧 (340px) ：用户卡 + VIP 鍗?+ 璁剧疆
-     右侧 (1fr) 锛氭椿鍔ㄦ澘锛堢偣璧?+ 璇勮 涓婁笅鍫嗗彔锛?
+     P5: 我的面板 —— 2 列 grid 布局
+     左侧 (340px)：用户卡 + VIP 卡 + 设置
+     右侧 (1fr)：活动板（点赞 + 评论 上下堆叠）
      顶部 header 横跨两列
      底部 totals 横跨两列
      - 绉诲姩绔?(< 1024px) 行为完全不变
@@ -560,7 +567,7 @@
   #panelProfile .profile-activity-board { grid-area: activity; }
   #panelProfile .profile-totals-bar { grid-area: totals; margin: 8px 0 0; }
 
-  /* 用户卡在 PC 绔◢寰簿鑷?*/
+  /* 用户卡在 PC 端稍微精致 */
   #panelProfile .profile-user-card {
     padding: 18px 20px;
   }
@@ -572,7 +579,7 @@
   #panelProfile .profile-user-name { font-size: 18px; }
   #panelProfile .profile-user-status { font-size: 13px; }
 
-  /* 娲诲姩鏉匡細涓ゅ潡鍗＄墖鍦ㄥ彸渚т竴鍒?*/
+  /* 活动板：两块卡片在右侧一列 */
   #panelProfile .profile-activity-card {
     padding: 18px 20px;
   }
@@ -598,15 +605,15 @@
     height: 16px;
   }
 
-  /* P5 鍔犲浐锛氱‘淇濇椿鍔?modal 鍦?PC 绔笉琚?dock-bar 遮挡 */
+  /* P5 加固：确保活动 modal 在 PC 端不被 dock-bar 遮挡 */
   #profileActivityModal {
     z-index: 250;
   }
 
-  /* P5 加固 #2锛氭椿鍔ㄨ褰?modal 鍦?PC 绔姞瀹?+ 璁板綍鍗＄墖鍨傜洿鍫嗗彔甯冨眬
-     根因：mobile 绔?stat-row 鏄?3 鍒?grid (62+1fr+auto) + align-items:center锛?
-     modal 宽度只有 560px 鏃?1fr 列被压扁，stat-row-main 内的 title+copy 涓婁笅鎸ゅ湪涓€璧?
-     解决：PC 绔?modal 鍔犲鍒?760px锛宻tat-row 鏀?flex column 璁╁獟浣?涓诲唴瀹?鎸夐挳鍨傜洿鍫嗗彔
+  /* P5 加固 #2：活动记录 modal 在 PC 端加宽 + 记录卡片垂直堆叠布局
+     根因：mobile 端 stat-row 是 3 列 grid (62+1fr+auto) + align-items:center，
+     modal 宽度只有 560px 时 1fr 列被压扁，stat-row-main 内的 title+copy 上下挤在一起
+     解决：PC 端 modal 加宽到 760px，stat-row 改 flex column 让媒体/主内容/按钮垂直堆叠
      ============================================================== */
 
   #profileActivityModal .profile-activity-modal {
@@ -620,7 +627,7 @@
     max-height: none;
   }
 
-  /* stat-row 鏀?flex column 布局（mobile 鏄?3 鍒?grid锛?*/
+  /* stat-row 改 flex column 布局（mobile 是 3 列 grid） */
   #profileActivityModal .stat-row {
     display: flex;
     flex-direction: column;
@@ -629,7 +636,7 @@
     padding: 14px 16px;
     border-bottom: 1px solid rgba(196, 224, 206, 0.72);
   }
-  /* 濯掍綋缂╃暐鍥撅紙鐙珛涓€琛岋紝宸﹀榻愶級 */
+  /* 媒体缩略图（单独一行，左对齐） */
   #profileActivityModal .stat-row-media {
     margin-top: 0;
     width: auto;
@@ -647,7 +654,7 @@
     width: 100%;
     min-width: 0;
   }
-  /* 鎸夐挳鍗曠嫭涓€琛岋紝宸﹀榻?*/
+  /* 按钮单独一行，左对齐 */
   #profileActivityModal .stat-record-action {
     align-self: flex-start;
     min-height: 32px;
@@ -666,11 +673,11 @@
     background: rgba(254, 246, 246, 0.78);
     color: #b3404a;
   }
-  /* 姣忔潯璁板綍鏈€灏忛珮搴︼紝璁╁唴瀹硅兘瀹屾暣鏄剧ず */
+  /* 每条记录最小高度，让内容能完整显示 */
   #profileActivityModal .stat-record-entry {
     min-height: 96px;
   }
-  /* 复制评论记录 modal锛堝鏋滄湁锛変竴骞堕€傞厤 */
+  /* 复制评论记录 modal（如果有）一并适配 */
   #statRecordsModal .stat-records-modal {
     max-width: 760px;
     width: min(760px, calc(100vw - 80px));
@@ -678,14 +685,14 @@
 
   /* ==============================================================
      P6: 鍏ㄥ眬妯℃€佹 PC 绔昂瀵搁€傞厤
-     - 通用 modal-box锛氬眳涓€佸姞瀹藉埌鍚堢悊灏哄銆乥ackdrop 加深
-     - 闀垮唴瀹?modal锛堝笘瀛愯鎯?鐢ㄦ埛璧勬枡/缁熻锛夛細760px
-     - 中等 modal锛堢紪杈?璇勮/鍏憡锛夛細600px
-     - 鐭?modal锛堢櫥褰?娉ㄥ唽/删除/涓炬姤锛夛細480px
+     - 通用 modal-box：居中、加宽到合理尺寸、backdrop 加深
+     - 长内容 modal（帖子详情/用户资料/统计）：760px
+     - 中等 modal（编辑/评论/公告）：600px
+     - 短 modal（登录/注册/删除/举报）：480px
      - 绉诲姩绔?(< 1024px) 行为完全不变
      ============================================================== */
 
-  /* 通用 modal-box 鍦?PC 端居中更好看 */
+  /* 通用 modal-box 在 PC 端居中更好看 */
   .modal-overlay {
     padding: 24px !important;
   }
@@ -714,7 +721,7 @@
     max-height: min(82vh, 760px);
   }
 
-  /* 鐭?modal 480px（注意：#reportModal 鏄伄缃?.report-modal-overlay锛宮ax-width 限制的是弹窗 box .report-modal，不是遮罩） */
+  /* 短 modal 480px（注意：#reportModal 是遮罩 .report-modal-overlay，max-width 限制的是弹窗 box .report-modal，不是遮罩） */
   #loginModal .modal-box,
   #registerModal .modal-box,
   #delModal .modal-box {
@@ -723,15 +730,15 @@
   }
 
   /* VIP modal 特殊：内容多，给 820px */
-  /* 头像上传 info modal锛氬浐瀹?360px */
+  /* 头像上传 info modal：固定 360px */
   #ppInfoModal {
     max-width: 360px;
   }
 
   /* ==============================================================
      P7: 全局 PC 绔墦纾?
-     - 鍏ㄥ眬婊氬姩鏉＄編鍖栵紙缁嗐€佸渾瑙掋€佹殫鑹查€傞厤锛?
-     - 鐒︾偣鏍峰紡锛堥敭鐩?tab 鍙锛?
+     - 全局滚动条美化（细、圆角、暗色适配）
+     - 焦点样式（键盘 tab 可见）
      - 暗色主题适配
      - 字体微调
      - iPad 横屏 1024-1280 适配
@@ -773,7 +780,7 @@
     scrollbar-color: rgba(180, 200, 195, 0.28) transparent;
   }
 
-  /* 3. 鐒︾偣鏍峰紡锛氶敭鐩?tab 导航可见（不能影响点击） */
+  /* 3. 焦点样式：键盘 tab 导航可见（不能影响点击） */
   button:focus-visible,
   a:focus-visible,
   [tabindex]:focus-visible,
@@ -796,12 +803,12 @@
     color: inherit;
   }
 
-  /* 6. 鏆楄壊涓婚涓?panel 鍐呭鍖洪€傞厤 */
+  /* 6. 暗色主题下 panel 内边距适配 */
   [data-theme="dark"] .dock-panels {
     background: var(--bg, #0a0e0c);
   }
 
-  /* 7. 鏆楄壊涓婚涓嬬殑鐜荤拑鎬侀潰鏉跨◢寰寒涓€鐐癸紙閬垮厤澶粦锛?*/
+  /* 7. 暗色主题下的玻璃态面板稍微亮一点（避免太滑） */
 
   /* Block 1 removed - superseded by Final True Dark Desktop Override below */
   [data-theme="dark"] .photo-wall-header,
@@ -822,7 +829,7 @@
       background: rgba(35, 42, 52, 0.92) !important;
     }
   }
-  /* 鏂囧瓧鑹?*/
+  /* 文字色 */
   [data-theme="dark"] .content,
 
   [data-theme="dark"] .content,
@@ -898,7 +905,7 @@
     color: #e6ebe8 !important;
   }
 
-  /* 8. PC 绔?body 瀛椾綋鐣ュぇ锛岃楂樻洿鑸掗€?*/
+  /* 8. PC 端 body 字体略大，行高更舒适 */
   body {
     font-size: 15px;
     line-height: 1.6;
@@ -906,7 +913,7 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* 10. 超宽屏（> 1920px锛夋斁瀹藉垪鏁?鈥?feed 保持单列 */
+  /* 10. 超宽屏（> 1920px）放宽列数 —— feed 保持单列 */
   @media (min-width: 1920px) {
     #panelPosts .wrap {
       max-width: 1400px !important;
