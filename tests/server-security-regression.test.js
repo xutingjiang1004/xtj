@@ -123,17 +123,22 @@ test('CSP style-src allows self, unsafe-inline, and jsDelivr', () => {
   assert.match(styleSrc, /'unsafe-inline'/);
 });
 
-test('CSP font-src permits the exact font origins', () => {
+test('CSP font-src 只放行本站（站点无外链字体）', () => {
   const fontSrc = csp.split(';').find(function(d) { return d.trim().startsWith('font-src'); });
   assert.ok(fontSrc, 'font-src directive must exist');
   assert.match(fontSrc, /'self'/);
-  assert.match(fontSrc, /https:\/\/cdn\.jsdelivr\.net/);
-  // ★ 2026-09-23 收敛：registry.npmmirror.com 已从 font-src（及 script-src/style-src）移除。
-  //   原注释理由「Monaco loads its codicon font」不成立 —— monaco 全仓 0 命中，
-  //   该域名只剩 mcp-servers/xtj-admin/package-lock.json（构建期产物，与 CSP 无关）。
-  //   冗余放行即攻击面：任何来源只要出现在 CSP 白名单里，就多一条被利用的路径。
+  // ★ 2026-09-23 收敛：font-src 收窄为仅 'self'。依据：
+  //   ① css/ 下无任何 @font-face / @import；
+  //   ② 全站 font-family 为系统字体栈（-apple-system / "PingFang SC" / sans-serif）；
+  //   ③ 唯一提及 Google Fonts 的是 core-parts/06-chat-and-nav.js:3252 的一行更新日志
+  //      文本，而 `Great Vibes` 字体引用与 `.idol-` 命名空间均已从代码库移除。
+  //   冗余放行即攻击面：白名单里的来源被投毒时可直接加载样式/字体。
   assert.doesNotMatch(fontSrc, /npmmirror/, 'npmmirror 属已清理的冗余放行，不得回归');
+  assert.doesNotMatch(fontSrc, /googleapis|gstatic/, 'Google Fonts 未被使用，不得回归');
+  assert.doesNotMatch(fontSrc, /cdn\.jsdelivr\.net/, 'jsdelivr 仅承载 gsap 脚本，与字体无关');
   assert.doesNotMatch(fontSrc, /\bhttps:\s*(?:;|$)/, 'font-src must not be widened to every HTTPS origin');
+  // 除 'self' 外不应有任何其他来源
+  assert.doesNotMatch(fontSrc, /https?:\/\//, 'font-src 不应放行任何外部来源');
 });
 
 test('CSP includes security hardening directives', () => {

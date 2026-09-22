@@ -22,16 +22,21 @@ var CSP = [
   //     core.js 50 处）。移除需先把这些全部改为 addEventListener / 事件委托，
   //     再配合 nonce 白名单，属独立改造工程，需与前端一起排期。
   //     在此之前 CSP 对 XSS 的兜底能力有限，主防线仍是 ai-sanitize.js + 各处转义。
-  //   jsdelivr/npmmirror 为历史放行源：
-  //   ★ 2026-09-23 收敛已完成：`registry.npmmirror.com` 已从 script-src / style-src /
-  //     font-src 全部移除。核实方式：全仓（排除 mcp-servers/*/package-lock.json 这类
-  //     构建期产物）已无任何对该域名的运行时引用；Monaco 编辑器亦从未被引入
-  //     （`monaco` 全仓 0 命中，此前 font-src 的注释理由「Monaco codicon font」不成立）。
-  //     移除后各指令只剩实际使用的来源：jsdelivr（gsap，已加 SRI），
-  //     fonts.googleapis/gstatic（字体）。
+  //   jsdelivr / npmmirror / Google Fonts 均为历史放行源：
+  //   ★ 2026-09-23 收敛（第一轮）：`registry.npmmirror.com` 已从 script-src / style-src /
+  //     font-src 全部移除。核实：全仓（排除 mcp-servers/*/package-lock.json 这类构建期
+  //     产物）无任何运行时引用；`monaco` 全仓 0 命中，原 font-src 注释理由
+  //     「Monaco loads its codicon font」不成立。
+  //   ★ 2026-09-23 收敛（第二轮）：Google Fonts 两个域名同样移除。核实：
+  //     ① css/ 下无任何 @font-face / @import；② 全站 font-family 为系统字体栈
+  //     （-apple-system / BlinkMacSystemFont / "SF Pro Display" / "PingFang SC" / sans-serif）；
+  //     ③ 唯一提及 Google Fonts 的是 js/core-parts/06-chat-and-nav.js:3252 的一行
+  //     **更新日志文本**（"引入 Google Fonts Great Vibes 手写字体"），而 `Great Vibes`
+  //     字体引用与 `.idol-` 命名空间均已从代码库移除 —— 即该字体从未被真正加载。
+  //   现各指令只剩真正会被请求的来源：jsdelivr（gsap@3.12.5，已加 SRI）。
   //   script-src 对第三方 CDN 无法做路径级收窄（CSP 规范忽略 script-src 的路径）。
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
-  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
   "img-src 'self' data: blob: https:",
   "media-src 'self' https:",
   "worker-src 'self' blob:",
@@ -40,8 +45,8 @@ var CSP = [
   "frame-src 'self' blob:",
   // WebLLM 本地 Qwen：模型元数据在 huggingface.co，权重会重定向到区域 *.hf.co CDN，WASM 模型库在 raw.githubusercontent.com。
   "connect-src 'self' https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",
-  // Google Fonts 的字形文件从 gstatic.com 取（font-src 只需放行实际使用的两个来源）
-  "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com",
+  // jsdelivr 为 gsap 脚本来源；本站无外链字体（全站系统字体栈），故 font-src 只留 self。
+  "font-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'"
