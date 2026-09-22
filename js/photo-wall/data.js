@@ -376,6 +376,23 @@
       if (!isAbort) {
         setPhotoWallSyncStatus('error', '同步失败');
       }
+      // ★ 修复：断网且无缓存时，UI 会停留在「还没有照片」（空态），
+      //   而不是「同步失败 + 重新加载」。原因是 render.js 的空态分支靠
+      //   `pwSyncStatus.classList.contains('is-error')` 决定是否显示重试按钮，
+      //   而本函数在 hasCache 分支（:302）会**先**渲染一次（那时 is-error 还没设），
+      //   失败后只改 class 不再重渲染 → 视图停在旧状态。
+      //   这里在设置完 is-error 后补一次幂等重渲染，让错误态必然呈现。
+      if (!isAbort) {
+        try {
+          if (typeof window.renderPhotoWallWithoutReload === 'function') {
+            window.renderPhotoWallWithoutReload();
+          } else if (typeof window.renderPhotoWall === 'function') {
+            window.renderPhotoWall();
+          }
+        } catch (renderErr) {
+          console.warn('[PhotoWall] render after failure skipped', renderErr);
+        }
+      }
       return window.photoWallData;
     } finally {
       if (currentGen === photoLoadGeneration) {
@@ -549,7 +566,13 @@
       // 且只有 opts.render !== false 才重渲染；预览弹窗删除传 {render:false}，
       // 导致云端删除失败后 DOM 卡片消失但数据仍在，UI 与数据不一致。
       // 数据已在下行恢复（mergePhotoLists），无条件重渲染让卡片立即回到网格。
-      window.photoWallData = mergePhotoLists([item].concat(window.photoWallData || []), []);
+      // ★ 二次修复：mergePhotoLists 只接受**已 normalize** 的项（内部按 imageUrl
+      // 判定有效性）。若调用方把原始数据库行直接传进来（字段是 media_url 而非
+      // imageUrl），该项会被静默丢弃 —— 照片从墙上消失但云端其实还在，
+      // 用户必须刷新才能看到。此处先 normalize 再合并，保证任何入参形态都能恢复。
+      var restoredItem = normalizePhotoWallRow(item);
+      if (!restoredItem || !restoredItem.imageUrl) restoredItem = item;
+      window.photoWallData = mergePhotoLists([restoredItem].concat(window.photoWallData || []), []);
       saveLocalPhotoWallData();
       // P4: 云端删除失败 — 更新 lastFailureAt（不更新 lastSuccessfulLoadedAt）
       lastFailureAt = Date.now();

@@ -51,7 +51,12 @@
   // G5 修复：除拒绝 SVG 外，仅允许位图 MIME 白名单（与后端 photo-create.js 一致）。
   // 防止伪造 file.type 上传 text/html、application/javascript 等可执行内容到公开可读的
   // Storage bucket（原图 URL 直接打开即存储型 XSS 载体）。
-  var PHOTO_WALL_ALLOWED_IMAGE_MIME = /^image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tiff|x-ms-bmp)(?:[a-z0-9!#$&^_.+-]{0,126})?$/i;
+  // ★ 修复：原正则尾部带 `(?:[a-z0-9!#$&^_.+-]{0,126})?` 可选后缀段，
+  //   实际比服务端宽松得多 —— 会放行 image/jpegmalware、image/jpegx 等伪造类型，
+  //   以及服务端不接受的 image/tif。这些请求最终仍会被服务端 400 拒绝
+  //   （render-api/photo-create.js 的 IMAGE_MIME_TYPE 是精确白名单），
+  //   用户却只看到一次无意义的失败上传。此处与服务端完全对齐。
+  var PHOTO_WALL_ALLOWED_IMAGE_MIME = /^image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)$/i;
   function isImage(file){ return !!(file && PHOTO_WALL_ALLOWED_IMAGE_MIME.test(String(file.type || ''))); }
   function isVideo(file){ return !!(file && /^video\//i.test(file.type || '')); }
   function isMedia(file){ return isImage(file) || isVideo(file); }
@@ -61,7 +66,15 @@
     try {
       if (crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
     } catch (_) {}
-    return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+    // ★ 修复：退化分支原先返回 `Date.now() + '_' + rand`（**含下划线**）。
+    //   而服务端（render-api/server.js 的存储路径解析）以**首个 `_`** 作为
+    //   upload_id 的截断点，导致该环境下前端持有的 upload_id 与服务端解析出的
+    //   不一致，进而使上传归属校验 / cleanup 归属校验失配
+    //   （可能误判 photo_not_owned）。
+    //   crypto.randomUUID 仅在安全上下文可用，Render(HTTPS) 下不触发，
+    //   但内网 HTTP、被 CSP/扩展干扰的 WebView 会走到这里，故必须修正。
+    //   改为不含下划线，与 randomUUID 分支（已 replace('-','')）形态一致。
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   }
 
   function createPhotoUploadError(code){
@@ -872,13 +885,27 @@
     job.storagePath = path;
     var uploadFile = file;
     var type = isImage(file) && file.type ? file.type : 'image/jpeg';
-    // P6: 压缩 + 方向矫正，失败时静默回退原图直传（storage path/文件名不变）
+    // P6: 压缩 + 方向矫正
+    // ★ 修复：原注释写"失败时静默回退原图直传"，这对 JPEG/PNG 是安全的，
+    //   但对浏览器**无法解码**的格式（HEIC/HEIF/BMP/TIFF）有害无害之分：
+    //   转码失败后 uploadFile 仍是原文件、type 仍是 image/heic 直传 Storage，
+    //   于是照片墙上出现一张 Chrome/Firefox 都渲染不出的"破图"（仅 Safari 可看）。
+    //   高分辨率 HEIC 转 JPEG 后体积常常反超原图，preprocessImageFile 在
+    //   "编码后体积 >= 原图"时会直接返回原文件，所以这条路径极易触发。
+    //   改为：对浏览器不支持的格式，转码失败即明确报错，而不是上传一张破图。
     if (isImage(file)) {
+      var BROWSER_UNDECODABLE = /^image\/(heic|heif|bmp|x-ms-bmp|tiff|tif)$/i;
+      var srcType = String(file.type || '');
+      var needsTranscode = BROWSER_UNDECODABLE.test(srcType);
       try {
         var processed = await preprocessImageFile(file);
         if (processed && processed !== file) uploadFile = processed;
       } catch (_) {}
       if (uploadFile && uploadFile.type) type = uploadFile.type;
+      // 需要转码但最终仍是原格式 → 浏览器渲染不了，宁可拒绝也不要落一张破图
+      if (needsTranscode && BROWSER_UNDECODABLE.test(String(type || ''))) {
+        throw createPhotoUploadError('unsupported_type');
+      }
     }
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
     var publicUrl;
@@ -1060,7 +1087,7 @@
           fail += 1; job.status = 'failed'; job.error = err;
         }
         onProgress && onProgress(processed, ok, fail);
-      }).then(runOne);
+      }).then(runOne, runOne);  // ★ 修复：补上 reject 回调，防止 onProgress 等回调抛错时整条 worker 链断掉，导致剩余文件永不上传
     }
     var workers = [];
     for (var w = 0; w < Math.min(CONCURRENCY, Math.max(1, total)); w++) workers.push(runOne());
@@ -1090,6 +1117,13 @@
       });
       ok = result.ok; fail = result.fail;
       updateUploadBatchProgress(total, total, ok, fail, '处理完成');
+    } catch (batchErr) {
+      // ★ 修复：原实现只有 try/finally，runBatch 抛错时异常直接冒泡出本函数，
+      //   导致下方 `state.failedJobs = ...` 不执行 → 失败任务丢失、用户无法重试，
+      //   而且整个批次静默中止、界面上只看到进度条消失、没有任何提示。
+      //   这里吞掉异常并继续走正常收尾流程，把已失败的任务如实登记下来。
+      console.error('[photo-upload] batch aborted', batchErr);
+      updateUploadBatchProgress(processed, total, ok, fail, '上传中断，可重试失败项');
     } finally {
       setProgress('');
       state.uploading = false;

@@ -1459,7 +1459,16 @@
                         if (Number.isFinite(authoritativeViews)) {
                             var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
                             var statsEl = postEl && postEl.querySelector('.post-stats-text');
-                            if (statsEl) statsEl.textContent = statsEl.textContent.replace(/\d+/, String(authoritativeViews));
+                            // ★ 修复：原用无锚点的 /\d+/ 替换，会命中文案里的**第一个**数字。
+                            //   正常文案「浏览 1｜点赞 0｜评论 0」下恰好是浏览数，
+                            //   但一旦文案改版（如「3 小时前 · 浏览 1」）就会把时间数字改掉。
+                            //   改为锚定「浏览」/👁 后的数字，只替换目标位置。
+                            if (statsEl) {
+                                statsEl.textContent = statsEl.textContent.replace(
+                                    /((?:浏览|👁)\s*)(\d+)/,
+                                    function (_m, prefix) { return prefix + String(authoritativeViews); }
+                                );
+                            }
                             if (Array.isArray(feedAllPosts)) {
                                 feedAllPosts = feedAllPosts.map(function(post) {
                                     return post && String(post.id) === String(postId) ? Object.assign({}, post, { views: authoritativeViews }) : post;
