@@ -10349,7 +10349,26 @@ async function checkAiUserRateLimit(userName) {
  */
 async function enforceAiChatAccess(userName, opts) {
   opts = opts || {};
-  var tokenGate = await aiQuota.checkBeforeChat(userName, !!opts.needSearch);
+  // ★ 2026-09-22 首包延迟优化（用户反馈「发消息到开始思考这段有点慢」）：
+  //   旧实现是**串行的两次往返**：
+  //     await aiQuota.checkBeforeChat()      ← 内含 RPC + membership 查询（2 次往返）
+  //     await checkAiUserRateLimit()         ← 另一次 RPC
+  //   而这两项**互不依赖**（一个查额度、一个查频次），却被排成一条队，
+  //   每次 100-300ms，累计 300-900ms 的纯等待，且这段时间前端收不到任何事件。
+  //   改为并行发起：总耗时从"两次往返相加"降为"两者取较大值"。
+  var results = await Promise.all([
+    aiQuota.checkBeforeChat(userName, !!opts.needSearch).catch(function(e) {
+      console.error('[AI-QUOTA] checkBeforeChat exception:', e && e.message);
+      return { allowed: false, reason: 'quota_unavailable', quota: null };
+    }),
+    checkAiUserRateLimit(userName).catch(function(e) {
+      console.error('[AI-RATE] checkAiUserRateLimit exception:', e && e.message);
+      return { allowed: false, reason: 'quota_unavailable' };
+    })
+  ]);
+  var tokenGate = results[0] || {};
+  var rl = results[1] || {};
+  // 判定顺序保持与旧实现一致：先额度、后频次 —— 保证错误文案不变
   if (!tokenGate.allowed) {
     return {
       allowed: false,
@@ -10359,7 +10378,6 @@ async function enforceAiChatAccess(userName, opts) {
       remainingDay: null
     };
   }
-  var rl = await checkAiUserRateLimit(userName);
   if (!rl.allowed) {
     return {
       allowed: false,
@@ -21477,8 +21495,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   // ★ 心跳保活：普通聊天与深度思考不同，此前没有任何 keep-alive 事件。
   //   DeepSeek 思考模型（尤其 high/max effort）首个 token 前可能沉默 20-60s，
   //   期间代理/网络会切断空闲 SSE 连接 → 前端收到干净 EOF 且无任何事件 →
-  //   落入"AI 暂时没有回应，请稍后再试"兜底。每 4s 检查一次，沉默 ≥8s 时
-  //   发送 heartbeat 事件保活，同时重置前端 45s idle 看门狗。
+  //   落入"AI 暂时没有回应，请稍后再试"兜底。
+  // ★ 2026-09-22 调整：沉默阈值 8s → 2.5s、检查间隔 4s → 1.5s。
+  //   原 8s 窗口意味着「用户发消息后的前 8 秒是绝对静默的」——即使服务端已在
+  //   跑额度校验/拉起上游，客户端也只是干等，这与"卡/慢"的主观感受直接相关。
+  //   收紧后前端最多 2.5s 就能收到一次心跳，45s idle 看门狗被持续重置，
+  //   同时给了 UI 一个廉价的"仍在推进"信号。事件本身只有 ~30 字节，代价可忽略。
   var _heartbeatTimer = null;
   function clearStreamHeartbeat() {
     if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; }
@@ -21488,10 +21510,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     _heartbeatTimer = setInterval(function() {
       if (res.writableEnded || aborted) { clearStreamHeartbeat(); return; }
       var lastWrite = res._sseLastWriteAt || 0;
-      if (Date.now() - lastWrite >= 8000) {
+      if (Date.now() - lastWrite >= 2500) {
         try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {}
       }
-    }, 4000);
+    }, 1500);
   }
   // ★★★ 2026-09-17 新增（P1「内置模型回复时误报 AI 连接中断」配套）：
   //   症状：内置模型调用失败（例如上游 400 模型/参数不兼容）时，
@@ -21569,13 +21591,43 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var _visionImageUrls = extractVisionImageUrls(req.body && req.body.attachments);
     var _visionRawText = String((req.body && req.body.message) || '');
 
+    // ★ 2026-09-22 首包延迟优化（第二轮）：
+    //   用户反馈「从发消息到他开始思考，这个过程有点慢」。根因是此处**曾经**是：
+    //     headers → await enforceAiChatAccess()（内含 2~3 次 Supabase 往返，300~900ms）
+    //             → 才 flush SSE + meta
+    //   即：在额度校验完成之前，前端**收不到任何事件**，只能靠本地占位动效硬扛，
+    //   表现为「点了发送之后干等」。而校验失败的分支本来就会自己 flushHeaders，
+    //   所以提前 flush 不会改变任何错误路径的行为。
+    //   调整后顺序：headers → meta/early reasoning_start → await 额度校验。
+    //   额度不足时 terminateWithError 依然能正常下发（headers 已 flush，SSE 已开）。
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    if (aborted) return safeEnd();
+
+    // 会话管理（convId 是纯字符串运算，零 IO，可安全前置到校验之前）
+    var convId = String(req.body && req.body.conversation_id || '').trim();
+    if (!convId) convId = genConvId();
+    if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
+
+    writeSse(res, { type: 'meta', conversation_id: convId });
+    if (aborted) return safeEnd();
+    startStreamHeartbeat();
+
+    // 请求体已带思考模式时，先发 preparing 事件（不等 config/ctx，也不等额度校验），
+    // 前端可立刻稳固「思考中」态 —— 这就是用户感知到的"开始思考"那一帧。
+    var _reqThinkingHint = (req.body && req.body.thinking_mode) || '';
+    if (['low', 'medium', 'high', 'max'].indexOf(_reqThinkingHint) >= 0) {
+      try {
+        writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now(), early: true });
+      } catch (_) {}
+    }
+
     // token + 请求次数兜底（搜索额度不在此拦截整轮聊天）
     var rl = await enforceAiChatAccess(userName, { needSearch: false });
     if (!rl.allowed) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      if (typeof res.flushHeaders === 'function') res.flushHeaders();
       return terminateWithError({
         type: 'error',
         error: getAiQuotaErrorMessage(rl.reason),
@@ -21588,38 +21640,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (clientReqId && userName) {
       var sKey = userName + ':' + clientReqId;
       if (inFlightStreams.has(sKey)) {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        if (typeof res.flushHeaders === 'function') res.flushHeaders();
         return terminateWithError({ type: 'error', error: '请求正在处理中，请勿重复提交', code: 'duplicate_request' });
       }
       inFlightStreams.set(sKey, requestAbortCtrl);
-    }
-
-    // 会话管理（尽早生成 convId，便于立刻 flush SSE，降低首包等待）
-    var convId = String(req.body && req.body.conversation_id || '').trim();
-    if (!convId) convId = genConvId();
-    if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
-
-    // ★ 延迟优化：校验通过后立刻开 SSE + meta，附件解析与配置/历史并行
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    if (aborted) return safeEnd();
-
-    writeSse(res, { type: 'meta', conversation_id: convId });
-    if (aborted) return safeEnd();
-    startStreamHeartbeat();
-
-    // 请求体已带思考模式时，先发 preparing 事件（不等 config/ctx），前端可立刻稳固「思考中」态
-    var _reqThinkingHint = (req.body && req.body.thinking_mode) || '';
-    if (['low', 'medium', 'high', 'max'].indexOf(_reqThinkingHint) >= 0) {
-      try {
-        writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now(), early: true });
-      } catch (_) {}
     }
 
     // 附件解析与 config/ctx 并行，无附件时 extract 应快速返回
