@@ -2354,3 +2354,71 @@ html.xtj-wechat.xtj-ios-viewport #panelPosts .posts-nav.sticky-header {
 html.xtj-wechat.xtj-ios-viewport .dock-bar {
   bottom: max(0px, env(safe-area-inset-bottom, 0px)) !important;
 }
+
+/* ============================================================================
+   ★ 2026-09-23 桌面端侧栏可折叠（往左收起）
+   ----------------------------------------------------------------------------
+   折叠按钮在侧栏顶部（.desktop-wb-collapse）；折叠后侧栏 display:none、
+   网格第一列 --wb-sidebar-width 归 0，内容区占满整宽；
+   展开按钮 .desktop-wb-expand 放在 <aside> 之外、position:fixed 不参与网格布局，
+   所以不会被侧栏的 display:none 连带隐藏。
+   状态存 localStorage['xtj_wb_sidebar']（'collapsed' | 'expanded'），刷新后保持。
+   ========================================================================== */
+.desktop-wb-collapse {
+  position: absolute;
+  right: 10px;
+  top: 12px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 160, 145, 0.22);
+  background: rgba(255, 255, 255, 0.62);
+  color: #4b6b60;
+  cursor: pointer;
+}
+.desktop-wb-collapse svg, .desktop-wb-expand svg { width: 16px; height: 16px; }
+.desktop-wb-collapse:hover, .desktop-wb-expand:hover { background: #fff; color: #14603f; }
+
+/* ★ 展开按钮必须**始终脱离网格流**：它是 .app-container 的子元素，
+   若没被真正隐藏（display:none）就会占掉网格第二列，把 .dock-panels 挤到第二行。
+   所以这里用 !important 压住任何通用 button 样式，并只在折叠时显示。 */
+.desktop-wb-expand {
+  display: none !important;
+  position: fixed;
+  left: 10px;
+  top: 10px;
+  z-index: 1200;
+}
+.app-container.wb-sidebar-collapsed .desktop-wb-expand {
+  display: inline-flex !important;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 160, 145, 0.25);
+  background: rgba(255, 255, 255, 0.88);
+  color: #2c5c46;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(19, 70, 48, 0.12);
+}
+
+@media (min-width: 768px) and (min-height: 480px) {
+  .desktop-workbench-sidebar { position: relative; }
+  .app-container.wb-sidebar-collapsed {
+    --wb-sidebar-width: 0px;
+  }
+  .app-container.wb-sidebar-collapsed .desktop-workbench-sidebar {
+    display: none !important;
+  }
+  /* 折叠后内容区占满：面板横跨整行 */
+  .app-container.wb-sidebar-collapsed .dock-panels {
+    grid-column: 1 / -1;
+  }
+}
