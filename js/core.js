@@ -3719,7 +3719,12 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 if (!normalized.media_url) return '';
                 var onclick = "event.stopPropagation();openProfileActivityMedia('" + safeJsStr(String(postId || normalized.id || '')) + "')";
                 if (normalized.media_type === 'image') {
-                    return '<img class="stat-record-thumb" src="' + escapeHtml(normalized.media_url) + '" alt="" loading="lazy" decoding="async" fetchpriority="low" onclick="' + onclick + '" />';
+                    // ★ 修复（XSS 防护一致性）：媒体 URL 此前只 escapeHtml，未过 sanitizeUrl
+                    //   协议白名单。media_url 来自帖子数据（用户可控），必须拒绝
+                    //   javascript: / data:text/html 等可执行载荷（见 04 文件 2516 行的同类修复）。
+                    var activityMediaUrl = sanitizeUrl(normalized.media_url);
+                    if (!activityMediaUrl) return '';
+                    return '<img class="stat-record-thumb" src="' + escapeHtml(activityMediaUrl) + '" alt="" loading="lazy" decoding="async" fetchpriority="low" onclick="' + onclick + '" />';
                 }
                 if (normalized.media_type === 'video') {
                     return '<div class="stat-record-thumb stat-record-thumb--video" onclick="' + onclick + '">视频</div>';
@@ -6697,14 +6702,17 @@ function renderProfileActivityList(kind) {
             function getPostFilterUserAvatar(username) {
                 var safeName = escapeHtml(username || "");
                 var avatarUrl = getAvatarUrl(username);
-                if (avatarUrl) {
-                    return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
+                // ★ 修复（XSS 防护一致性）：此前只做 escapeHtml，未过 sanitizeUrl 协议白名单。
+                //   若缓存/服务端下发 `javascript:` 或 `data:text/html` 形态 URL，会直接进 src。
+                //   与本文件 renderAvatarContent（1678 行）保持一致，统一走 sanitizeUrl。
+                if (avatarUrl && sanitizeUrl(avatarUrl)) {
+                    return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(avatarUrl)) + '" alt="' + safeName + '"></span>';
                 }
                 try {
                     var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[username] && cachedAvatars[username].url) {
+                    if (cachedAvatars[username] && cachedAvatars[username].url && sanitizeUrl(cachedAvatars[username].url)) {
                         avatarCache[username] = cachedAvatars[username];
-                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(cachedAvatars[username].url) + '" alt="' + safeName + '"></span>';
+                        return '<span class="post-user-chip-avatar"><img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[username].url)) + '" alt="' + safeName + '"></span>';
                     }
                 } catch(e) {}
                 return '<span class="post-user-chip-avatar">' + escapeHtml((username || "?").slice(0, 1).toUpperCase()) + '</span>';
@@ -14748,7 +14756,11 @@ function renderProfileActivityList(kind) {
                 var normalized = post ? normalizePost(post) : null;
                 if (!normalized || !normalized.media_url) return '';
                 if (normalized.media_type === 'image') {
-                    return '<img class="stat-record-thumb" src="' + escapeHtml(normalized.media_url) + '" alt="记录缩略图" loading="lazy">';
+                    // ★ 修复（XSS 防护一致性）：同 03 文件的 profileActivityMedia，
+                    //   媒体 URL 需过 sanitizeUrl 协议白名单，拒绝 javascript:/data:text/html。
+                    var statMediaUrl = sanitizeUrl(normalized.media_url);
+                    if (!statMediaUrl) return '';
+                    return '<img class="stat-record-thumb" src="' + escapeHtml(statMediaUrl) + '" alt="记录缩略图" loading="lazy">';
                 }
                 if (normalized.media_type === 'video') {
                     return '<div class="stat-record-thumb stat-record-thumb--video" aria-hidden="true">视频</div>';

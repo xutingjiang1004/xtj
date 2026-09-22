@@ -739,7 +739,12 @@
                 if (!normalized.media_url) return '';
                 var onclick = "event.stopPropagation();openProfileActivityMedia('" + safeJsStr(String(postId || normalized.id || '')) + "')";
                 if (normalized.media_type === 'image') {
-                    return '<img class="stat-record-thumb" src="' + escapeHtml(normalized.media_url) + '" alt="" loading="lazy" decoding="async" fetchpriority="low" onclick="' + onclick + '" />';
+                    // ★ 修复（XSS 防护一致性）：媒体 URL 此前只 escapeHtml，未过 sanitizeUrl
+                    //   协议白名单。media_url 来自帖子数据（用户可控），必须拒绝
+                    //   javascript: / data:text/html 等可执行载荷（见 04 文件 2516 行的同类修复）。
+                    var activityMediaUrl = sanitizeUrl(normalized.media_url);
+                    if (!activityMediaUrl) return '';
+                    return '<img class="stat-record-thumb" src="' + escapeHtml(activityMediaUrl) + '" alt="" loading="lazy" decoding="async" fetchpriority="low" onclick="' + onclick + '" />';
                 }
                 if (normalized.media_type === 'video') {
                     return '<div class="stat-record-thumb stat-record-thumb--video" onclick="' + onclick + '">视频</div>';
