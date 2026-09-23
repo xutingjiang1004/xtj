@@ -2834,7 +2834,23 @@ async function executeToolCall(toolCall, context) {
         if (rzAb.byteLength > 30 * 1024 * 1024) return { tool_name: name, url: rzUrl, error: '压缩包过大（超过 30MB）' };
         var rzZip = await JSZip.loadAsync(Buffer.from(rzAb));
         var rzEntryWanted = String(args.entry || '').trim().slice(0, 300);
-        var rzNames = Object.keys(rzZip.files).filter(function(n) { return !rzZip.files[n].dir; });
+
+        // ★ P1-11：ZIP 炸弹 / 目录爆炸防护。
+        //   下载侧已限 30MB，但 ZIP 是压缩格式：一个几十 KB 的压缩包可以声明出
+        //   上 GB 的解压后体积（zip bomb），而此前实现完全没有解压侧的限制 ——
+        //   清单分支会遍历全部条目，取文件分支会把单个条目整体解压进内存。
+        //   JSZip 在 loadAsync 阶段只读中央目录，条目元信息里的
+        //   _data.uncompressedSize 是**声明值**，可以在真正解压前就拦住。
+        var ZIP_MAX_ENTRIES = 10000;                          // 条目数上限
+        var ZIP_MAX_ENTRY_UNCOMPRESSED = 8 * 1024 * 1024;     // 单个条目解压上限 8MB
+        var rzAllNames = Object.keys(rzZip.files);
+        if (rzAllNames.length > ZIP_MAX_ENTRIES) {
+          return {
+            tool_name: name, url: rzUrl,
+            error: '压缩包内条目过多（' + rzAllNames.length + ' 条，上限 ' + ZIP_MAX_ENTRIES + ' 条），拒绝读取'
+          };
+        }
+        var rzNames = rzAllNames.filter(function(n) { return !rzZip.files[n].dir; });
         if (rzEntryWanted) {
           var rzTarget = null;
           for (var rzi = 0; rzi < rzNames.length; rzi++) {
@@ -2854,6 +2870,16 @@ async function executeToolCall(toolCall, context) {
           if (!toolHelpers.isZipTextFile(rzTarget)) {
             return { tool_name: name, url: rzUrl, error: '「' + rzTarget + '」不是文本文件，无法直接读取内容' };
           }
+          // ★ P1-11：先按声明的解压后大小拦截，再真正解压。
+          //   最终展示只取前 12000 字符，为几百 MB 的文本条目整包解压纯属浪费内存。
+          var rzTargetSize = (rzZip.files[rzTarget]._data && rzZip.files[rzTarget]._data.uncompressedSize) || 0;
+          if (rzTargetSize > ZIP_MAX_ENTRY_UNCOMPRESSED) {
+            return {
+              tool_name: name, url: rzUrl,
+              error: '「' + rzTarget + '」解压后约 ' + toolHelpers.formatBytes(rzTargetSize) +
+                '，超过单文件 ' + toolHelpers.formatBytes(ZIP_MAX_ENTRY_UNCOMPRESSED) + ' 上限，拒绝读取'
+            };
+          }
           var rzText = await rzZip.files[rzTarget].async('string');
           rzText = String(rzText || '');
           var rzTrunc = rzText.length > 12000;
@@ -2867,13 +2893,18 @@ async function executeToolCall(toolCall, context) {
             results_count: 1
           };
         }
-        // 只列清单
+        // 只列清单（不解压任何条目，因此不存在解压侧的内存风险）
         var rzList = [];
         var rzTotalBytes = 0;
+        // ★ P1-11：uncompressedSize 是压缩包自己声明的值，可能被伪造得极大。
+        //   这里只是展示用，累加到上限后停止，避免输出离谱的"总大小"。
+        var ZIP_LIST_TOTAL_CAP = 2 * 1024 * 1024 * 1024;
+        var rzTotalTruncated = false;
         for (var rzk = 0; rzk < rzNames.length && rzList.length < 200; rzk++) {
           var rzF = rzZip.files[rzNames[rzk]];
           var rzSize = (rzF._data && rzF._data.uncompressedSize) || 0;
-          rzTotalBytes += rzSize;
+          if (rzTotalBytes + rzSize > ZIP_LIST_TOTAL_CAP) { rzTotalTruncated = true; }
+          else { rzTotalBytes += rzSize; }
           rzList.push({ path: rzNames[rzk].slice(0, 300), size: rzSize, size_text: toolHelpers.formatBytes(rzSize) });
         }
         var rzListText = rzList.map(function(f, fi) { return (fi + 1) + '. ' + f.path + '（' + f.size_text + '）'; }).join('\n');
@@ -2881,7 +2912,8 @@ async function executeToolCall(toolCall, context) {
           tool_name: name,
           url: rzUrl,
           file_count: rzNames.length,
-          content: '【压缩包清单】共 ' + rzNames.length + ' 个文件，总大小约 ' + toolHelpers.formatBytes(rzTotalBytes) + '。\n' + rzListText +
+          content: '【压缩包清单】共 ' + rzNames.length + ' 个文件，总大小约 ' +
+            (rzTotalTruncated ? '超过 ' : '') + toolHelpers.formatBytes(rzTotalBytes) + '。\n' + rzListText +
             (rzNames.length > 200 ? '\n...（仅显示前 200 个）' : '') +
             '\n\n如需查看某个文本文件的内容，再次调用 read_zip 并传入 entry 参数（文件路径）。',
           results_count: rzNames.length
