@@ -70,16 +70,16 @@
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=a85c8d0061" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=aa0e4dba60" />
-    <link rel="preload" as="style" href="css/ui-shell.min.css?v=9f634ff815" />
+    <link rel="preload" as="style" href="css/ui-shell.min.css?v=81bba7a957" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=55f7c3cd9b" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=aa0e4dba60" /><link rel="stylesheet" href="css/ui-shell.min.css?v=9f634ff815" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=a85c8d0061" /><link rel="stylesheet" href="css/ai-agent.min.css?v=55f7c3cd9b" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=aa0e4dba60" /><link rel="stylesheet" href="css/ui-shell.min.css?v=81bba7a957" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=4ee2fa8795" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=aa0e4dba60" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=9f634ff815" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=81bba7a957" media="print" onload="this.media='all'">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=55f7c3cd9b">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=d3c7b57fa0">
     <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=9162c96201">
@@ -140,11 +140,6 @@
     <div class="app-container">
 
     <aside class="desktop-workbench-sidebar" id="desktopWorkbenchSidebar" aria-label="电脑端主导航">
-        <!-- ★ 2026-09-23 侧栏可折叠：折叠后侧栏宽度变 0，内容区占满，
-             展开按钮浮在内容区左上角（见 css/ui-shell.css 的 .wb-collapsed 规则）。 -->
-        <button type="button" class="desktop-wb-collapse" id="desktopWbCollapse" aria-label="折叠侧栏" title="折叠侧栏（往左收起）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path><path d="M19 5v14"></path></svg>
-        </button>
         <div class="desktop-workbench-brand">xtj</div>
         <div class="desktop-workbench-user" aria-label="当前账户">
             <span class="avatar desktop-workbench-avatar" id="desktopWorkbenchAvatar">?</span>
@@ -161,11 +156,6 @@
             <label class="desktop-theme-control" for="desktopThemeMode"><span>外观</span><select id="desktopThemeMode" aria-label="选择外观模式"><option value="system">跟随系统</option><option value="light">浅色模式</option><option value="dark">深色模式</option></select></label>
         </div>
     </aside>
-
-    <!-- ★ 2026-09-23 侧栏折叠后的"展开"按钮：放在 aside 之外，position:fixed 不参与网格布局 -->
-    <button type="button" class="desktop-wb-expand" id="desktopWbExpand" aria-label="展开侧栏" title="展开侧栏">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path><path d="M5 5v14"></path></svg>
-    </button>
 
     <div class="dock-panels" id="dockPanels">
         <div class="dock-panel active" id="panelPosts">
@@ -1142,7 +1132,7 @@
     <script defer src="js/core.min.js?v=b7528c3b0e"></script>
     <script defer src="js/login-device.min.js?v=3c7f3ca971"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
-    <script defer src="js/desktop-shell.min.js?v=2a1d169013"></script>
+    <script defer src="js/desktop-shell.min.js?v=e914842de4"></script>
     <script defer src="js/ux-features.min.js?v=f43dd7162c"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
