@@ -678,10 +678,20 @@ function buildDefaultAgents(message) {
   return agents;
 }
 
-function buildToolExecutor(sseSend, agentRole, sourcesAccum, queriesAccum, searchCountAccum, userName) {
+function buildToolExecutor(sseSend, agentRole, sourcesAccum, queriesAccum, searchCountAccum, userName, sharedSearchCtx) {
+  // ★ P1-9：配额 context 必须是**共享对象**，不能每次工具调用都 new 一个。
+  //   旧写法 `{ userName, signal }` 每次都是新对象 → executeToolCall 里
+  //   `context.searchConsumed = context.searchConsumed || 0` 恒为 0 → 额度判定
+  //   只看 DB 里"上一轮已落账"的旧数，本轮内的第 2、3…N 次搜索全部放行，
+  //   这就是多智能体并行下额度被成倍打穿的根因之一。
+  //   传入 sharedSearchCtx 后，同一请求（含并行 worker）内的搜索次数持续累加。
+  var quotaCtx = (sharedSearchCtx && typeof sharedSearchCtx === 'object') ? sharedSearchCtx : {};
+  if (!quotaCtx.userName) quotaCtx.userName = userName || '';
+  if (typeof quotaCtx.searchConsumed !== 'number') quotaCtx.searchConsumed = 0;
   return async function(tc, signal) {
     var tRes = null;
-    try { tRes = await executeToolCall(tc, { userName: userName || '', signal: signal || null }); } catch (e) {
+    quotaCtx.signal = signal || null;
+    try { tRes = await executeToolCall(tc, quotaCtx); } catch (e) {
       tRes = { tool_name: (tc.function && tc.function.name) || '', error: (e && e.message) || '工具执行失败' };
     }
     if (tc.function && tc.function.name === 'search_web') {
@@ -1736,13 +1746,14 @@ async function executeToolCall(toolCall, context) {
       var maxR = Math.min(Math.max(parseInt(args.max_results, 10) || 20, 1), 20);
       if (!q) return { tool_name: name, error: '搜索关键词为空' };
       // ★ 搜索配额下沉：模型自主调 search_web 也受用户搜索额度约束（含请求内已用计数）
-      var swGate = await measureSearchQuota(context.userName, context.searchConsumed);
+      // ★ P1-9：改用 claimSearchSlot 乐观预占（计数先加、拒绝则回滚），消除同一轮内
+      //   并发工具调用同时读到旧计数、一次性打穿额度的超发窗口。
+      var swGate = await claimSearchSlot(context);
       if (!swGate.allowed) {
         var swQErr = searchQuotaErrorPayload(swGate.reason);
         return Object.assign({ tool_name: name, query: q }, swQErr, { quota: swGate.quota || null });
       }
       if (swGate.degraded) { try { console.warn('[SEARCH-QUOTA] search_web fail-open (quota service unavailable)'); } catch (e) {} }
-      context.searchConsumed++;
       try {
         var result = await searchWeb(q, maxR);
         var resultsArr = result && result.results ? result.results : [];
@@ -1776,13 +1787,13 @@ async function executeToolCall(toolCall, context) {
       if (!tq) return { tool_name: name, error: '搜索关键词为空' };
       if (!process.env.TAVILY_API_KEY) return { tool_name: name, query: tq, error: 'Tavily 未配置（缺少 TAVILY_API_KEY 环境变量）' };
       // ★ 搜索配额下沉：tavily_search 同样受用户搜索额度约束（含请求内已用计数）
-      var tsGate = await measureSearchQuota(context.userName, context.searchConsumed);
+      // ★ P1-9：同 search_web，乐观预占避免并发超发。
+      var tsGate = await claimSearchSlot(context);
       if (!tsGate.allowed) {
         var tsQErr = searchQuotaErrorPayload(tsGate.reason);
         return Object.assign({ tool_name: name, query: tq }, tsQErr, { quota: tsGate.quota || null });
       }
       if (tsGate.degraded) { try { console.warn('[SEARCH-QUOTA] tavily_search fail-open (quota service unavailable)'); } catch (e) {} }
-      context.searchConsumed++;
       try {
         var tavilyResult = await searchTavily(tq, tMax, {
           search_depth: args.search_depth,
@@ -1847,13 +1858,13 @@ async function executeToolCall(toolCall, context) {
       var kwSuffix = kind === 'account' ? ' 博主' : '';
       var socialQuery = skw + kwSuffix + ' site:' + platMeta.site;
 
-      var ssGate = await measureSearchQuota(context.userName, context.searchConsumed);
+      // ★ P1-9：乐观预占，避免并发超发。
+      var ssGate = await claimSearchSlot(context);
       if (!ssGate.allowed) {
         var ssQErr = searchQuotaErrorPayload(ssGate.reason);
         return Object.assign({ tool_name: name, query: socialQuery }, ssQErr, { quota: ssGate.quota || null });
       }
       if (ssGate.degraded) { try { console.warn('[SEARCH-QUOTA] social search fail-open (quota service unavailable)'); } catch (e) {} }
-      context.searchConsumed++;
       try {
         var ssResult = await searchWeb(socialQuery, 10);
         var ssArr = (ssResult && ssResult.results) ? ssResult.results : [];
@@ -1880,9 +1891,9 @@ async function executeToolCall(toolCall, context) {
           //   只走这一条补充路径，命中时最多 2 次搜索（配额如实计 2）。
           try {
             var wideQuery = skw + ' ' + platMeta.label + (kind === 'account' ? ' 博主' : '');
-            var wideGate = await measureSearchQuota(context.userName, context.searchConsumed);
+            // ★ P1-9：乐观预占（与主检索共用同一 context 计数）
+            var wideGate = await claimSearchSlot(context);
             if (wideGate.allowed) {
-              context.searchConsumed++;
               var wideRes = await searchWeb(wideQuery, 10);
               var wideArr = (wideRes && wideRes.results) ? wideRes.results : [];
               var onSite = [], offSite = [];
@@ -9906,6 +9917,12 @@ async function runMultiAgentFlow(opts) {
   if (isCancelled()) workerAbortCtrl.abort();
   cancelToken._onWorkerCancel = _workerOnCancel;
 
+  // ★ P1-9：所有并行 worker 共享同一个搜索配额 context。
+  //   原来每个 worker（乃至每次工具调用）都拿到 searchConsumed=0 的新 context，
+  //   于是 agentCount × 每轮多次搜索可以一次性绕过额度判定。共享后第 k 次并发
+  //   检索看到的就是"已用 k-1 次"，与真实额度一致。
+  var sharedSearchCtx = { userName: userName || '', searchConsumed: 0 };
+
   var workerPromises = agents.map(function(agent, idx) {
     return runDeepThinkWorker({
       agent: agent,
@@ -9914,6 +9931,7 @@ async function runMultiAgentFlow(opts) {
       cancelToken: cancelToken,
       timeLeft: timeLeft,
       sseSend: sseSend,
+      searchCtx: sharedSearchCtx,
       externalSignal: workerAbortCtrl.signal,
       onRound: function(round) {
         sseSend({ type: 'deep_think_stage', stage: 'agent', message: '[' + agent.role + '] 第 ' + round + ' 轮分析...' });
@@ -10235,6 +10253,8 @@ async function runDeepThinkAgent(opts) {
       }
     };
     var searchCountAccum = { count: 0 };
+    // ★ P1-9：单智能体链路也要跨轮次共享配额 context（多轮 tool_use 累加计数）
+    var mainSearchCtx = { userName: userName || '', searchConsumed: 0 };
     // ★ P 改: 思考程度 low 时不传 tools(禁止搜索), 其他级别正常传
     if (!disableSearch) {
       // ★ 2026-09-13：不再按配额裁剪工具可见性（配额在 executeToolCall 内 gate）。
@@ -10243,7 +10263,7 @@ async function runDeepThinkAgent(opts) {
       if (!thirdPartyOk) { try { console.warn('[TOOLS] 第三方搜索配额受限，工具仍全量可见，调用时由 gate 返回可读提示'); } catch (e) {} }
       deepSeekOpts.tools = aiToolsForSearch(true);
       deepSeekOpts.tool_choice = 'auto';
-      deepSeekOpts.tool_executor = buildToolExecutor(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName);
+      deepSeekOpts.tool_executor = buildToolExecutor(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName, mainSearchCtx);
     }
     var agentPromise = callDeepSeek(
       [
@@ -10392,6 +10412,8 @@ async function runDeepThinkWorker(opts) {
   var sharedPrefix = opts.sharedPrefix || '';
   // ★ 取消中断：来自 runMultiAgentFlow 的 workerAbortCtrl，客户端断开/取消时立即 abort
   var externalAbortSignal = opts.externalSignal || null;
+  // ★ P1-9：跨并行 worker 共享的搜索配额槽（由 runMultiAgentFlow 传入）
+  var searchCtx = opts.searchCtx || { userName: userName, searchConsumed: 0 };
 
   var sources = [];
   var queries = [];
@@ -10457,7 +10479,7 @@ async function runDeepThinkWorker(opts) {
         // ★ 2026-09-13：同主链路，工具可见性不因配额裁剪。
         callOpts.tools = aiToolsForSearch(true);
         callOpts.tool_choice = 'auto';
-        callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum, userName);
+        callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum, userName, searchCtx);
       }
       workerAbortController = new AbortController();
       if (cancelToken.cancelled) workerAbortController.abort();
@@ -10702,6 +10724,55 @@ function searchQuotaErrorPayload(reason) {
     return { error: '请先登录后再使用联网搜索', search_quota_exceeded: false };
   }
   return { error: '今日网页搜索次数已达上限，请开通 Pro 或明日再试', search_quota_exceeded: true };
+}
+
+// ★ P1-9 审计修复：搜索配额「乐观预占」，消除并发超发窗口。
+//
+//   原写法的顺序是：await 门禁 → 通过后才 context.searchConsumed++。
+//   问题在于 measureSearchQuota 内部有一次 Supabase RPC 往返（网络 I/O），
+//   而模型经常在同一轮里并行发起多个搜索类工具调用（并发循环）。在 RPC 返回
+//   之前 searchConsumed 一直是旧值，于是 N 个并发搜索读到同一个计数、全部被
+//   判定为"未超额"，一次性打穿用户当日额度 —— 这就是审计里的超发窗口。
+//
+//   改法：先把计数加一（乐观预占），再去问门禁；门禁拒绝时回滚。这样第 k 个
+//   并发调用抢占到序号 k，看到的是"已用 k-1 次"，与真实额度判定一致。
+//
+//   等价性说明：门禁看到的 usedNow 仍是「本次之前已用次数」（预占值 -1），
+//   所以判定结果与旧写法逐字节相同，只是提前了；拒绝路径会回滚，不会把
+//   被拒的调用算进计数。预占仅为进程内记账，真正的扣费仍在 DB 侧
+//   consume_ai_token_usage，因此账目准确性不受影响。
+async function claimSearchSlot(context) {
+  if (!context || typeof context !== 'object') {
+    return measureSearchQuota('', 0);
+  }
+  var prev = (typeof context.searchConsumed === 'number' && context.searchConsumed > 0) ? context.searchConsumed : 0;
+  context.searchConsumed = prev + 1;              // 乐观预占
+  var gate = await measureSearchQuota(context.userName, prev);
+  if (!gate || !gate.allowed) {
+    // ★ 回滚只能用「减一」，绝不能写回 prev 快照。
+    //   prev 是本次调用**开始时**的值；在 await 门禁期间，其他并发调用可能又占了
+    //   若干槽，写回 prev 会把它们的计数一并抹掉，导致额度判定重新放宽。
+    //   JS 单线程下 ++/-- 不会被打断，减一是安全的。
+    context.searchConsumed = Math.max(0, context.searchConsumed - 1);
+  }
+  return gate;
+}
+
+// ★ P1-9：请求级共享的搜索配额 context。
+//   多个路由处理函数里，工具执行器被写成 `executeToolCall(tc, { userName })` ——
+//   每次都是新对象，executeToolCall 内部 `context.searchConsumed || 0` 恒为 0。
+//   在 `Promise.all(toolCalls.map(...))` 这种并行路径（22991/23877/23978）下，
+//   同一批 N 个搜索工具调用会同时读到"已用 0 次"并全部放行；在串行多轮路径下，
+//   第 2 轮也只看得到 DB 里上一轮落账的旧数。两者都会打穿用户当日额度。
+//   挂在 req 上即可让同一请求内所有（含并行）工具调用共享同一个累加计数。
+function requestSearchCtx(req, userName) {
+  var host = (req && typeof req === 'object') ? req : null;
+  if (!host) return { userName: userName || '', searchConsumed: 0 };
+  if (!host._searchCtx || typeof host._searchCtx !== 'object') {
+    host._searchCtx = { userName: userName || '', searchConsumed: 0 };
+  }
+  if (!host._searchCtx.userName) host._searchCtx.userName = userName || '';
+  return host._searchCtx;
 }
 
 async function enforceSearchQuota(userName, extraUsed) {
@@ -20578,7 +20649,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         signal: requestAbortCtrl.signal,
         _userName: userName,
         tool_executor: async function(toolCall) {
-          var res = await executeToolCall(toolCall, { userName: userName });
+          var res = await executeToolCall(toolCall, requestSearchCtx(req, userName));
           // F-1: 模型驱动 tavily_search 计入请求级搜索调用计数器
           if (res && res.tool_name === 'tavily_search' && !res.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
           if (res && (res.tool_name === 'tavily_search' || res.tool_name === 'get_weather' || res.tool_name === 'get_current_time')) {
@@ -20695,7 +20766,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       signal: requestAbortCtrl.signal,
       // ★ wrapper：拦截 search_web 的真实 results 数组
       tool_executor: async function(toolCall) {
-        var res = await executeToolCall(toolCall, { userName: userName });
+        var res = await executeToolCall(toolCall, requestSearchCtx(req, userName));
         // F-1: 模型驱动 search_web / tavily_search 计入请求级搜索调用计数器
         if (res && (res.tool_name === 'search_web' || res.tool_name === 'tavily_search') && !res.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
         if (res && (res.tool_name === 'search_web' || res.tool_name === 'tavily_search')) {
@@ -21560,7 +21631,11 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
     ];
   }
 
-  var searchCount = 0;
+  // ★ P1-9：并行 worker（Promise.all，最多 6 个）共享同一个计数槽。
+  //   原来是裸 number + 「先 await 门禁再 ++」，RPC 往返期间所有并发 worker 读到
+  //   同一个旧值，6×3=18 次检索可以一次性打穿当日额度。改成对象 + claimSearchSlot
+  //   乐观预占后，并发调用各自抢占到递增的序号，额度判定即时生效。
+  var searchCtx = { userName: req.userName || '', searchConsumed: 0 };
   var sources = [];
   var thinkingAcc = '';
   var reasoningStartedFlag = false;
@@ -21619,9 +21694,9 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
         for (var qi = 0; qi < queries.length; qi++) {
           var q = String(queries[qi] || '').trim().slice(0, 100);
           if (!q) continue;
-          var gate = await measureSearchQuota(req.userName, searchCount);
+          // ★ P1-9：乐观预占（内部已把 searchCtx.searchConsumed 加一，拒绝则回滚）
+          var gate = await claimSearchSlot(searchCtx);
           if (!gate.allowed) break;
-          searchCount += 1;
           // 工具时间线 + 搜索状态条（主聊天循环兼容事件）
           sseSend({ type: 'tool_calls', tools: [{ name: 'search_web', args: { query: q } }] });
           var sr = null;
@@ -21633,7 +21708,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
             if (it && it.url) sources.push({ title: it.title || '', url: it.url, snippet: it.snippet || '', source: it.source || '' });
           });
           sseSend({ type: 'tool_result', tool_name: 'search_web', success: true, count: items.length, location: '' });
-          sseSend({ type: 'search', count: searchCount, query: q, results: [] });
+          sseSend({ type: 'search', count: searchCtx.searchConsumed, query: q, results: [] });
           emitReasoning('【' + role + '】搜索「' + q + '」命中 ' + items.length + ' 条\n');
           contextParts.push('【搜索: ' + q + '】\n' + items.map(function(it) { return '- ' + (it.title || '') + '\n  ' + (it.url || '') + '\n  ' + (it.snippet || ''); }).join('\n'));
         }
@@ -21688,7 +21763,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
       provider: provider,
       thinking_mode: 'max',
       agent_count: agents.length,
-      search_count: searchCount,
+      search_count: searchCtx.searchConsumed,
       sources: sources.slice(0, 30),
       reasoning: thinkingAcc.slice(0, 200000),
       content: finalContent
@@ -21709,8 +21784,8 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
           message: text,
           content: finalContent || '',
           reasoning: thinkingAcc ? String(thinkingAcc).slice(0, 50000) : '',
-          search_count: searchCount,
-          did_search: searchCount > 0
+          search_count: searchCtx.searchConsumed,
+          did_search: searchCtx.searchConsumed > 0
         });
       } catch (eRec) {
         console.error('[CUSTOM-DEEP] usage record failed:', eRec && eRec.message);
@@ -22541,7 +22616,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           } catch (e) {}
         },
         tool_executor: async function(toolCall) {
-          var tcResult = await executeToolCall(toolCall, { userName: userName });
+          var tcResult = await executeToolCall(toolCall, requestSearchCtx(req, userName));
           // ★ 修复（工作模式时间线永远停在"进行中"）：
           //   此前 Responses 路径只在 /chat/stream 旧路径推 tool_result，
           //   工作模式全程走这里 → 前端步骤条拿不到完成/失败回执，用户看到一堆
@@ -22934,7 +23009,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
             // 并行执行所有工具调用
             var toolResults = await Promise.all(fcMessage.tool_calls.map(function(tc) {
-              return executeToolCall(tc, { userName: userName }).then(function(tr) {
+              return executeToolCall(tc, requestSearchCtx(req, userName)).then(function(tr) {
                 // F-1: FC 预检路径工具驱动的真实搜索调用计入请求级计数器
                 if (tr && (tr.tool_name === 'search_web' || tr.tool_name === 'tavily_search') && !tr.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
                 return { toolCallId: tc.id, toolResult: tr };
@@ -23820,7 +23895,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           var tcExec = { function: { name: tc.name, arguments: tc.args } };
           var execResult;
           try {
-            execResult = await executeToolCall(tcExec, { userName: userName });
+            execResult = await executeToolCall(tcExec, requestSearchCtx(req, userName));
           } catch (toolErr) {
             execResult = { tool_name: tc.name, error: (toolErr && toolErr.message) || '工具执行失败' };
           }
@@ -23921,7 +23996,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var dsmlToolResults = await Promise.all(dsmlFallbackCalls.map(async function(tc) {
         var tcRaw = { function: { name: tc.function.name, arguments: tc.function.arguments } };
         var execResult;
-        try { execResult = await executeToolCall(tcRaw, { userName: userName }); } catch (e) { execResult = { tool_name: tc.function.name, error: '工具执行失败' }; }
+        try { execResult = await executeToolCall(tcRaw, requestSearchCtx(req, userName)); } catch (e) { execResult = { tool_name: tc.function.name, error: '工具执行失败' }; }
         if (execResult && (execResult.tool_name === 'search_web' || execResult.tool_name === 'tavily_search') && !execResult.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
         return { result: execResult, id: tc.id, name: tc.function.name };
       }));

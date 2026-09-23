@@ -211,9 +211,12 @@ test('audit: post-tools 429 carries quota for frontend refresh', () => {
 
 test('audit: deep-think workers and FC preflight searches are quota-enforced', () => {
   // buildToolExecutor 透传 userName → executeToolCall 做搜索配额校验（S1 修复）
-  assert.match(serverSource, /buildToolExecutor\(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName\)/);
-  assert.match(serverSource, /buildToolExecutor\(sseSend, agent\.role, sources, queries, searchCountAccum, userName\)/);
-  assert.match(serverSource, /executeToolCall\(tc, \{ userName: userName \|\| '', signal: signal \|\| null \}\)/);
+  // ★ P1-9：新增第 7 参 sharedSearchCtx，让并行 worker / 多轮工具调用共享同一个
+  //   已用搜索计数，否则每次工具调用都从 0 开始、额度判定形同虚设。
+  assert.match(serverSource, /buildToolExecutor\(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName, mainSearchCtx\)/);
+  assert.match(serverSource, /buildToolExecutor\(sseSend, agent\.role, sources, queries, searchCountAccum, userName, searchCtx\)/);
+  // 默认 executor 复用共享 context（不再是每次 new 一个对象字面量）
+  assert.match(serverSource, /executeToolCall\(tc, quotaCtx\)/);
   // FC 预检的补全/扩展搜索改用 searchWebForUser（S2 修复；F-1 后新增第 4 参 req._searchApiCalls 计数）
   assert.match(serverSource, /searchWebForUser\(userName, firstQuery, 20(?:,[^)]*)?\)/);
   assert.match(serverSource, /searchWebForUser\(userName, eq, 20(?:,[^)]*)?\)/);

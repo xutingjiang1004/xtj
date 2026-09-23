@@ -112,7 +112,9 @@ test('遗留1：三个搜索工具分支都走新 gate 与分档文案', () => {
     if (idx < 0) return;
     found++;
     const seg = serverSrc.slice(idx, idx + 2200);
-    assert.match(seg, /measureSearchQuota/, sig + ' 未使用新 gate');
+    // ★ P1-9：搜索分支的门禁入口改为 claimSearchSlot（乐观预占），它内部委派
+    //   measureSearchQuota 判定；两者任一出现都代表该分支确实过了配额门禁。
+    assert.match(seg, /claimSearchSlot|measureSearchQuota/, sig + ' 未使用新 gate');
     assert.match(seg, /searchQuotaErrorPayload/, sig + ' 未使用分档错误文案');
     assert.doesNotMatch(seg, /return \{ tool_name: name[^}]*error: '今日网页搜索次数已达上限/,
       sig + ' 仍在使用一刀切文案（服务故障会被误报为次数用尽）');
