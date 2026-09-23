@@ -41,8 +41,11 @@ test('合约：ipwho.is 请求必须带 lang=zh-CN', () => {
 });
 
 test('合约：属地解析必须是并行竞速（Promise.any + 整体截止），不是顺序 fallback', () => {
+  // ★ 2026-09-24：竞速抽成 raceWithDeadline(list, ms) 辅助（两层竞速复用：
+  // 第一层国内源、第二层海外源），参数名 fetchers → list，语义不变。
   assert.ok(
-    src.includes('Promise.race([Promise.any(fetchers.map('),
+    src.includes('function raceWithDeadline(list, deadlineMs) {') &&
+    src.includes('Promise.race([Promise.any(list.map('),
     '必须用 Promise.any 并行竞速（首个成功者胜出）'
   );
   assert.ok(/overall_deadline/.test(src), '必须有整体截止（overall_deadline），避免竞速无上限地等待');

@@ -155,6 +155,15 @@ var MAX_WEATHER_RESPONSE_BYTES = 512 * 1024;
 var GEOCODE_CACHE = Object.create(null);
 var GEOCODE_CACHE_MAX = 80;
 
+// ★ 2026-09-24 修复（线上 get_weather 反复"天气服务暂时不可用"）：
+//   Render 共享出口 IP 极易触发 open-meteo 免费档限流（HTTP 429），
+//   此前每次提问都实时外发请求，毫无节流 → 偶发限流被放大成持续故障。
+//   新增天气结果缓存：同一坐标 10 分钟内直接复用，请求量下降一个数量级，
+//   是防限流的治本第一道防线；叠加 wttr.in 备源消除单点。
+var WEATHER_CACHE = new Map();
+var WEATHER_CACHE_TTL_MS = 10 * 60 * 1000;
+var WEATHER_CACHE_MAX = 300;
+
 function formatWeatherText(data) {
   if (!data) return null;
   var result = '【天气工具结果】\n查询时间：' + data.queried_at + '（北京时间）\n地点：' + data.city +
@@ -371,7 +380,12 @@ async function fetchForecast(matchedCity) {
   // ★ 2026-09-22：2 次 → 3 次，并在重试之间加退避。
   //   无间隔的连续重试在"上游短暂过载"时几乎必然一起失败；
   //   退避后再试可把偶发抖动与真实故障区分开，显著降低假失败率。
+  // ★ 2026-09-24：记录每次失败的 HTTP 状态码；429 时读取 Retry-After 做退避
+  //   （上限 5s），避免无间隔连打加深限流；全败后抛出带 upstream_status 的
+  //   错误，由 queryWeatherData 走 wttr.in 备源，不再静默 return null。
   var resp = null;
+  var lastStatus = 0;
+  var lastErr = '';
   for (var attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) {
       await new Promise(function (r) { setTimeout(r, attempt * 600); });
@@ -379,12 +393,25 @@ async function fetchForecast(matchedCity) {
     try {
       resp = await fetch(weatherUrl, { signal: AbortSignal.timeout(10000) });
       if (resp && resp.ok) break;
+      lastStatus = resp ? (resp.status || 0) : 0;
+      if (lastStatus === 429 && attempt < 2) {
+        var ra = Number(resp && resp.headers && resp.headers.get && resp.headers.get('retry-after'));
+        var backoff = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 5000) : 1500;
+        await new Promise(function (r) { setTimeout(r, backoff); });
+      }
+      resp = null;
     } catch (eFetch) {
-      console.error('[WEATHER] forecast fetch attempt', attempt + 1, 'failed:', eFetch && eFetch.message);
+      lastErr = (eFetch && eFetch.message) || 'fetch_error';
+      console.error('[WEATHER] forecast fetch attempt', attempt + 1, 'failed:', lastErr);
       resp = null;
     }
   }
-  if (!resp || !resp.ok) return null;
+  if (!resp || !resp.ok) {
+    var upErr = new Error('open-meteo forecast failed' + (lastStatus ? ' HTTP ' + lastStatus : '') + (lastErr ? ' ' + lastErr : ''));
+    upErr.reason = 'upstream_failed';
+    upErr.upstream_status = lastStatus;
+    throw upErr;
+  }
   // 审计 🟢：先查 content-length，再限量读取 body，异常大响应直接丢弃
   var declaredLen = Number(resp.headers && resp.headers.get && resp.headers.get('content-length'));
   if (Number.isFinite(declaredLen) && declaredLen > MAX_WEATHER_RESPONSE_BYTES) return null;
@@ -430,6 +457,78 @@ function describeUvIndex(uv) {
   return '极高';
 }
 
+// ★ 2026-09-24 新增：wttr.in 备源（免 Key、免注册）。open-meteo 整体不可用
+//   （被 Render 共享出口 IP 触发限流 / 上游宕机）时兜底，消除
+//   "单一上游限流 = get_weather 持续失败"的单点故障。
+//   wttr.in 的 weatherCode 同为 WMO 代码，直接复用 WEATHER_CODES 映射中文；
+//   无紫外线字段 → 置 null，formatWeatherText 会自动跳过。
+async function fetchForecastViaWttr(matchedCity) {
+  var lat = Number(matchedCity.coords.lat);
+  var lon = Number(matchedCity.coords.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    var bad = new Error('wttr.in bad coords');
+    bad.reason = 'upstream_failed';
+    throw bad;
+  }
+  var wttrUrl = 'https://wttr.in/' + lat.toFixed(2) + ',' + lon.toFixed(2) + '?format=j1';
+  var data = null;
+  var lastStatus = 0;
+  for (var attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      await new Promise(function (r) { setTimeout(r, 800); });
+    }
+    try {
+      var resp = await fetch(wttrUrl, { signal: AbortSignal.timeout(8000) });
+      lastStatus = resp.status || 0;
+      if (!resp.ok) continue;
+      var declared = Number(resp.headers && resp.headers.get && resp.headers.get('content-length'));
+      if (Number.isFinite(declared) && declared > MAX_WEATHER_RESPONSE_BYTES) continue;
+      var raw = await resp.text();
+      if (Buffer.byteLength(raw, 'utf8') > MAX_WEATHER_RESPONSE_BYTES) continue;
+      data = JSON.parse(raw);
+      break;
+    } catch (eW) {
+      console.error('[WEATHER] wttr.in attempt', attempt + 1, 'failed:', eW && eW.message);
+      data = null;
+    }
+  }
+  var cur = data && Array.isArray(data.current_condition) && data.current_condition[0];
+  var day = data && Array.isArray(data.weather) && data.weather[0];
+  if (!cur || Number.isNaN(Number(cur.temp_C))) {
+    var wErr = new Error('wttr.in fallback failed' + (lastStatus ? ' HTTP ' + lastStatus : ''));
+    wErr.reason = 'upstream_failed';
+    wErr.upstream_status = lastStatus;
+    throw wErr;
+  }
+  // 当天降雨概率：取 hourly 各时段 chanceofrain 的最大值
+  var rainProb = null;
+  if (day && Array.isArray(day.hourly)) {
+    for (var hi = 0; hi < day.hourly.length; hi++) {
+      var v = Number(day.hourly[hi] && day.hourly[hi].chanceofrain);
+      if (Number.isFinite(v)) rainProb = (rainProb === null) ? v : Math.max(rainProb, v);
+    }
+  }
+  var queriedAt = new Date().toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  var wmo = Number(cur.weatherCode);
+  return {
+    city: matchedCity.name,
+    condition: WEATHER_CODES[wmo] || '天气代码 ' + cur.weatherCode,
+    temperature_c: Number(cur.temp_C),
+    humidity: Number(cur.humidity),
+    wind_kmh: Number(cur.windspeedKmph),
+    high_c: (day && day.maxtempC !== undefined && day.maxtempC !== '' && day.maxtempC !== null) ? Number(day.maxtempC) : null,
+    low_c: (day && day.mintempC !== undefined && day.mintempC !== '' && day.mintempC !== null) ? Number(day.mintempC) : null,
+    precip_prob: rainProb,
+    weather_code: wmo,
+    uv_index: null,
+    uv_index_max: null,
+    queried_at: queriedAt
+  };
+}
+
 /** Structured weather for result cards + model content. */
 async function queryWeatherData(query) {
   try {
@@ -441,12 +540,41 @@ async function queryWeatherData(query) {
       notFound.reason = 'city_not_found';
       throw notFound;
     }
-    var forecast = await fetchForecast(matchedCity);
+    // ★ 2026-09-24：主/备源共享的结果缓存 —— 同一坐标 10 分钟内直接复用，
+    //   大幅降低对 open-meteo 的请求量，防 Render 共享出口 IP 触发限流。
+    var cacheKey = Number(matchedCity.coords.lat).toFixed(2) + ',' + Number(matchedCity.coords.lon).toFixed(2);
+    var cached = WEATHER_CACHE.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (cached) WEATHER_CACHE.delete(cacheKey);
+
+    var forecast = null;
+    var primaryErr = null;
+    try {
+      forecast = await fetchForecast(matchedCity);
+    } catch (ePrimary) {
+      primaryErr = ePrimary;
+      console.error('[WEATHER] open-meteo 主源失败:', ePrimary && ePrimary.message);
+    }
     if (!forecast) {
-      var upstream = new Error('天气服务无响应');
+      // ★ 2026-09-24：主源全败 → wttr.in 备源兜底
+      try {
+        forecast = await fetchForecastViaWttr(matchedCity);
+      } catch (eFallback) {
+        console.error('[WEATHER] wttr.in 备源也失败:', eFallback && eFallback.message);
+      }
+    }
+    if (!forecast) {
+      var upstream = new Error('天气服务无响应' +
+        (primaryErr && primaryErr.upstream_status ? '（open-meteo HTTP ' + primaryErr.upstream_status + '）' : ''));
       upstream.reason = 'upstream_failed';
+      upstream.upstream_status = (primaryErr && primaryErr.upstream_status) || 0;
       throw upstream;
     }
+    if (WEATHER_CACHE.size >= WEATHER_CACHE_MAX) {
+      var oldestKey = WEATHER_CACHE.keys().next().value;
+      if (oldestKey !== undefined) WEATHER_CACHE.delete(oldestKey);
+    }
+    WEATHER_CACHE.set(cacheKey, { value: forecast, expiresAt: Date.now() + WEATHER_CACHE_TTL_MS });
     return forecast;
   } catch (e) {
     if (e && e.reason) throw e;
@@ -477,6 +605,9 @@ module.exports = {
   // ★ 2026-09-11：导出候选生成器，便于单测覆盖地名清洗逻辑
   buildGeoQueryCandidates: buildGeoQueryCandidates,
   describeUvIndex: describeUvIndex,
+  // ★ 2026-09-24：导出备源与缓存引用，供单测/上层复用
+  fetchForecastViaWttr: fetchForecastViaWttr,
+  WEATHER_CACHE: WEATHER_CACHE,
   CITY_COORDS: CITY_COORDS,
   CITY_ALIASES: CITY_ALIASES
 };

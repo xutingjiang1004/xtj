@@ -72,7 +72,9 @@ test('IP geolocation prefers TLS providers and de-duplicates repeated lookups', 
   //   现在锁定：① ipwho.is 仍是首个 HTTPS 源；② ip-api.com 不得回归；③ 竞速结构存在。
   assert.ok(server.indexOf('https://ipwho.is/') > 0, 'ipwho.is 应仍在解析链中');
   assert.ok(server.indexOf('https://ip-api.com/') < 0, 'ip-api.com（免费档无 HTTPS）不应再出现在解析链中');
-  assert.match(server, /Promise\.any\(fetchers/, '应为并行竞速取最快成功者');
+  // ★ 2026-09-24：竞速抽成 raceWithDeadline(list, ms)，两层（国内源/海外源）复用，
+  //   Promise.any 并行竞速语义不变（list 为形参名）。
+  assert.match(server, /Promise\.any\((fetchers|list)\.map\(/, '应为并行竞速取最快成功者');
   assert.match(server, /lang=zh-CN/, 'ipwho.is 应请求中文，避免返回英文地名');
   assert.match(server, /function normalizeIpGeoName/, '应有英文地名兜底归一（竞速下 ipapi.co 可能先返回）');
   assert.match(server, /provider: racedResult\.provider/);
