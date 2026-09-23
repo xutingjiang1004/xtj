@@ -365,49 +365,13 @@
     syncUser();
     syncChatBadge();
     syncContacts();
-    setupSidebarCollapse();
   }
 
-  // ★ 2026-09-23 桌面端侧栏可折叠（往左收起）
-  //   折叠：侧栏 display:none + 网格第一列归 0（CSS 在 ui-shell.css 的桌面媒体查询内），
-  //   展开按钮在 <aside> 之外、position:fixed，所以不受侧栏隐藏影响。
-  //   状态存 localStorage['xtj_wb_sidebar']，刷新/重开浏览器后保持。
-  function setupSidebarCollapse() {
-    var app = document.querySelector('.app-container');
-    if (!app) return;
-    var KEY = 'xtj_wb_sidebar';
-    function readSaved() {
-      try { return localStorage.getItem(KEY); } catch (e) { return null; }
-    }
-    function save(v) {
-      try { localStorage.setItem(KEY, v); } catch (e) {}
-    }
-    function apply(collapsed) {
-      var on = !!collapsed;
-      app.classList.toggle('wb-sidebar-collapsed', on);
-      var btnCollapse = document.getElementById('desktopWbCollapse');
-      var btnExpand = document.getElementById('desktopWbExpand');
-      if (btnCollapse) btnCollapse.setAttribute('aria-expanded', on ? 'false' : 'true');
-      if (btnExpand) btnExpand.setAttribute('aria-expanded', on ? 'false' : 'true');
-    }
-    apply(readSaved() === 'collapsed');
-    document.addEventListener('click', function (event) {
-      var t = event.target;
-      if (!t || typeof t.closest !== 'function') return;
-      if (t.closest('#desktopWbCollapse')) {
-        event.preventDefault();
-        apply(true);
-        save('collapsed');
-        return;
-      }
-      if (t.closest('#desktopWbExpand')) {
-        event.preventDefault();
-        apply(false);
-        save('expanded');
-      }
-    });
-    window.__xtjSetSidebarCollapsed = function (v) { apply(v); save(v ? 'collapsed' : 'expanded'); };
-  }
+  // 2026-09-23 侧栏折叠功能已移除。
+  //   原实现（提交 a90273e）存在无法修复的布局缺陷：展开按钮放在 <aside> 之外、
+  //   成为 .app-container 网格的直接子元素，侧栏 display:none 后它与 .dock-panels
+  //   被自动排成两行，内容区落到第 2 行（实测 y=884、h=0）→ 折叠后整页空白。
+  //   经确认该功能从未真正可用，故整体移除，侧栏保持常驻显示。
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();
