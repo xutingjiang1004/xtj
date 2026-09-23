@@ -1369,6 +1369,9 @@
       // 递归树被截断：逐层遍历所有子树，确保当前分支的全部文件都被列出
       if (truncated) {
         var walked = await walkFullTree(owner, repoName, branch);
+        // ★ 2026-09-24 修复：walkFullTree 对大仓可发几十上百个请求、耗时很长，
+        //   返回后必须复查 seq —— 否则切换分支后旧分支的遍历结果会覆盖新分支的文件树
+        if (seq !== state.treeSeq) return; // 已切换分支/刷新，丢弃过期遍历
         if (walked && walked.length) myItems = walked;
       }
       var files = myItems.filter(function (item) {
@@ -2606,9 +2609,15 @@
       if (e && e.code === 'ABORTED') msg = '已停止生成';
       streamView.setStatus('出错了：' + esc(msg));
     } finally {
-      state.streaming = false;
-      ui.sendBtn.disabled = false;
-      ui.sendBtn.textContent = '发送';
+      // ★ 2026-09-24 修复：自动续写/工具调用会继续进行多轮流式请求，若首轮结束后
+      //   立即恢复发送按钮，用户可在多轮期间再次发送 → 双流并行、state.abortCtrl
+      //   被覆盖、旧流无法中止。仅当不再进入续写/工具轮时才恢复；
+      //   多轮路径在工具循环结束后统一恢复（见下方）。
+      if (done || !(isAiOutputTruncated(accumulated) || /【TOOL/i.test(String(accumulated)))) {
+        state.streaming = false;
+        ui.sendBtn.disabled = false;
+        ui.sendBtn.textContent = '发送';
+      }
     }
 
     // ★ 自动续写：输出疑似被截断（代码块未闭合）时，自动追加「继续输出」请求并拼接，
@@ -2728,23 +2737,37 @@
         toolPayload = { url: '/api/code/ai', body: { message: toolFollow, history: [], model: state.model, thinking_mode: state.thinking } };
       }
       streamView.setStatus('正在读取文件（第 ' + toolRounds + ' 轮），稍候…');
-      var toolOk = await streamAi(toolPayload, {
-        onReasoning: function (chunk) {
-          if (chunk) {
-            thinkWrap.classList.remove('hidden');
-            thinkBody.textContent = (thinkBody.textContent || '') + chunk;
-            scrollChat();
-          }
-        },
-        onContent: function (chunk) {
-          // ★ P2-8：工具调用轮同样只记全文、按帧渲染
-          accumulated += chunk;
-          streamView.setText(accumulated);
-        },
-        onError: function () { done = true; }
-      }).then(function () { streamView.flush(); return true; }, function () { streamView.cancel(); return false; });
+      var toolOk = false;
+      try {
+        toolOk = await streamAi(toolPayload, {
+          onReasoning: function (chunk) {
+            if (chunk) {
+              thinkWrap.classList.remove('hidden');
+              thinkBody.textContent = (thinkBody.textContent || '') + chunk;
+              scrollChat();
+            }
+          },
+          onContent: function (chunk) {
+            // ★ P2-8：工具调用轮同样只记全文、按帧渲染
+            accumulated += chunk;
+            streamView.setText(accumulated);
+          },
+          onError: function () { done = true; }
+        }).then(function () { streamView.flush(); return true; }, function () { streamView.cancel(); return false; });
+      } catch (eTool) {
+        // ★ 2026-09-24 修复：与续写轮对齐 —— streamAi 同步抛错不应逃逸出 sendChat
+        //   （多轮占用期间逃逸会让发送按钮永久禁用）
+        done = true;
+        break;
+      }
       if (!toolOk) { done = true; break; }
     }
+
+    // ★ 2026-09-24 修复：多轮（续写/工具）占用期间的统一恢复点（幂等；
+    //   首轮流 finally 已恢复时重复执行无副作用）。
+    state.streaming = false;
+    ui.sendBtn.disabled = false;
+    ui.sendBtn.textContent = '发送';
 
     var didContinue = contRounds > 0 || toolRounds > 0;
     var finalText = accumulated.trim();
@@ -2918,7 +2941,9 @@
     if (!code) return '';
     var firstLine = '\n' + code.split('\n')[0];
     // 仅处理首行出现 path: 标记的情况
-    if (firstLine.indexOf('path:') === -1 && firstLine.indexOf('路径') === -1) return '';
+    // ★ 2026-09-24 修复：守卫原只查 path:/路径，漏掉下方正则支持的「保存为/保存到」，
+    //   这两种标注永不生效且被 stripPathMarker 删除后路径信息彻底丢失；词表对齐。
+    if (!/(?:path|文件路径|保存为|保存到)\s*[:：]/i.test(firstLine)) return '';
     var m = firstLine.match(/(?:path|文件路径|保存为|保存到)\s*[:：]\s*([^\s`"'<>|;]+)/i);
     if (!m) return '';
     var p = String(m[1]).trim();

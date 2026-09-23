@@ -1007,7 +1007,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var n = String(name || '').toLowerCase();
     if (/\.pdf$/i.test(n)) return 'application/pdf';
     if (/\.docx$/i.test(n)) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    if (/\b\.xlsx$/i.test(n)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (/\.xlsx$/i.test(n)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     if (/\.(txt|md|log|srt|vtt)$/i.test(n)) return 'text/plain';
     if (/\.csv$/i.test(n)) return 'text/csv';
     if (/\.json$/i.test(n)) return 'application/json';
@@ -5644,6 +5644,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (reader) try { reader.cancel(); } catch (e) {}
           if (abortedRef) abortedRef.value = true;
           if (doneReceivedRef) doneReceivedRef.value = true;
+          // ★ 2026-09-24 修复：error 分支提前 return 后，循环尾守卫（doneReceived 已置位）
+          //   会跳过 clearInterval —— 看门狗每 5s 继续运行并把已收尾的卡片反复翻转。
+          try { clearInterval(_idleCheckTimer); } catch (e) {}
           return;
         }
         if (evt.type === 'done') {

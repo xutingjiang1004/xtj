@@ -3280,7 +3280,12 @@ async function executeToolCall(toolCall, context) {
       var upTrackers = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
         'fbclid', 'gclid', 'spm', 'from', 'ref', 'share_token'];
       var upFoundTrackers = upParams.filter(function(p) { return upTrackers.indexOf(p.key.toLowerCase()) >= 0; });
-      var upPathParts = upObj.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      // ★ 2026-09-24 修复：pathname 含裸 % 或截断的 UTF-8 序列（如 /a%zzb、/%E4%BD）时
+      //   decodeURIComponent 抛 URIError 且本分支无兜底，会中断整轮工具调用；
+      //   解码失败的段保留原文。
+      var upPathParts = upObj.pathname.split('/').filter(Boolean).map(function(seg) {
+        try { return decodeURIComponent(seg); } catch (eDec) { return seg; }
+      });
       var upLine = [
         '协议：' + upObj.protocol.replace(':', ''),
         '主机名：' + upObj.hostname,
@@ -4733,15 +4738,26 @@ function parseSearchQuery(query) {
   var author = '';
   var authorMatch = cleaned.match(/([^\s]{1,20})\s*(?:发布|说|的|提到|写|发|po)/);
   if (authorMatch) {
-    author = authorMatch[1].replace(/[的之说发布提到写发po]/g, '').trim();
+    // ★ 2026-09-24 修复：原字符类含 ASCII 的 p/o，会把英文名 Tom→Tm、photos→hts；
+    //   中文助词只可能出现在捕获段尾部（"张三说的"→"张三说"），改为只剥尾部助词。
+    author = authorMatch[1].replace(/[的之说发布提到写发]+$/g, '').trim();
     cleaned = cleaned.replace(authorMatch[0], ' ').trim();
   }
   var dateFrom = ''; var dateTo = '';
   var dateMatch = cleaned.match(/(\d{4})[年-](\d{1,2})[月-]?(\d{1,2})?[日号]?/);
   if (dateMatch) {
+    // ★ 2026-09-24 修复：只写年月（如"2024年2月"）或日期非法（如"2024年2月30日"）时，
+    //   原实现会生成 2024-02-31 这类 Postgres 无法解析的时间戳，整条站内搜索查询 400。
+    //   现改为：无日时取当月最后一天；日期非法时丢弃日期过滤（搜索仍可用）。
     var y = dateMatch[1]; var m = String(Number(dateMatch[2])).padStart(2, '0'); var d = dateMatch[3] ? String(Number(dateMatch[3])).padStart(2, '0') : '01';
-    dateFrom = y + '-' + m + '-' + d + 'T00:00:00Z';
-    dateTo = y + '-' + m + '-' + (dateMatch[3] ? d : '31') + 'T23:59:59Z';
+    var _yNum = Number(y); var _mNum = Number(dateMatch[2]); var _dNum = dateMatch[3] ? Number(dateMatch[3]) : 1;
+    var _probe = new Date(Date.UTC(_yNum, _mNum - 1, _dNum));
+    var _dateValid = _probe.getUTCFullYear() === _yNum && _probe.getUTCMonth() === _mNum - 1 && _probe.getUTCDate() === _dNum;
+    if (_dateValid) {
+      var _lastDay = dateMatch[3] ? d : String(new Date(Date.UTC(_yNum, _mNum, 0)).getUTCDate()).padStart(2, '0');
+      dateFrom = y + '-' + m + '-' + d + 'T00:00:00Z';
+      dateTo = y + '-' + m + '-' + _lastDay + 'T23:59:59Z';
+    }
     cleaned = cleaned.replace(dateMatch[0], ' ').trim();
   }
   var normalized = aiSiteNormalizeQuery(cleaned);
@@ -6447,7 +6463,10 @@ async function extractEmbeddedFiles(text, opts) {
       extractedText = '\n\n【用户上传文件: ' + fileName + '】\n[文件解析失败: ' + (e.message || '') + ']\n【文件结束】\n\n';
     }
     // 所有分支都替换，不保留原始 Base64
-    result = result.replace(match[0], extractedText || '\n\n【文件解析跳过】\n\n');
+    // ★ 2026-09-24 修复：字符串替换会把 extractedText 中的 $& / $` / $' 当替换模式展开，
+    //   文件正文含这些字面量时，最长 10MB 的 base64 匹配串会被拼回 prompt；
+    //   改为函数替换，文本按字面量插入。
+    result = result.replace(match[0], function() { return extractedText || '\n\n【文件解析跳过】\n\n'; });
   }
   return { text: result, cards: cards };
 }
@@ -9003,9 +9022,16 @@ function parseDsmlToolCallsGlobal(rawText, roundNumber, toolsList) {
 // completion_tokens）。统一映射到内部字段，保证配额扣减与用量报表口径一致。
 function responsesUsageToInternal(u) {
   if (!u || typeof u !== 'object') return null;
+  var _in = Math.max(0, Number(u.input_tokens) || Number(u.prompt_tokens) || 0);
+  var _out = Math.max(0, Number(u.output_tokens) || Number(u.completion_tokens) || 0);
   return {
-    input_tokens: Math.max(0, Number(u.input_tokens) || Number(u.prompt_tokens) || 0),
-    output_tokens: Math.max(0, Number(u.output_tokens) || Number(u.completion_tokens) || 0),
+    input_tokens: _in,
+    output_tokens: _out,
+    // ★ 2026-09-24 修复：累计与出口（9430/9439/9651 一带）读取的是 prompt_tokens/
+    //   completion_tokens，而本函数此前只输出 input_tokens/output_tokens，
+    //   导致 Responses 全链路的 input/output 拆分恒为 0。补输出旧字段名别名。
+    prompt_tokens: _in,
+    completion_tokens: _out,
     total_tokens: Math.max(0, Number(u.total_tokens) || 0),
     input_tokens_details: u.input_tokens_details || null,
     output_tokens_details: u.output_tokens_details || null,
@@ -10578,7 +10604,10 @@ async function runDeepThinkWorker(opts) {
 
   var workerSystemPrompt = sharedPrefix + '\n\n---\n\n你是 XTJ 深度研究模式下的 [' + agent.role + '] 专家.\n' +
     '你的具体任务: ' + agent.task_description + '\n' +
-    (needSearch ? '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n' : '') +
+    // ★ 2026-09-24 修复：Planner 路径的 agent 对象只有 search_angle（9839 行 sanitize 后写入），
+    //   原来读 agent.search_queries 恒为空，Planner 定制的搜索关键词被静默丢弃；
+    //   buildDefaultAgents 兜底路径的对象只有 search_queries，两者按序兜底。
+    (needSearch ? '建议搜索关键词: ' + (agent.search_angle || (agent.search_queries || []).join(' | ') || '') + '\n' : '') +
     (workerHistoryContext || '') + '\n\n' +
     searchHint + '\n\n' +
     '执行规则 (务必精炼, 不要废话):\n' +
@@ -10973,7 +11002,13 @@ setInterval(function() {
   // 清理过期 revokedTokenHashes（异步）
   // ★ 修复：吊销哈希 10 分钟才从 DB 重建，导致多实例下"登出即失效"最长有 10 分钟
   // 窗口；改为每 60 秒同步一次，缩短撤销传播延迟。
-  loadRevokedTokenHashes().catch(function(){});
+  // ★ 2026-09-24 修复：启动加载失败（revokedTokenHashesReadyPromise 已 reject）后，
+  //   waitForRevocationState 会永久 503；周期任务成功时必须置 ready 并清除错误，
+  //   使认证服务在 Supabase 恢复后能自愈，而不是直到进程重启都不可用。
+  loadRevokedTokenHashes().then(function() {
+    revokedTokenHashesReady = true;
+    revokedTokenHashesLoadError = null;
+  }).catch(function(){});
 }, 60000).unref(); // ★ 审计修复：Admin token 清理不应阻止进程退出
 
 // 生成签名 token：base64(payload) + '.' + HMAC
@@ -11507,9 +11542,10 @@ app.post('/admin/login', securityRateLimit(60000, 10), async (req, res) => {
     res.cookie('xtj_admin_token', token, cookieOpts);
   } catch(e) {}
 
-  // ★ M23：storeRefreshToken 失败时 issueUserSession 返回 null（已写 503）。
+  // ★ M23：storeRefreshToken 失败时 issueUserSession 返回 null。
   //   管理员主 token 登录不受影响，user_token 传 null（前端按未登录用户态处理）
-  var adminUserSession = await issueUserSession(res, ADMIN_USERNAME);
+  // ★ 2026-09-24：silent 模式下失败不写 503，避免下方 res.json 二次写响应
+  var adminUserSession = await issueUserSession(res, ADMIN_USERNAME, undefined, { silent: true });
   return res.json({ ok: true, username: ADMIN_USERNAME, token: token, user_token: (adminUserSession && adminUserSession.token) || null });
   } catch (e) {
     console.error('[API] admin login error:', e && e.message);
@@ -11784,12 +11820,17 @@ async function verifyAuthPassword(stored, password, userName) {
 }
 
 // ★ M23：refresh token 持久化失败时返回 null（已写 503），由调用方跳过后续成功响应
-async function issueUserSession(res, userName, deviceId) {
+// ★ 2026-09-24：新增 opts.silent —— 失败时不写 503 响应，供管理员登录路径使用
+//   （M23 意图是"管理员主 token 登录不受影响，user_token 传 null"；若此处仍写 503，
+//    调用方继续 res.json 会造成 headersSent 后二次写响应，Node 抛 ERR_HTTP_HEADERS_SENT）
+async function issueUserSession(res, userName, deviceId, opts) {
   var accessToken = signUserAccessToken(userName);
   var refreshToken = signUserRefreshToken(userName, deviceId);
   var stored = await storeRefreshToken(userName, refreshToken);
   if (!stored) {
-    res.status(503).json({ error: '登录服务暂不可用，请稍后重试', code: 'refresh_store_failed' });
+    if (!(opts && opts.silent)) {
+      res.status(503).json({ error: '登录服务暂不可用，请稍后重试', code: 'refresh_store_failed' });
+    }
     return null;
   }
   res.cookie('xtj_user_refresh', refreshToken, {
@@ -12449,10 +12490,13 @@ app.get('/api/report/notifications', authenticateUser, async (req, res) => {
 app.post('/api/report/notifications/mark-read', authenticateUser, async (req, res) => {
   const userName = req.userName;
   try {
+    // ★ 2026-09-24 修复：与 GET 端 .limit(160) 对齐，避免举报行多的用户触发
+    //   无上限拉取 + 逐行串行 update 的 N+1 放大
     const { data, error } = await supabase.from('posts')
       .select('id, content')
       .eq('user_name', userName)
-      .eq('media_type', '__report__');
+      .eq('media_type', '__report__')
+      .limit(160);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     var marked = 0;
     var failed = 0;
@@ -14515,7 +14559,17 @@ function runAvatarUpdateSerialized(userName, task) {
     return task();
   });
   // 链尾必须永远是被 resolve 的普通 promise，否则后一个任务会被前一个的失败卡死
-  var tail = current.then(function() { return null; }, function() { return null; });
+  // ★ 2026-09-24 修复：tail 原先链接在 race 结果（current）上——当前驱任务超过
+  //   AVATAR_UPDATE_LOCK_WAIT_MS 时，超时退出的请求会使自己的 tail 提前 settle，
+  //   排在其后的请求视"前驱已完成"立即执行，与仍在运行的真实前驱并发
+  //   （正是 P2-11 修复要杜绝的交错窗口）。改为：正常执行（无论成败）后放行；
+  //   仅超时退出者（avatarBusy，未执行 task）的 tail 改等真实前驱完成信号 turn。
+  var tail = current.then(function() { return null; }, function(eLock) {
+    if (eLock && eLock.avatarBusy) {
+      return turn.then(function() { return null; }, function() { return null; });
+    }
+    return null;
+  });
   avatarUpdateLocks.set(userName, tail);
   tail.then(function() {
     // 只有确认链上没有更新的排队者时才删 key；删掉别人的 tail 会让串行失效
@@ -15654,10 +15708,13 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     }
     var exists = existsChecks.some(function(r) { return r.data && r.data.length > 0; });
     if (!exists) return res.status(404).json({ error: '用户不存在或已被删除' });
+    // ★ 2026-09-24 修复（off-by-one）：existsChecks 顺序为 [0]posts [1]posts(DM) [2]likes
+    //   [3]comments [4]bans [5]mutes [6]blacklist [7]dm_media_uploads；原索引 5/6/7
+    //   分别读到 mutes/blacklist/dm_media_uploads，三字段全部错位。
     var retainedPolicyData = {
-      bans: !!(existsChecks[5].data && existsChecks[5].data.length),
-      mutes: !!(existsChecks[6].data && existsChecks[6].data.length),
-      blacklist: !!(existsChecks[7].data && existsChecks[7].data.length)
+      bans: !!(existsChecks[4].data && existsChecks[4].data.length),
+      mutes: !!(existsChecks[5].data && existsChecks[5].data.length),
+      blacklist: !!(existsChecks[6].data && existsChecks[6].data.length)
     };
 
     // 只清理本服务能证明为账号私有/用户内容的数据；法律、审计、封禁/拉黑、
@@ -15934,7 +15991,13 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       supabase.from('ai_action_confirmations').select('id').eq('owner_name', userName).limit(1)
     ]);
     var residualAi = aiResidualChecks.some(function(result) { return !result || result.error || (result.data && result.data.length); });
-    var residual = residualPosts || residualOwned || residualNullType || residualEmptyType || residualDm || residualRegistry || residualAi || storagePending > 0 || retainedSystemPostCount > 0 || retainedPolicyData.bans || retainedPolicyData.mutes || retainedPolicyData.blacklist;
+    // ★ 2026-09-24 修复（P1）：residual 只覆盖「本应删除却仍然存在」的数据。
+    //   retainedSystemPostCount（__login_event__/__user_visit__ 等按上注有意保留）
+    //   与 retainedPolicyData（封禁/禁言/拉黑，注释明确"不在删除范围内"）此前被
+    //   计入 residual 失败判定 —— 而每个登录/访问过的用户都必然有这类行，
+    //   导致删除接口对任何真实用户恒返回 500"仍有残留，请重试"，与"重复执行安全"
+    //   的设计自相矛盾。保留项仍照常写入响应与审计日志，供管理员核对。
+    var residual = residualPosts || residualOwned || residualNullType || residualEmptyType || residualDm || residualRegistry || residualAi || storagePending > 0;
     var verificationFailed = verifyDeleteFailed || !retainedDmCheck || !!retainedDmCheck.error || registryVerifyFailed || !remainingOwnedCheck || !!remainingOwnedCheck.error || !nullTypeCheck || !!nullTypeCheck.error || !emptyTypeCheck || !!emptyTypeCheck.error || aiResidualChecks.some(function(result) { return !result || result.error; });
 
     if (!revokeOk || verificationFailed || residual) {
@@ -16761,8 +16824,10 @@ async function resolveLatLngToAddress(latitude, longitude) {
   if (cached && (Date.now() - cached.time) < LOCATION_CACHE_TTL) {
     return { address: cached.address, error: null, from_cache: true };
   }
-  var elapsed = Date.now() - locationLastRequestTime;
-  if (elapsed < LOCATION_RATE_LIMIT_MS) {
+  // ★ 2026-09-24 修复：N 个并发读到相同 elapsed、同时睡醒后同时发请求，限流形同虚设；
+  //   改为睡醒后循环复查间隔，保证任意两次请求间隔不小于 LOCATION_RATE_LIMIT_MS。
+  while (Date.now() - locationLastRequestTime < LOCATION_RATE_LIMIT_MS) {
+    var elapsed = Date.now() - locationLastRequestTime;
     await new Promise(function(r) { setTimeout(r, LOCATION_RATE_LIMIT_MS - elapsed); });
   }
   locationLastRequestTime = Date.now();
@@ -22423,6 +22488,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   //   在 error 事件之后**补发一个终结 done**（complete:false, interrupted:false），
   //   使前端 doneReceived 语义闭合，从而保留真实错误信息、不再误报中断。
   var _terminalSent = false;
+  var _inFlightRegistered = false; // 本请求是否已在 inFlightStreams 注册（safeEnd 清理条件）
   function terminateWithError(errObj) {
     if (_terminalSent) return;
     _terminalSent = true;
@@ -22447,7 +22513,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     try { clearTimeout(_totalTimer); } catch (e) {}
     try { _totalTimer = null; } catch (e) {}
     // ★ P0：清理去重注册，避免 Map 無限增長
-    if (clientReqId && userName) {
+    // ★ 2026-09-24 修复：仅当本请求成功注册过（_inFlightRegistered）时才删除。
+    //   此前重复请求在 22417 一带命中 409 分支后，其 safeEnd 会无条件 delete，
+    //   删掉的是"在途请求"的注册，防串流去重被一次重复提交击穿。
+    if (_inFlightRegistered && clientReqId && userName) {
       try { inFlightStreams.delete(userName + ':' + clientReqId); } catch (e) {}
     }
     if (!res.writableEnded) res.end();
@@ -22539,9 +22608,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (clientReqId && userName) {
       var sKey = userName + ':' + clientReqId;
       if (inFlightStreams.has(sKey)) {
+        // 注意：此处未注册，safeEnd 不得删除在途请求的注册（见 _inFlightRegistered）
         return terminateWithError({ type: 'error', error: '请求正在处理中，请勿重复提交', code: 'duplicate_request' });
       }
       inFlightStreams.set(sKey, requestAbortCtrl);
+      _inFlightRegistered = true;
     }
 
     // 附件解析与 config/ctx 并行，无附件时 extract 应快速返回
@@ -23047,9 +23118,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         //   完全不计费。DeepSeek 可能已受理并计费（尤其是超时类异常），
         //   这里按「无 usage、无产出」由 recordAbortedStreamUsage 自行判定是否补记。
         if (aborted) {
+          // ★ 2026-09-24 修复：本路径（callDeepSeek Responses 通道）从未赋值
+          //   contentBuffer/reasoningBuffer，直接传 undefined 会让"无 usage 无产出"
+          //   判定成立而整体跳过记账；对齐成功路径（contentBuffer || responsesContent）。
           await recordAbortedStreamUsage(userName, {
             convId: convId, usedModel: usedModel, source: 'chat_stream_aborted',
-            message: message, content: contentBuffer, reasoning: reasoningBuffer,
+            message: message, content: contentBuffer || responsesContent, reasoning: reasoningBuffer || responsesReasoning,
             searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0
           });
           return safeEnd();
@@ -23996,6 +24070,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       if (aborted) {
         clearChunkTimer();
         controller.abort();
+        // ★ 2026-09-24 修复（资损）：客户端断开/总超时后此前直接 safeEnd —— 已流出
+        //   的内容不落库、recordAiTurnUsage 全部漏记，"边收边断"可零成本消费上游 token。
+        //   与 catch 分支（S2/S11 修复）及 Responses 路径对齐：补记账后再收尾。
+        try {
+          await recordAbortedStreamUsage(userName, {
+            convId: convId, usedModel: usedModel, source: 'chat_stream_aborted',
+            message: message, content: contentBuffer, reasoning: persistentReasoning || reasoningBuffer,
+            usage: usageInStream || null,
+            searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0
+          });
+        } catch (eAbortedBill) {}
         return safeEnd();
       }
       // idle timeout: 思考模式(useThinking)放宽到 90 秒无 chunk 才中断，
@@ -24426,6 +24511,18 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           startTime: T0
         });
       }
+    }
+    // ★ 2026-09-24 修复（资损）：aborted 时跳过 finishStream 属正常（连接已断无法写 SSE），
+    //   但此前连补记账也一并跳过 —— 已流出的内容与上游 token 消耗全部漏记。
+    if (aborted) {
+      try {
+        await recordAbortedStreamUsage(userName, {
+          convId: convId, usedModel: usedModel, source: 'chat_stream_aborted',
+          message: message, content: contentBuffer, reasoning: persistentReasoning || reasoningBuffer,
+          usage: usageInStream || null,
+          searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0
+        });
+      } catch (eAbortedBill2) {}
     }
     return safeEnd();
 
@@ -25677,6 +25774,11 @@ app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), 
     }
     if (!closed) {
       writeSse(res, {}, 'done');
+    }
+    // ★ 2026-09-24 修复（S3 同类）：记账原在 if (!closed) 守卫内，客户端断开即整单
+    //   跳过，而 callDeepSeekAI 已完整执行、上游费用已发生 → 可零成本刷配额。
+    //   对齐 code/ai 通道（S3）的修复模式：记账移出守卫，仅在确实产生过输出时记。
+    if (reply && String(reply).length > 0) {
       recordAiTurnUsage(req.userName, null, { model: DEEPSEEK_MODEL_REASONER, source: 'post_chat', message: prompt.slice(0, 500), content: sanitizePostCritique(reply || ''), reasoning: '', search_count: 0, did_search: false }).catch(function() {});
     }
   } catch (e) {
@@ -25691,7 +25793,7 @@ app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), 
   res.end();
 });
 
-app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
+app.post('/api/agent/site-search', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
     var rawQuery = String(req.body && req.body.query || '').trim();
     var sources = Array.isArray(req.body && req.body.sources) ? req.body.sources : ['posts'];
@@ -25734,7 +25836,7 @@ app.post('/api/agent/site-search', authenticateUser, async (req, res) => {
   }
 });
 
-app.get('/api/agent/search-result/:id', authenticateUser, async (req, res) => {
+app.get('/api/agent/search-result/:id', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
     var id = aiSiteText(req.params.id, 80);
     var lookup = await supabase.from('ai_search_results').select('id,source,source_id,title,snippet,jump_target,created_at,expires_at').eq('id', id).eq('owner_name', req.userName).gt('expires_at', new Date().toISOString()).maybeSingle();
@@ -25744,7 +25846,7 @@ app.get('/api/agent/search-result/:id', authenticateUser, async (req, res) => {
   } catch (e) { return res.status(500).json({ error: '查询失败' }); }
 });
 
-app.get('/api/agent/drafts', authenticateUser, async (req, res) => {
+app.get('/api/agent/drafts', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
     var rows = await supabase.from('ai_drafts').select('id,kind,title,body,status,created_at,updated_at').eq('owner_name', req.userName).neq('status', 'deleted').order('updated_at', { ascending: false }).limit(100);
     if (rows.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });

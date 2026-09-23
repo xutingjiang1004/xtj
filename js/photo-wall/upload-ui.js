@@ -435,10 +435,11 @@
       console.warn('[PhotoWall] recheckLowFreqPhotoQueue failed', e);
     }
   };
-  // 每 30 分钟执行一次低频率重试；登出（无登录态）后停止轮询，避免以失效 token 空转
+  // 每 30 分钟执行一次低频率重试；无登录态时跳过本次（避免以失效 token 空转）
+  // ★ 2026-09-24 修复：原实现访客/登出态首个 tick 即 clearInterval 永久销毁轮询，
+  //   同一页面之后登录的用户也不再处理 7 天过期清理队列；改为跳过本 tick。
   var _lowFreqIntervalId = setInterval(function() {
     if (!getCurrentUser()) {
-      clearInterval(_lowFreqIntervalId);
       return;
     }
     window.recheckLowFreqPhotoQueue();

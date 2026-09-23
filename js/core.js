@@ -1182,6 +1182,7 @@ const ADMIN_NAME = "xxz";
                 }
 
                 var authChannel = new BroadcastChannel('xtj_auth_sync');
+                function _bindAuthChannelListeners() {
                 authChannel.addEventListener('message', function(event) {
                     var msg = event && event.data;
                     if (!msg || !msg.type) return;
@@ -1202,6 +1203,8 @@ const ADMIN_NAME = "xxz";
                         if (typeof showToast === 'function') showToast('账号已在其他窗口切换，请重新登录', 'info');
                     }
                 });
+                }
+                _bindAuthChannelListeners();
                 // 登录成功后广播
                 window.__xtjBroadcastAuthChange = function(newUser) {
                     try {
@@ -1231,10 +1234,21 @@ const ADMIN_NAME = "xxz";
                     } catch (e) {}
                 };
                 // ★ 审计修复：页面卸载时关闭 BroadcastChannel，避免 bfcache 往返/多实例累积
+                // ★ 2026-09-24 修复：pagehide 在进入 bfcache 时同样触发，往返恢复后通道已
+                //   closed 且无重建路径 —— 跨 tab 登录态同步在本 tab 生命周期内永久断裂。
+                //   pageshow（persisted=true）时重建通道并重新绑定监听。
                 try {
                     window.addEventListener('pagehide', function() {
                         try { authChannel.close(); } catch (eClose) {}
                     }, { once: true });
+                    window.addEventListener('pageshow', function(eShow) {
+                        if (!eShow || !eShow.persisted) return;
+                        try { if (authChannel) { try { authChannel.close(); } catch (_) {} } } catch (eC2) {}
+                        try {
+                            authChannel = new BroadcastChannel('xtj_auth_sync');
+                            _bindAuthChannelListeners();
+                        } catch (eRebuild) {}
+                    });
                 } catch (eBind) {}
             } catch (e) {
                 // BroadcastChannel 不可用（旧浏览器），静默降级
@@ -1257,7 +1271,22 @@ const ADMIN_NAME = "xxz";
                     fetch(API_BASE + '/api/log-user-visit', {
                         method: 'POST', headers: headers, body: JSON.stringify(body)
                     }).catch(function(){
-                        try { checkReportReplies(); } catch (_) {}
+                        // ★ 2026-09-24 修复：此处原误调 checkReportReplies()（复制粘贴错误）——
+                        //   与访问日志无关，还会多发一次幽灵通知请求；改为与"无 API_BASE"
+                        //   分支一致的 Supabase 直写兜底（同天只记一次）。
+                        try {
+                            if (sb && !_visitLoggedToday) {
+                                _visitLoggedToday = true;
+                                var today = new Date().toISOString().slice(0, 10);
+                                sb.from('posts').insert([{
+                                    user_name: userName || 'anonymous',
+                                    content: JSON.stringify({ date: today }),
+                                    media_type: '__user_visit__',
+                                    media_url: today,
+                                    actor_key: 'uvisit_' + Date.now()
+                                }]).then(function(){}, function(){});
+                            }
+                        } catch (_) {}
                     });
                 } catch(e) {}
             } else if (sb && !_visitLoggedToday) {
@@ -12724,6 +12753,9 @@ function renderProfileActivityList(kind) {
 
             function subscribeToAnnouncements() {
                 if (annRealtime) return;
+                // ★ 2026-09-24 修复：补 if (!sb) 空守卫，与 subscribeToMessages /
+                //   subscribeToComments 一致，避免 sb 未初始化时抛 TypeError
+                if (!sb) return;
                 annRealtime = sb.channel('announcements')
                     .on('postgres_changes', {
                         event: '*',
