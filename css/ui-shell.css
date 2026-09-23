@@ -2453,20 +2453,40 @@ html.xtj-wechat.xtj-ios-viewport .dock-bar {
     grid-column: 1 / -1;
   }
 
-  /* ★ 2026-09-23 折叠反馈修复：原先切换是瞬时的，加上侧栏本就紧贴左缘，
-     用户几乎察觉不到"内容区向左右扩张了 236px"，观感上就像只是把侧栏藏了起来。
-     这里给网格列与面板留出位移动画，让折叠/展开的宽度变化可见。
-     仅过渡布局属性（列宽、外边距），不碰 transform/动画类属性，避免与既有动效冲突。 */
+  /* ★ 2026-09-23 空白页修复（关键）：
+     .app-container 是网格，而它的直接子元素里除了 aside/button/dock-panels 外，
+     还有一个 .modal-overlay（登录弹窗容器）。该元素并未脱离文档流（非 fixed），
+     会参与网格自动排布：侧栏 display:none 后网格重新排布，它抢占第一行（整屏高），
+     把 .dock-panels 挤到第二行（实测 y=450、h=434）→ 内容出现在页面下半屏，
+     上半屏一片空白；更早的表现是行高塌成 0、整页空白。
+     这里显式把内容区钉在第 1 行第 1 列，不让它被其它子元素挤出原位。 */
+  .app-container.wb-sidebar-collapsed {
+    grid-template-columns: 0px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .app-container.wb-sidebar-collapsed .dock-panels {
+    grid-row: 1;
+    grid-column: 1 / -1;
+    align-self: stretch;
+    min-height: 0;
+    height: 100%;
+  }
+  /* 展开态同样钉住内容区，避免该 modal-overlay 在任何情况下挤出空白 */
+  .app-container .dock-panels {
+    grid-row: 1;
+  }
+
+  /* ★ 2026-09-23 折叠反馈：原先切换是瞬时的，加上侧栏本就紧贴左缘，
+     用户几乎察觉不到"内容区扩张了 236px"，观感上就像只是把侧栏藏了起来。
+     给网格列留出位移动画，让折叠/展开的宽度变化可见。
+     仅过渡布局属性（列宽），不碰 transform/动画类属性，避免与既有动效冲突。 */
   .app-container {
     transition: grid-template-columns 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .app-container .dock-panels {
-    transition: margin-left 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
 }
 
 /* 尊重系统"减少动态效果"偏好（独立块，避免 @media 嵌套的兼容性问题） */
 @media (min-width: 768px) and (min-height: 480px) and (prefers-reduced-motion: reduce) {
-  .app-container,
-  .app-container .dock-panels { transition: none !important; }
+  .app-container { transition: none !important; }
 }
