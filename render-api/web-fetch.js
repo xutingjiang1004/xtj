@@ -576,7 +576,12 @@ async function fetchSafeBuffer(url, options) {
     status: status,
     ok: status >= 200 && status < 300,
     buffer: response.body || Buffer.alloc(0),
-    bytes: response.body ? response.body.length : 0
+    bytes: response.body ? response.body.length : 0,
+    headers: {
+      get: function(key) {
+        return response.headers.get ? response.headers.get(key) : null;
+      }
+    }
   };
 }
 

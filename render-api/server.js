@@ -2119,20 +2119,17 @@ async function executeToolCall(toolCall, context) {
         return { tool_name: name, url: docUrl, error: '该地址不被允许访问' };
       }
       try {
-        var docResp = await fetch(docUrl, {
-          redirect: 'follow',
-          signal: (context && context.signal) || undefined,
+        var docResp = await fetchSafeBuffer(docUrl, {
+          maxBytes: MAX_DOC_BYTES,
+          timeoutMs: 30000,
+          signal: (context && context.signal) || null,
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; XTJBot/1.0)' }
         });
         if (!docResp.ok) return { tool_name: name, url: docUrl, error: '文档下载失败（HTTP ' + docResp.status + '）' };
         var ctype = docResp.headers.get('content-type') || '';
         var dtype = detectDocType(docUrl, ctype);
         if (!dtype) return { tool_name: name, url: docUrl, error: '不支持的文档类型，仅支持 PDF / Word(docx) / Excel(xlsx,xls) / CSV' };
-        var abuf = await docResp.arrayBuffer();
-        if (abuf.byteLength > MAX_DOC_BYTES) {
-          return { tool_name: name, url: docUrl, error: '文档过大（超过 20MB），请换更小的文件' };
-        }
-        var docBuf = Buffer.from(abuf);
+        var docBuf = docResp.buffer;
         var parsedText = '';
         if (dtype === 'pdf') {
           var pdfParser = getPdfParser();
@@ -4402,12 +4399,8 @@ app.use(function(req, res, next) {
       return origin === o || referer.startsWith(o + '/');
     });
     // 安全：状态变更请求携带会话 Cookie 时，必须能证明请求来自可信来源。
-    // 现代浏览器对所有跨站 POST 都带 Origin；少数场景（老浏览器/降级策略）
-    // 可能只带 Referer 或不带任何来源头。因此：
-    //  - 有 Origin 且命中同源/白名单 → 放行；
-    //  - 无 Origin 且带会话 Cookie：必须有可信 Referer（同源或命中白名单）
-    //    或 X-Requested-With（老式同源 AJAX 标记），否则一律拒绝；
-    //  - 无 Cookie 的 curl/Postman 请求保持放行（无法携带会话，无 CSRF 价值）。
+    // 现代浏览器对跨站 POST 带 Origin；降级场景可用同源或白名单 Referer，
+    // 缺少两者时拒绝带会话 Cookie 的请求。无 Cookie 请求保持放行。
     // ★ 审计修复（M2）：去掉"origin 为空即放行"的口子（if (!allowed && origin)），
     //   杜绝带 Cookie+Referer 而无 Origin 的跨站请求绕过 CSRF。
     var hasSessionCookie = !!(req.cookies && (req.cookies.xtj_admin_token || req.cookies.xtj_user_refresh));
@@ -4419,7 +4412,7 @@ app.use(function(req, res, next) {
       } catch (e) { return false; }
       return ALLOWED_ORIGINS.some(function(o) { return referer.indexOf(o + '/') === 0; });
     })();
-    if (hasSessionCookie && !origin && !refererSameSite && !req.headers['x-requested-with']) {
+    if (hasSessionCookie && !origin && !refererSameSite) {
       logAttack(ip, 'CSRF', 'Missing/Cross-site Origin & Referer with session cookie');
       return res.status(403).json({ error: '拒绝跨站请求' });
     }
@@ -26276,7 +26269,15 @@ var CODE_GH_PATH_OK = /^\/?(repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\/.*)?|user(
 // 高危方法最小授权：DELETE 仅允许删除仓库内单个文件(contents)，禁止删库/删分支/删标签；
 // PATCH 仅允许更新分支引用(git/refs，Git Database 多文件提交需要)。
 var CODE_GH_DELETE_PATH_OK = /^\/?repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/contents\//;
-var CODE_GH_PATCH_PATH_OK = /^\/?repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/git\/refs\//;
+var CODE_GH_PATCH_PATH_OK = /^\/?repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/git\/refs\/heads\//;
+function isBlockedCodeWritePath(pathname) {
+  var value;
+  try { value = decodeURIComponent(String(pathname || '')).replace(/\\/g, '/'); }
+  catch (e) { return true; }
+  var parts = value.split('/');
+  if (parts.some(function(part) { return part === '.' || part === '..'; })) return true;
+  return parts.some(function(part) { return part.toLowerCase() === '.git' || part.toLowerCase() === '.github'; });
+}
 // ★ 第三轮审计修复（🟠 授权绕过）：上述三条路径白名单此前比对的是**未规范化的
 //   字面 pathname**，而实际请求走的是 `fetch('https://api.github.com' + upstreamPath)`，
 //   URL 构造时会把 `..` 段规范化掉 —— 两者不一致即可绕过校验。
@@ -26346,6 +26347,20 @@ async function proxyGithubApi(req, res) {
     }
     if (method === 'PATCH' && !CODE_GH_PATCH_PATH_OK.test(safePath)) {
       return res.status(400).json({ error: 'PATCH 仅限更新分支引用（git/refs）', code: 'INVALID_INPUT' });
+    }
+    if (method === 'PATCH') {
+      if (!ghBody || typeof ghBody !== 'object' || Array.isArray(ghBody) || typeof ghBody.sha !== 'string') {
+        return res.status(400).json({ error: '分支引用更新参数无效', code: 'INVALID_INPUT' });
+      }
+      ghBody.force = false;
+    }
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && /^\/?repos\//.test(safePath) && isBlockedCodeWritePath(safePath)) {
+      return res.status(400).json({ error: '不允许修改 Git 元数据或 GitHub 配置路径', code: 'INVALID_INPUT' });
+    }
+    if (method === 'POST' && /\/git\/trees\/?$/.test(safePath) && ghBody && Array.isArray(ghBody.tree) && ghBody.tree.some(function(item) {
+      return !item || typeof item.path !== 'string' || isBlockedCodeWritePath(item.path);
+    })) {
+      return res.status(400).json({ error: 'Git tree 包含不允许修改的路径', code: 'INVALID_INPUT' });
     }
     // 请求体（如 contents 更新的 base64 内容）过大则拒绝
     if (ghBody !== undefined) {

@@ -5,6 +5,8 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 // 2026-09-22：Vercel 已弃用（生产只用 Render + Supabase），原先对 vercel.json 的断言随之移除。
 const source = fs.readFileSync(path.join(ROOT, 'render-api/server.js'), 'utf8');
+const workbench = fs.readFileSync(path.join(ROOT, 'js/code-workbench.js'), 'utf8');
+const webFetch = fs.readFileSync(path.join(ROOT, 'render-api/web-fetch.js'), 'utf8');
 const authMigration = fs.readFileSync(path.join(ROOT, 'supabase/migrations/011_auth_record_uniqueness.sql'), 'utf8');
 // CSP 已统一收敛到共享模块 security-headers.js（server.js 与 serve-static.js 共用一份）
 const sharedSecurityHeaders = require('../render-api/security-headers.js');
@@ -170,6 +172,38 @@ test('photo cleanup validates generated paths and fails closed on reference look
   assert.doesNotMatch(cleanup, /var refCheck = null/);
 });
 
+test('read_document 使用限大小、拒绝重定向的 DNS 固定下载器', () => {
+  const block = routeBlock("case 'read_document':", "case 'make_file':");
+  assert.match(block, /fetchSafeBuffer\(docUrl/);
+  assert.match(block, /maxBytes: MAX_DOC_BYTES/);
+  assert.match(block, /signal: \(context && context\.signal\)/);
+  assert.doesNotMatch(block, /await fetch\(docUrl/);
+  assert.match(webFetch, /async function fetchSafeBuffer/);
+  assert.match(webFetch, /status >= 300 && status < 400/);
+  assert.match(webFetch, /headers: \{[\s\S]*?get: function\(key\)/);
+});
+
+test('带会话 Cookie 且缺失来源证明时不得用 X-Requested-With 绕过 CSRF', () => {
+  const from = source.indexOf('// 访问记录 + CSRF 防护');
+  const to = source.indexOf('// 阻止敏感路径被静态文件服务泄露', from);
+  assert.notEqual(from, -1);
+  assert.notEqual(to, -1);
+  const middleware = source.slice(from, to);
+  assert.match(middleware, /if \(hasSessionCookie && !origin && !refererSameSite\)/);
+  assert.doesNotMatch(middleware, /x-requested-with/i);
+});
+
+test('工作台 AI 输出路径校验并要求所有批量提交显式确认', () => {
+  assert.match(workbench, /function isSafeAiTargetPath\(p\)/);
+  assert.match(workbench, /part === '\.\.'/);
+  assert.match(workbench, /part\.toLowerCase\(\) === '\.git' \|\| part\.toLowerCase\(\) === '\.github'/);
+  assert.match(workbench, /if \(!isSafeAiTargetPath\(path\)\)/);
+  const batch = workbench.slice(workbench.indexOf('async function commitAllGroups'), workbench.indexOf('// 从 AI 输出的代码块首行解析目标文件路径'));
+  assert.match(batch, /groups\.some\(function \(g\) \{ return !isSafeAiTargetPath\(g\.path\); \}\)/);
+  assert.match(batch, /window\.confirm\('即将一次性提交/);
+  assert.doesNotMatch(batch, /if \(br === state\.repo\.default_branch\)/);
+});
+
 test('GitHub 代理按规范化路径鉴权：`..` 路径遍历不得绕过 DELETE/PATCH 最小授权', () => {
   // 回归背景（第三轮审计）：白名单此前比对 parsed.pathname（字面值），而实际请求
   // 拼接进 fetch('https://api.github.com' + upstreamPath) 时会被 URL 规范化。
@@ -184,6 +218,10 @@ test('GitHub 代理按规范化路径鉴权：`..` 路径遍历不得绕过 DELE
   assert.match(proxy, /CODE_GH_PATH_OK\.test\(safePath\)/);
   assert.match(proxy, /CODE_GH_DELETE_PATH_OK\.test\(safePath\)/);
   assert.match(proxy, /CODE_GH_PATCH_PATH_OK\.test\(safePath\)/);
+  assert.match(source, /CODE_GH_PATCH_PATH_OK = .*heads/,'PATCH 仅允许更新分支 ref');
+  assert.match(proxy, /ghBody\.force = false/, '服务端必须强制禁止 force push');
+  assert.match(proxy, /isBlockedCodeWritePath\(safePath\)/, '禁止代理写入 Git 元数据或 GitHub 配置路径');
+  assert.match(proxy, /ghBody\.tree\.some[\s\S]*isBlockedCodeWritePath\(item\.path\)/, '禁止 Git tree 写入敏感路径');
   // 不得再对未规范化的 parsed.pathname 做授权判断
   assert.doesNotMatch(proxy, /_PATH_OK\.test\(parsed\.pathname\)/);
   // 上游请求路径必须用 safePath，保证"校验的"与"请求的"一致

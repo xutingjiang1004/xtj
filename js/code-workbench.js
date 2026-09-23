@@ -485,6 +485,14 @@
     return String(p).split('/').map(function (seg) { return encodeURIComponent(seg); }).join('/');
   }
 
+  function isSafeAiTargetPath(p) {
+    var value = String(p || '');
+    if (!value || value.charAt(0) === '/' || value.indexOf('\\') >= 0 || /^[A-Za-z]:/.test(value) || /[\u0000-\u001f\u007f]/.test(value)) return false;
+    var parts = value.split('/');
+    if (parts.some(function (part) { return !part || part === '.' || part === '..' || part.toLowerCase() === '.git' || part.toLowerCase() === '.github'; })) return false;
+    return true;
+  }
+
   // 代理返回的 error 是字符串；统一取出可读信息，避免 r.error.message 恒为 undefined
   function ghErr(r, fallback) {
     if (!r) return fallback || '请求失败';
@@ -2739,13 +2747,15 @@
   }
   async function commitAllGroups(groups, btn) {
     if (!state.repo || !groups || !groups.length) return;
+    if (groups.some(function (g) { return !isSafeAiTargetPath(g.path); })) {
+      notify('AI 输出包含不允许写入的文件路径，已阻止批量提交');
+      return;
+    }
+    var br = state.repo.branch;
+    if (!window.confirm('即将一次性提交 ' + groups.length + ' 个文件到分支「' + br + '」，是否继续？')) return;
     var input = window.prompt('本次提交信息：', 'fix: AI 批量修改 ' + groups.length + ' 个文件');
     if (input === null) return;
     var msg = String(input).trim() || ('fix: AI 批量修改 ' + groups.length + ' 个文件');
-    var br = state.repo.branch;
-    if (br === state.repo.default_branch) {
-      if (!window.confirm('将直接提交 ' + groups.length + ' 个文件到默认分支「' + br + '」，是否继续？')) return;
-    }
     if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
     try {
       var changes = groups.map(function (g) { return { path: g.path, content: stripPathMarker(g.code) }; });
@@ -2802,6 +2812,7 @@
     var path = targetPath || state.currentPath;
     if (!path) { notify('请先在左侧选择一个文件，或让 AI 在代码块首行标注 // path:'); return; }
     if (!code) { notify('AI 结果中没有可用的代码'); return; }
+    if (!isSafeAiTargetPath(path)) { notify('AI 输出包含不允许写入的文件路径，已阻止应用'); return; }
     code = stripPathMarker(code);
     var known = isKnownFilePath(path);
     var apply = function () {
