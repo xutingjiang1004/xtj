@@ -18,22 +18,49 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE_DIR = process.env.IMAGE_SOURCE_DIR || path.resolve(__dirname, "../../uploads");
 
-function safeResolve(inputPath) {
+function isWithin(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
+}
+
+function safeResolve(inputPath, { output = false } = {}) {
+  const root = fs.realpathSync(SOURCE_DIR);
   const resolved = path.resolve(inputPath);
-  const relative = path.relative(SOURCE_DIR, resolved);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error('路径越权：不允许访问 ' + SOURCE_DIR + ' 之外的目录');
-  }
-  const real = fs.realpathSync(resolved);
-  const realRelative = path.relative(SOURCE_DIR, real);
-  if (realRelative.startsWith('..')) {
-    throw new Error('路径越权：符号链接指向 ' + SOURCE_DIR + ' 之外的目录');
+  if (!isWithin(root, resolved)) throw new Error("路径越权：不允许访问 " + root + " 之外的目录");
+
+  if (output) {
+    const parentReal = fs.realpathSync(path.dirname(resolved));
+    if (!isWithin(root, parentReal)) throw new Error("路径越权：输出目录符号链接指向允许目录之外");
+    if (fs.existsSync(resolved) && !isWithin(root, fs.realpathSync(resolved))) {
+      throw new Error("路径越权：输出符号链接指向允许目录之外");
+    }
+  } else {
+    const real = fs.realpathSync(resolved);
+    if (!isWithin(root, real)) throw new Error("路径越权：符号链接指向 " + root + " 之外的目录");
   }
   return resolved;
 }
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
+const MAX_BATCH_FILES = 50;
+const MAX_BATCH_INPUT_BYTES = 250 * 1024 * 1024;
+const MAX_THUMBNAIL_SIZES = 10;
 const MAX_IMAGE_DIMENSION = 10000;
+const MAX_QUALITY = 100;
+
+function validateQuality(value, fallback) {
+  const quality = value ?? fallback;
+  if (!Number.isInteger(quality) || quality < 1 || quality > MAX_QUALITY) throw new Error("quality 必须是 1 到 100 的整数");
+  return quality;
+}
+
+function validateDimension(value, name, optional = false) {
+  if (optional && value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 1 || value > MAX_IMAGE_DIMENSION) {
+    throw new Error(`${name} 必须是 1 到 ${MAX_IMAGE_DIMENSION} 之间的整数`);
+  }
+  return value;
+}
 
 function validateFile(filePath) {
   // 先做 existsSync 检查再 safeResolve，避免 realpathSync 对不存在文件抛原始 ENOENT
@@ -64,21 +91,23 @@ server.tool("image_analyze", "分析图片信息（尺寸、格式、文件大�
   return { content: [{ type: "text", text }] };
 });
 
-server.tool("image_compress", "压缩图片文件", { filepath: z.string(), quality: z.number().optional(), output_suffix: z.string().optional() }, async (args) => {
+server.tool("image_compress", "压缩图片文件（单个输入最大 100 MiB；quality 为 1–100）", { filepath: z.string(), quality: z.number().int().min(1).max(MAX_QUALITY).optional(), output_suffix: z.string().optional() }, async (args) => {
   const fp = validateFile(args.filepath);
+  const quality = validateQuality(args.quality, 80);
   const ext = path.extname(fp);
   var suffix = String(args.output_suffix || '_compressed');
   // 防止路径遍历：移除所有路径分隔符和危险字符，仅保留安全字符
   suffix = suffix.replace(/\.\.(\/|\\)/g, '_').replace(/[\/\\]/g, '_').replace(/[^a-zA-Z0-9_-]/g, '_');
   const out = `${fp.slice(0, -ext.length)}${suffix}${ext}`;
-  const q = args.quality ?? 80;
+  const q = quality;
   const fmt = ext.toLowerCase().replace('.', '');
   let p = sharp(fp);
   if (fmt === 'jpg' || fmt === 'jpeg') p = p.jpeg({quality:q,mozjpeg:true});
   else if (fmt === 'png') p = p.png({compressionLevel:9}); // PNG 为无损格式，sharp 不支持 quality 参数
   else if (fmt === 'webp') p = p.webp({quality:q});
   else p = p.jpeg({quality:q,mozjpeg:true});
-  await p.toFile(out);
+  const safeOut = safeResolve(out, { output: true });
+  await p.toFile(safeOut);
   const orig = fs.statSync(fp).size;
   const now = fs.statSync(out).size;
   const saved = ((1 - now/orig) * 100).toFixed(1);
@@ -92,16 +121,19 @@ server.tool("image_convert", "转换图片格式（WebP/AVIF/JPEG/PNG）", { fil
   if (path.extname(fp).slice(1).toLowerCase() === args.format) {
     out = `${fp.slice(0, -path.extname(fp).length)}_converted.${args.format}`;
   }
-  const q = args.quality ?? 85;
+  const q = validateQuality(args.quality, 85);
   let p = sharp(fp);
   switch(args.format){ case"jpeg":p=p.jpeg({quality:q,mozjpeg:true});break; case"png":p=p.png({compressionLevel:9});break; // PNG 无损，不支持 quality
   case"webp":p=p.webp({quality:q});break; case"avif":p=p.avif({quality:q});break; case"tiff":p=p.tiff({quality:q});break; }
-  const info = await p.toFile(out);
+  const safeOut = safeResolve(out, { output: true });
+  const info = await p.toFile(safeOut);
   return { content: [{ type: "text", text: `✅ 转换完成\n  ${path.basename(fp)} → ${path.basename(out)}\n  格式: ${args.format.toUpperCase()}\n  大小: ${fmtSize(fs.statSync(out).size)}\n  尺寸: ${info.width}x${info.height}` }] };
 });
 
-server.tool("image_resize", "调整图片尺寸", { filepath: z.string(), width: z.number().max(MAX_IMAGE_DIMENSION), height: z.number().max(MAX_IMAGE_DIMENSION).optional(), fit: z.enum(["cover","contain","fill","inside","outside"]).optional(), output_suffix: z.string().optional() }, async (args) => {
+server.tool("image_resize", "调整图片尺寸（每边 1–10000 像素）", { filepath: z.string(), width: z.number().int().min(1).max(MAX_IMAGE_DIMENSION), height: z.number().int().min(1).max(MAX_IMAGE_DIMENSION).optional(), fit: z.enum(["cover","contain","fill","inside","outside"]).optional(), output_suffix: z.string().optional() }, async (args) => {
   const fp = validateFile(args.filepath);
+  validateDimension(args.width, "width");
+  validateDimension(args.height, "height", true);
   const ext = path.extname(fp);
   var suffix = String(args.output_suffix || '_resized');
   // 防止路径遍历
@@ -110,38 +142,51 @@ server.tool("image_resize", "调整图片尺寸", { filepath: z.string(), width:
   const r = { width: Math.min(args.width, MAX_IMAGE_DIMENSION) };
   if (args.height) r.height = Math.min(args.height, MAX_IMAGE_DIMENSION);
   if (args.fit) r.fit = args.fit;
-  const info = await sharp(fp).resize(r).toFile(out);
+  const safeOut = safeResolve(out, { output: true });
+  const info = await sharp(fp).resize(r).toFile(safeOut);
   return { content: [{ type: "text", text: `✅ 尺寸调整完成\n  输出: ${path.basename(out)}\n  新尺寸: ${info.width}x${info.height}\n  大小: ${fmtSize(fs.statSync(out).size)}` }] };
 });
 
-server.tool("image_generate_thumbnails", "生成多尺寸响应式缩略图", { filepath: z.string(), format: z.enum(["jpeg","webp","avif"]).optional(), quality: z.number().optional(), sizes: z.array(z.object({ width: z.number(), label: z.string() })).optional() }, async (args) => {
+server.tool("image_generate_thumbnails", "生成多尺寸响应式缩略图（最多 10 个，宽度 1–10000 像素）", { filepath: z.string(), format: z.enum(["jpeg","webp","avif"]).optional(), quality: z.number().int().min(1).max(MAX_QUALITY).optional(), sizes: z.array(z.object({ width: z.number().int().min(1).max(MAX_IMAGE_DIMENSION), label: z.string().min(1).max(40) })).max(MAX_THUMBNAIL_SIZES).optional() }, async (args) => {
   const fp = validateFile(args.filepath);
   const sizes = args.sizes || [{width:200,label:"sm"},{width:400,label:"md"},{width:800,label:"lg"}];
+  if (sizes.length > MAX_THUMBNAIL_SIZES) throw new Error(`单次最多生成 ${MAX_THUMBNAIL_SIZES} 张缩略图`);
+  for (const size of sizes) validateDimension(size.width, "thumbnail width");
+  const q = validateQuality(args.quality, 80);
   const fmt = args.format || "webp";
-  const q = args.quality ?? 80;
   const base = fp.slice(0,-path.extname(fp).length);
   const results = [];
   for (const size of sizes) {
     // 防止路径遍历：label 中的特殊字符替换为安全字符
-    var safeLabel = String(size.label || '').replace(/\.\.(\/|\\)/g, '_').replace(/[\/\\]/g, '_');
+    var safeLabel = String(size.label || '').replace(/\.\.(\/|\\)/g, '_').replace(/[\/\\]/g, '_').replace(/[^a-zA-Z0-9_-]/g, '_');
     const out = `${base}_${safeLabel}.${fmt}`;
     let p = sharp(fp).resize({width:size.width});
     switch(fmt){case"webp":p=p.webp({quality:q});break;case"avif":p=p.avif({quality:q});break;case"jpeg":p=p.jpeg({quality:q});break;}
-    await p.toFile(out);
+    const safeOut = safeResolve(out, { output: true });
+    await p.toFile(safeOut);
     results.push(`  [${size.label}] ${size.width}px → ${path.basename(out)} (${fmtSize(fs.statSync(out).size)})`);
   }
   return { content: [{ type: "text", text: `✅ 缩略图生成完成 (${sizes.length}个尺寸)\n${results.join("\n")}` }] };
 });
 
-server.tool("image_batch_optimize", "批量优化目录下所有图片", { directory: z.string(), quality: z.number().optional(), format: z.enum(["webp","avif","jpeg"]).optional(), max_width: z.number().optional(), glob: z.string().optional() }, async (args) => {
+server.tool("image_batch_optimize", "批量优化目录图片（最多 50 张、输入总量最多 250 MiB、单张最大 100 MiB）", { directory: z.string(), quality: z.number().int().min(1).max(MAX_QUALITY).optional(), format: z.enum(["webp","avif","jpeg"]).optional(), max_width: z.number().int().min(1).max(MAX_IMAGE_DIMENSION).optional(), glob: z.string().max(100).optional() }, async (args) => {
   const dir = safeResolve(args.directory);
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`目录不存在: ${dir}`);
   const g = args.glob||"*.{jpg,jpeg,png,webp}";
   const braceMatch = g.match(/\{([^}]+)\}/);
   const exts = braceMatch ? braceMatch[1].split(",").map(s => "." + s.trim().toLowerCase()) : [path.extname(g).toLowerCase()];
-  const files = fs.readdirSync(dir).filter(f => exts.includes(path.extname(f).toLowerCase()));
+  const files = fs.readdirSync(dir).filter(f => exts.includes(path.extname(f).toLowerCase()) && fs.lstatSync(path.join(dir, f)).isFile());
   if (!files.length) return { content: [{ type: "text", text: `⚠️ 未找到匹配图片 (${g})` }] };
-  const fmt = args.format||"webp"; const q = args.quality??80; const mw = args.max_width||1920;
+  if (files.length > MAX_BATCH_FILES) throw new Error(`批量匹配 ${files.length} 张，单次上限 ${MAX_BATCH_FILES} 张`);
+  let inputBytes = 0;
+  for (const file of files) {
+    const full = safeResolve(path.join(dir, file));
+    const size = fs.statSync(full).size;
+    if (size > MAX_FILE_SIZE) throw new Error(`输入文件 ${file} 超过单张 100 MiB 上限`);
+    inputBytes += size;
+    if (inputBytes > MAX_BATCH_INPUT_BYTES) throw new Error("批量输入总大小超过 250 MiB 上限");
+  }
+  const fmt = args.format||"webp"; const q = validateQuality(args.quality, 80); const mw = validateDimension(args.max_width ?? 1920, "max_width");
   const results = [];
   for (const file of files) {
     const full = path.join(dir, file);
@@ -157,7 +202,8 @@ server.tool("image_batch_optimize", "批量优化目录下所有图片", { direc
       const meta = await sharp(full).metadata();
       let p = sharp(full); if (meta.width && meta.width > mw) p = p.resize({width:mw});
       switch(fmt){case"webp":p=p.webp({quality:q});break;case"avif":p=p.avif({quality:q});break;case"jpeg":p=p.jpeg({quality:q});break;}
-      await p.toFile(out);
+      const safeOut = safeResolve(out, { output: true });
+      await p.toFile(safeOut);
       const s2 = fs.statSync(out).size; const sv = ((1-s2/s1)*100).toFixed(1);
       results.push(`  ✅ ${file} → ${outName} (${fmtSize(s1)}→${fmtSize(s2)}, -${sv}%)`);
     } catch(e) { results.push(`  ❌ ${file}: ${e.message}`); }

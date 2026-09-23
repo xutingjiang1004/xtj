@@ -79,9 +79,11 @@
     }
     function clearPreviewImageLoad(image, resetSource) {
         if (!image) return;
+        image._ppFullPreloadCleanup && image._ppFullPreloadCleanup(!0);
+        image._ppFullPreloadCleanup = null;
         image._ppObjectUrl && (URL.revokeObjectURL(image._ppObjectUrl), image._ppObjectUrl = null);
         image._ppCleanup && image._ppCleanup(), image._ppCleanup = null, image._ppLoadGen = (image._ppLoadGen || 0) + 1,
-        image._ppUrl = null, image._ppListenerUrl = null, image.onload = null, image.onerror = null,
+        image._ppUrl = null, image._ppProgressiveUrl = null, image._ppListenerUrl = null, image.onload = null, image.onerror = null,
         image.classList.remove("pp-placeholder"), image.style.transition = "none";
         resetSource && (image.removeAttribute("src"), image.style.opacity = "0");
     }
@@ -99,7 +101,9 @@
                 if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
                 if (e._ppListenerUrl === t && e._ppCleanup) return;
             } else {
-                // 换 URL 前彻底清旧图，避免切换时残影
+                // 换 URL 前彻底清旧图，避免切换时残影；同时取消缩略图打开时的原图预加载回调。
+                e._ppFullPreloadCleanup && e._ppFullPreloadCleanup(!0);
+                e._ppFullPreloadCleanup = null;
                 e._ppCleanup && e._ppCleanup();
                 e._ppObjectUrl && (URL.revokeObjectURL(e._ppObjectUrl), e._ppObjectUrl = null);
                 e.style.transition = "none";
@@ -701,7 +705,8 @@
                 window.addEventListener("orientationchange", d._ppOrientationHandler);
             }(_), d = !0), q(), e = !0, t = n[b] || null, window.photoPreviewCurrent = t, i = b;
             var S = n[b];
-            S && S.imageUrl && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
+            // 缩略图路径下方已有独立原图预加载器；不要再由缓存预热器并发下载同一原图。
+            S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
             var D = null, W = null, Y = document.getElementById("photoGrid");
             if (Y && S && null != S.id) {
                 var Z = Y.querySelector('.photo-wall-item[data-photo-id="' + String(S.id).replace(/"/g, '\\"') + '"]'), K = Z ? Z.querySelector("img") : null;
@@ -714,18 +719,28 @@
             _.classList.add("active"), document.body.classList.add("photo-previewing"), _.style.opacity = "1",
             M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
             var J = document.getElementById("photoPreviewImage"), Q = !1, $ = null, ee = (_._openLoadGen || 0) + 1;
-            function cleanupOpenListeners() {
+            function cleanupOpenListeners(cancelFullPreload) {
                 $ && (clearTimeout($), $ = null), J && (J.removeEventListener("load", handleOpenLoad), J.removeEventListener("error", handleOpenError)), _ && _._cleanupOpenListeners === cleanupOpenListeners && (_._cleanupOpenListeners = null);
+                if (cancelFullPreload && J && J._ppFullPreloadCleanup) {
+                    J._ppFullPreloadCleanup(!0);
+                    J._ppFullPreloadCleanup = null;
+                }
             }
+            var fullRequestStarted = !1;
             function handleOpenLoad() {
-                _._openLoadGen === ee && (cleanupOpenListeners(), J.offsetHeight, J.style.opacity = "1", re());
+                if (hasThumb && !fullRequestStarted) return;
+                _._openLoadGen === ee && (cleanupOpenListeners(!0), J.offsetHeight, J.style.opacity = "1", re());
             }
             function handleOpenError() {
-                _._openLoadGen === ee && (cleanupOpenListeners(), J.style.opacity = "1", re());
+                if (hasThumb && !fullRequestStarted) return;
+                _._openLoadGen === ee && (cleanupOpenListeners(!0), J.style.opacity = "1", re());
             }
-            _._openLoadGen = ee, _._cleanupOpenListeners && _._cleanupOpenListeners(), _._cleanupOpenListeners = cleanupOpenListeners;
+            _._openLoadGen = ee, _._cleanupOpenListeners && _._cleanupOpenListeners(!0), _._cleanupOpenListeners = cleanupOpenListeners;
             if (J && S && S.imageUrl) {
                 clearPreviewImageLoad(J, !1);
+                // 清槽会递增图片加载代次；用当前代次绑定本次打开的主图加载。
+                ee = (_._openLoadGen || 0) + 1;
+                _._openLoadGen = ee;
                 var oe = C[S.imageUrl];
                 // 性能优化：原图未解码完成前，先用已缓存的缩略图秒开（墙格卡片通常已加载同一缩略图），
                 // 同时在后台解码原图，就绪后无缝替换，避免每次打开都长时间等待原图下载而黑屏。
@@ -754,33 +769,79 @@
                     //   浏览器可复用 HTTP 缓存、并按渐进式（逐行扫描）边下边渲染，
                     //   用户能立刻看到逐渐清晰的画面，明显快于等待整个 Blob。
                     J.src = thumbSrc, J.style.opacity = "1";
+                    J._ppProgressiveUrl = S.imageUrl;
                     var openFullUrl = S.imageUrl;
+                    var openLoadSettled = !1;
+                    function finishOpenLoad() {
+                        if (openLoadSettled || _._openLoadGen !== ee || t !== S) return;
+                        openLoadSettled = !0;
+                        if ($) { clearTimeout($); $ = null; }
+                        re();
+                    }
                     $ = setTimeout(function() {
-                        // 兜底：原图迟迟未就绪（如超慢网络）时先完成收尾，不无限期阻塞元信息
-                        _._openLoadGen === ee && t === S && re();
+                        // 兜底：原图迟迟未就绪（如超慢网络）时先完成打开阶段，
+                        // 但保留预加载器，以便后续完成仍可升级到清晰原图。
+                        finishOpenLoad();
                     }, 4e3);
 
-                    // 用独立的预加载 Image 探测原图就绪，就绪后再切主图，避免缩略图切换时闪白
+                    // 用独立的预加载 Image 探测原图就绪，就绪后切主图，避免缩略图切换时闪白。
+                    // 预加载对象与槽位同生命周期；切图/关闭时移除回调，旧请求不能操作新预览。
                     var preImg = new Image();
+                    var preDone = !1;
+                    function cleanupFullPreload(cancelRequest) {
+                        var wasPending = !preDone;
+                        preDone = !0;
+                        preImg.onload = null;
+                        preImg.onerror = null;
+                        if (cancelRequest && wasPending) {
+                            try { preImg.src = ''; } catch (e) {}
+                        }
+                        if (J && J._ppFullPreloadCleanup === cleanupFullPreload) J._ppFullPreloadCleanup = null;
+                    }
+                    function swapToFull() {
+                        if (preDone) return;
+                        cleanupFullPreload(!1);
+                        if (!(_._openLoadGen === ee && t === S && J && J.isConnected)) return;
+                        if (J._ppUrl !== openFullUrl && J._ppProgressiveUrl !== openFullUrl) {
+                            fullRequestStarted = !0;
+                            J._ppUrl = openFullUrl;
+                            J.addEventListener("load", handleOpenLoad);
+                            J.addEventListener("error", handleOpenError);
+                            J.style.transition = "none";
+                            J.src = openFullUrl;
+                            J.style.opacity = "1";
+                            if (J.complete) {
+                                J.naturalWidth > 0 ? handleOpenLoad() : handleOpenError();
+                            }
+                        } else {
+                            // already progressive-loaded; remove the stale thumb-era listeners
+                            cleanupOpenListeners();
+                        }
+                        if (!fullRequestStarted) {
+                            openLoadSettled = !0;
+                            if ($) { clearTimeout($); $ = null; }
+                            re();
+                        }
+                    }
+                    J._ppFullPreloadCleanup = cleanupFullPreload;
                     // 提升原图请求优先级，让浏览器更快开始拉取大图
                     try { preImg.fetchPriority = "high"; } catch (e) {}
                     preImg.decoding = "async";
-                    var preDone = false;
-                    function swapToFull() {
-                        if (preDone) return;
-                        preDone = true;
-                        if (!(_._openLoadGen === ee && t === S && J && J.isConnected)) return;
-                        if (J._ppUrl === openFullUrl) return;
-                        J._ppObjectUrl && (URL.revokeObjectURL(J._ppObjectUrl), J._ppObjectUrl = null);
-                        J._ppUrl = openFullUrl;
-                        J.style.transition = "none";
-                        J.src = openFullUrl;
-                        J.style.opacity = "1";
-                        if (_._openLoadGen === ee && t === S) re();
-                    }
                     preImg.onload = swapToFull;
-                    // 解码失败（如 404/CORS）时保持缩略图，不再重试
-                    preImg.onerror = function() { preDone = true; };
+                    // 原图失败时回退为直接请求原图，让主图的重试 / 错误 UI 逻辑生效。
+                    preImg.onerror = function() {
+                        cleanupFullPreload(!0);
+                        if (!(_._openLoadGen === ee && t === S && J && J.isConnected)) return;
+                        fullRequestStarted = !0;
+                        J._ppProgressiveUrl = null;
+                        J._ppUrl = openFullUrl;
+                        J.addEventListener("load", handleOpenLoad);
+                        J.addEventListener("error", handleOpenError);
+                        J.src = openFullUrl;
+                        if (J.complete) {
+                            J.naturalWidth > 0 ? handleOpenLoad() : handleOpenError();
+                        }
+                    };
                     preImg.src = openFullUrl;
                     // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
                     if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
@@ -800,7 +861,7 @@
                 b < 0 && (b = 0), b >= n.length && (b = n.length - 1);
                 i = b, t = n[b] || null, window.photoPreviewCurrent = t;
                 var S = n[b];
-                S && S.imageUrl && U(S.imageUrl);
+                S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl);
                 M(), O(b), q();
             }
         }

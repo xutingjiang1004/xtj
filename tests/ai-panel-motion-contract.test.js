@@ -300,8 +300,8 @@ test('Items 契约：后端必须统一 items 出口（不得把整段正文当�
   assert.match(body, /trimmed\[0\] !== '\['\)\s*return null/,
     '非 JSON 数组的正文字符串必须返回 null，不得当列表下发');
   assert.match(body, /Array\.isArray\(arr\)/, '必须校验确实是数组');
-  // 三条写入路径都必须走这个出口
-  const occurrences = (serverSrc.match(/items:\s*normalizeToolResultItems\(/g) || []).length;
+  // 三条写入路径都必须走这个出口（当前结构将规范化结果赋给 _n1/_n2/_n3 后写入）。
+  const occurrences = (serverSrc.match(/normalizeToolResultItems\(/g) || []).length - 1; // exclude declaration
   assert.ok(occurrences >= 3, `三条 tool_result 路径都必须走统一出口，当前只有 ${occurrences} 处`);
 });
 

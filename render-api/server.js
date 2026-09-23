@@ -10877,14 +10877,38 @@ async function storeRefreshToken(userName, refreshToken) {
 
 async function revokeAllUserRefreshTokens(userName) {
   try {
-    var { data: tokens } = await supabase.from('posts')
-      .select('media_url')
-      .eq('media_type', REFRESH_TOKEN_MARKER)
-      .eq('user_name', userName);
-    if (tokens && tokens.length > 0) {
-      await supabase.from('posts').delete().eq('media_type', REFRESH_TOKEN_MARKER).eq('user_name', userName);
+    var tokenRows = [];
+    var tokenOffset = 0;
+    var tokenPageSize = 500;
+    while (true) {
+      var tokenPage = await supabase.from('posts').select('id')
+        .eq('media_type', REFRESH_TOKEN_MARKER)
+        .eq('user_name', userName)
+        .range(tokenOffset, tokenOffset + tokenPageSize - 1);
+      if (!tokenPage || tokenPage.error) throw (tokenPage && tokenPage.error) || new Error('Refresh token lookup was not confirmed');
+      tokenRows = tokenRows.concat(tokenPage.data || []);
+      if ((tokenPage.data || []).length < tokenPageSize) break;
+      tokenOffset += tokenPageSize;
     }
-  } catch(e) { console.warn('[RefreshToken] revokeAll failed:', e && e.message); }
+    var tokenIds = tokenRows.map(function(row) { return row.id; }).filter(Boolean);
+    for (var tokenBatchStart = 0; tokenBatchStart < tokenIds.length; tokenBatchStart += 100) {
+      var deletion = await supabase.from('posts').delete()
+        .eq('media_type', REFRESH_TOKEN_MARKER)
+        .eq('user_name', userName)
+        .in('id', tokenIds.slice(tokenBatchStart, tokenBatchStart + 100));
+      if (!deletion || deletion.error) throw (deletion && deletion.error) || new Error('Refresh token delete was not confirmed');
+    }
+    var verification = await supabase.from('posts').select('id')
+      .eq('media_type', REFRESH_TOKEN_MARKER)
+      .eq('user_name', userName)
+      .limit(1);
+    if (!verification || verification.error) throw (verification && verification.error) || new Error('Refresh token revoke verification failed');
+    if (verification.data && verification.data.length) throw new Error('Refresh token rows remain after revoke');
+    return true;
+  } catch(e) {
+    console.warn('[RefreshToken] revokeAll failed:', e && e.message);
+    throw e;
+  }
 }
 
 /**
@@ -10946,12 +10970,13 @@ function _getTokenFromRequest(req) {
 // ===== 吊销 token 持久化 =====
 async function persistRevokedToken(token, expiresAt) {
   try {
-    await supabase.from('posts').insert([{
+    var revokeInsert = await supabase.from('posts').insert([{
       content: JSON.stringify({ token_hash: crypto.createHash('sha256').update(token).digest('hex'), expires_at: expiresAt }),
       media_type: REVOKED_TOKEN_MARKER,
       media_url: crypto.createHash('sha256').update(token).digest('hex'),
       user_name: ADMIN_USERNAME
     }]);
+    if (revokeInsert && revokeInsert.error) throw revokeInsert.error;
     revokedTokenHashes.add(crypto.createHash('sha256').update(token).digest('hex'));
     return true;
   } catch(e) {
@@ -12815,10 +12840,38 @@ async function processStorageCleanupJobs() {
       }
       var nextAttempts = Number(job.attempts || 0) + 1;
       var removeError = null;
+      var retryPaths = paths.slice();
       if (paths.length) {
         try {
           var removal = await withStorageCleanupTimeout(supabase.storage.from(job.bucket || 'uploads').remove(paths), STORAGE_CLEANUP_REMOVE_TIMEOUT_MS);
-          removeError = removal.error || null;
+          removeError = removal && removal.error || null;
+          // Storage may report only the objects it actually removed. Match paths
+          // precisely (basename fallback only when unique), then retry remaining
+          // paths rather than completing a partially successful durable job.
+          if (!removeError && removal && Array.isArray(removal.data) && removal.data.length > 0) {
+            var removedItems = removal.data.map(function(item) {
+              var raw = String(item && (item.name || item.path) || '').trim().replace(/^\/+/, '');
+              return raw ? { full: raw, base: raw.split('/').pop(), hasDir: raw.indexOf('/') >= 0 } : null;
+            }).filter(Boolean);
+            var basenameCounts = {};
+            paths.forEach(function(path) {
+              var base = String(path).replace(/^\/+/, '').split('/').pop();
+              basenameCounts[base] = (basenameCounts[base] || 0) + 1;
+            });
+            var remainingPaths = paths.filter(function(path) {
+              var clean = String(path).replace(/^\/+/, '');
+              var itemIndex = removedItems.findIndex(function(item) {
+                return item.full === clean || (!item.hasDir && item.base === clean.split('/').pop() && basenameCounts[item.base] === 1);
+              });
+              if (itemIndex < 0) return true;
+              removedItems.splice(itemIndex, 1);
+              return false;
+            });
+            if (remainingPaths.length) {
+              retryPaths = remainingPaths;
+              removeError = { code: 'STORAGE_PARTIAL_DELETE', message: 'Storage removal left ' + remainingPaths.length + ' of ' + paths.length + ' objects' };
+            }
+          }
         } catch (error) { removeError = error; }
       }
       var finalUpdate;
@@ -12827,6 +12880,7 @@ async function processStorageCleanupJobs() {
         const failedForever = nextAttempts >= STORAGE_CLEANUP_MAX_ATTEMPTS;
         finalUpdate = await supabase.from('storage_cleanup_jobs').update({
           status: failedForever ? 'failed' : 'pending', attempts: nextAttempts,
+          paths: retryPaths,
           last_error: String(removeError.message || removeError.error || 'storage_delete_failed').slice(0, 1000),
           claim_token: null, lease_until: null, updated_at: new Date().toISOString()
         }).eq('id', job.id).eq('status', 'processing').eq('claim_token', claimToken).select('id').maybeSingle();
@@ -12890,14 +12944,20 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
       return res.status(deleteStatus).json({ error: deleteResult.error || '删除失败', code: deleteResult.code || 'delete_not_applied' });
     }
 
-    // The database record is authoritative. Delete it first so a transient
-    // database failure can never leave a live row pointing at a missing file.
-    // Storage cleanup is best-effort and can be retried independently.
+    // Keep storage_cleanup_jobs authoritative and account for partial Storage
+    // responses. The helper retries only the unremoved paths and reports whether
+    // that retry was durably queued; never interpret a partial response as done.
     if (storagePaths.length) {
       try {
-        var { error: rmErr } = await supabase.storage.from('uploads').remove(storagePaths);
-        if (rmErr && !rmErr.message.includes('Not Found') && !rmErr.message.includes('not found')) {
-          storageErrors.push({ paths: storagePaths, error: rmErr.message });
+        var photoCleanupResult = await removeStorageWithQueue(supabase, {
+          bucket: 'uploads', paths: storagePaths, photoId: photoId,
+          lastError: 'photo_delete_cleanup'
+        });
+        if (!photoCleanupResult || !photoCleanupResult.ok || photoCleanupResult.cleanup_pending) {
+          storageErrors.push({
+            paths: photoCleanupResult && photoCleanupResult.paths || storagePaths,
+            error: photoCleanupResult && photoCleanupResult.error && (photoCleanupResult.error.message || photoCleanupResult.error.error) || 'storage_cleanup_pending'
+          });
         }
       } catch(e) {
         storageErrors.push({ paths: storagePaths, error: e && e.message || 'unknown' });
@@ -12912,13 +12972,13 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
         last_error: storageErrors.length ? String(storageErrors[0].error || 'storage_delete_failed').slice(0, 1000) : null,
         completed_at: storageErrors.length ? null : new Date().toISOString(),
         updated_at: new Date().toISOString()
-      }).eq('id', deleteResult.cleanup_job_id);
+      }).eq('id', deleteResult.cleanup_job_id).select('id').maybeSingle();
       // If the durable queue state could not be updated, leave the client in
       // "cleanup pending" state. The queued job remains retryable and the
       // periodic worker can safely repeat an idempotent Storage removal.
-      if (cleanupStateUpdate.error) {
+      if (cleanupStateUpdate.error || !cleanupStateUpdate.data) {
         cleanupStatePending = true;
-        console.warn('[storage-cleanup] delete state update failed:', cleanupStateUpdate.error.message);
+        console.warn('[storage-cleanup] delete state update was not confirmed:', cleanupStateUpdate.error && cleanupStateUpdate.error.message);
       }
     }
 
@@ -13759,6 +13819,30 @@ setInterval(function() {
   });
 }, 300000).unref();
 
+app.post('/api/photo/view', optionalAuth, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var photoId = normalizePostId(req.body && (req.body.photo_id || req.body.post_id));
+    if (!photoId) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
+    var photoResult = await applyPublicPostExclusions(supabase.from('posts')
+      .select('id, media_type, visibility')
+      .eq('id', photoId)
+      .eq('media_type', '__photo_wall__')).maybeSingle();
+    if (photoResult.error) return res.status(500).json({ error: sanitizeError(photoResult.error), code: 'photo_view_lookup_failed' });
+    var photo = photoResult.data;
+    if (!photo || (photo.visibility && photo.visibility !== 'public')) {
+      return res.status(404).json({ error: '照片不存在', code: 'photo_not_found' });
+    }
+    var incrementResult = await supabase.rpc('increment_post_views', { p_post_id: photoId });
+    if (incrementResult.error) return res.status(500).json({ error: sanitizeError(incrementResult.error), code: 'photo_view_increment_failed' });
+    var countResult = await supabase.from('posts').select('views').eq('id', photoId).maybeSingle();
+    if (countResult.error) return res.status(500).json({ error: sanitizeError(countResult.error), code: 'photo_view_count_failed' });
+    return res.json({ ok: true, recorded: Number(incrementResult.data) > 0, views: Number(countResult.data && countResult.data.views) || 0 });
+  } catch (e) {
+    console.error('[API] photo view:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: '照片浏览量更新失败', code: 'photo_view_failed' });
+  }
+});
+
 app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
     var postId = normalizePostId(req.body && req.body.post_id);
@@ -14565,6 +14649,9 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       actorKey = kindResult.actorPrefix + pathResult.storagePath;
       mediaKind = String(registryRow.kind || kindResult.kind);
       mimeType = String(registryRow.mime_type || kindResult.mimeType);
+      // getPublicUrl only constructs a URL; it does not prove bucket policy. Existing
+      // clients consume stable public URLs, so do not silently change the API to signed
+      // URLs until the deployed uploads bucket policy is verified outside this repo.
       var publicUrlResult;
       try {
         publicUrlResult = supabase.storage.from('uploads').getPublicUrl(pathResult.storagePath);
@@ -15121,200 +15208,335 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     if (!userName || userName.length > MAX_USERNAME_LEN) return res.status(400).json({ error: '用户名无效' });
     if (userName === ADMIN_USERNAME) return res.status(403).json({ error: '不能删除管理员账号' });
 
-    // 检查用户是否在任意表中存在（不仅 AUTH_MARKER）
-    var existsChecks = await Promise.all([
+    // 检查所有代码中明确存在的用户关联表；查询失败不可伪装成账号不存在。
+    // Moderation / invite / quota ledgers are intentionally retained below as
+    // their retention and billing/audit policy is not defined in this service.
+    var existsChecks;
+    try {
+      existsChecks = await Promise.all([
       supabase.from('posts').select('id').eq('user_name', userName).limit(1),
+      supabase.from('posts').select('id').eq('media_type', DM_MARKER).eq('media_url', userName).limit(1),
       supabase.from('likes').select('id').eq('user_name', userName).limit(1),
       supabase.from('comments').select('id').eq('user_name', userName).limit(1),
-      supabase.from('bans').select('id').eq('user_name', userName).order('banned_at', { ascending: false }).limit(1),
+      supabase.from('bans').select('id').eq('user_name', userName).limit(1),
       supabase.from('mutes').select('id').eq('user_name', userName).limit(1),
-      supabase.from('blacklist').select('id').eq('user_name', userName).limit(1)
-    ]);
-
-    var exists = existsChecks.some(function(r) {
-      return r && r.data && r.data.length > 0;
-    });
-
-    if (!exists) {
-      return res.status(404).json({ error: '用户不存在或已被删除' });
+      supabase.from('blacklist').select('id').eq('user_name', userName).limit(1),
+      supabase.from('dm_media_uploads').select('id').eq('uploader', userName).limit(1),
+      supabase.from('ai_search_results').select('id').eq('owner_name', userName).limit(1),
+      supabase.from('ai_drafts').select('id').eq('owner_name', userName).limit(1),
+      supabase.from('ai_action_confirmations').select('id').eq('owner_name', userName).limit(1)
+      ]);
+    } catch (lookupException) {
+      console.error('[admin] 用户关联数据存在性查询异常:', lookupException && lookupException.message);
+      return res.status(503).json({ error: '暂时无法完整核实用户数据，请重试', code: 'delete_user_lookup_failed' });
     }
+    var existsError = existsChecks.find(function(r) { return !r || r.error; });
+    if (existsError) {
+      console.error('[admin] 用户关联数据存在性查询失败:', existsError && existsError.error && existsError.error.message);
+      return res.status(503).json({ error: '暂时无法完整核实用户数据，请重试', code: 'delete_user_lookup_failed' });
+    }
+    var exists = existsChecks.some(function(r) { return r.data && r.data.length > 0; });
+    if (!exists) return res.status(404).json({ error: '用户不存在或已被删除' });
+    var retainedPolicyData = {
+      bans: !!(existsChecks[5].data && existsChecks[5].data.length),
+      mutes: !!(existsChecks[6].data && existsChecks[6].data.length),
+      blacklist: !!(existsChecks[7].data && existsChecks[7].data.length)
+    };
 
-    // 部分删除进度跟踪（fail-fast 时随 500 返回，便于管理员判断残留数据）
-    var partialDeleted = { posts: 0, likes: 0, comments: 0, bans: 0, mutes: 0, blacklist: 0, storage_files: 0 };
+    // 只清理本服务能证明为账号私有/用户内容的数据；法律、审计、封禁/拉黑、
+    // 邀请兑换、会员及额度记录不在删除范围内，待保留政策明确后再处理。
+    var deletableTypes = new Set(['text', 'image', 'video', 'audio', 'photo', 'album', '__auth__', '__user_info__', '__avatar__', '__photo_wall__']);
+    var partialDeleted = { posts: 0, likes: 0, comments: 0, dm_media: 0, ai_search_results: 0, ai_drafts: 0, ai_action_confirmations: 0, storage_files: 0, storage_cleanup_queued: 0 };
 
     // 先查询该用户发布的帖子 ID，用于级联删除点赞和评论（fail-fast）
-    var userPostIds = [];
-    var { data: userPosts, error: userPostsErr } = await supabase.from('posts').select('id').eq('user_name', userName);
-    if (userPostsErr) {
-      console.error('[admin] 查询用户帖子ID失败:', userPostsErr.message);
-      return res.status(500).json({ error: '删除失败：查询用户帖子失败', partial: partialDeleted });
-    }
-    if (userPosts && userPosts.length) {
-      userPostIds = userPosts.map(function(p) { return p.id; });
-    }
-
-    // 查询照片墙的 Storage 文件路径（fail-fast）
-    var storagePaths = [];
-    var { data: photoRecords, error: photoRecordsErr } = await supabase.from('posts')
-      .select('media_url').eq('user_name', userName).eq('media_type', '__photo_wall__');
-    if (photoRecordsErr) {
-      console.error('[admin] 查询照片路径失败:', photoRecordsErr.message);
-      return res.status(500).json({ error: '删除失败：查询照片路径失败', partial: partialDeleted });
-    }
-    if (photoRecords && photoRecords.length) {
-      photoRecords.forEach(function(pr) {
-        if (pr.media_url) {
-          var url = pr.media_url;
-          var pathMatch = url.match(/\/uploads\/(.+?)(?:\?|$)/);
-          if (pathMatch) {
-            var sp = decodeURIComponent(pathMatch[1]);
-            if (sp.indexOf('..') === -1) storagePaths.push(sp);
-          }
-        }
-      });
-    }
-
-    // ★ 修复：删除账号时一并收集头像与 DM 媒体的 Storage 路径（此前只清照片墙文件，
-    // 头像/私聊媒体对象与注册行全部残留、公开 URL 仍可访问）。
+    var userPostRows = [];
+    var userPostOffset = 0;
+    var userPostPageSize = 500;
     try {
-      var { data: avatarRecords } = await supabase.from('posts')
-        .select('media_url').eq('user_name', userName).eq('media_type', '__avatar__');
-      if (avatarRecords && avatarRecords.length) {
-        avatarRecords.forEach(function(ar) {
-          if (!ar || !ar.media_url) return;
-          var avPathMatch = String(ar.media_url).match(/\/uploads\/(.+?)(?:\?|$)/);
-          if (avPathMatch) {
-            var avPath = decodeURIComponent(avPathMatch[1]);
-            if (avPath.indexOf('..') === -1) storagePaths.push(avPath);
-          }
-        });
+      while (true) {
+        var userPostPage = await supabase.from('posts').select('id, media_type')
+          .eq('user_name', userName).range(userPostOffset, userPostOffset + userPostPageSize - 1);
+        if (!userPostPage || userPostPage.error) throw (userPostPage && userPostPage.error) || new Error('Post lookup not confirmed');
+        userPostRows = userPostRows.concat(userPostPage.data || []);
+        if ((userPostPage.data || []).length < userPostPageSize) break;
+        userPostOffset += userPostPageSize;
       }
-      var { data: dmMedias } = await supabase.from('dm_media_uploads')
-        .select('storage_path').eq('uploader', userName).neq('status', 'deleted');
-      if (dmMedias && dmMedias.length) {
-        dmMedias.forEach(function(dm) {
-          if (dm && dm.storage_path && String(dm.storage_path).indexOf('..') === -1) {
-            storagePaths.push(String(dm.storage_path));
-          }
-        });
+    } catch (userPostsErr) {
+      console.error('[admin] 查询用户帖子ID失败:', userPostsErr && userPostsErr.message);
+      return res.status(503).json({ error: '删除失败：查询用户帖子失败', partial: partialDeleted });
+    }
+    // 删除用户可见内容和身份/媒体记录；未知系统 marker 可能是审计、法定或
+    // 运营留存数据，默认保留而不猜测其政策。
+    var userPostIds = userPostRows.filter(function(row) {
+      return row && row.id && (row.media_type === null || row.media_type === '' || deletableTypes.has(String(row.media_type)));
+    }).map(function(row) { return row.id; });
+    var retainedSystemPostCount = userPostRows.length - userPostIds.length;
+
+    // 先发现发件人或接收人为该用户的 DM。收件人消息不属于该用户 posts.user_name，
+    // 必须按 recipient 字段单独遍历；分页直到空页，避免默认 1000 行上限漏删。
+    var dmMessages = [];
+    async function readDmPages(column) {
+      var offset = 0;
+      var pageSize = 500;
+      while (true) {
+        var page = await supabase.from('posts')
+          .select('id, user_name, media_url, content, actor_key')
+          .eq('media_type', DM_MARKER).eq(column, userName)
+          .range(offset, offset + pageSize - 1);
+        if (!page || page.error) throw (page && page.error) || new Error('DM lookup not confirmed');
+        var records = page.data || [];
+        dmMessages = dmMessages.concat(records);
+        if (records.length < pageSize) break;
+        offset += pageSize;
       }
-    } catch (eMediaCollect) {
-      console.warn('[admin] collect avatar/dm media paths failed:', eMediaCollect && eMediaCollect.message);
+    }
+    try {
+      await Promise.all([readDmPages('user_name'), readDmPages('media_url')]);
+    } catch (dmLookupError) {
+      console.error('[admin] 查询 DM 关联失败:', dmLookupError && dmLookupError.message);
+      return res.status(503).json({ error: '删除失败：查询私信关联失败', code: 'delete_user_dm_lookup_failed', partial: partialDeleted });
+    }
+    var dmById = new Map();
+    dmMessages.forEach(function(message) { if (message && message.id) dmById.set(String(message.id), message); });
+    dmMessages = Array.from(dmById.values());
+    var dmMessageIds = dmMessages.map(function(message) { return message.id; });
+
+    // 收集照片、头像以及关联 DM 的对象路径。只接纳 uploads bucket 公共对象 URL
+    // 或已校验的 chat/注册路径；查询/解码异常不能被吞掉，否则会丢失清理目标。
+    var storagePaths = [];
+    function addAccountStoragePath(value) {
+      var raw = String(value || '').trim();
+      if (!raw) return;
+      var storagePath = raw;
+      if (/^https?:\/\//i.test(raw)) {
+        try {
+          var parsed = new URL(raw);
+          var match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/uploads\/(.+)$/);
+          if (!match) return;
+          storagePath = decodeURIComponent(match[1]);
+        } catch (_) { return; }
+      }
+      storagePath = String(storagePath).replace(/^\/+/, '');
+      if (!/^(?:photos|avatars|chat)\//i.test(storagePath) || storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) return;
+      if (storagePaths.indexOf(storagePath) < 0) storagePaths.push(storagePath);
+    }
+    var ownedMediaRecords = [];
+    try {
+      var ownedMediaOffset = 0;
+      var ownedMediaPageSize = 500;
+      while (true) {
+        var ownedMediaPage = await supabase.from('posts')
+          .select('id, media_url, media_type, content').eq('user_name', userName)
+          .in('media_type', ['__photo_wall__', '__avatar__'])
+          .range(ownedMediaOffset, ownedMediaOffset + ownedMediaPageSize - 1);
+        if (!ownedMediaPage || ownedMediaPage.error) throw (ownedMediaPage && ownedMediaPage.error) || new Error('Photo/avatar lookup not confirmed');
+        ownedMediaRecords = ownedMediaRecords.concat(ownedMediaPage.data || []);
+        if ((ownedMediaPage.data || []).length < ownedMediaPageSize) break;
+        ownedMediaOffset += ownedMediaPageSize;
+      }
+    } catch (ownedMediaLookupError) {
+      return res.status(503).json({ error: '删除失败：查询照片/头像路径失败', code: 'delete_user_media_lookup_failed', partial: partialDeleted });
+    }
+    ownedMediaRecords.forEach(function(record) {
+      addAccountStoragePath(record.media_url);
+      try {
+        var body = JSON.parse(record.content || '{}');
+        ['storagePath', 'storage_path', 'thumb', 'thumbnailPath', 'thumbnail_path', 'rotatedPath', 'rotated_path'].forEach(function(key) { addAccountStoragePath(body[key]); });
+      } catch (_) {}
+    });
+    dmMessages.forEach(function(message) {
+      addAccountStoragePath(message.media_url);
+      try {
+        var body = JSON.parse(message.content || '{}');
+        var media = body && body.media;
+        if (media && typeof media === 'object') addAccountStoragePath(media.url || media.storage_path || media.storagePath);
+      } catch (_) {}
+    });
+    var dmRegistryRows = [];
+    async function readDmRegistryPages(column, values) {
+      var offset = 0;
+      var pageSize = 500;
+      while (true) {
+        var query = supabase.from('dm_media_uploads').select('id, storage_path, message_id, uploader, status');
+        if (column === 'uploader') query = query.eq(column, userName);
+        else query = query.in(column, values);
+        var page = await query.range(offset, offset + pageSize - 1);
+        if (!page || page.error) throw (page && page.error) || new Error('DM media registry lookup not confirmed');
+        dmRegistryRows = dmRegistryRows.concat(page.data || []);
+        if ((page.data || []).length < pageSize) break;
+        offset += pageSize;
+      }
+    }
+    try {
+      await readDmRegistryPages('uploader', [userName]);
+      for (var messageChunkStart = 0; messageChunkStart < dmMessageIds.length; messageChunkStart += 100) {
+        await readDmRegistryPages('message_id', dmMessageIds.slice(messageChunkStart, messageChunkStart + 100));
+      }
+    } catch (dmRegistryLookupError) {
+      return res.status(503).json({ error: '删除失败：查询私信媒体注册失败', code: 'delete_user_dm_media_lookup_failed', partial: partialDeleted });
+    }
+    var dmRegistryById = new Map();
+    dmRegistryRows.forEach(function(row) { if (row && row.id) dmRegistryById.set(String(row.id), row); });
+    dmRegistryRows = Array.from(dmRegistryById.values());
+    dmRegistryRows.forEach(function(row) { addAccountStoragePath(row.storage_path); });
+
+    // Storage delete is idempotent. Partial failures must be durably queued; a failed
+    // queue write halts account deletion so the remaining paths are not orphaned.
+    var storagePending = 0;
+    if (storagePaths.length) {
+      var cleanup;
+      try {
+        cleanup = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: storagePaths, photoId: 'account_' + userName, lastError: 'account_delete_cleanup' });
+      } catch (storageCleanupError) {
+        console.error('[admin] Storage cleanup exception:', storageCleanupError && storageCleanupError.message);
+        return res.status(503).json({ error: '删除失败：文件清理未确认，请重试', code: 'delete_user_storage_cleanup_failed', partial: partialDeleted });
+      }
+      if (!cleanup || !cleanup.ok) {
+        console.error('[admin] Storage cleanup not confirmed:', cleanup && cleanup.error && cleanup.error.message);
+        return res.status(503).json({ error: '删除失败：文件清理未确认，队列写入失败，请重试', code: 'delete_user_storage_cleanup_failed', partial: partialDeleted });
+      }
+      partialDeleted.storage_files = cleanup.removed ? storagePaths.length : Math.max(0, storagePaths.length - (cleanup.paths || []).length);
+      if (cleanup.cleanup_pending) {
+        storagePending = (cleanup.paths || []).length;
+        partialDeleted.storage_cleanup_queued = storagePending;
+      }
     }
 
-    // 删除 Storage 文件（fail-fast）
-    var deletedStorage = 0;
-    if (storagePaths.length > 0) {
-      var storageRes = await supabase.storage.from('uploads').remove(storagePaths).catch(function(e) { return { error: e }; });
-      if (storageRes && storageRes.error) {
-        console.error('[admin] 删除照片文件失败:', (storageRes.error && storageRes.error.message) || storageRes.error);
-        return res.status(500).json({ error: '删除失败：删除照片文件失败', partial: partialDeleted });
+    // Delete received/sent DM posts by exact IDs so deleting a recipient account also
+    // removes messages authored by others, without touching unrelated conversation data.
+    var postIdsToDelete = userPostIds.concat(dmMessageIds).map(String);
+    postIdsToDelete = Array.from(new Set(postIdsToDelete));
+    async function deleteIdsInBatches(table, column, ids, marker) {
+      var deletedCount = 0;
+      for (var batchStart = 0; batchStart < ids.length; batchStart += 100) {
+        var query = supabase.from(table).delete().in(column, ids.slice(batchStart, batchStart + 100));
+        if (marker) query = query.eq('media_type', marker);
+        var deletion = await query;
+        if (!deletion || deletion.error) return { ok: false, count: deletedCount, error: deletion && deletion.error };
+        deletedCount += deletion.count || 0;
       }
-      deletedStorage = storagePaths.length;
-      partialDeleted.storage_files = deletedStorage;
+      return { ok: true, count: deletedCount };
     }
-
-    // 删除帖子的同时，级联删除该帖子下的点赞和评论（fail-fast）
-    if (userPostIds.length > 0) {
-      var cascadeLikeRes = await supabase.from('likes').delete().in('post_id', userPostIds);
-      if (cascadeLikeRes.error) {
-        console.error('[admin] 级联删除 likes 失败:', cascadeLikeRes.error.message);
-        return res.status(500).json({ error: '删除失败：级联删除点赞失败', partial: partialDeleted });
-      }
-      partialDeleted.likes += (cascadeLikeRes.count || 0);
-      var cascadeCommentRes = await supabase.from('comments').delete().in('post_id', userPostIds);
-      if (cascadeCommentRes.error) {
-        console.error('[admin] 级联删除 comments 失败:', cascadeCommentRes.error.message);
-        return res.status(500).json({ error: '删除失败：级联删除评论失败', partial: partialDeleted });
-      }
-      partialDeleted.comments += (cascadeCommentRes.count || 0);
+    if (postIdsToDelete.length) {
+      var cascadeLikeRes = await deleteIdsInBatches('likes', 'post_id', postIdsToDelete);
+      if (!cascadeLikeRes.ok) return res.status(500).json({ error: '删除失败：级联删除点赞失败', partial: partialDeleted });
+      partialDeleted.likes += cascadeLikeRes.count;
+      var cascadeCommentRes = await deleteIdsInBatches('comments', 'post_id', postIdsToDelete);
+      if (!cascadeCommentRes.ok) return res.status(500).json({ error: '删除失败：级联删除评论失败', partial: partialDeleted });
+      partialDeleted.comments += cascadeCommentRes.count;
     }
-
-    // 删除 posts 表（用户发布的帖子）
-    var delPostsRes = await supabase.from('posts').delete().eq('user_name', userName);
-    if (delPostsRes.error) {
-      console.error('[admin] 删除 posts 失败:', delPostsRes.error.message);
-      return res.status(500).json({ error: '删除失败：删除帖子失败', partial: partialDeleted });
+    if (userPostIds.length) {
+      var delPostsRes = await deleteIdsInBatches('posts', 'id', userPostIds);
+      if (!delPostsRes.ok) return res.status(500).json({ error: '删除失败：删除用户内容失败', partial: partialDeleted });
+      partialDeleted.posts = delPostsRes.count;
     }
-    partialDeleted.posts = (delPostsRes.count || 0);
-
-    // 删除 likes 表（该用户自己点的赞）
+    if (dmMessageIds.length) {
+      var deletedDm = await deleteIdsInBatches('posts', 'id', dmMessageIds, DM_MARKER);
+      if (!deletedDm.ok) return res.status(500).json({ error: '删除失败：删除私信失败', partial: partialDeleted });
+      partialDeleted.dm_messages = deletedDm.count;
+    }
     var delLikesRes = await supabase.from('likes').delete().eq('user_name', userName);
-    if (delLikesRes.error) {
-      console.error('[admin] 删除 likes 失败:', delLikesRes.error.message);
-      return res.status(500).json({ error: '删除失败：删除点赞失败', partial: partialDeleted });
-    }
-    partialDeleted.likes += (delLikesRes.count || 0);
-
-    // 删除 comments 表（该用户自己的评论）
+    if (delLikesRes.error) return res.status(500).json({ error: '删除失败：删除点赞失败', partial: partialDeleted });
+    partialDeleted.likes += delLikesRes.count || 0;
     var delCommentsRes = await supabase.from('comments').delete().eq('user_name', userName);
-    if (delCommentsRes.error) {
-      console.error('[admin] 删除 comments 失败:', delCommentsRes.error.message);
-      return res.status(500).json({ error: '删除失败：删除评论失败', partial: partialDeleted });
-    }
-    partialDeleted.comments += (delCommentsRes.count || 0);
+    if (delCommentsRes.error) return res.status(500).json({ error: '删除失败：删除评论失败', partial: partialDeleted });
+    partialDeleted.comments += delCommentsRes.count || 0;
 
-    // 删除 bans 表
-    var delBansRes = await supabase.from('bans').delete().eq('user_name', userName);
-    if (delBansRes.error) {
-      console.error('[admin] 删除 bans 失败:', delBansRes.error.message);
-      return res.status(500).json({ error: '删除失败：删除封禁记录失败', partial: partialDeleted });
+    // 清除账号私有 AI 工具数据和媒体注册行；不碰审计/邀请/会员/额度表。
+    var accountCleanupQueries = [
+      { key: 'ai_search_results', query: supabase.from('ai_search_results').delete().eq('owner_name', userName) },
+      { key: 'ai_drafts', query: supabase.from('ai_drafts').delete().eq('owner_name', userName) },
+      { key: 'ai_action_confirmations', query: supabase.from('ai_action_confirmations').delete().eq('owner_name', userName) }
+    ];
+    for (var accountCleanupIndex = 0; accountCleanupIndex < accountCleanupQueries.length; accountCleanupIndex++) {
+      var accountCleanupItem = accountCleanupQueries[accountCleanupIndex];
+      var accountCleanupResult = await accountCleanupItem.query;
+      if (!accountCleanupResult || accountCleanupResult.error) {
+        return res.status(500).json({ error: '删除部分完成：清理 ' + accountCleanupItem.key + ' 失败', code: 'delete_user_partial', partial: partialDeleted });
+      }
+      partialDeleted[accountCleanupItem.key] = accountCleanupResult.count || 0;
     }
-    partialDeleted.bans = delBansRes.count || 0;
 
-    // 删除 mutes 表
-    var delMutesRes = await supabase.from('mutes').delete().eq('user_name', userName);
-    if (delMutesRes.error) {
-      console.error('[admin] 删除 mutes 失败:', delMutesRes.error.message);
-      return res.status(500).json({ error: '删除失败：删除禁言记录失败', partial: partialDeleted });
-    }
-    partialDeleted.mutes = delMutesRes.count || 0;
-
-    // 删除 blacklist 表
-    var delBlacklistRes = await supabase.from('blacklist').delete().eq('user_name', userName);
-    if (delBlacklistRes.error) {
-      console.error('[admin] 删除 blacklist 失败:', delBlacklistRes.error.message);
-      return res.status(500).json({ error: '删除失败：删除拉黑记录失败', partial: partialDeleted });
-    }
-    partialDeleted.blacklist = delBlacklistRes.count || 0;
-
-    // 删除 DM 媒体注册行（Storage 文件已随上述 storagePaths 一并删除）
-    var delDmMediaRes = await supabase.from('dm_media_uploads').delete().eq('uploader', userName);
-    if (delDmMediaRes.error) {
-      console.error('[admin] 删除 dm_media_uploads 失败:', delDmMediaRes.error.message);
-    } else {
-      partialDeleted.dm_media = delDmMediaRes.count || 0;
+    // 清理所有已发现的 DM 媒体注册记录，包括对方发送到该用户 DM 的媒体。
+    var dmRegistryIds = dmRegistryRows.map(function(row) { return row.id; }).filter(Boolean);
+    if (dmRegistryIds.length) {
+      var delLinkedDmMediaRes = await supabase.from('dm_media_uploads').delete().in('id', dmRegistryIds);
+      if (!delLinkedDmMediaRes || delLinkedDmMediaRes.error) {
+        return res.status(500).json({ error: '删除部分完成：清理关联私信媒体注册失败', code: 'delete_user_partial', partial: partialDeleted });
+      }
+      partialDeleted.dm_media = delLinkedDmMediaRes.count || 0;
     }
 
     // 撤销被删除用户的所有 refresh token
-    // ★ 加固：此前为 .catch(function(){}) 静默吞错。若撤销失败，账号数据已删除
-    //   但 refresh token 仍可续期，属于"删号留后门"的中间态。改为显式等待并校验，
+    // ★ 加固：撤销期间任意 Supabase 查询/删除错误均向上报告，不能假装成功。
     //   失败时返回 500 + partial，让管理员能感知并重试（幂等，可安全重跑）。
     var revokeOk = true;
     try {
-      await revokeAllUserRefreshTokens(userName);
+      revokeOk = await revokeAllUserRefreshTokens(userName);
     } catch (eRevoke) {
       revokeOk = false;
       console.error('[admin] 撤销用户 refresh token 失败:', eRevoke && eRevoke.message);
     }
 
     // ★ 加固：删后校验——确认核心身份/内容行确实清空，避免"部分删除"被当成成功。
-    var verifyRes = await supabase.from('posts')
-      .select('id').eq('user_name', userName).limit(1);
-    var residual = (verifyRes && verifyRes.data && verifyRes.data.length) ? true : false;
+    var verifyRes = { data: [], error: null };
+    if (userPostIds.length) {
+      verifyRes = await supabase.from('posts').select('id').in('id', userPostIds).limit(1);
+    }
+    var verifyDeleteFailed = !verifyRes || !!verifyRes.error;
+    var residualPosts = !!(verifyRes && verifyRes.data && verifyRes.data.length);
+    var retainedDmCheck = { data: [], error: null };
+    if (dmMessageIds.length) {
+      retainedDmCheck = await supabase.from('posts').select('id').eq('media_type', DM_MARKER)
+        .in('id', dmMessageIds.slice(0, 100)).limit(1);
+      for (var dmVerifyStart = 100; dmVerifyStart < dmMessageIds.length && !retainedDmCheck.error && !(retainedDmCheck.data || []).length; dmVerifyStart += 100) {
+        retainedDmCheck = await supabase.from('posts').select('id').eq('media_type', DM_MARKER)
+          .in('id', dmMessageIds.slice(dmVerifyStart, dmVerifyStart + 100)).limit(1);
+      }
+    }
+    var residualDm = !retainedDmCheck || !!retainedDmCheck.error || !!(retainedDmCheck.data && retainedDmCheck.data.length);
+    var registryVerify = { data: [], error: null };
+    var registryVerifyFailed = false;
+    for (var registryVerifyStart = 0; registryVerifyStart < dmRegistryIds.length; registryVerifyStart += 100) {
+      registryVerify = await supabase.from('dm_media_uploads').select('id')
+        .in('id', dmRegistryIds.slice(registryVerifyStart, registryVerifyStart + 100)).limit(1);
+      registryVerifyFailed = !registryVerify || !!registryVerify.error;
+      if (registryVerifyFailed || (registryVerify.data || []).length) break;
+    }
+    var residualRegistry = !!(registryVerify && registryVerify.data && registryVerify.data.length);
+    var remainingOwnedCheck = await supabase.from('posts').select('id').eq('user_name', userName)
+      .in('media_type', Array.from(deletableTypes)).limit(1);
+    var nullTypeCheck = await supabase.from('posts').select('id').eq('user_name', userName).is('media_type', null).limit(1);
+    var emptyTypeCheck = await supabase.from('posts').select('id').eq('user_name', userName).eq('media_type', '').limit(1);
+    var residualNullType = !nullTypeCheck || !!nullTypeCheck.error || !!(nullTypeCheck.data && nullTypeCheck.data.length);
+    var residualEmptyType = !emptyTypeCheck || !!emptyTypeCheck.error || !!(emptyTypeCheck.data && emptyTypeCheck.data.length);
+    var residualOwned = !remainingOwnedCheck || !!remainingOwnedCheck.error || !!(remainingOwnedCheck.data && remainingOwnedCheck.data.length);
+    var aiResidualChecks = await Promise.all([
+      supabase.from('ai_search_results').select('id').eq('owner_name', userName).limit(1),
+      supabase.from('ai_drafts').select('id').eq('owner_name', userName).limit(1),
+      supabase.from('ai_action_confirmations').select('id').eq('owner_name', userName).limit(1)
+    ]);
+    var residualAi = aiResidualChecks.some(function(result) { return !result || result.error || (result.data && result.data.length); });
+    var residual = residualPosts || residualOwned || residualNullType || residualEmptyType || residualDm || residualRegistry || residualAi || storagePending > 0 || retainedSystemPostCount > 0 || retainedPolicyData.bans || retainedPolicyData.mutes || retainedPolicyData.blacklist;
+    var verificationFailed = verifyDeleteFailed || !retainedDmCheck || !!retainedDmCheck.error || registryVerifyFailed || !remainingOwnedCheck || !!remainingOwnedCheck.error || !nullTypeCheck || !!nullTypeCheck.error || !emptyTypeCheck || !!emptyTypeCheck.error || aiResidualChecks.some(function(result) { return !result || result.error; });
 
-    if (!revokeOk || residual) {
+    if (!revokeOk || verificationFailed || residual) {
       await logAdminAudit('delete_user_partial', ADMIN_USERNAME,
-        'user:' + userName + ' revoke_ok:' + revokeOk + ' residual_posts:' + residual
+        'user:' + userName + ' revoke_ok:' + revokeOk + ' residual_posts:' + residualPosts + ' residual_dm:' + residualDm + ' residual_registry:' + residualRegistry + ' storage_pending:' + storagePending + ' retained_system_posts:' + retainedSystemPostCount
       );
       return res.status(500).json({
         error: !revokeOk
           ? '删除部分完成：会话撤销失败，请重试（重复执行安全）'
-          : '删除部分完成：仍有残留数据，请重试（重复执行安全）',
+          : '删除部分完成：仍有残留或保留数据，请重试（重复执行安全）',
         code: 'delete_user_partial',
         partial: partialDeleted,
         revoke_ok: revokeOk,
-        residual_posts: residual
+        residual_posts: residualPosts,
+        residual_dm: residualDm,
+        residual_media_registry: residualRegistry,
+        storage_cleanup_pending: storagePending > 0,
+        retained_system_posts: retainedSystemPostCount,
+        retained_policy_data: retainedPolicyData
       });
     }
 
@@ -15324,10 +15546,13 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       ' posts:' + partialDeleted.posts +
       ' likes:' + partialDeleted.likes +
       ' comments:' + partialDeleted.comments +
-      ' bans:' + partialDeleted.bans +
-      ' mutes:' + partialDeleted.mutes +
-      ' blacklist:' + partialDeleted.blacklist +
-      ' storage_files:' + partialDeleted.storage_files
+      ' dm_messages:' + (partialDeleted.dm_messages || 0) +
+      ' dm_media:' + partialDeleted.dm_media +
+      ' ai_search_results:' + partialDeleted.ai_search_results +
+      ' ai_drafts:' + partialDeleted.ai_drafts +
+      ' ai_action_confirmations:' + partialDeleted.ai_action_confirmations +
+      ' storage_files:' + partialDeleted.storage_files +
+      ' storage_cleanup_queued:' + partialDeleted.storage_cleanup_queued
     );
 
     return res.json({
@@ -15337,10 +15562,15 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
         posts: partialDeleted.posts,
         likes: partialDeleted.likes,
         comments: partialDeleted.comments,
-        bans: partialDeleted.bans,
-        mutes: partialDeleted.mutes,
-        blacklist: partialDeleted.blacklist,
-        storage_files: partialDeleted.storage_files
+        dm_messages: partialDeleted.dm_messages || 0,
+        dm_media: partialDeleted.dm_media,
+        ai_search_results: partialDeleted.ai_search_results,
+        ai_drafts: partialDeleted.ai_drafts,
+        ai_action_confirmations: partialDeleted.ai_action_confirmations,
+        storage_files: partialDeleted.storage_files,
+        storage_cleanup_queued: partialDeleted.storage_cleanup_queued,
+        retained_system_posts: retainedSystemPostCount,
+        retained_policy_data: retainedPolicyData
       }
     });
   } catch(e) {

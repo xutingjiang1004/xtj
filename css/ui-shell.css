@@ -404,6 +404,9 @@
 
 #panelChat .dock-chat-container,
 #panelChat .chat-list {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;

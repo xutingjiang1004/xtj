@@ -162,12 +162,13 @@ test('missing hard-delete RPC uses checked service-role cleanup and verifies abs
 test('photo delete removes the database row before durable storage cleanup', () => {
   const source = routeSource('post', '/api/photo/delete', "app.post('/api/post/create'");
   assert.match(source, /hardDeleteContent\(/);
-  assert.match(source, /supabase\.storage\.from\('uploads'\)\.remove\(storagePaths\)/);
-  assert.ok(source.indexOf('hardDeleteContent({') < source.indexOf("supabase.storage.from('uploads').remove(storagePaths)"));
+  assert.match(source, /removeStorageWithQueue\(supabase, \{[\s\S]*?bucket: 'uploads',[\s\S]*?paths: storagePaths/);
+  assert.ok(source.indexOf('hardDeleteContent({') < source.indexOf('removeStorageWithQueue(supabase'));
+  assert.match(source, /photoCleanupResult\.cleanup_pending/);
   assert.match(source, /deleted: deleteResult\.deleted === true/);
   assert.match(source, /already_deleted: deleteResult\.already_deleted === true/);
   assert.match(source, /var cleanupStatePending = storageErrors\.length > 0/);
-  assert.match(source, /if \(cleanupStateUpdate\.error\) \{[\s\S]*cleanupStatePending = true/);
+  assert.match(source, /if \(cleanupStateUpdate\.error \|\| !cleanupStateUpdate\.data\) \{[\s\S]*?cleanupStatePending = true/);
   assert.match(source, /cleanup_pending: cleanupStatePending/);
 });
 

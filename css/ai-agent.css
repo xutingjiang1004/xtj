@@ -42,8 +42,11 @@
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   height: var(--ai-viewport-height);
   max-height: 100%;
   position: relative;
@@ -353,6 +356,7 @@
   position: relative;
   z-index: 1;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -372,12 +376,19 @@
 .ai-msg {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   margin: 3px 0;
   position: relative;
 }
 
 .ai-msg.user { align-items: flex-end; }
 .ai-msg.assistant { align-items: flex-start; }
+.ai-msg > .ai-tool-card {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
 
 .ai-msg.entering {
   animation: aiMsgEnter 140ms ease both;
@@ -385,7 +396,9 @@
 
 .ai-msg-bubble {
   position: relative;
+  min-width: 0;
   max-width: min(92%, 720px);
+  box-sizing: border-box;
   padding: 10px 13px;
   border-radius: 18px;
   font-size: 14px;
@@ -819,7 +832,8 @@
   inset: 0;
   z-index: 99999;
   display: flex;
-  width: 100vw;
+  width: 100%;
+  min-width: 0;
   height: 100dvh;
   overflow: hidden;
   background: linear-gradient(180deg, #f8fcfa, #f0f8f4);
@@ -5978,6 +5992,9 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 
 /* Server-validated AI site-tool cards. Kept inside the AI transcript only. */
 .ai-tool-card {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   margin: 10px 0;
   padding: 12px 14px;
   border: 1px solid rgba(74, 128, 124, .22);
@@ -5989,6 +6006,8 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   -webkit-backdrop-filter: blur(10px);
 }
 .ai-tool-card-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-weight: 700;
   font-size: 12px;
   letter-spacing: 0.02em;
@@ -6043,7 +6062,8 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .ai-tool-card-hero-sub.is-down { color: #1a9b5c; font-weight: 600; }
 .ai-tool-card-kv {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 12px;
 }
 .ai-tool-card-kv-row {
@@ -6122,6 +6142,8 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   border-radius: 6px;
 }
 .ai-tool-card-table {
+  max-width: 100%;
+  box-sizing: border-box;
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
@@ -6392,6 +6414,8 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
     grid-column: 1 / -1;
     grid-row: 2;
     display: grid;
+    min-width: 0;
+    box-sizing: border-box;
     /* Default: full-width single column. Do NOT reserve an empty right rail. */
     grid-template-columns: minmax(0, 1fr);
     align-content: start;
@@ -6403,7 +6427,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 
   /* Only open the right context rail when tool/search status cards are present. */
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages:has(> .ai-search-status, > .ai-tool-status) {
-    grid-template-columns: minmax(0, 1fr) var(--ai-desktop-context);
+    grid-template-columns: minmax(0, 1fr) minmax(0, var(--ai-desktop-context));
   }
 
   .ai-secondary-panel #aiChatRoot:has(.ai-conv-item, .ai-no-history) > .ai-chat-messages {
@@ -6436,10 +6460,12 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-progress-card,
-  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-think-card {
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-think-card,
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-tool-card {
     grid-column: 1;
     /* Use full main column; keep a readable max for ultra-wide screens. */
     width: min(100%, 960px);
+    min-width: 0;
     justify-self: center;
   }
 
@@ -6480,7 +6506,11 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-msg-bubble,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-thinking,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-msg-footer {
-    max-width: min(92%, 960px);
+    max-width: min(100%, 960px);
+  }
+
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg {
+    width: 100%;
   }
 
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-msg-bubble {

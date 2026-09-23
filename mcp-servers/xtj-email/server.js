@@ -24,26 +24,54 @@ const PROVIDER = process.env.EMAIL_PROVIDER || "sendgrid";
 const FROM_EMAIL = process.env.FROM_EMAIL || "";
 const FROM_NAME = process.env.FROM_NAME || "XTJ 通知";
 const ADMIN_EMAIL = process.env.ADMIN_NOTIFY_EMAIL || "";
-// 白名单：逗号分隔的邮箱或域名（如 "a@x.com,*.x.com"），空则只允许发给管理员
+// 白名单：逗号分隔的邮箱/域名。任何通配规则都必须额外设置 EMAIL_ALLOW_WILDCARD_RECIPIENTS=true。
 const ALLOWED_RECIPIENTS = (process.env.ALLOWED_RECIPIENTS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+const WILDCARD_RECIPIENTS_ENABLED = process.env.EMAIL_ALLOW_WILDCARD_RECIPIENTS === "true";
+const MAX_EMAIL_HTML_CHARS = 50000;
+const MAX_EMAIL_TEXT_CHARS = 100000;
+const MAX_EMAIL_SUBJECT_CHARS = 998;
+const ALLOWED_HTML_TAGS = new Set(["p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "code", "pre"]);
+if (ALLOWED_RECIPIENTS.some(rule => rule === "*" || rule.startsWith("*@") || rule.startsWith("*.")) && !WILDCARD_RECIPIENTS_ENABLED) {
+  console.error("[xtj-email-mcp] 通配收件人规则默认禁用；如确有需要，请显式设置 EMAIL_ALLOW_WILDCARD_RECIPIENTS=true");
+  process.exit(1);
+}
 
 if (!FROM_EMAIL) { console.error("[xtj-email-mcp] 请设置 FROM_EMAIL"); process.exit(1); }
 
 function isRecipientAllowed(to) {
-  if (!ALLOWED_RECIPIENTS.length) return to.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const recipient = String(to).trim().toLowerCase();
+  if (!ALLOWED_RECIPIENTS.length) return Boolean(ADMIN_EMAIL) && recipient === ADMIN_EMAIL.trim().toLowerCase();
   return ALLOWED_RECIPIENTS.some(r => {
-    if (r === '*') return true;
-    if (r.startsWith('*@')) {
+    if (r === "*") return WILDCARD_RECIPIENTS_ENABLED;
+    if (r.startsWith("*@")) {
+      if (!WILDCARD_RECIPIENTS_ENABLED) return false;
       const domain = r.slice(2);
-      return to.toLowerCase().endsWith('@' + domain);
+      return recipient.endsWith("@" + domain) && recipient.split("@").length === 2;
     }
-    if (r.startsWith('*.')) {
+    if (r.startsWith("*.")) {
+      if (!WILDCARD_RECIPIENTS_ENABLED) return false;
       const domain = r.slice(2);
-      // 需同时匹配根域 (admin@x.com) 和子域 (a@sub.x.com)
-      return to.toLowerCase().endsWith('@' + domain) || to.toLowerCase().endsWith('.' + domain);
+      const at = recipient.lastIndexOf("@");
+      if (at < 1) return false;
+      const recipientDomain = recipient.slice(at + 1);
+      return recipientDomain === domain || recipientDomain.endsWith("." + domain);
     }
-    return to.toLowerCase() === r;
+    return recipient === r;
   });
+}
+
+function sanitizeEmailHtml(input) {
+  if (input.length > MAX_EMAIL_HTML_CHARS) throw new Error(`HTML 超过 ${MAX_EMAIL_HTML_CHARS} 字符上限`);
+  // 有意只保留无属性的纯文本排版标签；丢弃 script/style 等危险元素及其内容。
+  return input
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(script|style|iframe|object|embed|svg|math|form|video|audio)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<(script|style|iframe|object|embed|svg|math|form|video|audio)\b[^>]*\/?\s*>/gi, "")
+    .replace(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi, (tag, name) => {
+      const lower = name.toLowerCase();
+      if (!ALLOWED_HTML_TAGS.has(lower)) return "";
+      return /^<\//.test(tag) ? `</${lower}>` : `<${lower}>`;
+    });
 }
 
 let sendFn = null;
@@ -73,13 +101,14 @@ function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"
 
 const server = new McpServer({ name: "xtj-email-mcp", version: "1.0.0" });
 
-server.tool("send_email", "发送邮件（文本或 HTML）", { to: z.string(), subject: z.string(), text: z.string().optional(), html: z.string().optional() }, async (args) => {
-  await initProvider();
+server.tool("send_email", "发送邮件；原始 HTML 会被限制为无属性的纯文本排版标签，可能会移除样式/图片/链接", { to: z.string().email().max(254), subject: z.string().min(1).max(MAX_EMAIL_SUBJECT_CHARS), text: z.string().max(MAX_EMAIL_TEXT_CHARS).optional(), html: z.string().max(MAX_EMAIL_HTML_CHARS).optional() }, async (args) => {
   if (!args.text && !args.html) throw new Error("请提供 text 或 html");
+  if (args.text && args.text.length > MAX_EMAIL_TEXT_CHARS) throw new Error(`文本超过 ${MAX_EMAIL_TEXT_CHARS} 字符上限`);
   if (!isRecipientAllowed(args.to)) throw new Error('收件人不在白名单中');
-  const html = args.html || args.text.split("\n").map(l=>`<p>${esc(l)}</p>`).join("");
-  const text = args.text || args.html.replace(/<[^>]*>/g,"");
-  await sendFn({ to: args.to, subject: args.subject, text, html });
+  const safeHtml = args.html ? sanitizeEmailHtml(args.html) : args.text.split("\n").map(l=>`<p>${esc(l)}</p>`).join("");
+  const safeText = args.text || safeHtml.replace(/<[^>]*>/g,"");
+  await initProvider();
+  await sendFn({ to: args.to, subject: args.subject, text: safeText, html: safeHtml });
   return { content: [{ type: "text", text: `✅ 邮件已发送到 ${args.to}\n主题: ${args.subject}` }] };
 });
 

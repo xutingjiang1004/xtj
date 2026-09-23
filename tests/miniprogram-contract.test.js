@@ -65,10 +65,20 @@ test('合约：miniprogram/ 下所有 json 合法、所有 js 语法通过', () 
       assert.doesNotThrow(() => JSON.parse(fs.readFileSync(f, 'utf8')), rel(f) + ' 不是合法 JSON');
     }
     if (f.endsWith('.js')) {
-      assert.doesNotThrow(
-        () => cp.execSync('node --check "' + f + '"', { stdio: 'pipe' }),
-        rel(f) + ' 语法错误'
-      );
+      assert.doesNotThrow(() => {
+        var lastErr;
+        for (var attempt = 0; attempt < 3; attempt++) {
+          try {
+            cp.execFileSync(process.execPath, ['--check', f], { stdio: 'pipe' });
+            return;
+          } catch (err) {
+            lastErr = err;
+            if (err.code !== 'EBUSY' && err.code !== 'EPERM') break;
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+          }
+        }
+        throw lastErr;
+      }, rel(f) + ' 语法错误');
     }
   }
 });

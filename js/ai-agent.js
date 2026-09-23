@@ -7823,23 +7823,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 2026-09-15：工具"轮次"容器同样需要收敛。轮次是第四轮新增的紧凑动画
         //   容器（.ai-tool-round），其 is-running 由摘要行驱动；若不处理，中断后
         //   摘要行会永久停留"并行调用 N 个工具 · 2/5 完成"，图标一直是 ⏳。
-        try {
-          var _runningRounds = target.querySelectorAll('.ai-tool-round.is-running');
-          for (var _rr = 0; _rr < _runningRounds.length; _rr++) forceSettleToolRound(_runningRounds[_rr]);
-        } catch (eSettleRound) {}
-        // 同理：工具步骤若因中断/超时没等到 tool_result，is-running 会残留导致
-        // 光晕持续呼吸。终态统一落定为"完成"，停掉动画（信息保留）。
+        // A missing tool_result is not evidence of success. On any stream terminal,
+        // stop unresolved tool spinners as failures instead of silently painting them
+        // green; already reported is-done / is-error outcomes remain untouched.
         try {
           var runningSteps = target.querySelectorAll('.ai-tool-step.is-running');
           for (var rsIdx = 0; rsIdx < runningSteps.length; rsIdx++) {
             var rsEl = runningSteps[rsIdx];
-            rsEl.classList.remove('is-running');
-            rsEl.classList.add('is-done');
+            if (rsEl.classList.contains('ai-tool-organizing')) continue;
+            rsEl.classList.remove('is-running', 'is-done');
+            rsEl.classList.add('is-error');
             var rsIcon = rsEl.querySelector('.ai-tool-step-icon');
-            if (rsIcon) rsIcon.textContent = '✅';
+            if (rsIcon) rsIcon.textContent = '⚠️';
             var rsStatus = rsEl.querySelector('.ai-tool-step-status');
-            if (rsStatus) rsStatus.textContent = '已完成';
+            if (rsStatus) rsStatus.textContent = '未收到结果';
           }
+          var _runningRounds = target.querySelectorAll('.ai-tool-round.is-running');
+          for (var _rr = 0; _rr < _runningRounds.length; _rr++) updateToolRoundState(_runningRounds[_rr]);
         } catch (eSettle3) {}
         // ★★★ 2026-09-15 修复（P1-9 根因 + P0-2 语义统一）：
         //   原实现直接 `statusEl.remove()` 掉 `.ai-enhanced-status / .ai-tool-status /
@@ -8438,15 +8438,33 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   ② tool_pending 与 tool_calls 复用同一条目（按工具名归并），去重；
             //   ③ 同一轮内全部完成后，把整轮收敛为"N 项已完成"，并支持折叠；
             //   ④ 新一轮工具自动新建轮次容器，历史轮次保持折叠态，不再抢屏幕。
-            var _roundKey = 'r' + (toolRoundSeq++);
-            // ★ 2026-09-22：轮次容器统一由 createToolRound 构造（含可折叠条目区）
-            var _roundBuilt = createToolRound(
-              toolList.length > 1 ? ('正在调用 ' + toolList.length + ' 个工具') : '正在调用工具',
-              _roundKey
-            );
-            var roundBox = _roundBuilt.box;
-            var roundList = _roundBuilt.list;
-            timeline.appendChild(roundBox);
+            // tool_pending may arrive before tool_calls. Promote those placeholders
+            // in their existing round instead of creating a new empty round around them.
+            var roundBox = null;
+            var pendingRounds = timeline.querySelectorAll('.ai-tool-round.is-running');
+            for (var pr = pendingRounds.length - 1; pr >= 0; pr--) {
+              var pendingTitles = pendingRounds[pr].querySelectorAll('.ai-tool-step-title');
+              for (var pt = 0; pt < pendingTitles.length; pt++) {
+                if (pendingTitles[pt].textContent === '准备工具') { roundBox = pendingRounds[pr]; break; }
+              }
+              if (roundBox) break;
+            }
+            var roundList;
+            if (roundBox) {
+              roundList = roundBox.querySelector('.ai-tool-round-list');
+              var roundLabel = roundBox.querySelector('.ai-tool-round-label');
+              if (roundLabel) roundLabel.textContent = toolList.length > 1 ? ('正在调用 ' + toolList.length + ' 个工具') : '正在调用工具';
+            } else {
+              var _roundKey = 'r' + (toolRoundSeq++);
+              // ★ 2026-09-22：轮次容器统一由 createToolRound 构造（含可折叠条目区）
+              var _roundBuilt = createToolRound(
+                toolList.length > 1 ? ('正在调用 ' + toolList.length + ' 个工具') : '正在调用工具',
+                _roundKey
+              );
+              roundBox = _roundBuilt.box;
+              roundList = _roundBuilt.list;
+              timeline.appendChild(roundBox);
+            }
 
             toolList.forEach(function(t) {
               var label = nameMapCall[t.name] || t.name || '工具';
@@ -8460,22 +8478,48 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               // 保证 setAttribute 与 querySelector 取值恒等，杜绝属性选择器注入/失配
               var stepId = ('tool-step-' + String(t.name || 'tool') + '-' + String(detail).slice(0, 24))
                 .replace(/["\\\]\[\r\n\t]/g, '').replace(/\s+/g, '_');
-              // 全局去重：同一工具+同一查询词在**任意轮次**里已出现过就复用，
-              // 这是消除"准备工具 / 联网搜索 / 社媒检索"重复条目的关键。
-              var existing = timeline.querySelector('[data-tool-step="' + stepId + '"]');
+              // Identical calls belong to distinct execution rounds; never resurrect a
+              // settled historical entry, or a later result may be assigned to the wrong call.
+              var existing = null;
+              if (detail) {
+                var candidates = timeline.querySelectorAll('[data-tool-step="' + stepId + '"]');
+                for (var ci = candidates.length - 1; ci >= 0; ci--) {
+                  if (candidates[ci].classList.contains('is-running')) { existing = candidates[ci]; break; }
+                }
+              }
+              // Reuse a pending placeholder in the current live round, enriching it
+              // with the canonical call identity and query before results arrive.
+              if (!existing) {
+                var pendingSteps = timeline.querySelectorAll('.ai-tool-round.is-running .ai-tool-step');
+                for (var pi = pendingSteps.length - 1; pi >= 0; pi--) {
+                  var pendingStep = pendingSteps[pi];
+                  var pendingName = pendingStep.getAttribute('data-tool-name') || '';
+                  var pendingTitle = pendingStep.querySelector('.ai-tool-step-title');
+                  if (pendingName === String(t.name || '') && pendingTitle && pendingTitle.textContent === '准备工具') {
+                    existing = pendingStep;
+                    break;
+                  }
+                }
+              }
               if (existing) {
                 existing.classList.add('is-running');
                 existing.classList.remove('is-done', 'is-error');
+                existing.setAttribute('data-tool-name', String(t.name || ''));
+                existing.setAttribute('data-tool-step', stepId);
+                var stepTitle = existing.querySelector('.ai-tool-step-title');
+                if (stepTitle) stepTitle.textContent = label;
+                var stepBody = existing.querySelector('.ai-tool-step-body');
+                var stepDetail = existing.querySelector('.ai-tool-step-detail');
+                if (detail && stepBody) {
+                  if (!stepDetail) {
+                    stepDetail = el('div', { class: 'ai-tool-step-detail', text: detail });
+                    var statusNode = existing.querySelector('.ai-tool-step-status');
+                    stepBody.insertBefore(stepDetail, statusNode || null);
+                  } else stepDetail.textContent = detail;
+                }
                 var st = existing.querySelector('.ai-tool-step-status');
                 if (st) st.textContent = '搜索中';
-                // 若该条目属于已收敛的旧轮次，把它所在轮次重新置为运行态
-                var hostRound = existing.closest ? existing.closest('.ai-tool-round') : null;
-                if (hostRound) {
-                  hostRound.classList.add('is-running');
-                  hostRound.classList.remove('is-done');
-                  var hostIcon = hostRound.querySelector('.ai-tool-round-icon');
-                  if (hostIcon) hostIcon.textContent = '⏳';
-                }
+                try { refreshOwningToolRound(existing); } catch (eExistingRound) {}
                 return;
               }
               // 紧凑单行条目：状态图标 + 名称 +（查询词/参数）
@@ -8599,15 +8643,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
 
           if (evt.type === 'tool_error') {
-            notify((evt.tool_name || 'AI 工具') + '：' + (evt.error || '执行失败'));
+            // A tool error is a terminal result for this call, not a terminal
+            // event for the whole assistant turn: keep independent parallel calls
+            // running and let the final answer consume the failure feedback.
             var errTimeline = assistantNode.querySelector('.ai-tool-timeline');
             if (errTimeline) {
               // ★ 2026-09-17：优先把**同名**的进行中条目就地转为失败态（不新增重复条目）；
               //   找不到同名条目时才补建一条，保证信息不丢。
               var errName = String(evt.tool_name || '');
-              var errMatch = errName
-                ? errTimeline.querySelector('[data-tool-name="' + errName.replace(/["\\\]\[]/g, '') + '"]')
-                : null;
+              var errMatch = null;
+              if (errName) {
+                var errSteps = errTimeline.querySelectorAll('.ai-tool-step');
+                for (var eIdx = errSteps.length - 1; eIdx >= 0; eIdx--) {
+                  if ((errSteps[eIdx].getAttribute('data-tool-name') || '') !== errName) continue;
+                  if (!errMatch || errSteps[eIdx].classList.contains('is-running')) errMatch = errSteps[eIdx];
+                  if (errSteps[eIdx].classList.contains('is-running')) break;
+                }
+              }
               if (errMatch) {
                 errMatch.classList.remove('is-running', 'is-done');
                 errMatch.classList.add('is-error');
@@ -8640,24 +8692,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 updateToolRoundState(errRound2);
               }
             }
-            // ★★★ 2026-09-15 修复（P0-2 配套）：工具**报错**同样属于"本轮结束"，
-            //   必须立即收敛残留的搜索状态条与 is-running 步骤，否则失败的工具
-            //   会让动画一直转下去（与原 bug 表现一致）。
-            try { settleSearchStatus(assistantNode, { failed: true, failText: '联网失败' }); } catch (eSettleErr) {}
-            // ★ 2026-09-17：与 tool_result 同样只收敛"无名字的占位步骤"，
-            //   不无差别打断其他仍在并行执行的工具的进行态。
-            try {
-              var _errRunSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
-              for (var _ersi = 0; _ersi < _errRunSteps.length; _ersi++) {
-                var _erse = _errRunSteps[_ersi];
-                if (_erse.classList.contains('ai-tool-organizing')) continue;
-                if (_erse.getAttribute('data-tool-name')) continue;
-                _erse.classList.remove('is-running');
-                _erse.classList.add('is-error');
-                var _ersSt = _erse.querySelector('.ai-tool-step-status');
-                if (_ersSt && /进行中|搜索中|准备/.test(String(_ersSt.textContent || ''))) _ersSt.textContent = '失败';
-              }
-            } catch (eSettleErrSteps) {}
+            // Do not settle sibling tools or the shared search indicator here; a
+            // tool_error can precede successful results from other calls in the round.
             followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }
@@ -8686,7 +8722,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             };
             var label = nameMap[evt.tool_name] || evt.tool_name || '工具';
             var summaryText = '';
-            if (evt.success) {
+            var toolSucceeded = evt.success === true && !evt.error;
+            if (toolSucceeded) {
               if (evt.count > 0) {
                 summaryText = label + ' · ' + evt.count + ' 条结果' + (evt.location ? (' · ' + evt.location) : '');
               } else {
@@ -8697,34 +8734,54 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             // Update timeline step + keep expandable result card below
             var matchStep = null;
+            var exactRunningStep = null;
+            var firstRunningStep = null;
+            var exactNamedStep = null;
+            var lastNamedStep = null;
+            var resultQuery = String(evt.query || '').trim();
             var steps = toolBar2.querySelectorAll('.ai-tool-step');
-            for (var si = steps.length - 1; si >= 0; si--) {
-              if ((steps[si].getAttribute('data-tool-name') || '') === String(evt.tool_name || '')) {
-                matchStep = steps[si];
-                break;
+            // tool_result events carry a name (and often the original query), not
+            // an id. Matching only by name from the end marks the wrong entry when
+            // parallel rounds call the same tool with different queries.
+            for (var si = 0; si < steps.length; si++) {
+              var candidate = steps[si];
+              if ((candidate.getAttribute('data-tool-name') || '') !== String(evt.tool_name || '')) continue;
+              lastNamedStep = candidate;
+              var detailEl = candidate.querySelector('.ai-tool-step-detail');
+              var detailText = String(detailEl && detailEl.textContent || '').trim();
+              var exactDetail = !!resultQuery && detailText === resultQuery;
+              if (exactDetail) exactNamedStep = candidate;
+              if (candidate.classList.contains('is-running')) {
+                if (!firstRunningStep) firstRunningStep = candidate;
+                if (exactDetail) exactRunningStep = candidate;
               }
             }
+            matchStep = exactRunningStep || firstRunningStep || exactNamedStep || lastNamedStep;
             if (!matchStep) {
               matchStep = el('div', { class: 'ai-tool-step' });
               matchStep.setAttribute('data-tool-name', String(evt.tool_name || ''));
-              matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: evt.success ? '✅' : '⚠️' }));
+              matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: toolSucceeded ? '✅' : '⚠️' }));
               var mbody = el('div', { class: 'ai-tool-step-body' });
               mbody.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
-              mbody.appendChild(el('div', { class: 'ai-tool-step-status', text: evt.success ? '完成' : '失败' }));
+              mbody.appendChild(el('div', { class: 'ai-tool-step-status', text: toolSucceeded ? '已完成' : '失败' }));
               matchStep.appendChild(mbody);
+              matchStep.classList.add(toolSucceeded ? 'is-done' : 'is-error');
               toolBar2.appendChild(matchStep);
             } else {
-              matchStep.classList.remove('is-running');
-              matchStep.classList.add(evt.success ? 'is-done' : 'is-error');
+              matchStep.classList.remove('is-running', 'is-done', 'is-error');
+              matchStep.classList.add(toolSucceeded ? 'is-done' : 'is-error');
               var iconEl = matchStep.querySelector('.ai-tool-step-icon');
-              if (iconEl) iconEl.textContent = evt.success ? '✅' : '⚠️';
+              if (iconEl) iconEl.textContent = toolSucceeded ? '✅' : '⚠️';
               var stEl = matchStep.querySelector('.ai-tool-step-status');
               // ★ 2026-09-17：状态文案统一为"已完成"，与用户要求的
               //   「搜索中 → 已完成」两态切换保持一致。
-              if (stEl) stEl.textContent = evt.success ? '已完成' : '失败';
+              if (stEl) stEl.textContent = toolSucceeded ? '已完成' : '失败';
             }
             var resultCard = el('div', { class: 'ai-tool-result-card' });
             resultCard.appendChild(el('div', { class: 'ai-tool-result-card-title', text: summaryText }));
+            if (evt.error) {
+              resultCard.appendChild(el('div', { class: 'ai-tool-result-error', text: String(evt.error).slice(0, 240) }));
+            }
             toolBar2.appendChild(resultCard);
             // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」核心修复）：
             //   此前 `tool_result` 只更新**匹配到 data-tool-name 的那一个** step，
@@ -9051,6 +9108,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               finalThinkingElapsedMs = thinkingTimer.stop();
             }
             
+            // Preserve tool terminal states: a failed call remains failed after the
+            // assistant turn completes instead of being rewritten as a success.
+            try { clearAssistantTransientStatus(assistantNode, { preserveToolExecution: true }); } catch (eToolDone) {}
             // 更新 usage / done 数据
             try {
               usageResult = evt.usage || null;

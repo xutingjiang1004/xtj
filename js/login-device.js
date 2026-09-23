@@ -836,6 +836,10 @@
     window.addEventListener('pagehide', function() { stopLocationSharing('位置共享已暂停'); });
 
 
+    // DATA_COLLECTION_COMPLIANCE.js marks per-user behavior tracking OFF. There is
+    // no existing behavior-consent control in the UI/settings, so fail closed; do
+    // not infer consent from login, a server device-recording flag, or GPS consent.
+    var behaviorTelemetryEnabled = false;
     var behaviorQueue = [];
     var behaviorFlushTimer = null;
     var behaviorPending = false;
@@ -862,6 +866,7 @@
         return safe;
     }
     function queueBehavior(type, target, meta) {
+        if (!behaviorTelemetryEnabled) return;
         type = String(type || '').slice(0, 30);
         var safeMeta = sanitizeBehaviorMeta(type, meta);
         behaviorQueue.push({ type: type, target: String(target || '').slice(0, 80), meta: safeMeta, at: new Date().toISOString() });
@@ -872,6 +877,11 @@
 
     async function flushBehavior() {
         if (behaviorFlushTimer) { clearTimeout(behaviorFlushTimer); behaviorFlushTimer = null; }
+        if (!behaviorTelemetryEnabled) {
+            behaviorQueue.length = 0;
+            behaviorRetryCount = 0;
+            return;
+        }
         if (behaviorPending || !behaviorQueue.length) return;
         behaviorPending = true;
         var batch = behaviorQueue.slice(0, 50);
@@ -948,12 +958,18 @@
     // pagehide 处理：使用 fetch keepalive 或持久化到 localStorage
     var behaviorLastKnownToken = null;
     function rememberBehaviorToken(token) {
-        if (token) {
+        if (behaviorTelemetryEnabled && token) {
             behaviorLastKnownToken = token;
         }
     }
     window.__xtjRememberBehaviorToken = rememberBehaviorToken;
     function handlePagehideBehavior() {
+        if (!behaviorTelemetryEnabled) {
+            behaviorQueue.length = 0;
+            behaviorRetryCount = 0;
+            try { window.safeStorage.remove('xtj_pending_behavior'); } catch (e) {}
+            return;
+        }
         if (!behaviorQueue.length) return;
         var batch = behaviorQueue.slice(0, 50);
         // L2 修复：统一 token 获取函数名（其他处均用 getUserToken；旧代码用不存在的
@@ -981,6 +997,10 @@
     }
     // 页面加载时恢复上次未发送的行为
     function restorePendingBehavior() {
+        // There is no behavior-consent opt-in. Remove legacy data rather than
+        // restoring it and sending events collected under the previous default.
+        try { window.safeStorage.remove('xtj_pending_behavior'); } catch (e) {}
+        if (!behaviorTelemetryEnabled) return;
         try {
             var saved = window.safeStorage.get('xtj_pending_behavior');
             if (saved) {
@@ -1113,6 +1133,9 @@
         return el.tagName.toLowerCase();
     }
 
+    // No behavioral listeners are installed unless a real consent control exists
+    // and explicitly enables collection. (None currently exists.)
+    if (behaviorTelemetryEnabled) {
     // 全局行为追踪：点击事件
     document.addEventListener('click', function(event) {
         var el = event.target;
@@ -1128,11 +1151,12 @@
     }, true);
     document.addEventListener('visibilitychange', function() { queueBehavior('visibility', document.visibilityState); });
     window.addEventListener('pageshow', function() { queueBehavior('page_view', location.pathname || '/'); });
-    window.addEventListener('pagehide', handlePagehideBehavior);
+    }
     // 恢复上次未发送的行为
     restorePendingBehavior();
-    initSafeAnalytics();
+    if (behaviorTelemetryEnabled) initSafeAnalytics();
     // 记录开关/复选框切换
+    if (behaviorTelemetryEnabled) {
     document.addEventListener('change', function(event) {
         var el = event.target;
         if (!el) return;
@@ -1162,6 +1186,7 @@
         var pct = Math.round(scrollY / maxScroll * 100);
         queueBehavior('scroll', '页面滚动至 ' + pct + '%');
     }, { passive: true });
+    }
 
     // 自动后台触发定位（用户登录/注册后由系统自动调用，不暴露给用户手动控制）
     // 使用 getCurrentPosition 获取一次精准位置，不启动持续监听
