@@ -264,7 +264,7 @@ test('photo preview has maintainable source and no global error suppression', fu
   var source = read('js/photo-wall/preview.js');
   var html = read('index.html');
   assert.ok(source.indexOf('function handleLoad()') >= 0 && source.indexOf('function handleError()') >= 0, 'slide preview handlers missing');
-  assert.ok(source.indexOf('function handleOpenLoad()') >= 0 && source.indexOf('function handleOpenError()') >= 0 && source.indexOf('function cleanupOpenListeners()') >= 0, 'open preview handlers missing');
+  assert.ok(source.indexOf('function handleOpenLoad()') >= 0 && source.indexOf('function handleOpenError()') >= 0 && source.indexOf('function cleanupOpenListeners(') >= 0, 'open preview handlers missing');
   assert.strictEqual(source.indexOf('function onLoad()'), -1, 'legacy onLoad handler remains');
   assert.strictEqual(source.indexOf('function onErr()'), -1, 'legacy onErr handler remains');
   assert.ok(source.indexOf('onErr is not defined') < 0 && source.indexOf('onLoad is not defined') < 0, 'preview source contains known error');

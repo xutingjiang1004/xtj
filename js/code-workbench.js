@@ -6,9 +6,10 @@
  *  2. 文件树浏览 + 文件内容查看 / 在线编辑
  *  3. AI 助手（内置 DeepSeek 或第三方自定义模型）查看 / 修改代码
  *  4. 提交到 GitHub（直接提交 或 创建 Pull Request）
- *  5. 本地持久化：仓库信息 / Token / AI 对话 / 修改历史（localStorage）
+ *  5. 本地持久化：仓库信息 / AI 对话 / 修改历史（localStorage）；GitHub Token 按设置仅保留于
+ *     当前标签页 sessionStorage，或仅在工作区打开期间保留于内存。
  *
- * 安全：GitHub Token 只保存在用户浏览器 localStorage，仅在该用户发起操作时随
+ * 安全：GitHub Token 仅保存在当前 XTJ 用户隔离的浏览器 sessionStorage（或内存），仅在该用户发起操作时随
  *       请求经本站白名单代理（/api/code/gh-proxy，仅允许 api.github.com）转发，
  *       不在服务端持久化。
  *
@@ -88,9 +89,12 @@
   var CODE_FILE_RE = /\.(js|jsx|mjs|cjs|ts|tsx|vue|svelte|py|java|kt|go|rs|c|h|cpp|cc|hpp|cs|rb|php|swift|scala|sh|bash|zsh|sql|html?|css|scss|less|json|ya?ml|xml|md|txt|ini|toml|gradle|dart|lua|exs?|prisma|graphql|gql|proto)$/i;
   var BULK_SKIP_RE = /(^|\/)(node_modules|dist|build|out|vendor|coverage|\.next|\.nuxt|target|bin|obj|\.git)(\/|$)/i;
   var LOCKFILE_RE = /(package-lock|yarn\.lock|pnpm-lock|composer\.lock|Gemfile\.lock|poetry\.lock|Cargo\.lock)/i;
+  // 默认自动读取时跳过环境配置、凭据与私钥材料；路径段/文件名大小写不敏感。
+  var SENSITIVE_FILE_RE = /(^|\/)(\.env(?:\.[^/]*)?|\.netrc|\.npmrc|\.pypirc|id_(?:rsa|dsa|ecdsa|ed25519)|(?:authorized_keys|known_hosts)|credentials?(?:\.[^/]*)?|secrets?(?:\.[^/]*)?)(\/|$)|\.(?:pem|key|p8|p12|pfx|piv|jks|keystore|secret|asc|gpg|pgp)$/i;
+  function isSensitiveFilePath(p) { return SENSITIVE_FILE_RE.test(String(p || '')); }
   function isCodeFileForBulk(p) {
     p = String(p || '');
-    if (!p || BULK_SKIP_RE.test(p) || LOCKFILE_RE.test(p)) return false;
+    if (!p || isSensitiveFilePath(p) || BULK_SKIP_RE.test(p) || LOCKFILE_RE.test(p)) return false;
     var base = p.split('/').pop() || '';
     if (/^(dockerfile|makefile|rakefile|gemfile)$/i.test(base)) return true;
     return CODE_FILE_RE.test(p);
@@ -104,6 +108,7 @@
   var state = {
     repo: null,          // { owner, repo, branch, default_branch, full_name, html_url, branch_sha }
     token: '',
+    tokenUser: '',
     model: DEFAULT_MODEL,
     prMode: false,
     thinking: DEFAULT_THINK,
@@ -232,6 +237,9 @@
   function safeSessionRemove(key) {
     try { window.sessionStorage.removeItem(key); } catch (e) {}
   }
+  function safeScopedSessionGet(base) { return safeSessionGet(scopedKey(base)); }
+  function safeScopedSessionSet(base, value) { safeSessionSet(scopedKey(base), value); }
+  function safeScopedSessionRemove(base) { safeSessionRemove(scopedKey(base)); }
 
   // ── 账号级本地存储 ────────────────────────────────────────────
   // 仓库地址 / Token / 模型 / 思考档位 / 对话历史等全部按“当前登录账号”隔离：
@@ -272,18 +280,24 @@
     else storageRemove(LS_REPO);
   }
   function loadToken() {
-    // 优先 sessionStorage；旧版 localStorage 残留仅做一次性迁移并清除
-    var v = safeSessionGet(LS_TOKEN);
+    // Token 的 sessionStorage 键也必须按 XTJ 用户隔离；绝不读取旧版共享 session 键。
+    var key = scopedKey(LS_TOKEN);
+    var v = safeSessionGet(key);
     if (v) return v;
-    var legacy = storageGet(LS_TOKEN);
-    if (legacy) { saveToken(legacy); storageRemove(LS_TOKEN); }
+    // 仅迁移当前用户自己的旧 localStorage 键，不从共享全局键继承凭据。
+    var legacy = safeStorageGet(key);
+    if (legacy) saveToken(legacy);
+    safeSessionRemove(LS_TOKEN);
+    safeStorageRemove(LS_TOKEN);
     return legacy || '';
   }
   function saveToken(t) {
-    if (t) safeSessionSet(LS_TOKEN, t);
-    else safeSessionRemove(LS_TOKEN);
-    // 清除旧的 localStorage 落点（账号隔离键与旧版全局键），避免明文凭据长期残留
-    storageRemove(LS_TOKEN);
+    var key = scopedKey(LS_TOKEN);
+    if (t) safeSessionSet(key, t);
+    else safeSessionRemove(key);
+    // 清除旧的 localStorage 落点与历史共享键，避免凭据长期残留/跨账号串用。
+    safeStorageRemove(key);
+    safeSessionRemove(LS_TOKEN);
     safeStorageRemove(LS_TOKEN);
   }
   function loadModel() { return storageGet(LS_MODEL) || DEFAULT_MODEL; }
@@ -420,6 +434,14 @@
 
   // ── 鉴权 ──────────────────────────────────────────────────────
   async function ensureAuth() {
+    if (state.tokenUser && state.tokenUser !== storageScopeName()) {
+      state.token = '';
+      state.repo = null;
+      state.tokenUser = storageScopeName();
+      saveToken('');
+      notify('登录账号已切换，请重新连接仓库');
+      return false;
+    }
     var preflight = window.ensureProtectedOperationAuth || window.ensureRealUserAuth;
     if (typeof preflight === 'function') {
       try {
@@ -443,7 +465,25 @@
 
   // ── GitHub API 代理 ───────────────────────────────────────────
   async function ghRequest(method, path, ghBody, opts) {
+    var requestScope = storageScopeName();
+    if (!state.tokenUser) state.tokenUser = requestScope;
+    if (state.tokenUser !== requestScope) {
+      state.token = '';
+      state.repo = null;
+      state.tokenUser = requestScope;
+      saveToken('');
+      notify('登录账号已切换，请重新连接仓库');
+      return { ok: false, status: 401, data: null, error: '登录账号已切换' };
+    }
     var headers = await authHeaders();
+    if (requestScope !== storageScopeName()) {
+      state.token = '';
+      state.repo = null;
+      state.tokenUser = storageScopeName();
+      saveToken('');
+      notify('登录账号已切换，请重新连接仓库');
+      return { ok: false, status: 401, data: null, error: '登录账号已切换' };
+    }
     var r;
     try {
       r = await fetch(API_BASE + '/api/code/gh-proxy', {
@@ -605,43 +645,55 @@
           var reader = resp.body.getReader();
           var decoder = new TextDecoder();
           var buffer = '';
+          var sawDone = false;
+          function dispatchEvent(raw) {
+            var eventName = 'message';
+            var dataLines = [];
+            raw.split(/\r?\n/).forEach(function (line) {
+              if (line.indexOf('event:') === 0) eventName = line.slice(6).trim();
+              else if (line.indexOf('data:') === 0) dataLines.push(line.slice(5).trim());
+            });
+            if (!dataLines.length) return;
+            var evt = null;
+            try { evt = JSON.parse(dataLines.join('\n')); } catch (e) { return; }
+            var type = evt.type || eventName;
+            if (type === 'content') {
+              if (evt.text) { gotContent = true; fullText += evt.text; if (callbacks.onContent) callbacks.onContent(evt.text); }
+            } else if (type === 'delta') {
+              if (evt.content) { gotContent = true; fullText += evt.content; if (callbacks.onContent) callbacks.onContent(evt.content); }
+            } else if (type === 'reasoning') {
+              if (evt.text && callbacks.onReasoning) callbacks.onReasoning(evt.text);
+            } else if (type === 'message') {
+              if (evt.content) { gotContent = true; fullText += evt.content; if (callbacks.onContent) callbacks.onContent(evt.content); }
+            } else if (type === 'done') {
+              sawDone = true;
+              if (callbacks.onDone) callbacks.onDone(evt, fullText);
+            } else if (type === 'error') {
+              if (callbacks.onError) callbacks.onError(evt);
+            }
+            // heartbeat / search_status / meta / reasoning_start 等事件忽略
+          }
           function processEvents() {
-            var idx;
-            while ((idx = buffer.indexOf('\n\n')) >= 0) {
-              var raw = buffer.slice(0, idx);
-              buffer = buffer.slice(idx + 2);
-              var eventName = 'message';
-              var dataLines = [];
-              raw.split('\n').forEach(function (line) {
-                if (line.indexOf('event:') === 0) eventName = line.slice(6).trim();
-                else if (line.indexOf('data:') === 0) dataLines.push(line.slice(5).trim());
-              });
-              if (!dataLines.length) continue;
-              var evt = null;
-              try { evt = JSON.parse(dataLines.join('\n')); } catch (e) { continue; }
-              var type = evt.type || eventName;
-              if (type === 'content') {
-                if (evt.text) { gotContent = true; fullText += evt.text; if (callbacks.onContent) callbacks.onContent(evt.text); }
-              } else if (type === 'delta') {
-                if (evt.content) { gotContent = true; fullText += evt.content; if (callbacks.onContent) callbacks.onContent(evt.content); }
-              } else if (type === 'reasoning') {
-                if (evt.text && callbacks.onReasoning) callbacks.onReasoning(evt.text);
-              } else if (type === 'message') {
-                if (evt.content) { gotContent = true; fullText += evt.content; if (callbacks.onContent) callbacks.onContent(evt.content); }
-              } else if (type === 'done') {
-                if (callbacks.onDone) callbacks.onDone(evt, fullText);
-              } else if (type === 'error') {
-                if (callbacks.onError) callbacks.onError(evt);
-              }
-              // heartbeat / search_status / meta / reasoning_start 等事件忽略
+            var match;
+            while ((match = buffer.match(/\r?\n\r?\n/)) !== null) {
+              var raw = buffer.slice(0, match.index);
+              buffer = buffer.slice(match.index + match[0].length);
+              dispatchEvent(raw);
             }
           }
           function pump() {
             return reader.read().then(function (result) {
               if (settled) return;
               if (result.done) {
+                buffer += decoder.decode();
                 processEvents();
+                // SSE 在 EOF 前未必附带空行；残余帧必须处理，但不得把缺失 done 当成功。
+                if (buffer) { dispatchEvent(buffer); buffer = ''; }
                 if (callbacks.onEof) callbacks.onEof(fullText);
+                if (!sawDone) {
+                  finish(false, { error: '流式响应意外结束（缺少完成信号）', code: 'INCOMPLETE' });
+                  return;
+                }
                 finish(true, fullText);
                 return;
               }
@@ -713,7 +765,7 @@
     var rememberCheck = el('input', { type: 'checkbox', id: 'cwRememberToken' });
     rememberCheck.checked = true;
     rememberToken.appendChild(rememberCheck);
-    rememberToken.appendChild(el('span', { text: '记住 Token（取消勾选则仅本次会话保留，更安全）' }));
+    rememberToken.appendChild(el('span', { text: '记住 Token（当前标签页会话内保留；取消勾选则关闭工作区后不保留）' }));
     tokenField.appendChild(rememberToken);
     card.appendChild(tokenField);
 
@@ -1090,6 +1142,7 @@
 
     // 恢复本地持久化
     state.repo = loadRepo();
+    state.tokenUser = storageScopeName();
     state.token = loadToken();
     state.model = loadModel() || DEFAULT_MODEL;
     state.prMode = loadPrMode();
@@ -1129,6 +1182,7 @@
       try { panel.innerHTML = ''; } catch (e) {}
     }
     abortStream();
+    state.token = ''; // 关闭工作区后不在闭包内继续保留明文凭据；勾选记住时可从隔离 session 键恢复
     try { if (window.XTJSecondaryPageState) window.XTJSecondaryPageState.close('code-workbench'); } catch (e) {}
     try { if (window.restoreMainNavigationState) window.restoreMainNavigationState(); } catch (e) {}
   }
@@ -2019,7 +2073,7 @@
     if (!state.tree || !state.tree.length) return '';
     var files = [];
     for (var i = 0; i < state.tree.length; i++) {
-      if (state.tree[i].type === 'blob') files.push(state.tree[i].path);
+      if (state.tree[i].type === 'blob' && !isSensitiveFilePath(state.tree[i].path)) files.push(state.tree[i].path);
     }
     if (!files.length) return '';
     files.sort();
@@ -2076,6 +2130,7 @@
   }
   function isTextLikeFile(p) {
     p = String(p || '');
+    if (isSensitiveFilePath(p)) return false;
     if (isCodeFileForBulk(p)) return true;
     return /\.(md|txt|log|csv|tsv|toml|ini|cfg|conf|env|properties|srt|vtt|sh|bat|cmd|ps1)$/i.test(p);
   }
@@ -2094,6 +2149,7 @@
     var byPath = {};
     var byBase = {};
     blobs.forEach(function (n) {
+      if (isSensitiveFilePath(n.path)) return;
       byPath[n.path.toLowerCase()] = n;
       var b = (n.path.split('/').pop() || '').toLowerCase();
       if (b && b.length >= 3) (byBase[b] = byBase[b] || []).push(n);
@@ -2178,6 +2234,7 @@
   // ★ AI 工具协议：按路径读取单个文件内容（供「自动工具调用」链路使用）
   async function fetchToolFileText(path) {
     if (!state.repo) return { error: '未连接仓库' };
+    if (isSensitiveFilePath(path)) return { error: '为保护凭据与私钥，禁止自动读取敏感文件：' + path };
     var node = null;
     for (var ti = 0; ti < state.tree.length; ti++) {
       if (state.tree[ti].type === 'blob' && state.tree[ti].path === path) { node = state.tree[ti]; break; }
@@ -2260,7 +2317,7 @@
     }
     // 用户点“读取全部代码”后，把当前分支已读取文件的完整内容注入，支持全局改 bug
     if (state.bulkFiles && state.bulkBranch === (state.repo && state.repo.branch)) {
-      var bulkPaths = Object.keys(state.bulkFiles).sort();
+      var bulkPaths = Object.keys(state.bulkFiles).filter(function (p) { return !isSensitiveFilePath(p); }).sort();
       // ★ 自定义模型上下文通常远小于内置 DeepSeek：注入预算按模型档位压缩，
       //   避免撑爆上下文导致模型“复读文件内容”（读取变成输出）。
       var bulkBudget = (isCustomCtx ? Math.min(BULK_AI_TOTAL_CHARS, 60000) : BULK_AI_TOTAL_CHARS), bulkUsed = 0, bulkInjected = 0;

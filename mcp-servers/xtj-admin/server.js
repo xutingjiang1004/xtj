@@ -23,10 +23,43 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 // ===================== 配置 =====================
-const API_BASE = process.env.XTJ_API_BASE || "";
-if (!API_BASE) {
-  console.error("[xtj-admin-mcp] 错误: 请设置 XTJ_API_BASE 环境变量指向 XTJ 后端地址");
+function validateApiBase(raw, env = process.env) {
+  if (!raw) throw new Error("请设置 XTJ_API_BASE 环境变量指向 XTJ 后端地址");
+  let url;
+  try { url = new URL(raw); } catch (_) { throw new Error("XTJ_API_BASE 必须是有效的 URL"); }
+  if (url.username || url.password || url.search || url.hash || url.pathname !== "/") {
+    throw new Error("XTJ_API_BASE 只能包含站点 origin，不得包含凭据、路径、查询或片段");
+  }
+
+  const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+  const isLocal = localHosts.has(url.host.toLowerCase());
+  const localOptIn = env.NODE_ENV !== "production" && env.XTJ_MCP_ALLOW_LOCALHOST === "true" && isLocal;
+  if (url.protocol !== "https:" && !(localOptIn && url.protocol === "http:")) {
+    throw new Error("XTJ_API_BASE 必须使用 HTTPS（仅非生产 localhost 可显式允许 HTTP）");
+  }
+  if (!localOptIn) {
+    const allowlist = (env.XTJ_API_ALLOWED_HOSTS || "").split(",").map(host => host.trim().toLowerCase()).filter(Boolean);
+    const host = url.host.toLowerCase();
+    const hostname = url.hostname.toLowerCase();
+    if (!allowlist.length || !allowlist.some(allowed => allowed === host || (!allowed.includes(":") && allowed.replace(/\\.$/, "") === hostname.replace(/\\.$/, "")))) {
+      throw new Error("XTJ_API_BASE 主机不在 XTJ_API_ALLOWED_HOSTS 精确 allowlist 中");
+    }
+  }
+  return url.origin;
+}
+
+let API_BASE;
+try {
+  API_BASE = validateApiBase(process.env.XTJ_API_BASE || "");
+} catch (err) {
+  console.error(`[xtj-admin-mcp] 错误: ${err.message}`);
   process.exit(1);
+}
+const HIGH_RISK_NOTICE = "高风险写操作：confirm 参数仅代表本次 MCP 请求中的声明，不是独立审批或身份验证；MCP 宿主应在调用前进行单独人工审批。管理员还必须显式设置 XTJ_MCP_ENABLE_HIGH_RISK_WRITES=true 才允许执行。";
+function assertHighRiskWritesEnabled() {
+  if (process.env.XTJ_MCP_ENABLE_HIGH_RISK_WRITES !== "true") {
+    throw new Error("高风险写操作默认禁用；管理员核验独立审批流程后，需显式设置 XTJ_MCP_ENABLE_HIGH_RISK_WRITES=true。confirm 参数本身不是独立审批。");
+  }
 }
 
 let authToken = null;
@@ -195,7 +228,8 @@ server.tool("admin_get_users", "获取所有用户列表（隐藏敏感字段）
   return { content: [{ type: "text", text: t }] };
 });
 
-server.tool("admin_delete_user", "彻底删除用户账号（高风险！需要传入 confirm=true 确认）", { userName: z.string(), confirm: z.boolean() }, async ({ userName, confirm }) => {
+server.tool("admin_delete_user", `彻底删除用户账号。${HIGH_RISK_NOTICE}`, { userName: z.string(), confirm: z.boolean() }, async ({ userName, confirm }) => {
+  assertHighRiskWritesEnabled();
   if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除用户 ${userName} 将永久删除其所有数据。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   const data = await apiRequest("DELETE", `/admin/user/${encodeURIComponent(userName)}`);
@@ -212,7 +246,8 @@ server.tool("admin_get_data", "获取管理后台全部数据", {}, async () => 
   return { content: [{ type: "text", text: formatAdminData(data) }] };
 });
 
-server.tool("admin_delete_post", "删除指定帖子（高风险，需要 confirm=true 确认）", { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+server.tool("admin_delete_post", `删除指定帖子。${HIGH_RISK_NOTICE}`, { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+  assertHighRiskWritesEnabled();
   if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除帖子 ${id} 不可撤销。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   await apiRequest("DELETE", `/admin/post/${encodeURIComponent(id)}`);
@@ -220,7 +255,8 @@ server.tool("admin_delete_post", "删除指定帖子（高风险，需要 confir
   return { content: [{ type: "text", text: `✅ 帖子 ${id} 已删除` }] };
 });
 
-server.tool("admin_delete_comment", "删除指定评论（高风险，需要 confirm=true 确认）", { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+server.tool("admin_delete_comment", `删除指定评论。${HIGH_RISK_NOTICE}`, { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+  assertHighRiskWritesEnabled();
   if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除评论 ${id} 不可撤销。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   await apiRequest("DELETE", `/admin/comment/${encodeURIComponent(id)}`);
@@ -237,7 +273,8 @@ server.tool("admin_get_photos", "获取照片列表", {}, async () => {
   return { content: [{ type: "text", text: t }] };
 });
 
-server.tool("admin_delete_photo", "删除照片（硬删除，不可恢复）", { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+server.tool("admin_delete_photo", `删除照片（硬删除，不可恢复）。${HIGH_RISK_NOTICE}`, { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+  assertHighRiskWritesEnabled();
   if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除照片 ${id} 不可恢复。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   await apiRequest("DELETE", `/admin/photo/${encodeURIComponent(id)}`);
@@ -251,7 +288,8 @@ server.tool("admin_create_announcement", "创建公告", { content: z.string(), 
   return { content: [{ type: "text", text: `✅ 公告已创建` }] };
 });
 
-server.tool("admin_delete_announcement", "删除公告（高风险，需要 confirm=true 确认）", { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+server.tool("admin_delete_announcement", `删除公告。${HIGH_RISK_NOTICE}`, { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+  assertHighRiskWritesEnabled();
   if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除公告 ${id} 不可撤销。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   await apiRequest("DELETE", `/admin/announcement/${encodeURIComponent(id)}`);
@@ -272,7 +310,8 @@ server.tool("admin_get_bans", "获取封禁列表", {}, async () => {
 // 也无审计。最严重的是 duration_hours 缺省即 0 = 永久，AI 一次不带参数的调用
 // 就能永久封禁用户。现统一要求 confirm=true，且"永久"需再传 confirm_permanent=true
 // 做第二道闸；同时补 logAudit。
-server.tool("admin_ban_user", "封禁用户（高风险！需要传入 confirm=true 确认；永久封禁还需 confirm_permanent=true）", { user_name: z.string(), duration_hours: z.number().optional(), reason: z.string().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+server.tool("admin_ban_user", `封禁用户（永久操作需 confirm_permanent=true）。${HIGH_RISK_NOTICE}`, { user_name: z.string(), duration_hours: z.number().optional(), reason: z.string().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+  assertHighRiskWritesEnabled();
   var isPermanent = (args.duration_hours ?? 0) === 0;
   if (!args.confirm) {
     return { content: [{ type: "text", text: `⚠️ 高危操作！用户 ${args.user_name} 将被${isPermanent ? "【永久】" : ` ${args.duration_hours} 小时`}封禁。请在参数中传入 confirm=true 确认。` }] };
@@ -305,7 +344,8 @@ server.tool("admin_get_mutes", "获取禁言列表", {}, async () => {
 });
 
 // ★ 2026-09-13 修复（M-3）：同 admin_ban_user，禁言此前无 confirm 无审计，缺省即永久
-server.tool("admin_mute_user", "禁言用户（高风险！需要传入 confirm=true 确认；永久禁言还需 confirm_permanent=true）", { user_name: z.string(), duration_hours: z.number().optional(), reason: z.string().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+server.tool("admin_mute_user", `禁言用户（永久操作需 confirm_permanent=true）。${HIGH_RISK_NOTICE}`, { user_name: z.string(), duration_hours: z.number().optional(), reason: z.string().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+  assertHighRiskWritesEnabled();
   var isPermanent = (args.duration_hours ?? 0) === 0;
   if (!args.confirm) {
     return { content: [{ type: "text", text: `⚠️ 高危操作！用户 ${args.user_name} 将被${isPermanent ? "【永久】" : ` ${args.duration_hours} 小时`}禁言。请在参数中传入 confirm=true 确认。` }] };
@@ -338,7 +378,8 @@ server.tool("admin_get_blacklist", "获取黑名单列表", {}, async () => {
 });
 
 // ★ 2026-09-13 修复（M-3）：黑名单此前无 confirm 无审计，缺省即永久
-server.tool("admin_add_blacklist", "加入黑名单（高风险！需要传入 confirm=true 确认；永久拉黑还需 confirm_permanent=true）", { user_name: z.string(), reason: z.string().optional(), duration_hours: z.number().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+server.tool("admin_add_blacklist", `加入黑名单（永久操作需 confirm_permanent=true）。${HIGH_RISK_NOTICE}`, { user_name: z.string(), reason: z.string().optional(), duration_hours: z.number().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+  assertHighRiskWritesEnabled();
   var isPermanent = (args.duration_hours ?? 0) === 0;
   if (!args.confirm) {
     return { content: [{ type: "text", text: `⚠️ 高危操作！用户 ${args.user_name} 将被加入黑名单${isPermanent ? "（【永久】生效）" : `（${args.duration_hours} 小时）`}。请在参数中传入 confirm=true 确认。` }] };
@@ -382,7 +423,8 @@ server.tool("admin_respond_report", "回复举报", { id: z.string(), response: 
 });
 
 // ★ 2026-09-13 修复（M-3）：举报处置会直接删帖/封人，此前无 confirm 无审计
-server.tool("admin_report_delete_post", "处理举报→删除帖子（高风险，需要 confirm=true 确认）", { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+server.tool("admin_report_delete_post", `处理举报→删除帖子。${HIGH_RISK_NOTICE}`, { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+  assertHighRiskWritesEnabled();
   if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！举报 ${id} 对应内容将被删除。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   await apiRequest("POST", `/admin/report/${id}/delete-post`);
@@ -390,7 +432,8 @@ server.tool("admin_report_delete_post", "处理举报→删除帖子（高风险
   return { content: [{ type: "text", text: `✅ 举报 ${id}: 被举报内容已删除` }] };
 });
 
-server.tool("admin_report_ban_user", "处理举报→封禁用户（高风险，需要 confirm=true 确认；永久封禁还需 confirm_permanent=true）", { id: z.string(), duration_hours: z.number().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+server.tool("admin_report_ban_user", `处理举报→封禁用户（永久操作需 confirm_permanent=true）。${HIGH_RISK_NOTICE}`, { id: z.string(), duration_hours: z.number().optional(), confirm: z.boolean(), confirm_permanent: z.boolean().optional() }, async (args) => {
+  assertHighRiskWritesEnabled();
   var isPermanent = (args.duration_hours ?? 0) === 0;
   if (!args.confirm) {
     return { content: [{ type: "text", text: `⚠️ 高危操作！举报 ${args.id} 对应账号将被${isPermanent ? "【永久】" : ` ${args.duration_hours} 小时`}封禁。请在参数中传入 confirm=true 确认。` }] };

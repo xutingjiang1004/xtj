@@ -3613,6 +3613,8 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 modalKind: '',
                 loadedUser: '',
                 loading: false,
+                loadingUser: '',
+                requestGeneration: 0,
                 lastLoadedAt: 0
             };
 
@@ -3974,46 +3976,83 @@ function renderProfileActivityList(kind) {
 
             async function loadProfileActivity(forceRefresh) {
                 forceRefresh = !!forceRefresh;
-                if (loadProfileActivity._debounceTimer) {
-                    clearTimeout(loadProfileActivity._debounceTimer);
-                }
-                if (forceRefresh) {
-                    // 强制刷新立即执行
-                    return _doLoadProfileActivity(true);
-                }
-                return new Promise(function(resolve) {
-                    loadProfileActivity._debounceTimer = setTimeout(function() {
-                        loadProfileActivity._debounceTimer = null;
-                        _doLoadProfileActivity(false).then(resolve);
-                    }, 500);
-                });
-            }
-            async function _doLoadProfileActivity(forceRefresh) {
-                if (!document.getElementById('panelProfile')) return;
-                if (!currentUser) {
+                var username = currentUser || '';
+                var previousUser = profileActivityState.loadingUser || profileActivityState.loadedUser;
+                if (previousUser !== username) {
+                    profileActivityState.requestGeneration++;
                     profileActivityState.likes = [];
                     profileActivityState.comments = [];
                     profileActivityState.reports = [];
                     profileActivityState.posts = {};
                     profileActivityState.totals = { posts: 0, likes: 0, comments: 0, reports: 0 };
                     profileActivityState.loadedUser = '';
+                    profileActivityState.loading = false;
+                    profileActivityState.loadingUser = '';
+                    profileActivityState.lastLoadedAt = 0;
+                    renderProfileActivity();
+                }
+                if (loadProfileActivity._debounceTimer) {
+                    clearTimeout(loadProfileActivity._debounceTimer);
+                    loadProfileActivity._debounceTimer = null;
+                }
+                if (!username || forceRefresh) {
+                    // 登出时立即清空；强制刷新立即执行。
+                    return _doLoadProfileActivity(forceRefresh, username);
+                }
+                return new Promise(function(resolve) {
+                    loadProfileActivity._debounceTimer = setTimeout(function() {
+                        loadProfileActivity._debounceTimer = null;
+                        _doLoadProfileActivity(false, username).then(resolve);
+                    }, 500);
+                });
+            }
+            async function _doLoadProfileActivity(forceRefresh, requestedUser) {
+                if (!document.getElementById('panelProfile')) return;
+                var username = requestedUser == null ? (currentUser || '') : requestedUser;
+                if (username !== (currentUser || '')) return;
+                if (!username) {
+                    // Invalidate any in-flight request immediately on logout.
+                    profileActivityState.requestGeneration++;
+                    profileActivityState.likes = [];
+                    profileActivityState.comments = [];
+                    profileActivityState.reports = [];
+                    profileActivityState.posts = {};
+                    profileActivityState.totals = { posts: 0, likes: 0, comments: 0, reports: 0 };
+                    profileActivityState.loadedUser = '';
+                    profileActivityState.loading = false;
+                    profileActivityState.loadingUser = '';
+                    profileActivityState.lastLoadedAt = 0;
                     renderProfileActivity();
                     return;
                 }
-                if (profileActivityState.loading) return;
-                // ★ 修复：缓存窗口从 45000ms 缩短到 8000ms —— 用户在其他页面点赞/评论后，
-                // 45 秒内切回"我的"面板看不到更新；缩短后切回即可较快看到最新互动数据。
-                if (!forceRefresh && profileActivityState.loadedUser === currentUser && Date.now() - profileActivityState.lastLoadedAt < 8000) {
+                if (profileActivityState.loading && profileActivityState.loadingUser === username) return;
+                // ★ 缓存窗口从 45000ms 缩短到 8000ms。
+                if (!forceRefresh && profileActivityState.loadedUser === username && Date.now() - profileActivityState.lastLoadedAt < 8000) {
                     renderProfileActivity();
                     return;
                 }
+                if (profileActivityState.loadedUser && profileActivityState.loadedUser !== username) {
+                    profileActivityState.likes = [];
+                    profileActivityState.comments = [];
+                    profileActivityState.reports = [];
+                    profileActivityState.posts = {};
+                    profileActivityState.totals = { posts: 0, likes: 0, comments: 0, reports: 0 };
+                    profileActivityState.loadedUser = '';
+                    profileActivityState.lastLoadedAt = 0;
+                    renderProfileActivity();
+                }
+                var requestGeneration = ++profileActivityState.requestGeneration;
                 profileActivityState.loading = true;
+                profileActivityState.loadingUser = username;
+                function isCurrentRequest() {
+                    return requestGeneration === profileActivityState.requestGeneration && currentUser === username;
+                }
                 try {
                     var results = await Promise.all([
-                        window.xtjProtectedFetch('/api/likes/user/' + encodeURIComponent(currentUser) + '?limit=160')
+                        window.xtjProtectedFetch('/api/likes/user/' + encodeURIComponent(username) + '?limit=160')
                             .then(function(r) { return r.json(); })
                             .catch(function(e) { return { ok: false, error: e.message }; }),
-                        window.xtjProtectedFetch('/api/comments/user/' + encodeURIComponent(currentUser) + '?limit=160')
+                        window.xtjProtectedFetch('/api/comments/user/' + encodeURIComponent(username) + '?limit=160')
                             .then(async function(response) {
                                 var body = await response.json();
                                 if (!response.ok || !body.ok) throw new Error(body.error || '评论记录加载失败');
@@ -4022,7 +4061,7 @@ function renderProfileActivityList(kind) {
                             .catch(function(error) { return { error: error, data: [], count: 0 }; }),
                         sb.from('posts')
                             .select('id', { count: 'exact', head: true })
-                            .eq('user_name', currentUser)
+                            .eq('user_name', username)
                             .neq('media_type', AUTH_MARKER)
                             .neq('media_type', DM_MARKER)
                             .neq('media_type', REPORT_MARKER)
@@ -4035,7 +4074,7 @@ function renderProfileActivityList(kind) {
                             .neq('media_type', ADMIN_META_MARKER),
                         sb.from('posts')
                             .select('id, content, created_at, media_type')
-                            .eq('user_name', currentUser)
+                            .eq('user_name', username)
                             .eq('media_type', REPORT_MARKER)
                             .order('created_at', { ascending: false })
                             .limit(160)
@@ -4044,15 +4083,16 @@ function renderProfileActivityList(kind) {
                     var commentsRes = results[1];
                     var postsCountRes = results[2];
                     var reportsRes = results[3];
-                    // ★ 修复：点赞记录失败与评论记录一致抛错，避免网络抖动时误显示"你还没有点赞任何帖子"
+                    if (!isCurrentRequest()) return;
+                    // ★ 修复：点赞记录失败与评论记录一致抛错，避免网络抖动时误显示空数据。
                     if (likesRes && !likesRes.ok) throw likesRes.error || new Error('点赞记录加载失败');
                     if (commentsRes.error) throw commentsRes.error;
                     if (postsCountRes.error) throw postsCountRes.error;
                     if (reportsRes && reportsRes.error) console.warn('reports load warning:', reportsRes.error);
 
-                    profileActivityState.likes = cloneProfileLikes(likesRes && likesRes.data || []);
-                    profileActivityState.comments = commentsRes.data || [];
-                    profileActivityState.reports = (reportsRes && reportsRes.data || []).map(function(p) {
+                    var likes = cloneProfileLikes(likesRes && likesRes.data || []);
+                    var comments = commentsRes.data || [];
+                    var reports = (reportsRes && reportsRes.data || []).map(function(p) {
                         var c = {};
                         try { c = JSON.parse(p.content || '{}'); } catch(e) {}
                         return {
@@ -4067,14 +4107,13 @@ function renderProfileActivityList(kind) {
                             reviewed_at: c.reviewed_at || null
                         };
                     });
-                    profileActivityState.totals = {
+                    var totals = {
                         posts: postsCountRes.count || 0,
-                        likes: profileActivityState.likes.length,
-                        comments: commentsRes.count || (commentsRes.data || []).length,
-                        reports: profileActivityState.reports.length
+                        likes: likes.length,
+                        comments: commentsRes.count || comments.length,
+                        reports: reports.length
                     };
-
-                    var ids = Array.from(new Set(profileActivityState.likes.concat(profileActivityState.comments).map(function(item) {
+                    var ids = Array.from(new Set(likes.concat(comments).map(function(item) {
                         return item && item.post_id != null ? String(item.post_id) : '';
                     }).filter(Boolean)));
 
@@ -4096,19 +4135,27 @@ function renderProfileActivityList(kind) {
                             }
                         }
                     }
-
+                    if (!isCurrentRequest()) return;
+                    profileActivityState.likes = likes;
+                    profileActivityState.comments = comments;
+                    profileActivityState.reports = reports;
+                    profileActivityState.totals = totals;
                     profileActivityState.posts = postMap;
-                    profileActivityState.loadedUser = currentUser;
+                    profileActivityState.loadedUser = username;
                     profileActivityState.lastLoadedAt = Date.now();
                     renderProfileActivity();
                 } catch (e) {
+                    if (!isCurrentRequest()) return;
                     console.error('loadProfileActivity error:', e);
                     var likesList = document.getElementById('profileLikesList');
                     var commentsList = document.getElementById('profileCommentsList');
                     if (likesList) likesList.innerHTML = '<div class="profile-activity-empty">点赞记录加载失败，请稍后重试。</div>';
                     if (commentsList) commentsList.innerHTML = '<div class="profile-activity-empty">评论记录加载失败，请稍后重试。</div>';
                 } finally {
-                    profileActivityState.loading = false;
+                    if (requestGeneration === profileActivityState.requestGeneration) {
+                        profileActivityState.loading = false;
+                        profileActivityState.loadingUser = '';
+                    }
                 }
             }
 

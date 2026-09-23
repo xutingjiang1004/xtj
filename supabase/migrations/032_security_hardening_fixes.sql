@@ -7,8 +7,8 @@
 -- 4. 新增 delete_comment_v2（管理端删除评论，原定义缺失）
 -- 5. delete_post_with_actor 对 __report__ 行使用裸 content::jsonb 转换，坏 JSON 会导致
 --    帖子删除整体失败 → 改用 xtj_private.safe_jsonb
--- 6. 017 的 idx_comments_unique_ai_reply 依赖 020 才存在的列 → 迁入本迁移
---    （IF NOT EXISTS，对已手工应用的生产库为幂等空操作）
+-- 6. AI 回复部分唯一索引留给 017（补列并先去重）/052（清理后兜底），
+--    本迁移不提前建索引，避免重复数据令中途回放失败。
 -- 7. get_user_restrictions 客户端依赖但从未定义 → 补齐（仅返回三个布尔状态）
 -- 8. cleanup_expired_cat_rate_limits 缺少 SET search_path 硬化
 
@@ -329,9 +329,9 @@ $$;
 REVOKE ALL ON FUNCTION public.delete_post_with_actor(UUID, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_post_with_actor(UUID, TEXT) TO service_role;
 
--- ============ 6. 017 唯一索引迁入（020 之后列才存在） ============
-CREATE UNIQUE INDEX IF NOT EXISTS idx_comments_unique_ai_reply
-ON public.comments (parent_comment_id) WHERE generated_by_ai = true;
+-- ============ 6. AI 回复唯一索引由 052 在清理重复行后建立 ============
+-- 不要在此提前创建唯一索引：历史数据可能重复，且 052 是唯一迁移中
+-- 先清孤儿/重复 AI 回复、再创建索引的安全顺序。
 
 -- ============ 7. get_user_restrictions（客户端轮询依赖） ============
 CREATE OR REPLACE FUNCTION public.get_user_restrictions(p_user_name TEXT)

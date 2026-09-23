@@ -194,6 +194,14 @@
     return _refreshLocks[tab];
   }
 
+  function callRefreshSafely(callback) {
+    try {
+      return Promise.resolve(callback()).catch(function () {});
+    } catch (e) {
+      return Promise.resolve();
+    }
+  }
+
   async function performRefresh(tab) {
     try {
       try {
@@ -208,20 +216,20 @@
         case 'chat':
           var chatPromises = [];
           if (typeof window.updateUnreadBadge === 'function') {
-            chatPromises.push(window.updateUnreadBadge().catch(function() {}));
+            chatPromises.push(callRefreshSafely(function () { return window.updateUnreadBadge(); }));
           }
           if (typeof window.startDMPolling === 'function') {
-            chatPromises.push(window.startDMPolling(300000, false));
+            chatPromises.push(callRefreshSafely(function () { return window.startDMPolling(300000, false); }));
           }
           if (typeof window.syncContacts === 'function') {
-            chatPromises.push(window.syncContacts().catch(function() {}));
+            chatPromises.push(callRefreshSafely(function () { return window.syncContacts(); }));
           }
           if (typeof window.syncChatBadge === 'function') {
-            chatPromises.push(window.syncChatBadge().catch(function() {}));
+            chatPromises.push(callRefreshSafely(function () { return window.syncChatBadge(); }));
           }
           if (typeof window.dockChatActiveUser !== 'undefined' && window.dockChatActiveUser) {
             if (typeof window.loadDockChatMessages === 'function') {
-              chatPromises.push(window.loadDockChatMessages(window.dockChatActiveUser, false).catch(function() {}));
+              chatPromises.push(callRefreshSafely(function () { return window.loadDockChatMessages(window.dockChatActiveUser, false); }));
             }
           }
           if (chatPromises.length) await Promise.allSettled(chatPromises);

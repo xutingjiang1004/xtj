@@ -30,6 +30,21 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-next {
   }
 }
 
+/* Match JS slot dimensions to the measured layout viewport (innerWidth). The
+   legacy 100vw minimum includes desktop scrollbar width and can offset the
+   three-panel track from its center. */
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack > .pp-slide-slot {
+  flex: 0 0 calc(100% / 3);
+  min-width: 0;
+  max-width: none;
+}
+
+/* Keep the fixed preview aligned to the currently visible mobile viewport. */
+html.xtj-photo-preview-ready #photoPreviewOverlay {
+  height: 100vh;
+  height: 100dvh;
+}
+
 html.xtj-photo-preview-ready #photoPreviewOverlay,
 html.xtj-photo-preview-ready #ppImageWrapper,
 html.xtj-photo-preview-ready #ppSlideTrack,

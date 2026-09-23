@@ -842,11 +842,21 @@
         try { url = URL.createObjectURL(file); } catch (_) { return Promise.resolve(file); }
         var img = new Image();
         return new Promise(function(resolveImg){
+          var settled = false;
+          var timeoutId = setTimeout(function(){ finish(file); }, 15000);
+          function finish(result){
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            img.onload = null;
+            img.onerror = null;
+            try { URL.revokeObjectURL(url); } catch (_) {}
+            resolveImg(result);
+          }
           img.onload = function(){
-            URL.revokeObjectURL(url);
-            encodeFrom(img, 0, false).then(resolveImg);
+            encodeFrom(img, 0, false).then(function(result){ finish(result); }, function(){ finish(file); });
           };
-          img.onerror = function(){ URL.revokeObjectURL(url); resolveImg(file); };
+          img.onerror = function(){ finish(file); };
           img.src = url;
         });
       }

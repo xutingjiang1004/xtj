@@ -244,6 +244,8 @@
     var adminTabDataLoaded = {};
     var adminDataLoadPromises = {};
     var _allDataLoadPromise = null; // ★ M51：loadAllData in-flight Promise（复用，替代仅布尔锁）
+    var _allDataLoadGeneration = 0;
+    var _allDataAbortController = null;
     var adminTabSwitchGeneration = 0;
     var searchUser = '', searchPost = '';
     // 主 Tab 白名单：refreshAdminTab / switchTab / initAdminClient 共用，避免三份名单漂移
@@ -261,6 +263,7 @@
     window.setUserFilterStatus = function(v) { userFilterStatus = v; };
     window.setUserSortBy = function(v) { userSortBy = v; };
     var confirmCallback = null;
+    var confirmPreviousFocus = null;
     var currentTab = 'ann';
     var registerAlertState = {
         data: null,
@@ -498,6 +501,12 @@
         if (body) opts.body = JSON.stringify(body);
         var timeoutMs = Number(options.timeoutMs) || 30000;
         var ac = new AbortController();
+        var externalSignal = options.signal;
+        var forwardAbort = function() { ac.abort(); };
+        if (externalSignal) {
+            if (externalSignal.aborted) ac.abort();
+            else externalSignal.addEventListener('abort', forwardAbort, { once: true });
+        }
         var at = setTimeout(function() { ac.abort(); }, timeoutMs);
         opts.signal = ac.signal;
         var res;
@@ -505,6 +514,7 @@
             res = await fetch(API_BASE + path, opts);
             if (useUserAccessToken && res.status === 401 && !options._retriedUserAccess) {
                 clearTimeout(at);
+                if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
                 var renewed = await refreshUserAccessToken();
                 if (renewed) {
                     return apiCall(method, path, body, Object.assign({}, options, {
@@ -513,8 +523,10 @@
                     }));
                 }
             }
+            if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
         } catch (fetchErr) {
             clearTimeout(at);
+            if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
             if (fetchErr && fetchErr.name === 'AbortError') {
                 throw new Error('请求超时（' + (timeoutMs / 1000) + '秒），请检查网络后重试');
             }
@@ -568,23 +580,61 @@
         _titleEl.textContent = title || '确认操作';
         _msgEl.textContent = msg || '确定要执行此操作吗？';
         _okBtn.textContent = btnText || '确认删除';
+        confirmPreviousFocus = document.activeElement;
         confirmCallback = cb;
         _modal.classList.add('active');
+        _modal.setAttribute('aria-hidden', 'false');
+        _okBtn.focus();
     };
 
+    function restoreConfirmFocus() {
+        var previous = confirmPreviousFocus;
+        confirmPreviousFocus = null;
+        if (previous && typeof previous.focus === 'function' && document.contains(previous)) previous.focus();
+    }
+
     window.closeConfirm = function() {
-        document.getElementById('confirmModal').classList.remove('active');
+        var modal = document.getElementById('confirmModal');
+        if (modal) {
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
+        }
         confirmCallback = null;
+        restoreConfirmFocus();
     };
 
     window.execConfirm = function() {
-        document.getElementById('confirmModal').classList.remove('active');
-        if (typeof confirmCallback === 'function') {
-            var cb = confirmCallback;
-            confirmCallback = null;
-            cb();
+        var modal = document.getElementById('confirmModal');
+        if (modal) {
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
         }
+        var cb = confirmCallback;
+        confirmCallback = null;
+        restoreConfirmFocus();
+        if (typeof cb === 'function') cb();
     };
+
+    document.addEventListener('keydown', function(e) {
+        var modal = document.getElementById('confirmModal');
+        if (!modal || !modal.classList.contains('active')) return;
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            window.closeConfirm();
+        } else if (e.key === 'Tab') {
+            var focusable = modal.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+            if (!focusable.length) return;
+            var first = focusable[0];
+            var last = focusable[focusable.length - 1];
+            if (e.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
+    });
 
     function saveSession() {
         try { localStorage.setItem(SESSION_KEY, JSON.stringify({ t: Date.now() })); } catch(e) {}
@@ -649,6 +699,7 @@
             var btn = document.getElementById('tab' + getTabDomName(normalized) + 'Btn');
             if (panel) panel.classList.add('active');
             if (btn) btn.classList.add('active');
+            syncAdminTabSemantics(normalized);
 
             await loadAllData(true);
             await loadTabDataIfNeeded(normalized);
@@ -707,6 +758,7 @@
         try { savedTab = localStorage.getItem(TAB_KEY); } catch(e) {}
         if (savedTab && allowedTabs.indexOf(savedTab) !== -1) {
             currentTab = savedTab;
+            syncAdminTabSemantics(savedTab);
             await loadAllData(true);
             allowedTabs.forEach(function(t) {
                 var panel = document.getElementById('tab' + getTabDomName(t));
@@ -764,16 +816,20 @@
         err.textContent = '';
         
         // 仅通过 API 认证 — 禁止直连 Supabase
+        if (btn.disabled) return;
         btn.disabled = true;
         btn.textContent = '验证中...';
+        var loginAbortController = new AbortController();
+        var loginTimeout = setTimeout(function() { loginAbortController.abort(); }, 20000);
         try {
             var res = await fetch(API_BASE + '/admin/login', {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: name, password: pw })
+                body: JSON.stringify({ username: name, password: pw }),
+                signal: loginAbortController.signal
             });
-            var data = await res.json();
+            var data = await res.json().catch(function() { return {}; });
             if (!res.ok || !data || data.ok !== true) {
                 err.textContent = data && data.error ? data.error : '登录失败 (' + res.status + ')';
                 btn.disabled = false;
@@ -804,13 +860,15 @@
         } catch(e) {
             ADMIN = null;
             var errMsg = (e && e.message) || '未知网络错误';
-            if (errMsg.indexOf('Failed to fetch') >= 0 || errMsg.indexOf('NetworkError') >= 0) {
-                err.textContent = '无法连接后端API，请检查网络或API地址';
-            } else if (errMsg.indexOf('AbortError') >= 0 || errMsg.indexOf('超时') >= 0) {
+            if (isFetchAbortError(e) || errMsg.indexOf('超时') >= 0) {
                 err.textContent = '连接超时，请检查网络后重试';
+            } else if (errMsg.indexOf('Failed to fetch') >= 0 || errMsg.indexOf('NetworkError') >= 0) {
+                err.textContent = '无法连接后端API，请检查网络或API地址';
             } else {
                 err.textContent = '登录失败: ' + errMsg;
             }
+        } finally {
+            clearTimeout(loginTimeout);
             btn.disabled = false;
             btn.textContent = '登录';
         }
@@ -834,6 +892,11 @@
             }
         } catch(e) { /* 忽略登出请求异常，仍继续清理本地状态 */ }
         stopRegisterAlertPolling();
+        _allDataLoadGeneration++;
+        if (_allDataAbortController) {
+            _allDataAbortController.abort();
+            _allDataAbortController = null;
+        }
         // 清理定时器和事件监听
         if (_adminSessionTimer) { clearInterval(_adminSessionTimer); _adminSessionTimer = null; }
         // 重置监控标志：管理员重新登录后必须重新挂载 24h 无操作自动登出与 activity 监听
@@ -893,9 +956,16 @@
         // ★ M51：加载中重复调用不再直接 return（否则并发触发的刷新会被静默丢弃），
         // 改为复用 in-flight Promise，与 _loadSingleDataType 的 adminDataLoadPromises 模式保持一致。
         if (_allDataLoadPromise) return _allDataLoadPromise;
+        var generation = ++_allDataLoadGeneration;
+        var controller = new AbortController();
+        _allDataAbortController = controller;
         adminDataLoading = true;
         var lockTimeout = setTimeout(function() {
-            // 30s 安全阀：请求挂起时解除占用，允许后续调用重新发起加载
+            // 30s 安全阀除了释放占用，也使过期响应失效并中止网络请求。
+            if (_allDataLoadGeneration !== generation) return;
+            _allDataLoadGeneration++;
+            if (_allDataAbortController === controller) _allDataAbortController = null;
+            controller.abort();
             adminDataLoading = false;
             _allDataLoadPromise = null;
         }, 30000);
@@ -904,7 +974,9 @@
             if (!API_BASE) {
             throw new Error('API 未配置或未登录，拒绝加载数据');
         }
-        var apiData = await apiCall('GET', '/admin/data');
+        var apiData = await apiCall('GET', '/admin/data', null, { signal: controller.signal });
+            if (generation !== _allDataLoadGeneration) return;
+            
             var postData = apiData.posts || [];
                 allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
             annList = apiData.announcements || [];
@@ -948,14 +1020,21 @@
                 adminTabDataLoaded.behavior = false;
                 adminTabDataLoaded.photos = false;
                 await loadTabDataIfNeeded(currentTab);
+                if (generation !== _allDataLoadGeneration) return;
                 window.renderTab(currentTab);
             }
+            if (generation !== _allDataLoadGeneration) return;
             adminDataLoadedAt = Date.now();
         } catch(e) {
-            showToast('数据加载失败，请刷新重试', 'error');
+            if (generation === _allDataLoadGeneration && !isFetchAbortError(e)) {
+                showToast('数据加载失败，请刷新重试', 'error');
+            }
         } finally {
-            adminDataLoading = false;
             try { clearTimeout(lockTimeout); } catch (e) {}
+            if (generation === _allDataLoadGeneration) {
+                adminDataLoading = false;
+                if (_allDataAbortController === controller) _allDataAbortController = null;
+            }
         }
         })();
         _allDataLoadPromise = pending;
@@ -2572,7 +2651,7 @@
     function renderAdminTabLoadError(panel, tab, message) {
         if (!panel) return;
         panel.removeAttribute('aria-busy');
-        panel.innerHTML = '<div class="empty-state" role="alert"><div class="icon">!</div>' +
+        panel.innerHTML = '<div class="empty-state" role="alert" aria-live="assertive"><div class="icon" aria-hidden="true">!</div>' +
             '<div class="text">数据加载失败：' + escapeHtml(message || '请重试') + '</div>' +
             '<button class="btn-sm primary" type="button" onclick="refreshAdminTab(\'' + safeJsStr(tab) + '\')">重新加载</button></div>';
     }
@@ -2580,10 +2659,61 @@
     // 供模板内联 onclick 使用（如统计页「刷新缓存」），必须导出，否则全局作用域 ReferenceError
     window.apiCall = apiCall;
 
+    function syncAdminTabSemantics(selectedTab) {
+        allowedTabs.forEach(function(tab) {
+            var button = document.getElementById('tab' + getTabDomName(tab) + 'Btn');
+            var panel = document.getElementById('tab' + getTabDomName(tab));
+            if (!button || !panel) return;
+            button.setAttribute('role', 'tab');
+            button.setAttribute('aria-controls', panel.id);
+            button.setAttribute('aria-selected', tab === selectedTab ? 'true' : 'false');
+            button.setAttribute('tabindex', tab === selectedTab ? '0' : '-1');
+            panel.setAttribute('role', 'tabpanel');
+            panel.setAttribute('aria-labelledby', button.id);
+            panel.setAttribute('aria-hidden', tab === selectedTab ? 'false' : 'true');
+            panel.setAttribute('tabindex', '0');
+        });
+    }
+
+    var adminTablist = document.querySelector('.dash-header .dh-right [role="tablist"]');
+    if (adminTablist) {
+        adminTablist.querySelectorAll('button[id^="tab"][id$="Btn"]').forEach(function(button) {
+            var inferred = button.id.replace(/^tab/, '').replace(/Btn$/, '');
+            var inferredTab = inferred.charAt(0).toLowerCase() + inferred.slice(1);
+            if (inferredTab === 'errorLog') inferredTab = 'errorlog';
+            if (allowedTabs.indexOf(inferredTab) === -1) return;
+            button.setAttribute('type', 'button');
+            button.setAttribute('role', 'tab');
+            button.setAttribute('aria-controls', 'tab' + getTabDomName(inferredTab));
+        });
+        adminTablist.addEventListener('keydown', function(e) {
+            var currentButton = e.target && e.target.closest ? e.target.closest('[role="tab"]') : null;
+            if (!currentButton || !adminTablist.contains(currentButton)) return;
+            var tabName = currentButton.id.replace(/^tab/, '').replace(/Btn$/, '');
+            var tabIndex = allowedTabs.indexOf(tabName.charAt(0).toLowerCase() + tabName.slice(1));
+            if (currentButton.id === 'tabErrorLogBtn') tabIndex = allowedTabs.indexOf('errorlog');
+            if (tabIndex < 0) return;
+            var nextIndex;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIndex = (tabIndex + 1) % allowedTabs.length;
+            else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') nextIndex = (tabIndex - 1 + allowedTabs.length) % allowedTabs.length;
+            else if (e.key === 'Home') nextIndex = 0;
+            else if (e.key === 'End') nextIndex = allowedTabs.length - 1;
+            else return;
+            e.preventDefault();
+            var nextButton = document.getElementById('tab' + getTabDomName(allowedTabs[nextIndex]) + 'Btn');
+            if (nextButton) {
+                nextButton.focus();
+                window.switchTab(allowedTabs[nextIndex]);
+            }
+        });
+    }
+    syncAdminTabSemantics(currentTab);
+
     window.switchTab = async function(tab) {
         var normalized = tab;
         var allTabs = allowedTabs;
         if (allTabs.indexOf(normalized) === -1) return;
+        syncAdminTabSemantics(normalized);
         var switchGeneration = ++adminTabSwitchGeneration;
         currentTab = normalized;
         saveCurrentTab();
@@ -2722,13 +2852,11 @@
     };
 
     window.loadReportsData = async function() {
-        try {
-            var data = await apiCall('GET', '/admin/reports');
-            reportsData = Array.isArray(data.data) ? data.data : [];
-        } catch(e) {
-            reportsData = [];
-        }
+        var data = await apiCall('GET', '/admin/reports');
+        if (!data || !Array.isArray(data.data)) throw new Error('举报数据格式无效，请重试');
+        reportsData = data.data;
         updateReportBadge();
+        return reportsData;
     };
 
     window.loadUserVisitStats = async function(el) {
