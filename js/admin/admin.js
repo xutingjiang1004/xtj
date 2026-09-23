@@ -218,6 +218,10 @@
     // 若产品要求"24h 无操作必须重新登录"，需在 hasSession() 同时校验不活动标记（当前为有意设计）。
     var ADMIN_SESSION_TTL_MS = 72 * 60 * 60 * 1000; // 72小时
     var SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24小时无操作自动退出
+    // ★ P2-23 审计修复：登录请求的超时上限（15s）。
+    // 之前是散落在 doAdminLogin 里的魔法数（20s）且不具名，慢连接会让登录按钮长时间保持禁用；
+    // 这里提为常量，配合 AbortController 使用，超时/失败统一在 finally 里恢复按钮。
+    var ADMIN_LOGIN_TIMEOUT_MS = 15 * 1000;
     var lastActivityTime = Date.now();
     var sessionTimeoutMonitorStarted = false;
     var _adminSessionTimer = null;
@@ -791,7 +795,14 @@
                     var el = document.getElementById('tabReports');
                     if (el) renderReportsTab(el);
                 }
-            } catch (e) { /* 静默, 下次重试 */ }
+            } catch (e) {
+                // ★ P2-5 审计修复：轮询失败不再完全静默。数据仍保留上一次成功的（loadReportsData 保证），
+                // 但停留在举报 Tab 时要刷新出失败提示与重试入口，否则徽标/列表会一直显示过期数据。
+                if (currentTab === 'reports') {
+                    var errEl = document.getElementById('tabReports');
+                    if (errEl) renderReportsTab(errEl);
+                }
+            }
         }, 30000);
         // 恢复可见时立即补一轮（此前隐藏期间的变更要等下一个轮询周期）
         // ★ M48：先移除再注册，防止同页面多次登录/初始化叠加重复监听器
@@ -820,7 +831,9 @@
         btn.disabled = true;
         btn.textContent = '验证中...';
         var loginAbortController = new AbortController();
-        var loginTimeout = setTimeout(function() { loginAbortController.abort(); }, 20000);
+        // ★ P2-23 审计修复：超时值改用具名常量 ADMIN_LOGIN_TIMEOUT_MS（15s），
+        // 便于与后端/其它超时统一调优；超时触发 abort 后由 catch 提示、finally 恢复按钮。
+        var loginTimeout = setTimeout(function() { loginAbortController.abort(); }, ADMIN_LOGIN_TIMEOUT_MS);
         try {
             var res = await fetch(API_BASE + '/admin/login', {
                 method: 'POST',
@@ -909,6 +922,8 @@
             document.removeEventListener(evt, resetActivityTimer);
         });
         allPosts = []; allLikes = []; allComments = []; allUsers = [];
+        // ★ P2-5：登出时一并清空举报的三态，避免下次登录残留上一次的错误提示
+        reportsData = []; reportsLoading = false; reportsLoadError = '';
         allLoginEvents = []; allBehaviorEvents = []; allSecurityAlerts = [];
         allAuditLogs = []; allErrorLogs = [];
         annList = [];
@@ -1139,9 +1154,10 @@
                 await loadPhotosAdminData();
                 adminTabDataLoaded.photos = true;
             } else if (dataType === 'reports') {
-                var reportRes = await apiCall('GET', '/admin/reports');
-                reportsData = reportRes.data || [];
-                updateReportBadge();
+                // ★ P2-5 审计修复：统一走 loadReportsData()。
+                // 旧分支会把格式异常/空响应当成"没有举报"直接写进 reportsData，
+                // 与 loadReportsData 的行为不一致；共用一条路径后，失败绝不覆盖上次成功的数据。
+                await loadReportsData();
                 adminTabDataLoaded.reports = true;
             } else if (dataType === 'mutes') {
                 var muteRes = await apiCall('GET', '/admin/mutes');
@@ -1890,6 +1906,12 @@
     })();
 
     var reportsData = [];
+    // ★ P2-5 审计修复：举报列表的 loading / error / data 三态。
+    // 旧实现失败时把 reportsData 清空，渲染层于是显示"暂无举报"——
+    // 请求失败被伪装成"确实没有举报"，管理员会漏掉真实待处理举报。
+    // 现在：失败保留上一次成功的数据，只记录 reportsLoadError，由渲染层显示失败 + 重试入口。
+    var reportsLoading = false;
+    var reportsLoadError = '';
 
     function updateReportBadge() {
         var badge = document.getElementById('reportBadge');
@@ -2852,11 +2874,22 @@
     };
 
     window.loadReportsData = async function() {
-        var data = await apiCall('GET', '/admin/reports');
-        if (!data || !Array.isArray(data.data)) throw new Error('举报数据格式无效，请重试');
-        reportsData = data.data;
-        updateReportBadge();
-        return reportsData;
+        // ★ P2-5 审计修复：只有请求成功才覆盖 reportsData，失败时保留上一次成功的列表并单独记录错误态。
+        // 这样轮询/刷新失败不会把"加载失败"伪装成"暂无举报"，徽标也停留在最后一次成功的数据上。
+        reportsLoading = true;
+        try {
+            var data = await apiCall('GET', '/admin/reports');
+            if (!data || !Array.isArray(data.data)) throw new Error('举报数据格式无效，请重试');
+            reportsData = data.data;
+            reportsLoadError = '';
+            updateReportBadge();
+            return reportsData;
+        } catch (e) {
+            reportsLoadError = (e && e.message) || '举报数据加载失败，请重试';
+            throw e; // 不吞异常：调用方（轮询/Tab 渲染）据此展示失败态与重试入口
+        } finally {
+            reportsLoading = false;
+        }
     };
 
     window.loadUserVisitStats = async function(el) {
@@ -2965,8 +2998,21 @@
     }
 
     window.renderReportsTab = async function(el) {
-        if (!reportsData.length && !adminTabDataLoaded.reports) {
-            await _loadSingleDataType('reports');
+        // ★ P2-5 审计修复：loading / error / data 三态分开。
+        // 只有「加载成功且确实为空」才展示"暂无举报"；失败时给出明确提示 + 重新加载按钮，
+        // 若手里还有上一次成功的数据则继续展示旧列表（顶部标注刷新失败），避免误判为"没有举报"。
+        try {
+            if (!reportsData.length && !adminTabDataLoaded.reports && !reportsLoadError) {
+                await _loadSingleDataType('reports');
+            }
+        } catch (e) {
+            renderAdminTabLoadError(el, 'reports', (e && e.message) || reportsLoadError);
+            return;
+        }
+        if (reportsLoading) { renderAdminTabLoading(el, 'reports'); return; }
+        if (reportsLoadError && !reportsData.length) {
+            renderAdminTabLoadError(el, 'reports', reportsLoadError);
+            return;
         }
         var pending = reportsData.filter(function(r) { return r.status === 'pending'; }).length;
         var h = '<div class="stats-row">';
@@ -2974,6 +3020,11 @@
         h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + pending + '</div><div class="lbl">待处理</div></div>';
         h += '<div class="stat-box"><div class="val" style="color:var(--primary)">' + reportsData.filter(function(r) { return r.status === 'actioned'; }).length + '</div><div class="lbl">已处理</div></div>';
         h += '</div>';
+        if (reportsLoadError) {
+            h += '<div class="empty-state" role="alert" aria-live="assertive"><div class="icon" aria-hidden="true">!</div>' +
+                '<div class="text">刷新失败，以下为最后一次成功获取的举报（' + escapeHtml(reportsLoadError) + '）</div>' +
+                '<button class="btn-sm primary" type="button" onclick="refreshAdminTab(\'reports\')">重新加载</button></div>';
+        }
         h += '<div class="card"><h3>举报管理</h3>';
         if (!reportsData.length) {
             h += '<div class="empty">暂无举报</div>';

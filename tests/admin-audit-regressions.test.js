@@ -14,11 +14,14 @@ function sourceBetween(source, start, end) {
   return source.slice(startIndex, endIndex);
 }
 
-test('admin login request is bounded, rejects duplicates, and always unlocks its submit button', () => {
+test('admin login request is bounded by a named timeout, rejects duplicates, and always unlocks its submit button', () => {
   const login = sourceBetween(js, 'window.doAdminLogin = async function()', 'window.confirmLogout = function()');
   assert.match(login, /if \(btn\.disabled\) return;/);
   assert.match(login, /new AbortController\(\)/);
-  assert.match(login, /setTimeout\(function\(\) \{ loginAbortController\.abort\(\); \}, 20000\)/);
+  // ★ P2-23：超时值必须是具名常量，不再散落魔法数
+  assert.match(login, /setTimeout\(function\(\) \{ loginAbortController\.abort\(\); \}, ADMIN_LOGIN_TIMEOUT_MS\)/);
+  assert.match(js, /var ADMIN_LOGIN_TIMEOUT_MS = 15 \* 1000;/);
+  assert.doesNotMatch(login, /abort\(\); \}, \d+\)/);
   assert.match(login, /signal: loginAbortController\.signal/);
   assert.match(login, /finally\s*\{\s*clearTimeout\(loginTimeout\);\s*btn\.disabled = false;\s*btn\.textContent = '登录';/);
   assert.match(html, /id="loginErr" role="alert" aria-live="assertive"/);
@@ -36,12 +39,54 @@ test('loadAllData timeout invalidates and aborts stale requests before they can 
   assert.match(api, /externalSignal\.addEventListener\('abort', forwardAbort/);
 });
 
-test('report load failures propagate without clearing the last successful report list', () => {
+test('report load failures record an error state without clearing the last successful report list', () => {
   const reports = sourceBetween(js, 'window.loadReportsData = async function()', 'window.loadUserVisitStats = async function');
   assert.match(reports, /var data = await apiCall\('GET', '\/admin\/reports'\);/);
   assert.match(reports, /if \(!data \|\| !Array\.isArray\(data\.data\)\) throw new Error/);
-  assert.doesNotMatch(reports, /catch\s*\(/);
-  assert.doesNotMatch(reports, /reportsData = \[\];/);
+  assert.doesNotMatch(reports, /reportsData = \[\]/);
+  assert.doesNotMatch(reports, /reportsData\.length = 0/);
+  assert.doesNotMatch(reports, /reportsData = data \|\| \[\]/);
+  // ★ P2-5：失败只记录错误态并继续上抛，绝不吞异常、绝不覆盖上次成功的数据
+  assert.match(reports, /reportsLoading = true;/);
+  assert.match(reports, /\} catch \(e\) \{[\s\S]*?reportsLoadError = [\s\S]*?throw e;/);
+  assert.match(reports, /\} finally \{[\s\S]*?reportsLoading = false;/);
+  // 成功路径才清空错误态并刷新徽标
+  assert.match(reports, /reportsLoadError = '';/);
+  assert.match(reports, /updateReportBadge\(\);/);
+  assert.match(js, /var reportsLoading = false;/);
+  assert.match(js, /var reportsLoadError = '';/);
+});
+
+test('reports tab separates loading, error and empty states instead of faking an empty list', () => {
+  const render = sourceBetween(js, 'window.renderReportsTab = async function(el)', 'window.handleReportDetail = function(id)');
+  assert.match(render, /if \(reportsLoading\) \{ renderAdminTabLoading\(el, 'reports'\); return; \}/);
+  assert.match(render, /if \(reportsLoadError && !reportsData\.length\)/);
+  assert.match(render, /renderAdminTabLoadError\(el, 'reports', reportsLoadError\)/);
+  // 失败态必须有可重试入口（沿用后台统一的 refreshAdminTab 重试），且两者都要提前 return
+  assert.match(render, /onclick="refreshAdminTab\(\\'reports\\'\)"/);
+  const errorBranch = sourceBetween(render, "if (reportsLoadError && !reportsData.length)", "var pending");
+  assert.match(errorBranch, /return;/);
+  const catchBranch = sourceBetween(render, '} catch (e) {', 'if (reportsLoading)');
+  assert.match(catchBranch, /renderAdminTabLoadError\(el, 'reports'/);
+  assert.match(catchBranch, /return;/);
+  // "暂无举报"只允许出现在失败态判定之后（成功且为空才展示）
+  assert.match(render, /if \(!reportsData\.length\) \{\s*h \+= '<div class="empty">暂无举报<\/div>';/);
+  assert.ok(render.indexOf('renderAdminTabLoadError(el, \'reports\', reportsLoadError)') < render.indexOf('<div class="empty">暂无举报</div>'));
+  // 有旧数据 + 刷新失败：保留旧列表并在顶部提示，不能静默显示成"没有举报"
+  assert.match(render, /if \(reportsLoadError\) \{[\s\S]*?最后一次成功获取的举报[\s\S]*?onclick="refreshAdminTab\(\\'reports\\'\)"/);
+  assert.doesNotMatch(render, /reportsData = \[\]/);
+});
+
+test('report lazy loader and polling reuse the same failure-safe reports path', () => {
+  const lazy = sourceBetween(js, "} else if (dataType === 'reports') {", "} else if (dataType === 'mutes') {");
+  assert.match(lazy, /await loadReportsData\(\);/);
+  assert.doesNotMatch(lazy, /reportsData = reportRes\.data \|\| \[\]/);
+  assert.match(lazy, /adminTabDataLoaded\.reports = true;/);
+  const poll = sourceBetween(js, '_adminReportPollTimer = setInterval', '}, 30000)');
+  assert.match(poll, /await loadReportsData\(\);/);
+  // 轮询失败不再完全静默：停留在举报 Tab 时刷新出失败提示与重试入口
+  assert.match(poll, /\} catch \(e\) \{[\s\S]*?renderReportsTab\(errEl\)/);
+  assert.doesNotMatch(poll, /reportsData = \[\]/);
 });
 
 test('admin tabs expose tab semantics, keyboard navigation, and active selection', () => {
