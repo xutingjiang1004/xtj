@@ -2391,6 +2391,9 @@
 
             function subscribeToAnnouncements() {
                 if (annRealtime) return;
+                // ★ 2026-09-24 修复：补 if (!sb) 空守卫，与 subscribeToMessages /
+                //   subscribeToComments 一致，避免 sb 未初始化时抛 TypeError
+                if (!sb) return;
                 annRealtime = sb.channel('announcements')
                     .on('postgres_changes', {
                         event: '*',

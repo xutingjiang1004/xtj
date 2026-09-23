@@ -45,6 +45,11 @@ const crypto = require('crypto');
 const dns = require('dns');
 const https = require('https');
 const net = require('net');
+// ★ 2026-09-24 修复（P1-3 同类残留）：/api/provider/test 此前用全局 fetch 并把
+//   pinned Agent 传给 agent: 选项 —— undici 不认识该选项、静默忽略，DNS pin 实际无效，
+//   校验与连接各自解析 DNS，DNS rebinding TOCTOU 窗口仍在。
+//   改用 web-fetch 的 requestPinnedJson（https.request + pinnedLookup）。
+const { requestPinnedJson } = require('./web-fetch');
 
 // ★ 修复 M-1（2026-09-13）：把已校验过的地址 pin 到连接上，消除
 //   「assertSafeProviderHost 解析一次 → fetch 再独立解析一次」的 SSRF TOCTOU 窗口。
@@ -497,7 +502,7 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
         return res.status(400).json({ error: 'base_url 指向不允许的主机', code: 'BLOCKED_BASE_URL' });
       }
       // ★ 修复 M-1：复用已校验地址发起连接（消除校验-连接之间的 DNS 二次解析）
-      var _testPinnedAgent = createPinnedAgentFromAddresses(hostCheck.addresses);
+      //   （agent: 选项对 undici 无效，见文件头 2026-09-24 修复注释，改用 requestPinnedJson）
 
       // 移除末尾的 /v1 等路径以获取基础 URL
       var modelsUrl = testUrl.replace(/\/+$/, '');
@@ -510,63 +515,35 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
       var timeout = setTimeout(function() { controller.abort(); }, 10000);
 
       try {
-        var fetchOptions = {
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer ' + apiKey,
-            'Content-Type': 'application/json'
-          },
-          signal: controller.signal,
-          // 不跟随重定向：3xx 一律视为失败，防止重定向到内网/云元数据地址
-          redirect: 'manual',
-          // ★ 修复 M-1：已校验地址 pin（防 DNS rebinding 绕过上面的内网判定）
-          agent: _testPinnedAgent || undefined
+        var reqHeaders = {
+          'Authorization': 'Bearer ' + apiKey,
+          'Content-Type': 'application/json'
         };
 
         // Anthropic 使用 x-api-key 头
         if (providerType === 'anthropic') {
-          fetchOptions.headers = {
+          reqHeaders = {
             'x-api-key': apiKey,
             'anthropic-version': '2023-06-01',
             'Content-Type': 'application/json'
           };
         }
 
-        var response = await fetch(modelsUrl, fetchOptions);
+        // ★ 修复 M-1（2026-09-24）：requestPinnedJson 用已校验地址发起 https.request
+        //   （pinnedLookup），不做重定向跟随（3xx 直接返回状态码），与原 redirect:'manual'
+        //   语义一致；响应体超 256KB 直接拒绝（防超大响应拖垮进程）。
+        var response = await requestPinnedJson(new URL(modelsUrl), hostCheck.addresses, {
+          method: 'GET',
+          headers: reqHeaders,
+          signal: controller.signal,
+          maxBytes: 256 * 1024,
+          timeoutMs: 10000
+        });
         clearTimeout(timeout);
 
-        if (response.ok) {
+        if (response.status >= 200 && response.status < 300) {
           var modelsData = null;
-          // 响应体设字节上限（256KB），超限即丢弃，防止超大响应体拖垮进程
-          try {
-            var maxBodyBytes = 256 * 1024;
-            var bodyBytes = 0;
-            var chunks = [];
-            var reader = response.body && typeof response.body.getReader === 'function' ? response.body.getReader() : null;
-            if (reader) {
-              var overLimit = false;
-              while (true) {
-                var chunk = await reader.read();
-                if (chunk.done) break;
-                bodyBytes += chunk.value ? chunk.value.byteLength : 0;
-                if (bodyBytes > maxBodyBytes) { overLimit = true; break; }
-                chunks.push(Buffer.from(chunk.value));
-              }
-              if (overLimit && reader && typeof reader.cancel === 'function') {
-                // 超限跳出后释放 reader，避免连接/流一直占用
-                try { await reader.cancel(); } catch (_) {}
-              }
-              if (!overLimit) {
-                var bodyText = Buffer.concat(chunks).toString('utf8');
-                try { modelsData = JSON.parse(bodyText); } catch (_) {}
-              }
-            } else {
-              var fullText = await response.text();
-              if (Buffer.byteLength(fullText, 'utf8') <= maxBodyBytes) {
-                try { modelsData = JSON.parse(fullText); } catch (_) {}
-              }
-            }
-          } catch (_) { modelsData = null; }
+          try { modelsData = JSON.parse(response.text); } catch (_) { modelsData = null; }
 
           var models = [];
           if (modelsData && modelsData.data && Array.isArray(modelsData.data)) {
@@ -590,10 +567,12 @@ module.exports = function registerProviderRegistryRoutes(app, deps) {
         }
       } catch (fetchErr) {
         clearTimeout(timeout);
-        if (fetchErr.name === 'AbortError') {
-          return res.status(200).json({ ok: false, message: '连接超时（10秒）', code: 'TIMEOUT' });
+        var _fetchErrMsg = String((fetchErr && fetchErr.message) || '');
+        // requestPinnedJson 的超时/中止表现为"请求超时"/"请求已取消"（外部 abort 为 AbortError）
+        if ((fetchErr && fetchErr.name === 'AbortError') || _fetchErrMsg.indexOf('超时') >= 0 || _fetchErrMsg.indexOf('取消') >= 0 || _fetchErrMsg.indexOf('大小限制') >= 0) {
+          return res.status(200).json({ ok: false, message: _fetchErrMsg.indexOf('大小限制') >= 0 ? '响应超过大小限制（256KB）' : '连接超时（10秒）', code: _fetchErrMsg.indexOf('大小限制') >= 0 ? 'RESPONSE_TOO_LARGE' : 'TIMEOUT' });
         }
-        return res.status(200).json({ ok: false, message: '连接失败: ' + (fetchErr.message || '') });
+        return res.status(200).json({ ok: false, message: '连接失败: ' + _fetchErrMsg });
       }
     } catch (e) {
       console.error('[PROVIDER] POST /api/provider/test error:', e.message);

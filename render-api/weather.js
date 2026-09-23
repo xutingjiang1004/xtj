@@ -191,7 +191,10 @@ function matchBuiltinCity(query) {
   var q = String(query || '').trim();
   if (!q) return null;
   var lower = q.toLowerCase();
-  if (CITY_ALIASES[lower]) {
+  // ★ 2026-09-24 修复：普通对象以用户输入做属性访问会沿原型链命中
+  //   constructor/__proto__/valueOf 等键，导致 coords undefined 抛 TypeError；
+  //   与 dm-media.js M-7c 的 hasOwnProperty 标准对齐。
+  if (Object.prototype.hasOwnProperty.call(CITY_ALIASES, lower)) {
     var aliasName = CITY_ALIASES[lower];
     return { name: aliasName, coords: CITY_COORDS[aliasName] };
   }

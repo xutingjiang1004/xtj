@@ -273,7 +273,8 @@ function decodeHtmlEntities(text) {
       try { return String.fromCodePoint(parseInt(hex, 16)); } catch (e) { return ''; }
     })
     .replace(/&#(\d+);/g, function(_, num) {
-      try { return String.fromCodePoint(parseInt(num, 16)); } catch (e) { return ''; }
+      // ★ 2026-09-24 修复：十进制实体此前误按 16 进制解析（&#39;→"9"、&#65;→"e"）
+      try { return String.fromCodePoint(parseInt(num, 10)); } catch (e) { return ''; }
     });
 }
 
@@ -393,7 +394,16 @@ async function fetchSafeWebPage(rawUrl, options) {
   }
 
   // 直接抓取失败 → Jina Reader 兜底（除非显式禁用）
+  // ★ 2026-09-24 修复（SSRF）：直接路径的失败可能正是因为目标 URL 命中黑名单
+  //   （内网/元数据地址）。fetchViaJinaReader 只校验 r.jina.ai 自身、不校验目标 URL，
+  //   若不复查，黑名单目标会经公共代理整体绕过 assertSafeWebUrl 的内网判定。
+  //   兜底前对目标做与直接路径同等的校验，命中黑名单则保留原始错误。
   if (options.allowJinaFallback !== false) {
+    try {
+      await assertSafeWebUrl(current, lookupImpl);
+    } catch (safeErr) {
+      throw directErr || safeErr;
+    }
     try {
       var jina = await fetchViaJinaReader(current, {
         lookupImpl: lookupImpl,
