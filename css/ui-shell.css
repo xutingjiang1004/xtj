@@ -2364,56 +2364,25 @@ html.xtj-wechat.xtj-ios-viewport .dock-bar {
    所以不会被侧栏的 display:none 连带隐藏。
    状态存 localStorage['xtj_wb_sidebar']（'collapsed' | 'expanded'），刷新后保持。
    ========================================================================== */
-/* ★ 2026-09-23 可见性修复：原样式 28×28 + rgba(255,255,255,0.62) 半透明背景 +
-   0.22 透明度的淡边框，压在浅色侧栏上几乎隐形，用户找不到按钮 → 折叠功能形同不存在。
-   现改为：34×34（与展开按钮统一）、实底、明显边框与阴影、hover 强化。
-   注意：本项目 style.css 有一套全局玻璃拟态按钮系统（:is(button:not(...)) 形式），
-   其选择器优先级高于单类名。这里用 .app-container 前缀提升优先级，稳定压过全局规则，
-   避免按钮被渲染成半透明渐变而重新变得难辨认。 */
-.app-container .desktop-wb-collapse {
+.desktop-wb-collapse {
   position: absolute;
   right: 10px;
   top: 12px;
-  z-index: 30;
-  width: 34px;
-  height: 34px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 10px;
-  border: 1px solid rgba(38, 139, 106, 0.34);
-  background: #ffffff;
-  color: #14603f;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 160, 145, 0.22);
+  background: rgba(255, 255, 255, 0.62);
+  color: #4b6b60;
   cursor: pointer;
-  box-shadow: 0 2px 10px rgba(19, 70, 48, 0.16);
-  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease,
-              box-shadow 0.16s ease;
 }
-.app-container .desktop-wb-collapse svg,
-.app-container .desktop-wb-expand svg { width: 16px; height: 16px; }
-.app-container .desktop-wb-collapse:hover,
-.app-container .desktop-wb-expand:hover {
-  background: #14603f;
-  color: #ffffff;
-  border-color: #14603f;
-  transform: scale(1.06);
-  box-shadow: 0 4px 14px rgba(19, 70, 48, 0.24);
-}
-.app-container .desktop-wb-collapse:active { transform: scale(0.96); }
-
-/* 深色主题下白底按钮会突兀，改为深底浅字，保持同等的可见度与对比 */
-[data-theme="dark"] .app-container .desktop-wb-collapse {
-  background: #1b3a33;
-  color: #a8e6d0;
-  border-color: rgba(120, 216, 184, 0.42);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.42);
-}
-[data-theme="dark"] .app-container .desktop-wb-collapse:hover {
-  background: #26a97c;
-  color: #07110e;
-  border-color: #26a97c;
-}
+.desktop-wb-collapse svg, .desktop-wb-expand svg { width: 16px; height: 16px; }
+.desktop-wb-collapse:hover, .desktop-wb-expand:hover { background: #fff; color: #14603f; }
 
 /* ★ 展开按钮必须**始终脱离网格流**：它是 .app-container 的子元素，
    若没被真正隐藏（display:none）就会占掉网格第二列，把 .dock-panels 挤到第二行。
@@ -2452,41 +2421,4 @@ html.xtj-wechat.xtj-ios-viewport .dock-bar {
   .app-container.wb-sidebar-collapsed .dock-panels {
     grid-column: 1 / -1;
   }
-
-  /* ★ 2026-09-23 空白页修复（关键）：
-     .app-container 是网格，而它的直接子元素里除了 aside/button/dock-panels 外，
-     还有一个 .modal-overlay（登录弹窗容器）。该元素并未脱离文档流（非 fixed），
-     会参与网格自动排布：侧栏 display:none 后网格重新排布，它抢占第一行（整屏高），
-     把 .dock-panels 挤到第二行（实测 y=450、h=434）→ 内容出现在页面下半屏，
-     上半屏一片空白；更早的表现是行高塌成 0、整页空白。
-     这里显式把内容区钉在第 1 行第 1 列，不让它被其它子元素挤出原位。 */
-  .app-container.wb-sidebar-collapsed {
-    grid-template-columns: 0px minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-    align-items: stretch;
-  }
-  .app-container.wb-sidebar-collapsed .dock-panels {
-    grid-row: 1;
-    grid-column: 1 / -1;
-    align-self: stretch;
-    min-height: 0;
-    height: 100%;
-  }
-  /* 展开态同样钉住内容区，避免该 modal-overlay 在任何情况下挤出空白 */
-  .app-container .dock-panels {
-    grid-row: 1;
-  }
-
-  /* ★ 2026-09-23 折叠反馈：原先切换是瞬时的，加上侧栏本就紧贴左缘，
-     用户几乎察觉不到"内容区扩张了 236px"，观感上就像只是把侧栏藏了起来。
-     给网格列留出位移动画，让折叠/展开的宽度变化可见。
-     仅过渡布局属性（列宽），不碰 transform/动画类属性，避免与既有动效冲突。 */
-  .app-container {
-    transition: grid-template-columns 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-}
-
-/* 尊重系统"减少动态效果"偏好（独立块，避免 @media 嵌套的兼容性问题） */
-@media (min-width: 768px) and (min-height: 480px) and (prefers-reduced-motion: reduce) {
-  .app-container { transition: none !important; }
 }
