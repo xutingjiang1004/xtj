@@ -32,7 +32,18 @@ test('index.html CSS/JS query hashes match file content', function(){
 });
 test('no manual date version query remains for local CSS/JS', function(){
   var html = read('index.html');
-  assert.ok(!/\b(?:css|js)\/[^"?#]+\.(?:css|js)\?v=20\d{6,}/.test(html));
+  // 手工日期版本号形如 ?v=20260923 —— 恒为「纯数字且长度 ≥8」。
+  // 注意不能直接写 /20\d{6,}/：构建生成的 hash 是 10 位十六进制，完全可能
+  // 恰好以 "20" 开头（例如 20295505c6），会被误判成日期版本号。
+  // 这里逐个取出 ?v= token，只有"纯数字 + 长度≥8"才判定为遗留的手工版本号。
+  var re = /\b(?:css|js)\/[^"?#]+\.(?:css|js)\?v=([^"&#\s]*)/g;
+  var m, offenders = [];
+  while ((m = re.exec(html))) {
+    var token = m[1] || '';
+    if (/^20\d{6,}$/.test(token)) offenders.push(token);
+  }
+  assert.strictEqual(offenders.length, 0,
+    'found manual date-style version queries: ' + offenders.join(', '));
 });
 test('index.html uses minified local assets when a min build exists', function(){
   var html = read('index.html');

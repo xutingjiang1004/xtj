@@ -168,7 +168,9 @@ test('修复③：工具可见性不因第三方搜索配额被裁剪', () => {
   const swSeg = serverSrc.slice(swIdx, swIdx + 1500);
   // ★ 遗留 1：gate 函数改名 measureSearchQuota（返回 degraded 标记以便区分
   //   「配额用尽」与「配额服务故障」）；enforceSearchQuota 保留为兼容别名。
-  assert.match(swSeg, /measureSearchQuota|enforceSearchQuota/, 'search_web 内部必须做配额 gate');
+  // ★ P1-9：搜索分支统一改走 claimSearchSlot（内部仍委派 measureSearchQuota，
+  //   额外做乐观预占以消除并发超发窗口），因此这里两个名字都接受。
+  assert.match(swSeg, /claimSearchSlot|measureSearchQuota|enforceSearchQuota/, 'search_web 内部必须做配额 gate');
 });
 
 test('体验：工具调用进度通过 tool_calls 事件下发（与既有协议一致）', () => {
