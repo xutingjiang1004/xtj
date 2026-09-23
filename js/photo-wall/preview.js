@@ -747,31 +747,43 @@
                     J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", $ = setTimeout(re, 220)) : (J.style.opacity = "1",
                     $ = setTimeout(re, 150));
                 } else if (hasThumb) {
-                    // 缩略图秒开（命中浏览器缓存），原图在后台以 fetch→Blob→对象URL 无缝替换：
-                    // 避免"同一 URL 换元素重载"时的浏览器内存缓存异常（部分环境复现），
-                    // 生产环境同样更稳（下载功能已用同一 fetch 通道，且命中 HTTP 缓存）。
+                    // ★ 2026-09-23 原图提速：原先走 fetch→Blob→objectURL，必须等原图 100%
+                    //   下载完才能替换显示，慢网下大图要干等数秒（期间一直看缩略图），
+                    //   且 Blob 会多一次内存拷贝、带 credentials 的 fetch 还常绕过 CDN 共享缓存。
+                    //   现改为：保留缩略图做首帧占位，直接把 <img> 指向原图 URL——
+                    //   浏览器可复用 HTTP 缓存、并按渐进式（逐行扫描）边下边渲染，
+                    //   用户能立刻看到逐渐清晰的画面，明显快于等待整个 Blob。
                     J.src = thumbSrc, J.style.opacity = "1";
                     var openFullUrl = S.imageUrl;
                     $ = setTimeout(function() {
                         // 兜底：原图迟迟未就绪（如超慢网络）时先完成收尾，不无限期阻塞元信息
                         _._openLoadGen === ee && t === S && re();
                     }, 4e3);
-                    fetch(openFullUrl, { credentials: "same-origin" }).then(function(resp) {
-                        if (!resp || !resp.ok) return null;
-                        return resp.blob();
-                    }).then(function(blob) {
-                        if (!blob || !blob.size) return;
+
+                    // 用独立的预加载 Image 探测原图就绪，就绪后再切主图，避免缩略图切换时闪白
+                    var preImg = new Image();
+                    // 提升原图请求优先级，让浏览器更快开始拉取大图
+                    try { preImg.fetchPriority = "high"; } catch (e) {}
+                    preImg.decoding = "async";
+                    var preDone = false;
+                    function swapToFull() {
+                        if (preDone) return;
+                        preDone = true;
                         if (!(_._openLoadGen === ee && t === S && J && J.isConnected)) return;
                         if (J._ppUrl === openFullUrl) return;
-                        var objectUrl = URL.createObjectURL(blob);
                         J._ppObjectUrl && (URL.revokeObjectURL(J._ppObjectUrl), J._ppObjectUrl = null);
-                        J._ppObjectUrl = objectUrl;
                         J._ppUrl = openFullUrl;
-                        J.src = objectUrl;
                         J.style.transition = "none";
+                        J.src = openFullUrl;
                         J.style.opacity = "1";
                         if (_._openLoadGen === ee && t === S) re();
-                    }).catch(function() {});
+                    }
+                    preImg.onload = swapToFull;
+                    // 解码失败（如 404/CORS）时保持缩略图，不再重试
+                    preImg.onerror = function() { preDone = true; };
+                    preImg.src = openFullUrl;
+                    // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
+                    if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
                 } else {
                     J.src = S.imageUrl;
                     J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
