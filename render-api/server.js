@@ -12441,6 +12441,7 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
 // 单请求仍受 rateLimit(3600000, 60) 限制，配额进一步防"大体积多请求"灌爆存储。
 const PHOTO_UPLOAD_QUOTA_BYTES = 500 * 1024 * 1024; // 每用户每小时 500MB（约 4 个满批 120MB）
 const PHOTO_UPLOAD_QUOTA_WINDOW_MS = 60 * 60 * 1000;
+const PHOTO_UPLOAD_MAX_SINGLE_BYTES = 50 * 1024 * 1024;
 const photoUploadQuotaStore = new Map(); // userName -> { windowStart, bytes }
 setInterval(function() {
   var quotaCutoff = Date.now() - PHOTO_UPLOAD_QUOTA_WINDOW_MS;
@@ -12448,24 +12449,108 @@ setInterval(function() {
     if (!quotaRec || quotaRec.windowStart < quotaCutoff) photoUploadQuotaStore.delete(quotaUser);
   });
 }, 300000).unref();
-function tryConsumePhotoUploadQuota(userName, bytes) {
-  var now = Date.now();
+function photoUploadQuotaWindow(userName, now) {
   var rec = photoUploadQuotaStore.get(userName);
   if (!rec || (now - rec.windowStart) >= PHOTO_UPLOAD_QUOTA_WINDOW_MS) {
     rec = { windowStart: now, bytes: 0 };
     photoUploadQuotaStore.set(userName, rec);
   }
+  return rec;
+}
+function tryConsumePhotoUploadQuota(userName, bytes) {
+  var rec = photoUploadQuotaWindow(userName, Date.now());
   if (rec.bytes + bytes > PHOTO_UPLOAD_QUOTA_BYTES) return false;
   rec.bytes += bytes;
   return true;
 }
-app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), express.raw({ type: 'application/octet-stream', limit: '55mb' }), async (req, res) => {
+// ★ P2-12 审计修复：配额改为「解码前预占」，就必须有对应的反向操作，否则一次被拒
+//   （sharp 解码失败 / 类型不符 / 并发闸 429）的请求会把额度白白扣掉，用户什么都没
+//   上传成功却被限流——这是典型的「拒了也扣」。回滚一律走本函数（减所属字节数），
+//   不能直接写 0 或删记录：并发请求可能在同一窗口里又占了额度，粗暴清零会把它们一起抹掉。
+function refundPhotoUploadQuota(userName, bytes) {
+  if (!bytes || bytes <= 0) return;
+  var rec = photoUploadQuotaStore.get(userName);
+  if (!rec) return;
+  rec.bytes = Math.max(0, rec.bytes - bytes);
+}
+// 只读查询：用于 body 接收**之前**的预算预检，不得创建/修改记账记录。
+function photoUploadQuotaRemainingBytes(userName) {
+  var rec = photoUploadQuotaStore.get(userName);
+  if (!rec || (Date.now() - rec.windowStart) >= PHOTO_UPLOAD_QUOTA_WINDOW_MS) return PHOTO_UPLOAD_QUOTA_BYTES;
+  return Math.max(0, PHOTO_UPLOAD_QUOTA_BYTES - rec.bytes);
+}
+
+// ★ P2-12 审计修复（并发闸）：同一用户同时在途的照片解码请求数上限。
+//   旧实现里 500MB/小时配额是在全链路**跑完之后**才扣的事后记账：只要 N 个请求同时
+//   进来，每个都会各自持有一份最多 50MB 的 body 缓冲 + sharp 解码缓冲，进程内存峰值
+//   和「用户小时配额」之间没有任何相关性——配额起不到闸的作用。并发闸是唯一能在解码
+//   发生**之前**生效的限制：拿不到名额的请求直接 429，不会进入解码。
+//   取值依据：前端批量上传 worker 并发为 3（js/photo-wall/upload-ui.js 的 CONCURRENCY），
+//   取 4 是给多标签页/重试留余量，保证正常批量上传不被误伤；最坏情况下单用户在途
+//   ~4×50MB（有界），而非此前的无上界。
+const PHOTO_DECODE_MAX_INFLIGHT_PER_USER = 4;
+const photoDecodeInflight = new Map(); // userName -> 在途数（归零即从 Map 中删除，不留存）
+function acquirePhotoDecodeSlot(userName) {
+  var inFlight = photoDecodeInflight.get(userName) || 0;
+  if (inFlight >= PHOTO_DECODE_MAX_INFLIGHT_PER_USER) return null; // 立即拒绝，不排队
+  photoDecodeInflight.set(userName, inFlight + 1);
+  var released = false;
+  return function releasePhotoDecodeSlot() {
+    // 幂等：无论被调用几次（含 try/finally 与其它路径重复释放）都只生效一次，
+    // 否则重复释放会把同用户其它在途请求的名额减掉。
+    if (released) return;
+    released = true;
+    var cur = photoDecodeInflight.get(userName) || 0;
+    if (cur <= 1) photoDecodeInflight.delete(userName);
+    else photoDecodeInflight.set(userName, cur - 1);
+  };
+}
+
+// ★ P2-12 审计修复（预算预检）：排在 express.raw **之前**，用 Content-Length 在
+//   接收 body 之前就拒绝明显超预算的请求——先缓冲 50MB 再 429 等于白付内存代价。
+//   本中间件只「只读检查」不记账：真正的扣减仍按实际 body 字节数在处理器内进行，
+//   因此不存在「声明长度与实际字节不符」导致的账目偏差。chunked（无 Content-Length）
+//   时体积不可预知，跳过预检交给处理器里的尺寸/配额检查兜底。
+function photoUploadBudgetPrecheck(req, res, next) {
+  var declared = parseInt(req.headers['content-length'], 10);
+  if (!isFinite(declared) || declared <= 0) return next();
+  if (declared > PHOTO_UPLOAD_MAX_SINGLE_BYTES) {
+    return res.status(400).json({ error: '文件过大，单张不超过 50MB', code: 'file_too_large' });
+  }
+  if (declared > photoUploadQuotaRemainingBytes(req.userName)) {
+    return res.status(429).json({ error: '照片上传已达每小时容量上限，请稍后再试', code: 'photo_quota_exceeded' });
+  }
+  return next();
+}
+
+app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), photoUploadBudgetPrecheck, express.raw({ type: 'application/octet-stream', limit: '55mb' }), async (req, res) => {
+  // ★ P2-12：以下两个资源必须在**每一条**返回路径上归还，集中放在 finally 里处理。
+  //   写在具体分支里必然会有漏网的 return（新增校验分支时几乎一定会漏），一旦漏掉
+  //   就是永久泄漏一个解码名额 + 误扣一份配额。
+  var quotaCharged = 0;      // 已预占、尚未确认提交的字节数
+  var quotaCommitted = false; // 字节确实写进了 Storage → 不再回滚
+  var releaseDecodeSlot = null;
   try {
     var userName = req.userName;
     if (!userName) return res.status(401).json({ error: '未登录', code: 'auth_expired' });
     var buf = req.body;
     if (!Buffer.isBuffer(buf) || buf.length === 0) return res.status(400).json({ error: '缺少文件数据', code: 'INVALID_INPUT' });
-    if (buf.length > 50 * 1024 * 1024) return res.status(400).json({ error: '文件过大，单张不超过 50MB', code: 'file_too_large' });
+    if (buf.length > PHOTO_UPLOAD_MAX_SINGLE_BYTES) return res.status(400).json({ error: '文件过大，单张不超过 50MB', code: 'file_too_large' });
+    // ★ P2-12 审计修复：配额在**解码之前**预占。旧写法把扣减放在 sharp 解码之后，
+    //   等于先干活后算账：解码期间的内存已经付出，配额完全没起到闸门作用。
+    //   提前到此处后，超配额请求根本不会进入 sharp。
+    if (!tryConsumePhotoUploadQuota(userName, buf.length)) {
+      // 未扣到额度 → quotaCharged 保持 0，无需回滚（避免「没扣却退」把并发请求
+      // 在同一窗口里占的额度抹掉）。
+      return res.status(429).json({ error: '照片上传已达每小时容量上限，请稍后再试', code: 'photo_quota_exceeded' });
+    }
+    quotaCharged = buf.length;
+    // ★ P2-12 审计修复：per-user 并发解码闸。拿不到名额就立即 429——不做排队，
+    //   因为排队等于把 50MB 缓冲继续留在内存里等着，正是本条要消除的内存峰值。
+    releaseDecodeSlot = acquirePhotoDecodeSlot(userName);
+    if (!releaseDecodeSlot) {
+      return res.status(429).json({ error: '同时处理的照片过多，请稍后再试', code: 'photo_decode_busy' });
+    }
     var path = String(req.query.path || '').trim().slice(0, 300);
     var mimeType = String(req.query.mime_type || '').trim().slice(0, 50);
     if (!/^photos\/[A-Za-z0-9._-]{1,200}$/.test(path)) return res.status(400).json({ error: '存储路径不合法', code: 'INVALID_INPUT' });
@@ -12525,17 +12610,24 @@ app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), express.
     if (claimedNormalized && realNormalized && claimedNormalized !== realNormalized) {
       return res.status(400).json({ error: '图片内容与声明类型不符', code: 'INVALID_INPUT' });
     }
-    // ★ M27 审计修复：按用户累计字节配额（进程内小时窗口），避免单用户灌爆存储
-    if (!tryConsumePhotoUploadQuota(userName, buf.length)) {
-      return res.status(429).json({ error: '照片上传已达每小时容量上限，请稍后再试', code: 'photo_quota_exceeded' });
-    }
     var upload = await supabase.storage.from('uploads').upload(path, buf, { contentType: mimeType || 'image/jpeg', cacheControl: '31536000', upsert: false });
     if (upload && upload.error) return res.status(500).json({ error: '存储上传失败', code: 'storage_upload_failed' });
+    // 字节确实落到 Storage 了 → 额度不再回滚。此前所有 return（含上面各类 4xx
+    // 拒绝）都会走到 finally 回滚，所以不存在「拒了也扣」。
+    quotaCommitted = true;
     var publicUrl = supabase.storage.from('uploads').getPublicUrl(path).data.publicUrl;
     return res.json({ ok: true, public_url: publicUrl });
   } catch (e) {
     console.error('[photo-upload] server upload failed:', e && e.message);
     return res.status(500).json({ error: '上传失败，请稍后重试', code: 'photo_upload_failed' });
+  } finally {
+    // ★ P2-12：任何路径（成功 / 4xx 拒绝 / 5xx 异常 / 提前 return）都必须归还。
+    //   写在 try 的各个分支里一定会漏，集中在这里才是「必须保证任何路径都释放」。
+    if (releaseDecodeSlot) {
+      try { releaseDecodeSlot(); } catch (slotErr) { console.error('[photo-upload] release decode slot failed:', slotErr && slotErr.message); }
+      releaseDecodeSlot = null;
+    }
+    if (quotaCharged > 0 && !quotaCommitted) refundPhotoUploadQuota(userName, quotaCharged);
   }
 });
 
@@ -14267,6 +14359,49 @@ app.post('/api/avatar/batch', rateLimit(60000, 60), async (req, res) => {
   } catch (e) { console.error('[API] batch avatar:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
+// ★ P2-11 审计修复：同一用户的头像更新串行化（进程内 per-user mutex，无分布式依赖）。
+//
+//   触发场景：本接口的顺序是「insert 新头像记录 → 查询并删除『其它』头像记录 →
+//   删除对应 Storage 文件」。这两步之间没有原子性保证，同一账号两个更新交错时，
+//   较早请求的清理查询可能命中较晚请求刚插入的行，把用户刚换上的新头像（记录 +
+//   文件）一并删掉，前端表现为"头像换完又变空"。
+//
+//   实现为「尾 promise 链」：同一 userName 的任务严格按到达顺序排队执行。
+//   ① task 无论成功 / 失败 / 抛异常，链尾都必然 settle（失败被吞掉只作同步信号），
+//      因此一个挂掉的请求不会让后续请求永久排队；
+//   ② 等待超过 AVATAR_UPDATE_LOCK_WAIT_MS 的请求立即以 avatarBusy 失败退出队列，
+//      用户请求不会被挂死（→ 路由返回 429）；
+//   ③ 链上最后一个任务 settle 后删除 Map 项，Map 不随用户数无限增长。
+const AVATAR_UPDATE_LOCK_WAIT_MS = 8000;
+const AVATAR_CLEANUP_MAX_ROWS = 20; // 单次更新最多对账/清理的旧头像行数（防 N+1 放大）
+const avatarUpdateLocks = new Map(); // userName -> tail Promise
+function runAvatarUpdateSerialized(userName, task) {
+  var prevTail = avatarUpdateLocks.get(userName) || Promise.resolve();
+  // 前一个任务 reject 不得让排队者永远悬着：结果统一归一成"已结束"信号
+  var turn = prevTail.then(function() { return true; }, function() { return true; });
+  var waitTimer = null;
+  var timeoutSignal = new Promise(function(resolve) {
+    waitTimer = setTimeout(function() { resolve('timeout'); }, AVATAR_UPDATE_LOCK_WAIT_MS);
+  });
+  var current = Promise.race([turn, timeoutSignal]).then(function(outcome) {
+    if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
+    if (outcome === 'timeout') {
+      var busyErr = new Error('头像更新请求过于密集，请稍后重试');
+      busyErr.avatarBusy = true;
+      throw busyErr;
+    }
+    return task();
+  });
+  // 链尾必须永远是被 resolve 的普通 promise，否则后一个任务会被前一个的失败卡死
+  var tail = current.then(function() { return null; }, function() { return null; });
+  avatarUpdateLocks.set(userName, tail);
+  tail.then(function() {
+    // 只有确认链上没有更新的排队者时才删 key；删掉别人的 tail 会让串行失效
+    if (avatarUpdateLocks.get(userName) === tail) avatarUpdateLocks.delete(userName);
+  });
+  return current;
+}
+
 // POST /api/avatar - 更新当前用户头像（服务端写入，替代浏览器直写 posts 表，
 // 修复 anon 可插入任意 user_name 头像记录的身份冒充问题）
 app.post('/api/avatar', authenticateUser, rateLimit(60000, 10), async (req, res) => {
@@ -14304,63 +14439,120 @@ app.post('/api/avatar', authenticateUser, rateLimit(60000, 10), async (req, res)
     if (!hasUserPrefix && !isLegacyTimestampName) {
       return res.status(400).json({ error: '头像文件不属于当前用户', code: 'avatar_not_owned' });
     }
-    if (!hasUserPrefix) {
-      var claimed = await supabase.from('posts')
-        .select('id, user_name')
-        .eq('media_type', '__avatar__')
-        .eq('media_url', mediaUrl)
-        .neq('user_name', userName)
-        .limit(1)
-        .maybeSingle();
-      if (claimed && claimed.data) {
-        return res.status(403).json({ error: '该头像已被其他用户使用', code: 'avatar_not_owned' });
-      }
-    }
-    var insertRes = await supabase.from('posts').insert([{
-      user_name: userName,
-      content: '用户头像',
-      media_url: mediaUrl,
-      media_type: '__avatar__',
-      actor_key: '__avatar__'
-    }]).select('id,media_url').maybeSingle();
-    if (insertRes.error || !insertRes.data) {
-      console.error('[API] avatar insert:', insertRes.error && insertRes.error.message);
-      return res.status(500).json({ error: '头像保存失败', code: 'avatar_save_failed' });
-    }
-    // 清理旧头像记录（仅保留最新一条，避免记录无限累积）；同时删除旧 Storage 文件，
-    // 防止每个旧头像 URL 永久公开可热链（此前只删记录不删文件）。
-    var oldRes = await supabase.from('posts')
-      .select('id,media_url')
-      .eq('user_name', userName)
-      .eq('media_type', '__avatar__')
-      .eq('actor_key', '__avatar__')
-      .neq('id', insertRes.data.id)
-      .order('created_at', { ascending: false });
-    var oldRows = (oldRes && !oldRes.error && oldRes.data || []);
-    var oldIds = oldRows.map(function(row) { return row.id; });
-    if (oldIds.length > 0) {
-      var delRes = await supabase.from('posts').delete().in('id', oldIds);
-      if (delRes && delRes.error) console.error('[API] avatar cleanup:', delRes.error.message);
-      try {
-        var stalePaths = [];
-        oldRows.forEach(function(row) {
-          if (!row || !row.media_url) return;
-          var avMatch = String(row.media_url).match(/\/uploads\/(.+?)(?:\?|$)/);
-          if (avMatch) {
-            var avPath = decodeURIComponent(avMatch[1]);
-            if (avPath.indexOf('..') === -1) stalePaths.push(avPath);
-          }
-        });
-        if (stalePaths.length) {
-          var avDelRes = await supabase.storage.from('uploads').remove(stalePaths).catch(function(stErr) { return { error: stErr }; });
-          if (avDelRes && avDelRes.error) console.warn('[API] avatar stale storage remove:', (avDelRes.error && avDelRes.error.message) || avDelRes.error);
+    // ★ P2-11 审计修复：从归属查询到"插记录 + 清旧记录/旧文件"整段按用户串行执行。
+    //   归属查询也必须在锁内——它与后续步骤读的是同一批数据，"验锁之间"同样会被
+    //   并发的第二次更新穿透。task 内统一返回 { status, error, code } 由外层写响应，
+    //   避免回调里直接 res.* 造成"同一请求两次响应"。
+    var outcome = await runAvatarUpdateSerialized(userName, async function() {
+      if (!hasUserPrefix) {
+        var claimed = await supabase.from('posts')
+          .select('id, user_name')
+          .eq('media_type', '__avatar__')
+          .eq('media_url', mediaUrl)
+          .neq('user_name', userName)
+          .limit(1)
+          .maybeSingle();
+        if (claimed && claimed.data) {
+          return { status: 403, error: '该头像已被其他用户使用', code: 'avatar_not_owned' };
         }
-      } catch (eStale) {
-        console.warn('[API] avatar stale storage cleanup failed:', eStale && eStale.message);
       }
-    }
-    return res.json({ ok: true, avatar_url: mediaUrl });
+      var insertRes = await supabase.from('posts').insert([{
+        user_name: userName,
+        content: '用户头像',
+        media_url: mediaUrl,
+        media_type: '__avatar__',
+        actor_key: '__avatar__'
+      }]).select('id,media_url,created_at').maybeSingle();
+      if (insertRes.error || !insertRes.data) {
+        console.error('[API] avatar insert:', insertRes.error && insertRes.error.message);
+        return { status: 500, error: '头像保存失败', code: 'avatar_save_failed' };
+      }
+      // 清理旧头像记录（仅保留最新一条，避免记录无限累积）；同时删除旧 Storage 文件，
+      // 防止每个旧头像 URL 永久公开可热链（此前只删记录不删文件）。
+      var ourRow = insertRes.data;
+      var oldRes = await supabase.from('posts')
+        .select('id,media_url,created_at')
+        .eq('user_name', userName)
+        .eq('media_type', '__avatar__')
+        .eq('actor_key', '__avatar__')
+        .neq('id', ourRow.id)
+        .order('created_at', { ascending: false })
+        .limit(AVATAR_CLEANUP_MAX_ROWS);
+      var oldRows = (oldRes && !oldRes.error && oldRes.data || []);
+      // ★ P2-11 审计修复：只有"严格早于本次插入"的行才算旧头像。
+      //   任何 created_at 比本次插入更新（或 id 更大，数值型主键场景）的行都可能
+      //   是并发写进来的新头像，必须完整保留——把它们删掉正是本次要修的那个 bug。
+      var staleRows = oldRows.filter(function(row) {
+        if (!row || row.id === ourRow.id) return false;
+        var rowCreated = String(row.created_at || '');
+        var ourCreated = String(ourRow.created_at || '');
+        if (rowCreated && ourCreated && rowCreated > ourCreated) return false;
+        if (Number(row.id) > Number(ourRow.id)) return false;
+        return true;
+      });
+      var staleIds = staleRows.map(function(row) { return row.id; });
+      if (staleIds.length > 0) {
+        // ★ P2-11 审计修复：删除要回读确认。旧代码无条件按"查询到的 id 列表"去删
+        //   Storage 文件；若 delete 实际失败或只删掉一部分，那些记录仍在引用这些
+        //   文件，删文件等于把仍在使用的头像一并删掉。这里只处理**确实被删掉**的行。
+        var delRes = await supabase.from('posts').delete().in('id', staleIds).select('id');
+        if (delRes && delRes.error) {
+          console.error('[API] avatar cleanup:', delRes.error.message);
+          return { status: 200, avatar_url: mediaUrl };
+        }
+        var deletedIds = {};
+        ((delRes && delRes.data) || []).forEach(function(row) {
+          if (row && row.id != null) deletedIds[String(row.id)] = true;
+        });
+        var confirmedStale = staleRows.filter(function(row) { return deletedIds[String(row.id)] === true; });
+        try {
+          var stalePaths = [];
+          confirmedStale.forEach(function(row) {
+            if (!row || !row.media_url) return;
+            var avMatch = String(row.media_url).match(/\/uploads\/(.+?)(?:\?|$)/);
+            if (avMatch) {
+              var avPath = decodeURIComponent(avMatch[1]);
+              if (avPath.indexOf('..') === -1 && stalePaths.indexOf(avPath) === -1) stalePaths.push(avPath);
+            }
+          });
+          if (stalePaths.length) {
+            // ★ P2-11 审计修复：删除前逐个确认该路径已**不再被任何头像记录引用**。
+            //   同一次清理里多行可能指向同一个文件；别的用户也可能已把这个 URL 设成
+            //   自己的头像；用户重复设置同一个 URL 时，"保留的最新行"也仍在引用它
+            //   （旧逻辑只看本用户的旧行，会把仍在使用的头像文件删掉）。
+            //   引用仍在 = 它不是孤儿文件，本次不删（下次它不再被引用时自然会被清理）；
+            //   查询失败一律跳过（fail-closed），绝不赌一次删除。
+            var safeToRemove = [];
+            for (var avIdx = 0; avIdx < stalePaths.length; avIdx++) {
+              var avEscaped = stalePaths[avIdx].replace(/[\\%_]/g, '\\$&');
+              var stillRefRes = await supabase.from('posts')
+                .select('id')
+                .eq('media_type', '__avatar__')
+                .eq('actor_key', '__avatar__')
+                .ilike('media_url', '%' + avEscaped + '%')
+                .limit(1);
+              if (!stillRefRes || stillRefRes.error) {
+                console.warn('[API] avatar stale storage skip: reference query failed');
+                continue;
+              }
+              if (stillRefRes.data && stillRefRes.data.length > 0) continue; // 仍被引用 → 不删
+              safeToRemove.push(stalePaths[avIdx]);
+            }
+            if (safeToRemove.length) {
+              var avDelRes = await supabase.storage.from('uploads').remove(safeToRemove).catch(function(stErr) { return { error: stErr }; });
+              if (avDelRes && avDelRes.error) console.warn('[API] avatar stale storage remove:', (avDelRes.error && avDelRes.error.message) || avDelRes.error);
+            }
+          }
+        } catch (eStale) {
+          console.warn('[API] avatar stale storage cleanup failed:', eStale && eStale.message);
+        }
+      }
+      return { status: 200, avatar_url: mediaUrl };
+    });
+    if (outcome.status !== 200) return res.status(outcome.status).json({ error: outcome.error, code: outcome.code });
+    return res.json({ ok: true, avatar_url: outcome.avatar_url });
   } catch (e) {
+    if (e && e.avatarBusy) return res.status(429).json({ error: e.message, code: 'avatar_update_busy' });
     console.error('[API] avatar update:', e && e.message);
     return res.status(500).json({ error: '头像更新失败', code: 'avatar_update_failed' });
   }
