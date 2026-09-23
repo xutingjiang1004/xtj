@@ -9,6 +9,8 @@ var dns = require('dns');
 var http = require('http');
 var https = require('https');
 var net = require('net');
+var zlib = require('zlib');
+var Readable = require('stream').Readable;
 
 var WEB_MAX_BYTES = 1.5 * 1024 * 1024;
 // ★ 2026-09-22 修复（read_web_page 对慢站/反爬站频繁失败）：
@@ -545,6 +547,7 @@ module.exports = {
   assertSafeWebUrl: assertSafeWebUrl,
   defaultDnsLookup: defaultDnsLookup,
   requestPinnedJson: requestPinnedJson,
+  requestPinnedStream: requestPinnedStream,
   createPinnedAgent: createPinnedAgent
 };
 
@@ -786,6 +789,141 @@ function requestPinnedJson(parsedUrl, addresses, opts) {
     request.setTimeout(timeoutMs, function() {
       request.destroy(new Error('请求超时'));
     });
+    request.on('error', function(err) {
+      if (!settled) {
+        settled = true;
+        cleanupExternalAbort();
+        reject(err);
+      }
+    });
+    if (bodyBuf) request.write(bodyBuf);
+    request.end();
+  });
+}
+
+// ── DNS-pinned 流式请求（供自定义模型 base_url 的 SSE/非流式调用）──────────────
+// ★ P1-3 审计修复：
+//   此前 server.js 的自定义模型调用写成
+//     fetch(baseUrl + '/chat/completions', { ..., agent: createPinnedAgent(addrs) })
+//   但 Node 内置 fetch 走的是 undici，**不认识 http.Agent，也不读 `agent` 选项**
+//   —— 只认 `dispatcher`。结果是这个参数被静默忽略：fetch 仍旧自己解析一次 DNS，
+//   与 assertSafeWebUrl 的解析相互独立，注释里声称的「消除 TOCTOU / DNS rebinding」
+//   实际上完全没有生效，攻击者控制的域名仍可让校验通过后再连到内网或云元数据。
+//
+//   本函数改用 https.request + pinnedLookup（真正的 DNS pin），并把响应包装成
+//   WHATWG Response —— 调用方继续用 ok / status / headers.get() / body.getReader()
+//   即可，无需改动消费逻辑。
+//
+//   另外两点与 fetch(..., { redirect: 'manual' }) 等价：
+//     · https.request 从不跟随重定向，3xx 原样返回，由调用方显式拒绝；
+//     · Response 的 type 恒为 'default'，调用方对 3xx 的状态码判断已覆盖。
+//
+// 参数：parsedUrl(URL) / addresses(已校验地址数组) / opts{method, headers, body, signal, timeoutMs}
+// 返回：Promise<Response>
+function requestPinnedStream(parsedUrl, addresses, opts) {
+  opts = opts || {};
+  if (!Array.isArray(addresses) || !addresses.length) {
+    return Promise.reject(new Error('requestPinnedStream 需要非空的已校验地址列表'));
+  }
+  var timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 0;
+  var bodyBuf = null;
+  if (opts.body !== undefined && opts.body !== null) {
+    bodyBuf = Buffer.isBuffer(opts.body) ? opts.body : Buffer.from(String(opts.body), 'utf8');
+  }
+  var isHttps = parsedUrl.protocol !== 'http:';
+  var transport = isHttps ? https : http;
+
+  return new Promise(function(resolve, reject) {
+    var settled = false;
+    var request = null;
+    var externalSignal = opts.signal;
+
+    function cleanupExternalAbort() {
+      if (externalSignal) {
+        try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+      }
+    }
+    function onExternalAbort() {
+      if (!settled) {
+        settled = true;
+        try { if (request) request.destroy(new Error('请求已取消')); } catch (_) {}
+        cleanupExternalAbort();
+        reject(new Error('请求已取消'));
+      }
+    }
+    if (externalSignal) {
+      if (externalSignal.aborted) return reject(new Error('请求已取消'));
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+
+    var headers = Object.assign({
+      Host: parsedUrl.host,
+      'User-Agent': 'xtj-server/1.0',
+      Accept: 'application/json,text/event-stream,*/*;q=0.8',
+      // ★ 与 fetch 不同：https.request 不会自动解压响应体。若上游仍返回
+      //   gzip/deflate/br，SSE 与 json() 都会拿到压缩字节而解析失败，
+      //   因此显式要求 identity，并在下方按 content-encoding 做兜底解压。
+      'Accept-Encoding': 'identity'
+    }, opts.headers || {});
+    if (bodyBuf) {
+      headers['Content-Length'] = bodyBuf.length;
+      if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    }
+
+    request = transport.request({
+      protocol: isHttps ? 'https:' : 'http:',
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port ? Number(parsedUrl.port) : (isHttps ? 443 : 80),
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: String(opts.method || 'POST').toUpperCase(),
+      servername: isHttps ? parsedUrl.hostname : undefined,
+      rejectUnauthorized: true,
+      headers: headers,
+      // ★ 关键：真正的 DNS pin —— 连接复用已校验地址，杜绝二次解析被劫持
+      lookup: pinnedLookup(addresses)
+    }, function(response) {
+      if (settled) return;
+      settled = true;
+      cleanupExternalAbort();
+      // 把数组型头（如 set-cookie）摊平成字符串，否则 Headers 构造会抛错。
+      var flatHeaders = {};
+      try {
+        Object.keys(response.headers || {}).forEach(function(k) {
+          var v = response.headers[k];
+          flatHeaders[k] = Array.isArray(v) ? v.join(', ') : String(v);
+        });
+      } catch (_) { flatHeaders = {}; }
+
+      // 兜底解压：上游无视 Accept-Encoding: identity 时仍能正确拿到明文。
+      var src = response;
+      var enc = String(response.headers['content-encoding'] || '').toLowerCase();
+      try {
+        if (enc === 'gzip' || enc === 'x-gzip') src = response.pipe(zlib.createGunzip());
+        else if (enc === 'deflate') src = response.pipe(zlib.createInflate());
+        else if (enc === 'br') src = response.pipe(zlib.createBrotliDecompress());
+      } catch (_) { src = response; }
+      if (src !== response) {
+        // 已解压，再保留 content-length / content-encoding 会让调用方误判
+        delete flatHeaders['content-length'];
+        delete flatHeaders['content-encoding'];
+      }
+
+      var init = { status: response.statusCode || 0, statusText: response.statusMessage || '' };
+      try {
+        init.headers = flatHeaders;
+        resolve(new Response(Readable.toWeb(src), init));
+      } catch (eHeaders) {
+        // 极端情况下上游头不合法 → 丢弃头信息，保留流（状态码判断仍可用）
+        try { delete init.headers; resolve(new Response(Readable.toWeb(src), init)); }
+        catch (eFatal) { reject(eFatal); }
+      }
+    });
+
+    if (timeoutMs > 0) {
+      request.setTimeout(timeoutMs, function() {
+        try { request.destroy(new Error('请求超时')); } catch (_) {}
+      });
+    }
     request.on('error', function(err) {
       if (!settled) {
         settled = true;

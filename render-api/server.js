@@ -53,7 +53,7 @@ const {
   withSearchProviderTimeout
 } = require('./search-providers');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
-const { fetchSafeWebPage, assertSafeWebUrl, createPinnedAgent, fetchSafeRaw, fetchSafeBuffer } = require('./web-fetch');
+const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
 
@@ -21004,14 +21004,16 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
   // ★ 2026-09-13 修复 S-1（SSRF TOCTOU）：校验通过后必须把「已校验地址」固定到
   //   连接的 DNS lookup 上，否则 fetch 会独立二次解析，攻击者控制的域名可让
   //   两次解析返回不同结果（校验时公网 IP、连接时内网 IP）→ 绕过防护。
-  var _pinnedAgent = null;
+  var _safeCheck = null;
+  // ★ P1-3：转发目标端点。用已校验过的 parsed.href 派生，不再重新拼接字符串。
+  var _chatEndpoint = null;
   try {
-    var _safeCheck = await assertSafeWebUrl(baseUrl);
+    _safeCheck = await assertSafeWebUrl(baseUrl);
     if (_safeCheck.parsed.protocol !== 'https:') {
       writeSse(res, { type: 'error', error: '接口地址仅支持 https://', code: 'CUSTOM_BAD_BASE_URL' });
       return safeEnd();
     }
-    _pinnedAgent = createPinnedAgent(_safeCheck.addresses);
+    _chatEndpoint = new URL(_safeCheck.parsed.href.replace(/\/+$/, '') + '/chat/completions');
   } catch (eUrl) {
     writeSse(res, { type: 'error', error: '接口地址无效或指向不允许的主机', code: 'CUSTOM_BAD_BASE_URL' });
     return safeEnd();
@@ -21166,17 +21168,16 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
     }
     var upstream;
     try {
-      upstream = await fetch(baseUrl + '/chat/completions', {
+      // ★ P1-3 修复：改用 requestPinnedStream（https.request + pinnedLookup）。
+      //   此前这里传的是 `agent: createPinnedAgent(...)`，但 Node 内置 fetch 走
+      //   undici、只认 `dispatcher`，`agent` 被静默忽略 —— DNS pin 实际从未生效，
+      //   校验与连接仍是两次独立解析，DNS rebinding 窗口依旧敞开。
+      //   本函数内部同样不跟随重定向（等价于 redirect:'manual'），3xx 由下方拒绝。
+      upstream = await requestPinnedStream(_chatEndpoint, _safeCheck.addresses, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
         body: JSON.stringify(payload),
-        signal: controller.signal,
-        // ★ 修复：不跟随重定向（此前默认 follow，初始 host 校验后 302 到内网/云元数据
-        // 即完成 SSRF）；配合上方 assertSafeWebUrl 一次性校验，重定向一律拒绝。
-        redirect: 'manual',
-        // ★ 修复 S-1（SSRF TOCTOU）：复用已校验地址的 pinned Agent，使 fetch 不再
-        //   独立二次解析 DNS（否则校验与连接分离可被 DNS rebinding 绕过）。
-        agent: _pinnedAgent || undefined
+        signal: controller.signal
       });
     } catch (eNet) {
       throw eNet;
@@ -21526,11 +21527,13 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
   baseUrl = baseUrl.replace(/\/+$/, '');
   var chosenModel = model || (ep && ep.defaultModel) || '';
   // ★ 修复 S-1（SSRF TOCTOU）：同 /custom-chat/stream，把已校验地址 pin 到连接上。
-  var _pinnedAgent2 = null;
+  var _safe2 = null;
+  var _chatEndpoint2 = null;
   try {
-    var _safe2 = await assertSafeWebUrl(baseUrl);
+    _safe2 = await assertSafeWebUrl(baseUrl);
     if (_safe2.parsed.protocol !== 'https:') { sseSend({ type: 'error', error: '接口地址仅支持 https://', code: 'CUSTOM_BAD_BASE_URL' }); return safeEnd(); }
-    _pinnedAgent2 = createPinnedAgent(_safe2.addresses);
+    // ★ P1-3：由已校验的 parsed 派生转发端点（不再用字符串拼接 + 未生效的 agent）
+    _chatEndpoint2 = new URL(_safe2.parsed.href.replace(/\/+$/, '') + '/chat/completions');
   } catch (eUrl2) {
     sseSend({ type: 'error', error: '接口地址无效或指向不允许的主机', code: 'CUSTOM_BAD_BASE_URL' });
     return safeEnd();
@@ -21550,17 +21553,13 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
       max_tokens: options.maxTokens || 2000
     };
     if (options.stream) payload.stream = true;
-    return fetch(baseUrl + '/chat/completions', {
+    // ★ P1-3 修复：同 /custom-chat/stream —— `agent:` 对内置 fetch 无效，
+    //   改走 requestPinnedStream 做真正的 DNS pin（https.request + pinnedLookup）。
+    return requestPinnedStream(_chatEndpoint2, _safe2.addresses, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify(payload),
-      signal: controller.signal,
-      // ★ 修复：禁止跟随重定向（防 SSRF 经 302 跳到内网；校验-连接分离的 DNS
-      // 翻转窗口同时被收窄，与 web-fetch.js 的 redirect:'manual' 模式一致）
-      redirect: 'manual',
-      // ★ 修复 S-1（SSRF TOCTOU）：用已校验地址的 pinned Agent 发起连接，
-      //   彻底消除「校验用一次解析、连接又用另一次解析」的 DNS rebinding 窗口。
-      agent: _pinnedAgent2 || undefined
+      signal: controller.signal
     });
   }
   async function callCustomChat(msgs, options) {
