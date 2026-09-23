@@ -6,12 +6,13 @@
  *  2. 文件树浏览 + 文件内容查看 / 在线编辑
  *  3. AI 助手（内置 DeepSeek 或第三方自定义模型）查看 / 修改代码
  *  4. 提交到 GitHub（直接提交 或 创建 Pull Request）
- *  5. 本地持久化：仓库信息 / AI 对话 / 修改历史（localStorage）；GitHub Token 按设置仅保留于
- *     当前标签页 sessionStorage，或仅在工作区打开期间保留于内存。
+ *  5. 本地持久化：仓库信息 / AI 对话 / 修改历史（localStorage）；GitHub Token 按账号隔离保存在
+ *     当前标签页 sessionStorage——★ P2-21：「记住 Token」只表示「刷新页面仍保留，关闭标签页即清除」，
+ *     不存在跨标签页 / 跨会话的长期保存；取消勾选时连当前标签页的会话键也不写。
  *
- * 安全：GitHub Token 仅保存在当前 XTJ 用户隔离的浏览器 sessionStorage（或内存），仅在该用户发起操作时随
- *       请求经本站白名单代理（/api/code/gh-proxy，仅允许 api.github.com）转发，
- *       不在服务端持久化。
+ * 安全：GitHub Token 仅保存在「当前 XTJ 用户隔离」的浏览器 sessionStorage（仅当前标签页有效，关闭
+ *       标签页即清除），仅在该用户发起操作时随请求经本站白名单代理（/api/code/gh-proxy，
+ *       仅允许 api.github.com）转发，不在服务端持久化。
  *
  * 依赖：仅使用 window 全局（XTJ_CONFIG / ensureUserToken / currentUser /
  *       XTJSecondaryPageState / showToast），不依赖 ai-agent.js 内部实现。
@@ -28,6 +29,9 @@
   var LS_CONV = 'xtj_code_conversation';
   var LS_HISTORY = 'xtj_code_history';
   var LS_PR = 'xtj_code_pr_mode';
+  // ★ P2-20：'记住 Token' 偏好（0/1 开关，绝不存 Token 本身）与 Token 一样按账号隔离存储，
+  //   换账号后不会继承上一个账号的保存策略。
+  var LS_REMEMBER = 'xtj_code_remember';
   var LS_THINK = 'xtj_code_think';
   var LS_SPLIT = 'xtj_code_split';
 
@@ -226,8 +230,10 @@
   }
 
   // S9：GitHub Token 等敏感凭据不再明文持久化到 localStorage。
-  // 改用 sessionStorage——本标签页内刷新保留（等价原有“记住”体验），
+  // 改用 sessionStorage——仅当前标签页有效：本标签页内刷新保留，
   // 关闭标签页即清除，任意 XSS 也无法跨会话偷走长期令牌。
+  // ★ P2-21：因此界面上的「记住 Token」只在本标签页会话内生效，文案必须写明这一点，
+  //   不能再让用户误以为是长期记住（默认仍是 sessionStorage，不引入长期存放凭据的风险）。
   function safeSessionGet(key) {
     try { return window.sessionStorage.getItem(key); } catch (e) { return null; }
   }
@@ -247,7 +253,17 @@
   // 旧版全局键（xtj_code_*）作为回退：首次读写后自动迁移到账号键并删除旧键。
   function storageScopeName() {
     var u = '';
-    try { u = String(window.currentUser || window._xtjCanonicalUser || '').trim(); } catch (e) {}
+    // ★ P2-20 审计修复：用户标识优先复用项目统一入口 window.getCanonicalUser()
+    //   （core.js 定义：服务端确认的权威用户名，未确认时回退 currentUser），
+    //   不再自造一套取值顺序；core.js 尚未加载时再按既有全局变量兜底。
+    try {
+      if (typeof window.getCanonicalUser === 'function') u = String(window.getCanonicalUser() || '').trim();
+    } catch (e) { u = ''; }
+    if (!u) {
+      try { u = String(window.currentUser || window._xtjCanonicalUser || '').trim(); } catch (e) { u = ''; }
+    }
+    // ★ P2-20：取不到用户名时用明确的兜底键 'guest'，既不会因为读不到标识而抛错，
+    //   也绝不退化成所有账号共用的裸 xtj_code_* 键（避免跨账号串读凭据）。
     if (!u) u = 'guest';
     u = String(u).replace(/[^a-zA-Z0-9_@\-\u4e00-\u9fa5]/g, '_').slice(0, 64);
     return u || 'guest';
@@ -364,6 +380,9 @@
     } catch (e) { return []; }
   }
   function saveHistory(arr) { storageSet(LS_HISTORY, JSON.stringify((arr || []).slice(-200))); }
+  // ★ P2-20：记住偏好走 storageGet/storageSet ⇒ 键自动带当前账号 scope；默认记住（缺值视为 1）
+  function loadRemember() { return storageGet(LS_REMEMBER) !== '0'; }
+  function saveRemember(on) { storageSet(LS_REMEMBER, on ? '1' : '0'); }
   function loadPrMode() { return storageGet(LS_PR) === '1'; }
   function savePrMode(v) { storageSet(LS_PR, v ? '1' : '0'); }
   function loadThink() {
@@ -765,7 +784,9 @@
     var rememberCheck = el('input', { type: 'checkbox', id: 'cwRememberToken' });
     rememberCheck.checked = true;
     rememberToken.appendChild(rememberCheck);
-    rememberToken.appendChild(el('span', { text: '记住 Token（当前标签页会话内保留；取消勾选则关闭工作区后不保留）' }));
+    // ★ P2-21 审计修复：存储恒定是 sessionStorage（仅当前标签页有效），文案必须如实反映，
+    //   不能让用户以为勾选后会长期记住。
+    rememberToken.appendChild(el('span', { text: '记住 Token（仅当前标签页有效：刷新页面保留，关闭标签页即清除；取消勾选则关闭工作区后不保留）' }));
     tokenField.appendChild(rememberToken);
     card.appendChild(tokenField);
 
@@ -796,7 +817,8 @@
     connectBtn.addEventListener('click', function () { connectRepo(); });
     card.appendChild(connectBtn);
 
-    card.appendChild(el('div', { class: 'cw-connect-tip', text: 'Token 仅保存在你的浏览器本地，仅在你操作时经本站转发到 GitHub，不会上传服务器存储。' }));
+    // ★ P2-21：原文案「保存在你的浏览器本地」容易被理解成长期保存，实际只在当前标签页会话内。
+    card.appendChild(el('div', { class: 'cw-connect-tip', text: 'Token 仅保存在当前标签页会话（刷新保留，关闭标签页即清除），并按登录账号隔离；仅在你操作时经本站转发到 GitHub，不会上传服务器存储。' }));
     connectView.appendChild(card);
     body.appendChild(connectView);
 
@@ -1151,6 +1173,9 @@
     populateThinkingSelects();
     initSplitters();
     ui.prCheck.checked = state.prMode;
+    // ★ P2-20：记住偏好按当前账号读回；★ P2-21：该勾选只决定「是否写当前标签页的会话键」，
+    //   不改变存储生命周期（永远是 sessionStorage，关闭标签页即清除）。
+    try { if (ui.rememberCheck) ui.rememberCheck.checked = loadRemember(); } catch (e) {}
 
     if (state.repo) {
       ui.repoInput.value = (state.repo.full_name ? 'https://github.com/' + state.repo.full_name : ('https://github.com/' + state.repo.owner + '/' + state.repo.repo));
@@ -1182,6 +1207,8 @@
       try { panel.innerHTML = ''; } catch (e) {}
     }
     abortStream();
+    // ★ P2-21：关闭工作区后不在闭包内继续保留明文凭据；勾选「记住」也只是写入当前标签页的
+    // 账号隔离 session 键（仅当前标签页有效，关闭标签页即清除），下次打开工作区时从该键恢复。
     state.token = ''; // 关闭工作区后不在闭包内继续保留明文凭据；勾选记住时可从隔离 session 键恢复
     try { if (window.XTJSecondaryPageState) window.XTJSecondaryPageState.close('code-workbench'); } catch (e) {}
     try { if (window.restoreMainNavigationState) window.restoreMainNavigationState(); } catch (e) {}
@@ -1230,7 +1257,11 @@
       };
       state.prMode = ui.prCheck.checked;
       saveRepo(state.repo);
-      if (ui.rememberCheck && ui.rememberCheck.checked) saveToken(state.token); else saveToken('');
+      // ★ P2-21：勾选与否只决定「是否保存」，保存目标恒为当前标签页的账号隔离 session 键；
+      //   ★ P2-20：偏好本身也按账号隔离持久化，换账号不继承。
+      var rememberOn = !!(ui.rememberCheck && ui.rememberCheck.checked);
+      saveRemember(rememberOn);
+      if (rememberOn) saveToken(state.token); else saveToken('');
       savePrMode(state.prMode);
       ui.repoName.textContent = state.repo.full_name;
       ui.connectView.classList.add('hidden');
@@ -2257,6 +2288,58 @@
     return String(text || '').replace(/【TOOL[：:\s]*(?:read_file[：:\s]*path=[^\s】]+|list_files)[^】]*】/gi, '');
   }
 
+  // ★ P2-8 审计修复：AI 流式输出此前每收到一个片段就把「完整累计全文」丢给 Markdown 渲染器
+  //   并整体替换 innerHTML —— 处理量随回复长度二次增长，长代码会明显卡顿。
+  //   这里把高频增量按帧合并：同一帧内只排一次渲染任务，一帧最多重排一次；
+  //   流正常结束必须 flush() 补一次完整渲染，保证最终态与逐片段渲染完全一致。
+  //   渲染仍然复用 renderMarkdownEscFirst（先转义再交给渲染器），不新增任何 XSS 面。
+  function scheduleRenderFrame(fn) {
+    if (typeof window.requestAnimationFrame === 'function') return window.requestAnimationFrame(fn);
+    return setTimeout(fn, 16); // 无 rAF（老浏览器 / 后台环境）时退化为按帧节流
+  }
+  function cancelRenderFrame(id) {
+    if (typeof window.requestAnimationFrame === 'function' && typeof window.cancelAnimationFrame === 'function') {
+      try { window.cancelAnimationFrame(id); return; } catch (e) {}
+    }
+    clearTimeout(id);
+  }
+  function createStreamRenderer(node) {
+    var pending = '';
+    var frameId = null;
+    var closed = false;
+    function paint() {
+      frameId = null;
+      if (closed || !node) return;
+      var shown = stripToolMarkers(pending);
+      var mdHtml = renderMarkdownEscFirst(shown);
+      if (mdHtml !== null) node.innerHTML = mdHtml; else node.textContent = shown;
+      scrollChat();
+    }
+    return {
+      // 只记录最新全文，不立刻重排
+      setText: function (text) {
+        pending = String(text == null ? '' : text);
+        if (closed || frameId !== null) return;
+        frameId = scheduleRenderFrame(paint);
+      },
+      // 流结束：取消待执行帧并同步渲染一次，确保最终态完整正确
+      flush: function () {
+        if (frameId !== null) { cancelRenderFrame(frameId); frameId = null; }
+        paint();
+      },
+      // 状态文案（如“正在继续生成余下部分…”）：先撤掉待执行帧，避免被上一次的残留帧覆盖
+      setStatus: function (text) {
+        if (frameId !== null) { cancelRenderFrame(frameId); frameId = null; }
+        pending = '';
+        if (node) node.textContent = String(text == null ? '' : text);
+      },
+      cancel: function () {
+        closed = true;
+        if (frameId !== null) { cancelRenderFrame(frameId); frameId = null; }
+      }
+    };
+  }
+
   async function buildAiPrompt(request) {
     var lines = [];
     if (state.repo) lines.push('仓库：' + state.repo.full_name + '（当前分支：' + state.repo.branch + '）');
@@ -2401,6 +2484,8 @@
     aiWrap.appendChild(contentDiv);
     ui.chatMsgs.appendChild(aiWrap);
     scrollChat();
+    // ★ P2-8：本轮对话共用一个按帧合并的渲染器（含自动续写 / 工具调用的多轮流式）
+    var streamView = createStreamRenderer(contentDiv);
 
     var accumulated = '';
     state.streaming = true;
@@ -2420,7 +2505,7 @@
     if (isCustom) {
       var cfg = resolveCustomCfg(state.model);
       if (!cfg || !cfg.api_key) {
-        contentDiv.textContent = '该自定义模型缺少 API Key，请先在 AI 设置中配置。';
+        streamView.setStatus('该自定义模型缺少 API Key，请先在 AI 设置中配置。');
         state.streaming = false;
         ui.sendBtn.disabled = false;
         ui.sendBtn.textContent = '发送';
@@ -2504,22 +2589,22 @@
           }
         },
         onContent: function (chunk) {
+          // ★ P2-8：只更新待渲染全文，实际重排交给下一帧统一做一次
           accumulated += chunk;
-          var shown = stripToolMarkers(accumulated);
-          var mdHtml = renderMarkdownEscFirst(shown);
-          if (mdHtml !== null) contentDiv.innerHTML = mdHtml; else contentDiv.textContent = shown;
-          scrollChat();
+          streamView.setText(accumulated);
         },
         onError: function (evt) {
           done = true;
-          contentDiv.textContent = '出错了：' + esc((evt && (evt.error || evt.message)) || '未知错误');
+          streamView.setStatus('出错了：' + esc((evt && (evt.error || evt.message)) || '未知错误'));
         }
       });
+      // ★ P2-8：流正常结束后补一次完整渲染，最终态与逐片段渲染一致
+      if (!done) streamView.flush(); else streamView.cancel();
     } catch (e) {
       done = true;
       var msg = (e && (e.error || e.message)) || '生成失败';
       if (e && e.code === 'ABORTED') msg = '已停止生成';
-      contentDiv.textContent = '出错了：' + esc(msg);
+      streamView.setStatus('出错了：' + esc(msg));
     } finally {
       state.streaming = false;
       ui.sendBtn.disabled = false;
@@ -2558,7 +2643,7 @@
         } else {
           contPayload = { url: '/api/code/ai', body: { message: contMsg, history: [], model: state.model, thinking_mode: state.thinking } };
         }
-        contentDiv.textContent = '输出较长（第 ' + contRounds + ' 段），正在继续生成余下部分…';
+        streamView.setStatus('输出较长（第 ' + contRounds + ' 段），正在继续生成余下部分…');
         var contOk = await streamAi(contPayload, {
           onReasoning: function (chunk) {
             if (chunk) {
@@ -2568,14 +2653,12 @@
             }
           },
           onContent: function (chunk) {
+            // ★ P2-8：续写轮同样只记全文、按帧渲染
             accumulated += chunk;
-            var shownC = stripToolMarkers(accumulated);
-            var mdHtmlC = renderMarkdownEscFirst(shownC);
-            if (mdHtmlC !== null) contentDiv.innerHTML = mdHtmlC; else contentDiv.textContent = shownC;
-            scrollChat();
+            streamView.setText(accumulated);
           },
           onError: function () { done = true; }
-        }).then(function () { return true; }, function () { return false; });
+        }).then(function () { streamView.flush(); return true; }, function () { streamView.cancel(); return false; });
         if (!contOk) { done = true; break; }
       } catch (eCont) { done = true; break; }
     }
@@ -2644,6 +2727,7 @@
       } else {
         toolPayload = { url: '/api/code/ai', body: { message: toolFollow, history: [], model: state.model, thinking_mode: state.thinking } };
       }
+      streamView.setStatus('正在读取文件（第 ' + toolRounds + ' 轮），稍候…');
       var toolOk = await streamAi(toolPayload, {
         onReasoning: function (chunk) {
           if (chunk) {
@@ -2653,14 +2737,12 @@
           }
         },
         onContent: function (chunk) {
+          // ★ P2-8：工具调用轮同样只记全文、按帧渲染
           accumulated += chunk;
-          var shownT = stripToolMarkers(accumulated);
-          var mdHtmlT = renderMarkdownEscFirst(shownT);
-          if (mdHtmlT !== null) contentDiv.innerHTML = mdHtmlT; else contentDiv.textContent = shownT;
-          scrollChat();
+          streamView.setText(accumulated);
         },
         onError: function () { done = true; }
-      }).then(function () { return true; }, function () { return false; });
+      }).then(function () { streamView.flush(); return true; }, function () { streamView.cancel(); return false; });
       if (!toolOk) { done = true; break; }
     }
 
@@ -2706,7 +2788,7 @@
         }
       }
     } else if (!finalText && !done) {
-      contentDiv.textContent = 'AI 没有返回内容，请重试';
+      streamView.setStatus('AI 没有返回内容，请重试');
     }
   }
 
