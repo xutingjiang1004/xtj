@@ -15,6 +15,7 @@ const m052 = migration('052_cat_ai_hardening.sql');
 const m056 = migration('056_fix_increment_post_views_scope.sql');
 const m057 = migration('057_remove_consented_collection.sql');
 const m058 = migration('058_database_audit_regressions.sql');
+const m059 = migration('059_revoke_increment_post_views_anon.sql');
 
 test('base snapshot uses UUID post references compatible with posts.id and RLS comparisons', () => {
   assert.match(snapshot, /CREATE TABLE IF NOT EXISTS public\.posts\s*\([\s\S]*?id uuid PRIMARY KEY/);
@@ -58,6 +59,23 @@ test('legacy interaction conversion is idempotent and refuses to guess numeric m
   assert.match(m058, /IF v_has_values THEN\s+RAISE WARNING[\s\S]*?refusing lossy\/guessed UUID mapping/);
   assert.match(m058, /ALTER TABLE %s ALTER COLUMN post_id TYPE uuid USING post_id::text::uuid/);
   assert.match(m058, /IF to_regclass\('public\.posts'\) IS NULL THEN/);
+});
+
+test('059 hardens increment_post_views without re-opening client-role access', () => {
+  // 058 already revoked client roles; 059 must not silently re-grant them.
+  // A later migration that "fixes" 056 by granting anon/authenticated again would
+  // reintroduce the exact audit finding, so this is asserted explicitly.
+  assert.doesNotMatch(m059, /GRANT EXECUTE ON FUNCTION public\.increment_post_views\([^)]*\)\s+TO[^;]*\banon\b/i);
+  assert.doesNotMatch(m059, /GRANT EXECUTE ON FUNCTION public\.increment_post_views\([^)]*\)\s+TO[^;]*\bauthenticated\b/i);
+  assert.match(m059, /REVOKE ALL ON FUNCTION public\.increment_post_views\(uuid\) FROM PUBLIC, anon, authenticated/i);
+  assert.match(m059, /GRANT EXECUTE ON FUNCTION public\.increment_post_views\(uuid\) TO service_role/i);
+
+  // The added guard: only public (or legacy NULL-visibility) posts may be counted.
+  assert.match(m059, /AND \(visibility IS NULL OR visibility = 'public'\)/);
+  // Non-public / missing rows must not leak a precise count.
+  assert.match(m059, /RETURN COALESCE\(v_views, 0\)/);
+  // SECURITY DEFINER search_path must be re-pinned after CREATE OR REPLACE.
+  assert.match(m059, /ALTER FUNCTION public\.increment_post_views\(uuid\) SET search_path = pg_catalog, public/i);
 });
 
 test('account deletion is left to a policy-backed, reviewed forward plan', () => {
