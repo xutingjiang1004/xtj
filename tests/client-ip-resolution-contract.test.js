@@ -12,10 +12,16 @@ const path = require('node:path');
 const SERVER = path.join(__dirname, '..', 'render-api', 'server.js');
 const src = fs.readFileSync(SERVER, 'utf8');
 
-test('合约：trust proxy 信任全部私有/保留网段（不再是一跳）', () => {
+test('合约：trust proxy 为函数判定（所有私网/保留地址视为受信代理 hop）', () => {
+  // ★ 2026-09-24：固定网段列表可能漏掉平台新增内网 hop；改为函数判定后
+  //   任何私网 hop 都被信任，req.ip 恒为第一个公网地址（真实客户端）。
   assert.ok(
-    src.includes("app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', '100.64.0.0/10'])"),
-    "server.js 必须设置 trust proxy = [loopback, linklocal, uniquelocal, CGNAT]"
+    src.includes("app.set('trust proxy', function trustProxyHop(addr) {"),
+    "server.js 必须设置 trust proxy 为函数模式"
+  );
+  assert.ok(
+    src.includes('return isPrivateOrReservedIp(addr);'),
+    'trust proxy 函数必须复用 isPrivateOrReservedIp 判定'
   );
 });
 

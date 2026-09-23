@@ -150,13 +150,16 @@ app.use((req, res, next) => {
 // ★ 2026-09-21 修复（IP 全部落成 10.x 内网地址 → 属地全部解析失败）：
 //   原值 `1` 只信任一跳，但 Render 边缘 → 应用之间实际存在多层内网代理，
 //   导致 req.ip 仍解析成 Render 内网地址（用户数据实证：last_ip = 10.193.27.131）。
-//   私有 IP 送给任何地理数据源都必然失败，表现为：
-//   帖子"IP属地：未知"、管理端"IP 地区解析失败（所有数据源均不可用）"。
-//   改为信任全部私有/保留网段（loopback/linklocal/uniquelocal + CGNAT）：
-//   Express 从 X-Forwarded-For 链**从右往左**跳过所有受信代理地址，
-//   req.ip = 第一个公网地址 = 真实客户端。安全性不变：客户端伪造的
-//   X-Forwarded-For 值只会出现在链最左侧，从右往左扫描永远不会选中它。
-app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', '100.64.0.0/10']);
+// ★ 2026-09-24 再修（发帖 IP 属地错误）：固定网段列表可能漏掉平台新增的内网
+//   hop 网段——一旦漏掉，req.ip 会落成该 hop 的私网地址，getClientIp 只能退到
+//   XFF 从右往左兜底；极端情况下（真实 IP 右侧全为未被信任的私网 hop）会误选
+//   客户端伪造的最左公网值。改为函数判定：所有私网/保留地址一律视为平台代理
+//   hop（isPrivateOrReservedIp 为函数声明，运行时已提升可用）。安全性：
+//   LB 追加的真实客户端公网 IP 必在链最右侧，从右往左扫描会先停在它那里；
+//   客户端伪造值永远在最左侧，不可能被选中（见下方 getClientIp 注释与测试）。
+app.set('trust proxy', function trustProxyHop(addr) {
+  return isPrivateOrReservedIp(addr);
+});
 
 // 全局禁用 X-Powered-By（必须在任何路由之前）
 app.disable('x-powered-by');
@@ -2311,6 +2314,12 @@ async function executeToolCall(toolCall, context) {
             error: '未能识别该地点「' + loc + '」。请改用规范的城市名（如「成都」「大阪」「Los Angeles」），或用「城市名+国家」的形式。'
           };
         }
+        // ★ 2026-09-24：失败原因打进服务端日志（用户侧文案不变），便于在
+        //   Render 日志中确认上游真实状态（429 限流 / 5xx / 超时 / 备源也失败）。
+        console.warn('[get_weather] 上游失败:', loc,
+          'reason=' + ((e && e.reason) || '?'),
+          'upstream_status=' + ((e && e.upstream_status) || 0),
+          (e && e.message) || '');
         // 服务端故障：不把底层错误透传，且明确这是服务侧问题
         return {
           tool_name: name,
@@ -4605,14 +4614,22 @@ function getClientIp(req) {
   ];
   for (var i = 0; i < candidates.length; i++) {
     var ip = normalizeClientIpValue(candidates[i]);
-    if (ip && !isPrivateOrReservedIp(ip)) return ip;
+    if (ip && !isPrivateOrReservedIp(ip)) {
+      // ★ 2026-09-24：标记取值来源，供属地诊断日志定位"取错的是哪一环"
+      if (req) req._clientIpSource = (i === 0 ? 'express_req_ip' : 'socket_remote');
+      return ip;
+    }
   }
   // 兜底：req.ip/socket 全是私网地址（trust proxy 信任范围仍不够），
   // 从 X-Forwarded-For 链右往左找第一个公网地址。
   var chainIp = firstPublicIpFromForwardedChain(req);
-  if (chainIp) return chainIp;
+  if (chainIp) {
+    if (req) req._clientIpSource = 'xff_chain_public';
+    return chainIp;
+  }
   // 最终兜底：返回原始 req.ip（哪怕是私网，至少日志/审计可溯源）。
   var fallback = normalizeClientIpValue(candidates[0]);
+  if (req) req._clientIpSource = 'fallback_private_or_unknown';
   return fallback || 'unknown';
 }
 
@@ -5295,10 +5312,91 @@ function normalizeIpGeoName(name) {
     .trim();
   return IP_GEO_ZH_MAP[key] || IP_GEO_ZH_MAP[raw] || v;
 }
+// ★ 2026-09-24 新增（属地错误/不准修复）：国内数据源的纯解析函数（模块级，
+//   便于单测直接构造 payload 验证，不需要真实网络）。
+//   背景：海外库（ipwho.is/ipapi.co）对中国移动/广电等运营商 IP 的省市精度差，
+//   甚至张冠李戴；国内库对国内 IP 显著更准。resolveIpLocationUncached 现在
+//   分两层：第一层竞速国内库（百度 opendata + pconline 太平洋），命中即用；
+//   只有国家级结果（常见于海外 IP）或全败时，再落第二层海外库竞速。
+//   注：qifu（百度千帆 district API）2026-09 实测已全量下线（ResourceNotFound），
+//   故国内第一层采用 opendata.baidu.com + pconline 双源。
+function parseBaiduGeoPayload(data) {
+  if (!data || typeof data !== 'object' || String(data.status) !== '0' || !Array.isArray(data.data) || !data.data[0]) return null;
+  var loc = String(data.data[0].location || '').trim();
+  if (!loc) return null;
+  // 「福建省福州市 电信」→ 去尾部运营商；「北京市北京市 移动」→ 去重
+  var main = loc.replace(/\s*(电信|联通|移动|铁通|教育网|长城宽带|鹏博士|其他)\s*$/, '').trim();
+  var m = main.match(/^([^省自治区市]{1,8}?(?:省|自治区)|北京市|上海市|天津市|重庆市)(.*)$/);
+  var rg = m ? normalizeIpGeoName(m[1]) : '';
+  var ct = m ? normalizeIpGeoName(m[2] || '') : '';
+  if (rg && ct && rg === ct) ct = '';
+  if (!rg && !ct) return null;
+  return { region: rg, city: ct, addr: loc.slice(0, 60) };
+}
+
+function parsePconlineGeoText(text) {
+  var m = String(text || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  var d;
+  try { d = JSON.parse(m[0]); } catch (_) { return null; }
+  if (!d || typeof d !== 'object') return null;
+  var rg = normalizeIpGeoName(d.pro || '');
+  var ct = normalizeIpGeoName(d.city || '');
+  if (rg && ct && rg === ct) ct = ''; // 直辖市去重：「北京市/北京市」→「北京」
+  if (!rg && !ct) return null;
+  return { region: rg, city: ct, addr: String(d.addr || '').slice(0, 60) };
+}
+
 async function resolveIpLocationUncached(ip) {
   if (isPrivateOrReservedIp(ip)) return null;
-
   var diagnostics = [];
+  // ★ 2026-09-24：第一层 —— 国内数据源竞速（百度 opendata + pconline 太平洋）。
+  //   海外库对中国移动/广电等运营商 IP 省市精度差甚至张冠李戴；国内库对国内
+  //   IP 显著更准。2s/源、整体 2.5s 截止。解析逻辑抽在模块级纯函数
+  //   parseBaiduGeoPayload / parsePconlineGeoText，可离线单测。
+  const cnFetchers = [
+    async function() {
+      var controller = new AbortController();
+      var timeout = setTimeout(function() { controller.abort(); }, 2000);
+      var diag = { provider: 'baidu-opendata', resolved_at: new Date().toISOString() };
+      try {
+        var resp = await fetch('https://opendata.baidu.com/api.php?query=' + encodeURIComponent(ip) + '&co=&resource_id=6006&oe=utf8', { signal: controller.signal });
+        diag.http_status = resp.status;
+        if (!resp.ok) { diag.error_code = 'HTTP_' + resp.status; throw new Error('baidu opendata HTTP ' + resp.status); }
+        var data = await resp.json();
+        var parsed = parseBaiduGeoPayload(data);
+        if (!parsed) { diag.error_code = 'bad_or_empty_payload'; throw new Error('baidu opendata empty geo'); }
+        diag.response_schema_valid = true;
+        return { provider: 'baidu-opendata', country: '中国', region: parsed.region, city: parsed.city, isp: parsed.addr };
+      } catch (e) {
+        diag.error_code = diag.error_code || (e.name === 'AbortError' ? 'timeout' : String(e.message || '').slice(0, 200));
+        throw e;
+      } finally { clearTimeout(timeout); diagnostics.push(diag); }
+    },
+    async function() {
+      var controller = new AbortController();
+      var timeout = setTimeout(function() { controller.abort(); }, 2000);
+      var diag = { provider: 'pconline', resolved_at: new Date().toISOString() };
+      try {
+        var resp = await fetch('https://whois.pconline.com.cn/ipJson.jsp?ip=' + encodeURIComponent(ip) + '&json=true', { signal: controller.signal });
+        diag.http_status = resp.status;
+        if (!resp.ok) { diag.error_code = 'HTTP_' + resp.status; throw new Error('pconline HTTP ' + resp.status); }
+        // pconline 返回 GBK 编码文本（Node 22 内置 full-icu，TextDecoder('gbk')
+        // 可用；运行时万一不可用会抛 RangeError → 记录后落第二层海外库）
+        var buf = await resp.arrayBuffer();
+        var text;
+        try { text = new TextDecoder('gbk').decode(buf); }
+        catch (eDec) { diag.error_code = 'gbk_decoder_unavailable'; throw new Error('pconline gbk decode failed'); }
+        var parsed = parsePconlineGeoText(text);
+        if (!parsed) { diag.error_code = 'bad_or_empty_payload'; throw new Error('pconline empty geo'); }
+        diag.response_schema_valid = true;
+        return { provider: 'pconline', country: '中国', region: parsed.region, city: parsed.city, isp: parsed.addr };
+      } catch (e) {
+        diag.error_code = diag.error_code || (e.name === 'AbortError' ? 'timeout' : String(e.message || '').slice(0, 200));
+        throw e;
+      } finally { clearTimeout(timeout); diagnostics.push(diag); }
+    }
+  ];
   const fetchers = [
     async function() {
       var controller = new AbortController();
@@ -5343,17 +5441,25 @@ async function resolveIpLocationUncached(ip) {
     }
   ];
 
-  // 并行竞速：所有数据源同时发起，取第一个成功者；整体 3s 截止。
+  // 并行竞速：所有数据源同时发起，取第一个成功者。
   // 超时/全败返回 null，由调用方走 failed/pending + 异步重试路径，不阻塞发帖。
-  var racedResult = null;
-  try {
+  function raceWithDeadline(list, deadlineMs) {
     var overallDeadline = new Promise(function(_, reject) {
-      var deadlineTimer = setTimeout(function() { reject(new Error('overall_deadline')); }, 3000);
+      var deadlineTimer = setTimeout(function() { reject(new Error('overall_deadline')); }, deadlineMs);
       if (deadlineTimer && typeof deadlineTimer.unref === 'function') deadlineTimer.unref();
     });
-    racedResult = await Promise.race([Promise.any(fetchers.map(function(f) { return f(); })), overallDeadline]);
-  } catch (e) {
-    racedResult = null;
+    return Promise.race([Promise.any(list.map(function(f) { return f(); })), overallDeadline]);
+  }
+
+  // ★ 2026-09-24：两层竞速 —— 先国内库（国内 IP 更准），全败、或只拿到
+  //   国家级结果（region/city 全空，常见于海外 IP 命中国内库）时，
+  //   再落第二层海外库竞速（原 ipwho.is/ipapi.co 逻辑不变）。
+  var racedResult = null;
+  try { racedResult = await raceWithDeadline(cnFetchers, 2500); } catch (e) { racedResult = null; }
+  if (!racedResult || (!racedResult.region && !racedResult.city)) {
+    var overseasResult = null;
+    try { overseasResult = await raceWithDeadline(fetchers, 3000); } catch (e) { overseasResult = null; }
+    if (overseasResult) racedResult = overseasResult;
   }
   if (racedResult) {
     // 2026-09-22：竞速下不支持语言参数的 ipapi.co 可能先返回（英文，如
@@ -5394,7 +5500,9 @@ async function resolveIpLocationUncached(ip) {
 
 // 帖子 IP 属地专用解析（返回简化格式：省份+城市，用于帖子展示）
 var ipRegionCache = new Map();
-var IP_REGION_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7天
+// ★ 2026-09-24：7 天 → 24 小时。数据源精度会随时间修正（国内库新接入），
+//   错误的属地结果最多固化一天，不再一周无法自愈。
+var IP_REGION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 var IP_REGION_CACHE_MAX = 2000;
 
 async function resolveIpRegion(ip) {
@@ -13303,6 +13411,20 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     } catch (_) {
       // IP 解析失败不阻止发帖
     }
+    // ★ 2026-09-24 诊断（属地错误排查）：每帖一行，日志量可控。Render 日志中
+    //   source=express_req_ip → 信任链解析正确（真实客户端）；
+    //   source=xff_chain_public → trust proxy 仍漏了内网 hop（需查平台网段）；
+    //   source=fallback_private_or_unknown → 全链私网（需查部署环境）。
+    //   配合 xff 原文可直接判断属地错在"取 IP"还是"查库"。
+    try {
+      console.log('[IP-DIAG] user=' + req.userName +
+        ' source=' + (req._clientIpSource || '?') +
+        ' final=' + clientIp +
+        ' req_ip=' + (req.ip || '') +
+        ' socket=' + ((req.socket && req.socket.remoteAddress) || '') +
+        ' xff=' + String(req.headers['x-forwarded-for'] || '').slice(0, 300) +
+        ' region=' + (ipRegion && ipRegion.status === 'resolved' ? String(ipRegion.text) : String((ipRegion && ipRegion.status) || 'none')));
+    } catch (_) {}
 
     var payload = {
       user_name: req.userName,
