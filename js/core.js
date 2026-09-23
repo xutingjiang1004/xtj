@@ -14894,7 +14894,7 @@ function renderProfileActivityList(kind) {
                         ? getStatPostSummary(post)
                         : '原帖：' + getStatPostSummary(post);
                     return renderStatRecordCard({
-                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了 ' : ' 评论了 ') + (post && post.user_name ? escapeHtml(post.user_name) : '某用户') + ' 的内容',
+                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了 ' : ' 评论了 ') + (post && post.user_name ? String(post.user_name) : '某用户') + ' 的内容',
                         copy: copyText,
                         note: kind === 'comments' ? ('评论：' + String(item.content || '')) : '',
                         postId: post && post.id ? String(post.id) : '',
@@ -15105,7 +15105,7 @@ function renderProfileActivityList(kind) {
                 var sourceComments = Array.isArray(feedAllComments) && feedAllComments.length ? feedAllComments : statAllComments;
                 var sourceLikes = Array.isArray(feedAllLikes) && feedAllLikes.length ? feedAllLikes : statAllLikes;
                 if (sourcePosts.length || sourceComments.length || sourceLikes.length) {
-                    applyStatSnapshot(sourcePosts, sourceComments, sourceLikes);
+                    applyStatSnapshot(sourcePosts, sourceComments, sourceLikes, statViewEvents);
                 }
                 renderStatByTypeFinal(statCurrentType);
                 ensureStatDataLoaded(false).then(function(snapshot) {
@@ -15316,12 +15316,12 @@ function renderProfileActivityList(kind) {
                 }
 
                 if (sourcePosts.length || sourceComments.length || sourceLikes.length) {
-                    applyStatSnapshot(sourcePosts, sourceComments, sourceLikes);
+                    applyStatSnapshot(sourcePosts, sourceComments, sourceLikes, statViewEvents);
                     if (requestId !== statRequestId) return;
                     renderStatByTypeFinal(type);
                     ensureStatDataLoaded(false).then(function(snapshot) {
                         if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statRequestId) return;
-                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
+                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
                         renderStatByTypeFinal(type);
                     }).catch(function() {});
                     return;
@@ -15330,7 +15330,7 @@ function renderProfileActivityList(kind) {
                 var snapshot = await ensureStatDataLoaded(true);
                 if (!modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statRequestId) return;
                 if (snapshot) {
-                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
                     renderStatByTypeFinal(type);
                 } else if (body) {
                     body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';

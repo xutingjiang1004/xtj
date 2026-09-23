@@ -140,7 +140,7 @@
         if (v === undefined || v === null) continue;
         if (k === 'class') node.className = v;
         else if (k === 'text') node.textContent = v;
-        else if (k === 'html') node.innerHTML = v;
+        else if (k === 'html') node.textContent = v; // ★ 安全: 禁用 innerHTML, 改用 textContent（与 ai-agent.js 保持一致）
         else if (k === 'style') node.style.cssText = v;
         else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2).toLowerCase(), v);
         else node.setAttribute(k, v);
@@ -687,7 +687,7 @@
     // 连接视图
     var connectView = el('div', { class: 'cw-connect', id: 'cwConnectView' });
     var card = el('div', { class: 'cw-connect-card' });
-    card.appendChild(el('div', { class: 'cw-connect-logo', html: '&lt;/&gt;' }));
+    card.appendChild(el('div', { class: 'cw-connect-logo', text: '</>' }));
     card.appendChild(el('h2', { class: 'cw-connect-title', text: '连接 GitHub 仓库' }));
     card.appendChild(el('p', { class: 'cw-connect-desc', text: '输入仓库地址并授权后，AI 可以查看、分析、修改并提交你的代码。' }));
 
