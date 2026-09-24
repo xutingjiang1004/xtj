@@ -11401,6 +11401,45 @@ function renderProfileActivityList(kind) {
                 return _chatCache[cacheKey];
             }
 
+            function isDockChatNearBottom(el, threshold) {
+                if (!el) return true;
+                return (el.scrollHeight - el.scrollTop - el.clientHeight) < (threshold || 96);
+            }
+
+            function setDockChatJumpLatestVisible(visible) {
+                var button = document.getElementById('dockChatJumpLatest');
+                if (!button) return;
+                button.hidden = !visible;
+                button.classList.toggle('is-visible', !!visible);
+            }
+
+            // A single layout can change twice after rendering: once on DOM insertion and
+            // once when an image decodes. Reapply the target after both frames so opening a
+            // long history always lands on the newest message, including on mobile Safari.
+            function scrollDockChatToLatest(options) {
+                var el = document.getElementById('dockChatMessages');
+                if (!el) return;
+                var behavior = options && options.smooth ? 'smooth' : 'auto';
+                var scroll = function() { el.scrollTo({ top: el.scrollHeight, behavior: behavior }); };
+                scroll();
+                requestAnimationFrame(function() {
+                    scroll();
+                    requestAnimationFrame(scroll);
+                });
+                setDockChatJumpLatestVisible(false);
+            }
+
+            function bindDockChatMediaLoadScroll(el, shouldFollow) {
+                if (!el || !shouldFollow) return;
+                Array.prototype.forEach.call(el.querySelectorAll('.msg-img'), function(media) {
+                    if (media.__xtjChatScrollBound) return;
+                    media.__xtjChatScrollBound = true;
+                    media.addEventListener('load', function() {
+                        if (isDockChatNearBottom(el, 180)) scrollDockChatToLatest();
+                    }, { once: true });
+                });
+            }
+
             function buildDockChatBodyMarkup(message) {
                 var payload = getDMMessagePayload(message);
                 if (payload && payload.withdrawn) {
@@ -11411,7 +11450,7 @@ function renderProfileActivityList(kind) {
                 if (media && media.kind === 'image') {
                     var safeSrc = escapeHtml(media.src);
                     var safeFull = escapeHtml(media.fullSrc);
-                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
+                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
@@ -11553,10 +11592,12 @@ function renderProfileActivityList(kind) {
                 var signatureKey = userName || '__empty__';
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
-                    if (forceScroll) el.scrollTop = el.scrollHeight;
+                    if (forceScroll) scrollDockChatToLatest();
                     return;
                 }
-                var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
+                var previousScrollTop = el.scrollTop;
+                var previousScrollHeight = el.scrollHeight;
+                var isNearBottom = !el.scrollHeight || isDockChatNearBottom(el, 100);
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
                 var otherUser = msgs[0] ? (msgs[0].user_name === currentUser ? msgs[0].media_url : msgs[0].user_name) : '';
@@ -11568,7 +11609,16 @@ function renderProfileActivityList(kind) {
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
                 patchDockChatMessageAvatars(userName);
-                if (shouldAutoScroll) el.scrollTop = el.scrollHeight;
+                if (shouldAutoScroll) {
+                    scrollDockChatToLatest();
+                    bindDockChatMediaLoadScroll(el, true);
+                } else {
+                    // Keep the reader anchored on the same message while a polling refresh
+                    // updates the DOM; only advertise the new messages instead of yanking
+                    // the conversation to the bottom.
+                    el.scrollTop = previousScrollTop + Math.max(0, el.scrollHeight - previousScrollHeight);
+                    setDockChatJumpLatestVisible(true);
+                }
             }
 
             window.withdrawDMMessage = async function(id, btnEl) {
@@ -11598,8 +11648,7 @@ function renderProfileActivityList(kind) {
             };
 
             function scrollDockChatBottom() {
-                const el = document.getElementById('dockChatMessages');
-                if (el) el.scrollTop = el.scrollHeight;
+                scrollDockChatToLatest({ smooth: true });
             }
 
             async function sendDockChatMessage() {
@@ -11912,6 +11961,8 @@ function renderProfileActivityList(kind) {
                 var _dci = document.getElementById('dockChatInput'); if (_dci) _dci.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDockChatMessage(); } });
                 var _dib = document.getElementById('dockChatImgBtn'); if (_dib) _dib.addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
                 var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
+                var _dcjl = document.getElementById('dockChatJumpLatest'); if (_dcjl) _dcjl.addEventListener('click', function() { scrollDockChatToLatest({ smooth: true }); });
+                var _dcm = document.getElementById('dockChatMessages'); if (_dcm) _dcm.addEventListener('scroll', function() { if (isDockChatNearBottom(_dcm, 96)) setDockChatJumpLatestVisible(false); }, { passive: true });
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
                 bindDockChatPasteAndDrop();
             } catch(e) {
