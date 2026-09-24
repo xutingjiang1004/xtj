@@ -80,7 +80,7 @@ async function enqueueStorageCleanupJob(supabase, options) {
   if (result && result.error && String(result.error.code || '') === '23505') {
     let existing;
     try {
-      existing = await supabase.from('storage_cleanup_jobs').select('id,photo_id,paths,status,claim_token').eq('photo_id', photoId).maybeSingle();
+      existing = await supabase.from('storage_cleanup_jobs').select('id,photo_id,paths,status,claim_token,attempts').eq('photo_id', photoId).maybeSingle();
     } catch (error) {
       return { ok: false, queued: false, failed: true, paths: paths, error: error };
     }

@@ -68,7 +68,7 @@
                     display: summary || (hasImg ? '图片动态' : (hasVid ? '视频动态' : '无文字内容')),
                     hasImg: hasImg,
                     hasVid: hasVid,
-                    thumbUrl: hasImg ? normalized.media_url : null,
+                    thumbUrl: hasImg ? sanitizeUrl(normalized.media_url) : null,
                     normalized: normalized
                 };
             }

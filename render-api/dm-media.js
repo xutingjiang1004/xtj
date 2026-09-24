@@ -267,6 +267,11 @@ async function reserveDmMediaUpload(supabase, options) {
       if (Number.isFinite(casMs)) {
         query.gte('updated_at', new Date(casMs - 1).toISOString())
              .lte('updated_at', new Date(casMs + 1).toISOString());
+      } else {
+        // ★ CAS 修复：updated_at 不可解析时无法构造 CAS 谓词，绝不能跳过谓词直接
+        //   按 id+status 回收——否则两个并发恢复请求会同时拿到租约（重复发送）。
+        //   保守按冲突处理，等租约超时后由 updated_at 正常的行路径回收。
+        return { ok: false, state: 'conflict', code: 'media_send_in_progress', data: row, error: 'Media message is already being sent' };
       }
       reclaim = await query.select('*').maybeSingle();
     } catch (error) {

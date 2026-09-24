@@ -129,8 +129,9 @@
     var _refreshRateMeasured = false;
     function measureRefreshRate() {
         if (_refreshRateMeasured) return; // 只测一次并缓存（避免每次页面可见都跑 16 帧）
-        _refreshRateMeasured = true;
+        // ★ 修复：hidden 时不能预置位缓存标志，否则后台标签页首次触发后永远不再测量
         if (document.hidden) return;
+        _refreshRateMeasured = true;
         if (refreshFrameId) cancelAnimationFrame(refreshFrameId);
         var stamps = [];
         function step(ts) {

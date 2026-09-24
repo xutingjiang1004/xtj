@@ -143,7 +143,8 @@ async function ocrImageBuffer(buffer, mimeType, fileName, deps) {
     }
     if (sharpLib && buffer.length > 200 * 1024) {
       // 审计 🟢：pipeline 完成后显式 destroy()，避免 libvips 句柄/内存滞留 GC
-      var shrinkImage = sharpLib(buffer);
+      // ★ 与 photo-create.js 对齐：限制解码像素总量，防高维"解压炸弹"图片耗尽内存
+      var shrinkImage = sharpLib(buffer, { animated: false, limitInputPixels: 100000000 });
       try {
         workBuf = await shrinkImage
           .rotate()

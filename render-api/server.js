@@ -2070,7 +2070,8 @@ async function executeToolCall(toolCall, context) {
         if (dAction === 'now') {
           var n = new Date();
           var cnStr = n.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
-          var wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][n.getDay()];
+          // ★ 时区修复：星期也按 Asia/Shanghai 计算，避免服务器本地时区跨午夜差一天（与 get_current_time 对齐）
+          var wd = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'short' }).format(n);
           return { tool_name: name, content: '当前时间（北京时间）：' + cnStr + ' ' + wd + '\nISO：' + n.toISOString() };
         }
         if (dAction === 'diff') {
@@ -2094,13 +2095,13 @@ async function executeToolCall(toolCall, context) {
           if (!isFinite(addDays)) return { tool_name: name, error: '请提供有效的 days 数值' };
           var resD = new Date(baseD.getTime() + addDays * 86400000);
           var resStr = resD.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
-          var resWd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][resD.getDay()];
+          var resWd = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'short' }).format(resD);
           return { tool_name: name, content: String(args.date1 || '今天') + ' ' + (addDays >= 0 ? '+' : '') + addDays + ' 天 = ' + resStr + ' ' + resWd };
         }
         if (dAction === 'weekday') {
           var wD = parseDateSafe(args.date1);
           if (!wD) return { tool_name: name, error: 'date1 格式无法识别，请用 YYYY-MM-DD' };
-          var wdStr = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][wD.getDay()];
+          var wdStr = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'short' }).format(wD);
           return { tool_name: name, content: String(args.date1) + ' 是 ' + wdStr };
         }
         return { tool_name: name, error: '不支持的 action：' + dAction };
@@ -20370,6 +20371,10 @@ async function handleDeepThinkChat(req, res) {
   var cancelToken = { cancelled: false, userName: userName };
   // ★ S2 配套：断开路径的估算记账只执行一次
   var _deepThinkAbortUsageRecorded = false;
+  // ★ 双重记账修复：断开时的估算记账改为"延迟挂起"——若研究流程随后正常跑完，
+  //   由下方 S7 分支按真实用量记账（并丢弃该估算）；仅当真实记账未发生
+  //   （流程失败降级退出 / 提前返回）时才补记这笔估算，保证一轮只记一次账。
+  var _deepThinkAbortEstimatePending = null;
   var convId = String(req.body && req.body.conversation_id || '').trim();
   if (!convId) convId = genConvId();
   if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
@@ -20441,19 +20446,12 @@ async function handleDeepThinkChat(req, res) {
     cancelToken.cancelled = true;
     try { console.log('[DEEP-THINK] client disconnected, reqId:', clientReqId || '?', 'convId:', convId); } catch (e) {}
     // ★ S2 配套：断开路径也必须补估算记账，防止"深度研究断开免单"（多 agent 成本更高）
+    //   双重记账修复：此处不再立即入账，改为挂起估算；由 flushDeepThinkAbortEstimate
+    //   在"真实用量记账未发生"的退出路径统一补记（见下方 S7 分支）。
     try {
       if (userName && typeof message === 'string' && message && !_deepThinkAbortUsageRecorded) {
         _deepThinkAbortUsageRecorded = true;
-        recordAiTurnUsage(userName, null, {
-          conversation_id: convId,
-          model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER),
-          source: 'deep_think_aborted',
-          message: message,
-          content: '',
-          reasoning: '',
-          search_count: 0,
-          did_search: false
-        }).catch(function(recErr) { console.warn('[AI-QUOTA] deep think abort record failed:', recErr && recErr.message); });
+        _deepThinkAbortEstimatePending = { user: userName, message: message };
       }
     } catch (_) {}
     try { clearInterval(_heartbeatTimer); } catch (e) {}
@@ -20463,6 +20461,26 @@ async function handleDeepThinkChat(req, res) {
     try { if (typeof cancelToken._onAgentCancel === 'function') cancelToken._onAgentCancel(); } catch (e) {}
     try { if (typeof cancelToken._onWorkerCancel === 'function') cancelToken._onWorkerCancel(); } catch (e) {}
     releaseDeepResearch();
+  }
+
+  // ★ 双重记账修复：把挂起的断开估算真正入账（幂等：pending 置空后重复调用无效）。
+  //   仅在"流程未能走到 S7 真实用量记账"的路径调用。
+  function flushDeepThinkAbortEstimate() {
+    if (!_deepThinkAbortEstimatePending) return;
+    var pending = _deepThinkAbortEstimatePending;
+    _deepThinkAbortEstimatePending = null;
+    try {
+      recordAiTurnUsage(pending.user, null, {
+        conversation_id: convId,
+        model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER),
+        source: 'deep_think_aborted',
+        message: pending.message,
+        content: '',
+        reasoning: '',
+        search_count: 0,
+        did_search: false
+      }).catch(function(recErr) { console.warn('[AI-QUOTA] deep think abort record failed:', recErr && recErr.message); });
+    } catch (eFlush) {}
   }
 
   try {
@@ -20513,7 +20531,7 @@ async function handleDeepThinkChat(req, res) {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    if (aborted) { releaseDeepResearch(); return safeEnd(); }
+    if (aborted) { flushDeepThinkAbortEstimate(); releaseDeepResearch(); return safeEnd(); }
     sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
     _heartbeatTimer = setInterval(function() {
       if (!res.writableEnded) {
@@ -20675,6 +20693,7 @@ async function handleDeepThinkChat(req, res) {
         console.error('[DEEP-THINK] fallback also failed:', fallbackErr && fallbackErr.message);
         try { clearInterval(_heartbeatTimer); } catch (e2) {}
         sseSend({ type: 'error', error: '深度研究失败: ' + (e && e.message || '未知错误') });
+        flushDeepThinkAbortEstimate();
         releaseDeepResearch();
         return safeEnd();
       }
@@ -20687,8 +20706,10 @@ async function handleDeepThinkChat(req, res) {
       //   客户端读完流后在 done 前断开即可反复白嫖（并发名额只限并发、不限累计）。
       //   按已完成阶段的真实用量补扣；无 usage 且无产出时 recordAbortedStreamUsage
       //   自身会跳过，不会把"刚发出就断开"也记成一笔完整用量。
+      //   ★ 双重记账修复：断开估算（S2）已改为挂起制——此处真实用量记账成功则
+      //     丢弃估算；真实记账未发生（无 usage/无产出）时才补记估算，一轮只记一次。
       try {
-        await recordAbortedStreamUsage(userName, {
+        var _deepThinkAbortRec = await recordAbortedStreamUsage(userName, {
           convId: convId,
           usedModel: (flowResult && flowResult.model) || DEEPSEEK_MODEL_REASONER,
           source: 'deep_think_aborted',
@@ -20698,8 +20719,10 @@ async function handleDeepThinkChat(req, res) {
           usage: flowResult && flowResult.synth_usage,
           searchApiCount: Math.max(0, Math.floor(Number(flowResult && flowResult.search_count) || 0))
         });
+        if (!_deepThinkAbortRec) flushDeepThinkAbortEstimate();
       } catch (eAbortQ) {
         console.error('[AI-QUOTA] deep think aborted record failed:', eAbortQ && eAbortQ.message);
+        flushDeepThinkAbortEstimate();
       }
       releaseDeepResearch();
       return safeEnd();
@@ -21262,7 +21285,6 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
     // 9. 保存消息（含 conversation_id，不物理删除旧数据）
     // ★ S2：即使调用成功但客户端已断开，也继续保存消息并记账（防断开免单）
-    var nowIso = new Date().toISOString();
     var nowTs = Date.now();
     var usedModel = normalizeDeepSeekUsageModel((result && result.model) || DEEPSEEK_MODEL_REASONER, (result && result.model) || DEEPSEEK_MODEL_REASONER);
     var usageToStore = Object.assign({}, usage || {}, {
@@ -22027,25 +22049,30 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(36000
     var reader = upstream.body.getReader();
     var decoder = new TextDecoder('utf-8');
     var buf = '';
-    while (!aborted) {
-      var chunk = await reader.read();
-      if (chunk.done) break;
-      buf += decoder.decode(chunk.value, { stream: true });
-      var lines = buf.split('\n');
-      buf = lines.pop() || '';
-      for (var li = 0; li < lines.length; li++) {
-        var line = lines[li].trim();
-        if (!line || line.indexOf('data:') !== 0) continue;
-        var data = line.slice(5).trim();
-        if (data === '[DONE]') return;
-        var json;
-        try { json = JSON.parse(data); } catch (e) { continue; }
-        var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
-        if (!delta) continue;
-        var piece = delta.content || '';
-        var rPiece = delta.reasoning_content || delta.reasoning || delta.thinking || '';
-        onChunk(piece, rPiece);
+    try {
+      while (!aborted) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buf += decoder.decode(chunk.value, { stream: true });
+        var lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li].trim();
+          if (!line || line.indexOf('data:') !== 0) continue;
+          var data = line.slice(5).trim();
+          if (data === '[DONE]') return;
+          var json;
+          try { json = JSON.parse(data); } catch (e) { continue; }
+          var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
+          if (!delta) continue;
+          var piece = delta.content || '';
+          var rPiece = delta.reasoning_content || delta.reasoning || delta.thinking || '';
+          onChunk(piece, rPiece);
+        }
       }
+    } finally {
+      // ★ 流泄漏修复：异常/断开退出时取消上游读取，避免第三方 SSE 连接挂到超时
+      try { if (reader && reader.cancel) reader.cancel().catch(function() {}); } catch (e) {}
     }
   }
 
@@ -23309,7 +23336,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       if (!responsesContent) responsesContent = '（AI 没有回复，请稍后再试）';
       if (responsesContent.length > 24000) responsesContent = responsesContent.slice(0, 24000) + '\n…（已截断）';
 
-      var nowIso = new Date().toISOString();
       var nowTs = Date.now();
       var usedModel = validatedModel;
       var usageToStore = Object.assign({}, responsesUsage || {}, {
@@ -23695,10 +23721,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
       return safeEnd();
     }
-
-    // _sharedSearchMeta 在非思考模式搜索或思考模式搜索中赋值
-    var _sharedSearchMeta2;
-    var reasoningStartedAt2 = 0;
 
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
     if (!hasCalledTools && !aborted && allowSearch && !weatherResult && !useThinking) {
@@ -25110,6 +25132,8 @@ async function callCustomModelOnce(cm, messages, options) {
           }
         }
       } finally {
+        // ★ 流泄漏修复：cancel 放在 releaseLock 之前，异常/断开时真正断开上游连接
+        try { if (reader && reader.cancel) reader.cancel().catch(function() {}); } catch (_eCxl) {}
         try { if (reader && typeof reader.releaseLock === 'function') reader.releaseLock(); } catch (_eRl) {}
       }
       return { content: full, usage: null, model_used: chosenModel };
@@ -27231,6 +27255,8 @@ async function checkUnreadDmForAdmin() {
     //   → DM 未读提醒永不发送。本通知只走 Gmail SMTP，故按凭据判断是否可用。
     if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return; // 邮件服务未配置
     if (!getMailTransporter()) return;
+    // ★ 与 M42 注释对齐：收件邮箱未配置时视为未启用，不做无意义的每分钟轮询查询
+    if (!ADMIN_DM_NOTIFY_EMAIL) return;
     var cutoff = new Date(Date.now() - DM_UNREAD_NOTIFY_TIMEOUT).toISOString();
     // 查询未读且未通知的 DM（发给 xxz）
     var { data, error } = await supabase.from('posts')

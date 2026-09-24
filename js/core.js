@@ -2877,8 +2877,7 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 if (!pw) { showToast("请输入密码"); return; }
 
                 const btn = document.getElementById("loginSubmitBtn");
-                btn.disabled = true;
-                btn.textContent = "验证中..";
+                if (btn) { btn.disabled = true; btn.textContent = "验证中.."; }
 
                 try {
                     if (name === ADMIN_NAME) {
@@ -2975,8 +2974,7 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     showToast("登录失败，请重试");
                 } finally {
                     // 统一恢复按钮状态：与 doRegister 的 finally 模式一致，避免散落恢复点
-                    btn.disabled = false;
-                    btn.textContent = "登录";
+                    if (btn) { btn.disabled = false; btn.textContent = "登录"; }
                 }
             }
             window.doLogin = doLogin;
@@ -14892,7 +14890,7 @@ function renderProfileActivityList(kind) {
                     display: summary || (hasImg ? '图片动态' : (hasVid ? '视频动态' : '无文字内容')),
                     hasImg: hasImg,
                     hasVid: hasVid,
-                    thumbUrl: hasImg ? normalized.media_url : null,
+                    thumbUrl: hasImg ? sanitizeUrl(normalized.media_url) : null,
                     normalized: normalized
                 };
             }
