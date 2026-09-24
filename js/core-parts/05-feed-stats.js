@@ -74,6 +74,10 @@
                     bubble.classList.add('hide');
                     setTimeout(() => {
                         if (bubble.parentNode) bubble.remove();
+                        // ★ 审计修复：点击路径同样要从 activeNotifications 移除条目。
+                        //   旧实现只在自动隐藏路径 filter（且 clicked 后被 if 提前
+                        //   return 跳过），点击过的气泡 DOM 引用会长期滞留数组。
+                        activeNotifications = activeNotifications.filter(n => n.id !== notifId);
                     }, 400);
                 });
 

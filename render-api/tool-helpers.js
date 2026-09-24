@@ -121,7 +121,10 @@ function buildChartSvg(type, title, labels, series, xLabel, yLabel, width, heigh
     // 图例（右侧竖排，超过 12 项折叠）
     var legendX = W - PAD_R - 150;
     var legendY = PAD_T + 8;
-    var legendCount = Math.min(pieLabels.length || pieData.length, 12);
+    // ★ 审计修复：labels 多于 data 时（如 labels=5、data=3）旧表达式
+    //   `Math.min(pieLabels.length || pieData.length, 12)` 会取到越界下标，
+    //   `Math.max(undefined,0)=NaN` → 图例渲染出 "NaN%"。同时受 data 长度约束。
+    var legendCount = Math.min(pieLabels.length || pieData.length, pieData.length, 12);
     for (var li = 0; li < legendCount; li++) {
       var ly = legendY + li * 22;
       var lname = String((pieLabels[li] !== undefined ? pieLabels[li] : ('项目' + (li + 1)))).slice(0, 12);

@@ -604,6 +604,15 @@ const ADMIN_NAME = "xxz";
                     // 保留本地会话，下次交互/可见性变化时自然重试。
                     return { token: '', user_name: '' };
                 })();
+                // ★ 审计修复（P1）：Promise settle 后必须清空缓存变量。旧实现从不
+                //   重置 _refreshPromise，首次刷新完成后所有后续调用永远命中
+                //   `if (_refreshPromise) return _refreshPromise`，拿到的都是第一次
+                //   的**旧结果** —— access token 过期后 401 重试仍在用旧 token，最终
+                //   用户被强制登出，30 秒冷却逻辑也被短路。此处仅保留"在途去重"
+                //   语义（settle 前的并发调用共享同一 Promise）。内部实现从不
+                //   reject（全路径 try/catch 返回对象），then 双回调为防御性兜底。
+                var _clearRefreshPromise = function() { _refreshPromise = null; };
+                _refreshPromise.then(_clearRefreshPromise, _clearRefreshPromise);
                 return _refreshPromise;
             }
 

@@ -37,11 +37,16 @@ var _pdfParseWaiters = [];
 
 // 进程级并发信号量：最多 MAX_CONCURRENT_PDF_PARSES 个 PDF 同时解析，
 // 超出排队等待，防止并发恶意 PDF 反复占满事件循环。
+// ★ 审计修复：旧实现"先等后计"存在竞态 —— finally 中 `_pdfParseInFlight--`
+//   与唤醒排队者（next()）之后，被唤醒方要等 microtask 恢复才执行自己的
+//   `_pdfParseInFlight++`；此间隙内新调用方检查 `>= 2` 仍通过并先行占位，
+//   唤醒者再叠加，并发数可超过上限。改为**入队即计数**：进入函数先 ++，
+//   超限时排队（名额已持有），唤醒后直接执行，计数全程精确。
 async function withPdfParseSlot(fn) {
-  if (_pdfParseInFlight >= MAX_CONCURRENT_PDF_PARSES) {
+  _pdfParseInFlight++;
+  if (_pdfParseInFlight > MAX_CONCURRENT_PDF_PARSES) {
     await new Promise(function(resolve) { _pdfParseWaiters.push(resolve); });
   }
-  _pdfParseInFlight++;
   var parseStartAt = Date.now();
   try {
     return await fn();

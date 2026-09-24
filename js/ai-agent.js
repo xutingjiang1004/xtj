@@ -6963,7 +6963,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         mcWrap.appendChild(mcImg);
       } else if (data.svg) {
         // SVG 为后端自产内容，来源可信；仍做基础剔除防止脚本注入
-        mcWrap.innerHTML = String(data.svg).replace(/<script[\s\S]*?<\/script>/gi, '').replace(/on\w+\s*=/gi, 'data-removed=');
+        // ★ 审计修复：旧过滤仅两条黑名单（<script>、on\w+=），可被
+        //   `<foreignObject><a href="javascript:…">` 绕过（不含 script/on*）。
+        //   补充 foreignObject 整块剔除与危险协议 href 中和，纵深防御。
+        mcWrap.innerHTML = String(data.svg)
+          .replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
+          .replace(/on\w+\s*=/gi, 'data-removed=')
+          .replace(/(\shref\s*=|\sxlink:href\s*=)\s*(["'])\s*(javascript|vbscript|data)\s*:[^"'>]*\2/gi, '$1"$2#"');
       }
       if (mcWrap.childNodes.length) shell.appendChild(mcWrap);
       var mcBits = [];
@@ -7018,9 +7025,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (data.format) qcBits.push(String(data.format).toUpperCase());
       if (qcBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: qcBits.join(' · ') }));
       if (data.image) {
-        shell.appendChild(el('a', {
+        // ★ 审计修复：下载链接的 href 此前直接取服务端字符串，未经协议白名单
+        //   （同文件 page_read/page_meta 分支均已限定协议）。若字段被污染为
+        //   javascript: URI，点击"保存二维码"即执行脚本。现仅放行 https/http
+        //   与 data:image/*。
+        var _qrHrefRaw = String(data.image);
+        var _qrSafeHref = '';
+        if (/^data:image\//i.test(_qrHrefRaw)) {
+          _qrSafeHref = _qrHrefRaw;
+        } else {
+          try {
+            var _qrUrl = new URL(_qrHrefRaw, location.href);
+            if (_qrUrl.protocol === 'https:' || _qrUrl.protocol === 'http:') _qrSafeHref = _qrUrl.href;
+          } catch (e) {}
+        }
+        if (_qrSafeHref) shell.appendChild(el('a', {
           class: 'ai-tool-card-link',
-          href: String(data.image),
+          href: _qrSafeHref,
           download: 'qrcode.' + String(data.format || 'png'),
           text: '⬇ 保存二维码'
         }));
