@@ -154,18 +154,66 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return sa === sb;
   }
   // 本地保存 + 账号同步（未登录/失败时静默降级为仅本地）
+  // ★ 2026-09-24：删除的 uid 会写入本地墓碑（xtj_ai_models_deleted_uids），
+  //   同步时一并上报服务端，双端墓碑交叉校验，杜绝「删掉又复活」。
+  var CUSTOM_MODELS_DELETED_KEY = 'xtj_ai_models_deleted_uids';
+  function loadDeletedModelUids() {
+    try {
+      var raw = scopedStorageGet(CUSTOM_MODELS_DELETED_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.filter(function(x) { return typeof x === 'string' && x; }) : [];
+    } catch (e) { return []; }
+  }
+  function saveDeletedModelUids(list) {
+    try {
+      var arr = (list || []).filter(function(x) { return typeof x === 'string' && x; });
+      // 去重 + 上限，避免无限增长
+      var seen = {};
+      var out = [];
+      for (var i = 0; i < arr.length && out.length < 200; i++) {
+        if (seen[arr[i]]) continue;
+        seen[arr[i]] = 1;
+        out.push(arr[i]);
+      }
+      scopedStorageSet(CUSTOM_MODELS_DELETED_KEY, JSON.stringify(out));
+    } catch (e) {}
+  }
+  function markModelUidsDeleted(uids) {
+    var cur = loadDeletedModelUids();
+    (uids || []).forEach(function(uid) {
+      if (uid && cur.indexOf(uid) < 0) cur.push(uid);
+    });
+    saveDeletedModelUids(cur);
+  }
+  function unmarkModelUidsDeleted(uids) {
+    var kill = {};
+    (uids || []).forEach(function(uid) { if (uid) kill[uid] = 1; });
+    saveDeletedModelUids(loadDeletedModelUids().filter(function(uid) { return !kill[uid]; }));
+  }
   function saveCustomModels(list) {
     saveCustomModelsLocal(list);
-    pushServerCustomModels(list).catch(function() {});
+    // 与本地墓碑交叉校验：墓碑里的 uid 绝不出现在保存列表中
+    var tombstones = loadDeletedModelUids();
+    var alive = [];
+    (list || []).forEach(function(m) {
+      if (!m || !m.uid) return;
+      if (tombstones.indexOf(m.uid) >= 0) return;
+      alive.push(m);
+    });
+    pushServerCustomModels(alive).catch(function() {});
   }
-  async function pushServerCustomModels(list) {
+  async function pushServerCustomModels(list, deletedUids) {
     try {
       var auth = await getUserAuthPayload({ forceNoToken: false });
       if (!auth.token) return false;
+      var payload = {
+        models: (list || []).map(toStoredModel).slice(0, 20),
+        deleted_uids: (deletedUids && deletedUids.length) ? deletedUids.slice(0, 200) : loadDeletedModelUids()
+      };
       var resp = await fetch(API_BASE + '/custom-models', {
         method: 'PUT',
         headers: auth.headers,
-        body: JSON.stringify({ models: (list || []).map(toStoredModel).slice(0, 20) })
+        body: JSON.stringify(payload)
       });
       if (!resp.ok) return false;
       var data = await resp.json();
@@ -180,12 +228,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!resp.ok) return null;
       var data = await resp.json();
       if (data && data.ok && Array.isArray(data.models)) {
-        return data.models.filter(function(m) { return m && m.uid && m.api_key; }).map(normalizeCustomModelRecord);
+        // ★ 2026-09-24：同步服务端墓碑到本地，保证「已删 uid 不再复活」双端一致
+        if (Array.isArray(data.deleted_uids) && data.deleted_uids.length) {
+          var mergedTomb = loadDeletedModelUids();
+          data.deleted_uids.forEach(function(uid) {
+            if (uid && mergedTomb.indexOf(uid) < 0) mergedTomb.push(uid);
+          });
+          saveDeletedModelUids(mergedTomb);
+        }
+        var tombstones = loadDeletedModelUids();
+        return data.models.filter(function(m) {
+          if (!m || !m.uid || !m.api_key) return false;
+          return tombstones.indexOf(String(m.uid)) < 0; // 墓碑兜底：即使服务端返回也丢弃
+        }).map(normalizeCustomModelRecord);
       }
       return null;
     } catch (e) { return null; }
   }
-  // 登录后合并账号与本地模型（同 uid 本地优先），并把差异回写到服务端
+  // 登录后合并账号与本地模型（同 uid 本地优先）
+  // ★ 2026-09-24 修复（课题②「删除的模型自动复活」）：
+  //   旧实现合并后只要与 server 不等价就 pushServerCustomModels(merged) 反向写回服务端 ——
+  //   而服务端旧快照可能残留已删模型（见后端同名修复注释），于是「复活项」被写回并固化，
+  //   用户越删越顽固。现改为：合并结果只落本地，绝不自动反写服务端；服务端数据仅由
+  //   用户在「模型管理」里的显式增删操作（saveCustomModels）驱动，且删除会带 deleted_uids 墓碑。
   async function syncCustomModelsFromServer() {
     try {
       var server = await fetchServerCustomModels();
@@ -204,10 +269,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!sv || completeness(m) > completeness(sv)) mergedMap[m.uid] = m;
       });
       var merged = Object.keys(mergedMap).map(function(k) { return mergedMap[k]; });
+      // ★ 关键：只写本地缓存，不再自动 push 回服务端（避免把服务端残留的已删模型固化）
       saveCustomModelsLocal(merged);
-      if (!modelsEqual(merged, server)) {
-        await pushServerCustomModels(merged);
-      }
       // 当前选中的自定义模型 uid 若已不存在，回退到第一个自定义模型或默认模型
       if (S.selectedModel && isCustomModelId(S.selectedModel)) {
         var uid = S.selectedModel.slice(CUSTOM_MODEL_PREFIX.length);
@@ -4651,7 +4714,105 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       modeBar.appendChild(hint);
       inputBar.parentNode.insertBefore(modeBar, inputBar);
     }
+
+    // ★ 2026-09-24 新增（课题④）：研究报告「模型选择器」。
+    //   需求：内置两个模型之外，还可用用户在小猫AI 里添加的第三方 API 模型，
+    //   选定后研究流程（Planner / 子智能体 / Synthesizer）全部按所选模型执行。
+    //   模型池与小猫AI 共用 loadCustomModels()，无需重复配置。
+    if (inputBar && !panel.querySelector('.dt-research-model-bar')) {
+      var modelBar = el('div', { class: 'dt-research-model-bar', style: 'display:flex;align-items:center;gap:8px;padding:6px 16px 0;flex:0 0 auto;flex-wrap:wrap;' });
+      modelBar.appendChild(el('span', { text: '模型', style: 'font-size:11px;color:rgba(100,130,120,.9);flex:0 0 auto;' }));
+      var modelSel = el('select', {
+        class: 'dt-research-model-select',
+        'aria-label': '选择研究模型',
+        style: 'flex:0 1 auto;max-width:min(320px,72%);padding:5px 10px;border-radius:10px;border:1px solid rgba(140,196,158,.34);background:rgba(255,255,255,.9);color:#2f4b45;font-size:12px;cursor:pointer;outline:none;'
+      });
+      modelSel.addEventListener('change', function() {
+        var v = String(modelSel.value || '');
+        S.dtResearchModel = v;
+        try { localStorage.setItem('xtj_ai_research_model', v); } catch (eSt) {}
+        syncResearchModelUi(panel);
+      });
+      modelBar.appendChild(modelSel);
+      var modelHint = el('div', {
+        class: 'dt-research-model-hint',
+        text: '',
+        style: 'font-size:11px;color:rgba(100,130,120,.85);flex:1 1 auto;min-width:0;'
+      });
+      modelBar.appendChild(modelHint);
+      inputBar.parentNode.insertBefore(modelBar, inputBar);
+      // 恢复上次选择（默认 = 内置推理模型 pro）
+      try {
+        var savedResearchModel = localStorage.getItem('xtj_ai_research_model');
+        if (savedResearchModel) S.dtResearchModel = savedResearchModel;
+      } catch (eRm) {}
+    }
+    refreshResearchModelOptions(panel);
     syncResearchModeUi(panel);
+  }
+
+  // 内置研究模型（对齐后端 DEEPSEEK_MODEL_REASONER / DEEPSEEK_MODEL_FAST）
+  var RESEARCH_BUILTIN_MODELS = [
+    { id: 'pro', label: 'V4 Pro · 深度推理', hint: '内置推理模型，多角度深度分析（默认）' },
+    { id: 'flash', label: 'V4.1 Flash · 快速', hint: '内置快速模型，响应更快、适合简要研究' }
+  ];
+
+  // 重建模型下拉选项：内置两个 + 全部自定义（第三方 API）模型
+  function refreshResearchModelOptions(panel) {
+    panel = panel || document.getElementById('panelDeepThink');
+    if (!panel) return;
+    var sel = panel.querySelector('.dt-research-model-select');
+    if (!sel) return;
+    var prev = sel.value || S.dtResearchModel || 'pro';
+    sel.innerHTML = '';
+    // 内置
+    var builtinGroup = el('optgroup', { label: '内置模型' });
+    RESEARCH_BUILTIN_MODELS.forEach(function(m) {
+      builtinGroup.appendChild(el('option', { value: m.id, text: m.label }));
+    });
+    sel.appendChild(builtinGroup);
+    // 自定义（第三方 API），与小猫AI 共用模型池
+    var customs = [];
+    try { customs = loadCustomModels() || []; } catch (eCl) { customs = []; }
+    if (customs.length) {
+      var customGroup = el('optgroup', { label: '我的第三方模型' });
+      customs.forEach(function(cm) {
+        if (!cm || !cm.uid) return;
+        var val = CUSTOM_MODEL_PREFIX + cm.uid;
+        var pv = cm.providerLabel || cm.provider || '';
+        var txt = (cm.label || cm.model || '未命名') + (pv ? (' · ' + pv) : '');
+        customGroup.appendChild(el('option', { value: val, text: txt }));
+      });
+      sel.appendChild(customGroup);
+    }
+    // 回填当前值；若已不存在则回落到 pro
+    var valid = false;
+    for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === prev) { valid = true; break; } }
+    sel.value = valid ? prev : 'pro';
+    S.dtResearchModel = sel.value;
+    syncResearchModelUi(panel);
+  }
+
+  function syncResearchModelUi(panel) {
+    panel = panel || document.getElementById('panelDeepThink');
+    if (!panel) return;
+    var sel = panel.querySelector('.dt-research-model-select');
+    var hintEl = panel.querySelector('.dt-research-model-hint');
+    if (!sel) return;
+    var v = String(S.dtResearchModel || sel.value || 'pro');
+    var text = '';
+    if (v === 'pro') text = '内置推理模型：分析最深入，耗时较长';
+    else if (v === 'flash') text = '内置快速模型：速度快，适合快速结论';
+    else if (v.indexOf(CUSTOM_MODEL_PREFIX) === 0) {
+      var cm = findCustomModel(v.slice(CUSTOM_MODEL_PREFIX.length));
+      text = cm ? ('第三方：' + (cm.providerLabel || cm.provider || '') + ' / ' + (cm.model || '')) : '第三方模型（已失效，请重新选择）';
+    }
+    if (hintEl) hintEl.textContent = text;
+    // 深色主题适配
+    var isDark = isDeepThinkDarkTheme();
+    sel.style.background = isDark ? 'rgba(24,44,38,.92)' : 'rgba(255,255,255,.9)';
+    sel.style.color = isDark ? '#d6ece5' : '#2f4b45';
+    sel.style.borderColor = isDark ? 'rgba(140,196,158,.28)' : 'rgba(140,196,158,.34)';
   }
 
   function syncResearchModeUi(panel) {
@@ -4907,6 +5068,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             body: JSON.stringify({
               query: String(query || ''),
               model: (opts && opts.model) || 'pro',
+              // ★ 2026-09-24 新增（课题④）：把用户在「模型」下拉里选定的模型传给后端。
+              //   内置：'pro' | 'flash'；第三方：'custom:<uid>'（后端解密对应 api_key/base_url 调用）。
+              research_model: String(S.dtResearchModel || 'pro'),
               mode: (opts && opts.mode) || 'hybrid',
               rewrite: (opts && typeof opts.rewrite === 'boolean') ? opts.rewrite : true,
               // ★ 优化：refresh=true 时后端跳过 24h 缓存重新研究（结果不满意重试）
@@ -9696,6 +9860,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   async function switchConversation(cid) {
     if (!cid) return;
+    // ★ 2026-09-24（课题③）：从历史二级页选中会话后，立即收起浮层回到聊天区，
+    //   并给出"正在打开"反馈，避免用户以为点击无效。
+    var _histBtn = document.querySelector('.ai-chat-hist-btn');
+    var _newBtn = document.querySelector('.ai-chat-new-btn');
+    hideConversationListPage();
+    if (_histBtn) syncAiHeaderButtons(_histBtn, _newBtn);
     if (cid === S.conversationId && S.messages.length > 0) return;
     abortCurrentRequest();
     removeHistoryUnavailableBanner(S.messagesEl);
@@ -9721,7 +9891,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   
 function showChatMessages() {
-    if (S.conversationsEl) S.conversationsEl.style.display = 'none';
+    if (S.conversationsEl) {
+      S.conversationsEl.style.display = 'none';
+      S.conversationsEl.classList.remove('is-open');
+    }
+    // ★ 2026-09-24 修复（课题③「返回后历史仍显示在页面上」）：
+    //   旧实现只切 display，未清理二级页状态与视觉残留，返回后历史列表仍可见。
+    closeConversationListPage();
     if (S.messagesEl) S.messagesEl.style.display = '';
     var infoBar = document.getElementById('aiChatHistoryInfo');
     if (infoBar) infoBar.style.display = 'none';
@@ -9731,20 +9907,95 @@ function showChatMessages() {
     var root = getAiRoot();
     if (root) root.classList.remove('showing-history');
   }
-  
-  function showConversationList() {
+
+  // ★ 2026-09-24（课题③）：历史对话改为「独立二级信息页」——
+  //   以浮层卡片形式展示（非全屏覆盖），带滑入/滑出过渡动画，
+  //   可点击关闭按钮或直接选中某个历史会话返回聊天区。
+  function ensureConversationPageShell() {
+    var root = getAiRoot();
+    if (!root || !S.conversationsEl) return null;
+    var shell = root.querySelector('.ai-conv-page-shell');
+    if (shell) return shell;
+    shell = el('div', { class: 'ai-conv-page-shell', role: 'dialog', 'aria-modal': 'false', 'aria-label': '历史会话' });
+    var card = el('div', { class: 'ai-conv-page-card' });
+    var head = el('div', { class: 'ai-conv-page-head' });
+    head.appendChild(el('div', { class: 'ai-conv-page-title', text: '历史会话' }));
+    var closeBtn = el('button', { type: 'button', class: 'ai-conv-page-close', 'aria-label': '关闭历史会话' }, '×');
+    closeBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var histBtnNow = document.querySelector('.ai-chat-hist-btn');
+      var newBtnNow = document.querySelector('.ai-chat-new-btn');
+      hideConversationListPage();
+      if (histBtnNow) syncAiHeaderButtons(histBtnNow, newBtnNow);
+    });
+    head.appendChild(closeBtn);
+    card.appendChild(head);
+    // 把会话列表与提示栏移入浮层卡片（保留原引用，逻辑不变）
+    var infoBar = document.getElementById('aiChatHistoryInfo');
+    if (infoBar) card.appendChild(infoBar);
+    card.appendChild(S.conversationsEl);
+    shell.appendChild(card);
+    root.appendChild(shell);
+    return shell;
+  }
+
+  function openConversationListPage() {
     if (S.messagesEl) S.messagesEl.style.display = 'none';
+    var inputBar = document.getElementById('aiChatInputBar');
+    if (inputBar) inputBar.style.display = 'none';
+    var infoBar = document.getElementById('aiChatHistoryInfo');
+    if (infoBar) infoBar.style.display = '';
     if (S.conversationsEl) {
       S.conversationsEl.style.display = '';
       renderConversationListStyled(S.conversationsEl);
     }
-    var infoBar = document.getElementById('aiChatHistoryInfo');
-    if (infoBar) infoBar.style.display = '';
-    var inputBar = document.getElementById('aiChatInputBar');
-    if (inputBar) inputBar.style.display = 'none';
+    var shell = ensureConversationPageShell();
     S.showingHistory = true;
     var root = getAiRoot();
     if (root) root.classList.add('showing-history');
+    // 下一帧加 is-open 触发滑入动画（保证 transition 生效）
+    if (shell) {
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() { shell.classList.add('is-open'); });
+      });
+    }
+  }
+
+  // 关闭二级浮层（带滑出动画），但不改变聊天区可见性 —— 供 showChatMessages 复用
+  function closeConversationListPage() {
+    var root = getAiRoot();
+    var shell = root ? root.querySelector('.ai-conv-page-shell') : null;
+    if (!shell) return;
+    shell.classList.remove('is-open');
+    shell.classList.add('is-leaving');
+    setTimeout(function() {
+      // 动画结束后把会话列表与提示栏移回 root（保持 DOM 引用稳定，避免后续逻辑找不到节点）
+      try {
+        if (S.conversationsEl && shell.contains(S.conversationsEl)) {
+          S.conversationsEl.style.display = 'none';
+          root.appendChild(S.conversationsEl);
+        }
+        var infoBar = shell.querySelector('#aiChatHistoryInfo');
+        if (infoBar) { infoBar.style.display = 'none'; root.appendChild(infoBar); }
+        if (shell.parentNode) shell.parentNode.removeChild(shell);
+      } catch (eShell) {}
+    }, 260);
+  }
+
+  // 返回聊天区（供页面内"返回"入口调用）
+  function hideConversationListPage() {
+    closeConversationListPage();
+    if (S.messagesEl) S.messagesEl.style.display = '';
+    var inputBar = document.getElementById('aiChatInputBar');
+    if (inputBar) inputBar.style.display = '';
+    S.showingHistory = false;
+    var root = getAiRoot();
+    if (root) root.classList.remove('showing-history');
+  }
+
+  function showConversationList() {
+    openConversationListPage();
   }
 
   function renderAiRoot() {
@@ -9817,16 +10068,40 @@ function showChatMessages() {
       type: 'button', class: 'ai-chat-hist-btn', 'aria-label': '历史会话',
       title: '历史会话'
     }, '历史对话');
+    // ★ 2026-09-24 修复（课题①「历史按钮点不动/有延迟」）：
+    //   旧实现点击后直接 await fetchConversations()，网络往返期间界面零反馈，
+    //   用户以为没点到而反复点击 → 重复请求 → 更卡。现改为：
+    //   ① 点击瞬间立刻进入 loading 态（按钮禁用 + 文案「加载中」+ 面板显示骨架）；
+    //   ② 加 _historyBusy 并发锁，进行中忽略重复点击；
+    //   ③ 失败时明确提示并保持原状，不再静默显示空列表。
     histBtn.addEventListener('click', function() {
       if (S.showingHistory) {
-        showChatMessages();
+        hideConversationListPage();
         syncAiHeaderButtons(histBtn, newBtn);
-      } else {
-        fetchConversations().then(function() {
-          showConversationList();
-          syncAiHeaderButtons(histBtn, newBtn);
-        });
+        return;
       }
+      if (S._historyBusy) return; // 并发锁：忽略重复点击
+      S._historyBusy = true;
+      var _prevText = histBtn.textContent;
+      histBtn.disabled = true;
+      histBtn.textContent = '加载中';
+      // 立即打开二级页并显示骨架屏（点击即反馈，不等网络）
+      openConversationListPage();
+      syncAiHeaderButtons(histBtn, newBtn);
+      fetchConversations().then(function() {
+        S._historyBusy = false;
+        histBtn.disabled = false;
+        if (!histBtn.textContent || histBtn.textContent === '加载中') histBtn.textContent = _prevText;
+        syncAiHeaderButtons(histBtn, newBtn);
+        renderConversationListStyled(S.conversationsEl);
+      }).catch(function() {
+        S._historyBusy = false;
+        histBtn.disabled = false;
+        histBtn.textContent = _prevText;
+        syncAiHeaderButtons(histBtn, newBtn);
+        notify('历史会话加载失败，请稍后重试');
+        if (S.conversationsEl) renderConversationListStyled(S.conversationsEl);
+      });
     });
     header.appendChild(histBtn);
 
@@ -9890,8 +10165,15 @@ function showChatMessages() {
     newBtn.addEventListener('click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      if (S.sending) return;
+      if (S.sending) { notify('正在回复中，请稍候再新建对话'); return; }
+      // ★ 2026-09-24 修复（课题①「新对话点不动/有延迟」）：
+      //   旧实现只有 S.sending 守卫，点击后要等 /chat/new 网络往返才有视觉变化，
+      //   期间按钮无 loading 态、无并发锁，用户重复点击会并发创建多个会话。
+      if (S._newChatBusy) return; // 并发锁：忽略重复点击
+      S._newChatBusy = true;
+      var _prevLabel = newBtn.textContent;
       newBtn.disabled = true;
+      newBtn.textContent = '创建中';
       try {
         // Pending attachments belong to the current conversation only.
         _aiChatFiles = [];
@@ -9909,12 +10191,21 @@ function showChatMessages() {
             appendEmptyState(S.messagesEl);
           }
           setAiRootState('ai-idle');
+          // 若当前正停留在历史二级页，自动收起回到聊天区
+          if (S.showingHistory) {
+            hideConversationListPage();
+            if (typeof histBtn !== 'undefined' && histBtn) syncAiHeaderButtons(histBtn, newBtn);
+          }
           notify('已开始新对话，旧对话仍保留在历史中');
         } else {
           notify(describeError(r, '创建新对话失败'));
         }
+      } catch (eNew) {
+        notify('创建新对话失败，请检查网络后重试');
       } finally {
+        S._newChatBusy = false;
         newBtn.disabled = false;
+        newBtn.textContent = _prevLabel;
       }
     });
     header.appendChild(newBtn);
@@ -10458,6 +10749,9 @@ function showChatMessages() {
         else sum.textContent = modelLabels[S.selectedModel] || S.selectedModel;
         if (flash) flashPanelValue(sum);
       }
+      // ★ 2026-09-24（课题④）：自定义模型增删后，同步刷新深度研究页的模型下拉，
+      //   否则用户在小猫AI 里新加的第三方模型，研究板块选不到。
+      try { refreshResearchModelOptions(document.getElementById('panelDeepThink')); } catch (eRmo) {}
     }
     function updateThinkUI(flash) {
       var sum = panelShell.querySelector('#aiThinkSummary');
@@ -11128,6 +11422,9 @@ function showChatMessages() {
         if (idx < 0) return;
         var removed = customs[idx];
         customs.splice(idx, 1);
+        // ★ 2026-09-24 修复（课题②）：删除时写本地墓碑，并随保存一并上报服务端 deleted_uids，
+        //   防止服务端历史残留快照把该模型复活。
+        markModelUidsDeleted([uid]);
         saveCustomModels(customs);
         if (editingUid === uid) resetForm();
         if (S.selectedModel === CUSTOM_MODEL_PREFIX + uid) {
@@ -11184,6 +11481,7 @@ function showChatMessages() {
           // 编辑：保留原 uid，覆盖全部可编辑字段，账号侧随之同步更新
           record.uid = targetUid;
           customs[existIdx] = record;
+          unmarkModelUidsDeleted([targetUid]); // ★ 重新启用该 uid，清除墓碑
           saveCustomModels(customs);
           S.selectedModel = CUSTOM_MODEL_PREFIX + targetUid;
           S._userPickedModel = true;
@@ -11195,6 +11493,7 @@ function showChatMessages() {
         } else {
           record.uid = genCustomModelUid();
           customs.push(record);
+          unmarkModelUidsDeleted([record.uid]); // ★ 新 uid 若曾入墓碑，先清除
           saveCustomModels(customs);
           var newUid = record.uid;
           S.selectedModel = CUSTOM_MODEL_PREFIX + newUid;

@@ -2921,6 +2921,144 @@
   display: none;
 }
 
+/* ★ 2026-09-24（课题③）：历史对话「独立二级信息页」浮层 + 过渡动画
+   以卡片浮层展示（非全屏覆盖），滑入/滑出带缓动，关闭或选中会话后回到聊天区。 */
+.ai-conv-page-shell {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 0;
+  pointer-events: none;
+}
+
+.ai-conv-page-card {
+  pointer-events: auto;
+  width: min(420px, 92%);
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-left: 1px solid rgba(140, 196, 158, 0.28);
+  box-shadow: -14px 0 40px rgba(61, 113, 99, 0.14);
+  transform: translateX(100%);
+  opacity: 0.4;
+  transition: transform 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+              opacity 220ms ease;
+  will-change: transform, opacity;
+}
+
+.ai-conv-page-shell.is-open .ai-conv-page-card {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.ai-conv-page-shell.is-leaving .ai-conv-page-card {
+  transform: translateX(100%);
+  opacity: 0.35;
+}
+
+.ai-conv-page-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(140, 196, 158, 0.2);
+}
+
+.ai-conv-page-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #2f4b45;
+}
+
+.ai-conv-page-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(140, 196, 158, 0.32);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: #4c6a63;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.ai-conv-page-close:hover {
+  background: rgba(232, 247, 240, 0.95);
+  border-color: rgba(107, 178, 150, 0.5);
+}
+
+.ai-conv-page-close:active {
+  transform: scale(0.92);
+}
+
+/* 列表项逐个淡入，强化"二级页展开"的层次感 */
+.ai-conv-page-shell.is-open .ai-conv-item {
+  animation: aiConvItemIn 260ms ease both;
+}
+
+.ai-conv-page-shell.is-open .ai-conv-item:nth-child(1) { animation-delay: 10ms; }
+.ai-conv-page-shell.is-open .ai-conv-item:nth-child(2) { animation-delay: 30ms; }
+.ai-conv-page-shell.is-open .ai-conv-item:nth-child(3) { animation-delay: 50ms; }
+.ai-conv-page-shell.is-open .ai-conv-item:nth-child(4) { animation-delay: 70ms; }
+.ai-conv-page-shell.is-open .ai-conv-item:nth-child(5) { animation-delay: 90ms; }
+.ai-conv-page-shell.is-open .ai-conv-item:nth-child(n + 6) { animation-delay: 110ms; }
+
+@keyframes aiConvItemIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 深色模式适配 */
+[data-theme="dark"] .ai-conv-page-card,
+.dark .ai-conv-page-card {
+  background: rgba(20, 42, 36, 0.98);
+  border-left-color: rgba(140, 196, 158, 0.22);
+  box-shadow: -14px 0 40px rgba(0, 0, 0, 0.36);
+}
+
+[data-theme="dark"] .ai-conv-page-title,
+.dark .ai-conv-page-title {
+  color: #cfe6dd;
+}
+
+[data-theme="dark"] .ai-conv-page-close,
+.dark .ai-conv-page-close {
+  background: rgba(28, 52, 45, 0.9);
+  color: #b8d6cb;
+  border-color: rgba(140, 196, 158, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-conv-page-card,
+  .ai-conv-page-shell.is-open .ai-conv-item {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .ai-conv-page-card {
+    width: 100%;
+    border-left: none;
+    box-shadow: none;
+  }
+}
+
 .ai-chat-root.ai-idle .ai-cat-avatar {
   animation: aiCatBreathe 3.8s ease-in-out infinite;
 }
