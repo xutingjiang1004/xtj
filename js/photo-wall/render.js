@@ -476,7 +476,10 @@
           continue;
         }
         var now = Date.now();
-        if (now - _lastMoreLoadAt < 300) { setSentinelText('点击加载更多', false); continue; }
+        // ★ 审计修复：300ms 防抖窗口内的触发改为"点击加载更多"（retryable=true）。
+        //   旧代码传 false 使 setSentinelText 把 onclick 置 null —— 文案提示可点，
+        //   实际点击无响应；哨兵持续在视口内时翻页停滞。
+        if (now - _lastMoreLoadAt < 300) { setSentinelText('点击加载更多', true); continue; }
         _lastMoreLoadAt = now;
         doLoadMore();
       }

@@ -2032,7 +2032,9 @@
         html += '</div>';
         html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
         html += '<button class="btn-sm" onclick="this.closest(\'.report-detail-modal\').remove()">取消</button>';
-        html += '<button class="btn-sm primary" onclick="addBan()">确认拉黑封禁</button>';
+        // ★ 审计修复：确认按钮补 id（弹窗与举报详情弹窗共用 .report-detail-modal 类名，
+        //   旧 addBan 用全局 querySelector 取按钮/关闭弹窗，堆叠时会命中错误弹窗）。
+        html += '<button class="btn-sm primary" id="banConfirmBtn" onclick="addBan()">确认拉黑封禁</button>';
         html += '</div>';
 
         box.innerHTML = html;
@@ -2040,22 +2042,33 @@
         document.body.appendChild(modal);
     };
 
+    // ★ 审计修复：addBan 此前无 in-flight 锁（G9 已给 mute/blacklist 加锁，此处遗漏），
+    //   双击可重复提交封禁；且经全局 querySelector 取按钮/关弹窗，与举报详情弹窗
+    //   共用类名时会命中错误弹窗。现对齐 mute 模式加布尔锁，并用确认按钮 id +
+    //   closest 精确持有本次弹窗引用。
+    var _addBanLock = false;
     window.addBan = async function() {
+        if (_addBanLock) return;
         var userName = document.getElementById('banUserName').value.trim();
         var duration = parseInt(document.getElementById('banDuration').value);
         var reason = document.getElementById('banReason').value.trim();
         if (!validateAdminTargetUser(userName, 'banUserName')) return;
-        var btn = document.querySelector('.report-detail-modal button.primary');
+        _addBanLock = true;
+        var btn = document.getElementById('banConfirmBtn') || document.querySelector('.report-detail-modal button.primary');
+        var modal = (btn && btn.closest('.report-detail-modal')) || null;
         if (btn) btn.disabled = true;
         try {
             await apiCall('POST', '/admin/ban', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
-            document.querySelector('.report-detail-modal')?.remove();
+            if (modal) modal.remove();
+            else document.querySelector('.report-detail-modal')?.remove();
             await loadBansData();
             renderTab('bans');
             showToast('已拉黑封禁 ' + userName, 'success');
         } catch(e) {
             showToast('拉黑封禁失败: ' + e.message, 'error');
             if (btn) btn.disabled = false;
+        } finally {
+            _addBanLock = false;
         }
     };
 
@@ -3287,7 +3300,7 @@
             html += '<div style="margin-top:4px;">';
             userAlerts.forEach(function(a) {
                 var alertTypeLabels = { 'same_ip_multi_users': '同IP多账号', 'same_device_multi_users': '同设备多账号', 'multi_ip_same_user': '多IP同账号', 'geo_change': '地区变化', 'high_frequency_visit': '高频访问', 'same_browser_fp_multi_users': '同浏览器指纹多账号', 'same_canvas_fp_multi_users': '同Canvas指纹多账号' };
-                html += '<div style="font-size:11px;padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.04);"><span style="color:var(--danger);">' + (alertTypeLabels[a.type] || a.type) + '</span> ' + escapeHtml(a.reason) + ' <span style="color:var(--text-muted);">' + escapeHtml(formatTime(a.created_at)) + '</span></div>';
+                html += '<div style="font-size:11px;padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.04);"><span style="color:var(--danger);">' + escapeHtml(alertTypeLabels[a.type] || a.type) + '</span> ' + escapeHtml(a.reason) + ' <span style="color:var(--text-muted);">' + escapeHtml(formatTime(a.created_at)) + '</span></div>';
             });
             html += '</div></div>';
         }

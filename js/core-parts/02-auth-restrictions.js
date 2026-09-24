@@ -333,7 +333,14 @@
             var btn = document.getElementById('loginSubmitBtn');
             if (btn) btn.addEventListener('click', doLogin);
             var pwInp = document.getElementById('loginPwInp');
-            if (pwInp) pwInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+            if (pwInp) pwInp.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    // ★ 审计修复：Enter 路径此前不检查按钮 disabled，弱网下脚本加载
+                    // 期间/响应返回前连按 Enter 会并发触发两次登录提交。
+                    if (btn && btn.disabled) return;
+                    doLogin();
+                }
+            });
             var nickInp = document.getElementById('loginNickInp');
             if (nickInp) nickInp.addEventListener('keydown', function (e) { if (e.key === 'Enter' && pwInp) pwInp.focus(); });
 
@@ -482,7 +489,12 @@
             // 判空保护：任一注册表单元素缺失不得中断 core.js 后续全部逻辑
             if (_regSubmitBtn) _regSubmitBtn.addEventListener('click', doRegister);
             if (_regPwInp) _regPwInp.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') doRegister();
+                if (e.key === 'Enter') {
+                    // ★ 审计修复：与登录路径对称，防止连按 Enter 并发重复注册
+                    //   （并发走 saveUserInfo 可能插入两条 __user_info__ 记录）。
+                    if (_regSubmitBtn && _regSubmitBtn.disabled) return;
+                    doRegister();
+                }
             });
             if (_regNickInp) _regNickInp.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') { var _email = document.getElementById('regEmailInp'); if (_email) _email.focus(); }
@@ -546,7 +558,10 @@
                     await saveUserInfo(currentUser, true, email);
                     await loadCurrentUserInfoSnapshot(currentUser);
 
-                    await initUI();
+                    // ★ 审计修复：initUI 内部直取多个 getElementById 结果无空守卫，
+                    //   一旦抛错会让"注册成功"toast 之后又弹"注册失败"，且跳过下方
+                    //   initialLoad 与访问记录。与登录路径（initUI().catch）对齐。
+                    await initUI().catch(function() {});
                     initialLoad(true).catch(function() {});
                     // 记录用户访问
                     logUserVisitToApi(currentUser);

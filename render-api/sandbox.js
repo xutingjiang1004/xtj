@@ -330,6 +330,10 @@ function runInVmFallback(code, input) {
     Error: Error, TypeError: TypeError, RangeError: RangeError, SyntaxError: SyntaxError
   };
 
+  // 补齐 console 其余级别（与 isolated-vm 路径对齐；旧实现只有 log，
+  // 沙箱内调用 console.warn/error/info 会直接 TypeError）
+  ['info', 'warn', 'error'].forEach(function (lv) { sandbox.console[lv] = sandbox.console.log; });
+
   // 挂载可用的预装库（同进程，直接挂对象即可）
   for (const key of AVAILABLE_LIBS) {
     sandbox[key] = SANDBOX_LIBS[key];

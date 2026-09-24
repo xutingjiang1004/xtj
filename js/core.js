@@ -610,6 +610,15 @@ const ADMIN_NAME = "xxz";
                     // 保留本地会话，下次交互/可见性变化时自然重试。
                     return { token: '', user_name: '' };
                 })();
+                // ★ 审计修复（P1）：Promise settle 后必须清空缓存变量。旧实现从不
+                //   重置 _refreshPromise，首次刷新完成后所有后续调用永远命中
+                //   `if (_refreshPromise) return _refreshPromise`，拿到的都是第一次
+                //   的**旧结果** —— access token 过期后 401 重试仍在用旧 token，最终
+                //   用户被强制登出，30 秒冷却逻辑也被短路。此处仅保留"在途去重"
+                //   语义（settle 前的并发调用共享同一 Promise）。内部实现从不
+                //   reject（全路径 try/catch 返回对象），then 双回调为防御性兜底。
+                var _clearRefreshPromise = function() { _refreshPromise = null; };
+                _refreshPromise.then(_clearRefreshPromise, _clearRefreshPromise);
                 return _refreshPromise;
             }
 
@@ -2769,7 +2778,14 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             var btn = document.getElementById('loginSubmitBtn');
             if (btn) btn.addEventListener('click', doLogin);
             var pwInp = document.getElementById('loginPwInp');
-            if (pwInp) pwInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+            if (pwInp) pwInp.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    // ★ 审计修复：Enter 路径此前不检查按钮 disabled，弱网下脚本加载
+                    // 期间/响应返回前连按 Enter 会并发触发两次登录提交。
+                    if (btn && btn.disabled) return;
+                    doLogin();
+                }
+            });
             var nickInp = document.getElementById('loginNickInp');
             if (nickInp) nickInp.addEventListener('keydown', function (e) { if (e.key === 'Enter' && pwInp) pwInp.focus(); });
 
@@ -2918,7 +2934,12 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             // 判空保护：任一注册表单元素缺失不得中断 core.js 后续全部逻辑
             if (_regSubmitBtn) _regSubmitBtn.addEventListener('click', doRegister);
             if (_regPwInp) _regPwInp.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') doRegister();
+                if (e.key === 'Enter') {
+                    // ★ 审计修复：与登录路径对称，防止连按 Enter 并发重复注册
+                    //   （并发走 saveUserInfo 可能插入两条 __user_info__ 记录）。
+                    if (_regSubmitBtn && _regSubmitBtn.disabled) return;
+                    doRegister();
+                }
             });
             if (_regNickInp) _regNickInp.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') { var _email = document.getElementById('regEmailInp'); if (_email) _email.focus(); }
@@ -2982,7 +3003,10 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     await saveUserInfo(currentUser, true, email);
                     await loadCurrentUserInfoSnapshot(currentUser);
 
-                    await initUI();
+                    // ★ 审计修复：initUI 内部直取多个 getElementById 结果无空守卫，
+                    //   一旦抛错会让"注册成功"toast 之后又弹"注册失败"，且跳过下方
+                    //   initialLoad 与访问记录。与登录路径（initUI().catch）对齐。
+                    await initUI().catch(function() {});
                     initialLoad(true).catch(function() {});
                     // 记录用户访问
                     logUserVisitToApi(currentUser);
@@ -3021,8 +3045,15 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
             window.openUserProfile = async function(userName) {
                 upcTargetUser = userName;
                 var _seq = ++upcRequestSeq;
-                document.getElementById('upcName').textContent = userName;
-                document.getElementById('upcLogin').textContent = '最近登录：加载中...';
+                // ★ 审计修复：upcName/upcLogin/upcMsgBtn 此前直接取用无守卫（与下方
+                //   avatarEl 的 `if (!avatarEl) return` 不对称），元素缺失时 TypeError
+                //   会导致资料卡打不开。统一获取 + 前置守卫。
+                var upcNameEl = document.getElementById('upcName');
+                var upcLoginEl = document.getElementById('upcLogin');
+                var msgBtn = document.getElementById('upcMsgBtn');
+                if (!upcNameEl || !upcLoginEl || !msgBtn) return;
+                upcNameEl.textContent = userName;
+                upcLoginEl.textContent = '最近登录：加载中...';
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 if (!avatarEl) return;
@@ -3043,7 +3074,6 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + escapeHtml(String(userName || '?').charAt(0).toUpperCase()) + '</span>';
                 }
                 
-                var msgBtn = document.getElementById('upcMsgBtn');
                 if (userName === currentUser) {
                     msgBtn.textContent = '这是你自己';
                     msgBtn.disabled = true;
@@ -3112,22 +3142,27 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                     // S7 修复：同上，用户已切换则丢弃本次结果
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
                     
-                    if (userInfoRes.data && userInfoRes.data.length > 0) {
+                    // ★ 审计修复：userInfoRes 仅在本人分支被赋值（上方 RLS 收紧后
+                    //   非本人不再直读），查看他人资料时保持 null —— 旧代码
+                    //   `userInfoRes.data` 必然 TypeError 落入 catch，界面恒显示
+                    //   "最近登录：加载失败"，与注释"非本人直接显示占位"意图相悖。
+                    //   补空值守卫后非本人走 118 行的 '-' 占位。
+                    if (userInfoRes && userInfoRes.data && userInfoRes.data.length > 0) {
                         try {
                             var info = JSON.parse(userInfoRes.data[0].content);
                             if (info.last_login) {
-                                document.getElementById('upcLogin').textContent = '最近登录：' + window.safeParseDate(info.last_login).toLocaleString();
+                                upcLoginEl.textContent = '最近登录：' + window.safeParseDate(info.last_login).toLocaleString();
                             } else {
-                                document.getElementById('upcLogin').textContent = '最近登录：-';
+                                upcLoginEl.textContent = '最近登录：-';
                             }
                         } catch(e) {
-                            document.getElementById('upcLogin').textContent = '最近登录：-';
+                            upcLoginEl.textContent = '最近登录：-';
                         }
                     } else {
-                        document.getElementById('upcLogin').textContent = '最近登录：-';
+                        upcLoginEl.textContent = '最近登录：-';
                     }
                 } catch(e) {
-                    document.getElementById('upcLogin').textContent = '最近登录：加载失败';
+                    upcLoginEl.textContent = '最近登录：加载失败';
                 }
             };
 
@@ -9433,6 +9468,10 @@ function renderProfileActivityList(kind) {
                     bubble.classList.add('hide');
                     setTimeout(() => {
                         if (bubble.parentNode) bubble.remove();
+                        // ★ 审计修复：点击路径同样要从 activeNotifications 移除条目。
+                        //   旧实现只在自动隐藏路径 filter（且 clicked 后被 if 提前
+                        //   return 跳过），点击过的气泡 DOM 引用会长期滞留数组。
+                        activeNotifications = activeNotifications.filter(n => n.id !== notifId);
                     }, 400);
                 });
 
@@ -12081,14 +12120,21 @@ function renderProfileActivityList(kind) {
             let themeSplashOverlay = null;
             let themeSplashCleanupTimer = 0;
 
-            function setThemeState(isDark) {
+            // ★ 审计修复（G7 对称补全）：新增 persist 参数（默认 true）。
+            //   旧实现 isDark 分支无条件落盘 'dark' —— 首次访问且系统为深色时，
+            //   初始化 setThemeState(true) 会写入 localStorage，使下方系统主题
+            //   变化监听的 `if (!safeStorage.get(THEME_STORAGE_KEY))` 永久短路；
+            //   浅色路径 G7 已修、深色路径遗漏。"跟随系统"的初始化与系统变化
+            //   回调现传 persist=false，不写存储；用户主动切换保持落盘。
+            function setThemeState(isDark, persist) {
+                if (persist === undefined) persist = true;
                 if (isDark) {
                     htmlEl.setAttribute('data-theme', 'dark');
                     if (themeBtn) {
                         themeBtn.setAttribute('aria-label', '切换到浅色模式');
                         themeBtn.setAttribute('title', '切换到浅色模式');
                     }
-                    window.safeStorage.set(THEME_STORAGE_KEY, 'dark');
+                    if (persist) window.safeStorage.set(THEME_STORAGE_KEY, 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
                     if (themeBtn) {
@@ -12097,6 +12143,7 @@ function renderProfileActivityList(kind) {
                     }
                     // G7 修复：仅当用户显式选择了浅色（此前存过偏好）时才落盘 'light'；
                     // 首次访问跟随系统浅色时不写 localStorage，保证系统深色监听（11441 行）持续生效
+                    if (!persist) return;
                     if (window.safeStorage.get(THEME_STORAGE_KEY)) {
                         window.safeStorage.set(THEME_STORAGE_KEY, 'light');
                     } else {
@@ -12252,7 +12299,9 @@ function renderProfileActivityList(kind) {
             if (savedTheme === 'dark') {
                 setThemeState(true);
             } else if (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                setThemeState(true);
+                // ★ 审计修复：首次跟随系统深色不落盘（persist=false），与 G7 浅色
+                //   路径对称 —— 否则系统主题变化监听从此永久失效。
+                setThemeState(true, false);
             } else {
                 setThemeState(false);
             }
@@ -12262,7 +12311,7 @@ function renderProfileActivityList(kind) {
                 if (mqDark && mqDark.addEventListener) {
                     mqDark.addEventListener('change', function(e) {
                         if (!window.safeStorage.get(THEME_STORAGE_KEY)) {
-                            setThemeState(e.matches);
+                            setThemeState(e.matches, false);
                         }
                     });
                 }

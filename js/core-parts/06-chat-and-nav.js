@@ -1719,14 +1719,21 @@
             let themeSplashOverlay = null;
             let themeSplashCleanupTimer = 0;
 
-            function setThemeState(isDark) {
+            // ★ 审计修复（G7 对称补全）：新增 persist 参数（默认 true）。
+            //   旧实现 isDark 分支无条件落盘 'dark' —— 首次访问且系统为深色时，
+            //   初始化 setThemeState(true) 会写入 localStorage，使下方系统主题
+            //   变化监听的 `if (!safeStorage.get(THEME_STORAGE_KEY))` 永久短路；
+            //   浅色路径 G7 已修、深色路径遗漏。"跟随系统"的初始化与系统变化
+            //   回调现传 persist=false，不写存储；用户主动切换保持落盘。
+            function setThemeState(isDark, persist) {
+                if (persist === undefined) persist = true;
                 if (isDark) {
                     htmlEl.setAttribute('data-theme', 'dark');
                     if (themeBtn) {
                         themeBtn.setAttribute('aria-label', '切换到浅色模式');
                         themeBtn.setAttribute('title', '切换到浅色模式');
                     }
-                    window.safeStorage.set(THEME_STORAGE_KEY, 'dark');
+                    if (persist) window.safeStorage.set(THEME_STORAGE_KEY, 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
                     if (themeBtn) {
@@ -1735,6 +1742,7 @@
                     }
                     // G7 修复：仅当用户显式选择了浅色（此前存过偏好）时才落盘 'light'；
                     // 首次访问跟随系统浅色时不写 localStorage，保证系统深色监听（11441 行）持续生效
+                    if (!persist) return;
                     if (window.safeStorage.get(THEME_STORAGE_KEY)) {
                         window.safeStorage.set(THEME_STORAGE_KEY, 'light');
                     } else {
@@ -1890,7 +1898,9 @@
             if (savedTheme === 'dark') {
                 setThemeState(true);
             } else if (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                setThemeState(true);
+                // ★ 审计修复：首次跟随系统深色不落盘（persist=false），与 G7 浅色
+                //   路径对称 —— 否则系统主题变化监听从此永久失效。
+                setThemeState(true, false);
             } else {
                 setThemeState(false);
             }
@@ -1900,7 +1910,7 @@
                 if (mqDark && mqDark.addEventListener) {
                     mqDark.addEventListener('change', function(e) {
                         if (!window.safeStorage.get(THEME_STORAGE_KEY)) {
-                            setThemeState(e.matches);
+                            setThemeState(e.matches, false);
                         }
                     });
                 }

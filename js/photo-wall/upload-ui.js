@@ -1137,12 +1137,18 @@
       updateUploadBatchProgress(processed, total, ok, fail, '上传中断，可重试失败项');
     } finally {
       setProgress('');
-      state.uploading = false;
+      // ★ 审计修复：uploading 标志不再在此处提前复位 —— 下方还有失败登记、
+      //   loadPhotoWallData、渲染、结果面板等异步收尾（最长可达数十秒），
+      //   期间 isBusy() 已放行新上传，旧批次的 failedJobs 回写/结果面板会
+      //   覆盖新批次状态。改为在全部收尾结束后（finally）统一复位。
       state.batchController = null;
       // 取消按钮文案由实际取消完成（本 finally）驱动复位，不再固定 500ms
       var _cancelBtn = byId('pwUploadProgressCancel');
       if (_cancelBtn) { _cancelBtn.disabled = false; _cancelBtn.textContent = '取消上传'; }
     }
+    // 收尾整体包裹 try/catch：任何一步抛错都必须保证 uploading 最终复位，
+    // 避免标志永久卡死导致上传功能不可用。
+    try {
     jobs.forEach(function(j){
       if (j.status === 'failed' && j.error) {
         failures.push({
@@ -1194,6 +1200,12 @@
     setUploadResult(summary, resultState, fullMsg);
     toast(summary);
     await new Promise(function(resolve){ setTimeout(resolve, 180); });
+    } catch (finErr) {
+      console.error('[photo-upload] finalize error', finErr);
+    } finally {
+      // ★ 全部收尾（含 180ms 稳定窗）结束后才放行下一次上传
+      state.uploading = false;
+    }
   }
 
   async function uploadPhotoWallFiles(){

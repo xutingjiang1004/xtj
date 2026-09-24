@@ -709,7 +709,12 @@
             S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
             var D = null, W = null, Y = document.getElementById("photoGrid");
             if (Y && S && null != S.id) {
-                var Z = Y.querySelector('.photo-wall-item[data-photo-id="' + String(S.id).replace(/"/g, '\\"') + '"]'), K = Z ? Z.querySelector("img") : null;
+                // ★ 审计修复：旧转义只处理双引号不处理反斜杠，id 含 "\" 时选择器
+                //   断裂抛 SyntaxError 导致预览打不开。统一用 CSS.escape
+                //   （data.js 已有同款先例），带降级兜底。
+                var _pidRaw = String(S.id);
+                var _pidSel = (window.CSS && typeof CSS.escape === "function") ? CSS.escape(_pidRaw) : _pidRaw.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                var Z = Y.querySelector('.photo-wall-item[data-photo-id="' + _pidSel + '"]'), K = Z ? Z.querySelector("img") : null;
                 if (K && K.complete) {
                     var G = K.getBoundingClientRect();
                     G && G.width > 0 && G.height > 0 && (D = G, W = K);

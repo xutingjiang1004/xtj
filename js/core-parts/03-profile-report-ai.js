@@ -12,8 +12,15 @@
             window.openUserProfile = async function(userName) {
                 upcTargetUser = userName;
                 var _seq = ++upcRequestSeq;
-                document.getElementById('upcName').textContent = userName;
-                document.getElementById('upcLogin').textContent = '最近登录：加载中...';
+                // ★ 审计修复：upcName/upcLogin/upcMsgBtn 此前直接取用无守卫（与下方
+                //   avatarEl 的 `if (!avatarEl) return` 不对称），元素缺失时 TypeError
+                //   会导致资料卡打不开。统一获取 + 前置守卫。
+                var upcNameEl = document.getElementById('upcName');
+                var upcLoginEl = document.getElementById('upcLogin');
+                var msgBtn = document.getElementById('upcMsgBtn');
+                if (!upcNameEl || !upcLoginEl || !msgBtn) return;
+                upcNameEl.textContent = userName;
+                upcLoginEl.textContent = '最近登录：加载中...';
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 if (!avatarEl) return;
@@ -34,7 +41,6 @@
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + escapeHtml(String(userName || '?').charAt(0).toUpperCase()) + '</span>';
                 }
                 
-                var msgBtn = document.getElementById('upcMsgBtn');
                 if (userName === currentUser) {
                     msgBtn.textContent = '这是你自己';
                     msgBtn.disabled = true;
@@ -103,22 +109,27 @@
                     // S7 修复：同上，用户已切换则丢弃本次结果
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
                     
-                    if (userInfoRes.data && userInfoRes.data.length > 0) {
+                    // ★ 审计修复：userInfoRes 仅在本人分支被赋值（上方 RLS 收紧后
+                    //   非本人不再直读），查看他人资料时保持 null —— 旧代码
+                    //   `userInfoRes.data` 必然 TypeError 落入 catch，界面恒显示
+                    //   "最近登录：加载失败"，与注释"非本人直接显示占位"意图相悖。
+                    //   补空值守卫后非本人走 118 行的 '-' 占位。
+                    if (userInfoRes && userInfoRes.data && userInfoRes.data.length > 0) {
                         try {
                             var info = JSON.parse(userInfoRes.data[0].content);
                             if (info.last_login) {
-                                document.getElementById('upcLogin').textContent = '最近登录：' + window.safeParseDate(info.last_login).toLocaleString();
+                                upcLoginEl.textContent = '最近登录：' + window.safeParseDate(info.last_login).toLocaleString();
                             } else {
-                                document.getElementById('upcLogin').textContent = '最近登录：-';
+                                upcLoginEl.textContent = '最近登录：-';
                             }
                         } catch(e) {
-                            document.getElementById('upcLogin').textContent = '最近登录：-';
+                            upcLoginEl.textContent = '最近登录：-';
                         }
                     } else {
-                        document.getElementById('upcLogin').textContent = '最近登录：-';
+                        upcLoginEl.textContent = '最近登录：-';
                     }
                 } catch(e) {
-                    document.getElementById('upcLogin').textContent = '最近登录：加载失败';
+                    upcLoginEl.textContent = '最近登录：加载失败';
                 }
             };
 

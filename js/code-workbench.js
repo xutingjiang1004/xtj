@@ -1884,9 +1884,18 @@
     }
     return item.content || '';
   }
+  // ★ 审计修复：批量读取代次号。bulkLoadAll 的并发 worker 此前无任何失效守卫：
+  //   读取进行中切换分支（resetBulkCache 清空缓存）后，旧 worker 仍按新分支名
+  //   拼请求、把旧分支文件内容写进共享缓存，最终经 buildAiPrompt 以"当前分支
+  //   已读取的 N 个文件"注入 AI，诱导错误修改。切分支/重新发起读取时递增，
+  //   过期 worker 直接放弃写入与收尾。
+  var bulkLoadSeq = 0;
   function resetBulkCache() {
+    bulkLoadSeq++; // 作废在途的批量读取请求
     state.bulkFiles = {};
+    state.bulkFailed = [];
     state.bulkBranch = '';
+    if (ui.bulkBtn) ui.bulkBtn.disabled = false;
     updateBulkStatus();
   }
   function updateBulkStatus() {
@@ -1909,6 +1918,7 @@
     candidates.sort(function (a, b) { return (a.size || 0) - (b.size || 0); });
     if (candidates.length > BULK_MAX_FILES) candidates = candidates.slice(0, BULK_MAX_FILES);
     if (!candidates.length) { notify('当前分支没有可批量读取的代码文件'); return; }
+    var _bulkSeq = ++bulkLoadSeq; // 本轮代次号：切换分支/再次读取后旧轮次全部失效
     state.bulkFiles = {};
     state.bulkFailed = [];
     state.bulkBranch = state.repo.branch;
@@ -1916,8 +1926,10 @@
     var total = candidates.length, done = 0, failed = 0;
     if (ui.bulkStatus) ui.bulkStatus.textContent = '0/' + total;
     async function fetchOne(n) {
+      if (_bulkSeq !== bulkLoadSeq) return;
       try {
         var r = await ghRequest('GET', '/repos/' + state.repo.owner + '/' + state.repo.repo + '/contents/' + encodePath(n.path) + '?ref=' + encodeURIComponent(state.repo.branch));
+        if (_bulkSeq !== bulkLoadSeq) return; // 代次过期：不写入共享缓存
         if (r.ok && r.data) {
           var c = decodeGhContent(r.data);
           if (c.length > BULK_MAX_FILE_BYTES) c = c.slice(0, BULK_MAX_FILE_BYTES);
@@ -1928,10 +1940,11 @@
       if (ui.bulkStatus) ui.bulkStatus.textContent = done + '/' + total;
     }
     var idx = 0;
-    async function worker() { while (idx < candidates.length) { await fetchOne(candidates[idx++]); } }
+    async function worker() { while (_bulkSeq === bulkLoadSeq && idx < candidates.length) { await fetchOne(candidates[idx++]); } }
     var pool = [];
     for (var w = 0; w < BULK_CONCURRENCY; w++) pool.push(worker());
     await Promise.all(pool);
+    if (_bulkSeq !== bulkLoadSeq) return; // 过期轮次：收尾交给当前轮次处理
     if (ui.bulkBtn) ui.bulkBtn.disabled = false;
     var loaded = Object.keys(state.bulkFiles).length;
     updateBulkStatus();
