@@ -492,15 +492,21 @@ const ADMIN_NAME = "xxz";
             window.clearAllAuthState = clearAllAuthState;
 
             function handleProtectedAuthFailure() {
-                if (_protectedAuthFailureHandled) return;
-                _protectedAuthFailureHandled = true;
-                clearAllAuthState({ revokeRemote: false });
-                try { if (typeof showToast === 'function') showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
+                var _alreadyHandled = _protectedAuthFailureHandled;
+                if (!_alreadyHandled) {
+                    _protectedAuthFailureHandled = true;
+                    clearAllAuthState({ revokeRemote: false });
+                    // ★ 30秒后重置，允许用户关闭弹窗后再次触发
+                    setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
+                }
+                // ★ 修复「提示了登录失效却不见弹窗」：去重只作用于 clear + toast，
+                //   登录弹窗必须始终确保打开（openAuthModal 幂等，重复调用无副作用）。
+                //   此前 30 秒去重窗口内的后续失效整体 return，各调用方只会 throw 出
+                //   「登录已失效」的笼统报错，登录框却再也不出现。
+                try { if (typeof showToast === 'function' && !_alreadyHandled) showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
                 try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
-                // ★ 30秒后重置，允许用户关闭弹窗后再次触发
-                setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
             }
-            window.handleProtectedAuthFailure = handleProtectedAuthFailure;
+window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 
             async function ensureUserToken() {
                 var existingToken = memoryUserToken || '';
@@ -685,6 +691,10 @@ const ADMIN_NAME = "xxz";
                     userName = String(userName || '').trim();
                     if (!userName) return { ok: false, reason: 'no_user', token: '', user_name: '' };
 
+                                        // ★ 修复「点了没反应」：30 秒 refresh 冷却只应约束后台自动重试风暴。
+                    //   本函数仅由用户主动操作触发，点击时应立即允许再试一次，否则冷却期内
+                    //   每次点击都拿空 token 直接失败，按钮毫无反馈。
+                    try { _refreshCooldownUntil = 0; } catch (_eCd) {}
                     var token = await ensureUserToken();
                     if (token) {
                         // ★ 验证 token 身份与 UI 身份一致
@@ -692,6 +702,8 @@ const ADMIN_NAME = "xxz";
                         if (_lastRefreshUser && _lastRefreshUser !== userName) {
                             // Token 对应的是另一个账号，UI 身份过期
                             _protectedAuthFailureHandled = true;
+                            // ★ 修复：此处置 true 若从不重置，后续真正的会话失效会被去重永久吞掉（有提示无弹窗）。补 30 秒自愈。
+                            setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
                             clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'identity_mismatch' });
                             try { if (typeof showToast === 'function') showToast('账号认证状态异常，请重新登录', 'error'); } catch (e) {}
                             try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
@@ -701,9 +713,9 @@ const ADMIN_NAME = "xxz";
                         try { touchUserSession(false); } catch (e2) {}
                         return { ok: true, reason: 'ok', token: token, user_name: userName };
                     }
-                    if (_lastRefreshAuthResult.reason === 'expired') {
+                    if (_lastRefreshAuthResult.reason === 'expired' || _lastRefreshAuthResult.reason === 'forbidden') {
                         handleProtectedAuthFailure();
-                        return { ok: false, reason: 'expired', status: _lastRefreshAuthResult.status, token: '', user_name: userName };
+                        return { ok: false, reason: _lastRefreshAuthResult.reason, status: _lastRefreshAuthResult.status, token: '', user_name: userName };
                     }
                     return {
                         ok: false,
@@ -723,6 +735,18 @@ const ADMIN_NAME = "xxz";
                 var timeoutMs = options.timeoutMs != null ? options.timeoutMs : 15000;
                 var auth = await window.ensureProtectedOperationAuth();
                 if (!auth.ok) {
+                    // ★ 修复「静默无反馈」：确证失效已在 ensureProtectedOperationAuth 内弹窗；
+                    //   网络类失败（unavailable/network_error）此前只 throw，调用方多半静默
+                    //   吞掉，用户点按钮毫无反应。补 15 秒节流 toast。
+                    if (!(auth.reason === 'expired' || auth.reason === 'forbidden' || auth.reason === 'identity_mismatch')) {
+                        try {
+                            var _nowTs = Date.now();
+                            if (_nowTs - (window.__xtjAuthUnavailableToastAt || 0) > 15000) {
+                                window.__xtjAuthUnavailableToastAt = _nowTs;
+                                if (typeof showToast === 'function') showToast('网络不稳定，操作未完成，请稍后重试', 'info');
+                            }
+                        } catch (_eToast) {}
+                    }
                     var authError = new Error(auth.reason === 'expired' ? '登录已失效' : '认证服务暂时不可用');
                     authError.code = auth.reason || 'auth_unavailable';
                     authError.status = auth.status || 0;
@@ -1131,15 +1155,45 @@ const ADMIN_NAME = "xxz";
                         // 每次经 ensureProtectedOperationAuth 忙等 5 秒后才报失效；
                         // 下方 catch 的 no_cookie/offline_unverified 判定实际不可达。
                         var _rReason = (_lastRefreshAuthResult && _lastRefreshAuthResult.reason) || '';
-                        if (_rReason === 'expired' || _rReason === 'forbidden' || _rReason === 'invalid_response') {
-                            // 服务端确认会话已失效：清除幽灵登录
-                            clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'startup_refresh_' + _rReason });
-                            currentUser = '';
-                            window.currentUser = '';
-                            window._lastKnownUser = '';
-                            window._xtjAuthState = 'unauthenticated';
-                            window._xtjCanonicalUser = '';
-                            if (typeof initUI === 'function') initUI().catch(function() {});
+                        if (_rReason === 'invalid_response') {
+                            // ★ 修复：HTTP 200 但响应体缺 token 属于服务端异常/半兼容响应，
+                            //   不构成「确证失效」，不再清 30 天本地会话（此前误杀）。
+                            window._xtjAuthState = 'offline_unverified';
+                        } else if (_rReason === 'expired' || _rReason === 'forbidden') {
+                            // ★ 修复「每次部署后掉登录」：Render 部署窗口/边缘抖动可能产生
+                            //   一次性 401。清掉 30 天本地会话前先绕过冷却延迟 1.5s 重试一次
+                            //   做二次确认；仍确证失效才清。期间恢复成功则直接回到 authenticated。
+                            try { _refreshCooldownUntil = 0; } catch (_eCd2) {}
+                            await new Promise(function (r) { setTimeout(r, 1500); });
+                            var _recheck = await refreshUserTokenViaCookie();
+                            if (_recheck && _recheck.token) {
+                                _startupAuthVerified = true;
+                                window._xtjAuthState = 'authenticated';
+                                window._xtjCanonicalUser = _recheck.user_name || currentUser;
+                                if (_recheck.user_name && _recheck.user_name !== currentUser) {
+                                    currentUser = _recheck.user_name;
+                                    window.currentUser = currentUser;
+                                    window._lastKnownUser = currentUser;
+                                    writeUserSession(currentUser, { resetLoginAt: false });
+                                }
+                            } else if (_lastRefreshAuthResult.reason === 'expired' || _lastRefreshAuthResult.reason === 'forbidden') {
+                                // 二次确认仍确证失效：清除幽灵登录
+                                clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'startup_refresh_' + _lastRefreshAuthResult.reason });
+                                currentUser = '';
+                                window.currentUser = '';
+                                window._lastKnownUser = '';
+                                window._xtjAuthState = 'unauthenticated';
+                                window._xtjCanonicalUser = '';
+                                if (typeof initUI === 'function') initUI().catch(function() {});
+                                // ★ 失效必须可见：补 toast + 弹登录框（此前静默清状态，用户一脸懵）
+                                try { if (typeof showToast === 'function') showToast('登录状态已过期，请重新登录', 'error'); } catch (_eT) {}
+                                setTimeout(function () {
+                                    try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (_eM) {}
+                                }, 600);
+                            } else {
+                                // 二次确认时变成网络类失败：不注销本地会话
+                                window._xtjAuthState = 'offline_unverified';
+                            }
                         } else {
                             // 网络/服务不可用：不注销本地会话，但退出 auth_pending 忙等态
                             window._xtjAuthState = 'offline_unverified';

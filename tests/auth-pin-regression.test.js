@@ -17,7 +17,7 @@ test('protected auth only clears a genuinely expired session', () => {
   //   403→'forbidden'（二者均确证会话失效，由上层处理）；5xx/409/429/网络异常
   //   改走重试，不再返回失效信号。契约同步为「401 映射 expired、403 映射 forbidden」。
   assert.match(core, /reason:\s*res\.status === 401 \? 'expired' : 'forbidden'/);
-  assert.match(core, /if \(_lastRefreshAuthResult\.reason === 'expired'\) \{\s*handleProtectedAuthFailure\(\)/);
+  assert.match(core, /if \(_lastRefreshAuthResult\.reason === 'expired' \|\| _lastRefreshAuthResult\.reason === 'forbidden'\) \{\s*handleProtectedAuthFailure\(\)/);
   assert.match(core, /reason: 'network_error'/);
 });
 
