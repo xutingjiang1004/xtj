@@ -15776,3 +15776,35 @@ profile content only. Dock stays untouched.
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 36px rgba(0, 0, 0, 0.22) !important;
   }
 }
+
+/* Private chat: stable bottom anchoring and a WeChat-style return-to-latest affordance. */
+.chat-messages { overflow-anchor: none; }
+.chat-jump-latest {
+    position: absolute;
+    right: 18px;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid rgba(76, 168, 124, 0.24);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.92);
+    color: #19724a;
+    box-shadow: 0 8px 24px rgba(24, 80, 52, 0.16);
+    font-size: 12px;
+    font-weight: 700;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity .18s ease, transform .18s ease;
+}
+.dock-chat-container { position: relative; }
+.chat-jump-latest.is-visible { opacity: 1; transform: translateY(0); }
+.chat-jump-latest[hidden] { display: none; }
+.chat-msg .msg-img { min-width: 96px; background: rgba(19, 73, 45, 0.08); }
+[data-theme="dark"] .chat-jump-latest { background: rgba(29, 48, 39, 0.94); border-color: rgba(123, 208, 163, 0.24); color: #b6ebcd; }
+@media (prefers-reduced-motion: reduce) {
+    .chat-msg, .chat-msg.sent-anim, .chat-jump-latest { animation: none !important; transition: none !important; }
+}
