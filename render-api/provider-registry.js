@@ -178,6 +178,42 @@ function getDefaultConfig(providerType) {
 // isPrivateAddress 保持同一套覆盖标准：IPv4 全部分段 + IPv6 的 mapped 内嵌、
 // ULA(fc/fd)、链路本地(fe8-feB)、NAT64(64:ff9b::/96)、6to4(2002::/16)、
 // Teredo(2001::/32)、文档段(2001:db8::/32) 与组播(ff00::/8)。
+// 把 IPv6 归一化为 8 个 16 位组（含 "::" 展开与内嵌 IPv4 写法）；无法解析返回 null。
+// 与 web-fetch.js 的同名实现保持一致，用于识别 0:0:0:0:0:0:0:1、::0.0.0.1 等
+// 字符串前缀匹配覆盖不到的形变。
+function ipv6Groups(address) {
+  var value = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
+  var zone = value.indexOf('%');
+  if (zone >= 0) value = value.slice(0, zone);
+  if (value.indexOf('.') >= 0) {
+    var lastColon = value.lastIndexOf(':');
+    if (lastColon < 0) return null;
+    var embedded = value.slice(lastColon + 1);
+    if (net.isIP(embedded) !== 4) return null;
+    var embeddedOctets = embedded.split('.').map(Number);
+    value = value.slice(0, lastColon + 1) +
+      (((embeddedOctets[0] << 8) | embeddedOctets[1]).toString(16)) + ':' +
+      (((embeddedOctets[2] << 8) | embeddedOctets[3]).toString(16));
+  }
+  var halves = value.split('::');
+  if (halves.length > 2) return null;
+  var head = halves[0] ? halves[0].split(':') : [];
+  var tail = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
+  var groups = head;
+  if (halves.length === 2) {
+    var missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    groups = head.concat(new Array(missing).fill('0')).concat(tail);
+  }
+  if (groups.length !== 8) return null;
+  var result = [];
+  for (var i = 0; i < 8; i++) {
+    if (!/^[0-9a-f]{1,4}$/.test(groups[i])) return null;
+    result.push(parseInt(groups[i], 16));
+  }
+  return result;
+}
+
 function isPrivateIpAddress(address) {
   var value = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (net.isIP(value) === 4) {
@@ -192,18 +228,21 @@ function isPrivateIpAddress(address) {
       (first === 203 && octets[1] === 0 && octets[2] === 113);
   }
   if (net.isIP(value) === 6) {
-    if (value.indexOf('::ffff:') === 0) {
-      var mappedV4 = value.slice(7);
-      if (net.isIP(mappedV4) === 4) return isPrivateIpAddress(mappedV4);
+    // ★ SSRF 修复（与 web-fetch.js 对齐）：改用 16 位组数值判定，避免
+    //   0:0:0:0:0:0:0:1（全展开回环）、::0.0.0.1 等形变绕过字符串前缀匹配；
+    //   解析不了的 IPv6 一律按内网处理（fail-closed）。
+    var groups = ipv6Groups(value);
+    if (!groups) return true;
+    // IPv4-mapped(::ffff:0:0/96) 与 IPv4-compatible(::/96) 的内嵌 IPv4
+    if (groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0 && groups[4] === 0 && (groups[5] === 0 || groups[5] === 0xffff)) {
+      return isPrivateIpAddress(((groups[6] >> 8) & 255) + '.' + (groups[6] & 255) + '.' + ((groups[7] >> 8) & 255) + '.' + (groups[7] & 255));
     }
-    return value === '::' || value === '::1' ||
-      /^f[cd][0-9a-f]{2}:/.test(value) ||  // fc00::/7 ULA（fc00-fdff 前缀全段）
-      /^fe[89ab]:/.test(value) ||          // fe80::/10 链路本地
-      /^64:ff9b:/.test(value) ||           // NAT64 well-known 前缀
-      /^2002:/.test(value) ||              // 6to4（2002::/16，可内嵌任意 IPv4）
-      /^2001:0:/i.test(value) ||           // Teredo（2001::/32）
-      /^2001:db8:/.test(value) ||          // 文档/示例保留段
-      /^ff00:/i.test(value);               // 组播
+    return (groups[0] & 0xfe00) === 0xfc00 ||  // fc00::/7 ULA
+      (groups[0] & 0xffc0) === 0xfe80 ||        // fe80::/10 链路本地
+      (groups[0] & 0xff00) === 0xff00 ||        // ff00::/8 组播
+      (groups[0] === 0x64 && groups[1] === 0xff9b) || // NAT64
+      groups[0] === 0x2002 ||                    // 6to4
+      (groups[0] === 0x2001 && (groups[1] === 0x0 || groups[1] === 0x0db8)); // Teredo / 文档段
   }
   return false;
 }

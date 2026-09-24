@@ -599,6 +599,9 @@
                     }
                 };
                 collectAndSend();
+            }).catch(function() {
+                // 设置拉取失败时静默忽略：开关读取已在 getSecuritySettings 内回退 false，
+                // 这里只收敛 promise，避免产生 unhandled rejection
             });
         } catch(e) {}
     }

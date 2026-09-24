@@ -485,8 +485,11 @@ async function createPhotoRecord(options) {
       if (!duplicateRefs.ok) {
         return { status: 503, body: { ok: false, error: 'Unable to verify photo ownership', code: 'PHOTO_OWNERSHIP_CHECK_FAILED', retryable: true } };
       }
-      if (hasOtherOwnerRef(duplicateRefs, options.userName)) {
-        // 该文件属于其他用户的帖子，禁止删除；仅返回现有记录（幂等语义）
+      // ★ 引用保护修复：不止"他人"——同一用户的其他帖子引用同一路径时同样
+      //   禁止删除（refs 已排除当前记录 id，剩余任何引用都意味着文件被别的
+      //   帖子使用；否则幂等去重会把本人其他帖子的原图误删成悬空引用）。
+      if (duplicateRefs.truncated === true || (duplicateRefs.refs || []).length > 0) {
+        // 该文件仍被其他帖子（含本人的其他帖子）引用，禁止删除；仅返回现有记录（幂等语义）
         return { status: 200, body: { ok: true, data: existing.data, idempotent: true } };
       }
       var derivativePaths = getPhotoDerivativePaths(storagePath);

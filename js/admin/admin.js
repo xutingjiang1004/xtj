@@ -2935,8 +2935,8 @@
                     var lastLogin = u.last_login || u.last_visit || '';
                     var regTime = u.reg_time || '';
                     h += '<tr><td><strong>' + escapeHtml(u.user_name) + '</strong></td>';
-                    h += '<td><span style="color:var(--primary);font-weight:600;">' + u.total_visits + '</span></td>';
-                    h += '<td>' + (todayVisits > 0 ? '<span style="color:#059669;font-weight:600;">' + todayVisits + '</span>' : '0') + '</td>';
+                    h += '<td><span style="color:var(--primary);font-weight:600;">' + escapeHtml(String(u.total_visits == null ? '' : u.total_visits)) + '</span></td>';
+                    h += '<td>' + (todayVisits > 0 ? '<span style="color:#059669;font-weight:600;">' + escapeHtml(String(todayVisits)) + '</span>' : '0') + '</td>';
                     h += '<td style="font-size:11px;color:var(--text-muted);">' + (lastLogin ? formatTime(lastLogin) : '--') + '</td>';
                     h += '<td style="font-size:11px;color:var(--text-muted);">' + (regTime ? formatTime(regTime) : '--') + '</td></tr>';
                 });

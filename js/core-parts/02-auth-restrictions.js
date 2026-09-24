@@ -378,8 +378,7 @@
                 if (!pw) { showToast("请输入密码"); return; }
 
                 const btn = document.getElementById("loginSubmitBtn");
-                btn.disabled = true;
-                btn.textContent = "验证中..";
+                if (btn) { btn.disabled = true; btn.textContent = "验证中.."; }
 
                 try {
                     if (name === ADMIN_NAME) {
@@ -476,8 +475,7 @@
                     showToast("登录失败，请重试");
                 } finally {
                     // 统一恢复按钮状态：与 doRegister 的 finally 模式一致，避免散落恢复点
-                    btn.disabled = false;
-                    btn.textContent = "登录";
+                    if (btn) { btn.disabled = false; btn.textContent = "登录"; }
                 }
             }
             window.doLogin = doLogin;
