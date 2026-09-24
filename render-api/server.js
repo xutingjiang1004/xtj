@@ -22291,40 +22291,64 @@ function cleanAiModelIn(m) {
     api_key_enc: encryptAiModelSecret(apiKey)
   };
 }
+// ★ 2026-09-24 修复（课题②「删除的模型自动复活」）：
+//   旧实现 GET 会把该账号最近 20 行快照按 uid 合并，只要某个 uid 出现在任意一行旧快照里
+//   就会被复活 —— 而 PUT 的「先立后破」若删除旧行失败（旧代码只 console.warn 放过），
+//   旧行便永久残留；前端 syncCustomModelsFromServer 再把合并结果写回服务端，把错误固化。
+//   表现为：很久以前删掉的第三方模型，刷几次页面又冒出来，且越删越顽固。
+//   修复：读取只认「最新一行」快照，绝不合并历史行；同时快照内携带 deleted_uids 墓碑，
+//   已删 uid 即使出现在更旧的行里也一律剔除。
+function parseAiModelsSnapshotRow(row) {
+  var parsed = {};
+  try { parsed = JSON.parse((row && row.content) || '{}'); } catch (_) { return null; }
+  var models = Array.isArray(parsed.models) ? parsed.models : [];
+  var deleted = Array.isArray(parsed.deleted_uids) ? parsed.deleted_uids.map(function(x) { return String(x || '').trim(); }).filter(Boolean) : [];
+  return { models: models, deletedUids: deleted, updatedAt: parsed.updated_at || (row && row.created_at) || '' };
+}
+// 取该账号最新一行快照（不合并历史行）
+async function fetchLatestAiModelsSnapshot(userName) {
+  var lookup = await supabase.from('posts').select('content,created_at')
+    .eq('user_name', userName).eq('media_type', CUSTOM_AI_MODELS_MARKER)
+    .order('created_at', { ascending: false }).limit(1);
+  if (lookup.error) throw lookup.error;
+  var rows = Array.isArray(lookup.data) ? lookup.data : [];
+  if (!rows.length) return { models: [], deletedUids: [], updatedAt: '' };
+  var snap = parseAiModelsSnapshotRow(rows[0]);
+  return snap || { models: [], deletedUids: [], updatedAt: '' };
+}
+function cleanDeletedUidList(input) {
+  if (!Array.isArray(input)) return [];
+  var out = [];
+  var seen = {};
+  for (var i = 0; i < input.length && out.length < 200; i++) {
+    var uid = String(input[i] || '').trim().slice(0, 64);
+    if (!uid || seen[uid]) continue;
+    seen[uid] = 1;
+    out.push(uid);
+  }
+  return out;
+}
 // GET /api/agent/custom-models - 读取当前账号的自定义模型（解密 Key 后返回）
 app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   try {
-    // 拉取该账号全部快照行（历史“先删后插”在并发/失败时可能残留多行），按时间倒序，
-    // 逐行解析并按 uid 合并（最新快照中的同 uid 优先）。单行损坏或多行残留都不影响读取，
-    // 也不再依赖 maybeSingle 命中多行即报错，换设备/刷新都能稳定恢复。
-    var lookup = await supabase.from('posts').select('content,created_at')
-      .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER)
-      .order('created_at', { ascending: false }).limit(20);
-    if (lookup.error) throw lookup.error;
-    var rows = Array.isArray(lookup.data) ? lookup.data : [];
-    var mergedByUid = {};
-    var uidOrder = [];
-    for (var ri = 0; ri < rows.length; ri++) {
-      var parsed = {};
-      try { parsed = JSON.parse(rows[ri].content || '{}'); } catch (_) { continue; }
-      var rowModels = Array.isArray(parsed.models) ? parsed.models : [];
-      for (var mi = 0; mi < rowModels.length; mi++) {
-        var rm = rowModels[mi];
-        if (!rm || !rm.uid) continue;
-        if (!Object.prototype.hasOwnProperty.call(mergedByUid, rm.uid)) {
-          mergedByUid[rm.uid] = rm;
-          uidOrder.push(rm.uid);
-        }
-      }
-    }
-    var models = uidOrder.map(function(uid) { return mergedByUid[uid]; });
+    // ★ 2026-09-24 修复（课题②「删除的模型自动复活」）：
+    //   原实现拉取最近 20 行快照并按 uid 逐行合并，最新行里没有的 uid 只要在任意旧行存在
+    //   就会被复活，导致用户删除的第三方模型反复出现。现改为：只读最新一行快照，
+    //   并以快照内 deleted_uids 墓碑二次剔除。历史残留行不再参与合并，复活路径彻底断开。
+    var snap = await fetchLatestAiModelsSnapshot(req.userName);
+    var deletedSet = {};
+    snap.deletedUids.forEach(function(uid) { deletedSet[uid] = 1; });
+    var models = snap.models.filter(function(m) {
+      if (!m || !m.uid) return false;
+      return !deletedSet[String(m.uid)];
+    });
     var out = models.map(function(m) {
       var copy = Object.assign({}, m);
       if (copy.api_key_enc) { copy.api_key = decryptAiModelSecret(copy.api_key_enc); delete copy.api_key_enc; }
       else { copy.api_key = String(copy.api_key || ''); }
       return copy;
     });
-    return res.json({ ok: true, models: out });
+    return res.json({ ok: true, models: out, deleted_uids: snap.deletedUids });
   } catch (e) {
     console.error('[ai-models] 读取失败:', e && e.message);
     return res.status(500).json({ error: '读取自定义模型失败', code: 'ai_models_read_error' });
@@ -22341,32 +22365,58 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
       var clean = cleanAiModelIn(raw[i]);
       if (clean) models.push(clean);
     }
-    if (models.length) {
-      // 先立后破：先插入本次完整快照并拿回 id，成功后再删除其它旧快照行；
-      // 旧实现“先全删再插”在插入失败/并发时会把整份模型清空（表现为换设备/刷新后莫名丢失）。
-      var ins = await supabase.from('posts').insert([{
-        user_name: req.userName,
-        media_type: CUSTOM_AI_MODELS_MARKER,
-        content: JSON.stringify({ models: models }),
-        actor_key: 'ai_models_' + Date.now()
-      }]).select('id').maybeSingle();
-      if (ins.error) throw ins.error;
-      var keepId = ins.data && ins.data.id;
-      var delQ = supabase.from('posts').delete()
-        .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER);
-      if (keepId != null) delQ = delQ.neq('id', keepId);
-      var del = await delQ;
-      if (del.error && String(del.error.code) !== 'PGRST116') {
-        // 旧快照清理失败不影响本次保存（GET 会按 uid 合并多行，最新行优先）
-        console.warn('[ai-models] 清理旧快照失败(不影响本次保存):', del.error && del.error.message);
+    var incomingUids = models.map(function(m) { return m.uid; });
+    // ★ 2026-09-24 修复（课题②）：合并墓碑。本次快照未包含、但历史快照包含过的 uid，
+    //   视为用户主动删除，写入 deleted_uids，避免旧残留行把它们复活。
+    var prevSnap = { models: [], deletedUids: [] };
+    try { prevSnap = await fetchLatestAiModelsSnapshot(req.userName); } catch (ePrev) {
+      console.warn('[ai-models] 读取上一版快照失败(继续保存):', ePrev && ePrev.message);
+    }
+    var deletedUids = cleanDeletedUidList(prevSnap.deletedUids);
+    var incomingSet = {};
+    incomingUids.forEach(function(uid) { incomingSet[uid] = 1; });
+    prevSnap.models.forEach(function(m) {
+      if (!m || !m.uid) return;
+      var uid = String(m.uid);
+      if (!incomingSet[uid] && deletedUids.indexOf(uid) < 0) deletedUids.push(uid);
+    });
+    // 本次显式删除声明（前端可传 deleted_uids，做精确墓碑）
+    cleanDeletedUidList(body.deleted_uids).forEach(function(uid) {
+      if (!incomingSet[uid] && deletedUids.indexOf(uid) < 0) deletedUids.push(uid);
+    });
+    // 仍在列表中的 uid 不应留在墓碑里（用户重新加回来）
+    deletedUids = deletedUids.filter(function(uid) { return !incomingSet[uid]; });
+    deletedUids = cleanDeletedUidList(deletedUids);
+
+    var snapshotContent = JSON.stringify({ models: models, deleted_uids: deletedUids, updated_at: new Date().toISOString() });
+
+    // 先立后破：先插入本次完整快照并拿回 id，成功后再删除其它旧快照行。
+    // ★ 2026-09-24 修复：旧代码在删除旧行失败时只 console.warn 放过，导致旧行永久残留
+    //   （进而被 GET 复活）。现改为：删除失败即视为保存失败，回滚刚插入的新行并返回 5xx，
+    //   让前端明确感知失败，不再产生「看起来保存成功、实际旧行还在」的假成功。
+    var ins = await supabase.from('posts').insert([{
+      user_name: req.userName,
+      media_type: CUSTOM_AI_MODELS_MARKER,
+      content: snapshotContent,
+      actor_key: 'ai_models_' + Date.now()
+    }]).select('id').maybeSingle();
+    if (ins.error) throw ins.error;
+    var keepId = ins.data && ins.data.id;
+    var delQ = supabase.from('posts').delete()
+      .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER);
+    if (keepId != null) delQ = delQ.neq('id', keepId);
+    var del = await delQ;
+    if (del.error && String(del.error.code) !== 'PGRST116') {
+      console.error('[ai-models] 清理旧快照失败，回滚本次插入:', del.error && del.error.message);
+      // 回滚：删除本次新插入的行，保持数据与用户操作前的状态一致
+      try {
+        if (keepId != null) {
+          await supabase.from('posts').delete().eq('id', keepId);
+        }
+      } catch (eRollback) {
+        console.error('[ai-models] 回滚失败(需人工清理重复快照行):', eRollback && eRollback.message);
       }
-    } else {
-      // 用户主动清空（列表为空）：删除全部快照行
-      var delAll = await supabase.from('posts').delete()
-        .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER);
-      if (delAll.error && String(delAll.error.code) !== 'PGRST116') {
-        console.warn('[ai-models] 清空快照失败:', delAll.error && delAll.error.message);
-      }
+      return res.status(500).json({ error: '保存自定义模型失败(旧快照清理失败，已回滚)', code: 'ai_models_cleanup_failed' });
     }
     var echo = models.map(function(m) {
       var copy = Object.assign({}, m);
@@ -22374,7 +22424,7 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
       delete copy.api_key_enc;
       return copy;
     });
-    return res.json({ ok: true, models: echo });
+    return res.json({ ok: true, models: echo, deleted_uids: deletedUids });
   } catch (e) {
     console.error('[ai-models] 保存失败:', e && e.message);
     return res.status(500).json({ error: '保存自定义模型失败', code: 'ai_models_write_error' });
@@ -24977,6 +25027,101 @@ async function runResearchSubAgent(opts) {
 }
 
 // 自托管深度研究主流程：返回 { answer, sources, queries, agents }
+// ★ 2026-09-24 新增（课题④）：模块级第三方模型一次性调用（非流式）。
+//   深度研究流程的 Planner / Synthesizer 需要「非流式拿全文」，与 /custom-chat/stream
+//   的 SSE 通道不同，故抽成独立函数供研究流程复用，安全校验与 SSRF pin 策略保持一致。
+var CUSTOM_RESEARCH_ENDPOINTS = {
+  qwen:    { base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',        defaultModel: 'qwen-plus' },
+  doubao:  { base: 'https://ark.cn-beijing.volces.com/api/v3',                defaultModel: 'doubao-1-5-pro-32k' },
+  deepseek:{ base: 'https://api.deepseek.com',                                defaultModel: 'deepseek-chat' },
+  kimi:    { base: 'https://api.moonshot.cn/v1',                              defaultModel: 'moonshot-v1-8k' },
+  zhipu:   { base: 'https://open.bigmodel.cn/api/paas/v4',                    defaultModel: 'glm-4-flash' },
+  openai:  { base: 'https://api.openai.com/v1',                               defaultModel: 'gpt-4o-mini' },
+  custom:  { base: '' }
+};
+async function callCustomModelOnce(cm, messages, options) {
+  options = options || {};
+  if (!cm || !cm.api_key || !cm.model) throw new Error('自定义模型配置不完整');
+  var ep = CUSTOM_RESEARCH_ENDPOINTS[cm.provider];
+  var baseUrl = (ep && ep.base) ? ep.base : String(cm.base_url || '').trim();
+  if (!baseUrl) throw new Error('该服务商未配置接口地址');
+  baseUrl = baseUrl.replace(/\/+$/, '');
+  var chosenModel = cm.model || (ep && ep.defaultModel) || '';
+  var safe = await assertSafeWebUrl(baseUrl);
+  if (safe.parsed.protocol !== 'https:') throw new Error('接口地址仅支持 https://');
+  var endpoint = new URL(safe.parsed.href.replace(/\/+$/, '') + '/chat/completions');
+  var timeoutMs = Math.max(30000, Math.min(Number(options.timeoutMs) || 180000, 300000));
+  var controller = new AbortController();
+  var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
+  if (options.signal) {
+    try {
+      if (options.signal.aborted) controller.abort();
+      else options.signal.addEventListener('abort', function() { try { controller.abort(); } catch (e) {} }, { once: true });
+    } catch (_eSig) {}
+  }
+  var wantStream = !!options.stream;
+  try {
+    var payload = {
+      model: chosenModel,
+      messages: messages,
+      temperature: typeof options.temperature === 'number' ? options.temperature : 0.6,
+      max_tokens: options.maxTokens || 2000
+    };
+    if (!wantStream && options.jsonObject) payload.response_format = { type: 'json_object' };
+    if (wantStream) payload.stream = true;
+    var upstream = await requestPinnedStream(endpoint, safe.addresses, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cm.api_key },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    if (upstream && (upstream.type === 'opaqueredirect' || (upstream.status >= 300 && upstream.status < 400))) {
+      throw new Error('redirect_not_allowed');
+    }
+    if (!upstream.ok) throw new Error('HTTP ' + upstream.status);
+    // 流式：按 OpenAI 兼容 SSE 逐块解析 delta.content，通过 onContentChunk 实时回传
+    if (wantStream && upstream.body) {
+      var full = '';
+      var buf = '';
+      var decoder = new TextDecoder('utf-8');
+      var reader = upstream.body.getReader();
+      try {
+        while (true) {
+          var step = await reader.read();
+          if (step.done) break;
+          buf += decoder.decode(step.value, { stream: true });
+          var lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (var li = 0; li < lines.length; li++) {
+            var line = String(lines[li] || '').trim();
+            if (!line || line.indexOf('data:') !== 0) continue;
+            var raw = line.slice(5).trim();
+            if (!raw || raw === '[DONE]') continue;
+            try {
+              var j = JSON.parse(raw);
+              var delta = j && j.choices && j.choices[0] && ((j.choices[0].delta && j.choices[0].delta.content) || j.choices[0].text);
+              if (delta) {
+                full += String(delta);
+                if (typeof options.onContentChunk === 'function') {
+                  try { options.onContentChunk(String(delta)); } catch (_eCb) {}
+                }
+              }
+            } catch (_eJson) { /* 忽略无法解析的分片 */ }
+          }
+        }
+      } finally {
+        try { if (reader && typeof reader.releaseLock === 'function') reader.releaseLock(); } catch (_eRl) {}
+      }
+      return { content: full, usage: null, model_used: chosenModel };
+    }
+    var data = await upstream.json();
+    var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    var usage = (data && data.usage) || null;
+    return { content: String(content || '').trim(), usage: usage, model_used: chosenModel };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 async function runSelfResearchFlow(opts) {
   var res = opts.res;
   var query = opts.query;
@@ -24987,6 +25132,89 @@ async function runSelfResearchFlow(opts) {
   var cancelToken = opts.cancelToken || { cancelled: false };
   var rewrite = opts.rewrite !== false;
   var sharedPrefix = buildAiCorePrompt(config);
+
+  // ★ 2026-09-24 新增（课题④「研究报告可选模型」）：
+  //   research_model 取值：
+  //     'pro'   → 内置推理模型 DEEPSEEK_MODEL_REASONER（默认，保持原有行为）
+  //     'flash' → 内置快速模型 DEEPSEEK_MODEL_FLASH
+  //     'custom:<uid>' → 用户在小猫AI 里配置的第三方 API 模型（解密 api_key/base_url 后走 custom-chat 通道）
+  //   未传 / 非法值一律回落 'pro'，保证旧前端行为完全不变。
+  var researchModelSpec = String((opts && opts.researchModel) || 'pro').trim();
+  var researchCustomModel = null;
+  var researchDeepseekModel = null;
+  if (researchModelSpec.indexOf('custom:') === 0) {
+    var _cmUid = researchModelSpec.slice('custom:'.length).trim();
+    if (_cmUid) {
+      try {
+        var _cmSnap = await fetchLatestAiModelsSnapshot(userName);
+        var _cmDeleted = {};
+        (_cmSnap.deletedUids || []).forEach(function(u) { _cmDeleted[String(u)] = 1; });
+        var _cmHit = null;
+        (_cmSnap.models || []).forEach(function(m) {
+          if (m && String(m.uid) === _cmUid && !_cmDeleted[_cmUid]) _cmHit = m;
+        });
+        if (_cmHit) {
+          researchCustomModel = {
+            uid: _cmUid,
+            provider: String(_cmHit.provider || ''),
+            provider_label: String(_cmHit.provider_label || _cmHit.provider || ''),
+            label: String(_cmHit.label || _cmHit.model || ''),
+            model: String(_cmHit.model || ''),
+            base_url: String(_cmHit.base_url || ''),
+            api_key: decryptAiModelSecret(_cmHit.api_key_enc)
+          };
+          if (!researchCustomModel.api_key || !researchCustomModel.model) researchCustomModel = null;
+        }
+      } catch (eCm) {
+        console.warn('[SELF-RESEARCH] 解析自定义研究模型失败，回落内置模型:', eCm && eCm.message);
+        researchCustomModel = null;
+      }
+    }
+    if (!researchCustomModel) {
+      try { writeSse(res, { type: 'research_stage', stage: 'model_fallback', message: '所选第三方模型不可用，已自动回落内置推理模型。' }); } catch (_eSse) {}
+    }
+  } else if (researchModelSpec === 'flash') {
+    researchDeepseekModel = DEEPSEEK_MODEL_FLASH;
+  }
+  // 统一取模型标识：自定义优先，其次按 research_model 指定的内置档，最后默认推理模型
+  var activeResearchModel = researchDeepseekModel || getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER);
+  // Planer/Synthesizer 的调用参数（内置模型走 callDeepSeek；自定义模型走第三方通道）
+  function researchCallParams(extra) {
+    var base = Object.assign({
+      thinking_mode: 'high',
+      signal: flowAbortCtrl.signal
+    }, extra || {});
+    if (researchCustomModel) {
+      base.custom_model = researchCustomModel;
+      // 第三方模型统一不带 DeepSeek 专有参数，避免上游报错
+      delete base.thinking_mode;
+      delete base.response_format;
+      base.max_tokens = base.max_tokens || 4096;
+    } else {
+      base.model = activeResearchModel;
+    }
+    return base;
+  }
+
+  // ★ 2026-09-24（课题④）：研究流程的统一模型调度入口。
+  //   内置模型 → callDeepSeek；第三方自定义模型 → callCustomModelOnce。
+  //   两条路径都返回 { content, usage, reasoning_tokens } 同构结果，上层无需分支。
+  async function researchComplete(messages, params) {
+    params = params || {};
+    if (researchCustomModel) {
+      var r = await callCustomModelOnce(researchCustomModel, messages, {
+        maxTokens: params.max_tokens || 4096,
+        temperature: params.temperature,
+        jsonObject: !!(params.response_format && params.response_format.type === 'json_object'),
+        signal: flowAbortCtrl.signal,
+        timeoutMs: 180000
+      });
+      return { content: r.content, usage: r.usage, reasoning_tokens: 0, model_used: researchCustomModel.model };
+    }
+    var r2 = await callDeepSeek(messages, params);
+    if (r2 && !r2.model_used) r2.model_used = params.model || activeResearchModel;
+    return r2;
+  }
 
   // ★ 流程级取消中断：断开/取消时 abort 所有子智能体在途调用（配合 runResearchSubAgent 的 signal）
   var flowAbortCtrl = new AbortController();
@@ -25068,19 +25296,18 @@ async function runSelfResearchFlow(opts) {
   sseSend({ type: 'research_stage', stage: 'collect', message: '总指挥派出 ' + range.min + '-' + range.max + ' 个研究子智能体并行调研中…' });
   var plannerContent = '';
   try {
-    var plannerRes = await callDeepSeek(
+    var plannerRes = await researchComplete(
       [
         { role: 'system', content: sharedPrefix + '\n\n---\n\n' + SELF_RESEARCH_PLANNER_PROMPT },
         { role: 'user', content: '研究主题: ' + researchQuery + '\n\n请输出规划 JSON。' }
       ],
-      {
+      researchCallParams({
         thinking_mode: 'high',
         max_tokens: 4096,
         response_format: { type: 'json_object' },
-        model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER),
         // ★ M38 审计修复：传入流程级 abort signal，客户端断开/整体超时立即中断在途调用
         signal: flowAbortCtrl.signal
-      }
+      })
     );
     plannerContent = plannerRes.content || '';
     if (plannerRes && plannerRes.usage) accumulateResearchUsage(plannerRes.usage);
@@ -25251,17 +25478,36 @@ async function runSelfResearchFlow(opts) {
     if (flowAbortCtrl.signal.aborted) synthAbort.abort();
     else flowAbortCtrl.signal.addEventListener('abort', _synthFlowAbortHandler, { once: true });
     cancelToken._onSynthCancel = function () { try { synthAbort.abort(); } catch (e) {} };
-    var synthRes = await callDeepSeekViaResponses(synthMessages, {
-      thinking_mode: 'high',
-      max_tokens: 16384,
-      total_timeout_ms: 600000, // 长报告 + high 思考，放宽到 10 分钟
-      signal: synthAbort.signal,
-      onContentChunk: function (chunk) {
-        if (isCancelled() || synthAbort.signal.aborted) return;
-        finalAnswer += chunk;
-        sseSend({ type: 'research_content', text: chunk, content: chunk });
-      }
-    });
+    // ★ 2026-09-24（课题④）：研究报告生成按所选模型分流。
+    //   内置模型 → callDeepSeekViaResponses（原有行为不变）；
+    //   第三方自定义模型 → callCustomModelOnce 流式通道（OpenAI 兼容 SSE，逐块回传）。
+    var synthRes;
+    if (researchCustomModel) {
+      synthRes = await callCustomModelOnce(researchCustomModel, synthMessages, {
+        stream: true,
+        max_tokens: 8192,
+        signal: synthAbort.signal,
+        timeoutMs: 300000,
+        onContentChunk: function (chunk) {
+          if (isCancelled() || synthAbort.signal.aborted) return;
+          finalAnswer += chunk;
+          sseSend({ type: 'research_content', text: chunk, content: chunk });
+        }
+      });
+    } else {
+      synthRes = await callDeepSeekViaResponses(synthMessages, {
+        thinking_mode: 'high',
+        max_tokens: 16384,
+        total_timeout_ms: 600000, // 长报告 + high 思考，放宽到 10 分钟
+        model: activeResearchModel,
+        signal: synthAbort.signal,
+        onContentChunk: function (chunk) {
+          if (isCancelled() || synthAbort.signal.aborted) return;
+          finalAnswer += chunk;
+          sseSend({ type: 'research_content', text: chunk, content: chunk });
+        }
+      });
+    }
     if (!finalAnswer && synthRes && synthRes.content) finalAnswer = synthRes.content;
     if (synthRes && synthRes.usage) accumulateResearchUsage(synthRes.usage);
     if (synthRes && typeof synthRes.reasoning_tokens === 'number') {
@@ -25404,6 +25650,11 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
     var query = vq;
     var model = String(req.body && req.body.model || 'pro').trim();
     if (['pro', 'mini', 'auto'].indexOf(model) < 0) model = 'pro';
+    // ★ 2026-09-24 新增（课题④）：用户选定的研究模型。
+    //   合法值：'pro' | 'flash' | 'custom:<uid>'；非法值回落 'pro'（保证旧前端行为不变）。
+    var researchModel = String(req.body && req.body.research_model || 'pro').trim().slice(0, 80);
+    var _rmValid = (researchModel === 'pro' || researchModel === 'flash' || /^custom:[A-Za-z0-9_\-]{1,64}$/.test(researchModel));
+    if (!_rmValid) researchModel = 'pro';
     // mode：仅用于缓存 key 兼容（历史沿用 hybrid），当前已不再驱动 Tavily 分支
     var mode = String(req.body && req.body.mode || 'hybrid').trim();
     if (mode !== 'direct') mode = 'hybrid';
@@ -25417,7 +25668,9 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
     // ★ 优化（缓存刷新）：前端传 refresh=true 时跳过缓存重新研究，
     // 解决"对同一问题结果不满意，重问却被 24h 缓存回放"的问题。
     var forceRefresh = !!(req.body && req.body.refresh === true);
-    var cacheKey = researchCacheKey(userName, query, model, mode);
+    // ★ 2026-09-24（课题④）：缓存 key 必须包含 researchModel，
+    //   否则换模型研究会命中上一个模型的旧报告（表现为"选了模型但报告没变"）。
+    var cacheKey = researchCacheKey(userName, query, model, mode + '|' + researchModel);
     if (forceRefresh) {
       try { researchCache.delete(cacheKey); } catch (_) {}
     }
@@ -25483,7 +25736,9 @@ app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20),
     try {
       selfResult = await runSelfResearchFlow({
         res: res, query: query, model: model, userName: userName, convId: convId,
-        config: config, cancelToken: cancelToken, rewrite: rewrite
+        config: config, cancelToken: cancelToken, rewrite: rewrite,
+        // ★ 2026-09-24（课题④）：把用户选定的研究模型一路传进流程
+        researchModel: researchModel
       });
     } catch (e) {
       if (!aborted) {
