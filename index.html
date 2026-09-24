@@ -62,7 +62,7 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=221b39b05a" />
+    <link rel="stylesheet" href="css/style.min.css?v=8b2ea70c11" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <!-- ★ 2026-09-22 响应式修复：下面三个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
@@ -345,7 +345,8 @@
                     <div id="dockChatList" class="chat-list"></div>
                 </div>
                 <div id="dockChatDetailView" class="chat-view hidden">
-                    <div id="dockChatMessages" class="chat-messages"></div>
+                    <div id="dockChatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
+                    <button type="button" id="dockChatJumpLatest" class="chat-jump-latest" hidden aria-label="跳转到最新消息">↓ <span>最新消息</span></button>
                     <div class="chat-input-area">
                         <div class="chat-input-row">
                             <div class="chat-input-wrap">
@@ -1130,7 +1131,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=6f0770a5c0"></script>
+    <script defer src="js/core.min.js?v=d7f5f55ad3"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b8e5d553a1"></script>
