@@ -1817,6 +1817,8 @@
                     renderPostFilterUsers();
                     return;
                 }
+                // ★ 2026-09-26（审计 P2-3）：记录加载时间，供 toggleFilterPanel 做 TTL 判断
+                window.__xtjPostFilterUsersLoadedAt = Date.now();
                 var loadSeq = ++postFilterUsersLoadSeq;
                 postFilterUsersLoading = true;
                 renderPostFilterUsers();
@@ -2746,7 +2748,13 @@
                 if (isHidden) {
                     panel.style.display = "flex";
                     if (btn) btn.classList.add("active");
-                    loadPostFilterUsers(true);
+                    // ★ 2026-09-26（审计 P2-3）：原实现每次展开都 forceRefresh=true，
+                    //   用户反复开合筛选面板就会反复打后端拉全量用户列表（并且
+                    //   renderPostFilterUsers 内还会逐用户读头像缓存）。这里改为
+                    //   仅在缓存超过 TTL（3 分钟）或从未加载时才强制刷新。
+                    var _pfAge = Date.now() - (window.__xtjPostFilterUsersLoadedAt || 0);
+                    var _pfNeedForce = !window.__xtjPostFilterUsersLoadedAt || _pfAge > 3 * 60 * 1000;
+                    loadPostFilterUsers(_pfNeedForce);
                     renderPostFilterUsers();
                 } else {
                     panel.style.display = "none";
@@ -4237,9 +4245,35 @@
                 var sentinel = document.getElementById("feedSentinel");
                 var tempContainer = document.createElement("div");
                 tempContainer.innerHTML = postsHtml;
+                // ★ 2026-09-26（审计 P2-25）：改用 DocumentFragment 一次性插入。
+                //   原实现 while 循环里逐节点 insertBefore —— 每个节点都触发一次 DOM
+                //   插入与（潜在）布局，长列表追加时是 O(n) 次重排；Fragment 只触发一次。
+                var frag = document.createDocumentFragment();
                 while (tempContainer.firstChild) {
-                    feed.insertBefore(tempContainer.firstChild, sentinel);
+                    frag.appendChild(tempContainer.firstChild);
                 }
+                feed.insertBefore(frag, sentinel);
+                // ★ 2026-09-26（审计 P2-25）：Feed DOM 上限。照片墙早有 MAX_DOM_PHOTOS 封顶，
+                //   Feed 侧此前没有任何上限，长会话下节点数线性增长，滚动与
+                //   updateFeedStats（遍历全部帖子）同步变慢。超过上限时回收顶部的旧卡片
+                //   （保留内存中的 posts 状态，向上滚动时由既有加载逻辑重新渲染）。
+                try {
+                    var FEED_DOM_MAX_POSTS = 200;
+                    var _postNodes = feed.querySelectorAll('.post');
+                    if (_postNodes.length > FEED_DOM_MAX_POSTS) {
+                        var _toDrop = _postNodes.length - FEED_DOM_MAX_POSTS;
+                        if (!window._xtjFeedDomTrimmed) window._xtjFeedDomTrimmed = 0;
+                        for (var _di = 0; _di < _toDrop; _di++) {
+                            var _node = _postNodes[_di];
+                            if (_node && _node.parentNode) _node.parentNode.removeChild(_node);
+                        }
+                        window._xtjFeedDomTrimmed += _toDrop;
+                        if (!window._xtjFeedDomTrimNoticeShown) {
+                            window._xtjFeedDomTrimNoticeShown = true;
+                            console.info('[feed] DOM 超过 ' + FEED_DOM_MAX_POSTS + ' 条，已回收顶部卡片以保持滚动流畅');
+                        }
+                    }
+                } catch (eTrim) { /* DOM 回收失败不影响本次渲染 */ }
                 var newPosts = feed.querySelectorAll(".post:not(.visible)");
                 primePostReveal(newPosts);
                 observePostViewportState(newPosts);

@@ -20,7 +20,7 @@
  ├─ server.js         主入口:全部路由 + AI 函数(§2,17196 行)
  ├─ code-agent.js      Code AI 代理(5621 行,register 模式)
  ├─ code-index.js      Code 项目索引(1639 行)
- ├─ provider-registry.js 模型供应商注册(662 行)
+null
  ├─ photo-create.js    照片创建/缩略图(581 行)
  ├─ search-providers.js 联网搜索 provider(454 行)
  └─ 其余工具模块(见 §5)
@@ -161,7 +161,7 @@ Supabase (PostgreSQL + Storage)
 | 文件 | 内容 | 备注 |
 |---|---|---|
 | ~~code-agent.js / code-index.js / code-github.js~~ | **已并入 server.js**（CODE_INDEX 核实于 2026-09，/api/code/ai 与 /api/code/gh-proxy 内联在 server.js 约 21381 行） | |
-| `provider-registry.js` | 模型供应商注册 | |
+null
 | `photo-create.js` | 照片创建/缩略图/sharp 校验 | |
 | `dm-media.js` | DM 媒体上传校验 | |
 | `search-providers.js` | 联网搜索(bing/tavily/searxng 等) | |
@@ -249,7 +249,7 @@ Supabase (PostgreSQL + Storage)
 ### 未来若坚持拆分的条件
 - 必须**同步重写所有受影响测试**(约 10-15 个文件),把 `fs.readFileSync('server.js')` 改为读新模块文件,并重建 slice 边界
 - 建议先跑 `npm test` 记录基线,拆一段验证一段
-- 已按 `registerXxxRoutes(app, deps)` 模式拆出的模块:`provider-registry.js`（code-agent/code-github 已回并 server.js）——**新路由应优先写进独立文件,不要再堆进 server.js**
+- 已按 `registerXxxRoutes(app, deps)` 模式拆出的模块均已在 2026-09-26 回并或删除（code-agent/code-github 回并 server.js，provider-registry 因无任何消费方整体删除）——**新路由可继续拆进独立文件，不要再无脑堆进 server.js**
 
 ### 测试锚定的 server.js 段(拆分红线)
 

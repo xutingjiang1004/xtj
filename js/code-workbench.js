@@ -243,9 +243,6 @@
   function safeSessionRemove(key) {
     try { window.sessionStorage.removeItem(key); } catch (e) {}
   }
-  function safeScopedSessionGet(base) { return safeSessionGet(scopedKey(base)); }
-  function safeScopedSessionSet(base, value) { safeSessionSet(scopedKey(base), value); }
-  function safeScopedSessionRemove(base) { safeSessionRemove(scopedKey(base)); }
 
   // ── 账号级本地存储 ────────────────────────────────────────────
   // 仓库地址 / Token / 模型 / 思考档位 / 对话历史等全部按“当前登录账号”隔离：
@@ -270,9 +267,13 @@
   }
   function scopedKey(base) { return String(base) + '__' + storageScopeName(); }
   function storageGet(base) {
+    // ★ 2026-09-26（审计 P1-10 同类）：不再回退到未做账号隔离的旧全局键
+    //   （xtj_code_*）。旧键可能残留上一个账号的仓库地址/会话/对话历史，
+    //   回退读取会造成跨账号串读；这里只做清理，配置由账号键 + 服务端同步恢复。
     var v = safeStorageGet(scopedKey(base));
-    if (v === null || v === undefined) return safeStorageGet(base); // 兼容旧版全局键
-    return v;
+    if (v !== null && v !== undefined) return v;
+    if (safeStorageGet(base) !== null) safeStorageRemove(base);
+    return null;
   }
   function storageSet(base, value) {
     safeStorageSet(scopedKey(base), value);

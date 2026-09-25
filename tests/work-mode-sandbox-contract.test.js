@@ -115,12 +115,11 @@ test('沙箱：实现内部保留关键安全护栏', () => {
   assert.match(src, /MAX_CODE_LEN\s*=\s*20000/, '缺少代码长度上限');
   // isolated-vm 路径：硬超时
   assert.match(src, /timeout:\s*timeout/, '缺少硬超时');
-  // 降级路径：显式封堵危险全局
-  assert.match(src, /sandbox\.process = undefined/);
-  assert.match(src, /sandbox\.require = undefined/);
-  assert.match(src, /sandbox\.Function = undefined/);
-  // 降级必须存在，保证服务不会因 ivm 加载失败而起不来
-  assert.match(src, /function runInVmFallback/);
+  // ★ 2026-09-26 审计 P0-1：vm 降级路径已整体移除，改为 fail-closed。
+  assert.ok(!/function runInVmFallback/.test(src), 'vm 降级实现应已删除');
+  assert.ok(!/vm\.createContext/.test(src), '不应再使用 vm.createContext');
+  assert.match(src, /sandboxUnavailableError/, '缺少沙箱不可用错误（fail-closed 必需）');
+  assert.match(src, /if \(!ivm\) throw sandboxUnavailableError\(\);/, 'ivm 缺失时未 fail-closed');
 });
 
 test('工作模式：system prompt 注入含工作模式指令与沙箱提示', () => {

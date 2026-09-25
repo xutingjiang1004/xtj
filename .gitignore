@@ -62,3 +62,52 @@ miniprogram_npm/
 # ★ 2026-09-23：已执行 `git rm -r --cached .trae-html-share-packages` 解除跟踪
 #   （本地文件保留在磁盘上，仅移出版本库）。
 .trae-html-share-packages/
+
+# ============================================================================
+# ★ 2026-09-26：以下为深度审计（audit-reports/2026-09-26-全栈深度审计报告.md）
+#   发现的"工作区临时产物"防复发规则。这些文件此前虽未被跟踪，但既没有忽略规则
+#   也没有被静态服务黑名单拦截，一旦 `git add .` 就会随部署公开托管。
+# ============================================================================
+
+# 抓取/下载产物目录（含数百 MB 的安装包，与项目代码无关）
+/downloads/
+
+# 一次性网络探测脚本与其输出（含禁用证书校验、反自动化规避代码，禁止入库/托管）
+/net-probe.js
+/node-tls.js
+/tls-deep.js
+/http2-fetch.js
+/http2-debug.js
+/retry.js
+/pw-recon.js
+/reach.js
+/edge.js
+/slow.js
+/fast.js
+/hdr.js
+/hdr2.js
+/hosts-test.js
+/ips.js
+
+# 根目录临时报告文本（微信校验文件 MP_verify_*.txt 例外，必须保留）
+/*.txt
+!/MP_verify_*.txt
+/pw-log.txt
+
+# 页面快照 / 截图残留
+/page-*.html
+/page_*.html
+/lanzou-page.html
+/dl-page.html
+/grab-*.html
+/slow-*.html
+/shot-*.png
+/screenshot*.png
+
+# 与本项目无关的本机脚本（DSH Web GUI 局域网放通等）
+/enable-phone-access.ps1
+/enable-phone-access.cmd
+
+# 一次性探测/归档脚本
+/scripts/archive/
+

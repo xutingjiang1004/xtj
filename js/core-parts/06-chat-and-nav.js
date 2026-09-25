@@ -1125,9 +1125,15 @@
                     //   实测 uploads 桶的 /public/ 路由是放通的（真实对象 HTTP 200），
                     //   此前"渲染期先换签名地址"的多余往返已删除——它正是图片首帧
                     //   显示成坏图标/按钮、几百毫秒后才变图的根源。
+                    // ★ 2026-09-26（审计 P1-7）：这段私信媒体此前只 escapeHtml，是全站
+                    //   唯一没过协议白名单的用户内容渲染点（media.src 来自发信人可控的
+                    //   私信 JSON）。img/video/audio 的 src 不能直接执行脚本，但一旦这些
+                    //   地址被复用到 <a href>/window.open（历史上照片墙就出过这类事故），
+                    //   即刻变成 XSS。统一走 sanitizeUrl，非法协议返回空串 → 不渲染节点。
                     var resolvedImageSrc = String(media.src || media.fullSrc || '');
-                    var safeSrc = escapeHtml(resolvedImageSrc);
-                    var safeFull = escapeHtml(resolvedImageSrc);
+                    var safeSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(resolvedImageSrc) : '';
+                    if (!safeSrc) return '<span class="msg-text">' + escapeHtml(messageText || '[媒体]') + '</span>';
+                    var safeFull = escapeHtml(safeSrc);
                     // ★ 2026-09-25 修复（聊天图片预览器降级到旧 #imgViewer）：
                     //   此前 onclick 只传了 src，没有把 <img> 自身作为 triggerEl 传入。
                     //   openImageViewer → openPostImagePreview 依赖 triggerEl 读取
@@ -1147,13 +1153,19 @@
                     return imageBody;
                 }
                 if (media && media.kind === 'video') {
-                    var videoBody = '<video class="msg-img" src="' + escapeHtml(media.src) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
+                    // ★ 2026-09-26（审计 P1-7）：同图片，走 sanitizeUrl 协议白名单
+                    var safeVideoSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(media.src || '')) : '';
+                    if (!safeVideoSrc) return '<span class="msg-text">' + escapeHtml(messageText || '[视频]') + '</span>';
+                    var videoBody = '<video class="msg-img" src="' + escapeHtml(safeVideoSrc) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
                     if (messageText) videoBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return videoBody;
                 }
                 // P6: render audio messages with <audio> player
                 if (media && media.kind === 'audio') {
-                    var audioBody = '<audio class="msg-audio" src="' + escapeHtml(media.src) + '" controls preload="metadata" onclick="event.stopPropagation()" style="max-width:240px;cursor:default;"></audio>';
+                    // ★ 2026-09-26（审计 P1-7）：同图片，走 sanitizeUrl 协议白名单
+                    var safeAudioSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(media.src || '')) : '';
+                    if (!safeAudioSrc) return '<span class="msg-text">' + escapeHtml(messageText || '[音频]') + '</span>';
+                    var audioBody = '<audio class="msg-audio" src="' + escapeHtml(safeAudioSrc) + '" controls preload="metadata" onclick="event.stopPropagation()" style="max-width:240px;cursor:default;"></audio>';
                     if (messageText) audioBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return audioBody;
                 }
@@ -1198,7 +1210,10 @@
                 } else if (message.__optimistic && rowMedia) {
                     statusMark = '<span class="msg-send-status" role="status">' + (rowMedia.kind === 'image' ? '图片上传中…' : (rowMedia.kind === 'video' ? '视频上传中…' : '音频上传中…')) + '</span>';
                 }
-                var tempAttr = message.__tempId ? ' data-temp-id="' + message.__tempId + '"' : '';
+                // ★ 2026-09-26（审计 P2-27）：属性值必须转义。__tempId 目前由本地生成
+                //   （不可注入），但同函数其它属性全部走 escapeHtml，这里补齐以防未来
+                //   改为服务端字段后变成属性注入。
+                var tempAttr = message.__tempId ? ' data-temp-id="' + escapeHtml(String(message.__tempId)) + '"' : '';
                 var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + '<span class="msg-meta">' + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span></span>' + statusMark + '</div>';
                 if (sent) return '<div class="chat-msg-row sent">' + bubble + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
                 return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
@@ -1307,9 +1322,23 @@
                 const el = document.getElementById('dockChatMessages');
                 if (!el) return;
                 if (typeof clearDockChatDesktopEmptyFlag === 'function') clearDockChatDesktopEmptyFlag();
-                // ★ 2026-09-25：长按菜单的「删除」是**仅本机**生效的（与微信一致）。
+                // ★ 2026-09-25：长按菜单的「删除」语义为「对本账号隐藏」。
                 //   必须在这里统一过滤 tombstone，否则下一次轮询/重新进入会话时，
                 //   服务端返回的同一批消息会把删掉的内容又渲染回来。
+                // ★ 2026-09-26：墓碑现在是"本机 ∪ 服务端"。这里首次渲染时后台拉取服务端
+                //   快照并合并（每账号每会话只拉一次），合并结果变化后再重渲染一次，
+                //   使"在别的设备删掉的消息"在本机也立即消失。
+                if (userName) {
+                    try {
+                        syncDmDeletedWithServer(userName, false).then(function(changed) {
+                            if (!changed) return;
+                            var uKey = getDockChatCacheKey(userName);
+                            var fresh = Array.isArray(_chatCache[uKey]) ? _chatCache[uKey] : [];
+                            _chatRenderSignature[userName] = undefined;
+                            renderDockMessages(userName, fresh, false);
+                        }).catch(function() {});
+                    } catch (eSync) {}
+                }
                 msgs = (Array.isArray(msgs) ? msgs : []).filter(function(m) {
                     return !isDmMessageLocallyDeleted(m);
                 });
@@ -1787,16 +1816,31 @@
             //   移动端：长按 450ms；桌面端：右键（contextmenu）。
             // ══════════════════════════════════════════════════════════════════
 
-            // 「删除」仅本机生效（与微信的"删除"语义一致）：用 tombstone 记录 id，
+            // 「删除」= 对本账号隐藏（与微信的"删除"语义一致）：用 tombstone 记录 id，
             //   渲染与入缓存时都过滤掉。按账号隔离，避免换账号后串数据。
+            // ★ 2026-09-26 修复（用户反馈"删除为什么只在本机生效"）：
+            //   此前墓碑**只写本机 localStorage**，服务端完全不知情 —— 换设备、清缓存、
+            //   换浏览器登录同一账号后，被删消息又会重新出现（数据库里也仍在）。
+            //   现在墓碑按账号同步到服务端（/api/dm/deleted），localStorage 退化为
+            //   本地快取：启动时与服务端合并，删除时回推，离线删除在下次同步补传。
             var DM_DELETED_KEY_PREFIX = 'xtj_dm_deleted_';
             var DM_DELETED_MAX = 500;
+            var _dmDeletedSyncedUsers = {};
+            var _dmDeletedPendingPush = [];
 
             function getDmDeletedIds() {
                 try {
                     var raw = window.safeStorage ? window.safeStorage.get(DM_DELETED_KEY_PREFIX + (currentUser || '')) : null;
                     var arr = raw ? JSON.parse(raw) : [];
                     return Array.isArray(arr) ? arr : [];
+                } catch (e) { return []; }
+            }
+
+            function persistDmDeletedIds(list) {
+                try {
+                    var clean = (Array.isArray(list) ? list : []).slice(0, DM_DELETED_MAX);
+                    window.safeStorage.set(DM_DELETED_KEY_PREFIX + (currentUser || ''), JSON.stringify(clean));
+                    return clean;
                 } catch (e) { return []; }
             }
 
@@ -1813,7 +1857,66 @@
                 var list = getDmDeletedIds().filter(function(x) { return x !== id; });
                 list.unshift(id);
                 if (list.length > DM_DELETED_MAX) list = list.slice(0, DM_DELETED_MAX);
-                try { window.safeStorage.set(DM_DELETED_KEY_PREFIX + (currentUser || ''), JSON.stringify(list)); } catch (e) {}
+                persistDmDeletedIds(list);
+            }
+
+            // ★ 2026-09-26：把删除记录推给服务端（账号级同步）。返回 Promise<boolean>，
+            //   失败时进入待补传队列，下次同步时一并补上（离线删除不丢）。
+            function pushDmDeletedToServer(ids) {
+                var list = (Array.isArray(ids) ? ids : []).filter(Boolean);
+                if (!list.length) return Promise.resolve(true);
+                if (typeof window.xtjProtectedFetch !== 'function') {
+                    _dmDeletedPendingPush = _dmDeletedPendingPush.concat(list).slice(0, DM_DELETED_MAX);
+                    return Promise.resolve(false);
+                }
+                return window.xtjProtectedFetch('/api/dm/deleted', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: list }),
+                    timeoutMs: 15000
+                }).then(function(resp) {
+                    if (!resp || !resp.ok) throw new Error('dm_deleted_sync_failed');
+                    _dmDeletedPendingPush = _dmDeletedPendingPush.filter(function(x) { return list.indexOf(x) < 0; });
+                    return true;
+                }).catch(function(err) {
+                    console.warn('[DM] 删除记录同步失败，已排队待补传:', err && err.message);
+                    _dmDeletedPendingPush = _dmDeletedPendingPush.concat(list).slice(0, DM_DELETED_MAX);
+                    return false;
+                });
+            }
+
+            // ★ 2026-09-26：与服务端合并墓碑（本机 ∪ 服务端），并把"仅本机"的部分补推上去
+            //   （覆盖老版本留下的纯本地墓碑，以及离线期间删掉的消息）。
+            function syncDmDeletedWithServer(userName, force) {
+                var u = String(userName || currentUser || '');
+                if (!u) return Promise.resolve(false);
+                if (_dmDeletedSyncedUsers[u] && !force) return Promise.resolve(false);
+                _dmDeletedSyncedUsers[u] = 1;
+                if (typeof window.xtjProtectedFetch !== 'function') return Promise.resolve(false);
+                var localIds = getDmDeletedIds();
+                var pending = _dmDeletedPendingPush.slice();
+                return window.xtjProtectedFetch('/api/dm/deleted', { method: 'GET', timeoutMs: 15000 })
+                    .then(function(resp) {
+                        if (!resp || !resp.ok) throw new Error('dm_deleted_fetch_failed');
+                        return resp.json();
+                    })
+                    .then(function(data) {
+                        var serverIds = (data && Array.isArray(data.ids)) ? data.ids : [];
+                        var merged = serverIds.slice();
+                        localIds.forEach(function(id) { if (merged.indexOf(id) < 0) merged.push(id); });
+                        var onlyLocal = localIds.filter(function(id) { return serverIds.indexOf(id) < 0; });
+                        var toPush = onlyLocal.concat(pending).filter(function(id, i, arr) { return arr.indexOf(id) === i; });
+                        var changed = JSON.stringify(merged) !== JSON.stringify(localIds);
+                        if (changed) persistDmDeletedIds(merged);
+                        if (toPush.length) {
+                            pushDmDeletedToServer(toPush);
+                        }
+                        return changed;
+                    })
+                    .catch(function(err) {
+                        console.warn('[DM] 删除记录同步失败（继续用本机记录）:', err && err.message);
+                        return false;
+                    });
             }
 
             function findDockMessageByRow(rowEl) {
@@ -2042,7 +2145,12 @@
                 renderDockMessages(peer, _chatCache[cacheKey], false);
                 releaseDockChatLocalPreview(message);
                 scheduleDockChatListRefresh(200);
-                showToast('已删除（仅本机）');
+                // ★ 2026-09-26：删除改为**账号级同步**。先本机立即生效（乐观），
+                //   再把墓碑推给服务端；失败时排入待补传队列并在文案里如实说明，
+                //   不再无脑显示"仅本机"。
+                pushDmDeletedToServer([targetId]).then(function(ok) {
+                    showToast(ok ? '已删除（已同步到账号）' : '已删除（本机生效，联网后自动同步）');
+                });
             }
 
             // ★ 2026-09-25：从 ux-features.js 的重复长按菜单迁移过来的"问小猫"。
@@ -2745,6 +2853,10 @@
                         });
                 });
                 // 帖子区看门狗：skeleton 卡住 / 白屏空 feed 时给出可点重试（含 Render 冷启动）
+                // ★ 2026-09-26（审计 P2-2）：判活不再用 innerHTML/innerText 做字符串匹配 ——
+                //   本看门狗每秒执行一次，innerHTML 会把整棵 feed 子树序列化、innerText 更会
+                //   强制重排，Feed 有数十条帖子时是全站最贵的周期性开销。现改为
+                //   querySelector + textContent（不触发重排，且 textContent 本来就要读一次）。
                 (function setupFeedBootWatchdog() {
                     if (window.__xtjFeedBootWatchdog) return;
                     window.__xtjFeedBootWatchdog = true;
@@ -2757,11 +2869,11 @@
                             return;
                         }
                         var hasPosts = !!feedEl.querySelector('.post');
-                        var hasSkeleton = !!feedEl.querySelector('.xtj-loading-skeleton, .xtj-skeleton-card, .xtj-magic-loading, .loading')
-                            || /内容加载中|加载中/.test(feedEl.innerHTML || '');
+                        var _feedTextProbe = String(feedEl.textContent || '');
+                        var hasSkeleton = !!feedEl.querySelector('.xtj-loading-skeleton, .xtj-skeleton-card, .xtj-magic-loading, .loading');
                         var hasError = !!feedEl.querySelector('#feedBootError, #feedInitError, #feedWatchdogError, .feed-load-more-error')
-                            || /加载失败|加载中断|启动加载失败|加载超时/.test(feedEl.innerText || '');
-                        var isEmpty = !hasPosts && !hasError && String(feedEl.textContent || '').trim().length < 8;
+                            || /加载失败|加载中断|启动加载失败|加载超时/.test(_feedTextProbe);
+                        var isEmpty = !hasPosts && !hasError && _feedTextProbe.trim().length < 8;
                         if (hasPosts || hasError) {
                             clearInterval(timer);
                             return;
@@ -3242,7 +3354,6 @@
                     window.safeStorage.set(key, JSON.stringify(obj));
                 } catch (e) {}
             }
-            function updateAnnouncementBadgeOld() { window.updateAnnouncementBadge(); }
 
             window.openAnnouncementModal = async function() {
                 const overlay = document.getElementById('announcementModal');
@@ -5040,8 +5151,12 @@
                 var selected = _reportSelectedId === String(item.id) ? ' selected' : '';
                 if (selected && !_reportTargetUser) _reportTargetUser = item.user_name;
                 var isTextOnly = !item.thumb && item.type !== 'photo';
-                var thumbHtml = item.thumb
-                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;rc-thumb rc-thumb--text&quot; aria-hidden=&quot;true&quot;><span>' + safeJsStr((item.user_name || '?').slice(0,1).toUpperCase()) + '</span></div>\'">'
+                // ★ 2026-09-26（审计 P1-7）：item.thumb 的照片墙分支来自用户可控的
+                //   JSON.parse(post.content)，此前仅 escapeHtml（不过协议白名单）。
+                //   统一改走 sanitizeUrl，非法协议（javascript:/data:text/html 等）直接不渲染图片。
+                var safeThumb = (typeof sanitizeUrl === 'function') ? sanitizeUrl(item.thumb) : '';
+                var thumbHtml = safeThumb
+                    ? '<img class="rc-thumb" src="' + escapeHtml(safeThumb) + '" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;rc-thumb rc-thumb--text&quot; aria-hidden=&quot;true&quot;><span>' + safeJsStr((item.user_name || '?').slice(0,1).toUpperCase()) + '</span></div>\'">'
                     : '<div class="rc-thumb rc-thumb--text" aria-hidden="true"><span>' + getReportTextThumbLabel(item.user_name) + '</span></div>';
                 h += '<div class="report-content-item' + selected + (isTextOnly ? ' report-content-item--text' : '') + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
                 h += thumbHtml;

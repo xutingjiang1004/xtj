@@ -12,8 +12,11 @@ services:
     # PR 已合并到 main；生产部署跟随默认主分支，避免继续跟随已合并的临时 hotfix 分支。
     branch: main
     rootDir: .
-    # 构建阶段仅做语法级冒烟检查（避免长测试阻塞部署，完整测试由 CI 承担）。
-    buildCommand: npm ci && npm run build && npm run test:smoke
+    # 构建阶段做语法级冒烟 + 构建产物一致性校验（避免长测试阻塞部署，完整测试由 CI 承担）。
+    # ★ 2026-09-26（审计 P2-31）：补 test:consistency —— 此前 scripts/build.js 即使因缺少
+    #   SUPABASE_ANON_KEY 产出占位 anon key 也照常 0 退出，且产物与源码漂移无人拦；
+    #   现在构建阶段就会因指纹不一致而失败，阻断"静默降级"上线。
+    buildCommand: npm ci && npm run build && npm run test:syntax && npm run test:consistency && npm run test:smoke
     startCommand: node render-api/server.js
     autoDeploy: true
     # M-4: 声明健康检查路径，Render 不再 ping "/" 污染访问统计

@@ -444,7 +444,16 @@
             return '<div class="pp-info-row"><span class="pp-info-label">' + e + '</span><span class="pp-info-value">' + t + "</span></div>";
         }
         function I(e, t) {
-            return window.escapeHtml(String(null == e || "" === e ? t || "--" : e));
+            // ★ 2026-09-26（审计 AI 前端 P2-6）：与上方 G() 保持同一套转义兜底。
+            //   本文件里同一段"取默认值 + 转义"逻辑存在两份实现，此前只给 G() 补了
+            //   window.escapeHtml 缺失时的兜底，I() 仍直接调用 window.escapeHtml ——
+            //   一旦 core.js 加载顺序变化（预览模块被独立复用/延后加载），这里就会
+            //   TypeError 或把用户可控字段（username/exif）原样拼进 innerHTML。
+            var o = null == e || "" === e ? t || "--" : e;
+            var escapeFn = typeof window.escapeHtml === 'function' ? window.escapeHtml : function(s) {
+                return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            };
+            return escapeFn(String(o));
         }
     }
     function $() {

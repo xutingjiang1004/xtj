@@ -27,7 +27,9 @@
             }
 
             async function checkUserRestrictions() {
-                if (!currentUser || currentUser === ADMIN_NAME) return;
+                // ★ 2026-09-26（审计 P1-5）：管理员同样要请求一次——服务端会在响应里
+                //   下发权威的 is_admin 标志，前端据此锁定管理员身份，不再只信 localStorage。
+                if (!currentUser) return;
                 try {
                     if (typeof API_BASE !== 'string' || !API_BASE) return;
                     var authHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
@@ -36,6 +38,12 @@
                     }, 10000);
                     var result = await response.json().catch(function() { return {}; });
                     if (!response.ok || !result.ok) return;
+                    // ★ P1-5：服务端权威身份位。收到后 isAdmin() 必须以它为准，
+                    //   localStorage 里的用户名从此不构成管理员凭据。
+                    if (typeof result.is_admin === 'boolean') {
+                        window.__xtjServerIsAdmin = result.is_admin;
+                        window.__xtjServerIsAdminAt = Date.now();
+                    }
                     var prev = JSON.stringify(userRestrictions);
                     var data = result.restrictions;
                     userRestrictions = data && !Array.isArray(data) ? data : { is_banned: false, is_blacklisted: false, is_muted: false };
@@ -105,11 +113,13 @@
             }
 
             function isUserMuted() {
-                return userRestrictions.is_muted && (currentUser || window.currentUser) !== ADMIN_NAME;
+                // ★ 2026-09-26（审计 P1-5）：管理员豁免改用 isAdmin()（服务端权威标志优先），
+                //   不再直接比较可伪造的 localStorage 用户名。
+                return userRestrictions.is_muted && !(typeof isAdmin === 'function' ? isAdmin() : (currentUser || window.currentUser) === ADMIN_NAME);
             }
 
             function isUserBlocked() {
-                return (userRestrictions.is_blacklisted || userRestrictions.is_banned) && (currentUser || window.currentUser) !== ADMIN_NAME;
+                return (userRestrictions.is_blacklisted || userRestrictions.is_banned) && !(typeof isAdmin === 'function' ? isAdmin() : (currentUser || window.currentUser) === ADMIN_NAME);
             }
 
             function startRestrictionPolling() {

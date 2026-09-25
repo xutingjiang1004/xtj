@@ -4,6 +4,26 @@
  * Lines from original core.js: 2850-4752
  * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
  */
+
+            // ★ 2026-09-26（审计 P2-26）：进入 querySelector 属性选择器的动态值必须转义。
+            //   评论/状态节点的 data-comment-id 目前是服务端 UUID（不可注入），但
+            //   restoreCatAiRetryableStatuses 等路径会从 localStorage 键名后缀还原 id，
+            //   一旦值里出现 " 或 ] 就会抛 DOMException 并中断整段 AI 评论状态恢复。
+            //   CSS.escape 不支持时退化为手工转义引号与反斜杠。
+            function catAiCssValue(v) {
+                var s = String(v == null ? '' : v);
+                if (window.CSS && typeof window.CSS.escape === 'function') {
+                    try { return window.CSS.escape(s); } catch (e) { /* 落到手工转义 */ }
+                }
+                var out = '';
+                for (var i = 0; i < s.length; i++) {
+                    var ch = s.charAt(i);
+                    if (ch === '"' || ch === '\\' || ch === ']' || ch === '[' || ch === "'") out += '\\' + ch;
+                    else out += ch;
+                }
+                return out;
+            }
+
             // ========== 查看用户资料卡 ==========
             let upcTargetUser = null;
             // S7 修复：资料卡请求代次号，防止快速切换用户时旧响应覆盖新用户资料
@@ -442,47 +462,6 @@
                 });
             }
 
-            async function updateAllAvatars() {
-                // 统一更新所有用户头像缓存（含 localStorage）
-                try {
-                    var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[currentUser] && cachedAvatars[currentUser].url) {
-                        avatarCache[currentUser] = cachedAvatars[currentUser];
-                        const profileAvatar = document.getElementById('profileAvatar');
-                        if (profileAvatar) {
-                            profileAvatar.innerHTML = renderAvatarContent(currentUser, cachedAvatars[currentUser].url);
-                        }
-                        return;
-                    }
-                } catch(e) {}
-
-                try {
-                    const avatarRes = await sb.from("posts")
-                        .select("media_url")
-                        .eq("user_name", currentUser)
-                        .eq("media_type", "__avatar__")
-                        .eq("actor_key", "__avatar__")
-                        .order("created_at", { ascending: false })
-                        .limit(1);
-
-                    const profileAvatar = document.getElementById('profileAvatar');
-                    if (profileAvatar) {
-                        if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                            profileAvatar.innerHTML = renderAvatarContent(currentUser, avatarRes.data[0].media_url);
-                            setAvatarCacheEntry(currentUser, 'has_avatar', avatarRes.data[0].media_url);
-                            try {
-                                var cv = readAvatarCacheFromStorage();
-                                cv[currentUser] = { state: 'has_avatar', url: avatarRes.data[0].media_url, fetched_at: Date.now() };
-                                writeAvatarCacheToStorage(cv);
-                            } catch(e) {}
-                        } else {
-                            profileAvatar.innerHTML = currentUser ? escapeHtml(currentUser[0].toUpperCase()) : '?';
-                        }
-                    }
-                } catch(e) {
-                    console.error("更新头像显示失败:", e);
-                }
-            }
 
             window.doLogoutFromProfile = function() {
                 closeModal('profileDetailModal');
@@ -1445,7 +1424,7 @@ function renderProfileActivityList(kind) {
                             if (el && el.parentNode) el.parentNode.removeChild(el);
                         });
                     } else if (commentIdStr) {
-                        var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + commentIdStr + '"]');
+                        var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + catAiCssValue(commentIdStr) + '"]');
                         if (statusEl && statusEl.parentNode) statusEl.parentNode.removeChild(statusEl);
                     }
                 } catch(e) {}
@@ -1671,7 +1650,7 @@ function renderProfileActivityList(kind) {
 
             // ★ 显示重试按钮
             function retryBtnSetup(commentId, postId) {
-                var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + commentId + '"]');
+                var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + catAiCssValue(commentId) + '"]');
                 if (statusEl) {
                     statusEl.innerHTML = '小猫暂时无法回复 <button type="button" class="cat-ai-retry-btn" onclick="window.__xtjRetryCatAi(\'' + safeJsStr(commentId) + '\', \'' + safeJsStr(postId) + '\')">重试</button>';
                 }
@@ -1680,7 +1659,7 @@ function renderProfileActivityList(kind) {
                 var commentIdStr = String(commentId);
                 // ★ 修复：状态元素由 showCatAiStatus 创建，类名为 cat-ai-status + data-comment-id，
                 // 不存在 id="cat-ai-status-<id>" 的元素，改用 querySelector 定位。
-                var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + commentIdStr + '"]');
+                var statusEl = document.querySelector('.cat-ai-status[data-comment-id="' + catAiCssValue(commentIdStr) + '"]');
                 if (statusEl) statusEl.innerHTML = '小猫正在恢复……';
                 try {
                     var resp = await window.xtjProtectedFetch('/api/comments/ai-reply-retry', {
@@ -1729,7 +1708,7 @@ function renderProfileActivityList(kind) {
                 var existingInFeed = (feedAllComments || []).some(function(item) {
                     return item && item.id != null && String(item.id) === aiIdStr;
                 });
-                var existingInDom = document.querySelector('.comment-item[data-comment-id="' + aiIdStr + '"]');
+                var existingInDom = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(aiIdStr) + '"]');
                 if (existingInFeed && existingInDom) return; // 已存在，跳过
                 // 加入 feedAllComments
                 feedAllComments = (feedAllComments || []).filter(function(item) {
@@ -1761,7 +1740,7 @@ function renderProfileActivityList(kind) {
                                 }
                             }
                             // 重渲染后再次确认
-                            var confirmExisting = document.querySelector('.comment-item[data-comment-id="' + aiIdStr + '"]');
+                            var confirmExisting = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(aiIdStr) + '"]');
                             if (!confirmExisting) {
                                 console.warn('[CatAI] upsert retry failed for comment:', aiIdStr);
                             }
@@ -1785,12 +1764,12 @@ function renderProfileActivityList(kind) {
                 if (!aiComment || !aiComment.id) return { inserted: false, reason: 'invalid_data' };
                 var aiIdStr = String(aiComment.id);
                 var srcIdStr = String(sourceCommentId);
-                var sourceEl = document.querySelector('.comment-item[data-comment-id="' + srcIdStr + '"]');
+                var sourceEl = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(srcIdStr) + '"]');
                 if (!sourceEl) return { inserted: false, reason: 'source_comment_missing' };
                 // 移除旧状态
                 removeCatAiStatus(srcIdStr);
                 // 检查是否已存在
-                var existing = document.querySelector('.comment-item[data-comment-id="' + aiIdStr + '"]');
+                var existing = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(aiIdStr) + '"]');
                 if (existing) return { inserted: false, reason: 'already_exists' };
                 // ★ 查找或创建 .comment-replies 容器
                 var repliesContainer = sourceEl.querySelector('.comment-replies');
@@ -1847,7 +1826,7 @@ function renderProfileActivityList(kind) {
                         localStorage.setItem('xtj_cat_ai_retryable_' + String(commentId), JSON.stringify(retryableEntry));
                     } catch(e) {}
                 }
-                var existing = document.querySelector('.cat-ai-status[data-comment-id="' + commentId + '"]');
+                var existing = document.querySelector('.cat-ai-status[data-comment-id="' + catAiCssValue(commentId) + '"]');
                 if (existing) {
                     existing.textContent = message;
                     if (fadeOut) {
@@ -1861,7 +1840,7 @@ function renderProfileActivityList(kind) {
                     }
                     return;
                 }
-                var commentEl = document.querySelector('.comment-item[data-comment-id="' + commentId + '"]');
+                var commentEl = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(commentId) + '"]');
                 if (!commentEl) return;
                 var statusEl = document.createElement('div');
                 statusEl.className = 'cat-ai-status';
@@ -1881,7 +1860,7 @@ function renderProfileActivityList(kind) {
             }
 
             function removeCatAiStatus(commentId) {
-                var el = document.querySelector('.cat-ai-status[data-comment-id="' + commentId + '"]');
+                var el = document.querySelector('.cat-ai-status[data-comment-id="' + catAiCssValue(commentId) + '"]');
                 if (el && el.parentNode) el.parentNode.removeChild(el);
                 // Phase 3-P0-5: 状态被显式移除（completed/blocked）时也清除 retryable 缓存。
                 try { localStorage.removeItem('xtj_cat_ai_retryable_' + String(commentId)); } catch(e) {}
@@ -1911,9 +1890,9 @@ function renderProfileActivityList(kind) {
                 }
                 keysToRemove.forEach(function(k) { try { localStorage.removeItem(k); } catch(e) {} });
                 toRestore.forEach(function(item) {
-                    var commentEl = document.querySelector('.comment-item[data-comment-id="' + item.commentId + '"]');
+                    var commentEl = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(item.commentId) + '"]');
                     if (!commentEl) return;
-                    var existingStatus = document.querySelector('.cat-ai-status[data-comment-id="' + item.commentId + '"]');
+                    var existingStatus = document.querySelector('.cat-ai-status[data-comment-id="' + catAiCssValue(item.commentId) + '"]');
                     if (existingStatus) return; // 状态已存在，不重复
                     // 重新显示 retryable 状态和重试按钮
                     var statusEl = document.createElement('div');

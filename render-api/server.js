@@ -23,7 +23,7 @@ const {
 } = require('./dm-media');
 const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError } = require('./storage-cleanup');
 const { applySecurityHeaders } = require('./security-headers');
-const registerProviderRegistryRoutes = require('./provider-registry');
+// ★ 2026-09-26：provider-registry 模块已删除（无任何运行时/前端消费），见文末说明。
 const {
   REPORT_MARKER,
   DM_MARKER,
@@ -48,7 +48,8 @@ const {
   AI_AGENT_CONFIG_MARKER,
   AI_AGENT_CONV_SUMMARY_MARKER,
   AI_ENGLISH_LEARNING_MARKER,
-  REVOKED_TOKEN_MARKER
+  REVOKED_TOKEN_MARKER,
+  DM_DELETED_MARKER
 } = require('./post-markers');
 const { sanitizeAssistantVisibleText } = require('./ai-sanitize');
 const {
@@ -233,9 +234,8 @@ if (ALLOWED_ORIGINS.length === 0) {
   }
 }
 
-if (!ADMIN_PASSWORD) {
-  console.warn('[WARN] ADMIN_PASSWORD is not configured.');
-}
+// ★ 2026-09-26（审计 P3-14）：删除此处重复的 ADMIN_PASSWORD 警告（第 192 行已提示过），
+//   避免启动日志出现两条完全相同的 WARN。
 
 // 初始化 Supabase 客户端（仅使用 service_role key，禁止 anon key 兜底）
 const supabase = createClient(
@@ -465,36 +465,6 @@ function getDeepSeekProbeSnapshot() {
     errMsg: deepseekModelCatalog.error || '',
     models: Array.isArray(deepseekModelCatalog.models) ? deepseekModelCatalog.models.slice() : [],
     preferred_model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER)
-  };
-}
-function getDeepSeekCapabilitySnapshot() {
-  var probe = getDeepSeekProbeSnapshot();
-  var model = probe.preferred_model;
-  var probeReady = probe.status === 'ready';
-  var modelAvailable = probeReady ? probe.models.indexOf(model) !== -1 : null;
-  // Provider limits must come from deployment configuration (or a future
-  // model-catalog response), never from a frontend claim. Keep them unknown
-  // when the deployment has not declared them.
-  var configuredContext = Number(process.env.DEEPSEEK_PROVIDER_CONTEXT_TOKENS || process.env.DEEPSEEK_CONTEXT_TOKENS);
-  var configuredOutput = Number(process.env.DEEPSEEK_PROVIDER_MAX_OUTPUT_TOKENS || process.env.DEEPSEEK_MAX_OUTPUT_TOKENS);
-  var providerContextTokens = Number.isSafeInteger(configuredContext) && configuredContext > 0 ? configuredContext : null;
-  var providerMaxOutputTokens = Number.isSafeInteger(configuredOutput) && configuredOutput > 0 ? configuredOutput : null;
-  return {
-    configured: !!DEEPSEEK_API_KEY,
-    model: model,
-    probeStatus: probe.status,
-    probeError: probe.error,
-    modelAvailable: modelAvailable,
-    verifiedAvailable: !!DEEPSEEK_API_KEY && modelAvailable === true,
-    providerContextTokens: providerContextTokens,
-    providerMaxOutputTokens: providerMaxOutputTokens,
-    // ★ 2026-09-23 修正：此前硬编码为 'openai-chat-completions'，但服务端对 DeepSeek
-    //   实际走**两条**通道 —— callDeepSeek()（/chat/completions）与
-    //   callDeepSeekViaResponses()（/responses，由 options.use_responses_api 触发）。
-    //   固定宣称单一格式会误导排查（"为什么工具行为和 chat-completions 不一样"）。
-    //   注：本函数当前无任何调用方（既无路由暴露、也无内部引用），属预留的
-    //   能力快照；此处如实标注双通道，避免将来接上时传递错误信息。
-    apiFormats: ['openai-chat-completions', 'openai-responses']
   };
 }
 // 文件解析器 — 共用模块
@@ -1531,15 +1501,6 @@ function toResponsesFunctionTool(openaiTool) {
 //   而漏调真正的 search_web 工具，是"工具不生效"的隐藏诱因之一。
 //   现改为：全部工具都来自 AI_TOOLS（真实可执行），联网由 search_web /
 //   tavily_search 承担，其执行与配额由服务端 switch 分支控制。
-function buildResponsesTools() {
-  var tools = [];
-  for (var i = 0; i < AI_TOOLS.length; i++) {
-    var name = AI_TOOLS[i] && AI_TOOLS[i].function ? AI_TOOLS[i].function.name : '';
-    if (name === 'search_web') continue;
-    tools.push(toResponsesFunctionTool(AI_TOOLS[i]));
-  }
-  return tools;
-}
 
 // 根据是否开启第三方集群搜索，返回 Responses API 可用的 function 工具列表：
 // 非工作模式的工具集构建：
@@ -1610,28 +1571,6 @@ function aiToolsFilteredForThirdParty(allowed) {
 // - instructions 单独传（首条 system 即 corePrompt，跳过避免重复）
 // - system 消息直接保留为 message item（Responses 协议允许 system 角色）
 // - 空内容跳过；tool 消息（工具轮历史）由工具轮逻辑单独追加，这里忽略
-function buildResponsesInput(messagesArr, instructionsContent) {
-  var items = [];
-  for (var i = 0; i < messagesArr.length; i++) {
-    var m = messagesArr[i];
-    if (!m || !m.role || m.role === 'tool') continue;
-    if (m.role === 'system' && instructionsContent && m.content === instructionsContent) continue;
-    if (m.content === null || m.content === undefined || m.content === '') continue;
-    // 多模态内容数组→Responses 仅支持字符串：保留 text 块、图片块降级为提示文案，避免 String() 变成 "[object Object]"
-    if (Array.isArray(m.content)) {
-      var _textParts = [];
-      for (var _pi = 0; _pi < m.content.length; _pi++) {
-        var _p = m.content[_pi];
-        if (_p && _p.type === 'text' && _p.text) _textParts.push(String(_p.text));
-        else if (_p && _p.type === 'image_url' && _p.image_url && _p.image_url.url) _textParts.push('（用户上传了一张图片）');
-      }
-      items.push({ type: 'message', role: m.role === 'developer' ? 'system' : m.role, content: _textParts.join('\n') || '' });
-      continue;
-    }
-    items.push({ type: 'message', role: m.role === 'developer' ? 'system' : m.role, content: String(m.content) });
-  }
-  return items;
-}
 
 /** Safe arithmetic evaluator (no Function/eval). Supports + - * / ^ ( ) and scientific notation. */
 function safeEvalMath(expression) {
@@ -1987,6 +1926,11 @@ async function executeToolCall(toolCall, context) {
           cards: [aiSiteCard('calculate', '代码沙箱', { expression: 'run_code', result: outText.split('\n')[0].slice(0, 120) })]
         };
       } catch (e) {
+        // ★ 2026-09-26（审计 P0-1）：沙箱已改 fail-closed。isolated-vm 不可用时
+        //   直接向用户报告不可用，绝不再降级到不安全的 vm 实现重跑代码。
+        if (e && (e.sandboxUnavailable || e.code === 'SANDBOX_UNAVAILABLE')) {
+          return { tool_name: name, error: '代码沙箱当前不可用（服务端未加载强隔离引擎），已拒绝执行。请改用 process_json / text_stats / date_calc 等工具。', recoverable: false };
+        }
         var emsg = (e && e.message) || '执行失败';
         if (/Script execution timed out|timed out/i.test(emsg)) emsg = '代码执行超时（超过 3 秒），请简化或优化后再试';
         return { tool_name: name, error: '沙箱执行失败：' + emsg, recoverable: false };
@@ -4513,10 +4457,20 @@ app.use(function(req, res, next) {
   var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/README.md', '/CHANGELOG.md', '/CODE_INDEX.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore', '/.gitattributes', '/playwright.config.js', '/playwright.config.ts'];
   if (exact.indexOf(p) >= 0) return res.status(404).end();
   // 目录前缀匹配（★ M10 增补：audit-reports/ 等此前未覆盖的敏感目录）
-  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/audit-reports/', '/.git/', '/.github/', '/.codex/', '/.cursor/', '/.agents/', '/.trae/', '/.trae-html-share-packages/', '/.workbuddy/', '/.playwright-cli/', '/output/', '/playwright-report/', '/test-results/', '/.playwright/'];
+  // ★ 2026-09-26（审计 P2-33）：补 /downloads/、/miniprogram/、/.commandcode/ 等此前遗漏的目录。
+  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/audit-reports/', '/downloads/', '/miniprogram/', '/.commandcode/', '/backups/', '/.git/', '/.github/', '/.codex/', '/.cursor/', '/.agents/', '/.trae/', '/.trae-html-share-packages/', '/.workbuddy/', '/.playwright-cli/', '/output/', '/playwright-report/', '/test-results/', '/.playwright/'];
   for (var i = 0; i < dirs.length; i++) { if (p.indexOf(dirs[i]) === 0) return res.status(404).end(); }
   // 后缀匹配（★ M10 增补：*.sql 为数据库迁移/修复脚本，禁止对外）
-  if (p.endsWith('.bak') || p.endsWith('.md') || p.endsWith('.pem') || p.endsWith('.env') || p.endsWith('.log') || p.endsWith('.sql') || p.indexOf('/fix-') === 0 || p.indexOf('/scan-') === 0 || p.indexOf('/check-') === 0) return res.status(404).end();
+  // ★ 2026-09-26（审计 P2-33）：补 .txt/.ps1/.cmd/.exe/.zip/.yml 等——一次性探测输出、
+  //   本机放通脚本、下载的安装包都会把仓库根目录当静态目录托管。
+  //   例外：微信平台校验文件必须在根目录以 .txt 暴露，故 /MP_verify_*.txt 单独放行。
+  var _isWechatVerify = /^\/MP_verify_[A-Za-z0-9_-]{1,64}\.txt$/.test(p);
+  if (!_isWechatVerify && (
+        p.endsWith('.bak') || p.endsWith('.md') || p.endsWith('.pem') || p.endsWith('.env') ||
+        p.endsWith('.log') || p.endsWith('.sql') || p.endsWith('.txt') || p.endsWith('.ps1') ||
+        p.endsWith('.cmd') || p.endsWith('.exe') || p.endsWith('.zip') || p.endsWith('.yml') ||
+        p.endsWith('.yaml') || p.indexOf('/fix-') === 0 || p.indexOf('/scan-') === 0 || p.indexOf('/check-') === 0
+      )) return res.status(404).end();
   next();
 });
 
@@ -4703,12 +4657,6 @@ function extractPostPlainText(content) {
 
 function aiSiteText(value, max) {
   return extractPostPlainText(value).slice(0, max || 500);
-}
-function aiSiteContainsText(value, query) {
-  var text = aiSiteText(value, 10000);
-  var q = aiSiteText(query, 120);
-  if (!q) return false;
-  return text.toLowerCase().indexOf(q.toLowerCase()) >= 0;
 }
 function aiSiteMatchScore(text, query, author) {
   var t = text.toLowerCase();
@@ -5005,8 +4953,12 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
     if (!postRes.data) return res.status(404).json({ ok: false, error: 'post_not_found', message: '该帖子不存在、已删除或不可查看。' });
     var post = postRes.data;
     if (!isNormalPost(post)) return res.status(422).json({ ok: false, error: 'not_normal_post', message: '该帖子不存在、已删除或不可查看。' });
+    if (post.is_deleted === true) return res.status(404).json({ ok: false, error: 'post_not_found', message: '该帖子不存在、已删除或不可查看。' });
     if (post.visibility === 'private' && post.user_name !== (req.userName || '')) {
-      return res.status(403).json({ ok: false, error: 'post_not_visible', message: '该帖子不存在、已删除或不可查看。' });
+      // ★ 2026-09-26（审计 P3-3）：私密帖统一返回 404（此前 403），避免匿名用户
+      //   用 403/404 差异遍历 UUID 判定"存在但私密"。与 /api/post/comment、
+      //   /api/post/like 的口径保持一致。
+      return res.status(404).json({ ok: false, error: 'post_not_found', message: '该帖子不存在、已删除或不可查看。' });
     }
     var likesRes = await supabase.from('likes').select('id,user_name,created_at').eq('post_id', postId).order('created_at', { ascending: false }).limit(50);
     var commentsRes = await supabase.from('comments').select('id,user_name,content,created_at').eq('post_id', postId).order('created_at', { ascending: true }).limit(50);
@@ -5016,8 +4968,14 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
         id: post.id, user_name: post.user_name || '匿名用户',
         content: post.content || '', media_type: post.media_type || null,
         media_url: post.media_url || null, visibility: post.visibility || 'public',
-        created_at: post.created_at, view_count: post.view_count || 0,
-        like_count: post.like_count || 0, comment_count: post.comment_count || 0,
+        created_at: post.created_at,
+        // ★ 2026-09-26（审计 P3-2）：posts 表只有 views 列，不存在
+        //   view_count/like_count/comment_count —— 原实现恒返回 0 且丢掉了真实
+        //   浏览量。这里返回真实 views，互动数用上面已取到的数组长度（limit 50）。
+        views: Number(post.views) || 0,
+        view_count: Number(post.views) || 0,
+        like_count: (likesRes.data || []).length,
+        comment_count: (commentsRes.data || []).length,
         // 2026-09-22：详情弹窗需要与 feed 卡片一致地展示 IP 属地/位置
         location_name: post.location_name || null,
         ip_region_text: post.ip_region_text || null,
@@ -6171,9 +6129,67 @@ async function runSecurityChecks(userName, deviceId, ip, ipLocation, source, cur
   ]);
 }
 
+// ★ 2026-09-26（审计 P1-2）：限流键必须用"归一化后的路由路径"。
+//   原实现直接用 req.path，而 Express 默认「不区分大小写 + 把 /x 与 /x/ 当同一路由」，
+//   于是 /api/user/login、/api/user/login/、/API/USER/LOGIN 会命中同一个处理器，
+//   却各自落进不同的限流桶 —— 攻击者用路径变体即可把有效尝试次数放大数倍，
+//   使 /admin/login、/api/user/login 的口令爆破限流与 /api/agent/image 的生图
+//   限流形同虚设（两层限流同时被绕，因为它们共用这把键）。
+//   归一化规则：优先取 req.route.path（Express 路由模板，与书写形式无关），
+//   否则回退 baseUrl+path；统一小写并去掉尾部斜杠。
+function rateLimitPathKey(req) {
+  var p = '';
+  try {
+    if (req && req.route && typeof req.route.path === 'string' && req.route.path) {
+      p = String(req.baseUrl || '') + req.route.path;
+    }
+  } catch (e) { p = ''; }
+  if (!p) p = String((req && req.baseUrl) || '') + String((req && req.path) || '');
+  p = p.toLowerCase().replace(/\/+$/, '');
+  return p || '/';
+}
+
+// ★ 2026-09-26（审计 P1-4）：AI 对话/研究链路的「每用户并发闸」。
+//   背景：额度判定是"check → 流式生成 → consume"三段，check 与 consume 不在同一
+//   事务里。同一用户用不同 client_request_id 并发 N 条流时，N 个请求都能先通过
+//   check，之后才各自扣费 → 上游成本与额度消耗放大 N 倍（单次 prompt 上限 45 万
+//   字符 ≈ 15 万 token，已超过免费用户 10 万/日的额度）。
+//   这里把每用户在途 AI 请求数限制在 AI_CHAT_MAX_CONCURRENT_PER_USER（默认 2），
+//   把放大倍数收敛成常数，同时不影响"边等边发"的正常体感。
+//   释放挂在 res 的 close/finish 上：SSE 正常结束或客户端断开都会触发，且只释放
+//   一次，避免异常路径漏放导致用户被永久 429。
+var AI_CHAT_MAX_CONCURRENT_PER_USER = Math.max(1, parseInt(process.env.AI_CHAT_MAX_CONCURRENT_PER_USER || '2', 10) || 2);
+var aiChatActiveByUser = new Map(); // userName -> 在途请求数
+function tryAcquireAiChatSlot(userName) {
+  var key = String(userName || '').toLowerCase();
+  if (!key) return true; // 未认证请求由 authenticateUser 拦截，这里不额外限制
+  var cur = aiChatActiveByUser.get(key) || 0;
+  if (cur >= AI_CHAT_MAX_CONCURRENT_PER_USER) return false;
+  aiChatActiveByUser.set(key, cur + 1);
+  return true;
+}
+function releaseAiChatSlot(userName) {
+  var key = String(userName || '').toLowerCase();
+  if (!key) return;
+  var cur = aiChatActiveByUser.get(key) || 0;
+  if (cur <= 1) aiChatActiveByUser.delete(key);
+  else aiChatActiveByUser.set(key, cur - 1);
+}
+function aiChatConcurrencyGate(req, res, next) {
+  if (!tryAcquireAiChatSlot(req.userName)) {
+    res.setHeader('Retry-After', '5');
+    return res.status(429).json({ error: '已有进行中的 AI 请求，请等它完成后再发下一条', code: 'ai_concurrent_limit', retry_after: 5 });
+  }
+  var released = false;
+  var release = function() { if (released) return; released = true; releaseAiChatSlot(req.userName); };
+  res.on('close', release);
+  res.on('finish', release);
+  next();
+}
+
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
-    const key = getRealIp(req) + ':' + req.path;
+    const key = getRealIp(req) + ':' + rateLimitPathKey(req);
     const now = Date.now();
     const record = rateLimitStore.get(key) || { count: 0, resetAt: now + windowMs };
 
@@ -6359,7 +6375,8 @@ function securityRateLimit(windowMs, maxRequests) {
     if (!_nextCalled) return; // 本地已拒绝
 
     // 持久化限流（仅对安全敏感操作）
-    var key = getRealIp(req) + ':' + req.path;
+    // ★ 2026-09-26（审计 P1-2）：与本地层使用同一归一化键，避免两层口径不一致。
+    var key = getRealIp(req) + ':' + rateLimitPathKey(req);
     var result = await checkPersistentRateLimit(key, windowMs, maxRequests);
     if (result.limited) {
       // ★ M4：首参必须为纯 IP，避免 "IP:path" 污染 logAttack 的 user_name 字段
@@ -10788,6 +10805,27 @@ async function enforceAiChatAccess(userName, opts) {
   ]);
   var tokenGate = results[0] || {};
   var rl = results[1] || {};
+  // ★ 2026-09-26（审计 P1-4）：单请求预估值 vs 剩余额度。
+  //   额度扣减发生在流式生成之后，因此一个超长 prompt（上限 45 万字符）可以单次
+  //   就把免费用户 10 万/日的额度打爆。这里在放行前做一次保守估算：按 1 token ≈
+  //   2 字符（中文偏保守）估算，若预估值已经超过"有限且明确"的剩余额度则直接拒绝，
+  //   避免"先超发再扣费"。额度未知或无限（remaining < 0）时不拦截。
+  if (tokenGate.allowed && opts.promptChars > 0) {
+    var _q = tokenGate.quota || {};
+    var _remain = Number(_q.tokens_remaining);
+    var _est = Math.ceil(Number(opts.promptChars) / 2);
+    if (Number.isFinite(_remain) && _remain >= 0 && _est > _remain) {
+      return {
+        allowed: false,
+        reason: 'token_limit',
+        quota: _q,
+        remainingHour: null,
+        remainingDay: null,
+        estimated_tokens: _est,
+        estimated_exceeds_remaining: true
+      };
+    }
+  }
   // 判定顺序保持与旧实现一致：先额度、后频次 —— 保证错误文案不变
   if (!tokenGate.allowed) {
     return {
@@ -11537,7 +11575,8 @@ app.get('/health/mail', verifyToken, (req, res) => {
 // 安全敏感口令端点：内存限流 + DB 持久化限流双层（防多实例/IP 轮换绕过）
 app.post('/admin/login', securityRateLimit(60000, 10), async (req, res) => {
   try {
-    const { username, password } = req.body;
+    // ★ 2026-09-26（审计 P3-1）：非 JSON body 时 req.body 为 undefined，解构会 500。
+    const { username, password } = (req.body && typeof req.body === 'object') ? req.body : {};
     
     if (!username || !password) {
       return res.status(400).json({ error: '请输入账号和密码' });
@@ -11895,7 +11934,9 @@ async function issueUserSession(res, userName, deviceId, opts) {
     return null;
   }
   res.cookie('xtj_user_refresh', refreshToken, {
-    httpOnly: true, secure: true,
+    httpOnly: true,
+    // secure 必须为 true（契约测试锁定）；HTTP 局域网调试请改走 localhost/HTTPS
+    secure: true,
     // ★ Lax 而非 Strict（同 refresh 接口）：兼顾"从外链/主屏进入"与 CSRF 防护
     sameSite: 'Lax',
     maxAge: USER_REFRESH_TOKEN_EXPIRY_MS, path: '/api/user'
@@ -12034,9 +12075,16 @@ app.get('/api/user/restrictions', authenticateUser, rateLimit(60000, 60), async 
   try {
     var restrictionResult = await supabase.rpc('get_user_restrictions', { p_user_name: req.userName });
     if (restrictionResult.error) return res.status(503).json({ ok: false, error: '限制状态暂不可用' });
-    return res.json({ ok: true, restrictions: restrictionResult.data || {
-      is_banned: false, is_blacklisted: false, is_muted: false
-    } });
+    // ★ 2026-09-26（审计 P1-5）：由服务端下发权威的"是否管理员"标志。
+    //   前端 isAdmin() 此前只看 localStorage 里的用户名（可任意伪造），
+    //   这里让前端拿到一份服务端签发的判定，收到后即以它为准。
+    return res.json({
+      ok: true,
+      is_admin: String(req.userName || '') === String(ADMIN_USERNAME || ''),
+      restrictions: restrictionResult.data || {
+        is_banned: false, is_blacklisted: false, is_muted: false
+      }
+    });
   } catch (e) {
     return res.status(503).json({ ok: false, error: '限制状态暂不可用' });
   }
@@ -13316,11 +13364,20 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
     if (!photoId) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
 
     // 查询照片记录（限制 media_type）
-    const { data: photo } = await supabase.from('posts')
+    // ★ 2026-09-26（审计 P1-8）：必须解构 error 并 fail-closed——此前只取 data，
+    //   任何 DB 抖动/超时/多行(PGRST116) 都会走 !photo 分支返回
+    //   { ok:true, already_deleted:true }，而照片行与 Storage 文件仍在、公网
+    //   URL 仍可访问，直接违背用户"删除"的预期（隐私影响）。
+    const { data: photo, error: photoLookupError } = await supabase.from('posts')
       .select('id, user_name, media_url, media_type, actor_key, content')
       .eq('id', photoId)
       .eq('media_type', '__photo_wall__')
       .maybeSingle();
+
+    if (photoLookupError) {
+      console.error('[API] photo/delete lookup failed:', photoLookupError.message || photoLookupError);
+      return res.status(503).json({ error: '删除校验暂不可用，请稍后重试', code: 'delete_lookup_failed', retryable: true });
+    }
 
     if (!photo) return res.json({ ok: true, deleted: false, already_deleted: true, cleanup_pending: false, photo_id: photoId });
 
@@ -13411,10 +13468,17 @@ app.get('/api/photo/delete-status', authenticateUser, rateLimit(60000, 30), asyn
     if (!photoId) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
 
     // 只读查询：检查照片是否存在
-    const { data: photo } = await supabase.from('posts')
+    // ★ 2026-09-26（审计 P2-5）：解构 error 并 fail-closed，避免查询失败被当成
+    //   "已删除"（会让前端误删本地副本、也让用户以为删除成功）。
+    const { data: photo, error: statusLookupError } = await supabase.from('posts')
       .select('id, user_name, media_url, media_type, actor_key')
       .eq('id', photoId)
       .maybeSingle();
+
+    if (statusLookupError) {
+      console.error('[API] photo/delete-status lookup failed:', statusLookupError.message || statusLookupError);
+      return res.status(503).json({ status: 'unknown', error: '状态查询暂不可用', code: 'status_lookup_failed', retryable: true, photo_id: photoId });
+    }
 
     if (!photo) {
       return res.json({ status: 'deleted', photo_id: photoId });
@@ -13464,23 +13528,6 @@ function normalizeFallbackIpLocation(value) {
   return { province: province, city: city, text: textValue, status: 'resolved' };
 }
 
-async function fetchLatestUserIpLocationFallback(userName) {
-  var name = String(userName || '').trim();
-  if (!name) return null;
-  var lookup = await supabase
-    .from('posts')
-    .select('content, created_at')
-    .eq('user_name', name)
-    .eq('media_type', USER_INFO_MARKER)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!lookup || lookup.error || !lookup.data) return null;
-  var info = null;
-  try { info = JSON.parse(lookup.data.content || '{}'); } catch (_) { return null; }
-  if (!info) return null;
-  return normalizeFallbackIpLocation(info.last_ip_location || info.last_ip || null);
-}
 
 app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
@@ -13495,6 +13542,15 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     if (content.length > 50000) return res.status(400).json({ error: '内容长度超过限制', code: 'content_too_long' });
     if (['public', 'private'].indexOf(visibility) < 0) return res.status(400).json({ error: '可见范围无效', code: 'invalid_visibility' });
     if (mediaUrl && !/^https:\/\//i.test(mediaUrl)) return res.status(400).json({ error: '媒体地址无效', code: 'invalid_media_url' });
+    // ★ 2026-09-26（审计 P2-7）：media_url 此前只校验 https 前缀，配合全局 12MB
+    //   body 上限，单行可写入约 12MB 的 URL，造成 DB 行膨胀与前端渲染/日志负担。
+    if (mediaUrl.length > 2048) return res.status(400).json({ error: '媒体地址过长', code: 'media_url_too_long' });
+    // ★ 2026-09-26（审计 P2-7）：actor_key（幂等键）此前完全无校验，客户端可写入
+    //   任意长度/任意字符，混淆唯一索引语义。这里限定形态与长度，非法时改用服务端生成值。
+    var clientActorKey = String(req.body && req.body.actor_key || '');
+    if (clientActorKey && !/^[A-Za-z0-9_:.\-]{1,128}$/.test(clientActorKey)) {
+      return res.status(400).json({ error: '幂等键格式无效', code: 'invalid_actor_key' });
+    }
     if (mediaType && ['image', 'video', 'audio'].indexOf(mediaType) < 0) return res.status(400).json({ error: '媒体类型无效', code: 'invalid_media_type' });
 
     // ── 位置字段（可选，用户主动选择） ──
@@ -13536,7 +13592,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       content: content,
       media_url: mediaUrl,
       media_type: mediaType,
-      actor_key: String(req.body && req.body.actor_key || 'web_' + Date.now()),
+      actor_key: clientActorKey || ('web_' + Date.now()),
       visibility: visibility,
       is_pinned: false,
       pinned_at: null,
@@ -13714,7 +13770,10 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
   try {
     var postId = normalizePostId(req.body && req.body.post_id);
     if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
-    var { data: post } = await supabase.from('posts').select('user_name, media_type').eq('id', postId).maybeSingle();
+    // ★ 2026-09-26（审计 P3-6）：解构 error 并 fail-closed，避免 DB 故障被误报为
+    //   "帖子不存在"(404)，误导客户端。
+    var { data: post, error: postLookupError } = await supabase.from('posts').select('user_name, media_type').eq('id', postId).maybeSingle();
+    if (postLookupError) return res.status(503).json({ error: '修改校验暂不可用，请稍后重试', code: 'update_lookup_failed', retryable: true });
     if (!post) return res.status(404).json({ error: '帖子不存在' });
     var isAdmin = req.userName === ADMIN_USERNAME;
     if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权修改' });
@@ -14245,13 +14304,19 @@ app.post('/api/photo/view', optionalAuth, rateLimit(60000, 60), async (req, res)
   try {
     var photoId = normalizePostId(req.body && (req.body.photo_id || req.body.post_id));
     if (!photoId) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
-    var photoResult = await applyPublicPostExclusions(supabase.from('posts')
-      .select('id, media_type, visibility')
+    // ★ 2026-09-26（审计 P2-2）：原实现同时带 applyPublicPostExclusions 的
+    //   media_type 白名单（text/image/video/audio/photo/album）与
+    //   .eq('media_type','__photo_wall__')，两者 AND 后恒为 false —— 该接口对所
+    //   有照片都返回 404，increment_post_views 永不执行，照片浏览量永久为 0。
+    //   现改为"显式照片标记 + 可见性 + 未软删"三重校验。
+    var photoResult = await supabase.from('posts')
+      .select('id, media_type, visibility, is_deleted')
       .eq('id', photoId)
-      .eq('media_type', '__photo_wall__')).maybeSingle();
+      .eq('media_type', '__photo_wall__')
+      .maybeSingle();
     if (photoResult.error) return res.status(500).json({ error: sanitizeError(photoResult.error), code: 'photo_view_lookup_failed' });
     var photo = photoResult.data;
-    if (!photo || (photo.visibility && photo.visibility !== 'public')) {
+    if (!photo || photo.is_deleted === true || (photo.visibility && photo.visibility !== 'public')) {
       return res.status(404).json({ error: '照片不存在', code: 'photo_not_found' });
     }
     var incrementResult = await supabase.rpc('increment_post_views', { p_post_id: photoId });
@@ -14420,7 +14485,13 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
 
     // 服务端内容过滤：排除 content 为系统遥测/定位 JSON 的异常记录
     // 即使 media_type 被写错，内容检测也能兜底
+    // ★ 2026-09-26（审计 P2-3）：同时过滤软删墓碑（is_deleted=true）。
+    //   照片墙查询与 AI 站内工具都过滤了 is_deleted，信息流此前没有——
+    //   一旦有任何路径置位该列（管理端 RPC / 直连 DB），被软删的帖子仍会出现在
+    //   动态流并可被评论点赞。这里放在 JS 侧与遥测过滤同一处，避免再追加一个
+    //   PostgREST .or() 造成条件互相覆盖（endReached 仍用过滤前的 preFilterCount）。
     posts = posts.filter(function(p) {
+      if (p.is_deleted === true) return false;
       return !looksLikeSystemTelemetry(p.content);
     });
 
@@ -14430,11 +14501,21 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     var likes = [];
     if (postIds.length) {
       var [commRes, likeRes] = await Promise.all([
-        supabase.from('comments').select('*').in('post_id', postIds).order('created_at'),
-        supabase.from('likes').select('*').in('post_id', postIds)
+        // ★ 2026-09-26（审计 P2-6）：显式列白名单，替代 select('*')。
+        //   /api/feed 是 optionalAuth，匿名也会拿到全列（含 actor_key 与未来新增列）。
+        supabase.from('comments').select('id, post_id, user_name, content, parent_comment_id, generated_by_ai, created_at').in('post_id', postIds).order('created_at'),
+        supabase.from('likes').select('id, post_id, user_name, created_at').in('post_id', postIds)
       ]);
-      if (!commRes.error) comments = commRes.data || [];
-      if (!likeRes.error) likes = likeRes.data || [];
+      // ★ 2026-09-26（审计 P3-9）：子查询失败不再静默吞掉（那会让页面显示
+      //   "0 评论 0 赞"的假象且用户无法重试），改为 503 + retryable，与本文件
+      //   其它位置的 fail-closed 口径一致。
+      if (commRes.error || likeRes.error) {
+        console.error('[API] feed relations failed:',
+          (commRes.error && commRes.error.message) || '-', '/', (likeRes.error && likeRes.error.message) || '-');
+        return res.status(503).json({ error: '互动数据加载失败，请重试', code: 'feed_relations_failed', retryable: true });
+      }
+      comments = commRes.data || [];
+      likes = likeRes.data || [];
     }
 
     // 基于数据库返回数量（过滤前）判断是否到达末尾，防止内容过滤导致误判
@@ -14735,7 +14816,9 @@ app.post('/api/avatar', authenticateUser, rateLimit(60000, 10), async (req, res)
         var delRes = await supabase.from('posts').delete().in('id', staleIds).select('id');
         if (delRes && delRes.error) {
           console.error('[API] avatar cleanup:', delRes.error.message);
-          return { status: 200, avatar_url: mediaUrl };
+          // ★ 2026-09-26（审计 P3-10）：旧头像行清理失败不再谎报"干净成功"，
+          //   返回 cleanup_pending 让前端/运维知道有残留（新头像已写入，请求本身成功）。
+          return { status: 200, avatar_url: mediaUrl, cleanup_pending: true };
         }
         var deletedIds = {};
         ((delRes && delRes.data) || []).forEach(function(row) {
@@ -14844,6 +14927,89 @@ app.post('/api/avatar/status', authenticateUser, rateLimit(60000, 30), async (re
   }
 });
 
+// ===================== 私信「删除（对本账号隐藏）」账号级同步 =====================
+// ★ 2026-09-26：此前长按菜单的「删除」只写本机 localStorage 墓碑（见
+//   js/core-parts/06-chat-and-nav.js），服务端完全不知道这件事 —— 换设备、清缓存、
+//   换浏览器登录同一账号后，被删消息会重新出现，用户感知为"删除没生效"。
+//   现在把墓碑按账号存到服务端（posts 表的 __dm_deleted__ 标记行，每个账号一份快照，
+//   与自定义模型一致采用"先立后破"：先插入新快照，成功后再删旧行）。
+//   注意：这是"对我隐藏"，不是"撤回"——撤回仍走 /api/dm/withdraw（3 分钟窗口，
+//   会真正改掉消息内容）。两者语义不同，不要混用。
+var DM_DELETED_MAX = 500;
+
+function cleanDmDeletedIds(list) {
+  if (!Array.isArray(list)) return [];
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < list.length && out.length < DM_DELETED_MAX; i++) {
+    var v = String(list[i] == null ? '' : list[i]).trim();
+    if (!v || v.length > 64) continue;
+    // 服务端消息 id 是 UUID，本地乐观消息是 temp-xxx，只接受这两类安全字符集
+    if (!/^[A-Za-z0-9_:\-]+$/.test(v)) continue;
+    if (seen[v]) continue;
+    seen[v] = 1;
+    out.push(v);
+  }
+  return out;
+}
+
+async function fetchDmDeletedSnapshot(userName) {
+  var r = await supabase.from('posts')
+    .select('id, content')
+    .eq('user_name', userName)
+    .eq('media_type', DM_DELETED_MARKER)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (r.error) throw r.error;
+  if (!r.data) return { ids: [], rowId: null };
+  var ids = [];
+  try { ids = cleanDmDeletedIds(JSON.parse(r.data.content || '{}').ids); } catch (e) {}
+  return { ids: ids, rowId: r.data.id };
+}
+
+// GET /api/dm/deleted — 取当前账号的"已删除（隐藏）"消息 id 列表
+app.get('/api/dm/deleted', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var snap = await fetchDmDeletedSnapshot(req.userName);
+    return res.json({ ok: true, ids: snap.ids });
+  } catch (e) {
+    console.error('[API] dm/deleted get:', e && e.message);
+    return res.status(503).json({ error: '删除记录暂不可用，请稍后重试', code: 'dm_deleted_unavailable', retryable: true });
+  }
+});
+
+// POST /api/dm/deleted — 追加"已删除（隐藏）"的消息 id（幂等合并）
+app.post('/api/dm/deleted', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  try {
+    var incoming = cleanDmDeletedIds(req.body && req.body.ids);
+    if (!incoming.length) return res.status(400).json({ error: '缺少有效的消息 ID', code: 'invalid_ids' });
+    var snap = await fetchDmDeletedSnapshot(req.userName);
+    // 合并：新删除的在前，历史在后，去重截断
+    var merged = cleanDmDeletedIds(incoming.concat(snap.ids));
+    var ins = await supabase.from('posts').insert([{
+      user_name: req.userName,
+      media_type: DM_DELETED_MARKER,
+      content: JSON.stringify({ ids: merged, updated_at: new Date().toISOString() }),
+      actor_key: 'dm_deleted_' + Date.now()
+    }]).select('id').maybeSingle();
+    if (ins.error) throw ins.error;
+    var keepId = ins.data && ins.data.id;
+    if (keepId) {
+      // 先立后破：新快照落库成功后再清理同账号的旧快照行
+      var del = await supabase.from('posts').delete()
+        .eq('user_name', req.userName)
+        .eq('media_type', DM_DELETED_MARKER)
+        .neq('id', keepId);
+      if (del.error) console.warn('[API] dm/deleted cleanup old rows failed:', del.error.message);
+    }
+    return res.json({ ok: true, ids: merged });
+  } catch (e) {
+    console.error('[API] dm/deleted post:', e && e.message);
+    return res.status(503).json({ error: '删除记录保存失败，请稍后重试', code: 'dm_deleted_save_failed', retryable: true });
+  }
+});
+
 // ===================== 私信列表接口 =====================
 // GET /api/dm/list - 获取当前用户的对话列表
 app.get('/api/dm/list', authenticateUser, rateLimit(60000, 120), async (req, res) => {
@@ -14878,7 +15044,8 @@ app.get('/api/dm/list', authenticateUser, rateLimit(60000, 120), async (req, res
 // GET /api/dm/messages - 获取与某个用户的完整对话（分页）
 app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
-    const targetUser = String(req.query.target || '').trim();
+    // ★ 2026-09-26（审计 P3-7）：target 无长度上限，可传超长串进 .eq('media_url', ...)。
+    const targetUser = String(req.query.target || '').trim().slice(0, MAX_USERNAME_LEN);
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
     if (!targetUser) return res.status(400).json({ error: '缺少目标用户' });
     // ★ 2026-09-25 新增（复审 P1-02）：向上翻历史的游标。
@@ -15771,7 +15938,9 @@ function publishDmRealtime(targetUser, message) {
 app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var reqUser = req.userName;
-    var messageId = String(req.body && req.body.id || '').trim();
+    // ★ 2026-09-26（审计 P2-4）：改用 normalizePostId 校验 UUID —— 此前任意字符串
+    //   会传给 PostgREST 触发 22P02 类型错误并以 500 返回（应为 400）。
+    var messageId = normalizePostId(req.body && req.body.id);
 
     if (!messageId) {
       return res.status(400).json({ error: '消息ID无效', code: 'invalid_id' });
@@ -15799,6 +15968,13 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
 
     var elapsed = Date.now() - new Date(msg.created_at).getTime();
     var timeLimit = 3 * 60 * 1000;
+
+    // ★ 2026-09-26（审计 P2-4）：created_at 非法时 elapsed 为 NaN，而
+    //   `NaN > timeLimit` 恒为 false → 撤回时限校验会被静默跳过。这里显式拒绝。
+    if (!Number.isFinite(elapsed)) {
+      console.error('[API] dm/withdraw: invalid created_at for message', messageId);
+      return res.status(503).json({ error: '消息时间异常，暂时无法撤回', code: 'invalid_message_time', retryable: true });
+    }
 
     // Resolve and validate the backend-generated media path before changing
     // the message. Never allow an old or forged actor_key to select an
@@ -16848,7 +17024,10 @@ app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30)
 // 用户提交举报
 app.post('/api/report', rateLimit(60000, 5), authenticateUser, async (req, res) => {
   try {
-  const { reporter_name, target_type, target_id, target_user, report_category, report_reason } = req.body;
+  // ★ 2026-09-26（审计 P3-1）：非 JSON Content-Type 时 body-parser 会把 req.body
+  //   置为 undefined，直接解构会抛 TypeError 并被吞成 500。统一兜底成 {}。
+  const _reportBody = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { reporter_name, target_type, target_id, target_user, report_category, report_reason } = _reportBody;
   const reporterVal = req.userName;
   if (!reporterVal || !target_type || !target_id || !report_category) {
     return res.status(400).json({ error: '缺少必要参数' });
@@ -17158,16 +17337,6 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
     }
 
     // 辅助函数：过滤日期范围
-    function filterByDate(map, start, end) {
-      var result = {};
-      var keys = Object.keys(map).sort();
-      keys.forEach(function(k) {
-        if ((!start || k >= start) && (!end || k <= end)) {
-          result[k] = map[k];
-        }
-      });
-      return result;
-    }
 
     const dailyVisitsAll = {};
     (visitsRes.data || []).forEach(v => {
@@ -19421,7 +19590,10 @@ app.post('/api/client-error-log', rateLimit(60000, 20), async (req, res) => {
       res.setHeader('Retry-After', _celLimit.retryAfter);
       return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: _celLimit.retryAfter });
     }
-    var { type, message, stack, url, line, col, user_agent, timestamp } = req.body;
+    // ★ 2026-09-26（审计 P3-1）：非 JSON Content-Type 时 req.body 为 undefined，
+    //   直接解构会抛 TypeError 被吞成 500。兜底为 {}。
+    var { type, message, stack, url, line, col, user_agent, timestamp } =
+      (req.body && typeof req.body === 'object') ? req.body : {};
     var errorType = String(type || 'unknown').slice(0, 50);
     var errorMsg = String(message || '').slice(0, 500);
     var errorStack = String(stack || '').slice(0, 1000);
@@ -19980,9 +20152,18 @@ function generateInviteCode(length) {
   // ★ M28：新生成邀请码最低 8 位（存量更短码仍可被 RPC 校验/激活，兼容不失效）
   length = Math.max(8, Math.min(16, parseInt(length, 10) || 8));
   var out = '';
-  var bytes = crypto.randomBytes(length);
-  for (var i = 0; i < length; i++) {
-    out += INVITE_CODE_CHARS[bytes[i] % INVITE_CODE_CHARS.length];
+  var charsetLen = INVITE_CODE_CHARS.length;
+  // ★ 2026-09-26（审计 P3-19）：改用拒绝采样消除模偏差。
+  //   原实现 `INVITE_CODE_CHARS[bytes[i] % 36]` —— 36 不整除 256，前 4 个字符
+  //   （'2','3','4','5'）出现概率比其余字符高约 1/9，有效熵低于理论值。
+  //   现在丢弃落在"不可整除尾部"的字节，保证每个字符等概率。
+  var limit = Math.floor(256 / charsetLen) * charsetLen;
+  while (out.length < length) {
+    var bytes = crypto.randomBytes(length * 2);
+    for (var i = 0; i < bytes.length && out.length < length; i++) {
+      if (bytes[i] >= limit) continue;
+      out += INVITE_CODE_CHARS[bytes[i] % charsetLen];
+    }
   }
   return out;
 }
@@ -21377,7 +21558,7 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
 });
 
 // POST /api/agent/chat
-app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var aborted = false;
   // 客户端断开时 abort 底层 DeepSeek 调用，避免请求结束后仍占用 3-5 分钟资源
   var requestAbortCtrl = new AbortController();
@@ -21421,7 +21602,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
     // 2. 用户级 token + 请求次数兜底。
     // 搜索额度只约束第三方搜索，不因 search_limit 整段拒绝聊天（额度用尽后仍走内置 web_search）。
-    var rl = await enforceAiChatAccess(userName, { needSearch: false });
+    var rl = await enforceAiChatAccess(userName, { needSearch: false, promptChars: String(messageEarly || '').length });
     if (!rl.allowed) {
       return res.status(429).json({
         error: getAiQuotaErrorMessage(rl.reason),
@@ -21850,7 +22031,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 //     后服务端执行并把结果回喂模型继续推理（多轮，最多 CUSTOM_TOOL_MAX_ROUNDS 轮），
 //     同时推送 tool_calls/tool_pending/tool_result/tool_error SSE 供前端展示时间线。
 //     上游不支持 function calling（400/404/422）时自动回退为不带工具重试。
-app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -22403,7 +22584,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, rateLimit(3600000, A
 //   meta / deep_think_init / deep_think_stage / deep_think_planned / deep_think_tool /
 //   thinking_chunk{agent_role} / answer_chunk / content / done{agent_count,sources,search_count} / error
 // ─────────────────────────────────────────────────────────────
-app.post('/api/agent/custom-chat/deep-stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -22949,7 +23130,10 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
 // 说明：前端用 <img src> 直接展示成图，无法携带 Authorization 头，
 // 因此本接口不做登录鉴权；但 ★ 改为双层限流（内存 + DB 持久化按 IP 40 次/小时），
 // 防止多实例/换 IP 匿名批量刷上游付费生图，并限制响应体字节数避免内存放大。
-app.get('/api/agent/image', securityRateLimit(3600000, 40), async (req, res) => {
+// ★ 2026-09-26（审计 P1-3/P2-4）：补 authenticateUser —— 此前该路由匿名可用，
+//   配合当时按 req.path 分桶（可被大小写/尾斜杠变体绕过）的限流，可被用来刷
+//   第三方付费生图（单请求最坏 45s、5 次退避重试）。
+app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), async (req, res) => {
   var prompt = String(req.query.prompt || '').trim().slice(0, 500);
   if (!prompt) return res.status(400).json({ error: '缺少生图描述', code: 'invalid_prompt' });
   var allowedSizes = { square_hd: 1, square: 1, portrait_4_3: 1, portrait_16_9: 1, landscape_4_3: 1, landscape_16_9: 1 };
@@ -22981,6 +23165,23 @@ app.get('/api/agent/image', securityRateLimit(3600000, 40), async (req, res) => 
       }
       var cType = String(upstream.headers.get('content-type') || '');
       var finalUrl = upstream.url || '';
+      // ★ 2026-09-26（审计 P1-3/P2-4）：重定向后的最终地址必须复核——
+      //   上游若 302 到非 https / IP 字面量 / 内网保留段（如云元数据 169.254.169.254），
+      //   这里直接拒绝，避免把生图代理当成 SSRF 跳板。
+      try {
+        var _fin = new URL(finalUrl);
+        var _finHost = String(_fin.hostname || '').replace(/^\[|\]$/g, '');
+        if (_fin.protocol !== 'https:') {
+          return res.status(502).json({ error: '生图服务返回了不允许的重定向地址', code: 'image_upstream_blocked' });
+        }
+        if (/^[0-9.]+$/.test(_finHost) || _finHost.indexOf(':') >= 0) {
+          if (isPrivateOrReservedIp(_finHost)) {
+            return res.status(502).json({ error: '生图服务返回了不允许的重定向地址', code: 'image_upstream_blocked' });
+          }
+        }
+      } catch (_finErr) {
+        return res.status(502).json({ error: '生图服务返回了无效地址', code: 'image_upstream_blocked' });
+      }
       var isPlaceholder = /\/default\.jpe?g(\?|#|$)/i.test(finalUrl);
       if (!/^image\//.test(cType)) {
         if (i >= delays.length - 1) {
@@ -23022,7 +23223,7 @@ app.get('/api/agent/image', securityRateLimit(3600000, 40), async (req, res) => 
 
 
 // POST /api/agent/chat/stream - 流式 SSE 输出
-app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var T0 = Date.now();
   var T_stage = {};
   var userName = req.userName;
@@ -23183,7 +23384,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // token + 请求次数兜底（搜索额度不在此拦截整轮聊天）
-    var rl = await enforceAiChatAccess(userName, { needSearch: false });
+    var rl = await enforceAiChatAccess(userName, { needSearch: false, promptChars: String((req.body && req.body.message) || '').length });
     if (!rl.allowed) {
       return terminateWithError({
         type: 'error',
@@ -26059,7 +26260,7 @@ async function runSelfResearchFlow(opts) {
 //   4) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
 //   5) 最终报告持久化到 posts（type=tavily_research 以兼容历史读取），research_done 携带 message_id
 // 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
-app.post('/api/agent/research/stream', authenticateUser, rateLimit(3600000, 20), async (req, res) => {
+app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, 20), async (req, res) => {
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };
@@ -26526,7 +26727,7 @@ setInterval(function() {
   }
 }, 10 * 60 * 1000).unref(); // ★ 审计修复：翻译缓存清理不应阻止进程退出
 
-app.post('/api/agent/post-chat/stream', authenticateUser, rateLimit(60000, 12), async (req, res) => {
+app.post('/api/agent/post-chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(60000, 12), async (req, res) => {
   var closed = false;
   var requestAbort = new AbortController();
   res.on('close', function() { if (!res.writableEnded) { closed = true; requestAbort.abort(); } });
@@ -28104,16 +28305,12 @@ app.post('/api/code/ai', authenticateUser, rateLimit(60000, 12), async (req, res
   if (!res.writableEnded) res.end();
 });
 
-// ── Provider Registry routes ──
-registerProviderRegistryRoutes(app, {
-  supabase,
-  verifyToken,
-  rateLimit,
-  sanitizeError,
-  // ★ 修复 S-2：provider 管理路由（list/register/test/put/delete）补管理员守卫。
-  //   此前仅 verifyToken，任意登录用户可注册 provider 并控制 base_url 出站目标。
-  requireAdmin: requireAdminUser
-});
+// ★ 2026-09-26：Provider Registry 路由注册已移除。
+//   该模块（render-api/provider-registry.js，764 行）经全仓核查**从未被任何运行时
+//   或前端消费**：server.js 无 provider_registry 查询、前端无 /api/provider 调用，
+//   且它加密落库的 api_key 从未有解密入口（decryptApiKey 零调用）——即"注册了也用不上"。
+//   保留一个"可写不可用"的密钥管理面只会扩大攻击面，故整体删除。相关表
+//   provider_registry / user_model_preferences 的清理见迁移 061（可选执行）。
 
 // Keep API failures machine-readable even when a route or body parser throws.
 // Do this after every route registration so it cannot turn a normal response
@@ -28139,6 +28336,19 @@ _httpServer = app.listen(port, () => {
   console.log(`[xtj-admin-api] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
   console.log(`[AI-CONFIG] DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER}`);
   console.log(`[AI-CONFIG] API Key: ${DEEPSEEK_API_KEY ? '已配置' : '未配置'}`);
+  // ★ 2026-09-26（审计 P0-1）：沙箱引擎状态必须在启动日志里显式可见——
+  //   isolated-vm 加载失败时沙箱按 fail-closed 直接拒绝执行 run_code，
+  //   这属于"能力降级但服务照常启动"的情况，不能只留一行 warn。
+  try {
+    var _sbInfo = sandboxModule.sandboxInfo();
+    if (_sbInfo && _sbInfo.enabled) {
+      console.log('[SANDBOX] engine=' + _sbInfo.engine + ' memoryLimitMb=' + _sbInfo.memoryLimitMb + ' timeoutMs=' + _sbInfo.timeoutMs);
+    } else {
+      console.error('[SANDBOX][CRITICAL] 代码沙箱不可用（isolated-vm 未加载），run_code 已按 fail-closed 策略禁用；原因: ' + ((_sbInfo && _sbInfo.disabledReason) || 'unknown'));
+    }
+  } catch (eSb) {
+    console.error('[SANDBOX][CRITICAL] 沙箱状态检查失败:', eSb && eSb.message);
+  }
   console.log(`[AI-CONFIG] Rate Limit: 每小时${AI_AGENT_HOURLY_LIMIT}次 / 每天${AI_AGENT_DAILY_LIMIT}次`);
   void refreshDeepSeekModelCatalog(true).then(function() {
     console.log('[AI-CONFIG] /models probe ready:', JSON.stringify(getDeepSeekProbeSnapshot()));

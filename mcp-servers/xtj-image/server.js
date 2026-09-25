@@ -17,6 +17,12 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE_DIR = process.env.IMAGE_SOURCE_DIR || path.resolve(__dirname, "../../uploads");
+// ★ 2026-09-26（审计 P3-25）：默认 SOURCE_DIR 在本仓库里并不存在（项目图片走 Supabase
+//   Storage，仓库中无 uploads/ 目录），此前只会在首次调用时以 realpathSync 抛 ENOENT，
+//   错误信息不足以定位。这里在启动时显式给出可诊断的提示。
+if (!fs.existsSync(SOURCE_DIR)) {
+  console.warn('[xtj-image] SOURCE_DIR 不存在: ' + SOURCE_DIR + '（请通过 IMAGE_SOURCE_DIR 指定可访问的图片目录）');
+}
 
 function isWithin(root, candidate) {
   const relative = path.relative(root, candidate);

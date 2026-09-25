@@ -4,6 +4,9 @@
 //   （写入/删除/改额度的用例可能污染生产数据）。
 const TEST_ONLY_API_SECRET = 'xtj-test-only-api-secret-not-for-production';
 const TEST_ONLY_SUPABASE_KEY = 'xtj-test-only-supabase-service-key-not-for-production';
+// ★ 2026-09-26（审计 P3-24）：测试用 Supabase URL。必须显式设置，否则 server.js 在非生产
+//   模式下会回退到硬编码的真实生产 URL，UI 测试会真实出网打到线上。
+const TEST_ONLY_SUPABASE_URL = 'http://127.0.0.1:9/test-supabase-not-routable';
 
 const { defineConfig } = require('@playwright/test');
 
@@ -50,7 +53,12 @@ module.exports = defineConfig({
         //   请单独显式命名并注释用途，禁止使用 process.env.X || 'xxx' 形式的静默回退。
         API_SECRET: TEST_ONLY_API_SECRET,
         SUPABASE_SERVICE_KEY: TEST_ONLY_SUPABASE_KEY,
-        ALLOWED_ORIGINS: 'http://127.0.0.1:4173'
+        ALLOWED_ORIGINS: 'http://127.0.0.1:4173',
+        // ★ 2026-09-26（审计 P3-24）：必须显式覆盖 SUPABASE_URL，否则 server.js:212
+        //   在非生产模式会回退到**硬编码的真实生产 Supabase URL**，UI 测试会真实出网
+        //   打到线上库（既污染数据，也让测试结果受网络影响）。这里指向一个不可路由的
+        //   测试地址，所有 DB 调用都会快速失败而不是打到生产。
+        SUPABASE_URL: TEST_ONLY_SUPABASE_URL
       }
     }
   ]

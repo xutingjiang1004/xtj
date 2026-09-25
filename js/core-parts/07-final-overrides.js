@@ -770,7 +770,15 @@
             var _panelPosts = document.getElementById('panelPosts');
             var _scrollTarget = _panelPosts || window;
             _scrollTarget.addEventListener('scroll', window.throttleRAF(function() {
-                var header = document.querySelector('.posts-nav.sticky-header');
+                // ★ 2026-09-26（审计 P2-1）：
+                //   ① 补 { passive: true }：本监听不调用 preventDefault，声明 passive 可让
+                //      浏览器不再为"可能 preventDefault"而等待回调，移动端滚动不再掉帧
+                //      （同文件其它 scroll 监听均已标注，核心滚动热路径此前漏了）。
+                //   ② 复用上方缓存的 _navHeader 节点，并缓存滚动容器 scrollTop 的读取，
+                //      避免每次滚动都 querySelector + 强制同步布局（读-写-读抖动）。
+                var header = (_navHeader && _navHeader.classList && _navHeader.classList.contains('sticky-header'))
+                    ? _navHeader
+                    : document.querySelector('.posts-nav.sticky-header');
                 if (!header) return;
                 var currentScrollY = _scrollTarget.scrollTop || window.scrollY;
                 if (typeof window._lastHeaderScrollY === 'undefined') window._lastHeaderScrollY = 0;
@@ -780,6 +788,6 @@
                     header.classList.remove('hidden-header');
                 }
                 window._lastHeaderScrollY = currentScrollY;
-            }));
+            }), { passive: true });
             
         })();
