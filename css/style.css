@@ -1704,34 +1704,37 @@
             transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .dm-action-overlay.active .dm-action-panel { transform: translateY(0); }
-        .dm-action-caption {
-            padding: 12px 18px 4px; font-size: 12px; color: var(--text-muted);
-            text-align: center; overflow: hidden;
-            text-overflow: ellipsis; white-space: nowrap;
+        /* ── 长按/右键操作条（微信式：贴着气泡的细长小条） ───────────────
+           ★ 2026-09-25 改版：此前是"遮罩 + 底部大面板 + 4 个大圆圈图标"，
+           一块占满屏幕宽度、很笨重；微信/QQ 的做法是贴着气泡的一小条。
+           现在：深色小圆角条，图标 16px + 文字 11px，宽度随动作数量伸缩，
+           位置由 JS 按气泡位置计算（上方优先，空间不够翻到下方）。 */
+        .dm-bar-layer { position: fixed; inset: 0; z-index: 92; }
+        .dm-bar {
+            position: fixed;              /* left/top 由 JS 设置 */
+            display: flex; align-items: stretch;
+            gap: 1px; padding: 4px;
+            background: rgba(30, 38, 34, 0.94);
+            color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
+            opacity: 0; transform: scale(0.94);
+            transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.2, 0.8, 0.3, 1);
         }
-        .dm-action-grid {
-            /* ★ 2026-09-25：动作数量随消息类型变化（收到的消息没有"撤回"＝4 个，
-               撤回过的只剩"删除"＝1 个，失败消息＝2 个）。写死 5 列会让少数动作
-               左对齐显得歪，这里用 auto-fit 并整体居中。 */
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(58px, 84px));
-            justify-content: center;
-            gap: 4px; padding: 8px 6px 12px;
+        .dm-bar.active { opacity: 1; transform: scale(1); }
+        .dm-bar-item {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 3px; min-width: 52px; padding: 7px 6px;
+            border: 0; background: transparent; color: inherit;
+            font-size: 11px; line-height: 1.1; font-family: inherit;
+            border-radius: 9px; cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.14s ease;
         }
-        .dm-action-item {
-            display: flex; flex-direction: column; align-items: center; gap: 7px;
-            padding: 10px 2px; border: 0; background: transparent;
-            color: var(--text-main); font-size: 12px; border-radius: 14px;
-            cursor: pointer; -webkit-tap-highlight-color: transparent;
-        }
-        .dm-action-item:hover { background: rgba(5, 150, 105, 0.08); }
-        .dm-action-item:active { background: rgba(5, 150, 105, 0.16); }
-        .dm-action-icon {
-            width: 44px; height: 44px; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            background: rgba(5, 150, 105, 0.12); color: #059669; font-size: 19px;
-        }
-        .dm-action-label { line-height: 1.1; }
+        .dm-bar-item:hover { background: rgba(255, 255, 255, 0.14); }
+        .dm-bar-item:active { background: rgba(255, 255, 255, 0.24); }
+        .dm-bar-icon { display: flex; align-items: center; justify-content: center; height: 16px; }
+        .dm-bar-label { white-space: nowrap; }
         .dm-action-cancel {
             width: 100%; padding: 15px; border: 0; background: transparent;
             font-size: 15px; color: var(--text-main); cursor: pointer;

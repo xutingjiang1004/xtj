@@ -12477,13 +12477,24 @@ function renderProfileActivityList(kind) {
                 return media && media.src ? String(media.src) : '';
             }
 
+            // ★ 2026-09-25：操作条用 16px 线性 SVG 图标（跟随 currentColor）。
+            //   原先用 emoji/符号当占位（⧉ ↩ ➦ ⤴ 🗑），在深色小条上既花又受字体影响。
+            var DM_ACTION_ICONS = {
+                copy: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+                withdraw: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h11a5 5 0 0 1 0 10h-1"/><path d="M7 6l-4 4 4 4"/></svg>',
+                forward: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h13"/><path d="M13 8l4 4-4 4"/></svg>',
+                share: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>',
+                delete: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg>',
+                resend: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 5.3"/><path d="M20 5v6h-6"/></svg>'
+            };
+
             function buildDockMessageActions(message) {
                 var actions = [];
                 if (!message) return actions;
                 if (message.__failed) {
                     return [
-                        { id: 'resend', label: '重发', icon: '↻' },
-                        { id: 'delete', label: '删除', icon: '🗑' }
+                        { id: 'resend', label: '重发' },
+                        { id: 'delete', label: '删除' }
                     ];
                 }
                 if (message.__optimistic) return actions;   // 发送中不给操作
@@ -12493,11 +12504,11 @@ function renderProfileActivityList(kind) {
                 var sent = message.user_name === currentUser;
                 var elapsed = Date.now() - new Date(message.created_at).getTime();
                 var canWithdraw = sent && !withdrawn && !isNaN(elapsed) && elapsed <= 3 * 60 * 1000;
-                if (!withdrawn && value) actions.push({ id: 'copy', label: '复制', icon: '⧉' });
-                if (canWithdraw) actions.push({ id: 'withdraw', label: '撤回', icon: '↩' });
-                if (!withdrawn && value) actions.push({ id: 'forward', label: '转发', icon: '➦' });
-                if (value) actions.push({ id: 'share', label: '分享', icon: '⤴' });
-                actions.push({ id: 'delete', label: '删除', icon: '🗑' });
+                if (!withdrawn && value) actions.push({ id: 'copy', label: '复制' });
+                if (canWithdraw) actions.push({ id: 'withdraw', label: '撤回' });
+                if (!withdrawn && value) actions.push({ id: 'forward', label: '转发' });
+                if (value) actions.push({ id: 'share', label: '分享' });
+                actions.push({ id: 'delete', label: '删除' });
                 return actions;
             }
 
@@ -12513,6 +12524,12 @@ function renderProfileActivityList(kind) {
                 var sheet = _dmActionSheet;
                 _dmActionSheet = null;
                 try { sheet.classList.remove('active'); } catch (e) {}
+                // .active 在**内层**（.dm-bar 或 .dm-action-panel）上，遮罩层本身没有，
+                // 这里一并摘掉，避免关闭时最后 200ms 还亮着。
+                try {
+                    var innerSurface = sheet.querySelector ? sheet.querySelector('.dm-bar, .dm-action-panel') : null;
+                    if (innerSurface) innerSurface.classList.remove('active');
+                } catch (e) {}
                 setTimeout(function() { try { if (sheet.parentNode) sheet.parentNode.removeChild(sheet); } catch (e) {} }, 200);
                 try { document.removeEventListener('keydown', onDmActionKeydown, true); } catch (e) {}
             }
@@ -12558,41 +12575,32 @@ function renderProfileActivityList(kind) {
                 closeDockMessageActions();
                 closeDockForwardPicker();
 
-                var overlay = document.createElement('div');
-                overlay.className = 'dm-action-overlay';
-                var panel = document.createElement('div');
-                panel.className = 'dm-action-panel';
-                panel.setAttribute('role', 'dialog');
-                panel.setAttribute('aria-modal', 'true');
-                panel.setAttribute('aria-label', '消息操作');
-
-                var previewText = (getDMMessageText(message) || '').trim();
-                var mediaForCaption = resolveDockChatMedia(message);
-                var captionText = previewText
-                    ? (previewText.length > 40 ? previewText.slice(0, 40) + '…' : previewText)
-                    : (mediaForCaption
-                        ? (mediaForCaption.kind === 'image' ? '[图片]' : (mediaForCaption.kind === 'video' ? '[视频]' : '[音频]'))
-                        : '');
-                if (captionText) {
-                    var caption = document.createElement('div');
-                    caption.className = 'dm-action-caption';
-                    caption.textContent = captionText;
-                    panel.appendChild(caption);
+                // 定位基准用整行（气泡 + 头像）：长按传进来的是气泡、右键传进来的是行，
+                //   两种都要贴对位置。
+                var anchor = rowEl;
+                if (anchor && anchor.classList && anchor.classList.contains('chat-msg') && anchor.closest) {
+                    anchor = anchor.closest('.chat-msg-row') || anchor;
                 }
 
-                var grid = document.createElement('div');
-                grid.className = 'dm-action-grid';
+                var layer = document.createElement('div');
+                layer.className = 'dm-bar-layer';
+
+                var bar = document.createElement('div');
+                bar.className = 'dm-bar';
+                bar.setAttribute('role', 'menu');
+                bar.setAttribute('aria-label', '消息操作');
+
                 actions.forEach(function(action) {
                     var btn = document.createElement('button');
                     btn.type = 'button';
-                    btn.className = 'dm-action-item';
+                    btn.className = 'dm-bar-item';
+                    btn.setAttribute('role', 'menuitem');
                     btn.setAttribute('data-dm-action', action.id);
                     var icon = document.createElement('span');
-                    icon.className = 'dm-action-icon';
-                    icon.setAttribute('aria-hidden', 'true');
-                    icon.textContent = action.icon;
+                    icon.className = 'dm-bar-icon';
+                    icon.innerHTML = DM_ACTION_ICONS[action.id] || '';
                     var label = document.createElement('span');
-                    label.className = 'dm-action-label';
+                    label.className = 'dm-bar-label';
                     label.textContent = action.label;
                     btn.appendChild(icon);
                     btn.appendChild(label);
@@ -12601,24 +12609,42 @@ function renderProfileActivityList(kind) {
                         ev.stopPropagation();
                         runDockMessageAction(action.id, message);
                     });
-                    grid.appendChild(btn);
+                    bar.appendChild(btn);
                 });
-                panel.appendChild(grid);
 
-                var cancelBtn = document.createElement('button');
-                cancelBtn.type = 'button';
-                cancelBtn.className = 'dm-action-cancel';
-                cancelBtn.textContent = '取消';
-                cancelBtn.addEventListener('click', function(ev) {
-                    ev.preventDefault(); ev.stopPropagation(); closeDockMessageActions();
-                });
-                panel.appendChild(cancelBtn);
+                layer.appendChild(bar);
+                layer.addEventListener('click', function(ev) { if (ev.target === layer) closeDockMessageActions(); });
+                document.body.appendChild(layer);
+                _dmActionSheet = layer;
 
-                overlay.appendChild(panel);
-                overlay.addEventListener('click', function(ev) { if (ev.target === overlay) closeDockMessageActions(); });
-                document.body.appendChild(overlay);
-                _dmActionSheet = overlay;
-                requestAnimationFrame(function() { try { overlay.classList.add('active'); } catch (e) {} });
+                // 先量再摆：优先贴在气泡上方，上方空间不够就翻到下方；左右夹在视口内。
+                try {
+                    var rect = (anchor && anchor.getBoundingClientRect) ? anchor.getBoundingClientRect() : null;
+                    // 注意用 offsetWidth/offsetHeight：此刻 .dm-bar 还没加 .active，
+                    //   transform: scale(0.94) 会让 getBoundingClientRect 量小 6%，
+                    //   据此居中就会偏；offset* 是布局尺寸，不受 transform 影响。
+                    var barW = bar.offsetWidth || 0;
+                    var barH = bar.offsetHeight || 0;
+                    var vw = window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 0;
+                    var vh = window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 0;
+                    var left = rect ? (rect.left + rect.width / 2 - barW / 2) : (vw / 2 - barW / 2);
+                    var top = rect ? (rect.top - barH - 8) : 80;
+                    var below = false;
+                    if (top < 8) {
+                        top = rect ? Math.min(rect.bottom + 8, Math.max(8, vh - barH - 8)) : 8;
+                        below = true;
+                    }
+                    left = Math.max(8, Math.min(left, Math.max(8, vw - barW - 8)));
+                    bar.style.left = Math.round(left) + 'px';
+                    bar.style.top = Math.round(top) + 'px';
+                    bar.style.transformOrigin = '50% ' + (below ? '0%' : '100%');
+                } catch (ePos) {}
+
+                requestAnimationFrame(function() { try { bar.classList.add('active'); } catch (e) {} });
+                // 浮条用的是屏幕坐标，消息列表一滚就会和气泡脱节 —— 直接关掉最干净
+                var dmScroller = document.getElementById('dockChatMessages');
+                if (dmScroller) dmScroller.addEventListener('scroll', closeDockMessageActions, { passive: true, once: true });
+                window.addEventListener('resize', closeDockMessageActions, { once: true });
                 document.addEventListener('keydown', onDmActionKeydown, true);
             }
 
