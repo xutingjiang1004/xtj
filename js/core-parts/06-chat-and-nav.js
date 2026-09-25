@@ -1165,10 +1165,15 @@
                 
                 var payload = getDMMessagePayload(message);
                 var isWithdrawn = payload && payload.withdrawn;
+                // 已撤回的消息不再解析媒体：actor_key 仍然保留，若照常解析会给"已撤回"
+                //   这段文字套上媒体气泡的紧内边距，看着很怪。
+                var rowMedia = isWithdrawn ? null : resolveDockChatMedia(message);
                 
                 // ★ 2026-09-25 改造：撤回不再常驻气泡（改由长按菜单触发，与微信/QQ 一致），
                 //   气泡右下角只保留时间；失败态给出明确标记与重发入口，发送中给出上传提示。
                 var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
+                // 纯媒体气泡用更紧的内边距，让图片贴着气泡边（否则彩色边框会显得很宽）
+                if (rowMedia) bubbleClass += ' has-media';
                 if (message.__optimistic && sent) bubbleClass += ' sent-anim';
                 else if (disableAnim) bubbleClass += ' no-anim';
                 if (message.__optimistic) bubbleClass += ' pending';
@@ -1178,12 +1183,11 @@
                 var statusMark = '';
                 if (message.__failed) {
                     statusMark = '<span class="msg-fail-mark" title="' + escapeHtml(String(message.__failReason || '发送失败')) + '">发送失败 · 长按重发</span>';
-                } else if (message.__optimistic && resolveDockChatMedia(message)) {
-                    var pendingMedia = resolveDockChatMedia(message);
-                    statusMark = '<span class="msg-send-status" role="status">' + (pendingMedia.kind === 'image' ? '图片上传中…' : (pendingMedia.kind === 'video' ? '视频上传中…' : '音频上传中…')) + '</span>';
+                } else if (message.__optimistic && rowMedia) {
+                    statusMark = '<span class="msg-send-status" role="status">' + (rowMedia.kind === 'image' ? '图片上传中…' : (rowMedia.kind === 'video' ? '视频上传中…' : '音频上传中…')) + '</span>';
                 }
                 var tempAttr = message.__tempId ? ' data-temp-id="' + message.__tempId + '"' : '';
-                var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span>' + statusMark + '</div>';
+                var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + '<span class="msg-meta">' + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span></span>' + statusMark + '</div>';
                 if (sent) return '<div class="chat-msg-row sent">' + bubble + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
                 return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
             }

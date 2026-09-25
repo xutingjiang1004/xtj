@@ -48,6 +48,19 @@ test('bubble action menu resolves the message from the row that owns data-msg-ke
   assert.match(bind, /openDockMessageActions\(row\)/, 'right-click must actually open the action sheet');
 });
 
+// ★ 2026-09-25 回归测试：图片消息曾经出现「气泡是一大块、右侧空出一大片」。
+//   根因是 .msg-img 的 max-width 写成 min(200px, 100%) —— 百分比相对**父级气泡**，
+//   而气泡宽度又要由图片内容决定，循环依赖让浏览器只能把气泡撑到 max-width，
+//   图片却仍是 200px。图片宽度必须用与父级无关的单位（固定 px 或 vw）。
+test('media bubble image must not be sized relative to the bubble itself', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'css', 'style.css'), 'utf8');
+  const start = css.indexOf('.chat-msg .msg-img {');
+  assert.notEqual(start, -1, 'media bubble image rule missing');
+  const block = css.slice(start, css.indexOf('}', start));
+  assert.doesNotMatch(block, /max-width:[^;]*100%/, 'image width must not depend on the bubble width (cyclic)');
+  assert.match(block, /max-width:\s*min\(\s*200px\s*,\s*58vw\s*\)/, 'expected the viewport-based cap');
+});
+
 test('opening a chat does not immediately duplicate the detail request through polling', () => {
   const openChat = between(core, 'window.openChat = function(userName)', 'async function loadDockChatList()');
   assert.match(openChat, /startDMPolling\(60000, true\)/);

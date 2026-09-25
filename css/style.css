@@ -1586,7 +1586,13 @@
            cover 还会把长图裁掉内容。改为"不超过气泡宽度 + 保持完整比例"，并加一层浅底占位，
            减少图片解码时的布局跳动（M-18 的缓解）。 */
         .chat-msg .msg-img {
-            display: block; max-width: min(200px, 100%); max-height: 260px;
+            /* ★ 2026-09-25 修复（"图片气泡右边一大片绿"）：这里此前写的是
+               min(200px, 100%)，而 100% 是相对**父级气泡**的宽度，气泡宽度又要由图片
+               内容决定 —— 循环依赖让浏览器只能按"撑满 max-width(75%)"求解，
+               于是气泡变成占满 75% 的大绿块、图片仍只有 200px，右侧空出一大片。
+               改用与父级宽度无关的视口单位兜底：min(200px, 58vw)
+               在 320px 窄屏上≈185px（不会溢出），宽屏仍是 200px。 */
+            display: block; max-width: min(200px, 58vw); max-height: 260px;
             width: auto; height: auto;
             border-radius: 10px; cursor: pointer;
             object-fit: contain;
@@ -1610,10 +1616,21 @@
         [data-theme="dark"] .chat-msg .msg-text.withdrawn {
             color: var(--xtj-text-muted, #9aa5a2);
         }
+        /* ★ 2026-09-25：已读/未读与时间收进同一行、统一右对齐。
+           旧结构是「readStatus 行内块 + msg-time 块级」，窄气泡里各占一行、
+           宽气泡里又被撑到左右两端，观感完全取决于气泡宽度；现在与宽度无关。 */
+        .chat-msg .msg-meta {
+            display: block; margin-top: 5px; text-align: right;
+            white-space: nowrap;
+        }
+        .chat-msg .msg-meta .msg-read-status { margin-left: 0; margin-right: 6px; }
         .chat-msg .msg-time {
-            font-size: 10px; opacity: 0.55; margin-top: 5px; display: block;
+            font-size: 10px; opacity: 0.55; margin-top: 0; display: inline;
             text-align: right;
         }
+        /* 纯媒体消息：气泡紧贴图片，不再留 16px 的彩色边框（微信同款观感） */
+        .chat-msg.has-media { padding: 6px; }
+        .chat-msg.has-media .msg-meta { padding: 0 3px 1px; }
         /* ★ 2026-09-25 修复（审计 M-12）：深色模式下
            [data-theme="dark"] .msg-time{color:rgba(203,213,225,.78)!important}（style.css:14200）
            与上面 .msg-time{opacity:.55} 叠加，落在发送气泡的绿色渐变(#059669→#10b981)上，
