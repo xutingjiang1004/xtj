@@ -1541,6 +1541,8 @@
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
                 dockChatSending = true; inp.value = '';
+                var activeFilePreview = document.getElementById('dockChatFilePreview');
+                if (file && activeFilePreview) activeFilePreview.classList.add('is-uploading');
                 var capturedContent = content;
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 var optimisticCreatedAt = new Date().toISOString();
@@ -1732,7 +1734,11 @@
                     // 回填会让用户以为没发出去而重复发送。
                     showToast('发送失败：' + ((e && e.message) ? e.message : '未知错误') + '（长按该条可重发）');
                 }
-                finally { dockChatSending = false; }
+                finally {
+                    dockChatSending = false;
+                    var finishedFilePreview = document.getElementById('dockChatFilePreview');
+                    if (finishedFilePreview) finishedFilePreview.classList.remove('is-uploading');
+                }
             }
 
             // ══════════════════════════════════════════════════════════════════
