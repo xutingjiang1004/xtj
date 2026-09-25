@@ -1379,6 +1379,23 @@
             -webkit-backdrop-filter: blur(8px);
             z-index: 10;
         }
+        /* ★ 2026-09-25 修复（关闭按钮跑到屏幕外）：
+           文件后段的「全局玻璃按钮重置」选择器把 .img-viewer .iv-close 显式列了进去，
+           其 position:relative + transform:translateZ(0) 与上面的 position:fixed
+           同为 (0,2,0) 特异性，但因出现位置更靠后而胜出 —— 关闭按钮退回文档流，
+           在 flex 容器里实测落在 rect.x = -24（屏幕左侧之外），用户完全看不到。
+           这里用 #ivClose（特异性 1,0,0，高于 :is() 取到的 (0,2,0)）钉死定位，
+           并把 top/right 一并固定，避免任何后续全局重置再次把它挤走。 */
+        .img-viewer #ivClose {
+            position: fixed;
+            top: calc(16px + env(safe-area-inset-top, 0px));
+            right: calc(16px + env(safe-area-inset-right, 0px));
+            left: auto;
+            bottom: auto;
+            margin: 0;
+            transform: none;
+            z-index: 12;
+        }
         @media (hover: hover) and (pointer: fine) {
             .img-viewer .iv-close:hover { background: rgba(255,255,255,0.25); transform: scale(1.05); }
         }
