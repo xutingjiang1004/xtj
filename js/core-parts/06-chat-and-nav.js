@@ -2042,42 +2042,42 @@
             //   而且**塞错了元素**（找的是 #aiChatInput，而小猫AI 的输入框 id 是 #aiChatMsgInput），
             //   所以点下去实际只会跳到 AI 页面、什么都不会发生。
             //   现在：注入完整提示（图片/视频/音频带上链接）+ 直接触发发送，让小猫立刻开始思考回复。
+            // ★ 2026-09-25 重写（两个真实缺陷）：
+            //   ① 输入框里又出现一遍：旧逻辑是「发现输入框里没有提示词就重写」。
+            //      但小猫AI 在**发送成功后本身会清空输入框** —— 于是下一个 tick 误判为"被冲掉"，
+            //      又写回去；紧接着再点一次发送，触发小猫自己的防重（"已发送，请勿重复点击"），
+            //      我的校验又因此认为没发出去，最后弹出"已填入内容，请手动点发送"。
+            //      现在用 aiDispatched 标记：**一旦发出过，就绝不再注入**，只做校验。
+            //   ② 图片只给链接：小猫的网页读取工具抓 supabase 公共地址返回 HTTP 400，
+            //      而且它本来就没有解码视频/远端图片的能力。改为**把图片作为附件发给它**
+            //      （小猫支持图片附件，能直接"看"）——抓取失败时才退回"给链接"。
             function askAiAboutDmMessage(message) {
                 var text = (getDMMessageText(message) || '').trim();
                 var media = resolveDockChatMedia(message);
                 var mediaUrl = (media && media.src) ? String(media.src) : '';
+                var isImage = !!(media && media.kind === 'image' && mediaUrl);
                 if (!text && !mediaUrl) { showToast('这条消息没有可提问的内容'); return; }
                 if (typeof window.__xtjOpenAiChat !== 'function') { showToast('请先打开小猫AI'); return; }
 
-                var kindLabel = (media && media.kind === 'image') ? '图片'
-                    : ((media && media.kind === 'video') ? '视频'
-                    : ((media && media.kind === 'audio') ? '音频' : '消息'));
-                var prompt = '请帮我看看这条' + (mediaUrl ? kindLabel + '消息' : '消息') + '：';
+                var prompt = isImage ? '请帮我看看这张图片：' : '请帮我看看这条消息：';
                 if (text) prompt += '\n' + text.slice(0, 800);
-                if (mediaUrl) prompt += '\n（媒体链接：' + mediaUrl + '，需要的话可以抓取查看）';
+                if (mediaUrl && !isImage) {
+                    var kindLabel = (media && media.kind === 'video') ? '视频' : ((media && media.kind === 'audio') ? '音频' : '媒体');
+                    prompt += '\n（' + kindLabel + '链接：' + mediaUrl + '）';
+                }
 
                 window.__xtjOpenAiChat();
 
-                // ★ 2026-09-25 重写：上一版只「轮询找到元素→写值→点发送」，
-                //   一旦小猫AI 面板在挂载过程中重建 DOM（它是先 innerHTML='' 再整块重建），
-                //   写进去的值会被冲掉，用户看到的就是「点了一下、什么都没发生」。
-                //   现在做成一个小状态机，并且**任何失败都有明确出口**：
-                //     ① 等元素出现（最多 4s）→ 超时明确报错，不再静默；
-                //     ② 写入提示词；每个 tick 校验内容是否还在（被冲掉就重写）；
-                //     ③ 内容稳定后点发送；再校验是否真的产生了用户消息，
-                //        没产生就重试一次，仍不行则提示「已填入内容，请手动点发送」。
                 var aiWaited = 0;
-                var aiRetries = 0;
-                var aiSentAt = 0;
                 var aiReadySince = 0;
+                var aiDispatched = false;   // ★ 一旦发出过就不再注入
+                var aiSentAt = 0;
+                var aiRetries = 0;
                 var aiAnchor = prompt.slice(0, 24);
+                var aiAttached = false;
 
-                // ★ 2026-09-25 关键修复（「显示一秒就立刻消失、退出重进又能看到」）：
-                //   小猫AI 打开后会**异步拉配置并载入历史**，载入完成时会重写整个消息区。
-                //   先前只等「DOM 元素出现」就发送，比它自己的初始化早了约 1 秒 ——
-                //   消息与回复确实发出去了（服务端有记录），但紧接着被那次历史渲染冲掉，
-                //   于是界面上一闪就没；退出会话重进时从服务端重新载入，所以又看得见。
-                //   现在等它初始化**落定**再动手：配置就绪 + 再留 500ms 给历史渲染。
+                // 等小猫AI 自己的初始化落定（它异步拉配置 + 载入历史，载入时会重写消息区；
+                //   此前不等这一步，刚显示出来的消息会被那次重写冲掉）。
                 function aiInitSettled() {
                     var cfg = null;
                     try {
@@ -2090,56 +2090,94 @@
                     return (Date.now() - aiReadySince) >= 500;
                 }
 
-                var aiTimer = setInterval(function() {
-                    aiWaited += 150;
-                    var input = document.getElementById('aiChatMsgInput') || document.getElementById('aiChatInput');
-                    var sendBtn = document.getElementById('aiChatSendBtn');
-                    var list = document.getElementById('aiChatMessages');
-                    if (!input || !sendBtn) {
-                        if (aiWaited >= 6000) {
-                            clearInterval(aiTimer);
-                            showToast('小猫AI 打开失败，请刷新后重试');
-                        }
-                        return;
+                // 把图片作为附件塞进小猫的附件管线（复用它的 change 处理，与手动选图完全同路径）
+                function attachImageToAi() {
+                    if (aiAttached || !isImage) return Promise.resolve(false);
+                    aiAttached = true;
+                    var fileInput = document.getElementById('aiChatFileInp');
+                    if (!fileInput || typeof fetch !== 'function') return Promise.resolve(false);
+                    return fetch(mediaUrl, { mode: 'cors', credentials: 'omit' })
+                        .then(function(resp) { return resp.ok ? resp.blob() : null; })
+                        .then(function(blob) {
+                            if (!blob) return false;
+                            var name = 'dm-' + Date.now() + '.png';
+                            var file = null;
+                            try { file = new File([blob], name, { type: blob.type || 'image/png' }); }
+                            catch (e) { return false; }
+                            var dt = new DataTransfer();
+                            dt.items.add(file);
+                            fileInput.files = dt.files;
+                            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            return true;
+                        })
+                        .catch(function() { return false; });
+                }
+
+                attachImageToAi().then(function(attachedOk) {
+                    if (isImage && !attachedOk) {
+                        // 附件注入失败（多为跨域）→ 退回把链接写进提示词，至少不是空手问
+                        prompt += '\n（图片链接：' + mediaUrl + '）';
+                        aiAnchor = prompt.slice(0, 24);
                     }
-                    if (!aiInitSettled()) {
-                        if (aiWaited >= 10000) {
-                            clearInterval(aiTimer);
-                            showToast('小猫AI 初始化超时，请重试');
-                        }
-                        return;
-                    }
-                    // ① 确保提示词在输入框里（被面板重建冲掉就再写一遍）
-                    if (String(input.value || '').indexOf(aiAnchor) < 0) {
-                        var existing = String(input.value || '');
-                        input.value = existing.trim() ? (existing.replace(/\s+$/, '') + '\n' + prompt) : prompt;
-                        try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
-                        return;
-                    }
-                    // ② 已经点过发送：确认是否真的发出去了
-                    if (aiSentAt) {
-                        if (aiWaited - aiSentAt < 700) return;
-                        var produced = false;
-                        try {
-                            produced = !!(list && list.querySelector('.ai-msg.user, .ai-msg--user, .ai-msg.entering, .ai-msg'));
-                        } catch (eChk) { produced = false; }
-                        if (produced) { clearInterval(aiTimer); return; }
-                        if (aiRetries >= 1) {
-                            clearInterval(aiTimer);
-                            showToast('已填入内容，请手动点发送');
+
+                    var aiTimer = setInterval(function() {
+                        aiWaited += 150;
+                        var input = document.getElementById('aiChatMsgInput') || document.getElementById('aiChatInput');
+                        var sendBtn = document.getElementById('aiChatSendBtn');
+                        var list = document.getElementById('aiChatMessages');
+                        if (!input || !sendBtn) {
+                            if (aiWaited >= 6000) {
+                                clearInterval(aiTimer);
+                                showToast('小猫AI 打开失败，请刷新后重试');
+                            }
                             return;
                         }
-                        aiRetries += 1;
-                        aiSentAt = aiWaited;
-                        try { sendBtn.click(); } catch (eRe) {}
-                        return;
-                    }
-                    // ③ 内容就位 → 发送
-                    aiSentAt = aiWaited;
-                    try { sendBtn.click(); } catch (e2) {}
-                }, 150);
-            }
+                        if (!aiInitSettled()) {
+                            if (aiWaited >= 10000) {
+                                clearInterval(aiTimer);
+                                showToast('小猫AI 初始化超时，请重试');
+                            }
+                            return;
+                        }
 
+                        // ① 注入（只在首次发送之前；发出后 AI 会清空输入框，绝不能再写回去）
+                        if (!aiDispatched) {
+                            if (String(input.value || '').indexOf(aiAnchor) < 0) {
+                                var existing = String(input.value || '');
+                                input.value = existing.trim() ? (existing.replace(/\s+$/, '') + '\n' + prompt) : prompt;
+                                try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+                                return;
+                            }
+                            aiDispatched = true;
+                            aiSentAt = aiWaited;
+                            try { sendBtn.click(); } catch (e2) {}
+                            return;
+                        }
+
+                        // ② 已发出：只校验，不再动输入框
+                        if (aiWaited - aiSentAt < 900) return;
+                        var produced = false;
+                        try {
+                            produced = !!(list && list.querySelector('.ai-msg.user, .ai-msg--user, .ai-msg'));
+                        } catch (eChk) { produced = false; }
+                        if (produced) { clearInterval(aiTimer); return; }
+                        if (aiRetries < 1) {
+                            aiRetries += 1;
+                            aiSentAt = aiWaited;
+                            // 重试前确认输入框真的还有内容，避免空点
+                            if (String(input.value || '').trim()) {
+                                try { sendBtn.click(); } catch (eRe) {}
+                            } else {
+                                clearInterval(aiTimer);
+                                showToast('已发送，但未确认到小猫的回复，请查看对话');
+                            }
+                            return;
+                        }
+                        clearInterval(aiTimer);
+                        showToast('已发送，但未确认到小猫的回复，请查看对话');
+                    }, 150);
+                });
+            }
             async function doShareDmMessage(message) {
                 var value = getDmActionValue(message);
                 if (!value) { showToast('这条消息没有可分享的内容'); return; }
