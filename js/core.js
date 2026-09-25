@@ -11818,6 +11818,9 @@ function renderProfileActivityList(kind) {
                 var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
                 // 纯媒体气泡用更紧的内边距，让图片贴着气泡边（否则彩色边框会显得很宽）
                 if (rowMedia) bubbleClass += ' has-media';
+                // 只有"图片/视频 + 无文字"时才把时间叠到图上去；带文字的气泡若也叠，
+                //   绝对定位的元信息会盖住文字（所以这里由 JS 判定，不用 :has()）。
+                if (rowMedia && !(getDMMessageText(message) || '').trim()) bubbleClass += ' media-only';
                 if (message.__optimistic && sent) bubbleClass += ' sent-anim';
                 else if (disableAnim) bubbleClass += ' no-anim';
                 if (message.__optimistic) bubbleClass += ' pending';
