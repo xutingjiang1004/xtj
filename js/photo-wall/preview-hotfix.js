@@ -685,41 +685,76 @@
     });
     // ★ 修复：隐藏两个不明确的缩放按钮（− / +）——照片在角落里被误认为“不明按钮”，
     // 缩放仍可通过 双击 / 滚轮 / 双指捏合 使用，工具栏只保留 信息/旋转/分享/删除。
+    //
+    // ★ 2026-09-25 修复（按钮位置错乱 / 隐藏失效）：
+    //   style.css:14051 有一组后置规则
+    //     #photoPreviewOverlay .pp-zoom-btn { … display: flex !important; width:42px !important; … }
+    //   它用 !important 覆盖了这里设置的普通内联 display:none，导致这两个按钮在线上
+    //   始终可见（实测 computed display = flex，而 style.display = none）。
+    //   更糟的是同一文件 7738 行还给了 .pp-zoom-btn { position:absolute; bottom:100px }
+    //   ——于是它们既不隐藏，又被定位到远离底部工具栏的左上角落，正是用户反馈的
+    //   「按钮的位置也不对」。
+    //   这里必须用 setProperty(..., 'important') 才能压过样式表里的 !important。
     ['ppZoomOutBtn', 'ppZoomInBtn'].forEach(function (id) {
       var zoomBtn = root.querySelector('#' + id);
-      if (zoomBtn) zoomBtn.style.display = 'none';
+      if (!zoomBtn) return;
+      zoomBtn.style.setProperty('display', 'none', 'important');
+      zoomBtn.setAttribute('aria-hidden', 'true');
+      zoomBtn.setAttribute('tabindex', '-1');
     });
     // ★ 修复：内联固定工具栏/关闭钮/指示器位置——新样式表（photo-preview.css）未加载或
     // 加载失败时，style.css 里的旧版规则会把工具栏挤到错误位置（贴底被裁、关闭钮错位）。
-    // 内联样式优先级高于任何类规则，保证控件永远落在正确位置。
-    var toolbarCss = 'position:absolute;left:50%;right:auto;top:auto;margin:0;' +
-      'bottom:calc(18px + env(safe-area-inset-bottom, 0px));' +
-      'transform:translateX(-50%);z-index:24;display:flex;align-items:center;justify-content:center;' +
-      'gap:10px;padding:8px 10px;border-radius:999px;' +
-      'background:rgba(12,18,28,.34);border:1px solid rgba(255,255,255,.12);' +
-      'box-shadow:0 10px 34px rgba(0,0,0,.18);' +
-      'backdrop-filter:blur(16px) saturate(130%);-webkit-backdrop-filter:blur(16px) saturate(130%);';
-    toolbar.style.cssText = toolbarCss;
+    //
+    // ★ 2026-09-25：style.css 后段出现了一组带 !important 的覆盖规则
+    //   （#photoPreviewOverlay .pp-preview-toolbar / .photo-preview-close / .pp-dots，
+    //    见 style.css 约 14040 行起）。普通内联样式**压不过 !important**，
+    //   所以这里统一改用 setProperty(..., 'important')，确保这套定位在任何
+    //   样式表加载顺序下都稳定生效。
+    function setImportant(node, prop, value) {
+      if (node) node.style.setProperty(prop, value, 'important');
+    }
+    setImportant(toolbar, 'position', 'absolute');
+    setImportant(toolbar, 'left', '50%');
+    setImportant(toolbar, 'right', 'auto');
+    setImportant(toolbar, 'top', 'auto');
+    setImportant(toolbar, 'margin', '0');
+    setImportant(toolbar, 'bottom', 'calc(18px + env(safe-area-inset-bottom, 0px))');
+    setImportant(toolbar, 'transform', 'translateX(-50%)');
+    setImportant(toolbar, 'z-index', '24');
+    setImportant(toolbar, 'display', 'flex');
+    setImportant(toolbar, 'align-items', 'center');
+    setImportant(toolbar, 'justify-content', 'center');
+    setImportant(toolbar, 'gap', '10px');
+    setImportant(toolbar, 'padding', '8px 10px');
+    setImportant(toolbar, 'border-radius', '999px');
+    setImportant(toolbar, 'background', 'rgba(12,18,28,.34)');
+    setImportant(toolbar, 'border', '1px solid rgba(255,255,255,.12)');
+    setImportant(toolbar, 'box-shadow', '0 10px 34px rgba(0,0,0,.18)');
+    setImportant(toolbar, 'backdrop-filter', 'blur(16px) saturate(130%)');
+    setImportant(toolbar, '-webkit-backdrop-filter', 'blur(16px) saturate(130%)');
     var closeBtn = root.querySelector('.photo-preview-close');
     if (closeBtn) {
-      closeBtn.style.position = 'absolute';
-      closeBtn.style.top = 'calc(max(16px, env(safe-area-inset-top, 0px)))';
-      closeBtn.style.right = 'calc(12px + env(safe-area-inset-right, 0px))';
-      closeBtn.style.left = 'auto';
-      closeBtn.style.bottom = 'auto';
-      closeBtn.style.transform = 'none';
-      closeBtn.style.zIndex = '46';
-      closeBtn.style.margin = '0';
+      setImportant(closeBtn, 'position', 'absolute');
+      setImportant(closeBtn, 'top', 'calc(max(16px, env(safe-area-inset-top, 0px)))');
+      setImportant(closeBtn, 'right', 'calc(12px + env(safe-area-inset-right, 0px))');
+      setImportant(closeBtn, 'left', 'auto');
+      setImportant(closeBtn, 'bottom', 'auto');
+      setImportant(closeBtn, 'transform', 'none');
+      setImportant(closeBtn, 'z-index', '46');
+      setImportant(closeBtn, 'margin', '0');
+      setImportant(closeBtn, 'display', 'grid');
+      setImportant(closeBtn, 'place-items', 'center');
+      setImportant(closeBtn, 'pointer-events', 'auto');
     }
     var dots = root.querySelector('.pp-dots');
     if (dots) {
-      dots.style.position = 'absolute';
-      dots.style.top = 'calc(14px + env(safe-area-inset-top, 0px))';
-      dots.style.bottom = 'auto';
-      dots.style.left = '50%';
-      dots.style.transform = 'translateX(-50%)';
-      dots.style.zIndex = '11';
-      dots.style.pointerEvents = 'none';
+      setImportant(dots, 'position', 'absolute');
+      setImportant(dots, 'top', 'calc(14px + env(safe-area-inset-top, 0px))');
+      setImportant(dots, 'bottom', 'auto');
+      setImportant(dots, 'left', '50%');
+      setImportant(dots, 'transform', 'translateX(-50%)');
+      setImportant(dots, 'z-index', '11');
+      setImportant(dots, 'pointer-events', 'none');
     }
     return toolbar;
   }

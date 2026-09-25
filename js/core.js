@@ -6258,44 +6258,83 @@ function renderProfileActivityList(kind) {
 
             function buildPostPreviewItemFromTrigger(src, triggerEl) {
                 var el = triggerEl && triggerEl.getAttribute ? triggerEl : null;
-                if (!el) return null;
-                var postId = String(el.getAttribute('data-post-id') || '').trim();
-                if (!postId) return null;
-                var userName = String(el.getAttribute('data-post-user') || '').trim();
-                var createdAt = String(el.getAttribute('data-post-created-at') || '').trim();
-                var views = Number(el.getAttribute('data-post-views') || 0) || 0;
-                var fileSize = Number(el.getAttribute('data-file-size') || 0) || null;
-                var originalSize = Number(el.getAttribute('data-original-size') || 0) || null;
+                // ★ 修复：此前 el 为空直接 return null，导致「无触发元素」的调用
+                //   （如兜底按钮、外链图片）也强制退回旧 #imgViewer。
+                //   现在只要拿到可用 src 就构造预览项，el 仅用于补充元数据。
+                var rawSrc = String(src || (el && (el.getAttribute('data-full-src') || el.getAttribute('data-src') || el.getAttribute('src'))) || '').trim();
+                var safeImageUrl = sanitizeUrl(rawSrc);
+                if (!safeImageUrl) return null;
+                var postId = String((el && el.getAttribute('data-post-id')) || '').trim();
+                var userName = String((el && el.getAttribute('data-post-user')) || '').trim();
+                var createdAt = String((el && el.getAttribute('data-post-created-at')) || '').trim();
+                var views = Number((el && el.getAttribute('data-post-views')) || 0) || 0;
+                var fileSize = Number((el && el.getAttribute('data-file-size')) || 0) || null;
+                var originalSize = Number((el && el.getAttribute('data-original-size')) || 0) || null;
+                // ★ 修复（聊天图片无关闭按钮/按钮错位/缩放异常的根因）：
+                //   聊天图片气泡 <img class="msg-img"> 只有 data-full-src，没有 data-post-id。
+                //   旧代码在 postId 为空时 return null → openPostImagePreview 返回 false →
+                //   openImageViewer 退回旧 #imgViewer（其关闭按钮被全局按钮重置规则压成
+                //   position:relative，实测 rect.x = -24 跑到屏幕外，缩放也在两套状态机间打架）。
+                //   现在：无 postId 时按「聊天/通用图片」构造单图预览项，统一走新 photo-preview。
+                var isPostPhoto = !!postId;
                 return {
-                    id: 'post_' + postId,
-                    imageUrl: sanitizeUrl(src || el.getAttribute('src') || ''),
-                    thumbUrl: sanitizeUrl(src || el.getAttribute('src') || ''),
+                    id: isPostPhoto ? ('post_' + postId) : ('chat_' + (el && el.id ? el.id : 'img') + '_' + rawSrc.length),
+                    imageUrl: safeImageUrl,
+                    // 缩略图与原图同源：聊天图没有独立缩略图，传相同的 URL 会让 preview.js
+                    // 走 hasThumb=false 分支（避免多一次无意义预加载）。
+                    thumbUrl: safeImageUrl,
                     username: userName || '',
                     timestamp: createdAt || '',
                     views: views,
                     fileSize: fileSize,
                     originalSize: originalSize,
-                    __xtjSource: 'post',
+                    __xtjSource: isPostPhoto ? 'post' : 'chat',
                     __xtjPostId: postId,
-                    __xtjActorKey: String(el.getAttribute('data-actor-key') || ''),
-                    __xtjCanDelete: String(el.getAttribute('data-can-delete') || '') === '1'
+                    __xtjActorKey: String((el && el.getAttribute('data-actor-key')) || ''),
+                    __xtjCanDelete: String((el && el.getAttribute('data-can-delete')) || '') === '1'
                 };
             }
 
             function syncPostPhotoPreviewChrome(photo) {
                 var overlay = document.getElementById('photoPreviewOverlay');
-                if (!overlay) return;
+                if (!overlay || !overlay.classList.contains('active')) return;
                 var isPostPhoto = !!(photo && photo.__xtjSource === 'post');
+                var isChatPhoto = !!(photo && photo.__xtjSource === 'chat');
                 overlay.classList.toggle('pp-post-mode', isPostPhoto);
+                // ★ 修复：单图预览（帖子图 / 聊天图）都隐藏左右翻页箭头——只有一张图时
+                //   箭头点了没反应，反而和关闭按钮一起造成「按钮很多但没用」的观感。
+                var singleItem = isPostPhoto || isChatPhoto ||
+                    (Array.isArray(window.__xtjPreviewExplicitPhotos) && window.__xtjPreviewExplicitPhotos.length <= 1);
                 var prevBtn = document.getElementById('ppPrevBtn');
                 var nextBtn = document.getElementById('ppNextBtn');
-                if (prevBtn) prevBtn.style.display = isPostPhoto ? 'none' : '';
-                if (nextBtn) nextBtn.style.display = isPostPhoto ? 'none' : '';
+                if (prevBtn) setCtBtnDisplay(prevBtn, singleItem ? 'none' : '');
+                if (nextBtn) setCtBtnDisplay(nextBtn, singleItem ? 'none' : '');
                 var deleteBtn = document.getElementById('ppDeleteBtn');
-                if (deleteBtn && isPostPhoto) {
-                    deleteBtn.style.display = photo.__xtjCanDelete ? 'flex' : 'none';
-                    deleteBtn.title = '删除帖子';
+                if (deleteBtn) {
+                    if (isPostPhoto) {
+                        setCtBtnDisplay(deleteBtn, photo.__xtjCanDelete ? 'flex' : 'none');
+                        deleteBtn.title = '删除帖子';
+                    } else {
+                        // 聊天图 / 通用图不属于当前用户可删除的内容，强制隐藏。
+                        // 必须用 setProperty(...,'important')：style.css 里
+                        // #photoPreviewOverlay .pp-delete-btn { display:flex !important }
+                        // 会压过普通内联值（实测改完后按钮仍在工具栏里显示）。
+                        setCtBtnDisplay(deleteBtn, 'none');
+                    }
                 }
+                // 聊天图片不提供「分享」（复制图片直链给他人并无意义，且聊天图多为
+                // 私有会话内容），也不提供「删除」。工具栏只留 信息 / 旋转。
+                var shareBtn = document.getElementById('ppShareBtn');
+                if (shareBtn) setCtBtnDisplay(shareBtn, isChatPhoto ? 'none' : '');
+            }
+
+            // 统一用 !important 设置按钮显隐：预览器工具栏按钮在 style.css 里
+            // 有一组 display:flex !important 的后置覆盖规则，普通 .style.display
+            // 会被压掉，导致「代码里隐藏了、界面仍然显示」。
+            function setCtBtnDisplay(btn, value) {
+                if (!btn) return;
+                if (value) btn.style.setProperty('display', value, 'important');
+                else btn.style.removeProperty('display');
             }
 
             function ensurePhotoPreviewContextHooks() {
@@ -6318,17 +6357,21 @@ function renderProfileActivityList(kind) {
                 if (typeof window.closeImageViewer === 'function') {
                     try { window.closeImageViewer(); } catch (e) {}
                 }
+                // ★ 修复：context.kind 必须跟随真实来源。此前对聊天图片也硬编码 'post'，
+                //   会让 deleteCurrentPhoto 把聊天图当成帖子图去调删除帖子接口。
                 window.__xtjPhotoPreviewContext = {
-                    kind: 'post',
+                    kind: photo.__xtjSource === 'post' ? 'post' : 'generic',
                     postId: photo.__xtjPostId,
                     actorKey: photo.__xtjActorKey || '',
                     canDelete: !!photo.__xtjCanDelete
                 };
                 window.openPhotoPreview(0, { photos: [photo], originEl: triggerEl && triggerEl.getBoundingClientRect ? triggerEl : null });
                 window.photoPreviewCurrent = photo;
-                setTimeout(function() {
-                    syncPostPhotoPreviewChrome(photo);
-                }, 30);
+                // 同步 chrome 需要等 hotfix 的 afterOpen（双 rAF + 打开动画）走完，
+                // 否则按钮会在其后的重置里被改回来。这里在两个时间点各同步一次：
+                // 30ms 覆盖快路径，480ms 兜底覆盖慢路径/动画较长的设备。
+                setTimeout(function() { syncPostPhotoPreviewChrome(photo); }, 30);
+                setTimeout(function() { syncPostPhotoPreviewChrome(photo); }, 480);
                 return true;
             }
             window.openPostImagePreview = openPostImagePreview;
@@ -9888,8 +9931,11 @@ function renderProfileActivityList(kind) {
                 fallback.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
+                    // ★ 2026-09-25：把兜底按钮自身作为 triggerEl 传入。此前只传 src，
+                    //   新预览器拿不到触发元素就会退化成旧 #imgViewer（关闭按钮不可见、
+                    //   缩放异常）。传 this 后即使原图失败，点开的仍是统一的新预览器。
                     if (fullSrc && typeof window.openImageViewer === "function") {
-                        window.openImageViewer(fullSrc);
+                        window.openImageViewer(fullSrc, fallback);
                     } else if (fullSrc) {
                         window.open(fullSrc, '_blank', 'noopener');
                     } else {
@@ -11663,7 +11709,15 @@ function renderProfileActivityList(kind) {
                     var resolvedImageSrc = String(media.src || media.fullSrc || '');
                     var safeSrc = escapeHtml(resolvedImageSrc);
                     var safeFull = escapeHtml(resolvedImageSrc);
-                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
+                    // ★ 2026-09-25 修复（聊天图片预览器降级到旧 #imgViewer）：
+                    //   此前 onclick 只传了 src，没有把 <img> 自身作为 triggerEl 传入。
+                    //   openImageViewer → openPostImagePreview 依赖 triggerEl 读取
+                    //   data-post-id 等元数据来构造新预览器的数据项；缺了它就只能
+                    //   fallbackOpen() 打开旧 #imgViewer —— 旧查看器的关闭按钮被
+                    //   全局按钮重置规则压成 position:relative（实测跑到屏幕外 x=-24），
+                    //   缩放也在两套状态机之间打架，正是用户反馈的那一堆问题。
+                    //   这里补上 this，让聊天图片走和帖子图完全一致的新预览器。
+                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }

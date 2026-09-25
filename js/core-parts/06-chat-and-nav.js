@@ -1071,7 +1071,15 @@
                     var resolvedImageSrc = String(media.src || media.fullSrc || '');
                     var safeSrc = escapeHtml(resolvedImageSrc);
                     var safeFull = escapeHtml(resolvedImageSrc);
-                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
+                    // ★ 2026-09-25 修复（聊天图片预览器降级到旧 #imgViewer）：
+                    //   此前 onclick 只传了 src，没有把 <img> 自身作为 triggerEl 传入。
+                    //   openImageViewer → openPostImagePreview 依赖 triggerEl 读取
+                    //   data-post-id 等元数据来构造新预览器的数据项；缺了它就只能
+                    //   fallbackOpen() 打开旧 #imgViewer —— 旧查看器的关闭按钮被
+                    //   全局按钮重置规则压成 position:relative（实测跑到屏幕外 x=-24），
+                    //   缩放也在两套状态机之间打架，正是用户反馈的那一堆问题。
+                    //   这里补上 this，让聊天图片走和帖子图完全一致的新预览器。
+                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }

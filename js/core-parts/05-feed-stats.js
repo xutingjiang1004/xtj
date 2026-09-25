@@ -371,8 +371,11 @@
                 fallback.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
+                    // ★ 2026-09-25：把兜底按钮自身作为 triggerEl 传入。此前只传 src，
+                    //   新预览器拿不到触发元素就会退化成旧 #imgViewer（关闭按钮不可见、
+                    //   缩放异常）。传 this 后即使原图失败，点开的仍是统一的新预览器。
                     if (fullSrc && typeof window.openImageViewer === "function") {
-                        window.openImageViewer(fullSrc);
+                        window.openImageViewer(fullSrc, fallback);
                     } else if (fullSrc) {
                         window.open(fullSrc, '_blank', 'noopener');
                     } else {
