@@ -213,7 +213,12 @@
     var userEl = document.getElementById('photoPreviewUser');
     var timeEl = document.getElementById('photoPreviewTime');
     var viewsEl = document.getElementById('photoPreviewViewsCount');
-    if (userEl) userEl.textContent = photo ? (photoUsername(photo) || '未知用户') : '';
+    // ★ 2026-09-25 修复：聊天图片没有"浏览量"概念，页脚却一直显示 👁 0，看着像数据丢了。
+    //   同理，作者未知时不再硬写「未知用户」制造"信息缺失"的观感。
+    var isChatPhotoMeta = !!(photo && String(photo.__xtjSource || '') === 'chat');
+    var viewsWrap = document.getElementById('photoPreviewViews');
+    if (viewsWrap) viewsWrap.style.display = isChatPhotoMeta ? 'none' : '';
+    if (userEl) userEl.textContent = photo ? (photoUsername(photo) || (isChatPhotoMeta ? '' : '未知用户')) : '';
     if (timeEl) {
       timeEl.textContent = photo && photo.timestamp
         ? new Date(photo.timestamp).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -782,14 +787,25 @@
 
   function buildPhotoInfoHtml(photo) {
     if (!photo) return '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + infoRow('状态', '暂无数据') + '</div>';
+    // ★ 2026-09-25 修复（"照片详情点开什么都没有"）：原实现无条件输出四行，缺数据时
+    //   用 '--' / '未知用户' 占位 —— 而聊天图片此前不带任何元数据，于是整个面板
+    //   全是空占位。现在改为：有值才出行；聊天图片不显示"浏览"（私聊图片没有浏览量
+    //   概念）；一个字段都没有时给明确空态，而不是四个破折号。
+    var isChatPhoto = String(photo.__xtjSource || '') === 'chat';
     var parts = [];
-    parts.push(infoRow('作者', photoUsername(photo) || '未知用户'));
-    parts.push(infoRow('时间', photo.timestamp ? new Date(photo.timestamp).toLocaleString('zh-CN') : '--'));
-    parts.push(infoRow('浏览', photo.views == null ? 0 : photo.views));
-    parts.push(infoRow('大小', formatFileSize(photo.fileSize)));
+    var who = photoUsername(photo);
+    if (who) parts.push(infoRow('作者', who));
+    if (photo.timestamp) {
+      var tsDate = new Date(photo.timestamp);
+      if (!isNaN(tsDate.getTime())) parts.push(infoRow('时间', tsDate.toLocaleString('zh-CN')));
+    }
+    if (!isChatPhoto && photo.views != null) parts.push(infoRow('浏览', photo.views));
+    if (photo.fileSize) parts.push(infoRow('大小', formatFileSize(photo.fileSize)));
     if (photo.originalSize && Number(photo.originalSize) > 0 && Number(photo.originalSize) !== Number(photo.fileSize || 0)) {
       parts.push(infoRow('原始大小', formatFileSize(photo.originalSize)));
     }
+    if (isChatPhoto) parts.push(infoRow('来源', '聊天图片'));
+    if (!parts.length) parts.push(infoRow('状态', '这张图片没有可显示的元数据'));
     var html = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + parts.join('') + '</div>';
     var exif = photo.exif || null;
     if (exif) {

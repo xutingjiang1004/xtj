@@ -1628,21 +1628,100 @@
         .chat-msg.received .msg-read-status {
             opacity: 1 !important;
         }
-        /* ★ 2026-09-25 修复（审计 L-4）：撤回入口此前全库没有任何 CSS，只靠内联
-           font-size:11px;color:#999 —— 在彩色气泡上对比度不足，触摸目标也远小于 44px。
-           这里补统一样式（内联 color 由 !important 覆盖，内联 padding 未设置故不冲突）。 */
-        .chat-msg .msg-withdraw-btn {
-            display: inline-block;
-            margin-left: 6px;
-            padding: 2px 8px;
-            border-radius: 999px;
-            font-size: 11px;
-            line-height: 16px;
-            color: rgba(255, 255, 255, 0.94) !important;
-            background: rgba(0, 0, 0, 0.2);
-            cursor: pointer;
+        /* ★ 2026-09-25 改造：撤回不再常驻气泡（改由长按菜单触发，与微信/QQ 一致），
+           原来的 .msg-withdraw-btn 规则随之移除，这里承载「失败态 / 发送中 / 长按菜单」。 */
+        .chat-msg.failed {
+            box-shadow: 0 0 0 1.5px rgba(220, 38, 38, 0.6) inset;
         }
-        .chat-msg .msg-withdraw-btn:hover { background: rgba(0, 0, 0, 0.32); }
+        .chat-msg .msg-fail-mark {
+            display: block; margin-top: 4px; text-align: right;
+            font-size: 11px; font-weight: 700;
+            color: #fecaca;
+            opacity: 1 !important;
+        }
+        .chat-msg.received .msg-fail-mark { color: #dc2626; }
+        .chat-msg .msg-send-status {
+            display: block; margin-top: 4px; text-align: right;
+            font-size: 10px;
+        }
+
+        /* ── 长按气泡操作菜单 ───────────────────────────────────────── */
+        .dm-action-overlay {
+            position: fixed; inset: 0; z-index: 90;
+            display: flex; align-items: flex-end; justify-content: center;
+            background: rgba(0, 0, 0, 0.42);
+            opacity: 0; transition: opacity 0.18s ease;
+        }
+        .dm-action-overlay.active { opacity: 1; }
+        .dm-action-panel {
+            width: 100%; max-width: 560px;
+            max-height: 70vh; overflow-y: auto;
+            background: var(--panel-bg, #fff);
+            border-radius: 20px 20px 0 0;
+            padding: 6px 0 calc(6px + env(safe-area-inset-bottom, 0px));
+            box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.22);
+            transform: translateY(14px);
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .dm-action-overlay.active .dm-action-panel { transform: translateY(0); }
+        .dm-action-caption {
+            padding: 12px 18px 4px; font-size: 12px; color: var(--text-muted);
+            text-align: center; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap;
+        }
+        .dm-action-grid {
+            display: grid; grid-template-columns: repeat(5, 1fr);
+            gap: 2px; padding: 8px 6px 12px;
+        }
+        .dm-action-item {
+            display: flex; flex-direction: column; align-items: center; gap: 7px;
+            padding: 10px 2px; border: 0; background: transparent;
+            color: var(--text-main); font-size: 12px; border-radius: 14px;
+            cursor: pointer; -webkit-tap-highlight-color: transparent;
+        }
+        .dm-action-item:hover { background: rgba(5, 150, 105, 0.08); }
+        .dm-action-item:active { background: rgba(5, 150, 105, 0.16); }
+        .dm-action-icon {
+            width: 44px; height: 44px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(5, 150, 105, 0.12); color: #059669; font-size: 19px;
+        }
+        .dm-action-label { line-height: 1.1; }
+        .dm-action-cancel {
+            width: 100%; padding: 15px; border: 0; background: transparent;
+            font-size: 15px; color: var(--text-main); cursor: pointer;
+            border-top: 1px solid var(--xtj-line-soft, rgba(0, 0, 0, 0.07));
+        }
+        /* ── 转发目标选择 ───────────────────────────────────────────── */
+        .dm-forward-title {
+            padding: 14px 18px 8px; font-size: 14px; font-weight: 700;
+            color: var(--text-main); text-align: center;
+        }
+        .dm-forward-list { padding: 0 8px 8px; }
+        .dm-forward-item {
+            display: flex; align-items: center; gap: 12px; width: 100%;
+            padding: 10px 12px; border: 0; background: transparent;
+            border-radius: 12px; cursor: pointer; color: var(--text-main);
+            font-size: 14px; text-align: left;
+        }
+        .dm-forward-item:hover { background: rgba(5, 150, 105, 0.08); }
+        .dm-forward-avatar {
+            width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            overflow: hidden;
+            background: linear-gradient(135deg, #059669, #34d399);
+            color: #fff; font-weight: 700; font-size: 16px;
+        }
+        .dm-forward-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .dm-forward-name {
+            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        [data-theme="dark"] .dm-action-panel { background: #16211d; }
+        [data-theme="dark"] .dm-action-cancel { border-top-color: rgba(255, 255, 255, 0.08); }
+        @media (min-width: 768px) {
+            .dm-action-overlay { align-items: center; }
+            .dm-action-panel { border-radius: 20px; max-width: 460px; }
+        }
         .chat-msg.pending {
             opacity: 0.92;
         }

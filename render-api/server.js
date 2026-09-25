@@ -15357,6 +15357,31 @@ app.post('/api/dm/upload/abort', authenticateUser, rateLimit(60000, 60), async (
       return res.status(503).json({ error: '暂时无法确认媒体归属，请稍后重试', code: 'dm_abort_lookup_failed', retryable: true });
     }
 
+    // ★ 2026-09-25 修复（审计 B-3，"图片不显示"的服务端一环）：
+    //   上面的 posts 检查只覆盖"消息已经提交"。但 /api/dm/send 是
+    //   「claim 建注册行 → 插入 posts → attach」三步；若客户端的超时恰好落在
+    //   插入提交之前，abort 会查不到消息 → 删掉对象，紧接着插入成功 ——
+    //   于是消息在、图片 404。注册行只要仍处于 uploaded/sending/attached，
+    //   就说明"有一次发送正在进行或已经发生"，此时必须拒绝删除（可重试）。
+    try {
+      const regRows = await supabase.from('dm_media_uploads')
+        .select('id, status, message_id')
+        .eq('storage_path', storagePath)
+        .limit(5);
+      if (regRows && regRows.error) {
+        return res.status(503).json({ error: '暂时无法确认媒体状态，请稍后重试', code: 'dm_abort_lookup_failed', retryable: true });
+      }
+      const blocking = (regRows && Array.isArray(regRows.data) ? regRows.data : []).filter(function(row) {
+        return row && (row.status === 'uploaded' || row.status === 'sending' || row.status === 'attached');
+      });
+      if (blocking.length) {
+        return res.status(409).json({ error: '该媒体正在发送中，暂不能删除', code: 'dm_abort_in_flight', retryable: true });
+      }
+    } catch (regErr) {
+      console.warn('[dm-upload-abort] registry lookup failed:', regErr && regErr.message);
+      return res.status(503).json({ error: '暂时无法确认媒体状态，请稍后重试', code: 'dm_abort_lookup_failed', retryable: true });
+    }
+
     try {
       const removed = await supabase.storage.from('uploads').remove([storagePath]);
       if (removed && removed.error) {

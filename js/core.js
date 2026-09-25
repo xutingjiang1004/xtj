@@ -11387,7 +11387,6 @@ function renderProfileActivityList(kind) {
             var _dockChatListLoadSeq = 0;
             var _dockChatListRefreshTimer = null;
             var _dockChatListRenderSignature = '';
-            var _dockChatWithdrawExpiryTimer = null;
 
             function getDockChatCacheKey(userName) {
                 return (currentUser || '') + '_' + (userName || '');
@@ -11623,6 +11622,8 @@ function renderProfileActivityList(kind) {
                     message && message.actor_key ? message.actor_key : '',
                     message && message.views ? message.views : 0,
                     message && message.__optimistic ? 1 : 0,
+                    // ★ 失败态必须进签名，否则"发送中 → 失败"这一跳不会重绘
+                    message && message.__failed ? 1 : 0,
                     // 已读状态 / 撤回状态 / 媒体地址 必须进签名：这些变化时该行才重建
                     getDMMessageReadAt(message),
                     payload.withdrawn ? 1 : 0,
@@ -11717,38 +11718,8 @@ function renderProfileActivityList(kind) {
                 return (el.scrollHeight - el.scrollTop - el.clientHeight) < (threshold || 96);
             }
 
-            // ★ 2026-09-25 修复（审计 M-1）：撤回入口有 3 分钟窗口，但行签名
-            //   （buildDockChatRowSignature）里没有任何时间维度，于是轮询刷新时
-            //   "签名未变 → 不重绘"，撤回按钮会一直挂在那里；用户点了必然被服务端
-            //   403 timeout 拒绝。这里在渲染后按"最近一条可撤回消息的到期时刻"
-            //   排一个定时器，到期时强制重算该会话。
-            function scheduleDockChatWithdrawExpiry(userName, msgs) {
-                if (_dockChatWithdrawExpiryTimer) {
-                    clearTimeout(_dockChatWithdrawExpiryTimer);
-                    _dockChatWithdrawExpiryTimer = null;
-                }
-                if (!userName || !Array.isArray(msgs) || !currentUser) return;
-                var now = Date.now();
-                var window_ = 3 * 60 * 1000;
-                var soonest = Infinity;
-                msgs.forEach(function(m) {
-                    if (!m || m.__optimistic || m.user_name !== currentUser) return;
-                    var payload = getDMMessagePayload(m);
-                    if (payload && payload.withdrawn) return;
-                    var t = new Date(m.created_at).getTime();
-                    if (isNaN(t)) return;
-                    var remaining = (t + window_) - now;
-                    if (remaining > 0 && remaining < soonest) soonest = remaining;
-                });
-                if (!isFinite(soonest)) return;
-                _dockChatWithdrawExpiryTimer = setTimeout(function() {
-                    _dockChatWithdrawExpiryTimer = null;
-                    if (!dockChatActiveUser || dockChatActiveUser !== userName) return;
-                    // 清掉签名，强制这次重绘（否则签名未变会被提前 return 掉）
-                    _chatRenderSignature[userName] = undefined;
-                    renderDockMessages(userName, _chatCache[getDockChatCacheKey(userName)] || [], false);
-                }, Math.min(soonest + 50, 2147483000));
-            }
+            // ★ 2026-09-25：撤回入口改为长按菜单后，气泡里不再有会过期的按钮，
+            //   这里原本的"到期强制重绘"定时器已无必要（菜单每次打开都实时计算窗口）。
 
             function setDockChatJumpLatestVisible(visible) {
                 var button = document.getElementById('dockChatJumpLatest');
@@ -11807,7 +11778,13 @@ function renderProfileActivityList(kind) {
                     //   全局按钮重置规则压成 position:relative（实测跑到屏幕外 x=-24），
                     //   缩放也在两套状态机之间打架，正是用户反馈的那一堆问题。
                     //   这里补上 this，让聊天图片走和帖子图完全一致的新预览器。
-                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
+                    // ★ 2026-09-25 修复（"照片详情点开是空的"）：预览器 buildPostPreviewItemFromTrigger
+                    //   是从触发元素的 data-* 属性读元数据的（帖子图有 data-post-user 等，
+                    //   帖子详情图也有），而聊天图片此前只写了 data-full-src —— 于是点开
+                    //   ⓘ 永远是「未知用户 / – / – / –」。这里补上发送者与时间。
+                    //   故意**不加** data-post-id：预览器据此把来源判定为 chat，
+                    //   从而不显示"删除帖子/分享"等不适用按钮。
+                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
@@ -11833,20 +11810,23 @@ function renderProfileActivityList(kind) {
                 var payload = getDMMessagePayload(message);
                 var isWithdrawn = payload && payload.withdrawn;
                 
-                var elapsed = Date.now() - new Date(message.created_at).getTime();
-                var timeLimit = 3 * 60 * 1000;
-                var canWithdraw = sent && !message.__optimistic && !isWithdrawn && (elapsed <= timeLimit);
-                
-                var withdrawBtn = canWithdraw ? '<span class="msg-withdraw-btn" role="button" tabindex="0" onclick="window.withdrawDMMessage(\'' + safeJsStr(String(message.id)) + '\', this)" onkeydown="if(event.keyCode===13||event.keyCode===32){event.preventDefault();this.click();}" style="cursor:pointer;">撤回</span>' : '';
-                
+                // ★ 2026-09-25 改造：撤回不再常驻气泡（改由长按菜单触发，与微信/QQ 一致），
+                //   气泡右下角只保留时间；失败态给出明确标记与重发入口，发送中给出上传提示。
                 var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
                 if (message.__optimistic && sent) bubbleClass += ' sent-anim';
                 else if (disableAnim) bubbleClass += ' no-anim';
                 if (message.__optimistic) bubbleClass += ' pending';
+                if (message.__failed) bubbleClass += ' failed';
                 if (isWithdrawn) bubbleClass += ' is-withdrawn';
                 
+                var statusMark = '';
+                if (message.__failed) {
+                    statusMark = '<span class="msg-fail-mark" title="' + escapeHtml(String(message.__failReason || '发送失败')) + '">发送失败 · 长按重发</span>';
+                } else if (message.__optimistic && resolveDockChatMedia(message)) {
+                    statusMark = '<span class="msg-send-status">上传中…</span>';
+                }
                 var tempAttr = message.__tempId ? ' data-temp-id="' + message.__tempId + '"' : '';
-                var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + withdrawBtn + '</span></div>';
+                var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span>' + statusMark + '</div>';
                 if (sent) return '<div class="chat-msg-row sent">' + bubble + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
                 return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
             }
@@ -11910,7 +11890,10 @@ function renderProfileActivityList(kind) {
                     var messagesResult = await messagesResp.json().catch(function() { return {}; });
                     if (!messagesResp.ok || !messagesResult.ok) throw new Error(messagesResult.error || 'DM messages failed');
                     if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
-                    var mergedMessages = mergeDockChatMessages(userName, mergeDockChatRowsById(messagesResult.data || [], true, 180));
+                    var mergedMessages = mergeDockChatMessages(userName, mergeDockChatRowsById(messagesResult.data || [], true, 180)).filter(function(m) {
+                        // 本地已删除的消息不再进入缓存（否则未读统计/会话预览还会带上它）
+                        return !isDmMessageLocallyDeleted(m);
+                    });
                     var pendingReadUpdates = [];
                     mergedMessages.forEach(function(message) {
                         if (!message || message.user_name !== userName || message.media_url !== window.currentUser || getDMMessageReadAt(message)) {
@@ -11951,6 +11934,12 @@ function renderProfileActivityList(kind) {
                 const el = document.getElementById('dockChatMessages');
                 if (!el) return;
                 if (typeof clearDockChatDesktopEmptyFlag === 'function') clearDockChatDesktopEmptyFlag();
+                // ★ 2026-09-25：长按菜单的「删除」是**仅本机**生效的（与微信一致）。
+                //   必须在这里统一过滤 tombstone，否则下一次轮询/重新进入会话时，
+                //   服务端返回的同一批消息会把删掉的内容又渲染回来。
+                msgs = (Array.isArray(msgs) ? msgs : []).filter(function(m) {
+                    return !isDmMessageLocallyDeleted(m);
+                });
                 if (!msgs.length) {
                     _chatRenderSignature[userName || '__empty__'] = '__empty__';
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>';
@@ -11962,7 +11951,6 @@ function renderProfileActivityList(kind) {
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
                     if (forceScroll) scrollDockChatToLatest();
-                    scheduleDockChatWithdrawExpiry(userName, msgs);
                     return;
                 }
                 var previousScrollTop = el.scrollTop;
@@ -12002,7 +11990,6 @@ function renderProfileActivityList(kind) {
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
                 patchDockChatMessageAvatars(userName);
-                scheduleDockChatWithdrawExpiry(userName, msgs);
                 if (shouldAutoScroll) {
                     scrollDockChatToLatest();
                     bindDockChatMediaLoadScroll(el, true);
@@ -12018,10 +12005,15 @@ function renderProfileActivityList(kind) {
             }
 
             window.withdrawDMMessage = async function(id, btnEl) {
-                if (!id) return;
-                var oldText = btnEl.textContent;
-                btnEl.textContent = '撤回中...';
-                btnEl.style.pointerEvents = 'none';
+                if (!id) return false;
+                // ★ 2026-09-25：撤回入口从"气泡内常驻按钮"改为长按菜单后，这里不再有
+                //   按钮可用来显示"撤回中…"，因此 btnEl 变成可选，并返回是否成功，
+                //   交给调用方决定提示。
+                var oldText = btnEl ? btnEl.textContent : '';
+                if (btnEl) {
+                    btnEl.textContent = '撤回中...';
+                    btnEl.style.pointerEvents = 'none';
+                }
                 try {
                     var resp = await window.xtjProtectedFetch('/api/dm/withdraw', {
                         method: 'POST',
@@ -12034,17 +12026,101 @@ function renderProfileActivityList(kind) {
                     }
                     if (result.message && dockChatActiveUser) {
                         upsertDockChatCacheMessage(dockChatActiveUser, result.message);
+                        // 撤回后本地签名要失效，否则签名未变会被提前 return 掉、界面不更新
+                        _chatRenderSignature[dockChatActiveUser] = undefined;
                         loadDockChatMessages(dockChatActiveUser, false);
                     }
+                    window.showToast('已撤回');
+                    return true;
                 } catch (e) {
                     window.showToast(e.message || '撤回请求失败');
-                    btnEl.textContent = oldText;
-                    btnEl.style.pointerEvents = 'auto';
+                    if (btnEl) {
+                        btnEl.textContent = oldText;
+                        btnEl.style.pointerEvents = 'auto';
+                    }
+                    return false;
                 }
             };
 
             function scrollDockChatBottom() {
                 scrollDockChatToLatest({ smooth: true });
+            }
+
+            // ★ 2026-09-25 新增（修复"照片发送慢 / 发送失败"）：上传前把图片规范化成
+            //   「服务端一定能解码、且体积可控」的 JPEG。三个真实问题的根因：
+            //   ① HEIC：服务端 sharp 0.34.5（libvips 8.17.3）的 heif 解码器只注册了 .avif，
+            //      **不支持 iPhone 的 HEIC/HEVC** → /api/dm/upload 里 sharp 解码抛错 →
+            //      400「无法识别为有效图片，请重新选择」＝ 用户看到的"发送失败"。
+            //      而 iOS Safari 自己能解码 HEIC，所以先在浏览器里画进 canvas 再导出 JPEG，
+            //      等于借浏览器完成 HEIC→JPEG 转换，服务端与其它客户端都能正常显示。
+            //   ② 速度慢：此前**零压缩**直传 3–8MB 原图，弱网下要几十秒；
+            //      缩到长边 1600 / q0.82 后通常 200–500KB。
+            //   ③ 顺带剥掉 EXIF（含 GPS 坐标）—— 私聊图片不该带着拍摄地。
+            //   任何一步失败都回退原文件：绝不因为"压缩失败"让用户发不出去。
+            var DM_IMAGE_MAX_EDGE = 1600;
+            var DM_IMAGE_QUALITY = 0.82;
+            async function prepareDmImageForUpload(file) {
+                var passthrough = { file: file, converted: false, originalSize: file.size, newSize: file.size };
+                if (!file || !/^image\//i.test(String(file.type || ''))) return passthrough;
+                if (/gif/i.test(String(file.type || ''))) return passthrough; // 保留动图
+                var isHeic = /heic|heif/i.test(String(file.type || '')) || /\.(heic|heif)$/i.test(String(file.name || ''));
+                // 已经很小、又不是 HEIC 的图没必要重编码（重编码会掉画质）
+                if (!isHeic && file.size <= 400 * 1024) return passthrough;
+
+                var bitmap = null;
+                try {
+                    if (typeof createImageBitmap === 'function') {
+                        try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+                        catch (e1) { bitmap = await createImageBitmap(file); }
+                    }
+                } catch (eBitmap) { bitmap = null; }
+                if (!bitmap) {
+                    bitmap = await new Promise(function(resolve) {
+                        var url = URL.createObjectURL(file);
+                        var img = new Image();
+                        img.onload = function() { URL.revokeObjectURL(url); resolve(img); };
+                        img.onerror = function() { URL.revokeObjectURL(url); resolve(null); };
+                        img.src = url;
+                    });
+                }
+                // 浏览器也解不了（典型：桌面 Chrome 打开 HEIC）→ 交回原文件，由调用方决定怎么提示
+                if (!bitmap) return passthrough;
+
+                var sw = bitmap.width || 0, sh = bitmap.height || 0;
+                if (!sw || !sh) return passthrough;
+                var scale = Math.min(1, DM_IMAGE_MAX_EDGE / Math.max(sw, sh));
+                var tw = Math.max(1, Math.round(sw * scale));
+                var th = Math.max(1, Math.round(sh * scale));
+                var canvas = null, ctx = null;
+                try {
+                    if (typeof OffscreenCanvas === 'function') { canvas = new OffscreenCanvas(tw, th); }
+                    else { canvas = document.createElement('canvas'); canvas.width = tw; canvas.height = th; }
+                    ctx = canvas.getContext('2d');
+                    if (!ctx) return passthrough;
+                    ctx.drawImage(bitmap, 0, 0, tw, th);
+                } catch (eDraw) {
+                    return passthrough;
+                } finally {
+                    try { if (bitmap && typeof bitmap.close === 'function') bitmap.close(); } catch (eClose) {}
+                }
+
+                var blob = null;
+                try {
+                    if (typeof canvas.convertToBlob === 'function') {
+                        blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: DM_IMAGE_QUALITY });
+                    } else {
+                        blob = await new Promise(function(resolve) { canvas.toBlob(resolve, 'image/jpeg', DM_IMAGE_QUALITY); });
+                    }
+                } catch (eBlob) { blob = null; }
+                if (!blob) return passthrough;
+                // 压完反而更大（小图/已高压缩）→ 保留原图；HEIC 必须转换，不看体积
+                if (!isHeic && blob.size >= file.size * 0.96) return passthrough;
+
+                var baseName = String(file.name || 'image').replace(/\.[^./\\]+$/, '') || 'image';
+                var nextFile = null;
+                try { nextFile = new File([blob], baseName + '.jpg', { type: 'image/jpeg', lastModified: Date.now() }); }
+                catch (eFile) { return passthrough; }
+                return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size };
             }
 
             async function sendDockChatMessage() {
@@ -12054,7 +12130,7 @@ function renderProfileActivityList(kind) {
                 if (!inp) return;
                 const content = inp.value.trim();
                 const fileInput = document.getElementById('dockChatFileInp');
-                const file = fileInput && fileInput.files[0];
+                let file = fileInput && fileInput.files[0];
                 if (!content && !file) return;
                 if (!dockChatActiveUser) {
                     if (content) showToast('请先选择一个聊天对象');
@@ -12085,12 +12161,33 @@ function renderProfileActivityList(kind) {
                 var capturedContent = content;
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 var optimisticCreatedAt = new Date().toISOString();
+                // 失败重发时复用同一个文件对象（File 在内存里保留，页面刷新后重发不可用）
+                var pendingFile = file || null;
                 try {
                     var storagePath = null;
                     var mediaKind = null;
                     var actorKey = DM_MARKER;
                     var mediaPayload = null;
                     if (file) {
+                        // ★ 上传前规范化图片：HEIC→JPEG + 压缩。失败一律回退原文件。
+                        if (/^image\//i.test(String(file.type || ''))) {
+                            try {
+                                var _prep = await prepareDmImageForUpload(file);
+                                if (_prep && _prep.file && _prep.file !== file) {
+                                    file = _prep.file;
+                                    pendingFile = _prep.file;
+                                }
+                            } catch (prepErr) {
+                                console.warn('[dm-send] image prepare failed, falling back to original', prepErr);
+                                // 浏览器解不了 HEIC，且服务端 sharp 也不支持 → 给出可执行的提示，
+                                // 而不是让用户面对一句模糊的「无法识别为有效图片」。
+                                if (/heic|heif/i.test(String(file.type || '') + ' ' + String(file.name || ''))) {
+                                    var heicErr = new Error('当前浏览器无法转换 HEIC 照片：请在 iPhone 相册里打开该照片 → 编辑 → 存储为 JPEG，或改用「文件」里的 JPG 发送');
+                                    heicErr.serverRejected = true;
+                                    throw heicErr;
+                                }
+                            }
+                        }
                         // ★ 2026-09-25 根治：媒体改走**后端上传**，不再直连 Supabase Storage。
                         //   旧实现依赖 window.sb（浏览器端 anon key）。构建期未注入
                         //   SUPABASE_ANON_KEY 时线上 config 里是占位串，浏览器用垃圾 key 建的
@@ -12169,15 +12266,26 @@ function renderProfileActivityList(kind) {
                         requestBody.mime_type = file.type;
                     }
 
-                    // ★ 通过后端认证接口发送，禁止前端直连 Supabase
+                    // ★ 通过后端认证接口发送，禁止前端直连 Supabase。
+                    //   ★ 2026-09-25 修复（"图片不显示"的根因）：此前没传 timeoutMs，
+                    //   走的是 xtjProtectedFetch 默认的 15s。移动网络下"媒体已上传、正在写库"
+                    //   很容易超过 15s，前端当成失败 → 进 catch → 调 /api/dm/upload/abort
+                    //   把存储对象删掉；而服务端其实提交成功了 → 消息在、图片 404，
+                    //   收件人看到的正是"图片不显示"。现在放宽到 60s，并且只有服务端
+                    //   **明确拒绝**（4xx 且重试无意义）时才允许回收媒体。
                     var sendResp = await window.xtjProtectedFetch('/api/dm/send', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(requestBody)
+                        body: JSON.stringify(requestBody),
+                        timeoutMs: 60000
                     });
                     if (!sendResp.ok) {
                         var sendErrData = await sendResp.json().catch(function() { return {}; });
-                        throw new Error(sendErrData.error || '发送失败 (HTTP ' + sendResp.status + ')');
+                        var sendErr = new Error(sendErrData.error || '发送失败 (HTTP ' + sendResp.status + ')');
+                        // 只有"重试也不会变好"的客户端错误才把提交结果视为确定；
+                        // 409/429/5xx 属于可重试或结果未知，媒体必须留下。
+                        sendErr.serverRejected = [400, 403, 404, 413, 415, 422].indexOf(sendResp.status) >= 0;
+                        throw sendErr;
                     }
                     var sendResult = await sendResp.json();
                     if (!sendResult.ok || !sendResult.message) throw new Error('服务端未确认发送');
@@ -12199,7 +12307,12 @@ function renderProfileActivityList(kind) {
                     //   （只允许删自己命名空间下、且尚未挂到任何消息上的对象）。
                     //   旧实现直调 sb.storage.remove，sb 为 null 时会抛 TypeError 把真正的
                     //   失败原因覆盖成 "null is not an object (evaluating 'sb.storage')"。
-                    if (storagePath) {
+                    var hardRejected = !!(e && e.serverRejected);
+                    // ★ 2026-09-25 修复（审计 B-3）：只有"服务端明确拒绝"才回收媒体。
+                    //   超时/断网属于**提交结果未知**，此刻删对象会把可能已经入库的消息
+                    //   变成永久 404 图片（＝用户反馈的"图片不显示"）。这种情况保留对象，
+                    //   由注册表与清理队列兜底；用户重发会命中 actor_key 幂等直接成功。
+                    if (storagePath && hardRejected) {
                         try {
                             await window.xtjProtectedFetch('/api/dm/upload/abort', {
                                 method: 'POST',
@@ -12210,14 +12323,448 @@ function renderProfileActivityList(kind) {
                         } catch (dmCleanupErr) { console.warn('[dm-send] orphan media cleanup failed', dmCleanupErr); }
                         storagePath = null;
                     }
-                    removeDockChatCacheMessage(targetUser, tempId);
+                    // ★ 2026-09-25 修复（"发送失败"体验）：不再把气泡直接抹掉。
+                    //   旧行为是 removeDockChatCacheMessage + 一句 3 秒 toast —— 消息凭空消失，
+                    //   用户既不知道丢了什么，也没有任何重试入口。现在保留为"失败态"气泡，
+                    //   长按即可重发或删除，并把服务端原因留在气泡上（title）。
+                    var failedMessage = Object.assign({}, optimisticMessage || {}, {
+                        id: tempId,
+                        __tempId: tempId,
+                        __optimistic: false,
+                        __failed: true,
+                        user_name: currentUser,
+                        media_type: DM_MARKER,
+                        media_url: targetUser,
+                        created_at: optimisticCreatedAt,
+                        __pendingFile: pendingFile || null,
+                        __pendingStoragePath: storagePath || null,
+                        __pendingMediaKind: mediaKind || null,
+                        __pendingActorKey: actorKey || null,
+                        __pendingPayload: mediaPayload || null,
+                        __failReason: (e && e.message) ? e.message : '未知错误'
+                    });
+                    upsertDockChatCacheMessage(targetUser, failedMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
-                    // ★ 修复：发送失败恢复输入框内容时，若用户失败提示期间已输入新内容，
-                    // 直接赋值会覆盖用户正在输入的内容；仅当输入框当前为空时才恢复原文。
-                    if (!inp.value) { inp.value = capturedContent; }
-                    showToast('发送失败: ' + (e && e.message ? e.message : '未知错误'));
+                    // 注意：不再把内容回填到输入框 —— 消息已经以失败气泡留在会话里，
+                    // 回填会让用户以为没发出去而重复发送。
+                    showToast('发送失败：' + ((e && e.message) ? e.message : '未知错误') + '（长按该条可重发）');
                 }
                 finally { dockChatSending = false; }
+            }
+
+            // ══════════════════════════════════════════════════════════════════
+            // 长按气泡操作菜单（对齐微信/QQ）：复制 / 撤回 / 删除 / 转发 / 分享
+            //   ★ 2026-09-25 改造：撤回按钮过去常驻气泡（且窗口过期后仍不消失），
+            //   现在统一收进长按菜单；菜单每次打开都**实时**计算可用性，
+            //   因此不会再出现"点了必然失败"的按钮。
+            //   移动端：长按 450ms；桌面端：右键（contextmenu）。
+            // ══════════════════════════════════════════════════════════════════
+
+            // 「删除」仅本机生效（与微信的"删除"语义一致）：用 tombstone 记录 id，
+            //   渲染与入缓存时都过滤掉。按账号隔离，避免换账号后串数据。
+            var DM_DELETED_KEY_PREFIX = 'xtj_dm_deleted_';
+            var DM_DELETED_MAX = 500;
+
+            function getDmDeletedIds() {
+                try {
+                    var raw = window.safeStorage ? window.safeStorage.get(DM_DELETED_KEY_PREFIX + (currentUser || '')) : null;
+                    var arr = raw ? JSON.parse(raw) : [];
+                    return Array.isArray(arr) ? arr : [];
+                } catch (e) { return []; }
+            }
+
+            function isDmMessageLocallyDeleted(message) {
+                if (!message) return false;
+                var id = String(message.id || message.__tempId || '');
+                if (!id) return false;
+                return getDmDeletedIds().indexOf(id) >= 0;
+            }
+
+            function markDmMessageLocallyDeleted(message) {
+                var id = String((message && (message.id || message.__tempId)) || '');
+                if (!id) return;
+                var list = getDmDeletedIds().filter(function(x) { return x !== id; });
+                list.unshift(id);
+                if (list.length > DM_DELETED_MAX) list = list.slice(0, DM_DELETED_MAX);
+                try { window.safeStorage.set(DM_DELETED_KEY_PREFIX + (currentUser || ''), JSON.stringify(list)); } catch (e) {}
+            }
+
+            function findDockMessageByRow(rowEl) {
+                if (!rowEl || !dockChatActiveUser) return null;
+                var bubble = rowEl.classList && rowEl.classList.contains('chat-msg')
+                    ? rowEl
+                    : (rowEl.querySelector ? rowEl.querySelector('.chat-msg') : null);
+                if (!bubble) return null;
+                var key = bubble.getAttribute('data-msg-key') || '';
+                if (!key) return null;
+                var list = _chatCache[getDockChatCacheKey(dockChatActiveUser)] || [];
+                for (var i = 0; i < list.length; i++) {
+                    if (getDockChatRowKey(list[i], i) === key) return list[i];
+                }
+                return null;
+            }
+
+            function getDmActionValue(message) {
+                var text = (getDMMessageText(message) || '').trim();
+                if (text) return text;
+                var media = resolveDockChatMedia(message);
+                return media && media.src ? String(media.src) : '';
+            }
+
+            function buildDockMessageActions(message) {
+                var actions = [];
+                if (!message) return actions;
+                if (message.__failed) {
+                    return [
+                        { id: 'resend', label: '重发', icon: '↻' },
+                        { id: 'delete', label: '删除', icon: '🗑' }
+                    ];
+                }
+                if (message.__optimistic) return actions;   // 发送中不给操作
+                var payload = getDMMessagePayload(message) || {};
+                var withdrawn = !!payload.withdrawn;
+                var value = getDmActionValue(message);
+                var sent = message.user_name === currentUser;
+                var elapsed = Date.now() - new Date(message.created_at).getTime();
+                var canWithdraw = sent && !withdrawn && !isNaN(elapsed) && elapsed <= 3 * 60 * 1000;
+                if (!withdrawn && value) actions.push({ id: 'copy', label: '复制', icon: '⧉' });
+                if (canWithdraw) actions.push({ id: 'withdraw', label: '撤回', icon: '↩' });
+                if (!withdrawn && value) actions.push({ id: 'forward', label: '转发', icon: '➦' });
+                if (value) actions.push({ id: 'share', label: '分享', icon: '⤴' });
+                actions.push({ id: 'delete', label: '删除', icon: '🗑' });
+                return actions;
+            }
+
+            var _dmActionSheet = null;
+            var _dmForwardPicker = null;
+
+            function onDmActionKeydown(e) {
+                if (e.key === 'Escape') { e.preventDefault(); closeDockMessageActions(); closeDockForwardPicker(); }
+            }
+
+            function closeDockMessageActions() {
+                if (!_dmActionSheet) return;
+                var sheet = _dmActionSheet;
+                _dmActionSheet = null;
+                try { sheet.classList.remove('active'); } catch (e) {}
+                setTimeout(function() { try { if (sheet.parentNode) sheet.parentNode.removeChild(sheet); } catch (e) {} }, 200);
+                try { document.removeEventListener('keydown', onDmActionKeydown, true); } catch (e) {}
+            }
+
+            function closeDockForwardPicker() {
+                if (!_dmForwardPicker) return;
+                var el = _dmForwardPicker;
+                _dmForwardPicker = null;
+                try { el.classList.remove('active'); } catch (e) {}
+                setTimeout(function() { try { if (el.parentNode) el.parentNode.removeChild(el); } catch (e) {} }, 200);
+                try { document.removeEventListener('keydown', onDmActionKeydown, true); } catch (e) {}
+            }
+
+            function copyTextToClipboard(text) {
+                function legacyCopy(value) {
+                    try {
+                        var ta = document.createElement('textarea');
+                        ta.value = value;
+                        ta.setAttribute('readonly', '');
+                        ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        ta.setSelectionRange(0, ta.value.length);
+                        var ok = document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        return !!ok;
+                    } catch (e) { return false; }
+                }
+                if (!text) return Promise.resolve(false);
+                if (navigator.clipboard && window.isSecureContext) {
+                    return navigator.clipboard.writeText(text)
+                        .then(function() { return true; })
+                        .catch(function() { return legacyCopy(text); });
+                }
+                return Promise.resolve(legacyCopy(text));
+            }
+
+            function openDockMessageActions(rowEl) {
+                var message = findDockMessageByRow(rowEl);
+                if (!message) return;
+                var actions = buildDockMessageActions(message);
+                if (!actions.length) return;
+                closeDockMessageActions();
+                closeDockForwardPicker();
+
+                var overlay = document.createElement('div');
+                overlay.className = 'dm-action-overlay';
+                var panel = document.createElement('div');
+                panel.className = 'dm-action-panel';
+                panel.setAttribute('role', 'dialog');
+                panel.setAttribute('aria-modal', 'true');
+                panel.setAttribute('aria-label', '消息操作');
+
+                var previewText = (getDMMessageText(message) || '').trim();
+                var mediaForCaption = resolveDockChatMedia(message);
+                var captionText = previewText
+                    ? (previewText.length > 40 ? previewText.slice(0, 40) + '…' : previewText)
+                    : (mediaForCaption
+                        ? (mediaForCaption.kind === 'image' ? '[图片]' : (mediaForCaption.kind === 'video' ? '[视频]' : '[音频]'))
+                        : '');
+                if (captionText) {
+                    var caption = document.createElement('div');
+                    caption.className = 'dm-action-caption';
+                    caption.textContent = captionText;
+                    panel.appendChild(caption);
+                }
+
+                var grid = document.createElement('div');
+                grid.className = 'dm-action-grid';
+                actions.forEach(function(action) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'dm-action-item';
+                    btn.setAttribute('data-dm-action', action.id);
+                    var icon = document.createElement('span');
+                    icon.className = 'dm-action-icon';
+                    icon.setAttribute('aria-hidden', 'true');
+                    icon.textContent = action.icon;
+                    var label = document.createElement('span');
+                    label.className = 'dm-action-label';
+                    label.textContent = action.label;
+                    btn.appendChild(icon);
+                    btn.appendChild(label);
+                    btn.addEventListener('click', function(ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        runDockMessageAction(action.id, message);
+                    });
+                    grid.appendChild(btn);
+                });
+                panel.appendChild(grid);
+
+                var cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.className = 'dm-action-cancel';
+                cancelBtn.textContent = '取消';
+                cancelBtn.addEventListener('click', function(ev) {
+                    ev.preventDefault(); ev.stopPropagation(); closeDockMessageActions();
+                });
+                panel.appendChild(cancelBtn);
+
+                overlay.appendChild(panel);
+                overlay.addEventListener('click', function(ev) { if (ev.target === overlay) closeDockMessageActions(); });
+                document.body.appendChild(overlay);
+                _dmActionSheet = overlay;
+                requestAnimationFrame(function() { try { overlay.classList.add('active'); } catch (e) {} });
+                document.addEventListener('keydown', onDmActionKeydown, true);
+            }
+
+            function runDockMessageAction(actionId, message) {
+                closeDockMessageActions();
+                if (actionId === 'copy') { doCopyDmMessage(message); return; }
+                if (actionId === 'withdraw') { window.withdrawDMMessage(String(message.id || ''), null); return; }
+                if (actionId === 'delete') { doDeleteDmMessage(message); return; }
+                if (actionId === 'forward') { openDockForwardPicker(message); return; }
+                if (actionId === 'share') { doShareDmMessage(message); return; }
+                if (actionId === 'resend') { resendDmMessage(message); return; }
+            }
+
+            function doCopyDmMessage(message) {
+                var value = getDmActionValue(message);
+                if (!value) { showToast('这条消息没有可复制的内容'); return; }
+                copyTextToClipboard(value).then(function(ok) {
+                    showToast(ok ? '已复制' : '复制失败，请重试');
+                });
+            }
+
+            function doDeleteDmMessage(message) {
+                if (!message) return;
+                var peer = dockChatActiveUser;
+                if (!peer) return;
+                markDmMessageLocallyDeleted(message);
+                // 注意：不能用 removeDockChatCacheMessage(peer, undefined) —— 它按 __tempId
+                //   匹配，传 undefined 会把所有"没有 __tempId"的服务端消息一起清掉。
+                var targetId = String(message.id || message.__tempId || '');
+                var cacheKey = getDockChatCacheKey(peer);
+                var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
+                _chatCache[cacheKey] = list.filter(function(m) {
+                    return String((m && (m.id || m.__tempId)) || '') !== targetId;
+                });
+                _chatRenderSignature[peer] = undefined;
+                renderDockMessages(peer, _chatCache[cacheKey], false);
+                scheduleDockChatListRefresh(200);
+                showToast('已删除（仅本机）');
+            }
+
+            async function doShareDmMessage(message) {
+                var value = getDmActionValue(message);
+                if (!value) { showToast('这条消息没有可分享的内容'); return; }
+                if (navigator.share) {
+                    try { await navigator.share({ text: value }); return; }
+                    catch (e) { if (e && e.name === 'AbortError') return; }
+                }
+                var ok = await copyTextToClipboard(value);
+                showToast(ok ? '内容已复制，可粘贴分享' : '分享失败，请重试');
+            }
+
+            function openDockForwardPicker(message) {
+                var value = getDmActionValue(message);
+                if (!value) { showToast('这条消息没有可转发的内容'); return; }
+                var names = [];
+                Array.prototype.forEach.call(document.querySelectorAll('#dockChatList .chat-list-item[data-chat-user]'), function(node) {
+                    var n = node.getAttribute('data-chat-user');
+                    if (n && n !== currentUser && names.indexOf(n) < 0) names.push(n);
+                });
+                if (!names.length) { showToast('暂无可转发的会话（先和对方聊过天才会出现在列表里）'); return; }
+
+                closeDockForwardPicker();
+                var overlay = document.createElement('div');
+                overlay.className = 'dm-action-overlay dm-forward-overlay';
+                var panel = document.createElement('div');
+                panel.className = 'dm-action-panel dm-forward-panel';
+                panel.setAttribute('role', 'dialog');
+                panel.setAttribute('aria-modal', 'true');
+                panel.setAttribute('aria-label', '转发到');
+                var title = document.createElement('div');
+                title.className = 'dm-forward-title';
+                title.textContent = '转发到';
+                panel.appendChild(title);
+                var list = document.createElement('div');
+                list.className = 'dm-forward-list';
+                names.forEach(function(name) {
+                    var row = document.createElement('button');
+                    row.type = 'button';
+                    row.className = 'dm-forward-item';
+                    var av = document.createElement('span');
+                    av.className = 'dm-forward-avatar';
+                    av.innerHTML = getDockChatAvatarMarkup(name);
+                    var nm = document.createElement('span');
+                    nm.className = 'dm-forward-name';
+                    nm.textContent = name;
+                    row.appendChild(av);
+                    row.appendChild(nm);
+                    row.addEventListener('click', function(ev) {
+                        ev.preventDefault(); ev.stopPropagation();
+                        closeDockForwardPicker();
+                        forwardDmMessage(value, name);
+                    });
+                    list.appendChild(row);
+                });
+                panel.appendChild(list);
+                var cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.className = 'dm-action-cancel';
+                cancelBtn.textContent = '取消';
+                cancelBtn.addEventListener('click', function(ev) {
+                    ev.preventDefault(); ev.stopPropagation(); closeDockForwardPicker();
+                });
+                panel.appendChild(cancelBtn);
+                overlay.appendChild(panel);
+                overlay.addEventListener('click', function(ev) { if (ev.target === overlay) closeDockForwardPicker(); });
+                document.body.appendChild(overlay);
+                _dmForwardPicker = overlay;
+                requestAnimationFrame(function() { try { overlay.classList.add('active'); } catch (e) {} });
+                document.addEventListener('keydown', onDmActionKeydown, true);
+            }
+
+            async function forwardDmMessage(value, targetUser) {
+                if (!value || !targetUser) return;
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/dm/send', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ target_user: targetUser, content: value }),
+                        timeoutMs: 60000
+                    });
+                    var data = await resp.json().catch(function() { return {}; });
+                    if (!resp.ok || !data || !data.ok) {
+                        throw new Error((data && data.error) || ('HTTP ' + resp.status));
+                    }
+                    showToast('已转发给 ' + targetUser);
+                    scheduleDockChatListRefresh(200);
+                    if (dockChatActiveUser === targetUser && data.message) {
+                        replaceDockChatCacheMessage(targetUser, null, data.message);
+                        loadDockChatMessages(targetUser, false, true);
+                    }
+                } catch (e) {
+                    showToast('转发失败：' + ((e && e.message) || '未知错误'));
+                }
+            }
+
+            async function resendDmMessage(message) {
+                if (!message || !message.__failed) return;
+                var peer = dockChatActiveUser;
+                if (!peer) return;
+                var file = message.__pendingFile || null;
+                var text = (getDMMessageText(message) || '').trim();
+                if (!file && !text) { showToast('这条消息没有可重发的内容'); return; }
+                // 先把失败气泡移出缓存，再走一次完整的正常发送流程
+                var targetId = String(message.id || message.__tempId || '');
+                var cacheKey = getDockChatCacheKey(peer);
+                var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
+                _chatCache[cacheKey] = list.filter(function(m) {
+                    return String((m && (m.id || m.__tempId)) || '') !== targetId;
+                });
+                _chatRenderSignature[peer] = undefined;
+                renderDockMessages(peer, _chatCache[cacheKey], false);
+
+                var fileInput = document.getElementById('dockChatFileInp');
+                var inp = document.getElementById('dockChatInput');
+                if (file && fileInput) {
+                    try {
+                        var dt = new DataTransfer();
+                        dt.items.add(file);
+                        fileInput.files = dt.files;
+                    } catch (e) { fileInput.value = ''; }
+                }
+                if (inp && text) inp.value = text;
+                await sendDockChatMessage();
+            }
+
+            function bindDockChatMessageActions() {
+                var container = document.getElementById('dockChatMessages');
+                if (!container || container.__xtjMsgActionsBound) return;
+                container.__xtjMsgActionsBound = true;
+                var pressTimer = null;
+                var startX = 0, startY = 0, longPressed = false;
+                function cancelPress() { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }
+
+                // 长按 450ms。用 passive 监听 + 位移阈值取消，避免抢走列表滚动。
+                container.addEventListener('touchstart', function(e) {
+                    if (!e.touches || e.touches.length !== 1) { cancelPress(); return; }
+                    var row = e.target && e.target.closest ? e.target.closest('.chat-msg') : null;
+                    if (!row) { cancelPress(); return; }
+                    startX = e.touches[0].clientX;
+                    startY = e.touches[0].clientY;
+                    longPressed = false;
+                    cancelPress();
+                    pressTimer = setTimeout(function() {
+                        pressTimer = null;
+                        longPressed = true;
+                        try { if (navigator.vibrate) navigator.vibrate(12); } catch (eVib) {}
+                        openDockMessageActions(row);
+                    }, 450);
+                }, { passive: true });
+
+                container.addEventListener('touchmove', function(e) {
+                    if (!pressTimer || !e.touches || !e.touches[0]) return;
+                    if (Math.abs(e.touches[0].clientX - startX) > 10 || Math.abs(e.touches[0].clientY - startY) > 10) cancelPress();
+                }, { passive: true });
+                container.addEventListener('touchend', cancelPress, { passive: true });
+                container.addEventListener('touchcancel', cancelPress, { passive: true });
+
+                // 桌面端：右键
+                container.addEventListener('contextmenu', function(e) {
+                    var row = e.target && e.target.closest ? e.target.closest('.chat-msg') : null;
+                    if (!row) return;
+                    e.preventDefault();
+                    openDockMessageActions(row);
+                });
+
+                // 长按之后浏览器还会补一次 click（会点开图片预览）——在捕获阶段吞掉它
+                container.addEventListener('click', function(e) {
+                    if (!longPressed) return;
+                    longPressed = false;
+                    e.preventDefault();
+                    e.stopPropagation();
+                }, true);
             }
 
             function showDockChatFilePreview(file) {
@@ -12390,6 +12937,7 @@ function renderProfileActivityList(kind) {
                 var _dcm = document.getElementById('dockChatMessages'); if (_dcm) _dcm.addEventListener('scroll', function() { if (isDockChatNearBottom(_dcm, 96)) setDockChatJumpLatestVisible(false); }, { passive: true });
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
                 bindDockChatPasteAndDrop();
+                bindDockChatMessageActions();
             } catch(e) {
             }
 
