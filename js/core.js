@@ -12035,40 +12035,177 @@ function renderProfileActivityList(kind) {
                         ? '<span class="msg-read-status is-read">已读</span>'
                         : '<span class="msg-read-status">未读</span>')
                     : '';
-                
+
                 var payload = getDMMessagePayload(message);
                 var isWithdrawn = payload && payload.withdrawn;
                 // 已撤回的消息不再解析媒体：actor_key 仍然保留，若照常解析会给"已撤回"
                 //   这段文字套上媒体气泡的紧内边距，看着很怪。
                 var rowMedia = isWithdrawn ? null : resolveDockChatMedia(message);
-                
+
                 // ★ 2026-09-25 改造：撤回不再常驻气泡（改由长按菜单触发，与微信/QQ 一致），
                 //   气泡右下角只保留时间；失败态给出明确标记与重发入口，发送中给出上传提示。
                 var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
                 // 纯媒体气泡用更紧的内边距，让图片贴着气泡边（否则彩色边框会显得很宽）
                 if (rowMedia) bubbleClass += ' has-media';
-                // 只有"图片/视频 + 无文字"时才把时间叠到图上去；带文字的气泡若也叠，
-                //   绝对定位的元信息会盖住文字（所以这里由 JS 判定，不用 :has()）。
-                if (rowMedia && !(getDMMessageText(message) || '').trim()) bubbleClass += ' media-only';
+                // ★ 2026-09-26：不再给气泡加 media-only（把时间/已读未读绝对定位**叠在图片上**）。
+                //   用户明确反馈"已读未读、时间都显示在图片里面……有点不对"——这正是叠图方案
+                //   的观感。现在媒体消息的状态行（含时间）统一放气泡**下方**（见下方 msg-meta），
+                //   图片上不再压任何文字，对齐 iMessage。
                 if (message.__optimistic && sent) bubbleClass += ' sent-anim';
                 else if (disableAnim) bubbleClass += ' no-anim';
                 if (message.__optimistic) bubbleClass += ' pending';
                 if (message.__failed) bubbleClass += ' failed';
                 if (isWithdrawn) bubbleClass += ' is-withdrawn';
-                
-                var statusMark = '';
-                if (message.__failed) {
-                    statusMark = '<span class="msg-fail-mark" title="' + escapeHtml(String(message.__failReason || '发送失败')) + '">发送失败 · 长按重发</span>';
-                } else if (message.__optimistic && rowMedia) {
-                    statusMark = '<span class="msg-send-status" role="status">' + (rowMedia.kind === 'image' ? '图片上传中…' : (rowMedia.kind === 'video' ? '视频上传中…' : '音频上传中…')) + '</span>';
-                }
+
+                // ★ 2026-09-26：媒体消息的上传状态升级为**实时进度环 + 百分比**。
+                //   旧的 .msg-send-status 是一句不会动的「图片上传中…」——fetch 上传拿不到
+                //   进度，只能干等；现在上传走 XHR（见 uploadDmMediaWithProgress），
+                //   真实字节进度由 setDockChatUploadProgress 实时 patch 到环与百分比上。
+                //   失败标记也从气泡内挪到 meta 行，与状态信息同一层。
+                var failMark = message.__failed
+                    ? '<span class="msg-fail-mark" title="' + escapeHtml(String(message.__failReason || '发送失败')) + '">发送失败 · 长按重发</span>'
+                    : '';
                 // ★ 2026-09-26（审计 P2-27）：属性值必须转义。__tempId 目前由本地生成
                 //   （不可注入），但同函数其它属性全部走 escapeHtml，这里补齐以防未来
                 //   改为服务端字段后变成属性注入。
                 var tempAttr = message.__tempId ? ' data-temp-id="' + escapeHtml(String(message.__tempId)) + '"' : '';
-                var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + '<span class="msg-meta">' + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span></span>' + statusMark + '</div>';
-                if (sent) return '<div class="chat-msg-row sent">' + bubble + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
-                return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
+                var timeHtml = '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span>';
+                var bubbleBody = buildDockChatBodyMarkup(message);
+                var bubble, inner;
+                if (rowMedia) {
+                    // 媒体消息：气泡内只留媒体本体（iMessage 观感），状态/时间在气泡下方。
+                    bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + bubbleBody + '</div>';
+                    var metaParts = [];
+                    if (message.__failed) metaParts.push(failMark);
+                    else if (message.__optimistic && sent) metaParts.push(buildDmUploadProgressHtml(rowMedia.kind, message.__dmUploadRatio));
+                    else metaParts.push(readStatus);
+                    metaParts.push(timeHtml);
+                    inner = '<div class="chat-msg-col">' + bubble + '<div class="msg-meta">' + metaParts.join('') + '</div></div>';
+                } else {
+                    // 文字消息：meta 收在气泡内右下角（气泡小、贴得下，保持既有观感）。
+                    // 失败标记（发送失败 · 长按重发）保留在气泡内 —— 文字气泡有内边距放得下，
+                    // 且失败是异常态，贴着正文更显眼。
+                    bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + bubbleBody + (message.__failed ? failMark : '') + '<span class="msg-meta">' + readStatus + timeHtml + '</span></div>';
+                    inner = bubble;
+                }
+                if (sent) return '<div class="chat-msg-row sent' + (rowMedia ? ' has-media' : '') + '">' + inner + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
+                return '<div class="chat-msg-row received' + (rowMedia ? ' has-media' : '') + '"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + inner + '</div>';
+            }
+
+            // ===== 2026-09-26：媒体上传的实时进度 UI（iMessage 风格） =====
+            // 进度环 SVG：r=8 → 周长 2πr ≈ 50.27，用 stroke-dashoffset 表示剩余弧长。
+            var DM_RING_CIRCUMFERENCE = 2 * Math.PI * 8;
+            var DM_UPLOAD_LABEL = { image: '图片上传中', video: '视频上传中', audio: '音频上传中' };
+            function buildDmUploadProgressHtml(kind, ratio) {
+                var label = DM_UPLOAD_LABEL[String(kind || '').toLowerCase()] || '文件上传中';
+                var r = (typeof ratio === 'number' && isFinite(ratio)) ? Math.max(0, Math.min(1, ratio)) : 0;
+                var percent = Math.round(r * 100);
+                return '<span class="msg-send-state" role="status" data-dm-progress="' + r.toFixed(4) + '">'
+                    + '<svg class="dm-progress-ring" viewBox="0 0 20 20" aria-hidden="true" focusable="false">'
+                    + '<circle class="dm-ring-track" cx="10" cy="10" r="8"></circle>'
+                    + '<circle class="dm-ring-bar" cx="10" cy="10" r="8" stroke-dashoffset="' + (DM_RING_CIRCUMFERENCE * (1 - r)).toFixed(2) + '"></circle>'
+                    + '</svg>'
+                    + '<span class="dm-progress-text">' + label + ' <em class="dm-progress-pct">' + percent + '%</em></span>'
+                    + '</span>';
+            }
+            // 实时刷新某条乐观媒体消息的进度：**只 patch 环与百分比两个节点**，
+            // 不重渲染整行——整行重建会让已解码的本地图片重新请求，气泡闪白。
+            function setDockChatUploadProgress(tempId, ratio, phaseLabel) {
+                var host = document.getElementById('dockChatMessages');
+                if (!host || !tempId) return;
+                var bubble = null;
+                try { bubble = host.querySelector('.chat-msg[data-temp-id="' + tempId + '"]'); } catch (e) {}
+                if (!bubble) return;
+                var state = bubble.parentNode ? bubble.parentNode.querySelector('.msg-send-state') : null;
+                if (!state) return;
+                var r = (typeof ratio === 'number' && isFinite(ratio)) ? Math.max(0, Math.min(1, ratio)) : 0;
+                var bar = state.querySelector('.dm-ring-bar');
+                if (bar) bar.setAttribute('stroke-dashoffset', (DM_RING_CIRCUMFERENCE * (1 - r)).toFixed(2));
+                var pct = state.querySelector('.dm-progress-pct');
+                if (pct) {
+                    // 字节已发完、服务端还在写 Storage → 不显示卡住的"100%"，改提示处理中
+                    pct.textContent = (phaseLabel === 'processing') ? '处理中…' : (Math.round(r * 100) + '%');
+                }
+                state.setAttribute('data-dm-progress', r.toFixed(4));
+            }
+
+            // 带真实上传进度的 DM 媒体上传：fetch 拿不到 upload.onprogress，
+            // XMLHttpRequest 是唯一能上报字节进度的方式。鉴权完全复用
+            // xtjProtectedFetch 的链路：ensureProtectedOperationAuth 取 token →
+            // 401 时 refreshUserToken(true) 换新 token 重试一次；120s 超时对齐旧实现。
+            function uploadDmMediaWithProgress(path, kind, file, onProgress) {
+                return new Promise(function(resolve, reject) {
+                    if (typeof XMLHttpRequest !== 'function') {
+                        reject(new Error('当前浏览器不支持带进度的上传，请升级后重试'));
+                        return;
+                    }
+                    var sendOnce = function(token) {
+                        var xhr = new XMLHttpRequest();
+                        var settled = false;
+                        var finish = function(fn, arg) {
+                            if (settled) return;
+                            settled = true;
+                            fn(arg);
+                        };
+                        xhr.timeout = 120000; // 50MB 素材在弱网下也够用
+                        xhr.open('POST', (window.API_BASE || '') + '/api/dm/upload'
+                            + '?path=' + encodeURIComponent(path)
+                            + '&kind=' + encodeURIComponent(kind)
+                            + '&mime_type=' + encodeURIComponent(file.type || 'application/octet-stream'), true);
+                        xhr.withCredentials = true;
+                        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+                        if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+                        if (xhr.upload && typeof onProgress === 'function') {
+                            xhr.upload.onprogress = function(e) {
+                                if (settled || !e || !e.lengthComputable || !e.total) return;
+                                try { onProgress(Math.max(0, Math.min(1, e.loaded / e.total))); } catch (err) {}
+                            };
+                            // 字节发完、服务端还在写 Storage → 通知 UI 进入"处理中"阶段
+                            xhr.upload.onload = function() {
+                                if (settled) return;
+                                try { onProgress(1, 'processing'); } catch (err) {}
+                            };
+                        }
+                        xhr.onload = function() {
+                            var data = null;
+                            try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) { data = null; }
+                            if (xhr.status === 401) {
+                                finish(function() {
+                                    if (typeof window.refreshUserToken === 'function') {
+                                        window.refreshUserToken(true).then(function(renewed) {
+                                            if (renewed) { settled = false; sendOnce(renewed); }
+                                            else reject(new Error('登录已失效'));
+                                        }).catch(function() { reject(new Error('登录已失效')); });
+                                    } else {
+                                        reject(new Error('登录已失效'));
+                                    }
+                                });
+                                return;
+                            }
+                            // 只有 (2xx && data.ok) 才算成功；其余一律 reject —— 失败即阻断发送
+                            if (xhr.status >= 200 && xhr.status < 300 && data && data.ok) {
+                                finish(resolve, data);
+                                return;
+                            }
+                            finish(reject, new Error('媒体上传失败: ' + ((data && data.error) || ('HTTP ' + xhr.status))));
+                        };
+                        xhr.onerror = function() { finish(reject, new Error('媒体上传失败: 网络错误')); };
+                        xhr.ontimeout = function() { finish(reject, new Error('媒体上传超时，请检查网络后重试')); };
+                        xhr.onabort = function() { finish(reject, new Error('媒体上传已取消')); };
+                        try { xhr.send(file); } catch (e) { finish(reject, new Error('媒体上传失败: ' + (e && e.message ? e.message : '未知错误'))); }
+                    };
+                    if (typeof window.ensureProtectedOperationAuth === 'function') {
+                        window.ensureProtectedOperationAuth().then(function(auth) {
+                            if (!auth || !auth.ok) {
+                                reject(new Error((auth && auth.reason === 'expired') ? '登录已失效' : '认证服务暂时不可用'));
+                                return;
+                            }
+                            sendOnce(auth.token);
+                        }).catch(function() { reject(new Error('认证服务暂时不可用')); });
+                    } else {
+                        sendOnce('');
+                    }
+                });
             }
 
             // ★ 2026-09-25：muteLoadingSkeleton=true 表示「轮询/后台刷新」，不允许动 loading 骨架
@@ -12518,25 +12655,14 @@ function renderProfileActivityList(kind) {
                         // 路径必须带 uidHash 前缀，后端 validateDmUploadOwnership 会校验归属，
                         // 防止"猜一个他人路径"抢占存储位置。
                         var path = await buildDmStorageUploadPath(file.name);
-                        // 统一走 xtjProtectedFetch：它已处理 token 刷新、15s 超时、401 重试与
-                        // 失效弹窗，比裸 fetch 更稳，也不会在 token 过期时静默失败。
-                        var _upResp = await window.xtjProtectedFetch(
-                            '/api/dm/upload'
-                                + '?path=' + encodeURIComponent(path)
-                                + '&kind=' + encodeURIComponent(_dmKind)
-                                + '&mime_type=' + encodeURIComponent(file.type || 'application/octet-stream'),
-                            {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/octet-stream' },
-                                body: file,
-                                // 50MB 素材在移动网络下 15s 不够，放宽到 2 分钟
-                                timeoutMs: 120000
-                            }
-                        );
-                        var _upData = await _upResp.json().catch(function() { return {}; });
-                        if (!_upResp.ok || !_upData || !_upData.ok) {
-                            throw new Error('媒体上传失败: ' + ((_upData && _upData.error) || ('HTTP ' + _upResp.status)));
-                        }
+                        // ★ 2026-09-26：fetch 换成 XHR 上传（uploadDmMediaWithProgress）。
+                        //   fetch 拿不到上传进度，用户只能对着"图片上传中…"干等；
+                        //   XHR 的 upload.onprogress 能拿到真实字节百分比，
+                        //   由 setDockChatUploadProgress 实时画进气泡下方的进度环。
+                        //   鉴权/401 重试/超时语义与 xtjProtectedFetch 保持一致。
+                        var _upData = await uploadDmMediaWithProgress(path, _dmKind, file, function(ratio, phase) {
+                            setDockChatUploadProgress(tempId, ratio, phase || 'uploading');
+                        });
                         storagePath = _upData.storage_path || path;
                         mediaKind = _dmKind;
                         if (_dmKind === 'video') {

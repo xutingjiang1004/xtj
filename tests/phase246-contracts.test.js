@@ -126,11 +126,21 @@ test('P6-18: 媒体上传失败必须阻断 DM 发送（已改走后端上传）
   var s = read('js/core.js');
   // 前端：必须调用后端上传接口
   assert.ok(s.indexOf('/api/dm/upload') >= 0, 'DM upload must go through the backend /api/dm/upload endpoint');
-  // 前端：必须检查上传响应失败并 throw，阻断后续 /api/dm/send
-  assert.ok(/!_upResp\.ok\s*\|\|\s*!_upData\s*\|\|\s*!_upData\.ok/.test(s),
-    'DM upload must check the backend response and throw when it fails');
-  assert.ok(/throw new Error\('媒体上传失败/.test(s),
-    'DM upload must throw on upload error, blocking message send');
+  // 前端：必须检查上传响应失败并阻断后续 /api/dm/send
+  // ★ 2026-09-26：上传从 fetch 换成 **XMLHttpRequest**（fetch 拿不到上传进度，
+  //   大图需要真实字节百分比喂给气泡下方的进度环）。成功判定写法随之变化，
+  //   但断言的**原始意图**不变：非成功响应必须走失败分支，绝不能把消息发出去。
+  //   两种形态都接受：
+  //     · fetch 版：!_upResp.ok || !_upData || !_upData.ok
+  //     · XHR  版：仅在 (2xx && data.ok) 时 resolve，其余一律 reject —— 失败即阻断
+  assert.ok(
+    /!_upResp\.ok\s*\|\|\s*!_upData\s*\|\|\s*!_upData\.ok/.test(s) ||
+    /xhr\.status\s*>=\s*200\s*&&\s*xhr\.status\s*<\s*300\s*&&\s*data\s*&&\s*data\.ok/.test(s),
+    'DM upload must check the backend response and fail when it is not successful');
+  // 「媒体上传失败」Error 必须存在；fetch 版是 throw，XHR 版是 reject(new Error(...))，
+  // 两者经 await 后行为一致（reject 会向上抛出，同样阻断 /api/dm/send）。
+  assert.ok(/throw new Error\('媒体上传失败/.test(s) || /new Error\('媒体上传失败/.test(s),
+    'DM upload must raise an upload error, blocking message send');
   // 前端：必须仍在发送前完成上传（上传段出现在 /api/dm/send 之前）
   assert.ok(s.indexOf('/api/dm/upload') < s.indexOf("'/api/dm/send'"),
     'upload must happen before the send call');

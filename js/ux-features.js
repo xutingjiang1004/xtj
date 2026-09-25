@@ -191,9 +191,14 @@
   //   跟真实发送状态无关：按回车不触发、消息早已送达它还在闪、发送失败时它照样显示「发送中」，
   //   而气泡里已经有真实的「图片上传中…」，属于重复且误导。
   //   现在改为由 06-chat-and-nav.js 的 sendDockChatMessage 在开始/结束时回调真实状态。
+  // ★ 2026-09-26（用户反馈）：这条「●●● 发送中…」出现在**输入框上方**，位置不对——
+  //   发送状态应该跟着气泡走。现在媒体消息的真实进度（进度环 + 百分比）直接显示在
+  //   气泡下方（setDockChatUploadProgress），文字消息则完全不需要"发送中"（发送很快）。
+  //   因此这里**不再显示**消息列表下方的指示条（DOM 永远保持 hidden），
+  //   只保留发送按钮上的 is-sending 微动画作为轻量反馈。
   function setChatSending(on) {
     var tip = ensureTypingEl();
-    if (tip) tip.hidden = !on;
+    if (tip) tip.hidden = true;
     var sendBtn = document.getElementById('dockChatSendBtn');
     if (sendBtn) {
       try { sendBtn.classList.toggle('is-sending', !!on); } catch (e) {}
