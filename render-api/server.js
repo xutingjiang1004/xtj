@@ -15693,7 +15693,20 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       }
       var publicUrl = publicUrlResult && publicUrlResult.data && publicUrlResult.data.publicUrl;
       if (!publicUrl) return res.status(503).json({ error: 'Media URL could not be generated', code: 'media_url_failed', retryable: true });
+      // ★ 2026-09-26：像素尺寸随媒体一起持久化（客户端量好的真实宽高）。
+      //   用途单一且安全：渲染时给 <img> 写 aspect-ratio，让气泡在图片解码前
+      //   就按正确比例占位，消除"先一个小气泡、图到位后又跳大"的两次布局跳动。
+      //   只接受 1–20000 的整数，其余一律丢弃（不信任客户端输入）。
+      var _normDim = function (v) {
+        var n = Number(v);
+        if (!Number.isFinite(n)) return 0;
+        n = Math.round(n);
+        return (n >= 1 && n <= 20000) ? n : 0;
+      };
+      var _mw = _normDim(req.body && req.body.media_width);
+      var _mh = _normDim(req.body && req.body.media_height);
       mediaPayload = { kind: mediaKind, url: publicUrl, mimeType: mimeType };
+      if (_mw > 0 && _mh > 0) { mediaPayload.w = _mw; mediaPayload.h = _mh; }
 
       // A second send for an already attached upload is idempotent. If the
       // registry points at a deleted message, the normal insert path below
