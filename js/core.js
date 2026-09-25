@@ -10021,7 +10021,19 @@ function renderProfileActivityList(kind) {
                 var _dmReconnectAttempts = 0;
                 var _dmMaxReconnectAttempts = 10;
 
+                // ★ 2026-09-25 修复（复审 P1-01）：与评论订阅对齐的「订阅代次」保护。
+                //   旧实现没有代次：连接异常后排下的退避定时器，会在用户切回页面之后触发 ——
+                //   而 visibilitychange / pageshow / online 都会重新调用 subscribeToMessages()，
+                //   此时 chatRealtime 已经指向**新连接**，却被旧定时器 removeChannel 掉，
+                //   即「旧连接的重连任务杀掉新连接」。
+                //   注：DM Realtime 目前本身并未真正投递（见审计 H-1：posts 不在 publication、
+                //   RLS 排除 __dm__、socket 未用本应用 JWT 鉴权），所以这是**防御性修复** ——
+                //   等真接通实时通道时，这个坑已经填好。
+                window.__dmSubEpoch = (window.__dmSubEpoch || 0) + 1;
+                var mySubEpoch = window.__dmSubEpoch;
+
                 function createDmChannel() {
+                    if (mySubEpoch !== window.__dmSubEpoch) return; // 已被更新的订阅取代
                     chatRealtime = sb.channel('chat-dms')
                         // ★ 修复：只订阅 INSERT——/api/dm/read 一次批量写 read_at 会让 N 行各产生
                         // 一个 UPDATE 事件，每个事件再触发一次全量 loadDockChatMessages（请求放大 N 倍）。
@@ -10058,6 +10070,9 @@ function renderProfileActivityList(kind) {
                                     _dmReconnectAttempts++;
                                     var backoff = Math.min(1000 * Math.pow(2, _dmReconnectAttempts), 30000);
                                     setTimeout(function() {
+                                        // 代次已变 = 期间有更新的订阅建立，旧定时器必须彻底放弃，
+                                        //   否则会把新连接 removeChannel 掉（复审 P1-01）。
+                                        if (mySubEpoch !== window.__dmSubEpoch) return;
                                         if (chatRealtime) {
                                             try { sb.removeChannel(chatRealtime); } catch(e) {}
                                             chatRealtime = null;
@@ -12389,8 +12404,12 @@ function renderProfileActivityList(kind) {
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     releaseDockChatLocalPreview(optimisticMessage);
                     localPreviewUrl = '';
+                    // ★ 2026-09-25 修复（复审 P2-04）：这里原本还调 scheduleDockChatListRefresh(320)，
+                    //   于是每发一条消息 → 320ms 后 → GET /api/dm/list（服务端要扫两个方向的消息）
+                    //   → 重新分组 → 重算整个会话列表。而上一行的 applyDockChatConversationPreview
+                    //   已经把本条会话的预览/时间就地更新好了，发送**不会**改变其它会话。
+                    //   现在把它真正作为主更新路径；全量校准交给轮询/可见性变化/手动刷新。
                     applyDockChatConversationPreview(targetUser, insertedMessage, 0);
-                    scheduleDockChatListRefresh(320);
                     if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
                     }
@@ -12538,10 +12557,15 @@ function renderProfileActivityList(kind) {
                 var actions = [];
                 if (!message) return actions;
                 if (message.__failed) {
-                    return [
-                        { id: 'resend', label: '重发' },
-                        { id: 'delete', label: '删除' }
-                    ];
+                    // ★ 2026-09-25 修复（复审 P3-02）：__pendingFile 只活在当前页面内存里。
+                    //   刷新页面后文件不可恢复，此时若还显示「重发」，用户点了才发现媒体发不出去
+                    //   （会退化成只发文字）—— 那才是真的蠢。这里如实判断：
+                    //   只有"文件还在"或"至少还有文字"时才给重发入口。
+                    var acts = [];
+                    var pendingText = (getDMMessageText(message) || '').trim();
+                    if (message.__pendingFile || pendingText) acts.push({ id: 'resend', label: '重发' });
+                    acts.push({ id: 'delete', label: '删除' });
+                    return acts;
                 }
                 if (message.__optimistic) return actions;   // 发送中不给操作
                 var payload = getDMMessagePayload(message) || {};
@@ -12954,6 +12978,10 @@ function renderProfileActivityList(kind) {
                 var file = message.__pendingFile || null;
                 var text = (getDMMessageText(message) || '').trim();
                 if (!file && !text) { showToast('这条消息没有可重发的内容'); return; }
+                // 媒体文件随页面刷新丢失，但文字还在 —— 明确告知，不要让用户以为整条都能重发
+                if (!file && (message.__pendingMediaKind || message.__pendingStoragePath)) {
+                    showToast('原文件已不在内存（刷新页面后无法找回），本次只重发文字');
+                }
                 // 先把失败气泡移出缓存，再走一次完整的正常发送流程
                 var targetId = String(message.id || message.__tempId || '');
                 var cacheKey = getDockChatCacheKey(peer);

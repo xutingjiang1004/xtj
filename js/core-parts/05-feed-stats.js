@@ -463,7 +463,19 @@
                 var _dmReconnectAttempts = 0;
                 var _dmMaxReconnectAttempts = 10;
 
+                // ★ 2026-09-25 修复（复审 P1-01）：与评论订阅对齐的「订阅代次」保护。
+                //   旧实现没有代次：连接异常后排下的退避定时器，会在用户切回页面之后触发 ——
+                //   而 visibilitychange / pageshow / online 都会重新调用 subscribeToMessages()，
+                //   此时 chatRealtime 已经指向**新连接**，却被旧定时器 removeChannel 掉，
+                //   即「旧连接的重连任务杀掉新连接」。
+                //   注：DM Realtime 目前本身并未真正投递（见审计 H-1：posts 不在 publication、
+                //   RLS 排除 __dm__、socket 未用本应用 JWT 鉴权），所以这是**防御性修复** ——
+                //   等真接通实时通道时，这个坑已经填好。
+                window.__dmSubEpoch = (window.__dmSubEpoch || 0) + 1;
+                var mySubEpoch = window.__dmSubEpoch;
+
                 function createDmChannel() {
+                    if (mySubEpoch !== window.__dmSubEpoch) return; // 已被更新的订阅取代
                     chatRealtime = sb.channel('chat-dms')
                         // ★ 修复：只订阅 INSERT——/api/dm/read 一次批量写 read_at 会让 N 行各产生
                         // 一个 UPDATE 事件，每个事件再触发一次全量 loadDockChatMessages（请求放大 N 倍）。
@@ -500,6 +512,9 @@
                                     _dmReconnectAttempts++;
                                     var backoff = Math.min(1000 * Math.pow(2, _dmReconnectAttempts), 30000);
                                     setTimeout(function() {
+                                        // 代次已变 = 期间有更新的订阅建立，旧定时器必须彻底放弃，
+                                        //   否则会把新连接 removeChannel 掉（复审 P1-01）。
+                                        if (mySubEpoch !== window.__dmSubEpoch) return;
                                         if (chatRealtime) {
                                             try { sb.removeChannel(chatRealtime); } catch(e) {}
                                             chatRealtime = null;

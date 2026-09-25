@@ -14881,6 +14881,10 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
     const targetUser = String(req.query.target || '').trim();
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
     if (!targetUser) return res.status(400).json({ error: '缺少目标用户' });
+    // ★ 2026-09-25 新增（复审 P1-02）：向上翻历史的游标。
+    //   before = 上一页最早一条的 created_at；只取比它更早的消息，实现 keyset 分页。
+    //   不传 before 时行为与旧版完全一致（返回最近 limit 条），因此是纯增量改动。
+    const before = String(req.query.before || '').trim();
     // actor_key = dm_<user> 存储该用户发起的对话元数据
     // 真实私信内容每个消息都是一个 __dm__ 记录
     // ★ P2 修复：双向查询都按 created_at 倒序取最新 limit 条。
@@ -14890,7 +14894,9 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
       var query = supabase.from('posts')
         .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
         .eq('media_type', DM_MARKER).eq('user_name', sender).eq('media_url', recipient);
-      return query.order('created_at', { ascending: false }).limit(limit);
+      if (before) query = query.lt('created_at', before);
+      // 多取 1 条用来判断"还有更早的"（keyset 分页的标准做法）
+      return query.order('created_at', { ascending: false }).limit(limit + 1);
     }
     const [outboundResult, inboundResult] = await Promise.all([
       buildDirectionQuery(req.userName, targetUser),
@@ -14903,12 +14909,15 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
     (outboundResult.data || []).concat(inboundResult.data || []).forEach(function(row) {
       if (row && !byMessageId.has(row.id)) byMessageId.set(row.id, row);
     });
-    var messages = Array.from(byMessageId.values())
+    var mergedMessages = Array.from(byMessageId.values())
       .sort(function(a, b) {
         return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id || '').localeCompare(String(b.id || ''));
-      })
-      .slice(-limit);
-    return res.json({ ok: true, data: messages });
+      });
+    var hasMore = mergedMessages.length > limit;
+    var messages = hasMore ? mergedMessages.slice(mergedMessages.length - limit) : mergedMessages;
+    // next_cursor 给"再往上翻一页"用：取本页最早一条的时间
+    var nextCursor = messages.length ? (messages[0].created_at || null) : null;
+    return res.json({ ok: true, data: messages, has_more: hasMore, next_cursor: nextCursor });
   } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
