@@ -1763,8 +1763,8 @@
                 linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.40) 46%, rgba(255, 255, 255, 0.24) 100%),
                 rgba(243, 250, 246, 0.66);
             border: 1px solid rgba(255, 255, 255, 0.66);
-            border-radius: 20px;
-            padding: 8px 6px 6px;
+            border-radius: 22px;
+            padding: 10px 8px 8px;
             position: relative;
             box-shadow:
                 0 20px 48px rgba(24, 62, 45, 0.22),
@@ -1785,18 +1785,22 @@
             background: radial-gradient(120% 62% at 50% -12%, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0) 62%);
         }
         .dm-action-overlay.active .dm-action-panel { transform: translateY(0); }
+        /* ★ 2026-09-25 二次调整：上一版收得过头了（圆图标 38px、文字 11px、间距也砍），
+           观感上丢掉了第一版的「饱满感」。现在把**内部尺寸恢复成第一版**（44px 圆图标 /
+           12px 文字 / 更宽的项与间距），但面板本身仍是紧凑浮层卡片（max-width 430px，
+           不是第一版那种占满屏宽的底部大板）—— 即「第一版的观感 + 收小后的外框」。 */
         .dm-action-overlay .dm-action-panel .dm-action-grid {
-            display: flex; flex-wrap: wrap; justify-content: center; gap: 2px;
-            padding: 2px 2px 6px;
+            display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;
+            padding: 6px 4px 10px;
         }
         .dm-action-overlay .dm-action-panel .dm-action-item {
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            gap: 5px; width: 62px; min-width: 0; min-height: 0;
-            padding: 6px 2px; padding-inline: 2px;
-            border: 0; border-radius: 12px;
+            gap: 8px; width: 74px; min-width: 0; min-height: 0;
+            padding: 10px 2px; padding-inline: 2px;
+            border: 0; border-radius: 14px;
             background: transparent; box-shadow: none;
             backdrop-filter: none; -webkit-backdrop-filter: none;
-            color: var(--text-main); font-size: 11px; line-height: 1.1; font-family: inherit;
+            color: var(--text-main); font-size: 12px; line-height: 1.15; font-family: inherit;
             overflow: visible; cursor: pointer;
             -webkit-tap-highlight-color: transparent;
             transition: background 0.14s ease;
@@ -1804,7 +1808,7 @@
         .dm-action-overlay .dm-action-panel .dm-action-item:hover { background: rgba(5, 150, 105, 0.08); }
         .dm-action-overlay .dm-action-panel .dm-action-item:active { background: rgba(5, 150, 105, 0.16); }
         .dm-action-overlay .dm-action-panel .dm-action-icon {
-            width: 38px; height: 38px; border-radius: 50%;
+            width: 44px; height: 44px; border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
             /* 图标底也做成小玻璃片：斜向渐变 + 高光内边 + 一圈细边 */
             background: linear-gradient(160deg, rgba(16, 185, 129, 0.26), rgba(16, 185, 129, 0.08));
@@ -1812,9 +1816,19 @@
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 3px rgba(16, 90, 60, 0.12);
             color: #04805a;
         }
+        /* SVG 上写的是 width/height="16"，但呈现属性优先级低于 CSS，这里统一放大到 20px ——
+           上一版 38px 圆 + 16px 图标显得又小又空，是第一版「不够饱满」的主因。 */
+        .dm-action-overlay .dm-action-panel .dm-action-icon svg {
+            width: 20px; height: 20px;
+        }
         .dm-action-overlay .dm-action-panel .dm-action-label { white-space: nowrap; }
+        /* 图标按下时轻微回弹，补一点「液态」的手感 */
+        .dm-action-overlay .dm-action-panel .dm-action-item:active .dm-action-icon {
+            transform: scale(0.94);
+        }
+        .dm-action-overlay .dm-action-panel .dm-action-icon { transition: transform 0.14s ease; }
         .dm-action-overlay .dm-action-panel .dm-action-cancel {
-            width: 100%; padding: 11px; border: 0; border-radius: 12px;
+            width: 100%; padding: 13px; border: 0; border-radius: 14px;
             background: transparent; color: var(--text-main);
             font-size: 14px; font-family: inherit; cursor: pointer;
             border-top: 1px solid var(--xtj-line-soft, rgba(0, 0, 0, 0.07));
