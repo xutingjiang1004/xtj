@@ -1631,6 +1631,24 @@
         /* 纯媒体消息：气泡紧贴图片，不再留 16px 的彩色边框（微信同款观感） */
         .chat-msg.has-media { padding: 6px; }
         .chat-msg.has-media .msg-meta { padding: 0 3px 1px; }
+        /* ★ 2026-09-25：只有图片/视频、没有文字的气泡，把时间与已读/未读**压到图片上**，
+           而不是在图片下面留一条绿色"价签"。做法：气泡去掉内边距 + overflow:hidden 让图片
+           铺满并裁出圆角，元信息绝对定位在底部并加一层由下往上的深色渐变保证可读性。 */
+        .chat-msg.media-only { padding: 0; overflow: hidden; }
+        .chat-msg.media-only .msg-img { border-radius: 0; }
+        .chat-msg.media-only .msg-meta {
+            position: absolute; left: 0; right: 0; bottom: 0;
+            margin-top: 0; padding: 18px 9px 6px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.52), rgba(0, 0, 0, 0));
+            text-align: right;
+            pointer-events: none;
+        }
+        .chat-msg.media-only .msg-meta .msg-time,
+        .chat-msg.media-only .msg-meta .msg-read-status {
+            color: rgba(255, 255, 255, 0.95) !important;
+            opacity: 1 !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+        }
         /* ★ 2026-09-25 修复（审计 M-12）：深色模式下
            [data-theme="dark"] .msg-time{color:rgba(203,213,225,.78)!important}（style.css:14200）
            与上面 .msg-time{opacity:.55} 叠加，落在发送气泡的绿色渐变(#059669→#10b981)上，
@@ -1722,17 +1740,28 @@
             transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.2, 0.8, 0.3, 1);
         }
         .dm-bar.active { opacity: 1; transform: scale(1); }
-        .dm-bar-item {
+        /* ⚠ 注意：style.css:7185 有一套「Shared non-dock button system」——
+           它用 :is(...) 把「除 Dock 标签页以外」的所有 button（以及 .btn/.action-btn 等）
+           套上玻璃底渐变、padding-inline:16px、min-height:40px、大圆角与 box-shadow。
+           关键点：:is() 的权重等于其**参数里最高的那个**，而列表中含 .post-vis-toggle .vis-btn
+           这类 (0,2,0) 的选择器 —— 所以它不是 (0,1,1) 而是 (0,2,0)。
+           先前用 .dm-bar .dm-bar-item（同样 0,2,0）只是打平，按源码顺序（7185 行在后）反而输了，
+           操作条里的按钮就被刷成白色圆片（由 tests/ui/chat-visual.spec.js 实测抓出）。
+           这里用 (0,3,0) 明确压过，并把对方设过的每一项显式复位。 */
+        .dm-bar-layer .dm-bar .dm-bar-item {
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            gap: 3px; min-width: 52px; padding: 7px 6px;
-            border: 0; background: transparent; color: inherit;
-            font-size: 11px; line-height: 1.1; font-family: inherit;
-            border-radius: 9px; cursor: pointer;
+            gap: 3px; min-width: 52px; min-height: 0;
+            padding: 7px 6px; padding-inline: 6px;
+            border: 0; border-radius: 9px;
+            background: transparent; box-shadow: none;
+            backdrop-filter: none; -webkit-backdrop-filter: none;
+            color: inherit; font-size: 11px; line-height: 1.1; font-family: inherit;
+            overflow: visible; cursor: pointer;
             -webkit-tap-highlight-color: transparent;
             transition: background 0.14s ease;
         }
-        .dm-bar-item:hover { background: rgba(255, 255, 255, 0.14); }
-        .dm-bar-item:active { background: rgba(255, 255, 255, 0.24); }
+        .dm-bar-layer .dm-bar .dm-bar-item:hover { background: rgba(255, 255, 255, 0.14); }
+        .dm-bar-layer .dm-bar .dm-bar-item:active { background: rgba(255, 255, 255, 0.24); }
         .dm-bar-icon { display: flex; align-items: center; justify-content: center; height: 16px; }
         .dm-bar-label { white-space: nowrap; }
         .dm-action-cancel {
