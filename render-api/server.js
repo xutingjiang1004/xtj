@@ -14848,11 +14848,18 @@ app.post('/api/avatar/status', authenticateUser, rateLimit(60000, 30), async (re
 // GET /api/dm/list - 获取当前用户的对话列表
 app.get('/api/dm/list', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
+    // ★ 2026-09-25 性能修复（"聊天联系人加载有点慢"）：
+    //   此前两个方向各自硬编码 .limit(500)，等于每次最多把 **1000 条完整消息**
+    //   （含 content JSON）搬到前端；而前端 mergeDockChatRowsById(..., 180) 只保留最近 180 条 ——
+    //   也就是说大部分流量与序列化开销被白白丢掉，而会话列表又是打开聊天页的必经路径。
+    //   现在允许客户端传 limit（夹在 1..500），默认 200；200 ≥ 前端 180 的窗口，
+    //   因此界面结果不变，单次载荷约降到 1/5。
+    const listLimit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 500);
     const [sentResult, receivedResult] = await Promise.all([
       supabase.from('posts').select('id, user_name, content, media_url, views, created_at')
-        .eq('media_type', DM_MARKER).eq('user_name', req.userName).order('created_at', { ascending: false }).limit(500),
+        .eq('media_type', DM_MARKER).eq('user_name', req.userName).order('created_at', { ascending: false }).limit(listLimit),
       supabase.from('posts').select('id, user_name, content, media_url, views, created_at')
-        .eq('media_type', DM_MARKER).eq('media_url', req.userName).order('created_at', { ascending: false }).limit(500)
+        .eq('media_type', DM_MARKER).eq('media_url', req.userName).order('created_at', { ascending: false }).limit(listLimit)
     ]);
     if (sentResult.error || receivedResult.error) {
       return res.status(400).json({ error: sanitizeError(sentResult.error || receivedResult.error), code: 'dm_list_failed' });

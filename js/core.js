@@ -10271,6 +10271,31 @@ function renderProfileActivityList(kind) {
             // 供 loadDockChatList 在写入角标后打点，避免紧随其后再打一次同样的请求
             window.__xtjNoteDmUnreadFresh = function() { _dmUnreadFetchedAt = Date.now(); };
 
+            // ★ 2026-09-25 性能修复：/api/dm/list 是聊天里最重的接口（要扫两个方向的消息），
+            //   而会话列表（loadDockChatList）与未读角标（updateUnreadBadge）都要用它 ——
+            //   启动时两者在同一帧先后触发，等于并发打两次同一个重接口。
+            //   这里做单飞 + 3 秒短缓存；缓存的是**解析后的 JSON**（Response body 只能消费一次，
+            //   直接共享 Response 会让第二个调用方拿到 "body already used"）。
+            var _dmListShared = { at: 0, json: null, inflight: null };
+            function fetchDmListShared(limit) {
+                var now = Date.now();
+                if (_dmListShared.json && (now - _dmListShared.at) < 3000) {
+                    return Promise.resolve(_dmListShared.json);
+                }
+                if (_dmListShared.inflight) return _dmListShared.inflight;
+                var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)))
+                    .then(function(resp) { return (resp && resp.ok) ? resp.json().catch(function() { return null; }) : null; })
+                    .then(function(json) {
+                        if (json && json.ok) { _dmListShared.json = json; _dmListShared.at = Date.now(); }
+                        _dmListShared.inflight = null;
+                        return json;
+                    })
+                    .catch(function() { _dmListShared.inflight = null; return null; });
+                _dmListShared.inflight = p;
+                return p;
+            }
+            window.fetchDmListShared = fetchDmListShared;
+
             async function updateUnreadBadge() {
                 if (!window.currentUser) { setUnreadBadgeCount(0); return; }
                 // ★ 2026-09-25 修复（审计 H-2，严重）：旧实现用浏览器端 anon key 直连
@@ -10283,9 +10308,8 @@ function renderProfileActivityList(kind) {
                 //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
                 if (Date.now() - _dmUnreadFetchedAt < 5000) return;
                 try {
-                    var resp = await window.xtjProtectedFetch('/api/dm/list');
-                    if (!resp.ok) return;
-                    var result = await resp.json().catch(function() { return {}; });
+                    // 走共享单飞请求：与会话列表复用同一份结果，不再并发两次
+                    var result = await fetchDmListShared(180);
                     if (!result || !result.ok) return;
                     _dmUnreadFetchedAt = Date.now();
                     setUnreadBadgeCount(aggregateDmUnread(result.data || []).total);
@@ -11197,10 +11221,10 @@ function renderProfileActivityList(kind) {
                             variant: 'chat-list'
                         });
                     }
-                    const dmResp = await window.xtjProtectedFetch('/api/dm/list');
-                    if (!dmResp.ok) throw new Error('DM list fetch failed');
-                    const dmResult = await dmResp.json();
-                    if (!dmResult.ok) throw new Error(dmResult.error || 'DM list failed');
+                    // 走共享单飞请求（与未读角标复用同一份结果），并显式传 limit=180 ——
+                    //   与下面 mergeDockChatRowsById 的窗口一致，避免"拉了 1000 条只用 180 条"。
+                    const dmResult = await window.fetchDmListShared(180);
+                    if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
                     if (listLoadSeq !== _dockChatListLoadSeq) return;
                     const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
                     if (!allMsgs || !allMsgs.length) {
@@ -12708,23 +12732,59 @@ function renderProfileActivityList(kind) {
 
                 window.__xtjOpenAiChat();
 
-                // AI 面板是异步挂载的，轮询等它就绪再注入并发送（最多等约 3 秒）
-                var tries = 0;
-                (function injectAndSend() {
-                    tries += 1;
+                // ★ 2026-09-25 重写：上一版只「轮询找到元素→写值→点发送」，
+                //   一旦小猫AI 面板在挂载过程中重建 DOM（它是先 innerHTML='' 再整块重建），
+                //   写进去的值会被冲掉，用户看到的就是「点了一下、什么都没发生」。
+                //   现在做成一个小状态机，并且**任何失败都有明确出口**：
+                //     ① 等元素出现（最多 4s）→ 超时明确报错，不再静默；
+                //     ② 写入提示词；每个 tick 校验内容是否还在（被冲掉就重写）；
+                //     ③ 内容稳定后点发送；再校验是否真的产生了用户消息，
+                //        没产生就重试一次，仍不行则提示「已填入内容，请手动点发送」。
+                var aiWaited = 0;
+                var aiRetries = 0;
+                var aiSentAt = 0;
+                var aiAnchor = prompt.slice(0, 24);
+                var aiTimer = setInterval(function() {
+                    aiWaited += 150;
                     var input = document.getElementById('aiChatMsgInput') || document.getElementById('aiChatInput');
                     var sendBtn = document.getElementById('aiChatSendBtn');
+                    var list = document.getElementById('aiChatMessages');
                     if (!input || !sendBtn) {
-                        if (tries < 25) { setTimeout(injectAndSend, 120); return; }
-                        showToast('小猫AI 打开失败，请重试');
+                        if (aiWaited >= 4000) {
+                            clearInterval(aiTimer);
+                            showToast('小猫AI 打开失败，请刷新后重试');
+                        }
                         return;
                     }
-                    // 用户已经打了草稿就追加，不覆盖
-                    var existing = String(input.value || '');
-                    input.value = existing.trim() ? (existing.replace(/\s+$/, '') + '\n' + prompt) : prompt;
-                    try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
-                    try { sendBtn.click(); } catch (e2) { showToast('已填入内容，请手动点发送'); }
-                })();
+                    // ① 确保提示词在输入框里（被面板重建冲掉就再写一遍）
+                    if (String(input.value || '').indexOf(aiAnchor) < 0) {
+                        var existing = String(input.value || '');
+                        input.value = existing.trim() ? (existing.replace(/\s+$/, '') + '\n' + prompt) : prompt;
+                        try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+                        return;
+                    }
+                    // ② 已经点过发送：确认是否真的发出去了
+                    if (aiSentAt) {
+                        if (aiWaited - aiSentAt < 700) return;
+                        var produced = false;
+                        try {
+                            produced = !!(list && list.querySelector('.ai-msg.user, .ai-msg--user, .ai-msg.entering, .ai-msg'));
+                        } catch (eChk) { produced = false; }
+                        if (produced) { clearInterval(aiTimer); return; }
+                        if (aiRetries >= 1) {
+                            clearInterval(aiTimer);
+                            showToast('已填入内容，请手动点发送');
+                            return;
+                        }
+                        aiRetries += 1;
+                        aiSentAt = aiWaited;
+                        try { sendBtn.click(); } catch (eRe) {}
+                        return;
+                    }
+                    // ③ 内容就位 → 发送
+                    aiSentAt = aiWaited;
+                    try { sendBtn.click(); } catch (e2) {}
+                }, 150);
             }
 
             async function doShareDmMessage(message) {
