@@ -1693,8 +1693,13 @@
             text-overflow: ellipsis; white-space: nowrap;
         }
         .dm-action-grid {
-            display: grid; grid-template-columns: repeat(5, 1fr);
-            gap: 2px; padding: 8px 6px 12px;
+            /* ★ 2026-09-25：动作数量随消息类型变化（收到的消息没有"撤回"＝4 个，
+               撤回过的只剩"删除"＝1 个，失败消息＝2 个）。写死 5 列会让少数动作
+               左对齐显得歪，这里用 auto-fit 并整体居中。 */
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(58px, 84px));
+            justify-content: center;
+            gap: 4px; padding: 8px 6px 12px;
         }
         .dm-action-item {
             display: flex; flex-direction: column; align-items: center; gap: 7px;
