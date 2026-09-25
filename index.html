@@ -62,7 +62,7 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=7981a1a255" />
+    <link rel="stylesheet" href="css/style.min.css?v=c3e32e77f0" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <!-- ★ 2026-09-22 响应式修复：下面三个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
@@ -348,15 +348,17 @@
                     <div id="dockChatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
                     <button type="button" id="dockChatJumpLatest" class="chat-jump-latest" hidden aria-label="跳转到最新消息">↓ <span>最新消息</span></button>
                     <div class="chat-input-area">
+                        <div id="dockChatFilePreview" class="chat-file-preview hidden" aria-live="polite">
+                            <div class="cfp-thumb" id="dockCfpThumb" aria-hidden="true"></div>
+                            <div class="cfp-details">
+                                <span class="cfp-name" id="dockCfpName"></span>
+                                <span class="cfp-meta" id="dockCfpMeta">准备发送</span>
+                            </div>
+                            <button type="button" class="cfp-x" id="dockCfpRemove" title="移除附件" aria-label="移除待发送附件">×</button>
+                        </div>
                         <div class="chat-input-row">
                             <div class="chat-input-wrap">
                                 <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
-                                <div id="dockChatFilePreview" class="chat-file-preview hidden">
-                                    <div class="cfp-thumb" id="dockCfpThumb">
-                                        <button class="cfp-x" id="dockCfpRemove" title="移除">✕</button>
-                                    </div>
-                                    <span class="cfp-name" id="dockCfpName"></span>
-                                </div>
                             </div>
                             <button class="chat-orig-btn" id="dockChatOrigBtn" type="button" role="switch" aria-checked="false" title="发送原图（不压缩，画质更好但上传更慢）">原图</button>
                             <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">📷</button>
@@ -1132,7 +1134,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=832b33c556"></script>
+    <script defer src="js/core.min.js?v=450662f6cf"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b8e5d553a1"></script>

@@ -1036,6 +1036,13 @@
                 return _chatCache[cacheKey];
             }
 
+            function releaseDockChatLocalPreview(message) {
+                var previewUrl = String(message && message.__localPreviewUrl || '');
+                if (previewUrl.indexOf('blob:') === 0) {
+                    try { URL.revokeObjectURL(previewUrl); } catch (e) {}
+                }
+            }
+
             function replaceDockChatCacheMessage(userName, tempId, message) {
                 var cacheKey = getDockChatCacheKey(userName);
                 var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
@@ -1172,7 +1179,8 @@
                 if (message.__failed) {
                     statusMark = '<span class="msg-fail-mark" title="' + escapeHtml(String(message.__failReason || '发送失败')) + '">发送失败 · 长按重发</span>';
                 } else if (message.__optimistic && resolveDockChatMedia(message)) {
-                    statusMark = '<span class="msg-send-status">上传中…</span>';
+                    var pendingMedia = resolveDockChatMedia(message);
+                    statusMark = '<span class="msg-send-status" role="status">' + (pendingMedia.kind === 'image' ? '图片上传中…' : (pendingMedia.kind === 'video' ? '视频上传中…' : '音频上传中…')) + '</span>';
                 }
                 var tempAttr = message.__tempId ? ' data-temp-id="' + message.__tempId + '"' : '';
                 var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span>' + statusMark + '</div>';
@@ -1541,18 +1549,42 @@
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
                 dockChatSending = true; inp.value = '';
-                var activeFilePreview = document.getElementById('dockChatFilePreview');
-                if (file && activeFilePreview) activeFilePreview.classList.add('is-uploading');
                 var capturedContent = content;
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 var optimisticCreatedAt = new Date().toISOString();
+                var localPreviewUrl = '';
+                var mediaKind = file
+                    ? (file.type.startsWith('video/') ? 'video' : (file.type.startsWith('image/') ? 'image' : 'audio'))
+                    : null;
+                var mediaPayload = null;
+                if (file) {
+                    try {
+                        localPreviewUrl = URL.createObjectURL(file);
+                        mediaPayload = { kind: mediaKind, url: localPreviewUrl, mimeType: file.type || '' };
+                    } catch (previewError) { /* 本地预览失败时仍继续发送原文件 */ }
+                }
+                var actorKey = DM_MARKER;
+                var optimisticContentPayload = buildDMMessageContent({ content: capturedContent }, { text: capturedContent, read_at: null, media: mediaPayload });
+                var optimisticMessage = {
+                    id: tempId,
+                    __tempId: tempId,
+                    __optimistic: true,
+                    __localPreviewUrl: localPreviewUrl,
+                    user_name: currentUser,
+                    content: optimisticContentPayload,
+                    media_type: DM_MARKER,
+                    media_url: targetUser,
+                    actor_key: actorKey,
+                    created_at: optimisticCreatedAt,
+                    views: 0
+                };
+                renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
+                applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
+                if (file) clearDockChatFilePreview(false);
                 // 失败重发时复用同一个文件对象（File 在内存里保留，页面刷新后重发不可用）
                 var pendingFile = file || null;
                 try {
                     var storagePath = null;
-                    var mediaKind = null;
-                    var actorKey = DM_MARKER;
-                    var mediaPayload = null;
                     if (file) {
                         // ★ 上传前规范化图片：HEIC→JPEG + 压缩。失败一律回退原文件。
                         if (/^image\//i.test(String(file.type || ''))) {
@@ -1621,24 +1653,6 @@
                             mediaPayload = { kind: 'audio', url: _upData.public_url || getMediaUrl('__dm_aud__', storagePath), mimeType: file.type || '' };
                         }
                     }
-                    // P6: 构建乐观消息的 contentPayload（含媒体信息，用于本地即时渲染）
-                    var optimisticContentPayload = buildDMMessageContent({ content: capturedContent }, { text: capturedContent, read_at: null, media: mediaPayload });
-
-                    var optimisticMessage = {
-                        id: tempId,
-                        __tempId: tempId,
-                        __optimistic: true,
-                        user_name: currentUser,
-                        content: optimisticContentPayload,
-                        media_type: DM_MARKER,
-                        media_url: targetUser,
-                        actor_key: actorKey,
-                        created_at: optimisticCreatedAt,
-                        views: 0
-                    };
-                    renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
-                    applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
-
                     // P6: 客户端只提交 storage_path / kind / mime_type，后端生成 URL 和 actor_key
                     // 禁止前端直接发送 actor_key 和 media_type，防止篡改。
                     var requestBody = {
@@ -1681,6 +1695,8 @@
                     clearDockChatFilePreview(false);
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
+                    releaseDockChatLocalPreview(optimisticMessage);
+                    localPreviewUrl = '';
                     applyDockChatConversationPreview(targetUser, insertedMessage, 0);
                     scheduleDockChatListRefresh(320);
                     if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
@@ -1726,6 +1742,7 @@
                         __pendingMediaKind: mediaKind || null,
                         __pendingActorKey: actorKey || null,
                         __pendingPayload: mediaPayload || null,
+                        __localPreviewUrl: localPreviewUrl,
                         __failReason: (e && e.message) ? e.message : '未知错误'
                     });
                     upsertDockChatCacheMessage(targetUser, failedMessage);
@@ -1736,8 +1753,6 @@
                 }
                 finally {
                     dockChatSending = false;
-                    var finishedFilePreview = document.getElementById('dockChatFilePreview');
-                    if (finishedFilePreview) finishedFilePreview.classList.remove('is-uploading');
                 }
             }
 
@@ -1780,15 +1795,29 @@
 
             function findDockMessageByRow(rowEl) {
                 if (!rowEl || !dockChatActiveUser) return null;
-                var bubble = rowEl.classList && rowEl.classList.contains('chat-msg')
-                    ? rowEl
-                    : (rowEl.querySelector ? rowEl.querySelector('.chat-msg') : null);
-                if (!bubble) return null;
-                var key = bubble.getAttribute('data-msg-key') || '';
-                if (!key) return null;
+                // ★ 2026-09-25 修复（右键/长按菜单"完全没反应"的根因）：
+                //   data-msg-key 是渲染时挂在 **.chat-msg-row** 上的
+                //   （见 renderDockMessages 里 querySelectorAll('.chat-msg-row[data-msg-key]')），
+                //   而事件目标 closest('.chat-msg') 拿到的是**内部的气泡**。
+                //   旧实现从气泡上读 key，永远是空串 → 这里恒返 null →
+                //   openDockMessageActions 直接 return，菜单静默不弹。
+                //   现在：先归一到 .chat-msg-row 再读 key，并保留 __tempId 兜底。
+                var row = rowEl;
+                if (row.classList && row.classList.contains('chat-msg')) {
+                    row = row.closest ? (row.closest('.chat-msg-row') || row) : row;
+                }
+                var bubble = (row.classList && row.classList.contains('chat-msg'))
+                    ? row
+                    : (row.querySelector ? row.querySelector('.chat-msg') : null);
+                var key = row.getAttribute ? (row.getAttribute('data-msg-key') || '') : '';
+                var tempId = (bubble && bubble.getAttribute) ? (bubble.getAttribute('data-temp-id') || '') : '';
+                if (!key && !tempId) return null;
                 var list = _chatCache[getDockChatCacheKey(dockChatActiveUser)] || [];
                 for (var i = 0; i < list.length; i++) {
-                    if (getDockChatRowKey(list[i], i) === key) return list[i];
+                    var candidate = list[i];
+                    if (key && getDockChatRowKey(candidate, i) === key) return candidate;
+                    if (tempId && candidate && candidate.__tempId && String(candidate.__tempId) === tempId) return candidate;
+                    if (key && candidate && candidate.__tempId && ('t:' + candidate.__tempId) === key) return candidate;
                 }
                 return null;
             }
@@ -1978,6 +2007,7 @@
                 });
                 _chatRenderSignature[peer] = undefined;
                 renderDockMessages(peer, _chatCache[cacheKey], false);
+                releaseDockChatLocalPreview(message);
                 scheduleDockChatListRefresh(200);
                 showToast('已删除（仅本机）');
             }
@@ -2093,6 +2123,7 @@
                 });
                 _chatRenderSignature[peer] = undefined;
                 renderDockMessages(peer, _chatCache[cacheKey], false);
+                releaseDockChatLocalPreview(message);
 
                 var fileInput = document.getElementById('dockChatFileInp');
                 var inp = document.getElementById('dockChatInput');
@@ -2139,9 +2170,10 @@
                 container.addEventListener('touchend', cancelPress, { passive: true });
                 container.addEventListener('touchcancel', cancelPress, { passive: true });
 
-                // 桌面端：右键
+                // 桌面端：鼠标右键。命中区域放宽到整行（.chat-msg-row，含头像），
+                //   比只认气泡更好点；同时 preventDefault 掉浏览器原生菜单。
                 container.addEventListener('contextmenu', function(e) {
-                    var row = e.target && e.target.closest ? e.target.closest('.chat-msg') : null;
+                    var row = e.target && e.target.closest ? e.target.closest('.chat-msg-row') : null;
                     if (!row) return;
                     e.preventDefault();
                     openDockMessageActions(row);
@@ -2157,24 +2189,41 @@
             }
 
             function showDockChatFilePreview(file) {
-                const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
-                const thumb = document.getElementById('dockCfpThumb'), name = document.getElementById('dockCfpName');
-                if (!preview || !input || !thumb || !name) return;
+                const preview = document.getElementById('dockChatFilePreview');
+                const thumb = document.getElementById('dockCfpThumb');
+                const name = document.getElementById('dockCfpName');
+                const meta = document.getElementById('dockCfpMeta');
+                if (!preview || !thumb || !name) return;
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
-                const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
-                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">视频</span>'; }
-                else if (file.type.startsWith('audio/')) { thumb.innerHTML = '<span class="cfp-audio-icon">音频</span>'; }
-                else { const img = document.createElement('img'); _dockPreviewUrl = URL.createObjectURL(file); img.src = _dockPreviewUrl; thumb.appendChild(img); }
-                if (xBtn) thumb.appendChild(xBtn);
-                name.textContent = file.name; input.classList.add('hidden'); preview.classList.remove('hidden');
+                thumb.replaceChildren();
+                if (file.type.startsWith('video/')) {
+                    const icon = document.createElement('span'); icon.className = 'cfp-video-icon'; icon.textContent = '视频'; thumb.appendChild(icon);
+                } else if (file.type.startsWith('audio/')) {
+                    const icon = document.createElement('span'); icon.className = 'cfp-audio-icon'; icon.textContent = '音频'; thumb.appendChild(icon);
+                } else {
+                    const img = document.createElement('img');
+                    _dockPreviewUrl = URL.createObjectURL(file);
+                    img.src = _dockPreviewUrl;
+                    img.alt = '';
+                    thumb.appendChild(img);
+                }
+                name.textContent = file.name || '图片';
+                if (meta) {
+                    var kindLabel = file.type.startsWith('video/') ? '视频' : (file.type.startsWith('audio/') ? '音频' : '图片');
+                    var sizeLabel = file.size < 1024 * 1024
+                        ? Math.max(1, Math.round(file.size / 1024)) + ' KB'
+                        : (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+                    meta.textContent = kindLabel + ' · ' + sizeLabel + ' · 准备发送';
+                }
+                preview.classList.remove('hidden');
             }
 
             function clearDockChatFilePreview(restoreFocus) {
-                const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
+                const preview = document.getElementById('dockChatFilePreview');
+                const input = document.getElementById('dockChatInput');
                 const fileInput = document.getElementById('dockChatFileInp');
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
                 if (preview) preview.classList.add('hidden');
-                if (input) input.classList.remove('hidden');
                 if (fileInput) fileInput.value = '';
                 if (restoreFocus !== false && input) input.focus();
             }
