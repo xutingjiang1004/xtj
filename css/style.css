@@ -1631,23 +1631,63 @@
         /* 纯媒体消息：气泡紧贴图片，不再留 16px 的彩色边框（微信同款观感） */
         .chat-msg.has-media { padding: 6px; }
         .chat-msg.has-media .msg-meta { padding: 0 3px 1px; }
-        /* ★ 2026-09-25：只有图片/视频、没有文字的气泡，把时间与已读/未读**压到图片上**，
-           而不是在图片下面留一条绿色"价签"。做法：气泡去掉内边距 + overflow:hidden 让图片
-           铺满并裁出圆角，元信息绝对定位在底部并加一层由下往上的深色渐变保证可读性。 */
-        .chat-msg.media-only { padding: 0; overflow: hidden; }
-        .chat-msg.media-only .msg-img { border-radius: 0; }
-        .chat-msg.media-only .msg-meta {
-            position: absolute; left: 0; right: 0; bottom: 0;
-            margin-top: 0; padding: 18px 9px 6px;
-            background: linear-gradient(to top, rgba(0, 0, 0, 0.52), rgba(0, 0, 0, 0));
-            text-align: right;
-            pointer-events: none;
+        /* ★ 2026-09-26（iMessage 风格改造）：媒体消息的「已读/未读 + 时间 + 上传进度 +
+           失败标记」从气泡内部挪到气泡**下方**的独立状态行。
+           旧方案（media-only）把元信息绝对定位叠在图片上、加黑渐变打底——用户反馈
+           「已读未读、时间都显示在图片里面……有点不对」，正是这套观感的问题。
+           现在图片上不再压任何文字；气泡内只装媒体本体。
+           实现方式：行内新增 .chat-msg-col 列容器（气泡在上、状态行在下），
+           宽度约束从气泡移到列上。 */
+        .chat-msg-row.has-media .chat-msg-col {
+            display: flex; flex-direction: column; align-items: flex-end;
+            max-width: 75%; min-width: 0;
         }
-        .chat-msg.media-only .msg-meta .msg-time,
-        .chat-msg.media-only .msg-meta .msg-read-status {
-            color: rgba(255, 255, 255, 0.95) !important;
-            opacity: 1 !important;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+        .chat-msg-row.has-media.received .chat-msg-col { align-items: flex-start; }
+        .chat-msg-row.has-media .chat-msg { max-width: 100%; }
+        .chat-msg-row.has-media .msg-meta {
+            display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+            margin-top: 5px; padding: 0 4px;
+            font-size: 10px; line-height: 1.4;
+            color: var(--xtj-text-muted, #7a8f89);
+            text-align: right;
+            /* 状态行进场与气泡同步，避免状态区"先到/后到"的错位感 */
+            animation: msgMetaIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .chat-msg-row.has-media.received .msg-meta { text-align: left; }
+        .chat-msg-row.has-media .msg-meta .msg-time { margin-top: 0; }
+        .chat-msg-row.has-media .msg-meta .msg-fail-mark {
+            margin-top: 0; font-size: 10px;
+        }
+        @keyframes msgMetaIn {
+            from { opacity: 0; transform: translateY(-2px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* 上传中的状态块：环形进度指示器 + 「图片上传中 x%」 */
+        .msg-send-state {
+            display: inline-flex; align-items: center; gap: 5px;
+            color: #0a8a5e; font-variant-numeric: tabular-nums;
+        }
+        .dm-progress-ring {
+            width: 12px; height: 12px; flex-shrink: 0;
+            /* 环从 12 点方向起画，否则起点在 3 点方向看起来歪 */
+            transform: rotate(-90deg);
+            overflow: visible;
+        }
+        .dm-ring-track { fill: none; stroke: rgba(10, 138, 94, 0.2); stroke-width: 2.6; }
+        .dm-ring-bar {
+            fill: none; stroke: #0a8a5e; stroke-width: 2.6; stroke-linecap: round;
+            stroke-dasharray: 50.27;
+            /* 进度事件本身是跳变的（如 12%→47%），没有 transition 会一格一格"闪"，
+               0.3s 的缓动让环的推进显得顺滑（iMessage 观感）。 */
+            transition: stroke-dashoffset 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .dm-progress-pct { font-style: normal; }
+        [data-theme="dark"] .msg-send-state { color: #34d399; }
+        [data-theme="dark"] .dm-ring-track { stroke: rgba(52, 211, 153, 0.24); }
+        [data-theme="dark"] .dm-ring-bar { stroke: #34d399; }
+        @media (prefers-reduced-motion: reduce) {
+            .chat-msg-row.has-media .msg-meta { animation: none; }
+            .dm-ring-bar { transition: none; }
         }
         /* ★ 2026-09-25 修复（审计 M-12）：深色模式下
            [data-theme="dark"] .msg-time{color:rgba(203,213,225,.78)!important}（style.css:14200）
@@ -1675,10 +1715,6 @@
             opacity: 1 !important;
         }
         .chat-msg.received .msg-fail-mark { color: #dc2626; }
-        .chat-msg .msg-send-status {
-            display: block; margin-top: 4px; text-align: right;
-            font-size: 10px;
-        }
 
         /* ★ 2026-09-25 新增：「原图」开关（对齐微信）。默认关闭＝压缩发送。 */
         .chat-orig-btn {
@@ -16201,15 +16237,6 @@ profile content only. Dock stays untouched.
 #panelChat .chat-msg-row { transition: opacity .18s ease, transform .18s ease; }
 #panelChat .chat-msg.sent-anim { animation: chatMessageTransfer .3s cubic-bezier(.18,.78,.24,1) both; }
 #panelChat .chat-msg.pending { opacity: .9; transition: opacity .22s ease, box-shadow .22s ease; }
-#panelChat .chat-msg.pending .msg-send-status {
-    display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px;
-    margin-top: 5px; color: rgba(255,255,255,.78); font-size: 10px; line-height: 1.2;
-}
-#panelChat .chat-msg.pending .msg-send-status::before {
-    content: ""; width: 9px; height: 9px; box-sizing: border-box;
-    border: 1.5px solid rgba(255,255,255,.32); border-top-color: rgba(255,255,255,.92);
-    border-radius: 50%; animation: chatUploadSpin .8s linear infinite;
-}
 #panelChat .chat-msg.is-withdrawn { animation: chatWithdrawIn .22s ease both; }
 #panelChat .chat-msg .msg-img { transition: filter .22s ease, transform .22s cubic-bezier(.2,.75,.25,1); }
 #panelChat .chat-msg .msg-img:not(video):hover { transform: translateY(-1px); }
@@ -16223,7 +16250,6 @@ profile content only. Dock stays untouched.
 [data-theme="dark"] #panelChat .cfp-thumb .cfp-audio-icon { color: #a8dfbd; }
 @keyframes chatAttachmentIn { from { opacity: 0; transform: translateX(-5px) scale(.985); } to { opacity: 1; transform: translateX(0) scale(1); } }
 @keyframes chatUploadShimmer { to { background-position: -200% 0; } }
-@keyframes chatUploadSpin { to { transform: rotate(1turn); } }
 @keyframes chatMessageTransfer { from { opacity: 0; transform: translate3d(0,10px,0) scale(.96); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); } }
 @keyframes chatWithdrawIn { from { opacity: .55; transform: scale(.985); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) {
