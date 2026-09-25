@@ -12046,6 +12046,33 @@ function renderProfileActivityList(kind) {
                 scrollDockChatToLatest({ smooth: true });
             }
 
+            // ★ 2026-09-25 新增：「原图」开关（对齐微信的做法）。
+            //   默认压缩（长边 1600 / q0.82，约 200–500KB，发送最快）；
+            //   打开后按**原始字节**上传，不缩放不重编码；
+            //   唯一例外是 HEIC —— 服务端 sharp 不支持 HEIC/HEVC，必须转码成 JPEG，
+            //   此时用 q0.95 且不缩放，把损失降到最低。
+            //   偏好按设备持久化（safeStorage），下次进来自动沿用。
+            var DM_ORIGINAL_KEY = 'xtj_dm_send_original';
+
+            function isDmOriginalSendEnabled() {
+                try { return window.safeStorage.get(DM_ORIGINAL_KEY) === '1'; } catch (e) { return false; }
+            }
+
+            function syncDmOriginalToggle() {
+                var btn = document.getElementById('dockChatOrigBtn');
+                if (!btn) return;
+                var on = isDmOriginalSendEnabled();
+                btn.classList.toggle('is-on', on);
+                btn.setAttribute('aria-checked', on ? 'true' : 'false');
+            }
+
+            window.toggleDmOriginalSend = function() {
+                var next = !isDmOriginalSendEnabled();
+                try { window.safeStorage.set(DM_ORIGINAL_KEY, next ? '1' : '0'); } catch (e) {}
+                syncDmOriginalToggle();
+                showToast(next ? '已开启原图发送：画质更好，上传更慢' : '已关闭原图发送：图片压缩后上传');
+            };
+
             // ★ 2026-09-25 新增（修复"照片发送慢 / 发送失败"）：上传前把图片规范化成
             //   「服务端一定能解码、且体积可控」的 JPEG。三个真实问题的根因：
             //   ① HEIC：服务端 sharp 0.34.5（libvips 8.17.3）的 heif 解码器只注册了 .avif，
@@ -12059,11 +12086,15 @@ function renderProfileActivityList(kind) {
             //   任何一步失败都回退原文件：绝不因为"压缩失败"让用户发不出去。
             var DM_IMAGE_MAX_EDGE = 1600;
             var DM_IMAGE_QUALITY = 0.82;
-            async function prepareDmImageForUpload(file) {
+            async function prepareDmImageForUpload(file, opts) {
+                var wantOriginal = !!(opts && opts.original);
                 var passthrough = { file: file, converted: false, originalSize: file.size, newSize: file.size };
                 if (!file || !/^image\//i.test(String(file.type || ''))) return passthrough;
                 if (/gif/i.test(String(file.type || ''))) return passthrough; // 保留动图
                 var isHeic = /heic|heif/i.test(String(file.type || '')) || /\.(heic|heif)$/i.test(String(file.name || ''));
+                // ★ 原图开关打开时：非 HEIC 一律**原样上传** —— 不缩放、不重编码，保留原始字节。
+                //   （HEIC 例外：服务端 sharp 不支持 HEIC/HEVC，必须转码，否则整条消息发不出去。）
+                if (wantOriginal && !isHeic) return passthrough;
                 // 已经很小、又不是 HEIC 的图没必要重编码（重编码会掉画质）
                 if (!isHeic && file.size <= 400 * 1024) return passthrough;
 
@@ -12088,7 +12119,10 @@ function renderProfileActivityList(kind) {
 
                 var sw = bitmap.width || 0, sh = bitmap.height || 0;
                 if (!sw || !sh) return passthrough;
-                var scale = Math.min(1, DM_IMAGE_MAX_EDGE / Math.max(sw, sh));
+                // 原图模式不缩放；HEIC 必须转码时用更高质量，尽量少损失
+                var maxEdge = wantOriginal ? 0 : DM_IMAGE_MAX_EDGE;
+                var quality = wantOriginal ? 0.95 : DM_IMAGE_QUALITY;
+                var scale = maxEdge > 0 ? Math.min(1, maxEdge / Math.max(sw, sh)) : 1;
                 var tw = Math.max(1, Math.round(sw * scale));
                 var th = Math.max(1, Math.round(sh * scale));
                 var canvas = null, ctx = null;
@@ -12107,9 +12141,9 @@ function renderProfileActivityList(kind) {
                 var blob = null;
                 try {
                     if (typeof canvas.convertToBlob === 'function') {
-                        blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: DM_IMAGE_QUALITY });
+                        blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: quality });
                     } else {
-                        blob = await new Promise(function(resolve) { canvas.toBlob(resolve, 'image/jpeg', DM_IMAGE_QUALITY); });
+                        blob = await new Promise(function(resolve) { canvas.toBlob(resolve, 'image/jpeg', quality); });
                     }
                 } catch (eBlob) { blob = null; }
                 if (!blob) return passthrough;
@@ -12172,7 +12206,7 @@ function renderProfileActivityList(kind) {
                         // ★ 上传前规范化图片：HEIC→JPEG + 压缩。失败一律回退原文件。
                         if (/^image\//i.test(String(file.type || ''))) {
                             try {
-                                var _prep = await prepareDmImageForUpload(file);
+                                var _prep = await prepareDmImageForUpload(file, { original: isDmOriginalSendEnabled() });
                                 if (_prep && _prep.file && _prep.file !== file) {
                                     file = _prep.file;
                                     pendingFile = _prep.file;
@@ -12938,6 +12972,9 @@ function renderProfileActivityList(kind) {
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
                 bindDockChatPasteAndDrop();
                 bindDockChatMessageActions();
+                var _dockOrigBtn = document.getElementById('dockChatOrigBtn');
+                if (_dockOrigBtn) _dockOrigBtn.addEventListener('click', window.toggleDmOriginalSend);
+                syncDmOriginalToggle();
             } catch(e) {
             }
 
