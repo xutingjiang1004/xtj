@@ -5984,31 +5984,26 @@ function renderProfileActivityList(kind) {
                 removeDeletedPostFromFeed(postId);
                 if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
 
-                // 乐观删除动画：透明度+位移+高度收缩，180-220ms
+                // 删除只过渡合成属性，完成后一次移除节点，避免连续重算整张卡片的布局。
                 if (session.postEl && session.postEl.parentNode) {
                     var el = session.postEl;
                     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                     if (reducedMotion) {
                         try { el.remove(); } catch (e) {}
                     } else {
-                        el.style.transition = 'opacity 200ms ease, transform 200ms ease, max-height 200ms ease, margin 200ms ease, padding 200ms ease';
+                        el.style.transition = 'opacity 180ms ease, transform 180ms cubic-bezier(.2,.7,.25,1)';
                         el.style.opacity = '0';
-                        el.style.transform = 'translateY(-8px) scale(0.98)';
-                        el.style.maxHeight = '0';
-                        el.style.overflow = 'hidden';
-                        el.style.margin = '0';
-                        el.style.padding = '0';
-                        el.style.border = 'none';
+                        el.style.transform = 'translate3d(0,-6px,0) scale(.99)';
                         el.style.pointerEvents = 'none';
                         var onTransitionEnd = function() {
                             try { el.remove(); } catch (e) {}
                             el.removeEventListener('transitionend', onTransitionEnd);
                         };
                         el.addEventListener('transitionend', onTransitionEnd);
-                        // 兜底：250ms 后强制移除
+                        // 兜底：transitionend 在后台标签页可能不会触发。
                         setTimeout(function() {
                             try { if (el.parentNode) el.remove(); } catch (e) {}
-                        }, 250);
+                        }, 220);
                     }
                 }
 
@@ -6066,10 +6061,8 @@ function renderProfileActivityList(kind) {
                 if (session.postEl) {
                     session.originalOpacity = session.postEl.style.opacity || '';
                     session.originalPointerEvents = session.postEl.style.pointerEvents || '';
-                    session.originalFilter = session.postEl.style.filter || '';
                     session.postEl.style.opacity = '0.56';
                     session.postEl.style.pointerEvents = 'none';
-                    session.postEl.style.filter = 'grayscale(0.08)';
                 }
                 session.timeoutId = setTimeout(function() {
                     if (finished) return;
@@ -12192,6 +12185,8 @@ function renderProfileActivityList(kind) {
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
                 dockChatSending = true; inp.value = '';
+                var activeFilePreview = document.getElementById('dockChatFilePreview');
+                if (file && activeFilePreview) activeFilePreview.classList.add('is-uploading');
                 var capturedContent = content;
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 var optimisticCreatedAt = new Date().toISOString();
@@ -12383,7 +12378,11 @@ function renderProfileActivityList(kind) {
                     // 回填会让用户以为没发出去而重复发送。
                     showToast('发送失败：' + ((e && e.message) ? e.message : '未知错误') + '（长按该条可重发）');
                 }
-                finally { dockChatSending = false; }
+                finally {
+                    dockChatSending = false;
+                    var finishedFilePreview = document.getElementById('dockChatFilePreview');
+                    if (finishedFilePreview) finishedFilePreview.classList.remove('is-uploading');
+                }
             }
 
             // ══════════════════════════════════════════════════════════════════
