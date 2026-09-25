@@ -450,6 +450,9 @@
             window.aggregateDmUnread = aggregateDmUnread;
 
             function subscribeToMessages() {
+                // ★ H-1：顺带确保 Broadcast 订阅存在（启动 / 可见性 / online / pageshow 都走这里），
+                //   避免改四处调用点；它自带代次与退避，重复调用安全。
+                try { subscribeToDmBroadcast(); } catch (eBc) {}
                 // H-10 修复：sb 在 SUPABASE_URL/ANON_KEY 缺失时为 null，
                 // 缺守卫会抛 TypeError（与 subscribeToComments 对齐）
                 if (!sb) return;
@@ -531,6 +534,93 @@
                 }
                 createDmChannel();
             }
+
+            // ══════════════════════════════════════════════════════════════════
+            // H-1 实时投递（Broadcast）：订阅属于自己的、不可猜的频道。
+            //   为什么不用 postgres_changes：posts 既不在 supabase_realtime publication，
+            //   RLS 也不允许读 __dm__，且它的过滤器没有按人过滤 —— 放开就是全站私信泄露。
+            //   Broadcast 的频道名由服务端 HMAC 派生、只发给本人，天然按人隔离。
+            //   收到消息后**直接把 payload 写进缓存并增量渲染**（复审 P2-02 的建议形态），
+            //   不再因为一条新消息就回拉 180 条历史。
+            // ══════════════════════════════════════════════════════════════════
+            var dmBroadcast = { channel: null, topic: null, epoch: 0, attempts: 0 };
+
+            function applyRealtimeDmMessage(message) {
+                try {
+                    if (!message || !message.id) return;
+                    if (!window.currentUser) return;
+                    if (message.media_type !== DM_MARKER) return;
+                    if (message.user_name !== window.currentUser && message.media_url !== window.currentUser) return;
+                    var isMine = message.user_name === window.currentUser;
+                    var otherUser = isMine ? message.media_url : message.user_name;
+                    if (!otherUser || otherUser === window.currentUser) return;
+                    // 增量：把 payload 直接并入该会话缓存（同 id 的乐观消息就地被替换），
+                    //   不再触发 loadDockChatMessages 的全量回拉。
+                    upsertDockChatCacheMessage(otherUser, message);
+                    var convOpen = (dockChatActiveUser === otherUser);
+                    if (convOpen) {
+                        var key = getDockChatCacheKey(otherUser);
+                        _chatRenderSignature[otherUser] = undefined;
+                        renderDockMessages(otherUser, _chatCache[key] || [], false);
+                    }
+                    // 会话列表就地更新预览/时间/排序；缓存标记失效，下次打开列表仍取权威值。
+                    //   ⚠ 只在列表**已经有渲染内容**时才就地改行：applyDockChatConversationPreview
+                    //   会把「它收集到的会话」整体重排渲染，若此刻列表为空，它会拿"只有一条"的
+                    //   数组去渲染，把完整列表临时覆盖成一条。未渲染时靠 cacheTime=0 在打开时取权威值。
+                    window.dockChatListCacheTime = 0;
+                    var _convListEl = document.getElementById("dockChatList");
+                    if (_convListEl && _convListEl.querySelector(".chat-list-item")) {
+                        applyDockChatConversationPreview(otherUser, message, 0);
+                    }
+                    if (!isMine && !convOpen) {
+                        updateUnreadBadge();
+                        showNotification(message.user_name, getDockChatMessagePreview(message));
+                    }
+                } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
+            }
+
+            async function subscribeToDmBroadcast() {
+                if (!sb || !window.currentUser) return;
+                if (typeof window.xtjProtectedFetch !== "function") return;
+                dmBroadcast.epoch += 1;
+                var myEpoch = dmBroadcast.epoch;
+                try {
+                    if (!dmBroadcast.topic) {
+                        var resp = await window.xtjProtectedFetch("/api/dm/realtime-topic");
+                        if (!resp || !resp.ok) { console.warn("[dm-realtime] topic fetch", resp && resp.status); return; }
+                        var data = await resp.json().catch(function () { return {}; });
+                        if (!data || !data.ok || !data.topic) return;
+                        dmBroadcast.topic = data.topic;
+                    }
+                } catch (e) { return; }
+                if (myEpoch !== dmBroadcast.epoch) return; // 已被更新的订阅取代
+                try {
+                    if (dmBroadcast.channel) { sb.removeChannel(dmBroadcast.channel); dmBroadcast.channel = null; }
+                } catch (e) {}
+                try {
+                    dmBroadcast.channel = sb.channel(dmBroadcast.topic, { config: { broadcast: { self: false } } })
+                        .on("broadcast", { event: "dm" }, function (payload) {
+                            if (myEpoch !== dmBroadcast.epoch) return;
+                            var msg = payload && payload.payload && payload.payload.message;
+                            applyRealtimeDmMessage(msg);
+                        })
+                        .subscribe(function (status) {
+                            if (status === "SUBSCRIBED") { dmBroadcast.attempts = 0; return; }
+                            if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+                                console.warn("[dm-realtime]", status);
+                                if (dmBroadcast.attempts >= 10) return;
+                                dmBroadcast.attempts += 1;
+                                var backoff = Math.min(1000 * Math.pow(2, dmBroadcast.attempts), 30000);
+                                setTimeout(function () {
+                                    // 代次校验：期间若已重建订阅，旧定时器必须彻底放弃（与 P1-01 同一教训）
+                                    if (myEpoch !== dmBroadcast.epoch) return;
+                                    subscribeToDmBroadcast();
+                                }, backoff);
+                            }
+                        });
+                } catch (e) { console.warn("[dm-realtime] subscribe failed:", e && e.message); }
+            }
+            window.subscribeToDmBroadcast = subscribeToDmBroadcast;
 
             function subscribeToComments() {
                 if (!sb) return;

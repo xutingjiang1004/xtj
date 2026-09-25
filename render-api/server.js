@@ -15686,6 +15686,12 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
         });
       }
     }
+    // ★ H-1：投递到**收件人**的实时频道（内部 fire-and-forget，不阻塞也不抛错）。
+    //   注意：只发收件人频道，**不发**发件人自己的频道 —— 否则发件人在 /api/dm/send 的
+    //   HTTP 响应回来之前就会先收到广播，此时缓存里还只有带 __tempId 的乐观消息，
+    //   upsertDockChatCacheMessage 无法按 id 命中，会多出一个重复气泡。
+    //   发件人其它设备的同步仍由轮询兜底（与本次改动之前一致，不是回归）。
+    publishDmRealtime(targetUser, inserted);
     return res.json({ ok: true, message: inserted });
   } catch (e) {
     console.error('[API] dm send:', e && e.message);
@@ -15694,6 +15700,74 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
 });
 
 // POST /api/dm/withdraw - 撤回私信（发送者3分钟内，管理员10分钟内）
+// ══════════════════════════════════════════════════════════════════════════════
+// H-1 实时投递（2026-09-25）
+//   背景（实测，非推测）：DM 的 Realtime 订阅从来没能投递过 ——
+//     · posts 不在 supabase_realtime publication（migration 022 只加了 comments）；
+//     · posts 的 RLS 白名单显式排除 __dm__（migration 015 / 035）；
+//     · 浏览器端 Realtime socket 从未用本应用 JWT 鉴权（全仓库没有 setAuth/setSession），
+//       始终是 anon 身份，即使前两条放开也读不到。
+//   于是新消息只能靠 60 秒轮询到达 —— 这就是「聊天要退出重进才看到」的根因。
+//
+//   为什么不干脆给 posts 放开 __dm__ 的读权限：那条订阅的过滤器只有
+//   media_type=eq.__dm__、**没有按人过滤** —— 一旦放开，每个在线客户端都会收到全站私信。
+//   正确做法是让投递通道天然按人隔离。
+//
+//   这里用 Supabase Realtime 的 **Broadcast**（不是 postgres_changes）：
+//     · 频道名 = dm-<HMAC-SHA256(SERVICE_KEY, 用户名) 前 32 位>，只有服务端算得出来；
+//       客户端凭认证接口换取**自己的**频道名，因此猜不到别人的频道；
+//     · 由后端用 service_role 经 REST 发布，绕开「表不在 publication / RLS 不允许」的全部限制；
+//     · 失败模式安全：发布失败只等于「没有实时推送」，轮询照旧兜底，不会比现状更差。
+//
+//   ⚠ 仍保留轮询：在真机上确认投递可用之前，**不做**「Realtime 正常就停轮询」的优化
+//     （复审 P2-03）—— 那会把唯一可用的投递路径关掉。
+// ══════════════════════════════════════════════════════════════════════════════
+function dmRealtimeTopic(userName) {
+  var name = String(userName || '').trim();
+  if (!name) return '';
+  return 'dm-' + crypto.createHmac('sha256', String(SUPABASE_SERVICE_KEY || '')).update(name).digest('hex').slice(0, 32);
+}
+
+// 客户端用认证身份换取自己的频道名（别人的算不出来）
+app.get('/api/dm/realtime-topic', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    var topic = dmRealtimeTopic(req.userName);
+    if (!topic) return res.status(400).json({ error: '无法生成频道标识', code: 'topic_unavailable' });
+    return res.json({ ok: true, topic: topic });
+  } catch (e) { return res.status(500).json({ error: '查询失败' }); }
+});
+
+// 把一条私信发布到收件人的频道。**永不阻塞、永不抛错**：投递失败不能影响发送本身。
+function publishDmRealtime(targetUser, message) {
+  try {
+    var topic = dmRealtimeTopic(targetUser);
+    if (!topic || !message || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) return;
+    var body = {
+      messages: [{
+        topic: topic,
+        event: 'dm',
+        payload: { message: message },
+        private: false
+      }]
+    };
+    fetch(SUPABASE_URL.replace(/\/$/, '') + '/realtime/v1/api/broadcast', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_SERVICE_KEY,
+        Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY
+      },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r || !r.ok) console.warn('[dm-realtime] broadcast rejected:', r && r.status);
+    }).catch(function (err) {
+      console.warn('[dm-realtime] broadcast failed:', err && err.message);
+    });
+  } catch (e) {
+    console.warn('[dm-realtime] publish threw:', e && e.message);
+  }
+}
+
 app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var reqUser = req.userName;
