@@ -171,9 +171,17 @@
 
             function getMediaUrl(prefix, val) {
                 if (val.startsWith('http')) return sanitizeUrl(val);
-                if (!sb) return '';
+                // ★ 2026-09-25 修复：sb 可能为 null（Supabase SDK 延迟就绪/加载失败），
+                //   原实现直接 return ''，导致私聊图片拿不到地址而永久显示「查看图片」按钮。
+                //   现做惰性兜底 + 触发一次 Supabase 重建。
+                var _client = sb || window.sb || null;
+                if (!_client && typeof initSupabaseClient === 'function') {
+                    try { initSupabaseClient(); } catch (eInit) {}
+                    _client = sb || window.sb || null;
+                }
+                if (!_client) return '';
                 try {
-                    return sb.storage.from('uploads').getPublicUrl(val).data.publicUrl;
+                    return _client.storage.from('uploads').getPublicUrl(val).data.publicUrl;
                 } catch(e) { return ''; }
             }
 
@@ -348,6 +356,25 @@
                 })();
                 _dmSignInflight[storagePath] = p;
                 return p;
+            }
+
+            // ★ 2026-09-25 新增：渲染期「签名地址优先」。
+            //   仅靠 onerror 兜底的话，用户第一眼看到的永远是加载失败态（点开才有图的按钮）。
+            //   这里在渲染时优先使用已缓存的签名地址；未缓存则后台预热，下次渲染即命中。
+            function resolveDockChatMediaSrc(publicSrc, fullSrc) {
+                var base = String(publicSrc || fullSrc || '');
+                var sp = _dmStoragePathFromUrl(base);
+                if (sp && _dmSignedCache[sp] && _dmSignedCache[sp].exp > Date.now()) {
+                    return _dmSignedCache[sp].url;
+                }
+                return base;
+            }
+            function primeDockChatMediaSignedUrl(src) {
+                var sp = _dmStoragePathFromUrl(src);
+                if (!sp) return;
+                if (_dmSignedCache[sp] && _dmSignedCache[sp].exp > Date.now()) return;
+                if (_dmSignInflight[sp]) return;
+                _dmFetchSignedUrl(sp).catch(function() {});
             }
 
             window.handleDockChatImageError = function(img) {
@@ -677,7 +704,9 @@
                     if (!window.currentUser) return;
                     try {
                         if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
-                            await loadDockChatMessages(dockChatActiveUser, false);
+                            // ★ 2026-09-25：轮询属于后台刷新，禁止动 loading 骨架/空状态，
+                            //   否则回包会把用户当前界面顶掉重画（闪屏）。
+                            await loadDockChatMessages(dockChatActiveUser, false, true);
                         } else {
                             await updateUnreadBadge();
                         }
@@ -709,11 +738,20 @@
                     return;
                 }
                 try {
+                    // ★ 2026-09-25 修复：sb 可能因 SDK 未就绪而为 null，直接 sb.from(...) 会抛
+                    //   TypeError 被下面的 catch 静默吞掉，导致未读角标长期不更新。
+                    //   这里补一次惰性初始化，仍不可用则安全返回。
+                    var _badgeClient = sb || window.sb || null;
+                    if (!_badgeClient && typeof initSupabaseClient === 'function') {
+                        try { initSupabaseClient(); } catch (eInit) {}
+                        _badgeClient = sb || window.sb || null;
+                    }
+                    if (!_badgeClient) return;
                     // ★ 修复：口径对齐 —— loadDockChatList 用最近 180 条按会话聚合再求和，
                     // 这里原为 120 条直接逐条计数（去重 120 条），两处结果不一致导致切换 tab 时数字跳动。
                     // 现将查询上限提高到 200，并同样先按会话（media_url）聚合每条会话的未读数
                     // （封顶 99），再对所有会话求和，与 loadDockChatList 的统计口径保持一致。
-                    var result = await sb.from('posts')
+                    var result = await _badgeClient.from('posts')
                         .select('id, user_name, content, views, created_at')
                         .eq('media_type', DM_MARKER)
                         .eq('media_url', window.currentUser)

@@ -23,7 +23,8 @@ test('chat list ignores stale responses and keeps one retry control', () => {
 });
 
 test('chat detail ignores stale conversations and deduplicates retry controls', () => {
-  const detail = between(core, 'async function loadDockChatMessages(userName, forceScroll)', 'function renderDockMessages');
+  // ★ 2026-09-25：签名新增 muteLoadingSkeleton（轮询/后台刷新不得重绘 loading 骨架）。
+  const detail = between(core, 'async function loadDockChatMessages(userName, forceScroll, muteLoadingSkeleton)', 'function renderDockMessages');
   assert.match(detail, /loadSeq\s*=\s*\+\+_dockChatLoadSeq/);
   assert.match(detail, /loadSeq !== _dockChatLoadSeq \|\| dockChatActiveUser !== userName/);
   assert.match(detail, /requestController/);

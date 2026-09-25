@@ -63,6 +63,12 @@
                 console.error('Supabase SDK not loaded');
                 window.addEventListener('xtj:supabase-ready', function () {
                     if (!initSupabaseClient()) return;
+                    // ★ 2026-09-25 修复：initSupabaseClient 内部只在首次创建时写 window.sb。
+                    //   若此处才补上初始化（SDK 延迟就绪），必须同步 window.sb，
+                    //   否则下面第 80 行的 window.sb = sb（当时为 null）会把它永久钉死为 null，
+                    //   导致后续所有 sb.storage / sb.from 调用抛
+                    //   "null is not an object (evaluating 'sb.storage')" —— 发图失败的根因。
+                    window.sb = sb;
                     if (typeof window.initialLoad === 'function') {
                         window.initialLoad(true).catch(function (e) {
                             console.warn('[XTJ] delayed Supabase feed restore failed:', e && e.message);
@@ -74,7 +80,11 @@
                     if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
                 });
             }
-            window.sb = sb;
+            // ★ 2026-09-25 修复：仅在 sb 真正可用时覆盖 window.sb。
+            //   原实现无条件执行 `window.sb = sb`，当 Supabase 尚未就绪（sb 为 null）时
+            //   会把 window.sb 永久置为 null，之后即便 SDK 延迟加载成功也不会再更新，
+            //   造成"发图失败: null is not an object (evaluating 'sb.storage')"。
+            if (sb) window.sb = sb;
 
 
 (function() {
@@ -1387,7 +1397,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
         // 已删除该死代码与全局监听；如确需攻击检测，应改走后端 API 上报。
 
         let dockChatListCacheTime = 0;
-        const DOCK_CHAT_CACHE_DURATION = 120000;
+        const DOCK_CHAT_CACHE_DURATION = 20000;
         let deviceId;
         try { deviceId = window.safeStorage.get("xtj_device_id"); } catch(e) { deviceId = null; }
         if (!deviceId) {
