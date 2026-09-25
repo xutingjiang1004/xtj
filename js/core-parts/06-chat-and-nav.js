@@ -1715,8 +1715,12 @@
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     releaseDockChatLocalPreview(optimisticMessage);
                     localPreviewUrl = '';
+                    // ★ 2026-09-25 修复（复审 P2-04）：这里原本还调 scheduleDockChatListRefresh(320)，
+                    //   于是每发一条消息 → 320ms 后 → GET /api/dm/list（服务端要扫两个方向的消息）
+                    //   → 重新分组 → 重算整个会话列表。而上一行的 applyDockChatConversationPreview
+                    //   已经把本条会话的预览/时间就地更新好了，发送**不会**改变其它会话。
+                    //   现在把它真正作为主更新路径；全量校准交给轮询/可见性变化/手动刷新。
                     applyDockChatConversationPreview(targetUser, insertedMessage, 0);
-                    scheduleDockChatListRefresh(320);
                     if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
                     }
@@ -1864,10 +1868,15 @@
                 var actions = [];
                 if (!message) return actions;
                 if (message.__failed) {
-                    return [
-                        { id: 'resend', label: '重发' },
-                        { id: 'delete', label: '删除' }
-                    ];
+                    // ★ 2026-09-25 修复（复审 P3-02）：__pendingFile 只活在当前页面内存里。
+                    //   刷新页面后文件不可恢复，此时若还显示「重发」，用户点了才发现媒体发不出去
+                    //   （会退化成只发文字）—— 那才是真的蠢。这里如实判断：
+                    //   只有"文件还在"或"至少还有文字"时才给重发入口。
+                    var acts = [];
+                    var pendingText = (getDMMessageText(message) || '').trim();
+                    if (message.__pendingFile || pendingText) acts.push({ id: 'resend', label: '重发' });
+                    acts.push({ id: 'delete', label: '删除' });
+                    return acts;
                 }
                 if (message.__optimistic) return actions;   // 发送中不给操作
                 var payload = getDMMessagePayload(message) || {};
@@ -2280,6 +2289,10 @@
                 var file = message.__pendingFile || null;
                 var text = (getDMMessageText(message) || '').trim();
                 if (!file && !text) { showToast('这条消息没有可重发的内容'); return; }
+                // 媒体文件随页面刷新丢失，但文字还在 —— 明确告知，不要让用户以为整条都能重发
+                if (!file && (message.__pendingMediaKind || message.__pendingStoragePath)) {
+                    showToast('原文件已不在内存（刷新页面后无法找回），本次只重发文字');
+                }
                 // 先把失败气泡移出缓存，再走一次完整的正常发送流程
                 var targetId = String(message.id || message.__tempId || '');
                 var cacheKey = getDockChatCacheKey(peer);
