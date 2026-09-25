@@ -300,7 +300,9 @@
                     return {
                         kind: payload.media.kind || '',
                         src: payload.media.url,
-                        fullSrc: payload.media.url
+                        fullSrc: payload.media.url,
+                        w: Math.round(Number(payload.media.w || 0)) || 0,
+                        h: Math.round(Number(payload.media.h || 0)) || 0
                     };
                 }
                 if (actorKey.indexOf('__dm_img__') === 0) {
@@ -362,16 +364,115 @@
             window.handleDockChatImageError = function(img) {
                 if (!img || !img.parentNode) return;
                 var retryCount = parseInt(img.getAttribute('data-retry-count') || '0', 10) || 0;
-                var fullSrc = img.getAttribute("data-full-src") || img.getAttribute('data-src') || img.currentSrc || img.src || "";
-                // 第 1 步：普通重试（可能是瞬时网络抖动 / 缓存未命中）
-                if (retryCount < 1 && fullSrc) {
-                    img.setAttribute('data-retry-count', String(retryCount + 1));
-                    img.src = fullSrc + (fullSrc.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
+                var currentSrc = String(img.currentSrc || img.src || '');
+                var dataSrc = String(img.getAttribute('data-src') || '');
+                var fullSrc = img.getAttribute("data-full-src") || dataSrc || currentSrc || "";
+                var localSrc = String(img.getAttribute('data-local-src') || '');
+                var remoteAlt = String(img.getAttribute('data-remote-src') || '');
+
+                // ★ 2026-09-26 修复（"发完图先是小气泡→再变没图的大气泡→最后变成『查看图片』按钮"）：
+                //   ① 手上还有**本地原图**时，远端取不到就退回本地继续显示。
+                //      绝不让气泡变空、也绝不降级成按钮 —— 本地字节不可能 404。
+                //   ② blob: 地址**不能**拼 ?retry= 之类的查询串 —— blob URL 是内存句柄，
+                //      带 query 后立刻失效，于是"第一次失败 → 重试必然再失败 → 直接降级成按钮"。
+                //      这正是真机上那套三段式退化的直接成因。
+                //   ③ 远端地址失败时也不再立刻降级：先退避重试两次（300ms / 900ms），
+                //      移动端弱网首帧失败很常见，多给两次机会基本都能救回来。
+
+                // 情况 A：当前是远端、本地图还在 → 退回本地图，到此为止
+                if (localSrc && !/^blob:/i.test(currentSrc) && img.getAttribute('data-local-shown') !== '1') {
+                    img.setAttribute('data-local-shown', '1');
+                    img.removeAttribute('data-remote-src');
+                    img.src = localSrc;
                     return;
                 }
-                // 第 2 步：仍失败 → 退化成可点开的兜底按钮（点开用原始地址）
+                // 情况 B：当前是本地 blob（被 revoke 或解码失败）→ 立刻切到远端，不加 query
+                if (/^blob:/i.test(currentSrc)) {
+                    var next = remoteAlt || (dataSrc && !/^blob:/i.test(dataSrc) ? dataSrc : (String(fullSrc).indexOf('blob:') !== 0 ? fullSrc : ''));
+                    if (next && next !== currentSrc) {
+                        img.removeAttribute('data-remote-src');
+                        img.setAttribute('data-retry-count', String(retryCount + 1));
+                        img.src = next;
+                        return;
+                    }
+                    return; // 没有任何远端可换，也不降级成按钮（降级只会更糟）
+                }
+                // 情况 C：远端地址 → 退避重试两次
+                if (retryCount < 2 && fullSrc && String(fullSrc).indexOf('blob:') !== 0) {
+                    img.setAttribute('data-retry-count', String(retryCount + 1));
+                    var delay = retryCount === 0 ? 300 : 900;
+                    setTimeout(function() {
+                        if (!img.parentNode) return;
+                        img.src = fullSrc + (fullSrc.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
+                    }, delay);
+                    return;
+                }
+                // 情况 D：确实没救了 → 退化成可点开的兜底按钮（点开用原始地址）
                 _dmRenderMediaFallback(img, fullSrc);
             };
+
+            // ★ 2026-09-26 新增：把气泡里的本地 blob 预览**无缝换成**远端地址。
+            //   发送成功后消息对象仍带着 __localPreviewUrl（本地字节），气泡先用它渲染，
+            //   所以图片从头到尾都在，绝不会出现"空白气泡"。这里在后台把远端图下载好，
+            //   完成后才把 src 指过去（同一张图，肉眼无变化），随后释放 blob。
+            //   远端下载失败则**什么都不做**：继续显示本地图，不清空、不降级成按钮。
+            function hydrateDockChatRemoteMedia(host) {
+                var root = host || document.getElementById('dockChatMessages');
+                if (!root) return;
+                var imgs = root.querySelectorAll('img.msg-img[data-remote-src]');
+                Array.prototype.forEach.call(imgs, function(img) {
+                    var remote = String(img.getAttribute('data-remote-src') || '');
+                    if (!remote || img.getAttribute('data-swapping') === '1') return;
+                    img.setAttribute('data-swapping', '1');
+                    var probe = new Image();
+                    probe.onload = function() {
+                        try { img.removeAttribute('data-swapping'); } catch (e) {}
+                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) return;
+                        var localSrc = String(img.getAttribute('data-local-src') || '');
+                        // ★ 换源期间**用本地图当背景垫底**：把 img.src 指向远端会再走一次网络
+                        //   （缓存未命中时又要等一整轮），那正是"图片忽然消失"的观感。
+                        //   盒子的比例已经由 width/height 锁定，背景铺满即与本地图完全重合，
+                        //   远端真正解码完成后再撤掉背景 —— 全程看不到空窗。
+                        if (localSrc) {
+                            try {
+                                img.style.backgroundImage = 'url("' + localSrc.replace(/["\\]/g, '') + '")';
+                                img.style.backgroundSize = '100% 100%';
+                                img.style.backgroundRepeat = 'no-repeat';
+                            } catch (eBg) {}
+                        }
+                        img.removeAttribute('data-remote-src');
+                        img.src = remote;
+                        var finishSwap = function() {
+                            try {
+                                img.style.backgroundImage = '';
+                                img.style.backgroundSize = '';
+                            } catch (eClr) {}
+                            // 远端确认显示后，本地 blob 不再需要；通知外层释放（幂等）
+                            try {
+                                if (typeof window.__xtjReleaseDmLocalPreview === 'function') {
+                                    window.__xtjReleaseDmLocalPreview(localSrc);
+                                }
+                            } catch (e) {}
+                            img.removeAttribute('data-local-src');
+                            img.removeAttribute('data-local-shown');
+                        };
+                        if (img.complete && img.naturalWidth) finishSwap();
+                        else {
+                            img.addEventListener('load', finishSwap, { once: true });
+                            // 远端这一次没成功 → 保留本地背景图，由 handleDockChatImageError 退回本地 src
+                            img.addEventListener('error', function() {
+                                try { img.style.backgroundImage = ''; img.style.backgroundSize = ''; } catch (eClr2) {}
+                            }, { once: true });
+                        }
+                    };
+                    probe.onerror = function() {
+                        try { img.removeAttribute('data-swapping'); } catch (e) {}
+                        // 远端暂时取不到 → 保留本地图，稍后由调用方/重渲染再试
+                    };
+                    probe.src = remote;
+                });
+            }
+            window.hydrateDockChatRemoteMedia = hydrateDockChatRemoteMedia;
 
             function _dmRenderMediaFallback(img, fullSrc) {
                 if (!img || !img.parentNode) return;

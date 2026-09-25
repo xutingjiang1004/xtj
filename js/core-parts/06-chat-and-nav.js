@@ -1045,6 +1045,24 @@
                 }
             }
 
+            // ★ 2026-09-26：气泡把本地 blob 成功换成远端地址后调用。
+            //   除了释放 blob，还要把缓存里所有指向它的 __localPreviewUrl 清掉 ——
+            //   否则下次重渲染又拿已被 revoke 的 blob 当 src（先 error 再回退，会闪一下）。
+            window.__xtjReleaseDmLocalPreview = function(url) {
+                var target = String(url || '');
+                if (target.indexOf('blob:') !== 0) return;
+                try {
+                    Object.keys(_chatCache || {}).forEach(function(k) {
+                        var list = _chatCache[k];
+                        if (!Array.isArray(list)) return;
+                        list.forEach(function(m) {
+                            if (m && String(m.__localPreviewUrl || '') === target) m.__localPreviewUrl = '';
+                        });
+                    });
+                } catch (e) {}
+                try { URL.revokeObjectURL(target); } catch (e2) {}
+            };
+
             function replaceDockChatCacheMessage(userName, tempId, message) {
                 var cacheKey = getDockChatCacheKey(userName);
                 var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
@@ -1121,6 +1139,20 @@
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
+                    // ★ 2026-09-26（用户反馈"发完图先是小气泡、再变成没图的大气泡、最后
+                    //   变成『查看图片』按钮"）：整条渲染链改成 iMessage 的做法——
+                    //   ① **有本地原图就用本地原图**：刚发出的消息带着本地字节
+                    //      （__localPreviewUrl / blob），直接拿它当 src，图片**立刻**就在，
+                    //      不存在"等远端下载"的空白窗口；远端地址写进 data-remote-src，
+                    //      由 hydrateDockChatRemoteMedia() 后台下载好再无缝换过去。
+                    //   ② **预留真实比例**：payload 里的 w/h（发送端解码时量到的真实像素）
+                    //      写成 width/height 属性，浏览器在图片解码前就按正确比例占位，
+                    //      彻底消灭"先小后大"的两次布局跳动。
+                    //   ③ **去掉 loading="lazy"**：聊天图片是用户刚主动发出的内容，
+                    //      移动端 Safari 的懒加载 defer 会让它长时间停在空白态。
+                    var localSrc = String(message.__localPreviewUrl || '');
+                    var localUsable = /^blob:/i.test(localSrc) || /^data:image\//i.test(localSrc);
+                    var remoteSrc = String(media.src || media.fullSrc || '');
                     // ★ 2026-09-25：直接用公共地址渲染，不再绕后端签名。
                     //   实测 uploads 桶的 /public/ 路由是放通的（真实对象 HTTP 200），
                     //   此前"渲染期先换签名地址"的多余往返已删除——它正是图片首帧
@@ -1130,10 +1162,27 @@
                     //   私信 JSON）。img/video/audio 的 src 不能直接执行脚本，但一旦这些
                     //   地址被复用到 <a href>/window.open（历史上照片墙就出过这类事故），
                     //   即刻变成 XSS。统一走 sanitizeUrl，非法协议返回空串 → 不渲染节点。
-                    var resolvedImageSrc = String(media.src || media.fullSrc || '');
-                    var safeSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(resolvedImageSrc) : '';
+                    var safeSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(remoteSrc) : '';
+                    if (!safeSrc) {
+                        if (localUsable) safeSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(localSrc) : '';
+                    }
                     if (!safeSrc) return '<span class="msg-text">' + escapeHtml(messageText || '[媒体]') + '</span>';
                     var safeFull = escapeHtml(safeSrc);
+                    // 本地预览优先当 src；远端地址留给后台换取
+                    var safeLocal = localUsable ? ((typeof sanitizeUrl === 'function') ? sanitizeUrl(localSrc) : '') : '';
+                    var displaySrc = safeLocal || safeSrc;
+                    var remoteAttr = (safeLocal && safeSrc && safeSrc !== safeLocal)
+                        ? ' data-remote-src="' + escapeHtml(safeSrc) + '" data-local-src="' + escapeHtml(safeLocal) + '"'
+                        : '';
+                    // 宽高占位：只取合理范围的正整数，避免污染布局。
+                    // 写 width/height 属性 + 内联 aspect-ratio（作者样式，优先级高于 UA 规则），
+                    // 浏览器据此在图片解码前就撑出正确比例的盒子 → 不再"先小后大"。
+                    // 老消息没有 w/h（服务端此前不存），兜一个 4:3，也比 0 高度好得多。
+                    var mw = Math.round(Number(media.w || 0));
+                    var mh = Math.round(Number(media.h || 0));
+                    if (!(mw > 0 && mh > 0 && mw <= 20000 && mh <= 20000)) { mw = 4; mh = 3; }
+                    var dimAttr = ' style="aspect-ratio:' + mw + ' / ' + mh + '"';
+                    if (mw !== 4 || mh !== 3) dimAttr += ' width="' + mw + '" height="' + mh + '"';
                     // ★ 2026-09-25 修复（聊天图片预览器降级到旧 #imgViewer）：
                     //   此前 onclick 只传了 src，没有把 <img> 自身作为 triggerEl 传入。
                     //   openImageViewer → openPostImagePreview 依赖 triggerEl 读取
@@ -1148,7 +1197,10 @@
                     //   ⓘ 永远是「未知用户 / – / – / –」。这里补上发送者与时间。
                     //   故意**不加** data-post-id：预览器据此把来源判定为 chat，
                     //   从而不显示"删除帖子/分享"等不适用按钮。
-                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
+                    // 点开大图始终用**远端原图地址**（本地 blob 只在本次会话有效，
+                    // 用它做 data-full-src 会让对方/刷新后失效）。
+                    var fullForViewer = (safeSrc && !/^blob:/i.test(safeSrc)) ? safeSrc : safeFull;
+                    var imageBody = '<img class="msg-img" src="' + displaySrc + '" data-src="' + escapeHtml(safeSrc) + '" data-full-src="' + escapeHtml(fullForViewer) + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" decoding="async"' + dimAttr + remoteAttr + ' />';
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
@@ -1529,6 +1581,9 @@
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
                 patchDockChatMessageAvatars(userName);
+                // ★ 2026-09-26：把仍用本地 blob 显示的图片在后台换成远端地址
+                //   （下载成功才替换，失败则继续显示本地图，绝不降级成按钮）
+                try { if (typeof hydrateDockChatRemoteMedia === 'function') hydrateDockChatRemoteMedia(el); } catch (eHyd) {}
                 if (shouldAutoScroll) {
                     scrollDockChatToLatest();
                     bindDockChatMediaLoadScroll(el, true);
@@ -1585,16 +1640,23 @@
                 scrollDockChatToLatest({ smooth: true });
             }
 
-            // ★ 2026-09-25 新增：「原图」开关（对齐微信的做法）。
-            //   默认压缩（长边 1600 / q0.82，约 200–500KB，发送最快）；
-            //   打开后按**原始字节**上传，不缩放不重编码；
+            // ★ 2026-09-25 新增 / ★ 2026-09-26 反转默认值：「原图」开关。
+            //   用户明确要求：**发出去的就是原图**，只有在**主动取消勾选**原图时才发缩略图。
+            //   所以默认值改为「开」（safeStorage 还没有该键时按开启处理）。
+            //   开启 → 按原始字节上传，不缩放不重编码；
+            //   关闭 → 压到长边 1600 / q0.82（约 200–500KB，弱网更快）；
             //   唯一例外是 HEIC —— 服务端 sharp 不支持 HEIC/HEVC，必须转码成 JPEG，
             //   此时用 q0.95 且不缩放，把损失降到最低。
             //   偏好按设备持久化（safeStorage），下次进来自动沿用。
             var DM_ORIGINAL_KEY = 'xtj_dm_send_original';
 
             function isDmOriginalSendEnabled() {
-                try { return window.safeStorage.get(DM_ORIGINAL_KEY) === '1'; } catch (e) { return false; }
+                try {
+                    var raw = window.safeStorage.get(DM_ORIGINAL_KEY);
+                    // 只有被显式关掉过（'0'）才算关；从未设置 / 读取失败都按「开」处理。
+                    if (raw === '0') return false;
+                    return true;
+                } catch (e) { return true; }
             }
 
             function syncDmOriginalToggle() {
@@ -1603,13 +1665,15 @@
                 var on = isDmOriginalSendEnabled();
                 btn.classList.toggle('is-on', on);
                 btn.setAttribute('aria-checked', on ? 'true' : 'false');
+                var label = btn.querySelector('.cor-label');
+                if (label) label.textContent = on ? '原图' : '压缩';
             }
 
             window.toggleDmOriginalSend = function() {
                 var next = !isDmOriginalSendEnabled();
                 try { window.safeStorage.set(DM_ORIGINAL_KEY, next ? '1' : '0'); } catch (e) {}
                 syncDmOriginalToggle();
-                showToast(next ? '已开启原图发送：画质更好，上传更慢' : '已关闭原图发送：图片压缩后上传');
+                showToast(next ? '已开启原图：按原始画质发送（气泡与大图都是原图）' : '已关闭原图：图片压缩后发送');
             };
 
             // ★ 2026-09-25 新增（修复"照片发送慢 / 发送失败"）：上传前把图片规范化成
@@ -1625,10 +1689,76 @@
             //   任何一步失败都回退原文件：绝不因为"压缩失败"让用户发不出去。
             var DM_IMAGE_MAX_EDGE = 1600;
             var DM_IMAGE_QUALITY = 0.82;
+
+            // ★ 2026-09-26 新增：只读文件头拿图片像素尺寸（PNG/GIF/WEBP/JPEG）。
+            //   用途是给气泡 <img> 写 width/height，让浏览器在图片解码完成前就按正确比例
+            //   预留空间 —— 消除"先一个小气泡、图片到位后气泡又跳大"的两次布局跳动。
+            //   刻意**不整图解ma**：原图动辄 3–12MB，为拿两个数字去解码既慢又占内存；
+            //   这几种格式都把尺寸写在头部固定偏移上，读前 64KB 足够。
+            function readImageHeaderSize(file) {
+                return new Promise(function(resolve) {
+                    var done = function(w, h) { resolve({ w: Math.round(w) || 0, h: Math.round(h) || 0 }); };
+                    try {
+                        if (!file || typeof file.slice !== 'function') return done(0, 0);
+                        var head = file.slice(0, 65536);
+                        var reader = new FileReader();
+                        reader.onload = function() {
+                            var buf = reader.result;
+                            if (!(buf instanceof ArrayBuffer) || buf.byteLength < 32) return done(0, 0);
+                            var u = new Uint8Array(buf);
+                            // PNG：IHDR 里 16–23 字节是 width/height（大端）
+                            if (u[0] === 0x89 && u[1] === 0x50 && u[2] === 0x4e && u[3] === 0x47) {
+                                var dv = new DataView(buf);
+                                return done(dv.getUint32(16), dv.getUint32(20));
+                            }
+                            // GIF：6–9 字节（小端）
+                            if (u[0] === 0x47 && u[1] === 0x49 && u[2] === 0x46) {
+                                return done(u[6] | (u[7] << 8), u[8] | (u[9] << 8));
+                            }
+                            // WEBP：RIFF....WEBP + VP8/VP8L/VP8X
+                            if (u[0] === 0x52 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x46 &&
+                                u[8] === 0x57 && u[9] === 0x45 && u[10] === 0x42 && u[11] === 0x50) {
+                                var fmt = String.fromCharCode(u[12], u[13], u[14], u[15]);
+                                if (fmt === 'VP8 ') return done((u[26] | (u[27] << 8)) & 0x3fff, (u[28] | (u[29] << 8)) & 0x3fff);
+                                if (fmt === 'VP8L') {
+                                    var b0 = u[21], b1 = u[22], b2 = u[23], b3 = u[24];
+                                    var bits = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+                                    return done((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1);
+                                }
+                                if (fmt === 'VP8X') return done((u[24] | (u[25] << 8) | (u[26] << 16)) + 1, (u[27] | (u[28] << 8) | (u[29] << 16)) + 1);
+                                return done(0, 0);
+                            }
+                            // JPEG：从 SOI 起按 marker 段走，找到 SOFn（C0–CF 且非 C4/C8/CC）
+                            if (u[0] === 0xff && u[1] === 0xd8) {
+                                var off = 2;
+                                while (off + 9 < u.length) {
+                                    if (u[off] !== 0xff) { off++; continue; }
+                                    var marker = u[off + 1];
+                                    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { off += 2; continue; }
+                                    var segLen = (u[off + 2] << 8) | u[off + 3];
+                                    if (segLen < 2) break;
+                                    var isSof = (marker >= 0xc0 && marker <= 0xcf) && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+                                    if (isSof) {
+                                        return done((u[off + 7] << 8) | u[off + 8], (u[off + 5] << 8) | u[off + 6]);
+                                    }
+                                    off += 2 + segLen;
+                                }
+                                return done(0, 0);
+                            }
+                            return done(0, 0);
+                        };
+                        reader.onerror = function() { done(0, 0); };
+                        reader.readAsArrayBuffer(head);
+                    } catch (e) { done(0, 0); }
+                });
+            }
+
             async function prepareDmImageForUpload(file, opts) {
                 var wantOriginal = !!(opts && opts.original);
-                var passthrough = { file: file, converted: false, originalSize: file.size, newSize: file.size };
+                var passthrough = { file: file, converted: false, originalSize: file.size, newSize: file.size, w: 0, h: 0 };
                 if (!file || !/^image\//i.test(String(file.type || ''))) return passthrough;
+                var headSize = await readImageHeaderSize(file);
+                passthrough.w = headSize.w; passthrough.h = headSize.h;
                 if (/gif/i.test(String(file.type || ''))) return passthrough; // 保留动图
                 var isHeic = /heic|heif/i.test(String(file.type || '')) || /\.(heic|heif)$/i.test(String(file.name || ''));
                 // ★ 原图开关打开时：非 HEIC 一律**原样上传** —— 不缩放、不重编码，保留原始字节。
@@ -1693,7 +1823,8 @@
                 var nextFile = null;
                 try { nextFile = new File([blob], baseName + '.jpg', { type: 'image/jpeg', lastModified: Date.now() }); }
                 catch (eFile) { return passthrough; }
-                return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size };
+                // 返回**输出图**的真实像素（缩放后为 tw×th），气泡按比例占位才准确
+                return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size, w: tw, h: th };
             }
 
             async function sendDockChatMessage() {
@@ -1741,6 +1872,7 @@
                     ? (file.type.startsWith('video/') ? 'video' : (file.type.startsWith('image/') ? 'image' : 'audio'))
                     : null;
                 var mediaPayload = null;
+                var mediaW = 0, mediaH = 0;
                 if (file) {
                     try {
                         localPreviewUrl = URL.createObjectURL(file);
@@ -1774,9 +1906,26 @@
                         if (/^image\//i.test(String(file.type || ''))) {
                             try {
                                 var _prep = await prepareDmImageForUpload(file, { original: isDmOriginalSendEnabled() });
+                                if (_prep) {
+                                    // 真实像素 → 随消息一起存（服务端会原样透传），
+                                    // 渲染时写成 <img width height> 让气泡按正确比例占位。
+                                    mediaW = Math.round(Number(_prep.w || 0)) || 0;
+                                    mediaH = Math.round(Number(_prep.h || 0)) || 0;
+                                }
                                 if (_prep && _prep.file && _prep.file !== file) {
                                     file = _prep.file;
                                     pendingFile = _prep.file;
+                                }
+                                // 换位后把宽高补进乐观气泡（否则第一帧仍会先小后大）
+                                if (mediaW > 0 && mediaH > 0 && mediaPayload) {
+                                    mediaPayload.w = mediaW;
+                                    mediaPayload.h = mediaH;
+                                    var _optPayload = getDMMessagePayload(optimisticMessage) || {};
+                                    if (_optPayload.media) {
+                                        _optPayload.media.w = mediaW;
+                                        _optPayload.media.h = mediaH;
+                                        optimisticMessage.content = JSON.stringify(_optPayload);
+                                    }
                                 }
                             } catch (prepErr) {
                                 console.warn('[dm-send] image prepare failed, falling back to original', prepErr);
@@ -1818,7 +1967,7 @@
                             mediaPayload = { kind: 'video', url: _upData.public_url || getMediaUrl('__dm_vid__', storagePath), mimeType: file.type || '' };
                         } else if (_dmKind === 'image') {
                             actorKey = '__dm_img__' + storagePath;
-                            mediaPayload = { kind: 'image', url: _upData.public_url || getMediaUrl('__dm_img__', storagePath), mimeType: file.type || '' };
+                            mediaPayload = { kind: 'image', url: _upData.public_url || getMediaUrl('__dm_img__', storagePath), mimeType: file.type || '', w: mediaW, h: mediaH };
                         } else {
                             // P6: 明确支持音频 — 之前校验允许 audio/ 但上传分支和解析/渲染
                             // 全链路缺失，导致音频文件成为 Storage 孤儿。
@@ -1836,6 +1985,11 @@
                         requestBody.storage_path = storagePath;
                         requestBody.kind = mediaKind;
                         requestBody.mime_type = file.type;
+                        // 像素尺寸只用于气泡按比例占位（纯展示），服务端会做范围校验
+                        if (mediaKind === 'image' && mediaW > 0 && mediaH > 0) {
+                            requestBody.media_width = mediaW;
+                            requestBody.media_height = mediaH;
+                        }
                     }
 
                     // ★ 通过后端认证接口发送，禁止前端直连 Supabase。
@@ -1866,9 +2020,22 @@
                     touchUserSession(false);
                     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('message_send', '发送消息给 [' + targetUser + ']'); } catch(e) {}
                     clearDockChatFilePreview(false);
+                    // ★ 2026-09-26（用户反馈"气泡先小、再空、最后变成查看图片按钮"）：
+                    //   发送成功后**不立刻释放本地原图**。把 blob 挂到真实消息上继续当显示源，
+                    //   于是气泡里从头到尾都有图（本地字节，不可能 404）；远端地址交给
+                    //   hydrateDockChatRemoteMedia() 在后台下载，下载成功后才无缝换过去
+                    //   并释放 blob。远端一时取不到也无所谓 —— 继续显示本地图，不降级。
+                    if (localPreviewUrl && mediaKind === 'image') {
+                        insertedMessage = Object.assign({}, insertedMessage, { __localPreviewUrl: localPreviewUrl });
+                    }
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage);
-                    if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
-                    releaseDockChatLocalPreview(optimisticMessage);
+                    if (dockChatActiveUser === targetUser) {
+                        renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
+                        try { if (typeof hydrateDockChatRemoteMedia === 'function') hydrateDockChatRemoteMedia(document.getElementById('dockChatMessages')); } catch (eH) {}
+                    } else {
+                        // 用户已切走会话：本地图没有展示的必要，直接释放
+                        releaseDockChatLocalPreview(optimisticMessage);
+                    }
                     localPreviewUrl = '';
                     // ★ 2026-09-25 修复（复审 P2-04）：这里原本还调 scheduleDockChatListRefresh(320)，
                     //   于是每发一条消息 → 320ms 后 → GET /api/dm/list（服务端要扫两个方向的消息）

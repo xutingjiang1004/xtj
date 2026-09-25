@@ -1716,12 +1716,17 @@
         }
         .chat-msg.received .msg-fail-mark { color: #dc2626; }
 
-        /* ★ 2026-09-25 新增：「原图」开关（对齐微信）。默认关闭＝压缩发送。 */
+        /* ★ 2026-09-25 新增 / ★ 2026-09-26 改版：「原图」开关做成**圆圈 + 圆点**的单选反馈
+           （用户反馈原来的胶囊按钮"不够直观"）——
+             未勾选 = 一个空心圆圈；勾选 = 圆圈里多一个实心点（微信/系统设置同款语言）。
+           默认**勾选**（发原图）；取消勾选才压成长边 1600 的缩略图。
+           整块（圈 + 文字）都可点，避免小圆圈不好按。 */
         .chat-orig-btn {
             flex-shrink: 0;
+            display: inline-flex; align-items: center; gap: 5px;
             padding: 6px 9px;
             border-radius: 999px;
-            border: 1px solid var(--xtj-border-soft, rgba(0, 0, 0, 0.12));
+            border: 1px solid transparent;
             background: transparent;
             color: var(--text-muted);
             font-size: 11px;
@@ -1729,15 +1734,44 @@
             cursor: pointer;
             min-height: 30px;
             -webkit-tap-highlight-color: transparent;
+            transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+        }
+        .cor-ring {
+            position: relative;
+            flex: 0 0 auto;
+            width: 15px; height: 15px;
+            border-radius: 50%;
+            border: 1.5px solid var(--xtj-border-soft, rgba(0, 0, 0, 0.34));
+            box-sizing: border-box;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        }
+        .cor-dot {
+            position: absolute; left: 50%; top: 50%;
+            width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px;
+            border-radius: 50%;
+            background: #059669;
+            transform: scale(0);
+            opacity: 0;
+            transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.14s ease;
         }
         .chat-orig-btn.is-on {
-            background: rgba(5, 150, 105, 0.14);
-            border-color: rgba(5, 150, 105, 0.55);
+            background: rgba(5, 150, 105, 0.12);
+            border-color: rgba(5, 150, 105, 0.42);
             color: #059669;
             font-weight: 700;
         }
-        [data-theme="dark"] .chat-orig-btn { border-color: rgba(255, 255, 255, 0.16); }
-        [data-theme="dark"] .chat-orig-btn.is-on { color: #6ee7b7; }
+        .chat-orig-btn.is-on .cor-ring {
+            border-color: #059669;
+            box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.14);
+        }
+        .chat-orig-btn.is-on .cor-dot { transform: scale(1); opacity: 1; }
+        [data-theme="dark"] .cor-ring { border-color: rgba(255, 255, 255, 0.38); }
+        [data-theme="dark"] .chat-orig-btn.is-on { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.42); }
+        [data-theme="dark"] .chat-orig-btn.is-on .cor-ring { border-color: #34d399; box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.16); }
+        [data-theme="dark"] .cor-dot { background: #34d399; }
+        @media (prefers-reduced-motion: reduce) {
+            .chat-orig-btn, .cor-ring, .cor-dot { transition: none; }
+        }
 
         /* ── 长按气泡操作菜单 ───────────────────────────────────────── */
         .dm-action-overlay {

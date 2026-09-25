@@ -111,3 +111,6 @@ miniprogram_npm/
 # 一次性探测/归档脚本
 /scripts/archive/
 
+# 临时本地调试/复现脚本目录（Playwright 复现、生产探针、视觉截图等，非源码，不入版本库）
+/tests-tmp/
+

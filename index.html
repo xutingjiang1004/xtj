@@ -62,7 +62,7 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=e336ffdaca" />
+    <link rel="stylesheet" href="css/style.min.css?v=beb4ba980f" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <!-- ★ 2026-09-22 响应式修复：下面三个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
@@ -360,7 +360,12 @@
                             <div class="chat-input-wrap">
                                 <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
                             </div>
-                            <button class="chat-orig-btn" id="dockChatOrigBtn" type="button" role="switch" aria-checked="false" title="发送原图（不压缩，画质更好但上传更慢）">原图</button>
+                            <!-- ★ 2026-09-26：原图开关改成「圆圈 + 圆点」的单选反馈（未选＝空心圆，已选＝圆里有个点）。
+                                 默认「已选」＝发原图；取消勾选才发压缩图（见 isDmOriginalSendEnabled）。 -->
+                            <button class="chat-orig-btn" id="dockChatOrigBtn" type="button" role="radio" aria-checked="true" title="原图：气泡与大图都是原始画质（取消勾选后压缩发送）">
+                                <span class="cor-ring" aria-hidden="true"><span class="cor-dot"></span></span>
+                                <span class="cor-label">原图</span>
+                            </button>
                             <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">📷</button>
                             <button class="send-btn" id="dockChatSendBtn">➤</button>
                         </div>
@@ -1134,7 +1139,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=950e14f7cb"></script>
+    <script defer src="js/core.min.js?v=c1a24032db"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b8e5d553a1"></script>
