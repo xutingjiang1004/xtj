@@ -29,6 +29,12 @@ try {
 }
 function isNormalPost(row) {
   if (!row) return false;
+  // ★ 2026-09-26（审计 P2-3）：软删墓碑一律不算"正常帖子"。
+  //   照片墙查询与 AI 站内工具早已过滤 is_deleted，而 feed/详情/评论/点赞此前
+  //   只看 media_type 白名单 —— 一旦有路径（管理端 RPC / 直连 DB）把 is_deleted
+  //   置真，被软删的帖子仍可被浏览、评论、点赞。未 select 该列时值为 undefined，
+  //   不会影响既有行为。
+  if (row.is_deleted === true) return false;
   var mt = row.media_type;
   if (mt === null || mt === undefined) return true;
   if (String(mt).trim() === '') return true;

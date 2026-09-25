@@ -267,32 +267,39 @@ test('超时后不影响后续调用（隔离性）', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 8. 降级路径
+// 8. fail-closed（★ 2026-09-26 审计 P0-1：移除 vm 降级路径）
 // ---------------------------------------------------------------------------
-console.log('\n【8】降级路径（vm 兜底）');
+console.log('\n【8】fail-closed（不降级到 vm）');
 
-test('sandbox.js 包含 vm 降级实现', () => {
+test('sandbox.js 已彻底移除 vm 降级实现', () => {
   const src = fs.readFileSync(SANDBOX_PATH, 'utf8');
-  assert.ok(/function runInVmFallback/.test(src), '未找到 runInVmFallback');
-  assert.ok(/vm\.createContext/.test(src), '降级实现未使用 vm.createContext');
+  assert.ok(!/function runInVmFallback/.test(src), 'runInVmFallback 仍存在（应已删除）');
+  assert.ok(!/vm\.createContext/.test(src), '仍在使用 vm.createContext');
+  assert.ok(!/^\s*(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*require\(['"]vm['"]\)/m.test(src),
+    '仍 require vm 模块（真实代码，非注释）');
+  assert.ok(!/return runInVmFallback\(src, input\);/.test(src), '仍存在降级返回分支');
 });
 
-test('isolated-vm 加载失败时降级（require 失败被捕获）', () => {
+test('isolated-vm 加载失败时记录原因（不静默降级）', () => {
   const src = fs.readFileSync(SANDBOX_PATH, 'utf8');
   assert.ok(/ivm\s*=\s*null;\s*ivmLoadError/.test(src),
     '未捕获 isolated-vm 加载失败');
+  assert.ok(/sandboxUnavailableError/.test(src), '缺少沙箱不可用错误构造器');
+  assert.ok(/if \(!ivm\) throw sandboxUnavailableError\(\);/.test(src),
+    'ivm 缺失时未 fail-closed 拒绝执行');
 });
 
-test('runInSandbox 在 ivm 缺失时走降级分支', () => {
-  const src = fs.readFileSync(SANDBOX_PATH, 'utf8');
-  assert.ok(/return runInVmFallback\(src, input\);/.test(src),
-    '未在 ivm 缺失时降级');
+test('sandboxInfo 暴露 enabled / disabledReason（供 /health 诊断）', () => {
+  const info = sb.sandboxInfo();
+  assert.strictEqual(typeof info.enabled, 'boolean', 'sandboxInfo 缺少 enabled 字段');
+  assert.ok(info.engine === 'isolated-vm' || info.engine === 'disabled',
+    'engine 取值只能是 isolated-vm / disabled，实际：' + info.engine);
+  assert.ok(!/vm\(fallback\)/.test(String(info.engine)), '仍报告 vm 降级引擎');
 });
 
-test('区分用户代码错误与沙箱基础设施错误', () => {
+test('用户代码错误原样抛出（不再有降级吞并）', () => {
   const src = fs.readFileSync(SANDBOX_PATH, 'utf8');
-  assert.ok(/isUserError/.test(src), '未区分用户错误与基础设施错误');
-  // 用户语法错误应原样抛出，而不是被降级吞掉
+  assert.ok(!/isUserError/.test(src), '旧的降级判定逻辑应已删除');
   assert.throws(() => sb.runInSandbox('this is not valid js !!!'), /./);
 });
 

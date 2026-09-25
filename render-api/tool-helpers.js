@@ -1052,7 +1052,6 @@ function evaluateFormula(expr, scope) {
   };
 
   function skipWs() { while (pos < src.length && /\s/.test(src[pos])) pos++; }
-  function peek() { skipWs(); return src[pos]; }
 
   function parseExpression() {
     var v = parseTerm();

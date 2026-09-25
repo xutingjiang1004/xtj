@@ -798,6 +798,21 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             window.xtjProtectedFetch = async function(path, options) {
                 options = options || {};
                 var timeoutMs = options.timeoutMs != null ? options.timeoutMs : 15000;
+                // ★ 2026-09-26（审计 P2-30）：离线时立即给出明确文案，不再让用户等到超时
+                //   之后收到笼统的"网络不稳定"提示（写操作在离线状态注定失败）。
+                if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+                    try {
+                        var _offTs = Date.now();
+                        if (_offTs - (window.__xtjOfflineToastAt || 0) > 15000) {
+                            window.__xtjOfflineToastAt = _offTs;
+                            if (typeof showToast === 'function') showToast('当前处于离线状态，请恢复网络后重试', 'info');
+                        }
+                    } catch (_eOffToast) {}
+                    var offError = new Error('当前处于离线状态');
+                    offError.code = 'offline';
+                    offError.status = 0;
+                    throw offError;
+                }
                 var auth = await window.ensureProtectedOperationAuth();
                 if (!auth.ok) {
                     // ★ 修复「静默无反馈」：确证失效已在 ensureProtectedOperationAuth 内弹窗；
@@ -1618,7 +1633,17 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-loading-skeleton" style="width:100%"><div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div></div></div>';
         }
 
-function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; }
+// ★ 2026-09-26（审计 P1-5）：管理员身份以**服务端下发的权威标志**为准。
+//   旧实现只比较 (currentUser || window.currentUser) === ADMIN_NAME，而 currentUser
+//   来自 localStorage.xtj_user（用户可在控制台任意改写）——禁言/封禁用户改一个
+//   localStorage 值即可让前端门禁放行，管理员入口也会被伪造显示。
+//   checkUserRestrictions()（02-auth-restrictions.js）会把服务端返回的 is_admin
+//   写入 window.__xtjServerIsAdmin；一旦该标志已被服务端确认过，就以它为准。
+//   未收到服务端响应前（首屏、离线）保留旧的名字比较，避免管理员界面直接失效。
+function isAdmin() {
+    if (typeof window.__xtjServerIsAdmin === 'boolean') return window.__xtjServerIsAdmin === true;
+    return (currentUser || window.currentUser) === ADMIN_NAME;
+}
         function clearFeedCache() {
             try { window.safeStorage.remove(CACHE_KEY); } catch (e) {}
             feedVisiblePostsCache = null;

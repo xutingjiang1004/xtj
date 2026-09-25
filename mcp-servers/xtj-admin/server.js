@@ -41,7 +41,10 @@ function validateApiBase(raw, env = process.env) {
     const allowlist = (env.XTJ_API_ALLOWED_HOSTS || "").split(",").map(host => host.trim().toLowerCase()).filter(Boolean);
     const host = url.host.toLowerCase();
     const hostname = url.hostname.toLowerCase();
-    if (!allowlist.length || !allowlist.some(allowed => allowed === host || (!allowed.includes(":") && allowed.replace(/\\.$/, "") === hostname.replace(/\\.$/, "")))) {
+    // ★ 2026-09-26（审计 P3-25）：原正则写成 /\\.$/ —— 匹配的是"字面反斜杠 + 行尾"，
+    //   而不是"末尾的域名点"。结果是 XTJ_API_ALLOWED_HOSTS 写 FQDN（如 api.example.com.）
+    //   时最后一层匹配永远失败，属 fail-closed 的功能缺陷。修正为 /\.$/。
+    if (!allowlist.length || !allowlist.some(allowed => allowed === host || (!allowed.includes(":") && allowed.replace(/\.$/, "") === hostname.replace(/\.$/, "")))) {
       throw new Error("XTJ_API_BASE 主机不在 XTJ_API_ALLOWED_HOSTS 精确 allowlist 中");
     }
   }

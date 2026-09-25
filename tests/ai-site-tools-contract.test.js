@@ -118,7 +118,9 @@ test('aiSiteText extracts text from JSON-wrapped content', () => {
   assert.match(server, /parsed\.text/);
   assert.match(server, /parsed\.content/);
   assert.match(server, /parsed\.body/);
-  assert.match(server, /function aiSiteContainsText/);
+  // ★ 2026-09-26（审计 P1-9）：原断言 assert.match(server, /function aiSiteContainsText/)
+  //   锚定的是一个**从未被调用的死函数** —— 测试反而"保护"了死代码（死代码已删除）。
+  //   改为断言真正被使用的匹配函数存在。
   assert.match(server, /function aiSiteMatchScore/);
   assert.match(server, /function parseSearchQuery/);
 });

@@ -1,15 +1,22 @@
 // ============================================================================
-// sandbox.js —— 受限 JavaScript 执行沙箱（isolated-vm 强隔离 + vm 降级）
+// sandbox.js —— 受限 JavaScript 执行沙箱（isolated-vm 强隔离，fail-closed）
 // ============================================================================
 //
 // 设计目标
-//   1. 真隔离：用 isolated-vm（V8 独立 Isolate）替代 Node 内置 vm 模块。
-//      vm 模块是"同进程同 Isolate"，存在原型链逃逸风险，且 timeout 在
-//      纯 CPU 死循环里并不可靠；isolated-vm 的 memoryLimit / timeout 是
-//      V8 层面的硬限制，可靠且可强制中断。
-//   2. 零风险接入：isolated-vm 是原生模块（预编译二进制）。若加载失败
-//      （平台 ABI 不匹配、二进制损坏等），自动降级到原有 vm 实现，
-//      **绝不让服务起不来**。
+//   1. 真隔离：用 isolated-vm（V8 独立 Isolate）执行。isolated-vm 的
+//      memoryLimit / timeout 是 V8 层面的硬限制，可靠且可强制中断。
+//   2. fail-closed（★ 2026-09-26 深度审计 P0-1 修复）：isolated-vm 是原生
+//      模块（预编译二进制），若加载失败（ABI 不匹配、二进制损坏、平台不支持）
+//      或运行期抛出基础设施异常，**一律拒绝执行**，绝不再降级到 Node 内置
+//      vm 模块。原因：vm 只能做"同进程同 Isolate"的伪隔离，注入的宿主内置
+//      对象（Math/JSON/console/...）都带宿主原型链，沙箱内一句
+//      `Math.constructor.constructor('return process')()` 即可拿到宿主
+//      process / require('fs') / child_process，等同任意代码执行；且注入宿主
+//      Promise 后，微任务可逃出 vm 的 timeout 窗口并永久占满事件循环。
+//      （上述逃逸与超时绕过的 PoC 见 audit-reports/2026-09-26-全栈深度审计报告.md）
+//      沙箱不可用时 run_code 工具会向用户返回明确错误，而不是在更弱的环境
+//      里重跑用户代码；`sandboxInfo()` 会给出 enabled/disabledReason 供
+//      /health 与启动日志暴露该状态。
 //   3. 预装库里：注入一批纯计算 npm 库（lodash / mathjs / papaparse /
 //      dayjs / decimal.js / fast-xml-parser），让 AI 写代码时无需重复造轮子。
 //
@@ -30,12 +37,14 @@
 
 'use strict';
 
-const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
+// ★ 2026-09-26（P0-1）：不再 require('vm')。vm 模块无法提供安全边界
+//   （同进程同 Isolate + 宿主对象原型链逃逸 + 微任务绕过 timeout），
+//   任何"降级到 vm"的路径都已删除，沙箱统一 fail-closed。
 
 // ---------------------------------------------------------------------------
-// isolated-vm 可选加载：失败不抛异常，只记录降级原因
+// isolated-vm 加载：失败即 fail-closed（不降级、不静默继续）
 // ---------------------------------------------------------------------------
 let ivm = null;
 let ivmLoadError = null;
@@ -47,7 +56,14 @@ try {
 } catch (e) {
   ivm = null;
   ivmLoadError = (e && e.message) || String(e);
-  console.warn('[SANDBOX] isolated-vm 不可用，已降级到 vm 实现：' + ivmLoadError);
+  console.error('[SANDBOX] isolated-vm 不可用，代码沙箱已按 fail-closed 策略禁用（不会降级到 vm）：' + ivmLoadError);
+}
+
+function sandboxUnavailableError() {
+  var err = new Error('代码沙箱暂不可用（isolated-vm 未加载），已拒绝执行以保护服务安全');
+  err.code = 'SANDBOX_UNAVAILABLE';
+  err.sandboxUnavailable = true;
+  return err;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,125 +319,38 @@ function runInIsolatedVm(code, input, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// 实现 B：vm 降级执行（原实现，保留作为兜底）
-// ---------------------------------------------------------------------------
-function runInVmFallback(code, input) {
-  const logs = [];
-  const sandbox = {
-    input: input === undefined ? undefined : input,
-    console: {
-      log: function () {
-        const parts = [];
-        for (let i = 0; i < arguments.length; i++) {
-          const a = arguments[i];
-          try { parts.push(typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a)); }
-          catch (e) { parts.push(String(a)); }
-        }
-        if (logs.length < MAX_LOGS) logs.push(parts.join(' '));
-      }
-    },
-    Math: Math, JSON: JSON, Date: Date,
-    Number: Number, String: String, Boolean: Boolean,
-    Array: Array, Object: Object, RegExp: RegExp,
-    Map: Map, Set: Set, Promise: Promise,
-    parseInt: parseInt, parseFloat: parseFloat, isNaN: isNaN, isFinite: isFinite,
-    encodeURIComponent: encodeURIComponent, decodeURIComponent: decodeURIComponent,
-    encodeURI: encodeURI, decodeURI: decodeURI,
-    Error: Error, TypeError: TypeError, RangeError: RangeError, SyntaxError: SyntaxError
-  };
-
-  // 补齐 console 其余级别（与 isolated-vm 路径对齐；旧实现只有 log，
-  // 沙箱内调用 console.warn/error/info 会直接 TypeError）
-  ['info', 'warn', 'error'].forEach(function (lv) { sandbox.console[lv] = sandbox.console.log; });
-
-  // 挂载可用的预装库（同进程，直接挂对象即可）
-  for (const key of AVAILABLE_LIBS) {
-    sandbox[key] = SANDBOX_LIBS[key];
-  }
-  if (SANDBOX_LIBS.lodash) sandbox._ = SANDBOX_LIBS.lodash;
-  if (SANDBOX_LIBS.mathjs) sandbox.math = SANDBOX_LIBS.mathjs;
-
-  // 显式封堵危险全局（防原型链逃逸）
-  sandbox.process = undefined;
-  sandbox.require = undefined;
-  sandbox.global = undefined;
-  sandbox.globalThis = undefined;
-  sandbox.Buffer = undefined;
-  sandbox.fetch = undefined;
-  sandbox.setTimeout = undefined;
-  sandbox.setInterval = undefined;
-  sandbox.setImmediate = undefined;
-  sandbox.eval = undefined;
-  sandbox.Function = undefined;
-
-  const context = vm.createContext(sandbox);
-  const scriptSrc = '"use strict";\n(function(){\n' + code + '\n})();';
-  const result = vm.runInContext(scriptSrc, context, { timeout: DEFAULT_TIMEOUT_MS, breakOnSigint: true });
-
-  let out = '';
-  if (logs.length) out += logs.join('\n');
-  if (result !== undefined) {
-    let resStr;
-    try { resStr = typeof result === 'object' && result !== null ? JSON.stringify(result, null, 2) : String(result); }
-    catch (e) { resStr = String(result); }
-    out += (out ? '\n【返回值】\n' : '') + resStr;
-  }
-  if (!out) out = '（代码执行完毕，无输出。请用 return 或 console.log 返回结果）';
-  if (out.length > MAX_OUTPUT_LEN) out = out.slice(0, MAX_OUTPUT_LEN) + '\n...(输出过长已截断)';
-  return out;
-}
-
+// 实现 B（已删除）：vm 降级执行
+//
+// ★ 2026-09-26（审计 P0-1）：原 runInVmFallback() 已整体移除。
+//   它把宿主内置对象（Math/JSON/console/Promise/Date/...）直接注入 vm 上下文，
+//   沙箱内一句 `Math.constructor.constructor('return process')()` 即可拿到宿主
+//   process，再经 process.mainModule.require('fs'|'child_process') 读写文件、
+//   起子进程（本次审计已实测逃逸成功）；注入宿主 Promise 后微任务还能逃出
+//   vm 的 timeout 窗口，把事件循环永久占满。vm 模块与宿主同进程同 Isolate，
+//   本质上无法充当安全边界，因此不再保留任何形式。
+//   若将来确实需要"无 isolated-vm 也能执行代码"，正确做法是 worker_threads
+//   子进程 + 资源限额，而不是回到 vm。
 // ---------------------------------------------------------------------------
 // 统一入口：同步签名（保持与旧 runInSandbox 调用方兼容）
 //
 // 注意：isolated-vm 提供原生同步 API（compileScriptSync / runSync），因此
 // 无需把调用方改成 async。这也是选同步 API 的原因 —— server.js 中
 // executeToolCall 是同步函数，改成 async 会波及整条工具链。
+//
+// ★ 2026-09-26（审计 P0-1）：本函数不再有 try/catch 降级分支——isolated-vm
+//   抛出的任何异常（用户代码错误、超时、内存超限、内部故障）都原样向上抛出，
+//   由调用方按失败反馈给用户。绝不在"隔离更弱的环境"里重跑用户代码。
 // ---------------------------------------------------------------------------
 function runInSandbox(code, input, opts) {
   const src = String(code || '');
   if (!src.trim()) throw new Error('代码为空');
   if (src.length > MAX_CODE_LEN) throw new Error('代码过长（上限 ' + MAX_CODE_LEN + ' 字符）');
 
-  if (ivm) {
-    try {
-      return runInIsolatedVm(src, input, opts);
-    } catch (e) {
-      const msg = (e && e.message) || String(e);
-      // ★ 第三轮审计修复（🔴 安全）：降级判定此前用**宽泛关键词**匹配错误文案，
-      //   导致用户代码自身的异常被误判为"沙箱基础设施故障"，从而静默重跑到
-      //   安全性更弱的 vm 实现（同进程同 Isolate，存在原型链逃逸风险）——
-      //   等于给用户代码一个"在隔离层更弱的环境里再执行一次"的机会。
-      //
-      //   已实测复现：用户仅写 `throw new Error("my custom error")`，因文案中
-      //   含 "Error" 命中 /TypeError|RangeError/ 之类的松匹配，被判定为 infra
-      //   异常并降级执行。同理 `Unexpected error in isolated-vm internals` 这类
-      //   真正的 infra 故障反而会被判成用户错误。
-      //
-      //   改为**结构化判定**，三条并列，任一命中即判为用户代码问题：
-      //     (a) 堆栈含 isolated-vm 帧 —— 覆盖用户 throw / 语法 / 类型 / 超时
-      //         （实测：`at <isolated-vm>:N:M`、`(<isolated-vm> boundary)`）；
-      //     (b) 文案含 memory limit —— 覆盖内存超限。实测发现这条**必须单列**：
-      //         `Isolate was disposed during execution due to memory limit` 的
-      //         堆栈指向宿主而非 isolated-vm，若只靠 (a) 会被误判为 infra 故障
-      //         而降级到 vm，而 vm 同进程无内存上限，同样的死循环代码会直接把
-      //         Node 进程 OOM 掉（已实测触发 FATAL ERROR: heap out of memory）；
-      //     (c) 入参校验类（代码为空/过长），由本函数自身抛出，不经沙箱。
-      //   另有兜底：(a)(b)(c) 都不命中，且**错误发生点确实在 isolated-vm 内部**
-      //   （堆栈含 node_modules/isolated-vm 且不含本次调用的本文件帧）→ 才降级。
-      //   注意 `e.isolateError` 不是 isolated-vm 的真实 API（源码与 .d.ts 均无），
-      //   故不依赖它。
-      const stack = (e && e.stack) || '';
-      const isUserError = /<isolated-vm>|isolated-vm:\d+:\d+/.test(stack) ||
-        /memory limit/i.test(msg) ||
-        /代码为空|代码过长/.test(msg);
-      if (isUserError) throw e;
-      console.warn('[SANDBOX] isolated-vm 执行异常，降级到 vm：' + msg);
-      return runInVmFallback(src, input);
-    }
-  }
-  return runInVmFallback(src, input);
+  if (!ivm) throw sandboxUnavailableError();
+
+  return runInIsolatedVm(src, input, opts);
 }
+
 
 // ---------------------------------------------------------------------------
 // 导出
@@ -432,7 +361,11 @@ module.exports = {
   // 诊断信息（供 /health 或管理端展示）
   sandboxInfo: function () {
     return {
-      engine: ivm ? 'isolated-vm' : 'vm(fallback)',
+      // ★ 2026-09-26（审计 P0-1）：engine 只会是 'isolated-vm' 或 'disabled'，
+      //   不再出现 'vm(fallback)'；enabled=false 表示 run_code 已被 fail-closed 禁用。
+      engine: ivm ? 'isolated-vm' : 'disabled',
+      enabled: !!ivm,
+      disabledReason: ivm ? null : (ivmLoadError || 'isolated-vm unavailable'),
       loadError: ivmLoadError,
       libs: AVAILABLE_LIBS.slice(),
       memoryLimitMb: DEFAULT_MEMORY_MB,

@@ -150,9 +150,9 @@ test('weather distinguishes city-not-found from upstream failure', function () {
 
 // ── 4. 模型升级（V4.1 Flash）────────────────────────────────────────────
 test('deepseek flash model is migrated to the canonical V4.1 id', function () {
-  var registry = read('render-api/provider-registry.js');
-  assert.ok(registry.indexOf("'deepseek-flash'") >= 0,
-    'provider-registry 未包含新模型 ID deepseek-flash');
+  // ★ 2026-09-26：原先这里还断言 render-api/provider-registry.js 含 'deepseek-flash'。
+  //   该模块无任何运行时/前端消费方，已整体删除；模型 ID 的真源在 server.js 与前端，
+  //   下面两条断言已足够覆盖，故移除对被删文件的引用。
   assert.ok(server.indexOf("const DEEPSEEK_MODEL_FLASH = 'deepseek-flash'") >= 0,
     'server.js 未切换到 deepseek-flash');
   assert.ok(aiAgent.indexOf("var DEFAULT_AI_MODEL = 'deepseek-flash'") >= 0,

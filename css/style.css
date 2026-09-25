@@ -16269,3 +16269,44 @@ profile content only. Dock stays untouched.
     #panelChat .chat-msg:not(.no-anim):not(.sent-anim),
     #panelPosts .post.is-newly-published { animation: none !important; transition: none !important; }
 }
+
+/* ============================================================================
+   ★ 2026-09-26（审计 P2-24）：性能档位降级。
+   项目已有 js/performance.js 的 perf-lite / balanced / full 三档（写在
+   <html class="perf-lite">），但 CSS 从未按档位降级：style.css 有 292 处、
+   ai-agent.css 49 处、ui-shell.css 18 处 backdrop-filter，配合 20 处 infinite
+   动画在中低端机上持续占用 GPU。这里为 perf-lite 关闭模糊与常驻动画。
+
+   注意：!important 在此是必要的——它必须压过零散的组件级声明，否则降级不生效。
+   ============================================================================ */
+html.perf-lite .ai-chat-container,
+html.perf-lite .ai-panel,
+html.perf-lite .glass,
+html.perf-lite [class*="glass"],
+html.perf-lite [class*="-glass"],
+html.perf-lite [class*="backdrop"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 常驻动画：只关掉无限循环的装饰性动画，保留一次性过渡 */
+html.perf-lite *,
+html.perf-lite *::before,
+html.perf-lite *::after {
+  animation-iteration-count: 1 !important;
+}
+
+html.perf-lite .ai-streaming-soft,
+html.perf-lite .xtj-skeleton-card,
+html.perf-lite .xtj-loading-skeleton,
+html.perf-lite .xtj-magic-loading {
+  animation: none !important;
+}
+
+/* 大面积阴影/滤镜在低端机上同样昂贵，档位降级时一并收敛 */
+html.perf-lite .post-card,
+html.perf-lite .ai-tool-card,
+html.perf-lite .ai-chat-bubble {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+  filter: none !important;
+}

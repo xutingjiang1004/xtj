@@ -37,6 +37,11 @@ const REVOKED_TOKEN_MARKER = '__revoked_token__';
 // 用户自定义第三方 AI 模型（账号级同步，API Key 加密存储）
 const CUSTOM_AI_MODELS_MARKER = '__custom_ai_models__';
 
+// ★ 2026-09-26：私信「删除（对本账号隐藏）」的账号级墓碑。
+//   与前端长按菜单的「删除」配套：服务端每个账号保存一份被隐藏的消息 id 快照，
+//   换设备/清缓存后不再"删了又回来"。
+const DM_DELETED_MARKER = '__dm_deleted__';
+
 // 审计 ⚪ 单一真源：允许出现在公开信息流/搜索结果/统计中的"正常帖子" media_type 白名单。
 // system marker（上方全部 __xxx__）一律排除在公开 feed 之外；此处只描述普通用户可见类型，
 // post-query.js 消费本集合，避免新增/退役 marker 时两处白名单漏同步。
@@ -68,5 +73,6 @@ module.exports = {
   AI_ENGLISH_LEARNING_MARKER,
   REVOKED_TOKEN_MARKER,
   CUSTOM_AI_MODELS_MARKER,
+  DM_DELETED_MARKER,
   PUBLIC_POST_MEDIA_TYPES
 };

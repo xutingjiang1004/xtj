@@ -62,9 +62,6 @@ writeFile(utilsPath, utilsBody, '/** Shared window utils — loaded before core.
 // ---- 2) Split remainder into parts by stable anchors ----
 const bodyLines = lines.slice(utilsEnd);
 // Recompute absolute line numbers: body line 0 = original utilsEnd+1
-function absLine(bodyIdx0) {
-  return utilsEnd + bodyIdx0 + 1;
-}
 
 // Find anchors in full file (1-based)
 function findAbs(re, fromAbs) {

@@ -95,8 +95,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try {
       var k = String(base) + '__' + aiStorageScopeName();
       var v = localStorage.getItem(k);
-      if (v === null || v === undefined) return localStorage.getItem(base);
-      return v;
+      if (v !== null && v !== undefined) return v;
+      // ★ 2026-09-26（审计 P1-10）：**不再回退到未做账号隔离的全局旧键**。
+      //   旧键 `xtj_ai_custom_models` 里可能残留上一个账号（甚至匿名）写入的自定义
+      //   模型配置，其中 api_key 是明文第三方凭据。原实现回退读取 → B 账号能看到
+      //   A 账号的 Key，配合"编辑"回填（apiKeyInput.value = m.api_key）与"保存"
+      //   （pushServerCustomModels）还会把 A 的 Key 写进 B 的账号，属真实凭据泄露。
+      //   现在只做"清理"不做"读取"：命中全局键即删除，配置改由服务端同步路径
+      //   （syncCustomModelsFromServer）按当前账号恢复。
+      try {
+        if (localStorage.getItem(base) !== null) localStorage.removeItem(base);
+      } catch (_rm) { /* 隐私模式下可能失败，忽略 */ }
+      return null;
     } catch (e) { return null; }
   }
   function scopedStorageSet(base, value) {
@@ -143,15 +153,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var stored = (list || []).map(toStoredModel).slice(0, 12);
       scopedStorageSet(CUSTOM_MODELS_KEY, JSON.stringify(stored));
     } catch (e) {}
-  }
-  function modelsEqual(a, b) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    var keyOf = function(m) {
-      return [m && m.uid, m && m.provider, m && m.model, m && m.base_url, m && m.api_key, m && m.label, m && m.provider_label].join('|');
-    };
-    var sa = a.map(keyOf).sort().join('\n');
-    var sb = b.map(keyOf).sort().join('\n');
-    return sa === sb;
   }
   // 本地保存 + 账号同步（未登录/失败时静默降级为仅本地）
   // ★ 2026-09-24：删除的 uid 会写入本地墓碑（xtj_ai_models_deleted_uids），
@@ -860,9 +861,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
    * 所有 generate_pdf / make_file / 图片下载卡片统一走此函数，避免各处重复实现。
    */
   function buildDownloadLink(dataUrl, filename, linkText) {
+    // ★ 2026-09-26（审计 AI 前端 P2-8）：先做协议白名单。原实现只拦 data:，
+    //   当 data_url 为 `javascript:` 时 <a download> 的 download 属性不生效、
+    //   点击即执行脚本。这里仅放行 http/https/blob/data: 与站内相对路径，
+    //   其余一律降级为不可点击的纯文本。
+    var rawUrl = String(dataUrl == null ? '' : dataUrl).trim();
+    var urlOk = /^(https?:|blob:|data:)/i.test(rawUrl)
+      || (/^\.\.?\//.test(rawUrl))
+      || (/^\//.test(rawUrl) && !/^\/\//.test(rawUrl));
+    if (!urlOk) {
+      return el('span', { class: 'ai-tool-card-link is-disabled', text: (linkText || ('⬇ 下载 ' + filename)) + '（链接不可用）' });
+    }
     var a = el('a', {
       class: 'ai-tool-card-link',
-      href: String(dataUrl),
+      href: rawUrl,
       download: String(filename),
       text: linkText || ('⬇ 下载 ' + filename)
     });
@@ -878,6 +890,76 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     });
     return a;
+  }
+
+  /**
+   * ★ 2026-09-26（审计 AI 前端 P1-2）：SVG 白名单重建。
+   * 只保留图表实际用到的元素与呈现属性，丢弃全部 on* 事件与 href/xlink:href；
+   * 解析失败或结果为空串时返回 ''（调用方不渲染）。相比正则黑名单，白名单不会
+   * 因为"漏了一条规则"而被绕过。
+   */
+  var SVG_ALLOWED_TAGS = {
+    svg: 1, g: 1, rect: 1, circle: 1, ellipse: 1, line: 1, polyline: 1, polygon: 1,
+    path: 1, text: 1, tspan: 1, title: 1, desc: 1, defs: 1,
+    linearGradient: 1, radialGradient: 1, stop: 1, clipPath: 1
+  };
+  var SVG_ALLOWED_ATTRS = {
+    xmlns: 1, viewBox: 1, width: 1, height: 1, x: 1, y: 1, x1: 1, y1: 1, x2: 1, y2: 1,
+    cx: 1, cy: 1, r: 1, rx: 1, ry: 1, d: 1, points: 1, transform: 1, id: 1, class: 1,
+    fill: 1, 'fill-opacity': 1, 'fill-rule': 1, stroke: 1, 'stroke-width': 1,
+    'stroke-dasharray': 1, 'stroke-linecap': 1, 'stroke-linejoin': 1, 'stroke-opacity': 1,
+    opacity: 1, 'font-size': 1, 'font-family': 1, 'font-weight': 1, 'font-style': 1,
+    'text-anchor': 1, 'dominant-baseline': 1, dx: 1, dy: 1, offset: 1,
+    'stop-color': 1, 'stop-opacity': 1, gradientUnits: 1, gradientTransform: 1,
+    'clip-path': 1, 'stroke-miterlimit': 1
+  };
+  function sanitizeSvgMarkup(svgText) {
+    var raw = String(svgText || '').trim();
+    if (!raw || raw.length > 200000) return '';
+    try {
+      var doc = new DOMParser().parseFromString(raw, 'image/svg+xml');
+      if (!doc || !doc.documentElement) return '';
+      if (doc.getElementsByTagName('parsererror').length) return '';
+      var root = doc.documentElement;
+      if (!root || String(root.nodeName).toLowerCase() !== 'svg') return '';
+      var out = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      copySvgNode(root, out);
+      return out.outerHTML;
+    } catch (e) {
+      return '';
+    }
+  }
+  function copySvgNode(src, dest) {
+    var tag = String(src.nodeName || '').toLowerCase();
+    if (!SVG_ALLOWED_TAGS[tag]) return;
+    // 属性白名单：只复制呈现类属性，任何 on* 与 href/xlink:href 一律丢弃
+    for (var i = 0; i < src.attributes.length; i++) {
+      var attr = src.attributes[i];
+      var name = String(attr.name || '');
+      var lower = name.toLowerCase();
+      if (lower.indexOf('on') === 0) continue;
+      if (lower === 'href' || lower === 'xlink:href' || lower.indexOf('href') >= 0) continue;
+      if (lower.indexOf('style') === 0) continue;
+      if (!SVG_ALLOWED_ATTRS[name] && !SVG_ALLOWED_ATTRS[lower]) continue;
+      var val = String(attr.value == null ? '' : attr.value);
+      // 属性值兜底：拒绝可执行的伪协议（白名单属性里理论上不会出现，纵深防御）
+      if (/javascript:|vbscript:/i.test(val)) continue;
+      try { dest.setAttribute(name, val); } catch (eA) {}
+    }
+    var kids = src.childNodes || [];
+    for (var k = 0; k < kids.length; k++) {
+      var child = kids[k];
+      if (child.nodeType === 3) {
+        var textNode = document.createTextNode(String(child.nodeValue || ''));
+        dest.appendChild(textNode);
+      } else if (child.nodeType === 1) {
+        var childTag = String(child.nodeName || '').toLowerCase();
+        if (!SVG_ALLOWED_TAGS[childTag]) continue;
+        var childEl = document.createElementNS('http://www.w3.org/2000/svg', childTag);
+        copySvgNode(child, childEl);
+        dest.appendChild(childEl);
+      }
+    }
   }
 
   function notify(msg, type, duration) {
@@ -1020,13 +1102,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   /** 就地替换已有搜索条（保留 DOM 位置） */
-  function replaceSearchStatusBar(oldBar, opts) {
-    var fresh = buildSearchStatusBar(opts);
-    if (oldBar && oldBar.parentNode) {
-      oldBar.parentNode.replaceChild(fresh, oldBar);
-    }
-    return fresh;
-  }
 
   /**
    * 搜索状态收敛（★ 2026-09-13 修复"已搜完仍显示正在搜索中"）。
@@ -2171,13 +2246,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
-  function clearAiUserToken() {
-    clearAiHistoryCacheForUser();
-    try { if (typeof window.clearUserToken === 'function') window.clearUserToken(); } catch (e) {}
-    try { localStorage.removeItem('xtj_user_token'); } catch (e2) {}
-    try { sessionStorage.removeItem('xtj_user_token'); } catch (e3) {}
-    try { localStorage.removeItem('xtj_user_token_ts'); } catch (e4) {}
-  }
 
   async function getUserAuthPayload(options) {
     options = options || {};
@@ -3170,7 +3238,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function patchInnerHTML(targetEl, html) {
     if (!targetEl) return;
     // 存在用户选区时不做增量改动，避免破坏选区
-    var kids = targetEl.childNodes;
+    // ★ 2026-09-26（审计 AI 前端 P2-3）：增量补丁此前被自家的"打字光标"节点击穿——
+    //   ensureCursor() 把 .ai-stream-cursor 挂在同一个 targetEl 上，而 renderMarkdown
+    //   的输出不含该节点，于是 `next.length < kids.length` 恒成立 → 每帧仍走整段
+    //   innerHTML 替换（性能优化完全失效），且光标被抹掉后 cursor 变量不为 null，
+    //   ensureCursor() 直接 return → 光标只在第一帧可见（打字光标消失）。
+    //   这里把所有 .ai-stream-cursor 节点从现有子节点列表中剔除后再做比对，
+    //   让补丁恢复 O(1) 增量；光标由下方 ensureCursor() 负责重新挂载。
+    var kids = [];
+    try {
+      var _rawKids = targetEl.childNodes;
+      for (var _ki = 0; _ki < _rawKids.length; _ki++) {
+        var _kn = _rawKids[_ki];
+        if (_kn && _kn.nodeType === 1 && _kn.classList && _kn.classList.contains('ai-stream-cursor')) continue;
+        kids.push(_kn);
+      }
+    } catch (eKids) { kids = targetEl.childNodes; }
     if (!kids || kids.length === 0) { targetEl.innerHTML = html; return; }
     try {
       var holder = document.createElement('div');
@@ -3192,8 +3275,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         targetEl.replaceChild(want.cloneNode(true), have);
       }
       // 多余的旧节点（理论上不会走到，兜底清理）
-      while (targetEl.childNodes.length > next.length) {
-        targetEl.removeChild(targetEl.lastChild);
+      // ★ 2026-09-26（审计 AI 前端 P2-3）：清理时跳过打字光标节点，否则每帧都会
+      //   把光标删掉（且 cursor 变量仍非 null，ensureCursor 不再重挂 → 光标消失）。
+      while (true) {
+        var _contentKids = [];
+        for (var _ci = 0; _ci < targetEl.childNodes.length; _ci++) {
+          var _cn = targetEl.childNodes[_ci];
+          if (_cn && _cn.nodeType === 1 && _cn.classList && _cn.classList.contains('ai-stream-cursor')) continue;
+          _contentKids.push(_cn);
+        }
+        if (_contentKids.length <= next.length) break;
+        var _victim = _contentKids[_contentKids.length - 1];
+        if (!_victim) break;
+        targetEl.removeChild(_victim);
       }
     } catch (e) {
       try { targetEl.innerHTML = html; } catch (e2) {}
@@ -3238,6 +3332,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // V3: 末尾呼吸竖线光标 (替代闪光光点)
     var cursor = null;
     function ensureCursor() {
+      // ★ 2026-09-26（审计 AI 前端 P2-3）：光标被 innerHTML 重建抹掉后，cursor 变量
+      //   仍指向游离节点 → 原实现直接 return，光标永远不再出现（实测只在第一帧可见）。
+      //   这里检测到已脱离 DOM 就把引用置空，走下面的重新创建分支。
+      if (cursor && cursor.parentNode !== targetEl) cursor = null;
       if (cursor || finished || cancelled) return;
       try {
         cursor = document.createElement('span');
@@ -3629,15 +3727,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // 让字符串无限累积并导致每帧 renderMarkdown 的 O(n²) 渲染越来越卡。
   var AI_CONTENT_MAX_LEN = 500000;
   // 带上限追加：返回截断到 cap 以内的新字符串
-  function appendCapped(base, chunk, cap) {
-    base = base || '';
-    if (!chunk) return base;
-    cap = cap || AI_CONTENT_MAX_LEN;
-    var room = cap - base.length;
-    if (room <= 0) return base;
-    var c = String(chunk);
-    return base + (c.length > room ? c.slice(0, room) : c);
-  }
   var AI_RESEARCH_STEPS = ['拆解问题', '分析信息', '组织结构', '生成回答'];
   var AI_RESEARCH_THINKING_TEXTS = ['正在拆解问题', '正在分析上下文', '正在组织思路', '正在构建回答结构'];
   var AI_RESEARCH_RESEARCH_TEXTS = ['正在检索相关信息', '正在归纳研究要点', '正在生成研究结论'];
@@ -6310,8 +6399,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
     var userContent = el('div', { class: 'dt-msg-content' });
     // 渲染 markdown (包含图片 data URL 或文件占位)
-    // ★ 校验委托目标类型：window.renderMarkdown 可能被第三方/旧脚本覆盖为非函数，调用前必须判型
-    var renderFn = (typeof window.renderMarkdown === 'function') ? window.renderMarkdown : renderMarkdown;
+    // ★ 2026-09-26（审计 AI 前端 P2-5）：不再委托给可变的 window.renderMarkdown。
+    //   该全局全仓库从未被赋值，任何第三方脚本把它改成 `s => s` 就能让用户消息原样
+    //   进入 innerHTML（存储型/反射型 XSS）。这里固定使用本模块内的 renderMarkdown
+    //   （escape-first + 协议白名单），只做函数判型兜底。
+    var renderFn = (typeof renderMarkdown === 'function') ? renderMarkdown
+      : ((typeof window.renderMarkdown === 'function') ? window.renderMarkdown : function (s) { return escapeHtml(String(s || '')); });
     userContent.innerHTML = renderFn(displayText);
     userNode.appendChild(userContent);
     dtMessagesEl.appendChild(userNode);
@@ -7144,23 +7237,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (data.title) shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.title).slice(0, 120) }));
       var mcWrap = el('div', { class: 'ai-tool-card-chart' });
       if (data.image) {
-        var mcImg = el('img', {
-          class: 'ai-tool-card-chart-img',
-          src: String(data.image),
-          alt: String(data.title || data.chart_type || '图表'),
-          loading: 'lazy'
-        });
-        mcWrap.appendChild(mcImg);
+        // ★ 2026-09-26（审计 AI 前端 P2-8）：src 走协议白名单（此前无校验）
+        var mcImgSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(data.image)) : '';
+        if (mcImgSrc) {
+          var mcImg = el('img', {
+            class: 'ai-tool-card-chart-img',
+            src: mcImgSrc,
+            alt: String(data.title || data.chart_type || '图表'),
+            loading: 'lazy'
+          });
+          mcWrap.appendChild(mcImg);
+        }
       } else if (data.svg) {
-        // SVG 为后端自产内容，来源可信；仍做基础剔除防止脚本注入
-        // ★ 审计修复：旧过滤仅两条黑名单（<script>、on\w+=），可被
-        //   `<foreignObject><a href="javascript:…">` 绕过（不含 script/on*）。
-        //   补充 foreignObject 整块剔除与危险协议 href 中和，纵深防御。
-        mcWrap.innerHTML = String(data.svg)
-          .replace(/<script[\s\S]*?<\/script>/gi, '')
-          .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
-          .replace(/on\w+\s*=/gi, 'data-removed=')
-          .replace(/(\shref\s*=|\sxlink:href\s*=)\s*(["'])\s*(javascript|vbscript|data)\s*:[^"'>]*\2/gi, '$1"$2#"');
+        // ★ 2026-09-26（审计 AI 前端 P1-2/P2-4）：放弃"正则黑名单过滤 SVG"。
+        //   黑名单已被证明可绕：未闭合 <foreignObject> 不命中、拼接标签击穿单趟正则、
+        //   href 正则强制要求引号、实体编码 jav&#x61;script: 也不命中。这里改为
+        //   **白名单重建**：DOMParser 解析（XML 文档中的脚本不会执行），只保留
+        //   图表需要的元素/属性，逐个丢弃 on* 与任何 href/xlink:href。
+        var safeSvg = sanitizeSvgMarkup(String(data.svg));
+        if (safeSvg) mcWrap.innerHTML = safeSvg;
       }
       if (mcWrap.childNodes.length) shell.appendChild(mcWrap);
       var mcBits = [];
@@ -8447,6 +8542,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // ★ 修复（M55）：EOF 时 flush 解码器残留与半行缓冲，避免最后事件（done/error）
           // 非换行结尾时被静默丢弃（同文件 DT/Tavily 读取器均有 EOF flush）。
           buffer += decoder.decode();
+          // ★ 2026-09-26（审计 AI 前端 P2-1）：补上真正的"半行派发"。原实现只 flush 了
+          //   解码器，若最后一行没有换行结尾，split('\n') 后它会留在 buffer 里被丢弃 →
+          //   前端收不到最后一条 done/error（表现为"回复完整却提示未保存/连接中断"）。
+          //   这里补一个换行符，让它进入下面的行处理循环；buffer 已被消费为空。
+          if (buffer && buffer.charAt(buffer.length - 1) !== '\n') buffer += '\n';
           _eofReached = true;
         }
         if (!readResult.done && !S.active) {
@@ -11410,7 +11510,12 @@ function showChatMessages() {
         for (var k = 0; k < CUSTOM_MODEL_PROVIDERS.length; k++) { if (CUSTOM_MODEL_PROVIDERS[k].key === m.provider) { matched = m.provider; break; } }
         providerSelect.value = matched;
         labelInput.value = (m.label && m.label !== m.model) ? m.label : '';
-        apiKeyInput.value = m.api_key || '';
+        // ★ 2026-09-26（审计 P1-10 配套）：编辑时不再把明文 API Key 回填到输入框
+        //   （避免截图/插件/XSS 直接拿走凭据，也避免"看起来能改却改错"）。改为
+        //   "留空即保持原 Key"，需要轮换时用户自行粘贴新 Key。
+        apiKeyInput.value = '';
+        apiKeyInput.dataset.keepExisting = '1';
+        apiKeyInput.placeholder = '留空表示保持原 API Key 不变';
         modelInput.value = m.model || '';
         modelInput.dataset.auto = '0';
         baseInput.value = m.base_url || '';
@@ -11429,6 +11534,8 @@ function showChatMessages() {
         providerSelect.value = CUSTOM_MODEL_PROVIDERS[0].key;
         labelInput.value = '';
         apiKeyInput.value = '';
+        delete apiKeyInput.dataset.keepExisting;
+        apiKeyInput.placeholder = '请输入 API Key';
         modelInput.value = '';
         modelInput.dataset.auto = '1';
         baseInput.value = '';
@@ -11479,6 +11586,12 @@ function showChatMessages() {
         var p = currentProvider();
         var apiKey = String(apiKeyInput.value || '').trim();
         if (!p) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请选择服务商'; return; }
+        // ★ 2026-09-26（审计 P1-10 配套）：编辑态留空 = 沿用原有 Key（输入框已不再回填明文）
+        var keepExistingKey = false;
+        if (!apiKey && editingUid) {
+          var _prev = findCustomModel(editingUid);
+          if (_prev && _prev.api_key) { apiKey = _prev.api_key; keepExistingKey = true; }
+        }
         if (!apiKey) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入 API Key'; return; }
         var model = String(modelInput.value || '').trim();
         var isCustom = p.key === 'custom';
@@ -11515,7 +11628,7 @@ function showChatMessages() {
           updateModelUI(true);
           renderList();
           resetForm();
-          notify('已保存修改：' + label);
+          notify('已保存修改：' + label + (keepExistingKey ? '（API Key 未变更）' : ''));
         } else {
           record.uid = genCustomModelUid();
           customs.push(record);

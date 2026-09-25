@@ -27,7 +27,9 @@ var mime = {
 
 // 敏感路径拒绝前缀：按 URL 路径段匹配，命中直接 403，防止源码/凭据/构建脚本泄露
 // ★ 2026-09-04 审计修复：补 audit-reports（审计报告含内网/弱口令细节）
-var SENSITIVE_SEGMENTS = ['.git', '.env', 'node_modules', 'render-api', 'tests', 'scripts', 'mcp-servers', 'supabase', 'backups', 'output', 'audit-reports'];
+// ★ 2026-09-26 深度审计修复：补 downloads / miniprogram / .commandcode / docs 等
+//   （与 render-api/server.js 的黑名单保持同一份口径，避免两处漂移）
+var SENSITIVE_SEGMENTS = ['.git', '.env', 'node_modules', 'render-api', 'tests', 'scripts', 'mcp-servers', 'supabase', 'backups', 'output', 'audit-reports', 'downloads', 'miniprogram', '.commandcode', '.workbuddy', 'docs'];
 function hasSensitiveSegment(urlPath) {
   // ★ 修复：统一反斜杠并大小写不敏感比较（此前 %5c 解码后的 \\ 路径与 /.ENV 等大小写变体可绕过名单）
   var normalizedPath = String(urlPath || '').replace(/\\/g, '/').toLowerCase();
@@ -38,10 +40,14 @@ function hasSensitiveSegment(urlPath) {
 //   不在目录黑名单内，须按文件粒度拒绝）：
 //   - *.sql（含仓库根 SUPABASE_FIX_051.sql 等修复脚本，可能携带生产修复 SQL）
 //   - package.json / package-lock.json（依赖元信息与潜在 scripts 探测面）
+// ★ 2026-09-26 深度审计：补 .txt/.ps1/.cmd/.exe/.zip/.log/.env/.yml 等一次性探测
+//   输出与本机脚本；微信平台校验文件 /MP_verify_*.txt 必须放行。
 function hasSensitiveFile(urlPath) {
   var lower = String(urlPath || '').toLowerCase();
+  if (/\/mp_verify_[a-z0-9_-]{1,64}\.txt$/.test(lower)) return false;
   if (/\.sql$/.test(lower)) return true;
   if (/(^|\/)package(-lock)?\.json$/.test(lower)) return true;
+  if (/\.(txt|ps1|cmd|exe|zip|log|yml|yaml|md|bak|pem|env)$/.test(lower)) return true;
   return false;
 }
 
