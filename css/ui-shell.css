@@ -463,9 +463,21 @@
    conversation split.  Keep the existing single-pane selection model until a
    fine-pointer desktop has real room for both columns. */
 @media (max-width: 767.98px) {
+  /* ★ 2026-09-25 修复（审计 H-5，移动端核心问题）：这里原本是 display:block !important +
+     height:auto !important，本意大概是"手机上不做两栏"，但它同时压掉了
+     style.css:2917 的 .dock-chat-container{display:flex;flex-direction:column;height:100%;min-height:0}。
+     容器高度退化成"内容高度"后，.chat-messages 的 flex:1;min-height:0;overflow-y:auto 拿不到
+     可分配高度，滚动整块落到了 .dock-panel 上 —— 表现就是：打开会话时最新消息不在视野内
+     （必须手动一路滑到底）、输入框不吸底、#dockChatJumpLatest 失效。
+     iOS Safari / 微信 web-view 上必现。单栏与双栏的切换本来就应该由下面几条
+     .chat-view.hidden 规则完成，不需要杀掉容器高度。
+     （已核实：≤767.98px 区间内没有其它规则再改这个容器的 display/height；
+      ui-shell.css:905/1081 的 min-height 都在 min-width:1024px 块里，不影响手机。） */
   #panelChat .dock-chat-container {
-    display: block !important;
-    height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    min-height: 0 !important;
   }
 
   #panelChat #dockChatListView,

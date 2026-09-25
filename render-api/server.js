@@ -15029,15 +15029,19 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
 });
 
 // POST /api/dm/send - 发送私信（后端认证写入，禁止前端直连 Supabase）
-async function findDmMessageByActorKey(sender, actorKey) {
+// ★ 2026-09-25 修复（审计 B-1）：actor_key 由「kind + storage_path」决定，本身**不含收件人**。
+//   旧实现对账只按 actor_key + 发件人查，于是「同一个文件先发给 B、再发给 C」时，
+//   第二次会命中发给 B 的那条消息并直接返回 idempotent:true —— 对 C 的写入从未发生，
+//   调用方却以为发送成功（前端还会把它塞进 C 的会话）。因此对账必须同时限定收件人。
+async function findDmMessageByActorKey(sender, actorKey, targetUser) {
   try {
-    return await supabase.from('posts')
+    var query = supabase.from('posts')
       .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
       .eq('actor_key', actorKey)
       .eq('user_name', sender)
-      .eq('media_type', DM_MARKER)
-      .limit(1)
-      .maybeSingle();
+      .eq('media_type', DM_MARKER);
+    if (targetUser) query = query.eq('media_url', targetUser);
+    return await query.limit(1).maybeSingle();
   } catch (error) {
     return { data: null, error: error };
   }
@@ -15166,24 +15170,61 @@ function sniffDmMediaMagic(buf, kind) {
   return { ok: false, error: '不支持的媒体类型' };
 }
 
-function dmUploadBudgetPrecheck(req, res, next) {
+// ★ 2026-09-25 修复（审计 H-8）：并发名额与配额必须在请求体**进入内存之前**预占。
+//   旧顺序：authenticateUser → rateLimit → dmUploadBudgetPrecheck → express.raw(55mb)
+//           → handler 内才 tryConsumeDmMediaQuota / acquireDmMediaSlot。
+//   等于先把最多 55MB 读进内存、再判断要不要收；而旧的 precheck 对 chunked（无
+//   Content-Length）直接放行，可用不定长请求绕过体积与配额预检。单 IP 并发 60 个
+//   55MB 请求即可把进程 RSS 推到数 GB（Render 常见 512MB–2GB 实例直接 OOM 重启）。
+//   现在：强制要求 Content-Length（浏览器对 File/Blob body 一定会带）→ 单文件上限预检
+//   → 预占配额 → 预占并发名额 → 才进入 express.raw 收 body。
+//   所有预占资源统一挂在 res 的 finish/close 上兜底归还，因此 express.raw 因超限抛 413、
+//   客户端中途断开、handler 提前 return 都不会泄漏名额或误扣配额（finalize 幂等）。
+function dmUploadReserve(req, res, next) {
+  const uploader = String(req.userName || '');
+  if (!uploader) return res.status(401).json({ error: '未登录', code: 'auth_expired' });
+
   const declared = parseInt(req.headers['content-length'], 10);
-  if (!isFinite(declared) || declared <= 0) return next(); // chunked：体积不可知，交给处理器兜底
+  if (!isFinite(declared) || declared <= 0) {
+    // 体积不可知就无法在收 body 前预占配额与内存，直接拒绝（不再放行 chunked）
+    return res.status(411).json({ error: '缺少 Content-Length，无法接收上传', code: 'length_required' });
+  }
   if (declared > DM_UPLOAD_MAX_SINGLE_BYTES) {
     return res.status(400).json({ error: '文件过大，单个不超过 50MB', code: 'file_too_large' });
   }
-  if (declared > dmMediaQuotaRemainingBytes(req.userName)) {
+  if (!tryConsumeDmMediaQuota(uploader, declared)) {
     return res.status(429).json({ error: '媒体上传已达每小时容量上限，请稍后再试', code: 'dm_quota_exceeded' });
   }
+  const release = acquireDmMediaSlot(uploader);
+  if (!release) {
+    refundDmMediaQuota(uploader, declared);
+    return res.status(429).json({ error: '同时处理的媒体过多，请稍后再试', code: 'dm_upload_busy' });
+  }
+
+  const reservation = { release: release, charged: declared, committed: false, done: false };
+  reservation.finalize = function() {
+    if (reservation.done) return;
+    reservation.done = true;
+    if (!reservation.committed && reservation.charged > 0) {
+      try { refundDmMediaQuota(uploader, reservation.charged); } catch (eRefund) {
+        console.error('[dm-upload] quota refund failed:', eRefund && eRefund.message);
+      }
+    }
+    try { reservation.release(); } catch (slotErr) {
+      console.error('[dm-upload] release slot failed:', slotErr && slotErr.message);
+    }
+  };
+  req.__dmUploadReservation = reservation;
+  res.on('finish', reservation.finalize);
+  res.on('close', reservation.finalize);
   return next();
 }
 
-app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadBudgetPrecheck, express.raw({ type: 'application/octet-stream', limit: '55mb' }), async (req, res) => {
-  // 两个资源（配额预占 / 并发名额）必须在**每一条**返回路径上归还，集中放 finally。
-  // 写在各个分支里必然漏，一漏就是永久泄漏一个名额 + 误扣一份配额。
-  let quotaCharged = 0;
-  let quotaCommitted = false;
-  let releaseSlot = null;
+app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadReserve, express.raw({ type: 'application/octet-stream', limit: '55mb' }), async (req, res) => {
+  // ★ 2026-09-25（审计 H-8）：配额与并发名额已由 dmUploadReserve 在收 body **之前**预占，
+  //   并挂在 res 的 finish/close 上兜底归还（见该中间件注释）。这里只保留「提交」语义：
+  //   字节真正落盘后把 reservation.committed 置真，finalize 便不再回滚配额。
+  const reservation = req.__dmUploadReservation;
   let uploader = '';
   try {
     uploader = String(req.userName || '');
@@ -15213,19 +15254,13 @@ app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadBud
       return res.status(400).json({ error: 'Unsupported media kind', code: 'invalid_media_kind' });
     }
 
-    // ④ 配额预占（在写入存储**之前**），失败即拒，不计入 quotaCharged。
-    if (!tryConsumeDmMediaQuota(uploader, buf.length)) {
-      return res.status(429).json({ error: '媒体上传已达每小时容量上限，请稍后再试', code: 'dm_quota_exceeded' });
-    }
-    quotaCharged = buf.length;
-
-    // ⑤ per-user 并发闸：拿不到名额立即 429，不排队（排队＝继续占着 50MB 内存）
-    releaseSlot = acquireDmMediaSlot(uploader);
-    if (!releaseSlot) {
-      return res.status(429).json({ error: '同时处理的媒体过多，请稍后再试', code: 'dm_upload_busy' });
+    // ④ 配额与并发名额已由 dmUploadReserve 预占（见路由中间件顺序）。
+    //    这里只做一致性校验：实收字节超过声明长度说明请求被裁剪/伪造，直接拒绝。
+    if (reservation && buf.length > reservation.charged) {
+      return res.status(400).json({ error: '上传数据与声明长度不符', code: 'INVALID_INPUT' });
     }
 
-    // ⑥ 内容嗅探：不信任自报 mime。
+    // ⑤ 内容嗅探：不信任自报 mime。
     //    图片走 sharp 解码验真（与照片墙一致）；音频/视频没有可靠的纯 JS 解码器，
     //    改用「magic bytes 与声明 kind 一致」做最小校验——至少拦住把 SVG/HTML
     //    改名成 video/mp4 上传这类最典型的手脚。
@@ -15274,7 +15309,7 @@ app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadBud
       return res.status(503).json({ error: '媒体上传失败，请稍后重试', code: 'dm_upload_failed', retryable: true });
     }
     // 字节确实落盘 → 额度不再回滚
-    quotaCommitted = true;
+    if (reservation) reservation.committed = true;
 
     const publicUrl = supabase.storage.from('uploads').getPublicUrl(storagePath).data.publicUrl;
     // 注意：这里只上传，**不**登记 dm_media_uploads 注册表。
@@ -15285,11 +15320,9 @@ app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadBud
     console.error('[dm-upload] failed:', e && e.message);
     return res.status(500).json({ error: '媒体上传失败，请稍后重试', code: 'dm_upload_failed', retryable: true });
   } finally {
-    if (releaseSlot) {
-      try { releaseSlot(); } catch (slotErr) { console.error('[dm-upload] release slot failed:', slotErr && slotErr.message); }
-      releaseSlot = null;
-    }
-    if (quotaCharged > 0 && !quotaCommitted) refundDmMediaQuota(uploader, quotaCharged);
+    // 正常路径由 res 的 finish 事件归还；这里再兜一层，保证异常/提前 return 时
+    // 立刻释放并发名额，而不必等整个响应生命周期结束。finalize 是幂等的。
+    if (reservation) reservation.finalize();
   }
 });
 
@@ -15404,6 +15437,16 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       }
       var pathResult = validateDmStoragePath(storagePath);
       if (!pathResult.ok) return res.status(400).json({ error: pathResult.error, code: pathResult.code });
+      // ★ 2026-09-25 安全修复（审计 H-7）：/api/dm/upload 与 /api/dm/upload/abort 都校验了
+      //   chat/<uidHash>_ 归属，唯独 /api/dm/send 没有。而注册表是「第一个认领者即确权」
+      //   （上传阶段刻意不登记，见该 handler 尾部注释），缺少这一层就等于任何登录用户
+      //   只要知道完整路径，就能抢先认领他人的上传对象，且原主此后会被 403
+      //   media_not_owned 永久挡住。这里补齐与另外两个入口完全一致的归属校验。
+      var dmUidHash = crypto.createHash('sha256').update(String(sender)).digest('hex').slice(0, 12);
+      var dmOwnCheck = validateDmUploadOwnership(pathResult.storagePath, dmUidHash);
+      if (!dmOwnCheck.ok) {
+        return res.status(400).json({ error: dmOwnCheck.error, code: dmOwnCheck.code || 'media_not_owned' });
+      }
       var kindResult = validateDmMediaKind(mediaKind, mimeType);
       if (!kindResult.ok) return res.status(400).json({ error: kindResult.error, code: kindResult.code });
       if (!ALLOWED_KINDS[kindResult.kind] || ALLOWED_KINDS[kindResult.kind] !== kindResult.actorPrefix) {
@@ -15450,7 +15493,9 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       if (registryRow.status === 'attached' && registryRow.message_id) {
         var existingMessage = await supabase.from('posts')
           .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
-          .eq('id', registryRow.message_id).eq('user_name', sender).eq('media_type', DM_MARKER).maybeSingle();
+          // 审计 B-1：必须同时限定收件人，否则同一对象改发给别人会被误判为"已发送成功"
+          .eq('id', registryRow.message_id).eq('user_name', sender).eq('media_type', DM_MARKER)
+          .eq('media_url', targetUser).maybeSingle();
         if (existingMessage.error) return res.status(503).json({ error: 'Media message lookup failed', code: 'media_message_lookup_retry', retryable: true });
         if (existingMessage.data) {
           if (existingMessage.data.actor_key !== actorKey) {
@@ -15463,7 +15508,7 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       // Reconcile a message committed immediately before a previous request
       // crashed while attaching the registry row. This check is deliberately
       // before taking a new lease, so a retry never creates a second post.
-      var actorMessage = await findDmMessageByActorKey(sender, actorKey);
+      var actorMessage = await findDmMessageByActorKey(sender, actorKey, targetUser);
       if (actorMessage.error) {
         return res.status(503).json({ error: 'Media message lookup failed', code: 'media_message_lookup_retry', retryable: true });
       }
@@ -15472,7 +15517,7 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
           return res.status(409).json({ error: 'Media registry points to another message', code: 'media_registry_conflict', retryable: true });
         }
         var reconciledAttach = await attachDmMediaRegistry(registryRow, actorMessage.data.id);
-        if (!reconciledAttach.ok && !reconciledAttach.updated) {
+        if (!reconciledAttach.ok || !reconciledAttach.updated) {
           return res.status(503).json({ error: 'Media registry could not be repaired', code: 'media_registry_update_retry', retryable: true });
         }
         return res.json({ ok: true, message: actorMessage.data, idempotent: true, media_registry_pending: !reconciledAttach.updated });
@@ -15499,13 +15544,13 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
 
       // A stale lease can be reclaimed only after another actor has had a
       // final chance to reveal a committed message.
-      actorMessage = await findDmMessageByActorKey(sender, actorKey);
+      actorMessage = await findDmMessageByActorKey(sender, actorKey, targetUser);
       if (actorMessage.error) {
         return res.status(503).json({ error: 'Media message lookup failed', code: 'media_message_lookup_retry', retryable: true });
       }
       if (actorMessage.data) {
         var reclaimedAttach = await attachDmMediaRegistry(registryRow, actorMessage.data.id);
-        if (!reclaimedAttach.ok && !reclaimedAttach.updated) {
+        if (!reclaimedAttach.ok || !reclaimedAttach.updated) {
           return res.status(503).json({ error: 'Media registry could not be repaired', code: 'media_registry_update_retry', retryable: true });
         }
         return res.json({ ok: true, message: actorMessage.data, idempotent: true, media_registry_pending: !reclaimedAttach.updated });
@@ -15516,7 +15561,12 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       parsedPayload = JSON.parse(content);
     } catch (_) {}
     if (parsedPayload && typeof parsedPayload === 'object' && !Array.isArray(parsedPayload)) {
-      if (!parsedPayload.read_at) parsedPayload.read_at = null;
+      // ★ 2026-09-25 修复（审计 M-3）：read_at / withdrawn 是服务端权威字段。旧实现只在
+      //   read_at 为空时补 null，客户端自带真值会被原样保留 —— 发送方可在发送时就把消息
+      //   标成「已读」，既伪造回执，又让收件人的未读计数（依据 read_at 判定）少算。
+      //   withdrawn 同理可被伪造成「撤回态」。这里一律以服务端为准：发送必然是未读、未撤回。
+      parsedPayload.read_at = null;
+      delete parsedPayload.withdrawn;
       // P6: 移除客户端可能传入的 media 字段，替换为后端生成的 mediaPayload
       if (mediaPayload) {
         parsedPayload.media = mediaPayload;
@@ -15558,13 +15608,13 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     if (insertErr || !inserted || !inserted.id) {
       console.error('[API] dm send insert error:', insertErr);
       if (storagePath) {
-        var committedAfterError = await findDmMessageByActorKey(sender, actorKey);
+        var committedAfterError = await findDmMessageByActorKey(sender, actorKey, targetUser);
         if (committedAfterError.error) {
           return res.status(503).json({ error: 'Message save outcome is unknown; please retry', code: 'DM_COMMIT_UNKNOWN', retryable: true });
         }
         if (committedAfterError.data) {
           var committedAttach = await attachDmMediaRegistry(registryRow, committedAfterError.data.id);
-          if (!committedAttach.ok && !committedAttach.updated) {
+          if (!committedAttach.ok || !committedAttach.updated) {
             return res.status(503).json({ error: 'Media registry could not be repaired', code: 'media_registry_update_retry', retryable: true });
           }
           return res.json({ ok: true, message: committedAfterError.data, idempotent: true, media_registry_pending: !committedAttach.updated });

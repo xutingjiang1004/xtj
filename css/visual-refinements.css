@@ -110,9 +110,19 @@
 [data-theme="dark"] .btn-ghost:hover {
   background: var(--xtj-dark-surface);
 }
-[data-theme="dark"] .chat-input-wrap {
+/* ★ 2026-09-25 修复（审计 H-6）：下面的深色规则与 style.css:1626 的浅色
+   .chat-input-wrap{background:rgba(255,255,255,0.3);border-color:rgba(255,255,255,0.4)}
+   权重完全相同（0,2,0）且都没有 !important，谁生效只取决于加载顺序 —— 本文件在
+   style.css 之后加载，于是深色变量被浅色玻璃层反向覆盖：深色模式下聊天输入框发白、
+   与底色几乎没有边界。这里引入 #panelChat（id 参与权重）彻底摆脱加载顺序依赖。 */
+[data-theme="dark"] #panelChat .chat-input-wrap {
   background: var(--xtj-dark-surface-soft);
   border-color: var(--xtj-dark-border);
+}
+[data-theme="dark"] #panelChat .chat-input-wrap:focus-within {
+  background: var(--xtj-dark-surface);
+  border-color: rgba(52, 211, 153, 0.5);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.12);
 }
 [data-theme="dark"] .chat-list-item:hover {
   background: var(--xtj-dark-surface-soft);

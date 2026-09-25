@@ -424,6 +424,25 @@
             }
             window.markMessagesRead = markMessagesRead;
 
+            // ★ 2026-09-25 修复（审计 M-7）：未读口径单一来源。
+            //   会话列表（loadDockChatList）与导航角标（updateUnreadBadge）此前各自实现了一份
+            //   聚合，条数上限还不一样（180 vs 200），切换 tab 时数字会跳动。
+            //   规则：只统计"发给我的且未读"的消息，按发件人（会话）分组，每个会话封顶 99，再求和。
+            function aggregateDmUnread(rows) {
+                var bySender = {};
+                (Array.isArray(rows) ? rows : []).forEach(function(m) {
+                    if (!m || m.media_url !== window.currentUser) return;
+                    if (window.isMsgReadByMe(m)) return;
+                    var sender = m.user_name;
+                    if (!sender) return;
+                    bySender[sender] = Math.min((bySender[sender] || 0) + 1, 99);
+                });
+                var total = 0;
+                Object.keys(bySender).forEach(function(k) { total += bySender[k]; });
+                return { total: total, bySender: bySender };
+            }
+            window.aggregateDmUnread = aggregateDmUnread;
+
             function subscribeToMessages() {
                 // H-10 修复：sb 在 SUPABASE_URL/ANON_KEY 缺失时为 null，
                 // 缺守卫会抛 TypeError（与 subscribeToComments 对齐）
@@ -670,59 +689,48 @@
 
             function setUnreadBadgeCount(cnt) {
                 var badge = document.getElementById('navChatBadge');
+                var count = Number(cnt) || 0;
                 if (!badge) return;
-                if (cnt > 0) {
-                    badge.textContent = cnt > 99 ? '99+' : cnt;
+                if (count > 0) {
+                    badge.textContent = count > 99 ? '99+' : String(count);
                     badge.classList.add('show');
                 } else {
+                    // ★ 2026-09-25 修复（审计 M-11）：清零时必须同时清空文本。
+                    //   desktop-shell.js 的 syncChatBadge 是按 textContent 把导航角标镜像到
+                    //   桌面侧栏 #desktopChatBadge 的，只摘 .show 会让侧栏长期显示过期未读数。
+                    badge.textContent = '';
                     badge.classList.remove('show');
                 }
             }
 
-            async function updateUnreadBadge() {
-                var badge = document.getElementById('navChatBadge');
-                if (!window.currentUser) {
-                    if (badge) badge.classList.remove('show');
-                    return;
-                }
-                try {
-                    // ★ 2026-09-25 修复：sb 可能因 SDK 未就绪而为 null，直接 sb.from(...) 会抛
-                    //   TypeError 被下面的 catch 静默吞掉，导致未读角标长期不更新。
-                    //   这里补一次惰性初始化，仍不可用则安全返回。
-                    var _badgeClient = sb || window.sb || null;
-                    if (!_badgeClient && typeof initSupabaseClient === 'function') {
-                        try { initSupabaseClient(); } catch (eInit) {}
-                        _badgeClient = sb || window.sb || null;
-                    }
-                    if (!_badgeClient) return;
-                    // ★ 修复：口径对齐 —— loadDockChatList 用最近 180 条按会话聚合再求和，
-                    // 这里原为 120 条直接逐条计数（去重 120 条），两处结果不一致导致切换 tab 时数字跳动。
-                    // 现将查询上限提高到 200，并同样先按会话（media_url）聚合每条会话的未读数
-                    // （封顶 99），再对所有会话求和，与 loadDockChatList 的统计口径保持一致。
-                    var result = await _badgeClient.from('posts')
-                        .select('id, user_name, content, views, created_at')
-                        .eq('media_type', DM_MARKER)
-                        .eq('media_url', window.currentUser)
-                        .order('created_at', { ascending: false })
-                        .limit(200);
+            var _dmUnreadFetchedAt = 0;
+            // 供 loadDockChatList 在写入角标后打点，避免紧随其后再打一次同样的请求
+            window.__xtjNoteDmUnreadFresh = function() { _dmUnreadFetchedAt = Date.now(); };
 
-                    var data = result.data;
-                    var error = result.error;
-                    if (error) return;
-                    var convUnreadMap = {};
-                    (data || []).forEach(function(m) {
-                        var sender = m && m.user_name;
-                        if (!sender) return;
-                        if (window.isMsgReadByMe(m)) return;
-                        convUnreadMap[sender] = Math.min((convUnreadMap[sender] || 0) + 1, 99);
-                    });
-                    var cnt = 0;
-                    Object.keys(convUnreadMap).forEach(function(sender) {
-                        cnt += convUnreadMap[sender];
-                    });
-                    setUnreadBadgeCount(cnt);
-                } catch(e) {}
+            async function updateUnreadBadge() {
+                if (!window.currentUser) { setUnreadBadgeCount(0); return; }
+                // ★ 2026-09-25 修复（审计 H-2，严重）：旧实现用浏览器端 anon key 直连
+                //   Supabase 查 posts 里 media_type = '__dm__' 的行来数未读。但 posts 的 RLS
+                //   白名单（migrations/015、035）**显式排除了 __dm__** —— 该查询不报错，
+                //   只是被 RLS 过滤成空数组，于是每次调用都把角标"成功地"写成 0。
+                //   而它在启动后 90ms、每次轮询、每次发消息/标记已读时都会跑，等于反复
+                //   抹掉 loadDockChatList 算出来的正确数字 —— 用户因此漏消息。
+                //   未读数是安全敏感数据，必须走后端（service_role）。这里改为复用
+                //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
+                if (Date.now() - _dmUnreadFetchedAt < 5000) return;
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/dm/list');
+                    if (!resp.ok) return;
+                    var result = await resp.json().catch(function() { return {}; });
+                    if (!result || !result.ok) return;
+                    _dmUnreadFetchedAt = Date.now();
+                    setUnreadBadgeCount(aggregateDmUnread(result.data || []).total);
+                } catch (e) {
+                    // 网络失败时保留上一次的角标 —— 清零等于谎报"没有未读"
+                }
             }
+            window.updateUnreadBadge = updateUnreadBadge;
+            window.startDMPolling = startDMPolling;
 
             // ===================== 举报回复通知检测 =====================
             var reportReplyPollTimer = null;

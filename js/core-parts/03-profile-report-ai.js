@@ -559,6 +559,11 @@
                 window._lastKnownUser = '';
                 window.currentUserInfoSnapshot = null;
                 _chatCache = {};
+                // ★ 2026-09-25 修复（审计 H-4）：连渲染态一起清。只清内存缓存不够——
+                //   桌面分屏下 #dockChatMessages 里的气泡仍留在 DOM 中，且
+                //   renderDockChatDesktopEmptyState 会因 dataset.chatUser 未变而跳过重绘，
+                //   结果是登出后仍能看到上一个账号的完整聊天记录。
+                try { if (typeof window.__xtjResetChatPanels === 'function') window.__xtjResetChatPanels(); } catch(e) {}
                 // M-2d: 登出时复位聊天面板会话状态，防止切换账号后残留上一账号的
                 // 聊天标题/渲染签名，导致串号或列表不刷新
                 try { dockChatActiveUser = null; } catch(e) {}
