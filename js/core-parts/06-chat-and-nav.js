@@ -918,12 +918,14 @@
                     var userName = node.getAttribute('data-chat-user');
                     if (!userName || userName === otherUser) return;
                     var previewNode = node.querySelector('.cli-preview');
-                    var timeNode = node.querySelector('.cli-time');
                     var badgeNode = node.querySelector('.cli-badge');
                     convs.push({
                         other_user: userName,
                         last_message: previewNode ? previewNode.textContent : '',
-                        last_time: node.getAttribute('data-last-time') || (timeNode ? timeNode.textContent : ''),
+                        // ★ 2026-09-25 修复：只认 data-last-time（权威值）。旧实现会回退去读
+                        //   **渲染后的时间文本**，一旦某行被写成 "NaN/NaN NaN:NaN"，这个坏值
+                        //   又会被当成时间读回来，从此永久污染该行（而且它还是排序依据）。
+                        last_time: node.getAttribute('data-last-time') || '',
                         unread: badgeNode ? parseInt(badgeNode.textContent, 10) || 0 : 0
                     });
                 });
@@ -1161,7 +1163,14 @@
                         function buildDockChatRowMarkup(message, avatars, disableAnim) {
                 var sent = message.user_name === currentUser;
                 var avatarHtml = sent ? avatars.mine : avatars.other;
-                var readStatus = sent ? (isMsgReadByMe(message) ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
+                // ★ is-read 类给「已读」配上配色/微动画（ui-enhance.css 里有规则）。
+                //   原先由 ux-features.js 那套重复的长按菜单在**绑定时刻**扫描一遍，
+                //   但那时还没有任何消息，等于从未生效；现在直接在渲染时打上。
+                var readStatus = sent
+                    ? (isMsgReadByMe(message)
+                        ? '<span class="msg-read-status is-read">已读</span>'
+                        : '<span class="msg-read-status">未读</span>')
+                    : '';
                 
                 var payload = getDMMessagePayload(message);
                 var isWithdrawn = payload && payload.withdrawn;
@@ -1556,6 +1565,8 @@
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
                 dockChatSending = true; inp.value = '';
+                // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
+                try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 var optimisticCreatedAt = new Date().toISOString();
@@ -1760,6 +1771,7 @@
                 }
                 finally {
                     dockChatSending = false;
+                    try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(false); } catch (e) {}
                 }
             }
 
@@ -1844,7 +1856,8 @@
                 forward: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h13"/><path d="M13 8l4 4-4 4"/></svg>',
                 share: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>',
                 delete: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg>',
-                resend: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 5.3"/><path d="M20 5v6h-6"/></svg>'
+                resend: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 5.3"/><path d="M20 5v6h-6"/></svg>',
+                'ask-ai': '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 4.3 4.6.5-3.4 3 1 4.6-4.1-2.3-4.1 2.3 1-4.6-3.4-3 4.6-.5z"/></svg>'
             };
 
             function buildDockMessageActions(message) {
@@ -1867,6 +1880,8 @@
                 if (canWithdraw) actions.push({ id: 'withdraw', label: '撤回' });
                 if (!withdrawn && value) actions.push({ id: 'forward', label: '转发' });
                 if (value) actions.push({ id: 'share', label: '分享' });
+                // ★ 由 ux-features.js 的重复长按菜单迁移过来（那里已停用），保留"问小猫"这个能力
+                if (!withdrawn && value) actions.push({ id: 'ask-ai', label: '问小猫' });
                 actions.push({ id: 'delete', label: '删除' });
                 return actions;
             }
@@ -1934,32 +1949,26 @@
                 closeDockMessageActions();
                 closeDockForwardPicker();
 
-                // 定位基准用整行（气泡 + 头像）：长按传进来的是气泡、右键传进来的是行，
-                //   两种都要贴对位置。
-                var anchor = rowEl;
-                if (anchor && anchor.classList && anchor.classList.contains('chat-msg') && anchor.closest) {
-                    anchor = anchor.closest('.chat-msg-row') || anchor;
-                }
+                var overlay = document.createElement('div');
+                overlay.className = 'dm-action-overlay';
+                var panel = document.createElement('div');
+                panel.className = 'dm-action-panel';
+                panel.setAttribute('role', 'dialog');
+                panel.setAttribute('aria-modal', 'true');
+                panel.setAttribute('aria-label', '消息操作');
 
-                var layer = document.createElement('div');
-                layer.className = 'dm-bar-layer';
-
-                var bar = document.createElement('div');
-                bar.className = 'dm-bar';
-                bar.setAttribute('role', 'menu');
-                bar.setAttribute('aria-label', '消息操作');
-
+                var grid = document.createElement('div');
+                grid.className = 'dm-action-grid';
                 actions.forEach(function(action) {
                     var btn = document.createElement('button');
                     btn.type = 'button';
-                    btn.className = 'dm-bar-item';
-                    btn.setAttribute('role', 'menuitem');
+                    btn.className = 'dm-action-item';
                     btn.setAttribute('data-dm-action', action.id);
                     var icon = document.createElement('span');
-                    icon.className = 'dm-bar-icon';
+                    icon.className = 'dm-action-icon';
                     icon.innerHTML = DM_ACTION_ICONS[action.id] || '';
                     var label = document.createElement('span');
-                    label.className = 'dm-bar-label';
+                    label.className = 'dm-action-label';
                     label.textContent = action.label;
                     btn.appendChild(icon);
                     btn.appendChild(label);
@@ -1968,45 +1977,26 @@
                         ev.stopPropagation();
                         runDockMessageAction(action.id, message);
                     });
-                    bar.appendChild(btn);
+                    grid.appendChild(btn);
                 });
+                panel.appendChild(grid);
 
-                layer.appendChild(bar);
-                layer.addEventListener('click', function(ev) { if (ev.target === layer) closeDockMessageActions(); });
-                document.body.appendChild(layer);
-                _dmActionSheet = layer;
+                var cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.className = 'dm-action-cancel';
+                cancelBtn.textContent = '取消';
+                cancelBtn.addEventListener('click', function(ev) {
+                    ev.preventDefault(); ev.stopPropagation(); closeDockMessageActions();
+                });
+                panel.appendChild(cancelBtn);
 
-                // 先量再摆：优先贴在气泡上方，上方空间不够就翻到下方；左右夹在视口内。
-                try {
-                    var rect = (anchor && anchor.getBoundingClientRect) ? anchor.getBoundingClientRect() : null;
-                    // 注意用 offsetWidth/offsetHeight：此刻 .dm-bar 还没加 .active，
-                    //   transform: scale(0.94) 会让 getBoundingClientRect 量小 6%，
-                    //   据此居中就会偏；offset* 是布局尺寸，不受 transform 影响。
-                    var barW = bar.offsetWidth || 0;
-                    var barH = bar.offsetHeight || 0;
-                    var vw = window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 0;
-                    var vh = window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 0;
-                    var left = rect ? (rect.left + rect.width / 2 - barW / 2) : (vw / 2 - barW / 2);
-                    var top = rect ? (rect.top - barH - 8) : 80;
-                    var below = false;
-                    if (top < 8) {
-                        top = rect ? Math.min(rect.bottom + 8, Math.max(8, vh - barH - 8)) : 8;
-                        below = true;
-                    }
-                    left = Math.max(8, Math.min(left, Math.max(8, vw - barW - 8)));
-                    bar.style.left = Math.round(left) + 'px';
-                    bar.style.top = Math.round(top) + 'px';
-                    bar.style.transformOrigin = '50% ' + (below ? '0%' : '100%');
-                } catch (ePos) {}
-
-                requestAnimationFrame(function() { try { bar.classList.add('active'); } catch (e) {} });
-                // 浮条用的是屏幕坐标，消息列表一滚就会和气泡脱节 —— 直接关掉最干净
-                var dmScroller = document.getElementById('dockChatMessages');
-                if (dmScroller) dmScroller.addEventListener('scroll', closeDockMessageActions, { passive: true, once: true });
-                window.addEventListener('resize', closeDockMessageActions, { once: true });
+                overlay.appendChild(panel);
+                overlay.addEventListener('click', function(ev) { if (ev.target === overlay) closeDockMessageActions(); });
+                document.body.appendChild(overlay);
+                _dmActionSheet = overlay;
+                requestAnimationFrame(function() { try { overlay.classList.add('active'); } catch (e) {} });
                 document.addEventListener('keydown', onDmActionKeydown, true);
             }
-
             function runDockMessageAction(actionId, message) {
                 closeDockMessageActions();
                 if (actionId === 'copy') { doCopyDmMessage(message); return; }
@@ -2015,6 +2005,7 @@
                 if (actionId === 'forward') { openDockForwardPicker(message); return; }
                 if (actionId === 'share') { doShareDmMessage(message); return; }
                 if (actionId === 'resend') { resendDmMessage(message); return; }
+                if (actionId === 'ask-ai') { askAiAboutDmMessage(message); return; }
             }
 
             function doCopyDmMessage(message) {
@@ -2043,6 +2034,24 @@
                 releaseDockChatLocalPreview(message);
                 scheduleDockChatListRefresh(200);
                 showToast('已删除（仅本机）');
+            }
+
+            // ★ 2026-09-25：从 ux-features.js 的重复长按菜单迁移过来的"问小猫"。
+            //   原实现只对气泡取 innerText，这里改为取消息正文（含媒体时取链接）。
+            function askAiAboutDmMessage(message) {
+                var text = getDmActionValue(message);
+                if (!text) { showToast('这条消息没有可提问的内容'); return; }
+                if (typeof window.__xtjOpenAiChat !== 'function') {
+                    showToast('请先打开小猫AI');
+                    return;
+                }
+                window.__xtjOpenAiChat();
+                setTimeout(function() {
+                    var input = document.getElementById('aiChatInput');
+                    if (!input) return;
+                    input.value = '请帮我看看这条消息：\n' + text.slice(0, 800);
+                    try { input.focus(); } catch (e) {}
+                }, 400);
             }
 
             async function doShareDmMessage(message) {

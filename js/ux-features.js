@@ -187,163 +187,22 @@
     return el;
   }
 
-  function patchChatSend() {
-    var orig = window.sendDockChatMessage;
-    // sendDockChatMessage may be local; wrap via button click interception
+  // ★ 2026-09-25 改造：原来的「发送中…」是假的 —— 它只绑在发送按钮的 click 上、固定显示 1.8 秒，
+  //   跟真实发送状态无关：按回车不触发、消息早已送达它还在闪、发送失败时它照样显示「发送中」，
+  //   而气泡里已经有真实的「图片上传中…」，属于重复且误导。
+  //   现在改为由 06-chat-and-nav.js 的 sendDockChatMessage 在开始/结束时回调真实状态。
+  function setChatSending(on) {
+    var tip = ensureTypingEl();
+    if (tip) tip.hidden = !on;
     var sendBtn = document.getElementById('dockChatSendBtn');
-    if (!sendBtn || sendBtn.__xtjTypingBound) return;
-    sendBtn.__xtjTypingBound = true;
-    sendBtn.addEventListener(
-      'click',
-      function () {
-        var tip = ensureTypingEl();
-        if (tip) {
-          tip.hidden = false;
-          setTimeout(function () {
-            if (tip) tip.hidden = true;
-          }, 1800);
-        }
-        try {
-          sendBtn.classList.add('is-sending');
-          setTimeout(function () {
-            sendBtn.classList.remove('is-sending');
-          }, 1200);
-        } catch (e) {}
-      },
-      true
-    );
+    if (sendBtn) {
+      try { sendBtn.classList.toggle('is-sending', !!on); } catch (e) {}
+    }
   }
 
-  function bindChatLongPress() {
-    var host = document.getElementById('dockChatMessages');
-    if (!host || host.__xtjLongPressBound) return;
-    host.__xtjLongPressBound = true;
-    var timer = null;
-    var startX = 0;
-    var startY = 0;
-    var targetBubble = null;
-
-    function closeMenu() {
-      var m = document.getElementById('dockChatMsgMenu');
-      if (m) m.remove();
-    }
-
-    function openMenu(bubble, x, y) {
-      closeMenu();
-      var menu = document.createElement('div');
-      menu.id = 'dockChatMsgMenu';
-      menu.className = 'chat-msg-action-menu';
-      menu.innerHTML =
-        '<button type="button" data-act="copy">复制</button>' +
-        '<button type="button" data-act="forward-ai">问小猫</button>';
-      document.body.appendChild(menu);
-      var rect = menu.getBoundingClientRect();
-      var left = Math.min(window.innerWidth - rect.width - 8, Math.max(8, x - rect.width / 2));
-      var top = Math.min(window.innerHeight - rect.height - 8, Math.max(8, y - rect.height - 12));
-      menu.style.left = left + 'px';
-      menu.style.top = top + 'px';
-      menu.addEventListener('click', function (ev) {
-        var act = ev.target && ev.target.getAttribute('data-act');
-        var text = (bubble.innerText || bubble.textContent || '').trim();
-        if (act === 'copy') {
-          try {
-            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
-            else {
-              var ta = document.createElement('textarea');
-              ta.value = text;
-              document.body.appendChild(ta);
-              ta.select();
-              document.execCommand('copy');
-              ta.remove();
-            }
-            if (typeof window.showToast === 'function') window.showToast('已复制', 'success');
-          } catch (e) {
-            if (typeof window.showToast === 'function') window.showToast('复制失败', 'error');
-          }
-        } else if (act === 'forward-ai') {
-          if (typeof window.__xtjOpenAiChat === 'function') {
-            window.__xtjOpenAiChat();
-            setTimeout(function () {
-              var input = document.getElementById('aiChatInput');
-              if (input) {
-                input.value = '请帮我看看这条消息：\n' + text.slice(0, 800);
-                try {
-                  input.focus();
-                } catch (e2) {}
-              }
-            }, 400);
-          } else if (typeof window.showToast === 'function') {
-            window.showToast('请先打开小猫AI', 'info');
-          }
-        }
-        closeMenu();
-      });
-      setTimeout(function () {
-        document.addEventListener(
-          'pointerdown',
-          function once(e) {
-            if (menu.contains(e.target)) return;
-            closeMenu();
-            document.removeEventListener('pointerdown', once, true);
-          },
-          true
-        );
-      }, 0);
-    }
-
-    host.addEventListener(
-      'pointerdown',
-      function (e) {
-        var bubble = e.target && e.target.closest && e.target.closest('.chat-bubble, .msg-bubble, .chat-msg-bubble, .cm-bubble');
-        if (!bubble) bubble = e.target && e.target.closest && e.target.closest('.chat-msg, .msg-row');
-        if (!bubble) return;
-        targetBubble = bubble.querySelector('.chat-bubble, .msg-bubble, .cm-bubble') || bubble;
-        startX = e.clientX;
-        startY = e.clientY;
-        timer = setTimeout(function () {
-          timer = null;
-          openMenu(targetBubble, startX, startY);
-        }, 480);
-      },
-      true
-    );
-    host.addEventListener(
-      'pointermove',
-      function (e) {
-        if (!timer) return;
-        if (Math.abs(e.clientX - startX) > 10 || Math.abs(e.clientY - startY) > 10) {
-          clearTimeout(timer);
-          timer = null;
-        }
-      },
-      true
-    );
-    host.addEventListener(
-      'pointerup',
-      function () {
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-      },
-      true
-    );
-    host.addEventListener(
-      'pointercancel',
-      function () {
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-      },
-      true
-    );
-    // enhance read status class for animation
-    try {
-      host.querySelectorAll('.msg-read-status').forEach(function (n) {
-        if (n.textContent === '已读') n.classList.add('is-read');
-      });
-    } catch (e) {}
+  function patchChatSend() {
+    // 函数名保留（boot() 的调用点不动）：现在只负责把真实状态的入口挂到 window 上。
+    window.__xtjNotifyChatSending = setChatSending;
   }
 
   // ---------- Site 4 settings ----------
@@ -547,7 +406,6 @@
     injectProfileSettings();
     enhanceAnnouncement();
     patchChatSend();
-    bindChatLongPress();
     polishPhotoWall();
     try {
       // 防重入：回调里会对 body 子节点加 class，若直接改会触发自身 mutation
