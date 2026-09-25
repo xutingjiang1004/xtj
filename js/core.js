@@ -12743,16 +12743,43 @@ function renderProfileActivityList(kind) {
                 var aiWaited = 0;
                 var aiRetries = 0;
                 var aiSentAt = 0;
+                var aiReadySince = 0;
                 var aiAnchor = prompt.slice(0, 24);
+
+                // ★ 2026-09-25 关键修复（「显示一秒就立刻消失、退出重进又能看到」）：
+                //   小猫AI 打开后会**异步拉配置并载入历史**，载入完成时会重写整个消息区。
+                //   先前只等「DOM 元素出现」就发送，比它自己的初始化早了约 1 秒 ——
+                //   消息与回复确实发出去了（服务端有记录），但紧接着被那次历史渲染冲掉，
+                //   于是界面上一闪就没；退出会话重进时从服务端重新载入，所以又看得见。
+                //   现在等它初始化**落定**再动手：配置就绪 + 再留 500ms 给历史渲染。
+                function aiInitSettled() {
+                    var cfg = null;
+                    try {
+                        cfg = (window.__xtjAiAgent && typeof window.__xtjAiAgent.getConfig === 'function')
+                            ? window.__xtjAiAgent.getConfig()
+                            : null;
+                    } catch (e) { cfg = null; }
+                    if (!cfg) { aiReadySince = 0; return false; }
+                    if (!aiReadySince) { aiReadySince = Date.now(); return false; }
+                    return (Date.now() - aiReadySince) >= 500;
+                }
+
                 var aiTimer = setInterval(function() {
                     aiWaited += 150;
                     var input = document.getElementById('aiChatMsgInput') || document.getElementById('aiChatInput');
                     var sendBtn = document.getElementById('aiChatSendBtn');
                     var list = document.getElementById('aiChatMessages');
                     if (!input || !sendBtn) {
-                        if (aiWaited >= 4000) {
+                        if (aiWaited >= 6000) {
                             clearInterval(aiTimer);
                             showToast('小猫AI 打开失败，请刷新后重试');
+                        }
+                        return;
+                    }
+                    if (!aiInitSettled()) {
+                        if (aiWaited >= 10000) {
+                            clearInterval(aiTimer);
+                            showToast('小猫AI 初始化超时，请重试');
                         }
                         return;
                     }
