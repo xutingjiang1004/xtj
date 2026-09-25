@@ -547,10 +547,10 @@
                             variant: 'chat-list'
                         });
                     }
-                    const dmResp = await window.xtjProtectedFetch('/api/dm/list');
-                    if (!dmResp.ok) throw new Error('DM list fetch failed');
-                    const dmResult = await dmResp.json();
-                    if (!dmResult.ok) throw new Error(dmResult.error || 'DM list failed');
+                    // 走共享单飞请求（与未读角标复用同一份结果），并显式传 limit=180 ——
+                    //   与下面 mergeDockChatRowsById 的窗口一致，避免"拉了 1000 条只用 180 条"。
+                    const dmResult = await window.fetchDmListShared(180);
+                    if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
                     if (listLoadSeq !== _dockChatListLoadSeq) return;
                     const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
                     if (!allMsgs || !allMsgs.length) {
@@ -2058,23 +2058,59 @@
 
                 window.__xtjOpenAiChat();
 
-                // AI 面板是异步挂载的，轮询等它就绪再注入并发送（最多等约 3 秒）
-                var tries = 0;
-                (function injectAndSend() {
-                    tries += 1;
+                // ★ 2026-09-25 重写：上一版只「轮询找到元素→写值→点发送」，
+                //   一旦小猫AI 面板在挂载过程中重建 DOM（它是先 innerHTML='' 再整块重建），
+                //   写进去的值会被冲掉，用户看到的就是「点了一下、什么都没发生」。
+                //   现在做成一个小状态机，并且**任何失败都有明确出口**：
+                //     ① 等元素出现（最多 4s）→ 超时明确报错，不再静默；
+                //     ② 写入提示词；每个 tick 校验内容是否还在（被冲掉就重写）；
+                //     ③ 内容稳定后点发送；再校验是否真的产生了用户消息，
+                //        没产生就重试一次，仍不行则提示「已填入内容，请手动点发送」。
+                var aiWaited = 0;
+                var aiRetries = 0;
+                var aiSentAt = 0;
+                var aiAnchor = prompt.slice(0, 24);
+                var aiTimer = setInterval(function() {
+                    aiWaited += 150;
                     var input = document.getElementById('aiChatMsgInput') || document.getElementById('aiChatInput');
                     var sendBtn = document.getElementById('aiChatSendBtn');
+                    var list = document.getElementById('aiChatMessages');
                     if (!input || !sendBtn) {
-                        if (tries < 25) { setTimeout(injectAndSend, 120); return; }
-                        showToast('小猫AI 打开失败，请重试');
+                        if (aiWaited >= 4000) {
+                            clearInterval(aiTimer);
+                            showToast('小猫AI 打开失败，请刷新后重试');
+                        }
                         return;
                     }
-                    // 用户已经打了草稿就追加，不覆盖
-                    var existing = String(input.value || '');
-                    input.value = existing.trim() ? (existing.replace(/\s+$/, '') + '\n' + prompt) : prompt;
-                    try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
-                    try { sendBtn.click(); } catch (e2) { showToast('已填入内容，请手动点发送'); }
-                })();
+                    // ① 确保提示词在输入框里（被面板重建冲掉就再写一遍）
+                    if (String(input.value || '').indexOf(aiAnchor) < 0) {
+                        var existing = String(input.value || '');
+                        input.value = existing.trim() ? (existing.replace(/\s+$/, '') + '\n' + prompt) : prompt;
+                        try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+                        return;
+                    }
+                    // ② 已经点过发送：确认是否真的发出去了
+                    if (aiSentAt) {
+                        if (aiWaited - aiSentAt < 700) return;
+                        var produced = false;
+                        try {
+                            produced = !!(list && list.querySelector('.ai-msg.user, .ai-msg--user, .ai-msg.entering, .ai-msg'));
+                        } catch (eChk) { produced = false; }
+                        if (produced) { clearInterval(aiTimer); return; }
+                        if (aiRetries >= 1) {
+                            clearInterval(aiTimer);
+                            showToast('已填入内容，请手动点发送');
+                            return;
+                        }
+                        aiRetries += 1;
+                        aiSentAt = aiWaited;
+                        try { sendBtn.click(); } catch (eRe) {}
+                        return;
+                    }
+                    // ③ 内容就位 → 发送
+                    aiSentAt = aiWaited;
+                    try { sendBtn.click(); } catch (e2) {}
+                }, 150);
             }
 
             async function doShareDmMessage(message) {

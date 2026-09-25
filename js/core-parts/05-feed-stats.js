@@ -713,6 +713,31 @@
             // 供 loadDockChatList 在写入角标后打点，避免紧随其后再打一次同样的请求
             window.__xtjNoteDmUnreadFresh = function() { _dmUnreadFetchedAt = Date.now(); };
 
+            // ★ 2026-09-25 性能修复：/api/dm/list 是聊天里最重的接口（要扫两个方向的消息），
+            //   而会话列表（loadDockChatList）与未读角标（updateUnreadBadge）都要用它 ——
+            //   启动时两者在同一帧先后触发，等于并发打两次同一个重接口。
+            //   这里做单飞 + 3 秒短缓存；缓存的是**解析后的 JSON**（Response body 只能消费一次，
+            //   直接共享 Response 会让第二个调用方拿到 "body already used"）。
+            var _dmListShared = { at: 0, json: null, inflight: null };
+            function fetchDmListShared(limit) {
+                var now = Date.now();
+                if (_dmListShared.json && (now - _dmListShared.at) < 3000) {
+                    return Promise.resolve(_dmListShared.json);
+                }
+                if (_dmListShared.inflight) return _dmListShared.inflight;
+                var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)))
+                    .then(function(resp) { return (resp && resp.ok) ? resp.json().catch(function() { return null; }) : null; })
+                    .then(function(json) {
+                        if (json && json.ok) { _dmListShared.json = json; _dmListShared.at = Date.now(); }
+                        _dmListShared.inflight = null;
+                        return json;
+                    })
+                    .catch(function() { _dmListShared.inflight = null; return null; });
+                _dmListShared.inflight = p;
+                return p;
+            }
+            window.fetchDmListShared = fetchDmListShared;
+
             async function updateUnreadBadge() {
                 if (!window.currentUser) { setUnreadBadgeCount(0); return; }
                 // ★ 2026-09-25 修复（审计 H-2，严重）：旧实现用浏览器端 anon key 直连
@@ -725,9 +750,8 @@
                 //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
                 if (Date.now() - _dmUnreadFetchedAt < 5000) return;
                 try {
-                    var resp = await window.xtjProtectedFetch('/api/dm/list');
-                    if (!resp.ok) return;
-                    var result = await resp.json().catch(function() { return {}; });
+                    // 走共享单飞请求：与会话列表复用同一份结果，不再并发两次
+                    var result = await fetchDmListShared(180);
                     if (!result || !result.ok) return;
                     _dmUnreadFetchedAt = Date.now();
                     setUnreadBadgeCount(aggregateDmUnread(result.data || []).total);
