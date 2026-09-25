@@ -14857,6 +14857,95 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
   } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
+// ★ 2026-09-25 新增：私聊媒体「受鉴权签名地址」接口。
+//   背景：私聊图片此前用的是 supabase getPublicUrl 生成的永久公共地址。当 uploads 桶
+//   未开放公共读时，该地址会 403，前端 <img> 加载失败后只能退化成「查看图片」按钮
+//   （用户看到的就是聊天里图片变成按钮，点开才有）。
+//   本接口在确认「请求者确实是该会话的发送方或接收方」后，才为对应存储对象签发
+//   短时效签名地址；他人即使拿到 storagePath 也无法换取可访问地址。
+//   设计要点：
+//     ① 只接受 storagePath（chat/xxx），不接受任意 URL，杜绝把它当通用 SSRF 跳板；
+//     ② 权限判定以「该 storagePath 确实挂在本用户参与的某条私信上」为准，
+//        而不是信任前端传入的对象名；
+//     ③ 签名有效期 10 分钟，前端按需换取、加载失败时再换一次，避免长时泄露；
+//     ④ 桶本就没开公共读时也照常工作 —— 签名地址不依赖公开策略。
+app.post('/api/dm/media/sign', authenticateUser, rateLimit(60000, 120), async (req, res) => {
+  try {
+    var me = String(req.userName || '');
+    if (!me) return res.status(401).json({ error: '未登录', code: 'auth_required' });
+    var rawList = Array.isArray(req.body && req.body.paths) ? req.body.paths : [];
+    // 单次最多签 50 个，避免被当批量枚举工具
+    var paths = Array.from(new Set(rawList.map(function(x) { return String(x || '').trim(); }).filter(Boolean))).slice(0, 50);
+    if (!paths.length) return res.status(400).json({ error: '缺少媒体路径', code: 'invalid_media_paths' });
+
+    // 逐个校验：storagePath 必须确实属于一条「我参与其中」的私信
+    var allowed = [];
+    var rejected = [];
+    for (var i = 0; i < paths.length; i++) {
+      var p = paths[i];
+      var pathCheck = validateDmStoragePath(p);
+      if (!pathCheck.ok) { rejected.push({ path: p, reason: 'invalid_path' }); continue; }
+      // actor_key 存储的是 <kindPrefix><storagePath>，据此精确反查消息归属
+      var actorCandidates = [MEDIA_KINDS.image + p, MEDIA_KINDS.video + p, MEDIA_KINDS.audio + p];
+      var owner = null;
+      try {
+        var ownerRes = await supabase.from('posts')
+          .select('id, user_name, media_url, media_type, actor_key')
+          .eq('media_type', DM_MARKER)
+          .in('actor_key', actorCandidates)
+          .limit(5);
+        if (ownerRes && !ownerRes.error && Array.isArray(ownerRes.data)) {
+          for (var oi = 0; oi < ownerRes.data.length; oi++) {
+            var row = ownerRes.data[oi];
+            var sender = String(row.user_name || '');
+            var receiver = String(row.media_url || '');
+            // 参与者校验：只有发送方或接收方可以取地址
+            if (sender === me || receiver === me) { owner = row; break; }
+          }
+        }
+      } catch (eOwner) {
+        console.warn('[dm-media-sign] 归属查询失败:', eOwner && eOwner.message);
+      }
+      if (!owner) { rejected.push({ path: p, reason: 'not_participant' }); continue; }
+      allowed.push(p);
+    }
+
+    if (!allowed.length) {
+      return res.status(403).json({ ok: false, error: '无权访问该媒体', code: 'media_forbidden', rejected: rejected });
+    }
+
+    // 批量签发（10 分钟有效）。签名地址不依赖桶的公共读策略。
+    var signed = {};
+    try {
+      var signRes = await supabase.storage.from('uploads').createSignedUrls(allowed, 600);
+      var rows = (signRes && Array.isArray(signRes.data)) ? signRes.data : [];
+      rows.forEach(function(r) {
+        if (r && r.path && r.signedUrl) signed[r.path] = r.signedUrl;
+        else if (r && r.path && r.error) rejected.push({ path: r.path, reason: 'sign_failed' });
+      });
+      if (signRes && signRes.error) {
+        console.warn('[dm-media-sign] createSignedUrls 失败，尝试逐个签发:', signRes.error && signRes.error.message);
+        for (var ai = 0; ai < allowed.length; ai++) {
+          if (signed[allowed[ai]]) continue;
+          try {
+            var one = await supabase.storage.from('uploads').createSignedUrl(allowed[ai], 600);
+            if (one && one.data && one.data.signedUrl) signed[allowed[ai]] = one.data.signedUrl;
+            else rejected.push({ path: allowed[ai], reason: 'sign_failed' });
+          } catch (eOne) { rejected.push({ path: allowed[ai], reason: 'sign_failed' }); }
+        }
+      }
+    } catch (eSign) {
+      console.error('[dm-media-sign] 签发异常:', eSign && eSign.message);
+      return res.status(503).json({ ok: false, error: '媒体地址签发失败，请重试', code: 'media_sign_failed', retryable: true });
+    }
+
+    return res.json({ ok: true, signed: signed, rejected: rejected, expires_in: 600 });
+  } catch (e) {
+    console.error('[API] dm media sign:', e && e.message);
+    return res.status(500).json({ error: '媒体地址签发失败', code: 'media_sign_error' });
+  }
+});
+
 // Read state is server-authoritative and scoped to messages addressed to the
 // authenticated user. A sender cannot mark their own outbound rows as read.
 app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, res) => {

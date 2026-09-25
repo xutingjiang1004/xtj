@@ -9743,9 +9743,63 @@ function renderProfileActivityList(kind) {
                 return '[图片]';
             }
 
+            // ★ 2026-09-25 修复：私聊图片「退化成查看图片按钮」。
+            //   原逻辑：加载失败 → 加时间戳重试 1 次 → 仍失败就替换成按钮。
+            //   但生产环境 uploads 桶未开公共读时，公共地址是 403，重试多少次都一样，
+            //   图片必然退化成按钮（用户看到聊天里图片变按钮）。
+            //   新逻辑：失败后先向后端换取「10 分钟有效签名地址」再重试；签名地址不依赖
+            //   桶的公共读策略，且只有会话参与者能取到。签名也失败时才显示重试提示。
+            var _dmSignedCache = {};
+            var _dmSignInflight = {};
+            function _dmStoragePathFromUrl(u) {
+                // 从公有/签名地址中还原出 storagePath（chat/xxx），用于向后端换取签名地址
+                try {
+                    var s = String(u || '');
+                    var m = s.match(/\/storage\/v1\/object\/(?:public|sign)\/uploads\/([^?#]+)/i);
+                    if (m && m[1]) return decodeURIComponent(m[1]);
+                    if (/^chat\/[A-Za-z0-9_.-]+$/i.test(s)) return s;
+                } catch (e) { /* ignore */ }
+                return '';
+            }
+            function _dmApplySignedSrc(img, signedUrl) {
+                if (!img || !signedUrl) return;
+                img.setAttribute('data-retry-count', '2');
+                var sep = signedUrl.indexOf('?') >= 0 ? '&' : '?';
+                img.src = signedUrl + sep + '_ts=' + Date.now();
+            }
+            function _dmFetchSignedUrl(storagePath) {
+                if (_dmSignedCache[storagePath] && _dmSignedCache[storagePath].exp > Date.now()) {
+                    return Promise.resolve(_dmSignedCache[storagePath].url);
+                }
+                if (_dmSignInflight[storagePath]) return _dmSignInflight[storagePath];
+                var p = (async function() {
+                    try {
+                        // ★ 用 xtjProtectedFetch：它自带 Authorization 头与登录态处理，
+                        //   与全站其他 DM 请求（/api/dm/list、/api/dm/messages）鉴权方式一致。
+                        //   此前误用 getUserAuthPayload —— 那是 ai-agent.js 的内部函数，
+                        //   在 window 上并不存在，会导致签名请求永远拿不到鉴权头。
+                        if (typeof window.xtjProtectedFetch !== 'function') return '';
+                        var resp = await window.xtjProtectedFetch('/api/dm/media/sign', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paths: [storagePath] })
+                        });
+                        if (!resp || !resp.ok) return '';
+                        var data = await resp.json().catch(function() { return {}; });
+                        var url = (data && data.signed && data.signed[storagePath]) || '';
+                        if (url) _dmSignedCache[storagePath] = { url: url, exp: Date.now() + 8 * 60 * 1000 };
+                        return url;
+                    } catch (e) { return ''; }
+                    finally { delete _dmSignInflight[storagePath]; }
+                })();
+                _dmSignInflight[storagePath] = p;
+                return p;
+            }
+
             window.handleDockChatImageError = function(img) {
                 if (!img || !img.parentNode) return;
                 var retryCount = parseInt(img.getAttribute('data-retry-count') || '0', 10) || 0;
+                // 第 1 步：普通重试（可能是瞬时网络抖动）
                 if (retryCount < 1) {
                     var retrySrc = img.getAttribute('data-full-src') || img.getAttribute('data-src') || img.currentSrc || img.src || "";
                     if (retrySrc) {
@@ -9755,6 +9809,27 @@ function renderProfileActivityList(kind) {
                     }
                 }
                 var fullSrc = img.getAttribute("data-full-src") || img.currentSrc || img.src || "";
+                // 第 2 步：普通重试仍失败 → 换用后端签发的受鉴权短效地址再试一次
+                if (retryCount < 2) {
+                    var storagePath = _dmStoragePathFromUrl(img.getAttribute('data-src') || fullSrc);
+                    if (storagePath) {
+                        img.setAttribute('data-retry-count', '2'); // 先占位，避免并发重复触发
+                        _dmFetchSignedUrl(storagePath).then(function(signedUrl) {
+                            if (signedUrl) {
+                                _dmApplySignedSrc(img, signedUrl);
+                            } else if (img.parentNode) {
+                                // 签名也拿不到（无权限/对象不存在）→ 才显示可重试提示
+                                _dmRenderMediaFallback(img, fullSrc, storagePath);
+                            }
+                        });
+                        return;
+                    }
+                }
+                _dmRenderMediaFallback(img, fullSrc, '');
+            };
+
+            function _dmRenderMediaFallback(img, fullSrc, storagePath) {
+                if (!img || !img.parentNode) return;
                 var fallback = document.createElement("button");
                 fallback.type = "button";
                 fallback.className = "msg-media-fallback";
@@ -9762,6 +9837,16 @@ function renderProfileActivityList(kind) {
                 fallback.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
+                    // 点击时再尝试换取一次签名地址，成功则直接打开大图
+                    if (storagePath) {
+                        _dmFetchSignedUrl(storagePath).then(function(signedUrl) {
+                            var target = signedUrl || fullSrc;
+                            if (target && typeof window.openImageViewer === "function") window.openImageViewer(target);
+                            else if (target) window.open(target, '_blank', 'noopener');
+                            else showToast("图片加载失败");
+                        });
+                        return;
+                    }
                     if (fullSrc && typeof window.openImageViewer === "function") {
                         window.openImageViewer(fullSrc);
                     } else {
@@ -9769,7 +9854,7 @@ function renderProfileActivityList(kind) {
                     }
                 };
                 img.parentNode.replaceChild(fallback, img);
-            };
+            }
 
             function isMsgReadByMe(msg) {
                 if (getDMMessageReadAt(msg)) return true;
@@ -10959,15 +11044,40 @@ function renderProfileActivityList(kind) {
                         return;
                     }
                     const convMap = {};
+                    // ★ 2026-09-25 优化（聊天秒开）：会话列表接口返回的其实是「该用户最近的
+                    //   全部消息」，此前只取每个会话的最后一条做预览，其余全部丢弃 —— 于是用户
+                    //   点开会话时必须等一次 /api/dm/messages 网络往返才能看到内容（"点开会话要
+                    //   等一下才出现消息"）。
+                    //   现改为：把每条消息按会话归组，预热进 _chatCache。点击会话时 loadDockChatMessages
+                    //   会先命中缓存立即渲染（见其开头 _chatCache 分支），网络回包后再精确替换，
+                    //   从而实现"点开秒见内容"。
+                    const preheatMap = {};
                     allMsgs.forEach(m => {
                         const other = m.user_name === window.currentUser ? m.media_url : m.user_name;
+                        if (!other) return;
                         if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
                             convMap[other] = { other_user: other, last_message: getDockChatMessagePreview(m), last_time: m.created_at, unread: 0 };
                         }
                         if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
                             convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
                         }
+                        if (!preheatMap[other]) preheatMap[other] = [];
+                        preheatMap[other].push(m);
                     });
+                    // 按会话预热缓存：只在缓存为空或确实更旧时写入，避免把更完整的既有缓存降级覆盖
+                    try {
+                        Object.keys(preheatMap).forEach(function(other) {
+                            var k = getDockChatCacheKey(other);
+                            var rows = preheatMap[other].sort(function(a, b) {
+                                return String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
+                                       String(a.id || '').localeCompare(String(b.id || ''));
+                            });
+                            var existing = _chatCache[k];
+                            // 已有缓存且条数不少于预热数据时跳过（网络回包的数据更权威）
+                            if (Array.isArray(existing) && existing.length >= rows.length && existing.length > 0) return;
+                            _chatCache[k] = rows;
+                        });
+                    } catch (ePreheat) { /* 预热失败不影响列表渲染 */ }
                     const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
                     setUnreadBadgeCount(convs.reduce(function(total, item) {
                         return total + (item && item.unread ? item.unread : 0);

@@ -297,9 +297,63 @@
                 return '[图片]';
             }
 
+            // ★ 2026-09-25 修复：私聊图片「退化成查看图片按钮」。
+            //   原逻辑：加载失败 → 加时间戳重试 1 次 → 仍失败就替换成按钮。
+            //   但生产环境 uploads 桶未开公共读时，公共地址是 403，重试多少次都一样，
+            //   图片必然退化成按钮（用户看到聊天里图片变按钮）。
+            //   新逻辑：失败后先向后端换取「10 分钟有效签名地址」再重试；签名地址不依赖
+            //   桶的公共读策略，且只有会话参与者能取到。签名也失败时才显示重试提示。
+            var _dmSignedCache = {};
+            var _dmSignInflight = {};
+            function _dmStoragePathFromUrl(u) {
+                // 从公有/签名地址中还原出 storagePath（chat/xxx），用于向后端换取签名地址
+                try {
+                    var s = String(u || '');
+                    var m = s.match(/\/storage\/v1\/object\/(?:public|sign)\/uploads\/([^?#]+)/i);
+                    if (m && m[1]) return decodeURIComponent(m[1]);
+                    if (/^chat\/[A-Za-z0-9_.-]+$/i.test(s)) return s;
+                } catch (e) { /* ignore */ }
+                return '';
+            }
+            function _dmApplySignedSrc(img, signedUrl) {
+                if (!img || !signedUrl) return;
+                img.setAttribute('data-retry-count', '2');
+                var sep = signedUrl.indexOf('?') >= 0 ? '&' : '?';
+                img.src = signedUrl + sep + '_ts=' + Date.now();
+            }
+            function _dmFetchSignedUrl(storagePath) {
+                if (_dmSignedCache[storagePath] && _dmSignedCache[storagePath].exp > Date.now()) {
+                    return Promise.resolve(_dmSignedCache[storagePath].url);
+                }
+                if (_dmSignInflight[storagePath]) return _dmSignInflight[storagePath];
+                var p = (async function() {
+                    try {
+                        // ★ 用 xtjProtectedFetch：它自带 Authorization 头与登录态处理，
+                        //   与全站其他 DM 请求（/api/dm/list、/api/dm/messages）鉴权方式一致。
+                        //   此前误用 getUserAuthPayload —— 那是 ai-agent.js 的内部函数，
+                        //   在 window 上并不存在，会导致签名请求永远拿不到鉴权头。
+                        if (typeof window.xtjProtectedFetch !== 'function') return '';
+                        var resp = await window.xtjProtectedFetch('/api/dm/media/sign', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paths: [storagePath] })
+                        });
+                        if (!resp || !resp.ok) return '';
+                        var data = await resp.json().catch(function() { return {}; });
+                        var url = (data && data.signed && data.signed[storagePath]) || '';
+                        if (url) _dmSignedCache[storagePath] = { url: url, exp: Date.now() + 8 * 60 * 1000 };
+                        return url;
+                    } catch (e) { return ''; }
+                    finally { delete _dmSignInflight[storagePath]; }
+                })();
+                _dmSignInflight[storagePath] = p;
+                return p;
+            }
+
             window.handleDockChatImageError = function(img) {
                 if (!img || !img.parentNode) return;
                 var retryCount = parseInt(img.getAttribute('data-retry-count') || '0', 10) || 0;
+                // 第 1 步：普通重试（可能是瞬时网络抖动）
                 if (retryCount < 1) {
                     var retrySrc = img.getAttribute('data-full-src') || img.getAttribute('data-src') || img.currentSrc || img.src || "";
                     if (retrySrc) {
@@ -309,6 +363,27 @@
                     }
                 }
                 var fullSrc = img.getAttribute("data-full-src") || img.currentSrc || img.src || "";
+                // 第 2 步：普通重试仍失败 → 换用后端签发的受鉴权短效地址再试一次
+                if (retryCount < 2) {
+                    var storagePath = _dmStoragePathFromUrl(img.getAttribute('data-src') || fullSrc);
+                    if (storagePath) {
+                        img.setAttribute('data-retry-count', '2'); // 先占位，避免并发重复触发
+                        _dmFetchSignedUrl(storagePath).then(function(signedUrl) {
+                            if (signedUrl) {
+                                _dmApplySignedSrc(img, signedUrl);
+                            } else if (img.parentNode) {
+                                // 签名也拿不到（无权限/对象不存在）→ 才显示可重试提示
+                                _dmRenderMediaFallback(img, fullSrc, storagePath);
+                            }
+                        });
+                        return;
+                    }
+                }
+                _dmRenderMediaFallback(img, fullSrc, '');
+            };
+
+            function _dmRenderMediaFallback(img, fullSrc, storagePath) {
+                if (!img || !img.parentNode) return;
                 var fallback = document.createElement("button");
                 fallback.type = "button";
                 fallback.className = "msg-media-fallback";
@@ -316,6 +391,16 @@
                 fallback.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
+                    // 点击时再尝试换取一次签名地址，成功则直接打开大图
+                    if (storagePath) {
+                        _dmFetchSignedUrl(storagePath).then(function(signedUrl) {
+                            var target = signedUrl || fullSrc;
+                            if (target && typeof window.openImageViewer === "function") window.openImageViewer(target);
+                            else if (target) window.open(target, '_blank', 'noopener');
+                            else showToast("图片加载失败");
+                        });
+                        return;
+                    }
                     if (fullSrc && typeof window.openImageViewer === "function") {
                         window.openImageViewer(fullSrc);
                     } else {
@@ -323,7 +408,7 @@
                     }
                 };
                 img.parentNode.replaceChild(fallback, img);
-            };
+            }
 
             function isMsgReadByMe(msg) {
                 if (getDMMessageReadAt(msg)) return true;

@@ -506,15 +506,40 @@
                         return;
                     }
                     const convMap = {};
+                    // ★ 2026-09-25 优化（聊天秒开）：会话列表接口返回的其实是「该用户最近的
+                    //   全部消息」，此前只取每个会话的最后一条做预览，其余全部丢弃 —— 于是用户
+                    //   点开会话时必须等一次 /api/dm/messages 网络往返才能看到内容（"点开会话要
+                    //   等一下才出现消息"）。
+                    //   现改为：把每条消息按会话归组，预热进 _chatCache。点击会话时 loadDockChatMessages
+                    //   会先命中缓存立即渲染（见其开头 _chatCache 分支），网络回包后再精确替换，
+                    //   从而实现"点开秒见内容"。
+                    const preheatMap = {};
                     allMsgs.forEach(m => {
                         const other = m.user_name === window.currentUser ? m.media_url : m.user_name;
+                        if (!other) return;
                         if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
                             convMap[other] = { other_user: other, last_message: getDockChatMessagePreview(m), last_time: m.created_at, unread: 0 };
                         }
                         if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
                             convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
                         }
+                        if (!preheatMap[other]) preheatMap[other] = [];
+                        preheatMap[other].push(m);
                     });
+                    // 按会话预热缓存：只在缓存为空或确实更旧时写入，避免把更完整的既有缓存降级覆盖
+                    try {
+                        Object.keys(preheatMap).forEach(function(other) {
+                            var k = getDockChatCacheKey(other);
+                            var rows = preheatMap[other].sort(function(a, b) {
+                                return String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
+                                       String(a.id || '').localeCompare(String(b.id || ''));
+                            });
+                            var existing = _chatCache[k];
+                            // 已有缓存且条数不少于预热数据时跳过（网络回包的数据更权威）
+                            if (Array.isArray(existing) && existing.length >= rows.length && existing.length > 0) return;
+                            _chatCache[k] = rows;
+                        });
+                    } catch (ePreheat) { /* 预热失败不影响列表渲染 */ }
                     const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
                     setUnreadBadgeCount(convs.reduce(function(total, item) {
                         return total + (item && item.unread ? item.unread : 0);
