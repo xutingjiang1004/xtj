@@ -69,6 +69,12 @@
                 console.error('Supabase SDK not loaded');
                 window.addEventListener('xtj:supabase-ready', function () {
                     if (!initSupabaseClient()) return;
+                    // ★ 2026-09-25 修复：initSupabaseClient 内部只在首次创建时写 window.sb。
+                    //   若此处才补上初始化（SDK 延迟就绪），必须同步 window.sb，
+                    //   否则下面第 80 行的 window.sb = sb（当时为 null）会把它永久钉死为 null，
+                    //   导致后续所有 sb.storage / sb.from 调用抛
+                    //   "null is not an object (evaluating 'sb.storage')" —— 发图失败的根因。
+                    window.sb = sb;
                     if (typeof window.initialLoad === 'function') {
                         window.initialLoad(true).catch(function (e) {
                             console.warn('[XTJ] delayed Supabase feed restore failed:', e && e.message);
@@ -80,7 +86,11 @@
                     if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
                 });
             }
-            window.sb = sb;
+            // ★ 2026-09-25 修复：仅在 sb 真正可用时覆盖 window.sb。
+            //   原实现无条件执行 `window.sb = sb`，当 Supabase 尚未就绪（sb 为 null）时
+            //   会把 window.sb 永久置为 null，之后即便 SDK 延迟加载成功也不会再更新，
+            //   造成"发图失败: null is not an object (evaluating 'sb.storage')"。
+            if (sb) window.sb = sb;
 
 
 (function() {
@@ -1393,7 +1403,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
         // 已删除该死代码与全局监听；如确需攻击检测，应改走后端 API 上报。
 
         let dockChatListCacheTime = 0;
-        const DOCK_CHAT_CACHE_DURATION = 120000;
+        const DOCK_CHAT_CACHE_DURATION = 20000;
         let deviceId;
         try { deviceId = window.safeStorage.get("xtj_device_id"); } catch(e) { deviceId = null; }
         if (!deviceId) {
@@ -9617,9 +9627,17 @@ function renderProfileActivityList(kind) {
 
             function getMediaUrl(prefix, val) {
                 if (val.startsWith('http')) return sanitizeUrl(val);
-                if (!sb) return '';
+                // ★ 2026-09-25 修复：sb 可能为 null（Supabase SDK 延迟就绪/加载失败），
+                //   原实现直接 return ''，导致私聊图片拿不到地址而永久显示「查看图片」按钮。
+                //   现做惰性兜底 + 触发一次 Supabase 重建。
+                var _client = sb || window.sb || null;
+                if (!_client && typeof initSupabaseClient === 'function') {
+                    try { initSupabaseClient(); } catch (eInit) {}
+                    _client = sb || window.sb || null;
+                }
+                if (!_client) return '';
                 try {
-                    return sb.storage.from('uploads').getPublicUrl(val).data.publicUrl;
+                    return _client.storage.from('uploads').getPublicUrl(val).data.publicUrl;
                 } catch(e) { return ''; }
             }
 
@@ -9794,6 +9812,25 @@ function renderProfileActivityList(kind) {
                 })();
                 _dmSignInflight[storagePath] = p;
                 return p;
+            }
+
+            // ★ 2026-09-25 新增：渲染期「签名地址优先」。
+            //   仅靠 onerror 兜底的话，用户第一眼看到的永远是加载失败态（点开才有图的按钮）。
+            //   这里在渲染时优先使用已缓存的签名地址；未缓存则后台预热，下次渲染即命中。
+            function resolveDockChatMediaSrc(publicSrc, fullSrc) {
+                var base = String(publicSrc || fullSrc || '');
+                var sp = _dmStoragePathFromUrl(base);
+                if (sp && _dmSignedCache[sp] && _dmSignedCache[sp].exp > Date.now()) {
+                    return _dmSignedCache[sp].url;
+                }
+                return base;
+            }
+            function primeDockChatMediaSignedUrl(src) {
+                var sp = _dmStoragePathFromUrl(src);
+                if (!sp) return;
+                if (_dmSignedCache[sp] && _dmSignedCache[sp].exp > Date.now()) return;
+                if (_dmSignInflight[sp]) return;
+                _dmFetchSignedUrl(sp).catch(function() {});
             }
 
             window.handleDockChatImageError = function(img) {
@@ -10123,7 +10160,9 @@ function renderProfileActivityList(kind) {
                     if (!window.currentUser) return;
                     try {
                         if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
-                            await loadDockChatMessages(dockChatActiveUser, false);
+                            // ★ 2026-09-25：轮询属于后台刷新，禁止动 loading 骨架/空状态，
+                            //   否则回包会把用户当前界面顶掉重画（闪屏）。
+                            await loadDockChatMessages(dockChatActiveUser, false, true);
                         } else {
                             await updateUnreadBadge();
                         }
@@ -10155,11 +10194,20 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 try {
+                    // ★ 2026-09-25 修复：sb 可能因 SDK 未就绪而为 null，直接 sb.from(...) 会抛
+                    //   TypeError 被下面的 catch 静默吞掉，导致未读角标长期不更新。
+                    //   这里补一次惰性初始化，仍不可用则安全返回。
+                    var _badgeClient = sb || window.sb || null;
+                    if (!_badgeClient && typeof initSupabaseClient === 'function') {
+                        try { initSupabaseClient(); } catch (eInit) {}
+                        _badgeClient = sb || window.sb || null;
+                    }
+                    if (!_badgeClient) return;
                     // ★ 修复：口径对齐 —— loadDockChatList 用最近 180 条按会话聚合再求和，
                     // 这里原为 120 条直接逐条计数（去重 120 条），两处结果不一致导致切换 tab 时数字跳动。
                     // 现将查询上限提高到 200，并同样先按会话（media_url）聚合每条会话的未读数
                     // （封顶 99），再对所有会话求和，与 loadDockChatList 的统计口径保持一致。
-                    var result = await sb.from('posts')
+                    var result = await _badgeClient.from('posts')
                         .select('id, user_name, content, views, created_at')
                         .eq('media_type', DM_MARKER)
                         .eq('media_url', window.currentUser)
@@ -10754,7 +10802,9 @@ function renderProfileActivityList(kind) {
                         document.getElementById('dockChatBackBtn').style.display = 'flex';
                         document.getElementById('dockChatTitle').textContent = dockChatActiveUser;
                         if (!(options && options.source === 'openChat')) {
-                            loadDockChatMessages(dockChatActiveUser, false);
+                            // ★ 2026-09-25：切回聊天 Tab 属于恢复既有界面，静默刷新即可，
+                            //   不要重画骨架（否则每次切 Tab 都闪一下）。
+                            loadDockChatMessages(dockChatActiveUser, false, true);
                         }
                     } else {
                         loadDockChatList();
@@ -10885,11 +10935,24 @@ function renderProfileActivityList(kind) {
             function renderDockChatDesktopEmptyState() {
                 var messages = document.getElementById('dockChatMessages');
                 if (!messages || window.__xtjAiChatActive) return;
+                // ★ 2026-09-25 修复（切换联系人时桌面端"闪白"）：旧实现无条件重写空状态
+                //   DOM。会话切换过程中 switchDockTab → syncDockChatLayoutState 会走到这里，
+                //   把正在渲染的消息区顶掉再重画，观感就是闪一下白。仅在内容确实不属于
+                //   任何会话（没有渲染过消息）时才重绘。
+                if (messages.dataset.chatUser && messages.dataset.chatUser !== '__empty__') return;
+                if (messages.dataset.emptyRendered === '1') return;
                 if (!window.currentUser) {
                     messages.innerHTML = '<div class="chat-empty chat-empty-state"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
+                    messages.dataset.emptyRendered = '1';
                     return;
                 }
                 messages.innerHTML = '<div class="chat-empty chat-empty-state"><div class="ce-icon">💬</div><div>选择一条会话开始聊天</div><div style="font-size:12px;">左侧列表会保持可见，方便切换会话</div></div>';
+                messages.dataset.emptyRendered = '1';
+            }
+
+            function clearDockChatDesktopEmptyFlag() {
+                var messages = document.getElementById('dockChatMessages');
+                if (messages) delete messages.dataset.emptyRendered;
             }
 
             function syncDockChatLayoutState() {
@@ -10936,6 +10999,12 @@ function renderProfileActivityList(kind) {
                 var title = options && options.title ? options.title : '加载中..';
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
+                var seq = parseInt(options && options.seq, 10);
+                // ★ 2026-09-25 修复（切换联系人骨架闪烁）：切换会话时先显示 loading 骨架，再把
+                //   网络回包渲染进去，两次 innerHTML 替换之间骨架会闪一下（观感像"闪白/卡顿"）。
+                //   给骨架打上序号；同一序号（同一次会话打开）内的后续调用直接跳过，不再重绘。
+                if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-loading')) return;
+                if (seq > 0) el.setAttribute('data-loading-seq', String(seq));
                 el.innerHTML = getXtjLoadingHtml(title, subtitle, variant);
             }
 
@@ -10953,6 +11022,9 @@ function renderProfileActivityList(kind) {
                 }
                 window.dockChatListCacheTime = 0;
                 syncDockChatLayoutState();
+                // ★ 2026-09-25 修复：返回会话列表时 0 值即"缓存失效"，缓存时长被提到 20s 后
+                //   这里会必然触发一次 /api/dm/list 往返（列表明明还在屏幕上）。改为标记为刚刷新。
+                window.dockChatListCacheTime = Date.now();
                 loadDockChatList();
                 startDMPolling(300000);
                 if (typeof window.__xtjResetIOSChatViewport === 'function') {
@@ -10991,11 +11063,9 @@ function renderProfileActivityList(kind) {
                 dockChatActiveUser = userName;
                 // 清除渲染签名，确保缓存加载不会因签名匹配跳过（当前 innerHTML 是 loading 状态）
                 if (typeof _chatRenderSignature !== 'undefined') _chatRenderSignature[userName] = undefined;
-                renderChatLoadingState(document.getElementById('dockChatMessages'), {
-                    title: '加载中..',
-                    subtitle: '正在打开聊天通道',
-                    variant: 'chat-detail'
-                });
+                // ★ 2026-09-25 修复（切换联系人闪一下）：这里不再无条件画 loading 骨架。
+                //   骨架的绘制统一交给 loadDockChatMessages —— 它有缓存时会直接渲染内容，
+                //   只有真正「无缓存的首屏」才显示骨架，避免骨架→内容两次重绘造成闪烁。
                 document.getElementById('dockChatListView').classList.add('hidden');
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
@@ -11419,25 +11489,47 @@ function renderProfileActivityList(kind) {
                 });
             }
 
+            // ★ 2026-09-25 修复（切换会话卡顿 + 已读未读/气泡闪白）：
+            //   旧实现用 el.innerHTML = rows.join('') 全量重建，是三个用户可感知问题的共同根因：
+            //     ① 整个消息树被销毁重建 → 已加载的图片/视频重新发起请求、先变成一张白纸再解码，
+            //        视觉上就是「聊天气泡闪白」；
+            //     ② 消息多时重建成本高 → 切换联系人卡顿；
+            //     ③ 「已读/未读」「撤回按钮」这类随时间/状态变化的节点每次都被重新创建。
+            //   现改为「按 id 复用 DOM 节点」的增量渲染：只在签名变化的那一行重建，
+            //   其余行原样搬过去（节点不销毁 → 图片不重载 → 不闪白，也不卡顿）。
+            function getDockChatRowKey(message, index) {
+                if (!message) return 'row-' + index;
+                if (message.__tempId) return 't:' + message.__tempId;
+                if (message.id) return 'i:' + message.id;
+                return 'x:' + index + ':' + String(message.created_at || '');
+            }
+
+            function buildDockChatRowSignature(message) {
+                var payload = getDMMessagePayload(message) || {};
+                return [
+                    message && message.user_name ? message.user_name : '',
+                    message && message.media_url ? message.media_url : '',
+                    message && message.content ? message.content : '',
+                    message && message.created_at ? message.created_at : '',
+                    message && message.actor_key ? message.actor_key : '',
+                    message && message.views ? message.views : 0,
+                    message && message.__optimistic ? 1 : 0,
+                    // 已读状态 / 撤回状态 / 媒体地址 必须进签名：这些变化时该行才重建
+                    getDMMessageReadAt(message),
+                    payload.withdrawn ? 1 : 0,
+                    (payload.media && payload.media.url) ? payload.media.url : ''
+                ].join('~');
+            }
+
             function buildDockChatRenderSignature(msgs) {
+                // ★ 修复：签名纳入 read_at / withdrawn / 媒体地址 与「时间显示档位」。
+                //   此前只比 id/content 等，导致已读变未读、撤回、以及跨档位（1分钟前→昨天）
+                //   的时间文案都不会触发重渲染；反过来又因为全量重建而频繁闪烁。现两者都对齐。
                 return (Array.isArray(msgs) ? msgs : []).map(function(m) {
-                    var payload = getDMMessagePayload(m) || {};
-                    return [
-                        m && m.id ? m.id : '',
-                        m && m.__tempId ? m.__tempId : '',
-                        m && m.user_name ? m.user_name : '',
-                        m && m.media_url ? m.media_url : '',
-                        m && m.content ? m.content : '',
-                        m && m.created_at ? m.created_at : '',
-                        m && m.actor_key ? m.actor_key : '',
-                        m && m.views ? m.views : 0,
-                        m && m.__optimistic ? 1 : 0,
-                        // ★ 修复：签名纳入 read_at 与 withdrawn，已读状态/撤回后必须重渲染
-                        getDMMessageReadAt(m),
-                        payload.withdrawn ? 1 : 0
-                    ].join('~');
+                    return (m && (m.id || m.__tempId) ? (m.id || m.__tempId) : '') + '@' + buildDockChatRowSignature(m);
                 }).join('|');
             }
+
 
             function mergeDockChatMessages(userName, msgs) {
                 // ★ 修复：发送成功会把乐观消息替换成服务端真实消息（不再带 __optimistic）。
@@ -11558,9 +11650,16 @@ function renderProfileActivityList(kind) {
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
-                    var safeSrc = escapeHtml(media.src);
-                    var safeFull = escapeHtml(media.fullSrc);
+                    // ★ 2026-09-25 修复（发图后显示"查看图片"按钮而不是缩略图）：
+                    //   公共地址在桶未开公共读时必然 403，旧流程只能靠 onerror 兜底换签名地址，
+                    //   于是用户先看到一个坏图标/按钮，几百毫秒后才变图（或永久变按钮）。
+                    //   现在渲染时就用本地签名缓存（若已换取过）直接作为 src，命中则首帧即为图片。
+                    var resolvedImageSrc = resolveDockChatMediaSrc(media.src, media.fullSrc);
+                    var safeSrc = escapeHtml(resolvedImageSrc);
+                    var safeFull = escapeHtml(resolvedImageSrc);
                     var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
+                    // 后台预热签名地址：下一次渲染（含切换会话回来）即可直接命中，不再闪按钮
+                    primeDockChatMediaSignedUrl(media.src);
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
@@ -11604,10 +11703,12 @@ function renderProfileActivityList(kind) {
                 return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
             }
 
-            async function loadDockChatMessages(userName, forceScroll) {
+            // ★ 2026-09-25：muteLoadingSkeleton=true 表示「轮询/后台刷新」，不允许动 loading 骨架
+            //   与空状态，避免后台回包把用户正在看的界面顶掉重画。
+            async function loadDockChatMessages(userName, forceScroll, muteLoadingSkeleton) {
+                var el0 = document.getElementById('dockChatMessages');
                 if (!window.currentUser) {
-                    const el = document.getElementById('dockChatMessages');
-                    if (el) el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div></div>';
+                    if (el0) el0.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div></div>';
                     return;
                 }
                 var loadSeq = ++_dockChatLoadSeq;
@@ -11622,20 +11723,29 @@ function renderProfileActivityList(kind) {
                 }
                 // 获取聊天缓存键
                 var cacheKey = getDockChatCacheKey(userName);
-                if (_chatCache[cacheKey] && _chatCache[cacheKey].length) {
+                var hadCachedMessages = !!(_chatCache[cacheKey] && _chatCache[cacheKey].length);
+                if (hadCachedMessages) {
+                    // ★ 2026-09-25 修复（切换会话骨架闪烁）：缓存命中时必须在任何骨架/空状态
+                    //   绘制之前就把内容渲染出来，否则 openChat 里那次 loading 骨架会先画上去
+                    //   再被覆盖，用户就看到"闪一下"。
                     renderDockMessages(userName, _chatCache[cacheKey], !!forceScroll);
+                }
+                if (!hadCachedMessages && !muteLoadingSkeleton) {
+                    // 无缓存且不是轮询/后台刷新 → 才允许显示骨架（首次打开会话）
+                    renderChatLoadingState(el0, {
+                        title: '加载中..',
+                        subtitle: '正在打开聊天通道',
+                        variant: 'chat-detail',
+                        seq: loadSeq
+                    });
                 }
                 hydrateDockChatAvatars([currentUser, userName], function(changed) {
                     if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
-                    if (changed) {
-                        var cachedMessages = _chatCache[cacheKey];
-                        if (cachedMessages && cachedMessages.length) {
-                            renderDockMessages(userName, cachedMessages, false);
-                        }
-                    }
+                    // ★ 修复：头像变化只就地替换头像节点，不再整段重渲染消息列表
+                    //   （整段重建会让已加载的图片重新请求，造成"气泡闪白"）。
                     patchDockChatMessageAvatars(userName);
                 });
-                const el = document.getElementById('dockChatMessages');
+                const el = el0;
                 try {
                     var requestController = typeof AbortController === 'function' ? new AbortController() : null;
                     var requestTimeout = setTimeout(function() {
@@ -11692,6 +11802,7 @@ function renderProfileActivityList(kind) {
             function renderDockMessages(userName, msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
                 if (!el) return;
+                if (typeof clearDockChatDesktopEmptyFlag === 'function') clearDockChatDesktopEmptyFlag();
                 if (!msgs.length) {
                     _chatRenderSignature[userName || '__empty__'] = '__empty__';
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>';
@@ -11711,23 +11822,48 @@ function renderProfileActivityList(kind) {
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
                 var otherUser = msgs[0] ? (msgs[0].user_name === currentUser ? msgs[0].media_url : msgs[0].user_name) : '';
-                var myAvatarHtml = getDockChatAvatarMarkup(currentUser);
-                var otherAvatarHtml = getDockChatAvatarMarkup(otherUser);
-                el.innerHTML = msgs.map(function(m) {
-                    return buildDockChatRowMarkup(m, { mine: myAvatarHtml, other: otherAvatarHtml }, isBulk);
-                }).join('');
+                var avatars = { mine: getDockChatAvatarMarkup(currentUser), other: getDockChatAvatarMarkup(otherUser) };
+                var sameConversation = el.dataset.chatUser === signatureKey;
+                var existingRows = {};
+                Array.prototype.forEach.call(el.querySelectorAll('.chat-msg-row[data-msg-key]'), function(node) {
+                    var k = node.getAttribute('data-msg-key');
+                    if (k) existingRows[k] = node;
+                });
+                var fragment = document.createDocumentFragment();
+                msgs.forEach(function(message, index) {
+                    var key = getDockChatRowKey(message, index);
+                    var sig = buildDockChatRowSignature(message);
+                    var node = existingRows[key];
+                    if (sameConversation && node && node.getAttribute('data-msg-sig') === sig) {
+                        // 未变化 → 复用原节点：图片不重新请求，已读状态不重建，不闪白
+                        delete existingRows[key];
+                        fragment.appendChild(node);
+                        return;
+                    }
+                    var template = document.createElement('template');
+                    template.innerHTML = buildDockChatRowMarkup(message, avatars, isBulk).trim();
+                    node = template.content.firstElementChild;
+                    if (node) {
+                        node.setAttribute('data-msg-key', key);
+                        node.setAttribute('data-msg-sig', sig);
+                    }
+                    fragment.appendChild(node);
+                });
+                el.replaceChildren(fragment);
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
                 patchDockChatMessageAvatars(userName);
                 if (shouldAutoScroll) {
                     scrollDockChatToLatest();
                     bindDockChatMediaLoadScroll(el, true);
-                } else {
+                } else if (sameConversation) {
                     // Keep the reader anchored on the same message while a polling refresh
                     // updates the DOM; only advertise the new messages instead of yanking
                     // the conversation to the bottom.
                     el.scrollTop = previousScrollTop + Math.max(0, el.scrollHeight - previousScrollHeight);
                     setDockChatJumpLatestVisible(true);
+                } else {
+                    setDockChatJumpLatestVisible(false);
                 }
             }
 
@@ -11798,11 +11934,23 @@ function renderProfileActivityList(kind) {
                     var mediaPayload = null;
                     if (file) {
                         const path = buildStorageUploadPath('chat', file.name);
+                        // ★ 2026-09-25 修复（发送图片失败：null is not an object (evaluating 'sb.storage')）：
+                        //   全局 sb 可能因 Supabase SDK 延迟加载/SDK 加载失败而为 null。
+                        //   此处先做惰性兜底：尝试 window.sb，再尝试调用 initSupabaseClient() 重建，
+                        //   仍不可用则给出明确可读的提示（而不是把原生 TypeError 抛给用户）。
+                        var _sbClient = sb || window.sb || null;
+                        if (!_sbClient && typeof initSupabaseClient === 'function') {
+                            try { initSupabaseClient(); } catch (eInit) {}
+                            _sbClient = sb || window.sb || null;
+                        }
+                        if (!_sbClient || !_sbClient.storage) {
+                            throw new Error('图片上传服务未就绪，请刷新页面后重试');
+                        }
                         // P6: 检查 Storage 上传返回的 error — Supabase JS 客户端在
                         // Storage 业务错误（配额超限、权限拒绝、路径冲突）时返回
                         // { data: null, error } 而非 throw。之前不检查 error，导致
                         // 媒体文件实际不存在时仍继续发送私信。
-                        var uploadResult = await sb.storage.from("uploads").upload(path, file, {
+                        var uploadResult = await _sbClient.storage.from("uploads").upload(path, file, {
                             cacheControl: '3600',
                             upsert: false,
                             contentType: file.type || 'application/octet-stream'
@@ -11890,8 +12038,17 @@ function renderProfileActivityList(kind) {
                     //   从未感知该路径，文件会残留在公共桶）。
                     if (storagePath) {
                         try {
-                            var dmOrphanRes = await sb.storage.from('uploads').remove([storagePath]);
-                            if (dmOrphanRes && dmOrphanRes.error) console.warn('[dm-send] orphan media cleanup failed', dmOrphanRes.error);
+                            // ★ 2026-09-25 修复：此处原本直接裸调 sb.storage。若 sb 为 null
+                            //   （Supabase SDK 未就绪），这里会抛 TypeError，把真正的失败原因
+                            //   （上传/发送错误）覆盖成 "null is not an object (evaluating 'sb.storage')"，
+                            //   用户看到的报错就是这句无意义的话。现改为安全取客户端并单独兜底。
+                            var _cleanupClient = sb || window.sb || null;
+                            if (_cleanupClient && _cleanupClient.storage) {
+                                var dmOrphanRes = await _cleanupClient.storage.from('uploads').remove([storagePath]);
+                                if (dmOrphanRes && dmOrphanRes.error) console.warn('[dm-send] orphan media cleanup failed', dmOrphanRes.error);
+                            } else {
+                                console.warn('[dm-send] orphan media cleanup skipped: storage client unavailable');
+                            }
                         } catch (dmCleanupErr) { console.warn('[dm-send] orphan media cleanup failed', dmCleanupErr); }
                         storagePath = null;
                     }

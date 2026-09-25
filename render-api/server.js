@@ -22419,7 +22419,18 @@ function parseAiModelsSnapshotRow(row) {
   try { parsed = JSON.parse((row && row.content) || '{}'); } catch (_) { return null; }
   var models = Array.isArray(parsed.models) ? parsed.models : [];
   var deleted = Array.isArray(parsed.deleted_uids) ? parsed.deleted_uids.map(function(x) { return String(x || '').trim(); }).filter(Boolean) : [];
-  return { models: models, deletedUids: deleted, updatedAt: parsed.updated_at || (row && row.created_at) || '' };
+  // ★ 2026-09-25 新增：快照顺带承载轻量 UI 偏好（目前只有「深入研究使用的模型」）。
+  //   该字段随快照一起走「最新一行」读取，因此天然不会受历史残留行影响。
+  var aiPrefs = (parsed.ai_prefs && typeof parsed.ai_prefs === 'object' && !Array.isArray(parsed.ai_prefs)) ? parsed.ai_prefs : {};
+  return { models: models, deletedUids: deleted, aiPrefs: aiPrefs, updatedAt: parsed.updated_at || (row && row.created_at) || '' };
+}
+function cleanAiPrefs(input) {
+  var out = {};
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return out;
+  // research_model 形如 'pro' | 'flash' | 'custom:<uid>'
+  var rm = String(input.research_model || '').trim().slice(0, 64);
+  if (/^(pro|flash|custom:[A-Za-z0-9_-]{1,60})$/.test(rm)) out.research_model = rm;
+  return out;
 }
 // 取该账号最新一行快照（不合并历史行）
 async function fetchLatestAiModelsSnapshot(userName) {
@@ -22428,9 +22439,9 @@ async function fetchLatestAiModelsSnapshot(userName) {
     .order('created_at', { ascending: false }).limit(1);
   if (lookup.error) throw lookup.error;
   var rows = Array.isArray(lookup.data) ? lookup.data : [];
-  if (!rows.length) return { models: [], deletedUids: [], updatedAt: '' };
+  if (!rows.length) return { models: [], deletedUids: [], aiPrefs: {}, updatedAt: '' };
   var snap = parseAiModelsSnapshotRow(rows[0]);
-  return snap || { models: [], deletedUids: [], updatedAt: '' };
+  return snap || { models: [], deletedUids: [], aiPrefs: {}, updatedAt: '' };
 }
 function cleanDeletedUidList(input) {
   if (!Array.isArray(input)) return [];
@@ -22464,7 +22475,7 @@ app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), asyn
       else { copy.api_key = String(copy.api_key || ''); }
       return copy;
     });
-    return res.json({ ok: true, models: out, deleted_uids: snap.deletedUids });
+    return res.json({ ok: true, models: out, deleted_uids: snap.deletedUids, ai_prefs: snap.aiPrefs || {} });
   } catch (e) {
     console.error('[ai-models] 读取失败:', e && e.message);
     return res.status(500).json({ error: '读取自定义模型失败', code: 'ai_models_read_error' });
@@ -22504,7 +22515,14 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
     deletedUids = deletedUids.filter(function(uid) { return !incomingSet[uid]; });
     deletedUids = cleanDeletedUidList(deletedUids);
 
-    var snapshotContent = JSON.stringify({ models: models, deleted_uids: deletedUids, updated_at: new Date().toISOString() });
+    var snapshotContent = JSON.stringify({
+      models: models,
+      deleted_uids: deletedUids,
+      // ★ 2026-09-25：保存/合并 UI 偏好。前端只在用户真正改动选择器时才传 ai_prefs，
+      //   不传则沿用上一版快照的值，避免把已有偏好清空。
+      ai_prefs: Object.assign({}, (prevSnap.aiPrefs || {}), cleanAiPrefs(body.ai_prefs)),
+      updated_at: new Date().toISOString()
+    });
 
     // 先立后破：先插入本次完整快照并拿回 id，成功后再删除其它旧快照行。
     // ★ 2026-09-24 修复：旧代码在删除旧行失败时只 console.warn 放过，导致旧行永久残留
@@ -22540,7 +22558,7 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
       delete copy.api_key_enc;
       return copy;
     });
-    return res.json({ ok: true, models: echo, deleted_uids: deletedUids });
+    return res.json({ ok: true, models: echo, deleted_uids: deletedUids, ai_prefs: Object.assign({}, (prevSnap.aiPrefs || {}), cleanAiPrefs(body.ai_prefs)) });
   } catch (e) {
     console.error('[ai-models] 保存失败:', e && e.message);
     return res.status(500).json({ error: '保存自定义模型失败', code: 'ai_models_write_error' });

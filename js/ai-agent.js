@@ -202,7 +202,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
     pushServerCustomModels(alive).catch(function() {});
   }
-  async function pushServerCustomModels(list, deletedUids) {
+  async function pushServerCustomModels(list, deletedUids, aiPrefs) {
     try {
       var auth = await getUserAuthPayload({ forceNoToken: false });
       if (!auth.token) return false;
@@ -210,6 +210,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         models: (list || []).map(toStoredModel).slice(0, 20),
         deleted_uids: (deletedUids && deletedUids.length) ? deletedUids.slice(0, 200) : loadDeletedModelUids()
       };
+      // ★ 2026-09-25：仅当调用方显式传入偏好时才写，避免模型增删顺带清空研究模型选择。
+      if (aiPrefs && typeof aiPrefs === 'object') payload.ai_prefs = aiPrefs;
       var resp = await fetch(API_BASE + '/custom-models', {
         method: 'PUT',
         headers: auth.headers,
@@ -219,6 +221,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var data = await resp.json();
       return !!(data && data.ok);
     } catch (e) { return false; }
+  }
+  // ★ 2026-09-25 新增：把「深入研究模型」选择持久化到服务端（随模型快照同行），
+  //   解决换设备/清缓存后选择丢失的问题。失败静默忽略，localStorage 仍是兜底。
+  function persistResearchModelPref(modelId) {
+    try {
+      var v = String(modelId || '').trim();
+      if (!/^(pro|flash|custom:[A-Za-z0-9_-]{1,60})$/.test(v)) return;
+      pushServerCustomModels(loadCustomModels(), loadDeletedModelUids(), { research_model: v }).catch(function() {});
+    } catch (e) {}
   }
   async function fetchServerCustomModels() {
     try {
@@ -236,6 +247,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           });
           saveDeletedModelUids(mergedTomb);
         }
+        // ★ 2026-09-25：恢复服务端保存的「深入研究模型」选择（本地已有值时以本地为准，
+        //   因为本地代表用户最近一次显式选择）。
+        try {
+          var prefModel = data.ai_prefs && data.ai_prefs.research_model;
+          if (prefModel && typeof prefModel === 'string') {
+            S.dtResearchModel = prefModel;
+            try {
+              if (!localStorage.getItem('xtj_ai_research_model')) {
+                localStorage.setItem('xtj_ai_research_model', prefModel);
+              }
+            } catch (ePref) {}
+          }
+        } catch (ePref2) {}
         var tombstones = loadDeletedModelUids();
         return data.models.filter(function(m) {
           if (!m || !m.uid || !m.api_key) return false;
@@ -4731,6 +4755,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var v = String(modelSel.value || '');
         S.dtResearchModel = v;
         try { localStorage.setItem('xtj_ai_research_model', v); } catch (eSt) {}
+        // ★ 2026-09-25：同步到服务端，换设备/清缓存后选择仍在
+        persistResearchModelPref(v);
         syncResearchModelUi(panel);
       });
       modelBar.appendChild(modelSel);
