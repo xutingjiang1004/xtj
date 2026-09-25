@@ -3715,6 +3715,11 @@ function isAdmin() { return (currentUser || window.currentUser) === ADMIN_NAME; 
                 window._lastKnownUser = '';
                 window.currentUserInfoSnapshot = null;
                 _chatCache = {};
+                // ★ 2026-09-25 修复（审计 H-4）：连渲染态一起清。只清内存缓存不够——
+                //   桌面分屏下 #dockChatMessages 里的气泡仍留在 DOM 中，且
+                //   renderDockChatDesktopEmptyState 会因 dataset.chatUser 未变而跳过重绘，
+                //   结果是登出后仍能看到上一个账号的完整聊天记录。
+                try { if (typeof window.__xtjResetChatPanels === 'function') window.__xtjResetChatPanels(); } catch(e) {}
                 // M-2d: 登出时复位聊天面板会话状态，防止切换账号后残留上一账号的
                 // 聊天标题/渲染签名，导致串号或列表不刷新
                 try { dockChatActiveUser = null; } catch(e) {}
@@ -9984,6 +9989,25 @@ function renderProfileActivityList(kind) {
             }
             window.markMessagesRead = markMessagesRead;
 
+            // ★ 2026-09-25 修复（审计 M-7）：未读口径单一来源。
+            //   会话列表（loadDockChatList）与导航角标（updateUnreadBadge）此前各自实现了一份
+            //   聚合，条数上限还不一样（180 vs 200），切换 tab 时数字会跳动。
+            //   规则：只统计"发给我的且未读"的消息，按发件人（会话）分组，每个会话封顶 99，再求和。
+            function aggregateDmUnread(rows) {
+                var bySender = {};
+                (Array.isArray(rows) ? rows : []).forEach(function(m) {
+                    if (!m || m.media_url !== window.currentUser) return;
+                    if (window.isMsgReadByMe(m)) return;
+                    var sender = m.user_name;
+                    if (!sender) return;
+                    bySender[sender] = Math.min((bySender[sender] || 0) + 1, 99);
+                });
+                var total = 0;
+                Object.keys(bySender).forEach(function(k) { total += bySender[k]; });
+                return { total: total, bySender: bySender };
+            }
+            window.aggregateDmUnread = aggregateDmUnread;
+
             function subscribeToMessages() {
                 // H-10 修复：sb 在 SUPABASE_URL/ANON_KEY 缺失时为 null，
                 // 缺守卫会抛 TypeError（与 subscribeToComments 对齐）
@@ -10230,59 +10254,48 @@ function renderProfileActivityList(kind) {
 
             function setUnreadBadgeCount(cnt) {
                 var badge = document.getElementById('navChatBadge');
+                var count = Number(cnt) || 0;
                 if (!badge) return;
-                if (cnt > 0) {
-                    badge.textContent = cnt > 99 ? '99+' : cnt;
+                if (count > 0) {
+                    badge.textContent = count > 99 ? '99+' : String(count);
                     badge.classList.add('show');
                 } else {
+                    // ★ 2026-09-25 修复（审计 M-11）：清零时必须同时清空文本。
+                    //   desktop-shell.js 的 syncChatBadge 是按 textContent 把导航角标镜像到
+                    //   桌面侧栏 #desktopChatBadge 的，只摘 .show 会让侧栏长期显示过期未读数。
+                    badge.textContent = '';
                     badge.classList.remove('show');
                 }
             }
 
-            async function updateUnreadBadge() {
-                var badge = document.getElementById('navChatBadge');
-                if (!window.currentUser) {
-                    if (badge) badge.classList.remove('show');
-                    return;
-                }
-                try {
-                    // ★ 2026-09-25 修复：sb 可能因 SDK 未就绪而为 null，直接 sb.from(...) 会抛
-                    //   TypeError 被下面的 catch 静默吞掉，导致未读角标长期不更新。
-                    //   这里补一次惰性初始化，仍不可用则安全返回。
-                    var _badgeClient = sb || window.sb || null;
-                    if (!_badgeClient && typeof initSupabaseClient === 'function') {
-                        try { initSupabaseClient(); } catch (eInit) {}
-                        _badgeClient = sb || window.sb || null;
-                    }
-                    if (!_badgeClient) return;
-                    // ★ 修复：口径对齐 —— loadDockChatList 用最近 180 条按会话聚合再求和，
-                    // 这里原为 120 条直接逐条计数（去重 120 条），两处结果不一致导致切换 tab 时数字跳动。
-                    // 现将查询上限提高到 200，并同样先按会话（media_url）聚合每条会话的未读数
-                    // （封顶 99），再对所有会话求和，与 loadDockChatList 的统计口径保持一致。
-                    var result = await _badgeClient.from('posts')
-                        .select('id, user_name, content, views, created_at')
-                        .eq('media_type', DM_MARKER)
-                        .eq('media_url', window.currentUser)
-                        .order('created_at', { ascending: false })
-                        .limit(200);
+            var _dmUnreadFetchedAt = 0;
+            // 供 loadDockChatList 在写入角标后打点，避免紧随其后再打一次同样的请求
+            window.__xtjNoteDmUnreadFresh = function() { _dmUnreadFetchedAt = Date.now(); };
 
-                    var data = result.data;
-                    var error = result.error;
-                    if (error) return;
-                    var convUnreadMap = {};
-                    (data || []).forEach(function(m) {
-                        var sender = m && m.user_name;
-                        if (!sender) return;
-                        if (window.isMsgReadByMe(m)) return;
-                        convUnreadMap[sender] = Math.min((convUnreadMap[sender] || 0) + 1, 99);
-                    });
-                    var cnt = 0;
-                    Object.keys(convUnreadMap).forEach(function(sender) {
-                        cnt += convUnreadMap[sender];
-                    });
-                    setUnreadBadgeCount(cnt);
-                } catch(e) {}
+            async function updateUnreadBadge() {
+                if (!window.currentUser) { setUnreadBadgeCount(0); return; }
+                // ★ 2026-09-25 修复（审计 H-2，严重）：旧实现用浏览器端 anon key 直连
+                //   Supabase 查 posts 里 media_type = '__dm__' 的行来数未读。但 posts 的 RLS
+                //   白名单（migrations/015、035）**显式排除了 __dm__** —— 该查询不报错，
+                //   只是被 RLS 过滤成空数组，于是每次调用都把角标"成功地"写成 0。
+                //   而它在启动后 90ms、每次轮询、每次发消息/标记已读时都会跑，等于反复
+                //   抹掉 loadDockChatList 算出来的正确数字 —— 用户因此漏消息。
+                //   未读数是安全敏感数据，必须走后端（service_role）。这里改为复用
+                //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
+                if (Date.now() - _dmUnreadFetchedAt < 5000) return;
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/dm/list');
+                    if (!resp.ok) return;
+                    var result = await resp.json().catch(function() { return {}; });
+                    if (!result || !result.ok) return;
+                    _dmUnreadFetchedAt = Date.now();
+                    setUnreadBadgeCount(aggregateDmUnread(result.data || []).total);
+                } catch (e) {
+                    // 网络失败时保留上一次的角标 —— 清零等于谎报"没有未读"
+                }
             }
+            window.updateUnreadBadge = updateUnreadBadge;
+            window.startDMPolling = startDMPolling;
 
             // ===================== 举报回复通知检测 =====================
             var reportReplyPollTimer = null;
@@ -10976,31 +10989,65 @@ function renderProfileActivityList(kind) {
             let dockChatSending = false;
             let _dockPreviewUrl = null;
 
+            // ★ 2026-09-25 修复（审计 M-16）：判据必须与 desktop.css 的加载条件一致。
+            //   desktop.min.css 的 media 是 (min-width:768px) and (min-height:480px)，
+            //   而这里此前只看宽度 —— 横屏手机（如 844x390）会被判为桌面分屏，加上
+            //   .desktop-split 并取消两栏 hidden，但分屏样式根本没加载，于是变成
+            //   "单栏布局 + dock 栏不隐藏"的混合态。
             function shouldUseDesktopChatSplitLayout() {
                 var width = Math.max(
                     window.innerWidth || 0,
                     document.documentElement ? (document.documentElement.clientWidth || 0) : 0
                 );
-                return width >= 768;
+                var height = Math.max(
+                    window.innerHeight || 0,
+                    document.documentElement ? (document.documentElement.clientHeight || 0) : 0
+                );
+                return width >= 768 && height >= 480;
             }
 
             function renderDockChatDesktopEmptyState() {
                 var messages = document.getElementById('dockChatMessages');
                 if (!messages || window.__xtjAiChatActive) return;
+                // ★ 2026-09-25 修复（审计 H-4，隐私）：未登录分支必须放在"内容归属"判断
+                //   **之前**。旧顺序下，dataset.chatUser 仍是上一个账号的会话对手名时，
+                //   会命中下面的 return，于是登出后桌面分屏继续显示**上一账号的完整聊天记录**。
+                if (!window.currentUser) {
+                    messages.innerHTML = '<div class="chat-empty chat-empty-state"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
+                    delete messages.dataset.chatUser;
+                    messages.dataset.emptyRendered = '1';
+                    return;
+                }
                 // ★ 2026-09-25 修复（切换联系人时桌面端"闪白"）：旧实现无条件重写空状态
                 //   DOM。会话切换过程中 switchDockTab → syncDockChatLayoutState 会走到这里，
                 //   把正在渲染的消息区顶掉再重画，观感就是闪一下白。仅在内容确实不属于
                 //   任何会话（没有渲染过消息）时才重绘。
                 if (messages.dataset.chatUser && messages.dataset.chatUser !== '__empty__') return;
                 if (messages.dataset.emptyRendered === '1') return;
-                if (!window.currentUser) {
-                    messages.innerHTML = '<div class="chat-empty chat-empty-state"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
-                    messages.dataset.emptyRendered = '1';
-                    return;
-                }
                 messages.innerHTML = '<div class="chat-empty chat-empty-state"><div class="ce-icon">💬</div><div>选择一条会话开始聊天</div><div style="font-size:12px;">左侧列表会保持可见，方便切换会话</div></div>';
                 messages.dataset.emptyRendered = '1';
             }
+
+            // ★ 2026-09-25 新增（审计 H-4）：登出/切换账号时把聊天面板的**渲染态**一并清掉。
+            //   旧实现只清了内存缓存（_chatCache / dockChatActiveUser），DOM 原样保留，
+            //   叠加 renderDockChatDesktopEmptyState 的归属判断，导致桌面分屏在登出后
+            //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
+            window.__xtjResetChatPanels = function() {
+                try {
+                    var messages = document.getElementById('dockChatMessages');
+                    if (messages) {
+                        messages.innerHTML = '';
+                        delete messages.dataset.chatUser;
+                        delete messages.dataset.emptyRendered;
+                    }
+                    var list = document.getElementById('dockChatList');
+                    if (list) list.innerHTML = '';
+                    var title = document.getElementById('dockChatTitle');
+                    if (title) title.textContent = '消息';
+                    _dockChatListRenderSignature = '';
+                    _chatRenderSignature = {};
+                } catch (e) {}
+            };
 
             function clearDockChatDesktopEmptyFlag() {
                 var messages = document.getElementById('dockChatMessages');
@@ -11201,9 +11248,10 @@ function renderProfileActivityList(kind) {
                         });
                     } catch (ePreheat) { /* 预热失败不影响列表渲染 */ }
                     const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
-                    setUnreadBadgeCount(convs.reduce(function(total, item) {
-                        return total + (item && item.unread ? item.unread : 0);
-                    }, 0));
+                    // ★ 2026-09-25 修复（审计 M-7/H-2）：角标口径统一走 aggregateDmUnread，
+                    //   与 updateUnreadBadge 完全同源，避免两处算法/上限不同导致数字跳动。
+                    setUnreadBadgeCount(aggregateDmUnread(allMsgs).total);
+                    if (typeof window.__xtjNoteDmUnreadFresh === 'function') window.__xtjNoteDmUnreadFresh();
                     renderDockChatConversationList(el, convs);
                     window.dockChatListCacheTime = Date.now();
                     renderDockChatFixedEntry(el);
@@ -11339,6 +11387,7 @@ function renderProfileActivityList(kind) {
             var _dockChatListLoadSeq = 0;
             var _dockChatListRefreshTimer = null;
             var _dockChatListRenderSignature = '';
+            var _dockChatWithdrawExpiryTimer = null;
 
             function getDockChatCacheKey(userName) {
                 return (currentUser || '') + '_' + (userName || '');
@@ -11422,7 +11471,7 @@ function renderProfileActivityList(kind) {
                     '" data-last-time="', escapeHtml(conversation.last_time || ''), '" style="--xtj-enter-delay:', String(Math.min((index || 0) * 12, 48)),
                     'ms" onclick="openChat(\'', safeUser, '\')">',
                     '<div class="cli-avatar">', getDockChatConversationAvatarHtml(conversation.other_user), '</div>',
-                    '<div class="cli-info"><div class="cli-name">', escapeHtml(conversation.other_user), '</div><div class="cli-preview">', escapeHtml(conversation.last_message || ''), '</div></div>',
+                    '<div class="cli-info"><div class="cli-name"><span class="cli-name-text">', escapeHtml(conversation.other_user), '</span></div><div class="cli-preview">', escapeHtml(conversation.last_message || ''), '</div></div>',
                     '<div class="cli-right"><span class="cli-time">', formatMsgTime(conversation.last_time), '</span>', conversation.unread ? '<span class="cli-badge">' + (conversation.unread > 99 ? '99+' : conversation.unread) + '</span>' : '', '</div>',
                     '</div>'
                 ].join('');
@@ -11463,6 +11512,14 @@ function renderProfileActivityList(kind) {
             // intentionally launched from the homepage AI tools button.
             function renderDockChatFixedEntry(el) {
                 if (!el) return;
+                // ★ 2026-09-25 修复（审计 M-10）：未登录时不渲染固定入口。
+                //   旧实现不看登录态，未登录访客会在"登录后可查看消息"的列表里看到一个
+                //   「xxz 管理员」联系人，点下去只弹"请先登录"。
+                if (!window.currentUser) {
+                    var staleAdminEntry = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
+                    if (staleAdminEntry) staleAdminEntry.remove();
+                    return;
+                }
                 // The administrator contact remains a normal direct-message entry.
                 if (window.currentUser === 'xxz') {
                     var selfEntry = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
@@ -11479,7 +11536,7 @@ function renderProfileActivityList(kind) {
                     var adminHtml = [
                         '<div class="chat-list-item admin-chat-entry" data-chat-user="xxz" role="button" tabindex="0" style="--xtj-enter-delay:50ms">',
                         '<div class="cli-avatar">', getDockChatAvatarMarkup('xxz'), '</div>',
-                        '<div class="cli-info"><div class="cli-name">xxz<span class="admin-tag-mini">管理员</span></div><div class="cli-preview">想我就给我发消息</div></div>',
+                        '<div class="cli-info"><div class="cli-name"><span class="cli-name-text">xxz</span><span class="admin-tag-mini">管理员</span></div><div class="cli-preview">想我就给我发消息</div></div>',
                         '<div class="cli-right"></div>',
                         '</div>'
                     ].join('');
@@ -11660,6 +11717,39 @@ function renderProfileActivityList(kind) {
                 return (el.scrollHeight - el.scrollTop - el.clientHeight) < (threshold || 96);
             }
 
+            // ★ 2026-09-25 修复（审计 M-1）：撤回入口有 3 分钟窗口，但行签名
+            //   （buildDockChatRowSignature）里没有任何时间维度，于是轮询刷新时
+            //   "签名未变 → 不重绘"，撤回按钮会一直挂在那里；用户点了必然被服务端
+            //   403 timeout 拒绝。这里在渲染后按"最近一条可撤回消息的到期时刻"
+            //   排一个定时器，到期时强制重算该会话。
+            function scheduleDockChatWithdrawExpiry(userName, msgs) {
+                if (_dockChatWithdrawExpiryTimer) {
+                    clearTimeout(_dockChatWithdrawExpiryTimer);
+                    _dockChatWithdrawExpiryTimer = null;
+                }
+                if (!userName || !Array.isArray(msgs) || !currentUser) return;
+                var now = Date.now();
+                var window_ = 3 * 60 * 1000;
+                var soonest = Infinity;
+                msgs.forEach(function(m) {
+                    if (!m || m.__optimistic || m.user_name !== currentUser) return;
+                    var payload = getDMMessagePayload(m);
+                    if (payload && payload.withdrawn) return;
+                    var t = new Date(m.created_at).getTime();
+                    if (isNaN(t)) return;
+                    var remaining = (t + window_) - now;
+                    if (remaining > 0 && remaining < soonest) soonest = remaining;
+                });
+                if (!isFinite(soonest)) return;
+                _dockChatWithdrawExpiryTimer = setTimeout(function() {
+                    _dockChatWithdrawExpiryTimer = null;
+                    if (!dockChatActiveUser || dockChatActiveUser !== userName) return;
+                    // 清掉签名，强制这次重绘（否则签名未变会被提前 return 掉）
+                    _chatRenderSignature[userName] = undefined;
+                    renderDockMessages(userName, _chatCache[getDockChatCacheKey(userName)] || [], false);
+                }, Math.min(soonest + 50, 2147483000));
+            }
+
             function setDockChatJumpLatestVisible(visible) {
                 var button = document.getElementById('dockChatJumpLatest');
                 if (!button) return;
@@ -11747,7 +11837,7 @@ function renderProfileActivityList(kind) {
                 var timeLimit = 3 * 60 * 1000;
                 var canWithdraw = sent && !message.__optimistic && !isWithdrawn && (elapsed <= timeLimit);
                 
-                var withdrawBtn = canWithdraw ? '<span class="msg-withdraw-btn" onclick="window.withdrawDMMessage(\'' + safeJsStr(String(message.id)) + '\', this)" style="cursor:pointer; font-size: 11px; margin-left: 6px; color: #999;">撤回</span>' : '';
+                var withdrawBtn = canWithdraw ? '<span class="msg-withdraw-btn" role="button" tabindex="0" onclick="window.withdrawDMMessage(\'' + safeJsStr(String(message.id)) + '\', this)" onkeydown="if(event.keyCode===13||event.keyCode===32){event.preventDefault();this.click();}" style="cursor:pointer;">撤回</span>' : '';
                 
                 var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
                 if (message.__optimistic && sent) bubbleClass += ' sent-anim';
@@ -11872,6 +11962,7 @@ function renderProfileActivityList(kind) {
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
                     if (forceScroll) scrollDockChatToLatest();
+                    scheduleDockChatWithdrawExpiry(userName, msgs);
                     return;
                 }
                 var previousScrollTop = el.scrollTop;
@@ -11911,6 +12002,7 @@ function renderProfileActivityList(kind) {
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
                 patchDockChatMessageAvatars(userName);
+                scheduleDockChatWithdrawExpiry(userName, msgs);
                 if (shouldAutoScroll) {
                     scrollDockChatToLatest();
                     bindDockChatMediaLoadScroll(el, true);
@@ -11963,10 +12055,18 @@ function renderProfileActivityList(kind) {
                 const content = inp.value.trim();
                 const fileInput = document.getElementById('dockChatFileInp');
                 const file = fileInput && fileInput.files[0];
-                if ((!content && !file) || !dockChatActiveUser || dockChatSending) {
-                if (!dockChatActiveUser && content) showToast('请先选择一个聊天对象');
-                return;
-            }
+                if (!content && !file) return;
+                if (!dockChatActiveUser) {
+                    if (content) showToast('请先选择一个聊天对象');
+                    return;
+                }
+                if (dockChatSending) {
+                    // ★ 2026-09-25 修复（审计 M-4）：旧实现把 dockChatSending 与"无内容"
+                    //   合并在同一个 return 里，发送中再次回车会被静默吞掉（无提示、不排队）。
+                    //   这里给出明确反馈；输入框内容保持不变，用户可直接再回车。
+                    showToast('上一条消息正在发送，请稍候');
+                    return;
+                }
                 var targetUser = dockChatActiveUser;
                 if (targetUser === currentUser) { showToast('不能给自己发送消息'); return; }
                 var maxFileSize = 50 * 1024 * 1024;
@@ -12309,6 +12409,17 @@ function renderProfileActivityList(kind) {
                 syncDockChatLayoutState();
             }
             window.updateChatAuthUI = updateChatAuthUI;
+            // ★ 2026-09-25 修复：desktop-shell.js 的"双击刷新聊天"分支用
+            //   typeof window.loadDockChatMessages === 'function' / window.dockChatActiveUser
+            //   做守卫，但这两个符号此前从未挂到 window 上 —— 于是桌面侧栏刷新聊天时
+            //   消息重载被静默跳过。这里补齐（getter 保证读到的永远是当前会话）。
+            window.loadDockChatMessages = loadDockChatMessages;
+            try {
+                Object.defineProperty(window, 'dockChatActiveUser', {
+                    configurable: true,
+                    get: function() { return dockChatActiveUser; }
+                });
+            } catch (eDockUser) {}
 
             window.addEventListener('DOMContentLoaded', async function() {
                 // iOS 键盘与可视视口适配
@@ -14975,18 +15086,8 @@ function renderProfileActivityList(kind) {
                 loadFeed.__xtjMagicLoaderV4 = true;
             }
 
-            if (false && typeof openChat === 'function' && !openChat.__xtjMagicLoaderV4) {
-                var origChat = openChat;
-                openChat = window.openChat = function(userName) {
-                    var r = origChat.apply(this, arguments);
-                    var el = document.getElementById('dockChatMessages');
-                    if (el && (el.querySelector('.chat-empty') || /加载中/.test(el.textContent || ''))) {
-                        renderChatLoadingState(el, { title: '加载中..', variant: 'chat-detail' });
-                    }
-                    return r;
-                };
-                openChat.__xtjMagicLoaderV4 = true;
-            }
+            // ★ 2026-09-25 清理（审计 L-3）：此处原有一段 `if (false && ...)` 包裹的
+            //   openChat 覆盖实现（永久不可达），已删除以免误导后续维护。
 
 
         })();

@@ -126,7 +126,7 @@ test('profile shell cancels legacy named-grid tracks on wide layouts', function(
 test('desktop chat layout helper switches at the phone boundary', function(){
   var source = read('js/core.js');
   assert.ok(source.indexOf('function shouldUseDesktopChatSplitLayout()') >= 0, 'missing desktop chat layout helper');
-  assert.ok(/function shouldUseDesktopChatSplitLayout\(\)[\s\S]*?return width >= 768;/.test(source), 'desktop chat split is not tied to the 768px boundary');
+  assert.ok(/function shouldUseDesktopChatSplitLayout\(\)[\s\S]*?return width >= 768 && height >= 480;/.test(source), 'desktop chat split must match the desktop.css media query (>=768px wide AND >=480px tall)');
   assert.ok(source.indexOf('function syncDockChatLayoutState()') >= 0, 'missing chat layout state sync');
   assert.ok(source.indexOf('选择一条会话开始聊天') >= 0, 'desktop chat empty state missing');
 });

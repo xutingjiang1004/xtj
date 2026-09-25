@@ -1489,11 +1489,25 @@
             color: white; font-weight: bold; font-size: 18px;
         }
         .chat-list-item .cli-info { flex: 1; min-width: 0; }
-        .chat-list-item .cli-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+        /* ★ 2026-09-25 修复（审计 M-15）：.cli-name 是 flex 容器，用户名的文本节点是
+           匿名 flex item —— text-overflow 对匿名 flex item 不生效；而它既没有 min-width:0
+           也没有 overflow:hidden，于是超长中文用户名会撑破整行：先把 .cli-preview 挤没，
+           再把 .cli-right（flex-shrink:0）推到面板外被裁掉。
+           这里容器加 min-width:0，用户名包一层 .cli-name-text（JS 侧已同步包裹）才真正出
+           省略号；同时去掉 .cli-preview 的 220px 硬上限，改为随容器伸缩。 */
+        .chat-list-item .cli-name {
+            font-weight: 700; font-size: 15px;
+            display: flex; align-items: center; gap: 6px;
+            min-width: 0;
+        }
+        .chat-list-item .cli-name .cli-name-text {
+            min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .chat-list-item .cli-name .admin-tag-mini { flex-shrink: 0; }
         .chat-list-item .cli-preview {
             font-size: 13px; color: var(--text-muted);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-            max-width: 220px; margin-top: 2px;
+            max-width: 100%; margin-top: 2px;
         }
         .chat-list-item .cli-right {
             display: flex; flex-direction: column; align-items: flex-end;
@@ -1567,10 +1581,16 @@
         .chat-msg-row .chat-msg {
             max-width: 75%;
         }
+        /* ★ 2026-09-25 修复（审计 M-17）：固定 max-width:200px + object-fit:cover，配合气泡
+           内边距在窄屏（320–360px）会超出气泡宽度、被 .dock-panel 的 overflow-x:hidden 裁掉；
+           cover 还会把长图裁掉内容。改为"不超过气泡宽度 + 保持完整比例"，并加一层浅底占位，
+           减少图片解码时的布局跳动（M-18 的缓解）。 */
         .chat-msg .msg-img {
-            display: block; max-width: 200px; max-height: 260px;
+            display: block; max-width: min(200px, 100%); max-height: 260px;
+            width: auto; height: auto;
             border-radius: 10px; cursor: pointer;
-            object-fit: cover;
+            object-fit: contain;
+            background: rgba(19, 73, 45, 0.06);
             transition: transform 0.2s;
         }
         @media (hover: hover) and (pointer: fine) {
@@ -1594,6 +1614,35 @@
             font-size: 10px; opacity: 0.55; margin-top: 5px; display: block;
             text-align: right;
         }
+        /* ★ 2026-09-25 修复（审计 M-12）：深色模式下
+           [data-theme="dark"] .msg-time{color:rgba(203,213,225,.78)!important}（style.css:14200）
+           与上面 .msg-time{opacity:.55} 叠加，落在发送气泡的绿色渐变(#059669→#10b981)上，
+           实测对比度仅约 1.5–2.6:1；.msg-read-status 的 white@0.7 再乘 opacity .6 同理。
+           这里对我方气泡内的时间/已读状态单独提权，并取消二次透明度衰减。 */
+        .chat-msg.sent .msg-time,
+        .chat-msg.sent .msg-read-status {
+            color: rgba(255, 255, 255, 0.94) !important;
+            opacity: 1 !important;
+        }
+        .chat-msg.received .msg-time,
+        .chat-msg.received .msg-read-status {
+            opacity: 1 !important;
+        }
+        /* ★ 2026-09-25 修复（审计 L-4）：撤回入口此前全库没有任何 CSS，只靠内联
+           font-size:11px;color:#999 —— 在彩色气泡上对比度不足，触摸目标也远小于 44px。
+           这里补统一样式（内联 color 由 !important 覆盖，内联 padding 未设置故不冲突）。 */
+        .chat-msg .msg-withdraw-btn {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            line-height: 16px;
+            color: rgba(255, 255, 255, 0.94) !important;
+            background: rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+        }
+        .chat-msg .msg-withdraw-btn:hover { background: rgba(0, 0, 0, 0.32); }
         .chat-msg.pending {
             opacity: 0.92;
         }
@@ -1639,7 +1688,10 @@
         }
         .chat-input-wrap input {
             flex: 1; padding: 12px 18px; border: none; background: transparent;
-            font-size: 15px; outline: none; color: var(--text-main);
+            /* ★ 2026-09-25 修复（审计 M-14）：iOS Safari 对 font-size < 16px 的输入框
+               会在聚焦时自动放大整页。此前 16px 的"防放大"规则只补了发帖框
+               （ui-shell.css:1272），聊天输入框是 15px —— 每次点输入框页面都会被放大。 */
+            font-size: 16px; outline: none; color: var(--text-main);
             min-width: 0;
         }
         .chat-input-wrap input::placeholder { color: var(--text-muted); }
@@ -1869,7 +1921,7 @@
         }
         @media (max-width: 480px) {
             .chat-panel { height: 88vh; max-height: none; border-radius: 20px 20px 0 0; }
-            .chat-msg { max-width: 88%; font-size: 14px; }
+            .chat-msg-row .chat-msg { max-width: 88%; font-size: 14px; }
         }
 
         /* ========== 数据统计详情 - 新增样式 ========== */
@@ -15820,7 +15872,7 @@ profile content only. Dock stays untouched.
 .dock-chat-container { position: relative; }
 .chat-jump-latest.is-visible { opacity: 1; transform: translateY(0); }
 .chat-jump-latest[hidden] { display: none; }
-.chat-msg .msg-img { min-width: 96px; background: rgba(19, 73, 45, 0.08); }
+.chat-msg .msg-img { min-width: 0; background: rgba(19, 73, 45, 0.08); }
 [data-theme="dark"] .chat-jump-latest { background: rgba(29, 48, 39, 0.94); border-color: rgba(123, 208, 163, 0.24); color: #b6ebcd; }
 @media (prefers-reduced-motion: reduce) {
     .chat-msg, .chat-msg.sent-anim, .chat-jump-latest { animation: none !important; transition: none !important; }
