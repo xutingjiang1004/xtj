@@ -1064,16 +1064,14 @@
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
-                    // ★ 2026-09-25 修复（发图后显示"查看图片"按钮而不是缩略图）：
-                    //   公共地址在桶未开公共读时必然 403，旧流程只能靠 onerror 兜底换签名地址，
-                    //   于是用户先看到一个坏图标/按钮，几百毫秒后才变图（或永久变按钮）。
-                    //   现在渲染时就用本地签名缓存（若已换取过）直接作为 src，命中则首帧即为图片。
-                    var resolvedImageSrc = resolveDockChatMediaSrc(media.src, media.fullSrc);
+                    // ★ 2026-09-25：直接用公共地址渲染，不再绕后端签名。
+                    //   实测 uploads 桶的 /public/ 路由是放通的（真实对象 HTTP 200），
+                    //   此前"渲染期先换签名地址"的多余往返已删除——它正是图片首帧
+                    //   显示成坏图标/按钮、几百毫秒后才变图的根源。
+                    var resolvedImageSrc = String(media.src || media.fullSrc || '');
                     var safeSrc = escapeHtml(resolvedImageSrc);
                     var safeFull = escapeHtml(resolvedImageSrc);
                     var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
-                    // 后台预热签名地址：下一次渲染（含切换会话回来）即可直接命中，不再闪按钮
-                    primeDockChatMediaSignedUrl(media.src);
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
@@ -1347,49 +1345,52 @@
                     var actorKey = DM_MARKER;
                     var mediaPayload = null;
                     if (file) {
-                        const path = buildStorageUploadPath('chat', file.name);
-                        // ★ 2026-09-25 修复（发送图片失败：null is not an object (evaluating 'sb.storage')）：
-                        //   全局 sb 可能因 Supabase SDK 延迟加载/SDK 加载失败而为 null。
-                        //   此处先做惰性兜底：尝试 window.sb，再尝试调用 initSupabaseClient() 重建，
-                        //   仍不可用则给出明确可读的提示（而不是把原生 TypeError 抛给用户）。
-                        var _sbClient = sb || window.sb || null;
-                        if (!_sbClient && typeof initSupabaseClient === 'function') {
-                            try { initSupabaseClient(); } catch (eInit) {}
-                            _sbClient = sb || window.sb || null;
+                        // ★ 2026-09-25 根治：媒体改走**后端上传**，不再直连 Supabase Storage。
+                        //   旧实现依赖 window.sb（浏览器端 anon key）。构建期未注入
+                        //   SUPABASE_ANON_KEY 时线上 config 里是占位串，浏览器用垃圾 key 建的
+                        //   client 在登录后会被 Supabase 判为无效 JWS，报
+                        //   "发送失败: 媒体上传失败: Invalid Compact JWS"——反复出现的根因。
+                        //   改成一次 multipart 以外的单请求：50MB 原始体 + 查询参数描述元数据，
+                        //   由后端用 service_role 写入，前端不再持有任何存储密钥。
+                        var _dmKind = file.type.startsWith('video/') ? 'video'
+                                    : (file.type.startsWith('image/') ? 'image'
+                                    : (file.type.startsWith('audio/') ? 'audio' : null));
+                        if (!_dmKind) throw new Error('不支持的媒体类型: ' + file.type);
+                        // 路径必须带 uidHash 前缀，后端 validateDmUploadOwnership 会校验归属，
+                        // 防止"猜一个他人路径"抢占存储位置。
+                        var path = await buildDmStorageUploadPath(file.name);
+                        // 统一走 xtjProtectedFetch：它已处理 token 刷新、15s 超时、401 重试与
+                        // 失效弹窗，比裸 fetch 更稳，也不会在 token 过期时静默失败。
+                        var _upResp = await window.xtjProtectedFetch(
+                            '/api/dm/upload'
+                                + '?path=' + encodeURIComponent(path)
+                                + '&kind=' + encodeURIComponent(_dmKind)
+                                + '&mime_type=' + encodeURIComponent(file.type || 'application/octet-stream'),
+                            {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/octet-stream' },
+                                body: file,
+                                // 50MB 素材在移动网络下 15s 不够，放宽到 2 分钟
+                                timeoutMs: 120000
+                            }
+                        );
+                        var _upData = await _upResp.json().catch(function() { return {}; });
+                        if (!_upResp.ok || !_upData || !_upData.ok) {
+                            throw new Error('媒体上传失败: ' + ((_upData && _upData.error) || ('HTTP ' + _upResp.status)));
                         }
-                        if (!_sbClient || !_sbClient.storage) {
-                            throw new Error('图片上传服务未就绪，请刷新页面后重试');
-                        }
-                        // P6: 检查 Storage 上传返回的 error — Supabase JS 客户端在
-                        // Storage 业务错误（配额超限、权限拒绝、路径冲突）时返回
-                        // { data: null, error } 而非 throw。之前不检查 error，导致
-                        // 媒体文件实际不存在时仍继续发送私信。
-                        var uploadResult = await _sbClient.storage.from("uploads").upload(path, file, {
-                            cacheControl: '3600',
-                            upsert: false,
-                            contentType: file.type || 'application/octet-stream'
-                        });
-                        if (uploadResult && uploadResult.error) {
-                            throw new Error('媒体上传失败: ' + (uploadResult.error.message || '未知错误'));
-                        }
-                        storagePath = path;
-                        if (file.type.startsWith('video/')) {
-                            mediaKind = 'video';
-                            actorKey = '__dm_vid__' + path;
-                            mediaPayload = { kind: 'video', url: getMediaUrl('__dm_vid__', path), mimeType: file.type || '' };
-                        } else if (file.type.startsWith('image/')) {
-                            mediaKind = 'image';
-                            actorKey = '__dm_img__' + path;
-                            mediaPayload = { kind: 'image', url: getMediaUrl('__dm_img__', path), mimeType: file.type || '' };
-                        } else if (file.type.startsWith('audio/')) {
+                        storagePath = _upData.storage_path || path;
+                        mediaKind = _dmKind;
+                        if (_dmKind === 'video') {
+                            actorKey = '__dm_vid__' + storagePath;
+                            mediaPayload = { kind: 'video', url: _upData.public_url || getMediaUrl('__dm_vid__', storagePath), mimeType: file.type || '' };
+                        } else if (_dmKind === 'image') {
+                            actorKey = '__dm_img__' + storagePath;
+                            mediaPayload = { kind: 'image', url: _upData.public_url || getMediaUrl('__dm_img__', storagePath), mimeType: file.type || '' };
+                        } else {
                             // P6: 明确支持音频 — 之前校验允许 audio/ 但上传分支和解析/渲染
                             // 全链路缺失，导致音频文件成为 Storage 孤儿。
-                            mediaKind = 'audio';
-                            actorKey = '__dm_aud__' + path;
-                            mediaPayload = { kind: 'audio', url: getMediaUrl('__dm_aud__', path), mimeType: file.type || '' };
-                        } else {
-                            // P6: 不支持的类型 — 在上传前就应该被拦截，但作为最后一道防线
-                            throw new Error('不支持的媒体类型: ' + file.type);
+                            actorKey = '__dm_aud__' + storagePath;
+                            mediaPayload = { kind: 'audio', url: _upData.public_url || getMediaUrl('__dm_aud__', storagePath), mimeType: file.type || '' };
                         }
                     }
                     // P6: 构建乐观消息的 contentPayload（含媒体信息，用于本地即时渲染）
@@ -1447,22 +1448,19 @@
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
                     }
                 } catch(e) {
-                    // ★ 修复：发送失败时回收已上传的 Storage 文件，避免孤儿媒体永久泄漏
-                    //   （前端先直传 Storage、后调 /api/dm/send；若 send 失败/超时，后端
-                    //   从未感知该路径，文件会残留在公共桶）。
+                    // ★ 修复：发送失败时回收已上传的 Storage 文件，避免孤儿媒体永久泄漏。
+                    //   ★ 2026-09-25 改造：媒体已改走后端上传，回收也走后端 /api/dm/upload/abort
+                    //   （只允许删自己命名空间下、且尚未挂到任何消息上的对象）。
+                    //   旧实现直调 sb.storage.remove，sb 为 null 时会抛 TypeError 把真正的
+                    //   失败原因覆盖成 "null is not an object (evaluating 'sb.storage')"。
                     if (storagePath) {
                         try {
-                            // ★ 2026-09-25 修复：此处原本直接裸调 sb.storage。若 sb 为 null
-                            //   （Supabase SDK 未就绪），这里会抛 TypeError，把真正的失败原因
-                            //   （上传/发送错误）覆盖成 "null is not an object (evaluating 'sb.storage')"，
-                            //   用户看到的报错就是这句无意义的话。现改为安全取客户端并单独兜底。
-                            var _cleanupClient = sb || window.sb || null;
-                            if (_cleanupClient && _cleanupClient.storage) {
-                                var dmOrphanRes = await _cleanupClient.storage.from('uploads').remove([storagePath]);
-                                if (dmOrphanRes && dmOrphanRes.error) console.warn('[dm-send] orphan media cleanup failed', dmOrphanRes.error);
-                            } else {
-                                console.warn('[dm-send] orphan media cleanup skipped: storage client unavailable');
-                            }
+                            await window.xtjProtectedFetch('/api/dm/upload/abort', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ storage_path: storagePath }),
+                                timeoutMs: 15000
+                            });
                         } catch (dmCleanupErr) { console.warn('[dm-send] orphan media cleanup failed', dmCleanupErr); }
                         storagePath = null;
                     }

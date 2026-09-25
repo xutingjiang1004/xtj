@@ -55,14 +55,75 @@
               /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(_anonKey)
               || /^sb_publishable_/.test(_anonKey)
             );
-            if (!_sbConfigOk) {
+            // ★ 2026-09-25：把这套「配置有问题」的处理抽成函数，除了首屏调用，
+            //   运行时从后端补到配置后也要能重新跑一遍（见下方 _syncRuntimeConfig）。
+            function _applySupabaseConfigFailure() {
+                _sbConfigOk = false;
+                sb = null;
                 console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
                 console.error('[XTJ] SUPABASE_ANON_KEY 当前为' + (_anonKey ? '占位符/无效 key（需在构建/部署时注入真实 anon key）' : '空值'));
-                sb = null;
                 document.addEventListener('DOMContentLoaded', function () {
                     var _feedEl = document.getElementById('feed');
                     if (_feedEl) _feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">配置错误：Supabase 配置缺失或格式不正确，请检查 config.js</div>';
                 });
+            }
+            // ★ 2026-09-25 根因修复：前端运行时配置自愈。
+            //   事故背景：构建期未注入 SUPABASE_ANON_KEY 时，scripts/build.js 只打 warning
+            //   照常产出 bundle，线上 config.min.js 里是占位串 "eyJhbG...yDDA"。浏览器拿这串
+            //   垃圾 key 建 client，登录后 Storage 请求带登录 JWT，Supabase 报
+            //   "Invalid Compact JWS"，发图直接失败——这不是 token 问题，是 key 本身是坏的。
+            //   现在改为：首屏若发现 key 无效，异步回源 /api/config/public 取真实 anon key，
+            //   拿到后重建 client 并继续后续初始化。**不阻塞首屏渲染**——回源失败就维持
+            //   现有「走后端上传」的降级路径，功能不中断。
+            var _runtimeConfigSynced = false;
+            function _syncRuntimeConfig(done) {
+                if (_runtimeConfigSynced) { if (done) done(false); return; }
+                if (typeof fetch !== 'function') { if (done) done(false); return; }
+                var _apiBase = String(API_BASE || window.location.origin || '').replace(/\/$/, '');
+                fetch(_apiBase + '/api/config/public', { method: 'GET', headers: { 'Accept': 'application/json' } })
+                    .then(function (resp) { return resp && resp.ok ? resp.json() : null; })
+                    .then(function (cfg) {
+                        _runtimeConfigSynced = true;
+                        var key = cfg && cfg.supabase_anon_key ? String(cfg.supabase_anon_key) : '';
+                        var url = cfg && cfg.supabase_url ? String(cfg.supabase_url) : '';
+                        if (!key || !url) { if (done) done(false); return; }
+                        if (!(/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(key) || /^sb_publishable_/.test(key))) { if (done) done(false); return; }
+                        // 写回运行时配置，供后续读取 XTJ_CONFIG 的模块（如 ai-agent）复用
+                        try {
+                            window.XTJ_CONFIG.SUPABASE_URL = url;
+                            window.XTJ_CONFIG.SUPABASE_ANON_KEY = key;
+                        } catch (_) {}
+                        // 重建 client：先清掉旧的（可能是用占位 key 建的坏实例或 null）
+                        sb = null;
+                        window.sb = null;
+                        try { if (window.supabase && typeof window.supabase.createClient === 'function') { sb = window.supabase.createClient(url, key); window.sb = sb; } } catch (e) { console.warn('[XTJ] 运行时重建 Supabase client 失败:', e && e.message); sb = null; }
+                        if (sb) {
+                            _sbConfigOk = true;
+                            console.log('[XTJ] 已从服务端补齐 Supabase anon key，客户端已重建');
+                            if (done) done(true);
+                        } else if (done) done(false);
+                    })
+                    .catch(function (e) { if (done) done(false); });
+            }
+            if (!_sbConfigOk) {
+                _applySupabaseConfigFailure();
+                // 异步自愈：SDK 已就绪时立刻重建；未就绪时等 ready 事件后再补。
+                var _healAfterSdkReady = function () {
+                    _syncRuntimeConfig(function (healed) {
+                        if (!healed) return;
+                        if (typeof window.initialLoad === 'function') {
+                            window.initialLoad(true).catch(function (e) {
+                                console.warn('[XTJ] 配置自愈后的数据加载失败:', e && e.message);
+                            });
+                        }
+                    });
+                };
+                if (typeof window.supabase !== 'undefined') {
+                    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _healAfterSdkReady, { once: true });
+                    else _healAfterSdkReady();
+                } else {
+                    window.addEventListener('xtj:supabase-ready', _healAfterSdkReady, { once: true });
+                }
             } else if (typeof window.supabase !== 'undefined') {
                 initSupabaseClient();
             } else {
@@ -9664,6 +9725,37 @@ function renderProfileActivityList(kind) {
                 return String(scope || "misc") + "/" + userPart + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
             }
 
+            // ★ 2026-09-25 新增：私聊媒体上传路径（走后端 /api/dm/upload 时使用）。
+            //   与 buildStorageUploadPath 的区别：**不含用户名**，改为 <uidHash>_ 前缀。
+            //   原因：后端 validateDmUploadOwnership 要求 chat/<uidHash>_ 严格前缀匹配
+            //   （uidHash = sha256(userName) 前 12 位），以此把"猜路径抢存储位"挡在写入之前。
+            //   dm-media.js 的路径正则只允许 [A-Za-z0-9_-]，所以这里也不能出现中文用户名。
+            //   客户端不做哈希（避免依赖 crypto.subtle 的 HTTPS 限制），由其异步取一次。
+            var _dmUidHashCache = null;
+            async function getDmUidHash() {
+                if (_dmUidHashCache) return _dmUidHashCache;
+                var u = '';
+                try { u = String(window.currentUser || '').trim(); } catch (_) {}
+                if (!u) return null;
+                try {
+                    if (window.crypto && window.crypto.subtle && window.TextEncoder) {
+                        var buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(u));
+                        var hex = Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+                        _dmUidHashCache = hex.slice(0, 12);
+                        return _dmUidHashCache;
+                    }
+                } catch (_) { /* 非安全上下文等：落回下面的兜底 */ }
+                // 兜底：必须与后端 sha256 前 12 位一致，否则上传必然 400。
+                // 因此拿不到 WebCrypto 时不再瞎猜，直接返回 null 让调用方报可读错误。
+                return null;
+            }
+
+            async function buildDmStorageUploadPath(fileName) {
+                var hash = await getDmUidHash();
+                if (!hash) throw new Error('无法为上传文件生成安全标识，请刷新页面重试');
+                return 'chat/' + hash + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '_' + sanitizeStorageFileName(fileName);
+            }
+
             function parseDMContentPayload(raw) {
                 if (!raw) return null;
                 if (typeof raw === 'object') return raw;
@@ -9761,111 +9853,33 @@ function renderProfileActivityList(kind) {
                 return '[图片]';
             }
 
-            // ★ 2026-09-25 修复：私聊图片「退化成查看图片按钮」。
-            //   原逻辑：加载失败 → 加时间戳重试 1 次 → 仍失败就替换成按钮。
-            //   但生产环境 uploads 桶未开公共读时，公共地址是 403，重试多少次都一样，
-            //   图片必然退化成按钮（用户看到聊天里图片变按钮）。
-            //   新逻辑：失败后先向后端换取「10 分钟有效签名地址」再重试；签名地址不依赖
-            //   桶的公共读策略，且只有会话参与者能取到。签名也失败时才显示重试提示。
-            var _dmSignedCache = {};
-            var _dmSignInflight = {};
-            function _dmStoragePathFromUrl(u) {
-                // 从公有/签名地址中还原出 storagePath（chat/xxx），用于向后端换取签名地址
-                try {
-                    var s = String(u || '');
-                    var m = s.match(/\/storage\/v1\/object\/(?:public|sign)\/uploads\/([^?#]+)/i);
-                    if (m && m[1]) return decodeURIComponent(m[1]);
-                    if (/^chat\/[A-Za-z0-9_.-]+$/i.test(s)) return s;
-                } catch (e) { /* ignore */ }
-                return '';
-            }
-            function _dmApplySignedSrc(img, signedUrl) {
-                if (!img || !signedUrl) return;
-                img.setAttribute('data-retry-count', '2');
-                var sep = signedUrl.indexOf('?') >= 0 ? '&' : '?';
-                img.src = signedUrl + sep + '_ts=' + Date.now();
-            }
-            function _dmFetchSignedUrl(storagePath) {
-                if (_dmSignedCache[storagePath] && _dmSignedCache[storagePath].exp > Date.now()) {
-                    return Promise.resolve(_dmSignedCache[storagePath].url);
-                }
-                if (_dmSignInflight[storagePath]) return _dmSignInflight[storagePath];
-                var p = (async function() {
-                    try {
-                        // ★ 用 xtjProtectedFetch：它自带 Authorization 头与登录态处理，
-                        //   与全站其他 DM 请求（/api/dm/list、/api/dm/messages）鉴权方式一致。
-                        //   此前误用 getUserAuthPayload —— 那是 ai-agent.js 的内部函数，
-                        //   在 window 上并不存在，会导致签名请求永远拿不到鉴权头。
-                        if (typeof window.xtjProtectedFetch !== 'function') return '';
-                        var resp = await window.xtjProtectedFetch('/api/dm/media/sign', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ paths: [storagePath] })
-                        });
-                        if (!resp || !resp.ok) return '';
-                        var data = await resp.json().catch(function() { return {}; });
-                        var url = (data && data.signed && data.signed[storagePath]) || '';
-                        if (url) _dmSignedCache[storagePath] = { url: url, exp: Date.now() + 8 * 60 * 1000 };
-                        return url;
-                    } catch (e) { return ''; }
-                    finally { delete _dmSignInflight[storagePath]; }
-                })();
-                _dmSignInflight[storagePath] = p;
-                return p;
-            }
-
-            // ★ 2026-09-25 新增：渲染期「签名地址优先」。
-            //   仅靠 onerror 兜底的话，用户第一眼看到的永远是加载失败态（点开才有图的按钮）。
-            //   这里在渲染时优先使用已缓存的签名地址；未缓存则后台预热，下次渲染即命中。
-            function resolveDockChatMediaSrc(publicSrc, fullSrc) {
-                var base = String(publicSrc || fullSrc || '');
-                var sp = _dmStoragePathFromUrl(base);
-                if (sp && _dmSignedCache[sp] && _dmSignedCache[sp].exp > Date.now()) {
-                    return _dmSignedCache[sp].url;
-                }
-                return base;
-            }
-            function primeDockChatMediaSignedUrl(src) {
-                var sp = _dmStoragePathFromUrl(src);
-                if (!sp) return;
-                if (_dmSignedCache[sp] && _dmSignedCache[sp].exp > Date.now()) return;
-                if (_dmSignInflight[sp]) return;
-                _dmFetchSignedUrl(sp).catch(function() {});
-            }
-
+            // ★ 2026-09-25 简化：私聊图片「退化成查看图片按钮」的**签名地址**补救链路已删除。
+            //
+            //   上一版曾假设"生产环境 uploads 桶未开公共读，公共地址 403，所以要换后端签名地址"。
+            //   该假设已被线上事实验证为不成立：实测真实对象
+            //     https://<proj>.supabase.co/storage/v1/object/public/uploads/posts/xxx.jpg
+            //     → HTTP 200 / image/jpeg / 589950 bytes
+            //   而取一个不存在的对象返回 NoSuchKey（而非策略拒绝），证明 /public/ 路由是放通的。
+            //   因此 /api/dm/media/sign 及其前端签名缓存/预热/降级分支全部是多余复杂度：
+            //   它们只是让每次渲染多打一次后端、并在失败时把图片退化成按钮。
+            //
+            //   现在保留的只有「真实网络抖动仍需要重试 + 重试仍失败给可点开的兜底按钮」，
+    //   直接用公共地址，不再引入任何后端往返。
             window.handleDockChatImageError = function(img) {
                 if (!img || !img.parentNode) return;
                 var retryCount = parseInt(img.getAttribute('data-retry-count') || '0', 10) || 0;
-                // 第 1 步：普通重试（可能是瞬时网络抖动）
-                if (retryCount < 1) {
-                    var retrySrc = img.getAttribute('data-full-src') || img.getAttribute('data-src') || img.currentSrc || img.src || "";
-                    if (retrySrc) {
-                        img.setAttribute('data-retry-count', String(retryCount + 1));
-                        img.src = retrySrc + (retrySrc.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
-                        return;
-                    }
+                var fullSrc = img.getAttribute("data-full-src") || img.getAttribute('data-src') || img.currentSrc || img.src || "";
+                // 第 1 步：普通重试（可能是瞬时网络抖动 / 缓存未命中）
+                if (retryCount < 1 && fullSrc) {
+                    img.setAttribute('data-retry-count', String(retryCount + 1));
+                    img.src = fullSrc + (fullSrc.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
+                    return;
                 }
-                var fullSrc = img.getAttribute("data-full-src") || img.currentSrc || img.src || "";
-                // 第 2 步：普通重试仍失败 → 换用后端签发的受鉴权短效地址再试一次
-                if (retryCount < 2) {
-                    var storagePath = _dmStoragePathFromUrl(img.getAttribute('data-src') || fullSrc);
-                    if (storagePath) {
-                        img.setAttribute('data-retry-count', '2'); // 先占位，避免并发重复触发
-                        _dmFetchSignedUrl(storagePath).then(function(signedUrl) {
-                            if (signedUrl) {
-                                _dmApplySignedSrc(img, signedUrl);
-                            } else if (img.parentNode) {
-                                // 签名也拿不到（无权限/对象不存在）→ 才显示可重试提示
-                                _dmRenderMediaFallback(img, fullSrc, storagePath);
-                            }
-                        });
-                        return;
-                    }
-                }
-                _dmRenderMediaFallback(img, fullSrc, '');
+                // 第 2 步：仍失败 → 退化成可点开的兜底按钮（点开用原始地址）
+                _dmRenderMediaFallback(img, fullSrc);
             };
 
-            function _dmRenderMediaFallback(img, fullSrc, storagePath) {
+            function _dmRenderMediaFallback(img, fullSrc) {
                 if (!img || !img.parentNode) return;
                 var fallback = document.createElement("button");
                 fallback.type = "button";
@@ -9874,18 +9888,10 @@ function renderProfileActivityList(kind) {
                 fallback.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
-                    // 点击时再尝试换取一次签名地址，成功则直接打开大图
-                    if (storagePath) {
-                        _dmFetchSignedUrl(storagePath).then(function(signedUrl) {
-                            var target = signedUrl || fullSrc;
-                            if (target && typeof window.openImageViewer === "function") window.openImageViewer(target);
-                            else if (target) window.open(target, '_blank', 'noopener');
-                            else showToast("图片加载失败");
-                        });
-                        return;
-                    }
                     if (fullSrc && typeof window.openImageViewer === "function") {
                         window.openImageViewer(fullSrc);
+                    } else if (fullSrc) {
+                        window.open(fullSrc, '_blank', 'noopener');
                     } else {
                         showToast("图片加载失败");
                     }
@@ -11650,16 +11656,14 @@ function renderProfileActivityList(kind) {
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
-                    // ★ 2026-09-25 修复（发图后显示"查看图片"按钮而不是缩略图）：
-                    //   公共地址在桶未开公共读时必然 403，旧流程只能靠 onerror 兜底换签名地址，
-                    //   于是用户先看到一个坏图标/按钮，几百毫秒后才变图（或永久变按钮）。
-                    //   现在渲染时就用本地签名缓存（若已换取过）直接作为 src，命中则首帧即为图片。
-                    var resolvedImageSrc = resolveDockChatMediaSrc(media.src, media.fullSrc);
+                    // ★ 2026-09-25：直接用公共地址渲染，不再绕后端签名。
+                    //   实测 uploads 桶的 /public/ 路由是放通的（真实对象 HTTP 200），
+                    //   此前"渲染期先换签名地址"的多余往返已删除——它正是图片首帧
+                    //   显示成坏图标/按钮、几百毫秒后才变图的根源。
+                    var resolvedImageSrc = String(media.src || media.fullSrc || '');
                     var safeSrc = escapeHtml(resolvedImageSrc);
                     var safeFull = escapeHtml(resolvedImageSrc);
                     var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" decoding="async" />';
-                    // 后台预热签名地址：下一次渲染（含切换会话回来）即可直接命中，不再闪按钮
-                    primeDockChatMediaSignedUrl(media.src);
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
@@ -11933,49 +11937,52 @@ function renderProfileActivityList(kind) {
                     var actorKey = DM_MARKER;
                     var mediaPayload = null;
                     if (file) {
-                        const path = buildStorageUploadPath('chat', file.name);
-                        // ★ 2026-09-25 修复（发送图片失败：null is not an object (evaluating 'sb.storage')）：
-                        //   全局 sb 可能因 Supabase SDK 延迟加载/SDK 加载失败而为 null。
-                        //   此处先做惰性兜底：尝试 window.sb，再尝试调用 initSupabaseClient() 重建，
-                        //   仍不可用则给出明确可读的提示（而不是把原生 TypeError 抛给用户）。
-                        var _sbClient = sb || window.sb || null;
-                        if (!_sbClient && typeof initSupabaseClient === 'function') {
-                            try { initSupabaseClient(); } catch (eInit) {}
-                            _sbClient = sb || window.sb || null;
+                        // ★ 2026-09-25 根治：媒体改走**后端上传**，不再直连 Supabase Storage。
+                        //   旧实现依赖 window.sb（浏览器端 anon key）。构建期未注入
+                        //   SUPABASE_ANON_KEY 时线上 config 里是占位串，浏览器用垃圾 key 建的
+                        //   client 在登录后会被 Supabase 判为无效 JWS，报
+                        //   "发送失败: 媒体上传失败: Invalid Compact JWS"——反复出现的根因。
+                        //   改成一次 multipart 以外的单请求：50MB 原始体 + 查询参数描述元数据，
+                        //   由后端用 service_role 写入，前端不再持有任何存储密钥。
+                        var _dmKind = file.type.startsWith('video/') ? 'video'
+                                    : (file.type.startsWith('image/') ? 'image'
+                                    : (file.type.startsWith('audio/') ? 'audio' : null));
+                        if (!_dmKind) throw new Error('不支持的媒体类型: ' + file.type);
+                        // 路径必须带 uidHash 前缀，后端 validateDmUploadOwnership 会校验归属，
+                        // 防止"猜一个他人路径"抢占存储位置。
+                        var path = await buildDmStorageUploadPath(file.name);
+                        // 统一走 xtjProtectedFetch：它已处理 token 刷新、15s 超时、401 重试与
+                        // 失效弹窗，比裸 fetch 更稳，也不会在 token 过期时静默失败。
+                        var _upResp = await window.xtjProtectedFetch(
+                            '/api/dm/upload'
+                                + '?path=' + encodeURIComponent(path)
+                                + '&kind=' + encodeURIComponent(_dmKind)
+                                + '&mime_type=' + encodeURIComponent(file.type || 'application/octet-stream'),
+                            {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/octet-stream' },
+                                body: file,
+                                // 50MB 素材在移动网络下 15s 不够，放宽到 2 分钟
+                                timeoutMs: 120000
+                            }
+                        );
+                        var _upData = await _upResp.json().catch(function() { return {}; });
+                        if (!_upResp.ok || !_upData || !_upData.ok) {
+                            throw new Error('媒体上传失败: ' + ((_upData && _upData.error) || ('HTTP ' + _upResp.status)));
                         }
-                        if (!_sbClient || !_sbClient.storage) {
-                            throw new Error('图片上传服务未就绪，请刷新页面后重试');
-                        }
-                        // P6: 检查 Storage 上传返回的 error — Supabase JS 客户端在
-                        // Storage 业务错误（配额超限、权限拒绝、路径冲突）时返回
-                        // { data: null, error } 而非 throw。之前不检查 error，导致
-                        // 媒体文件实际不存在时仍继续发送私信。
-                        var uploadResult = await _sbClient.storage.from("uploads").upload(path, file, {
-                            cacheControl: '3600',
-                            upsert: false,
-                            contentType: file.type || 'application/octet-stream'
-                        });
-                        if (uploadResult && uploadResult.error) {
-                            throw new Error('媒体上传失败: ' + (uploadResult.error.message || '未知错误'));
-                        }
-                        storagePath = path;
-                        if (file.type.startsWith('video/')) {
-                            mediaKind = 'video';
-                            actorKey = '__dm_vid__' + path;
-                            mediaPayload = { kind: 'video', url: getMediaUrl('__dm_vid__', path), mimeType: file.type || '' };
-                        } else if (file.type.startsWith('image/')) {
-                            mediaKind = 'image';
-                            actorKey = '__dm_img__' + path;
-                            mediaPayload = { kind: 'image', url: getMediaUrl('__dm_img__', path), mimeType: file.type || '' };
-                        } else if (file.type.startsWith('audio/')) {
+                        storagePath = _upData.storage_path || path;
+                        mediaKind = _dmKind;
+                        if (_dmKind === 'video') {
+                            actorKey = '__dm_vid__' + storagePath;
+                            mediaPayload = { kind: 'video', url: _upData.public_url || getMediaUrl('__dm_vid__', storagePath), mimeType: file.type || '' };
+                        } else if (_dmKind === 'image') {
+                            actorKey = '__dm_img__' + storagePath;
+                            mediaPayload = { kind: 'image', url: _upData.public_url || getMediaUrl('__dm_img__', storagePath), mimeType: file.type || '' };
+                        } else {
                             // P6: 明确支持音频 — 之前校验允许 audio/ 但上传分支和解析/渲染
                             // 全链路缺失，导致音频文件成为 Storage 孤儿。
-                            mediaKind = 'audio';
-                            actorKey = '__dm_aud__' + path;
-                            mediaPayload = { kind: 'audio', url: getMediaUrl('__dm_aud__', path), mimeType: file.type || '' };
-                        } else {
-                            // P6: 不支持的类型 — 在上传前就应该被拦截，但作为最后一道防线
-                            throw new Error('不支持的媒体类型: ' + file.type);
+                            actorKey = '__dm_aud__' + storagePath;
+                            mediaPayload = { kind: 'audio', url: _upData.public_url || getMediaUrl('__dm_aud__', storagePath), mimeType: file.type || '' };
                         }
                     }
                     // P6: 构建乐观消息的 contentPayload（含媒体信息，用于本地即时渲染）
@@ -12033,22 +12040,19 @@ function renderProfileActivityList(kind) {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
                     }
                 } catch(e) {
-                    // ★ 修复：发送失败时回收已上传的 Storage 文件，避免孤儿媒体永久泄漏
-                    //   （前端先直传 Storage、后调 /api/dm/send；若 send 失败/超时，后端
-                    //   从未感知该路径，文件会残留在公共桶）。
+                    // ★ 修复：发送失败时回收已上传的 Storage 文件，避免孤儿媒体永久泄漏。
+                    //   ★ 2026-09-25 改造：媒体已改走后端上传，回收也走后端 /api/dm/upload/abort
+                    //   （只允许删自己命名空间下、且尚未挂到任何消息上的对象）。
+                    //   旧实现直调 sb.storage.remove，sb 为 null 时会抛 TypeError 把真正的
+                    //   失败原因覆盖成 "null is not an object (evaluating 'sb.storage')"。
                     if (storagePath) {
                         try {
-                            // ★ 2026-09-25 修复：此处原本直接裸调 sb.storage。若 sb 为 null
-                            //   （Supabase SDK 未就绪），这里会抛 TypeError，把真正的失败原因
-                            //   （上传/发送错误）覆盖成 "null is not an object (evaluating 'sb.storage')"，
-                            //   用户看到的报错就是这句无意义的话。现改为安全取客户端并单独兜底。
-                            var _cleanupClient = sb || window.sb || null;
-                            if (_cleanupClient && _cleanupClient.storage) {
-                                var dmOrphanRes = await _cleanupClient.storage.from('uploads').remove([storagePath]);
-                                if (dmOrphanRes && dmOrphanRes.error) console.warn('[dm-send] orphan media cleanup failed', dmOrphanRes.error);
-                            } else {
-                                console.warn('[dm-send] orphan media cleanup skipped: storage client unavailable');
-                            }
+                            await window.xtjProtectedFetch('/api/dm/upload/abort', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ storage_path: storagePath }),
+                                timeoutMs: 15000
+                            });
                         } catch (dmCleanupErr) { console.warn('[dm-send] orphan media cleanup failed', dmCleanupErr); }
                         storagePath = null;
                     }

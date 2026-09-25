@@ -208,6 +208,37 @@
                 return String(scope || "misc") + "/" + userPart + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
             }
 
+            // ★ 2026-09-25 新增：私聊媒体上传路径（走后端 /api/dm/upload 时使用）。
+            //   与 buildStorageUploadPath 的区别：**不含用户名**，改为 <uidHash>_ 前缀。
+            //   原因：后端 validateDmUploadOwnership 要求 chat/<uidHash>_ 严格前缀匹配
+            //   （uidHash = sha256(userName) 前 12 位），以此把"猜路径抢存储位"挡在写入之前。
+            //   dm-media.js 的路径正则只允许 [A-Za-z0-9_-]，所以这里也不能出现中文用户名。
+            //   客户端不做哈希（避免依赖 crypto.subtle 的 HTTPS 限制），由其异步取一次。
+            var _dmUidHashCache = null;
+            async function getDmUidHash() {
+                if (_dmUidHashCache) return _dmUidHashCache;
+                var u = '';
+                try { u = String(window.currentUser || '').trim(); } catch (_) {}
+                if (!u) return null;
+                try {
+                    if (window.crypto && window.crypto.subtle && window.TextEncoder) {
+                        var buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(u));
+                        var hex = Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+                        _dmUidHashCache = hex.slice(0, 12);
+                        return _dmUidHashCache;
+                    }
+                } catch (_) { /* 非安全上下文等：落回下面的兜底 */ }
+                // 兜底：必须与后端 sha256 前 12 位一致，否则上传必然 400。
+                // 因此拿不到 WebCrypto 时不再瞎猜，直接返回 null 让调用方报可读错误。
+                return null;
+            }
+
+            async function buildDmStorageUploadPath(fileName) {
+                var hash = await getDmUidHash();
+                if (!hash) throw new Error('无法为上传文件生成安全标识，请刷新页面重试');
+                return 'chat/' + hash + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '_' + sanitizeStorageFileName(fileName);
+            }
+
             function parseDMContentPayload(raw) {
                 if (!raw) return null;
                 if (typeof raw === 'object') return raw;
@@ -305,111 +336,33 @@
                 return '[图片]';
             }
 
-            // ★ 2026-09-25 修复：私聊图片「退化成查看图片按钮」。
-            //   原逻辑：加载失败 → 加时间戳重试 1 次 → 仍失败就替换成按钮。
-            //   但生产环境 uploads 桶未开公共读时，公共地址是 403，重试多少次都一样，
-            //   图片必然退化成按钮（用户看到聊天里图片变按钮）。
-            //   新逻辑：失败后先向后端换取「10 分钟有效签名地址」再重试；签名地址不依赖
-            //   桶的公共读策略，且只有会话参与者能取到。签名也失败时才显示重试提示。
-            var _dmSignedCache = {};
-            var _dmSignInflight = {};
-            function _dmStoragePathFromUrl(u) {
-                // 从公有/签名地址中还原出 storagePath（chat/xxx），用于向后端换取签名地址
-                try {
-                    var s = String(u || '');
-                    var m = s.match(/\/storage\/v1\/object\/(?:public|sign)\/uploads\/([^?#]+)/i);
-                    if (m && m[1]) return decodeURIComponent(m[1]);
-                    if (/^chat\/[A-Za-z0-9_.-]+$/i.test(s)) return s;
-                } catch (e) { /* ignore */ }
-                return '';
-            }
-            function _dmApplySignedSrc(img, signedUrl) {
-                if (!img || !signedUrl) return;
-                img.setAttribute('data-retry-count', '2');
-                var sep = signedUrl.indexOf('?') >= 0 ? '&' : '?';
-                img.src = signedUrl + sep + '_ts=' + Date.now();
-            }
-            function _dmFetchSignedUrl(storagePath) {
-                if (_dmSignedCache[storagePath] && _dmSignedCache[storagePath].exp > Date.now()) {
-                    return Promise.resolve(_dmSignedCache[storagePath].url);
-                }
-                if (_dmSignInflight[storagePath]) return _dmSignInflight[storagePath];
-                var p = (async function() {
-                    try {
-                        // ★ 用 xtjProtectedFetch：它自带 Authorization 头与登录态处理，
-                        //   与全站其他 DM 请求（/api/dm/list、/api/dm/messages）鉴权方式一致。
-                        //   此前误用 getUserAuthPayload —— 那是 ai-agent.js 的内部函数，
-                        //   在 window 上并不存在，会导致签名请求永远拿不到鉴权头。
-                        if (typeof window.xtjProtectedFetch !== 'function') return '';
-                        var resp = await window.xtjProtectedFetch('/api/dm/media/sign', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ paths: [storagePath] })
-                        });
-                        if (!resp || !resp.ok) return '';
-                        var data = await resp.json().catch(function() { return {}; });
-                        var url = (data && data.signed && data.signed[storagePath]) || '';
-                        if (url) _dmSignedCache[storagePath] = { url: url, exp: Date.now() + 8 * 60 * 1000 };
-                        return url;
-                    } catch (e) { return ''; }
-                    finally { delete _dmSignInflight[storagePath]; }
-                })();
-                _dmSignInflight[storagePath] = p;
-                return p;
-            }
-
-            // ★ 2026-09-25 新增：渲染期「签名地址优先」。
-            //   仅靠 onerror 兜底的话，用户第一眼看到的永远是加载失败态（点开才有图的按钮）。
-            //   这里在渲染时优先使用已缓存的签名地址；未缓存则后台预热，下次渲染即命中。
-            function resolveDockChatMediaSrc(publicSrc, fullSrc) {
-                var base = String(publicSrc || fullSrc || '');
-                var sp = _dmStoragePathFromUrl(base);
-                if (sp && _dmSignedCache[sp] && _dmSignedCache[sp].exp > Date.now()) {
-                    return _dmSignedCache[sp].url;
-                }
-                return base;
-            }
-            function primeDockChatMediaSignedUrl(src) {
-                var sp = _dmStoragePathFromUrl(src);
-                if (!sp) return;
-                if (_dmSignedCache[sp] && _dmSignedCache[sp].exp > Date.now()) return;
-                if (_dmSignInflight[sp]) return;
-                _dmFetchSignedUrl(sp).catch(function() {});
-            }
-
+            // ★ 2026-09-25 简化：私聊图片「退化成查看图片按钮」的**签名地址**补救链路已删除。
+            //
+            //   上一版曾假设"生产环境 uploads 桶未开公共读，公共地址 403，所以要换后端签名地址"。
+            //   该假设已被线上事实验证为不成立：实测真实对象
+            //     https://<proj>.supabase.co/storage/v1/object/public/uploads/posts/xxx.jpg
+            //     → HTTP 200 / image/jpeg / 589950 bytes
+            //   而取一个不存在的对象返回 NoSuchKey（而非策略拒绝），证明 /public/ 路由是放通的。
+            //   因此 /api/dm/media/sign 及其前端签名缓存/预热/降级分支全部是多余复杂度：
+            //   它们只是让每次渲染多打一次后端、并在失败时把图片退化成按钮。
+            //
+            //   现在保留的只有「真实网络抖动仍需要重试 + 重试仍失败给可点开的兜底按钮」，
+    //   直接用公共地址，不再引入任何后端往返。
             window.handleDockChatImageError = function(img) {
                 if (!img || !img.parentNode) return;
                 var retryCount = parseInt(img.getAttribute('data-retry-count') || '0', 10) || 0;
-                // 第 1 步：普通重试（可能是瞬时网络抖动）
-                if (retryCount < 1) {
-                    var retrySrc = img.getAttribute('data-full-src') || img.getAttribute('data-src') || img.currentSrc || img.src || "";
-                    if (retrySrc) {
-                        img.setAttribute('data-retry-count', String(retryCount + 1));
-                        img.src = retrySrc + (retrySrc.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
-                        return;
-                    }
+                var fullSrc = img.getAttribute("data-full-src") || img.getAttribute('data-src') || img.currentSrc || img.src || "";
+                // 第 1 步：普通重试（可能是瞬时网络抖动 / 缓存未命中）
+                if (retryCount < 1 && fullSrc) {
+                    img.setAttribute('data-retry-count', String(retryCount + 1));
+                    img.src = fullSrc + (fullSrc.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
+                    return;
                 }
-                var fullSrc = img.getAttribute("data-full-src") || img.currentSrc || img.src || "";
-                // 第 2 步：普通重试仍失败 → 换用后端签发的受鉴权短效地址再试一次
-                if (retryCount < 2) {
-                    var storagePath = _dmStoragePathFromUrl(img.getAttribute('data-src') || fullSrc);
-                    if (storagePath) {
-                        img.setAttribute('data-retry-count', '2'); // 先占位，避免并发重复触发
-                        _dmFetchSignedUrl(storagePath).then(function(signedUrl) {
-                            if (signedUrl) {
-                                _dmApplySignedSrc(img, signedUrl);
-                            } else if (img.parentNode) {
-                                // 签名也拿不到（无权限/对象不存在）→ 才显示可重试提示
-                                _dmRenderMediaFallback(img, fullSrc, storagePath);
-                            }
-                        });
-                        return;
-                    }
-                }
-                _dmRenderMediaFallback(img, fullSrc, '');
+                // 第 2 步：仍失败 → 退化成可点开的兜底按钮（点开用原始地址）
+                _dmRenderMediaFallback(img, fullSrc);
             };
 
-            function _dmRenderMediaFallback(img, fullSrc, storagePath) {
+            function _dmRenderMediaFallback(img, fullSrc) {
                 if (!img || !img.parentNode) return;
                 var fallback = document.createElement("button");
                 fallback.type = "button";
@@ -418,18 +371,10 @@
                 fallback.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
-                    // 点击时再尝试换取一次签名地址，成功则直接打开大图
-                    if (storagePath) {
-                        _dmFetchSignedUrl(storagePath).then(function(signedUrl) {
-                            var target = signedUrl || fullSrc;
-                            if (target && typeof window.openImageViewer === "function") window.openImageViewer(target);
-                            else if (target) window.open(target, '_blank', 'noopener');
-                            else showToast("图片加载失败");
-                        });
-                        return;
-                    }
                     if (fullSrc && typeof window.openImageViewer === "function") {
                         window.openImageViewer(fullSrc);
+                    } else if (fullSrc) {
+                        window.open(fullSrc, '_blank', 'noopener');
                     } else {
                         showToast("图片加载失败");
                     }
