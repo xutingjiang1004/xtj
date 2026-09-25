@@ -116,12 +116,30 @@ test('P4-22: preview.js inner T renamed to avoid shadowing', function () {
 // Phase 6: DM & avatar
 // ──────────────────────────────────────────────
 
-test('P6-18: Storage upload error blocks DM send', function () {
+// ★ 2026-09-25 更新：DM 媒体上传已从「前端直连 Supabase Storage」改为「走后端 /api/dm/upload」。
+//   原断言检查的是 uploadResult.error（Supabase SDK 的 error-first 返回风格），
+//   新通道走的是标准 fetch 语义（!resp.ok || !data.ok）。
+//   这里保留该用例的**原始意图**不变——「上传失败必须阻断发送，不能把消息发出去」，
+//   只把检查对象换成新实现的错误分支。同时增加后端侧的存在性断言，
+//   避免前端被误改回直连、或后端接口被删而无人发现。
+test('P6-18: 媒体上传失败必须阻断 DM 发送（已改走后端上传）', function () {
   var s = read('js/core.js');
-  assert.ok(/uploadResult\s*&&\s*uploadResult\.error/.test(s),
-    'DM upload must check uploadResult.error');
+  // 前端：必须调用后端上传接口
+  assert.ok(s.indexOf('/api/dm/upload') >= 0, 'DM upload must go through the backend /api/dm/upload endpoint');
+  // 前端：必须检查上传响应失败并 throw，阻断后续 /api/dm/send
+  assert.ok(/!_upResp\.ok\s*\|\|\s*!_upData\s*\|\|\s*!_upData\.ok/.test(s),
+    'DM upload must check the backend response and throw when it fails');
   assert.ok(/throw new Error\('媒体上传失败/.test(s),
-    'DM upload must throw on Storage error, blocking message send');
+    'DM upload must throw on upload error, blocking message send');
+  // 前端：必须仍在发送前完成上传（上传段出现在 /api/dm/send 之前）
+  assert.ok(s.indexOf('/api/dm/upload') < s.indexOf("'/api/dm/send'"),
+    'upload must happen before the send call');
+  // 后端：接口存在，且带鉴权与限流
+  var server = read('render-api/server.js');
+  assert.ok(/app\.post\('\/api\/dm\/upload',\s*authenticateUser/.test(server),
+    'backend /api/dm/upload must require authentication');
+  assert.ok(/app\.post\('\/api\/dm\/upload\/abort',\s*authenticateUser/.test(server),
+    'backend /api/dm/upload/abort must require authentication');
 });
 
 test('P6-19: audio is fully supported or rejected', function () {

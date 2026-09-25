@@ -9,7 +9,18 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
-const { claimDmMediaUpload, reserveDmMediaUpload, validateDmStoragePath, validateDmMediaKind, MEDIA_KINDS: ALLOWED_KINDS } = require('./dm-media');
+const {
+  claimDmMediaUpload,
+  reserveDmMediaUpload,
+  validateDmStoragePath,
+  validateDmMediaKind,
+  validateDmUploadOwnership,
+  MEDIA_KINDS: ALLOWED_KINDS,
+  dmMediaQuotaRemainingBytes,
+  tryConsumeDmMediaQuota,
+  refundDmMediaQuota,
+  acquireDmMediaSlot
+} = require('./dm-media');
 const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError } = require('./storage-cleanup');
 const { applySecurityHeaders } = require('./security-headers');
 const registerProviderRegistryRoutes = require('./provider-registry');
@@ -11471,6 +11482,43 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// ★ 2026-09-25：前端运行时配置自愈接口。
+//   背景（真实事故）：构建脚本 scripts/build.js 只有在构建期设置了环境变量
+//   SUPABASE_ANON_KEY 时才会替换占位符，否则只打一行 warning 并照常产出 bundle。
+//   render.yaml 把该变量标为 sync:false（需在 Render Dashboard 手工填），实际长期未填
+//   → 线上 config.min.js 里始终是占位串 "eyJhbG...yDDA"。
+//   后果：浏览器用这串垃圾 key 建 Supabase client，登录后 Storage 请求带上登录 JWT，
+//   Supabase 判定为无效 JWS，报 "Invalid Compact JWS"，前端发图直接失败。
+//   本接口让前端在运行时回源补齐 anon key，前端不再依赖构建期注入。
+//   安全红线：只回 anon/publishable key，**绝不**回退到 service_role key；
+//   未配置时返回 null，让前端继续走「后端上传」路径而不是拿错 key 去连。
+app.get('/api/config/public', rateLimit(60000, 30), (req, res) => {
+  try {
+    var anonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || null;
+    if (anonKey) {
+      // 只接受两种合法形态：JWT 形态（anon key）或新版 publishable key。
+      // 其余一律视为未配置——宁可返回 null 让前端走安全的后端上传，
+      // 也不能把可疑字符串发给浏览器建 client。
+      var anonOk = /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(anonKey) || /^sb_publishable_/.test(anonKey);
+      if (!anonOk) {
+        console.warn('[config-public] SUPABASE_ANON_KEY 形态不合法，已忽略并返回 null');
+        anonKey = null;
+      }
+    }
+    if (!anonKey) {
+      console.warn('[config-public] 未配置 SUPABASE_ANON_KEY，前端将退回后端上传路径');
+    }
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    return res.json({
+      supabase_url: SUPABASE_URL || null,
+      supabase_anon_key: anonKey
+    });
+  } catch (e) {
+    console.error('[config-public] exception:', e && e.message);
+    return res.status(500).json({ error: '服务器内部错误', code: 'config_public_failed' });
+  }
+});
+
 // 邮件配置健康检查（需管理员鉴权）
 app.get('/health/mail', verifyToken, (req, res) => {
   res.json({
@@ -14857,94 +14905,17 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
   } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
-// ★ 2026-09-25 新增：私聊媒体「受鉴权签名地址」接口。
-//   背景：私聊图片此前用的是 supabase getPublicUrl 生成的永久公共地址。当 uploads 桶
-//   未开放公共读时，该地址会 403，前端 <img> 加载失败后只能退化成「查看图片」按钮
-//   （用户看到的就是聊天里图片变成按钮，点开才有）。
-//   本接口在确认「请求者确实是该会话的发送方或接收方」后，才为对应存储对象签发
-//   短时效签名地址；他人即使拿到 storagePath 也无法换取可访问地址。
-//   设计要点：
-//     ① 只接受 storagePath（chat/xxx），不接受任意 URL，杜绝把它当通用 SSRF 跳板；
-//     ② 权限判定以「该 storagePath 确实挂在本用户参与的某条私信上」为准，
-//        而不是信任前端传入的对象名；
-//     ③ 签名有效期 10 分钟，前端按需换取、加载失败时再换一次，避免长时泄露；
-//     ④ 桶本就没开公共读时也照常工作 —— 签名地址不依赖公开策略。
-app.post('/api/dm/media/sign', authenticateUser, rateLimit(60000, 120), async (req, res) => {
-  try {
-    var me = String(req.userName || '');
-    if (!me) return res.status(401).json({ error: '未登录', code: 'auth_required' });
-    var rawList = Array.isArray(req.body && req.body.paths) ? req.body.paths : [];
-    // 单次最多签 50 个，避免被当批量枚举工具
-    var paths = Array.from(new Set(rawList.map(function(x) { return String(x || '').trim(); }).filter(Boolean))).slice(0, 50);
-    if (!paths.length) return res.status(400).json({ error: '缺少媒体路径', code: 'invalid_media_paths' });
-
-    // 逐个校验：storagePath 必须确实属于一条「我参与其中」的私信
-    var allowed = [];
-    var rejected = [];
-    for (var i = 0; i < paths.length; i++) {
-      var p = paths[i];
-      var pathCheck = validateDmStoragePath(p);
-      if (!pathCheck.ok) { rejected.push({ path: p, reason: 'invalid_path' }); continue; }
-      // actor_key 存储的是 <kindPrefix><storagePath>，据此精确反查消息归属
-      var actorCandidates = [MEDIA_KINDS.image + p, MEDIA_KINDS.video + p, MEDIA_KINDS.audio + p];
-      var owner = null;
-      try {
-        var ownerRes = await supabase.from('posts')
-          .select('id, user_name, media_url, media_type, actor_key')
-          .eq('media_type', DM_MARKER)
-          .in('actor_key', actorCandidates)
-          .limit(5);
-        if (ownerRes && !ownerRes.error && Array.isArray(ownerRes.data)) {
-          for (var oi = 0; oi < ownerRes.data.length; oi++) {
-            var row = ownerRes.data[oi];
-            var sender = String(row.user_name || '');
-            var receiver = String(row.media_url || '');
-            // 参与者校验：只有发送方或接收方可以取地址
-            if (sender === me || receiver === me) { owner = row; break; }
-          }
-        }
-      } catch (eOwner) {
-        console.warn('[dm-media-sign] 归属查询失败:', eOwner && eOwner.message);
-      }
-      if (!owner) { rejected.push({ path: p, reason: 'not_participant' }); continue; }
-      allowed.push(p);
-    }
-
-    if (!allowed.length) {
-      return res.status(403).json({ ok: false, error: '无权访问该媒体', code: 'media_forbidden', rejected: rejected });
-    }
-
-    // 批量签发（10 分钟有效）。签名地址不依赖桶的公共读策略。
-    var signed = {};
-    try {
-      var signRes = await supabase.storage.from('uploads').createSignedUrls(allowed, 600);
-      var rows = (signRes && Array.isArray(signRes.data)) ? signRes.data : [];
-      rows.forEach(function(r) {
-        if (r && r.path && r.signedUrl) signed[r.path] = r.signedUrl;
-        else if (r && r.path && r.error) rejected.push({ path: r.path, reason: 'sign_failed' });
-      });
-      if (signRes && signRes.error) {
-        console.warn('[dm-media-sign] createSignedUrls 失败，尝试逐个签发:', signRes.error && signRes.error.message);
-        for (var ai = 0; ai < allowed.length; ai++) {
-          if (signed[allowed[ai]]) continue;
-          try {
-            var one = await supabase.storage.from('uploads').createSignedUrl(allowed[ai], 600);
-            if (one && one.data && one.data.signedUrl) signed[allowed[ai]] = one.data.signedUrl;
-            else rejected.push({ path: allowed[ai], reason: 'sign_failed' });
-          } catch (eOne) { rejected.push({ path: allowed[ai], reason: 'sign_failed' }); }
-        }
-      }
-    } catch (eSign) {
-      console.error('[dm-media-sign] 签发异常:', eSign && eSign.message);
-      return res.status(503).json({ ok: false, error: '媒体地址签发失败，请重试', code: 'media_sign_failed', retryable: true });
-    }
-
-    return res.json({ ok: true, signed: signed, rejected: rejected, expires_in: 600 });
-  } catch (e) {
-    console.error('[API] dm media sign:', e && e.message);
-    return res.status(500).json({ error: '媒体地址签发失败', code: 'media_sign_error' });
-  }
-});
+// ★ 2026-09-25 删除：私聊媒体「受鉴权签名地址」接口（POST /api/dm/media/sign）及其完整实现。
+//
+//   删除依据（线上实测，不是推测）：
+//   该接口的前提是"uploads 桶未开公共读 → 公共地址 403 → 必须换签名地址"。
+//   实测真实对象 https://<proj>.supabase.co/storage/v1/object/public/uploads/posts/xxx.jpg
+//   → HTTP 200 / image/jpeg / 589950 bytes；而取一个不存在的对象返回 NoSuchKey
+//   （而非策略拒绝），证明 /public/ 路由是放通的。
+//   既然公共地址可用，这条签名链路就是纯粹的额外复杂度：
+//   · 每次图片渲染多打一次后端；签名失败时反而把好好的图片退化成"查看图片"按钮；
+//   · 多一个需要维护鉴权语义、限流与错误分支的接口面。
+//   前端所有调用点（救援重试、渲染期预热、点击兜底）已同步移除，直连公共地址。
 
 // Read state is server-authoritative and scoped to messages addressed to the
 // authenticated user. A sender cannot mark their own outbound rows as read.
@@ -15131,6 +15102,244 @@ async function cleanupDmMediaAfterFailedSend(registryRow, storagePath, reason) {
   }
   return { cleanup: cleanupResult, registry: registryResult };
 }
+
+// ===================== 私聊媒体：后端上传通道 =====================
+// ★ 2026-09-25 新增。背景（真实事故）：
+//   前端原本直连 Supabase Storage 上传私聊媒体，依赖 window.sb（浏览器端 anon key）。
+//   构建期未注入 SUPABASE_ANON_KEY 时线上 config.js 里是占位串，浏览器用垃圾 key 建
+//   client，登录后 Storage 请求携带登录 JWT，Supabase 判定无效 JWS，报
+//   "Invalid Compact JWS" —— 用户看到的「发送失败: 媒体上传失败: Invalid Compact JWS」。
+//   改为走后端后，上传通道不再依赖任何前端密钥，window.sb 是否存在都不影响发图。
+//
+// 为什么不能复用 /api/photo/upload：那条路径有照片墙专属强校验（photos/ 前缀、
+//   upload_id 归属预检、sharp 解码、tryConsumePhotoUploadQuota），语义完全不同。
+//   私聊要支持视频/音频，也没有 upload_id 概念，硬复用会两边一起坏。
+//
+// 安全顺序刻意与 /api/photo/upload 对齐：先鉴权 → 限流 → Content-Length 预检 →
+//   再进 express.raw 收 55MB 原始体。绝不把大体积解析器放在鉴权之前（未登录内存 DoS）。
+const DM_UPLOAD_MAX_SINGLE_BYTES = 50 * 1024 * 1024;
+
+// 音视频的 magic bytes 最小校验。
+// 说明：图片用 sharp 解码验真，但音视频没有可靠的纯 JS 解码器（引入 ffmpeg 成本过高），
+//   因此这里只做"头部魔数是否与声明 kind 相符"。它拦不住精心构造的畸形容器，
+//   但能拦住最典型的手脚：把 SVG / HTML / 任意字节改名成 video/mp4 上传。
+//   私聊媒体的最终消费方是 <img>/<video>/<audio> 标签，不会执行脚本，
+//   所以这类文件的实际危害是"伪装文件占空间"，本层校验与威胁模型相称。
+function sniffDmMediaMagic(buf, kind) {
+  if (!Buffer.isBuffer(buf) || buf.length < 4) {
+    return { ok: false, error: '媒体文件内容不完整' };
+  }
+  const b = buf;
+  const has = function (offset, bytes) {
+    if (b.length < offset + bytes.length) return false;
+    for (let i = 0; i < bytes.length; i++) if (b[offset + i] !== bytes[i]) return false;
+    return true;
+  };
+  const ascii = function (offset, str) {
+    return b.length >= offset + str.length && b.toString('latin1', offset, offset + str.length) === str;
+  };
+  if (kind === 'video') {
+    // MP4/MOV/3GP：offset 4 处为 'ftyp'；WebM/MKV：EBML 魔数 1A 45 DF A3
+    if (has(4, [0x66, 0x74, 0x79, 0x70])) return { ok: true, format: 'mp4' };
+    if (has(0, [0x1a, 0x45, 0xdf, 0xa3])) return { ok: true, format: 'webm' };
+    // MPEG-TS：0x47 同步字节，按 188 字节包长重复出现。纯 JS 无法解码 TS，
+    // 这里退化为"同步字节在若干包位置都成立"的启发式。
+    if (b[0] === 0x47) {
+      let syncHits = 1;
+      for (let off = 188; off + 1 <= b.length; off += 188) if (b[off] === 0x47) syncHits++;
+      if (syncHits >= 2 || b.length <= 188) return { ok: true, format: 'mpegts' };
+    }
+    if (ascii(0, 'FLV')) return { ok: true, format: 'flv' };
+    return { ok: false, error: '无法识别的视频文件，请重新选择' };
+  }
+  if (kind === 'audio') {
+    if (ascii(0, 'ID3')) return { ok: true, format: 'mp3' };
+    // MP3 帧同步：11 位全 1
+    if (b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return { ok: true, format: 'mp3' };
+    if (ascii(0, 'OggS')) return { ok: true, format: 'ogg' };
+    if (ascii(0, 'fLaC')) return { ok: true, format: 'flac' };
+    if (ascii(0, 'RIFF') && ascii(8, 'WAVE')) return { ok: true, format: 'wav' };
+    if (has(4, [0x66, 0x74, 0x79, 0x70])) return { ok: true, format: 'm4a' }; // AAC in MP4 容器
+    if (ascii(0, 'FORM') && ascii(8, 'AIFF')) return { ok: true, format: 'aiff' };
+    return { ok: false, error: '无法识别的音频文件，请重新选择' };
+  }
+  return { ok: false, error: '不支持的媒体类型' };
+}
+
+function dmUploadBudgetPrecheck(req, res, next) {
+  const declared = parseInt(req.headers['content-length'], 10);
+  if (!isFinite(declared) || declared <= 0) return next(); // chunked：体积不可知，交给处理器兜底
+  if (declared > DM_UPLOAD_MAX_SINGLE_BYTES) {
+    return res.status(400).json({ error: '文件过大，单个不超过 50MB', code: 'file_too_large' });
+  }
+  if (declared > dmMediaQuotaRemainingBytes(req.userName)) {
+    return res.status(429).json({ error: '媒体上传已达每小时容量上限，请稍后再试', code: 'dm_quota_exceeded' });
+  }
+  return next();
+}
+
+app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadBudgetPrecheck, express.raw({ type: 'application/octet-stream', limit: '55mb' }), async (req, res) => {
+  // 两个资源（配额预占 / 并发名额）必须在**每一条**返回路径上归还，集中放 finally。
+  // 写在各个分支里必然漏，一漏就是永久泄漏一个名额 + 误扣一份配额。
+  let quotaCharged = 0;
+  let quotaCommitted = false;
+  let releaseSlot = null;
+  let uploader = '';
+  try {
+    uploader = String(req.userName || '');
+    if (!uploader) return res.status(401).json({ error: '未登录', code: 'auth_expired' });
+    const banCheck = userBanError(req);
+    if (banCheck) return res.status(banCheck.status || 403).json({ error: banCheck.message, code: banCheck.code });
+
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) return res.status(400).json({ error: '缺少文件数据', code: 'INVALID_INPUT' });
+    if (buf.length > DM_UPLOAD_MAX_SINGLE_BYTES) return res.status(400).json({ error: '文件过大，单个不超过 50MB', code: 'file_too_large' });
+
+    const storagePathRaw = String(req.query.path || '').trim().slice(0, 300);
+    const kind = String(req.query.kind || '').trim();
+    const mimeType = String(req.query.mime_type || '').trim().slice(0, 100);
+
+    // ① 路径合法性 + ② 归属绑定：要求 chat/<uidHash>_ 前缀与请求者一致。
+    //    与照片墙 photos/<uploadId>_ 同一思路，让"猜路径抢占他人位置"在写入前失败。
+    const uidHash = crypto.createHash('sha256').update(uploader).digest('hex').slice(0, 12);
+    const ownResult = validateDmUploadOwnership(storagePathRaw, uidHash);
+    if (!ownResult.ok) return res.status(400).json({ error: ownResult.error, code: ownResult.code });
+    const storagePath = ownResult.storagePath;
+
+    // ③ 类型白名单（不接受 svg，防存储型 XSS）
+    const kindResult = validateDmMediaKind(kind, mimeType);
+    if (!kindResult.ok) return res.status(400).json({ error: kindResult.error, code: kindResult.code });
+    if (!ALLOWED_KINDS[kindResult.kind] || ALLOWED_KINDS[kindResult.kind] !== kindResult.actorPrefix) {
+      return res.status(400).json({ error: 'Unsupported media kind', code: 'invalid_media_kind' });
+    }
+
+    // ④ 配额预占（在写入存储**之前**），失败即拒，不计入 quotaCharged。
+    if (!tryConsumeDmMediaQuota(uploader, buf.length)) {
+      return res.status(429).json({ error: '媒体上传已达每小时容量上限，请稍后再试', code: 'dm_quota_exceeded' });
+    }
+    quotaCharged = buf.length;
+
+    // ⑤ per-user 并发闸：拿不到名额立即 429，不排队（排队＝继续占着 50MB 内存）
+    releaseSlot = acquireDmMediaSlot(uploader);
+    if (!releaseSlot) {
+      return res.status(429).json({ error: '同时处理的媒体过多，请稍后再试', code: 'dm_upload_busy' });
+    }
+
+    // ⑥ 内容嗅探：不信任自报 mime。
+    //    图片走 sharp 解码验真（与照片墙一致）；音频/视频没有可靠的纯 JS 解码器，
+    //    改用「magic bytes 与声明 kind 一致」做最小校验——至少拦住把 SVG/HTML
+    //    改名成 video/mp4 上传这类最典型的手脚。
+    if (kindResult.kind === 'image') {
+      let realFormat = null;
+      try {
+        const meta = await sharp(buf, { animated: false, limitInputPixels: 100000000 }).metadata();
+        realFormat = meta && meta.format ? String(meta.format).toLowerCase() : null;
+      } catch (sharpErr) {
+        console.warn('[dm-upload] sharp decode failed:', sharpErr && sharpErr.message);
+        return res.status(400).json({ error: '无法识别为有效图片，请重新选择', code: 'INVALID_IMAGE' });
+      }
+      const REAL_FORMAT_OK = { jpeg: 1, jpg: 1, png: 1, webp: 1, gif: 1, avif: 1, heic: 1, heif: 1, bmp: 1, tif: 1, tiff: 1 };
+      if (!realFormat || !REAL_FORMAT_OK[realFormat]) {
+        return res.status(400).json({ error: '不支持的图片内容', code: 'INVALID_IMAGE' });
+      }
+      const claimed = String(kindResult.mimeType).split('/')[1] || '';
+      const normalize = function (x) { return x === 'jpg' ? 'jpeg' : (x === 'tif' ? 'tiff' : x); };
+      if (claimed && normalize(claimed) !== normalize(realFormat)) {
+        return res.status(400).json({ error: '图片内容与声明类型不符', code: 'INVALID_INPUT' });
+      }
+    } else {
+      const sniff = sniffDmMediaMagic(buf, kindResult.kind);
+      if (!sniff.ok) return res.status(400).json({ error: sniff.error, code: 'INVALID_MEDIA' });
+    }
+
+    // ⑦ 服务端写入（service_role 绕过 RLS；upsert:false 防止覆盖他人同名对象）
+    let upload;
+    try {
+      upload = await supabase.storage.from('uploads').upload(storagePath, buf, {
+        contentType: kindResult.mimeType,
+        cacheControl: '31536000',
+        upsert: false
+      });
+    } catch (upErr) {
+      console.error('[dm-upload] storage upload exception:', upErr && upErr.message);
+      return res.status(503).json({ error: '媒体上传失败，请稍后重试', code: 'dm_upload_failed', retryable: true });
+    }
+    if (upload && upload.error) {
+      const msg = String((upload.error && (upload.error.message || upload.error.error)) || '');
+      // 同名已存在：前端重试/并发时属正常现象，告知其换名重传而不是报"存储故障"
+      if (/exists|duplicate|already/i.test(msg)) {
+        return res.status(409).json({ error: '该文件已存在，请重新选择后再试', code: 'dm_object_exists' });
+      }
+      console.error('[dm-upload] storage upload error:', msg);
+      return res.status(503).json({ error: '媒体上传失败，请稍后重试', code: 'dm_upload_failed', retryable: true });
+    }
+    // 字节确实落盘 → 额度不再回滚
+    quotaCommitted = true;
+
+    const publicUrl = supabase.storage.from('uploads').getPublicUrl(storagePath).data.publicUrl;
+    // 注意：这里只上传，**不**登记 dm_media_uploads 注册表。
+    //   注册表由随后的 /api/dm/send（claimDmMediaUpload）按 storage_path 认领，
+    //   保持「两段式」不变：上传 ≠ 已发送，消息未发出前不会污染注册表。
+    return res.json({ ok: true, storage_path: storagePath, public_url: publicUrl, kind: kindResult.kind, mime_type: kindResult.mimeType, size_bytes: buf.length });
+  } catch (e) {
+    console.error('[dm-upload] failed:', e && e.message);
+    return res.status(500).json({ error: '媒体上传失败，请稍后重试', code: 'dm_upload_failed', retryable: true });
+  } finally {
+    if (releaseSlot) {
+      try { releaseSlot(); } catch (slotErr) { console.error('[dm-upload] release slot failed:', slotErr && slotErr.message); }
+      releaseSlot = null;
+    }
+    if (quotaCharged > 0 && !quotaCommitted) refundDmMediaQuota(uploader, quotaCharged);
+  }
+});
+
+// 放弃上传：删除已写入但确定不会发送的对象（发送失败/用户取消/页面关闭）。
+// 仅允许删除**自己命名空间**下的对象（chat/<uidHash>_ 前缀），不能借它删他人文件。
+app.post('/api/dm/upload/abort', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  try {
+    const uploader = String(req.userName || '');
+    if (!uploader) return res.status(401).json({ error: '未登录', code: 'auth_required' });
+    const storagePathRaw = String((req.body && req.body.storage_path) || '').trim();
+    const uidHash = crypto.createHash('sha256').update(uploader).digest('hex').slice(0, 12);
+    const ownResult = validateDmUploadOwnership(storagePathRaw, uidHash);
+    if (!ownResult.ok) return res.status(400).json({ error: ownResult.error, code: ownResult.code });
+    const storagePath = ownResult.storagePath;
+
+    // 已挂到某条真实消息上的对象不允许删除——否则 abort 会变成"撤回他人已收到的图"。
+    const actorCandidates = [ALLOWED_KINDS.image + storagePath, ALLOWED_KINDS.video + storagePath, ALLOWED_KINDS.audio + storagePath];
+    try {
+      const attached = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', DM_MARKER)
+        .in('actor_key', actorCandidates)
+        .limit(1);
+      if (attached && attached.error) {
+        return res.status(503).json({ error: '暂时无法确认媒体归属，请稍后重试', code: 'dm_abort_lookup_failed', retryable: true });
+      }
+      if (attached && Array.isArray(attached.data) && attached.data.length) {
+        return res.json({ ok: true, removed: false, reason: 'already_attached' });
+      }
+    } catch (lookupErr) {
+      console.warn('[dm-upload-abort] lookup failed:', lookupErr && lookupErr.message);
+      return res.status(503).json({ error: '暂时无法确认媒体归属，请稍后重试', code: 'dm_abort_lookup_failed', retryable: true });
+    }
+
+    try {
+      const removed = await supabase.storage.from('uploads').remove([storagePath]);
+      if (removed && removed.error) {
+        console.warn('[dm-upload-abort] remove failed:', removed.error && removed.error.message);
+        return res.status(503).json({ error: '清理未完成，请稍后重试', code: 'dm_abort_failed', retryable: true });
+      }
+    } catch (rmErr) {
+      console.warn('[dm-upload-abort] remove exception:', rmErr && rmErr.message);
+      return res.status(503).json({ error: '清理未完成，请稍后重试', code: 'dm_abort_failed', retryable: true });
+    }
+    return res.json({ ok: true, removed: true });
+  } catch (e) {
+    console.error('[dm-upload-abort] failed:', e && e.message);
+    return res.status(500).json({ error: '清理失败', code: 'dm_abort_error' });
+  }
+});
 
 app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {

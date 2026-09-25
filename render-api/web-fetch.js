@@ -558,7 +558,12 @@ module.exports = {
   defaultDnsLookup: defaultDnsLookup,
   requestPinnedJson: requestPinnedJson,
   requestPinnedStream: requestPinnedStream,
-  createPinnedAgent: createPinnedAgent
+  createPinnedAgent: createPinnedAgent,
+  // ★ 2026-09-25：导出网页文本解析层（charset 嗅探 → 解码 → 标题/正文抽取）。
+  //   供契约测试确定性验证非 UTF-8（GBK）中文站点的解析正确性 ——
+  //   此前该场景只能靠抓真实外网站点验证，在 CI 上因外网抖动长期失败。
+  //   纯函数、无网络副作用，导出不改变运行时行为。
+  parseWebText: normalizeWebText
 };
 
 // ── 安全二进制下载（供 read_zip / image_info / image_process 使用）───────────

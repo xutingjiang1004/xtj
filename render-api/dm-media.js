@@ -301,13 +301,106 @@ async function reserveDmMediaUpload(supabase, options) {
   return { ok: false, state: 'conflict', code: 'media_send_in_progress', data: row, error: 'Media message is already being sent' };
 }
 
+// ===================== 私聊媒体上传配额（独立于照片墙） =====================
+// 背景：私聊原本由前端直连 Supabase Storage 上传，服务端没有任何字节级约束。
+// 改为后端上传后，必须给这条新通道配独立配额，否则等于开了个无上限的写入口。
+//
+// 审计红线：**绝不能复用照片墙的 tryConsumePhotoUploadQuota / acquirePhotoDecodeSlot**。
+//   - 照片墙配额是 500MB/小时、按"上传的图片张数+缩略图"场景调的；私聊媒体含视频，
+//     体积量级完全不同，共用会把两边互相拖垮（用户传个视频把照片墙额度耗光）。
+//   - 两者共用一个 Map 还会让「私聊上传失败回滚」误减照片墙额度，账目跨域污染。
+//   因此这里使用**完全独立的常量与 Map**，语义上与照片墙互不影响。
+const DM_MEDIA_QUOTA_BYTES = 300 * 1024 * 1024; // 每用户每小时 300MB（含视频，故小于照片墙的 500MB）
+const DM_MEDIA_QUOTA_WINDOW_MS = 60 * 60 * 1000;
+// 并发闸取值依据：单请求上限 50MB，AI 聊天发图通常一次 1~3 张。
+// 取 4 与照片墙保持同一数量级，正常使用不会误伤，最坏在途内存有界（~4×50MB）。
+const DM_MEDIA_MAX_INFLIGHT_PER_USER = 4;
+const dmMediaQuotaStore = new Map(); // userName -> { windowStart, bytes }
+const dmMediaInflight = new Map();   // userName -> 在途请求数（归零即删除）
+
+const dmMediaQuotaCleanupTimer = setInterval(function () {
+  const cutoff = Date.now() - DM_MEDIA_QUOTA_WINDOW_MS;
+  dmMediaQuotaStore.forEach(function (rec, user) {
+    if (!rec || rec.windowStart < cutoff) dmMediaQuotaStore.delete(user);
+  });
+}, 300000);
+if (dmMediaQuotaCleanupTimer && typeof dmMediaQuotaCleanupTimer.unref === 'function') dmMediaQuotaCleanupTimer.unref();
+
+function dmMediaQuotaWindow(userName, now) {
+  let rec = dmMediaQuotaStore.get(userName);
+  if (!rec || (now - rec.windowStart) >= DM_MEDIA_QUOTA_WINDOW_MS) {
+    rec = { windowStart: now, bytes: 0 };
+    dmMediaQuotaStore.set(userName, rec);
+  }
+  return rec;
+}
+
+// 只读查询：用于接收 body **之前**用 Content-Length 做预检，不得创建记账记录。
+function dmMediaQuotaRemainingBytes(userName) {
+  const rec = dmMediaQuotaStore.get(userName);
+  if (!rec || (Date.now() - rec.windowStart) >= DM_MEDIA_QUOTA_WINDOW_MS) return DM_MEDIA_QUOTA_BYTES;
+  return Math.max(0, DM_MEDIA_QUOTA_BYTES - rec.bytes);
+}
+
+function tryConsumeDmMediaQuota(userName, bytes) {
+  const rec = dmMediaQuotaWindow(userName, Date.now());
+  if (rec.bytes + bytes > DM_MEDIA_QUOTA_BYTES) return false;
+  rec.bytes += bytes;
+  return true;
+}
+
+// 反向操作：被拒（校验失败 / 存储写入失败 / 并发闸 429）时回滚预占的字节数。
+// 不能直接写 0 或删记录——并发请求可能已在同一窗口占用额度，粗暴清零会一起抹掉。
+function refundDmMediaQuota(userName, bytes) {
+  if (!bytes || bytes <= 0) return;
+  const rec = dmMediaQuotaStore.get(userName);
+  if (!rec) return;
+  rec.bytes = Math.max(0, rec.bytes - bytes);
+}
+
+// 并发闸：拿不到名额直接拒绝，**不排队**——排队等于把 50MB 缓冲继续留在内存等着。
+function acquireDmMediaSlot(userName) {
+  const inFlight = dmMediaInflight.get(userName) || 0;
+  if (inFlight >= DM_MEDIA_MAX_INFLIGHT_PER_USER) return null;
+  dmMediaInflight.set(userName, inFlight + 1);
+  let released = false;
+  return function releaseDmMediaSlot() {
+    if (released) return; // 幂等：重复释放会把同用户其它在途请求的名额减掉
+    released = true;
+    const cur = dmMediaInflight.get(userName) || 0;
+    if (cur <= 1) dmMediaInflight.delete(userName);
+    else dmMediaInflight.set(userName, cur - 1);
+  };
+}
+
+// 存储路径归属绑定：要求 chat/<uidHash>_<...> 前缀与请求者一致。
+// 与照片墙 photos/<uploadId>_ 的思路一致——让"猜路径抢占"在写入前就失败。
+// uidHash 由调用方用 userName 的 sha256 前 12 位算出（与照片墙 ownerNs 同算法）。
+function validateDmUploadOwnership(storagePath, uidHash) {
+  const parsed = validateDmStoragePath(storagePath);
+  if (!parsed.ok) return parsed;
+  const prefix = 'chat/' + String(uidHash || '') + '_';
+  if (!uidHash || parsed.storagePath.indexOf(prefix) !== 0 || parsed.storagePath.length <= prefix.length) {
+    return { ok: false, code: 'media_not_owned', error: 'Media path is not bound to the requesting user' };
+  }
+  return { ok: true, storagePath: parsed.storagePath };
+}
+
 module.exports = {
   MAX_DM_MEDIA_SIZE,
   MEDIA_KINDS,
   validateDmStoragePath,
   validateDmMediaKind,
+  validateDmUploadOwnership,
   verifyStorageObject,
   claimDmMediaUpload,
   reserveDmMediaUpload,
-  DM_MEDIA_SEND_LEASE_MS
+  DM_MEDIA_SEND_LEASE_MS,
+  DM_MEDIA_QUOTA_BYTES,
+  DM_MEDIA_QUOTA_WINDOW_MS,
+  DM_MEDIA_MAX_INFLIGHT_PER_USER,
+  dmMediaQuotaRemainingBytes,
+  tryConsumeDmMediaQuota,
+  refundDmMediaQuota,
+  acquireDmMediaSlot
 };

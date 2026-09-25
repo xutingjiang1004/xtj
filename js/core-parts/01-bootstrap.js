@@ -49,14 +49,75 @@
               /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(_anonKey)
               || /^sb_publishable_/.test(_anonKey)
             );
-            if (!_sbConfigOk) {
+            // ★ 2026-09-25：把这套「配置有问题」的处理抽成函数，除了首屏调用，
+            //   运行时从后端补到配置后也要能重新跑一遍（见下方 _syncRuntimeConfig）。
+            function _applySupabaseConfigFailure() {
+                _sbConfigOk = false;
+                sb = null;
                 console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
                 console.error('[XTJ] SUPABASE_ANON_KEY 当前为' + (_anonKey ? '占位符/无效 key（需在构建/部署时注入真实 anon key）' : '空值'));
-                sb = null;
                 document.addEventListener('DOMContentLoaded', function () {
                     var _feedEl = document.getElementById('feed');
                     if (_feedEl) _feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">配置错误：Supabase 配置缺失或格式不正确，请检查 config.js</div>';
                 });
+            }
+            // ★ 2026-09-25 根因修复：前端运行时配置自愈。
+            //   事故背景：构建期未注入 SUPABASE_ANON_KEY 时，scripts/build.js 只打 warning
+            //   照常产出 bundle，线上 config.min.js 里是占位串 "eyJhbG...yDDA"。浏览器拿这串
+            //   垃圾 key 建 client，登录后 Storage 请求带登录 JWT，Supabase 报
+            //   "Invalid Compact JWS"，发图直接失败——这不是 token 问题，是 key 本身是坏的。
+            //   现在改为：首屏若发现 key 无效，异步回源 /api/config/public 取真实 anon key，
+            //   拿到后重建 client 并继续后续初始化。**不阻塞首屏渲染**——回源失败就维持
+            //   现有「走后端上传」的降级路径，功能不中断。
+            var _runtimeConfigSynced = false;
+            function _syncRuntimeConfig(done) {
+                if (_runtimeConfigSynced) { if (done) done(false); return; }
+                if (typeof fetch !== 'function') { if (done) done(false); return; }
+                var _apiBase = String(API_BASE || window.location.origin || '').replace(/\/$/, '');
+                fetch(_apiBase + '/api/config/public', { method: 'GET', headers: { 'Accept': 'application/json' } })
+                    .then(function (resp) { return resp && resp.ok ? resp.json() : null; })
+                    .then(function (cfg) {
+                        _runtimeConfigSynced = true;
+                        var key = cfg && cfg.supabase_anon_key ? String(cfg.supabase_anon_key) : '';
+                        var url = cfg && cfg.supabase_url ? String(cfg.supabase_url) : '';
+                        if (!key || !url) { if (done) done(false); return; }
+                        if (!(/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(key) || /^sb_publishable_/.test(key))) { if (done) done(false); return; }
+                        // 写回运行时配置，供后续读取 XTJ_CONFIG 的模块（如 ai-agent）复用
+                        try {
+                            window.XTJ_CONFIG.SUPABASE_URL = url;
+                            window.XTJ_CONFIG.SUPABASE_ANON_KEY = key;
+                        } catch (_) {}
+                        // 重建 client：先清掉旧的（可能是用占位 key 建的坏实例或 null）
+                        sb = null;
+                        window.sb = null;
+                        try { if (window.supabase && typeof window.supabase.createClient === 'function') { sb = window.supabase.createClient(url, key); window.sb = sb; } } catch (e) { console.warn('[XTJ] 运行时重建 Supabase client 失败:', e && e.message); sb = null; }
+                        if (sb) {
+                            _sbConfigOk = true;
+                            console.log('[XTJ] 已从服务端补齐 Supabase anon key，客户端已重建');
+                            if (done) done(true);
+                        } else if (done) done(false);
+                    })
+                    .catch(function (e) { if (done) done(false); });
+            }
+            if (!_sbConfigOk) {
+                _applySupabaseConfigFailure();
+                // 异步自愈：SDK 已就绪时立刻重建；未就绪时等 ready 事件后再补。
+                var _healAfterSdkReady = function () {
+                    _syncRuntimeConfig(function (healed) {
+                        if (!healed) return;
+                        if (typeof window.initialLoad === 'function') {
+                            window.initialLoad(true).catch(function (e) {
+                                console.warn('[XTJ] 配置自愈后的数据加载失败:', e && e.message);
+                            });
+                        }
+                    });
+                };
+                if (typeof window.supabase !== 'undefined') {
+                    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _healAfterSdkReady, { once: true });
+                    else _healAfterSdkReady();
+                } else {
+                    window.addEventListener('xtj:supabase-ready', _healAfterSdkReady, { once: true });
+                }
             } else if (typeof window.supabase !== 'undefined') {
                 initSupabaseClient();
             } else {
