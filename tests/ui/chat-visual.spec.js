@@ -241,14 +241,15 @@ test('长按/右键操作面板：尺寸、圆形按钮与转发表板', async (
   expect(diag, 'action panel not found').not.toBeNull();
 
   // 收小后的面板：宽 ≤440、高 ≤170，动作不能换行
-  expect(diag.panelW, 'action panel too wide').toBeLessThanOrEqual(440);
-  expect(diag.panelH, 'action panel too tall').toBeLessThanOrEqual(170);
+  expect(diag.panelW, 'action panel too wide').toBeLessThanOrEqual(460);
+  // 内部尺寸已恢复第一版（44px 圆图标 / 12px 文字）→ 面板自然变高，上限放到 200
+  expect(diag.panelH, 'action panel too tall').toBeLessThanOrEqual(200);
   expect(diag.items, 'expected one row of actions').toBeGreaterThanOrEqual(4);
   // 圆形按钮不得被全局按钮系统刷白（padding-inline:16px / min-height:40px / 玻璃渐变）
   expect(diag.itemBgImage === 'none' || diag.itemBgImage === '', 'item picked up the global glass gradient').toBeTruthy();
   expect(parseFloat(diag.itemMinH), 'item inherited the global 40px min-height').toBeLessThan(30);
   expect(parseFloat(diag.itemPadX), 'item inherited the global 16px padding-inline').toBeLessThan(8);
-  expect(diag.iconW, 'icon should be the compact 38px circle').toBeLessThanOrEqual(40);
+  expect(diag.iconW, 'icon circle should be about 44px').toBeGreaterThanOrEqual(42);
   expect(diag.iconRadius, 'icon should stay a circle').toMatch(/50%/);
   await page.screenshot({ path: path.join(SHOT_DIR, 'chat-action-panel.png') });
 
