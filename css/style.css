@@ -1754,15 +1754,35 @@
             /* 底色做到近乎不透明：blur 只是加分项，不能当拐杖 ——
                旧版微信 WebView / headless 环境可能根本不渲染 backdrop-filter，
                那时 0.8 左右的 alpha 会让面板"透成坏的"（视觉用例截图已见）。 */
-            background: rgba(250, 252, 250, 0.97);
-            border: 1px solid rgba(255, 255, 255, 0.72);
-            border-radius: 18px;
+            /* ★ 2026-09-25「液态玻璃」：分层构造，缺一层就会变成"塑料片"——
+               ① 上→中的白色高光渐变（玻璃迎光面）叠在 ② 半透明底色上；
+               ③ backdrop-filter 做真实背景模糊 + 提饱和；
+               ④ 内外双向的 1px 高光边让边缘"发光"；
+               ⑤ 大范围柔和投影 + 近距小投影，把卡片从背景里托起来。 */
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.40) 46%, rgba(255, 255, 255, 0.24) 100%),
+                rgba(243, 250, 246, 0.66);
+            border: 1px solid rgba(255, 255, 255, 0.66);
+            border-radius: 20px;
             padding: 8px 6px 6px;
-            box-shadow: 0 18px 42px rgba(38, 71, 54, 0.18);
-            backdrop-filter: blur(20px) saturate(150%);
-            -webkit-backdrop-filter: blur(20px) saturate(150%);
+            position: relative;
+            box-shadow:
+                0 20px 48px rgba(24, 62, 45, 0.22),
+                0 3px 10px rgba(24, 62, 45, 0.10),
+                inset 0 1px 0 rgba(255, 255, 255, 0.95),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.28);
+            backdrop-filter: blur(22px) saturate(180%);
+            -webkit-backdrop-filter: blur(22px) saturate(180%);
             transform: translateY(12px);
             transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        /* 迎光面的柔和高光 —— 液态玻璃最关键的一笔（不参与命中测试） */
+        .dm-action-overlay .dm-action-panel::before {
+            content: '';
+            position: absolute; inset: 0;
+            border-radius: inherit;
+            pointer-events: none;
+            background: radial-gradient(120% 62% at 50% -12%, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0) 62%);
         }
         .dm-action-overlay.active .dm-action-panel { transform: translateY(0); }
         .dm-action-overlay .dm-action-panel .dm-action-grid {
@@ -1786,7 +1806,11 @@
         .dm-action-overlay .dm-action-panel .dm-action-icon {
             width: 38px; height: 38px; border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
-            background: rgba(5, 150, 105, 0.12); color: #059669;
+            /* 图标底也做成小玻璃片：斜向渐变 + 高光内边 + 一圈细边 */
+            background: linear-gradient(160deg, rgba(16, 185, 129, 0.26), rgba(16, 185, 129, 0.08));
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 3px rgba(16, 90, 60, 0.12);
+            color: #04805a;
         }
         .dm-action-overlay .dm-action-panel .dm-action-label { white-space: nowrap; }
         .dm-action-overlay .dm-action-panel .dm-action-cancel {
@@ -1796,9 +1820,21 @@
             border-top: 1px solid var(--xtj-line-soft, rgba(0, 0, 0, 0.07));
         }
         [data-theme="dark"] .dm-action-panel {
-            background: rgba(20, 24, 30, 0.97);
-            border-color: rgba(255, 255, 255, 0.1);
-            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 46%, rgba(255, 255, 255, 0) 100%),
+                rgba(16, 22, 20, 0.74);
+            border-color: rgba(255, 255, 255, 0.14);
+            box-shadow:
+                0 20px 48px rgba(0, 0, 0, 0.44),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        }
+        [data-theme="dark"] .dm-action-overlay .dm-action-panel::before {
+            background: radial-gradient(120% 62% at 50% -12%, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 62%);
+        }
+        [data-theme="dark"] .dm-action-overlay .dm-action-panel .dm-action-icon {
+            background: linear-gradient(160deg, rgba(16, 185, 129, 0.28), rgba(16, 185, 129, 0.10));
+            border-color: rgba(255, 255, 255, 0.16);
+            color: #7fe0b4;
         }
         [data-theme="dark"] .dm-action-overlay .dm-action-panel .dm-action-cancel {
             border-top-color: rgba(255, 255, 255, 0.08);
