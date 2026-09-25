@@ -162,6 +162,12 @@
 
             function formatMsgTime(dateStr) {
                 var d = new Date(dateStr);
+                // ★ 2026-09-25 修复（会话列表出现 "NaN/NaN NaN:NaN"）：空串/非法日期时
+                //   new Date('') 是 Invalid Date，getHours() 返回 NaN，拼出来就是 "NaN:NaN"。
+                //   管理员固定入口本来就没有时间，而每发一条消息都会走
+                //   applyDockChatConversationPreview 把列表重排一遍 —— 于是那一行立刻变成 NaN。
+                //   所有调用方都只把这里当展示文案，兜底成空串最安全。
+                if (isNaN(d.getTime())) return '';
                 var now = new Date();
                 var pad = function(n) { return String(n).padStart(2, '0'); };
                 var hhmm = pad(d.getHours()) + ':' + pad(d.getMinutes());
