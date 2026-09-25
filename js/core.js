@@ -12688,20 +12688,43 @@ function renderProfileActivityList(kind) {
 
             // ★ 2026-09-25：从 ux-features.js 的重复长按菜单迁移过来的"问小猫"。
             //   原实现只对气泡取 innerText，这里改为取消息正文（含媒体时取链接）。
+            // ★ 2026-09-25 修复「问小猫」：这个动作此前只是"打开小猫AI + 往输入框塞一段文字"，
+            //   而且**塞错了元素**（找的是 #aiChatInput，而小猫AI 的输入框 id 是 #aiChatMsgInput），
+            //   所以点下去实际只会跳到 AI 页面、什么都不会发生。
+            //   现在：注入完整提示（图片/视频/音频带上链接）+ 直接触发发送，让小猫立刻开始思考回复。
             function askAiAboutDmMessage(message) {
-                var text = getDmActionValue(message);
-                if (!text) { showToast('这条消息没有可提问的内容'); return; }
-                if (typeof window.__xtjOpenAiChat !== 'function') {
-                    showToast('请先打开小猫AI');
-                    return;
-                }
+                var text = (getDMMessageText(message) || '').trim();
+                var media = resolveDockChatMedia(message);
+                var mediaUrl = (media && media.src) ? String(media.src) : '';
+                if (!text && !mediaUrl) { showToast('这条消息没有可提问的内容'); return; }
+                if (typeof window.__xtjOpenAiChat !== 'function') { showToast('请先打开小猫AI'); return; }
+
+                var kindLabel = (media && media.kind === 'image') ? '图片'
+                    : ((media && media.kind === 'video') ? '视频'
+                    : ((media && media.kind === 'audio') ? '音频' : '消息'));
+                var prompt = '请帮我看看这条' + (mediaUrl ? kindLabel + '消息' : '消息') + '：';
+                if (text) prompt += '\n' + text.slice(0, 800);
+                if (mediaUrl) prompt += '\n（媒体链接：' + mediaUrl + '，需要的话可以抓取查看）';
+
                 window.__xtjOpenAiChat();
-                setTimeout(function() {
-                    var input = document.getElementById('aiChatInput');
-                    if (!input) return;
-                    input.value = '请帮我看看这条消息：\n' + text.slice(0, 800);
-                    try { input.focus(); } catch (e) {}
-                }, 400);
+
+                // AI 面板是异步挂载的，轮询等它就绪再注入并发送（最多等约 3 秒）
+                var tries = 0;
+                (function injectAndSend() {
+                    tries += 1;
+                    var input = document.getElementById('aiChatMsgInput') || document.getElementById('aiChatInput');
+                    var sendBtn = document.getElementById('aiChatSendBtn');
+                    if (!input || !sendBtn) {
+                        if (tries < 25) { setTimeout(injectAndSend, 120); return; }
+                        showToast('小猫AI 打开失败，请重试');
+                        return;
+                    }
+                    // 用户已经打了草稿就追加，不覆盖
+                    var existing = String(input.value || '');
+                    input.value = existing.trim() ? (existing.replace(/\s+$/, '') + '\n' + prompt) : prompt;
+                    try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+                    try { sendBtn.click(); } catch (e2) { showToast('已填入内容，请手动点发送'); }
+                })();
             }
 
             async function doShareDmMessage(message) {
