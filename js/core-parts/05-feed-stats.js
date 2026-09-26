@@ -428,6 +428,21 @@
                     probe.onload = function() {
                         try { img.removeAttribute('data-swapping'); } catch (e) {}
                         if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) return;
+                        // ★ 2026-09-26（`object-fit` 改为 cover 后的必要条件）：只有远端图的
+                        //   真实比例与占位比例**一致**时才允许换源。比例一旦不一致，cover 会把
+                        //   远端图按占位盒子裁切（老消息没有 w/h，兜的是 4:3，会被裁掉一大块）。
+                        //   不一致就继续显示本地 blob：本地字节、比例一定对、又不可能 404。
+                        //   代价只是 blob 晚一点释放，用户完全无感。
+                        var pw = Number(probe.naturalWidth || 0);
+                        var ph = Number(probe.naturalHeight || 0);
+                        var boxW = Number(img.getAttribute('width') || img.naturalWidth || 0);
+                        var boxH = Number(img.getAttribute('height') || img.naturalHeight || 0);
+                        if (!pw || !ph) return;
+                        if (boxW > 0 && boxH > 0) {
+                            var probeRatio = pw / ph;
+                            var boxRatio = boxW / boxH;
+                            if (Math.abs(probeRatio - boxRatio) / boxRatio > 0.02) return;
+                        }
                         var localSrc = String(img.getAttribute('data-local-src') || '');
                         // ★ 换源期间**用本地图当背景垫底**：把 img.src 指向远端会再走一次网络
                         //   （缓存未命中时又要等一整轮），那正是"图片忽然消失"的观感。
