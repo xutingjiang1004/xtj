@@ -12668,12 +12668,8 @@ function renderProfileActivityList(kind) {
             //      缩到长边 1600 / q0.82 后通常 200–500KB。
             //   ③ 顺带剥掉 EXIF（含 GPS 坐标）—— 私聊图片不该带着拍摄地。
             //   任何一步失败都回退原文件：绝不因为"压缩失败"让用户发不出去。
-            // ★ 2026-09-26：常量名去掉 _DM 前缀改为通用名 —— 现在照片墙也复用同一套
-            //   压缩参数（见 07-final-overrides.js 的 __xtjPrepareImageForUpload 导出）。
-            var IMAGE_COMPRESS_MAX_EDGE = 1600;
-            var IMAGE_COMPRESS_QUALITY = 0.82;
-            var XTJ_IMAGE_MAX_EDGE = IMAGE_COMPRESS_MAX_EDGE;
-            var XTJ_IMAGE_QUALITY = IMAGE_COMPRESS_QUALITY;
+            var DM_IMAGE_MAX_EDGE = 1600;
+            var DM_IMAGE_QUALITY = 0.82;
 
             // ★ 2026-09-26 新增：只读文件头拿图片像素尺寸（PNG/GIF/WEBP/JPEG）。
             //   用途是给气泡 <img> 写 width/height，让浏览器在图片解码完成前就按正确比例
@@ -12738,11 +12734,8 @@ function renderProfileActivityList(kind) {
                 });
             }
 
-            // ★ 2026-09-26：通用化（原名 prepareDmImageForUpload）。私信与照片墙现在共用
-            //   同一份压缩/HEIC 转码逻辑 —— 两处各写一份必然走样（历史上照片墙就因为
-            //   自己那份不处理 HEIC，iPhone 直发的照片在墙上是"无法识别为有效图片"）。
-            //   通过 window.__xtjPrepareImageForUpload 导出给 07-final-overrides.js 使用。
-            async function prepareImageForUpload(file, opts) {
+            // 仅供私信使用：照片墙有它自己的一套"原画质直传"策略，**不要动**。
+            async function prepareDmImageForUpload(file, opts) {
                 var wantOriginal = !!(opts && opts.original);
                 var passthrough = { file: file, converted: false, originalSize: file.size, newSize: file.size, w: 0, h: 0 };
                 if (!file || !/^image\//i.test(String(file.type || ''))) return passthrough;
@@ -12778,8 +12771,8 @@ function renderProfileActivityList(kind) {
                 var sw = bitmap.width || 0, sh = bitmap.height || 0;
                 if (!sw || !sh) return passthrough;
                 // 原图模式不缩放；HEIC 必须转码时用更高质量，尽量少损失
-                var maxEdge = wantOriginal ? 0 : IMAGE_COMPRESS_MAX_EDGE;
-                var quality = wantOriginal ? 0.95 : IMAGE_COMPRESS_QUALITY;
+                var maxEdge = wantOriginal ? 0 : DM_IMAGE_MAX_EDGE;
+                var quality = wantOriginal ? 0.95 : DM_IMAGE_QUALITY;
                 var scale = maxEdge > 0 ? Math.min(1, maxEdge / Math.max(sw, sh)) : 1;
                 var tw = Math.max(1, Math.round(sw * scale));
                 var th = Math.max(1, Math.round(sh * scale));
@@ -12815,8 +12808,6 @@ function renderProfileActivityList(kind) {
                 // 返回**输出图**的真实像素（缩放后为 tw×th），气泡按比例占位才准确
                 return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size, w: tw, h: th };
             }
-            // 导出给 07-final-overrides.js：照片墙复用同一份压缩/HEIC 逻辑
-            window.__xtjPrepareImageForUpload = prepareImageForUpload;
 
             async function sendDockChatMessage() {
                 if (!currentUser) { showToast('请先登录'); return; }
@@ -12896,7 +12887,7 @@ function renderProfileActivityList(kind) {
                         // ★ 上传前规范化图片：HEIC→JPEG + 压缩。失败一律回退原文件。
                         if (/^image\//i.test(String(file.type || ''))) {
                             try {
-                                var _prep = await prepareImageForUpload(file, { original: isDmOriginalSendEnabled() });
+                                var _prep = await prepareDmImageForUpload(file, { original: isDmOriginalSendEnabled() });
                                 if (_prep) {
                                     // 真实像素 → 随消息一起存（服务端会原样透传），
                                     // 渲染时写成 <img width height> 让气泡按正确比例占位。

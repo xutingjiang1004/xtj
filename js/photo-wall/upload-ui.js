@@ -775,31 +775,10 @@
     openSheet(c.accepted, c.skipped);
   }
 
-  // ★ 2026-09-26（用户："你也要给照片墙加这种逻辑，就是上传的时候也要压缩，
-  //   不然很大，很影响上传速度"）：照片墙此前对 JPEG/PNG/WebP **零压缩直传**，
-  //   一张 iPhone 照片 3–8MB，弱网下要几十秒。现在改为复用私信那套已经过实测的
-  //   预处理（window.__xtjPrepareImageForUpload，由 core 的 06-chat-and-nav.js 导出）：
-  //     · 压缩模式（默认）：长边 1600 / q0.82 → 通常 200–500KB；
-  //     · 原图模式：不缩放、不重编码（HEIC 仍必须转码，否则浏览器渲染不出）；
-  //     · 顺带剥掉 EXIF（含 GPS 坐标）—— 公开可见的照片墙更不该带拍摄地；
-  //     · 体积没变小（小图 / 已高压缩）时保留原文件，不做无意义的重编码。
-  //   导出方的契约与这里的旧实现完全一致：返回 { file, converted, w, h }，
-  //   失败一律回退原文件 —— 绝不因为"压缩失败"让用户传不上去。
-  //   core 未加载（懒加载竞态）时退回下面的本地实现，行为与旧版一致。
-  function preprocessImageFile(file){
-    if (!isImage(file)) return Promise.resolve(file);
-    if (String(file.type || '').toLowerCase() === 'image/gif') return Promise.resolve(file); // GIF 动图不压缩
-    try {
-      if (typeof window.__xtjPrepareImageForUpload === 'function') {
-        return Promise.resolve(window.__xtjPrepareImageForUpload(file))
-          .then(function(res){ return (res && res.file) ? res.file : file; })
-          .catch(function(){ return legacyPreprocessImageFile(file); });
-      }
-    } catch (_) {}
-    return legacyPreprocessImageFile(file);
-  }
-
-  // 备用实现用到的两个画布工具（core 可用时走不到这里）
+  // P6: 上传前图片预处理 — 原画质优先 + EXIF 方向矫正
+  // - GIF 动图保持原样（不压缩）
+  // - JPEG/PNG/WebP 不缩放、不转码，直接上传原文件（保留原画质；现代浏览器对 <img> 自动应用 EXIF 方向）
+  // - 其余格式(HEIC/BMP/TIFF 等)为跨浏览器可显示，仅做格式归一化并保留原始分辨率、高质量输出
   function scaleImageToCanvas(source, maxSide){
     // maxSide<=0 表示不缩放，保留原始分辨率（原画质）
     var max = maxSide || 0;
@@ -825,9 +804,7 @@
     });
   }
 
-  // 备用实现：core 尚未加载时使用。JPEG/PNG/WebP 保持原样（旧行为），
-  // 仅对浏览器不支持的格式做归一化。
-  function legacyPreprocessImageFile(file){
+  function preprocessImageFile(file){
     return new Promise(function(resolve){
       if (!isImage(file)) return resolve(file);
       var type = String(file.type || '').toLowerCase();
