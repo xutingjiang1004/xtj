@@ -1595,8 +1595,15 @@
             display: block; max-width: min(200px, 58vw); max-height: 260px;
             width: auto; height: auto;
             border-radius: 10px; cursor: pointer;
-            object-fit: contain;
-            background: rgba(19, 73, 45, 0.06);
+            /* ★ 2026-09-26（用户："为什么图片边缘还有绿色的气泡"）：这里原本是
+               contain + 一层 rgba(19,73,45,.06) 的浅绿垫底。比例已经被 width/height
+               属性锁定，contain 只会在"属性比例与真实比例不一致时"于图外留出浅色边
+               （老消息没有 w/h，兜的是 4:3），加上那层浅绿垫底，看起来就是
+               "图片周围裹了一圈绿" —— 正是用户截图里的观感。
+               两部分一起改：取景用 cover（按锁定比例铺满盒子，不再留边），
+               并去掉浅绿垫底（解码瞬间宁可透明，也不要在绿气泡里露一圈绿）。 */
+            object-fit: cover;
+            background: transparent;
             transition: transform 0.2s;
         }
         @media (hover: hover) and (pointer: fine) {
@@ -1628,9 +1635,27 @@
             font-size: 10px; opacity: 0.55; margin-top: 0; display: inline;
             text-align: right;
         }
-        /* 纯媒体消息：气泡紧贴图片，不再留 16px 的彩色边框（微信同款观感） */
-        .chat-msg.has-media { padding: 6px; }
+        /* 媒体消息：气泡**完全贴合**图片，不留任何内边距，并裁掉溢出。
+           ★ 2026-09-26（用户第二次反馈"为什么图片边缘还有绿色的气泡"）：
+           上一版把 6px 收到 4px，但 4px 在绿色渐变气泡上仍然是一圈清晰可见的色环
+           —— 用户截图里那道绿边就是它。这次把 padding 收到 0 并加 overflow:hidden，
+           让图片**取代**气泡本体：图片自己的圆角就是视觉边界，绿色不再露出来。
+           overflow:hidden 同时保证图片的直角被气泡圆角裁圆，不需要给图片单独配圆角。 */
+        .chat-msg.has-media { padding: 0; overflow: hidden; }
         .chat-msg.has-media .msg-meta { padding: 0 3px 1px; }
+        /* 有文字的图片消息：文字在气泡顶部（自带内边距），图片在下方铺满整宽。
+           overflow:hidden 已经把图片四角裁好，所以这里只负责间距。 */
+        .chat-msg.has-media > .msg-text {
+            padding: 9px 12px 7px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.45;
+        }
+        .chat-msg.has-media > .msg-text + .msg-img {
+            display: block;
+            width: 100%;
+            max-width: none;
+        }
         /* ★ 2026-09-26（iMessage 风格改造）：媒体消息的「已读/未读 + 时间 + 上传进度 +
            失败标记」从气泡内部挪到气泡**下方**的独立状态行。
            旧方案（media-only）把元信息绝对定位叠在图片上、加黑渐变打底——用户反馈
@@ -1645,7 +1670,11 @@
         .chat-msg-row.has-media.received .chat-msg-col { align-items: flex-start; }
         .chat-msg-row.has-media .chat-msg { max-width: 100%; }
         .chat-msg-row.has-media .msg-meta {
-            display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+            /* ★ 2026-09-26：gap 从 6px 收到 4px、「已读/未读」与时间贴得更紧 ——
+               对齐 iMessage「已读 08:19」的紧凑排布（用户："已读未读我需要和图片
+               这样显示在气泡下面"）。这一行整体右对齐，紧贴气泡**下方**，
+               绝不进入图片区域：.chat-msg-col 是纵向 flex，meta 天然在气泡之后。 */
+            display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
             margin-top: 5px; padding: 0 4px;
             font-size: 10px; line-height: 1.4;
             color: var(--xtj-text-muted, #7a8f89);
@@ -1655,6 +1684,9 @@
         }
         .chat-msg-row.has-media.received .msg-meta { text-align: left; }
         .chat-msg-row.has-media .msg-meta .msg-time { margin-top: 0; }
+        .chat-msg-row.has-media .msg-meta .msg-read-status {
+            margin-left: 0; margin-right: 0; font-size: 10px;
+        }
         .chat-msg-row.has-media .msg-meta .msg-fail-mark {
             margin-top: 0; font-size: 10px;
         }
@@ -16184,7 +16216,7 @@ profile content only. Dock stays untouched.
 .dock-chat-container { position: relative; }
 .chat-jump-latest.is-visible { opacity: 1; transform: translateY(0); }
 .chat-jump-latest[hidden] { display: none; }
-.chat-msg .msg-img { min-width: 0; background: rgba(19, 73, 45, 0.08); }
+.chat-msg .msg-img { min-width: 0; }
 [data-theme="dark"] .chat-jump-latest { background: rgba(29, 48, 39, 0.94); border-color: rgba(123, 208, 163, 0.24); color: #b6ebcd; }
 
 /* 私信动效收口：让附件预览、上传态与消息气泡共享一套克制的节奏。 */

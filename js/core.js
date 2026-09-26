@@ -10034,6 +10034,21 @@ function renderProfileActivityList(kind) {
                     probe.onload = function() {
                         try { img.removeAttribute('data-swapping'); } catch (e) {}
                         if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) return;
+                        // ★ 2026-09-26（`object-fit` 改为 cover 后的必要条件）：只有远端图的
+                        //   真实比例与占位比例**一致**时才允许换源。比例一旦不一致，cover 会把
+                        //   远端图按占位盒子裁切（老消息没有 w/h，兜的是 4:3，会被裁掉一大块）。
+                        //   不一致就继续显示本地 blob：本地字节、比例一定对、又不可能 404。
+                        //   代价只是 blob 晚一点释放，用户完全无感。
+                        var pw = Number(probe.naturalWidth || 0);
+                        var ph = Number(probe.naturalHeight || 0);
+                        var boxW = Number(img.getAttribute('width') || img.naturalWidth || 0);
+                        var boxH = Number(img.getAttribute('height') || img.naturalHeight || 0);
+                        if (!pw || !ph) return;
+                        if (boxW > 0 && boxH > 0) {
+                            var probeRatio = pw / ph;
+                            var boxRatio = boxW / boxH;
+                            if (Math.abs(probeRatio - boxRatio) / boxRatio > 0.02) return;
+                        }
                         var localSrc = String(img.getAttribute('data-local-src') || '');
                         // ★ 换源期间**用本地图当背景垫底**：把 img.src 指向远端会再走一次网络
                         //   （缓存未命中时又要等一整轮），那正是"图片忽然消失"的观感。
@@ -12154,7 +12169,12 @@ function renderProfileActivityList(kind) {
                     // 用它做 data-full-src 会让对方/刷新后失效）。
                     var fullForViewer = (safeSrc && !/^blob:/i.test(safeSrc)) ? safeSrc : safeFull;
                     var imageBody = '<img class="msg-img" src="' + displaySrc + '" data-src="' + escapeHtml(safeSrc) + '" data-full-src="' + escapeHtml(fullForViewer) + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" decoding="async"' + dimAttr + remoteAttr + ' />';
-                    if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
+                    // ★ 2026-09-26（用户："已读未读要显示在气泡下面，而不是图片里面"）：
+                    //   带文字的图片消息以前是「图片 → 文字」竖排，状态行被推到文字下面，
+                    //   视觉上「未读 04:37」就贴在图片内部（截图里的观感）。改成
+                    //   「文字在上、图片在下」，状态行自然落在**图片正下方**，与 iMessage 一致。
+                    //   纯图片消息保持「图片 → 状态行」不变。
+                    if (messageText) imageBody = '<div class="msg-text">' + escapeHtml(messageText) + '</div>' + imageBody;
                     return imageBody;
                 }
                 if (media && media.kind === 'video') {
@@ -12183,6 +12203,11 @@ function renderProfileActivityList(kind) {
                 // ★ is-read 类给「已读」配上配色/微动画（ui-enhance.css 里有规则）。
                 //   原先由 ux-features.js 那套重复的长按菜单在**绑定时刻**扫描一遍，
                 //   但那时还没有任何消息，等于从未生效；现在直接在渲染时打上。
+                // ★ 2026-09-26（用户："气泡的已读未读我需要和图片这样显示在气泡下面"）：
+                //   媒体消息的 meta 行只对**发送方**放已读状态（对方的消息本来就没有
+                //   "已读未读"），用户截图里那条正是自己发的图 —— 现在这一行统一按
+                //   「已读/未读 + 时间」排布，位置固定在**图片下方**（见下方 has-media
+                //   的 .msg-meta 规则），与文字消息观感一致。
                 var readStatus = sent
                     ? (isMsgReadByMe(message)
                         ? '<span class="msg-read-status is-read">已读</span>'
@@ -12603,13 +12628,16 @@ function renderProfileActivityList(kind) {
             //   偏好按设备持久化（safeStorage），下次进来自动沿用。
             var DM_ORIGINAL_KEY = 'xtj_dm_send_original';
 
+            // ★ 2026-09-26 反转默认值：**默认不勾选（压缩）**。
+            //   用户澄清：「开启原图选项不应该是图片开始原图吗，为什么现在显示气泡和图片原图？
+            //   一个文本信息有啥原图不原图的？」——上一版把默认值反成"开"是理解错了。
+            //   正确语义：默认走压缩（体积小、弱网快）；**主动勾选**后整条链才切到原图字节。
+            //   旧版本遗留的 '1'（那时"开"=压缩）与新版语义相反，直接忽略 —— 用户升级后
+            //   看到的就是默认不勾选，符合直觉。
             function isDmOriginalSendEnabled() {
                 try {
-                    var raw = window.safeStorage.get(DM_ORIGINAL_KEY);
-                    // 只有被显式关掉过（'0'）才算关；从未设置 / 读取失败都按「开」处理。
-                    if (raw === '0') return false;
-                    return true;
-                } catch (e) { return true; }
+                    return window.safeStorage.get(DM_ORIGINAL_KEY) === '1';
+                } catch (e) { return false; }
             }
 
             function syncDmOriginalToggle() {
@@ -12619,14 +12647,14 @@ function renderProfileActivityList(kind) {
                 btn.classList.toggle('is-on', on);
                 btn.setAttribute('aria-checked', on ? 'true' : 'false');
                 var label = btn.querySelector('.cor-label');
-                if (label) label.textContent = on ? '原图' : '压缩';
+                if (label) label.textContent = '原图';
             }
 
             window.toggleDmOriginalSend = function() {
                 var next = !isDmOriginalSendEnabled();
                 try { window.safeStorage.set(DM_ORIGINAL_KEY, next ? '1' : '0'); } catch (e) {}
                 syncDmOriginalToggle();
-                showToast(next ? '已开启原图：按原始画质发送（气泡与大图都是原图）' : '已关闭原图：图片压缩后发送');
+                showToast(next ? '已选原图：这条照片按原始画质发送' : '未选原图：照片压缩后发送（更省流量、更快）');
             };
 
             // ★ 2026-09-25 新增（修复"照片发送慢 / 发送失败"）：上传前把图片规范化成
@@ -12640,8 +12668,12 @@ function renderProfileActivityList(kind) {
             //      缩到长边 1600 / q0.82 后通常 200–500KB。
             //   ③ 顺带剥掉 EXIF（含 GPS 坐标）—— 私聊图片不该带着拍摄地。
             //   任何一步失败都回退原文件：绝不因为"压缩失败"让用户发不出去。
-            var DM_IMAGE_MAX_EDGE = 1600;
-            var DM_IMAGE_QUALITY = 0.82;
+            // ★ 2026-09-26：常量名去掉 _DM 前缀改为通用名 —— 现在照片墙也复用同一套
+            //   压缩参数（见 07-final-overrides.js 的 __xtjPrepareImageForUpload 导出）。
+            var IMAGE_COMPRESS_MAX_EDGE = 1600;
+            var IMAGE_COMPRESS_QUALITY = 0.82;
+            var XTJ_IMAGE_MAX_EDGE = IMAGE_COMPRESS_MAX_EDGE;
+            var XTJ_IMAGE_QUALITY = IMAGE_COMPRESS_QUALITY;
 
             // ★ 2026-09-26 新增：只读文件头拿图片像素尺寸（PNG/GIF/WEBP/JPEG）。
             //   用途是给气泡 <img> 写 width/height，让浏览器在图片解码完成前就按正确比例
@@ -12706,7 +12738,11 @@ function renderProfileActivityList(kind) {
                 });
             }
 
-            async function prepareDmImageForUpload(file, opts) {
+            // ★ 2026-09-26：通用化（原名 prepareDmImageForUpload）。私信与照片墙现在共用
+            //   同一份压缩/HEIC 转码逻辑 —— 两处各写一份必然走样（历史上照片墙就因为
+            //   自己那份不处理 HEIC，iPhone 直发的照片在墙上是"无法识别为有效图片"）。
+            //   通过 window.__xtjPrepareImageForUpload 导出给 07-final-overrides.js 使用。
+            async function prepareImageForUpload(file, opts) {
                 var wantOriginal = !!(opts && opts.original);
                 var passthrough = { file: file, converted: false, originalSize: file.size, newSize: file.size, w: 0, h: 0 };
                 if (!file || !/^image\//i.test(String(file.type || ''))) return passthrough;
@@ -12742,8 +12778,8 @@ function renderProfileActivityList(kind) {
                 var sw = bitmap.width || 0, sh = bitmap.height || 0;
                 if (!sw || !sh) return passthrough;
                 // 原图模式不缩放；HEIC 必须转码时用更高质量，尽量少损失
-                var maxEdge = wantOriginal ? 0 : DM_IMAGE_MAX_EDGE;
-                var quality = wantOriginal ? 0.95 : DM_IMAGE_QUALITY;
+                var maxEdge = wantOriginal ? 0 : IMAGE_COMPRESS_MAX_EDGE;
+                var quality = wantOriginal ? 0.95 : IMAGE_COMPRESS_QUALITY;
                 var scale = maxEdge > 0 ? Math.min(1, maxEdge / Math.max(sw, sh)) : 1;
                 var tw = Math.max(1, Math.round(sw * scale));
                 var th = Math.max(1, Math.round(sh * scale));
@@ -12779,6 +12815,8 @@ function renderProfileActivityList(kind) {
                 // 返回**输出图**的真实像素（缩放后为 tw×th），气泡按比例占位才准确
                 return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size, w: tw, h: th };
             }
+            // 导出给 07-final-overrides.js：照片墙复用同一份压缩/HEIC 逻辑
+            window.__xtjPrepareImageForUpload = prepareImageForUpload;
 
             async function sendDockChatMessage() {
                 if (!currentUser) { showToast('请先登录'); return; }
@@ -12858,7 +12896,7 @@ function renderProfileActivityList(kind) {
                         // ★ 上传前规范化图片：HEIC→JPEG + 压缩。失败一律回退原文件。
                         if (/^image\//i.test(String(file.type || ''))) {
                             try {
-                                var _prep = await prepareDmImageForUpload(file, { original: isDmOriginalSendEnabled() });
+                                var _prep = await prepareImageForUpload(file, { original: isDmOriginalSendEnabled() });
                                 if (_prep) {
                                     // 真实像素 → 随消息一起存（服务端会原样透传），
                                     // 渲染时写成 <img width height> 让气泡按正确比例占位。

@@ -62,7 +62,7 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=beb4ba980f" />
+    <link rel="stylesheet" href="css/style.min.css?v=16f374d80c" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <!-- ★ 2026-09-22 响应式修复：下面三个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
@@ -86,7 +86,7 @@
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=f44d91a9f4">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=12a9ec32a9">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=28fe4b0b48">
-    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=b5d38475a0">
+    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=636b11a35d">
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=0a6e6bea00">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=fb9ad1af22">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=21d7c3bc7e">
@@ -361,8 +361,9 @@
                                 <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
                             </div>
                             <!-- ★ 2026-09-26：原图开关改成「圆圈 + 圆点」的单选反馈（未选＝空心圆，已选＝圆里有个点）。
-                                 默认「已选」＝发原图；取消勾选才发压缩图（见 isDmOriginalSendEnabled）。 -->
-                            <button class="chat-orig-btn" id="dockChatOrigBtn" type="button" role="radio" aria-checked="true" title="原图：气泡与大图都是原始画质（取消勾选后压缩发送）">
+                                 默认「未选」＝照片压缩后发送；主动勾选才按原始画质发送
+                                 （见 isDmOriginalSendEnabled / toggleDmOriginalSend）。 -->
+                            <button class="chat-orig-btn" id="dockChatOrigBtn" type="button" role="radio" aria-checked="false" title="原图：勾选后本次发送的照片按原始画质上传（默认不勾选＝压缩后发送）">
                                 <span class="cor-ring" aria-hidden="true"><span class="cor-dot"></span></span>
                                 <span class="cor-label">原图</span>
                             </button>
@@ -1139,7 +1140,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=c1a24032db"></script>
+    <script defer src="js/core.min.js?v=e582554108"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b8e5d553a1"></script>
