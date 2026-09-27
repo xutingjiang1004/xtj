@@ -1577,9 +1577,39 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             list.slice(0, 6).forEach(function(post) {
                 if (!post.classList.contains('visible')) post.classList.add('visible');
             });
+            // ★ 2026-09-27 修复（审计 P3：重复 observe 造成回调风暴）：
+            //   IntersectionObserver.observe() 对**同一个元素**重复调用不会新增监听（规范上
+            //   是幂等的），但本项目里同一批 .post 节点会被反复交给本函数：
+            //     · appendMorePosts 末尾对 `feed.querySelectorAll(".post:not(.visible)")` 调用；
+            //     · initPostScrollAnimation 对 `document.querySelectorAll('.post')` **全量**调用；
+            //     · renderFeedWithAvatars 全量重建后再次调用。
+            //   第二条尤其致命：`document` 级选择器会把所有历史卡片再喂一遍，若节点已经
+            //   被 DOM 回收（父节点没了但 JS 里仍持有引用），observe 会让 observer 永久持有
+            //   该节点 → 节点无法被 GC，且每次交叉回调仍会执行 classList.add 等逻辑，
+            //   长会话下累积成明显卡顿与内存增长。
+            //   现在 observe 前先 unobserve，并跳过已脱离文档的节点；同时对每个节点打标记
+            //   做短路，保证同一节点在**同一代** observer 上只注册一次。
+            //   （标记随节点一起被丢弃，DOM 重建后新节点会重新注册，语义不变。）
+            //   ⚠️ 不改动 dock bar / dock capsule 及其动画逻辑，仅收敛 feed 的 observer 注册。
             list.forEach(function(post) {
-                getPostVisibilityObserver().observe(post);
-                getPostDwellObserver().observe(post);
+                if (!post) return;
+                // 已脱离文档（被 DOM 回收）→ 不注册，避免 observer 持有不可回收引用
+                if (post.isConnected === false) {
+                    try { getPostVisibilityObserver().unobserve(post); } catch (_) {}
+                    try { getPostDwellObserver().unobserve(post); } catch (_) {}
+                    post.__xtjPostObserved = '';
+                    return;
+                }
+                // 本代已注册过 → 跳过（避免重复交回 observer）
+                if (post.__xtjPostObserved === 'v1') return;
+                var visObs = getPostVisibilityObserver();
+                var dwellObs = getPostDwellObserver();
+                // 先移除再添加：即使标记因外部克隆/重建而失效，也不会叠加监听
+                try { visObs.unobserve(post); } catch (_) {}
+                try { dwellObs.unobserve(post); } catch (_) {}
+                try { visObs.observe(post); } catch (_) {}
+                try { dwellObs.observe(post); } catch (_) {}
+                try { post.__xtjPostObserved = 'v1'; } catch (_) {}
             });
             // Failsafe: any remaining hidden posts become visible shortly after.
             if (list.some(function(post) { return !post.classList.contains('visible'); })) {

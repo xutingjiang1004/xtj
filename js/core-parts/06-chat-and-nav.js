@@ -383,6 +383,12 @@
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
                 try {
+                    // ★ 2026-09-27 修复（审计 S6 配套）：登出时必须**顶掉所有在途请求**，
+                    //   否则登出前发出的 /api/dm/list 回来后（seq 未变）会把上个账号的
+                    //   会话列表重新画进刚被清空的 DOM —— 正是本次要根治的残留问题。
+                    //   计数器是共享的，nextMessageLoadSeq 也在同一变量上，一并失效即可。
+                    if (typeof _dockChatListLoadSeq === 'number') _dockChatListLoadSeq++;
+                    if (typeof _dockChatLoadSeq === 'number') _dockChatLoadSeq++;
                     var messages = document.getElementById('dockChatMessages');
                     if (messages) {
                         messages.innerHTML = '';
@@ -537,7 +543,25 @@
                     syncDockChatLayoutState();
                 }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
+                // ★ 2026-09-27 修复（审计 S6：会话列表跨账号/跨登出残留）：
+                //   此前只用 `listLoadSeq !== _dockChatListLoadSeq` 判失效，而这个计数器只在
+                //   **本函数自身**下一次进入时才 ++，有两个致命缺口：
+                //     1) 上面的 `if (!window.currentUser) { … return; }` 分支在计数器递增**之前**
+                //        就 return 了 —— 于是登出/换账号时计数器纹丝不动，登出前在途的请求
+                //        回来后 seq 仍然相等，直接把**上一个账号的会话列表**画到新会话的 DOM 里。
+                //     2) 登录用户从 A 切到 B 时计数器也不会变（切号不一定经过未登录态），
+                //        A 的在途响应会被当作最新数据渲染出来。
+                //   现在同时快照「请求发起时的登录账号」，回填前核对当前账号与登录态，
+                //   只要对不上就整段丢弃（不 toast、不重试，由新账号自己的请求接管）。
+                var listOwner = window.currentUser || '';
                 var listLoadSeq = ++_dockChatListLoadSeq;
+                // 统一的失效判定：请求序号被顶掉，或账号/登录态已变，都视为这次结果作废。
+                var listResultStale = function() {
+                    if (listLoadSeq !== _dockChatListLoadSeq) return true;
+                    if (!window.currentUser) return true;
+                    if ((window.currentUser || '') !== listOwner) return true;
+                    return false;
+                };
                 var hadRenderedList = !!el.children.length;
                 try {
                     if (!hadRenderedList) {
@@ -551,7 +575,7 @@
                     //   与下面 mergeDockChatRowsById 的窗口一致，避免"拉了 1000 条只用 180 条"。
                     const dmResult = await window.fetchDmListShared(180);
                     if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
-                    if (listLoadSeq !== _dockChatListLoadSeq) return;
+                    if (listResultStale()) return;
                     const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">暂无最近会话</div></div>';
@@ -612,7 +636,7 @@
                         if (changed) patchDockChatConversationAvatars(el);
                     });
                 } catch(e) {
-                    if (listLoadSeq !== _dockChatListLoadSeq) return;
+                    if (listResultStale()) return;
                     // ★ 修复：已有列表时保留旧列表并仅 toast 提示失败，不追加重试按钮；
                     // 此前无条件追加 retry 且 dockChatListCacheTime=0 会立刻触发下次重试，
                     // 可能反复请求。重试按钮只在无列表（首屏加载失败）时显示。
@@ -992,6 +1016,18 @@
             }
 
 
+            // ★ 2026-09-27 新增（审计 S3/S4）：判定一条缓存消息是否属于「本地未决状态」——
+            //   即服务端快照暂时还看不到、但绝不该被合并逻辑抹掉的消息。
+            //   覆盖三类：
+            //   1) __optimistic  正在发送中的乐观气泡（尚未落库）
+            //   2) __failed      发送失败、等待用户重试的气泡（服务端永远不会有它）
+            //   3) __pendingFile 已选好文件但还没走完上传流程的占位消息
+            //   注意：只用本地标记判定，不掺入时间戳比较，避免服务端时钟偏移导致误判。
+            function isDockChatLocalPendingMessage(msg) {
+                if (!msg || typeof msg !== 'object') return false;
+                return !!(msg.__optimistic || msg.__failed || msg.__pendingFile);
+            }
+
             function mergeDockChatMessages(userName, msgs) {
                 // ★ 修复：发送成功会把乐观消息替换成服务端真实消息（不再带 __optimistic）。
                 //   此前该函数只保留带 __optimistic 的缓存消息，若此刻刚好有「更早快照」的
@@ -1001,8 +1037,20 @@
                 var cacheKey = getDockChatCacheKey(userName);
                 var cached = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
                 var snapshot = (msgs || []).slice();
-                // 快照为空时以快照为准，避免整段恢复已删除/过期缓存
-                if (!snapshot.length) return sortDockChatMessages(snapshot);
+                // ★ 2026-09-27 修复（审计 S3：空快照吞掉本地新消息）：
+                //   此前 `if (!snapshot.length) return sortDockChatMessages(snapshot);`
+                //   直接返回空数组 —— 但"服务端返回空快照"和"服务端确实没有消息"是两回事：
+                //   一个更早发出、此刻才回来的 /api/dm/messages（limit=0 结果 / 对方刚清空 /
+                //   接口抖动返回 []）都会走到这里，于是把缓存里**刚发送成功但还没进快照窗口**
+                //   的消息、以及正在发送中的乐观气泡全部当作"服务端已删除"抹掉，用户看到
+                //   自己刚发出去的消息凭空消失。现在空快照也走合并：只保留本地仍处于
+                //   「未决状态」的消息（乐观/失败/窗口期新提交），绝不复活真正的旧历史。
+                if (!snapshot.length) {
+                    var keptFromCache = cached.filter(function(msg) {
+                        return isDockChatLocalPendingMessage(msg);
+                    });
+                    return sortDockChatMessages(keptFromCache);
+                }
                 var snapshotNewestAt = 0;
                 var lastMsg = snapshot[snapshot.length - 1];
                 if (lastMsg && lastMsg.created_at) {
@@ -1016,7 +1064,13 @@
                         return existing && existing.id && msg.id && existing.id === msg.id;
                     });
                     if (exists) return; // 快照已是服务端权威
-                    if (msg.__optimistic) { merged.push(msg); return; }
+                    // ★ S4：本地未决消息（乐观 / 失败 / 待上传）无条件保留。
+                    //   此前只特判了 __optimistic，__failed 的气泡会掉进下面的时间戳比较里：
+                    //   失败气泡的 created_at 通常是"当时点发送"的时间，一旦它早于快照最新时间
+                    //   （比如在弱网里挂了 30 秒、期间收到了对方新消息），条件 `ts >= snapshotNewestAt`
+                    //   不成立 → 失败气泡被丢弃 → 用户既看不到"发送失败"也没法重试，
+                    //   而重试所需的 __pendingFile 也随之丢失，只能重新选文件。
+                    if (isDockChatLocalPendingMessage(msg)) { merged.push(msg); return; }
                     var ts = msg.created_at ? Date.parse(msg.created_at) : NaN;
                     // 仅合并比快照新（发送成功后才落库的窗口期消息），不复活旧历史
                     if (!isNaN(ts) && ts >= snapshotNewestAt) merged.push(msg);
@@ -1200,7 +1254,7 @@
                     // 点开大图始终用**远端原图地址**（本地 blob 只在本次会话有效，
                     // 用它做 data-full-src 会让对方/刷新后失效）。
                     var fullForViewer = (safeSrc && !/^blob:/i.test(safeSrc)) ? safeSrc : safeFull;
-                    var imageBody = '<img class="msg-img" src="' + displaySrc + '" data-src="' + escapeHtml(safeSrc) + '" data-full-src="' + escapeHtml(fullForViewer) + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" decoding="async"' + dimAttr + remoteAttr + ' />';
+                    var imageBody = '<img class="msg-img" src="' + escapeHtml(displaySrc) + '" data-src="' + escapeHtml(safeSrc) + '" data-full-src="' + escapeHtml(fullForViewer) + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" decoding="async"' + dimAttr + remoteAttr + ' />';
                     // ★ 2026-09-26（用户："已读未读要显示在气泡下面，而不是图片里面"）：
                     //   带文字的图片消息以前是「图片 → 文字」竖排，状态行被推到文字下面，
                     //   视觉上「未读 04:37」就贴在图片内部（截图里的观感）。改成
@@ -1349,7 +1403,17 @@
                         reject(new Error('当前浏览器不支持带进度的上传，请升级后重试'));
                         return;
                     }
-                    var sendOnce = function(token) {
+                    // ★ 2026-09-27 修复（审计 S2：上传 401 递归重试无上限）：
+                    //   此前 401 分支里 `settled = false; sendOnce(renewed);` 没有任何计数，
+                    //   若续期接口持续返回"看似成功"但 token 仍被服务端拒绝（时钟漂移 /
+                    //   多端登录互相踢 / 服务端续期契约变更），就会 401 → 续期 → 401 →
+                    //   续期 …… 无限递归，每次都是一次真实网络往返，且上传进度环永远
+                    //   停在原地转圈、Promise 永不 settle（用户看到"发不出去也退不回来"）。
+                    //   现在对齐 xtjProtectedFetch 的做法：**最多重试 1 次**，且续期拿到的
+                    //   token 必须与上一次不同（否则说明续期根本没生效，重试毫无意义）。
+                    var MAX_UPLOAD_AUTH_RETRIES = 1;
+                    var sendOnce = function(token, authAttempt) {
+                        var attempt = Number(authAttempt) || 0;
                         var xhr = new XMLHttpRequest();
                         var settled = false;
                         var finish = function(fn, arg) {
@@ -1380,15 +1444,23 @@
                             var data = null;
                             try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) { data = null; }
                             if (xhr.status === 401) {
+                                // ★ S2：超出重试上限 / 无续期能力 → 直接 reject，绝不静默挂起
+                                if (attempt >= MAX_UPLOAD_AUTH_RETRIES
+                                    || typeof window.refreshUserToken !== 'function') {
+                                    finish(reject, new Error('登录已失效'));
+                                    return;
+                                }
                                 finish(function() {
-                                    if (typeof window.refreshUserToken === 'function') {
-                                        window.refreshUserToken(true).then(function(renewed) {
-                                            if (renewed) { settled = false; sendOnce(renewed); }
-                                            else reject(new Error('登录已失效'));
-                                        }).catch(function() { reject(new Error('登录已失效')); });
-                                    } else {
-                                        reject(new Error('登录已失效'));
-                                    }
+                                    window.refreshUserToken(true).then(function(renewed) {
+                                        // 续期失败，或拿到的 token 与刚才那份完全相同（说明续期
+                                        // 没有真正生效），都不该再打一次必然失败的上传。
+                                        if (!renewed || String(renewed) === String(token || '')) {
+                                            reject(new Error('登录已失效'));
+                                            return;
+                                        }
+                                        settled = false;
+                                        sendOnce(renewed, attempt + 1);
+                                    }).catch(function() { reject(new Error('登录已失效')); });
                                 });
                                 return;
                             }
@@ -1520,6 +1592,24 @@
             function renderDockMessages(userName, msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
                 if (!el) return;
+                // ★ 2026-09-27 修复（审计 S7：空数组分支绕过会话一致性检查）：
+                //   此前 `userName !== dockChatActiveUser → return` 这道关卡位于**函数中部**
+                //   （原 1624 行），而"消息为空"分支在它**之前**就 return 了。后果：
+                //     1) 切走会话后，先前那个会话的在途轮询/同步回调若带着**空数组**回来，
+                //        会命中空分支，把「发送第一条消息吧」写进**当前正在看的另一个会话**，
+                //        刚打开的历史消息被整屏抹掉。
+                //     2) 紧接着第 1619 行还会把 `_chatRenderSignature[outdatedUser] = '__empty__'`
+                //        写脏签名缓存，导致切回该会话时判定"签名相同"而跳过渲染，停在空态。
+                //   现在把会话归属检查**提到所有副作用之前**：只要 userName 与当前会话不符，
+                //   立即返回，不写 DOM、不写签名、不触发墓碑同步。
+                //   注意兼容 `__empty__`/空 userName 这类由内部主动发起的"清空"调用：
+                //   它们不绑定具体会话，仍然放行（由空分支自己处理）。
+                if (userName && dockChatActiveUser && userName !== dockChatActiveUser) return;
+                // ★ S7 配套：墓碑同步回调是**异步**的，等到它回来时用户可能已经切走会话，
+                //   甚至已经登出/换号。回调里必须重新核对「此刻的会话 + 此刻的账号」，
+                //   否则会拿旧会话的数据去重渲染新会话，或把上个账号的缓存画进新账号界面。
+                //   账号维度用快照比较（renderDockMessages 是同步函数，取当前 currentUser 即基线）。
+                var renderOwner = currentUser || '';
                 if (typeof clearDockChatDesktopEmptyFlag === 'function') clearDockChatDesktopEmptyFlag();
                 // ★ 2026-09-25：长按菜单的「删除」语义为「对本账号隐藏」。
                 //   必须在这里统一过滤 tombstone，否则下一次轮询/重新进入会话时，
@@ -1531,6 +1621,10 @@
                     try {
                         syncDmDeletedWithServer(userName, false).then(function(changed) {
                             if (!changed) return;
+                            // ★ S7：回调期间用户可能已切走会话/登出/换账号 —— 三者任一不成立即放弃重渲染
+                            if (!window.currentUser) return;
+                            if ((currentUser || '') !== renderOwner) return;
+                            if (dockChatActiveUser && userName !== dockChatActiveUser) return;
                             var uKey = getDockChatCacheKey(userName);
                             var fresh = Array.isArray(_chatCache[uKey]) ? _chatCache[uKey] : [];
                             _chatRenderSignature[userName] = undefined;
@@ -1547,7 +1641,7 @@
                     el.dataset.chatUser = userName || '__empty__';
                     return;
                 }
-                if (userName && dockChatActiveUser && userName !== dockChatActiveUser) return;
+                // 注：会话归属检查已前移到函数开头（见上），此处不再重复判断。
                 var signatureKey = userName || '__empty__';
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
@@ -1880,6 +1974,17 @@
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                // ★ 2026-09-27 修复（审计 S5：发送请求缺幂等键）：
+                //   /api/dm/send 此前只带 target_user + content，服务端无法区分
+                //   「用户真的发了两条一模一样的话」和「同一条消息被重发了一次」。
+                //   而前端**确实会重发**：xtjProtectedFetch 超时后（60s 未回包）会走
+                //   401 续期重试；弱网下"服务端已落库、响应丢在路上"更是经典场景 ——
+                //   结果是收件人看到两条重复消息，且前端 replaceDockChatCacheMessage
+                //   按 tempId 替换，两条服务端消息里只有一条能替换掉乐观气泡，另一条
+                //   永久残留成"幽灵消息"。
+                //   现在为每次用户动作生成一个稳定幂等键（同一 tempId 生命周期内不变，
+                //   重发/重试复用同一个值），服务端据此去重即可。
+                var clientMessageId = tempId;
                 var optimisticCreatedAt = new Date().toISOString();
                 var localPreviewUrl = '';
                 var mediaKind = file
@@ -1993,7 +2098,11 @@
                     // 禁止前端直接发送 actor_key 和 media_type，防止篡改。
                     var requestBody = {
                         target_user: targetUser,
-                        content: capturedContent
+                        content: capturedContent,
+                        // ★ S5：稳定幂等键。服务端应按 (user_name, client_message_id) 去重：
+                        //   重复到达时直接返回**已存在的那条消息**而不是再插一条。
+                        //   后端未实现时该字段被忽略，不影响现有行为（向前兼容）。
+                        client_message_id: clientMessageId
                     };
                     if (storagePath) {
                         requestBody.storage_path = storagePath;
@@ -2704,32 +2813,74 @@
                 var file = message.__pendingFile || null;
                 var text = (getDMMessageText(message) || '').trim();
                 if (!file && !text) { showToast('这条消息没有可重发的内容'); return; }
-                // 媒体文件随页面刷新丢失，但文字还在 —— 明确告知，不要让用户以为整条都能重发
-                if (!file && (message.__pendingMediaKind || message.__pendingStoragePath)) {
-                    showToast('原文件已不在内存（刷新页面后无法找回），本次只重发文字');
-                }
-                // 先把失败气泡移出缓存，再走一次完整的正常发送流程
+                // ★ 2026-09-27 修复（审计 S8：重发先毁旧气泡，失败即彻底丢失）：
+                //   此前流程是「先把失败气泡从缓存删掉并重渲染 → 释放本地 blob → 再交给
+                //   sendDockChatMessage 重新走一遍」。中间有多个**可失败**环节：
+                //     · `new DataTransfer()` 在部分浏览器/无 File 构造环境下抛错 → 走
+                //       `fileInput.value = ''`，媒体文件**已随 blob 释放而永久消失**；
+                //     · sendDockChatMessage 开头的 `dockChatSending` 防抖命中（调用方恰好是
+                //       在发送中长按重发）→ 直接 return，而旧气泡已经被删掉了；
+                //     · `isUserMuted()` / 50MB 体积 / 类型校验任一不通过 → 同样只 return。
+                //   这些情况下用户得到的是"消息没了、也没有提示"，比失败气泡还糟。
+                //   现在改为**事务式重发**：先做完所有前置校验与文件准备，把旧失败项留在
+                //   缓存里；只有当新一轮乐观气泡确定已入队成功后，才移除旧的失败项。
+                //   任一步骤失败 → 旧气泡原样保留，用户可再试。
+                if (dockChatSending) { showToast('上一条消息正在发送，请稍候再重发'); return; }
+                if (isUserMuted()) { showToast('您已被禁言，无法发送消息'); return; }
+                if (!window.currentUser) { showToast('请先登录'); return; }
+
                 var targetId = String(message.id || message.__tempId || '');
                 var cacheKey = getDockChatCacheKey(peer);
-                var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
-                _chatCache[cacheKey] = list.filter(function(m) {
+                var fileInput = document.getElementById('dockChatFileInp');
+                var inp = document.getElementById('dockChatInput');
+                // —— 阶段一：准备（可能失败，此时不改动任何缓存/DOM）——
+                var stagedFileOk = true;
+                var preList = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
+                var preSignature = _chatRenderSignature[peer];
+                var preInputValue = (inp && typeof inp.value === 'string') ? inp.value : undefined;
+                var preFileList = fileInput ? fileInput.files : null;
+                try {
+                    if (file && fileInput) {
+                        var dt = new DataTransfer();
+                        dt.items.add(file);
+                        fileInput.files = dt.files;
+                    }
+                    if (inp && text) inp.value = text;
+                } catch (eStage) {
+                    stagedFileOk = false;
+                    try { if (fileInput) fileInput.value = ''; } catch (eStage2) {}
+                    if (inp && typeof preInputValue === 'string') inp.value = preInputValue;
+                }
+                if (!stagedFileOk && file) {
+                    // 文件无法回填到 fileInput → 无法重发媒体。保留旧失败气泡，明确告知。
+                    _chatRenderSignature[peer] = preSignature;
+                    showToast('无法准备原文件，重发未执行（气泡已保留，可清理后重新选择文件发送）');
+                    return;
+                }
+                // —— 阶段二：发起新一轮发送 ——
+                await sendDockChatMessage();
+                // —— 阶段三：确认新气泡已入队，才移除旧失败项 ——
+                //   判据：缓存里出现了 targetId 以外的新项（乐观气泡的 tempId 必然是新的）。
+                var postList = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
+                var hasNewItem = postList.some(function(m) {
+                    var id = String((m && (m.id || m.__tempId)) || '');
+                    return id && id !== targetId;
+                });
+                if (!hasNewItem) {
+                    // 新一轮根本没起来（例如内容被清空/被防抖拦下）→ 保留旧失败气泡
+                    _chatCache[cacheKey] = preList;
+                    _chatRenderSignature[peer] = undefined;
+                    renderDockMessages(peer, _chatCache[cacheKey], false);
+                    if (inp && typeof preInputValue === 'string') inp.value = preInputValue;
+                    if (preFileList && fileInput) { try { fileInput.files = preFileList; } catch (eRestore) {} }
+                    return;
+                }
+                _chatCache[cacheKey] = postList.filter(function(m) {
                     return String((m && (m.id || m.__tempId)) || '') !== targetId;
                 });
                 _chatRenderSignature[peer] = undefined;
                 renderDockMessages(peer, _chatCache[cacheKey], false);
                 releaseDockChatLocalPreview(message);
-
-                var fileInput = document.getElementById('dockChatFileInp');
-                var inp = document.getElementById('dockChatInput');
-                if (file && fileInput) {
-                    try {
-                        var dt = new DataTransfer();
-                        dt.items.add(file);
-                        fileInput.files = dt.files;
-                    } catch (e) { fileInput.value = ''; }
-                }
-                if (inp && text) inp.value = text;
-                await sendDockChatMessage();
             }
 
             function bindDockChatMessageActions() {
@@ -5703,12 +5854,21 @@
                 var normalizedPost = normalizePost(post);
                 var vc = Math.max(Number(normalizedPost.views) || 0, (post && post.views) || 0);
                 var detailMediaAttrs = buildPostDetailMediaAttrs(normalizedPost);
-                var mediaHtml = normalizedPost.media_url ? (
+                // ★ 2026-09-27 修复（审计 P5：详情弹窗媒体只 escapeHtml，未过协议白名单）：
+                //   卡片/feed 里的媒体 URL 早就统一走 sanitizeUrl（拒绝 javascript: /
+                //   data:text/html / data:image/svg+xml 等），但详情弹窗这三条分支漏了 ——
+                //   escapeHtml 只挡引号与尖括号，`javascript:alert(1)` 这种**不含特殊字符**的
+                //   协议串会原样进入 src。虽然 <img>/<video> 的 src 执行 JS 的能力有限，
+                //   但这条链路与其它渲染点策略不一致本身即为风险面（例如后续被复用成
+                //   可点击的 media 形态），且 data:image/svg+xml 在部分浏览器可触发脚本。
+                //   现在与 1219/1268/1277 行保持完全一致：非法协议 → 空串 → 不渲染媒体。
+                var safeMediaUrl = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(normalizedPost.media_url || '')) : '';
+                var mediaHtml = (normalizedPost.media_url && safeMediaUrl) ? (
                     normalizedPost.media_type === 'video'
-                        ? '<video src="' + escapeHtml(normalizedPost.media_url) + '" controls preload="metadata" playsinline></video>'
+                        ? '<video src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata" playsinline></video>'
                         : (normalizedPost.media_type === 'audio'
-                            ? '<audio src="' + escapeHtml(normalizedPost.media_url) + '" controls preload="metadata"></audio>'
-                            : '<img ' + detailMediaAttrs + ' data-actor-key="' + escapeHtml(String(normalizedPost.actor_key || "")) + '" data-can-delete="' + (canDeletePost(normalizedPost) ? '1' : '0') + '" src="' + escapeHtml(normalizedPost.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(normalizedPost.media_url) + '\', this)" loading="lazy" decoding="async" fetchpriority="low" />')
+                            ? '<audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio>'
+                            : '<img ' + detailMediaAttrs + ' data-actor-key="' + escapeHtml(String(normalizedPost.actor_key || "")) + '" data-can-delete="' + (canDeletePost(normalizedPost) ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)" loading="lazy" decoding="async" fetchpriority="low" />')
                 ) : '';
                 var visibilityLabel = normalizedPost.visibility === 'private' ? '私密' : '公开';
                 var contentText = String(normalizedPost.content || '').trim();

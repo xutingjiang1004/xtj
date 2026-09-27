@@ -798,8 +798,19 @@
                                         renderFeedFromMemoryState().catch(function() {});
                                     }
                                 } else {
-                                    // 普通评论，全量刷新
-                                    if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
+                                    // ★ 2026-09-27 修复（审计 P2）：普通评论不再全量重建 feed。
+                                    //   旧实现调 renderFeedFromMemoryState()，即 `feed.innerHTML = 全部卡片`
+                                    //   整段重建 —— 评论草稿丢失、滚动位置被拽回、图片重新请求、
+                                    //   评论区展开状态与小猫 AI 气泡全部重置。现在改走单卡片局部更新，
+                                    //   只有该卡片不在 DOM 中时才回退到全量刷新（保证不退化）。
+                                    if (row.post_id != null && typeof window.__xtjSchedulePostCardPatch === 'function') {
+                                        try { window.__xtjSchedulePostCardPatch(row.post_id); }
+                                        catch (ePatch) {
+                                            if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
+                                        }
+                                    } else if (typeof renderFeedFromMemoryState === 'function') {
+                                        renderFeedFromMemoryState().catch(function() {});
+                                    }
                                 }
                             } else if (payload.eventType === 'UPDATE') {
                                 // 更新已有评论
