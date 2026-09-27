@@ -45,9 +45,31 @@ function block(src, anchor, size) {
 
 /** 与 CSS 版一致：断言"代码行为"时必须先剥掉注释，
  *  否则修复说明里提到的旧代码（如 `toolBar2.appendChild(resultCard)`）
- *  会被误判为"缺陷仍然存在"。 */
+ *  会被误判为"缺陷仍然存在"。
+ *
+ *  ★ 2026-09-28 修正：原实现用正则删除行注释（形如 replace 加 "(^|[^:])\/\/[^\n]*"），
+ *    会把 URL 里的双斜杠之后、以及大量正常代码一并吃掉
+ *    （实测剥离后只剩 294KB / 原文 557KB，丢了 47% 内容），
+ *    导致"计数类"断言（如 toolLabel 调用点数）永远偏低而误报。
+ *    改为逐字符状态机：正确跳过块注释、行注释与字符串字面量，
+ *    只删除真正的注释文本。 */
 function stripJsComments(s) {
-  return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  let out = '', i = 0, quote = null, inBlock = false;
+  while (i < s.length) {
+    const c = s[i], n = s[i + 1];
+    if (inBlock) { if (c === '*' && n === '/') { inBlock = false; i += 2; } else i++; continue; }
+    if (quote) {
+      out += c;
+      if (c === '\\') { out += (s[i + 1] || ''); i += 2; continue; }
+      if (c === quote) quote = null;
+      i++; continue;
+    }
+    if (c === '/' && n === '*') { inBlock = true; i += 2; continue; }
+    if (c === '/' && n === '/') { while (i < s.length && s[i] !== '\n') i++; continue; }
+    if (c === '"' || c === "'" || c === '`') quote = c;
+    out += c; i++;
+  }
+  return out;
 }
 
 /** 取一条 CSS 规则的完整声明块（从选择器起到匹配的 } 为止）
@@ -309,4 +331,112 @@ test('E3：不得复用 .ai-tool-organizing 占位作为普通工具条目', fun
   const seg = block(aiAgent, "toolList.forEach(function(t) {", 4000);
   assert.match(seg, /ai-tool-organizing/,
     '"整理中"占位也带 data-tool-name，复用循环必须显式排除它');
+});
+
+// ── E4: 共享辅助函数的作用域守卫 ────────────────────────────────────────
+/**
+ * 背景（线上致命 bug，2026-09-28 用户截图报障）：
+ *   TOOL_LABELS / toolLabel 曾被**误插入 ensureToolActivity 函数体内部**。
+ *   后果有两条，且压缩后更难发现：
+ *     ① ensureToolActivity 被拦腰截断，尾部（activity.__startedAt /
+ *        timeline.appendChild / return activity）掉到函数外变成裸语句；
+ *     ② toolLabel 成为 ensureToolActivity 的**局部函数**，而调用它的
+ *        tool_calls / tool_result 分支在别的作用域 → 一旦真的触发工具调用
+ *        就抛 `Can't find variable: toolLabel`（Terser 把定义 mangle 掉，
+ *        产物里只剩调用点保留原名，肉眼 grep 定义会误以为"函数没写"）。
+ *   纯文本 `assert.match(/function toolLabel\(/)` 完全抓不到这个问题——
+ *   定义确实存在，只是**位置错了**。所以这里必须做真实的作用域判定。
+ */
+
+/** 用花括号配平判断某位置是否嵌套在函数体内部。
+ *  只统计 {} ，忽略字符串/正则/注释里的干扰（先剥注释；本文件的
+ *  作用域检查目标代码里没有含 {} 的字符串字面量）。 */
+function depthAt(src, index) {
+  // 在原文里逐字符扫描，遇到注释/字符串就跳过（不能先剥离再算 —— 剥离会改变长度）
+  let depth = 0, i = 0;
+  const end = Math.min(index, src.length);
+  let inBlock = false, inLine = false;
+  let quote = null;
+  while (i < end) {
+    const c = src[i], n = src[i + 1];
+    if (inBlock) { if (c === '*' && n === '/') { inBlock = false; i += 2; continue; } i++; continue; }
+    if (inLine) { if (c === '\n') inLine = false; i++; continue; }
+    if (quote) {
+      if (c === '\\') { i += 2; continue; }
+      if (c === quote) quote = null;
+      i++; continue;
+    }
+    if (c === '/' && n === '*') { inBlock = true; i += 2; continue; }
+    if (c === '/' && n === '/') { inLine = true; i += 2; continue; }
+    if (c === '"' || c === "'" || c === '`') { quote = c; i++; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') depth--;
+    i++;
+  }
+  return depth;
+}
+
+test('E4：TOOL_LABELS / toolLabel 必须与工具区其他辅助函数同层（不得嵌进函数体）', function () {
+  const labelsIdx = aiAgent.indexOf('var TOOL_LABELS = {');
+  assert.notEqual(labelsIdx, -1, 'TOOL_LABELS 定义必须存在');
+  const fnIdx = aiAgent.indexOf('function toolLabel(');
+  assert.notEqual(fnIdx, -1, 'toolLabel 定义必须存在');
+
+  // 基准：ensureToolActivity / toolActivityBody 所在层级即"模块级"。
+  // （ai-agent.js 整体包在 IIFE + 块作用域中，绝对深度不是 0，
+  //   因此不能硬编码 0 —— 必须拿同类辅助函数做参照。）
+  const baseIdx = aiAgent.indexOf('function ensureToolActivity(timeline) {');
+  assert.notEqual(baseIdx, -1, 'ensureToolActivity 必须存在（作为层级基准）');
+  const base = depthAt(aiAgent, baseIdx);
+
+  const labelsDepth = depthAt(aiAgent, labelsIdx);
+  const fnDepth = depthAt(aiAgent, fnIdx);
+  assert.equal(labelsDepth, base,
+    `TOOL_LABELS 必须与其他辅助函数同层（期望深度 ${base}，实际 ${labelsDepth}）。`
+    + '若被插进某个函数体，调用方会拿不到它；同时会把宿主函数拦腰截断。');
+  assert.equal(fnDepth, base,
+    `toolLabel 必须与其他辅助函数同层（期望深度 ${base}，实际 ${fnDepth}）。`
+    + '嵌进 ensureToolActivity 等函数体时会变成局部函数，'
+    + 'tool_calls / tool_result 分支调用它必然抛 ReferenceError。');
+  assert.ok(fnIdx > labelsIdx, 'toolLabel 必须定义在 TOOL_LABELS 之后（它依赖该表）');
+});
+
+test('E4：ensureToolActivity 必须完整（尾部不得掉到函数体外）', function () {
+  const start = aiAgent.indexOf('function ensureToolActivity(timeline) {');
+  assert.notEqual(start, -1, 'ensureToolActivity 必须存在');
+  // 从函数起点做花括号配平，取回它真正的函数体范围
+  let depth = 0, i = aiAgent.indexOf('{', start), end = -1;
+  for (; i < aiAgent.length; i++) {
+    if (aiAgent[i] === '{') depth++;
+    else if (aiAgent[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  assert.notEqual(end, -1, 'ensureToolActivity 花括号未配平');
+  const body = stripJsComments(aiAgent.slice(start, end + 1));
+  assert.match(body, /activity\.__startedAt\s*=\s*Date\.now\(\)/,
+    'activity.__startedAt 必须在函数体内（曾因中间插入映射表而掉到函数外）');
+  assert.match(body, /timeline\.appendChild\(activity\)/, 'timeline.appendChild 必须在函数体内');
+  assert.match(body, /return activity/, 'return activity 必须在函数体内');
+  // 反向断言：函数体里不得再出现 TOOL_LABELS 的整表定义
+  assert.doesNotMatch(body, /var TOOL_LABELS = \{/,
+    'TOOL_LABELS 不得被定义在 ensureToolActivity 内部');
+});
+
+test('E4：toolLabel 的每个调用点都必须看得到定义（产物同名性）', function () {
+  // 源码层：调用点数 ≥3（tool_calls / tool_result / 其他）
+  const calls = (stripJsComments(aiAgent).match(/toolLabel\(/g) || []).length;
+  assert.ok(calls >= 3, `toolLabel 调用点应 ≥3，实际 ${calls}`);
+  // 产物层：定义与调用必须被 mangle 成**同一个**名字。
+  // 若定义在错误作用域，Terser 只会改定义名、调用点保留原名 → 两者不一致。
+  const min = read('js/ai-agent.min.js');
+  const def = min.match(/规划任务"\};\s*function\s+([A-Za-z_$][\w$]*)\s*\(\s*[A-Za-z_$][\w$]*\s*\)\s*\{\s*var\s+[A-Za-z_$][\w$]*\s*=\s*String/);
+  assert.ok(def, '产物中必须能定位到工具名映射函数（紧随映射表定义之后）');
+  const fnName = def[1];
+  const callRe = new RegExp('\\b' + fnName.replace(/\$/g, '\\$') + '\\(', 'g');
+  const minCalls = (min.match(callRe) || []).length;
+  assert.ok(minCalls >= 2,
+    `产物中该函数名的调用次数应 ≥2（实际 ${minCalls}）。`
+    + '若为 0，说明调用点仍写着未 mangle 的 toolLabel，而定义已被改名 —— '
+    + '这正是线上 "Can\'t find variable: toolLabel" 的形态。');
+  assert.doesNotMatch(min, /\btoolLabel\s*\(/,
+    '产物中不得残留未改名的 toolLabel 调用（定义已 mangle，调用必须同步）');
 });

@@ -2548,6 +2548,50 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //                 └─ .ai-tool-organizing    ← "整理中"归位到同一层级
   //   兼容性：timeline 上的 querySelectorAll('.ai-tool-round') 是后代查询，
   //   多一层 wrapper 不受影响；清空/移除逻辑移除 timeline 时活动区随之移除。
+  // ★ 2026-09-28（方案 D「工具名说人话」）：统一工具名映射表。
+  //   此前 nameMapCall（tool_calls）与 nameMap（tool_result）**各写一份且不一致**，
+  //   改名时容易漏改一边导致同一工具在"调用中"和"已完成"显示成两个名字。
+  //   现收敛为单一来源，两处共用。
+  //
+  //   命名原则：**用动作描述，不用产品名/技术名**。
+  //   ChatGPT 会说"正在搜索网页"，不会说"正在调用 Tavily"——后者是内部实现，
+  //   对用户没有意义。内部名不丢失：调用点仍会把原始 tool_name 写进
+  //   data-tool-name（供对账/去重）与 title（供鼠标悬停查看）。
+  //
+  //   ★★ 作用域红线：TOOL_LABELS / toolLabel 必须定义在**模块级**（与
+  //     ensureToolActivity / toolActivityBody 同一层），不能写进任何函数体内部。
+  //     2026-09-28 曾误把这段插进 ensureToolActivity 中间：后果是
+  //       ① ensureToolActivity 被拦腰截断，尾部（activity.__startedAt /
+  //          timeline.appendChild / return activity）变成函数外的裸语句；
+  //       ② toolLabel 沦为 ensureToolActivity 的**局部函数**，而 tool_calls /
+  //          tool_result 分支在别的作用域调用它 → 一旦真的触发工具调用就抛
+  //          ReferenceError: Can't find variable: toolLabel（线上实测报障）。
+  //     压缩后症状更隐蔽：调用点保留原名、定义被 mangle 改名，产物里只剩调用。
+  var TOOL_LABELS = {
+    // 检索类
+    search_web: '搜索网页', tavily_search: '搜索网页', read_web_page: '阅读网页',
+    web_extract: '提取网页内容', extract_links: '提取链接', page_meta: '查看网页信息',
+    search_social: '搜索社交内容',
+    // 实时信息类
+    get_weather: '查询天气', get_current_time: '获取当前时间',
+    get_exchange_rate: '查询汇率', get_stock_quote: '查询股票行情',
+    // 计算/数据类
+    calculate: '计算', convert_units: '单位换算', date_calc: '日期计算',
+    text_stats: '统计文本', batch_calc: '批量计算', sort_filter: '整理数据',
+    convert_data: '转换数据格式', process_json: '处理数据', regex_test: '校验表达式',
+    encode_decode: '编码转换', run_code: '运行代码',
+    // 文件生成/读取类
+    read_document: '读取文档', read_zip: '读取压缩包', make_file: '生成文件',
+    generate_pdf: '生成 PDF', make_chart: '生成图表', markdown_table: '生成表格',
+    qr_code: '生成二维码', image_info: '查看图片信息', image_process: '处理图片',
+    diff_text: '对比文本', url_parse: '解析网址', password_tool: '生成密码',
+    task_plan: '规划任务'
+  };
+  function toolLabel(name) {
+    var key = String(name || '');
+    return TOOL_LABELS[key] || key || '工具';
+  }
+
   function ensureToolActivity(timeline) {
     if (!timeline) return null;
     var activity = timeline.querySelector('.ai-tool-activity');
@@ -2586,41 +2630,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         toggleActivity();
       }
     });
-    // ★ 2026-09-28（方案 D「工具名说人话」）：统一工具名映射表。
-  //   此前 nameMapCall（tool_calls）与 nameMap（tool_result）**各写一份且不一致**，
-  //   改名时容易漏改一边导致同一工具在"调用中"和"已完成"显示成两个名字。
-  //   现收敛为单一来源，两处共用。
-  //
-  //   命名原则：**用动作描述，不用产品名/技术名**。
-  //   ChatGPT 会说"正在搜索网页"，不会说"正在调用 Tavily"——后者是内部实现，
-  //   对用户没有意义。内部名不丢失：调用点仍会把原始 tool_name 写进
-  //   data-tool-name（供对账/去重）与 title（供鼠标悬停查看）。
-  var TOOL_LABELS = {
-    // 检索类
-    search_web: '搜索网页', tavily_search: '搜索网页', read_web_page: '阅读网页',
-    web_extract: '提取网页内容', extract_links: '提取链接', page_meta: '查看网页信息',
-    search_social: '搜索社交内容',
-    // 实时信息类
-    get_weather: '查询天气', get_current_time: '获取当前时间',
-    get_exchange_rate: '查询汇率', get_stock_quote: '查询股票行情',
-    // 计算/数据类
-    calculate: '计算', convert_units: '单位换算', date_calc: '日期计算',
-    text_stats: '统计文本', batch_calc: '批量计算', sort_filter: '整理数据',
-    convert_data: '转换数据格式', process_json: '处理数据', regex_test: '校验表达式',
-    encode_decode: '编码转换', run_code: '运行代码',
-    // 文件生成/读取类
-    read_document: '读取文档', read_zip: '读取压缩包', make_file: '生成文件',
-    generate_pdf: '生成 PDF', make_chart: '生成图表', markdown_table: '生成表格',
-    qr_code: '生成二维码', image_info: '查看图片信息', image_process: '处理图片',
-    diff_text: '对比文本', url_parse: '解析网址', password_tool: '生成密码',
-    task_plan: '规划任务'
-  };
-  function toolLabel(name) {
-    var key = String(name || '');
-    return TOOL_LABELS[key] || key || '工具';
-  }
-
-  // ★ 2026-09-28（方案 C）：记录活动区起点，用于完成后在摘要行显示「用时 X.Xs」。
+    // ★ 2026-09-28（方案 C）：记录活动区起点，用于完成后在摘要行显示「用时 X.Xs」。
     //   ChatGPT / Claude 都有这个——低成本高感知，让人知道"它确实干了活"。
     activity.__startedAt = Date.now();
     activity.__body = body;
