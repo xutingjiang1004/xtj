@@ -553,8 +553,26 @@
                 var title = options && options.title ? options.title : '加载中..';
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
+                // ★ 2026-09-27 修复（M6：07 覆盖丢失 06 的 seq 幂等保护 + 文案透传）：
+                //   根因：本函数是 07 对 06:451 的覆盖实现。06 版本支持 options.seq——
+                //   切换会话时给骨架打序号，同一序号内的后续调用（如 openChat / 缓存命中路径
+                //   的补画）不再重绘 DOM，从而消除「骨架→内容两次 innerHTML 替换」造成的闪白；
+                //   而 07 覆盖时把 seq 判重整体丢掉，且 title/subtitle 虽被读取，最终却因
+                //   优先命中 window.__xtjSharedPhotoLoaderHtml（写死聊天骨架）而被吞掉。
+                //   后果：06 修掉的「切换联系人骨架闪烁」回归；调用方自定义文案失效。
+                //   修法：补回与 06 完全一致的 seq 判重语义（落后于最新序号 / 同序号已画过则
+                //   直接 return，不碰 DOM），并让 title/subtitle 真正参与渲染；07 带来的视觉
+                //   改进（xtj-chat-photo-loading 类 + 共享骨架 HTML）保持不变。
+                var seq = parseInt(options && options.seq, 10);
+                if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-loading')) return;
+                if (seq > 0) el.setAttribute('data-loading-seq', String(seq));
                 el.classList.add('xtj-chat-photo-loading');
-                el.innerHTML = window.__xtjSharedPhotoLoaderHtml || getXtjLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
+                // 仅当调用方未提供任何自定义文案时，才复用 07 的共享骨架（写死文案）；
+                // 一旦显式传了 title/subtitle，就走 getXtjLoadingHtml 透传，避免文案被吞。
+                var hasCustomCopy = !!((options && options.title) || (options && options.subtitle));
+                el.innerHTML = (window.__xtjSharedPhotoLoaderHtml && !hasCustomCopy)
+                    ? window.__xtjSharedPhotoLoaderHtml
+                    : getXtjLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
             };
 
             (function installChatPhotoLoaderFinal() {
@@ -733,7 +751,20 @@
                 var listEl = document.getElementById('announcementList');
                 var cachedAnnouncements = readAnnouncementCache();
                 var cacheFresh = !!(cachedAnnouncements && cachedAnnouncements.data && cachedAnnouncements.data.length && Date.now() - cachedAnnouncements.timestamp < ANN_CACHE_DURATION);
-                if (cacheFresh) {
+                // ★ 2026-09-27 修复（M7：realtime 无参调用被缓存短路，公告推送收不到）：
+                //   根因：06 的 subscribeToAnnouncements 回调（06:4092）里是**无参**调用
+                //   `loadAnnouncements()`——管理员发布/删除公告后由 realtime 推送触发。但本覆盖
+                //   在缓存新鲜时 `if (!forceRefresh) return;` 直接短路，于是这次无参刷新被吃掉，
+                //   其他在线客户端在 3 分钟缓存期内收不到公告更新（仅能等缓存过期）。
+                //   修法：不改 06（realtime 回调在 06 内），在本函数内用 arguments.length 区分调用来源：
+                //     · 无参（arguments.length === 0）＝被动/推送触发 → 视为强制刷新，绕过缓存；
+                //     · 显式传参（pageInit 的 loadAnnouncements(false)、发布/删除的 loadAnnouncements(true)）
+                //       → 维持原缓存语义：false 走缓存、true 强制。
+                //   安全性：无参路径只是多一次网络往返（公告接口轻量），无参调用点集中在 realtime
+                //   推送与后台预热（03 的 queueDeferredStartupTasks 无参，多一次请求可接受），
+                //   不会造成请求风暴。
+                var passiveTriggered = arguments.length === 0;
+                if (cacheFresh && !forceRefresh && !passiveTriggered) {
                     announcements = cachedAnnouncements.data;
                     updateAnnouncementBadge();
                     if (listEl && !listEl.children.length) {
@@ -741,7 +772,15 @@
                     }
                     // ★ 修复：缓存新鲜时不再无条件发网络请求（此前 3 分钟缓存只是"内容抢先"，
                     // 每次调用都查库）；发布/删除路径会显式传 forceRefresh=true。
-                    if (!forceRefresh) return;
+                    return;
+                }
+                if (cacheFresh && passiveTriggered) {
+                    // 先用缓存乐观回填（避免列表短暂空白），再继续走网络拉取最新公告覆盖。
+                    announcements = cachedAnnouncements.data;
+                    updateAnnouncementBadge();
+                    if (listEl && !listEl.children.length) {
+                        renderAnnouncementList();
+                    }
                 }
                 try {
                     await originalLoadAnnouncements.apply(this, arguments);

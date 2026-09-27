@@ -736,7 +736,18 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
              * 返回 { ok, reason, token, user_name }
              *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
              */
-            window.ensureProtectedOperationAuth = async function() {
+            // ★ 2026-09-27 修复（M15：后台轮询清零 refresh 冷却，导致反复刷 /api/user/refresh）：
+            //   根因：本函数每次调用都执行 `_refreshCooldownUntil = 0`，而该冷却的本意是
+            //   「refresh 确证失败（401/403）后 30 秒内不再重试」。DM 轮询（startDMPolling
+            //   → pollNow → updateUnreadBadge → fetchDmListShared → xtjProtectedFetch）同样
+            //   走本函数且不带任何参数，于是每轮轮询都把刚刚设上的冷却清零 —— 30 秒冷却
+            //   对后台路径完全失效，服务端持续收到 /api/user/refresh 请求与日志噪音。
+            //   修法：用 opts.background 区分调用来源。只有「用户主动操作」才清零冷却
+            //   （保证点了按钮能立即刷新）；后台/被动路径保留冷却，冷却期内直接返回
+            //   上次失败结果，不再发起刷新。
+            window.ensureProtectedOperationAuth = async function(opts) {
+                // 后台/被动路径显式传 { background: true }；默认（无参）= 用户主动操作。
+                var _isBackground = !!(opts && opts.background);
                 // ★ 启动验证未完成时，等待验证完成（最多 5 秒）
                 if (window._xtjAuthState === 'auth_pending') {
                     var waitStart = Date.now();
@@ -756,10 +767,27 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     userName = String(userName || '').trim();
                     if (!userName) return { ok: false, reason: 'no_user', token: '', user_name: '' };
 
-                                        // ★ 修复「点了没反应」：30 秒 refresh 冷却只应约束后台自动重试风暴。
-                    //   本函数仅由用户主动操作触发，点击时应立即允许再试一次，否则冷却期内
-                    //   每次点击都拿空 token 直接失败，按钮毫无反馈。
-                    try { _refreshCooldownUntil = 0; } catch (_eCd) {}
+                    // ★ M15：仅在「用户主动操作」时清零冷却（点击需立即刷新，不被后台轮询
+                    //   留下的冷却拖住）。后台/被动路径保持冷却有效。
+                    try { if (!_isBackground) _refreshCooldownUntil = 0; } catch (_eCd) {}
+                    // ★ M15：冷却生效期内，不再发起刷新；直接返回上次失败结果 / 现有 token。
+                    //   长冷却（30 秒，仅由 401/403 确证失效设置）只约束后台路径，
+                    //   避免 DM 轮询反复请求 /api/user/refresh。
+                    try {
+                        if (_isBackground && _refreshCooldownUntil && Date.now() < _refreshCooldownUntil) {
+                            var _cdToken = getUserToken();
+                            if (_cdToken) {
+                                return { ok: true, reason: 'ok', token: _cdToken, user_name: userName };
+                            }
+                            return {
+                                ok: false,
+                                reason: _lastRefreshAuthResult.reason || 'unavailable',
+                                status: _lastRefreshAuthResult.status || 0,
+                                token: '',
+                                user_name: userName
+                            };
+                        }
+                    } catch (_eCd2) {}
                     var token = await ensureUserToken();
                     if (token) {
                         // ★ 验证 token 身份与 UI 身份一致
@@ -813,7 +841,15 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     offError.status = 0;
                     throw offError;
                 }
-                var auth = await window.ensureProtectedOperationAuth();
+                // ★ 2026-09-27（M15 配套）：把「这是后台/轮询发起的请求」这一事实透传下去。
+                //   后台路径若不清零冷却，就能真正享受 30 秒冷却保护 —— 否则 DM 轮询
+                //   （pollNow → updateUnreadBadge → fetchDmListShared → 这里）每一轮都会
+                //   把冷却重置，服务端持续收到 /api/user/refresh。
+                //   调用方通过 options.background = true 声明；默认 undefined = 用户主动操作
+                //   （保持既有体验：点按钮能立即刷新 token，不被后台轮询留下的冷却拖住）。
+                var auth = await window.ensureProtectedOperationAuth(
+                    options.background ? { background: true } : undefined
+                );
                 if (!auth.ok) {
                     // ★ 修复「静默无反馈」：确证失效已在 ensureProtectedOperationAuth 内弹窗；
                     //   网络类失败（unavailable/network_error）此前只 throw，调用方多半静默

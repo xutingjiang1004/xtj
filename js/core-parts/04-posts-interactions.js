@@ -38,7 +38,15 @@
                 btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
             }
 
-            function persistFeedLikesCache() {
+            // ★ 2026-09-27 修复（审计 P10：点赞同步写 localStorage 阻塞主线程）：
+            //   根因：updatePostLikeUi 每次点赞都同步 get→JSON.parse→改→JSON.stringify→set
+            //   整份 feed 缓存，快速连点时主线程被反复全量序列化打满（卡顿）。
+            //   修法：只改写入时机——用 ~400ms 尾沿防抖合并窗口内的多次点赞，
+            //   最终只落盘一次；并在页面卸载/隐藏前强制 flush，避免丢数据。
+            //   数据结构与语义（parsed.data.likes / timestamp）完全不变。
+            var _persistLikesTimer = null;
+            var _persistLikesFlushBound = false;
+            function _persistFeedLikesCacheNow() {
                 try {
                     var raw = window.safeStorage.get(CACHE_KEY);
                     if (!raw) return;
@@ -50,6 +58,30 @@
                     window.safeStorage.set(CACHE_KEY, JSON.stringify(parsed));
                 } catch (e) {}
             }
+            function flushFeedLikesCache() {
+                if (_persistLikesTimer) {
+                    clearTimeout(_persistLikesTimer);
+                    _persistLikesTimer = null;
+                }
+                _persistFeedLikesCacheNow();
+            }
+            function persistFeedLikesCache() {
+                if (_persistLikesTimer) clearTimeout(_persistLikesTimer);
+                _persistLikesTimer = setTimeout(function() {
+                    _persistLikesTimer = null;
+                    _persistFeedLikesCacheNow();
+                }, 400);
+                if (!_persistLikesFlushBound) {
+                    _persistLikesFlushBound = true;
+                    // 页面卸载/切后台前把挂起的写入落盘（pagehide 比 beforeunload 在移动端更可靠）
+                    window.addEventListener('pagehide', flushFeedLikesCache);
+                    window.addEventListener('beforeunload', flushFeedLikesCache);
+                    document.addEventListener('visibilitychange', function() {
+                        if (document.visibilityState === 'hidden') flushFeedLikesCache();
+                    });
+                }
+            }
+            window.__xtjFlushFeedLikesCache = flushFeedLikesCache;
 
             function updateLikeStatsText(statsEl, liked) {
                 if (!statsEl) return;
@@ -329,7 +361,7 @@
                     }
                 }
                 
-                var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                var postEl = findBySafePostSelector(postId);
                 if (!postEl) return;
                 
                 // 如果已经存在，则收起（切换显示状态）
@@ -564,6 +596,10 @@
                     if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
                     var content = inp.value.trim();
                     if (!content) { showToast("请输入评论内容"); return; }
+                    // ★ 2026-09-27 修复（审计 P8-①：评论内容无长度上限）：
+                    //   与服务端 /api/post/comment 的 content.length > 5000 限制保持一致，
+                    //   提前拦截既避免无谓请求，也给用户及时反馈（服务端仍会二次校验）。
+                    if (content.length > 5000) { showToast("评论内容不能超过5000字"); return; }
                     var targetPostId = String(postId || '').trim().toLowerCase();
                     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(targetPostId)) {
                         showToast("帖子参数无效");
@@ -582,7 +618,6 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ post_id: targetPostId, content: content })
                         });
-                        clearTimeout(timeoutId);
                         const result = await response.json().catch(function() { return {}; });
                         if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
                         
@@ -610,10 +645,15 @@
                         requestAnimationFrame(function() {
                             var p = document.getElementById('panelPosts');
                             if (p && savedScroll > 0) p.scrollTop = savedScroll;
-                            var newEl = document.querySelector('.post[data-post-id="' + targetPostId + '"]');
+                            var newEl = findBySafePostSelector(targetPostId);
                             if (newEl) newEl.classList.add('visible');
                         });
-                        loadProfileActivity(true);
+                        loadProfileActivity(true).catch(function(eProfile) {
+                            // ★ 2026-09-27 修复（审计 P8-③）：loadProfileActivity 返回 Promise，
+                            //   此前不接 await/catch，抛错会成为未处理的 rejection（静默）。
+                            //   评论已发布成功，个人页刷新失败不影响主流程，仅告警不阻断。
+                            console.warn('[comment] loadProfileActivity refresh failed', eProfile);
+                        });
                         
                         // 小猫 AI 自动回复轮询
                         // Phase 3-P0-1: 修复 @小猫 正则。原 lookahead (?=\s|$|[^\w\u4e00-\u9fa5]) 要求
@@ -626,6 +666,11 @@
                         showToast("评论失败: " + (e.message || "未知错误"));
                         btn.disabled = false;
                         btn.textContent = '发送';
+                    } finally {
+                        // ★ 2026-09-27 修复（审计 P8-②：失败路径未 clearTimeout(15s)）：
+                        //   此前仅成功路径 clearTimeout，请求失败/抛错时定时器仍挂着 15s，
+                        //   虽 abort 后无实际影响，但属泄漏。统一在 finally 清理，幂等安全。
+                        clearTimeout(timeoutId);
                     }
                 };
 
@@ -724,8 +769,32 @@
                     showToast(opts.toast);
                 }
             }
+            // ★ 2026-09-27 修复（审计 P12：id 未校验就拼进 querySelector）：
+            //   根因：多处直接把 postId 拼进 `.post[data-post-id="' + id + '"]` 选择器，
+            //   非法字符（引号/方括号/控制字符等）会抛 SyntaxError，或命中错误元素。
+            //   修法：统一走 safePostSelector 生成选择器——优先 CSS.escape（旧浏览器可能
+            //   缺失，带 try/catch），否则退化为手工转义引号/反斜杠/控制符（与 03 中
+            //   既有写法保持一致）。返回 null 时调用方应跳过查询，避免抛错。
+            function escapeCssIdent(value) {
+                var s = String(value == null ? '' : value);
+                if (window.CSS && typeof window.CSS.escape === 'function') {
+                    try { return window.CSS.escape(s); } catch (_) { /* 落到手工转义 */ }
+                }
+                return s.replace(/["\\\x00-\x1f\x7f]/g, function(ch) {
+                    return '\\' + ch;
+                });
+            }
+            function safePostSelector(postId) {
+                var raw = String(postId == null ? '' : postId);
+                if (!raw) return null;
+                return '.post[data-post-id="' + escapeCssIdent(raw) + '"]';
+            }
+            function findBySafePostSelector(postId) {
+                var sel = safePostSelector(postId);
+                return sel ? document.querySelector(sel) : null;
+            }
             function findPostCardElement(postId) {
-                return document.querySelector('.post[data-post-id="' + postId + '"]');
+                return findBySafePostSelector(postId);
             }
             function removeDeletedPostFromFeed(postId) {
                 if (!Array.isArray(feedAllPosts)) return;
@@ -806,8 +875,26 @@
                     showToast("正在删除中，请稍后..");
                     return;
                 }
-                var targetPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
-                if (targetPost && !canDeletePost(targetPost)) {
+                // ★ 2026-09-27 修复（审计 P6：删除客户端权限校验 fail-open）：
+                //   根因：缓存未命中（targetPost 为 undefined）时下方 `targetPost &&` 短路，
+                //   直接放行 → 前端门禁形同虚设（虽有服务端 403 兜底，但前端应 fail-closed）。
+                //   修法：先在内存全量数据里找，找不到再从 postInfoCache / xtjGetPostById 兜底
+                //   再取一次；仍取不到就不放行，提示刷新后重试并中止，绝不把请求发出去。
+                //   正常路径（卡片可见、feedAllPosts 已加载）都能取到，不会卡死正常删除。
+                var targetPost = null;
+                if (Array.isArray(feedAllPosts)) {
+                    targetPost = feedAllPosts.find(function(post) { return String(post && post.id) === String(postId); });
+                }
+                if (!targetPost) {
+                    var cachedForDelete = (window.postInfoCache && window.postInfoCache[String(postId)])
+                        || (typeof window.xtjGetPostById === 'function' ? window.xtjGetPostById(postId) : null);
+                    if (cachedForDelete) targetPost = cachedForDelete;
+                }
+                if (!targetPost) {
+                    showToast("无法确认删除权限，请刷新后重试");
+                    return;
+                }
+                if (!canDeletePost(targetPost)) {
                     showToast("无权删除这条帖子");
                     return;
                 }
@@ -831,8 +918,22 @@
                 const session = getDeleteSession();
                 session.cancelled = false;
                 const targetPostId = String(delPostId);
-                const currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === targetPostId; });
-                if (currentPost && !canDeletePost(currentPost)) {
+                // ★ 2026-09-27 修复（审计 P6）：删除确认入口同样 fail-closed，
+                //   取不到帖子记录时不再放行（openDelete 已拦一道，这里再兜一道，
+                //   防止 delPostId 被其它路径直接写入或缓存被清空后绕过）。
+                var currentPost = null;
+                if (Array.isArray(feedAllPosts)) {
+                    currentPost = feedAllPosts.find(function(post) { return String(post && post.id) === targetPostId; });
+                }
+                if (!currentPost) {
+                    currentPost = (window.postInfoCache && window.postInfoCache[targetPostId])
+                        || (typeof window.xtjGetPostById === 'function' ? window.xtjGetPostById(targetPostId) : null);
+                }
+                if (!currentPost) {
+                    cleanupDeleteSession({ toast: "无法确认删除权限，请刷新后重试" });
+                    return;
+                }
+                if (!canDeletePost(currentPost)) {
                     cleanupDeleteSession({ toast: "无权删除这条帖子" });
                     return;
                 }
@@ -958,6 +1059,14 @@
                 // 删除弹窗取消时立即清理，不播放动画
                 if (id === 'delModal') {
                     cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                }
+                // ★ 2026-09-27（P7 配套）：关闭帖子详情弹窗时清空 activePostId，
+                //   避免「已关闭但 activePostId 残留」导致 refreshPostDetailIfActive
+                //   在后续置顶操作时误判为"详情正开着"。
+                //   直接内联在此处而不是外层包装 closeModal —— 包装会引入「谁先谁后」
+                //   的隐式依赖，内联版是确定性的。
+                if (id === 'postDetailModal') {
+                    try { window.__xtjSetActivePostId(null); } catch (_) {}
                 }
                 if (id === 'loginModal' || id === 'registerModal') {
                     if (authModalFocusOrigin && typeof authModalFocusOrigin.focus === 'function') {
@@ -1493,7 +1602,7 @@
                         if (!response.ok || !result.ok) throw new Error(result.error || 'view_record_failed');
                         var authoritativeViews = Number(result.views);
                         if (Number.isFinite(authoritativeViews)) {
-                            var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                            var postEl = findBySafePostSelector(postId);
                             var statsEl = postEl && postEl.querySelector('.post-stats-text');
                             // ★ 修复：原用无锚点的 /\d+/ 替换，会命中文案里的**第一个**数字。
                             //   正常文案「浏览 1｜点赞 0｜评论 0」下恰好是浏览数，
@@ -1893,6 +2002,19 @@
             }
 
             let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
+            // ★ 2026-09-27 修复（审计 P4：顶部统计两套口径，数字突变）：
+            //   根因：renderFeed 把 sPosts 写成 window._xtjTotalPostCount（服务端全站总量，
+            //   如 1234），而 updateFeedStats 写 feedAllPosts.length（已加载数，如 40）。
+            //   用户点赞一次 → applyPostLikeIntent → updateFeedStats → sPosts 从 1234 突变成 40，
+            //   统计区数字不可信。
+            //   语义裁定：HTML 中该标签是「总动态」（index.html 的 <b id="sPosts"> 对应
+            //   <span>总动态</span>），点击进详情也是全站动态，故统一为「服务端已知总量」，
+            //   无该值时退回当前已加载帖子数。两处共用本函数，口径唯一。
+            function resolveTotalPostCount() {
+                var known = Number(window._xtjTotalPostCount);
+                if (Number.isFinite(known) && known >= 0) return known;
+                return Array.isArray(feedAllPosts) ? feedAllPosts.length : 0;
+            }
             function updateFeedStats() {
     // 统一统计口径：优先使用内存全量数据（feedAll* 缓存），
     // 避免筛选/分页后 DOM 只含部分帖子导致统计数字错乱；内存数据缺失时回退 DOM 统计。
@@ -1926,7 +2048,7 @@
                 var sPosts = (_cachedSPosts && document.body.contains(_cachedSPosts)) ? _cachedSPosts : (_cachedSPosts = document.getElementById('sPosts'));
                 var sViews = (_cachedSViews && document.body.contains(_cachedSViews)) ? _cachedSViews : (_cachedSViews = document.getElementById('sViews'));
                 var sLikes = (_cachedSLikes && document.body.contains(_cachedSLikes)) ? _cachedSLikes : (_cachedSLikes = document.getElementById('sLikes'));
-                if (sPosts) sPosts.textContent = posts.length;
+                if (sPosts) sPosts.textContent = resolveTotalPostCount();
                 if (sViews) sViews.textContent = totalViews;
                 // 只显示点赞数；互动合计见统计弹层文案
                 if (sLikes) sLikes.textContent = totalLikes;
@@ -2066,7 +2188,10 @@
                 markFeedStateChanged();
                 var feed = document.getElementById('feed');
                 if (!feed) return false;
-                var existing = feed.querySelector('.post[data-post-id="' + postId.replace(/"/g, '\\"') + '"]');
+                var existing = (function() {
+                    var sel = safePostSelector(postId);
+                    return sel ? feed.querySelector(sel) : null;
+                })();
                 if (!existing) return false;
                 var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
                 var template = document.createElement('template');
@@ -2354,7 +2479,8 @@
 
             var activePostAiSession = null;
             function getPostToolAnchor(postId) {
-                return document.querySelector('.post-tools-trigger[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]');
+                var esc = escapeCssIdent(postId);
+                return esc ? document.querySelector('.post-tools-trigger[data-post-id="' + esc + '"]') : null;
             }
             function postToolFetch(body) {
                 return window.xtjProtectedFetch('/api/agent/post-tools', { method: 'POST', body: JSON.stringify(body) }).then(function(resp) {
@@ -2569,7 +2695,27 @@
                 if (safeMediaUrl) {
                     if (normalized.media_type === 'video') mediaMarkup = '<div class="media"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="none" playsinline></video></div>';
                     else if (normalized.media_type === 'audio') mediaMarkup = '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
-                    else mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)"></div>';
+                    else {
+                        // ★ 2026-09-27 修复（审计 P9：feed 媒体 <img> 无尺寸占位，CLS 跳动）：
+                        //   根因：feed 卡片图片只有 loading="lazy" 没有宽高/aspect-ratio，
+                        //   图片解码前盒子高度为 0，解码完成后撑开 → 整列内容下移（CLS）。
+                        //   修法：参照聊天气泡约定（06-chat-and-nav 的 msg-img）写内联
+                        //   aspect-ratio；有真实宽高就同时写 width/height 属性。
+                        //   现状：帖子接口未持久化像素尺寸（服务端 posts 表无 media_width/height，
+                        //   normalizePost 的 _contentMeta 也无 w/h），因此这里对已有字段做
+                        //   「有则用、无则兜底」的防御性处理：万一后续接口补上 width/height
+                        //   或 _contentMeta.w/h，立刻生效；确实拿不到时兜 4:3。
+                        //   注意：aspect-ratio 需至少一维确定才生效，而 CSS 已给
+                        //   `.media img { width:100% }`，宽度确定 → aspect-ratio 可算出高度，
+                        //   盒子立即有尺寸，消除加载前后跳动。仅渲染属性，不影响照片墙直传。
+                        var _mw = Math.round(Number(normalized.media_width || normalized.width || (normalized._contentMeta && normalized._contentMeta.w) || 0));
+                        var _mh = Math.round(Number(normalized.media_height || normalized.height || (normalized._contentMeta && normalized._contentMeta.h) || 0));
+                        var hasRealDims = (_mw > 0 && _mh > 0 && _mw <= 20000 && _mh <= 20000);
+                        if (!hasRealDims) { _mw = 4; _mh = 3; }
+                        var imgDimAttr = ' style="aspect-ratio:' + _mw + ' / ' + _mh + '"';
+                        if (hasRealDims) imgDimAttr += ' width="' + _mw + '" height="' + _mh + '"';
+                        mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + imgDimAttr + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)"></div>';
+                    }
                 }
                 return `
                 <div class="post glass" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
@@ -2660,7 +2806,8 @@
                         return String(p && p.id) === String(postId);
                     });
                     if (!post) return false;
-                    var card = feed.querySelector('.post[data-post-id="' + (window.CSS && CSS.escape ? CSS.escape(String(postId)) : String(postId).replace(/"/g, '')) + '"]');
+                    var _cardSel = safePostSelector(postId);
+                    var card = _cardSel ? feed.querySelector(_cardSel) : null;
                     if (!card) return false;
                     var filtered = getFilteredPosts([post], feedAllComments);
                     if (!filtered || !filtered.length) {
@@ -3460,6 +3607,42 @@
                 return true;
             };
 
+            // ★ 2026-09-27 修复（审计 P7：refreshPostDetailIfActive 是死代码）：
+            //   根因：该函数依赖 activePostId，但全仓 grep 确认 activePostId 仅在
+            //   01 声明、04 的 resetCommentModalState 里被置 null，**从未被赋具体帖子 id**，
+            //   于是 `String(activePostId) !== postId` 恒真 → 函数体永不执行 →
+            //   置顶后详情弹窗不刷新。
+            //   修法（打通数据流）：详情弹窗的打开/渲染逻辑在 06（openPostDetail/renderPostDetail），
+            //   本文件不可改 06。因此在这里提供标准 hook，并在本文件内把 openPostDetail
+            //   包一层以自动记录当前详情帖 id：
+            //     · window.__xtjSetActivePostId(id|null)：给 06 或任何调用方显式设置/清空；
+            //     · 由于 04 先于 06 执行，window.openPostDetail 此刻尚未定义，包装推迟到
+            //       setTimeout(0)（此时整份 bundle 的 7 个 IIFE 已同步执行完毕，06 已就绪）。
+            //   打开详情 → 记录 id；关闭详情弹窗（closeModal('postDetailModal')）→ 清空。
+            //   ⚠ 不修改 06 的任何逻辑，仅在其对外入口上做无侵入包装（保留原函数返回值/this）。
+            window.__xtjSetActivePostId = function(id) {
+                activePostId = (id == null || id === '') ? null : String(id);
+                return activePostId;
+            };
+            window.__xtjGetActivePostId = function() { return activePostId; };
+            var _xtjOpenPostDetailWrapped = false;
+            function installPostDetailActiveTracker() {
+                if (_xtjOpenPostDetailWrapped) return;
+                if (typeof window.openPostDetail !== 'function') return;
+                var _origOpenPostDetail = window.openPostDetail;
+                window.openPostDetail = function(postId) {
+                    // 记录当前正在查看的详情帖，供置顶/编辑后的局部刷新判断
+                    try { window.__xtjSetActivePostId(postId); } catch (_) {}
+                    return _origOpenPostDetail.apply(this, arguments);
+                };
+                _xtjOpenPostDetailWrapped = true;
+            }
+            // 06 在本 bundle 之后同步注册，故用宏任务兜底安装（幂等）。
+            setTimeout(installPostDetailActiveTracker, 0);
+            // ★ 2026-09-27（P7）：关闭详情弹窗的清空钩子已直接内联进
+            //   window.closeModal（见上方 `id === 'postDetailModal'` 分支），
+            //   此处不再对外层做包装，避免「包装先后顺序」的隐式依赖。
+
             async function refreshPostDetailIfActive(postId) {
                 if (!postId || String(activePostId || '') !== String(postId)) return;
                 if (typeof window.openPostDetail !== 'function') return;
@@ -3588,8 +3771,8 @@
             }
 
             function completePinnedPostTransition(postId) {
-                var selector = '.post[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]';
-                var postEl = document.querySelector(selector);
+                var selector = safePostSelector(postId);
+                var postEl = selector ? document.querySelector(selector) : null;
                 var surface = document.getElementById('panelPosts');
                 if (!postEl) return Promise.resolve(false);
                 var actualSurface = getActualScrollSurface(surface);
@@ -3678,7 +3861,7 @@
                         syncPinnedPostIntoFeedState({ id: id, is_pinned: false, pinned_at: null });
                     });
                     
-                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                    var postEl = findBySafePostSelector(normalizedPostId);
                     var willAnimatePin = nextPinned;
                     if (willAnimatePin) await beginPinnedPostTransition(postEl);
 
@@ -3705,7 +3888,7 @@
                         showToast('置顶失败：' + (e && e.message ? e.message : '未知错误'));
                     }
                 } finally {
-                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                    var postEl = findBySafePostSelector(normalizedPostId);
                     if (postEl) postEl.classList.remove('post-pin-departing');
                     if (btn) {
                         btn.disabled = false;
@@ -3959,8 +4142,14 @@
                 var btn = document.getElementById("pubBtn");
                 if (!btn || btn.disabled || btn.getAttribute('aria-busy') === 'true') return;
                 if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
-                var content = document.getElementById("postInp").value.trim();
-                var file = document.getElementById("fileInp").files[0];
+                // ★ 2026-09-27 修复（审计 P13-①：取 DOM 值无判空）：
+                //   此前直接 `document.getElementById("postInp").value`，元素缺失时抛
+                //   TypeError（整段中断）。这里改为判空后安全取值，缺失时给出提示并返回。
+                var postInpEl = document.getElementById("postInp");
+                var fileInpEl = document.getElementById("fileInp");
+                if (!postInpEl) { showToast("发布框未就绪，请刷新后重试"); return; }
+                var content = postInpEl.value.trim();
+                var file = (fileInpEl && fileInpEl.files && fileInpEl.files[0]) || null;
                 var visibilityEl = document.getElementById("postVisibility");
                 var visibility = visibilityEl ? visibilityEl.value : "public";
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
@@ -4022,6 +4211,12 @@
                     uploadedPath = '';
                     touchUserSession(false);
                     resetPostComposer();
+                    // ★ 2026-09-27 修复（审计 P13-②：失败仍 resetPostPreview 导致
+                    //   "显示 0 个文件但文件还在"）：把预览清理移到**发布成功之后**。
+                    //   成功时 resetPostComposer 已清空 fileInp，这里同步回收预览界面与 blob URL；
+                    //   失败时（下方 catch/insertRes.!ok 分支）保留预览，用户可直接改文案重试，
+                    //   不必重新选文件。重新选择文件时 setPostPreview 会先 revoke 旧 blob，无泄漏。
+                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     if (!insertPublishedPostIntoFeed(insertRes.data)) {
                         clearFeedCache();
@@ -4047,9 +4242,9 @@
                     btn.setAttribute('aria-busy', 'false');
                     btn.textContent = btn.dataset.originalText || "发布动态";
                     delete btn.dataset.originalText;
-                    // ★ 修复：成功/失败路径统一回收 postPreviewUrls（blob:），
-                    // 避免反复发帖失败时 blob URL 内存累积。幂等，重复调用安全。
-                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
+                    // ★ 2026-09-27（审计 P13-②）：此处不再无条件 resetPostPreview()，
+                    //   失败时保留预览与已选文件，避免"显示 0 个文件但文件还在"的错乱状态。
+                    //   成功路径已在上方显式清理。
                 }
             };
 
@@ -4428,7 +4623,9 @@
                 bindPostFilterEvents();
                 var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);
-                var totalPosts = window._xtjTotalPostCount || filteredPosts.length;
+                // ★ 2026-09-27 修复（审计 P4）：与 updateFeedStats 共用 resolveTotalPostCount，
+                //   保证两处口径完全一致（详见该函数处注释）。
+                var totalPosts = resolveTotalPostCount();
                 var sPostsEl = document.getElementById("sPosts");
                 if (sPostsEl) sPostsEl.textContent = totalPosts;
                 var sViewsEl = document.getElementById("sViews");

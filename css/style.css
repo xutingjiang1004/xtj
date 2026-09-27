@@ -1690,6 +1690,15 @@
         .chat-msg-row.has-media .msg-meta .msg-fail-mark {
             margin-top: 0; font-size: 10px;
         }
+        /* ★ 2026-09-27 修复（审计 M8：老消息无 w/h 时 4:3 兜底盒子塌成 0×0）：
+           渲染时对有真实 w/h 的图片会写 width/height 属性，而**没有 w/h 的老消息**
+           只能兜 4:3 —— 此时若宽度没有确定基准，`width:auto` + `aspect-ratio` 两维都不定，
+           盒子高度算不出来（塌成 0×0），图片一加载就跳一下，正是 CLS 的来源。
+           这里给媒体气泡内的直接子级 .msg-img 一个确定的宽度基准（气泡宽 ≤200px），
+           aspect-ratio 才能算出高度，再被既有 max-height:260px 收口。
+           注：「文字 + 图片」气泡的宽度基准已由上方
+           `.chat-msg.has-media > .msg-text + .msg-img{width:100%}` 提供，此处无需重复。 */
+        .chat-msg-row.has-media .chat-msg > .msg-img { width: 100%; }
         @keyframes msgMetaIn {
             from { opacity: 0; transform: translateY(-2px); }
             to { opacity: 1; transform: translateY(0); }

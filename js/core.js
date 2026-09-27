@@ -742,7 +742,18 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
              * 返回 { ok, reason, token, user_name }
              *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
              */
-            window.ensureProtectedOperationAuth = async function() {
+            // ★ 2026-09-27 修复（M15：后台轮询清零 refresh 冷却，导致反复刷 /api/user/refresh）：
+            //   根因：本函数每次调用都执行 `_refreshCooldownUntil = 0`，而该冷却的本意是
+            //   「refresh 确证失败（401/403）后 30 秒内不再重试」。DM 轮询（startDMPolling
+            //   → pollNow → updateUnreadBadge → fetchDmListShared → xtjProtectedFetch）同样
+            //   走本函数且不带任何参数，于是每轮轮询都把刚刚设上的冷却清零 —— 30 秒冷却
+            //   对后台路径完全失效，服务端持续收到 /api/user/refresh 请求与日志噪音。
+            //   修法：用 opts.background 区分调用来源。只有「用户主动操作」才清零冷却
+            //   （保证点了按钮能立即刷新）；后台/被动路径保留冷却，冷却期内直接返回
+            //   上次失败结果，不再发起刷新。
+            window.ensureProtectedOperationAuth = async function(opts) {
+                // 后台/被动路径显式传 { background: true }；默认（无参）= 用户主动操作。
+                var _isBackground = !!(opts && opts.background);
                 // ★ 启动验证未完成时，等待验证完成（最多 5 秒）
                 if (window._xtjAuthState === 'auth_pending') {
                     var waitStart = Date.now();
@@ -762,10 +773,27 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     userName = String(userName || '').trim();
                     if (!userName) return { ok: false, reason: 'no_user', token: '', user_name: '' };
 
-                                        // ★ 修复「点了没反应」：30 秒 refresh 冷却只应约束后台自动重试风暴。
-                    //   本函数仅由用户主动操作触发，点击时应立即允许再试一次，否则冷却期内
-                    //   每次点击都拿空 token 直接失败，按钮毫无反馈。
-                    try { _refreshCooldownUntil = 0; } catch (_eCd) {}
+                    // ★ M15：仅在「用户主动操作」时清零冷却（点击需立即刷新，不被后台轮询
+                    //   留下的冷却拖住）。后台/被动路径保持冷却有效。
+                    try { if (!_isBackground) _refreshCooldownUntil = 0; } catch (_eCd) {}
+                    // ★ M15：冷却生效期内，不再发起刷新；直接返回上次失败结果 / 现有 token。
+                    //   长冷却（30 秒，仅由 401/403 确证失效设置）只约束后台路径，
+                    //   避免 DM 轮询反复请求 /api/user/refresh。
+                    try {
+                        if (_isBackground && _refreshCooldownUntil && Date.now() < _refreshCooldownUntil) {
+                            var _cdToken = getUserToken();
+                            if (_cdToken) {
+                                return { ok: true, reason: 'ok', token: _cdToken, user_name: userName };
+                            }
+                            return {
+                                ok: false,
+                                reason: _lastRefreshAuthResult.reason || 'unavailable',
+                                status: _lastRefreshAuthResult.status || 0,
+                                token: '',
+                                user_name: userName
+                            };
+                        }
+                    } catch (_eCd2) {}
                     var token = await ensureUserToken();
                     if (token) {
                         // ★ 验证 token 身份与 UI 身份一致
@@ -819,7 +847,15 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     offError.status = 0;
                     throw offError;
                 }
-                var auth = await window.ensureProtectedOperationAuth();
+                // ★ 2026-09-27（M15 配套）：把「这是后台/轮询发起的请求」这一事实透传下去。
+                //   后台路径若不清零冷却，就能真正享受 30 秒冷却保护 —— 否则 DM 轮询
+                //   （pollNow → updateUnreadBadge → fetchDmListShared → 这里）每一轮都会
+                //   把冷却重置，服务端持续收到 /api/user/refresh。
+                //   调用方通过 options.background = true 声明；默认 undefined = 用户主动操作
+                //   （保持既有体验：点按钮能立即刷新 token，不被后台轮询留下的冷却拖住）。
+                var auth = await window.ensureProtectedOperationAuth(
+                    options.background ? { background: true } : undefined
+                );
                 if (!auth.ok) {
                     // ★ 修复「静默无反馈」：确证失效已在 ensureProtectedOperationAuth 内弹窗；
                     //   网络类失败（unavailable/network_error）此前只 throw，调用方多半静默
@@ -5298,7 +5334,15 @@ function renderProfileActivityList(kind) {
                 btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
             }
 
-            function persistFeedLikesCache() {
+            // ★ 2026-09-27 修复（审计 P10：点赞同步写 localStorage 阻塞主线程）：
+            //   根因：updatePostLikeUi 每次点赞都同步 get→JSON.parse→改→JSON.stringify→set
+            //   整份 feed 缓存，快速连点时主线程被反复全量序列化打满（卡顿）。
+            //   修法：只改写入时机——用 ~400ms 尾沿防抖合并窗口内的多次点赞，
+            //   最终只落盘一次；并在页面卸载/隐藏前强制 flush，避免丢数据。
+            //   数据结构与语义（parsed.data.likes / timestamp）完全不变。
+            var _persistLikesTimer = null;
+            var _persistLikesFlushBound = false;
+            function _persistFeedLikesCacheNow() {
                 try {
                     var raw = window.safeStorage.get(CACHE_KEY);
                     if (!raw) return;
@@ -5310,6 +5354,30 @@ function renderProfileActivityList(kind) {
                     window.safeStorage.set(CACHE_KEY, JSON.stringify(parsed));
                 } catch (e) {}
             }
+            function flushFeedLikesCache() {
+                if (_persistLikesTimer) {
+                    clearTimeout(_persistLikesTimer);
+                    _persistLikesTimer = null;
+                }
+                _persistFeedLikesCacheNow();
+            }
+            function persistFeedLikesCache() {
+                if (_persistLikesTimer) clearTimeout(_persistLikesTimer);
+                _persistLikesTimer = setTimeout(function() {
+                    _persistLikesTimer = null;
+                    _persistFeedLikesCacheNow();
+                }, 400);
+                if (!_persistLikesFlushBound) {
+                    _persistLikesFlushBound = true;
+                    // 页面卸载/切后台前把挂起的写入落盘（pagehide 比 beforeunload 在移动端更可靠）
+                    window.addEventListener('pagehide', flushFeedLikesCache);
+                    window.addEventListener('beforeunload', flushFeedLikesCache);
+                    document.addEventListener('visibilitychange', function() {
+                        if (document.visibilityState === 'hidden') flushFeedLikesCache();
+                    });
+                }
+            }
+            window.__xtjFlushFeedLikesCache = flushFeedLikesCache;
 
             function updateLikeStatsText(statsEl, liked) {
                 if (!statsEl) return;
@@ -5589,7 +5657,7 @@ function renderProfileActivityList(kind) {
                     }
                 }
                 
-                var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                var postEl = findBySafePostSelector(postId);
                 if (!postEl) return;
                 
                 // 如果已经存在，则收起（切换显示状态）
@@ -5824,6 +5892,10 @@ function renderProfileActivityList(kind) {
                     if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
                     var content = inp.value.trim();
                     if (!content) { showToast("请输入评论内容"); return; }
+                    // ★ 2026-09-27 修复（审计 P8-①：评论内容无长度上限）：
+                    //   与服务端 /api/post/comment 的 content.length > 5000 限制保持一致，
+                    //   提前拦截既避免无谓请求，也给用户及时反馈（服务端仍会二次校验）。
+                    if (content.length > 5000) { showToast("评论内容不能超过5000字"); return; }
                     var targetPostId = String(postId || '').trim().toLowerCase();
                     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(targetPostId)) {
                         showToast("帖子参数无效");
@@ -5842,7 +5914,6 @@ function renderProfileActivityList(kind) {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ post_id: targetPostId, content: content })
                         });
-                        clearTimeout(timeoutId);
                         const result = await response.json().catch(function() { return {}; });
                         if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
                         
@@ -5870,10 +5941,15 @@ function renderProfileActivityList(kind) {
                         requestAnimationFrame(function() {
                             var p = document.getElementById('panelPosts');
                             if (p && savedScroll > 0) p.scrollTop = savedScroll;
-                            var newEl = document.querySelector('.post[data-post-id="' + targetPostId + '"]');
+                            var newEl = findBySafePostSelector(targetPostId);
                             if (newEl) newEl.classList.add('visible');
                         });
-                        loadProfileActivity(true);
+                        loadProfileActivity(true).catch(function(eProfile) {
+                            // ★ 2026-09-27 修复（审计 P8-③）：loadProfileActivity 返回 Promise，
+                            //   此前不接 await/catch，抛错会成为未处理的 rejection（静默）。
+                            //   评论已发布成功，个人页刷新失败不影响主流程，仅告警不阻断。
+                            console.warn('[comment] loadProfileActivity refresh failed', eProfile);
+                        });
                         
                         // 小猫 AI 自动回复轮询
                         // Phase 3-P0-1: 修复 @小猫 正则。原 lookahead (?=\s|$|[^\w\u4e00-\u9fa5]) 要求
@@ -5886,6 +5962,11 @@ function renderProfileActivityList(kind) {
                         showToast("评论失败: " + (e.message || "未知错误"));
                         btn.disabled = false;
                         btn.textContent = '发送';
+                    } finally {
+                        // ★ 2026-09-27 修复（审计 P8-②：失败路径未 clearTimeout(15s)）：
+                        //   此前仅成功路径 clearTimeout，请求失败/抛错时定时器仍挂着 15s，
+                        //   虽 abort 后无实际影响，但属泄漏。统一在 finally 清理，幂等安全。
+                        clearTimeout(timeoutId);
                     }
                 };
 
@@ -5984,8 +6065,32 @@ function renderProfileActivityList(kind) {
                     showToast(opts.toast);
                 }
             }
+            // ★ 2026-09-27 修复（审计 P12：id 未校验就拼进 querySelector）：
+            //   根因：多处直接把 postId 拼进 `.post[data-post-id="' + id + '"]` 选择器，
+            //   非法字符（引号/方括号/控制字符等）会抛 SyntaxError，或命中错误元素。
+            //   修法：统一走 safePostSelector 生成选择器——优先 CSS.escape（旧浏览器可能
+            //   缺失，带 try/catch），否则退化为手工转义引号/反斜杠/控制符（与 03 中
+            //   既有写法保持一致）。返回 null 时调用方应跳过查询，避免抛错。
+            function escapeCssIdent(value) {
+                var s = String(value == null ? '' : value);
+                if (window.CSS && typeof window.CSS.escape === 'function') {
+                    try { return window.CSS.escape(s); } catch (_) { /* 落到手工转义 */ }
+                }
+                return s.replace(/["\\\x00-\x1f\x7f]/g, function(ch) {
+                    return '\\' + ch;
+                });
+            }
+            function safePostSelector(postId) {
+                var raw = String(postId == null ? '' : postId);
+                if (!raw) return null;
+                return '.post[data-post-id="' + escapeCssIdent(raw) + '"]';
+            }
+            function findBySafePostSelector(postId) {
+                var sel = safePostSelector(postId);
+                return sel ? document.querySelector(sel) : null;
+            }
             function findPostCardElement(postId) {
-                return document.querySelector('.post[data-post-id="' + postId + '"]');
+                return findBySafePostSelector(postId);
             }
             function removeDeletedPostFromFeed(postId) {
                 if (!Array.isArray(feedAllPosts)) return;
@@ -6066,8 +6171,26 @@ function renderProfileActivityList(kind) {
                     showToast("正在删除中，请稍后..");
                     return;
                 }
-                var targetPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
-                if (targetPost && !canDeletePost(targetPost)) {
+                // ★ 2026-09-27 修复（审计 P6：删除客户端权限校验 fail-open）：
+                //   根因：缓存未命中（targetPost 为 undefined）时下方 `targetPost &&` 短路，
+                //   直接放行 → 前端门禁形同虚设（虽有服务端 403 兜底，但前端应 fail-closed）。
+                //   修法：先在内存全量数据里找，找不到再从 postInfoCache / xtjGetPostById 兜底
+                //   再取一次；仍取不到就不放行，提示刷新后重试并中止，绝不把请求发出去。
+                //   正常路径（卡片可见、feedAllPosts 已加载）都能取到，不会卡死正常删除。
+                var targetPost = null;
+                if (Array.isArray(feedAllPosts)) {
+                    targetPost = feedAllPosts.find(function(post) { return String(post && post.id) === String(postId); });
+                }
+                if (!targetPost) {
+                    var cachedForDelete = (window.postInfoCache && window.postInfoCache[String(postId)])
+                        || (typeof window.xtjGetPostById === 'function' ? window.xtjGetPostById(postId) : null);
+                    if (cachedForDelete) targetPost = cachedForDelete;
+                }
+                if (!targetPost) {
+                    showToast("无法确认删除权限，请刷新后重试");
+                    return;
+                }
+                if (!canDeletePost(targetPost)) {
                     showToast("无权删除这条帖子");
                     return;
                 }
@@ -6091,8 +6214,22 @@ function renderProfileActivityList(kind) {
                 const session = getDeleteSession();
                 session.cancelled = false;
                 const targetPostId = String(delPostId);
-                const currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === targetPostId; });
-                if (currentPost && !canDeletePost(currentPost)) {
+                // ★ 2026-09-27 修复（审计 P6）：删除确认入口同样 fail-closed，
+                //   取不到帖子记录时不再放行（openDelete 已拦一道，这里再兜一道，
+                //   防止 delPostId 被其它路径直接写入或缓存被清空后绕过）。
+                var currentPost = null;
+                if (Array.isArray(feedAllPosts)) {
+                    currentPost = feedAllPosts.find(function(post) { return String(post && post.id) === targetPostId; });
+                }
+                if (!currentPost) {
+                    currentPost = (window.postInfoCache && window.postInfoCache[targetPostId])
+                        || (typeof window.xtjGetPostById === 'function' ? window.xtjGetPostById(targetPostId) : null);
+                }
+                if (!currentPost) {
+                    cleanupDeleteSession({ toast: "无法确认删除权限，请刷新后重试" });
+                    return;
+                }
+                if (!canDeletePost(currentPost)) {
                     cleanupDeleteSession({ toast: "无权删除这条帖子" });
                     return;
                 }
@@ -6218,6 +6355,14 @@ function renderProfileActivityList(kind) {
                 // 删除弹窗取消时立即清理，不播放动画
                 if (id === 'delModal') {
                     cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                }
+                // ★ 2026-09-27（P7 配套）：关闭帖子详情弹窗时清空 activePostId，
+                //   避免「已关闭但 activePostId 残留」导致 refreshPostDetailIfActive
+                //   在后续置顶操作时误判为"详情正开着"。
+                //   直接内联在此处而不是外层包装 closeModal —— 包装会引入「谁先谁后」
+                //   的隐式依赖，内联版是确定性的。
+                if (id === 'postDetailModal') {
+                    try { window.__xtjSetActivePostId(null); } catch (_) {}
                 }
                 if (id === 'loginModal' || id === 'registerModal') {
                     if (authModalFocusOrigin && typeof authModalFocusOrigin.focus === 'function') {
@@ -6753,7 +6898,7 @@ function renderProfileActivityList(kind) {
                         if (!response.ok || !result.ok) throw new Error(result.error || 'view_record_failed');
                         var authoritativeViews = Number(result.views);
                         if (Number.isFinite(authoritativeViews)) {
-                            var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                            var postEl = findBySafePostSelector(postId);
                             var statsEl = postEl && postEl.querySelector('.post-stats-text');
                             // ★ 修复：原用无锚点的 /\d+/ 替换，会命中文案里的**第一个**数字。
                             //   正常文案「浏览 1｜点赞 0｜评论 0」下恰好是浏览数，
@@ -7153,6 +7298,19 @@ function renderProfileActivityList(kind) {
             }
 
             let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
+            // ★ 2026-09-27 修复（审计 P4：顶部统计两套口径，数字突变）：
+            //   根因：renderFeed 把 sPosts 写成 window._xtjTotalPostCount（服务端全站总量，
+            //   如 1234），而 updateFeedStats 写 feedAllPosts.length（已加载数，如 40）。
+            //   用户点赞一次 → applyPostLikeIntent → updateFeedStats → sPosts 从 1234 突变成 40，
+            //   统计区数字不可信。
+            //   语义裁定：HTML 中该标签是「总动态」（index.html 的 <b id="sPosts"> 对应
+            //   <span>总动态</span>），点击进详情也是全站动态，故统一为「服务端已知总量」，
+            //   无该值时退回当前已加载帖子数。两处共用本函数，口径唯一。
+            function resolveTotalPostCount() {
+                var known = Number(window._xtjTotalPostCount);
+                if (Number.isFinite(known) && known >= 0) return known;
+                return Array.isArray(feedAllPosts) ? feedAllPosts.length : 0;
+            }
             function updateFeedStats() {
     // 统一统计口径：优先使用内存全量数据（feedAll* 缓存），
     // 避免筛选/分页后 DOM 只含部分帖子导致统计数字错乱；内存数据缺失时回退 DOM 统计。
@@ -7186,7 +7344,7 @@ function renderProfileActivityList(kind) {
                 var sPosts = (_cachedSPosts && document.body.contains(_cachedSPosts)) ? _cachedSPosts : (_cachedSPosts = document.getElementById('sPosts'));
                 var sViews = (_cachedSViews && document.body.contains(_cachedSViews)) ? _cachedSViews : (_cachedSViews = document.getElementById('sViews'));
                 var sLikes = (_cachedSLikes && document.body.contains(_cachedSLikes)) ? _cachedSLikes : (_cachedSLikes = document.getElementById('sLikes'));
-                if (sPosts) sPosts.textContent = posts.length;
+                if (sPosts) sPosts.textContent = resolveTotalPostCount();
                 if (sViews) sViews.textContent = totalViews;
                 // 只显示点赞数；互动合计见统计弹层文案
                 if (sLikes) sLikes.textContent = totalLikes;
@@ -7326,7 +7484,10 @@ function renderProfileActivityList(kind) {
                 markFeedStateChanged();
                 var feed = document.getElementById('feed');
                 if (!feed) return false;
-                var existing = feed.querySelector('.post[data-post-id="' + postId.replace(/"/g, '\\"') + '"]');
+                var existing = (function() {
+                    var sel = safePostSelector(postId);
+                    return sel ? feed.querySelector(sel) : null;
+                })();
                 if (!existing) return false;
                 var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
                 var template = document.createElement('template');
@@ -7614,7 +7775,8 @@ function renderProfileActivityList(kind) {
 
             var activePostAiSession = null;
             function getPostToolAnchor(postId) {
-                return document.querySelector('.post-tools-trigger[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]');
+                var esc = escapeCssIdent(postId);
+                return esc ? document.querySelector('.post-tools-trigger[data-post-id="' + esc + '"]') : null;
             }
             function postToolFetch(body) {
                 return window.xtjProtectedFetch('/api/agent/post-tools', { method: 'POST', body: JSON.stringify(body) }).then(function(resp) {
@@ -7829,7 +7991,27 @@ function renderProfileActivityList(kind) {
                 if (safeMediaUrl) {
                     if (normalized.media_type === 'video') mediaMarkup = '<div class="media"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="none" playsinline></video></div>';
                     else if (normalized.media_type === 'audio') mediaMarkup = '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
-                    else mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)"></div>';
+                    else {
+                        // ★ 2026-09-27 修复（审计 P9：feed 媒体 <img> 无尺寸占位，CLS 跳动）：
+                        //   根因：feed 卡片图片只有 loading="lazy" 没有宽高/aspect-ratio，
+                        //   图片解码前盒子高度为 0，解码完成后撑开 → 整列内容下移（CLS）。
+                        //   修法：参照聊天气泡约定（06-chat-and-nav 的 msg-img）写内联
+                        //   aspect-ratio；有真实宽高就同时写 width/height 属性。
+                        //   现状：帖子接口未持久化像素尺寸（服务端 posts 表无 media_width/height，
+                        //   normalizePost 的 _contentMeta 也无 w/h），因此这里对已有字段做
+                        //   「有则用、无则兜底」的防御性处理：万一后续接口补上 width/height
+                        //   或 _contentMeta.w/h，立刻生效；确实拿不到时兜 4:3。
+                        //   注意：aspect-ratio 需至少一维确定才生效，而 CSS 已给
+                        //   `.media img { width:100% }`，宽度确定 → aspect-ratio 可算出高度，
+                        //   盒子立即有尺寸，消除加载前后跳动。仅渲染属性，不影响照片墙直传。
+                        var _mw = Math.round(Number(normalized.media_width || normalized.width || (normalized._contentMeta && normalized._contentMeta.w) || 0));
+                        var _mh = Math.round(Number(normalized.media_height || normalized.height || (normalized._contentMeta && normalized._contentMeta.h) || 0));
+                        var hasRealDims = (_mw > 0 && _mh > 0 && _mw <= 20000 && _mh <= 20000);
+                        if (!hasRealDims) { _mw = 4; _mh = 3; }
+                        var imgDimAttr = ' style="aspect-ratio:' + _mw + ' / ' + _mh + '"';
+                        if (hasRealDims) imgDimAttr += ' width="' + _mw + '" height="' + _mh + '"';
+                        mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + imgDimAttr + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)"></div>';
+                    }
                 }
                 return `
                 <div class="post glass" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
@@ -7920,7 +8102,8 @@ function renderProfileActivityList(kind) {
                         return String(p && p.id) === String(postId);
                     });
                     if (!post) return false;
-                    var card = feed.querySelector('.post[data-post-id="' + (window.CSS && CSS.escape ? CSS.escape(String(postId)) : String(postId).replace(/"/g, '')) + '"]');
+                    var _cardSel = safePostSelector(postId);
+                    var card = _cardSel ? feed.querySelector(_cardSel) : null;
                     if (!card) return false;
                     var filtered = getFilteredPosts([post], feedAllComments);
                     if (!filtered || !filtered.length) {
@@ -8720,6 +8903,42 @@ function renderProfileActivityList(kind) {
                 return true;
             };
 
+            // ★ 2026-09-27 修复（审计 P7：refreshPostDetailIfActive 是死代码）：
+            //   根因：该函数依赖 activePostId，但全仓 grep 确认 activePostId 仅在
+            //   01 声明、04 的 resetCommentModalState 里被置 null，**从未被赋具体帖子 id**，
+            //   于是 `String(activePostId) !== postId` 恒真 → 函数体永不执行 →
+            //   置顶后详情弹窗不刷新。
+            //   修法（打通数据流）：详情弹窗的打开/渲染逻辑在 06（openPostDetail/renderPostDetail），
+            //   本文件不可改 06。因此在这里提供标准 hook，并在本文件内把 openPostDetail
+            //   包一层以自动记录当前详情帖 id：
+            //     · window.__xtjSetActivePostId(id|null)：给 06 或任何调用方显式设置/清空；
+            //     · 由于 04 先于 06 执行，window.openPostDetail 此刻尚未定义，包装推迟到
+            //       setTimeout(0)（此时整份 bundle 的 7 个 IIFE 已同步执行完毕，06 已就绪）。
+            //   打开详情 → 记录 id；关闭详情弹窗（closeModal('postDetailModal')）→ 清空。
+            //   ⚠ 不修改 06 的任何逻辑，仅在其对外入口上做无侵入包装（保留原函数返回值/this）。
+            window.__xtjSetActivePostId = function(id) {
+                activePostId = (id == null || id === '') ? null : String(id);
+                return activePostId;
+            };
+            window.__xtjGetActivePostId = function() { return activePostId; };
+            var _xtjOpenPostDetailWrapped = false;
+            function installPostDetailActiveTracker() {
+                if (_xtjOpenPostDetailWrapped) return;
+                if (typeof window.openPostDetail !== 'function') return;
+                var _origOpenPostDetail = window.openPostDetail;
+                window.openPostDetail = function(postId) {
+                    // 记录当前正在查看的详情帖，供置顶/编辑后的局部刷新判断
+                    try { window.__xtjSetActivePostId(postId); } catch (_) {}
+                    return _origOpenPostDetail.apply(this, arguments);
+                };
+                _xtjOpenPostDetailWrapped = true;
+            }
+            // 06 在本 bundle 之后同步注册，故用宏任务兜底安装（幂等）。
+            setTimeout(installPostDetailActiveTracker, 0);
+            // ★ 2026-09-27（P7）：关闭详情弹窗的清空钩子已直接内联进
+            //   window.closeModal（见上方 `id === 'postDetailModal'` 分支），
+            //   此处不再对外层做包装，避免「包装先后顺序」的隐式依赖。
+
             async function refreshPostDetailIfActive(postId) {
                 if (!postId || String(activePostId || '') !== String(postId)) return;
                 if (typeof window.openPostDetail !== 'function') return;
@@ -8848,8 +9067,8 @@ function renderProfileActivityList(kind) {
             }
 
             function completePinnedPostTransition(postId) {
-                var selector = '.post[data-post-id="' + String(postId).replace(/"/g, '\\"') + '"]';
-                var postEl = document.querySelector(selector);
+                var selector = safePostSelector(postId);
+                var postEl = selector ? document.querySelector(selector) : null;
                 var surface = document.getElementById('panelPosts');
                 if (!postEl) return Promise.resolve(false);
                 var actualSurface = getActualScrollSurface(surface);
@@ -8938,7 +9157,7 @@ function renderProfileActivityList(kind) {
                         syncPinnedPostIntoFeedState({ id: id, is_pinned: false, pinned_at: null });
                     });
                     
-                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                    var postEl = findBySafePostSelector(normalizedPostId);
                     var willAnimatePin = nextPinned;
                     if (willAnimatePin) await beginPinnedPostTransition(postEl);
 
@@ -8965,7 +9184,7 @@ function renderProfileActivityList(kind) {
                         showToast('置顶失败：' + (e && e.message ? e.message : '未知错误'));
                     }
                 } finally {
-                    var postEl = document.querySelector('.post[data-post-id="' + normalizedPostId + '"]');
+                    var postEl = findBySafePostSelector(normalizedPostId);
                     if (postEl) postEl.classList.remove('post-pin-departing');
                     if (btn) {
                         btn.disabled = false;
@@ -9219,8 +9438,14 @@ function renderProfileActivityList(kind) {
                 var btn = document.getElementById("pubBtn");
                 if (!btn || btn.disabled || btn.getAttribute('aria-busy') === 'true') return;
                 if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
-                var content = document.getElementById("postInp").value.trim();
-                var file = document.getElementById("fileInp").files[0];
+                // ★ 2026-09-27 修复（审计 P13-①：取 DOM 值无判空）：
+                //   此前直接 `document.getElementById("postInp").value`，元素缺失时抛
+                //   TypeError（整段中断）。这里改为判空后安全取值，缺失时给出提示并返回。
+                var postInpEl = document.getElementById("postInp");
+                var fileInpEl = document.getElementById("fileInp");
+                if (!postInpEl) { showToast("发布框未就绪，请刷新后重试"); return; }
+                var content = postInpEl.value.trim();
+                var file = (fileInpEl && fileInpEl.files && fileInpEl.files[0]) || null;
                 var visibilityEl = document.getElementById("postVisibility");
                 var visibility = visibilityEl ? visibilityEl.value : "public";
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
@@ -9282,6 +9507,12 @@ function renderProfileActivityList(kind) {
                     uploadedPath = '';
                     touchUserSession(false);
                     resetPostComposer();
+                    // ★ 2026-09-27 修复（审计 P13-②：失败仍 resetPostPreview 导致
+                    //   "显示 0 个文件但文件还在"）：把预览清理移到**发布成功之后**。
+                    //   成功时 resetPostComposer 已清空 fileInp，这里同步回收预览界面与 blob URL；
+                    //   失败时（下方 catch/insertRes.!ok 分支）保留预览，用户可直接改文案重试，
+                    //   不必重新选文件。重新选择文件时 setPostPreview 会先 revoke 旧 blob，无泄漏。
+                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     if (!insertPublishedPostIntoFeed(insertRes.data)) {
                         clearFeedCache();
@@ -9307,9 +9538,9 @@ function renderProfileActivityList(kind) {
                     btn.setAttribute('aria-busy', 'false');
                     btn.textContent = btn.dataset.originalText || "发布动态";
                     delete btn.dataset.originalText;
-                    // ★ 修复：成功/失败路径统一回收 postPreviewUrls（blob:），
-                    // 避免反复发帖失败时 blob URL 内存累积。幂等，重复调用安全。
-                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
+                    // ★ 2026-09-27（审计 P13-②）：此处不再无条件 resetPostPreview()，
+                    //   失败时保留预览与已选文件，避免"显示 0 个文件但文件还在"的错乱状态。
+                    //   成功路径已在上方显式清理。
                 }
             };
 
@@ -9688,7 +9919,9 @@ function renderProfileActivityList(kind) {
                 bindPostFilterEvents();
                 var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);
-                var totalPosts = window._xtjTotalPostCount || filteredPosts.length;
+                // ★ 2026-09-27 修复（审计 P4）：与 updateFeedStats 共用 resolveTotalPostCount，
+                //   保证两处口径完全一致（详见该函数处注释）。
+                var totalPosts = resolveTotalPostCount();
                 var sPostsEl = document.getElementById("sPosts");
                 if (sPostsEl) sPostsEl.textContent = totalPosts;
                 var sViewsEl = document.getElementById("sViews");
@@ -10145,6 +10378,9 @@ function renderProfileActivityList(kind) {
                 if (localSrc && !/^blob:/i.test(currentSrc) && img.getAttribute('data-local-shown') !== '1') {
                     img.setAttribute('data-local-shown', '1');
                     img.removeAttribute('data-remote-src');
+                    // ★ 2026-09-27 修复（审计 M10）：这是一次**新的显示起点**（本地图接管），
+                    //   把「连续失败次数」清零，否则远端再次失败时会直接继承此前的失败档位。
+                    img.setAttribute('data-retry-count', '0');
                     img.src = localSrc;
                     return;
                 }
@@ -10157,7 +10393,14 @@ function renderProfileActivityList(kind) {
                         img.src = next;
                         return;
                     }
-                    return; // 没有任何远端可换，也不降级成按钮（降级只会更糟）
+                    // ★ 2026-09-27 修复（审计 M9）：本地 blob 已失效、且**没有任何远端可换**
+                    //   （HEIC 在桌面 Chrome 解不了、服务端也没转出 JPEG，即 data-remote-src
+                    //   为空）时，旧实现直接 return —— 气泡里永久留一个坏图图标，用户
+                    //   完全不知道发生了什么。这里改为给出**可感知**的占位说明（复用
+                    //   _dmRenderMediaFallback，不另起一套 DOM）。注意：不拼任何 query 参数，
+                    //   也不重新拼 blob URL —— 只做一次性降级。
+                    _dmRenderMediaFallback(img, '');
+                    return;
                 }
                 // 情况 C：远端地址 → 退避重试两次
                 if (retryCount < 2 && fullSrc && String(fullSrc).indexOf('blob:') !== 0) {
@@ -10169,6 +10412,12 @@ function renderProfileActivityList(kind) {
                     }, delay);
                     return;
                 }
+                // ★ 2026-09-27 修复（审计 M10）：走到终态降级前先把「连续失败次数」清零。
+                //   旧实现 data-retry-count 只增不减，同一张图第二次失效时 retryCount 仍是
+                //   上一次的 2 → 直接越过情况 C 跳到按钮终态，用户根本没有第二次机会。
+                //   计数语义必须是「连续失败次数」：一次**成功 retry 发起之前**已被下面的
+                //   onload 路径重置；这里保证终态不会把计数留在高位。
+                img.setAttribute('data-retry-count', '0');
                 // 情况 D：确实没救了 → 退化成可点开的兜底按钮（点开用原始地址）
                 _dmRenderMediaFallback(img, fullSrc);
             };
@@ -10186,77 +10435,133 @@ function renderProfileActivityList(kind) {
                     var remote = String(img.getAttribute('data-remote-src') || '');
                     if (!remote || img.getAttribute('data-swapping') === '1') return;
                     img.setAttribute('data-swapping', '1');
-                    var probe = new Image();
-                    probe.onload = function() {
-                        try { img.removeAttribute('data-swapping'); } catch (e) {}
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) return;
+                    // ★ 2026-09-27 修复（审计 M11：换源要下载两遍远端图）：
+                    //   旧实现先用 `new Image()` 探一次远端可用性（probe），onload 后再把
+                    //   `img.src = remote` —— 同一张图下载两遍，弱网下流量翻倍。
+                    //   改为**预加载到目标元素本身**：probe 不再是独立对象，而是把远端地址
+                    //   直接喂给这个 `<img>`（浏览器据此完成一次下载并解码）。为了让"换源期间
+                    //   不闪空窗"，仍保留本地图当背景垫底（本地图本来就已经在 src 里显示），
+                    //   待远端 load 完成后再撤背景、释放 blob。整条链路只请求远端一次。
+                    var localSrc = String(img.getAttribute('data-local-src') || '');
+                    // ★ 2026-09-27 修复（审计 M14：once:true 的 load 监听在失败分支从不移除）：
+                    //   旧实现两个 { once: true } 监听（finishSwap 与 error 清理）互相不知道对方
+                    //   是否存在 —— error 触发后 load 监听仍挂在元素上（闭包连同 img 引用滞留），
+                    //   反之亦然。这里统一命名、互相注销，保证任一路径结束后两个监听都不残留。
+                    var onLoad = null;
+                    var onError = null;
+                    var cleanupListeners = function() {
+                        if (onLoad) { try { img.removeEventListener('load', onLoad); } catch (eL) {} onLoad = null; }
+                        if (onError) { try { img.removeEventListener('error', onError); } catch (eE) {} onError = null; }
+                        try { img.removeAttribute('data-swapping'); } catch (eS) {}
+                    };
+                    var finishSwap = function() {
+                        cleanupListeners();
+                        // ★ 2026-09-27（审计 M10）：成功换到远端图 → 重置「连续失败计数」，
+                        //   让同一气泡此后如有异常从零开始，而不是继承上次的失败档位。
+                        try { img.setAttribute('data-retry-count', '0'); } catch (eRc) {}
+                        try {
+                            img.style.backgroundImage = '';
+                            img.style.backgroundSize = '';
+                        } catch (eClr) {}
+                        // 远端确认显示后，本地 blob 不再需要；通知外层释放（幂等）
+                        try {
+                            if (typeof window.__xtjReleaseDmLocalPreview === 'function') {
+                                window.__xtjReleaseDmLocalPreview(localSrc);
+                            }
+                        } catch (e) {}
+                        img.removeAttribute('data-local-src');
+                        img.removeAttribute('data-local-shown');
+                    };
+                    // ★ 2026-09-27 修复（审计 M5：远端探测失败后既不重试也不释放 blob）：
+                    //   弱网下 probe 失败就彻底放弃，且因为 renderDockMessages 签名未变会直接
+                    //   return，hydrate 再也不会被触发 → blob 永久滞留内存。现在退避重试
+                    //   2 次（600ms / 1800ms）；仍失败则**保留本地 blob 继续显示**（既有设计
+                    //   意图：绝不降级成按钮），但把背景垫底与监听都清干净，避免闭包滞留。
+                    // 远端地址已有本地图在显示 → 先把本地图铺成背景，换源期间零空窗。
+                    // 抽成函数：每次重试前都要重新铺（error 会把 <img> 内容清空露出空白）。
+                    var applyLocalBackdrop = function() {
+                        if (!localSrc) return;
+                        try {
+                            img.style.backgroundImage = 'url("' + localSrc.replace(/["\\]/g, '') + '")';
+                            img.style.backgroundSize = '100% 100%';
+                            img.style.backgroundRepeat = 'no-repeat';
+                        } catch (eBg) {}
+                    };
+                    var retryLeft = 2;
+                    var scheduleRetry = function() {
+                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (retryLeft <= 0) { cleanupListeners(); return; }
+                        retryLeft -= 1;
+                        var delay = retryLeft === 1 ? 600 : 1800;
+                        setTimeout(function() {
+                            if (!img.parentNode) { cleanupListeners(); return; }
+                            if (img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                            // error 之后 <img> 是空的 → 先把本地图重新铺成背景，避免露出空白
+                            applyLocalBackdrop();
+                            // 复用目标元素本身重新加载（命中缓存/失败重试都只算这一路）
+                            try { img.src = remote; } catch (eR) {}
+                        }, delay);
+                    };
+                    applyLocalBackdrop();
+                    onLoad = function() {
+                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
                         // ★ 2026-09-26（`object-fit` 改为 cover 后的必要条件）：只有远端图的
                         //   真实比例与占位比例**一致**时才允许换源。比例一旦不一致，cover 会把
                         //   远端图按占位盒子裁切（老消息没有 w/h，兜的是 4:3，会被裁掉一大块）。
                         //   不一致就继续显示本地 blob：本地字节、比例一定对、又不可能 404。
-                        //   代价只是 blob 晚一点释放，用户完全无感。
-                        var pw = Number(probe.naturalWidth || 0);
-                        var ph = Number(probe.naturalHeight || 0);
-                        var boxW = Number(img.getAttribute('width') || img.naturalWidth || 0);
-                        var boxH = Number(img.getAttribute('height') || img.naturalHeight || 0);
-                        if (!pw || !ph) return;
-                        if (boxW > 0 && boxH > 0) {
+                        var pw = Number(img.naturalWidth || 0);
+                        var ph = Number(img.naturalHeight || 0);
+                        var boxW = Number(img.getAttribute('width') || 0);
+                        var boxH = Number(img.getAttribute('height') || 0);
+                        if (pw > 0 && ph > 0 && boxW > 0 && boxH > 0) {
                             var probeRatio = pw / ph;
                             var boxRatio = boxW / boxH;
-                            if (Math.abs(probeRatio - boxRatio) / boxRatio > 0.02) return;
+                            if (Math.abs(probeRatio - boxRatio) / boxRatio > 0.02) {
+                                // 比例不符：退回本地图，清监听但不释放 blob（本地图还要继续显示）
+                                cleanupListeners();
+                                try { img.style.backgroundImage = ''; img.style.backgroundSize = ''; } catch (ePr) {}
+                                return;
+                            }
                         }
-                        var localSrc = String(img.getAttribute('data-local-src') || '');
-                        // ★ 换源期间**用本地图当背景垫底**：把 img.src 指向远端会再走一次网络
-                        //   （缓存未命中时又要等一整轮），那正是"图片忽然消失"的观感。
-                        //   盒子的比例已经由 width/height 锁定，背景铺满即与本地图完全重合，
-                        //   远端真正解码完成后再撤掉背景 —— 全程看不到空窗。
-                        if (localSrc) {
-                            try {
-                                img.style.backgroundImage = 'url("' + localSrc.replace(/["\\]/g, '') + '")';
-                                img.style.backgroundSize = '100% 100%';
-                                img.style.backgroundRepeat = 'no-repeat';
-                            } catch (eBg) {}
-                        }
-                        img.removeAttribute('data-remote-src');
-                        img.src = remote;
-                        var finishSwap = function() {
-                            try {
-                                img.style.backgroundImage = '';
-                                img.style.backgroundSize = '';
-                            } catch (eClr) {}
-                            // 远端确认显示后，本地 blob 不再需要；通知外层释放（幂等）
-                            try {
-                                if (typeof window.__xtjReleaseDmLocalPreview === 'function') {
-                                    window.__xtjReleaseDmLocalPreview(localSrc);
-                                }
-                            } catch (e) {}
-                            img.removeAttribute('data-local-src');
-                            img.removeAttribute('data-local-shown');
-                        };
-                        if (img.complete && img.naturalWidth) finishSwap();
-                        else {
-                            img.addEventListener('load', finishSwap, { once: true });
-                            // 远端这一次没成功 → 保留本地背景图，由 handleDockChatImageError 退回本地 src
-                            img.addEventListener('error', function() {
-                                try { img.style.backgroundImage = ''; img.style.backgroundSize = ''; } catch (eClr2) {}
-                            }, { once: true });
-                        }
+                        finishSwap();
                     };
-                    probe.onerror = function() {
-                        try { img.removeAttribute('data-swapping'); } catch (e) {}
-                        // 远端暂时取不到 → 保留本地图，稍后由调用方/重渲染再试
+                    onError = function() {
+                        // 远端这一次没成功 → **保留本地背景图**（不撤，避免露白），安排有限重试。
+                        // 旧实现这里会先把背景清掉，弱网下用户就会看到一次空白闪动 ——
+                        // 与"文件没换成功就继续显示本地图"的设计意图相悖。
+                        scheduleRetry();
                     };
-                    probe.src = remote;
+                    img.addEventListener('load', onLoad);
+                    img.addEventListener('error', onError);
+                    // ★ 预加载到目标元素本身：只请求远端一次（onload 后浏览器已缓存）
+                    img.removeAttribute('data-remote-src');
+                    try { img.src = remote; } catch (eSet) { cleanupListeners(); }
                 });
             }
             window.hydrateDockChatRemoteMedia = hydrateDockChatRemoteMedia;
+
+            // ★ 2026-09-27 修复（审计 M9）：无远端可换时给用户**可感知**的降级说明。
+            //   旧实现只给一个「查看图片」按钮，点开还得再失败一次；HEIC 在桌面 Chrome
+            //   解不了、服务端也没转出 JPEG 时，用户完全不知道是格式问题。这里按 mime
+            //   给出原因与可执行建议（HEIC → 转 JPEG），并保留可点开按钮（有远端地址时）。
+            function _dmMediaFallbackReason() {
+                return '图片无法显示：当前浏览器/服务端无法解码该格式（HEIC/HEIF 请先用 iPhone 相册「编辑 → 存储为 JPEG」，或在电脑上用「文件」里的 JPG 重新发送）';
+            }
 
             function _dmRenderMediaFallback(img, fullSrc) {
                 if (!img || !img.parentNode) return;
                 var fallback = document.createElement("button");
                 fallback.type = "button";
                 fallback.className = "msg-media-fallback";
-                fallback.innerHTML = '<span class="msg-media-fallback-icon">图片</span><span class="msg-media-fallback-text">查看图片</span>';
+                // 无远端可换 → 直接把原因写进气泡；有远端 → 仍提示可点开查看
+                if (fullSrc) {
+                    fallback.innerHTML = '<span class="msg-media-fallback-icon">图片</span><span class="msg-media-fallback-text">查看图片</span>';
+                    fallback.title = _dmMediaFallbackReason();
+                } else {
+                    fallback.innerHTML = '<span class="msg-media-fallback-icon">图片</span><span class="msg-media-fallback-text">图片无法显示</span>';
+                    fallback.title = _dmMediaFallbackReason();
+                    fallback.setAttribute('aria-label', _dmMediaFallbackReason());
+                }
                 fallback.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -10535,6 +10840,16 @@ function renderProfileActivityList(kind) {
                                 // 删除对应的 DOM 元素
                                 var domEl = document.querySelector('.comment-item[data-comment-id="' + commentId + '"]');
                                 if (domEl && domEl.parentNode) domEl.parentNode.removeChild(domEl);
+                                // ★ 2026-09-27 修复（审计 P11：DELETE 只删 DOM，不同步「评论 N」计数）：
+                                //   此前只移除单个 .comment-item 节点，卡片上的「评论 N」统计行与
+                                //   「评论记录」面板仍停留在删除前的数字，直到下一次全量刷新才对上。
+                                //   这里复用 04 导出的单卡片重绘入口（P2 引入），按最新 feedAllComments
+                                //   重绘本帖卡片，统计行与评论树随之一致。
+                                //   注意只在 post_id 可用时调用；拿不到就退化为「等下次全量刷新」，
+                                //   不做无谓的整屏重绘（那正是 P2 要消灭的）。
+                                if (row.post_id != null && typeof window.__xtjSchedulePostCardPatch === 'function') {
+                                    try { window.__xtjSchedulePostCardPatch(row.post_id); } catch (ePatchDel) {}
+                                }
                                 // Phase 4: 取消对应的 cat AI 轮询任务
                                 if (typeof cancelCatAiTask === 'function') {
                                     cancelCatAiTask(commentId, 'comment deleted via Realtime');
@@ -10744,7 +11059,12 @@ function renderProfileActivityList(kind) {
                     return Promise.resolve(_dmListShared.json);
                 }
                 if (_dmListShared.inflight) return _dmListShared.inflight;
-                var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)))
+                // ★ 2026-09-27（M15 配套）：本函数是 DM 轮询的主链路
+                //   （startDMPolling → pollNow → updateUnreadBadge → 这里），属后台被动请求。
+                //   显式标记 background，让 ensureProtectedOperationAuth 保留 refresh 冷却，
+                //   避免每 60 秒一轮的轮询把「401/403 后 30 秒不重试」的冷却反复清零，
+                //   持续打 /api/user/refresh。用户主动操作（点按钮）走其它路径，不受影响。
+                var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)), { background: true })
                     .then(function(resp) { return (resp && resp.ok) ? resp.json().catch(function() { return null; }) : null; })
                     .then(function(json) {
                         if (json && json.ok) { _dmListShared.json = json; _dmListShared.at = Date.now(); }
@@ -10791,7 +11111,7 @@ function renderProfileActivityList(kind) {
                     // 兼容新旧API：优先用后端通知API，降级到本地检测
                     var unread = 0;
                     if (typeof window.xtjProtectedFetch !== 'function') return;
-                    var notifRes = await window.xtjProtectedFetch('/api/report/notifications');
+                    var notifRes = await window.xtjProtectedFetch('/api/report/notifications', { background: true });
                     if (!notifRes.ok) return;
                     var notifData = await notifRes.json().catch(function() { return {}; });
                     unread = Number(notifData.unread) || 0;
@@ -11249,11 +11569,26 @@ function renderProfileActivityList(kind) {
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'chat') {
                             // 聊天 tab 刷新逻辑
+                            // ★ 2026-09-27 修复（审计 C14）：旧实现在调用 loadDockChatList() 后
+                            //   **不 await** 就立刻弹「刷新完成」并释放刷新锁 isRefreshing[tab]。
+                            //   后果：① 提示先报成功、网络失败时又报失败（自相矛盾）；
+                            //   ② 锁提前释放，用户可在请求在途时再次双击触发并发刷新。
+                            //   改为 await 真正完成后才给结果提示，并在 finally 里释放锁。
                             window.showToast('正在刷新...');
                             window.dockChatListCacheTime = 0;
-                            loadDockChatList();
-                            isRefreshing[tab] = false;
-                            window.showToast('刷新完成');
+                            Promise.resolve()
+                                .then(function() { return loadDockChatList(); })
+                                .then(function() {
+                                    window.showToast('刷新完成');
+                                })
+                                .catch(function(err) {
+                                    console.error('[chat] refresh failed', err);
+                                    window.showToast('刷新失败');
+                                })
+                                .then(function() {
+                                    // finally 语义：无论成功/失败都释放锁
+                                    isRefreshing[tab] = false;
+                                });
                         } else if (tab === 'profile') {
                             // 个人页刷新
                             window.showToast('正在刷新...');
@@ -11303,6 +11638,18 @@ function renderProfileActivityList(kind) {
                     window.cleanupPhotoWallTransientState();
                 }
                 var previousPanel = document.querySelector('.dock-panel.active');
+                // ★ 2026-09-27 修复（审计 C16：私信轮询离开聊天页未停止）：
+                //   调查结论 —— stopDMPolling 此前**只在登出/清 auth 时**被调用
+                //   （03-profile-report-ai.js 的 doLogout / clearAllAuthState），
+                //   而 startDMPolling 在「切到聊天 Tab / 返回列表 / openChat」三处都会启动。
+                //   于是从 openChat 进入会话后启动的 60s 轮询，切到帖子/我的/照片墙后
+                //   仍在后台持续跑（pollNow 里只要 dockChatActiveUser 还在就会一直刷新该会话），
+                //   属于真实的"离开聊天页仍轮询"问题（visibilitychange 只负责恢复、不负责暂停）。
+                //   修法：切离聊天 Tab 时停止轮询；切回聊天 Tab 时会由下面的分支重新 startDMPolling。
+                //   注意：只在此处（06）处理 Tab 维度，登出路径仍由 03 的 stopDMPolling 负责。
+                if (previousPanel && previousPanel.id !== 'panelChat' && currentDockTab === 'chat' && tab !== 'chat') {
+                    try { if (typeof stopDMPolling === 'function') stopDMPolling(); } catch (eStopPoll) {}
+                }
                 currentDockTab = tab;
                 window.safeStorage.set('xtj_current_tab', tab);
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
@@ -11597,6 +11944,14 @@ function renderProfileActivityList(kind) {
                 el.innerHTML = getXtjLoadingHtml(title, subtitle, variant);
             }
 
+            // ★ 2026-09-27 修复（审计 C11）：从帖子/通知直接 openChat() 进入私信详情时，
+            //   会话列表根本没被加载过（列表 DOM 仍是空的）。此时返回列表会走下面的
+            //   `window.dockChatListCacheTime = Date.now()` 分支 —— 因为"缓存新鲜"而
+            //   直接 return，loadDockChatList 判定 Date.now()-cacheTime < 20s 直接跳过，
+            //   于是列表是空白的，要等 20s 或手动下拉才会加载。
+            //   这里用一个显式标记记录"列表从未成功渲染过"，返回列表时据此强制加载一次。
+            var _dockChatListEverLoaded = false;
+
             function dockChatGoBack() {
                 dockChatActiveUser = null;
                 dockChatSending = false;
@@ -11613,7 +11968,13 @@ function renderProfileActivityList(kind) {
                 syncDockChatLayoutState();
                 // ★ 2026-09-25 修复：返回会话列表时 0 值即"缓存失效"，缓存时长被提到 20s 后
                 //   这里会必然触发一次 /api/dm/list 往返（列表明明还在屏幕上）。改为标记为刚刷新。
-                window.dockChatListCacheTime = Date.now();
+                // ★ 2026-09-27 修复（C11）：若列表**从未加载成功过**（例如从帖子直接 openChat
+                //   进的详情），则必须清掉缓存时间戳强制加载，否则返回时列表空白。
+                var listEl = document.getElementById('dockChatList');
+                var listHasContent = !!(listEl && listEl.children.length);
+                if (_dockChatListEverLoaded || listHasContent) {
+                    window.dockChatListCacheTime = Date.now();
+                }
                 loadDockChatList();
                 startDMPolling(300000);
                 if (typeof window.__xtjResetIOSChatViewport === 'function') {
@@ -11643,6 +12004,13 @@ function renderProfileActivityList(kind) {
 
             window.openChat = function(userName) {
                 if (!window.currentUser) { showToast('请先登录'); return; }
+                // ★ 2026-09-27 待产品确认（审计 C13）：禁言是否应禁止"查看"私信。
+                //   审计认为「禁言应只禁发送，不应禁查看」，但这属于**产品语义**问题，不是明确 bug。
+                //   现状：禁言用户被这一行直接挡在会话之外（连历史都看不了）。
+                //   保守处理：暂不放开权限，仅保留拦截 + TODO。
+                //   → 若产品确认改为「仅禁发」，改动点：删除/放宽**本行** return，
+                //     会话即可进入；发送侧仍由 sendDockChatMessage 第 1940 行附近的
+                //     isUserMuted() 拦截兜底（发送必须拦，不动）。
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 if (userName === window.currentUser) { switchDockTab('chat', true); return; }
                 if (currentDockTab === 'posts') {
@@ -11650,6 +12018,9 @@ function renderProfileActivityList(kind) {
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
+                // ★ 2026-09-27 修复（C11）：直接进详情时，会话列表并未加载，
+                //   标记为"待加载"，返回列表时 dockChatGoBack 会据此强制加载一次。
+                _dockChatListEverLoaded = false;
                 // 清除渲染签名，确保缓存加载不会因签名匹配跳过（当前 innerHTML 是 loading 状态）
                 if (typeof _chatRenderSignature !== 'undefined') _chatRenderSignature[userName] = undefined;
                 // ★ 2026-09-25 修复（切换联系人闪一下）：这里不再无条件画 loading 骨架。
@@ -11663,6 +12034,69 @@ function renderProfileActivityList(kind) {
                 loadDockChatMessages(userName, true);
                 startDMPolling(60000, true);
             };
+
+            // ★ 2026-09-27 新增（审计 C8）：把"按会话分组 + 预热缓存"的逻辑抽成可复用函数，
+            //   供首屏渲染与"截断补拉"两条路径共用，避免两处口径分叉。
+            function buildDockChatConversations(allMsgs) {
+                var convMap = {};
+                var preheatMap = {};
+                (Array.isArray(allMsgs) ? allMsgs : []).forEach(function(m) {
+                    var other = m.user_name === window.currentUser ? m.media_url : m.user_name;
+                    if (!other) return;
+                    if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
+                        convMap[other] = { other_user: other, last_message: getDockChatMessagePreview(m), last_time: m.created_at, unread: 0 };
+                    }
+                    if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
+                        convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
+                    }
+                    if (!preheatMap[other]) preheatMap[other] = [];
+                    preheatMap[other].push(m);
+                });
+                var convs = Object.keys(convMap).map(function(k) { return convMap[k]; })
+                    .sort(function(a, b) { return new Date(b.last_time) - new Date(a.last_time); });
+                return { convs: convs, preheatMap: preheatMap };
+            }
+
+            // 把 preheatMap 写进 _chatCache（只在缓存为空或确实更旧时写入，避免降级覆盖）
+            function preheatDockChatCache(preheatMap) {
+                try {
+                    Object.keys(preheatMap).forEach(function(other) {
+                        var k = getDockChatCacheKey(other);
+                        var rows = preheatMap[other].sort(function(a, b) {
+                            return String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
+                                   String(a.id || '').localeCompare(String(b.id || ''));
+                        });
+                        var existing = _chatCache[k];
+                        if (Array.isArray(existing) && existing.length >= rows.length && existing.length > 0) return;
+                        _chatCache[k] = rows;
+                    });
+                } catch (ePreheat) { /* 预热失败不影响列表渲染 */ }
+            }
+
+            // ★ 2026-09-27 新增（审计 C8）：会话列表窗口截断的"温和兜底"补拉。
+            //   现状局限（务必知晓）：
+            //     · 后端 `/api/dm/list` **只接受 limit、不支持游标分页**（render-api/server.js
+            //       的 dm/list 无 before/offset 参数），返回的是"该用户两个方向最近 N 条消息"，
+            //       没有服务端未读聚合接口。
+            //     · 因此当高频会话把最近 180 条塞满时，更早的旧会话会从列表消失，
+            //       窗口外的未读也无法从服务端补齐。
+            //   兜底做法（只用现有接口）：把 limit 提到服务端上限 500 再拉一次，
+            //   按 id 去重合并后重算会话列表与未读角标 —— 能覆盖绝大多数场景，
+            //   但**极端情况（>500 条仍被单一高频会话占满）依旧会截断**，
+            //   彻底解法需要后端支持会话级聚合/游标（记为已知局限）。
+            async function fetchDockChatListCatchUp(listOwner, listResultStale) {
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/dm/list?limit=500', { timeoutMs: 15000 });
+                    if (!resp || !resp.ok) return null;
+                    var json = await resp.json().catch(function() { return null; });
+                    if (!json || !json.ok) return null;
+                    if (listResultStale()) return null;
+                    return json.data || [];
+                } catch (eCatch) {
+                    console.warn('[chat-list] 补拉更大会话窗口失败（保持首屏结果）:', eCatch && eCatch.message);
+                    return null;
+                }
+            }
 
             async function loadDockChatList() {
                 const el = document.getElementById('dockChatList');
@@ -11711,57 +12145,51 @@ function renderProfileActivityList(kind) {
                     const dmResult = await window.fetchDmListShared(180);
                     if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
                     if (listResultStale()) return;
-                    const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
+                    var rawRows = dmResult.data || [];
+                    var allMsgs = mergeDockChatRowsById(rawRows, false, 180);
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">暂无最近会话</div></div>';
                         setUnreadBadgeCount(0);
                         window.dockChatListCacheTime = Date.now();
+                        _dockChatListEverLoaded = true;
                         renderDockChatFixedEntry(el);
                         syncDockChatLayoutState();
                         return;
                     }
-                    const convMap = {};
+                    // ★ 2026-09-27 修复（审计 C8）：检测"窗口可能被截断"→ 补拉一页更宽窗口。
+                    //   判据：服务端按 limit 返回，若原始条数**达到上限 180**，说明后面
+                    //   很可能还有更早的消息被截掉（高频会话会占满窗口，使其它旧会话消失）。
+                    //   仅在确实可能截断时才多发一次请求，避免给首屏常态路径增加负担。
+                    var maybeTruncated = rawRows.length >= 180;
+                    if (maybeTruncated) {
+                        var widerRows = await fetchDockChatListCatchUp(listOwner, listResultStale);
+                        if (widerRows && widerRows.length > rawRows.length) {
+                            // 用 id 去重后合并（补拉窗口通常包含首屏窗口，取并集最稳妥）
+                            var mergedRows = rawRows.concat(widerRows);
+                            var widerMsgs = mergeDockChatRowsById(mergedRows, false, 500);
+                            if (widerMsgs.length > allMsgs.length) allMsgs = widerMsgs;
+                        }
+                    }
                     // ★ 2026-09-25 优化（聊天秒开）：会话列表接口返回的其实是「该用户最近的
                     //   全部消息」，此前只取每个会话的最后一条做预览，其余全部丢弃 —— 于是用户
                     //   点开会话时必须等一次 /api/dm/messages 网络往返才能看到内容（"点开会话要
                     //   等一下才出现消息"）。
                     //   现改为：把每条消息按会话归组，预热进 _chatCache。点击会话时 loadDockChatMessages
                     //   会先命中缓存立即渲染（见其开头 _chatCache 分支），网络回包后再精确替换，
-                    //   从而实现"点开秒见内容"。
-                    const preheatMap = {};
-                    allMsgs.forEach(m => {
-                        const other = m.user_name === window.currentUser ? m.media_url : m.user_name;
-                        if (!other) return;
-                        if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
-                            convMap[other] = { other_user: other, last_message: getDockChatMessagePreview(m), last_time: m.created_at, unread: 0 };
-                        }
-                        if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
-                            convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
-                        }
-                        if (!preheatMap[other]) preheatMap[other] = [];
-                        preheatMap[other].push(m);
-                    });
-                    // 按会话预热缓存：只在缓存为空或确实更旧时写入，避免把更完整的既有缓存降级覆盖
-                    try {
-                        Object.keys(preheatMap).forEach(function(other) {
-                            var k = getDockChatCacheKey(other);
-                            var rows = preheatMap[other].sort(function(a, b) {
-                                return String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
-                                       String(a.id || '').localeCompare(String(b.id || ''));
-                            });
-                            var existing = _chatCache[k];
-                            // 已有缓存且条数不少于预热数据时跳过（网络回包的数据更权威）
-                            if (Array.isArray(existing) && existing.length >= rows.length && existing.length > 0) return;
-                            _chatCache[k] = rows;
-                        });
-                    } catch (ePreheat) { /* 预热失败不影响列表渲染 */ }
-                    const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
+                    //   从而实现"点开秒见内容"。分组逻辑抽到 buildDockChatConversations 复用。
+                    var grouped = buildDockChatConversations(allMsgs);
+                    preheatDockChatCache(grouped.preheatMap);
+                    const convs = grouped.convs;
                     // ★ 2026-09-25 修复（审计 M-7/H-2）：角标口径统一走 aggregateDmUnread，
                     //   与 updateUnreadBadge 完全同源，避免两处算法/上限不同导致数字跳动。
+                    // ★ 2026-09-27（C8）：补拉后基于**更宽的窗口**重算角标，使窗口外旧会话的
+                    //   未读也能计入；但服务端无聚合接口，极端情况下（>500 条仍被占满）仍会低估，
+                    //   属于已知局限（见 fetchDockChatListCatchUp 注释）。
                     setUnreadBadgeCount(aggregateDmUnread(allMsgs).total);
                     if (typeof window.__xtjNoteDmUnreadFresh === 'function') window.__xtjNoteDmUnreadFresh();
                     renderDockChatConversationList(el, convs);
                     window.dockChatListCacheTime = Date.now();
+                    _dockChatListEverLoaded = true;
                     renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
                     // 非阻塞加载头像: 先显示列表, 头像后台补上（包含固定入口 xxz）
@@ -12229,9 +12657,20 @@ function renderProfileActivityList(kind) {
 
             function releaseDockChatLocalPreview(message) {
                 var previewUrl = String(message && message.__localPreviewUrl || '');
-                if (previewUrl.indexOf('blob:') === 0) {
-                    try { URL.revokeObjectURL(previewUrl); } catch (e) {}
+                if (previewUrl.indexOf('blob:') !== 0) return;
+                // ★ 2026-09-27 修复（审计 M3：只 revoke 不清缓存 __localPreviewUrl）：
+                //   旧实现只 `URL.revokeObjectURL` 就完事，缓存里那条消息的
+                //   `__localPreviewUrl` 仍指着这个已被 revoke 的 blob —— 用户切回会话时
+                //   渲染又把它当 src，浏览器必然先 error 再回退，图片闪一下（正是下方
+                //   __xtjReleaseDmLocalPreview 注释里声称要消灭的现象）。
+                //   现在收敛到**同一个实现**：复用 __xtjReleaseDmLocalPreview 的完整语义
+                //   （清掉所有会话缓存里指向该 blob 的字段 + revoke）。它内部已做
+                //   幂等与 blob: 协议校验，这里不再重复一套逻辑。
+                if (typeof window.__xtjReleaseDmLocalPreview === 'function') {
+                    window.__xtjReleaseDmLocalPreview(previewUrl);
+                    return;
                 }
+                try { URL.revokeObjectURL(previewUrl); } catch (e) {}
             }
 
             // ★ 2026-09-26：气泡把本地 blob 成功换成远端地址后调用。
@@ -12369,9 +12808,18 @@ function renderProfileActivityList(kind) {
                     // 老消息没有 w/h（服务端此前不存），兜一个 4:3，也比 0 高度好得多。
                     var mw = Math.round(Number(media.w || 0));
                     var mh = Math.round(Number(media.h || 0));
-                    if (!(mw > 0 && mh > 0 && mw <= 20000 && mh <= 20000)) { mw = 4; mh = 3; }
+                    var hasRealDims = (mw > 0 && mh > 0 && mw <= 20000 && mh <= 20000);
+                    if (!hasRealDims) { mw = 4; mh = 3; }
                     var dimAttr = ' style="aspect-ratio:' + mw + ' / ' + mh + '"';
-                    if (mw !== 4 || mh !== 3) dimAttr += ' width="' + mw + '" height="' + mh + '"';
+                    if (hasRealDims) dimAttr += ' width="' + mw + '" height="' + mh + '"';
+                    // ★ 2026-09-27 修复（审计 M8：4:3 兜底不写 width/height，盒子 0×0）：
+                    //   老消息没有 w/h 时兜 4:3，但此前**不写** width/height，而 CSS 是
+                    //   `width:auto`（css/style.css .chat-msg .msg-img）→ `aspect-ratio` 需要
+                    //   至少一维确定才能算出另一维，两维都 auto 时盒子塌成 0×0，老消息仍会
+                    //   布局跳动。这里给兜底 `<img>` 补一个**确定的宽度基准** width:100%
+                    //   （走 .has-media 气泡的满宽 + max-height:260px 约束），aspect-ratio
+                    //   据此算出高度，盒子立刻有尺寸，也不破坏有真实 w/h 的现有正确渲染。
+                    else dimAttr += ' style="aspect-ratio:' + mw + ' / ' + mh + ';width:100%"';
                     // ★ 2026-09-25 修复（聊天图片预览器降级到旧 #imgViewer）：
                     //   此前 onclick 只传了 src，没有把 <img> 自身作为 triggerEl 传入。
                     //   openImageViewer → openPostImagePreview 依赖 triggerEl 读取
@@ -12429,7 +12877,12 @@ function renderProfileActivityList(kind) {
                 //   "已读未读"），用户截图里那条正是自己发的图 —— 现在这一行统一按
                 //   「已读/未读 + 时间」排布，位置固定在**图片下方**（见下方 has-media
                 //   的 .msg-meta 规则），与文字消息观感一致。
-                var readStatus = sent
+                // ★ 2026-09-27 修复（审计 C15：失败消息自相矛盾显示"发送失败 + 未读"）：
+                //   __failed 的消息已被判定为发送失败，既没成功提交到服务端，
+                //   就不存在"已读/未读"这回事。旧实现照常计算 readStatus，于是
+                //   文字气泡里同时出现 failMark（发送失败·长按重发）和 readStatus（未读），
+                //   观感矛盾且误导。这里对失败态直接清空 readStatus，只保留失败态 + 时间。
+                var readStatus = (sent && !message.__failed)
                     ? (isMsgReadByMe(message)
                         ? '<span class="msg-read-status is-read">已读</span>'
                         : '<span class="msg-read-status">未读</span>')
@@ -12784,7 +13237,6 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 var previousScrollTop = el.scrollTop;
-                var previousScrollHeight = el.scrollHeight;
                 var isNearBottom = !el.scrollHeight || isDockChatNearBottom(el, 100);
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
@@ -12830,7 +13282,15 @@ function renderProfileActivityList(kind) {
                     // Keep the reader anchored on the same message while a polling refresh
                     // updates the DOM; only advertise the new messages instead of yanking
                     // the conversation to the bottom.
-                    el.scrollTop = previousScrollTop + Math.max(0, el.scrollHeight - previousScrollHeight);
+                    // ★ 2026-09-27 修复（审计 C10：上翻历史被轮询拖回底部）：
+                    //   旧公式 `previousScrollTop + (scrollHeight - previousScrollHeight)`
+                    //   是「在**顶部之前**插入内容、需要把内容整体下推」的补偿语义。
+                    //   但本函数的更新方式是在**末尾追加**（消息按时间升序渲染，新的在下面），
+                    //   追加发生在视口**下方**，根本不影响用户当前正在阅读的位置。
+                    //   套用该公式会把 scrollTop 跟着内容高度增量往前推 —— 每轮轮询都把
+                    //   正在上翻历史的用户往底部方向拽一段，连点几次就"被拖回底部"。
+                    //   正确做法：追加到末尾时 scrollTop 保持**不变**（视口内内容位置不动）。
+                    el.scrollTop = previousScrollTop;
                     setDockChatJumpLatestVisible(true);
                 } else {
                     setDockChatJumpLatestVisible(false);
@@ -13095,11 +13555,10 @@ function renderProfileActivityList(kind) {
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
                 if (file) {
-                    // ★ 修复：显式拒绝 SVG（image/svg+xml 会通过 image/ 前缀白名单），
-                    // 后端 dm-media 拒绝 SVG 后文件已先落桶，留下 Storage 孤儿 + 公共桶
-                    // 存储型 XSS 窗口。这里与照片墙 upload-ui 的拒绝策略对齐。
-                    var svgBlocked = /^image\/svg\+xml/i.test(String(file.type || '')) || /\.svgz?$/i.test(String(file.name || '').toLowerCase());
-                    if (svgBlocked) { showToast("不支持 SVG 文件，仅支持图片、视频、音频"); return; }
+                    // ★ 修复：显式拒绝 SVG（image/svg+xml 会通过 image/ 前缀白名单）。
+                    // ★ M13：拦截规则已收敛到共用 isBlockedDmFile（粘贴/拖拽入口同用），
+                    // 确保三个入口规则一致。
+                    if (isBlockedDmFile(file)) { showToast("不支持 SVG 文件，仅支持图片、视频、音频"); return; }
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
@@ -13128,10 +13587,21 @@ function renderProfileActivityList(kind) {
                 var mediaPayload = null;
                 var mediaW = 0, mediaH = 0;
                 if (file) {
-                    try {
-                        localPreviewUrl = URL.createObjectURL(file);
-                        mediaPayload = { kind: mediaKind, url: localPreviewUrl, mimeType: file.type || '' };
-                    } catch (previewError) { /* 本地预览失败时仍继续发送原文件 */ }
+                    // ★ 2026-09-27 修复（审计 M4：视频/音频的 localPreviewUrl 泄漏 ≤50MB blob）：
+                    //   旧实现对**所有类型**无条件 `URL.createObjectURL(file)`，但只有
+                    //   `mediaKind === 'image'` 才进释放路径（成功分支里 `localPreviewUrl &&
+                    //   mediaKind === 'image'` 才把 blob 挂到消息上）。视频/音频的这个 objectURL
+                    //   **从不被任何气泡引用**（video/audio 气泡用的是远端 safeVideoSrc/safeAudioSrc，
+                    //   见下方 buildDockChatBodyMarkup），也没有任何释放点 → 每发一个视频/音频
+                    //   就泄漏一个 ≤50MB 的 blob，直到刷新页面。
+                    //   核对结论：video/audio 气泡**不依赖**这个本地预览（它们不读 __localPreviewUrl），
+                    //   故选方案 (a) 最干净 —— 只对 image 创建 objectURL，其余类型返回 ''。
+                    if (mediaKind === 'image') {
+                        try {
+                            localPreviewUrl = URL.createObjectURL(file);
+                            mediaPayload = { kind: mediaKind, url: localPreviewUrl, mimeType: file.type || '' };
+                        } catch (previewError) { /* 本地预览失败时仍继续发送原文件 */ }
+                    }
                 }
                 var actorKey = DM_MARKER;
                 var optimisticContentPayload = buildDMMessageContent({ content: capturedContent }, { text: capturedContent, read_at: null, media: mediaPayload });
@@ -13376,7 +13846,17 @@ function renderProfileActivityList(kind) {
             //   本地快取：启动时与服务端合并，删除时回推，离线删除在下次同步补传。
             var DM_DELETED_KEY_PREFIX = 'xtj_dm_deleted_';
             var DM_DELETED_MAX = 500;
+            // ★ 2026-09-27 修复（审计 C12）：
+            //   _dmDeletedSyncedUsers 的键此前只用"对手 userName" u，但墓碑实际是
+            //   **账号级**的（DM_DELETED_KEY_PREFIX + currentUser，服务端 /api/dm/deleted
+            //   也按 req.userName 隔离）。用对手名作键有两个致命后果：
+            //     1) 失败后本次生命周期内不再同步：_dmDeletedSyncedUsers[u] 已置 1，
+            //        且失败不回滚 → 该会话的墓碑永远补推不上去（离线删除丢失）。
+            //     2) 切号后串号：A 账号同步过 u 后，切到 B 账号再用同一个 u 会命中旧标记，
+            //        或用 B 的凭证去补传 A 的删除 ID。
+            //   这里统一改为「账号 + 对手」复合键，并在同步失败时撤销标记允许重试。
             var _dmDeletedSyncedUsers = {};
+            // 待补传队列改为按"入队账号"分批存储：{ account, ids }，补传前核对当前账号。
             var _dmDeletedPendingPush = [];
 
             function getDmDeletedIds() {
@@ -13411,13 +13891,54 @@ function renderProfileActivityList(kind) {
                 persistDmDeletedIds(list);
             }
 
+            // ★ 2026-09-27（C12）：待补传队列是"账号级"的 —— 入队时记录当时的账号，
+            //   补传前核对账号一致，不一致就丢弃（绝不用新账号的凭证去提交旧账号的 ID）。
+            function enqueueDmDeletedPending(ids) {
+                var list = (Array.isArray(ids) ? ids : []).filter(Boolean);
+                if (!list.length) return;
+                var account = currentUser || '';
+                if (!account) return;
+                var batch = null;
+                for (var i = 0; i < _dmDeletedPendingPush.length; i++) {
+                    if (_dmDeletedPendingPush[i] && _dmDeletedPendingPush[i].account === account) { batch = _dmDeletedPendingPush[i]; break; }
+                }
+                if (!batch) { batch = { account: account, ids: [] }; _dmDeletedPendingPush.push(batch); }
+                batch.ids = batch.ids.concat(list).filter(function(id, idx, arr) { return arr.indexOf(id) === idx; }).slice(0, DM_DELETED_MAX);
+            }
+
+            // 取出"当前账号"的待补传 ID（不跨账号），其余账号的批次原样保留。
+            function takeDmDeletedPendingForCurrentAccount() {
+                var account = currentUser || '';
+                var mine = [];
+                var rest = [];
+                _dmDeletedPendingPush.forEach(function(batch) {
+                    if (!batch || !Array.isArray(batch.ids)) return;
+                    if (batch.account === account) mine = mine.concat(batch.ids);
+                    else rest.push(batch);
+                });
+                _dmDeletedPendingPush = rest;
+                return mine;
+            }
+
+            // 把 ids 从"当前账号"的批次中移除（推送成功后调用）。
+            function clearDmDeletedPendingForCurrentAccount(ids) {
+                var account = currentUser || '';
+                var drop = Array.isArray(ids) ? ids : [];
+                _dmDeletedPendingPush.forEach(function(batch) {
+                    if (!batch || batch.account !== account || !Array.isArray(batch.ids)) return;
+                    batch.ids = batch.ids.filter(function(x) { return drop.indexOf(x) < 0; });
+                });
+                _dmDeletedPendingPush = _dmDeletedPendingPush.filter(function(batch) { return batch && batch.ids && batch.ids.length; });
+            }
+
             // ★ 2026-09-26：把删除记录推给服务端（账号级同步）。返回 Promise<boolean>，
             //   失败时进入待补传队列，下次同步时一并补上（离线删除不丢）。
             function pushDmDeletedToServer(ids) {
                 var list = (Array.isArray(ids) ? ids : []).filter(Boolean);
                 if (!list.length) return Promise.resolve(true);
+                // ★ 2026-09-27（C12）：入队/提交都绑定"入队时的账号"，切号后不会用新账号提交旧数据。
                 if (typeof window.xtjProtectedFetch !== 'function') {
-                    _dmDeletedPendingPush = _dmDeletedPendingPush.concat(list).slice(0, DM_DELETED_MAX);
+                    enqueueDmDeletedPending(list);
                     return Promise.resolve(false);
                 }
                 return window.xtjProtectedFetch('/api/dm/deleted', {
@@ -13427,11 +13948,11 @@ function renderProfileActivityList(kind) {
                     timeoutMs: 15000
                 }).then(function(resp) {
                     if (!resp || !resp.ok) throw new Error('dm_deleted_sync_failed');
-                    _dmDeletedPendingPush = _dmDeletedPendingPush.filter(function(x) { return list.indexOf(x) < 0; });
+                    clearDmDeletedPendingForCurrentAccount(list);
                     return true;
                 }).catch(function(err) {
                     console.warn('[DM] 删除记录同步失败，已排队待补传:', err && err.message);
-                    _dmDeletedPendingPush = _dmDeletedPendingPush.concat(list).slice(0, DM_DELETED_MAX);
+                    enqueueDmDeletedPending(list);
                     return false;
                 });
             }
@@ -13441,17 +13962,27 @@ function renderProfileActivityList(kind) {
             function syncDmDeletedWithServer(userName, force) {
                 var u = String(userName || currentUser || '');
                 if (!u) return Promise.resolve(false);
-                if (_dmDeletedSyncedUsers[u] && !force) return Promise.resolve(false);
-                _dmDeletedSyncedUsers[u] = 1;
-                if (typeof window.xtjProtectedFetch !== 'function') return Promise.resolve(false);
+                // ★ 2026-09-27（C12）：复合键 —— 账号 + 对手。换账号后不复用旧标记（避免串号），
+                //   同一账号下不同会话仍各自独立（保持原有"每会话一次"的去重语义）。
+                var syncKey = (currentUser || '') + '|' + u;
+                if (_dmDeletedSyncedUsers[syncKey] && !force) return Promise.resolve(false);
+                _dmDeletedSyncedUsers[syncKey] = 1;
+                // 同步发起时的账号快照：回调里核对，账号变了就整段放弃（不写缓存、不补传）。
+                var syncOwner = currentUser || '';
+                // 撤销标记：失败（网络/非 ok）时允许下次重试，否则本次生命周期内永不重试。
+                var releaseMarker = function() { delete _dmDeletedSyncedUsers[syncKey]; };
+                if (typeof window.xtjProtectedFetch !== 'function') { releaseMarker(); return Promise.resolve(false); }
                 var localIds = getDmDeletedIds();
-                var pending = _dmDeletedPendingPush.slice();
+                // 只取**当前账号**的待补传批次（跨账号批次原样留在队列里）。
+                var pending = takeDmDeletedPendingForCurrentAccount();
                 return window.xtjProtectedFetch('/api/dm/deleted', { method: 'GET', timeoutMs: 15000 })
                     .then(function(resp) {
                         if (!resp || !resp.ok) throw new Error('dm_deleted_fetch_failed');
                         return resp.json();
                     })
                     .then(function(data) {
+                        // 回调期间账号已变（登出/切号）→ 丢弃结果，不污染新账号的墓碑，也不补传。
+                        if (!currentUser || (currentUser || '') !== syncOwner) return false;
                         var serverIds = (data && Array.isArray(data.ids)) ? data.ids : [];
                         var merged = serverIds.slice();
                         localIds.forEach(function(id) { if (merged.indexOf(id) < 0) merged.push(id); });
@@ -13460,12 +13991,15 @@ function renderProfileActivityList(kind) {
                         var changed = JSON.stringify(merged) !== JSON.stringify(localIds);
                         if (changed) persistDmDeletedIds(merged);
                         if (toPush.length) {
+                            // 补传失败不回滚"已同步"标记也无妨：失败的 ID 会进待补传队列由下次重试。
                             pushDmDeletedToServer(toPush);
                         }
                         return changed;
                     })
                     .catch(function(err) {
                         console.warn('[DM] 删除记录同步失败（继续用本机记录）:', err && err.message);
+                        // ★ C12：失败必须撤销标记 —— 否则本次生命周期内不再重试（离线删除会丢）。
+                        releaseMarker();
                         return false;
                     });
             }
@@ -14068,6 +14602,20 @@ function renderProfileActivityList(kind) {
                 }, true);
             }
 
+            // ★ 2026-09-27 修复（M13：粘贴/拖拽入口缺 SVG 拦截）：
+            //   根因：文件选择入口（sendDockChatMessage）已有显式 SVG 拦截，但粘贴（paste）
+            //   与拖拽（drop/dragover）走的是另一条路径（经 assignDockChatFile 的
+            //   `image/` 白名单，而 image/* 天然包含 image/svg+xml）→ 可绕过拦截把 SVG
+            //   塞进发送链路。后端 dm-media 拒绝 SVG 时文件已先落桶，留下 Storage 孤儿
+            //   + 公共桶存储型 XSS 窗口。
+            //   修法：把 SVG 拦截收敛成唯一的小工具函数，文件选择 / 粘贴 / 拖拽三处统一
+            //   调用，规则一致，避免以后再分叉。
+            function isBlockedDmFile(file) {
+                if (!file) return false;
+                return /^image\/svg\+xml/i.test(String(file.type || '')) ||
+                    /\.svgz?$/i.test(String(file.name || '').toLowerCase());
+            }
+
             function showDockChatFilePreview(file) {
                 const preview = document.getElementById('dockChatFilePreview');
                 const thumb = document.getElementById('dockCfpThumb');
@@ -14138,6 +14686,8 @@ function renderProfileActivityList(kind) {
                 var file = normalizeDockChatMediaFile(rawFile);
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file.size > maxFileSize) { showToast('文件大小不能超过50MB'); return false; }
+                // ★ M13：粘贴/拖拽入口统一走 isBlockedDmFile，拒绝 SVG（与文件选择入口同规则）
+                if (isBlockedDmFile(file)) { showToast('不支持 SVG 文件，仅支持图片、视频、音频'); return false; }
                 var allowedTypes = ['image/', 'video/', 'audio/'];
                 var typeOk = allowedTypes.some(function(t) { return String(file.type || '').indexOf(t) === 0; });
                 if (!typeOk) { showToast('不支持的文件类型，仅支持图片、视频、音频'); return false; }
@@ -17737,8 +18287,26 @@ function renderProfileActivityList(kind) {
                 var title = options && options.title ? options.title : '加载中..';
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
+                // ★ 2026-09-27 修复（M6：07 覆盖丢失 06 的 seq 幂等保护 + 文案透传）：
+                //   根因：本函数是 07 对 06:451 的覆盖实现。06 版本支持 options.seq——
+                //   切换会话时给骨架打序号，同一序号内的后续调用（如 openChat / 缓存命中路径
+                //   的补画）不再重绘 DOM，从而消除「骨架→内容两次 innerHTML 替换」造成的闪白；
+                //   而 07 覆盖时把 seq 判重整体丢掉，且 title/subtitle 虽被读取，最终却因
+                //   优先命中 window.__xtjSharedPhotoLoaderHtml（写死聊天骨架）而被吞掉。
+                //   后果：06 修掉的「切换联系人骨架闪烁」回归；调用方自定义文案失效。
+                //   修法：补回与 06 完全一致的 seq 判重语义（落后于最新序号 / 同序号已画过则
+                //   直接 return，不碰 DOM），并让 title/subtitle 真正参与渲染；07 带来的视觉
+                //   改进（xtj-chat-photo-loading 类 + 共享骨架 HTML）保持不变。
+                var seq = parseInt(options && options.seq, 10);
+                if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-loading')) return;
+                if (seq > 0) el.setAttribute('data-loading-seq', String(seq));
                 el.classList.add('xtj-chat-photo-loading');
-                el.innerHTML = window.__xtjSharedPhotoLoaderHtml || getXtjLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
+                // 仅当调用方未提供任何自定义文案时，才复用 07 的共享骨架（写死文案）；
+                // 一旦显式传了 title/subtitle，就走 getXtjLoadingHtml 透传，避免文案被吞。
+                var hasCustomCopy = !!((options && options.title) || (options && options.subtitle));
+                el.innerHTML = (window.__xtjSharedPhotoLoaderHtml && !hasCustomCopy)
+                    ? window.__xtjSharedPhotoLoaderHtml
+                    : getXtjLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
             };
 
             (function installChatPhotoLoaderFinal() {
@@ -17917,7 +18485,20 @@ function renderProfileActivityList(kind) {
                 var listEl = document.getElementById('announcementList');
                 var cachedAnnouncements = readAnnouncementCache();
                 var cacheFresh = !!(cachedAnnouncements && cachedAnnouncements.data && cachedAnnouncements.data.length && Date.now() - cachedAnnouncements.timestamp < ANN_CACHE_DURATION);
-                if (cacheFresh) {
+                // ★ 2026-09-27 修复（M7：realtime 无参调用被缓存短路，公告推送收不到）：
+                //   根因：06 的 subscribeToAnnouncements 回调（06:4092）里是**无参**调用
+                //   `loadAnnouncements()`——管理员发布/删除公告后由 realtime 推送触发。但本覆盖
+                //   在缓存新鲜时 `if (!forceRefresh) return;` 直接短路，于是这次无参刷新被吃掉，
+                //   其他在线客户端在 3 分钟缓存期内收不到公告更新（仅能等缓存过期）。
+                //   修法：不改 06（realtime 回调在 06 内），在本函数内用 arguments.length 区分调用来源：
+                //     · 无参（arguments.length === 0）＝被动/推送触发 → 视为强制刷新，绕过缓存；
+                //     · 显式传参（pageInit 的 loadAnnouncements(false)、发布/删除的 loadAnnouncements(true)）
+                //       → 维持原缓存语义：false 走缓存、true 强制。
+                //   安全性：无参路径只是多一次网络往返（公告接口轻量），无参调用点集中在 realtime
+                //   推送与后台预热（03 的 queueDeferredStartupTasks 无参，多一次请求可接受），
+                //   不会造成请求风暴。
+                var passiveTriggered = arguments.length === 0;
+                if (cacheFresh && !forceRefresh && !passiveTriggered) {
                     announcements = cachedAnnouncements.data;
                     updateAnnouncementBadge();
                     if (listEl && !listEl.children.length) {
@@ -17925,7 +18506,15 @@ function renderProfileActivityList(kind) {
                     }
                     // ★ 修复：缓存新鲜时不再无条件发网络请求（此前 3 分钟缓存只是"内容抢先"，
                     // 每次调用都查库）；发布/删除路径会显式传 forceRefresh=true。
-                    if (!forceRefresh) return;
+                    return;
+                }
+                if (cacheFresh && passiveTriggered) {
+                    // 先用缓存乐观回填（避免列表短暂空白），再继续走网络拉取最新公告覆盖。
+                    announcements = cachedAnnouncements.data;
+                    updateAnnouncementBadge();
+                    if (listEl && !listEl.children.length) {
+                        renderAnnouncementList();
+                    }
                 }
                 try {
                     await originalLoadAnnouncements.apply(this, arguments);
