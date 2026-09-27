@@ -567,6 +567,156 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-step.is-running .ai-tool-step-status { color: #2f7f9e; }
 .ai-tool-step.is-error .ai-tool-step-status { color: #c44b5a; }
 
+/* ── 工具「活动区」外壳（P0 + 方案 A，2026-09-28）──────────────────────
+   产品诉求：像 ChatGPT 那样——一个回复里的所有工具活动归到**同一个区域**，
+   由一个总摘要行统一控制折叠，而不是 N 个各自独立的小块 + 一行孤零零的"整理中"。
+   层级：
+     .ai-tool-activity
+       ├─ .ai-tool-activity-head   总摘要行（轮数/工具数 + 折叠箭头）
+       └─ .ai-tool-activity-body   可折叠体
+            ├─ .ai-tool-round  ... 每轮一段（不再自带外框）
+            └─ .ai-tool-organizing "整理检索结果并作答"（归位到同一层级）
+   设计要点：
+   1) 活动区比单轮**更弱化**——单轮已经有摘要行，活动区只在外层加一条极淡的
+      左侧导引线，避免"框套框"的视觉噪音；
+   2) 轮次之间的分隔用间距 + 导引线，而不是各自的外框；
+   3) 完成态整区折叠为一行，与单轮的行为一致，只是收敛层级更高。 */
+.ai-tool-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: 8px;
+  transition: opacity 200ms ease;
+}
+/* 总摘要行：比轮次摘要行更轻（字号更小、颜色更淡），形成层级差。
+   三级字号梯度（有合同测试钉住）：活动区 11px < 轮次 12px < 条目 12.5px */
+.ai-tool-activity-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 650;
+  color: #4d7268;
+  line-height: 1.5;
+  min-height: 20px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 160ms ease, color 200ms ease;
+}
+.ai-tool-activity-head:hover { background: rgba(91, 151, 131, .08); }
+.ai-tool-activity.is-running .ai-tool-activity-head { cursor: default; }
+.ai-tool-activity.is-running .ai-tool-activity-head:hover { background: transparent; }
+
+/* 总摘要图标：同样 CSS 绘制（运行中旋转环 / 完成 ✓ / 失败 !） */
+.ai-tool-activity-icon {
+  flex: 0 0 auto;
+  position: relative;
+  width: 13px; height: 13px;
+  font-size: 0;
+  text-align: center;
+}
+.ai-tool-activity-icon::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 1.6px solid rgba(47, 127, 158, .2);
+  border-top-color: rgba(47, 127, 158, .9);
+  animation: xtjToolSpin .72s linear infinite;
+}
+.ai-tool-activity.is-done .ai-tool-activity-icon::before {
+  content: '✓';
+  position: static;
+  width: auto; height: auto;
+  border: 0; border-radius: 0;
+  font-size: 11.5px; font-weight: 800;
+  color: #2f9e6e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+.ai-tool-activity.is-done.is-error .ai-tool-activity-icon::before {
+  content: '!';
+  color: #c0505e;
+}
+.ai-tool-activity-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-tool-activity-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 650;
+  color: #2f7f9e;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 180ms ease;
+}
+.ai-tool-activity.is-done .ai-tool-activity-head { color: #2f7a5f; }
+.ai-tool-activity.is-done .ai-tool-activity-count { opacity: 0; }
+.ai-tool-activity-caret {
+  flex: 0 0 auto;
+  width: 12px; height: 12px;
+  font-size: 0;
+  position: relative;
+  opacity: 0;
+  transition: opacity 180ms ease, transform 200ms cubic-bezier(.16, 1, .3, 1);
+}
+.ai-tool-activity-caret::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 5px; height: 5px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transform-origin: center;
+}
+.ai-tool-activity.is-done .ai-tool-activity-caret,
+.ai-tool-activity.is-error .ai-tool-activity-caret { opacity: .55; }
+.ai-tool-activity.is-collapsed .ai-tool-activity-caret { transform: rotate(-90deg); }
+
+/* 折叠体：与单轮同一手法（grid-template-rows 才能平滑过渡未知高度） */
+.ai-tool-activity-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 260ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
+}
+.ai-tool-activity.is-collapsed .ai-tool-activity-body {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+/* 活动区内部的容器：承载所有轮次与"整理中"，左导引线建立"同属一个区域"的归属感 */
+.ai-tool-activity-body > .ai-tool-activity-inner,
+.ai-tool-activity-body {
+  min-height: 0;
+  overflow: hidden;
+}
+.ai-tool-activity-body > .ai-tool-round:first-child,
+.ai-tool-activity-body > .ai-tool-step:first-child { margin-top: 2px; }
+/* 轮次在活动区内改为"分段"：去掉各自的外框与额外间距，只保留极淡的区隔 */
+.ai-tool-activity .ai-tool-round {
+  background: transparent;
+  border-radius: 0;
+}
+/* 轮次摘要行在活动区里降半级：字号略小于裸轮次、颜色更淡，
+   形成 活动区(11px) < 轮次(12px) < 条目(12.5px) 的三级层次。
+   注意：活动区摘要必须**严格小于**轮次摘要，否则层级感消失（有合同测试钉住）。 */
+.ai-tool-activity .ai-tool-round-head {
+  font-size: 12px;
+  color: #4f7568;
+  min-height: 20px;
+}
+/* 多轮之间用一条细分隔线，而不是各自的框 */
+.ai-tool-activity .ai-tool-round + .ai-tool-round {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px dashed rgba(91, 151, 131, .14);
+}
+
 /* ── 工具调用「并行轮次」紧凑布局（Codex 风格）─────────────────────────
    产品诉求（用户原话）："并行搜索五个网页或工具，就直接显示五个正在搜索中，
    全部搜索之后就把搜索中那些字和图标换成已完成……不要全部展开占很多位置，
@@ -920,8 +1070,11 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   .ai-tool-round.is-error .ai-tool-round-icon::before,
   .ai-tool-round-list .ai-tool-step-icon::before,
   .ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before,
-  .ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before { animation: none !important; }
-  .ai-tool-round-list-wrap { transition: none !important; }
+  .ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before,
+  .ai-tool-activity-icon::before,
+  .ai-tool-activity.is-done .ai-tool-activity-icon::before { animation: none !important; }
+  .ai-tool-round-list-wrap,
+  .ai-tool-activity-body { transition: none !important; }
 }
 html[data-xtj-motion=off] .ai-tool-step,
 html[data-xtj-motion=off] .ai-tool-result-card,
@@ -933,8 +1086,10 @@ html[data-xtj-motion=weak] .ai-tool-step.is-running::before {
 }
 html[data-xtj-motion=off] .ai-tool-round-icon::before,
 html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step-icon::before,
+html[data-xtj-motion=off] .ai-tool-activity-icon::before,
 html[data-xtj-motion=weak] .ai-tool-round-icon::before,
-html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step-icon::before {
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step-icon::before,
+html[data-xtj-motion=weak] .ai-tool-activity-icon::before {
   animation: none !important;
 }
 
@@ -1036,8 +1191,26 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 .ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-title { color: #a83f4d; }
 
 /* 深色主题下工具进展的配色（此前工具 UI 全是浅色硬编码） */
-[data-theme="dark"] .ai-tool-round-head { color: #a8c8bd; }
-[data-theme="dark"] .ai-tool-round-head:hover { background: rgba(110, 165, 140, .12); }
+/* 活动区外壳（方案 A）：与轮次同一套深色语言，但更淡一档以保持层级差 */
+[data-theme="dark"] .ai-tool-activity-head { color: #93b6a9; }
+[data-theme="dark"] .ai-tool-activity-head:hover { background: rgba(110, 165, 140, .1); }
+[data-theme="dark"] .ai-tool-activity.is-done .ai-tool-activity-head { color: #7fc9a5; }
+[data-theme="dark"] .ai-tool-activity-icon::before {
+  border-color: rgba(124, 196, 224, .2);
+  border-top-color: rgba(124, 196, 224, .88);
+}
+[data-theme="dark"] .ai-tool-activity.is-done .ai-tool-activity-icon::before { color: #6ad6a8; }
+[data-theme="dark"] .ai-tool-activity.is-done.is-error .ai-tool-activity-icon::before { color: #e2808c; }
+[data-theme="dark"] .ai-tool-activity-count { color: #7cc4dd; }
+[data-theme="dark"] .ai-tool-activity .ai-tool-round-head { color: #8fb0a4; }
+[data-theme="dark"] .ai-tool-activity .ai-tool-round + .ai-tool-round {
+  border-top-color: rgba(110, 165, 140, .18);
+}
+[data-theme="dark"] .ai-tool-activity .ai-tool-step.ai-tool-organizing {
+  border-top-color: rgba(110, 165, 140, .18);
+}
+
+[data-theme="dark"] .ai-tool-round-head { color: #a8c8bd; }[data-theme="dark"] .ai-tool-round-head:hover { background: rgba(110, 165, 140, .12); }
 [data-theme="dark"] .ai-tool-round.is-done .ai-tool-round-head { color: #7fc9a5; }
 [data-theme="dark"] .ai-tool-round-icon::before {
   border-color: rgba(124, 196, 224, .22);

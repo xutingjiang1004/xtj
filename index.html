@@ -69,19 +69,19 @@
          这里加 preload 让浏览器解析到本行就立即高优先级抓取，缩短空窗期。
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=acb9ef6f5f" />
-    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=aa0e4dba60" />
+    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=cf7c8ac33f" />
     <link rel="preload" as="style" href="css/ui-shell.min.css?v=93172dbf64" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=d1af4183ce" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=aa0e4dba60" /><link rel="stylesheet" href="css/ui-shell.min.css?v=93172dbf64" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=d1af4183ce" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=cf7c8ac33f" /><link rel="stylesheet" href="css/ui-shell.min.css?v=93172dbf64" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=4ee2fa8795" />
-    <link rel="stylesheet" href="css/ui-enhance.min.css?v=aa0e4dba60" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-enhance.min.css?v=cf7c8ac33f" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=93172dbf64" media="print" onload="this.media='all'">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=d1af4183ce">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=70669bad2d">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=43e21f6602">
     <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=c97be79d7a">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=f44d91a9f4">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=12a9ec32a9">
