@@ -2660,8 +2660,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   tool_pending/organizing 推过来、tool_calls 稍后才到）。原写法
     //   在这种状态下直接退出，活动区头一直停在初始文案「正在使用工具」，
     //   既不显示"正在整理结果"，也无法在占位结束后收敛。
-    //   改为：无轮次时只驱动标题文案（状态由 organizing 决定），跳过计数。
-    var totalSteps = 0, totalDone = 0, totalFailed = 0, runningRounds = 0;
+    var totalSteps = 0, totalDone = 0, totalFailed = 0, runningRounds = 0, runningSteps = 0;
     for (var i = 0; i < totalRounds; i++) {
       var steps = rounds[i].querySelectorAll('.ai-tool-step');
       var roundRunning = rounds[i].classList.contains('is-running');
@@ -2670,15 +2669,40 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         totalSteps++;
         if (steps[j].classList.contains('is-done')) totalDone++;
         else if (steps[j].classList.contains('is-error')) totalFailed++;
+        else if (steps[j].classList.contains('is-running')) runningSteps++;
       }
     }
     // "整理中"占位仍在跑 → 整区不能算完成（否则摘要行会显示"已完成"但下面还在转）
     var organizing = activity.querySelector('.ai-tool-organizing');
     var organizingRunning = !!(organizing && organizing.classList.contains('is-running'));
-    // ★ totalSteps > 0 是必要条件：没有条目时（只有占位/空壳）不构成"完成"，
-    //   否则 "0 >= 0" 会让空活动区立刻判 settled 并收起。
-    var settled = totalSteps > 0 && runningRounds === 0 && !organizingRunning
-      && (totalDone + totalFailed) >= totalSteps;
+    // 直挂活动区 body 的条目（典型是"整理中"占位，不属于任何轮次）。
+    // ★★★ 2026-09-28 二次修复（用户报障：「整理中已显示完成，头还在转圈」）：
+    //   上一版用 `totalSteps > 0 && runningRounds === 0 && ...` 判定 settled，
+    //   在「只有一个 organizing 占位、压根没有 .ai-tool-round」的场景下
+    //   totalSteps 恒为 0 → settled 恒为 false → 头行永远停在"正在使用工具"
+    //   且旋转环不停，哪怕占位自己已经变成"完成"。
+    //   根因：totalSteps 只统计了**轮次内**的条目，漏掉了直挂 body 的那部分。
+    //   现把两部分合并统计，并以"是否存在任何未收敛证据"为准，
+    //   而不是用 totalSteps>0 这种粗暴前置条件。
+    var looseSteps = activity.querySelectorAll('.ai-tool-activity-body > .ai-tool-step');
+    for (var k = 0; k < looseSteps.length; k++) {
+      var ls = looseSteps[k];
+      var isOrg = ls.classList.contains('ai-tool-organizing');
+      var lsRunning = ls.classList.contains('is-running');
+      // organizing 占位单独由 organizingRunning 表达"仍在进行"，这里不重复计入
+      if (isOrg) continue;
+      totalSteps++;
+      if (ls.classList.contains('is-done')) totalDone++;
+      else if (ls.classList.contains('is-error')) totalFailed++;
+      else if (lsRunning) runningSteps++;
+    }
+    // 是否还有"正在进行"的证据：运行中的轮次 / 运行中的条目 / 运行中的占位
+    var stillRunning = runningRounds > 0 || runningSteps > 0 || organizingRunning;
+    // settled 的充分条件：有条目（含占位）且再无任何进行中证据。
+    // 用 (totalSteps + (organizing ? 1 : 0)) > 0 代替原 totalSteps > 0 ——
+    // 后者在"只有占位"的场景下恒 false，正是本次线上缺陷。
+    var hasAnyContent = (totalSteps + (organizing ? 1 : 0)) > 0;
+    var settled = hasAnyContent && !stillRunning;
 
     var icon = activity.querySelector('.ai-tool-activity-icon');
     var label = activity.querySelector('.ai-tool-activity-label');
@@ -2740,11 +2764,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 从任意子节点反查所属活动区并刷新（供轮次状态变化后联动调用）
+  // 从任意节点反查相关的活动区并刷新（供轮次/占位状态变化后联动调用）。
+  // ★★★ 2026-09-28 修复（用户报障：「整理中已完成，上面的头还在转圈」）：
+  //   原实现只用 `node.closest('.ai-tool-activity')`，而 closest **只朝祖先方向**查找。
+  //   但多数调用点传入的是**外层容器**（assistantNode / .ai-tool-timeline），
+  //   活动区是它们的**后代** → closest 恒返回 null → 活动区摘要从不刷新，
+  //   于是即使在条目的"整理中"已经变成"完成"、正文也开始渲染，
+  //   活动区头的旋转环与"正在使用工具"文案仍然一直转。
+  //   改为双向查找：
+  //     ① 向上：节点本身/祖先就是活动区（进度中最常见的形态）；
+  //     ② 向下：节点是容器，其内部包含活动区（settleOrganizingStep /
+  //        clearAssistantTransientStatus 传 assistantNode 时属这种）；
+  //     ③ 容器内可能有多个活动区（理论上极少），全部刷新。
   function refreshOwningToolActivity(node) {
     if (!node) return;
-    var activity = node.closest ? node.closest('.ai-tool-activity') : null;
-    if (activity) updateToolActivity(activity);
+    var activity = null;
+    try { activity = node.closest ? node.closest('.ai-tool-activity') : null; } catch (eCl) {}
+    if (activity) { updateToolActivity(activity); return; }
+    var list = null;
+    try { list = node.querySelectorAll ? node.querySelectorAll('.ai-tool-activity') : null; } catch (eQ) {}
+    if (!list) return;
+    for (var i = 0; i < list.length; i++) {
+      try { updateToolActivity(list[i]); } catch (eUp) {}
+    }
   }
 
   // ★ 2026-09-22 新增：统一构造「工具轮次」容器。
@@ -2889,7 +2931,46 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     // ★ 2026-09-28（方案 A）："整理中"收敛后同样要刷新活动区总摘要，
     //   否则它会一直停在"正在整理结果"而下面已经全是完成态。
+    //   ★★ 二次修复：宿主可能是 assistantNode（活动区是它的**后代**），
+    //      refreshOwningToolActivity 已改为双向查找，这里直接调用即可。
     try { refreshOwningToolActivity(host); } catch (eSettleAct) {}
+    // ★★★ 2026-09-28 修复（用户报障：「条目显示完成了、活动区头还在转圈」）：
+    //   organizing 占位被收敛后，**轮次容器自己**（.ai-tool-round.is-running）
+    //   与活动区（.ai-tool-activity.is-running）的进行态并没有被清掉 ——
+    //   它们不在 organizing 的 DOM 子树里，本函数上面的循环只处理
+    //   .ai-tool-organizing 本身。结果是：占位行显示"完成"，但活动区头的
+    //   旋转环与"正在使用工具"文案继续转；updateToolActivity 又因为
+    //   runningRounds > 0 判不出 settled，循环自锁。
+    //   这里在宿主范围内把所有工具轮次/活动区的进行态一并落定。
+    try {
+      var _settleRounds = host.querySelectorAll('.ai-tool-round.is-running');
+      for (var _sr = 0; _sr < _settleRounds.length; _sr++) {
+        var _srEl = _settleRounds[_sr];
+        // 轮次内若仍有真实条目在跑，交给它们各自的 tool_result 收敛，不越权
+        var _srRunningSteps = _srEl.querySelectorAll('.ai-tool-round-list .ai-tool-step.is-running');
+        var _srHasLive = false;
+        for (var _ss = 0; _ss < _srRunningSteps.length; _ss++) {
+          if (!_srRunningSteps[_ss].classList.contains('ai-tool-organizing')) { _srHasLive = true; break; }
+        }
+        if (_srHasLive) continue;
+        _srEl.classList.remove('is-running');
+        _srEl.classList.add('is-done', 'is-collapsed');
+      }
+      var _settleActs = host.querySelectorAll('.ai-tool-activity.is-running');
+      for (var _sa = 0; _sa < _settleActs.length; _sa++) {
+        var _actEl = _settleActs[_sa];
+        // 与上面同理：活动区内还有真实条目在跑时不强行落定
+        var _actLiveSteps = _actEl.querySelectorAll('.ai-tool-step.is-running');
+        var _actHasLive = false;
+        for (var _as = 0; _as < _actLiveSteps.length; _as++) {
+          var _asEl = _actLiveSteps[_as];
+          if (_asEl.classList.contains('ai-tool-organizing')) continue;
+          _actHasLive = true; break;
+        }
+        if (_actHasLive) continue;
+        try { updateToolActivity(_actEl); } catch (eUpA) {}
+      }
+    } catch (eSettleRounds) {}
   }
 
   // 找到某条目所属的轮次并刷新它；用于 tool_result / tool_error 之后收敛
@@ -8435,6 +8516,42 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   它挂在 timeline 上、不在任何 .ai-tool-round 内，上面两段收敛都覆盖不到，
         //   必须在这里单独处理，否则工具走完 + 正文到达前它会一直转圈。
         try { settleOrganizingStep(target); } catch (eSettleOrg) {}
+        // ★★★ 2026-09-28 修复（用户报障：「正文都回答完了，上面还在写整理中/调用中」）：
+        //   上面的收敛只作用于 `.ai-tool-status` 容器内部，而工具轮次
+        //   （.ai-tool-round）与活动区（.ai-tool-activity）位于
+        //   `.ai-tool-timeline` 里，**不在 .ai-tool-status 之内** ——
+        //   于是流结束时它们的 is-running 一直留着：轮次摘要行继续转、活动区
+        //   头的旋转环继续转，正文却已经在下面渲染完毕。
+        //   这里对流终态做一次"无条件兜底收敛"：把时间线里所有残留的
+        //   is-running 全部落定（含轮次、条目、占位），再强制刷新活动区摘要。
+        try {
+          var _tlNodes = target.querySelectorAll('.ai-tool-timeline, .ai-tool-round, .ai-tool-activity');
+          for (var _ti = 0; _ti < _tlNodes.length; _ti++) {
+            var _tlEl = _tlNodes[_ti];
+            if (!_tlEl.classList.contains('is-running')) continue;
+            _tlEl.classList.remove('is-running');
+            if (_tlEl.classList.contains('ai-tool-round')) {
+              _tlEl.classList.add('is-done', 'is-collapsed');
+            } else if (_tlEl.classList.contains('ai-tool-activity')) {
+              _tlEl.classList.add('is-done', 'is-collapsed');
+            }
+          }
+          // 条目级残留（轮次内的 step）
+          var _tlSteps = target.querySelectorAll('.ai-tool-round-list .ai-tool-step.is-running');
+          for (var _ts = 0; _ts < _tlSteps.length; _ts++) {
+            var _tsEl = _tlSteps[_ts];
+            if (_tsEl.classList.contains('ai-tool-organizing')) continue;
+            _tsEl.classList.remove('is-running');
+            _tsEl.classList.add('is-done');
+            var _tsSt = _tsEl.querySelector('.ai-tool-step-status');
+            if (_tsSt) _tsSt.textContent = '已完成';
+          }
+          // 收敛后刷新活动区总摘要（否则头行文案仍停在"正在使用工具"）
+          var _tlActs = target.querySelectorAll('.ai-tool-activity');
+          for (var _ta = 0; _ta < _tlActs.length; _ta++) {
+            try { updateToolActivity(_tlActs[_ta]); } catch (eUpAct) {}
+          }
+        } catch (eSettleTimeline) {}
       }
 
       function attachContinueGenerateBtn(node, msgHost) {
@@ -8981,14 +9098,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   ④ 新一轮工具自动新建轮次容器，历史轮次保持折叠态，不再抢屏幕。
             // tool_pending may arrive before tool_calls. Promote those placeholders
             // in their existing round instead of creating a new empty round around them.
+            // ★★★ 2026-09-28 修复（重复轮次根因）：
+            //   原实现靠**文案匹配**识别占位轮次（标题 textContent === '准备工具'）。
+            //   但占位标题已改为 toolLabel(pendName)（"查询天气"等说人话的名字），
+            //   文案匹配必然失效 → 找不到可复用的轮次 → 新建 → 同一件事出现两轮。
+            //   改为读取 [data-tool-pending] 语义标记，与显示文案彻底解耦。
             var roundBox = null;
             var pendingRounds = timeline.querySelectorAll('.ai-tool-round.is-running');
             for (var pr = pendingRounds.length - 1; pr >= 0; pr--) {
-              var pendingTitles = pendingRounds[pr].querySelectorAll('.ai-tool-step-title');
-              for (var pt = 0; pt < pendingTitles.length; pt++) {
-                if (pendingTitles[pt].textContent === '准备工具') { roundBox = pendingRounds[pr]; break; }
-              }
-              if (roundBox) break;
+              if (pendingRounds[pr].querySelector('[data-tool-pending]')) { roundBox = pendingRounds[pr]; break; }
             }
             var roundList;
             if (roundBox) {
@@ -9042,13 +9160,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               }
               // Reuse a pending placeholder in the current live round, enriching it
               // with the canonical call identity and query before results arrive.
+              // ★★★ 2026-09-28 修复：同样改为读 [data-tool-pending] 语义标记，
+              //   不再依赖标题文案 '准备工具'（占位标题已改为 toolLabel 结果）。
               if (!existing) {
-                var pendingSteps = timeline.querySelectorAll('.ai-tool-round.is-running .ai-tool-step');
+                var pendingSteps = timeline.querySelectorAll('.ai-tool-round.is-running .ai-tool-step[data-tool-pending]');
                 for (var pi = pendingSteps.length - 1; pi >= 0; pi--) {
                   var pendingStep = pendingSteps[pi];
                   var pendingName = pendingStep.getAttribute('data-tool-name') || '';
-                  var pendingTitle = pendingStep.querySelector('.ai-tool-step-title');
-                  if (pendingName === String(t.name || '') && pendingTitle && pendingTitle.textContent === '准备工具'
+                  if (pendingName === String(t.name || '')
                       && pendingStep.getAttribute('data-tool-claimed') !== '1') {
                     existing = pendingStep;
                     break;
@@ -9059,6 +9178,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 // 重激活 = 开启**新的执行轮次**，必须清掉上一轮的认领标记，
                 // 否则这一轮的 tool_result 会因为 claimed=1 而认领不到它 → 永远转圈。
                 existing.removeAttribute('data-tool-claimed');
+                // 占位转正：清掉 pending 标记（它已是正式条目，不再代表"尚未下发调用"）
+                existing.removeAttribute('data-tool-pending');
                 existing.classList.add('is-running');
                 existing.classList.remove('is-done', 'is-error');
                 existing.setAttribute('data-tool-name', String(t.name || ''));
@@ -9178,8 +9299,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               pendingBar = el('div', { class: 'ai-tool-timeline ai-tool-status', role: 'status' });
               assistantNode.insertBefore(pendingBar, assistantBubble);
             }
-            // 复用最近一个仍在运行的轮次；没有则新建（避免 pending 单独成轮）
-            var pendRound = pendingBar.querySelector('.ai-tool-round.is-running:last-of-type');
+            // ★★★ 2026-09-28 修复（重复轮次）：
+            //   原选择器 `.ai-tool-round.is-running:last-of-type` 是**错误语义** ——
+            //   `:last-of-type` 要求该元素在**所有同级 .ai-tool-round 中排在最后**
+            //   （只按标签名/类型算，不看 class），再叠加 `.is-running` 过滤。
+            //   实测：tool_calls 先建了运行中的轮次 r1 之后，pending 到来时
+            //   r1 不是":last-of-type"→ 查不到 → 新建 r2 → 同一件事出现两个轮次，
+            //   截图里表现为"准备工具 get_weather"与"查询天气"上下各一条。
+            //   正确做法：直接取**最后一个仍在运行的轮次**（不附加 of-type 约束）。
+            var _pendRounds = pendingBar.querySelectorAll('.ai-tool-round.is-running');
+            var pendRound = _pendRounds.length ? _pendRounds[_pendRounds.length - 1] : null;
             if (!pendRound) {
               // ★ 2026-09-22：统一走 createToolRound，保证折叠结构与 CSS 一致
               var _pendBuilt = createToolRound('正在调用工具', 'r' + (toolRoundSeq++));
@@ -9191,11 +9320,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var pendList = pendRound.querySelector('.ai-tool-round-list');
             var pendStep = el('div', { class: 'ai-tool-step is-running' });
             if (pendName) pendStep.setAttribute('data-tool-name', pendName);
+            // ★★★ 2026-09-28：给 pending 占位打**语义标记**，供 tool_calls 分支
+            //   识别"这是我提前建的占位轮次，应该复用它而不是再新建一轮"。
+            //   原实现靠文案匹配（标题 === '准备工具'），但占位标题已改为
+            //   toolLabel(pendName)（说人话），文案匹配因此失效 → 重复轮次。
+            //   改为标记驱动，从此与显示文案解耦。
+            pendStep.setAttribute('data-tool-pending', '1');
             pendStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
             var pendBody = el('div', { class: 'ai-tool-step-body' });
-            pendBody.appendChild(el('div', { class: 'ai-tool-step-title', text: '准备工具' }));
-            pendBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: pendName || '站内工具' }));
-            pendBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '搜索中' }));
+            // ★★★ 2026-09-28 修复（占位说人话）：
+            //   原实现标题写死"准备工具"、详情写**原始技术名**（get_weather），
+            //   用户看到的是内部标识符。tool_calls 到达后会复用/新建正式条目，
+            //   占位只是极短的过渡态，但既然要显示，就该走统一映射表。
+            //   保留原始名到 data-tool-name（对账/去重用），显示层用 toolLabel。
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-title', text: pendName ? toolLabel(pendName) : '准备工具' }));
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '准备中' }));
             pendStep.appendChild(pendBody);
             pendList.appendChild(pendStep);
             updateToolRoundState(pendRound);
@@ -9401,17 +9540,40 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               }
               return card;
             }
-            var nextSib = matchStep && matchStep.nextElementSibling;
-            if (nextSib && nextSib.classList && nextSib.classList.contains('ai-tool-result-card')) {
-              resultCard = fillResultCard(nextSib);           // 复用同一工具的卡片
+            // ★★★ 2026-09-28 修复（重复结果卡片）：
+            //   原实现用 `matchStep.nextElementSibling` 判断"紧接着的下一条是否已是卡片"，
+            //   但卡片实际被插到**整轮条目之后**（.ai-tool-round-list-wrap 的后面），
+            //   所以 matchStep 的下一个兄弟通常是**另一条 step**，不是卡片 ——
+            //   复用判断恒为 false，每个 tool_result 都新建一张卡片。
+            //   后端对同一工具会重复推送 tool_result（先 count、后带 items 等），
+            //   实测同一轮里同一工具出现 2 张一模一样的"查询天气 · 1 条结果 · 福州"。
+            //   改为按工具名在**所属轮次内**查找已有卡片去重：
+            //   同一轮 + 同一工具 → 复用（只更新内容），跨轮则各自保留（轮次是独立的）。
+            var owningRoundForCard = matchStep && matchStep.closest ? matchStep.closest('.ai-tool-round') : null;
+            var cardKey = String(evt.tool_name || '');
+            var existingCard = null;
+            if (cardKey) {
+              var cardScope = owningRoundForCard || toolActivityBody(toolBar2) || toolBar2;
+              try {
+                var _cards = cardScope.querySelectorAll('.ai-tool-result-card');
+                for (var _ci = _cards.length - 1; _ci >= 0; _ci--) {
+                  if ((_cards[_ci].getAttribute('data-tool-name') || '') === cardKey) {
+                    existingCard = _cards[_ci]; break;
+                  }
+                }
+              } catch (eCardFind) {}
+            }
+            if (existingCard) {
+              resultCard = fillResultCard(existingCard);      // 复用同一轮内同工具的卡片
             } else {
               resultCard = fillResultCard(el('div', { class: 'ai-tool-result-card' }));
+              if (cardKey) resultCard.setAttribute('data-tool-name', cardKey);
               // ★ 卡片落点：优先插在**所属轮次**内、`.ai-tool-round-list-wrap` 之后。
               //   为什么不是紧贴 matchStep：.ai-tool-round-list 的每条子元素都靠
               //   ::after 画导轨节点、并按 :nth-child 做错峰入场；往中间塞一个非
               //   step 节点会让导轨断开、动画序号错位。放在整轮条目之后既保持了
               //   导轨完整，又让"这张卡片属于哪一轮"归属清晰。
-              var owningRound = matchStep && matchStep.closest ? matchStep.closest('.ai-tool-round') : null;
+              var owningRound = owningRoundForCard;
               if (owningRound) {
                 var roundWrap = owningRound.querySelector('.ai-tool-round-list-wrap');
                 if (roundWrap && roundWrap.parentNode === owningRound) {

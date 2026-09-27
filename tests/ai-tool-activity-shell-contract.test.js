@@ -105,9 +105,16 @@ test('方案A：轮次 / 整理中 / 强制收敛三条路径都要刷新活动�
     '轮次状态变化后必须刷新活动区总摘要');
 
   // settleOrganizingStep 末尾
-  const settle = block(aiAgent, 'function settleOrganizingStep(node, opts) {', 2200);
+  const settle = block(aiAgent, 'function settleOrganizingStep(node, opts) {', 4200);
   assert.match(settle, /refreshOwningToolActivity\(host\)/,
     '"整理中"收敛后必须刷新活动区，否则总摘要会卡在"正在整理结果"');
+  // ★★★ 2026-09-28：占位收敛后，轮次容器与活动区自身的 is-running 也要落定。
+  //   它们不在 .ai-tool-organizing 的 DOM 子树里，只靠上面的循环覆盖不到 ——
+  //   结果是占位行显示"完成"、活动区头仍在转圈（用户报障形态）。
+  assert.match(settle, /querySelectorAll\('\.ai-tool-round\.is-running'\)/,
+    '占位收敛时必须一并落定仍在运行的轮次容器');
+  assert.match(settle, /querySelectorAll\('\.ai-tool-activity\.is-running'\)/,
+    '占位收敛时必须一并落定仍在运行的活动区');
 
   // forceSettleToolRound 兜底分支
   const force = block(aiAgent, 'function forceSettleToolRound(roundBox) {', 1800);
@@ -115,14 +122,40 @@ test('方案A：轮次 / 整理中 / 强制收敛三条路径都要刷新活动�
     '强制收敛路径必须刷新活动区，否则中断后活动区会残留进行态');
 });
 
+test('方案A：refreshOwningToolActivity 必须双向查找（closest 只朝祖先，覆盖不到容器入参）', function () {
+  // ★★★ 2026-09-28 修复的线上缺陷：
+  //   原实现只用 node.closest('.ai-tool-activity')，而 closest 只朝**祖先**方向。
+  //   但 settleOrganizingStep / clearAssistantTransientStatus 传入的是 assistantNode，
+  //   活动区是它的**后代** → closest 恒 null → 活动区摘要永不刷新，
+  //   于是"整理中已变完成、正文已渲染"时头行还在转。
+  const fn = block(aiAgent, 'function refreshOwningToolActivity(node) {', 1200);
+  assert.match(fn, /node\.closest \? node\.closest\('\.ai-tool-activity'\)/,
+    '必须保留向上查找（节点本身/祖先即活动区）');
+  assert.match(fn, /node\.querySelectorAll\(['"]\.ai-tool-activity['"]\)/,
+    '必须补充向下查找（节点是容器、活动区在后代里）');
+});
+
 test('方案A：总摘要必须汇总轮数、工具数，并把"整理中"计入未完成', function () {
-  const fn = block(aiAgent, 'function updateToolActivity(activity) {', 3200);
+  const fn = block(aiAgent, 'function updateToolActivity(activity) {', 5200);
   assert.match(fn, /querySelectorAll\('\.ai-tool-round'\)/, '必须遍历所有轮次以汇总');
   assert.match(fn, /runningRounds/, '必须统计仍在运行的轮次');
   assert.match(fn, /ai-tool-organizing/, '必须检查"整理中"占位是否仍在运行');
-  // 关键：整理中未收敛时不得判定为 settled
-  assert.match(fn, /runningRounds === 0 && !organizingRunning/,
-    '"整理中"未结束前不得把活动区判为完成，否则摘要显示已完成但下面还在转');
+  // ★★★ 2026-09-28 改写（原断言把"仅 totalSteps>0 才算完成"固化成契约）：
+  //   原断言是 `runningRounds === 0 && !organizingRunning`。这条组合在
+  //   「只有一个 organizing 占位、压根没有任何 .ai-tool-round」的场景下
+  //   永远不会成立：totalSteps 恒为 0 → settled 恒 false →
+  //   占位行已经显示"完成"、正文都开始渲染了，活动区头仍在转圈。
+  //   现改为断言**行为等价的新表述**：
+  //     · 进行中证据 = 运行中轮次 ∥ 运行中条目 ∥ 运行中占位；
+  //     · 内容判据必须把占位计入（否则"只有占位"场景永远不会 settled）；
+  //     · 二者共同决定 settled。
+  assert.match(fn, /runningSteps/, '必须统计仍在运行的条目（含直挂 body 的）');
+  assert.match(fn, /var stillRunning = runningRounds > 0 \|\| runningSteps > 0 \|\| organizingRunning/,
+    '进行中证据必须涵盖：运行中轮次 / 运行中条目 / 运行中占位');
+  assert.match(fn, /var hasAnyContent = \(totalSteps \+ \(organizing \? 1 : 0\)\) > 0/,
+    '内容判据必须把"整理中"占位计入，否则只有占位时永不收敛');
+  assert.match(fn, /var settled = hasAnyContent && !stillRunning/,
+    'settled 必须由"有内容 且 无进行中证据"决定');
   // 完成后自动折叠
   assert.match(fn, /is-collapsed/, '活动区完成后必须自动折叠为一行');
 });
