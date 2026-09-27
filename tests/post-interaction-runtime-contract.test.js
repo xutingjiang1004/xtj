@@ -24,7 +24,11 @@ test('comment keeps its target id and inserts the canonical response locally', (
   assert.match(core, /JSON\.stringify\(\{ post_id: targetPostId, content: content \}\)/);
   assert.match(core, /result\.data && String\(result\.data\.post_id\) === targetPostId/);
   assert.match(core, /feedAllComments[\s\S]*await renderFeedFromMemoryState\(\)/);
-  assert.match(core, /data-post-id="' \+ targetPostId/);
+  // ★ 2026-09-27：P12 修复后，评论节点不再用 `data-post-id="' + targetPostId` 裸拼选择器
+  //   （未校验的 id 拼进 querySelector 会抛 SyntaxError 或命中错误元素），改为经
+  //   findBySafePostSelector(targetPostId)（内部走 CSS.escape + 手工转义兜底）。
+  //   断言意图不变：插入的评论必须绑定到正确的帖子卡片。
+  assert.match(core, /feedAllComments[\s\S]*findBySafePostSelector\(targetPostId\)/);
 });
 
 test('delete timeout aborts the request and confirms authoritative server state', () => {

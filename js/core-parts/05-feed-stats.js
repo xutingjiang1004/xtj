@@ -383,6 +383,9 @@
                 if (localSrc && !/^blob:/i.test(currentSrc) && img.getAttribute('data-local-shown') !== '1') {
                     img.setAttribute('data-local-shown', '1');
                     img.removeAttribute('data-remote-src');
+                    // ★ 2026-09-27 修复（审计 M10）：这是一次**新的显示起点**（本地图接管），
+                    //   把「连续失败次数」清零，否则远端再次失败时会直接继承此前的失败档位。
+                    img.setAttribute('data-retry-count', '0');
                     img.src = localSrc;
                     return;
                 }
@@ -395,7 +398,14 @@
                         img.src = next;
                         return;
                     }
-                    return; // 没有任何远端可换，也不降级成按钮（降级只会更糟）
+                    // ★ 2026-09-27 修复（审计 M9）：本地 blob 已失效、且**没有任何远端可换**
+                    //   （HEIC 在桌面 Chrome 解不了、服务端也没转出 JPEG，即 data-remote-src
+                    //   为空）时，旧实现直接 return —— 气泡里永久留一个坏图图标，用户
+                    //   完全不知道发生了什么。这里改为给出**可感知**的占位说明（复用
+                    //   _dmRenderMediaFallback，不另起一套 DOM）。注意：不拼任何 query 参数，
+                    //   也不重新拼 blob URL —— 只做一次性降级。
+                    _dmRenderMediaFallback(img, '');
+                    return;
                 }
                 // 情况 C：远端地址 → 退避重试两次
                 if (retryCount < 2 && fullSrc && String(fullSrc).indexOf('blob:') !== 0) {
@@ -407,6 +417,12 @@
                     }, delay);
                     return;
                 }
+                // ★ 2026-09-27 修复（审计 M10）：走到终态降级前先把「连续失败次数」清零。
+                //   旧实现 data-retry-count 只增不减，同一张图第二次失效时 retryCount 仍是
+                //   上一次的 2 → 直接越过情况 C 跳到按钮终态，用户根本没有第二次机会。
+                //   计数语义必须是「连续失败次数」：一次**成功 retry 发起之前**已被下面的
+                //   onload 路径重置；这里保证终态不会把计数留在高位。
+                img.setAttribute('data-retry-count', '0');
                 // 情况 D：确实没救了 → 退化成可点开的兜底按钮（点开用原始地址）
                 _dmRenderMediaFallback(img, fullSrc);
             };
@@ -424,77 +440,133 @@
                     var remote = String(img.getAttribute('data-remote-src') || '');
                     if (!remote || img.getAttribute('data-swapping') === '1') return;
                     img.setAttribute('data-swapping', '1');
-                    var probe = new Image();
-                    probe.onload = function() {
-                        try { img.removeAttribute('data-swapping'); } catch (e) {}
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) return;
+                    // ★ 2026-09-27 修复（审计 M11：换源要下载两遍远端图）：
+                    //   旧实现先用 `new Image()` 探一次远端可用性（probe），onload 后再把
+                    //   `img.src = remote` —— 同一张图下载两遍，弱网下流量翻倍。
+                    //   改为**预加载到目标元素本身**：probe 不再是独立对象，而是把远端地址
+                    //   直接喂给这个 `<img>`（浏览器据此完成一次下载并解码）。为了让"换源期间
+                    //   不闪空窗"，仍保留本地图当背景垫底（本地图本来就已经在 src 里显示），
+                    //   待远端 load 完成后再撤背景、释放 blob。整条链路只请求远端一次。
+                    var localSrc = String(img.getAttribute('data-local-src') || '');
+                    // ★ 2026-09-27 修复（审计 M14：once:true 的 load 监听在失败分支从不移除）：
+                    //   旧实现两个 { once: true } 监听（finishSwap 与 error 清理）互相不知道对方
+                    //   是否存在 —— error 触发后 load 监听仍挂在元素上（闭包连同 img 引用滞留），
+                    //   反之亦然。这里统一命名、互相注销，保证任一路径结束后两个监听都不残留。
+                    var onLoad = null;
+                    var onError = null;
+                    var cleanupListeners = function() {
+                        if (onLoad) { try { img.removeEventListener('load', onLoad); } catch (eL) {} onLoad = null; }
+                        if (onError) { try { img.removeEventListener('error', onError); } catch (eE) {} onError = null; }
+                        try { img.removeAttribute('data-swapping'); } catch (eS) {}
+                    };
+                    var finishSwap = function() {
+                        cleanupListeners();
+                        // ★ 2026-09-27（审计 M10）：成功换到远端图 → 重置「连续失败计数」，
+                        //   让同一气泡此后如有异常从零开始，而不是继承上次的失败档位。
+                        try { img.setAttribute('data-retry-count', '0'); } catch (eRc) {}
+                        try {
+                            img.style.backgroundImage = '';
+                            img.style.backgroundSize = '';
+                        } catch (eClr) {}
+                        // 远端确认显示后，本地 blob 不再需要；通知外层释放（幂等）
+                        try {
+                            if (typeof window.__xtjReleaseDmLocalPreview === 'function') {
+                                window.__xtjReleaseDmLocalPreview(localSrc);
+                            }
+                        } catch (e) {}
+                        img.removeAttribute('data-local-src');
+                        img.removeAttribute('data-local-shown');
+                    };
+                    // ★ 2026-09-27 修复（审计 M5：远端探测失败后既不重试也不释放 blob）：
+                    //   弱网下 probe 失败就彻底放弃，且因为 renderDockMessages 签名未变会直接
+                    //   return，hydrate 再也不会被触发 → blob 永久滞留内存。现在退避重试
+                    //   2 次（600ms / 1800ms）；仍失败则**保留本地 blob 继续显示**（既有设计
+                    //   意图：绝不降级成按钮），但把背景垫底与监听都清干净，避免闭包滞留。
+                    // 远端地址已有本地图在显示 → 先把本地图铺成背景，换源期间零空窗。
+                    // 抽成函数：每次重试前都要重新铺（error 会把 <img> 内容清空露出空白）。
+                    var applyLocalBackdrop = function() {
+                        if (!localSrc) return;
+                        try {
+                            img.style.backgroundImage = 'url("' + localSrc.replace(/["\\]/g, '') + '")';
+                            img.style.backgroundSize = '100% 100%';
+                            img.style.backgroundRepeat = 'no-repeat';
+                        } catch (eBg) {}
+                    };
+                    var retryLeft = 2;
+                    var scheduleRetry = function() {
+                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (retryLeft <= 0) { cleanupListeners(); return; }
+                        retryLeft -= 1;
+                        var delay = retryLeft === 1 ? 600 : 1800;
+                        setTimeout(function() {
+                            if (!img.parentNode) { cleanupListeners(); return; }
+                            if (img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                            // error 之后 <img> 是空的 → 先把本地图重新铺成背景，避免露出空白
+                            applyLocalBackdrop();
+                            // 复用目标元素本身重新加载（命中缓存/失败重试都只算这一路）
+                            try { img.src = remote; } catch (eR) {}
+                        }, delay);
+                    };
+                    applyLocalBackdrop();
+                    onLoad = function() {
+                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
                         // ★ 2026-09-26（`object-fit` 改为 cover 后的必要条件）：只有远端图的
                         //   真实比例与占位比例**一致**时才允许换源。比例一旦不一致，cover 会把
                         //   远端图按占位盒子裁切（老消息没有 w/h，兜的是 4:3，会被裁掉一大块）。
                         //   不一致就继续显示本地 blob：本地字节、比例一定对、又不可能 404。
-                        //   代价只是 blob 晚一点释放，用户完全无感。
-                        var pw = Number(probe.naturalWidth || 0);
-                        var ph = Number(probe.naturalHeight || 0);
-                        var boxW = Number(img.getAttribute('width') || img.naturalWidth || 0);
-                        var boxH = Number(img.getAttribute('height') || img.naturalHeight || 0);
-                        if (!pw || !ph) return;
-                        if (boxW > 0 && boxH > 0) {
+                        var pw = Number(img.naturalWidth || 0);
+                        var ph = Number(img.naturalHeight || 0);
+                        var boxW = Number(img.getAttribute('width') || 0);
+                        var boxH = Number(img.getAttribute('height') || 0);
+                        if (pw > 0 && ph > 0 && boxW > 0 && boxH > 0) {
                             var probeRatio = pw / ph;
                             var boxRatio = boxW / boxH;
-                            if (Math.abs(probeRatio - boxRatio) / boxRatio > 0.02) return;
+                            if (Math.abs(probeRatio - boxRatio) / boxRatio > 0.02) {
+                                // 比例不符：退回本地图，清监听但不释放 blob（本地图还要继续显示）
+                                cleanupListeners();
+                                try { img.style.backgroundImage = ''; img.style.backgroundSize = ''; } catch (ePr) {}
+                                return;
+                            }
                         }
-                        var localSrc = String(img.getAttribute('data-local-src') || '');
-                        // ★ 换源期间**用本地图当背景垫底**：把 img.src 指向远端会再走一次网络
-                        //   （缓存未命中时又要等一整轮），那正是"图片忽然消失"的观感。
-                        //   盒子的比例已经由 width/height 锁定，背景铺满即与本地图完全重合，
-                        //   远端真正解码完成后再撤掉背景 —— 全程看不到空窗。
-                        if (localSrc) {
-                            try {
-                                img.style.backgroundImage = 'url("' + localSrc.replace(/["\\]/g, '') + '")';
-                                img.style.backgroundSize = '100% 100%';
-                                img.style.backgroundRepeat = 'no-repeat';
-                            } catch (eBg) {}
-                        }
-                        img.removeAttribute('data-remote-src');
-                        img.src = remote;
-                        var finishSwap = function() {
-                            try {
-                                img.style.backgroundImage = '';
-                                img.style.backgroundSize = '';
-                            } catch (eClr) {}
-                            // 远端确认显示后，本地 blob 不再需要；通知外层释放（幂等）
-                            try {
-                                if (typeof window.__xtjReleaseDmLocalPreview === 'function') {
-                                    window.__xtjReleaseDmLocalPreview(localSrc);
-                                }
-                            } catch (e) {}
-                            img.removeAttribute('data-local-src');
-                            img.removeAttribute('data-local-shown');
-                        };
-                        if (img.complete && img.naturalWidth) finishSwap();
-                        else {
-                            img.addEventListener('load', finishSwap, { once: true });
-                            // 远端这一次没成功 → 保留本地背景图，由 handleDockChatImageError 退回本地 src
-                            img.addEventListener('error', function() {
-                                try { img.style.backgroundImage = ''; img.style.backgroundSize = ''; } catch (eClr2) {}
-                            }, { once: true });
-                        }
+                        finishSwap();
                     };
-                    probe.onerror = function() {
-                        try { img.removeAttribute('data-swapping'); } catch (e) {}
-                        // 远端暂时取不到 → 保留本地图，稍后由调用方/重渲染再试
+                    onError = function() {
+                        // 远端这一次没成功 → **保留本地背景图**（不撤，避免露白），安排有限重试。
+                        // 旧实现这里会先把背景清掉，弱网下用户就会看到一次空白闪动 ——
+                        // 与"文件没换成功就继续显示本地图"的设计意图相悖。
+                        scheduleRetry();
                     };
-                    probe.src = remote;
+                    img.addEventListener('load', onLoad);
+                    img.addEventListener('error', onError);
+                    // ★ 预加载到目标元素本身：只请求远端一次（onload 后浏览器已缓存）
+                    img.removeAttribute('data-remote-src');
+                    try { img.src = remote; } catch (eSet) { cleanupListeners(); }
                 });
             }
             window.hydrateDockChatRemoteMedia = hydrateDockChatRemoteMedia;
+
+            // ★ 2026-09-27 修复（审计 M9）：无远端可换时给用户**可感知**的降级说明。
+            //   旧实现只给一个「查看图片」按钮，点开还得再失败一次；HEIC 在桌面 Chrome
+            //   解不了、服务端也没转出 JPEG 时，用户完全不知道是格式问题。这里按 mime
+            //   给出原因与可执行建议（HEIC → 转 JPEG），并保留可点开按钮（有远端地址时）。
+            function _dmMediaFallbackReason() {
+                return '图片无法显示：当前浏览器/服务端无法解码该格式（HEIC/HEIF 请先用 iPhone 相册「编辑 → 存储为 JPEG」，或在电脑上用「文件」里的 JPG 重新发送）';
+            }
 
             function _dmRenderMediaFallback(img, fullSrc) {
                 if (!img || !img.parentNode) return;
                 var fallback = document.createElement("button");
                 fallback.type = "button";
                 fallback.className = "msg-media-fallback";
-                fallback.innerHTML = '<span class="msg-media-fallback-icon">图片</span><span class="msg-media-fallback-text">查看图片</span>';
+                // 无远端可换 → 直接把原因写进气泡；有远端 → 仍提示可点开查看
+                if (fullSrc) {
+                    fallback.innerHTML = '<span class="msg-media-fallback-icon">图片</span><span class="msg-media-fallback-text">查看图片</span>';
+                    fallback.title = _dmMediaFallbackReason();
+                } else {
+                    fallback.innerHTML = '<span class="msg-media-fallback-icon">图片</span><span class="msg-media-fallback-text">图片无法显示</span>';
+                    fallback.title = _dmMediaFallbackReason();
+                    fallback.setAttribute('aria-label', _dmMediaFallbackReason());
+                }
                 fallback.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -773,6 +845,16 @@
                                 // 删除对应的 DOM 元素
                                 var domEl = document.querySelector('.comment-item[data-comment-id="' + commentId + '"]');
                                 if (domEl && domEl.parentNode) domEl.parentNode.removeChild(domEl);
+                                // ★ 2026-09-27 修复（审计 P11：DELETE 只删 DOM，不同步「评论 N」计数）：
+                                //   此前只移除单个 .comment-item 节点，卡片上的「评论 N」统计行与
+                                //   「评论记录」面板仍停留在删除前的数字，直到下一次全量刷新才对上。
+                                //   这里复用 04 导出的单卡片重绘入口（P2 引入），按最新 feedAllComments
+                                //   重绘本帖卡片，统计行与评论树随之一致。
+                                //   注意只在 post_id 可用时调用；拿不到就退化为「等下次全量刷新」，
+                                //   不做无谓的整屏重绘（那正是 P2 要消灭的）。
+                                if (row.post_id != null && typeof window.__xtjSchedulePostCardPatch === 'function') {
+                                    try { window.__xtjSchedulePostCardPatch(row.post_id); } catch (ePatchDel) {}
+                                }
                                 // Phase 4: 取消对应的 cat AI 轮询任务
                                 if (typeof cancelCatAiTask === 'function') {
                                     cancelCatAiTask(commentId, 'comment deleted via Realtime');
@@ -982,7 +1064,12 @@
                     return Promise.resolve(_dmListShared.json);
                 }
                 if (_dmListShared.inflight) return _dmListShared.inflight;
-                var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)))
+                // ★ 2026-09-27（M15 配套）：本函数是 DM 轮询的主链路
+                //   （startDMPolling → pollNow → updateUnreadBadge → 这里），属后台被动请求。
+                //   显式标记 background，让 ensureProtectedOperationAuth 保留 refresh 冷却，
+                //   避免每 60 秒一轮的轮询把「401/403 后 30 秒不重试」的冷却反复清零，
+                //   持续打 /api/user/refresh。用户主动操作（点按钮）走其它路径，不受影响。
+                var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)), { background: true })
                     .then(function(resp) { return (resp && resp.ok) ? resp.json().catch(function() { return null; }) : null; })
                     .then(function(json) {
                         if (json && json.ok) { _dmListShared.json = json; _dmListShared.at = Date.now(); }
@@ -1029,7 +1116,7 @@
                     // 兼容新旧API：优先用后端通知API，降级到本地检测
                     var unread = 0;
                     if (typeof window.xtjProtectedFetch !== 'function') return;
-                    var notifRes = await window.xtjProtectedFetch('/api/report/notifications');
+                    var notifRes = await window.xtjProtectedFetch('/api/report/notifications', { background: true });
                     if (!notifRes.ok) return;
                     var notifData = await notifRes.json().catch(function() { return {}; });
                     unread = Number(notifData.unread) || 0;

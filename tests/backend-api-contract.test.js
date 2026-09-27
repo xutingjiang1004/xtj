@@ -74,7 +74,11 @@ test('report notification UI uses protected fetch without anon Supabase fallback
   const end = core.indexOf('let refreshTimeout = null;', start);
   assert.ok(start >= 0 && end > start);
   const source = core.slice(start, end);
-  assert.match(source, /xtjProtectedFetch\('\/api\/report\/notifications'\)/);
+  // ★ 2026-09-27：M15 修复后，后台轮询链路（checkReportReplies 由 30s 定时器驱动）
+  //   显式传 { background: true }，让 ensureProtectedOperationAuth 保留 refresh 冷却，
+  //   不再每轮清零零冷却反复打 /api/user/refresh。断言意图不变：仍走 xtjProtectedFetch，
+  //   且不得回退到 anon Supabase / 裸 fetch。故这里允许可选第二参数。
+  assert.match(source, /xtjProtectedFetch\('\/api\/report\/notifications'(?:,\s*\{[^}]*\})?\)/);
   assert.match(source, /xtjProtectedFetch\('\/api\/report\/notifications\/mark-read'/);
   assert.doesNotMatch(source, /sb\.from\('posts'\)/);
   assert.doesNotMatch(source, /fetch\(API_BASE \+ '\/api\/report\/notifications/);

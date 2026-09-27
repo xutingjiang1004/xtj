@@ -114,11 +114,26 @@
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'chat') {
                             // 聊天 tab 刷新逻辑
+                            // ★ 2026-09-27 修复（审计 C14）：旧实现在调用 loadDockChatList() 后
+                            //   **不 await** 就立刻弹「刷新完成」并释放刷新锁 isRefreshing[tab]。
+                            //   后果：① 提示先报成功、网络失败时又报失败（自相矛盾）；
+                            //   ② 锁提前释放，用户可在请求在途时再次双击触发并发刷新。
+                            //   改为 await 真正完成后才给结果提示，并在 finally 里释放锁。
                             window.showToast('正在刷新...');
                             window.dockChatListCacheTime = 0;
-                            loadDockChatList();
-                            isRefreshing[tab] = false;
-                            window.showToast('刷新完成');
+                            Promise.resolve()
+                                .then(function() { return loadDockChatList(); })
+                                .then(function() {
+                                    window.showToast('刷新完成');
+                                })
+                                .catch(function(err) {
+                                    console.error('[chat] refresh failed', err);
+                                    window.showToast('刷新失败');
+                                })
+                                .then(function() {
+                                    // finally 语义：无论成功/失败都释放锁
+                                    isRefreshing[tab] = false;
+                                });
                         } else if (tab === 'profile') {
                             // 个人页刷新
                             window.showToast('正在刷新...');
@@ -168,6 +183,18 @@
                     window.cleanupPhotoWallTransientState();
                 }
                 var previousPanel = document.querySelector('.dock-panel.active');
+                // ★ 2026-09-27 修复（审计 C16：私信轮询离开聊天页未停止）：
+                //   调查结论 —— stopDMPolling 此前**只在登出/清 auth 时**被调用
+                //   （03-profile-report-ai.js 的 doLogout / clearAllAuthState），
+                //   而 startDMPolling 在「切到聊天 Tab / 返回列表 / openChat」三处都会启动。
+                //   于是从 openChat 进入会话后启动的 60s 轮询，切到帖子/我的/照片墙后
+                //   仍在后台持续跑（pollNow 里只要 dockChatActiveUser 还在就会一直刷新该会话），
+                //   属于真实的"离开聊天页仍轮询"问题（visibilitychange 只负责恢复、不负责暂停）。
+                //   修法：切离聊天 Tab 时停止轮询；切回聊天 Tab 时会由下面的分支重新 startDMPolling。
+                //   注意：只在此处（06）处理 Tab 维度，登出路径仍由 03 的 stopDMPolling 负责。
+                if (previousPanel && previousPanel.id !== 'panelChat' && currentDockTab === 'chat' && tab !== 'chat') {
+                    try { if (typeof stopDMPolling === 'function') stopDMPolling(); } catch (eStopPoll) {}
+                }
                 currentDockTab = tab;
                 window.safeStorage.set('xtj_current_tab', tab);
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
@@ -462,6 +489,14 @@
                 el.innerHTML = getXtjLoadingHtml(title, subtitle, variant);
             }
 
+            // ★ 2026-09-27 修复（审计 C11）：从帖子/通知直接 openChat() 进入私信详情时，
+            //   会话列表根本没被加载过（列表 DOM 仍是空的）。此时返回列表会走下面的
+            //   `window.dockChatListCacheTime = Date.now()` 分支 —— 因为"缓存新鲜"而
+            //   直接 return，loadDockChatList 判定 Date.now()-cacheTime < 20s 直接跳过，
+            //   于是列表是空白的，要等 20s 或手动下拉才会加载。
+            //   这里用一个显式标记记录"列表从未成功渲染过"，返回列表时据此强制加载一次。
+            var _dockChatListEverLoaded = false;
+
             function dockChatGoBack() {
                 dockChatActiveUser = null;
                 dockChatSending = false;
@@ -478,7 +513,13 @@
                 syncDockChatLayoutState();
                 // ★ 2026-09-25 修复：返回会话列表时 0 值即"缓存失效"，缓存时长被提到 20s 后
                 //   这里会必然触发一次 /api/dm/list 往返（列表明明还在屏幕上）。改为标记为刚刷新。
-                window.dockChatListCacheTime = Date.now();
+                // ★ 2026-09-27 修复（C11）：若列表**从未加载成功过**（例如从帖子直接 openChat
+                //   进的详情），则必须清掉缓存时间戳强制加载，否则返回时列表空白。
+                var listEl = document.getElementById('dockChatList');
+                var listHasContent = !!(listEl && listEl.children.length);
+                if (_dockChatListEverLoaded || listHasContent) {
+                    window.dockChatListCacheTime = Date.now();
+                }
                 loadDockChatList();
                 startDMPolling(300000);
                 if (typeof window.__xtjResetIOSChatViewport === 'function') {
@@ -508,6 +549,13 @@
 
             window.openChat = function(userName) {
                 if (!window.currentUser) { showToast('请先登录'); return; }
+                // ★ 2026-09-27 待产品确认（审计 C13）：禁言是否应禁止"查看"私信。
+                //   审计认为「禁言应只禁发送，不应禁查看」，但这属于**产品语义**问题，不是明确 bug。
+                //   现状：禁言用户被这一行直接挡在会话之外（连历史都看不了）。
+                //   保守处理：暂不放开权限，仅保留拦截 + TODO。
+                //   → 若产品确认改为「仅禁发」，改动点：删除/放宽**本行** return，
+                //     会话即可进入；发送侧仍由 sendDockChatMessage 第 1940 行附近的
+                //     isUserMuted() 拦截兜底（发送必须拦，不动）。
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 if (userName === window.currentUser) { switchDockTab('chat', true); return; }
                 if (currentDockTab === 'posts') {
@@ -515,6 +563,9 @@
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
+                // ★ 2026-09-27 修复（C11）：直接进详情时，会话列表并未加载，
+                //   标记为"待加载"，返回列表时 dockChatGoBack 会据此强制加载一次。
+                _dockChatListEverLoaded = false;
                 // 清除渲染签名，确保缓存加载不会因签名匹配跳过（当前 innerHTML 是 loading 状态）
                 if (typeof _chatRenderSignature !== 'undefined') _chatRenderSignature[userName] = undefined;
                 // ★ 2026-09-25 修复（切换联系人闪一下）：这里不再无条件画 loading 骨架。
@@ -528,6 +579,69 @@
                 loadDockChatMessages(userName, true);
                 startDMPolling(60000, true);
             };
+
+            // ★ 2026-09-27 新增（审计 C8）：把"按会话分组 + 预热缓存"的逻辑抽成可复用函数，
+            //   供首屏渲染与"截断补拉"两条路径共用，避免两处口径分叉。
+            function buildDockChatConversations(allMsgs) {
+                var convMap = {};
+                var preheatMap = {};
+                (Array.isArray(allMsgs) ? allMsgs : []).forEach(function(m) {
+                    var other = m.user_name === window.currentUser ? m.media_url : m.user_name;
+                    if (!other) return;
+                    if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
+                        convMap[other] = { other_user: other, last_message: getDockChatMessagePreview(m), last_time: m.created_at, unread: 0 };
+                    }
+                    if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
+                        convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
+                    }
+                    if (!preheatMap[other]) preheatMap[other] = [];
+                    preheatMap[other].push(m);
+                });
+                var convs = Object.keys(convMap).map(function(k) { return convMap[k]; })
+                    .sort(function(a, b) { return new Date(b.last_time) - new Date(a.last_time); });
+                return { convs: convs, preheatMap: preheatMap };
+            }
+
+            // 把 preheatMap 写进 _chatCache（只在缓存为空或确实更旧时写入，避免降级覆盖）
+            function preheatDockChatCache(preheatMap) {
+                try {
+                    Object.keys(preheatMap).forEach(function(other) {
+                        var k = getDockChatCacheKey(other);
+                        var rows = preheatMap[other].sort(function(a, b) {
+                            return String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
+                                   String(a.id || '').localeCompare(String(b.id || ''));
+                        });
+                        var existing = _chatCache[k];
+                        if (Array.isArray(existing) && existing.length >= rows.length && existing.length > 0) return;
+                        _chatCache[k] = rows;
+                    });
+                } catch (ePreheat) { /* 预热失败不影响列表渲染 */ }
+            }
+
+            // ★ 2026-09-27 新增（审计 C8）：会话列表窗口截断的"温和兜底"补拉。
+            //   现状局限（务必知晓）：
+            //     · 后端 `/api/dm/list` **只接受 limit、不支持游标分页**（render-api/server.js
+            //       的 dm/list 无 before/offset 参数），返回的是"该用户两个方向最近 N 条消息"，
+            //       没有服务端未读聚合接口。
+            //     · 因此当高频会话把最近 180 条塞满时，更早的旧会话会从列表消失，
+            //       窗口外的未读也无法从服务端补齐。
+            //   兜底做法（只用现有接口）：把 limit 提到服务端上限 500 再拉一次，
+            //   按 id 去重合并后重算会话列表与未读角标 —— 能覆盖绝大多数场景，
+            //   但**极端情况（>500 条仍被单一高频会话占满）依旧会截断**，
+            //   彻底解法需要后端支持会话级聚合/游标（记为已知局限）。
+            async function fetchDockChatListCatchUp(listOwner, listResultStale) {
+                try {
+                    var resp = await window.xtjProtectedFetch('/api/dm/list?limit=500', { timeoutMs: 15000 });
+                    if (!resp || !resp.ok) return null;
+                    var json = await resp.json().catch(function() { return null; });
+                    if (!json || !json.ok) return null;
+                    if (listResultStale()) return null;
+                    return json.data || [];
+                } catch (eCatch) {
+                    console.warn('[chat-list] 补拉更大会话窗口失败（保持首屏结果）:', eCatch && eCatch.message);
+                    return null;
+                }
+            }
 
             async function loadDockChatList() {
                 const el = document.getElementById('dockChatList');
@@ -576,57 +690,51 @@
                     const dmResult = await window.fetchDmListShared(180);
                     if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
                     if (listResultStale()) return;
-                    const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
+                    var rawRows = dmResult.data || [];
+                    var allMsgs = mergeDockChatRowsById(rawRows, false, 180);
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">暂无最近会话</div></div>';
                         setUnreadBadgeCount(0);
                         window.dockChatListCacheTime = Date.now();
+                        _dockChatListEverLoaded = true;
                         renderDockChatFixedEntry(el);
                         syncDockChatLayoutState();
                         return;
                     }
-                    const convMap = {};
+                    // ★ 2026-09-27 修复（审计 C8）：检测"窗口可能被截断"→ 补拉一页更宽窗口。
+                    //   判据：服务端按 limit 返回，若原始条数**达到上限 180**，说明后面
+                    //   很可能还有更早的消息被截掉（高频会话会占满窗口，使其它旧会话消失）。
+                    //   仅在确实可能截断时才多发一次请求，避免给首屏常态路径增加负担。
+                    var maybeTruncated = rawRows.length >= 180;
+                    if (maybeTruncated) {
+                        var widerRows = await fetchDockChatListCatchUp(listOwner, listResultStale);
+                        if (widerRows && widerRows.length > rawRows.length) {
+                            // 用 id 去重后合并（补拉窗口通常包含首屏窗口，取并集最稳妥）
+                            var mergedRows = rawRows.concat(widerRows);
+                            var widerMsgs = mergeDockChatRowsById(mergedRows, false, 500);
+                            if (widerMsgs.length > allMsgs.length) allMsgs = widerMsgs;
+                        }
+                    }
                     // ★ 2026-09-25 优化（聊天秒开）：会话列表接口返回的其实是「该用户最近的
                     //   全部消息」，此前只取每个会话的最后一条做预览，其余全部丢弃 —— 于是用户
                     //   点开会话时必须等一次 /api/dm/messages 网络往返才能看到内容（"点开会话要
                     //   等一下才出现消息"）。
                     //   现改为：把每条消息按会话归组，预热进 _chatCache。点击会话时 loadDockChatMessages
                     //   会先命中缓存立即渲染（见其开头 _chatCache 分支），网络回包后再精确替换，
-                    //   从而实现"点开秒见内容"。
-                    const preheatMap = {};
-                    allMsgs.forEach(m => {
-                        const other = m.user_name === window.currentUser ? m.media_url : m.user_name;
-                        if (!other) return;
-                        if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
-                            convMap[other] = { other_user: other, last_message: getDockChatMessagePreview(m), last_time: m.created_at, unread: 0 };
-                        }
-                        if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
-                            convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
-                        }
-                        if (!preheatMap[other]) preheatMap[other] = [];
-                        preheatMap[other].push(m);
-                    });
-                    // 按会话预热缓存：只在缓存为空或确实更旧时写入，避免把更完整的既有缓存降级覆盖
-                    try {
-                        Object.keys(preheatMap).forEach(function(other) {
-                            var k = getDockChatCacheKey(other);
-                            var rows = preheatMap[other].sort(function(a, b) {
-                                return String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
-                                       String(a.id || '').localeCompare(String(b.id || ''));
-                            });
-                            var existing = _chatCache[k];
-                            // 已有缓存且条数不少于预热数据时跳过（网络回包的数据更权威）
-                            if (Array.isArray(existing) && existing.length >= rows.length && existing.length > 0) return;
-                            _chatCache[k] = rows;
-                        });
-                    } catch (ePreheat) { /* 预热失败不影响列表渲染 */ }
-                    const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
+                    //   从而实现"点开秒见内容"。分组逻辑抽到 buildDockChatConversations 复用。
+                    var grouped = buildDockChatConversations(allMsgs);
+                    preheatDockChatCache(grouped.preheatMap);
+                    const convs = grouped.convs;
                     // ★ 2026-09-25 修复（审计 M-7/H-2）：角标口径统一走 aggregateDmUnread，
                     //   与 updateUnreadBadge 完全同源，避免两处算法/上限不同导致数字跳动。
+                    // ★ 2026-09-27（C8）：补拉后基于**更宽的窗口**重算角标，使窗口外旧会话的
+                    //   未读也能计入；但服务端无聚合接口，极端情况下（>500 条仍被占满）仍会低估，
+                    //   属于已知局限（见 fetchDockChatListCatchUp 注释）。
                     setUnreadBadgeCount(aggregateDmUnread(allMsgs).total);
                     if (typeof window.__xtjNoteDmUnreadFresh === 'function') window.__xtjNoteDmUnreadFresh();
                     renderDockChatConversationList(el, convs);
                     window.dockChatListCacheTime = Date.now();
+                    _dockChatListEverLoaded = true;
                     renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
                     // 非阻塞加载头像: 先显示列表, 头像后台补上（包含固定入口 xxz）
@@ -1094,9 +1202,20 @@
 
             function releaseDockChatLocalPreview(message) {
                 var previewUrl = String(message && message.__localPreviewUrl || '');
-                if (previewUrl.indexOf('blob:') === 0) {
-                    try { URL.revokeObjectURL(previewUrl); } catch (e) {}
+                if (previewUrl.indexOf('blob:') !== 0) return;
+                // ★ 2026-09-27 修复（审计 M3：只 revoke 不清缓存 __localPreviewUrl）：
+                //   旧实现只 `URL.revokeObjectURL` 就完事，缓存里那条消息的
+                //   `__localPreviewUrl` 仍指着这个已被 revoke 的 blob —— 用户切回会话时
+                //   渲染又把它当 src，浏览器必然先 error 再回退，图片闪一下（正是下方
+                //   __xtjReleaseDmLocalPreview 注释里声称要消灭的现象）。
+                //   现在收敛到**同一个实现**：复用 __xtjReleaseDmLocalPreview 的完整语义
+                //   （清掉所有会话缓存里指向该 blob 的字段 + revoke）。它内部已做
+                //   幂等与 blob: 协议校验，这里不再重复一套逻辑。
+                if (typeof window.__xtjReleaseDmLocalPreview === 'function') {
+                    window.__xtjReleaseDmLocalPreview(previewUrl);
+                    return;
                 }
+                try { URL.revokeObjectURL(previewUrl); } catch (e) {}
             }
 
             // ★ 2026-09-26：气泡把本地 blob 成功换成远端地址后调用。
@@ -1234,9 +1353,18 @@
                     // 老消息没有 w/h（服务端此前不存），兜一个 4:3，也比 0 高度好得多。
                     var mw = Math.round(Number(media.w || 0));
                     var mh = Math.round(Number(media.h || 0));
-                    if (!(mw > 0 && mh > 0 && mw <= 20000 && mh <= 20000)) { mw = 4; mh = 3; }
+                    var hasRealDims = (mw > 0 && mh > 0 && mw <= 20000 && mh <= 20000);
+                    if (!hasRealDims) { mw = 4; mh = 3; }
                     var dimAttr = ' style="aspect-ratio:' + mw + ' / ' + mh + '"';
-                    if (mw !== 4 || mh !== 3) dimAttr += ' width="' + mw + '" height="' + mh + '"';
+                    if (hasRealDims) dimAttr += ' width="' + mw + '" height="' + mh + '"';
+                    // ★ 2026-09-27 修复（审计 M8：4:3 兜底不写 width/height，盒子 0×0）：
+                    //   老消息没有 w/h 时兜 4:3，但此前**不写** width/height，而 CSS 是
+                    //   `width:auto`（css/style.css .chat-msg .msg-img）→ `aspect-ratio` 需要
+                    //   至少一维确定才能算出另一维，两维都 auto 时盒子塌成 0×0，老消息仍会
+                    //   布局跳动。这里给兜底 `<img>` 补一个**确定的宽度基准** width:100%
+                    //   （走 .has-media 气泡的满宽 + max-height:260px 约束），aspect-ratio
+                    //   据此算出高度，盒子立刻有尺寸，也不破坏有真实 w/h 的现有正确渲染。
+                    else dimAttr += ' style="aspect-ratio:' + mw + ' / ' + mh + ';width:100%"';
                     // ★ 2026-09-25 修复（聊天图片预览器降级到旧 #imgViewer）：
                     //   此前 onclick 只传了 src，没有把 <img> 自身作为 triggerEl 传入。
                     //   openImageViewer → openPostImagePreview 依赖 triggerEl 读取
@@ -1294,7 +1422,12 @@
                 //   "已读未读"），用户截图里那条正是自己发的图 —— 现在这一行统一按
                 //   「已读/未读 + 时间」排布，位置固定在**图片下方**（见下方 has-media
                 //   的 .msg-meta 规则），与文字消息观感一致。
-                var readStatus = sent
+                // ★ 2026-09-27 修复（审计 C15：失败消息自相矛盾显示"发送失败 + 未读"）：
+                //   __failed 的消息已被判定为发送失败，既没成功提交到服务端，
+                //   就不存在"已读/未读"这回事。旧实现照常计算 readStatus，于是
+                //   文字气泡里同时出现 failMark（发送失败·长按重发）和 readStatus（未读），
+                //   观感矛盾且误导。这里对失败态直接清空 readStatus，只保留失败态 + 时间。
+                var readStatus = (sent && !message.__failed)
                     ? (isMsgReadByMe(message)
                         ? '<span class="msg-read-status is-read">已读</span>'
                         : '<span class="msg-read-status">未读</span>')
@@ -1649,7 +1782,6 @@
                     return;
                 }
                 var previousScrollTop = el.scrollTop;
-                var previousScrollHeight = el.scrollHeight;
                 var isNearBottom = !el.scrollHeight || isDockChatNearBottom(el, 100);
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
@@ -1695,7 +1827,15 @@
                     // Keep the reader anchored on the same message while a polling refresh
                     // updates the DOM; only advertise the new messages instead of yanking
                     // the conversation to the bottom.
-                    el.scrollTop = previousScrollTop + Math.max(0, el.scrollHeight - previousScrollHeight);
+                    // ★ 2026-09-27 修复（审计 C10：上翻历史被轮询拖回底部）：
+                    //   旧公式 `previousScrollTop + (scrollHeight - previousScrollHeight)`
+                    //   是「在**顶部之前**插入内容、需要把内容整体下推」的补偿语义。
+                    //   但本函数的更新方式是在**末尾追加**（消息按时间升序渲染，新的在下面），
+                    //   追加发生在视口**下方**，根本不影响用户当前正在阅读的位置。
+                    //   套用该公式会把 scrollTop 跟着内容高度增量往前推 —— 每轮轮询都把
+                    //   正在上翻历史的用户往底部方向拽一段，连点几次就"被拖回底部"。
+                    //   正确做法：追加到末尾时 scrollTop 保持**不变**（视口内内容位置不动）。
+                    el.scrollTop = previousScrollTop;
                     setDockChatJumpLatestVisible(true);
                 } else {
                     setDockChatJumpLatestVisible(false);
@@ -1960,11 +2100,10 @@
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
                 if (file) {
-                    // ★ 修复：显式拒绝 SVG（image/svg+xml 会通过 image/ 前缀白名单），
-                    // 后端 dm-media 拒绝 SVG 后文件已先落桶，留下 Storage 孤儿 + 公共桶
-                    // 存储型 XSS 窗口。这里与照片墙 upload-ui 的拒绝策略对齐。
-                    var svgBlocked = /^image\/svg\+xml/i.test(String(file.type || '')) || /\.svgz?$/i.test(String(file.name || '').toLowerCase());
-                    if (svgBlocked) { showToast("不支持 SVG 文件，仅支持图片、视频、音频"); return; }
+                    // ★ 修复：显式拒绝 SVG（image/svg+xml 会通过 image/ 前缀白名单）。
+                    // ★ M13：拦截规则已收敛到共用 isBlockedDmFile（粘贴/拖拽入口同用），
+                    // 确保三个入口规则一致。
+                    if (isBlockedDmFile(file)) { showToast("不支持 SVG 文件，仅支持图片、视频、音频"); return; }
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
@@ -1993,10 +2132,21 @@
                 var mediaPayload = null;
                 var mediaW = 0, mediaH = 0;
                 if (file) {
-                    try {
-                        localPreviewUrl = URL.createObjectURL(file);
-                        mediaPayload = { kind: mediaKind, url: localPreviewUrl, mimeType: file.type || '' };
-                    } catch (previewError) { /* 本地预览失败时仍继续发送原文件 */ }
+                    // ★ 2026-09-27 修复（审计 M4：视频/音频的 localPreviewUrl 泄漏 ≤50MB blob）：
+                    //   旧实现对**所有类型**无条件 `URL.createObjectURL(file)`，但只有
+                    //   `mediaKind === 'image'` 才进释放路径（成功分支里 `localPreviewUrl &&
+                    //   mediaKind === 'image'` 才把 blob 挂到消息上）。视频/音频的这个 objectURL
+                    //   **从不被任何气泡引用**（video/audio 气泡用的是远端 safeVideoSrc/safeAudioSrc，
+                    //   见下方 buildDockChatBodyMarkup），也没有任何释放点 → 每发一个视频/音频
+                    //   就泄漏一个 ≤50MB 的 blob，直到刷新页面。
+                    //   核对结论：video/audio 气泡**不依赖**这个本地预览（它们不读 __localPreviewUrl），
+                    //   故选方案 (a) 最干净 —— 只对 image 创建 objectURL，其余类型返回 ''。
+                    if (mediaKind === 'image') {
+                        try {
+                            localPreviewUrl = URL.createObjectURL(file);
+                            mediaPayload = { kind: mediaKind, url: localPreviewUrl, mimeType: file.type || '' };
+                        } catch (previewError) { /* 本地预览失败时仍继续发送原文件 */ }
+                    }
                 }
                 var actorKey = DM_MARKER;
                 var optimisticContentPayload = buildDMMessageContent({ content: capturedContent }, { text: capturedContent, read_at: null, media: mediaPayload });
@@ -2241,7 +2391,17 @@
             //   本地快取：启动时与服务端合并，删除时回推，离线删除在下次同步补传。
             var DM_DELETED_KEY_PREFIX = 'xtj_dm_deleted_';
             var DM_DELETED_MAX = 500;
+            // ★ 2026-09-27 修复（审计 C12）：
+            //   _dmDeletedSyncedUsers 的键此前只用"对手 userName" u，但墓碑实际是
+            //   **账号级**的（DM_DELETED_KEY_PREFIX + currentUser，服务端 /api/dm/deleted
+            //   也按 req.userName 隔离）。用对手名作键有两个致命后果：
+            //     1) 失败后本次生命周期内不再同步：_dmDeletedSyncedUsers[u] 已置 1，
+            //        且失败不回滚 → 该会话的墓碑永远补推不上去（离线删除丢失）。
+            //     2) 切号后串号：A 账号同步过 u 后，切到 B 账号再用同一个 u 会命中旧标记，
+            //        或用 B 的凭证去补传 A 的删除 ID。
+            //   这里统一改为「账号 + 对手」复合键，并在同步失败时撤销标记允许重试。
             var _dmDeletedSyncedUsers = {};
+            // 待补传队列改为按"入队账号"分批存储：{ account, ids }，补传前核对当前账号。
             var _dmDeletedPendingPush = [];
 
             function getDmDeletedIds() {
@@ -2276,13 +2436,54 @@
                 persistDmDeletedIds(list);
             }
 
+            // ★ 2026-09-27（C12）：待补传队列是"账号级"的 —— 入队时记录当时的账号，
+            //   补传前核对账号一致，不一致就丢弃（绝不用新账号的凭证去提交旧账号的 ID）。
+            function enqueueDmDeletedPending(ids) {
+                var list = (Array.isArray(ids) ? ids : []).filter(Boolean);
+                if (!list.length) return;
+                var account = currentUser || '';
+                if (!account) return;
+                var batch = null;
+                for (var i = 0; i < _dmDeletedPendingPush.length; i++) {
+                    if (_dmDeletedPendingPush[i] && _dmDeletedPendingPush[i].account === account) { batch = _dmDeletedPendingPush[i]; break; }
+                }
+                if (!batch) { batch = { account: account, ids: [] }; _dmDeletedPendingPush.push(batch); }
+                batch.ids = batch.ids.concat(list).filter(function(id, idx, arr) { return arr.indexOf(id) === idx; }).slice(0, DM_DELETED_MAX);
+            }
+
+            // 取出"当前账号"的待补传 ID（不跨账号），其余账号的批次原样保留。
+            function takeDmDeletedPendingForCurrentAccount() {
+                var account = currentUser || '';
+                var mine = [];
+                var rest = [];
+                _dmDeletedPendingPush.forEach(function(batch) {
+                    if (!batch || !Array.isArray(batch.ids)) return;
+                    if (batch.account === account) mine = mine.concat(batch.ids);
+                    else rest.push(batch);
+                });
+                _dmDeletedPendingPush = rest;
+                return mine;
+            }
+
+            // 把 ids 从"当前账号"的批次中移除（推送成功后调用）。
+            function clearDmDeletedPendingForCurrentAccount(ids) {
+                var account = currentUser || '';
+                var drop = Array.isArray(ids) ? ids : [];
+                _dmDeletedPendingPush.forEach(function(batch) {
+                    if (!batch || batch.account !== account || !Array.isArray(batch.ids)) return;
+                    batch.ids = batch.ids.filter(function(x) { return drop.indexOf(x) < 0; });
+                });
+                _dmDeletedPendingPush = _dmDeletedPendingPush.filter(function(batch) { return batch && batch.ids && batch.ids.length; });
+            }
+
             // ★ 2026-09-26：把删除记录推给服务端（账号级同步）。返回 Promise<boolean>，
             //   失败时进入待补传队列，下次同步时一并补上（离线删除不丢）。
             function pushDmDeletedToServer(ids) {
                 var list = (Array.isArray(ids) ? ids : []).filter(Boolean);
                 if (!list.length) return Promise.resolve(true);
+                // ★ 2026-09-27（C12）：入队/提交都绑定"入队时的账号"，切号后不会用新账号提交旧数据。
                 if (typeof window.xtjProtectedFetch !== 'function') {
-                    _dmDeletedPendingPush = _dmDeletedPendingPush.concat(list).slice(0, DM_DELETED_MAX);
+                    enqueueDmDeletedPending(list);
                     return Promise.resolve(false);
                 }
                 return window.xtjProtectedFetch('/api/dm/deleted', {
@@ -2292,11 +2493,11 @@
                     timeoutMs: 15000
                 }).then(function(resp) {
                     if (!resp || !resp.ok) throw new Error('dm_deleted_sync_failed');
-                    _dmDeletedPendingPush = _dmDeletedPendingPush.filter(function(x) { return list.indexOf(x) < 0; });
+                    clearDmDeletedPendingForCurrentAccount(list);
                     return true;
                 }).catch(function(err) {
                     console.warn('[DM] 删除记录同步失败，已排队待补传:', err && err.message);
-                    _dmDeletedPendingPush = _dmDeletedPendingPush.concat(list).slice(0, DM_DELETED_MAX);
+                    enqueueDmDeletedPending(list);
                     return false;
                 });
             }
@@ -2306,17 +2507,27 @@
             function syncDmDeletedWithServer(userName, force) {
                 var u = String(userName || currentUser || '');
                 if (!u) return Promise.resolve(false);
-                if (_dmDeletedSyncedUsers[u] && !force) return Promise.resolve(false);
-                _dmDeletedSyncedUsers[u] = 1;
-                if (typeof window.xtjProtectedFetch !== 'function') return Promise.resolve(false);
+                // ★ 2026-09-27（C12）：复合键 —— 账号 + 对手。换账号后不复用旧标记（避免串号），
+                //   同一账号下不同会话仍各自独立（保持原有"每会话一次"的去重语义）。
+                var syncKey = (currentUser || '') + '|' + u;
+                if (_dmDeletedSyncedUsers[syncKey] && !force) return Promise.resolve(false);
+                _dmDeletedSyncedUsers[syncKey] = 1;
+                // 同步发起时的账号快照：回调里核对，账号变了就整段放弃（不写缓存、不补传）。
+                var syncOwner = currentUser || '';
+                // 撤销标记：失败（网络/非 ok）时允许下次重试，否则本次生命周期内永不重试。
+                var releaseMarker = function() { delete _dmDeletedSyncedUsers[syncKey]; };
+                if (typeof window.xtjProtectedFetch !== 'function') { releaseMarker(); return Promise.resolve(false); }
                 var localIds = getDmDeletedIds();
-                var pending = _dmDeletedPendingPush.slice();
+                // 只取**当前账号**的待补传批次（跨账号批次原样留在队列里）。
+                var pending = takeDmDeletedPendingForCurrentAccount();
                 return window.xtjProtectedFetch('/api/dm/deleted', { method: 'GET', timeoutMs: 15000 })
                     .then(function(resp) {
                         if (!resp || !resp.ok) throw new Error('dm_deleted_fetch_failed');
                         return resp.json();
                     })
                     .then(function(data) {
+                        // 回调期间账号已变（登出/切号）→ 丢弃结果，不污染新账号的墓碑，也不补传。
+                        if (!currentUser || (currentUser || '') !== syncOwner) return false;
                         var serverIds = (data && Array.isArray(data.ids)) ? data.ids : [];
                         var merged = serverIds.slice();
                         localIds.forEach(function(id) { if (merged.indexOf(id) < 0) merged.push(id); });
@@ -2325,12 +2536,15 @@
                         var changed = JSON.stringify(merged) !== JSON.stringify(localIds);
                         if (changed) persistDmDeletedIds(merged);
                         if (toPush.length) {
+                            // 补传失败不回滚"已同步"标记也无妨：失败的 ID 会进待补传队列由下次重试。
                             pushDmDeletedToServer(toPush);
                         }
                         return changed;
                     })
                     .catch(function(err) {
                         console.warn('[DM] 删除记录同步失败（继续用本机记录）:', err && err.message);
+                        // ★ C12：失败必须撤销标记 —— 否则本次生命周期内不再重试（离线删除会丢）。
+                        releaseMarker();
                         return false;
                     });
             }
@@ -2933,6 +3147,20 @@
                 }, true);
             }
 
+            // ★ 2026-09-27 修复（M13：粘贴/拖拽入口缺 SVG 拦截）：
+            //   根因：文件选择入口（sendDockChatMessage）已有显式 SVG 拦截，但粘贴（paste）
+            //   与拖拽（drop/dragover）走的是另一条路径（经 assignDockChatFile 的
+            //   `image/` 白名单，而 image/* 天然包含 image/svg+xml）→ 可绕过拦截把 SVG
+            //   塞进发送链路。后端 dm-media 拒绝 SVG 时文件已先落桶，留下 Storage 孤儿
+            //   + 公共桶存储型 XSS 窗口。
+            //   修法：把 SVG 拦截收敛成唯一的小工具函数，文件选择 / 粘贴 / 拖拽三处统一
+            //   调用，规则一致，避免以后再分叉。
+            function isBlockedDmFile(file) {
+                if (!file) return false;
+                return /^image\/svg\+xml/i.test(String(file.type || '')) ||
+                    /\.svgz?$/i.test(String(file.name || '').toLowerCase());
+            }
+
             function showDockChatFilePreview(file) {
                 const preview = document.getElementById('dockChatFilePreview');
                 const thumb = document.getElementById('dockCfpThumb');
@@ -3003,6 +3231,8 @@
                 var file = normalizeDockChatMediaFile(rawFile);
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file.size > maxFileSize) { showToast('文件大小不能超过50MB'); return false; }
+                // ★ M13：粘贴/拖拽入口统一走 isBlockedDmFile，拒绝 SVG（与文件选择入口同规则）
+                if (isBlockedDmFile(file)) { showToast('不支持 SVG 文件，仅支持图片、视频、音频'); return false; }
                 var allowedTypes = ['image/', 'video/', 'audio/'];
                 var typeOk = allowedTypes.some(function(t) { return String(file.type || '').indexOf(t) === 0; });
                 if (!typeOk) { showToast('不支持的文件类型，仅支持图片、视频、音频'); return false; }
