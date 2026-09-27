@@ -35,8 +35,14 @@ test('new usability tools calculate + convert_units are registered', () => {
   assert.match(server, /aiSiteCard\('unit_convert'/);
   assert.match(client, /type === 'calculate'/);
   assert.match(client, /type === 'unit_convert'/);
-  assert.match(client, /calculate: '精确计算'/);
-  assert.match(client, /convert_units: '单位换算'/);
+  // ★ 工具显示名已收敛到单一 TOOL_LABELS 表（方案 D），
+  //   原正则钉住的是"两处重复 nameMap"的旧实现，会随重构失效。
+  //   现改为断言：单一来源 + 两项映射仍存在 + 渲染走 toolLabel()。
+  assert.match(client, /var TOOL_LABELS = \{[\s\S]*?\bcalculate:\s*'计算'/, 'TOOL_LABELS 必须包含 calculate 映射');
+  assert.match(client, /var TOOL_LABELS = \{[\s\S]*?\bconvert_units:\s*'单位换算'/, 'TOOL_LABELS 必须包含 convert_units 映射');
+  assert.match(client, /function toolLabel\(/, 'toolLabel() 统一取名函数必须存在');
+  assert.ok((client.match(/toolLabel\(/g) || []).length >= 3, 'toolLabel() 必须被多处复用而非重复 nameMap');
+  assert.doesNotMatch(client, /toolNameMap\s*=\s*\{/, '不得再出现第二份工具名映射');
   // Safe math: no Function/eval injection path
   assert.match(server, /function safeEvalMath/);
   assert.doesNotMatch(server, /Function\(['"]use strict['"]; return \(/);
