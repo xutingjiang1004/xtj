@@ -304,13 +304,21 @@
                 const id = mode === 'login' ? 'loginModal' : 'registerModal';
                 const modal = document.getElementById(id);
                 if (!modal) return;
+                if (modal.classList.contains('active')) return;
                 authModalFocusOrigin = document.activeElement;
+                modal.removeAttribute('inert');
                 modal.setAttribute('aria-hidden', 'false');
                 modal.classList.add('active');
-                setTimeout(() => {
-                    const nickInp = document.getElementById(mode === 'login' ? 'loginNickInp' : 'regNickInp');
-                    if (nickInp) nickInp.focus();
-                }, 200);
+                // iOS restores saved credentials when an auth input is focused by script,
+                // which can open the system password sheet without a tap from the user.
+                // Desktop keyboard users still get focus; touch users choose the field themselves.
+                if (window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+                    setTimeout(() => {
+                        if (!modal.classList.contains('active')) return;
+                        const nickInp = document.getElementById(mode === 'login' ? 'loginNickInp' : 'regNickInp');
+                        if (nickInp) nickInp.focus();
+                    }, 200);
+                }
             };
 
             document.addEventListener('keydown', function (event) {
@@ -593,4 +601,3 @@
                     btn.textContent = "注册";
                 }
             }
-

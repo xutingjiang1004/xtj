@@ -556,7 +556,7 @@ const ADMIN_NAME = "xxz";
             }
             window.clearAllAuthState = clearAllAuthState;
 
-            function handleProtectedAuthFailure() {
+            function handleProtectedAuthFailure(opts) {
                 var _alreadyHandled = _protectedAuthFailureHandled;
                 if (!_alreadyHandled) {
                     _protectedAuthFailureHandled = true;
@@ -564,12 +564,14 @@ const ADMIN_NAME = "xxz";
                     // ★ 30秒后重置，允许用户关闭弹窗后再次触发
                     setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
                 }
-                // ★ 修复「提示了登录失效却不见弹窗」：去重只作用于 clear + toast，
-                //   登录弹窗必须始终确保打开（openAuthModal 幂等，重复调用无副作用）。
-                //   此前 30 秒去重窗口内的后续失效整体 return，各调用方只会 throw 出
-                //   「登录已失效」的笼统报错，登录框却再也不出现。
+                // Show the form only for an explicit foreground action. Background
+                // requests can fail during startup without taking over Safari's UI.
                 try { if (typeof showToast === 'function' && !_alreadyHandled) showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
-                try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                // Polling and initial loading never open the iOS password sheet.
+                // The login button or a user-initiated protected action can still open the form.
+                if (!(opts && opts.background)) {
+                    try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                }
             }
 window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 
@@ -799,7 +801,9 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
                             clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'identity_mismatch' });
                             try { if (typeof showToast === 'function') showToast('账号认证状态异常，请重新登录', 'error'); } catch (e) {}
-                            try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                            if (!_isBackground) {
+                                try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                            }
                             return { ok: false, reason: 'identity_mismatch', token: token, user_name: userName };
                         }
                         _protectedAuthFailureHandled = false;
@@ -807,7 +811,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                         return { ok: true, reason: 'ok', token: token, user_name: userName };
                     }
                     if (_lastRefreshAuthResult.reason === 'expired' || _lastRefreshAuthResult.reason === 'forbidden') {
-                        handleProtectedAuthFailure();
+                        handleProtectedAuthFailure({ background: _isBackground });
                         return { ok: false, reason: _lastRefreshAuthResult.reason, status: _lastRefreshAuthResult.status, token: '', user_name: userName };
                     }
                     return {
@@ -889,7 +893,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     if (renewed) response = await send(renewed);
                 }
                 if (response.status === 401) {
-                    window.handleProtectedAuthFailure();
+                    window.handleProtectedAuthFailure({ background: !!options.background });
                 }
                 return response;
             };
@@ -1301,11 +1305,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 window._xtjAuthState = 'unauthenticated';
                                 window._xtjCanonicalUser = '';
                                 if (typeof initUI === 'function') initUI().catch(function() {});
-                                // ★ 失效必须可见：补 toast + 弹登录框（此前静默清状态，用户一脸懵）
-                                try { if (typeof showToast === 'function') showToast('登录状态已过期，请重新登录', 'error'); } catch (_eT) {}
-                                setTimeout(function () {
-                                    try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (_eM) {}
-                                }, 600);
+                                // Cold-start expiry is visible without forcing Safari's password UI.
+                                try { if (typeof showToast === 'function') showToast('登录已过期，点击登录可继续', 'error'); } catch (_eT) {}
                             } else {
                                 // 二次确认时变成网络类失败：不注销本地会话
                                 window._xtjAuthState = 'offline_unverified';
@@ -2652,4 +2653,3 @@ function isAdmin() {
                 overlay._closeTimer = null;
             }, 300);
         };
-

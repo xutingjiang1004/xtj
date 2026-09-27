@@ -566,6 +566,11 @@
                 var seq = parseInt(options && options.seq, 10);
                 if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-loading')) return;
                 if (seq > 0) el.setAttribute('data-loading-seq', String(seq));
+                if (variant === 'chat-list' && window.__xtjChatListSkeletonHtml) {
+                    el.classList.remove('xtj-chat-photo-loading');
+                    el.innerHTML = window.__xtjChatListSkeletonHtml();
+                    return;
+                }
                 el.classList.add('xtj-chat-photo-loading');
                 // 仅当调用方未提供任何自定义文案时，才复用 07 的共享骨架（写死文案）；
                 // 一旦显式传了 title/subtitle，就走 getXtjLoadingHtml 透传，避免文案被吞。
