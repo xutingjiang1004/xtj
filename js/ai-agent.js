@@ -1033,6 +1033,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  // ★ 2026-09-28（方案 D「来源可信度」）：从 URL 提取域名用于来源条目展示。
+  //   ChatGPT 的搜索卡片会显示 favicon + 域名，这是"结果可信"的关键视觉线索。
+  //   这里只取域名文字，**不引入任何外部 favicon 请求**（避免第三方追踪与额外失败点）。
+  //   URL 非法时返回空串，调用方据此决定是否渲染域名位。
+  function safeSearchHost(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+      var parsed = new URL(raw, window.location.origin);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+      return (parsed.hostname || '').replace(/^www\./i, '');
+    } catch (e) {
+      return '';
+    }
+  }
+
   /**
    * 对话内「已联网」状态：纯文字元信息（不要胶囊/边框）。
    * opts: { count, query, results, expired, statusText, simple }
@@ -1084,7 +1100,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           text: String(r.snippet).slice(0, 200)
         }));
       }
-      var meta = (r.source || '') + (r.published_at ? ' · ' + r.published_at : '');
+      // ★ 2026-09-28（方案 D）：域名前置（与 tool_result 分支同一套来源展示逻辑）
+      var host1 = safeSearchHost(r.url);
+      var meta = [host1, r.source, r.published_at].filter(function(v) { return !!v; }).join(' · ');
       if (meta) item.appendChild(el('div', { class: 'ai-search-detail-source', text: meta }));
       detail.appendChild(item);
     }
@@ -2568,6 +2586,43 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         toggleActivity();
       }
     });
+    // ★ 2026-09-28（方案 D「工具名说人话」）：统一工具名映射表。
+  //   此前 nameMapCall（tool_calls）与 nameMap（tool_result）**各写一份且不一致**，
+  //   改名时容易漏改一边导致同一工具在"调用中"和"已完成"显示成两个名字。
+  //   现收敛为单一来源，两处共用。
+  //
+  //   命名原则：**用动作描述，不用产品名/技术名**。
+  //   ChatGPT 会说"正在搜索网页"，不会说"正在调用 Tavily"——后者是内部实现，
+  //   对用户没有意义。内部名不丢失：调用点仍会把原始 tool_name 写进
+  //   data-tool-name（供对账/去重）与 title（供鼠标悬停查看）。
+  var TOOL_LABELS = {
+    // 检索类
+    search_web: '搜索网页', tavily_search: '搜索网页', read_web_page: '阅读网页',
+    web_extract: '提取网页内容', extract_links: '提取链接', page_meta: '查看网页信息',
+    search_social: '搜索社交内容',
+    // 实时信息类
+    get_weather: '查询天气', get_current_time: '获取当前时间',
+    get_exchange_rate: '查询汇率', get_stock_quote: '查询股票行情',
+    // 计算/数据类
+    calculate: '计算', convert_units: '单位换算', date_calc: '日期计算',
+    text_stats: '统计文本', batch_calc: '批量计算', sort_filter: '整理数据',
+    convert_data: '转换数据格式', process_json: '处理数据', regex_test: '校验表达式',
+    encode_decode: '编码转换', run_code: '运行代码',
+    // 文件生成/读取类
+    read_document: '读取文档', read_zip: '读取压缩包', make_file: '生成文件',
+    generate_pdf: '生成 PDF', make_chart: '生成图表', markdown_table: '生成表格',
+    qr_code: '生成二维码', image_info: '查看图片信息', image_process: '处理图片',
+    diff_text: '对比文本', url_parse: '解析网址', password_tool: '生成密码',
+    task_plan: '规划任务'
+  };
+  function toolLabel(name) {
+    var key = String(name || '');
+    return TOOL_LABELS[key] || key || '工具';
+  }
+
+  // ★ 2026-09-28（方案 C）：记录活动区起点，用于完成后在摘要行显示「用时 X.Xs」。
+    //   ChatGPT / Claude 都有这个——低成本高感知，让人知道"它确实干了活"。
+    activity.__startedAt = Date.now();
     activity.__body = body;
     timeline.appendChild(activity);
     return activity;
@@ -2590,7 +2645,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!activity) return;
     var rounds = activity.querySelectorAll('.ai-tool-round');
     var totalRounds = rounds.length;
-    if (!totalRounds) return;
+    // ★ 2026-09-28 修复：不能在这里直接 return。
+    //   存在"只有「整理中」占位、还没有任何轮次"的中间态（后端先把
+    //   tool_pending/organizing 推过来、tool_calls 稍后才到）。原写法
+    //   在这种状态下直接退出，活动区头一直停在初始文案「正在使用工具」，
+    //   既不显示"正在整理结果"，也无法在占位结束后收敛。
+    //   改为：无轮次时只驱动标题文案（状态由 organizing 决定），跳过计数。
     var totalSteps = 0, totalDone = 0, totalFailed = 0, runningRounds = 0;
     for (var i = 0; i < totalRounds; i++) {
       var steps = rounds[i].querySelectorAll('.ai-tool-step');
@@ -2605,7 +2665,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // "整理中"占位仍在跑 → 整区不能算完成（否则摘要行会显示"已完成"但下面还在转）
     var organizing = activity.querySelector('.ai-tool-organizing');
     var organizingRunning = !!(organizing && organizing.classList.contains('is-running'));
-    var settled = runningRounds === 0 && !organizingRunning && (totalDone + totalFailed) >= totalSteps;
+    // ★ totalSteps > 0 是必要条件：没有条目时（只有占位/空壳）不构成"完成"，
+    //   否则 "0 >= 0" 会让空活动区立刻判 settled 并收起。
+    var settled = totalSteps > 0 && runningRounds === 0 && !organizingRunning
+      && (totalDone + totalFailed) >= totalSteps;
 
     var icon = activity.querySelector('.ai-tool-activity-icon');
     var label = activity.querySelector('.ai-tool-activity-label');
@@ -2617,6 +2680,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       activity.classList.add('is-done', 'is-collapsed');
       if (head) { try { head.setAttribute('aria-expanded', 'false'); } catch (eArA2) {} }
       if (icon) icon.textContent = totalFailed > 0 ? '⚠️' : '✅';
+      // ★ 2026-09-28（方案 C）：用时只在**首次**收敛时锁定。
+      //   若每次刷新都重算，中途展开/再收敛会让耗时一直涨，与"这次工具花了多久"的语义不符。
+      if (activity.__elapsedMs === undefined) {
+        var startedAt = Number(activity.__startedAt || 0);
+        activity.__elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+      }
+      // 用时放在右侧 count 位：左边是"做了什么"，右边是"花了多久"，各司其职。
+      // <1s 不显示（"用时 0.2s"既无信息量又像是卡顿）；≥100s 转分钟避免数字过长。
+      var elapsedText = '';
+      if (activity.__elapsedMs >= 1000) {
+        var elapsedSec = activity.__elapsedMs / 1000;
+        elapsedText = elapsedSec >= 100
+          ? ('用时 ' + Math.round(elapsedSec / 60) + 'min')
+          : ('用时 ' + elapsedSec.toFixed(1) + 's');
+      }
       if (label) {
         // 单轮时沿用"已完成 N 个工具"的措辞，避免"1 轮"这种别扭说法
         if (totalRounds <= 1) {
@@ -2629,19 +2707,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             : ('已使用 ' + totalRounds + ' 轮工具 · 共 ' + totalSteps + ' 个');
         }
       }
-      if (count) count.textContent = '';
+      if (count) count.textContent = elapsedText;
     } else {
       activity.classList.add('is-running');
       activity.classList.remove('is-done', 'is-collapsed');
       if (head) { try { head.setAttribute('aria-expanded', 'true'); } catch (eArA3) {} }
       if (icon) icon.textContent = '⏳';
       if (label) {
-        label.textContent = organizingRunning
-          ? '正在整理结果'
-          : (totalRounds > 1 ? ('正在使用工具（第 ' + totalRounds + ' 轮）') : '正在使用工具');
-      }
-      if (count) {
-        count.textContent = organizingRunning
+        // ★ 2026-09-28（D3 续）：文案分工
+        //   活动区头 = **状态**，"整理中"占位 = **具体动作**（"整理检索结果并作答"）。
+        //   两者若都写"整理"，就是同义反复（真实渲染里表现为上下两行说同一件事）。
+        //   organizing 期间头行收敛为"正在使用工具"，动作交给占位行。
+        label.textContent = totalRounds > 1
+          ? ('正在使用工具（第 ' + totalRounds + ' 轮）')
+          : '正在使用工具';
+      }      if (count) {
+        // 无轮次时（只有"整理中"占位在跑）不显示 "0/0 完成"这种无意义计数
+        count.textContent = (organizingRunning || totalSteps === 0)
           ? ''
           : ((totalDone + totalFailed) + '/' + totalSteps + ' 完成');
       }
@@ -8867,22 +8949,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'tool_calls') {
             var toolList = evt.tools || [];
             streamToolCount += toolList.length;
-            var nameMapCall = {
-              search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
-              get_weather: '查询天气', get_current_time: '获取时间',
-              get_exchange_rate: '查询汇率', get_stock_quote: '查询行情',
-              calculate: '精确计算', convert_units: '单位换算',
-              search_social: '社媒检索', run_code: '沙箱计算', process_json: '处理 JSON',
-              encode_decode: '编码转换', date_calc: '日期计算', text_stats: '文本统计',
-              read_document: '读取文档', make_file: '生成文件', web_extract: '网页提取',
-              task_plan: '任务计划',
-              make_chart: '生成图表', generate_pdf: '生成 PDF', read_zip: '读取压缩包',
-              image_info: '图片信息', image_process: '图片处理', diff_text: '文本对比',
-              sort_filter: '数据筛选排序', markdown_table: '生成表格', qr_code: '生成二维码',
-              password_tool: '密码工具', regex_test: '正则测试', url_parse: '网址解析',
-              convert_data: '数据格式转换', batch_calc: '批量计算', page_meta: '网页元信息',
-              extract_links: '提取链接'
-            };
             var timeline = assistantNode.querySelector('.ai-tool-timeline');
             if (!timeline) {
               timeline = el('div', { class: 'ai-tool-timeline ai-tool-status', role: 'status', 'aria-live': 'polite' });
@@ -8934,7 +9000,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
 
             toolList.forEach(function(t) {
-              var label = nameMapCall[t.name] || t.name || '工具';
+              // ★ 2026-09-28（方案 D）：改走统一映射表，工具名用动作描述而非产品名
+              var label = toolLabel(t.name);
               var detail = '';
               if (t.args && t.args.query) detail = String(t.args.query);
               else if (t.args && t.args.url) detail = String(t.args.url).slice(0, 80);
@@ -8993,7 +9060,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var step = el('div', { class: 'ai-tool-step is-running' });
               step.setAttribute('data-tool-step', stepId);
               step.setAttribute('data-tool-name', String(t.name || ''));
-              step.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🔍' }));
+              // ★ 2026-09-28（方案 D）：显示名说人话，内部名保留进 title 供悬停查看
+              if (t.name && label !== String(t.name)) step.setAttribute('title', String(t.name));
+              step.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
               var body = el('div', { class: 'ai-tool-step-body' });
               body.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
               if (detail) body.appendChild(el('div', { class: 'ai-tool-step-detail', text: detail }));
@@ -9099,7 +9168,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var pendList = pendRound.querySelector('.ai-tool-round-list');
             var pendStep = el('div', { class: 'ai-tool-step is-running' });
             if (pendName) pendStep.setAttribute('data-tool-name', pendName);
-            pendStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🔍' }));
+            pendStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
             var pendBody = el('div', { class: 'ai-tool-step-body' });
             pendBody.appendChild(el('div', { class: 'ai-tool-step-title', text: '准备工具' }));
             pendBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: pendName || '站内工具' }));
@@ -9144,7 +9213,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 try { refreshOwningToolRound(errMatch); } catch (eErrRound) {}
               } else {
                 var errStep = el('div', { class: 'ai-tool-step is-error' });
-                errStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '⚠️' }));
+                errStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
                 var errBody = el('div', { class: 'ai-tool-step-body' });
                 errBody.appendChild(el('div', { class: 'ai-tool-step-title', text: evt.tool_name || '工具' }));
                 errBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '失败' }));
@@ -9175,23 +9244,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               toolBar2 = el('div', { class: 'ai-tool-timeline ai-tool-status' });
               assistantNode.insertBefore(toolBar2, assistantBubble);
             }
-            var nameMap = {
-              search_web: '联网搜索', tavily_search: 'Tavily搜索', read_web_page: '阅读网页',
-              get_weather: '查询天气', get_current_time: '获取时间',
-              get_exchange_rate: '查询汇率', get_stock_quote: '查询行情',
-              calculate: '精确计算', convert_units: '单位换算',
-              search_social: '社媒检索', run_code: '沙箱计算', process_json: '处理 JSON',
-              encode_decode: '编码转换', date_calc: '日期计算', text_stats: '文本统计',
-              read_document: '读取文档', make_file: '生成文件', web_extract: '网页提取',
-              task_plan: '任务计划',
-              make_chart: '生成图表', generate_pdf: '生成 PDF', read_zip: '读取压缩包',
-              image_info: '图片信息', image_process: '图片处理', diff_text: '文本对比',
-              sort_filter: '数据筛选排序', markdown_table: '生成表格', qr_code: '生成二维码',
-              password_tool: '密码工具', regex_test: '正则测试', url_parse: '网址解析',
-              convert_data: '数据格式转换', batch_calc: '批量计算', page_meta: '网页元信息',
-              extract_links: '提取链接'
-            };
-            var label = nameMap[evt.tool_name] || evt.tool_name || '工具';
+            // ★ 2026-09-28（方案 D）：改走统一映射表（原先这里有一份重复的 nameMap）
+            var label = toolLabel(evt.tool_name);
             var summaryText = '';
             var toolSucceeded = evt.success === true && !evt.error;
             if (toolSucceeded) {
@@ -9231,7 +9285,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (!matchStep) {
               matchStep = el('div', { class: 'ai-tool-step' });
               matchStep.setAttribute('data-tool-name', String(evt.tool_name || ''));
-              matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: toolSucceeded ? '✅' : '⚠️' }));
+              matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
               var mbody = el('div', { class: 'ai-tool-step-body' });
               mbody.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
               mbody.appendChild(el('div', { class: 'ai-tool-step-status', text: toolSucceeded ? '已完成' : '失败' }));
@@ -9310,7 +9364,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 }));
                 var _orgStep = _orgHost.querySelector('.ai-tool-organizing');
                 if (_orgStep) {
-                  _orgStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🧠' }));
+                  _orgStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
                   var _orgBody = el('div', { class: 'ai-tool-step-body' });
                   _orgBody.appendChild(el('div', { class: 'ai-tool-step-title', text: '整理检索结果并作答' }));
                   _orgBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '整理中' }));
@@ -9359,7 +9413,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 if (r2.snippet && typeof r2.snippet === 'string') {
                   itemEl2.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r2.snippet.slice(0, 200) }));
                 }
-                var meta2 = [r2.source, r2.published_at].filter(function(v) { return !!v; }).join(' · ');
+                // ★ 2026-09-28（方案 D）：域名前置，让"这条结果来自哪个站"一眼可见
+                var host2 = safeSearchHost(r2.url);
+                var meta2 = [host2, r2.source, r2.published_at].filter(function(v) { return !!v; }).join(' · ');
                 if (meta2) itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: meta2 }));
                 detailPanel2.appendChild(itemEl2);
               }

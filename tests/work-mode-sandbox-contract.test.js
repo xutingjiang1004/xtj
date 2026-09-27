@@ -146,10 +146,19 @@ test('工作模式：prompt 明确提示文档/文件/网页/计划四类新工�
 
 test('前端：工具中文名映射覆盖新增工具', () => {
   const jsSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'ai-agent.js'), 'utf8');
+  // ★ 2026-09-28（方案 D）：原先断言"每个名字出现 ≥2 次"，那是在钉住
+  //   **两份重复 nameMap** 这个缺陷本身。现已收敛为单一 TOOL_LABELS，
+  //   断言改为：统一映射必须覆盖全部工具，且两处调用点都走它。
   ['read_document', 'make_file', 'web_extract', 'task_plan', 'run_code', 'search_social'].forEach((n) => {
-    const cnt = (jsSrc.match(new RegExp(n + ": '", 'g')) || []).length;
-    assert.ok(cnt >= 2, '工具 ' + n + ' 应在两处 nameMap 中都有中文名，实际: ' + cnt);
+    const cnt = (jsSrc.match(new RegExp(n + ":\\s*'", 'g')) || []).length;
+    assert.ok(cnt >= 1, `工具 ${n} 必须在统一映射表 TOOL_LABELS 中有中文名，实际出现 ${cnt} 次`);
   });
+  // 映射表只能有一份：重复会让同一工具在"调用中"与"已完成"显示成两个名字
+  const defs = (jsSrc.match(/var TOOL_LABELS\s*=\s*\{/g) || []).length;
+  assert.equal(defs, 1, `TOOL_LABELS 必须只定义一次，实际 ${defs} 次`);
+  // 两个渲染点（tool_calls / tool_result）都必须经 toolLabel 取值
+  const calls = (jsSrc.match(/toolLabel\(/g) || []).length;
+  assert.ok(calls >= 3, `toolLabel 调用点不足（${calls}）：定义 + tool_calls + tool_result 至少 3 处`);
 });
 
 test('前端：make_file / task_plan 卡片有渲染分支', () => {
