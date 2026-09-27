@@ -16086,6 +16086,27 @@ profile content only. Dock stays untouched.
     backdrop-filter: none !important;
   }
 
+  /* Loading rows share the exact contact geometry, including mobile padding. */
+  #panelChat .chat-list-skeleton-row {
+    pointer-events: none;
+    animation: none;
+  }
+  #panelChat .chat-list-skeleton-row .cli-avatar,
+  #panelChat .chat-list-skeleton-line {
+    background: linear-gradient(100deg, rgba(127,191,168,.13) 8%, rgba(127,191,168,.28) 48%, rgba(127,191,168,.13) 88%);
+    background-size: 200% 100%;
+    animation: xtjChatListShimmer 1.8s ease-in-out infinite;
+  }
+  #panelChat .chat-list-skeleton-line { display: block; height: 10px; border-radius: 999px; }
+  #panelChat .chat-list-skeleton-name { width: 46%; margin: 3px 0 8px; }
+  #panelChat .chat-list-skeleton-preview { width: 72%; height: 9px; margin: 3px 0; }
+  #panelChat .chat-list-skeleton-time { width: 30px; height: 8px; }
+  @keyframes xtjChatListShimmer { to { background-position-x: -200%; } }
+  @media (prefers-reduced-motion: reduce) {
+    #panelChat .chat-list-skeleton-row .cli-avatar,
+    #panelChat .chat-list-skeleton-line { animation: none; }
+  }
+
   #panelChat .chat-list-item:hover,
   #panelChat .chat-list-item.active,
   #panelChat .chat-list-item.unread {

@@ -1069,8 +1069,14 @@
                     try { window.__xtjSetActivePostId(null); } catch (_) {}
                 }
                 if (id === 'loginModal' || id === 'registerModal') {
+                    if (el.contains(document.activeElement)) {
+                        try { document.activeElement.blur(); } catch (_) {}
+                    }
+                    el.setAttribute('inert', '');
                     if (authModalFocusOrigin && typeof authModalFocusOrigin.focus === 'function') {
-                        try { authModalFocusOrigin.focus(); } catch (_) {}
+                        if (!el.contains(authModalFocusOrigin) && (!window.matchMedia || window.matchMedia('(hover: hover) and (pointer: fine)').matches)) {
+                            try { authModalFocusOrigin.focus(); } catch (_) {}
+                        }
                     }
                     authModalFocusOrigin = null;
                 }

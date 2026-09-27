@@ -562,7 +562,7 @@ const ADMIN_NAME = "xxz";
             }
             window.clearAllAuthState = clearAllAuthState;
 
-            function handleProtectedAuthFailure() {
+            function handleProtectedAuthFailure(opts) {
                 var _alreadyHandled = _protectedAuthFailureHandled;
                 if (!_alreadyHandled) {
                     _protectedAuthFailureHandled = true;
@@ -570,12 +570,14 @@ const ADMIN_NAME = "xxz";
                     // ★ 30秒后重置，允许用户关闭弹窗后再次触发
                     setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
                 }
-                // ★ 修复「提示了登录失效却不见弹窗」：去重只作用于 clear + toast，
-                //   登录弹窗必须始终确保打开（openAuthModal 幂等，重复调用无副作用）。
-                //   此前 30 秒去重窗口内的后续失效整体 return，各调用方只会 throw 出
-                //   「登录已失效」的笼统报错，登录框却再也不出现。
+                // Show the form only for an explicit foreground action. Background
+                // requests can fail during startup without taking over Safari's UI.
                 try { if (typeof showToast === 'function' && !_alreadyHandled) showToast('登录已失效，请重新登录', 'error'); } catch (e) {}
-                try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                // Polling and initial loading never open the iOS password sheet.
+                // The login button or a user-initiated protected action can still open the form.
+                if (!(opts && opts.background)) {
+                    try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                }
             }
 window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 
@@ -805,7 +807,9 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             setTimeout(function() { _protectedAuthFailureHandled = false; }, 30000);
                             clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'identity_mismatch' });
                             try { if (typeof showToast === 'function') showToast('账号认证状态异常，请重新登录', 'error'); } catch (e) {}
-                            try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                            if (!_isBackground) {
+                                try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (e2) {}
+                            }
                             return { ok: false, reason: 'identity_mismatch', token: token, user_name: userName };
                         }
                         _protectedAuthFailureHandled = false;
@@ -813,7 +817,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                         return { ok: true, reason: 'ok', token: token, user_name: userName };
                     }
                     if (_lastRefreshAuthResult.reason === 'expired' || _lastRefreshAuthResult.reason === 'forbidden') {
-                        handleProtectedAuthFailure();
+                        handleProtectedAuthFailure({ background: _isBackground });
                         return { ok: false, reason: _lastRefreshAuthResult.reason, status: _lastRefreshAuthResult.status, token: '', user_name: userName };
                     }
                     return {
@@ -895,7 +899,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     if (renewed) response = await send(renewed);
                 }
                 if (response.status === 401) {
-                    window.handleProtectedAuthFailure();
+                    window.handleProtectedAuthFailure({ background: !!options.background });
                 }
                 return response;
             };
@@ -1307,11 +1311,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 window._xtjAuthState = 'unauthenticated';
                                 window._xtjCanonicalUser = '';
                                 if (typeof initUI === 'function') initUI().catch(function() {});
-                                // ★ 失效必须可见：补 toast + 弹登录框（此前静默清状态，用户一脸懵）
-                                try { if (typeof showToast === 'function') showToast('登录状态已过期，请重新登录', 'error'); } catch (_eT) {}
-                                setTimeout(function () {
-                                    try { if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); } catch (_eM) {}
-                                }, 600);
+                                // Cold-start expiry is visible without forcing Safari's password UI.
+                                try { if (typeof showToast === 'function') showToast('登录已过期，点击登录可继续', 'error'); } catch (_eT) {}
                             } else {
                                 // 二次确认时变成网络类失败：不注销本地会话
                                 window._xtjAuthState = 'offline_unverified';
@@ -2965,13 +2966,21 @@ function isAdmin() {
                 const id = mode === 'login' ? 'loginModal' : 'registerModal';
                 const modal = document.getElementById(id);
                 if (!modal) return;
+                if (modal.classList.contains('active')) return;
                 authModalFocusOrigin = document.activeElement;
+                modal.removeAttribute('inert');
                 modal.setAttribute('aria-hidden', 'false');
                 modal.classList.add('active');
-                setTimeout(() => {
-                    const nickInp = document.getElementById(mode === 'login' ? 'loginNickInp' : 'regNickInp');
-                    if (nickInp) nickInp.focus();
-                }, 200);
+                // iOS restores saved credentials when an auth input is focused by script,
+                // which can open the system password sheet without a tap from the user.
+                // Desktop keyboard users still get focus; touch users choose the field themselves.
+                if (window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+                    setTimeout(() => {
+                        if (!modal.classList.contains('active')) return;
+                        const nickInp = document.getElementById(mode === 'login' ? 'loginNickInp' : 'regNickInp');
+                        if (nickInp) nickInp.focus();
+                    }, 200);
+                }
             };
 
             document.addEventListener('keydown', function (event) {
@@ -6365,8 +6374,14 @@ function renderProfileActivityList(kind) {
                     try { window.__xtjSetActivePostId(null); } catch (_) {}
                 }
                 if (id === 'loginModal' || id === 'registerModal') {
+                    if (el.contains(document.activeElement)) {
+                        try { document.activeElement.blur(); } catch (_) {}
+                    }
+                    el.setAttribute('inert', '');
                     if (authModalFocusOrigin && typeof authModalFocusOrigin.focus === 'function') {
-                        try { authModalFocusOrigin.focus(); } catch (_) {}
+                        if (!el.contains(authModalFocusOrigin) && (!window.matchMedia || window.matchMedia('(hover: hover) and (pointer: fine)').matches)) {
+                            try { authModalFocusOrigin.focus(); } catch (_) {}
+                        }
                     }
                     authModalFocusOrigin = null;
                 }
@@ -11878,7 +11893,7 @@ function renderProfileActivityList(kind) {
                         delete messages.dataset.emptyRendered;
                     }
                     var list = document.getElementById('dockChatList');
-                    if (list) list.innerHTML = '';
+                    if (list) { list.innerHTML = ''; list.removeAttribute('data-list-owner'); }
                     var title = document.getElementById('dockChatTitle');
                     if (title) title.textContent = '消息';
                     _dockChatListRenderSignature = '';
@@ -11930,6 +11945,16 @@ function renderProfileActivityList(kind) {
                 if (inputArea) inputArea.style.display = '';
             }
 
+            function buildDockChatListSkeleton() {
+                return '<div class="chat-list-skeleton" aria-hidden="true">' + [0, 1, 2, 3].map(function() {
+                    return '<div class="chat-list-item chat-list-skeleton-row"><span class="cli-avatar"></span>' +
+                        '<span class="cli-info"><span class="cli-name"><span class="chat-list-skeleton-line chat-list-skeleton-name"></span></span>' +
+                        '<span class="cli-preview"><span class="chat-list-skeleton-line chat-list-skeleton-preview"></span></span></span>' +
+                        '<span class="cli-right"><span class="chat-list-skeleton-line chat-list-skeleton-time"></span></span></div>';
+                }).join('') + '</div>';
+            }
+            window.__xtjChatListSkeletonHtml = buildDockChatListSkeleton;
+
                                                             function renderChatLoadingState(el, options) {
                 if (!el) return;
                 var title = options && options.title ? options.title : '加载中..';
@@ -11941,7 +11966,7 @@ function renderProfileActivityList(kind) {
                 //   给骨架打上序号；同一序号（同一次会话打开）内的后续调用直接跳过，不再重绘。
                 if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-loading')) return;
                 if (seq > 0) el.setAttribute('data-loading-seq', String(seq));
-                el.innerHTML = getXtjLoadingHtml(title, subtitle, variant);
+                el.innerHTML = variant === 'chat-list' ? buildDockChatListSkeleton() : getXtjLoadingHtml(title, subtitle, variant);
             }
 
             // ★ 2026-09-27 修复（审计 C11）：从帖子/通知直接 openChat() 进入私信详情时，
@@ -12086,7 +12111,7 @@ function renderProfileActivityList(kind) {
             //   彻底解法需要后端支持会话级聚合/游标（记为已知局限）。
             async function fetchDockChatListCatchUp(listOwner, listResultStale) {
                 try {
-                    var resp = await window.xtjProtectedFetch('/api/dm/list?limit=500', { timeoutMs: 15000 });
+                    var resp = await window.xtjProtectedFetch('/api/dm/list?limit=500', { timeoutMs: 15000, background: true });
                     if (!resp || !resp.ok) return null;
                     var json = await resp.json().catch(function() { return null; });
                     if (!json || !json.ok) return null;
@@ -12098,10 +12123,34 @@ function renderProfileActivityList(kind) {
                 }
             }
 
+            // Keep only contact names for this tab and account. The first paint can show
+            // recognizable contacts while the current previews and unread counts load.
+            function cacheDockChatContactNames(owner, convs) {
+                try {
+                    sessionStorage.setItem('xtj_dm_contact_names:' + owner, JSON.stringify({
+                        at: Date.now(), names: convs.map(function(c) { return c.other_user; }).slice(0, 80)
+                    }));
+                } catch (_) {}
+            }
+            function restoreDockChatContactNames(el, owner) {
+                try {
+                    var saved = JSON.parse(sessionStorage.getItem('xtj_dm_contact_names:' + owner) || 'null');
+                    if (!saved || Date.now() - saved.at > 15 * 60 * 1000 || !Array.isArray(saved.names)) return false;
+                    var names = saved.names.filter(function(name) { return typeof name === 'string' && name && name !== 'xxz'; });
+                    if (!names.length) return false;
+                    renderDockChatConversationList(el, names.map(function(name) {
+                        return { other_user: name, last_message: '正在更新消息…', last_time: '', unread: 0 };
+                    }));
+                    renderDockChatFixedEntry(el);
+                    return true;
+                } catch (_) { return false; }
+            }
+
             async function loadDockChatList() {
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
                 if (!window.currentUser) {
+                    el.removeAttribute('data-list-owner');
                     el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">登录后可查看消息</div></div>';
                     setUnreadBadgeCount(0);
                     renderDockChatFixedEntry(el);
@@ -12111,7 +12160,8 @@ function renderProfileActivityList(kind) {
                 if (!dockChatActiveUser) {
                     syncDockChatLayoutState();
                 }
-                if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
+                if (el.getAttribute('data-list-owner') === window.currentUser &&
+                    Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
                 // ★ 2026-09-27 修复（审计 S6：会话列表跨账号/跨登出残留）：
                 //   此前只用 `listLoadSeq !== _dockChatListLoadSeq` 判失效，而这个计数器只在
                 //   **本函数自身**下一次进入时才 ++，有两个致命缺口：
@@ -12123,6 +12173,11 @@ function renderProfileActivityList(kind) {
                 //   现在同时快照「请求发起时的登录账号」，回填前核对当前账号与登录态，
                 //   只要对不上就整段丢弃（不 toast、不重试，由新账号自己的请求接管）。
                 var listOwner = window.currentUser || '';
+                if (el.getAttribute('data-list-owner') !== listOwner) {
+                    el.replaceChildren();
+                    el.setAttribute('data-list-owner', listOwner);
+                    _dockChatListRenderSignature = '';
+                }
                 var listLoadSeq = ++_dockChatListLoadSeq;
                 // 统一的失效判定：请求序号被顶掉，或账号/登录态已变，都视为这次结果作废。
                 var listResultStale = function() {
@@ -12131,7 +12186,10 @@ function renderProfileActivityList(kind) {
                     if ((window.currentUser || '') !== listOwner) return true;
                     return false;
                 };
-                var hadRenderedList = !!el.children.length;
+                if (!el.querySelector('.chat-list-item[data-chat-user]')) {
+                    restoreDockChatContactNames(el, listOwner);
+                }
+                var hadRenderedList = !!el.querySelector('.chat-list-item[data-chat-user]');
                 try {
                     if (!hadRenderedList) {
                         renderChatLoadingState(el, {
@@ -12139,6 +12197,7 @@ function renderProfileActivityList(kind) {
                             subtitle: '正在取回最近消息',
                             variant: 'chat-list'
                         });
+                        renderDockChatFixedEntry(el);
                     }
                     // 走共享单飞请求（与未读角标复用同一份结果），并显式传 limit=180 ——
                     //   与下面 mergeDockChatRowsById 的窗口一致，避免"拉了 1000 条只用 180 条"。
@@ -12148,6 +12207,7 @@ function renderProfileActivityList(kind) {
                     var rawRows = dmResult.data || [];
                     var allMsgs = mergeDockChatRowsById(rawRows, false, 180);
                     if (!allMsgs || !allMsgs.length) {
+                        cacheDockChatContactNames(listOwner, []);
                         el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">暂无最近会话</div></div>';
                         setUnreadBadgeCount(0);
                         window.dockChatListCacheTime = Date.now();
@@ -12155,20 +12215,6 @@ function renderProfileActivityList(kind) {
                         renderDockChatFixedEntry(el);
                         syncDockChatLayoutState();
                         return;
-                    }
-                    // ★ 2026-09-27 修复（审计 C8）：检测"窗口可能被截断"→ 补拉一页更宽窗口。
-                    //   判据：服务端按 limit 返回，若原始条数**达到上限 180**，说明后面
-                    //   很可能还有更早的消息被截掉（高频会话会占满窗口，使其它旧会话消失）。
-                    //   仅在确实可能截断时才多发一次请求，避免给首屏常态路径增加负担。
-                    var maybeTruncated = rawRows.length >= 180;
-                    if (maybeTruncated) {
-                        var widerRows = await fetchDockChatListCatchUp(listOwner, listResultStale);
-                        if (widerRows && widerRows.length > rawRows.length) {
-                            // 用 id 去重后合并（补拉窗口通常包含首屏窗口，取并集最稳妥）
-                            var mergedRows = rawRows.concat(widerRows);
-                            var widerMsgs = mergeDockChatRowsById(mergedRows, false, 500);
-                            if (widerMsgs.length > allMsgs.length) allMsgs = widerMsgs;
-                        }
                     }
                     // ★ 2026-09-25 优化（聊天秒开）：会话列表接口返回的其实是「该用户最近的
                     //   全部消息」，此前只取每个会话的最后一条做预览，其余全部丢弃 —— 于是用户
@@ -12188,6 +12234,7 @@ function renderProfileActivityList(kind) {
                     setUnreadBadgeCount(aggregateDmUnread(allMsgs).total);
                     if (typeof window.__xtjNoteDmUnreadFresh === 'function') window.__xtjNoteDmUnreadFresh();
                     renderDockChatConversationList(el, convs);
+                    cacheDockChatContactNames(listOwner, convs);
                     window.dockChatListCacheTime = Date.now();
                     _dockChatListEverLoaded = true;
                     renderDockChatFixedEntry(el);
@@ -12198,6 +12245,26 @@ function renderProfileActivityList(kind) {
                     hydrateDockChatAvatars(avatarUsers, function(changed) {
                         if (changed) patchDockChatConversationAvatars(el);
                     });
+                    // A full 180-row window might hide older contacts. Paint the first
+                    // result now, then extend the list without blocking its first paint.
+                    if (rawRows.length >= 180) {
+                        fetchDockChatListCatchUp(listOwner, listResultStale).then(function(widerRows) {
+                            if (listResultStale() || !widerRows || widerRows.length <= rawRows.length) return;
+                            var widerMsgs = mergeDockChatRowsById(rawRows.concat(widerRows), false, 500);
+                            if (widerMsgs.length <= allMsgs.length) return;
+                            var widerGrouped = buildDockChatConversations(widerMsgs);
+                            preheatDockChatCache(widerGrouped.preheatMap);
+                            setUnreadBadgeCount(aggregateDmUnread(widerMsgs).total);
+                            if (typeof window.__xtjNoteDmUnreadFresh === 'function') window.__xtjNoteDmUnreadFresh();
+                            renderDockChatConversationList(el, widerGrouped.convs);
+                            cacheDockChatContactNames(listOwner, widerGrouped.convs);
+                            renderDockChatFixedEntry(el);
+                            syncDockChatLayoutState();
+                            hydrateDockChatAvatars(widerGrouped.convs.map(function(c) { return c.other_user; }), function(changed) {
+                                if (changed && !listResultStale()) patchDockChatConversationAvatars(el);
+                            });
+                        }).catch(function(err) { console.warn('[chat-list] 后台补全失败:', err); });
+                    }
                 } catch(e) {
                     if (listResultStale()) return;
                     // ★ 修复：已有列表时保留旧列表并仅 toast 提示失败，不追加重试按钮；
@@ -12415,8 +12482,8 @@ function renderProfileActivityList(kind) {
             function renderDockChatConversationList(el, convs) {
                 if (!el) return '';
                 var nextListSignature = convs.map(buildDockChatConversationSignature).join('|');
-                var hadRenderedList = !!el.children.length;
-                if (_dockChatListRenderSignature === nextListSignature && hadRenderedList) {
+                var existingRows = el.querySelectorAll('.chat-list-item[data-signature]');
+                if (_dockChatListRenderSignature === nextListSignature && existingRows.length === convs.length && !el.querySelector('.chat-list-skeleton')) {
                     return nextListSignature;
                 }
                 var existingMap = {};
@@ -18330,6 +18397,11 @@ function renderProfileActivityList(kind) {
                 var seq = parseInt(options && options.seq, 10);
                 if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-loading')) return;
                 if (seq > 0) el.setAttribute('data-loading-seq', String(seq));
+                if (variant === 'chat-list' && window.__xtjChatListSkeletonHtml) {
+                    el.classList.remove('xtj-chat-photo-loading');
+                    el.innerHTML = window.__xtjChatListSkeletonHtml();
+                    return;
+                }
                 el.classList.add('xtj-chat-photo-loading');
                 // 仅当调用方未提供任何自定义文案时，才复用 07 的共享骨架（写死文案）；
                 // 一旦显式传了 title/subtitle，就走 getXtjLoadingHtml 透传，避免文案被吞。
