@@ -1583,9 +1583,39 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             list.slice(0, 6).forEach(function(post) {
                 if (!post.classList.contains('visible')) post.classList.add('visible');
             });
+            // ★ 2026-09-27 修复（审计 P3：重复 observe 造成回调风暴）：
+            //   IntersectionObserver.observe() 对**同一个元素**重复调用不会新增监听（规范上
+            //   是幂等的），但本项目里同一批 .post 节点会被反复交给本函数：
+            //     · appendMorePosts 末尾对 `feed.querySelectorAll(".post:not(.visible)")` 调用；
+            //     · initPostScrollAnimation 对 `document.querySelectorAll('.post')` **全量**调用；
+            //     · renderFeedWithAvatars 全量重建后再次调用。
+            //   第二条尤其致命：`document` 级选择器会把所有历史卡片再喂一遍，若节点已经
+            //   被 DOM 回收（父节点没了但 JS 里仍持有引用），observe 会让 observer 永久持有
+            //   该节点 → 节点无法被 GC，且每次交叉回调仍会执行 classList.add 等逻辑，
+            //   长会话下累积成明显卡顿与内存增长。
+            //   现在 observe 前先 unobserve，并跳过已脱离文档的节点；同时对每个节点打标记
+            //   做短路，保证同一节点在**同一代** observer 上只注册一次。
+            //   （标记随节点一起被丢弃，DOM 重建后新节点会重新注册，语义不变。）
+            //   ⚠️ 不改动 dock bar / dock capsule 及其动画逻辑，仅收敛 feed 的 observer 注册。
             list.forEach(function(post) {
-                getPostVisibilityObserver().observe(post);
-                getPostDwellObserver().observe(post);
+                if (!post) return;
+                // 已脱离文档（被 DOM 回收）→ 不注册，避免 observer 持有不可回收引用
+                if (post.isConnected === false) {
+                    try { getPostVisibilityObserver().unobserve(post); } catch (_) {}
+                    try { getPostDwellObserver().unobserve(post); } catch (_) {}
+                    post.__xtjPostObserved = '';
+                    return;
+                }
+                // 本代已注册过 → 跳过（避免重复交回 observer）
+                if (post.__xtjPostObserved === 'v1') return;
+                var visObs = getPostVisibilityObserver();
+                var dwellObs = getPostDwellObserver();
+                // 先移除再添加：即使标记因外部克隆/重建而失效，也不会叠加监听
+                try { visObs.unobserve(post); } catch (_) {}
+                try { dwellObs.unobserve(post); } catch (_) {}
+                try { visObs.observe(post); } catch (_) {}
+                try { dwellObs.observe(post); } catch (_) {}
+                try { post.__xtjPostObserved = 'v1'; } catch (_) {}
             });
             // Failsafe: any remaining hidden posts become visible shortly after.
             if (list.some(function(post) { return !post.classList.contains('visible'); })) {
@@ -7868,6 +7898,85 @@ function renderProfileActivityList(kind) {
                 }
             }
 
+            // ★ 2026-09-27 新增（审计 P2：评论 Realtime 触发全量重建）：
+            //   背景：subscribeToComments 的 Realtime 回调里，收到一条**普通评论 INSERT**
+            //   就调 renderFeedFromMemoryState() → renderFeed() → renderFeedWithAvatars()，
+            //   而后者是 `feed.innerHTML = 全部卡片` 的整段重建。全站任意用户发评论都会
+            //   推给所有在线端，于是：
+            //     · 正在评论框里打字的人，草稿节点被销毁 → 输入丢失；
+            //     · 已经加载到第 10 屏的人，滚动位置被拽回重建后的内容；
+            //     · 评论框展开状态、正在播放的视频、已加载的图片全部重置（图片重新请求）；
+            //     · 卡片上的「小猫 AI 正在组织语言」气泡也会被重绘。
+            //   现在改为**只重渲染受影响的单张卡片**：替换该 .post 节点的 outerHTML，
+            //   并用同签名复用 observer 注册，其余卡片完全不动。
+            //   若目标卡片不在 DOM 中（尚未加载到 / 被筛选掉 / 被 DOM 回收），
+            //   安全回退到原有全量刷新路径，保证行为不退化。
+            //   ⚠️ 不触碰 dock bar / dock capsule / 动画相关逻辑。
+            function patchSinglePostCard(postId) {
+                try {
+                    var feed = document.getElementById('feed');
+                    if (!feed || postId == null) return false;
+                    var post = (feedAllPosts || []).find(function(p) {
+                        return String(p && p.id) === String(postId);
+                    });
+                    if (!post) return false;
+                    var card = feed.querySelector('.post[data-post-id="' + (window.CSS && CSS.escape ? CSS.escape(String(postId)) : String(postId).replace(/"/g, '')) + '"]');
+                    if (!card) return false;
+                    var filtered = getFilteredPosts([post], feedAllComments);
+                    if (!filtered || !filtered.length) {
+                        // 被当前筛选排除 → 直接移除卡片，无需重绘
+                        if (card.parentNode) card.parentNode.removeChild(card);
+                        window._xtjFeedDomTrimmed = Math.max(0, (Number(window._xtjFeedDomTrimmed) || 0));
+                        return true;
+                    }
+                    var scopedComments = getRenderableComments(feedAllComments, filtered);
+                    var maps = buildPostMaps(scopedComments, feedAllLikes || []);
+                    var html = renderPostCardSafely(filtered[0], maps.commentMap, maps.likeMap, maps.likeUserMap);
+                    if (!html) return false;
+                    var wasVisible = card.classList.contains('visible');
+                    var tmp = document.createElement('div');
+                    tmp.innerHTML = html;
+                    var newNode = tmp.firstElementChild;
+                    if (!newNode) return false;
+                    if (wasVisible) newNode.classList.add('visible');
+                    // 保持该卡片在信息流中的位置不变（slice 下标语义依赖 DOM 顺序）
+                    card.parentNode.replaceChild(newNode, card);
+                    // 新节点需要重新接入观察器（旧节点的注册随节点一起作废）
+                    try { primePostReveal([newNode]); } catch (_) {}
+                    try { observePostViewportState([newNode]); } catch (_) {}
+                    try { if (typeof updateFeedStats === 'function') updateFeedStats(); } catch (_) {}
+                    return true;
+                } catch (ePatch) {
+                    console.warn('[feed] patchSinglePostCard failed, fallback to full render', ePatch);
+                    return false;
+                }
+            }
+            window.__xtjPatchSinglePostCard = patchSinglePostCard;
+
+            // 评论变更后的统一入口：优先局部更新，失败则回退全量刷新。
+            //   ★ 节流：Realtime 在批量导入/连续灌评论时会密集触发，逐条全量重建会把
+            //   主线程打满。这里按 postId 合并 120ms 内的多次变更，只重绘一次；
+            //   超出节流窗口的稳定变更仍会立即生效（首条不延迟）。
+            var _pendingCardPatchTimers = {};
+            function schedulePostCardPatch(postId) {
+                var key = String(postId == null ? '' : postId);
+                if (!key) return;
+                if (_pendingCardPatchTimers[key]) return; // 窗口内已排队，合并
+                var run = function() {
+                    delete _pendingCardPatchTimers[key];
+                    var ok = patchSinglePostCard(postId);
+                    if (!ok && typeof renderFeedFromMemoryState === 'function') {
+                        renderFeedFromMemoryState().catch(function() {});
+                    }
+                };
+                // 首条即时执行（用户最关心"我的评论出现了没"），随后 120ms 内的合并丢弃
+                run();
+                _pendingCardPatchTimers[key] = setTimeout(function() {
+                    delete _pendingCardPatchTimers[key];
+                }, 120);
+            }
+            window.__xtjSchedulePostCardPatch = schedulePostCardPatch;
+
             function hydrateCachedAvatarsForUsers(usernames) {
                 var users = Array.from(new Set((usernames || []).map(function(value) {
                     return String(value || '').trim();
@@ -9372,6 +9481,45 @@ function renderProfileActivityList(kind) {
             };
             window.loadFeed = loadFeed;
 
+            // ★ 2026-09-27 新增（审计 P1：DOM 回收导致切片下标错位）：
+            //   背景：appendMorePosts 里有 FEED_DOM_MAX_POSTS=200 的 DOM 上限，超出后会把
+            //   顶部的 .post 节点 removeChild 掉，并把回收条数累加到 window._xtjFeedDomTrimmed。
+            //   但该计数器**只写不读**（全仓 grep 无读取点），而 loadMoreFeedPosts 的切片起点
+            //   一直是 `feed.querySelectorAll('.post').length` —— 于是每回收一批，DOM 计数就
+            //   比真实位置少一批：假设内存里已有 400 条、DOM 保留最后 200 条，继续加载时
+            //   startIdx 算成 200，又从第 201 条开始追加，**已展示过的帖子被重复渲染一遍**，
+            //   表现为"加载更多之后又看到之前看过的内容"。
+            //   ★ 另需注意：滚动到顶部时那些被回收的卡片不会再回到 DOM（这里不做反向补偿，
+            //   因为内存态仍完整、且往上滚由既有逻辑重新渲染），所以无需恢复 window.scrollY。
+            //   ★ 第二个错误来源：`feed.querySelectorAll('.post')` 会**同时命中**非 feed 列表
+            //   里的 .post 节点（用户主页/搜索结果等），把它们算进 feed 的已渲染数造成多算。
+            //   这里改用 feed 直属子节点计数，语义严格限定在信息流容器内。
+            function countFeedDomPosts(feed) {
+                if (!feed) return 0;
+                var n = 0;
+                for (var i = 0; i < feed.children.length; i++) {
+                    var child = feed.children[i];
+                    if (child && child.classList && child.classList.contains('post')) n++;
+                }
+                return n;
+            }
+
+            // 返回「当前内存过滤结果中，已被渲染到该位置」的条数（含已被 DOM 回收的部分）。
+            function getFeedRenderedSliceStart() {
+                var feed = document.getElementById('feed');
+                var domCount = countFeedDomPosts(feed);
+                var trimmed = Math.max(0, Number(window._xtjFeedDomTrimmed) || 0);
+                return domCount + trimmed;
+            }
+
+            // 信息流被整段重建（renderFeedWithAvatars 全量 innerHTML / 筛选重置 / 换账号）时，
+            //   是否该把回收计数清零？—— **不清零**。因为切片起点的语义是"在内存过滤结果中的
+            //   位置"，全量重建后 DOM 通常又回到从头渲染的前 N 条，此时 trimmed 若不清零会多算。
+            //   因此在全量重建处显式归零，保证两种口径始终一致。
+            function resetFeedDomTrimmed() {
+                window._xtjFeedDomTrimmed = 0;
+            }
+
             loadMoreFeedPosts = async function() {
                 if (feedEndReached || feedPageFetchPending || feedLoadMoreFailed) return;
                 var feed = document.getElementById("feed");
@@ -9388,8 +9536,10 @@ function renderProfileActivityList(kind) {
                 // 筛选开启时 filteredPosts 远小于 feedAllPosts 会提前判定"没有更多"，
                 // 或 20 页后游标与切片错位导致循环不满足。是否还有更多只由 feedNextOffset/
                 // feedEndReached 判定，切片长度只受当前内存过滤结果约束。
-                var renderedCount = feed.querySelectorAll(".post").length;
-                var startIdx = Math.max(renderedCount, 0);
+                //   现在把切片起点统一收敛到 getFeedRenderedSliceStart()：它返回
+                //   「DOM 卡片数 + 被 DOM 回收掉的条数」，也就是**在当前内存过滤结果中的
+                //   真实位置**，两种口径下都不再错位。
+                var startIdx = getFeedRenderedSliceStart();
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 var fetchFailed = false;
@@ -9436,8 +9586,8 @@ function renderProfileActivityList(kind) {
                 }
                 // ★ 修复：await 拉取期间 feed 可能被并发发布/刷新重建（DOM 计数与内存索引错位，
                 // 导致偶发重复渲染或跳帖）；在拉取完成之后、切片之前基于最新 DOM 数量重新计算起点。
-                var renderedCountNow = feed.querySelectorAll(".post").length;
-                startIdx = Math.max(renderedCountNow, 0);
+                //   现在同样走 getFeedRenderedSliceStart()，把被回收的条数补偿回去。
+                startIdx = getFeedRenderedSliceStart();
                 endIdx = startIdx + FEED_PAGE_SIZE;
                 // ★ 修复：只有"服务端已到末尾"才置 feedEndReached 并显示"没有更多"。
                 // 筛选开启时 filteredPosts 可能远小于已拉取总量（feedNextOffset 尚未到末尾），
@@ -9492,12 +9642,14 @@ function renderProfileActivityList(kind) {
                     var _postNodes = feed.querySelectorAll('.post');
                     if (_postNodes.length > FEED_DOM_MAX_POSTS) {
                         var _toDrop = _postNodes.length - FEED_DOM_MAX_POSTS;
-                        if (!window._xtjFeedDomTrimmed) window._xtjFeedDomTrimmed = 0;
+                        // ★ P1：回收计数必须用 `|| 0` 兜底 + 统一走 getFeedRenderedSliceStart 读取，
+                        //   否则一旦某次渲染把计数写成 NaN，所有后续切片起点都会变成 NaN。
+                        var _dropped = 0;
                         for (var _di = 0; _di < _toDrop; _di++) {
                             var _node = _postNodes[_di];
-                            if (_node && _node.parentNode) _node.parentNode.removeChild(_node);
+                            if (_node && _node.parentNode) { _node.parentNode.removeChild(_node); _dropped++; }
                         }
-                        window._xtjFeedDomTrimmed += _toDrop;
+                        window._xtjFeedDomTrimmed = (Number(window._xtjFeedDomTrimmed) || 0) + _dropped;
                         if (!window._xtjFeedDomTrimNoticeShown) {
                             window._xtjFeedDomTrimNoticeShown = true;
                             console.info('[feed] DOM 超过 ' + FEED_DOM_MAX_POSTS + ' 条，已回收顶部卡片以保持滚动流畅');
@@ -9524,6 +9676,10 @@ function renderProfileActivityList(kind) {
                 } else {
                     feed.innerHTML = '<div class="loading">' + (hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~') + '</div>';
                 }
+                // ★ P1：整段重建后 DOM 从新渲染的前 N 条开始，与内存过滤结果的第 0..N 条对齐，
+                //   此时必须把"已回收条数"归零，否则 loadMoreFeedPosts 的切片起点会多算，
+                //   从中间开始追加 → 帖子重复。
+                resetFeedDomTrimmed();
                 initPostScrollAnimation();
             };
 
@@ -10404,8 +10560,19 @@ function renderProfileActivityList(kind) {
                                         renderFeedFromMemoryState().catch(function() {});
                                     }
                                 } else {
-                                    // 普通评论，全量刷新
-                                    if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
+                                    // ★ 2026-09-27 修复（审计 P2）：普通评论不再全量重建 feed。
+                                    //   旧实现调 renderFeedFromMemoryState()，即 `feed.innerHTML = 全部卡片`
+                                    //   整段重建 —— 评论草稿丢失、滚动位置被拽回、图片重新请求、
+                                    //   评论区展开状态与小猫 AI 气泡全部重置。现在改走单卡片局部更新，
+                                    //   只有该卡片不在 DOM 中时才回退到全量刷新（保证不退化）。
+                                    if (row.post_id != null && typeof window.__xtjSchedulePostCardPatch === 'function') {
+                                        try { window.__xtjSchedulePostCardPatch(row.post_id); }
+                                        catch (ePatch) {
+                                            if (typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
+                                        }
+                                    } else if (typeof renderFeedFromMemoryState === 'function') {
+                                        renderFeedFromMemoryState().catch(function() {});
+                                    }
                                 }
                             } else if (payload.eventType === 'UPDATE') {
                                 // 更新已有评论
@@ -11351,6 +11518,12 @@ function renderProfileActivityList(kind) {
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
                 try {
+                    // ★ 2026-09-27 修复（审计 S6 配套）：登出时必须**顶掉所有在途请求**，
+                    //   否则登出前发出的 /api/dm/list 回来后（seq 未变）会把上个账号的
+                    //   会话列表重新画进刚被清空的 DOM —— 正是本次要根治的残留问题。
+                    //   计数器是共享的，nextMessageLoadSeq 也在同一变量上，一并失效即可。
+                    if (typeof _dockChatListLoadSeq === 'number') _dockChatListLoadSeq++;
+                    if (typeof _dockChatLoadSeq === 'number') _dockChatLoadSeq++;
                     var messages = document.getElementById('dockChatMessages');
                     if (messages) {
                         messages.innerHTML = '';
@@ -11505,7 +11678,25 @@ function renderProfileActivityList(kind) {
                     syncDockChatLayoutState();
                 }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
+                // ★ 2026-09-27 修复（审计 S6：会话列表跨账号/跨登出残留）：
+                //   此前只用 `listLoadSeq !== _dockChatListLoadSeq` 判失效，而这个计数器只在
+                //   **本函数自身**下一次进入时才 ++，有两个致命缺口：
+                //     1) 上面的 `if (!window.currentUser) { … return; }` 分支在计数器递增**之前**
+                //        就 return 了 —— 于是登出/换账号时计数器纹丝不动，登出前在途的请求
+                //        回来后 seq 仍然相等，直接把**上一个账号的会话列表**画到新会话的 DOM 里。
+                //     2) 登录用户从 A 切到 B 时计数器也不会变（切号不一定经过未登录态），
+                //        A 的在途响应会被当作最新数据渲染出来。
+                //   现在同时快照「请求发起时的登录账号」，回填前核对当前账号与登录态，
+                //   只要对不上就整段丢弃（不 toast、不重试，由新账号自己的请求接管）。
+                var listOwner = window.currentUser || '';
                 var listLoadSeq = ++_dockChatListLoadSeq;
+                // 统一的失效判定：请求序号被顶掉，或账号/登录态已变，都视为这次结果作废。
+                var listResultStale = function() {
+                    if (listLoadSeq !== _dockChatListLoadSeq) return true;
+                    if (!window.currentUser) return true;
+                    if ((window.currentUser || '') !== listOwner) return true;
+                    return false;
+                };
                 var hadRenderedList = !!el.children.length;
                 try {
                     if (!hadRenderedList) {
@@ -11519,7 +11710,7 @@ function renderProfileActivityList(kind) {
                     //   与下面 mergeDockChatRowsById 的窗口一致，避免"拉了 1000 条只用 180 条"。
                     const dmResult = await window.fetchDmListShared(180);
                     if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
-                    if (listLoadSeq !== _dockChatListLoadSeq) return;
+                    if (listResultStale()) return;
                     const allMsgs = mergeDockChatRowsById(dmResult.data || [], false, 180);
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">暂无最近会话</div></div>';
@@ -11580,7 +11771,7 @@ function renderProfileActivityList(kind) {
                         if (changed) patchDockChatConversationAvatars(el);
                     });
                 } catch(e) {
-                    if (listLoadSeq !== _dockChatListLoadSeq) return;
+                    if (listResultStale()) return;
                     // ★ 修复：已有列表时保留旧列表并仅 toast 提示失败，不追加重试按钮；
                     // 此前无条件追加 retry 且 dockChatListCacheTime=0 会立刻触发下次重试，
                     // 可能反复请求。重试按钮只在无列表（首屏加载失败）时显示。
@@ -11960,6 +12151,18 @@ function renderProfileActivityList(kind) {
             }
 
 
+            // ★ 2026-09-27 新增（审计 S3/S4）：判定一条缓存消息是否属于「本地未决状态」——
+            //   即服务端快照暂时还看不到、但绝不该被合并逻辑抹掉的消息。
+            //   覆盖三类：
+            //   1) __optimistic  正在发送中的乐观气泡（尚未落库）
+            //   2) __failed      发送失败、等待用户重试的气泡（服务端永远不会有它）
+            //   3) __pendingFile 已选好文件但还没走完上传流程的占位消息
+            //   注意：只用本地标记判定，不掺入时间戳比较，避免服务端时钟偏移导致误判。
+            function isDockChatLocalPendingMessage(msg) {
+                if (!msg || typeof msg !== 'object') return false;
+                return !!(msg.__optimistic || msg.__failed || msg.__pendingFile);
+            }
+
             function mergeDockChatMessages(userName, msgs) {
                 // ★ 修复：发送成功会把乐观消息替换成服务端真实消息（不再带 __optimistic）。
                 //   此前该函数只保留带 __optimistic 的缓存消息，若此刻刚好有「更早快照」的
@@ -11969,8 +12172,20 @@ function renderProfileActivityList(kind) {
                 var cacheKey = getDockChatCacheKey(userName);
                 var cached = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
                 var snapshot = (msgs || []).slice();
-                // 快照为空时以快照为准，避免整段恢复已删除/过期缓存
-                if (!snapshot.length) return sortDockChatMessages(snapshot);
+                // ★ 2026-09-27 修复（审计 S3：空快照吞掉本地新消息）：
+                //   此前 `if (!snapshot.length) return sortDockChatMessages(snapshot);`
+                //   直接返回空数组 —— 但"服务端返回空快照"和"服务端确实没有消息"是两回事：
+                //   一个更早发出、此刻才回来的 /api/dm/messages（limit=0 结果 / 对方刚清空 /
+                //   接口抖动返回 []）都会走到这里，于是把缓存里**刚发送成功但还没进快照窗口**
+                //   的消息、以及正在发送中的乐观气泡全部当作"服务端已删除"抹掉，用户看到
+                //   自己刚发出去的消息凭空消失。现在空快照也走合并：只保留本地仍处于
+                //   「未决状态」的消息（乐观/失败/窗口期新提交），绝不复活真正的旧历史。
+                if (!snapshot.length) {
+                    var keptFromCache = cached.filter(function(msg) {
+                        return isDockChatLocalPendingMessage(msg);
+                    });
+                    return sortDockChatMessages(keptFromCache);
+                }
                 var snapshotNewestAt = 0;
                 var lastMsg = snapshot[snapshot.length - 1];
                 if (lastMsg && lastMsg.created_at) {
@@ -11984,7 +12199,13 @@ function renderProfileActivityList(kind) {
                         return existing && existing.id && msg.id && existing.id === msg.id;
                     });
                     if (exists) return; // 快照已是服务端权威
-                    if (msg.__optimistic) { merged.push(msg); return; }
+                    // ★ S4：本地未决消息（乐观 / 失败 / 待上传）无条件保留。
+                    //   此前只特判了 __optimistic，__failed 的气泡会掉进下面的时间戳比较里：
+                    //   失败气泡的 created_at 通常是"当时点发送"的时间，一旦它早于快照最新时间
+                    //   （比如在弱网里挂了 30 秒、期间收到了对方新消息），条件 `ts >= snapshotNewestAt`
+                    //   不成立 → 失败气泡被丢弃 → 用户既看不到"发送失败"也没法重试，
+                    //   而重试所需的 __pendingFile 也随之丢失，只能重新选文件。
+                    if (isDockChatLocalPendingMessage(msg)) { merged.push(msg); return; }
                     var ts = msg.created_at ? Date.parse(msg.created_at) : NaN;
                     // 仅合并比快照新（发送成功后才落库的窗口期消息），不复活旧历史
                     if (!isNaN(ts) && ts >= snapshotNewestAt) merged.push(msg);
@@ -12168,7 +12389,7 @@ function renderProfileActivityList(kind) {
                     // 点开大图始终用**远端原图地址**（本地 blob 只在本次会话有效，
                     // 用它做 data-full-src 会让对方/刷新后失效）。
                     var fullForViewer = (safeSrc && !/^blob:/i.test(safeSrc)) ? safeSrc : safeFull;
-                    var imageBody = '<img class="msg-img" src="' + displaySrc + '" data-src="' + escapeHtml(safeSrc) + '" data-full-src="' + escapeHtml(fullForViewer) + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" decoding="async"' + dimAttr + remoteAttr + ' />';
+                    var imageBody = '<img class="msg-img" src="' + escapeHtml(displaySrc) + '" data-src="' + escapeHtml(safeSrc) + '" data-full-src="' + escapeHtml(fullForViewer) + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" decoding="async"' + dimAttr + remoteAttr + ' />';
                     // ★ 2026-09-26（用户："已读未读要显示在气泡下面，而不是图片里面"）：
                     //   带文字的图片消息以前是「图片 → 文字」竖排，状态行被推到文字下面，
                     //   视觉上「未读 04:37」就贴在图片内部（截图里的观感）。改成
@@ -12317,7 +12538,17 @@ function renderProfileActivityList(kind) {
                         reject(new Error('当前浏览器不支持带进度的上传，请升级后重试'));
                         return;
                     }
-                    var sendOnce = function(token) {
+                    // ★ 2026-09-27 修复（审计 S2：上传 401 递归重试无上限）：
+                    //   此前 401 分支里 `settled = false; sendOnce(renewed);` 没有任何计数，
+                    //   若续期接口持续返回"看似成功"但 token 仍被服务端拒绝（时钟漂移 /
+                    //   多端登录互相踢 / 服务端续期契约变更），就会 401 → 续期 → 401 →
+                    //   续期 …… 无限递归，每次都是一次真实网络往返，且上传进度环永远
+                    //   停在原地转圈、Promise 永不 settle（用户看到"发不出去也退不回来"）。
+                    //   现在对齐 xtjProtectedFetch 的做法：**最多重试 1 次**，且续期拿到的
+                    //   token 必须与上一次不同（否则说明续期根本没生效，重试毫无意义）。
+                    var MAX_UPLOAD_AUTH_RETRIES = 1;
+                    var sendOnce = function(token, authAttempt) {
+                        var attempt = Number(authAttempt) || 0;
                         var xhr = new XMLHttpRequest();
                         var settled = false;
                         var finish = function(fn, arg) {
@@ -12348,15 +12579,23 @@ function renderProfileActivityList(kind) {
                             var data = null;
                             try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) { data = null; }
                             if (xhr.status === 401) {
+                                // ★ S2：超出重试上限 / 无续期能力 → 直接 reject，绝不静默挂起
+                                if (attempt >= MAX_UPLOAD_AUTH_RETRIES
+                                    || typeof window.refreshUserToken !== 'function') {
+                                    finish(reject, new Error('登录已失效'));
+                                    return;
+                                }
                                 finish(function() {
-                                    if (typeof window.refreshUserToken === 'function') {
-                                        window.refreshUserToken(true).then(function(renewed) {
-                                            if (renewed) { settled = false; sendOnce(renewed); }
-                                            else reject(new Error('登录已失效'));
-                                        }).catch(function() { reject(new Error('登录已失效')); });
-                                    } else {
-                                        reject(new Error('登录已失效'));
-                                    }
+                                    window.refreshUserToken(true).then(function(renewed) {
+                                        // 续期失败，或拿到的 token 与刚才那份完全相同（说明续期
+                                        // 没有真正生效），都不该再打一次必然失败的上传。
+                                        if (!renewed || String(renewed) === String(token || '')) {
+                                            reject(new Error('登录已失效'));
+                                            return;
+                                        }
+                                        settled = false;
+                                        sendOnce(renewed, attempt + 1);
+                                    }).catch(function() { reject(new Error('登录已失效')); });
                                 });
                                 return;
                             }
@@ -12488,6 +12727,24 @@ function renderProfileActivityList(kind) {
             function renderDockMessages(userName, msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
                 if (!el) return;
+                // ★ 2026-09-27 修复（审计 S7：空数组分支绕过会话一致性检查）：
+                //   此前 `userName !== dockChatActiveUser → return` 这道关卡位于**函数中部**
+                //   （原 1624 行），而"消息为空"分支在它**之前**就 return 了。后果：
+                //     1) 切走会话后，先前那个会话的在途轮询/同步回调若带着**空数组**回来，
+                //        会命中空分支，把「发送第一条消息吧」写进**当前正在看的另一个会话**，
+                //        刚打开的历史消息被整屏抹掉。
+                //     2) 紧接着第 1619 行还会把 `_chatRenderSignature[outdatedUser] = '__empty__'`
+                //        写脏签名缓存，导致切回该会话时判定"签名相同"而跳过渲染，停在空态。
+                //   现在把会话归属检查**提到所有副作用之前**：只要 userName 与当前会话不符，
+                //   立即返回，不写 DOM、不写签名、不触发墓碑同步。
+                //   注意兼容 `__empty__`/空 userName 这类由内部主动发起的"清空"调用：
+                //   它们不绑定具体会话，仍然放行（由空分支自己处理）。
+                if (userName && dockChatActiveUser && userName !== dockChatActiveUser) return;
+                // ★ S7 配套：墓碑同步回调是**异步**的，等到它回来时用户可能已经切走会话，
+                //   甚至已经登出/换号。回调里必须重新核对「此刻的会话 + 此刻的账号」，
+                //   否则会拿旧会话的数据去重渲染新会话，或把上个账号的缓存画进新账号界面。
+                //   账号维度用快照比较（renderDockMessages 是同步函数，取当前 currentUser 即基线）。
+                var renderOwner = currentUser || '';
                 if (typeof clearDockChatDesktopEmptyFlag === 'function') clearDockChatDesktopEmptyFlag();
                 // ★ 2026-09-25：长按菜单的「删除」语义为「对本账号隐藏」。
                 //   必须在这里统一过滤 tombstone，否则下一次轮询/重新进入会话时，
@@ -12499,6 +12756,10 @@ function renderProfileActivityList(kind) {
                     try {
                         syncDmDeletedWithServer(userName, false).then(function(changed) {
                             if (!changed) return;
+                            // ★ S7：回调期间用户可能已切走会话/登出/换账号 —— 三者任一不成立即放弃重渲染
+                            if (!window.currentUser) return;
+                            if ((currentUser || '') !== renderOwner) return;
+                            if (dockChatActiveUser && userName !== dockChatActiveUser) return;
                             var uKey = getDockChatCacheKey(userName);
                             var fresh = Array.isArray(_chatCache[uKey]) ? _chatCache[uKey] : [];
                             _chatRenderSignature[userName] = undefined;
@@ -12515,7 +12776,7 @@ function renderProfileActivityList(kind) {
                     el.dataset.chatUser = userName || '__empty__';
                     return;
                 }
-                if (userName && dockChatActiveUser && userName !== dockChatActiveUser) return;
+                // 注：会话归属检查已前移到函数开头（见上），此处不再重复判断。
                 var signatureKey = userName || '__empty__';
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
@@ -12848,6 +13109,17 @@ function renderProfileActivityList(kind) {
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                // ★ 2026-09-27 修复（审计 S5：发送请求缺幂等键）：
+                //   /api/dm/send 此前只带 target_user + content，服务端无法区分
+                //   「用户真的发了两条一模一样的话」和「同一条消息被重发了一次」。
+                //   而前端**确实会重发**：xtjProtectedFetch 超时后（60s 未回包）会走
+                //   401 续期重试；弱网下"服务端已落库、响应丢在路上"更是经典场景 ——
+                //   结果是收件人看到两条重复消息，且前端 replaceDockChatCacheMessage
+                //   按 tempId 替换，两条服务端消息里只有一条能替换掉乐观气泡，另一条
+                //   永久残留成"幽灵消息"。
+                //   现在为每次用户动作生成一个稳定幂等键（同一 tempId 生命周期内不变，
+                //   重发/重试复用同一个值），服务端据此去重即可。
+                var clientMessageId = tempId;
                 var optimisticCreatedAt = new Date().toISOString();
                 var localPreviewUrl = '';
                 var mediaKind = file
@@ -12961,7 +13233,11 @@ function renderProfileActivityList(kind) {
                     // 禁止前端直接发送 actor_key 和 media_type，防止篡改。
                     var requestBody = {
                         target_user: targetUser,
-                        content: capturedContent
+                        content: capturedContent,
+                        // ★ S5：稳定幂等键。服务端应按 (user_name, client_message_id) 去重：
+                        //   重复到达时直接返回**已存在的那条消息**而不是再插一条。
+                        //   后端未实现时该字段被忽略，不影响现有行为（向前兼容）。
+                        client_message_id: clientMessageId
                     };
                     if (storagePath) {
                         requestBody.storage_path = storagePath;
@@ -13672,32 +13948,74 @@ function renderProfileActivityList(kind) {
                 var file = message.__pendingFile || null;
                 var text = (getDMMessageText(message) || '').trim();
                 if (!file && !text) { showToast('这条消息没有可重发的内容'); return; }
-                // 媒体文件随页面刷新丢失，但文字还在 —— 明确告知，不要让用户以为整条都能重发
-                if (!file && (message.__pendingMediaKind || message.__pendingStoragePath)) {
-                    showToast('原文件已不在内存（刷新页面后无法找回），本次只重发文字');
-                }
-                // 先把失败气泡移出缓存，再走一次完整的正常发送流程
+                // ★ 2026-09-27 修复（审计 S8：重发先毁旧气泡，失败即彻底丢失）：
+                //   此前流程是「先把失败气泡从缓存删掉并重渲染 → 释放本地 blob → 再交给
+                //   sendDockChatMessage 重新走一遍」。中间有多个**可失败**环节：
+                //     · `new DataTransfer()` 在部分浏览器/无 File 构造环境下抛错 → 走
+                //       `fileInput.value = ''`，媒体文件**已随 blob 释放而永久消失**；
+                //     · sendDockChatMessage 开头的 `dockChatSending` 防抖命中（调用方恰好是
+                //       在发送中长按重发）→ 直接 return，而旧气泡已经被删掉了；
+                //     · `isUserMuted()` / 50MB 体积 / 类型校验任一不通过 → 同样只 return。
+                //   这些情况下用户得到的是"消息没了、也没有提示"，比失败气泡还糟。
+                //   现在改为**事务式重发**：先做完所有前置校验与文件准备，把旧失败项留在
+                //   缓存里；只有当新一轮乐观气泡确定已入队成功后，才移除旧的失败项。
+                //   任一步骤失败 → 旧气泡原样保留，用户可再试。
+                if (dockChatSending) { showToast('上一条消息正在发送，请稍候再重发'); return; }
+                if (isUserMuted()) { showToast('您已被禁言，无法发送消息'); return; }
+                if (!window.currentUser) { showToast('请先登录'); return; }
+
                 var targetId = String(message.id || message.__tempId || '');
                 var cacheKey = getDockChatCacheKey(peer);
-                var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
-                _chatCache[cacheKey] = list.filter(function(m) {
+                var fileInput = document.getElementById('dockChatFileInp');
+                var inp = document.getElementById('dockChatInput');
+                // —— 阶段一：准备（可能失败，此时不改动任何缓存/DOM）——
+                var stagedFileOk = true;
+                var preList = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
+                var preSignature = _chatRenderSignature[peer];
+                var preInputValue = (inp && typeof inp.value === 'string') ? inp.value : undefined;
+                var preFileList = fileInput ? fileInput.files : null;
+                try {
+                    if (file && fileInput) {
+                        var dt = new DataTransfer();
+                        dt.items.add(file);
+                        fileInput.files = dt.files;
+                    }
+                    if (inp && text) inp.value = text;
+                } catch (eStage) {
+                    stagedFileOk = false;
+                    try { if (fileInput) fileInput.value = ''; } catch (eStage2) {}
+                    if (inp && typeof preInputValue === 'string') inp.value = preInputValue;
+                }
+                if (!stagedFileOk && file) {
+                    // 文件无法回填到 fileInput → 无法重发媒体。保留旧失败气泡，明确告知。
+                    _chatRenderSignature[peer] = preSignature;
+                    showToast('无法准备原文件，重发未执行（气泡已保留，可清理后重新选择文件发送）');
+                    return;
+                }
+                // —— 阶段二：发起新一轮发送 ——
+                await sendDockChatMessage();
+                // —— 阶段三：确认新气泡已入队，才移除旧失败项 ——
+                //   判据：缓存里出现了 targetId 以外的新项（乐观气泡的 tempId 必然是新的）。
+                var postList = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
+                var hasNewItem = postList.some(function(m) {
+                    var id = String((m && (m.id || m.__tempId)) || '');
+                    return id && id !== targetId;
+                });
+                if (!hasNewItem) {
+                    // 新一轮根本没起来（例如内容被清空/被防抖拦下）→ 保留旧失败气泡
+                    _chatCache[cacheKey] = preList;
+                    _chatRenderSignature[peer] = undefined;
+                    renderDockMessages(peer, _chatCache[cacheKey], false);
+                    if (inp && typeof preInputValue === 'string') inp.value = preInputValue;
+                    if (preFileList && fileInput) { try { fileInput.files = preFileList; } catch (eRestore) {} }
+                    return;
+                }
+                _chatCache[cacheKey] = postList.filter(function(m) {
                     return String((m && (m.id || m.__tempId)) || '') !== targetId;
                 });
                 _chatRenderSignature[peer] = undefined;
                 renderDockMessages(peer, _chatCache[cacheKey], false);
                 releaseDockChatLocalPreview(message);
-
-                var fileInput = document.getElementById('dockChatFileInp');
-                var inp = document.getElementById('dockChatInput');
-                if (file && fileInput) {
-                    try {
-                        var dt = new DataTransfer();
-                        dt.items.add(file);
-                        fileInput.files = dt.files;
-                    } catch (e) { fileInput.value = ''; }
-                }
-                if (inp && text) inp.value = text;
-                await sendDockChatMessage();
             }
 
             function bindDockChatMessageActions() {
@@ -16671,12 +16989,21 @@ function renderProfileActivityList(kind) {
                 var normalizedPost = normalizePost(post);
                 var vc = Math.max(Number(normalizedPost.views) || 0, (post && post.views) || 0);
                 var detailMediaAttrs = buildPostDetailMediaAttrs(normalizedPost);
-                var mediaHtml = normalizedPost.media_url ? (
+                // ★ 2026-09-27 修复（审计 P5：详情弹窗媒体只 escapeHtml，未过协议白名单）：
+                //   卡片/feed 里的媒体 URL 早就统一走 sanitizeUrl（拒绝 javascript: /
+                //   data:text/html / data:image/svg+xml 等），但详情弹窗这三条分支漏了 ——
+                //   escapeHtml 只挡引号与尖括号，`javascript:alert(1)` 这种**不含特殊字符**的
+                //   协议串会原样进入 src。虽然 <img>/<video> 的 src 执行 JS 的能力有限，
+                //   但这条链路与其它渲染点策略不一致本身即为风险面（例如后续被复用成
+                //   可点击的 media 形态），且 data:image/svg+xml 在部分浏览器可触发脚本。
+                //   现在与 1219/1268/1277 行保持完全一致：非法协议 → 空串 → 不渲染媒体。
+                var safeMediaUrl = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(normalizedPost.media_url || '')) : '';
+                var mediaHtml = (normalizedPost.media_url && safeMediaUrl) ? (
                     normalizedPost.media_type === 'video'
-                        ? '<video src="' + escapeHtml(normalizedPost.media_url) + '" controls preload="metadata" playsinline></video>'
+                        ? '<video src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata" playsinline></video>'
                         : (normalizedPost.media_type === 'audio'
-                            ? '<audio src="' + escapeHtml(normalizedPost.media_url) + '" controls preload="metadata"></audio>'
-                            : '<img ' + detailMediaAttrs + ' data-actor-key="' + escapeHtml(String(normalizedPost.actor_key || "")) + '" data-can-delete="' + (canDeletePost(normalizedPost) ? '1' : '0') + '" src="' + escapeHtml(normalizedPost.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(normalizedPost.media_url) + '\', this)" loading="lazy" decoding="async" fetchpriority="low" />')
+                            ? '<audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio>'
+                            : '<img ' + detailMediaAttrs + ' data-actor-key="' + escapeHtml(String(normalizedPost.actor_key || "")) + '" data-can-delete="' + (canDeletePost(normalizedPost) ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)" loading="lazy" decoding="async" fetchpriority="low" />')
                 ) : '';
                 var visibilityLabel = normalizedPost.visibility === 'private' ? '私密' : '公开';
                 var contentText = String(normalizedPost.content || '').trim();

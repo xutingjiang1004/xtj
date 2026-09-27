@@ -2638,6 +2638,85 @@
                 }
             }
 
+            // ★ 2026-09-27 新增（审计 P2：评论 Realtime 触发全量重建）：
+            //   背景：subscribeToComments 的 Realtime 回调里，收到一条**普通评论 INSERT**
+            //   就调 renderFeedFromMemoryState() → renderFeed() → renderFeedWithAvatars()，
+            //   而后者是 `feed.innerHTML = 全部卡片` 的整段重建。全站任意用户发评论都会
+            //   推给所有在线端，于是：
+            //     · 正在评论框里打字的人，草稿节点被销毁 → 输入丢失；
+            //     · 已经加载到第 10 屏的人，滚动位置被拽回重建后的内容；
+            //     · 评论框展开状态、正在播放的视频、已加载的图片全部重置（图片重新请求）；
+            //     · 卡片上的「小猫 AI 正在组织语言」气泡也会被重绘。
+            //   现在改为**只重渲染受影响的单张卡片**：替换该 .post 节点的 outerHTML，
+            //   并用同签名复用 observer 注册，其余卡片完全不动。
+            //   若目标卡片不在 DOM 中（尚未加载到 / 被筛选掉 / 被 DOM 回收），
+            //   安全回退到原有全量刷新路径，保证行为不退化。
+            //   ⚠️ 不触碰 dock bar / dock capsule / 动画相关逻辑。
+            function patchSinglePostCard(postId) {
+                try {
+                    var feed = document.getElementById('feed');
+                    if (!feed || postId == null) return false;
+                    var post = (feedAllPosts || []).find(function(p) {
+                        return String(p && p.id) === String(postId);
+                    });
+                    if (!post) return false;
+                    var card = feed.querySelector('.post[data-post-id="' + (window.CSS && CSS.escape ? CSS.escape(String(postId)) : String(postId).replace(/"/g, '')) + '"]');
+                    if (!card) return false;
+                    var filtered = getFilteredPosts([post], feedAllComments);
+                    if (!filtered || !filtered.length) {
+                        // 被当前筛选排除 → 直接移除卡片，无需重绘
+                        if (card.parentNode) card.parentNode.removeChild(card);
+                        window._xtjFeedDomTrimmed = Math.max(0, (Number(window._xtjFeedDomTrimmed) || 0));
+                        return true;
+                    }
+                    var scopedComments = getRenderableComments(feedAllComments, filtered);
+                    var maps = buildPostMaps(scopedComments, feedAllLikes || []);
+                    var html = renderPostCardSafely(filtered[0], maps.commentMap, maps.likeMap, maps.likeUserMap);
+                    if (!html) return false;
+                    var wasVisible = card.classList.contains('visible');
+                    var tmp = document.createElement('div');
+                    tmp.innerHTML = html;
+                    var newNode = tmp.firstElementChild;
+                    if (!newNode) return false;
+                    if (wasVisible) newNode.classList.add('visible');
+                    // 保持该卡片在信息流中的位置不变（slice 下标语义依赖 DOM 顺序）
+                    card.parentNode.replaceChild(newNode, card);
+                    // 新节点需要重新接入观察器（旧节点的注册随节点一起作废）
+                    try { primePostReveal([newNode]); } catch (_) {}
+                    try { observePostViewportState([newNode]); } catch (_) {}
+                    try { if (typeof updateFeedStats === 'function') updateFeedStats(); } catch (_) {}
+                    return true;
+                } catch (ePatch) {
+                    console.warn('[feed] patchSinglePostCard failed, fallback to full render', ePatch);
+                    return false;
+                }
+            }
+            window.__xtjPatchSinglePostCard = patchSinglePostCard;
+
+            // 评论变更后的统一入口：优先局部更新，失败则回退全量刷新。
+            //   ★ 节流：Realtime 在批量导入/连续灌评论时会密集触发，逐条全量重建会把
+            //   主线程打满。这里按 postId 合并 120ms 内的多次变更，只重绘一次；
+            //   超出节流窗口的稳定变更仍会立即生效（首条不延迟）。
+            var _pendingCardPatchTimers = {};
+            function schedulePostCardPatch(postId) {
+                var key = String(postId == null ? '' : postId);
+                if (!key) return;
+                if (_pendingCardPatchTimers[key]) return; // 窗口内已排队，合并
+                var run = function() {
+                    delete _pendingCardPatchTimers[key];
+                    var ok = patchSinglePostCard(postId);
+                    if (!ok && typeof renderFeedFromMemoryState === 'function') {
+                        renderFeedFromMemoryState().catch(function() {});
+                    }
+                };
+                // 首条即时执行（用户最关心"我的评论出现了没"），随后 120ms 内的合并丢弃
+                run();
+                _pendingCardPatchTimers[key] = setTimeout(function() {
+                    delete _pendingCardPatchTimers[key];
+                }, 120);
+            }
+            window.__xtjSchedulePostCardPatch = schedulePostCardPatch;
+
             function hydrateCachedAvatarsForUsers(usernames) {
                 var users = Array.from(new Set((usernames || []).map(function(value) {
                     return String(value || '').trim();
@@ -4142,6 +4221,45 @@
             };
             window.loadFeed = loadFeed;
 
+            // ★ 2026-09-27 新增（审计 P1：DOM 回收导致切片下标错位）：
+            //   背景：appendMorePosts 里有 FEED_DOM_MAX_POSTS=200 的 DOM 上限，超出后会把
+            //   顶部的 .post 节点 removeChild 掉，并把回收条数累加到 window._xtjFeedDomTrimmed。
+            //   但该计数器**只写不读**（全仓 grep 无读取点），而 loadMoreFeedPosts 的切片起点
+            //   一直是 `feed.querySelectorAll('.post').length` —— 于是每回收一批，DOM 计数就
+            //   比真实位置少一批：假设内存里已有 400 条、DOM 保留最后 200 条，继续加载时
+            //   startIdx 算成 200，又从第 201 条开始追加，**已展示过的帖子被重复渲染一遍**，
+            //   表现为"加载更多之后又看到之前看过的内容"。
+            //   ★ 另需注意：滚动到顶部时那些被回收的卡片不会再回到 DOM（这里不做反向补偿，
+            //   因为内存态仍完整、且往上滚由既有逻辑重新渲染），所以无需恢复 window.scrollY。
+            //   ★ 第二个错误来源：`feed.querySelectorAll('.post')` 会**同时命中**非 feed 列表
+            //   里的 .post 节点（用户主页/搜索结果等），把它们算进 feed 的已渲染数造成多算。
+            //   这里改用 feed 直属子节点计数，语义严格限定在信息流容器内。
+            function countFeedDomPosts(feed) {
+                if (!feed) return 0;
+                var n = 0;
+                for (var i = 0; i < feed.children.length; i++) {
+                    var child = feed.children[i];
+                    if (child && child.classList && child.classList.contains('post')) n++;
+                }
+                return n;
+            }
+
+            // 返回「当前内存过滤结果中，已被渲染到该位置」的条数（含已被 DOM 回收的部分）。
+            function getFeedRenderedSliceStart() {
+                var feed = document.getElementById('feed');
+                var domCount = countFeedDomPosts(feed);
+                var trimmed = Math.max(0, Number(window._xtjFeedDomTrimmed) || 0);
+                return domCount + trimmed;
+            }
+
+            // 信息流被整段重建（renderFeedWithAvatars 全量 innerHTML / 筛选重置 / 换账号）时，
+            //   是否该把回收计数清零？—— **不清零**。因为切片起点的语义是"在内存过滤结果中的
+            //   位置"，全量重建后 DOM 通常又回到从头渲染的前 N 条，此时 trimmed 若不清零会多算。
+            //   因此在全量重建处显式归零，保证两种口径始终一致。
+            function resetFeedDomTrimmed() {
+                window._xtjFeedDomTrimmed = 0;
+            }
+
             loadMoreFeedPosts = async function() {
                 if (feedEndReached || feedPageFetchPending || feedLoadMoreFailed) return;
                 var feed = document.getElementById("feed");
@@ -4158,8 +4276,10 @@
                 // 筛选开启时 filteredPosts 远小于 feedAllPosts 会提前判定"没有更多"，
                 // 或 20 页后游标与切片错位导致循环不满足。是否还有更多只由 feedNextOffset/
                 // feedEndReached 判定，切片长度只受当前内存过滤结果约束。
-                var renderedCount = feed.querySelectorAll(".post").length;
-                var startIdx = Math.max(renderedCount, 0);
+                //   现在把切片起点统一收敛到 getFeedRenderedSliceStart()：它返回
+                //   「DOM 卡片数 + 被 DOM 回收掉的条数」，也就是**在当前内存过滤结果中的
+                //   真实位置**，两种口径下都不再错位。
+                var startIdx = getFeedRenderedSliceStart();
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 var fetchFailed = false;
@@ -4206,8 +4326,8 @@
                 }
                 // ★ 修复：await 拉取期间 feed 可能被并发发布/刷新重建（DOM 计数与内存索引错位，
                 // 导致偶发重复渲染或跳帖）；在拉取完成之后、切片之前基于最新 DOM 数量重新计算起点。
-                var renderedCountNow = feed.querySelectorAll(".post").length;
-                startIdx = Math.max(renderedCountNow, 0);
+                //   现在同样走 getFeedRenderedSliceStart()，把被回收的条数补偿回去。
+                startIdx = getFeedRenderedSliceStart();
                 endIdx = startIdx + FEED_PAGE_SIZE;
                 // ★ 修复：只有"服务端已到末尾"才置 feedEndReached 并显示"没有更多"。
                 // 筛选开启时 filteredPosts 可能远小于已拉取总量（feedNextOffset 尚未到末尾），
@@ -4262,12 +4382,14 @@
                     var _postNodes = feed.querySelectorAll('.post');
                     if (_postNodes.length > FEED_DOM_MAX_POSTS) {
                         var _toDrop = _postNodes.length - FEED_DOM_MAX_POSTS;
-                        if (!window._xtjFeedDomTrimmed) window._xtjFeedDomTrimmed = 0;
+                        // ★ P1：回收计数必须用 `|| 0` 兜底 + 统一走 getFeedRenderedSliceStart 读取，
+                        //   否则一旦某次渲染把计数写成 NaN，所有后续切片起点都会变成 NaN。
+                        var _dropped = 0;
                         for (var _di = 0; _di < _toDrop; _di++) {
                             var _node = _postNodes[_di];
-                            if (_node && _node.parentNode) _node.parentNode.removeChild(_node);
+                            if (_node && _node.parentNode) { _node.parentNode.removeChild(_node); _dropped++; }
                         }
-                        window._xtjFeedDomTrimmed += _toDrop;
+                        window._xtjFeedDomTrimmed = (Number(window._xtjFeedDomTrimmed) || 0) + _dropped;
                         if (!window._xtjFeedDomTrimNoticeShown) {
                             window._xtjFeedDomTrimNoticeShown = true;
                             console.info('[feed] DOM 超过 ' + FEED_DOM_MAX_POSTS + ' 条，已回收顶部卡片以保持滚动流畅');
@@ -4294,6 +4416,10 @@
                 } else {
                     feed.innerHTML = '<div class="loading">' + (hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~') + '</div>';
                 }
+                // ★ P1：整段重建后 DOM 从新渲染的前 N 条开始，与内存过滤结果的第 0..N 条对齐，
+                //   此时必须把"已回收条数"归零，否则 loadMoreFeedPosts 的切片起点会多算，
+                //   从中间开始追加 → 帖子重复。
+                resetFeedDomTrimmed();
                 initPostScrollAnimation();
             };
 
