@@ -954,22 +954,18 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 }
 /* 步骤图标同样改 CSS 绘制：运行中=旋转环，完成=✓，失败=! */
 .ai-tool-round-list .ai-tool-step-icon {
-  position: relative;
-  width: 11px; height: 11px;
-  font-size: 0;
-  flex: 0 0 auto;
-  align-self: center;
-  /* ★ 2026-09-28 修复（D8「emoji fallback 漏出」）：
-     JS 里图标位写的是真实 emoji（🔍 / 🧠 / ✍️），靠 font-size:0 隐身、
-     由 ::before 画出图形。但 font-size:0 在部分字体下**不会让 emoji 完全消失**，
-     浏览器会用 fallback 字形（实测 Chromium 下渲染成一个 ▷ 小三角）顶上，
-     于是条目左边出现"三角 + 圆圈"叠字（真实渲染截图实证）。
-     兜底：color:transparent（彩色 emoji 不受其影响）+ text-indent 推出可视区。
-     running 态 ::before 为 absolute 定位，不受 text-indent 影响；
-     done/error 态为 static，已在各自规则里显式重置 text-indent: 0。 */
-  color: transparent;
-  text-indent: -999px;
-  overflow: hidden;
+  /* ★ 2026-09-28（去冗余，对齐 Claude / ChatGPT 的时间轴语言）：
+     条目左侧原本同时存在两个表达"状态"的圆 ——
+       ① .ai-tool-step::after 导轨节点（8px，三态：running 实心蓝+光晕+脉冲 /
+          done 实心绿 / error 实心红）
+       ② .ai-tool-step-icon::before 图标位（9px 空心环 / ✓ / !）
+     两者位置相邻（4x 放大截图里就是"实心蓝点 + 空心圆环"并排），
+     信息完全重复，视觉上像两个零件叠在一起。
+     该函数的第二套状态全部由导轨节点承载（节点底色 + 光晕 + pulse 已经能
+     区分运行中/完成/失败），因此这里整块隐藏图标位，只留节点。
+     —— JS 仍照常写 .ai-tool-step-icon 节点，不改动 DOM 契约；
+        本规则是纯视觉收敛，撤销只需恢复 display。 */
+  display: none;
 }
 .ai-tool-round-list .ai-tool-step-icon::before {
   content: '';
@@ -980,25 +976,14 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   border-top-color: rgba(47, 127, 158, .9);
   animation: xtjToolSpin .72s linear infinite;
 }
-.ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before {
-  content: '✓';
-  position: static;
-  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
-  width: auto; height: auto;
-  border: 0;
-  font-size: 10px; font-weight: 800;
-  color: #2f9e6e;
-  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
-}
-.ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before {
-  content: '!';
-  position: static;
-  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
-  width: auto; height: auto;
-  border: 0;
-  font-size: 10px; font-weight: 800;
-  color: #c0505e;
-  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+/* 去冗余：完成/失败态不再画 ✓ / !，状态由导轨节点底色独家表达。
+   父级 .ai-tool-step-icon 已 display:none；此处显式收敛 ::before，
+   防止未来恢复父级 display 时"节点 + 符号"两套状态语言同时出现。 */
+.ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before,
+.ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before,
+.ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon,
+.ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon {
+  display: none;
 }
 .ai-tool-round-list .ai-tool-step-body {
   display: flex;
@@ -1060,8 +1045,13 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   content: '';
   position: absolute;
   left: -14px;
-  top: 6px;
-  width: 7px; height: 7px;
+  top: 5.5px;
+  /* ★ 2026-09-28（去冗余后调优）：节点从 7px 升到 8px。
+     过去它与条目内 11px 图标位并列，只作"辅助点缀"，尺寸刻意压小；
+     现在图标位已隐藏、节点成为**唯一**的状态载体（实心蓝=运行中 /
+     实心绿=完成 / 实心红=失败），给到 8px 让它读起来更像时间轴节点本身，
+     而不是一个可有可无的小装饰。 */
+  width: 8px; height: 8px;
   box-sizing: border-box;
   border-radius: 50%;
   background: #fff;
@@ -1075,11 +1065,12 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   box-shadow: 0 0 0 3px rgba(47, 127, 158, .16), 0 0 7px rgba(47, 127, 158, .4);
   animation: xtjToolNodePulse 2.4s ease-in-out infinite;
 }
-/* 已过节点：实心低饱和绿，视觉退后让"当前"保持主角地位 */
+/* 已过节点：实心低饱和绿，视觉退后让"当前"保持主角地位。
+   去冗余后节点独自承担"完成"语义，补一圈极淡的静态光晕避免读成脏点。 */
 .ai-tool-round-list .ai-tool-step.is-done::after {
   background: #3a9271;
   border-color: #3a9271;
-  box-shadow: none;
+  box-shadow: 0 0 0 2.5px rgba(58, 146, 113, .12);
   animation: none;
 }
 .ai-tool-round-list .ai-tool-step.is-error::after {
@@ -1166,9 +1157,15 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 }
 /* ★ 2026-09-17：轮次紧凑条目里，运行中图标改用柔和呼吸（覆盖上面的 none）。
    放在此处是为了保证在源码顺序上晚于通用规则、选择器也更具体，
-   不依赖 !important 即可稳定生效。 */
+   不依赖 !important 即可稳定生效。
+   ★ 2026-09-28（去冗余）：条目内图标位整体隐藏，状态改由导轨节点独家承载。
+   本选择器是 3 类（.ai-tool-round-list + .is-running + .ai-tool-step-icon），
+   优先级高于上方 2 类的隐藏规则，因此**必须在这里也写 display:none**，
+   否则运行中的条目仍会把空心圆环画出来（真实渲染 4x 放大截图实证：
+   节点旁边并排一个空心环）。 */
 .ai-tool-round-list .ai-tool-step.is-running .ai-tool-step-icon {
-  animation: xtjToolIconBreath 1.6s ease-in-out infinite;
+  display: none;
+  animation: none;
 }
 
 /* 3) 状态切换过渡：完成/失败时颜色与位移平滑变化 */
