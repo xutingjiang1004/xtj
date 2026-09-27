@@ -14558,7 +14558,10 @@ app.get('/api/photos/wall/:userName', authenticateUser, rateLimit(60000, 120), a
       .eq('user_name', targetUser)
       .eq('media_type', '__photo_wall__')
       .or('is_deleted.is.null,is_deleted.eq.false')
+      // ★ 2026-09-27（后端补完 · 照片墙稳定排序）：offset 分页必须有确定性全序，
+      //   否则同秒创建的照片在相邻页之间会重复/漏出。created_at 相同时用 id 兜底。
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(offset, offset + pageLimit - 1);
     // 查看他人的照片墙时仅返回公开照片（私密照片只有本人可见）
     if (String(req.userName || '') !== String(targetUser)) {
@@ -14585,7 +14588,10 @@ app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
       .eq('media_type', '__photo_wall__')
       .eq('visibility', 'public')
       .or('is_deleted.is.null,is_deleted.eq.false')
+      // ★ 2026-09-27（后端补完 · 照片墙稳定排序）：page/limit offset 分页补 id 兜底排序，
+      //   保证同一时间戳的照片在多页之间顺序恒定，不产生重复/丢失。
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(from, to);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     return res.json({ ok: true, data: data || [] });
@@ -15048,10 +15054,24 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
     const targetUser = String(req.query.target || '').trim().slice(0, MAX_USERNAME_LEN);
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
     if (!targetUser) return res.status(400).json({ error: '缺少目标用户' });
-    // ★ 2026-09-25 新增（复审 P1-02）：向上翻历史的游标。
-    //   before = 上一页最早一条的 created_at；只取比它更早的消息，实现 keyset 分页。
-    //   不传 before 时行为与旧版完全一致（返回最近 limit 条），因此是纯增量改动。
-    const before = String(req.query.before || '').trim();
+    // ★ 2026-09-27（后端补完 · 私信复合游标）：向上翻历史的游标。
+    //   旧实现只按 created_at 单时间戳翻页，同一秒内落库的多条消息会整体被跳过
+    //   （`lt('created_at', before)` 把同秒的其余消息一起排除）或跨页重复取到，
+    //   在高频对话下表现为"翻页丢消息 / 看到重复消息"。
+    //   现改为 (created_at, id) 复合游标，与排序键严格对齐，消除同秒歧义：
+    //     · 支持两种入参：`before` + `before_id` 分开传；或单个 `cursor=<ts>|<id>` 合并串。
+    //     · before_id 缺省时退化为纯时间游标，行为与旧版一致（纯增量，不破坏老调用方）。
+    //     · 不传游标时行为与旧版完全一致（返回最近 limit 条）。
+    const parseDmCursor = function(rawCursor) {
+      const s = String(rawCursor || '').trim();
+      if (!s) return { ts: '', id: '' };
+      const sep = s.indexOf('|');
+      if (sep === -1) return { ts: s, id: '' };
+      return { ts: s.slice(0, sep).trim(), id: s.slice(sep + 1).trim() };
+    };
+    const mergedCursor = parseDmCursor(req.query.cursor);
+    const before = mergedCursor.ts || String(req.query.before || '').trim();
+    const beforeId = mergedCursor.id || String(req.query.before_id || '').trim();
     // actor_key = dm_<user> 存储该用户发起的对话元数据
     // 真实私信内容每个消息都是一个 __dm__ 记录
     // ★ P2 修复：双向查询都按 created_at 倒序取最新 limit 条。
@@ -15061,9 +15081,23 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
       var query = supabase.from('posts')
         .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
         .eq('media_type', DM_MARKER).eq('user_name', sender).eq('media_url', recipient);
-      if (before) query = query.lt('created_at', before);
-      // 多取 1 条用来判断"还有更早的"（keyset 分页的标准做法）
-      return query.order('created_at', { ascending: false }).limit(limit + 1);
+      if (before) {
+        if (beforeId) {
+          // 复合 keyset：created_at < before，或 created_at = before 且 id < before_id。
+          // 与排序键 (created_at desc, id desc) 完全一致，翻页不重不漏。
+          query = query.or(
+            'created_at.lt.' + before + ',and(created_at.eq.' + before + ',id.lt.' + beforeId + ')'
+          );
+        } else {
+          query = query.lt('created_at', before);
+        }
+      }
+      // 多取 1 条用来判断"还有更早的"（keyset 分页的标准做法）。
+      // ★ 排序补 id 兜底：同秒消息顺序稳定，否则复合游标的分页边界会漂移。
+      return query
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(limit + 1);
     }
     const [outboundResult, inboundResult] = await Promise.all([
       buildDirectionQuery(req.userName, targetUser),
@@ -15082,9 +15116,21 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
       });
     var hasMore = mergedMessages.length > limit;
     var messages = hasMore ? mergedMessages.slice(mergedMessages.length - limit) : mergedMessages;
-    // next_cursor 给"再往上翻一页"用：取本页最早一条的时间
-    var nextCursor = messages.length ? (messages[0].created_at || null) : null;
-    return res.json({ ok: true, data: messages, has_more: hasMore, next_cursor: nextCursor });
+    // ★ 2026-09-27：next_cursor 升级为复合游标 "created_at|id"（本页最早一条）。
+    //   同时保留 next_cursor_ts / next_cursor_id 两个字段，方便前端任选一种传递方式。
+    //   老调用方若直接把 next_cursor 当时间戳塞回 before，会被 parseDmCursor 正确拆解。
+    var headMessage = messages.length ? messages[0] : null;
+    var nextCursorTs = headMessage ? (headMessage.created_at || null) : null;
+    var nextCursorId = headMessage ? (headMessage.id || null) : null;
+    var nextCursor = (nextCursorTs && nextCursorId) ? (nextCursorTs + '|' + nextCursorId) : nextCursorTs;
+    return res.json({
+      ok: true,
+      data: messages,
+      has_more: hasMore,
+      next_cursor: nextCursor,
+      next_cursor_ts: nextCursorTs,
+      next_cursor_id: nextCursorId
+    });
   } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
@@ -15099,6 +15145,97 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
 //   · 每次图片渲染多打一次后端；签名失败时反而把好好的图片退化成"查看图片"按钮；
 //   · 多一个需要维护鉴权语义、限流与错误分支的接口面。
 //   前端所有调用点（救援重试、渲染期预热、点击兜底）已同步移除，直连公共地址。
+//
+// ★ 2026-09-27 补完（GPT 报告遗留项 · 私密媒体授权，纯增量路线）：
+//   不恢复上面的签名链路（会改动已验证可用的渲染路径），改为补一个**服务端授权判定**
+//   接口 GET /api/dm/media/authorize —— 只回答"当前请求者是否有权访问该私聊媒体"，
+//   不签发任何 URL。价值：
+//   · 给未来真正收紧 uploads 桶策略留好服务端决策点（届时前端把直连地址换成
+//     带鉴权的下载地址即可，判定逻辑已就绪）；
+//   · 现在就能拦「拿到别人 media_url 猜到 storage_path 想确认某文件是否存在」的探测；
+//   · 撤回/删除后的媒体会被判定为不可访问，即使对象尚在存储中。
+//   判定口径（必须同时满足）：
+//     1) storage_path 合法（chat/ 前缀、无穿越）；
+//     2) 存在一条 DM 媒体消息（media_type='__dm__'）携带该 actor_key，
+//        且请求者是该消息的发件人或收件人；
+//     3) 该消息未被撤回、未被删除，且内容未标记媒体已撤回。
+
+// 从 actor_key 解析私聊媒体 storage_path：actor_key = <kind 前缀><storage_path>
+//   ★ 2026-09-27：前缀表上移到「私信媒体」公共约定区（见 DM_MEDIA_ACTOR_PREFIXES 定义处），
+//   本函数与媒体授权接口、撤回清理共用同一口径。
+function resolveDmMediaPathFromActorKey(actorKey) {
+  var raw = String(actorKey || '');
+  if (!raw) return null;
+  for (var pi = 0; pi < DM_MEDIA_ACTOR_PREFIXES.length; pi++) {
+    if (raw.indexOf(DM_MEDIA_ACTOR_PREFIXES[pi]) === 0) {
+      return raw.substring(DM_MEDIA_ACTOR_PREFIXES[pi].length) || null;
+    }
+  }
+  return null;
+}
+
+// GET /api/dm/media/authorize - 判定当前用户是否有权访问某个私聊媒体对象
+//   入参：query.storage_path（chat/xxx.jpg）或 query.actor_key（__dm_img__chat/xxx.jpg）
+//   出参：{ ok, authorized, reason, storage_path? }
+//   注意：本接口**不返回签名 URL / 公共 URL**，前端渲染路径完全不受影响。
+app.get('/api/dm/media/authorize', authenticateUser, rateLimit(60000, 120), async (req, res) => {
+  try {
+    var requestedPath = String(req.query.storage_path || '').trim();
+    if (!requestedPath) {
+      var fromActor = resolveDmMediaPathFromActorKey(req.query.actor_key);
+      if (fromActor) requestedPath = fromActor;
+    }
+    if (!requestedPath) {
+      return res.status(400).json({ error: '缺少媒体路径', code: 'media_path_required' });
+    }
+    var pathCheck = validateDmStoragePath(requestedPath);
+    if (!pathCheck.ok) {
+      // 路径越界一律按"未授权"返回，不泄露服务端校验细节
+      return res.json({ ok: true, authorized: false, reason: 'invalid_path' });
+    }
+    var storagePath = pathCheck.storagePath;
+    // 反查持有该媒体的 DM 消息：actor_key 是 kind 前缀 + storage_path，逐前缀匹配
+    var candidateActorKeys = DM_MEDIA_ACTOR_PREFIXES.map(function(p) { return p + storagePath; });
+    var lookup = await supabase.from('posts')
+      .select('id, user_name, media_url, media_type, actor_key, content, is_deleted, created_at')
+      .eq('media_type', DM_MARKER)
+      .in('actor_key', candidateActorKeys)
+      .limit(5);
+    if (lookup && lookup.error) {
+      return res.status(400).json({ error: sanitizeError(lookup.error), code: 'media_authorize_failed' });
+    }
+    var rows = (lookup && Array.isArray(lookup.data)) ? lookup.data : [];
+    var me = String(req.userName || '');
+    var authorized = false;
+    var reason = 'no_message';
+    for (var ri = 0; ri < rows.length; ri++) {
+      var row = rows[ri];
+      if (!row) continue;
+      var sender = String(row.user_name || '');
+      var recipient = String(row.media_url || '');
+      // 1) 请求者必须是这条私信的发件人或收件人
+      if (sender !== me && recipient !== me) { reason = 'not_participant'; continue; }
+      // 2) 软删的消息不再授权
+      if (row.is_deleted === true || String(row.media_url || '') === '__deleted__') { reason = 'message_deleted'; continue; }
+      // 3) content 里标记 withdrawn / 媒体被撤回
+      var meta = null;
+      try { meta = JSON.parse(String(row.content || '{}')); } catch (eParse) { meta = null; }
+      if (meta && typeof meta === 'object') {
+        if (meta.withdrawn === true) { reason = 'message_withdrawn'; continue; }
+        if (meta.media && typeof meta.media === 'object' && (meta.media.withdrawn === true || meta.media.removed === true)) {
+          reason = 'media_withdrawn'; continue;
+        }
+      }
+      authorized = true;
+      reason = 'ok';
+      break;
+    }
+    return res.json({ ok: true, authorized: authorized, reason: reason, storage_path: storagePath });
+  } catch (e) {
+    console.error('[API] dm media authorize:', e && e.message ? e.message : e);
+    return res.status(500).json({ error: '媒体授权判定失败', code: 'media_authorize_failed' });
+  }
+});
 
 // Read state is server-authoritative and scoped to messages addressed to the
 // authenticated user. A sender cannot mark their own outbound rows as read.
@@ -15210,6 +15347,14 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
     return res.status(500).json({ error: '消息已读状态更新失败', code: 'dm_read_update_failed' });
   }
 });
+
+// ===================== 私信媒体：actor_key 约定 =====================
+// 私聊媒体消息的 actor_key 形如 `<kind 前缀><storage_path>`，
+// 例如 `__dm_img__chat/<uidHash>_xxx.jpg`。该前缀表是全文件级约定，
+// 被三处共用：发送时生成（/api/dm/send）、撤回时清理（/api/dm/withdraw）、
+// 访问鉴权（/api/dm/media/authorize，经 resolveDmMediaPathFromActorKey）。
+// ★ 只在此处定义一次——新增媒体 kind 时改这里，避免多处前缀表漏改。
+var DM_MEDIA_ACTOR_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__'];
 
 // POST /api/dm/send - 发送私信（后端认证写入，禁止前端直连 Supabase）
 // ★ 2026-09-25 修复（审计 B-1）：actor_key 由「kind + storage_path」决定，本身**不含收件人**。
@@ -15992,16 +16137,9 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
     // Resolve and validate the backend-generated media path before changing
     // the message. Never allow an old or forged actor_key to select an
     // arbitrary Storage object for deletion.
-    var DM_MEDIA_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__'];
-    var storagePath = null;
-    if (msg && msg.actor_key) {
-      for (var pi = 0; pi < DM_MEDIA_PREFIXES.length; pi++) {
-        if (msg.actor_key.indexOf(DM_MEDIA_PREFIXES[pi]) === 0) {
-          storagePath = msg.actor_key.substring(DM_MEDIA_PREFIXES[pi].length);
-          break;
-        }
-      }
-    }
+    // ★ 2026-09-27：改用共享的 resolveDmMediaPathFromActorKey（与媒体授权接口同一口径），
+    //   避免两处前缀表各写一份、将来加 kind 时漏改一边。
+    var storagePath = resolveDmMediaPathFromActorKey(msg && msg.actor_key);
     if (storagePath) {
       var validDmPath = validateDmStoragePath(storagePath);
       if (!validDmPath.ok) {

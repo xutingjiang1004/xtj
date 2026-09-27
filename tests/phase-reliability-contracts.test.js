@@ -150,13 +150,33 @@ test('P6-03: client only submits storage_path, kind, mime_type', function () {
 
 test('P6-04: backend generates URL and actor_key, rejects external URLs', function () {
   var s = read('render-api/server.js');
-  var dmSendBlock = s.slice(s.indexOf("app.post('/api/dm/send'"));
+  // ★ 2026-09-27：原先 slice 到文件末尾，属于"范围过宽 + 靠位置碰巧命中"的脆弱断言
+  //   （它当时其实是在扫 /api/dm/withdraw 里重复的前缀表字面量才通过的）。
+  //   改为精确限定 /api/dm/send 路由体，并断言真正的 actor_key 生成表达式。
+  var sendStart = s.indexOf("app.post('/api/dm/send'");
+  var sendEnd = s.indexOf("app.post('/api/dm/withdraw'", sendStart);
+  assert.ok(sendStart > 0 && sendEnd > sendStart, '无法定位 /api/dm/send 区间');
+  var dmSendBlock = s.slice(sendStart, sendEnd);
   assert.ok(/getPublicUrl/.test(dmSendBlock) || /publicUrl/.test(dmSendBlock),
     'backend must generate public URL');
-  assert.ok(/__dm_img__|__dm_vid__|__dm_aud__/.test(dmSendBlock),
-    'backend must generate actor_key with DM prefix');
-  assert.ok(/http/.test(dmSendBlock) && /reject|拒绝|invalid/.test(dmSendBlock),
-    'external URLs must be rejected');
+  // actor_key = kind 前缀 + storage_path，前缀来自 dm-media 的 MEDIA_KINDS 白名单查表
+  assert.ok(/actorKey\s*=\s*kindResult\.actorPrefix\s*\+\s*pathResult\.storagePath/.test(dmSendBlock),
+    'backend must generate actor_key as <kind prefix><storage_path>');
+  assert.ok(/ALLOWED_KINDS\[kindResult\.kind\]/.test(dmSendBlock),
+    'actor_key prefix must be gated by the dm-media MEDIA_KINDS whitelist');
+  assert.ok(/DM_MEDIA_ACTOR_PREFIXES\s*=\s*\[\s*'__dm_img__'/.test(s),
+    'the DM media prefix table must be defined once at module scope');
+  // "拒绝外部 URL"是靠**结构**实现的：客户端只能提交 storage_path，
+  // 没有 URL 参数可传；再叠加 validateDmStoragePath（拒绝 .. / \ / ? / #）
+  // 与 validateDmUploadOwnership（路径必须绑定到请求者 uidHash）。
+  assert.ok(/var storagePath = String\(req\.body && req\.body\.storage_path/.test(dmSendBlock),
+    'client may only submit storage_path — no URL field is accepted');
+  assert.ok(!/req\.body\.(url|media_url)\b/.test(dmSendBlock),
+    'send must not accept a client-supplied URL field');
+  assert.ok(/validateDmStoragePath\(storagePath\)/.test(dmSendBlock),
+    'storage_path must be validated (rejects .. / \\ / ? / #)');
+  assert.ok(/validateDmUploadOwnership\(pathResult\.storagePath, dmUidHash\)/.test(dmSendBlock),
+    'storage_path must be ownership-bound to the requesting user hash');
 });
 
 test('P6-05: withdraw failure enters cleanup queue', function () {
