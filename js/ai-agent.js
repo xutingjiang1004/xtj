@@ -2514,12 +2514,155 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(container, true);
   }
 
+  // ★ 2026-09-28 新增（P0 + 方案 A）：统一「工具活动区」外壳。
+  //   问题（改造前）：
+  //     ① 一个回复里的多轮工具是 N 个**各自独立**的 .ai-tool-round，视觉上是
+  //        一堆孤立的小块，缺少 ChatGPT 那种"所有工具活动归到一个区域"的整体感；
+  //     ② "整理检索结果并作答"占位是直接 append 到 .ai-tool-timeline 上的，
+  //        **落在轮次容器之外** —— 样式与轮次条目不一致，收敛路径也覆盖不到它
+  //        （2026-09-22 那次修复只是给它单独补了收敛函数，父节点仍然挂错）。
+  //   方案 A：
+  //     .ai-tool-timeline                     ← 保持原样（外部定位/清理逻辑都依赖它）
+  //       └─ .ai-tool-activity                ← 新增：统一活动区
+  //            ├─ .ai-tool-activity-head      ← 总摘要行（轮数/工具数/失败数 + 折叠箭头）
+  //            └─ .ai-tool-activity-body      ← 可折叠体（grid-template-rows 过渡）
+  //                 ├─ .ai-tool-round  ...    ← 轮次降级为区内"分段"，不再自带外框
+  //                 └─ .ai-tool-organizing    ← "整理中"归位到同一层级
+  //   兼容性：timeline 上的 querySelectorAll('.ai-tool-round') 是后代查询，
+  //   多一层 wrapper 不受影响；清空/移除逻辑移除 timeline 时活动区随之移除。
+  function ensureToolActivity(timeline) {
+    if (!timeline) return null;
+    var activity = timeline.querySelector('.ai-tool-activity');
+    if (activity) return activity;
+    activity = el('div', { class: 'ai-tool-activity' });
+    var head = el('div', {
+      class: 'ai-tool-activity-head',
+      role: 'button',
+      tabindex: '0',
+      'aria-expanded': 'true',
+      title: '点击收起/展开工具活动'
+    });
+    head.appendChild(el('span', { class: 'ai-tool-activity-icon', 'aria-hidden': 'true' }));
+    var headLabel = el('span', { class: 'ai-tool-activity-label', text: '正在使用工具' });
+    head.appendChild(headLabel);
+    head.appendChild(el('span', { class: 'ai-tool-activity-count', text: '' }));
+    head.appendChild(el('span', { class: 'ai-tool-activity-caret', 'aria-hidden': 'true' }));
+    activity.appendChild(head);
+    var body = el('div', { class: 'ai-tool-activity-body' });
+    activity.appendChild(body);
+    // ★ 折叠交互放在活动区**摘要行**上；轮次自己的摘要行仍然可独立折叠明细。
+    function toggleActivity() {
+      // 运行中不允许收起：进度是用户此刻唯一想看的东西
+      if (activity.classList.contains('is-running')) return;
+      var collapsed = activity.classList.toggle('is-collapsed');
+      try { head.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); } catch (eArA) {}
+    }
+    head.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleActivity();
+    });
+    head.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+        ev.preventDefault();
+        toggleActivity();
+      }
+    });
+    activity.__body = body;
+    timeline.appendChild(activity);
+    return activity;
+  }
+
+  // 取活动区 body（没有就创建）。轮次与"整理中"占位一律挂到这里，
+  // 保证二者在同一层级、共享同一套样式与折叠行为。
+  function toolActivityBody(timeline) {
+    if (!timeline) return null;
+    var activity = ensureToolActivity(timeline);
+    if (!activity) return null;
+    return activity.__body || activity.querySelector('.ai-tool-activity-body');
+  }
+
+  // ★ 2026-09-28（方案 A）：活动区总摘要刷新。
+  //   汇总所有轮次的条目数与成败数，外加"整理中"是否仍在进行。
+  //   全部轮次收敛后：整区加 is-done、自动折叠为一行（与单轮的行为一致，
+  //   只是收敛层级从"每轮"上升到"整个活动区"，历史明细不再堆在屏幕上）。
+  function updateToolActivity(activity) {
+    if (!activity) return;
+    var rounds = activity.querySelectorAll('.ai-tool-round');
+    var totalRounds = rounds.length;
+    if (!totalRounds) return;
+    var totalSteps = 0, totalDone = 0, totalFailed = 0, runningRounds = 0;
+    for (var i = 0; i < totalRounds; i++) {
+      var steps = rounds[i].querySelectorAll('.ai-tool-step');
+      var roundRunning = rounds[i].classList.contains('is-running');
+      if (roundRunning) runningRounds++;
+      for (var j = 0; j < steps.length; j++) {
+        totalSteps++;
+        if (steps[j].classList.contains('is-done')) totalDone++;
+        else if (steps[j].classList.contains('is-error')) totalFailed++;
+      }
+    }
+    // "整理中"占位仍在跑 → 整区不能算完成（否则摘要行会显示"已完成"但下面还在转）
+    var organizing = activity.querySelector('.ai-tool-organizing');
+    var organizingRunning = !!(organizing && organizing.classList.contains('is-running'));
+    var settled = runningRounds === 0 && !organizingRunning && (totalDone + totalFailed) >= totalSteps;
+
+    var icon = activity.querySelector('.ai-tool-activity-icon');
+    var label = activity.querySelector('.ai-tool-activity-label');
+    var count = activity.querySelector('.ai-tool-activity-count');
+    var head = activity.querySelector('.ai-tool-activity-head');
+
+    if (settled) {
+      activity.classList.remove('is-running');
+      activity.classList.add('is-done', 'is-collapsed');
+      if (head) { try { head.setAttribute('aria-expanded', 'false'); } catch (eArA2) {} }
+      if (icon) icon.textContent = totalFailed > 0 ? '⚠️' : '✅';
+      if (label) {
+        // 单轮时沿用"已完成 N 个工具"的措辞，避免"1 轮"这种别扭说法
+        if (totalRounds <= 1) {
+          label.textContent = totalFailed > 0
+            ? (totalSteps + ' 个工具已完成（' + totalFailed + ' 个失败）')
+            : (totalSteps > 1 ? ('已完成 ' + totalSteps + ' 个工具') : '工具调用完成');
+        } else {
+          label.textContent = totalFailed > 0
+            ? ('使用 ' + totalRounds + ' 轮工具（' + totalFailed + ' 个失败）')
+            : ('已使用 ' + totalRounds + ' 轮工具 · 共 ' + totalSteps + ' 个');
+        }
+      }
+      if (count) count.textContent = '';
+    } else {
+      activity.classList.add('is-running');
+      activity.classList.remove('is-done', 'is-collapsed');
+      if (head) { try { head.setAttribute('aria-expanded', 'true'); } catch (eArA3) {} }
+      if (icon) icon.textContent = '⏳';
+      if (label) {
+        label.textContent = organizingRunning
+          ? '正在整理结果'
+          : (totalRounds > 1 ? ('正在使用工具（第 ' + totalRounds + ' 轮）') : '正在使用工具');
+      }
+      if (count) {
+        count.textContent = organizingRunning
+          ? ''
+          : ((totalDone + totalFailed) + '/' + totalSteps + ' 完成');
+      }
+    }
+  }
+
+  // 从任意子节点反查所属活动区并刷新（供轮次状态变化后联动调用）
+  function refreshOwningToolActivity(node) {
+    if (!node) return;
+    var activity = node.closest ? node.closest('.ai-tool-activity') : null;
+    if (activity) updateToolActivity(activity);
+  }
+
   // ★ 2026-09-22 新增：统一构造「工具轮次」容器。
   //   结构：摘要行（旋转环 + 文案 + 计数 + 折叠箭头）+ 可折叠条目区。
   //   收起/展开用 grid-template-rows 平滑过渡，完成后自动折叠为一行，
   //   这是 ChatGPT / Codex 那种"工具步骤可折叠"的手感来源。
   //   三处创建点（tool_calls / tool_pending / tool_error）此前各写一遍 DOM，
   //   结构不一致时 CSS 折叠会失效，故统一收敛到本函数。
+  //   ★ 2026-09-28（方案 A）：轮次不再自带独立外框，改为活动区内的一段；
+  //   调用方需把返回的 box 挂到 toolActivityBody(timeline) 下（见各处调用点）。
   function createToolRound(labelText, roundKey) {
     var box = el('div', { class: 'ai-tool-round is-running' });
     if (roundKey) box.setAttribute('data-tool-round', roundKey);
@@ -2608,6 +2751,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (label) label.textContent = total > 1 ? ('正在调用 ' + total + ' 个工具') : '正在调用工具';
       if (count) count.textContent = (done + failed) + '/' + total + ' 完成';
     }
+    // ★ 2026-09-28（方案 A）：轮次状态变化后联动刷新**活动区总摘要**。
+    //   收敛层级从"每轮各自一行"上升到"整个活动区一行"，多轮场景下
+    //   历史明细统一收进活动区，不再在屏幕上堆成一串孤立小块。
+    try { refreshOwningToolActivity(roundBox); } catch (eActRef) {}
   }
 
   // ★★★ 2026-09-22 修复（用户报障：「工具明明完成了、回复也出来了，'整理检索结果并作答'
@@ -2648,6 +2795,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!cur || /整理|中|正在/.test(cur)) st.textContent = ok ? '完成' : '失败';
       }
     }
+    // ★ 2026-09-28（方案 A）："整理中"收敛后同样要刷新活动区总摘要，
+    //   否则它会一直停在"正在整理结果"而下面已经全是完成态。
+    try { refreshOwningToolActivity(host); } catch (eSettleAct) {}
   }
 
   // 找到某条目所属的轮次并刷新它；用于 tool_result / tool_error 之后收敛
@@ -2656,7 +2806,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var round = stepEl.closest ? stepEl.closest('.ai-tool-round') : null;
     if (round) updateToolRoundState(round);
   }
-
   // ★ 2026-09-15：终态强制收敛某个轮次（用于中断/超时/错误收尾）。
   //   与 updateToolRoundState 的区别：不依赖子条目状态，直接把整轮置为终态，
   //   停掉所有跳动动画，避免用户看到"流已结束但轮次还在转圈"。
@@ -2685,6 +2834,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (bi) bi.textContent = '✅';
       if (bl) bl.textContent = '工具调用结束';
       if (bc) bc.textContent = '';
+      // ★ 2026-09-28（方案 A）：兜底路径也要刷新活动区，否则总摘要会残留进行态
+      try { refreshOwningToolActivity(roundBox); } catch (eForceAct) {}
     }
   }
 
@@ -8777,7 +8928,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               );
               roundBox = _roundBuilt.box;
               roundList = _roundBuilt.list;
-              timeline.appendChild(roundBox);
+              // ★ 2026-09-28（方案 A）：轮次挂进统一活动区 body，而不是直接挂 timeline
+              var _actBody = toolActivityBody(timeline);
+              (_actBody || timeline).appendChild(roundBox);
             }
 
             toolList.forEach(function(t) {
@@ -8939,7 +9092,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               // ★ 2026-09-22：统一走 createToolRound，保证折叠结构与 CSS 一致
               var _pendBuilt = createToolRound('正在调用工具', 'r' + (toolRoundSeq++));
               pendRound = _pendBuilt.box;
-              pendingBar.appendChild(pendRound);
+              // ★ 2026-09-28（方案 A）：挂进活动区 body
+              var _pendActBody = toolActivityBody(pendingBar);
+              (_pendActBody || pendingBar).appendChild(pendRound);
             }
             var pendList = pendRound.querySelector('.ai-tool-round-list');
             var pendStep = el('div', { class: 'ai-tool-step is-running' });
@@ -9000,7 +9155,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   // ★ 2026-09-22：统一走 createToolRound，保证折叠结构与 CSS 一致
                   var _errBuilt = createToolRound('正在调用工具', 'r' + (toolRoundSeq++));
                   errRound2 = _errBuilt.box;
-                  errTimeline.appendChild(errRound2);
+                  // ★ 2026-09-28（方案 A）：挂进活动区 body
+                  var _errActBody = toolActivityBody(errTimeline);
+                  (_errActBody || errTimeline).appendChild(errRound2);
                 }
                 errRound2.querySelector('.ai-tool-round-list').appendChild(errStep);
                 updateToolRoundState(errRound2);
@@ -9140,14 +9297,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   最终答案（多轮工具场景可达数秒），此前的"联网完成/完成"是终态，
             //   用户看到静止的完成态会误以为已经答完了。
             //   这里补一条明确的进行态提示，并把进度计数归零（下一轮工具重新累计）。
+            //   ★ 2026-09-28（方案 A 修复）：此前它 append 到 .ai-tool-timeline，
+            //   **落在轮次容器之外** → 样式与轮次条目不一致，且收敛路径覆盖不到。
+            //   现改为挂进统一活动区 body，与轮次同层级、共享同一套样式与折叠。
             try {
               var _organizeBar = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
               if (_organizeBar && !_organizeBar.querySelector('.ai-tool-organizing')) {
-                _organizeBar.appendChild(el('div', {
+                var _orgHost = toolActivityBody(_organizeBar) || _organizeBar;
+                _orgHost.appendChild(el('div', {
                   class: 'ai-tool-step ai-tool-organizing is-running',
                   'data-organizing': '1'
                 }));
-                var _orgStep = _organizeBar.querySelector('.ai-tool-organizing');
+                var _orgStep = _orgHost.querySelector('.ai-tool-organizing');
                 if (_orgStep) {
                   _orgStep.appendChild(el('span', { class: 'ai-tool-step-icon', text: '🧠' }));
                   var _orgBody = el('div', { class: 'ai-tool-step-body' });
@@ -9155,6 +9316,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   _orgBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '整理中' }));
                   _orgStep.appendChild(_orgBody);
                 }
+                try { refreshOwningToolActivity(_orgHost); } catch (eOrgAct) {}
               }
             } catch (eOrganize) {}
             toolProgressTick = 0;
