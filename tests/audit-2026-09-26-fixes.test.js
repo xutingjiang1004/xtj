@@ -72,9 +72,12 @@ test('P1-5 isAdmin() 必须以服务端下发的标志优先', () => {
 
 // ---------------------------------------------------------------- P1-7 媒体协议白名单
 test('P1-7 私信媒体与举报缩略图必须过 sanitizeUrl', () => {
-  assert.match(chatNav, /var safeSrc = \(typeof sanitizeUrl === 'function'\) \? sanitizeUrl\(resolvedImageSrc\) : ''/, '私信图片必须过 sanitizeUrl');
-  assert.match(chatNav, /sanitizeUrl\(String\(media\.src \|\| ''\)\)/, '视频/音频必须过 sanitizeUrl');
-  assert.match(chatNav, /sanitizeUrl\(item\.thumb\)/, '举报缩略图必须过 sanitizeUrl');
+  // ★ 原断言钉住的是 `resolvedImageSrc` 这个已重命名的局部变量，会随重构失效。
+  //   安全意图不变：私信图片/视频/音频必须过 sanitizeUrl 协议白名单。
+  assert.match(chatNav, /var safeSrc = \(typeof sanitizeUrl === 'function'\) \? sanitizeUrl\((?:remoteSrc|resolvedImageSrc)\) : ''/, '私信图片必须过 sanitizeUrl');
+  assert.match(chatNav, /var safe(?:Video|Audio)Src = \(typeof sanitizeUrl === 'function'\) \? sanitizeUrl\(String\(media\.src \|\| ''\)\) : ''/, '视频/音频必须过 sanitizeUrl');
+  assert.match(chatNav, /var safeThumb = \(typeof sanitizeUrl === 'function'\) \? sanitizeUrl\(item\.thumb\) : ''/, '举报缩略图必须过 sanitizeUrl');
+  assert.doesNotMatch(chatNav, /img\.src\s*=\s*(?:resolvedImageSrc|remoteSrc)\s*[;\n]/, '私信图片不得把原始 URL 直接赋给 src（绕过白名单）');
   assert.match(feedStats, /if \(s\.length > 2 \* 1024 \* 1024\) return '';/, 'sanitizeUrl 必须有长度上限');
   assert.match(chatNav, /escapeHtml\(String\(message\.__tempId\)\)/, 'data-temp-id 必须转义');
 });

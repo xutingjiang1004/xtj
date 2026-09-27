@@ -9018,7 +9018,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (detail) {
                 var candidates = timeline.querySelectorAll('[data-tool-step="' + stepId + '"]');
                 for (var ci = candidates.length - 1; ci >= 0; ci--) {
-                  if (candidates[ci].classList.contains('is-running')) { existing = candidates[ci]; break; }
+                  // ★ 2026-09-28：必须同时满足"还在跑"且"尚未被任何 result 认领"。
+                  //   只判 is-running 会踩到"上一轮同名调用超时未返回、仍处于 running"
+                  //   的那条，把它当成这一轮的重用目标 —— 结果是两次调用共用一条 DOM，
+                  //   谁的结果先到就把这条标完成，另一个永远转圈（用户报障的机制之一）。
+                  if (candidates[ci].classList.contains('is-running')
+                      && candidates[ci].getAttribute('data-tool-claimed') !== '1'
+                      && !candidates[ci].classList.contains('ai-tool-organizing')) {
+                    existing = candidates[ci];
+                    break;
+                  }
                 }
               }
               // Reuse a pending placeholder in the current live round, enriching it
@@ -9029,13 +9038,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   var pendingStep = pendingSteps[pi];
                   var pendingName = pendingStep.getAttribute('data-tool-name') || '';
                   var pendingTitle = pendingStep.querySelector('.ai-tool-step-title');
-                  if (pendingName === String(t.name || '') && pendingTitle && pendingTitle.textContent === '准备工具') {
+                  if (pendingName === String(t.name || '') && pendingTitle && pendingTitle.textContent === '准备工具'
+                      && pendingStep.getAttribute('data-tool-claimed') !== '1') {
                     existing = pendingStep;
                     break;
                   }
                 }
               }
               if (existing) {
+                // 重激活 = 开启**新的执行轮次**，必须清掉上一轮的认领标记，
+                // 否则这一轮的 tool_result 会因为 claimed=1 而认领不到它 → 永远转圈。
+                existing.removeAttribute('data-tool-claimed');
                 existing.classList.add('is-running');
                 existing.classList.remove('is-done', 'is-error');
                 existing.setAttribute('data-tool-name', String(t.name || ''));
@@ -9257,12 +9270,35 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             } else {
               summaryText = label + ' · 失败' + (evt.error ? (': ' + evt.error.slice(0, 80)) : '');
             }
-            // Update timeline step + keep expandable result card below
+            // ★★★ 2026-09-28 修复（用户报障：「工具搜完了，下面又出现一个已完成，
+            //   但上面原先那个工具还在转圈圈」）：
+            //
+            //   旧匹配逻辑（按优先级）：
+            //     exactRunningStep(名字+query 都精确) → firstRunningStep(第一个还在转的同名)
+            //     → exactNamedStep → lastNamedStep
+            //
+            //   两个真实缺陷：
+            //   ① 后端绝大多数 tool_result **不带 query**（见 server.js 的
+            //      `writeSse(res, { type:'tool_result', tool_name, success, count })`），
+            //      于是 `resultQuery` 恒为空、`exactDetail` 恒为 false，
+            //      exactRunningStep 永远命中不了 → 每次都落到 firstRunningStep。
+            //   ② firstRunningStep 取的是**全 timeline 范围内**第一个还在转的同名条目，
+            //      **完全无视轮次归属**。多轮调用同一工具时（第 1 轮"搜索网页" +
+            //      第 2 轮"搜索网页"），第 2 轮的结果会去认领第 1 轮那条（或反之），
+            //      被认领的那条显示"已完成"，而**真正在跑的那条继续转圈** ——
+            //      这正是用户截图里看到的现象。
+            //
+            //   新匹配策略（严格按"轮次内 FIFO 认领"）：
+            //     a) 优先精确匹配（名字 + query 都对得上）—— 后端若带 query 则最可靠；
+            //     b) 否则在**所有未认领的同名 running 条目**里，取**最早出现**的一条
+            //        （tool_calls 是按调用顺序追加的，最早出现 = 最早发起的调用）；
+            //     c) 认领后打上 data-tool-claimed，保证同一个 result 不会重复认领，
+            //        也保证同一轮里两个同名工具各认领各的（FIFO）；
+            //     d) 全部已认领（result 多于 step，异常情况）再退回 lastNamedStep。
             var matchStep = null;
             var exactRunningStep = null;
-            var firstRunningStep = null;
-            var exactNamedStep = null;
-            var lastNamedStep = null;
+            var unclaimedNamedStep = null;
+            var claimedNamedStep = null;
             var resultQuery = String(evt.query || '').trim();
             var steps = toolBar2.querySelectorAll('.ai-tool-step');
             // tool_result events carry a name (and often the original query), not
@@ -9271,43 +9307,114 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             for (var si = 0; si < steps.length; si++) {
               var candidate = steps[si];
               if ((candidate.getAttribute('data-tool-name') || '') !== String(evt.tool_name || '')) continue;
-              lastNamedStep = candidate;
+              // "整理中"占位也带 data-tool-name（历史数据），不参与认领
+              if (candidate.classList.contains('ai-tool-organizing')) continue;
+              var isClaimed = candidate.getAttribute('data-tool-claimed') === '1';
               var detailEl = candidate.querySelector('.ai-tool-step-detail');
               var detailText = String(detailEl && detailEl.textContent || '').trim();
               var exactDetail = !!resultQuery && detailText === resultQuery;
-              if (exactDetail) exactNamedStep = candidate;
               if (candidate.classList.contains('is-running')) {
-                if (!firstRunningStep) firstRunningStep = candidate;
-                if (exactDetail) exactRunningStep = candidate;
+                if (exactDetail && !isClaimed) exactRunningStep = candidate;
+                if (!isClaimed && !unclaimedNamedStep) unclaimedNamedStep = candidate;
+              } else if (!claimedNamedStep) {
+                // 已完成/已失败的同名条目：仅在异常（result 多于 step）时兜底复用
+                claimedNamedStep = candidate;
               }
             }
-            matchStep = exactRunningStep || firstRunningStep || exactNamedStep || lastNamedStep;
+            matchStep = exactRunningStep || unclaimedNamedStep || claimedNamedStep;
+            // 认领标记：防止同一 result 重复命中，也保证同名并行工具 FIFO 配对
+            if (matchStep) matchStep.setAttribute('data-tool-claimed', '1');
+            // ★ 2026-09-28 兜底（对应"原先的工具还在转圈"这一现象）：
+            //   若本次只匹配到了"已完成"的同名条目（claimedNamedStep 兜底路径），
+            //   说明当前活动区里很可能**还有一条同名条目在跑而它的 result 丢失/错配**。
+            //   此时把该活动区内所有仍 running 的同名条目一并收敛，避免永久转圈。
+            //   （只在兜底路径触发，不干扰正常的多轮并行：并行场景下 unclaimedNamedStep
+            //     一定命中，不会走到这里。）
+            if (matchStep && !exactRunningStep && !unclaimedNamedStep) {
+              try {
+                var _stragglers = toolBar2.querySelectorAll('.ai-tool-step.is-running');
+                for (var _sg = 0; _sg < _stragglers.length; _sg++) {
+                  var _sgEl = _stragglers[_sg];
+                  if (_sgEl.classList.contains('ai-tool-organizing')) continue;
+                  if ((_sgEl.getAttribute('data-tool-name') || '') !== String(evt.tool_name || '')) continue;
+                  _sgEl.setAttribute('data-tool-claimed', '1');
+                  _sgEl.classList.remove('is-running');
+                  _sgEl.classList.add(toolSucceeded ? 'is-done' : 'is-error');
+                  var _sgSt = _sgEl.querySelector('.ai-tool-step-status');
+                  if (_sgSt) _sgSt.textContent = toolSucceeded ? '已完成' : '失败';
+                  try { refreshOwningToolRound(_sgEl); } catch (eSgRound) {}
+                }
+              } catch (eStraggler) {}
+            }
             if (!matchStep) {
               matchStep = el('div', { class: 'ai-tool-step' });
               matchStep.setAttribute('data-tool-name', String(evt.tool_name || ''));
+              matchStep.setAttribute('data-tool-claimed', '1');
               matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
               var mbody = el('div', { class: 'ai-tool-step-body' });
               mbody.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
               mbody.appendChild(el('div', { class: 'ai-tool-step-status', text: toolSucceeded ? '已完成' : '失败' }));
               matchStep.appendChild(mbody);
               matchStep.classList.add(toolSucceeded ? 'is-done' : 'is-error');
-              toolBar2.appendChild(matchStep);
+              // ★ 新增条目必须落在**活动区内**，否则又会在活动区外面凭空冒出一行
+              var _orphanHost = toolActivityBody(toolBar2) || toolBar2;
+              _orphanHost.appendChild(matchStep);
             } else {
               matchStep.classList.remove('is-running', 'is-done', 'is-error');
               matchStep.classList.add(toolSucceeded ? 'is-done' : 'is-error');
-              var iconEl = matchStep.querySelector('.ai-tool-step-icon');
-              if (iconEl) iconEl.textContent = toolSucceeded ? '✅' : '⚠️';
               var stEl = matchStep.querySelector('.ai-tool-step-status');
               // ★ 2026-09-17：状态文案统一为"已完成"，与用户要求的
               //   「搜索中 → 已完成」两态切换保持一致。
               if (stEl) stEl.textContent = toolSucceeded ? '已完成' : '失败';
             }
-            var resultCard = el('div', { class: 'ai-tool-result-card' });
-            resultCard.appendChild(el('div', { class: 'ai-tool-result-card-title', text: summaryText }));
-            if (evt.error) {
-              resultCard.appendChild(el('div', { class: 'ai-tool-result-error', text: String(evt.error).slice(0, 240) }));
+            // ★★★ 2026-09-28 修复（同上一处报障的另一半：结果卡片挂错父节点）：
+            //   旧代码是 `toolBar2.appendChild(resultCard)`，而 toolBar2 是**外层
+            //   .ai-tool-timeline** —— 于是结果卡片被追加到 `.ai-tool-activity`
+            //   **外面**。用户在活动区里看到条目还在转圈，活动区下方却凭空多出
+            //   一行「搜索网页 · 8 条结果」，观感就是"又显示了一个已完成工具"。
+            //   而且每个 tool_result 都新建一张卡片、从不去重，多轮多工具时
+            //   卡片在 timeline 末尾堆成一摞，与上面的条目完全对不上号。
+            //
+            //   修法：结果卡片必须
+            //     ① 落在**活动区内**（与条目同一层级、共享折叠与样式）；
+            //     ② **紧跟在它对应的条目之后**，让"哪条结果属于哪个工具"一眼可见；
+            //     ③ 同一工具重复返回时**复用已有卡片**，不重复新建。
+            //   实现：若紧邻的下一个兄弟已是结果卡片 → 只更新它的内容（复用）；
+            //   否则新建并插到 matchStep 之后。matchStep 在轮次内时，卡片同样落进
+            //   那个 .ai-tool-round-list，缩进与导轨自动对齐。
+            var resultCard;
+            function fillResultCard(card) {
+              while (card.firstChild) card.removeChild(card.firstChild);
+              card.appendChild(el('div', { class: 'ai-tool-result-card-title', text: summaryText }));
+              if (evt.error) {
+                card.appendChild(el('div', { class: 'ai-tool-result-error', text: String(evt.error).slice(0, 240) }));
+              }
+              return card;
             }
-            toolBar2.appendChild(resultCard);
+            var nextSib = matchStep && matchStep.nextElementSibling;
+            if (nextSib && nextSib.classList && nextSib.classList.contains('ai-tool-result-card')) {
+              resultCard = fillResultCard(nextSib);           // 复用同一工具的卡片
+            } else {
+              resultCard = fillResultCard(el('div', { class: 'ai-tool-result-card' }));
+              // ★ 卡片落点：优先插在**所属轮次**内、`.ai-tool-round-list-wrap` 之后。
+              //   为什么不是紧贴 matchStep：.ai-tool-round-list 的每条子元素都靠
+              //   ::after 画导轨节点、并按 :nth-child 做错峰入场；往中间塞一个非
+              //   step 节点会让导轨断开、动画序号错位。放在整轮条目之后既保持了
+              //   导轨完整，又让"这张卡片属于哪一轮"归属清晰。
+              var owningRound = matchStep && matchStep.closest ? matchStep.closest('.ai-tool-round') : null;
+              if (owningRound) {
+                var roundWrap = owningRound.querySelector('.ai-tool-round-list-wrap');
+                if (roundWrap && roundWrap.parentNode === owningRound) {
+                  owningRound.insertBefore(resultCard, roundWrap.nextSibling);
+                } else {
+                  owningRound.appendChild(resultCard);
+                }
+              } else if (matchStep && matchStep.parentNode) {
+                matchStep.parentNode.insertBefore(resultCard, matchStep.nextSibling);
+              } else {
+                (toolActivityBody(toolBar2) || toolBar2).appendChild(resultCard);
+              }
+            }
             // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」核心修复）：
             //   此前 `tool_result` 只更新**匹配到 data-tool-name 的那一个** step，
             //   既不收敛搜索状态条（.ai-search-status），也不处理 tool_pending

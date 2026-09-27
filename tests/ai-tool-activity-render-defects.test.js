@@ -43,6 +43,13 @@ function block(src, anchor, size) {
   return src.slice(start, start + size);
 }
 
+/** 与 CSS 版一致：断言"代码行为"时必须先剥掉注释，
+ *  否则修复说明里提到的旧代码（如 `toolBar2.appendChild(resultCard)`）
+ *  会被误判为"缺陷仍然存在"。 */
+function stripJsComments(s) {
+  return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
+
 /** 取一条 CSS 规则的完整声明块（从选择器起到匹配的 } 为止）
  *  ★ 会先剥掉注释，避免"注释里提到的属性"被误判为真实声明
  *    （例如 .ai-tool-round-list 的注释里写着"不能加 overflow:hidden"）。 */
@@ -213,4 +220,81 @@ test('综合：活动区内的轮次必须是"分段"而非"独立卡片"', func
     '活动区内轮次必须去背景，否则又变回一叠独立卡片');
   assert.match(roundRule, /border-radius:\s*0/,
     '活动区内轮次必须去圆角');
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// 2026-09-28 第二轮（用户报障）：
+//   「他调用工具，如果从运行中的状态完成了，不应该在原来的基础上变成/勾选上完成态吗？
+//     为什么搜索网页、搜索天气搜好了之后，下面又显示一个已完成工具，
+//     但原先那个工具还在运行、还在转圈圈？」
+//
+// 真实成因（三处，全部在 tool_result / tool_calls 分支）：
+//   E1 tool_result 的结果卡片 `toolBar2.appendChild(resultCard)`，而 toolBar2 是
+//      **外层 .ai-tool-timeline** → 卡片落在 .ai-tool-activity 外面，看起来就是
+//      "活动区里还在转，活动区下面凭空多出一个已完成"。
+//   E2 条目匹配用 `firstRunningStep` —— 全 timeline 范围内第一个还在转的同名条目，
+//      **完全无视轮次归属**，多轮同名时认领错人 → 真正在跑的那条没人收敛，一直转。
+//   E3 tool_calls 复用旧条目时只判 is-running，不复用"未认领"约束，
+//      也没清 data-tool-claimed → 新一轮的 result 认领不到被复用的条目 → 一直转。
+// ══════════════════════════════════════════════════════════════════════
+
+test('E1：tool_result 的结果卡片必须落在活动区内，不得挂到外层 timeline', function () {
+  const seg = stripJsComments(block(aiAgent, "if (evt.type === 'tool_result') {", 12000));
+  assert.doesNotMatch(seg, /toolBar2\.appendChild\(resultCard\)/,
+    '结果卡片不得再挂到 toolBar2（=外层 .ai-tool-timeline）——那会让卡片落在'
+    + '活动区外面，用户看到"活动区里还在转圈、下面却多出一个已完成"');
+  assert.match(seg, /closest\(['"]\.ai-tool-round['"]\)/,
+    '结果卡片必须定位到所属轮次（closest .ai-tool-round）后再插入');
+  assert.match(seg, /toolActivityBody\(toolBar2\)/,
+    '兜底路径也必须挂在活动区内（toolActivityBody）');
+});
+
+test('E1：同一工具重复返回时必须复用已有卡片，不得堆叠', function () {
+  const seg = block(aiAgent, "if (evt.type === 'tool_result') {", 12000);
+  assert.match(seg, /ai-tool-result-card/);
+  assert.match(seg, /nextElementSibling/,
+    '必须用 nextElementSibling 判断"紧邻已有卡片"以复用，否则每个 result 都新建一张');
+  assert.match(seg, /fillResultCard/,
+    '复用时只重填内容（fillResultCard），而不是再插入一个新节点');
+});
+
+test('E2：条目匹配不得使用跨轮的 firstRunningStep', function () {
+  const seg = stripJsComments(block(aiAgent, "if (evt.type === 'tool_result') {", 12000));
+  assert.doesNotMatch(seg, /firstRunningStep/,
+    'firstRunningStep 取全 timeline 第一个 running 的同名条目、无视轮次归属，'
+    + '多轮同名工具时会认领错人，导致真正在跑的条目永远转圈');
+  assert.match(seg, /unclaimedNamedStep/,
+    '必须改为"未认领的同名 running 条目"FIFO 认领（unclaimedNamedStep）');
+});
+
+test('E2：认领必须打 data-tool-claimed 标记（保证同名并行工具各自配对）', function () {
+  const seg = block(aiAgent, "if (evt.type === 'tool_result') {", 12000);
+  assert.match(seg, /setAttribute\(['"]data-tool-claimed['"],\s*['"]1['"]\)/,
+    '匹配到的条目必须打 data-tool-claimed=1，否则同一 result 会重复命中、'
+    + '而另一条同名条目永远等不到自己的 result');
+  assert.match(seg, /getAttribute\(['"]data-tool-claimed['"]\)/,
+    '匹配时要跳过已认领的条目');
+});
+
+test('E2：只匹配到"已完成"条目时必须兜底收敛残留的同名 running 条目', function () {
+  const seg = block(aiAgent, "if (evt.type === 'tool_result') {", 12000);
+  assert.match(seg, /_stragglers/,
+    '兜底路径缺失：只匹配到已完成条目时，同名的 running 条目会永久转圈，'
+    + '必须扫一遍并强制收敛（对应"原先那个工具还在转圈圈"）');
+});
+
+test('E3：tool_calls 复用旧条目时必须清掉 data-tool-claimed', function () {
+  const seg = block(aiAgent, "toolList.forEach(function(t) {", 4000);
+  assert.match(seg, /removeAttribute\(['"]data-tool-claimed['"]\)/,
+    '重激活条目 = 开启新执行轮次，必须清除上一轮的 claimed 标记，'
+    + '否则新一轮的 result 会因 claimed=1 认领不到它 → 一直转圈');
+  const claimGuard = seg.match(/getAttribute\(['"]data-tool-claimed['"]\)\s*!==\s*['"]1['"]/);
+  assert.ok(claimGuard,
+    '复用候选必须排除"已被认领"的条目，否则两次调用共用同一条 DOM');
+});
+
+test('E3：不得复用 .ai-tool-organizing 占位作为普通工具条目', function () {
+  const seg = block(aiAgent, "toolList.forEach(function(t) {", 4000);
+  assert.match(seg, /ai-tool-organizing/,
+    '"整理中"占位也带 data-tool-name，复用循环必须显式排除它');
 });

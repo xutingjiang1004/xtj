@@ -215,23 +215,37 @@ test('整理占位：所有终态路径都必须调用收敛（content / done / 
     'doneReceived / terminalErrorSeen 分支必须显式收敛');
 });
 
-test('整理占位：占位必须挂在 timeline 且不在任何 .ai-tool-round 内（这是曾经的漏网原因）', () => {
-  // 固化"它落在轮次之外"这一事实 —— 若将来有人把它挪进轮次，本断言会提醒
-  // 重新评估 updateToolRoundState 的覆盖范围。
+test('整理占位：占位必须挂在活动区体内，且不在任何 .ai-tool-round 内', () => {
+  // ★ 契约演进（2026-09 工具 UI 重构）：
+  //   旧实现把占位 `_organizeBar.appendChild` 直接挂到 timeline，视觉上与轮次列表错位 20px；
+  //   现改为挂进 toolActivityBody()，与 .ai-tool-round-list 对齐。
+  //   真正要守住的不变量是：占位**不属于任何轮次**（否则会被 updateToolRoundState 的
+  //   收敛逻辑误算进"已完成工具数"），以及**必须落在活动区体内**（不在则退化成裸挂 timeline）。
   assert.match(agentSrc, /class:\s*'ai-tool-step ai-tool-organizing is-running'/,
     'organizing 占位必须仍以该 class 组合创建');
-  assert.match(agentSrc, /_organizeBar\.appendChild/, '占位是 append 到 timeline 的');
+  assert.match(agentSrc, /var _orgHost = toolActivityBody\(_organizeBar\) \|\| _organizeBar;/,
+    '占位必须优先挂进活动区体内，无活动区时才回退 timeline');
+  assert.match(agentSrc, /_orgHost\.appendChild/, '占位必须 append 到 _orgHost');
+  assert.doesNotMatch(agentSrc, /_organizeBar\.appendChild/, '占位不得再裸挂到 timeline（会与轮次列表错位）');
 });
 
 /* ── 5) 流动感动效层（参考 iOS 27 Siri / ChatGPT 流式输出）────────────── */
 test('流动感：工具轮摘要行运行中必须有流光扫过（渐变位移而非闪烁）', () => {
-  assert.match(enhanceCss, /@keyframes\s+xtjToolFlow/,
-    '必须存在流光扫过关键帧');
-  const rule = enhanceCss.match(/\.ai-tool-round\.is-running \.ai-tool-round-label\s*\{[^}]*\}/);
-  assert.ok(rule, '运行中摘要行规则必须存在');
-  assert.match(rule[0], /background-image:\s*linear-gradient/,
-    '流光必须是渐变（有方向的连续位移）');
-  assert.match(rule[0], /animation:\s*xtjToolFlow/, '必须挂上流光动画');
+  // ★ 同一选择器可能有多条规则（例如另有一条只改 flex 的）。
+  //   逐条遍历，找出真正承载流光的那条（含渐变 + 动画），避免正则取到第一条就误判。
+  const runningRules = [...enhanceCss.matchAll(/\.ai-tool-round\.is-running \.ai-tool-round-label\s*\{([^}]*)\}/g)]
+    .map(function (m) { return m[1]; });
+  assert.ok(runningRules.length, '运行中摘要行规则必须存在');
+  const flowRule = runningRules.find(function (body) {
+    return /background-image:\s*linear-gradient/.test(body) && /animation:\s*xtjToolFlow/.test(body);
+  });
+  assert.ok(flowRule, '必须有一条运行中摘要行规则同时含渐变流光与 xtjToolFlow 动画');
+  assert.ok(enhanceCss.includes('@keyframes xtjToolFlow'), '必须存在流光扫过关键帧');
+  // 流动 ≠ 铺满整行：flex 收紧规则与渐变规则是同选择器的两条独立声明，
+  // 因此对整个选择器组做检查（任一条含 flex:0 1 auto 即可）。
+  const allRunningBodies = [...enhanceCss.matchAll(/\.ai-tool-round\.is-running \.ai-tool-round-label\s*\{([^}]*)\}/g)]
+    .map(function (m) { return m[1]; }).join('\n');
+  assert.match(allRunningBodies, /flex:\s*0 1 auto/, '流光载体必须 flex:0 1 auto 收紧，避免铺满整行');
   // 终态必须归零：流结束了光就得停
   const done = enhanceCss.match(/\.ai-tool-round\.is-done \.ai-tool-round-label[\s\S]{0,200}?\}/);
   assert.ok(done, '终态摘要行规则必须存在');
