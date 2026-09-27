@@ -618,6 +618,15 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   width: 13px; height: 13px;
   font-size: 0;
   text-align: center;
+  /* D8 兜底：JS 写入的 ✅ / ⏳ / ⚠️ emoji 必须完全隐身（见 .ai-tool-step-icon 注释）。
+     ★ 只用 font-size:0 + color:transparent 不够：emoji 是**彩色字形**，
+       color 对它无效；font-size:0 在 Chromium 下会让部分 emoji 退化成
+       fallback 字形（实测渲染成 ▷ 小三角）。补 text-indent 把残留字形
+       推出可视区 —— running 态的 ::before 是 absolute 定位，脱离文本流，
+       不受 text-indent 影响；done/error 态是 static，需在各自规则里重置为 0。 */
+  color: transparent;
+  text-indent: -999px;
+  overflow: hidden;
 }
 .ai-tool-activity-icon::before {
   content: '';
@@ -631,6 +640,7 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-activity.is-done .ai-tool-activity-icon::before {
   content: '✓';
   position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
   width: auto; height: auto;
   border: 0; border-radius: 0;
   font-size: 11.5px; font-weight: 800;
@@ -657,7 +667,14 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   transition: opacity 180ms ease;
 }
 .ai-tool-activity.is-done .ai-tool-activity-head { color: #2f7a5f; }
-.ai-tool-activity.is-done .ai-tool-activity-count { opacity: 0; }
+/* ★ 2026-09-28（方案 C）：完成态的 count 位改放「用时 X.Xs」——
+   原为 opacity:0（隐藏进度计数），但用时是完成时才有价值的信息，必须可见。
+   降饱和 + 缩字号以区别于运行中的进度计数。 */
+.ai-tool-activity.is-done .ai-tool-activity-count {
+  opacity: .72;
+  color: #6b8b80;
+  font-weight: 600;
+}
 .ai-tool-activity-caret {
   flex: 0 0 auto;
   width: 12px; height: 12px;
@@ -679,21 +696,31 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-activity.is-error .ai-tool-activity-caret { opacity: .55; }
 .ai-tool-activity.is-collapsed .ai-tool-activity-caret { transform: rotate(-90deg); }
 
-/* 折叠体：与单轮同一手法（grid-template-rows 才能平滑过渡未知高度） */
+/* 折叠体：与单轮同一手法（grid-template-rows 才能平滑过渡未知高度）
+   ★★★ 2026-09-28 修复（真实渲染实测出来的 bug）：
+   原写法把 `min-height:0; overflow:hidden` 挂在 `.ai-tool-activity-body`
+   自身上，**没有作用到它的 grid item 子节点**。而 `grid-template-rows: 0fr`
+   只是把轨道高度设为 0，轨道里的 item 默认 `min-height: auto`（= min-content），
+   会把 0fr 轨道**重新撑开**——实测收起后 body 仍有 24px（见 Chromium 量测），
+   表现为"收起后留一条白杠"，折叠形同失效。
+   正确修法（与单轮 list-wrap 同一套路）：
+     ① body 自身只管轨道与过渡；
+     ② 给 body 的**直接子元素**（轮次分段 / 整理中占位）补 `min-height: 0`，
+        让它们真的能被压到 0；
+     ③ `overflow: hidden` 只放在 body 上做裁剪。 */
 .ai-tool-activity-body {
   display: grid;
   grid-template-rows: 1fr;
+  min-height: 0;
+  overflow: hidden;
   transition: grid-template-rows 260ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
 }
+.ai-tool-activity-body > * { min-height: 0; }
 .ai-tool-activity.is-collapsed .ai-tool-activity-body {
   grid-template-rows: 0fr;
   opacity: 0;
-}
-/* 活动区内部的容器：承载所有轮次与"整理中"，左导引线建立"同属一个区域"的归属感 */
-.ai-tool-activity-body > .ai-tool-activity-inner,
-.ai-tool-activity-body {
-  min-height: 0;
-  overflow: hidden;
+  /* 收起后不再参与命中测试，避免"看不见但能点到" */
+  pointer-events: none;
 }
 .ai-tool-activity-body > .ai-tool-round:first-child,
 .ai-tool-activity-body > .ai-tool-step:first-child { margin-top: 2px; }
@@ -710,7 +737,44 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   color: #4f7568;
   min-height: 20px;
 }
-/* 多轮之间用一条细分隔线，而不是各自的框 */
+/* ★★★ 2026-09-28 核心修复（D3「三层摘要重复」）：
+   真实渲染发现一个回复里会同时出现【活动区总摘要 + 每个轮次的摘要行】，
+   两轮就是 3 行「正在使用工具 / 已完成 N 个工具 / 正在调用 N 个工具」，
+   信息完全重复，与 ChatGPT / Claude「全部工具活动只有一行总结」的形态不符。
+   收敛策略：
+     · 活动区**总摘要行** = 唯一的状态来源（轮数/条目数/失败数/用时）；
+     · 活动区内**运行中**的轮次摘要行保留 —— 它承载「x/y 完成」这条
+       活动区给不出的实时进度，但**隐去重复的图标**，只留进度与折叠箭头；
+     · 活动区内**已完成**的历史轮次摘要行**整行隐藏** —— 它的信息
+       （"已完成 N 个工具"）已经被总摘要归纳，留着就是纯噪声；
+       明细仍可通过总摘要行展开回看（导轨与条目都在，只是不再有二级标题）。 */
+.ai-tool-activity .ai-tool-round.is-done > .ai-tool-round-head {
+  display: none;
+}
+/* 运行中的轮次摘要行：只作为「进度轨道」，不作为第二套标题。
+   去掉图标（活动区头已有旋转环），文案交由 updateToolRoundState 写「x/y 完成」。 */
+.ai-tool-activity .ai-tool-round.is-running > .ai-tool-round-head .ai-tool-round-icon {
+  display: none;
+}
+.ai-tool-activity .ai-tool-round.is-running > .ai-tool-round-head {
+  color: #6b8b80;
+  font-weight: 600;
+}
+/* ★★★ 2026-09-28（D3 续）：单轮时运行中的轮次摘要行**整行隐藏**。
+   真实渲染的最终形态对齐 ChatGPT / Claude：
+     · 只有一个轮次时 —— 活动区头一行足够（"正在使用工具 · 2/2 完成"），
+       再来一行"正在调用 2 个工具"就是同义反复；
+     · 有多个轮次时 —— 轮次摘要行才有存在意义（区分"第几轮"）。
+   这里用 body 内轮次数做判定：`:only-of-type` 表示"活动区里只有一个轮次"，
+   同时排除存在"整理中"占位的情况（占位也算一个兄弟节点，故用 :first-child
+   与 :last-child 同时满足来表达"唯一子元素"）。 */
+.ai-tool-activity .ai-tool-round.is-running:first-child:last-child > .ai-tool-round-head {
+  display: none;
+}
+/* 隐藏了摘要行的已完成轮次：补一点点上间距，避免与上一个活跃轮次贴死 */
+.ai-tool-activity .ai-tool-round.is-done:not(:first-child) { margin-top: 2px; }
+/* 多轮之间用一条细分隔线，而不是各自的框。
+   已完成轮次没有摘要行了，虚线改由轮次容器自身承载。 */
 .ai-tool-activity .ai-tool-round + .ai-tool-round {
   margin-top: 3px;
   padding-top: 3px;
@@ -765,6 +829,10 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   width: 14px; height: 14px;
   font-size: 0;
   text-align: center;
+  /* D8 兜底：JS 写入的 ⏳ / ✅ / ⚠️ emoji 完全隐身（同 .ai-tool-activity-icon） */
+  color: transparent;
+  text-indent: -999px;
+  overflow: hidden;
 }
 .ai-tool-round-icon::before {
   content: '';
@@ -778,6 +846,7 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-round.is-done .ai-tool-round-icon::before {
   content: '✓';
   position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
   width: auto; height: auto;
   border: 0; border-radius: 0;
   font-size: 12px; font-weight: 800;
@@ -787,6 +856,7 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-round.is-error .ai-tool-round-icon::before {
   content: '!';
   position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
   width: auto; height: auto;
   border: 0; border-radius: 0;
   font-size: 12px; font-weight: 800;
@@ -834,26 +904,46 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-round.is-collapsed .ai-tool-round-caret { transform: rotate(-90deg); }
 
 /* 折叠容器：grid-template-rows 0fr↔1fr 是唯一能平滑过渡"未知高度"的方案
-   （max-height 需要写死数值，条目多时要么裁切要么延迟）。 */
+   （max-height 需要写死数值，条目多时要么裁切要么延迟）。
+   ★ 2026-09-28：与活动区 body 同一处修复 —— grid item 必须显式
+   `min-height: 0`，否则 0fr 轨道会被 item 的 min-content 撑开；
+   list 自身已有 min-height:0，这里再对子选择器兜底一次防回归。 */
 .ai-tool-round-list-wrap {
   display: grid;
   grid-template-rows: 1fr;
+  min-height: 0;
+  /* ★ 2026-09-28：折叠裁切由 wrap 承担（而不是 list）。
+     原因：导轨节点 ::after 用了负偏移（left: -14px）把自己放在 list
+     左边界之外；若 list 带 overflow:hidden，节点会被**裁掉左半边**
+     （真实渲染 4x 放大截图实证）。wrap 的左边界比 list 更靠外，
+     把裁切职责上移到 wrap，节点就能完整露出。 */
+  overflow: hidden;
   transition: grid-template-rows 240ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
 }
+.ai-tool-round-list-wrap > * { min-height: 0; }
 .ai-tool-round.is-collapsed .ai-tool-round-list-wrap {
   grid-template-rows: 0fr;
   opacity: 0;
+  /* 收起后隐藏导轨线（border 不随高度归零，会留一条悬空的竖线） */
+  visibility: hidden;
 }
-/* 条目列表：单行紧凑，左侧一条细分隔线形成"组"的视觉归属 */
+/* 条目列表：单行紧凑，左侧一条细分隔线形成"组"的视觉归属。
+   ★ 2026-09-28（方案 B）：这条线升级为"导轨"——加粗、加深，配合每条目
+   ::after 的节点圆点构成时间轴。改 padding-left 或 border-left 宽度时，
+   必须同步改 .ai-tool-step::after 的 left（见下方时间轴注释）。 */
 .ai-tool-round-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-height: 0;
-  overflow: hidden;
+  /* 注意：这里**不能**加 overflow:hidden —— 会裁掉导轨节点的左半边。
+     折叠裁切职责已上移到 .ai-tool-round-list-wrap。 */
   margin-left: 9px;
   padding-left: 10px;
-  border-left: 1px solid rgba(91, 151, 131, .18);
+  /* ★ 2026-09-28 真实渲染调优：原 rgba(...,.26) 在移动端与高分屏上
+     几乎不可见（4x 放大截图里导轨线完全消失），时间轴的"贯穿感"就没了。
+     提到 .38 保住"低调但看得见"的平衡；线条本身仍比节点淡一档。 */
+  border-left: 1.5px solid rgba(91, 151, 131, .38);
 }
 /* 轮次内的步骤改为单行：图标 + 文字块同一基线，取消大间距 */
 .ai-tool-round-list .ai-tool-step {
@@ -869,6 +959,17 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   font-size: 0;
   flex: 0 0 auto;
   align-self: center;
+  /* ★ 2026-09-28 修复（D8「emoji fallback 漏出」）：
+     JS 里图标位写的是真实 emoji（🔍 / 🧠 / ✍️），靠 font-size:0 隐身、
+     由 ::before 画出图形。但 font-size:0 在部分字体下**不会让 emoji 完全消失**，
+     浏览器会用 fallback 字形（实测 Chromium 下渲染成一个 ▷ 小三角）顶上，
+     于是条目左边出现"三角 + 圆圈"叠字（真实渲染截图实证）。
+     兜底：color:transparent（彩色 emoji 不受其影响）+ text-indent 推出可视区。
+     running 态 ::before 为 absolute 定位，不受 text-indent 影响；
+     done/error 态为 static，已在各自规则里显式重置 text-indent: 0。 */
+  color: transparent;
+  text-indent: -999px;
+  overflow: hidden;
 }
 .ai-tool-round-list .ai-tool-step-icon::before {
   content: '';
@@ -882,6 +983,7 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before {
   content: '✓';
   position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
   width: auto; height: auto;
   border: 0;
   font-size: 10px; font-weight: 800;
@@ -891,6 +993,7 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before {
   content: '!';
   position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
   width: auto; height: auto;
   border: 0;
   font-size: 10px; font-weight: 800;
@@ -922,6 +1025,73 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 /* 单行条目不再需要左侧粗光晕（会显得笨重），改为整行轻微底纹 */
 .ai-tool-round-list .ai-tool-step.is-running { padding-left: 0; }
 .ai-tool-round-list .ai-tool-step.is-running::before { display: none; }
+/* ★★★ 2026-09-28 修复（真实渲染发现）：
+   "整理检索结果并作答"占位同时带 `.ai-tool-step.is-running`，于是继承了
+   `.ai-tool-step.is-running::before` 那条 **3px 宽的渐变光晕条**。
+   旧规则只在 `.ai-tool-round-list` 上下文里关掉了它，而占位是活动区的
+   直接子元素、不在任何 list 内 → 光晕条完整露出，在真实渲染里表现为
+   占位左侧一条粗蓝绿渐变竖线（与 1.5px 低调导轨并存，非常突兀）。
+   占位已经有自己的 `border-left` 导轨，这里把光晕条彻底关掉。 */
+.ai-tool-activity-body > .ai-tool-step.ai-tool-organizing::before,
+.ai-tool-step.ai-tool-organizing.is-running::before { display: none; }
+
+/* ── 2026-09-28（方案 B）：导轨式时间轴 ──────────────────────────────
+   产品参照：Claude 的思考过程是一条竖线贯穿 + 节点逐个点亮，而不是一叠
+   独立卡片。纵向占用小得多，且"进度到哪一步"一眼可见。
+   实现：容器左侧竖线作导轨（下面把 .ai-tool-round-list 的 border-left
+   加粗），每个条目用 ::after 在导轨上画一个节点圆点。
+   三态语义：
+     · 未到达（默认）  空心、极淡   —— 还没轮到
+     · 当前（is-running）实心 + 光晕 —— 正在做
+     · 已过（is-done）  实心低饱和绿 —— 做完了，视觉退后
+     · 失败（is-error） 实心红
+   ★ 关键：节点必须准确落在导轨线上。
+     ★ 2026-09-28 用真实渲染量测校正（原注释的 10.75px 是错的）：
+     `.ai-tool-round-list` 有 margin-left:9px + border-left:1.5px + padding-left:10px，
+     实测 step 左边缘距 list 左外沿 **11.5px**（1.5 边框 + 10 内边距），
+     导轨线中心在距 list 左外沿 **0.75px** 处。
+     ⇒ step 左边缘距导轨中心 = 11.5 - 0.75 = 10.75px …是"相对 list 外沿"的算法，
+        但从 **step 自身** 看：导轨中心在 step 左边缘左侧 11.5 - 0.75 = 10.75px 处。
+     节点总宽 7px（半径 3.5），故 left = -(10.75 + 3.5) = -14.25px。
+     取 -14px（亚像素差异不可见）。**改 padding/border 时必须重算此值**，
+     并可用 tests/ai-tool-activity-shell-contract.test.js 的几何断言兜底。 */
+.ai-tool-round-list .ai-tool-step { position: relative; }
+.ai-tool-round-list .ai-tool-step::after {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 6px;
+  width: 7px; height: 7px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid rgba(91, 151, 131, .3);
+  transition: background 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+/* 当前节点：实心强调色 + 柔和光晕（与运行中的呼吸节奏呼应） */
+.ai-tool-round-list .ai-tool-step.is-running::after {
+  background: #2f7f9e;
+  border-color: #2f7f9e;
+  box-shadow: 0 0 0 3px rgba(47, 127, 158, .16), 0 0 7px rgba(47, 127, 158, .4);
+  animation: xtjToolNodePulse 2.4s ease-in-out infinite;
+}
+/* 已过节点：实心低饱和绿，视觉退后让"当前"保持主角地位 */
+.ai-tool-round-list .ai-tool-step.is-done::after {
+  background: #3a9271;
+  border-color: #3a9271;
+  box-shadow: none;
+  animation: none;
+}
+.ai-tool-round-list .ai-tool-step.is-error::after {
+  background: #c44b5a;
+  border-color: #c44b5a;
+  box-shadow: none;
+  animation: none;
+}
+@keyframes xtjToolNodePulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(47, 127, 158, .16), 0 0 7px rgba(47, 127, 158, .4); }
+  50%      { box-shadow: 0 0 0 4px rgba(47, 127, 158, .1), 0 0 10px rgba(47, 127, 158, .55); }
+}
 @keyframes xtjToolIconBreath {
   0%, 100% { opacity: .55; }
   50%      { opacity: 1; }
@@ -1121,12 +1291,46 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
   padding-left: 0;
   min-height: 20px;
 }
+/* ★ 2026-09-28 修复（D4「整理中缩进错位」）：
+   "整理检索结果并作答"占位在活动区里与轮次条目**同级**，但轮次条目的
+   左边缘经过了 .ai-tool-round-list 的 `margin-left:9px + border 1px
+   + padding-left:10px` 共 20px 的缩进；占位直接挂在活动区 body 上，
+   没有任何缩进 → 真实渲染里它比上面两条条目**左移 20px**，视觉上像
+   脱出了这一组。这里把同一套缩进复用到占位，让导轨、条目、占位左边缘对齐。 */
+.ai-tool-activity-body > .ai-tool-step.ai-tool-organizing {
+  margin-left: 9px;
+  padding-left: 10px;
+  /* ★ 2026-09-28 真实渲染调优：原 rgba(...,.26) 在移动端与高分屏上
+     几乎不可见（4x 放大截图里导轨线完全消失），时间轴的"贯穿感"就没了。
+     提到 .38 保住"低调但看得见"的平衡；线条本身仍比节点淡一档。 */
+  border-left: 1.5px solid rgba(91, 151, 131, .38);
+  /* 与 .ai-tool-round-list 的 padding 对齐后，条目图标与占位图标落在同一竖线 */
+  box-sizing: border-box;
+  /* ★ 2026-09-28：两条必要约束
+     ① `align-self: flex-start` —— 活动区 body 是 flex column，默认 stretch 会把
+        占位盒子拉满剩余高度，其 border-left（导轨线）随之被拉长成一条"拖尾"，
+        真实渲染里表现为占位下方的竖线一直垂到容器底部（截图实证）。
+     ② 覆盖 `.ai-tool-activity-body > * { min-height: 0 }` —— 那条是给折叠用的，
+        对内容元素会把 20px 的最小行高压掉；占位要保住自身高度。 */
+  align-self: flex-start;
+  min-height: 20px;
+  width: auto;
+}
+/* 占位的图标比条目图标宽（11px vs 11px），但条目有 gap:6px + 图标定宽，
+   这里显式对齐 icon 槽位，避免因 flex 基线不同产生的 1~2px 抖动。 */
+.ai-tool-activity-body > .ai-tool-step.ai-tool-organizing .ai-tool-step-icon {
+  margin-right: 6px;
+}
 .ai-tool-step.ai-tool-organizing::before { display: none; }
 .ai-tool-step.ai-tool-organizing .ai-tool-step-icon {
   position: relative;
   width: 11px; height: 11px;
   font-size: 0;
   flex: 0 0 auto;
+  /* D8 兜底：🧠 / ✍️ emoji 完全隐身（同 .ai-tool-step-icon） */
+  color: transparent;
+  text-indent: -999px;
+  overflow: hidden;
 }
 .ai-tool-step.ai-tool-organizing .ai-tool-step-icon::before {
   content: '';
@@ -1168,6 +1372,7 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 .ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon::before {
   content: '!';
   position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
   width: auto; height: auto;
   border: 0; border-radius: 0;
   font-size: 11px; font-weight: 800;
@@ -1219,7 +1424,15 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 [data-theme="dark"] .ai-tool-round.is-done .ai-tool-round-icon::before { color: #6ad6a8; }
 [data-theme="dark"] .ai-tool-round.is-error .ai-tool-round-icon::before { color: #e2808c; }
 [data-theme="dark"] .ai-tool-round-count { color: #7cc4dd; }
-[data-theme="dark"] .ai-tool-round-list { border-left-color: rgba(110, 165, 140, .22); }
+[data-theme="dark"] .ai-tool-round-list { border-left-color: rgba(110, 165, 140, .3); }
+/* 导轨节点（方案 B）：深色下节点底色要跟着容器变，不能残留白色圆点 */
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step::after { background: #1d2b27; border-color: rgba(110, 165, 140, .34); }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-running::after {
+  background: #7cc4dd; border-color: #7cc4dd;
+  box-shadow: 0 0 0 3px rgba(124, 196, 224, .16), 0 0 7px rgba(124, 196, 224, .4);
+}
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-done::after { background: #6ad6a8; border-color: #6ad6a8; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-error::after { background: #e2808c; border-color: #e2808c; }
 [data-theme="dark"] .ai-tool-round-list .ai-tool-step-icon::before {
   border-color: rgba(124, 196, 224, .2);
   border-top-color: rgba(124, 196, 224, .9);
@@ -1255,7 +1468,14 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 /* ── 1) 工具轮摘要行：流光沿标题扫过（运行中） ──────────────────────────
    做法：把渐变铺在摘要行上，用 background-position 让它横向平移。
    之所以用「渐变扫过」而不是「整体呼吸」：呼吸是整块明暗变化（跳），
-   扫过是有方向的连续位移（流）—— 这正是 Siri 边缘光的观感。 */
+   扫过是有方向的连续位移（流）—— 这正是 Siri 边缘光的观感。
+   ★★★ 2026-09-28 修复（真实渲染发现）：
+   原先 `.ai-tool-round-label` 是 `flex: 1 1 auto`，会**撑满整行剩余宽度**，
+   于是这条渐变横跨约 590px，看起来像一整块"被选中的蓝色高亮条"，
+   而不是"文字上有一道光扫过"（4x 放大截图实证，观感很重且误导）。
+   修法：把 label 改为按内容宽度收缩（`flex: 0 1 auto`），渐变就只覆盖
+   文字本身；`min-width:0 + overflow:hidden` 仍保留，长文案照常省略号截断。 */
+.ai-tool-round.is-running .ai-tool-round-label { flex: 0 1 auto; max-width: 100%; }
 .ai-tool-round.is-running .ai-tool-round-label {
   background-image: linear-gradient(
     100deg,
@@ -1360,6 +1580,8 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .ai-tool-round.is-running .ai-tool-round-label,
   .ai-tool-round-list .ai-tool-step.is-running::before,
+  /* 方案 B 导轨节点的脉冲同样必须能停（保留静态高亮，只去掉呼吸） */
+  .ai-tool-round-list .ai-tool-step.is-running::after,
   .ai-tool-result-card,
   .ai-stream-cursor,
   .ai-stream-soft { animation: none !important; }
@@ -1367,11 +1589,13 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 }
 html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label,
 html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step.is-running::before,
+html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step.is-running::after,
 html[data-xtj-motion=off] .ai-tool-result-card,
 html[data-xtj-motion=off] .ai-stream-cursor,
 html[data-xtj-motion=off] .ai-stream-soft,
 html[data-xtj-motion=weak] .ai-tool-round.is-running .ai-tool-round-label,
 html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step.is-running::before,
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step.is-running::after,
 html[data-xtj-motion=weak] .ai-stream-cursor,
 html[data-xtj-motion=weak] .ai-stream-soft {
   animation: none !important;

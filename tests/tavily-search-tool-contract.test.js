@@ -46,6 +46,21 @@ test('search result collection covers tavily_search on both streaming paths', ()
 });
 
 test('frontend renders tavily_search tool name in tool_calls and tool_result status bars', () => {
-  assert.match(aiAgent, /var nameMapCall = \{[\s\S]*?tavily_search: 'Tavily搜索'/);
-  assert.match(aiAgent, /var nameMap = \{[\s\S]*?tavily_search: 'Tavily搜索'/);
+  // ★ 2026-09-28（方案 D「工具名说人话」）：
+  //   原先断言两处 nameMap 都写着 `tavily_search: 'Tavily搜索'`。
+  //   现在映射收敛为单一 TOOL_LABELS，且 tavily_search 改为动作描述
+  //   「搜索网页」（Tavily 是实现名，对用户无意义；内部名仍写入
+  //   data-tool-name 供对账、title 供悬停）。
+  //   测试意图保留：**tavily_search 必须有中文名且两处渲染都取得到**。
+  assert.match(aiAgent, /var TOOL_LABELS\s*=\s*\{[\s\S]*?tavily_search:\s*'[^']+'/,
+    '统一映射表 TOOL_LABELS 必须包含 tavily_search 的中文名');
+  // 显示名不得再是产品名（说人话）
+  assert.ok(!/tavily_search:\s*'Tavily搜索'/.test(aiAgent),
+    'tavily_search 的显示名不应再是产品名「Tavily搜索」，应改为动作描述');
+  // 两处渲染点都必须经 toolLabel 取值（tool_calls 用 t.name，tool_result 用 evt.tool_name）
+  assert.match(aiAgent, /toolLabel\(t\.name\)/, 'tool_calls 分支必须经 toolLabel 取显示名');
+  assert.match(aiAgent, /toolLabel\(evt\.tool_name\)/, 'tool_result 分支必须经 toolLabel 取显示名');
+  // 对账用的内部名必须保留，不能被显示名顶掉
+  assert.match(aiAgent, /setAttribute\('data-tool-name', String\(t\.name \|\| ''\)\)/,
+    'data-tool-name 必须保留原始工具名，否则并行同工具的对账会错配');
 });
