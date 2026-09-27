@@ -711,19 +711,40 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-activity-body {
   display: grid;
   grid-template-rows: 1fr;
+  /* ★ 2026-09-28（二次修复，接上面 0fr 撑开问题）：
+     多轮间距改由 row-gap 承担 —— gap 是**轨道间距**，
+     不参与任何 item 的 min-content / min-height 计算，
+     天然不会像 margin-top 那样在收起态顶开轨道（实测 62px 残留的成因之一）。
+     因此轮次/占位的首间距与轮间距一律禁止再用 margin 表达（下方有守卫注释）。 */
+  row-gap: 3px;
   min-height: 0;
   overflow: hidden;
   transition: grid-template-rows 260ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
 }
 .ai-tool-activity-body > * { min-height: 0; }
+/* ★★★ 2026-09-28（确定性收法）：
+   真实渲染复盘发现：即便 body 的直接子元素全部 min-height:0，
+   嵌套内容（round-head 的 padding 2px 4px + min-height 20px、
+   result-card 的 margin-top 4px + border 1px + padding 10px）仍会通过
+   嵌套 grid/flex 的 min-content 链条把 0fr 轨道顶开 —— 实测收起后
+   第二轮可见高度残留 62px。这些样式是内容自身的必要样式，不能删。
+   结论：**折叠的最终态不能依赖 grid 轨道计算**，收起态直接把 body
+   高度锁死为 0（!important 压过一切内容侧撑开），过渡交给 opacity；
+   展开态 height 锁移除，grid-template-rows 0fr→1fr 的平滑过渡保留。
+   实测：折叠 0 ↔ 128 双向严格归零，展开仍有平滑过渡。 */
 .ai-tool-activity.is-collapsed .ai-tool-activity-body {
   grid-template-rows: 0fr;
+  height: 0 !important;
+  min-height: 0 !important;
   opacity: 0;
   /* 收起后不再参与命中测试，避免"看不见但能点到" */
   pointer-events: none;
 }
-.ai-tool-activity-body > .ai-tool-round:first-child,
-.ai-tool-activity-body > .ai-tool-step:first-child { margin-top: 2px; }
+/* ★ 2026-09-28（随 row-gap 改造移除）：原规则给首个 round/step 补
+   margin-top: 2px —— margin 属于 item 盒子，会计入收起态的
+   min-content 链条顶开 0fr 轨道，是折叠残留的成因之一；
+   视觉上它本就是多余的微调，首间距统一由 row-gap 承担。
+   禁止恢复任何形如 `.ai-tool-activity-body > *:first-child { margin-top }` 的规则。 */
 /* 轮次在活动区内改为"分段"：去掉各自的外框与额外间距，只保留极淡的区隔 */
 .ai-tool-activity .ai-tool-round {
   background: transparent;
@@ -771,12 +792,18 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-activity .ai-tool-round.is-running:first-child:last-child > .ai-tool-round-head {
   display: none;
 }
-/* 隐藏了摘要行的已完成轮次：补一点点上间距，避免与上一个活跃轮次贴死 */
-.ai-tool-activity .ai-tool-round.is-done:not(:first-child) { margin-top: 2px; }
+/* ★ 2026-09-28（随 row-gap 改造移除）：原规则
+   `.ai-tool-round.is-done:not(:first-child) { margin-top: 2px }` 已删。
+   一是 margin 顶开收起态轨道（62px 残留成因），二是它使 :first-child
+   语义失真、干扰折叠状态排查。轮间距统一由 .ai-tool-activity-body 的
+   row-gap 承担。 */
 /* 多轮之间用一条细分隔线，而不是各自的框。
-   已完成轮次没有摘要行了，虚线改由轮次容器自身承载。 */
+   已完成轮次没有摘要行了，虚线改由轮次容器自身承载。
+   ★ 2026-09-28：margin-top 交给 body 的 row-gap（这里显式清零，
+   压掉下方全局 `.ai-tool-round + .ai-tool-round { margin-top: 2px }`
+   对活动区内轮次的命中——gap 与 margin 双重叠加会让轮距忽大忽小）。 */
 .ai-tool-activity .ai-tool-round + .ai-tool-round {
-  margin-top: 3px;
+  margin-top: 0;
   padding-top: 3px;
   border-top: 1px dashed rgba(91, 151, 131, .14);
 }
@@ -921,8 +948,14 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   transition: grid-template-rows 240ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
 }
 .ai-tool-round-list-wrap > * { min-height: 0; }
+/* ★ 2026-09-28（确定性收法，与活动区 body 同一修法）：
+   0fr 最终态会被嵌套内容的 min-content 链条顶开（实测第二轮收起后
+   仍残留 62px 可见高度），收起态直接锁死 height:0，
+   展开态由 0fr→1fr 过渡保证平滑。 */
 .ai-tool-round.is-collapsed .ai-tool-round-list-wrap {
   grid-template-rows: 0fr;
+  height: 0 !important;
+  min-height: 0 !important;
   opacity: 0;
   /* 收起后隐藏导轨线（border 不随高度归零，会留一条悬空的竖线） */
   visibility: hidden;

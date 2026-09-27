@@ -440,3 +440,67 @@ test('E4：toolLabel 的每个调用点都必须看得到定义（产物同名�
   assert.doesNotMatch(min, /\btoolLabel\s*\(/,
     '产物中不得残留未改名的 toolLabel 调用（定义已 mangle，调用必须同步）');
 });
+
+// ═══════════════════════════════════════════════════════════════
+// 2026-09-28 第二轮守卫：折叠「确定性收法」+ 多轮间距 gap 化 + 整理完成文案
+//
+// 背景（接手中断会话的实测结论）：
+//   ① 即便 body 的直接子元素全部 min-height:0，嵌套内容（round-head 的
+//      padding 2px 4px + min-height 20px、result-card 的 margin 4px +
+//      border 1px + padding 10px）仍通过嵌套 grid/flex 的 min-content
+//      链条把 0fr 轨道顶开 —— Chromium 实测收起后第二轮残留 62px。
+//      这些是内容自身的必要样式，不能删 → 最终态必须与轨道计算解耦。
+//   ② 首间距/轮间距的 margin-top: 2px 属于 item 盒子，同链条顶开轨道。
+//      间距改由 grid 的 row-gap 承担（gap 是轨道间距，不参与 item 尺寸计算）。
+//   ③ 用户三次报障「他竟然整理好了，不应该把整理中三个字变成整理完成吗」
+//      → 占位落定文案「整理中」必须原位变「整理完成」。
+
+test('D9：活动区 body 收起态必须 height:0 锁死（确定性收法）', function () {
+  const m = css.match(/\.ai-tool-activity\.is-collapsed \.ai-tool-activity-body\s*\{[^}]*\}/);
+  assert.ok(m, '规则 .ai-tool-activity.is-collapsed .ai-tool-activity-body 必须存在');
+  assert.match(m[0], /height:\s*0\s*!important/,
+    '收起态必须 height:0 !important —— 0fr 最终态会被嵌套内容的 min-content 链条顶开（实测残留 62px）');
+  assert.match(m[0], /min-height:\s*0\s*!important/, 'min-height 必须同步锁 0');
+  assert.match(m[0], /pointer-events:\s*none/, '收起态不得参与命中测试（看不见但能点到）');
+});
+
+test('D10：单轮 list-wrap 收起态必须 height:0 锁死（与 D9 同一修法）', function () {
+  const m = css.match(/\.ai-tool-round\.is-collapsed \.ai-tool-round-list-wrap\s*\{[^}]*\}/);
+  assert.ok(m, '规则 .ai-tool-round.is-collapsed .ai-tool-round-list-wrap 必须存在');
+  assert.match(m[0], /height:\s*0\s*!important/, '收起态必须 height:0 !important');
+  assert.match(m[0], /visibility:\s*hidden/, '导轨线必须随收起隐藏（border 不随高度归零）');
+});
+
+test('D11：活动区多轮间距必须由 row-gap 承担（margin 顶开轨道回归防护）', function () {
+  const bodyRule = css.match(/\.ai-tool-activity-body\s*\{[^}]*\}/);
+  assert.ok(bodyRule, '.ai-tool-activity-body 主规则必须存在');
+  assert.match(bodyRule[0], /row-gap:\s*3px/, 'body 必须用 row-gap 承担多轮间距（gap 不参与 item 尺寸计算）');
+  // 两条 margin-top: 2px 旧规则已删，不得回归
+  assert.doesNotMatch(css, /\.ai-tool-activity-body > \.ai-tool-(?:round|step):first-child\s*\{[^}]*margin-top/,
+    '首元素 margin-top 2px 已删（计入 item 盒子、顶开收起态轨道），不得回归');
+  assert.doesNotMatch(css, /\.ai-tool-activity \.ai-tool-round\.is-done:not\(:first-child\)\s*\{[^}]*margin-top/,
+    '已完成轮次 margin-top 2px 已删，不得回归');
+  // 活动区内轮间距 margin 必须显式清零，压掉全局 `.ai-tool-round + .ai-tool-round { margin-top: 2px }` 的叠加
+  const sep = css.match(/\.ai-tool-activity \.ai-tool-round \+ \.ai-tool-round\s*\{[^}]*\}/);
+  assert.ok(sep, '活动区内轮次分隔线规则必须存在');
+  assert.match(sep[0], /margin-top:\s*0/, '活动区内轮间距 margin 必须清零（由 row-gap 接管，避免 gap+margin 双重叠加）');
+  assert.match(sep[0], /border-top:\s*1px dashed/, '轮次分隔虚线必须保留');
+});
+
+test('R1：「整理中」占位落定文案必须是「整理完成」（原位收敛叙事闭合）', function () {
+  const src = stripJsComments(aiAgent);
+  const fnStart = src.indexOf('function settleOrganizingStep(');
+  assert.notEqual(fnStart, -1, 'settleOrganizingStep 必须存在');
+  // 花括号配平取完整函数体
+  let depth = 0, i = src.indexOf('{', fnStart), end = -1;
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  assert.notEqual(end, -1, 'settleOrganizingStep 花括号未配平');
+  const body = src.slice(fnStart, end + 1);
+  assert.match(body, /'整理完成'/,
+    '落定文案必须是「整理完成」—— 用户报障原话：他竟然整理好了，不应该把整理中三个字变成整理完成吗');
+  assert.match(body, /'整理失败'/, '失败落定文案必须是「整理失败」');
+  assert.doesNotMatch(body, /=\s*ok\s*\?\s*'完成'/, '不得回落到裸「完成」（对用户而言叙事不闭合）');
+});
