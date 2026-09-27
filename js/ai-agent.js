@@ -2926,7 +2926,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var st = step.querySelector('.ai-tool-step-status');
       if (st) {
         var cur = String(st.textContent || '');
-        if (!cur || /整理|中|正在/.test(cur)) st.textContent = ok ? '完成' : '失败';
+        // ★★★ 2026-09-28（用户三次报障收敛点：「他竟然整理好了，不应该把
+        //   整理中三个字变成整理完成吗？」）：落定文案必须是**整理完成**，
+        //   而不是裸的「完成」——用户盯着的那行字是「整理检索结果并作答 ·
+        //   整理中」，收杆时把「整理中」原位替换成「整理完成」，
+        //   交互叙事才闭合（运行中 → 完成，原位变化，不新增条目）。
+        if (!cur || /整理|中|正在/.test(cur)) st.textContent = ok ? '整理完成' : '整理失败';
       }
     }
     // ★ 2026-09-28（方案 A）："整理中"收敛后同样要刷新活动区总摘要，
