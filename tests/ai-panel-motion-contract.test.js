@@ -136,10 +136,15 @@ test('工具进展：运行态图标由 CSS 绘制（不依赖 emoji，避免字
   assert.match(enhanceCss, /@keyframes\s+xtjToolSpin/, '缺少 CSS 旋转环动画');
   assert.match(enhanceCss, /\.ai-tool-round-icon\s*\{[^}]*font-size:\s*0/,
     '摘要图标的 emoji 文本必须隐身（font-size:0），图形由 CSS 绘制');
-  assert.match(enhanceCss, /\.ai-tool-round-list \.ai-tool-step-icon\s*\{[^}]*font-size:\s*0/,
-    '步骤图标同理，不得依赖 emoji');
   assert.match(enhanceCss, /\.ai-tool-round\.is-done \.ai-tool-round-icon::before\s*\{[^}]*content:\s*'✓'/,
     '完成态必须有 ✓ 落定标记');
+  // ★ 2026-09-28（去冗余）：条目内图标位已整体隐藏，状态由导轨节点承载。
+  //   旧断言要求 `.ai-tool-step-icon { font-size: 0 }`（那时图标还可见），
+  //   现改为断言：它必须被隐藏，且旋转环 ::before 不得重新漏出。
+  assert.match(enhanceCss, /\.ai-tool-round-list \.ai-tool-step-icon\s*\{[^}]*display:\s*none/,
+    '条目内图标位必须隐藏（状态改由导轨节点独家表达）');
+  assert.match(enhanceCss, /\.ai-tool-round-list \.ai-tool-step\.is-running \.ai-tool-step-icon\s*\{[^}]*display:\s*none/,
+    '运行态必须显式隐藏图标位（3 类选择器优先级更高，漏写会让空心环漏出）');
 });
 
 test('工具进展：条目错峰进入（并行多工具时依次落下而非整块砸出）', () => {

@@ -179,11 +179,23 @@ test('D8：图标位不得由 JS 写入 emoji 文本（CSS ::before 才是唯一
   });
 });
 
-test('D8：图标容器必须带双重隐身兜底（color:transparent + text-indent）', function () {
+test('D8：条目内图标位必须隐藏（状态改由导轨节点独家表达，消除双圆冗余）', function () {
+  // ★ 2026-09-28（去冗余）契约演进：
+  //   过去条目左侧同时有「导轨节点 ::after」+「图标位 ::before」两个圆表达状态，
+  //   4x 放大截图里表现为"实心蓝点 + 空心圆环"并排，信息完全重复。
+  //   现隐藏整个图标位；D8 原来的"emoji 隐身兜底"（color:transparent /
+  //   text-indent:-999px）已随 display:none 一并失去意义，不再要求。
+  //   新不变量：图标位必须隐藏，且运行态（3 类选择器）也要显式隐藏——
+  //   否则它的高优先级规则会覆盖 2 类规则、空心环重新漏出（真实渲染实证）。
   const iconRule = rule(css, '.ai-tool-round-list .ai-tool-step-icon {');
-  assert.match(iconRule, /color:\s*transparent/, '缺 color:transparent 兜底');
-  assert.match(iconRule, /text-indent:\s*-\d+px/, '缺 text-indent 兜底（把 fallback 字形推出可视区）');
-  assert.match(iconRule, /overflow:\s*hidden/);
+  assert.match(iconRule, /display:\s*none/, '条目内图标位必须 display:none');
+  const runningIconRule = rule(css, '.ai-tool-round-list .ai-tool-step.is-running .ai-tool-step-icon {');
+  assert.match(runningIconRule, /display:\s*none/,
+    '运行态必须显式 display:none（3 类选择器优先级高于 2 类，漏写会让空心环漏出）');
+  // 导轨节点是唯一状态载体 → 三态必须齐备
+  assert.match(css, /\.ai-tool-round-list \.ai-tool-step\.is-running::after\s*\{[^}]*background/, '运行态节点必须实心');
+  assert.match(css, /\.ai-tool-round-list \.ai-tool-step\.is-done::after\s*\{[^}]*background:\s*#3a9271/, '完成态节点必须实心绿');
+  assert.match(css, /\.ai-tool-round-list \.ai-tool-step\.is-error::after\s*\{[^}]*background:\s*#c44b5a/, '失败态节点必须实心红');
 });
 
 test('D8：所有 static 定位的伪元素必须重置 text-indent（否则 ✓/! 会被推出视野）', function () {
