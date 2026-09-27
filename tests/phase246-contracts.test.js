@@ -213,7 +213,13 @@ test('P6-23: DM withdraw cleans up Storage media', function () {
   assert.ok(/select\('id,\s*user_name,\s*created_at,\s*content,\s*media_type,\s*actor_key'\)/.test(block),
     'dm withdraw must select actor_key when looking up message');
   // Must extract storage path from actor_key.
-  assert.ok(/DM_MEDIA_PREFIXES/.test(block), 'dm withdraw must extract storage path from actor_key');
+  // ★ 2026-09-27：前缀解析已收敛为共享函数 resolveDmMediaPathFromActorKey
+  //   （此前是块内重复的 DM_MEDIA_PREFIXES 字面量数组，新增 kind 时容易漏改）。
+  //   断言改为绑定"必须复用共享解析函数"这一行为契约，而不是绑定字面量。
+  assert.ok(/resolveDmMediaPathFromActorKey\(/.test(block),
+    'dm withdraw must extract storage path via the shared resolveDmMediaPathFromActorKey');
+  assert.ok(/DM_MEDIA_ACTOR_PREFIXES\s*=\s*\[/.test(s),
+    'the actor_key prefix table must still exist exactly once at module scope');
   // Must call supabase.storage.remove.
   assert.ok(/storage\.from\('uploads'\)\.remove\(\[storagePath\]\)/.test(block),
     'dm withdraw must remove Storage file');
