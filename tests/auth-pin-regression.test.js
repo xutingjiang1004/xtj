@@ -17,7 +17,11 @@ test('protected auth only clears a genuinely expired session', () => {
   //   403→'forbidden'（二者均确证会话失效，由上层处理）；5xx/409/429/网络异常
   //   改走重试，不再返回失效信号。契约同步为「401 映射 expired、403 映射 forbidden」。
   assert.match(core, /reason:\s*res\.status === 401 \? 'expired' : 'forbidden'/);
-  assert.match(core, /if \(_lastRefreshAuthResult\.reason === 'expired' \|\| _lastRefreshAuthResult\.reason === 'forbidden'\) \{\s*handleProtectedAuthFailure\(\)/);
+  // ★ 2026-09-27：handleProtectedAuthFailure 现在接受 { background } 参数 ——
+  //   后台轮询/启动加载即使鉴权失败也不弹登录框（否则 iOS 上会无故弹出密码面板，
+  //   见 3363fe0「Fix iOS auth prompt」）。断言意图不变：expired/forbidden 两种
+  //   确证失效都必须走 handleProtectedAuthFailure，故允许可选的参数对象。
+  assert.match(core, /if \(_lastRefreshAuthResult\.reason === 'expired' \|\| _lastRefreshAuthResult\.reason === 'forbidden'\) \{\s*handleProtectedAuthFailure\((?:[^)]*)?\)/);
   assert.match(core, /reason: 'network_error'/);
 });
 
