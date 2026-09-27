@@ -1912,6 +1912,7 @@
                 var on = isDmOriginalSendEnabled();
                 btn.classList.toggle('is-on', on);
                 btn.setAttribute('aria-checked', on ? 'true' : 'false');
+                btn.setAttribute('aria-label', on ? '原图已开启，点击改为压缩发送' : '原图已关闭，点击按原始画质发送');
                 var label = btn.querySelector('.cor-label');
                 if (label) label.textContent = '原图';
             }
@@ -1920,6 +1921,14 @@
                 var next = !isDmOriginalSendEnabled();
                 try { window.safeStorage.set(DM_ORIGINAL_KEY, next ? '1' : '0'); } catch (e) {}
                 syncDmOriginalToggle();
+                var btn = document.getElementById('dockChatOrigBtn');
+                if (btn) {
+                    btn.classList.remove('is-bouncing');
+                    void btn.offsetWidth;
+                    btn.classList.add('is-bouncing');
+                    clearTimeout(btn._dmBounceTimer);
+                    btn._dmBounceTimer = setTimeout(function() { btn.classList.remove('is-bouncing'); }, 360);
+                }
                 showToast(next ? '已选原图：这条照片按原始画质发送' : '未选原图：照片压缩后发送（更省流量、更快）');
             };
 
@@ -2639,14 +2648,10 @@
                 if (!_dmActionSheet) return;
                 var sheet = _dmActionSheet;
                 _dmActionSheet = null;
+                if (sheet._dmCleanup) sheet._dmCleanup();
+                sheet.style.pointerEvents = 'none';
                 try { sheet.classList.remove('active'); } catch (e) {}
-                // .active 在**内层**（.dm-bar 或 .dm-action-panel）上，遮罩层本身没有，
-                // 这里一并摘掉，避免关闭时最后 200ms 还亮着。
-                try {
-                    var innerSurface = sheet.querySelector ? sheet.querySelector('.dm-bar, .dm-action-panel') : null;
-                    if (innerSurface) innerSurface.classList.remove('active');
-                } catch (e) {}
-                setTimeout(function() { try { if (sheet.parentNode) sheet.parentNode.removeChild(sheet); } catch (e) {} }, 200);
+                setTimeout(function() { try { if (sheet.parentNode) sheet.parentNode.removeChild(sheet); } catch (e) {} }, 260);
                 try { document.removeEventListener('keydown', onDmActionKeydown, true); } catch (e) {}
             }
 
@@ -2695,8 +2700,7 @@
                 overlay.className = 'dm-action-overlay';
                 var panel = document.createElement('div');
                 panel.className = 'dm-action-panel';
-                panel.setAttribute('role', 'dialog');
-                panel.setAttribute('aria-modal', 'true');
+                panel.setAttribute('role', 'group');
                 panel.setAttribute('aria-label', '消息操作');
 
                 var grid = document.createElement('div');
@@ -2723,20 +2727,46 @@
                 });
                 panel.appendChild(grid);
 
-                var cancelBtn = document.createElement('button');
-                cancelBtn.type = 'button';
-                cancelBtn.className = 'dm-action-cancel';
-                cancelBtn.textContent = '取消';
-                cancelBtn.addEventListener('click', function(ev) {
-                    ev.preventDefault(); ev.stopPropagation(); closeDockMessageActions();
-                });
-                panel.appendChild(cancelBtn);
-
                 overlay.appendChild(panel);
                 overlay.addEventListener('click', function(ev) { if (ev.target === overlay) closeDockMessageActions(); });
                 document.body.appendChild(overlay);
                 _dmActionSheet = overlay;
-                requestAnimationFrame(function() { try { overlay.classList.add('active'); } catch (e) {} });
+                var bubble = rowEl.classList && rowEl.classList.contains('chat-msg')
+                    ? rowEl : rowEl.querySelector('.chat-msg');
+                if (!bubble) bubble = rowEl;
+                bubble.classList.add('is-actions-open');
+                function positionPanel() {
+                    if (_dmActionSheet !== overlay || !bubble.isConnected) { closeDockMessageActions(); return; }
+                    var anchor = bubble.getBoundingClientRect();
+                    var width = window.innerWidth;
+                    var height = window.innerHeight;
+                    // Transforms scale the visual rect during opening; use layout size for stable placement.
+                    var surface = { width: panel.offsetWidth, height: panel.offsetHeight };
+                    var margin = 10, gap = 12;
+                    var left = Math.max(margin, Math.min(anchor.left + anchor.width / 2 - surface.width / 2, width - surface.width - margin));
+                    var above = anchor.top >= surface.height + gap + margin;
+                    var top = above ? anchor.top - surface.height - gap : anchor.bottom + gap;
+                    top = Math.max(margin, Math.min(top, height - surface.height - margin));
+                    panel.style.left = left + 'px';
+                    panel.style.top = top + 'px';
+                    panel.style.setProperty('--dm-tip-x', Math.max(18, Math.min(anchor.left + anchor.width / 2 - left, surface.width - 18)) + 'px');
+                    panel.classList.toggle('is-below', !above);
+                }
+                positionPanel();
+                // Two frames allow the browser to paint the collapsed surface before expanding it.
+                requestAnimationFrame(function() { requestAnimationFrame(function() {
+                    if (_dmActionSheet === overlay) overlay.classList.add('active');
+                }); });
+                function dismissOnScroll(ev) {
+                    if (!panel.contains(ev.target)) closeDockMessageActions();
+                }
+                window.addEventListener('resize', positionPanel);
+                document.addEventListener('scroll', dismissOnScroll, true);
+                overlay._dmCleanup = function() {
+                    bubble.classList.remove('is-actions-open');
+                    window.removeEventListener('resize', positionPanel);
+                    document.removeEventListener('scroll', dismissOnScroll, true);
+                };
                 document.addEventListener('keydown', onDmActionKeydown, true);
             }
             function runDockMessageAction(actionId, message) {

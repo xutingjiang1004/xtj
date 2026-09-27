@@ -1762,29 +1762,34 @@
              未勾选 = 一个空心圆圈；勾选 = 圆圈里多一个实心点（微信/系统设置同款语言）。
            默认**勾选**（发原图）；取消勾选才压成长边 1600 的缩略图。
            整块（圈 + 文字）都可点，避免小圆圈不好按。 */
-        .chat-orig-btn {
-            flex-shrink: 0;
+        #dockChatOrigBtn {
+            flex-shrink: 0; position: relative;
             display: inline-flex; align-items: center; gap: 5px;
-            padding: 6px 9px;
-            border-radius: 999px;
-            border: 1px solid transparent;
-            background: transparent;
-            color: var(--text-muted);
-            font-size: 11px;
+            padding: 7px 9px;
+            border-radius: 12px;
+            border: 1px solid rgba(83, 156, 125, 0.18);
+            background: rgba(255, 255, 255, 0.56);
+            box-shadow: inset 0 1px rgba(255,255,255,.7);
+            color: var(--text-main);
+            font-size: 12px; font-weight: 600;
             line-height: 1;
             cursor: pointer;
-            min-height: 30px;
+            min-height: 36px;
+            backdrop-filter: none; -webkit-backdrop-filter: none; overflow: visible;
             -webkit-tap-highlight-color: transparent;
-            transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+            transition: background-color .25s ease, border-color .25s ease, color .25s ease, box-shadow .25s ease, transform .18s ease;
         }
+        #dockChatOrigBtn:active { transform: scale(.94); }
+        #dockChatOrigBtn.is-bouncing { animation: dm-orig-bounce .36s cubic-bezier(.2, .8, .2, 1); }
+        @keyframes dm-orig-bounce { 0% { transform: scale(.94); } 52% { transform: scale(1.06); } 100% { transform: scale(1); } }
         .cor-ring {
             position: relative;
             flex: 0 0 auto;
-            width: 15px; height: 15px;
+            width: 17px; height: 17px;
             border-radius: 50%;
-            border: 1.5px solid var(--xtj-border-soft, rgba(0, 0, 0, 0.34));
+            border: 1.5px solid rgba(44, 112, 85, .56);
             box-sizing: border-box;
-            transition: border-color 0.18s ease, box-shadow 0.18s ease;
+            transition: border-color .24s ease, box-shadow .24s ease, transform .3s cubic-bezier(.2,1.5,.4,1), background-color .24s ease;
         }
         .cor-dot {
             position: absolute; left: 50%; top: 50%;
@@ -1793,179 +1798,156 @@
             background: #059669;
             transform: scale(0);
             opacity: 0;
-            transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.14s ease;
+            transition: transform .3s cubic-bezier(.2,1.5,.4,1), opacity .2s ease;
         }
-        .chat-orig-btn.is-on {
-            background: rgba(5, 150, 105, 0.12);
-            border-color: rgba(5, 150, 105, 0.42);
+        #dockChatOrigBtn.is-on {
+            background: linear-gradient(135deg, rgba(118,216,176,.25), rgba(118,191,223,.16));
+            border-color: rgba(5, 150, 105, 0.44);
             color: #059669;
             font-weight: 700;
+            box-shadow: 0 2px 9px rgba(5,150,105,.1), inset 0 1px rgba(255,255,255,.8);
         }
-        .chat-orig-btn.is-on .cor-ring {
+        #dockChatOrigBtn.is-on .cor-ring {
             border-color: #059669;
-            box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.14);
+            background: rgba(5,150,105,.12);
+            box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
+            transform: scale(1.04);
         }
-        .chat-orig-btn.is-on .cor-dot { transform: scale(1); opacity: 1; }
+        #dockChatOrigBtn.is-on .cor-dot { transform: scale(1); opacity: 1; }
         [data-theme="dark"] .cor-ring { border-color: rgba(255, 255, 255, 0.38); }
-        [data-theme="dark"] .chat-orig-btn.is-on { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.42); }
-        [data-theme="dark"] .chat-orig-btn.is-on .cor-ring { border-color: #34d399; box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.16); }
+        [data-theme="dark"] #dockChatOrigBtn { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.15); }
+        [data-theme="dark"] #dockChatOrigBtn.is-on { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.42); }
+        [data-theme="dark"] #dockChatOrigBtn.is-on .cor-ring { border-color: #34d399; box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.16); }
         [data-theme="dark"] .cor-dot { background: #34d399; }
         @media (prefers-reduced-motion: reduce) {
-            .chat-orig-btn, .cor-ring, .cor-dot { transition: none; }
+            #dockChatOrigBtn, .cor-ring, .cor-dot { transition: none; animation: none !important; }
         }
 
-        /* ── 长按气泡操作菜单 ───────────────────────────────────────── */
-        .dm-action-overlay {
-            position: fixed; inset: 0; z-index: 90;
-            display: flex; align-items: flex-end; justify-content: center;
-            background: rgba(0, 0, 0, 0.42);
-            opacity: 0; transition: opacity 0.18s ease;
-        }
-        .dm-action-overlay.active { opacity: 1; }
-        .dm-action-panel {
-            width: 100%; max-width: 560px;
-            max-height: 70vh; overflow-y: auto;
-            background: var(--panel-bg, #fff);
-            border-radius: 20px 20px 0 0;
-            padding: 6px 0 calc(6px + env(safe-area-inset-bottom, 0px));
-            box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.22);
-            transform: translateY(14px);
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        .dm-action-overlay.active .dm-action-panel { transform: translateY(0); }
-
-        .dm-action-cancel {
-            width: 100%; padding: 15px; border: 0; background: transparent;
-            font-size: 15px; color: var(--text-main); cursor: pointer;
-            border-top: 1px solid var(--xtj-line-soft, rgba(0, 0, 0, 0.07));
-        }
-        /* ── 长按/右键消息操作面板 ───────────────────────────────────────
-           ★ 2026-09-25 定版：恢复第一版的视觉（浅色圆角卡片 + 圆形图标 + 文字 + 取消），
-           但整体收小 —— 面板不再是"占满屏宽的底部大板"，而是最宽 430px、四周留白的浮层卡片：
-           圆图标 44→38px、文字 12→11px、内边距同步收紧，高度从 ~200px 降到 ~120px。
-           ⚠ 这里必须用「三层选择器」(0,3,0)：style.css:7185 的共享按钮系统用 :is(...) 覆盖所有
-           button，其权重是**参数里最高者** (0,2,0)，两层选择器只会与它打平、再按源码顺序输掉
-           （曾因此把圆形按钮刷成白色圆片，由 tests/ui/chat-visual.spec.js 实测抓出）。
-           同时把它设过的 padding-inline / min-height / border-radius / background / box-shadow /
-           backdrop-filter / overflow 全部显式复位。 */
+        /* 消息气泡旁的横排操作条：保留原有功能，固定定位避免受滚动容器裁剪。 */
         .dm-action-overlay {
             position: fixed; inset: 0; z-index: 92;
-            display: flex; align-items: flex-end; justify-content: center;
-            background: rgba(0, 0, 0, 0.42);
-            opacity: 0; transition: opacity 0.18s ease;
-            padding: 0 10px calc(12px + env(safe-area-inset-bottom, 0px));
+            background: transparent;
         }
-        .dm-action-overlay.active { opacity: 1; }
-        .dm-action-panel {
-            width: 100%; max-width: 430px;
-            max-height: 70vh; overflow-y: auto;
-            /* ★ 2026-09-25：必须和 .modal-box.glass 用同一套表面处理（浅色底 + backdrop blur）。
-               先前只给了 var(--panel-bg)（0.88 alpha）却没加 backdrop-filter，
-               结果是半透明面板、背后的会话列表整片透进来，看着像坏了（视觉用例截图暴露）。 */
-            /* 底色做到近乎不透明：blur 只是加分项，不能当拐杖 ——
-               旧版微信 WebView / headless 环境可能根本不渲染 backdrop-filter，
-               那时 0.8 左右的 alpha 会让面板"透成坏的"（视觉用例截图已见）。 */
-            /* ★ 2026-09-25「液态玻璃」：分层构造，缺一层就会变成"塑料片"——
-               ① 上→中的白色高光渐变（玻璃迎光面）叠在 ② 半透明底色上；
-               ③ backdrop-filter 做真实背景模糊 + 提饱和；
-               ④ 内外双向的 1px 高光边让边缘"发光"；
-               ⑤ 大范围柔和投影 + 近距小投影，把卡片从背景里托起来。 */
-            background:
-                linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.40) 46%, rgba(255, 255, 255, 0.24) 100%),
-                rgba(243, 250, 246, 0.66);
-            border: 1px solid rgba(255, 255, 255, 0.66);
-            border-radius: 22px;
-            padding: 10px 8px 8px;
-            position: relative;
-            box-shadow:
-                0 20px 48px rgba(24, 62, 45, 0.22),
-                0 3px 10px rgba(24, 62, 45, 0.10),
-                inset 0 1px 0 rgba(255, 255, 255, 0.95),
-                inset 0 -1px 0 rgba(255, 255, 255, 0.28);
-            backdrop-filter: blur(22px) saturate(180%);
-            -webkit-backdrop-filter: blur(22px) saturate(180%);
-            transform: translateY(12px);
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        .dm-action-overlay .dm-action-panel:not(.dm-forward-panel) {
+            position: fixed;
+            width: max-content; max-width: calc(100vw - 20px);
+            padding: 8px;
+            border: 1px solid rgba(255,255,255,.82);
+            border-radius: 18px;
+            background: linear-gradient(140deg, rgba(255,255,255,.96), rgba(231,248,242,.93));
+            box-shadow: 0 12px 36px rgba(25,80,60,.19), 0 2px 8px rgba(25,80,60,.08), inset 0 1px rgba(255,255,255,.9);
+            backdrop-filter: blur(18px) saturate(150%);
+            -webkit-backdrop-filter: blur(18px) saturate(150%);
+            opacity: 0;
+            transform: translate3d(0,12px,0) scale(.78);
+            transform-origin: var(--dm-tip-x, 50%) 100%;
+            transition: transform .26s cubic-bezier(.2,1.22,.35,1), opacity .18s ease;
+            will-change: transform, opacity;
         }
-        /* 迎光面的柔和高光 —— 液态玻璃最关键的一笔（不参与命中测试） */
-        .dm-action-overlay .dm-action-panel::before {
-            content: '';
-            position: absolute; inset: 0;
-            border-radius: inherit;
+        .dm-action-overlay .dm-action-panel.is-below {
+            transform: translate3d(0,-12px,0) scale(.78);
+            transform-origin: var(--dm-tip-x, 50%) 0;
+        }
+        .dm-action-overlay.active .dm-action-panel:not(.dm-forward-panel) {
+            transform: translate3d(0,0,0) scale(1);
+            opacity: 1;
+        }
+        .dm-action-overlay .dm-action-panel:not(.dm-forward-panel)::after {
+            content: ''; position: absolute;
+            left: calc(var(--dm-tip-x, 50%) - 6px); bottom: -6px;
+            width: 11px; height: 11px;
+            transform: rotate(45deg);
+            background: rgba(232,248,242,.96);
+            border-right: 1px solid rgba(255,255,255,.82);
+            border-bottom: 1px solid rgba(255,255,255,.82);
             pointer-events: none;
-            background: radial-gradient(120% 62% at 50% -12%, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0) 62%);
         }
-        .dm-action-overlay.active .dm-action-panel { transform: translateY(0); }
-        /* ★ 2026-09-25 二次调整：上一版收得过头了（圆图标 38px、文字 11px、间距也砍），
-           观感上丢掉了第一版的「饱满感」。现在把**内部尺寸恢复成第一版**（44px 圆图标 /
-           12px 文字 / 更宽的项与间距），但面板本身仍是紧凑浮层卡片（max-width 430px，
-           不是第一版那种占满屏宽的底部大板）—— 即「第一版的观感 + 收小后的外框」。 */
+        .dm-action-overlay .dm-action-panel:not(.dm-forward-panel).is-below::after {
+            top: -6px; bottom: auto;
+            transform: rotate(225deg);
+        }
         .dm-action-overlay .dm-action-panel .dm-action-grid {
-            display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;
-            padding: 6px 4px 10px;
+            display: flex; align-items: stretch; gap: 3px;
+            width: max-content; max-width: calc(100vw - 38px);
+            overflow-x: auto; overscroll-behavior-x: contain;
+            scrollbar-width: none;
         }
+        .dm-action-overlay .dm-action-panel .dm-action-grid::-webkit-scrollbar { display: none; }
         .dm-action-overlay .dm-action-panel .dm-action-item {
+            flex: 0 0 52px;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            gap: 8px; width: 74px; min-width: 0; min-height: 0;
-            padding: 10px 2px; padding-inline: 2px;
-            border: 0; border-radius: 14px;
+            gap: 5px; width: 52px; min-width: 52px; min-height: 58px;
+            padding: 5px 1px; padding-inline: 1px;
+            border: 0; border-radius: 12px;
             background: transparent; box-shadow: none;
             backdrop-filter: none; -webkit-backdrop-filter: none;
-            color: var(--text-main); font-size: 12px; line-height: 1.15; font-family: inherit;
-            overflow: visible; cursor: pointer;
-            -webkit-tap-highlight-color: transparent;
-            transition: background 0.14s ease;
+            color: #254b3d; font-size: 11px; line-height: 1.2; font-family: inherit;
+            cursor: pointer; -webkit-tap-highlight-color: transparent;
+            transition: background-color .18s ease, transform .18s ease;
         }
-        .dm-action-overlay .dm-action-panel .dm-action-item:hover { background: rgba(5, 150, 105, 0.08); }
-        .dm-action-overlay .dm-action-panel .dm-action-item:active { background: rgba(5, 150, 105, 0.16); }
+        .dm-action-overlay .dm-action-panel .dm-action-item:hover,
+        .dm-action-overlay .dm-action-panel .dm-action-item:focus-visible { background: rgba(5,150,105,.11); }
+        .dm-action-overlay .dm-action-panel .dm-action-item:active { transform: scale(.92); background: rgba(5,150,105,.17); }
         .dm-action-overlay .dm-action-panel .dm-action-icon {
-            width: 44px; height: 44px; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            /* 图标底也做成小玻璃片：斜向渐变 + 高光内边 + 一圈细边 */
-            background: linear-gradient(160deg, rgba(16, 185, 129, 0.26), rgba(16, 185, 129, 0.08));
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 3px rgba(16, 90, 60, 0.12);
-            color: #04805a;
+            display: grid; place-items: center;
+            width: 32px; height: 32px; border-radius: 11px;
+            background: linear-gradient(145deg,rgba(120,218,181,.3),rgba(158,213,230,.18));
+            border: 1px solid rgba(255,255,255,.8);
+            box-shadow: inset 0 1px rgba(255,255,255,.8), 0 2px 5px rgba(16,90,60,.08);
+            color: #087c5b;
+            transition: transform .22s cubic-bezier(.2,1.35,.4,1), background-color .2s ease;
         }
-        /* SVG 上写的是 width/height="16"，但呈现属性优先级低于 CSS，这里统一放大到 20px ——
-           上一版 38px 圆 + 16px 图标显得又小又空，是第一版「不够饱满」的主因。 */
-        .dm-action-overlay .dm-action-panel .dm-action-icon svg {
-            width: 20px; height: 20px;
-        }
+        .dm-action-overlay .dm-action-panel .dm-action-icon svg { width: 18px; height: 18px; }
+        .dm-action-overlay .dm-action-panel .dm-action-item:active .dm-action-icon { transform: scale(.85); }
         .dm-action-overlay .dm-action-panel .dm-action-label { white-space: nowrap; }
-        /* 图标按下时轻微回弹，补一点「液态」的手感 */
-        .dm-action-overlay .dm-action-panel .dm-action-item:active .dm-action-icon {
-            transform: scale(0.94);
+        .dm-action-overlay .dm-action-panel [data-dm-action="delete"] .dm-action-icon { color: #b64d57; background: rgba(244,194,196,.27); }
+        .chat-msg.is-actions-open { filter: brightness(1.035); }
+        [data-theme="dark"] .dm-action-overlay .dm-action-panel:not(.dm-forward-panel) {
+            background: linear-gradient(145deg,rgba(38,57,52,.97),rgba(23,40,38,.96));
+            border-color: rgba(255,255,255,.16);
+            box-shadow: 0 14px 38px rgba(0,0,0,.4), inset 0 1px rgba(255,255,255,.1);
         }
-        .dm-action-overlay .dm-action-panel .dm-action-icon { transition: transform 0.14s ease; }
-        .dm-action-overlay .dm-action-panel .dm-action-cancel {
-            width: 100%; padding: 13px; border: 0; border-radius: 14px;
-            background: transparent; color: var(--text-main);
-            font-size: 14px; font-family: inherit; cursor: pointer;
-            border-top: 1px solid var(--xtj-line-soft, rgba(0, 0, 0, 0.07));
+        [data-theme="dark"] .dm-action-overlay .dm-action-panel:not(.dm-forward-panel)::after {
+            background: #21352f; border-color: rgba(255,255,255,.16);
         }
-        [data-theme="dark"] .dm-action-panel {
-            background:
-                linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 46%, rgba(255, 255, 255, 0) 100%),
-                rgba(16, 22, 20, 0.74);
-            border-color: rgba(255, 255, 255, 0.14);
-            box-shadow:
-                0 20px 48px rgba(0, 0, 0, 0.44),
-                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        [data-theme="dark"] .dm-action-overlay .dm-action-panel .dm-action-item { color: #e1f3eb; }
+        [data-theme="dark"] .dm-action-overlay .dm-action-panel .dm-action-icon { border-color: rgba(255,255,255,.16); color: #8de5bd; }
+        [data-theme="dark"] .dm-action-overlay .dm-action-panel [data-dm-action="delete"] .dm-action-icon { color: #f5a9ad; }
+        @media (prefers-reduced-motion: reduce) {
+            .dm-action-overlay .dm-action-panel:not(.dm-forward-panel),
+            .dm-action-overlay .dm-action-panel .dm-action-item,
+            .dm-action-overlay .dm-action-panel .dm-action-icon { transition: none; }
         }
-        [data-theme="dark"] .dm-action-overlay .dm-action-panel::before {
-            background: radial-gradient(120% 62% at 50% -12%, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 62%);
+
+        /* 转发仍需会话列表弹层，保持独立于贴近气泡的操作条。 */
+        .dm-forward-overlay {
+            display: flex; align-items: flex-end; justify-content: center;
+            padding: 12px 10px calc(12px + env(safe-area-inset-bottom, 0px));
+            background: rgba(9, 30, 24, .4);
+            opacity: 0; transition: opacity .2s ease;
         }
-        [data-theme="dark"] .dm-action-overlay .dm-action-panel .dm-action-icon {
-            background: linear-gradient(160deg, rgba(16, 185, 129, 0.28), rgba(16, 185, 129, 0.10));
-            border-color: rgba(255, 255, 255, 0.16);
-            color: #7fe0b4;
+        .dm-forward-overlay.active { opacity: 1; }
+        .dm-forward-overlay .dm-forward-panel {
+            width: 100%; max-width: 430px; max-height: 65vh; overflow-y: auto;
+            padding: 10px 8px 8px;
+            border: 1px solid rgba(255,255,255,.7); border-radius: 20px;
+            background: rgba(246,253,249,.96);
+            box-shadow: 0 18px 48px rgba(18,64,44,.25);
+            transform: translateY(16px) scale(.97);
+            transition: transform .24s cubic-bezier(.2,1,.3,1);
         }
-        [data-theme="dark"] .dm-action-overlay .dm-action-panel .dm-action-cancel {
-            border-top-color: rgba(255, 255, 255, 0.08);
+        .dm-forward-overlay.active .dm-forward-panel { transform: translateY(0) scale(1); }
+        .dm-forward-overlay .dm-action-cancel {
+            width: 100%; min-height: 42px; border: 0; border-radius: 12px;
+            background: transparent; color: var(--text-main); font: inherit; cursor: pointer;
+            border-top: 1px solid rgba(80,120,96,.12);
         }
-        @media (min-width: 768px) {
-            .dm-action-overlay { align-items: center; padding-bottom: 0; }
+        [data-theme="dark"] .dm-forward-overlay .dm-forward-panel {
+            background: rgba(27,43,38,.97); border-color: rgba(255,255,255,.14);
+        }
+        @media (min-width: 768px) { .dm-forward-overlay { align-items: center; } }
+        @media (prefers-reduced-motion: reduce) {
+            .dm-forward-overlay, .dm-forward-overlay .dm-forward-panel { transition: none; }
         }
 
         /* ── 转发目标选择 ───────────────────────────────────────────── */

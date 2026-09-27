@@ -199,7 +199,7 @@ test('发送失败：失败气泡与"长按重发"提示必须出现', async ({ 
   await page.screenshot({ path: path.join(SHOT_DIR, 'chat-failed.png') });
 });
 
-test('长按/右键操作面板：尺寸、圆形按钮与转发表板', async ({ page }) => {
+test('消息操作条贴近气泡，切换原图有状态反馈，转发仍可用', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('xtj_user', 'viewer');
     localStorage.setItem('xtj_device_id', 'chat-visual-test');
@@ -211,7 +211,8 @@ test('长按/右键操作面板：尺寸、圆形按钮与转发表板', async (
   //   只写 .dm-action-panel 会匹配到它，导致断言看错元素（曾经因此误判面板过大/过透）。
   const ACTION_PANEL = '.dm-action-panel:not(.dm-forward-panel)';
 
-  await page.locator('#dockChatMessages .chat-msg').first().click({ button: 'right' });
+  const bubble = page.locator('#dockChatMessages .chat-msg').first();
+  await bubble.click({ button: 'right' });
   await expect(page.locator(ACTION_PANEL)).toBeVisible();
   // 等 opacity/transform 过渡走完（0.2s），否则截到半透明中间态
   await page.waitForTimeout(320);
@@ -224,6 +225,7 @@ test('长按/右键操作面板：尺寸、圆形按钮与转发表板', async (
     const icon = item && item.querySelector('.dm-action-icon');
     const ics = item ? getComputedStyle(item) : null;
     const pr = panel.getBoundingClientRect();
+    const br = document.querySelector('#dockChatMessages .chat-msg').getBoundingClientRect();
     const ir = item ? item.getBoundingClientRect() : null;
     return {
       panelW: Math.round(pr.width), panelH: Math.round(pr.height),
@@ -234,24 +236,36 @@ test('长按/右键操作面板：尺寸、圆形按钮与转发表板', async (
       itemBgImage: ics ? ics.backgroundImage : null,
       iconW: icon ? Math.round(icon.getBoundingClientRect().width) : null,
       iconRadius: icon ? getComputedStyle(icon).borderRadius : null,
+      anchorTop: br.top, anchorBottom: br.bottom, panelTop: pr.top, panelBottom: pr.bottom,
       panelBg: getComputedStyle(panel).backgroundColor,
     };
   }, ACTION_PANEL);
   console.log('DIAG action-panel: ' + JSON.stringify(diag));
   expect(diag, 'action panel not found').not.toBeNull();
 
-  // 收小后的面板：宽 ≤440、高 ≤170，动作不能换行
-  expect(diag.panelW, 'action panel too wide').toBeLessThanOrEqual(460);
-  // 内部尺寸已恢复第一版（44px 圆图标 / 12px 文字）→ 面板自然变高，上限放到 200
-  expect(diag.panelH, 'action panel too tall').toBeLessThanOrEqual(200);
+  expect(diag.panelW, 'action panel too wide').toBeLessThanOrEqual(370);
+  expect(diag.panelH, 'horizontal action bar too tall').toBeLessThanOrEqual(105);
+  expect(diag.panelBottom <= diag.anchorTop + 1 || diag.panelTop >= diag.anchorBottom - 1,
+    'action bar should appear above or below its bubble').toBeTruthy();
   expect(diag.items, 'expected one row of actions').toBeGreaterThanOrEqual(4);
-  // 圆形按钮不得被全局按钮系统刷白（padding-inline:16px / min-height:40px / 玻璃渐变）
+  // 全局按钮系统不得覆盖菜单的紧凑布局。
   expect(diag.itemBgImage === 'none' || diag.itemBgImage === '', 'item picked up the global glass gradient').toBeTruthy();
-  expect(parseFloat(diag.itemMinH), 'item inherited the global 40px min-height').toBeLessThan(30);
+  expect(parseFloat(diag.itemMinH), 'item height should fit a touch target').toBeGreaterThanOrEqual(50);
   expect(parseFloat(diag.itemPadX), 'item inherited the global 16px padding-inline').toBeLessThan(8);
-  expect(diag.iconW, 'icon circle should be about 44px').toBeGreaterThanOrEqual(42);
-  expect(diag.iconRadius, 'icon should stay a circle').toMatch(/50%/);
+  expect(diag.iconW, 'compact icon should be about 32px').toBeGreaterThanOrEqual(30);
   await page.screenshot({ path: path.join(SHOT_DIR, 'chat-action-panel.png') });
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator(ACTION_PANEL)).toHaveCount(0);
+  const original = page.locator('#dockChatOrigBtn');
+  await expect(original).toHaveAttribute('aria-checked', 'false');
+  await original.click();
+  await expect(original).toHaveAttribute('aria-checked', 'true');
+  await expect(original).toHaveClass(/is-on/);
+  await original.click();
+  await expect(original).toHaveAttribute('aria-checked', 'false');
+
+  await bubble.click({ button: 'right' });
 
   // 转发面板
   await page.locator(ACTION_PANEL + ' [data-dm-action="forward"]').click();
