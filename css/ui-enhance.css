@@ -1681,3 +1681,35 @@ html[data-xtj-motion=weak] .ai-stream-soft {
 html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label {
   background-image: none !important;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   2026-09-29 Claude / ChatGPT 形态对齐（用户连续报障「很丑」）
+   目标形态：
+     ① 过程流（思考 + 工具进度）留在正文**上方** —— 那是"它正在干嘛"
+     ② 结果摘要挪到正文**下方**一行 —— "已搜索 3 个网页 ▾"，可展开看明细
+     ③ 正文上方不再出现任何"已完成 N 个工具 · 用时 X.Xs"横幅
+   ══════════════════════════════════════════════════════════════ */
+
+/* ① "整理检索结果并作答 · 整理中"占位：不再上屏。
+   用户原话「写这个东西真的很丑」。Claude / ChatGPT 都没有这一行 ——
+   工具跑完后就是正文，中间不插一个"我在整理"的自述步骤。
+   ★ 只在视觉层隐藏：DOM 节点与 is-running 状态机**完整保留**。
+     updateToolActivity 的 organizingRunning 判据、settleOrganizingStep 的
+     收敛、以及"只有占位"场景的 settled 判定，全部依赖该元素存在；
+     直接不创建或 remove() 会打穿状态机（历史上已因此出过"头永远在转圈"）。 */
+.ai-tool-step.ai-tool-organizing { display: none !important; }
+
+/* ② 完成态摘要行：极简、低调，对齐 ChatGPT "Searched 3 sites" / Claude 行式收敛。
+   原先是加粗绿字 + 完成图标 + 用时，形式感过重，夹在思考与正文之间很扎眼。 */
+.ai-tool-activity.is-done .ai-tool-activity-head {
+  font-weight: 500;
+  font-size: 11.5px;
+  color: #8a9691;
+  background: transparent;
+  padding: 1px 4px;
+}
+.ai-tool-activity.is-done .ai-tool-activity-head:hover { background: transparent; }
+[data-theme="dark"] .ai-tool-activity.is-done .ai-tool-activity-head { color: #7d8f89; }
+
+/* ③ 工具区被搬到正文**下方**后，与正文之间留一点呼吸，避免贴着正文尾巴 */
+.ai-msg-bubble + .ai-tool-timeline { margin-top: 9px; }
