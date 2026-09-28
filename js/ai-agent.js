@@ -1184,7 +1184,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return name.length > 0 && name !== 'blob';
   }
 
-  var AI_FILE_MAX_BYTES = 7 * 1024 * 1024;
+  // ★ 2026-09-29：单文件上限 7MB → 50MB（用户要求）。base64 膨胀 4/3 后约 67MB，
+  //   后端 express.json 全局上限已同步放宽到 80mb（server.js）。
+  var AI_FILE_MAX_BYTES = 50 * 1024 * 1024;
 
   // 部分系统不上报 MIME（type 为空）：按扩展名推断，保证后端解析器能正确识别
   function mimeFromFilename(name) {
@@ -1272,7 +1274,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return false;
     }
     if (file.size > AI_FILE_MAX_BYTES) {
-      notify(opts.sizeMsg || '文件不能超过 7MB');
+      notify(opts.sizeMsg || '文件不能超过 50MB');
       return false;
     }
     var reader = new FileReader();
@@ -7462,7 +7464,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       readAiAttachmentFile(rawFile, function(fileData) {
         _dtFileData = { name: fileData.name, type: fileData.type, dataUrl: fileData.dataUrl };
         if (filePreview) renderAiFilePreview(filePreview, fileData, clearDtFilePreview);
-      }, { sizeMsg: '文件不能超过 7MB（data URL 编码后）' });
+      }, { sizeMsg: '文件不能超过 50MB（data URL 编码后）' });
     }
     if (fileBtn && fileInput) {
       addDtListener(fileBtn, 'click', function() { fileInput.click(); });
@@ -13066,7 +13068,7 @@ function showChatMessages() {
       function next(i) {
         if (i >= list.length) {
           if (!attachments.length) {
-            notify(list.length ? '文件都超过 7MB 或数量超限（最多 10 个、合计约 9MB），请选择更小的文件' : '没有可上传的文件');
+            notify(list.length ? '文件都超过 50MB 或数量超限（最多 10 个、合计约 50MB），请选择更小的文件' : '没有可上传的文件');
             return;
           }
           _aiChatFiles = attachments;
@@ -13078,8 +13080,12 @@ function showChatMessages() {
         var pass = true;
         if (String(f.size || 0) > AI_FILE_MAX_BYTES) { skipped++; pass = false; }
         if (attachments.length >= 10) { skipped++; pass = false; }
-        var est = Math.ceil(Number(f.size || 0) * 4 / 3);
-        if (pass && totalBytes + est > 9 * 1024 * 1024) { skipped++; pass = false; }
+        // ★ 总量预算按 base64 编码后口径（原字节 ×4/3），上限 76MB——
+        //   对齐后端 express.json 80mb 上限并留文本/历史余量；
+        //   保证单张 50MB 图（编码后约 67MB）可独立通过。
+        var AI_ATTACH_TOTAL_B64_BUDGET = 76 * 1024 * 1024;
+        var estTotal = Math.ceil((totalBytes + Number(f.size || 0)) * 4 / 3);
+        if (pass && estTotal > AI_ATTACH_TOTAL_B64_BUDGET) { skipped++; pass = false; }
         if (!pass) { next(i + 1); return; }
         var okRead = readAiAttachmentFile(f, function(fileData) {
           if (fileData) {
@@ -13087,7 +13093,7 @@ function showChatMessages() {
             totalBytes += Math.ceil((fileData.dataUrl.length * 3) / 4);
           } else { skipped++; }
           next(i + 1);
-        }, { sizeMsg: '文件不能超过 7MB' });
+        }, { sizeMsg: '文件不能超过 50MB' });
         if (!okRead) { skipped++; next(i + 1); }
       }
       next(0);

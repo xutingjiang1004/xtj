@@ -4354,10 +4354,10 @@ app.use(function corsErrorHandler(err, req, res, next) {
   next(err);
 });
 
-// Cat AI accepts one browser-encoded document (the UI caps files at 7 MB;
-// base64 adds ~33% plus JSON overhead). Keep this bounded while avoiding a
-// predictable 413 for valid DOCX/PDF uploads.
-app.use(express.json({ limit: '12mb' }));
+// Cat AI accepts browser-encoded attachments (the UI caps each file at 50 MB
+// and the encoded multi-file budget at 76 MB; base64 adds ~33% plus JSON
+// overhead). 2026-09-29: 12mb → 80mb to fit the raised UI caps with headroom.
+app.use(express.json({ limit: '80mb' }));
 
 // HTTPS 重定向（生产环境强制跳转 HTTPS）
 app.use((req, res, next) => {
@@ -18416,7 +18416,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
   try {
     const { device_id, device_type, os, browser, user_agent, source, device_meta, exact_device_model, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips, battery_info, storage_estimate, media_devices } = req.body;
 
-    // ★ S3 审计修复：该路由 body 来源为全局 express.json({limit:'12mb'})。
+    // ★ S3 审计修复：该路由 body 来源为全局 express.json({limit:'80mb'})。
     //   先做后置解析体总量校验（超限直接拒绝，避免超大请求体在后续清洗前滞留）；
     //   关键防护在字段级白名单清洗与整体大小上限（见下方 cleanLoginValue）。
     try {
@@ -22234,7 +22234,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   var message = validateString(body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
   if (message && message.error) { writeSse(res, { type: 'error', error: message.error }); return safeEnd(); }
   // ★ 审计修复：旧代码在此后用 `String(body.message || '').trim()` 重新取**原始未校验值**，
-  //   使上面的长度上限形同虚设（实际转发内容仅受全局 12mb body 限制）。
+  //   使上面的长度上限形同虚设（实际转发内容仅受全局 80mb body 限制）。
   //   validateString 成功时返回清洗后的字符串，直接复用即可。
   var text = message;
   if (!provider || !apiKey || !model || !text) {
