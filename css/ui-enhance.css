@@ -1704,9 +1704,14 @@ html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label {
 .ai-tool-activity.is-done .ai-tool-activity-head {
   font-weight: 500;
   font-size: 11.5px;
-  color: #8a9691;
+  /* ★ 对比度：初版降重用 #8a9691，对白底仅 3.06:1 —— 低于 WCAG AA 的 4.5:1，
+     "低调"变成了"看不清"。改 #64736e = 4.98:1，达标且观感仍是次要信息。 */
+  color: #64736e;
   background: transparent;
-  padding: 1px 4px;
+  /* ★ 触摸热区：原 padding 1px 4px 实测整行仅 22px 高，移动端很难点中展开。
+     补到 32px（AA 建议的最小触摸目标尺寸）。 */
+  padding: 6px 4px;
+  min-height: 32px;
 }
 .ai-tool-activity.is-done .ai-tool-activity-head:hover { background: transparent; }
 [data-theme="dark"] .ai-tool-activity.is-done .ai-tool-activity-head { color: #7d8f89; }
