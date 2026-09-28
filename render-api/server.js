@@ -20887,19 +20887,41 @@ const AI_DEFAULT_CONFIG = {
     high_max_tool_rounds: 4,          // high 模式最大工具轮数
     require_history_injection: true   // 是否把 history 注入到 Planner/Worker/Synthesizer
   },
-  security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词  admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
+  // ★★ 2026-09-29 修复（admin 配置保存 500「保存失败」）：
+  //   提交 6ae00e15（09-14）把下面 admin_debug 整行并进了 security 行的行尾注释，
+  //   AI_DEFAULT_CONFIG 从此丢失 admin_debug key。后果（已本地实跑复现）：
+  //   ① 管理端保存必带 admin_debug 对象 → migrateConfig 里
+  //      safeAssignShallow(merged.admin_debug=undefined, …) 抛 TypeError
+  //      → /admin/ai-agent/config 恒 500，前端报「保存异常: 保存失败」；
+  //   ② 更隐蔽：getAiConfig() 读已落库配置同样要过 migrateConfig，同样抛错被
+  //      catch 吞掉 → 用户端 AI 配置（人设/欢迎语/模型设置）静默回退到默认值。
+  //   现把 admin_debug 恢复为独立 key（与 6ae00e15 之前一致）。
+  security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词
+  admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
 };
 
 // S-5/#17: 深拷贝后逐层合并，阻止 __proto__/constructor/prototype 原型污染键
+// ★ 2026-09-29 加固：target 缺失（如 defaults 漂移导致某子对象不存在）时初始化为
+//   空对象，而不是往 undefined 上赋值抛 TypeError——那次漂移曾让 /admin/ai-agent/
+//   config 恒 500、getAiConfig 静默回退默认配置（见 AI_DEFAULT_CONFIG.admin_debug 处注释）。
 function safeAssignShallow(target, source) {
+  if (!target || typeof target !== 'object') target = {};
   if (!source || typeof source !== 'object') return target;
   Object.keys(source).forEach(function(k) {
     if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
     target[k] = source[k];
   });
   return target;
+}
+
+// ★ 2026-09-29（admin 配置保存 500 修复的加固二）：defaults 漂移（某子对象缺失）
+//   时先补空对象再合并。仅靠 safeAssignShallow 的 target 兜底只能"不抛错"，
+//   字段会写进局部临时对象而静默丢失；这里保证合并结果真实落在 merged 上。
+function safeMergeInto(merged, key, source) {
+  if (!merged[key] || typeof merged[key] !== 'object') merged[key] = {};
+  return safeAssignShallow(merged[key], source);
 }
 
 // S-5: deep_think 数字上限 clamp —— 管理员可配置 max_tokens 不得超过 65536，
@@ -20931,21 +20953,21 @@ function migrateConfig(config) {
     if (k === 'version') return;
     if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
     if (k === 'reply_style' && typeof config.reply_style === 'object') {
-      safeAssignShallow(merged.reply_style, config.reply_style);
+      safeMergeInto(merged, 'reply_style', config.reply_style);
     } else if (k === 'roleplay' && typeof config.roleplay === 'object') {
-      safeAssignShallow(merged.roleplay, config.roleplay);
+      safeMergeInto(merged, 'roleplay', config.roleplay);
     } else if (k === 'output_rules' && typeof config.output_rules === 'object') {
-      safeAssignShallow(merged.output_rules, config.output_rules);
+      safeMergeInto(merged, 'output_rules', config.output_rules);
     } else if (k === 'search' && typeof config.search === 'object') {
-      safeAssignShallow(merged.search, config.search);
+      safeMergeInto(merged, 'search', config.search);
     } else if (k === 'model' && typeof config.model === 'object') {
-      safeAssignShallow(merged.model, config.model);
+      safeMergeInto(merged, 'model', config.model);
     } else if (k === 'deep_think' && typeof config.deep_think === 'object') {  // ★ P 新增
-      safeAssignShallow(merged.deep_think, clampDeepThinkNumbers(config.deep_think));
+      safeMergeInto(merged, 'deep_think', clampDeepThinkNumbers(config.deep_think));
     } else if (k === 'security' && typeof config.security === 'object') {
-      safeAssignShallow(merged.security, config.security);
+      safeMergeInto(merged, 'security', config.security);
     } else if (k === 'admin_debug' && typeof config.admin_debug === 'object') {
-      safeAssignShallow(merged.admin_debug, config.admin_debug);
+      safeMergeInto(merged, 'admin_debug', config.admin_debug);
     } else {
       merged[k] = config[k];
     }
