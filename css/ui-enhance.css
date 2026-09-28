@@ -557,7 +557,12 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-timeline {
   display: flex; flex-direction: column; gap: 2px; margin: 4px 0 8px;
   padding: 0; border: 0; border-radius: 0;
-  background: transparent; max-width: min(96%, 720px);
+  /* ★★ 2026-09-29 修复（审计报告 M 级「工具区与正文/页脚宽度对不齐」）：
+     原为 min(96%, 720px)，而正文气泡 .ai-msg-bubble 与页脚是 min(92%, 720px)
+     （css/ai-agent.css:400）。工具区被搬到正文下方后，两条右边界不同口径，
+     390px 视口下实测右边沿错开约 15px，看起来像"工具区单独凸出去一块"。
+     统一到 92%（与正文/页脚同一口径）。 */
+  background: transparent; max-width: min(92%, 720px);
 }
 .ai-tool-step { display: flex; gap: 10px; align-items: flex-start; }
 .ai-tool-step-icon { flex: 0 0 auto; width: 22px; text-align: center; line-height: 1.4; }
@@ -635,7 +640,16 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   border-radius: 50%;
   border: 1.6px solid rgba(47, 127, 158, .2);
   border-top-color: rgba(47, 127, 158, .9);
-  animation: xtjToolSpin .72s linear infinite;
+  /* ★★★ 2026-09-29 修复（审计报告 M 级「spinner 全靠 JS 收敛，CSS 零兜底」）：
+     原来是 `infinite` —— 停转**完全等价于** JS 给容器加上 is-done / is-error。
+     一旦流中断、后端少发一个 tool_result、或 updateToolActivity 抛错，
+     这个环就会一直转到用户离开页面（CHANGELOG 里"头永远在转圈"的形态）。
+     改为**限定圈数** 80：0.72s × 80 ≈ 58s 后自然停在 360°（= 停在起点角度，
+     视觉上就是一个静止的空心环，不会突兀）。
+     · 正常运行不受影响：一个工具调用通常在数秒内收敛，远不到 58s；
+     · 中断时 CSS 侧也能自愈：最多转 58s 就停，不再无限转；
+     · `both` 保证停在终帧（360°），不会在动画结束后弹回 0°。 */
+  animation: xtjToolSpin .72s linear 80 both;
 }
 .ai-tool-activity.is-done .ai-tool-activity-icon::before {
   content: '✓';
@@ -767,6 +781,21 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 }
 
 /* 只有“锁定”这一个动作，不需要视觉插值：auto 撑开阶段不干扰 0fr 的收拢动画 */
+/* ★★ 2026-09-29（审计报告 M 级「折叠动画用 height/min-height」）处置结论：
+   **保留现状，不重写为 scaleY / content-visibility**。理由（实测 + 规范）：
+     ① `height: auto → 0` 是**不可插值**的变更（min-height: auto → 0 同理：
+        本元素是 .ai-tool-activity 的 flex item，auto 解析为内容最小尺寸）。
+        Chromium 对此走**离散插值** —— 只在 50%（第 180ms）翻转一次，
+        **不是**逐帧重排；真正逐帧跑的是并行的 grid-template-rows 过渡
+        （那已是过渡未知高度的最省手段，且不可替换）。
+     ② 报告建议的 scaleY 替代**不可用**：scaleY(0) 只是视觉塌陷，布局高度
+        仍然保留 ⇒ 收起后会在正文下方留一条空洞（正是本次形态重构要避免的）；
+     ③ content-visibility:hidden 与现有 opacity 淡出 + 延迟锁语义重复，
+        且同样不可动画（离散），收益为 0、回归风险为正。
+   因此本条只做**说明性加固**：确认关键帧保持 from(height:auto) → to(height:0)
+   的离散翻转语义（ai-tool-activity-render-defects 的 D9 用例钉住了它）。
+   真正的并发压力来自同帧的 box-shadow 无限动画 —— 那部分已在本轮修掉
+   （xtjToolNodePulse 改为纯 opacity 合成，见 1163 行）。 */
 @keyframes xtjActivityLockHeight {
   from { height: auto; min-height: auto; }
   to { height: 0; min-height: 0; }
@@ -899,7 +928,9 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   border-radius: 50%;
   border: 1.7px solid rgba(47, 127, 158, .22);
   border-top-color: rgba(47, 127, 158, .95);
-  animation: xtjToolSpin .72s linear infinite;
+  /* ★ 2026-09-29（同上 S/M 级 spinner 兜底）：轮次摘要图标同样限定 80 圈
+     （≈58s）后自停，避免 JS 未收敛时永久旋转。 */
+  animation: xtjToolSpin .72s linear 80 both;
 }
 .ai-tool-round.is-done .ai-tool-round-icon::before {
   content: '✓';
@@ -926,6 +957,24 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   0%   { opacity: 0; transform: scale(.4); }
   60%  { opacity: 1; transform: scale(1.18); }
   100% { opacity: 1; transform: scale(1); }
+}
+/* ★★ 2026-09-29 修复（审计报告 M 级「spinner 全靠 JS 收敛」的第二道兜底）：
+   上面三个旋转环已经把 infinite 换成限定圈数（第一道兜底：CSS 自己会停）。
+   这里再补一道**终态强制只播一次**：
+     容器一旦带上 is-done / is-error，无论此刻 ::before 上挂的是落定动画
+     （xtjToolPop）还是因任何原因残留的旋转环，都只允许播 1 次。
+   · 正常路径下 xtjToolPop 本就是 1 次，本规则不改变观感；
+   · 异常路径（终态类已加但旋转环选择器仍命中）下，环最多再转一圈就停，
+     杜绝"已经完成却还在转圈"这一历史缺陷形态。
+   ★ 这里**不能**写 `animation: none !important` —— 那会把落定的 xtjToolPop
+     ✓ 缩放反馈一并杀掉（用户看不到"完成"的落定感）。只压 iteration-count。 */
+.ai-tool-activity.is-done .ai-tool-activity-icon::before,
+.ai-tool-activity.is-error .ai-tool-activity-icon::before,
+.ai-tool-round.is-done .ai-tool-round-icon::before,
+.ai-tool-round.is-error .ai-tool-round-icon::before,
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon::before,
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon::before {
+  animation-iteration-count: 1 !important;
 }
 /* 运行中标题的三点脉冲：比文字"搜索中…"更接近 Codex 的呼吸感 */
 .ai-tool-round-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1000,6 +1049,9 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   animation: xtjRoundLockHeight 360ms linear forwards, xtjRoundHideTrack 360ms linear forwards;
 }
 
+/* ★ 2026-09-29（审计报告 M 级）：与 xtjActivityLockHeight 同一处置结论 ——
+   height/min-height 的 auto→0 属离散插值，只在第 180ms 翻转一次，
+   保留现状（详见 783 行那组注释）。 */
 @keyframes xtjRoundLockHeight {
   from { height: auto; min-height: auto; }
   to { height: 0; min-height: 0; }
@@ -1143,6 +1195,14 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
 .ai-tool-round-list .ai-tool-step.is-running::after {
   background: #2f7f9e;
   border-color: #2f7f9e;
+  /* ★★ 2026-09-29 修复（审计报告 M 级「box-shadow 无限动画无法合成」）：
+     这里原本让 xtjToolNodePulse 逐帧插值 **box-shadow** —— box-shadow 不是
+     可合成属性，每帧都要重绘（并行 N 个工具就是 N 条重绘流，与折叠的
+     height 动画同帧触发完整布局，实测 5 条并行时并发 infinite 到 ~13 个）。
+     改为：**光晕静态预置**（下面这行 box-shadow 一次性画好），动画只插值
+     **opacity**（纯合成属性，走 GPU，不触发重排/重绘）。
+     额外收益：深色主题（1508 行）可以直接覆盖静态 box-shadow 的配色，
+     不再被关键帧里的浅色硬编码 box-shadow 顶掉。 */
   box-shadow: 0 0 0 3px rgba(47, 127, 158, .16), 0 0 7px rgba(47, 127, 158, .4);
   animation: xtjToolNodePulse 2.4s ease-in-out infinite;
 }
@@ -1160,9 +1220,13 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   box-shadow: none;
   animation: none;
 }
+/* ★ 2026-09-29（同上）：关键帧只插值 opacity —— 光晕的**形状**交给元素上
+   那条静态 box-shadow 声明（含深色主题覆盖），这里只做明暗呼吸。
+   原实现在关键帧里插值 box-shadow 半径（3px→4px / 7px→10px），既不可合成，
+   又把浅色硬编码写死在关键帧里，深色主题覆盖不到。 */
 @keyframes xtjToolNodePulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(47, 127, 158, .16), 0 0 7px rgba(47, 127, 158, .4); }
-  50%      { box-shadow: 0 0 0 4px rgba(47, 127, 158, .1), 0 0 10px rgba(47, 127, 158, .55); }
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .62; }
 }
 @keyframes xtjToolIconBreath {
   0%, 100% { opacity: .55; }
@@ -1358,6 +1422,26 @@ html[data-xtj-motion="off"] *::after {
 }
 html[data-xtj-motion="weak"] .xtj-heart-particle,
 html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
+/* ★★★ 2026-09-29 修复（审计报告 M 级「weak 无全局降级」）：
+   现象：站内"弱动效"开关对 AI 面板基本无效 —— off 有上面那条全局收敛，
+   weak 却只显式关掉了粒子/彩带与工具区那几条；css/ai-agent.css 全文仅
+   3653-3654 两行涉及 data-xtj-motion，深度思考族（dt-sparkle-wiggle /
+   dt-soft-float / dt-dot-breathe）、进度卡（progress-shimmer）、语音脉冲
+   （ai-voice-pulse）、猫头像呼吸/发光/眨眼全部照常 infinite 循环。
+   根因：历史上只给 off 写了全局兜底，weak 没有对应物；而 ai-agent.css 是
+   后加载的模块样式，从未纳入开关体系。
+   修法：**不彻底关动画**（那和 off 就没区别了），改为把周期压到 400ms 且
+   **只播一次** —— 保留"有反馈"的手感，去掉"永远在动"的负担。
+   ★ 必须用 !important：ai-agent.min.css 是运行时动态注入、顺序在 ui-enhance
+   之后；同为作者样式时，!important 声明优先于普通声明（与上面 off 那组同理）。
+   ★ 不影响一次性动画的观感：进入/落定类动画本就是 1 次、时长数百毫秒，
+     这里只是把超过 400ms 的收敛到 400ms。 */
+html[data-xtj-motion="weak"] *,
+html[data-xtj-motion="weak"] *::before,
+html[data-xtj-motion="weak"] *::after {
+  animation-duration: .4s !important;
+  animation-iteration-count: 1 !important;
+}
 
 /* ── 2026-09-22 Codex 化收尾：整理中占位 + 深色主题配色 ──────────────── */
 
@@ -1417,7 +1501,10 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
   border-radius: 50%;
   border: 1.5px solid rgba(91, 151, 131, .22);
   border-top-color: rgba(91, 151, 131, .9);
-  animation: xtjToolSpin 1.1s linear infinite;
+  /* ★ 2026-09-29（同上 spinner 兜底）：1.1s × 40 ≈ 44s 后自停。
+     该占位目前被 1700 行 display:none 屏蔽（不渲染），但状态机仍在：
+     一旦恢复显示，同样不能依赖 JS 收敛才能停。 */
+  animation: xtjToolSpin 1.1s linear 40 both;
 }
 .ai-tool-step.ai-tool-organizing .ai-tool-step-body {
   display: flex;
@@ -1591,7 +1678,20 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 
 /* ── 2) 运行中的步骤：左侧光条改为「向下流动的液柱」 ────────────────────
    旧实现 xtjToolGlow 是 2.4s 的整体明暗呼吸（没有方向感）。
-   改为渐变位置持续下移，视觉上像液体在管里往下淌。 */
+   改为渐变位置持续下移，视觉上像液体在管里往下淌。
+
+   ⚠️⚠️ 2026-09-29 审计报告 M 级：整段是**死代码，从未上过屏**，请勿继续依赖。
+   现象：`.ai-tool-round-list .ai-tool-step.is-running::before` 这个**同一
+   选择器**在 1093 行被 `display: none`（当时的注释：单行条目不再需要左侧
+   粗光晕）；本段后来只补了 background 与 animation，**忘了恢复 display**。
+   两条规则优先级相同，1093 在前但 display:none 不被本段覆盖 ⇒
+   Chromium 实测 display = none、animation-name = xtjToolFlowDown，
+   而 document.getAnimations() **不含该动画** —— 它从未渲染过一帧。
+   目前运行中的条目只剩 ::after 导轨节点那一个脉动信号（见 1143 行）。
+   处置：**按决策要求只做标注，不删除**。两份候选方案留待产品决策——
+     ① 直接删除本段与下方 @keyframes xtjToolFlowDown（省一份死代码）；
+     ② 若确要液柱，改挂到导轨节点的兄弟伪元素或 .ai-tool-round-list::before，
+        并显式 display: block（否则仍会被 1093 行压掉）。 */
 .ai-tool-round-list .ai-tool-step.is-running::before {
   background: linear-gradient(
     180deg,
@@ -1622,14 +1722,30 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
    旧光标是一根 2px 硬竖线在呼吸，太"电报灯"。
    改为：竖线 + 一圈柔和外发光，发光随时间缓慢脉动；
    竖线本身保持清晰（保证可读性），光晕负责流动感。 */
-.ai-stream-cursor {
-  width: 2px;
-  border-radius: 1px;
-  background: var(--primary);
-  box-shadow: 0 0 0 2px rgba(66, 155, 122, 0.14);
-  animation:
-    ai-cursor-breathe 1.15s ease-in-out infinite,
-    ai-cursor-halo 1.9s ease-in-out infinite;
+/* ★★★ 2026-09-29 修复（审计报告 L 级「.ai-stream-cursor 双定义互相覆盖」）：
+   同一个组件在「模块样式」css/ai-agent.css:6912 与「增强样式」本文件各写一遍，
+   两边同优先级（各 1 个类），胜负**只由加载顺序决定**：
+     ai-agent.min.css 是运行时按 meta[xtj-module-ai-style] 动态注入的，
+     后于 ui-enhance.min.css ⇒ 生效的一直是 ai-agent 那套 ai-cursor-flow
+     （background-position 流动渐变）。
+   后果：本文件的 ai-cursor-breathe + ai-cursor-halo **从未执行**，但
+   `box-shadow: 0 0 0 2px …` 与 `border-radius` 未被覆盖仍然生效 ——
+   留下一个与流动渐变叠加的**静态光晕圈**（两套房叠在一起的视觉噪音），
+   同时 ai-cursor-halo 这条逐帧插值 box-shadow 的 infinite 动画白挂着。
+   修法：把本套降级为**@supports 回退** —— 仅在不支持 color-mix 的老引擎上
+   生效（那正是 ai-agent.css 自己把光标退回纯色的同一条件，见其 6934 行），
+   老引擎于是仍能拿到"柔和呼吸 + 外发光"；现代引擎只跑 ai-agent 那套流动
+   渐变，不再有双份定义与残留静态光晕。 */
+@supports not (background: color-mix(in srgb, red 50%, transparent)) {
+  .ai-stream-cursor {
+    width: 2px;
+    border-radius: 1px;
+    background: var(--primary);
+    box-shadow: 0 0 0 2px rgba(66, 155, 122, 0.14);
+    animation:
+      ai-cursor-breathe 1.15s ease-in-out infinite,
+      ai-cursor-halo 1.9s ease-in-out infinite;
+  }
 }
 @keyframes ai-cursor-halo {
   0%, 100% { box-shadow: 0 0 0 1.5px rgba(66, 155, 122, 0.10); }
@@ -1650,7 +1766,17 @@ html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
 }
 .ai-streaming-soft .ai-stream-soft {
   animation: xtjBlockRise .22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-  will-change: opacity, transform;
+  /* ★★★ 2026-09-29 修复（审计报告 S 级「图层 churn」）：
+     这里原本常驻 `will-change: opacity, transform`。而 .ai-stream-soft 是
+     renderMarkdown 在流式期间把**尾部文本残余**包出来的节点，增量补丁走
+     replaceChild —— **每个 chunk 都是全新节点**。于是每秒十几次地：
+       新建合成层 → 播放 220ms 动画 → 节点被丢弃 → 层被销毁。
+     常驻 will-change 把每一次重建都强制提升为独立合成层，层数随吐字频率
+     线性抖动（低端机上直接表现为掉帧），而它带来的收益极小：
+     动画只有 220ms 且只做 opacity + 3px 位移，浏览器本就会在动画期间
+     自动提层。去掉常驻 will-change 后，提层只在动画真正播放的那一小段
+     时间发生，节点丢弃即释放，不再有常驻残留。
+     ★ 不要在高频重建的节点上写常驻 will-change（这是本条的通用结论）。 */
 }
 
 /* ── 6) 无障碍降级：所有流动动画必须能被彻底停掉 ────────────────────────
@@ -1716,5 +1842,69 @@ html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label {
 .ai-tool-activity.is-done .ai-tool-activity-head:hover { background: transparent; }
 [data-theme="dark"] .ai-tool-activity.is-done .ai-tool-activity-head { color: #7d8f89; }
 
-/* ③ 工具区被搬到正文**下方**后，与正文之间留一点呼吸，避免贴着正文尾巴 */
-.ai-msg-bubble + .ai-tool-timeline { margin-top: 9px; }
+/* ③ 工具区被搬到正文**下方**后，与正文之间留一点呼吸，避免贴着正文尾巴
+   ★★ 2026-09-29 修复（审计报告 M 级「下间距对不齐 / margin-bottom 被压成 0」）：
+     原规则只写了 `margin-top: 9px`，而 .ai-tool-timeline 同时带 .ai-tool-status
+     （见 ai-agent.js: class 'ai-tool-timeline ai-tool-status'），后者
+     `margin: 2px 0 0`（css/ai-agent.css:3660）把 **margin-bottom 打成 0** ——
+     实测工具摘要下方与 .ai-msg-footer（margin-top:3px）只隔 3px，下边缘贴死。
+     修法：**连同 margin-bottom 一起写**（margin: 9px 0 6px），
+     而不是只写 margin-top。
+     ★ 优先级说明：本选择器是 2 个类，`.ai-tool-status` 只有 1 个类，
+       因此本规则胜出 —— 不需要去改 ai-agent.css:3660 那条**共享**状态行样式
+       （.ai-enhanced-status / .ai-search-supplement 也用它，改了会波及别处）。 */
+.ai-msg-bubble + .ai-tool-timeline { margin: 9px 0 6px; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   ★ 2026-09-29 工具活动区移动端断点（审计报告 M 级「零移动端断点」）
+   现象：css/ui-enhance.css 全文原本**零个** @media (max-width:…)
+   （对照 css/ai-agent.css 在 944/2728/3054/5718/6089/6399/7297/8261/8269
+     都有断点）。活动区摘要 11px、轮次 12px、条目 12.5px、详情 11.5px，
+   以及 min-height 20/22px、`.ai-tool-round-list` 的 margin-left:9px +
+   padding-left:10px、节点 ::after 的 left:-14px，在 320~390px 屏上与桌面
+   完全同值 —— 小屏上字号偏小、热区偏矮，且 -14px 的负偏移距容器左沿仅
+   ~10px，父级横向 padding 一变就可能被裁切。
+   修法（**只做字号与缩进微调，不重排布局**）：
+     ① 字号整体 +1px，保持 活动区(12) < 轮次(13) < 条目(13.5) 的三级梯度
+        （有合同测试钉住这个严格小于关系，见 ai-tool-activity-shell-contract）；
+     ② 摘要行热区补到 32px（AA 最小触摸目标），与完成态摘要行口径一致；
+     ③ 导轨缩进收到 margin-left:6px + padding-left:8px，**同步重算节点 left**。
+   断点取 480px：与 ai-agent.css:8269 既有的 480px 断点同一口径。
+   ══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  /* ① 三级字号梯度整体上移一档（层级关系不变：12 < 13 < 13.5） */
+  .ai-tool-activity-head { font-size: 12px; }
+  .ai-tool-activity .ai-tool-round-head { font-size: 13px; }
+  .ai-tool-round-head { font-size: 13px; }
+  .ai-tool-round-list .ai-tool-step-title { font-size: 13.5px; }
+  .ai-tool-round-list .ai-tool-step-detail { font-size: 12.5px; }
+  .ai-tool-round-list .ai-tool-step-status { font-size: 12px; }
+  .ai-tool-step-detail { font-size: 13px; }
+  .ai-tool-step-status { font-size: 12px; }
+  .ai-tool-step.ai-tool-organizing .ai-tool-step-title { font-size: 13.5px; }
+  .ai-tool-step.ai-tool-organizing .ai-tool-step-status { font-size: 12px; }
+
+  /* ② 摘要行触摸热区：20px → 32px（AA 建议的最小触摸目标尺寸）。
+       用 min-height 撑（不改 padding），避免动到折叠高度计算。 */
+  .ai-tool-activity-head { min-height: 32px; }
+
+  /* ③ 导轨缩进收紧：margin-left 9→6、padding-left 10→8，
+       给窄屏多让出 5px 横向空间，降低节点被裁切的风险。 */
+  .ai-tool-round-list {
+    margin-left: 6px;
+    padding-left: 8px;
+  }
+  /* ★ 节点 left 必须跟随上面的缩进**同步重算**（原注释已写明）：
+       step 左边缘距 list 左外沿 = border 1.5 + padding 8 = 9.5px；
+       导轨线中心在距 list 左外沿 0.75px 处；
+       ⇒ 导轨中心在 step 左边缘左侧 9.5 - 0.75 = 8.75px 处；
+       节点总宽 8px（半径 4）⇒ left = -(8.75 + 4) = -12.75px，取 -13px。 */
+  .ai-tool-round-list .ai-tool-step::after { left: -13px; }
+  /* 「整理中」占位沿用同一套缩进（它要与条目左边缘对齐，见 1378 行注释） */
+  .ai-tool-activity-body > .ai-tool-step.ai-tool-organizing {
+    margin-left: 6px;
+    padding-left: 8px;
+  }
+  /* 小屏上 detail 的 46ch 上限会把查询词压得比标题还窄，放宽到 60ch */
+  .ai-tool-round-list .ai-tool-step-detail { max-width: 60ch; }
+}
