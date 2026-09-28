@@ -35,7 +35,9 @@
   var LS_THINK = 'xtj_code_think';
   var LS_SPLIT = 'xtj_code_split';
 
-  var DEFAULT_MODEL = 'deepseek-v4-flash-vision-exp';
+  // ★ 2026-09-11 模型升级：deepseek-flash 即 DeepSeek-V4.1-Flash（GA 2026-09-10），
+  //   旧 ID deepseek-v4-flash-vision-exp 已下线（后端仍会归一化兜底，但默认值直接用新 ID）
+  var DEFAULT_MODEL = 'deepseek-flash';
   var DEFAULT_THINK = 'high'; // 默认开启深度思考（与主站档位一致）
   var THINK_LEVELS = [
     { id: 'off',    label: '关闭' },
@@ -45,7 +47,7 @@
     { id: 'max',    label: '极致' }
   ];
   var BUILTIN_MODELS = [
-    { id: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash（内置）' },
+    { id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash（内置）' },
     { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro（内置）' }
   ];
   var CUSTOM_MODELS_KEY = 'xtj_ai_custom_models';
@@ -317,7 +319,18 @@
     safeSessionRemove(LS_TOKEN);
     safeStorageRemove(LS_TOKEN);
   }
-  function loadModel() { return storageGet(LS_MODEL) || DEFAULT_MODEL; }
+  // 兼容别名：历史存量 localStorage 里的旧模型 ID 统一收敛到当前 ID（与后端迁移表一致）
+  var LEGACY_MODEL_ALIASES = {
+    'deepseek-v4-flash-vision-exp': 'deepseek-flash',
+    'deepseek-v4-flash': 'deepseek-flash',
+    'deepseek-v4.1-flash': 'deepseek-flash',
+    'deepseek-chat': 'deepseek-flash',
+    'deepseek-reasoner': 'deepseek-flash'
+  };
+  function loadModel() {
+    var m = storageGet(LS_MODEL) || '';
+    return LEGACY_MODEL_ALIASES[m] || m || DEFAULT_MODEL;
+  }
   function saveModel(m) { storageSet(LS_MODEL, m); }
   // M54：聊天历史改为“内存数组优先 + 写入前合并去重”。原实现每次全量读改写
   // localStorage 且无锁，多标签页各自保存会相互整段覆盖；现内存缓存做单页主副本，
