@@ -2625,6 +2625,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     search_web: 1, tavily_search: 1, read_web_page: 1,
     web_extract: 1, extract_links: 1, page_meta: 1, search_social: 1
   };
+  // ★ count 语义**可当作"网页/结果条数"**的那一小撮。
+  //   协议侧确证：后端 9 处 tool_result 的 count 语义并不统一 ——
+  //   extract_links 是链接数、*_table 是行数、read_web_page 恒为 1。
+  //   把它们混加进「已搜索 N 个网页」会得到一个似是而非的数字，
+  //   所以只有真正的检索引擎结果才参与网页计数。
+  var TOOL_WEBSEARCH_KINDS = { search_web: 1, tavily_search: 1, search_social: 1 };
   function toolDoneLabel(name) {
     var key = String(name || '');
     return TOOL_DONE_LABELS[key] || toolLabel(key);
@@ -2656,8 +2662,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (searchKinds > 0 && otherKinds === 0) {
       var n = Number(activity && activity.__searchCount || 0);
       // 后端多数 tool_result 带 count；拿不到条数时不硬编数字，退化成无数量措辞
+      // ★ 只有拿到真实条数才报数字。绝不能用"工具种数"冒充 ——
+      //   那会凭空造出「已搜索 2 个网页」这种数字（实际可能一个网页都没有）。
       if (n > 0) return '已搜索 ' + n + ' 个网页';
-      return searchKinds > 1 ? ('已搜索 ' + searchKinds + ' 个网页') : '已搜索网页';
+      return '已搜索网页';
     }
     // 只有一种非检索工具：「已调用天气工具」/「已调用 PDF 工具」
     if (otherKinds === 1 && searchKinds === 0) {
@@ -2828,6 +2836,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (label) label.textContent = doneText;
       // count 位清空：不再显示"用时"，也不显示"N/M 完成"这类过程计数
       if (count) count.textContent = '';
+      // ★ 补搬（对应上面①）：正文先到时 content 分支搬了个寂寞（工具区尚未创建），
+      //   这里在"工具刚刚全部收敛"这个时机再问一次 —— 此时正文已在，理应归位到下方。
+      //   moveToolAreaBelowBubble 是幂等的，重复调用无副作用。
+      try {
+        var _host = (activity.closest && activity.closest('.ai-msg')) || null;
+        if (!_host) {
+          var _p = activity.parentNode;
+          while (_p && _p !== document.body && _p.querySelector && !_p.querySelector('.ai-msg-bubble')) _p = _p.parentNode;
+          _host = _p;
+        }
+        if (_host && _host.querySelector) moveToolAreaBelowBubble(_host);
+      } catch (eMoveLate) {}
     } else {
       // ★ 2026-09-28 修复（多轮/补搜场景"用时"显示的是**第一轮**的耗时）：
       //   原 __elapsedMs 首次收敛后就锁死、__startedAt 也从不复位。但工具可以
@@ -2983,9 +3003,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       else roundBox.classList.remove('is-error');
       if (icon) icon.textContent = failed > 0 ? '⚠️' : '✅';
       if (label) {
+        // ★ 2026-09-29：轮次摘要同步去掉"已完成 N 个工具"的横幅措辞（用户嫌丑）。
+        //   活动区 head 已改极简，轮次里若还写着"已完成 N 个工具"，展开明细
+        //   照样是一句横幅。展开区只需中性计数，成败交给图标与各条目自身表达。
         label.textContent = failed > 0
-          ? (total + ' 个工具已完成（' + failed + ' 个失败）')
-          : (total > 1 ? ('已完成 ' + total + ' 个工具') : '工具调用完成');
+          ? (total + ' 个工具（' + failed + ' 个失败）')
+          : (total + ' 个工具');
       }
       if (count) count.textContent = '';
     } else {
@@ -3298,21 +3321,65 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //     · 结果摘要挪到正文**下方**一行（"已搜索 3 个网页 ▾"，可展开看明细）
   //   时机选在**正文首字到达**：此刻"过程"结束、"结果"才开始有意义。
   //   纯工具失败/无正文的回复不移动 —— 那种情况下用户正需要看见发生了什么。
+  // 找最近的真正可滚动祖先（用于搬移后的滚动锚定补偿）
+  function findScrollParent(el) {
+    var p = el && el.parentNode;
+    while (p && p !== document.body && p !== document.documentElement && p.getBoundingClientRect) {
+      var oy = '';
+      try { oy = String(getComputedStyle(p).overflowY || ''); } catch (eOy) {}
+      if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight + 1) return p;
+      p = p.parentNode;
+    }
+    return null;
+  }
+
   function moveToolAreaBelowBubble(node) {
-    if (!node || node.__toolAreaMoved) return;
+    if (!node) return;
     var bubble = node.querySelector('.ai-msg-bubble');
     if (!bubble || !bubble.parentNode) return;
+    // ① 正文必须**真的开始了**（气泡里有内容）。
+    //    ★ 修复（协议侧确证）：后端存在 content 早于工具事件的确定性路径
+    //      （server.js 22566/22616 先推 narration content，工具事件随后）。
+    //      旧实现用一次性标志 __toolAreaMoved，正文先到时把标志提前消耗掉，
+    //      之后才建起来的工具区就**永久停在正文上方** —— 正是用户要消灭的形态。
+    //      改为幂等：不记"搬过"，只问"当下该不该在下面"。
+    var hasText = false;
+    try { hasText = String(bubble.textContent || '').trim().length > 0; } catch (eTxt) {}
+    if (!hasText) return;
     var timelines = node.querySelectorAll('.ai-tool-timeline');
     for (var i = 0; i < timelines.length; i++) {
       var tl = timelines[i];
       if (!tl || !tl.parentNode) continue;
-      // 只搬"当前排在正文之前"的（DOCUMENT_POSITION_FOLLOWING 表示 bubble 在其后）
-      var follows = false;
-      try { follows = !!(tl.compareDocumentPosition(bubble) & 4); } catch (eCmp) { follows = false; }
-      if (!follows) continue;
-      try { bubble.parentNode.insertBefore(tl, bubble.nextSibling); } catch (eMove) {}
+      // ② 仍在跑的工具留在正文**上方** —— 那是过程流，用户此刻正盯着看
+      try { if (tl.querySelector('.is-running')) continue; } catch (eRun) {}
+      // ③ 幂等：已经在正文之后就不再动（避免每个 content chunk 都做一次 DOM 搬移）
+      var alreadyAfter = false;
+      try { alreadyAfter = !!(bubble.compareDocumentPosition(tl) & 4); }
+      catch (eCmp) { alreadyAfter = (bubble.nextElementSibling === tl); }
+      if (alreadyAfter) continue;
+      // ④ ★ 滚动锚定补偿：工具区从正文上方消失、又在下方出现，正文整体往上一跳
+      //    （Chromium 实测：85px 高的 timeline 造成气泡上跳 87px，且常与思考面板
+      //     收起同帧叠加 —— 用户正在读正文开头却被拽走）。
+      //    移动前后各量一次气泡的视口位置，把差值补回滚动条，视觉上正文纹丝不动。
+      var scroller = findScrollParent(bubble);
+      var beforeTop = 0;
+      try { beforeTop = bubble.getBoundingClientRect().top; } catch (eRect) {}
+      try { bubble.parentNode.insertBefore(tl, bubble.nextSibling); } catch (eMove) { continue; }
+      if (scroller) {
+        var afterTop = beforeTop;
+        try { afterTop = bubble.getBoundingClientRect().top; } catch (eRect2) {}
+        var delta = afterTop - beforeTop;
+        if (delta) {
+          try {
+            if (scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body) {
+              window.scrollBy(0, delta);
+            } else {
+              scroller.scrollTop += delta;
+            }
+          } catch (eScroll) {}
+        }
+      }
     }
-    node.__toolAreaMoved = true;
   }
 
   function settleUnusedEarlyThinkingNode(target) {
@@ -9702,7 +9769,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   { type:'tool_result', tool_name, success, count }）。
             //   同一工具会被重复推送（先 count、后带 items），故按**条目**去重：
             //   每个 step 只贡献一次，多条目相加 = 本次检索拿到的网页总数。
-            if (matchStep && TOOL_SEARCH_KINDS[String(evt.tool_name || '')]) {
+            if (matchStep && TOOL_WEBSEARCH_KINDS[String(evt.tool_name || '')]) {
               try {
                 var _c = Number(evt.count || 0);
                 if (_c > 0 && !matchStep.__counted) {
