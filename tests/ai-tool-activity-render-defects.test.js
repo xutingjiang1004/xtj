@@ -43,6 +43,21 @@ function block(src, anchor, size) {
   return src.slice(start, start + size);
 }
 
+/** 按花括号配平取**完整函数体**（从 anchor 处的左花括号起）。
+ *  ★ 2026-09-28 引入：此前多处用 `slice(start, start+N)` 取固定长度片段，
+ *    一旦往函数里加注释或分支，尾部的字面量就被挤出窗口，
+ *    导致"其实没坏"却被判失败（误报（本次修复连踩两次））。
+ *    合同测试应该断言"函数体里有没有"，而不是"前 N 个字符里有没有"。 */
+function balancedBody(src, startIdx) {
+  let depth = 0;
+  let i = src.indexOf('{', startIdx);
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(startIdx, i + 1); }
+  }
+  return src.slice(startIdx);
+}
+
 /** 与 CSS 版一致：断言"代码行为"时必须先剥掉注释，
  *  否则修复说明里提到的旧代码（如 `toolBar2.appendChild(resultCard)`）
  *  会被误判为"缺陷仍然存在"。
@@ -109,8 +124,13 @@ test('D1：活动区 body 的 grid item 必须显式 min-height:0（否则 0fr �
 test('D2：轮次收起后必须隐藏导轨线（border 不随高度归零，会留一条悬空竖线）', function () {
   const collapsed = rule(css, '.ai-tool-round.is-collapsed .ai-tool-round-list-wrap');
   assert.match(collapsed, /grid-template-rows:\s*0fr/, '收起态必须是 0fr');
-  assert.match(collapsed, /visibility:\s*hidden/,
-    '收起态必须 visibility:hidden，否则 list 的 border-left 会画出一条悬空竖线');
+  // ★ 2026-09-28 更新：visibility 不再写在规则里（立即隐藏会让导轨线在内容淡出前先消失，
+  //   出现"线先没、字后没"的割裂感），改由 xtjRoundHideTrack 关键帧延后到 180ms 施加。
+  //   契约不变：收起完成后导轨线必须不可见。
+  assert.match(collapsed, /animation:[^;]*xtjRoundHideTrack/,
+    '导轨线必须由 xtjRoundHideTrack 延后隐藏，否则 list 的 border-left 会画出一条悬空竖线');
+  const kf = css.match(/@keyframes\s+xtjRoundHideTrack\s*\{[^@]*?from\s*\{[^}]*visibility:\s*visible[^}]*\}\s*to\s*\{[^}]*visibility:\s*hidden[^}]*\}/);
+  assert.ok(kf, 'xtjRoundHideTrack 关键帧必须 visible → hidden（收起后导轨线不可见）');
 });
 
 // ── D3: 三层摘要重复必须被收敛 ──────────────────────────────────────────
@@ -127,7 +147,18 @@ test('D3：单轮场景下运行中的轮次摘要行也要隐藏（避免同义
 });
 
 test('D3：活动区头在"整理中"期间只说状态，不重复占位的动作描述', function () {
-  const fn = block(aiAgent, 'function updateToolActivity(activity) {', 5200);
+  // ★ 2026-09-28：原实现用 block() 截固定 5200 字符，函数体一变长就漏掉后面的
+  //   字面量（改中间逻辑时误报过一次）。改为花括号配平取**完整函数体**。
+  const anchor = 'function updateToolActivity(activity) {';
+  const start = aiAgent.indexOf(anchor);
+  assert.notEqual(start, -1, 'updateToolActivity 必须存在');
+  let depth = 0, i = aiAgent.indexOf('{', start), end = -1;
+  for (; i < aiAgent.length; i++) {
+    if (aiAgent[i] === '{') depth++;
+    else if (aiAgent[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  assert.notEqual(end, -1, 'updateToolActivity 花括号未配平');
+  const fn = aiAgent.slice(start, end + 1);
   assert.doesNotMatch(fn, /'正在整理结果'/,
     '活动区头不得再写"正在整理结果"——具体动作由"整理检索结果并作答"占位承载，'
     + '两行都说"整理"就是同义反复（真实渲染里是上下两行同一件事）');
@@ -455,20 +486,31 @@ test('E4：toolLabel 的每个调用点都必须看得到定义（产物同名�
 //   ③ 用户三次报障「他竟然整理好了，不应该把整理中三个字变成整理完成吗」
 //      → 占位落定文案「整理中」必须原位变「整理完成」。
 
-test('D9：活动区 body 收起态必须 height:0 锁死（确定性收法）', function () {
+test('D9：活动区 body 收起态必须把 height 锁到 0（且不半路改回 !important）', function () {
   const m = css.match(/\.ai-tool-activity\.is-collapsed \.ai-tool-activity-body\s*\{[^}]*\}/);
   assert.ok(m, '规则 .ai-tool-activity.is-collapsed .ai-tool-activity-body 必须存在');
-  assert.match(m[0], /height:\s*0\s*!important/,
-    '收起态必须 height:0 !important —— 0fr 最终态会被嵌套内容的 min-content 链条顶开（实测残留 62px）');
-  assert.match(m[0], /min-height:\s*0\s*!important/, 'min-height 必须同步锁 0');
+  assert.match(m[0], /height:\s*0/,
+    '收起态最终必须 height:0 —— 0fr 的最小值是 minmax(auto,0fr)，实测只收到 49px 就压不动');
+  assert.match(m[0], /animation:\s*[\w-]*LockHeight\s+360ms\s+linear\s+forwards/,
+    '高度锁必须由延迟关键帧施加：0~180ms 走 0fr 平滑收拢，180ms 后才归零（第二阶段）');
+  // ★ 反断言：写回 !important 会让动画失效、退回 0ms 立即归零（收起硬跳）
+  assert.doesNotMatch(m[0], /height:\s*0\s*!important/,
+    '★ !important 声明胜过 animation —— 一旦写上，延迟锁失效、收起退回瞬间跳到 0（实测踩过）');
   assert.match(m[0], /pointer-events:\s*none/, '收起态不得参与命中测试（看不见但能点到）');
+  assert.match(css, /@keyframes\s+xtjActivityLockHeight\s*\{\s*from\s*\{[^}]*height:\s*auto[^}]*\}\s*to\s*\{[^}]*height:\s*0/,
+    '必须存在 xtjActivityLockHeight 关键帧，且 from(height:auto) → to(height:0) 构成离散插值延迟');
 });
 
-test('D10：单轮 list-wrap 收起态必须 height:0 锁死（与 D9 同一修法）', function () {
+test('D10：单轮 list-wrap 收起态同样走延迟锁，且导轨线延后隐藏', function () {
   const m = css.match(/\.ai-tool-round\.is-collapsed \.ai-tool-round-list-wrap\s*\{[^}]*\}/);
   assert.ok(m, '规则 .ai-tool-round.is-collapsed .ai-tool-round-list-wrap 必须存在');
-  assert.match(m[0], /height:\s*0\s*!important/, '收起态必须 height:0 !important');
-  assert.match(m[0], /visibility:\s*hidden/, '导轨线必须随收起隐藏（border 不随高度归零）');
+  assert.match(m[0], /height:\s*0/, '收起态最终必须 height:0');
+  assert.match(m[0], /animation:[^;]*xtjRoundLockHeight/, '高度锁必须走 xtjRoundLockHeight 延迟关键帧');
+  assert.match(m[0], /animation:[^;]*xtjRoundHideTrack/, '导轨线必须走 xtjRoundHideTrack 延迟隐藏');
+  assert.doesNotMatch(m[0], /height:\s*0\s*!important/, '同样禁止 !important（会压掉动画）');
+  // ★ 立即 visibility:hidden 会让导轨线在内容淡出前先消失（割裂感）
+  assert.doesNotMatch(m[0], /^\s*visibility:\s*hidden;/m,
+    '★ 不得立即 visibility:hidden —— 内容还在淡出导轨线就没了，visibility 必须交给延迟关键帧');
 });
 
 test('D11：活动区多轮间距必须由 row-gap 承担（margin 顶开轨道回归防护）', function () {
@@ -503,4 +545,79 @@ test('R1：「整理中」占位落定文案必须是「整理完成」（原位
     '落定文案必须是「整理完成」—— 用户报障原话：他竟然整理好了，不应该把整理中三个字变成整理完成吗');
   assert.match(body, /'整理失败'/, '失败落定文案必须是「整理失败」');
   assert.doesNotMatch(body, /=\s*ok\s*\?\s*'完成'/, '不得回落到裸「完成」（对用户而言叙事不闭合）');
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 2026-09-28 第三轮守卫：工具事件认领 / 失败态 / 计时 / 思考占位回收
+
+test('S1：tool_pending 不得复活已终态或已认领的同名条目', function () {
+  const src = stripJsComments(aiAgent);
+  const start = src.indexOf("if (evt.type === 'tool_pending') {");
+  assert.notEqual(start, -1, 'tool_pending 分支必须存在');
+  const seg = src.slice(start, start + 2600);
+  // 必有：候选排除已终态 + 排除已认领
+  assert.match(seg, /classList\.contains\('is-running'\)\)\s*continue/,
+    '复用候选必须排除已终态条目 —— 否则「北京和上海天气」会把已完成的那条复活成"搜索中"');
+  assert.match(seg, /data-tool-claimed'\)\s*===\s*'1'\)\s*continue/,
+    '复用候选必须排除已被结果认领的条目（claimed 条目不清理标记会永久无人收敛）');
+  // 反向：不得再回到"第一条匹配"的老写法
+  assert.doesNotMatch(seg, /querySelector\('\[data-tool-name="' \+ pendName/,
+    '禁用文档序第一条匹配：后端时序 tool_calls→pending→result，第二条 pending 会命中第一条');
+  assert.match(seg, /_pendCands\.length - 1/, '候选应从后往前取（后追加的属于更新的轮次）');
+});
+
+test('M6：tool_error 不得使用 :last-of-type 找轮次', function () {
+  const src = stripJsComments(aiAgent);
+  const start = src.indexOf("if (evt.type === 'tool_error') {");
+  assert.notEqual(start, -1, 'tool_error 分支必须存在');
+  // ★ 收窄到分支体内部断言：全仓 grep 会发现 is-running:last-of-type 仍出现在
+  //   「解释为什么不用」的 // 注释里（合法文档），不能让注释误触发 doesNotMatch。
+  const branch = balancedBody(src, start);
+  // ★ 只查"真作为选择器调用"的用法：分支内有注释把错误写法 '...is-running:last-of-type'
+  //   当示例字符串包起来，纯字串匹配会误报，必须收窄到 querySelector(...) 调用内。
+  assert.doesNotMatch(branch, /querySelector(?:All)?\([^)]*:last-of-type/,
+    ':last-of-type 语义错误（只按标签算、无视 class）—— 会漏掉已有轮次而新建孤儿轮次，'
+    + 'tool_pending 分支已修，tool_error 分支必须同步');
+  assert.match(branch, /querySelectorAll\('\.ai-tool-round\.is-running'\)/,
+    'tool_error 应与其他分支一致：取最后一个仍在运行的轮次');
+});
+
+test('M3：失败时必须给容器加 is-error（否则失败图标永远显示不出来）', function () {
+  const src = stripJsComments(aiAgent);
+  const actStart = src.indexOf('function updateToolActivity(activity) {');
+  assert.notEqual(actStart, -1, 'updateToolActivity 必须存在');
+  const actBody = balancedBody(src, actStart);
+  assert.match(actBody, /totalFailed > 0\)\s*activity\.classList\.add\('is-error'\)/,
+    '活动区容器失败时必须加 is-error —— CSS 的失败图标选择器 .is-done.is-error 依赖它，'
+    + '而写入的 ⚠️ emoji 已被 font-size:0 隐身');
+  const roundStart = src.indexOf('function updateToolRoundState(roundBox) {');
+  assert.notEqual(roundStart, -1, 'updateToolRoundState 必须存在');
+  assert.match(balancedBody(src, roundStart), /failed > 0\)\s*roundBox\.classList\.add\('is-error'\)/,
+    '轮次容器失败时必须加 is-error');
+});
+
+test('M4：新一轮工具开始时必须解锁并重设计时（多轮场景不得显示首轮耗时）', function () {
+  const src = stripJsComments(aiAgent);
+  const start = src.indexOf('function updateToolActivity(activity) {');
+  const body = balancedBody(src, start);
+  assert.match(body, /delete activity\.__elapsedMs/,
+    '新一轮开始时必须解锁 __elapsedMs —— 否则二次工具/补搜后"用时"仍是第一轮快照');
+  assert.match(body, /activity\.__startedAt = Date\.now\(\)/,
+    '解锁的同时必须把起点拨到当下');
+});
+
+test('S8：未被思考内容接管的「思考中」占位必须在终态被回收', function () {
+  const src = stripJsComments(aiAgent);
+  assert.match(src, /function settleUnusedEarlyThinkingNode\(/,
+    '必须提供占位思考节点回收函数（无 reasoning 的回复会永久挂着"思考中"）');
+  const helperStart = src.indexOf('function settleUnusedEarlyThinkingNode(');
+  const helper = balancedBody(src, helperStart);
+  assert.match(helper, /querySelectorAll\('\.ai-thinking'\)/,
+    '必须选择真实容器类 .ai-thinking（buildReasoningNode 的产出），写错名字会静默空转');
+  assert.match(helper, /!==\s*'思考中'\)\s*continue/, '只有仍是初始标签的占位才回收');
+  assert.match(helper, /\.remove\(\)/, '确认真回收');
+  const clearStart = src.indexOf('function clearAssistantTransientStatus(node) {');
+  assert.notEqual(clearStart, -1, 'clearAssistantTransientStatus 必须存在');
+  assert.match(balancedBody(src, clearStart), /settleUnusedEarlyThinkingNode\(target\)/,
+    '回收必须挂在所有终态路径的公共收敛点上（done/error/中断/超时都会走这里）');
 });

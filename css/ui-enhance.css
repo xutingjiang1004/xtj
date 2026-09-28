@@ -722,23 +722,54 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
   transition: grid-template-rows 260ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
 }
 .ai-tool-activity-body > * { min-height: 0; }
-/* ★★★ 2026-09-28（确定性收法）：
-   真实渲染复盘发现：即便 body 的直接子元素全部 min-height:0，
-   嵌套内容（round-head 的 padding 2px 4px + min-height 20px、
-   result-card 的 margin-top 4px + border 1px + padding 10px）仍会通过
-   嵌套 grid/flex 的 min-content 链条把 0fr 轨道顶开 —— 实测收起后
-   第二轮可见高度残留 62px。这些样式是内容自身的必要样式，不能删。
-   结论：**折叠的最终态不能依赖 grid 轨道计算**，收起态直接把 body
-   高度锁死为 0（!important 压过一切内容侧撑开），过渡交给 opacity；
-   展开态 height 锁移除，grid-template-rows 0fr→1fr 的平滑过渡保留。
-   实测：折叠 0 ↔ 128 双向严格归零，展开仍有平滑过渡。 */
+/* ★★★ 2026-09-28（折叠保守改动）：
+   真实渲染复盘发现：grid-template-rows 的最小值是 minmax(auto, 0fr)，
+   即便给 body 的直接子元素全部补 min-height:0，嵌套内容
+   （round-head 的 padding 2px 4px + min-height 20px、result-card 的
+   margin-top 4px + border 1px + padding 10px）仍会通过嵌套 grid/flex 的
+   min-content 链条把 0fr 轨道撑开 —— 实测从 118px 平滑收拢到 ~49px 后
+   再也压不下去；把这些漏网元素再 overflow+height 全压扁，仍剩 23px。
+   这些样式是内容自身的必要样式，不能删。
+   结论：**折叠的最终态不能依赖 grid 轨道计算**，必须由 height 兜底锁死。
+   过渡本身仍然由 0fr 负责（唯一能对未知高度做平滑的手段）。 */
 .ai-tool-activity.is-collapsed .ai-tool-activity-body {
   grid-template-rows: 0fr;
-  height: 0 !important;
-  min-height: 0 !important;
   opacity: 0;
   /* 收起后不再参与命中测试，避免"看不见但能点到" */
   pointer-events: none;
+  /* ★★★ 2026-09-28（两阶段折叠 —— 既严格归零，又保留收起动感）：
+     实测数据：单独用 0fr 时容器从 118px 平滑收到 ~49px 后**再也压不动**
+     （minmax(auto,0fr) 的最小值由嵌套内容的 min-content 决定，
+     把 result-card / organizing 全部 overflow+height 压扁后仍有 23px 残留）；
+     而直接 height:0 虽然严格归零，却让收起瞬间从 118 跳到 0（“硬跳”）。
+     折中方案：**两阶段收起** ——
+       ① 0~180ms：opacity 由 1 淡到 0（内容先被擦除），
+          同时 grid-template-rows 由 1fr 过渡到 0fr（容器缓慢收拢）；
+       ② 180ms 之后（内容此时已不可见）：height / min-height 才归零并锁死，
+          最后这一步“布局收拢”发生在看不见内容的时候，不会有内容跳动。
+     展开方向不受影响：本规则在展开时不命中，height 回到 auto，
+     由 grid-template-rows 0fr→1fr 提供平滑展开。 */
+  /* 最终态仍由 height 锁死（见上方注释：0fr 的最小值压不到 0）。
+     ★ 注意：这里**不能用 transition-delay** —— height 由 auto→0 属于
+     不可插值变更，transition 根本不会生成，延迟写了也不生效（实测 0ms 就归零）。
+     改用关键帧的**离散插值**：两个关键帧之间在 50% 处翻转，
+     配合 360ms 时长 → 恰好在第 180ms（内容已随 opacity 淡完）才锁死，
+     forwards 保证收起后停在 0。 */
+  /* 注意：不能写 !important —— 规范规定 !important 声明**胜过** animation，
+     写了会让延迟锁失效、退回 0ms 立即归零（实测踩过）。
+     动画的 forwards 填充已经能保证收起后停在 0，无需 important。 */
+  height: 0;
+  min-height: 0;
+  transition:
+    grid-template-rows 260ms cubic-bezier(.16, 1, .3, 1),
+    opacity 180ms ease;
+  animation: xtjActivityLockHeight 360ms linear forwards;
+}
+
+/* 只有“锁定”这一个动作，不需要视觉插值：auto 撑开阶段不干扰 0fr 的收拢动画 */
+@keyframes xtjActivityLockHeight {
+  from { height: auto; min-height: auto; }
+  to { height: 0; min-height: 0; }
 }
 /* ★ 2026-09-28（随 row-gap 改造移除）：原规则给首个 round/step 补
    margin-top: 2px —— margin 属于 item 盒子，会计入收起态的
@@ -954,11 +985,28 @@ button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-
    展开态由 0fr→1fr 过渡保证平滑。 */
 .ai-tool-round.is-collapsed .ai-tool-round-list-wrap {
   grid-template-rows: 0fr;
-  height: 0 !important;
-  min-height: 0 !important;
   opacity: 0;
-  /* 收起后隐藏导轨线（border 不随高度归零，会留一条悬空的竖线） */
-  visibility: hidden;
+  /* 与活动区 body 同一套两阶段收起（详见上方注释）：
+     0~180ms 由 0fr 平滑收拢，180ms 后由关键帧把 height 锁死到 0。
+     同样不能写 !important（!important 胜过 animation，会让延迟锁失效）。
+     导轨线（border 不随高度归零）与诉诸 visibility，但这里**不能立即隐藏** ——
+     否则内容还在淡出时导轨线先消失，出现“线先没、字后没”的割裂感，
+     因此把 visibility 一并交给同一组延迟关键帧处理。 */
+  height: 0;
+  min-height: 0;
+  transition:
+    grid-template-rows 240ms cubic-bezier(.16, 1, .3, 1),
+    opacity 180ms ease;
+  animation: xtjRoundLockHeight 360ms linear forwards, xtjRoundHideTrack 360ms linear forwards;
+}
+
+@keyframes xtjRoundLockHeight {
+  from { height: auto; min-height: auto; }
+  to { height: 0; min-height: 0; }
+}
+@keyframes xtjRoundHideTrack {
+  from { visibility: visible; }
+  to { visibility: hidden; }
 }
 /* 条目列表：单行紧凑，左侧一条细分隔线形成"组"的视觉归属。
    ★ 2026-09-28（方案 B）：这条线升级为"导轨"——加粗、加深，配合每条目
