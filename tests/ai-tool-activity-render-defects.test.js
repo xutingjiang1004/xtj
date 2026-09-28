@@ -657,16 +657,58 @@ test('C2：「整理中」占位必须视觉隐藏、但 DOM 与状态机保留'
     + '改成不创建或 remove() 会打穿状态机');
 });
 
-test('C3：正文首字到达时必须把工具区从正文上方搬到正文下方', function () {
+test('C3：工具区必须归位到正文下方，且实现必须**幂等**（不得用一次性标志）', function () {
   const src = stripJsComments(aiAgent);
   const fnStart = src.indexOf('function moveToolAreaBelowBubble(node) {');
   assert.notEqual(fnStart, -1, 'moveToolAreaBelowBubble 必须存在');
   const fn = balancedBody(src, fnStart);
   assert.match(fn, /querySelector\('\.ai-msg-bubble'\)/, '必须以正文气泡为定位锚点');
   assert.match(fn, /insertBefore\(tl, bubble\.nextSibling\)/, '必须插到正文气泡**之后**（正文下方）');
-  assert.match(fn, /__toolAreaMoved/, '必须有一次标志，避免每个 content chunk 都搬一次导致抖动');
-  assert.match(src, /moveToolAreaBelowBubble\(assistantNode\)/,
-    '必须在正文首字到达处调用（此刻"过程"结束、"结果"才有意义）');
+  // ★ 反向契约（本条由一次真实翻车换来）：
+  //   初版用一次性标志 __toolAreaMoved，但协议侧确证后端存在 content 早于工具事件的
+  //   确定性路径（server.js 22566/22616 先推 narration content）—— 正文先到时
+  //   标志被提前消耗，之后才建起来的工具区就**永久停在正文上方**，
+  //   等于把用户最讨厌的形态又放回了原位。必须改成"每次都问当下该不该在下面"。
+  assert.doesNotMatch(fn, /__toolAreaMoved/,
+    '不得使用一次性搬移标志：正文先到会提前消耗它，导致工具区永久停在正文上方');
+  assert.match(fn, /hasText/, '必须以"正文真的开始了"（气泡有内容）为前置判据');
+  // 两个互补调用点：content 分支 + 工具收敛分支
+  assert.match(src, /moveToolAreaBelowBubble\(assistantNode\)/, '必须在正文到达处调用');
+  assert.match(src, /moveToolAreaBelowBubble\(_host\)/, '必须在工具收敛处补调（覆盖正文先到的场景）');
+});
+
+test('C5：网页计数只认语义可靠的检索工具，拿不到时不得编造数字', function () {
+  const src = stripJsComments(aiAgent);
+  assert.match(src, /var TOOL_WEBSEARCH_KINDS = \{/,
+    '必须区分"count 语义=结果条数"的检索工具 —— 协议侧确证 9 处 tool_result 的 count '
+    + '语义混杂（extract_links=链接数、*_table=行数），混加会得到似是而非的网页数');
+  const start = src.indexOf('function toolActivityDoneLabel(activity) {');
+  const body = balancedBody(src, start);
+  assert.doesNotMatch(body, /'已搜索 ' \+ searchKinds/,
+    '不得用"工具种数"冒充网页数 —— 那会凭空造出「已搜索 2 个网页」这种数字');
+  assert.match(body, /return '已搜索网页';/, '拿不到真实条数时应退化为无数字的「已搜索网页」');
+  // 累加处必须认 WEBSEARCH 而不是广义 SEARCH
+  const accumAt = src.indexOf('if (matchStep && TOOL_WEBSEARCH_KINDS');
+  assert.notEqual(accumAt, -1, 'tool_result 的条数累加必须只认 TOOL_WEBSEARCH_KINDS');
+});
+
+test('C6：搬移必须做滚动锚定补偿（否则正文整体跳动 87px）', function () {
+  const src = stripJsComments(aiAgent);
+  assert.match(src, /function findScrollParent\(el\)/, '必须能定位可滚动容器以做补偿');
+  const fnStart = src.indexOf('function moveToolAreaBelowBubble(node) {');
+  const fn = balancedBody(src, fnStart);
+  assert.match(fn, /getBoundingClientRect\(\)\.top/, '必须量测搬移前后气泡的视口位置');
+  assert.match(fn, /scroller\.scrollTop \+= delta/, '必须把位移差补回滚动条（实测不补偿会跳 87px）');
+});
+
+test('C7：轮次摘要也不得再输出「已完成 N 个工具」横幅措辞', function () {
+  const src = stripJsComments(aiAgent);
+  const start = src.indexOf('function updateToolRoundState(roundBox) {');
+  assert.notEqual(start, -1, 'updateToolRoundState 必须存在');
+  const body = balancedBody(src, start);
+  assert.doesNotMatch(body, /'已完成 ' \+ total/,
+    '轮次摘要不得再写「已完成 N 个工具」—— 活动区 head 已极简，展开明细里再来一句横幅照样丑');
+  assert.match(body, /total \+ ' 个工具（' \+ failed \+ ' 个失败）'/, '失败时给中性计数 + 失败数');
 });
 
 test('C4：toolActivityDoneLabel 产出 ChatGPT 式极简文案', function () {
