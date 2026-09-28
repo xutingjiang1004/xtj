@@ -621,3 +621,63 @@ test('S8：未被思考内容接管的「思考中」占位必须在终态被回
   assert.match(balancedBody(src, clearStart), /settleUnusedEarlyThinkingNode\(target\)/,
     '回收必须挂在所有终态路径的公共收敛点上（done/error/中断/超时都会走这里）');
 });
+
+// ═══════════════════════════════════════════════════════════════
+// 2026-09-29 第四轮守卫：Claude / ChatGPT 形态对齐
+//
+// 用户连续报障原话：
+//   ①「回复完之后那个思考几秒跟正文中间还有显示已调用几个工具啊，真的很丑」
+//   ②「调完工具显示回答的时候就直接回复正文就可以了」
+//   ③「要用工具那个显示的话，直接在思考过程当中显示就可以了」
+//   ④「在正文下面显示已搜索几个网页，可以展开看到收到哪些网页」
+//   ⑤「其他工具在下面显示已调用什么什么工具，简洁明了就可以了」
+// 目标形态 = ChatGPT 的 "Searched 3 sites" / Claude 的行式收敛。
+
+test('C1：完成态摘要不得再输出「已完成 N 个工具」横幅、「用时」不得上屏', function () {
+  const src = stripJsComments(aiAgent);
+  const start = src.indexOf('function updateToolActivity(activity) {');
+  assert.notEqual(start, -1, 'updateToolActivity 必须存在');
+  const body = balancedBody(src, start);
+  assert.match(body, /toolActivityDoneLabel\(activity\)/,
+    '完成态文案必须走 toolActivityDoneLabel（极简结果行）');
+  assert.doesNotMatch(body, /'已完成 ' \+ totalSteps/,
+    '不得再输出「已完成 N 个工具」横幅 —— 用户报障：正文上面写调用几个工具很丑');
+  assert.doesNotMatch(body, /count\) count\.textContent = elapsedText/,
+    '「用时 X.Xs」不得再上屏 —— 用户报障嫌丑。'
+    + '注意 __elapsedMs 仍必须计算：running 分支靠它识别"曾收敛过→新一轮"来解锁重算（M4）');
+});
+
+test('C2：「整理中」占位必须视觉隐藏、但 DOM 与状态机保留', function () {
+  const m = css.match(/\.ai-tool-step\.ai-tool-organizing \{ display: none !important; \}/);
+  assert.ok(m, '.ai-tool-step.ai-tool-organizing 必须 display:none（用户报障：整理中这行很丑）');
+  const src = stripJsComments(aiAgent);
+  assert.match(src, /ai-tool-organizing/,
+    '占位 DOM 必须保留 —— updateToolActivity 的 organizingRunning 判据、'
+    + 'settleOrganizingStep 的收敛、"只有占位"场景的 settled 判定都依赖它存在，'
+    + '改成不创建或 remove() 会打穿状态机');
+});
+
+test('C3：正文首字到达时必须把工具区从正文上方搬到正文下方', function () {
+  const src = stripJsComments(aiAgent);
+  const fnStart = src.indexOf('function moveToolAreaBelowBubble(node) {');
+  assert.notEqual(fnStart, -1, 'moveToolAreaBelowBubble 必须存在');
+  const fn = balancedBody(src, fnStart);
+  assert.match(fn, /querySelector\('\.ai-msg-bubble'\)/, '必须以正文气泡为定位锚点');
+  assert.match(fn, /insertBefore\(tl, bubble\.nextSibling\)/, '必须插到正文气泡**之后**（正文下方）');
+  assert.match(fn, /__toolAreaMoved/, '必须有一次标志，避免每个 content chunk 都搬一次导致抖动');
+  assert.match(src, /moveToolAreaBelowBubble\(assistantNode\)/,
+    '必须在正文首字到达处调用（此刻"过程"结束、"结果"才有意义）');
+});
+
+test('C4：toolActivityDoneLabel 产出 ChatGPT 式极简文案', function () {
+  const src = stripJsComments(aiAgent);
+  const start = src.indexOf('function toolActivityDoneLabel(activity) {');
+  assert.notEqual(start, -1, 'toolActivityDoneLabel 必须存在');
+  const body = balancedBody(src, start);
+  assert.match(body, /'已搜索 ' \+ n \+ ' 个网页'/,
+    '纯检索必须输出「已搜索 N 个网页」（用户点名的形态，N 为真实结果条数）');
+  assert.match(body, /__searchCount/, '网页数必须取自 tool_result 累加的真实条数，不得用调用次数冒充');
+  assert.match(body, /'已调用'/, '单类非检索必须输出「已调用 X」');
+  assert.match(body, /'已使用 ' \+ totalKinds \+ ' 个工具'/,
+    '多类混杂只报数量，不得罗列一长串工具名（那是"丑"的根源）');
+});

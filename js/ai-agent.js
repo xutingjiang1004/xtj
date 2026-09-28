@@ -2592,6 +2592,84 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return TOOL_LABELS[key] || key || '工具';
   }
 
+  // ★★★ 2026-09-29（Claude/ChatGPT 形态对齐）：完成态**名词化**标签。
+  //   用户明确要求：回复完之后不要在正文上方堆"已完成 N 个工具 · 用时 X.Xs"
+  //   这种总结横幅，而是在正文**下方**给一行极简结果：
+  //     搜索类 → 「已搜索 3 个网页」（可展开看拿到哪些网页）
+  //     其他   → 「已调用天气工具」/「已调用 PDF 工具」/「已生成文件」
+  //     混杂   → 「已使用 N 个工具」
+  //   与 ChatGPT 的 "Searched 3 sites"、Claude 的行式收敛是同一形态。
+  //   ★ 作用域红线同 TOOL_LABELS：必须模块级，不得写进任何函数体内部。
+  var TOOL_DONE_LABELS = {
+    // 检索类 —— 走"已搜索 N 个网页"专用句式，这里只标记类型
+    search_web: '网页', tavily_search: '网页', read_web_page: '网页',
+    web_extract: '网页', extract_links: '链接', page_meta: '网页信息',
+    search_social: '社交内容',
+    // 实时信息类
+    get_weather: '天气工具', get_current_time: '时间工具',
+    get_exchange_rate: '汇率工具', get_stock_quote: '行情工具',
+    // 计算/数据类
+    calculate: '计算工具', convert_units: '换算工具', date_calc: '日期计算',
+    text_stats: '文本统计', batch_calc: '批量计算', sort_filter: '数据整理',
+    convert_data: '数据转换', process_json: '数据处理', regex_test: '表达式校验',
+    encode_decode: '编码转换', run_code: '代码运行',
+    // 文件生成/读取类
+    read_document: '文档读取', read_zip: '压缩包读取', make_file: '文件生成',
+    generate_pdf: 'PDF 工具', make_chart: '图表工具', markdown_table: '表格生成',
+    qr_code: '二维码工具', image_info: '图片分析', image_process: '图片处理',
+    diff_text: '文本对比', url_parse: '网址解析', password_tool: '密码工具',
+    task_plan: '任务规划'
+  };
+  // 检索类工具：命中则走"已搜索 N 个网页"句式（用户点名要的形态）
+  var TOOL_SEARCH_KINDS = {
+    search_web: 1, tavily_search: 1, read_web_page: 1,
+    web_extract: 1, extract_links: 1, page_meta: 1, search_social: 1
+  };
+  function toolDoneLabel(name) {
+    var key = String(name || '');
+    return TOOL_DONE_LABELS[key] || toolLabel(key);
+  }
+
+  // 汇总一个活动区"到底干了什么"，产出一行极简文案。
+  //   countSource：activity.__searchCount（tool_result 里累加的真实结果条数）
+  function toolActivityDoneLabel(activity) {
+    if (!activity) return '工具调用完成';
+    var names = [];
+    var seen = {};
+    try {
+      var items = activity.querySelectorAll('[data-tool-name]');
+      for (var i = 0; i < items.length; i++) {
+        var n = String(items[i].getAttribute('data-tool-name') || '').trim();
+        if (!n || seen[n]) continue;
+        seen[n] = 1;
+        names.push(n);
+      }
+    } catch (eNames) {}
+    if (!names.length) return '工具调用完成';
+
+    var searchKinds = 0, otherKinds = 0, lastOther = '';
+    for (var k = 0; k < names.length; k++) {
+      if (TOOL_SEARCH_KINDS[names[k]]) searchKinds++;
+      else { otherKinds++; lastOther = names[k]; }
+    }
+    // 纯检索：用户点名的形态 —— 「已搜索 N 个网页」
+    if (searchKinds > 0 && otherKinds === 0) {
+      var n = Number(activity && activity.__searchCount || 0);
+      // 后端多数 tool_result 带 count；拿不到条数时不硬编数字，退化成无数量措辞
+      if (n > 0) return '已搜索 ' + n + ' 个网页';
+      return searchKinds > 1 ? ('已搜索 ' + searchKinds + ' 个网页') : '已搜索网页';
+    }
+    // 只有一种非检索工具：「已调用天气工具」/「已调用 PDF 工具」
+    if (otherKinds === 1 && searchKinds === 0) {
+      var lb = toolDoneLabel(lastOther);
+      // 拉丁字母开头的标签（PDF/JSON/QR）补一个空格，避免挤成「已调用PDF 工具」
+      return '已调用' + (/^[A-Za-z]/.test(lb) ? ' ' : '') + lb;
+    }
+    // 混杂：不给一长串工具名（那是"丑"的根源），只报数量
+    var totalKinds = names.length;
+    return '已使用 ' + totalKinds + ' 个工具';
+  }
+
   function ensureToolActivity(timeline) {
     if (!timeline) return null;
     var activity = timeline.querySelector('.ai-tool-activity');
@@ -2736,19 +2814,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           ? ('用时 ' + Math.round(elapsedSec / 60) + 'min')
           : ('用时 ' + elapsedSec.toFixed(1) + 's');
       }
-      if (label) {
-        // 单轮时沿用"已完成 N 个工具"的措辞，避免"1 轮"这种别扭说法
-        if (totalRounds <= 1) {
-          label.textContent = totalFailed > 0
-            ? (totalSteps + ' 个工具已完成（' + totalFailed + ' 个失败）')
-            : (totalSteps > 1 ? ('已完成 ' + totalSteps + ' 个工具') : '工具调用完成');
-        } else {
-          label.textContent = totalFailed > 0
-            ? ('使用 ' + totalRounds + ' 轮工具（' + totalFailed + ' 个失败）')
-            : ('已使用 ' + totalRounds + ' 轮工具 · 共 ' + totalSteps + ' 个');
-        }
-      }
-      if (count) count.textContent = elapsedText;
+      // ★★★ 2026-09-29（用户报障：「正文上面还要写调用几个工具，真的很丑」）：
+      //   完成态摘要改走 toolActivityDoneLabel —— 搜索类「已搜索 N 个网页」、
+      //   单类「已调用天气工具」、混杂「已使用 N 个工具」，对齐 ChatGPT 的
+      //   "Searched 3 sites" / Claude 的行式收敛形态。
+      //   ★ elapsedText 仍然计算但**不再上屏**：用户明确嫌"用时 X.Xs"丑。
+      //     这里保留 __elapsedMs 的写入是**必需的** —— running 分支靠
+      //     "__elapsedMs !== undefined" 识别"曾收敛过 → 当下是新一轮"来解锁重算
+      //     （M4 多轮计时复位修复）。若删掉赋值，该解锁永不触发，多轮场景
+      //     "用时"会回退成首轮快照。故：算、但不用。
+      var doneText = toolActivityDoneLabel(activity);
+      if (totalFailed > 0) doneText += '（' + totalFailed + ' 个失败）';
+      if (label) label.textContent = doneText;
+      // count 位清空：不再显示"用时"，也不显示"N/M 完成"这类过程计数
+      if (count) count.textContent = '';
     } else {
       // ★ 2026-09-28 修复（多轮/补搜场景"用时"显示的是**第一轮**的耗时）：
       //   原 __elapsedMs 首次收敛后就锁死、__startedAt 也从不复位。但工具可以
@@ -2773,11 +2852,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         label.textContent = totalRounds > 1
           ? ('正在使用工具（第 ' + totalRounds + ' 轮）')
           : '正在使用工具';
-      }      if (count) {
-        // 无轮次时（只有"整理中"占位在跑）不显示 "0/0 完成"这种无意义计数
-        count.textContent = (organizingRunning || totalSteps === 0)
-          ? ''
-          : ((totalDone + totalFailed) + '/' + totalSteps + ' 完成');
+      }
+      if (count) {
+        // ★ 2026-09-29：运行中也清空计数。原「1/2 完成」这类过程计数偏技术面，
+        //   而进度本身已由下方工具行的 spinner 直观表达，再叠一层数字就是噪音。
+        count.textContent = '';
       }
     }
   }
@@ -3211,6 +3290,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   判定条件刻意收紧，避免误删真正有内容的思考面板：
   //     ① 标签仍是初始的「思考中」（说明没有任何 reasoning 流进来改写过它）；
   //     ② 且思考正文区域为空（没有被后续流填充）。
+  // ★★★ 2026-09-29（用户连续报障：「正文上面还要写调用几个工具，真的很丑」）：
+  //   工具活动区原本固定在正文气泡**上方**、完成后折叠成一行"已完成 N 个工具 · 用时"，
+  //   正好卡在思考块和正文之间 —— 用户原话"很丑"，且反复修了十几次仍不满意。
+  //   对齐 ChatGPT / Claude 的真实形态：
+  //     · 过程流（思考 + 工具进度）留在正文**上方**（那是"它正在干嘛"）
+  //     · 结果摘要挪到正文**下方**一行（"已搜索 3 个网页 ▾"，可展开看明细）
+  //   时机选在**正文首字到达**：此刻"过程"结束、"结果"才开始有意义。
+  //   纯工具失败/无正文的回复不移动 —— 那种情况下用户正需要看见发生了什么。
+  function moveToolAreaBelowBubble(node) {
+    if (!node || node.__toolAreaMoved) return;
+    var bubble = node.querySelector('.ai-msg-bubble');
+    if (!bubble || !bubble.parentNode) return;
+    var timelines = node.querySelectorAll('.ai-tool-timeline');
+    for (var i = 0; i < timelines.length; i++) {
+      var tl = timelines[i];
+      if (!tl || !tl.parentNode) continue;
+      // 只搬"当前排在正文之前"的（DOCUMENT_POSITION_FOLLOWING 表示 bubble 在其后）
+      var follows = false;
+      try { follows = !!(tl.compareDocumentPosition(bubble) & 4); } catch (eCmp) { follows = false; }
+      if (!follows) continue;
+      try { bubble.parentNode.insertBefore(tl, bubble.nextSibling); } catch (eMove) {}
+    }
+    node.__toolAreaMoved = true;
+  }
+
   function settleUnusedEarlyThinkingNode(target) {
     if (!target || !target.querySelectorAll) return;
     // 容器真实类名为 .ai-thinking（buildReasoningNode 的产出），必须是这一个，
@@ -9593,6 +9697,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             matchStep = exactRunningStep || unclaimedNamedStep || claimedNamedStep;
             // 认领标记：防止同一 result 重复命中，也保证同名并行工具 FIFO 配对
             if (matchStep) matchStep.setAttribute('data-tool-claimed', '1');
+            // ★ 2026-09-29：为完成态「已搜索 N 个网页」累加真实结果条数。
+            //   后端 tool_result 带 count 字段（见 server.js writeSse 的
+            //   { type:'tool_result', tool_name, success, count }）。
+            //   同一工具会被重复推送（先 count、后带 items），故按**条目**去重：
+            //   每个 step 只贡献一次，多条目相加 = 本次检索拿到的网页总数。
+            if (matchStep && TOOL_SEARCH_KINDS[String(evt.tool_name || '')]) {
+              try {
+                var _c = Number(evt.count || 0);
+                if (_c > 0 && !matchStep.__counted) {
+                  matchStep.__counted = 1;
+                  var _act = toolBar2.querySelector('.ai-tool-activity');
+                  if (_act) _act.__searchCount = (Number(_act.__searchCount) || 0) + _c;
+                }
+              } catch (eCnt) {}
+            }
             // ★ 2026-09-28 兜底（对应"原先的工具还在转圈"这一现象）：
             //   若本次只匹配到了"已完成"的同名条目（claimedNamedStep 兜底路径），
             //   说明当前活动区里很可能**还有一条同名条目在跑而它的 result 丢失/错配**。
@@ -9988,6 +10107,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // ★ 2026-09-22：统一走 settleOrganizingStep，保证与 done/中断路径收敛口径一致
             //   （此前这里的手写逻辑与 clearAssistantTransientStatus 各写一套，容易走偏）。
             try { settleOrganizingStep(assistantNode); } catch (eOrganizeDone) {}
+            // ★ 2026-09-29：正文开始输出 → 工具区从正文上方搬到正文下方（结果摘要位）
+            try { moveToolAreaBelowBubble(assistantNode); } catch (eMoveTool) {}
             // ★★★ 2026-09-17 思考 → 正文交接优化（本轮流动性重点之一）：
             //   旧行为：思考流全程强制展开，正文一开始输出后，思考面板**仍占满屏幕**
             //   继续显示，正文只能挤在下方；用户要一路滚动才能看到回复的开头，
