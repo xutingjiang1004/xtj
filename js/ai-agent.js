@@ -427,6 +427,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     showingHistory: false,
     headerButtonsCleanup: null,
     _currentReqId: null,
+    // ★ 2026-09-29（审计 S1）：本次发送产生的、服务端尚未收录的消息对象引用
+    //   （userMsg / aiMsg）。首屏历史到达时靠它把"本地还没同步的轮次"保留下来，
+    //   避免被 loadHistory 的整体覆盖抹掉。只在 S.messages 里仍然存在的才算数。
+    _pendingLocalMsgs: [],
     // ★ 修复：深度思考二级页面独立请求 ID 通道，与普通聊天 _currentReqId 隔离，
     // 避免深页流式输出期间打开普通聊天发消息导致深页 SSE 被误判"被取代"而中断。
     _dtCurrentReqId: null,
@@ -3174,6 +3178,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  // ★ 2026-09-29（审计 S4「发送按钮从不禁用，可并行开多条流」）：
+  //   现象：网络慢时连点发送/连按回车，界面出现两条用户消息和两条并行 AI 回复，
+  //   停止按钮只能停掉最后一条，前一条的「思考中」永远转；额度按次数重复扣。
+  //   修法：发送期间把发送按钮置为 disabled（视觉上直接挡住连点），
+  //   任何收尾路径（成功/失败/中止/超时）都会重新启用；只改 disabled，
+  //   不触碰 dock bar / dock capsule 相关任何代码。
+  function setAiSendBtnDisabled(disabled) {
+    var btn = S.sendBtnEl;
+    if (!btn) return;
+    try { btn.disabled = !!disabled; } catch (e) {}
+  }
+
   function updateInputMetrics() {
     var root = getAiRoot();
     var bar = S.inputBarEl;
@@ -3745,6 +3761,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { empty.remove(); } catch (e) {}
     }
     var node = buildMessageNode(msg, messagesEl);
+    // ★ 2026-09-29（审计 S1）：把消息对象与 DOM 节点互相关联。历史到达后需要按
+    //   「这个节点是不是本地未同步的轮次」来决定保留/摘除，光靠顺序或 class 不够可靠。
+    node._msgRef = msg;
     messagesEl.appendChild(node);
     if (msg && msg.role === 'assistant' && Array.isArray(msg.site_cards)) {
       msg.site_cards.forEach(function(card) {
@@ -3834,8 +3853,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var want = next[i];
         var have = kids[i];
         if (!have) { targetEl.appendChild(want.cloneNode(true)); continue; }
-        var wantHtml = want.outerHTML;
-        if (have.outerHTML === wantHtml) continue;   // 未变化：完全不碰
+        // ★ 2026-09-29（审计 M6）：原比对一律取 outerHTML，但 **文本节点没有
+        //   outerHTML**（两侧都是 undefined），`undefined === undefined` 恒判定
+        //   "未变化" —— 一旦流式输出里出现裸文本节点，该位置永远不再更新，
+        //   表现为「后面新写的内容不显示 / 卡在旧文字」。
+        //   修法：按 nodeType 分支比对（文本节点比 data，元素比 outerHTML）；
+        //   类型不同（文本↔元素）直接视为变化并替换。
+        var wantHtml = (want.nodeType === 3) ? want.data : want.outerHTML;
+        var haveHtml = (have.nodeType === 3) ? have.data : have.outerHTML;
+        if (have.nodeType === want.nodeType && haveHtml === wantHtml) continue;   // 未变化：完全不碰
         targetEl.replaceChild(want.cloneNode(true), have);
       }
       // 多余的旧节点（理论上不会走到，兜底清理）
@@ -8260,6 +8286,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { notify('已发送，请勿重复点击'); } catch (eDuplicate) {}
       return;
     }
+    // ★ 2026-09-29（审计 S4）：并发总闸。旧实现只靠上面 1500ms 内同指纹的弱校验，
+    //   连点/连按回车仍会开出两条并行 /chat/stream。这里在真正开工前再挡一次。
+    if (S.sending) {
+      try { notify('正在回复中…'); } catch (eBusy) {}
+      return;
+    }
     S.lastSendFingerprint = sendFingerprint;
     S.lastSendAt = Date.now();
     // ★ 修复（H5/并发重复请求）：认证/配额窗口期间第二个请求不会中止第一个（此时
@@ -8269,6 +8301,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Lock synchronously before the first await (auth/token acquisition), so
     // two clicks in the same event loop cannot create two streams.
     S.sending = true;
+    // ★ 2026-09-29（审计 S4）：发送期间禁用发送按钮（视觉上挡住连点）。
+    setAiSendBtnDisabled(true);
     // ★ 修复：遥测不再上传提问内容（原 30 字符随行为记录上行，AI 提问可能含敏感信息）
     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息'); } catch(e) {}
     var displayText = text;
@@ -8297,10 +8331,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         attachmentPayload = null;
       }
     }
-    if (!text) { S.sending = false; return; }
+    if (!text) { S.sending = false; setAiSendBtnDisabled(false); return; }
     if (text.length > 50000) {
       notify('消息过长，最多 50000 字符，请精简后重试');
       S.sending = false;
+      setAiSendBtnDisabled(false);
       return;
     }
 
@@ -8314,12 +8349,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!qGate.ok) {
       notify(qGate.message || '今日额度已用完');
       S.sending = false;
+      setAiSendBtnDisabled(false);
       return;
     }
 
     // ★ 立即标记发送中，防止并发竞态
     // P1: UI立即显示，认证异步执行
-    if (sendToken !== S.sendSeq) { S.sending = false; return; } // 已有更新的发送接管
+    // ★★ 2026-09-29（审计 S4「过期发送令牌把 S.sending 错误清零」）：
+    //   现象：新发送自增 S.sendSeq 后，旧发送在 await fetchAiQuota() 之后的令牌
+    //   校验处 return 前执行了 `S.sending = false` —— 此时**新发送正在流式进行**，
+    //   全局发送锁被错误清零，后续 triggerRegenerate / 继续生成等基于 S.sending
+    //   的并发保护全部失效，于是能并行开多条流、额度按次重复扣。
+    //   修法：过期令牌分支只 return，**不动 S.sending**（复位统一交给
+    //   resetSendingIfCurrent() 按 reqId 比对后执行）。
+    if (sendToken !== S.sendSeq) { return; } // 已有更新的发送接管
     S.sending = true;
     if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
     clearReplyTimer();
@@ -8330,7 +8373,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       abortCurrentRequest('chat');
       try { await new Promise(function(resolve) { setTimeout(resolve, 50); }); } catch (e) {}
     }
-    if (sendToken !== S.sendSeq) { S.sending = false; return; }
+    if (sendToken !== S.sendSeq) { return; } // 已有更新的发送接管（同上，不清 S.sending）
 
     S.clientRequestId++;
     var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
@@ -8338,6 +8381,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function resetSendingIfCurrent() {
       if (S._currentReqId === reqId) {
         S.sending = false;
+        // ★ 2026-09-29（审计 S4）：发送锁释放处统一重新启用发送按钮，
+        //   保证任何收尾路径（成功/失败/中止/超时）都不会把按钮永久禁用。
+        setAiSendBtnDisabled(false);
         S.abortController = null;
         S.paused = false;
         resetActiveRenderersByChannel('chat');
@@ -8354,6 +8400,47 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!_isTouchMobile) input.focus();
       } catch (e) {}
       updateInputMetrics();
+      // ★ 2026-09-29（审计 M5「发送失败只回填文字，已选附件不可恢复」）：
+      //   现象：选好图片/PDF 后发送，遇到鉴权失败/HTTP 错误/断网/45s 超时，
+      //   输入框文字回来了但附件预览已经没了，用户必须重新选一遍文件。
+      //   根因：doSend 在调用 async 的 handleSendMessage 后立即清空预览，
+      //   而所有失败路径只有本函数在恢复文字，没有对应的附件恢复。
+      //   修法：回填文字的同时把本次附件副本交还输入区重新渲染预览。
+      try {
+        if (typeof S._restoreAiChatFiles === 'function' && fileList && fileList.length) {
+          S._restoreAiChatFiles(fileList.slice(0, 10));
+        }
+      } catch (eRestoreFiles) {}
+    }
+
+    // ★ 2026-09-29（审计 M12「失败路径 S.messages.pop() 不校验目标」）：
+    //   现象：竞态下（首屏历史覆盖、切会话、旧请求迟到）失败收尾会把**当前会话
+    //   最后一条无关消息**从内存数组里弹掉，同时删掉 DOM 里最后一个用户气泡
+    //   —— 用户看到历史里最后一条问答凭空消失。
+    //   根因：pop() 只保证"弹最后一个"，但那一条未必是本次发送压入的 userMsg
+    //   （loadHistory 会整体替换 S.messages，switchConversation 会清空它）。
+    //   修法：按引用定位本次的 userMsg 再 splice，DOM 侧删除它对应的节点；
+    //   找不到时才回退到原来的"删最后一个用户气泡"。
+    function removeThisUserMessage() {
+      // ★ 2026-09-29（审计 S1 收尾）：本轮已被取消/失败，清空"本地待同步"引用，
+      //   避免遗留引用在后续 loadHistory 里与服务端已落库的消息 concat 成两条，
+      //   也防止本就作废的本地消息在其它收尾路径被误当有效项保留。
+      try { S._pendingLocalMsgs = []; } catch (ePendClear) {}
+      try {
+        var at = S.messages.indexOf(userMsg);
+        if (at >= 0) S.messages.splice(at, 1);
+      } catch (eRmMsg) {}
+      try {
+        if (userNode && userNode.parentNode) {
+          userNode.parentNode.removeChild(userNode);
+        } else {
+          removeLastUserMessage(messagesEl);
+          return;
+        }
+        maybeRestoreEmptyState(messagesEl);
+      } catch (eRmDom) {
+        try { removeLastUserMessage(messagesEl); } catch (eRmDom2) {}
+      }
     }
 
     // ============================================================
@@ -8364,8 +8451,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // ★ 记录附件（含图片 data URL），供「重新生成」时原样复用
     var userMsg = { role: 'user', content: displayText, created_at: nowIso, attachments: attachmentPayload || null };
     S.messages.push(userMsg);
+    // ★ 2026-09-29（审计 S1/S2）：登记"本轮本地消息"，供首屏历史到达时保留、
+    //   以及失败收尾时精确定位（不再盲 pop / 盲删最后一个用户气泡）。
+    S._pendingLocalMsgs = [userMsg];
     try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache) {}
-    appendMessage(messagesEl, userMsg);
+    var userNode = appendMessage(messagesEl, userMsg);
     S.autoScrollPinned = true;
     scrollToBottom(messagesEl, true);
 
@@ -8429,8 +8519,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!authOk) {
       // 认证失败 => 清理UI，恢复状态
       try { assistantNode.remove(); } catch (e) {}
-      S.messages.pop();
-      removeLastUserMessage(messagesEl);
+      removeThisUserMessage();
       restoreInputText();
       resetSendingIfCurrent();
       return;
@@ -8581,7 +8670,36 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         body: fetchBody,
         signal: controller.signal
       });
-      
+
+      // ★★ 2026-09-29（审计 S3「聊天流 401 不做 token 刷新，凭证失效永久卡住」）：
+      //   现象：登录态过期后发消息，只弹一句「AI 服务暂时不可用，请稍后重试」，
+      //   之后每次发送都失败；不提示重新登录也不跳转登录页，只有刷新页面才恢复。
+      //   根因：本函数走原生 fetch，绕过了 apiRequest 里已有的
+      //   「401 → refreshUserToken(true) → 重发一次」链路，!resp.ok 一律回落通用文案。
+      //   修法：401 时先刷新 token，成功则携带新凭证**重发一次**（仅一次，防死循环）；
+      //   刷新失败/重发仍 401 则交给 handleProtectedAuthFailure 并给出明确登录提示。
+      if (resp && resp.status === 401 && typeof window.refreshUserToken === 'function') {
+        var _refreshed = false;
+        try { _refreshed = await window.refreshUserToken(true); } catch (eRefresh) {}
+        if (_refreshed) {
+          try {
+            var _auth2 = await getUserAuthPayload({ forceNoToken: false });
+            var _resp2 = await fetch(url, {
+              method: 'POST',
+              headers: (_auth2 && _auth2.headers) || headers,
+              body: fetchBody,
+              signal: controller.signal
+            });
+            if (_resp2) resp = _resp2;
+          } catch (eRetry401) {
+            // 重发本身失败（网络/中断）：保留原始 401 响应走下方统一错误分支
+          }
+        }
+        if (!resp.ok && resp.status === 401) {
+          try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (eAuthFail) {}
+        }
+      }
+
       if (!resp.ok) {
         var responseMessage = 'AI 服务暂时不可用，请稍后重试';
         var errorCode = '';
@@ -8600,6 +8718,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             responseMessage = '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
           } else if (errorCode === 'search_limit') {
             responseMessage = '今日网页搜索次数已达上限，开通 Pro 可无限搜索';
+          } else if (resp.status === 401) {
+            // ★ 2026-09-29（审计 S3）：401 走到这里说明上面刷新+重发也失败了，
+            //   此时别再回落通用的「AI 服务暂时不可用」（用户会以为 AI 坏了，
+            //   其实是登录态失效），给出可操作的文案。
+            responseMessage = '登录已失效，请重新登录';
           }
         } catch(e) {}
         // Phase 3: Use shared error classification when enabled
@@ -8621,8 +8744,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         hideAssistantTyping();
         try { assistantNode.remove(); } catch (e) {}
-        S.messages.pop();
-        removeLastUserMessage(messagesEl);
+        removeThisUserMessage();
         restoreInputText();
         notify(responseMessage);
         resetSendingIfCurrent();
@@ -8632,8 +8754,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!resp.body) {
         hideAssistantTyping();
         try { assistantNode.remove(); } catch (e) {}
-        S.messages.pop();
-        removeLastUserMessage(messagesEl);
+        removeThisUserMessage();
         restoreInputText();
         notify('AI 没有响应');
         resetSendingIfCurrent();
@@ -8824,8 +8945,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             notify('没有可继续的消息');
             return;
           }
+          // ★★ 2026-09-29（审计 M8「继续生成按钮点击后永久停在「继续中…」」）：
+          //   现象：回复被中断后点「继续生成」，按钮变灰显示「继续中…」；新一轮回复
+          //   生成完毕后它仍然是灰的，再想续写只能自己手动输入。
+          //   根因：`btn.disabled = true; btn.textContent = '继续中…'` 之后只在
+          //   catch(eSend) 分支回滚，成功路径没有任何复位；而按钮挂在**旧的**
+          //   assistantNode 上，新一轮生成结束后无人处理它。
+          //   修法：发起新一轮前先移除页面上所有「继续生成」按钮（含本按钮自身）——
+          //   ① 避免同时挂多个按钮；② 本按钮已完成使命，直接移除，
+          //   新一轮若再次中断会由 attachContinueGenerateBtn 重新挂一个全新按钮。
           btn.disabled = true;
           btn.textContent = '继续中…';
+          try {
+            var _oldBtns = document.querySelectorAll('.ai-continue-btn');
+            for (var _ob = 0; _ob < _oldBtns.length; _ob++) {
+              var _obEl = _oldBtns[_ob];
+              if (_obEl && _obEl.parentNode) _obEl.parentNode.removeChild(_obEl);
+            }
+          } catch (eOldBtn) {}
           var inputEl = S.inputEl || document.getElementById('aiChatInput');
           var sendEl = S.sendBtnEl || document.getElementById('aiChatSend');
           var host = msgHost || S.messagesEl || document.getElementById('aiChatMessages');
@@ -8835,8 +8972,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             else notify('无法继续，请手动重发');
           } catch (eSend) {
             notify('继续失败，请手动重发');
+            // ★ 2026-09-29（审计 M8）：发起前已把按钮摘出文档树，回滚时要重新挂回去，
+            //   否则用户连"再试一次"的入口都没有。
             btn.disabled = false;
             btn.textContent = '继续生成';
+            try {
+              if (!btn.parentNode && node && node.parentNode) node.appendChild(btn);
+            } catch (eBtnBack) {}
           }
         });
         node.appendChild(btn);
@@ -8845,6 +8987,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       function finishAiMessage(node, content, thinking, evt) {
         // P4 修复: 防止重复 finalize
         if (_finalized) return;
+        // ★★ 2026-09-29（审计 S2「切会话/中止后旧流仍继续收尾」）：
+        //   现象：A 会话 AI 还在输出时切到 B，B 里会多出一条 A 的 AI 回复并写进 B 的缓存。
+        //   根因：旧流 catch 里只靠 `S._currentReqId === reqId` 判定，而 switchConversation
+        //   此前不作废 _currentReqId，于是收尾照常执行 push + 写缓存。
+        //   修法：① 节点已脱离文档树（随 messagesEl.innerHTML='' 被摘掉）直接返回；
+        //   ② 本请求已不是当前请求（切会话/关面板会把 _currentReqId 置空）也直接返回。
+        //   两道校验都在 push / 写缓存之前，杜绝把上一会话的回复写进新会话。
+        //   注意用 `isConnected === false` 而非 `!isConnected`：某些非标准 DOM 实现
+        //   上没有该属性，取反会误伤（宁可放过，不可错杀）。
+        if (!node || node.isConnected === false) return;
+        if (S._currentReqId !== reqId) return;
         _finalized = true;
         // A stage is only a live progress indicator. Keeping it after the
         // answer is rendered makes a completed answer look permanently stuck.
@@ -8940,8 +9093,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           })
         };
         S.messages.push(aiMsg);
+        // ★ 2026-09-29（审计 S1）：登记本轮的本地 assistant 消息，并把节点与消息
+        //   互相关联，供首屏历史到达时按"是否本地未同步"保留气泡。
+        if (S._pendingLocalMsgs.indexOf(aiMsg) === -1) S._pendingLocalMsgs.push(aiMsg);
+        if (node) node._msgRef = aiMsg;
         // 流式完成后立刻写本地缓存，避免关面板/重进时服务端尚未落库导致「上一条不见了」
         try { setAiHistoryCache(S.conversationId, S.messages); } catch (eCache) {}
+        // ★ 2026-09-29（审计 S1 收尾）：本轮已成功落定，清空"本地待同步"引用。
+        //   否则若之后又触发 loadHistory(!before)（如重进会话），服务端已落库的
+        //   等价消息会和这里的本地引用被 concat 成两条，造成重复问答。
+        //   只在流式进行中保留 _pendingLocalMsgs，落定即清，生命周期严格对齐。
+        S._pendingLocalMsgs = [];
         
         if (node) {
           // 如果有搜索结果，把已有的搜索条移入消息节点（而非单独在 container 里）
@@ -10068,8 +10230,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               // 没有内容，回退
               notify(errMsg);
               try { assistantNode.remove(); } catch (e) {}
-              S.messages.pop();
-              removeLastUserMessage(messagesEl);
+              removeThisUserMessage();
               restoreInputText();
             }
             
@@ -10091,8 +10252,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             } else {
               notify(errMsg2);
               try { assistantNode.remove(); } catch (e) {}
-              S.messages.pop();
-              removeLastUserMessage(messagesEl);
+              removeThisUserMessage();
               restoreInputText();
             }
             
@@ -10219,7 +10379,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             hideAssistantTyping();
             S.sending = false;
             S.paused = false;
-            resetActiveRenderersByChannel('chat');
+            // ★★ 2026-09-29（审计 M11「done 先取消渲染器致气泡清空，长回复收尾闪一下」）：
+            //   现象：一条长回复写到最后时，气泡内容瞬间消失再整段重绘（"闪一下"），
+            //   低端机更明显，偶发整段空白停留。
+            //   根因：这里原先**先** resetActiveRenderersByChannel('chat')，
+            //   渲染器的 cancel() 在 !finished 时会执行 targetEl.innerHTML = ''，
+            //   随后 finishAiMessage 只能走 assistantBubble.innerHTML = renderMarkdown(...)
+            //   的兜底重绘 —— 中间存在一帧空气泡。
+            //   修法：把渲染器清理**挪到 finishAiMessage 之后**；finish() 已把最终内容
+            //   写进气泡并置 finished=true，此后的 cancel() 不会再清空 DOM。
             S.abortController = null;
             if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
@@ -10284,6 +10452,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               ensureAssistantBubbleReady();
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
             }
+            // ★ 2026-09-29（审计 M11，接上方注释）：收尾渲染完成后再清理渲染器，
+            //   避免"先清空气泡再兜底重绘"造成的收尾闪烁。
+            resetActiveRenderersByChannel('chat');
             // Attachments are single-use: remove the preview only after a
             // successful terminal event; errors and aborts remain retryable.
             consumeAiAttachment(fileData);
@@ -10340,8 +10511,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eC1) {}
         } else {
           try { assistantNode.remove(); } catch (e) {}
-          S.messages.pop();
-          removeLastUserMessage(messagesEl);
+          removeThisUserMessage();
           restoreInputText();
           notify('AI 响应超时（45 秒未收到数据），请重试');
         }
@@ -10381,8 +10551,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } else if (!doneReceived) {
         cleanupRenderers();
         try { assistantNode.remove(); } catch (e) {}
-        S.messages.pop();
-        removeLastUserMessage(messagesEl);
+        removeThisUserMessage();
         restoreInputText();
         // 流意外结束且未收到任何内容，且服务端**未**报错过：才是真的连接中断
         // （多半是连接被代理/网络切断，而非 AI 拒绝回答）。
@@ -10402,8 +10571,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           finishAiMessage(assistantNode, aiContent, aiReasoning, null);
         } else {
           try { assistantNode.remove(); } catch (e) {}
-          S.messages.pop();
-          removeLastUserMessage(messagesEl);
+          removeThisUserMessage();
           restoreInputText();
           notify('AI 响应超时（45 秒未收到数据），请重试');
         }
@@ -10440,8 +10608,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eC2) {}
         } else {
           try { assistantNode.remove(); } catch (e) {}
-          S.messages.pop();
-          removeLastUserMessage(messagesEl);
+          removeThisUserMessage();
           restoreInputText();
           // Phase 3: Use shared error classification
           var netErrMsg = '网络连接异常，请检查网络后重试';
@@ -10477,8 +10644,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } else {
           hideAssistantTyping();
           try { if (assistantNode) assistantNode.remove(); } catch (eAbortNode) {}
-          S.messages.pop();
-          removeLastUserMessage(messagesEl);
+          removeThisUserMessage();
         }
       }
     }
@@ -10629,11 +10795,49 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
 
       if (!before) {
-        S.messages = msgs;
+        // ★★ 2026-09-29（审计 S1「首屏历史到达时整体清空容器」）：
+        //   现象：打开小猫AI 后立刻发一条消息（鉴权/网络较慢时有 1~3 秒窗口，
+        //   输入框此时已可用），气泡先正常出现，几百毫秒后被整体清掉重画历史：
+        //   提问消失、AI 的回复再也看不到；S.messages 也被整体替换，后续追问
+        //   不再带这条上下文。
+        //   根因：这里无条件 `S.messages = msgs; messagesEl.innerHTML = ''`，
+        //   既不检查 S.sending，也不保留本地已 append 的 .ai-msg 节点。正在流式
+        //   写入的 assistantNode 被摘出文档树，之后 finishAiMessage /
+        //   clearAssistantTransientStatus 全部落在游离节点上，用户永远看不到内容。
+        //   修法：渲染历史前先把"本地尚未被服务端收录的轮次"（S._pendingLocalMsgs
+        //   里的消息对象 + 正在流式的 .generating 节点）从容器摘出，历史渲染完
+        //   再原样追加回末尾，并把它们并回 S.messages，保证上下文不丢。
+        var _localPending = [];
+        try {
+          var _pend = Array.isArray(S._pendingLocalMsgs) ? S._pendingLocalMsgs : [];
+          for (var _pi = 0; _pi < _pend.length; _pi++) {
+            var _pm = _pend[_pi];
+            // 只保留仍存在于 S.messages 里的（切会话/关面板后引用已失效，自然被过滤）
+            if (_pm && S.messages.indexOf(_pm) >= 0) _localPending.push(_pm);
+          }
+        } catch (ePend) {}
+        var _localNodes = [];
+        try {
+          var _kids = messagesEl.querySelectorAll('.ai-msg');
+          for (var _ki2 = 0; _ki2 < _kids.length; _ki2++) {
+            var _kn2 = _kids[_ki2];
+            var _isLocal = _kn2.classList.contains('generating')
+              || (_kn2._msgRef && _localPending.indexOf(_kn2._msgRef) >= 0);
+            if (!_isLocal) continue;
+            _localNodes.push(_kn2);
+            if (_kn2.parentNode) _kn2.parentNode.removeChild(_kn2);
+          }
+        } catch (eDetach) {}
+
+        S.messages = msgs.concat(_localPending);
         messagesEl.innerHTML = '';
         var frag = document.createDocumentFragment();
         msgs.forEach(function(m) { frag.appendChild(buildMessageNode(m, messagesEl)); });
         messagesEl.appendChild(frag);
+        // 历史渲染完再把本地未同步的轮次放回末尾（节点原样复用，流式写入不中断）
+        for (var _li = 0; _li < _localNodes.length; _li++) {
+          try { messagesEl.appendChild(_localNodes[_li]); } catch (eReappend) {}
+        }
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
         try {
@@ -10642,7 +10846,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } else {
         // 加载更早历史：DOM 前置 + 同步 S.messages（避免内存历史与 DOM 不一致）
         if (msgs.length) S.messages = msgs.concat(S.messages);
+        // ★ 2026-09-29（审计 M9「历史分页滚动锚点用 scrollHeight 差值，加载完跳位」）：
+        //   现象：上翻加载更早消息后，视口没有停在原来那条消息上，而是跳几十像素；
+        //   连续翻页时跳动累积，接近"历史加载后内容乱跳"。
+        //   根因：原代码 `oldScroll = scrollHeight` 再 `scrollTop = scrollHeight - oldScroll`
+        //   算出来的其实是"新增高度 Δ"，等价于假设加载前 scrollTop === 0；但触发条件
+        //   是 `scrollTop < 60`（见 bindAiChatScroll 的分页判断），真实 scrollTop 可能
+        //   是 0~59，误差最多 59px。
+        //   修法：额外记住加载前的 scrollTop，插入后设 scrollTop = oldScrollTop + Δ。
         var oldScroll = messagesEl.scrollHeight;
+        var oldScrollTop = messagesEl.scrollTop;
         var frag = document.createDocumentFragment();
         for (var mi = 0; mi < msgs.length; mi++) {
           var node = buildMessageNode(msgs[mi], messagesEl);
@@ -10651,7 +10864,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messagesEl.insertBefore(frag, messagesEl.firstChild);
         try {
           requestAnimationFrame(function() {
-            messagesEl.scrollTop = messagesEl.scrollHeight - oldScroll;
+            // ★ 2026-09-29（审计 M9，接上方注释）：Δ 是"新增内容高度"，
+            //   锚点 = 加载前的 scrollTop + Δ，才能停在原来那条消息上。
+            var delta = messagesEl.scrollHeight - oldScroll;
+            messagesEl.scrollTop = oldScrollTop + delta;
           });
         } catch (e2) {}
       }
@@ -10799,6 +11015,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (_histBtn) syncAiHeaderButtons(_histBtn, _newBtn);
     if (cid === S.conversationId && S.messages.length > 0) return;
     abortCurrentRequest();
+    // ★★ 2026-09-29（审计 S2「切会话后旧流仍继续收尾，污染新会话」）：
+    //   现象：A 会话 AI 还在输出时切到 B，B 里会莫名多出一条 A 的 AI 回复，
+    //   并被写进 B 的本地缓存（下次打开 B 还能看到"别人的回答"）；若 A 流还没
+    //   收到正文，则反过来把 B 刚加载出来的最后一条用户消息连同气泡删掉。
+    //   根因：这里只调 abortCurrentRequest()，既没有作废 S._currentReqId，
+    //   也没有标记旧流已收尾。旧流 catch 里 `S._currentReqId !== reqId` 判定
+    //   仍然通过，于是继续 finishAiMessage → push 到**新会话**的 S.messages + 写缓存。
+    //   修法：切会话时把 _currentReqId 置空，旧流所有收尾路径（含 finishAiMessage）
+    //   都会因"我不再是当前请求"而短路；同时作废本轮的本地待同步消息引用。
+    S._currentReqId = null;
+    S._pendingLocalMsgs = [];
     removeHistoryUnavailableBanner(S.messagesEl);
     
     S.historyRequestId += 1;
@@ -12705,6 +12932,17 @@ function showChatMessages() {
     }
 
     function doSend() {
+      // ★★ 2026-09-29（审计 S4「发送按钮从不禁用，可并行开多条流」）：
+      //   现象：网络慢时连点发送/连按回车，界面出现两条用户消息和两条并行 AI 回复，
+      //   停止按钮只能停掉最后一条，前一条的「思考中」永远转；额度按次数重复扣。
+      //   根因：doSend 不检查 S.sending，sendBtn 也从不 disabled，唯一防重是
+      //   handleSendMessage 里 1500ms 内同指纹的弱校验（且过期令牌分支会错误清零
+      //   S.sending，见该函数内的注释）。
+      //   修法：入口处再挡一道（配合发送期间 sendBtn.disabled = true）。
+      if (S.sending) {
+        try { notify('正在回复中…'); } catch (eBusyNotify) {}
+        return;
+      }
       if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
       var text = String(input.value || '').trim();
       var fileList = (_aiChatFiles && _aiChatFiles.length) ? _aiChatFiles.slice(0, 10) : [];
@@ -12753,8 +12991,21 @@ function showChatMessages() {
         pauseBtn.textContent = '继续';
       }
     });
+    // ★★ 2026-09-29（审计 M10「输入区没有 compositionstart / compositionend」）：
+    //   现象：中文/日文输入法下用回车确认候选词时消息被提前发送出去，发出去的是
+    //   半截拼音或没上屏的候选；Safari 与部分安卓第三方输入法上更明显。
+    //   根因：全文件只有 `!e.isComposing` 一处判断，没有组合输入状态兜底。部分浏览器
+    //   在 compositionend 之后的那一帧 keydown 上 isComposing 已经变回 false，
+    //   且缺少 e.keyCode === 229（IME 处理中）的兼容判断。
+    //   修法：自己维护 _imeComposing（compositionstart 置真、compositionend 在
+    //   setTimeout(0) 里置假，让同帧的 keydown 仍被拦住），发送条件三选一全不满足才发。
+    var _imeComposing = false;
+    input.addEventListener('compositionstart', function() { _imeComposing = true; });
+    input.addEventListener('compositionend', function() {
+      setTimeout(function() { _imeComposing = false; }, 0);
+    });
     input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !_imeComposing && e.keyCode !== 229) {
         e.preventDefault();
         doSend();
       }
@@ -12768,6 +13019,16 @@ function showChatMessages() {
     //   由 closeAiChat 统一调用；函数每次 renderAiRoot 重建，指向当前闭包，无泄漏。
     S._aiChatFilesCleanup = function() {
       try { _aiChatFiles = []; } catch (e) {}
+    };
+    // ★ 2026-09-29（审计 M5「发送失败只回填文字，附件不可恢复」）：
+    //   供 handleSendMessage 的失败收尾（restoreInputText）把本次附件放回输入区
+    //   并重新渲染预览 —— 此前失败后附件预览永久丢失，用户必须重新选一遍文件。
+    S._restoreAiChatFiles = function(files) {
+      try {
+        if (!files || !files.length) return;
+        _aiChatFiles = files.slice(0, 10);
+        renderAiMultiFilePreview(_aiChatFiles);
+      } catch (eRestore) {}
     };
     function clearAiChatFilePreview() {
       _aiChatFiles = [];
@@ -13034,6 +13295,11 @@ function showChatMessages() {
     clearReplyTimer();
     // 页面级关闭：完整清理主聊天 + 深度思考两套状态
     abortAllAiRequests();
+    // ★ 2026-09-29（审计 S2）：关闭面板同样要作废 _currentReqId，
+    //   否则旧流的收尾（push 消息 / 写缓存）仍会落在已被清空/替换的 S.messages 上。
+    //   （只清主聊天通道，深页独立通道 _dtCurrentReqId 由深页自己管理。）
+    S._currentReqId = null;
+    S._pendingLocalMsgs = [];
     // 关闭深度思考二级页面，避免它残留在普通聊天之中
     // Clean up deep think state
     if (S.deepThinkProgressCard) {

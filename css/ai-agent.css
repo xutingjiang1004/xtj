@@ -1025,6 +1025,26 @@
   isolation: isolate;
 }
 
+/* ★★ 2026-09-29 修复（审计报告 L 级「输入栏常驻 blur(32px) 未按性能档位降级」）：
+   32px 模糊 + 190% 饱和度在**整个流式输出期间**持续参与合成，是移动端低端机上
+   滚动/打字时最贵的一层；本文件全文另有 49 处 backdrop-filter，但输入栏是唯一
+   常驻可见、且长时间与高频重绘同帧的那一层。
+   分级降级（项目已有 .perf-balanced / .perf-lite 档位；lite 侧已由
+   `.perf-lite .ai-chat-root *`（6113 行）统一置 none，输入栏挂在
+   #aiChatRoot.ai-chat-root 下（ai-agent.js:12993 root.appendChild(inputBar)），
+   故已在覆盖范围内，此处不重复写）：
+     · perf-balanced：已由 6097 行那条规则降到 blur(8px)，此处不重复；
+     · 动效关闭（data-xtj-motion=off）：补上同一档降级。off 表示用户明确
+       要求"别折腾"，此时 32px 模糊 + 190% 饱和度最没有存在必要；
+       降到 8px 并去掉 saturate(190%)（8px 已足够压住背后滚动的正文，
+       饱和度提升对毛玻璃观感贡献极小，却是额外一轮色彩矩阵运算）；
+     · perf-lite：完全 none（由 6113 行统一处理，纯色渐变背景已可辨认）。
+   ★ 只降级 filter，不动背景渐变/边框/阴影 —— 输入栏的分层观感保持不变。 */
+html[data-xtj-motion="off"] .ai-chat-input-bar {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 .ai-chat-input-bar.is-file-dragover,
 .dt-input-bar.is-file-dragover {
   box-shadow:
@@ -3468,6 +3488,33 @@
     background-image: none !important;
     -webkit-text-fill-color: currentColor !important;
     color: rgba(95, 114, 117, 0.92) !important;
+  }
+
+  /* ★★ 2026-09-29 修复（审计报告 M 级「prefers-reduced-motion 漏网 6 处」）：
+     本块是**手工罗列选择器**的写法，新增动画时没有同步补，于是下面这批
+     infinite 动画对"减少动效"用户照常永久循环：
+       · 776  .ai-msg.typing .ai-typing-bubble span → aiTypingDot
+          （本块原先只写了 .ai-msg-bubble span，漏了 .ai-typing-bubble span）
+       · 4471 .ai-deep-think-icon                  → dt-sparkle-wiggle
+       · 4537 .ai-progress-card::after             → progress-shimmer
+       · 4560 .ai-progress-icon                    → dt-soft-float
+       · 4618 .ai-progress-thinking-log .ai-thought-role::before → dt-dot-breathe
+       · 4846 .ai-thought-role::before             → dt-dot-breathe
+         （这一条不在 #panelDeepThink .ai-research-card 子树内，
+           5724 / 6077 那两个按面板兜底的块罩不到它）
+       · 7057 .ai-chat-voice.listening             → ai-voice-pulse
+     根因：dt-* / progress-* / voice 三族整体缺一个**按族**的兜底。
+     这里按族兜底（而不是逐个类名再罗列一遍，避免下次新增动画再漏）。
+     ★ 只关 animation，不动颜色/边框：这些元素的"状态"仍由静态样式表达
+       （语音键仍有红边、进度卡仍有渐变底），只是不再呼吸/浮动/扫光。 */
+  .ai-msg.typing .ai-typing-bubble span,
+  .ai-deep-think-icon,
+  .ai-progress-card::after,
+  .ai-progress-icon,
+  .ai-progress-thinking-log .ai-thought-role::before,
+  .ai-thought-role::before,
+  .ai-chat-voice.listening {
+    animation: none !important;
   }
 
   .ai-chat-think-menu {
