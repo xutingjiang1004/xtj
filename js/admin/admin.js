@@ -4721,8 +4721,8 @@
                 // ---- 模块7: 模型与思考模式 ----
                 '<div class="ai-settings-section">',
                 '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">模型与思考模式</h4>',
-                '<div class="form-group"><label>主模型名</label><input id="modelReasoner" value="' + escapeHtml(mdl.reasoner_model || 'deepseek-v4-flash-vision-exp') + '" placeholder="deepseek-v4-flash-vision-exp / deepseek-v4-pro" /></div>',
-                '<div style="font-size:11px;color:#888;margin:-4px 0 8px 0;line-height:1.4;">旧模型名 deepseek-chat / deepseek-reasoner / deepseek-v4-flash 会在保存和加载时自动迁移到 deepseek-v4-flash-vision-exp。</div>',
+                '<div class="form-group"><label>主模型名</label><input id="modelReasoner" value="' + escapeHtml(mdl.reasoner_model || 'deepseek-flash') + '" placeholder="deepseek-flash / deepseek-v4-pro" /></div>',
+                '<div style="font-size:11px;color:#888;margin:-4px 0 8px 0;line-height:1.4;">当前主模型 deepseek-flash 即 DeepSeek-V4.1-Flash（2026-09-10 GA，原生多模态）。旧模型名 deepseek-chat / deepseek-reasoner / deepseek-v4-flash / deepseek-v4-flash-vision-exp 等已下线，会在保存和加载时自动迁移到 deepseek-flash。</div>',
                 '<div class="form-group"><label>默认思考模式</label><select id="modelThinkingMode">' + selOpts(mdl.default_thinking_mode, [{val:'off',label:'关闭'},{val:'low',label:'低'},{val:'medium',label:'中'},{val:'high',label:'高'},{val:'max',label:'极高 (max)'}]) + '</select></div>',
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="modelMultiAgent"' + (mdl.multi_agent ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 多Agent协作（拆解问题→多关键词并行搜索→合成回答，思考/非思考模式均可）</label>',
