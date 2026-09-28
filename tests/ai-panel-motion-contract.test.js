@@ -116,7 +116,16 @@ test('工具轮次：容器由 createToolRound 统一构造（三处创建点结
 test('工具轮次：整轮结束后自动折叠为一行', () => {
   const fnStart = agentSrc.indexOf('function updateToolRoundState(');
   assert.ok(fnStart > 0, 'updateToolRoundState 必须存在');
-  const body = agentSrc.slice(fnStart, fnStart + 1800);
+  // ★ 2026-09-28：原实现按固定 1800 字符截取函数体，往函数里加注释/分支后
+  //   尾部的 remove('is-done','is-collapsed') 会被挤出窗口而误报。
+  //   改为花括号配平取完整函数体。
+  let depth = 0, idx = agentSrc.indexOf('{', fnStart), fnEnd = -1;
+  for (; idx < agentSrc.length; idx++) {
+    if (agentSrc[idx] === '{') depth++;
+    else if (agentSrc[idx] === '}') { depth--; if (depth === 0) { fnEnd = idx; break; } }
+  }
+  assert.ok(fnEnd > 0, 'updateToolRoundState 花括号未配平');
+  const body = agentSrc.slice(fnStart, fnEnd + 1);
   const settledIdx = body.indexOf('roundBox.classList.add(\'is-done\')');
   assert.ok(settledIdx > 0, '必须存在整轮完成分支');
   const settledSeg = body.slice(settledIdx, settledIdx + 400);

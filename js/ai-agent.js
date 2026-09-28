@@ -2713,6 +2713,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       activity.classList.remove('is-running');
       activity.classList.add('is-done', 'is-collapsed');
       if (head) { try { head.setAttribute('aria-expanded', 'false'); } catch (eArA2) {} }
+      // ★ 2026-09-28 修复（失败态视觉缺失）：
+      //   CSS 为失败态准备了 `.ai-tool-activity.is-done.is-error .ai-tool-activity-icon::before
+      //   {content:'!'}`，但 JS 从来没给容器加过 is-error（is-error 只加在条目上），
+      //   而这里写入的 ⚠️ emoji 又被 CSS 的 `font-size:0; text-indent:-999px` 隐身 ——
+      //   于是成功失败长得一模一样（都是绿勾），只有文字里能看出差别。
+      if (totalFailed > 0) activity.classList.add('is-error');
+      else activity.classList.remove('is-error');
       if (icon) icon.textContent = totalFailed > 0 ? '⚠️' : '✅';
       // ★ 2026-09-28（方案 C）：用时只在**首次**收敛时锁定。
       //   若每次刷新都重算，中途展开/再收敛会让耗时一直涨，与"这次工具花了多久"的语义不符。
@@ -2743,6 +2750,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (count) count.textContent = elapsedText;
     } else {
+      // ★ 2026-09-28 修复（多轮/补搜场景"用时"显示的是**第一轮**的耗时）：
+      //   原 __elapsedMs 首次收敛后就锁死、__startedAt 也从不复位。但工具可以
+      //   **分多轮跑**（后端每轮 tool_calls 前会推一段 narration content），
+      //   第一轮结束时 __elapsedMs 就被锁定；第二轮再跑时不重算，
+      //   最终展示第一轮快照（体感 30s 却写着 3.2s —— 典型的"它在骗我"）。
+      //   识别"新一轮开始了"：计时若已锁定过，说明中途发生过收敛，
+      //   当下必然是新一轮 → 解锁并把起点拨到现在。
+      if (activity.__elapsedMs !== undefined) {
+        delete activity.__elapsedMs;
+        activity.__startedAt = Date.now();
+      }
       activity.classList.add('is-running');
       activity.classList.remove('is-done', 'is-collapsed');
       if (head) { try { head.setAttribute('aria-expanded', 'true'); } catch (eArA3) {} }
@@ -2846,7 +2864,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!roundBox) return;
     var steps = roundBox.querySelectorAll('.ai-tool-step');
     var total = steps.length;
-    if (!total) return;
+    // ★ 2026-09-28 修复（零条目轮次永不收敛）：
+    //   原写法 `if (!total) return;` —— 空轮次连 is-running 都不会被摘掉，
+    //   于是摘要行一直挂着"正在调用工具"、整轮永远处于进行态，
+    //   反过来让 updateToolActivity 的 runningRounds>0 恒真、活动区永不收敛。
+    //   而注释里专门为此写的 forceSettleToolRound 在全文件竟然没有调用点。
+    //   真实来源：tool_calls 的 evt.tools 为空（一条都没建）、
+    //   或所有条目都被复用到别的轮次。
+    //   处理：无条目时视为"已收敛"，走终态落定（而不是直接 return）。
+    if (!total) {
+      roundBox.classList.remove('is-running');
+      roundBox.classList.add('is-done', 'is-collapsed');
+      try { refreshOwningToolActivity(roundBox); } catch (eEmptyRoundAct) {}
+      return;
+    }
     var done = 0, failed = 0;
     for (var i = 0; i < total; i++) {
       if (steps[i].classList.contains('is-done')) done++;
@@ -2867,6 +2898,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (caretHost) {
         try { caretHost.setAttribute('aria-expanded', 'false'); } catch (eAr2) {}
       }
+      // ★ 2026-09-28 修复（同上：轮次容器也需要 is-error，否则 `.ai-tool-round.is-error
+      //   .ai-tool-round-icon::before{content:'!'}` 永远不生效）
+      if (failed > 0) roundBox.classList.add('is-error');
+      else roundBox.classList.remove('is-error');
       if (icon) icon.textContent = failed > 0 ? '⚠️' : '✅';
       if (label) {
         label.textContent = failed > 0
@@ -3167,6 +3202,35 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     container.appendChild(toggle);
     container.appendChild(panel);
     return container;
+  }
+
+  // ★★★ 2026-09-28 新增：回收"从未被真实思考内容接管"的占位思考节点。
+  //   为降低感知延迟，发送瞬间会在 thinkingMode 开启时插入一个占位节点
+  //   （标签写死的「思考中」）。模型不是每次都输出 reasoning —— 简单提问或
+  //   工具直答时根本没有思考过程，这个节点若不回收就会永久停留在"思考中"。
+  //   判定条件刻意收紧，避免误删真正有内容的思考面板：
+  //     ① 标签仍是初始的「思考中」（说明没有任何 reasoning 流进来改写过它）；
+  //     ② 且思考正文区域为空（没有被后续流填充）。
+  function settleUnusedEarlyThinkingNode(target) {
+    if (!target || !target.querySelectorAll) return;
+    // 容器真实类名为 .ai-thinking（buildReasoningNode 的产出），必须是这一个，
+    // 写错名字会导致本函数静默空转（守卫测试已钉住）。
+    var nodes = target.querySelectorAll('.ai-thinking');
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var label = node.querySelector('.ai-thinking-label');
+      if (!label) continue;
+      if (String(label.textContent || '').trim() !== '思考中') continue; // 已被真实内容接管
+      var hasBody = false;
+      try {
+        var bodies = node.querySelectorAll('.ai-thinking-body, .ai-thinking-panel, .ai-reasoning-body');
+        for (var b = 0; b < bodies.length; b++) {
+          if (String(bodies[b].textContent || '').trim()) { hasBody = true; break; }
+        }
+      } catch (eBody) {}
+      if (hasBody) continue;
+      try { node.remove(); } catch (eRm) {}
+    }
   }
 
   // ★ O 修复 Bug 4: 从 history 恢复 think-card
@@ -8452,6 +8516,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       function clearAssistantTransientStatus(node) {
         var target = node || assistantNode;
         if (!target) return;
+        // ★★★ 2026-09-28 修复（用户报障：「我根本没让它思考，它却一直挂着思考中」）：
+        //   发送瞬间为了让用户立刻看到反馈，会在 thinkingMode 开启时
+        //   插入一个占位思考节点（标签写死的「思考中」）。但**并非每次回复都有
+        //   reasoning 内容** —— 简单提问/工具直答时模型不输出思考过程，
+        //   这个占位节点就再也没人管：标签停在「思考中」、思考动画继续转，
+        //   直到用户切走会话都还在。
+        //   本函数是所有终态路径（done / error / 中断 / 超时 / 工具收尾）的公共收敛点，
+        //   放在这里覆盖面最广。只在"确实没有被真实思考内容接管"时才移除：
+        //   ① 节点仍带着初始标签「思考中」（说明没有任何 reasoning 流进来）
+        //   ② 且节点体内没有用户可读的思考正文
+        try { settleUnusedEarlyThinkingNode(target); } catch (eEarlyThink) {}
         // ★ 2026-09-13 修复（"已搜完仍显示正在搜索中、动画一直闪"）：
         //   搜索状态条（.ai-search-status）此前不在此函数的清理范围内，且 done 事件
         //   也不处理它 —— 于是只要走过搜索路径，状态条就永久停留在"联网中…"，
@@ -9288,9 +9363,40 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   紧凑占位，等 tool_calls 到达时把详情补齐、状态统一为"搜索中"。
             var pendingBar = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
             var pendName = String(evt.tool_name || '');
-            var pendExisting = pendName
-              ? pendingBar && pendingBar.querySelector('[data-tool-name="' + pendName.replace(/["\\\]\[]/g, '') + '"]')
-              : null;
+            // ★★★ 2026-09-28 修复（必现：同一批两个同名工具＝赤字）：
+            //   原式 `pendingBar.querySelector('[data-tool-name="X"]')` 取的是
+            //   **全时间线文档序第一条**同名条目，既不限定是否仍在运行、
+            //   也不排除已被结果认领/已终态的条目。
+            //   后端的发送时序是 `tool_calls`(整批) → 逐个 `tool_pending`
+            //   → `tool_result`（server.js:22620-22630），所以第 2 个 pending
+            //   再次查询时命中的**仍是第 1 条**——而它此时可能已经被自己的
+            //   tool_result 标记了 is-done。原代码随后无条件
+            //   `add('is-running') / remove('is-done','is-error')`，把一条
+            //   **已经完成并打勾**的条目复活成"搜索中"，且没有清掉
+            //   `data-tool-claimed` —— 于是后续 tool_result 的匹配循环里
+            //   它既不算 unclaimedNamedStep（claimed=1）也不算兜底候选，
+            //   再也没人收敛它，只能等流结束被兜底抹成 is-error，
+            //   表现为「工具明明成功了，最后却显示未收到结果 / 失败」。
+            //   用户问"北京和上海的天气"必现（同一批两个 get_weather）。
+            //
+            //   复用候选收紧为：**仍在运行 且 未被结果认领** 的最后一个同名条目。
+            //   已终态（is-done/is-error）与已认领（data-tool-claimed）一律不碰。
+            var pendExisting = null;
+            if (pendName) {
+              try {
+                var _pendCands = pendingBar.querySelectorAll('[data-tool-name="' + pendName.replace(/["\\\]\[]/g, '') + '"]');
+                // 从后往前取：后追加的条目属于更新的轮次
+                for (var _pendI = _pendCands.length - 1; _pendI >= 0; _pendI--) {
+                  var _pendC = _pendCands[_pendI];
+                  // "整理中"占位（历史数据）不参与复用
+                  if (_pendC.classList.contains('ai-tool-organizing')) continue;
+                  if (!_pendC.classList.contains('is-running')) continue;   // ★ 已终态不复活
+                  if (_pendC.getAttribute('data-tool-claimed') === '1') continue; // ★ 已认领不复活
+                  pendExisting = _pendC;
+                  break;
+                }
+              } catch (ePendQ) {}
+            }
             if (pendExisting) {
               pendExisting.classList.add('is-running');
               pendExisting.classList.remove('is-done', 'is-error');
@@ -9386,7 +9492,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 errBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '失败' }));
                 if (evt.error) errBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(evt.error).slice(0, 120) }));
                 errStep.appendChild(errBody);
-                var errRound2 = errTimeline.querySelector('.ai-tool-round.is-running:last-of-type');
+                // ★★★ 2026-09-28 修复（与 tool_pending 同款，上一轮修复时漏改此处）：
+                //   `.ai-tool-round.is-running:last-of-type` 语义错误 ——
+                //   :last-of-type 要求该元素在**所有同级 .ai-tool-round 中排在最后**
+                //   （只按标签名算，不看 class），再叠加 .is-running 过滤。
+                //   只要 running 轮次后面还排着别的轮次，这里就查不到它，
+                //   于是为本该归属已有轮次的失败条目**新建一个轮次**（孤儿轮次），
+                //   反过来又让该轮永远凑不齐、停在 running 不收敛。
+                //   正确写法：直接取**最后一个仍在运行的轮次**。
+                var _errRounds = errTimeline.querySelectorAll('.ai-tool-round.is-running');
+                var errRound2 = _errRounds.length ? _errRounds[_errRounds.length - 1] : null;
                 if (!errRound2) {
                   // ★ 2026-09-22：统一走 createToolRound，保证折叠结构与 CSS 一致
                   var _errBuilt = createToolRound('正在调用工具', 'r' + (toolRoundSeq++));
