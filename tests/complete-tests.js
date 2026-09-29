@@ -516,12 +516,11 @@ console.log('\n=== Feed Pagination Guards ===');
 
 test('/api/feed filters system markers and visibility at database level before pagination', function(){
   var s = read('render-api/server.js');
-  // 必须先用 neq 排除系统标记，再用分页
   var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
-  assert.ok(feedSection.indexOf('.range(from, to)') >= 0, '/api/feed missing range pagination');
+  assert.ok(feedSection.indexOf('.range(from, from + limit - 1)') >= 0, '/api/feed missing first-page pagination');
   // System rows must be excluded before pagination. The current implementation
   // uses a safe media-type allowlist so NULL post rows are retained.
-  var rangeIdx = feedSection.indexOf('.range(from, to)');
+  var rangeIdx = feedSection.indexOf('.range(from, from + limit - 1)');
   var neqIdx = feedSection.indexOf(".neq('media_type',");
   var allowlistIdx = feedSection.indexOf('media_type.in.');
   assert.ok((neqIdx >= 0 || allowlistIdx >= 0) && Math.max(neqIdx, allowlistIdx) < rangeIdx, '/api/feed system marker filter must appear before range pagination');
@@ -536,12 +535,14 @@ test('/api/feed returns next_offset from server', function(){
   assert.ok(feedSection.indexOf('next_offset') >= 0, '/api/feed missing next_offset in response');
 });
 
-test('/api/feed endReached based on database-filtered result not JS-filtered count', function(){
+test('/api/feed advances by consumed rows and fills pages after legacy telemetry filtering', function(){
   var s = read('render-api/server.js');
   var feedSection = s.slice(s.indexOf("app.get('/api/feed'"), s.indexOf('// ===================== 照片墙'));
   assert.ok(feedSection.indexOf('endReached') >= 0, '/api/feed missing endReached');
-  assert.ok(feedSection.indexOf('preFilterCount < limit') >= 0, '/api/feed endReached must use preFilterCount < limit');
-  assert.ok(feedSection.indexOf('next_offset: preFilterCount ? from + preFilterCount : from') >= 0, '/api/feed next_offset must advance by the unfiltered page width');
+  assert.ok(feedSection.indexOf('endReached = rawPosts.length < limit') >= 0, '/api/feed endReached must use the raw database page');
+  assert.ok(feedSection.indexOf('next_offset: requestedOffset + scannedCount') >= 0, '/api/feed next_offset must advance by consumed database rows');
+  assert.ok(feedSection.indexOf('posts.length < limit && rawPosts.length === limit') >= 0, '/api/feed must scan beyond filtered telemetry rows to fill the first page');
+  assert.ok(feedSection.indexOf('var maxScans = 20;') >= 0, '/api/feed cursor path must bound telemetry scan work');
 });
 
 test('/api/feed uses optionalAuth for unauthenticated access', function(){

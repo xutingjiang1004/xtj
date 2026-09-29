@@ -516,6 +516,8 @@
                 try { stopReportReplyPolling(); } catch (e) {}
                 try { if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; } } catch (e) {}
                 try { if (commentRealtime) { sb.removeChannel(commentRealtime); commentRealtime = null; } } catch (e) {}
+                try { if (likesRealtime) { sb.removeChannel(likesRealtime); likesRealtime = null; } } catch (e) {}
+                window.__likesSubEpoch = (window.__likesSubEpoch || 0) + 1;
                 try { if (annRealtime) { sb.removeChannel(annRealtime); annRealtime = null; } } catch (e) {}
 
                 clearUserToken();
@@ -2036,4 +2038,3 @@ function renderProfileActivityList(kind) {
                     console.error("加载头像失败:", e);
                 }
             }
-

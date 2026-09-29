@@ -110,7 +110,7 @@
                 var buttons = [];
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
                     if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
-                    var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
+                    var likeBtn = postEl.querySelector('.actions .like-btn');
                     if (likeBtn) buttons.push(likeBtn);
                 });
                 return buttons;
@@ -144,13 +144,59 @@
 
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
                     if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
-                    var likeBtn = postEl.querySelector('.actions .like-btn') || postEl.querySelector('.actions .action-btn');
+                    var likeBtn = postEl.querySelector('.actions .like-btn');
                     var statsEl = postEl.querySelector('.post-stats-text');
                     var stateChanged = !!likeBtn && likeBtn.classList.contains('liked') !== !!liked;
                     setLikeButtonState(likeBtn, liked);
                     if (stateChanged) updateLikeStatsText(statsEl, liked);
                 });
             }
+
+            window.__xtjApplyRealtimeLike = function(eventType, row) {
+                if (!row || row.id == null || row.post_id == null) return;
+                var postId = String(row.post_id);
+                if (!(feedAllPosts || []).some(function(post) { return String(post && post.id) === postId; })) return;
+                // The API response owns the in-flight optimistic update on this device.
+                if (likeOperations[postId] && likeOperations[postId].running) return;
+                var likes = Array.isArray(feedAllLikes) ? feedAllLikes : (feedAllLikes = []);
+                var changed = false;
+                var shouldIncrement = false;
+                if (eventType === 'INSERT') {
+                    if (likes.some(function(item) { return String(item && item.id) === String(row.id); })) return;
+                    var sameActorIndex = -1;
+                    if (isLikeOwnedByCurrentUser(row, postId)) {
+                        sameActorIndex = likes.findIndex(function(item) {
+                            return !item.id && isLikeOwnedByCurrentUser(item, postId);
+                        });
+                    }
+                    if (sameActorIndex >= 0) likes.splice(sameActorIndex, 1);
+                    else shouldIncrement = true;
+                    likes.push(row);
+                    changed = true;
+                } else if (eventType === 'DELETE') {
+                    var before = likes.length;
+                    likes = likes.filter(function(item) {
+                        if (String(item && item.id) === String(row.id)) return false;
+                        if (isLikeOwnedByCurrentUser(row, postId) && isLikeOwnedByCurrentUser(item, postId)) return false;
+                        return true;
+                    });
+                    changed = likes.length !== before;
+                    if (!changed) return;
+                } else {
+                    return;
+                }
+                feedAllLikes = likes;
+                document.querySelectorAll('.post[data-post-id]').forEach(function(card) {
+                    if (String(card.getAttribute('data-post-id') || '') !== postId) return;
+                    var stats = card.querySelector('.post-stats-text');
+                    if (stats && (eventType === 'DELETE' || shouldIncrement)) updateLikeStatsText(stats, eventType === 'INSERT');
+                    var mine = likes.some(function(item) { return isLikeOwnedByCurrentUser(item, postId); });
+                    setLikeButtonState(card.querySelector('.actions .like-btn'), mine);
+                });
+                persistFeedLikesCache();
+                scheduleLikeStatRefresh();
+                if (typeof updateFeedStats === 'function') updateFeedStats();
+            };
             var likeStatRefreshTimer = null;
             function scheduleLikeStatRefresh() {
                 var modal = document.getElementById('statModal');
@@ -199,6 +245,11 @@
                         applyPostLikeIntent(postId, operation.confirmed);
                         showToast("点赞失败，请重试");
                     }
+                    // A failed request must not leave a stale optimistic intent behind.
+                    // The next tap is derived from the visible/confirmed state and will
+                    // resend that explicit state (the endpoint is idempotent).
+                    operation.desired = operation.confirmed;
+                    operation.requested = operation.confirmed;
                 }).finally(function() {
                     // ★ 修复：无条件复位 running——此前仅当 desired===confirmed 时才删除条目，
                     // 若"请求在途时再点取消 → 第一次成功触发 re-flush → 第二次失败"，条目会永久
@@ -247,8 +298,28 @@
 
             function createLikeBlossom(btn) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
-                if (perfProfile === 'lite') return;
                 if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+                if (perfProfile === 'lite') {
+                    if (!btn || !btn.classList) return;
+                    if (btn._likeLiteTimer) clearTimeout(btn._likeLiteTimer);
+                    if (btn._likeLiteFrame != null) {
+                        if (window.cancelAnimationFrame) window.cancelAnimationFrame(btn._likeLiteFrame);
+                        else clearTimeout(btn._likeLiteFrame);
+                    }
+                    btn.classList.remove('like-lite-feedback');
+                    var startLiteFeedback = function() {
+                        btn._likeLiteFrame = null;
+                        btn.classList.add('like-lite-feedback');
+                        btn._likeLiteTimer = setTimeout(function() {
+                            btn._likeLiteTimer = null;
+                            btn.classList.remove('like-lite-feedback');
+                        }, 240);
+                    };
+                    btn._likeLiteFrame = window.requestAnimationFrame
+                        ? window.requestAnimationFrame(startLiteFeedback)
+                        : setTimeout(startLiteFeedback, 16);
+                    return;
+                }
                 var layer = btn.closest ? btn.closest('.actions') : btn.parentElement;
                 if (!layer) return;
 
@@ -271,13 +342,19 @@
                 layer.appendChild(blossom);
 
                 var cleanup = function() {
-                    if (btn._likeBlossom && btn._likeBlossom.node === blossom) btn._likeBlossom = null;
+                    if (btn._likeBlossom && btn._likeBlossom.node === blossom) {
+                        if (btn._likeBlossom.timer) clearTimeout(btn._likeBlossom.timer);
+                        btn._likeBlossom = null;
+                    }
                     if (blossom.parentNode) blossom.remove();
+                    btn.classList.remove('like-bloom-origin');
                 };
                 blossom.addEventListener('animationend', cleanup, { once: true });
                 btn._likeBlossom = {
                     node: blossom,
-                    timer: setTimeout(cleanup, perfProfile === 'balanced' ? 620 : 820)
+                    // CSS runs for 780ms. Keep the fallback beyond animationend so
+                    // Balanced mode cannot truncate the last part of the blossom.
+                    timer: setTimeout(cleanup, perfProfile === 'balanced' ? 900 : 900)
                 };
             }
 
@@ -637,7 +714,9 @@
                                 return !(item && item.id != null && String(item.id) === String(insertedComment.id));
                             }).concat([insertedComment]);
                             writeFeedCacheSnapshot();
-                            await renderFeedFromMemoryState();
+                            if (typeof window.__xtjSchedulePostCardPatch === 'function') {
+                                window.__xtjSchedulePostCardPatch(targetPostId);
+                            }
                         } else {
                             await loadFeed(true);
                         }
@@ -1620,6 +1699,15 @@
                                     function (_m, prefix) { return prefix + String(authoritativeViews); }
                                 );
                             }
+                            var detailModal = document.getElementById('postDetailModal');
+                            var detailStats = document.querySelector('#postDetailBody .post-detail-stats');
+                            if (detailModal && detailModal.classList.contains('active') &&
+                                String(window.__xtjPostDetailCurrentId || '') === String(postId) && detailStats) {
+                                detailStats.textContent = detailStats.textContent.replace(
+                                    /((?:浏览|👁)\s*)(\d+)/,
+                                    function (_m, prefix) { return prefix + String(authoritativeViews); }
+                                );
+                            }
                             if (Array.isArray(feedAllPosts)) {
                                 feedAllPosts = feedAllPosts.map(function(post) {
                                     return post && String(post.id) === String(postId) ? Object.assign({}, post, { views: authoritativeViews }) : post;
@@ -1668,6 +1756,7 @@
             let feedLoadRequestId = 0;
             let feedStateVersion = 0;
             let feedNextOffset = 0;
+            let feedNextCursor = null;
             let feedLoadedPages = [];
             let feedPageFetchPending = false;
             // ★ 修复：加载更多失败后置位，哨兵不再自动触发（防无限重复请求），
@@ -2199,14 +2288,28 @@
                     return sel ? feed.querySelector(sel) : null;
                 })();
                 if (!existing) return false;
-                var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
-                var template = document.createElement('template');
-                template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
-                var nextPostEl = template.content.firstElementChild;
-                if (!nextPostEl) return false;
-                nextPostEl.classList.add('visible');
-                existing.replaceWith(nextPostEl);
-                observePostViewportState([nextPostEl]);
+                var locationHolder = document.createElement('div');
+                locationHolder.innerHTML = buildPostLocationHtml(post);
+                var nextIp = locationHolder.querySelector('.post-ip-region');
+                var oldIp = existing.querySelector('.post-ip-region');
+                var oldLocation = existing.querySelector('.post-location-info');
+                if (nextIp) {
+                    if (oldIp) {
+                        oldIp.textContent = nextIp.textContent;
+                    } else {
+                        if (!oldLocation) {
+                            oldLocation = document.createElement('div');
+                            oldLocation.className = 'post-location-info';
+                            var stats = existing.querySelector('.post-stats-text');
+                            if (stats && stats.parentNode) stats.parentNode.insertBefore(oldLocation, stats);
+                            else existing.appendChild(oldLocation);
+                        }
+                        oldLocation.appendChild(nextIp);
+                    }
+                } else if (oldIp) {
+                    oldIp.remove();
+                    if (oldLocation && !oldLocation.children.length) oldLocation.remove();
+                }
                 writeFeedCacheSnapshot();
                 updateFeedStats();
                 return true;
@@ -2219,11 +2322,11 @@
                 if (publishedPostIpRefreshTimers[key]) return;
                 publishedPostIpRefreshTimers[key] = true;
                 var attempts = 0;
-                // 2026-09-22：轮询窗口对齐后端节奏（发布时同步解析 3s 截止 + 失败后
-                // 30s 一轮异步重试，总计 ~35s）。此前 4 次 ≈3s 即放弃，后端落定后
-                // 卡片仍停在"解析中"，要手动刷新才能看到属地。
-                var maxAttempts = 7;
-                var attemptDelaysMs = [600, 1200, 2500, 5000, 8000, 9000, 9000];
+                // Track the complete server retry schedule: an immediate retry, then 30s,
+                // then 5m. The extra polling margin covers the resolver deadline on the
+                // final attempt so a successful backend update is not missed by this card.
+                var maxAttempts = 19;
+                var attemptDelaysMs = [600, 1200, 2500, 5000, 8000, 15000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000];
                 function nextDelayMs() {
                     return attemptDelaysMs[Math.min(attempts, attemptDelaysMs.length) - 1] || 900;
                 }
@@ -2417,7 +2520,7 @@
                 var idHtml = escapeHtml(String(post.id));
                 var actorKeyJs = safeJsStr(String(post.actor_key || ""));
                 var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>',
+                    '<button class="action-btn like-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>',
                     '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canPinPost(post)) {
@@ -2799,8 +2902,8 @@
             //     · 已经加载到第 10 屏的人，滚动位置被拽回重建后的内容；
             //     · 评论框展开状态、正在播放的视频、已加载的图片全部重置（图片重新请求）；
             //     · 卡片上的「小猫 AI 正在组织语言」气泡也会被重绘。
-            //   现在改为**只重渲染受影响的单张卡片**：替换该 .post 节点的 outerHTML，
-            //   并用同签名复用 observer 注册，其余卡片完全不动。
+            //   现在只重渲染受影响的评论与统计子树；保留 .post 根节点及其媒体、
+            //   评论输入框、焦点和其他临时交互状态。
             //   若目标卡片不在 DOM 中（尚未加载到 / 被筛选掉 / 被 DOM 回收），
             //   安全回退到原有全量刷新路径，保证行为不退化。
             //   ⚠️ 不触碰 dock bar / dock capsule / 动画相关逻辑。
@@ -2826,17 +2929,24 @@
                     var maps = buildPostMaps(scopedComments, feedAllLikes || []);
                     var html = renderPostCardSafely(filtered[0], maps.commentMap, maps.likeMap, maps.likeUserMap);
                     if (!html) return false;
-                    var wasVisible = card.classList.contains('visible');
                     var tmp = document.createElement('div');
                     tmp.innerHTML = html;
                     var newNode = tmp.firstElementChild;
                     if (!newNode) return false;
-                    if (wasVisible) newNode.classList.add('visible');
-                    // 保持该卡片在信息流中的位置不变（slice 下标语义依赖 DOM 顺序）
-                    card.parentNode.replaceChild(newNode, card);
-                    // 新节点需要重新接入观察器（旧节点的注册随节点一起作废）
-                    try { primePostReveal([newNode]); } catch (_) {}
-                    try { observePostViewportState([newNode]); } catch (_) {}
+                    var oldStats = card.querySelector('.post-stats-text');
+                    var newStats = newNode.querySelector('.post-stats-text');
+                    if (oldStats && newStats) oldStats.innerHTML = newStats.innerHTML;
+                    var oldComments = card.querySelector('.comments');
+                    var newComments = newNode.querySelector('.comments');
+                    if (oldComments && newComments) {
+                        oldComments.replaceWith(newComments);
+                    } else if (oldComments) {
+                        oldComments.remove();
+                    } else if (newComments) {
+                        var actions = card.querySelector('.actions');
+                        if (actions && actions.parentNode) actions.parentNode.insertBefore(newComments, actions.nextSibling);
+                        else card.appendChild(newComments);
+                    }
                     try { if (typeof updateFeedStats === 'function') updateFeedStats(); } catch (_) {}
                     return true;
                 } catch (ePatch) {
@@ -3125,6 +3235,7 @@
                                 postIds: cachePosts.map(function(post) { return String(post.id); })
                             }] : [],
                             nextOffset: cachePosts.length,
+                            nextCursor: feedNextCursor,
                             endReached: cachePosts.length < FEED_PAGE_SIZE,
                             pageSize: FEED_PAGE_SIZE
                         },
@@ -3193,6 +3304,9 @@
                         likes: Array.isArray(data.likes) ? data.likes : [],
                         pages: pages,
                         nextOffset: typeof data.nextOffset === "number" ? data.nextOffset : posts.length,
+                        nextCursor: data.nextCursor && typeof data.nextCursor.created_at === 'string' && data.nextCursor.id
+                            ? { created_at: data.nextCursor.created_at, id: String(data.nextCursor.id) }
+                            : null,
                         endReached: typeof data.endReached === "boolean" ? data.endReached : (posts.length < FEED_PAGE_SIZE),
                         pageSize: data.pageSize || FEED_PAGE_SIZE
                     }
@@ -3207,6 +3321,7 @@
                 feedAllLikes = normalized.data.likes || [];
                 feedLoadedPages = normalized.data.pages || [];
                 feedNextOffset = typeof normalized.data.nextOffset === "number" ? normalized.data.nextOffset : feedAllPosts.length;
+                feedNextCursor = normalized.data.nextCursor || null;
                 feedEndReached = !!normalized.data.endReached;
                 return true;
             }
@@ -3315,6 +3430,8 @@
                 // ★ 修复：记录服务端返回的"下一页起始绝对偏移"（已含页宽），
                 // 仅 API/early 路径设置；start 保持为本次请求的起始偏移，不再被改写。
                 var serverNextOffset = null;
+                var serverNextCursor = null;
+                var requestCursor = start > 0 ? feedNextCursor : null;
                 var FEED_NET_TIMEOUT_MS = 18000;
                 var withTimeout = (typeof window.xtjWithTimeout === 'function')
                     ? window.xtjWithTimeout
@@ -3324,7 +3441,15 @@
                 // 公开首屏：裸 fetch + 硬超时，避免登录态 refresh / optionalAuth 路径拖死 skeleton
                 try {
                     // 复用 early-feed.js 已发起的首屏请求，避免重复等待
-                    if (page === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
+                    var knownUser = '';
+                    try {
+                        knownUser = String((typeof currentUser === 'string' ? currentUser : '') || (window.safeStorage && window.safeStorage.get('xtj_user')) || '').trim();
+                    } catch (eUser) { knownUser = ''; }
+                    var hasToken = false;
+                    try { hasToken = !!(typeof getUserToken === 'function' && getUserToken()); } catch (eTok) { hasToken = false; }
+                    var mayReuseAnonymousEarlyFeed = !knownUser && !hasToken;
+
+                    if (page === 0 && mayReuseAnonymousEarlyFeed && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
                         var early = window.__xtjEarlyFeed.data;
                         posts = normalizePosts(early.posts || []);
                         comments = early.comments || [];
@@ -3332,8 +3457,9 @@
                         endReached = early.endReached || false;
                         if (typeof early.total_post_count === 'number') window._xtjTotalPostCount = early.total_post_count;
                         serverNextOffset = early.next_offset != null ? Number(early.next_offset) : null;
+                        serverNextCursor = early.next_cursor || null;
                         usedApi = true;
-                    } else if (page === 0 && !usedApi && window.__xtjEarlyFeedPromise) {
+                    } else if (page === 0 && mayReuseAnonymousEarlyFeed && !usedApi && window.__xtjEarlyFeedPromise) {
                         try {
                             var early2 = await (typeof window.xtjWithTimeout === 'function'
                                 ? window.xtjWithTimeout(window.__xtjEarlyFeedPromise, Math.min(FEED_NET_TIMEOUT_MS, 12000), 'early-feed')
@@ -3345,6 +3471,7 @@
                                 endReached = early2.endReached || false;
                                 if (typeof early2.total_post_count === 'number') window._xtjTotalPostCount = early2.total_post_count;
                                 serverNextOffset = early2.next_offset != null ? Number(early2.next_offset) : null;
+                                serverNextCursor = early2.next_cursor || null;
                                 usedApi = true;
                             }
                         } catch (earlyErr) {
@@ -3352,15 +3479,12 @@
                         }
                     }
                     var feedPath = '/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE;
+                    if (requestCursor && requestCursor.created_at && requestCursor.id) {
+                        feedPath += '&cursor_created_at=' + encodeURIComponent(requestCursor.created_at) +
+                            '&cursor_id=' + encodeURIComponent(requestCursor.id) + '&offset=' + start;
+                    }
                     var apiResp = null;
                     if (!usedApi) {
-                    var knownUser = '';
-                    try {
-                        knownUser = String((typeof currentUser === 'string' ? currentUser : '') || (window.safeStorage && window.safeStorage.get('xtj_user')) || '').trim();
-                    } catch (eUser) { knownUser = ''; }
-                    var hasToken = false;
-                    try { hasToken = !!(typeof getUserToken === 'function' && getUserToken()); } catch (eTok) { hasToken = false; }
-
                     if (!knownUser && !hasToken) {
                         var feedUrl = (window.API_BASE || (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin || '').replace(/\/$/, '') + feedPath;
                         var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
@@ -3383,6 +3507,7 @@
                             if (typeof apiData.total_post_count === 'number') window._xtjTotalPostCount = apiData.total_post_count;
                             // 使用服务器返回的 next_offset，不自行计算、不再叠加 posts.length
                             serverNextOffset = apiData.next_offset != null ? Number(apiData.next_offset) : null;
+                            serverNextCursor = apiData.next_cursor || null;
                             usedApi = true;
                         }
                     }
@@ -3395,8 +3520,17 @@
                     // 回退：Supabase 直连（RLS 仅返回公开帖子）
                     // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
                     var end = start + FEED_PAGE_SIZE - 1;
+                    var fallbackQuery = getFeedBasePostQuery();
+                    if (requestCursor && requestCursor.created_at && requestCursor.id) {
+                        fallbackQuery = fallbackQuery
+                            .or('created_at.lt.' + requestCursor.created_at + ',and(created_at.eq.' + requestCursor.created_at + ',id.lt.' + requestCursor.id + ')')
+                            .order('id', { ascending: false })
+                            .limit(FEED_PAGE_SIZE);
+                    } else {
+                        fallbackQuery = fallbackQuery.range(start, end);
+                    }
                     var postRes = await withTimeout(
-                        getFeedBasePostQuery().range(start, end),
+                        fallbackQuery,
                         FEED_NET_TIMEOUT_MS,
                         'feed-supabase'
                     );
@@ -3404,6 +3538,12 @@
                     if (postRes.error) throw postRes.error;
                     posts = normalizePosts(postRes.data || []);
                     endReached = posts.length < FEED_PAGE_SIZE;
+                    if (posts.length) {
+                        var fallbackLastPost = posts[posts.length - 1];
+                        serverNextCursor = fallbackLastPost && fallbackLastPost.created_at && fallbackLastPost.id
+                            ? { created_at: fallbackLastPost.created_at, id: String(fallbackLastPost.id) }
+                            : null;
+                    }
                     try {
                         var countRes = await withTimeout(
                             applyVisiblePostQueryFilters(sb.from('posts').select('id', { count: 'exact', head: true })),
@@ -3450,6 +3590,7 @@
                             comments: comments,
                             likes: likes,
                             nextOffset: computedNextOffset,
+                            nextCursor: serverNextCursor,
                             endReached: endReached,
                             postIds: postIds,
                             relatedPromise: relatedPromise
@@ -3470,6 +3611,7 @@
                     comments: comments,
                     likes: likes,
                     nextOffset: computedNextOffset,
+                    nextCursor: serverNextCursor,
                     endReached: endReached,
                     postIds: postIds
                 };
@@ -3524,6 +3666,7 @@
                 } else {
                     feedNextOffset = Math.max(feedNextOffset || 0, chunk.nextOffset);
                 }
+                feedNextCursor = chunk.nextCursor || null;
                 if (chunk.endReached) feedEndReached = true;
                 (chunk.posts || []).forEach(syncPostInfoCache);
                 markFeedStateChanged();
@@ -4343,6 +4486,7 @@
                         feedAllLikes = [];
                         feedLoadedPages = [];
                         feedNextOffset = 0;
+                        feedNextCursor = null;
                         feedEndReached = false;
                         markFeedStateChanged();
                     }

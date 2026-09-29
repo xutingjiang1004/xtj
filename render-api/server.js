@@ -4975,8 +4975,11 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
       //   /api/post/like 的口径保持一致。
       return res.status(404).json({ ok: false, error: 'post_not_found', message: '该帖子不存在、已删除或不可查看。' });
     }
-    var likesRes = await supabase.from('likes').select('id,user_name,created_at').eq('post_id', postId).order('created_at', { ascending: false }).limit(50);
-    var commentsRes = await supabase.from('comments').select('id,user_name,content,created_at').eq('post_id', postId).order('created_at', { ascending: true }).limit(50);
+    var likesRes = await supabase.from('likes').select('id,user_name,created_at', { count: 'exact' }).eq('post_id', postId).order('created_at', { ascending: false }).limit(50);
+    var commentsRes = await supabase.from('comments').select('id,user_name,content,created_at', { count: 'exact' }).eq('post_id', postId).order('created_at', { ascending: true }).limit(50);
+    if (likesRes.error || commentsRes.error) {
+      return res.status(503).json({ ok: false, error: 'detail_relations_failed', message: '互动数据加载失败，请重试。' });
+    }
     return res.json({
       ok: true,
       post: {
@@ -4986,15 +4989,18 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
         created_at: post.created_at,
         // ★ 2026-09-26（审计 P3-2）：posts 表只有 views 列，不存在
         //   view_count/like_count/comment_count —— 原实现恒返回 0 且丢掉了真实
-        //   浏览量。这里返回真实 views，互动数用上面已取到的数组长度（limit 50）。
+        //   浏览量。这里返回真实 views 与不受展示列表 limit 影响的精确互动总数。
         views: Number(post.views) || 0,
         view_count: Number(post.views) || 0,
-        like_count: (likesRes.data || []).length,
-        comment_count: (commentsRes.data || []).length,
+        like_count: Number.isFinite(Number(likesRes.count)) ? Number(likesRes.count) : (likesRes.data || []).length,
+        comment_count: Number.isFinite(Number(commentsRes.count)) ? Number(commentsRes.count) : (commentsRes.data || []).length,
         // 2026-09-22：详情弹窗需要与 feed 卡片一致地展示 IP 属地/位置
         location_name: post.location_name || null,
+        ip_province: post.ip_province || null,
+        ip_city: post.ip_city || null,
         ip_region_text: post.ip_region_text || null,
-        ip_region_status: post.ip_region_status || null
+        ip_region_status: post.ip_region_status || null,
+        ip_lookup_started_at: post.ip_lookup_started_at || null
       },
       likes: (likesRes.data || []).map(function(l) { return { id: l.id, user_name: l.user_name, created_at: l.created_at }; }),
       comments: (commentsRes.data || []).map(function(c) { return { id: c.id, user_name: c.user_name, content: c.content, created_at: c.created_at }; })
@@ -5542,17 +5548,47 @@ async function resolveIpRegion(ip) {
   return { province: '', city: '', text: '', status: 'failed' };
 }
 
-// 异步重试 IP 属地解析（最多3次：发布时→30秒后→5分钟后）
-// 超过 2 分钟仍未解析的 pending 状态转为 failed
-async function retryIpRegionAsync(postId, ip, attempt) {
-  if (attempt > 3) {
-    await setIpRegionFailed(postId, 'max_retries_exceeded');
-    return;
+// IP retry jobs are persisted on the post row. The temporary client IP is encrypted at rest
+// with a key derived from the server secret and erased as soon as retries finish.
+function ipRetryEncryptionKey() {
+  var secret = String(API_SECRET || SUPABASE_SERVICE_KEY || '');
+  if (!secret) return null;
+  return crypto.createHash('sha256').update('xtj:ip-region-retry:v1:' + secret).digest();
+}
+
+function encryptIpRetryAddress(ip) {
+  var key = ipRetryEncryptionKey();
+  if (!key || !ip) return null;
+  try {
+    var iv = crypto.randomBytes(12);
+    var cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    var ciphertext = Buffer.concat([cipher.update(String(ip), 'utf8'), cipher.final()]);
+    return ['v1', iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), ciphertext.toString('base64url')].join('.');
+  } catch (_) {
+    return null;
   }
-  // ★ 2026-09-21：私有/保留地址永远解析不了，直接落定失败态，
-  //   不再安排 30s/5min 两次注定无效的重试（resolveIpRegion 对私有 IP 恒返回 failed）
-  if (isPrivateOrReservedIp(ip)) {
-    await setIpRegionFailed(postId, 'private_ip_unresolvable');
+}
+
+function decryptIpRetryAddress(value) {
+  var key = ipRetryEncryptionKey();
+  var parts = String(value || '').split('.');
+  if (!key || parts.length !== 4 || parts[0] !== 'v1') return null;
+  try {
+    var decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(parts[1], 'base64url'));
+    decipher.setAuthTag(Buffer.from(parts[2], 'base64url'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(parts[3], 'base64url')),
+      decipher.final()
+    ]).toString('utf8');
+  } catch (_) {
+    return null;
+  }
+}
+
+// Legacy in-memory fallback is used only when retry migration 063 has not been applied.
+async function retryIpRegionAsync(postId, ip, attempt) {
+  if (attempt > 3 || isPrivateOrReservedIp(ip)) {
+    await setIpRegionFailed(postId, attempt > 3 ? 'max_retries_exceeded' : 'private_ip_unresolvable');
     return;
   }
   try {
@@ -5568,31 +5604,150 @@ async function retryIpRegionAsync(postId, ip, attempt) {
       }).eq('id', postId);
       return;
     }
-    // resolveIpRegion 返回 failed，但可能还有重试机会
-    if (attempt === 3 && result.status === 'failed') {
+    if (attempt === 3) {
       await setIpRegionFailed(postId, result.error || 'resolve_returned_failed');
       return;
     }
   } catch (e) {
-    console.warn('[IP Retry] 重试 ' + attempt + ' 失败:', postId, e.message || e);
+    console.warn('[IP Retry] in-memory fallback failed:', postId, e && e.message || e);
     if (attempt === 3) {
-      await setIpRegionFailed(postId, e.message || 'retry_error');
+      await setIpRegionFailed(postId, e && e.message || 'retry_error');
       return;
     }
   }
   if (attempt < 3) {
     var delay = attempt === 1 ? 30000 : 300000;
-    // ★ M8 审计修复：补 .catch 防未捕获 rejection；定时器 unref，
-    //   不阻止进程退出/优雅停机（其余后台定时器同风格）
     setTimeout(function() {
       retryIpRegionAsync(postId, ip, attempt + 1).catch(function(err) {
-        console.warn('[IP Retry] 定时重试异常:', postId, err && err.message || err);
+        console.warn('[IP Retry] fallback timer failed:', postId, err && err.message || err);
       });
     }, delay).unref();
   }
 }
 
-// 统一设置 IP 解析失败状态
+async function queuePersistentIpRegionRetry(postId, ip, lookupStartedAt) {
+  var encryptedIp = encryptIpRetryAddress(ip);
+  if (!encryptedIp) return false;
+  var now = new Date().toISOString();
+  var queued = await supabase.from('posts').update({
+    ip_region_status: 'pending',
+    ip_region_text: null,
+    ip_lookup_started_at: lookupStartedAt || now,
+    ip_retry_count: 0,
+    ip_next_retry_at: now,
+    ip_last_attempt_at: null,
+    ip_lookup_ip_enc: encryptedIp
+  }).eq('id', postId).select('id').maybeSingle();
+  if (queued.error || !queued.data) throw queued.error || new Error('ip_retry_job_not_saved');
+  setTimeout(function() {
+    processDueIpRegionRetries().catch(function(err) {
+      console.warn('[IP Retry] immediate worker failed:', err && err.message || err);
+    });
+  }, 0).unref();
+  return true;
+}
+
+var ipRetryWorkerRunning = false;
+var ipRetrySchemaWarningShown = false;
+async function processDueIpRegionRetries() {
+  if (ipRetryWorkerRunning) return;
+  ipRetryWorkerRunning = true;
+  try {
+    var now = new Date().toISOString();
+    var dueResult = await supabase.from('posts')
+      .select('id, ip_retry_count, ip_lookup_ip_enc')
+      .eq('ip_region_status', 'pending')
+      .lte('ip_next_retry_at', now)
+      .order('ip_next_retry_at', { ascending: true })
+      .limit(25);
+    if (dueResult.error) {
+      if (!ipRetrySchemaWarningShown) {
+        ipRetrySchemaWarningShown = true;
+        console.warn('[IP Retry] persistent retry schema unavailable; apply migration 063_ip_region_retry_jobs.sql');
+      }
+      return;
+    }
+
+    for (var i = 0; i < (dueResult.data || []).length; i++) {
+      var due = dueResult.data[i];
+      var claimAt = new Date().toISOString();
+      var leaseUntil = new Date(Date.now() + 120000).toISOString();
+      var claimed = await supabase.from('posts').update({
+        ip_last_attempt_at: claimAt,
+        ip_next_retry_at: leaseUntil
+      }).eq('id', due.id)
+        .eq('ip_region_status', 'pending')
+        .lte('ip_next_retry_at', now)
+        .select('ip_retry_count, ip_lookup_ip_enc')
+        .maybeSingle();
+      if (claimed.error || !claimed.data) continue;
+
+      var ip = decryptIpRetryAddress(claimed.data.ip_lookup_ip_enc);
+      if (!ip || isPrivateOrReservedIp(ip)) {
+        await setIpRegionFailed(due.id, ip ? 'private_ip_unresolvable' : 'retry_ip_unavailable');
+        continue;
+      }
+
+      var result = null;
+      var failureReason = 'resolve_returned_failed';
+      try {
+        result = await resolveIpRegion(ip);
+      } catch (err) {
+        failureReason = String(err && err.message || 'retry_error').slice(0, 500);
+      }
+      var retryCount = Math.max(0, Number(claimed.data.ip_retry_count) || 0) + 1;
+      var update;
+      if (result && result.status === 'resolved') {
+        update = {
+          ip_province: result.province,
+          ip_city: result.city,
+          ip_region_text: result.text,
+          ip_region_status: 'resolved',
+          ip_resolved_at: new Date().toISOString(),
+          ip_region_error: null,
+          ip_retry_count: retryCount,
+          ip_next_retry_at: null,
+          ip_last_attempt_at: claimAt,
+          ip_lookup_ip_enc: null
+        };
+      } else if (retryCount >= 3) {
+        update = {
+          ip_region_status: 'failed',
+          ip_region_text: '未知',
+          ip_region_error: String((result && result.error) || failureReason).slice(0, 500),
+          ip_retry_count: retryCount,
+          ip_next_retry_at: null,
+          ip_last_attempt_at: claimAt,
+          ip_lookup_ip_enc: null
+        };
+      } else {
+        update = {
+          ip_region_status: 'pending',
+          ip_region_text: null,
+          ip_region_error: String((result && result.error) || failureReason).slice(0, 500),
+          ip_retry_count: retryCount,
+          ip_next_retry_at: new Date(Date.now() + (retryCount === 1 ? 30000 : 300000)).toISOString(),
+          ip_last_attempt_at: claimAt
+        };
+      }
+      var saved = await supabase.from('posts').update(update)
+        .eq('id', due.id)
+        .eq('ip_region_status', 'pending')
+        .eq('ip_last_attempt_at', claimAt);
+      if (saved.error) console.warn('[IP Retry] result save failed:', due.id, saved.error.message || saved.error);
+    }
+  } finally {
+    ipRetryWorkerRunning = false;
+  }
+}
+
+// This poller discovers due database jobs after process restarts and executes retries once.
+setInterval(function() {
+  processDueIpRegionRetries().catch(function(err) {
+    console.warn('[IP Retry] worker failed:', err && err.message || err);
+  });
+}, 15000).unref();
+
 async function setIpRegionFailed(postId, errorMsg) {
   try {
     await supabase.from('posts').update({
@@ -5600,25 +5755,12 @@ async function setIpRegionFailed(postId, errorMsg) {
       ip_region_text: '未知',
       ip_region_error: String(errorMsg || 'unknown').slice(0, 500)
     }).eq('id', postId);
+    await supabase.from('posts').update({
+      ip_next_retry_at: null,
+      ip_lookup_ip_enc: null
+    }).eq('id', postId);
   } catch (_) {}
 }
-
-// 每 60 秒检查一次超时的 pending 状态（超过 2 分钟未解析的转为 failed）
-setInterval(async function() {
-  try {
-    var cutoff = new Date(Date.now() - 120000).toISOString();
-    var { data: stalePosts } = await supabase.from('posts')
-      .select('id')
-      .eq('ip_region_status', 'pending')
-      .lt('ip_lookup_started_at', cutoff)
-      .limit(50);
-    if (stalePosts && stalePosts.length) {
-      for (var i = 0; i < stalePosts.length; i++) {
-        await setIpRegionFailed(stalePosts[i].id, 'timeout_2min');
-      }
-    }
-  } catch (_) {}
-}, 60000).unref(); // ★ M12：IP 区域超时清理不应阻止进程退出
 
 // ===================== 安全检测逻辑 =====================
 
@@ -13581,12 +13723,16 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
 
     // ── IP 属地（后端强制生成，忽略前端提交的任何 IP 字段） ──
     var clientIp = getClientIp(req);
+    var ipLookupStartedAt = clientIp ? new Date().toISOString() : null;
     var ipRegion = { province: '', city: '', text: '', status: 'pending' };
     try {
       ipRegion = await resolveIpRegion(clientIp);
     } catch (_) {
       // IP 解析失败不阻止发帖
     }
+    var ipRetryRequired = !!clientIp &&
+      !isPrivateOrReservedIp(clientIp) &&
+      (ipRegion.status === 'failed' || ipRegion.status === 'pending');
     // ★ 2026-09-24 诊断（属地错误排查）：每帖一行，日志量可控。Render 日志中
     //   source=express_req_ip → 信任链解析正确（真实客户端）；
     //   source=xff_chain_public → trust proxy 仍漏了内网 hop（需查平台网段）；
@@ -13619,11 +13765,11 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       location_level: locationLevel,
       ip_province: ipRegion.province,
       ip_city: ipRegion.city,
-      ip_region_text: ipRegion.text,
-      ip_region_status: ipRegion.status,
+      ip_region_text: ipRetryRequired ? null : (ipRegion.text || (ipRegion.status === 'failed' ? '未知' : null)),
+      ip_region_status: ipRetryRequired ? 'pending' : ipRegion.status,
       ip_resolved_at: ipRegion.status === 'resolved' ? new Date().toISOString() : null,
-      ip_lookup_started_at: ipRegion.status === 'pending' ? new Date().toISOString() : null,
-      ip_region_error: null
+      ip_lookup_started_at: ipLookupStartedAt,
+      ip_region_error: ipRetryRequired ? String(ipRegion.error || 'initial_lookup_failed').slice(0, 500) : null
     };
     var inserted = await supabase.from('posts').insert([payload]).select('*').single();
     var degraded = false;
@@ -13691,8 +13837,17 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     }
 
     // IP 解析失败时异步重试
-    if (ipRegion.status === 'failed' || ipRegion.status === 'pending') {
-      retryIpRegionAsync(inserted.data.id, clientIp, 1);
+    if (ipRetryRequired) {
+      queuePersistentIpRegionRetry(inserted.data.id, clientIp, ipLookupStartedAt).then(function(queued) {
+        if (!queued) retryIpRegionAsync(inserted.data.id, clientIp, 1).catch(function(err) {
+          console.warn('[IP Retry] fallback could not start:', err && err.message || err);
+        });
+      }).catch(function(err) {
+        console.warn('[IP Retry] persistent queue unavailable:', err && err.message || err);
+        retryIpRegionAsync(inserted.data.id, clientIp, 1).catch(function(fallbackErr) {
+          console.warn('[IP Retry] fallback could not start:', fallbackErr && fallbackErr.message || fallbackErr);
+        });
+      });
     }
 
     return res.status(201).json({
@@ -14427,25 +14582,16 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     var page = Math.max(0, parseInt(req.query.page, 10) || 0);
     var limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
     var from = page * limit;
-    var to = from + limit - 1;
+    var cursorCreatedAt = String(req.query.cursor_created_at || '');
+    var cursorId = String(req.query.cursor_id || '');
+    var cursorTimestampValid = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i.test(cursorCreatedAt) && Number.isFinite(Date.parse(cursorCreatedAt));
+    var cursorMode = !!(cursorTimestampValid && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursorId));
+    var requestedOffset = cursorMode ? Math.max(0, parseInt(req.query.offset, 10) || from) : from;
 
     var isAdmin = req.userName === ADMIN_USERNAME;
     var isLoggedIn = !!req.userName;
 
-    // 系统标记过滤列表（在数据库层排除）
-    // ⚠️ 说明（2026-09-23 审计核对）：
-    //   1) 本数组当前**不参与实际过滤**——下方 media_type 白名单
-    //      （text/image/video/audio/photo/album 六类 + NULL/空串）已是 fail-closed：
-    //      任何不在白名单内的 media_type 一律不返回，因此系统标记天然被排除。
-    //   2) 保留它的原因：tests/complete-tests.js 以它为**契约锚点**断言过滤意图
-    //      （要求含 __refresh_token__、__user_info__，并引用本数组名），删除会导致测试红。
-    //   3) 与 post-markers.js 的关系：post-markers.js 的 PUBLIC_POST_MEDIA_TYPES 是
-    //      "允许对外类型"的唯一真源；post-query.js 的 NORMAL_POST_MEDIA_TYPES 受契约测试
-    //      锚定须保持字面量，两者由 post-query.js 的加载期一致性检查告警兜底。
-    //      本数组是**第三份** marker 清单，与上述两份存在漂移（本数组有 __vip__/__avatar__/
-    //      __location_task__ 等 16 项是 post-markers.js 未收录的；反之亦然）。
-    //      由于它不参与过滤，漂移**不构成泄露风险**；新增 marker 时无需强行同步本数组，
-    //      但若未来要让它重新参与过滤，必须先补齐到 post-markers.js 的单一真源。
+    // Kept as a documented marker inventory; the normal media type allowlist below is authoritative.
     var SYSTEM_MARKERS = [
       '__auth__', '__auth_admin__', '__admin_meta__', '__dm__', '__report__',
       '__avatar__', '__user_info__', '__photo_wall__', '__visit__',
@@ -14460,55 +14606,102 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       '__ai_english_learning__', '__location_task__'
     ];
 
-    // 构建查询：数据库层排除系统标记 + 可见性过滤 + 分页
-    // count: 'estimated' 避免全表精确计数（大数据量下翻页慢）；字段白名单避免
-    // 返回 ip_resolved_at/ip_region_error 等内部字段。白名单覆盖前端渲染全部依赖字段
-    // （id/user_name/media_*/content/actor_key/created_at/updated_at/visibility/is_deleted/views/
-    //  is_pinned/pinned_at/location_*/ip_region_*/ip_province/ip_city/ip_lookup_started_at）。
-    var query = supabase.from('posts').select('id, user_name, media_type, media_url, content, actor_key, created_at, updated_at, visibility, is_deleted, views, is_pinned, pinned_at, location_name, location_province, location_city, location_district, location_level, ip_province, ip_city, ip_region_text, ip_region_status, ip_lookup_started_at', { count: 'estimated' });
-
-    // 白名单过滤：只允许正常帖子 media_type（NULL 或已知类型）
-    // 即使系统记录的 marker 被写错，白名单也能兜底过滤
-    // 白名单已覆盖正常类型，不再需要单独排除系统标记
-    // 注意：不要用 neq/not.in，它们会误杀 media_type IS NULL 的行
-    // Legacy text posts stored an empty string instead of NULL. Keep them in
-    // the normal feed so a refresh cannot make cached posts disappear.
-    query = query.or('media_type.is.null,media_type.eq."",media_type.in.(text,image,video,audio,photo,album)');
-
-    // 可见性过滤：管理员看全部，已登录用户看公开 + 自己的私密，未登录用户仅公开
-    if (!isAdmin) {
-      if (isLoggedIn) {
-        // ★ M17 审计修复：用户名用 pgrstQuote 引用，禁止含 , ( ) " \ 等特殊字符的
-        //   用户名逃逸出 .or() 逻辑表达式（原实现仅去掉双引号，逗号/括号仍可注入）
-        query = query.or('visibility.eq.public,user_name.eq.' + pgrstQuote(req.userName));
-      } else {
-        query = query.eq('visibility', 'public');
+    var selectFields = 'id, user_name, media_type, media_url, content, actor_key, created_at, updated_at, visibility, is_deleted, views, is_pinned, pinned_at, location_name, location_province, location_city, location_district, location_level, ip_province, ip_city, ip_region_text, ip_region_status, ip_lookup_started_at';
+    function buildFeedQuery(after, includeCount) {
+      var query = includeCount
+        ? supabase.from('posts').select(selectFields, { count: 'estimated' })
+        : supabase.from('posts').select(selectFields);
+      query = query.or('media_type.is.null,media_type.eq.\"\",media_type.in.(text,image,video,audio,photo,album)');
+      if (!isAdmin) {
+        if (isLoggedIn) query = query.or('visibility.eq.public,user_name.eq.' + pgrstQuote(req.userName));
+        else query = query.eq('visibility', 'public');
       }
+      query = query.or('is_deleted.is.null,is_deleted.eq.false');
+      if (after) {
+        query = query.or('created_at.lt.' + after.created_at + ',and(created_at.eq.' + after.created_at + ',id.lt.' + after.id + ')');
+      }
+      return query.order('created_at', { ascending: false }).order('id', { ascending: false });
     }
 
-    // created_at DESC + id DESC 二级排序：同时间戳帖子跨页不再重复/丢页
-    query = query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to);
-
-    var { data: posts, error: postsErr, count: totalCount } = await query;
-
-    if (postsErr) return res.status(500).json({ error: '获取帖子失败', code: 'feed_query_failed' });
-
-    posts = posts || [];
-
-    // 保存内容过滤前的数量，用于正确判断 endReached
-    var preFilterCount = posts.length;
-
-    // 服务端内容过滤：排除 content 为系统遥测/定位 JSON 的异常记录
-    // 即使 media_type 被写错，内容检测也能兜底
-    // ★ 2026-09-26（审计 P2-3）：同时过滤软删墓碑（is_deleted=true）。
-    //   照片墙查询与 AI 站内工具都过滤了 is_deleted，信息流此前没有——
-    //   一旦有任何路径置位该列（管理端 RPC / 直连 DB），被软删的帖子仍会出现在
-    //   动态流并可被评论点赞。这里放在 JS 侧与遥测过滤同一处，避免再追加一个
-    //   PostgREST .or() 造成条件互相覆盖（endReached 仍用过滤前的 preFilterCount）。
-    posts = posts.filter(function(p) {
-      if (p.is_deleted === true) return false;
-      return !looksLikeSystemTelemetry(p.content);
-    });
+    var posts = [];
+    var totalCount = null;
+    var scannedCount = 0;
+    var nextCursor = null;
+    var endReached = false;
+    if (!cursorMode) {
+      var firstResult = await buildFeedQuery(null, true).range(from, from + limit - 1);
+      if (firstResult.error) return res.status(500).json({ error: '获取帖子失败', code: 'feed_query_failed' });
+      var rawPosts = firstResult.data || [];
+      totalCount = firstResult.count;
+      scannedCount = rawPosts.length;
+      posts = rawPosts.filter(function(p) { return !looksLikeSystemTelemetry(p.content); });
+      endReached = rawPosts.length < limit;
+      var firstPageAfter = rawPosts.length ? { created_at: rawPosts[rawPosts.length - 1].created_at, id: rawPosts[rawPosts.length - 1].id } : null;
+      // Keep the initial page full too when legacy telemetry rows are filtered.
+      // The first request starts at offset zero for compatibility, then advances
+      // with the same stable keyset cursor used by every later request.
+      for (var firstScan = 0; posts.length < limit && rawPosts.length === limit && firstPageAfter && firstScan < 19; firstScan++) {
+        var fillResult = await buildFeedQuery(firstPageAfter, false).limit(limit);
+        if (fillResult.error) return res.status(500).json({ error: '获取帖子失败', code: 'feed_query_failed' });
+        var fillBatch = fillResult.data || [];
+        if (!fillBatch.length) {
+          endReached = true;
+          break;
+        }
+        for (var fi = 0; fi < fillBatch.length; fi++) {
+          var fillPost = fillBatch[fi];
+          scannedCount++;
+          firstPageAfter = { created_at: fillPost.created_at, id: fillPost.id };
+          if (!looksLikeSystemTelemetry(fillPost.content)) posts.push(fillPost);
+          if (posts.length >= limit) {
+            posts.length = limit;
+            break;
+          }
+        }
+        if (posts.length >= limit) break;
+        if (fillBatch.length < limit) {
+          endReached = true;
+          break;
+        }
+        if (firstScan === 18) endReached = false;
+      }
+      nextCursor = firstPageAfter;
+    } else {
+      // Fill a visible page when legacy telemetry rows are filtered in JS. Advance by the last
+      // consumed raw row so insertions at the top cannot shift the next-page boundary.
+      var after = { created_at: cursorCreatedAt, id: cursorId };
+      var maxScans = 20;
+      var stop = false;
+      for (var scan = 0; scan < maxScans && !stop; scan++) {
+        var pageResult = await buildFeedQuery(after, false).limit(limit);
+        if (pageResult.error) return res.status(500).json({ error: '获取帖子失败', code: 'feed_query_failed' });
+        var batch = pageResult.data || [];
+        if (!batch.length) {
+          endReached = true;
+          break;
+        }
+        for (var bi = 0; bi < batch.length; bi++) {
+          var rawPost = batch[bi];
+          scannedCount++;
+          after = { created_at: rawPost.created_at, id: rawPost.id };
+          if (!looksLikeSystemTelemetry(rawPost.content)) posts.push(rawPost);
+          if (posts.length >= limit) {
+            posts.length = limit;
+            nextCursor = after;
+            endReached = bi === batch.length - 1 && batch.length < limit;
+            stop = true;
+            break;
+          }
+        }
+        if (stop) break;
+        nextCursor = after;
+        if (batch.length < limit) {
+          endReached = true;
+          break;
+        }
+        if (scan === maxScans - 1) endReached = false;
+      }
+    }
 
     // 获取相关评论和点赞
     var postIds = posts.map(function(p) { return p.id; });
@@ -14533,9 +14726,6 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       likes = likeRes.data || [];
     }
 
-    // 基于数据库返回数量（过滤前）判断是否到达末尾，防止内容过滤导致误判
-    var endReached = preFilterCount < limit;
-
     return res.json({
       ok: true,
       posts: posts,
@@ -14547,9 +14737,10 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       // filtering can make `posts.length` smaller than the page width; using
       // that filtered count would move the next request backwards and repeat
       // rows forever. Advance by the number actually consumed from storage.
-      next_offset: preFilterCount ? from + preFilterCount : from,
+      next_offset: requestedOffset + scannedCount,
+      next_cursor: nextCursor,
       endReached: endReached,
-      total_post_count: totalCount
+      total_post_count: cursorMode ? null : totalCount
     });
   } catch (e) {
     console.error('[API] feed:', e && e.message);
