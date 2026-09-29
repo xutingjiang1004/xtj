@@ -90,17 +90,16 @@ test('recording cancel releases the microphone and restores the composer', async
   await expect(page.locator('#dockChatInput')).toHaveValue('existing draft'); expect(await page.evaluate(()=>window.__stoppedTracks)).toBeGreaterThan(0);
 });
 
-test('archive separates the current-user list and reactions use the selected message', async ({page}) => {
+test('retired archive returns conversations to the list and reactions target the selected message', async ({page}) => {
   await setup(page); await page.waitForTimeout(800);
   await page.evaluate(()=>window.__xtjApplyConversationSnapshot([
     {peer_name:'active-peer',last_message:'active',last_message_at:new Date().toISOString()},
     {peer_name:'archived-peer',last_message:'archived',archived_at:new Date().toISOString()}
   ]));
   await expect(page.locator('#dockChatList [data-chat-user="active-peer"]')).toHaveCount(1);
-  await expect(page.locator('#dockChatList [data-chat-user="archived-peer"]')).toHaveCount(0);
-  await page.locator('#chatArchiveButton').click();
+  await expect(page.locator('#chatArchiveButton')).toHaveCount(0);
   await expect(page.locator('#dockChatList [data-chat-user="archived-peer"]')).toHaveCount(1);
-  await expect(page.locator('#dockChatList [data-chat-user="active-peer"]')).toHaveCount(0);
+  await expect(page.locator('#dockChatList [data-chat-user="active-peer"]')).toHaveCount(1);
   await page.locator('[data-message-id="'+id+'"] .chat-msg').click({button:'right'});
   await page.getByRole('button',{name:'回应',exact:true}).click();
   await page.locator('.chat-reaction-picker button').filter({hasText:'👍'}).click();
@@ -128,7 +127,7 @@ test('conversation settings live only in the detail header and reopen safely dur
   await setup(page);
   await page.evaluate(()=>window.__xtjApplyConversationSnapshot([{peer_name:'peer',last_message:'hello',last_message_at:new Date().toISOString()}]));
   await expect(page.locator('#dockChatList [data-chat-menu-peer]')).toHaveCount(0);
-  await expect(page.locator('#panelChat .chat-header #dockChatSocialBtn')).toHaveCount(0);
+  await expect(page.locator('#panelChat .chat-header #dockChatSocialBtn')).toHaveCount(1);
   const trigger=page.locator('#dockChatConversationBtn');
   await expect(trigger).toBeVisible();
   await trigger.click();
@@ -242,4 +241,118 @@ test('the site motion-off preference also skips send effects', async ({page}) =>
   await page.locator('#dockChatSendBtn').click();
   await expect(page.locator('.chat-send-flight')).toHaveCount(0);
   await expect(page.locator('#dockChatMessages .chat-msg').last()).toContainText('motion disabled');
+});
+
+test('header contacts and account search use the existing protected user directory', async ({page}) => {
+  await setup(page);
+  const contacts=await page.locator('#dockChatSocialBtn').boundingBox(), search=await page.locator('#chatSearchButton').boundingBox();
+  expect(contacts.x).toBeLessThan(search.x);
+  await page.evaluate(()=>{
+    const original=window.xtjProtectedFetch;
+    window.xtjProtectedFetch=async(url,options)=>url.includes('/users/search') ? new Response(JSON.stringify({ok:true,users:[{user_name:'registered-user'}]}),{headers:{'Content-Type':'application/json'}}) : original(url,options);
+  });
+  await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="users"]').click();
+  await page.locator('#chatHistoryQuery').fill('registered'); await page.locator('#chatHistoryForm').dispatchEvent('submit');
+  await expect(page.locator('.chat-account-result')).toContainText('registered-user');
+  await page.locator('.chat-account-result').click(); await expect(page.locator('#dockChatSocialSheet')).toBeVisible();
+  await expect(page.locator('#dockChatSocialSearchForm input')).toHaveValue('registered-user');
+});
+
+test('iPad viewport uses the available height and composer has one continuous background', async ({browser}) => {
+  const context=await browser.newContext({viewport:{width:1194,height:834},hasTouch:true,userAgent:'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'});
+  const page=await context.newPage(); await page.addInitScript(()=>localStorage.setItem('xtj_theme','dark')); await setup(page);
+  await expect(page.locator('#dockChatInput')).toBeEnabled();
+  const layout=await page.evaluate(()=>{
+    const box=document.getElementById('dockChatContainer').getBoundingClientRect(), input=getComputedStyle(document.getElementById('dockChatInput'));
+    return {bottom:box.bottom,height:innerHeight,background:input.backgroundColor,overflow:document.documentElement.scrollWidth>innerWidth};
+  });
+  expect(layout.height-layout.bottom).toBeLessThan(32); expect(layout.overflow).toBe(false); expect(layout.background).toBe('rgba(0, 0, 0, 0)');
+  await page.screenshot({path:'output/chat-visual/ipad-responsive-dark.png'}); await context.close();
+});
+
+test('revisiting a conversation preserves bubble and avatar nodes', async ({page}) => {
+  await setup(page); await expect(page.locator('[data-message-id="'+id+'"]')).toBeVisible();
+  await page.evaluate(id=>{ window.__savedBubble=document.querySelector('[data-message-id="'+id+'"] .chat-msg'); window.__savedAvatar=document.querySelector('[data-message-id="'+id+'"] .chat-msg-avatar'); window.openChat('second-peer'); },id);
+  await page.waitForTimeout(150); await page.evaluate(()=>window.openChat('peer'));
+  await expect.poll(()=>page.evaluate(id=>window.__savedBubble===document.querySelector('[data-message-id="'+id+'"] .chat-msg') && window.__savedAvatar===document.querySelector('[data-message-id="'+id+'"] .chat-msg-avatar'),id)).toBe(true);
+});
+
+async function fakeMic(page,pending=false) {
+  await page.addInitScript(pending=>{
+    window.__stoppedTracks=0;
+    const stream={getTracks:()=>[{stop(){window.__stoppedTracks++;}}]};
+    Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:()=>pending ? new Promise(resolve=>window.__resolveMic=()=>resolve(stream)) : Promise.resolve(stream)}});
+    window.MediaRecorder=class {
+      static isTypeSupported(){return true;} constructor(){this.state='inactive';this.mimeType='audio/webm';}
+      start(){this.state='recording';} stop(){this.state='inactive';this.ondataavailable?.({data:new Blob(['voice-data'],{type:'audio/webm'})});this.onstop?.();}
+    };
+  },pending);
+}
+
+test('long press released while permission is pending never sends and releases the later stream', async ({page}) => {
+  await fakeMic(page,true); await setup(page); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  const box=await page.locator('.chat-input-wrap').boundingBox(); await page.mouse.move(box.x+20,box.y+20); await page.mouse.down();
+  await page.waitForFunction(()=>typeof window.__resolveMic==='function'); await page.mouse.up(); await page.evaluate(()=>window.__resolveMic());
+  await expect.poll(()=>page.evaluate(()=>window.__stoppedTracks)).toBe(1); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  expect(await page.evaluate(()=>window.__chatTestCalls.filter(c=>c.url.includes('/api/dm/send')).length)).toBe(0);
+});
+
+test('long press slide-up cancels voice and keeps the microphone icon', async ({page}) => {
+  await fakeMic(page); await setup(page); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  const box=await page.locator('.chat-input-wrap').boundingBox(); await page.mouse.move(box.x+20,box.y+20); await page.mouse.down();
+  await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');
+  await page.mouse.move(box.x+20,box.y-80); await page.mouse.up();
+  await expect(page.locator('#chatVoiceButton svg')).toBeVisible(); await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','false');
+  expect(await page.evaluate(()=>window.__stoppedTracks)).toBeGreaterThan(0); await expect(page.locator('#dockChatFilePreview')).toBeHidden();
+});
+
+test('long press records, release prepares upload and sends audio through the existing pipeline', async ({page}) => {
+  await fakeMic(page); await setup(page); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  await page.route('**/api/dm/upload?**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,storage_path:'chat/test.webm',public_url:'https://example.invalid/voice.webm',kind:'audio',mime_type:'audio/webm'})}));
+  const box=await page.locator('.chat-input-wrap').boundingBox(); await page.mouse.move(box.x+20,box.y+20); await page.mouse.down();
+  await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true'); await page.waitForTimeout(700); await page.mouse.up();
+  await expect.poll(()=>page.evaluate(()=>window.__chatTestCalls.some(c=>c.url.includes('/api/dm/send')&&JSON.parse(c.body).kind==='audio'))).toBe(true);
+  await expect(page.locator('#dockChatInput')).toBeEnabled(); await expect(page.locator('#chatVoiceButton svg')).toBeVisible();
+});
+
+test('custom voice player plays real WAV media, pauses, and retains its node on read changes', async ({page}) => {
+  const samples=16000, wav=Buffer.alloc(44+samples*2);
+  wav.write('RIFF'); wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(16000,24);wav.writeUInt32LE(32000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(samples*2,40);
+  for(let i=0;i<samples;i++)wav.writeInt16LE(Math.sin(i/16000*Math.PI*2*440)*2500,44+i*2);
+  await page.route('https://example.invalid/voice.wav',route=>route.fulfill({status:200,contentType:'audio/wav',body:wav}));
+  await page.setViewportSize({width:390,height:844}); await setup(page);
+  await page.evaluate(({stamp})=>{
+    const original=window.xtjProtectedFetch;
+    window.__voiceRead=false;
+    window.xtjProtectedFetch=async(url,options)=>{
+      if(url.includes('/api/dm/messages')) return new Response(JSON.stringify({ok:true,has_more:false,data:[{id:'123e4567-e89b-42d3-a456-000000000010',user_name:'tester',media_url:'voice-peer',created_at:stamp,views:window.__voiceRead?1:0,content:JSON.stringify({text:'语音播放器验收',media:{kind:'audio',url:'https://example.invalid/voice.wav',mimeType:'audio/wav'},read_at:window.__voiceRead?stamp:null})}]}),{headers:{'Content-Type':'application/json'}});
+      return original(url,options);
+    };
+    window.openChat('voice-peer');
+  },{stamp});
+  const player=page.locator('.chat-voice-player'); await expect(player).toBeVisible(); await player.locator('button').click();
+  await expect(player).toHaveClass(/is-playing/); await expect(player.locator('button')).toHaveAttribute('aria-pressed','true');
+  await player.locator('button').click(); await expect(player).not.toHaveClass(/is-playing/);
+  await page.evaluate(()=>{window.__savedAudio=document.querySelector('.msg-audio');window.__voiceRead=true;window.openChat('voice-peer');});
+  await expect.poll(()=>page.evaluate(()=>window.__savedAudio===document.querySelector('.msg-audio'))).toBe(true);
+  await page.screenshot({path:'output/chat-visual/mobile-voice-player.png'});
+  await page.locator('#dockChatSocialBtn').click(); await expect(page.locator('[data-chat-social-tab="friends"]')).toHaveAttribute('aria-selected','true');
+  await expect(page.locator('#dockChatSocialSheet .chat-social-card')).toBeVisible();
+  await page.waitForTimeout(220);
+  const card=await page.locator('#dockChatSocialSheet .chat-social-card').boundingBox(); expect(card.y+card.height).toBeLessThan(845);
+  await page.screenshot({path:'output/chat-visual/mobile-contacts.png'});
+});
+
+test('home navigation remains in its sticky slot when scrolling down and up', async ({page}) => {
+  await page.setViewportSize({width:390,height:844});await setup(page);
+  await page.evaluate(()=>{window.switchDockTab('posts');const feed=document.getElementById('feed');feed.innerHTML='<div style="height:2000px">滚动验收</div>';});
+  const before=await page.locator('.posts-nav').boundingBox();
+  await page.evaluate(()=>document.getElementById('panelPosts').scrollTop=500);await page.waitForTimeout(100);
+  const down=await page.locator('.posts-nav').boundingBox();
+  await page.evaluate(()=>document.getElementById('panelPosts').scrollTop=100);await page.waitForTimeout(100);
+  const up=await page.locator('.posts-nav').boundingBox();
+  expect(down.y).toBeGreaterThanOrEqual(0);expect(Math.abs(down.y-up.y)).toBeLessThan(2);expect(Math.abs(before.y-down.y)).toBeLessThan(16);
+  await expect(page.locator('.posts-nav')).not.toHaveClass(/hidden-header/);
+  const auth=await page.locator('#authUI').boundingBox(), brand=await page.locator('.posts-nav-brand').boundingBox(); expect(Math.abs(auth.y-brand.y)).toBeLessThan(15);
+  await page.screenshot({path:'output/chat-visual/mobile-home-stable.png'});
 });

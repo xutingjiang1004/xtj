@@ -4,6 +4,18 @@
   if (window.__xtjDesktopShellBound) return;
   window.__xtjDesktopShellBound = true;
 
+  // Safari may ignore viewport scale limits; suppress page pinch while keeping image gestures.
+  if (navigator.maxTouchPoints > 0 || /iPad|iPhone|Android/.test(navigator.userAgent)) {
+    function preventPageZoom(event) {
+      var target=event.target;
+      if (target && target.closest && target.closest('#photoPreviewOverlay, #imgViewer')) return;
+      if (event.type.indexOf('gesture')===0 || event.touches && event.touches.length>1) event.preventDefault();
+    }
+    document.addEventListener('gesturestart',preventPageZoom,{passive:false});
+    document.addEventListener('gesturechange',preventPageZoom,{passive:false});
+    document.addEventListener('touchmove',preventPageZoom,{passive:false});
+  }
+
   function openTab(tab) {
     var aiPanel = document.getElementById('panelAiChat');
     var aiVisible = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
