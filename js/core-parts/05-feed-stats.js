@@ -684,7 +684,7 @@
                             if (m.user_name !== window.currentUser && m.media_url !== window.currentUser) return;
                             var otherUser = m.user_name === window.currentUser ? m.media_url : m.user_name;
                             if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
-                                showNotification(m.user_name, getDockChatMessagePreview(m));
+                                if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[m.user_name]) showNotification(m.user_name, getDockChatMessagePreview(m));
                             }
                             window.dockChatListCacheTime = 0;
                             if (dockChatActiveUser && dockChatActiveUser === otherUser) {
@@ -768,7 +768,7 @@
                     }
                     if (!isMine && !convOpen) {
                         updateUnreadBadge();
-                        showNotification(message.user_name, getDockChatMessagePreview(message));
+                        if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[message.user_name]) showNotification(message.user_name, getDockChatMessagePreview(message));
                     }
                 } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
             }
@@ -1113,9 +1113,41 @@
             //   启动时两者在同一帧先后触发，等于并发打两次同一个重接口。
             //   这里做单飞 + 3 秒短缓存；缓存的是**解析后的 JSON**（Response body 只能消费一次，
             //   直接共享 Response 会让第二个调用方拿到 "body already used"）。
-            var _dmListShared = { at: 0, json: null, inflight: null };
+            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0 };
+            window.__xtjInvalidateDmListShared = function() {
+                _dmListShared.epoch++;
+                _dmListShared.at = 0;
+                _dmListShared.json = null;
+                _dmListShared.inflight = null;
+                _dmUnreadFetchedAt = 0;
+            };
+            window.__xtjMutedChatPeers = {};
+            window.__xtjDmMuteReady = false;
+            function authoritativeDmUnread(conversations) {
+                var total = 0;
+                var muted = {};
+                (conversations || []).forEach(function(c) {
+                    if (!c || c.deleted) return;
+                    var isMuted = !!c.muted_until && (c.muted_until === 'infinity' || Date.parse(c.muted_until) > Date.now());
+                    if (isMuted) muted[c.peer_name] = true;
+                    else total += Math.max(0, Number(c.unread_count) || 0);
+                });
+                window.__xtjMutedChatPeers = muted;
+                window.__xtjDmMuteReady = true;
+                return total;
+            }
+            window.__xtjAuthoritativeDmUnread = authoritativeDmUnread;
             function fetchDmListShared(limit) {
                 var now = Date.now();
+                var owner = window.currentUser || '';
+                if (_dmListShared.owner !== owner) {
+                    window.__xtjInvalidateDmListShared();
+                    _dmListShared.owner = owner;
+                    window.__xtjMutedChatPeers = {};
+                    window.__xtjDmMuteReady = false;
+                    setUnreadBadgeCount(0);
+                }
+                var epoch = _dmListShared.epoch;
                 if (_dmListShared.json && (now - _dmListShared.at) < 3000) {
                     return Promise.resolve(_dmListShared.json);
                 }
@@ -1128,11 +1160,12 @@
                 var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)), { background: true })
                     .then(function(resp) { return (resp && resp.ok) ? resp.json().catch(function() { return null; }) : null; })
                     .then(function(json) {
+                        if (_dmListShared.epoch !== epoch || window.currentUser !== owner) return null;
                         if (json && json.ok) { _dmListShared.json = json; _dmListShared.at = Date.now(); }
                         _dmListShared.inflight = null;
                         return json;
                     })
-                    .catch(function() { _dmListShared.inflight = null; return null; });
+                    .catch(function() { if (_dmListShared.epoch === epoch) _dmListShared.inflight = null; return null; });
                 _dmListShared.inflight = p;
                 return p;
             }
@@ -1154,7 +1187,12 @@
                     var result = await fetchDmListShared(180);
                     if (!result || !result.ok) return;
                     _dmUnreadFetchedAt = Date.now();
-                    setUnreadBadgeCount(aggregateDmUnread(result.data || []).total);
+                    setUnreadBadgeCount(Array.isArray(result.conversations)
+                        ? authoritativeDmUnread(result.conversations)
+                        : aggregateDmUnread(result.data || []).total);
+                    if (Array.isArray(result.conversations) && typeof window.__xtjApplyConversationSnapshot === 'function') {
+                        window.__xtjApplyConversationSnapshot(result.conversations);
+                    }
                 } catch (e) {
                     // 网络失败时保留上一次的角标 —— 清零等于谎报"没有未读"
                 }

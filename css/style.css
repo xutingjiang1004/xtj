@@ -16283,6 +16283,21 @@ profile content only. Dock stays untouched.
   animation: chat-social-in .2s cubic-bezier(.2,.8,.2,1) both;
 }
 .chat-social-sheet.hidden { display: none; }
+.chat-conversation-trigger { margin-left:auto; border:0; background:transparent; color:inherit; font-size:23px; min-width:40px; min-height:40px; cursor:pointer; }
+.chat-conversation-trigger[hidden] { display:none !important; }
+.cli-state { margin-left:6px; padding:2px 5px; border-radius:7px; background:rgba(62,131,99,.1); color:var(--xtj-text-muted,#628172); font-size:10px; }
+.cli-menu-btn { border:0; background:transparent; color:inherit; font-size:17px; min-width:32px; min-height:30px; cursor:pointer; }
+.chat-conversation-menu { position:absolute; inset:0; z-index:42; display:flex; align-items:flex-end; justify-content:center; padding:12px; background:rgba(20,38,30,.37); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); }
+.chat-conversation-menu.hidden { display:none; }
+.chat-conversation-menu-card { width:min(100%,480px); padding:14px; border-radius:20px; background:var(--xtj-card-bg,#fff); color:var(--xtj-text,#294a3f); box-shadow:0 16px 44px rgba(0,0,0,.16); animation:chat-social-in .18s ease-out both; }
+.chat-conversation-menu-head { display:flex; justify-content:space-between; align-items:center; padding:2px 4px 10px; }
+.chat-conversation-menu-head button { border:0; background:transparent; color:inherit; font-size:24px; cursor:pointer; }
+.chat-conversation-menu-actions { display:grid; gap:5px; }
+.chat-conversation-menu-actions button { width:100%; min-height:45px; text-align:left; padding:10px 13px; border:0; border-radius:12px; background:rgba(76,145,105,.08); color:inherit; font:inherit; cursor:pointer; }
+.chat-conversation-menu-actions button:last-child { color:#be4b45; }
+[data-theme="dark"] .chat-conversation-menu-card { background:#263c32; color:#eff8f1; }
+[data-theme="dark"] .chat-conversation-menu-actions button { background:rgba(171,218,184,.1); }
+@media (prefers-reduced-motion:reduce) { .chat-conversation-menu-card { animation:none; } }
 .chat-social-card {
   display: flex;
   flex-direction: column;
