@@ -109,6 +109,38 @@ test('access tokens have jti and logout persistently revokes the presented token
   assert.match(logout, /status\(503\)/);
 });
 
+test('token revocation persists a non-null actor key and never revokes only in memory on write failure', async () => {
+  const vm = require('node:vm');
+  const crypto = require('node:crypto');
+  let rejectWrite = false;
+  const rows = [];
+  const revokedTokenHashes = new Set();
+  const context = vm.createContext({ crypto, revokedTokenHashes,
+    ADMIN_USERNAME: 'test-admin', REVOKED_TOKEN_MARKER: '__revoked_token__',
+    console: { warn() {} },
+    supabase: { from(table) {
+      assert.equal(table, 'posts');
+      return { async insert(batch) {
+        rows.push(...batch);
+        if (!batch[0].actor_key) return { error: { message: 'actor_key not null' } };
+        return { error: rejectWrite ? { message: 'database unavailable' } : null };
+      } };
+    } }
+  });
+  vm.runInContext(routeBlock('async function persistRevokedToken(', 'async function loadRevokedTokenHashes('), context);
+  const expiry = Date.now() + 60000;
+  assert.equal(await context.persistRevokedToken('test-access-token', expiry), true);
+  const hash = crypto.createHash('sha256').update('test-access-token').digest('hex');
+  assert.equal(rows[0].actor_key, '__revoked_token__:' + hash);
+  assert.equal(rows[0].media_url, hash);
+  assert.equal(JSON.parse(rows[0].content).expires_at, expiry);
+  assert.equal(revokedTokenHashes.has(hash), true);
+  assert.equal(JSON.stringify(rows[0]).includes('test-access-token'), false);
+  rejectWrite = true;
+  assert.equal(await context.persistRevokedToken('second-test-token', expiry), false);
+  assert.equal(revokedTokenHashes.size, 1);
+});
+
 test('admin and user auth wait for persistent revocation state before accepting requests', () => {
   assert.match(source, /revokedTokenHashesReadyPromise/);
   assert.match(source, /async function loadRevokedTokenHashesWithRetry\(\)/);

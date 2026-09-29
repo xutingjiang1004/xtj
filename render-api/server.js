@@ -11435,14 +11435,16 @@ function _getTokenFromRequest(req) {
 // ===== 吊销 token 持久化 =====
 async function persistRevokedToken(token, expiresAt) {
   try {
+    var tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     var revokeInsert = await supabase.from('posts').insert([{
-      content: JSON.stringify({ token_hash: crypto.createHash('sha256').update(token).digest('hex'), expires_at: expiresAt }),
+      content: JSON.stringify({ token_hash: tokenHash, expires_at: expiresAt }),
       media_type: REVOKED_TOKEN_MARKER,
-      media_url: crypto.createHash('sha256').update(token).digest('hex'),
+      media_url: tokenHash,
+      actor_key: REVOKED_TOKEN_MARKER + ':' + tokenHash,
       user_name: ADMIN_USERNAME
     }]);
     if (revokeInsert && revokeInsert.error) throw revokeInsert.error;
-    revokedTokenHashes.add(crypto.createHash('sha256').update(token).digest('hex'));
+    revokedTokenHashes.add(tokenHash);
     return true;
   } catch(e) {
     console.warn('[Revoke] 持久化撤销失败:', e.message);

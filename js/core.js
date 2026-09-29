@@ -15639,6 +15639,10 @@ function renderProfileActivityList(kind) {
                         var playing=!audio.paused && !audio.ended;
                         player.classList.toggle('is-playing',playing); player.classList.remove('is-loading');
                         button.setAttribute('aria-pressed',String(playing)); button.setAttribute('aria-label',playing ? '暂停语音' : '播放语音');
+                        if (button.dataset.playing!==String(playing)) {
+                            button.dataset.playing=String(playing);
+                            player.querySelector('.voice-play-icon path').setAttribute('d',playing ? 'M7 5h4v14H7zM14 5h4v14h-4z' : 'm8 5 11 7-11 7z');
+                        }
                         var seconds=playing ? audio.duration-audio.currentTime : audio.duration;
                         if (Number.isFinite(seconds) && seconds>0) duration.textContent=Math.ceil(seconds)+'″';
                         player.style.setProperty('--voice-progress',audio.duration>0 ? Math.min(100,audio.currentTime/audio.duration*100)+'%' : '0%');
