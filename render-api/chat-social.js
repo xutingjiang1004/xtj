@@ -73,6 +73,11 @@ function createChatSocialRouter(options) {
   var supabase = options.supabase;
   var authenticateUser = options.authenticateUser;
   var rateLimit = options.rateLimit;
+  var publishEvent = typeof options.publishEvent === 'function' ? options.publishEvent : function() {};
+  function notifyBoth(actor, peer, kind) {
+    publishEvent(actor, 'chat-state', { kind:kind, peer:peer });
+    if (peer && peer !== actor) publishEvent(peer, 'chat-state', { kind:kind, peer:actor });
+  }
   var router = express.Router();
 
   function authenticatedReadLimit() { return rateLimit ? rateLimit(60000, 120) : function(req, res, next) { next(); }; }
@@ -112,7 +117,14 @@ function createChatSocialRouter(options) {
         p_draft_text: action === 'draft' ? draft : null,
         p_draft_revision: action === 'draft' ? revision : null
       });
-      if (result && result.status === 'ok') return res.json({ ok: true, state: result });
+      if (result && result.status === 'ok') {
+        if (action === 'mark_read') await callChatRpc(supabase,'chat_sync_legacy_read_receipts',{
+          p_actor_name:req.userName,p_peer_name:peerName
+        });
+        publishEvent(req.userName, 'chat-state', { kind:action, peer:peerName });
+        if (action === 'mark_read') publishEvent(peerName, 'chat-state', { kind:'read', peer:req.userName });
+        return res.json({ ok: true, state: result });
+      }
       if (result && result.status === 'revision_conflict') return res.status(409).json({ ok: false, code: 'revision_conflict', draft_revision: result.draft_revision });
       if (result && result.status === 'not_found') return res.status(404).json({ ok: false, code: 'not_found' });
       if (result && result.status === 'deleted') return res.status(409).json({ ok: false, code: 'deleted' });
@@ -172,6 +184,43 @@ function createChatSocialRouter(options) {
     } catch (e) { return errorResponse(res, e, 'chat_blocks_unavailable'); }
   });
 
+  router.post('/presence/heartbeat', rateLimit ? rateLimit(60000, 60) : authenticatedWriteLimit(), async function(req,res) {
+    try {
+      var outcome = await callChatRpc(supabase,'chat_touch_presence',{ p_actor_name:req.userName });
+      if (!outcome || outcome.status !== 'ok') return res.status(403).json({ ok:false,code:'account_unavailable' });
+      if (outcome.became_online) {
+        var friends = await callChatRpc(supabase,'chat_list_friends',{ p_user_name:req.userName });
+        (Array.isArray(friends) ? friends : []).forEach(function(friend) {
+          if (friend && friend.peer_name) publishEvent(friend.peer_name,'presence',{ peer:req.userName,last_seen_at:outcome.last_seen_at });
+        });
+      }
+      return res.json({ ok:true,last_seen_at:outcome.last_seen_at });
+    } catch(e) { return errorResponse(res,e,'chat_presence_unavailable'); }
+  });
+
+  router.get('/presence/:peerName', authenticatedReadLimit(), async function(req,res) {
+    var peerName = cleanName(req.params.peerName);
+    if (!peerName) return res.status(400).json({ok:false,code:'invalid_target'});
+    try {
+      var presence = await callChatRpc(supabase,'chat_get_presence',{
+        p_actor_name:req.userName,p_peer_name:peerName
+      });
+      if (!presence || presence.status !== 'ok') return res.status(403).json({ok:false,code:'forbidden'});
+      return res.json({ok:true,presence:presence});
+    } catch(e) { return errorResponse(res,e,'chat_presence_unavailable'); }
+  });
+
+  router.post('/typing/:peerName', rateLimit ? rateLimit(60000, 30) : authenticatedWriteLimit(), async function(req,res) {
+    var peerName = cleanName(req.params.peerName);
+    if (!peerName) return res.status(400).json({ok:false,code:'invalid_target'});
+    try {
+      var permission = await assertCanSendDirectMessage(supabase,req.userName,peerName,options.adminName);
+      if (!permission.ok) return res.status(403).json({ok:false,code:permission.code});
+      publishEvent(peerName,'typing',{peer:req.userName,active:req.body && req.body.active === true,at:Date.now()});
+      return res.json({ok:true});
+    } catch(e) { return errorResponse(res,e,'chat_typing_unavailable'); }
+  });
+
   router.post('/friend-requests', authenticatedWriteLimit(), async function(req, res) {
     var peerName = cleanName(req.body && (req.body.target_user || req.body.target));
     var note = String(req.body && req.body.note || '').trim();
@@ -184,8 +233,9 @@ function createChatSocialRouter(options) {
         p_note: note || null
       });
       var status = outcome && outcome.status;
-      if (status === 'request_sent') return res.status(201).json({ ok: true, result: outcome });
+      if (status === 'request_sent') { notifyBoth(req.userName,peerName,'friend_request'); return res.status(201).json({ ok: true, result: outcome }); }
       if (status === 'accepted' || status === 'already_friends' || status === 'request_pending') {
+        if (status === 'accepted') notifyBoth(req.userName,peerName,'friendship');
         return res.json({ ok: true, result: outcome });
       }
       if (status === 'blocked') return res.status(403).json({ ok: false, error: '当前无法向该用户发送好友申请', code: 'chat_blocked' });
@@ -204,13 +254,24 @@ function createChatSocialRouter(options) {
       return res.status(400).json({ ok: false, error: '操作无效', code: 'invalid_action' });
     }
     try {
+      var pendingRows = [];
+      try {
+        pendingRows = await callChatRpc(supabase,'chat_list_requests',{
+          p_user_name:req.userName,p_direction:action === 'cancel' ? 'outgoing' : 'incoming'
+        });
+      } catch(_) { /* The action RPC remains authoritative; polling repairs a missed signal. */ }
+      var pending = (Array.isArray(pendingRows) ? pendingRows : []).find(function(row) { return String(row.request_id) === requestId; });
+      var otherName = pending ? (pending.requester_name === req.userName ? pending.target_name : pending.requester_name) : '';
       var outcome = await callChatRpc(supabase, 'chat_finish_friend_request', {
         p_actor_name: req.userName,
         p_request_id: requestId,
         p_action: action
       });
       var status = outcome && outcome.status;
-      if (['accepted', 'rejected', 'canceled'].indexOf(status) >= 0) return res.json({ ok: true, result: outcome });
+      if (['accepted', 'rejected', 'canceled'].indexOf(status) >= 0) {
+        notifyBoth(req.userName,otherName,'friend_request');
+        return res.json({ ok: true, result: outcome });
+      }
       if (status === 'request_not_found') return res.status(404).json({ ok: false, error: '好友申请不存在', code: status });
       if (status === 'request_not_pending') return res.status(409).json({ ok: false, error: '好友申请已处理', code: status });
       if (status === 'forbidden' || status === 'blocked') return res.status(403).json({ ok: false, error: '无权处理这条好友申请', code: status });
@@ -226,7 +287,7 @@ function createChatSocialRouter(options) {
         p_actor_name: req.userName,
         p_peer_name: peerName
       });
-      if (outcome && outcome.status === 'removed') return res.json({ ok: true, result: outcome, history_preserved: true });
+      if (outcome && outcome.status === 'removed') { notifyBoth(req.userName,peerName,'friendship'); return res.json({ ok: true, result: outcome, history_preserved: true }); }
       if (outcome && outcome.status === 'not_friends') return res.status(404).json({ ok: false, error: '好友关系不存在', code: 'not_friends' });
       if (outcome && outcome.status === 'user_not_found') return res.status(404).json({ ok: false, error: '用户不存在', code: 'user_not_found' });
       return res.status(403).json({ ok: false, error: '当前账号暂不可删除好友', code: (outcome && outcome.status) || 'account_unavailable' });
@@ -244,7 +305,7 @@ function createChatSocialRouter(options) {
         p_peer_name: peerName,
         p_note: note
       });
-      if (outcome && outcome.status === 'ok') return res.json({ ok: true, note: outcome.note || null });
+      if (outcome && outcome.status === 'ok') { publishEvent(req.userName,'chat-state',{kind:'friend_note',peer:peerName}); return res.json({ ok: true, note: outcome.note || null }); }
       if (outcome && outcome.status === 'not_friends') return res.status(409).json({ ok: false, error: '只能给好友设置备注', code: 'not_friends' });
       if (outcome && outcome.status === 'user_not_found') return res.status(404).json({ ok: false, error: '用户不存在', code: 'user_not_found' });
       return res.status(403).json({ ok: false, error: '当前账号暂不可修改好友备注', code: (outcome && outcome.status) || 'account_unavailable' });
@@ -260,6 +321,7 @@ function createChatSocialRouter(options) {
         p_peer_name: peerName
       });
       if (outcome && ['blocked', 'already_blocked'].indexOf(outcome.status) >= 0) {
+        if (outcome.status === 'blocked') notifyBoth(req.userName,peerName,'block');
         return res.json({ ok: true, result: outcome, history_preserved: true });
       }
       if (outcome && outcome.status === 'user_not_found') return res.status(404).json({ ok: false, error: '用户不存在', code: 'user_not_found' });
@@ -275,7 +337,10 @@ function createChatSocialRouter(options) {
         p_actor_name: req.userName,
         p_peer_name: peerName
       });
-      if (outcome && ['unblocked', 'not_blocked'].indexOf(outcome.status) >= 0) return res.json({ ok: true, result: outcome });
+      if (outcome && ['unblocked', 'not_blocked'].indexOf(outcome.status) >= 0) {
+        if (outcome.status === 'unblocked') notifyBoth(req.userName,peerName,'block');
+        return res.json({ ok: true, result: outcome });
+      }
       if (outcome && outcome.status === 'user_not_found') return res.status(404).json({ ok: false, error: '用户不存在', code: 'user_not_found' });
       return res.status(400).json({ ok: false, error: '无法解除拉黑', code: (outcome && outcome.status) || 'invalid_target' });
     } catch (e) { return errorResponse(res, e, 'chat_unblock_unavailable'); }

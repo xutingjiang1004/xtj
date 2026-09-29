@@ -9,7 +9,7 @@ const {
   assertCanSendDirectMessage
 } = require('../render-api/chat-social');
 
-function buildApp(rpc) {
+function buildApp(rpc, published) {
   const app = express();
   app.use(express.json());
   const calls = [];
@@ -31,7 +31,8 @@ function buildApp(rpc) {
     supabase,
     authenticateUser,
     rateLimit: () => (req, res, next) => next(),
-    adminName: 'admin'
+    adminName: 'admin',
+    publishEvent: (user,event,payload) => { if (published) published.push({user,event,payload}); }
   }));
   return { app, calls, supabase };
 }
@@ -99,7 +100,7 @@ test('request action rejects invalid IDs/actions before RPC and reports ownershi
   const forbidden = await request(fixture.app)
     .post('/api/chat/friend-requests/123e4567-e89b-42d3-a456-426614174000/accept').set(token);
   assert.equal(forbidden.status, 403);
-  assert.equal(fixture.calls[0].args.p_actor_name, 'trusted-actor');
+  assert.equal(fixture.calls.find(call => call.name === 'chat_finish_friend_request').args.p_actor_name, 'trusted-actor');
 });
 
 test('message authorization fails closed for pending/non-friend states and blocks admin bypass when blocked', async () => {
@@ -150,4 +151,42 @@ test('conversation list fails closed if the authoritative RPC is unavailable', a
   const response = await request(fixture.app).get('/api/chat/conversations').set(token);
   assert.equal(response.status,503);
   assert.equal(response.body.code,'chat_conversations_unavailable');
+});
+
+test('typing is transient, sender derived from token, and a block denies delivery', async () => {
+  const events = [];
+  let relationship = { status:'friends', can_message:true };
+  const fixture = buildApp((name) => ({data:name==='chat_get_relationship' ? relationship : null,error:null}),events);
+  const good = await request(fixture.app).post('/api/chat/typing/peer').set(token)
+    .send({active:true,from:'forged'});
+  assert.equal(good.status,200);
+  assert.equal(events[0].user,'peer');
+  assert.deepEqual({peer:events[0].payload.peer,active:events[0].payload.active},{peer:'trusted-actor',active:true});
+  relationship = {status:'blocked_by_peer',can_message:false};
+  const denied = await request(fixture.app).post('/api/chat/typing/peer').set(token).send({active:true});
+  assert.equal(denied.status,403);
+  assert.equal(events.length,1);
+});
+
+test('presence lookup fails closed for nonfriends and heartbeat uses signed identity', async () => {
+  const fixture = buildApp((name,args) => ({
+    data:name==='chat_get_presence' ? {status:'forbidden'} :
+      name==='chat_touch_presence' ? {status:'ok',last_seen_at:'2026-09-29T00:00:00Z',became_online:false} : [],error:null
+  }));
+  const lookup = await request(fixture.app).get('/api/chat/presence/peer').set(token);
+  assert.equal(lookup.status,403);
+  const heartbeat = await request(fixture.app).post('/api/chat/presence/heartbeat').set(token).send({actor:'victim'});
+  assert.equal(heartbeat.status,200);
+  assert.equal(fixture.calls.at(-1).args.p_actor_name,'trusted-actor');
+});
+
+test('mark-read synchronizes legacy receipts and notifies both devices only after success', async () => {
+  const events=[];
+  const fixture=buildApp((name) => ({
+    data:name==='chat_manage_conversation' ? {status:'ok'} : 2,error:null
+  }),events);
+  const response=await request(fixture.app).patch('/api/chat/conversations/peer').set(token).send({action:'mark_read'});
+  assert.equal(response.status,200);
+  assert.deepEqual(fixture.calls.map(call=>call.name),['chat_manage_conversation','chat_sync_legacy_read_receipts']);
+  assert.deepEqual(events.map(e=>e.user),['trusted-actor','peer']);
 });

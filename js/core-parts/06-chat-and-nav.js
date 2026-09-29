@@ -573,6 +573,8 @@
 
             function dockChatGoBack() {
                 closeDockChatConversationMenu();
+                sendDockChatTyping(false);
+                showDockChatPresence('',false);
                 if (_dockChatDraftTimer && dockChatActiveUser) {
                     clearTimeout(_dockChatDraftTimer);
                     _dockChatDraftTimer = null;
@@ -652,8 +654,12 @@
                     persistDockChatDraft(dockChatActiveUser,previousInput ? previousInput.value : '');
                 }
                 dockChatActiveUser = userName;
+                _chatPresenceSnapshot=null;
+                showDockChatPresence('',false);
                 closeDockChatConversationMenu();
                 restoreDockChatDraft(userName);
+                refreshDockChatPresence(userName);
+                touchDockChatPresence();
                 // ★ 2026-09-27 修复（C11）：直接进详情时，会话列表并未加载，
                 //   标记为"待加载"，返回列表时 dockChatGoBack 会据此强制加载一次。
                 _dockChatListEverLoaded = false;
@@ -775,6 +781,7 @@
                 if (!dockChatActiveUser) {
                     syncDockChatLayoutState();
                 }
+                touchDockChatPresence();
                 refreshChatSocialBadge(false);
                 refreshChatFriendNotes(false);
                 if (el.getAttribute('data-list-owner') === window.currentUser &&
@@ -2287,6 +2294,7 @@
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
                 dockChatSending = true; inp.value = '';
+                sendDockChatTyping(false);
                 if (_dockChatDraftTimer) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
@@ -3602,6 +3610,117 @@
                 });
             }
 
+            var _chatPresenceTouchedAt = 0;
+            var _chatPresenceOwner = '';
+            var _chatPresenceSeq = 0;
+            var _chatPresenceSnapshot = null;
+            var _chatTypingUntil = 0;
+            var _chatTypingPeer = '';
+            var _chatTypingLastSentAt = 0;
+            var _chatTypingStopTimer = null;
+
+            function showDockChatPresence(text,online) {
+                var el = document.getElementById('dockChatPresence');
+                if (!el) return;
+                el.textContent = text || '';
+                el.hidden = !text || !dockChatActiveUser;
+                el.classList.toggle('is-online',!!online && !!text);
+                el.classList.toggle('is-typing',text==='正在输入…');
+            }
+
+            function formatDockChatPresence(lastSeen) {
+                var age = Date.now()-Date.parse(lastSeen || '');
+                if (!Number.isFinite(age) || age<0) return '离线';
+                if (age<80000) return '在线';
+                if (age<180000) return '刚刚在线';
+                if (age<3600000) return Math.max(1,Math.floor(age/60000))+' 分钟前在线';
+                if (age<86400000) return Math.floor(age/3600000)+' 小时前在线';
+                return new Date(lastSeen).toLocaleDateString()+' 在线';
+            }
+
+            function paintDockChatPresence() {
+                if (!dockChatActiveUser) return;
+                if (_chatTypingPeer===dockChatActiveUser && _chatTypingUntil>Date.now()) {
+                    showDockChatPresence('正在输入…',false); return;
+                }
+                var snapshot=_chatPresenceSnapshot;
+                if (!snapshot || snapshot.peer!==dockChatActiveUser) { showDockChatPresence('',false); return; }
+                var text=formatDockChatPresence(snapshot.last_seen_at);
+                showDockChatPresence(text,text==='在线');
+            }
+
+            function refreshDockChatPresence(peer) {
+                peer=peer || dockChatActiveUser;
+                if (!peer || peer!==dockChatActiveUser || !window.currentUser) return;
+                var owner=window.currentUser;
+                var seq=++_chatPresenceSeq;
+                requestDockChatSocial('/presence/'+encodeURIComponent(peer)).then(function(data) {
+                    if (owner!==window.currentUser || dockChatActiveUser!==peer || seq!==_chatPresenceSeq) return;
+                    _chatPresenceSnapshot={peer:peer,last_seen_at:data.presence.last_seen_at};
+                    paintDockChatPresence();
+                }).catch(function() {
+                    if (owner!==window.currentUser || dockChatActiveUser!==peer || seq!==_chatPresenceSeq) return;
+                    _chatPresenceSnapshot=null;
+                    showDockChatPresence('',false);
+                });
+            }
+            window.__xtjRefreshChatPresence=refreshDockChatPresence;
+
+            function touchDockChatPresence() {
+                if (!window.currentUser || document.hidden || (typeof navigator!=='undefined' && navigator.onLine===false)) return;
+                var owner=window.currentUser;
+                if (_chatPresenceOwner!==owner) { _chatPresenceOwner=owner; _chatPresenceTouchedAt=0; }
+                if (Date.now()-_chatPresenceTouchedAt<30000) return;
+                _chatPresenceTouchedAt=Date.now();
+                requestDockChatSocial('/presence/heartbeat',{method:'POST',body:'{}'}).catch(function() {
+                    if (window.currentUser===owner) _chatPresenceTouchedAt=0;
+                });
+            }
+            window.__xtjChatHeartbeat=touchDockChatPresence;
+
+            function sendDockChatTyping(active) {
+                var peer=dockChatActiveUser;
+                if (!peer || !window.currentUser) return;
+                if (active && Date.now()-_chatTypingLastSentAt<3000) return;
+                _chatTypingLastSentAt=active ? Date.now() : 0;
+                requestDockChatSocial('/typing/'+encodeURIComponent(peer),{
+                    method:'POST',body:JSON.stringify({active:!!active})
+                }).catch(function() {});
+            }
+            window.__xtjApplyChatTyping=function(payload) {
+                if (!payload || payload.peer!==dockChatActiveUser || !window.currentUser || document.hidden) return;
+                if (Math.abs(Date.now()-Number(payload.at))>15000) return;
+                _chatTypingPeer=payload.peer;
+                _chatTypingUntil=payload.active ? Date.now()+4700 : 0;
+                paintDockChatPresence();
+            };
+            setInterval(function() {
+                touchDockChatPresence();
+                if (dockChatActiveUser && !document.hidden) {
+                    if (_chatTypingUntil<=Date.now()) paintDockChatPresence();
+                    refreshDockChatPresence(dockChatActiveUser);
+                }
+            },35000);
+            document.addEventListener('visibilitychange',function() {
+                if (!document.hidden) { touchDockChatPresence(); refreshDockChatPresence(); }
+                else { sendDockChatTyping(false); _chatTypingUntil=0; }
+            });
+            window.addEventListener('online',function() { touchDockChatPresence(); refreshDockChatPresence(); });
+            setTimeout(touchDockChatPresence,1500);
+
+            window.__xtjRefreshChatSocialState=function() {
+                refreshChatSocialBadge(true);
+                refreshChatFriendNotes(true);
+                if (dockChatActiveUser) {
+                    _chatPresenceSnapshot=null;
+                    showDockChatPresence('',false);
+                    refreshDockChatPresence(dockChatActiveUser);
+                    updateDockChatComposerPermission(dockChatActiveUser);
+                }
+                var sheet=document.getElementById('dockChatSocialSheet');
+                if (sheet && !sheet.classList.contains('hidden')) renderDockChatSocialTab(_dockChatSocialTab);
+            };
+
             function closeDockChatConversationMenu() {
                 var menu = document.getElementById('dockChatConversationMenu');
                 if (menu) menu.classList.add('hidden');
@@ -3729,6 +3848,13 @@
             if (_conversationInput) _conversationInput.addEventListener('input',function() {
                 var peer = dockChatActiveUser;
                 var value = _conversationInput.value;
+                if (_chatTypingStopTimer) clearTimeout(_chatTypingStopTimer);
+                if (value.trim()) {
+                    sendDockChatTyping(true);
+                    _chatTypingStopTimer=setTimeout(function() {
+                        if (dockChatActiveUser===peer) sendDockChatTyping(false);
+                    },4200);
+                } else sendDockChatTyping(false);
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
                 _dockChatDraftTimer = setTimeout(function() { persistDockChatDraft(peer,value); },650);
             });
