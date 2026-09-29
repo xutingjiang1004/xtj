@@ -68,7 +68,7 @@ const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = requi
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
-const { createChatSocialRouter, assertCanSendDirectMessage } = require('./chat-social');
+const { createChatSocialRouter, assertCanSendDirectMessage, listChatConversations, getChatConversationState } = require('./chat-social');
 
 /**
  * ★★★ 2026-09-22 修复（P0「网页搜索/读网页时显示超大板块内容」根因之一）：
@@ -15238,6 +15238,8 @@ app.post('/api/dm/deleted', authenticateUser, rateLimit(60000, 30), async (req, 
 // GET /api/dm/list - 获取当前用户的对话列表
 app.get('/api/dm/list', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
+    const conversations = await listChatConversations(supabase, req.userName);
+    const states = new Map(conversations.map(function(c) { return [c.peer_name, c]; }));
     // ★ 2026-09-25 性能修复（"聊天联系人加载有点慢"）：
     //   此前两个方向各自硬编码 .limit(500)，等于每次最多把 **1000 条完整消息**
     //   （含 content JSON）搬到前端；而前端 mergeDockChatRowsById(..., 180) 只保留最近 180 条 ——
@@ -15258,11 +15260,15 @@ app.get('/api/dm/list', authenticateUser, rateLimit(60000, 120), async (req, res
     (sentResult.data || []).concat(receivedResult.data || []).forEach(function(row) {
       if (row && !byId.has(row.id)) byId.set(row.id, row);
     });
-    var rows = Array.from(byId.values()).sort(function(a, b) {
+    var rows = Array.from(byId.values()).filter(function(row) {
+      var peer = row.user_name === req.userName ? row.media_url : row.user_name;
+      var state = states.get(peer);
+      return !!state && !state.deleted && (!state.cleared_before || Date.parse(row.created_at) > Date.parse(state.cleared_before));
+    }).sort(function(a, b) {
       return String(b.created_at || '').localeCompare(String(a.created_at || '')) || Number(b.id || 0) - Number(a.id || 0);
     });
-    return res.json({ ok: true, data: rows });
-  } catch (e) { console.error('[API] dm list get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+    return res.json({ ok: true, data: rows, conversations: conversations });
+  } catch (e) { console.error('[API] dm list get:', e.message); return res.status(503).json({ error: '会话列表暂不可用', code: 'dm_list_unavailable', retryable: true }); }
 });
 
 // GET /api/dm/messages - 获取与某个用户的完整对话（分页）
@@ -15272,6 +15278,10 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
     const targetUser = String(req.query.target || '').trim().slice(0, MAX_USERNAME_LEN);
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
     if (!targetUser) return res.status(400).json({ error: '缺少目标用户' });
+    const conversationState = await getChatConversationState(supabase, req.userName, targetUser);
+    if (conversationState.status === 'not_found' || conversationState.deleted) {
+      return res.json({ ok: true, data: [], has_more: false, next_cursor: null, next_cursor_ts: null, next_cursor_id: null });
+    }
     // ★ 2026-09-27（后端补完 · 私信复合游标）：向上翻历史的游标。
     //   旧实现只按 created_at 单时间戳翻页，同一秒内落库的多条消息会整体被跳过
     //   （`lt('created_at', before)` 把同秒的其余消息一起排除）或跨页重复取到，
@@ -15299,6 +15309,7 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
       var query = supabase.from('posts')
         .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
         .eq('media_type', DM_MARKER).eq('user_name', sender).eq('media_url', recipient);
+      if (conversationState.cleared_before) query = query.gt('created_at', conversationState.cleared_before);
       if (before) {
         if (beforeId) {
           // 复合 keyset：created_at < before，或 created_at = before 且 id < before_id。
@@ -15349,7 +15360,7 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
       next_cursor_ts: nextCursorTs,
       next_cursor_id: nextCursorId
     });
-  } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(500).json({ error: '查询失败' }); }
+  } catch (e) { console.error('[API] dm messages get:', e.message); return res.status(503).json({ error: '会话记录暂不可用', code: 'dm_messages_unavailable', retryable: true }); }
 });
 
 // ★ 2026-09-25 删除：私聊媒体「受鉴权签名地址」接口（POST /api/dm/media/sign）及其完整实现。

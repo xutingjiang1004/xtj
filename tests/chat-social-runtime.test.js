@@ -114,3 +114,40 @@ test('message authorization fails closed for pending/non-friend states and block
   const unavailable = { rpc: async () => ({ data: null, error: { code: '08006' } }) };
   await assert.rejects(assertCanSendDirectMessage(unavailable, 'alice', 'bob', 'admin'));
 });
+
+test('conversation settings use verified actor and peer identity, and validate draft revisions', async () => {
+  const fixture = buildApp((name) => ({
+    data: name === 'chat_manage_conversation' ? { status:'ok', pinned_at:'2026-09-29T00:00:00Z' } : [],
+    error:null
+  }));
+  const noAuth = await request(fixture.app).patch('/api/chat/conversations/peer').send({ action:'delete' });
+  assert.equal(noAuth.status,401);
+  assert.equal(fixture.calls.length,0);
+  const invalidDraft = await request(fixture.app).patch('/api/chat/conversations/peer').set(token)
+    .send({ action:'draft', draft_text:'text', draft_revision:-1 });
+  assert.equal(invalidDraft.status,400);
+  assert.equal(fixture.calls.length,0);
+  const response = await request(fixture.app).patch('/api/chat/conversations/peer').set(token)
+    .send({ action:'pin', actor:'victim' });
+  assert.equal(response.status,200);
+  assert.equal(fixture.calls[0].args.p_actor_name,'trusted-actor');
+  assert.equal(fixture.calls[0].args.p_peer_name,'peer');
+  assert.equal(fixture.calls[0].args.p_action,'pin');
+});
+
+test('conversation draft conflict is reported without overwriting the other device', async () => {
+  const fixture = buildApp(() => ({ data:{ status:'revision_conflict',draft_revision:5 },error:null }));
+  const response = await request(fixture.app).patch('/api/chat/conversations/peer').set(token)
+    .send({ action:'draft',draft_text:'my text',draft_revision:4 });
+  assert.equal(response.status,409);
+  assert.equal(response.body.code,'revision_conflict');
+  assert.equal(response.body.draft_revision,5);
+  assert.equal(fixture.calls[0].args.p_draft_text,'my text');
+});
+
+test('conversation list fails closed if the authoritative RPC is unavailable', async () => {
+  const fixture = buildApp(() => ({ data:null,error:{ code:'rpc_unavailable' } }));
+  const response = await request(fixture.app).get('/api/chat/conversations').set(token);
+  assert.equal(response.status,503);
+  assert.equal(response.body.code,'chat_conversations_unavailable');
+});

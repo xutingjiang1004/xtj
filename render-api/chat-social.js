@@ -26,6 +26,20 @@ async function getChatRelationship(supabase, userName, peerName) {
   return data;
 }
 
+async function listChatConversations(supabase, userName) {
+  var data = await callChatRpc(supabase, 'chat_list_conversations', { p_actor_name: userName });
+  if (!Array.isArray(data)) throw new Error('chat_conversations_unavailable');
+  return data;
+}
+
+async function getChatConversationState(supabase, userName, peerName) {
+  var data = await callChatRpc(supabase, 'chat_get_conversation_state', {
+    p_actor_name: userName, p_peer_name: peerName
+  });
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('chat_conversation_unavailable');
+  return data;
+}
+
 async function assertCanSendDirectMessage(supabase, senderName, targetName, adminName) {
   var relationship = await getChatRelationship(supabase, senderName, targetName);
   if (relationship.status === 'blocked_by_me' || relationship.status === 'blocked_by_peer') {
@@ -65,6 +79,46 @@ function createChatSocialRouter(options) {
   function authenticatedWriteLimit() { return rateLimit ? rateLimit(60000, 30) : function(req, res, next) { next(); }; }
 
   router.use(authenticateUser);
+
+  router.get('/conversations', authenticatedReadLimit(), async function(req, res) {
+    try { return res.json({ ok: true, conversations: await listChatConversations(supabase, req.userName) }); }
+    catch (e) { return errorResponse(res, e, 'chat_conversations_unavailable'); }
+  });
+
+  router.get('/conversations/:peerName', authenticatedReadLimit(), async function(req, res) {
+    var peerName = cleanName(req.params.peerName);
+    if (!peerName) return res.status(400).json({ ok: false, code: 'invalid_target' });
+    try {
+      var state = await getChatConversationState(supabase, req.userName, peerName);
+      if (state.status === 'not_found') return res.status(404).json({ ok: false, code: 'not_found' });
+      return res.json({ ok: true, state: state });
+    } catch (e) { return errorResponse(res, e, 'chat_conversation_unavailable'); }
+  });
+
+  router.patch('/conversations/:peerName', authenticatedWriteLimit(), async function(req, res) {
+    var peerName = cleanName(req.params.peerName);
+    var action = String(req.body && req.body.action || '');
+    if (!peerName || ['pin','unpin','mute','unmute','mark_read','mark_unread','clear','delete','draft'].indexOf(action) < 0) {
+      return res.status(400).json({ ok: false, code: 'invalid_action' });
+    }
+    var draft = req.body && req.body.draft_text;
+    var revision = req.body && req.body.draft_revision;
+    if (action === 'draft' && (typeof draft !== 'string' || draft.length > 500 || !Number.isSafeInteger(revision) || revision < 0)) {
+      return res.status(400).json({ ok: false, code: 'invalid_draft' });
+    }
+    try {
+      var result = await callChatRpc(supabase, 'chat_manage_conversation', {
+        p_actor_name: req.userName, p_peer_name: peerName, p_action: action,
+        p_draft_text: action === 'draft' ? draft : null,
+        p_draft_revision: action === 'draft' ? revision : null
+      });
+      if (result && result.status === 'ok') return res.json({ ok: true, state: result });
+      if (result && result.status === 'revision_conflict') return res.status(409).json({ ok: false, code: 'revision_conflict', draft_revision: result.draft_revision });
+      if (result && result.status === 'not_found') return res.status(404).json({ ok: false, code: 'not_found' });
+      if (result && result.status === 'deleted') return res.status(409).json({ ok: false, code: 'deleted' });
+      return res.status(400).json({ ok: false, code: result && result.status || 'invalid_action' });
+    } catch (e) { return errorResponse(res, e, 'chat_conversation_update_unavailable'); }
+  });
 
   router.get('/users/search', authenticatedReadLimit(), async function(req, res) {
     var query = String(req.query.q || '').trim();
@@ -232,6 +286,8 @@ function createChatSocialRouter(options) {
 
 module.exports = {
   cleanName: cleanName,
+  listChatConversations: listChatConversations,
+  getChatConversationState: getChatConversationState,
   getChatRelationship: getChatRelationship,
   assertCanSendDirectMessage: assertCanSendDirectMessage,
   createChatSocialRouter: createChatSocialRouter
