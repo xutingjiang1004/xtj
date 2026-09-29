@@ -70,16 +70,16 @@
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=acb9ef6f5f" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=e560ba776a" />
-    <link rel="preload" as="style" href="css/ui-shell.min.css?v=ca68533df7" />
+    <link rel="preload" as="style" href="css/ui-shell.min.css?v=7c11600006" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=c6675e30bb" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=ca68533df7" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=c6675e30bb" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=7c11600006" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=4ee2fa8795" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=ca68533df7" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=7c11600006" media="print" onload="this.media='all'">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=c6675e30bb">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=67c5936bae">
     <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=e2e7271513">
@@ -163,9 +163,7 @@
                 <div class="posts-nav-brand">
                     <h1>xtj</h1>
                     <button id="themeToggle" class="theme-toggle-btn" title="切换主题" aria-label="切换主题">
-                        <span class="theme-toggle-orb" aria-hidden="true">
-                            <span class="theme-toggle-core"></span>
-                        </span>
+                        <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 14.2A9 9 0 0 1 9.8 3.2 9 9 0 1 0 20.8 14.2Z"/></svg>
                     </button>
                     <div class="ai-tools-nav" id="aiToolsNav">
                         <!-- 自定义下拉：Win 原生 select 会空弹「选择…」 -->
@@ -347,7 +345,7 @@
                 </div>
                 <section id="chatHistoryPanel" class="chat-history-panel" hidden aria-hidden="true" aria-label="聊天搜索与媒体中心">
                     <div class="chat-history-head"><strong>聊天记录</strong><button type="button" id="chatHistoryClose" aria-label="关闭聊天记录">×</button></div>
-                    <div id="chatSearchTabs" class="chat-search-tabs" role="tablist" aria-label="搜索类别"><button type="button" data-chat-search-mode="messages" role="tab" aria-selected="true">聊天记录</button><button type="button" data-chat-search-mode="users" role="tab" aria-selected="false">用户账号</button></div>
+                    <div id="chatSearchTabs" class="chat-search-tabs" role="tablist" aria-label="搜索类别"><button type="button" data-chat-search-mode="users" role="tab" aria-selected="true">找人</button><button type="button" data-chat-search-mode="messages" role="tab" aria-selected="false">聊天记录</button></div>
                     <form id="chatHistoryForm">
                         <div class="chat-history-query"><input id="chatHistoryQuery" type="search" maxlength="120" placeholder="搜索文字、转写或文件名" aria-label="搜索关键词"><button type="submit">搜索</button></div>
                         <div class="chat-history-filters">
@@ -420,7 +418,7 @@
                             <button class="send-btn" id="dockChatSendBtn" aria-label="发送消息"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
                         </div>
                     </div>
-                    <input type="file" id="dockChatFileInp" accept="image/*,video/*,audio/*,.pdf,.txt,.csv,.rtf,.docx,.xlsx,.pptx,.zip" style="display:none" />
+                    <input type="file" id="dockChatFileInp" multiple accept="image/*,video/*,audio/*,.pdf,.txt,.csv,.rtf,.docx,.xlsx,.pptx,.zip" style="display:none" />
                 </div>
             </div>
         </div>
@@ -1189,10 +1187,10 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=9c8a7ec7cf"></script>
+    <script defer src="js/core.min.js?v=54be8c4f14"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
-    <script defer src="js/desktop-shell.min.js?v=6ae0f50f5d"></script>
+    <script defer src="js/desktop-shell.min.js?v=4bbb59d3b3"></script>
     <script defer src="js/ux-features.min.js?v=cf3e805e19"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->

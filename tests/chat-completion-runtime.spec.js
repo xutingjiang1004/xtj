@@ -38,7 +38,7 @@ async function setup(page) {
   }, {id,stamp});
 }
 test('search pages on the server and locates a result', async ({page}) => {
-  await setup(page); await page.locator('#chatSearchButton').click();
+  await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="messages"]').click();
   await page.locator('#chatHistoryQuery').fill('hello'); await page.locator('#chatHistoryForm').dispatchEvent('submit');
   await expect(page.locator('.chat-history-result')).toHaveCount(1);
   await page.locator('#chatHistoryMore').click(); await expect(page.locator('.chat-history-result')).toHaveCount(2);
@@ -50,7 +50,7 @@ test('search pages on the server and locates a result', async ({page}) => {
 });
 test('closing search discards a late response', async ({page}) => {
   await setup(page); await page.evaluate(()=>window.__chatSearchDelay=600);
-  await page.locator('#chatSearchButton').click(); await page.locator('#chatHistoryQuery').fill('hello');
+  await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="messages"]').click(); await page.locator('#chatHistoryQuery').fill('hello');
   await page.locator('#chatHistoryForm').dispatchEvent('submit'); await page.locator('#chatHistoryClose').click();
   await page.waitForTimeout(750); await expect(page.locator('#chatHistoryPanel')).toBeHidden();
   await expect(page.locator('.chat-history-result')).toHaveCount(0);
@@ -90,7 +90,7 @@ test('recording cancel releases the microphone and restores the composer', async
   await expect(page.locator('#dockChatInput')).toHaveValue('existing draft'); expect(await page.evaluate(()=>window.__stoppedTracks)).toBeGreaterThan(0);
 });
 
-test('retired archive returns conversations to the list and reactions target the selected message', async ({page}) => {
+test('retired archive returns conversations and menu removes reactions and transcription', async ({page}) => {
   await setup(page); await page.waitForTimeout(800);
   await page.evaluate(()=>window.__xtjApplyConversationSnapshot([
     {peer_name:'active-peer',last_message:'active',last_message_at:new Date().toISOString()},
@@ -101,13 +101,15 @@ test('retired archive returns conversations to the list and reactions target the
   await expect(page.locator('#dockChatList [data-chat-user="archived-peer"]')).toHaveCount(1);
   await expect(page.locator('#dockChatList [data-chat-user="active-peer"]')).toHaveCount(1);
   await page.locator('[data-message-id="'+id+'"] .chat-msg').click({button:'right'});
-  await page.getByRole('button',{name:'回应',exact:true}).click();
-  await page.locator('.chat-reaction-picker button').filter({hasText:'👍'}).click();
-  await expect.poll(()=>page.evaluate(()=>window.__chatTestCalls.some(c=>c.url.includes('/messages/reactions')&&c.body&&JSON.parse(c.body).emoji==='👍'))).toBe(true);
+  await expect(page.getByRole('button',{name:'回应',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'转文字',exact:true})).toHaveCount(0);
+  const buttons=page.locator('.dm-action-grid button');expect(await buttons.count()).toBeLessThanOrEqual(8);
+  const boxes=await buttons.evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().y));expect(new Set(boxes).size).toBe(2);
+  await expect(page.locator('[data-dm-action="reply"] svg')).toBeVisible();
 });
 
 test('editing while viewing a search result updates the existing history window', async ({page}) => {
-  await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('#chatHistoryQuery').fill('hello');
+  await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="messages"]').click(); await page.locator('#chatHistoryQuery').fill('hello');
   await page.locator('#chatHistoryForm').dispatchEvent('submit'); await page.locator('.chat-history-jump').first().click();
   await expect(page.locator('[data-message-id="'+id+'"]')).toContainText('hello world');
   await page.evaluate((id)=>{window.__chatContextText='remote edit';window.__xtjRefreshChatMessageExtras({kind:'edit',peer:'peer',message_id:id});},id);
@@ -115,7 +117,7 @@ test('editing while viewing a search result updates the existing history window'
 });
 
 test('a remote clear removes messages from a focused search window', async ({page}) => {
-  await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('#chatHistoryQuery').fill('hello');
+  await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="messages"]').click(); await page.locator('#chatHistoryQuery').fill('hello');
   await page.locator('#chatHistoryForm').dispatchEvent('submit'); await page.locator('.chat-history-jump').first().click();
   await expect(page.locator('[data-message-id="'+id+'"]')).toBeVisible();
   await page.evaluate(()=>{window.__chatMessagesGone=true;window.__xtjRefreshChatMessageExtras({kind:'clear',peer:'peer'});});
@@ -251,7 +253,7 @@ test('header contacts and account search use the existing protected user directo
     const original=window.xtjProtectedFetch;
     window.xtjProtectedFetch=async(url,options)=>url.includes('/users/search') ? new Response(JSON.stringify({ok:true,users:[{user_name:'registered-user'}]}),{headers:{'Content-Type':'application/json'}}) : original(url,options);
   });
-  await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="users"]').click();
+  await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="messages"]').click(); await page.locator('[data-chat-search-mode="users"]').click();
   await page.locator('#chatHistoryQuery').fill('registered'); await page.locator('#chatHistoryForm').dispatchEvent('submit');
   await expect(page.locator('.chat-account-result')).toContainText('registered-user');
   await page.locator('.chat-account-result').click(); await expect(page.locator('#dockChatSocialSheet')).toBeVisible();
@@ -330,7 +332,8 @@ test('custom voice player plays real WAV media, pauses, and retains its node on 
     };
     window.openChat('voice-peer');
   },{stamp});
-  const player=page.locator('.chat-voice-player'); await expect(player).toBeVisible(); await player.locator('button').click();
+  const player=page.locator('.chat-voice-player'); await expect(player).toBeVisible();
+  await player.evaluate(el=>{const e=new Event('touchstart',{bubbles:true});Object.defineProperty(e,'touches',{value:[{clientX:100,clientY:100}]});el.dispatchEvent(e);});await page.waitForTimeout(480);await player.dispatchEvent('touchend',{touches:[]});await expect(page.locator('.dm-action-panel')).toBeVisible();await page.keyboard.press('Escape');await player.locator('button').click();
   await expect(player).toHaveClass(/is-playing/); await expect(player.locator('button')).toHaveAttribute('aria-pressed','true');
   await expect(player.locator('.voice-play-icon path')).toHaveAttribute('d','M7 5h4v14H7zM14 5h4v14h-4z');
   await player.locator('button').click(); await expect(player).not.toHaveClass(/is-playing/);
@@ -344,7 +347,7 @@ test('custom voice player plays real WAV media, pauses, and retains its node on 
   await page.screenshot({path:'output/chat-visual/mobile-contacts.png'});
 });
 
-test('home navigation remains in its sticky slot when scrolling down and up', async ({page}) => {
+test('home navigation scrolls out with feed and restores the moon icon', async ({page}) => {
   await page.setViewportSize({width:390,height:844});await setup(page);
   await page.evaluate(()=>{window.switchDockTab('posts');const feed=document.getElementById('feed');feed.innerHTML='<div style="height:2000px">滚动验收</div>';});
   const before=await page.locator('.posts-nav').boundingBox();
@@ -352,8 +355,69 @@ test('home navigation remains in its sticky slot when scrolling down and up', as
   const down=await page.locator('.posts-nav').boundingBox();
   await page.evaluate(()=>document.getElementById('panelPosts').scrollTop=100);await page.waitForTimeout(100);
   const up=await page.locator('.posts-nav').boundingBox();
-  expect(down.y).toBeGreaterThanOrEqual(0);expect(Math.abs(down.y-up.y)).toBeLessThan(2);expect(Math.abs(before.y-down.y)).toBeLessThan(16);
+  expect(down.y).toBeLessThan(-100);expect(up.y).toBeGreaterThan(down.y);
+  await page.evaluate(()=>document.getElementById('panelPosts').scrollTop=0);
+  await expect(page.locator('#themeToggle .theme-moon')).toBeVisible();
+  await page.locator('#themeToggle').click();await expect(page.locator('#themeToggle')).toHaveClass(/is-dark/);
+  await page.waitForTimeout(350);await page.locator('#themeToggle').click();await expect(page.locator('#themeToggle')).not.toHaveClass(/is-dark/);
   await expect(page.locator('.posts-nav')).not.toHaveClass(/hidden-header/);
   const auth=await page.locator('#authUI').boundingBox(), brand=await page.locator('.posts-nav-brand').boundingBox(); expect(Math.abs(auth.y-brand.y)).toBeLessThan(15);
   await page.screenshot({path:'output/chat-visual/mobile-home-stable.png'});
+});
+test('reply quote jumps to original and cleared chats reopen without skeletons',async({page})=>{
+ await setup(page);await page.waitForTimeout(400);
+ await page.evaluate(({id,stamp})=>{const original=window.xtjProtectedFetch;window.xtjProtectedFetch=async(url,options)=>{if(url.includes('/api/dm/messages'))return new Response(JSON.stringify({ok:true,data:[{id,user_name:'tester',media_url:'peer',created_at:stamp,content:JSON.stringify({text:'reply content',reply_to:{id:'123e4567-e89b-42d3-a456-000000000033',sender_name:'peer',text:'quoted original'}})}]}));return original(url,options);};window.openChat('peer');},{id,stamp});
+ await page.getByRole('button',{name:'定位引用的消息'}).click();await expect.poll(()=>page.evaluate(()=>window.__chatTestCalls.some(c=>c.url.includes('message_id=123e4567-e89b-42d3-a456-000000000033')))).toBe(true);
+ await page.evaluate(()=>{window.__chatMessagesGone=true;window.openChat('empty-peer');});
+ await expect(page.locator('#dockChatMessages .xtj-loading-skeleton,#dockChatMessages .xtj-loading')).toHaveCount(0);
+});
+test('multi attachment selection supports reorder, removal and sends each selected photo',async({page})=>{
+ await setup(page);await expect(page.locator('#dockChatInput')).toBeEnabled();
+ await page.evaluate(()=>{class XHR{constructor(){this.upload={};this.status=200;}open(){}setRequestHeader(){}send(file){window.__batchFiles=(window.__batchFiles||[]).concat(file.name);this.responseText=JSON.stringify({ok:true,storage_path:'chat/test.png',public_url:'https://example.invalid/sent.png'});setTimeout(()=>this.onload(),10);}abort(){}}window.XMLHttpRequest=XHR;window.__chatSendDelay=30;});
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=','base64');
+ await page.locator('#dockChatFileInp').setInputFiles([{name:'one.png',mimeType:'image/png',buffer:png},{name:'two.png',mimeType:'image/png',buffer:png},{name:'three.png',mimeType:'image/png',buffer:png}]);
+ await expect(page.locator('.chat-attachment-item')).toHaveCount(3);await page.getByRole('button',{name:'后移第 1 个附件'}).click();await page.getByRole('button',{name:'移除第 3 个附件'}).click();await expect(page.locator('.chat-attachment-item')).toHaveCount(2);
+ await page.locator('#dockChatSendBtn').click();await expect.poll(()=>page.evaluate(()=>window.__batchFiles)).toEqual(['two.png','one.png']);await expect(page.locator('#dockChatSendBtn')).toBeEnabled();await page.waitForTimeout(500);expect(await page.evaluate(()=>window.__batchFiles)).toEqual(['two.png','one.png']);expect(await page.evaluate(()=>window.__chatTestCalls.filter(c=>c.url.includes('/api/dm/send')).length)).toBe(2);
+});
+test('actual MediaRecorder output contains nonzero audio and sending starts as a wave bubble',async({page})=>{
+ await setup(page);test.skip(await page.evaluate(()=>typeof MediaRecorder!=='function'),'Cloud Linux WebKit lacks MediaRecorder; real WAV playback and mocked recording lifecycle are tested separately.');await expect(page.locator('#dockChatInput')).toBeEnabled();
+ await page.evaluate(()=>{
+  Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{async getUserMedia(){const ctx=new AudioContext();await ctx.resume();const source=ctx.createOscillator(),gain=ctx.createGain(),dest=ctx.createMediaStreamDestination();source.frequency.value=440;gain.gain.value=.2;source.connect(gain);gain.connect(dest);source.start();window.__realVoiceContext=ctx;return dest.stream;}}});
+  class XHR{constructor(){this.upload={};this.status=200;}open(){}setRequestHeader(){}send(file){window.__capturedVoiceFile=file;this.responseText=JSON.stringify({ok:true,storage_path:'chat/voice.m4a',public_url:'https://example.invalid/voice.m4a'});setTimeout(()=>this.onload(),600);}abort(){}}window.XMLHttpRequest=XHR;
+ });
+ await page.locator('#chatVoiceButton').click();await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');await page.waitForTimeout(1200);await page.locator('#chatVoiceButton').click();await expect(page.locator('#dockChatFilePreview')).toBeVisible();await page.locator('#dockChatSendBtn').click();
+ await expect(page.locator('.chat-msg.pending .chat-voice-wave')).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>window.__capturedVoiceFile?.size||0)).toBeGreaterThan(100);
+ const audio=await page.evaluate(async()=>{const file=window.__capturedVoiceFile,ctx=window.__realVoiceContext,decoded=await ctx.decodeAudioData(await file.arrayBuffer()),values=decoded.getChannelData(0);let energy=0;for(const v of values)energy+=v*v;return {seconds:decoded.duration,rms:Math.sqrt(energy/values.length),mime:file.type};});
+ expect(audio.seconds).toBeGreaterThan(.5);expect(audio.rms).toBeGreaterThan(.02);
+});
+test('account search is first and contact tabs preserve the loaded search node',async({page})=>{
+ await setup(page);await page.locator('#chatSearchButton').click();await expect(page.locator('[data-chat-search-mode="users"]')).toHaveAttribute('aria-selected','true');await expect(page.locator('#chatHistoryScope')).toBeHidden();await page.locator('#chatHistoryClose').click();
+ await page.locator('#dockChatSocialBtn').click();await page.locator('[data-chat-social-tab="search"]').click();await page.locator('#dockChatSocialSearchForm input').fill('my-search');await page.evaluate(()=>window.__savedSocialInput=document.querySelector('#dockChatSocialSearchForm input'));
+ await page.locator('[data-chat-social-tab="blocks"]').click();await page.locator('[data-chat-social-tab="search"]').click();expect(await page.evaluate(()=>document.querySelector('#dockChatSocialSearchForm input')===window.__savedSocialInput)).toBe(true);await expect(page.locator('#dockChatSocialSearchForm input')).toHaveValue('my-search');
+ await page.waitForTimeout(400);await page.screenshot({path:'output/chat-visual/contacts-redesign.png'});
+});
+
+test('touch long press reply does not swallow the next quote click',async({page})=>{
+ await setup(page);await page.waitForTimeout(400);
+ await page.evaluate(({id,stamp})=>{const base=window.xtjProtectedFetch;window.xtjProtectedFetch=async(url,options)=>url.includes('/api/dm/messages')?new Response(JSON.stringify({ok:true,data:[{id,user_name:'tester',media_url:'peer',created_at:stamp,content:JSON.stringify({text:'touch reply',reply_to:{id,sender_name:'tester',text:'original'}})}]})):base(url,options);window.openChat('peer');},{id,stamp});
+ const bubble=page.locator('[data-message-id="'+id+'"] .chat-msg');await expect(bubble).toContainText('touch reply');
+ await bubble.evaluate(el=>{const e=new Event('touchstart',{bubbles:true});Object.defineProperty(e,'touches',{value:[{clientX:100,clientY:100}]});el.dispatchEvent(e);});await page.waitForTimeout(480);await bubble.dispatchEvent('touchend',{touches:[]});
+ await page.getByRole('button',{name:'回复',exact:true}).click();await expect(page.locator('#chatMessageContext')).toBeVisible();
+ await page.getByRole('button',{name:'定位引用的消息'}).click();await expect.poll(()=>page.evaluate(()=>window.__chatTestCalls.some(c=>c.url.includes('/history/context')))).toBe(true);
+});
+test('gallery fetches one metadata page then pages on demand and releases on logout',async({page})=>{
+ await setup(page);await page.waitForTimeout(400);
+ await page.evaluate(({id,stamp})=>{const base=window.xtjProtectedFetch;window.xtjProtectedFetch=async(url,options)=>{
+ if(url.includes('/api/dm/messages'))return new Response(JSON.stringify({ok:true,data:[{id,user_name:'tester',media_url:'peer',created_at:stamp,content:JSON.stringify({text:'',media:{kind:'image',url:'https://example.invalid/photo.png',w:100,h:100}})}]}));
+ if(url.includes('/history/search')){window.__galleryCalls=(window.__galleryCalls||0)+1;return new Response(JSON.stringify({ok:true,items:[],has_more:true,next_cursor_at:stamp,next_cursor_id:id}));}return base(url,options);};window.openChat('peer');},{id,stamp});
+ await page.locator('.msg-img').click();await expect(page.locator('#chatGallery')).toBeVisible();await expect.poll(()=>page.evaluate(()=>window.__galleryCalls)).toBe(1);await page.waitForTimeout(200);expect(await page.evaluate(()=>window.__galleryCalls)).toBe(1);
+ await page.locator('[data-gallery="previous"]').click();await expect.poll(()=>page.evaluate(()=>window.__galleryCalls)).toBe(2);await page.evaluate(()=>window.__xtjResetChatPanels());await expect(page.locator('#chatGallery')).toHaveCount(0);
+});
+
+test('touch swipe replies while a vertical gesture remains scrolling',async({page})=>{
+ await setup(page);await page.waitForTimeout(400);const bubble=page.locator('[data-message-id="'+id+'"] .chat-msg');
+ await bubble.dispatchEvent('pointerdown',{pointerType:'touch',pointerId:1,clientX:100,clientY:100});await bubble.dispatchEvent('pointermove',{pointerType:'touch',pointerId:1,clientX:105,clientY:145});await bubble.dispatchEvent('pointerup',{pointerType:'touch',pointerId:1,clientX:105,clientY:145});await expect(page.locator('#chatMessageContext')).toBeHidden();
+ await bubble.dispatchEvent('pointerdown',{pointerType:'touch',pointerId:2,clientX:100,clientY:100});await bubble.dispatchEvent('pointermove',{pointerType:'touch',pointerId:2,clientX:180,clientY:104});await bubble.dispatchEvent('pointerup',{pointerType:'touch',pointerId:2,clientX:180,clientY:104});await expect(page.locator('#chatMessageContext')).toContainText('hello world');
+ await page.locator('#chatMessageContextClose').click();await page.locator('#chatSearchButton').click();await page.waitForTimeout(350);await page.screenshot({path:'output/chat-visual/account-search-redesign.png'});await page.locator('#chatHistoryClose').click();await bubble.click({button:'right'});await page.waitForTimeout(350);await page.screenshot({path:'output/chat-visual/message-menu-two-rows.png'});
 });

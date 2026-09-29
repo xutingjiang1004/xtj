@@ -51,6 +51,8 @@ async function main(){
    await api(b,'/api/chat/friend-requests/'+request.request_id+'/accept',{method:'POST',data:{}});
   }
   record('real friendship request and acceptance');
+  const capabilities=await api(a,'/api/chat/transcription/capabilities');report.transcriptionEnabled=capabilities.enabled;record('production transcription capability checked',{enabled:capabilities.enabled});
+  const push=await api(a,'/api/chat/push/config');if(!push.public_key)throw Error('push configuration unavailable');record('authenticated Web Push configuration');
   // Reload to bootstrap subscriptions with real refresh cookies and friend state.
   for(const actor of actors){await actor.page.reload({waitUntil:'domcontentloaded'});await actor.page.waitForFunction(u=>window.currentUser===u&&typeof window.openChat==='function',actor.user);}
   await a.page.evaluate(u=>window.openChat(u),b.user);
@@ -76,6 +78,11 @@ async function main(){
   const ownRow=a.page.locator('#dockChatMessages .chat-msg-row').filter({hasText:text});
   await expect(ownRow.locator('.msg-read-status')).toContainText('已读',{timeout:20000});
   record('real read receipt synchronization');
+  await b.page.locator('.chat-msg-row').filter({hasText:text}).locator('.chat-msg').click({button:'right'});await b.page.getByRole('button',{name:'回复',exact:true}).click();
+  const reply='引用验收 '+suffix;await b.page.locator('#dockChatInput').fill(reply);await b.page.locator('#dockChatSendBtn').click();
+  await expect(a.page.locator('.chat-msg-row').filter({hasText:reply}).locator('.chat-reply-quote')).toBeVisible({timeout:20000});
+  await a.page.locator('.chat-msg-row').filter({hasText:reply}).locator('.chat-reply-quote').click();await expect(a.page.locator('#dockChatMessages')).toContainText(text);record('real reply and original-context navigation');
+  await a.page.locator('#dockChatJumpLatest').click().catch(()=>{});
   await b.page.locator('#dockChatInput').fill('收到 '+suffix);
   await b.page.locator('#dockChatSendBtn').click();
   await expect(a.page.locator('#dockChatMessages')).toContainText('收到 '+suffix,{timeout:20000});
@@ -101,6 +108,12 @@ async function main(){
   const imageSrc=await image.getAttribute('src');
   if(!imageSrc.includes('/object/sign/dm-private/'))throw new Error('new photo does not use private signed URL');
   record('real private image upload, delivery and decoding');
+  await image.click();await expect(b.page.locator('#chatGallery')).toBeVisible();await b.page.locator('[data-gallery="close"]').click();record('production authorized image gallery');
+  const samples=24000,wav=Buffer.alloc(44+samples*2);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(16000,24);wav.writeUInt32LE(32000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(samples*2,40);for(let i=0;i<samples;i++)wav.writeInt16LE(Math.sin(i/16000*Math.PI*2*440)*5000,44+i*2);
+  await a.page.setInputFiles('#dockChatFileInp',{name:'qa-voice.wav',mimeType:'audio/wav',buffer:wav});await a.page.locator('#dockChatSendBtn').click();
+  const voice=b.page.locator('.chat-voice-player').last();await expect(voice).toBeVisible({timeout:30000});await voice.locator('button').click();await expect.poll(()=>voice.locator('audio').evaluate(n=>n.currentTime),{timeout:10000}).toBeGreaterThan(.05);
+  const sound=await voice.locator('audio').evaluate(async n=>{const response=await fetch(n.src);const ctx=new AudioContext();const decoded=await ctx.decodeAudioData(await response.arrayBuffer());const values=decoded.getChannelData(0);let energy=0;for(const value of values)energy+=value*value;await ctx.close();return {duration:decoded.duration,rms:Math.sqrt(energy/values.length),signed:n.src.includes('/object/sign/dm-private/')};});
+  if(sound.rms<.02 || !sound.signed)throw Error('private audio is silent or unsigned');record('real private audio upload, delivery, playback and decoded sound',sound);
   // Replay after a genuine network interruption, not a simulated API response.
   await b.context.setOffline(true);
   const reconnectText='断线补收 '+suffix+'-'+Date.now();

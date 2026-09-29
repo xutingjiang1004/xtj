@@ -419,6 +419,11 @@
             //   叠加 renderDockChatDesktopEmptyState 的归属判断，导致桌面分屏在登出后
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
+                if (_chatSocialPanels) _chatSocialPanels.clear();
+                resetChatAttachmentQueue();
+                var gallery=document.getElementById('chatGallery');if(gallery)gallery.__close ? gallery.__close() : gallery.remove();
+                _chatPushOwner='';_chatPushEnabled=false;
+                setTimeout(function(){window.__xtjSyncChatPush?.();},0);
                 if (_chatDomSnapshots) _chatDomSnapshots.clear();
                 cancelDockChatSendFlights(); resetDockChatTyping(); closeDockChatConversationMenu(true);
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); _chatRecordedFile = null; _chatShowArchived = false; var archiveButton = document.getElementById('chatArchiveButton'); if (archiveButton) { archiveButton.textContent = '归档'; archiveButton.setAttribute('aria-pressed','false'); } _chatReactionSeq++; clearTimeout(_chatReactionTimer);
@@ -609,7 +614,8 @@
                 _chatSendFlights.forEach(function(flight) { flight.finish(); });
             }
             function captureDockChatSendOrigin(file) {
-                var source = document.querySelector(file ? '#dockCfpThumb' : '#panelChat .chat-input-wrap');
+                var source = document.querySelector(file && getChatUploadKind(file)!=='audio' ? '#dockCfpThumb' : '#panelChat .chat-input-wrap');
+                if (!source || !source.getClientRects().length) source=document.querySelector('#panelChat .chat-input-wrap');
                 if (!source || !source.getClientRects().length) return null;
                 return source.getBoundingClientRect();
             }
@@ -670,12 +676,12 @@
             var _chatDomSnapshots = new Map();
             function forgetDockChatConversationMessages(peer) {
                 _chatDomSnapshots.delete(getDockChatCacheKey(peer));
-                delete _chatCache[getDockChatCacheKey(peer)];
+                _chatCache[getDockChatCacheKey(peer)] = [];
                 _chatRenderSignature[peer] = undefined;
             }
 
             function dockChatGoBack() {
-                closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); _chatRecordedFile = null; _chatHistoryFocus = '';
+                closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 closeDockChatConversationMenu(true);
                 cancelDockChatSendFlights();
                 resetDockChatTyping();
@@ -740,7 +746,7 @@
             window.openChat = function(userName) {
                 cancelDockChatSendFlights();
                 resetDockChatTyping();
-                closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); _chatRecordedFile = null; _chatHistoryFocus = '';
+                closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 if (!window.currentUser) { showToast('请先登录'); return; }
                 // ★ 2026-09-27 待产品确认（审计 C13）：禁言是否应禁止"查看"私信。
                 //   审计认为「禁言应只禁发送，不应禁查看」，但这属于**产品语义**问题，不是明确 bug。
@@ -1566,6 +1572,9 @@
             function setDockChatJumpLatestVisible(visible) {
                 var button = document.getElementById('dockChatJumpLatest');
                 if (!button) return;
+                var count=Number(button.dataset.unseen || 0);
+                if(!visible){button.dataset.unseen='0';count=0;}
+                var label=button.querySelector('span');if(label)label.textContent=count ? count+' 条新消息' : '最新消息';
                 button.hidden = !visible;
                 button.classList.toggle('is-visible', !!visible);
             }
@@ -1674,7 +1683,7 @@
                     // 点开大图始终用**远端原图地址**（本地 blob 只在本次会话有效，
                     // 用它做 data-full-src 会让对方/刷新后失效）。
                     var fullForViewer = (safeSrc && !/^blob:/i.test(safeSrc)) ? safeSrc : safeFull;
-                    var imageBody = '<img class="msg-img" src="' + escapeHtml(displaySrc) + '" data-src="' + escapeHtml(safeSrc) + '" data-full-src="' + escapeHtml(fullForViewer) + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" decoding="async"' + dimAttr + remoteAttr + ' />';
+                    var imageBody = '<img class="msg-img" src="' + escapeHtml(displaySrc) + '" data-src="' + escapeHtml(safeSrc) + '" data-full-src="' + escapeHtml(fullForViewer) + '" data-post-user="' + escapeHtml(String(message.user_name || '')) + '" data-post-created-at="' + escapeHtml(String(message.created_at || '')) + '" alt="聊天图片" onclick="openChatGallery(this.getAttribute(\'data-full-src\') || this.src, this)" onerror="window.handleDockChatImageError(this)" decoding="async"' + dimAttr + remoteAttr + ' />';
                     // ★ 2026-09-26（用户："已读未读要显示在气泡下面，而不是图片里面"）：
                     //   带文字的图片消息以前是「图片 → 文字」竖排，状态行被推到文字下面，
                     //   视觉上「未读 04:37」就贴在图片内部（截图里的观感）。改成
@@ -1685,7 +1694,7 @@
                 }
                 if (media && media.kind === 'video') {
                     // ★ 2026-09-26（审计 P1-7）：同图片，走 sanitizeUrl 协议白名单
-                    var safeVideoSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(media.src || '')) : '';
+                    var safeVideoSrc = sanitizeUrl(String(message.__localPreviewUrl || media.src || ''));
                     if (!safeVideoSrc) return '<span class="msg-text">' + escapeHtml(messageText || '[视频]') + '</span>';
                     var videoBody = '<video class="msg-img" src="' + escapeHtml(safeVideoSrc) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
                     if (messageText) videoBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
@@ -1694,9 +1703,9 @@
                 // P6: render audio messages with <audio> player
                 if (media && media.kind === 'audio') {
                     // ★ 2026-09-26（审计 P1-7）：同图片，走 sanitizeUrl 协议白名单
-                    var safeAudioSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(media.src || '')) : '';
+                    var safeAudioSrc = sanitizeUrl(String(message.__localPreviewUrl || media.src || ''));
                     if (!safeAudioSrc) return '<span class="msg-text">' + escapeHtml(messageText || '[音频]') + '</span>';
-                    var audioBody = '<div class="chat-voice-player"><audio class="msg-audio" src="' + escapeHtml(safeAudioSrc) + '" preload="metadata"></audio><button type="button" class="chat-voice-play" aria-label="播放语音" aria-pressed="false"><svg class="voice-play-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="m8 5 11 7-11 7z"/></svg><span class="chat-voice-wave" aria-hidden="true">' + [8,14,23,12,18,28,16,10,22,14,26,18,12,20,9,16].map(function(height) { return '<i style="--voice-bar:'+height+'px"></i>'; }).join('') + '</span><span class="chat-voice-duration">语音</span></button></div>';
+                    var audioBody = '<div class="chat-voice-player"><audio class="msg-audio" src="' + escapeHtml(safeAudioSrc) + '" preload="metadata"></audio><button type="button" class="chat-voice-play" aria-label="播放语音" aria-pressed="false"><svg class="voice-play-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="m8 5 11 7-11 7z"/></svg><span class="chat-voice-wave" aria-hidden="true">' + [8,14,23,12,18,28,16,10,22,14,26,18,12,20,9,16].map(function(height) { return '<i style="--voice-bar:'+height+'px"></i>'; }).join('') + '</span><span class="chat-voice-duration">' + (Number(payload.media && payload.media.duration)>0 ? Math.ceil(payload.media.duration)+'″' : '语音') + '</span></button></div>';
                     if (messageText) audioBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return audioBody;
                 }
@@ -1767,7 +1776,7 @@
                 var timeHtml = '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span>';
                 var bubbleBody = buildDockChatBodyMarkup(message);
                 if (!isWithdrawn && payload.transcript) bubbleBody += '<div class="chat-transcript"><small>语音转写</small><span>' + escapeHtml(String(payload.transcript)) + '</span></div>';
-                if (!isWithdrawn && payload.reply_to) bubbleBody = '<div class="chat-reply-quote"><strong>' + escapeHtml(String(payload.reply_to.sender_name || '消息')) + '</strong><span>' + escapeHtml(String(payload.reply_to.text || '[附件]')) + '</span></div>' + bubbleBody;
+                if (!isWithdrawn && payload.reply_to) bubbleBody = '<button type="button" class="chat-reply-quote" data-reply-id="' + escapeHtml(String(payload.reply_to.id || '')) + '" aria-label="定位引用的消息"><strong>' + escapeHtml(String(payload.reply_to.sender_name || '消息')) + '</strong><span>' + escapeHtml(String(payload.reply_to.text || '[附件]')) + '</span></button>' + bubbleBody;
                 if (payload.edited_at) timeHtml = '<span class="msg-edited">已编辑</span>' + timeHtml;
                 var bubble, inner;
                 if (rowMedia) {
@@ -1945,7 +1954,7 @@
                 }
                 // 获取聊天缓存键
                 var cacheKey = getDockChatCacheKey(userName);
-                var hadCachedMessages = !!(_chatCache[cacheKey] && _chatCache[cacheKey].length);
+                var hadCachedMessages = Array.isArray(_chatCache[cacheKey]);
                 if (hadCachedMessages) {
                     // ★ 2026-09-25 修复（切换会话骨架闪烁）：缓存命中时必须在任何骨架/空状态
                     //   绘制之前就把内容渲染出来，否则 openChat 里那次 loading 骨架会先画上去
@@ -1954,12 +1963,7 @@
                 }
                 if (!hadCachedMessages && !muteLoadingSkeleton) {
                     // 无缓存且不是轮询/后台刷新 → 才允许显示骨架（首次打开会话）
-                    renderChatLoadingState(el0, {
-                        title: '加载中..',
-                        subtitle: '正在打开聊天通道',
-                        variant: 'chat-detail',
-                        seq: loadSeq
-                    });
+                    renderDockMessages(userName, [], false);
                 }
                 hydrateDockChatAvatars([currentUser, userName], function(changed) {
                     if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
@@ -2098,6 +2102,7 @@
                     var k = node.getAttribute('data-msg-key');
                     if (k) existingRows[k] = node;
                 });
+                var newReceived=msgs.filter(function(message,index){return message.user_name!==currentUser && !existingRows[getDockChatRowKey(message,index)];}).length;
                 var orderedNodes = [];
                 msgs.forEach(function(message, index) {
                     var key = getDockChatRowKey(message, index);
@@ -2163,6 +2168,7 @@
                     //   正在上翻历史的用户往底部方向拽一段，连点几次就"被拖回底部"。
                     //   正确做法：追加到末尾时 scrollTop 保持**不变**（视口内内容位置不动）。
                     el.scrollTop = previousScrollTop;
+                    var jump=document.getElementById('dockChatJumpLatest');if(jump && !_chatHistoryFocus)jump.dataset.unseen=String(Number(jump.dataset.unseen || 0)+newReceived);
                     setDockChatJumpLatestVisible(true);
                 } else {
                     setDockChatJumpLatestVisible(false);
@@ -2411,15 +2417,15 @@
                 return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size, w: tw, h: th };
             }
 
-            async function sendDockChatMessage() {
+            async function sendDockChatMessageSingle(queuedFile, queuedText) {
                 _chatHistoryFocus = '';
                 if (!currentUser) { showToast('请先登录'); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 const inp = document.getElementById('dockChatInput');
                 if (!inp) return;
-                const content = inp.value.trim();
+                const content = queuedText != null ? queuedText : inp.value.trim();
                 const fileInput = document.getElementById('dockChatFileInp');
-                let file = _chatRecordedFile || (fileInput && fileInput.files[0]);
+                let file = queuedFile || _chatRecordedFile || (fileInput && fileInput.files[0]);
                 if (file) file = normalizeDockChatMediaFile(file);
                 if (_chatVoice) { showToast('请先结束录音'); return; }
                 if (_chatEditDraft) { await sendChatEditedMessage(content); return; }
@@ -2450,7 +2456,7 @@
                     if (!typeOk) { showToast("不支持的文件类型，支持图片、视频、音频及 PDF、TXT、CSV、RTF、DOCX、XLSX、PPTX、ZIP"); return; }
                 }
                 var sendOrigin = captureDockChatSendOrigin(file);
-                dockChatSending = true; inp.value = '';
+                dockChatSending = true; if (!queuedFile || inp.value.trim()===content) inp.value = '';
                 sendDockChatTyping(false);
                 if (_dockChatDraftTimer) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
@@ -2485,10 +2491,10 @@
                     //   就泄漏一个 ≤50MB 的 blob，直到刷新页面。
                     //   核对结论：video/audio 气泡**不依赖**这个本地预览（它们不读 __localPreviewUrl），
                     //   故选方案 (a) 最干净 —— 只对 image 创建 objectURL，其余类型返回 ''。
-                    if (mediaKind === 'image') {
+                    if (['image','audio','video'].includes(mediaKind)) {
                         try {
                             localPreviewUrl = URL.createObjectURL(file);
-                            mediaPayload = { kind: mediaKind, url: localPreviewUrl, mimeType: file.type || '' };
+                            mediaPayload = { kind: mediaKind, url: localPreviewUrl, mimeType: file.type || '', duration: file.__voiceDuration || 0 };
                             var previewImage=document.querySelector('#dockCfpThumb img');
                             if (previewImage && previewImage.naturalWidth && previewImage.naturalHeight) {
                                 mediaPayload.w=previewImage.naturalWidth; mediaPayload.h=previewImage.naturalHeight;
@@ -2652,7 +2658,7 @@
                     //   于是气泡里从头到尾都有图（本地字节，不可能 404）；远端地址交给
                     //   hydrateDockChatRemoteMedia() 在后台下载，下载成功后才无缝换过去
                     //   并释放 blob。远端一时取不到也无所谓 —— 继续显示本地图，不降级。
-                    if (localPreviewUrl && mediaKind === 'image') {
+                    if (localPreviewUrl && ['image','audio','video'].includes(mediaKind)) {
                         insertedMessage = Object.assign({}, insertedMessage, { __localPreviewUrl: localPreviewUrl });
                     }
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage);
@@ -2943,6 +2949,8 @@
             // ★ 2026-09-25：操作条用 16px 线性 SVG 图标（跟随 currentColor）。
             //   原先用 emoji/符号当占位（⧉ ↩ ➦ ⤴ 🗑），在深色小条上既花又受字体影响。
             var DM_ACTION_ICONS = {
+                reply: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5v7a4 4 0 0 1-4 4H4m5-5-5 5 5 5"/></svg>',
+                edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6L16 3Zm-3 3 5 5"/></svg>',
                 copy: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
                 withdraw: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h11a5 5 0 0 1 0 10h-1"/><path d="M7 6l-4 4 4 4"/></svg>',
                 forward: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h13"/><path d="M13 8l4 4-4 4"/></svg>',
@@ -2974,10 +2982,9 @@
                 var elapsed = Date.now() - new Date(message.created_at).getTime();
                 var canWithdraw = sent && !withdrawn && !isNaN(elapsed) && elapsed <= 3 * 60 * 1000;
                 if (!withdrawn) {
-                    actions.push({ id: 'reply', label: '回复' }, { id: 'reaction', label: '回应' });
+                    actions.push({ id: 'reply', label: '回复' });
                     if (sent && !resolveDockChatMedia(message) && elapsed >= 0 && elapsed <= 15 * 60 * 1000) actions.push({ id: 'edit', label: '编辑' });
                 }
-                if (!withdrawn && resolveDockChatMedia(message) && resolveDockChatMedia(message).kind === 'audio') actions.push({ id: 'transcribe', label: payload.transcript ? '查看转写' : '转文字' });
                 if (!withdrawn && value) actions.push({ id: 'copy', label: '复制' });
                 if (canWithdraw) actions.push({ id: 'withdraw', label: '撤回' });
                 if (!withdrawn && value) actions.push({ id: 'forward', label: '转发' });
@@ -2997,6 +3004,7 @@
 
             function closeDockMessageActions() {
                 if (!_dmActionSheet) return;
+                window.__xtjResetDmPress?.();
                 var sheet = _dmActionSheet;
                 _dmActionSheet = null;
                 if (sheet._dmCleanup) sheet._dmCleanup();
@@ -3129,6 +3137,7 @@
                 document.addEventListener('keydown', onDmActionKeydown, true);
             }
             function runDockMessageAction(actionId, message) {
+                window.__xtjResetDmPress?.();
                 closeDockMessageActions();
                 if (['reply', 'edit', 'reaction', 'transcribe'].indexOf(actionId) >= 0) { runChatExtraAction(actionId, message); return; }
                 if (actionId === 'copy') { doCopyDmMessage(message); return; }
@@ -3513,7 +3522,7 @@
                 if (!window.currentUser) { showToast('请先登录'); return; }
                 var panel = document.getElementById('chatHistoryPanel');
                 transitionChatSurface(panel,true,false,panel);
-                setChatSearchMode('messages');
+                setChatSearchMode(media ? 'messages' : 'users');
                 document.getElementById('chatSearchTabs').hidden=!!media;
                 document.getElementById('chatHistoryKind').value = media ? 'media' : 'all';
                 var scope = document.getElementById('chatHistoryScope');
@@ -3521,7 +3530,7 @@
                 scope.value = dockChatActiveUser ? 'current' : 'global';
                 document.getElementById('chatHistoryQuery').value = '';
                 document.getElementById('chatHistoryResults').replaceChildren();
-                document.getElementById('chatHistoryStatus').textContent = media ? '正在加载媒体…' : '输入至少两个字搜索消息';
+                document.getElementById('chatHistoryStatus').textContent = media ? '正在加载媒体…' : '输入账号，找到想联系的人';
                 document.getElementById('chatHistoryMore').hidden = true;
                 if (media) runChatHistorySearch(false); else document.getElementById('chatHistoryQuery').focus();
             }
@@ -3631,6 +3640,7 @@
                         if (owner === window.currentUser && peer === dockChatActiveUser) showToast(job.status === 'completed' ? '转写已完成，请刷新会话查看' : '正在后台转写，完成后自动同步');
                     } catch (error) { if (owner === window.currentUser) showToast(error.message); }
                 } else if (action === 'reply') {
+                    document.getElementById('dockChatInput').focus();
                     try {
                         var result = await chatFeatureApi('messages/reply/validate', { peer: peer, message_id: message.id });
                         if (owner !== window.currentUser || peer !== dockChatActiveUser) return;
@@ -3741,6 +3751,7 @@
                     if (voice.recognition) { try { voice.recognition.abort(); } catch (_) {} }
                     if (voice.recorder && voice.recorder.state !== 'inactive') { try { voice.recorder.stop(); } catch (_) {} }
                     voice.stream.getTracks().forEach(function(track) { track.stop(); });
+                    try { if (navigator.audioSession) navigator.audioSession.type='playback'; } catch (_) {}
                 }
                 var input = document.getElementById('dockChatInput');
                 if (voice && input) { input.value = voice.base; input.disabled = false; }
@@ -3766,8 +3777,9 @@
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
-                    var type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find(function(t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); });
+                    var type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus'].find(function(t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); });
                     var recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined), chunks = [];
+                    try { if (navigator.audioSession) navigator.audioSession.type='play-and-record'; } catch (_) {}
                     var input = document.getElementById('dockChatInput'), base = input.value, transcript = '';
                     var voice = _chatVoice = { recorder: recorder, stream: stream, cancelled: false, hold:!!hold, base: base, started: Date.now() };
                     recorder.ondataavailable = function(event) { if (event.data.size) chunks.push(event.data); };
@@ -3775,6 +3787,7 @@
                     recorder.onstop = function() {
                         if (voice.recognition) { try { voice.recognition.stop(); } catch (_) {} }
                         stream.getTracks().forEach(function(t) { t.stop(); }); clearInterval(voice.timer); clearTimeout(voice.limit);
+                        try { if (navigator.audioSession) navigator.audioSession.type='playback'; } catch (_) {}
                         if (voice.cancelled || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) return;
                         _chatVoice = null; input.disabled = false;
                         document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
@@ -3785,22 +3798,13 @@
                         if (voice.hold && Date.now()-voice.started<600) { document.getElementById('chatVoiceStatus').hidden=true; showToast('录音太短，请再说一次'); return; }
                         if (!blob.size || blob.size > 50 * 1024 * 1024) { showToast('录音无内容或超过 50MB，请重录'); return; }
                         _chatRecordedFile = new File([blob], 'voice-' + Date.now() + (mime.indexOf('webm') >= 0 ? '.webm' : mime.indexOf('ogg') >= 0 ? '.ogg' : '.m4a'), { type: mime });
+                        _chatRecordedFile.__voiceDuration = Math.max(1,Math.round((Date.now()-voice.started)/1000));
                         showDockChatFilePreview(_chatRecordedFile);
                         if (voice.hold) { sendDockChatMessage(); return; }
                         document.getElementById('chatVoiceStatus').textContent = transcript ? '录音完成 · 转写文字可编辑后发送' : '录音完成 · 可补充文字后发送';
                     };
-                    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    if (SR) {
-                        try {
-                            var recognition = new SR(); voice.recognition = recognition; recognition.lang = 'zh-CN'; recognition.continuous = true; recognition.interimResults = true;
-                            recognition.onresult = function(event) {
-                                if (voice.cancelled || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) return;
-                                transcript = Array.from(event.results).map(function(r) { return r[0].transcript; }).join('').slice(0, 450);
-                                input.value = [base, transcript].filter(Boolean).join(' ').slice(0, 500);
-                            };
-                            recognition.onerror = function() { voice.recognition = null; }; recognition.start();
-                        } catch (_) { voice.recognition = null; }
-                    }
+                    // A second SpeechRecognition session can steal the iOS microphone from MediaRecorder.
+                    // Record audio alone; the existing authenticated server queue transcribes after sending.
                     input.disabled = true; setChatVoiceButton(true); document.getElementById('chatVoiceButton').classList.add('recording');
                     document.getElementById('chatVoiceCancel').hidden = false; document.getElementById('chatVoiceStatus').hidden = false;
                     voice.timer = setInterval(function() { if (voice.hold && _chatVoiceHold && _chatVoiceHold.cancel) return; document.getElementById('chatVoiceStatus').textContent = (voice.hold ? '松开发送 · 上滑取消 · ' : '正在录音 · ') + Math.floor((Date.now() - voice.started) / 1000) + ' 秒'; }, 500);
@@ -3866,7 +3870,17 @@
                         document.querySelectorAll('#dockChatMessages audio').forEach(function(other) { if (other!==audio) other.pause(); });
                         if (audio.ended) audio.currentTime=0;
                         player.classList.add('is-loading');
-                        try { await audio.play(); update(); } catch(_) { player.classList.remove('is-loading'); duration.textContent='重试'; showToast('语音暂时无法播放，请再试一次'); }
+                        try {
+                            try { if (navigator.audioSession) navigator.audioSession.type='playback'; } catch (_) {}
+                            audio.muted=false; audio.volume=1;
+                            if (audio.error) audio.load();
+                            await audio.play(); update();
+                        } catch(_) {
+                            player.classList.remove('is-loading'); duration.textContent='重试';
+                            // Refresh expired signed URLs through the existing actor-authorized messages API.
+                            await loadDockChatMessages(dockChatActiveUser,false,true);
+                            showToast('语音地址已刷新，请点击重试；也请检查媒体音量');
+                        }
                     };
                     ['loadedmetadata','durationchange','play','pause','ended','timeupdate','playing'].forEach(function(event) { audio.addEventListener(event,update); });
                     audio.addEventListener('waiting',function() { player.classList.add('is-loading'); });
@@ -3874,6 +3888,145 @@
                     update();
                 });
             }
+            var _chatAttachmentQueue=[], _chatAttachmentUrls=new Map(), _chatBatchSending=false;
+            function resetChatAttachmentQueue() {
+                _chatAttachmentQueue=[];
+                _chatAttachmentUrls.forEach(function(url) { URL.revokeObjectURL(url); }); _chatAttachmentUrls.clear();
+                var host=document.getElementById('chatAttachmentQueue'); if(host)host.remove();
+            }
+            function renderChatAttachmentQueue() {
+                var old=document.getElementById('chatAttachmentQueue'); if(old)old.remove();
+                if(_chatAttachmentQueue.length<2)return;
+                var host=document.createElement('div'); host.id='chatAttachmentQueue'; host.className='chat-attachment-queue';
+                _chatAttachmentQueue.forEach(function(file,index){
+                    var item=document.createElement('div'); item.className='chat-attachment-item';
+                    if(/^image\//.test(file.type)){ var img=document.createElement('img'); var url=_chatAttachmentUrls.get(file); if(!url){url=URL.createObjectURL(file);_chatAttachmentUrls.set(file,url);} img.src=url;img.alt=file.name;item.appendChild(img); }
+                    else {var label=document.createElement('span');label.textContent=file.name;item.appendChild(label);}
+                    var controls=document.createElement('div');
+                    [['←','前移',-1],['→','后移',1],['×','移除',0]].forEach(function(action){var button=document.createElement('button');button.type='button';button.textContent=action[0];button.setAttribute('aria-label',action[1]+'第 '+(index+1)+' 个附件');button.disabled=action[2] && (index+action[2]<0 || index+action[2]>=_chatAttachmentQueue.length);button.onclick=function(){
+                        if(!action[2]){_chatAttachmentQueue.splice(index,1);var url=_chatAttachmentUrls.get(file);if(url)URL.revokeObjectURL(url);_chatAttachmentUrls.delete(file);}
+                        else {var other=index+action[2];[_chatAttachmentQueue[index],_chatAttachmentQueue[other]]=[_chatAttachmentQueue[other],_chatAttachmentQueue[index]];}
+                        if(!_chatAttachmentQueue.length)clearDockChatFilePreview(false);else{showDockChatFilePreview(_chatAttachmentQueue[0]);renderChatAttachmentQueue();}
+                    };controls.appendChild(button);});item.appendChild(controls);host.appendChild(item);
+                });document.getElementById('dockChatFilePreview').appendChild(host);
+            }
+            function selectChatAttachments(files) {
+                if(dockChatSending || _chatBatchSending){showToast('请等待当前附件发送完成');return;}
+                var valid=Array.from(files||[]).map(normalizeDockChatMediaFile).filter(function(f){return f && getChatUploadKind(f) && !isBlockedDmFile(f) && f.size>0 && f.size<=50*1024*1024;});
+                if(valid.length!==files.length)showToast('部分附件类型或大小不支持，已跳过');
+                if(valid.length>9 || valid.reduce(function(n,f){return n+f.size;},0)>200*1024*1024){showToast('每批最多 9 个附件，总大小不超过 200MB');return;}
+                resetChatAttachmentQueue();_chatRecordedFile=null;_chatAttachmentQueue=valid;
+                if(valid.length){showDockChatFilePreview(valid[0]);renderChatAttachmentQueue();}else clearDockChatFilePreview(false);
+            }
+            async function sendDockChatMessage() {
+                if(_chatBatchSending){showToast('附件正在依次发送');return;}
+                if(!_chatAttachmentQueue.length)return sendDockChatMessageSingle();
+                if(dockChatSending)return;
+                var files=_chatAttachmentQueue.slice(),peer=dockChatActiveUser,owner=window.currentUser,text=document.getElementById('dockChatInput').value.trim();
+                if(!peer || !owner || isUserMuted())return sendDockChatMessageSingle();
+                _chatBatchSending=true;resetChatAttachmentQueue();
+                try {for(var i=0;i<files.length;i++){
+                    if(owner!==window.currentUser || peer!==dockChatActiveUser) {showToast('会话已切换，剩余附件没有发送');break;}
+                    await sendDockChatMessageSingle(files[i],i===0?text:'');
+                }} finally {_chatBatchSending=false;}
+            }
+            function bindChatReplyGestures() {
+                var host=document.getElementById('dockChatMessages');
+                host.addEventListener('click',function(event){var quote=event.target.closest('.chat-reply-quote');if(quote){event.stopPropagation();if(quote.dataset.replyId)jumpChatHistory(dockChatActiveUser,quote.dataset.replyId);}});
+                var swipe=null;
+                host.addEventListener('pointerdown',function(event){
+                    if(event.pointerType!=='touch' || event.target.closest('button,a,img,video,audio'))return;
+                    var row=event.target.closest('.chat-msg-row'),message=row && findDockMessageByRow(row);
+                    if(!message || message.__optimistic || message.__failed || (getDMMessagePayload(message)||{}).withdrawn)return;
+                    swipe={row:row,bubble:row.querySelector('.chat-msg'),id:event.pointerId,x:event.clientX,y:event.clientY,dx:0,active:false,peer:dockChatActiveUser,owner:window.currentUser};
+                });
+                host.addEventListener('pointermove',function(event){if(!swipe || swipe.id!==event.pointerId)return;
+                    var dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;
+                    if(Math.abs(dy)>15 && !swipe.active){swipe=null;return;}
+                    if(dx>12 && Math.abs(dx)>Math.abs(dy)*1.5){swipe.active=true;swipe.dx=dx;swipe.bubble.style.transform='translateX('+Math.min(65,dx*.6)+'px)';}
+                });
+                function finish(event,cancel){if(!swipe || event.pointerId!==swipe.id)return;var state=swipe;swipe=null;state.bubble.style.transform='';
+                    if(!cancel && state.active && state.dx>65 && state.peer===dockChatActiveUser && state.owner===window.currentUser){closeDockMessageActions();var message=findDockMessageByRow(state.row);if(message)runChatExtraAction('reply',message);}
+                }
+                host.addEventListener('pointerup',function(e){finish(e,false);});host.addEventListener('pointercancel',function(e){finish(e,true);});
+            }
+            window.openChatGallery=function(src,trigger){
+                var peer=dockChatActiveUser,owner=window.currentUser,opener=trigger;
+                if(!peer || !owner)return;
+                var items=(_chatCache[getDockChatCacheKey(peer)]||[]).filter(function(m){var media=resolveDockChatMedia(m);return media && media.kind==='image' && !(getDMMessagePayload(m)||{}).withdrawn;}).map(function(m){return {id:m.id,url:sanitizeUrl(resolveDockChatMedia(m).src),date:m.created_at};});
+                var row=trigger.closest('.chat-msg-row'),current=items.findIndex(function(i){return row && i.id===row.dataset.messageId;});if(current<0)current=0;
+                var old=document.getElementById('chatGallery');if(old)old.__close ? old.__close() : old.remove();
+                var overlay=document.createElement('section');overlay.id='chatGallery';overlay.className='chat-gallery';overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-label','聊天图片');
+                overlay.innerHTML='<header><button type="button" data-gallery="close" aria-label="关闭图片">×</button><span class="chat-gallery-title"></span><button type="button" data-gallery="save">保存</button></header><div class="chat-gallery-stage"><img alt="聊天图片" draggable="false" /></div><footer><button type="button" data-gallery="previous" aria-label="上一张图片">‹</button><button type="button" data-gallery="jump">定位原消息</button><button type="button" data-gallery="next" aria-label="下一张图片">›</button></footer>';
+                var img=overlay.querySelector('img'),scale=1,pointer=null;var closed=false,cursor=null,hasMore=true,loading=false;
+                function paint(){if(!items[current])return;if(img.getAttribute('src')!==items[current].url){scale=1;img.style.transform='';img.src=items[current].url;}overlay.querySelector('.chat-gallery-title').textContent=(current+1)+' / '+items.length+' · '+new Date(items[current].date).toLocaleDateString();overlay.querySelector('[data-gallery="previous"]').disabled=current===0 && (!hasMore || loading);overlay.querySelector('[data-gallery="next"]').disabled=current===items.length-1;}
+                function close(){closed=true;window.removeEventListener('keydown',keys);overlay.remove();if(opener && opener.isConnected)opener.focus?.({preventScroll:true});}
+                function keys(event){if(event.key==='Escape')close();else if(event.key==='ArrowLeft')move(-1);else if(event.key==='ArrowRight')move(1);else if(event.key==='Tab'){var buttons=Array.from(overlay.querySelectorAll('button:not(:disabled)'));var first=buttons[0],last=buttons[buttons.length-1];if(event.shiftKey && document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first.focus();}}}
+                function move(delta){if(owner!==window.currentUser || peer!==dockChatActiveUser){close();return;}if(delta<0 && current===0 && hasMore){loadOlder(true);return;}current=Math.max(0,Math.min(items.length-1,current+delta));paint();}
+                overlay.addEventListener('click',async function(event){var b=event.target.closest('[data-gallery]');if(!b)return;var action=b.dataset.gallery;
+                    if(action==='close')close();if(action==='previous')move(-1);if(action==='next')move(1);
+                    if(action==='jump'){var id=items[current].id;close();jumpChatHistory(peer,id);}
+                    if(action==='save'){b.disabled=true;try{var response=await fetch(items[current].url);if(!response.ok)throw Error();var blob=await response.blob();if(owner!==window.currentUser || closed)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='chat-photo-'+current+'.'+(blob.type==='image/png'?'png':'jpg');a.click();setTimeout(function(){URL.revokeObjectURL(url);},30000);}catch(_){showToast('图片暂时无法保存，请重试');}finally{b.disabled=false;}}
+                });
+                img.addEventListener('error',function(){if(!closed)showToast('图片暂时不可用，请返回会话刷新');});
+                var stage=overlay.querySelector('.chat-gallery-stage');stage.addEventListener('pointerdown',function(e){if(e.pointerType==='touch')pointer={x:e.clientX,y:e.clientY,id:e.pointerId};});stage.addEventListener('pointerup',function(e){if(pointer && pointer.id===e.pointerId && scale===1 && Math.abs(e.clientX-pointer.x)>55 && Math.abs(e.clientY-pointer.y)<50)move(e.clientX>pointer.x?-1:1);pointer=null;});stage.addEventListener('pointercancel',function(){pointer=null;});
+                var start=0;stage.addEventListener('touchstart',function(e){if(e.touches.length===2){start=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);pointer=null;}},{passive:true});stage.addEventListener('touchmove',function(e){if(e.touches.length===2 && start){e.preventDefault();scale=Math.max(1,Math.min(4,Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)/start));img.style.transform='scale('+scale+')';}},{passive:false});stage.addEventListener('dblclick',function(){scale=scale===1?2:1;img.style.transform='scale('+scale+')';});
+                overlay.__close=close;document.body.appendChild(overlay);window.addEventListener('keydown',keys);paint();overlay.querySelector('[data-gallery="close"]').focus();
+                // Load one authorized metadata page at a time, retaining the displayed image and zoom.
+                async function loadOlder(moveBack){if(loading || !hasMore || closed)return;loading=true;paint();var active=items[current]?.id;
+                    try{var result=await chatFeatureApi('history/search?peer='+encodeURIComponent(peer)+'&kind=image&limit=50'+(cursor?'&cursor_at='+encodeURIComponent(cursor.at)+'&cursor_id='+encodeURIComponent(cursor.id):''));
+                        if(closed || owner!==window.currentUser || peer!==dockChatActiveUser)return;
+                        (result.items||[]).forEach(function(item){var media=item.payload && item.payload.media,url=media && sanitizeUrl(media.url);if(url && !items.some(function(i){return i.id===item.message_id || i.id===item.legacy_post_id;}))items.push({id:item.legacy_post_id || item.message_id,url:url,date:item.sent_at});});
+                        items.sort(function(a,b){return Date.parse(a.date)-Date.parse(b.date);});current=Math.max(0,items.findIndex(function(i){return i.id===active;}));
+                        hasMore=!!result.has_more && !!result.next_cursor_id;cursor={at:result.next_cursor_at,id:result.next_cursor_id};
+                        if(moveBack && current>0)current--;
+                    }catch(_){showToast('历史图片加载失败，请重试');}finally{loading=false;if(!closed)paint();}
+                }
+                loadOlder(false);
+            };
+
+            var _chatPushSyncing=false, _chatPushOwner='', _chatPushEnabled=false;
+            function chatPushSupported(){return window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;}
+            async function chatPushApi(path,body){var response=await window.xtjProtectedFetch('/api/chat/push/'+path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),timeoutMs:15000}:{timeoutMs:15000});var result=await response.json();if(!response.ok || !result.ok)throw new Error(result.error||'通知设置暂不可用');return result;}
+            async function syncChatPushState(){
+                if(!chatPushSupported())return;
+                var owner=window.currentUser || '',enabled=!!owner && localStorage.getItem('xtj_chat_push_'+owner)==='on';
+                var registration=await navigator.serviceWorker.getRegistration('/');
+                if(registration && registration.active)registration.active.postMessage({type:'XTJ_CHAT_PUSH_STATE',owner:enabled?owner:'',peer:currentDockTab==='chat'?dockChatActiveUser || '':''});
+                if(!owner || !enabled || Notification.permission!=='granted'){_chatPushEnabled=false;_chatPushOwner='';return;}
+                if(_chatPushSyncing || _chatPushOwner===owner)return;
+                _chatPushSyncing=true;
+                try {
+                    registration=await navigator.serviceWorker.register('/chat-notifications-sw.js',{scope:'/'});await navigator.serviceWorker.ready;
+                    var config=await chatPushApi('config'),subscription=await registration.pushManager.getSubscription();
+                    if(subscription){var key=subscription.options && subscription.options.applicationServerKey;if(key && btoa(String.fromCharCode.apply(null,new Uint8Array(key))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')!==config.public_key){await subscription.unsubscribe();subscription=null;}}
+                    if(!subscription){var raw=atob(config.public_key.replace(/-/g,'+').replace(/_/g,'/'));subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:Uint8Array.from(raw,function(c){return c.charCodeAt(0);})});}
+                    if(owner!==window.currentUser)return;
+                    await chatPushApi('subscribe',{subscription:subscription.toJSON()});
+                    if(owner!==window.currentUser)return;
+                    _chatPushOwner=owner;_chatPushEnabled=true;
+                    (registration.active || registration.waiting).postMessage({type:'XTJ_CHAT_PUSH_STATE',owner,peer:currentDockTab==='chat'?dockChatActiveUser || '':''});
+                }catch(_){_chatPushEnabled=false;}finally{_chatPushSyncing=false;}
+            }
+            async function toggleChatPush(){
+                if(!chatPushSupported()){showToast('当前浏览器不支持系统推送，请使用支持通知的网页应用');return;}
+                var owner=window.currentUser;if(!owner)return;
+                if(localStorage.getItem('xtj_chat_push_'+owner)==='on'){
+                    try{var registration=await navigator.serviceWorker.getRegistration('/'),subscription=registration && await registration.pushManager.getSubscription();if(subscription){await chatPushApi('unsubscribe',{endpoint:subscription.endpoint});await subscription.unsubscribe();}localStorage.setItem('xtj_chat_push_'+owner,'off');_chatPushOwner='';_chatPushEnabled=false;await syncChatPushState();showToast('系统消息通知已关闭');}catch(error){showToast(error.message);}return;
+                }
+                // Permission must be requested from this explicit user action, never at page startup.
+                var permission=await Notification.requestPermission();if(permission!=='granted'){showToast('没有获得通知权限，可在浏览器设置中修改');return;}
+                if(owner!==window.currentUser)return;
+                localStorage.setItem('xtj_chat_push_'+owner,'on');await syncChatPushState();
+                if(!_chatPushEnabled){localStorage.setItem('xtj_chat_push_'+owner,'off');await syncChatPushState();showToast('通知订阅未建立，请检查浏览器支持和网络后重试');}
+                else showToast('系统通知已开启，消息内容默认隐藏');
+            }
+            window.__xtjSyncChatPush=function(){void syncChatPushState().catch(function(){});};
+            if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',function(event){var data=event.data||{};if(data.type==='XTJ_OPEN_CHAT' && data.owner===window.currentUser && typeof data.peer==='string' && data.peer.length<=64)window.openChat(data.peer);});
+            window.addEventListener('online',function(){_chatPushOwner='';window.__xtjSyncChatPush();});
+            document.addEventListener('visibilitychange',function(){window.__xtjSyncChatPush();});
+            function openChatPushLink(){var params=new URLSearchParams(location.search),peer=params.get('chat_peer'),owner=params.get('chat_owner');if(peer && peer.length<=64 && owner===window.currentUser){params.delete('chat_peer');params.delete('chat_owner');history.replaceState(null,'',location.pathname+(params.size?'?'+params.toString():'')+location.hash);window.openChat(peer);}}
+
             function bindChatFeatures() {
                 document.getElementById('chatSearchButton').onclick = function() { openChatHistory(false); };
                 document.getElementById('chatMediaButton').onclick = function() { openChatHistory(true); };
@@ -3886,6 +4039,7 @@
                 document.getElementById('chatVoiceButton').onclick = toggleChatVoice;
                 document.getElementById('chatVoiceCancel').onclick = cancelChatVoice;
                 document.addEventListener('keydown', function(event) { if (event.key === 'Escape') { closeChatHistory(); cancelChatVoice(); document.querySelectorAll('.chat-reaction-picker').forEach(function(p) { p.remove(); }); } });
+                bindChatReplyGestures();
                 bindChatHoldVoice();
                 bindChatAudioPlayers();
                 window.addEventListener('pagehide', cancelChatVoice);
@@ -3898,7 +4052,9 @@
                 if (!container || container.__xtjMsgActionsBound) return;
                 container.__xtjMsgActionsBound = true;
                 var pressTimer = null;
-                var startX = 0, startY = 0, longPressed = false;
+                var startX = 0, startY = 0, suppressedBubble = null, suppressUntil = 0;
+                function resetSuppression() { suppressedBubble = null; suppressUntil = 0; }
+                window.__xtjResetDmPress = resetSuppression;
                 function cancelPress() { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }
 
                 // 长按 450ms。用 passive 监听 + 位移阈值取消，避免抢走列表滚动。
@@ -3908,13 +4064,13 @@
                     if (!row) { cancelPress(); return; }
                     startX = e.touches[0].clientX;
                     startY = e.touches[0].clientY;
-                    longPressed = false;
+                    resetSuppression();
                     cancelPress();
                     pressTimer = setTimeout(function() {
                         pressTimer = null;
-                        longPressed = true;
                         try { if (navigator.vibrate) navigator.vibrate(12); } catch (eVib) {}
                         openDockMessageActions(row);
+                        suppressedBubble = row; suppressUntil = Date.now() + 900;
                     }, 450);
                 }, { passive: true });
 
@@ -3936,8 +4092,8 @@
 
                 // 长按之后浏览器还会补一次 click（会点开图片预览）——在捕获阶段吞掉它
                 container.addEventListener('click', function(e) {
-                    if (!longPressed) return;
-                    longPressed = false;
+                    if (!suppressedBubble || Date.now() > suppressUntil || !suppressedBubble.contains(e.target)) { resetSuppression(); return; }
+                    resetSuppression();
                     e.preventDefault();
                     e.stopPropagation();
                 }, true);
@@ -4000,6 +4156,7 @@
             }
 
             function clearDockChatFilePreview(restoreFocus) {
+                resetChatAttachmentQueue();
                 const preview = document.getElementById('dockChatFilePreview');
                 const input = document.getElementById('dockChatInput');
                 const fileInput = document.getElementById('dockChatFileInp');
@@ -4159,7 +4316,7 @@
                 var _dsb = document.getElementById('dockChatSendBtn'); if (_dsb) _dsb.addEventListener('click', sendDockChatMessage);
                 var _dci = document.getElementById('dockChatInput'); if (_dci) _dci.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDockChatMessage(); } });
                 var _dib = document.getElementById('dockChatImgBtn'); if (_dib) _dib.addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
-                var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { _chatRecordedFile = null; if (this.files.length) showDockChatFilePreview(this.files[0]); });
+                var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { _chatRecordedFile = null; if (this.files.length) selectChatAttachments(this.files); });
                 var _dcjl = document.getElementById('dockChatJumpLatest'); if (_dcjl) _dcjl.addEventListener('click', function() { if (_chatHistoryFocus) { _chatHistoryFocus = ''; loadDockChatMessages(dockChatActiveUser, true, true); } else scrollDockChatToLatest({ smooth: true }); });
                 var _dcm = document.getElementById('dockChatMessages'); if (_dcm) _dcm.addEventListener('scroll', function() { if (isDockChatNearBottom(_dcm, 96)) setDockChatJumpLatestVisible(false); }, { passive: true });
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
@@ -4281,6 +4438,8 @@
             window.__xtjRefreshChatPresence=refreshDockChatPresence;
 
             function touchDockChatPresence() {
+                if(window.__xtjSyncChatPush)window.__xtjSyncChatPush();
+                openChatPushLink();
                 if (!window.currentUser || document.hidden || (typeof navigator!=='undefined' && navigator.onLine===false)) return;
                 var owner=window.currentUser;
                 if (_chatPresenceOwner!==owner) { _chatPresenceOwner=owner; _chatPresenceTouchedAt=0; }
@@ -4370,6 +4529,7 @@
                     [state.muted_until ? 'unmute' : 'mute',state.muted_until ? '取消免打扰' : '消息免打扰'],
                     [Number(state.unread_count) || state.manual_unread_at ? 'mark_read' : 'mark_unread',Number(state.unread_count) || state.manual_unread_at ? '标记已读' : '标记未读'],
                     ['hold_voice',isChatHoldVoiceEnabled() ? '长按录音：已开启' : '长按录音：已关闭'],
+                    ['push_notifications',_chatPushEnabled ? '系统消息通知：已开启' : '开启系统消息通知'],
                     ['clear','清空我的聊天记录'],['delete','删除我的会话']
                 ];
                 actions.innerHTML = items.map(function(item) {
@@ -4477,6 +4637,7 @@
                 if (button) {
                     var action=button.getAttribute('data-chat-conversation-action');
                     if (action==='search' || action==='media') { closeDockChatConversationMenu(true); openChatHistory(action==='media'); }
+                    else if (action==='push_notifications') { toggleChatPush().then(function(){openDockChatConversationMenu(dockChatActiveUser);}); }
                     else if (action==='hold_voice') { localStorage.setItem('xtj_chat_hold_voice',isChatHoldVoiceEnabled() ? 'off' : 'on'); openDockChatConversationMenu(dockChatActiveUser); }
                     else mutateDockChatConversation(_conversationMenu.getAttribute('data-peer'),action);
                 }
@@ -4644,12 +4805,20 @@
                 });
             }
 
+            var _chatSocialPanels = new Map();
             function renderDockChatSocialTab(tab) {
                 if (!window.currentUser) { closeDockChatSocialSheet(); return; }
-                setDockChatSocialTabState(tab);
                 var content = document.getElementById('dockChatSocialContent');
+                if (content && content.dataset.panelKey) _chatSocialPanels.set(content.dataset.panelKey,Array.from(content.childNodes));
+                setDockChatSocialTabState(tab);
                 if (!content) return;
+                var panelKey=window.currentUser+'\u0000'+_dockChatSocialTab+(_dockChatSocialTab==='requests' ? '\u0000'+_dockChatSocialRequestDirection : '');
+                var saved=_chatSocialPanels.get(panelKey);
+                content.dataset.panelKey=panelKey;
+                content.replaceChildren.apply(content,saved || []);
+                content.setAttribute('aria-busy','true');
                 var seq = ++_dockChatSocialLoadSeq;
+                if (saved && _dockChatSocialTab==='search') { content.setAttribute('aria-busy','false'); return; }
                 if (_dockChatSocialTab === 'search') {
                     content.innerHTML = '<form id="dockChatSocialSearchForm" class="chat-social-search-form" autocomplete="off">' +
                         '<input name="q" type="search" minlength="2" maxlength="64" placeholder="输入用户名，至少 2 个字符" value="' + escapeHtml(_dockChatSocialQuery) + '" aria-label="搜索用户名">' +
@@ -4657,7 +4826,8 @@
                     if (_dockChatSocialQuery) loadDockChatSocialSearch(_dockChatSocialQuery, seq);
                     return;
                 }
-                content.innerHTML = '<div class="chat-social-loading">正在加载…</div>';
+                if (!saved) content.innerHTML = '<div class="chat-social-empty">联系人会显示在这里</div>';
+                content.setAttribute('aria-busy','false');
                 if (_dockChatSocialTab === 'friends') {
                     requestDockChatSocial('/friends').then(function(data) {
                         if (seq !== _dockChatSocialLoadSeq || _dockChatSocialTab !== 'friends' || window.currentUser == null) return;
@@ -4672,7 +4842,7 @@
                             content.innerHTML = '<div class="chat-social-empty">还没有好友。搜索用户名后发送好友申请即可开始聊天。</div>';
                             return;
                         }
-                        content.innerHTML = friends.map(function(friend) {
+                        var friendMarkup = friends.map(function(friend) {
                             var name = String(friend.peer_name || '');
                             var note = String(friend.note || '');
                             var actions = [
@@ -4685,6 +4855,7 @@
                             ];
                             return chatSocialUserRow(name, note ? '账号：' + name : '已添加为好友', actions, note || name);
                         }).join('');
+                        if (content.innerHTML!==friendMarkup) content.innerHTML=friendMarkup;
                         hydrateDockChatSocialAvatars(friends.map(function(friend) { return friend.peer_name; }));
                     }).catch(function() {
                         if (seq === _dockChatSocialLoadSeq) content.innerHTML = '<div class="chat-social-error">好友列表加载失败，请切换标签或重新打开。</div>';
@@ -4692,10 +4863,10 @@
                     return;
                 }
                 if (_dockChatSocialTab === 'requests') {
-                    content.innerHTML = '<div class="chat-social-request-switch">' +
+                    if (!saved) content.innerHTML = '<div class="chat-social-request-switch">' +
                         '<button type="button" data-chat-social-direction="incoming" aria-pressed="' + (_dockChatSocialRequestDirection === 'incoming') + '">收到的申请</button>' +
                         '<button type="button" data-chat-social-direction="outgoing" aria-pressed="' + (_dockChatSocialRequestDirection === 'outgoing') + '">发出的申请</button></div>' +
-                        '<div class="chat-social-loading">正在加载…</div>';
+                        '<div class="chat-social-empty">好友申请会显示在这里</div>';
                     requestDockChatSocial('/requests?direction=' + _dockChatSocialRequestDirection).then(function(data) {
                         if (seq !== _dockChatSocialLoadSeq || _dockChatSocialTab !== 'requests') return;
                         var rows = Array.isArray(data.requests) ? data.requests : [];
@@ -5021,6 +5192,7 @@
                     const root = document.documentElement;
                     root.classList.add('xtj-ios-viewport');
                     let keyboardOpen = false;
+                    var keyboardFollowLatest=true;
                     // 环境固有的视口差（非键盘部分），取历史最小值当基线。见 updateIOSViewport。
                     var viewportBaseline = Infinity;
 
@@ -5056,7 +5228,7 @@
                         var shouldCollapseDock = !!(chatFocused && keyboardGap > 0);
                         document.body.classList.toggle('ios-chat-keyboard-open', shouldCollapseDock);
                         if (dockBar) dockBar.style.display = shouldCollapseDock ? 'none' : '';
-                        if (chatFocused && keyboardOpen && isDockChatNearBottom(document.getElementById('dockChatMessages'),180)) requestAnimationFrame(scrollDockChatBottom);
+                        if (chatFocused && keyboardOpen && keyboardFollowLatest) requestAnimationFrame(scrollDockChatBottom);
                     }
 
                     window.__xtjRefreshIOSChatViewport = function(options) {
@@ -5073,6 +5245,8 @@
                     };
 
                     window.__xtjResetIOSChatViewport = function() {
+                        var messages=document.getElementById('dockChatMessages');
+                        var follow=isDockChatNearBottom(messages,100),anchor=messages ? messages.scrollTop : 0;
                         keyboardOpen = false;
                         document.body.classList.remove('ios-chat-keyboard-open');
                         root.style.setProperty('--xtj-ios-keyboard-gap', '0px');
@@ -5081,12 +5255,13 @@
                             updateIOSViewport();
                             setTimeout(function() {
                                 updateIOSViewport();
-                                scrollDockChatBottom();
+                                if (follow) scrollDockChatBottom(); else if(messages)messages.scrollTop=anchor;
                             }, 120);
                         });
                     };
 
                     function handleFocus(e) {
+                        keyboardFollowLatest=isDockChatNearBottom(document.getElementById('dockChatMessages'),100) && !_chatHistoryFocus;
                         keyboardOpen = true;
                         updateIOSViewport();
                         setTimeout(() => {

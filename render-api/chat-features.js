@@ -28,9 +28,10 @@ function createChatFeatures(options) {
     return user ? { state, actorId: user.id } : null;
   }
   async function visible(ctx, id) {
-    const m = await data(supabase.from('chat_messages').select('*').eq('conversation_id', ctx.state.conversation_id).eq('id', id).is('withdrawn_at', null).maybeSingle());
+    let m = await data(supabase.from('chat_messages').select('*').eq('conversation_id', ctx.state.conversation_id).eq('id', id).is('withdrawn_at', null).maybeSingle());
+    if (!m) m = await data(supabase.from('chat_messages').select('*').eq('conversation_id', ctx.state.conversation_id).eq('legacy_post_id', id).is('withdrawn_at', null).maybeSingle());
     if (!m || (ctx.state.cleared_before && Date.parse(m.sent_at) <= Date.parse(ctx.state.cleared_before))) return null;
-    const s = await data(supabase.from('chat_message_user_state').select('hidden_at').eq('message_id', id).eq('user_id', ctx.actorId).maybeSingle());
+    const s = await data(supabase.from('chat_message_user_state').select('hidden_at').eq('message_id', m.id).eq('user_id', ctx.actorId).maybeSingle());
     return s && s.hidden_at ? null : m;
   }
   async function validateReply(actor, peer, id) {
