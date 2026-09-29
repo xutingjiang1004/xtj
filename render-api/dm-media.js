@@ -5,8 +5,13 @@ const DM_MEDIA_SEND_LEASE_MS = 5 * 60 * 1000;
 const MEDIA_KINDS = {
   image: '__dm_img__',
   video: '__dm_vid__',
-  audio: '__dm_aud__'
+  audio: '__dm_aud__',
+  file: '__dm_file__'
 };
+const DM_FILE_MIME_TYPES = new Set(['application/pdf', 'text/plain', 'text/csv', 'application/rtf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip']);
 
 function validateDmStoragePath(value) {
   const storagePath = String(value || '').trim();
@@ -28,7 +33,8 @@ function validateDmMediaKind(kind, mimeType) {
   // 沿原型链命中返回非字符串 actorPrefix
   if (!Object.prototype.hasOwnProperty.call(MEDIA_KINDS, normalizedKind)) return { ok: false, code: 'invalid_kind', error: 'Unsupported media kind' };
   const prefix = normalizedKind + '/';
-  if (!new RegExp('^' + normalizedKind + '/[a-z0-9][a-z0-9!#$&^_.+\\-]{0,126}$', 'i').test(normalizedMime)) {
+  if (normalizedKind === 'file' ? !DM_FILE_MIME_TYPES.has(normalizedMime)
+    : !new RegExp('^' + normalizedKind + '/[a-z0-9][a-z0-9!#$&^_.+\\-]{0,126}$', 'i').test(normalizedMime)) {
     return { ok: false, code: 'mime_mismatch', error: 'MIME type does not match media kind' };
   }
   // M-9c: SVG 可内嵌脚本，直接打开即存储型 XSS 载体，DM 与照片墙一致显式排除
@@ -37,6 +43,8 @@ function validateDmMediaKind(kind, mimeType) {
   }
   return { ok: true, kind: normalizedKind, mimeType: normalizedMime, actorPrefix: MEDIA_KINDS[normalizedKind], mimePrefix: prefix };
 }
+
+function dmStorageBucket(path) { return /^chat\/[a-f0-9]{12}_private_/.test(String(path || '')) ? 'dm-private' : 'uploads'; }
 
 async function verifyStorageObject(supabase, storagePath, expected) {
   const parsed = validateDmStoragePath(storagePath);
@@ -52,7 +60,7 @@ async function verifyStorageObject(supabase, storagePath, expected) {
     // Search for the exact object in its parent directory. Do not enumerate
     // chat/ with a large limit: the folder may contain more than 1000 files.
     // 提高 limit 并对结果二次精确过滤，避免同前缀文件较多时真实对象被截断误判 not_found。
-    result = await supabase.storage.from('uploads').list(directory, { limit: 1000, search: name });
+    result = await supabase.storage.from(dmStorageBucket(parsed.storagePath)).list(directory, { limit: 1000, search: name });
   } catch (error) {
     return { ok: false, state: 'query_failed', code: 'storage_verify_failed', error: error };
   }
@@ -62,7 +70,7 @@ async function verifyStorageObject(supabase, storagePath, expected) {
     // list search 是模糊匹配且可能截断：用 HEAD（info）做精确探测，避免合法媒体被误判不存在。
     // M-6c: 不再用 download 兜底——全量拉取对象入内存只为读 size 是 DoS 向量。
     try {
-      const probe = await supabase.storage.from('uploads').info(parsed.storagePath);
+      const probe = await supabase.storage.from(dmStorageBucket(parsed.storagePath)).info(parsed.storagePath);
       if (probe && !probe.error && probe.data) {
         const probeMeta = probe.data;
         item = {
@@ -99,7 +107,7 @@ async function verifyStorageObject(supabase, storagePath, expected) {
     return { ok: false, state: 'invalid', code: 'media_mime_unverified', error: 'Media object MIME type does not match the registered upload' };
   }
   const expectedKind = String(expected && expected.kind || '').trim().toLowerCase();
-  if (expectedKind && (!actualMime || actualMime.indexOf(expectedKind + '/') !== 0)) {
+  if (expectedKind && (!actualMime || (expectedKind === 'file' ? !DM_FILE_MIME_TYPES.has(actualMime) : actualMime.indexOf(expectedKind + '/') !== 0))) {
     return { ok: false, state: 'invalid', code: 'media_kind_unverified', error: 'Media object kind does not match the registered upload' };
   }
   const expectedSizeRaw = expected && (expected.sizeBytes !== undefined ? expected.sizeBytes : expected.size_bytes);
@@ -390,6 +398,7 @@ module.exports = {
   MAX_DM_MEDIA_SIZE,
   MEDIA_KINDS,
   validateDmStoragePath,
+  dmStorageBucket,
   validateDmMediaKind,
   validateDmUploadOwnership,
   verifyStorageObject,
