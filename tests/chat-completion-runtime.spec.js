@@ -20,6 +20,12 @@ async function setup(page) {
         const more = url.includes('cursor_id');
         result = {ok:true,items:[{message_id:id,peer_name:'peer',sender_name:'tester',body:more?'second page':'hello world',sent_at:stamp,message_type:'text'}],has_more:!more,next_cursor_at:stamp,next_cursor_id:id};
       } else if (url.includes('/history/context')) { const current={...message,content:JSON.stringify({text:window.__chatContextText})};result={ok:true,data:[current],focus_id:id}; }
+      else if (url.includes('/api/dm/send')) {
+        await new Promise(r=>setTimeout(r,window.__chatSendDelay || 500));
+        const body=JSON.parse(options.body);
+        result={ok:true,message:{...message,id:'123e4567-e89b-42d3-a456-000000000009',created_at:new Date().toISOString(),content:JSON.stringify({text:JSON.parse(body.content).text || '',media:body.kind ? {kind:body.kind,url:'https://example.invalid/sent.png',mimeType:body.mime_type,w:body.media_width,h:body.media_height} : null})}};
+      }
+      else if (url.includes('/presence/peer')) result={ok:true,presence:{last_seen_at:new Date(Date.now()-7*60000).toISOString()}};
       else if (url.includes('/api/dm/messages')) result={ok:true,data:window.__chatMessagesGone?[]:[message],has_more:false};
       else if (url.includes('/relationship?')) result={ok:true,relationship:{relation:'friend',can_message:true}};
       else if (url.includes('/conversations/')) result={ok:true,state:{status:'ok',draft_revision:0}};
@@ -115,4 +121,125 @@ test('a remote clear removes messages from a focused search window', async ({pag
   await expect(page.locator('[data-message-id="'+id+'"]')).toBeVisible();
   await page.evaluate(()=>{window.__chatMessagesGone=true;window.__xtjRefreshChatMessageExtras({kind:'clear',peer:'peer'});});
   await expect(page.locator('[data-message-id="'+id+'"]')).toHaveCount(0);
+});
+
+
+test('conversation settings live only in the detail header and reopen safely during exit', async ({page}) => {
+  await setup(page);
+  await page.evaluate(()=>window.__xtjApplyConversationSnapshot([{peer_name:'peer',last_message:'hello',last_message_at:new Date().toISOString()}]));
+  await expect(page.locator('#dockChatList [data-chat-menu-peer]')).toHaveCount(0);
+  await expect(page.locator('#panelChat .chat-header #dockChatSocialBtn')).toHaveCount(0);
+  const trigger=page.locator('#dockChatConversationBtn');
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  const menu=page.locator('#dockChatConversationMenu');
+  await expect(menu).toBeVisible();
+  await expect(trigger).toHaveAttribute('aria-expanded','true');
+  await expect(menu).toContainText('搜索聊天记录');
+  const geometry=await page.evaluate(()=>{
+    const card=document.querySelector('.chat-conversation-menu-card').getBoundingClientRect();
+    const head=document.querySelector('#panelChat .chat-header').getBoundingClientRect();
+    return {top:card.top,header:head.top,width:card.width,right:card.right,viewport:innerWidth};
+  });
+  expect(geometry.top).toBeLessThan(geometry.header+100);
+  expect(geometry.width).toBeLessThanOrEqual(321);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewport);
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  // Reopen before the 140ms exit animation finishes; its old callback must not hide the menu.
+  await trigger.dispatchEvent('click');
+  await page.waitForTimeout(250);
+  await expect(menu).toBeVisible();
+  await page.locator('[data-chat-conversation-action="search"]').click();
+  await expect(menu).toBeHidden();
+  await expect(page.locator('#chatHistoryPanel')).toBeVisible();
+});
+
+test('text flies from the composer and settles without replay on acknowledgement', async ({page}) => {
+  await setup(page); await page.evaluate(()=>window.__chatSendDelay=50); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  await page.locator('#dockChatInput').fill('a new message');
+  await page.locator('#dockChatSendBtn').click();
+  await expect(page.locator('.chat-send-flight')).toHaveCount(1);
+  const frames=await page.evaluate(()=>document.querySelector('.chat-send-flight').getAnimations()[0].effect.getKeyframes());
+  expect(frames[0].transform).toContain('translate3d(');
+  expect(frames[0].transform).not.toBe(frames[1].transform);
+  await expect(page.locator('[data-message-id="123e4567-e89b-42d3-a456-000000000009"]')).toHaveCount(1);
+  await expect(page.locator('.chat-send-flight')).toHaveCount(0);
+  await expect(page.locator('#dockChatMessages .chat-msg').last()).toContainText('a new message');
+  await page.waitForTimeout(600);
+  await expect(page.locator('.chat-send-flight')).toHaveCount(0);
+  expect(await page.evaluate(()=>Array.from(document.querySelectorAll('#dockChatMessages .chat-msg')).every(n=>n.style.visibility!=='hidden'))).toBe(true);
+});
+
+test('incoming typing expires promptly and restores last-online status', async ({page}) => {
+  await setup(page); await expect(page.locator('#dockChatPresence')).toContainText('7 分钟前在线');
+  await page.evaluate(()=>window.__xtjApplyChatTyping({peer:'peer',active:true,at:Date.now()}));
+  await expect(page.locator('#dockChatPresence')).toContainText('正在输入');
+  await expect(page.locator('.chat-typing-dots i')).toHaveCount(3);
+  await expect(page.locator('#dockChatPresence')).toContainText('7 分钟前在线',{timeout:6500});
+  await page.evaluate(()=>window.__xtjApplyChatTyping({peer:'other',active:true,at:Date.now()}));
+  await expect(page.locator('#dockChatPresence')).toContainText('7 分钟前在线');
+  await page.evaluate(()=>window.__xtjApplyChatTyping({peer:'peer',active:true,at:Date.now()-20000}));
+  await expect(page.locator('#dockChatPresence')).toContainText('7 分钟前在线');
+});
+
+test('switching peers clears typing and cancels an in-flight send', async ({page}) => {
+  await setup(page); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  await page.evaluate(()=>window.__xtjApplyChatTyping({peer:'peer',active:true,at:Date.now()}));
+  await page.locator('#dockChatInput').fill('sending before switch');
+  await page.locator('#dockChatSendBtn').click();
+  await expect(page.locator('.chat-send-flight')).toHaveCount(1);
+  await page.evaluate(()=>window.openChat('other-peer'));
+  await expect(page.locator('.chat-send-flight')).toHaveCount(0);
+  await expect(page.locator('#dockChatPresence')).not.toContainText('正在输入');
+  const stopped=await page.evaluate(()=>window.__chatTestCalls.some(c=>c.url.includes('/typing/peer') && JSON.parse(c.body).active===false));
+  expect(stopped).toBe(true);
+});
+
+test('reduced motion skips the send flight and closes menus immediately', async ({page}) => {
+  await page.emulateMedia({reducedMotion:'reduce'}); await setup(page);
+  await page.locator('#dockChatConversationBtn').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#dockChatConversationMenu')).toBeHidden();
+  await expect(page.locator('#dockChatInput')).toBeEnabled();
+  await page.locator('#dockChatInput').fill('quiet motion');
+  await page.locator('#dockChatSendBtn').click();
+  await expect(page.locator('.chat-send-flight')).toHaveCount(0);
+  await expect(page.locator('#dockChatMessages .chat-msg').last()).toContainText('quiet motion');
+});
+
+
+test('photo flies from attachment preview with a visible local image', async ({page}) => {
+  await page.setViewportSize({width:390,height:844}); await setup(page);
+  await expect(page.locator('#dockChatInput')).toBeEnabled();
+  const png=await page.evaluate(()=>{
+    const canvas=document.createElement('canvas'); canvas.width=360; canvas.height=240;
+    const context=canvas.getContext('2d'); context.fillStyle='#79c8a7'; context.fillRect(0,0,360,240);
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  await page.route('**/api/dm/upload?**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,storage_path:'chat/test.png',public_url:'https://example.invalid/sent.png',kind:'image',mime_type:'image/png'})}));
+  await page.route('https://example.invalid/**',route=>route.fulfill({status:200,contentType:'image/png',body:Buffer.from(png,'base64')}));
+  await page.setInputFiles('#dockChatFileInp',{name:'photo.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+  await expect(page.locator('#dockChatFilePreview')).toBeVisible();
+  await page.locator('#dockChatSendBtn').click();
+  await expect(page.locator('.chat-send-flight img')).toBeVisible();
+  const flight=await page.evaluate(()=>{
+    const ghost=document.querySelector('.chat-send-flight');
+    const frames=ghost.getAnimations()[0].effect.getKeyframes();
+    return {src:ghost.querySelector('img').src,first:frames[0].transform,last:frames[1].transform};
+  });
+  expect(flight.src).toMatch(/^blob:/); expect(flight.first).not.toBe(flight.last);
+  await expect(page.locator('.chat-send-flight')).toHaveCount(0);
+  await expect(page.locator('#dockChatMessages .chat-msg.has-media img')).toBeVisible();
+  await expect(page.locator('#dockChatFilePreview')).toBeHidden();
+});
+
+
+test('the site motion-off preference also skips send effects', async ({page}) => {
+  await setup(page); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  await page.evaluate(()=>document.documentElement.setAttribute('data-xtj-motion','off'));
+  await page.locator('#dockChatInput').fill('motion disabled');
+  await page.locator('#dockChatSendBtn').click();
+  await expect(page.locator('.chat-send-flight')).toHaveCount(0);
+  await expect(page.locator('#dockChatMessages .chat-msg').last()).toContainText('motion disabled');
 });
