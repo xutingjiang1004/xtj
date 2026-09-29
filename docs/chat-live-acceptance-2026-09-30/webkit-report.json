@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-29T22:30:25.154Z",
+  "engine": "WebKit (Linux), touch phone and iPad viewports",
+  "checks": [
+    "real WebKit authentication 0",
+    "real WebKit authentication 1",
+    "real WebKit typing",
+    "real WebKit message and read receipt",
+    "phone and iPad have no horizontal overflow",
+    "touch menu transitions",
+    "real friend list",
+    "real registered account search"
+  ],
+  "errors": []
+}
