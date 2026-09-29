@@ -67,18 +67,22 @@ test.describe('AI Agent Chat Fixes Validation', () => {
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, conversation_id: 'new-c', messages: [] }) });
     });
 
-    await page.evaluate(() => {
-      if (window.__xtjCloseAiChat) window.__xtjCloseAiChat();
+    await page.evaluate(async () => {
+      // Load the lazy module first so this checks the history request instead
+      // of racing the bootstrap launcher against script loading.
+      await window.__xtjEnsureAiAgentLoaded();
+      if (window.__xtjAiAgent) window.__xtjAiAgent.close();
       window.localStorage.removeItem('xtj_ai_last_conversation_id');
-      if (window.__xtjOpenAiChat) window.__xtjOpenAiChat();
     });
-
-    await page.waitForTimeout(500);
-    expect(historyRequests.length).toBe(1);
-    const url = historyRequests[0];
+    const firstHistoryResponse = page.waitForResponse(response =>
+      response.url().includes('/api/agent/chat/history')
+    );
+    await page.evaluate(() => window.__xtjAiAgent.open());
+    const url = (await firstHistoryResponse).url();
     expect(url).toContain('mode=normal');
     expect(url).toContain('limit=10');
     expect(url).not.toContain('conversation_id='); // 首次打开必须不带 ID
+    expect(historyRequests.length).toBe(1);
   });
 
   test('主动选择历史会话必须请求指定ID', async ({ page }) => {
@@ -187,27 +191,31 @@ test.describe('AI Agent Chat Fixes Validation', () => {
       if (window.__xtjListenerStats) return;
       window.__xtjListenerStats = { added: 0, removed: 0 };
       const proto = EventTarget.prototype;
+      const isLongLivedTarget = target => target === window || target === document || target === window.visualViewport;
       const origAdd = proto.addEventListener;
       const origRemove = proto.removeEventListener;
       proto.addEventListener = function (type, fn, opts) {
-        window.__xtjListenerStats.added += 1;
+        // Detached chat controls are collectible even without removeListener.
+        // Only global targets can keep a closed chat alive through a listener.
+        if (isLongLivedTarget(this)) window.__xtjListenerStats.added += 1;
         return origAdd.call(this, type, fn, opts);
       };
       proto.removeEventListener = function (type, fn, opts) {
-        window.__xtjListenerStats.removed += 1;
+        if (isLongLivedTarget(this)) window.__xtjListenerStats.removed += 1;
         return origRemove.call(this, type, fn, opts);
       };
     });
     await page.goto('/');
-    await page.waitForFunction(() => typeof window.__xtjOpenAiChat === 'function' || typeof window.__xtjAiAgent !== 'undefined');
+    await page.evaluate(() => window.__xtjEnsureAiAgentLoaded());
+    await page.waitForFunction(() => !!(window.__xtjAiAgent && window.__xtjAiAgent.open));
 
     const readBalance = () => page.evaluate(() => window.__xtjListenerStats.added - window.__xtjListenerStats.removed);
 
     const baseline = await readBalance();
     for (let i = 0; i < 2; i++) {
-      await page.evaluate(() => { if (window.__xtjOpenAiChat) window.__xtjOpenAiChat(); });
+      await page.evaluate(() => window.__xtjAiAgent.open());
       await page.waitForTimeout(200);
-      await page.evaluate(() => { if (window.__xtjCloseAiChat) window.__xtjCloseAiChat(); });
+      await page.evaluate(() => window.__xtjAiAgent.close());
       await page.waitForTimeout(200);
     }
     const afterCycles = await readBalance();
