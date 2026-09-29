@@ -6165,6 +6165,8 @@
             function statPostDetailMarkup(post, likes, comments) {
                 var normalizedPost = normalizePost(post);
                 var vc = Math.max(Number(normalizedPost.views) || 0, (post && post.views) || 0);
+                var likeCount = Number.isFinite(Number(normalizedPost.like_count)) ? Number(normalizedPost.like_count) : (likes || []).length;
+                var commentCount = Number.isFinite(Number(normalizedPost.comment_count)) ? Number(normalizedPost.comment_count) : (comments || []).length;
                 var detailMediaAttrs = buildPostDetailMediaAttrs(normalizedPost);
                 // ★ 2026-09-27 修复（审计 P5：详情弹窗媒体只 escapeHtml，未过协议白名单）：
                 //   卡片/feed 里的媒体 URL 早就统一走 sanitizeUrl（拒绝 javascript: /
@@ -6206,17 +6208,17 @@
                     contentText ? '<div class="post-detail-content">' + escapeHtml(contentText) + '</div>' : '',
                     // 2026-09-22：详情弹窗与 feed 卡片一致展示位置/IP 属地（此前详情不显示）
                     (typeof window.buildPostLocationHtml === 'function' ? window.buildPostLocationHtml(normalizedPost) : ''),
-                    '    <div class="post-detail-stats">' + buildPostStatsLine(normalizedPost, (likes || []).length, (comments || []).length) + '</div>',
+                    '    <div class="post-detail-stats">' + buildPostStatsLine(normalizedPost, likeCount, commentCount) + '</div>',
                     detailActions.length ? '<div class="post-detail-actions">' + detailActions.join("") + '</div>' : '',
                     '  </section>',
                     '  <section class="post-detail-panel post-detail-panel--stack">',
-                    '    <div class="post-detail-panel-title">点赞用户 <span>' + likes.length + '</span></div>',
+                    '    <div class="post-detail-panel-title">点赞用户 <span>' + likeCount + '</span></div>',
                     likes.length ? likes.map(function(l) {
                         return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + window.safeParseDate(l.created_at).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>',
                     '  </section>',
                     '  <section class="post-detail-panel post-detail-panel--stack">',
-                    '    <div class="post-detail-panel-title">评论记录 <span>' + comments.length + '</span></div>',
+                    '    <div class="post-detail-panel-title">评论记录 <span>' + commentCount + '</span></div>',
                     comments.length ? comments.map(function(c) {
                         return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(c.user_name) + '</div><div class="post-detail-mini-copy">' + escapeHtml(c.content || '无评论内容') + '</div></div><span class="post-detail-mini-time">' + window.safeParseDate(c.created_at).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无评论</div>',
@@ -6311,6 +6313,7 @@
 
             window.openPostDetail = async function(postId) {
                 var _seq = ++_postDetailReqSeq;
+                window.__xtjPostDetailCurrentId = String(postId || '');
                 var title = document.getElementById('postDetailTitle');
                 var body = document.getElementById('postDetailBody');
                 var modal = document.getElementById('postDetailModal');
@@ -6319,8 +6322,18 @@
                 if (modal) modal.classList.add('active');
 
                 try {
-                    var apiUrl = (window.API_BASE || '') + '/api/post/detail/' + encodeURIComponent(postId);
-                    var apiRes = await fetch(apiUrl, { credentials: 'include' });
+                    var detailPath = '/api/post/detail/' + encodeURIComponent(postId);
+                    var apiUrl = (window.API_BASE || '') + detailPath;
+                    var apiRes;
+                    if (typeof window.xtjOptionalAuthFetch === 'function') {
+                        apiRes = await window.xtjOptionalAuthFetch(detailPath, { timeoutMs: 18000 });
+                    } else {
+                        var detailHeaders = { 'Accept': 'application/json' };
+                        var detailToken = '';
+                        try { detailToken = typeof getUserToken === 'function' ? String(getUserToken() || '') : ''; } catch (_) {}
+                        if (detailToken) detailHeaders.Authorization = 'Bearer ' + detailToken;
+                        apiRes = await fetch(apiUrl, { credentials: 'include', headers: detailHeaders });
+                    }
                     if (!apiRes.ok && (!apiRes.headers.get('content-type') || !apiRes.headers.get('content-type').includes('application/json'))) {
                         if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">无法获取帖子详情（' + apiRes.status + '）。</div>';
                         return;

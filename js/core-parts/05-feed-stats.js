@@ -116,6 +116,7 @@
             // ===================== 悬浮 Dock（底部导航） =====================
             let chatRealtime = null;
             let commentRealtime = null;
+            let likesRealtime = null;
             let dmpollTimer = null;
             let dmpollInterval = null;
 
@@ -896,10 +897,20 @@
                                 }
                             } else if (payload.eventType === 'UPDATE') {
                                 // 更新已有评论
-                                feedAllComments = (feedAllComments || []).map(function(comment) {
-                                    if (String(comment && comment.id) === commentId) return row;
-                                    return comment;
+                                var updatePostVisible = (feedAllPosts || []).some(function(post) {
+                                    return String(post && post.id) === String(row.post_id);
                                 });
+                                if (updatePostVisible) {
+                                    feedAllComments = (feedAllComments || []).map(function(comment) {
+                                        return String(comment && comment.id) === commentId ? row : comment;
+                                    });
+                                    profileActivityState.comments = (profileActivityState.comments || []).map(function(comment) {
+                                        return String(comment && comment.id) === commentId ? row : comment;
+                                    });
+                                    if (typeof window.__xtjSchedulePostCardPatch === 'function') {
+                                        try { window.__xtjSchedulePostCardPatch(row.post_id); } catch (ePatchUpdate) {}
+                                    }
+                                }
                             }
                             // ★ 修复：全站任意用户的评论变更都会推给所有在线端；此前无条件执行
                             // 全量快照序列化 + 个人页重渲染（跨用户写放大）。仅当评论所属帖子
@@ -932,7 +943,52 @@
                         });
                 }
                 createChannel();
+                subscribeToLikes();
             }
+
+            function subscribeToLikes() {
+                if (!sb) return;
+                window.__likesSubEpoch = (window.__likesSubEpoch || 0) + 1;
+                var mySubEpoch = window.__likesSubEpoch;
+                if (likesRealtime) {
+                    try { sb.removeChannel(likesRealtime); } catch (e) {}
+                    likesRealtime = null;
+                }
+                var reconnectAttempts = 0;
+                function createChannel() {
+                    if (mySubEpoch !== window.__likesSubEpoch) return;
+                    likesRealtime = sb.channel('feed-likes')
+                        .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, function(payload) {
+                            var row = payload && (payload.new || payload.old);
+                            if (!row || row.id == null || row.post_id == null) return;
+                            if (typeof window.__xtjApplyRealtimeLike === 'function') {
+                                window.__xtjApplyRealtimeLike(payload.eventType, row);
+                            }
+                        })
+                        .subscribe(function(status, err) {
+                            if (status === 'SUBSCRIBED') {
+                                reconnectAttempts = 0;
+                                return;
+                            }
+                            if (status !== 'CHANNEL_ERROR' && status !== 'TIMED_OUT' && status !== 'CLOSED') return;
+                            console.warn('[LIKES-REALTIME]', status, err);
+                            if (reconnectAttempts >= 10) return;
+                            reconnectAttempts++;
+                            var backoff = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                            setTimeout(function() {
+                                if (mySubEpoch !== window.__likesSubEpoch) return;
+                                if (likesRealtime) {
+                                    try { sb.removeChannel(likesRealtime); } catch (e) {}
+                                    likesRealtime = null;
+                                }
+                                createChannel();
+                            }, backoff);
+                        });
+                }
+                createChannel();
+            }
+
+            if (window.currentUser) subscribeToComments();
 
             // ★ 页面可见时检查并恢复实时订阅 + 恢复轮询任务
             document.addEventListener('visibilitychange', function() {

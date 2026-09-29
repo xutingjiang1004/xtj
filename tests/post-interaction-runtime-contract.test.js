@@ -2,8 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const core = fs.readFileSync(path.join(__dirname, '..', 'js', 'core.js'), 'utf8');
+const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');
 
 function between(start, end) {
   const startIndex = core.indexOf(start);
@@ -19,11 +21,13 @@ test('publish and comment handlers reject duplicate in-flight submissions', () =
   assert.match(core, /btn\.onclick = async function\(\) \{[\s\S]*?if \(btn\.disabled\) return/);
 });
 
-test('comment keeps its target id and inserts the canonical response locally', () => {
+test('comment keeps its target id and patches only the affected card after success', () => {
   assert.match(core, /var targetPostId = String\(postId \|\| ''\)\.trim\(\)\.toLowerCase\(\)/);
   assert.match(core, /JSON\.stringify\(\{ post_id: targetPostId, content: content \}\)/);
   assert.match(core, /result\.data && String\(result\.data\.post_id\) === targetPostId/);
-  assert.match(core, /feedAllComments[\s\S]*await renderFeedFromMemoryState\(\)/);
+  assert.match(core, /feedAllComments[\s\S]*window\.__xtjSchedulePostCardPatch\(targetPostId\)/);
+  const commentSubmit = between('var insertedComment = result.data', 'requestAnimationFrame(function() {');
+  assert.doesNotMatch(commentSubmit, /await renderFeedFromMemoryState\(\)/);
   // ★ 2026-09-27：P12 修复后，评论节点不再用 `data-post-id="' + targetPostId` 裸拼选择器
   //   （未校验的 id 拼进 querySelector 会抛 SyntaxError 或命中错误元素），改为经
   //   findBySafePostSelector(targetPostId)（内部走 CSS.escape + 手工转义兜底）。
@@ -82,6 +86,101 @@ test('like operation resets running flag so a failed sync never locks the button
   assert.match(like, /if \(likeOperations\[postId\] === operation &&\s*operation\.desired === operation\.confirmed &&\s*operation\.requested === operation\.confirmed\) \{[\s\S]*?delete likeOperations\[postId\];/);
   // 失败路径回滚 UI 后仍可重试（下次点击重新 flush）
   assert.match(like, /if \(operation\.desired !== operation\.confirmed\) \{[\s\S]*?applyPostLikeIntent\(postId, operation\.confirmed\);/);
+  assert.match(like, /operation\.desired = operation\.confirmed;\s*operation\.requested = operation\.confirmed;/);
+});
+
+test('like failure followed by another tap sends the intended like state', async () => {
+  const likeRuntime = between('var likeOperations = Object.create(null);', 'var likeBlossomSequence = 0;');
+  const requests = [];
+  const classNames = new Set();
+  const button = {
+    classList: {
+      contains(name) { return classNames.has(name); },
+      toggle(name, force) { if (force) classNames.add(name); else classNames.delete(name); },
+      add(name) { classNames.add(name); },
+      remove(name) { classNames.delete(name); }
+    },
+    setAttribute() {}
+  };
+  const runtime = {
+    window: {
+      xtjProtectedFetch: async (_url, options) => {
+        const body = JSON.parse(options.body);
+        requests.push(body);
+        if (requests.length === 1) {
+          return { ok: false, json: async () => ({ ok: false, error: 'temporary_failure' }) };
+        }
+        return { ok: true, json: async () => ({ ok: true, liked: true, like_count: 1 }) };
+      }
+    },
+    currentUser: 'alice',
+    currentDockTab: 'feed',
+    deviceId: 'device-a',
+    isUserMuted: () => false,
+    showToast() {},
+    getPostLikeButtons: () => [button],
+    setPostLikePending() {},
+    updatePostLikeUi(_postId, liked) {
+      button.classList.toggle('liked', liked);
+    },
+    updatePostLikeCount() {},
+    updateFeedStats() {},
+    touchUserSession() {},
+    scheduleLikeStatRefresh() {},
+    createLikeBlossom() {},
+    console: { error() {}, warn() {} },
+    setTimeout,
+    clearTimeout
+  };
+  vm.runInNewContext(likeRuntime + '\nfunction createLikeBlossom() {}', runtime);
+  const postId = '8c1cb02d-74d0-4e45-9e15-17f5cf3aa812';
+  await runtime.window.toggleLike(button, postId);
+  assert.equal(button.classList.contains('liked'), false, 'failed optimistic like rolls back');
+  await runtime.window.toggleLike(button, postId);
+  assert.deepEqual(requests.map((request) => request.liked), [true, true]);
+  assert.equal(button.classList.contains('liked'), true, 'retry leaves the UI in the confirmed liked state');
+});
+
+test('post card comment patch preserves the root node and updates only stats/comments', () => {
+  const patch = between('function patchSinglePostCard(postId)', 'window.__xtjPatchSinglePostCard = patchSinglePostCard;');
+  assert.match(patch, /oldStats\.innerHTML = newStats\.innerHTML/);
+  assert.match(patch, /oldComments\.replaceWith\(newComments\)/);
+  assert.doesNotMatch(patch, /card\.parentNode\.replaceChild/);
+});
+
+test('feed page requests use an authenticated keyset cursor after the first page', () => {
+  assert.match(core, /mayReuseAnonymousEarlyFeed = !knownUser && !hasToken/);
+  assert.match(core, /page === 0 && mayReuseAnonymousEarlyFeed/);
+  assert.match(core, /feedPath \+= '&cursor_created_at=' \+ encodeURIComponent\(requestCursor\.created_at\)/);
+  assert.match(core, /'&cursor_id=' \+ encodeURIComponent\(requestCursor\.id\) \+ '&offset=' \+ start/);
+  assert.match(server, /cursorTimestampValid = \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}T/);
+  assert.match(server, /created_at\.lt\.' \+ after\.created_at \+ ',and\(created_at\.eq\.' \+ after\.created_at \+ ',id\.lt\.' \+ after\.id/);
+  assert.match(server, /next_cursor: nextCursor/);
+  assert.match(server, /query = query\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/);
+});
+
+test('private detail requests use optional auth and detail data carries complete counts/IP fields', () => {
+  const detail = fs.readFileSync(path.join(__dirname, '..', 'js', 'core-parts', '06-chat-and-nav.js'), 'utf8');
+  assert.match(detail, /xtjOptionalAuthFetch\(detailPath/);
+  assert.match(server, /select\('id,user_name,created_at', \{ count: 'exact' \}\)/);
+  assert.match(server, /ip_province: post\.ip_province/);
+  assert.match(server, /ip_lookup_started_at: post\.ip_lookup_started_at/);
+});
+
+test('IP retry remains pending until durable backend retries finish and refreshes only IP DOM', () => {
+  const ip = between('function refreshPublishedPostCard(post)', 'function schedulePublishedPostIpRefresh(postId)');
+  assert.match(ip, /oldIp\.textContent = nextIp\.textContent/);
+  assert.doesNotMatch(ip, /existing\.replaceWith/);
+  const refresh = between('function schedulePublishedPostIpRefresh(postId)', 'function refreshPendingFeedIpPosts(posts)');
+  assert.match(refresh, /var maxAttempts = 19;/);
+  const delayMatch = refresh.match(/var attemptDelaysMs = \[([^\]]+)\]/);
+  assert.ok(delayMatch, 'IP refresh delay schedule is missing');
+  const delayWindow = delayMatch[1].split(',').map(Number).reduce((sum, value) => sum + value, 450);
+  assert.ok(delayWindow > 360000, 'IP refresh window must outlast backend retries and resolver time');
+  assert.match(server, /ip_next_retry_at/);
+  assert.match(server, /ip_lookup_ip_enc/);
+  assert.match(server, /setInterval\(function\(\) \{\s*processDueIpRegionRetries/);
+  assert.doesNotMatch(server, /超过 2 分钟未解析的转为 failed/);
 });
 
 test('feed load-more failure shows a retry entry and pauses the sentinel loop', () => {
