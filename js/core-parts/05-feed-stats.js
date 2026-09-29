@@ -765,9 +765,10 @@
                     loadDockChatList();
                     updateUnreadBadge();
                     if (dockChatActiveUser && payload && (!payload.peer || payload.peer===dockChatActiveUser) &&
-                        ['read','mark_read','sent','withdraw','delete_message'].indexOf(payload.kind) >= 0) {
+                        ['read','mark_read','sent','withdraw','delete_message','edit','reaction','transcript','refresh','reconnect','clear','delete'].indexOf(payload.kind) >= 0) {
                         loadDockChatMessages(dockChatActiveUser,false);
                     }
+                    if (payload && typeof window.__xtjRefreshChatMessageExtras === 'function') window.__xtjRefreshChatMessageExtras(payload);
                     if (payload && ['friend_request','friendship','block','friend_note'].indexOf(payload.kind) >= 0 &&
                         typeof window.__xtjRefreshChatSocialState === 'function') window.__xtjRefreshChatSocialState();
                 },180);

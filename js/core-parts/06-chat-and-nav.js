@@ -3338,7 +3338,7 @@
             // Search uses server keyset pagination; message actions use the same
             // authenticated boundary as sending. State is tied to account + peer.
             var _chatSearchSeq = 0, _chatSearchCursor = null, _chatSearchMore = false, _chatSearchCriteria = '';
-            var _chatHistoryFocus = '', _chatReplyDraft = null, _chatEditDraft = null;
+            var _chatHistoryFocus = '', _chatHistoryAnchor = '', _chatHistoryRefreshSeq = 0, _chatReplyDraft = null, _chatEditDraft = null;
             var _chatRecordedFile = null, _chatVoice = null, _chatVoiceSeq = 0;
             var _chatReactionTimer = null, _chatReactionSeq = 0, _chatShowArchived = false;
             async function chatFeatureApi(path, body) {
@@ -3347,7 +3347,7 @@
                     body: JSON.stringify(body), timeoutMs: 30000
                 } : { timeoutMs: 20000 });
                 var result = await response.json();
-                if (!response.ok || !result.ok) throw new Error(result.error || '操作失败，请重试');
+                if (!response.ok || !result.ok) { var error = new Error(result.error || '操作失败，请重试'); error.status = response.status; throw error; }
                 return result;
             }
             function closeChatHistory() {
@@ -3417,7 +3417,7 @@
                 try {
                     var result = await chatFeatureApi('history/context?peer=' + encodeURIComponent(peer) + '&message_id=' + encodeURIComponent(id));
                     if (owner !== window.currentUser || dockChatActiveUser !== peer) return;
-                    _dockChatLoadSeq++; _chatHistoryFocus = peer;
+                    _dockChatLoadSeq++; _chatHistoryRefreshSeq++; _chatHistoryFocus = peer; _chatHistoryAnchor = result.focus_id;
                     _chatCache[getDockChatCacheKey(peer)] = result.data;
                     _chatRenderSignature[peer] = undefined; renderDockMessages(peer, result.data, false);
                     requestAnimationFrame(function() {
@@ -3516,6 +3516,34 @@
                     } catch (_) { /* A failed summary read does not replace chat content. */ }
                 }, 180);
             }
+            window.__xtjRefreshChatMessageExtras = function(payload) {
+                var peer = dockChatActiveUser, owner = window.currentUser;
+                if (!peer || !owner || (payload.peer && payload.peer !== peer)) return;
+                if (payload.kind === 'reaction') { scheduleChatReactions(); return; }
+                if (['clear','delete'].indexOf(payload.kind) >= 0) {
+                    _chatHistoryFocus = ''; _chatHistoryRefreshSeq++;
+                    forgetDockChatConversationMessages(peer); renderDockMessages(peer,[],false);
+                    if (payload.kind === 'delete') dockChatGoBack(); else loadDockChatMessages(peer,false);
+                    return;
+                }
+                if (_chatHistoryFocus !== peer || ['edit','transcript','withdraw','delete_message','read','mark_read','refresh','reconnect','sent'].indexOf(payload.kind) < 0) return;
+                var key = getDockChatCacheKey(peer), cached = _chatCache[key] || [];
+                var anchors = [_chatHistoryAnchor,cached[0] && cached[0].id,cached[cached.length-1] && cached[cached.length-1].id].filter(Boolean);
+                var seq = ++_chatHistoryRefreshSeq;
+                (async function() {
+                    for (var i=0;i<anchors.length;i++) {
+                        try {
+                            var result = await chatFeatureApi('history/context?peer=' + encodeURIComponent(peer) + '&message_id=' + encodeURIComponent(anchors[i]));
+                            if (seq !== _chatHistoryRefreshSeq || owner !== window.currentUser || dockChatActiveUser !== peer || _chatHistoryFocus !== peer) return;
+                            _chatCache[key] = result.data; _chatHistoryAnchor = result.focus_id;
+                            _chatRenderSignature[peer] = undefined; renderDockMessages(peer,result.data,false); return;
+                        } catch (error) { if (error.status !== 404) return; }
+                    }
+                    if (seq === _chatHistoryRefreshSeq && owner === window.currentUser && dockChatActiveUser === peer && _chatHistoryFocus === peer) {
+                        _chatHistoryFocus = ''; forgetDockChatConversationMessages(peer); renderDockMessages(peer,[],false); loadDockChatMessages(peer,false);
+                    }
+                })();
+            };
             function cancelChatVoice() {
                 _chatVoiceSeq++;
                 var voice = _chatVoice; _chatVoice = null;

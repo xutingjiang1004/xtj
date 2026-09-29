@@ -10,7 +10,7 @@ async function setup(page) {
   await page.evaluate(({id,stamp}) => {
     window.currentUser = 'tester'; window.ensureUserToken = async () => 'test';
     window.ensureProtectedOperationAuth = async () => ({ ok: true, token: 'test' });
-    window.__chatTestCalls = []; window.__chatSearchDelay = 0;
+    window.__chatTestCalls = []; window.__chatSearchDelay = 0; window.__chatContextText = 'hello world';
     const message = { id, user_name: 'tester', media_url: 'peer', media_type: '__dm__', created_at: stamp, content: JSON.stringify({text:'hello world'}) };
     window.xtjProtectedFetch = async (url, options = {}) => {
       window.__chatTestCalls.push({url, body: options.body});
@@ -19,8 +19,8 @@ async function setup(page) {
         await new Promise(r => setTimeout(r,window.__chatSearchDelay));
         const more = url.includes('cursor_id');
         result = {ok:true,items:[{message_id:id,peer_name:'peer',sender_name:'tester',body:more?'second page':'hello world',sent_at:stamp,message_type:'text'}],has_more:!more,next_cursor_at:stamp,next_cursor_id:id};
-      } else if (url.includes('/history/context')) result={ok:true,data:[message],focus_id:id};
-      else if (url.includes('/api/dm/messages')) result={ok:true,data:[message],has_more:false};
+      } else if (url.includes('/history/context')) { const current={...message,content:JSON.stringify({text:window.__chatContextText})};result={ok:true,data:[current],focus_id:id}; }
+      else if (url.includes('/api/dm/messages')) result={ok:true,data:window.__chatMessagesGone?[]:[message],has_more:false};
       else if (url.includes('/relationship?')) result={ok:true,relationship:{relation:'friend',can_message:true}};
       else if (url.includes('/conversations/')) result={ok:true,state:{status:'ok',draft_revision:0}};
       else if (url.includes('/messages/reply/validate')) result={ok:true,reply_to:{id,sender_name:'tester',text:'hello world'}};
@@ -99,4 +99,20 @@ test('archive separates the current-user list and reactions use the selected mes
   await page.getByRole('button',{name:'回应',exact:true}).click();
   await page.locator('.chat-reaction-picker button').filter({hasText:'👍'}).click();
   await expect.poll(()=>page.evaluate(()=>window.__chatTestCalls.some(c=>c.url.includes('/messages/reactions')&&c.body&&JSON.parse(c.body).emoji==='👍'))).toBe(true);
+});
+
+test('editing while viewing a search result updates the existing history window', async ({page}) => {
+  await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('#chatHistoryQuery').fill('hello');
+  await page.locator('#chatHistoryForm').dispatchEvent('submit'); await page.locator('.chat-history-jump').first().click();
+  await expect(page.locator('[data-message-id="'+id+'"]')).toContainText('hello world');
+  await page.evaluate((id)=>{window.__chatContextText='remote edit';window.__xtjRefreshChatMessageExtras({kind:'edit',peer:'peer',message_id:id});},id);
+  await expect(page.locator('[data-message-id="'+id+'"]')).toContainText('remote edit');
+});
+
+test('a remote clear removes messages from a focused search window', async ({page}) => {
+  await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('#chatHistoryQuery').fill('hello');
+  await page.locator('#chatHistoryForm').dispatchEvent('submit'); await page.locator('.chat-history-jump').first().click();
+  await expect(page.locator('[data-message-id="'+id+'"]')).toBeVisible();
+  await page.evaluate(()=>{window.__chatMessagesGone=true;window.__xtjRefreshChatMessageExtras({kind:'clear',peer:'peer'});});
+  await expect(page.locator('[data-message-id="'+id+'"]')).toHaveCount(0);
 });
