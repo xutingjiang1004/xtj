@@ -100,6 +100,8 @@
                         if (sb) {
                             _sbConfigOk = true;
                             console.log('[XTJ] 已从服务端补齐 Supabase anon key，客户端已重建');
+                            // Restored login may finish before public config; reconnect after client healing.
+                            if (window.currentUser && typeof window.subscribeToDmBroadcast === 'function') window.subscribeToDmBroadcast();
                             if (done) done(true);
                         } else if (done) done(false);
                     })
@@ -12147,7 +12149,7 @@ function renderProfileActivityList(kind) {
             var _dockChatFriendNotes = Object.create(null);
             var _dockChatFriendNotesOwner = '';
             var _dockChatFriendNotesAt = 0;
-            var _dockChatSocialTab = 'search';
+            var _dockChatSocialTab = 'friends';
             var _dockChatSocialQuery = '';
             var _dockChatSocialRequestDirection = 'incoming';
             var _dockChatSocialLoadSeq = 0;
@@ -12199,6 +12201,7 @@ function renderProfileActivityList(kind) {
             //   叠加 renderDockChatDesktopEmptyState 的归属判断，导致桌面分屏在登出后
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
+                if (_chatDomSnapshots) _chatDomSnapshots.clear();
                 cancelDockChatSendFlights(); resetDockChatTyping(); closeDockChatConversationMenu(true);
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); _chatRecordedFile = null; _chatShowArchived = false; var archiveButton = document.getElementById('chatArchiveButton'); if (archiveButton) { archiveButton.textContent = '归档'; archiveButton.setAttribute('aria-pressed','false'); } _chatReactionSeq++; clearTimeout(_chatReactionTimer);
                 document.querySelectorAll('.chat-reaction-picker').forEach(function(p) { p.remove(); });
@@ -12323,7 +12326,7 @@ function renderProfileActivityList(kind) {
             var _dockChatDraftConflicts = {};
 
             function dockChatConversationRows(states) {
-                return states.filter(function(s) { return s && !s.deleted && !!s.archived_at === _chatShowArchived && s.peer_name; }).map(function(s) {
+                return states.filter(function(s) { return s && !s.deleted && s.peer_name; }).map(function(s) {
                     var preview = s.draft_text ? '草稿：' + s.draft_text : s.last_message;
                     if (!preview && s.last_message_type && s.last_message_type !== 'text') preview = '[' + s.last_message_type + ']';
                     return { other_user: s.peer_name, last_message: preview || '',
@@ -12431,7 +12434,7 @@ function renderProfileActivityList(kind) {
                     flight.animation=ghost.animate([
                         {transform:'translate3d('+dx+'px,'+dy+'px,0) scale('+sx+','+sy+')',opacity:.72},
                         {transform:'translate3d(0,0,0) scale(1,1)',opacity:1}
-                    ],{duration:380,easing:'cubic-bezier(.2,.8,.2,1)',fill:'both'});
+                    ],{duration:290,easing:'cubic-bezier(.22,.72,.24,1)',fill:'both'});
                     flight.animation.finished.then(flight.finish,flight.finish);
                 } catch (_) { flight.finish(); }
             }
@@ -12446,7 +12449,9 @@ function renderProfileActivityList(kind) {
                 }).observe(chatMotionPanel,{attributes:true,attributeFilter:['class']});
             }
 
+            var _chatDomSnapshots = new Map();
             function forgetDockChatConversationMessages(peer) {
+                _chatDomSnapshots.delete(getDockChatCacheKey(peer));
                 delete _chatCache[getDockChatCacheKey(peer)];
                 _chatRenderSignature[peer] = undefined;
             }
@@ -12537,6 +12542,11 @@ function renderProfileActivityList(kind) {
                     _dockChatDraftTimer = null;
                     var previousInput = document.getElementById('dockChatInput');
                     persistDockChatDraft(dockChatActiveUser,previousInput ? previousInput.value : '');
+                }
+                var oldMessages=document.getElementById('dockChatMessages');
+                if (dockChatActiveUser && oldMessages && oldMessages.dataset.chatUser===dockChatActiveUser) {
+                    _chatDomSnapshots.set(getDockChatCacheKey(dockChatActiveUser),Array.from(oldMessages.children));
+                    while (_chatDomSnapshots.size>6) _chatDomSnapshots.delete(_chatDomSnapshots.keys().next().value);
                 }
                 dockChatActiveUser = userName;
                 _chatPresenceSnapshot=null;
@@ -12959,7 +12969,7 @@ function renderProfileActivityList(kind) {
                     var row = node.closest('.chat-list-item[data-chat-user]');
                     if (!row) return;
                     var userName = row.getAttribute('data-chat-user') || '';
-                    node.innerHTML = getDockChatAvatarMarkup(userName);
+                    var markup=getDockChatAvatarMarkup(userName); if (node.innerHTML !== markup) node.innerHTML=markup;
                 });
             }
 
@@ -12971,7 +12981,7 @@ function renderProfileActivityList(kind) {
                 Array.prototype.forEach.call(container.querySelectorAll('.chat-msg-row .chat-msg-avatar'), function(node) {
                     var row = node.closest('.chat-msg-row');
                     if (!row) return;
-                    node.innerHTML = row.classList.contains('sent') ? mineAvatar : otherAvatar;
+                    var markup=row.classList.contains('sent') ? mineAvatar : otherAvatar; if (node.innerHTML !== markup) node.innerHTML=markup;
                 });
             }
 
@@ -13156,6 +13166,10 @@ function renderProfileActivityList(kind) {
                 return 'x:' + index + ':' + String(message.created_at || '');
             }
 
+            function buildDockChatStableBodySignature(message) {
+                var p=getDMMessagePayload(message) || {};
+                return buildDockChatBodyMarkup(message)+'|'+JSON.stringify([p.reply_to,p.transcript,p.edited_at,p.withdrawn,!!message.__failed,!!message.__optimistic]);
+            }
             function buildDockChatRowSignature(message) {
                 var payload = getDMMessagePayload(message) || {};
                 return [
@@ -13347,9 +13361,8 @@ function renderProfileActivityList(kind) {
                 var behavior = options && options.smooth ? 'smooth' : 'auto';
                 var scroll = function() { el.scrollTo({ top: el.scrollHeight, behavior: behavior }); };
                 scroll();
-                requestAnimationFrame(function() {
+                if (!_chatSendFlights.size) requestAnimationFrame(function() {
                     scroll();
-                    requestAnimationFrame(scroll);
                 });
                 setDockChatJumpLatestVisible(false);
             }
@@ -13465,7 +13478,7 @@ function renderProfileActivityList(kind) {
                     // ★ 2026-09-26（审计 P1-7）：同图片，走 sanitizeUrl 协议白名单
                     var safeAudioSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(media.src || '')) : '';
                     if (!safeAudioSrc) return '<span class="msg-text">' + escapeHtml(messageText || '[音频]') + '</span>';
-                    var audioBody = '<audio class="msg-audio" src="' + escapeHtml(safeAudioSrc) + '" controls preload="metadata" onclick="event.stopPropagation()" style="max-width:240px;cursor:default;"></audio>';
+                    var audioBody = '<div class="chat-voice-player"><audio class="msg-audio" src="' + escapeHtml(safeAudioSrc) + '" preload="metadata"></audio><button type="button" class="chat-voice-play" aria-label="播放语音" aria-pressed="false"><svg class="voice-play-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="m8 5 11 7-11 7z"/></svg><span class="chat-voice-wave" aria-hidden="true">' + [8,14,23,12,18,28,16,10,22,14,26,18,12,20,9,16].map(function(height) { return '<i style="--voice-bar:'+height+'px"></i>'; }).join('') + '</span><span class="chat-voice-duration">语音</span></button></div>';
                     if (messageText) audioBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return audioBody;
                 }
@@ -13861,12 +13874,13 @@ function renderProfileActivityList(kind) {
                 var otherUser = msgs[0] ? (msgs[0].user_name === currentUser ? msgs[0].media_url : msgs[0].user_name) : '';
                 var avatars = { mine: getDockChatAvatarMarkup(currentUser), other: getDockChatAvatarMarkup(otherUser) };
                 var sameConversation = el.dataset.chatUser === signatureKey;
+                if (!sameConversation) { var snapshot=_chatDomSnapshots.get(getDockChatCacheKey(userName)); if (snapshot) { el.replaceChildren.apply(el,snapshot); sameConversation=true; } }
                 var existingRows = {};
                 Array.prototype.forEach.call(el.querySelectorAll('.chat-msg-row[data-msg-key]'), function(node) {
                     var k = node.getAttribute('data-msg-key');
                     if (k) existingRows[k] = node;
                 });
-                var fragment = document.createDocumentFragment();
+                var orderedNodes = [];
                 msgs.forEach(function(message, index) {
                     var key = getDockChatRowKey(message, index);
                     var sig = buildDockChatRowSignature(message);
@@ -13874,7 +13888,7 @@ function renderProfileActivityList(kind) {
                     if (sameConversation && node && node.getAttribute('data-msg-sig') === sig) {
                         // 未变化 → 复用原节点：图片不重新请求，已读状态不重建，不闪白
                         delete existingRows[key];
-                        fragment.appendChild(node);
+                        orderedNodes.push(node);
                         return;
                     }
                     var activeFlight = _chatSendFlights.get(message.__tempId || '');
@@ -13884,8 +13898,16 @@ function renderProfileActivityList(kind) {
                     if (!activeFlight) _chatSendFlights.forEach(function(flight) { if (flight.messageId && flight.messageId===message.id) activeFlight=flight; });
                     if (activeFlight && message.__failed) { activeFlight.finish(); activeFlight=null; }
                     var template = document.createElement('template');
-                    template.innerHTML = buildDockChatRowMarkup(message, avatars, isBulk).trim();
-                    node = template.content.firstElementChild;
+                    template.innerHTML = buildDockChatRowMarkup(message, avatars, isBulk || !message.__optimistic).trim();
+                    var nextNode = template.content.firstElementChild;
+                    if (node && sameConversation && node.getAttribute('data-body-sig') === buildDockChatStableBodySignature(message)) {
+                        var oldMeta=node.querySelector('.msg-meta'), nextMeta=nextNode.querySelector('.msg-meta');
+                        if (oldMeta && nextMeta && oldMeta.innerHTML!==nextMeta.innerHTML) oldMeta.innerHTML=nextMeta.innerHTML;
+                        var oldBubble=node.querySelector('.chat-msg'), nextBubble=nextNode.querySelector('.chat-msg');
+                        if (oldBubble && nextBubble) oldBubble.className=nextBubble.className;
+                    } else node=nextNode;
+                    node.setAttribute('data-body-sig',buildDockChatStableBodySignature(message));
+                    node.setAttribute('data-message-id',String(message.id || ''));
                     if (node) {
                         node.setAttribute('data-msg-key', key);
                         node.setAttribute('data-msg-sig', sig);
@@ -13895,12 +13917,15 @@ function renderProfileActivityList(kind) {
                             if (activeFlight.bubble) activeFlight.bubble.style.visibility='hidden';
                         }
                     }
-                    fragment.appendChild(node);
+                    orderedNodes.push(node);
                 });
-                el.replaceChildren(fragment);
+                var cursor=el.firstChild;
+                orderedNodes.forEach(function(node) { if (node===cursor) cursor=cursor.nextSibling; else el.insertBefore(node,cursor); });
+                var wanted=new Set(orderedNodes); Array.from(el.children).forEach(function(node) { if (!wanted.has(node)) node.remove(); });
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
                 patchDockChatMessageAvatars(userName);
+                bindChatAudioPlayers();
                 // ★ 2026-09-26：把仍用本地 blob 显示的图片在后台换成远端地址
                 //   （下载成功才替换，失败则继续显示本地图，绝不降级成按钮）
                 try { if (typeof hydrateDockChatRemoteMedia === 'function') hydrateDockChatRemoteMedia(el); } catch (eHyd) {}
@@ -15250,6 +15275,7 @@ function renderProfileActivityList(kind) {
             var _chatSearchSeq = 0, _chatSearchCursor = null, _chatSearchMore = false, _chatSearchCriteria = '';
             var _chatHistoryFocus = '', _chatHistoryAnchor = '', _chatHistoryRefreshSeq = 0, _chatReplyDraft = null, _chatEditDraft = null;
             var _chatRecordedFile = null, _chatVoice = null, _chatVoiceSeq = 0;
+            var _chatSearchMode='messages';
             var _chatReactionTimer = null, _chatReactionSeq = 0, _chatShowArchived = false;
             async function chatFeatureApi(path, body) {
                 var response = await window.xtjProtectedFetch('/api/chat/' + path, body ? {
@@ -15269,6 +15295,8 @@ function renderProfileActivityList(kind) {
                 if (!window.currentUser) { showToast('请先登录'); return; }
                 var panel = document.getElementById('chatHistoryPanel');
                 transitionChatSurface(panel,true,false,panel);
+                setChatSearchMode('messages');
+                document.getElementById('chatSearchTabs').hidden=!!media;
                 document.getElementById('chatHistoryKind').value = media ? 'media' : 'all';
                 var scope = document.getElementById('chatHistoryScope');
                 scope.options[0].disabled = !dockChatActiveUser;
@@ -15279,7 +15307,37 @@ function renderProfileActivityList(kind) {
                 document.getElementById('chatHistoryMore').hidden = true;
                 if (media) runChatHistorySearch(false); else document.getElementById('chatHistoryQuery').focus();
             }
+            function setChatSearchMode(mode) {
+                _chatSearchSeq++; _chatSearchMode=mode; _chatSearchCursor=null;
+                document.getElementById('chatHistoryResults').replaceChildren();
+                document.getElementById('chatHistoryMore').hidden=true;
+                document.querySelector('#chatHistoryForm .chat-history-filters').hidden=mode==='users';
+                document.getElementById('chatHistoryQuery').placeholder=mode==='users' ? '搜索注册用户的账号' : '搜索文字、转写或文件名';
+                document.getElementById('chatHistoryStatus').textContent=mode==='users' ? '输入至少两个字搜索账号' : '输入至少两个字搜索消息';
+                document.querySelectorAll('[data-chat-search-mode]').forEach(function(button) { button.setAttribute('aria-selected',String(button.dataset.chatSearchMode===mode)); });
+            }
+            async function searchChatAccounts() {
+                var q=document.getElementById('chatHistoryQuery').value.trim(), status=document.getElementById('chatHistoryStatus');
+                if (q.length<2) { status.textContent='请输入至少两个字'; return; }
+                var seq=++_chatSearchSeq, owner=window.currentUser;
+                status.textContent='正在搜索账号…';
+                try {
+                    var result=await requestDockChatSocial('/users/search?q='+encodeURIComponent(q));
+                    if (seq!==_chatSearchSeq || owner!==window.currentUser || _chatSearchMode!=='users') return;
+                    var list=document.getElementById('chatHistoryResults'); list.replaceChildren();
+                    (result.users || []).forEach(function(user) {
+                        var name=String(user.user_name || ''); if (!name) return;
+                        var button=document.createElement('button'); button.type='button'; button.className='chat-account-result';
+                        var icon=document.createElement('span'); icon.className='chat-account-avatar'; icon.textContent=name.slice(0,1).toUpperCase();
+                        var label=document.createElement('strong'); label.textContent=name;
+                        var hint=document.createElement('span'); hint.textContent='查看与添加';
+                        button.append(icon,label,hint); button.onclick=function() { _dockChatSocialQuery=name; closeChatHistory(); openDockChatSocialSheet('search'); }; list.appendChild(button);
+                    });
+                    status.textContent=list.children.length ? '找到 '+list.children.length+' 个账号' : '没有匹配的账号';
+                } catch(error) { if (seq===_chatSearchSeq) status.textContent=error.message; }
+            }
             async function runChatHistorySearch(more) {
+                if (_chatSearchMode==='users') { searchChatAccounts(); return; }
                 var owner = window.currentUser, peer = document.getElementById('chatHistoryScope').value === 'current' ? dockChatActiveUser : null;
                 var q = document.getElementById('chatHistoryQuery').value.trim(), kind = document.getElementById('chatHistoryKind').value;
                 if (kind === 'all' && q.length < 2) { document.getElementById('chatHistoryStatus').textContent = '请输入至少两个字'; return; }
@@ -15456,6 +15514,9 @@ function renderProfileActivityList(kind) {
             };
             function cancelChatVoice() {
                 _chatVoiceSeq++;
+                if (typeof window.__xtjCancelChatVoiceHold==='function') window.__xtjCancelChatVoiceHold();
+                document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
+                if (_chatVoiceHold) _chatVoiceHold.active=false;
                 var voice = _chatVoice; _chatVoice = null;
                 if (voice) {
                     voice.cancelled = true; clearInterval(voice.timer); clearTimeout(voice.limit);
@@ -15466,22 +15527,31 @@ function renderProfileActivityList(kind) {
                 var input = document.getElementById('dockChatInput');
                 if (voice && input) { input.value = voice.base; input.disabled = false; }
                 if (dockChatActiveUser) updateDockChatComposerPermission(dockChatActiveUser);
-                var button = document.getElementById('chatVoiceButton'); if (button) { button.textContent = '语音'; button.classList.remove('recording'); }
+                var button = document.getElementById('chatVoiceButton'); if (button) { setChatVoiceButton(false); }
                 var cancel = document.getElementById('chatVoiceCancel'); if (cancel) cancel.hidden = true;
                 var status = document.getElementById('chatVoiceStatus'); if (status) status.hidden = true;
             }
-            async function toggleChatVoice() {
+            function setChatVoiceButton(recording) {
+                var button=document.getElementById('chatVoiceButton'); if (!button) return;
+                if (!button.dataset.idleIcon) button.dataset.idleIcon=button.innerHTML;
+                button.innerHTML=recording ? '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="3"/></svg>' : button.dataset.idleIcon;
+                button.setAttribute('aria-label',recording ? '结束录音' : '录制语音'); button.setAttribute('aria-pressed',String(recording));
+            }
+            function isChatHoldVoiceEnabled() { return localStorage.getItem('xtj_chat_hold_voice') !== 'off'; }
+            var _chatVoiceHold=null;
+            async function toggleChatVoice(options) {
+                var hold=options && options.hold;
                 if (_chatVoice) { _chatVoice.recorder.stop(); return; }
                 if (!window.currentUser || !dockChatActiveUser || dockChatSending || _chatEditDraft || document.getElementById('dockChatInput').disabled) { showToast('请选择可发送消息的会话'); return; }
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { showToast('此浏览器不支持录音，请使用附件发送音频'); return; }
                 var seq = ++_chatVoiceSeq, owner = window.currentUser, peer = dockChatActiveUser, stream;
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    if (seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
+                    if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
                     var type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find(function(t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); });
                     var recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined), chunks = [];
                     var input = document.getElementById('dockChatInput'), base = input.value, transcript = '';
-                    var voice = _chatVoice = { recorder: recorder, stream: stream, cancelled: false, base: base, started: Date.now() };
+                    var voice = _chatVoice = { recorder: recorder, stream: stream, cancelled: false, hold:!!hold, base: base, started: Date.now() };
                     recorder.ondataavailable = function(event) { if (event.data.size) chunks.push(event.data); };
                     recorder.onerror = function() { cancelChatVoice(); showToast('录音失败，请重试'); };
                     recorder.onstop = function() {
@@ -15489,13 +15559,16 @@ function renderProfileActivityList(kind) {
                         stream.getTracks().forEach(function(t) { t.stop(); }); clearInterval(voice.timer); clearTimeout(voice.limit);
                         if (voice.cancelled || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) return;
                         _chatVoice = null; input.disabled = false;
-                        document.getElementById('chatVoiceButton').textContent = '语音';
+                        document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
+                        setChatVoiceButton(false);
                         document.getElementById('chatVoiceButton').classList.remove('recording'); document.getElementById('chatVoiceCancel').hidden = true;
                         var mime = String(recorder.mimeType || (chunks[0] && chunks[0].type) || 'audio/mp4').split(';')[0];
                         var blob = new Blob(chunks, { type: mime });
+                        if (voice.hold && Date.now()-voice.started<600) { document.getElementById('chatVoiceStatus').hidden=true; showToast('录音太短，请再说一次'); return; }
                         if (!blob.size || blob.size > 50 * 1024 * 1024) { showToast('录音无内容或超过 50MB，请重录'); return; }
                         _chatRecordedFile = new File([blob], 'voice-' + Date.now() + (mime.indexOf('webm') >= 0 ? '.webm' : mime.indexOf('ogg') >= 0 ? '.ogg' : '.m4a'), { type: mime });
                         showDockChatFilePreview(_chatRecordedFile);
+                        if (voice.hold) { sendDockChatMessage(); return; }
                         document.getElementById('chatVoiceStatus').textContent = transcript ? '录音完成 · 转写文字可编辑后发送' : '录音完成 · 可补充文字后发送';
                     };
                     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -15510,21 +15583,80 @@ function renderProfileActivityList(kind) {
                             recognition.onerror = function() { voice.recognition = null; }; recognition.start();
                         } catch (_) { voice.recognition = null; }
                     }
-                    input.disabled = true; document.getElementById('chatVoiceButton').textContent = '完成'; document.getElementById('chatVoiceButton').classList.add('recording');
+                    input.disabled = true; setChatVoiceButton(true); document.getElementById('chatVoiceButton').classList.add('recording');
                     document.getElementById('chatVoiceCancel').hidden = false; document.getElementById('chatVoiceStatus').hidden = false;
-                    voice.timer = setInterval(function() { document.getElementById('chatVoiceStatus').textContent = '正在录音 · ' + Math.floor((Date.now() - voice.started) / 1000) + ' 秒'; }, 500);
+                    voice.timer = setInterval(function() { if (voice.hold && _chatVoiceHold && _chatVoiceHold.cancel) return; document.getElementById('chatVoiceStatus').textContent = (voice.hold ? '松开发送 · 上滑取消 · ' : '正在录音 · ') + Math.floor((Date.now() - voice.started) / 1000) + ' 秒'; }, 500);
+                    document.querySelector('#panelChat .chat-input-wrap').classList.add('is-recording');
                     voice.limit = setTimeout(function() { if (recorder.state === 'recording') recorder.stop(); }, 300000);
                     recorder.start(250);
                 } catch (error) { if (stream) stream.getTracks().forEach(function(t) { t.stop(); }); cancelChatVoice(); showToast(error.name === 'NotAllowedError' ? '请允许麦克风权限后重试' : '无法打开麦克风'); }
             }
+            function bindChatHoldVoice() {
+                var wrap=document.querySelector('#panelChat .chat-input-wrap'), input=document.getElementById('dockChatInput');
+                if (!wrap || wrap.__voiceHoldBound) return; wrap.__voiceHoldBound=true;
+                var timer=null, press=null;
+                function finish(cancel) {
+                    clearTimeout(timer); timer=null;
+                    if (!press) return;
+                    var active=press.active; press.active=false; press=null;
+                    if (!active) { if (!cancel) input.focus({preventScroll:true}); return; }
+                    if (cancel || !_chatVoice) cancelChatVoice();
+                    else if (_chatVoice.recorder.state==='recording') _chatVoice.recorder.stop();
+                }
+                window.__xtjCancelChatVoiceHold=function() { clearTimeout(timer); timer=null; if (press) press.active=false; press=null; };
+                wrap.addEventListener('pointerdown',function(event) {
+                    if (!isChatHoldVoiceEnabled() || event.button!==0 || input.disabled || input.value.trim() || _chatRecordedFile || document.getElementById('dockChatFileInp').files.length || _chatVoice || _chatEditDraft) return;
+                    event.preventDefault();
+                    press={active:false,x:event.clientX,y:event.clientY,id:event.pointerId,cancel:false,peer:dockChatActiveUser,owner:window.currentUser};
+                    var current=press;
+                    timer=setTimeout(function() {
+                        if (press!==current || current.peer!==dockChatActiveUser || current.owner!==window.currentUser || !document.getElementById('panelChat').classList.contains('active')) return;
+                        current.active=true; _chatVoiceHold=current; input.blur();
+                        try { wrap.setPointerCapture(current.id); } catch(_) {}
+                        toggleChatVoice({hold:true});
+                    },450);
+                });
+                wrap.addEventListener('pointermove',function(event) {
+                    if (!press) return;
+                    if (!press.active && Math.hypot(event.clientX-press.x,event.clientY-press.y)>10) { finish(true); return; }
+                    press.cancel=press.y-event.clientY>65;
+                    if (press.active) { var status=document.getElementById('chatVoiceStatus'); status.textContent=press.cancel ? '松开取消发送' : '松开发送 · 上滑取消'; }
+                });
+                window.addEventListener('pointerup',function(event) { if (press && press.id===event.pointerId) finish(press.cancel); });
+                window.addEventListener('pointercancel',function() { finish(true); });
+                wrap.addEventListener('contextmenu',function(event) { if (press && press.active) event.preventDefault(); });
+            }
+            function bindChatAudioPlayers() {
+                document.querySelectorAll('#dockChatMessages .chat-voice-player').forEach(function(player) {
+                    if (player.__voiceBound) return; player.__voiceBound=true;
+                    var audio=player.querySelector('audio'), button=player.querySelector('button'), duration=player.querySelector('.chat-voice-duration');
+                    function update() {
+                        var playing=!audio.paused && !audio.ended;
+                        player.classList.toggle('is-playing',playing); player.classList.remove('is-loading');
+                        button.setAttribute('aria-pressed',String(playing)); button.setAttribute('aria-label',playing ? '暂停语音' : '播放语音');
+                        var seconds=playing ? audio.duration-audio.currentTime : audio.duration;
+                        if (Number.isFinite(seconds) && seconds>0) duration.textContent=Math.ceil(seconds)+'″';
+                        player.style.setProperty('--voice-progress',audio.duration>0 ? Math.min(100,audio.currentTime/audio.duration*100)+'%' : '0%');
+                    }
+                    button.onclick=async function(event) {
+                        event.stopPropagation();
+                        if (!audio.paused) { audio.pause(); return; }
+                        document.querySelectorAll('#dockChatMessages audio').forEach(function(other) { if (other!==audio) other.pause(); });
+                        if (audio.ended) audio.currentTime=0;
+                        player.classList.add('is-loading');
+                        try { await audio.play(); update(); } catch(_) { player.classList.remove('is-loading'); duration.textContent='重试'; showToast('语音暂时无法播放，请再试一次'); }
+                    };
+                    ['loadedmetadata','durationchange','play','pause','ended','timeupdate','playing'].forEach(function(event) { audio.addEventListener(event,update); });
+                    audio.addEventListener('waiting',function() { player.classList.add('is-loading'); });
+                    audio.addEventListener('error',function() { player.classList.remove('is-playing','is-loading'); duration.textContent='重试'; button.setAttribute('aria-label','重新播放语音'); });
+                    update();
+                });
+            }
             function bindChatFeatures() {
-                document.getElementById('chatArchiveButton').onclick = function() {
-                    _chatShowArchived = !_chatShowArchived; this.textContent = _chatShowArchived ? '全部会话' : '归档'; this.setAttribute('aria-pressed', String(_chatShowArchived));
-                    _dockChatListRenderSignature = ''; renderDockChatConversationList(document.getElementById('dockChatList'),dockChatConversationRows(Object.values(_dockChatConversationStates)));
-                };
                 document.getElementById('chatSearchButton').onclick = function() { openChatHistory(false); };
                 document.getElementById('chatMediaButton').onclick = function() { openChatHistory(true); };
                 document.getElementById('chatHistoryClose').onclick = closeChatHistory;
+                document.querySelectorAll('[data-chat-search-mode]').forEach(function(button) { button.onclick=function() { setChatSearchMode(button.dataset.chatSearchMode); if (document.getElementById('chatHistoryQuery').value.trim().length>=2) runChatHistorySearch(false); }; });
                 document.getElementById('chatHistoryForm').onsubmit = function(event) { event.preventDefault(); runChatHistorySearch(false); };
                 document.getElementById('chatHistoryMore').onclick = function() { runChatHistorySearch(true); };
                 document.getElementById('chatHistoryKind').onchange = function() { runChatHistorySearch(false); };
@@ -15532,7 +15664,10 @@ function renderProfileActivityList(kind) {
                 document.getElementById('chatVoiceButton').onclick = toggleChatVoice;
                 document.getElementById('chatVoiceCancel').onclick = cancelChatVoice;
                 document.addEventListener('keydown', function(event) { if (event.key === 'Escape') { closeChatHistory(); cancelChatVoice(); document.querySelectorAll('.chat-reaction-picker').forEach(function(p) { p.remove(); }); } });
+                bindChatHoldVoice();
+                bindChatAudioPlayers();
                 window.addEventListener('pagehide', cancelChatVoice);
+                document.addEventListener('visibilitychange',function() { if (document.hidden) cancelChatVoice(); });
             }
             window.addEventListener('DOMContentLoaded', bindChatFeatures);
 
@@ -15811,7 +15946,7 @@ function renderProfileActivityList(kind) {
                 var _dockOrigBtn = document.getElementById('dockChatOrigBtn');
                 if (_dockOrigBtn) _dockOrigBtn.addEventListener('click', window.toggleDmOriginalSend);
                 var _socialOpen = document.getElementById('dockChatSocialBtn');
-                if (_socialOpen) _socialOpen.addEventListener('click', function() { openDockChatSocialSheet('search'); });
+                if (_socialOpen) _socialOpen.addEventListener('click', function() { openDockChatSocialSheet('friends'); });
                 var _socialClose = document.getElementById('dockChatSocialClose');
                 if (_socialClose) _socialClose.addEventListener('click', closeDockChatSocialSheet);
                 var _socialSheet = document.getElementById('dockChatSocialSheet');
@@ -16010,9 +16145,9 @@ function renderProfileActivityList(kind) {
                 var items = [
                     ['search','搜索聊天记录'],['media','图片、文件与链接'],
                     [state.pinned_at ? 'unpin' : 'pin',state.pinned_at ? '取消置顶' : '置顶聊天'],
-                    [state.archived_at ? 'unarchive' : 'archive',state.archived_at ? '移回会话列表' : '归档聊天'],
                     [state.muted_until ? 'unmute' : 'mute',state.muted_until ? '取消免打扰' : '消息免打扰'],
                     [Number(state.unread_count) || state.manual_unread_at ? 'mark_read' : 'mark_unread',Number(state.unread_count) || state.manual_unread_at ? '标记已读' : '标记未读'],
+                    ['hold_voice',isChatHoldVoiceEnabled() ? '长按录音：已开启' : '长按录音：已关闭'],
                     ['clear','清空我的聊天记录'],['delete','删除我的会话']
                 ];
                 actions.innerHTML = items.map(function(item) {
@@ -16120,6 +16255,7 @@ function renderProfileActivityList(kind) {
                 if (button) {
                     var action=button.getAttribute('data-chat-conversation-action');
                     if (action==='search' || action==='media') { closeDockChatConversationMenu(true); openChatHistory(action==='media'); }
+                    else if (action==='hold_voice') { localStorage.setItem('xtj_chat_hold_voice',isChatHoldVoiceEnabled() ? 'off' : 'on'); openDockChatConversationMenu(dockChatActiveUser); }
                     else mutateDockChatConversation(_conversationMenu.getAttribute('data-peer'),action);
                 }
             });
@@ -16213,7 +16349,7 @@ function renderProfileActivityList(kind) {
                 var sheet = document.getElementById('dockChatSocialSheet');
                 if (!sheet) return;
                 transitionChatSurface(sheet,true);
-                renderDockChatSocialTab(tab || 'search');
+                renderDockChatSocialTab(tab || 'friends');
                 refreshChatSocialBadge(true);
                 setTimeout(function() {
                     if (_dockChatSocialTab === 'search') {
@@ -16272,7 +16408,7 @@ function renderProfileActivityList(kind) {
                     '<div class="chat-social-avatar">' + avatar + '</div>' +
                     '<div class="chat-social-info"><span class="chat-social-name" title="' + escapeHtml(userName) + '">' + escapeHtml(displayName || userName) + '</span>' +
                     '<span class="chat-social-meta">' + escapeHtml(meta || userName) + '</span></div>' +
-                    '<div class="chat-social-actions">' + (actions || []).join('') + '</div></div>';
+                    '<div class="chat-social-actions">' + ((actions || []).length>3 ? actions[0] + '<details class="chat-contact-options"><summary aria-label="联系人设置">设置</summary><div>' + actions.slice(1).join('') + '</div></details>' : (actions || []).join('')) + '</div></div>';
             }
 
             function hydrateDockChatSocialAvatars(users) {
@@ -16673,6 +16809,7 @@ function renderProfileActivityList(kind) {
 
                     function updateIOSViewport() {
                         var vv = window.visualViewport;
+                        if (vv && Math.abs(vv.scale - 1)>0.02) return;
                         var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
                         var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
@@ -16687,7 +16824,7 @@ function renderProfileActivityList(kind) {
                         if (rawDiff < viewportBaseline) viewportBaseline = rawDiff;
                         var viewportBottom = Math.max(0, rawDiff - viewportBaseline);
                         root.style.setProperty('--xtj-visual-bottom', viewportBottom + 'px');
-                        if (dockBar) {
+                        if (dockBar && !shouldUseDesktopChatSplitLayout() && dockBar.getClientRects().length) {
                             // Reserve the real Dock footprint so the last post never scrolls behind it.
                             root.style.setProperty('--xtj-dock-reserve', (Math.ceil(dockBar.getBoundingClientRect().height) + 20) + 'px');
                         }
@@ -16697,7 +16834,7 @@ function renderProfileActivityList(kind) {
                         var shouldCollapseDock = !!(chatFocused && keyboardGap > 0);
                         document.body.classList.toggle('ios-chat-keyboard-open', shouldCollapseDock);
                         if (dockBar) dockBar.style.display = shouldCollapseDock ? 'none' : '';
-                        if (chatFocused) setTimeout(scrollDockChatBottom, 80);
+                        if (chatFocused && keyboardOpen && isDockChatNearBottom(document.getElementById('dockChatMessages'),180)) requestAnimationFrame(scrollDockChatBottom);
                     }
 
                     window.__xtjRefreshIOSChatViewport = function(options) {
@@ -20370,27 +20507,6 @@ function renderProfileActivityList(kind) {
             var _navHeader = document.querySelector('.posts-nav');
             if (_navHeader) _navHeader.classList.add('sticky-header');
             
-            var _panelPosts = document.getElementById('panelPosts');
-            var _scrollTarget = _panelPosts || window;
-            _scrollTarget.addEventListener('scroll', window.throttleRAF(function() {
-                // ★ 2026-09-26（审计 P2-1）：
-                //   ① 补 { passive: true }：本监听不调用 preventDefault，声明 passive 可让
-                //      浏览器不再为"可能 preventDefault"而等待回调，移动端滚动不再掉帧
-                //      （同文件其它 scroll 监听均已标注，核心滚动热路径此前漏了）。
-                //   ② 复用上方缓存的 _navHeader 节点，并缓存滚动容器 scrollTop 的读取，
-                //      避免每次滚动都 querySelector + 强制同步布局（读-写-读抖动）。
-                var header = (_navHeader && _navHeader.classList && _navHeader.classList.contains('sticky-header'))
-                    ? _navHeader
-                    : document.querySelector('.posts-nav.sticky-header');
-                if (!header) return;
-                var currentScrollY = _scrollTarget.scrollTop || window.scrollY;
-                if (typeof window._lastHeaderScrollY === 'undefined') window._lastHeaderScrollY = 0;
-                if (currentScrollY > 50 && currentScrollY > window._lastHeaderScrollY) {
-                    header.classList.add('hidden-header');
-                } else {
-                    header.classList.remove('hidden-header');
-                }
-                window._lastHeaderScrollY = currentScrollY;
-            }), { passive: true });
+            if (_navHeader) _navHeader.classList.remove('hidden-header');
             
         })();

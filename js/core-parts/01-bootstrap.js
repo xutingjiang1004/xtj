@@ -94,6 +94,8 @@
                         if (sb) {
                             _sbConfigOk = true;
                             console.log('[XTJ] 已从服务端补齐 Supabase anon key，客户端已重建');
+                            // Restored login may finish before public config; reconnect after client healing.
+                            if (window.currentUser && typeof window.subscribeToDmBroadcast === 'function') window.subscribeToDmBroadcast();
                             if (done) done(true);
                         } else if (done) done(false);
                     })

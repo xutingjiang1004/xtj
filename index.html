@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="description" content="XTJ - 照片墙与社区平台" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, shrink-to-fit=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no" />
 
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -70,16 +70,16 @@
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=acb9ef6f5f" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=e560ba776a" />
-    <link rel="preload" as="style" href="css/ui-shell.min.css?v=93172dbf64" />
+    <link rel="preload" as="style" href="css/ui-shell.min.css?v=ca68533df7" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=c6675e30bb" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=93172dbf64" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=c6675e30bb" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=ca68533df7" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=4ee2fa8795" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=93172dbf64" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=ca68533df7" media="print" onload="this.media='all'">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=c6675e30bb">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=67c5936bae">
     <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=e2e7271513">
@@ -340,12 +340,14 @@
                 <div class="chat-header">
                     <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()" aria-label="返回会话列表"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6"/></svg></button>
                     <div class="chat-title-stack"><h3 id="dockChatTitle">消息</h3><span id="dockChatPresence" class="chat-presence" hidden aria-live="polite"></span></div>
-                    <button type="button" id="chatSearchButton" class="chat-feature-button" aria-label="搜索聊天记录" title="搜索聊天记录"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
-                    <button type="button" id="chatMediaButton" class="chat-feature-button" aria-label="打开媒体中心" title="媒体中心"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="3"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 5-5 3 3 3-4 5 6"/></svg></button>
+                    <button type="button" id="dockChatSocialBtn" class="chat-feature-button" aria-label="联系人与添加好友" title="联系人与添加好友" aria-haspopup="dialog" aria-controls="dockChatSocialSheet"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="16" height="18" rx="3"/><path d="M3 7h4M3 12h4M3 17h4"/><circle cx="13" cy="9" r="2.5"/><path d="M9 17c0-4 8-4 8 0"/></svg><span id="dockChatSocialPendingBadge" class="chat-social-badge" hidden>0</span></button>
+                    <button type="button" id="chatSearchButton" class="chat-feature-button" aria-label="搜索用户与聊天记录" title="搜索用户与聊天记录"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+                    <button type="button" id="chatMediaButton" class="chat-feature-button" aria-label="聊天记录与附件" title="聊天记录与附件"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2"/></svg></button>
                     <button type="button" id="dockChatConversationBtn" class="chat-conversation-trigger" hidden aria-haspopup="dialog" aria-controls="dockChatConversationMenu" aria-label="会话设置" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
                 </div>
                 <section id="chatHistoryPanel" class="chat-history-panel" hidden aria-hidden="true" aria-label="聊天搜索与媒体中心">
                     <div class="chat-history-head"><strong>聊天记录</strong><button type="button" id="chatHistoryClose" aria-label="关闭聊天记录">×</button></div>
+                    <div id="chatSearchTabs" class="chat-search-tabs" role="tablist" aria-label="搜索类别"><button type="button" data-chat-search-mode="messages" role="tab" aria-selected="true">聊天记录</button><button type="button" data-chat-search-mode="users" role="tab" aria-selected="false">用户账号</button></div>
                     <form id="chatHistoryForm">
                         <div class="chat-history-query"><input id="chatHistoryQuery" type="search" maxlength="120" placeholder="搜索文字、转写或文件名" aria-label="搜索关键词"><button type="submit">搜索</button></div>
                         <div class="chat-history-filters">
@@ -366,11 +368,11 @@
                 <section id="dockChatSocialSheet" class="chat-social-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="dockChatSocialTitle" aria-hidden="true">
                     <div class="chat-social-card">
                         <div class="chat-social-head">
-                            <div><h3 id="dockChatSocialTitle">好友与联系人</h3><p>只有互为好友后才能继续发送消息</p></div>
+                            <div><h3 id="dockChatSocialTitle">好友与联系人</h3><p>联系人、添加好友与新的申请</p></div>
                             <button type="button" id="dockChatSocialClose" class="chat-social-close" aria-label="关闭好友面板">×</button>
                         </div>
                         <div class="chat-social-tabs" role="tablist" aria-label="好友功能">
-                            <button type="button" data-chat-social-tab="search" role="tab">搜索用户</button>
+                            <button type="button" data-chat-social-tab="search" role="tab">添加好友</button>
                             <button type="button" data-chat-social-tab="friends" role="tab">好友</button>
                             <button type="button" data-chat-social-tab="requests" role="tab">申请</button>
                             <button type="button" data-chat-social-tab="blocks" role="tab">黑名单</button>
@@ -380,10 +382,6 @@
                 </section>
                 <div id="dockChatListView" class="chat-view">
                     <div class="chat-list-tools"><span>会话</span>
-                    <button type="button" id="dockChatSocialBtn" class="chat-social-trigger" aria-haspopup="dialog" aria-controls="dockChatSocialSheet">
-                        <span>好友</span><span id="dockChatSocialPendingBadge" class="chat-social-badge" hidden>0</span>
-                    </button>
-                    <button type="button" id="chatArchiveButton" class="chat-social-trigger" aria-pressed="false">归档</button>
                     </div>
                     <div id="dockChatList" class="chat-list"></div>
                 </div>
@@ -407,7 +405,7 @@
                         <p id="chatVoiceStatus" class="chat-voice-status" hidden role="status"></p>
                         <div class="chat-input-row">
                             <div class="chat-input-wrap">
-                                <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
+                                <input id="dockChatInput" placeholder="输入消息 · 空白处长按录音" title="空白输入框长按录音，松开发送，上滑取消" maxlength="500" />
                             </div>
                             <!-- ★ 2026-09-26：原图开关改成「圆圈 + 圆点」的单选反馈（未选＝空心圆，已选＝圆里有个点）。
                                  默认「未选」＝照片压缩后发送；主动勾选才按原始画质发送
@@ -1191,10 +1189,10 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=022db6fb24"></script>
+    <script defer src="js/core.min.js?v=ddebef6064"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
-    <script defer src="js/desktop-shell.min.js?v=b8e5d553a1"></script>
+    <script defer src="js/desktop-shell.min.js?v=6ae0f50f5d"></script>
     <script defer src="js/ux-features.min.js?v=cf3e805e19"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->

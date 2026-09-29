@@ -17,3 +17,20 @@ test('Supabase loads before core while both scripts remain non-blocking', () => 
   const corePosition = indexHtml.indexOf('js/core.min.js');
   assert.ok(sdkPosition >= 0 && corePosition >= 0 && sdkPosition < corePosition);
 });
+
+test('runtime Supabase config healing reconnects a login restored before the client exists', async () => {
+  const vm=require('node:vm');
+  const source=fs.readFileSync(path.join(root,'js/core-parts/01-bootstrap.js'),'utf8');
+  const start=source.indexOf('            function _syncRuntimeConfig(done) {');
+  const end=source.indexOf('            if (!_sbConfigOk) {',start);
+  for(const user of ['tester',null]) {
+    let reconnects=0;
+    const client={};
+    const sandbox={_runtimeConfigSynced:false,API_BASE:'http://127.0.0.1',XTJ_RUNTIME_CONFIG:{},_sbConfigOk:false,sb:null,console:{log(){},warn(){}},
+      fetch:async()=>({ok:true,json:async()=>({supabase_url:'http://127.0.0.1',supabase_anon_key:'sb_publishable_test_only_key'})}),
+      window:{currentUser:user,location:{origin:'http://127.0.0.1'},XTJ_CONFIG:{},supabase:{createClient:()=>client},subscribeToDmBroadcast:()=>{reconnects++;}}};
+    vm.runInNewContext(source.slice(start,end),sandbox);
+    const healed=await new Promise(resolve=>sandbox._syncRuntimeConfig(resolve));
+    assert.equal(healed,true);assert.equal(sandbox.window.sb,client);assert.equal(reconnects,user?1:0);
+  }
+});
