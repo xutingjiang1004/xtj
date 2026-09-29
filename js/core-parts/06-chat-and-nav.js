@@ -1997,7 +1997,7 @@
                     });
                     _chatCache[cacheKey] = mergedMessages;
                     renderDockMessages(userName, mergedMessages, forceScroll);
-                    if (pendingReadUpdates.length) {
+                    if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
                             scheduleDockChatListRefresh(120);
                         });

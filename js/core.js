@@ -10962,6 +10962,11 @@ function renderProfileActivityList(kind) {
                         var key = getDockChatCacheKey(otherUser);
                         _chatRenderSignature[otherUser] = undefined;
                         renderDockMessages(otherUser, _chatCache[key] || [], false);
+                        if (!isMine && currentDockTab === 'chat' && !document.hidden && !getDMMessageReadAt(message)) {
+                            window.markMessagesRead(otherUser,_chatCache[key] || [],[{id:message.id}]).catch(function() {
+                                scheduleDockChatListRefresh(120);
+                            });
+                        }
                     }
                     // 会话列表就地更新预览/时间/排序；缓存标记失效，下次打开列表仍取权威值。
                     //   ⚠ 只在列表**已经有渲染内容**时才就地改行：applyDockChatConversationPreview
@@ -13779,7 +13784,7 @@ function renderProfileActivityList(kind) {
                     });
                     _chatCache[cacheKey] = mergedMessages;
                     renderDockMessages(userName, mergedMessages, forceScroll);
-                    if (pendingReadUpdates.length) {
+                    if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
                             scheduleDockChatListRefresh(120);
                         });
