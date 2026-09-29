@@ -4515,7 +4515,7 @@ app.use('/vendor/webllm', express.static(path.join(__dirname, '..', 'node_module
 app.use(express.static(path.join(__dirname, '..'), {
   maxAge: '1h',
   setHeaders: function(res, filePath) {
-    if (filePath.endsWith('.html')) {
+    if (filePath.endsWith('.html') || filePath.endsWith('chat-notifications-sw.js')) {
       res.setHeader('Cache-Control', 'no-cache');
       return;
     }
@@ -11962,6 +11962,8 @@ app.use('/api/chat', createChatSocialRouter({
 
 const chatFeatures = createChatFeatures({ express, supabase, authenticateUser, rateLimit, publishChatEvent });
 app.use('/api/chat', chatFeatures.router);
+const chatPush = require('./chat-push').createChatPush({ express, supabase, authenticateUser, rateLimit, secret: API_SECRET });
+app.use('/api/chat/push', chatPush.router);
 
 // HTML 转义（服务端安全输出）
 function escapeHtml(str) {
@@ -16316,6 +16318,7 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     //   upsertDockChatCacheMessage 无法按 id 命中，会多出一个重复气泡。
     //   发件人其它设备的同步仍由轮询兜底（与本次改动之前一致，不是回归）。
     publishDmRealtime(targetUser, inserted);
+    void chatPush.notify(targetUser, sender, inserted.id);
     publishChatEvent(req.userName,'chat-state',{kind:'sent',peer:targetUser});
     if (mediaPayload && mediaPayload.kind === 'audio') {
       void chatFeatures.transcription.enqueue(inserted.id).catch(() => console.error('[chat-transcription] enqueue failed'));

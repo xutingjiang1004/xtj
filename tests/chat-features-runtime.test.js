@@ -108,3 +108,12 @@ test('restricted documents and recorded WebM have an explicit type boundary',()=
   assert.equal(sniffDocument(Buffer.from('<html>unsafe'),'text/plain').ok,false);
   assert.equal(sniffDocument(Buffer.from('hello,world\n'),'text/csv').ok,true);
 });
+test('legacy message IDs resolve to canonical replies and hidden state uses the canonical ID',async()=>{
+  const f=fixture();f.rows[0].legacy_post_id=id(9);f.posts[0].id=id(9);
+  const result=await request(f.app).post('/api/chat/messages/reply/validate').set(auth).send({peer:'peer',message_id:id(9)});
+  assert.equal(result.status,200);assert.equal(result.body.reply_to.id,id(4));
+  const hidden=fixture({hidden:[{message_id:id(4),user_id:id(1),hidden_at:new Date().toISOString()}]});hidden.rows[0].legacy_post_id=id(9);
+  assert.equal(await hidden.features.validateReply('actor','peer',id(9)),null);
+  const other=fixture({state:{status:'ok',conversation_id:id(8),deleted:false}});other.rows[0].legacy_post_id=id(9);
+  assert.equal(await other.features.validateReply('actor','other-peer',id(9)),null);
+});
