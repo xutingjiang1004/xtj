@@ -8131,6 +8131,9 @@ button.post-publish.is-loading::after {
 @keyframes pw-skeleton-loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
 .pw-load-more-sentinel { text-align: center; padding: 20px; color: #999; }
+.pw-batch-nav { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 16px 8px; color: var(--text-secondary, #777); }
+.pw-batch-nav button { border: 1px solid var(--border-color, rgba(120,140,130,.25)); border-radius: 999px; padding: 8px 16px; background: var(--card-bg, #fff); color: inherit; cursor: pointer; }
+.pw-batch-nav button:focus-visible { outline: 2px solid var(--accent-color, #5c9b83); outline-offset: 2px; }
 
 .pw-load-more-indicator { font-size: 14px; color: #999; }
 

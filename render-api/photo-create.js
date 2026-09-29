@@ -342,14 +342,41 @@ async function findStoragePathRefs(supabase, storagePath, excludeId) {
     // ILIKE 通配符 %/_ 与转义符 \ 在拼接前必须转义，否则路径中的这些字符会扩大/破坏匹配
     var escapedToken = String(contentToken).replace(/[\\%_]/g, function (m) { return '\\' + m; });
     var pattern = '%' + escapedToken + '%';
-    // count:'exact' 让 total 反映全部命中数（limit 只截断 data，不截断计数）
-    var query = supabase.from('posts').select('id,user_name', { count: 'exact' }).ilike('content', pattern);
-    if (excludeId) query = query.neq('id', excludeId);
-    var result = await query.limit(50);
-    if (result && result.error) return { ok: false, refs: [], error: result.error };
-    var refs = (result && result.data) || [];
-    var total = Number.isSafeInteger(result.count) ? result.count : refs.length;
-    return { ok: true, refs: refs, total: total, truncated: refs.length < total, error: null };
+    // 旧帖子可能只在 media_url 中保存存储 URL，而 content 尚无 storagePath。
+    // 同时检查原始与 URL 编码路径，兼容历史文件名中的空格/非 ASCII 字符。
+    var encodedPath = cleanPath.split('/').map(function (part) { return encodeURIComponent(part); }).join('/');
+    var mediaPaths = Array.from(new Set([cleanPath, encodedPath]));
+    var queries = [];
+    var contentQuery = supabase.from('posts').select('id,user_name', { count: 'exact' }).ilike('content', pattern);
+    if (excludeId) contentQuery = contentQuery.neq('id', excludeId);
+    queries.push(contentQuery.limit(50));
+    mediaPaths.forEach(function (path) {
+      var escapedPath = path.replace(/[\\%_]/g, function (m) { return '\\' + m; });
+      var mediaQuery = supabase.from('posts').select('id,user_name', { count: 'exact' }).ilike('media_url', '%' + escapedPath + '%');
+      if (excludeId) mediaQuery = mediaQuery.neq('id', excludeId);
+      queries.push(mediaQuery.limit(50));
+    });
+    var results = await Promise.all(queries);
+    var byId = new Map();
+    var total = 0;
+    var truncated = false;
+    for (var ri = 0; ri < results.length; ri++) {
+      var result = results[ri];
+      if (result && result.error) return { ok: false, refs: [], total: 0, truncated: false, error: result.error };
+      var rows = (result && result.data) || [];
+      var count = Number.isSafeInteger(result && result.count) ? result.count : rows.length;
+      total += count;
+      if (rows.length < count) truncated = true;
+      rows.forEach(function (row) {
+        if (row && row.id != null) byId.set(String(row.id), row);
+      });
+    }
+    var refs = Array.from(byId.values());
+    if (refs.length > 50) {
+      refs = refs.slice(0, 50);
+      truncated = true;
+    }
+    return { ok: true, refs: refs, total: total, truncated: truncated, error: null };
   } catch (err) {
     return { ok: false, refs: [], error: err };
   }
@@ -634,6 +661,7 @@ module.exports = {
   parseStoragePhotoUrl,
   validatePhotoCreatePayload,
   createPhotoRecord,
+  findStoragePathRefs,
   createPhotoThumbnail,
   cleanupStorageFile
 };

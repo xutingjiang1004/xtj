@@ -602,7 +602,7 @@
       result.textContent = message || '';
       result.hidden = !message;
       result.classList.toggle('is-error', state === 'error');
-      if (result.dataset) result.dataset.state = !message ? 'idle' : state;
+      if (result.dataset) result.dataset.state = !message ? 'idle' : (state === 'cancelled' ? 'partial' : state);
       return;
     }
     setUploadResultState(detailMsg || message, state);
@@ -629,8 +629,9 @@
     }
     result.hidden = false;
     s = s || 'success';
-    result.dataset.state = s;
-    var titleMap = { success: '上传成功', partial: '部分上传成功', error: '上传失败' };
+    // 取消沿用 partial 的警示色，但单独显示准确标题，避免零成功时宣称“部分上传成功”。
+    result.dataset.state = s === 'cancelled' ? 'partial' : s;
+    var titleMap = { success: '上传成功', partial: '部分完成', cancelled: '上传已取消', error: '上传失败' };
     if (titleEl) titleEl.textContent = titleMap[s] || titleMap.success;
     // 全站照片墙：上传成功庆祝（轻量 confetti，尊重 perf-lite）
     if (s === 'success' && typeof window.__xtjPhotoUploadCelebrate === 'function') {
@@ -1074,6 +1075,7 @@
     var processed = 0;
     var ok = 0;
     var fail = 0;
+    var cancelled = 0;
     function runOne(){
       if (state.cancelRequested) return Promise.resolve();
       if (nextIdx >= total) return Promise.resolve();
@@ -1093,7 +1095,7 @@
         // P6: 用户取消不计失败、不进 failedJobs，只有真实错误才记失败
         var isCancel = state.cancelRequested || !!(err && (err.photoUploadCode === 'cancelled' || err.name === 'AbortError'));
         if (isCancel) {
-          job.status = 'cancelled'; job.error = null;
+          cancelled += 1; job.status = 'cancelled'; job.error = null;
         } else {
           fail += 1; job.status = 'failed'; job.error = err;
         }
@@ -1102,11 +1104,14 @@
     }
     var workers = [];
     for (var w = 0; w < Math.min(CONCURRENCY, Math.max(1, total)); w++) workers.push(runOne());
-    return Promise.all(workers).then(function(){ return { processed: processed, ok: ok, fail: fail }; });
+    return Promise.all(workers).then(function(){ return { processed: processed, ok: ok, fail: fail, cancelled: cancelled, total: total }; });
   }
 
-  function buildSummary(total, ok, fail){
-    var s = '已处理 ' + total + ' 张：成功 ' + ok + ' 张，失败 ' + fail + ' 张';
+  function buildSummary(processed, total, ok, fail, cancelled){
+    var notStarted = Math.max(0, total - processed);
+    var s = '已处理 ' + processed + '/' + total + ' 张：成功 ' + ok + ' 张，失败 ' + fail + ' 张';
+    if (cancelled) s += '，取消中止 ' + cancelled + ' 张';
+    if (notStarted) s += '，未开始 ' + notStarted + ' 张';
     var skipped = (state.skippedFiles || []).length;
     if (skipped) s += '，跳过 ' + skipped + ' 张';
     return s;
@@ -1119,6 +1124,7 @@
     var processed = 0;
     var ok = 0;
     var fail = 0;
+    var cancelled = 0;
     var failures = [];
     try {
       updateUploadBatchProgress(processed, total, ok, fail, '正在准备上传');
@@ -1126,8 +1132,8 @@
         processed = p; ok = o; fail = f;
         updateUploadBatchProgress(p, total, o, f, '正在处理第 ' + p + ' 张');
       });
-      ok = result.ok; fail = result.fail;
-      updateUploadBatchProgress(total, total, ok, fail, '处理完成');
+      processed = result.processed; ok = result.ok; fail = result.fail; cancelled = result.cancelled || 0;
+      updateUploadBatchProgress(processed, total, ok, fail, state.cancelRequested ? '已取消' : '处理完成');
     } catch (batchErr) {
       // ★ 修复：原实现只有 try/finally，runBatch 抛错时异常直接冒泡出本函数，
       //   导致下方 `state.failedJobs = ...` 不执行 → 失败任务丢失、用户无法重试，
@@ -1186,9 +1192,13 @@
       else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
     } catch (e) { refreshFailed = true; }
     if (ok && typeof window.touchUserSession === 'function') window.touchUserSession(false);
-    var summary = buildSummary(total, ok, fail);
+    var summary = buildSummary(processed, total, ok, fail, cancelled);
     if (refreshFailed) summary += '。照片已上传，但列表刷新失败，请点击重试';
-    var resultState = ok === 0 && fail > 0 ? 'error' : (fail > 0 ? 'partial' : 'success');
+    var incomplete = processed < total;
+    var cancellationOnly = ok === 0 && fail === 0 && (cancelled > 0 || (state.cancelRequested && incomplete));
+    var resultState = cancellationOnly ? 'cancelled' :
+      (ok === 0 && fail > 0 && !incomplete && cancelled === 0 ? 'error' :
+        (fail > 0 || incomplete || cancelled > 0 ? 'partial' : 'success'));
     var details = [];
     if (state.skippedFiles.length) {
       state.skippedFiles.slice(0, 3).forEach(function(s){ details.push((s.file && s.file.name ? s.file.name : '文件') + '（跳过：' + s.reason + '）'); });

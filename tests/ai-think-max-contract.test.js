@@ -59,7 +59,7 @@ test('前端：请求体携带 thinking_max / work_mode，关闭时上下文限�
   assert.equal((agentSource.match(/thinking_max: S\.thinkMax === true/g) || []).length, 2);
   assert.equal((agentSource.match(/work_mode: S\.workMode === true/g) || []).length, 2);
   assert.match(agentSource, /var _ctxCap = S\.thinkMax \? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;/);
-  assert.match(agentSource, /S\.messages\.slice\(-_ctxCap\)/);
+  assert.match(agentSource, /buildAiConversationHistory\(_ctxCap, _ctxChars, userMsg, attachmentPayload\)/);
 });
 
 test('前端：工作模式开关切回默认不自动压缩（work-mode 点击处理）', () => {

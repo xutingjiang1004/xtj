@@ -34,11 +34,11 @@ jobs:
       - name: Run build consistency check
         run: npm run test:consistency
 
-      - name: Verify generated assets are committed
-        run: git diff --exit-code
-
       - name: Run project tests
         run: npm test
+
+      - name: Verify generated assets are committed
+        run: git diff --exit-code
 
   syntax:
     name: Syntax Check
@@ -90,6 +90,9 @@ jobs:
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
+
+      - name: Build frontend assets
+        run: npm run build && npm run test:consistency
 
       - name: Run UI tests
         run: npm run test:ui

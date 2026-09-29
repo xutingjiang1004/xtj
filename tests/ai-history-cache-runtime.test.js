@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const aiSource = fs.readFileSync(path.join(root, 'js', 'ai-agent.js'), 'utf8');
@@ -36,7 +37,7 @@ test('Requirement 4: Active cancellation (aborted) does not trigger error toast'
 
 // 5 & 6. 有缓存时刷新失败保留消息且状态显示在聊天内部
 test('Requirements 5 & 6: Cached history preserved and internal failure banner shown', () => {
-  assert.match(aiSource, /if \(opts\.preserveExistingMessages\)/);
+  assert.match(aiSource, /opts\.preserveExistingMessages \|\| hasVisibleMessages/);
   assert.match(aiSource, /ai-history-cache-banner/);
   assert.match(aiSource, /当前显示缓存记录，刷新失败/);
   assert.match(aiSource, /ai-history-cache-retry/);
@@ -90,4 +91,85 @@ test('Requirement 12: Bottom 4 Dock bar items are intact', () => {
   assert.match(indexHtml, /data-tab="chat"/);
   assert.match(indexHtml, /data-tab="ai"/);
   assert.match(indexHtml, /data-tab="profile"/);
+});
+
+
+test('pure image history turns reconcile with server vision_urls despite different display names', () => {
+  const helperStart = aiSource.indexOf('function stripAiHistoryAttachmentData');
+  const helperEnd = aiSource.indexOf('function setAiHistoryCache', helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, 'AI history helpers are present');
+  const context = vm.createContext({ Date, S: { messages: [] }, CONTEXT_LIMIT_NORMAL: 256, MSG_MAX_CHARS_NORMAL: 16000 });
+  vm.runInContext(aiSource.slice(helperStart, helperEnd) + '\nglobalThis.matchHistory = aiHistoryMessagesMatch; globalThis.buildHistory = buildAiConversationHistory; globalThis.reconcileHistory = reconcileAiHistoryPending;', context);
+
+  const createdAt = '2026-09-29T12:00:00.000Z';
+  const local = {
+    role: 'user',
+    content: '![my-cat.png](data:image/png;base64,AAAA)',
+    created_at: createdAt,
+    attachments: [{ name: 'my-cat.png', type: 'image/png', data_url: 'data:image/png;base64,AAAA' }]
+  };
+  const remote = {
+    role: 'user',
+    content: '![图片1](data:image/png;base64,BBBB)',
+    created_at: createdAt,
+    vision_urls: ['data:image/png;base64,BBBB'],
+    attachments: [{ name: '图片1', type: 'image/png', data_url: 'data:image/png;base64,BBBB' }]
+  };
+  assert.equal(context.matchHistory(local, remote), true);
+  assert.equal(context.matchHistory(local, { ...remote, vision_urls: ['data:image/png;base64,1', 'data:image/png;base64,2'], attachments: [remote.attachments[0], remote.attachments[0]] }), false);
+  const repeatedLocal = { ...local, created_at: '2026-09-29T12:00:05.000Z' };
+  assert.equal(context.reconcileHistory([local, repeatedLocal], [remote], [local, repeatedLocal]).length, 1);
+
+  const localDocument = {
+    role: 'user', content: '[📄 notes.pdf · 25KB]', created_at: createdAt,
+    attachments: [{ name: 'notes.pdf', type: 'application/pdf', data_url: 'data:application/pdf;base64,AAAA' }]
+  };
+  const remoteDocument = {
+    role: 'user', content: '【用户上传文件: notes.pdf · application/pdf】extracted text【文件结束】', created_at: createdAt
+  };
+  assert.equal(context.matchHistory(localDocument, remoteDocument), true);
+});
+
+test('history request excludes the current turn and keeps prior image attachments structured', () => {
+  const helperStart = aiSource.indexOf('function stripAiHistoryAttachmentData');
+  const helperEnd = aiSource.indexOf('function setAiHistoryCache', helperStart);
+  const context = vm.createContext({ Date, S: { messages: [] }, CONTEXT_LIMIT_NORMAL: 256, MSG_MAX_CHARS_NORMAL: 16000 });
+  vm.runInContext(aiSource.slice(helperStart, helperEnd) + '\nglobalThis.buildHistory = buildAiConversationHistory;', context);
+  const prior = {
+    role: 'user',
+    content: 'what is this? ![cat.png](data:image/png;base64,AAAA)',
+    created_at: '2026-09-29T11:00:00.000Z',
+    attachments: [{ name: 'cat.png', type: 'image/png', data_url: 'data:image/png;base64,AAAA' }]
+  };
+  const current = { role: 'user', content: 'current question', created_at: '2026-09-29T12:00:00.000Z' };
+  context.S.messages = [prior, { role: 'assistant', content: 'a prior answer' }, current];
+  const result = context.buildHistory(256, 16000, current, []);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].attachments[0].data_url, 'data:image/png;base64,AAAA');
+  assert.doesNotMatch(result[0].content, /AAAA/);
+  assert.equal(result[1].content, 'a prior answer');
+});
+
+test('deep research sends use an independent lock and invalidate pending auth on close', () => {
+  const start = aiSource.indexOf('async function handleDeepThinkPageSend');
+  const end = aiSource.indexOf('var _dtListeners', start);
+  const deepSend = aiSource.slice(start, end);
+  assert.match(deepSend, /if \(S\._dtSending\)/);
+  assert.match(deepSend, /var dtSendToken = \(S\._dtSendSeq/);
+  assert.match(deepSend, /await ensureUserAuthOrNotify\(\);\s*if \(!isCurrentDeepSend\(\)\)/);
+  assert.match(deepSend, /await getUserAuthPayload\(\{ forceNoToken: false \}\);[\s\S]{0,500}if \(!isCurrentDeepSend\(\)/);
+  assert.doesNotMatch(deepSend, /S\.sending\s*=/);
+
+  const closeStart = aiSource.indexOf('function closeDeepThinkPage()');
+  const closeEnd = aiSource.indexOf('// 文件上传状态 (dt 页面)', closeStart);
+  const closeDeep = aiSource.slice(closeStart, closeEnd);
+  assert.match(closeDeep, /S\._dtSendSeq = \(S\._dtSendSeq \|\| 0\) \+ 1/);
+  assert.doesNotMatch(closeDeep, /S\.sending\s*=/);
+});
+
+test('normal and custom chat send prior history only, then append the current message server-side', () => {
+  assert.equal((aiSource.match(/messages_include_current: false/g) || []).length, 2);
+  assert.match(aiSource, /buildAiConversationHistory\(_ctxCap, _ctxChars, userMsg, attachmentPayload\)/);
+  assert.match(aiSource, /buildAiConversationHistory\(_bCtxCap, _bCtxChars, userMsg, attachmentPayload\)/);
+  assert.match(aiSource, /reconcileAiHistoryPending\(S\._pendingLocalMsgs, msgs, S\.messages\)/);
 });
