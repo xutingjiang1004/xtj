@@ -62,7 +62,7 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=be570189a2" />
+    <link rel="stylesheet" href="css/style.min.css?v=9124fb5c57" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <!-- ★ 2026-09-22 响应式修复：下面三个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
@@ -338,15 +338,11 @@
         <div class="dock-panel" id="panelChat">
             <div class="dock-chat-container" id="dockChatContainer">
                 <div class="chat-header">
-                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">←</button>
+                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()" aria-label="返回会话列表"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6"/></svg></button>
                     <div class="chat-title-stack"><h3 id="dockChatTitle">消息</h3><span id="dockChatPresence" class="chat-presence" hidden aria-live="polite"></span></div>
-                    <button type="button" id="dockChatSocialBtn" class="chat-social-trigger" aria-haspopup="dialog" aria-controls="dockChatSocialSheet">
-                        <span>好友</span><span id="dockChatSocialPendingBadge" class="chat-social-badge" hidden>0</span>
-                    </button>
-                    <button type="button" id="chatArchiveButton" class="chat-social-trigger" aria-pressed="false">归档</button>
-                    <button type="button" id="chatSearchButton" class="chat-feature-button" aria-label="搜索聊天记录">搜索</button>
-                    <button type="button" id="chatMediaButton" class="chat-feature-button" aria-label="打开媒体中心">媒体</button>
-                    <button type="button" id="dockChatConversationBtn" class="chat-conversation-trigger" hidden aria-haspopup="dialog" aria-controls="dockChatConversationMenu" aria-label="会话设置">···</button>
+                    <button type="button" id="chatSearchButton" class="chat-feature-button" aria-label="搜索聊天记录" title="搜索聊天记录"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+                    <button type="button" id="chatMediaButton" class="chat-feature-button" aria-label="打开媒体中心" title="媒体中心"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="3"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 5-5 3 3 3-4 5 6"/></svg></button>
+                    <button type="button" id="dockChatConversationBtn" class="chat-conversation-trigger" hidden aria-haspopup="dialog" aria-controls="dockChatConversationMenu" aria-label="会话设置" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
                 </div>
                 <section id="chatHistoryPanel" class="chat-history-panel" hidden aria-hidden="true" aria-label="聊天搜索与媒体中心">
                     <div class="chat-history-head"><strong>聊天记录</strong><button type="button" id="chatHistoryClose" aria-label="关闭聊天记录">×</button></div>
@@ -361,7 +357,7 @@
                     <p id="chatHistoryStatus" role="status"></p><div id="chatHistoryResults" class="chat-history-results"></div>
                     <button type="button" id="chatHistoryMore" hidden>加载更多</button>
                 </section>
-                <div id="dockChatConversationMenu" class="chat-conversation-menu hidden" role="dialog" aria-modal="true" aria-label="会话管理">
+                <div id="dockChatConversationMenu" class="chat-conversation-menu hidden" role="dialog" aria-modal="true" aria-label="会话管理" aria-hidden="true">
                     <div class="chat-conversation-menu-card">
                         <div class="chat-conversation-menu-head"><strong id="dockChatConversationMenuTitle">会话管理</strong><button type="button" id="dockChatConversationMenuClose" aria-label="关闭">×</button></div>
                         <div id="dockChatConversationMenuActions" class="chat-conversation-menu-actions"></div>
@@ -383,6 +379,12 @@
                     </div>
                 </section>
                 <div id="dockChatListView" class="chat-view">
+                    <div class="chat-list-tools"><span>会话</span>
+                    <button type="button" id="dockChatSocialBtn" class="chat-social-trigger" aria-haspopup="dialog" aria-controls="dockChatSocialSheet">
+                        <span>好友</span><span id="dockChatSocialPendingBadge" class="chat-social-badge" hidden>0</span>
+                    </button>
+                    <button type="button" id="chatArchiveButton" class="chat-social-trigger" aria-pressed="false">归档</button>
+                    </div>
                     <div id="dockChatList" class="chat-list"></div>
                 </div>
                 <div id="dockChatDetailView" class="chat-view hidden">
@@ -414,10 +416,10 @@
                                 <span class="cor-ring" aria-hidden="true"><span class="cor-dot"></span></span>
                                 <span class="cor-label">原图</span>
                             </button>
-                            <button type="button" class="chat-feature-button" id="chatVoiceButton" aria-label="录制语音">语音</button>
+                            <button type="button" class="chat-feature-button" id="chatVoiceButton" aria-label="录制语音" title="录制语音"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6"/></svg></button>
                             <button type="button" class="chat-feature-button" id="chatVoiceCancel" hidden>取消</button>
-                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送附件">📎</button>
-                            <button class="send-btn" id="dockChatSendBtn">➤</button>
+                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送附件" aria-label="发送附件"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8m-3 11 6-6"/></svg></button>
+                            <button class="send-btn" id="dockChatSendBtn" aria-label="发送消息"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
                         </div>
                     </div>
                     <input type="file" id="dockChatFileInp" accept="image/*,video/*,audio/*,.pdf,.txt,.csv,.rtf,.docx,.xlsx,.pptx,.zip" style="display:none" />
@@ -1189,7 +1191,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=6ce4aafbe6"></script>
+    <script defer src="js/core.min.js?v=022db6fb24"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b8e5d553a1"></script>
