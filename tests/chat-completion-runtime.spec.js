@@ -332,6 +332,7 @@ test('custom voice player plays real WAV media, pauses, and retains its node on 
   },{stamp});
   const player=page.locator('.chat-voice-player'); await expect(player).toBeVisible(); await player.locator('button').click();
   await expect(player).toHaveClass(/is-playing/); await expect(player.locator('button')).toHaveAttribute('aria-pressed','true');
+  await expect(player.locator('.voice-play-icon path')).toHaveAttribute('d','M7 5h4v14H7zM14 5h4v14h-4z');
   await player.locator('button').click(); await expect(player).not.toHaveClass(/is-playing/);
   await page.evaluate(()=>{window.__savedAudio=document.querySelector('.msg-audio');window.__voiceRead=true;window.openChat('voice-peer');});
   await expect.poll(()=>page.evaluate(()=>window.__savedAudio===document.querySelector('.msg-audio'))).toBe(true);
