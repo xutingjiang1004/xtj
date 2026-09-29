@@ -6,6 +6,7 @@
   var ERROR_IMG = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cg text-anchor="middle" font-family="sans-serif"%3E%3Ctext x="200" y="190" font-size="26" fill="%23c0392b"%3E%E5%8A%A0%E8%BD%BD%E5%A4%B1%E8%B4%A5%3C/text%3E%3Ctext x="200" y="230" font-size="16" fill="%2395a5a0"%3E%E7%82%B9%E5%87%BB%E9%87%8D%E8%AF%95%3C/text%3E%3C/g%3E%3C/svg%3E';
   // P6: DOM 卡片数量上限 — 超过后不再 append 新卡片，避免数组/DOM 无限增长
   var MAX_DOM_PHOTOS = 500;
+  var photoBatchStart = 0;
 
   function esc(value){
     if (window.escapeHtml) return window.escapeHtml(String(value == null ? '' : value));
@@ -399,9 +400,85 @@
   // 避免"IO 立即回调 → 再翻页 → 再重建 → 再回调"的无限翻页循环。
   var _lastMoreLoadAt = 0;
 
+  function currentPhotoWallList(sortedPhotos){
+    var sorted = sortedPhotos || sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
+    if (!window.pwAlbumView) return sorted;
+    if (!window.pwAlbumGroupKey) return [];
+    var group = groupByDate(sorted).find(function(item){ return item.key === window.pwAlbumGroupKey; });
+    return group ? group.photos : [];
+  }
+
+  function photoBatchNavHtml(list){
+    var total = (list || []).length;
+    if (!total) return '';
+    var batch = Math.floor(photoBatchStart / MAX_DOM_PHOTOS) + 1;
+    var nextAvailable = photoBatchStart + MAX_DOM_PHOTOS < total || (typeof window.hasMorePhotos === 'function' && window.hasMorePhotos());
+    if (photoBatchStart === 0 && !nextAvailable) return '';
+    return '<div class="pw-batch-nav" aria-label="照片分页">' +
+      (photoBatchStart > 0 ? '<button type="button" onclick="window.showPreviousPhotoBatch()">上一批</button>' : '') +
+      '<span>第 ' + batch + ' 批</span>' +
+      (nextAvailable ? '<button type="button" onclick="window.showNextPhotoBatch()">下一批</button>' : '') +
+      '</div>';
+  }
+
+  function currentPhotoWallViewKey(){
+    return [window.pwAlbumView ? 'album' : 'flat', window.pwAlbumGroupKey || '', window.pwSortKey || 'date_desc'].join('|');
+  }
+
+  function showPreviousPhotoBatch(){
+    if (photoBatchStart <= 0) return;
+    photoBatchStart = Math.max(0, photoBatchStart - MAX_DOM_PHOTOS);
+    renderSorted(sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc'), true);
+  }
+
+  async function showNextPhotoBatch(){
+    if (loadingMore) return;
+    var start = photoBatchStart;
+    var viewKey = currentPhotoWallViewKey();
+    var sorted = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
+    var viewPhotos = currentPhotoWallList(sorted);
+    if (viewPhotos.length > start + MAX_DOM_PHOTOS) {
+      photoBatchStart = start + MAX_DOM_PHOTOS;
+      renderSorted(sorted, true);
+      return;
+    }
+    if (typeof window.hasMorePhotos !== 'function' || !window.hasMorePhotos() || typeof window.loadMorePhotos !== 'function') return;
+    loadingMore = true;
+    resetSentinelText(document.getElementById('photoGrid'), '正在加载下一批…', false);
+    try {
+      // An album detail may need several server pages before its date appears.
+      // Bound each click so sparse groups cannot keep the UI busy indefinitely.
+      for (var attempt = 0; attempt < 30; attempt++) {
+        await window.loadMorePhotos();
+        if (viewKey !== currentPhotoWallViewKey()) return;
+        sorted = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
+        viewPhotos = currentPhotoWallList(sorted);
+        if (viewPhotos.length > start + MAX_DOM_PHOTOS || !window.hasMorePhotos()) break;
+      }
+      if (viewKey !== currentPhotoWallViewKey()) return;
+      // Only advance when there is at least one photo in the requested batch.
+      // A final server page may contain only filtered videos/deleted rows, so
+      // `viewPhotos.length > start` alone can land on a blank batch.
+      if (viewPhotos.length > start + MAX_DOM_PHOTOS) {
+        photoBatchStart = start + MAX_DOM_PHOTOS;
+        renderSorted(sorted, true);
+      } else {
+        var stillHasMore = typeof window.hasMorePhotos === 'function' && window.hasMorePhotos();
+        renderSorted(sorted, true);
+        resetSentinelText(document.getElementById('photoGrid'), stillHasMore ? '当前相册暂无更多照片，点击继续查找' : '没有更多照片', stillHasMore);
+      }
+    } catch (err) {
+      resetSentinelText(document.getElementById('photoGrid'), '加载失败，点击重试', true);
+    } finally {
+      loadingMore = false;
+    }
+  }
+
   function installLoadMoreSentinel(grid){
     if (loadMoreObserver) loadMoreObserver.disconnect();
-    if (!window.hasMorePhotos || !window.loadMorePhotos || !window.IntersectionObserver) return;
+    var oldSentinel = grid.querySelector('.pw-load-more-sentinel');
+    if (oldSentinel) oldSentinel.remove();
+    if (!window.hasMorePhotos || !window.loadMorePhotos || !window.hasMorePhotos()) return;
     var sentinel = document.createElement('div');
     sentinel.className = 'pw-load-more-sentinel';
     sentinel.innerHTML = '<div class="pw-load-more-indicator">加载更多...</div>';
@@ -412,10 +489,42 @@
       if (ind) ind.textContent = text;
       sentinel.classList.toggle('pw-load-more-error', !!retryable);
       sentinel.onclick = retryable ? doLoadMore : null;
+      if (retryable) {
+        sentinel.setAttribute('role', 'button');
+        sentinel.setAttribute('tabindex', '0');
+      } else {
+        sentinel.removeAttribute('role');
+        sentinel.removeAttribute('tabindex');
+      }
     }
+
+    // Keep the focusable sentinel usable without a pointer and in browsers
+    // where IntersectionObserver is unavailable.
+    sentinel.onkeydown = function(event){
+      if (!event || (event.key !== 'Enter' && event.key !== ' ')) return;
+      if (typeof sentinel.onclick !== 'function') return;
+      if (event.preventDefault) event.preventDefault();
+      sentinel.onclick(event);
+    };
+
+    // The sentinel is a focusable button for keyboard and no-IntersectionObserver
+    // users; keep Enter/Space behavior in sync with its current click action.
+    sentinel.onkeydown = function(event){
+      if (!event || (event.key !== 'Enter' && event.key !== ' ')) return;
+      if (typeof sentinel.onclick !== 'function') return;
+      if (event.preventDefault) event.preventDefault();
+      sentinel.onclick(event);
+    };
 
     function doLoadMore(){
       if (loadingMore) return;
+      var sortedBefore = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
+      var visibleBefore = currentPhotoWallList(sortedBefore);
+      if (visibleBefore.length > photoBatchStart + MAX_DOM_PHOTOS) {
+        photoBatchStart += MAX_DOM_PHOTOS;
+        renderSorted(sortedBefore, true);
+        return;
+      }
       loadingMore = true;
       setSentinelText('加载中...', false);
       Promise.resolve(window.loadMorePhotos()).then(function(more){
@@ -462,13 +571,17 @@
       });
     }
 
-    loadMoreObserver = new IntersectionObserver(function(entries){
+    sentinel.onclick = doLoadMore;
+    sentinel.setAttribute('role', 'button');
+    sentinel.setAttribute('tabindex', '0');
+    if (window.IntersectionObserver) loadMoreObserver = new IntersectionObserver(function(entries){
       for (var i = 0; i < entries.length; i++) {
         if (!entries[i].isIntersecting || loadingMore) continue;
         // ★ 已达 DOM 上限且服务端仍有更多时：只保留「点击继续加载」入口，
         //   不让 IO 自动触发 —— 否则会形成 触发→封顶 return→再触发 的空转循环。
         if (domPhotoLimitReached() && window.hasMorePhotos()) {
-          setSentinelText('已达当前渲染上限，点击继续加载', true);
+          var currentList = currentPhotoWallList(sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc'));
+          setSentinelText(currentList.length > photoBatchStart + MAX_DOM_PHOTOS ? '已加载下一批，点击查看' : '已达当前渲染上限，点击继续加载', true);
           continue;
         }
         if (!window.hasMorePhotos()) {
@@ -484,7 +597,8 @@
         doLoadMore();
       }
     }, { rootMargin:'400px 0px' });
-    loadMoreObserver.observe(sentinel);
+    if (loadMoreObserver) loadMoreObserver.observe(sentinel);
+    else setSentinelText('点击加载更多', true);
     // ★ 暴露给外部（resetSentinelText / appendPhotoWallMore 封顶分支）使用，
     //   避免它们改了文案却点不动（onclick 只在闭包内的 setSentinelText 里绑定）。
     window.__xtjPhotoWallLoadMore = doLoadMore;
@@ -517,11 +631,32 @@
   function sortedPrefixMatches(list, domIds){
     if (domIds.length > list.length) return false;
     for (var i = 0; i < domIds.length; i++) {
-      var item = list[i];
+      var item = list[photoBatchStart + i];
       var id = item ? String(item.id == null ? '' : item.id) : '';
       if (id !== domIds[i]) return false;
     }
     return true;
+  }
+
+  function refreshBatchNavigation(grid, list){
+    var oldNav = grid.querySelector('.pw-batch-nav');
+    if (oldNav) oldNav.remove();
+    var navHtml = photoBatchNavHtml(list);
+    if (!navHtml) return;
+    var sentinel = grid.querySelector('.pw-load-more-sentinel');
+    if (sentinel && sentinel.parentNode === grid) sentinel.insertAdjacentHTML('beforebegin', navHtml);
+    else grid.insertAdjacentHTML('beforeend', navHtml);
+  }
+
+  function refreshLoadMoreSentinel(grid){
+    var sentinel = grid.querySelector('.pw-load-more-sentinel');
+    if (!sentinel) return;
+    if (typeof window.hasMorePhotos !== 'function' || !window.hasMorePhotos()) {
+      if (loadMoreObserver) loadMoreObserver.disconnect();
+      sentinel.remove();
+      return;
+    }
+    resetSentinelText(grid, window.IntersectionObserver ? '加载更多...' : '点击加载更多', !window.IntersectionObserver);
   }
 
   // ★ 修复：原实现只改文案与 class，**不设置 onclick**，
@@ -535,7 +670,8 @@
     var ind = sent.querySelector('.pw-load-more-indicator');
     if (ind) ind.textContent = text;
     sent.classList.toggle('pw-load-more-error', !!retryable);
-    if (retryable) {
+    var keyboardClickable = retryable || (!window.IntersectionObserver && typeof window.hasMorePhotos === 'function' && window.hasMorePhotos());
+    if (keyboardClickable) {
       // 优先复用当前 observer 对应的 doLoadMore（renderSorted 内每次重建）
       var handler = (typeof window.__xtjPhotoWallLoadMore === 'function')
         ? window.__xtjPhotoWallLoadMore
@@ -565,12 +701,16 @@
 
   function appendNewPhotoCards(grid, list, domIds){
     var existingCount = domIds.length;
-    var newOnes = list.slice(existingCount);
-    if (!newOnes.length) { resetSentinelText(grid, '加载更多...', false); return; }
-    var html = photoCardHtml(newOnes, existingCount);
-    var sentinel = grid.querySelector('.pw-load-more-sentinel');
-    if (sentinel && sentinel.parentNode === grid) {
-      sentinel.insertAdjacentHTML('beforebegin', html);
+    var newOnes = list.slice(photoBatchStart + existingCount, photoBatchStart + MAX_DOM_PHOTOS);
+    if (!newOnes.length) {
+      refreshBatchNavigation(grid, list);
+      refreshLoadMoreSentinel(grid);
+      return;
+    }
+    var html = photoCardHtml(newOnes, photoBatchStart + existingCount);
+    var anchor = grid.querySelector('.pw-batch-nav') || grid.querySelector('.pw-load-more-sentinel');
+    if (anchor && anchor.parentNode === grid) {
+      anchor.insertAdjacentHTML('beforebegin', html);
     } else {
       grid.insertAdjacentHTML('beforeend', html);
     }
@@ -581,60 +721,44 @@
       newCards[k].classList.remove('pw-stagger-enter');
     }
     observeAppendedImages(grid);
-    resetSentinelText(grid, '加载更多...', false);
+    refreshBatchNavigation(grid, list);
+    refreshLoadMoreSentinel(grid);
   }
 
   function appendPhotoWallMore(){
     var grid = document.getElementById('photoGrid');
     if (!grid) return;
     var domIds = collectDomPhotoIds(grid);
-    // P6: DOM 数量上限 — 达到后不再追加新卡片
-    // ★ 修复：原实现在封顶时直接 resetSentinelText(grid, '暂无更多') + disconnect()，
-    //   但 hasMorePhotos() 依据的是服务端游标（more），与 DOM 截断无关，
-    //   此时它**仍可能为 true**。结果是：用户看到「暂无更多」却其实还有数据，
-    //   且哨兵已被 disconnect，扁平视图下**没有任何入口**能再加载（永久卡死）。
-    //   改为：若服务端仍有更多，则保留哨兵为可点击的「继续加载」入口，
-    //   文案明确区分「达渲染上限」与「真的没有更多」。
-    if (domIds.length >= MAX_DOM_PHOTOS) {
-      // ★ 修复：原实现在封顶时直接 resetSentinelText(grid, '暂无更多') + disconnect()，
-      //   但 hasMorePhotos() 依据服务端游标（more），与 DOM 截断无关，
-      //   此时它**仍可能为 true**。结果：用户看到「暂无更多」却其实还有数据，
-      //   且哨兵已 disconnect，扁平视图下**没有任何入口**能再加载（永久卡死）。
-      //   改为：若服务端仍有更多，保留哨兵为可点击入口（不清除 onclick、
-      //   不 disconnect）；真正的"没有更多"才走原逻辑。
-      var serverHasMore = (typeof window.hasMorePhotos === 'function') ? !!window.hasMorePhotos() : false;
-      if (serverHasMore) {
-        resetSentinelText(grid, '已达当前渲染上限，点击继续加载', true);
-      } else {
-        resetSentinelText(grid, '暂无更多', false);
-        if (loadMoreObserver) loadMoreObserver.disconnect();
-      }
-      return;
-    }
     var key = window.pwSortKey || 'date_desc';
     var sortedAll = sortPhotoWallData(window.photoWallData || [], key);
-
+    var visible = currentPhotoWallList(sortedAll);
+    // Once the current DOM batch is full, newly fetched rows open the next
+    // batch. Smaller batches stay in place and are simply refreshed.
+    if (domIds.length >= MAX_DOM_PHOTOS && visible.length > photoBatchStart + MAX_DOM_PHOTOS) {
+      photoBatchStart += MAX_DOM_PHOTOS;
+      renderSorted(sortedAll, true);
+      return;
+    }
     if (!window.pwAlbumView) {
-      if (!sortedPrefixMatches(sortedAll, domIds)) { renderSorted(sortedAll); return; }
       window.pwCurrentSortedPhotos = sortedAll.slice();
+      if (!sortedPrefixMatches(sortedAll, domIds)) { renderSorted(sortedAll, true); return; }
       appendNewPhotoCards(grid, sortedAll, domIds);
       return;
     }
     if (window.pwAlbumGroupKey) {
-      var groups = groupByDate(sortedAll);
-      var group = groups.find(function(g){ return g.key === window.pwAlbumGroupKey; });
-      if (!group || !sortedPrefixMatches(group.photos, domIds)) { renderSorted(sortedAll); return; }
-      window.pwCurrentSortedPhotos = group.photos.slice();
-      appendNewPhotoCards(grid, group.photos, domIds);
+      window.pwCurrentSortedPhotos = visible.slice();
+      if (!sortedPrefixMatches(visible, domIds)) { renderSorted(sortedAll, true); return; }
+      appendNewPhotoCards(grid, visible, domIds);
       return;
     }
-    // 相册视图：新照片可能构成新相册组，走全量重建（相册卡片数量远小于照片卡片）
-    renderSorted(sortedAll);
+    // The album overview contains date-group cards, not photo cards.
+    renderSorted(sortedAll, true);
   }
 
-  function renderSorted(photos){
+  function renderSorted(photos, preserveBatch){
     var grid = document.getElementById('photoGrid');
     if (!grid) return;
+    if (!preserveBatch) photoBatchStart = 0;
     // ★ 修复 C3：每次重渲染复位 loadingMore，避免分组切换/返回相册后
     // 旧哨兵的 loadingMore=true 残留，导致新分组哨兵首次 intersect 不触发加载。
     loadingMore = false;
@@ -651,7 +775,7 @@
           : emptyHtml();
         return;
       }
-      grid.innerHTML = photoCardHtml(photos.slice(0, MAX_DOM_PHOTOS), 0);
+      grid.innerHTML = photoCardHtml(photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS), photoBatchStart) + photoBatchNavHtml(photos);
       revealCards(grid);
       observeImages(grid);
       installLoadMoreSentinel(grid);
@@ -678,7 +802,7 @@
     }
 
     window.pwCurrentSortedPhotos = group.photos.slice();
-    grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" onclick="openPhotoAlbumGroup(\'\')">返回相册</button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos.slice(0, MAX_DOM_PHOTOS), 0);
+    grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" onclick="openPhotoAlbumGroup(\'\')">返回相册</button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS), photoBatchStart) + photoBatchNavHtml(group.photos);
     revealCards(grid);
     observeImages(grid);
     // H-33: 相册分组详情页同样需要哨兵，滚动到底继续加载更多照片
@@ -753,6 +877,8 @@
   window.openPhotoWallPreviewAt = openPhotoWallPreviewAt;
   window.renderPhotoWall = renderPhotoWall;
   window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
+  window.showPreviousPhotoBatch = showPreviousPhotoBatch;
+  window.showNextPhotoBatch = showNextPhotoBatch;
   window.openPhotoAlbumGroup = function(key){
     window.pwAlbumGroupKey = key || '';
     renderPhotoWallWithoutReload();

@@ -280,6 +280,152 @@ test('realtime channel recovers properly after pagehide and visibility changes',
 const uploadSource = fs.readFileSync(path.join(ROOT, 'js/photo-wall/upload-ui.js'), 'utf8');
 const renderSource = fs.readFileSync(path.join(ROOT, 'js/photo-wall/render.js'), 'utf8');
 
+function createPhotoWallRenderRuntime(photos, options = {}) {
+  let markup = '';
+  let sentinel = null;
+  let hasMore = !!options.hasMore;
+  let innerHTMLWrites = 0;
+
+  function tokenAnchor(tokenHtml, onRemove) {
+    return {
+      parentNode: grid,
+      remove() {
+        markup = markup.replace(tokenHtml, '');
+        this.parentNode = null;
+        if (onRemove) onRemove();
+      },
+      insertAdjacentHTML(position, html) {
+        if (position === 'beforebegin') markup = markup.replace(tokenHtml, String(html) + tokenHtml);
+      }
+    };
+  }
+
+  function photoCards() {
+    const cards = [];
+    const pattern = /<div class="photo-wall-item pw-stagger-enter" data-photo-id="([^"]*)" style="[^"]*" onclick="openPhotoWallPreviewAt\((\d+), this\)">/g;
+    let match;
+    while ((match = pattern.exec(markup))) {
+      const id = match[1];
+      const index = Number(match[2]);
+      cards.push({
+        id,
+        previewIndex: index,
+        style: {},
+        classList: { add() {}, remove() {} },
+        getAttribute(name) { return name === 'data-photo-id' ? id : null; }
+      });
+    }
+    return cards;
+  }
+
+  const grid = {
+    get innerHTML() { return markup; },
+    set innerHTML(value) {
+      markup = String(value || '');
+      sentinel = null;
+      innerHTMLWrites++;
+    },
+    appendChild(node) {
+      sentinel = node;
+      node.parentNode = grid;
+      markup += node.outerHTML;
+      return node;
+    },
+    insertAdjacentHTML(position, html) {
+      if (position === 'beforeend') markup += String(html);
+    },
+    querySelector(selector) {
+      if (selector === '.pw-load-more-sentinel') return sentinel;
+      if (selector === '.pw-batch-nav') {
+        const match = markup.match(/<div class="pw-batch-nav"[\s\S]*?<\/div>/);
+        return match ? tokenAnchor(match[0]) : null;
+      }
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '.photo-wall-item[data-photo-id]' || selector === '.photo-wall-item.pw-stagger-enter') return photoCards();
+      return [];
+    },
+    getPhotoCards: photoCards,
+    getInnerHTMLWrites() { return innerHTMLWrites; }
+  };
+
+  function makeSentinel() {
+    const indicator = { textContent: '' };
+    const node = {
+      className: '',
+      innerHTML: '',
+      outerHTML: '<div class="pw-load-more-sentinel"><div class="pw-load-more-indicator"></div></div>',
+      parentNode: null,
+      attributes: {},
+      classList: { toggle() {} },
+      querySelector(selector) { return selector === '.pw-load-more-indicator' ? indicator : null; },
+      setAttribute(name, value) { this.attributes[name] = String(value); },
+      removeAttribute(name) { delete this.attributes[name]; },
+      insertAdjacentHTML(position, html) {
+        if (position === 'beforebegin') markup = markup.replace(this.outerHTML, String(html) + this.outerHTML);
+      },
+      remove() {
+        markup = markup.replace(this.outerHTML, '');
+        this.parentNode = null;
+        if (sentinel === this) sentinel = null;
+      },
+      indicator
+    };
+    return node;
+  }
+
+  const toggle = { classList: { toggle() {} } };
+  const window = {
+    photoWallData: photos.slice(),
+    pwCurrentSortedPhotos: [],
+    pwSortKey: 'date_desc',
+    pwAlbumView: false,
+    pwAlbumGroupKey: '',
+    addEventListener() {},
+    hasMorePhotos() { return hasMore; },
+    setHasMore(value) { hasMore = !!value; },
+    openPhotoPreview(index, config) { this.lastPreview = { index, config }; }
+  };
+  if (typeof options.loadMorePhotos === 'function') {
+    window.loadMorePhotos = () => options.loadMorePhotos(window, value => { hasMore = !!value; });
+  }
+
+  const document = {
+    getElementById(id) {
+      if (id === 'photoGrid') return grid;
+      if (id === 'pwAlbumToggle') return toggle;
+      return null;
+    },
+    createElement() { return makeSentinel(); },
+    querySelector() { return null; }
+  };
+  const context = {
+    window,
+    document,
+    console,
+    Date,
+    Map,
+    Set,
+    Promise,
+    requestAnimationFrame(callback) { callback(); },
+    setTimeout,
+    clearTimeout
+  };
+  vm.runInNewContext(renderSource, context, { filename: 'photo-wall-render.js' });
+  return { window, grid, context };
+}
+
+function makeRenderablePhotos(count, sameDay = false) {
+  const day = new Date(2026, 4, 12, 12, 0, 0).getTime();
+  return Array.from({ length: count }, (_, index) => ({
+    id: `photo-${index}`,
+    timestamp: sameDay ? day + index : count - index,
+    thumbUrl: `https://example.test/photo-${index}.jpg`,
+    imageUrl: `https://example.test/photo-${index}.jpg`
+  }));
+}
+
 test('cloud delete failure restores the card and re-renders unconditionally', () => {
   // 修复前：失败分支调用 removePhotoLocal（移除而非恢复），且仅在 opts.render !== false 时重渲染；
   // 预览弹窗删除传 {render:false}，导致 DOM 卡片消失但数据仍在。
@@ -331,4 +477,141 @@ test('photo view count is wired when the preview opens', () => {
   const openPreview = renderSource.slice(renderSource.indexOf('function openPhotoWallPreviewAt'), renderSource.indexOf('function photoCardHtml'));
   assert.match(openPreview, /window\.syncPhotoViewCount/);
   assert.match(openPreview, /previewTarget/);
+});
+
+test('photo wall renders 500-item batches at 500, 501, and 1001 photo boundaries', async () => {
+  for (const total of [500, 501, 1001]) {
+    const runtime = createPhotoWallRenderRuntime(makeRenderablePhotos(total));
+    runtime.window.renderPhotoWallWithoutReload();
+
+    assert.equal(runtime.grid.getPhotoCards().length, Math.min(total, 500), `${total} photos: first batch is capped at 500`);
+    assert.equal(runtime.window.pwCurrentSortedPhotos.length, total, `${total} photos: preview source retains the full sorted list`);
+
+    if (total <= 500) {
+      assert.doesNotMatch(runtime.grid.innerHTML, /pw-batch-nav/);
+      continue;
+    }
+
+    assert.match(runtime.grid.innerHTML, /下一批/);
+    await runtime.window.showNextPhotoBatch();
+    const secondBatch = runtime.grid.getPhotoCards();
+    assert.equal(secondBatch.length, Math.min(total - 500, 500));
+    assert.equal(secondBatch[0].id, 'photo-500');
+    assert.equal(secondBatch[0].previewIndex, 500, 'batch card onclick indices stay global');
+
+    const previewCard = secondBatch[secondBatch.length - 1];
+    runtime.window.openPhotoWallPreviewAt(previewCard.previewIndex, previewCard);
+    assert.equal(runtime.window.lastPreview.config.photos.length, total);
+    assert.equal(runtime.window.lastPreview.config.photos[previewCard.previewIndex].id, previewCard.id);
+
+    if (total === 1001) {
+      await runtime.window.showNextPhotoBatch();
+      assert.equal(runtime.grid.getPhotoCards().length, 1, 'the final partial batch remains visible');
+      assert.equal(runtime.grid.getPhotoCards()[0].id, 'photo-1000');
+      assert.equal(runtime.grid.getPhotoCards()[0].previewIndex, 1000);
+      await runtime.window.showPreviousPhotoBatch();
+      assert.equal(runtime.grid.getPhotoCards().length, 500, 'previous from the tail returns to batch two');
+      assert.equal(runtime.grid.getPhotoCards()[0].id, 'photo-500');
+    }
+
+    await runtime.window.showPreviousPhotoBatch();
+    assert.equal(runtime.grid.getPhotoCards().length, 500, 'previous returns to the first batch');
+    assert.equal(runtime.grid.getPhotoCards()[0].id, 'photo-0');
+  }
+});
+
+test('photo wall next-batch request does not navigate to an empty tail after filtering', async () => {
+  const runtime = createPhotoWallRenderRuntime(makeRenderablePhotos(60), {
+    hasMore: true,
+    async loadMorePhotos(window, setHasMore) {
+      setHasMore(false);
+      return [{ id: 'filtered-video', mediaKind: 'video', mimeType: 'video/mp4', imageUrl: '' }];
+    }
+  });
+  runtime.window.renderPhotoWallWithoutReload();
+  await runtime.window.showNextPhotoBatch();
+  assert.equal(runtime.grid.getPhotoCards().length, 60);
+  assert.equal(runtime.grid.getPhotoCards()[0].id, 'photo-0');
+  assert.doesNotMatch(runtime.grid.innerHTML, /下一批/);
+});
+
+test('photo album detail paginates within the selected date and preserves preview indices', async () => {
+  const photos = makeRenderablePhotos(501, true);
+  const runtime = createPhotoWallRenderRuntime(photos);
+  runtime.window.pwAlbumView = true;
+  const date = new Date(photos[0].timestamp);
+  runtime.window.pwAlbumGroupKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  runtime.window.renderPhotoWallWithoutReload();
+
+  assert.equal(runtime.grid.getPhotoCards().length, 500);
+  assert.match(runtime.grid.innerHTML, /返回相册/);
+  await runtime.window.showNextPhotoBatch();
+  assert.equal(runtime.grid.getPhotoCards().length, 1);
+  assert.equal(runtime.grid.getPhotoCards()[0].previewIndex, 500);
+  assert.equal(runtime.window.pwCurrentSortedPhotos.length, 501);
+  await runtime.window.showPreviousPhotoBatch();
+  assert.equal(runtime.grid.getPhotoCards().length, 500, 'previous keeps the album detail active and returns to its first batch');
+  assert.match(runtime.grid.innerHTML, /返回相册/);
+});
+
+test('photo wall sentinel remains keyboard operable without IntersectionObserver and appends without replacing existing cards', async () => {
+  const runtime = createPhotoWallRenderRuntime(makeRenderablePhotos(60), {
+    hasMore: true,
+    async loadMorePhotos(window, setHasMore) {
+      window.photoWallData.push({
+        id: 'photo-60', timestamp: 0,
+        thumbUrl: 'https://example.test/photo-60.jpg', imageUrl: 'https://example.test/photo-60.jpg'
+      });
+      setHasMore(false);
+      return [window.photoWallData[window.photoWallData.length - 1]];
+    }
+  });
+  runtime.window.renderPhotoWallWithoutReload();
+  assert.equal(runtime.window.IntersectionObserver, undefined);
+  assert.equal(runtime.grid.getPhotoCards().length, 60);
+  assert.equal(runtime.grid.getInnerHTMLWrites(), 1);
+  const sentinel = runtime.grid.querySelector('.pw-load-more-sentinel');
+  assert.equal(sentinel.attributes.role, 'button');
+  assert.equal(sentinel.attributes.tabindex, '0');
+  assert.equal(typeof sentinel.onclick, 'function');
+
+  let prevented = false;
+  sentinel.onkeydown({ key: 'Enter', preventDefault() { prevented = true; } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(prevented, true);
+  assert.equal(runtime.grid.getPhotoCards().length, 61);
+  assert.equal(runtime.grid.getPhotoCards()[60].id, 'photo-60');
+  assert.equal(runtime.grid.getInnerHTMLWrites(), 1, 'incremental loading preserves the existing grid instead of rebuilding it');
+  assert.equal(runtime.grid.querySelector('.pw-load-more-sentinel'), null, 'sentinel is removed after the last page');
+});
+
+test('an in-flight batch request does not apply its offset after the user changes photo-wall view', async () => {
+  let resolvePage;
+  const photos = makeRenderablePhotos(60, true);
+  const date = new Date(photos[0].timestamp);
+  const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const runtime = createPhotoWallRenderRuntime(photos, {
+    hasMore: true,
+    loadMorePhotos(window, setHasMore) {
+      return new Promise(resolve => {
+        resolvePage = () => {
+          const photo = { id: 'photo-60', timestamp: photos[0].timestamp + 1, thumbUrl: 'https://example.test/photo-60.jpg', imageUrl: 'https://example.test/photo-60.jpg' };
+          window.photoWallData.push(photo);
+          setHasMore(false);
+          resolve([photo]);
+        };
+      });
+    }
+  });
+  runtime.window.renderPhotoWallWithoutReload();
+  const pendingNext = runtime.window.showNextPhotoBatch();
+  runtime.window.pwAlbumView = true;
+  runtime.window.pwAlbumGroupKey = dateKey;
+  runtime.window.renderPhotoWallWithoutReload();
+  resolvePage();
+  await pendingNext;
+
+  assert.equal(runtime.grid.getPhotoCards().length, 60);
+  assert.match(runtime.grid.innerHTML, /返回相册/);
+  assert.equal(runtime.grid.getPhotoCards()[0].previewIndex, 0);
 });

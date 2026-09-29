@@ -9,6 +9,10 @@
   var observer = null;
   var LEGACY_MARKER = 'data-xtj-legacy-text';
   var REPAIR_ATTRS = ['title', 'aria-label', 'placeholder', 'alt'];
+  var PROTECTED_TAGS = Object.create(null);
+  ['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'PRE', 'CODE', 'TEXTAREA', 'INPUT'].forEach(function (tag) {
+    PROTECTED_TAGS[tag] = true;
+  });
   var MOJIBAKE_PAIRS = [
     ['鍏ㄩ儴甯栧瓙', '全部帖子'], ['娌℃湁鎵惧埌相关甯栧瓙', '没有找到相关帖子'],
     ['纭鎿嶄綔', '确认操作'], ['纭畾瑕佹墽琛屾鎿嶄綔鍚楋紵', '确定要执行此操作吗？'],
@@ -44,16 +48,48 @@
     var text = String(value == null ? '' : value);
     return text.replace(repairPattern, function (match) { return replacements[match] || match; });
   }
+  function needsRepair(value) {
+    repairPattern.lastIndex = 0;
+    return repairPattern.test(String(value == null ? '' : value));
+  }
+  function isInProtectedSubtree(node) {
+    var element = node && node.nodeType === 1 ? node : (node && node.parentNode);
+    while (element && element.nodeType === 1) {
+      if (PROTECTED_TAGS[String(element.tagName || '').toUpperCase()]) return true;
+      if (element === document.body) break;
+      element = element.parentNode;
+    }
+    return false;
+  }
   function repairMarkedNode(node) {
-    if (!node || node.nodeType !== 1) return;
+    if (!node) return;
+    // Content in source/code samples, templates, and form controls is literal data.
+    // A queued node can also be moved into one of these subtrees before the RAF runs.
+    if (isInProtectedSubtree(node)) return;
+    if (node.nodeType === 3) {
+      var originalText = node.nodeValue || '';
+      var fixedText = fixText(originalText);
+      if (fixedText !== originalText) node.nodeValue = fixedText;
+      return;
+    }
+    if (node.nodeType !== 1) return;
     // ★ 修复：此前要求节点带 data-xtj-legacy-text 属性，但全项目没有任何代码设置该标记，
     // 导致页面乱码修复（除 toast 外）从不生效。改为直接对节点文本做幂等修复：
     // 修复后的文本不再命中乱码对，重复处理无副作用；属性修复仅对匹配属性生效。
     Array.prototype.forEach.call(node.childNodes, function (child) {
-      if (child.nodeType === 3) child.nodeValue = fixText(child.nodeValue);
+      if (child.nodeType === 3) {
+        var originalText = child.nodeValue || '';
+        var fixedText = fixText(originalText);
+        if (fixedText !== originalText) child.nodeValue = fixedText;
+      }
     });
     REPAIR_ATTRS.forEach(function (attr) {
-      try { if (node.hasAttribute(attr)) node.setAttribute(attr, fixText(node.getAttribute(attr))); } catch (_) {}
+      try {
+        if (!node.hasAttribute(attr)) return;
+        var originalAttr = node.getAttribute(attr);
+        var fixedAttr = fixText(originalAttr);
+        if (fixedAttr !== originalAttr) node.setAttribute(attr, fixedAttr);
+      } catch (_) {}
     });
     if (node.hasAttribute(LEGACY_MARKER)) node.removeAttribute(LEGACY_MARKER);
   }
@@ -67,7 +103,7 @@
   }
 
   function scheduleRepair(node) {
-    if (!node || node.nodeType !== 1 || queuedSet.has(node)) return;
+    if (!node || (node.nodeType !== 1 && node.nodeType !== 3) || queuedSet.has(node)) return;
     queuedSet.add(node);
     queuedNodes.push(node);
     if (repairScheduled) return;
@@ -76,9 +112,27 @@
   }
 
   function collectMarkedNodes(node) {
-    if (!node || node.nodeType !== 1) return;
-    if (node.hasAttribute(LEGACY_MARKER)) scheduleRepair(node);
-    if (node.querySelectorAll) node.querySelectorAll('[' + LEGACY_MARKER + ']').forEach(scheduleRepair);
+    if (!node) return;
+    if (isInProtectedSubtree(node)) return;
+    if (node.nodeType === 3) {
+      if (needsRepair(node.nodeValue)) scheduleRepair(node);
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    var tag = String(node.tagName || '').toUpperCase();
+    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'INPUT') return;
+    function collectElement(el) {
+      if (isInProtectedSubtree(el)) return;
+      if (el.hasAttribute(LEGACY_MARKER)) scheduleRepair(el);
+      REPAIR_ATTRS.forEach(function(attr) {
+        try { if (el.hasAttribute(attr) && needsRepair(el.getAttribute(attr))) scheduleRepair(el); } catch (_) {}
+      });
+      Array.prototype.forEach.call(el.childNodes || [], function (child) {
+        if (child.nodeType === 3 && needsRepair(child.nodeValue)) scheduleRepair(child);
+      });
+    }
+    collectElement(node);
+    if (node.querySelectorAll) node.querySelectorAll('*').forEach(collectElement);
   }
 
   function patchToast() {
@@ -128,13 +182,30 @@
     patchToast();
     patchChat();
     initProfileSync();
-    document.querySelectorAll('[' + LEGACY_MARKER + ']').forEach(scheduleRepair);
+    if (document.body) collectMarkedNodes(document.body);
     observer = new MutationObserver(function (records) {
       records.forEach(function (record) {
-        Array.prototype.forEach.call(record.addedNodes || [], collectMarkedNodes);
+        if (record.type === 'childList') {
+          Array.prototype.forEach.call(record.addedNodes || [], collectMarkedNodes);
+        } else if (record.type === 'characterData') {
+          if (!isInProtectedSubtree(record.target) && needsRepair(record.target.nodeValue)) scheduleRepair(record.target);
+        } else if (record.type === 'attributes' && !isInProtectedSubtree(record.target)) {
+          var attr = record.attributeName;
+          if (attr === LEGACY_MARKER && record.target.hasAttribute(LEGACY_MARKER)) {
+            scheduleRepair(record.target);
+          } else if (REPAIR_ATTRS.indexOf(attr) !== -1 && needsRepair(record.target.getAttribute(attr))) {
+            scheduleRepair(record.target);
+          }
+        }
       });
     });
-    if (document.body) observer.observe(document.body, { childList: true, subtree: true });
+    if (document.body) observer.observe(document.body, {
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: REPAIR_ATTRS.concat([LEGACY_MARKER]),
+      subtree: true
+    });
     window.addEventListener('beforeunload', stopObserver);
   }
 

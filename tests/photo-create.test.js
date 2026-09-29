@@ -2,11 +2,83 @@
 
 const assert = require('assert');
 const test = require('node:test');
-const { MAX_IMAGE_SIZE, createPhotoRecord, parseStoragePhotoUrl, validatePhotoCreatePayload } = require('../render-api/photo-create');
+const { MAX_IMAGE_SIZE, createPhotoRecord, findStoragePathRefs, parseStoragePhotoUrl, validatePhotoCreatePayload } = require('../render-api/photo-create');
 
 const ORIGIN = 'https://ithowxqignlhkwaykglt.supabase.co';
 const GOOD_URL = ORIGIN + '/storage/v1/object/public/uploads/photos/test.jpg';
 function valid(overrides) { return Object.assign({ media_url: GOOD_URL, file_size: 12, original_size: 12, mime_type: 'image/jpeg' }, overrides || {}); }
+
+function createStoragePathRefsSupabase(results) {
+  const calls = [];
+  return {
+    calls,
+    from: function(table) {
+      return {
+        select: function(columns, options) {
+          const call = { table: table, columns: columns, options: options, filters: [] };
+          calls.push(call);
+          return {
+            ilike: function(column, pattern) { call.filters.push({ type: 'ilike', column: column, value: pattern }); return this; },
+            neq: function(column, value) { call.filters.push({ type: 'neq', column: column, value: value }); return this; },
+            limit: function(limit) {
+              call.limit = limit;
+              return Promise.resolve(results[calls.length - 1]);
+            }
+          };
+        }
+      };
+    }
+  };
+}
+
+test('storage path reference lookup checks content and media_url then merges duplicate rows', async function() {
+  const shared = { id: 'shared', user_name: 'owner' };
+  const mediaOnly = { id: 'media-only', user_name: 'other' };
+  const supabase = createStoragePathRefsSupabase([
+    { data: [shared, { id: 'content-only', user_name: 'owner' }], count: 2, error: null },
+    { data: [shared, mediaOnly], count: 2, error: null },
+    { data: [mediaOnly, { id: 'encoded-only', user_name: 'other' }], count: 2, error: null }
+  ]);
+
+  const result = await findStoragePathRefs(supabase, 'photos/cat one.jpg', 'excluded-id');
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.truncated, false);
+  assert.deepStrictEqual(result.refs.map(function(ref) { return ref.id; }).sort(), [
+    'content-only', 'encoded-only', 'media-only', 'shared'
+  ]);
+  assert.strictEqual(new Set(result.refs.map(function(ref) { return String(ref.id); })).size, result.refs.length,
+    'a post matching content and media_url must be returned only once');
+  assert.deepStrictEqual(supabase.calls.map(function(call) {
+    return call.filters.find(function(filter) { return filter.type === 'ilike'; }).column;
+  }), ['content', 'media_url', 'media_url']);
+  assert.deepStrictEqual(supabase.calls.map(function(call) {
+    return call.filters.find(function(filter) { return filter.type === 'ilike'; }).value;
+  }), ['%"photos/cat one.jpg"%', '%photos/cat one.jpg%', '%photos/cat\\%20one.jpg%']);
+  supabase.calls.forEach(function(call) {
+    assert.strictEqual(call.table, 'posts');
+    assert.strictEqual(call.columns, 'id,user_name');
+    assert.deepStrictEqual(call.options, { count: 'exact' });
+    assert.strictEqual(call.limit, 50);
+    assert.ok(call.filters.some(function(filter) { return filter.type === 'neq' && filter.column === 'id' && filter.value === 'excluded-id'; }));
+  });
+});
+
+test('storage path reference lookup fails closed when any content or media_url query errors', async function() {
+  const queryError = { message: 'media_url lookup unavailable' };
+  const supabase = createStoragePathRefsSupabase([
+    { data: [{ id: 'content-ref', user_name: 'other' }], count: 1, error: null },
+    { data: [{ id: 'raw-url-ref', user_name: 'other' }], count: 1, error: null },
+    { data: null, count: null, error: queryError }
+  ]);
+
+  const result = await findStoragePathRefs(supabase, 'photos/cat one.jpg', null);
+
+  assert.strictEqual(supabase.calls.length, 3);
+  assert.strictEqual(result.ok, false);
+  assert.deepStrictEqual(result.refs, [], 'partial matches must not be treated as a complete ownership check');
+  assert.strictEqual(result.error, queryError);
+});
 
 test('photo create rejects untrusted URLs and legacy fields', function() {
   [

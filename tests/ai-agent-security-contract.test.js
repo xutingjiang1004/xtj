@@ -68,11 +68,12 @@ test('deep research close invalidates callbacks, aborts streams, and clears tran
   assert.match(closeBody, /S\.dtLifecycleId\+\+/);
   // 反向断言：不得再递增主聊天的生命周期计数器（那会误杀主聊天在途回调）
   assert.doesNotMatch(closeBody, /S\.lifecycleId\+\+/);
-  assert.match(closeBody, /S\.clientRequestId\+\+/);
+  assert.match(closeBody, /S\._dtSendSeq\s*=/);
+  assert.doesNotMatch(closeBody, /S\.clientRequestId\+\+/);
   // ★ 修复后：closeDeepThinkPage 只 abort 深页独立通道（_dtAbortController / deepThinkJob），
   // 不再触碰普通聊天共享的 S.abortController，避免误杀普通聊天流。
   assert.match(closeBody, /_dtAbortController/);
-  assert.match(closeBody, /c\.abort/);
+  assert.match(closeBody, /dtController\.abort/);
   assert.match(closeBody, /S\.deepThinkJob/);
   assert.match(closeBody, /_dtFileData\s*=\s*null/);
 });

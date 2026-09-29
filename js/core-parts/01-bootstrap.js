@@ -2192,9 +2192,10 @@ function isAdmin() {
 
         function lazyPhotoUploadLauncher() {
             ensurePhotoWallUploadLoaded().then(function() {
-                if (typeof window.xtjUploadBtn === 'function' && window.xtjUploadBtn !== lazyPhotoUploadLauncher) {
-                    window.xtjUploadBtn();
-                }
+                // A file picker must be opened in the original user gesture.
+                // Async module loading loses that gesture in Safari/iOS, so
+                // never replay the click after the promise resolves.
+                if (typeof window.showToast === 'function') window.showToast('上传模块已就绪，请再次点击上传');
             }).catch(function(err) {
                 if (typeof window.showToast === 'function') window.showToast('上传模块加载失败，请稍后重试');
                 console.error('[XTJ] photo upload lazy load failed:', err);
@@ -2202,9 +2203,7 @@ function isAdmin() {
         }
         function lazyPhotoWallSubmitLauncher() {
             ensurePhotoWallUploadLoaded().then(function() {
-                if (typeof window.triggerPhotoWallUpload === 'function' && window.triggerPhotoWallUpload !== lazyPhotoWallSubmitLauncher) {
-                    window.triggerPhotoWallUpload();
-                }
+                if (typeof window.showToast === 'function') window.showToast('上传模块已就绪，请再次点击上传');
             }).catch(function(err) {
                 if (typeof window.showToast === 'function') window.showToast('上传模块加载失败，请稍后重试');
                 console.error('[XTJ] photo upload submit lazy load failed:', err);
@@ -2213,6 +2212,18 @@ function isAdmin() {
         window.xtjUploadBtn = lazyPhotoUploadLauncher;
         window.triggerPhotoUpload = lazyPhotoUploadLauncher;
         window.triggerPhotoWallUpload = lazyPhotoWallSubmitLauncher;
+        // Warm the lazy module before the first tap when the browser is idle;
+        // the actual picker remains synchronous with the user's later click.
+        var preloadPhotoUpload = function() {
+            ensurePhotoWallUploadLoaded().catch(function(err) {
+                console.warn('[XTJ] photo upload module preload failed:', err && err.message);
+            });
+        };
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(preloadPhotoUpload, { timeout: 2000 });
+        } else {
+            setTimeout(preloadPhotoUpload, 2000);
+        }
 
         function lazyOpenPhotoPreview() {
             var args = Array.prototype.slice.call(arguments);

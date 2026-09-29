@@ -238,7 +238,7 @@ test('cache writes and reads are fully isolated by encoding currentUser', () => 
 });
 
 test('renderHistoryUnavailable receives error_code and preserves cache', () => {
-  assert.match(client, /renderHistoryUnavailable\(messagesEl, r, \{ preserveExistingMessages: hasCache \}\)/);
+  assert.match(client, /renderHistoryUnavailable\(messagesEl, r, \{ preserveExistingMessages: hasCache \|\| !!messagesEl\.querySelector\('\.ai-msg'\) \}\)/);
   const renderFn = client.slice(client.indexOf('function renderHistoryUnavailable'), client.indexOf('function appendMessage'));
   assert.match(renderFn, /opts\.preserveExistingMessages/);
   assert.match(renderFn, /ai-history-cache-banner/);
