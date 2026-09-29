@@ -10,6 +10,18 @@ const fs = require('node:fs');
 
 const SHOT_DIR = path.join(__dirname, '..', '..', 'output', 'chat-visual');
 
+// Install bootstrap mocks before navigation: startup refresh must retain the
+// authenticated actor, and no fixture may contact production Supabase.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/*.supabase.co/**', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '[]',
+  }));
+  await page.route('**/api/**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ ok: true, token: 'chat-visual-token', user_name: 'viewer', data: [], items: [], friends: [], conversations: [] }),
+  }));
+});
+
 const MSG = {
   m1: { id: 'm1', user_name: 'friend', media_url: 'viewer', views: 0, actor_key: 'dm_1', created_at: '2026-09-25T10:00:00.000Z', content: JSON.stringify({ text: '在吗？给你看张照片', read_at: null }) },
   m3: { id: 'm3', user_name: 'viewer', media_url: 'friend', views: 0, actor_key: 'dm_3', created_at: '2026-09-25T10:02:00.000Z', content: JSON.stringify({ text: '这张是原图，没有压缩', read_at: null }) },
@@ -20,12 +32,12 @@ const MSG = {
 
 async function mockApis(page, messages, extra) {
   const routes = [
-    page.route('**/api/user/refresh', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: 'chat-visual-token' }) })),
+    page.route('**/api/user/refresh', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: 'chat-visual-token', user_name: 'viewer' }) })),
     page.route('**/api/feed**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, posts: [], comments: [], likes: [], next_offset: 0, endReached: true, total_post_count: 0 }) })),
     // 注意：这里要与 /api/dm/messages 用**同一批 id**。会话列表会被预热进 _chatCache，
     //   mergeDockChatMessages 会把"比快照新"的缓存消息并回会话；编一条 id 不同但内容/时间
     //   相同的行，界面上就会出现两条一模一样的消息（曾因此误判成渲染 bug）。
-    page.route('**/api/dm/list', (route) => route.fulfill({
+    page.route('**/api/dm/list**', (route) => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ ok: true, data: [messages[messages.length - 1], { id: 'c2', user_name: 'viewer', media_url: 'other', content: JSON.stringify({ text: '晚点聊' }), created_at: '2026-09-25T09:00:00.000Z', views: 1 }] }),
     })),
@@ -171,7 +183,10 @@ test('发送失败：失败气泡与"长按重发"提示必须出现', async ({ 
   await page.click('#dockChatSendBtn');
   const failed = page.locator('#dockChatMessages .chat-msg.failed');
   await expect(failed).toBeVisible({ timeout: 10000 });
-  await expect(failed.locator('.msg-fail-mark')).toContainText('发送失败');
+  // Media status sits below the bubble in the same message row.
+  const failedRow = page.locator('#dockChatMessages .chat-msg-row').filter({ has: page.locator('.chat-msg.failed') });
+  await expect(failedRow.locator('.msg-fail-mark')).toBeVisible();
+  await expect(failedRow.locator('.msg-fail-mark')).toContainText('发送失败');
   await page.waitForTimeout(200);
   // 诊断：把含「发送」的可见文本连同伪元素 content 一起挖出来（含位置）
   const diag = await page.evaluate(() => {

@@ -1839,7 +1839,7 @@
         }
         .dm-action-overlay .dm-action-panel:not(.dm-forward-panel) {
             position: fixed;
-            width: max-content; max-width: calc(100vw - 20px);
+            width: max-content; max-width: min(370px, calc(100vw - 20px));
             padding: 8px;
             border: 1px solid rgba(255,255,255,.82);
             border-radius: 18px;
@@ -1877,7 +1877,7 @@
         }
         .dm-action-overlay .dm-action-panel .dm-action-grid {
             display: flex; align-items: stretch; gap: 3px;
-            width: max-content; max-width: calc(100vw - 38px);
+            width: max-content; max-width: min(352px, calc(100vw - 38px));
             overflow-x: auto; overscroll-behavior-x: contain;
             scrollbar-width: none;
         }
