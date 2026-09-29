@@ -80,7 +80,9 @@ test('site search has its own result page and opens a matching post without chan
     if (route.request().url().includes('/site-search')) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
         ok: true,
-        results: [{ source: 'posts', source_id: 'post-search-1', title: '广州旅行记录', snippet: '十月去广州的行程安排', created_at: '2026-07-18T10:00:00.000Z', matched_keywords: ['广州'], relevance: 0.96, jump_target: { type: 'post', post_id: 'post-search-1' } }]
+        // openAiSearchTarget deliberately rejects malformed post IDs; use a
+        // valid UUID so this exercises the successful navigation path.
+        results: [{ source: 'posts', source_id: '11111111-1111-4111-8111-111111111111', title: '广州旅行记录', snippet: '十月去广州的行程安排', created_at: '2026-07-18T10:00:00.000Z', matched_keywords: ['广州'], relevance: 0.96, jump_target: { type: 'post', post_id: '11111111-1111-4111-8111-111111111111' } }]
       }) });
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, messages: [], has_more: false }) });

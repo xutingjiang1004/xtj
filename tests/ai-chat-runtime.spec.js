@@ -17,8 +17,13 @@ test('AI entry renders a visible state while history is slow and offers retry on
     contentType: 'application/json',
     body: JSON.stringify({ name: '徐旭泽', welcome_message: '嗨，来聊天吧。' })
   }));
+  let releaseHistory;
+  const historyGate = new Promise(resolve => { releaseHistory = resolve; });
+  let markHistoryStarted;
+  const historyStarted = new Promise(resolve => { markHistoryStarted = resolve; });
   await page.route('**/api/agent/chat/history**', async route => {
-    await new Promise(resolve => setTimeout(resolve, 650));
+    markHistoryStarted();
+    await historyGate;
     await route.fulfill({
       status: 503,
       contentType: 'application/json',
@@ -39,7 +44,11 @@ test('AI entry renders a visible state while history is slow and offers retry on
   await page.locator('#aiToolsBtn').click();
   await page.locator('#aiToolsMenu [data-ai-tool="chat"]').click();
   await expect(page.locator('#aiChatRoot')).toBeVisible();
-  await expect(page.locator('#aiChatMessagesArea')).toContainText('正在加载聊天记录');
+  await historyStarted;
+  await expect(page.locator('.ai-history-loading')).toContainText('正在加载聊天记录');
+  // Keep the request pending until the loading state has been observed, then
+  // release the failure to exercise retry UI without a timer race.
+  releaseHistory();
   await expect(page.locator('.ai-history-retry')).toBeVisible({ timeout: 4000 });
   await expect(page.locator('#aiChatMsgInput')).toBeVisible();
 

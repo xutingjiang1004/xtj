@@ -106,12 +106,13 @@ test('a delayed feed refresh merges instead of removing a newly published post',
   expect(deleteCalls).toBe(0);
 });
 
-test('comment submission keeps its target after modal close and sends once', async ({ page }) => {
+test('inline comment composer sends once to its post', async ({ page }) => {
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
   const postId = '22222222-2222-4222-8222-222222222222';
   let commentCalls = 0;
   let submittedPostId = '';
+  let releaseComment;
   await page.addInitScript(() => {
     localStorage.setItem('xtj_user', 'commenter');
     localStorage.setItem('xtj_device_id', 'device_comment_test');
@@ -121,11 +122,34 @@ test('comment submission keeps its target after modal close and sends once', asy
     contentType: 'application/json',
     body: JSON.stringify({ token: 'test-access-token' })
   }));
+  await page.route('**/api/feed**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      posts: [{
+        id: postId,
+        user_name: 'commenter',
+        content: 'A post with an inline comment composer.',
+        media_url: '',
+        media_type: '',
+        actor_key: 'device_comment_test',
+        visibility: 'public',
+        views: 0,
+        created_at: new Date().toISOString()
+      }],
+      comments: [],
+      likes: [],
+      next_offset: 1,
+      endReached: true,
+      total_post_count: 1
+    })
+  }));
   await page.route('**/api/post/comment', async route => {
     commentCalls += 1;
     const payload = route.request().postDataJSON();
     submittedPostId = payload.post_id;
-    await new Promise(resolve => setTimeout(resolve, 120));
+    await new Promise(resolve => { releaseComment = resolve; });
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
@@ -144,14 +168,24 @@ test('comment submission keeps its target after modal close and sends once', asy
   });
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => typeof window.openComment === 'function');
-  await page.evaluate(id => window.openComment(id), postId);
-  await page.locator('#commInp').fill('评论运行时验证');
-  const button = page.locator('#commBtn');
+  await page.waitForFunction(() => typeof window.openComment === 'function' && window.currentUser === 'commenter');
+  const post = page.locator(`.post[data-post-id="${postId}"]`);
+  await expect(post).toBeVisible();
+  await post.locator('.actions button').filter({ hasText: '评论' }).click();
+  const box = post.locator('.inline-comment-box');
+  await expect(box.locator('.inline-comment-inp')).toBeVisible();
+  await box.locator('.inline-comment-inp').fill('评论运行时验证');
+  const button = box.getByRole('button', { name: '发送' });
   await button.click();
-  await page.evaluate(() => document.getElementById('commBtn').onclick());
+  await expect.poll(() => commentCalls).toBe(1);
   await expect(button).toBeDisabled();
-  await expect(page.locator('#commentModal')).not.toHaveClass(/active/);
+  await page.evaluate(() => {
+    const send = document.querySelector('.inline-comment-box button');
+    if (send && typeof send.onclick === 'function') send.onclick();
+  });
+  expect(commentCalls).toBe(1);
+  releaseComment();
+  await expect(page.locator(`.post[data-post-id="${postId}"] .comments`)).toContainText('评论运行时验证');
   expect(commentCalls).toBe(1);
   expect(submittedPostId).toBe(postId);
   expect(pageErrors).toEqual([]);

@@ -75,6 +75,10 @@ test('site search preserves source metadata and restored cards without exposing 
   assert.match(server, /site_cards: Array\.isArray\(m\.site_cards\)/);
   assert.match(server, /siteCards: siteToolCards/);
   assert.match(client, /Array\.isArray\(msg\.site_cards\)/);
+  assert.match(client, /function renderAiHistoryCards/);
+  const historyLoader = client.slice(client.indexOf('async function loadHistory'), client.indexOf('async function fetchConversations'));
+  assert.match(historyLoader, /renderAiHistoryCards\(messagesEl,\s*cachedMsgs/);
+  assert.match(historyLoader, /renderAiHistoryCards\(messagesEl,\s*msgs/);
   assert.doesNotMatch(server, /schedule_action|cancel_scheduled_action/);
 });
 

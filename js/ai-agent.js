@@ -3957,6 +3957,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return node;
   }
 
+  // History rows are built in batches rather than through appendMessage, so
+  // restore their structured tool cards here as well. `nextMessageNodes` keeps
+  // each card attached to the assistant turn that produced it (and lets older
+  // paginated rows insert before the already-rendered history).
+  function renderAiHistoryCards(messagesEl, messages, messageNodes, nextMessageNodes) {
+    if (!messagesEl) return;
+    var rows = Array.isArray(messages) ? messages : [];
+    var nodes = Array.isArray(messageNodes) ? messageNodes : [];
+    var nextNodes = Array.isArray(nextMessageNodes) ? nextMessageNodes : [];
+    rows.forEach(function(msg, index) {
+      if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.site_cards)) return;
+      var insertBeforeNode = nodes[index + 1] || nextNodes[index] || null;
+      msg.site_cards.forEach(function(card) {
+        try { renderAiToolCard(messagesEl, card, insertBeforeNode); } catch (e) {}
+      });
+    });
+  }
+
   function removeLastUserMessage(messagesEl) {
     if (!messagesEl) return;
     var nodes = messagesEl.querySelectorAll('.ai-msg.user');
@@ -10870,12 +10888,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         hasCache = true;
         S.messages = cachedMsgs;
         messagesEl.innerHTML = '';
+        messagesEl.__xtjAiCardIds = {};
         var frag = document.createDocumentFragment();
-        cachedMsgs.forEach(function(m) { frag.appendChild(buildMessageNode(m, messagesEl)); });
+        var cachedNodes = [];
+        cachedMsgs.forEach(function(m) {
+          var cachedNode = buildMessageNode(m, messagesEl);
+          cachedNodes.push(cachedNode);
+          frag.appendChild(cachedNode);
+        });
         messagesEl.appendChild(frag);
+        renderAiHistoryCards(messagesEl, cachedMsgs, cachedNodes, []);
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
-      } else if (!messagesEl.children.length || messagesEl.querySelector('.ai-history-unavailable')) {
+      } else if (!messagesEl.children.length
+          || messagesEl.querySelector('.ai-history-unavailable')
+          // renderAiRoot starts with the welcome empty-state, so checking only
+          // children.length skipped the loading indicator on every cold open.
+          || messagesEl.querySelector('.ai-chat-empty')) {
         messagesEl.innerHTML = '';
         var loadingState = buildEmptyState('正在加载聊天记录…');
         loadingState.classList.add('ai-history-loading');
@@ -11012,9 +11041,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
         S.messages = msgs.concat(_localPending);
         messagesEl.innerHTML = '';
+        // The prior DOM is discarded below, so its card-id dedupe map must be
+        // discarded too or restored cards would be incorrectly suppressed.
+        messagesEl.__xtjAiCardIds = {};
         var frag = document.createDocumentFragment();
-        msgs.forEach(function(m) { frag.appendChild(buildMessageNode(m, messagesEl)); });
+        var _historyNodes = [];
+        msgs.forEach(function(m) {
+          var _historyNode = buildMessageNode(m, messagesEl);
+          _historyNodes.push(_historyNode);
+          frag.appendChild(_historyNode);
+        });
         messagesEl.appendChild(frag);
+        renderAiHistoryCards(messagesEl, msgs, _historyNodes, []);
         // 历史渲染完再把本地未同步的轮次放回末尾（节点原样复用，流式写入不中断）
         for (var _li = 0; _li < _localNodes.length; _li++) {
           try { messagesEl.appendChild(_localNodes[_li]); } catch (eReappend) {}
@@ -11037,12 +11075,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   修法：额外记住加载前的 scrollTop，插入后设 scrollTop = oldScrollTop + Δ。
         var oldScroll = messagesEl.scrollHeight;
         var oldScrollTop = messagesEl.scrollTop;
+        var _existingFirstNode = messagesEl.firstChild;
         var frag = document.createDocumentFragment();
+        var _historyNodes = [];
         for (var mi = 0; mi < msgs.length; mi++) {
           var node = buildMessageNode(msgs[mi], messagesEl);
+          _historyNodes.push(node);
           frag.appendChild(node);
         }
-        messagesEl.insertBefore(frag, messagesEl.firstChild);
+        messagesEl.insertBefore(frag, _existingFirstNode);
+        renderAiHistoryCards(messagesEl, msgs, _historyNodes, msgs.map(function() { return _existingFirstNode; }));
         try {
           requestAnimationFrame(function() {
             // ★ 2026-09-29（审计 M9，接上方注释）：Δ 是"新增内容高度"，
