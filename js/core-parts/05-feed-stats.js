@@ -300,6 +300,7 @@
                 if (payload && payload.media && payload.media.url) {
                     return {
                         kind: payload.media.kind || '',
+                        name: payload.media.name || '',
                         src: payload.media.url,
                         fullSrc: payload.media.url,
                         w: Math.round(Number(payload.media.w || 0)) || 0,
@@ -345,6 +346,7 @@
                 var media = resolveDockChatMedia(message);
                 if (!media) return '新消息';
                 // P6: support audio preview text
+                if (media.kind === 'file') return '[文件]';
                 if (media.kind === 'audio') return '[音频]';
                 if (media.kind === 'video') return '[视频]';
                 return '[图片]';

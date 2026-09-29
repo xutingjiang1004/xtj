@@ -103,7 +103,7 @@ function createChatSocialRouter(options) {
   router.patch('/conversations/:peerName', authenticatedWriteLimit(), async function(req, res) {
     var peerName = cleanName(req.params.peerName);
     var action = String(req.body && req.body.action || '');
-    if (!peerName || ['pin','unpin','mute','unmute','mark_read','mark_unread','clear','delete','draft'].indexOf(action) < 0) {
+    if (!peerName || ['pin','unpin','mute','unmute','mark_read','mark_unread','clear','delete','draft','archive','unarchive'].indexOf(action) < 0) {
       return res.status(400).json({ ok: false, code: 'invalid_action' });
     }
     var draft = req.body && req.body.draft_text;

@@ -68,6 +68,9 @@ const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = requi
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
+const { createChatFeatures } = require('./chat-features');
+const { createDmPrivateStorage, dmStorageBucket, PRIVATE_BUCKET } = require('./dm-private-storage');
+const { sniffDocument } = require('./dm-file-magic');
 const { createChatSocialRouter, assertCanSendDirectMessage, listChatConversations, getChatConversationState } = require('./chat-social');
 
 /**
@@ -11940,6 +11943,9 @@ async function authenticateUser(req, res, next) {
   return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
 }
 
+const dmPrivateStorage = createDmPrivateStorage(supabase);
+app.use(dmPrivateStorage.middleware);
+
 // The service-role backed chat social API is mounted behind the same signed
 // user-token middleware as the legacy DM API. Its database functions are not
 // callable by browser Supabase roles.
@@ -11951,6 +11957,9 @@ app.use('/api/chat', createChatSocialRouter({
   adminName: ADMIN_USERNAME,
   publishEvent: publishChatEvent
 }));
+
+const chatFeatures = createChatFeatures({ express, supabase, authenticateUser, rateLimit, publishChatEvent });
+app.use('/api/chat', chatFeatures.router);
 
 // HTML 转义（服务端安全输出）
 function escapeHtml(str) {
@@ -15597,7 +15606,7 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
 // 被三处共用：发送时生成（/api/dm/send）、撤回时清理（/api/dm/withdraw）、
 // 访问鉴权（/api/dm/media/authorize，经 resolveDmMediaPathFromActorKey）。
 // ★ 只在此处定义一次——新增媒体 kind 时改这里，避免多处前缀表漏改。
-var DM_MEDIA_ACTOR_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__'];
+var DM_MEDIA_ACTOR_PREFIXES = ['__dm_img__', '__dm_vid__', '__dm_aud__', '__dm_file__'];
 
 // POST /api/dm/send - 发送私信（后端认证写入，禁止前端直连 Supabase）
 // ★ 2026-09-25 修复（审计 B-1）：actor_key 由「kind + storage_path」决定，本身**不含收件人**。
@@ -15655,7 +15664,7 @@ async function cleanupDmMediaAfterFailedSend(registryRow, storagePath, reason) {
   var cleanupResult;
   try {
     cleanupResult = await removeStorageWithQueue(supabase, {
-      bucket: 'uploads',
+      bucket: dmStorageBucket(storagePath),
       paths: [storagePath],
       photoId: registryRow && registryRow.id,
       lastError: reason
@@ -15728,6 +15737,7 @@ function sniffDmMediaMagic(buf, kind) {
     return { ok: false, error: '无法识别的视频文件，请重新选择' };
   }
   if (kind === 'audio') {
+    if (has(0, [0x1a, 0x45, 0xdf, 0xa3])) return { ok: true, format: 'webm' };
     if (ascii(0, 'ID3')) return { ok: true, format: 'mp3' };
     // MP3 帧同步：11 位全 1
     if (b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return { ok: true, format: 'mp3' };
@@ -15816,7 +15826,7 @@ app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadRes
     const uidHash = crypto.createHash('sha256').update(uploader).digest('hex').slice(0, 12);
     const ownResult = validateDmUploadOwnership(storagePathRaw, uidHash);
     if (!ownResult.ok) return res.status(400).json({ error: ownResult.error, code: ownResult.code });
-    const storagePath = ownResult.storagePath;
+    const storagePath = 'chat/' + uidHash + '_private_' + crypto.randomUUID() + '_' + path.basename(ownResult.storagePath).slice(-120);
 
     // ③ 类型白名单（不接受 svg，防存储型 XSS）
     const kindResult = validateDmMediaKind(kind, mimeType);
@@ -15854,14 +15864,14 @@ app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadRes
         return res.status(400).json({ error: '图片内容与声明类型不符', code: 'INVALID_INPUT' });
       }
     } else {
-      const sniff = sniffDmMediaMagic(buf, kindResult.kind);
+      const sniff = kindResult.kind === 'file' ? sniffDocument(buf, kindResult.mimeType) : sniffDmMediaMagic(buf, kindResult.kind);
       if (!sniff.ok) return res.status(400).json({ error: sniff.error, code: 'INVALID_MEDIA' });
     }
 
     // ⑦ 服务端写入（service_role 绕过 RLS；upsert:false 防止覆盖他人同名对象）
     let upload;
     try {
-      upload = await supabase.storage.from('uploads').upload(storagePath, buf, {
+      upload = await supabase.storage.from(dmStorageBucket(storagePath)).upload(storagePath, buf, {
         contentType: kindResult.mimeType,
         cacheControl: '31536000',
         upsert: false
@@ -15882,7 +15892,12 @@ app.post('/api/dm/upload', authenticateUser, rateLimit(3600000, 60), dmUploadRes
     // 字节确实落盘 → 额度不再回滚
     if (reservation) reservation.committed = true;
 
-    const publicUrl = supabase.storage.from('uploads').getPublicUrl(storagePath).data.publicUrl;
+    let publicUrl;
+    try { publicUrl = await dmPrivateStorage.sign(storagePath); }
+    catch (signError) {
+      await removeStorageWithQueue(supabase, { bucket: PRIVATE_BUCKET, paths: [storagePath], lastError: 'private_media_sign_failed' });
+      throw signError;
+    }
     // 注意：这里只上传，**不**登记 dm_media_uploads 注册表。
     //   注册表由随后的 /api/dm/send（claimDmMediaUpload）按 storage_path 认领，
     //   保持「两段式」不变：上传 ≠ 已发送，消息未发出前不会污染注册表。
@@ -15954,7 +15969,7 @@ app.post('/api/dm/upload/abort', authenticateUser, rateLimit(60000, 60), async (
     }
 
     try {
-      const removed = await supabase.storage.from('uploads').remove([storagePath]);
+      const removed = await supabase.storage.from(dmStorageBucket(storagePath)).remove([storagePath]);
       if (removed && removed.error) {
         console.warn('[dm-upload-abort] remove failed:', removed.error && removed.error.message);
         return res.status(503).json({ error: '清理未完成，请稍后重试', code: 'dm_abort_failed', retryable: true });
@@ -16041,6 +16056,15 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       });
     }
 
+    // Validate quotes before acquiring an upload lease: rejected quotes cannot strand media.
+    var canonicalReply = null;
+    var requestedEnvelope;
+    try { requestedEnvelope = JSON.parse(content); } catch (_) {}
+    if (requestedEnvelope && requestedEnvelope.reply_to) {
+      canonicalReply = await chatFeatures.validateReply(sender, targetUser, requestedEnvelope.reply_to.id);
+      if (!canonicalReply) return res.status(400).json({ ok: false, code: 'invalid_reply', error: '引用消息已不可用' });
+    }
+
     // P6: 媒体文件处理 — 如果有媒体文件，验证并生成 actor_key / URL
     var actorKey = 'dm_' + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '_' + Math.random().toString(36).slice(2));
     var mediaPayload = null;
@@ -16089,12 +16113,12 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       actorKey = kindResult.actorPrefix + pathResult.storagePath;
       mediaKind = String(registryRow.kind || kindResult.kind);
       mimeType = String(registryRow.mime_type || kindResult.mimeType);
-      // getPublicUrl only constructs a URL; it does not prove bucket policy. Existing
-      // clients consume stable public URLs, so do not silently change the API to signed
-      // URLs until the deployed uploads bucket policy is verified outside this repo.
+      // New private objects use signed URLs; legacy objects retain their existing bucket.
       var publicUrlResult;
       try {
-        publicUrlResult = supabase.storage.from('uploads').getPublicUrl(pathResult.storagePath);
+        publicUrlResult = dmStorageBucket(pathResult.storagePath) === PRIVATE_BUCKET
+          ? { data: { publicUrl: await dmPrivateStorage.sign(pathResult.storagePath) } }
+          : supabase.storage.from('uploads').getPublicUrl(pathResult.storagePath);
       } catch (error) {
         return res.status(503).json({ error: 'Media URL could not be generated', code: 'media_url_failed', retryable: true });
       }
@@ -16113,6 +16137,8 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       var _mw = _normDim(req.body && req.body.media_width);
       var _mh = _normDim(req.body && req.body.media_height);
       mediaPayload = { kind: mediaKind, url: publicUrl, mimeType: mimeType };
+      if (dmStorageBucket(pathResult.storagePath) === PRIVATE_BUCKET) { mediaPayload.bucket = PRIVATE_BUCKET; mediaPayload.storage_path = pathResult.storagePath; }
+      if (mediaKind === 'file') mediaPayload.name = path.basename(String(req.body.file_name || '附件').replace(/\\/g, '/')).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120) || '附件';
       if (_mw > 0 && _mh > 0) { mediaPayload.w = _mw; mediaPayload.h = _mh; }
 
       // A second send for an already attached upload is idempotent. If the
@@ -16198,13 +16224,22 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
       // P6: 移除客户端可能传入的 media 字段，替换为后端生成的 mediaPayload
       if (mediaPayload) {
         parsedPayload.media = mediaPayload;
+        parsedPayload.kind = mediaPayload.kind;
       } else {
         delete parsedPayload.media;
+        delete parsedPayload.kind;
+      }
+      delete parsedPayload.edited_at;
+      delete parsedPayload.transcript;
+      if (parsedPayload.reply_to) {
+        parsedPayload.reply_to = canonicalReply;
       }
       content = JSON.stringify(parsedPayload);
     } else {
       if (mediaPayload) {
-        content = JSON.stringify({ text: content, read_at: null, media: mediaPayload });
+        content = JSON.stringify({ text: content, read_at: null, media: mediaPayload })
+        // Keep the legacy envelope, then add the authoritative normalized kind.
+        content = JSON.stringify({ ...JSON.parse(content), kind: mediaPayload.kind });
       } else {
         content = JSON.stringify({ text: content, read_at: null });
       }
@@ -16280,6 +16315,9 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     //   发件人其它设备的同步仍由轮询兜底（与本次改动之前一致，不是回归）。
     publishDmRealtime(targetUser, inserted);
     publishChatEvent(req.userName,'chat-state',{kind:'sent',peer:targetUser});
+    if (mediaPayload && mediaPayload.kind === 'audio') {
+      void chatFeatures.transcription.enqueue(inserted.id).catch(() => console.error('[chat-transcription] enqueue failed'));
+    }
     return res.json({ ok: true, message: inserted });
   } catch (e) {
     console.error('[API] dm send:', e && e.message);
@@ -16327,7 +16365,8 @@ app.get('/api/dm/realtime-topic', authenticateUser, rateLimit(60000, 60), async 
 
 // 把一条私信发布到收件人的频道。**永不阻塞、永不抛错**：投递失败不能影响发送本身。
 function publishDmRealtime(targetUser, message) {
-  publishChatEvent(targetUser,'dm',{message:message});
+  var outgoing = { ...message };
+  void dmPrivateStorage.hydrateMessage(outgoing).then(() => publishChatEvent(targetUser,'dm',{message:outgoing})).catch(() => publishChatEvent(targetUser,'chat-state',{kind:'refresh'}));
 }
 
 function publishChatEvent(targetUser,event,payload) {
@@ -16467,7 +16506,7 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
       // records a durable storage_cleanup_jobs retry task when removal fails.
       try {
         cleanupResult = await removeStorageWithQueue(supabase, {
-          bucket: 'uploads',
+          bucket: dmStorageBucket(storagePath),
           paths: [storagePath],
           photoId: messageId
         });
