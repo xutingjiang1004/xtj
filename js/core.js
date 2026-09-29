@@ -528,6 +528,7 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理头像缓存
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; window._xtjCanonicalUser = ''; window._xtjAuthState = 'unauthenticated'; } catch(e) {}
+                try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
@@ -3814,6 +3815,7 @@ function isAdmin() {
 
                 currentUser = '';
                 window.currentUser = '';
+                try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 window._lastKnownUser = '';
                 window.currentUserInfoSnapshot = null;
                 _chatCache = {};
@@ -10904,7 +10906,39 @@ function renderProfileActivityList(kind) {
             //   收到消息后**直接把 payload 写进缓存并增量渲染**（复审 P2-02 的建议形态），
             //   不再因为一条新消息就回拉 180 条历史。
             // ══════════════════════════════════════════════════════════════════
-            var dmBroadcast = { channel: null, topic: null, epoch: 0, attempts: 0 };
+            var dmBroadcast = { channel: null, topic: null, owner: '', epoch: 0, attempts: 0 };
+            window.__xtjResetDmBroadcast = function() {
+                dmBroadcast.epoch++;
+                if (dmBroadcast.channel && sb) { try { sb.removeChannel(dmBroadcast.channel); } catch(e) {} }
+                if (chatRealtime && sb) { try { sb.removeChannel(chatRealtime); } catch(e) {} }
+                chatRealtime = null;
+                window.__dmSubEpoch = (window.__dmSubEpoch || 0) + 1;
+                dmBroadcast.channel = null;
+                dmBroadcast.topic = null;
+                dmBroadcast.owner = '';
+                dmBroadcast.attempts = 0;
+                if (_chatStateRefreshTimer) { clearTimeout(_chatStateRefreshTimer); _chatStateRefreshTimer = null; }
+            };
+            var _chatStateRefreshTimer = null;
+            function refreshChatStateFromEvent(payload) {
+                if (!window.currentUser) return;
+                var owner = window.currentUser;
+                if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
+                if (_chatStateRefreshTimer) clearTimeout(_chatStateRefreshTimer);
+                _chatStateRefreshTimer = setTimeout(function() {
+                    _chatStateRefreshTimer = null;
+                    if (owner !== window.currentUser) return;
+                    window.dockChatListCacheTime = 0;
+                    loadDockChatList();
+                    updateUnreadBadge();
+                    if (dockChatActiveUser && payload && (!payload.peer || payload.peer===dockChatActiveUser) &&
+                        ['read','mark_read','sent','withdraw','delete_message'].indexOf(payload.kind) >= 0) {
+                        loadDockChatMessages(dockChatActiveUser,false);
+                    }
+                    if (payload && ['friend_request','friendship','block','friend_note'].indexOf(payload.kind) >= 0 &&
+                        typeof window.__xtjRefreshChatSocialState === 'function') window.__xtjRefreshChatSocialState();
+                },180);
+            }
 
             function applyRealtimeDmMessage(message) {
                 try {
@@ -10941,7 +10975,12 @@ function renderProfileActivityList(kind) {
             }
 
             async function subscribeToDmBroadcast() {
-                if (!sb || !window.currentUser) return;
+                var owner=window.currentUser || '';
+                if (dmBroadcast.owner !== owner) {
+                    window.__xtjResetDmBroadcast();
+                    dmBroadcast.owner=owner;
+                }
+                if (!sb || !owner) return;
                 if (typeof window.xtjProtectedFetch !== "function") return;
                 dmBroadcast.epoch += 1;
                 var myEpoch = dmBroadcast.epoch;
@@ -10951,10 +10990,11 @@ function renderProfileActivityList(kind) {
                         if (!resp || !resp.ok) { console.warn("[dm-realtime] topic fetch", resp && resp.status); return; }
                         var data = await resp.json().catch(function () { return {}; });
                         if (!data || !data.ok || !data.topic) return;
+                        if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
                         dmBroadcast.topic = data.topic;
                     }
                 } catch (e) { return; }
-                if (myEpoch !== dmBroadcast.epoch) return; // 已被更新的订阅取代
+                if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
                 try {
                     if (dmBroadcast.channel) { sb.removeChannel(dmBroadcast.channel); dmBroadcast.channel = null; }
                 } catch (e) {}
@@ -10965,16 +11005,32 @@ function renderProfileActivityList(kind) {
                             var msg = payload && payload.payload && payload.payload.message;
                             applyRealtimeDmMessage(msg);
                         })
+                        .on("broadcast", { event: "chat-state" }, function(payload) {
+                            if (myEpoch !== dmBroadcast.epoch) return;
+                            refreshChatStateFromEvent(payload && payload.payload);
+                        })
+                        .on("broadcast", { event: "typing" }, function(payload) {
+                            if (myEpoch !== dmBroadcast.epoch) return;
+                            if (typeof window.__xtjApplyChatTyping === 'function') window.__xtjApplyChatTyping(payload && payload.payload);
+                        })
+                        .on("broadcast", { event: "presence" }, function(payload) {
+                            if (myEpoch !== dmBroadcast.epoch) return;
+                            if (typeof window.__xtjRefreshChatPresence === 'function') window.__xtjRefreshChatPresence(payload && payload.payload && payload.payload.peer);
+                        })
                         .subscribe(function (status) {
-                            if (status === "SUBSCRIBED") { dmBroadcast.attempts = 0; return; }
+                            if (status === "SUBSCRIBED") {
+                                dmBroadcast.attempts = 0;
+                                refreshChatStateFromEvent({kind:'reconnect'});
+                                if (typeof window.__xtjRefreshChatPresence === 'function') window.__xtjRefreshChatPresence();
+                                return;
+                            }
                             if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
                                 console.warn("[dm-realtime]", status);
-                                if (dmBroadcast.attempts >= 10) return;
                                 dmBroadcast.attempts += 1;
                                 var backoff = Math.min(1000 * Math.pow(2, dmBroadcast.attempts), 30000);
                                 setTimeout(function () {
                                     // 代次校验：期间若已重建订阅，旧定时器必须彻底放弃（与 P1-01 同一教训）
-                                    if (myEpoch !== dmBroadcast.epoch) return;
+                                    if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
                                     subscribeToDmBroadcast();
                                 }, backoff);
                             }
@@ -12294,6 +12350,8 @@ function renderProfileActivityList(kind) {
 
             function dockChatGoBack() {
                 closeDockChatConversationMenu();
+                sendDockChatTyping(false);
+                showDockChatPresence('',false);
                 if (_dockChatDraftTimer && dockChatActiveUser) {
                     clearTimeout(_dockChatDraftTimer);
                     _dockChatDraftTimer = null;
@@ -12373,8 +12431,12 @@ function renderProfileActivityList(kind) {
                     persistDockChatDraft(dockChatActiveUser,previousInput ? previousInput.value : '');
                 }
                 dockChatActiveUser = userName;
+                _chatPresenceSnapshot=null;
+                showDockChatPresence('',false);
                 closeDockChatConversationMenu();
                 restoreDockChatDraft(userName);
+                refreshDockChatPresence(userName);
+                touchDockChatPresence();
                 // ★ 2026-09-27 修复（C11）：直接进详情时，会话列表并未加载，
                 //   标记为"待加载"，返回列表时 dockChatGoBack 会据此强制加载一次。
                 _dockChatListEverLoaded = false;
@@ -12496,6 +12558,7 @@ function renderProfileActivityList(kind) {
                 if (!dockChatActiveUser) {
                     syncDockChatLayoutState();
                 }
+                touchDockChatPresence();
                 refreshChatSocialBadge(false);
                 refreshChatFriendNotes(false);
                 if (el.getAttribute('data-list-owner') === window.currentUser &&
@@ -14008,6 +14071,7 @@ function renderProfileActivityList(kind) {
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
                 dockChatSending = true; inp.value = '';
+                sendDockChatTyping(false);
                 if (_dockChatDraftTimer) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
@@ -15323,6 +15387,117 @@ function renderProfileActivityList(kind) {
                 });
             }
 
+            var _chatPresenceTouchedAt = 0;
+            var _chatPresenceOwner = '';
+            var _chatPresenceSeq = 0;
+            var _chatPresenceSnapshot = null;
+            var _chatTypingUntil = 0;
+            var _chatTypingPeer = '';
+            var _chatTypingLastSentAt = 0;
+            var _chatTypingStopTimer = null;
+
+            function showDockChatPresence(text,online) {
+                var el = document.getElementById('dockChatPresence');
+                if (!el) return;
+                el.textContent = text || '';
+                el.hidden = !text || !dockChatActiveUser;
+                el.classList.toggle('is-online',!!online && !!text);
+                el.classList.toggle('is-typing',text==='正在输入…');
+            }
+
+            function formatDockChatPresence(lastSeen) {
+                var age = Date.now()-Date.parse(lastSeen || '');
+                if (!Number.isFinite(age) || age<0) return '离线';
+                if (age<80000) return '在线';
+                if (age<180000) return '刚刚在线';
+                if (age<3600000) return Math.max(1,Math.floor(age/60000))+' 分钟前在线';
+                if (age<86400000) return Math.floor(age/3600000)+' 小时前在线';
+                return new Date(lastSeen).toLocaleDateString()+' 在线';
+            }
+
+            function paintDockChatPresence() {
+                if (!dockChatActiveUser) return;
+                if (_chatTypingPeer===dockChatActiveUser && _chatTypingUntil>Date.now()) {
+                    showDockChatPresence('正在输入…',false); return;
+                }
+                var snapshot=_chatPresenceSnapshot;
+                if (!snapshot || snapshot.peer!==dockChatActiveUser) { showDockChatPresence('',false); return; }
+                var text=formatDockChatPresence(snapshot.last_seen_at);
+                showDockChatPresence(text,text==='在线');
+            }
+
+            function refreshDockChatPresence(peer) {
+                peer=peer || dockChatActiveUser;
+                if (!peer || peer!==dockChatActiveUser || !window.currentUser) return;
+                var owner=window.currentUser;
+                var seq=++_chatPresenceSeq;
+                requestDockChatSocial('/presence/'+encodeURIComponent(peer)).then(function(data) {
+                    if (owner!==window.currentUser || dockChatActiveUser!==peer || seq!==_chatPresenceSeq) return;
+                    _chatPresenceSnapshot={peer:peer,last_seen_at:data.presence.last_seen_at};
+                    paintDockChatPresence();
+                }).catch(function() {
+                    if (owner!==window.currentUser || dockChatActiveUser!==peer || seq!==_chatPresenceSeq) return;
+                    _chatPresenceSnapshot=null;
+                    showDockChatPresence('',false);
+                });
+            }
+            window.__xtjRefreshChatPresence=refreshDockChatPresence;
+
+            function touchDockChatPresence() {
+                if (!window.currentUser || document.hidden || (typeof navigator!=='undefined' && navigator.onLine===false)) return;
+                var owner=window.currentUser;
+                if (_chatPresenceOwner!==owner) { _chatPresenceOwner=owner; _chatPresenceTouchedAt=0; }
+                if (Date.now()-_chatPresenceTouchedAt<30000) return;
+                _chatPresenceTouchedAt=Date.now();
+                requestDockChatSocial('/presence/heartbeat',{method:'POST',body:'{}'}).catch(function() {
+                    if (window.currentUser===owner) _chatPresenceTouchedAt=0;
+                });
+            }
+            window.__xtjChatHeartbeat=touchDockChatPresence;
+
+            function sendDockChatTyping(active) {
+                var peer=dockChatActiveUser;
+                if (!peer || !window.currentUser) return;
+                if (active && Date.now()-_chatTypingLastSentAt<3000) return;
+                _chatTypingLastSentAt=active ? Date.now() : 0;
+                requestDockChatSocial('/typing/'+encodeURIComponent(peer),{
+                    method:'POST',body:JSON.stringify({active:!!active})
+                }).catch(function() {});
+            }
+            window.__xtjApplyChatTyping=function(payload) {
+                if (!payload || payload.peer!==dockChatActiveUser || !window.currentUser || document.hidden) return;
+                if (Math.abs(Date.now()-Number(payload.at))>15000) return;
+                _chatTypingPeer=payload.peer;
+                _chatTypingUntil=payload.active ? Date.now()+4700 : 0;
+                paintDockChatPresence();
+            };
+            setInterval(function() {
+                touchDockChatPresence();
+                if (dockChatActiveUser && !document.hidden) {
+                    if (_chatTypingUntil<=Date.now()) paintDockChatPresence();
+                    refreshDockChatPresence(dockChatActiveUser);
+                }
+            },35000);
+            document.addEventListener('visibilitychange',function() {
+                if (!document.hidden) { touchDockChatPresence(); refreshDockChatPresence(); }
+                else { sendDockChatTyping(false); _chatTypingUntil=0; }
+            });
+            window.addEventListener('online',function() { touchDockChatPresence(); refreshDockChatPresence(); });
+            setTimeout(touchDockChatPresence,1500);
+
+            window.__xtjRefreshChatSocialState=function() {
+                refreshChatSocialBadge(true);
+                refreshChatFriendNotes(true);
+                if (dockChatActiveUser) {
+                    _chatPresenceSnapshot=null;
+                    showDockChatPresence('',false);
+                    refreshDockChatPresence(dockChatActiveUser);
+                    updateDockChatComposerPermission(dockChatActiveUser);
+                }
+                var sheet=document.getElementById('dockChatSocialSheet');
+                if (sheet && !sheet.classList.contains('hidden')) renderDockChatSocialTab(_dockChatSocialTab);
+            };
+
             function closeDockChatConversationMenu() {
                 var menu = document.getElementById('dockChatConversationMenu');
                 if (menu) menu.classList.add('hidden');
@@ -15450,6 +15625,13 @@ function renderProfileActivityList(kind) {
             if (_conversationInput) _conversationInput.addEventListener('input',function() {
                 var peer = dockChatActiveUser;
                 var value = _conversationInput.value;
+                if (_chatTypingStopTimer) clearTimeout(_chatTypingStopTimer);
+                if (value.trim()) {
+                    sendDockChatTyping(true);
+                    _chatTypingStopTimer=setTimeout(function() {
+                        if (dockChatActiveUser===peer) sendDockChatTyping(false);
+                    },4200);
+                } else sendDockChatTyping(false);
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
                 _dockChatDraftTimer = setTimeout(function() { persistDockChatDraft(peer,value); },650);
             });

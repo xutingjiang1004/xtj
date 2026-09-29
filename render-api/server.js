@@ -11948,7 +11948,8 @@ app.use('/api/chat', createChatSocialRouter({
   supabase: supabase,
   authenticateUser: authenticateUser,
   rateLimit: rateLimit,
-  adminName: ADMIN_USERNAME
+  adminName: ADMIN_USERNAME,
+  publishEvent: publishChatEvent
 }));
 
 // HTML 转义（服务端安全输出）
@@ -15218,6 +15219,7 @@ app.post('/api/dm/deleted', authenticateUser, rateLimit(60000, 30), async (req, 
       actor_key: 'dm_deleted_' + Date.now()
     }]).select('id').maybeSingle();
     if (ins.error) throw ins.error;
+    publishChatEvent(req.userName, 'chat-state', { kind:'delete_message' });
     var keepId = ins.data && ins.data.id;
     if (keepId) {
       // 先立后破：新快照落库成功后再清理同账号的旧快照行
@@ -15505,6 +15507,12 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
           updatedRows = fetchedRows || [];
         }
       }
+      if (updatedIds.length) {
+        publishChatEvent(receiver,'chat-state',{kind:'read'});
+        Array.from(new Set(updatedRows.map(function(row) { return row.user_name; }))).forEach(function(sender) {
+          publishChatEvent(sender,'chat-state',{kind:'read',peer:receiver});
+        });
+      }
       return res.json({
         ok: true,
         marked: Number(rpcResult.marked) || updatedIds.length,
@@ -15570,6 +15578,12 @@ app.post('/api/dm/read', authenticateUser, rateLimit(60000, 120), async (req, re
       }
     });
 
+    if (updated.length) {
+      publishChatEvent(receiver,'chat-state',{kind:'read'});
+      Array.from(new Set(updated.map(function(row) { return row.user_name; }))).forEach(function(sender) {
+        publishChatEvent(sender,'chat-state',{kind:'read',peer:receiver});
+      });
+    }
     return res.json({ ok: true, marked: updated.length, partial: failedIds.length > 0, failed_ids: failedIds, data: updated });
   } catch (e) {
     console.error('[API] dm read:', e && e.message ? e.message : e);
@@ -16265,6 +16279,7 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     //   upsertDockChatCacheMessage 无法按 id 命中，会多出一个重复气泡。
     //   发件人其它设备的同步仍由轮询兜底（与本次改动之前一致，不是回归）。
     publishDmRealtime(targetUser, inserted);
+    publishChatEvent(req.userName,'chat-state',{kind:'sent',peer:targetUser});
     return res.json({ ok: true, message: inserted });
   } catch (e) {
     console.error('[API] dm send:', e && e.message);
@@ -16312,14 +16327,18 @@ app.get('/api/dm/realtime-topic', authenticateUser, rateLimit(60000, 60), async 
 
 // 把一条私信发布到收件人的频道。**永不阻塞、永不抛错**：投递失败不能影响发送本身。
 function publishDmRealtime(targetUser, message) {
+  publishChatEvent(targetUser,'dm',{message:message});
+}
+
+function publishChatEvent(targetUser,event,payload) {
   try {
     var topic = dmRealtimeTopic(targetUser);
-    if (!topic || !message || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) return;
+    if (!topic || !event || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) return;
     var body = {
       messages: [{
         topic: topic,
-        event: 'dm',
-        payload: { message: message },
+        event: event,
+        payload: payload || {},
         private: false
       }]
     };
@@ -16481,6 +16500,8 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
       }
     }
 
+    publishChatEvent(reqUser,'chat-state',{kind:'withdraw',peer:updated.media_url});
+    publishChatEvent(updated.media_url,'chat-state',{kind:'withdraw',peer:reqUser});
     return res.json({ ok: true, message: updated, cleanup_pending: !!(cleanupResult && cleanupResult.cleanup_pending), media_registry_pending: mediaRegistryPending });
   } catch (e) {
     console.error('[API] dm withdraw:', e && e.message);

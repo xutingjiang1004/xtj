@@ -16284,6 +16284,14 @@ profile content only. Dock stays untouched.
 }
 .chat-social-sheet.hidden { display: none; }
 .chat-conversation-trigger { margin-left:auto; border:0; background:transparent; color:inherit; font-size:23px; min-width:40px; min-height:40px; cursor:pointer; }
+.chat-title-stack { display:flex; flex-direction:column; min-width:0; }
+.chat-title-stack h3 { margin:0; }
+.chat-presence { color:var(--xtj-text-muted,#688377); font-size:11px; line-height:1.4; white-space:nowrap; }
+.chat-presence[hidden] { display:none; }
+.chat-presence.is-online::before { content:""; display:inline-block; width:6px; height:6px; margin-right:5px; border-radius:50%; background:#27b36b; vertical-align:middle; }
+.chat-presence.is-typing { color:#2d966b; animation:xtj-chat-typing-pulse 1.4s ease-in-out infinite; }
+@keyframes xtj-chat-typing-pulse { 50% { opacity:.52; } }
+@media (prefers-reduced-motion:reduce) { .chat-presence.is-typing { animation:none; } }
 .chat-conversation-trigger[hidden] { display:none !important; }
 .cli-state { margin-left:6px; padding:2px 5px; border-radius:7px; background:rgba(62,131,99,.1); color:var(--xtj-text-muted,#628172); font-size:10px; }
 .cli-menu-btn { border:0; background:transparent; color:inherit; font-size:17px; min-width:32px; min-height:30px; cursor:pointer; }

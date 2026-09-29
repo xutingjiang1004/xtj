@@ -537,6 +537,7 @@
 
                 currentUser = '';
                 window.currentUser = '';
+                try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 window._lastKnownUser = '';
                 window.currentUserInfoSnapshot = null;
                 _chatCache = {};

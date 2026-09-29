@@ -737,7 +737,39 @@
             //   收到消息后**直接把 payload 写进缓存并增量渲染**（复审 P2-02 的建议形态），
             //   不再因为一条新消息就回拉 180 条历史。
             // ══════════════════════════════════════════════════════════════════
-            var dmBroadcast = { channel: null, topic: null, epoch: 0, attempts: 0 };
+            var dmBroadcast = { channel: null, topic: null, owner: '', epoch: 0, attempts: 0 };
+            window.__xtjResetDmBroadcast = function() {
+                dmBroadcast.epoch++;
+                if (dmBroadcast.channel && sb) { try { sb.removeChannel(dmBroadcast.channel); } catch(e) {} }
+                if (chatRealtime && sb) { try { sb.removeChannel(chatRealtime); } catch(e) {} }
+                chatRealtime = null;
+                window.__dmSubEpoch = (window.__dmSubEpoch || 0) + 1;
+                dmBroadcast.channel = null;
+                dmBroadcast.topic = null;
+                dmBroadcast.owner = '';
+                dmBroadcast.attempts = 0;
+                if (_chatStateRefreshTimer) { clearTimeout(_chatStateRefreshTimer); _chatStateRefreshTimer = null; }
+            };
+            var _chatStateRefreshTimer = null;
+            function refreshChatStateFromEvent(payload) {
+                if (!window.currentUser) return;
+                var owner = window.currentUser;
+                if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
+                if (_chatStateRefreshTimer) clearTimeout(_chatStateRefreshTimer);
+                _chatStateRefreshTimer = setTimeout(function() {
+                    _chatStateRefreshTimer = null;
+                    if (owner !== window.currentUser) return;
+                    window.dockChatListCacheTime = 0;
+                    loadDockChatList();
+                    updateUnreadBadge();
+                    if (dockChatActiveUser && payload && (!payload.peer || payload.peer===dockChatActiveUser) &&
+                        ['read','mark_read','sent','withdraw','delete_message'].indexOf(payload.kind) >= 0) {
+                        loadDockChatMessages(dockChatActiveUser,false);
+                    }
+                    if (payload && ['friend_request','friendship','block','friend_note'].indexOf(payload.kind) >= 0 &&
+                        typeof window.__xtjRefreshChatSocialState === 'function') window.__xtjRefreshChatSocialState();
+                },180);
+            }
 
             function applyRealtimeDmMessage(message) {
                 try {
@@ -774,7 +806,12 @@
             }
 
             async function subscribeToDmBroadcast() {
-                if (!sb || !window.currentUser) return;
+                var owner=window.currentUser || '';
+                if (dmBroadcast.owner !== owner) {
+                    window.__xtjResetDmBroadcast();
+                    dmBroadcast.owner=owner;
+                }
+                if (!sb || !owner) return;
                 if (typeof window.xtjProtectedFetch !== "function") return;
                 dmBroadcast.epoch += 1;
                 var myEpoch = dmBroadcast.epoch;
@@ -784,10 +821,11 @@
                         if (!resp || !resp.ok) { console.warn("[dm-realtime] topic fetch", resp && resp.status); return; }
                         var data = await resp.json().catch(function () { return {}; });
                         if (!data || !data.ok || !data.topic) return;
+                        if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
                         dmBroadcast.topic = data.topic;
                     }
                 } catch (e) { return; }
-                if (myEpoch !== dmBroadcast.epoch) return; // 已被更新的订阅取代
+                if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
                 try {
                     if (dmBroadcast.channel) { sb.removeChannel(dmBroadcast.channel); dmBroadcast.channel = null; }
                 } catch (e) {}
@@ -798,16 +836,32 @@
                             var msg = payload && payload.payload && payload.payload.message;
                             applyRealtimeDmMessage(msg);
                         })
+                        .on("broadcast", { event: "chat-state" }, function(payload) {
+                            if (myEpoch !== dmBroadcast.epoch) return;
+                            refreshChatStateFromEvent(payload && payload.payload);
+                        })
+                        .on("broadcast", { event: "typing" }, function(payload) {
+                            if (myEpoch !== dmBroadcast.epoch) return;
+                            if (typeof window.__xtjApplyChatTyping === 'function') window.__xtjApplyChatTyping(payload && payload.payload);
+                        })
+                        .on("broadcast", { event: "presence" }, function(payload) {
+                            if (myEpoch !== dmBroadcast.epoch) return;
+                            if (typeof window.__xtjRefreshChatPresence === 'function') window.__xtjRefreshChatPresence(payload && payload.payload && payload.payload.peer);
+                        })
                         .subscribe(function (status) {
-                            if (status === "SUBSCRIBED") { dmBroadcast.attempts = 0; return; }
+                            if (status === "SUBSCRIBED") {
+                                dmBroadcast.attempts = 0;
+                                refreshChatStateFromEvent({kind:'reconnect'});
+                                if (typeof window.__xtjRefreshChatPresence === 'function') window.__xtjRefreshChatPresence();
+                                return;
+                            }
                             if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
                                 console.warn("[dm-realtime]", status);
-                                if (dmBroadcast.attempts >= 10) return;
                                 dmBroadcast.attempts += 1;
                                 var backoff = Math.min(1000 * Math.pow(2, dmBroadcast.attempts), 30000);
                                 setTimeout(function () {
                                     // 代次校验：期间若已重建订阅，旧定时器必须彻底放弃（与 P1-01 同一教训）
-                                    if (myEpoch !== dmBroadcast.epoch) return;
+                                    if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
                                     subscribeToDmBroadcast();
                                 }, backoff);
                             }
