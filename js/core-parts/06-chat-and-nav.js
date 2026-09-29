@@ -364,6 +364,16 @@
             let dockChatActiveUser = null;
             let dockChatSending = false;
             let _dockPreviewUrl = null;
+            var _dockChatFriendNotes = Object.create(null);
+            var _dockChatFriendNotesOwner = '';
+            var _dockChatFriendNotesAt = 0;
+            var _dockChatSocialTab = 'search';
+            var _dockChatSocialQuery = '';
+            var _dockChatSocialRequestDirection = 'incoming';
+            var _dockChatSocialLoadSeq = 0;
+            var _dockChatSocialBadgeOwner = '';
+            var _dockChatSocialBadgeAt = 0;
+            var _dockChatRelationshipSeq = 0;
 
             // ★ 2026-09-25 修复（审计 M-16）：判据必须与 desktop.css 的加载条件一致。
             //   desktop.min.css 的 media 是 (min-width:768px) and (min-height:480px)，
@@ -416,6 +426,11 @@
                     //   计数器是共享的，nextMessageLoadSeq 也在同一变量上，一并失效即可。
                     if (typeof _dockChatListLoadSeq === 'number') _dockChatListLoadSeq++;
                     if (typeof _dockChatLoadSeq === 'number') _dockChatLoadSeq++;
+                    _dockChatSocialLoadSeq++;
+                    _dockChatRelationshipSeq++;
+                    _dockChatFriendNotes = Object.create(null);
+                    _dockChatFriendNotesOwner = '';
+                    _dockChatFriendNotesAt = 0;
                     var messages = document.getElementById('dockChatMessages');
                     if (messages) {
                         messages.innerHTML = '';
@@ -426,6 +441,14 @@
                     if (list) { list.innerHTML = ''; list.removeAttribute('data-list-owner'); }
                     var title = document.getElementById('dockChatTitle');
                     if (title) title.textContent = '消息';
+                    var socialSheet = document.getElementById('dockChatSocialSheet');
+                    if (socialSheet) { socialSheet.classList.add('hidden'); socialSheet.setAttribute('aria-hidden', 'true'); }
+                    var socialContent = document.getElementById('dockChatSocialContent');
+                    if (socialContent) socialContent.innerHTML = '';
+                    var socialBadge = document.getElementById('dockChatSocialPendingBadge');
+                    if (socialBadge) { socialBadge.hidden = true; socialBadge.textContent = '0'; }
+                    var relationNotice = document.getElementById('dockChatRelationshipNotice');
+                    if (relationNotice) relationNotice.hidden = true;
                     _dockChatListRenderSignature = '';
                     _chatRenderSignature = {};
                 } catch (e) {}
@@ -584,7 +607,9 @@
                 document.getElementById('dockChatListView').classList.add('hidden');
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
-                document.getElementById('dockChatTitle').textContent = userName;
+                var titleEl = document.getElementById('dockChatTitle');
+                if (titleEl) titleEl.textContent = _dockChatFriendNotes[userName] || userName;
+                updateDockChatComposerPermission(userName);
                 switchDockTab('chat', true, { source: 'openChat' });
                 loadDockChatMessages(userName, true);
                 startDMPolling(60000, true);
@@ -690,6 +715,8 @@
                 if (!dockChatActiveUser) {
                     syncDockChatLayoutState();
                 }
+                refreshChatSocialBadge(false);
+                refreshChatFriendNotes(false);
                 if (el.getAttribute('data-list-owner') === window.currentUser &&
                     Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
                 // ★ 2026-09-27 修复（审计 S6：会话列表跨账号/跨登出残留）：
@@ -982,8 +1009,10 @@
             }
 
             function buildDockChatConversationSignature(conversation) {
+                var otherUser = conversation && conversation.other_user ? conversation.other_user : '';
                 return [
-                    conversation && conversation.other_user ? conversation.other_user : '',
+                    otherUser,
+                    _dockChatFriendNotes[otherUser] || '',
                     conversation && conversation.last_message ? conversation.last_message : '',
                     conversation && conversation.last_time ? conversation.last_time : '',
                     conversation && conversation.unread ? conversation.unread : 0,
@@ -997,13 +1026,15 @@
 
             function buildDockChatListItemMarkup(conversation, index) {
                 var safeUser = safeJsStr(conversation.other_user);
+                var friendNote = _dockChatFriendNotes[conversation.other_user] || '';
+                var displayName = friendNote || conversation.other_user;
                 var signature = buildDockChatConversationSignature(conversation);
                 return [
                     '<div class="chat-list-item" data-chat-user="', escapeHtml(conversation.other_user), '" data-signature="', escapeHtml(signature),
                     '" data-last-time="', escapeHtml(conversation.last_time || ''), '" style="--xtj-enter-delay:', String(Math.min((index || 0) * 12, 48)),
                     'ms" onclick="openChat(\'', safeUser, '\')">',
                     '<div class="cli-avatar">', getDockChatConversationAvatarHtml(conversation.other_user), '</div>',
-                    '<div class="cli-info"><div class="cli-name"><span class="cli-name-text">', escapeHtml(conversation.other_user), '</span></div><div class="cli-preview">', escapeHtml(conversation.last_message || ''), '</div></div>',
+                    '<div class="cli-info"><div class="cli-name"><span class="cli-name-text" title="', escapeHtml(conversation.other_user), '">', escapeHtml(displayName), '</span></div><div class="cli-preview">', escapeHtml(conversation.last_message || ''), '</div></div>',
                     '<div class="cli-right"><span class="cli-time">', formatMsgTime(conversation.last_time), '</span>', conversation.unread ? '<span class="cli-badge">' + (conversation.unread > 99 ? '99+' : conversation.unread) + '</span>' : '', '</div>',
                     '</div>'
                 ].join('');
@@ -3435,8 +3466,510 @@
                 bindDockChatMessageActions();
                 var _dockOrigBtn = document.getElementById('dockChatOrigBtn');
                 if (_dockOrigBtn) _dockOrigBtn.addEventListener('click', window.toggleDmOriginalSend);
+                var _socialOpen = document.getElementById('dockChatSocialBtn');
+                if (_socialOpen) _socialOpen.addEventListener('click', function() { openDockChatSocialSheet('search'); });
+                var _socialClose = document.getElementById('dockChatSocialClose');
+                if (_socialClose) _socialClose.addEventListener('click', closeDockChatSocialSheet);
+                var _socialSheet = document.getElementById('dockChatSocialSheet');
+                if (_socialSheet) _socialSheet.addEventListener('click', function(e) {
+                    if (e.target === _socialSheet) { closeDockChatSocialSheet(); return; }
+                    var tab = e.target && e.target.closest ? e.target.closest('[data-chat-social-tab]') : null;
+                    if (tab) { openDockChatSocialSheet(tab.getAttribute('data-chat-social-tab')); return; }
+                    var direction = e.target && e.target.closest ? e.target.closest('[data-chat-social-direction]') : null;
+                    if (direction) {
+                        _dockChatSocialRequestDirection = direction.getAttribute('data-chat-social-direction') === 'outgoing' ? 'outgoing' : 'incoming';
+                        renderDockChatSocialTab('requests');
+                        return;
+                    }
+                    var action = e.target && e.target.closest ? e.target.closest('[data-chat-social-action]') : null;
+                    if (action) handleDockChatSocialAction(action);
+                });
+                var _socialContent = document.getElementById('dockChatSocialContent');
+                if (_socialContent) _socialContent.addEventListener('submit', function(e) {
+                    if (!e.target || e.target.id !== 'dockChatSocialSearchForm') return;
+                    e.preventDefault();
+                    var input = e.target.querySelector('input[name="q"]');
+                    runDockChatSocialSearch(input ? input.value : '');
+                });
+                var _relationAction = document.getElementById('dockChatRelationshipAction');
+                if (_relationAction) _relationAction.addEventListener('click', handleDockChatRelationshipAction);
                 syncDmOriginalToggle();
             } catch(e) {
+            }
+
+            function requestDockChatSocial(path, options) {
+                if (!window.currentUser) return Promise.reject(new Error('请先登录'));
+                var reqOptions = Object.assign({ timeoutMs: 12000, background: true }, options || {});
+                reqOptions.headers = Object.assign({ 'Content-Type': 'application/json' }, reqOptions.headers || {});
+                return window.xtjProtectedFetch('/api/chat' + path, reqOptions).then(function(resp) {
+                    return resp.json().catch(function() { return {}; }).then(function(data) {
+                        if (!resp.ok || !data || !data.ok) {
+                            var error = new Error(data && data.error || '好友操作失败，请稍后重试');
+                            error.code = data && data.code || 'chat_social_failed';
+                            throw error;
+                        }
+                        return data;
+                    });
+                });
+            }
+
+            function refreshChatSocialBadge(force) {
+                var badge = document.getElementById('dockChatSocialPendingBadge');
+                if (!badge) return Promise.resolve();
+                var owner = window.currentUser || '';
+                if (!owner) {
+                    badge.hidden = true;
+                    badge.textContent = '0';
+                    _dockChatSocialBadgeOwner = '';
+                    _dockChatSocialBadgeAt = 0;
+                    return Promise.resolve();
+                }
+                if (!force && _dockChatSocialBadgeOwner === owner && Date.now() - _dockChatSocialBadgeAt < 60000) return Promise.resolve();
+                _dockChatSocialBadgeOwner = owner;
+                return requestDockChatSocial('/requests?direction=incoming').then(function(data) {
+                    if (window.currentUser !== owner) return;
+                    var count = Array.isArray(data.requests) ? data.requests.length : 0;
+                    badge.textContent = count > 99 ? '99+' : String(count);
+                    badge.hidden = count === 0;
+                    _dockChatSocialBadgeAt = Date.now();
+                }).catch(function() {});
+            }
+
+            function applyDockChatFriendLabels() {
+                var list = document.getElementById('dockChatList');
+                if (list) Array.prototype.forEach.call(list.querySelectorAll('.chat-list-item[data-chat-user]'), function(row) {
+                    var userName = row.getAttribute('data-chat-user') || '';
+                    var name = row.querySelector('.cli-name-text');
+                    if (name) {
+                        name.textContent = _dockChatFriendNotes[userName] || userName;
+                        name.title = userName;
+                    }
+                });
+                if (dockChatActiveUser) {
+                    var title = document.getElementById('dockChatTitle');
+                    if (title) title.textContent = _dockChatFriendNotes[dockChatActiveUser] || dockChatActiveUser;
+                }
+                _dockChatListRenderSignature = '';
+            }
+
+            function refreshChatFriendNotes(force) {
+                var owner = window.currentUser || '';
+                if (!owner) {
+                    _dockChatFriendNotes = Object.create(null);
+                    _dockChatFriendNotesOwner = '';
+                    _dockChatFriendNotesAt = 0;
+                    return Promise.resolve();
+                }
+                if (!force && _dockChatFriendNotesOwner === owner && Date.now() - _dockChatFriendNotesAt < 60000) return Promise.resolve();
+                return requestDockChatSocial('/friends').then(function(data) {
+                    if (window.currentUser !== owner) return;
+                    var next = Object.create(null);
+                    (Array.isArray(data.friends) ? data.friends : []).forEach(function(friend) {
+                        if (friend && friend.peer_name && friend.note) next[String(friend.peer_name)] = String(friend.note);
+                    });
+                    _dockChatFriendNotes = next;
+                    _dockChatFriendNotesOwner = owner;
+                    _dockChatFriendNotesAt = Date.now();
+                    applyDockChatFriendLabels();
+                }).catch(function() {});
+            }
+
+            function openDockChatSocialSheet(tab) {
+                if (!window.currentUser) { showToast('请先登录后管理好友'); return; }
+                var sheet = document.getElementById('dockChatSocialSheet');
+                if (!sheet) return;
+                sheet.classList.remove('hidden');
+                sheet.setAttribute('aria-hidden', 'false');
+                renderDockChatSocialTab(tab || 'search');
+                refreshChatSocialBadge(true);
+                setTimeout(function() {
+                    if (_dockChatSocialTab === 'search') {
+                        var input = document.querySelector('#dockChatSocialSearchForm input[name="q"]');
+                        if (input) input.focus({ preventScroll: true });
+                    }
+                }, 30);
+            }
+
+            function closeDockChatSocialSheet() {
+                var sheet = document.getElementById('dockChatSocialSheet');
+                if (!sheet) return;
+                sheet.classList.add('hidden');
+                sheet.setAttribute('aria-hidden', 'true');
+                _dockChatSocialLoadSeq++;
+                var opener = document.getElementById('dockChatSocialBtn');
+                if (opener && document.activeElement && document.activeElement.closest && document.activeElement.closest('#dockChatSocialSheet')) {
+                    opener.focus({ preventScroll: true });
+                }
+            }
+
+            function setDockChatSocialTabState(tab) {
+                _dockChatSocialTab = ['search', 'friends', 'requests', 'blocks'].indexOf(tab) >= 0 ? tab : 'search';
+                Array.prototype.forEach.call(document.querySelectorAll('[data-chat-social-tab]'), function(button) {
+                    var active = button.getAttribute('data-chat-social-tab') === _dockChatSocialTab;
+                    button.setAttribute('aria-selected', active ? 'true' : 'false');
+                    button.tabIndex = active ? 0 : -1;
+                });
+            }
+
+            function chatSocialActionButton(label, action, peer, requestId, className, note) {
+                return '<button type="button" class="chat-social-action' + (className ? ' ' + className : '') + '" data-chat-social-action="' + escapeHtml(action) + '"' +
+                    (peer ? ' data-peer="' + escapeHtml(peer) + '"' : '') +
+                    (requestId ? ' data-request-id="' + escapeHtml(requestId) + '"' : '') +
+                    (note ? ' data-note="' + escapeHtml(note) + '"' : '') + '>' + escapeHtml(label) + '</button>';
+            }
+
+            function chatSocialUserRow(userName, meta, actions, displayName) {
+                var avatar = '?';
+                try { avatar = getDockChatAvatarMarkup(userName); } catch (_) { avatar = escapeHtml(String(userName || '?').slice(0, 1).toUpperCase()); }
+                return '<div class="chat-social-user" data-social-user="' + escapeHtml(userName) + '">' +
+                    '<div class="chat-social-avatar">' + avatar + '</div>' +
+                    '<div class="chat-social-info"><span class="chat-social-name" title="' + escapeHtml(userName) + '">' + escapeHtml(displayName || userName) + '</span>' +
+                    '<span class="chat-social-meta">' + escapeHtml(meta || userName) + '</span></div>' +
+                    '<div class="chat-social-actions">' + (actions || []).join('') + '</div></div>';
+            }
+
+            function hydrateDockChatSocialAvatars(users) {
+                if (!users || !users.length || typeof hydrateDockChatAvatars !== 'function') return;
+                hydrateDockChatAvatars(users, function() {
+                    Array.prototype.forEach.call(document.querySelectorAll('#dockChatSocialContent .chat-social-user[data-social-user]'), function(row) {
+                        var avatar = row.querySelector('.chat-social-avatar');
+                        var userName = row.getAttribute('data-social-user');
+                        if (avatar && userName) avatar.innerHTML = getDockChatAvatarMarkup(userName);
+                    });
+                });
+            }
+
+            function renderDockChatSocialTab(tab) {
+                if (!window.currentUser) { closeDockChatSocialSheet(); return; }
+                setDockChatSocialTabState(tab);
+                var content = document.getElementById('dockChatSocialContent');
+                if (!content) return;
+                var seq = ++_dockChatSocialLoadSeq;
+                if (_dockChatSocialTab === 'search') {
+                    content.innerHTML = '<form id="dockChatSocialSearchForm" class="chat-social-search-form" autocomplete="off">' +
+                        '<input name="q" type="search" minlength="2" maxlength="64" placeholder="输入用户名，至少 2 个字符" value="' + escapeHtml(_dockChatSocialQuery) + '" aria-label="搜索用户名">' +
+                        '<button type="submit">搜索</button></form><div id="dockChatSocialResults" class="chat-social-results"><div class="chat-social-empty">搜索公开用户名，查看好友关系并发送申请。</div></div>';
+                    if (_dockChatSocialQuery) loadDockChatSocialSearch(_dockChatSocialQuery, seq);
+                    return;
+                }
+                content.innerHTML = '<div class="chat-social-loading">正在加载…</div>';
+                if (_dockChatSocialTab === 'friends') {
+                    requestDockChatSocial('/friends').then(function(data) {
+                        if (seq !== _dockChatSocialLoadSeq || _dockChatSocialTab !== 'friends' || window.currentUser == null) return;
+                        var friends = Array.isArray(data.friends) ? data.friends : [];
+                        var next = Object.create(null);
+                        friends.forEach(function(friend) { if (friend && friend.peer_name && friend.note) next[String(friend.peer_name)] = String(friend.note); });
+                        _dockChatFriendNotes = next;
+                        _dockChatFriendNotesOwner = window.currentUser;
+                        _dockChatFriendNotesAt = Date.now();
+                        applyDockChatFriendLabels();
+                        if (!friends.length) {
+                            content.innerHTML = '<div class="chat-social-empty">还没有好友。搜索用户名后发送好友申请即可开始聊天。</div>';
+                            return;
+                        }
+                        content.innerHTML = friends.map(function(friend) {
+                            var name = String(friend.peer_name || '');
+                            var note = String(friend.note || '');
+                            var actions = [
+                                chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'),
+                                chatSocialActionButton('资料', 'friend-profile', name),
+                                chatSocialActionButton('备注', 'friend-note', name, '', '', note),
+                                chatSocialActionButton('删除', 'friend-remove', name, '', 'danger'),
+                                chatSocialActionButton('拉黑', 'friend-block', name, '', 'danger')
+                            ];
+                            return chatSocialUserRow(name, note ? '账号：' + name : '已添加为好友', actions, note || name);
+                        }).join('');
+                        hydrateDockChatSocialAvatars(friends.map(function(friend) { return friend.peer_name; }));
+                    }).catch(function() {
+                        if (seq === _dockChatSocialLoadSeq) content.innerHTML = '<div class="chat-social-error">好友列表加载失败，请切换标签或重新打开。</div>';
+                    });
+                    return;
+                }
+                if (_dockChatSocialTab === 'requests') {
+                    content.innerHTML = '<div class="chat-social-request-switch">' +
+                        '<button type="button" data-chat-social-direction="incoming" aria-pressed="' + (_dockChatSocialRequestDirection === 'incoming') + '">收到的申请</button>' +
+                        '<button type="button" data-chat-social-direction="outgoing" aria-pressed="' + (_dockChatSocialRequestDirection === 'outgoing') + '">发出的申请</button></div>' +
+                        '<div class="chat-social-loading">正在加载…</div>';
+                    requestDockChatSocial('/requests?direction=' + _dockChatSocialRequestDirection).then(function(data) {
+                        if (seq !== _dockChatSocialLoadSeq || _dockChatSocialTab !== 'requests') return;
+                        var rows = Array.isArray(data.requests) ? data.requests : [];
+                        if (_dockChatSocialRequestDirection === 'incoming') refreshChatSocialBadge(true);
+                        var html = rows.map(function(request) {
+                            var incoming = _dockChatSocialRequestDirection === 'incoming';
+                            var peer = incoming ? request.requester_name : request.target_name;
+                            var actions = incoming ? [
+                                chatSocialActionButton('接受', 'request-accept', peer, request.request_id, 'primary'),
+                                chatSocialActionButton('拒绝', 'request-reject', peer, request.request_id, 'danger'),
+                                chatSocialActionButton('拉黑', 'request-block', peer, request.request_id, 'danger')
+                            ] : [chatSocialActionButton('取消申请', 'request-cancel', peer, request.request_id, 'danger')];
+                            return chatSocialUserRow(peer, request.request_note || (incoming ? '等待你处理' : '等待对方处理'), actions, peer);
+                        }).join('');
+                        var switchHtml = '<div class="chat-social-request-switch">' +
+                            '<button type="button" data-chat-social-direction="incoming" aria-pressed="' + (_dockChatSocialRequestDirection === 'incoming') + '">收到的申请</button>' +
+                            '<button type="button" data-chat-social-direction="outgoing" aria-pressed="' + (_dockChatSocialRequestDirection === 'outgoing') + '">发出的申请</button></div>';
+                        content.innerHTML = switchHtml + (html || '<div class="chat-social-empty">' + (_dockChatSocialRequestDirection === 'incoming' ? '暂时没有收到好友申请。' : '暂时没有发出的好友申请。') + '</div>');
+                        hydrateDockChatSocialAvatars(rows.map(function(request) { return _dockChatSocialRequestDirection === 'incoming' ? request.requester_name : request.target_name; }));
+                    }).catch(function() {
+                        if (seq === _dockChatSocialLoadSeq) content.innerHTML = '<div class="chat-social-error">好友申请加载失败，请稍后重试。</div>';
+                    });
+                    return;
+                }
+                requestDockChatSocial('/blocks').then(function(data) {
+                    if (seq !== _dockChatSocialLoadSeq || _dockChatSocialTab !== 'blocks') return;
+                    var blocks = Array.isArray(data.blocks) ? data.blocks : [];
+                    content.innerHTML = blocks.length ? blocks.map(function(block) {
+                        var name = String(block.peer_name || '');
+                        return chatSocialUserRow(name, '已拉黑，不能互相申请或发送新消息', [chatSocialActionButton('解除拉黑', 'block-remove', name, '', 'primary')], name);
+                    }).join('') : '<div class="chat-social-empty">黑名单为空。</div>';
+                    hydrateDockChatSocialAvatars(blocks.map(function(block) { return block.peer_name; }));
+                }).catch(function() {
+                    if (seq === _dockChatSocialLoadSeq) content.innerHTML = '<div class="chat-social-error">黑名单加载失败，请稍后重试。</div>';
+                });
+            }
+
+            function loadDockChatSocialSearch(query, seq) {
+                var q = String(query || '').trim();
+                _dockChatSocialQuery = q;
+                var results = document.getElementById('dockChatSocialResults');
+                if (!results) return;
+                if (q.length < 2) {
+                    results.innerHTML = '<div class="chat-social-error">请输入至少 2 个字符。</div>';
+                    return;
+                }
+                results.innerHTML = '<div class="chat-social-loading">正在搜索…</div>';
+                var owner = window.currentUser;
+                requestDockChatSocial('/users/search?q=' + encodeURIComponent(q)).then(function(data) {
+                    if (seq !== _dockChatSocialLoadSeq || window.currentUser !== owner || _dockChatSocialTab !== 'search') return;
+                    var users = Array.isArray(data.users) ? data.users : [];
+                    if (!users.length) {
+                        results.innerHTML = '<div class="chat-social-empty">没有找到匹配的公开用户名。</div>';
+                        return;
+                    }
+                    results.innerHTML = users.map(function(user) {
+                        var name = String(user.user_name || '');
+                        var relation = String(user.relationship || 'none');
+                        var actions;
+                        var meta;
+                        if (relation === 'friends') {
+                            actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
+                            meta = '已是好友';
+                        } else if (relation === 'request_sent') {
+                            actions = [chatSocialActionButton('已发送', 'noop', name, '', '', '')];
+                            meta = '等待对方处理';
+                        } else if (relation === 'request_received') {
+                            actions = [chatSocialActionButton('处理申请', 'requests-open', name, '', 'primary')];
+                            meta = '对方已向你发送好友申请';
+                        } else {
+                            actions = [chatSocialActionButton('添加好友', 'friend-request', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
+                            meta = '注册用户';
+                        }
+                        return chatSocialUserRow(name, meta, actions, name);
+                    }).join('');
+                    hydrateDockChatSocialAvatars(users.map(function(user) { return user.user_name; }));
+                }).catch(function(error) {
+                    if (seq === _dockChatSocialLoadSeq && window.currentUser === owner) {
+                        results.innerHTML = '<div class="chat-social-error">' + escapeHtml(error && error.message || '搜索失败，请稍后重试。') + '</div>';
+                    }
+                });
+            }
+
+            function runDockChatSocialSearch(query) {
+                _dockChatSocialQuery = String(query || '').trim();
+                var seq = ++_dockChatSocialLoadSeq;
+                loadDockChatSocialSearch(_dockChatSocialQuery, seq);
+            }
+
+            async function sendDockChatFriendRequest(userName, fromComposer) {
+                try {
+                    var result = await requestDockChatSocial('/friend-requests', {
+                        method: 'POST',
+                        body: JSON.stringify({ target_user: userName })
+                    });
+                    var status = result.result && result.result.status;
+                    showToast(status === 'accepted' || status === 'already_friends' ? '你们已经成为好友' : '好友申请已发送');
+                    refreshChatSocialBadge(true);
+                    refreshChatFriendNotes(true);
+                    if (fromComposer && dockChatActiveUser === userName) updateDockChatComposerPermission(userName);
+                    if (_dockChatSocialTab === 'search') {
+                        var seq = ++_dockChatSocialLoadSeq;
+                        loadDockChatSocialSearch(_dockChatSocialQuery, seq);
+                    } else {
+                        var currentSheet = document.getElementById('dockChatSocialSheet');
+                        if (currentSheet && !currentSheet.classList.contains('hidden')) renderDockChatSocialTab(_dockChatSocialTab);
+                    }
+                    return true;
+                } catch (e) {
+                    showToast(e && e.message || '好友申请发送失败');
+                    return false;
+                }
+            }
+
+            async function handleDockChatSocialAction(button) {
+                var action = button.getAttribute('data-chat-social-action') || '';
+                var peer = button.getAttribute('data-peer') || '';
+                var requestId = button.getAttribute('data-request-id') || '';
+                if (action === 'noop' || !action) return;
+                if (action === 'friend-chat') {
+                    closeDockChatSocialSheet();
+                    if (typeof window.openChat === 'function') window.openChat(peer);
+                    return;
+                }
+                if (action === 'friend-profile') {
+                    closeDockChatSocialSheet();
+                    if (typeof window.openUserProfile === 'function') window.openUserProfile(peer);
+                    return;
+                }
+                if (action === 'requests-open') { renderDockChatSocialTab('requests'); return; }
+                if (action === 'friend-request') { await sendDockChatFriendRequest(peer, false); return; }
+                if (action === 'friend-note') {
+                    var existingNote = button.getAttribute('data-note') || '';
+                    var nextNote = window.prompt('设置仅自己可见的好友备注（留空可清除）', existingNote);
+                    if (nextNote === null) return;
+                    try {
+                        await requestDockChatSocial('/friends/' + encodeURIComponent(peer) + '/note', { method: 'PUT', body: JSON.stringify({ note: nextNote }) });
+                        await refreshChatFriendNotes(true);
+                        showToast(nextNote.trim() ? '好友备注已保存' : '好友备注已清除');
+                        renderDockChatSocialTab('friends');
+                    } catch (e) { showToast(e && e.message || '备注保存失败'); }
+                    return;
+                }
+                if (action === 'friend-remove') {
+                    if (!window.confirm('删除好友后会保留历史聊天，但需要重新成为好友才能发送新消息。确定删除？')) return;
+                    try {
+                        await requestDockChatSocial('/friends/' + encodeURIComponent(peer), { method: 'DELETE' });
+                        await refreshChatFriendNotes(true);
+                        if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
+                        showToast('已删除好友，历史聊天保留');
+                        renderDockChatSocialTab('friends');
+                    } catch (e) { showToast(e && e.message || '删除好友失败'); }
+                    return;
+                }
+                if (action === 'friend-block' || action === 'request-block') {
+                    if (!window.confirm('拉黑后会解除好友关系，并阻止双方互相申请好友和发送新消息。历史聊天会保留。确定拉黑？')) return;
+                    try {
+                        await requestDockChatSocial('/blocks/' + encodeURIComponent(peer), { method: 'POST', body: '{}' });
+                        await refreshChatFriendNotes(true);
+                        refreshChatSocialBadge(true);
+                        if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
+                        showToast('已拉黑该用户');
+                        renderDockChatSocialTab(_dockChatSocialTab === 'requests' ? 'requests' : 'friends');
+                    } catch (e) { showToast(e && e.message || '拉黑失败'); }
+                    return;
+                }
+                if (action === 'block-remove') {
+                    try {
+                        await requestDockChatSocial('/blocks/' + encodeURIComponent(peer), { method: 'DELETE' });
+                        showToast('已解除拉黑');
+                        renderDockChatSocialTab('blocks');
+                    } catch (e) { showToast(e && e.message || '解除拉黑失败'); }
+                    return;
+                }
+                if (action.indexOf('request-') === 0) {
+                    var verb = action.slice('request-'.length);
+                    if (['accept', 'reject', 'cancel'].indexOf(verb) < 0 || !requestId) return;
+                    try {
+                        var response = await requestDockChatSocial('/friend-requests/' + encodeURIComponent(requestId) + '/' + verb, { method: 'POST', body: '{}' });
+                        var resultStatus = response.result && response.result.status;
+                        if (resultStatus === 'accepted') {
+                            showToast('已添加好友');
+                            await refreshChatFriendNotes(true);
+                            if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
+                        } else {
+                            showToast(verb === 'cancel' ? '已取消好友申请' : (verb === 'reject' ? '已拒绝好友申请' : '操作完成'));
+                        }
+                        refreshChatSocialBadge(true);
+                        renderDockChatSocialTab('requests');
+                    } catch (e) { showToast(e && e.message || '好友申请处理失败'); }
+                }
+            }
+
+            function handleDockChatRelationshipAction() {
+                var action = this.getAttribute('data-chat-action') || '';
+                var userName = this.getAttribute('data-peer') || dockChatActiveUser || '';
+                if (action === 'add') sendDockChatFriendRequest(userName, true);
+                else if (action === 'cancel') {
+                    var requestId = this.getAttribute('data-request-id') || '';
+                    if (requestId) requestDockChatSocial('/friend-requests/' + encodeURIComponent(requestId) + '/cancel', { method: 'POST', body: '{}' })
+                        .then(function() { showToast('已取消好友申请'); updateDockChatComposerPermission(userName); refreshChatSocialBadge(true); })
+                        .catch(function(e) { showToast(e && e.message || '取消申请失败'); });
+                } else if (action === 'requests') openDockChatSocialSheet('requests');
+                else if (action === 'blocks') openDockChatSocialSheet('blocks');
+                else if (action === 'retry') updateDockChatComposerPermission(userName);
+            }
+
+            async function updateDockChatComposerPermission(userName) {
+                var input = document.getElementById('dockChatInput');
+                var send = document.getElementById('dockChatSendBtn');
+                var attach = document.getElementById('dockChatImgBtn');
+                var notice = document.getElementById('dockChatRelationshipNotice');
+                var message = document.getElementById('dockChatRelationshipText');
+                var actionButton = document.getElementById('dockChatRelationshipAction');
+                if (!userName || !window.currentUser) {
+                    if (notice) notice.hidden = true;
+                    return;
+                }
+                if (window.currentUser === 'xxz' || userName === 'xxz') {
+                    if (input) input.disabled = false;
+                    if (send) send.disabled = false;
+                    if (attach) attach.disabled = false;
+                    if (notice) notice.hidden = true;
+                    return;
+                }
+                var seq = ++_dockChatRelationshipSeq;
+                if (input) input.disabled = true;
+                if (send) send.disabled = true;
+                if (attach) attach.disabled = true;
+                if (notice) notice.hidden = false;
+                if (message) message.textContent = '正在确认好友关系…';
+                if (actionButton) { actionButton.hidden = true; actionButton.onclick = null; }
+                var owner = window.currentUser;
+                try {
+                    var result = await requestDockChatSocial('/relationship?target=' + encodeURIComponent(userName));
+                    if (seq !== _dockChatRelationshipSeq || window.currentUser !== owner || dockChatActiveUser !== userName) return;
+                    var relationship = result.relationship || {};
+                    if (relationship.can_message === true) {
+                        if (input) input.disabled = false;
+                        if (send) send.disabled = false;
+                        if (attach) attach.disabled = false;
+                        if (notice) notice.hidden = true;
+                        return;
+                    }
+                    var action = '';
+                    var label = '';
+                    var note = '';
+                    if (relationship.status === 'blocked_by_me') {
+                        note = '你已拉黑该用户。解除拉黑后，双方才能重新申请或发送新消息。'; action = 'blocks'; label = '管理黑名单';
+                    } else if (relationship.status === 'blocked_by_peer') {
+                        note = '对方已限制与你的好友申请和新消息。历史聊天仍可查看。';
+                    } else if (relationship.status === 'request_sent') {
+                        note = '好友申请已发送，等待对方处理。'; action = 'cancel'; label = '取消申请';
+                    } else if (relationship.status === 'request_received') {
+                        note = '对方已向你发送好友申请。'; action = 'requests'; label = '处理申请';
+                    } else if (relationship.status === 'none') {
+                        note = '成为好友后才能发送新消息。历史聊天仍可查看。'; action = 'add'; label = '添加好友';
+                    } else if (relationship.status === 'user_not_found') {
+                        note = '该用户当前不可用。';
+                    } else {
+                        note = '好友状态不可用，暂时无法发送新消息。'; action = 'retry'; label = '重试';
+                    }
+                    if (message) message.textContent = note;
+                    if (actionButton && action) {
+                        actionButton.hidden = false;
+                        actionButton.textContent = label;
+                        actionButton.setAttribute('data-chat-action', action);
+                        actionButton.setAttribute('data-peer', userName);
+                        actionButton.setAttribute('data-request-id', relationship.outgoing_request_id || '');
+                    }
+                } catch (_) {
+                    if (seq !== _dockChatRelationshipSeq || dockChatActiveUser !== userName) return;
+                    if (message) message.textContent = '暂时无法确认好友关系，消息发送已暂停。';
+                    if (actionButton) {
+                        actionButton.hidden = false;
+                        actionButton.textContent = '重试';
+                        actionButton.setAttribute('data-chat-action', 'retry');
+                        actionButton.setAttribute('data-peer', userName);
+                    }
+                }
             }
 
             function updateChatAuthUI() {
@@ -3452,6 +3985,9 @@
                     if (sendBtn) sendBtn.disabled = false;
                     if (imgBtn) imgBtn.disabled = false;
                 }
+                refreshChatSocialBadge(false);
+                refreshChatFriendNotes(false);
+                if (dockChatActiveUser && window.currentUser) updateDockChatComposerPermission(dockChatActiveUser);
                 syncDockChatLayoutState();
             }
             window.updateChatAuthUI = updateChatAuthUI;

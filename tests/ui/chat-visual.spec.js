@@ -30,6 +30,9 @@ async function mockApis(page, messages, extra) {
       body: JSON.stringify({ ok: true, data: [messages[messages.length - 1], { id: 'c2', user_name: 'viewer', media_url: 'other', content: JSON.stringify({ text: '晚点聊' }), created_at: '2026-09-25T09:00:00.000Z', views: 1 }] }),
     })),
     page.route('**/api/dm/messages?**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: messages }) })),
+    page.route('**/api/chat/relationship**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, relationship: { status: 'friends', is_friend: true, can_message: true } }) })),
+    page.route('**/api/chat/friends', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, friends: [] }) })),
+    page.route('**/api/chat/requests**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, requests: [] }) })),
     page.route('**/api/avatar/batch', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, avatars: {} }) })),
     page.route('**/api/config/public', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })),
   ];
