@@ -68,6 +68,7 @@ const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = requi
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
+const { createChatSocialRouter, assertCanSendDirectMessage } = require('./chat-social');
 
 /**
  * ★★★ 2026-09-22 修复（P0「网页搜索/读网页时显示超大板块内容」根因之一）：
@@ -11939,6 +11940,17 @@ async function authenticateUser(req, res, next) {
   return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
 }
 
+// The service-role backed chat social API is mounted behind the same signed
+// user-token middleware as the legacy DM API. Its database functions are not
+// callable by browser Supabase roles.
+app.use('/api/chat', createChatSocialRouter({
+  express: express,
+  supabase: supabase,
+  authenticateUser: authenticateUser,
+  rateLimit: rateLimit,
+  adminName: ADMIN_USERNAME
+}));
+
 // HTML 转义（服务端安全输出）
 function escapeHtml(str) {
   if (!str) return '';
@@ -15983,6 +15995,25 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     }
     if (!targetExists && targetUser !== ADMIN_USERNAME) {
       return res.status(400).json({ error: '接收用户不存在', code: 'target_not_found' });
+    }
+
+    // Private history remains readable after a friendship is removed, but new
+    // user-to-user messages require an active friendship. Blocking is checked
+    // before any media upload claim and independently enforced by a DB trigger.
+    var dmPermission;
+    try {
+      dmPermission = await assertCanSendDirectMessage(supabase, sender, targetUser, ADMIN_USERNAME);
+    } catch (permissionError) {
+      console.error('[API] dm send relationship lookup failed:', permissionError && permissionError.code || 'database_error');
+      return res.status(503).json({ error: '好友关系暂时无法验证，请稍后重试', code: 'chat_relationship_retry', retryable: true });
+    }
+    if (!dmPermission.ok) {
+      var blockedPair = dmPermission.code === 'chat_blocked';
+      return res.status(403).json({
+        error: blockedPair ? '你们暂时无法互相发送消息' : '成为好友后才能继续发送消息',
+        code: dmPermission.code || 'friend_required',
+        relationship: dmPermission.status || 'none'
+      });
     }
 
     // P6: 媒体文件处理 — 如果有媒体文件，验证并生成 actor_key / URL

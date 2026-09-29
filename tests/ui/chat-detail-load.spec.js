@@ -16,6 +16,16 @@ test('opening a direct message renders the conversation with one initial request
     contentType: 'application/json',
     body: JSON.stringify({ ok: true, posts: [], comments: [], likes: [], next_offset: 0, endReached: true, total_post_count: 0 })
   }));
+  await page.route('**/api/chat/relationship**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, relationship: { status: 'friends', is_friend: true, can_message: true } })
+  }));
+  await page.route('**/api/chat/requests**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, requests: [] })
+  }));
   await page.route('**/api/dm/messages?**', route => {
     messageRequests += 1;
     return route.fulfill({

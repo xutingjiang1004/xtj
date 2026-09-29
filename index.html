@@ -62,7 +62,7 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=7877a5c096" />
+    <link rel="stylesheet" href="css/style.min.css?v=d0b7293907" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <!-- ★ 2026-09-22 响应式修复：下面三个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
@@ -340,11 +340,33 @@
                 <div class="chat-header">
                     <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">←</button>
                     <h3 id="dockChatTitle">消息</h3>
+                    <button type="button" id="dockChatSocialBtn" class="chat-social-trigger" aria-haspopup="dialog" aria-controls="dockChatSocialSheet">
+                        <span>好友</span><span id="dockChatSocialPendingBadge" class="chat-social-badge" hidden>0</span>
+                    </button>
                 </div>
+                <section id="dockChatSocialSheet" class="chat-social-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="dockChatSocialTitle" aria-hidden="true">
+                    <div class="chat-social-card">
+                        <div class="chat-social-head">
+                            <div><h3 id="dockChatSocialTitle">好友与联系人</h3><p>只有互为好友后才能继续发送消息</p></div>
+                            <button type="button" id="dockChatSocialClose" class="chat-social-close" aria-label="关闭好友面板">×</button>
+                        </div>
+                        <div class="chat-social-tabs" role="tablist" aria-label="好友功能">
+                            <button type="button" data-chat-social-tab="search" role="tab">搜索用户</button>
+                            <button type="button" data-chat-social-tab="friends" role="tab">好友</button>
+                            <button type="button" data-chat-social-tab="requests" role="tab">申请</button>
+                            <button type="button" data-chat-social-tab="blocks" role="tab">黑名单</button>
+                        </div>
+                        <div id="dockChatSocialContent" class="chat-social-content" aria-live="polite"></div>
+                    </div>
+                </section>
                 <div id="dockChatListView" class="chat-view">
                     <div id="dockChatList" class="chat-list"></div>
                 </div>
                 <div id="dockChatDetailView" class="chat-view hidden">
+                    <div id="dockChatRelationshipNotice" class="chat-relationship-notice" hidden aria-live="polite">
+                        <span id="dockChatRelationshipText"></span>
+                        <button type="button" id="dockChatRelationshipAction" hidden></button>
+                    </div>
                     <div id="dockChatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
                     <button type="button" id="dockChatJumpLatest" class="chat-jump-latest" hidden aria-label="跳转到最新消息">↓ <span>最新消息</span></button>
                     <div class="chat-input-area">
@@ -1140,7 +1162,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=b5233e31e7"></script>
+    <script defer src="js/core.min.js?v=d03860a9a5"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=8416b2c23d"></script>
     <script defer src="js/desktop-shell.min.js?v=b8e5d553a1"></script>
