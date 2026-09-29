@@ -118,3 +118,26 @@ test('H-1: 组装后的 core.js 含有新订阅（core-parts 改动必须已构�
   assert.match(core, /function subscribeToDmBroadcast\(\)/, 'core.js 缺少 subscribeToDmBroadcast —— 忘记跑 scripts/assemble-core.js');
   assert.match(core, /realtime-topic/, 'core.js 缺少 realtime-topic 端点调用');
 });
+
+test('broadcast arrivals mark only an incoming message in the visible active conversation as read', () => {
+  const vm=require('node:vm');
+  const start=feed.indexOf('            function applyRealtimeDmMessage(message) {');
+  const end=feed.indexOf('            async function subscribeToDmBroadcast()',start);
+  for(const scenario of [
+    {peer:'sender',tab:'chat',hidden:false,mine:false,read:false,expected:1},
+    {peer:'sender',tab:'posts',hidden:false,mine:false,read:false,expected:0},
+    {peer:'sender',tab:'chat',hidden:true,mine:false,read:false,expected:0},
+    {peer:'other',tab:'chat',hidden:false,mine:false,read:false,expected:0},
+    {peer:'sender',tab:'chat',hidden:false,mine:true,read:false,expected:0},
+    {peer:'sender',tab:'chat',hidden:false,mine:false,read:true,expected:0}
+  ]) {
+    let reads=0;
+    const sandbox={window:{currentUser:'viewer',markMessagesRead:(peer,rows,updates)=>{assert.equal(peer,'sender');assert.deepEqual(JSON.parse(JSON.stringify(updates)),[{id:'message-id'}]);reads++;return Promise.resolve();}},
+      dockChatActiveUser:scenario.peer,currentDockTab:scenario.tab,DM_MARKER:'__dm__',document:{hidden:scenario.hidden,getElementById:()=>null},
+      _chatCache:{sender:[]},_chatRenderSignature:{},getDockChatCacheKey:peer=>peer,getDMMessageReadAt:()=>scenario.read?'read-at':null,
+      upsertDockChatCacheMessage(){},renderDockMessages(){},scheduleDockChatListRefresh(){},updateUnreadBadge(){},console:{warn(){}}};
+    vm.runInNewContext(feed.slice(start,end),sandbox);
+    sandbox.applyRealtimeDmMessage({id:'message-id',media_type:'__dm__',user_name:scenario.mine?'viewer':'sender',media_url:scenario.mine?'sender':'viewer'});
+    assert.equal(reads,scenario.expected,JSON.stringify(scenario));
+  }
+});

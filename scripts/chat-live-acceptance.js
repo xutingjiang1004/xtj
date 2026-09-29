@@ -68,7 +68,7 @@ async function main(){
   await a.page.locator('#dockChatInput').fill('');
   await expect(b.page.locator('#dockChatPresence')).not.toContainText('正在输入',{timeout:7000});
   record('typing stopped');
-  const text='联机验收 '+suffix+' · 中文与 emoji 📷';
+  const text='联机验收 '+suffix+'-'+Date.now()+' · 中文与 emoji 📷';
   await a.page.locator('#dockChatInput').fill(text);
   const sent=Date.now();await a.page.locator('#dockChatSendBtn').click();
   await expect(b.page.locator('#dockChatMessages')).toContainText(text,{timeout:20000});
@@ -103,13 +103,21 @@ async function main(){
   record('real private image upload, delivery and decoding');
   // Replay after a genuine network interruption, not a simulated API response.
   await b.context.setOffline(true);
-  const reconnectText='断线补收 '+suffix;
+  const reconnectText='断线补收 '+suffix+'-'+Date.now();
   await a.page.locator('#dockChatInput').fill(reconnectText);await a.page.locator('#dockChatSendBtn').click();
   await expect(a.page.locator('#dockChatMessages')).toContainText(reconnectText,{timeout:15000});
   await b.context.setOffline(false);
   await expect(b.page.locator('#dockChatMessages')).toContainText(reconnectText,{timeout:30000});
   record('real offline/reconnect catch-up');
   for(const actor of actors) await actor.page.screenshot({path:path.join(out,actor===a?'sender-final.png':'recipient-final.png')});
+  const history=await api(a,'/api/dm/messages?target='+encodeURIComponent(b.user)+'&limit=100');
+  for(const message of history.data || []) {
+   let payload={};try{payload=JSON.parse(message.content || '{}');}catch{}
+   if(message.user_name===a.user && payload.media && !payload.withdrawn) {
+    const cleanup=await api(a,'/api/dm/withdraw',{method:'POST',data:{id:message.id}});
+    record('own test attachment withdrawn',{cleanupPending:!!cleanup.cleanup_pending});
+   }
+  }
   // Retain only session checkpoints until WebKit acceptance and database cleanup.
   for(const actor of actors)await actor.context.storageState({path:path.join(out,actor===a?'session-a.json':'session-b.json')});
  }catch(e){report.diagnostics=await Promise.all(actors.filter(a=>a.page).map(async a=>({user:a.user,state:await a.page.evaluate(()=>({sdk:!!window.supabase,client:!!window.sb,configKey:!!window.XTJ_CONFIG?.SUPABASE_ANON_KEY && !window.XTJ_CONFIG.SUPABASE_ANON_KEY.includes('...'),channels:window.sb?window.sb.getChannels().map(c=>c.state):[]})).catch(()=>({closed:true}))})));report.failure=e.message;console.error('FAIL '+e.message);process.exitCode=1;}
