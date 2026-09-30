@@ -97,18 +97,29 @@ test('slider follows forward/reverse movement before release, with transparent r
   await page.mouse.down();
   await page.mouse.move(x + 11, y, { steps: 4 });
   await expect(toggle).toHaveClass(/is-dragging/);
+  await expect.poll(async () => (await orb.boundingBox()).x - start.x).toBeGreaterThan(9);
   const middle = await orb.boundingBox();
-  const middlePaint = await page.locator('#feed .post').first().evaluate(n => getComputedStyle(n).color);
+  const middlePaint = await page.locator('#feed .post .content').first().evaluate(n => getComputedStyle(n).color);
+  const middleVisiblePaint = await page.locator('#feed .post .content').first().evaluate(n =>
+    document.documentElement.classList.contains('theme-composited')
+      ? getComputedStyle(document.documentElement,'::view-transition-new(root)').opacity
+      : getComputedStyle(n).color);
   expect(middlePaint).not.toBe('rgba(0, 0, 0, 0)');
   await expect(page.locator('#pubBtn')).toHaveCSS('color','rgb(255, 255, 255)');
-  expect(await page.evaluate(() => Number(document.documentElement.style.getPropertyValue('--xtj-theme-darkness')))).toBeCloseTo(.5,2);
+  expect(await page.evaluate(() => window.XTJThemeController.getProgress())).toBeCloseTo(.5,2);
   expect(middle.x - start.x).toBeGreaterThan(9);
   expect(middle.x - start.x).toBeLessThan(13);
   await expect(toggle.locator('.theme-symbol-moon')).toHaveCSS('opacity', '0.5');
   await expect(toggle.locator('.theme-symbol-sun')).toHaveCSS('opacity', '0.5');
   await page.screenshot({ path: info.outputPath('theme-mid-drag.png') });
   await page.mouse.move(x + 5, y);
-  await expect.poll(() => page.locator('#feed .post').first().evaluate(n => getComputedStyle(n).color)).not.toBe(middlePaint);
+  // Composited browsers blend captured pixels; their live DOM remains at the
+  // endpoint. Older browsers still interpolate the actual visible paint rules.
+  await expect.poll(() => page.locator('#feed .post .content').first().evaluate(n =>
+    document.documentElement.classList.contains('theme-composited')
+      ? getComputedStyle(document.documentElement,'::view-transition-new(root)').opacity
+      : getComputedStyle(n).color)).not.toBe(middleVisiblePaint);
+  await expect.poll(() => page.evaluate(() => window.XTJThemeController.getProgress())).toBeLessThan(.3);
   await expect.poll(() => orb.evaluate(el => el.getBoundingClientRect().x)).toBeLessThan(start.x + 7);
   await page.mouse.move(x + 30, y);
   await page.mouse.up();
@@ -148,6 +159,25 @@ test('pointer cancellation preserves the original mode and does not turn a verti
   await page.mouse.up();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 });
+
+for (const failure of ['stalled','rejected']) {
+test(`a ${failure} snapshot falls back without freezing the finger or losing the selected theme`,async({page})=>{
+  await setup(page);
+  await page.evaluate(failure=>{
+    window.__snapshotSkipped=0;
+    document.startViewTransition=()=>({ready:failure==='stalled'?new Promise(()=>{}):Promise.reject(new Error('capture unavailable')),skipTransition(){window.__snapshotSkipped++;}});
+  },failure);
+  const toggle=page.locator('#themeToggle'),orb=toggle.locator('.theme-toggle-orb'),b=await toggle.boundingBox();
+  const start=await orb.boundingBox();await page.mouse.move(b.x+14,b.y+15);await page.mouse.down();
+  await page.mouse.move(b.x+25,b.y+15);
+  await expect.poll(async()=>(await orb.boundingBox()).x-start.x).toBeGreaterThan(9);
+  await expect(page.locator('html')).not.toHaveClass(/theme-composited/);
+  expect(await page.evaluate(()=>window.__snapshotSkipped)).toBe(1);
+  await page.mouse.move(b.x+36,b.y+15);await page.mouse.up();
+  await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+  await expect(page.locator('html')).not.toHaveClass(/theme-switching/);
+});
+}
 
 test('fast reversals, keyboard, system preference and stored mode stay synchronized', async ({ page }) => {
   await setup(page);
@@ -192,7 +222,7 @@ test('one animation clock blends controls and settles without a delayed repaint'
         if (document.documentElement.dataset.theme === 'dark') {
           if (firstDarkFrame === null) firstDarkFrame = performance.now();
           samples.push({ colors: colors(), time: performance.now() - start,
-            progress: Number(document.documentElement.style.getPropertyValue('--xtj-theme-darkness') || 1),
+            progress: window.XTJThemeController.getProgress(),
             settled: !document.documentElement.classList.contains('theme-switching'),
             durations: nodes.map(n => getComputedStyle(n).transitionDuration) });
         }

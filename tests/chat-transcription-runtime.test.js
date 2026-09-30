@@ -31,3 +31,28 @@ test('provider failures retry through the durable queue without replacing messag
 test('unconfigured transcription remains unavailable and never touches storage',async()=>{
  const worker=createChatTranscription({supabase:{},env:{}});assert.equal(worker.enabled,false);assert.deepEqual(await worker.enqueue('message'),{status:'unavailable'});worker.stop();
 });
+test('reopening a conversation restores completed text, preserves current text and respects withdrawal',async()=>{
+ const rows=[
+  {id:'voice',content:JSON.stringify({media:{kind:'audio',storage_path:'chat/a.webm'}})},
+  {id:'current',content:JSON.stringify({kind:'audio',transcript:'already persisted'})},
+  {id:'withdrawn',content:JSON.stringify({kind:'audio',withdrawn:true})},
+  {id:'text',content:JSON.stringify({text:'hello'})}
+ ];
+ let queried=0;
+ const supabase={from(table){assert.equal(table,'chat_transcription_jobs');queried++;return {
+  select(){return this;},in(key,ids){assert.equal(key,'message_id');assert.deepEqual(ids,['voice']);return this;},
+  eq(key,value){assert.equal(key,'status');assert.equal(value,'completed');return Promise.resolve({data:[{message_id:'voice',transcript:'saved words'}]});}
+ };}};
+ const worker=createChatTranscription({supabase,env:{}});
+ await worker.restore(rows);
+ assert.equal(JSON.parse(rows[0].content).transcript,'saved words');
+ assert.equal(JSON.parse(rows[1].content).transcript,'already persisted');
+ assert.equal(JSON.parse(rows[2].content).transcript,undefined);
+ assert.equal(JSON.parse(rows[3].content).transcript,undefined);assert.equal(queried,1);
+});
+test('a queue outage does not turn readable messages into a load failure',async()=>{
+ const rows=[{id:'voice',content:JSON.stringify({kind:'audio',text:'caption'})}];
+ const supabase={from(){return {select(){return this;},in(){return this;},eq(){return Promise.resolve({error:{message:'offline'}});}};}};
+ const worker=createChatTranscription({supabase,env:{}});
+ assert.equal(await worker.restore(rows),rows);assert.equal(JSON.parse(rows[0].content).text,'caption');
+});

@@ -12,7 +12,7 @@ const {
 } = require('../render-api/storage-cleanup');
 const {
   createPhotoRecord,
-  createPhotoThumbnail
+  inspectPhotoOriginal
 } = require('../render-api/photo-create');
 
 const ORIGIN = 'https://ithowxqignlhkwaykglt.supabase.co';
@@ -177,7 +177,7 @@ test('storage removal reports queue_failed when durable cleanup cannot be record
   assert.equal(result.queue_failed, true);
 });
 
-test('photo thumbnail dimensions come from the final WebP output', async function () {
+test('photo inspection keeps original dimensions and writes no compressed derivatives', async function () {
   const output = Buffer.from('webp-output');
   const image = {
     metadata: async function () { return { width: 4000, height: 3000, orientation: 1 }; },
@@ -200,16 +200,16 @@ test('photo thumbnail dimensions come from the final WebP output', async functio
       };
     } }
   };
-  const result = await createPhotoThumbnail({
+  const result = await inspectPhotoOriginal({
     storagePath: 'photos/original.jpg',
     supabase: supabase,
     supabaseUrl: ORIGIN,
     sharp: function () { return image; }
   });
-  assert.equal(result.width, 321);
-  assert.equal(result.height, 123);
-  assert.equal(result.fileSize, output.length);
-  assert.equal(uploaded.length, 1);
+  assert.equal(result.width, 4000);
+  assert.equal(result.height, 3000);
+  assert.equal(result.fileSize, 3);
+  assert.equal(uploaded.length, 0);
 });
 
 test('same upload_id never removes the already referenced storage path', async function () {

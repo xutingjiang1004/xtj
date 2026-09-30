@@ -22,6 +22,28 @@ function createChatTranscription({ supabase, publishChatEvent, env = process.env
     void tick();
     return { status: 'queued' };
   }
+  async function restore(rows) {
+    const missing = [];
+    for (const row of rows || []) {
+      let payload; try { payload = JSON.parse(row.content); } catch (_) { continue; }
+      if (!payload || payload.withdrawn || payload.transcript ||
+          !(payload.kind === 'audio' || payload.media && payload.media.kind === 'audio')) continue;
+      missing.push({row,payload});
+    }
+    if (!missing.length) return rows;
+    // Completed queue output is durable and authoritative. Older message
+    // snapshots must not hide it after leaving or reopening the conversation.
+    try {
+      const jobs = await result(supabase.from('chat_transcription_jobs').select('message_id,transcript')
+        .in('message_id',missing.map(item=>item.row.id)).eq('status','completed'));
+      const saved = new Map((jobs || []).map(job=>[job.message_id,job.transcript]));
+      for (const {row,payload} of missing) {
+        const text = String(saved.get(row.id) || '').trim().slice(0,5000);
+        if (text) row.content = JSON.stringify({...payload,transcript:text});
+      }
+    } catch (_) { /* An optional queue outage cannot hide readable messages. */ }
+    return rows;
+  }
   async function processJob(job) {
     const message = await result(supabase.from('chat_messages').select('legacy_post_id,message_type,withdrawn_at').eq('id', job.message_id).maybeSingle());
     if (!message || message.withdrawn_at || message.message_type !== 'audio') throw new Error('message_unavailable');
@@ -76,6 +98,6 @@ function createChatTranscription({ supabase, publishChatEvent, env = process.env
   }
   const timer = enabled ? setInterval(tick, 10000) : null;
   if (timer) timer.unref();
-  return { enabled, enqueue, tick, processJob, stop() { if (timer) clearInterval(timer); } };
+  return { enabled, enqueue, restore, tick, processJob, stop() { if (timer) clearInterval(timer); } };
 }
 module.exports = { createChatTranscription };

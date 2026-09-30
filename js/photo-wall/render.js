@@ -158,14 +158,14 @@
     for (var i = 0; i < photos.length; i++) {
       var p = photos[i];
       if (!isRenderablePhoto(p)) continue;
-      // 墙格子优先用轻量缩略图(960 webp)加载提速；点击预览/放大仍走 imageUrl=原图，保留细节。
-      var realUrl = p.thumbUrl || p.thumb || p.imageUrl || '';
+      // Display the original at every size, including high-density tablet grids.
+      var realUrl = p.imageUrl || p.thumbUrl || p.thumb || '';
       var username = p.username || '未知用户';
       var time = formatPhotoTime(p.timestamp);
       var index = base + i;
       var delay = Math.min(index * 30, 300);
       html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + esc(String(p.id)) + '" style="animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)">';
-      html += '<img src="' + FALLBACK_IMG + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy">';
+      html += '<img src="' + FALLBACK_IMG + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
       html += '<div class="pw-item-info"><div class="pw-item-name">' + esc(username) + '</div><div class="pw-item-meta"><span>' + esc(time) + '</span><span>浏览 <b class="pw-view-count">' + esc(p.views || 0) + '</b></span></div></div></div>';
     }
     return html;
@@ -192,7 +192,7 @@
     if (!groups.length) return emptyHtml();
     return groups.map(function(group){
       var first = group.photos[0];
-      var cover = first && (first.thumbUrl || first.thumb || first.imageUrl) || FALLBACK_IMG;
+      var cover = first && (first.imageUrl || first.thumbUrl || first.thumb) || FALLBACK_IMG;
       return '<button type="button" class="pw-album-card" onclick="openPhotoAlbumGroup(\'' + esc(group.key) + '\')"><img class="pw-album-cover" src="' + safeUrl(cover) + '" alt="album"><div class="pw-album-title">' + esc(group.title) + '</div><div class="pw-album-count">' + group.photos.length + ' 张照片</div></button>';
     }).join('');
   }
@@ -831,9 +831,9 @@
         _renderPromise = null;
         return;
       }
-      var skeleton = '';
-      for (var i = 0; i < 9; i++) skeleton += '<div class="pw-skeleton"></div>';
-      grid.innerHTML = skeleton;
+      var garden = document.getElementById('pwUploadGarden');
+      grid.innerHTML = '<div class="pw-wall-loading" role="status"><div class="pw-garden is-growing" aria-hidden="true">' +
+        (garden ? garden.innerHTML : '') + '</div><span>照片正在慢慢铺开</span></div>';
       try {
         if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData();
         // ★ 检查 generation，旧数据不覆盖

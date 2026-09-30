@@ -23,7 +23,12 @@ function createDmPrivateStorage(supabase) {
     else { try { payload = JSON.parse(row.content); } catch (_) { return; } }
     if (!payload || !payload.media || payload.media.bucket !== PRIVATE_BUCKET) return;
     const path = payload.media.storage_path;
-    const next = { ...payload, media: { ...payload.media, url: await sign(path) } };
+    let url = '', unavailable = false;
+    try { url = await sign(path); }
+    catch (_) { unavailable = true; }
+    // One unavailable attachment must not erase the entire conversation or
+    // its saved transcripts. Never fall back to an expired/public private URL.
+    const next = { ...payload, media: { ...payload.media, url, unavailable } };
     if (row.payload) row.payload = next;
     else row.content = JSON.stringify(next);
   }

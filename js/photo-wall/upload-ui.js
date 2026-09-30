@@ -493,6 +493,23 @@
     }
     var text = '已完成 ' + processed + ' / ' + total + ' 张';
     setProgress(text, pct);
+    var active = jobs.filter(function(job){ return job.status === 'running'; });
+    var phase = state.cancelRequested ? 'cancelling' :
+      (processed === total ? (failed ? 'partial' : 'complete') :
+        (active.some(function(job){ return job.phase === 'uploading'; }) ? 'uploading' :
+          (active.some(function(job){ return job.phase === 'storing' || job.phase === 'saving'; }) ? 'saving' : 'preparing')));
+    var overlay = byId('pwUploadProgressOverlay');
+    if (overlay) overlay.dataset.phase = phase;
+    var stageEl = byId('pwUploadProgressStage');
+    if (stageEl) stageEl.textContent = ({ preparing:'正在读取原图', uploading:'正在上传原图',
+      saving:'正在保存照片', complete:'照片已保存', partial:'部分照片未完成', cancelling:'正在取消' })[phase];
+    var bytesEl = byId('pwUploadProgressBytes');
+    if (bytesEl) {
+      var sent = 0, size = 0;
+      jobs.forEach(function(job){ size += Number(job.file && job.file.size) || 0; sent += job.sentBytes || 0; });
+      function formatBytes(bytes){ return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB'; }
+      bytesEl.textContent = '已传 ' + formatBytes(sent) + ' / ' + formatBytes(size);
+    }
     var processedEl = byId('pwUploadProgressProcessed');
     var okEl = byId('pwUploadProgressOk');
     var failEl = byId('pwUploadProgressFail');
@@ -528,29 +545,58 @@
     return '';
   }
 
-  // ★ 照片墙存储上传：优先直连 Supabase（window.sb），缺失/失败时回退服务端上传。
-  //   保证即使部署未注入 SUPABASE_ANON_KEY（window.sb 为 null）也能正常传图。
-  async function uploadPhotoToStorage(path, file, type, signal) {
-    if (window.sb) {
-      var up = await window.sb.storage.from('uploads').upload(path, file, {
-        contentType: type, cacheControl: '31536000', upsert: false, signal: signal || undefined
-      });
-      if (up && up.error) { up.error.photoUploadStage = 'storage'; throw up.error; }
-      return window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
-    }
-    // 服务端上传（复用 service_role，不依赖 anon key）
+  // Send the untouched File through the authenticated upload API. XHR exposes
+  // real transmitted bytes; server storage and record saving are separate stages.
+  async function uploadPhotoToStorage(path, file, type, signal, onProgress) {
     var authHeaders = (typeof window.getUserAuthHeaders === 'function') ? window.getUserAuthHeaders() : {};
     var headers = Object.assign({}, await Promise.resolve(authHeaders), { 'Content-Type': 'application/octet-stream' });
     var qs = 'path=' + encodeURIComponent(path) + '&mime_type=' + encodeURIComponent(type || 'image/jpeg');
-    var resp = await fetch(apiUrl('/api/photo/upload') + '?' + qs, {
-      method: 'POST', headers: headers, body: file, signal: signal || undefined
-    });
+    var url = apiUrl('/api/photo/upload') + '?' + qs;
+    var resp;
+    if (typeof XMLHttpRequest === 'function') {
+      resp = await new Promise(function(resolve, reject){
+        var xhr = new XMLHttpRequest(), settled = false;
+        function finish(error, response){
+          if (settled) return;
+          settled = true;
+          if (signal) signal.removeEventListener('abort', abort);
+          xhr.upload.onprogress = xhr.upload.onload = null;
+          xhr.onload = xhr.onerror = xhr.onabort = xhr.ontimeout = null;
+          if (error) reject(error); else resolve(response);
+        }
+        function abort(){ xhr.abort(); finish(createPhotoUploadError('cancelled')); }
+        xhr.open('POST', url, true);
+        xhr.withCredentials = true;
+        xhr.timeout = 10 * 60 * 1000;
+        Object.keys(headers).forEach(function(key){ xhr.setRequestHeader(key, headers[key]); });
+        xhr.upload.onprogress = function(event){
+          if (!event.lengthComputable || settled) return;
+          if (onProgress) onProgress(Math.min(file.size, event.loaded), event.loaded >= event.total);
+        };
+        xhr.upload.onload = function(){ if (!settled && onProgress) onProgress(file.size, true); };
+        xhr.onload = function(){
+          var status = xhr.status, body = xhr.responseText;
+          finish(null, { ok:status >= 200 && status < 300, status:status,
+            json:function(){ return Promise.resolve().then(function(){ return JSON.parse(body); }); } });
+        };
+        xhr.onerror = function(){ finish(createPhotoUploadError('network_error')); };
+        xhr.ontimeout = function(){ finish(createPhotoUploadError('timeout')); };
+        xhr.onabort = function(){ finish(createPhotoUploadError('cancelled')); };
+        if (signal && signal.aborted) { abort(); return; }
+        if (signal) signal.addEventListener('abort', abort, { once:true });
+        xhr.send(file);
+      });
+    } else {
+      resp = await fetch(url, { method:'POST', headers:headers, body:file, signal:signal || undefined });
+    }
     var data = await resp.json().catch(function () { return {}; });
     if (!resp.ok || !data.ok || !data.public_url) {
       var err = new Error((data && data.error) || '图片上传失败');
+      err.status = resp.status;
       err.photoUploadStage = 'storage';
       throw err;
     }
+    if (onProgress) onProgress(file.size, true);
     return data.public_url;
   }
 
@@ -745,12 +791,14 @@
     var cancelBtn = byId('pwUploadProgressCancel');
     // ★ 修复：pwUploadProgressPct（统计行"进度 X%"）此前从未被更新，恒显示 0%
     var pctEl = byId('pwUploadProgressPct');
+    var garden = byId('pwUploadGarden');
+    if (garden) garden.classList.toggle('is-growing', !!text);
     if (!text) {
       overlay.style.display = 'none';
       overlay.classList.remove('upload-overlay-visible');
       overlay.setAttribute('aria-hidden', 'true');
       if (trackEl) trackEl.hidden = true;
-      if (fillEl) fillEl.style.width = '0%';
+      if (fillEl) fillEl.style.transform = 'scaleX(0)';
       if (cancelBtn) cancelBtn.hidden = true;
       if (pctEl) pctEl.textContent = '0%';
       return;
@@ -759,10 +807,10 @@
     overlay.classList.add('upload-overlay-visible');
     overlay.setAttribute('aria-hidden', 'false');
     if (textEl) textEl.textContent = text || '';
-    if (statusEl) statusEl.textContent = '保留原始画质 · 上传后自动显示';
+    if (statusEl) statusEl.textContent = '原文件直传 · 保留分辨率与格式';
     if (pctEl) pctEl.textContent = (typeof pct === 'number') ? Math.round(pct) + '%' : '0%';
     if (trackEl) { trackEl.hidden = !(typeof pct === 'number'); trackEl.setAttribute('aria-valuenow', String(Math.round(pct || 0))); }
-    if (fillEl && typeof pct === 'number') fillEl.style.width = Math.round(pct) + '%';
+    if (fillEl && typeof pct === 'number') fillEl.style.transform = 'scaleX(' + Math.max(0, Math.min(1, pct / 100)) + ')';
     if (stageEl) {
       var r = (typeof pct === 'number') ? Math.round(pct) : -1;
       stageEl.textContent = state.cancelRequested ? '正在取消' : (r >= 100 ? '处理完成' : '正在上传照片');
@@ -782,10 +830,6 @@
     openSheet(c.accepted, c.skipped);
   }
 
-  // P6: 上传前图片预处理 — 原画质优先 + EXIF 方向矫正
-  // - GIF 动图保持原样（不压缩）
-  // - JPEG/PNG/WebP 不缩放、不转码，直接上传原文件（保留原画质；现代浏览器对 <img> 自动应用 EXIF 方向）
-  // - 其余格式(HEIC/BMP/TIFF 等)为跨浏览器可显示，仅做格式归一化并保留原始分辨率、高质量输出
   // Original bytes are never resized or re-encoded. Check uncommon formats against
   // this browser before uploading, so unsupported HEIC/TIFF cannot become broken tiles.
   function preprocessImageFile(file, signal){
@@ -825,15 +869,29 @@
     var path = 'photos/' + safeFileName(file, inferExt(file), uploadId);
     job.storagePath = path;
     var uploadFile = file;
+    job.phase = 'preparing';
+    if (job.onProgress) job.onProgress();
     var type = isImage(file) && file.type ? file.type : 'image/jpeg';
     uploadFile = await preprocessImageFile(file, signal);
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
     var publicUrl;
     try {
-      publicUrl = await uploadPhotoToStorage(path, uploadFile, type, signal);
-      job.progress = 0.9;
+      job.phase = 'uploading';
+      if (job.onProgress) job.onProgress();
+      publicUrl = await uploadPhotoToStorage(path, uploadFile, type, signal, function(bytes, sent){
+        job.sentBytes = bytes;
+        job.progress = .88 * (bytes / Math.max(1, uploadFile.size));
+        job.phase = sent ? 'storing' : 'uploading';
+        if (job.onProgress) job.onProgress();
+      });
+      job.progress = 0.94;
+      job.phase = 'saving';
       if (job.onProgress) job.onProgress();
     } catch (storageError) {
+      // The browser may abort after sending the body while the server is still
+      // storing it. Reconcile this known path on resume instead of losing it.
+      if (state.cancelRequested || (signal && signal.aborted))
+        savePendingPhotoUpload({uploadId:uploadId,path:path,fileName:file.name,fileSize:file.size,mimeType:type});
       storageError.photoUploadStage = 'storage';
       throw storageError;
     }
@@ -998,6 +1056,7 @@
       }
       job.status = 'running';
       job.progress = 0;
+      job.sentBytes = 0;
       job.onProgress = function(){ onProgress && onProgress(processed, ok, fail); };
       return uploadOnePhotoWallFile(job, signal).then(function(row){
         processed += 1; ok += 1; job.status = 'success'; job.succeeded = true; job.result = row;

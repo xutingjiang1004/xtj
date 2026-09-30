@@ -297,7 +297,8 @@
                 if (!message) return null;
                 var payload = getDMMessagePayload(message);
                 var actorKey = String(message.actor_key || '');
-                if (payload && payload.media && payload.media.url) {
+                if (payload && payload.media && (payload.media.url ||
+                    payload.media.bucket === 'dm-private' && payload.media.storage_path)) {
                     return {
                         kind: payload.media.kind || '',
                         name: payload.media.name || '',
