@@ -185,12 +185,12 @@ test('cancellation messaging preserves ordinary success and failure result actio
   assert.strictEqual(title.textContent, '上传成功');
   assert.strictEqual(actions.hidden, true);
   assert.strictEqual(retry.hidden, true);
-  assert.strictEqual(celebrations, 1);
+  assert.strictEqual(celebrations, 0);
 
   runtime.window.setPhotoUploadResult('已处理 2/2 张：成功 0 张，失败 2 张', 'error');
   assert.strictEqual(result.dataset.state, 'error');
   assert.strictEqual(title.textContent, '上传失败');
   assert.strictEqual(actions.hidden, false);
   assert.strictEqual(retry.hidden, false);
-  assert.strictEqual(celebrations, 1);
+  assert.strictEqual(celebrations, 0);
 });

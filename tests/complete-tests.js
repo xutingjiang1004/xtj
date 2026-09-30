@@ -305,7 +305,7 @@ test('login-device executes only from its single static entry', function(){
   assert.strictEqual((html.match(/<script[^>]+src="js\/login-device\.min\.js\?v=/g) || []).length, 1, 'login-device static script count');
   assert.ok(!/xtjLoadScript(?:Once|Sequence)[\s\S]{0,260}login-device/.test(core), 'core can load login-device twice');
 });
-test('photo upload progress is processed-based and reports safe batch outcomes', function(){
+test('photo upload progress tracks settled items and reports safe batch outcomes', function(){
   var source = read('js/photo-wall/upload-ui.js');
   assert.ok(source.indexOf('var processed = 0;') >= 0, 'processed counter missing');
   assert.ok(source.indexOf('processed += 1;') >= 0, 'every settled item must advance progress');
@@ -317,7 +317,8 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
   assert.ok(source.indexOf("'文件类型不支持'") >= 0, 'safe type failure reason missing');
   assert.ok(source.indexOf("'图片已上传，但记录保存失败'") >= 0, 'safe record failure reason missing');
   assert.ok(source.indexOf("'后端不可达'") >= 0, 'safe network failure reason missing');
-  assert.ok(source.indexOf('await new Promise(function(resolve){ setTimeout(resolve, 180); });') >= 0, 'final 100 percent state is not painted before close');
+  // The persistent result replaces the progress overlay immediately; no artificial finish delay.
+  assert.ok(source.indexOf('doneBytes / totalBytes') >= 0, 'file-size weighted progress missing');
 });
 test('Dock changes stay inside the approved selection-feedback scope', function(){
   // 删除大文件批量时 diff 输出可能超过 execSync 默认 1MB 缓冲上限（ENOBUFS），显式扩容

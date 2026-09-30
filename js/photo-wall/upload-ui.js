@@ -481,8 +481,17 @@
   function updateUploadBatchProgress(processed, total, success, failed, prefix){
     var skipped = (state.skippedFiles || []).length;
     var pct = uploadBatchPercent(processed, total);
-    var text = (prefix ? prefix + '，' : '') + '已处理 ' + processed + ' / ' + total + '，成功 ' + success + '，失败 ' + failed;
-    if (skipped) text += '，跳过 ' + skipped;
+    var jobs = state.batchJobs || [];
+    if (jobs.length === total) {
+      var totalBytes = 0, doneBytes = 0;
+      jobs.forEach(function(job){
+        var bytes = Math.max(1, Number(job.file && job.file.size) || 1);
+        totalBytes += bytes;
+        doneBytes += bytes * (job.succeeded || job.status === 'failed' || job.status === 'cancelled' ? 1 : (job.progress || 0));
+      });
+      pct = totalBytes ? Math.round(doneBytes / totalBytes * 100) : pct;
+    }
+    var text = '已完成 ' + processed + ' / ' + total + ' 张';
     setProgress(text, pct);
     var processedEl = byId('pwUploadProgressProcessed');
     var okEl = byId('pwUploadProgressOk');
@@ -633,10 +642,6 @@
     result.dataset.state = s === 'cancelled' ? 'partial' : s;
     var titleMap = { success: '上传成功', partial: '部分完成', cancelled: '上传已取消', error: '上传失败' };
     if (titleEl) titleEl.textContent = titleMap[s] || titleMap.success;
-    // 全站照片墙：上传成功庆祝（轻量 confetti，尊重 perf-lite）
-    if (s === 'success' && typeof window.__xtjPhotoUploadCelebrate === 'function') {
-      try { window.__xtjPhotoUploadCelebrate(); } catch (_) {}
-    }
     var parts = text.split(/\n|[。;；]/).map(function(p){ return p.trim(); }).filter(Boolean);
     if (detailEl) detailEl.textContent = parts.length > 1 ? parts.join('\n') : text;
     if (actionsEl) actionsEl.hidden = (s === 'success');
@@ -710,8 +715,9 @@
     });
     state.photoFiles = files.slice();
     state.skippedFiles = (skipped || []).slice();
-    if (title) title.textContent = '选择完成，准备上传';
-    var metaText = '已选择 ' + files.length + ' 张照片，确认后开始上传。';
+    if (title) title.textContent = '上传照片';
+    var sizeMb = files.reduce(function(sum, file){ return sum + file.size; }, 0) / 1024 / 1024;
+    var metaText = files.length + ' 张 · ' + sizeMb.toFixed(1) + ' MB · 原图上传';
     if (skipped && skipped.length) metaText += ' 已跳过 ' + skipped.length + ' 个不支持或超限文件。';
     if (meta) meta.textContent = metaText;
     if (count) count.textContent = files.length + ' 张照片';
@@ -753,13 +759,13 @@
     overlay.classList.add('upload-overlay-visible');
     overlay.setAttribute('aria-hidden', 'false');
     if (textEl) textEl.textContent = text || '';
-    if (statusEl) statusEl.textContent = (typeof pct === 'number') ? ('当前进度 ' + Math.round(pct) + '%') : '正在准备上传任务。';
+    if (statusEl) statusEl.textContent = '保留原始画质 · 上传后自动显示';
     if (pctEl) pctEl.textContent = (typeof pct === 'number') ? Math.round(pct) + '%' : '0%';
-    if (trackEl) trackEl.hidden = !(typeof pct === 'number');
+    if (trackEl) { trackEl.hidden = !(typeof pct === 'number'); trackEl.setAttribute('aria-valuenow', String(Math.round(pct || 0))); }
     if (fillEl && typeof pct === 'number') fillEl.style.width = Math.round(pct) + '%';
     if (stageEl) {
       var r = (typeof pct === 'number') ? Math.round(pct) : -1;
-      stageEl.textContent = r < 0 ? '准备中' : (r >= 100 ? '上传完成' : '上传中');
+      stageEl.textContent = state.cancelRequested ? '正在取消' : (r >= 100 ? '处理完成' : '正在上传照片');
     }
     if (cancelBtn) cancelBtn.hidden = false;
   }
@@ -780,110 +786,33 @@
   // - GIF 动图保持原样（不压缩）
   // - JPEG/PNG/WebP 不缩放、不转码，直接上传原文件（保留原画质；现代浏览器对 <img> 自动应用 EXIF 方向）
   // - 其余格式(HEIC/BMP/TIFF 等)为跨浏览器可显示，仅做格式归一化并保留原始分辨率、高质量输出
-  function scaleImageToCanvas(source, maxSide){
-    // maxSide<=0 表示不缩放，保留原始分辨率（原画质）
-    var max = maxSide || 0;
-    var w = source.width || source.naturalWidth || 1;
-    var h = source.height || source.naturalHeight || 1;
-    var longest = Math.max(w, h);
-    var scale = (max > 0 && longest > max) ? (max / longest) : 1;
-    var cw = Math.max(1, Math.round(w * scale));
-    var ch = Math.max(1, Math.round(h * scale));
-    var canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
-    var ctx = canvas.getContext('2d');
-    if (ctx) ctx.drawImage(source, 0, 0, cw, ch);
-    return canvas;
-  }
-
-  function canvasToBlob(canvas, mimeType){
+  // Original bytes are never resized or re-encoded. Check uncommon formats against
+  // this browser before uploading, so unsupported HEIC/TIFF cannot become broken tiles.
+  function preprocessImageFile(file, signal){
+    if (/^image\/(jpeg|png|webp|gif|avif)$/i.test(file.type || '')) return Promise.resolve(file);
+    if (signal && signal.aborted) return Promise.reject(createPhotoUploadError('cancelled'));
     return new Promise(function(resolve, reject){
-      try {
-        canvas.toBlob(function(blob){ blob ? resolve(blob) : reject(new Error('canvas_to_blob_failed')); }, mimeType, 0.92);
-      } catch (e) { reject(e); }
-    });
-  }
-
-  function preprocessImageFile(file){
-    return new Promise(function(resolve){
-      if (!isImage(file)) return resolve(file);
-      var type = String(file.type || '').toLowerCase();
-      if (type === 'image/gif') return resolve(file); // GIF 动图不压缩
-      // 原画质直传：浏览器普遍支持的格式不做任何缩放/转码，直接上传原文件，
-      // 现代浏览器(2020+)对 <img> 会自动应用 EXIF 方向，因而无需在此旋转。
-      if (type === 'image/jpeg' || type === 'image/png' || type === 'image/webp') {
-        return resolve(file);
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      var settled = false;
+      var timeoutId = setTimeout(function(){ finish(false); }, 10000);
+      function onAbort(){ finish(false, true); }
+      function finish(ok, cancelled){
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
+        URL.revokeObjectURL(url);
+        if (ok) resolve(file);
+        else reject(createPhotoUploadError(cancelled ? 'cancelled' : 'unsupported_type'));
       }
-      // 仅 exotic 格式(heic/bmp/tiff 等)需转码为可跨浏览器显示的 jpeg/png，
-      // 但仍保留原始分辨率、以高质量导出。
-      var isSmall = Number(file.size) < 200 * 1024;
-      var outMime = (type === 'image/png') ? 'image/png' : 'image/jpeg';
-
-      // 编码后体积大于原图时保留原图；keepEvenIfLarger 用于小图方向矫正场景
-      function toProcessed(blob, keepEvenIfLarger){
-        if (!blob || !blob.size) return file;
-        if (!keepEvenIfLarger && blob.size >= file.size) return file;
-        if (blob.type === outMime) return blob;
-        try { return new Blob([blob], { type: outMime }); } catch (_) { return blob; }
-      }
-
-      function encodeFrom(source, cap, keepEvenIfLarger){
-        try {
-          var canvas = scaleImageToCanvas(source, cap);
-          return canvasToBlob(canvas, outMime).then(function(blob){
-            return toProcessed(blob, keepEvenIfLarger);
-          }, function(){ return file; });
-        } catch (_) { return Promise.resolve(file); }
-      }
-
-      function fallbackCompress(){
-        // 无 createImageBitmap：仅压缩、不矫正方向（旧浏览器）
-        if (isSmall) return Promise.resolve(file);
-        var url = null;
-        try { url = URL.createObjectURL(file); } catch (_) { return Promise.resolve(file); }
-        var img = new Image();
-        return new Promise(function(resolveImg){
-          var settled = false;
-          var timeoutId = setTimeout(function(){ finish(file); }, 15000);
-          function finish(result){
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeoutId);
-            img.onload = null;
-            img.onerror = null;
-            try { URL.revokeObjectURL(url); } catch (_) {}
-            resolveImg(result);
-          }
-          img.onload = function(){
-            encodeFrom(img, 0, false).then(function(result){ finish(result); }, function(){ finish(file); });
-          };
-          img.onerror = function(){ finish(file); };
-          img.src = url;
-        });
-      }
-
-      if (!(window.createImageBitmap && typeof window.createImageBitmap === 'function')) {
-        resolve(fallbackCompress());
-        return;
-      }
-      var bitmapPromise;
-      try { bitmapPromise = Promise.resolve(createImageBitmap(file, { imageOrientation: 'from-image' })); }
-      catch (_) { resolve(fallbackCompress()); return; }
-      bitmapPromise.then(function(bitmap){
-        try {
-          var maxSide = isSmall ? Math.max(bitmap.width, bitmap.height) : 0; // 0=不缩放，保留原分辨率
-          encodeFrom(bitmap, maxSide, isSmall).then(function(result){
-            if (bitmap.close) try { bitmap.close(); } catch (_) {}
-            resolve(result);
-          });
-        } catch (_) {
-          if (bitmap.close) try { bitmap.close(); } catch (_) {}
-          resolve(file);
-        }
-      }, function(){
-        resolve(fallbackCompress());
-      });
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      img.onload = function(){ finish(img.naturalWidth > 0); };
+      img.onerror = function(){ finish(false); };
+      img.src = url;
     });
   }
 
@@ -897,32 +826,13 @@
     job.storagePath = path;
     var uploadFile = file;
     var type = isImage(file) && file.type ? file.type : 'image/jpeg';
-    // P6: 压缩 + 方向矫正
-    // ★ 修复：原注释写"失败时静默回退原图直传"，这对 JPEG/PNG 是安全的，
-    //   但对浏览器**无法解码**的格式（HEIC/HEIF/BMP/TIFF）有害无害之分：
-    //   转码失败后 uploadFile 仍是原文件、type 仍是 image/heic 直传 Storage，
-    //   于是照片墙上出现一张 Chrome/Firefox 都渲染不出的"破图"（仅 Safari 可看）。
-    //   高分辨率 HEIC 转 JPEG 后体积常常反超原图，preprocessImageFile 在
-    //   "编码后体积 >= 原图"时会直接返回原文件，所以这条路径极易触发。
-    //   改为：对浏览器不支持的格式，转码失败即明确报错，而不是上传一张破图。
-    if (isImage(file)) {
-      var BROWSER_UNDECODABLE = /^image\/(heic|heif|bmp|x-ms-bmp|tiff|tif)$/i;
-      var srcType = String(file.type || '');
-      var needsTranscode = BROWSER_UNDECODABLE.test(srcType);
-      try {
-        var processed = await preprocessImageFile(file);
-        if (processed && processed !== file) uploadFile = processed;
-      } catch (_) {}
-      if (uploadFile && uploadFile.type) type = uploadFile.type;
-      // 需要转码但最终仍是原格式 → 浏览器渲染不了，宁可拒绝也不要落一张破图
-      if (needsTranscode && BROWSER_UNDECODABLE.test(String(type || ''))) {
-        throw createPhotoUploadError('unsupported_type');
-      }
-    }
+    uploadFile = await preprocessImageFile(file, signal);
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
     var publicUrl;
     try {
       publicUrl = await uploadPhotoToStorage(path, uploadFile, type, signal);
+      job.progress = 0.9;
+      if (job.onProgress) job.onProgress();
     } catch (storageError) {
       storageError.photoUploadStage = 'storage';
       throw storageError;
@@ -1087,6 +997,8 @@
         return runOne();
       }
       job.status = 'running';
+      job.progress = 0;
+      job.onProgress = function(){ onProgress && onProgress(processed, ok, fail); };
       return uploadOnePhotoWallFile(job, signal).then(function(row){
         processed += 1; ok += 1; job.status = 'success'; job.succeeded = true; job.result = row;
         onProgress && onProgress(processed, ok, fail);
@@ -1103,7 +1015,9 @@
       }).then(runOne, runOne);  // ★ 修复：补上 reject 回调，防止 onProgress 等回调抛错时整条 worker 链断掉，导致剩余文件永不上传
     }
     var workers = [];
-    for (var w = 0; w < Math.min(CONCURRENCY, Math.max(1, total)); w++) workers.push(runOne());
+    var largeFiles = jobs.some(function(job){ return job.file && job.file.size > 20 * 1024 * 1024; });
+    var workerLimit = largeFiles ? 2 : CONCURRENCY;
+    for (var w = 0; w < Math.min(workerLimit, Math.max(1, total)); w++) workers.push(runOne());
     return Promise.all(workers).then(function(){ return { processed: processed, ok: ok, fail: fail, cancelled: cancelled, total: total }; });
   }
 
@@ -1119,6 +1033,7 @@
 
   async function performUpload(jobs){
     state.uploading = true;
+    state.batchJobs = jobs;
     state.cancelRequested = false;
     var total = jobs.length;
     var processed = 0;
@@ -1167,9 +1082,7 @@
     state.failedJobs = failures.map(function(f){ return f.job; }).filter(Boolean);
     var refreshFailed = false;
     var insertedAny = false;
-    try {
-      if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData(true);
-    } catch (e) { refreshFailed = true; }
+
     // ★ 修复：先归一化回填（unshift）再渲染，避免"先渲染后回填"导致新照片不出现
     jobs.filter(function(j){ return j.succeeded && j.result; }).forEach(function(j){
       var row = j.result;
@@ -1208,12 +1121,22 @@
     // 单次渲染：setUploadResult 内部统一处理 dataset/title/detail/庆祝，
     // 避免旧写法(setUploadResult + setUploadResultState 连续调用)二次写入、成功庆祝触发两次。
     setUploadResult(summary, resultState, fullMsg);
-    toast(summary);
-    await new Promise(function(resolve){ setTimeout(resolve, 180); });
+
+    // Committed rows are rendered immediately; reconcile the wall in the background.
+    if (ok && typeof window.loadPhotoWallData === 'function') {
+      Promise.resolve().then(function(){ return window.loadPhotoWallData(true); }).then(function(){
+        if (!state.uploading && typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
+      }).catch(function(){ /* Result stays available; the refresh action can retry. */ });
+    }
     } catch (finErr) {
       console.error('[photo-upload] finalize error', finErr);
     } finally {
-      // ★ 全部收尾（含 180ms 稳定窗）结束后才放行下一次上传
+      // Release successful/cancelled originals; failed originals remain available for retry.
+      jobs.forEach(function(job){
+        job.onProgress = null;
+        if (job.succeeded || job.status === 'cancelled') job.file = null;
+      });
+      state.batchJobs = [];
       state.uploading = false;
     }
   }
@@ -1390,7 +1313,7 @@
         cancelCurrentUpload();
         cancelBtn.disabled = true;
         cancelBtn.textContent = '正在取消...';
-        setTimeout(function(){ cancelBtn.disabled = false; cancelBtn.textContent = '取消上传'; }, 500);
+
       });
     }
     // ★ 修复：不再在此处给 pwUploadResultRetry 绑定直接 click——该按钮同时受

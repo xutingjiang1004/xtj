@@ -132,10 +132,10 @@ test('M3: 图片预热先判视口、再消耗预算，不再预先截断数组'
 
 // ─────────────────────────── M4 HEIC 破图 ───────────────────────────
 
-test('M4: 浏览器不可解码的格式转码失败时明确报错，不静默直传', () => {
-  assert.match(uploadSource, /BROWSER_UNDECODABLE = \/\^image\\\/\(heic\|heif\|bmp\|x-ms-bmp\|tiff\|tif\)\$\//i);
-  assert.match(uploadSource, /if \(needsTranscode && BROWSER_UNDECODABLE\.test\(String\(type \|\| ''\)\)\)/);
-  assert.match(uploadSource, /throw createPhotoUploadError\('unsupported_type'\)/, '复用既有错误码');
+test('M4: 原图上传前检查不常见格式，无法显示时明确报错', () => {
+  assert.match(uploadSource, /img\.onerror = function\(\)\{ finish\(false\); \}/);
+  assert.match(uploadSource, /reject\(createPhotoUploadError\(cancelled \? 'cancelled' : 'unsupported_type'\)\)/);
+  assert.doesNotMatch(uploadSource, /canvasToBlob|fallbackCompress/);
 });
 
 // ─────────────────────────── M5/M6 上传契约 ───────────────────────────

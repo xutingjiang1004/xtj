@@ -317,7 +317,11 @@
     var track = slideTrack();
     var root = overlay();
     if (!track || !root) return;
-    setPreviewVars({ '--pp-track-x': centerTrackOffset(extraX) + 'px' });
+    var offset = centerTrackOffset(extraX);
+    setPreviewVars({ '--pp-track-x': offset + 'px' });
+    // The legacy navigator owns an inline transform; update it for gestures too.
+    track.style.transition = animate ? 'transform 220ms ease-out' : 'none';
+    track.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
     if (animate) toggleTimedClass(root, 'pp-animate-track', 240);
     else root.classList.remove('pp-animate-track');
   }
@@ -348,7 +352,7 @@
     if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
     if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
     clearDismissVisual(!!opts.animate);
-    syncTrackTransform(0, !!opts.animate);
+    if (!opts.keepTrack) syncTrackTransform(0, !!opts.animate);
     applyImageTransform(!!opts.animate);
   }
 
@@ -1599,7 +1603,7 @@
   function wrapNavigation(kind) {
     return function () {
       closePhotoInfoInternal(true);
-      resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
+      resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true, keepTrack: true });
       var fn = kind === 'next' ? original.nextPhoto : original.prevPhoto;
       var result = withPreviewGuardDisabled(fn, window, arguments);
       var seq = ++_navSeq;

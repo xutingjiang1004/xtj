@@ -15,19 +15,17 @@ const previewCss = read('css/photo-preview.css');
 // This audit test deliberately stays standalone: do not wire it through package.json.
 test('photo uploads retain a bounded worker pool and continue after a worker callback throws', () => {
   assert.match(upload, /var CONCURRENCY = 3;/);
-  assert.match(upload, /w < Math\.min\(CONCURRENCY, Math\.max\(1, total\)\)/);
+  assert.match(upload, /w < Math\.min\(workerLimit, Math\.max\(1, total\)\)/);
   assert.match(upload, /\.then\(runOne, runOne\)/);
 });
 
-test('legacy image preprocessing releases its object URL on success, error, and timeout', () => {
-  const start = upload.indexOf('function fallbackCompress()');
-  const end = upload.indexOf('if (!(window.createImageBitmap', start);
-  const body = upload.slice(start, end);
-  assert.match(body, /var timeoutId = setTimeout\(function\(\)\{ finish\(file\); \}, 15000\)/);
-  assert.match(body, /img\.onload = null/);
-  assert.match(body, /img\.onerror = null/);
-  assert.match(body, /URL\.revokeObjectURL\(url\)/);
-  assert.match(body, /img\.onload = function\(\)\{[\s\S]*?encodeFrom\(img, 0, false\)\.then\(function\(result\)\{ finish\(result\); \}, function\(\)\{ finish\(file\); \}\)/);
+test('original uploads never use canvas re-encoding and uncommon-format checks release resources', () => {
+  assert.doesNotMatch(upload, /toBlob|drawImage|createImageBitmap/);
+  assert.match(upload, /if \(ok\) resolve\(file\)/);
+  assert.match(upload, /URL\.revokeObjectURL\(url\)/);
+  assert.match(upload, /img\.onload = null/);
+  assert.match(upload, /img\.onerror = null/);
+  assert.match(upload, /else reject\(createPhotoUploadError\(cancelled \? 'cancelled' : 'unsupported_type'\)\)/);
 });
 
 test('thumbnail full-size preload is single-flight and tied to preview image lifecycle', () => {
@@ -37,7 +35,7 @@ test('thumbnail full-size preload is single-flight and tied to preview image lif
   assert.match(preview, /if \(cancelRequest && wasPending\)[\s\S]*?preImg\.src = ''/);
   assert.match(preview, /preImg\.onerror = function\(\)\s*\{[\s\S]*?cleanupFullPreload\(!0\);[\s\S]*?fullRequestStarted = !0;[\s\S]*?J\.src = openFullUrl/);
   assert.match(preview, /if \(!\(_\._openLoadGen === ee && t === S && J && J\.isConnected\)\) return/);
-  assert.match(preview, /J\._ppProgressiveUrl !== openFullUrl/);
+  assert.match(preview, /J\._ppUrl !== openFullUrl/);
   // The active thumbnail path should not concurrently fetch the same original via the generic cache prewarmer.
   assert.match(preview, /S && S\.imageUrl && !\(S\.thumbUrl \|\| S\.thumb\) && U\(S\.imageUrl\)/);
 });
