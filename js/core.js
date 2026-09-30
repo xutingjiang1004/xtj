@@ -14216,7 +14216,8 @@ function renderProfileActivityList(kind) {
                 if (file) file = normalizeDockChatMediaFile(file);
                 if (_chatVoice) { showToast('请先结束录音'); return; }
                 if (_chatEditDraft) { await sendChatEditedMessage(content); return; }
-                var replyDraft = _chatReplyDraft ? Object.assign({}, _chatReplyDraft) : null;
+                var replyDraftSource = _chatReplyDraft;
+                var replyDraft = replyDraftSource ? Object.assign({}, replyDraftSource) : null;
                 if (!content && !file) return;
                 if (!dockChatActiveUser) {
                     if (content) showToast('请先选择一个聊天对象');
@@ -14436,7 +14437,7 @@ function renderProfileActivityList(kind) {
                     var insertedMessage = sendResult.message;
                     var sendFlight = _chatSendFlights.get(tempId);
                     if (sendFlight) sendFlight.messageId=insertedMessage.id;
-                    if (replyDraft && _chatReplyDraft && replyDraft.id === _chatReplyDraft.id) clearChatMessageDraft();
+                    if (replyDraftSource && _chatReplyDraft === replyDraftSource) clearChatMessageDraft();
                     touchUserSession(false);
                     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('message_send', '发送消息给 [' + targetUser + ']'); } catch(e) {}
                     clearDockChatFilePreview(false);
@@ -15427,13 +15428,18 @@ function renderProfileActivityList(kind) {
                         if (owner === window.currentUser && peer === dockChatActiveUser) showToast(job.status === 'completed' ? '转写已完成，请刷新会话查看' : '正在后台转写，完成后自动同步');
                     } catch (error) { if (owner === window.currentUser) showToast(error.message); }
                 } else if (action === 'reply') {
-                    document.getElementById('dockChatInput').focus();
+                    // Immediate draft retains the quote even when Send precedes the validation response.
+                    // The send endpoint independently validates visibility and replaces the quote canonically.
+                    var draft={id:String(message.id || ''),sender_name:String(message.user_name || ''),text:getDMMessageText(message) || '[附件]'};
+                    _chatEditDraft=null;_chatReplyDraft=draft;showChatMessageDraft('回复 '+draft.sender_name,draft.text);
                     try {
                         var result = await chatFeatureApi('messages/reply/validate', { peer: peer, message_id: message.id });
-                        if (owner !== window.currentUser || peer !== dockChatActiveUser) return;
-                        _chatEditDraft = null; _chatReplyDraft = result.reply_to;
-                        showChatMessageDraft('回复 ' + result.reply_to.sender_name, result.reply_to.text);
-                    } catch (error) { showToast(error.message); }
+                        if (owner !== window.currentUser || peer !== dockChatActiveUser || _chatReplyDraft!==draft) return;
+                        Object.assign(draft,result.reply_to);
+                        showChatMessageDraft('回复 ' + draft.sender_name, draft.text);
+                    } catch (error) {
+                        if(owner===window.currentUser && peer===dockChatActiveUser && _chatReplyDraft===draft){clearChatMessageDraft();showToast(error.message);}
+                    }
                 } else if (action === 'edit') {
                     _chatReplyDraft = null; _chatEditDraft = { id: message.id, peer: peer, owner: owner };
                     document.getElementById('dockChatInput').value = getDMMessageText(message);
