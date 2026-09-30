@@ -16835,3 +16835,61 @@ html.perf-lite .ai-chat-bubble {
 #panelChat #dockChatContainer .chat-social-sheet { animation: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 html[data-xtj-motion="off"] #panelChat .chat-typing-dots i { animation: none; }
+
+/* Photo uploads: a quiet surface, one progress bar and consistent typography. */
+#pwUploadSheet, #pwUploadProgressOverlay, #pwUploadResult {
+  --pw-surface: #fff; --pw-ink: #243b31; --pw-muted: #687c71;
+  --pw-line: rgba(35, 80, 55, .14); --pw-accent: #287b55;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--pw-ink); letter-spacing: normal;
+}
+[data-theme="dark"] #pwUploadSheet, [data-theme="dark"] #pwUploadProgressOverlay, [data-theme="dark"] #pwUploadResult {
+  --pw-surface: #1a2420; --pw-ink: #edf5f0; --pw-muted: #a1b4a8;
+  --pw-line: rgba(220, 240, 228, .16); --pw-accent: #8cd3aa;
+}
+#pwUploadSheet, #pwUploadProgressOverlay { background: rgba(10, 22, 16, .32); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+#pwUploadSheet { align-items: center; padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); }
+#pwUploadSheet .pw-upload-sheet-card, #pwUploadProgressOverlay .pw-upload-progress-container {
+  background: var(--pw-surface); border: 1px solid var(--pw-line); border-radius: 20px;
+  box-shadow: 0 20px 64px rgba(0, 0, 0, .18); padding: 24px; gap: 20px;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+#pwUploadSheet .pw-upload-sheet-card { max-height: min(80dvh, 720px); }
+#pwUploadSheet .pw-upload-sheet-kicker, #pwUploadProgressOverlay .pw-upload-progress-container::before { display: none; }
+#pwUploadSheet .pw-upload-sheet-head h4 { margin: 0; color: var(--pw-ink); font-size: 22px; font-weight: 600; letter-spacing: normal; }
+#pwUploadSheet .pw-upload-sheet-head p, #pwUploadSheet .pw-upload-sheet-count { color: var(--pw-muted); font-size: 13px; font-weight: 400; line-height: 1.6; }
+#pwUploadSheet .pw-upload-sheet-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+#pwUploadSheet .pw-upload-sheet-thumb { border: 0; border-radius: 10px; box-shadow: none; }
+#pwUploadSheet .pw-upload-sheet-thumb::after { display: none; }
+#pwUploadSheet .pw-upload-sheet-close { color: var(--pw-muted); background: transparent; border: 0; }
+#pwUploadSheet .pw-upload-sheet-btn, #pwUploadProgressCancel { min-height: 44px; font-size: 14px; font-weight: 500; border-radius: 10px; box-shadow: none; }
+#pwUploadSheet .is-ghost, #pwUploadProgressCancel { color: var(--pw-ink); background: transparent; border: 1px solid var(--pw-line); }
+#pwUploadSheet .is-primary { background: #287b55; color: #fff; border-color: transparent; }
+#pwUploadProgressOverlay .pw-upload-progress-hero { min-height: 0; gap: 16px; align-items: flex-start; }
+#pwUploadProgressOverlay .pw-upload-local-spinner { width: 32px; height: 32px; flex: 0 0 32px; margin-top: 2px; }
+#pwUploadProgressOverlay .pw-upload-local-icon { color: var(--pw-accent); filter: none; animation: pwSpinRing 1.2s linear infinite; }
+#pwUploadProgressOverlay .pw-upload-progress-stage { color: var(--pw-ink); font-size: 18px; font-weight: 600; letter-spacing: normal; text-transform: none; }
+#pwUploadProgressOverlay .pw-upload-progress-text { color: var(--pw-muted); font-size: 14px; font-weight: 400; line-height: 1.6; min-height: 0; }
+#pwUploadProgressOverlay .pw-upload-progress-stats { gap: 12px; margin-top: 8px; }
+#pwUploadProgressOverlay .pw-upload-progress-stat { padding: 0; background: transparent; }
+#pwUploadProgressOverlay .pw-upload-progress-stat:first-child { display: none; }
+#pwUploadProgressOverlay .pw-upload-progress-stat .k { color: var(--pw-muted); font-size: 12px; }
+#pwUploadProgressOverlay .pw-upload-progress-stat .v { color: var(--pw-ink); font-size: 12px; font-weight: 500; }
+#pwUploadProgressOverlay .pw-upload-progress-status { margin-top: 8px; color: var(--pw-muted); font-size: 12px; }
+#pwUploadProgressOverlay .pw-upload-progress-bar-track { background: var(--pw-line); box-shadow: none; height: 4px; }
+#pwUploadProgressOverlay .pw-upload-progress-bar-fill { background: var(--pw-accent); box-shadow: none; transition: width 180ms ease-out; }
+#pwUploadProgressCancel { align-self: flex-end; padding: 0 16px; }
+#pwUploadResult { background: var(--pw-surface); color: var(--pw-ink); border-color: var(--pw-line); box-shadow: none; font-weight: 400; }
+#pwUploadResult .pw-upload-result-title { color: var(--pw-ink); font-size: 14px; font-weight: 600; }
+#pwUploadResult .pw-upload-result-detail { color: var(--pw-muted); font-size: 13px; line-height: 1.6; }
+@media (max-width: 480px) {
+  #pwUploadSheet .pw-upload-sheet-card, #pwUploadProgressOverlay .pw-upload-progress-container { padding: 20px; }
+  #pwUploadSheet .pw-upload-sheet-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #pwUploadSheet .pw-upload-sheet-footer { align-items: stretch; gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #pwUploadProgressOverlay .pw-upload-local-icon { animation: none; }
+  #pwUploadProgressOverlay .pw-upload-progress-bar-fill, #pwUploadSheet, #pwUploadSheet .pw-upload-sheet-card { transition: none; }
+}
+html[data-xtj-motion="off"] #pwUploadProgressOverlay .pw-upload-local-icon, html[data-perf="lite"] #pwUploadProgressOverlay .pw-upload-local-icon { animation: none; }
+html[data-xtj-motion="off"] #pwUploadProgressOverlay .pw-upload-progress-bar-fill { transition: none; }
