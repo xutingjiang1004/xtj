@@ -38,7 +38,8 @@ var CSP = [
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
   "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
   "img-src 'self' data: blob: https:",
-  "media-src 'self' https:",
+  // New voice/video bubbles play their owned local object URL before storage is ready.
+  "media-src 'self' blob: https:",
   "worker-src 'self' blob:",
   "object-src 'none'",
   // frame-src 放行同源与 blob:
