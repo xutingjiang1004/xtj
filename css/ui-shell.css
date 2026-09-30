@@ -2473,7 +2473,6 @@ html[data-xtj-motion="off"] #panelChat .chat-voice-player.is-playing .chat-voice
   #panelPosts.active .posts-nav { flex-wrap: nowrap !important; gap: 4px !important; padding: 8px 10px !important; min-height: 54px !important; background: var(--xtj-content-surface-strong, #f6fcfa) !important; }
   #panelPosts.active .posts-nav .posts-nav-brand { gap: 5px !important; min-width: 0; }
   #panelPosts.active .posts-nav-brand h1 { font-size: 22px; margin: 0 2px 0 0 !important; }
-  #panelPosts.active .posts-nav #themeToggle,
   #panelPosts.active .posts-nav .posts-nav-icon-btn { width: 36px !important; min-width: 36px !important; height: 36px !important; min-height: 36px !important; padding: 0 !important; }
   #panelPosts.active .posts-nav > #announcement-btn-wrapper,
   #panelPosts.active .posts-nav > #report-btn-wrapper { flex: 0 0 36px !important; width: 36px !important; inline-size: 36px !important; margin: 0 !important; }
@@ -2493,9 +2492,8 @@ html[data-xtj-motion="off"] #panelChat .chat-voice-player.is-playing .chat-voice
 /* Chat refinement: normal feed scroll, lunar control, calm panels and fully visible actions. */
 html.xtj-ios-viewport #panelPosts .posts-nav.sticky-header,
 html.xtj-wechat.xtj-ios-viewport #panelPosts .posts-nav.sticky-header { position: relative !important; top: auto !important; }
-#themeToggle .theme-moon { width: 24px; height: 24px; display: block; color: #436b77; transform: rotate(-12deg); transition: transform .3s cubic-bezier(.2,.75,.25,1),color .25s; }
-#themeToggle.is-dark .theme-moon { color: #b9dacf; transform: rotate(10deg); }
-#themeToggle:active .theme-moon { transform: rotate(-25deg) scale(.86); }
+#panelPosts .posts-nav #themeToggle { width: 52px !important; height: 30px !important; min-width: 52px !important; min-height: 30px !important; padding: 3px !important; border-radius: 999px !important; justify-content: flex-start !important; flex: none; }
+#themeToggle .theme-toggle-orb { transition: transform .28s cubic-bezier(.2,.75,.25,1), box-shadow .28s ease; }
 .dm-action-overlay .dm-action-panel:not(.dm-forward-panel) { width: min(350px,calc(100vw - 24px)); padding: 10px; border-radius: 18px; }
 .dm-action-overlay .dm-action-panel .dm-action-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); width: 100%; max-width: none; gap: 8px 4px; overflow: visible; }
 .dm-action-overlay .dm-action-panel .dm-action-item { width: 100%; min-width: 0; padding: 6px 2px; gap: 7px; font-size: 12px; }
@@ -2534,7 +2532,51 @@ html.xtj-wechat.xtj-ios-viewport #panelPosts .posts-nav.sticky-header { position
 #panelChat .chat-attachment-item div { display: flex; justify-content: space-between; }
 #panelChat .chat-attachment-item button { border: 0; padding: 4px 7px; border-radius: 6px; background: var(--chat-control); color: var(--chat-ink); box-shadow: none; }
 #panelChat .chat-file-preview:has(.chat-attachment-queue) { flex-wrap: wrap; }
-@media(prefers-reduced-motion:reduce) { #themeToggle .theme-moon { transition: none; } }
+@media(prefers-reduced-motion:reduce) { #themeToggle .theme-toggle-orb, #themeToggle .theme-toggle-core { transition: none; } }
+
+/* Theme tokens must change with the theme, including the narrow iPad layout. */
+html[data-theme="dark"] {
+  --xtj-content-surface: #17171f;
+  --xtj-content-surface-strong: #17171f;
+  --xtj-content-line: rgba(255,255,255,.1);
+}
+html[data-theme="dark"] #panelPosts.active .posts-nav,
+html[data-theme="dark"] #panelPosts .stats .stat-card {
+  background: #17171f !important;
+  color: #f3f4f8 !important;
+  box-shadow: none !important;
+}
+html[data-theme="dark"] #panelPosts .stats .stat-card span { color: #a7adba !important; }
+
+/* Only the outer Dock is transparent and passes clicks through; its controls stay intact. */
+html #dockBar {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  pointer-events: none !important;
+}
+html #dockBar::before, html #dockBar::after { content: none !important; pointer-events: none !important; }
+
+/* The sheet is opaque throughout tab changes; only opening/closing animates. */
+#panelChat #dockChatSocialSheet .chat-social-card { background: #f8fcfa; }
+html[data-theme="dark"] #panelChat #dockChatSocialSheet .chat-social-card { background: #192d25; color: #e9f3ee; }
+
+html.theme-crossfade::view-transition-old(root) {
+  animation: xtjThemeOut 280ms cubic-bezier(.2,.75,.25,1) both;
+  mix-blend-mode: normal;
+}
+html.theme-crossfade::view-transition-new(root) {
+  animation: xtjThemeIn 280ms cubic-bezier(.2,.75,.25,1) both;
+  mix-blend-mode: normal;
+}
+@keyframes xtjThemeOut { to { opacity: 0; } }
+@keyframes xtjThemeIn { from { opacity: 0; } to { opacity: 1; } }
+/* A snapshot crossfade already animates colors; avoid a second delayed color transition. */
+html.theme-crossfade.theme-switching :is(body,.glass,.post,.publish-box,.dock-panel,.chat-panel,.photo-wall-container,.photo-wall-header,.profile-user-card,.stat-card,nav) { transition: none !important; }
+html[data-xtj-motion="off"] #themeToggle :is(.theme-toggle-orb,.theme-toggle-core) { transition: none; }
+html[data-xtj-motion="off"]::view-transition-old(root), html[data-xtj-motion="off"]::view-transition-new(root) { animation: none !important; }
 .chat-gallery { position: fixed; inset: 0; z-index: 2600; display: grid; grid-template-rows: auto minmax(0,1fr) auto; background: #101519; color: #eef5f3; padding: max(10px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom)); box-sizing: border-box; animation: chatFeatureEnter .16s ease-out; }
 .chat-gallery header,.chat-gallery footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
 .chat-gallery-title { font-size: 12px; opacity: .8; text-align: center; }

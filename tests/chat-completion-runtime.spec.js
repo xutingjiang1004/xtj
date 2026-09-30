@@ -357,7 +357,8 @@ test('home navigation scrolls out with feed and restores the moon icon', async (
   const up=await page.locator('.posts-nav').boundingBox();
   expect(down.y).toBeLessThan(-100);expect(up.y).toBeGreaterThan(down.y);
   await page.evaluate(()=>document.getElementById('panelPosts').scrollTop=0);
-  await expect(page.locator('#themeToggle .theme-moon')).toBeVisible();
+  await expect(page.locator('#themeToggle .theme-toggle-orb')).toBeVisible();
+  const toggle=await page.locator('#themeToggle').boundingBox(),orb=await page.locator('#themeToggle .theme-toggle-orb').boundingBox();expect(toggle.width).toBe(52);expect(orb.x+orb.width).toBeLessThanOrEqual(toggle.x+toggle.width);
   await page.locator('#themeToggle').click();await expect(page.locator('#themeToggle')).toHaveClass(/is-dark/);
   await page.waitForTimeout(350);await page.locator('#themeToggle').click();await expect(page.locator('#themeToggle')).not.toHaveClass(/is-dark/);
   await expect(page.locator('.posts-nav')).not.toHaveClass(/hidden-header/);
@@ -427,4 +428,65 @@ test('immediate send preserves a quote while reply validation is delayed',async(
  await page.locator('[data-message-id="'+id+'"] .chat-msg').click({button:'right'});await page.getByRole('button',{name:'回复',exact:true}).click();await expect(page.locator('#chatMessageContext')).toContainText('hello world');
  await page.locator('#dockChatInput').fill('instant reply');await page.locator('#dockChatSendBtn').click();await expect.poll(()=>page.evaluate(()=>{const call=window.__chatTestCalls.find(c=>c.url.includes('/api/dm/send'));return call && JSON.parse(JSON.parse(call.body).content).reply_to?.id;})).toBe(id);
  await expect(page.locator('#chatMessageContext')).toBeHidden();await page.waitForTimeout(1600);await expect(page.locator('#chatMessageContext')).toBeHidden();
+});
+
+
+for (const width of [390,744,820]) {
+ test(`dark homepage and Dock stay coherent at ${width}px`,async({browser})=>{
+  const device=width===390 ? 'iPhone' : 'iPad';
+  const context=await browser.newContext({baseURL:'http://127.0.0.1:4173',viewport:{width,height:1180},hasTouch:true,userAgent:`Mozilla/5.0 (${device}; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1`});
+  const page=await context.newPage();await page.addInitScript(()=>localStorage.setItem('xtj_theme','dark'));
+  await setup(page);await page.evaluate(()=>window.switchDockTab('posts',true));
+  await expect(page.locator('#themeToggle .theme-toggle-orb')).toBeVisible();
+  const toggle=await page.locator('#themeToggle').boundingBox(),orb=await page.locator('#themeToggle .theme-toggle-orb').boundingBox();expect(toggle.width).toBe(52);expect(orb.x+orb.width).toBeLessThanOrEqual(toggle.x+toggle.width);
+  const style=await page.evaluate(()=>{const s=e=>getComputedStyle(document.querySelector(e));return {nav:s('.posts-nav').backgroundColor,stat:s('.stat-card').backgroundColor,dock:s('#dockBar').backgroundColor,pointer:s('#dockBar').pointerEvents,filter:s('#dockBar').backdropFilter};});
+  expect(style.nav).toBe('rgb(23, 23, 31)');expect(style.stat).toBe('rgb(23, 23, 31)');expect(style.dock).toBe('rgba(0, 0, 0, 0)');expect(style.pointer).toBe('none');expect(style.filter).toBe('none');
+  const point=await page.evaluate(()=>{const dock=document.getElementById('dockBar'),r=dock.getBoundingClientRect(),probe=document.createElement('button');probe.id='dock-underlay-probe';probe.textContent='点赞';Object.assign(probe.style,{position:'fixed',left:r.left+'px',top:r.top+'px',width:'8px',height:'8px',padding:'0',zIndex:String((parseInt(getComputedStyle(dock).zIndex)||100)-1)});probe.onclick=()=>window.__probeClicked=true;document.body.append(probe);return {x:r.left+2,y:r.top+2};});
+  await page.mouse.click(point.x,point.y);expect(await page.evaluate(()=>window.__probeClicked)).toBe(true);
+  await page.locator('#dock-underlay-probe').evaluate(el=>el.remove());
+  await page.screenshot({path:`output/chat-visual/dark-home-${width}.png`});
+  const navControl=width>=768 ? page.locator('.desktop-nav-item[data-desktop-tab="chat"]') : page.locator('#dockBar [data-tab="chat"]');
+  await navControl.click();await expect(page.locator('#panelChat')).toHaveClass(/active/);
+  await context.close();
+ });
+}
+
+test('contact tabs never restart entrance or replace unchanged loaded rows',async({page})=>{
+ await page.setViewportSize({width:744,height:1180});await page.addInitScript(()=>localStorage.setItem('xtj_theme','dark'));await setup(page);
+ await page.evaluate(()=>{const base=window.xtjProtectedFetch;window.xtjProtectedFetch=async(url,options)=>{
+  if(url.endsWith('/friends'))return new Response(JSON.stringify({ok:true,friends:[{peer_name:'peer',note:''}]}));
+  if(url.includes('/requests?'))return new Response(JSON.stringify({ok:true,requests:[{request_id:'req-one',requester_name:'newfriend',target_name:'tester'}]}));
+  if(url.endsWith('/blocks'))return new Response(JSON.stringify({ok:true,blocks:[{peer_name:'blocked'}]}));
+  return base(url,options);
+ };});
+ await page.locator('#dockChatSocialBtn').click();await expect(page.locator('#dockChatSocialContent .chat-social-user')).toHaveCount(1);await page.waitForTimeout(350);
+ for(const tab of ['friends','requests','blocks']) {
+  await page.locator(`[data-chat-social-tab="${tab}"]`).click();await expect(page.locator('#dockChatSocialContent .chat-social-user')).toHaveCount(1);await page.waitForTimeout(200);
+  await page.evaluate(()=>{window.__contactRow=document.querySelector('#dockChatSocialContent .chat-social-user');window.__contactAvatar=window.__contactRow.querySelector('.chat-social-avatar').firstChild;});
+  await page.locator('[data-chat-social-tab="search"]').click();await page.locator(`[data-chat-social-tab="${tab}"]`).click();
+  const instant=await page.locator('.chat-social-card').evaluate(el=>({opacity:getComputedStyle(el).opacity,background:getComputedStyle(el).backgroundColor,animations:el.getAnimations().length}));
+  expect(instant.opacity).toBe('1');expect(instant.background).toBe('rgb(25, 45, 37)');expect(instant.animations).toBe(0);
+  await page.waitForTimeout(250);expect(await page.evaluate(()=>window.__contactRow===document.querySelector('#dockChatSocialContent .chat-social-user') && window.__contactAvatar===window.__contactRow.querySelector('.chat-social-avatar').firstChild)).toBe(true);
+ }
+ await page.screenshot({path:'output/chat-visual/dark-contacts-stable.png'});
+});
+
+test('native microphone obeys the shared HTTP policy and both recording entry points work',async({page,browserName,request})=>{
+ test.skip(browserName!=='chromium','Linux WebKit exposes no microphone capture device; native Chromium exercises policy enforcement.');
+ const response=await request.get('/');expect(response.headers()['permissions-policy']).toContain('microphone=(self)');
+ await page.context().grantPermissions(['microphone'],{origin:'http://127.0.0.1:4173'});await setup(page);
+ const policy=await page.evaluate(()=>{const p=document.permissionsPolicy||document.featurePolicy;return {mic:p.allowsFeature('microphone'),camera:p.allowsFeature('camera')};});expect(policy).toEqual({mic:true,camera:false});
+ await page.locator('#chatVoiceButton').click();await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');await expect(page.locator('#chatVoiceStatus')).toBeVisible();await page.locator('#chatVoiceCancel').click();await expect(page.locator('#dockChatInput')).toBeEnabled();
+ const box=await page.locator('.chat-input-wrap').boundingBox();await page.mouse.move(box.x+30,box.y+20);await page.mouse.down();await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');await page.mouse.move(box.x+30,box.y-80);await page.mouse.up();await expect(page.locator('#dockChatInput')).toBeEnabled();
+ // Negative control: the former production policy must reject actual native capture.
+ await page.route('**/policy-negative',route=>route.fulfill({status:200,contentType:'text/html',headers:{'Permissions-Policy':'microphone=()'},body:'<!doctype html><title>Blocked microphone control</title>'}));await page.goto('/policy-negative');
+ expect(await page.evaluate(async()=>{try{const s=await navigator.mediaDevices.getUserMedia({audio:true});s.getTracks().forEach(t=>t.stop());return 'allowed';}catch(e){return e.name;}})).toBe('NotAllowedError');
+});
+
+test('recorder falls back when an advertised MIME format cannot be constructed',async({page})=>{
+ await page.addInitScript(()=>{
+  Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async()=>({getTracks:()=>[{stop(){}}]})}});
+  window.__recorderFormats=[];window.MediaRecorder=class{static isTypeSupported(){return true;}constructor(stream,options){window.__recorderFormats.push(options?.mimeType||'default');if(options?.mimeType==='audio/mp4')throw new DOMException('Unsupported format','NotSupportedError');this.state='inactive';this.mimeType='audio/webm';}start(){this.state='recording';}stop(){this.state='inactive';this.onstop?.();}};
+ });
+ await setup(page);await page.locator('#chatVoiceButton').click();await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');expect(await page.evaluate(()=>window.__recorderFormats)).toEqual(['audio/mp4','audio/webm;codecs=opus']);await page.locator('#chatVoiceCancel').click();await expect(page.locator('#dockChatInput')).toBeEnabled();
 });

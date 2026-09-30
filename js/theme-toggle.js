@@ -96,6 +96,8 @@
 
   function startThemeSwitching() {
     clearThemeSwitching();
+    if (htmlEl.getAttribute('data-xtj-motion') === 'off' ||
+        (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
     htmlEl.classList.add('theme-switching');
     clearSwitchingTimer = window.setTimeout(clearThemeSwitching, 300);
   }
@@ -103,6 +105,7 @@
   function supportsTransitionAnimation() {
     try {
       return !!document.startViewTransition &&
+        htmlEl.getAttribute('data-xtj-motion') !== 'off' &&
         !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     } catch (_) {
       return false;
@@ -125,19 +128,24 @@
 
     if (supportsTransitionAnimation()) {
       try {
+        htmlEl.classList.add('theme-crossfade');
         var transition = document.startViewTransition(function () {
           applyThemeMode(nextTheme);
           persistTheme(nextTheme);
         });
         // ★ 显式吞掉 .finished/.ready 的未处理 Promise 拒绝
-        if (transition && transition.finished) transition.finished.catch(function () {});
+        if (transition && transition.finished) transition.finished.catch(function () {}).then(function () {
+          htmlEl.classList.remove('theme-crossfade');
+          if (switchTimer) window.clearTimeout(switchTimer);
+          switchTimer = 0;
+        });
         if (transition && transition.ready) transition.ready.catch(function () {});
         startThemeSwitching();
         switchTimer = window.setTimeout(function () {
           switchTimer = 0;
-        }, 300);
+        }, 1000);
         return;
-      } catch (_) {}
+      } catch (_) { htmlEl.classList.remove('theme-crossfade'); }
     }
 
     setThemeMode(nextTheme);
