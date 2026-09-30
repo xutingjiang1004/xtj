@@ -503,6 +503,7 @@ const ADMIN_NAME = "xxz";
             // hashes are never retained as a session fallback.
             function clearAllAuthState(options) {
                 options = options || {};
+                _authStateEpoch++;
                 var revokeRemote = options.revokeRemote !== false;
                 var shouldBroadcast = options.broadcast !== false;
                 var reason = options.reason || 'manual';
@@ -619,11 +620,14 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             window.getXtjDeviceId = getXtjDeviceId;
 
             // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
+            var _authStateEpoch = 0;
             var _refreshPromise = null;
             // ★ 修复：未登录/会话失效（401/403）后进入 30 秒冷却期，
             // 避免每次切换导航都重复发起 refresh 请求（此前产生 401 噪音与冗余请求）。
             var _refreshCooldownUntil = 0;
             async function refreshUserTokenViaCookie() {
+                if (window.__xtjLogoutPending) return { token: "", user_name: "" };
+                var refreshEpoch = _authStateEpoch;
                 if (_refreshPromise) return _refreshPromise;
                 if (_refreshCooldownUntil && Date.now() < _refreshCooldownUntil) {
                     return { token: '', user_name: '' };
@@ -637,6 +641,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     //   只有 401 / 403（服务端确证未登录）才进入冷却并视为失效。
                     var attempts = 0;
                     while (attempts < 2) {
+                        if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                         attempts++;
                         try {
                             // VPN/代理下无超时的 refresh 会卡住 ensureUserToken → feed 永久 skeleton
@@ -647,8 +652,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ device_id: getXtjDeviceId() })
                             }, 10000);
+                            if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                             if (res.ok) {
                                 var data = await res.json().catch(function(){ return {}; });
+                                if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                                 if (data && data.token) {
                                     setUserToken(data.token);
                                     // ★ 使用服务端返回的规范 user_name

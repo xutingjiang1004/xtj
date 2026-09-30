@@ -49,3 +49,26 @@ test('logout presents the access token before clearing local state', () => {
   assert.match(core, /var tokenForRevocation = getUserToken\(\);[\s\S]*?clearUserToken\(\)/);
   assert.match(core, /logoutHeaders\.Authorization = 'Bearer ' \+ tokenForRevocation/);
 });
+
+test('a refresh response arriving after explicit logout cannot restore the previous token', async () => {
+  const vm = require('node:vm');
+  const source = fs.readFileSync('js/core-parts/01-bootstrap.js','utf8');
+  const start = source.indexOf('            var _authStateEpoch = 0;');
+  const end = source.indexOf('            /**', start);
+  let deliver, saved = '';
+  const sandbox = {
+    window: {}, API_BASE: '', getXtjDeviceId: () => 'test-device',
+    fetch: () => new Promise(resolve => {deliver = resolve;}),
+    setUserToken: token => {saved = token;},
+    Date, Promise, setTimeout, clearTimeout,
+    _lastRefreshAuthResult: {}, _lastRefreshUser: ''
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(source.slice(start,end),sandbox);
+  const pending = sandbox.refreshUserTokenViaCookie();
+  vm.runInContext('_authStateEpoch++;',sandbox);
+  deliver({ok:true,status:200,json:async()=>({token:'previous-token',user_name:'previous-user'})});
+  const result = await pending;
+  assert.equal(result.token,'');
+  assert.equal(saved,'');
+});

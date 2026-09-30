@@ -167,6 +167,10 @@
                     return;
                 }
                 
+                var profileOwner = currentUser;
+                document.getElementById("profileDetailRegTime").textContent = "读取中…";
+                openModal("profileDetailModal");
+                loadProfileAvatar();
                 // 打开个人资料详情
                 document.getElementById('profileDetailName').textContent = currentUser;
                 document.getElementById('profileDetailId').textContent = currentUser;
@@ -175,11 +179,12 @@
                 try {
                     const userInfoRes = await sb.from("posts")
                         .select("content")
-                        .eq("user_name", currentUser)
+                        .eq("user_name", profileOwner)
                         .eq("media_type", "__user_info__")
                         .order("created_at", { ascending: false })
                         .limit(1);
                     
+                    if (currentUser !== profileOwner) return;
                     if (userInfoRes.data && userInfoRes.data.length > 0) {
                         try {
                             const userInfo = JSON.parse(userInfoRes.data[0].content);
@@ -195,17 +200,15 @@
                         document.getElementById('profileDetailRegTime').textContent = '-';
                     }
                 } catch(e) {
+                    if (currentUser !== profileOwner) return;
                     console.error("获取用户信息失败:", e);
                     document.getElementById('profileDetailRegTime').textContent = '-';
                 }
                 
-                // 加载头像
-                loadProfileAvatar();
-                
-                openModal('profileDetailModal');
             };
 
             async function loadProfileAvatar() {
+                var avatarOwner = currentUser;
                 const avatarEl = document.getElementById('profileDetailAvatar');
                 if (!avatarEl) return;
                 
@@ -226,7 +229,8 @@
                 }
 
                 try {
-                    var avatarUrl = await fetchAvatarUrl(currentUser);
+                    var avatarUrl = await fetchAvatarUrl(avatarOwner);
+                    if (currentUser !== avatarOwner) return;
 
                     if (avatarUrl) {
                         var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
@@ -468,6 +472,12 @@
                 doLogout();
             };
 
+            window.switchAccount = function() {
+                closeModal('profileDetailModal');
+                window.doLogout();
+                openAuthModal('login');
+            };
+
             var _isLoggingOut = false;
             window.doLogout = async function () {
                 if (_isLoggingOut) return;
@@ -480,29 +490,23 @@
                 try { savedToken = getUserToken() || ''; } catch (e) {}
                 try { savedUser = currentUser || window.currentUser || ''; } catch (e) {}
 
-                var logoutCallSucceeded = false;
-                try {
-                    var logoutHeaders = { 'Content-Type': 'application/json' };
-                    if (savedToken) logoutHeaders.Authorization = 'Bearer ' + savedToken;
-                    // H-37: 登出请求加 8s 超时，避免请求悬挂时 _isLoggingOut 永真，
-                    // 导致之后所有登出点击无效、本地状态永不清除。
-                    var logoutAbortCtl = null;
-                    var logoutTimeoutTimer = null;
-                    if (typeof AbortController === 'function') {
-                        logoutAbortCtl = new AbortController();
-                        logoutTimeoutTimer = setTimeout(function() { try { logoutAbortCtl.abort(); } catch (e) {} }, 8000);
-                    }
-                    var resp = await fetch(API_BASE + '/api/user/logout', {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: logoutHeaders,
+                // Send revocation with the saved credentials, while clearing the local UI immediately.
+                _authStateEpoch++;
+                var logoutAbortCtl = typeof AbortController === 'function' ? new AbortController() : null;
+                var logoutTimeoutTimer = logoutAbortCtl ? setTimeout(function(){ logoutAbortCtl.abort(); }, 8000) : null;
+                var logoutHeaders = { 'Content-Type': 'application/json' };
+                if (savedToken) logoutHeaders.Authorization = 'Bearer ' + savedToken;
+                var logoutRequest = Promise.resolve().then(function(){
+                    return fetch(API_BASE + '/api/user/logout', {
+                        method: 'POST', credentials: 'include', headers: logoutHeaders,
                         signal: logoutAbortCtl ? logoutAbortCtl.signal : undefined
                     });
-                    if (logoutTimeoutTimer) clearTimeout(logoutTimeoutTimer);
-                    if (resp && resp.ok) logoutCallSucceeded = true;
-                } catch (e) {
-                    console.error('API logout failed (will still clear local state):', e);
-                }
+                }).catch(function(error){
+                    console.error('API logout failed (local session already cleared):', error);
+                }).finally(function(){ if (logoutTimeoutTimer) clearTimeout(logoutTimeoutTimer); });
+                window.__xtjLogoutPending = logoutRequest;
+                closeModal('profileDetailModal');
+                closeModal('profileActivityModal');
 
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
@@ -603,6 +607,8 @@
                 showToast('已退出登录');
                 try { await initUI(); } catch (e) {}
                 initialLoad(true).catch(function() {});
+                await logoutRequest;
+                if (window.__xtjLogoutPending === logoutRequest) window.__xtjLogoutPending = null;
                 _isLoggingOut = false;
             };
 
@@ -2043,6 +2049,7 @@ function renderProfileActivityList(kind) {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
                     annBtnWrapper.style.display = "none";
+                    if (reportBtnWrapper) reportBtnWrapper.style.display = "none";
                     
                     stopRestrictionPolling();
                     hideBlockedScreen();
@@ -2067,6 +2074,7 @@ function renderProfileActivityList(kind) {
             }
 
             async function loadUserAvatar() {
+                var avatarOwner = currentUser;
                 try {
                     var cachedAvatars = readAvatarCacheFromStorage();
                     if (cachedAvatars[currentUser] && cachedAvatars[currentUser].url) {
@@ -2074,7 +2082,8 @@ function renderProfileActivityList(kind) {
                         updateAllAvatarElements(cachedAvatars[currentUser].url);
                     } else {
                         // localStorage 无缓存：远程获取头像
-                        var avatarUrl = await fetchAvatarUrl(currentUser);
+                        var avatarUrl = await fetchAvatarUrl(avatarOwner);
+                        if (currentUser !== avatarOwner) return;
                         if (avatarUrl) {
                             setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                             try {

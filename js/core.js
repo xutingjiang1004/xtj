@@ -509,6 +509,7 @@ const ADMIN_NAME = "xxz";
             // hashes are never retained as a session fallback.
             function clearAllAuthState(options) {
                 options = options || {};
+                _authStateEpoch++;
                 var revokeRemote = options.revokeRemote !== false;
                 var shouldBroadcast = options.broadcast !== false;
                 var reason = options.reason || 'manual';
@@ -625,11 +626,14 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             window.getXtjDeviceId = getXtjDeviceId;
 
             // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
+            var _authStateEpoch = 0;
             var _refreshPromise = null;
             // ★ 修复：未登录/会话失效（401/403）后进入 30 秒冷却期，
             // 避免每次切换导航都重复发起 refresh 请求（此前产生 401 噪音与冗余请求）。
             var _refreshCooldownUntil = 0;
             async function refreshUserTokenViaCookie() {
+                if (window.__xtjLogoutPending) return { token: "", user_name: "" };
+                var refreshEpoch = _authStateEpoch;
                 if (_refreshPromise) return _refreshPromise;
                 if (_refreshCooldownUntil && Date.now() < _refreshCooldownUntil) {
                     return { token: '', user_name: '' };
@@ -643,6 +647,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     //   只有 401 / 403（服务端确证未登录）才进入冷却并视为失效。
                     var attempts = 0;
                     while (attempts < 2) {
+                        if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                         attempts++;
                         try {
                             // VPN/代理下无超时的 refresh 会卡住 ensureUserToken → feed 永久 skeleton
@@ -653,8 +658,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ device_id: getXtjDeviceId() })
                             }, 10000);
+                            if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                             if (res.ok) {
                                 var data = await res.json().catch(function(){ return {}; });
+                                if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                                 if (data && data.token) {
                                     setUserToken(data.token);
                                     // ★ 使用服务端返回的规范 user_name
@@ -3065,12 +3072,14 @@ function isAdmin() {
             }
 
             async function doLogin() {
+                if (window.__xtjLogoutPending) { await window.__xtjLogoutPending; }
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
                 if (!name) { showToast("请输入昵称"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
 
                 const btn = document.getElementById("loginSubmitBtn");
+                if (btn && btn.disabled) return;
                 if (btn) { btn.disabled = true; btn.textContent = "验证中.."; }
 
                 try {
@@ -3194,6 +3203,7 @@ function isAdmin() {
                 if (e.key === 'Enter') { var _pw = document.getElementById('regPwInp'); if (_pw) _pw.focus(); }
             });
             async function doRegister() {
+                if (window.__xtjLogoutPending) { await window.__xtjLogoutPending; }
                 const name = document.getElementById("regNickInp").value.trim();
                 const pw = document.getElementById("regPwInp").value;
                 const email = document.getElementById("regEmailInp").value.trim();
@@ -3205,6 +3215,7 @@ function isAdmin() {
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
 
                 const btn = document.getElementById("registerSubmitBtn");
+                if (btn.disabled) return;
                 btn.disabled = true;
                 btn.textContent = "注册中..";
 
@@ -3446,6 +3457,10 @@ function isAdmin() {
                     return;
                 }
                 
+                var profileOwner = currentUser;
+                document.getElementById("profileDetailRegTime").textContent = "读取中…";
+                openModal("profileDetailModal");
+                loadProfileAvatar();
                 // 打开个人资料详情
                 document.getElementById('profileDetailName').textContent = currentUser;
                 document.getElementById('profileDetailId').textContent = currentUser;
@@ -3454,11 +3469,12 @@ function isAdmin() {
                 try {
                     const userInfoRes = await sb.from("posts")
                         .select("content")
-                        .eq("user_name", currentUser)
+                        .eq("user_name", profileOwner)
                         .eq("media_type", "__user_info__")
                         .order("created_at", { ascending: false })
                         .limit(1);
                     
+                    if (currentUser !== profileOwner) return;
                     if (userInfoRes.data && userInfoRes.data.length > 0) {
                         try {
                             const userInfo = JSON.parse(userInfoRes.data[0].content);
@@ -3474,17 +3490,15 @@ function isAdmin() {
                         document.getElementById('profileDetailRegTime').textContent = '-';
                     }
                 } catch(e) {
+                    if (currentUser !== profileOwner) return;
                     console.error("获取用户信息失败:", e);
                     document.getElementById('profileDetailRegTime').textContent = '-';
                 }
                 
-                // 加载头像
-                loadProfileAvatar();
-                
-                openModal('profileDetailModal');
             };
 
             async function loadProfileAvatar() {
+                var avatarOwner = currentUser;
                 const avatarEl = document.getElementById('profileDetailAvatar');
                 if (!avatarEl) return;
                 
@@ -3505,7 +3519,8 @@ function isAdmin() {
                 }
 
                 try {
-                    var avatarUrl = await fetchAvatarUrl(currentUser);
+                    var avatarUrl = await fetchAvatarUrl(avatarOwner);
+                    if (currentUser !== avatarOwner) return;
 
                     if (avatarUrl) {
                         var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
@@ -3747,6 +3762,12 @@ function isAdmin() {
                 doLogout();
             };
 
+            window.switchAccount = function() {
+                closeModal('profileDetailModal');
+                window.doLogout();
+                openAuthModal('login');
+            };
+
             var _isLoggingOut = false;
             window.doLogout = async function () {
                 if (_isLoggingOut) return;
@@ -3759,29 +3780,23 @@ function isAdmin() {
                 try { savedToken = getUserToken() || ''; } catch (e) {}
                 try { savedUser = currentUser || window.currentUser || ''; } catch (e) {}
 
-                var logoutCallSucceeded = false;
-                try {
-                    var logoutHeaders = { 'Content-Type': 'application/json' };
-                    if (savedToken) logoutHeaders.Authorization = 'Bearer ' + savedToken;
-                    // H-37: 登出请求加 8s 超时，避免请求悬挂时 _isLoggingOut 永真，
-                    // 导致之后所有登出点击无效、本地状态永不清除。
-                    var logoutAbortCtl = null;
-                    var logoutTimeoutTimer = null;
-                    if (typeof AbortController === 'function') {
-                        logoutAbortCtl = new AbortController();
-                        logoutTimeoutTimer = setTimeout(function() { try { logoutAbortCtl.abort(); } catch (e) {} }, 8000);
-                    }
-                    var resp = await fetch(API_BASE + '/api/user/logout', {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: logoutHeaders,
+                // Send revocation with the saved credentials, while clearing the local UI immediately.
+                _authStateEpoch++;
+                var logoutAbortCtl = typeof AbortController === 'function' ? new AbortController() : null;
+                var logoutTimeoutTimer = logoutAbortCtl ? setTimeout(function(){ logoutAbortCtl.abort(); }, 8000) : null;
+                var logoutHeaders = { 'Content-Type': 'application/json' };
+                if (savedToken) logoutHeaders.Authorization = 'Bearer ' + savedToken;
+                var logoutRequest = Promise.resolve().then(function(){
+                    return fetch(API_BASE + '/api/user/logout', {
+                        method: 'POST', credentials: 'include', headers: logoutHeaders,
                         signal: logoutAbortCtl ? logoutAbortCtl.signal : undefined
                     });
-                    if (logoutTimeoutTimer) clearTimeout(logoutTimeoutTimer);
-                    if (resp && resp.ok) logoutCallSucceeded = true;
-                } catch (e) {
-                    console.error('API logout failed (will still clear local state):', e);
-                }
+                }).catch(function(error){
+                    console.error('API logout failed (local session already cleared):', error);
+                }).finally(function(){ if (logoutTimeoutTimer) clearTimeout(logoutTimeoutTimer); });
+                window.__xtjLogoutPending = logoutRequest;
+                closeModal('profileDetailModal');
+                closeModal('profileActivityModal');
 
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
@@ -3882,6 +3897,8 @@ function isAdmin() {
                 showToast('已退出登录');
                 try { await initUI(); } catch (e) {}
                 initialLoad(true).catch(function() {});
+                await logoutRequest;
+                if (window.__xtjLogoutPending === logoutRequest) window.__xtjLogoutPending = null;
                 _isLoggingOut = false;
             };
 
@@ -5322,6 +5339,7 @@ function renderProfileActivityList(kind) {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
                     annBtnWrapper.style.display = "none";
+                    if (reportBtnWrapper) reportBtnWrapper.style.display = "none";
                     
                     stopRestrictionPolling();
                     hideBlockedScreen();
@@ -5346,6 +5364,7 @@ function renderProfileActivityList(kind) {
             }
 
             async function loadUserAvatar() {
+                var avatarOwner = currentUser;
                 try {
                     var cachedAvatars = readAvatarCacheFromStorage();
                     if (cachedAvatars[currentUser] && cachedAvatars[currentUser].url) {
@@ -5353,7 +5372,8 @@ function renderProfileActivityList(kind) {
                         updateAllAvatarElements(cachedAvatars[currentUser].url);
                     } else {
                         // localStorage 无缓存：远程获取头像
-                        var avatarUrl = await fetchAvatarUrl(currentUser);
+                        var avatarUrl = await fetchAvatarUrl(avatarOwner);
+                        if (currentUser !== avatarOwner) return;
                         if (avatarUrl) {
                             setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                             try {
@@ -8427,7 +8447,7 @@ function renderProfileActivityList(kind) {
                 var panel = document.getElementById("postFilterPanel");
                 if (panel) panel.style.display = "none";
                 var btn = document.getElementById("filterToggleBtn");
-                if (btn) btn.classList.remove("active");
+                if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
                 renderPostFilterUsers();
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
@@ -8464,7 +8484,7 @@ function renderProfileActivityList(kind) {
                 var isHidden = panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
                 if (isHidden) {
                     panel.style.display = "flex";
-                    if (btn) btn.classList.add("active");
+                    if (btn) { btn.classList.add("active"); btn.setAttribute("aria-expanded", "true"); }
                     // ★ 2026-09-26（审计 P2-3）：原实现每次展开都 forceRefresh=true，
                     //   用户反复开合筛选面板就会反复打后端拉全量用户列表（并且
                     //   renderPostFilterUsers 内还会逐用户读头像缓存）。这里改为
@@ -8475,7 +8495,7 @@ function renderProfileActivityList(kind) {
                     renderPostFilterUsers();
                 } else {
                     panel.style.display = "none";
-                    if (btn) btn.classList.remove("active");
+                    if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
                 }
             };
 
@@ -16646,10 +16666,72 @@ function renderProfileActivityList(kind) {
                 }
             }
 
+            function bindDockChatSocialSlider() {
+                var rail = document.getElementById('dockChatSocialTabs');
+                if (!rail || rail.__xtjSliderBound) return;
+                rail.__xtjSliderBound = true;
+                var slider = rail.querySelector('.chat-social-slider');
+                var tabs = ['search', 'friends', 'requests', 'blocks'];
+                var pointer = null, startX = 0, moved = false, left = 0, suppressClickUntil = 0;
+                function cellWidth(){ return Math.max(1, (rail.clientWidth - 8) / 4); }
+                function release(event, cancelled){
+                    if (pointer === null || event.pointerId !== pointer) return;
+                    var didMove = moved;
+                    pointer = null;
+                    rail.classList.remove('is-dragging');
+                    slider.style.transform = '';
+                    rail.querySelectorAll('[data-drag-active]').forEach(function(button){ button.removeAttribute('data-drag-active'); });
+                    if (didMove) {
+                        suppressClickUntil = Date.now() + 400;
+                        if (!cancelled) renderDockChatSocialTab(tabs[Math.max(0, Math.min(3, Math.round(left / cellWidth())))]);
+                    }
+                }
+                rail.addEventListener('pointerdown', function(event){
+                    if (event.button !== 0 || pointer !== null) return;
+                    pointer = event.pointerId; startX = event.clientX; moved = false;
+                    left = Math.max(0, tabs.indexOf(_dockChatSocialTab)) * cellWidth();
+                });
+                rail.addEventListener('pointermove', function(event){
+                    if (event.pointerId !== pointer) return;
+                    if (!moved && Math.abs(event.clientX - startX) < 5) return;
+                    if (!moved) rail.setPointerCapture(event.pointerId);
+                    moved = true;
+                    rail.classList.add('is-dragging');
+                    var width = cellWidth();
+                    left = Math.max(0, Math.min(width * 3, event.clientX - rail.getBoundingClientRect().left - 4 - width / 2));
+                    slider.style.transform = 'translate3d(' + left + 'px,0,0)';
+                    var closest = Math.round(left / width);
+                    rail.querySelectorAll('[data-chat-social-tab]').forEach(function(button,index){
+                        button.toggleAttribute('data-drag-active', index === closest);
+                    });
+                });
+                rail.addEventListener('pointerup', function(event){ release(event, false); });
+                rail.addEventListener('pointercancel', function(event){ release(event, true); });
+                rail.addEventListener('lostpointercapture', function(event){ release(event, true); });
+                rail.addEventListener('click', function(event){
+                    if (Date.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
+                }, true);
+                rail.addEventListener('keydown', function(event){
+                    if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+                    event.preventDefault();
+                    var index = Math.max(0, tabs.indexOf(_dockChatSocialTab));
+                    index = event.key === 'Home' ? 0 : event.key === 'End' ? 3 : (index + (event.key === 'ArrowRight' ? 1 : 3)) % 4;
+                    renderDockChatSocialTab(tabs[index]);
+                    rail.querySelector('[data-chat-social-tab="' + tabs[index] + '"]').focus({ preventScroll: true });
+                });
+            }
+
             function setDockChatSocialTabState(tab) {
                 _dockChatSocialTab = ['search', 'friends', 'requests', 'blocks'].indexOf(tab) >= 0 ? tab : 'search';
+                bindDockChatSocialSlider();
+                var rail = document.getElementById('dockChatSocialTabs');
+                if (rail) rail.style.setProperty('--social-tab-index', String(['search','friends','requests','blocks'].indexOf(_dockChatSocialTab)));
+                var panel = document.getElementById('dockChatSocialContent');
+                if (panel) panel.setAttribute('aria-labelledby', 'social-tab-' + _dockChatSocialTab);
                 Array.prototype.forEach.call(document.querySelectorAll('[data-chat-social-tab]'), function(button) {
                     var active = button.getAttribute('data-chat-social-tab') === _dockChatSocialTab;
+                    button.id = 'social-tab-' + button.getAttribute('data-chat-social-tab');
+                    button.setAttribute('aria-controls', 'dockChatSocialContent');
                     button.setAttribute('aria-selected', active ? 'true' : 'false');
                     button.tabIndex = active ? 0 : -1;
                 });

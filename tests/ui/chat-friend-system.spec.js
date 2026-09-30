@@ -83,6 +83,7 @@ test('mobile friend search sends a request and keeps non-friend messaging disabl
 
   await page.locator('#dockChatSocialBtn').click();
   await expect(page.locator('#dockChatSocialSheet')).toBeVisible();
+  await page.locator('[data-chat-social-tab="search"]').click();
   await page.locator('#dockChatSocialSearchForm input[name="q"]').fill('alice');
   await page.locator('#dockChatSocialSearchForm button[type="submit"]').click();
   const addButton = page.locator('#dockChatSocialResults [data-chat-social-action="friend-request"]');

@@ -3052,7 +3052,7 @@
                 var panel = document.getElementById("postFilterPanel");
                 if (panel) panel.style.display = "none";
                 var btn = document.getElementById("filterToggleBtn");
-                if (btn) btn.classList.remove("active");
+                if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
                 renderPostFilterUsers();
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
@@ -3089,7 +3089,7 @@
                 var isHidden = panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
                 if (isHidden) {
                     panel.style.display = "flex";
-                    if (btn) btn.classList.add("active");
+                    if (btn) { btn.classList.add("active"); btn.setAttribute("aria-expanded", "true"); }
                     // ★ 2026-09-26（审计 P2-3）：原实现每次展开都 forceRefresh=true，
                     //   用户反复开合筛选面板就会反复打后端拉全量用户列表（并且
                     //   renderPostFilterUsers 内还会逐用户读头像缓存）。这里改为
@@ -3100,7 +3100,7 @@
                     renderPostFilterUsers();
                 } else {
                     panel.style.display = "none";
-                    if (btn) btn.classList.remove("active");
+                    if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
                 }
             };
 

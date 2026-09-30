@@ -4806,10 +4806,72 @@
                 }
             }
 
+            function bindDockChatSocialSlider() {
+                var rail = document.getElementById('dockChatSocialTabs');
+                if (!rail || rail.__xtjSliderBound) return;
+                rail.__xtjSliderBound = true;
+                var slider = rail.querySelector('.chat-social-slider');
+                var tabs = ['search', 'friends', 'requests', 'blocks'];
+                var pointer = null, startX = 0, moved = false, left = 0, suppressClickUntil = 0;
+                function cellWidth(){ return Math.max(1, (rail.clientWidth - 8) / 4); }
+                function release(event, cancelled){
+                    if (pointer === null || event.pointerId !== pointer) return;
+                    var didMove = moved;
+                    pointer = null;
+                    rail.classList.remove('is-dragging');
+                    slider.style.transform = '';
+                    rail.querySelectorAll('[data-drag-active]').forEach(function(button){ button.removeAttribute('data-drag-active'); });
+                    if (didMove) {
+                        suppressClickUntil = Date.now() + 400;
+                        if (!cancelled) renderDockChatSocialTab(tabs[Math.max(0, Math.min(3, Math.round(left / cellWidth())))]);
+                    }
+                }
+                rail.addEventListener('pointerdown', function(event){
+                    if (event.button !== 0 || pointer !== null) return;
+                    pointer = event.pointerId; startX = event.clientX; moved = false;
+                    left = Math.max(0, tabs.indexOf(_dockChatSocialTab)) * cellWidth();
+                });
+                rail.addEventListener('pointermove', function(event){
+                    if (event.pointerId !== pointer) return;
+                    if (!moved && Math.abs(event.clientX - startX) < 5) return;
+                    if (!moved) rail.setPointerCapture(event.pointerId);
+                    moved = true;
+                    rail.classList.add('is-dragging');
+                    var width = cellWidth();
+                    left = Math.max(0, Math.min(width * 3, event.clientX - rail.getBoundingClientRect().left - 4 - width / 2));
+                    slider.style.transform = 'translate3d(' + left + 'px,0,0)';
+                    var closest = Math.round(left / width);
+                    rail.querySelectorAll('[data-chat-social-tab]').forEach(function(button,index){
+                        button.toggleAttribute('data-drag-active', index === closest);
+                    });
+                });
+                rail.addEventListener('pointerup', function(event){ release(event, false); });
+                rail.addEventListener('pointercancel', function(event){ release(event, true); });
+                rail.addEventListener('lostpointercapture', function(event){ release(event, true); });
+                rail.addEventListener('click', function(event){
+                    if (Date.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
+                }, true);
+                rail.addEventListener('keydown', function(event){
+                    if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+                    event.preventDefault();
+                    var index = Math.max(0, tabs.indexOf(_dockChatSocialTab));
+                    index = event.key === 'Home' ? 0 : event.key === 'End' ? 3 : (index + (event.key === 'ArrowRight' ? 1 : 3)) % 4;
+                    renderDockChatSocialTab(tabs[index]);
+                    rail.querySelector('[data-chat-social-tab="' + tabs[index] + '"]').focus({ preventScroll: true });
+                });
+            }
+
             function setDockChatSocialTabState(tab) {
                 _dockChatSocialTab = ['search', 'friends', 'requests', 'blocks'].indexOf(tab) >= 0 ? tab : 'search';
+                bindDockChatSocialSlider();
+                var rail = document.getElementById('dockChatSocialTabs');
+                if (rail) rail.style.setProperty('--social-tab-index', String(['search','friends','requests','blocks'].indexOf(_dockChatSocialTab)));
+                var panel = document.getElementById('dockChatSocialContent');
+                if (panel) panel.setAttribute('aria-labelledby', 'social-tab-' + _dockChatSocialTab);
                 Array.prototype.forEach.call(document.querySelectorAll('[data-chat-social-tab]'), function(button) {
                     var active = button.getAttribute('data-chat-social-tab') === _dockChatSocialTab;
+                    button.id = 'social-tab-' + button.getAttribute('data-chat-social-tab');
+                    button.setAttribute('aria-controls', 'dockChatSocialContent');
                     button.setAttribute('aria-selected', active ? 'true' : 'false');
                     button.tabIndex = active ? 0 : -1;
                 });
