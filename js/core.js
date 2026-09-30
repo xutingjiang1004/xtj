@@ -5426,10 +5426,17 @@ function renderProfileActivityList(kind) {
                 return false;
             }
 
+            function buildLikeButtonContent(liked) {
+                return '<svg class="post-like-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg><span class="post-like-label">' + (liked ? '已赞' : '点赞') + '</span>';
+            }
+
             function setLikeButtonState(btn, liked) {
                 if (!btn) return;
                 btn.classList.toggle('liked', !!liked);
-                btn.textContent = liked ? '❤️' : '🤍';
+                if (!btn.querySelector('.post-like-icon')) btn.innerHTML = buildLikeButtonContent(liked);
+                var label = btn.querySelector('.post-like-label');
+                if (label) label.textContent = liked ? '已赞' : '点赞';
+                btn.setAttribute('aria-label', liked ? '取消点赞' : '点赞');
                 btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
             }
 
@@ -5693,28 +5700,27 @@ function renderProfileActivityList(kind) {
 
             function createLikeBlossom(btn) {
                 var perfProfile = window.__xtjPerfProfile || 'full';
-                if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-                if (perfProfile === 'lite') {
-                    if (!btn || !btn.classList) return;
-                    if (btn._likeLiteTimer) clearTimeout(btn._likeLiteTimer);
-                    if (btn._likeLiteFrame != null) {
-                        if (window.cancelAnimationFrame) window.cancelAnimationFrame(btn._likeLiteFrame);
-                        else clearTimeout(btn._likeLiteFrame);
-                    }
-                    btn.classList.remove('like-lite-feedback');
-                    var startLiteFeedback = function() {
-                        btn._likeLiteFrame = null;
-                        btn.classList.add('like-lite-feedback');
-                        btn._likeLiteTimer = setTimeout(function() {
-                            btn._likeLiteTimer = null;
-                            btn.classList.remove('like-lite-feedback');
-                        }, 240);
-                    };
-                    btn._likeLiteFrame = window.requestAnimationFrame
-                        ? window.requestAnimationFrame(startLiteFeedback)
-                        : setTimeout(startLiteFeedback, 16);
-                    return;
+                if (document.documentElement.getAttribute('data-xtj-motion') === 'off' ||
+                    (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+                if (!btn || !btn.classList) return;
+                if (btn._likeLiteTimer) clearTimeout(btn._likeLiteTimer);
+                if (btn._likeLiteFrame != null) {
+                    if (window.cancelAnimationFrame) window.cancelAnimationFrame(btn._likeLiteFrame);
+                    else clearTimeout(btn._likeLiteFrame);
                 }
+                btn.classList.remove('like-lite-feedback');
+                var startLiteFeedback = function() {
+                    btn._likeLiteFrame = null;
+                    btn.classList.add('like-lite-feedback');
+                    btn._likeLiteTimer = setTimeout(function() {
+                        btn._likeLiteTimer = null;
+                        btn.classList.remove('like-lite-feedback');
+                    }, 240);
+                };
+                btn._likeLiteFrame = window.requestAnimationFrame
+                    ? window.requestAnimationFrame(startLiteFeedback)
+                    : setTimeout(startLiteFeedback, 16);
+                if (perfProfile === 'lite') return;
                 var layer = btn.closest ? btn.closest('.actions') : btn.parentElement;
                 if (!layer) return;
 
@@ -5745,11 +5751,11 @@ function renderProfileActivityList(kind) {
                     btn.classList.remove('like-bloom-origin');
                 };
                 blossom.addEventListener('animationend', cleanup, { once: true });
+                blossom.addEventListener('animationcancel', cleanup, { once: true });
                 btn._likeBlossom = {
                     node: blossom,
-                    // CSS runs for 780ms. Keep the fallback beyond animationend so
-                    // Balanced mode cannot truncate the last part of the blossom.
-                    timer: setTimeout(cleanup, perfProfile === 'balanced' ? 900 : 900)
+                    // The compact blossom ends at 480ms; also clean up if animation is cancelled.
+                    timer: setTimeout(cleanup, 600)
                 };
             }
 
@@ -7915,7 +7921,7 @@ function renderProfileActivityList(kind) {
                 var idHtml = escapeHtml(String(post.id));
                 var actorKeyJs = safeJsStr(String(post.actor_key || ""));
                 var actions = [
-                    '<button class="action-btn like-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '❤️' : '🤍') + '</button>',
+                    '<button class="action-btn like-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" aria-label="' + (isLiked ? '取消点赞' : '点赞') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + buildLikeButtonContent(isLiked) + '</button>',
                     '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canPinPost(post)) {
@@ -17194,6 +17200,7 @@ function renderProfileActivityList(kind) {
                         if (vv && Math.abs(vv.scale - 1)>0.02) return;
                         var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
+                        root.style.setProperty('--xtj-visual-top', (vv ? Math.max(0, Math.round(vv.offsetTop)) : 0) + 'px');
                         var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
                         // ★ 2026-09-22 视口差基线（微信 web-view / 微信内置浏览器 / 开发者工具模拟器通吃）：
                         //   这些环境里 window.innerHeight 与 visualViewport 存在**环境固有的恒定差值**
@@ -17296,6 +17303,7 @@ function renderProfileActivityList(kind) {
                         window.visualViewport.addEventListener('resize', _iosVvHandler);
                         window.visualViewport.addEventListener('scroll', _iosVvHandler);
                     }
+                    window.addEventListener('pageshow', updateIOSViewport);
                     window.addEventListener('orientationchange', function() {
                         setTimeout(updateIOSViewport, 180);
                     });

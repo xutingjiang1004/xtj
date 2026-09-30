@@ -5334,6 +5334,7 @@
                         if (vv && Math.abs(vv.scale - 1)>0.02) return;
                         var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
+                        root.style.setProperty('--xtj-visual-top', (vv ? Math.max(0, Math.round(vv.offsetTop)) : 0) + 'px');
                         var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
                         // ★ 2026-09-22 视口差基线（微信 web-view / 微信内置浏览器 / 开发者工具模拟器通吃）：
                         //   这些环境里 window.innerHeight 与 visualViewport 存在**环境固有的恒定差值**
@@ -5436,6 +5437,7 @@
                         window.visualViewport.addEventListener('resize', _iosVvHandler);
                         window.visualViewport.addEventListener('scroll', _iosVvHandler);
                     }
+                    window.addEventListener('pageshow', updateIOSViewport);
                     window.addEventListener('orientationchange', function() {
                         setTimeout(updateIOSViewport, 180);
                     });
