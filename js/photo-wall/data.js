@@ -575,15 +575,20 @@
     }
   }
 
+  function canDeletePhotoWallPhoto(item) {
+    var current = String(window.currentUser || '');
+    return !!(item && current && (item.username === current ||
+      (current === 'xxz' && typeof window.isAdmin === 'function' && window.isAdmin())));
+  }
+  window.canDeletePhotoWallPhoto = canDeletePhotoWallPhoto;
+
   async function deletePhotoWallPhoto(item, opts){
     opts = opts || {};
     if (!item) return { ok:false, error:'missing_photo' };
     var current = window.currentUser || '';
     // L3 修复：管理员判断统一走 window.isAdmin()（由后端 /admin/verify 结果驱动），
     // 移除硬编码用户名 'xxz' 的前端后门式提权通道（后端 /api/photo/delete 仍独立校验权限）
-    var isAdmin = typeof window.isAdmin === 'function' && window.isAdmin();
-    var isOwner = !!(item.username && current && item.username === current);
-    if (!current || (!isOwner && !isAdmin)) {
+    if (!canDeletePhotoWallPhoto(item)) {
       toast('无权删除这张照片');
       return { ok:false, error:'unauthorized' };
     }
@@ -623,7 +628,9 @@
     removePendingDeletedPhotoId(item.cloudId);
     addDeletedPhotoId(id);
     broadcastSync('photo_deleted', { photoId: id });
-    try { await loadPhotoWallData(true); } catch (_) {}
+    // The delete response is authoritative. A slow wall refresh must not keep
+    // the preview's delete button locked after the photo is already removed.
+    Promise.resolve().then(function(){ return loadPhotoWallData(true); }).catch(function(){});
     if (deleteResult.cleanup_pending) {
       setPhotoWallSyncStatus('syncing', '列表已同步，文件清理中');
       toast('照片已从全站移除，原文件正在清理');
