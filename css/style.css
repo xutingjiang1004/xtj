@@ -1182,27 +1182,27 @@
 
         .actions .like-blossom {
             position: absolute;
-            width: 76px;
-            height: 76px;
-            margin: -38px 0 0 -38px;
+            width: 48px;
+            height: 48px;
+            margin: -24px 0 0 -24px;
             pointer-events: none;
             z-index: 2;
             opacity: 0;
             transform-origin: center;
             will-change: transform, opacity;
-            filter: drop-shadow(0 5px 10px rgba(242, 139, 173, 0.18));
-            animation: xtj-like-blossom 780ms cubic-bezier(.18, .78, .2, 1) forwards;
+            filter: none;
+            animation: xtj-like-blossom 480ms cubic-bezier(.18, .78, .2, 1) forwards;
         }
         .actions .like-blossom svg { display: block; width: 100%; height: 100%; }
         .actions .like-bloom-origin { z-index: 1; }
-        .actions .like-btn.like-lite-feedback { animation: xtj-like-lite-feedback 240ms ease-out; }
+        .actions .like-btn.like-lite-feedback .post-like-icon { animation: xtj-like-lite-feedback 240ms ease-out; }
         @keyframes xtj-like-lite-feedback {
             0% { transform: scale(1); }
-            42% { transform: scale(1.22); }
+            42% { transform: scale(1.18); }
             100% { transform: scale(1); }
         }
         @media (prefers-reduced-motion: reduce) {
-            .actions .like-btn.like-lite-feedback { animation: none; }
+            .actions .like-btn.like-lite-feedback .post-like-icon { animation: none; }
         }
         @keyframes xtj-like-blossom {
             0% { opacity: 0; transform: scale(.12) rotate(-15deg); }

@@ -62,24 +62,23 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=5d4d40f117" />
+    <link rel="stylesheet" href="css/style.min.css?v=bb1c9e2128" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
-    <!-- ★ 2026-09-22 响应式修复：下面三个 CSS 是「media="print" onload 切 all」的异步加载，
+    <!-- ★ 2026-09-22 响应式修复：下面两个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
          这里加 preload 让浏览器解析到本行就立即高优先级抓取，缩短空窗期。
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
-    <link rel="preload" as="style" href="css/visual-refinements.min.css?v=acb9ef6f5f" />
+    <link rel="preload" as="style" href="css/visual-refinements.min.css?v=62423b60cd" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=e560ba776a" />
-    <link rel="preload" as="style" href="css/ui-shell.min.css?v=e30f9d5107" />
-    <link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=9136bdcd67" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=e30f9d5107" /></noscript>
+    <link rel="stylesheet" href="css/visual-refinements.min.css?v=62423b60cd" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=62423b60cd" /><link rel="stylesheet" href="css/ai-agent.min.css?v=9136bdcd67" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=21fe1d7847" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=4ee2fa8795" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=e30f9d5107" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=21fe1d7847">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=9136bdcd67">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=ca28241408">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=f44d91a9f4">
@@ -1172,11 +1171,11 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=938621a82b"></script>
+    <script defer src="js/core.min.js?v=2690969444"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
-    <script defer src="js/theme-toggle.min.js?v=75e2d44a36"></script>
+    <script defer src="js/theme-toggle.min.js?v=c8c15c44e1"></script>
     <script defer src="js/desktop-shell.min.js?v=4bbb59d3b3"></script>
-    <script defer src="js/ux-features.min.js?v=cf3e805e19"></script>
+    <script defer src="js/ux-features.min.js?v=3a2022da98"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">
