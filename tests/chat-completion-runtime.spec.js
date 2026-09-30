@@ -421,3 +421,10 @@ test('touch swipe replies while a vertical gesture remains scrolling',async({pag
  await bubble.dispatchEvent('pointerdown',{pointerType:'touch',pointerId:2,clientX:100,clientY:100});await bubble.dispatchEvent('pointermove',{pointerType:'touch',pointerId:2,clientX:180,clientY:104});await bubble.dispatchEvent('pointerup',{pointerType:'touch',pointerId:2,clientX:180,clientY:104});await expect(page.locator('#chatMessageContext')).toContainText('hello world');
  await page.locator('#chatMessageContextClose').click();await page.locator('#chatSearchButton').click();await page.waitForTimeout(350);await page.screenshot({path:'output/chat-visual/account-search-redesign.png'});await page.locator('#chatHistoryClose').click();await bubble.click({button:'right'});await page.waitForTimeout(350);await page.screenshot({path:'output/chat-visual/message-menu-two-rows.png'});
 });
+
+test('immediate send preserves a quote while reply validation is delayed',async({page})=>{
+ await setup(page);await page.waitForTimeout(400);await page.evaluate(()=>{const base=window.xtjProtectedFetch;window.xtjProtectedFetch=async(url,options)=>{if(url.includes('/messages/reply/validate'))return new Promise(resolve=>setTimeout(async()=>resolve(await base(url,options)),1500));return base(url,options);};});
+ await page.locator('[data-message-id="'+id+'"] .chat-msg').click({button:'right'});await page.getByRole('button',{name:'回复',exact:true}).click();await expect(page.locator('#chatMessageContext')).toContainText('hello world');
+ await page.locator('#dockChatInput').fill('instant reply');await page.locator('#dockChatSendBtn').click();await expect.poll(()=>page.evaluate(()=>{const call=window.__chatTestCalls.find(c=>c.url.includes('/api/dm/send'));return call && JSON.parse(JSON.parse(call.body).content).reply_to?.id;})).toBe(id);
+ await expect(page.locator('#chatMessageContext')).toBeHidden();await page.waitForTimeout(1600);await expect(page.locator('#chatMessageContext')).toBeHidden();
+});

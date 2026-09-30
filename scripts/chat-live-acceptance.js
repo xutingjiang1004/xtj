@@ -17,6 +17,7 @@ async function main(){
  const browser=await chromium.launch({executablePath:process.env.CHAT_TEST_CHROMIUM || undefined,headless:true,proxy:process.env.HTTPS_PROXY ? {server:process.env.HTTPS_PROXY} : undefined});
  const contexts=[];
  const actors=[];
+ function checkpoint(){const previous=fs.existsSync(secretPath)?JSON.parse(fs.readFileSync(secretPath,'utf8')):[];for(const actor of actors){const value={user:actor.user,password:actor.password,token:actor.token,tokens:[...new Set(actor.tokens||[])]};const index=previous.findIndex(p=>p.user===actor.user);if(index<0)previous.push(value);else previous[index]=value;}fs.writeFileSync(secretPath,JSON.stringify(previous),{mode:0o600});}
  try {
   const health=await (await browser.newContext()).request.get(base+'/health');
   const h=await health.json(); record('production version',{commit:h.node.commit,database:h.database.ok});
@@ -27,8 +28,8 @@ async function main(){
    const context=await browser.newContext({viewport:{width:1280,height:800},ignoreHTTPSErrors:process.env.CHAT_TEST_IGNORE_HTTPS_ERRORS==='1'});contexts.push(context);
    const reg=await context.request.post(base+(previous ? '/api/user/login' : '/api/user/register'),{data:{user_name:user,password},headers:{Origin:base,'X-XTJ-Device-Id':'qa-'+tag}});
    const data=await reg.json(); if (!reg.ok() || !data.token) throw new Error('register '+tag+' status '+reg.status()+' '+(data.error||data.code||''));
-   const actor={user,password,token:data.token,context};actors.push(actor);report.users.push(user);
-   fs.writeFileSync(secretPath,JSON.stringify(actors.map(a=>({user:a.user,password:a.password,token:a.token}))),{mode:0o600});
+   const actor={user,password,token:data.token,tokens:[...(previous?.tokens||[]),previous?.token].filter(Boolean),context};actors.push(actor);report.users.push(user);
+   checkpoint();
    await context.addInitScript(({user,tag})=>{localStorage.setItem('xtj_user',user);localStorage.setItem('xtj_device_id','qa-'+tag);},{user,tag});
    const page=await context.newPage();actor.page=page;
    page.on('requestfailed',r=>{const u=new URL(r.url());if(u.pathname.includes('/typing') || u.hostname.includes('supabase')) report.errors.push({network:u.hostname+u.pathname,error:r.failure()?.errorText});});
@@ -134,6 +135,6 @@ async function main(){
   // Retain only session checkpoints until WebKit acceptance and database cleanup.
   for(const actor of actors)await actor.context.storageState({path:path.join(out,actor===a?'session-a.json':'session-b.json')});
  }catch(e){report.diagnostics=await Promise.all(actors.filter(a=>a.page).map(async a=>({user:a.user,state:await a.page.evaluate(()=>({sdk:!!window.supabase,client:!!window.sb,configKey:!!window.XTJ_CONFIG?.SUPABASE_ANON_KEY && !window.XTJ_CONFIG.SUPABASE_ANON_KEY.includes('...'),channels:window.sb?window.sb.getChannels().map(c=>c.state):[]})).catch(()=>({closed:true}))})));report.failure=e.message;console.error('FAIL '+e.message);process.exitCode=1;}
- finally{save();for(const c of contexts)await c.close();await browser.close();}
+ finally{for(const actor of actors){const token=await actor.page?.evaluate(()=>window.getUserToken?.()).catch(()=>null);if(token)actor.tokens.push(token);}if(actors.length)checkpoint();save();for(const c of contexts)await c.close();await browser.close();}
 }
 main().catch(e=>{report.failure=e.message;save();console.error('FAIL '+e.message);process.exitCode=1;});
