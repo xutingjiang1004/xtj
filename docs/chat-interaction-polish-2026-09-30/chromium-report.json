@@ -1,0 +1,112 @@
+{
+  "at": "2026-09-30T00:16:57.458Z",
+  "base": "https://xtj.onrender.com",
+  "checks": [
+    {
+      "name": "production version",
+      "ok": true,
+      "commit": "58fecbf61d980ee7d3a867df944d01ad96b64463",
+      "database": true
+    },
+    {
+      "name": "authenticated browser a",
+      "ok": true
+    },
+    {
+      "name": "authenticated browser b",
+      "ok": true
+    },
+    {
+      "name": "real friendship request and acceptance",
+      "ok": true
+    },
+    {
+      "name": "production transcription capability checked",
+      "ok": true,
+      "enabled": false
+    },
+    {
+      "name": "authenticated Web Push configuration",
+      "ok": true
+    },
+    {
+      "name": "real peer online status",
+      "ok": true
+    },
+    {
+      "name": "realtime channel states",
+      "ok": true,
+      "states": [
+        "joined"
+      ]
+    },
+    {
+      "name": "real typing broadcast",
+      "ok": true
+    },
+    {
+      "name": "typing stopped",
+      "ok": true
+    },
+    {
+      "name": "real text delivery",
+      "ok": true,
+      "milliseconds": 1402
+    },
+    {
+      "name": "real read receipt synchronization",
+      "ok": true
+    },
+    {
+      "name": "real reply and original-context navigation",
+      "ok": true
+    },
+    {
+      "name": "bidirectional real delivery",
+      "ok": true
+    },
+    {
+      "name": "production detail menu open and close",
+      "ok": true
+    },
+    {
+      "name": "production mobile viewport",
+      "ok": true
+    },
+    {
+      "name": "real private image upload, delivery and decoding",
+      "ok": true
+    },
+    {
+      "name": "production authorized image gallery",
+      "ok": true
+    },
+    {
+      "name": "real private audio upload, delivery, playback and decoded sound",
+      "ok": true,
+      "duration": 1.5,
+      "rms": 0.10788323665994003,
+      "signed": true
+    },
+    {
+      "name": "real offline/reconnect catch-up",
+      "ok": true
+    },
+    {
+      "name": "own test attachment withdrawn",
+      "ok": true,
+      "cleanupPending": false
+    },
+    {
+      "name": "own test attachment withdrawn",
+      "ok": true,
+      "cleanupPending": false
+    }
+  ],
+  "errors": [],
+  "users": [
+    "qa0930_d74ed1_a",
+    "qa0930_d74ed1_b"
+  ],
+  "transcriptionEnabled": false
+}
