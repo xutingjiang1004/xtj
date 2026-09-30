@@ -3771,6 +3771,7 @@
                 if (!button.dataset.idleIcon) button.dataset.idleIcon=button.innerHTML;
                 button.innerHTML=recording ? '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="3"/></svg>' : button.dataset.idleIcon;
                 button.setAttribute('aria-label',recording ? '结束录音' : '录制语音'); button.setAttribute('aria-pressed',String(recording));
+                button.classList.toggle('recording',!!recording);
             }
             function isChatHoldVoiceEnabled() { return localStorage.getItem('xtj_chat_hold_voice') !== 'off'; }
             var _chatVoiceHold=null;
@@ -3783,8 +3784,15 @@
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
-                    var type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus'].find(function(t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); });
-                    var recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined), chunks = [];
+                    // Safari can advertise a MIME type but reject its recorder: try the
+                    // remaining supported formats, then its native default.
+                    var types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus'].filter(function(t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); });
+                    types.push(null);
+                    var recorder, chunks = [];
+                    for (var typeIndex=0; typeIndex<types.length; typeIndex++) {
+                        try { recorder = new MediaRecorder(stream,types[typeIndex] ? {mimeType:types[typeIndex]} : undefined); break; }
+                        catch (formatError) { if (formatError.name!=='NotSupportedError' || typeIndex===types.length-1) throw formatError; }
+                    }
                     try { if (navigator.audioSession) navigator.audioSession.type='play-and-record'; } catch (_) {}
                     var input = document.getElementById('dockChatInput'), base = input.value, transcript = '';
                     var voice = _chatVoice = { recorder: recorder, stream: stream, cancelled: false, hold:!!hold, base: base, started: Date.now() };
@@ -3817,7 +3825,15 @@
                     document.querySelector('#panelChat .chat-input-wrap').classList.add('is-recording');
                     voice.limit = setTimeout(function() { if (recorder.state === 'recording') recorder.stop(); }, 300000);
                     recorder.start(250);
-                } catch (error) { if (stream) stream.getTracks().forEach(function(t) { t.stop(); }); cancelChatVoice(); showToast(error.name === 'NotAllowedError' ? '请允许麦克风权限后重试' : '无法打开麦克风'); }
+                } catch (error) {
+                    if (stream) stream.getTracks().forEach(function(t) { t.stop(); });
+                    cancelChatVoice();
+                    var reason=error && error.name;
+                    showToast(reason==='NotAllowedError' ? '请在浏览器的网站设置中允许麦克风后重试' :
+                        reason==='SecurityError' ? '浏览器限制了麦克风，请检查网站权限后重试' :
+                        reason==='NotFoundError' ? '未找到可用的麦克风' :
+                        reason==='NotReadableError' ? '麦克风被占用，请结束其他录音后重试' : '无法打开麦克风，请稍后重试');
+                }
             }
             function bindChatHoldVoice() {
                 var wrap=document.querySelector('#panelChat .chat-input-wrap'), input=document.getElementById('dockChatInput');
@@ -4737,7 +4753,8 @@
                 if (!window.currentUser) { showToast('请先登录后管理好友'); return; }
                 var sheet = document.getElementById('dockChatSocialSheet');
                 if (!sheet) return;
-                transitionChatSurface(sheet,true);
+                // Switching an already visible tab must not replay the dialog entrance.
+                if (sheet.hidden || sheet.classList.contains('hidden') || sheet.inert) transitionChatSurface(sheet,true);
                 renderDockChatSocialTab(tab || 'friends');
                 refreshChatSocialBadge(true);
                 setTimeout(function() {
@@ -4806,22 +4823,35 @@
                     Array.prototype.forEach.call(document.querySelectorAll('#dockChatSocialContent .chat-social-user[data-social-user]'), function(row) {
                         var avatar = row.querySelector('.chat-social-avatar');
                         var userName = row.getAttribute('data-social-user');
-                        if (avatar && userName) avatar.innerHTML = getDockChatAvatarMarkup(userName);
+                        if (avatar && userName) {
+                            var markup = getDockChatAvatarMarkup(userName);
+                            if (avatar.dataset.avatarMarkup !== markup) { avatar.innerHTML = markup; avatar.dataset.avatarMarkup = markup; }
+                        }
                     });
                 });
             }
 
             var _chatSocialPanels = new Map();
+            function updateChatSocialPanel(content, markup) {
+                // Compare the unhydrated render, not live HTML containing loaded avatars.
+                if (content.dataset.renderMarkup !== markup) {
+                    content.innerHTML = markup;
+                    content.dataset.renderMarkup = markup;
+                }
+            }
             function renderDockChatSocialTab(tab) {
                 if (!window.currentUser) { closeDockChatSocialSheet(); return; }
                 var content = document.getElementById('dockChatSocialContent');
-                if (content && content.dataset.panelKey) _chatSocialPanels.set(content.dataset.panelKey,Array.from(content.childNodes));
+                if (content && content.dataset.panelKey) _chatSocialPanels.set(content.dataset.panelKey,{nodes:Array.from(content.childNodes),markup:content.dataset.renderMarkup || ''});
                 setDockChatSocialTabState(tab);
                 if (!content) return;
                 var panelKey=window.currentUser+'\u0000'+_dockChatSocialTab+(_dockChatSocialTab==='requests' ? '\u0000'+_dockChatSocialRequestDirection : '');
                 var saved=_chatSocialPanels.get(panelKey);
-                content.dataset.panelKey=panelKey;
-                content.replaceChildren.apply(content,saved || []);
+                if (content.dataset.panelKey !== panelKey) {
+                    content.dataset.panelKey=panelKey;
+                    content.replaceChildren.apply(content,saved ? saved.nodes : []);
+                    content.dataset.renderMarkup=saved ? saved.markup : '';
+                }
                 content.setAttribute('aria-busy','true');
                 var seq = ++_dockChatSocialLoadSeq;
                 if (saved && _dockChatSocialTab==='search') { content.setAttribute('aria-busy','false'); return; }
@@ -4845,7 +4875,7 @@
                         _dockChatFriendNotesAt = Date.now();
                         applyDockChatFriendLabels();
                         if (!friends.length) {
-                            content.innerHTML = '<div class="chat-social-empty">还没有好友。搜索用户名后发送好友申请即可开始聊天。</div>';
+                            updateChatSocialPanel(content,'<div class="chat-social-empty">还没有好友。搜索用户名后发送好友申请即可开始聊天。</div>');
                             return;
                         }
                         var friendMarkup = friends.map(function(friend) {
@@ -4861,10 +4891,10 @@
                             ];
                             return chatSocialUserRow(name, note ? '账号：' + name : '已添加为好友', actions, note || name);
                         }).join('');
-                        if (content.innerHTML!==friendMarkup) content.innerHTML=friendMarkup;
+                        updateChatSocialPanel(content,friendMarkup);
                         hydrateDockChatSocialAvatars(friends.map(function(friend) { return friend.peer_name; }));
                     }).catch(function() {
-                        if (seq === _dockChatSocialLoadSeq) content.innerHTML = '<div class="chat-social-error">好友列表加载失败，请切换标签或重新打开。</div>';
+                        if (seq === _dockChatSocialLoadSeq) updateChatSocialPanel(content,'<div class="chat-social-error">好友列表加载失败，请切换标签或重新打开。</div>');
                     });
                     return;
                 }
@@ -4890,23 +4920,23 @@
                         var switchHtml = '<div class="chat-social-request-switch">' +
                             '<button type="button" data-chat-social-direction="incoming" aria-pressed="' + (_dockChatSocialRequestDirection === 'incoming') + '">收到的申请</button>' +
                             '<button type="button" data-chat-social-direction="outgoing" aria-pressed="' + (_dockChatSocialRequestDirection === 'outgoing') + '">发出的申请</button></div>';
-                        content.innerHTML = switchHtml + (html || '<div class="chat-social-empty">' + (_dockChatSocialRequestDirection === 'incoming' ? '暂时没有收到好友申请。' : '暂时没有发出的好友申请。') + '</div>');
+                        updateChatSocialPanel(content,switchHtml + (html || '<div class="chat-social-empty">' + (_dockChatSocialRequestDirection === 'incoming' ? '暂时没有收到好友申请。' : '暂时没有发出的好友申请。') + '</div>'));
                         hydrateDockChatSocialAvatars(rows.map(function(request) { return _dockChatSocialRequestDirection === 'incoming' ? request.requester_name : request.target_name; }));
                     }).catch(function() {
-                        if (seq === _dockChatSocialLoadSeq) content.innerHTML = '<div class="chat-social-error">好友申请加载失败，请稍后重试。</div>';
+                        if (seq === _dockChatSocialLoadSeq) updateChatSocialPanel(content,'<div class="chat-social-error">好友申请加载失败，请稍后重试。</div>');
                     });
                     return;
                 }
                 requestDockChatSocial('/blocks').then(function(data) {
                     if (seq !== _dockChatSocialLoadSeq || _dockChatSocialTab !== 'blocks') return;
                     var blocks = Array.isArray(data.blocks) ? data.blocks : [];
-                    content.innerHTML = blocks.length ? blocks.map(function(block) {
+                    updateChatSocialPanel(content,blocks.length ? blocks.map(function(block) {
                         var name = String(block.peer_name || '');
                         return chatSocialUserRow(name, '已拉黑，不能互相申请或发送新消息', [chatSocialActionButton('解除拉黑', 'block-remove', name, '', 'primary')], name);
-                    }).join('') : '<div class="chat-social-empty">黑名单为空。</div>';
+                    }).join('') : '<div class="chat-social-empty">黑名单为空。</div>');
                     hydrateDockChatSocialAvatars(blocks.map(function(block) { return block.peer_name; }));
                 }).catch(function() {
-                    if (seq === _dockChatSocialLoadSeq) content.innerHTML = '<div class="chat-social-error">黑名单加载失败，请稍后重试。</div>';
+                    if (seq === _dockChatSocialLoadSeq) updateChatSocialPanel(content,'<div class="chat-social-error">黑名单加载失败，请稍后重试。</div>');
                 });
             }
 

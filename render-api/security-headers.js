@@ -64,7 +64,7 @@ var SECURITY_HEADERS = {
   // 保留 mode=block 反而可能在旧版浏览器引入额外 XSS 向量，故删除。
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
+  'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(self)',
   'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   // 审计 🟡：补充 COOP/COEP 家族的 COOP，配合 frame-ancestors 'none' 隔离跨源窗口
   'Cross-Origin-Opener-Policy': 'same-origin',
