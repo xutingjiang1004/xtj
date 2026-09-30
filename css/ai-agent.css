@@ -7356,7 +7356,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 }
 
 /* dock 模式：即便意外渲染出返回按钮也隐藏（底部 dock 即导航） */
-#panelAiChat .ai-chat-root.ai-chat-dock .ai-chat-back { display: none; }
+#panelAiChat .ai-chat-root.ai-chat-dock .ai-chat-back { display: inline-flex; }
 
 /* ===================== 自定义「模型 / 思考」选择弹层 =====================
    替代系统原生 select（部分设备原生下拉渲染不全/错位），全部由站点自绘。 */
@@ -7518,4 +7518,3 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .ai-secondary-panel #aiChatRoot > .ai-chat-header {
   grid-template-columns: auto auto auto auto auto minmax(0, 1fr);
 }
-

@@ -212,10 +212,10 @@ test('byte events drive progress while storage and record saving remain separate
   await page.waitForFunction(()=>window.__photoXHR && window.__photoXHR.file);
   await page.evaluate(()=>{const xhr=window.__photoXHR;xhr.upload.onprogress({lengthComputable:true,loaded:xhr.file.size/2,total:xhr.file.size});});
   await expect(page.locator('#pwUploadProgressTrack')).toHaveAttribute('aria-valuenow','44');
-  await expect(page.locator('#pwUploadProgressStage')).toHaveText('正在上传原图');
+  await expect(page.locator('#pwUploadProgressStage')).toHaveText('正在上传照片…');
   await page.evaluate(()=>window.__photoXHR.upload.onload());
   await expect(page.locator('#pwUploadProgressTrack')).toHaveAttribute('aria-valuenow','88');
-  await expect(page.locator('#pwUploadProgressStage')).toHaveText('正在保存照片');
+  await expect(page.locator('#pwUploadProgressStage')).toHaveText('正在上传照片…');
   await page.evaluate(()=>{const xhr=window.__photoXHR;xhr.status=200;xhr.responseText=JSON.stringify({ok:true,public_url:'https://example.test/original.png'});xhr.onload();});
   await expect(page.locator('#pwUploadProgressTrack')).toHaveAttribute('aria-valuenow','94');
   await expect.poll(()=>typeof confirm).toBe('function');confirm();
@@ -246,4 +246,25 @@ test('historical derivatives and cached thumbnails resolve to the original stora
   });
   expect(result.imageUrl).toBe('https://example.supabase.co/storage/v1/object/public/uploads/photos/upload_original.jpg');
   expect(result.thumbUrl).toBe('');expect(result.thumb).toBe('');
+});
+
+test('upload selection removes any photo, updates counts, and disables upload when empty',async({page})=>{
+ await uploadFixture(page);const buffer=await sharp({create:{width:12,height:12,channels:3,background:'#28553e'}}).png().toBuffer();
+ await page.locator('#photoFileInput').setInputFiles(['one.png','two.png','three.png'].map(name=>({name,mimeType:'image/png',buffer})));
+ await expect(page.locator('.pw-upload-remove')).toHaveCount(3);
+ await page.getByRole('button',{name:'移除第 3 张照片：three.png',exact:true}).click();await expect(page.locator('#pwUploadSheetMeta')).toContainText('2 张');
+ await page.getByRole('button',{name:'移除第 1 张照片：one.png',exact:true}).click();await expect(page.locator('.pw-upload-remove')).toHaveCount(1);
+ await expect(page.locator('.pw-upload-remove')).toHaveAttribute('data-file-name','two.png');
+ await page.locator('.pw-upload-remove').click();await expect(page.locator('#pwStartUploadBtn')).toBeDisabled();
+ await page.locator('#photoFileInput').setInputFiles({name:'one.png',mimeType:'image/png',buffer});await expect(page.locator('#pwStartUploadBtn')).toBeEnabled();
+});
+for(const hotfix of [false,true])test(`preview hides unauthorized deletion and unlocks after failure and success (${hotfix})`,async({page})=>{
+ await fixture(page,hotfix);
+ await page.evaluate(()=>{window.__deleteCalls=[];window.showConfirm=(a,b,c,callback)=>{window.__confirm=callback;};window.deletePhotoWallPhoto=async photo=>{window.__deleteCalls.push(photo.id);if(window.__deleteFail)throw Error('network');return {ok:true};};});
+ await page.locator('#ppDeleteBtn').click();await page.evaluate(()=>window.__confirm());await expect(page.locator('#photoPreviewOverlay')).not.toHaveClass(/active/);
+ await page.evaluate(()=>window.openPhotoPreview(0,[{id:'next',username:'tester',imageUrl:location.origin+'/quality-1.png',timestamp:Date.now()}]));await expect(page.locator('#ppDeleteBtn')).toBeEnabled();
+ await page.evaluate(()=>window.__deleteFail=true);await page.locator('#ppDeleteBtn').click();await page.evaluate(()=>window.__confirm());await expect(page.locator('#ppDeleteBtn')).toBeEnabled();await expect(page.locator('#photoPreviewOverlay')).toHaveClass(/active/);
+ await page.evaluate(()=>{window.closePhotoPreview();window.currentUser='B';window.isAdmin=()=>true;window.openPhotoPreview(0,[{id:'victim',username:'A',imageUrl:location.origin+'/quality-0.png',timestamp:Date.now()}]);});
+ await expect(page.locator('#ppDeleteBtn')).toBeHidden();await page.evaluate(()=>window.deletePhotoFromPreview());expect(await page.evaluate(()=>window.__deleteCalls)).toEqual(['0','next']);
+ await page.evaluate(()=>{window.currentUser='xxz';window.dispatchEvent(new CustomEvent('xtj:permissions-ready'));});await expect(page.locator('#ppDeleteBtn')).toBeVisible();
 });

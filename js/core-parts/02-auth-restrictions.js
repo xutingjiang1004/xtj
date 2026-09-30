@@ -30,6 +30,7 @@
                 // ★ 2026-09-26（审计 P1-5）：管理员同样要请求一次——服务端会在响应里
                 //   下发权威的 is_admin 标志，前端据此锁定管理员身份，不再只信 localStorage。
                 if (!currentUser) return;
+                var restrictionOwner = currentUser;
                 try {
                     if (typeof API_BASE !== 'string' || !API_BASE) return;
                     var authHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
@@ -37,12 +38,16 @@
                         method: 'GET', credentials: 'include', headers: authHeaders || {}
                     }, 10000);
                     var result = await response.json().catch(function() { return {}; });
-                    if (!response.ok || !result.ok) return;
+                    if (!response.ok || !result.ok || currentUser !== restrictionOwner) return;
                     // ★ P1-5：服务端权威身份位。收到后 isAdmin() 必须以它为准，
                     //   localStorage 里的用户名从此不构成管理员凭据。
                     if (typeof result.is_admin === 'boolean') {
+                        var permissionChanged = window.__xtjServerIsAdmin !== result.is_admin;
                         window.__xtjServerIsAdmin = result.is_admin;
+                        window.__xtjServerIsAdminOwner = restrictionOwner;
                         window.__xtjServerIsAdminAt = Date.now();
+                        window.dispatchEvent(new CustomEvent('xtj:permissions-ready'));
+                        if (permissionChanged && typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
                     }
                     var prev = JSON.stringify(userRestrictions);
                     var data = result.restrictions;
@@ -399,6 +404,7 @@
                 const btn = document.getElementById("loginSubmitBtn");
                 if (btn && btn.disabled) return;
                 if (btn) { btn.disabled = true; btn.textContent = "验证中.."; }
+                if (window.__xtjBeginAuthIdentityChange) window.__xtjBeginAuthIdentityChange();
 
                 try {
                     if (name === ADMIN_NAME) {
@@ -408,10 +414,10 @@
                             return;
                         }
                         try {
-                            var loginRes = await apiCall('POST', '/admin/login', {
+                            var loginRes = await window.__xtjWithSessionRequestLock(function() { return apiCall('POST', '/admin/login', {
                                 username: name,
                                 password: pw
-                            });
+                            }); });
                             if (!loginRes || !loginRes.ok) {
                                 showToast((loginRes && loginRes.error) || "管理员登录失败");
                                 return;
@@ -420,7 +426,7 @@
                                 showToast("管理员用户会话建立失败", "error");
                                 return;
                             }
-                            setUserToken(loginRes.user_token);
+                            setUserToken(loginRes.user_token, name);
                         } catch (apiErr) {
                             showToast("管理员登录失败: 无法连接后端 API");
                             return;
@@ -428,16 +434,15 @@
                     }
 
                     if (name !== ADMIN_NAME) {
-                        var tokenRes = await fetchWithTimeout(API_BASE + '/api/user/login', {
+                        var tokenRes = await window.__xtjWithSessionRequestLock(function() { return fetchWithTimeout(API_BASE + '/api/user/login', {
                             method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
                             body: JSON.stringify({ user_name: name, password: pw, device_id: (typeof getXtjDeviceId === 'function' ? getXtjDeviceId() : '') })
-                        });
+                        }); });
                         var tokenData = await tokenRes.json().catch(function(){ return {}; });
                         if (!tokenRes.ok || !tokenData.token) {
                             showToast(tokenData.error || "账号或密码错误", "error");
                             return;
                         }
-                        setUserToken(tokenData.token);
                         // ★ 使用服务端返回的规范 user_name，禁止使用输入框 name
                         var serverUserName = (tokenData.user_name || '').trim();
                         if (!serverUserName || serverUserName !== name) {
@@ -446,6 +451,7 @@
                             showToast("账号认证状态异常，请重新登录", "error");
                             return;
                         }
+                        setUserToken(tokenData.token, serverUserName);
                     }
 
                     // ★ 使用服务端确认的规范身份
@@ -459,6 +465,8 @@
                     //   在 auth_pending/unauthenticated，导致会话续写失效、长会话可能被 30 天 TTL 误登出
                     window._xtjAuthState = 'authenticated';
                     window._xtjCanonicalUser = confirmedUser;
+                    window.__xtjServerIsAdmin = false;
+                    window.__xtjServerIsAdminOwner = '';
                     await loadCurrentUserInfoSnapshot(currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function" && confirmedUser !== ADMIN_NAME) {
@@ -536,18 +544,19 @@
                 if (btn.disabled) return;
                 btn.disabled = true;
                 btn.textContent = "注册中..";
+                if (window.__xtjBeginAuthIdentityChange) window.__xtjBeginAuthIdentityChange();
 
                 try {
-                    var registerRes = await fetchWithTimeout(API_BASE + '/api/user/register', {
+                    var registerRes = await window.__xtjWithSessionRequestLock(function() { return fetchWithTimeout(API_BASE + '/api/user/register', {
                         method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
                         body: JSON.stringify({ user_name: name, password: pw, email: email || undefined, device_id: (typeof getXtjDeviceId === 'function' ? getXtjDeviceId() : '') })
-                    }, 10000);
+                    }, 10000); });
                     var registerData = await registerRes.json().catch(function(){ return {}; });
                     if (!registerRes.ok || !registerData.token) {
                         showToast(registerData.error || "注册失败，请重试", "error");
                         return;
                     }
-                    setUserToken(registerData.token);
+                    setUserToken(registerData.token, registerData.user_name);
                     // ★ 使用服务端返回的规范 user_name，禁止使用输入框 name
                     var serverUserName = (registerData.user_name || '').trim();
                     if (!serverUserName || serverUserName !== name) {

@@ -615,3 +615,18 @@ test('an in-flight batch request does not apply its offset after the user change
   assert.match(runtime.grid.innerHTML, /返回相册/);
   assert.equal(runtime.grid.getPhotoCards()[0].previewIndex, 0);
 });
+
+test('confirmed deletion resolves while public refresh is still pending',async()=>{
+ let releaseRefresh;const runtime=createPhotoDataRuntime(async url=>String(url).includes('/api/photo/delete') ? {ok:true,json:async()=>({ok:true,deleted:true})} : new Promise(resolve=>{releaseRefresh=resolve;}));
+ const photo={id:'p-fast',cloudId:'p-fast',username:'owner',imageUrl:'https://example.test/fast.jpg',timestamp:1};runtime.window.currentUser='owner';runtime.window.photoWallData=[photo];
+ const result=await Promise.race([runtime.window.deletePhotoWallPhoto(photo),new Promise(resolve=>setTimeout(()=>resolve({timeout:true}),200))]);
+ assert.equal(result.ok,true);assert.equal(runtime.window.photoWallData.length,0);if(releaseRefresh)releaseRefresh({ok:true,json:async()=>({ok:true,data:[]})});
+});
+test('normal users cannot use stale admin flags or forged ownership to delete another photo',async()=>{
+ let requests=0;const runtime=createPhotoDataRuntime(async()=>{requests++;return {ok:true,json:async()=>({ok:true})};});
+ runtime.window.currentUser='B';runtime.window.isAdmin=()=>true;
+ const photo={id:'victim',username:'A',imageUrl:'https://example.test/a.jpg',timestamp:1};runtime.window.photoWallData=[photo];
+ assert.equal((await runtime.window.deletePhotoWallPhoto(photo)).ok,false);assert.equal(requests,0);assert.equal(runtime.window.photoWallData.length,1);
+ runtime.window.currentUser='A';assert.equal(runtime.window.canDeletePhotoWallPhoto(photo),true);
+ runtime.window.currentUser='xxz';assert.equal(runtime.window.canDeletePhotoWallPhoto(photo),true);
+});

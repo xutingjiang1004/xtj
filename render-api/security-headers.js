@@ -7,7 +7,7 @@
 
 var CSP = [
   "default-src 'self'",
-  // WebLLM runs TVM/WebAssembly in a worker and needs these explicit runtime capabilities.
+  // Free voice recognition runs Whisper/WebAssembly in a dedicated worker.
   // H-9: script-src 不放行 supabase.co——public 桶是用户可写源（可上传 JS 脚本），
   // 放进 script-src 等于允许「上传 JS → 白名单源加载」；supabase 仅用于 API 调用，
   // 由 connect-src 放行。jsdelivr/npmmirror 承载 supabase-js/Monaco/GSAP，必须保留。
@@ -45,7 +45,7 @@ var CSP = [
   // frame-src 放行同源与 blob:
   "frame-src 'self' blob:",
   // WebLLM 本地 Qwen：模型元数据在 huggingface.co，权重会重定向到区域 *.hf.co CDN，WASM 模型库在 raw.githubusercontent.com。
-  "connect-src 'self' https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",
+  "connect-src 'self' https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/",
   // jsdelivr 为 gsap 脚本来源；本站无外链字体（全站系统字体栈），故 font-src 只留 self。
   "font-src 'self'",
   "frame-ancestors 'none'",

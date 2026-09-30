@@ -178,7 +178,38 @@ function createChatFeatures(options) {
       res.status(value.status === 'ok' ? 200 : 404).json({ ok: value.status === 'ok', ...value });
     } catch (e) { fail(res, e); }
   });
-  router.get('/transcription/capabilities', (req, res) => res.json({ ok: true, enabled: transcription.enabled }));
+  // Device-side Whisper has no API key or per-minute charge. Only the sender
+  // can attach its result; updating the legacy projection invokes the existing
+  // canonical-message trigger, preserving both readers' normal message flow.
+  router.post('/messages/transcript', async (req, res) => {
+    const peer = name(req.body.peer), id = String(req.body.message_id || '');
+    const text = typeof req.body.text === 'string' ? req.body.text.replace(/\0/g, '').trim() : '';
+    if (!peer || !UUID.test(id) || !text || text.length > 5000) return res.status(400).json({ ok: false });
+    try {
+      const ctx = await context(req.userName, peer), m = ctx && await visible(ctx, id);
+      if (!m || m.message_type !== 'audio' || m.sender_name_snapshot !== req.userName) return res.status(404).json({ ok: false });
+      // A read receipt can arrive during inference. Retry a compare-and-swap
+      // using the newest payload, never replace a receipt or resurrect a withdrawal.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const post = await data(supabase.from('posts').select(FIELDS).eq('id', m.legacy_post_id)
+          .eq('user_name', req.userName).eq('media_url', peer).eq('media_type', '__dm__').maybeSingle());
+        if (!post) return res.status(404).json({ ok: false });
+        const payload = JSON.parse(post.content);
+        if (payload.withdrawn || !payload.media || payload.media.kind !== 'audio') return res.status(409).json({ ok: false });
+        if (payload.transcript) return res.json({ ok: true, message: post });
+        payload.transcript = text;
+        payload.transcript_source = 'device-whisper-tiny';
+        const updated = await data(supabase.from('posts').update({ content: JSON.stringify(payload) })
+          .eq('id', post.id).eq('content', post.content).eq('user_name', req.userName).select(FIELDS).maybeSingle());
+        if (updated) {
+          publish(req.userName, peer, 'transcript', post.id);
+          return res.json({ ok: true, message: updated });
+        }
+      }
+      res.status(409).json({ ok: false, retryable: true, code: 'transcript_conflict' });
+    } catch (error) { fail(res, error); }
+  });
+  router.get('/transcription/capabilities', (req, res) => res.json({ ok: true, enabled: true, mode: 'device', server_enabled: transcription.enabled }));
   router.post('/messages/transcribe', async (req, res) => {
     const peer = name(req.body.peer), id = String(req.body.message_id || '');
     if (!peer || !UUID.test(id)) return res.status(400).json({ ok: false });
