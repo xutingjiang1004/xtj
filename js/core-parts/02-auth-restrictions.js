@@ -390,12 +390,14 @@
             }
 
             async function doLogin() {
+                if (window.__xtjLogoutPending) { await window.__xtjLogoutPending; }
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
                 if (!name) { showToast("请输入昵称"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
 
                 const btn = document.getElementById("loginSubmitBtn");
+                if (btn && btn.disabled) return;
                 if (btn) { btn.disabled = true; btn.textContent = "验证中.."; }
 
                 try {
@@ -519,6 +521,7 @@
                 if (e.key === 'Enter') { var _pw = document.getElementById('regPwInp'); if (_pw) _pw.focus(); }
             });
             async function doRegister() {
+                if (window.__xtjLogoutPending) { await window.__xtjLogoutPending; }
                 const name = document.getElementById("regNickInp").value.trim();
                 const pw = document.getElementById("regPwInp").value;
                 const email = document.getElementById("regEmailInp").value.trim();
@@ -530,6 +533,7 @@
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
 
                 const btn = document.getElementById("registerSubmitBtn");
+                if (btn.disabled) return;
                 btn.disabled = true;
                 btn.textContent = "注册中..";
 
