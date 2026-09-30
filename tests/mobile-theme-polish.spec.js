@@ -1,4 +1,9 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect, devices } = require('@playwright/test');
+
+// This spec also runs under the repository's default desktop CI project.
+// Use a mobile context explicitly so Safari viewport handling is exercised.
+const phone = devices['iPhone 13'];
+test.use({ userAgent: phone.userAgent, isMobile: true, hasTouch: true, deviceScaleFactor: phone.deviceScaleFactor });
 
 const pageErrors = new WeakMap();
 test.beforeEach(({ page }) => {
