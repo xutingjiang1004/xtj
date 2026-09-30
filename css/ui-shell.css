@@ -940,8 +940,8 @@
   }
 
   #panelAi .photo-wall-header {
-    position: sticky;
-    top: 0;
+    position: relative;
+    top: auto;
     z-index: 6;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -2075,8 +2075,8 @@ html.xtj-ios-viewport .dock-panel {
   }
 
   #panelAi .photo-wall-header {
-    position: sticky !important;
-    top: 0 !important;
+    position: relative !important;
+    top: auto !important;
     z-index: 8 !important;
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) auto !important;
@@ -2562,7 +2562,6 @@ html #dockBar::before, html #dockBar::after { content: none !important; pointer-
 #panelChat #dockChatSocialSheet .chat-social-card { background: #f8fcfa; }
 html[data-theme="dark"] #panelChat #dockChatSocialSheet .chat-social-card { background: #192d25; color: #e9f3ee; }
 
-@keyframes xtjThemeIn { from { opacity: 0; } to { opacity: 1; } }
 
 html[data-xtj-motion="off"]::view-transition-old(root), html[data-xtj-motion="off"]::view-transition-new(root) { animation: none !important; }
 .chat-gallery { position: fixed; inset: 0; z-index: 2600; display: grid; grid-template-rows: auto minmax(0,1fr) auto; background: #101519; color: #eef5f3; padding: max(10px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom)); box-sizing: border-box; animation: chatFeatureEnter .16s ease-out; }
@@ -2805,19 +2804,6 @@ html[data-theme="dark"] #profileActivityModal .glass.profile-activity-modal { ba
     html #themeToggle, html #themeToggle * { transition: none !important; }
   }
 }
-html.theme-crossfade::view-transition { pointer-events: none; }
-html.theme-crossfade::view-transition-group(root) { animation-duration: 220ms; }
-html.theme-crossfade::view-transition-image-pair(root) { isolation: isolate; }
-html.theme-crossfade::view-transition-old(root) {
-  animation: none;
-  opacity: 1;
-  mix-blend-mode: normal;
-}
-html.theme-crossfade::view-transition-new(root) {
-  animation: xtjThemeIn 220ms cubic-bezier(.2,.75,.25,1) both;
-  mix-blend-mode: normal;
-}
-
 html[data-theme] #panelPosts .posts-nav #themeToggle {
   --theme-progress: 0;
   --theme-travel: 22px;
@@ -2941,4 +2927,37 @@ html[data-xtj-motion="off"] .actions .like-btn.like-lite-feedback .post-like-ico
 }
 @media (max-width: 359px) {
   :is(#panelPosts, #postDetailModal) .actions { gap: 2px 4px; }
+}
+
+/* Live recording feedback occupies the input itself, so it fits small screens. */
+#panelChat .chat-input-wrap { position: relative; }
+#panelChat .chat-recording-indicator {
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  gap:10px; padding:0 10px; border-radius:inherit; background:var(--chat-surface); color:var(--chat-accent);
+  pointer-events:none; font-size:12px; font-variant-numeric:tabular-nums;
+}
+#panelChat .chat-recording-indicator[hidden] { display:none; }
+#panelChat .chat-recording-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
+#panelChat .chat-recording-wave { display:flex; align-items:center; justify-content:center; gap:3px; height:28px; min-width:0; }
+#panelChat .chat-recording-wave i {
+  width:3px; height:26px; border-radius:2px; background:currentColor;
+  transform:scaleY(var(--record-level,.4)); transition:transform 90ms linear;
+  animation:xtjRecordingPulse 700ms ease-in-out var(--record-delay) infinite alternate;
+}
+#panelChat .chat-recording-indicator.is-cancelling { color:#d45d68; background:var(--chat-surface); }
+#panelChat .chat-recording-indicator.is-cancelling .chat-recording-wave i { animation-play-state:paused; }
+@keyframes xtjRecordingPulse { from { opacity:.65; transform:scaleY(calc(var(--record-level,.5)*.55)); } to { opacity:1; transform:scaleY(var(--record-level,.5)); } }
+@media (prefers-reduced-motion:reduce) { #panelChat .chat-recording-wave i { animation:none; transition:none; } }
+html[data-xtj-motion="off"] #panelChat .chat-recording-wave i { animation:none; transition:none; }
+/* All breakpoints keep the gallery toolbar in the same scrolling flow as photos. */
+#panelAi .photo-wall-header { position:relative !important; top:auto !important; }
+
+[data-theme="dark"] #panelPosts .post-filter-select { background-color:#202832 !important; border-color:rgba(255,255,255,.12) !important; color:var(--text-main) !important; }
+
+/* Native Safari select chrome otherwise stays light despite its computed dark color. */
+#panelPosts .post-filter-select {
+  -webkit-appearance:none; appearance:none; padding-right:32px !important;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:right 16px center,right 11px center;
+  background-size:5px 5px; background-repeat:no-repeat;
 }

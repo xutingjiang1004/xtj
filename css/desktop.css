@@ -408,8 +408,8 @@
     border-radius: 16px;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    position: sticky;
-    top: 16px;
+    position: relative;
+    top: auto;
     z-index: 10;
   }
 
