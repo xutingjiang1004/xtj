@@ -1767,7 +1767,6 @@ function isAdmin() {
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
-            'code-workbench': { dependencies: ['ai-agent'], scripts: ['xtj-module-code-workbench'] },
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
@@ -3916,15 +3915,30 @@ function isAdmin() {
                 lastLoadedAt: 0
             };
 
+            var personalRecords = { owner: '', totals: {}, summaryAt: 0, summarySeq: 0, seq: 0, kind: '', cursor: null, loading: false };
             function renderProfileTotals() {
-                var postsEl = document.getElementById('profileTotalPosts');
-                var likesEl = document.getElementById('profileTotalLikes');
-                var commentsEl = document.getElementById('profileTotalComments');
-                if (!postsEl || !likesEl || !commentsEl) return;
-                var totals = profileActivityState.totals || {};
-                postsEl.textContent = String(totals.posts || 0);
-                likesEl.textContent = String(totals.likes || 0);
-                commentsEl.textContent = String(totals.comments || 0);
+                ['posts','views','likes','comments'].forEach(function(kind) {
+                    var el = document.getElementById('profile' + kind.charAt(0).toUpperCase() + kind.slice(1) + 'Count');
+                    if (el) el.textContent = String(personalRecords.owner === currentUser ? personalRecords.totals[kind] || 0 : 0);
+                });
+            }
+            async function loadPersonalRecordSummary(owner, force) {
+                if (personalRecords.owner !== owner) {
+                    personalRecords.owner = owner; personalRecords.totals = {}; personalRecords.summaryAt = 0;
+                    personalRecords.seq++; personalRecords.kind = ''; personalRecords.loading = false;
+                    var modal = document.getElementById('profileActivityModal'); if (modal) modal.classList.remove('active');
+                    renderProfileTotals();
+                }
+                if (!owner || (!force && Date.now()-personalRecords.summaryAt < 8000)) return;
+                var seq = ++personalRecords.summarySeq;
+                try {
+                    var response = await window.xtjProtectedFetch('/api/profile/records/summary');
+                    var body = await response.json();
+                    if (!response.ok || !body.ok || !body.totals || !['posts','views','likes','comments'].every(function(kind) { return Number.isFinite(body.totals[kind]); })) throw new Error('summary_unavailable');
+                    if (seq !== personalRecords.summarySeq || owner !== currentUser || owner !== personalRecords.owner) return;
+                    personalRecords.summaryAt = Date.now();
+                    personalRecords.totals = body.totals || {}; renderProfileTotals();
+                } catch (_) { if (seq === personalRecords.summarySeq) personalRecords.summaryAt = 0; }
             }
 
             function getProfileActivityPostMap() {
@@ -4118,32 +4132,67 @@ function renderProfileActivityList(kind) {
                 }
             }
 
-            function renderProfileActivityModal(kind) {
-                var listEl = document.getElementById('profileActivityModalList');
-                var titleEl = document.getElementById('profileActivityModalTitle');
-                var kickerEl = document.getElementById('profileActivityModalKicker');
-                var modal = document.getElementById('profileActivityModal');
-                if (!listEl || !titleEl || !kickerEl || !modal) return;
-                var isLikes = kind === 'likes';
-                var payload = buildProfileActivityListMarkup(kind);
-                titleEl.textContent = isLikes ? '点赞记录' : '评论记录';
-                kickerEl.textContent = isLikes ? '我的互动' : '我的留言';
-                listEl.innerHTML = payload.html;
-                profileActivityState.modalKind = kind;
-                modal.classList.add('active');
+            var recordLabels = { posts: '我的动态', views: '浏览记录', likes: '点赞记录', comments: '评论记录' };
+            async function loadPersonalRecordPage(more) {
+                var state = personalRecords, owner = currentUser, kind = state.kind;
+                if (!owner || state.loading || !recordLabels[kind]) return;
+                var list = document.getElementById('profileActivityModalList'), seq = ++state.seq;
+                state.loading = true;
+                var moreButton = list.querySelector('.profile-record-more');
+                if (moreButton) { moreButton.disabled = true; moreButton.textContent = '正在读取…'; }
+                var cursor = more && state.cursor;
+                var url = '/api/profile/records?kind=' + kind + '&limit=20' + (cursor ? '&before_at=' + encodeURIComponent(cursor.at) + '&before_id=' + encodeURIComponent(cursor.id) : '');
+                try {
+                    var response = await window.xtjProtectedFetch(url), body = await response.json();
+                    if (!response.ok || !body.ok) throw new Error(body.error || '记录暂时无法加载');
+                    if (seq !== state.seq || owner !== currentUser || kind !== state.kind) return;
+                    var items = body.items || [];
+                    var html = items.map(function(item) {
+                        var open = item.available && item.post_id;
+                        var stamp = window.safeParseDate(item.created_at).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+                        var text = String(item.text || '') || (item.media_type === 'image' || item.media_type === 'photo' || item.media_type === 'album' ? '图片动态' : item.media_type === 'video' ? '视频动态' : item.media_type === 'audio' ? '音频动态' : '这条动态没有文字');
+                        var action = kind === 'likes' ? 'unlikeFromProfile' : kind === 'comments' ? 'deleteProfileComment' : '';
+                        return '<article class="personal-record' + (open ? '' : ' is-unavailable') + '">' +
+                            '<button type="button" class="personal-record-body" ' + (open ? 'onclick="openProfileActivityPost(\'' + safeJsStr(item.post_id) + '\')"' : 'disabled') + '>' +
+                            '<span class="personal-record-meta"><b>' + escapeHtml(item.author || '暂不可查看') + '</b><time>' + escapeHtml(stamp) + '</time></span>' +
+                            '<span class="personal-record-text">' + escapeHtml(text) + '</span>' +
+                            (item.comment ? '<span class="personal-record-comment">我的评论 · ' + escapeHtml(item.comment) + '</span>' : '') + '</button>' +
+                            (action && open ? '<button type="button" class="personal-record-action" onclick="' + action + '(\'' + safeJsStr(item.id) + '\',\'' + safeJsStr(item.post_id) + '\',this)">' + (kind === 'likes' ? '取消点赞' : '删除评论') + '</button>' : '') + '</article>';
+                    }).join('');
+                    if (more) { if (moreButton) moreButton.remove(); list.insertAdjacentHTML('beforeend', html); }
+                    else list.innerHTML = html || '<div class="profile-activity-empty">' + { posts:'发布的动态会留在这里。', views:'浏览过的动态会留在这里。', likes:'喜欢的动态，点个赞就能找到。', comments:'你留下的评论会留在这里。' }[kind] + '</div>';
+                    state.cursor = body.next_cursor;
+                    if (body.has_more && state.cursor) list.insertAdjacentHTML('beforeend','<button type="button" class="profile-record-more" onclick="loadMoreProfileRecords()">查看更多</button>');
+                } catch (error) {
+                    if (seq !== state.seq || owner !== currentUser || kind !== state.kind) return;
+                    if (!more) list.innerHTML = '<div class="profile-activity-empty">记录暂时无法加载。<button type="button" class="profile-record-more" onclick="retryProfileRecords()">重新加载</button></div>';
+                    else if (moreButton) { moreButton.disabled = false; moreButton.textContent = '重试加载更多'; }
+                } finally { if (seq === state.seq) state.loading = false; }
             }
-
+            window.loadMoreProfileRecords = function() { loadPersonalRecordPage(true); };
+            window.retryProfileRecords = function() { loadPersonalRecordPage(false); };
+            function renderProfileActivityModal(kind) {
+                if (!recordLabels[kind]) return;
+                var modal = document.getElementById('profileActivityModal'), list = document.getElementById('profileActivityModalList');
+                var same = personalRecords.kind === kind && modal.classList.contains('active');
+                if (!same) {
+                    personalRecords.seq++; personalRecords.kind = kind; personalRecords.cursor = null; personalRecords.loading = false;
+                    list.innerHTML = '<div class="profile-activity-empty">正在读取记录…</div>';
+                }
+                document.getElementById('profileActivityModalTitle').textContent = recordLabels[kind];
+                document.getElementById('profileActivityModalKicker').textContent = '我的记录';
+                profileActivityState.modalKind = kind; modal.classList.add('active');
+                loadPersonalRecordPage(false);
+            }
             function refreshProfileActivityModalIfNeeded() {
-                if (!profileActivityState.modalKind) return;
-                var modal = document.getElementById('profileActivityModal');
-                if (!modal || !modal.classList.contains('active')) return;
-                renderProfileActivityModal(profileActivityState.modalKind);
+                if (personalRecords.kind && document.getElementById('profileActivityModal').classList.contains('active')) loadPersonalRecordPage(false);
             }
 
             function renderProfileActivity() {
                 renderProfileTotals();
                 renderProfileActivityList('likes');
                 renderProfileActivityList('comments');
+                renderProfileTotals();
                 refreshProfileActivityModalIfNeeded();
             }
 
@@ -4275,6 +4324,7 @@ function renderProfileActivityList(kind) {
             async function loadProfileActivity(forceRefresh) {
                 forceRefresh = !!forceRefresh;
                 var username = currentUser || '';
+                loadPersonalRecordSummary(username, forceRefresh);
                 var previousUser = profileActivityState.loadingUser || profileActivityState.loadedUser;
                 if (previousUser !== username) {
                     profileActivityState.requestGeneration++;
@@ -4472,6 +4522,7 @@ function renderProfileActivityList(kind) {
 
             window.closeProfileActivityModal = function() {
                 profileActivityState.modalKind = '';
+                personalRecords.seq++; personalRecords.kind = ''; personalRecords.loading = false;
                 var modal = document.getElementById('profileActivityModal');
                 if (modal) modal.classList.remove('active');
             };
@@ -4552,6 +4603,7 @@ function renderProfileActivityList(kind) {
                         rebuildFeedFromCurrentState().catch(function() {});
                     }
                     renderProfileActivity();
+                    loadPersonalRecordSummary(currentUser, true);
                     showToast('已取消点赞');
                 } catch (e) {
                     console.error('unlikeFromProfile error:', e);
@@ -4599,6 +4651,7 @@ function renderProfileActivityList(kind) {
                         btn.disabled = false;
                         if (btn.textContent === '删除中..') btn.textContent = originalText || '删除';
                     }
+                    loadPersonalRecordSummary(currentUser, true);
                     showToast('评论已删除');
                 } catch (e) {
                     console.error('deleteFeedComment error:', e);
@@ -14402,6 +14455,7 @@ function renderProfileActivityList(kind) {
                         requestBody.storage_path = storagePath;
                         requestBody.kind = mediaKind;
                         requestBody.mime_type = file.type;
+                        if (mediaKind === 'audio') requestBody.voice_duration = file.__voiceDuration || 0;
                         if (mediaKind === 'file') requestBody.file_name = file.name;
                         // 像素尺寸只用于气泡按比例占位（纯展示），服务端会做范围校验
                         if (mediaKind === 'image' && mediaW > 0 && mediaH > 0) {
@@ -15533,18 +15587,23 @@ function renderProfileActivityList(kind) {
                     }
                 })();
             };
+            var _chatVoiceStarting = false;
+            function setChatAudioSession(type) {
+                try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (_) {}
+            }
             function cancelChatVoice() {
                 _chatVoiceSeq++;
                 if (typeof window.__xtjCancelChatVoiceHold==='function') window.__xtjCancelChatVoiceHold();
                 document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
                 if (_chatVoiceHold) _chatVoiceHold.active=false;
                 var voice = _chatVoice; _chatVoice = null;
+                setChatAudioSession('auto');
                 if (voice) {
                     voice.cancelled = true; clearInterval(voice.timer); clearTimeout(voice.limit);
                     if (voice.recognition) { try { voice.recognition.abort(); } catch (_) {} }
                     if (voice.recorder && voice.recorder.state !== 'inactive') { try { voice.recorder.stop(); } catch (_) {} }
                     voice.stream.getTracks().forEach(function(track) { track.stop(); });
-                    try { if (navigator.audioSession) navigator.audioSession.type='playback'; } catch (_) {}
+                    setChatAudioSession('auto');
                 }
                 var input = document.getElementById('dockChatInput');
                 if (voice && input) { input.value = voice.base; input.disabled = false; }
@@ -15564,13 +15623,18 @@ function renderProfileActivityList(kind) {
             var _chatVoiceHold=null;
             async function toggleChatVoice(options) {
                 var hold=options && options.hold;
-                if (_chatVoice) { _chatVoice.recorder.stop(); return; }
+                if (_chatVoice) { if (_chatVoice.recorder.state === 'recording') _chatVoice.recorder.stop(); return; }
+                if (_chatVoiceStarting) return;
                 if (!window.currentUser || !dockChatActiveUser || dockChatSending || _chatEditDraft || document.getElementById('dockChatInput').disabled) { showToast('请选择可发送消息的会话'); return; }
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { showToast('此浏览器不支持录音，请使用附件发送音频'); return; }
                 var seq = ++_chatVoiceSeq, owner = window.currentUser, peer = dockChatActiveUser, stream;
+                _chatVoiceStarting = true;
                 try {
+                    // WebKit rejects capture while AudioSession is playback-only. Switch before requesting permission.
+                    document.querySelectorAll('#dockChatMessages audio').forEach(function(audio) { audio.pause(); });
+                    setChatAudioSession('play-and-record');
                     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
+                    if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); setChatAudioSession('auto'); return; }
                     // Safari can advertise a MIME type but reject its recorder: try the
                     // remaining supported formats, then its native default.
                     var types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus'].filter(function(t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); });
@@ -15580,7 +15644,7 @@ function renderProfileActivityList(kind) {
                         try { recorder = new MediaRecorder(stream,types[typeIndex] ? {mimeType:types[typeIndex]} : undefined); break; }
                         catch (formatError) { if (formatError.name!=='NotSupportedError' || typeIndex===types.length-1) throw formatError; }
                     }
-                    try { if (navigator.audioSession) navigator.audioSession.type='play-and-record'; } catch (_) {}
+                    setChatAudioSession('play-and-record');
                     var input = document.getElementById('dockChatInput'), base = input.value, transcript = '';
                     var voice = _chatVoice = { recorder: recorder, stream: stream, cancelled: false, hold:!!hold, base: base, started: Date.now() };
                     recorder.ondataavailable = function(event) { if (event.data.size) chunks.push(event.data); };
@@ -15588,7 +15652,7 @@ function renderProfileActivityList(kind) {
                     recorder.onstop = function() {
                         if (voice.recognition) { try { voice.recognition.stop(); } catch (_) {} }
                         stream.getTracks().forEach(function(t) { t.stop(); }); clearInterval(voice.timer); clearTimeout(voice.limit);
-                        try { if (navigator.audioSession) navigator.audioSession.type='playback'; } catch (_) {}
+                        if (!_chatVoice || _chatVoice === voice) setChatAudioSession('auto');
                         if (voice.cancelled || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) return;
                         _chatVoice = null; input.disabled = false;
                         document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
@@ -15611,16 +15675,18 @@ function renderProfileActivityList(kind) {
                     voice.timer = setInterval(function() { if (voice.hold && _chatVoiceHold && _chatVoiceHold.cancel) return; document.getElementById('chatVoiceStatus').textContent = (voice.hold ? '松开发送 · 上滑取消 · ' : '正在录音 · ') + Math.floor((Date.now() - voice.started) / 1000) + ' 秒'; }, 500);
                     document.querySelector('#panelChat .chat-input-wrap').classList.add('is-recording');
                     voice.limit = setTimeout(function() { if (recorder.state === 'recording') recorder.stop(); }, 300000);
-                    recorder.start(250);
+                    // Request the complete container on stop: Safari's MP4 fragments can be unplayable when interrupted.
+                    recorder.start();
                 } catch (error) {
                     if (stream) stream.getTracks().forEach(function(t) { t.stop(); });
+                    if (seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) return;
                     cancelChatVoice();
                     var reason=error && error.name;
                     showToast(reason==='NotAllowedError' ? '请在浏览器的网站设置中允许麦克风后重试' :
                         reason==='SecurityError' ? '浏览器限制了麦克风，请检查网站权限后重试' :
                         reason==='NotFoundError' ? '未找到可用的麦克风' :
                         reason==='NotReadableError' ? '麦克风被占用，请结束其他录音后重试' : '无法打开麦克风，请稍后重试');
-                }
+                } finally { _chatVoiceStarting = false; }
             }
             function bindChatHoldVoice() {
                 var wrap=document.querySelector('#panelChat .chat-input-wrap'), input=document.getElementById('dockChatInput');
@@ -15675,6 +15741,7 @@ function renderProfileActivityList(kind) {
                     }
                     button.onclick=async function(event) {
                         event.stopPropagation();
+                        if (_chatVoice || _chatVoiceStarting) { showToast('请先结束录音'); return; }
                         if (!audio.paused) { audio.pause(); return; }
                         document.querySelectorAll('#dockChatMessages audio').forEach(function(other) { if (other!==audio) other.pause(); });
                         if (audio.ended) audio.currentTime=0;
@@ -15684,14 +15751,30 @@ function renderProfileActivityList(kind) {
                             audio.muted=false; audio.volume=1;
                             if (audio.error) audio.load();
                             await audio.play(); update();
-                        } catch(_) {
+                        } catch(error) {
                             player.classList.remove('is-loading'); duration.textContent='重试';
-                            // Refresh expired signed URLs through the existing actor-authorized messages API.
-                            await loadDockChatMessages(dockChatActiveUser,false,true);
-                            showToast('语音地址已刷新，请点击重试；也请检查媒体音量');
+                            if (error && error.name === 'NotAllowedError') {
+                                showToast('浏览器暂未允许播放，请再次点击语音');
+                                return;
+                            }
+                            // Keep the current row while refreshing; a detached player cannot receive the next tap.
+                            var peer = dockChatActiveUser, owner = window.currentUser;
+                            var row = player.closest('[data-message-id]');
+                            if (row && row.dataset.messageId) {
+                                try {
+                                    var response = await window.xtjProtectedFetch('/api/chat/voice-url?peer=' + encodeURIComponent(peer) + '&message_id=' + encodeURIComponent(row.dataset.messageId));
+                                    var body = await response.json();
+                                    if (response.ok && body.ok && owner === window.currentUser && peer === dockChatActiveUser && player.isConnected) {
+                                        var refreshed = sanitizeUrl(body.url);
+                                        if (refreshed && /^https?:\/\//i.test(refreshed)) { audio.src = refreshed; audio.load(); }
+                                    }
+                                } catch (_) {}
+                            }
+                            showToast(error && error.name === 'NotSupportedError' ? '语音暂时无法解码，请重试或重新录制' : '语音加载失败，请点击重试');
                         }
                     };
                     ['loadedmetadata','durationchange','play','pause','ended','timeupdate','playing'].forEach(function(event) { audio.addEventListener(event,update); });
+                    audio.addEventListener('ended', function() { setChatAudioSession('auto'); });
                     audio.addEventListener('waiting',function() { player.classList.add('is-loading'); });
                     audio.addEventListener('error',function() { player.classList.remove('is-playing','is-loading'); duration.textContent='重试'; button.setAttribute('aria-label','重新播放语音'); });
                     update();
@@ -17953,6 +18036,17 @@ function renderProfileActivityList(kind) {
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.95.0', date: '2026-09-30',
+                    content: `<h4>更轻的个人页，更稳定的语音</h4><ul>
+                      <li>“我的”增加动态、浏览、点赞、评论四个紧凑入口，记录分页显示，统一头像和设置排版。</li>
+                      <li>修复播放后无法再次启用麦克风的音频会话顺序，完善录音取消、语音时长和播放重试。</li>
+                      <li>当前主题滑块保留：白天是太阳，夜晚是月亮，完善切换过渡。</li>
+                      <li>独立 Code 工作区彻底移除，小猫普通对话、深度思考和文件功能保留。</li>
+                      <li>近期聊天已增加消息搜索、媒体历史、语音转写、引用定位、转发、编辑和发送重试。</li>
+                      <li>首页导航随帖子滚出，通讯录切换和消息菜单已优化，底部 Dock 按钮保持原样。</li>
+                    </ul>`
+                },
                 {
                     version: 'v0.94.1',
                     date: '2026-09-22',
@@ -20390,6 +20484,8 @@ function renderProfileActivityList(kind) {
             };
 
             window.prefetchStatData = function() {
+                // Homepage overview is retired; personal records use their own actor-scoped API.
+                if (!document.getElementById('statsSection')) return Promise.resolve(null);
                 return ensureStatDataLoaded(false).catch(function() { return null; });
             };
 

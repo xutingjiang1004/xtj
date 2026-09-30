@@ -474,6 +474,8 @@
             };
 
             window.prefetchStatData = function() {
+                // Homepage overview is retired; personal records use their own actor-scoped API.
+                if (!document.getElementById('statsSection')) return Promise.resolve(null);
                 return ensureStatDataLoaded(false).catch(function() { return null; });
             };
 

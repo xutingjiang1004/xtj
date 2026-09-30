@@ -70,19 +70,18 @@
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=acb9ef6f5f" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=e560ba776a" />
-    <link rel="preload" as="style" href="css/ui-shell.min.css?v=e42d0f3d37" />
+    <link rel="preload" as="style" href="css/ui-shell.min.css?v=1668ee1b93" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=c6675e30bb" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=e42d0f3d37" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=acb9ef6f5f" /><link rel="stylesheet" href="css/ai-agent.min.css?v=9136bdcd67" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=1668ee1b93" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=4ee2fa8795" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=e42d0f3d37" media="print" onload="this.media='all'">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=c6675e30bb">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=67c5936bae">
-    <meta name="xtj-module-code-workbench" content="js/code-workbench.min.js?v=e2e7271513">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=1668ee1b93" media="print" onload="this.media='all'">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=9136bdcd67">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=ca28241408">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=f44d91a9f4">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=12a9ec32a9">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=28fe4b0b48">
@@ -163,7 +162,7 @@
                 <div class="posts-nav-brand">
                     <h1>xtj</h1>
                     <button id="themeToggle" class="theme-toggle-btn" title="切换主题" aria-label="切换主题">
-                        <span class="theme-toggle-orb" aria-hidden="true"><span class="theme-toggle-core"></span></span>
+                        <span class="theme-toggle-orb" aria-hidden="true"><span class="theme-toggle-core"><svg class="theme-symbol theme-symbol-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="theme-symbol theme-symbol-moon" viewBox="0 0 24 24" fill="currentColor"><path d="M19.8 14.1A8.4 8.4 0 0 1 9.9 4.2a8.4 8.4 0 1 0 9.9 9.9Z"/></svg></span></span>
                     </button>
                     <div class="ai-tools-nav" id="aiToolsNav">
                         <!-- 自定义下拉：Win 原生 select 会空弹「选择…」 -->
@@ -294,14 +293,6 @@
                 </div>
 
                 <aside class="desktop-right-rail" aria-label="桌面辅助信息">
-                    <section class="desktop-rail-card desktop-overview-card">
-                        <div class="desktop-rail-heading"><span>今日概览</span><small>实时统计</small></div>
-                        <div class="stats" id="statsSection">
-                            <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
-                            <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
-                            <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
-                        </div>
-                    </section>
                     <section class="desktop-rail-card desktop-contacts-card">
                         <div class="desktop-rail-heading"><span>最近联系人</span><button type="button" data-desktop-tab="chat">查看聊天</button></div>
                         <div class="desktop-contacts-preview" id="desktopContactsPreview"><span class="desktop-contacts-empty">登录后显示最近联系人</span></div>
@@ -560,28 +551,30 @@
                     </div>
                     <span class="profile-chevron">→</span>
                 </div>
-                <div class="profile-activity-board">
+                <div class="profile-activity-board" aria-label="我的记录">
+                    <section class="profile-activity-card profile-activity-card--summary" id="profilePostsCard" role="button" tabindex="0" onclick="toggleProfileActivity('posts')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('posts');}">
+                        <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9M14 3l7 7M14 3v7h7M7 14h10M7 18h6"/></svg></div>
+                        <div class="profile-activity-head"><h4>我的动态</h4><span class="profile-activity-count" id="profilePostsCount">0</span></div>
+                        <div class="profile-activity-list" id="profilePostsList" hidden></div>
+                        <button type="button" class="profile-activity-more" id="profilePostsMoreBtn" hidden>查看更多</button>
+                    </section>
+                    <section class="profile-activity-card profile-activity-card--summary" id="profileViewsCard" role="button" tabindex="0" onclick="toggleProfileActivity('views')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('views');}">
+                        <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v6h6M12 7v5l3 2"/></svg></div>
+                        <div class="profile-activity-head"><h4>浏览记录</h4><span class="profile-activity-count" id="profileViewsCount">0</span></div>
+                        <div class="profile-activity-list" id="profileViewsList" hidden></div>
+                        <button type="button" class="profile-activity-more" id="profileViewsMoreBtn" hidden>查看更多</button>
+                    </section>
                     <section class="profile-activity-card profile-activity-card--summary" id="profileLikesCard" role="button" tabindex="0" onclick="toggleProfileActivity('likes')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('likes');}">
-                        <div class="profile-activity-head">
-                            <div>
-                                <div class="profile-activity-kicker">我的互动</div>
-                                <h4>点赞记录</h4>
-                            </div>
-                            <span class="profile-activity-count" id="profileLikesCount">0</span>
-                        </div>
-                        <div class="profile-activity-list" id="profileLikesList"></div>
-                        <button type="button" class="profile-activity-more" id="profileLikesMoreBtn" onclick="event.stopPropagation();toggleProfileActivity('likes')" style="display:none;">更多点赞内容</button>
+                        <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg></div>
+                        <div class="profile-activity-head"><h4>点赞记录</h4><span class="profile-activity-count" id="profileLikesCount">0</span></div>
+                        <div class="profile-activity-list" id="profileLikesList" hidden></div>
+                        <button type="button" class="profile-activity-more" id="profileLikesMoreBtn" hidden>查看更多</button>
                     </section>
                     <section class="profile-activity-card profile-activity-card--summary" id="profileCommentsCard" role="button" tabindex="0" onclick="toggleProfileActivity('comments')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('comments');}">
-                        <div class="profile-activity-head">
-                            <div>
-                                <div class="profile-activity-kicker">我的留言</div>
-                                <h4>评论记录</h4>
-                            </div>
-                            <span class="profile-activity-count" id="profileCommentsCount">0</span>
-                        </div>
-                        <div class="profile-activity-list" id="profileCommentsList"></div>
-                        <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" onclick="event.stopPropagation();toggleProfileActivity('comments')" style="display:none;">更多评论内容</button>
+                        <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM7 8h10M7 12h7"/></svg></div>
+                        <div class="profile-activity-head"><h4>评论记录</h4><span class="profile-activity-count" id="profileCommentsCount">0</span></div>
+                        <div class="profile-activity-list" id="profileCommentsList" hidden></div>
+                        <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" hidden>查看更多</button>
                     </section>
                 </div>
                 <div class="profile-settings">
@@ -625,15 +618,8 @@
                             </span>
                             <span class="profile-setting-text">关于</span>
                         </div>
-                        <span class="profile-setting-value">xtj v0.94.1</span>
+                        <span class="profile-setting-value">xtj v0.95.0</span>
                     </div>
-                </div>
-                <div class="profile-totals-bar" id="profileTotalsBar" aria-label="累计互动数据">
-                    <span class="profile-total-item">帖子 <strong id="profileTotalPosts">0</strong></span>
-                    <span class="profile-total-sep">|</span>
-                    <span class="profile-total-item">点赞 <strong id="profileTotalLikes">0</strong></span>
-                    <span class="profile-total-sep">|</span>
-                    <span class="profile-total-item">评论 <strong id="profileTotalComments">0</strong></span>
                 </div>
                 </div><!-- /profileMainView -->
            </div>
@@ -1187,7 +1173,7 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=8e802585fd"></script>
+    <script defer src="js/core.min.js?v=4d76a5f51f"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
     <script defer src="js/theme-toggle.min.js?v=75e2d44a36"></script>
     <script defer src="js/desktop-shell.min.js?v=4bbb59d3b3"></script>

@@ -349,7 +349,8 @@ test('custom voice player plays real WAV media, pauses, and retains its node on 
 
 test('home navigation scrolls out with feed and restores the moon icon', async ({page}) => {
   await page.setViewportSize({width:390,height:844});await setup(page);
-  await page.evaluate(()=>{window.switchDockTab('posts');const feed=document.getElementById('feed');feed.innerHTML='<div style="height:2000px">滚动验收</div>';});
+  // Put the scroll fixture outside the asynchronously refreshed feed.
+  await page.evaluate(()=>{window.switchDockTab('posts');const spacer=document.createElement('div');spacer.style.height='2000px';spacer.textContent='滚动验收';document.getElementById('panelPosts').appendChild(spacer);});
   const before=await page.locator('.posts-nav').boundingBox();
   await page.evaluate(()=>document.getElementById('panelPosts').scrollTop=500);await page.waitForTimeout(100);
   const down=await page.locator('.posts-nav').boundingBox();
@@ -439,8 +440,9 @@ for (const width of [390,744,820]) {
   await setup(page);await page.evaluate(()=>window.switchDockTab('posts',true));
   await expect(page.locator('#themeToggle .theme-toggle-orb')).toBeVisible();
   const toggle=await page.locator('#themeToggle').boundingBox(),orb=await page.locator('#themeToggle .theme-toggle-orb').boundingBox();expect(toggle.width).toBe(52);expect(orb.x+orb.width).toBeLessThanOrEqual(toggle.x+toggle.width);
-  const style=await page.evaluate(()=>{const s=e=>getComputedStyle(document.querySelector(e));return {nav:s('.posts-nav').backgroundColor,stat:s('.stat-card').backgroundColor,dock:s('#dockBar').backgroundColor,pointer:s('#dockBar').pointerEvents,filter:s('#dockBar').backdropFilter};});
-  expect(style.nav).toBe('rgb(23, 23, 31)');expect(style.stat).toBe('rgb(23, 23, 31)');expect(style.dock).toBe('rgba(0, 0, 0, 0)');expect(style.pointer).toBe('none');expect(style.filter).toBe('none');
+  const style=await page.evaluate(()=>{const s=e=>getComputedStyle(document.querySelector(e));return {nav:s('.posts-nav').backgroundColor,dock:s('#dockBar').backgroundColor,pointer:s('#dockBar').pointerEvents,filter:s('#dockBar').backdropFilter};});
+  await expect(page.locator('#statsSection')).toHaveCount(0);
+  expect(style.nav).toBe('rgb(23, 23, 31)');expect(style.dock).toBe('rgba(0, 0, 0, 0)');expect(style.pointer).toBe('none');expect(style.filter).toBe('none');
   const point=await page.evaluate(()=>{const dock=document.getElementById('dockBar'),r=dock.getBoundingClientRect(),probe=document.createElement('button');probe.id='dock-underlay-probe';probe.textContent='点赞';Object.assign(probe.style,{position:'fixed',left:r.left+'px',top:r.top+'px',width:'8px',height:'8px',padding:'0',zIndex:String((parseInt(getComputedStyle(dock).zIndex)||100)-1)});probe.onclick=()=>window.__probeClicked=true;document.body.append(probe);return {x:r.left+2,y:r.top+2};});
   await page.mouse.click(point.x,point.y);expect(await page.evaluate(()=>window.__probeClicked)).toBe(true);
   await page.locator('#dock-underlay-probe').evaluate(el=>el.remove());
@@ -489,4 +491,74 @@ test('recorder falls back when an advertised MIME format cannot be constructed',
   window.__recorderFormats=[];window.MediaRecorder=class{static isTypeSupported(){return true;}constructor(stream,options){window.__recorderFormats.push(options?.mimeType||'default');if(options?.mimeType==='audio/mp4')throw new DOMException('Unsupported format','NotSupportedError');this.state='inactive';this.mimeType='audio/webm';}start(){this.state='recording';}stop(){this.state='inactive';this.onstop?.();}};
  });
  await setup(page);await page.locator('#chatVoiceButton').click();await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');expect(await page.evaluate(()=>window.__recorderFormats)).toEqual(['audio/mp4','audio/webm;codecs=opus']);await page.locator('#chatVoiceCancel').click();await expect(page.locator('#dockChatInput')).toBeEnabled();
+});
+
+test('Safari playback-only session is switched before permission, and repeated recording works',async({page})=>{
+ await page.addInitScript(()=>{
+  window.__session={type:'playback'};Object.defineProperty(navigator,'audioSession',{configurable:true,value:window.__session});window.__captureCount=0;
+  Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{async getUserMedia(){window.__captureCount++;if(navigator.audioSession.type!=='play-and-record')throw new DOMException('AudioSession category is not compatible with audio capture','InvalidStateError');return {getTracks:()=>[{stop(){}}]};}}});
+  window.MediaRecorder=class{static isTypeSupported(){return true;}constructor(){this.state='inactive';this.mimeType='audio/mp4';}start(){this.state='recording';}stop(){this.state='inactive';this.ondataavailable?.({data:new Blob(['voice'],{type:'audio/mp4'})});this.onstop?.();}};
+ });
+ await setup(page);await expect(page.locator('#dockChatInput')).toBeEnabled();
+ for(let i=0;i<3;i++){
+  await page.locator('#chatVoiceButton').click();await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');
+  expect(await page.evaluate(()=>navigator.audioSession.type)).toBe('play-and-record');
+  await page.locator('#chatVoiceCancel').click();await expect(page.locator('#dockChatInput')).toBeEnabled();
+  expect(await page.evaluate(()=>navigator.audioSession.type)).toBe('auto');
+ }
+ expect(await page.evaluate(()=>window.__captureCount)).toBe(3);
+ await page.evaluate(()=>navigator.audioSession.type='playback');
+ const input=page.locator('#dockChatInput');await input.dispatchEvent('pointerdown',{button:0,pointerId:91,clientX:80,clientY:700});await page.waitForTimeout(650);
+ await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');
+ await input.dispatchEvent('pointercancel',{pointerId:91});await expect(input).toBeEnabled();expect(await page.evaluate(()=>navigator.audioSession.type)).toBe('auto');
+});
+
+for(const width of [390,744,1194])test(`personal page has four compact records, readable paging and coherent theme at ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:1000});await setup(page);
+ await page.evaluate(()=>{
+  const prior=window.xtjProtectedFetch;
+  window.xtjProtectedFetch=async(url,options)=>{
+   if(url.includes('/api/profile/records')){
+    const body=url.includes('/summary')?{ok:true,totals:{posts:12,views:31,likes:24,comments:10}}:{ok:true,items:[{id:'123e4567-e89b-42d3-a456-000000000001',post_id:'123e4567-e89b-42d3-a456-000000000002',author:'xtj',text:url.includes('before_id')?'下一页的动态':'周末去散步，记录一点日常。',comment:url.includes('comments')?'看起来很舒服':'' ,created_at:'2026-09-30T07:00:00Z',available:true}],has_more:!url.includes('before_id'),next_cursor:{at:'2026-09-30T07:00:00Z',id:'123e4567-e89b-42d3-a456-000000000001'}};
+    return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
+   }return prior(url,options);
+  };
+  window.switchDockTab('profile',true);
+ });
+ await expect(page.locator('#profilePostsCount')).toHaveText('12');await expect(page.locator('#profileViewsCount')).toHaveText('31');
+ await expect(page.locator('#panelProfile .profile-activity-card')).toHaveCount(4);
+ const metrics=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,heights:[...document.querySelectorAll('#panelProfile .profile-activity-card')].map(e=>e.getBoundingClientRect().height),avatar:document.getElementById('profileAvatar').getBoundingClientRect().toJSON()}));
+ expect(metrics.scroll).toBeLessThanOrEqual(metrics.width);expect(Math.max(...metrics.heights)).toBeLessThan(100);expect(metrics.avatar.width).toBe(metrics.avatar.height);
+ await page.screenshot({path:`output/social-refresh/profile-light-${width}.png`,fullPage:true});
+ await page.locator('#profileViewsCard').click();await expect(page.locator('.personal-record')).toHaveCount(1);await page.locator('.profile-record-more').click();await expect(page.locator('.personal-record')).toHaveCount(2);await expect(page.locator('.profile-record-more')).toHaveCount(0);
+ await page.locator('#profileActivityModal .stat-close-btn').click();
+ await page.evaluate(()=>window.XTJThemeController.setMode('dark'));await page.waitForTimeout(350);await page.screenshot({path:`output/social-refresh/profile-dark-${width}.png`,fullPage:true});
+ await page.locator('#profileCommentsCard').click();await expect(page.locator('.personal-record-comment')).toHaveText('我的评论 · 看起来很舒服');
+ await page.screenshot({path:`output/social-refresh/records-dark-${width}.png`});
+});
+
+test('sun and moon retain clear shapes in both themes, and retired Code is absent from AI',async({page})=>{
+ await setup(page);await page.evaluate(()=>window.switchDockTab('posts',true));
+ await expect(page.locator('#themeToggle .theme-symbol-sun')).toHaveCSS('opacity','1');await expect(page.locator('#themeToggle .theme-symbol-moon')).toHaveCSS('opacity','0');
+ await page.locator('#themeToggle').click();await expect(page.locator('#themeToggle .theme-symbol-moon')).toHaveCSS('opacity','1');await expect(page.locator('#themeToggle .theme-symbol-sun')).toHaveCSS('opacity','0');
+ await page.evaluate(async()=>{await window.XTJModuleLoader.load('ai-agent');window.switchDockTab('ai-chat',true);});await expect(page.locator('#aiChatRoot')).toBeVisible();await expect(page.locator('#aiCodeToggle')).toHaveCount(0);
+});
+
+test('AAC MP4 voice plays with progressing time, and permission failure does not refresh or replace the row',async({page})=>{
+ test.skip(!await page.evaluate(()=>!!document.createElement('audio').canPlayType('audio/mp4; codecs="mp4a.40.2"')),'This Chromium build omits licensed AAC; WebKit executes the AAC playback case.');
+ const voice=require('node:fs').readFileSync(require('node:path').join(__dirname,'fixtures/voice-aac.m4a'));
+ await page.route('https://example.invalid/voice.m4a',r=>r.fulfill({status:200,contentType:'audio/mp4',body:voice}));await setup(page);
+ await page.evaluate(({stamp})=>{
+  const prior=window.xtjProtectedFetch;window.__voiceURLRefreshes=0;
+  window.xtjProtectedFetch=async(url,options)=>{
+   if(url.includes('/api/dm/messages'))return new Response(JSON.stringify({ok:true,has_more:false,data:[{id:'123e4567-e89b-42d3-a456-000000000010',user_name:'tester',media_url:'aac-peer',created_at:stamp,content:JSON.stringify({media:{kind:'audio',url:'https://example.invalid/voice.m4a',mimeType:'audio/mp4',duration:2}})}]}));
+   if(url.includes('/voice-url')){window.__voiceURLRefreshes++;return new Response(JSON.stringify({ok:true,url:'https://example.invalid/voice.m4a'}));}return prior(url,options);
+  };window.openChat('aac-peer');
+ },{stamp});
+ const player=page.locator('.chat-voice-player');await expect(player).toBeVisible();
+ await player.evaluate(el=>{window.__voiceRow=el;window.__playOriginal=el.querySelector('audio').play;el.querySelector('audio').play=()=>Promise.reject(new DOMException('requires gesture','NotAllowedError'));});
+ await player.locator('button').click();expect(await page.evaluate(()=>window.__voiceURLRefreshes)).toBe(0);expect(await page.evaluate(()=>window.__voiceRow===document.querySelector('.chat-voice-player'))).toBe(true);
+ await player.evaluate(el=>el.querySelector('audio').play=window.__playOriginal);await player.locator('button').click();
+ await expect(player).toHaveClass(/is-playing/);await expect.poll(()=>player.locator('audio').evaluate(el=>el.currentTime)).toBeGreaterThan(.2);
+ expect(await player.locator('audio').evaluate(el=>el.error)).toBeNull();
 });

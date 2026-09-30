@@ -2615,6 +2615,7 @@
                         requestBody.storage_path = storagePath;
                         requestBody.kind = mediaKind;
                         requestBody.mime_type = file.type;
+                        if (mediaKind === 'audio') requestBody.voice_duration = file.__voiceDuration || 0;
                         if (mediaKind === 'file') requestBody.file_name = file.name;
                         // 像素尺寸只用于气泡按比例占位（纯展示），服务端会做范围校验
                         if (mediaKind === 'image' && mediaW > 0 && mediaH > 0) {
@@ -3746,18 +3747,23 @@
                     }
                 })();
             };
+            var _chatVoiceStarting = false;
+            function setChatAudioSession(type) {
+                try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (_) {}
+            }
             function cancelChatVoice() {
                 _chatVoiceSeq++;
                 if (typeof window.__xtjCancelChatVoiceHold==='function') window.__xtjCancelChatVoiceHold();
                 document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
                 if (_chatVoiceHold) _chatVoiceHold.active=false;
                 var voice = _chatVoice; _chatVoice = null;
+                setChatAudioSession('auto');
                 if (voice) {
                     voice.cancelled = true; clearInterval(voice.timer); clearTimeout(voice.limit);
                     if (voice.recognition) { try { voice.recognition.abort(); } catch (_) {} }
                     if (voice.recorder && voice.recorder.state !== 'inactive') { try { voice.recorder.stop(); } catch (_) {} }
                     voice.stream.getTracks().forEach(function(track) { track.stop(); });
-                    try { if (navigator.audioSession) navigator.audioSession.type='playback'; } catch (_) {}
+                    setChatAudioSession('auto');
                 }
                 var input = document.getElementById('dockChatInput');
                 if (voice && input) { input.value = voice.base; input.disabled = false; }
@@ -3777,13 +3783,18 @@
             var _chatVoiceHold=null;
             async function toggleChatVoice(options) {
                 var hold=options && options.hold;
-                if (_chatVoice) { _chatVoice.recorder.stop(); return; }
+                if (_chatVoice) { if (_chatVoice.recorder.state === 'recording') _chatVoice.recorder.stop(); return; }
+                if (_chatVoiceStarting) return;
                 if (!window.currentUser || !dockChatActiveUser || dockChatSending || _chatEditDraft || document.getElementById('dockChatInput').disabled) { showToast('请选择可发送消息的会话'); return; }
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { showToast('此浏览器不支持录音，请使用附件发送音频'); return; }
                 var seq = ++_chatVoiceSeq, owner = window.currentUser, peer = dockChatActiveUser, stream;
+                _chatVoiceStarting = true;
                 try {
+                    // WebKit rejects capture while AudioSession is playback-only. Switch before requesting permission.
+                    document.querySelectorAll('#dockChatMessages audio').forEach(function(audio) { audio.pause(); });
+                    setChatAudioSession('play-and-record');
                     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
+                    if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); setChatAudioSession('auto'); return; }
                     // Safari can advertise a MIME type but reject its recorder: try the
                     // remaining supported formats, then its native default.
                     var types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus'].filter(function(t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); });
@@ -3793,7 +3804,7 @@
                         try { recorder = new MediaRecorder(stream,types[typeIndex] ? {mimeType:types[typeIndex]} : undefined); break; }
                         catch (formatError) { if (formatError.name!=='NotSupportedError' || typeIndex===types.length-1) throw formatError; }
                     }
-                    try { if (navigator.audioSession) navigator.audioSession.type='play-and-record'; } catch (_) {}
+                    setChatAudioSession('play-and-record');
                     var input = document.getElementById('dockChatInput'), base = input.value, transcript = '';
                     var voice = _chatVoice = { recorder: recorder, stream: stream, cancelled: false, hold:!!hold, base: base, started: Date.now() };
                     recorder.ondataavailable = function(event) { if (event.data.size) chunks.push(event.data); };
@@ -3801,7 +3812,7 @@
                     recorder.onstop = function() {
                         if (voice.recognition) { try { voice.recognition.stop(); } catch (_) {} }
                         stream.getTracks().forEach(function(t) { t.stop(); }); clearInterval(voice.timer); clearTimeout(voice.limit);
-                        try { if (navigator.audioSession) navigator.audioSession.type='playback'; } catch (_) {}
+                        if (!_chatVoice || _chatVoice === voice) setChatAudioSession('auto');
                         if (voice.cancelled || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) return;
                         _chatVoice = null; input.disabled = false;
                         document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
@@ -3824,16 +3835,18 @@
                     voice.timer = setInterval(function() { if (voice.hold && _chatVoiceHold && _chatVoiceHold.cancel) return; document.getElementById('chatVoiceStatus').textContent = (voice.hold ? '松开发送 · 上滑取消 · ' : '正在录音 · ') + Math.floor((Date.now() - voice.started) / 1000) + ' 秒'; }, 500);
                     document.querySelector('#panelChat .chat-input-wrap').classList.add('is-recording');
                     voice.limit = setTimeout(function() { if (recorder.state === 'recording') recorder.stop(); }, 300000);
-                    recorder.start(250);
+                    // Request the complete container on stop: Safari's MP4 fragments can be unplayable when interrupted.
+                    recorder.start();
                 } catch (error) {
                     if (stream) stream.getTracks().forEach(function(t) { t.stop(); });
+                    if (seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) return;
                     cancelChatVoice();
                     var reason=error && error.name;
                     showToast(reason==='NotAllowedError' ? '请在浏览器的网站设置中允许麦克风后重试' :
                         reason==='SecurityError' ? '浏览器限制了麦克风，请检查网站权限后重试' :
                         reason==='NotFoundError' ? '未找到可用的麦克风' :
                         reason==='NotReadableError' ? '麦克风被占用，请结束其他录音后重试' : '无法打开麦克风，请稍后重试');
-                }
+                } finally { _chatVoiceStarting = false; }
             }
             function bindChatHoldVoice() {
                 var wrap=document.querySelector('#panelChat .chat-input-wrap'), input=document.getElementById('dockChatInput');
@@ -3888,6 +3901,7 @@
                     }
                     button.onclick=async function(event) {
                         event.stopPropagation();
+                        if (_chatVoice || _chatVoiceStarting) { showToast('请先结束录音'); return; }
                         if (!audio.paused) { audio.pause(); return; }
                         document.querySelectorAll('#dockChatMessages audio').forEach(function(other) { if (other!==audio) other.pause(); });
                         if (audio.ended) audio.currentTime=0;
@@ -3897,14 +3911,30 @@
                             audio.muted=false; audio.volume=1;
                             if (audio.error) audio.load();
                             await audio.play(); update();
-                        } catch(_) {
+                        } catch(error) {
                             player.classList.remove('is-loading'); duration.textContent='重试';
-                            // Refresh expired signed URLs through the existing actor-authorized messages API.
-                            await loadDockChatMessages(dockChatActiveUser,false,true);
-                            showToast('语音地址已刷新，请点击重试；也请检查媒体音量');
+                            if (error && error.name === 'NotAllowedError') {
+                                showToast('浏览器暂未允许播放，请再次点击语音');
+                                return;
+                            }
+                            // Keep the current row while refreshing; a detached player cannot receive the next tap.
+                            var peer = dockChatActiveUser, owner = window.currentUser;
+                            var row = player.closest('[data-message-id]');
+                            if (row && row.dataset.messageId) {
+                                try {
+                                    var response = await window.xtjProtectedFetch('/api/chat/voice-url?peer=' + encodeURIComponent(peer) + '&message_id=' + encodeURIComponent(row.dataset.messageId));
+                                    var body = await response.json();
+                                    if (response.ok && body.ok && owner === window.currentUser && peer === dockChatActiveUser && player.isConnected) {
+                                        var refreshed = sanitizeUrl(body.url);
+                                        if (refreshed && /^https?:\/\//i.test(refreshed)) { audio.src = refreshed; audio.load(); }
+                                    }
+                                } catch (_) {}
+                            }
+                            showToast(error && error.name === 'NotSupportedError' ? '语音暂时无法解码，请重试或重新录制' : '语音加载失败，请点击重试');
                         }
                     };
                     ['loadedmetadata','durationchange','play','pause','ended','timeupdate','playing'].forEach(function(event) { audio.addEventListener(event,update); });
+                    audio.addEventListener('ended', function() { setChatAudioSession('auto'); });
                     audio.addEventListener('waiting',function() { player.classList.add('is-loading'); });
                     audio.addEventListener('error',function() { player.classList.remove('is-playing','is-loading'); duration.textContent='重试'; button.setAttribute('aria-label','重新播放语音'); });
                     update();
@@ -6166,6 +6196,17 @@
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.95.0', date: '2026-09-30',
+                    content: `<h4>更轻的个人页，更稳定的语音</h4><ul>
+                      <li>“我的”增加动态、浏览、点赞、评论四个紧凑入口，记录分页显示，统一头像和设置排版。</li>
+                      <li>修复播放后无法再次启用麦克风的音频会话顺序，完善录音取消、语音时长和播放重试。</li>
+                      <li>当前主题滑块保留：白天是太阳，夜晚是月亮，完善切换过渡。</li>
+                      <li>独立 Code 工作区彻底移除，小猫普通对话、深度思考和文件功能保留。</li>
+                      <li>近期聊天已增加消息搜索、媒体历史、语音转写、引用定位、转发、编辑和发送重试。</li>
+                      <li>首页导航随帖子滚出，通讯录切换和消息菜单已优化，底部 Dock 按钮保持原样。</li>
+                    </ul>`
+                },
                 {
                     version: 'v0.94.1',
                     date: '2026-09-22',
