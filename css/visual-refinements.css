@@ -274,15 +274,15 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
-/* ========== 10. 沉浸式顶部 (Sticky & Frosted Header) ========== */
+/* The header belongs to the feed, including before the shell finishes loading. */
 .posts-nav.sticky-header {
-  position: sticky;
-  top: 0;
+  position: relative;
+  top: auto;
   z-index: 100;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   background: rgba(255, 255, 255, 0.7);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: none;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 [data-theme="dark"] .posts-nav.sticky-header {
@@ -290,7 +290,7 @@
   border-bottom: 1px solid var(--xtj-dark-border);
 }
 .posts-nav.sticky-header.hidden-header {
-  transform: translateY(-100%);
+  transform: none;
 }
 
 /* ========== 11. 长文本丝滑展开 (Smooth Read-More) ========== */

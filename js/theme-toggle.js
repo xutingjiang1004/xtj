@@ -3,33 +3,24 @@
 
   if (window.__xtjThemeToggleBound) return;
   window.__xtjThemeToggleBound = true;
-  // ★ 修复 M-2：声明本模块接管主题控制（V2）。core.js 中旧主题块以
-  // `if (!window.__xtjThemeControllerV2)` 守卫，此前从未设置此标记导致两套
-  // 实现同时运行、存储键（xtj_theme vs xtj-theme）互相覆盖。
-  // 设置后旧块被跳过，主题状态统一由本模块管理。
   window.__xtjThemeControllerV2 = true;
 
   var STORAGE_KEY = 'xtj_theme';
   var LEGACY_STORAGE_KEY = 'xtj-theme';
   var htmlEl = document.documentElement;
-  var switchTimer = 0;
+  var themeBtn, profileThemeToggle, desktopThemeMode, systemThemeQuery;
+  var activeTransition = null;
+  var transitionVersion = 0;
   var clearSwitchingTimer = 0;
-  var themeBtn = null;
-  var profileThemeToggle = null;
-  var desktopThemeMode = null;
-  var systemThemeQuery = null;
+  var gesture = null;
+  var dragFrame = 0;
+  var suppressPointerClick = false;
 
   function getSystemTheme() {
-    try {
-      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light';
-    } catch (_) {
-      return 'light';
-    }
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
 
-  function readStoredTheme() {
+  function resolveThemeMode() {
     try {
       var stored = localStorage.getItem(STORAGE_KEY);
       if (stored === 'dark' || stored === 'light' || stored === 'system') return stored;
@@ -39,14 +30,8 @@
         return legacy;
       }
     } catch (_) {}
-    return '';
-  }
-
-  function resolveThemeMode() {
-    var stored = readStoredTheme();
-    if (stored) return stored;
-    var currentMode = htmlEl.getAttribute('data-theme-mode');
-    return currentMode === 'dark' || currentMode === 'light' || currentMode === 'system' ? currentMode : 'system';
+    var mode = htmlEl.getAttribute('data-theme-mode');
+    return mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system';
   }
 
   function resolveTheme(mode) {
@@ -61,136 +46,189 @@
   }
 
   function syncControls(theme, mode) {
-    if (!themeBtn) themeBtn = document.getElementById('themeToggle');
     var isDark = theme === 'dark';
     if (themeBtn) {
       themeBtn.classList.toggle('is-dark', isDark);
+      themeBtn.style.setProperty('--theme-progress', isDark ? '1' : '0');
       themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
-      themeBtn.setAttribute('aria-label', isDark ? '切换浅色模式' : '切换深色模式');
+      themeBtn.setAttribute('aria-label', isDark ? '切换浅色模式，可左右拖动' : '切换深色模式，可左右拖动');
       themeBtn.setAttribute('title', isDark ? '切换浅色模式' : '切换深色模式');
     }
-    if (!profileThemeToggle) profileThemeToggle = document.getElementById('profileThemeToggle');
     if (profileThemeToggle) {
       profileThemeToggle.checked = isDark;
       profileThemeToggle.setAttribute('aria-checked', isDark ? 'true' : 'false');
     }
-    if (!desktopThemeMode) desktopThemeMode = document.getElementById('desktopThemeMode');
     if (desktopThemeMode) desktopThemeMode.value = mode;
   }
 
   function applyThemeMode(mode) {
-    var normalizedMode = mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system';
-    var theme = resolveTheme(normalizedMode);
-    htmlEl.setAttribute('data-theme-mode', normalizedMode);
-    htmlEl.setAttribute('data-theme', theme);
-    syncControls(theme, normalizedMode);
+    htmlEl.setAttribute('data-theme-mode', mode);
+    htmlEl.setAttribute('data-theme', resolveTheme(mode));
+    syncControls(resolveTheme(mode), mode);
   }
 
   function clearThemeSwitching() {
-    if (clearSwitchingTimer) {
-      window.clearTimeout(clearSwitchingTimer);
-      clearSwitchingTimer = 0;
-    }
-    htmlEl.classList.remove('theme-switching');
+    window.clearTimeout(clearSwitchingTimer);
+    clearSwitchingTimer = 0;
+    htmlEl.classList.remove('theme-switching', 'theme-crossfade');
+    activeTransition = null;
   }
 
-  function startThemeSwitching() {
-    clearThemeSwitching();
-    if (htmlEl.getAttribute('data-xtj-motion') === 'off' ||
-        (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
-    htmlEl.classList.add('theme-switching');
-    clearSwitchingTimer = window.setTimeout(clearThemeSwitching, 300);
-  }
-
-  function supportsTransitionAnimation() {
-    try {
-      return !!document.startViewTransition &&
-        htmlEl.getAttribute('data-xtj-motion') !== 'off' &&
-        !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    } catch (_) {
-      return false;
-    }
+  function motionEnabled() {
+    return htmlEl.getAttribute('data-xtj-motion') !== 'off' &&
+      !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
 
   function setThemeMode(mode) {
-    var nextMode = mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system';
-    applyThemeMode(nextMode);
-    persistTheme(nextMode);
-    startThemeSwitching();
+    var next = mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system';
+    var previousTheme = htmlEl.getAttribute('data-theme');
+    var version = ++transitionVersion;
+    if (activeTransition) activeTransition.skipTransition();
+    clearThemeSwitching();
+    persistTheme(next);
+    // Freeze individual color transitions BEFORE updating the theme. The page
+    // crossfade supplies a single clock, including buttons and pseudo-elements.
+    htmlEl.classList.add('theme-switching');
+    var update = function () {
+      if (version === transitionVersion) applyThemeMode(next);
+    };
+    var finish = function () {
+      if (version === transitionVersion) clearThemeSwitching();
+    };
+    if (previousTheme !== resolveTheme(next) && document.startViewTransition && motionEnabled()) {
+      try {
+        htmlEl.classList.add('theme-crossfade');
+        activeTransition = document.startViewTransition(update);
+        activeTransition.ready.catch(function () {});
+        activeTransition.finished.then(finish, finish);
+        clearSwitchingTimer = window.setTimeout(function () {
+          if (version !== transitionVersion) return;
+          if (activeTransition) activeTransition.skipTransition();
+          update();
+          finish();
+        }, 700);
+        return;
+      } catch (_) {
+        htmlEl.classList.remove('theme-crossfade');
+      }
+    }
+    // Older Safari / reduced motion: one coherent paint, without staggered
+    // gradients and late button transitions.
+    update();
+    clearSwitchingTimer = window.setTimeout(finish, 32);
   }
 
   function switchTheme() {
-    // ★ 真正的节流闸门：连点期间只接受第一次，避免并发 startViewTransition
-    if (switchTimer) return;
-    var currentMode = resolveThemeMode();
-    var currentTheme = resolveTheme(currentMode);
-    var nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
-
-    if (supportsTransitionAnimation()) {
-      try {
-        htmlEl.classList.add('theme-crossfade');
-        var transition = document.startViewTransition(function () {
-          applyThemeMode(nextTheme);
-          persistTheme(nextTheme);
-        });
-        // ★ 显式吞掉 .finished/.ready 的未处理 Promise 拒绝
-        if (transition && transition.finished) transition.finished.catch(function () {}).then(function () {
-          htmlEl.classList.remove('theme-crossfade');
-          if (switchTimer) window.clearTimeout(switchTimer);
-          switchTimer = 0;
-        });
-        if (transition && transition.ready) transition.ready.catch(function () {});
-        startThemeSwitching();
-        switchTimer = window.setTimeout(function () {
-          switchTimer = 0;
-        }, 1000);
-        return;
-      } catch (_) { htmlEl.classList.remove('theme-crossfade'); }
-    }
-
-    setThemeMode(nextTheme);
-    switchTimer = window.setTimeout(function () {
-      switchTimer = 0;
-    }, 300);
+    setThemeMode(resolveTheme(resolveThemeMode()) === 'dark' ? 'light' : 'dark');
   }
 
-  function bindElementOnce(el, event, handler) {
-    if (!el || el.dataset.xtjThemeBound === '1') return;
-    el.dataset.xtjThemeBound = '1';
-    el.addEventListener(event, handler);
+  function renderDrag() {
+    dragFrame = 0;
+    if (gesture && themeBtn) themeBtn.style.setProperty('--theme-progress', String(gesture.progress));
+  }
+
+  function resetGesture() {
+    if (dragFrame) window.cancelAnimationFrame(dragFrame);
+    dragFrame = 0;
+    var old = gesture;
+    gesture = null;
+    themeBtn.classList.remove('is-dragging');
+    if (old && themeBtn.hasPointerCapture(old.id)) themeBtn.releasePointerCapture(old.id);
+    return old;
+  }
+
+  function finishGesture(event, cancelled) {
+    if (!gesture || (event && event.pointerId !== gesture.id)) return;
+    var old = resetGesture();
+    suppressPointerClick = old.dragged || cancelled;
+    if (cancelled || !old.dragged) {
+      syncControls(resolveTheme(resolveThemeMode()), resolveThemeMode());
+      return;
+    }
+    setThemeMode(old.progress >= 0.5 ? 'dark' : 'light');
   }
 
   function bindThemeToggle() {
     themeBtn = document.getElementById('themeToggle');
-    bindElementOnce(themeBtn, 'click', function (event) {
-      event.preventDefault();
-      switchTheme();
-    });
     profileThemeToggle = document.getElementById('profileThemeToggle');
-    bindElementOnce(profileThemeToggle, 'change', function () {
-      var that = this;
-      var next = that.checked ? 'dark' : 'light';
-      if (profileThemeToggle._debounceTimer) clearTimeout(profileThemeToggle._debounceTimer);
-      profileThemeToggle._debounceTimer = setTimeout(function() { setThemeMode(next); }, 100);
-    });
     desktopThemeMode = document.getElementById('desktopThemeMode');
-    bindElementOnce(desktopThemeMode, 'change', function () {
-      setThemeMode(this.value);
+    if (themeBtn) {
+      themeBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        if (suppressPointerClick && event.detail !== 0) {
+          suppressPointerClick = false;
+          return;
+        }
+        suppressPointerClick = false;
+        switchTheme();
+      });
+      themeBtn.addEventListener('pointerdown', function (event) {
+        if (gesture || !event.isPrimary || event.button !== 0) return;
+        suppressPointerClick = false;
+        if (activeTransition) {
+          activeTransition.skipTransition();
+          applyThemeMode(resolveThemeMode());
+        }
+        var orb = themeBtn.querySelector('.theme-toggle-orb');
+        var box = themeBtn.getBoundingClientRect();
+        var style = window.getComputedStyle(themeBtn);
+        var travel = box.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) -
+          parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth) - orb.offsetWidth;
+        themeBtn.style.setProperty('--theme-travel', Math.max(1, travel) + 'px');
+        gesture = { id: event.pointerId, x: event.clientX, y: event.clientY,
+          start: resolveTheme(resolveThemeMode()) === 'dark' ? 1 : 0,
+          progress: resolveTheme(resolveThemeMode()) === 'dark' ? 1 : 0,
+          travel: Math.max(1, travel), dragged: false };
+        themeBtn.setPointerCapture(event.pointerId);
+      });
+      themeBtn.addEventListener('pointermove', function (event) {
+        if (!gesture || event.pointerId !== gesture.id) return;
+        var dx = event.clientX - gesture.x;
+        var dy = event.clientY - gesture.y;
+        if (!gesture.dragged && Math.abs(dy) > 6 && Math.abs(dy) > Math.abs(dx)) {
+          finishGesture(event, true);
+          return;
+        }
+        if (!gesture.dragged && Math.abs(dx) < 3) return;
+        gesture.dragged = true;
+        themeBtn.classList.add('is-dragging');
+        gesture.progress = Math.max(0, Math.min(1, gesture.start + dx / gesture.travel));
+        if (!dragFrame) dragFrame = window.requestAnimationFrame(renderDrag);
+      });
+      themeBtn.addEventListener('pointerup', function (event) { finishGesture(event, false); });
+      themeBtn.addEventListener('pointercancel', function (event) { finishGesture(event, true); });
+      themeBtn.addEventListener('lostpointercapture', function (event) { finishGesture(event, true); });
+      themeBtn.addEventListener('keydown', function (event) {
+        if (!/^(ArrowLeft|ArrowRight|Home|End)$/.test(event.key)) return;
+        event.preventDefault();
+        if (gesture) finishGesture(null, true);
+        setThemeMode(event.key === 'ArrowRight' || event.key === 'End' ? 'dark' : 'light');
+      });
+    }
+    if (profileThemeToggle) profileThemeToggle.addEventListener('change', function () {
+      setThemeMode(this.checked ? 'dark' : 'light');
     });
+    if (desktopThemeMode) desktopThemeMode.addEventListener('change', function () { setThemeMode(this.value); });
   }
 
   function initThemeController() {
-    var mode = resolveThemeMode();
-    applyThemeMode(mode);
     bindThemeToggle();
+    applyThemeMode(resolveThemeMode());
     try {
       systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      var handleSystemThemeChange = function () {
-        if (resolveThemeMode() === 'system') applyThemeMode('system');
+      var change = function () {
+        if (resolveThemeMode() === 'system') setThemeMode('system');
       };
-      if (systemThemeQuery.addEventListener) systemThemeQuery.addEventListener('change', handleSystemThemeChange);
-      else if (systemThemeQuery.addListener) systemThemeQuery.addListener(handleSystemThemeChange);
+      if (systemThemeQuery.addEventListener) systemThemeQuery.addEventListener('change', change);
+      else if (systemThemeQuery.addListener) systemThemeQuery.addListener(change);
     } catch (_) {}
+    window.addEventListener('pagehide', function () {
+      if (gesture) finishGesture(null, true);
+      ++transitionVersion;
+      if (activeTransition) activeTransition.skipTransition();
+      applyThemeMode(resolveThemeMode());
+      clearThemeSwitching();
+    });
   }
 
   window.XTJThemeController = {
@@ -198,10 +236,6 @@
     getMode: resolveThemeMode,
     getResolvedTheme: function () { return resolveTheme(resolveThemeMode()); }
   };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initThemeController, { once: true });
-  } else {
-    initThemeController();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initThemeController, { once: true });
+  else initThemeController();
 })();

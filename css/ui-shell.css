@@ -2493,7 +2493,6 @@ html[data-xtj-motion="off"] #panelChat .chat-voice-player.is-playing .chat-voice
 html.xtj-ios-viewport #panelPosts .posts-nav.sticky-header,
 html.xtj-wechat.xtj-ios-viewport #panelPosts .posts-nav.sticky-header { position: relative !important; top: auto !important; }
 #panelPosts .posts-nav #themeToggle { width: 52px !important; height: 30px !important; min-width: 52px !important; min-height: 30px !important; padding: 3px !important; border-radius: 999px !important; justify-content: flex-start !important; flex: none; }
-#themeToggle .theme-toggle-orb { transition: transform .28s cubic-bezier(.2,.75,.25,1), box-shadow .28s ease; }
 .dm-action-overlay .dm-action-panel:not(.dm-forward-panel) { width: min(350px,calc(100vw - 24px)); padding: 10px; border-radius: 18px; }
 .dm-action-overlay .dm-action-panel .dm-action-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); width: 100%; max-width: none; gap: 8px 4px; overflow: visible; }
 .dm-action-overlay .dm-action-panel .dm-action-item { width: 100%; min-width: 0; padding: 6px 2px; gap: 7px; font-size: 12px; }
@@ -2563,20 +2562,7 @@ html #dockBar::before, html #dockBar::after { content: none !important; pointer-
 #panelChat #dockChatSocialSheet .chat-social-card { background: #f8fcfa; }
 html[data-theme="dark"] #panelChat #dockChatSocialSheet .chat-social-card { background: #192d25; color: #e9f3ee; }
 
-html.theme-crossfade::view-transition-old(root) {
-  animation: xtjThemeOut 280ms cubic-bezier(.2,.75,.25,1) both;
-  mix-blend-mode: normal;
-}
-html.theme-crossfade::view-transition-new(root) {
-  animation: xtjThemeIn 280ms cubic-bezier(.2,.75,.25,1) both;
-  mix-blend-mode: normal;
-}
-@keyframes xtjThemeOut { to { opacity: 0; } }
 @keyframes xtjThemeIn { from { opacity: 0; } to { opacity: 1; } }
-/* A snapshot crossfade already animates colors; avoid a second delayed color transition. */
-html.theme-crossfade.theme-switching :is(body,.glass,.post,.publish-box,.dock-panel,.chat-panel,.photo-wall-container,.photo-wall-header,.profile-user-card,.stat-card,nav) { transition: none !important; }
-html[data-xtj-motion="off"] #themeToggle :is(.theme-toggle-orb,.theme-toggle-core) { transition: none; }
-
 
 html[data-xtj-motion="off"]::view-transition-old(root), html[data-xtj-motion="off"]::view-transition-new(root) { animation: none !important; }
 .chat-gallery { position: fixed; inset: 0; z-index: 2600; display: grid; grid-template-rows: auto minmax(0,1fr) auto; background: #101519; color: #eef5f3; padding: max(10px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom)); box-sizing: border-box; animation: chatFeatureEnter .16s ease-out; }
@@ -2588,26 +2574,6 @@ html[data-xtj-motion="off"]::view-transition-old(root), html[data-xtj-motion="of
 .chat-gallery-stage { min-height: 0; overflow: hidden; display: grid; place-items: center; touch-action: none; }
 .chat-gallery-stage img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .12s ease-out; }
 @media(prefers-reduced-motion:reduce) { .chat-gallery { animation: none; }.chat-gallery-stage img { transition: none; } }
-
-/* 2026-09-30: recognizable sun/moon, retaining the existing slider dimensions. */
-html #themeToggle .theme-toggle-orb {
-  background: rgba(255,255,255,.9); box-shadow: 0 2px 6px rgba(34,80,83,.12);
-  transition: transform .36s cubic-bezier(.22,.8,.25,1), background-color .3s ease;
-}
-html #themeToggle .theme-toggle-core {
-  inset: 2px; background: transparent; border-radius: 0; opacity: 1; transform: none;
-}
-#themeToggle .theme-symbol {
-  position: absolute; inset: 0; width: 20px; height: 20px;
-  transition: opacity .25s ease, transform .36s cubic-bezier(.22,.8,.25,1);
-}
-#themeToggle .theme-symbol-sun { color: #d99220; opacity: 1; transform: rotate(0) scale(1); }
-#themeToggle .theme-symbol-moon { color: #d8e9fa; opacity: 0; transform: rotate(-55deg) scale(.45); }
-html[data-theme="dark"] #themeToggle .theme-toggle-orb { background: #293b54; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
-html[data-theme="dark"] #themeToggle .theme-symbol-sun { opacity: 0; transform: rotate(55deg) scale(.45); }
-html[data-theme="dark"] #themeToggle .theme-symbol-moon { opacity: 1; transform: rotate(0) scale(1); }
-@media(prefers-reduced-motion:reduce) { #themeToggle .theme-symbol { transition: none; } }
-html[data-xtj-motion="off"] #themeToggle .theme-symbol { transition: none; }
 
 /* Personal records and settings have one consistent width and compact rhythm. */
 #panelProfile { --profile-surface: rgba(255,255,255,.75); --profile-line: rgba(80,135,132,.14); --profile-muted: #75888d; }
@@ -2787,10 +2753,6 @@ html[data-theme="dark"] #panelChat #dockChatSocialTabs .chat-social-slider { bac
 #profileDetailModal .profile-account-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 #profileDetailModal .profile-account-actions button { min-height: 44px; margin: 0; font-size: 14px; border-radius: 12px; }
 #profileDetailModal .profile-detail-switch-btn { background: rgba(80,135,132,.1); border: 1px solid rgba(80,135,132,.2); color: var(--text-main); }
-html #themeToggle .theme-toggle-orb { background: rgba(255,255,255,.9) !important; box-shadow: 0 2px 6px rgba(34,80,83,.12) !important; overflow: visible; }
-html[data-theme="dark"] #themeToggle .theme-toggle-orb { background: #293b54 !important; box-shadow: 0 2px 6px rgba(0,0,0,.2) !important; }
-html #themeToggle .theme-toggle-core { inset: 2px; background: transparent !important; box-shadow: none !important; border: 0 !important; border-radius: 50%; filter: none !important; }
-html #themeToggle .theme-symbol { inset: 0; width: 20px !important; height: 20px !important; display: block; overflow: visible; background: none !important; box-shadow: none !important; filter: none !important; }
 @media(max-width:767.98px) {
   #panelPosts.active .posts-nav > .posts-nav-tools { gap: 3px; }
   #panelPosts.active .posts-nav .nav-account-profile { width: auto !important; min-width: 0 !important; }
@@ -2810,3 +2772,173 @@ html[data-xtj-motion="off"] #panelChat #dockChatSocialTabs .chat-social-slider {
 html[data-theme="dark"] #profileActivityModal .glass.profile-activity-modal { background: #17221d !important; }
 #profileActivityModal .profile-activity-modal-head { align-items: center; }
 #profileActivityModal .profile-activity-modal-head .stat-close-btn { width: 44px !important; min-width: 44px !important; height: 44px !important; min-height: 44px !important; padding: 0 !important; }
+
+/* 2026-09-30: mobile header, direct theme manipulation and quiet post actions. */
+@media (max-width: 767.98px), (max-height: 479.98px) {
+  html.xtj-ios-viewport .app-container {
+    position: fixed;
+    top: var(--xtj-visual-top, 0px);
+    inset-inline: 0;
+    width: 100%;
+    height: var(--xtj-app-height, 100dvh);
+    margin-block: 0;
+  }
+  html.xtj-ios-viewport body { overflow: hidden; }
+  html.xtj-ios-viewport #panelPosts.active {
+    padding-top: max(10px, env(safe-area-inset-top, 0px)) !important;
+  }
+  #panelPosts.active .posts-nav { flex-shrink: 0; }
+}
+
+/* Keep one page transition: controls must already be in their final palette
+   when the new snapshot is captured. Leave the Dock's own motion rules intact. */
+@layer xtj-theme-freeze {
+  /* Layered !important outranks legacy unlayered !important declarations. */
+  html.theme-switching :not(#dockBar, #dockBar *),
+  html.theme-switching :not(#dockBar, #dockBar *)::before,
+  html.theme-switching :not(#dockBar, #dockBar *)::after,
+  html #themeToggle.is-dragging, html #themeToggle.is-dragging *,
+  html[data-xtj-motion="off"] #themeToggle, html[data-xtj-motion="off"] #themeToggle * {
+    transition: none !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html #themeToggle, html #themeToggle * { transition: none !important; }
+  }
+}
+html.theme-crossfade::view-transition { pointer-events: none; }
+html.theme-crossfade::view-transition-group(root) { animation-duration: 220ms; }
+html.theme-crossfade::view-transition-image-pair(root) { isolation: isolate; }
+html.theme-crossfade::view-transition-old(root) {
+  animation: none;
+  opacity: 1;
+  mix-blend-mode: normal;
+}
+html.theme-crossfade::view-transition-new(root) {
+  animation: xtjThemeIn 220ms cubic-bezier(.2,.75,.25,1) both;
+  mix-blend-mode: normal;
+}
+
+html[data-theme] #panelPosts .posts-nav #themeToggle {
+  --theme-progress: 0;
+  --theme-travel: 22px;
+  padding: 2px !important;
+  box-sizing: border-box;
+  border: 1px solid rgba(113,145,151,.18) !important;
+  background: color-mix(in srgb, #edf3ec calc((1 - var(--theme-progress)) * 100%), #243149) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+  transform: none !important;
+  overflow: visible;
+  touch-action: pan-y;
+  cursor: grab;
+  transition: background-color 180ms ease !important;
+}
+html[data-theme] #themeToggle::before, html[data-theme] #themeToggle::after,
+html[data-theme] #themeToggle *::before, html[data-theme] #themeToggle *::after { content: none !important; }
+html[data-theme] #themeToggle .theme-toggle-orb {
+  width: 24px; height: 24px; flex: 0 0 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, #fff calc((1 - var(--theme-progress)) * 100%), #33445e) !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12) !important;
+  transform: translate3d(calc(var(--theme-progress) * var(--theme-travel)),0,0) !important;
+  transition: transform 180ms cubic-bezier(.22,.8,.25,1), background-color 180ms ease !important;
+  will-change: auto;
+}
+html[data-theme] #themeToggle .theme-toggle-core {
+  inset: 2px; border-radius: 50%; opacity: 1 !important; transform: none !important;
+  background: transparent !important; box-shadow: none !important; filter: none !important;
+}
+html[data-theme] #themeToggle .theme-symbol {
+  position: absolute; inset: 0; width: 20px !important; height: 20px !important;
+  display: block; overflow: visible;
+  background: transparent !important; box-shadow: none !important; filter: none !important;
+  transition: opacity 180ms ease, transform 180ms ease !important;
+}
+html[data-theme] #themeToggle .theme-symbol-sun {
+  color: #d99220;
+  opacity: calc(1 - var(--theme-progress));
+  transform: rotate(calc(var(--theme-progress) * 55deg)) scale(calc(1 - var(--theme-progress) * .55));
+}
+html[data-theme] #themeToggle .theme-symbol-moon {
+  color: #d8e9fa;
+  opacity: var(--theme-progress);
+  transform: rotate(calc((var(--theme-progress) - 1) * 55deg)) scale(calc(.45 + var(--theme-progress) * .55));
+}
+html[data-theme] #themeToggle.is-dragging { cursor: grabbing; }
+html[data-theme] #themeToggle.is-dragging,
+html[data-theme] #themeToggle.is-dragging *,
+html.theme-switching #themeToggle, html.theme-switching #themeToggle *,
+html[data-xtj-motion="off"] #themeToggle, html[data-xtj-motion="off"] #themeToggle * { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] #themeToggle, html[data-theme] #themeToggle * { transition: none !important; }
+}
+html[data-theme] #themeToggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+
+:is(#panelPosts, #postDetailModal) .actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  padding-top: 6px;
+  margin-top: 10px;
+  border-top: 1px solid var(--xtj-content-line, rgba(117,157,145,.14));
+}
+html :is(#panelPosts, #postDetailModal) .actions .action-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 5px;
+  gap: 5px;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+  transform: none !important;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text-muted) !important;
+  transition: color 120ms ease;
+}
+html :is(#panelPosts, #postDetailModal) .actions .action-btn::before,
+html :is(#panelPosts, #postDetailModal) .actions .action-btn::after { display: none !important; }
+html :is(#panelPosts, #postDetailModal) .actions .action-btn.liked { color: #e85577 !important; }
+html :is(#panelPosts, #postDetailModal) .actions .action-btn.del { color: #c7797e !important; }
+html :is(#panelPosts, #postDetailModal) .actions .post-tools-trigger {
+  margin-inline-start: auto;
+  padding-inline: 8px;
+  font-size: 15px;
+  letter-spacing: 2px;
+}
+html :is(#panelPosts, #postDetailModal) .actions .action-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.actions .post-like-icon {
+  display: block;
+  width: 18px; height: 18px;
+  flex: 0 0 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-origin: center;
+}
+.actions .liked .post-like-icon { fill: currentColor; }
+html[data-xtj-motion="off"] .actions .like-btn.like-lite-feedback .post-like-icon { animation: none; }
+@media (hover: hover) {
+  html :is(#panelPosts, #postDetailModal) .actions .action-btn:hover { color: var(--text-main) !important; }
+  html :is(#panelPosts, #postDetailModal) .actions .action-btn.liked:hover { color: #e85577 !important; }
+  html :is(#panelPosts, #postDetailModal) .actions .action-btn.del:hover { color: #df5063 !important; }
+}
+@media (max-width: 359px) {
+  :is(#panelPosts, #postDetailModal) .actions { gap: 2px 4px; }
+}
