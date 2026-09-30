@@ -186,7 +186,7 @@ function createChatFeatures(options) {
     try {
       const ctx = await context(req.userName, peer), m = ctx && await visible(ctx, id);
       if (!m || m.message_type !== 'audio') return res.status(404).json({ ok: false });
-      res.status(202).json({ ok: true, ...await transcription.enqueue(id) });
+      res.status(202).json({ ok: true, ...await transcription.enqueue(m.id) });
     } catch (e) { fail(res, e); }
   });
   return { router, validateReply, transcription };

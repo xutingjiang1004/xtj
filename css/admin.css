@@ -2478,3 +2478,14 @@
 
 /* 举报详情弹窗 */
 .report-detail-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 10000; background: var(--bg-primary); border-radius: 12px; padding: 24px; max-width: 600px; width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+
+.admin-support { max-width:780px; margin-inline:auto; }
+.admin-support>p { color:var(--text-muted,#7c8c82); line-height:1.8; font-size:14px; }
+.admin-support-codes { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; margin-top:24px; }
+.admin-support-codes section { padding:20px; border:1px solid rgba(120,170,140,.2); border-radius:16px; }
+.admin-support-codes img { display:block; width:100%; height:260px; object-fit:contain; margin-bottom:16px; background:#fff; }
+.admin-support-codes img[hidden] { display:none; }
+.admin-support-codes label { display:grid; gap:12px; font-size:14px; }
+.admin-support-codes input { width:100%; box-sizing:border-box; }
+.admin-support-disclaimer { font-size:12px; line-height:1.8; color:var(--text-muted,#7c8c82); }
+@media(max-width:580px) { .admin-support-codes { grid-template-columns:1fr; } }

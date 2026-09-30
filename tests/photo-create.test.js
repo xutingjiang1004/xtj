@@ -2,11 +2,36 @@
 
 const assert = require('assert');
 const test = require('node:test');
-const { MAX_IMAGE_SIZE, createPhotoRecord, findStoragePathRefs, parseStoragePhotoUrl, validatePhotoCreatePayload } = require('../render-api/photo-create');
+const { MAX_IMAGE_SIZE, createPhotoRecord, inspectPhotoOriginal, findStoragePathRefs, parseStoragePhotoUrl, validatePhotoCreatePayload } = require('../render-api/photo-create');
+const crypto = require('node:crypto');
+const sharp = require('sharp');
 
 const ORIGIN = 'https://ithowxqignlhkwaykglt.supabase.co';
 const GOOD_URL = ORIGIN + '/storage/v1/object/public/uploads/photos/test.jpg';
 function valid(overrides) { return Object.assign({ media_url: GOOD_URL, file_size: 12, original_size: 12, mime_type: 'image/jpeg' }, overrides || {}); }
+
+test('original PNG, EXIF JPEG and GIF retain their exact storage bytes and full dimensions', async function() {
+  const samples = [
+    { name:'original.png', bytes:await sharp({create:{width:1600,height:1200,channels:3,background:'#457a62'}}).png().toBuffer(), width:1600, height:1200 },
+    { name:'original.jpg', bytes:await sharp({create:{width:800,height:600,channels:3,background:'#a46555'}}).jpeg().withMetadata({orientation:6}).toBuffer(), width:600, height:800 },
+    { name:'original.gif', bytes:Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64'), width:1, height:1 }
+  ];
+  for (const sample of samples) {
+    const input = Buffer.from(sample.bytes);
+    const result = await inspectPhotoOriginal({storagePath:'photos/' + sample.name, sharp,
+      supabase:{storage:{from:()=>({
+        list:async()=>({data:[{name:sample.name,id:'test-object',metadata:{size:input.length}}]}),
+        download:async()=>({data:new Blob([input])}),
+        upload:async()=>{ throw new Error('Inspection must never write a compressed image'); }
+      })}}});
+    assert.equal(result.width,sample.width);
+    assert.equal(result.height,sample.height);
+    assert.equal(result.fileSize,input.length);
+    assert.equal(result.sha256,crypto.createHash('sha256').update(sample.bytes).digest('hex'));
+    assert.ok(input.equals(sample.bytes));
+    assert.equal(result.url,undefined);
+  }
+});
 
 function createStoragePathRefsSupabase(results) {
   const calls = [];

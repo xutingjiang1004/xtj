@@ -19,7 +19,10 @@ test('private attachment signing refreshes only authorized response rows and coa
 });
 test('private signing fails closed instead of falling back to public URLs', async () => {
   const media = createDmPrivateStorage({storage:{from(){return{async createSignedUrl(){return{error:{message:'offline'}};}};}}});
-  await assert.rejects(media.hydrateBody({ok:true,data:[{content:JSON.stringify({media:{bucket:'dm-private',storage_path:path}})}]}),/private_media_sign_failed/);
+  const body={ok:true,data:[{content:JSON.stringify({transcript:'saved words',media:{bucket:'dm-private',storage_path:path,url:'https://public.invalid/voice'}})}]};
+  await media.hydrateBody(body);
+  const payload=JSON.parse(body.data[0].content);
+  assert.equal(body.ok,true);assert.equal(payload.transcript,'saved words');assert.equal(payload.media.url,'');assert.equal(payload.media.unavailable,true);
 });
 test('document registry verification accepts the restricted MIME set and uses the private bucket', async () => {
   const supabase = {storage:{from(bucket){assert.equal(bucket,'dm-private');return{async list(){return{data:[{name:'abcdef123456_private_12345_file.pdf',metadata:{size:9,mimetype:'application/pdf'}}]};}};}}};

@@ -12,7 +12,7 @@ const STORAGE_PUBLIC_PHOTO_PREFIX = '/storage/v1/object/public/uploads/photos/';
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
 // 照片墙只接受位图图片；SVG 可内嵌 <script>/onload，上传后原图 URL 直接打开即存储型 XSS 载体，显式拒绝。
 // 收紧为常见图片类型精确白名单，不再允许任意长后缀（如 image/jpegmalware）。
-// 服务端仍以 sharp 解码出的真实格式兜底校验（见 createPhotoThumbnail 的 M-8a）。
+// 服务端仍以 sharp 读取出的真实格式兜底校验（见 inspectPhotoOriginal 的 M-8a）。
 const IMAGE_MIME_TYPE = /^image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)$/i;
 
 function invalid(error, code) {
@@ -173,13 +173,13 @@ function collectPhotoRecordPaths(record, supabaseUrl) {
   return paths;
 }
 
-async function createPhotoThumbnail(options) {
+async function inspectPhotoOriginal(options) {
   var storagePath = options && options.storagePath;
-  if (!storagePath || !options.supabase || !options.sharp) throw new Error('thumbnail unavailable');
+  if (!storagePath || !options.supabase || !options.sharp) throw new Error('original unavailable');
   // M-10: 给瞬态错误打标记——源探测/下载失败是网络抖动，不应删除用户原图
-  var sourceError = new Error('thumbnail source unavailable');
+  var sourceError = new Error('original source unavailable');
   sourceError.transient = true;
-  var tooLargeError = new Error('thumbnail source too large');
+  var tooLargeError = new Error('original source too large');
   tooLargeError.code = 'PHOTO_SOURCE_TOO_LARGE';
   // H-6: 下载前先用 list/HEAD 探测对象真实大小，超过上限直接拒绝，
   // 避免把超大对象全量读入内存后才检查（OOM 发生在校验之前）。
@@ -234,54 +234,17 @@ async function createPhotoThumbnail(options) {
   // SVG 可内嵌脚本，直接打开原图 URL 即存储型 XSS 载体——即使客户端伪报
   // mime_type 也必须拒绝，非瞬态错误会触发 422 清理原图。
   if (meta && meta.format && String(meta.format).toLowerCase() === 'svg') {
-    throw new Error('thumbnail source unsupported');
+    throw new Error('original source unsupported');
   }
-  var derivativePaths = getPhotoDerivativePaths(storagePath);
-  var thumbnailPath = derivativePaths.thumbnailPath;
-  var outputResult = await image.rotate().resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer({ resolveWithObject: true });
-  var output = Buffer.isBuffer(outputResult) ? outputResult : outputResult && outputResult.data;
-  var outputInfo = outputResult && !Buffer.isBuffer(outputResult) ? outputResult.info : null;
-  if (!output) throw new Error('thumbnail encode failed');
-  var uploaded = await options.supabase.storage.from('uploads').upload(thumbnailPath, output, { contentType: 'image/webp', cacheControl: '31536000', upsert: true });
-  if (uploaded && uploaded.error) throw new Error('thumbnail upload failed');
-
-  // Phase 5: 如果检测到 EXIF 方向且非标准方向，创建旋转后的原始尺寸 WebP 版本
-  var rotatedUrl = null;
-  var rotatedFileSize = null;
-  var rotatedPath = null;
-  var finalInfo = outputInfo || null;
-  if (meta && meta.orientation && meta.orientation !== 1) {
-    try {
-      // H-7: 旋转分支与缩略图分支一致，限制解码像素总量并对输出尺寸设上限
-      // （最长边 4096），防止高分辨率 EXIF 图全分辨率解码产生 GB 级缓冲
-      var rotatedImage = options.sharp(input, { animated: false, limitInputPixels: 100000000 })
-        .rotate()
-        .resize({ width: 4096, height: 4096, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 85 });
-      var rotatedResult = await rotatedImage.toBuffer({ resolveWithObject: true });
-      var rotatedOutput = Buffer.isBuffer(rotatedResult) ? rotatedResult : rotatedResult && rotatedResult.data;
-      var rotatedInfo = rotatedResult && !Buffer.isBuffer(rotatedResult) ? rotatedResult.info : null;
-      if (!rotatedOutput) throw new Error('rotated image encode failed');
-      rotatedPath = derivativePaths.rotatedPath;
-      var rotatedUpload = await options.supabase.storage.from('uploads').upload(rotatedPath, rotatedOutput, { contentType: 'image/webp', cacheControl: '31536000', upsert: true });
-      if (rotatedUpload && !rotatedUpload.error) {
-        rotatedUrl = publicStorageUrl(options.supabaseUrl, rotatedPath);
-        rotatedFileSize = rotatedOutput.length;
-        finalInfo = rotatedInfo || finalInfo;
-      }
-    } catch (_) { /* 旋转文件创建失败，降级使用原始文件 */ }
-  }
-
+  // Validation and metadata only. Never resize, rotate, re-encode or write a
+  // derivative. Modern image elements apply EXIF orientation to original bytes.
+  var swapAxes = meta.orientation >= 5 && meta.orientation <= 8;
   return {
-    path: thumbnailPath,
-    url: publicStorageUrl(options.supabaseUrl, thumbnailPath),
-    fileSize: output.length,
-    width: finalInfo && Number.isSafeInteger(finalInfo.width) ? finalInfo.width : (Number.isSafeInteger(meta.width) ? meta.width : null),
-    height: finalInfo && Number.isSafeInteger(finalInfo.height) ? finalInfo.height : (Number.isSafeInteger(meta.height) ? meta.height : null),
+    fileSize: input.length,
+    width: Number.isSafeInteger(meta.width) ? (swapAxes ? meta.height : meta.width) : null,
+    height: Number.isSafeInteger(meta.height) ? (swapAxes ? meta.width : meta.height) : null,
     exif: Number.isSafeInteger(meta.orientation) ? { orientation: meta.orientation } : null,
-    rotatedUrl: rotatedUrl,
-    rotatedPath: rotatedPath,
-    rotatedFileSize: rotatedFileSize
+    sha256: crypto.createHash('sha256').update(input).digest('hex')
   };
 }
 
@@ -546,31 +509,22 @@ async function createPhotoRecord(options) {
     return { status: 409, body: { ok: false, error: '图片已被其他帖子使用，请重新上传', code: 'PHOTO_ALREADY_REFERENCED' } };
   }
 
-  var thumbnail = null;
-  if (typeof options.createThumbnail === 'function') {
+  var originalInfo = null;
+  if (typeof options.inspectOriginal === 'function') {
     try {
-      thumbnail = await options.createThumbnail({ supabase: options.supabase, supabaseUrl: options.supabaseUrl, storagePath: storagePath });
+      originalInfo = await options.inspectOriginal({ supabase: options.supabase, supabaseUrl: options.supabaseUrl, storagePath: storagePath });
       var contentObj = JSON.parse(validated.content);
-      contentObj.thumb = thumbnail.url || '';
-      // H-8: 持久化缩略图 storage path，删除时才能正确移除（thumb 是 https URL，
-      // 直接当 storage path 传 remove() 永删不掉，缩略图成公网孤儿）
-      contentObj.thumbnailPath = thumbnail.path || '';
-      contentObj.thumbFileSize = Number.isSafeInteger(thumbnail.fileSize) ? thumbnail.fileSize : null;
-      contentObj.width = thumbnail.width || null;
-      contentObj.height = thumbnail.height || null;
-      if (thumbnail.exif) contentObj.exif = thumbnail.exif;
-      // Phase 5: 保留原上传文件作为显示源(media_url)，保证预览放大/下载为原画质。
-      // 旋转版(rotatedUrl,webp)仅作为低质量兜底缩略元数据保留，不再覆盖 media_url——
-      // 否则带 EXIF 方向的照片会被替换成"最长边4096 + webp q85"的有损版本，放大即模糊。
-      if (thumbnail.rotatedUrl) {
-        contentObj.rotatedUrl = thumbnail.rotatedUrl;
-        contentObj.rotatedPath = thumbnail.rotatedPath || '';
-        contentObj.rotatedFileSize = thumbnail.rotatedFileSize;
-      }
+      contentObj.thumb = '';
+      contentObj.fileSize = originalInfo.fileSize;
+      contentObj.originalSize = originalInfo.fileSize;
+      contentObj.width = originalInfo.width || null;
+      contentObj.height = originalInfo.height || null;
+      if (originalInfo.exif) contentObj.exif = originalInfo.exif;
+      if (originalInfo.sha256) contentObj.sha256 = originalInfo.sha256;
       validated.content = JSON.stringify(contentObj);
     } catch (error) {
       // M-10: 瞬态失败（源探测/下载失败）属于网络抖动，保留原图并返回可重试错误，
-      // 仅 sharp 解码/编码等确定性失败才清理原图与衍生物
+      // 仅 sharp 格式读取等确定性失败才清理原图与衍生物
       if (error && error.transient === true) {
         return { status: 503, body: { ok: false, error: '图片处理暂时不可用，请稍后重试', code: 'PHOTO_PROCESSING_RETRYABLE', retryable: true } };
       }
@@ -594,7 +548,7 @@ async function createPhotoRecord(options) {
       if (processingCleanup.queue_failed) {
         return { status: 503, body: { ok: false, error: 'Image processing failed and cleanup could not be queued', code: 'PHOTO_CLEANUP_QUEUE_FAILED', retryable: true } };
       }
-      return { status: 422, body: { ok: false, error: '图片缩略图处理失败', code: 'IMAGE_PROCESSING_FAILED' } };
+      return { status: 422, body: { ok: false, error: '图片原文件校验失败', code: 'IMAGE_PROCESSING_FAILED' } };
     }
   }
   let insertResult;
@@ -636,11 +590,7 @@ async function createPhotoRecord(options) {
   }
 
   // 真正失败: 清理 storage (幂等)
-  var insertFailPaths = [
-    thumbnail && thumbnail.path,
-    thumbnail && thumbnail.rotatedPath,
-    storagePath
-  ];
+  var insertFailPaths = [storagePath];
   // ★ 审计 🟡 双引用竞态：插入失败要删原图前二次引用检查，他人已并发引用时保留原图
   var insertFailRefs = await findStoragePathRefs(options.supabase, storagePath, null);
   if (!insertFailRefs.ok) {
@@ -662,6 +612,6 @@ module.exports = {
   validatePhotoCreatePayload,
   createPhotoRecord,
   findStoragePathRefs,
-  createPhotoThumbnail,
+  inspectPhotoOriginal,
   cleanupStorageFile
 };

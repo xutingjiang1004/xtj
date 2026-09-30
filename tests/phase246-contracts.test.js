@@ -61,11 +61,11 @@ test('P4-16: view-count sync goes through /api/photo/view and rolls back', funct
     'successful sync must adopt the server-returned view count');
 });
 
-test('P4-17: cancel upload aborts Storage request via signal', function () {
+test('P4-17: cancel upload aborts authenticated XHR and fallback fetch via signal', function () {
   var s = read('js/photo-wall/upload-ui.js');
-  // Storage upload must pass signal in options.
-  assert.ok(/storage\.from\('uploads'\)\.upload\([\s\S]*?signal:\s*signal\s*\|\|\s*undefined/.test(s),
-    'Storage upload must pass signal to support abort');
+  assert.ok(/signal:\s*signal\s*\|\|\s*undefined/.test(s) && /xhr\.abort\(\)/.test(s) &&
+    /signal\.addEventListener\('abort', abort/.test(s),
+    'Both upload transports must abort the active request');
   // cancelCurrentUpload must abort batchController.
   assert.ok(/cancelCurrentUpload[\s\S]*?batchController\.abort\(\)/.test(s),
     'cancelCurrentUpload must abort batchController');
