@@ -9,6 +9,38 @@
   if (window.__xtjUxFeaturesV1) return;
   window.__xtjUxFeaturesV1 = true;
 
+  // Finish a partially clipped header after scrolling stops. It still scrolls
+  // away normally; this never creates a sticky layer or locks the feed.
+  function bindMobileHeader() {
+    var panel = document.getElementById('panelPosts');
+    var nav = panel && panel.querySelector('.posts-nav');
+    if (!nav) return;
+    var timer = 0;
+    var touching = false;
+    function settle() {
+      timer = 0;
+      if (touching || !panel.classList.contains('active') ||
+          window.matchMedia('(min-width: 768px) and (min-height: 480px)').matches ||
+          (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))) return;
+      // WebKit's asynchronous scroller can expose the previous visual rect
+      // during scrollend. Layout offsets + scrollTop use the same coordinates.
+      var top = nav.offsetTop - panel.scrollTop;
+      var height = nav.offsetHeight;
+      if (top >= 0 || top + height <= 0) return;
+      panel.scrollTop = top + height >= height / 2 ? 0 : nav.offsetTop + height + 1;
+    }
+    function schedule() {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(settle, 160);
+    }
+    panel.addEventListener('scroll', schedule, { passive: true });
+    panel.addEventListener('scrollend', function () { window.clearTimeout(timer); settle(); }, { passive: true });
+    panel.addEventListener('touchstart', function () { touching = true; window.clearTimeout(timer); }, { passive: true });
+    panel.addEventListener('touchend', function () { touching = false; schedule(); }, { passive: true });
+    panel.addEventListener('touchcancel', function () { touching = false; schedule(); }, { passive: true });
+    window.addEventListener('pagehide', function () { window.clearTimeout(timer); });
+  }
+
   function isDock(el) {
     return !!(el && el.closest && el.closest('#dockBar, .dock-bar, .dock-tab'));
   }
@@ -126,25 +158,6 @@
   }
 
   // ---------- Fluency 2: like particle hook ----------
-  function patchLikeBurst() {
-    var orig = window.toggleLike;
-    if (typeof orig !== 'function' || orig.__xtjLikePatched) return;
-    window.toggleLike = function (btn, postId) {
-      var wasLiked = btn && btn.classList && btn.classList.contains('liked');
-      var ret = orig.apply(this, arguments);
-      try {
-        if (btn && !wasLiked && typeof window.xtjHeartBurst === 'function') {
-          // fire after optimistic like applied
-          setTimeout(function () {
-            if (btn.classList.contains('liked')) window.xtjHeartBurst(btn, { count: 8 });
-          }, 20);
-        }
-      } catch (e) {}
-      return ret;
-    };
-    window.toggleLike.__xtjLikePatched = true;
-  }
-
   // ---------- Fluency 2/3: button press scale (not dock) ----------
   function bindButtonPress() {
     if (window.__xtjBtnPressBound) return;
@@ -404,7 +417,7 @@
   function boot() {
     patchLoadingHtml();
     patchToast();
-    patchLikeBurst();
+    bindMobileHeader();
     bindButtonPress();
     bindDesktopPrefetch();
     polishImages(document);
@@ -416,7 +429,12 @@
       // 防重入：回调里会对 body 子节点加 class，若直接改会触发自身 mutation
       // → 无限循环占死主线程（线上首页曾因此彻底卡死，F12 都按不出来）。
       // 处理期间先 disconnect，杜绝回调重入，处理完再恢复观察。
-      var moBody = new MutationObserver(function () {
+      var moBody = new MutationObserver(function (records) {
+        // Dragging changes the theme control every frame. It cannot change the
+        // photo wall, so avoid rescanning every photo during this gesture.
+        if (records.length && records.every(function (record) {
+          return record.target.nodeType === 1 && record.target.closest('#themeToggle, .actions');
+        })) return;
         try {
           moBody.disconnect();
           polishPhotoWall();

@@ -194,11 +194,14 @@ test('feed load-more failure shows a retry entry and pauses the sentinel loop', 
   assert.match(core, /!feedEndReached && !feedLoadMoreFailed/);
 });
 
-test('like button keeps the same emoji shape between first render and toggles', () => {
+test('like button uses the same SVG on initial render and subsequent toggles', () => {
   const actions = between('function buildPostActionHtml(post, isLiked, canDelete)', 'var activePostToolsMenu = null;');
-  // 初次渲染与 setLikeButtonState 统一使用 emoji（修复前初渲染是中文"点赞/已赞"，点击后变 emoji）
-  assert.match(actions, /isLiked \? '❤️' : '🤍'/);
-  assert.match(core, /btn\.textContent = liked \? '❤️' : '🤍'/);
+  assert.match(actions, /buildLikeButtonContent\(isLiked\)/);
+  const state = between('function buildLikeButtonContent(liked)', '// ★ 2026-09-27');
+  assert.match(state, /class="post-like-icon"/);
+  assert.match(state, /btn\.innerHTML = buildLikeButtonContent\(liked\)/);
+  assert.match(state, /label\.textContent = liked \? '已赞' : '点赞'/);
+  assert.match(state, /btn\.setAttribute\('aria-label', liked \? '取消点赞' : '点赞'\)/);
 });
 
 test('geolocation fallback button text is not mojibake', () => {
