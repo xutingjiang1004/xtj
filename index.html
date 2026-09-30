@@ -71,14 +71,14 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=62423b60cd" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=e560ba776a" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=62423b60cd" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=62423b60cd" /><link rel="stylesheet" href="css/ai-agent.min.css?v=9136bdcd67" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=21fe1d7847" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=62423b60cd" /><link rel="stylesheet" href="css/ai-agent.min.css?v=9136bdcd67" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=bbe718dc22" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
-    <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=4ee2fa8795" />
+    <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d1d9232b4d" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=21fe1d7847">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=bbe718dc22">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=9136bdcd67">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=ca28241408">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=f44d91a9f4">
@@ -394,6 +394,7 @@
                         <p id="chatVoiceStatus" class="chat-voice-status" hidden role="status"></p>
                         <div class="chat-input-row">
                             <div class="chat-input-wrap">
+                                <div id="chatRecordingIndicator" class="chat-recording-indicator" hidden><span class="chat-recording-dot" aria-hidden="true"></span><span class="chat-recording-wave" aria-hidden="true"><i style="--record-delay:-0.0s"></i><i style="--record-delay:-0.07s"></i><i style="--record-delay:-0.14s"></i><i style="--record-delay:-0.21000000000000002s"></i><i style="--record-delay:-0.28s"></i><i style="--record-delay:-0.35000000000000003s"></i><i style="--record-delay:-0.42000000000000004s"></i><i style="--record-delay:-0.49000000000000005s"></i><i style="--record-delay:-0.56s"></i><i style="--record-delay:-0.6300000000000001s"></i><i style="--record-delay:-0.7000000000000001s"></i><i style="--record-delay:-0.77s"></i></span><span id="chatRecordingTimer">00:00</span></div>
                                 <input id="dockChatInput" placeholder="输入消息 · 空白处长按录音" title="空白输入框长按录音，松开发送，上滑取消" maxlength="500" />
                             </div>
                             <!-- ★ 2026-09-26：原图开关改成「圆圈 + 圆点」的单选反馈（未选＝空心圆，已选＝圆里有个点）。
@@ -1171,9 +1172,9 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/core.min.js?v=2690969444"></script>
+    <script defer src="js/core.min.js?v=62014b42fb"></script>
     <script defer src="js/login-device.min.js?v=0f97c9f47b"></script>
-    <script defer src="js/theme-toggle.min.js?v=c8c15c44e1"></script>
+    <script defer src="js/theme-toggle.min.js?v=9883ac2752"></script>
     <script defer src="js/desktop-shell.min.js?v=4bbb59d3b3"></script>
     <script defer src="js/ux-features.min.js?v=3a2022da98"></script>
 
