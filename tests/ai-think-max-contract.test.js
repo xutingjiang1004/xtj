@@ -68,7 +68,7 @@ test('前端：工作模式开关切回默认不自动压缩（work-mode 点击�
   assert.match(agentSource, /localStorage\.setItem\('xtj_ai_work_mode'/);
 });
 
-test('移动端：dock 新增小猫AI 中间按钮 + 打开时隐藏多余返回按钮', () => {
+test('移动端：dock 小猫AI 可切换，并提供独立返回按钮', () => {
   // index.html dock 含 data-tab="ai-chat"，位于 chat 与 ai(照片墙) 之间（第三个）
   const dockTabs = ['posts', 'chat', 'ai-chat', 'ai', 'profile'];
   let prev = -1;
@@ -85,7 +85,7 @@ test('移动端：dock 新增小猫AI 中间按钮 + 打开时隐藏多余返回
   assert.match(agentSource, /ai-chat-dock/);
   assert.match(agentSource, /function openAiChat\(opts\)/);
   assert.match(agentSource, /__xtjOpenAiChatFromDock = function/);
-  assert.match(agentSource, /if \(!S\._dockMode\)/);
+  assert.match(agentSource, /backBtn\.addEventListener\('click'/);
 });
 
 test('移动端：小猫AI 作为首页打开时无多余左上返回按钮但仍可经 dock 切换（CSS 上移）', () => {

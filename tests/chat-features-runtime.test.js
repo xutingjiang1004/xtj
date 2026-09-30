@@ -131,3 +131,21 @@ test('legacy message IDs resolve to canonical replies and hidden state uses the 
   const other=fixture({state:{status:'ok',conversation_id:id(8),deleted:false}});other.rows[0].legacy_post_id=id(9);
   assert.equal(await other.features.validateReply('actor','other-peer',id(9)),null);
 });
+
+test('device transcripts are sender-only, bounded and preserve receipts and withdrawal',async()=>{
+  function voice(config={}){const f=fixture(config);f.rows[0].message_type='audio';f.posts[0].content=JSON.stringify({media:{kind:'audio',bucket:'dm-private',storage_path:'chat/owned.wav'},read_at:'2026-09-30T01:00:00Z'});return f;}
+  const body={peer:'peer',message_id:id(4),text:'这是一段真实语音的识别结果'};
+  const f=voice();await request(f.app).post('/api/chat/messages/transcript').send(body).expect(401);
+  const saved=await request(f.app).post('/api/chat/messages/transcript').set(auth).send({...body,sender:'xxz',is_admin:true}).expect(200);
+  assert.equal(JSON.parse(saved.body.message.content).read_at,'2026-09-30T01:00:00Z');
+  assert.equal(JSON.parse(saved.body.message.content).transcript,body.text);
+  await request(f.app).post('/api/chat/messages/transcript').set(auth).send({...body,text:'replace'}).expect(200);
+  assert.equal(JSON.parse(f.posts[0].content).transcript,body.text);
+  for(const overrides of [{sender_name_snapshot:'peer'},{message_type:'text'},{withdrawn_at:new Date().toISOString()}]){
+    const g=voice();Object.assign(g.rows[0],overrides);await request(g.app).post('/api/chat/messages/transcript').set(auth).send(body).expect(404);
+  }
+  for(const cfg of [{hidden:[{message_id:id(4),user_id:id(1),hidden_at:new Date().toISOString()}]},{state:{status:'ok',conversation_id:id(3),cleared_before:'2100-01-01T00:00:00Z'}}])await request(voice(cfg).app).post('/api/chat/messages/transcript').set(auth).send(body).expect(404);
+  const withdrawn=voice();withdrawn.posts[0].content=JSON.stringify({withdrawn:true,media:{kind:'audio'}});await request(withdrawn.app).post('/api/chat/messages/transcript').set(auth).send(body).expect(409);
+  await request(voice({conflict:true}).app).post('/api/chat/messages/transcript').set(auth).send(body).expect(409);
+  await request(voice().app).post('/api/chat/messages/transcript').set(auth).send({...body,text:'x'.repeat(5001)}).expect(400);
+});

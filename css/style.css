@@ -16934,3 +16934,12 @@ html[data-xtj-motion="off"] #pwUploadProgressOverlay .pw-upload-progress-bar-fil
 /* Decode the original once; avoid a large blur filter on every scrolling tile. */
 .photo-wall-item img.pw-blur-in { filter:none; transform:none; opacity:.3; }
 .photo-wall-item img.pw-blur-done { filter:none; }
+
+#pwUploadSheet .pw-upload-remove { position:absolute; top:0; right:0; width:44px; height:44px; min-height:44px; padding:0; display:grid; place-items:center; border:0; border-radius:0; background:transparent; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; color:#fff; z-index:2; }
+#pwUploadSheet .pw-upload-remove span { display:grid; place-items:center; width:28px; height:28px; border-radius:50%; background:rgba(18,30,24,.78); font-size:22px; line-height:1; }
+#pwUploadSheet .pw-upload-remove:focus-visible span { outline:2px solid #fff; outline-offset:2px; }
+#pwUploadSheet .pw-upload-selection-empty { grid-column:1/-1; margin:12px 0; padding:20px 8px; color:var(--pw-muted); text-align:center; font-size:14px; }
+.chat-transcription-status { padding:8px 12px 10px; font-size:12px; line-height:1.6; opacity:.8; overflow-wrap:anywhere; }
+.chat-transcription-status button { margin-left:8px; padding:4px 8px; min-height:32px; font-size:12px; background:transparent; box-shadow:none; color:inherit; text-decoration:underline; }
+.chat-transcription-status button[hidden] { display:none; }
+#photoPreviewOverlay #ppDeleteBtn[hidden] { display:none !important; }

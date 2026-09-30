@@ -90,20 +90,20 @@ test('refresh 接口：jti 重用（多标签并发）不得立刻 401 清 cooki
 });
 
 // ── 2) 有效期与设备识别 ─────────────────────────────────────────────
-test('刷新令牌有效期必须是 30 天', () => {
-  assert.match(serverSrc, /USER_REFRESH_TOKEN_EXPIRY_MS\s*=\s*30\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/,
-    'refresh token 必须是 30 天');
-  assert.match(coreSrc, /USER_SESSION_TTL_MS\s*=\s*30\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/,
-    '前端本地会话同样必须是 30 天');
+test('刷新令牌有效期必须是 90 天', () => {
+  assert.match(serverSrc, /USER_REFRESH_TOKEN_EXPIRY_MS\s*=\s*90\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/,
+    'refresh token 必须是 90 天');
+  assert.match(coreSrc, /USER_SESSION_TTL_MS\s*=\s*90\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/,
+    '前端本地会话同样必须是 90 天');
 });
 
-test('刷新即续期：每次 refresh 都要重新签发 30 天令牌（滑动窗口）', () => {
+test('刷新即续期：每次 refresh 都要重新签发 90 天令牌（滑动窗口）', () => {
   const start = serverSrc.indexOf("app.post('/api/user/refresh'");
   const body = serverSrc.slice(start, start + 4200);
   assert.match(body, /signUserRefreshToken\(payload\.user_name,\s*presentedDeviceId\)/,
-    'refresh 必须重新签发 refresh token（滑动 30 天，而非固定到期）');
+    'refresh 必须重新签发 refresh token（滑动 90 天，而非固定到期）');
   assert.match(body, /maxAge:\s*USER_REFRESH_TOKEN_EXPIRY_MS/,
-    'cookie maxAge 必须同步为 30 天');
+    'cookie maxAge 必须同步为 90 天');
 });
 
 test('设备识别：令牌里只存设备 ID 的哈希，不得落明文', () => {

@@ -1732,6 +1732,44 @@
                 return '<span class="msg-text">' + escapeHtml(messageText || '') + '</span>';
             }
 
+            function queueDockVoiceTranscription(peer, messages, file, fileId) {
+                var controller = window.XTJVoiceTranscription, owner = currentUser;
+                if (!controller || !owner) return;
+                (messages || []).forEach(function(message) {
+                    var payload = getDMMessagePayload(message) || {};
+                    if (!message.id || message.__optimistic || message.__failed || payload.withdrawn || payload.transcript || !payload.media || payload.media.kind !== 'audio' || isDmMessageLocallyDeleted(message)) return;
+                    controller.enqueue({ owner: owner, peer: peer, id: message.id, sent: message.user_name === owner,
+                        file: fileId === message.id ? file : null,
+                        onState: function(job) {
+                            if (currentUser !== owner || dockChatActiveUser !== peer) return;
+                            var host = document.getElementById('dockChatMessages');
+                            if (!host) return;
+                            Array.from(host.querySelectorAll('.chat-msg-row')).forEach(function(row) {
+                                if (row.dataset.messageId !== String(message.id)) return;
+                                var status = row.querySelector('.chat-transcription-status');
+                                if (!status) return;
+                                status.querySelector('span').textContent = job.label;
+                                var retry = status.querySelector('button');
+                                retry.hidden = job.state !== 'error';
+                                retry.onclick = function(event) { event.stopPropagation(); controller.retry(peer, message.id); };
+                            });
+                        },
+                        onResult: function(text, saved) {
+                            if (currentUser !== owner) return;
+                            var cache = _chatCache[getDockChatCacheKey(peer)] || [];
+                            var target = cache.find(function(row) { return row.id === message.id; });
+                            if (!target) return;
+                            var latest = getDMMessagePayload(target) || {};
+                            if (latest.withdrawn || isDmMessageLocallyDeleted(target)) return;
+                            var stored = saved && getDMMessagePayload(saved);
+                            latest.transcript = stored && stored.transcript || text;
+                            target.content = JSON.stringify(latest);
+                            if (dockChatActiveUser === peer) renderDockMessages(peer, cache, false);
+                        }
+                    });
+                });
+            }
+
                         function buildDockChatRowMarkup(message, avatars, disableAnim) {
                 var sent = message.user_name === currentUser;
                 var avatarHtml = sent ? avatars.mine : avatars.other;
@@ -1791,6 +1829,7 @@
                 var timeHtml = '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span>';
                 var bubbleBody = buildDockChatBodyMarkup(message);
                 if (!isWithdrawn && payload.transcript) bubbleBody += '<div class="chat-transcript"><small>语音转写</small><span>' + escapeHtml(String(payload.transcript)) + '</span></div>';
+                else if (!isWithdrawn && rowMedia && rowMedia.kind === 'audio' && !message.__optimistic && !message.__failed) bubbleBody += '<div class="chat-transcription-status" role="status"><span>等待语音转写…</span><button type="button" hidden>重新转写</button></div>';
                 if (!isWithdrawn && payload.reply_to) bubbleBody = '<button type="button" class="chat-reply-quote" data-reply-id="' + escapeHtml(String(payload.reply_to.id || '')) + '" aria-label="定位引用的消息"><strong>' + escapeHtml(String(payload.reply_to.sender_name || '消息')) + '</strong><span>' + escapeHtml(String(payload.reply_to.text || '[附件]')) + '</span></button>' + bubbleBody;
                 if (payload.edited_at) timeHtml = '<span class="msg-edited">已编辑</span>' + timeHtml;
                 var bubble, inner;
@@ -2101,6 +2140,7 @@
                 var signatureKey = userName || '__empty__';
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
+                    queueDockVoiceTranscription(userName, msgs);
                     if (forceScroll) scrollDockChatToLatest();
                     return;
                 }
@@ -2164,6 +2204,7 @@
                 _chatRenderSignature[signatureKey] = nextSignature;
                 patchDockChatMessageAvatars(userName);
                 bindChatAudioPlayers();
+                queueDockVoiceTranscription(userName, msgs);
                 // ★ 2026-09-26：把仍用本地 blob 显示的图片在后台换成远端地址
                 //   （下载成功才替换，失败则继续显示本地图，绝不降级成按钮）
                 try { if (typeof hydrateDockChatRemoteMedia === 'function') hydrateDockChatRemoteMedia(el); } catch (eHyd) {}
@@ -2672,6 +2713,7 @@
                         insertedMessage = Object.assign({}, insertedMessage, { __localPreviewUrl: localPreviewUrl });
                     }
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage);
+                    if (mediaKind === 'audio') queueDockVoiceTranscription(targetUser, [insertedMessage], file, insertedMessage.id);
                     if (dockChatActiveUser === targetUser) {
                         renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                         try { if (typeof hydrateDockChatRemoteMedia === 'function') hydrateDockChatRemoteMedia(document.getElementById('dockChatMessages')); } catch (eH) {}

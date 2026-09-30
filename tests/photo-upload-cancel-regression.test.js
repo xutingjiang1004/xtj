@@ -37,6 +37,8 @@ function makeElement(id) {
     setAttribute: function(name, value) { this[name] = String(value); },
     getAttribute: function(name) { return this[name] || null; },
     appendChild: function(child) { this.children.push(child); return child; },
+    querySelectorAll: function(selector) { return this.children.filter(child => selector === '.pw-upload-sheet-thumb' && child.className === 'pw-upload-sheet-thumb'); },
+    querySelector: function(selector) { return this.children.find(child => selector === '.pw-upload-remove' && child.className === 'pw-upload-remove') || null; },
     removeChild: function(child) { this.children = this.children.filter(function(item) { return item !== child; }); },
     focus: function() {},
     click: function() {},

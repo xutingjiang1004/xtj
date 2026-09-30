@@ -501,8 +501,8 @@
     var overlay = byId('pwUploadProgressOverlay');
     if (overlay) overlay.dataset.phase = phase;
     var stageEl = byId('pwUploadProgressStage');
-    if (stageEl) stageEl.textContent = ({ preparing:'正在读取原图', uploading:'正在上传原图',
-      saving:'正在保存照片', complete:'照片已保存', partial:'部分照片未完成', cancelling:'正在取消' })[phase];
+    if (stageEl) stageEl.textContent = ({ preparing:'正在上传照片…', uploading:'正在上传照片…',
+      saving:'正在上传照片…', complete:'照片已上传', partial:'部分照片未完成', cancelling:'正在取消' })[phase];
     var bytesEl = byId('pwUploadProgressBytes');
     if (bytesEl) {
       var sent = 0, size = 0;
@@ -737,6 +737,24 @@
     return { accepted: accepted, skipped: skipped };
   }
 
+  function updateSelectedPhotos(){
+    var files = state.photoFiles, skipped = state.skippedFiles;
+    var meta = byId('pwUploadSheetMeta'), count = byId('pwUploadSheetCount'), start = byId('pwStartUploadBtn');
+    var sizeMb = files.reduce(function(sum,file){ return sum + file.size; },0) / 1024 / 1024;
+    if (meta) meta.textContent = files.length + ' 张 · ' + sizeMb.toFixed(1) + ' MB · 原图上传' +
+      (skipped.length ? ' 已跳过 ' + skipped.length + ' 个不支持或超限文件。' : '');
+    if (count) count.textContent = files.length + ' 张照片';
+    if (start) start.disabled = !files.length;
+    var grid = byId('pwUploadSheetGrid');
+    if (grid) {
+      Array.from(grid.querySelectorAll('.pw-upload-sheet-thumb')).forEach(function(item,index){
+        var button = item.querySelector('.pw-upload-remove');
+        if (button) button.setAttribute('aria-label','移除第 ' + (index+1) + ' 张照片：' + button.dataset.fileName);
+      });
+      if (!files.length) { var empty=document.createElement('p');empty.className='pw-upload-selection-empty';empty.textContent='还没有选择照片，点击重新选择添加。';grid.replaceChildren(empty); }
+    }
+  }
+
   function openSheet(files, skipped){
     var sheet = byId('pwUploadSheet');
     var grid = byId('pwUploadSheetGrid');
@@ -746,6 +764,8 @@
     var skipMeta = byId('pwUploadSheetSkipped');
     if (!sheet || !grid) { toast('上传面板未加载，请刷新页面'); return; }
     revoke('photoUrls');
+    state.photoFiles = files.slice();
+    state.skippedFiles = (skipped || []).slice();
     grid.innerHTML = '';
     files.forEach(function(file, index){
       var url = URL.createObjectURL(file);
@@ -757,16 +777,27 @@
       if (index > 3) img.loading = 'lazy';
       img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
       item.appendChild(img);
+      var remove = document.createElement('button');
+      remove.type='button';remove.className='pw-upload-remove';remove.dataset.fileName=file.name;
+      remove.innerHTML='<span aria-hidden="true">×</span>';
+      remove.addEventListener('click',function(event){
+        event.preventDefault();event.stopPropagation();
+        if (state.uploading) return;
+        var selected=state.photoFiles.indexOf(file);
+        if (selected<0) return;
+        state.photoFiles.splice(selected,1);
+        var oldUrl=state.photoUrls.splice(selected,1)[0];if (oldUrl) URL.revokeObjectURL(oldUrl);
+        item.remove();updateSelectedPhotos();
+        var buttons=grid.querySelectorAll('.pw-upload-remove');
+        var next=buttons[Math.min(selected,buttons.length-1)] || byId('pwUploadReselectBtn');
+        if (next) next.focus();
+        if (!state.photoFiles.length) { var input=byId('photoFileInput');if(input) input.value=''; }
+      });
+      item.appendChild(remove);
       grid.appendChild(item);
     });
-    state.photoFiles = files.slice();
-    state.skippedFiles = (skipped || []).slice();
     if (title) title.textContent = '上传照片';
-    var sizeMb = files.reduce(function(sum, file){ return sum + file.size; }, 0) / 1024 / 1024;
-    var metaText = files.length + ' 张 · ' + sizeMb.toFixed(1) + ' MB · 原图上传';
-    if (skipped && skipped.length) metaText += ' 已跳过 ' + skipped.length + ' 个不支持或超限文件。';
-    if (meta) meta.textContent = metaText;
-    if (count) count.textContent = files.length + ' 张照片';
+    updateSelectedPhotos();
     if (skipMeta) {
       if (skipped && skipped.length) {
         skipMeta.hidden = false;
@@ -807,13 +838,13 @@
     overlay.classList.add('upload-overlay-visible');
     overlay.setAttribute('aria-hidden', 'false');
     if (textEl) textEl.textContent = text || '';
-    if (statusEl) statusEl.textContent = '原文件直传 · 保留分辨率与格式';
+    if (statusEl) statusEl.textContent = '';
     if (pctEl) pctEl.textContent = (typeof pct === 'number') ? Math.round(pct) + '%' : '0%';
     if (trackEl) { trackEl.hidden = !(typeof pct === 'number'); trackEl.setAttribute('aria-valuenow', String(Math.round(pct || 0))); }
     if (fillEl && typeof pct === 'number') fillEl.style.transform = 'scaleX(' + Math.max(0, Math.min(1, pct / 100)) + ')';
     if (stageEl) {
       var r = (typeof pct === 'number') ? Math.round(pct) : -1;
-      stageEl.textContent = state.cancelRequested ? '正在取消' : (r >= 100 ? '处理完成' : '正在上传照片');
+      stageEl.textContent = state.cancelRequested ? '正在取消' : '正在上传照片…';
     }
     if (cancelBtn) cancelBtn.hidden = false;
   }

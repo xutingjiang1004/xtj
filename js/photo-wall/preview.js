@@ -9,6 +9,8 @@
         scale: 1,
         opacity: 1
     }, P = null, E = !1, L = Object.create(null);
+    var pendingPreviewDeletes = new Set();
+    window.addEventListener('xtj:permissions-ready', function() { if (e && t) j(i); });
     function T(e) {
         return "close" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span>' : "info" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span>' : "share" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span>' : "rotate" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(-1.5,0)"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></g></svg></span>' : "delete" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>' : "";
     }
@@ -302,9 +304,12 @@
             s && (s.textContent = i.views || "0");
             var c = document.getElementById("ppDeleteBtn");
             if (c) {
+                c.disabled = pendingPreviewDeletes.has(String(i.id));
                 // L3 修复：移除硬编码管理员名 'xxz'，改用 isAdmin()（后端仍独立校验）
-                var d = typeof window.isAdmin === "function" && window.isAdmin(), p = window.currentUser === i.username;
-                d || p ? (c.style.display = "flex", c.title = "删除") : c.style.display = "none";
+                var d = window.currentUser === 'xxz' && typeof window.isAdmin === "function" && window.isAdmin(), p = !!window.currentUser && window.currentUser === i.username;
+                c.hidden = !(d || p);
+                c.style.display = d || p ? 'flex' : 'none';
+                c.title = '删除';
             }
         }
     }
@@ -1090,8 +1095,14 @@
         window.deletePhotoFromPreview();
     }, window.deletePhotoFromPreview = function() {
         if (e) {
+            var selectedPhoto = t;
+            if (!selectedPhoto || pendingPreviewDeletes.has(String(selectedPhoto.id))) return;
+            if (!window.currentUser || (selectedPhoto.username !== window.currentUser &&
+                !(window.currentUser === 'xxz' && typeof window.isAdmin === 'function' && window.isAdmin()))) {
+                window.showToast('无权删除这张照片'); return;
+            }
             Y(10);
-            var t = document.getElementById("ppDeleteBtn"), o = t ? t.getBoundingClientRect() : null;
+            var deleteButton = document.getElementById("ppDeleteBtn"), o = deleteButton ? deleteButton.getBoundingClientRect() : null;
             if (o) {
                 var a = o.left + o.width / 2, r = o.top + o.height / 2;
                 window._confirmOrigin = {
@@ -1102,24 +1113,23 @@
                 };
             }
             window.showConfirm("删除照片", "删除后无法恢复，确定删除吗？", "确定删除", async function() {
-                var e = n;
-                if (!(i < 0 || i >= e.length)) {
-                    var t = e[i];
-                    if (t) {
-                        var o = document.getElementById("ppDeleteBtn"), a = document.getElementById("ppConfirmOkBtn");
-                        o && (o.disabled = !0), a && (a.disabled = !0), window.showToast("正在删除...");
-                        var r = {
-                            ok: !0
-                        };
-                        window.deletePhotoWallPhoto && (r = await window.deletePhotoWallPhoto(t, {
-                            render: !1
-                        })), r && r.ok ? (n = e.filter(function(e) {
-                            return e && String(e.id) !== String(t.id);
-                        }), window.photoWallData && (window.photoWallData = window.photoWallData.filter(function(p) {
-                            return p && String(p.id) !== String(t.id);
-                        })), V(),
-                        window.showToast("照片已从照片墙删除")) : (o && (o.disabled = !1), a && (a.disabled = !1));
-                    }
+                var id=String(selectedPhoto.id), button=document.getElementById('ppDeleteBtn');
+                if (pendingPreviewDeletes.has(id)) return;
+                if (typeof window.deletePhotoWallPhoto!=='function') { window.showToast('删除功能正在加载，请稍后重试');return; }
+                pendingPreviewDeletes.add(id);
+                if (button && t && String(t.id)===id) button.disabled=true;
+                window.showToast('正在删除...');
+                try {
+                    var result=await window.deletePhotoWallPhoto(selectedPhoto,{render:false});
+                    if (!result || !result.ok) return;
+                    n=n.filter(function(photo){return photo && String(photo.id)!==id;});
+                    if (t && String(t.id)===id) V();
+                    else if (t) { i=n.findIndex(function(photo){return String(photo.id)===String(t.id);});F(i); }
+                    window.showToast('照片已从照片墙删除');
+                } catch (error) { window.showToast('删除失败，请稍后重试'); }
+                finally {
+                    pendingPreviewDeletes.delete(id);
+                    if (button) button.disabled=!!(t && pendingPreviewDeletes.has(String(t.id)));
                 }
             });
         }
