@@ -281,12 +281,13 @@ test('revisiting a conversation preserves bubble and avatar nodes', async ({page
 
 async function fakeMic(page,pending=false) {
   await page.addInitScript(pending=>{
+    const buffer=new ArrayBuffer(44+48000),v=new DataView(buffer);const word=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};word(0,'RIFF');v.setUint32(4,48036,true);word(8,'WAVE');word(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,24000,true);v.setUint32(28,48000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);word(36,'data');v.setUint32(40,48000,true);
     window.__stoppedTracks=0;
     const stream={getTracks:()=>[{stop(){window.__stoppedTracks++;}}]};
     Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:()=>pending ? new Promise(resolve=>window.__resolveMic=()=>resolve(stream)) : Promise.resolve(stream)}});
     window.MediaRecorder=class {
       static isTypeSupported(){return true;} constructor(){this.state='inactive';this.mimeType='audio/webm';}
-      start(){this.state='recording';} stop(){this.state='inactive';this.ondataavailable?.({data:new Blob(['voice-data'],{type:'audio/webm'})});this.onstop?.();}
+      start(){this.state='recording';} stop(){this.state='inactive';this.ondataavailable?.({data:new Blob([buffer],{type:'audio/wav'})});this.onstop?.();}
     };
   },pending);
 }
@@ -303,7 +304,11 @@ test('long press slide-up cancels voice and keeps the microphone icon', async ({
   await fakeMic(page); await setup(page); await expect(page.locator('#dockChatInput')).toBeEnabled();
   const box=await page.locator('.chat-input-wrap').boundingBox(); await page.mouse.move(box.x+20,box.y+20); await page.mouse.down();
   await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');
-  await page.mouse.move(box.x+20,box.y-80); await page.mouse.up();
+  await page.mouse.move(box.x+20,box.y-80);
+  await expect(page.locator('#chatRecordingIndicator')).toHaveClass(/is-cancelling/);
+  await expect(page.locator('#chatVoiceStatus')).toContainText('取消');
+  await page.mouse.up();
+  await expect(page.locator('#chatRecordingIndicator')).toBeHidden();
   await expect(page.locator('#chatVoiceButton svg')).toBeVisible(); await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','false');
   expect(await page.evaluate(()=>window.__stoppedTracks)).toBeGreaterThan(0); await expect(page.locator('#dockChatFilePreview')).toBeHidden();
 });
@@ -312,7 +317,14 @@ test('long press records, release prepares upload and sends audio through the ex
   await fakeMic(page); await setup(page); await expect(page.locator('#dockChatInput')).toBeEnabled();
   await page.route('**/api/dm/upload?**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,storage_path:'chat/test.webm',public_url:'https://example.invalid/voice.webm',kind:'audio',mime_type:'audio/webm'})}));
   const box=await page.locator('.chat-input-wrap').boundingBox(); await page.mouse.move(box.x+20,box.y+20); await page.mouse.down();
-  await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true'); await page.waitForTimeout(700); await page.mouse.up();
+  await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('#chatRecordingIndicator')).toBeVisible();
+  await expect(page.locator('#chatVoiceStatus')).toContainText('录音');
+  const wave=page.locator('#chatRecordingIndicator i').first();
+  const first=await wave.evaluate(el=>getComputedStyle(el).transform);
+  await expect.poll(()=>wave.evaluate(el=>getComputedStyle(el).transform)).not.toBe(first);
+  await page.waitForTimeout(700); await page.mouse.up();
+  await expect(page.locator('#chatRecordingIndicator')).toBeHidden();
   await expect.poll(()=>page.evaluate(()=>window.__chatTestCalls.some(c=>c.url.includes('/api/dm/send')&&JSON.parse(c.body).kind==='audio'))).toBe(true);
   await expect(page.locator('#dockChatInput')).toBeEnabled(); await expect(page.locator('#chatVoiceButton svg')).toBeVisible();
 });
@@ -561,4 +573,61 @@ test('AAC MP4 voice plays with progressing time, and permission failure does not
  await player.evaluate(el=>el.querySelector('audio').play=window.__playOriginal);await player.locator('button').click();
  await expect(player).toHaveClass(/is-playing/);await expect.poll(()=>player.locator('audio').evaluate(el=>el.currentTime)).toBeGreaterThan(.2);
  expect(await player.locator('audio').evaluate(el=>el.error)).toBeNull();
+});
+
+test('damaged native recording recovers PCM and plays both before and after delivery',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ await setup(page);await expect(page.locator('#dockChatInput')).toBeEnabled();
+ let uploaded=null;
+ await page.route('**/api/dm/upload?**',async route=>{
+  uploaded=route.request().postDataBuffer();
+  // WebKit's protocol omits binary XHR bodies; inspect the exact File passed to send.
+  if(!uploaded || !uploaded.length)uploaded=Buffer.from(await page.evaluate(async()=>Array.from(new Uint8Array(await window.__roundtripUploadFile.arrayBuffer()))));expect(route.request().url()).toContain('mime_type=audio%2Fwav');
+  return route.fulfill({json:{ok:true,storage_path:'chat/roundtrip.wav',public_url:'https://example.invalid/roundtrip.wav',kind:'audio',mime_type:'audio/wav'}});
+ });
+ await page.route('https://example.invalid/roundtrip.wav',route=>route.fulfill({contentType:'audio/wav',body:uploaded}));
+ await page.evaluate(()=>{
+  const nativeSend=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(file){window.__roundtripUploadFile=file;return nativeSend.call(this,file);};
+  Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{async getUserMedia(){
+   const ctx=new AudioContext();await ctx.resume();const oscillator=ctx.createOscillator(),gain=ctx.createGain(),dest=ctx.createMediaStreamDestination();
+   oscillator.frequency.value=440;gain.gain.value=.2;oscillator.connect(gain);gain.connect(dest);oscillator.start();window.__roundtripContext=ctx;return dest.stream;
+  }}});
+  window.MediaRecorder=class{static isTypeSupported(){return true;}constructor(){this.state='inactive';this.mimeType='audio/mp4';}start(){this.state='recording';}stop(){this.state='inactive';this.ondataavailable({data:new Blob(['damaged MP4 container'],{type:'audio/mp4'})});this.onstop();}};
+  const prior=window.xtjProtectedFetch;window.__deliveredVoice=null;
+  window.xtjProtectedFetch=async(url,options={})=>{
+   if(url.includes('/api/dm/send')){
+    const body=JSON.parse(options.body);window.__deliveredVoice={id:'123e4567-e89b-42d3-a456-000000000099',user_name:'tester',media_url:'peer',created_at:new Date().toISOString(),content:JSON.stringify({type:'dm',text:'',media:{kind:'audio',url:'https://example.invalid/roundtrip.wav',mimeType:body.mime_type,duration:body.voice_duration}})};
+    return new Response(JSON.stringify({ok:true,message:window.__deliveredVoice}));
+   }
+   if(url.includes('/api/dm/messages')&&window.__deliveredVoice)return new Response(JSON.stringify({ok:true,data:[window.__deliveredVoice],has_more:false}));
+   return prior(url,options);
+  };
+ });
+ await page.locator('#chatVoiceButton').click();await expect(page.locator('#chatRecordingIndicator')).toBeVisible();
+ await expect(page.locator('#chatRecordingTimer')).toHaveText('00:01');await page.waitForTimeout(250);
+ await page.locator('#chatVoiceButton').click();await expect(page.locator('#dockChatFilePreview')).toBeVisible();
+ await page.locator('#dockChatSendBtn').click();await expect.poll(()=>uploaded?.length||0).toBeGreaterThan(1000);
+ expect(uploaded.subarray(0,4).toString()).toBe('RIFF');expect(uploaded.subarray(8,12).toString()).toBe('WAVE');
+ await expect(page.locator('#dockChatMessages [data-message-id="123e4567-e89b-42d3-a456-000000000099"]')).toBeVisible();
+ const player=page.locator('#dockChatMessages .chat-voice-player');await expect(player).toBeVisible();
+ await player.locator('button').click();
+ await expect.poll(()=>player.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThan(.2);
+ const audio=await page.evaluate(async base64=>{const bytes=await window.__roundtripContext.decodeAudioData(Uint8Array.from(atob(base64),c=>c.charCodeAt(0)).buffer);const values=bytes.getChannelData(0);let power=0;for(const value of values)power+=value*value;return {duration:bytes.duration,rms:Math.sqrt(power/values.length)};},uploaded.toString('base64'));
+ expect(audio.duration).toBeGreaterThan(.7);expect(audio.rms).toBeGreaterThan(.02);
+ await player.locator('button').click();
+ await page.evaluate(()=>{window.__xtjReleaseDmLocalPreview(document.querySelector('#dockChatMessages .msg-audio').src);window.openChat('other-peer');});
+ await expect(page.locator('#dockChatInput')).toBeEnabled();await page.evaluate(()=>window.openChat('peer'));
+ await expect(player.locator('audio')).toHaveAttribute('src','https://example.invalid/roundtrip.wav');
+ await player.locator('button').click();await expect.poll(()=>player.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThan(.2);
+ expect(await player.locator('audio').evaluate(a=>a.error)).toBeNull();
+ await page.evaluate(()=>window.__roundtripContext.close());
+});
+
+test('undecodable recording without PCM is rejected before upload and restores input',async({page})=>{
+ await fakeMic(page);await setup(page);await expect(page.locator('#dockChatInput')).toBeEnabled();
+ await page.evaluate(()=>{MediaRecorder.prototype.stop=function(){this.state='inactive';this.ondataavailable({data:new Blob(['broken'],{type:'audio/mp4'})});this.onstop();};});
+ await page.locator('#chatVoiceButton').click();await expect(page.locator('#chatRecordingIndicator')).toBeVisible();await page.locator('#chatVoiceButton').click();
+ await expect(page.locator('#dockChatInput')).toBeEnabled();await expect(page.locator('#chatRecordingIndicator')).toBeHidden();
+ await expect(page.locator('#dockChatFilePreview')).toBeHidden();
+ expect(await page.evaluate(()=>window.__chatTestCalls.some(call=>call.url.includes('/api/dm/send')))).toBe(false);
 });

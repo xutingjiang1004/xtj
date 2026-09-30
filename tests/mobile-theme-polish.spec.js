@@ -81,7 +81,9 @@ for (const [width, height] of [[320, 700], [390, 844], [430, 932], [844, 390]]) 
     await expect.poll(() => header.evaluate(n => n.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
     await page.screenshot({ path: info.outputPath(`mobile-${width}-light.png`) });
     await page.evaluate(() => window.XTJThemeController.setMode('dark'));
-    await expect(page.locator('html')).not.toHaveClass(/theme-crossfade/);
+    await expect(page.locator('html')).not.toHaveClass(/theme-switching/);
+    await expect(page.locator('#postVisibility')).toHaveCSS('appearance','none');
+    await expect(page.locator('#postVisibility')).toHaveCSS('background-color','rgb(32, 40, 50)');
     await page.screenshot({ path: info.outputPath(`mobile-${width}-dark.png`) });
   });
 }
@@ -96,12 +98,17 @@ test('slider follows forward/reverse movement before release, with transparent r
   await page.mouse.move(x + 11, y, { steps: 4 });
   await expect(toggle).toHaveClass(/is-dragging/);
   const middle = await orb.boundingBox();
+  const middlePaint = await page.locator('#feed .post').first().evaluate(n => getComputedStyle(n).color);
+  expect(middlePaint).not.toBe('rgba(0, 0, 0, 0)');
+  await expect(page.locator('#pubBtn')).toHaveCSS('color','rgb(255, 255, 255)');
+  expect(await page.evaluate(() => Number(document.documentElement.style.getPropertyValue('--xtj-theme-darkness')))).toBeCloseTo(.5,2);
   expect(middle.x - start.x).toBeGreaterThan(9);
   expect(middle.x - start.x).toBeLessThan(13);
   await expect(toggle.locator('.theme-symbol-moon')).toHaveCSS('opacity', '0.5');
   await expect(toggle.locator('.theme-symbol-sun')).toHaveCSS('opacity', '0.5');
   await page.screenshot({ path: info.outputPath('theme-mid-drag.png') });
   await page.mouse.move(x + 5, y);
+  await expect.poll(() => page.locator('#feed .post').first().evaluate(n => getComputedStyle(n).color)).not.toBe(middlePaint);
   await expect.poll(() => orb.evaluate(el => el.getBoundingClientRect().x)).toBeLessThan(start.x + 7);
   await page.mouse.move(x + 30, y);
   await page.mouse.up();
@@ -139,7 +146,6 @@ test('pointer cancellation preserves the original mode and does not turn a verti
   await page.mouse.down();
   await page.mouse.move(x + 1, y + 20);
   await page.mouse.up();
-  await toggle.dispatchEvent('click', { detail: 1 });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 });
 
@@ -163,7 +169,7 @@ test('fast reversals, keyboard, system preference and stored mode stay synchroni
   expect(await page.evaluate(() => localStorage.getItem('xtj_theme'))).toBe('light');
 });
 
-test('every sampled frame resolves all control colors together, with no delayed button repaint', async ({ page }, info) => {
+test('one animation clock blends controls and settles without a delayed repaint', async ({ page }, info) => {
   await setup(page);
   const result = await page.evaluate(async () => {
     const nodes = [document.body, document.querySelector('.post'), document.getElementById('publishBox'),
@@ -177,22 +183,35 @@ test('every sampled frame resolves all control colors together, with no delayed 
     let firstDarkFrame = null;
     window.XTJThemeController.setMode('dark');
     await new Promise(resolve => {
+      function schedule() {
+        let done=false, raf, timer;
+        const run=()=>{if(done)return;done=true;cancelAnimationFrame(raf);clearTimeout(timer);frame();};
+        raf=requestAnimationFrame(run);timer=setTimeout(run,40);
+      }
       function frame() {
         if (document.documentElement.dataset.theme === 'dark') {
           if (firstDarkFrame === null) firstDarkFrame = performance.now();
           samples.push({ colors: colors(), time: performance.now() - start,
+            progress: Number(document.documentElement.style.getPropertyValue('--xtj-theme-darkness') || 1),
+            settled: !document.documentElement.classList.contains('theme-switching'),
             durations: nodes.map(n => getComputedStyle(n).transitionDuration) });
         }
         // View transitions can suspend rAF, especially in software-rendered
         // WebKit. Sample a fixed number of actual frames after capture resumes.
-        if ((samples.length < 12 || firstDarkFrame === null || performance.now() - firstDarkFrame < 500) && performance.now() - start < 10000) requestAnimationFrame(frame); else resolve();
+        if ((samples.filter(sample => sample.settled).length < 4 || firstDarkFrame === null || performance.now() - firstDarkFrame < 500) && performance.now() - start < 10000) schedule(); else resolve();
       }
-      requestAnimationFrame(frame);
+      schedule();
     });
     return { samples, final: colors() };
   });
   expect(result.samples.length).toBeGreaterThan(3);
-  for (const sample of result.samples) expect(sample.colors).toEqual(result.final);
+  expect(result.samples.some(sample => sample.progress > 0 && sample.progress < 1)).toBe(true);
+  const settled = result.samples.filter(sample => sample.settled);
+  expect(settled.length).toBeGreaterThan(2);
+  for (const sample of settled) expect(sample.colors).toEqual(result.final);
+  for (const sample of result.samples.filter(sample => !sample.settled)) {
+    for (const duration of sample.durations) expect(duration).toBe('0s');
+  }
   await page.screenshot({ path: info.outputPath('theme-final-dark.png') });
 });
 
@@ -281,4 +300,34 @@ test('signed-out navigation also fits a 320px screen', async ({ page }) => {
   await expect(page.locator('#unauthUI')).toBeVisible();
   const bounds = await page.locator('.posts-nav button:visible').evaluateAll(nodes => nodes.map(n => n.getBoundingClientRect().toJSON()));
   for (const b of bounds) { expect(b.x).toBeGreaterThanOrEqual(0); expect(b.right).toBeLessThanOrEqual(320); }
+});
+
+for (const [width,height] of [[744,1133],[1194,834],[1440,900]]) {
+ test(`photo toolbar scrolls away with real photo cards at ${width}px`,async({page})=>{
+  await setup(page,width,height);await page.evaluate(()=>window.switchDockTab('ai',true));
+  await page.waitForFunction(()=>typeof window.renderPhotoWallWithoutReload==='function');
+  await page.evaluate(()=>{
+   window.photoWallData=Array.from({length:40},(_,i)=>({id:'scroll-photo-'+i,cloudId:'scroll-photo-'+i,imageUrl:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#62aa88"/></svg>'),mediaKind:'image',mimeType:'image/png',width:300,height:400,created_at:new Date(2026,8,30-i).toISOString()}));
+   window.renderPhotoWallWithoutReload();
+  });
+  const header=page.locator('#panelAi .photo-wall-header'),cards=page.locator('#photoGrid .photo-wall-item');
+  await expect(header).toBeVisible();await expect(cards.first()).toBeVisible();await expect(header).toHaveCSS('position','relative');
+  const before=await header.boundingBox();
+  const delta=await header.evaluate(header=>{let panel=header.parentElement;while(panel&&(!/auto|scroll/.test(getComputedStyle(panel).overflowY)||panel.scrollHeight-panel.clientHeight<250))panel=panel.parentElement;if(!panel)throw new Error('Photo scroll container missing');const start=panel.scrollTop;panel.scrollTop=start+320;return panel.scrollTop-start;});
+  expect(delta).toBeGreaterThan(200);
+  await expect.poll(async()=>{const box=await header.boundingBox();return before.y-box.y;}).toBeGreaterThan(delta-2);
+  expect((await header.boundingBox()).y+before.height).toBeLessThan(0);
+ });
+}
+
+test('suspended Safari animation frames cannot leave theme switching frozen',async({page})=>{
+ await setup(page);
+ await page.evaluate(()=>{window.requestAnimationFrame=()=>0;window.XTJThemeController.setMode('dark');});
+ await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+ await expect(page.locator('html')).not.toHaveClass(/theme-switching/);
+ await expect(page.locator('#xtjThemePaint')).toHaveCount(0);
+ await expect(page.locator('#themeToggle')).toHaveAttribute('aria-pressed','true');
+ expect(await page.locator('#feed .post').first().evaluate(n=>getComputedStyle(n).color)).toBe('rgb(243, 244, 248)');
+ await page.evaluate(()=>{Object.defineProperty(visualViewport,'offsetTop',{value:24,configurable:true});Object.defineProperty(visualViewport,'height',{value:640,configurable:true});visualViewport.dispatchEvent(new Event('resize'));});
+ await expect.poll(()=>page.locator('.app-container').evaluate(n=>Math.round(n.getBoundingClientRect().top))).toBe(24);
 });

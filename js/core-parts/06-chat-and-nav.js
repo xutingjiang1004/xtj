@@ -1409,7 +1409,8 @@
                     // 已读状态 / 撤回状态 / 媒体地址 必须进签名：这些变化时该行才重建
                     getDMMessageReadAt(message),
                     payload.withdrawn ? 1 : 0,
-                    (payload.media && payload.media.url) ? payload.media.url : ''
+                    (payload.media && payload.media.url) ? payload.media.url : '',
+                    String(message && message.__localPreviewUrl || '')
                 ].join('~');
             }
 
@@ -2483,15 +2484,8 @@
                 var mediaPayload = null;
                 var mediaW = 0, mediaH = 0;
                 if (file) {
-                    // ★ 2026-09-27 修复（审计 M4：视频/音频的 localPreviewUrl 泄漏 ≤50MB blob）：
-                    //   旧实现对**所有类型**无条件 `URL.createObjectURL(file)`，但只有
-                    //   `mediaKind === 'image'` 才进释放路径（成功分支里 `localPreviewUrl &&
-                    //   mediaKind === 'image'` 才把 blob 挂到消息上）。视频/音频的这个 objectURL
-                    //   **从不被任何气泡引用**（video/audio 气泡用的是远端 safeVideoSrc/safeAudioSrc，
-                    //   见下方 buildDockChatBodyMarkup），也没有任何释放点 → 每发一个视频/音频
-                    //   就泄漏一个 ≤50MB 的 blob，直到刷新页面。
-                    //   核对结论：video/audio 气泡**不依赖**这个本地预览（它们不读 __localPreviewUrl），
-                    //   故选方案 (a) 最干净 —— 只对 image 创建 objectURL，其余类型返回 ''。
+                    // Each media bubble owns its local preview until delivery/cleanup.
+                    // Keep recorded audio playable immediately, without waiting for storage.
                     if (['image','audio','video'].includes(mediaKind)) {
                         try {
                             localPreviewUrl = URL.createObjectURL(file);
@@ -3755,11 +3749,13 @@
                 _chatVoiceSeq++;
                 if (typeof window.__xtjCancelChatVoiceHold==='function') window.__xtjCancelChatVoiceHold();
                 document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
+                document.getElementById('chatRecordingIndicator').hidden=true;
+                document.getElementById('chatRecordingIndicator').classList.remove('is-cancelling');
                 if (_chatVoiceHold) _chatVoiceHold.active=false;
                 var voice = _chatVoice; _chatVoice = null;
                 setChatAudioSession('auto');
                 if (voice) {
-                    voice.cancelled = true; clearInterval(voice.timer); clearTimeout(voice.limit);
+                    voice.cancelled = true; stopChatVoiceMeter(voice); if (voice.meter) voice.meter.chunks=[]; clearInterval(voice.timer); clearTimeout(voice.limit);
                     if (voice.recognition) { try { voice.recognition.abort(); } catch (_) {} }
                     if (voice.recorder && voice.recorder.state !== 'inactive') { try { voice.recorder.stop(); } catch (_) {} }
                     voice.stream.getTracks().forEach(function(track) { track.stop(); });
@@ -3771,6 +3767,80 @@
                 var button = document.getElementById('chatVoiceButton'); if (button) { setChatVoiceButton(false); }
                 var cancel = document.getElementById('chatVoiceCancel'); if (cancel) cancel.hidden = true;
                 var status = document.getElementById('chatVoiceStatus'); if (status) status.hidden = true;
+            }
+            function stopChatVoiceMeter(voice) {
+                if (!voice || !voice.meter) return;
+                var meter=voice.meter; cancelAnimationFrame(meter.frame);
+                try { meter.source.disconnect(); meter.processor.disconnect(); meter.gain.disconnect(); } catch (_) {}
+                meter.processor.onaudioprocess=null;
+                meter.context.close().catch(function() {});
+            }
+            function startChatVoiceMeter(voice) {
+                var indicator=document.getElementById('chatRecordingIndicator');
+                indicator.hidden=false;
+                var Context=window.AudioContext || window.webkitAudioContext;
+                if (!Context) return;
+                try {
+                    var context=new Context(), source=context.createMediaStreamSource(voice.stream);
+                    // Keep a mono PCM backup: an interrupted WebKit MP4 finalization
+                    // must not leave the recipient with an undecodable voice message.
+                    var processor=context.createScriptProcessor(4096,1,1), gain=context.createGain(); gain.gain.value=0;
+                    var meter=voice.meter={context:context,source:source,processor:processor,gain:gain,chunks:[],samples:0,level:0,frame:0};
+                    source.connect(processor); processor.connect(gain); gain.connect(context.destination);
+                    processor.onaudioprocess=function(event) {
+                        if (voice.cancelled || _chatVoice!==voice) return;
+                        var samples=event.inputBuffer.getChannelData(0), energy=0;
+                        if (meter.samples<context.sampleRate*300) { meter.chunks.push(new Float32Array(samples)); meter.samples+=samples.length; }
+                        for (var i=0;i<samples.length;i++) energy+=samples[i]*samples[i];
+                        meter.level=Math.min(1,Math.sqrt(energy/samples.length)*5);
+                    };
+                    context.resume().catch(function() {});
+                    var bars=indicator.querySelectorAll('i');
+                    function draw() {
+                        if (_chatVoice!==voice || voice.cancelled) return;
+                        bars.forEach(function(bar,index) { bar.style.setProperty('--record-level',String(Math.max(.16,meter.level*(.5+.5*Math.sin(performance.now()/120+index))))); });
+                        meter.frame=requestAnimationFrame(draw);
+                    }
+                    meter.frame=requestAnimationFrame(draw);
+                } catch (_) { if (context) context.close().catch(function() {}); /* CSS wave remains visible. */ }
+            }
+            function encodeChatVoiceWav(channels,sampleRate,length) {
+                // Mono 24 kHz PCM is playable by Safari/Chrome without container or
+                // codec negotiation, and five minutes remains below the 50 MB cap.
+                var rate=Math.min(24000,sampleRate), count=Math.floor(length*rate/sampleRate);
+                var bytes=new ArrayBuffer(44+count*2), view=new DataView(bytes);
+                function word(offset,text) { for(var i=0;i<text.length;i++)view.setUint8(offset+i,text.charCodeAt(i)); }
+                word(0,'RIFF'); view.setUint32(4,36+count*2,true); word(8,'WAVE'); word(12,'fmt ');
+                view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,1,true);
+                view.setUint32(24,rate,true); view.setUint32(28,rate*2,true); view.setUint16(32,2,true); view.setUint16(34,16,true);
+                word(36,'data'); view.setUint32(40,count*2,true);
+                for(var i=0;i<count;i++) {
+                    var position=i*sampleRate/rate, index=Math.floor(position), fraction=position-index, sample=0;
+                    channels.forEach(function(channel) { sample+=(channel[index]||0)*(1-fraction)+(channel[Math.min(index+1,length-1)]||0)*fraction; });
+                    sample=Math.max(-1,Math.min(1,sample/channels.length)); view.setInt16(44+i*2,sample<0 ? sample*32768 : sample*32767,true);
+                }
+                var wav=new Blob([bytes],{type:'audio/wav'}); wav.__voiceDuration=count/rate; return wav;
+            }
+            async function prepareChatVoiceFile(blob,voice) {
+                var Context=window.OfflineAudioContext || window.webkitOfflineAudioContext, decoded;
+                try {
+                    if (!Context) throw new Error('Audio decoder unavailable');
+                    var timeout;
+                    try { decoded=await Promise.race([new Context(1,1,24000).decodeAudioData(await blob.arrayBuffer()),new Promise(function(_,reject){timeout=setTimeout(function(){reject(new Error('Audio decode timeout'));},8000);})]); }
+                    finally { clearTimeout(timeout); }
+                    if (!decoded.length || !Number.isFinite(decoded.duration) || decoded.duration>302) throw new Error('Invalid audio duration');
+                    var channels=[]; for(var i=0;i<decoded.numberOfChannels;i++)channels.push(decoded.getChannelData(i));
+                    blob=encodeChatVoiceWav(channels,decoded.sampleRate,decoded.length);
+                } catch (error) {
+                    var meter=voice.meter;
+                    if (!meter || meter.samples<meter.context.sampleRate*.4) throw error;
+                    var pcm=new Float32Array(meter.samples), offset=0;
+                    meter.chunks.forEach(function(chunk){pcm.set(chunk,offset);offset+=chunk.length;});
+                    blob=encodeChatVoiceWav([pcm],meter.context.sampleRate,pcm.length);
+                }
+                var file=new File([blob],'voice-'+Date.now()+'.wav',{type:'audio/wav'});
+                file.__voiceDuration=Math.max(1,Math.round(blob.__voiceDuration));
+                return file;
             }
             function setChatVoiceButton(recording) {
                 var button=document.getElementById('chatVoiceButton'); if (!button) return;
@@ -3794,7 +3864,7 @@
                     document.querySelectorAll('#dockChatMessages audio').forEach(function(audio) { audio.pause(); });
                     setChatAudioSession('play-and-record');
                     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); setChatAudioSession('auto'); return; }
+                    if ((hold && (!_chatVoiceHold || !_chatVoiceHold.active)) || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) { stream.getTracks().forEach(function(t) { t.stop(); }); if (seq===_chatVoiceSeq && !_chatVoice) setChatAudioSession('auto'); return; }
                     // Safari can advertise a MIME type but reject its recorder: try the
                     // remaining supported formats, then its native default.
                     var types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus'].filter(function(t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); });
@@ -3808,22 +3878,35 @@
                     var input = document.getElementById('dockChatInput'), base = input.value, transcript = '';
                     var voice = _chatVoice = { recorder: recorder, stream: stream, cancelled: false, hold:!!hold, base: base, started: Date.now() };
                     recorder.ondataavailable = function(event) { if (event.data.size) chunks.push(event.data); };
-                    recorder.onerror = function() { cancelChatVoice(); showToast('录音失败，请重试'); };
-                    recorder.onstop = function() {
+                    recorder.onerror = function() { if (seq!==_chatVoiceSeq || _chatVoice!==voice) return; cancelChatVoice(); showToast('录音失败，请重试'); };
+                    recorder.onstop = async function() {
+                        stopChatVoiceMeter(voice);
                         if (voice.recognition) { try { voice.recognition.stop(); } catch (_) {} }
                         stream.getTracks().forEach(function(t) { t.stop(); }); clearInterval(voice.timer); clearTimeout(voice.limit);
-                        if (!_chatVoice || _chatVoice === voice) setChatAudioSession('auto');
+                        if (seq===_chatVoiceSeq && (!_chatVoice || _chatVoice === voice)) setChatAudioSession('auto');
                         if (voice.cancelled || seq !== _chatVoiceSeq || owner !== window.currentUser || peer !== dockChatActiveUser) return;
-                        _chatVoice = null; input.disabled = false;
+                        _chatVoice = null; input.disabled = true;
                         document.querySelector('#panelChat .chat-input-wrap').classList.remove('is-recording');
+                        document.getElementById('chatRecordingIndicator').hidden=true;
+                        document.getElementById('chatRecordingIndicator').classList.remove('is-cancelling');
                         setChatVoiceButton(false);
                         document.getElementById('chatVoiceButton').classList.remove('recording'); document.getElementById('chatVoiceCancel').hidden = true;
                         var mime = String(recorder.mimeType || (chunks[0] && chunks[0].type) || 'audio/mp4').split(';')[0];
                         var blob = new Blob(chunks, { type: mime });
-                        if (voice.hold && Date.now()-voice.started<600) { document.getElementById('chatVoiceStatus').hidden=true; showToast('录音太短，请再说一次'); return; }
-                        if (!blob.size || blob.size > 50 * 1024 * 1024) { showToast('录音无内容或超过 50MB，请重录'); return; }
-                        _chatRecordedFile = new File([blob], 'voice-' + Date.now() + (mime.indexOf('webm') >= 0 ? '.webm' : mime.indexOf('ogg') >= 0 ? '.ogg' : '.m4a'), { type: mime });
-                        _chatRecordedFile.__voiceDuration = Math.max(1,Math.round((Date.now()-voice.started)/1000));
+                        if (voice.hold && Date.now()-voice.started<600) { input.disabled=false; document.getElementById('chatVoiceStatus').hidden=true; showToast('录音太短，请再说一次'); return; }
+                        if ((!blob.size && !(voice.meter && voice.meter.samples)) || blob.size > 50 * 1024 * 1024) { input.disabled=false; document.getElementById('chatVoiceStatus').hidden=true; showToast('录音无内容或超过 50MB，请重录'); return; }
+                        document.getElementById('chatVoiceStatus').textContent='正在准备语音…';
+                        try {
+                            var prepared=await prepareChatVoiceFile(blob,voice);
+                            if (seq!==_chatVoiceSeq || owner!==window.currentUser || peer!==dockChatActiveUser) return;
+                            _chatRecordedFile=prepared;
+                        } catch (_) {
+                            if (seq===_chatVoiceSeq) { document.getElementById('chatVoiceStatus').hidden=true; showToast('录音未生成可播放的音频，请重新录制'); }
+                            return;
+                        } finally {
+                            if (voice.meter) voice.meter.chunks=[];
+                            if (seq===_chatVoiceSeq && owner===window.currentUser && peer===dockChatActiveUser) { input.disabled=false; }
+                        }
                         showDockChatFilePreview(_chatRecordedFile);
                         if (voice.hold) { sendDockChatMessage(); return; }
                         document.getElementById('chatVoiceStatus').textContent = transcript ? '录音完成 · 转写文字可编辑后发送' : '录音完成 · 可补充文字后发送';
@@ -3832,7 +3915,10 @@
                     // Record audio alone; the existing authenticated server queue transcribes after sending.
                     input.disabled = true; setChatVoiceButton(true); document.getElementById('chatVoiceButton').classList.add('recording');
                     document.getElementById('chatVoiceCancel').hidden = false; document.getElementById('chatVoiceStatus').hidden = false;
-                    voice.timer = setInterval(function() { if (voice.hold && _chatVoiceHold && _chatVoiceHold.cancel) return; document.getElementById('chatVoiceStatus').textContent = (voice.hold ? '松开发送 · 上滑取消 · ' : '正在录音 · ') + Math.floor((Date.now() - voice.started) / 1000) + ' 秒'; }, 500);
+                    document.getElementById('chatVoiceStatus').textContent=voice.hold ? '正在录音 · 松开发送 · 上滑取消' : '正在录音 · 点击结束';
+                    document.getElementById('chatRecordingTimer').textContent='00:00';
+                    startChatVoiceMeter(voice);
+                    voice.timer = setInterval(function() { var elapsed=Math.floor((Date.now()-voice.started)/1000); document.getElementById('chatRecordingTimer').textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(elapsed%60).padStart(2,'0'); if (voice.hold && _chatVoiceHold && _chatVoiceHold.cancel) return; document.getElementById('chatVoiceStatus').textContent = (voice.hold ? '松开发送 · 上滑取消 · ' : '正在录音 · ') + Math.floor((Date.now() - voice.started) / 1000) + ' 秒'; }, 500);
                     document.querySelector('#panelChat .chat-input-wrap').classList.add('is-recording');
                     voice.limit = setTimeout(function() { if (recorder.state === 'recording') recorder.stop(); }, 300000);
                     // Request the complete container on stop: Safari's MP4 fragments can be unplayable when interrupted.
@@ -3877,7 +3963,7 @@
                     if (!press) return;
                     if (!press.active && Math.hypot(event.clientX-press.x,event.clientY-press.y)>10) { finish(true); return; }
                     press.cancel=press.y-event.clientY>65;
-                    if (press.active) { var status=document.getElementById('chatVoiceStatus'); status.textContent=press.cancel ? '松开取消发送' : '松开发送 · 上滑取消'; }
+                    if (press.active) { document.getElementById('chatRecordingIndicator').classList.toggle('is-cancelling',press.cancel); var status=document.getElementById('chatVoiceStatus'); status.textContent=press.cancel ? '松开取消发送' : '松开发送 · 上滑取消'; }
                 });
                 window.addEventListener('pointerup',function(event) { if (press && press.id===event.pointerId) finish(press.cancel); });
                 window.addEventListener('pointercancel',function() { finish(true); });
@@ -3926,7 +4012,7 @@
                                     var body = await response.json();
                                     if (response.ok && body.ok && owner === window.currentUser && peer === dockChatActiveUser && player.isConnected) {
                                         var refreshed = sanitizeUrl(body.url);
-                                        if (refreshed && /^https?:\/\//i.test(refreshed)) { audio.src = refreshed; audio.load(); }
+                                        if (refreshed && /^https?:\/\//i.test(refreshed)) { audio.src = refreshed; audio.load(); await audio.play(); update(); return; }
                                     }
                                 } catch (_) {}
                             }
@@ -3934,7 +4020,7 @@
                         }
                     };
                     ['loadedmetadata','durationchange','play','pause','ended','timeupdate','playing'].forEach(function(event) { audio.addEventListener(event,update); });
-                    audio.addEventListener('ended', function() { setChatAudioSession('auto'); });
+                    audio.addEventListener('ended', function() { if (!_chatVoice && !_chatVoiceStarting) setChatAudioSession('auto'); });
                     audio.addEventListener('waiting',function() { player.classList.add('is-loading'); });
                     audio.addEventListener('error',function() { player.classList.remove('is-playing','is-loading'); duration.textContent='重试'; button.setAttribute('aria-label','重新播放语音'); });
                     update();
@@ -5424,14 +5510,17 @@
                         }
                     });
                     if (window.visualViewport) {
-                        var _iosVvTicking = false;
+                        var _iosVvTicking = false, _iosVvFrame=0, _iosVvTimer=0;
                         function _iosVvHandler() {
                             if (!_iosVvTicking) {
                                 _iosVvTicking = true;
-                                requestAnimationFrame(function() {
+                                function settleViewport() {
+                                    if (!_iosVvTicking) return;
+                                    _iosVvTicking=false; cancelAnimationFrame(_iosVvFrame); clearTimeout(_iosVvTimer);
                                     updateIOSViewport();
-                                    _iosVvTicking = false;
-                                });
+                                }
+                                _iosVvFrame=requestAnimationFrame(settleViewport);
+                                _iosVvTimer=setTimeout(settleViewport,40);
                             }
                         }
                         window.visualViewport.addEventListener('resize', _iosVvHandler);

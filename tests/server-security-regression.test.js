@@ -491,3 +491,12 @@ test('P2-11: 头像更新路由的接线与"按引用确认后才删文件"（�
   assert.match(block, /limit\(AVATAR_CLEANUP_MAX_ROWS\)/);
   assert.match(source, /AVATAR_UPDATE_LOCK_WAIT_MS = \d+/);
 });
+
+test('owned voice/video object URLs are allowed as media without granting blob scripts', () => {
+  for (const policy of [sharedSecurityHeaders.CSP, sharedSecurityHeaders.CSP_LOCAL]) {
+    const media = policy.split(';').map(s => s.trim()).find(s => s.startsWith('media-src '));
+    assert.match(media, /(?:^|\s)blob:(?:\s|$)/);
+    const scripts = policy.split(';').map(s => s.trim()).find(s => s.startsWith('script-src '));
+    assert.doesNotMatch(scripts, /(?:^|\s)blob:(?:\s|$)/);
+  }
+});
