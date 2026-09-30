@@ -445,7 +445,7 @@ const ADMIN_NAME = "xxz";
             // P7: 显式四态头像缓存的内存有效期（has_avatar 重查间隔、confirmed_none/fetch_failed 的 TTL）
             const AVATAR_FETCH_TTL_MS = 5 * 60 * 1000; // 5 分钟
             const USER_SESSION_KEY = "xtj_user_session";
-            const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+            const USER_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
             var memoryUserToken = '';
             var memoryUserTokenIssuedAt = 0;
@@ -474,8 +474,9 @@ const ADMIN_NAME = "xxz";
                 return token;
             }
 
-            function setUserToken(token) {
+            function setUserToken(token, userName) {
                 if (token) {
+                    if (userName) _lastRefreshUser = String(userName).trim();
                     // ★ 修复：拿到有效 token 说明会话已就绪，清除 refresh 冷却（登录后立即可刷新）
                     try { _refreshCooldownUntil = 0; } catch (e) {}
                     memoryUserToken = String(token);
@@ -514,6 +515,9 @@ const ADMIN_NAME = "xxz";
                 var shouldBroadcast = options.broadcast !== false;
                 var reason = options.reason || 'manual';
                 var tokenForRevocation = getUserToken();
+                _lastRefreshUser = '';
+                window.__xtjServerIsAdmin = false;
+                window.__xtjServerIsAdminOwner = '';
                 clearUserToken();
                 lastUserSessionWriteAt = 0;
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
@@ -531,6 +535,7 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理头像缓存
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; window._xtjCanonicalUser = ''; window._xtjAuthState = 'unauthenticated'; } catch(e) {}
+                try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
@@ -628,6 +633,23 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
             var _authStateEpoch = 0;
             var _refreshPromise = null;
+            var _sessionRequestQueue = Promise.resolve();
+            function withSessionRequestLock(task) {
+                // Cookies are shared between tabs. Serialize login and refresh
+                // so a late refresh response cannot overwrite a newer login.
+                if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
+                    return navigator.locks.request('xtj-user-session-cookie', task);
+                }
+                var result = _sessionRequestQueue.then(task, task);
+                _sessionRequestQueue = result.catch(function() {});
+                return result;
+            }
+            window.__xtjWithSessionRequestLock = withSessionRequestLock;
+            window.__xtjBeginAuthIdentityChange = function() {
+                _authStateEpoch++;
+                _refreshPromise = null;
+                _refreshCooldownUntil = 0;
+            };
             // ★ 修复：未登录/会话失效（401/403）后进入 30 秒冷却期，
             // 避免每次切换导航都重复发起 refresh 请求（此前产生 401 噪音与冗余请求）。
             var _refreshCooldownUntil = 0;
@@ -638,7 +660,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (_refreshCooldownUntil && Date.now() < _refreshCooldownUntil) {
                     return { token: '', user_name: '' };
                 }
-                _refreshPromise = (async function() {
+                _refreshPromise = withSessionRequestLock(async function() {
                     // ★★ 2026-09-22：瞬时故障不再判定为「登录已失效」。
                     //   旧实现只要拿到 5xx / 网络异常就返回空 token，上层随即
                     //   clearAllAuthState + 弹登录框 —— 这就是"刷新一下页面
@@ -663,7 +685,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 var data = await res.json().catch(function(){ return {}; });
                                 if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                                 if (data && data.token) {
-                                    setUserToken(data.token);
+                                    setUserToken(data.token, data.user_name);
                                     // ★ 使用服务端返回的规范 user_name
                                     var serverUserName = (data.user_name || '').trim();
                                     if (serverUserName) {
@@ -698,7 +720,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     // 两次都失败：仍**不主动登出**——可能只是后端暂时不可用，
                     // 保留本地会话，下次交互/可见性变化时自然重试。
                     return { token: '', user_name: '' };
-                })();
+                });
                 // ★ 审计修复（P1）：Promise settle 后必须清空缓存变量。旧实现从不
                 //   重置 _refreshPromise，首次刷新完成后所有后续调用永远命中
                 //   `if (_refreshPromise) return _refreshPromise`，拿到的都是第一次
@@ -706,7 +728,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 //   用户被强制登出，30 秒冷却逻辑也被短路。此处仅保留"在途去重"
                 //   语义（settle 前的并发调用共享同一 Promise）。内部实现从不
                 //   reject（全路径 try/catch 返回对象），then 双回调为防御性兜底。
-                var _clearRefreshPromise = function() { _refreshPromise = null; };
+                var completedRefresh = _refreshPromise;
+                var _clearRefreshPromise = function() { if (_refreshPromise === completedRefresh) _refreshPromise = null; };
                 _refreshPromise.then(_clearRefreshPromise, _clearRefreshPromise);
                 return _refreshPromise;
             }
@@ -807,6 +830,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                         }
                     } catch (_eCd2) {}
                     var token = await ensureUserToken();
+                    // A protected background call may have started for A while
+                    // the user was logging in as B. Its late refresh is no
+                    // longer evidence about B's session and must not clear it.
+                    if (String(currentUser || '') !== userName) return { ok: false, reason: 'identity_changed', token: '', user_name: '' };
                     if (token) {
                         // ★ 验证 token 身份与 UI 身份一致
                         // 优先使用刷新时服务端返回的规范 user_name
@@ -1260,9 +1287,11 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
         if (currentUser) {
             loadCurrentUserInfoSnapshot(currentUser).catch(function() {});
             // 异步验证：尝试用 refresh cookie 获取 token 并校验身份
+            var startupAuthEpoch = _authStateEpoch;
             (async function() {
                 try {
                     var refreshResult = await refreshUserTokenViaCookie();
+                    if (startupAuthEpoch !== _authStateEpoch) return;
                     var serverUser = (refreshResult && refreshResult.user_name) || '';
                     if (serverUser && serverUser !== currentUser) {
                         // Token 身份与会话不一致，清除幽灵登录状态
@@ -1301,7 +1330,9 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             //   做二次确认；仍确证失效才清。期间恢复成功则直接回到 authenticated。
                             try { _refreshCooldownUntil = 0; } catch (_eCd2) {}
                             await new Promise(function (r) { setTimeout(r, 1500); });
+                            if (startupAuthEpoch !== _authStateEpoch) return;
                             var _recheck = await refreshUserTokenViaCookie();
+                            if (startupAuthEpoch !== _authStateEpoch) return;
                             if (_recheck && _recheck.token) {
                                 _startupAuthVerified = true;
                                 window._xtjAuthState = 'authenticated';
@@ -1724,8 +1755,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 //   写入 window.__xtjServerIsAdmin；一旦该标志已被服务端确认过，就以它为准。
 //   未收到服务端响应前（首屏、离线）保留旧的名字比较，避免管理员界面直接失效。
 function isAdmin() {
-    if (typeof window.__xtjServerIsAdmin === 'boolean') return window.__xtjServerIsAdmin === true;
-    return (currentUser || window.currentUser) === ADMIN_NAME;
+    var owner = String(currentUser || window.currentUser || '');
+    return owner === ADMIN_NAME && window.__xtjServerIsAdminOwner === owner && window.__xtjServerIsAdmin === true;
 }
         function clearFeedCache() {
             try { window.safeStorage.remove(CACHE_KEY); } catch (e) {}
@@ -2353,7 +2384,7 @@ function isAdmin() {
             if (!currentUser) return false;
             if (isAdmin()) return true;
             if (p.user_name && p.user_name === currentUser) return true;
-            return !p.user_name && !!deviceId && !!p.actor_key && p.actor_key === deviceId;
+            return false;
         }
         window.canDeletePost = canDeletePost;
         window.isAdmin = isAdmin;
@@ -2712,6 +2743,7 @@ function isAdmin() {
                 // ★ 2026-09-26（审计 P1-5）：管理员同样要请求一次——服务端会在响应里
                 //   下发权威的 is_admin 标志，前端据此锁定管理员身份，不再只信 localStorage。
                 if (!currentUser) return;
+                var restrictionOwner = currentUser;
                 try {
                     if (typeof API_BASE !== 'string' || !API_BASE) return;
                     var authHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
@@ -2719,12 +2751,16 @@ function isAdmin() {
                         method: 'GET', credentials: 'include', headers: authHeaders || {}
                     }, 10000);
                     var result = await response.json().catch(function() { return {}; });
-                    if (!response.ok || !result.ok) return;
+                    if (!response.ok || !result.ok || currentUser !== restrictionOwner) return;
                     // ★ P1-5：服务端权威身份位。收到后 isAdmin() 必须以它为准，
                     //   localStorage 里的用户名从此不构成管理员凭据。
                     if (typeof result.is_admin === 'boolean') {
+                        var permissionChanged = window.__xtjServerIsAdmin !== result.is_admin;
                         window.__xtjServerIsAdmin = result.is_admin;
+                        window.__xtjServerIsAdminOwner = restrictionOwner;
                         window.__xtjServerIsAdminAt = Date.now();
+                        window.dispatchEvent(new CustomEvent('xtj:permissions-ready'));
+                        if (permissionChanged && typeof renderFeedFromMemoryState === 'function') renderFeedFromMemoryState().catch(function() {});
                     }
                     var prev = JSON.stringify(userRestrictions);
                     var data = result.restrictions;
@@ -3081,6 +3117,7 @@ function isAdmin() {
                 const btn = document.getElementById("loginSubmitBtn");
                 if (btn && btn.disabled) return;
                 if (btn) { btn.disabled = true; btn.textContent = "验证中.."; }
+                if (window.__xtjBeginAuthIdentityChange) window.__xtjBeginAuthIdentityChange();
 
                 try {
                     if (name === ADMIN_NAME) {
@@ -3090,10 +3127,10 @@ function isAdmin() {
                             return;
                         }
                         try {
-                            var loginRes = await apiCall('POST', '/admin/login', {
+                            var loginRes = await window.__xtjWithSessionRequestLock(function() { return apiCall('POST', '/admin/login', {
                                 username: name,
                                 password: pw
-                            });
+                            }); });
                             if (!loginRes || !loginRes.ok) {
                                 showToast((loginRes && loginRes.error) || "管理员登录失败");
                                 return;
@@ -3102,7 +3139,7 @@ function isAdmin() {
                                 showToast("管理员用户会话建立失败", "error");
                                 return;
                             }
-                            setUserToken(loginRes.user_token);
+                            setUserToken(loginRes.user_token, name);
                         } catch (apiErr) {
                             showToast("管理员登录失败: 无法连接后端 API");
                             return;
@@ -3110,16 +3147,15 @@ function isAdmin() {
                     }
 
                     if (name !== ADMIN_NAME) {
-                        var tokenRes = await fetchWithTimeout(API_BASE + '/api/user/login', {
+                        var tokenRes = await window.__xtjWithSessionRequestLock(function() { return fetchWithTimeout(API_BASE + '/api/user/login', {
                             method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
                             body: JSON.stringify({ user_name: name, password: pw, device_id: (typeof getXtjDeviceId === 'function' ? getXtjDeviceId() : '') })
-                        });
+                        }); });
                         var tokenData = await tokenRes.json().catch(function(){ return {}; });
                         if (!tokenRes.ok || !tokenData.token) {
                             showToast(tokenData.error || "账号或密码错误", "error");
                             return;
                         }
-                        setUserToken(tokenData.token);
                         // ★ 使用服务端返回的规范 user_name，禁止使用输入框 name
                         var serverUserName = (tokenData.user_name || '').trim();
                         if (!serverUserName || serverUserName !== name) {
@@ -3128,6 +3164,7 @@ function isAdmin() {
                             showToast("账号认证状态异常，请重新登录", "error");
                             return;
                         }
+                        setUserToken(tokenData.token, serverUserName);
                     }
 
                     // ★ 使用服务端确认的规范身份
@@ -3141,6 +3178,8 @@ function isAdmin() {
                     //   在 auth_pending/unauthenticated，导致会话续写失效、长会话可能被 30 天 TTL 误登出
                     window._xtjAuthState = 'authenticated';
                     window._xtjCanonicalUser = confirmedUser;
+                    window.__xtjServerIsAdmin = false;
+                    window.__xtjServerIsAdminOwner = '';
                     await loadCurrentUserInfoSnapshot(currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function" && confirmedUser !== ADMIN_NAME) {
@@ -3218,18 +3257,19 @@ function isAdmin() {
                 if (btn.disabled) return;
                 btn.disabled = true;
                 btn.textContent = "注册中..";
+                if (window.__xtjBeginAuthIdentityChange) window.__xtjBeginAuthIdentityChange();
 
                 try {
-                    var registerRes = await fetchWithTimeout(API_BASE + '/api/user/register', {
+                    var registerRes = await window.__xtjWithSessionRequestLock(function() { return fetchWithTimeout(API_BASE + '/api/user/register', {
                         method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
                         body: JSON.stringify({ user_name: name, password: pw, email: email || undefined, device_id: (typeof getXtjDeviceId === 'function' ? getXtjDeviceId() : '') })
-                    }, 10000);
+                    }, 10000); });
                     var registerData = await registerRes.json().catch(function(){ return {}; });
                     if (!registerRes.ok || !registerData.token) {
                         showToast(registerData.error || "注册失败，请重试", "error");
                         return;
                     }
-                    setUserToken(registerData.token);
+                    setUserToken(registerData.token, registerData.user_name);
                     // ★ 使用服务端返回的规范 user_name，禁止使用输入框 name
                     var serverUserName = (registerData.user_name || '').trim();
                     if (!serverUserName || serverUserName !== name) {
@@ -13599,6 +13639,44 @@ function renderProfileActivityList(kind) {
                 return '<span class="msg-text">' + escapeHtml(messageText || '') + '</span>';
             }
 
+            function queueDockVoiceTranscription(peer, messages, file, fileId) {
+                var controller = window.XTJVoiceTranscription, owner = currentUser;
+                if (!controller || !owner) return;
+                (messages || []).forEach(function(message) {
+                    var payload = getDMMessagePayload(message) || {};
+                    if (!message.id || message.__optimistic || message.__failed || payload.withdrawn || payload.transcript || !payload.media || payload.media.kind !== 'audio' || isDmMessageLocallyDeleted(message)) return;
+                    controller.enqueue({ owner: owner, peer: peer, id: message.id, sent: message.user_name === owner,
+                        file: fileId === message.id ? file : null,
+                        onState: function(job) {
+                            if (currentUser !== owner || dockChatActiveUser !== peer) return;
+                            var host = document.getElementById('dockChatMessages');
+                            if (!host) return;
+                            Array.from(host.querySelectorAll('.chat-msg-row')).forEach(function(row) {
+                                if (row.dataset.messageId !== String(message.id)) return;
+                                var status = row.querySelector('.chat-transcription-status');
+                                if (!status) return;
+                                status.querySelector('span').textContent = job.label;
+                                var retry = status.querySelector('button');
+                                retry.hidden = job.state !== 'error';
+                                retry.onclick = function(event) { event.stopPropagation(); controller.retry(peer, message.id); };
+                            });
+                        },
+                        onResult: function(text, saved) {
+                            if (currentUser !== owner) return;
+                            var cache = _chatCache[getDockChatCacheKey(peer)] || [];
+                            var target = cache.find(function(row) { return row.id === message.id; });
+                            if (!target) return;
+                            var latest = getDMMessagePayload(target) || {};
+                            if (latest.withdrawn || isDmMessageLocallyDeleted(target)) return;
+                            var stored = saved && getDMMessagePayload(saved);
+                            latest.transcript = stored && stored.transcript || text;
+                            target.content = JSON.stringify(latest);
+                            if (dockChatActiveUser === peer) renderDockMessages(peer, cache, false);
+                        }
+                    });
+                });
+            }
+
                         function buildDockChatRowMarkup(message, avatars, disableAnim) {
                 var sent = message.user_name === currentUser;
                 var avatarHtml = sent ? avatars.mine : avatars.other;
@@ -13658,6 +13736,7 @@ function renderProfileActivityList(kind) {
                 var timeHtml = '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span>';
                 var bubbleBody = buildDockChatBodyMarkup(message);
                 if (!isWithdrawn && payload.transcript) bubbleBody += '<div class="chat-transcript"><small>语音转写</small><span>' + escapeHtml(String(payload.transcript)) + '</span></div>';
+                else if (!isWithdrawn && rowMedia && rowMedia.kind === 'audio' && !message.__optimistic && !message.__failed) bubbleBody += '<div class="chat-transcription-status" role="status"><span>等待语音转写…</span><button type="button" hidden>重新转写</button></div>';
                 if (!isWithdrawn && payload.reply_to) bubbleBody = '<button type="button" class="chat-reply-quote" data-reply-id="' + escapeHtml(String(payload.reply_to.id || '')) + '" aria-label="定位引用的消息"><strong>' + escapeHtml(String(payload.reply_to.sender_name || '消息')) + '</strong><span>' + escapeHtml(String(payload.reply_to.text || '[附件]')) + '</span></button>' + bubbleBody;
                 if (payload.edited_at) timeHtml = '<span class="msg-edited">已编辑</span>' + timeHtml;
                 var bubble, inner;
@@ -13968,6 +14047,7 @@ function renderProfileActivityList(kind) {
                 var signatureKey = userName || '__empty__';
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
+                    queueDockVoiceTranscription(userName, msgs);
                     if (forceScroll) scrollDockChatToLatest();
                     return;
                 }
@@ -14031,6 +14111,7 @@ function renderProfileActivityList(kind) {
                 _chatRenderSignature[signatureKey] = nextSignature;
                 patchDockChatMessageAvatars(userName);
                 bindChatAudioPlayers();
+                queueDockVoiceTranscription(userName, msgs);
                 // ★ 2026-09-26：把仍用本地 blob 显示的图片在后台换成远端地址
                 //   （下载成功才替换，失败则继续显示本地图，绝不降级成按钮）
                 try { if (typeof hydrateDockChatRemoteMedia === 'function') hydrateDockChatRemoteMedia(el); } catch (eHyd) {}
@@ -14539,6 +14620,7 @@ function renderProfileActivityList(kind) {
                         insertedMessage = Object.assign({}, insertedMessage, { __localPreviewUrl: localPreviewUrl });
                     }
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage);
+                    if (mediaKind === 'audio') queueDockVoiceTranscription(targetUser, [insertedMessage], file, insertedMessage.id);
                     if (dockChatActiveUser === targetUser) {
                         renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                         try { if (typeof hydrateDockChatRemoteMedia === 'function') hydrateDockChatRemoteMedia(document.getElementById('dockChatMessages')); } catch (eH) {}

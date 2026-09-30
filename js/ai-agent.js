@@ -11362,7 +11362,7 @@ function showChatMessages() {
     var header = el('div', { class: 'ai-chat-header' });
     // ★ dock 模式：作为移动端 dock 中间 tab 打开（等同首页），无需额外返回按钮，
     //   底部 dock 即导航，可切换到其它板块；其它入口（上下文菜单/桌面）保留返回。
-    if (!S._dockMode) {
+    {
       var backBtn = el('button', { type: 'button', class: 'ai-chat-back', 'aria-label': '返回', text: '‹' });
       backBtn.addEventListener('click', function(ev) {
         ev.preventDefault();
@@ -13344,6 +13344,10 @@ function showChatMessages() {
       notify('AI 页面未加载，请刷新后重试');
       return;
     }
+    // iOS fixes the app container to the visual viewport, creating a stacking
+    // context. Keep AI and the unchanged Dock in that same context.
+    var appContainer = document.querySelector('.app-container');
+    if (appContainer && aiPanel.parentNode !== appContainer) appContainer.appendChild(aiPanel);
     aiPanel.classList.remove('hidden');
     aiPanel.classList.add('active');
     aiPanel.setAttribute('aria-hidden', 'false');

@@ -41,7 +41,7 @@ test('device telemetry is token authenticated and can refresh via the shared hel
 });
 
 test('administrator login receives a separate user access session without browser hash storage', () => {
-  assert.match(core, /setUserToken\(loginRes\.user_token\)/);
+  assert.match(core, /setUserToken\(loginRes\.user_token, name\)/);
   assert.doesNotMatch(core, /ADMIN_TOKEN_KEY/);
 });
 
@@ -66,6 +66,7 @@ test('a refresh response arriving after explicit logout cannot restore the previ
   vm.createContext(sandbox);
   vm.runInContext(source.slice(start,end),sandbox);
   const pending = sandbox.refreshUserTokenViaCookie();
+  await Promise.resolve();
   vm.runInContext('_authStateEpoch++;',sandbox);
   deliver({ok:true,status:200,json:async()=>({token:'previous-token',user_name:'previous-user'})});
   const result = await pending;

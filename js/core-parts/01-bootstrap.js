@@ -439,7 +439,7 @@ const ADMIN_NAME = "xxz";
             // P7: 显式四态头像缓存的内存有效期（has_avatar 重查间隔、confirmed_none/fetch_failed 的 TTL）
             const AVATAR_FETCH_TTL_MS = 5 * 60 * 1000; // 5 分钟
             const USER_SESSION_KEY = "xtj_user_session";
-            const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+            const USER_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
             var memoryUserToken = '';
             var memoryUserTokenIssuedAt = 0;
@@ -468,8 +468,9 @@ const ADMIN_NAME = "xxz";
                 return token;
             }
 
-            function setUserToken(token) {
+            function setUserToken(token, userName) {
                 if (token) {
+                    if (userName) _lastRefreshUser = String(userName).trim();
                     // ★ 修复：拿到有效 token 说明会话已就绪，清除 refresh 冷却（登录后立即可刷新）
                     try { _refreshCooldownUntil = 0; } catch (e) {}
                     memoryUserToken = String(token);
@@ -508,6 +509,9 @@ const ADMIN_NAME = "xxz";
                 var shouldBroadcast = options.broadcast !== false;
                 var reason = options.reason || 'manual';
                 var tokenForRevocation = getUserToken();
+                _lastRefreshUser = '';
+                window.__xtjServerIsAdmin = false;
+                window.__xtjServerIsAdminOwner = '';
                 clearUserToken();
                 lastUserSessionWriteAt = 0;
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
@@ -525,6 +529,7 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理头像缓存
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; window._xtjCanonicalUser = ''; window._xtjAuthState = 'unauthenticated'; } catch(e) {}
+                try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
@@ -622,6 +627,23 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
             var _authStateEpoch = 0;
             var _refreshPromise = null;
+            var _sessionRequestQueue = Promise.resolve();
+            function withSessionRequestLock(task) {
+                // Cookies are shared between tabs. Serialize login and refresh
+                // so a late refresh response cannot overwrite a newer login.
+                if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
+                    return navigator.locks.request('xtj-user-session-cookie', task);
+                }
+                var result = _sessionRequestQueue.then(task, task);
+                _sessionRequestQueue = result.catch(function() {});
+                return result;
+            }
+            window.__xtjWithSessionRequestLock = withSessionRequestLock;
+            window.__xtjBeginAuthIdentityChange = function() {
+                _authStateEpoch++;
+                _refreshPromise = null;
+                _refreshCooldownUntil = 0;
+            };
             // ★ 修复：未登录/会话失效（401/403）后进入 30 秒冷却期，
             // 避免每次切换导航都重复发起 refresh 请求（此前产生 401 噪音与冗余请求）。
             var _refreshCooldownUntil = 0;
@@ -632,7 +654,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (_refreshCooldownUntil && Date.now() < _refreshCooldownUntil) {
                     return { token: '', user_name: '' };
                 }
-                _refreshPromise = (async function() {
+                _refreshPromise = withSessionRequestLock(async function() {
                     // ★★ 2026-09-22：瞬时故障不再判定为「登录已失效」。
                     //   旧实现只要拿到 5xx / 网络异常就返回空 token，上层随即
                     //   clearAllAuthState + 弹登录框 —— 这就是"刷新一下页面
@@ -657,7 +679,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 var data = await res.json().catch(function(){ return {}; });
                                 if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                                 if (data && data.token) {
-                                    setUserToken(data.token);
+                                    setUserToken(data.token, data.user_name);
                                     // ★ 使用服务端返回的规范 user_name
                                     var serverUserName = (data.user_name || '').trim();
                                     if (serverUserName) {
@@ -692,7 +714,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     // 两次都失败：仍**不主动登出**——可能只是后端暂时不可用，
                     // 保留本地会话，下次交互/可见性变化时自然重试。
                     return { token: '', user_name: '' };
-                })();
+                });
                 // ★ 审计修复（P1）：Promise settle 后必须清空缓存变量。旧实现从不
                 //   重置 _refreshPromise，首次刷新完成后所有后续调用永远命中
                 //   `if (_refreshPromise) return _refreshPromise`，拿到的都是第一次
@@ -700,7 +722,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 //   用户被强制登出，30 秒冷却逻辑也被短路。此处仅保留"在途去重"
                 //   语义（settle 前的并发调用共享同一 Promise）。内部实现从不
                 //   reject（全路径 try/catch 返回对象），then 双回调为防御性兜底。
-                var _clearRefreshPromise = function() { _refreshPromise = null; };
+                var completedRefresh = _refreshPromise;
+                var _clearRefreshPromise = function() { if (_refreshPromise === completedRefresh) _refreshPromise = null; };
                 _refreshPromise.then(_clearRefreshPromise, _clearRefreshPromise);
                 return _refreshPromise;
             }
@@ -801,6 +824,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                         }
                     } catch (_eCd2) {}
                     var token = await ensureUserToken();
+                    // A protected background call may have started for A while
+                    // the user was logging in as B. Its late refresh is no
+                    // longer evidence about B's session and must not clear it.
+                    if (String(currentUser || '') !== userName) return { ok: false, reason: 'identity_changed', token: '', user_name: '' };
                     if (token) {
                         // ★ 验证 token 身份与 UI 身份一致
                         // 优先使用刷新时服务端返回的规范 user_name
@@ -1254,9 +1281,11 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
         if (currentUser) {
             loadCurrentUserInfoSnapshot(currentUser).catch(function() {});
             // 异步验证：尝试用 refresh cookie 获取 token 并校验身份
+            var startupAuthEpoch = _authStateEpoch;
             (async function() {
                 try {
                     var refreshResult = await refreshUserTokenViaCookie();
+                    if (startupAuthEpoch !== _authStateEpoch) return;
                     var serverUser = (refreshResult && refreshResult.user_name) || '';
                     if (serverUser && serverUser !== currentUser) {
                         // Token 身份与会话不一致，清除幽灵登录状态
@@ -1295,7 +1324,9 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             //   做二次确认；仍确证失效才清。期间恢复成功则直接回到 authenticated。
                             try { _refreshCooldownUntil = 0; } catch (_eCd2) {}
                             await new Promise(function (r) { setTimeout(r, 1500); });
+                            if (startupAuthEpoch !== _authStateEpoch) return;
                             var _recheck = await refreshUserTokenViaCookie();
+                            if (startupAuthEpoch !== _authStateEpoch) return;
                             if (_recheck && _recheck.token) {
                                 _startupAuthVerified = true;
                                 window._xtjAuthState = 'authenticated';
@@ -1718,8 +1749,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 //   写入 window.__xtjServerIsAdmin；一旦该标志已被服务端确认过，就以它为准。
 //   未收到服务端响应前（首屏、离线）保留旧的名字比较，避免管理员界面直接失效。
 function isAdmin() {
-    if (typeof window.__xtjServerIsAdmin === 'boolean') return window.__xtjServerIsAdmin === true;
-    return (currentUser || window.currentUser) === ADMIN_NAME;
+    var owner = String(currentUser || window.currentUser || '');
+    return owner === ADMIN_NAME && window.__xtjServerIsAdminOwner === owner && window.__xtjServerIsAdmin === true;
 }
         function clearFeedCache() {
             try { window.safeStorage.remove(CACHE_KEY); } catch (e) {}
@@ -2347,7 +2378,7 @@ function isAdmin() {
             if (!currentUser) return false;
             if (isAdmin()) return true;
             if (p.user_name && p.user_name === currentUser) return true;
-            return !p.user_name && !!deviceId && !!p.actor_key && p.actor_key === deviceId;
+            return false;
         }
         window.canDeletePost = canDeletePost;
         window.isAdmin = isAdmin;

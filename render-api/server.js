@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const { createPhotoRecord, inspectPhotoOriginal } = require('./photo-create');
+const { createPhotoRecord, inspectPhotoOriginal, validatePhotoCreatePayload } = require('./photo-create');
 const {
   claimDmMediaUpload,
   reserveDmMediaUpload,
@@ -182,17 +182,11 @@ app.set('trust proxy', function trustProxyHop(addr) {
 app.disable('x-powered-by');
 
 // ===================== 配置 =====================
-// ★ 审计回退（P0-6/P0-7 修正）：强制校验 ADMIN_USERNAME/ADMIN_PASSWORD 会导致
-// Render 上环境变量缺失时整站拒绝启动（2026-08-05 生产宕机事故）。
-// 恢复"默认值 + 警告"策略：登录仍需要正确凭据，缺失时服务可启动但管理后台
-// 无法通过默认凭据访问。生产环境建议在 Render Dashboard 显式设置这两个变量。
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
-if (!process.env.ADMIN_USERNAME) {
-  console.warn('[WARN] ADMIN_USERNAME 环境变量未设置，使用默认值。建议在 Render Dashboard 中设置 ADMIN_USERNAME。');
-  if (process.env.NODE_ENV === 'production') {
-    console.error('[CRITICAL] 生产环境未设置 ADMIN_USERNAME，默认用户名可被预测！请在 Render Dashboard 环境变量中设置 ADMIN_USERNAME。');
-  }
-}
+// The product's only administrator is xxz. Credentials remain environment
+// secrets; missing admin credentials do not prevent ordinary service startup.
+const { readAuthRecord } = require('./auth-record');
+const { claimPhotoUpload, ownsPhotoUpload, ownedPhotoUploadPaths } = require('./photo-ownership');
+const ADMIN_USERNAME = 'xxz';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 if (!ADMIN_PASSWORD) {
   console.warn('[WARN] ADMIN_PASSWORD is not configured.');
@@ -11252,8 +11246,8 @@ function verifySignedToken(token) {
 
 // 短期 access token（15分钟）
 const USER_ACCESS_TOKEN_EXPIRY_MS = 15 * 60 * 1000;
-// 长期 refresh token（30天）
-const USER_REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
+// 长期 refresh token（90天，滑动续期）
+const USER_REFRESH_TOKEN_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000;
 
 function signUserAccessToken(userName) {
   return _signPayload({ exp: Date.now() + USER_ACCESS_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_access', jti: crypto.randomUUID() });
@@ -11887,34 +11881,13 @@ async function authenticateUser(req, res, next) {
     var payload = verifyUserAccessToken(token);
     if (payload && payload.user_name && !isTokenRevoked(token)) {
       try {
-        var { data: userExists, error: userCheckError } = await supabase.from('posts')
-          .select('id')
-          .eq('user_name', payload.user_name)
-          .eq('media_type', AUTH_MARKER)
-          .maybeSingle();
-        // 多行记录（PGRST116）时回退取最新一条，避免账号因重复记录被锁死
-        if (userCheckError && String(userCheckError.code) === 'PGRST116') {
-          var { data: latestUser, error: latestErr } = await supabase.from('posts')
-            .select('id')
-            .eq('user_name', payload.user_name)
-            .eq('media_type', AUTH_MARKER)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (latestErr) console.error('[auth] 最新认证记录回退查询失败:', latestErr && latestErr.message);
-          userExists = latestUser;
-        } else if (userCheckError) {
-          console.error('[auth] 用户校验查询异常:', userCheckError && userCheckError.message);
-          logAttack(getRealIp(req), 'AUTH_QUERY', 'user check error: ' + String(userCheckError.message || userCheckError.code || '').slice(0, 100)).catch(function(){});
-        }
+        var userExists = await readAuthRecord(supabase, payload.user_name, AUTH_MARKER);
         if (!userExists && payload.user_name !== ADMIN_USERNAME) {
-          if (userCheckError && String(userCheckError.code) !== 'PGRST116') {
-            console.warn('[auth] 认证查询异常，按未找到处理: ' + payload.user_name);
-          }
           return res.status(401).json({ error: '用户不存在或已注销', code: 'auth_expired' });
         }
       } catch(e) {
-        return res.status(500).json({ error: '认证查询失败' });
+        console.error('[auth] account lookup unavailable:', e && e.code || 'database_error');
+        return res.status(503).json({ error: '认证服务暂不可用，请稍后重试', code: 'auth_unavailable', retryable: true });
       }
       req.userName = payload.user_name;
       try {
@@ -12134,34 +12107,17 @@ app.post('/api/user/login', securityRateLimit(60000, 10), async (req, res) => {
     if (!userNameVal || typeof password !== 'string' || password.length < 1 || password.length > 128) {
       return res.status(400).json({ error: '缺少用户名或密码' });
     }
-    var { data: authRec, error: authRecError } = await supabase.from('posts')
-      .select('media_url')
-      .eq('user_name', userNameVal)
-      .eq('media_type', AUTH_MARKER)
-      .maybeSingle();
-    // 多行记录（PGRST116）时回退取最新一条，避免账号因重复记录被锁死
-    if (authRecError && String(authRecError.code) === 'PGRST116') {
-      var { data: latestAuth, error: latestAuthErr } = await supabase.from('posts')
-        .select('media_url')
-        .eq('user_name', userNameVal)
-        .eq('media_type', AUTH_MARKER)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (latestAuthErr) console.error('[auth] 最新登录记录回退查询失败:', latestAuthErr && latestAuthErr.message);
-      authRec = latestAuth;
-    } else if (authRecError) {
-      console.error('[auth] 登录凭证查询异常:', authRecError && authRecError.message);
-      logAttack(getRealIp(req), 'AUTH_QUERY', 'login auth record error: ' + String(authRecError.message || authRecError.code || '').slice(0, 100)).catch(function(){});
+    var authRec;
+    try { authRec = await readAuthRecord(supabase, userNameVal, AUTH_MARKER, 'media_url'); }
+    catch (error) {
+      console.error('[auth] login lookup unavailable:', error && error.code || 'database_error');
+      return res.status(503).json({ error: '登录服务暂不可用，请稍后重试', code: 'auth_unavailable', retryable: true });
     }
     if (!authRec || !authRec.media_url || !(await verifyAuthPassword(authRec.media_url, password, userNameVal))) {
       // 抗用户名枚举时序侧信道：用户名不存在时执行一次同等成本的 scrypt 派生，
       // 与"存在但密码错误"返回时间一致（参考 admin 登录的 dummy 比对）。
       if (!authRec || !authRec.media_url) {
         try { await deriveAuthVerifier(password); } catch (_dummy) {}
-      }
-      if (authRecError && String(authRecError.code) !== 'PGRST116') {
-        console.warn('[auth] 登录凭证查询异常，按账号或密码错误处理: ' + userNameVal);
       }
       return res.status(401).json({ error: '账号或密码错误' });
     }
@@ -12852,6 +12808,15 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
   try {
     var banCheck = userBanError(req);
     if (banCheck) return res.status(banCheck.status || 403).json({ error: banCheck.message, code: banCheck.code });
+    var photoInput = validatePhotoCreatePayload(req.body, SUPABASE_URL);
+    if (!photoInput.ok) return res.status(400).json(photoInput);
+    try {
+      if (!(await ownsPhotoUpload(supabase, photoInput.storagePath, req.userName, photoInput.uploadId))) {
+        return res.status(403).json({ ok: false, error: '请重新上传自己的照片', code: 'photo_ownership_forbidden' });
+      }
+    } catch (error) {
+      return res.status(503).json({ ok: false, error: '上传归属校验暂不可用，请稍后重试', retryable: true });
+    }
     var createResult = await createPhotoRecord({
       body: req.body,
       userName: req.userName,
@@ -13045,6 +13010,9 @@ app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), photoUpl
     if (claimedNormalized && realNormalized && claimedNormalized !== realNormalized) {
       return res.status(400).json({ error: '图片内容与声明类型不符', code: 'INVALID_INPUT' });
     }
+    if (!(await claimPhotoUpload(supabase, path, userName, uploadId))) {
+      return res.status(403).json({ error: '无权使用这个照片路径', code: 'photo_ownership_forbidden' });
+    }
     var upload = await supabase.storage.from('uploads').upload(path, buf, { contentType: mimeType || 'image/jpeg', cacheControl: '31536000', upsert: false });
     if (upload && upload.error) return res.status(500).json({ error: '存储上传失败', code: 'storage_upload_failed' });
     // 字节确实落到 Storage 了 → 额度不再回滚。此前所有 return（含上面各类 4xx
@@ -13149,9 +13117,7 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
             .filter(function(p) { return p !== referencedPath; });
           if (unreferenced.length > 0) {
             // 只清理同一 upload_id 的非当前引用路径
-            var toClean = unreferenced.filter(function(p) {
-              return p.indexOf(uploadId) >= 0;
-            });
+            var toClean = await ownedPhotoUploadPaths(supabase, unreferenced, req.userName, uploadId);
             if (toClean.length > 0) {
               // ★ 越权删除修复（C3）：删除前必须确认 toClean 中的每个文件都未被
               //   "任何用户"的照片记录引用。否则攻击者可提取他人公开照片 URL 中的
@@ -13214,6 +13180,11 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     // 派生文件（缩略图/旋转版）一律不允许通过本接口删除，只能走照片删除流程
     if (path.indexOf('photos/thumbs/') === 0 || path.indexOf('photos/rotated/') === 0) {
       return res.status(403).json({ ok: false, error: '无权清理该文件' });
+    }
+    try {
+      if (!(await ownsPhotoUpload(supabase, path, req.userName, uploadId))) return res.status(403).json({ ok: false, error: '无权清理该文件' });
+    } catch (error) {
+      return res.status(503).json({ ok: false, retryable: true, error: '暂时无法确认上传归属' });
     }
     // 归属校验：仅允许清理"未被任何照片记录引用"的孤儿文件（本次上传失败遗留）。
     // 已发布的照片在 DB 中必然有记录引用其 storagePath/media_url，任何用户都不可通过本接口删除。
@@ -13323,7 +13294,6 @@ function collectPhotoStoragePaths(photo) {
       var match = parsed.pathname.match(/\/object\/public\/uploads\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
       var basePath = match && match[1] ? decodeURIComponent(match[1]) : '';
       addPath(basePath);
-      if (basePath) addPath(basePath.replace(/(\.[^.]+)$/, '_thumb$1'));
     } catch (_) {}
   }
   return paths;
@@ -16316,9 +16286,8 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     publishDmRealtime(targetUser, inserted);
     void chatPush.notify(targetUser, sender, inserted.id);
     publishChatEvent(req.userName,'chat-state',{kind:'sent',peer:targetUser});
-    if (mediaPayload && mediaPayload.kind === 'audio') {
-      void chatFeatures.transcription.enqueue(inserted.id).catch(() => console.error('[chat-transcription] enqueue failed'));
-    }
+    // The sending device transcribes with free local Whisper after this ACK.
+    // Do not silently submit new audio to a paid provider.
     return res.json({ ok: true, message: inserted });
   } catch (e) {
     console.error('[API] dm send:', e && e.message);
