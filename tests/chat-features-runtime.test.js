@@ -56,10 +56,24 @@ function fixture(config = {}) {
       n==='chat_messages' ? rows : n==='posts' ? posts : n==='chat_message_user_state' ? states : reactions, {conflict:config.conflict && n==='posts'}); }
   };
   const app=express();app.use(express.json());
-  const features=createChatFeatures({express,supabase,env:{},authenticateUser(req,res,next){if(req.headers.authorization!=='Bearer test')return res.sendStatus(401);req.userName='actor';next();}});
+  const features=createChatFeatures({express,supabase,env:{},privateStorage:config.privateStorage,authenticateUser(req,res,next){if(req.headers.authorization!=='Bearer test')return res.sendStatus(401);req.userName='actor';next();}});
   app.use('/api/chat',features.router);return {app,rows,posts,reactions,calls,features};
 }
 const auth = { Authorization:'Bearer test' };
+test('voice URL renewal checks conversation, clear boundary and hidden state before signing',async()=>{
+  const calls=[];
+  const message={id:id(4),legacy_post_id:id(4),conversation_id:id(3),sender_name_snapshot:'peer',message_type:'audio',sent_at:new Date().toISOString(),withdrawn_at:null,payload:{media:{bucket:'dm-private',storage_path:'chat/private_voice.m4a'}}};
+  const privateStorage={async sign(path,refresh){calls.push({path,refresh});return 'https://storage.example/renewed';}};
+  const f=fixture({messages:[message],privateStorage});
+  await request(f.app).get('/api/chat/voice-url?peer=peer&message_id='+id(4)).set(auth).expect(200);
+  assert.equal(calls.length,1);assert.equal(calls[0].refresh,true);
+  await request(f.app).get('/api/chat/voice-url?peer=peer&message_id='+id(4)).expect(401);
+  for(const override of [{hidden:[{message_id:id(4),user_id:id(1),hidden_at:new Date().toISOString()}]},{state:{status:'ok',conversation_id:id(3),deleted:true}},{state:{status:'ok',conversation_id:id(3),cleared_before:'2100-01-01T00:00:00Z'}}]){
+    const denied=fixture({messages:[message],privateStorage,...override});
+    await request(denied.app).get('/api/chat/voice-url?peer=peer&message_id='+id(4)).set(auth).expect(404);
+  }
+  assert.equal(calls.length,1);
+});
 test('search uses signed identity, validates inputs and bounds server pagination',async()=>{
   const f=fixture();
   assert.equal((await request(f.app).get('/api/chat/history/search?q=hello')).status,401);

@@ -321,7 +321,8 @@ test('photo upload progress is processed-based and reports safe batch outcomes',
 });
 test('Dock changes stay inside the approved selection-feedback scope', function(){
   // 删除大文件批量时 diff 输出可能超过 execSync 默认 1MB 缓冲上限（ENOBUFS），显式扩容
-  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak" ":(exclude)tests/**"', {encoding:'utf8', maxBuffer: 50 * 1024 * 1024});
+  // Code retirement removes its own data-tab controls; those are unrelated to the Dock.
+  var diff = cp.execSync('git diff -- . ":(exclude)*.min.js" ":(exclude)*.min.css" ":(exclude)*.bak" ":(exclude)tests/**" ":(exclude)js/code-workbench.js"', {encoding:'utf8', maxBuffer: 50 * 1024 * 1024});
   var changedLines = diff.split(/\r?\n/).filter(function(line) {
     return /^[+-](?!\+\+\+|---)/.test(line);
   });

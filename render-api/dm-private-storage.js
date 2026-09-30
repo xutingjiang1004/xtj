@@ -3,10 +3,10 @@ const { validateDmStoragePath, dmStorageBucket } = require('./dm-media');
 const PRIVATE_BUCKET = 'dm-private';
 function createDmPrivateStorage(supabase) {
   const cache = new Map(), pending = new Map();
-  async function sign(path) {
+  async function sign(path, refresh) {
     if (!validateDmStoragePath(path).ok || dmStorageBucket(path) !== PRIVATE_BUCKET) throw new Error('invalid_private_path');
     const hit = cache.get(path);
-    if (hit && hit.until > Date.now()) return hit.url;
+    if (!refresh && hit && hit.until > Date.now()) return hit.url;
     if (pending.has(path)) return pending.get(path);
     const request = (async () => {
       const r = await supabase.storage.from(PRIVATE_BUCKET).createSignedUrl(path, 3600);

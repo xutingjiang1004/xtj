@@ -49,6 +49,20 @@ function createChatFeatures(options) {
     console.error('[chat-features]', err && err.code || 'database_error');
     return res.status(503).json({ ok: false, retryable: true, error: '聊天功能暂时不可用，请重试' });
   }
+  router.get('/voice-url', async (req, res) => {
+    const peer = name(req.query.peer), id = String(req.query.message_id || '');
+    if (!peer || !UUID.test(id)) return res.status(400).json({ ok: false });
+    try {
+      const ctx = await context(req.userName, peer), message = ctx && await visible(ctx, id);
+      if (!message || message.message_type !== 'audio') return res.status(404).json({ ok: false });
+      const media = message.payload && message.payload.media;
+      if (!media || !options.privateStorage) return res.status(404).json({ ok: false });
+      const url = media.bucket === 'dm-private'
+        ? await options.privateStorage.sign(media.storage_path, true) : media.url;
+      if (!url || !/^https:\/\//i.test(url)) return res.status(404).json({ ok: false });
+      res.json({ ok: true, url });
+    } catch (error) { fail(res, error); }
+  });
   router.get('/history/search', async (req, res) => {
     let from, to;
     const peer = req.query.peer ? name(req.query.peer) : null;

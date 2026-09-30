@@ -25,6 +25,7 @@ function createProfileActivityHarness() {
     profileRenderCount: 0,
     document: { getElementById: (id) => id === 'panelProfile' ? {} : null },
     window: {},
+    loadPersonalRecordSummary() {},
     setTimeout: (fn) => { fn(); return 1; },
     clearTimeout: () => {},
     console,
