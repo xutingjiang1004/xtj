@@ -2,11 +2,12 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
 const sharp = require('sharp');
+const http = require('node:http');
 const root = path.resolve(__dirname, '..');
 const source = name => fs.readFileSync(path.join(root, name), 'utf8');
 
 async function fixture(page, hotfix = true) {
-  await page.route('**/photo-test-fixture', route => route.fulfill({contentType:'text/html',body:'<!doctype html><html><body><div id="photoGrid"></div></body></html>'}));
+  await page.route('**/photo-test-fixture', route => route.fulfill({contentType:'text/html',body:'<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="photoGrid"></div></body></html>'}));
   await page.goto('/photo-test-fixture');
   await page.addStyleTag({content: source('css/style.css') + source('css/photo-preview.css')});
   const images = await Promise.all(['#ff0000', '#00ff00', '#0000ff', '#ffff00'].map(background => sharp({create:{width:120,height:80,channels:3,background}}).png().toBuffer()));
@@ -87,26 +88,35 @@ test('touch dragging actually moves the track before committing the adjacent pho
   await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /quality-1\.png$/);
 });
 
-async function uploadFixture(page) {
-  await page.route('**/upload-test-fixture', route => route.fulfill({contentType:'text/html', body:'<!doctype html><html><body></body></html>'}));
-  await page.goto('/upload-test-fixture');
+async function uploadFixture(page, origin = '') {
+  await page.route('**/upload-test-fixture', route => route.fulfill({contentType:'text/html', body:'<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body></body></html>'}));
+  await page.goto(origin+'/upload-test-fixture');
   await page.evaluate(html => {
     const doc = new DOMParser().parseFromString(html,'text/html');
     for (const id of ['photoFileInput','pwUploadSheet','pwUploadProgressOverlay','pwUploadResult']) document.body.appendChild(doc.getElementById(id));
   },source('index.html'));
   await page.addStyleTag({content:source('css/style.css')});
-  await page.addScriptTag({content:'window.currentUser="tester";window.showToast=function(){};window.getUserAuthHeaders=async()=>({});'+source('js/photo-wall/upload-ui.js')});
+  await page.addScriptTag({content:'window.currentUser="tester";window.showToast=function(){};window.getUserAuthHeaders=async()=>({});window.safeStorage={get:key=>localStorage.getItem(key),set:(key,value)=>localStorage.setItem(key,value)};'+source('js/photo-wall/upload-ui.js')});
 }
 
 test('original upload keeps its bytes and renders committed rows without waiting for wall refresh', async ({page}) => {
-  await uploadFixture(page);
   const buffer = await sharp({create:{width:1600,height:900,channels:3,background:'#28553e'}}).jpeg({quality:100}).toBuffer();
   let uploaded;
-  await page.route('**/api/photo/upload?**', route => {
-    uploaded = route.request().postDataBuffer();
-    return route.fulfill({json:{ok:true,public_url:'https://example.test/original.jpg'}});
+  // WebKit does not expose every File-backed body through its route inspector.
+  // Check the bytes actually received by HTTP in both browser engines.
+  const server = http.createServer((req,res) => {
+    const chunks=[];
+    req.on('data',chunk=>chunks.push(chunk));
+    req.on('end',()=>{
+      const upload=req.url.startsWith('/api/photo/upload?');
+      if(upload) uploaded=Buffer.concat(chunks);
+      res.setHeader('Content-Type','application/json');
+      res.end(JSON.stringify(upload ? {ok:true,public_url:'https://example.test/original.jpg'} : {ok:true,data:{id:'original',media_url:'https://example.test/original.jpg'}}));
+    });
   });
-  await page.route('**/api/photo/create', route => route.fulfill({json:{ok:true,data:{id:'original',media_url:'https://example.test/original.jpg'}}}));
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try {
+  await uploadFixture(page,'http://127.0.0.1:'+server.address().port);
   await page.evaluate(() => {
     window.photoWallData=[];
     window.normalizePhotoWallRow=row=>({id:row.id,imageUrl:row.media_url});
@@ -120,6 +130,7 @@ test('original upload keeps its bytes and renders committed rows without waiting
   expect(uploaded.equals(buffer)).toBe(true);
   expect(await page.evaluate(() => window.__rendered)).toEqual(['original']);
   await expect(page.locator('#pwUploadProgressOverlay')).toBeHidden();
+  } finally { server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); }
 });
 
 test('upload panel stays within a narrow dark viewport and supports reduced motion', async ({page}, testInfo) => {
@@ -160,7 +171,7 @@ test('a delayed original from the previous photo cannot overwrite the new photo'
   expect(await page.evaluate(() => window.photoPreviewCurrent.id)).toBe('next');
 });
 
-test('upload progress uses a single calm indicator and offers cancellation', async ({page}, testInfo) => {
+test('upload uses a growing stitched garden and waits for record confirmation', async ({page}, testInfo) => {
   await uploadFixture(page);
   const buffer = await sharp({create:{width:100,height:100,channels:3,background:'#28553e'}}).png().toBuffer();
   let finish;
@@ -173,9 +184,66 @@ test('upload progress uses a single calm indicator and offers cancellation', asy
   await page.locator('#pwStartUploadBtn').click();
   await expect(page.locator('#pwUploadProgressCancel')).toBeVisible();
   await expect(page.locator('#pwUploadProgressText')).toHaveText('已完成 0 / 1 张');
-  await expect(page.locator('#pwUploadProgressTrack')).toHaveAttribute('aria-valuenow','0');
+  await expect(page.locator('#pwUploadGarden svg')).toBeVisible();
+  await expect(page.locator('#pwUploadGarden')).toHaveClass(/is-growing/);
+  await expect(page.locator('#pwUploadProgressOverlay .pw-upload-progress-spinner')).toHaveCount(0);
+  const pct=Number(await page.locator('#pwUploadProgressTrack').getAttribute('aria-valuenow'));
+  expect(pct).toBeGreaterThanOrEqual(0);expect(pct).toBeLessThanOrEqual(94);
+  await expect(page.locator('#pwUploadProgressBytes')).toContainText('已传');
   await page.screenshot({path:testInfo.outputPath('upload-progress.png')});
   await expect.poll(() => typeof finish).toBe('function');
   finish();
   await expect(page.locator('#pwUploadResultTitle')).toHaveText('上传成功');
+});
+
+test('byte events drive progress while storage and record saving remain separate',async({page})=>{
+  await uploadFixture(page);
+  await page.evaluate(()=>{
+    window.XMLHttpRequest=class {
+      constructor(){this.upload={};window.__photoXHR=this;}
+      open(){}setRequestHeader(){}send(file){this.file=file;}abort(){if(this.onabort)this.onabort();}
+    };
+  });
+  const buffer=await sharp({create:{width:100,height:100,channels:3,background:'#28553e'}}).png().toBuffer();
+  let confirm;
+  await page.route('**/api/photo/create',async route=>{await new Promise(resolve=>{confirm=resolve;});await route.fulfill({json:{ok:true,data:{id:'saved'}}});});
+  await page.locator('#photoFileInput').setInputFiles({name:'original.png',mimeType:'image/png',buffer});
+  await page.locator('#pwStartUploadBtn').click();
+  await page.waitForFunction(()=>window.__photoXHR && window.__photoXHR.file);
+  await page.evaluate(()=>{const xhr=window.__photoXHR;xhr.upload.onprogress({lengthComputable:true,loaded:xhr.file.size/2,total:xhr.file.size});});
+  await expect(page.locator('#pwUploadProgressTrack')).toHaveAttribute('aria-valuenow','44');
+  await expect(page.locator('#pwUploadProgressStage')).toHaveText('正在上传原图');
+  await page.evaluate(()=>window.__photoXHR.upload.onload());
+  await expect(page.locator('#pwUploadProgressTrack')).toHaveAttribute('aria-valuenow','88');
+  await expect(page.locator('#pwUploadProgressStage')).toHaveText('正在保存照片');
+  await page.evaluate(()=>{const xhr=window.__photoXHR;xhr.status=200;xhr.responseText=JSON.stringify({ok:true,public_url:'https://example.test/original.png'});xhr.onload();});
+  await expect(page.locator('#pwUploadProgressTrack')).toHaveAttribute('aria-valuenow','94');
+  await expect.poll(()=>typeof confirm).toBe('function');confirm();
+  await expect(page.locator('#pwUploadResultTitle')).toHaveText('上传成功');
+});
+
+test('cancelling the browser upload aborts its request and leaves a path for reconciliation',async({page})=>{
+  await uploadFixture(page);let release;
+  const failed=[];page.on('requestfailed',r=>{if(r.url().includes('/api/photo/upload?'))failed.push(r.url());});
+  await page.route('**/api/photo/upload?**',async route=>{await new Promise(resolve=>{release=resolve;});await route.fulfill({json:{ok:true,public_url:'https://example.test/original.png'}}).catch(()=>{});});
+  const buffer=await sharp({create:{width:100,height:100,channels:3,background:'#28553e'}}).png().toBuffer();
+  await page.locator('#photoFileInput').setInputFiles({name:'original.png',mimeType:'image/png',buffer});
+  await page.locator('#pwStartUploadBtn').click();await expect.poll(()=>typeof release).toBe('function');
+  await page.locator('#pwUploadProgressCancel').click();release();
+  await expect(page.locator('#pwUploadProgressOverlay')).toBeHidden();
+  await expect.poll(()=>failed.length).toBe(1);
+  const pending=await page.evaluate(()=>JSON.parse(localStorage.getItem('xtj_photo_upload_pending')));
+  expect(pending).toHaveLength(1);expect(pending[0].path).toMatch(/^photos\//);
+});
+
+test('historical derivatives and cached thumbnails resolve to the original storage object',async({page})=>{
+  await page.route('**/quality-data-fixture',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><html><body></body></html>'}));
+  await page.goto('/quality-data-fixture');await page.addScriptTag({content:source('js/photo-wall/data.js')});
+  const result=await page.evaluate(()=>{
+    window.XTJ_CONFIG={SUPABASE_URL:'https://example.supabase.co'};
+    const original='photos/upload_original.jpg';
+    return window.normalizePhotoWallRow({id:'legacy',media_url:'https://example.supabase.co/storage/v1/object/public/uploads/photos/rotated/old.webp',content:JSON.stringify({storagePath:original,thumb:'https://example.supabase.co/thumbnail.webp'})});
+  });
+  expect(result.imageUrl).toBe('https://example.supabase.co/storage/v1/object/public/uploads/photos/upload_original.jpg');
+  expect(result.thumbUrl).toBe('');expect(result.thumb).toBe('');
 });

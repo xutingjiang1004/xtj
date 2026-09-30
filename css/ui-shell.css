@@ -2954,10 +2954,43 @@ html[data-xtj-motion="off"] #panelChat .chat-recording-wave i { animation:none; 
 
 [data-theme="dark"] #panelPosts .post-filter-select { background-color:#202832 !important; border-color:rgba(255,255,255,.12) !important; color:var(--text-main) !important; }
 
-/* Native Safari select chrome otherwise stays light despite its computed dark color. */
+/* A fixed-size vector chevron avoids gradient layers changing geometry when
+   the page palette is blended, and removes Safari's native select surface. */
 #panelPosts .post-filter-select {
   -webkit-appearance:none; appearance:none; padding-right:32px !important;
-  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
-  background-position:right 16px center,right 11px center;
-  background-size:5px 5px; background-repeat:no-repeat;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23849891' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-position:right 11px center !important;
+  background-size:14px 14px !important; background-repeat:no-repeat !important;
 }
+
+#panelChat #authorSupportButton { color:#ac812e; }
+#panelChat #authorSupportButton[hidden] { display:none !important; }
+[data-theme="dark"] #panelChat #authorSupportButton { color:#e8c477; }
+.author-support-dialog { width:min(560px,calc(100vw - 32px)); max-height:calc(100dvh - 48px); box-sizing:border-box; overflow-y:auto; border:1px solid var(--chat-line,rgba(85,120,100,.18)); border-radius:24px; padding:24px; background:#faf9f5; color:#294638; box-shadow:0 24px 80px rgba(0,0,0,.2); }
+.author-support-dialog::backdrop { background:rgba(8,20,15,.48); }
+.author-support-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.author-support-kicker { font-size:12px; color:#a58243; }
+.author-support-head h3 { margin:4px 0 0; font-size:22px; }
+.author-support-head button { width:44px; height:44px; border:0; border-radius:50%; background:transparent; color:inherit; font-size:26px; box-shadow:none; }
+.author-support-intro { font-size:14px; color:#718077; line-height:1.6; }
+.author-support-codes { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.author-support-codes section { background:#fff; border:1px solid rgba(85,120,100,.14); border-radius:16px; padding:12px; text-align:center; }
+.author-support-codes h4 { margin:0 0 12px; font-size:14px; }
+.author-support-codes img { display:block; width:100%; height:auto; object-fit:contain; border-radius:6px; -webkit-touch-callout:default; user-select:auto; -webkit-user-select:auto; }
+.author-support-empty { display:grid; place-items:center; min-height:160px; color:#7a887f; font-size:13px; }
+.author-support-disclaimer { margin:20px 0 0; font-size:12px; line-height:1.85; color:#7b837c; }
+[data-theme="dark"] .author-support-dialog { background:#172720; color:#e4efe7; }
+[data-theme="dark"] .author-support-codes section { background:#fff; color:#294638; }
+[data-theme="dark"] .author-support-intro,[data-theme="dark"] .author-support-disclaimer { color:#a2b5a9; }
+@media(max-width:400px) { .author-support-dialog { padding:20px; } .author-support-codes { grid-template-columns:1fr; } .author-support-codes img { max-height:240px; } }
+
+/* Native viewport snapshots crossfade on the compositor. The orb is a separate
+   group so dragging translates it instead of dissolving between two positions.
+   Older engines retain the live-palette fallback in theme-toggle.js. */
+html.theme-composited::view-transition { pointer-events:none; }
+html.theme-composited::view-transition-group(*) { animation-duration:1000ms; animation-timing-function:linear; animation-fill-mode:both; }
+html.theme-composited::view-transition-group(root) { animation:none; }
+html.theme-composited::view-transition-image-pair(*) { isolation:isolate; }
+html.theme-composited::view-transition-old(*) { animation:none; opacity:1; mix-blend-mode:normal; }
+html.theme-composited::view-transition-new(*) { animation:xtjThemeSnapshotFade 1000ms linear both; mix-blend-mode:normal; }
+@keyframes xtjThemeSnapshotFade { from { opacity:0; } to { opacity:1; } }
