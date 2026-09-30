@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const { createPhotoRecord, createPhotoThumbnail } = require('./photo-create');
+const { createPhotoRecord, inspectPhotoOriginal } = require('./photo-create');
 const {
   claimDmMediaUpload,
   reserveDmMediaUpload,
@@ -11951,6 +11951,8 @@ app.use('/api/chat', createChatSocialRouter({
 app.use('/api/profile/records', require('./profile-records').createProfileRecords({ express, supabase, authenticateUser, rateLimit }));
 const chatFeatures = createChatFeatures({ express, supabase, authenticateUser, rateLimit, publishChatEvent, privateStorage: dmPrivateStorage });
 app.use('/api/chat', chatFeatures.router);
+app.use(require('./author-support').createAuthorSupport({ express, supabase, sharp, authenticateUser,
+  verifyToken, rateLimit, adminName:ADMIN_USERNAME }));
 const chatPush = require('./chat-push').createChatPush({ express, supabase, authenticateUser, rateLimit, secret: API_SECRET });
 app.use('/api/chat/push', chatPush.router);
 
@@ -12855,7 +12857,7 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
       userName: req.userName,
       supabase: supabase,
       supabaseUrl: SUPABASE_URL,
-      createThumbnail: function(params) { return createPhotoThumbnail(Object.assign({}, params, { sharp: sharp })); },
+      inspectOriginal: function(params) { return inspectPhotoOriginal(Object.assign({}, params, { sharp: sharp })); },
       logger: console
     });
     return res.status(createResult.status).json(createResult.body);
@@ -13021,7 +13023,7 @@ app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), photoUpl
     // 与 photo-create.js 的 MIME 白名单保持一致，拒绝 SVG 防存储型 XSS
     if (!/^image\/(?:jpeg|png|gif|webp|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)$/i.test(mimeType)) return res.status(400).json({ error: '不支持的图片类型', code: 'INVALID_INPUT' });
     // ★ M16 审计修复：mime_type 自报不可信，用 sharp 解码出的真实格式校验
-    //   （与 photo-create.js createPhotoThumbnail 的 M-8a 同一策略）。
+    //   （与 photo-create.js inspectPhotoOriginal 的 M-8a 同一策略）。
     var realFormat = null;
     try {
       var decodedMeta = await sharp(buf, { animated: false, limitInputPixels: 100000000 }).metadata();
@@ -15349,6 +15351,7 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
       });
     var hasMore = mergedMessages.length > limit;
     var messages = hasMore ? mergedMessages.slice(mergedMessages.length - limit) : mergedMessages;
+    await chatFeatures.transcription.restore(messages);
     // ★ 2026-09-27：next_cursor 升级为复合游标 "created_at|id"（本页最早一条）。
     //   同时保留 next_cursor_ts / next_cursor_id 两个字段，方便前端任选一种传递方式。
     //   老调用方若直接把 next_cursor 当时间戳塞回 before，会被 parseDmCursor 正确拆解。

@@ -426,6 +426,7 @@
                 setTimeout(function(){window.__xtjSyncChatPush?.();},0);
                 if (_chatDomSnapshots) _chatDomSnapshots.clear();
                 cancelDockChatSendFlights(); resetDockChatTyping(); closeDockChatConversationMenu(true);
+                closeAuthorSupport(); _supportOwner='';
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); _chatRecordedFile = null; _chatShowArchived = false; var archiveButton = document.getElementById('chatArchiveButton'); if (archiveButton) { archiveButton.textContent = '归档'; archiveButton.setAttribute('aria-pressed','false'); } _chatReactionSeq++; clearTimeout(_chatReactionTimer);
                 document.querySelectorAll('.chat-reaction-picker').forEach(function(p) { p.remove(); });
                 try {
@@ -475,6 +476,7 @@
                 var container = document.getElementById('dockChatContainer');
                 if (container) container.classList.toggle('has-active-conversation', !!dockChatActiveUser);
                 var backBtn = document.getElementById('dockChatBackBtn');
+                syncAuthorSupportButton(dockChatActiveUser);
                 var titleEl = document.getElementById('dockChatTitle');
                 var conversationBtn = document.getElementById('dockChatConversationBtn');
                 if (conversationBtn) conversationBtn.hidden = !dockChatActiveUser;
@@ -681,6 +683,7 @@
             }
 
             function dockChatGoBack() {
+                closeAuthorSupport();
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 closeDockChatConversationMenu(true);
                 cancelDockChatSendFlights();
@@ -767,6 +770,8 @@
                     var previousInput = document.getElementById('dockChatInput');
                     persistDockChatDraft(dockChatActiveUser,previousInput ? previousInput.value : '');
                 }
+                var supportDialog=document.getElementById('authorSupportDialog');
+                if (supportDialog && supportDialog.open) supportDialog.close();
                 var oldMessages=document.getElementById('dockChatMessages');
                 if (dockChatActiveUser && oldMessages && oldMessages.dataset.chatUser===dockChatActiveUser) {
                     _chatDomSnapshots.set(getDockChatCacheKey(dockChatActiveUser),Array.from(oldMessages.children));
@@ -1465,7 +1470,15 @@
                     var lastTs = Date.parse(lastMsg.created_at);
                     if (!isNaN(lastTs)) snapshotNewestAt = lastTs;
                 }
-                var merged = snapshot.slice();
+                var priorById = new Map(cached.filter(function(row){return row && row.id;}).map(function(row){return [row.id,row];}));
+                var merged = snapshot.map(function(row){
+                    var old=priorById.get(row.id), saved=old && getDMMessagePayload(old), fresh=getDMMessagePayload(row);
+                    // A stale read acknowledgement/snapshot may predate the durable
+                    // transcript. Transcription has no delete action; withdrawal wins.
+                    if (fresh && !fresh.withdrawn && !fresh.transcript && saved && saved.transcript)
+                        return Object.assign({},row,{content:JSON.stringify(Object.assign({},fresh,{transcript:saved.transcript}))});
+                    return row;
+                });
                 cached.forEach(function(msg) {
                     if (!msg || !msg.id) return;
                     var exists = merged.some(function(existing) {
@@ -1705,8 +1718,9 @@
                 if (media && media.kind === 'audio') {
                     // ★ 2026-09-26（审计 P1-7）：同图片，走 sanitizeUrl 协议白名单
                     var safeAudioSrc = sanitizeUrl(String(message.__localPreviewUrl || media.src || ''));
-                    if (!safeAudioSrc) return '<span class="msg-text">' + escapeHtml(messageText || '[音频]') + '</span>';
-                    var audioBody = '<div class="chat-voice-player"><audio class="msg-audio" src="' + escapeHtml(safeAudioSrc) + '" preload="metadata"></audio><button type="button" class="chat-voice-play" aria-label="播放语音" aria-pressed="false"><svg class="voice-play-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="m8 5 11 7-11 7z"/></svg><span class="chat-voice-wave" aria-hidden="true">' + [8,14,23,12,18,28,16,10,22,14,26,18,12,20,9,16].map(function(height) { return '<i style="--voice-bar:'+height+'px"></i>'; }).join('') + '</span><span class="chat-voice-duration">' + (Number(payload.media && payload.media.duration)>0 ? Math.ceil(payload.media.duration)+'″' : '语音') + '</span></button></div>';
+                    // Keep the voice control and saved text even when its signed
+                    // URL is temporarily unavailable. Playback refreshes that row.
+                    var audioBody = '<div class="chat-voice-player"><audio class="msg-audio"' + (safeAudioSrc ? ' src="' + escapeHtml(safeAudioSrc) + '"' : '') + ' preload="metadata"></audio><button type="button" class="chat-voice-play" aria-label="播放语音" aria-pressed="false"><svg class="voice-play-icon" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="m8 5 11 7-11 7z"/></svg><span class="chat-voice-wave" aria-hidden="true">' + [8,14,23,12,18,28,16,10,22,14,26,18,12,20,9,16].map(function(height) { return '<i style="--voice-bar:'+height+'px"></i>'; }).join('') + '</span><span class="chat-voice-duration">' + (Number(payload.media && payload.media.duration)>0 ? Math.ceil(payload.media.duration)+'″' : '语音') + '</span></button></div>';
                     if (messageText) audioBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return audioBody;
                 }
@@ -3500,6 +3514,62 @@
             var _chatRecordedFile = null, _chatVoice = null, _chatVoiceSeq = 0;
             var _chatSearchMode='messages';
             var _chatReactionTimer = null, _chatReactionSeq = 0, _chatShowArchived = false;
+            var _supportAuthor='xxz', _supportOwner='', _supportConfigPending=null, _supportDialogSeq=0;
+            function closeAuthorSupport() {
+                _supportDialogSeq++;
+                var dialog=document.getElementById('authorSupportDialog');
+                if (dialog && dialog.open) dialog.close();
+                var button=document.getElementById('authorSupportButton');
+                if (button) button.hidden=true;
+            }
+            function syncAuthorSupportButton(peer) {
+                var button=document.getElementById('authorSupportButton');
+                if (!button) return;
+                button.hidden=!window.currentUser || peer!==_supportAuthor || window.currentUser===_supportAuthor;
+                if (_supportOwner===window.currentUser || _supportConfigPending || !window.currentUser) return;
+                var owner=window.currentUser;
+                _supportConfigPending=chatFeatureApi('author-support').then(function(config){
+                    if (window.currentUser!==owner) return;
+                    _supportOwner=owner; _supportAuthor=config.author || 'xxz';
+                    button.hidden=dockChatActiveUser!==_supportAuthor || owner===_supportAuthor;
+                }).catch(function(){}).finally(function(){_supportConfigPending=null;});
+            }
+            async function openAuthorSupport() {
+                if (!window.currentUser || dockChatActiveUser!==_supportAuthor || window.currentUser===_supportAuthor) return;
+                var dialog=document.getElementById('authorSupportDialog'), codes=document.getElementById('authorSupportCodes');
+                var owner=window.currentUser, seq=++_supportDialogSeq;
+                codes.replaceChildren(); var loading=document.createElement('p');loading.textContent='正在加载收款码…';codes.appendChild(loading);
+                document.getElementById('authorSupportDisclaimer').textContent='';
+                if (!dialog.open) dialog.showModal();
+                try {
+                    var config=await chatFeatureApi('author-support');
+                    if (seq!==_supportDialogSeq || owner!==window.currentUser || !dialog.open) return;
+                    codes.replaceChildren();
+                    ['wechat','alipay'].forEach(function(provider){
+                        var card=document.createElement('section'), name=document.createElement('h4');
+                        name.textContent=provider==='wechat' ? '微信' : '支付宝'; card.appendChild(name);
+                        var url=sanitizeUrl(config[provider+'_url'] || '');
+                        if (url && /^https:\/\//i.test(url)) {
+                            var image=document.createElement('img'); image.src=url; image.alt=name.textContent+'收款码'; image.decoding='async'; card.appendChild(image);
+                            image.onerror=function(){image.hidden=true;var message=document.createElement('p');message.textContent='收款码暂时无法显示，请稍后重试';card.appendChild(message);};
+                        } else { var empty=document.createElement('p');empty.className='author-support-empty';empty.textContent='作者暂未设置'+name.textContent+'收款码';card.appendChild(empty); }
+                        codes.appendChild(card);
+                    });
+                    document.getElementById('authorSupportDisclaimer').textContent=config.disclaimer || '';
+                } catch(error) {
+                    if (seq!==_supportDialogSeq || owner!==window.currentUser || !dialog.open) return;
+                    codes.replaceChildren();var message=document.createElement('p');message.textContent=error.message || '收款码加载失败';codes.appendChild(message);
+                    var retry=document.createElement('button');retry.type='button';retry.textContent='重新加载';retry.onclick=openAuthorSupport;codes.appendChild(retry);
+                }
+            }
+            var _supportButton=document.getElementById('authorSupportButton'), _supportDialog=document.getElementById('authorSupportDialog');
+            if (_supportButton) _supportButton.addEventListener('click',openAuthorSupport);
+            if (_supportDialog) {
+                document.getElementById('authorSupportClose').addEventListener('click',function(){_supportDialog.close();});
+                _supportDialog.addEventListener('close',function(){_supportDialogSeq++;if (_supportButton && !_supportButton.hidden) _supportButton.focus();});
+                _supportDialog.addEventListener('click',function(event){var rect=_supportDialog.getBoundingClientRect();if(event.target===_supportDialog && (event.clientX<rect.left || event.clientX>rect.right || event.clientY<rect.top || event.clientY>rect.bottom)) _supportDialog.close();});
+            }
+
             async function chatFeatureApi(path, body) {
                 var response = await window.xtjProtectedFetch('/api/chat/' + path, body ? {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3995,6 +4065,7 @@
                         try {
                             try { if (navigator.audioSession) navigator.audioSession.type='playback'; } catch (_) {}
                             audio.muted=false; audio.volume=1;
+                            if (!audio.getAttribute('src')) throw new Error('voice_url_missing');
                             if (audio.error) audio.load();
                             await audio.play(); update();
                         } catch(error) {

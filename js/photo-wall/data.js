@@ -118,6 +118,8 @@
     var list = readJson(CACHE_KEY, []);
     return Array.isArray(list) ? list.filter(function(item){
       return item && item.id && item.imageUrl && item.mediaKind !== 'video' && !/^video\//i.test(item.mimeType || '');
+    }).map(function(item){
+      return Object.assign({},item,{imageUrl:originalPhotoUrl(item.imageUrl,parseContent(item.content)),thumbUrl:'',thumb:''});
     }) : [];
   }
 
@@ -151,6 +153,22 @@
     return s;                                    // 无协议的裸相对路径
   }
 
+  function originalPhotoUrl(url, meta){
+    var storagePath=meta && (meta.storagePath || meta.storage_path);
+    var config=window.XTJ_CONFIG;
+    if (!url || !config || !config.SUPABASE_URL || typeof storagePath!=='string' ||
+        !/^photos\/(?!thumbs\/|rotated\/)/.test(storagePath) ||
+        /[\\%\u0000-\u001f\u007f]/.test(storagePath) ||
+        storagePath.split('/').some(function(part){return !part || part==='.' || part==='..';})) return url;
+    try {
+      var source=new URL(url), origin=new URL(config.SUPABASE_URL).origin;
+      if (source.origin===origin && /^\/storage\/v1\/(object\/public|render\/image\/public)\/uploads\//.test(source.pathname)) {
+        return origin+'/storage/v1/object/public/uploads/'+storagePath.split('/').map(encodeURIComponent).join('/');
+      }
+    } catch (_) {}
+    return url;
+  }
+
   function normalizePhotoWallRow(row){
     row = row || {};
     var meta = parseContent(row.content);
@@ -158,7 +176,7 @@
     if (row.is_deleted === true || row.media_url === '__deleted__' || meta.__pw_del__ === true) {
       return { id: row.id, cloudId: row.id, imageUrl: null, deleted: true, is_deleted: true };
     }
-    var url = sanitizePhotoWallUrl(row.media_url || meta.imageUrl || meta.url || '');
+    var url = originalPhotoUrl(sanitizePhotoWallUrl(row.media_url || meta.imageUrl || meta.url || ''),meta);
     var mime = meta.mimeType || row.mime_type || '';
     if (isPhotoWallVideoMeta(meta, mime)) {
       return {
@@ -176,8 +194,8 @@
       cloudId: row.id || meta.cloudId || null,
       username: row.user_name || meta.username || '未知用户',
       imageUrl: url,
-      thumbUrl: sanitizePhotoWallUrl(meta.thumb || meta.thumbUrl || ''),
-      thumb: sanitizePhotoWallUrl(meta.thumb || meta.thumbUrl || ''),
+      thumbUrl: '',
+      thumb: '',
       mediaKind: 'image',
       mimeType: mime,
       duration: meta.duration || null,

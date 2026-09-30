@@ -254,7 +254,7 @@
     var searchUser = '', searchPost = '';
     // 主 Tab 白名单：refreshAdminTab / switchTab / initAdminClient 共用，避免三份名单漂移
     // （blacklist 已下线并入 bans，不出现在名单中）
-    var allowedTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','ai','online','profile'];
+    var allowedTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','ai','online','profile','support'];
 
     function getTabDomName(tab) {
         if (tab === 'errorlog') return 'ErrorLog';
@@ -2782,6 +2782,34 @@
         }
     };
 
+    async function renderAuthorSupportTab(el) {
+        el.innerHTML = '<div class="admin-support"><h2>作者打赏</h2><p>上传微信、支付宝收款码，用户可在与你的聊天顶部打开打赏页面。支持静态 PNG、JPEG、WebP，单张不超过 2MB。</p><div id="adminSupportCodes" class="admin-support-codes"></div><p id="adminSupportStatus" role="status"></p></div>';
+        var container = el.querySelector('#adminSupportCodes'), status = el.querySelector('#adminSupportStatus');
+        try {
+            var config = await apiCall('GET','/admin/author-support');
+            if (!container.isConnected) return;
+            ['wechat','alipay'].forEach(function(provider) {
+                var card=document.createElement('section'), heading=document.createElement('h3');
+                heading.textContent=provider==='wechat' ? '微信收款码' : '支付宝收款码'; card.appendChild(heading);
+                var preview=document.createElement('img'); preview.alt=heading.textContent; preview.hidden=!config[provider+'_url']; if (!preview.hidden) preview.src=config[provider+'_url']; card.appendChild(preview);
+                var label=document.createElement('label'), input=document.createElement('input'); label.textContent='上传或更换收款码'; input.type='file'; input.accept='image/png,image/jpeg,image/webp'; input.setAttribute('aria-label',heading.textContent); label.appendChild(input); card.appendChild(label);
+                input.addEventListener('change',async function() {
+                    var file=input.files[0]; if (!file) return;
+                    if (file.size>2*1024*1024) { status.textContent='图片不超过 2MB'; input.value=''; return; }
+                    input.disabled=true; status.textContent='正在保存'+heading.textContent+'…';
+                    try {
+                        var encoded=await new Promise(function(resolve,reject){var reader=new FileReader();reader.onload=function(){resolve(String(reader.result).split(',')[1]);};reader.onerror=reject;reader.readAsDataURL(file);});
+                        var saved=await apiCall('POST','/admin/author-support',{provider:provider,image:encoded});
+                        if (!container.isConnected) return;
+                        preview.src=saved[provider+'_url']; preview.hidden=false; status.textContent=heading.textContent+'已保存';
+                    } catch(error) { if (container.isConnected) status.textContent=error.message || '保存失败，请重试'; }
+                    finally { input.disabled=false; input.value=''; }
+                }); container.appendChild(card);
+            });
+            var disclaimer=document.createElement('p'); disclaimer.className='admin-support-disclaimer'; disclaimer.textContent=config.disclaimer; container.after(disclaimer);
+        } catch(error) { if (status.isConnected) { status.textContent=error.message || '收款码加载失败'; var retry=document.createElement('button');retry.textContent='重试';retry.onclick=function(){renderAuthorSupportTab(el);};status.appendChild(retry); } }
+    }
+
     window.renderTab = function(tab) {
         var normalized = tab;
         var el = document.getElementById('tab' + getTabDomName(normalized));
@@ -2797,6 +2825,7 @@
             case 'bans': renderBansTab(el); break;
             case 'mutes': renderMutesTab(el); break;
             case 'photos': renderPhotosTab(el); break;
+            case 'support': renderAuthorSupportTab(el); break;
             case 'stats': renderStatsTab(el); break;
             case 'audit': renderAuditTab(el); break;
             case 'behavior': renderBehaviorTab(el); break;

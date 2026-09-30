@@ -16,6 +16,7 @@ async function setup(page) {
       window.__chatTestCalls.push({url, body: options.body});
       let result = {ok:true,data:[],items:[],conversations:[],friends:[]};
       if (url.includes('/history/search')) {
+        if (window.__holdChatSearch) await new Promise(resolve=>{window.__releaseChatSearch=resolve;});
         await new Promise(r => setTimeout(r,window.__chatSearchDelay));
         const more = url.includes('cursor_id');
         result = {ok:true,items:[{message_id:id,peer_name:'peer',sender_name:'tester',body:more?'second page':'hello world',sent_at:stamp,message_type:'text'}],has_more:!more,next_cursor_at:stamp,next_cursor_id:id};
@@ -49,10 +50,13 @@ test('search pages on the server and locates a result', async ({page}) => {
   await expect(page.locator('[data-message-id="'+id+'"]')).toContainText('hello world');
 });
 test('closing search discards a late response', async ({page}) => {
-  await setup(page); await page.evaluate(()=>window.__chatSearchDelay=600);
+  await setup(page); await page.evaluate(()=>window.__holdChatSearch=true);
   await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="messages"]').click(); await page.locator('#chatHistoryQuery').fill('hello');
-  await page.locator('#chatHistoryForm').dispatchEvent('submit'); await page.locator('#chatHistoryClose').click();
-  await page.waitForTimeout(750); await expect(page.locator('#chatHistoryPanel')).toBeHidden();
+  await page.locator('#chatHistoryForm').dispatchEvent('submit');
+  await page.waitForFunction(()=>typeof window.__releaseChatSearch==='function');
+  await page.locator('#chatHistoryClose').click();
+  await page.evaluate(()=>window.__releaseChatSearch());
+  await expect(page.locator('#chatHistoryPanel')).toBeHidden();
   await expect(page.locator('.chat-history-result')).toHaveCount(0);
 });
 test('reply and edit use the existing message action menu', async ({page}) => {
@@ -387,7 +391,7 @@ test('reply quote jumps to original and cleared chats reopen without skeletons',
 });
 test('multi attachment selection supports reorder, removal and sends each selected photo',async({page})=>{
  await setup(page);await expect(page.locator('#dockChatInput')).toBeEnabled();
- await page.evaluate(()=>{class XHR{constructor(){this.upload={};this.status=200;}open(){}setRequestHeader(){}send(file){window.__batchFiles=(window.__batchFiles||[]).concat(file.name);this.responseText=JSON.stringify({ok:true,storage_path:'chat/test.png',public_url:'https://example.invalid/sent.png'});setTimeout(()=>this.onload(),10);}abort(){}}window.XMLHttpRequest=XHR;window.__chatSendDelay=30;});
+ await page.evaluate(()=>{const NativeXHR=window.XMLHttpRequest;class XHR extends NativeXHR{open(method,url,...rest){this.mockUpload=url.includes('/api/dm/upload?');if(!this.mockUpload)super.open(method,url,...rest);}setRequestHeader(...args){if(!this.mockUpload)super.setRequestHeader(...args);}send(file){if(!this.mockUpload)return super.send(file);window.__batchFiles=(window.__batchFiles||[]).concat(file.name);Object.defineProperty(this,'status',{value:200});Object.defineProperty(this,'responseText',{value:JSON.stringify({ok:true,storage_path:'chat/test.png',public_url:'https://example.invalid/sent.png'})});setTimeout(()=>this.onload(),10);}}window.XMLHttpRequest=XHR;window.__chatSendDelay=30;});
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=','base64');
  await page.locator('#dockChatFileInp').setInputFiles([{name:'one.png',mimeType:'image/png',buffer:png},{name:'two.png',mimeType:'image/png',buffer:png},{name:'three.png',mimeType:'image/png',buffer:png}]);
  await expect(page.locator('.chat-attachment-item')).toHaveCount(3);await page.getByRole('button',{name:'后移第 1 个附件'}).click();await page.getByRole('button',{name:'移除第 3 个附件'}).click();await expect(page.locator('.chat-attachment-item')).toHaveCount(2);
