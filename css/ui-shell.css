@@ -2671,7 +2671,7 @@ html #panelProfile .profile-setting-control select {
   transform: translate3d(calc(var(--social-tab-index,0)*100%),0,0);
   transition: transform 260ms cubic-bezier(.22,.85,.25,1), box-shadow 160ms ease;
 }
-#panelChat #dockChatSocialTabs.is-dragging .chat-social-slider { transition: none; box-shadow: inset 0 1px 2px rgba(255,255,255,.9), 0 3px 12px rgba(38,81,62,.18); }
+#panelChat #dockChatSocialTabs.is-dragging .chat-social-slider { transition: none; box-shadow: inset 0 1px 2px rgba(255,255,255,.45), 0 3px 12px rgba(38,81,62,.2); }
 #panelChat #dockChatSocialTabs button {
   position: relative; z-index: 1; display: flex; justify-content: center; align-items: center;
   width: 100%; min-width: 0; min-height: 44px; padding: 4px 2px !important; margin: 0;
@@ -2688,7 +2688,7 @@ html #panelProfile .profile-setting-control select {
 #panelChat #dockChatSocialSheet .chat-social-search-form input { height: 44px; }
 #panelChat #dockChatSocialSheet .chat-social-search-form button, #panelChat #dockChatSocialSheet .chat-social-close { min-height: 44px; box-shadow: none !important; }
 #panelChat #dockChatSocialSheet .chat-social-empty { padding: 32px 8px; font-size: 13px; line-height: 1.7; color: var(--chat-muted); text-align: center; }
-html[data-theme="dark"] #panelChat #dockChatSocialTabs .chat-social-slider { background: linear-gradient(145deg,rgba(158,205,179,.2),rgba(158,205,179,.07)); border-color: rgba(212,241,224,.24); box-shadow: inset 0 1px 1px rgba(255,255,255,.12), 0 2px 8px rgba(0,0,0,.16); }
+html[data-theme="dark"] #panelChat #dockChatSocialTabs .chat-social-slider { background: linear-gradient(145deg,rgba(158,205,179,.3),rgba(158,205,179,.13)); border-color: rgba(212,241,224,.34); box-shadow: inset 0 1px 1px rgba(255,255,255,.12), 0 2px 8px rgba(0,0,0,.16); }
 
 /* Records are reading rows, with actions separate from the post link. */
 #profileActivityModal .personal-record { padding: 18px 0; border-bottom: 1px solid var(--xtj-line-soft,rgba(80,135,132,.14)); }
@@ -3005,7 +3005,7 @@ html.xtj-ios-viewport .app-container {
 }
 /* Contact rail gestures and local glass deformation. */
 #panelChat #dockChatSocialTabs { background:transparent!important;touch-action:none; }
-#panelChat #dockChatSocialTabs .chat-social-slider { backdrop-filter:blur(8px) saturate(145%);-webkit-backdrop-filter:blur(8px) saturate(145%);background:linear-gradient(120deg,rgba(255,255,255,.4),rgba(255,255,255,.12));border-color:rgba(255,255,255,.46);box-shadow:inset 0 1px 1px rgba(255,255,255,.45),0 2px 8px rgba(25,70,48,.08); }
+#panelChat #dockChatSocialTabs .chat-social-slider { backdrop-filter:blur(8px) saturate(145%);-webkit-backdrop-filter:blur(8px) saturate(145%);background:linear-gradient(120deg,rgba(78,169,130,.28),rgba(78,169,130,.14));border-color:rgba(46,119,84,.3);box-shadow:inset 0 1px 1px rgba(255,255,255,.4),0 2px 8px rgba(25,70,48,.13); }
 #panelChat #dockChatSocialTabs .chat-social-slider::before { content:"";position:absolute;inset:-2px;border-radius:inherit;pointer-events:none;background:linear-gradient(90deg,rgba(116,217,174,.12),transparent 40%,rgba(255,255,255,.2));opacity:0;transition:opacity 160ms; }
 #panelChat #dockChatSocialTabs.is-dragging .chat-social-slider::before { opacity:1; }
 .author-support-image-button { display:block;width:100%;padding:0!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;cursor:zoom-in; }
