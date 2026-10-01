@@ -415,14 +415,7 @@
     state.lastTapAt = now;
     state.lastTapX = point.x;
     state.lastTapY = point.y;
-    // H-32: 单击延迟关闭预览（与原 preview.js 的单击关闭一致）；
-    // 仅未缩放时生效，双击会在 280ms 内取消该定时器。
-    if (state.scale > 1.01 || isModalOpen()) return;
-    state.singleTapCloseTimer = setTimeout(function () {
-      state.singleTapCloseTimer = 0;
-      if (isModalOpen() || state.scale > 1.01) return;
-      window.closePhotoPreview();
-    }, 320);
+
   }
 
   function beginPan(point) {
@@ -460,11 +453,8 @@
   function refreshSinglePointerStart() {
     var remaining = Array.from(state.pointers.values())[0];
     if (!remaining) return;
-    if (state.scale > 1.01) {
-      beginPan(remaining);
-    } else {
-      beginSwipeDismiss(remaining);
-    }
+    // A remaining finger belongs to the pinch, never to a new dismiss gesture.
+    beginPan(remaining);
   }
 
   function beginPinch() {
@@ -524,9 +514,9 @@
     var dy = point.y - state.startY;
     if (Math.abs(dx) + Math.abs(dy) > 8) state.moved = true;
     if (!state.dragAxis) {
-      if (Math.abs(dy) > Math.abs(dx) + 6 && dy > 0) {
+      if (dy > 12 && dy > Math.abs(dx) * 1.2) {
         state.dragAxis = 'dismiss';
-      } else if (Math.abs(dx) > Math.abs(dy) + 6) {
+      } else if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) {
         state.dragAxis = 'swipe';
       } else {
         return;
@@ -565,6 +555,11 @@
     var dy = point.y - state.startY;
     var distance = Math.abs(dx) + Math.abs(dy);
 
+    if (state.mode === 'nav-wait') {
+      if(Math.abs(dx)>70 && Math.abs(dx)>Math.abs(dy))requestNavigation(dx<0?'next':'prev');
+      clearInteractionState();requestAnimationFrame(pumpNavigation);return;
+    }
+
     if (state.mode === 'pinch') {
       state.suppressTapUntil = Date.now() + 350;
       reboundScaleIfNeeded(true);
@@ -592,7 +587,7 @@
     if (state.mode === 'swipe-dismiss') {
       if (state.dragAxis === 'dismiss') {
         state.suppressTapUntil = Date.now() + 350;
-        if (dy > 140) {
+        if (dy > 140 && dy > Math.abs(dx) * 1.15) {
           window.closePhotoPreview();
         } else {
           clearDismissVisual(true);
@@ -684,6 +679,7 @@
     [
       'ppZoomOutBtn',
       'ppZoomInBtn',
+      'ppDeleteBtn',
       'ppInfoBtn',
       'ppShareBtn',
       'ppRotateBtn'
@@ -860,7 +856,6 @@
     if (closeBtn && !closeBtn.__xtjInfoCloseBound) {
       closeBtn.__xtjInfoCloseBound = true;
       closeBtn.addEventListener('pointerdown', function (event) {
-        event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
       }, true);
@@ -875,12 +870,10 @@
     if (content) {
       content.addEventListener('click', function (event) {
         event.stopPropagation();
-        event.stopImmediatePropagation();
-      }, true);
+      });
       content.addEventListener('pointerdown', function (event) {
         event.stopPropagation();
-        event.stopImmediatePropagation();
-      }, true);
+      });
     }
     modal.addEventListener('keydown', function (event) {
       if (!state.infoOpen) return;
@@ -947,6 +940,11 @@
   }
 
   function showPhotoInfoInternal() {
+    if(!infoModal()&&overlay()){
+      var created=document.createElement('div');created.id='ppInfoModal';created.className='pp-info-modal';created.setAttribute('role','dialog');created.setAttribute('aria-modal','true');created.setAttribute('aria-label','照片详情');
+      created.innerHTML='<div class="pp-info-modal-content" tabindex="-1"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button type="button" class="pp-info-modal-close" aria-label="关闭照片信息">×</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
+      overlay().appendChild(created);
+    }
     var photo = activePhoto();
     var modal = infoModal();
     var body = infoBody();
@@ -1020,6 +1018,8 @@
       if (state.activePointerId != null) {
         releasePointerCapture(root || wrapper(), state.activePointerId);
       }
+      cancelPreviewMotion();
+      cancelNavigation();
       clearInteractionState();
       clearImageError();
     // H-32: 关闭预览时隐藏下载确认弹窗，防止全屏遮罩残留阻塞页面
@@ -1038,7 +1038,7 @@
       if (!state.callingOriginalClose && typeof original.closePhotoPreview === 'function') {
         state.callingOriginalClose = true;
         try {
-          withPreviewGuardDisabled(original.closePhotoPreview, window, []);
+          withPreviewGuardDisabled(original.closePhotoPreview, window, [true]);
         } catch (_) {}
         state.callingOriginalClose = false;
       }
@@ -1166,6 +1166,8 @@
         return;
       }
 
+      if(motionClosing){event.preventDefault();event.stopImmediatePropagation();return;}
+      cancelPreviewMotion();
       var isTouchLike = event.pointerType === 'touch';
       var isMouse = event.pointerType === 'mouse';
       if (isMouse && event.button !== 0) return;
@@ -1189,6 +1191,8 @@
           beginPinch();
         } else if (state.scale > 1.01) {
           beginPanOrTap({ x: event.clientX, y: event.clientY });
+        } else if (navBusy) {
+          state.mode='nav-wait';state.startX=event.clientX;state.startY=event.clientY;
         } else {
           beginSwipeDismiss({ x: event.clientX, y: event.clientY });
           // H-32: 长按（550ms 未移动）触发下载确认弹窗，与原 preview.js 行为一致
@@ -1238,6 +1242,8 @@
           schedulePointerMoveVisual('pinch');
         } else if (state.mode === 'pinch') {
           schedulePointerMoveVisual('refresh-single');
+        } else if (state.mode === 'nav-wait') {
+          // Track the next intention without moving a track still finishing its prior slide.
         } else if (state.mode === 'pan-or-tap') {
           schedulePointerMoveVisual('pan-or-tap', { x: event.clientX, y: event.clientY });
         } else if (state.scale > 1.01 || state.mode === 'pan') {
@@ -1258,10 +1264,11 @@
     }, true);
 
     function finishPointer(event) {
+      if(isControl(event.target)&&!state.pointers.has(event.pointerId))return;
       flushPendingMoveBeforePointerEnd();
       if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
       if (event.pointerType === 'touch') {
-        if (!state.pointers.has(event.pointerId)) return;
+        if (!state.pointers.has(event.pointerId)){event.preventDefault();event.stopImmediatePropagation();return;}
         state.pointers.delete(event.pointerId);
         releasePointerCapture(surface, event.pointerId);
 
@@ -1320,18 +1327,18 @@
       cancelPendingMoveFrame();
       releasePointerCapture(surface, event.pointerId);
       clearInteractionState();
+      if(!navBusy)syncTrackTransform(0,true);
       clearDismissVisual(true);
       reboundScaleIfNeeded(true);
+      requestAnimationFrame(pumpNavigation);
       event.preventDefault();
       event.stopImmediatePropagation();
     }, true);
 
     surface.addEventListener('click', function (event) {
       if (isControl(event.target)) return;
-      if (Date.now() < state.suppressTapUntil || isModalOpen()) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
     }, true);
 
     surface.addEventListener('dblclick', function (event) {
@@ -1396,7 +1403,7 @@
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        if (typeof window.forceClosePhotoPreview === 'function') window.forceClosePhotoPreview();
+        if (isModalOpen())window.closePhotoInfo();else window.closePhotoPreview();
       } else if (event.key === 'ArrowLeft') {
         event.preventDefault();
         if (typeof window.ppPrevPhoto === 'function') window.ppPrevPhoto();
@@ -1591,34 +1598,87 @@
       clearImageError();
       // ★ 修复 A2：每次打开预览确保键盘导航监听存在（关闭时会被移除）
       ensurePreviewKeydownHandler();
+      var wasActive=overlay()&&overlay().classList.contains('active');
+      cancelPreviewMotion();cancelNavigation();
       var result = openWithExplicitPhotos(safeIndex, explicitPhotos, options || null);
-      requestAnimationFrame(function () {
-        requestAnimationFrame(afterOpen);
-      });
+      afterOpen();
+      if(!wasActive)animatePreviewOpen();
       return result;
     };
     window.openPhotoPreview.__xtjHotfixWrapped = true;
   }
 
-  var _navSeq = 0;
-  function wrapNavigation(kind) {
-    return function () {
-      closePhotoInfoInternal(true);
-      resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true, keepTrack: true });
-      var fn = kind === 'next' ? original.nextPhoto : original.prevPhoto;
-      var result = withPreviewGuardDisabled(fn, window, arguments);
-      var seq = ++_navSeq;
-      window.setTimeout(function () {
-        if (seq !== _navSeq) return;
-        var root = overlay();
-        if (root && root.classList.contains('active')) {
-          resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
-          afterOpen();
-          syncPreviewMeta(activePhoto());
-        }
-      }, 360);
-      return result;
-    };
+  var navBusy=false, navQueue=[], navTimer=0;
+  function cancelNavigation(){navBusy=false;navQueue=[];if(navTimer)clearTimeout(navTimer);navTimer=0;}
+  function pumpNavigation(){
+    var root=overlay();if(navBusy||state.pointers.size||!root||!root.classList.contains('active')||root.classList.contains('pp-transition-closing'))return;
+    var kind=navQueue.shift();if(!kind)return;
+    var index=currentPhotoIndex(),list=photoList();
+    if((kind==='next'&&index>=list.length-1)||(kind==='prev'&&index<=0)){syncTrackTransform(0,true);requestAnimationFrame(pumpNavigation);return;}
+    cancelPreviewMotion();closePhotoInfoInternal(true);
+    resetPreviewState({resetRotation:true,animate:false,keepSuppressTap:true,keepTrack:true});
+    // Detach a slow initial-open callback before it can restore the old index.
+    if(root._cleanupOpenListeners)root._cleanupOpenListeners(true);
+    root._openLoadGen=(root._openLoadGen||0)+1;
+    navBusy=true;
+    withPreviewGuardDisabled(kind==='next'?original.nextPhoto:original.prevPhoto,window,[]);
+    if(navBusy)navTimer=setTimeout(function(){navTimer=0;navBusy=false;syncTrackTransform(0,false);requestAnimationFrame(pumpNavigation);},650);
+  }
+  function requestNavigation(kind){
+    if(navQueue.length<8)navQueue.push(kind);
+    pumpNavigation();
+  }
+  window.addEventListener('xtj:photo-changed',function(){
+    if(navTimer)clearTimeout(navTimer);navTimer=0;navBusy=false;
+    syncPreviewMeta(activePhoto());clearImageError();requestAnimationFrame(pumpNavigation);
+  });
+  function wrapNavigation(kind){return function(){requestNavigation(kind);};}
+
+  var motionEpoch=0,motionAnimations=[],motionClosing=false;
+  function reducedMotion(){return document.documentElement.getAttribute('data-xtj-motion')==='off'||(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);}
+  function cancelPreviewMotion(){
+    motionEpoch++;motionAnimations.forEach(function(animation){animation.cancel();});motionAnimations=[];motionClosing=false;
+    var root=overlay();if(root)root.classList.remove('pp-transition-closing');
+  }
+  function originForCurrent(){
+    var photo=activePhoto(),grid=document.getElementById('photoGrid'),root=overlay(),node=null;
+    if(photo&&grid){var cards=grid.querySelectorAll('.photo-wall-item');for(var k=0;k<cards.length;k++){if(String(cards[k].getAttribute('data-photo-id'))===String(photo.id)){node=cards[k].querySelector('img');break;}}}
+    if(!node&&root&&root._openOriginImg&&photo&&String(photo.id)===String(root._motionOriginId))node=root._openOriginImg;
+    if(!node||!node.isConnected)return null;
+    var rect=node.getBoundingClientRect(),screen=overlay().getBoundingClientRect();
+    if(!rect.width||!rect.height||rect.bottom<=screen.top||rect.top>=screen.bottom||rect.right<=screen.left||rect.left>=screen.right)return null;
+    return {node:node,rect:rect};
+  }
+  function motionTransform(origin){
+    var root=overlay(),img=previewImage(),screen=root.getBoundingClientRect();
+    var width=img&&img.naturalWidth,height=img&&img.naturalHeight;
+    if(!width&&origin){width=origin.node.naturalWidth;height=origin.node.naturalHeight;}
+    var photo=activePhoto();width=width||(photo&&photo.width)||screen.width;height=height||(photo&&photo.height)||screen.height;
+    var fit=Math.min(screen.width/width,screen.height/height),imageWidth=width*fit,imageHeight=height*fit;
+    var rect=origin.rect,scale=Math.min(rect.width/imageWidth,rect.height/imageHeight);
+    return 'translate3d('+(rect.left+rect.width/2-screen.left-screen.width/2)+'px,'+(rect.top+rect.height/2-screen.top-screen.height/2)+'px,0) scale('+scale+')';
+  }
+  function animatePreviewOpen(){
+    var root=overlay(),wrap=wrapper();if(!root||!wrap||!wrap.animate||reducedMotion())return;
+    root._motionOriginId=activePhoto()&&activePhoto().id;
+    var origin=originForCurrent(),from=origin?motionTransform(origin):'none';
+    var token=motionEpoch;
+    motionAnimations=[wrap.animate([{transform:from,opacity:.6},{transform:'none',opacity:1}],{duration:240,easing:'cubic-bezier(.22,1,.36,1)'}),root.animate([{opacity:0},{opacity:1}],{duration:180,easing:'ease-out'})];
+    Promise.all(motionAnimations.map(function(a){return a.finished;})).then(function(){if(token===motionEpoch)motionAnimations=[];}).catch(function(){});
+  }
+  function animatePreviewClose(){
+    var root=overlay(),wrap=wrapper();if(!root||!root.classList.contains('active')||motionClosing)return;
+    cancelPreviewMotion();cancelNavigation();motionClosing=true;closePhotoInfoInternal(true);
+    // Stop navigation before measuring the current photograph's return target.
+    var track=slideTrack();if(track&&track._ppAnimationCleanup)track._ppAnimationCleanup();
+    syncTrackTransform(0,false);
+    var origin=originForCurrent(),to=origin?motionTransform(origin):'scale(.98)';
+    var from=getComputedStyle(previewImage()).transform;
+    state.scale=1;state.tx=0;state.ty=0;state.rotation=0;applyImageTransform(false);
+    if(reducedMotion()||!wrap||!wrap.animate){forceClosePhotoPreview();return;}
+    root.classList.add('pp-transition-closing');var token=motionEpoch;
+    motionAnimations=[wrap.animate([{transform:from,opacity:1},{transform:to,opacity:.3}],{duration:240,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}),root.animate([{opacity:getComputedStyle(root).opacity},{opacity:0}],{duration:240,easing:'ease-in',fill:'forwards'})];
+    motionAnimations[0].finished.then(function(){if(token===motionEpoch)forceClosePhotoPreview();}).catch(function(){});
   }
 
   window.showPhotoInfo = function () {
@@ -1629,24 +1689,7 @@
     closePhotoInfoInternal(false);
   };
 
-  window.closePhotoPreview = function () {
-    closePhotoInfoInternal(true);
-    delete window.__xtjPreviewExplicitPhotos;
-    window.__xtjPhotoPreviewContext = null;
-    clearInteractionState();
-    cancelPendingMoveFrame();
-    if (typeof original.closePhotoPreview === 'function') {
-      state.callingOriginalClose = true;
-      try {
-        withPreviewGuardDisabled(original.closePhotoPreview, this, arguments);
-      } finally {
-        state.callingOriginalClose = false;
-      }
-      scheduleCloseFallback(520);
-      return;
-    }
-    forceClosePhotoPreview();
-  };
+  window.closePhotoPreview = function () {animatePreviewClose();};
 
   window.shareCurrentPhoto = function () {
     return withPreviewGuardDisabled(original.shareCurrentPhoto, this, arguments);
@@ -1656,13 +1699,6 @@
     closePhotoInfoInternal(true);
     resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
     var result = withPreviewGuardDisabled(original.deletePhotoFromPreview, this, arguments);
-    window.setTimeout(function () {
-      var root = overlay();
-      if (root && root.classList.contains('active')) {
-        resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
-        afterOpen();
-      }
-    }, 420);
     return result;
   };
 
