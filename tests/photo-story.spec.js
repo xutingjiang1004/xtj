@@ -70,3 +70,33 @@ test('entry and exit animate to the current wall tile and reopening cancels old 
 test('lifting one pinch finger cannot turn its remaining downward movement into dismissal',async({page})=>{
  await storyFixture(page);await page.evaluate(()=>{const root=document.getElementById('photoPreviewOverlay');const send=(type,id,x,y)=>root.dispatchEvent(new PointerEvent(type,{bubbles:true,pointerType:'touch',pointerId:id,clientX:x,clientY:y}));send('pointerdown',21,100,260);send('pointerdown',22,220,260);send('pointermove',22,225,260);send('pointerup',22,225,260);send('pointermove',21,100,480);send('pointerup',21,100,480);});await page.waitForTimeout(450);await expect(page.locator('#photoPreviewOverlay')).toHaveClass(/active/);
 });
+
+test('decoded author avatar persists across same-author switches without another request',async({page})=>{
+ await storyFixture(page);await expect(page.locator('#ppStoryAvatar img')).toHaveCount(1);await expect(page.locator('#ppStoryAvatar img')).toHaveJSProperty('naturalWidth',1600);
+ const original=await page.locator('#ppStoryAvatar img').evaluate(img=>{window.__avatarNode=img;return img.src;});
+ await page.evaluate(()=>window.ppNextPhoto());await expect(page.locator('#ppStoryCaption')).toHaveText('第二张照片');expect(await page.locator('#ppStoryAvatar img').evaluate(img=>img===window.__avatarNode)).toBe(true);await expect(page.locator('#ppStoryAvatar img')).toHaveAttribute('src',original);
+});
+test('comments have 80 percent transparent glass and reversible entrance and exit',async({page})=>{
+ await storyFixture(page);await page.locator('#ppCommentBtn').click();const panel=page.locator('#ppCommentsPanel');await expect(panel).toBeVisible();
+ expect(await panel.evaluate(el=>getComputedStyle(el).backgroundColor)).toMatch(/0\.2\)/);expect(await panel.evaluate(el=>el.getAnimations().length)).toBeGreaterThan(0);
+ await page.locator('#ppCommentsClose').click();await expect(panel).toBeHidden();
+ await page.evaluate(()=>{document.getElementById('ppCommentBtn').click();document.getElementById('ppCommentsClose').click();document.getElementById('ppCommentBtn').click();});await page.waitForTimeout(300);await expect(panel).toBeVisible();
+ await page.evaluate(()=>window.ppNextPhoto());await expect(page.locator('#ppStoryCaption')).toHaveText('第二张照片');await expect(panel).toBeHidden();
+});
+
+test('delete confirmation stays readable over bright and dark photo backgrounds',async({page})=>{
+ await fullPage(page);await page.evaluate(()=>{document.body.insertAdjacentHTML('beforeend','<div id="contrastPhoto" style="position:fixed;inset:0;background:repeating-linear-gradient(45deg,#fff 0 70px,#172a24 70px 140px);z-index:10000"></div>');window.showConfirm('删除照片','删除后无法恢复，确定要删除吗？','删除',function(){});});
+ for(const theme of ['light','dark']){
+  await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);await page.waitForTimeout(150);
+  const style=await page.locator('.pp-confirm-dialog').evaluate(el=>({bg:getComputedStyle(el).backgroundColor,text:getComputedStyle(document.getElementById('ppConfirmMsg')).color}));expect(style.bg).toContain('0.5');expect(style.text).toBe('rgb(8, 19, 14)');
+  if(page.context().browser().browserType().name()==='chromium')await page.screenshot({path:'/workspace/scratch/delete-confirm-'+theme+'.png'});
+ }
+});
+
+test('behavior collection requires opt-in, records only control identifiers and stops on opt-out',async({page})=>{
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));await fullPage(page);const batches=[];
+ await page.route('**/api/user/behavior',async r=>{batches.push(r.request().postDataJSON());await r.fulfill({json:{ok:true}});});
+ await page.evaluate(()=>{window.dispatchEvent(new CustomEvent('xtj:behavior-consent',{detail:{owner:'A',enabled:true}}));const button=document.createElement('button');button.id='safeBehaviorTest';button.textContent='不应采集的私人正文';document.body.append(button);button.click();});
+ await expect.poll(()=>batches.length,{timeout:10000}).toBeGreaterThan(0);expect(JSON.stringify(batches)).toContain('safeBehaviorTest');expect(JSON.stringify(batches)).not.toContain('私人正文');
+ await page.evaluate(()=>window.dispatchEvent(new CustomEvent('xtj:behavior-consent',{detail:{owner:'A',enabled:false}})));const length=batches.length;await page.evaluate(()=>document.getElementById('safeBehaviorTest').click());await page.waitForTimeout(5500);expect(batches.length).toBe(length);expect(errors.filter(text=>/sessionStartedAt|startedAt|SafeAnalytics/.test(text))).toEqual([]);
+});

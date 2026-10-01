@@ -469,7 +469,7 @@ html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage { transform
   pointer-events:none;
 }
 #photoPreviewOverlay .pp-story-author { display:flex;gap:10px;align-items:center;max-width:100%; }
-#photoPreviewOverlay .pp-story-avatar { width:36px;height:36px;flex:0 0 36px;border-radius:50%;overflow:hidden;background:rgba(255,255,255,.16);display:grid;place-items:center;font-size:14px;color:#fff;border:1px solid rgba(255,255,255,.3); }
+#photoPreviewOverlay .pp-story-avatar { width:36px;height:36px;flex:0 0 36px;border-radius:50%;overflow:hidden;background:#354b43;display:grid;place-items:center;font-size:14px;color:#fff;border:1px solid rgba(255,255,255,.3); }
 #photoPreviewOverlay .pp-story-avatar img { width:100%;height:100%;object-fit:cover; }
 #photoPreviewOverlay .pp-story-identity { display:flex;flex-direction:column;gap:2px;min-width:0;text-shadow:0 1px 3px rgba(0,0,0,.6); }
 #photoPreviewOverlay .pp-story .pp-user { color:#fff!important;font-size:14px;font-weight:600; }
@@ -492,19 +492,21 @@ html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage { transform
 #photoPreviewOverlay .pp-comments-panel {
   position:absolute;inset:auto max(12px,env(safe-area-inset-right,0px)) 12px max(12px,env(safe-area-inset-left,0px));
   margin:auto;width:min(520px,calc(100% - 24px));max-height:min(68dvh,600px);display:flex;flex-direction:column;
-  border-radius:20px;background:#f8faf9;color:#23372e;box-shadow:0 12px 48px rgba(0,0,0,.3);padding:16px;z-index:60;
+  border-radius:20px;background:rgba(248,250,249,.2);color:#fff;
+  border:1px solid rgba(255,255,255,.35);backdrop-filter:blur(8px) saturate(140%);-webkit-backdrop-filter:blur(8px) saturate(140%);
+  text-shadow:0 1px 3px rgba(0,0,0,.85);box-shadow:0 12px 48px rgba(0,0,0,.3);padding:16px;z-index:60;
   user-select:text;touch-action:pan-y;
 }
-html[data-theme="dark"] #photoPreviewOverlay .pp-comments-panel { background:#16231d;color:#e6f1eb; }
+html[data-theme="dark"] #photoPreviewOverlay .pp-comments-panel { background:rgba(22,35,29,.2);color:#fff; }
 #photoPreviewOverlay .pp-comments-head { display:flex;align-items:center;justify-content:space-between;flex-shrink:0; }
 #photoPreviewOverlay .pp-comments-head button { width:44px;height:44px;padding:0;border:0;background:none;box-shadow:none;font-size:26px;color:inherit; }
 #photoPreviewOverlay .pp-comments-list { overflow:auto;min-height:60px;flex:1;padding:8px 0 16px;overscroll-behavior:contain;touch-action:pan-y; }
 #photoPreviewOverlay .pp-comment-row { padding:12px 0;border-bottom:1px solid rgba(128,155,143,.15);font-size:13px; }
 #photoPreviewOverlay .pp-comment-row p { white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0;line-height:1.6; }
-#photoPreviewOverlay .pp-comment-row time { font-size:11px;opacity:.55; }
+#photoPreviewOverlay .pp-comment-row time { font-size:11px;color:rgba(255,255,255,.85); }
 #photoPreviewOverlay .pp-comment-row button { font-size:11px;padding:8px;background:none;border:0;box-shadow:none;color:inherit; }
 #photoPreviewOverlay #ppCommentForm { display:flex;gap:10px;align-items:center;flex-shrink:0; }
-#photoPreviewOverlay #ppCommentInput { flex:1;min-width:0;max-height:100px;margin:0;padding:10px 12px;border:1px solid rgba(128,155,143,.25);border-radius:12px;resize:none;background:rgba(128,155,143,.08);color:inherit;font-size:14px; }
+#photoPreviewOverlay #ppCommentInput { flex:1;min-width:0;max-height:100px;margin:0;padding:10px 12px;border:1px solid rgba(128,155,143,.25);border-radius:12px;resize:none;background:rgba(20,32,27,.5);color:inherit;font-size:14px; }
 #photoPreviewOverlay #ppCommentSend { flex-shrink:0;min-height:44px;padding:8px 14px;background:#219b70;color:#fff;border:0;border-radius:12px;box-shadow:none; }
 #photoPreviewOverlay #ppCommentError { font-size:12px;color:#c46464;line-height:1.5; }
 @media (prefers-reduced-transparency:reduce) { #photoPreviewOverlay .photo-preview-close { background:rgba(25,35,30,.85)!important;backdrop-filter:none!important; } }
@@ -549,3 +551,5 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-info.pp-story {
   animation:none!important;transition:none!important;transform:none!important;opacity:1!important;
   flex-wrap:nowrap!important;justify-content:flex-start!important;
 }
+
+@media (prefers-reduced-transparency:reduce) { #photoPreviewOverlay .pp-comments-panel { background:#16231d;backdrop-filter:none;-webkit-backdrop-filter:none; } }
