@@ -10,6 +10,7 @@
         opacity: 1
     }, P = null, E = !1, L = Object.create(null);
     var pendingPreviewDeletes = new Set();
+    window.addEventListener('xtj:visual-viewport-change', function(){if(e){M();if(s){s.style.transition="none";s.style.transform="translate3d("+-a+"px,0,0)";}l=0;}});
     window.addEventListener('xtj:permissions-ready', function() { if (e && t) j(i); });
     function T(e) {
         return "close" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span>' : "info" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span>' : "share" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span>' : "rotate" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(-1.5,0)"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></g></svg></span>' : "delete" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>' : "";
@@ -21,7 +22,7 @@
         e && console.warn("[photo-preview]", e);
     });
     function M() {
-        (a = window.innerWidth, r = window.innerHeight, s = document.getElementById("ppSlideTrack")) && (s.querySelectorAll(".pp-slide-slot").forEach(function(e) {
+        (a = (document.getElementById("photoPreviewOverlay") || {}).clientWidth || window.innerWidth, r = (document.getElementById("photoPreviewOverlay") || {}).clientHeight || window.innerHeight, s = document.getElementById("ppSlideTrack")) && (s.querySelectorAll(".pp-slide-slot").forEach(function(e) {
             e.style.width = a + "px", e.style.height = r + "px";
         }), s.style.width = 3 * a + "px", s.style.height = r + "px");
     }
@@ -259,6 +260,7 @@
     }
     function N(e) {
         i = e, q(), t = n[e], j(e), F(e), M();
+        if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
         if (s) {
             s.style.transition = "none";
             s.style.transform = "translate3d(" + -a + "px, 0, 0)";
@@ -302,6 +304,7 @@
                 });
             }
             s && (s.textContent = i.views || "0");
+            if (window.renderPhotoStory) window.renderPhotoStory(i);
             var c = document.getElementById("ppDeleteBtn");
             if (c) {
                 c.disabled = pendingPreviewDeletes.has(String(i.id));
@@ -566,7 +569,7 @@
             var _ = document.getElementById("photoPreviewOverlay");
             if (!_) {
                 var H = document.createElement("div");
-                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button><button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div></div></div>',
+                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><div class="pp-preview-toolbar"><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button></div><button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div></div></div>',
                 document.body.appendChild(H), _ = H;
             }
             _ && function(e) {
@@ -690,7 +693,7 @@
                     }
                 }), d.addEventListener("pointerup", function(e) {
                     P && (clearTimeout(P), P = null);
-                    var t = e.target, r = t.closest(".photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn"), s = t.closest(".pp-info-modal-content, .pp-download-confirm-content"), h = t.closest(".pp-info-modal, .pp-download-confirm-overlay");
+                    var t = e.target, r = t.closest(".photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-story, .pp-comments-panel"), s = t.closest(".pp-info-modal-content, .pp-download-confirm-content"), h = t.closest(".pp-info-modal, .pp-download-confirm-overlay");
                     if (r || E) return e.stopPropagation(), m.clear(), y = null, void (B.isActive = !1);
                     if (s) return e.stopPropagation(), m.clear(), y = null, void (B.isActive = !1);
                     if (h) {
@@ -778,6 +781,7 @@
                 };
                 window.addEventListener("orientationchange", d._ppOrientationHandler);
             }(_), d = !0), q(), e = !0, t = n[b] || null, window.photoPreviewCurrent = t, i = b;
+            if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
             var S = n[b];
             // 缩略图路径下方已有独立原图预加载器；不要再由缓存预热器并发下载同一原图。
             S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");

@@ -193,6 +193,8 @@
       id: row.id || meta.id || ('local_' + Date.now() + '_' + Math.random().toString(36).slice(2)),
       cloudId: row.id || meta.cloudId || null,
       username: row.user_name || meta.username || '未知用户',
+      caption: typeof meta.caption === 'string' ? meta.caption : '',
+      width: meta.width || null, height: meta.height || null,
       imageUrl: url,
       thumbUrl: '',
       thumb: '',
@@ -659,57 +661,24 @@
     if (card) card.textContent = count;
   }
 
+  var countedPhotoViewers = new Set();
   async function syncPhotoViewCount(item){
-    if (!item || !item.cloudId) return;
-    var key = 'xtj_pwv_' + item.cloudId;
-    var now = Date.now();
-    var last = Number(window.safeStorage.get(key) || 0) || 0;
-    if (last && now - last < 5 * 60 * 1000) return;
-    try { window.safeStorage.set(key, String(now)); } catch (_) {}
-    // P4: 保存原始 views 以便请求失败时回滚乐观更新
-    var originalViews = Number(item.views || 0);
-    item.views = originalViews + 1;
-    updatePhotoViewDisplays(item);
-
-    // ★ P1-12 审计修复：不再直连 Supabase RPC。
-    //   原实现 `window.sb.rpc('increment_post_views')` 依赖 056 迁移把该
-    //   SECURITY DEFINER 函数 GRANT 给了 anon —— 任何拿到公开 anon key 的客户端
-    //   都能绕过后端逻辑反复刷浏览量，且私密帖的精确 views 会从 RPC 返回值泄露。
-    //   改走 /api/photo/view：后端校验 media_type=__photo_wall__ 且 visibility 为
-    //   公开、optionalAuth + 60/min 限流，不再对外暴露 RPC 入口。
-    var rollbackView = function () {
-      item.views = originalViews;
-      updatePhotoViewDisplays(item);
-      // P5: 失败时删除节流键，允许用户立即重试
-      try { window.safeStorage.remove(key); } catch (_) {}
-    };
-    var viewCtrl = null;
-    var viewTimer = null;
+    var owner = window.currentUser || '';
+    if (!item || !item.cloudId || !owner) return;
+    var key = owner + ':' + item.cloudId;
+    if (countedPhotoViewers.has(key)) return;
+    var controller = new AbortController(), timer = setTimeout(function(){controller.abort();},10000);
     try {
-      if (typeof AbortController === 'function') viewCtrl = new AbortController();
-      viewTimer = setTimeout(function () { try { if (viewCtrl) viewCtrl.abort(); } catch (_) {} }, 8000);
-      var viewResp = await fetch(apiUrl('/api/photo/view'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ photo_id: item.cloudId }),
-        signal: viewCtrl ? viewCtrl.signal : undefined
-      });
-      var viewPayload = await viewResp.json().catch(function () { return {}; });
-      // 404/非公开/服务端失败都不应保留本地乐观自增
-      if (!viewResp.ok || !viewPayload || viewPayload.ok !== true) {
-        rollbackView();
-      } else if (typeof viewPayload.views === 'number' && viewPayload.views >= 0) {
-        // 以服务端返回的真实计数为准，避免本地乐观值与库内值长期漂移
-        item.views = viewPayload.views;
-        updatePhotoViewDisplays(item);
-      }
-    } catch (_) {
-      // P4: 网络层异常也回滚
-      rollbackView();
-    } finally {
-      if (viewTimer) clearTimeout(viewTimer);
-    }
+      var options = { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
+        body:JSON.stringify({photo_id:item.cloudId}), signal:controller.signal, background:true };
+      var response;
+      if (window.xtjProtectedFetch) response=await window.xtjProtectedFetch('/api/photo/view',options);
+      else { options.headers=Object.assign({},options.headers,await Promise.resolve(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}));response=await fetch(apiUrl('/api/photo/view'),options); }
+      var result=response ? await response.json().catch(function(){return{};}) : {};
+      if (!response || !response.ok || result.ok!==true || !Number.isFinite(result.views) || owner!==(window.currentUser||'')) return;
+      countedPhotoViewers.add(key);if(countedPhotoViewers.size>1000)countedPhotoViewers.delete(countedPhotoViewers.values().next().value);
+      item.views=Math.max(Number(item.views)||0,result.views);updatePhotoViewDisplays(item);
+    } catch (_) {} finally { clearTimeout(timer); }
   }
 
   function handleExternalSync(message){
