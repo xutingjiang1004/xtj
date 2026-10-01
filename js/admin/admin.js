@@ -3416,7 +3416,9 @@
                 'cleanup_logs': '清理日志',
                 'update_security_settings': '修改安全设置',
                 'review_security_alert': '审查安全提醒',
-                'delete_user': '删除用户账号'
+                'delete_user': '删除用户账号',
+                'configure_flash_limits': '修改闪图额度',
+                'view_user_gps_history': '查看授权 GPS 历史'
             };
             allAuditLogs.forEach(function(log) {
                 h += '<tr><td>' + escapeHtml(formatTime(log.created_at)) + '</td><td>' + escapeHtml(actionLabels[log.action] || log.action) + '</td><td>' + escapeHtml(log.operator) + '</td><td style="max-width:300px;white-space:normal;word-break:break-word;">' + escapeHtml(log.detail || '-') + '</td></tr>';
@@ -3429,6 +3431,7 @@
 
     // ===================== 用户行为 Tab =====================
     var behaviorTypeLabels = {
+        'photo_delete': '删除照片', 'post_update': '编辑帖子', 'message_withdraw': '撤回消息',
         'control_click': '点击操作',
         'visibility': '页面可见性',
         'page_view': '浏览页面',
@@ -3440,6 +3443,7 @@
         'login': '用户登录',
         'register': '用户注册',
         'logout': '退出登录',
+        'flash_send':'发送闪图','flash_open':'查看闪图','action_denied':'操作被拒绝','data_export':'导出数据','location_authorized':'授权定位','content_delete':'删除内容','content_like':'点赞内容','content_comment':'评论内容',
         'post_create': '发布帖子',
         'post_view': '浏览帖子',
         'post_like': '点赞帖子',
@@ -3546,7 +3550,7 @@
                         user_name: row.user_name,
                         type: event.type,
                         target: event.target,
-                        at: event.at
+                        at: event.at, status:event.status, ip:event.ip, authority:event.authority, ip_source:event.ip_source
                     });
                 });
             } catch (e) {}
@@ -3554,7 +3558,7 @@
         allBehaviorItems.sort(function(a, b) { return toAdminTimeMs(b.at) - toAdminTimeMs(a.at); });
 
         var h = '<div class="card"><h3>用户行为追踪</h3>';
-        h += '<p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">记录所有用户的点击、浏览、页面切换等操作行为，共 ' + allBehaviorItems.length + ' 条记录</p>';
+        h += '<p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">记录服务端确认的安全操作，不采集输入文字或剪贴板，共 ' + allBehaviorItems.length + ' 条记录</p>';
 
         if (!allBehaviorItems.length) {
             h += '<div class="empty">暂无用户行为记录</div>';
@@ -3587,7 +3591,8 @@
             h += '<div class="table-wrap"><table><thead><tr><th style="width:140px;">时间</th><th style="width:100px;">用户</th><th style="width:100px;">行为类型</th><th>目标/详情</th></tr></thead><tbody>';
             filteredItems.slice(0, 200).forEach(function(item) {
                 var typeLabel = formatBehaviorType(item.type);
-                var targetLabel = formatBehaviorTarget(item.type, item.target);
+                var targetLabel = item.authority==='server_action'?formatBehaviorType(item.target):formatBehaviorTarget(item.type, item.target);
+                if(item.authority==='server_action')targetLabel+=' · 服务端 · HTTP '+String(item.status)+' · IP '+String(item.ip||'未知')+'（'+String(item.ip_source||'未知')+'）';
                 var typeColor = item.type === 'control_click' ? 'var(--accent)' : (item.type === 'page_view' ? 'var(--success)' : (item.type === 'visibility' ? 'var(--text-muted)' : 'var(--text-muted)'));
                 h += '<tr>';
                 h += '<td style="font-size:10px;">' + escapeHtml(formatTime(item.at || '')) + '</td>';
@@ -3700,12 +3705,13 @@
         var host=document.getElementById('adminGpsHistoryRows'),more=document.getElementById('adminGpsHistoryMore'),error=document.getElementById('adminGpsHistoryError');if(!host||!more)return;
         var cursor=null,busy=false,seen=new Map(),polls=0;
         function paint(body,refresh){
+            var retained=new Set((body.items||[]).map(function(row){return row.id;}));seen.forEach(function(previous,id){if(!retained.has(id)){previous.line.remove();seen.delete(id);}});
             (body.items||[]).forEach(function(row){var previous=seen.get(row.id);var line=document.createElement('div');line.style.cssText='padding:8px 0;border-bottom:1px solid rgba(148,163,184,.12);font-size:12px;';
                 var lat=Number(row.latitude),lng=Number(row.longitude),link=document.createElement('a');link.target='_blank';link.rel='noopener noreferrer';link.href='https://www.openstreetmap.org/?mlat='+encodeURIComponent(lat)+'&mlon='+encodeURIComponent(lng)+'#map=16/'+encodeURIComponent(lat)+'/'+encodeURIComponent(lng);link.textContent=String(row.latitude)+', '+String(row.longitude);line.appendChild(link);
                 var detail=document.createElement('span');detail.textContent=' · '+(row.accuracy_m==null?'精度未提供':'精度 '+Math.round(row.accuracy_m)+' 米')+' · '+formatTime(row.captured_at)+' · '+(row.capture_reason==='post_location'?'发布帖子定位':row.capture_reason==='legacy_retained'?'保留历史':row.capture_reason||'主动定位')+' · '+(row.resolved_address|| (row.resolution_status==='failed'?'地址解析失败':'地址解析中'));line.appendChild(detail);
                 if(row.resolution_status!=='resolved'){var retry=document.createElement('button');retry.type='button';retry.textContent='重新解析';retry.style.cssText='min-height:44px;padding:0 8px;border:0;background:none;color:var(--primary)';retry.onclick=function(){window.adminReResolveLocation(userName,'',row.id);};line.appendChild(retry);}
                 var latest=document.getElementById('adminGpsLatestStatus');if(latest&&latest.dataset.locationId===row.id){latest.textContent=row.resolved_address||(row.resolution_status==='failed'?'解析失败':'解析中');}
-                if(previous)previous.line.replaceWith(line);else host.appendChild(line);seen.set(row.id,{line:line,pending:row.resolution_status==='pending'});
+                if(previous)previous.line.remove();host.appendChild(line);seen.set(row.id,{line:line,pending:row.resolution_status==='pending'});
             });if(!refresh){cursor=body.next_cursor;more.hidden=!body.has_more;}more.textContent='加载更多';error.textContent='';
         }
         async function load(){if(busy||!host.isConnected)return;busy=true;more.disabled=true;try{var body=await apiCall('GET','/admin/user-location-history?user_name='+encodeURIComponent(userName)+(cursor?'&cursor='+encodeURIComponent(cursor):''));if(host.isConnected)paint(body);}catch(e){if(host.isConnected){error.textContent=e.message||'读取失败，请重试';more.hidden=false;}}finally{busy=false;more.disabled=false;}}
@@ -3715,6 +3721,15 @@
             if(Array.from(seen.values()).some(function(row){return row.pending;}))setTimeout(poll,10000);
         }
         setTimeout(poll,10000);
+    }
+
+    async function bindAdminFlashLimits(userName){
+        var host=document.getElementById('adminFlashLimits');if(!host)return;
+        try{var body=await apiCall('GET','/admin/flash-photos?user_name='+encodeURIComponent(userName));if(document.getElementById('adminFlashLimits')!==host)return;var q=body.quota||{},s=body.settings;
+            host.innerHTML='<h4>闪图额度</h4><p>今日 '+escapeHtml(String(q.used||0))+' / '+escapeHtml(q.limit<0?'不限':String(q.limit))+' 张 · '+(q.is_pro?'Pro':'普通用户')+'</p><label>个人每日额度（留空沿用统一设置，-1 不限）<input id="adminFlashUserLimit" type="number" min="-1" max="10000" value="'+(q.override==null?'':escapeHtml(String(q.override)))+'"></label><label><input id="adminFlashPro" type="checkbox" '+(q.is_pro?'checked':'')+'> Pro 会员（与站内 Pro 共用）</label><button id="adminFlashUserSave">保存个人设置</button><details><summary>统一每日额度</summary><label>普通用户<input id="adminFlashFree" type="number" min="0" max="10000" value="'+s.free_daily+'"></label><label>Pro 用户<input id="adminFlashProDefault" type="number" min="0" max="10000" value="'+s.pro_daily+'"></label><label><input id="adminFlashApplyAll" type="checkbox">覆盖所有个人额度，普通与 Pro 均使用普通额度（管理员默认不限）</label><button id="adminFlashDefaultSave">保存统一设置</button><p>个人自定义额度优先；清空个人额度后采用统一设置。每日北京时间零点重置。</p></details>';
+            host.querySelector('#adminFlashUserSave').onclick=async function(){try{var value=host.querySelector('#adminFlashUserLimit').value,pro=host.querySelector('#adminFlashPro').checked;var params={user_name:userName,daily_limit:value===''?null:Number(value)};if(pro!==!!q.is_pro)params.pro=pro;await apiCall('POST','/admin/flash-photos',params);showToast('闪图设置已保存','success');await bindAdminFlashLimits(userName);}catch(e){showToast(e.message,'error');}};
+            host.querySelector('#adminFlashDefaultSave').onclick=async function(){try{await apiCall('POST','/admin/flash-photos',{free_daily:Number(host.querySelector('#adminFlashFree').value),pro_daily:Number(host.querySelector('#adminFlashProDefault').value),apply_all:host.querySelector('#adminFlashApplyAll').checked});showToast('统一额度已保存','success');await bindAdminFlashLimits(userName);}catch(e){showToast(e.message,'error');}};
+        }catch(e){if(host.isConnected)host.querySelector('p').textContent='额度读取失败，请重新打开详情重试';}
     }
 
     window.showUserDetailModal = async function(userName) {
@@ -3843,6 +3858,7 @@
             return location && Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude));
         }).sort(function(a, b) { return toAdminTimeMs(b.captured_at || b.received_at) - toAdminTimeMs(a.captured_at || a.received_at); });
 
+        html += '<section id="adminFlashLimits"><h4>闪图额度</h4><p>正在读取额度…</p></section>';
         html += '<h4 style="margin:12px 0 8px;">用户授权 GPS 精确定位</h4>';
         html += '<div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:12px;margin-bottom:12px;">';
 
@@ -3898,7 +3914,7 @@
         }
         html += '</div>';
 
-        html += '<section><h4 style="margin:12px 0 8px;">完整 GPS 定位历史</h4><div id="adminGpsHistoryRows" style="max-height:260px;overflow:auto;"></div><button type="button" id="adminGpsHistoryMore" style="background:none;border:0;min-height:44px;">加载记录</button><span id="adminGpsHistoryError" role="status"></span></section>';
+        html += '<section><h4 style="margin:12px 0 8px;">最近 50 条 GPS 定位历史</h4><div id="adminGpsHistoryRows" style="max-height:260px;overflow:auto;"></div><button type="button" id="adminGpsHistoryMore" style="background:none;border:0;min-height:44px;">加载记录</button><span id="adminGpsHistoryError" role="status"></span></section>';
 
         var behaviorRows = allBehaviorEvents.filter(function(row) { return row.user_name === userName; }).slice(0, 20);
         if (behaviorRows.length) {
@@ -3913,7 +3929,8 @@
             html += '<h4 style="margin:12px 0 8px;">最近用户行为</h4><div style="max-height:180px;overflow:auto;font-size:11px;">';
             behaviorItems.slice(0, 50).forEach(function(event) {
                 var typeLabel = formatBehaviorType(event.type);
-                var targetLabel = formatBehaviorTarget(event.type, event.target);
+                var targetLabel = event.authority==='server_action'?formatBehaviorType(event.target):formatBehaviorTarget(event.type, event.target);
+                if(event.authority==='server_action')targetLabel+=' · 服务端 · HTTP '+String(event.status)+' · IP '+String(event.ip||'未知')+'（'+String(event.ip_source||'未知')+'）';
                 html += '<div style="padding:4px 0;border-bottom:1px solid rgba(148,163,184,.12);"><span style="color:var(--text-muted);">' + escapeHtml(formatTime(event.at || '')) + '</span> · ' + escapeHtml(typeLabel) + ' · ' + escapeHtml(targetLabel) + '</div>';
             });
             html += '</div>';
@@ -3972,6 +3989,7 @@
         // Show in modal
         showModal('用户详情', html);
         bindAdminGpsHistory(userName,gpsFirstPage);
+        bindAdminFlashLimits(userName);
     };
 
     // 管理员手动重新解析 GPS 地址

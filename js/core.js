@@ -12369,12 +12369,14 @@ function renderProfileActivityList(kind) {
             //   叠加 renderDockChatDesktopEmptyState 的归属判断，导致桌面分屏在登出后
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
+                cancelChatFlashSend();
                 if (_chatSocialPanels) _chatSocialPanels.clear();
                 resetChatAttachmentQueue();
                 var gallery=document.getElementById('chatGallery');if(gallery)gallery.__close ? gallery.__close() : gallery.remove();
                 _chatPushOwner='';_chatPushEnabled=false;
                 setTimeout(function(){window.__xtjSyncChatPush?.();},0);
                 if (_chatDomSnapshots) _chatDomSnapshots.clear();
+                if(_flashViewer)_flashViewer.close();
                 cancelDockChatSendFlights(); resetDockChatTyping(); closeDockChatConversationMenu(true);
                 closeAuthorSupport(); _supportOwner='';
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); _chatRecordedFile = null; _chatShowArchived = false; var archiveButton = document.getElementById('chatArchiveButton'); if (archiveButton) { archiveButton.textContent = '归档'; archiveButton.setAttribute('aria-pressed','false'); } _chatReactionSeq++; clearTimeout(_chatReactionTimer);
@@ -12620,7 +12622,8 @@ function renderProfileActivityList(kind) {
             if (chatMotionPanel && typeof MutationObserver==='function') {
                 new MutationObserver(function() {
                     if (!chatMotionPanel.classList.contains('active')) {
-                        cancelDockChatSendFlights(); resetDockChatTyping(); closeDockChatConversationMenu(true);
+                        if(_flashViewer)_flashViewer.close();
+                        cancelChatFlashSend();cancelDockChatSendFlights(); resetDockChatTyping(); closeDockChatConversationMenu(true);
                     }
                 }).observe(chatMotionPanel,{attributes:true,attributeFilter:['class']});
             }
@@ -12633,6 +12636,7 @@ function renderProfileActivityList(kind) {
             }
 
             function dockChatGoBack() {
+                cancelChatFlashSend();
                 closeAuthorSupport();
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 closeDockChatConversationMenu(true);
@@ -12697,6 +12701,8 @@ function renderProfileActivityList(kind) {
             let restorePostsScroll = null;
 
             window.openChat = function(userName) {
+                cancelChatFlashSend();
+                if(_flashViewer)_flashViewer.close();
                 cancelDockChatSendFlights();
                 resetDockChatTyping();
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
@@ -13381,6 +13387,7 @@ function renderProfileActivityList(kind) {
                     // 已读状态 / 撤回状态 / 媒体地址 必须进签名：这些变化时该行才重建
                     getDMMessageReadAt(message),
                     payload.withdrawn ? 1 : 0,
+                    payload.flash && _flashConsumed.has(currentUser+':'+message.id) ? 1 : 0,
                     (payload.media && payload.media.url) ? payload.media.url : '',
                     String(message && message.__localPreviewUrl || '')
                 ].join('~');
@@ -13591,6 +13598,7 @@ function renderProfileActivityList(kind) {
                 if (payload && payload.withdrawn) {
                     return '<span class="msg-text withdrawn">[此消息已被撤回]</span>';
                 }
+                if(payload.flash){var expired=payload.flash.state==='expired'||_flashConsumed.has(currentUser+':'+message.id);return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+escapeHtml(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':'查看一次性闪图，3 秒后销毁')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
@@ -15000,16 +15008,17 @@ function renderProfileActivityList(kind) {
                 var sent = message.user_name === currentUser;
                 var elapsed = Date.now() - new Date(message.created_at).getTime();
                 var canWithdraw = sent && !withdrawn && !isNaN(elapsed) && elapsed <= 3 * 60 * 1000;
-                if (!withdrawn) {
+                var flash=!!(getDMMessagePayload(message)||{}).flash;
+                if (!withdrawn&&!flash) {
                     actions.push({ id: 'reply', label: '回复' });
                     if (sent && !resolveDockChatMedia(message) && elapsed >= 0 && elapsed <= 15 * 60 * 1000) actions.push({ id: 'edit', label: '编辑' });
                 }
                 if (!withdrawn && value) actions.push({ id: 'copy', label: '复制' });
                 if (canWithdraw) actions.push({ id: 'withdraw', label: '撤回' });
-                if (!withdrawn && value) actions.push({ id: 'forward', label: '转发' });
-                if (value) actions.push({ id: 'share', label: '分享' });
+                if (!withdrawn && value&&!flash) actions.push({ id: 'forward', label: '转发' });
+                if (value&&!flash) actions.push({ id: 'share', label: '分享' });
                 // ★ 由 ux-features.js 的重复长按菜单迁移过来（那里已停用），保留"问小猫"这个能力
-                if (!withdrawn && value) actions.push({ id: 'ask-ai', label: '问小猫' });
+                if (!withdrawn && value&&!flash) actions.push({ id: 'ask-ai', label: '问小猫' });
                 actions.push({ id: 'delete', label: '删除' });
                 return actions;
             }
@@ -16378,6 +16387,50 @@ function renderProfileActivityList(kind) {
                     /\.svgz?$/i.test(String(file.name || '').toLowerCase());
             }
 
+            var _flashViewer=null,_flashConsumed=new Set(),_flashSending=false,_flashSendFlight=null;
+            function cancelChatFlashSend(){if(!_flashSendFlight)return;_flashSendFlight.controller.abort();_flashSendFlight=null;_flashSending=false;dockChatSending=false;var send=document.getElementById('dockChatSendBtn'),flash=document.getElementById('chatFlashSendBtn');if(send)send.disabled=false;if(flash){flash.textContent='闪图';flash.disabled=false;}}
+            function rememberFlashConsumed(key){_flashConsumed.add(key);if(_flashConsumed.size>512)_flashConsumed.delete(_flashConsumed.values().next().value);}
+            function syncChatFlashButton(file){var b=document.getElementById('chatFlashSendBtn');if(b){b.hidden=!file||!/^image\//.test(file.type)||isBlockedDmFile(file);b.disabled=_flashSending;}}
+            window.sendChatFlash=async function(){
+                if(_flashSending||dockChatSending||_chatBatchSending)return;
+                var file=_chatAttachmentQueue[0]||(document.getElementById('dockChatFileInp').files||[])[0],owner=currentUser,peer=dockChatActiveUser,epoch=_authStateEpoch;
+                if(!owner||!peer||!file||!/^image\//.test(file.type))return;
+                if(file.size>20*1024*1024){showToast('闪图照片不能超过 20MB');return;}
+                function active(){return _flashSendFlight===flight&&!flight.controller.signal.aborted&&currentUser===owner&&dockChatActiveUser===peer&&_authStateEpoch===epoch;}
+                var client=file.__flashClientId||(file.__flashClientId='flash-'+crypto.randomUUID());
+                var flight={controller:new AbortController()};_flashSendFlight=flight;
+                _flashSending=true;dockChatSending=true;syncChatFlashButton(file);document.getElementById('dockChatSendBtn').disabled=true;
+                var button=document.getElementById('chatFlashSendBtn');button.textContent='发送中…';
+                try{
+                    var form=new FormData();form.append('image',file,file.name||'flash.jpg');form.append('target_user',peer);form.append('client_id',client);
+                    var response=await window.xtjProtectedFetch('/api/chat/flash/send',{method:'POST',body:form,signal:flight.controller.signal,timeoutMs:60000});var body=await response.json();if(!active())return;
+                    if(!response.ok||!body.ok||!body.message)throw Error(body.error||'闪图发送未确认，请重试');
+                    var list=upsertDockChatCacheMessage(peer,body.message);_chatRenderSignature[peer]=undefined;renderDockMessages(peer,list,true);
+                    if(_chatAttachmentQueue[0]===file){_chatAttachmentQueue.shift();var url=_chatAttachmentUrls.get(file);if(url)URL.revokeObjectURL(url);_chatAttachmentUrls.delete(file);}
+                    if(_chatAttachmentQueue.length){showDockChatFilePreview(_chatAttachmentQueue[0]);renderChatAttachmentQueue();}else clearDockChatFilePreview(false);
+                    showToast('闪图已发送，先打开的一方可查看 3 秒');
+                }catch(error){if(active())showToast(error.message||'闪图发送失败，请重试');}
+                finally{if(_flashSendFlight===flight){_flashSendFlight=null;_flashSending=false;dockChatSending=false;document.getElementById('dockChatSendBtn').disabled=false;if(button){button.textContent='闪图';button.disabled=false;}}}
+            };
+            window.openChatFlash=async function(id){
+                if(_flashViewer||!currentUser||!/^[a-f0-9-]{36}$/i.test(String(id)))return;
+                var owner=currentUser,peer=dockChatActiveUser,epoch=_authStateEpoch,key=owner+':'+id,root=document.createElement('div');
+                root.id='chatFlashViewer';root.className='chat-flash-viewer';root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label','一次性闪图');root.innerHTML='<button type="button" class="flash-close" aria-label="关闭闪图">×</button><p class="flash-loading">正在打开闪图…</p><img alt="闪图照片"><div class="flash-clock" role="timer"><span>3</span><i></i></div>';
+                var controller=new AbortController(),url='',timeout,watch,closed=false,image=root.querySelector('img'),clock=root.querySelector('.flash-clock span');
+                function close(){if(closed)return;closed=true;clearTimeout(timeout);clearInterval(watch);controller.abort();image.style.visibility='hidden';image.removeAttribute('src');if(url)URL.revokeObjectURL(url);root.classList.add('is-closing');setTimeout(function(){root.remove();},150);_flashViewer=null;}
+                _flashViewer={close:close};root.querySelector('button').onclick=close;document.body.appendChild(root);
+                watch=setInterval(function(){if(currentUser!==owner||_authStateEpoch!==epoch||dockChatActiveUser!==peer||document.hidden)close();},50);
+                try{
+                    var response=await window.xtjProtectedFetch('/api/chat/flash/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id}),signal:controller.signal,timeoutMs:30000});
+                    if(!response.ok){var error=await response.json();if(response.status===410)rememberFlashConsumed(key);throw Error(error.error||'闪图不可查看');}
+                    rememberFlashConsumed(key);var blob=await response.blob();if(closed)return;url=URL.createObjectURL(blob);image.src=url;await image.decode();if(closed)return;
+                    root.querySelector('.flash-loading').remove();root.classList.add('is-viewing');var deadline=performance.now()+3000;timeout=setTimeout(close,3000);
+                    clearInterval(watch);watch=setInterval(function(){if(currentUser!==owner||_authStateEpoch!==epoch||dockChatActiveUser!==peer||document.hidden||performance.now()>=deadline){close();return;}clock.textContent=String(Math.max(1,Math.ceil((deadline-performance.now())/1000)));},50);
+                }catch(error){if(!closed){close();showToast(error.message||'闪图无法查看');}}
+                finally{if(currentUser===owner&&_authStateEpoch===epoch&&dockChatActiveUser===peer){_chatRenderSignature[peer]=undefined;renderDockMessages(peer,_chatCache[getDockChatCacheKey(peer)]||[],false);}}
+            };
+            document.addEventListener('visibilitychange',function(){if(document.hidden&&_flashViewer)_flashViewer.close();});
+
             function showDockChatFilePreview(file) {
                 file = normalizeDockChatMediaFile(file);
                 const preview = document.getElementById('dockChatFilePreview');
@@ -16409,9 +16462,11 @@ function renderProfileActivityList(kind) {
                     meta.textContent = kindLabel + ' · ' + sizeLabel + ' · 准备发送';
                 }
                 preview.classList.remove('hidden');
+                syncChatFlashButton(file);
             }
 
             function clearDockChatFilePreview(restoreFocus) {
+                syncChatFlashButton(null);
                 resetChatAttachmentQueue();
                 const preview = document.getElementById('dockChatFilePreview');
                 const input = document.getElementById('dockChatInput');

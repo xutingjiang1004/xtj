@@ -121,7 +121,7 @@ function createChatFeatures(options) {
     if (!peer || !UUID.test(id) || !text || text.length > 500) return res.status(400).json({ ok: false });
     try {
       const ctx = await context(req.userName, peer), m = ctx && await visible(ctx, id);
-      if (!m || m.sender_name_snapshot !== req.userName || m.message_type !== 'text') return res.status(404).json({ ok: false });
+      if (!m || m.sender_name_snapshot !== req.userName || m.message_type !== 'text' || (m.payload&&m.payload.flash)) return res.status(404).json({ ok: false });
       if (!Number.isFinite(Date.parse(m.sent_at)) || Date.now() - Date.parse(m.sent_at) > 900000) return res.status(409).json({ ok: false, error: '超过 15 分钟，无法编辑' });
       const post = await data(supabase.from('posts').select(FIELDS).eq('id', m.legacy_post_id).eq('user_name', req.userName).eq('media_url', peer).eq('media_type', '__dm__').maybeSingle());
       if (!post) return res.status(404).json({ ok: false });

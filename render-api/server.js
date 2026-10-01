@@ -4497,6 +4497,8 @@ app.use(function(req, res, next) {
 
 app.use('/api/voice-model', require('./voice-model-assets').createVoiceModelAssets({ express }));
 
+app.use(require('./security-activity').createSecurityActivity({supabase,getClientIp}));
+
 app.use(express.static(path.join(__dirname, '..'), {
   maxAge: '1h',
   setHeaders: function(res, filePath) {
@@ -11916,6 +11918,11 @@ async function authenticateUser(req, res, next) {
 
 const dmPrivateStorage = createDmPrivateStorage(supabase);
 app.use(dmPrivateStorage.middleware);
+const flashPhotos=require('./flash-photos').createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,rateLimit,
+ canSend:(actor,peer)=>assertCanSendDirectMessage(supabase,actor,peer,ADMIN_USERNAME),banError:userBanError,
+ publish:publishDmRealtime,notifyConsumed:(sender,peer)=>{publishChatEvent(sender,'chat-state',{kind:'flash_consumed'});publishChatEvent(peer,'chat-state',{kind:'flash_consumed'});},audit:logAdminAudit,setPro:(actor,active)=>aiQuota.setPro(actor,active,{})});
+app.use(flashPhotos.router);
+
 
 // The service-role backed chat social API is mounted behind the same signed
 // user-token middleware as the legacy DM API. Its database functions are not
@@ -16232,6 +16239,7 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
         delete parsedPayload.media;
         delete parsedPayload.kind;
       }
+      delete parsedPayload.flash;
       delete parsedPayload.edited_at;
       delete parsedPayload.transcript;
       if (parsedPayload.reply_to) {
@@ -18535,7 +18543,8 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
       if (evt.ip && evt.ip !== 'unknown') {
         if (!uniqueIps[evt.ip]) uniqueIps[evt.ip] = { ip: evt.ip, count: 0, first_seen: evt.recorded_at, last_seen: evt.recorded_at, location: evt.ip_location };
         uniqueIps[evt.ip].count++;
-        uniqueIps[evt.ip].last_seen = evt.recorded_at;
+        uniqueIps[evt.ip].first_seen = uniqueIps[evt.ip].first_seen < evt.recorded_at ? uniqueIps[evt.ip].first_seen : evt.recorded_at;
+        uniqueIps[evt.ip].last_seen = uniqueIps[evt.ip].last_seen > evt.recorded_at ? uniqueIps[evt.ip].last_seen : evt.recorded_at;
       }
       if (evt.device_id) {
         var normalizedDevice = normalizeDeviceSnapshot(evt);
@@ -18545,7 +18554,8 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
           first_seen: evt.recorded_at, last_seen: evt.recorded_at
         };
         uniqueDevices[evt.device_id].count++;
-        uniqueDevices[evt.device_id].last_seen = evt.recorded_at;
+        uniqueDevices[evt.device_id].first_seen = uniqueDevices[evt.device_id].first_seen < evt.recorded_at ? uniqueDevices[evt.device_id].first_seen : evt.recorded_at;
+        uniqueDevices[evt.device_id].last_seen = uniqueDevices[evt.device_id].last_seen > evt.recorded_at ? uniqueDevices[evt.device_id].last_seen : evt.recorded_at;
       }
       if (evt.ip_location && (evt.ip_location.city || evt.ip_location.region)) {
         locationHistory.push({ location: evt.ip_location.text || '', city: evt.ip_location.city, region: evt.ip_location.region, country: evt.ip_location.country, time: evt.recorded_at, ip: evt.ip });
@@ -28704,6 +28714,7 @@ _httpServer = app.listen(port, () => {
   startDmUnreadNotifier();
   console.log('[DM-NOTIFY] 未读消息邮件提醒已启动（间隔' + (DM_UNREAD_NOTIFY_INTERVAL / 1000) + '秒，超时' + (DM_UNREAD_NOTIFY_TIMEOUT / 60000) + '分钟）');
   startLocationTaskProcessor();
+  flashPhotos.start();
   console.log('[LOC-TASK] 定位地址解析任务处理器已启动（间隔30秒）');
 });
 
