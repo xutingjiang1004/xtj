@@ -171,7 +171,8 @@ test('switch account opens login immediately and serializes new login after cook
   await expect.poll(()=>logins).toBe(1);
 });
 
-test('touch slider tracks the finger and cancelling returns to the selected tab',async({page})=>{
+test('touch slider tracks the finger and cancelling returns to the selected tab',async({page,browserName})=>{
+  test.skip(browserName!=='chromium','CDP touch input is only supported by Chromium.');
   await setup(page);
   await contacts(page);
   const rail=page.locator('#dockChatSocialTabs'), selected=rail.locator('[aria-selected="true"]');
@@ -186,4 +187,15 @@ test('touch slider tracks the finger and cancelling returns to the selected tab'
   await client.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
   await expect(rail).not.toHaveClass(/is-dragging/);
   await expect(selected).toHaveAttribute('data-chat-social-tab',current);
+});
+
+test.describe('continuous contact touch drag',()=>{
+ test.use({hasTouch:true});
+ test('touch moves follow the finger, reverse immediately, snap and recover from cancellation',async({page,browserName})=>{
+  test.skip(browserName!=='chromium','Chromium CDP verifies browser-generated touch input; WebKit retains pointer and tap coverage.');
+  await setup(page);await contacts(page);await page.locator('[data-chat-social-tab="search"]').click();const rail=page.locator('#dockChatSocialTabs'),box=await rail.boundingBox(),cdp=await page.context().newCDPSession(page),x=box.x+box.width/8,y=box.y+box.height/2;
+  async function touch(type,dx){await cdp.send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'||type==='touchCancel'?[]:[{x:x+dx,y}],modifiers:0});}
+  await touch('touchStart',0);await touch('touchMove',box.width*.55);await expect(rail).toHaveClass(/is-dragging/);const first=await rail.locator('.chat-social-slider').evaluate(e=>new DOMMatrix(getComputedStyle(e).transform).m41);await touch('touchMove',box.width*.3);await expect.poll(()=>rail.locator('.chat-social-slider').evaluate(e=>new DOMMatrix(getComputedStyle(e).transform).m41)).toBeLessThan(first-30);await touch('touchEnd',0);await expect(page.locator('[data-chat-social-tab="friends"]')).toHaveAttribute('aria-selected','true');
+  await touch('touchStart',0);await touch('touchMove',box.width*.55);await touch('touchCancel',0);await expect(rail).not.toHaveClass(/is-dragging/);await expect(page.locator('[data-chat-social-tab="friends"]')).toHaveAttribute('aria-selected','true');
+ });
 });

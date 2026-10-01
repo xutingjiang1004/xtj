@@ -459,7 +459,7 @@ html.xtj-photo-preview-ready #photoPreviewOverlay #ppDeleteBtn {
 }
 #photoPreviewOverlay .pp-slide-track.snapping .pp-slide-img { transform:translateZ(0)!important;filter:none!important;transition:none!important; }
 html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage { transform:translate3d(var(--pp-img-x),var(--pp-img-y),0) scale(var(--pp-scale)) rotate(var(--pp-rotate))!important; }
-#photoPreviewOverlay::after { content:"";position:absolute;inset:40% 0 0;pointer-events:none;background:linear-gradient(transparent 25%,rgba(0,0,0,.12) 55%,rgba(0,0,0,.66));z-index:20; }
+#photoPreviewOverlay::after { content:none; }
 #photoPreviewOverlay .photo-preview-info.pp-story {
   position:absolute!important;left:max(16px,env(safe-area-inset-left,0px))!important;right:max(16px,env(safe-area-inset-right,0px))!important;
   bottom:calc(18px + env(safe-area-inset-bottom,0px))!important;top:auto!important;
@@ -553,3 +553,7 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-info.pp-story {
 }
 
 @media (prefers-reduced-transparency:reduce) { #photoPreviewOverlay .pp-comments-panel { background:#16231d;backdrop-filter:none;-webkit-backdrop-filter:none; } }
+/* Keep readability around labels, without dimming the original photograph. */
+#photoPreviewOverlay .pp-story-footer { text-shadow:0 1px 3px #000,0 0 10px rgba(0,0,0,.6); }
+#photoPreviewOverlay .pp-comment-row button { background:none!important;border:0!important;border-radius:0!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;color:inherit;opacity:.85;min-width:44px;min-height:44px;padding:8px 4px!important;font-size:12px; }
+#photoPreviewOverlay .pp-comment-row button::before,#photoPreviewOverlay .pp-comment-row button::after { content:none!important; }

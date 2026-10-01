@@ -1,7 +1,7 @@
 'use strict';
 const {PUBLIC_POST_MEDIA_TYPES}=require('./post-markers');
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-const CATEGORIES=['profile','posts','photos','likes','comments','photo_views','ai_history','activity','messages','chat_contacts','chat_preferences'];
+const CATEGORIES=['profile','posts','photos','likes','comments','photo_views','ai_history','activity','messages','chat_contacts','chat_preferences','locations'];
 const PROFILE=['__user_info__','__avatar__','__user_style__','__ai_agent_profile__','__ann_read__','__vip__','__vip_order__','__dm_deleted__','__custom_ai_models__'];
 const ACTIVITY=['__post_view__','__user_visit__','__login_event__','__user_behavior__','__client_error__'];
 const FIELDS='id,user_name,content,media_type,media_url,created_at,updated_at,visibility,views,is_deleted,deleted_at,location_name,location_province,location_city,ip_province,ip_city,ip_region_text';
@@ -33,7 +33,8 @@ function createPersonalExport({express,supabase,authenticateUser,rateLimit,priva
     rows=await checked(supabase.rpc('export_personal_chat',{p_actor:actor,p_kind:kind,p_after:after,p_snapshot:at}));
    } else {
     let q;
-    if(kind==='likes'||kind==='comments')q=supabase.from(kind).select(kind==='likes'?'id,post_id,user_name,created_at':'id,post_id,user_name,content,created_at,parent_comment_id').eq('user_name',actor);
+    if(kind==='locations')q=supabase.from('user_location_history').select('id,latitude,longitude,accuracy_m,captured_at,received_at,source,capture_reason,resolution_status,resolved_address,resolve_error,resolved_at').eq('user_name',actor);
+    else if(kind==='likes'||kind==='comments')q=supabase.from(kind).select(kind==='likes'?'id,post_id,user_name,created_at':'id,post_id,user_name,content,created_at,parent_comment_id').eq('user_name',actor);
     else if(kind==='photo_views')q=supabase.from('photo_viewers').select('photo_id,first_viewed_at').eq('viewer_name',actor);
     else {
      q=supabase.from('posts').select(FIELDS).eq('user_name',actor);
@@ -43,7 +44,7 @@ function createPersonalExport({express,supabase,authenticateUser,rateLimit,priva
      if(kind==='activity')q=q.in('media_type',ACTIVITY);
      if(kind==='ai_history')q=q.in('media_type',['__ai_agent_msg__','**ai_agent_conv_summary**']);
     }
-    const key=kind==='photo_views'?'photo_id':'id',time=kind==='photo_views'?'first_viewed_at':'created_at';
+    const key=kind==='photo_views'?'photo_id':'id',time=kind==='locations'?'received_at':kind==='photo_views'?'first_viewed_at':'created_at';
     q=q.lte(time,at);if(after)q=q.gt(key,after);rows=await checked(q.order(key,{ascending:true}).limit(201));
     if(kind==='photo_views')rows=rows.map(r=>({...r,id:r.photo_id}));
    }

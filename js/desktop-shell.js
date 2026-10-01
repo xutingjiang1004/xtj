@@ -8,7 +8,7 @@
   if (navigator.maxTouchPoints > 0 || /iPad|iPhone|Android/.test(navigator.userAgent)) {
     function preventPageZoom(event) {
       var target=event.target;
-      if (target && target.closest && target.closest('#photoPreviewOverlay, #imgViewer, #chatGallery')) return;
+      if (target && target.closest && target.closest('#photoPreviewOverlay, #imgViewer, #chatGallery, #supportCodePreview')) return;
       if (event.type.indexOf('gesture')===0 || event.touches && event.touches.length>1) event.preventDefault();
     }
     document.addEventListener('gesturestart',preventPageZoom,{passive:false});

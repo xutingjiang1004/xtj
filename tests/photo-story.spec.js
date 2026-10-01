@@ -93,10 +93,24 @@ test('delete confirmation stays readable over bright and dark photo backgrounds'
  }
 });
 
-test('behavior collection requires opt-in, records only control identifiers and stops on opt-out',async({page})=>{
- const errors=[];page.on('pageerror',error=>errors.push(error.message));await fullPage(page);const batches=[];
- await page.route('**/api/user/behavior',async r=>{batches.push(r.request().postDataJSON());await r.fulfill({json:{ok:true}});});
- await page.evaluate(()=>{window.dispatchEvent(new CustomEvent('xtj:behavior-consent',{detail:{owner:'A',enabled:true}}));const button=document.createElement('button');button.id='safeBehaviorTest';button.textContent='不应采集的私人正文';document.body.append(button);button.click();});
- await expect.poll(()=>batches.length,{timeout:10000}).toBeGreaterThan(0);expect(JSON.stringify(batches)).toContain('safeBehaviorTest');expect(JSON.stringify(batches)).not.toContain('私人正文');
- await page.evaluate(()=>window.dispatchEvent(new CustomEvent('xtj:behavior-consent',{detail:{owner:'A',enabled:false}})));const length=batches.length;await page.evaluate(()=>document.getElementById('safeBehaviorTest').click());await page.waitForTimeout(5500);expect(batches.length).toBe(length);expect(errors.filter(text=>/sessionStartedAt|startedAt|SafeAnalytics/.test(text))).toEqual([]);
+test('retired behavior diagnostic has no profile control and ignores legacy consent events',async({page})=>{
+ const batches=[];await fullPage(page);await page.route('**/api/user/behavior',async r=>{batches.push(r.request().postDataJSON());await r.fulfill({json:{ok:true}});});
+ await page.evaluate(()=>{window.currentUser='A';window.dispatchEvent(new Event('auth-ready'));window.dispatchEvent(new CustomEvent('xtj:behavior-consent',{detail:{owner:'A',enabled:true}}));});
+ await expect(page.locator('#xtjBehaviorConsent')).toHaveCount(0);await page.locator('#postInp').fill('不采集正文');await page.waitForTimeout(1200);expect(batches).toEqual([]);
+});
+
+test('photos keep their brightness on opening and switching, with no full-image dark scrim',async({page})=>{
+ await page.setViewportSize({width:390,height:844});await storyFixture(page);await page.waitForTimeout(300);
+ for(let i=0;i<2;i++){const raw=await sharp(await page.screenshot()).raw().toBuffer({resolveWithObject:true});const scale=raw.info.width/390;const index=(Math.round(472*scale)*raw.info.width+Math.round(195*scale))*raw.info.channels;expect(raw.data[index]).toBeGreaterThan(90);expect(raw.data[index+1]).toBeGreaterThan(130);expect(raw.data[index+2]).toBeGreaterThan(120);if(!i){await page.evaluate(()=>window.ppNextPhoto());await page.waitForTimeout(500);}}
+});
+test('compact composer removes the default filter card and deletion pills in both themes',async({page},info)=>{
+ await page.setViewportSize({width:390,height:844});await fullPage(page);await expect(page.locator('#postFilterBar')).toHaveCount(0);await expect(page.locator('#postFilterPanel')).toBeHidden();await expect(page.locator('#postLocationAddBtn svg')).toBeVisible();await expect(page.locator('.compose-tool svg')).toHaveCount(2);
+ expect((await page.locator('#publishBox').boundingBox()).height).toBeLessThan(260);await page.screenshot({path:info.outputPath('compact-composer.png')});
+ await page.locator('#filterToggleBtn').click();await expect(page.locator('#postFilterPanel')).toBeVisible();await page.locator('#filterToggleBtn').click();
+ for(const theme of ['light','dark']){await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;document.getElementById('delModal').style.display='flex';document.getElementById('delModal').classList.add('active');},theme);await expect(page.locator('#delModal .post-delete-modal')).toHaveCSS('background-color','rgba(255, 255, 255, 0.5)');for(const selector of ['#delModal .post-delete-message','#delModal .post-delete-cancel','#delModal .post-delete-confirm']){await expect(page.locator(selector)).toHaveCSS('background-color','rgba(0, 0, 0, 0)');await expect(page.locator(selector)).toHaveCSS('box-shadow','none');}await page.screenshot({path:info.outputPath('post-delete-'+theme+'.png')});}
+});
+test('explicit post GPS carries accuracy and capture identity, while stale account callbacks cannot send',async({page})=>{
+ await fullPage(page);await page.evaluate(()=>{window.__gpsCalls=[];Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition(success){window.__gpsSuccess=success;}}});window.xtjProtectedFetch=async(url,init)=>{window.__gpsCalls.push({url,body:init&&init.body});return new Response(JSON.stringify({ok:true,province:'福建省',city:'福州市',options:[{level:'city',name:'福建省福州市',province:'福建省',city:'福州市'}]}));};});
+ await page.locator('#postLocationAddBtn').click();await page.evaluate(()=>window.__gpsSuccess({timestamp:Date.now(),coords:{latitude:26.1,longitude:119.2,accuracy:0}}));await page.locator('.post-location-option').first().click();await expect(page.locator('#postLocationPreview')).toBeVisible();const call=await page.evaluate(()=>window.__gpsCalls.find(c=>c.url==='/api/location/reverse'));const body=JSON.parse(call.body);expect(body.latitude).toBe(26.1);expect(body.accuracy).toBe(0);expect(body.capture_id).toMatch(/^post_/);expect(body.captured_at).toBeTruthy();
+ await page.evaluate(()=>window.removePostLocation());await page.locator('#postLocationAddBtn').click();const before=await page.evaluate(()=>window.__gpsCalls.length);await page.evaluate(()=>{window.currentUser='another';window.__gpsSuccess({timestamp:Date.now(),coords:{latitude:26,longitude:119,accuracy:10}});});expect(await page.evaluate(()=>window.__gpsCalls.length)).toBe(before);await expect(page.locator('#postLocationAddBtn')).toBeEnabled();await expect(page.locator('#postLocationAddBtn svg')).toBeVisible();
 });

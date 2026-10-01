@@ -207,5 +207,5 @@ test('like button uses the same SVG on initial render and subsequent toggles', (
 test('geolocation fallback button text is not mojibake', () => {
   // 修复前：备用定位失败后按钮显示乱码"馃搷 娣诲姞浣嶇疆"
   assert.doesNotMatch(core, /馃搷/);
-  assert.match(core, /📍 添加位置/);
+  assert.match(core, /restorePostLocationButton/);
 });
