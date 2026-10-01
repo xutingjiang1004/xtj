@@ -268,6 +268,7 @@
         }
         l = 0, c = !1, O(e), n[e] && window.updateAmbientBackground && window.updateAmbientBackground(n[e].imageUrl),
         f = !1;
+        window.dispatchEvent(new CustomEvent("xtj:photo-changed"));
     }
     function W(e) {
         if (!f) {
@@ -353,7 +354,7 @@
             navigator.vibrate(e);
         } catch (e) {}
     }
-    function V() {
+    function V(immediate) {
         cancelTrackAnimation();
         if (e) {
             e = !1;
@@ -365,6 +366,11 @@
                 t._cleanupPreview && t._cleanupPreview(), t._cleanupOpenListeners && t._cleanupOpenListeners(), t._openLoadGen = (t._openLoadGen || 0) + 1, q();
                 var o = document.getElementById("photoPreviewImage"), n = t._openOrigin, i = t._openOriginImg, a = null;
                 clearPreviewImageLoad(o, !1);
+                if (immediate === true) {
+                    ["photoPreviewImage", "ppPrevImg", "ppNextImg"].forEach(function(id){clearPreviewImageLoad(document.getElementById(id),!0);});
+                    if(i){i.style.transition="";i.style.opacity="";}
+                    t.style.opacity="";t.style.transition="";t.classList.remove("active");document.body.classList.remove("photo-previewing");return;
+                }
                 if (o && (a = o.getBoundingClientRect()), n && a && i && a.width > 0 && a.height > 0 && n.width > 0 && n.height > 0) {
                     i.style.transition = "none", i.style.opacity = "0";
                     var r = n.left - a.left, s = n.top - a.top, l = n.width / a.width, c = n.height / a.height, d = Math.min(l, c);
@@ -563,7 +569,7 @@
         W(1);
     }, window.openPhotoPreview = function(b, L) {
         cancelTrackAnimation();
-        if (!e) if (Array.isArray(L) ? n = L.slice() : n = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : window.photoWallData ? window.photoWallData.slice() : [],
+        if (!e) { if (Array.isArray(L) ? n = L.slice() : n = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : window.photoWallData ? window.photoWallData.slice() : [],
         n && 0 !== n.length) {
             b < 0 && (b = 0), b >= n.length && (b = n.length - 1);
             var _ = document.getElementById("photoPreviewOverlay");
@@ -600,7 +606,7 @@
                     if (d._ppOrientationHandler) { window.removeEventListener("orientationchange", d._ppOrientationHandler); d._ppOrientationHandler = null; }
                 }
                 d._cleanupPreview = _ppCleanupFn, d.addEventListener("pointerdown", function(e) {
-                    var n = e.target, i = n.closest(".photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn"), a = n.closest(".pp-info-modal-content, .pp-download-confirm-content"), r = n.closest(".pp-info-modal, .pp-download-confirm-overlay"), l = E;
+                    var n = e.target, i = n.closest(".pp-story, .pp-comments-panel, .photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn"), a = n.closest(".pp-info-modal-content, .pp-download-confirm-content"), r = n.closest(".pp-info-modal, .pp-download-confirm-overlay"), l = E;
                     if (I && (clearTimeout(I), I = null), P && (clearTimeout(P), P = null), i || l) e.stopPropagation(); else if (a) e.stopPropagation(); else {
                         r && e.stopPropagation(), Date.now(), b = e.clientX, L = e.clientY, x = 0;
                         var d = e.pointerId, p = {
@@ -746,9 +752,7 @@
                                 var W = document.getElementById("ppInfoModal");
                                 if (W && "none" !== W.style.display && W.classList.contains("active")) return window.closePhotoInfo(),
                                 void (y = null);
-                                I && clearTimeout(I), I = setTimeout(function() {
-                                    I = null, V();
-                                }, 350);
+                                I && clearTimeout(I), I = null;
                             }
                             y = null;
                         }
@@ -801,6 +805,7 @@
             _._openOrigin = D, _._openOriginImg = W, W && (W.style.transition = "none", W.style.opacity = "0"),
             _.classList.add("active"), document.body.classList.add("photo-previewing"), _.style.opacity = "1",
             M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
+            j(b), F(b);
             var J = document.getElementById("photoPreviewImage"), Q = !1, $ = null, ee = (_._openLoadGen || 0) + 1;
             function cleanupOpenListeners(cancelFullPreload) {
                 $ && (clearTimeout($), $ = null), J && (J.removeEventListener("load", handleOpenLoad), J.removeEventListener("error", handleOpenError)), _ && _._cleanupOpenListeners === cleanupOpenListeners && (_._cleanupOpenListeners = null);
@@ -940,7 +945,8 @@
                     }, 8e3);
                 }
             } else re();
-        } else if (e) {
+        } } else if (e) {
+            // Explicit outer braces keep this branch reachable during quick reopen.
             // ★ 已打开时切换到目标 index（不再静默 no-op）
             if (Array.isArray(L)) n = L.slice();
             else if (window.pwCurrentSortedPhotos && window.pwCurrentSortedPhotos.length) n = window.pwCurrentSortedPhotos.slice();
@@ -950,7 +956,7 @@
                 i = b, t = n[b] || null, window.photoPreviewCurrent = t;
                 var S = n[b];
                 S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl);
-                M(), O(b), q();
+                N(b);
             }
         }
         function re() {

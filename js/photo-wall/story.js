@@ -1,6 +1,7 @@
 (function(){
   'use strict';
   var current = null, epoch = 0, controller = null, social = null, expanded = false, mutationVersion = 0;
+  var likeStates = new Map();
   var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function el(id){ return document.getElementById(id); }
   function icon(path){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+path+'</svg>'; }
@@ -51,8 +52,8 @@
     try {
       var body=await json('/api/photo/'+encodeURIComponent(id)+'/social',{background:true,signal:controller.signal});
       if(!valid(token,owner,id)||version!==mutationVersion)return;
-      social=body;current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
-    }catch(error){if(!valid(token,owner,id)||error.name==='AbortError')return;el('ppSocialStatus').textContent='互动暂未同步';el('ppLikeBtn').disabled=false;}
+      social=body;var saved=likeStates.get(owner+':'+id);if(saved&&saved.pending){social.liked=saved.desired;social.like_count=Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed));}else{likeStates.set(owner+':'+id,{confirmed:!!body.liked,desired:!!body.liked,count:body.like_count||0,pending:false});}current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
+    }catch(error){if(!valid(token,owner,id)||error.name==='AbortError')return;el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;}
   }
   window.renderPhotoStory=function(photo){
     if(!ensure())return;
@@ -72,15 +73,39 @@
     fetch((window.API_BASE||location.origin)+'/api/avatar/public/'+encodeURIComponent(photo.username||''),{signal:controller.signal}).then(function(r){return r.ok?r.json():null;}).then(function(data){
       if(token!==epoch||!data||!data.avatar_url)return;try{var url=new URL(data.avatar_url);if(url.protocol!=='https:'&&url.origin!==location.origin)return;var img=document.createElement('img');img.src=url.href;img.alt='';img.onerror=function(){avatar.textContent=String(photo.username||'?').slice(0,1);};avatar.replaceChildren(img);}catch(_){}
     }).catch(function(){});
-    if(isWall(photo)){el('ppSocialStatus').textContent='正在同步互动…';loadSocial(token,owner,id);}
+    if(isWall(photo)){var saved=likeStates.get(owner+':'+id);if(saved){social={comments:[],comment_count:0,liked:saved.desired,like_count:Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed))};updateCounts();el('ppLikeBtn').disabled=false;}loadSocial(token,owner,id);}
   };
-  async function toggleLike(){
+  function showLikeState(entry,owner,id){
+    if(!current || String(current.cloudId)!==String(id) || (window.currentUser||'')!==owner)return;
+    social=social||{comments:[],comment_count:0};social.liked=entry.desired;
+    social.like_count=Math.max(0,entry.count+Number(entry.desired)-Number(entry.confirmed));updateCounts();
+  }
+  function animateHeart(){
+    var svg=el('ppLikeBtn').querySelector('svg');
+    if(!svg||!svg.animate||document.documentElement.getAttribute('data-xtj-motion')==='off'||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    if(svg._likeAnimation)svg._likeAnimation.cancel();
+    svg._likeAnimation=svg.animate([{transform:'scale(1)'},{transform:'scale(1.22)',offset:.35},{transform:'scale(.96)',offset:.72},{transform:'scale(1)'}],{duration:280,easing:'ease-out'});
+  }
+  function toggleLike(){
     if(!current||!isWall(current)||el('ppLikeBtn').disabled)return;
-    var token=epoch,owner=window.currentUser||'',id=current.cloudId;if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
-    var liked=!(social&&social.liked);mutationVersion++;el('ppLikeBtn').disabled=true;
-    try{var body=await json('/api/photo/'+id+'/like',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({liked:liked})});if(!valid(token,owner,id))return;social=Object.assign({comments:[],comment_count:0},social,body);updateCounts();el('ppSocialStatus').textContent='';}
-    catch(error){if(valid(token,owner,id))el('ppSocialStatus').textContent=error.message;}
-    finally{if(valid(token,owner,id))el('ppLikeBtn').disabled=false;}
+    var owner=window.currentUser||'',id=current.cloudId;if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
+    var key=owner+':'+id,entry=likeStates.get(key);
+    if(!entry){entry={confirmed:!!(social&&social.liked),desired:!!(social&&social.liked),count:(social&&social.like_count)||0,pending:false};likeStates.set(key,entry);}
+    entry.desired=!entry.desired;mutationVersion++;showLikeState(entry,owner,id);animateHeart();el('ppSocialStatus').textContent='';
+    if(!entry.pending)saveLike(entry,owner,id);
+  }
+  async function saveLike(entry,owner,id){
+    entry.pending=true;
+    try{
+      while(entry.desired!==entry.confirmed){
+        // Never send a queued intention using a different account's credentials.
+        if((window.currentUser||'')!==owner){entry.desired=entry.confirmed;break;}
+        var liked=entry.desired;
+        var body=await json('/api/photo/'+id+'/like',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({liked:liked}),background:true});
+        entry.confirmed=!!body.liked;entry.count=Number(body.like_count)||0;showLikeState(entry,owner,id);
+      }
+    }catch(error){entry.desired=entry.confirmed;showLikeState(entry,owner,id);if(current&&String(current.cloudId)===String(id)&&(window.currentUser||'')===owner)el('ppSocialStatus').textContent='点赞未保存，请重试';}
+    finally{entry.pending=false;if(likeStates.size>256){for(var pair of likeStates){if(!pair[1].pending){likeStates.delete(pair[0]);break;}}}}
   }
   function renderComments(){
     var list=el('ppCommentsList');list.replaceChildren();
