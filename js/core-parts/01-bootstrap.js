@@ -2481,7 +2481,7 @@ function isAdmin() {
             if (clearBtn) clearBtn.style.display = activeCount > 0 ? "" : "none";
             var hasFilters = activeCount > 0;
             if (!hasFilters) {
-                el.textContent = "全部帖子";
+                el.textContent = "";
             } else if (!count) {
                 el.textContent = "没有找到相关帖子";
             } else {

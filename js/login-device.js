@@ -1140,12 +1140,9 @@
       if(behaviorFlushTimer){clearTimeout(behaviorFlushTimer);behaviorFlushTimer=null;}
       if(behaviorTelemetryEnabled){installBehaviorListeners();queueBehavior('page_view',location.pathname||'/');}
     }
-    async function refreshBehaviorConsent(){
-      var actor=window.currentUser,token=++consentEpoch;setBehaviorConsent(false,'');
-      if(!actor||!window.xtjProtectedFetch)return;
-      try{var response=await window.xtjProtectedFetch('/api/user/behavior-consent',{background:true});var body=await response.json();if(token===consentEpoch&&window.currentUser===actor&&response.ok&&body.ok)setBehaviorConsent(body.enabled,actor);}catch(_){}
-    }
-    window.addEventListener('xtj:behavior-consent',function(event){if(event.detail&&event.detail.owner===window.currentUser){++consentEpoch;setBehaviorConsent(event.detail.enabled,event.detail.owner);}});
+    async function refreshBehaviorConsent(){ ++consentEpoch;setBehaviorConsent(false,''); }
+    // Optional operation diagnostics retired; authentication records remain server-side.
+
     window.addEventListener('auth-ready',refreshBehaviorConsent);
     restorePendingBehavior();
     refreshBehaviorConsent();
@@ -1183,6 +1180,19 @@
             setLocationStatus(errMsg);
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
     }
+
+    var contextOwner='',contextSentAt=0,contextSending=false;
+    async function sendBrowserContext(){
+        var actor=window.currentUser;if(!actor||!window.xtjProtectedFetch||contextSending||actor===contextOwner&&Date.now()-contextSentAt<60000)return;
+        contextSending=true;var connection=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+        var body={language:navigator.language||null,languages:Array.from(navigator.languages||[]).slice(0,5),timezone:null,online:navigator.onLine!==false,network:{supported:false}};
+        try{body.timezone=Intl.DateTimeFormat().resolvedOptions().timeZone;}catch(_){}
+        if(connection)body.network={supported:true,effective_type:connection.effectiveType,downlink_mbps:connection.downlink,rtt_ms:connection.rtt,save_data:connection.saveData===true};
+        try{if(actor!==window.currentUser)return;var response=await window.xtjProtectedFetch('/api/user/browser-context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),background:true});if(response.ok&&actor===window.currentUser){contextOwner=actor;contextSentAt=Date.now();}}
+        catch(_){}finally{contextSending=false;if(actor!==window.currentUser&&window.currentUser)sendBrowserContext();}
+    }
+    window.addEventListener('auth-ready',sendBrowserContext);window.addEventListener('online',sendBrowserContext);
+    document.addEventListener('visibilitychange',function(){if(!document.hidden)sendBrowserContext();});sendBrowserContext();
 
     // 确保 device_id 已存在
     getOrCreateDeviceId();

@@ -268,7 +268,7 @@
     if(button.disabled)return;
     button.disabled=true;
     try {
-      var categories=['profile','posts','photos','likes','comments','photo_views','ai_history','activity','messages','chat_contacts','chat_preferences'];
+      var categories=['profile','posts','photos','likes','comments','photo_views','ai_history','activity','messages','chat_contacts','chat_preferences','locations'];
       var payload={format:'xtj-personal-data-v2',user:owner,exported_at:new Date().toISOString(),data:{},counts:{},attachments:[]},snapshot='',account=null;
       for(var kind of categories){
         var cursor='',seen=new Set();payload.data[kind]=[];
@@ -335,12 +335,6 @@
     box.appendChild(motionRow);
     box.appendChild(cacheRow);
     box.appendChild(exportRow);
-    box.appendChild(row('行为诊断记录', '<select id="xtjBehaviorConsent" class="profile-select" aria-label="行为诊断记录"><option value="false">关闭</option><option value="true">开启</option></select>'));
-    var consentSelect=document.getElementById('xtjBehaviorConsent');
-    consentSelect.title='仅记录页面、控件类别与性能，不记录输入正文；注册和登录安全记录始终由服务器保存';
-    async function loadConsent(){var owner=window.currentUser;consentSelect.disabled=true;try{if(!owner)return;var response=await window.xtjProtectedFetch('/api/user/behavior-consent',{background:true});var body=await response.json();if(owner===window.currentUser&&response.ok&&body.ok)consentSelect.value=String(body.enabled);}catch(_){}finally{consentSelect.disabled=!window.currentUser;}}
-    consentSelect.addEventListener('change',async function(){var owner=window.currentUser,enabled=consentSelect.value==='true';consentSelect.disabled=true;try{var response=await window.xtjProtectedFetch('/api/user/behavior-consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:enabled})});var body=await response.json();if(owner!==window.currentUser)return;if(!response.ok||!body.ok)throw new Error(body.error||'设置未保存');window.dispatchEvent(new CustomEvent('xtj:behavior-consent',{detail:{owner:owner,enabled:body.enabled}}));}catch(error){consentSelect.value=String(!enabled);if(window.showToast)window.showToast(error.message,'error');}finally{consentSelect.disabled=!window.currentUser;}});
-    window.addEventListener('auth-ready',loadConsent);loadConsent();
 
     var savedScale = '1';
     var savedMotion = 'full';

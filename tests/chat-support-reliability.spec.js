@@ -78,7 +78,8 @@ test('administrator uploads the original QR image and immediately previews the n
   await page.addInitScript(()=>{localStorage.setItem('xtj_admin_session',JSON.stringify({t:Date.now()}));localStorage.setItem('xtj_admin_tab','support');});
   const buffer=await sharp({create:{width:240,height:240,channels:3,background:'#456d5a'}}).png().toBuffer();let uploaded;
   await page.route('**/api/**',r=>r.fulfill({json:{ok:true}}));
-  await page.route('http://127.0.0.1:4173/admin/**',r=>{
+  await page.route('**/admin/**',r=>{
+    if(!new URL(r.request().url()).pathname.startsWith('/admin/'))return r.fallback();
     if(r.request().url().endsWith('/author-support')) {
       if(r.request().method()==='POST')uploaded=JSON.parse(r.request().postData());
       return r.fulfill({json:{ok:true,author:'xxz',wechat_url:uploaded?codeURL:null,alipay_url:null,disclaimer:DISCLAIMER}});
@@ -92,4 +93,9 @@ test('administrator uploads the original QR image and immediately previews the n
   await expect(page.locator('#adminSupportStatus')).toHaveText('微信收款码已保存');
   expect(uploaded.provider).toBe('wechat');expect(Buffer.from(uploaded.image,'base64').equals(buffer)).toBe(true);
   await expect(page.locator('#adminSupportCodes img[alt="微信收款码"]')).toBeVisible();
+});
+
+test('prefetched support code opens immediately, supports full-screen zoom and returns to tipping dialog',async({page})=>{
+ const errors=await setup(page);await page.evaluate(()=>window.openChat('xxz'));await expect(page.locator('#authorSupportButton')).toBeVisible();await page.locator('#authorSupportButton').click();await expect(page.locator('.author-support-image-button img')).toBeVisible();await page.locator('.author-support-image-button').click();await expect(page.locator('#supportCodePreview')).toBeVisible();await expect(page.locator('#supportCodePreview img')).toHaveAttribute('src',codeURL);await page.locator('#supportCodePreview img').dblclick();expect(await page.locator('#supportCodePreview img').evaluate(e=>getComputedStyle(e).transform)).not.toBe('none');await page.locator('.support-code-close').click();await expect(page.locator('#supportCodePreview')).toBeHidden();await expect(page.locator('#authorSupportDialog')).toBeVisible();await page.keyboard.press('Escape');
+ await page.evaluate(()=>window.__supportDelay=500);await page.locator('#authorSupportButton').click();await expect(page.locator('.author-support-image-button img')).toBeVisible();expect(errors).toEqual([]);
 });

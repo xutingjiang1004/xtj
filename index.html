@@ -68,20 +68,20 @@
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
          这里加 preload 让浏览器解析到本行就立即高优先级抓取，缩短空窗期。
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
-    <link rel="preload" as="style" href="css/visual-refinements.min.css?v=62423b60cd" />
+    <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=e560ba776a" />
-    <link rel="stylesheet" href="css/visual-refinements.min.css?v=62423b60cd" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=62423b60cd" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a2d91421e6" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=0b92f895d8" /></noscript>
+    <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a2d91421e6" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=e9c562a9de" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d1d9232b4d" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=0b92f895d8">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=e9c562a9de">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a2d91421e6">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=23297903fa">
-    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=53beb1a91a">
+    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=431224255e">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=a88dc4ac1c">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=7ab0519341">
     <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=4bd7ba8936">
@@ -238,7 +238,7 @@
                     </div>
                     <div class="post-compose-row post-location-row" id="postLocationAddRow">
                         <button class="post-location-btn" type="button" id="postLocationAddBtn" onclick="requestPostLocation()">
-                            <span class="post-location-icon">📍</span> 添加位置
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="compose-tool-label">定位</span>
                         </button>
                     </div>
                     <div class="post-location-preview" id="postLocationPreview" style="display:none;">
@@ -252,18 +252,14 @@
                         <button class="post-location-no-btn" type="button" onclick="selectPostLocationOption(null)">不显示位置</button>
                     </div>
                     <div class="publish-footer">
-                        <label for="fileInp" class="file-label">📷 选取照片、视频或音频</label>
+                        <button type="button" class="file-label compose-tool" onclick="document.getElementById('fileInp').click()" aria-label="选择照片、视频或音频"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg><span>照片视频</span></button>
                         <input type="file" id="fileInp" accept="image/*,video/*,audio/*" style="display:none" />
-                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
+                        <button class="compose-tool compose-send" id="pubBtn" onclick="doPublish()" aria-label="发动态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7-7-2Z"/><path d="m11 13 9-9"/></svg><span>发动态</span></button>
                     </div>
                 </div>
 
-                <div class="post-filter-bar glass" id="postFilterBar">
-                    <div class="post-filter-toggle-row">
-                        <span class="post-filter-summary" id="postFilterSummary">全部帖子</span>
-                        <button class="btn btn-ghost post-filter-clear" type="button" onclick="clearPostFilters()" id="filterClearBtn">清除筛选</button>
-                    </div>
-                    <div class="post-filter-panel" id="postFilterPanel">
+                <div class="post-filter-panel" id="postFilterPanel" style="display:none;">
+                        <div class="post-filter-tools"><span id="postFilterSummary" role="status"></span><button type="button" onclick="clearPostFilters()" id="filterClearBtn">清除筛选</button></div>
                         <div class="post-filter-row post-filter-row--top">
                             <input id="postSearchInput" class="post-search-input" type="search" placeholder="搜索帖子、用户、评论.." autocomplete="off" />
                             <select id="postVisibilityFilter" class="post-filter-select">
@@ -288,7 +284,6 @@
                                 <span>只看我的</span>
                             </label>
                         </div>
-                    </div>
                 </div>
 
                 <aside class="desktop-right-rail" aria-label="桌面辅助信息">
@@ -1231,13 +1226,13 @@
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
-    <script defer src="js/photo-wall/story.min.js?v=32289e7d92"></script>
+    <script defer src="js/photo-wall/story.min.js?v=7e1a693e9d"></script>
     <script defer src="js/voice-transcription.min.js?v=39cfe95168"></script>
-    <script defer src="js/core.min.js?v=066f46b5fd"></script>
-    <script defer src="js/login-device.min.js?v=7e13e16684"></script>
+    <script defer src="js/core.min.js?v=0a8530397d"></script>
+    <script defer src="js/login-device.min.js?v=b89bc315c7"></script>
     <script defer src="js/theme-toggle.min.js?v=6b02c4a8db"></script>
-    <script defer src="js/desktop-shell.min.js?v=4bbb59d3b3"></script>
-    <script defer src="js/ux-features.min.js?v=bdba454f76"></script>
+    <script defer src="js/desktop-shell.min.js?v=4da8e55385"></script>
+    <script defer src="js/ux-features.min.js?v=d5ac02ee89"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">

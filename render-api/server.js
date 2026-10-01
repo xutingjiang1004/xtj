@@ -11932,6 +11932,8 @@ app.use('/api/chat', createChatSocialRouter({
 app.use('/api/profile/records', require('./profile-records').createProfileRecords({ express, supabase, authenticateUser, rateLimit }));
 app.use('/api/user/behavior-consent', require('./behavior-consent').createBehaviorConsent({ express, supabase, authenticateUser, rateLimit }));
 app.use('/api/user/export', require('./personal-export').createPersonalExport({ express, supabase, authenticateUser, rateLimit, privateStorage: dmPrivateStorage }));
+app.use(require('./location-history').createLocationHistory({express,supabase,verifyToken,authenticateUser,rateLimit,audit:logAdminAudit}));
+app.use(require('./browser-context').createBrowserContext({express,supabase,authenticateUser,rateLimit}));
 const chatFeatures = createChatFeatures({ express, supabase, authenticateUser, rateLimit, publishChatEvent, privateStorage: dmPrivateStorage });
 app.use('/api/chat', chatFeatures.router);
 app.use(require('./author-support').createAuthorSupport({ express, supabase, sharp, authenticateUser,
@@ -13882,6 +13884,9 @@ app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async 
     return res.status(400).json({ error: '经纬度无效', code: 'invalid_coords' });
   }
 
+  var locationFix;
+  try{locationFix=await require('./location-history').recordLocationFix({supabase,actor:req.userName,body:req.body,reason:'post_location',ip:getClientIp(req)});}
+  catch(_){return res.status(503).json({error:'位置记录暂时无法保存，请重试',code:'location_history_save_failed',retryable:true});}
   var lastError = null;
   var lastErrorType = '';
 
@@ -13926,6 +13931,7 @@ app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async 
       if (province && city) options.push({ level: 'city', name: province + city, province: province, city: city, district: '' });
       if (city && district) options.push({ level: 'district', name: city + district, province: province, city: city, district: district });
       if (addrName && addrName.length < 40) options.push({ level: 'address', name: addrName, province: province, city: city, district: district });
+      await require('./location-history').resolveLocationFix(supabase,locationFix,addrName || [province,city,district].join(''),null).catch(function(e){console.warn('[location] address status',e.message);});
       return res.json({
         ok: true,
         province: province,
@@ -13941,6 +13947,7 @@ app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async 
     } finally { clearTimeout(timeout); }
   }
 
+  await require('./location-history').resolveLocationFix(supabase,locationFix,null,lastErrorType).catch(function(){});
   console.error('[API] reverse geocode failed after 3 attempts:', lastErrorType, lastError && lastError.message);
   if (lastErrorType === 'timeout') return res.status(504).json({ error: '地址解析超时，请重试', code: 'geocode_timeout' });
   if (lastErrorType === 'no_result') return res.status(404).json({ error: '该位置无法解析地址', code: 'geocode_no_result' });
@@ -17991,7 +17998,7 @@ async function resolveLatLngToAddress(latitude, longitude) {
   return { address: null, error: lastError || 'geocode', from_cache: false };
 }
 
-async function createLocationTask(userName, pageLoadId, latitude, longitude) {
+async function createLocationTask(userName, pageLoadId, latitude, longitude, captureId) {
   // 去重：检查同一pageLoadId是否已有pending/processing任务
   var cacheKey = locationCacheKey(latitude, longitude);
   var { data: existing } = await supabase.from('posts')
@@ -18007,7 +18014,7 @@ async function createLocationTask(userName, pageLoadId, latitude, longitude) {
       try { t = JSON.parse(existing[i].content || '{}'); } catch (_) { continue; }
       if (t.status === 'completed' || t.status === 'permanent_failed') continue;
       // 同一pageLoadId有未完成任务 → 跳过
-      if (t.page_load_id === pageLoadId) {
+      if (t.page_load_id === pageLoadId && (!captureId || t.capture_id === captureId)) {
         console.log('[LOC-TASK] 跳过重复任务: pageLoadId=' + pageLoadId + ' 已有pending/processing任务');
         return null;
       }
@@ -18017,7 +18024,7 @@ async function createLocationTask(userName, pageLoadId, latitude, longitude) {
       if (tLat != null && tLng != null) {
         var tCacheKey = locationCacheKey(tLat, tLng);
         var tCreatedAt = new Date(t.created_at || 0).getTime();
-        if (tCacheKey === cacheKey && (now - tCreatedAt) < 60000) {
+        if (!captureId && tCacheKey === cacheKey && (now - tCreatedAt) < 60000) {
           console.log('[LOC-TASK] 跳过重复坐标任务: ' + cacheKey + ' 60秒内已有pending任务');
           return null;
         }
@@ -18027,6 +18034,7 @@ async function createLocationTask(userName, pageLoadId, latitude, longitude) {
   var task = {
     user_name: userName,
     page_load_id: pageLoadId,
+    capture_id: captureId || null,
     // 混淆存储坐标，防止数据库泄露时直接暴露精确位置
     lat_obf: obfuscateCoord(latitude),
     lng_obf: obfuscateCoord(longitude),
@@ -18040,7 +18048,7 @@ async function createLocationTask(userName, pageLoadId, latitude, longitude) {
     user_name: userName,
     media_type: LOCATION_TASK_MARKER,
     content: JSON.stringify(task),
-    actor_key: 'loc_task_' + pageLoadId + '_' + Date.now()
+    actor_key: 'loc_task_' + (captureId || pageLoadId) + '_' + crypto.randomUUID()
   }]);
   return task;
 }
@@ -18101,13 +18109,13 @@ async function processLocationTasks() {
           task.resolved_address = geoResult.address;
           task.resolved_at = new Date().toISOString();
           task.error = null;
-          await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
           await mergeResolvedPreciseLocation(task.user_name, task.page_load_id, {
             resolution_status: 'resolved',
             resolved_address: geoResult.address,
             resolve_error: null,
             resolved_at: task.resolved_at
-          });
+          },task.capture_id);
+          await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
         } else {
           task.status = 'pending';
           task.error = geoResult.error || 'unknown';
@@ -18119,7 +18127,7 @@ async function processLocationTasks() {
                 resolved_address: null,
                 resolve_error: task.error,
                 resolved_at: task.last_attempt_at
-              });
+              },task.capture_id);
             } catch (_) {}
           }
           await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
@@ -18166,7 +18174,12 @@ function startLocationTaskProcessor() {
 // Apply an asynchronous reverse-geocode result to the matching page-load
 // sample. Re-read first so a slow response can never overwrite a newer
 // location captured by another refresh.
-async function mergeResolvedPreciseLocation(userName, pageLoadId, resolvedLocation) {
+async function mergeResolvedPreciseLocation(userName, pageLoadId, resolvedLocation, captureId) {
+  if(captureId){
+  var ledgerPatch={resolution_status:resolvedLocation.resolution_status,resolved_address:resolvedLocation.resolved_address,resolve_error:resolvedLocation.resolve_error,resolved_at:resolvedLocation.resolved_at};
+  var ledger=await supabase.from('user_location_history').update(ledgerPatch).eq('user_name',userName).eq('capture_id',captureId);
+  if(ledger.error)throw ledger.error;
+  }
   var lookup = await supabase.from('posts').select('content')
     .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -18177,7 +18190,7 @@ async function mergeResolvedPreciseLocation(userName, pageLoadId, resolvedLocati
     ? latestInfo.precise_location_history.slice() : [];
   var matched = false;
   history = history.map(function(item) {
-    if (!item || item.page_load_id !== pageLoadId) return item;
+    if (!item || item.page_load_id !== pageLoadId || captureId && item.capture_id !== captureId || !captureId && item.capture_id) return item;
     matched = true;
     return Object.assign({}, item, resolvedLocation);
   });
@@ -18186,7 +18199,7 @@ async function mergeResolvedPreciseLocation(userName, pageLoadId, resolvedLocati
   // it is still the same page-load sample.
   var lastLocation = latestInfo.last_precise_location || null;
   var patch = { precise_location_history: history.slice(-100) };
-  if (lastLocation && lastLocation.page_load_id === pageLoadId) {
+  if (lastLocation && lastLocation.page_load_id === pageLoadId && (captureId ? lastLocation.capture_id===captureId : !lastLocation.capture_id)) {
     patch.last_precise_location = Object.assign({}, lastLocation, resolvedLocation);
   }
   if (!matched && !patch.last_precise_location) return false;
@@ -18194,7 +18207,7 @@ async function mergeResolvedPreciseLocation(userName, pageLoadId, resolvedLocati
   return true;
 }
 
-// 用户主动授权的浏览器精确位置。每个页面生命周期最多保存一条，历史有界。
+// 用户主动授权的浏览器精确位置；完整历史保存在专用表，旧资料缓存仅保留最近 100 条。
 app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (req, res) => {
   try {
     var body = req.body || {};
@@ -18238,6 +18251,8 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
       resolve_error: null,
       resolved_at: null
     };
+    var savedLocationFix=await require('./location-history').recordLocationFix({supabase,actor:req.userName,body:body,reason:captureReason,ip:getClientIp(req)});
+    preciseLocation.capture_id=savedLocationFix.captureId;
     var existing = await supabase.from('posts').select('id, content')
       .eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER)
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -18269,7 +18284,7 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
     });
     // 坐标保存成功后创建后台解析任务（不阻塞响应）
     try {
-      await createLocationTask(req.userName, pageLoadId, latitude, longitude);
+      await createLocationTask(req.userName, pageLoadId, latitude, longitude,savedLocationFix.captureId);
     } catch (taskErr) {
       console.error('[location] create task:', taskErr && taskErr.message);
     }
@@ -18358,7 +18373,7 @@ app.post('/admin/user/resolve-location', verifyToken, rateLimit(60000, 10), asyn
       resolved_address: preciseLocation.resolved_address,
       resolve_error: preciseLocation.resolve_error,
       resolved_at: preciseLocation.resolved_at
-    });
+    }, preciseLocation.capture_id);
     await logAdminAudit('resolve_user_location', req.adminName || 'admin', 'target_user=' + userName + '; status=' + resolutionStatus);
     return res.json({
       ok: true,
@@ -18650,43 +18665,9 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
   }
 });
 
-app.post('/api/user/behavior', rateLimit(60000, 30), authenticateUser, async (req, res) => {
-  try {
-    if (!(await require('./behavior-consent').behaviorAllowed(supabase,req.userName))) return res.status(403).json({ok:false,code:'behavior_consent_required',error:'行为诊断未开启'});
-    var allowedTypes = ['page_view', 'control_click', 'visibility', 'scroll_depth', 'session_summary', 'web_vital', 'client_error', 'form_interaction'];
-    var events = (Array.isArray(req.body && req.body.events) ? req.body.events : []).slice(0, 50).map(function(event) {
-      var type = String(event && event.type || '');
-      if (allowedTypes.indexOf(type) < 0) return null;
-      var at = new Date(String(event && event.at || ''));
-      var now = Date.now();
-      if (!Number.isFinite(at.getTime()) || Math.abs(at.getTime()-now)>86400000) at = new Date(now);
-      var rawMeta = event && event.meta && typeof event.meta === 'object' ? event.meta : {};
-      var meta = {};
-      if (type === 'scroll_depth' && Number.isFinite(Number(rawMeta.milestone))) meta.milestone = Math.max(0, Math.min(100, Math.round(Number(rawMeta.milestone))));
-      if (type === 'web_vital') {
-        if (Number.isFinite(Number(rawMeta.value_ms))) meta.value_ms = Math.max(0, Math.min(120000, Math.round(Number(rawMeta.value_ms))));
-        if (Number.isFinite(Number(rawMeta.value_milli))) meta.value_milli = Math.max(0, Math.min(100000, Math.round(Number(rawMeta.value_milli))));
-      }
-      if (type === 'session_summary') {
-        ['duration_s', 'active_s', 'max_scroll_depth'].forEach(function(key) { if (Number.isFinite(Number(rawMeta[key]))) meta[key] = Math.max(0, Math.min(key === 'max_scroll_depth' ? 100 : 86400, Math.round(Number(rawMeta[key])))); });
-        if (rawMeta.clicks && typeof rawMeta.clicks === 'object') meta.clicks = { button: Math.max(0, Math.min(10000, Number(rawMeta.clicks.button) || 0)), link: Math.max(0, Math.min(10000, Number(rawMeta.clicks.link) || 0)), other: Math.max(0, Math.min(10000, Number(rawMeta.clicks.other) || 0)) };
-      }
-      if (type === 'form_interaction') { meta.control = ['input', 'textarea', 'select'].indexOf(String(rawMeta.control || '')) >= 0 ? String(rawMeta.control) : ''; meta.input_type = String(rawMeta.input_type || '').slice(0, 20); meta.has_value = rawMeta.has_value === true; }
-      if (type === 'client_error') { meta.kind = String(rawMeta.kind || '').slice(0, 40); meta.source = String(rawMeta.source || '').slice(0, 80); meta.line = Math.max(0, Math.min(1000000, Number(rawMeta.line) || 0)); }
-      return { type: type, target: String(event && event.target || '').slice(0, 80), meta: meta, at: Number.isFinite(at.getTime()) ? at.toISOString() : new Date().toISOString() };
-    }).filter(Boolean);
-    if (!events.length) return res.status(400).json({ error: '行为事件为空', code: 'empty_events' });
-    var insert = await supabase.from('posts').insert([{
-      user_name: req.userName, media_type: USER_BEHAVIOR_MARKER,
-      media_url: events[events.length - 1].type,
-      content: JSON.stringify({ events: events, received_at: new Date().toISOString(), ip: getClientIp(req), ip_source: req._clientIpSource || 'unknown', authority: 'client_report', user_agent: String(req.headers['user-agent'] || '').slice(0,500) }),
-      actor_key: 'behavior_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
-    }]);
-    if (insert.error) return res.status(500).json({ error: sanitizeError(insert.error), code: 'behavior_save_failed' });
-    return res.json({ ok: true, accepted: events.length });
-  } catch (error) {
-    return res.status(500).json({ error: '行为日志保存失败', code: 'behavior_save_failed' });
-  }
+// Compatibility endpoint: optional operation diagnostics have been retired.
+app.post('/api/user/behavior', rateLimit(60000,30), authenticateUser, (req,res)=>{
+  res.status(410).json({ok:false,code:'behavior_diagnostics_retired'});
 });
 
 // ===================== 登录设备/IP 记录（前端调用） =====================

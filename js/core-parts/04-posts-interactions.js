@@ -4148,6 +4148,9 @@
             var postLocationData = null;
             var postLocationRequesting = false;
 
+            function restorePostLocationButton(btn) {
+                if(btn)btn.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="compose-tool-label">定位</span>';
+            }
             window.requestPostLocation = function() {
                 if (postLocationRequesting) return;
                 var btn = document.getElementById('postLocationAddBtn');
@@ -4156,18 +4159,20 @@
                     showToast('您的浏览器不支持定位功能');
                     return;
                 }
+                var locationOwner=window.currentUser;
                 postLocationRequesting = true;
                 btn.disabled = true;
                 btn.textContent = '正在获取位置...';
                 function requestPostLocationFix(options, onError) {
                     navigator.geolocation.getCurrentPosition(function(position) {
-                        reverseGeocodePostLocation(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+                        if(locationOwner!==window.currentUser){postLocationRequesting=false;btn.disabled=false;restorePostLocationButton(btn);return;}
+                        reverseGeocodePostLocation(position.coords.latitude, position.coords.longitude, position.coords.accuracy, new Date(position.timestamp || Date.now()).toISOString(), locationOwner);
                     }, onError, options);
                 }
                 function finishLocationRequest(error) {
                     postLocationRequesting = false;
                     btn.disabled = false;
-                    btn.textContent = '添加位置';
+                    restorePostLocationButton(btn);
                     showToast(error && error.code === 1 ? '位置权限被拒绝，请在浏览器设置中允许定位' : '定位失败，请重试');
                 }
                 requestPostLocationFix({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }, function(error) {
@@ -4177,7 +4182,7 @@
                         requestPostLocationFix({ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }, function(fallbackError) {
                             postLocationRequesting = false;
                             btn.disabled = false;
-                            btn.textContent = '📍 添加位置';
+                            restorePostLocationButton(btn);
                             showToast('定位失败，请重试');
                         });
                         return;
@@ -4187,27 +4192,30 @@
                 });
             };
 
-            async function reverseGeocodePostLocation(lat, lng, accuracy) {
+            async function reverseGeocodePostLocation(lat, lng, accuracy, capturedAt, owner) {
                 var btn = document.getElementById('postLocationAddBtn');
                 try {
+                    if(owner!==window.currentUser) return;
                     var resp = await window.xtjProtectedFetch('/api/location/reverse', {
                         method: 'POST',
-                        body: JSON.stringify({ latitude: lat, longitude: lng, accuracy: Number(accuracy) || null })
+                        body: JSON.stringify({ latitude: lat, longitude: lng, accuracy: Number.isFinite(Number(accuracy)) ? Number(accuracy) : null, captured_at: capturedAt, capture_id: "post_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2) })
                     });
+                    if(owner!==window.currentUser) return;
                     var data = await resp.json().catch(function() { return {}; });
                     if (!resp.ok || !data.ok) {
                         showToast('地址解析失败: ' + (data.error || '请重试'));
                         postLocationRequesting = false;
-                        if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+                        if (btn) { btn.disabled = false; restorePostLocationButton(btn); }
                         return;
                     }
                     data.accuracy = Number(accuracy) || null;
                     showPostLocationOptions(data);
                 } catch (e) {
+                    if(owner!==window.currentUser)return;
                     showToast('地址解析失败，请检查网络');
                     postLocationRequesting = false;
-                    if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
-                }
+                    if (btn) { btn.disabled = false; restorePostLocationButton(btn); }
+                } finally {postLocationRequesting=false;if(btn){btn.disabled=false;restorePostLocationButton(btn);}}
             }
 
             function showPostLocationOptions(geoData) {
@@ -4244,7 +4252,7 @@
                 if (addRow) addRow.style.display = 'none';
                 postLocationRequesting = false;
                 var btn = document.getElementById('postLocationAddBtn');
-                if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+                if (btn) { btn.disabled = false; restorePostLocationButton(btn); }
             }
 
             window.selectPostLocationOption = function(option) {
@@ -4289,7 +4297,7 @@
                 if (panel) panel.style.display = 'none';
                 if (preview) preview.style.display = 'none';
                 if (addRow) addRow.style.display = 'block';
-                if (btn) { btn.disabled = false; btn.textContent = '📍 添加位置'; }
+                if (btn) { btn.disabled = false; restorePostLocationButton(btn); }
             }
 
             window.doPublish = async function () {
@@ -4319,7 +4327,7 @@
                 btn.disabled = true;
                 btn.classList.add('is-loading');
                 btn.setAttribute('aria-busy', 'true');
-                btn.dataset.originalText = btn.textContent;
+                btn.dataset.originalText = btn.textContent;btn._composeMarkup=btn.innerHTML;
                 btn.innerHTML = '<span>发布中</span>';
                 var uploadedPath = '';
                 try {
@@ -4395,7 +4403,7 @@
                     btn.disabled = false;
                     btn.classList.remove('is-loading');
                     btn.setAttribute('aria-busy', 'false');
-                    btn.textContent = btn.dataset.originalText || "发布动态";
+                    btn.innerHTML = btn._composeMarkup || '<span>发动态</span>';delete btn._composeMarkup;
                     delete btn.dataset.originalText;
                     // ★ 2026-09-27（审计 P13-②）：此处不再无条件 resetPostPreview()，
                     //   失败时保留预览与已选文件，避免"显示 0 个文件但文件还在"的错乱状态。
