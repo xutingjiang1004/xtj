@@ -11466,10 +11466,11 @@ function renderProfileActivityList(kind) {
             //   启动时两者在同一帧先后触发，等于并发打两次同一个重接口。
             //   这里做单飞 + 3 秒短缓存；缓存的是**解析后的 JSON**（Response body 只能消费一次，
             //   直接共享 Response 会让第二个调用方拿到 "body already used"）。
-            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0 };
+            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0, retryAt: 0, failures: 0 };
             window.__xtjInvalidateDmListShared = function() {
                 _dmListShared.epoch++;
                 _dmListShared.at = 0;
+                _dmListShared.retryAt = 0; _dmListShared.failures = 0;
                 _dmListShared.json = null;
                 _dmListShared.inflight = null;
                 _dmUnreadFetchedAt = 0;
@@ -11505,20 +11506,35 @@ function renderProfileActivityList(kind) {
                     return Promise.resolve(_dmListShared.json);
                 }
                 if (_dmListShared.inflight) return _dmListShared.inflight;
+                if (now < _dmListShared.retryAt) return Promise.resolve(null);
                 // ★ 2026-09-27（M15 配套）：本函数是 DM 轮询的主链路
                 //   （startDMPolling → pollNow → updateUnreadBadge → 这里），属后台被动请求。
                 //   显式标记 background，让 ensureProtectedOperationAuth 保留 refresh 冷却，
                 //   避免每 60 秒一轮的轮询把「401/403 后 30 秒不重试」的冷却反复清零，
                 //   持续打 /api/user/refresh。用户主动操作（点按钮）走其它路径，不受影响。
-                var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)), { background: true })
-                    .then(function(resp) { return (resp && resp.ok) ? resp.json().catch(function() { return null; }) : null; })
-                    .then(function(json) {
-                        if (_dmListShared.epoch !== epoch || window.currentUser !== owner) return null;
-                        if (json && json.ok) { _dmListShared.json = json; _dmListShared.at = Date.now(); }
-                        _dmListShared.inflight = null;
-                        return json;
-                    })
-                    .catch(function() { if (_dmListShared.epoch === epoch) _dmListShared.inflight = null; return null; });
+                async function fetchListAttempt() {
+                    for (var attempt=0; attempt<2; attempt++) {
+                        if (_dmListShared.epoch!==epoch || window.currentUser!==owner) return null;
+                        try {
+                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:true,timeoutMs:12000});
+                            if (response && response.ok) return await response.json();
+                            if (!response || (response.status!==429 && response.status<500)) return null;
+                        } catch (_) {}
+                        if (attempt===0) await new Promise(function(resolve){setTimeout(resolve,800);});
+                    }
+                    return null;
+                }
+                var p=fetchListAttempt().then(function(json){
+                    if (_dmListShared.epoch!==epoch || window.currentUser!==owner) return null;
+                    if (json && json.ok) {
+                        _dmListShared.json=json; _dmListShared.at=Date.now();
+                        _dmListShared.retryAt=0; _dmListShared.failures=0;
+                    } else {
+                        _dmListShared.failures++;
+                        _dmListShared.retryAt=Date.now()+Math.min(60000,5000*Math.pow(2,_dmListShared.failures-1));
+                    }
+                    _dmListShared.inflight=null;return json;
+                }).catch(function(){if(_dmListShared.epoch===epoch){_dmListShared.inflight=null;_dmListShared.retryAt=Date.now()+5000;}return null;});
                 _dmListShared.inflight = p;
                 return p;
             }
@@ -12798,7 +12814,9 @@ function renderProfileActivityList(kind) {
                 } catch (_) { return false; }
             }
 
+            var _dockChatListRetryTimer = 0;
             async function loadDockChatList() {
+                if (_dockChatListRetryTimer) { clearTimeout(_dockChatListRetryTimer); _dockChatListRetryTimer=0; }
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
                 if (!window.currentUser) {
@@ -12864,6 +12882,7 @@ function renderProfileActivityList(kind) {
                     const dmResult = await window.fetchDmListShared(180);
                     if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
                     if (listResultStale()) return;
+                    var syncStatus=el.querySelector('.chat-list-sync-status');if(syncStatus)syncStatus.remove();
                     var rawRows = dmResult.data || [];
                     var allMsgs = mergeDockChatRowsById(rawRows, false, 180);
                     var authoritative = Array.isArray(dmResult.conversations);
@@ -12957,10 +12976,23 @@ function renderProfileActivityList(kind) {
                         el.appendChild(retry);
                         window.dockChatListCacheTime = 0;
                     } else {
-                        showToast('消息列表刷新失败，请稍后重试');
+                        if (!el.querySelector('.chat-list-sync-status')) {
+                            var status=document.createElement('div');status.className='chat-list-sync-status';status.setAttribute('role','status');
+                            var message=document.createElement('span');message.textContent='连接暂时不稳定，稍后自动重试';
+                            var retryButton=document.createElement('button');retryButton.type='button';retryButton.textContent='重试';
+                            retryButton.onclick=function(){window.dockChatListCacheTime=0;if(window.__xtjInvalidateDmListShared)window.__xtjInvalidateDmListShared();loadDockChatList();};
+                            status.append(message,retryButton);el.appendChild(status);
+                        }
+                        window.dockChatListCacheTime=Date.now();
                     }
                     renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
+                    _dockChatListRetryTimer=setTimeout(function(){
+                        _dockChatListRetryTimer=0;
+                        if (!listResultStale() && currentDockTab==='chat' && !document.hidden) {
+                            window.dockChatListCacheTime=0;loadDockChatList();
+                        }
+                    },5000);
                 }
             }
 
@@ -17432,15 +17464,19 @@ function renderProfileActivityList(kind) {
 
                     function hasActiveInput() {
                         var active = document.activeElement;
-                        return !!(active && inputs.indexOf(active.id) >= 0);
+                        return !!(active && active.matches && active.matches('textarea,input:not([type=checkbox]):not([type=radio]):not([type=range]),[contenteditable=true]'));
                     }
 
                     function updateIOSViewport() {
                         var vv = window.visualViewport;
                         if (vv && Math.abs(vv.scale - 1)>0.02) return;
+                        // Panels own scrolling; Safari must not retain an outer-page
+                        // scroll from focusing a form or restoring a cached iPad tab.
+                        if (!hasActiveInput() && window.scrollY!==0) window.scrollTo(0,0);
                         var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
                         root.style.setProperty('--xtj-visual-top', (vv ? Math.max(0, Math.round(vv.offsetTop)) : 0) + 'px');
+                        window.dispatchEvent(new CustomEvent('xtj:visual-viewport-change'));
                         var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
                         // ★ 2026-09-22 视口差基线（微信 web-view / 微信内置浏览器 / 开发者工具模拟器通吃）：
                         //   这些环境里 window.innerHeight 与 visualViewport 存在**环境固有的恒定差值**

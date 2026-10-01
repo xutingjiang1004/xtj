@@ -34,31 +34,14 @@ test('P4-15: empty cloud photo list clears local cache', function () {
   assert.ok(!oldBehavior, 'old preserve-local behavior must be removed');
 });
 
-test('P4-16: view-count sync goes through /api/photo/view and rolls back', function () {
+test('P4-16: unique viewer sync uses the authenticated API and only adopts confirmed counts', function () {
   var s = codeOnly('js/photo-wall/data.js');
-  assert.ok(/originalViews\s*=\s*Number\(item\.views/.test(s),
-    'syncPhotoViewCount must save originalViews before optimistic update');
-
-  // ★ P1-12 审计修复：前端不得再直连 Supabase RPC increment_post_views。
-  //   056 迁移把该函数 GRANT 给了 anon，等同于公开一个"刷浏览量 + 读私密帖
-  //   精确计数"的接口。计数必须改走后端 /api/photo/view。
-  assert.ok(!/window\.sb\.rpc\(\s*['"]increment_post_views/.test(s),
-    'syncPhotoViewCount must NOT call the increment_post_views RPC directly');
-  assert.ok(/apiUrl\(\s*['"]\/api\/photo\/view['"]\s*\)/.test(s),
-    'syncPhotoViewCount must POST to /api/photo/view');
-  assert.ok(/method:\s*['"]POST['"]/.test(s) && /photo_id:\s*item\.cloudId/.test(s),
-    'view request must be a POST carrying photo_id');
-  assert.ok(/credentials:\s*['"]include['"]/.test(s),
-    'view request must send credentials so optionalAuth can identify the viewer');
-
-  // 失败必须回滚乐观自增：HTTP 非 2xx、业务 ok!==true、网络异常三条路径。
-  assert.ok(/!viewResp\.ok\s*\|\|\s*!viewPayload\s*\|\|\s*viewPayload\.ok\s*!==\s*true[\s\S]*?rollbackView\(\)/.test(s),
-    'non-ok HTTP / failed payload must roll back the optimistic increment');
-  assert.ok(/\}\s*catch\s*\(_\)\s*\{[\s\S]{0,120}rollbackView\(\)/.test(s),
-    'network exception must roll back the optimistic increment');
-  // 以服务端返回的真实计数为准，避免本地乐观值长期漂移。
-  assert.ok(/viewPayload\.views[\s\S]{0,120}item\.views\s*=\s*viewPayload\.views/.test(s),
-    'successful sync must adopt the server-returned view count');
+  assert.ok(!/window\.sb\.rpc\(/.test(s), 'view counting must not expose a direct browser RPC');
+  assert.ok(/apiUrl\(\s*['"]\/api\/photo\/view['"]\s*\)/.test(s));
+  assert.ok(/method:\s*['"]POST['"]/.test(s) && /photo_id:\s*item\.cloudId/.test(s));
+  assert.ok(/!response\.ok[\s\S]*?result\.ok!==true/.test(s));
+  assert.ok(/item\.views=Math\.max\(Number\(item\.views\)\|\|0,result\.views\)/.test(s));
+  assert.ok(!/item\.views\s*=\s*originalViews\s*\+\s*1/.test(s), 'do not fabricate a view before server confirmation');
 });
 
 test('P4-17: cancel upload aborts authenticated XHR and fallback fetch via signal', function () {

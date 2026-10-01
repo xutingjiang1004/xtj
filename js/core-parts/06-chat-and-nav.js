@@ -891,7 +891,9 @@
                 } catch (_) { return false; }
             }
 
+            var _dockChatListRetryTimer = 0;
             async function loadDockChatList() {
+                if (_dockChatListRetryTimer) { clearTimeout(_dockChatListRetryTimer); _dockChatListRetryTimer=0; }
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
                 if (!window.currentUser) {
@@ -957,6 +959,7 @@
                     const dmResult = await window.fetchDmListShared(180);
                     if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
                     if (listResultStale()) return;
+                    var syncStatus=el.querySelector('.chat-list-sync-status');if(syncStatus)syncStatus.remove();
                     var rawRows = dmResult.data || [];
                     var allMsgs = mergeDockChatRowsById(rawRows, false, 180);
                     var authoritative = Array.isArray(dmResult.conversations);
@@ -1050,10 +1053,23 @@
                         el.appendChild(retry);
                         window.dockChatListCacheTime = 0;
                     } else {
-                        showToast('消息列表刷新失败，请稍后重试');
+                        if (!el.querySelector('.chat-list-sync-status')) {
+                            var status=document.createElement('div');status.className='chat-list-sync-status';status.setAttribute('role','status');
+                            var message=document.createElement('span');message.textContent='连接暂时不稳定，稍后自动重试';
+                            var retryButton=document.createElement('button');retryButton.type='button';retryButton.textContent='重试';
+                            retryButton.onclick=function(){window.dockChatListCacheTime=0;if(window.__xtjInvalidateDmListShared)window.__xtjInvalidateDmListShared();loadDockChatList();};
+                            status.append(message,retryButton);el.appendChild(status);
+                        }
+                        window.dockChatListCacheTime=Date.now();
                     }
                     renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
+                    _dockChatListRetryTimer=setTimeout(function(){
+                        _dockChatListRetryTimer=0;
+                        if (!listResultStale() && currentDockTab==='chat' && !document.hidden) {
+                            window.dockChatListCacheTime=0;loadDockChatList();
+                        }
+                    },5000);
                 }
             }
 
@@ -5525,15 +5541,19 @@
 
                     function hasActiveInput() {
                         var active = document.activeElement;
-                        return !!(active && inputs.indexOf(active.id) >= 0);
+                        return !!(active && active.matches && active.matches('textarea,input:not([type=checkbox]):not([type=radio]):not([type=range]),[contenteditable=true]'));
                     }
 
                     function updateIOSViewport() {
                         var vv = window.visualViewport;
                         if (vv && Math.abs(vv.scale - 1)>0.02) return;
+                        // Panels own scrolling; Safari must not retain an outer-page
+                        // scroll from focusing a form or restoring a cached iPad tab.
+                        if (!hasActiveInput() && window.scrollY!==0) window.scrollTo(0,0);
                         var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
                         root.style.setProperty('--xtj-visual-top', (vv ? Math.max(0, Math.round(vv.offsetTop)) : 0) + 'px');
+                        window.dispatchEvent(new CustomEvent('xtj:visual-viewport-change'));
                         var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
                         // ★ 2026-09-22 视口差基线（微信 web-view / 微信内置浏览器 / 开发者工具模拟器通吃）：
                         //   这些环境里 window.innerHeight 与 visualViewport 存在**环境固有的恒定差值**

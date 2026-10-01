@@ -14457,7 +14457,9 @@ setInterval(function() {
   });
 }, 300000).unref();
 
-app.post('/api/photo/view', optionalAuth, rateLimit(60000, 60), async (req, res) => {
+require('./photo-social').installPhotoSocial(app, { supabase, authenticateUser, optionalAuth, rateLimit, userBanError });
+
+app.post('/api/photo/view', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   try {
     var photoId = normalizePostId(req.body && (req.body.photo_id || req.body.post_id));
     if (!photoId) return res.status(400).json({ error: '照片参数无效', code: 'invalid_photo_id' });
@@ -14476,11 +14478,11 @@ app.post('/api/photo/view', optionalAuth, rateLimit(60000, 60), async (req, res)
     if (!photo || photo.is_deleted === true || (photo.visibility && photo.visibility !== 'public')) {
       return res.status(404).json({ error: '照片不存在', code: 'photo_not_found' });
     }
-    var incrementResult = await supabase.rpc('increment_post_views', { p_post_id: photoId });
+    var incrementResult = await supabase.rpc('record_photo_view', { p_photo_id: photoId, p_viewer_name: req.userName });
     if (incrementResult.error) return res.status(500).json({ error: sanitizeError(incrementResult.error), code: 'photo_view_increment_failed' });
-    var countResult = await supabase.from('posts').select('views').eq('id', photoId).maybeSingle();
-    if (countResult.error) return res.status(500).json({ error: sanitizeError(countResult.error), code: 'photo_view_count_failed' });
-    return res.json({ ok: true, recorded: Number(incrementResult.data) > 0, views: Number(countResult.data && countResult.data.views) || 0 });
+    var latestViews=Number(incrementResult.data)||0;
+    if (!latestViews) return res.status(404).json({ error: '照片不存在或已删除', code: 'photo_not_found' });
+    return res.json({ ok: true, recorded: true, views: latestViews });
   } catch (e) {
     console.error('[API] photo view:', e && e.message ? e.message : e);
     return res.status(500).json({ error: '照片浏览量更新失败', code: 'photo_view_failed' });
@@ -15230,7 +15232,7 @@ app.get('/api/dm/list', authenticateUser, rateLimit(60000, 120), async (req, res
         .eq('media_type', DM_MARKER).eq('media_url', req.userName).order('created_at', { ascending: false }).limit(listLimit)
     ]);
     if (sentResult.error || receivedResult.error) {
-      return res.status(400).json({ error: sanitizeError(sentResult.error || receivedResult.error), code: 'dm_list_failed' });
+      return res.status(503).json({ error: '会话列表暂不可用', code: 'dm_list_failed', retryable: true });
     }
     var byId = new Map();
     (sentResult.data || []).concat(receivedResult.data || []).forEach(function(row) {

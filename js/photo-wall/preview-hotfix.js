@@ -171,6 +171,8 @@
 
   function isControl(target) {
     return !!(target && target.closest && target.closest(
+      '.pp-story,' +
+      '.pp-comments-panel,' +
       '.photo-preview-close,' +
       '.pp-nav-arrow,' +
       '.pp-zoom-btn,' +
@@ -683,9 +685,8 @@
       'ppZoomOutBtn',
       'ppZoomInBtn',
       'ppInfoBtn',
-      'ppRotateBtn',
       'ppShareBtn',
-      'ppDeleteBtn'
+      'ppRotateBtn'
     ].forEach(function (id) {
       var button = root.querySelector('#' + id);
       if (button && button.parentNode !== toolbar) {
@@ -723,24 +724,24 @@
       if (node) node.style.setProperty(prop, value, 'important');
     }
     setImportant(toolbar, 'position', 'absolute');
-    setImportant(toolbar, 'left', '50%');
-    setImportant(toolbar, 'right', 'auto');
+    setImportant(toolbar, 'left', 'auto');
+    setImportant(toolbar, 'right', 'max(14px, env(safe-area-inset-right, 0px))');
     setImportant(toolbar, 'top', 'auto');
     setImportant(toolbar, 'margin', '0');
     setImportant(toolbar, 'bottom', 'calc(18px + env(safe-area-inset-bottom, 0px))');
-    setImportant(toolbar, 'transform', 'translateX(-50%)');
+    setImportant(toolbar, 'transform', 'none');
     setImportant(toolbar, 'z-index', '24');
     setImportant(toolbar, 'display', 'flex');
     setImportant(toolbar, 'align-items', 'center');
     setImportant(toolbar, 'justify-content', 'center');
-    setImportant(toolbar, 'gap', '10px');
-    setImportant(toolbar, 'padding', '8px 10px');
-    setImportant(toolbar, 'border-radius', '999px');
-    setImportant(toolbar, 'background', 'rgba(12,18,28,.34)');
-    setImportant(toolbar, 'border', '1px solid rgba(255,255,255,.12)');
-    setImportant(toolbar, 'box-shadow', '0 10px 34px rgba(0,0,0,.18)');
-    setImportant(toolbar, 'backdrop-filter', 'blur(16px) saturate(130%)');
-    setImportant(toolbar, '-webkit-backdrop-filter', 'blur(16px) saturate(130%)');
+    setImportant(toolbar, 'gap', '2px');
+    setImportant(toolbar, 'padding', '0');
+    setImportant(toolbar, 'border-radius', '0');
+    setImportant(toolbar, 'background', 'transparent');
+    setImportant(toolbar, 'border', '0');
+    setImportant(toolbar, 'box-shadow', 'none');
+    setImportant(toolbar, 'backdrop-filter', 'none');
+    setImportant(toolbar, '-webkit-backdrop-filter', 'none');
     var closeBtn = root.querySelector('.photo-preview-close');
     if (closeBtn) {
       setImportant(closeBtn, 'position', 'absolute');

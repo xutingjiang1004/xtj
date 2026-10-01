@@ -110,13 +110,11 @@ test('P5-03: pagination binds generation, page, requestId, AbortController', fun
     'must bind requestId and AbortController');
 });
 
-test('P5-04: view count failure deletes throttle key', function () {
+test('P5-04: failed unique viewer writes remain retryable and never enter the confirmed cache', function () {
   var s = read('js/photo-wall/data.js');
-  assert.ok(/syncPhotoViewCount/.test(s),
-    'syncPhotoViewCount must exist');
-  assert.ok(/节流|throttle|throttleKey/.test(s) ||
-            /safeStorage.*remove|delete.*throttle/.test(s),
-    'failure must delete throttle key for immediate retry');
+  var start=s.indexOf('async function syncPhotoViewCount'),end=s.indexOf('function handleExternalSync',start),body=s.slice(start,end);
+  assert.ok(body.indexOf('!response.ok')<body.indexOf('countedPhotoViewers.add(key)'));
+  assert.ok(!/xtj_pwv_|5 \* 60 \* 1000/.test(body));
 });
 
 // ──────────────────────────────────────────────

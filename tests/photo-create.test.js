@@ -122,7 +122,7 @@ test('photo create accepts bounded image metadata and owns actor key', function(
   const result = validatePhotoCreatePayload(valid({ mime_type: 'image/avif' }), ORIGIN);
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.storagePath, 'photos/test.jpg');
-  assert.deepStrictEqual(JSON.parse(result.content), { type: 'photo_wall', mediaKind: 'image', thumb: '', fileSize: 12, originalSize: 12, mimeType: 'image/avif', width: null, height: null, duration: null, storagePath: 'photos/test.jpg' });
+  assert.deepStrictEqual(JSON.parse(result.content), { type: 'photo_wall', caption: '', mediaKind: 'image', thumb: '', fileSize: 12, originalSize: 12, mimeType: 'image/avif', width: null, height: null, duration: null, storagePath: 'photos/test.jpg' });
 });
 
 test('upload_id must match pattern when provided', function() {

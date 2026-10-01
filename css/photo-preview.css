@@ -424,3 +424,103 @@ html[data-theme="dark"].xtj-photo-preview-ready #photoPreviewOverlay .pp-info-mo
     box-shadow: 0 0 0 7px rgba(255, 255, 255, 0.16);
   }
 }
+
+/* Photo stories: quiet icons, transparent close control and stable slide sizes. */
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow {
+  width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;
+  margin-top:-22px!important;padding:10px!important;border:0!important;border-radius:0!important;
+  background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  color:#fff!important;filter:drop-shadow(0 1px 3px rgba(0,0,0,.7));
+  transition:opacity 160ms ease!important;
+}
+#photoPreviewOverlay .pp-nav-arrow svg { width:24px;height:24px; }
+#photoPreviewOverlay .pp-nav-arrow:hover { background:transparent!important;transform:none!important;opacity:.8; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-close {
+  width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;padding:10px!important;
+  border-radius:16px!important;color:#fff!important;border:1px solid rgba(255,255,255,.28)!important;
+  background:linear-gradient(145deg,rgba(255,255,255,.2),rgba(255,255,255,.025) 52%,rgba(255,255,255,.09))!important;
+  backdrop-filter:blur(3px) saturate(115%)!important;-webkit-backdrop-filter:blur(3px) saturate(115%)!important;
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.45),inset 0 -1px 1px rgba(255,255,255,.08),0 3px 12px rgba(0,0,0,.12)!important;
+}
+#photoPreviewOverlay .photo-preview-close svg { width:22px;height:22px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar button,
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppDeleteBtn {
+  width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;margin:0!important;padding:10px!important;
+  border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;color:#fff!important;transform:none!important;
+  filter:drop-shadow(0 1px 3px rgba(0,0,0,.65));
+}
+#photoPreviewOverlay .pp-preview-toolbar button { position:relative!important;inset:auto!important; }
+#photoPreviewOverlay #ppDeleteBtn { position:absolute!important;left:max(12px,env(safe-area-inset-left,0px))!important;top:max(16px,env(safe-area-inset-top,0px))!important;right:auto!important;bottom:auto!important;z-index:40!important; }
+#photoPreviewOverlay button[hidden],#photoPreviewOverlay section[hidden] { display:none!important; }
+#photoPreviewOverlay .pp-slide-img {
+  max-width:100%!important;max-height:100%!important;width:auto;height:auto;object-fit:contain;
+  transition:none!important;image-orientation:from-image;
+}
+#photoPreviewOverlay .pp-slide-track.snapping .pp-slide-img { transform:translateZ(0)!important;filter:none!important;transition:none!important; }
+html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage { transform:translate3d(var(--pp-img-x),var(--pp-img-y),0) scale(var(--pp-scale)) rotate(var(--pp-rotate))!important; }
+#photoPreviewOverlay::after { content:"";position:absolute;inset:40% 0 0;pointer-events:none;background:linear-gradient(transparent 25%,rgba(0,0,0,.12) 55%,rgba(0,0,0,.66));z-index:20; }
+#photoPreviewOverlay .photo-preview-info.pp-story {
+  position:absolute!important;left:max(16px,env(safe-area-inset-left,0px))!important;right:max(16px,env(safe-area-inset-right,0px))!important;
+  bottom:calc(18px + env(safe-area-inset-bottom,0px))!important;top:auto!important;
+  width:auto!important;max-width:none!important;transform:none!important;display:flex!important;flex-direction:column;align-items:flex-start!important;
+  gap:8px!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;color:#fff;text-align:left!important;z-index:23;
+  pointer-events:none;
+}
+#photoPreviewOverlay .pp-story-author { display:flex;gap:10px;align-items:center;max-width:100%; }
+#photoPreviewOverlay .pp-story-avatar { width:36px;height:36px;flex:0 0 36px;border-radius:50%;overflow:hidden;background:rgba(255,255,255,.16);display:grid;place-items:center;font-size:14px;color:#fff;border:1px solid rgba(255,255,255,.3); }
+#photoPreviewOverlay .pp-story-avatar img { width:100%;height:100%;object-fit:cover; }
+#photoPreviewOverlay .pp-story-identity { display:flex;flex-direction:column;gap:2px;min-width:0;text-shadow:0 1px 3px rgba(0,0,0,.6); }
+#photoPreviewOverlay .pp-story .pp-user { color:#fff!important;font-size:14px;font-weight:600; }
+#photoPreviewOverlay .pp-story .pp-user::before { display:none; }
+#photoPreviewOverlay .pp-story .pp-time { color:rgba(255,255,255,.7)!important;font-size:11px; }
+#photoPreviewOverlay .pp-story-caption { margin:0;max-width:min(680px,100%);font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,.6); }
+#photoPreviewOverlay .pp-story-caption.expanded { display:block;max-height:min(30dvh,240px);overflow:auto;pointer-events:auto; }
+#photoPreviewOverlay .pp-caption-more { font-size:12px!important;min-height:30px;padding:0!important;background:none!important;color:rgba(255,255,255,.8)!important;border:0!important;box-shadow:none!important; }
+#photoPreviewOverlay .pp-story-stats { display:flex;align-items:center;gap:8px;min-height:44px;max-width:calc(100% - 136px);flex-wrap:wrap; }
+#photoPreviewOverlay .pp-story-stats button,#photoPreviewOverlay .pp-story-stats .pp-views {
+  display:inline-flex;align-items:center;justify-content:flex-start;gap:5px;height:44px;min-width:34px!important;padding:0!important;
+  color:rgba(255,255,255,.88)!important;background:none!important;border:0!important;border-radius:0!important;box-shadow:none!important;font-size:12px!important;
+}
+#photoPreviewOverlay .pp-story-stats svg { width:20px;height:20px;flex:0 0 20px; }
+#photoPreviewOverlay #ppLikeBtn[aria-pressed="true"] { color:#ff7592!important; }
+#photoPreviewOverlay #ppLikeBtn[aria-pressed="true"] svg { fill:currentColor; }
+#photoPreviewOverlay .pp-story button { pointer-events:auto; }
+#photoPreviewOverlay .pp-social-status { font-size:11px;color:rgba(255,255,255,.65); }
+#photoPreviewOverlay .pp-social-status:empty { display:none; }
+#photoPreviewOverlay .pp-comments-panel {
+  position:absolute;inset:auto max(12px,env(safe-area-inset-right,0px)) 12px max(12px,env(safe-area-inset-left,0px));
+  margin:auto;width:min(520px,calc(100% - 24px));max-height:min(68dvh,600px);display:flex;flex-direction:column;
+  border-radius:20px;background:#f8faf9;color:#23372e;box-shadow:0 12px 48px rgba(0,0,0,.3);padding:16px;z-index:60;
+  user-select:text;touch-action:pan-y;
+}
+html[data-theme="dark"] #photoPreviewOverlay .pp-comments-panel { background:#16231d;color:#e6f1eb; }
+#photoPreviewOverlay .pp-comments-head { display:flex;align-items:center;justify-content:space-between;flex-shrink:0; }
+#photoPreviewOverlay .pp-comments-head button { width:44px;height:44px;padding:0;border:0;background:none;box-shadow:none;font-size:26px;color:inherit; }
+#photoPreviewOverlay .pp-comments-list { overflow:auto;min-height:60px;flex:1;padding:8px 0 16px;overscroll-behavior:contain;touch-action:pan-y; }
+#photoPreviewOverlay .pp-comment-row { padding:12px 0;border-bottom:1px solid rgba(128,155,143,.15);font-size:13px; }
+#photoPreviewOverlay .pp-comment-row p { white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0;line-height:1.6; }
+#photoPreviewOverlay .pp-comment-row time { font-size:11px;opacity:.55; }
+#photoPreviewOverlay .pp-comment-row button { font-size:11px;padding:8px;background:none;border:0;box-shadow:none;color:inherit; }
+#photoPreviewOverlay #ppCommentForm { display:flex;gap:10px;align-items:center;flex-shrink:0; }
+#photoPreviewOverlay #ppCommentInput { flex:1;min-width:0;max-height:100px;margin:0;padding:10px 12px;border:1px solid rgba(128,155,143,.25);border-radius:12px;resize:none;background:rgba(128,155,143,.08);color:inherit;font-size:14px; }
+#photoPreviewOverlay #ppCommentSend { flex-shrink:0;min-height:44px;padding:8px 14px;background:#219b70;color:#fff;border:0;border-radius:12px;box-shadow:none; }
+#photoPreviewOverlay #ppCommentError { font-size:12px;color:#c46464;line-height:1.5; }
+@media (prefers-reduced-transparency:reduce) { #photoPreviewOverlay .photo-preview-close { background:rgba(25,35,30,.85)!important;backdrop-filter:none!important; } }
+html.xtj-ios-viewport #photoPreviewOverlay { top:var(--xtj-visual-top,0px);height:var(--xtj-app-height,100dvh);bottom:auto; }
+
+/* These controls are styled from their first frame, before hotfix hydration. */
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppInfoBtn,
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppShareBtn,
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppRotateBtn {
+  background:transparent!important;border:0!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;transform:none!important;animation:none!important;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar {
+  position:absolute!important;left:auto!important;right:max(14px,env(safe-area-inset-right,0px))!important;
+  bottom:calc(18px + env(safe-area-inset-bottom,0px))!important;top:auto!important;transform:none!important;
+  background:transparent!important;border:0!important;border-radius:0!important;box-shadow:none!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;padding:0!important;gap:2px!important;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow { animation:none!important;transform:none!important;opacity:1!important; }
