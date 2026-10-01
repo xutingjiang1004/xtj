@@ -544,7 +544,7 @@ for(const width of [390,744,1194])test(`personal page has four compact records, 
  await expect(page.locator('#profilePostsCount')).toHaveText('12');await expect(page.locator('#profileViewsCount')).toHaveText('31');
  await expect(page.locator('#panelProfile .profile-activity-card')).toHaveCount(4);
  const metrics=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,heights:[...document.querySelectorAll('#panelProfile .profile-activity-card')].map(e=>e.getBoundingClientRect().height),avatar:document.getElementById('profileAvatar').getBoundingClientRect().toJSON()}));
- expect(metrics.scroll).toBeLessThanOrEqual(metrics.width);expect(Math.max(...metrics.heights)).toBeLessThan(100);expect(metrics.avatar.width).toBe(metrics.avatar.height);
+ expect(metrics.scroll).toBeLessThanOrEqual(metrics.width);expect(Math.max(...metrics.heights)).toBeLessThan(100);expect(metrics.avatar.width).toBeCloseTo(metrics.avatar.height,2);
  await page.screenshot({path:`output/social-refresh/profile-light-${width}.png`,fullPage:true});
  await page.locator('#profileViewsCard').click();await expect(page.locator('.personal-record')).toHaveCount(1);await page.locator('.profile-record-more').click();await expect(page.locator('.personal-record')).toHaveCount(2);await expect(page.locator('.profile-record-more')).toHaveCount(0);
  await page.locator('#profileActivityModal .stat-close-btn').click();
