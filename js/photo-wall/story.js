@@ -147,7 +147,7 @@
   function renderComments(){
     var list=el('ppCommentsList');list.replaceChildren();
     if(!social){list.textContent='评论暂未加载，请关闭后重试';return;}
-    if(!social.comments.length){list.textContent='还没有评论，来说说你的想法吧';}
+
     social.comments.forEach(function(row){
       var item=document.createElement('article');item.className='pp-comment-row';var author=document.createElement('strong');author.textContent=row.user_name||'用户';var text=document.createElement('p');text.textContent=row.content||'';var time=document.createElement('time');time.textContent=new Date(row.created_at).toLocaleString('zh-CN');item.append(author,text,time);
       if(window.currentUser&&(row.user_name===window.currentUser||(window.currentUser==='xxz'&&window.isAdmin&&window.isAdmin()))){var remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.setAttribute('aria-label','删除自己的评论');remove.onclick=function(){deleteComment(row,remove);};item.appendChild(remove);}

@@ -24,7 +24,8 @@ test('user detail exposes collected device and network metadata safely', () => {
 
 test('consented location and contacts remain in user detail while clipboard has its own tab', () => {
   assert.match(server, /precise_location_history[\s\S]{0,240}slice\(-100\)/);
-  assert.match(admin, /locationHistory\.slice\(0, 50\)/);
+  assert.match(admin, /bindAdminGpsHistory/);
+  assert.match(admin, /\/admin\/user-location-history\?user_name=/);
 });
 
 // ★ 2026-09-22 合规整改：通讯录与剪贴板采集按 DATA_COLLECTION_COMPLIANCE.js
