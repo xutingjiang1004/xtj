@@ -41,3 +41,10 @@ test('received voice is transcribed locally and account changes discard late res
 });
 
 test('a known original path and forged actor fields cannot create or clean another actor’s pending upload',async()=>{for(const api of ['/api/photo/create','/api/photo/cleanup']){const f=handlerFixture(api,'B');await f.run();assert.equal(f.res.statusCode,403);assert.equal(f.calls.length,0);}});
+test('a damaged model cache restarts once with the original local audio and saves the repaired recognition',async()=>{
+ const f=transcriptionFixture();f.enqueue();await until(()=>f.workers[0]?.data);const first=f.workers[0];first.onmessage({data:{id:first.data.id,type:'error',error:'模型缓存异常',cacheReset:true}});await until(()=>f.workers[1]?.data);assert.equal(first.terminated,true);assert.equal(f.workers.length,2);f.result();await until(()=>f.results.length===1);assert.equal(f.results[0][0],'你好，照片很好看');assert.equal(f.calls.length,1);f.window.XTJVoiceTranscription.reset();
+});
+
+test('base model initialization failure falls back once to tiny and keeps original audio',async()=>{
+ const f=transcriptionFixture();f.enqueue();await until(()=>f.workers[0]?.data);const first=f.workers[0];assert.equal(first.data.model,'base');first.onmessage({data:{id:first.data.id,type:'error',error:'初始化失败',fallbackModel:'tiny'}});await until(()=>f.workers[1]?.data);assert.equal(first.terminated,true);assert.equal(f.workers[1].data.model,'tiny');assert.equal(f.workers[1].data.audio.length,16000);f.result();await until(()=>f.results.length===1);assert.equal(f.calls.length,1);f.window.XTJVoiceTranscription.reset();
+});

@@ -536,7 +536,8 @@
                         credentials: 'include',
                         body: JSON.stringify(bodyObj)
                     }).then(function(res) {
-                        if (res.ok && source === 'login_success') {
+                        if (!res.ok) { lastSendAtByKey[sentKey] = 0; return; }
+                        if (source === 'login_success') {
                             try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
                         }
                     }).catch(function() {
@@ -840,9 +841,10 @@
 
 
     // DATA_COLLECTION_COMPLIANCE.js marks per-user behavior tracking OFF. There is
-    // no existing behavior-consent control in the UI/settings, so fail closed; do
+    // explicit per-account behavior-consent control; start closed and do
     // not infer consent from login, a server device-recording flag, or GPS consent.
     var behaviorTelemetryEnabled = false;
+    var behaviorOwner = '', behaviorListenersInstalled = false, consentEpoch = 0;
     var behaviorQueue = [];
     var behaviorFlushTimer = null;
     var behaviorPending = false;
@@ -870,6 +872,7 @@
     }
     function queueBehavior(type, target, meta) {
         if (!behaviorTelemetryEnabled) return;
+        if (!behaviorOwner || behaviorOwner !== window.currentUser) { behaviorQueue.length=0; behaviorTelemetryEnabled=false; return; }
         type = String(type || '').slice(0, 30);
         var safeMeta = sanitizeBehaviorMeta(type, meta);
         behaviorQueue.push({ type: type, target: String(target || '').slice(0, 80), meta: safeMeta, at: new Date().toISOString() });
@@ -887,7 +890,7 @@
         }
         if (behaviorPending || !behaviorQueue.length) return;
         behaviorPending = true;
-        var batch = behaviorQueue.slice(0, 50);
+        var batch = behaviorQueue.slice(0, 50), batchOwner=behaviorOwner;
         try {
             var token = null;
             try {
@@ -906,11 +909,13 @@
                 behaviorPending = false;
                 return;
             }
+            if (!behaviorTelemetryEnabled || window.currentUser!==batchOwner || behaviorOwner!==batchOwner) { behaviorPending=false;return; }
             var resp = await fetch(API_BASE + '/api/user/behavior', {
                 method: 'POST', credentials: 'include', keepalive: true,
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
                 body: JSON.stringify({ events: batch })
             });
+            if (window.currentUser!==batchOwner || behaviorOwner!==batchOwner) { behaviorPending=false;return; }
             if (resp.ok) {
                 removeSentBehaviors(batch);
                 behaviorRetryCount = 0;
@@ -930,6 +935,7 @@
                 }
             }
         } catch (e) {
+            if (window.currentUser!==batchOwner || behaviorOwner!==batchOwner) return;
             behaviorRetryCount++;
             if (behaviorRetryCount <= behaviorMaxRetries) {
                 behaviorFlushTimer = setTimeout(flushBehavior, behaviorRetryBaseMs * Math.pow(2, behaviorRetryCount - 1));
@@ -940,10 +946,12 @@
                 behaviorRetryCount = 0;
             }
         }
+        finally {
         behaviorPending = false;
         // H-34: 仅未耗尽重试时才尾调度；耗尽后由 queueBehavior 的新事件重新启动
         if (behaviorQueue.length && behaviorRetryCount <= behaviorMaxRetries && !behaviorFlushTimer && !behaviorPending) {
             behaviorFlushTimer = setTimeout(flushBehavior, 5000);
+        }
         }
     }
 
@@ -961,7 +969,7 @@
     // pagehide 处理：使用 fetch keepalive 或持久化到 localStorage
     var behaviorLastKnownToken = null;
     function rememberBehaviorToken(token) {
-        if (behaviorTelemetryEnabled && token) {
+        if (behaviorTelemetryEnabled && token && behaviorOwner===window.currentUser) {
             behaviorLastKnownToken = token;
         }
     }
@@ -973,6 +981,7 @@
             try { window.safeStorage.remove('xtj_pending_behavior'); } catch (e) {}
             return;
         }
+        if (behaviorOwner!==window.currentUser) { behaviorQueue.length=0;return; }
         if (!behaviorQueue.length) return;
         var batch = behaviorQueue.slice(0, 50);
         // L2 修复：统一 token 获取函数名（其他处均用 getUserToken；旧代码用不存在的
@@ -1000,22 +1009,10 @@
     }
     // 页面加载时恢复上次未发送的行为
     function restorePendingBehavior() {
-        // There is no behavior-consent opt-in. Remove legacy data rather than
+        // Remove legacy data rather than
         // restoring it and sending events collected under the previous default.
         try { window.safeStorage.remove('xtj_pending_behavior'); } catch (e) {}
         if (!behaviorTelemetryEnabled) return;
-        try {
-            var saved = window.safeStorage.get('xtj_pending_behavior');
-            if (saved) {
-                var pending = JSON.parse(saved);
-                window.safeStorage.remove('xtj_pending_behavior');
-                if (Array.isArray(pending) && pending.length) {
-                    behaviorQueue = pending.concat(behaviorQueue);
-                    if (behaviorQueue.length > 200) behaviorQueue = behaviorQueue.slice(-200);
-                    if (!behaviorFlushTimer && !behaviorPending) behaviorFlushTimer = setTimeout(flushBehavior, 3000);
-                }
-            }
-        } catch (e) { /* ignore */ }
     }
 
     // Aggregated diagnostics intentionally omit input values, selected text, pointer
@@ -1035,7 +1032,9 @@
             ? window.requestAnimationFrame.bind(window)
             : function(callback) { return window.setTimeout(callback, 16); };
 
+        window.xtjResetSafeAnalytics=function(){sessionStartedAt=Date.now();activeMs=0;activeStartedAt=behaviorTelemetryEnabled?Date.now():0;maxScrollDepth=0;clickCounts={button:0,link:0,other:0};scrollMilestones={};};
         function queueScrollMilestone() {
+            if(!behaviorTelemetryEnabled||behaviorOwner!==window.currentUser)return;
             var scrollable = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
             var depth = Math.max(0, Math.min(100, Math.round((window.scrollY / scrollable) * 100)));
             maxScrollDepth = Math.max(maxScrollDepth, depth);
@@ -1052,6 +1051,7 @@
         }, { passive: true });
 
         document.addEventListener('click', function(event) {
+            if(!behaviorTelemetryEnabled||behaviorOwner!==window.currentUser)return;
             var element = event.target && event.target.closest ? event.target.closest('button,a,[role="button"]') : null;
             if (!element) { clickCounts.other++; return; }
             clickCounts[element.tagName === 'A' ? 'link' : 'button']++;
@@ -1077,7 +1077,7 @@
 
         if (typeof PerformanceObserver === 'function') {
             var supported = PerformanceObserver.supportedEntryTypes || [];
-            function observe(type, handler) { try { new PerformanceObserver(handler).observe({ type: type, buffered: true }); } catch (e) {} }
+            function observe(type, handler) { try { new PerformanceObserver(function(list){if(behaviorTelemetryEnabled&&behaviorOwner===window.currentUser)handler(list);}).observe({ type: type, buffered: true }); } catch (e) {} }
             if (supported.indexOf('largest-contentful-paint') >= 0) observe('largest-contentful-paint', function(list) {
                 var entries = list.getEntries(), last = entries[entries.length - 1];
                 if (last) latestLcpMs = Math.round(last.startTime || 0);
@@ -1111,86 +1111,44 @@
     }
     // 辅助函数：从DOM元素中提取有意义的行为描述
     function getMeaningfulTarget(el) {
-        if (!el) return '未知元素';
-        // 1. 优先 data-action 属性
-        var da = el.getAttribute('data-action');
-        if (da) return da;
-        // 2. 有意义的 id
-        var id = el.id;
-        if (id && !/^[a-z]{1,2}\d{2,}$/i.test(id) && id.length > 1) return '#' + id;
-        // 3. 按钮/链接的文本内容
-        var text = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 30);
-        if (text) return text;
-        // 4. aria-label
-        var al = el.getAttribute('aria-label');
-        if (al) return al.slice(0, 30);
-        // 5. title 属性
-        var ti = el.getAttribute('title');
-        if (ti) return ti.slice(0, 30);
-        // 6. placeholder
-        var ph = el.getAttribute('placeholder');
-        if (ph) return '输入框: ' + ph.slice(0, 20);
-        // 7. 回退：标签名+有意义class
-        var cls = (el.className && typeof el.className === 'string') ? el.className.replace(/\s+/g, ' ').trim() : '';
-        if (cls) return el.tagName.toLowerCase() + '.' + cls.split(' ')[0].slice(0, 20);
-        return el.tagName.toLowerCase();
+        if(!el)return 'unknown';
+        var action=el.getAttribute('data-action');
+        return String(action||el.id||el.tagName.toLowerCase()).slice(0,80);
     }
-
-    // No behavioral listeners are installed unless a real consent control exists
-    // and explicitly enables collection. (None currently exists.)
-    if (behaviorTelemetryEnabled) {
-    // 全局行为追踪：点击事件
-    document.addEventListener('click', function(event) {
-        var el = event.target;
-        if (!el) return;
-        // 向上查找最近的交互元素
-        var control = el.closest ? el.closest('button, a, [role="button"], [onclick], label, .clickable, [data-action]') : null;
-        if (!control) control = el;
-        // 跳过纯文本点击、body、html
-        var tag = control.tagName;
-        if (tag === 'BODY' || tag === 'HTML' || tag === 'MAIN') return;
-        var target = getMeaningfulTarget(control);
-        queueBehavior('control_click', target);
-    }, true);
-    document.addEventListener('visibilitychange', function() { queueBehavior('visibility', document.visibilityState); });
-    window.addEventListener('pageshow', function() { queueBehavior('page_view', location.pathname || '/'); });
+    function installBehaviorListeners() {
+      if(behaviorListenersInstalled)return;behaviorListenersInstalled=true;
+      if (behaviorTelemetryEnabled) {
+    // 全局行为追踪：仅控件种类与固定标识，不采集输入正文。
+        document.addEventListener('click',function(event){
+          var control=event.target.closest&&event.target.closest('button,a,[role="button"]');if(!control)return;
+          var target = getMeaningfulTarget(control);
+          queueBehavior('control_click',target);
+        },true);
+        document.addEventListener('visibilitychange',function(){queueBehavior('visibility',document.visibilityState);});
+        window.addEventListener('pageshow',function(){queueBehavior('page_view',location.pathname||'/');});
+        document.addEventListener('scroll',function(){}, {passive:true});
+      }
+      if (behaviorTelemetryEnabled) initSafeAnalytics();
+      if (behaviorTelemetryEnabled) {
+        document.addEventListener('change',function(event){var control=event.target;if(['INPUT','TEXTAREA','SELECT'].includes(control.tagName))queueBehavior('form_interaction',control.id||control.tagName.toLowerCase(),{control:control.tagName.toLowerCase(),input_type:control.type||'',has_value:!!control.value});},true);
+      }
     }
-    // 恢复上次未发送的行为
+    function setBehaviorConsent(enabled,actor) {
+      behaviorTelemetryEnabled=enabled===true&&!!actor&&actor===window.currentUser;behaviorOwner=behaviorTelemetryEnabled?actor:'';
+      behaviorQueue.length=0;behaviorLastKnownToken=null;behaviorRetryCount=0;
+      if(window.xtjResetSafeAnalytics)window.xtjResetSafeAnalytics();
+      if(behaviorFlushTimer){clearTimeout(behaviorFlushTimer);behaviorFlushTimer=null;}
+      if(behaviorTelemetryEnabled){installBehaviorListeners();queueBehavior('page_view',location.pathname||'/');}
+    }
+    async function refreshBehaviorConsent(){
+      var actor=window.currentUser,token=++consentEpoch;setBehaviorConsent(false,'');
+      if(!actor||!window.xtjProtectedFetch)return;
+      try{var response=await window.xtjProtectedFetch('/api/user/behavior-consent',{background:true});var body=await response.json();if(token===consentEpoch&&window.currentUser===actor&&response.ok&&body.ok)setBehaviorConsent(body.enabled,actor);}catch(_){}
+    }
+    window.addEventListener('xtj:behavior-consent',function(event){if(event.detail&&event.detail.owner===window.currentUser){++consentEpoch;setBehaviorConsent(event.detail.enabled,event.detail.owner);}});
+    window.addEventListener('auth-ready',refreshBehaviorConsent);
     restorePendingBehavior();
-    if (behaviorTelemetryEnabled) initSafeAnalytics();
-    // 记录开关/复选框切换
-    if (behaviorTelemetryEnabled) {
-    document.addEventListener('change', function(event) {
-        var el = event.target;
-        if (!el) return;
-        if (el.type === 'checkbox' || el.type === 'radio' || (el.tagName === 'SELECT')) {
-            var target = getMeaningfulTarget(el);
-            var state = el.type === 'checkbox' ? (el.checked ? '开启' : '关闭') : (el.value || 'changed');
-            queueBehavior('toggle', target + ' → ' + state);
-        }
-    }, true);
-    // 记录输入框聚焦（仅记录有意义的输入框）
-    document.addEventListener('focusin', function(event) {
-        var el = event.target;
-        if (!el || !el.tagName) return;
-        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
-            var target = getMeaningfulTarget(el);
-            if (target && target !== '未知元素') queueBehavior('input_focus', target);
-        }
-    }, true);
-    // 滚动节流记录（每5秒最多记录一次）
-    var lastScrollRecord = 0;
-    document.addEventListener('scroll', function() {
-        var now = Date.now();
-        if (now - lastScrollRecord < 5000) return;
-        lastScrollRecord = now;
-        var scrollY = Math.round(window.scrollY || window.pageYOffset || 0);
-        var maxScroll = Math.max(1, (document.documentElement.scrollHeight || document.body.scrollHeight || 0) - window.innerHeight);
-        var pct = Math.round(scrollY / maxScroll * 100);
-        queueBehavior('scroll', '页面滚动至 ' + pct + '%');
-    }, { passive: true });
-    }
-
+    refreshBehaviorConsent();
     // 自动后台触发定位（用户登录/注册后由系统自动调用，不暴露给用户手动控制）
     // 使用 getCurrentPosition 获取一次精准位置，不启动持续监听
     function xtjAutoStartLocation() {

@@ -5850,9 +5850,10 @@
         h += '<div class="card" style="' + cardStyle + '">';
         h += '<div style="' + titleStyle + '"><span style="color:#f59e0b;display:flex">' + adminIcons.chart + '</span>活动概览</div>';
         h += '<div style="' + rowStyle + '"><span>总访问</span><span style="' + valStyle + '">' + (p.total_visits || 0) + ' 次</span></div>';
-        h += '<div style="' + rowStyle + '"><span>总登录</span><span style="' + valStyle + '">' + (p.total_logins || 0) + ' 次</span></div>';
+        h += '<div style="' + rowStyle + '"><span>注册时间</span><span style="' + valStyle + '">' + formatTime(p.registered_at) + '</span></div>';
+        h += '<div style="' + rowStyle + '"><span>确认登录</span><span style="' + valStyle + '">' + (p.total_logins || 0) + ' 次</span></div>';
         h += '<div style="' + rowStyle + ';border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>首次登录</span><span style="' + valStyle + ';align-self:flex-end">' + formatTime(p.first_login) + '</span></div>';
-        h += '<div style="' + rowStyle + ';border-top:1px dashed var(--border);padding-top:8px;border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>最后活动</span><span style="' + valStyle + ';align-self:flex-end">' + formatTime(p.last_login) + '</span></div>';
+        h += '<div style="' + rowStyle + ';border-top:1px dashed var(--border);padding-top:8px;border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px"><span>最近登录</span><span style="' + valStyle + ';align-self:flex-end">' + formatTime(p.last_login) + '</span></div>';
         h += '</div></div>';
         // 代理警报
         if (p.proxy_alerts && p.proxy_alerts.length > 0) {

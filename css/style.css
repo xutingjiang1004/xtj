@@ -2990,13 +2990,13 @@
         .pp-confirm-dialog {
             width: 88%;
             max-width: 340px;
-            background: rgba(255, 255, 255, 0.4);
-            backdrop-filter: blur(28px) saturate(200%);
-            -webkit-backdrop-filter: blur(28px) saturate(200%);
+            background: rgba(255, 255, 255, 0.5);
+            backdrop-filter: blur(8px) saturate(155%);
+            -webkit-backdrop-filter: blur(8px) saturate(155%);
             border: 1px solid rgba(255, 255, 255, 0.55);
             border-radius: 24px;
             padding: 28px 24px 20px;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.65), inset 0 -1px 0 rgba(255, 255, 255, 0.12);
             transform: scale(0.9) translateY(20px);
             opacity: 0;
             transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.3s ease-out;
@@ -3058,7 +3058,7 @@
             box-shadow: 0 6px 20px rgba(255, 59, 96, 0.45);
         }
         [data-theme="dark"] .pp-confirm-dialog {
-            background: rgba(35, 35, 50, 0.45);
+            background: rgba(255, 255, 255, 0.5);
             border-color: rgba(255, 255, 255, 0.2);
             box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
         }
@@ -16951,3 +16951,7 @@ html[data-xtj-motion="off"] #pwUploadProgressOverlay .pw-upload-progress-bar-fil
 #pwUploadSheet .pw-photo-caption { display:block;width:100%;min-height:78px;max-height:150px;box-sizing:border-box;margin:8px 0 0;padding:10px;border:1px solid var(--xtj-content-line,rgba(128,155,143,.22));border-radius:10px;background:var(--xtj-content-surface,rgba(128,155,143,.06));color:var(--text-main);font:inherit;font-size:12px;line-height:1.6;resize:vertical; }
 .chat-list-sync-status { padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--text-muted); }
 .chat-list-sync-status button { background:none;border:0;box-shadow:none;padding:6px;color:var(--primary);font-size:11px; }
+
+.pp-confirm-title, .pp-confirm-msg, [data-theme="dark"] .pp-confirm-title, [data-theme="dark"] .pp-confirm-msg { color:#08130e;text-shadow:0 .5px 0 rgba(255,255,255,.35); }
+.pp-confirm-msg { font-weight:500; }
+@media (prefers-reduced-transparency:reduce) { .pp-confirm-dialog, [data-theme="dark"] .pp-confirm-dialog { background:#f8faf9;backdrop-filter:none;-webkit-backdrop-filter:none; } }
