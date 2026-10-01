@@ -21,17 +21,15 @@ test('safe analytics records aggregate events without raw interaction payloads',
   assert.doesNotMatch(segment, /clientX|clientY|clipboard|window\.getSelection|mediaDevices|AudioContext/);
 });
 
-test('behavior API accepts only bounded aggregate metadata', () => {
+test('retired behavior API refuses collection without touching storage', () => {
   const start = server.indexOf("app.post('/api/user/behavior'");
   const end = server.indexOf('// ===================== 登录设备', start);
   assert.notEqual(start, -1, '未找到 /api/user/behavior 路由');
   assert.notEqual(end, -1, '未找到分隔注释，切片将退化为整个文件');
   const segment = server.slice(start, end);
-  assert.match(segment, /scroll_depth/);
-  assert.match(segment, /session_summary/);
-  assert.match(segment, /web_vital/);
-  assert.match(segment, /Math\.min\(120000/);
-  assert.doesNotMatch(segment, /selectedText|stack|clipboard_text|contacts/);
+  assert.match(segment, /status\(410\)/);
+  assert.match(segment, /behavior_diagnostics_retired/);
+  assert.doesNotMatch(segment, /supabase\.from|events\.map/);
 });
 
 test('traffic attribution retains only origin, UTM labels, and landing path', () => {

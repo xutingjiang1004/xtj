@@ -771,7 +771,8 @@
                     persistDockChatDraft(dockChatActiveUser,previousInput ? previousInput.value : '');
                 }
                 var supportDialog=document.getElementById('authorSupportDialog');
-                if (supportDialog && supportDialog.open) supportDialog.close();
+                if(userName!==_supportAuthor)closeAuthorSupport();
+                else if (supportDialog && supportDialog.open) supportDialog.close();
                 var oldMessages=document.getElementById('dockChatMessages');
                 if (dockChatActiveUser && oldMessages && oldMessages.dataset.chatUser===dockChatActiveUser) {
                     _chatDomSnapshots.set(getDockChatCacheKey(dockChatActiveUser),Array.from(oldMessages.children));
@@ -3572,9 +3573,10 @@
             var _chatRecordedFile = null, _chatVoice = null, _chatVoiceSeq = 0;
             var _chatSearchMode='messages';
             var _chatReactionTimer = null, _chatReactionSeq = 0, _chatShowArchived = false;
-            var _supportAuthor='xxz', _supportOwner='', _supportConfigPending=null, _supportDialogSeq=0;
+            var _supportAuthor='xxz', _supportOwner='', _supportConfigPending=null, _supportDialogSeq=0, _supportCache=null, _supportCacheAt=0, _supportImages=new Map();
             function closeAuthorSupport() {
-                _supportDialogSeq++;
+                _supportDialogSeq++;_supportCache=null;_supportOwner='';_supportImages.clear();var preview=document.getElementById('supportCodePreview');if(preview&&preview.open)preview.close();
+                var codes=document.getElementById('authorSupportCodes');if(codes)codes.replaceChildren();
                 var dialog=document.getElementById('authorSupportDialog');
                 if (dialog && dialog.open) dialog.close();
                 var button=document.getElementById('authorSupportButton');
@@ -3584,41 +3586,57 @@
                 var button=document.getElementById('authorSupportButton');
                 if (!button) return;
                 button.hidden=!window.currentUser || peer!==_supportAuthor || window.currentUser===_supportAuthor;
-                if (_supportOwner===window.currentUser || _supportConfigPending || !window.currentUser) return;
+                if(peer!==_supportAuthor||_supportOwner===window.currentUser||_supportConfigPending||!window.currentUser)return;
                 var owner=window.currentUser;
                 _supportConfigPending=chatFeatureApi('author-support').then(function(config){
                     if (window.currentUser!==owner) return;
-                    _supportOwner=owner; _supportAuthor=config.author || 'xxz';
+                    _supportOwner=owner; _supportAuthor=config.author || 'xxz';cacheSupportConfig(config,owner);
                     button.hidden=dockChatActiveUser!==_supportAuthor || owner===_supportAuthor;
                 }).catch(function(){}).finally(function(){_supportConfigPending=null;});
             }
-            async function openAuthorSupport() {
-                if (!window.currentUser || dockChatActiveUser!==_supportAuthor || window.currentUser===_supportAuthor) return;
-                var dialog=document.getElementById('authorSupportDialog'), codes=document.getElementById('authorSupportCodes');
-                var owner=window.currentUser, seq=++_supportDialogSeq;
-                codes.replaceChildren(); var loading=document.createElement('p');loading.textContent='正在加载收款码…';codes.appendChild(loading);
-                document.getElementById('authorSupportDisclaimer').textContent='';
-                if (!dialog.open) dialog.showModal();
-                try {
-                    var config=await chatFeatureApi('author-support');
-                    if (seq!==_supportDialogSeq || owner!==window.currentUser || !dialog.open) return;
-                    codes.replaceChildren();
-                    ['wechat','alipay'].forEach(function(provider){
-                        var card=document.createElement('section'), name=document.createElement('h4');
-                        name.textContent=provider==='wechat' ? '微信' : '支付宝'; card.appendChild(name);
-                        var url=sanitizeUrl(config[provider+'_url'] || '');
-                        if (url && /^https:\/\//i.test(url)) {
-                            var image=document.createElement('img'); image.src=url; image.alt=name.textContent+'收款码'; image.decoding='async'; card.appendChild(image);
-                            image.onerror=function(){image.hidden=true;var message=document.createElement('p');message.textContent='收款码暂时无法显示，请稍后重试';card.appendChild(message);};
-                        } else { var empty=document.createElement('p');empty.className='author-support-empty';empty.textContent='作者暂未设置'+name.textContent+'收款码';card.appendChild(empty); }
-                        codes.appendChild(card);
-                    });
-                    document.getElementById('authorSupportDisclaimer').textContent=config.disclaimer || '';
-                } catch(error) {
-                    if (seq!==_supportDialogSeq || owner!==window.currentUser || !dialog.open) return;
-                    codes.replaceChildren();var message=document.createElement('p');message.textContent=error.message || '收款码加载失败';codes.appendChild(message);
-                    var retry=document.createElement('button');retry.type='button';retry.textContent='重新加载';retry.onclick=openAuthorSupport;codes.appendChild(retry);
+            function cacheSupportConfig(config,owner){
+                if(owner!==window.currentUser)return;_supportCache=config;_supportCacheAt=Date.now();_supportOwner=owner;
+                ['wechat','alipay'].forEach(function(provider){var url=sanitizeUrl(config[provider+'_url']||'');if(!/^https:\/\//i.test(url)||_supportImages.has(url))return;var image=new Image();image.decoding='async';image.src=url;_supportImages.set(url,image);});
+                if(_supportImages.size>4){var keep=[config.wechat_url,config.alipay_url];for(var url of _supportImages.keys())if(keep.indexOf(url)<0)_supportImages.delete(url);}
+            }
+            function paintSupportCodes(config,codes){
+                codes.replaceChildren();['wechat','alipay'].forEach(function(provider){
+                    var card=document.createElement('section'),name=document.createElement('h4');name.textContent=provider==='wechat'?'微信':'支付宝';card.appendChild(name);
+                    var url=sanitizeUrl(config[provider+'_url']||'');
+                    if(url&&/^https:\/\//i.test(url)){
+                        var button=document.createElement('button');button.type='button';button.className='author-support-image-button';button.setAttribute('aria-label','全屏查看'+name.textContent+'收款码');
+                        var image=document.createElement('img');image.src=url;image.alt=name.textContent+'收款码';image.decoding='async';button.appendChild(image);card.appendChild(button);
+                        button.onclick=function(){openSupportCodePreview(url,image.alt,button);};
+                        image.onerror=function(){button.hidden=true;var message=document.createElement('p');message.textContent='收款码暂时无法显示，请稍后重试';card.appendChild(message);};
+                    }else{var empty=document.createElement('p');empty.className='author-support-empty';empty.textContent='作者暂未设置'+name.textContent+'收款码';card.appendChild(empty);}
+                    codes.appendChild(card);
+                });document.getElementById('authorSupportDisclaimer').textContent=config.disclaimer||'';
+            }
+            function openSupportCodePreview(url,label,opener){
+                var dialog=document.getElementById('supportCodePreview');if(!dialog){
+                    dialog=document.createElement('dialog');dialog.id='supportCodePreview';dialog.className='support-code-preview';dialog.setAttribute('aria-label','收款码全屏预览');
+                    var close=document.createElement('button');close.type='button';close.className='support-code-close';close.setAttribute('aria-label','关闭收款码预览');close.textContent='×';close.onclick=function(){dialog.close();};
+                    var stage=document.createElement('div');stage.className='support-code-stage';var image=document.createElement('img');image.draggable=false;stage.appendChild(image);dialog.append(close,stage);document.body.appendChild(dialog);
+                    var scale=1,panX=0,panY=0,pointers=new Map(),distance=0,base=1;
+                    function reset(){scale=1;panX=panY=0;pointers.clear();distance=0;image.style.transform='';stage.scrollTop=stage.scrollLeft=0;}
+                    function zoom(value){scale=Math.max(1,Math.min(4,value));var r=stage.getBoundingClientRect();panX=Math.max(-r.width*(scale-1)/2,Math.min(r.width*(scale-1)/2,panX));panY=Math.max(-r.height*(scale-1)/2,Math.min(r.height*(scale-1)/2,panY));image.style.transform='translate3d('+panX+'px,'+panY+'px,0) scale('+scale+')';}
+                    stage.addEventListener('dblclick',function(){zoom(scale===1?2:1);});
+                    stage.addEventListener('pointerdown',function(e){pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});stage.setPointerCapture(e.pointerId);if(pointers.size===2){var a=[...pointers.values()];distance=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);base=scale;}});
+                    stage.addEventListener('pointermove',function(e){if(!pointers.has(e.pointerId))return;var previous=pointers.get(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size===1&&scale>1){panX+=e.clientX-previous.x;panY+=e.clientY-previous.y;zoom(scale);}if(pointers.size===2&&distance){var a=[...pointers.values()];zoom(base*Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)/distance);}});
+                    function end(e){pointers.delete(e.pointerId);distance=0;}stage.addEventListener('pointerup',end);stage.addEventListener('pointercancel',end);stage.addEventListener('lostpointercapture',end);
+                    dialog.addEventListener('close',function(){reset();if(dialog._opener&&dialog._opener.isConnected)dialog._opener.focus();});dialog._reset=reset;
                 }
+                dialog._reset();dialog._opener=opener;var img=dialog.querySelector('img');img.src=url;img.alt=label;if(!dialog.open)dialog.showModal();
+            }
+            async function openAuthorSupport(){
+                if(!window.currentUser||dockChatActiveUser!==_supportAuthor||window.currentUser===_supportAuthor)return;
+                var dialog=document.getElementById('authorSupportDialog'),codes=document.getElementById('authorSupportCodes'),owner=window.currentUser,seq=++_supportDialogSeq;
+                var cached=_supportOwner===owner&&_supportCache&&Date.now()-_supportCacheAt<300000;
+                codes.replaceChildren();if(cached)paintSupportCodes(_supportCache,codes);else{var loading=document.createElement('p');loading.textContent='正在加载收款码…';codes.appendChild(loading);document.getElementById('authorSupportDisclaimer').textContent='';}
+                if(!dialog.open)dialog.showModal();
+                try{var config=await chatFeatureApi('author-support');if(seq!==_supportDialogSeq||owner!==window.currentUser||!dialog.open)return;
+                    var changed=!cached||config.wechat_url!==_supportCache.wechat_url||config.alipay_url!==_supportCache.alipay_url;cacheSupportConfig(config,owner);if(changed)paintSupportCodes(config,codes);
+                }catch(error){if(seq!==_supportDialogSeq||owner!==window.currentUser||!dialog.open||cached)return;codes.replaceChildren();var message=document.createElement('p');message.textContent=error.message||'收款码加载失败';codes.appendChild(message);var retry=document.createElement('button');retry.type='button';retry.textContent='重新加载';retry.onclick=openAuthorSupport;codes.appendChild(retry);}
             }
             var _supportButton=document.getElementById('authorSupportButton'), _supportDialog=document.getElementById('authorSupportDialog');
             if (_supportButton) _supportButton.addEventListener('click',openAuthorSupport);
@@ -5022,57 +5040,39 @@
             }
 
             function bindDockChatSocialSlider() {
-                var rail = document.getElementById('dockChatSocialTabs');
-                if (!rail || rail.__xtjSliderBound) return;
-                rail.__xtjSliderBound = true;
-                var slider = rail.querySelector('.chat-social-slider');
-                var tabs = ['search', 'friends', 'requests', 'blocks'];
-                var pointer = null, startX = 0, moved = false, left = 0, suppressClickUntil = 0;
-                function cellWidth(){ return Math.max(1, (rail.clientWidth - 8) / 4); }
-                function release(event, cancelled){
-                    if (pointer === null || event.pointerId !== pointer) return;
-                    var didMove = moved;
-                    pointer = null;
-                    rail.classList.remove('is-dragging');
-                    slider.style.transform = '';
-                    rail.querySelectorAll('[data-drag-active]').forEach(function(button){ button.removeAttribute('data-drag-active'); });
-                    if (didMove) {
-                        suppressClickUntil = Date.now() + 400;
-                        if (!cancelled) renderDockChatSocialTab(tabs[Math.max(0, Math.min(3, Math.round(left / cellWidth())))]);
-                    }
+                var rail=document.getElementById('dockChatSocialTabs');if(!rail||rail.__xtjSliderBound)return;
+                rail.__xtjSliderBound=true;var slider=rail.querySelector('.chat-social-slider'),tabs=['search','friends','requests','blocks'];
+                var pointer=null,startX=0,startLeft=0,left=0,moved=false,startTab='',suppressClickUntil=0;
+                function cellWidth(){return Math.max(1,(rail.clientWidth-8)/4);}
+                function release(event,cancelled){
+                    if(pointer===null||event.pointerId!==pointer)return;
+                    var id=pointer;pointer=null;rail.classList.remove('is-dragging');
+                    slider.style.transform='';slider.style.removeProperty('--liquid-stretch');
+                    rail.querySelectorAll('[data-drag-active]').forEach(function(b){b.removeAttribute('data-drag-active');});
+                    suppressClickUntil=Date.now()+400;
+                    if(!cancelled)renderDockChatSocialTab(moved?tabs[Math.max(0,Math.min(3,Math.round(left/cellWidth())))]:startTab);
+                    if(rail.hasPointerCapture&&rail.hasPointerCapture(id))rail.releasePointerCapture(id);
                 }
-                rail.addEventListener('pointerdown', function(event){
-                    if (event.button !== 0 || pointer !== null) return;
-                    pointer = event.pointerId; startX = event.clientX; moved = false;
-                    left = Math.max(0, tabs.indexOf(_dockChatSocialTab)) * cellWidth();
+                rail.addEventListener('pointerdown',function(event){
+                    if((event.pointerType==='mouse'&&event.button!==0)||pointer!==null)return;
+                    pointer=event.pointerId;startX=event.clientX;moved=false;
+                    startLeft=left=Math.max(0,tabs.indexOf(_dockChatSocialTab))*cellWidth();
+                    var hit=event.target.closest('[data-chat-social-tab]');startTab=hit?hit.dataset.chatSocialTab:_dockChatSocialTab;
+                    try{rail.setPointerCapture(pointer);}catch(_){}
                 });
-                rail.addEventListener('pointermove', function(event){
-                    if (event.pointerId !== pointer) return;
-                    if (!moved && Math.abs(event.clientX - startX) < 5) return;
-                    if (!moved) rail.setPointerCapture(event.pointerId);
-                    moved = true;
-                    rail.classList.add('is-dragging');
-                    var width = cellWidth();
-                    left = Math.max(0, Math.min(width * 3, event.clientX - rail.getBoundingClientRect().left - 4 - width / 2));
-                    slider.style.transform = 'translate3d(' + left + 'px,0,0)';
-                    var closest = Math.round(left / width);
-                    rail.querySelectorAll('[data-chat-social-tab]').forEach(function(button,index){
-                        button.toggleAttribute('data-drag-active', index === closest);
-                    });
+                rail.addEventListener('pointermove',function(event){
+                    if(event.pointerId!==pointer)return;var dx=event.clientX-startX;
+                    if(!moved&&Math.abs(dx)<4)return;moved=true;rail.classList.add('is-dragging');
+                    left=Math.max(0,Math.min(cellWidth()*3,startLeft+dx));
+                    var stretch=matchMedia('(prefers-reduced-motion: reduce)').matches||document.documentElement.getAttribute('data-xtj-motion')==='off'?1:1+Math.min(.055,Math.abs(dx)/cellWidth()*.02);
+                    slider.style.transform='translate3d('+left+'px,0,0) scaleX('+stretch+')';
+                    rail.querySelectorAll('[data-chat-social-tab]').forEach(function(b,i){b.toggleAttribute('data-drag-active',i===Math.round(left/cellWidth()));});
                 });
-                rail.addEventListener('pointerup', function(event){ release(event, false); });
-                rail.addEventListener('pointercancel', function(event){ release(event, true); });
-                rail.addEventListener('lostpointercapture', function(event){ release(event, true); });
-                rail.addEventListener('click', function(event){
-                    if (Date.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
-                }, true);
-                rail.addEventListener('keydown', function(event){
-                    if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
-                    event.preventDefault();
-                    var index = Math.max(0, tabs.indexOf(_dockChatSocialTab));
-                    index = event.key === 'Home' ? 0 : event.key === 'End' ? 3 : (index + (event.key === 'ArrowRight' ? 1 : 3)) % 4;
-                    renderDockChatSocialTab(tabs[index]);
-                    rail.querySelector('[data-chat-social-tab="' + tabs[index] + '"]').focus({ preventScroll: true });
+                rail.addEventListener('pointerup',function(e){release(e,false);});rail.addEventListener('pointercancel',function(e){release(e,true);});rail.addEventListener('lostpointercapture',function(e){release(e,true);});
+                rail.addEventListener('click',function(e){if(Date.now()<suppressClickUntil){e.preventDefault();e.stopPropagation();}},true);
+                rail.addEventListener('keydown',function(event){
+                    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();var i=Math.max(0,tabs.indexOf(_dockChatSocialTab));
+                    i=event.key==='Home'?0:event.key==='End'?3:(i+(event.key==='ArrowRight'?1:3))%4;renderDockChatSocialTab(tabs[i]);rail.querySelector('[data-chat-social-tab="'+tabs[i]+'"]').focus({preventScroll:true});
                 });
             }
 

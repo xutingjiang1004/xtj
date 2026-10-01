@@ -3003,3 +3003,14 @@ html.xtj-ios-viewport .app-container {
   inset-inline:0;width:100%!important;height:var(--xtj-app-height,100dvh)!important;
   margin-top:0!important;margin-bottom:0!important;min-height:0!important;
 }
+/* Contact rail gestures and local glass deformation. */
+#panelChat #dockChatSocialTabs { background:transparent!important;touch-action:none; }
+#panelChat #dockChatSocialTabs .chat-social-slider { backdrop-filter:blur(8px) saturate(145%);-webkit-backdrop-filter:blur(8px) saturate(145%);background:linear-gradient(120deg,rgba(255,255,255,.4),rgba(255,255,255,.12));border-color:rgba(255,255,255,.46);box-shadow:inset 0 1px 1px rgba(255,255,255,.45),0 2px 8px rgba(25,70,48,.08); }
+#panelChat #dockChatSocialTabs .chat-social-slider::before { content:"";position:absolute;inset:-2px;border-radius:inherit;pointer-events:none;background:linear-gradient(90deg,rgba(116,217,174,.12),transparent 40%,rgba(255,255,255,.2));opacity:0;transition:opacity 160ms; }
+#panelChat #dockChatSocialTabs.is-dragging .chat-social-slider::before { opacity:1; }
+.author-support-image-button { display:block;width:100%;padding:0!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;cursor:zoom-in; }
+.support-code-preview { position:fixed;inset:0;width:100vw;max-width:none;height:100dvh;max-height:none;margin:0;padding:0;border:0;background:#fafcfb;color:#162b20;overflow:hidden; }
+.support-code-preview::backdrop { background:#fafcfb; }
+.support-code-stage { position:absolute;inset:calc(56px + env(safe-area-inset-top)) 12px calc(24px + env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center;touch-action:none;overflow:hidden; }
+.support-code-stage img { display:block;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;transform-origin:center; }
+.support-code-close { position:absolute;right:14px;top:calc(8px + env(safe-area-inset-top));width:44px;height:44px;z-index:1;padding:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:transparent!important;font-size:30px;line-height:1;color:#162b20!important; }
