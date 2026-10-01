@@ -91,15 +91,15 @@ test('M-06: 前端对截断状态给出可见提示', () => {
 
 // ----------------------------------------------------------------- M-10
 
-test('M-10: 管理后台提供 IP / 地理 / 邮编遮罩工具', () => {
+test('M-10: 认证后台按用户要求默认完整显示 IP / 地理 / 邮编', () => {
   assert.match(admin, /function maskIp\(v\)/);
   assert.match(admin, /function maskGeo\(v\)/);
   // 遮罩开关只存内存，不做持久化（避免"上次点过显示"变成永久明文）
-  assert.match(admin, /var _showSensitiveInSession = false/);
+  assert.match(admin, /var _showSensitiveInSession = true/);
   assert.doesNotMatch(admin, /localStorage\.setItem\([^)]*_showSensitiveInSession/);
 });
 
-test('M-10: 实时在线页与画像页的敏感字段默认走遮罩', () => {
+test('M-10: 实时在线页与画像页保留完整字段分支', () => {
   // 实时在线：IP 与位置
   assert.match(admin, /_showSensitiveInSession \? \(u\.ip \|\| '未记录'\) : maskIp\(u\.ip\)/);
   assert.match(admin, /_showSensitiveInSession \? \(u\.location \|\| '未解析'\) : maskGeo\(u\.location\)/);
@@ -109,7 +109,7 @@ test('M-10: 实时在线页与画像页的敏感字段默认走遮罩', () => {
   assert.match(admin, /已遮罩/, 'GPS 坐标未遮罩');
 });
 
-test('M-10: 用户列表页区域使用 _geoRaw 统一遮罩', () => {
+test('M-10: 用户列表页区域保持安全文本渲染', () => {
   assert.match(admin, /var _geoRaw = ''/, '未引入 _geoRaw 中转变量');
   assert.match(admin, /regionCell = escapeHtml\(_showSensitiveInSession \? _geoRaw : maskGeo\(_geoRaw\)\)/);
 });

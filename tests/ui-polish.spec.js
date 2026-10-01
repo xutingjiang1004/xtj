@@ -199,3 +199,20 @@ test.describe('continuous contact touch drag',()=>{
   await touch('touchStart',0);await touch('touchMove',box.width*.55);await touch('touchCancel',0);await expect(rail).not.toHaveClass(/is-dragging/);await expect(page.locator('[data-chat-social-tab="friends"]')).toHaveAttribute('aria-selected','true');
  });
 });
+
+test('desktop contacts and AI use quiet rows, while deletion keeps half-transparent clear glass',async({page},info)=>{
+ await setup(page,1440);
+ await page.evaluate(()=>{document.getElementById('desktopContactsPreview').innerHTML='<button class="desktop-contact-preview"><span class="desktop-contact-preview__avatar">X</span><span class="desktop-contact-preview__copy"><span class="desktop-contact-preview__name">xtj</span><span class="desktop-contact-preview__preview">一起记录日常</span></span></button>';});
+ for(const theme of ['light','dark']){
+  await page.evaluate(theme=>window.XTJThemeController.setMode(theme),theme);await page.waitForTimeout(400);
+  for(const selector of ['.desktop-contact-preview','.desktop-ai-prompt','.desktop-rail-heading button']){
+   const button=page.locator(selector).first();await expect(button).toHaveCSS('background-color','rgba(0, 0, 0, 0)');await expect(button).toHaveCSS('border-radius','0px');await expect(button).toHaveCSS('box-shadow','none');
+  }
+  await page.screenshot({path:info.outputPath('desktop-rail-'+theme+'.png')});
+  await page.evaluate(()=>document.getElementById('delModal').classList.add('active'));
+  const glass=page.locator('#delModal .post-delete-modal');await expect(glass).toHaveCSS('background-color','rgba(248, 253, 250, 0.5)');await expect(page.locator('#delModal')).toHaveCSS('backdrop-filter','none');
+  for(const button of await page.locator('#delModal button').all()){await expect(button).toHaveCSS('background-color','rgba(0, 0, 0, 0)');await expect(button).toHaveCSS('box-shadow','none');await expect(button).toHaveCSS('border-radius','0px');}
+  await page.screenshot({path:info.outputPath('delete-glass-'+theme+'.png')});await page.locator('.post-delete-cancel').click();await expect(page.locator('#delModal')).not.toHaveClass(/active/);
+ }
+ await page.locator('.desktop-ai-prompt').click();await expect(page.locator('#panelAiChat')).toHaveClass(/active/);
+});

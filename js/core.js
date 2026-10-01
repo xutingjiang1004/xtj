@@ -1003,7 +1003,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 var entry = avatarCache[userName];
                 if (!entry || entry.state === 'not_fetched') return false;
                 var age = Date.now() - (entry.fetched_at || 0);
-                return age < AVATAR_FETCH_TTL_MS;
+                return age < (entry.state==='fetch_failed'?5000:entry.state==='confirmed_none'?30000:AVATAR_FETCH_TTL_MS);
             }
 
             // 写入内存缓存条目。fetch_failed 时若 url 为空则保留旧 URL（降级）。
@@ -1044,8 +1044,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             // fetch_failed 不持久化（仅内存），防御性跳过
                             if (state === 'fetch_failed') continue;
                             var fetchedAt = entry.fetched_at || 0;
-                            // TTL 按状态区分：has_avatar 24h，confirmed_none 5min
-                            var ttl = state === 'confirmed_none' ? AVATAR_FETCH_TTL_MS : AVATAR_CACHE_TTL_MS;
+                            // TTL 按状态区分：has_avatar 24h，confirmed_none 30s
+                            var ttl = state === 'confirmed_none' ? 30000 : AVATAR_CACHE_TTL_MS;
                             if ((now - fetchedAt) >= ttl) continue;
                             // has_avatar 必须有 url
                             if (state === 'has_avatar' && !entry.url) continue;
@@ -1096,9 +1096,9 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                         if (!entry || typeof entry !== 'object') continue;
                         // 只持久化 has_avatar 和 confirmed_none
                         if (entry.state !== 'has_avatar' && entry.state !== 'confirmed_none') continue;
-                        // 跳过已过期的 confirmed_none（5min TTL）
+                        // 跳过已过期的 confirmed_none（30s TTL）
                         if (entry.state === 'confirmed_none' &&
-                            (now - (entry.fetched_at || 0)) >= AVATAR_FETCH_TTL_MS) continue;
+                            (now - (entry.fetched_at || 0)) >= 30000) continue;
                         // has_avatar 必须有 url
                         if (entry.state === 'has_avatar' && !entry.url) continue;
                         wrapped.data[keys[i]] = {
@@ -1146,8 +1146,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (hasFreshAvatarCache(userName)) {
                     return getAvatarUrl(userName);
                 }
+                var requestedEntry=avatarCache[userName];
                 try {
                     var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
+                    if(avatarCache[userName]!==requestedEntry)return getAvatarUrl(userName);
                     if (!resp.ok) {
                         // P7: 网络失败 — 设置 fetch_failed，不缓存为无头像。
                         // 保留旧 URL 用于降级展示。
@@ -1155,6 +1157,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                         return getAvatarUrl(userName);
                     }
                     var result = await resp.json();
+                    if(avatarCache[userName]!==requestedEntry)return getAvatarUrl(userName);
                     if (result.ok && result.avatar_url) {
                         setAvatarCacheEntry(userName, 'has_avatar', result.avatar_url);
                         return result.avatar_url;
@@ -1170,6 +1173,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     return getAvatarUrl(userName);
                 } catch(e) {
                     // P7: 网络异常 — 设置 fetch_failed，降级返回旧缓存 URL。
+                    if(avatarCache[userName]!==requestedEntry)return getAvatarUrl(userName);
                     setAvatarCacheEntry(userName, 'fetch_failed', null);
                     return getAvatarUrl(userName);
                 }
@@ -3637,6 +3641,9 @@ function isAdmin() {
             window.handleAvatarUpload = async function(event) {
                 const file = event.target.files[0];
                 if (!file) return;
+                var avatarOwner=currentUser,avatarEpoch=_authStateEpoch;
+                function avatarOwnerActive(){return !!avatarOwner&&currentUser===avatarOwner&&_authStateEpoch===avatarEpoch;}
+                if(!avatarOwnerActive())return;
                 
                 if (!file.type.startsWith('image/')) {
                     showToast('请选择图片文件');
@@ -3676,6 +3683,7 @@ function isAdmin() {
                     }
                     
                     // 上传到 Supabase Storage
+                    if(!avatarOwnerActive())return;
                     if (/\.(svgz?|html?|xml|swf)$/i.test(String(file && file.name || '')) || /^image\/svg\+xml/i.test(String(file && file.type || ''))) {
                         throw new Error('file type not allowed');
                     }
@@ -3684,6 +3692,7 @@ function isAdmin() {
                     
                     // 获取 Public URL
                     const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+                    if(!avatarOwnerActive())return;
                     
                     // 头像记录必须由服务端校验当前用户并写入，不能在 anon
                     // 客户端保留一条绕过 RLS/归属校验的旧写入路径。
@@ -3692,16 +3701,19 @@ function isAdmin() {
                             throw new Error('头像服务不可用');
                         }
                         var avAuthHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
+                        if(!avatarOwnerActive())return;
                         var avResp = await fetch(window.API_BASE.replace(/\/$/, '') + '/api/avatar', {
                             method: 'POST',
                             headers: Object.assign({ 'Content-Type': 'application/json' }, avAuthHeaders || {}),
                             body: JSON.stringify({ media_url: avatarUrl })
                         });
                         var avData = await avResp.json().catch(function() { return {}; });
+                        if(!avatarOwnerActive())return;
                         if (!avResp.ok || !avData || !avData.ok) {
                             throw new Error((avData && avData.error) || '头像保存失败');
                         }
                     } catch (avErr) {
+                        if(!avatarOwnerActive())return;
                         // The request may have committed before its response
                         // was lost. Confirm ownership server-side before
                         // deleting the uploaded object, otherwise a valid
@@ -3718,6 +3730,7 @@ function isAdmin() {
                             var statusData = await statusResp.json().catch(function() { return {}; });
                             avatarCommitted = !!(statusResp.ok && statusData && statusData.committed);
                         } catch (statusErr) {}
+                        if(!avatarOwnerActive())return;
                         if (avatarCommitted) {
                             setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                             try {
@@ -3748,6 +3761,7 @@ function isAdmin() {
                     showToast('头像更新成功');
                     window.safeStorage.remove(CACHE_KEY);
                     await loadFeed(true);
+                    if(!avatarOwnerActive())return;
                     setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                     updateAllAvatarElements(avatarUrl);
                 } catch(e) {
@@ -3762,6 +3776,7 @@ function isAdmin() {
                 var safeUrl = escapeHtml(sanitizeUrl(avatarUrl));
                 if (!safeUrl) return;
                 var avatarContent = renderAvatarContent(currentUser, avatarUrl);
+                window.dispatchEvent(new CustomEvent('xtj:avatar-updated',{detail:{username:currentUser,url:avatarUrl}}));
                 var els = [
                     document.getElementById('profileAvatar'),
                     document.getElementById('myAvatar'),
@@ -7306,6 +7321,7 @@ function renderProfileActivityList(kind) {
                     return !hasFreshAvatarCache(username);
                 });
                 if (uncached.length === 0) return;
+                var requestedEntries={};uncached.forEach(function(name){requestedEntries[name]=avatarCache[name];});
                 try {
                     var resp = await fetch(API_BASE + '/api/avatar/batch', {
                         method: 'POST',
@@ -7319,6 +7335,7 @@ function renderProfileActivityList(kind) {
                         var keys = Object.keys(avatars);
                         for (var ki = 0; ki < keys.length; ki++) {
                             var k = keys[ki];
+                            if(avatarCache[k]!==requestedEntries[k])continue;
                             // P7: null → confirmed_none；有 URL → has_avatar
                             if (avatars[k]) {
                                 setAvatarCacheEntry(k, 'has_avatar', avatars[k]);
@@ -16176,8 +16193,8 @@ function renderProfileActivityList(kind) {
                 var old=document.getElementById('chatGallery');if(old)old.__close ? old.__close() : old.remove();
                 var overlay=document.createElement('section');overlay.id='chatGallery';overlay.className='chat-gallery';overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-label','聊天图片');
                 overlay.innerHTML='<header><button type="button" data-gallery="close" aria-label="关闭图片">×</button><span class="chat-gallery-title"></span><button type="button" data-gallery="save">保存</button></header><div class="chat-gallery-stage"><img alt="聊天图片" draggable="false" /></div><footer><button type="button" data-gallery="previous" aria-label="上一张图片">‹</button><button type="button" data-gallery="jump">定位原消息</button><button type="button" data-gallery="next" aria-label="下一张图片">›</button></footer>';
-                var img=overlay.querySelector('img'),scale=1,pointer=null;var closed=false,cursor=null,hasMore=true,loading=false;
-                function paint(){if(!items[current])return;if(img.getAttribute('src')!==items[current].url){scale=1;img.style.transform='';img.src=items[current].url;}overlay.querySelector('.chat-gallery-title').textContent=(current+1)+' / '+items.length+' · '+new Date(items[current].date).toLocaleDateString();overlay.querySelector('[data-gallery="previous"]').disabled=current===0 && (!hasMore || loading);overlay.querySelector('[data-gallery="next"]').disabled=current===items.length-1;}
+                var img=overlay.querySelector('img'),scale=1,pointer=null,panX=0,panY=0,pointers=new Map(),pinch=null;var closed=false,cursor=null,hasMore=true,loading=false;
+                function paint(){if(!items[current])return;if(img.getAttribute('src')!==items[current].url){scale=1;panX=panY=0;pointers.clear();pinch=null;pointer=null;img.style.transform='';img.src=items[current].url;}overlay.querySelector('.chat-gallery-title').textContent=(current+1)+' / '+items.length+' · '+new Date(items[current].date).toLocaleDateString();overlay.querySelector('[data-gallery="previous"]').disabled=current===0 && (!hasMore || loading);overlay.querySelector('[data-gallery="next"]').disabled=current===items.length-1;}
                 function close(){closed=true;window.removeEventListener('keydown',keys);overlay.remove();if(opener && opener.isConnected)opener.focus?.({preventScroll:true});}
                 function keys(event){if(event.key==='Escape')close();else if(event.key==='ArrowLeft')move(-1);else if(event.key==='ArrowRight')move(1);else if(event.key==='Tab'){var buttons=Array.from(overlay.querySelectorAll('button:not(:disabled)'));var first=buttons[0],last=buttons[buttons.length-1];if(event.shiftKey && document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first.focus();}}}
                 function move(delta){if(owner!==window.currentUser || peer!==dockChatActiveUser){close();return;}if(delta<0 && current===0 && hasMore){loadOlder(true);return;}current=Math.max(0,Math.min(items.length-1,current+delta));paint();}
@@ -16187,8 +16204,29 @@ function renderProfileActivityList(kind) {
                     if(action==='save'){b.disabled=true;try{var response=await fetch(items[current].url);if(!response.ok)throw Error();var blob=await response.blob();if(owner!==window.currentUser || closed)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='chat-photo-'+current+'.'+(blob.type==='image/png'?'png':'jpg');a.click();setTimeout(function(){URL.revokeObjectURL(url);},30000);}catch(_){showToast('图片暂时无法保存，请重试');}finally{b.disabled=false;}}
                 });
                 img.addEventListener('error',function(){if(!closed)showToast('图片暂时不可用，请返回会话刷新');});
-                var stage=overlay.querySelector('.chat-gallery-stage');stage.addEventListener('pointerdown',function(e){if(e.pointerType==='touch')pointer={x:e.clientX,y:e.clientY,id:e.pointerId};});stage.addEventListener('pointerup',function(e){if(pointer && pointer.id===e.pointerId && scale===1 && Math.abs(e.clientX-pointer.x)>55 && Math.abs(e.clientY-pointer.y)<50)move(e.clientX>pointer.x?-1:1);pointer=null;});stage.addEventListener('pointercancel',function(){pointer=null;});
-                var start=0;stage.addEventListener('touchstart',function(e){if(e.touches.length===2){start=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);pointer=null;}},{passive:true});stage.addEventListener('touchmove',function(e){if(e.touches.length===2 && start){e.preventDefault();scale=Math.max(1,Math.min(4,Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)/start));img.style.transform='scale('+scale+')';}},{passive:false});stage.addEventListener('dblclick',function(){scale=scale===1?2:1;img.style.transform='scale('+scale+')';});
+                var stage=overlay.querySelector('.chat-gallery-stage');
+                function zoom(value){
+                    scale=Math.max(1,Math.min(4,value));var r=stage.getBoundingClientRect(),ratio=Math.min(r.width/(img.naturalWidth||r.width),r.height/(img.naturalHeight||r.height));
+                    var maxX=Math.max(0,((img.naturalWidth||r.width)*ratio*scale-r.width)/2),maxY=Math.max(0,((img.naturalHeight||r.height)*ratio*scale-r.height)/2);
+                    panX=Math.max(-maxX,Math.min(maxX,panX));panY=Math.max(-maxY,Math.min(maxY,panY));img.style.transform='translate3d('+panX+'px,'+panY+'px,0) scale('+scale+')';
+                }
+                stage.addEventListener('pointerdown',function(e){
+                    if(e.pointerType==='mouse'&&e.button!==0)return;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});stage.setPointerCapture(e.pointerId);
+                    if(pointers.size===1)pointer={x:e.clientX,y:e.clientY,id:e.pointerId,swipe:scale===1};
+                    if(pointers.size===2){var p=[...pointers.values()],r=stage.getBoundingClientRect(),cx=(p[0].x+p[1].x)/2-r.left-r.width/2,cy=(p[0].y+p[1].y)/2-r.top-r.height/2;pinch={distance:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y),scale:scale,anchorX:(cx-panX)/scale,anchorY:(cy-panY)/scale};pointer=null;}
+                });
+                stage.addEventListener('pointermove',function(e){
+                    if(!pointers.has(e.pointerId))return;var before=pointers.get(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+                    if(pointers.size===2&&pinch&&pinch.distance){var p=[...pointers.values()],r=stage.getBoundingClientRect(),value=Math.max(1,Math.min(4,pinch.scale*Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)/pinch.distance));panX=(p[0].x+p[1].x)/2-r.left-r.width/2-pinch.anchorX*value;panY=(p[0].y+p[1].y)/2-r.top-r.height/2-pinch.anchorY*value;zoom(value);}
+                    else if(pointers.size===1&&scale>1){panX+=e.clientX-before.x;panY+=e.clientY-before.y;zoom(scale);}
+                });
+                function endPointer(e,cancelled){
+                    if(!pointers.has(e.pointerId))return;var swipe=pointer&&!cancelled&&pointer.swipe&&pointer.id===e.pointerId&&scale===1&&Math.abs(e.clientX-pointer.x)>55&&Math.abs(e.clientY-pointer.y)<50,delta=swipe?(e.clientX>pointer.x?-1:1):0;
+                    pointers.delete(e.pointerId);pinch=null;pointer=null;if(stage.hasPointerCapture(e.pointerId))stage.releasePointerCapture(e.pointerId);if(swipe)move(delta);
+                }
+                stage.addEventListener('pointerup',function(e){endPointer(e,false);});stage.addEventListener('pointercancel',function(e){endPointer(e,true);});stage.addEventListener('lostpointercapture',function(e){endPointer(e,true);});
+                stage.addEventListener('dblclick',function(){zoom(scale===1?2:1);});
+                stage.addEventListener('wheel',function(e){e.preventDefault();zoom(scale*(e.deltaY<0?1.12:1/1.12));},{passive:false});
                 overlay.__close=close;document.body.appendChild(overlay);window.addEventListener('keydown',keys);paint();overlay.querySelector('[data-gallery="close"]').focus();
                 // Load one authorized metadata page at a time, retaining the displayed image and zoom.
                 async function loadOlder(moveBack){if(loading || !hasMore || closed)return;loading=true;paint();var active=items[current]?.id;
