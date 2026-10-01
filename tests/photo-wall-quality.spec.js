@@ -272,3 +272,20 @@ for(const hotfix of [false,true])test(`preview hides unauthorized deletion and u
  await expect(page.locator('#ppDeleteBtn')).toBeHidden();await page.evaluate(()=>window.deletePhotoFromPreview());expect(await page.evaluate(()=>window.__deleteCalls)).toEqual(['0','next']);
  await page.evaluate(()=>{window.currentUser='xxz';window.dispatchEvent(new CustomEvent('xtj:permissions-ready'));});await expect(page.locator('#ppDeleteBtn')).toBeVisible();
 });
+async function albumFixture(page){
+ await page.route('**/album-fixture',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><section id="panelAi" class="active"><div id="photoWallContainer"><button id="pwAlbumToggle" type="button" onclick="toggleAlbumView()">相册</button><div id="photoGrid" class="photo-wall-grid"></div></div></section>'}));await page.goto('/album-fixture');
+ await page.addStyleTag({content:source('css/style.css')+source('css/visual-refinements.css')+source('css/ui-shell.css')+source('css/desktop.css')});
+ const img=await sharp({create:{width:800,height:600,channels:3,background:'#6e9684'}}).jpeg().toBuffer();await page.route('**/album-photo.jpg',r=>r.fulfill({contentType:'image/jpeg',body:img}));
+ await page.addScriptTag({content:source('js/photo-wall/render.js')});await page.evaluate(()=>{window.photoWallData=Array.from({length:6},(_,i)=>({id:String(i),username:'xtj',timestamp:Date.UTC(2026,9,1-Math.floor(i/2)),imageUrl:location.origin+'/album-photo.jpg'}));window.renderPhotoWallWithoutReload();});
+}
+test('album cards use rectangular covers and animate entering, grouping, returning and rapid toggles',async({page},info)=>{
+ await page.setViewportSize({width:390,height:844});await albumFixture(page);await page.locator('#pwAlbumToggle').click();await expect(page.locator('.pw-album-card')).toHaveCount(3);
+ expect(await page.locator('#photoGrid').evaluate(e=>e.getAnimations().length)).toBeGreaterThan(0);await expect(page.locator('#pwAlbumToggle')).toHaveAttribute('aria-pressed','true');await expect(page.locator('.pw-album-card').first()).toHaveCSS('border-radius','0px');await expect(page.locator('.pw-album-card').first()).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
+ await expect(page.locator('.pw-album-cover').first()).toHaveJSProperty('naturalWidth',800);await page.waitForTimeout(240);await page.screenshot({path:info.outputPath('albums-light.png')});await page.evaluate(()=>document.documentElement.dataset.theme='dark');await page.screenshot({path:info.outputPath('albums-dark.png')});
+ await page.locator('.pw-album-card').first().click();await expect(page.locator('.photo-wall-item')).toHaveCount(2);expect(await page.locator('#photoGrid').evaluate(e=>e.getAnimations().length)).toBeGreaterThan(0);await page.locator('.pw-album-back-btn').click();await expect(page.locator('.pw-album-card')).toHaveCount(3);
+ await page.locator('#pwAlbumToggle').click();await expect(page.locator('.photo-wall-item')).toHaveCount(6);expect(await page.locator('#photoGrid').evaluate(e=>e.getAnimations().length)).toBeGreaterThan(0);
+ await page.evaluate(()=>{for(let i=0;i<9;i++)window.toggleAlbumView();});await expect(page.locator('.pw-album-card')).toHaveCount(3);await page.waitForTimeout(260);await expect(page.locator('#photoGrid')).toHaveCSS('opacity','1');expect(await page.locator('#photoGrid').evaluate(e=>e.getAnimations().length)).toBe(0);
+});
+test('album transitions honor reduced motion without delaying content',async({page})=>{
+ await page.emulateMedia({reducedMotion:'reduce'});await albumFixture(page);await page.locator('#pwAlbumToggle').click();await expect(page.locator('.pw-album-card')).toHaveCount(3);expect(await page.locator('#photoGrid').evaluate(e=>e.getAnimations().length)).toBe(0);await page.locator('#pwAlbumToggle').click();await expect(page.locator('.photo-wall-item')).toHaveCount(6);
+});

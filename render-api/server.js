@@ -18069,16 +18069,20 @@ async function processLocationTasks() {
       var taskQuery = supabase.from('posts')
         .select('id, user_name, content, created_at')
         .eq('media_type', LOCATION_TASK_MARKER);
-      if (scannedIds.length > 0) taskQuery = taskQuery.not('id', 'in', scannedIds);
+      if(locationTaskScanCursor)taskQuery=taskQuery.or('created_at.gt.'+locationTaskScanCursor.at+',and(created_at.eq.'+locationTaskScanCursor.at+',id.gt.'+locationTaskScanCursor.id+')');
+      if (scannedIds.length > 0) taskQuery = taskQuery.not('id', 'in', '('+scannedIds.join(',')+')');
       var { data, error } = await taskQuery
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: true }).order('id',{ascending:true})
         .limit(batchLimit);
-      if (error || !data || !data.length) break;
+      if(error)throw error;
+      if (!data || !data.length) {locationTaskScanCursor=null;break;}
       for (var scanIdx = 0; scanIdx < data.length; scanIdx++) scannedIds.push(data[scanIdx].id);
       
       var hasPending = false;
       for (var i = 0; i < data.length; i++) {
+        if(processedCount>=20)break;
         var row = data[i];
+        locationTaskScanCursor={at:row.created_at,id:row.id};
         var task = {};
         try { task = JSON.parse(row.content || '{}'); } catch (_) { continue; }
         if (task.status === 'completed' || task.status === 'permanent_failed') continue;
@@ -18087,6 +18091,7 @@ async function processLocationTasks() {
         
         if (task.retry_count >= task.max_retries) {
           task.status = 'permanent_failed';
+          await mergeResolvedPreciseLocation(task.user_name,task.page_load_id,{resolution_status:'failed',resolved_address:null,resolve_error:task.error||'retry_limit',resolved_at:new Date().toISOString()},task.capture_id);
           await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
           continue;
         }
@@ -18100,6 +18105,7 @@ async function processLocationTasks() {
         if (taskLat == null || taskLng == null) {
           task.status = 'permanent_failed';
           task.error = 'invalid_coordinates';
+          await mergeResolvedPreciseLocation(task.user_name,task.page_load_id,{resolution_status:'failed',resolved_address:null,resolve_error:task.error,resolved_at:new Date().toISOString()},task.capture_id);
           await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
           continue;
         }
@@ -18142,6 +18148,7 @@ async function processLocationTasks() {
   } catch (e) {
     console.error('[LOC-TASK] process error:', e && e.message ? e.message : e);
   } finally {
+    try {await require('./location-history').resolvePendingHistory({supabase,resolver:resolveLatLngToAddress,sync:async function(row,resolved){await mergeResolvedPreciseLocation(row.user_name,row.page_load_id,resolved,row.capture_reason==='legacy_retained'?null:row.capture_id);}});} catch(error){console.warn('[LOC-GPS] pending history:',error&&error.message);}
     locationTaskRunning = false;
     try {
       var { data: allTasks } = await supabase.from('posts')
@@ -18163,6 +18170,7 @@ async function processLocationTasks() {
 }
 
 var locationTaskRunning = false;
+var locationTaskScanCursor=null;
 var locationTaskTimer = null;
 
 function startLocationTaskProcessor() {
@@ -18179,6 +18187,10 @@ async function mergeResolvedPreciseLocation(userName, pageLoadId, resolvedLocati
   var ledgerPatch={resolution_status:resolvedLocation.resolution_status,resolved_address:resolvedLocation.resolved_address,resolve_error:resolvedLocation.resolve_error,resolved_at:resolvedLocation.resolved_at};
   var ledger=await supabase.from('user_location_history').update(ledgerPatch).eq('user_name',userName).eq('capture_id',captureId);
   if(ledger.error)throw ledger.error;
+  }
+  if(!captureId&&pageLoadId){
+    var legacy=await supabase.from('user_location_history').update({resolution_status:resolvedLocation.resolution_status,resolved_address:resolvedLocation.resolved_address,resolve_error:resolvedLocation.resolve_error,resolved_at:resolvedLocation.resolved_at}).eq('user_name',userName).eq('page_load_id',pageLoadId).eq('capture_reason','legacy_retained');
+    if(legacy.error)throw legacy.error;
   }
   var lookup = await supabase.from('posts').select('content')
     .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
@@ -18344,6 +18356,17 @@ app.post('/admin/user/resolve-location', verifyToken, rateLimit(60000, 10), asyn
   try {
     var userName = String(req.body && req.body.user_name || '').trim();
     var pageLoadId = String(req.body && req.body.page_load_id || '').trim();
+    var locationId=String(req.body&&req.body.location_id||'');
+    if(!userName||userName.length>100)return res.status(400).json({error:'用户参数无效'});
+    if(locationId){
+      if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(locationId))return res.status(400).json({error:'定位标识无效'});
+      var saved=await supabase.from('user_location_history').select('account_id,capture_id,latitude,longitude,page_load_id').eq('user_name',userName).eq('id',locationId).maybeSingle();
+      if(saved.error)throw saved.error;if(!saved.data)return res.status(404).json({error:'定位记录不存在'});
+      var geo=await resolveLatLngToAddress(saved.data.latitude,saved.data.longitude);
+      await require('./location-history').resolveLocationFix(supabase,{accountId:saved.data.account_id,captureId:saved.data.capture_id},geo.address,geo.error);
+      await logAdminAudit('resolve_user_location',req.adminName||'admin','target_user='+userName+'; location_id='+locationId+'; status='+(geo.address?'resolved':'failed'));
+      return res.json({ok:!!geo.address,resolution_status:geo.address?'resolved':'failed',address:geo.address,error:geo.error});
+    }
     if (!userName || userName.length > 100) return res.status(400).json({ error: '用户名无效' });
     var existing = await supabase.from('posts').select('id, content')
       .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
@@ -18376,7 +18399,7 @@ app.post('/admin/user/resolve-location', verifyToken, rateLimit(60000, 10), asyn
     }, preciseLocation.capture_id);
     await logAdminAudit('resolve_user_location', req.adminName || 'admin', 'target_user=' + userName + '; status=' + resolutionStatus);
     return res.json({
-      ok: true,
+      ok: resolutionStatus==='resolved',
       resolution_status: resolutionStatus,
       address: resolvedAddress,
       error: resolveError

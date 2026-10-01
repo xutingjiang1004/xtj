@@ -186,7 +186,7 @@
     return groups.map(function(group){
       var first = group.photos[0];
       var cover = first && (first.imageUrl || first.thumbUrl || first.thumb) || FALLBACK_IMG;
-      return '<button type="button" class="pw-album-card" onclick="openPhotoAlbumGroup(\'' + esc(group.key) + '\')"><img class="pw-album-cover" src="' + safeUrl(cover) + '" alt="album"><div class="pw-album-title">' + esc(group.title) + '</div><div class="pw-album-count">' + group.photos.length + ' 张照片</div></button>';
+      return '<button type="button" class="pw-album-card" aria-label="' + esc(group.title) + '，' + group.photos.length + ' 张照片" onclick="openPhotoAlbumGroup(\'' + esc(group.key) + '\')"><span class="pw-album-cover-frame"><img class="pw-album-cover" loading="lazy" decoding="async" src="' + safeUrl(cover) + '" alt=""></span><div class="pw-album-title">' + esc(group.title) + '</div><div class="pw-album-count">' + group.photos.length + ' 张照片</div></button>';
     }).join('');
   }
 
@@ -757,7 +757,8 @@
     // 旧哨兵的 loadingMore=true 残留，导致新分组哨兵首次 intersect 不触发加载。
     loadingMore = false;
     var toggle = document.getElementById('pwAlbumToggle');
-    if (toggle) toggle.classList.toggle('active', !!window.pwAlbumView);
+    if (toggle) {toggle.classList.toggle('active', !!window.pwAlbumView);toggle.setAttribute('aria-pressed',String(!!window.pwAlbumView));}
+    grid.classList.toggle('pw-album-overview',!!window.pwAlbumView&&!window.pwAlbumGroupKey);
 
     if (!window.pwAlbumView) {
       window.pwCurrentSortedPhotos = photos.slice();
@@ -796,7 +797,7 @@
     }
 
     window.pwCurrentSortedPhotos = group.photos.slice();
-    grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" onclick="openPhotoAlbumGroup(\'\')">返回相册</button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS), photoBatchStart) + photoBatchNavHtml(group.photos);
+    grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" aria-label="返回相册" onclick="openPhotoAlbumGroup(\'\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg><span>相册</span></button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS), photoBatchStart) + photoBatchNavHtml(group.photos);
     revealCards(grid);
     observeImages(grid);
     // H-33: 相册分组详情页同样需要哨兵，滚动到底继续加载更多照片
@@ -874,14 +875,20 @@
   window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
   window.showPreviousPhotoBatch = showPreviousPhotoBatch;
   window.showNextPhotoBatch = showNextPhotoBatch;
+  var albumAnimation=null,albumMotionSequence=0;
+  function changeAlbumView(change){
+    var grid=document.getElementById('photoGrid'),sequence=++albumMotionSequence;
+    if(albumAnimation){albumAnimation.cancel();albumAnimation=null;}
+    change();renderPhotoWallWithoutReload();
+    if(!grid||!grid.animate||document.documentElement.dataset.xtjMotion==='off'||window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    albumAnimation=grid.animate([{opacity:.2,transform:'translateY(8px)'},{opacity:1,transform:'translateY(0)'}],{duration:220,easing:'cubic-bezier(.2,.8,.2,1)'});
+    albumAnimation.finished.then(function(){if(sequence===albumMotionSequence)albumAnimation=null;}).catch(function(){});
+  }
   window.openPhotoAlbumGroup = function(key){
-    window.pwAlbumGroupKey = key || '';
-    renderPhotoWallWithoutReload();
+    changeAlbumView(function(){window.pwAlbumGroupKey=key||'';});
   };
   window.toggleAlbumView = function(){
-    window.pwAlbumView = !window.pwAlbumView;
-    window.pwAlbumGroupKey = '';
-    renderPhotoWallWithoutReload();
+    changeAlbumView(function(){window.pwAlbumView=!window.pwAlbumView;window.pwAlbumGroupKey='';});
   };
   window.switchPhotoWallView = function(){
     var sel = document.getElementById('pwAlbumSort');

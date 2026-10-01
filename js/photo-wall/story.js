@@ -73,11 +73,14 @@
     var entry={at:Date.now(),image:cached&&cached.image,promise:null};avatars.set(name,entry);
     entry.promise=(async function(){
       var url=window.xtjFetchAvatarUrl?await window.xtjFetchAvatarUrl(name):(await (await fetch((window.API_BASE||location.origin)+'/api/avatar/public/'+encodeURIComponent(name))).json()).avatar_url;
-      if(!url)return null;
-      var parsed=new URL(url,location.origin);if(parsed.protocol!=='https:'&&parsed.origin!==location.origin)return null;
-      var image=new Image();image.alt='';image.src=parsed.href;
+      if(!url){entry.at=Date.now()-285000;entry.image=null;return null;}
+      url=String(url).trim();
+      var inline=/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/]+={0,2}$/i.test(url)&&url.length<=2*1024*1024;
+      var parsed=new URL(url,location.origin);if(!inline&&parsed.protocol!=='https:'&&!(parsed.origin===location.origin&&/^https?:$/.test(parsed.protocol)))return null;
+      var image=new Image();image.alt='';image.src=inline?url:parsed.href;
       await new Promise(function(resolve,reject){if(image.complete){image.naturalWidth?resolve():reject();return;}image.onload=resolve;image.onerror=reject;});
       if(image.decode)await image.decode().catch(function(){});
+      if(avatars.get(name)!==entry)return (avatars.get(name)||{}).image||null;
       entry.image=image;return image;
     })().catch(function(){entry.at=0;return entry.image||null;});
     if(avatars.size>128){for(var key of avatars.keys()){if(key!==name){avatars.delete(key);break;}}}
@@ -95,6 +98,11 @@
     if(avatar.dataset.author!==name){avatar.dataset.author=name;avatar.textContent=name.slice(0,1)||'?';if(cached&&cached.image)avatar.replaceChildren(cached.image.cloneNode());}
     preloadAvatar(name).then(function(image){if(image&&current&&current.username===name&&avatar.dataset.author===name){var shown=avatar.querySelector('img');if(!shown||shown.src!==image.src)avatar.replaceChildren(image.cloneNode());}});
   }
+  window.addEventListener('xtj:avatar-updated',function(event){
+    var detail=event.detail||{},name=String(detail.username||'');if(!name)return;
+    var cached=avatars.get(name);if(cached&&cached.image&&cached.image.src===detail.url)return;
+    avatars.delete(name);if(current&&current.username===name)showAvatar(current);
+  });
   window.renderPhotoStory=function(photo){
     if(!ensure())return;
     var same=current&&String(current.id)===String(photo.id)&&(current._storyOwner||'')===(window.currentUser||'');

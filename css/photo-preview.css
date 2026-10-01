@@ -557,3 +557,12 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-info.pp-story {
 #photoPreviewOverlay .pp-story-footer { text-shadow:0 1px 3px #000,0 0 10px rgba(0,0,0,.6); }
 #photoPreviewOverlay .pp-comment-row button { background:none!important;border:0!important;border-radius:0!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;color:inherit;opacity:.85;min-width:44px;min-height:44px;padding:8px 4px!important;font-size:12px; }
 #photoPreviewOverlay .pp-comment-row button::before,#photoPreviewOverlay .pp-comment-row button::after { content:none!important; }
+
+/* Preview statistics stay bare, including global glass pseudo-elements and SVG children. */
+#photoPreviewOverlay .pp-story-stats,
+#photoPreviewOverlay .pp-story-stats :is(button,.pp-views,span,svg) {
+  background:transparent!important;background-image:none!important;box-shadow:none!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+#photoPreviewOverlay .pp-story-stats :is(button,.pp-views,span,svg)::before,
+#photoPreviewOverlay .pp-story-stats :is(button,.pp-views,span,svg)::after { content:none!important;display:none!important; }

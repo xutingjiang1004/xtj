@@ -2,10 +2,10 @@ const {test,expect}=require('@playwright/test');
 const fs=require('node:fs'),path=require('node:path'),sharp=require('sharp');
 const source=file=>fs.readFileSync(path.join(__dirname,'..',file),'utf8');
 const ids=['123e4567-e89b-42d3-a456-000000000091','123e4567-e89b-42d3-a456-000000000092'];
-async function storyFixture(page){
+async function storyFixture(page,avatarURL){
  await page.route('**/story-fixture',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="photoGrid"></div>'}));await page.goto('/story-fixture');
  await page.addStyleTag({content:source('css/style.css')+source('css/ui-shell.css')+source('css/photo-preview.css')});
- const image=await sharp({create:{width:1600,height:900,channels:3,background:'#608b80'}}).jpeg().toBuffer();await page.route('**/story-*.jpg',r=>r.fulfill({contentType:'image/jpeg',body:image}));await page.route('**/api/avatar/public/*',r=>r.fulfill({json:{avatar_url:'http://127.0.0.1:4176/story-0.jpg'}}));
+ const image=await sharp({create:{width:1600,height:900,channels:3,background:'#608b80'}}).jpeg().toBuffer();await page.route('**/story-*.jpg',r=>r.fulfill({contentType:'image/jpeg',body:image}));await page.route('**/api/avatar/public/*',r=>r.fulfill({json:{avatar_url:avatarURL||'http://127.0.0.1:4176/story-0.jpg'}}));
  await page.addScriptTag({content:'window.currentUser="B";window.showToast=function(){};window.updateAmbientBackground=function(){};window.__socialCalls=[];window.__views={};window.__liked={};window.__comments={};window.xtjProtectedFetch=async function(url,options={}){window.__socialCalls.push({url,body:options.body});let body={ok:true};let id=url.match(/photo\\/([^/]+)\\//)?.[1]||"";if(url.endsWith("/social"))body={ok:true,like_count:window.__liked[id]?1:0,liked:!!window.__liked[id],comment_count:(window.__comments[id]||[]).length,views:window.__views[id]?1:0,comments:window.__comments[id]||[],has_more:false};else if(url.endsWith("/like")){window.__liked[id]=JSON.parse(options.body).liked;body={ok:true,like_count:window.__liked[id]?1:0,liked:window.__liked[id]};}else if(url.endsWith("/comments")){const text=JSON.parse(options.body).content;body={ok:true,comment:{id:"123e4567-e89b-42d3-a456-000000000099",user_name:"B",content:text,created_at:new Date().toISOString()}};(window.__comments[id]||(window.__comments[id]=[])).unshift(body.comment);}else if(url==="/api/photo/view"){id=JSON.parse(options.body).photo_id;window.__views[id]=1;body={ok:true,views:1,recorded:true};}return new Response(JSON.stringify(body),{status:200});};'+source('js/photo-wall/data.js')+source('js/photo-wall/story.js')+source('js/photo-wall/preview.js')+source('js/photo-wall/preview-hotfix.js')});
  await page.evaluate(ids=>{window.__photos=ids.map((id,i)=>({id,cloudId:id,username:'A',imageUrl:location.origin+'/story-'+i+'.jpg',timestamp:Date.now(),views:0,caption:i?'第二张照片':'雪山下的一天\n<img src=x onerror=alert(1)>只是文字'}));window.openPhotoPreview(0,window.__photos);},ids);
  await expect(page.locator('#photoPreviewImage')).toHaveCSS('opacity','1');await expect(page.locator('#ppLikeBtn')).toBeEnabled();
@@ -107,10 +107,38 @@ test('compact composer removes the default filter card and deletion pills in bot
  await page.setViewportSize({width:390,height:844});await fullPage(page);await expect(page.locator('#postFilterBar')).toHaveCount(0);await expect(page.locator('#postFilterPanel')).toBeHidden();await expect(page.locator('#postLocationAddBtn svg')).toBeVisible();await expect(page.locator('.compose-tool svg')).toHaveCount(2);
  expect((await page.locator('#publishBox').boundingBox()).height).toBeLessThan(260);await page.screenshot({path:info.outputPath('compact-composer.png')});
  await page.locator('#filterToggleBtn').click();await expect(page.locator('#postFilterPanel')).toBeVisible();await page.locator('#filterToggleBtn').click();
- for(const theme of ['light','dark']){await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;document.getElementById('delModal').style.display='flex';document.getElementById('delModal').classList.add('active');},theme);await expect(page.locator('#delModal .post-delete-modal')).toHaveCSS('background-color','rgba(255, 255, 255, 0.5)');for(const selector of ['#delModal .post-delete-message','#delModal .post-delete-cancel','#delModal .post-delete-confirm']){await expect(page.locator(selector)).toHaveCSS('background-color','rgba(0, 0, 0, 0)');await expect(page.locator(selector)).toHaveCSS('box-shadow','none');}await page.screenshot({path:info.outputPath('post-delete-'+theme+'.png')});}
+ for(const theme of ['light','dark']){await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;document.getElementById('delModal').style.display='flex';document.getElementById('delModal').classList.add('active');},theme);await expect(page.locator('#delModal .post-delete-modal')).toHaveCSS('background-color','rgba(248, 253, 250, 0.5)');for(const selector of ['#delModal .post-delete-message','#delModal .post-delete-cancel','#delModal .post-delete-confirm']){await expect(page.locator(selector)).toHaveCSS('background-color','rgba(0, 0, 0, 0)');await expect(page.locator(selector)).toHaveCSS('box-shadow','none');}await page.screenshot({path:info.outputPath('post-delete-'+theme+'.png')});}
 });
 test('explicit post GPS carries accuracy and capture identity, while stale account callbacks cannot send',async({page})=>{
  await fullPage(page);await page.evaluate(()=>{window.__gpsCalls=[];Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition(success){window.__gpsSuccess=success;}}});window.xtjProtectedFetch=async(url,init)=>{window.__gpsCalls.push({url,body:init&&init.body});return new Response(JSON.stringify({ok:true,province:'福建省',city:'福州市',options:[{level:'city',name:'福建省福州市',province:'福建省',city:'福州市'}]}));};});
  await page.locator('#postLocationAddBtn').click();await page.evaluate(()=>window.__gpsSuccess({timestamp:Date.now(),coords:{latitude:26.1,longitude:119.2,accuracy:0}}));await page.locator('.post-location-option').first().click();await expect(page.locator('#postLocationPreview')).toBeVisible();const call=await page.evaluate(()=>window.__gpsCalls.find(c=>c.url==='/api/location/reverse'));const body=JSON.parse(call.body);expect(body.latitude).toBe(26.1);expect(body.accuracy).toBe(0);expect(body.capture_id).toMatch(/^post_/);expect(body.captured_at).toBeTruthy();
  await page.evaluate(()=>window.removePostLocation());await page.locator('#postLocationAddBtn').click();const before=await page.evaluate(()=>window.__gpsCalls.length);await page.evaluate(()=>{window.currentUser='another';window.__gpsSuccess({timestamp:Date.now(),coords:{latitude:26,longitude:119,accuracy:10}});});expect(await page.evaluate(()=>window.__gpsCalls.length)).toBe(before);await expect(page.locator('#postLocationAddBtn')).toBeEnabled();await expect(page.locator('#postLocationAddBtn svg')).toBeVisible();
+});
+
+test('ordinary users with legacy inline JPEG avatars display the saved image and replace it immediately after upload',async({page})=>{
+ const one='data:image/jpeg;base64,'+(await sharp({create:{width:96,height:96,channels:3,background:'#a23f68'}}).jpeg().toBuffer()).toString('base64');
+ const two='data:image/png;base64,'+(await sharp({create:{width:96,height:96,channels:3,background:'#379c70'}}).png().toBuffer()).toString('base64');
+ await storyFixture(page,one);await page.evaluate(()=>{window.__photos[0].username='xtj';window.renderPhotoStory(window.__photos[0]);});await expect(page.locator('#ppStoryAvatar img')).toHaveAttribute('src',one);await expect(page.locator('#ppStoryAvatar img')).toHaveJSProperty('naturalWidth',96);
+ await page.evaluate(({one,two})=>{window.xtjFetchAvatarUrl=async()=>two;window.dispatchEvent(new CustomEvent('xtj:avatar-updated',{detail:{username:'xtj',url:two}}));},{one,two});await expect(page.locator('#ppStoryAvatar img')).toHaveAttribute('src',two);
+ await page.evaluate(()=>{window.__photos[1].username='xtj';window.ppNextPhoto();});await expect(page.locator('#ppStoryAvatar img')).toHaveAttribute('src',two);
+});
+test('a delayed old avatar cannot replace an uploaded avatar, and SVG inline avatars stay rejected',async({page})=>{
+ await storyFixture(page);await expect(page.locator('#ppStoryAvatar img')).toBeVisible();
+ const two='data:image/png;base64,'+(await sharp({create:{width:96,height:96,channels:3,background:'#379c70'}}).png().toBuffer()).toString('base64');
+ await page.evaluate(two=>{window.xtjFetchAvatarUrl=()=>new Promise(resolve=>window.__releaseOldAvatar=resolve);window.dispatchEvent(new CustomEvent('xtj:avatar-updated',{detail:{username:'A',url:'old'}}));window.xtjFetchAvatarUrl=async()=>two;window.dispatchEvent(new CustomEvent('xtj:avatar-updated',{detail:{username:'A',url:two}}));},two);
+ await expect(page.locator('#ppStoryAvatar img')).toHaveAttribute('src',two);await page.evaluate(()=>window.__releaseOldAvatar(location.origin+'/story-0.jpg'));await expect(page.locator('#ppStoryAvatar img')).toHaveAttribute('src',two);
+ await page.evaluate(()=>{window.xtjFetchAvatarUrl=async()=> 'data:image/svg+xml;base64,PHN2Zy8+';window.__photos[1].username='unsafe';window.ppNextPhoto();});await expect(page.locator('#ppStoryAvatar img')).toHaveCount(0);
+});
+
+test('view, like and comment icons never inherit square glass backgrounds in either theme',async({page},info)=>{
+ await storyFixture(page);
+ for(const theme of ['light','dark']){
+  await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+  for(const selector of ['.pp-views','#ppLikeBtn','#ppCommentBtn']){
+   const layers=await page.locator(selector).evaluate(el=>[el,...el.querySelectorAll('svg,span')].map(node=>({bg:getComputedStyle(node).backgroundColor,image:getComputedStyle(node).backgroundImage,before:getComputedStyle(node,'::before').content,after:getComputedStyle(node,'::after').content})));
+   for(const layer of layers){expect(layer.bg).toBe('rgba(0, 0, 0, 0)');expect(layer.image).toBe('none');expect(['none','normal']).toContain(layer.before);expect(['none','normal']).toContain(layer.after);}
+  }
+  await page.screenshot({path:info.outputPath('photo-icons-'+theme+'.png')});
+ }
+ await page.locator('#ppLikeBtn').click();await expect(page.locator('#ppLikeBtn')).toHaveAttribute('aria-pressed','true');await expect(page.locator('#ppLikeBtn')).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
 });

@@ -1869,6 +1869,7 @@
                     return !hasFreshAvatarCache(username);
                 });
                 if (uncached.length === 0) return;
+                var requestedEntries={};uncached.forEach(function(name){requestedEntries[name]=avatarCache[name];});
                 try {
                     var resp = await fetch(API_BASE + '/api/avatar/batch', {
                         method: 'POST',
@@ -1882,6 +1883,7 @@
                         var keys = Object.keys(avatars);
                         for (var ki = 0; ki < keys.length; ki++) {
                             var k = keys[ki];
+                            if(avatarCache[k]!==requestedEntries[k])continue;
                             // P7: null → confirmed_none；有 URL → has_avatar
                             if (avatars[k]) {
                                 setAvatarCacheEntry(k, 'has_avatar', avatars[k]);
