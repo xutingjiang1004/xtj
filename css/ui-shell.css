@@ -3116,3 +3116,32 @@ html #delModal .modal-box.glass.post-action-box.post-delete-modal{background:rgb
 .chat-flash-viewer .flash-clock[hidden],#chatFlashQuota[hidden]{display:none!important;}
 #chatFlashQuota{font-size:11px;color:var(--text-secondary,#537366);white-space:nowrap;text-align:center;}
 html.theme-composited::view-transition-group(*),html.theme-composited::view-transition-image-pair(*),html.theme-composited::view-transition-old(*),html.theme-composited::view-transition-new(*){pointer-events:none!important;}
+
+/* A normal photo-delete dialog. The glass and every backdrop ancestor stay
+   fully painted; only the content transitions, so frosting never pops in. */
+html #ppConfirmOverlay.photo-delete-confirm { visibility:hidden;opacity:1!important;transition:none!important; }
+html #ppConfirmOverlay.photo-delete-confirm:is(.active,.closing) { visibility:visible; }
+html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-dialog {
+  width:min(100%,310px)!important;padding:22px 22px 12px!important;border-radius:18px!important;
+  opacity:1!important;transform:none!important;transition:none!important;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif!important;
+  backdrop-filter:blur(12px) saturate(110%)!important;-webkit-backdrop-filter:blur(12px) saturate(110%)!important;
+  box-shadow:0 12px 36px rgba(8,24,17,.16)!important;
+}
+html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-title { text-align:left!important;font-size:17px!important;font-weight:600!important;color:#14271e!important;line-height:1.4!important; }
+html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-msg { text-align:left!important;font-size:14px!important;line-height:1.6!important;color:#263a30!important;text-shadow:none!important;margin:8px 0 16px!important; }
+html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-actions { justify-content:flex-end!important;gap:12px!important;margin-top:0!important; }
+html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-btn {
+  flex:0 0 auto!important;min-width:60px!important;height:44px!important;padding:0 8px!important;
+  border:0!important;border-radius:6px!important;background:transparent!important;background-image:none!important;
+  box-shadow:none!important;text-shadow:none!important;filter:none!important;font:inherit!important;font-size:14px!important;font-weight:500!important;color:#31473b!important;
+}
+html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-ok { color:#b82f48!important; }
+html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-btn::before,html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-btn::after { display:none!important; }
+html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-btn:focus-visible { outline:2px solid #557c67!important;outline-offset:2px; }
+html #ppConfirmOverlay.photo-delete-confirm.active .pp-confirm-dialog > * { animation:photoConfirmContentIn 140ms ease-out; }
+html #ppConfirmOverlay.photo-delete-confirm.closing .pp-confirm-dialog > * { animation:photoConfirmContentOut 140ms ease-in forwards; }
+@keyframes photoConfirmContentIn { from { opacity:0;transform:translateY(3px); } to { opacity:1;transform:none; } }
+@keyframes photoConfirmContentOut { to { opacity:0;transform:translateY(2px); } }
+@media(prefers-reduced-motion:reduce) { html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-dialog > * { animation:none!important; } }
+@media(prefers-reduced-transparency:reduce) { html #ppConfirmOverlay.photo-delete-confirm .pp-confirm-dialog { background:#eaf3ed!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important; } }
