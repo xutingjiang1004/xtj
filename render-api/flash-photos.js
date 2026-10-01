@@ -41,19 +41,29 @@ function createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,
   finally{if(req._flashRelease)req._flashRelease();if(req.file&&req.file.buffer)req.file.buffer.fill(0);if(encrypted){encrypted.key.fill(0);encrypted.bytes.fill(0);}/* Unknown commit ciphertext stays private; sweep removes expired/orphaned objects. */}
  });
  router.post('/api/chat/flash/open',authenticateUser,limited,async(req,res)=>{
-  const message=String(req.body&&req.body.message_id||'');if(!UUID.test(message))return res.status(400).json({ok:false});
+  const message=String(req.body&&req.body.message_id||''),view=String(req.body&&req.body.view_id||'');if(!UUID.test(message)||!UUID.test(view))return res.status(400).json({ok:false});
   let claim,key,bytes;
   try{
-   claim=await checked(supabase.rpc('dm_flash_claim',{p_actor:req.userName,p_message:message}));
-   if(!claim.ok)return res.status(claim.code==='flash_expired'?410:404).json({ok:false,code:claim.code,error:claim.code==='flash_expired'?'闪图已失效':'闪图不可查看'});
-   if(notifyConsumed)void checked(supabase.from('posts').select('user_name,media_url').eq('id',message).maybeSingle()).then(row=>{if(row)notifyConsumed(row.user_name,row.media_url);}).catch(()=>console.warn('[flash] state notification will refresh on polling'));
+   claim=await checked(supabase.rpc('dm_flash_prepare',{p_actor:req.userName,p_message:message,p_view:view}));
+   if(!claim.ok)return res.status(claim.code==='flash_expired'?410:claim.code==='flash_busy'?409:404).json({ok:false,code:claim.code,error:claim.code==='flash_expired'?'闪图已失效':claim.code==='flash_busy'?'闪图正在另一页面打开，请稍后重试':'闪图不可查看'});
    key=Buffer.from(claim.key,'base64');delete claim.key;
    const blob=await checked(store().download(claim.path));bytes=unseal(Buffer.from(await blob.arrayBuffer()),key,claim.iv,claim.tag);
-   // Ciphertext deletion is attempted before delivery. A failed deletion cannot restore the erased key.
-   try{await remove(claim.path,claim.id);}catch(_){console.warn('[flash] ciphertext cleanup queued');}
-   res.set('Content-Type',claim.mime);res.set('X-Flash-Duration','3000');res.set('X-Content-Type-Options','nosniff');const erase=()=>bytes.fill(0);res.once('finish',erase);res.once('close',erase);res.send(bytes);
-  }catch(_){if(claim&&claim.ok)return res.status(410).json({ok:false,error:'闪图已销毁，无法再次查看'});unavailable(res);}
+   // Retain the sender's encrypted original. Only the recipient receipt consumes access.
+   res.set('Content-Type',claim.mime);res.set('X-Flash-Role',claim.role);res.set('X-Flash-Duration',claim.role==='sender'?'0':'3000');res.set('X-Content-Type-Options','nosniff');const erase=()=>bytes.fill(0);res.once('finish',erase);res.once('close',erase);res.send(bytes);
+  }catch(_){if(claim&&claim.role==='recipient')await checked(supabase.rpc('dm_flash_release',{p_actor:req.userName,p_message:message,p_view:view})).catch(()=>{});unavailable(res);}
   finally{if(key)key.fill(0);if(bytes&&(res.writableFinished||res.destroyed))bytes.fill(0);}
+ });
+ router.post('/api/chat/flash/viewed',authenticateUser,limited,async(req,res)=>{
+  const message=String(req.body&&req.body.message_id||''),view=String(req.body&&req.body.view_id||'');if(!UUID.test(message)||!UUID.test(view))return res.status(400).json({ok:false});
+  try{const result=await checked(supabase.rpc('dm_flash_viewed',{p_actor:req.userName,p_message:message,p_view:view}));
+   if(!result.ok)return res.status(result.code==='flash_expired'?410:409).json({ok:false,error:'闪图未打开，请重试'});
+   if(notifyConsumed&&!result.idempotent)void checked(supabase.from('posts').select('user_name,media_url').eq('id',message).maybeSingle()).then(row=>{if(row)notifyConsumed(row.user_name,row.media_url);}).catch(()=>console.warn('[flash] state notification will refresh on polling'));
+   res.json(result);
+  }catch(_){unavailable(res);}
+ });
+ router.post('/api/chat/flash/release',authenticateUser,limited,async(req,res)=>{
+  const message=String(req.body&&req.body.message_id||''),view=String(req.body&&req.body.view_id||'');if(!UUID.test(message)||!UUID.test(view))return res.status(400).json({ok:false});
+  try{await checked(supabase.rpc('dm_flash_release',{p_actor:req.userName,p_message:message,p_view:view}));res.json({ok:true});}catch(_){unavailable(res);}
  });
  router.get('/admin/flash-photos',verifyToken,async(req,res)=>{try{const settings=await checked(supabase.from('dm_flash_settings').select('free_daily,pro_daily').eq('id',true).single());const actor=String(req.query.user_name||'').trim();if(actor.length>64)return res.status(400).json({ok:false});const quota=actor?await checked(supabase.rpc('dm_flash_quota',{p_actor:actor})):null;res.json({ok:true,settings,quota});}catch(_){unavailable(res);}});
  router.post('/admin/flash-photos',verifyToken,limited,async(req,res)=>{try{
@@ -65,7 +75,7 @@ function createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,
   if(audit)await audit('configure_flash_limits',req.adminName||'xxz','target='+ (actor||'defaults'));res.json({ok:true});
  }catch(_){unavailable(res);}});
  async function sweep(){if(busy)return;busy=true;try{
-  const now=new Date().toISOString(),cutoff=new Date(Date.now()-120000).toISOString();const rows=await checked(supabase.from('dm_flash_photos').select('id,storage_path,message_id,consumed_at').is('cleaned_at',null).or('and(consumed_at.not.is.null,consumed_at.lte.'+cutoff+'),and(consumed_at.is.null,expires_at.lte.'+now+'),message_id.is.null').limit(50));
+  const now=new Date().toISOString();const rows=await checked(supabase.from('dm_flash_photos').select('id,storage_path,message_id,consumed_at').is('cleaned_at',null).or('key_material.is.null,message_id.is.null').limit(50));
   for(const row of rows||[]){try{await checked(supabase.from('dm_flash_photos').update({key_material:null,consumed_at:row.consumed_at||now}).eq('id',row.id));if(row.message_id){const post=await checked(supabase.from('posts').select('content').eq('id',row.message_id).maybeSingle());if(post){let body=JSON.parse(post.content);if(body.flash){body.flash.state='expired';await checked(supabase.from('posts').update({content:JSON.stringify(body)}).eq('id',row.message_id));}}}await remove(row.storage_path,row.id);}catch(_){console.warn('[flash] object cleanup will retry');}}
   // Failed sends and account deletions can leave ciphertext with no ledger row.
   const files=await checked(store().list('',{limit:100,sortBy:{column:'created_at',order:'asc'}}));

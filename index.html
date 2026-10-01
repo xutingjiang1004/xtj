@@ -71,14 +71,14 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=e560ba776a" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a2d91421e6" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=7671a6c075" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a2d91421e6" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=58e891a623" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d1d9232b4d" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=7671a6c075">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=58e891a623">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a2d91421e6">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=23297903fa">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=b47e0599e3">
@@ -409,7 +409,7 @@
                             <button type="button" class="chat-feature-button" id="chatVoiceButton" aria-label="录制语音" title="录制语音"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6"/></svg></button>
                             <button type="button" class="chat-feature-button" id="chatVoiceCancel" hidden>取消</button>
                             <button class="chat-img-btn" id="dockChatImgBtn" title="发送附件" aria-label="发送附件"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8m-3 11 6-6"/></svg></button>
-                            <div class="chat-send-stack"><button type="button" id="chatFlashSendBtn" class="chat-flash-send" hidden onclick="sendChatFlash()" title="发送当前预览的照片；本人或对方先打开即消耗，显示 3 秒后失效。未打开的闪图 24 小时后过期。">闪图</button><button class="send-btn" id="dockChatSendBtn" aria-label="发送消息"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div>
+                            <div class="chat-send-stack"><span id="chatFlashQuota" hidden aria-live="polite"></span><button type="button" id="chatFlashSendBtn" class="chat-flash-send" hidden onclick="sendChatFlash()" title="发送当前预览的照片；本人可重复查看，对方只能查看一次、清晰显示 3 秒。">闪图</button><button class="send-btn" id="dockChatSendBtn" aria-label="发送消息"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div>
                         </div>
                     </div>
                     <input type="file" id="dockChatFileInp" multiple accept="image/*,video/*,audio/*,.pdf,.txt,.csv,.rtf,.docx,.xlsx,.pptx,.zip" style="display:none" />
@@ -1228,9 +1228,9 @@
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
     <script defer src="js/photo-wall/story.min.js?v=4ff9d0307b"></script>
     <script defer src="js/voice-transcription.min.js?v=39cfe95168"></script>
-    <script defer src="js/core.min.js?v=cdef107f4b"></script>
+    <script defer src="js/core.min.js?v=f4a8e8d3e5"></script>
     <script defer src="js/login-device.min.js?v=b89bc315c7"></script>
-    <script defer src="js/theme-toggle.min.js?v=6b02c4a8db"></script>
+    <script defer src="js/theme-toggle.min.js?v=8ee90050d3"></script>
     <script defer src="js/desktop-shell.min.js?v=4da8e55385"></script>
     <script defer src="js/ux-features.min.js?v=d5ac02ee89"></script>
 

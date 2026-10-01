@@ -361,3 +361,9 @@ test('suspended Safari animation frames cannot leave theme switching frozen',asy
  await page.evaluate(()=>{Object.defineProperty(visualViewport,'offsetTop',{value:24,configurable:true});Object.defineProperty(visualViewport,'height',{value:640,configurable:true});visualViewport.dispatchEvent(new Event('resize'));});
  await expect.poll(()=>page.locator('.app-container').evaluate(n=>Math.round(n.getBoundingClientRect().top))).toBe(24);
 });
+
+test('every rapid pointer tap reverses the requested mode while animation is running',async({page})=>{
+ await setup(page);const box=await page.locator('#themeToggle').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+ for(let i=0;i<7;i++){await page.mouse.down();await page.mouse.up();const mode=await page.evaluate(()=>localStorage.getItem('xtj_theme'));expect(mode).toBe(i%2===0?'dark':'light');}
+ await expect(page.locator('html')).toHaveAttribute('data-theme','dark');await expect(page.locator('html')).not.toHaveClass(/theme-switching/);await expect(page.locator('#themeToggle')).toHaveAttribute('aria-pressed','true');
+});
