@@ -3078,6 +3078,7 @@ html #delModal .post-delete-message,html #ppConfirmOverlay .pp-confirm-msg { fon
 html #delModal .post-delete-actions,html #ppConfirmOverlay .pp-confirm-actions { gap:20px;margin-top:18px!important; }
 html #delModal .post-delete-modal::before,html #delModal .post-delete-modal::after,
 html #ppConfirmOverlay .pp-confirm-dialog::before,html #ppConfirmOverlay .pp-confirm-dialog::after { content:none!important;display:none!important; }
+html #delModal .modal-box.glass.post-action-box.post-delete-modal{background:rgba(248,253,250,.7)!important;}
 @media(prefers-reduced-transparency:reduce) {
   html #delModal .modal-box.glass.post-action-box.post-delete-modal,html #ppConfirmOverlay .pp-confirm-dialog { background:#eaf3ed!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important; }
 }
@@ -3101,11 +3102,17 @@ html #ppConfirmOverlay .pp-confirm-dialog::before,html #ppConfirmOverlay .pp-con
 .chat-flash-viewer .flash-close{position:absolute;right:max(14px,env(safe-area-inset-right));top:max(14px,env(safe-area-inset-top));z-index:2;width:44px;height:44px;background:rgba(255,255,255,.12)!important;color:#fff!important;border:1px solid rgba(255,255,255,.25)!important;box-shadow:none!important;border-radius:14px!important;font-size:26px;padding:0!important;}
 .flash-clock{position:absolute;bottom:max(24px,env(safe-area-inset-bottom));color:#fff;display:flex;align-items:center;gap:10px;font-size:17px;text-shadow:0 1px 4px #000;}
 .flash-clock i{width:80px;height:2px;background:#fff;transform-origin:left;}
-.is-viewing .flash-clock i{animation:flashCountdown 3s linear forwards;}
+.is-viewing .flash-clock:not([hidden]) i{animation:flashCountdown 3s linear forwards;}
 @keyframes flashCountdown{to{transform:scaleX(0);}}
 @keyframes flashReveal{from{opacity:0;transform:scale(.99);}to{opacity:1;transform:scale(1);}}
-@media(prefers-reduced-motion:reduce){.chat-flash-viewer,.is-viewing .flash-clock i{animation:none;}.chat-flash-viewer img{transition:none;}}
+@media(prefers-reduced-motion:reduce){.chat-flash-viewer,.is-viewing .flash-clock:not([hidden]) i{animation:none;}.chat-flash-viewer img{transition:none;}}
 
 #chatFlashViewer.is-closing{animation:flashViewerLeave 150ms ease-out forwards;}
 @keyframes flashViewerLeave{to{opacity:0;transform:scale(.985);}}
 @media(prefers-reduced-motion:reduce){#chatFlashViewer.is-closing{animation:none;opacity:0;}}
+
+/* Sender previews remain available; failed image loads never start a timer. */
+.chat-flash-viewer img{position:absolute;inset:0;max-width:100%;max-height:100%;min-width:0;min-height:0;}
+.chat-flash-viewer .flash-clock[hidden],#chatFlashQuota[hidden]{display:none!important;}
+#chatFlashQuota{font-size:11px;color:var(--text-secondary,#537366);white-space:nowrap;text-align:center;}
+html.theme-composited::view-transition-group(*),html.theme-composited::view-transition-image-pair(*),html.theme-composited::view-transition-old(*),html.theme-composited::view-transition-new(*){pointer-events:none!important;}
