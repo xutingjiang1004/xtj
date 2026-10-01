@@ -37,7 +37,33 @@ test('late GPS resolution updates only its own capture and cannot overwrite a ne
  await context.mergeResolvedPreciseLocation('A','page_same',resolved,'old');
  assert.equal(writes[0].user_name,'A');assert.equal(writes[0].capture_id,'old');assert.equal(merges.length,0);
  await context.mergeResolvedPreciseLocation('A','page_same',resolved);
- assert.equal(writes.length,1);assert.equal(merges.length,0);
+ assert.equal(writes.length,2);assert.equal(writes[1].capture_reason,'legacy_retained');assert.equal(merges.length,0);
  fail=true;await assert.rejects(context.mergeResolvedPreciseLocation('A','page_same',resolved,'new'),/unavailable/);assert.equal(merges.length,0);
  fail=false;await context.mergeResolvedPreciseLocation('A','page_same',resolved,'new');assert.equal(merges.length,1);assert.equal(merges[0].patch.last_precise_location.capture_id,'new');
+});
+test('GPS worker reaches pending fixes beyond 150 completed rows and emits valid PostgREST pagination',async()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync(require.resolve('../render-api/server'),'utf8');
+ const rows=Array.from({length:201},(_,i)=>({id:'123e4567-e89b-42d3-a456-'+String(i).padStart(12,'0'),user_name:'A',created_at:'2026-10-01T00:00:00Z',content:JSON.stringify({status:i===200?'pending':'completed',page_load_id:'page_old_sample',latitude:26,longitude:119,retry_count:0,max_retries:5})}));
+ let resolved=0;const updates=[];
+ const db={from(){let cursor='',excluded=[],limit=50,update=null;const q={select(){return q;},eq(){return q;},not(k,op,value){assert.equal(typeof value,'string');assert.match(value,/^\([a-f0-9,-]+\)$/);excluded=value.slice(1,-1).split(',');return q;},or(value){cursor=value.match(/id\.gt\.([a-f0-9-]+)/)[1];return q;},order(){return q;},limit(n){limit=n;return q;},update(value){update=value;return q;},then(resolve){if(update){updates.push(update);return Promise.resolve({error:null}).then(resolve);}return Promise.resolve({data:limit===200?[]:rows.filter(r=>(!cursor||r.id>cursor)&&!excluded.includes(r.id)).slice(0,limit)}).then(resolve);}};return q;}};
+ const ctx=vm.createContext({supabase:db,LOCATION_TASK_MARKER:'__location_task__',locationTaskRunning:false,locationTaskScanCursor:null,console:{error(){},warn(){}},require(){return{async resolvePendingHistory(){}};},async resolveLatLngToAddress(){resolved++;return{address:'saved address'};},async mergeResolvedPreciseLocation(){},deobfuscateCoord(){return null;}});
+ vm.runInContext(source.slice(source.indexOf('async function processLocationTasks()'),source.indexOf('var locationTaskRunning = false;')),ctx);
+ await ctx.processLocationTasks();assert.equal(resolved,0);await ctx.processLocationTasks();assert.equal(resolved,1);assert(updates.some(u=>JSON.parse(u.content).status==='completed'));
+});
+test('admin GPS retry resolves the specified owned record, rejects mismatched user and does not trust client coordinates',async()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync(require.resolve('../render-api/server'),'utf8'),savedId='123e4567-e89b-42d3-a456-000000000222';let actor='',lookupId='',update;
+ const db={from(){const q={select(){return q;},update(value){update=value;return q;},eq(k,v){if(k==='user_name')actor=v;if(k==='id')lookupId=v;return q;},async maybeSingle(){return{data:actor==='A'&&lookupId===savedId?{account_id:'account-A',capture_id:'saved_fix',latitude:26,longitude:119}:null};},then(resolve){return Promise.resolve({error:null}).then(resolve);}};return q;}};
+ const app=express();app.use(express.json());const router=express.Router();const ctx=vm.createContext({app:router,supabase:db,verifyToken(req,res,next){if(req.get('Authorization')==='admin')next();else res.sendStatus(403);},rateLimit(){return(req,res,next)=>next();},USER_INFO_MARKER:'__user_info__',async resolveLatLngToAddress(lat,lng){assert.equal(lat,26);assert.equal(lng,119);return{address:'saved address'};},require:module=>require('../render-api/'+module.replace('./','')),async logAdminAudit(){},console,sanitizeError(){return'failed';}});
+ const start=source.indexOf("app.post('/admin/user/resolve-location'");vm.runInContext(source.slice(start,source.indexOf('// POST /admin/user/resolve-ip',start)),ctx);app.use(router);
+ await request(app).post('/admin/user/resolve-location').send({user_name:'A',location_id:savedId}).expect(403);
+ await request(app).post('/admin/user/resolve-location').set('Authorization','admin').send({user_name:'B',location_id:savedId}).expect(404);
+ const res=await request(app).post('/admin/user/resolve-location').set('Authorization','admin').send({user_name:'A',location_id:savedId,latitude:50,longitude:80}).expect(200);assert.equal(res.body.address,'saved address');assert.equal(update.resolution_status,'resolved');
+});
+
+test('orphaned GPS history is resolved or marked failed instead of remaining pending without a job',async()=>{
+ const {resolvePendingHistory}=require('../render-api/location-history');const writes=[];let filters={};
+ const rows=[{account_id:'A',capture_id:'legacy_one',latitude:26,longitude:119},{account_id:'B',capture_id:'legacy_two',latitude:27,longitude:120}];
+ const db={from(){let patch=null;const q={select(){return q;},eq(k,v){filters[k]=v;return q;},order(){return q;},limit(){return q;},update(value){patch=value;filters={};return q;},then(resolve){if(patch)writes.push({patch,filters:{...filters}});return Promise.resolve({data:patch?null:rows,error:null}).then(resolve);}};return q;}};
+ await resolvePendingHistory({supabase:db,async resolver(lat){return lat===26?{address:'resolved address'}:{error:'rate_limited'};}});
+ assert.equal(writes[0].patch.resolution_status,'resolved');assert.equal(writes[0].filters.account_id,'A');assert.equal(writes[1].patch.resolution_status,'failed');assert.equal(writes[1].filters.capture_id,'legacy_two');
 });

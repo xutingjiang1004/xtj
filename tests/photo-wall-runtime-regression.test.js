@@ -319,6 +319,7 @@ function createPhotoWallRenderRuntime(photos, options = {}) {
   }
 
   const grid = {
+    classList: { toggle() {} },
     get innerHTML() { return markup; },
     set innerHTML(value) {
       markup = String(value || '');
@@ -375,7 +376,7 @@ function createPhotoWallRenderRuntime(photos, options = {}) {
     return node;
   }
 
-  const toggle = { classList: { toggle() {} } };
+  const toggle = { classList: { toggle() {} }, setAttribute() {} };
   const window = {
     photoWallData: photos.slice(),
     pwCurrentSortedPhotos: [],

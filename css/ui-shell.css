@@ -3014,3 +3014,74 @@ html.xtj-ios-viewport .app-container {
 .support-code-stage { position:absolute;inset:calc(56px + env(safe-area-inset-top)) 12px calc(24px + env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center;touch-action:none;overflow:hidden; }
 .support-code-stage img { display:block;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;transform-origin:center; }
 .support-code-close { position:absolute;right:14px;top:calc(8px + env(safe-area-inset-top));width:44px;height:44px;z-index:1;padding:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:transparent!important;font-size:30px;line-height:1;color:#162b20!important; }
+/* Albums use photo covers and quiet metadata, without inherited button pills. */
+#photoWallContainer #photoGrid.pw-album-overview { grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 14px;align-items:start; }
+#photoWallContainer #photoGrid .pw-album-card { display:block!important;min-width:0;width:100%;padding:0!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;text-align:left;overflow:visible;transform:none!important; }
+#photoWallContainer #photoGrid .pw-album-card::before,#photoWallContainer #photoGrid .pw-album-card::after { content:none!important; }
+#photoWallContainer .pw-album-cover-frame { display:block;aspect-ratio:4/3;overflow:hidden;border-radius:14px;background:rgba(104,154,129,.1); }
+#photoWallContainer #photoGrid .pw-album-cover { display:block!important;width:100%!important;height:100%!important;aspect-ratio:auto!important;object-fit:cover;border-radius:0!important;margin:0!important;transition:transform 220ms ease; }
+#photoWallContainer .pw-album-title { margin:10px 0 3px;color:var(--text-main);font-size:14px;font-weight:600;line-height:1.4; }
+#photoWallContainer .pw-album-count { color:var(--text-muted);font-size:12px;line-height:1.5; }
+#photoWallContainer .pw-album-card:focus-visible { outline:2px solid var(--chat-accent,#168665);outline-offset:5px; }
+#photoWallContainer .pw-album-toolbar { grid-column:1/-1;margin:0 0 8px;padding:0;background:none;border:0;border-radius:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none; }
+#photoWallContainer .pw-album-back-btn { display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:0 8px 0 0!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;color:var(--text-main); }
+#photoWallContainer .pw-album-back-btn svg { width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round; }
+#photoWallContainer .pw-album-back-btn::before,#photoWallContainer .pw-album-back-btn::after { content:none!important; }
+@media(min-width:720px) { #photoWallContainer #photoGrid.pw-album-overview { grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:26px 20px; } }
+@media(hover:hover) and (pointer:fine) { #photoWallContainer .pw-album-card:hover .pw-album-cover { transform:scale(1.025); } }
+@media(prefers-reduced-motion:reduce) { #photoWallContainer .pw-album-cover { transition:none!important; } }
+html[data-xtj-motion="off"] #photoWallContainer .pw-album-cover { transition:none!important; }
+
+/* Chat image zoom occupies the viewport; controls remain above the image. */
+#chatGallery { overflow:hidden;padding:0; }
+#chatGallery .chat-gallery-stage { position:absolute;inset:0;width:100%;height:100%;overflow:hidden; }
+#chatGallery .chat-gallery-stage img { display:block;width:100%;height:100%;max-width:none;max-height:none;object-fit:contain;transform-origin:center;transition:none;will-change:transform;user-select:none;-webkit-user-select:none; }
+#chatGallery header,#chatGallery footer { position:absolute;inset-inline:12px;z-index:2;pointer-events:none; }
+#chatGallery header { top:max(10px,env(safe-area-inset-top)); }
+#chatGallery footer { bottom:max(12px,env(safe-area-inset-bottom)); }
+#chatGallery button { pointer-events:auto; }
+
+@media(prefers-reduced-motion:reduce) { #photoWallContainer #photoGrid { transition:none!important;animation:none!important; } }
+html[data-xtj-motion="off"] #photoWallContainer #photoGrid { transition:none!important;animation:none!important; }
+
+/* Quiet desktop contact rows and an AI entry share the site's mint typography. */
+#panelPosts .desktop-right-rail .desktop-rail-card { box-shadow:none; }
+#panelPosts .desktop-right-rail .desktop-ai-card { border-color:var(--wb-border); }
+#panelPosts .desktop-right-rail :is(.desktop-contact-preview,.desktop-ai-prompt,.desktop-rail-heading button) {
+  border:0!important;border-radius:0!important;background:transparent!important;background-image:none!important;
+  box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;transform:none!important;
+}
+#panelPosts .desktop-right-rail :is(.desktop-contact-preview,.desktop-ai-prompt,.desktop-rail-heading button)::before,
+#panelPosts .desktop-right-rail :is(.desktop-contact-preview,.desktop-ai-prompt,.desktop-rail-heading button)::after { content:none!important;display:none!important; }
+#panelPosts .desktop-right-rail .desktop-contact-preview { padding:10px 0!important;min-height:54px;text-align:left!important; }
+#panelPosts .desktop-right-rail .desktop-contact-preview + .desktop-contact-preview { border-top:1px solid var(--wb-border)!important; }
+#panelPosts .desktop-right-rail .desktop-contact-preview__name { font-size:13px;font-weight:600; }
+#panelPosts .desktop-right-rail .desktop-contact-preview__preview { font-size:12px; }
+#panelPosts .desktop-right-rail .desktop-ai-prompt { margin-top:10px;min-height:48px!important;padding:10px 0!important;color:var(--wb-text)!important;font-size:13px!important; }
+#panelPosts .desktop-right-rail .desktop-ai-prompt b { color:var(--wb-accent);font-size:22px; }
+#panelPosts .desktop-right-rail .desktop-rail-heading button { min-height:44px;padding:0!important;color:var(--wb-accent)!important; }
+#panelPosts .desktop-right-rail :is(.desktop-contact-preview,.desktop-ai-prompt):hover { color:var(--wb-accent)!important; }
+#panelPosts .desktop-right-rail :is(.desktop-contact-preview,.desktop-ai-prompt,.desktop-rail-heading button):focus-visible { outline:2px solid var(--wb-accent);outline-offset:3px; }
+
+/* Half-transparent deletion glass without the older full-screen frosting. */
+html #delModal.modal-overlay,html #delModal.modal-overlay.active,
+html #ppConfirmOverlay.pp-confirm-overlay,html #ppConfirmOverlay.pp-confirm-overlay.active { background:rgba(10,25,18,.12)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important; }
+html #delModal .modal-box.glass.post-action-box.post-delete-modal,
+html #ppConfirmOverlay .pp-confirm-dialog {
+  max-width:310px!important;padding:24px 24px 14px!important;border-radius:16px!important;
+  background:rgba(248,253,250,.5)!important;background-image:none!important;
+  border:1px solid rgba(255,255,255,.45)!important;backdrop-filter:blur(3px) saturate(125%)!important;-webkit-backdrop-filter:blur(3px) saturate(125%)!important;
+  box-shadow:0 8px 28px rgba(10,30,20,.1)!important;
+}
+html #delModal .post-delete-title,html #ppConfirmOverlay .pp-confirm-title { font-size:18px!important;letter-spacing:0!important;margin-bottom:8px!important;font-weight:600!important; }
+html #delModal .post-delete-message,html #ppConfirmOverlay .pp-confirm-msg { font-size:13px!important;text-shadow:0 1px 2px rgba(255,255,255,.65); }
+html #delModal .post-delete-actions,html #ppConfirmOverlay .pp-confirm-actions { gap:20px;margin-top:18px!important; }
+html #delModal .post-delete-modal::before,html #delModal .post-delete-modal::after,
+html #ppConfirmOverlay .pp-confirm-dialog::before,html #ppConfirmOverlay .pp-confirm-dialog::after { content:none!important;display:none!important; }
+@media(prefers-reduced-transparency:reduce) {
+  html #delModal .modal-box.glass.post-action-box.post-delete-modal,html #ppConfirmOverlay .pp-confirm-dialog { background:#eaf3ed!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important; }
+}
+
+#panelPosts .desktop-right-rail .desktop-contacts-preview { justify-items:stretch!important;place-items:stretch!important; }
+#panelPosts .desktop-right-rail .desktop-contact-preview { display:grid!important;grid-template-columns:30px minmax(0,1fr) auto!important;width:100%!important;margin:0!important; }
+#panelPosts .desktop-right-rail .desktop-ai-prompt { display:flex!important;width:100%!important;justify-content:space-between!important;text-align:left!important; }

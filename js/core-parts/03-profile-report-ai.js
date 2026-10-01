@@ -305,6 +305,9 @@
             window.handleAvatarUpload = async function(event) {
                 const file = event.target.files[0];
                 if (!file) return;
+                var avatarOwner=currentUser,avatarEpoch=_authStateEpoch;
+                function avatarOwnerActive(){return !!avatarOwner&&currentUser===avatarOwner&&_authStateEpoch===avatarEpoch;}
+                if(!avatarOwnerActive())return;
                 
                 if (!file.type.startsWith('image/')) {
                     showToast('请选择图片文件');
@@ -344,6 +347,7 @@
                     }
                     
                     // 上传到 Supabase Storage
+                    if(!avatarOwnerActive())return;
                     if (/\.(svgz?|html?|xml|swf)$/i.test(String(file && file.name || '')) || /^image\/svg\+xml/i.test(String(file && file.type || ''))) {
                         throw new Error('file type not allowed');
                     }
@@ -352,6 +356,7 @@
                     
                     // 获取 Public URL
                     const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+                    if(!avatarOwnerActive())return;
                     
                     // 头像记录必须由服务端校验当前用户并写入，不能在 anon
                     // 客户端保留一条绕过 RLS/归属校验的旧写入路径。
@@ -360,16 +365,19 @@
                             throw new Error('头像服务不可用');
                         }
                         var avAuthHeaders = (typeof window.getUserAuthHeaders === 'function') ? await window.getUserAuthHeaders() : {};
+                        if(!avatarOwnerActive())return;
                         var avResp = await fetch(window.API_BASE.replace(/\/$/, '') + '/api/avatar', {
                             method: 'POST',
                             headers: Object.assign({ 'Content-Type': 'application/json' }, avAuthHeaders || {}),
                             body: JSON.stringify({ media_url: avatarUrl })
                         });
                         var avData = await avResp.json().catch(function() { return {}; });
+                        if(!avatarOwnerActive())return;
                         if (!avResp.ok || !avData || !avData.ok) {
                             throw new Error((avData && avData.error) || '头像保存失败');
                         }
                     } catch (avErr) {
+                        if(!avatarOwnerActive())return;
                         // The request may have committed before its response
                         // was lost. Confirm ownership server-side before
                         // deleting the uploaded object, otherwise a valid
@@ -386,6 +394,7 @@
                             var statusData = await statusResp.json().catch(function() { return {}; });
                             avatarCommitted = !!(statusResp.ok && statusData && statusData.committed);
                         } catch (statusErr) {}
+                        if(!avatarOwnerActive())return;
                         if (avatarCommitted) {
                             setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                             try {
@@ -416,6 +425,7 @@
                     showToast('头像更新成功');
                     window.safeStorage.remove(CACHE_KEY);
                     await loadFeed(true);
+                    if(!avatarOwnerActive())return;
                     setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
                     updateAllAvatarElements(avatarUrl);
                 } catch(e) {
@@ -430,6 +440,7 @@
                 var safeUrl = escapeHtml(sanitizeUrl(avatarUrl));
                 if (!safeUrl) return;
                 var avatarContent = renderAvatarContent(currentUser, avatarUrl);
+                window.dispatchEvent(new CustomEvent('xtj:avatar-updated',{detail:{username:currentUser,url:avatarUrl}}));
                 var els = [
                     document.getElementById('profileAvatar'),
                     document.getElementById('myAvatar'),
