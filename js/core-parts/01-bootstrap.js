@@ -2537,7 +2537,12 @@ function isAdmin() {
             }
             
             // FLIP Animation: Step 1 - First (记录按钮位置)
-            var origin = window._confirmOrigin;
+            // Keep the photo confirmation glass stationary: transforming/fading its
+            // backdrop root makes Safari paint clear glass before the blur resolves.
+            var photoDelete = title === '删除照片';
+            overlay.classList.toggle('photo-delete-confirm', photoDelete);
+            overlay._ppDeleteOrigin = null;
+            var origin = photoDelete ? null : window._confirmOrigin;
             
             // FLIP Animation: Step 2 - Last (设置最终状态)
             overlay.classList.remove('closing');

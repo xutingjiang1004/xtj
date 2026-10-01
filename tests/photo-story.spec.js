@@ -88,7 +88,7 @@ test('delete confirmation stays readable over bright and dark photo backgrounds'
  await fullPage(page);await page.evaluate(()=>{document.body.insertAdjacentHTML('beforeend','<div id="contrastPhoto" style="position:fixed;inset:0;background:repeating-linear-gradient(45deg,#fff 0 70px,#172a24 70px 140px);z-index:10000"></div>');window.showConfirm('删除照片','删除后无法恢复，确定要删除吗？','删除',function(){});});
  for(const theme of ['light','dark']){
   await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);await page.waitForTimeout(150);
-  const style=await page.locator('.pp-confirm-dialog').evaluate(el=>({bg:getComputedStyle(el).backgroundColor,text:getComputedStyle(document.getElementById('ppConfirmMsg')).color}));expect(style.bg).toContain('0.5');expect(style.text).toBe('rgb(8, 19, 14)');
+  const style=await page.locator('.pp-confirm-dialog').evaluate(el=>({bg:getComputedStyle(el).backgroundColor,text:getComputedStyle(document.getElementById('ppConfirmMsg')).color}));expect(style.bg).toContain('0.5');expect(style.text).toBe('rgb(38, 58, 48)');
   if(page.context().browser().browserType().name()==='chromium')await page.screenshot({path:'/workspace/scratch/delete-confirm-'+theme+'.png'});
  }
 });
@@ -107,7 +107,7 @@ test('compact composer removes the default filter card and deletion pills in bot
  await page.setViewportSize({width:390,height:844});await fullPage(page);await expect(page.locator('#postFilterBar')).toHaveCount(0);await expect(page.locator('#postFilterPanel')).toBeHidden();await expect(page.locator('#postLocationAddBtn svg')).toBeVisible();await expect(page.locator('.compose-tool svg')).toHaveCount(2);
  expect((await page.locator('#publishBox').boundingBox()).height).toBeLessThan(260);await page.screenshot({path:info.outputPath('compact-composer.png')});
  await page.locator('#filterToggleBtn').click();await expect(page.locator('#postFilterPanel')).toBeVisible();await page.locator('#filterToggleBtn').click();
- for(const theme of ['light','dark']){await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;document.getElementById('delModal').style.display='flex';document.getElementById('delModal').classList.add('active');},theme);await expect(page.locator('#delModal .post-delete-modal')).toHaveCSS('background-color','rgba(248, 253, 250, 0.5)');for(const selector of ['#delModal .post-delete-message','#delModal .post-delete-cancel','#delModal .post-delete-confirm']){await expect(page.locator(selector)).toHaveCSS('background-color','rgba(0, 0, 0, 0)');await expect(page.locator(selector)).toHaveCSS('box-shadow','none');}await page.screenshot({path:info.outputPath('post-delete-'+theme+'.png')});}
+ for(const theme of ['light','dark']){await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;document.getElementById('delModal').style.display='flex';document.getElementById('delModal').classList.add('active');},theme);await expect(page.locator('#delModal .post-delete-modal')).toHaveCSS('background-color','rgba(248, 253, 250, 0.7)');for(const selector of ['#delModal .post-delete-message','#delModal .post-delete-cancel','#delModal .post-delete-confirm']){await expect(page.locator(selector)).toHaveCSS('background-color','rgba(0, 0, 0, 0)');await expect(page.locator(selector)).toHaveCSS('box-shadow','none');}await page.screenshot({path:info.outputPath('post-delete-'+theme+'.png')});}
 });
 test('explicit post GPS carries accuracy and capture identity, while stale account callbacks cannot send',async({page})=>{
  await fullPage(page);await page.evaluate(()=>{window.__gpsCalls=[];Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition(success){window.__gpsSuccess=success;}}});window.xtjProtectedFetch=async(url,init)=>{window.__gpsCalls.push({url,body:init&&init.body});return new Response(JSON.stringify({ok:true,province:'福建省',city:'福州市',options:[{level:'city',name:'福建省福州市',province:'福建省',city:'福州市'}]}));};});
@@ -141,4 +141,19 @@ test('view, like and comment icons never inherit square glass backgrounds in eit
   await page.screenshot({path:info.outputPath('photo-icons-'+theme+'.png')});
  }
  await page.locator('#ppLikeBtn').click();await expect(page.locator('#ppLikeBtn')).toHaveAttribute('aria-pressed','true');await expect(page.locator('#ppLikeBtn')).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
+});
+
+test('photo deletion glass stays fixed from the first frame and cancel never deletes',async({page})=>{
+ await fullPage(page);
+ const samples=await page.evaluate(async()=>{
+  window.__confirmDeletes=0;window._confirmOrigin={btnCx:350,btnCy:700,btnWidth:40,btnHeight:40};
+  window.showConfirm('删除照片','删除后无法恢复，确定删除吗？','确定删除',()=>window.__confirmDeletes++);
+  const overlay=document.getElementById('ppConfirmOverlay'),dialog=overlay.querySelector('.pp-confirm-dialog'),samples=[];
+  const started=performance.now();do {const o=getComputedStyle(overlay),d=getComputedStyle(dialog);samples.push({opacity:o.opacity,dialogOpacity:d.opacity,transform:d.transform,blur:d.backdropFilter||d.webkitBackdropFilter});await new Promise(requestAnimationFrame);}while(performance.now()-started<650);
+  return samples;
+ });
+ for(const sample of samples){expect(sample.opacity).toBe('1');expect(sample.dialogOpacity).toBe('1');expect(sample.transform).toBe('none');expect(sample.blur).toContain('blur(12px)');}
+ await page.locator('.pp-confirm-cancel').click();await expect(page.locator('#ppConfirmOverlay')).not.toHaveClass(/active|closing/);expect(await page.evaluate(()=>window.__confirmDeletes)).toBe(0);
+ await page.evaluate(()=>window.showConfirm('删除照片','删除后无法恢复，确定删除吗？','确定删除',()=>window.__confirmDeletes++));
+ await page.locator('#ppConfirmOkBtn').click();await expect.poll(()=>page.evaluate(()=>window.__confirmDeletes)).toBe(1);
 });
