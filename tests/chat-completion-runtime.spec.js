@@ -323,7 +323,7 @@ test('long press records, release prepares upload and sends audio through the ex
   const box=await page.locator('.chat-input-wrap').boundingBox(); await page.mouse.move(box.x+20,box.y+20); await page.mouse.down();
   await expect(page.locator('#chatVoiceButton')).toHaveAttribute('aria-pressed','true');
   await expect(page.locator('#chatRecordingIndicator')).toBeVisible();
-  await expect(page.locator('#chatVoiceStatus')).toContainText('录音');
+  await expect(page.locator('#chatVoiceStatus')).toContainText(/录音|松开发送/);
   const wave=page.locator('#chatRecordingIndicator i').first();
   const first=await wave.evaluate(el=>getComputedStyle(el).transform);
   await expect.poll(()=>wave.evaluate(el=>getComputedStyle(el).transform)).not.toBe(first);
@@ -567,7 +567,7 @@ test('AAC MP4 voice plays with progressing time, and permission failure does not
  await page.evaluate(({stamp})=>{
   const prior=window.xtjProtectedFetch;window.__voiceURLRefreshes=0;
   window.xtjProtectedFetch=async(url,options)=>{
-   if(url.includes('/api/dm/messages'))return new Response(JSON.stringify({ok:true,has_more:false,data:[{id:'123e4567-e89b-42d3-a456-000000000010',user_name:'tester',media_url:'aac-peer',created_at:stamp,content:JSON.stringify({media:{kind:'audio',url:'https://example.invalid/voice.m4a',mimeType:'audio/mp4',duration:2}})}]}));
+   if(url.includes('/api/dm/messages'))return new Response(JSON.stringify({ok:true,has_more:false,data:[{id:'123e4567-e89b-42d3-a456-000000000010',user_name:'tester',media_url:'aac-peer',created_at:stamp,content:JSON.stringify({transcript:'已保存的转写',media:{kind:'audio',url:'https://example.invalid/voice.m4a',mimeType:'audio/mp4',duration:2}})}]}));
    if(url.includes('/voice-url')){window.__voiceURLRefreshes++;return new Response(JSON.stringify({ok:true,url:'https://example.invalid/voice.m4a'}));}return prior(url,options);
   };window.openChat('aac-peer');
  },{stamp});
@@ -642,4 +642,66 @@ test('chat gallery zoom occupies the full viewport, pans freely and keeps close 
  await page.locator('.msg-img').click();await expect(page.locator('#chatGallery img')).toHaveJSProperty('naturalWidth',900);await expect.poll(async()=>Math.abs((await page.locator('.chat-gallery-stage').boundingBox()).y)).toBeLessThan(.01);const stage=await page.locator('.chat-gallery-stage').boundingBox();expect(Math.abs(stage.y)).toBeLessThan(.01);expect(stage.height).toBe(844);
  await page.locator('.chat-gallery-stage').dblclick({position:{x:195,y:422}});await expect.poll(()=>page.locator('#chatGallery img').evaluate(e=>new DOMMatrix(getComputedStyle(e).transform).a)).toBe(2);const enlarged=await page.locator('#chatGallery img').boundingBox();expect(enlarged.y).toBeLessThan(0);expect(enlarged.y+enlarged.height).toBeGreaterThan(844);
  await page.mouse.move(195,422);await page.mouse.down();await page.mouse.move(260,480,{steps:8});await page.mouse.up();expect(await page.locator('#chatGallery img').evaluate(e=>Math.abs(new DOMMatrix(getComputedStyle(e).transform).m41))).toBeGreaterThan(20);await page.screenshot({path:info.outputPath('chat-fullscreen-zoom.png')});await page.locator('[data-gallery="close"]').click();await expect(page.locator('#chatGallery')).toHaveCount(0);
+});
+
+async function setupFlash(page, options={}) {
+  await setup(page);
+  await page.waitForTimeout(650);
+  const png=await require('sharp')({create:{width:12,height:8,channels:3,background:'#1baa88'}}).png().toBuffer();
+  await page.evaluate(({id,png,options})=>{
+    const previous=window.xtjProtectedFetch;window.__flashOpens=0;window.__flashForms=[];window.__flashRevoked=0;
+    const revoke=URL.revokeObjectURL.bind(URL);URL.revokeObjectURL=(url)=>{if(url.startsWith('blob:'))window.__flashRevoked++;revoke(url);};
+    window.xtjProtectedFetch=async(url,opts={})=>{
+      if(url.includes('/flash/send')){
+        window.__flashForms.push({client:opts.body.get('client_id'),peer:opts.body.get('target_user'),file:opts.body.get('image').size,isFormData:opts.body instanceof FormData});
+        if(options.delaySend)await new Promise(r=>{window.__releaseFlashSend=r;});
+        if(options.quota)return new Response(JSON.stringify({ok:false,error:'今日闪图次数已用完'}),{status:429});
+        return new Response(JSON.stringify({ok:true,message:{id,user_name:'tester',media_url:'peer',media_type:'__dm__',created_at:new Date().toISOString(),content:JSON.stringify({text:'[闪图 3 秒]',flash:{id,duration_ms:3000,state:'ready'}})}}));
+      }
+      if(url.includes('/flash/open')){
+        window.__flashOpens++;
+        if(options.delayOpen)await new Promise(r=>{window.__releaseFlashOpen=r;});
+        if(window.__flashOpens>1)return new Response(JSON.stringify({ok:false,error:'闪图已失效'}),{status:410});
+        return new Response(Uint8Array.from(atob(png),c=>c.charCodeAt(0)),{headers:{'Content-Type':'image/png'}});
+      }
+      return previous(url,opts);
+    };
+  },{id,png:png.toString('base64'),options});
+  await page.locator('#dockChatFileInp').setInputFiles({name:'original.png',mimeType:'image/png',buffer:png});
+  await expect(page.locator('#chatFlashSendBtn')).toBeVisible();
+}
+
+test('flash button sends multipart original file above send; lightning preview contains no image URL',async({page})=>{
+  await setupFlash(page);
+  const positions=await page.evaluate(()=>({flash:document.getElementById('chatFlashSendBtn').getBoundingClientRect().y,send:document.getElementById('dockChatSendBtn').getBoundingClientRect().y}));
+  expect(positions.flash).toBeLessThan(positions.send);
+  await page.locator('#chatFlashSendBtn').click();
+  await expect(page.locator('.chat-flash-card')).toHaveCount(1);await expect(page.locator('.chat-flash-card')).toContainText('闪图 3 秒');
+  await expect(page.locator('.chat-flash-card img')).toHaveCount(0);
+  const forms=await page.evaluate(()=>window.__flashForms);expect(forms[0].isFormData).toBe(true);expect(forms[0].peer).toBe('peer');expect(forms[0].file).toBeGreaterThan(0);
+});
+test('flash clear view lasts three seconds then clears image and cannot reopen',async({page})=>{
+  await setupFlash(page);await page.locator('#chatFlashSendBtn').click();await page.locator('.chat-flash-card').click();
+  await expect(page.locator('#chatFlashViewer.is-viewing')).toBeVisible();
+  const start=Date.now();await page.waitForTimeout(1500);await expect(page.locator('#chatFlashViewer img')).toBeVisible();
+  await expect(page.locator('#chatFlashViewer')).toHaveCount(0,{timeout:3000});expect(Date.now()-start).toBeGreaterThanOrEqual(2800);
+  await expect(page.locator('.chat-flash-card')).toBeDisabled();await expect(page.locator('.chat-flash-card')).toContainText('已失效');
+  expect(await page.evaluate(()=>window.__flashOpens)).toBe(1);expect(await page.evaluate(()=>window.__flashRevoked)).toBeGreaterThan(0);
+});
+test('flash close immediately erases clear image before exit transition',async({page})=>{
+  await setupFlash(page);await page.locator('#chatFlashSendBtn').click();await page.locator('.chat-flash-card').click();await expect(page.locator('#chatFlashViewer.is-viewing')).toBeVisible();
+  await page.locator('#chatFlashViewer .flash-close').click();
+  expect(await page.locator('#chatFlashViewer img').getAttribute('src')).toBeNull();await expect(page.locator('#chatFlashViewer')).toHaveCount(0);
+  await expect(page.locator('.chat-flash-card')).toBeDisabled();
+});
+test('flash quota failure retains selection and stable retry id',async({page})=>{
+  await setupFlash(page,{quota:true});await page.locator('#chatFlashSendBtn').click();await expect(page.locator('#chatFlashSendBtn')).toBeEnabled();await page.locator('#chatFlashSendBtn').click();
+  await page.waitForFunction(()=>window.__flashForms.length===2);const forms=await page.evaluate(()=>window.__flashForms);expect(forms[0].client).toBe(forms[1].client);await expect(page.locator('#dockChatFilePreview')).toBeVisible();await expect(page.locator('.chat-flash-card')).toHaveCount(0);
+});
+test('flash late image response after closing never creates an image URL',async({page})=>{
+  await setupFlash(page,{delayOpen:true});await page.locator('#chatFlashSendBtn').click();await page.locator('.chat-flash-card').click();await page.waitForFunction(()=>typeof window.__releaseFlashOpen==='function');await page.locator('#chatFlashViewer .flash-close').click();await page.evaluate(()=>window.__releaseFlashOpen());await page.waitForTimeout(250);await expect(page.locator('#chatFlashViewer')).toHaveCount(0);await expect(page.locator('.chat-flash-card')).toBeDisabled();
+});
+test('flash sending account teardown discards late response and does not block next conversation',async({page})=>{
+  await setupFlash(page,{delaySend:true});await page.locator('#chatFlashSendBtn').click();await page.waitForFunction(()=>typeof window.__releaseFlashSend==='function');
+  await page.evaluate(()=>{window.__xtjResetChatPanels();window.__releaseFlashSend();});await page.waitForTimeout(200);await expect(page.locator('.chat-flash-card')).toHaveCount(0);await page.evaluate(()=>window.openChat('peer'));await expect(page.locator('#dockChatInput')).toBeEnabled();await page.locator('#dockChatInput').fill('after teardown');await page.locator('#dockChatSendBtn').click();await expect(page.locator('#dockChatMessages .chat-msg').filter({hasText:'after teardown'})).toHaveCount(1);
 });

@@ -3085,3 +3085,27 @@ html #ppConfirmOverlay .pp-confirm-dialog::before,html #ppConfirmOverlay .pp-con
 #panelPosts .desktop-right-rail .desktop-contacts-preview { justify-items:stretch!important;place-items:stretch!important; }
 #panelPosts .desktop-right-rail .desktop-contact-preview { display:grid!important;grid-template-columns:30px minmax(0,1fr) auto!important;width:100%!important;margin:0!important; }
 #panelPosts .desktop-right-rail .desktop-ai-prompt { display:flex!important;width:100%!important;justify-content:space-between!important;text-align:left!important; }
+
+/* One-time photos show no image thumbnail and never enter the ordinary gallery. */
+.chat-send-stack{display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0;}
+#panelChat #chatFlashSendBtn{min-height:30px;padding:4px 12px!important;background:#287bc1!important;color:#fff!important;border:0!important;border-radius:8px!important;box-shadow:none!important;font:inherit;font-size:12px;}
+#panelChat #chatFlashSendBtn[hidden]{display:none!important;}
+#panelChat .chat-flash-card{display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:10px;width:136px!important;min-height:116px;padding:18px!important;background:transparent!important;border:0!important;box-shadow:none!important;color:inherit;font:inherit;font-size:13px;}
+#panelChat .chat-flash-card::before,#panelChat .chat-flash-card::after,#chatFlashSendBtn::before,#chatFlashSendBtn::after{content:none!important;}
+.chat-flash-card svg{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;}
+.chat-flash-card:disabled{opacity:.55;cursor:default;}
+.chat-flash-viewer{position:fixed;inset:0;z-index:22000;background:#07100d;display:grid;place-items:center;animation:flashReveal .18s ease;}
+.chat-flash-viewer img{width:100%;height:100%;object-fit:contain;opacity:0;transition:opacity .16s ease;}
+.chat-flash-viewer.is-viewing img{opacity:1;}
+.chat-flash-viewer .flash-loading{position:absolute;color:#e4eee9;font-size:14px;}
+.chat-flash-viewer .flash-close{position:absolute;right:max(14px,env(safe-area-inset-right));top:max(14px,env(safe-area-inset-top));z-index:2;width:44px;height:44px;background:rgba(255,255,255,.12)!important;color:#fff!important;border:1px solid rgba(255,255,255,.25)!important;box-shadow:none!important;border-radius:14px!important;font-size:26px;padding:0!important;}
+.flash-clock{position:absolute;bottom:max(24px,env(safe-area-inset-bottom));color:#fff;display:flex;align-items:center;gap:10px;font-size:17px;text-shadow:0 1px 4px #000;}
+.flash-clock i{width:80px;height:2px;background:#fff;transform-origin:left;}
+.is-viewing .flash-clock i{animation:flashCountdown 3s linear forwards;}
+@keyframes flashCountdown{to{transform:scaleX(0);}}
+@keyframes flashReveal{from{opacity:0;transform:scale(.99);}to{opacity:1;transform:scale(1);}}
+@media(prefers-reduced-motion:reduce){.chat-flash-viewer,.is-viewing .flash-clock i{animation:none;}.chat-flash-viewer img{transition:none;}}
+
+#chatFlashViewer.is-closing{animation:flashViewerLeave 150ms ease-out forwards;}
+@keyframes flashViewerLeave{to{opacity:0;transform:scale(.985);}}
+@media(prefers-reduced-motion:reduce){#chatFlashViewer.is-closing{animation:none;opacity:0;}}

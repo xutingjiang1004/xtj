@@ -9,10 +9,11 @@ test('GPS record binds the authenticated actor and account; duplicate retries do
  await assert.rejects(recordLocationFix({supabase:db,actor:'A',body:{latitude:200,longitude:119},reason:'post_location'}));assert.equal(writes.length,1);
 });
 test('location history requires admin credentials or reads only the current actor, and rejects invalid cursors',async()=>{
- const calls=[];const db={from(){const q={select(){return q;},eq(k,v){calls.push([k,v]);return q;},or(){return q;},order(){return q;},limit(){return q;},then(resolve){return Promise.resolve({data:Array.from({length:51},(_,i)=>({id:'123e4567-e89b-42d3-a456-'+String(i).padStart(12,'0'),received_at:'2026-10-01T00:00:00Z',latitude:26,longitude:119}))}).then(resolve);}};return q;}};
+ const calls=[];const db={from(){const q={select(){return q;},eq(k,v){calls.push([k,v]);return q;},or(){return q;},order(){return q;},limit(n){calls.push(['limit',n]);return q;},then(resolve){return Promise.resolve({data:Array.from({length:51},(_,i)=>({id:'123e4567-e89b-42d3-a456-'+String(i).padStart(12,'0'),received_at:'2026-10-01T00:00:00Z',latitude:26,longitude:119}))}).then(resolve);}};return q;}};
  const app=express();app.use(createLocationHistory({express,supabase:db,verifyToken(req,res,next){if(req.get('Authorization')==='admin')next();else res.sendStatus(403);},authenticateUser(req,res,next){if(req.get('Authorization')==='A'){req.userName='A';next();}else res.sendStatus(401);}}));
  await request(app).get('/admin/user-location-history?user_name=B').set('Authorization','A').expect(403);
- const r=await request(app).get('/api/user/location-history?user_name=B').set('Authorization','A').expect(200);assert.equal(r.body.items.length,50);assert.equal(r.body.has_more,true);assert.deepEqual(calls.at(-1),['user_name','A']);
+ const r=await request(app).get('/api/user/location-history?user_name=B').set('Authorization','A').expect(200);assert.equal(r.body.items.length,50);assert.equal(r.body.has_more,true);assert.ok(calls.some(c=>c[0]==='user_name'&&c[1]==='A'));assert.deepEqual(calls.at(-1),['limit',51]);
+ const admin=await request(app).get('/admin/user-location-history?user_name=B').set('Authorization','admin').expect(200);assert.equal(admin.body.items.length,50);assert.equal(admin.body.has_more,false);assert.equal(admin.body.next_cursor,null);assert.deepEqual(calls.at(-1),['limit',50]);
  await request(app).get('/api/user/location-history?cursor=forged').set('Authorization','A').expect(400);
 });
 test('browser context saves only bounded supported facts and does not claim unavailable Safari network data',async()=>{

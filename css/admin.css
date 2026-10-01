@@ -2489,3 +2489,5 @@
 .admin-support-codes input { width:100%; box-sizing:border-box; }
 .admin-support-disclaimer { font-size:12px; line-height:1.8; color:var(--text-muted,#7c8c82); }
 @media(max-width:580px) { .admin-support-codes { grid-template-columns:1fr; } }
+
+#adminFlashLimits{padding:12px 0;border-bottom:1px solid var(--border);font-size:12px;}#adminFlashLimits label{display:block;margin:8px 0;}#adminFlashLimits input[type=number]{display:block;max-width:200px;padding:8px;margin-top:4px;}#adminFlashLimits button{min-height:44px;padding:0 8px;background:none;border:0;color:var(--primary);}#adminFlashLimits details{margin-top:12px;}
