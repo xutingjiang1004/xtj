@@ -175,6 +175,7 @@ app.use((req, res, next) => {
 //   LB 追加的真实客户端公网 IP 必在链最右侧，从右往左扫描会先停在它那里；
 //   客户端伪造值永远在最左侧，不可能被选中（见下方 getClientIp 注释与测试）。
 app.set('trust proxy', function trustProxyHop(addr) {
+  if (require('./trusted-proxies').isCloudflareProxy(addr)) return true;
   return isPrivateOrReservedIp(addr);
 });
 
@@ -4153,7 +4154,7 @@ function buildUserVisitMap(visitRows) {
 }
 
 function getEffectiveRegTime(authInfo, userInfo) {
-  return userInfo && userInfo.reg_time || authInfo && authInfo.auth_created_at || null;
+  return authInfo && authInfo.auth_created_at || userInfo && userInfo.reg_time || null;
 }
 
 function buildAdminUsersPayload(authRows, userInfoRows) {
@@ -4494,6 +4495,8 @@ app.use(function(req, res, next) {
   next();
 });
 
+app.use('/api/voice-model', require('./voice-model-assets').createVoiceModelAssets({ express }));
+
 app.use(express.static(path.join(__dirname, '..'), {
   maxAge: '1h',
   setHeaders: function(res, filePath) {
@@ -4568,6 +4571,7 @@ function normalizeClientIpValue(value) {
     if (hostPortMatch) ip = hostPortMatch[1];
   }
   if (ip.indexOf('::ffff:') === 0) ip = ip.slice(7);
+  if (require('net').isIP(ip) === 6) { try { ip = new URL('http://[' + ip + ']/').hostname.slice(1,-1); } catch (_) {} }
   return ip;
 }
 
@@ -4577,7 +4581,7 @@ function firstPublicIpFromForwardedChain(req) {
   var parts = String(raw).split(',');
   for (var i = parts.length - 1; i >= 0; i--) {
     var hop = normalizeClientIpValue(parts[i]);
-    if (hop && !isPrivateOrReservedIp(hop)) return hop;
+    if (hop && !isPrivateOrReservedIp(hop) && !require('./trusted-proxies').isCloudflareProxy(hop)) return hop;
   }
   return '';
 }
@@ -4599,7 +4603,8 @@ function getClientIp(req) {
   }
   // 兜底：req.ip/socket 全是私网地址（trust proxy 信任范围仍不够），
   // 从 X-Forwarded-For 链右往左找第一个公网地址。
-  var chainIp = firstPublicIpFromForwardedChain(req);
+  var socketIp = normalizeClientIpValue(req && req.socket && req.socket.remoteAddress);
+  var chainIp = socketIp && require('net').isIP(socketIp) && isPrivateOrReservedIp(socketIp) ? firstPublicIpFromForwardedChain(req) : '';
   if (chainIp) {
     if (req) req._clientIpSource = 'xff_chain_public';
     return chainIp;
@@ -5236,10 +5241,11 @@ var IP_CACHE_TTL_FAIL = 120000;
 // 组播与保留段；这些地址一旦被外发即产生无效请求与隐私面。
 function isPrivateOrReservedIp(ip) {
   var v = String(ip || '').trim().toLowerCase();
-  if (!v || v === 'unknown') return true;
+  if (!v || v === 'unknown' || !require('net').isIP(v)) return true;
   var mapped = v.match(/^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (mapped) v = mapped.slice(1).join('.');
   if (v.indexOf(':') >= 0) {
+    if (v.startsWith('2001:db8:') || v.startsWith('ff')) return true;
     if (v === '::1' || v === '::' || v.indexOf('::ffff:127.') === 0) return true;
     var first = parseInt(v.split(':')[0], 16);
     if (isNaN(first)) return true; // 非法形式，不外发
@@ -5406,6 +5412,7 @@ async function resolveIpLocationUncached(ip) {
         if (!resp.ok) { diag.error_code = 'HTTP_' + resp.status; throw new Error('ipwho.is HTTP ' + resp.status); }
         var data = await resp.json();
         diag.response_schema_valid = typeof data === 'object' && data !== null;
+        if (data.ip && normalizeClientIpValue(data.ip) !== normalizeClientIpValue(ip)) throw new Error('ipwho.is address mismatch');
         if (!data.success) { diag.error_code = 'not_success'; throw new Error('ipwho.is not success'); }
         return {
           _diag: diag, provider: 'ipwho.is', country: data.country || '', region: data.region || '', city: data.city || '',
@@ -5433,6 +5440,7 @@ async function resolveIpLocationUncached(ip) {
         var resp = await fetch('https://ipapi.co/' + encodeURIComponent(ip) + '/json/', { signal: controller.signal });
         if (!resp.ok) throw new Error('ipapi.co HTTP ' + resp.status);
         var data = await resp.json();
+        if (data.ip && normalizeClientIpValue(data.ip) !== normalizeClientIpValue(ip)) throw new Error('ipapi.co address mismatch');
         if (data.error) throw new Error('ipapi.co error: ' + (data.reason || data.error));
         return { provider: 'ipapi.co', country: data.country_name || '', region: data.region || '', city: data.city || '', country_code: data.country_code || '', latitude: data.latitude || null, longitude: data.longitude || null, postal: data.postal || '', asn: data.asn || '', isp: data.org || '', org: data.org || '', timezone: data.timezone || '' };
       } finally { clearTimeout(timeout); }
@@ -11922,6 +11930,8 @@ app.use('/api/chat', createChatSocialRouter({
 }));
 
 app.use('/api/profile/records', require('./profile-records').createProfileRecords({ express, supabase, authenticateUser, rateLimit }));
+app.use('/api/user/behavior-consent', require('./behavior-consent').createBehaviorConsent({ express, supabase, authenticateUser, rateLimit }));
+app.use('/api/user/export', require('./personal-export').createPersonalExport({ express, supabase, authenticateUser, rateLimit, privateStorage: dmPrivateStorage }));
 const chatFeatures = createChatFeatures({ express, supabase, authenticateUser, rateLimit, publishChatEvent, privateStorage: dmPrivateStorage });
 app.use('/api/chat', chatFeatures.router);
 app.use(require('./author-support').createAuthorSupport({ express, supabase, sharp, authenticateUser,
@@ -12080,6 +12090,18 @@ async function issueUserSession(res, userName, deviceId, opts) {
     }
     return null;
   }
+  var authEvent = null;
+  if (opts && opts.audit) {
+    try {
+      authEvent = await require('./account-events').recordAccountAuthentication({
+        supabase, req: opts.audit.req, userName, source: opts.audit.source, deviceId,
+        getClientIp, detectDeviceTypeFromUA, detectOSFromUA, detectBrowserFromUA
+      });
+    } catch (_) {
+      res.status(503).json({error:'登录记录暂时无法保存，请重试',code:'auth_event_store_failed',retryable:true});
+      return null;
+    }
+  }
   res.cookie('xtj_user_refresh', refreshToken, {
     httpOnly: true,
     // secure 必须为 true（契约测试锁定）；HTTP 局域网调试请改走 localhost/HTTPS
@@ -12093,7 +12115,9 @@ async function issueUserSession(res, userName, deviceId, opts) {
     token: accessToken,
     user_name: userName,
     token_type: 'access',
-    expires_in_ms: USER_REFRESH_TOKEN_EXPIRY_MS
+    expires_in_ms: USER_REFRESH_TOKEN_EXPIRY_MS,
+    authenticated_at: authEvent && authEvent.login_at,
+    registered_at: authEvent && authEvent.registered_at
   };
 }
 
@@ -12139,7 +12163,7 @@ app.post('/api/user/login', securityRateLimit(60000, 10), async (req, res) => {
     if (loginRestrictions.is_banned) {
       return res.status(403).json({ error: '该账号已被封禁，无法登录', code: 'account_banned' });
     }
-    var loginSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req));
+    var loginSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req), { audit: { req: req, source: 'login_success' } });
     if (loginSession) return res.json(loginSession);
     return; // issueUserSession 失败时已写 503
   } catch(e) {
@@ -12190,7 +12214,7 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
         console.warn('[API] 注册邮箱写入 user_info 失败:', e && e.message || e);
       }
     }
-    var regSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req));
+    var regSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req), { audit: { req: req, source: 'register_success' } });
     if (regSession) return res.status(201).json(regSession);
     return; // issueUserSession 失败时已写 503
   } catch (e) {
@@ -18454,9 +18478,10 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
       supabase.from('posts').select('content, created_at').eq('user_name', userName)
         .eq('media_type', USER_BEHAVIOR_MARKER).order('created_at', { ascending: false }).limit(200),
       supabase.from('posts').select('content, created_at').eq('user_name', userName)
-        .eq('media_type', USER_VISIT_MARKER).order('created_at', { ascending: false }).limit(50)
+        .eq('media_type', USER_VISIT_MARKER).order('created_at', { ascending: false }).limit(50),
+      supabase.rpc('account_security_summary', { p_actor: userName })
     ]);
-    var firstError = results[0].error || results[1].error || results[2].error || results[3].error;
+    var firstError = results[0].error || results[1].error || results[2].error || results[3].error || results[4].error;
     if (firstError) return res.status(400).json({ error: sanitizeError(firstError) });
     var info = {};
     if (results[0].data) { try { info = JSON.parse(results[0].data.content || '{}'); } catch(_) {} }
@@ -18499,12 +18524,14 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
     var behaviorEvents = (results[2].data || []).map(function(row) {
       try { return Object.assign(JSON.parse(row.content || '{}'), { recorded_at: row.created_at }); } catch(_) { return null; }
     }).filter(Boolean);
-    var behaviorSummary = { total_events: behaviorEvents.length, event_types: {} };
+    var behaviorSummary = { total_events: behaviorEvents.reduce(function(n,e){return n+(Array.isArray(e.events)?e.events.length:1);},0), event_types: {} };
     behaviorEvents.forEach(function(evt) {
-      var type = evt.type || evt.event || 'unknown';
-      behaviorSummary.event_types[type] = (behaviorSummary.event_types[type] || 0) + 1;
+      var batch = Array.isArray(evt.events) ? evt.events : [evt];
+      batch.forEach(function(event) { var type=event.type || event.event || 'unknown'; behaviorSummary.event_types[type]=(behaviorSummary.event_types[type]||0)+1; });
     });
-    var visitCount = (results[3].data || []).length;
+    var summary=results[4].data||{};
+    var visitCount = Number(summary.visit_count)||0;
+    behaviorSummary.total_events=Number(summary.behavior_count)||0;
     var latestLogin = loginEvents[0] || {};
     var latestDevice = normalizeDeviceSnapshot(latestLogin);
     var profile = {
@@ -18524,9 +18551,11 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
       proxy_alerts: proxyAlerts,
       behavior_summary: behaviorSummary,
       total_visits: visitCount,
-      total_logins: loginEvents.length,
-      last_login: loginEvents[0] ? loginEvents[0].recorded_at : null,
-      first_login: loginEvents.length > 0 ? loginEvents[loginEvents.length - 1].recorded_at : null
+      total_logins: Number(summary.login_count)||0,
+      last_login: summary.last_login || null,
+      registered_at: summary.registered_at || null,
+      record_scope: summary.scope || 'retained_server_records',
+      first_login: summary.first_login || null
     };
     await logAdminAudit('view_user_profile', req.adminName || 'admin', 'target_user=' + userName);
     return res.json(profile);
@@ -18623,11 +18652,14 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
 
 app.post('/api/user/behavior', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
+    if (!(await require('./behavior-consent').behaviorAllowed(supabase,req.userName))) return res.status(403).json({ok:false,code:'behavior_consent_required',error:'行为诊断未开启'});
     var allowedTypes = ['page_view', 'control_click', 'visibility', 'scroll_depth', 'session_summary', 'web_vital', 'client_error', 'form_interaction'];
     var events = (Array.isArray(req.body && req.body.events) ? req.body.events : []).slice(0, 50).map(function(event) {
       var type = String(event && event.type || '');
       if (allowedTypes.indexOf(type) < 0) return null;
       var at = new Date(String(event && event.at || ''));
+      var now = Date.now();
+      if (!Number.isFinite(at.getTime()) || Math.abs(at.getTime()-now)>86400000) at = new Date(now);
       var rawMeta = event && event.meta && typeof event.meta === 'object' ? event.meta : {};
       var meta = {};
       if (type === 'scroll_depth' && Number.isFinite(Number(rawMeta.milestone))) meta.milestone = Math.max(0, Math.min(100, Math.round(Number(rawMeta.milestone))));
@@ -18647,7 +18679,7 @@ app.post('/api/user/behavior', rateLimit(60000, 30), authenticateUser, async (re
     var insert = await supabase.from('posts').insert([{
       user_name: req.userName, media_type: USER_BEHAVIOR_MARKER,
       media_url: events[events.length - 1].type,
-      content: JSON.stringify({ events: events, received_at: new Date().toISOString() }),
+      content: JSON.stringify({ events: events, received_at: new Date().toISOString(), ip: getClientIp(req), ip_source: req._clientIpSource || 'unknown', authority: 'client_report', user_agent: String(req.headers['user-agent'] || '').slice(0,500) }),
       actor_key: 'behavior_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
     }]);
     if (insert.error) return res.status(500).json({ error: sanitizeError(insert.error), code: 'behavior_save_failed' });
@@ -18730,7 +18762,8 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
     }
 
     const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
-    const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
+    const reportedSource = VALID_SOURCES.includes(source) ? source : 'page_visit';
+    const srcVal = 'page_visit'; // Client reports never establish password authentication.
 
     const userNameVal = req.userName;
 
@@ -18901,10 +18934,13 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
         possible_device_model: possibleDeviceModel,
         ip: ip,
         ip_version: ip.indexOf(':') >= 0 ? 6 : (ip === 'unknown' ? null : 4),
-        ip_source: 'trusted_proxy_request',
+        ip_source: req._clientIpSource || 'unknown',
         ip_geolocation_precision: 'approximate_city',
         ip_location: ipLocation,
-        login_at: loginAt,
+        visit_at: loginAt,
+        received_at: loginAt,
+        authority: 'client_telemetry',
+        reported_source: reportedSource,
         source: srcVal,
         device_meta: finalDeviceMeta,
         exact_device_model: safeExactModel,
@@ -18932,7 +18968,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (
         last_device_id: deviceIdVal,
         last_ip: ip
       };
-      if (srcVal === 'login_success' || srcVal === 'register_success') infoPatch.last_login = now;
+      // last_login is written only by successful server authentication.
       if (ipLocation) infoPatch.last_ip_location = ipLocation;
       await mergeUserInfo(userNameVal, infoPatch);
     } catch(e) {

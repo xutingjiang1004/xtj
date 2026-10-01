@@ -44,8 +44,8 @@ const code = [
   extractFn('isPrivateOrReservedIp'),
   extractFn('firstPublicIpFromForwardedChain'),
 ].join('\n');
-const factory = new Function(code + '; return { normalizeClientIpValue: normalizeClientIpValue, isPrivateOrReservedIp: isPrivateOrReservedIp, firstPublicIpFromForwardedChain: firstPublicIpFromForwardedChain };');
-const { isPrivateOrReservedIp, firstPublicIpFromForwardedChain } = factory();
+const factory = new Function('require','URL',code + '; return { normalizeClientIpValue: normalizeClientIpValue, isPrivateOrReservedIp: isPrivateOrReservedIp, firstPublicIpFromForwardedChain: firstPublicIpFromForwardedChain };');
+const { isPrivateOrReservedIp, firstPublicIpFromForwardedChain } = factory(name => name==='./trusted-proxies'?require('../render-api/trusted-proxies'):require(name),URL);
 
 test('行为：私网/保留地址判定', () => {
   assert.equal(isPrivateOrReservedIp('10.193.27.131'), true, 'Render 内网 10/8');
@@ -102,7 +102,7 @@ test('合约：管理端重解析端点对私网 IP 返回明确结论', () => {
 
 test('合约：帖子属地重试对私网 IP 直接落定失败', () => {
   assert.ok(
-    src.includes("await setIpRegionFailed(postId, 'private_ip_unresolvable');"),
+    /setIpRegionFailed\(postId,[^;]*private_ip_unresolvable/.test(src),
     'retryIpRegionAsync 必须对私网 IP 跳过无效重试'
   );
 });

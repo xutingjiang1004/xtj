@@ -749,6 +749,7 @@
   }
 
   function renderSorted(photos, preserveBatch){
+    if(window.preloadPhotoStoryAvatars)window.preloadPhotoStoryAvatars(photos);
     var grid = document.getElementById('photoGrid');
     if (!grid) return;
     if (!preserveBatch) photoBatchStart = 0;
@@ -855,6 +856,7 @@
   }
 
   function renderPhotoWallWithoutReload(){
+    if(window.preloadPhotoStoryAvatars)window.preloadPhotoStoryAvatars(window.photoWallData||[]);
     var key = window.pwSortKey || 'date_desc';
     renderSorted(sortPhotoWallData(window.photoWallData || [], key));
   }

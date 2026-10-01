@@ -2,6 +2,7 @@
     'use strict';
     var scriptUrl = document.currentScript.src;
     var jobs = new Map(), queue = [], active = null, worker = null, owner = '';
+    var preferredModel=window.navigator&&window.navigator.hardwareConcurrency<4?'tiny':'base';
     var MAX_BYTES = 24 * 1024 * 1024;
     function sameUser(job) { return String(window.currentUser || '') === job.owner; }
     function notify(job, state, label) {
@@ -40,7 +41,7 @@
         if (!Audio || !Offline) throw new Error('当前浏览器不支持语音识别，请升级浏览器');
         var context = new Audio();
         var decoded;
-        try { var bytes = await file.arrayBuffer(); job.file = null; decoded = await context.decodeAudioData(bytes); }
+        try { var bytes = await file.arrayBuffer(); decoded = await context.decodeAudioData(bytes); }
         finally { try { await context.close(); } catch (_) {} }
         if (!decoded.duration || decoded.duration > 180) throw new Error('暂时支持 3 分钟以内的语音');
         var offline = new Offline(1, Math.ceil(decoded.duration * 16000), 16000);
@@ -60,17 +61,17 @@
             function cleanup() { clearTimeout(timer); currentWorker.onmessage = null; currentWorker.onerror = null; job.cancel = null; }
             function fail(error) { cleanup(); currentWorker.terminate(); if (worker === currentWorker) worker = null; reject(error); }
             job.cancel = function () { fail(new Error('识别已取消')); };
-            currentWorker.onerror = function () { fail(new Error('语音模型无法启动，请升级浏览器或检查网络后重试')); };
+            currentWorker.onerror = function () { var error=new Error('语音模型无法启动，请升级浏览器或检查网络后重试');error.fallbackModel=preferredModel==='base'?'tiny':null;fail(error); };
             currentWorker.onmessage = function (event) {
                 var data = event.data;
                 if (!data || data.id !== job.key) return;
                 if (data.type === 'progress') {
-                    var label = data.downloading ? '首次下载语音模型' + (data.progress === null ? '…' : ' ' + data.progress + '%') : '正在识别语音…';
+                    var label = data.phase === 'initializing' ? '正在准备语音模型…' : data.downloading ? '首次下载语音模型' + (data.progress === null ? '…' : ' ' + data.progress + '%') : '正在识别语音…';
                     notify(job, 'working', label);
                 } else if (data.type === 'result') { cleanup(); resolve(String(data.text || '').trim()); }
-                else if (data.type === 'error') fail(new Error(data.error));
+                else if (data.type === 'error') { var error=new Error(data.error);error.cacheReset=data.cacheReset===true;error.fallbackModel=data.fallbackModel;fail(error); }
             };
-            currentWorker.postMessage({ type: 'transcribe', id: job.key, audio: samples }, [samples.buffer]);
+            currentWorker.postMessage({ type: 'transcribe', id: job.key, audio: samples, model:preferredModel }, [samples.buffer]);
         });
     }
     async function run() {
@@ -82,7 +83,14 @@
                 notify(job, 'working', '准备识别语音…');
                 var samples = await audioSamples(job);
                 if (!sameUser(job)) return;
-                job.text = await recognize(job, samples);
+                try { job.text = await recognize(job, samples); }
+                catch(error){
+                    if((!error.cacheReset&&!error.fallbackModel)||job.modelRepairTried||!sameUser(job))throw error;
+                    job.modelRepairTried=true;if(error.fallbackModel==='tiny')preferredModel='tiny';notify(job,'working','正在重新准备语音模型…');
+                    var retrySamples=await audioSamples(job);
+                    if(!sameUser(job))return;
+                    job.text=await recognize(job,retrySamples);
+                }
                 if (!job.text) throw new Error('未识别到清晰语音，可以重新转写');
             }
             if (!sameUser(job)) return;

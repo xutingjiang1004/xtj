@@ -13,7 +13,7 @@ function section(start, end) {
   return client.slice(from, to);
 }
 
-test('behavior telemetry is fail-closed when no explicit consent control exists', () => {
+test('behavior telemetry starts closed and listeners require explicit per-account consent', () => {
   assert.match(client, /var behaviorTelemetryEnabled = false;/);
   assert.match(client, /if \(!behaviorTelemetryEnabled\) return;[\s\S]*?behaviorQueue\.push\(/);
   assert.match(client, /if \(behaviorTelemetryEnabled\) initSafeAnalytics\(\);/);

@@ -1133,6 +1133,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 invalidateAvatarCacheEntry(username);
             };
 
+            window.xtjFetchAvatarUrl = function(username) { return fetchAvatarUrl(username); };
+
             // 从后端 API 获取用户头像（修复 RLS 权限问题，不再直接查询 __avatar__）
             // P7: 显式四态 — has_avatar / confirmed_none / fetch_failed / not_fetched
             async function fetchAvatarUrl(userName) {

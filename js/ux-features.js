@@ -262,39 +262,47 @@
     }
   }
 
-  function exportMyData() {
+  async function exportMyData() {
+    var button=document.getElementById('xtjExportDataBtn'),owner=window.currentUser;
+    if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
+    if(button.disabled)return;
+    button.disabled=true;
     try {
-      var payload = {
-        exported_at: new Date().toISOString(),
-        user: window.currentUser || null,
-        feed_posts: Array.isArray(window.feedAllPosts) ? window.feedAllPosts.filter(function (p) {
-          return p && p.user_name === window.currentUser;
-        }) : [],
-        likes: Array.isArray(window.feedAllLikes)
-          ? window.feedAllLikes.filter(function (l) {
-              return l && l.user_name === window.currentUser;
-            })
-          : [],
-        comments: Array.isArray(window.feedAllComments)
-          ? window.feedAllComments.filter(function (c) {
-              return c && c.user_name === window.currentUser;
-            })
-          : []
-      };
-      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'xtj-export-' + (window.currentUser || 'guest') + '-' + Date.now() + '.json';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(function () {
-        URL.revokeObjectURL(a.href);
-        a.remove();
-      }, 500);
-      if (typeof window.showToast === 'function') window.showToast('已导出数据', 'success');
-    } catch (e) {
-      if (typeof window.showToast === 'function') window.showToast('导出失败', 'error');
-    }
+      var categories=['profile','posts','photos','likes','comments','photo_views','ai_history','activity','messages','chat_contacts','chat_preferences'];
+      var payload={format:'xtj-personal-data-v2',user:owner,exported_at:new Date().toISOString(),data:{},counts:{},attachments:[]},snapshot='',account=null;
+      for(var kind of categories){
+        var cursor='',seen=new Set();payload.data[kind]=[];
+        do {
+          if(window.currentUser!==owner)throw new Error('账号已切换，导出已停止');
+          button.textContent='读取记录 '+(categories.indexOf(kind)+1)+'/'+categories.length;
+          var response=await window.xtjProtectedFetch('/api/user/export?kind='+kind+(snapshot?'&snapshot='+encodeURIComponent(snapshot):'')+(cursor?'&after='+encodeURIComponent(cursor):''),{background:true,timeoutMs:45000});
+          var body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||'导出失败，请重试');
+          if(window.currentUser!==owner)throw new Error('账号已切换，导出已停止');
+          snapshot=body.snapshot;account=body.account||account;
+          payload.data[kind].push.apply(payload.data[kind],body.items);
+          if(!body.has_more)break;
+          if(!body.next_cursor||seen.has(body.next_cursor))throw new Error('导出分页异常，请重试');
+          cursor=body.next_cursor;seen.add(cursor);
+        } while(true);
+        payload.counts[kind]=payload.data[kind].length;
+      }
+      payload.account=account;payload.snapshot_at=snapshot;
+      var seenUrls=new Set();
+      function files(value,record){
+        if(!value||typeof value!=='object')return;
+        for(var key of Object.keys(value)){
+          var item=value[key];
+          if(typeof item==='string'&&/^(url|imageUrl|original_url|media_url|avatar_url)$/.test(key)&&/^https:\/\//i.test(item)&&!seenUrls.has(item)){
+            seenUrls.add(item);payload.attachments.push({record_id:record.id,url:item,storage_path:value.storage_path||null,expires: /\/object\/sign\//.test(item)?'临时签名地址，过期后可重新导出':null});
+          }else if(item&&typeof item==='object')files(item,record);
+        }
+      }
+      Object.values(payload.data).forEach(function(rows){rows.forEach(function(row){files(row,row);});});
+      var blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+      a.href=url;a.download='xtj-export-'+owner+'-'+Date.now()+'.json';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(url);a.remove();},1000);
+      if(window.showToast)window.showToast('个人记录已完整导出，包含原始附件清单','success');
+    } catch(e){if(window.showToast)window.showToast(e.message||'导出失败，请重试','error');}
+    finally {button.disabled=false;button.textContent='导出';}
   }
 
   function injectProfileSettings() {
@@ -327,6 +335,12 @@
     box.appendChild(motionRow);
     box.appendChild(cacheRow);
     box.appendChild(exportRow);
+    box.appendChild(row('行为诊断记录', '<select id="xtjBehaviorConsent" class="profile-select" aria-label="行为诊断记录"><option value="false">关闭</option><option value="true">开启</option></select>'));
+    var consentSelect=document.getElementById('xtjBehaviorConsent');
+    consentSelect.title='仅记录页面、控件类别与性能，不记录输入正文；注册和登录安全记录始终由服务器保存';
+    async function loadConsent(){var owner=window.currentUser;consentSelect.disabled=true;try{if(!owner)return;var response=await window.xtjProtectedFetch('/api/user/behavior-consent',{background:true});var body=await response.json();if(owner===window.currentUser&&response.ok&&body.ok)consentSelect.value=String(body.enabled);}catch(_){}finally{consentSelect.disabled=!window.currentUser;}}
+    consentSelect.addEventListener('change',async function(){var owner=window.currentUser,enabled=consentSelect.value==='true';consentSelect.disabled=true;try{var response=await window.xtjProtectedFetch('/api/user/behavior-consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:enabled})});var body=await response.json();if(owner!==window.currentUser)return;if(!response.ok||!body.ok)throw new Error(body.error||'设置未保存');window.dispatchEvent(new CustomEvent('xtj:behavior-consent',{detail:{owner:owner,enabled:body.enabled}}));}catch(error){consentSelect.value=String(!enabled);if(window.showToast)window.showToast(error.message,'error');}finally{consentSelect.disabled=!window.currentUser;}});
+    window.addEventListener('auth-ready',loadConsent);loadConsent();
 
     var savedScale = '1';
     var savedMotion = 'full';
