@@ -524,3 +524,28 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar {
   backdrop-filter:none!important;-webkit-backdrop-filter:none!important;padding:0!important;gap:2px!important;
 }
 html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow { animation:none!important;transform:none!important;opacity:1!important; }
+
+/* One shared tool row; deletion precedes information and stays permission-gated. */
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar #ppDeleteBtn {
+  position:relative!important;inset:auto!important;order:-1;flex:0 0 44px;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-avatar { width:40px;height:40px;flex-basis:40px;font-size:15px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story .pp-user { font-size:15px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story .pp-time { font-size:12px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-caption { font-size:15px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-stats { max-width:calc(100% - 140px);gap:9px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-stats svg { width:24px;height:24px;flex-basis:24px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-stats button,
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-stats .pp-views { font-size:13px!important; }
+html.xtj-photo-preview-ready #photoPreviewOverlay:has(#ppDeleteBtn:not([hidden])) .pp-story-stats { max-width:calc(100% - 184px); }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-stats button { min-width:44px!important; }
+#photoPreviewOverlay.pp-transition-closing { pointer-events:none!important; }
+
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-image #photoPreviewImage {
+  transition:transform var(--pp-dur-base) var(--pp-ease-standard)!important;
+}
+/* The retired centered footer animation must not shift the left story panel. */
+html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-info.pp-story {
+  animation:none!important;transition:none!important;transform:none!important;opacity:1!important;
+  flex-wrap:nowrap!important;justify-content:flex-start!important;
+}
