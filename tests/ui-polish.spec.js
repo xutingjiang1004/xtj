@@ -200,7 +200,7 @@ test.describe('continuous contact touch drag',()=>{
  });
 });
 
-test('desktop contacts and AI use quiet rows, while deletion keeps half-transparent clear glass',async({page},info)=>{
+test('desktop contacts and AI use quiet rows, while post deletion keeps 30-percent transparent clear glass',async({page},info)=>{
  await setup(page,1440);
  await page.evaluate(()=>{document.getElementById('desktopContactsPreview').innerHTML='<button class="desktop-contact-preview"><span class="desktop-contact-preview__avatar">X</span><span class="desktop-contact-preview__copy"><span class="desktop-contact-preview__name">xtj</span><span class="desktop-contact-preview__preview">一起记录日常</span></span></button>';});
  for(const theme of ['light','dark']){
@@ -210,7 +210,7 @@ test('desktop contacts and AI use quiet rows, while deletion keeps half-transpar
   }
   await page.screenshot({path:info.outputPath('desktop-rail-'+theme+'.png')});
   await page.evaluate(()=>document.getElementById('delModal').classList.add('active'));
-  const glass=page.locator('#delModal .post-delete-modal');await expect(glass).toHaveCSS('background-color','rgba(248, 253, 250, 0.5)');await expect(page.locator('#delModal')).toHaveCSS('backdrop-filter','none');
+  const glass=page.locator('#delModal .post-delete-modal');await expect(glass).toHaveCSS('background-color','rgba(248, 253, 250, 0.7)');await expect(page.locator('#delModal')).toHaveCSS('backdrop-filter','none');
   for(const button of await page.locator('#delModal button').all()){await expect(button).toHaveCSS('background-color','rgba(0, 0, 0, 0)');await expect(button).toHaveCSS('box-shadow','none');await expect(button).toHaveCSS('border-radius','0px');}
   await page.screenshot({path:info.outputPath('delete-glass-'+theme+'.png')});await page.locator('.post-delete-cancel').click();await expect(page.locator('#delModal')).not.toHaveClass(/active/);
  }

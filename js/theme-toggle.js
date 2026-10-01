@@ -308,7 +308,7 @@
       htmlEl.style.setProperty('--xtj-theme-darkness',String(progress));
     // Endpoint snapshots need the orb at each endpoint during capture. Its
     // separate composited group then follows the same scrubbed clock as the page.
-    if (themeBtn && !(palette && palette.composited && !palette.ready)) themeBtn.style.setProperty('--theme-progress',String(progress));
+    if (themeBtn) themeBtn.style.setProperty('--theme-progress',String(progress));
   }
   function animatePalette(target, finish) {
     stopPaletteAnimation();
@@ -317,7 +317,7 @@
     }
     var from=currentProgress == null ? target : currentProgress;
     if (!motionEnabled() || Math.abs(from-target)<.001) { paintProgress(target); finish(); return; }
-    var last=0, elapsed=0, duration=300;
+    var last=0, elapsed=0, duration=180;
     function frame(now) {
       // A long first paint must not skip every intermediate animation frame.
       if (last) elapsed+=Math.min(50,Math.max(0,now-last));
@@ -380,21 +380,7 @@
     setThemeMode(old.progress >= 0.5 ? 'dark' : 'light');
   }
 
-  function bindThemeToggle() {
-    themeBtn = document.getElementById('themeToggle');
-    profileThemeToggle = document.getElementById('profileThemeToggle');
-    desktopThemeMode = document.getElementById('desktopThemeMode');
-    if (themeBtn) {
-      themeBtn.addEventListener('click', function (event) {
-        event.preventDefault();
-        if (suppressPointerClick && event.detail !== 0) {
-          suppressPointerClick = false;
-          return;
-        }
-        suppressPointerClick = false;
-        switchTheme();
-      });
-      themeBtn.addEventListener('pointerdown', function (event) {
+  function beginThemeGesture(event) {
         if (gesture || !event.isPrimary || event.button !== 0) return;
         suppressPointerClick = false;
         stopPaletteAnimation();
@@ -410,10 +396,10 @@
           progress: currentProgress == null ? (resolveTheme(resolveThemeMode()) === 'dark' ? 1 : 0) : currentProgress,
           travel: Math.max(1, travel), dragged: false };
         themeBtn.setPointerCapture(event.pointerId);
-        // Begin native capture at contact, before the first horizontal move.
-        if (motionEnabled() && typeof document.startViewTransition==='function') preparePalette();
-      });
-      themeBtn.addEventListener('pointermove', function (event) {
+        // A tap must reach click before snapshot capture can temporarily suspend input.
+        // Drag capture starts on the first horizontal move instead.
+  }
+  function moveThemeGesture(event) {
         if (!gesture || event.pointerId !== gesture.id) return;
         var dx = event.clientX - gesture.x;
         var dy = event.clientY - gesture.y;
@@ -426,10 +412,39 @@
         themeBtn.classList.add('is-dragging');
         gesture.progress = Math.max(0, Math.min(1, gesture.start + dx / gesture.travel));
         if (!dragFrame) dragFrame = requestPaintFrame(renderDrag);
+  }
+  function snapshotHitsTheme(event) {
+    if (!palette || !palette.composited || !themeBtn || event.target!==htmlEl || !themeBtn.getClientRects().length) return false;
+    var box=themeBtn.getBoundingClientRect();
+    return event.clientX>=box.left && event.clientX<=box.right && event.clientY>=box.top && event.clientY<=box.bottom;
+  }
+
+  function bindThemeToggle() {
+    themeBtn = document.getElementById('themeToggle');
+    profileThemeToggle = document.getElementById('profileThemeToggle');
+    desktopThemeMode = document.getElementById('desktopThemeMode');
+    if (themeBtn) {
+      themeBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        if (suppressPointerClick && event.detail !== 0) {
+          suppressPointerClick = false;
+          return;
+        }
+        suppressPointerClick = false;
+        switchTheme();
       });
+      themeBtn.addEventListener('pointerdown', beginThemeGesture);
+      themeBtn.addEventListener('pointermove', moveThemeGesture);
       themeBtn.addEventListener('pointerup', function (event) { finishGesture(event, false); });
       themeBtn.addEventListener('pointercancel', function (event) { finishGesture(event, true); });
       themeBtn.addEventListener('lostpointercapture', function (event) { finishGesture(event, true); });
+      // Native snapshot layers can retarget input to <html> even with pointer-events:none.
+      // Route only real hits inside this control; ordinary button events keep their own path.
+      document.addEventListener('pointerdown',function(event){if(snapshotHitsTheme(event))beginThemeGesture(event);},true);
+      document.addEventListener('pointermove',function(event){if(gesture&&event.target===htmlEl)moveThemeGesture(event);},true);
+      document.addEventListener('pointerup',function(event){if(gesture&&event.target===htmlEl)finishGesture(event,false);},true);
+      document.addEventListener('pointercancel',function(event){if(gesture&&event.target===htmlEl)finishGesture(event,true);},true);
+      document.addEventListener('click',function(event){if(!snapshotHitsTheme(event))return;event.preventDefault();if(suppressPointerClick){suppressPointerClick=false;return;}switchTheme();},true);
       themeBtn.addEventListener('keydown', function (event) {
         if (!/^(ArrowLeft|ArrowRight|Home|End)$/.test(event.key)) return;
         event.preventDefault();
