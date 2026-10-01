@@ -1648,7 +1648,7 @@
                 if (payload && payload.withdrawn) {
                     return '<span class="msg-text withdrawn">[此消息已被撤回]</span>';
                 }
-                if(payload.flash){var expired=payload.flash.state==='expired'||_flashConsumed.has(currentUser+':'+message.id);return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+escapeHtml(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':'查看一次性闪图，3 秒后销毁')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
+                if(payload.flash){var own=message.user_name===currentUser,expired=!own&&(payload.flash.state==='expired'||_flashConsumed.has(currentUser+':'+message.id));return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+escapeHtml(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':own?'查看自己发送的闪图，不限次数':'查看一次性闪图，3 秒后失效')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
@@ -2435,8 +2435,8 @@
                 // ★ 原图开关打开时：非 HEIC 一律**原样上传** —— 不缩放、不重编码，保留原始字节。
                 //   （HEIC 例外：服务端 sharp 不支持 HEIC/HEVC，必须转码，否则整条消息发不出去。）
                 if (wantOriginal && !isHeic) return passthrough;
-                // 已经很小、又不是 HEIC 的图没必要重编码（重编码会掉画质）
-                if (!isHeic && file.size <= 400 * 1024) return passthrough;
+                // 未选原图的静态照片统一重编码，小文件也遵守开关。
+
 
                 var bitmap = null;
                 try {
@@ -2455,10 +2455,10 @@
                     });
                 }
                 // 浏览器也解不了（典型：桌面 Chrome 打开 HEIC）→ 交回原文件，由调用方决定怎么提示
-                if (!bitmap) return passthrough;
+                if (!bitmap) throw Error('无法压缩这张照片，请重试或勾选原图');
 
                 var sw = bitmap.width || 0, sh = bitmap.height || 0;
-                if (!sw || !sh) return passthrough;
+                if (!sw || !sh) throw Error('图片尺寸无法读取，请重试');
                 // 原图模式不缩放；HEIC 必须转码时用更高质量，尽量少损失
                 var maxEdge = wantOriginal ? 0 : DM_IMAGE_MAX_EDGE;
                 var quality = wantOriginal ? 0.95 : DM_IMAGE_QUALITY;
@@ -2470,10 +2470,11 @@
                     if (typeof OffscreenCanvas === 'function') { canvas = new OffscreenCanvas(tw, th); }
                     else { canvas = document.createElement('canvas'); canvas.width = tw; canvas.height = th; }
                     ctx = canvas.getContext('2d');
-                    if (!ctx) return passthrough;
+                    if (!ctx) throw Error('无法压缩这张照片，请重试或勾选原图');
+                    ctx.fillStyle='#fff';ctx.fillRect(0,0,tw,th);
                     ctx.drawImage(bitmap, 0, 0, tw, th);
                 } catch (eDraw) {
-                    return passthrough;
+                    throw Error('无法压缩这张照片，请重试或勾选原图');
                 } finally {
                     try { if (bitmap && typeof bitmap.close === 'function') bitmap.close(); } catch (eClose) {}
                 }
@@ -2486,14 +2487,14 @@
                         blob = await new Promise(function(resolve) { canvas.toBlob(resolve, 'image/jpeg', quality); });
                     }
                 } catch (eBlob) { blob = null; }
-                if (!blob) return passthrough;
-                // 压完反而更大（小图/已高压缩）→ 保留原图；HEIC 必须转换，不看体积
-                if (!isHeic && blob.size >= file.size * 0.96) return passthrough;
+                if (!blob) throw Error('无法压缩这张照片，请重试或勾选原图');
+                // 压缩模式保留生成的结果，不能按体积悄悄回退原文件。
+
 
                 var baseName = String(file.name || 'image').replace(/\.[^./\\]+$/, '') || 'image';
                 var nextFile = null;
                 try { nextFile = new File([blob], baseName + '.jpg', { type: 'image/jpeg', lastModified: Date.now() }); }
-                catch (eFile) { return passthrough; }
+                catch (eFile) { throw Error('无法生成压缩照片，请重试或勾选原图'); }
                 // 返回**输出图**的真实像素（缩放后为 tw×th），气泡按比例占位才准确
                 return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size, w: tw, h: th };
             }
@@ -2537,6 +2538,7 @@
                     var typeOk = !!getChatUploadKind(file);
                     if (!typeOk) { showToast("不支持的文件类型，支持图片、视频、音频及 PDF、TXT、CSV、RTF、DOCX、XLSX、PPTX、ZIP"); return; }
                 }
+                var sendOriginal=isDmOriginalSendEnabled();
                 var sendOrigin = captureDockChatSendOrigin(file);
                 dockChatSending = true; if (!queuedFile || inp.value.trim()===content) inp.value = '';
                 sendDockChatTyping(false);
@@ -2601,10 +2603,10 @@
                 try {
                     var storagePath = null;
                     if (file) {
-                        // ★ 上传前规范化图片：HEIC→JPEG + 压缩。失败一律回退原文件。
+                        // 上传前按点击发送时的原图开关处理；压缩失败不得偷偷上传原文件。
                         if (/^image\//i.test(String(file.type || ''))) {
                             try {
-                                var _prep = await prepareDmImageForUpload(file, { original: isDmOriginalSendEnabled() });
+                                var _prep = await prepareDmImageForUpload(file, { original: sendOriginal });
                                 if (_prep) {
                                     // 真实像素 → 随消息一起存（服务端会原样透传），
                                     // 渲染时写成 <img width height> 让气泡按正确比例占位。
@@ -2613,7 +2615,8 @@
                                 }
                                 if (_prep && _prep.file && _prep.file !== file) {
                                     file = _prep.file;
-                                    pendingFile = _prep.file;
+                                    // Keep the selected original for retries and a changed original toggle.
+                                    if(localPreviewUrl){var previousPreview=localPreviewUrl;localPreviewUrl=URL.createObjectURL(file);optimisticMessage.__localPreviewUrl=localPreviewUrl;window.__xtjReleaseDmLocalPreview(previousPreview);_chatRenderSignature[targetUser]=undefined;renderDockMessages(targetUser,upsertDockChatCacheMessage(targetUser,optimisticMessage),false);}
                                 }
                                 // 换位后把宽高补进乐观气泡（否则第一帧仍会先小后大）
                                 if (mediaW > 0 && mediaH > 0 && mediaPayload) {
@@ -2627,7 +2630,7 @@
                                     }
                                 }
                             } catch (prepErr) {
-                                console.warn('[dm-send] image prepare failed, falling back to original', prepErr);
+                                console.warn('[dm-send] image compression failed');
                                 // 浏览器解不了 HEIC，且服务端 sharp 也不支持 → 给出可执行的提示，
                                 // 而不是让用户面对一句模糊的「无法识别为有效图片」。
                                 if (/heic|heif/i.test(String(file.type || '') + ' ' + String(file.name || ''))) {
@@ -2635,6 +2638,7 @@
                                     heicErr.serverRejected = true;
                                     throw heicErr;
                                 }
+                                prepErr.serverRejected=true;throw prepErr;
                             }
                         }
                         // ★ 2026-09-25 根治：媒体改走**后端上传**，不再直连 Supabase Storage。
@@ -4437,13 +4441,15 @@
                     /\.svgz?$/i.test(String(file.name || '').toLowerCase());
             }
 
-            var _flashViewer=null,_flashConsumed=new Set(),_flashSending=false,_flashSendFlight=null;
+            var _flashViewer=null,_flashConsumed=new Set(),_flashSending=false,_flashSendFlight=null,_flashQuota=null,_flashQuotaFlight=null,_flashViewTokens=new Map();
             function cancelChatFlashSend(){if(!_flashSendFlight)return;_flashSendFlight.controller.abort();_flashSendFlight=null;_flashSending=false;dockChatSending=false;var send=document.getElementById('dockChatSendBtn'),flash=document.getElementById('chatFlashSendBtn');if(send)send.disabled=false;if(flash){flash.textContent='闪图';flash.disabled=false;}}
             function rememberFlashConsumed(key){_flashConsumed.add(key);if(_flashConsumed.size>512)_flashConsumed.delete(_flashConsumed.values().next().value);}
-            function syncChatFlashButton(file){var b=document.getElementById('chatFlashSendBtn');if(b){b.hidden=!file||!/^image\//.test(file.type)||isBlockedDmFile(file);b.disabled=_flashSending;}}
+            function paintChatFlashQuota(){var node=document.getElementById('chatFlashQuota'),button=document.getElementById('chatFlashSendBtn');if(!node||!button)return;var q=_flashQuota&&_flashQuota.owner===currentUser?_flashQuota.data:null;node.hidden=button.hidden||!q;node.textContent=q?(q.remaining<0?'次数不限':'今日剩余 '+q.remaining+' 次'):'';}
+            async function refreshChatFlashQuota(force){var owner=currentUser,epoch=_authStateEpoch;if(!owner)return;if(!force&&_flashQuota&&_flashQuota.owner===owner&&Date.now()-_flashQuota.at<10000){paintChatFlashQuota();return;}if(_flashQuotaFlight&&_flashQuotaFlight.owner===owner)return;var flight={owner:owner};_flashQuotaFlight=flight;try{var response=await window.xtjProtectedFetch('/api/chat/flash/quota',{background:true,timeoutMs:10000}),q=await response.json();if(response.ok&&q.ok&&typeof q.remaining==='number'&&Number.isFinite(q.remaining)&&currentUser===owner&&epoch===_authStateEpoch){_flashQuota={owner:owner,data:q,at:Date.now()};paintChatFlashQuota();}}catch(_){}finally{if(_flashQuotaFlight===flight)_flashQuotaFlight=null;}}
+            function syncChatFlashButton(file){var b=document.getElementById('chatFlashSendBtn');if(b){b.hidden=!file||!/^image\//.test(file.type)||isBlockedDmFile(file);b.disabled=_flashSending;paintChatFlashQuota();if(!b.hidden)void refreshChatFlashQuota(false);}}
             window.sendChatFlash=async function(){
                 if(_flashSending||dockChatSending||_chatBatchSending)return;
-                var file=_chatAttachmentQueue[0]||(document.getElementById('dockChatFileInp').files||[])[0],owner=currentUser,peer=dockChatActiveUser,epoch=_authStateEpoch;
+                var file=_chatAttachmentQueue[0]||(document.getElementById('dockChatFileInp').files||[])[0],owner=currentUser,peer=dockChatActiveUser,epoch=_authStateEpoch,original=isDmOriginalSendEnabled();
                 if(!owner||!peer||!file||!/^image\//.test(file.type))return;
                 if(file.size>20*1024*1024){showToast('闪图照片不能超过 20MB');return;}
                 function active(){return _flashSendFlight===flight&&!flight.controller.signal.aborted&&currentUser===owner&&dockChatActiveUser===peer&&_authStateEpoch===epoch;}
@@ -4452,32 +4458,49 @@
                 _flashSending=true;dockChatSending=true;syncChatFlashButton(file);document.getElementById('dockChatSendBtn').disabled=true;
                 var button=document.getElementById('chatFlashSendBtn');button.textContent='发送中…';
                 try{
-                    var form=new FormData();form.append('image',file,file.name||'flash.jpg');form.append('target_user',peer);form.append('client_id',client);
-                    var response=await window.xtjProtectedFetch('/api/chat/flash/send',{method:'POST',body:form,signal:flight.controller.signal,timeoutMs:60000});var body=await response.json();if(!active())return;
+                    var prepared=await prepareDmImageForUpload(file,{original:original});if(!active())return;var uploadFile=prepared.file;
+                    var form=new FormData();form.append('image',uploadFile,uploadFile.name||'flash.jpg');form.append('target_user',peer);form.append('client_id',client);
+                    var response=await window.xtjProtectedFetch('/api/chat/flash/send',{method:'POST',body:form,signal:flight.controller.signal,timeoutMs:60000});var body=await response.json();if(!active())return;if(body.quota){_flashQuota={owner:owner,data:body.quota,at:Date.now()};paintChatFlashQuota();}else void refreshChatFlashQuota(true);
                     if(!response.ok||!body.ok||!body.message)throw Error(body.error||'闪图发送未确认，请重试');
                     var list=upsertDockChatCacheMessage(peer,body.message);_chatRenderSignature[peer]=undefined;renderDockMessages(peer,list,true);
                     if(_chatAttachmentQueue[0]===file){_chatAttachmentQueue.shift();var url=_chatAttachmentUrls.get(file);if(url)URL.revokeObjectURL(url);_chatAttachmentUrls.delete(file);}
                     if(_chatAttachmentQueue.length){showDockChatFilePreview(_chatAttachmentQueue[0]);renderChatAttachmentQueue();}else clearDockChatFilePreview(false);
-                    showToast('闪图已发送，先打开的一方可查看 3 秒');
+                    showToast('闪图已发送，对方可查看一次，清晰显示 3 秒');
                 }catch(error){if(active())showToast(error.message||'闪图发送失败，请重试');}
                 finally{if(_flashSendFlight===flight){_flashSendFlight=null;_flashSending=false;dockChatSending=false;document.getElementById('dockChatSendBtn').disabled=false;if(button){button.textContent='闪图';button.disabled=false;}}}
             };
             window.openChatFlash=async function(id){
                 if(_flashViewer||!currentUser||!/^[a-f0-9-]{36}$/i.test(String(id)))return;
-                var owner=currentUser,peer=dockChatActiveUser,epoch=_authStateEpoch,key=owner+':'+id,root=document.createElement('div');
-                root.id='chatFlashViewer';root.className='chat-flash-viewer';root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label','一次性闪图');root.innerHTML='<button type="button" class="flash-close" aria-label="关闭闪图">×</button><p class="flash-loading">正在打开闪图…</p><img alt="闪图照片"><div class="flash-clock" role="timer"><span>3</span><i></i></div>';
-                var controller=new AbortController(),url='',timeout,watch,closed=false,image=root.querySelector('img'),clock=root.querySelector('.flash-clock span');
+                var owner=currentUser,peer=dockChatActiveUser,epoch=_authStateEpoch,key=owner+':'+id,view=_flashViewTokens.get(key)||crypto.randomUUID(),root=document.createElement('div');
+                _flashViewTokens.set(key,view);if(_flashViewTokens.size>100)_flashViewTokens.delete(_flashViewTokens.keys().next().value);
+                root.id='chatFlashViewer';root.className='chat-flash-viewer';root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label','闪图');root.innerHTML='<button type="button" class="flash-close" aria-label="关闭闪图">×</button><p class="flash-loading">正在打开闪图…</p><img alt="闪图照片"><div class="flash-clock" role="timer" hidden><span>3</span><i></i></div>';
+                var controller=new AbortController(),url='',timeout,watch,closed=false,role='',receiptStarted=false,image=root.querySelector('img'),clock=root.querySelector('.flash-clock span');
+                function active(){return !closed&&currentUser===owner&&_authStateEpoch===epoch&&dockChatActiveUser===peer&&!document.hidden;}
                 function close(){if(closed)return;closed=true;clearTimeout(timeout);clearInterval(watch);controller.abort();image.style.visibility='hidden';image.removeAttribute('src');if(url)URL.revokeObjectURL(url);root.classList.add('is-closing');setTimeout(function(){root.remove();},150);_flashViewer=null;}
                 _flashViewer={close:close};root.querySelector('button').onclick=close;document.body.appendChild(root);
-                watch=setInterval(function(){if(currentUser!==owner||_authStateEpoch!==epoch||dockChatActiveUser!==peer||document.hidden)close();},50);
+                watch=setInterval(function(){if(!active())close();},50);
                 try{
-                    var response=await window.xtjProtectedFetch('/api/chat/flash/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id}),signal:controller.signal,timeoutMs:30000});
+                    var response=await window.xtjProtectedFetch('/api/chat/flash/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id,view_id:view}),signal:controller.signal,timeoutMs:30000});
                     if(!response.ok){var error=await response.json();if(response.status===410)rememberFlashConsumed(key);throw Error(error.error||'闪图不可查看');}
-                    rememberFlashConsumed(key);var blob=await response.blob();if(closed)return;url=URL.createObjectURL(blob);image.src=url;await image.decode();if(closed)return;
-                    root.querySelector('.flash-loading').remove();root.classList.add('is-viewing');var deadline=performance.now()+3000;timeout=setTimeout(close,3000);
-                    clearInterval(watch);watch=setInterval(function(){if(currentUser!==owner||_authStateEpoch!==epoch||dockChatActiveUser!==peer||document.hidden||performance.now()>=deadline){close();return;}clock.textContent=String(Math.max(1,Math.ceil((deadline-performance.now())/1000)));},50);
-                }catch(error){if(!closed){close();showToast(error.message||'闪图无法查看');}}
-                finally{if(currentUser===owner&&_authStateEpoch===epoch&&dockChatActiveUser===peer){_chatRenderSignature[peer]=undefined;renderDockMessages(peer,_chatCache[getDockChatCacheKey(peer)]||[],false);}}
+                    var cached=(_chatCache[getDockChatCacheKey(peer)]||[]).find(function(m){return String(m.id)===String(id);});role=response.headers.get('X-Flash-Role')||(cached&&cached.user_name===owner?'sender':'recipient');var blob=await response.blob();if(!active())return;
+                    if(!blob.size||!/^image\//.test(blob.type))throw Error('闪图图片未加载，请重试');
+                    url=URL.createObjectURL(blob);
+                    // load/error handlers precede src: decode() alone can stall on Safari.
+                    await new Promise(function(resolve,reject){var done=false,timer=setTimeout(function(){finish(Error('图片加载超时，请重试'));},10000);function finish(error){if(done)return;done=true;clearTimeout(timer);image.onload=image.onerror=null;error?reject(error):resolve();}image.onload=function(){if(image.naturalWidth>0)finish();else finish(Error('图片无法读取，请重试'));};image.onerror=function(){finish(Error('图片无法读取，请重试'));};image.src=url;if(typeof image.decode==='function')image.decode().then(function(){if(image.naturalWidth>0)finish();}).catch(function(){});});
+                    if(!active())return;
+                    root.querySelector('.flash-loading').remove();root.classList.add('is-viewing');
+                    if(role==='sender'){root.classList.add('is-sender');return;}
+                    // Start only after the decoded image gets an actual presentation frame.
+                    await Promise.race([Promise.all(image.getAnimations?image.getAnimations().map(function(a){return a.finished.catch(function(){});}):[]),new Promise(function(resolve){setTimeout(resolve,200);})]);
+                    await new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});if(!active())return;
+                    root.querySelector('.flash-clock').hidden=false;var deadline=performance.now()+3000;timeout=setTimeout(close,3000);
+                    clearInterval(watch);watch=setInterval(function(){if(!active()||performance.now()>=deadline){close();return;}clock.textContent=String(Math.max(1,Math.ceil((deadline-performance.now())/1000)));},50);
+                    receiptStarted=true;
+                    var ack=await window.xtjProtectedFetch('/api/chat/flash/viewed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id,view_id:view}),background:true,timeoutMs:8000}),result=await ack.json();
+                    if(!ack.ok||!result.ok){receiptStarted=false;throw Error(result.error||'闪图查看未确认，请重试');}
+                    rememberFlashConsumed(key);_flashViewTokens.delete(key);
+                }catch(error){if(!closed){receiptStarted=false;close();showToast(error.message||'闪图无法查看');}}
+                finally{if(currentUser===owner&&_authStateEpoch===epoch&&dockChatActiveUser===peer){_chatRenderSignature[peer]=undefined;renderDockMessages(peer,_chatCache[getDockChatCacheKey(peer)]||[],false);}if(!active())close();}
             };
             document.addEventListener('visibilitychange',function(){if(document.hidden&&_flashViewer)_flashViewer.close();});
 

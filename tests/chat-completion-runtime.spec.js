@@ -8,7 +8,7 @@ async function setup(page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.switchDockTab === 'function');
   await page.evaluate(({id,stamp}) => {
-    window.currentUser = 'tester'; window.ensureUserToken = async () => 'test';
+    window.__realProtectedFetch=window.xtjProtectedFetch;window.currentUser = 'tester'; window.ensureUserToken = async () => 'test';
     window.ensureProtectedOperationAuth = async () => ({ ok: true, token: 'test' });
     window.__chatTestCalls = []; window.__chatSearchDelay = 0; window.__chatContextText = 'hello world';
     const message = { id, user_name: 'tester', media_url: 'peer', media_type: '__dm__', created_at: stamp, content: JSON.stringify({text:'hello world'}) };
@@ -395,7 +395,7 @@ test('multi attachment selection supports reorder, removal and sends each select
  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=','base64');
  await page.locator('#dockChatFileInp').setInputFiles([{name:'one.png',mimeType:'image/png',buffer:png},{name:'two.png',mimeType:'image/png',buffer:png},{name:'three.png',mimeType:'image/png',buffer:png}]);
  await expect(page.locator('.chat-attachment-item')).toHaveCount(3);await page.getByRole('button',{name:'后移第 1 个附件'}).click();await page.getByRole('button',{name:'移除第 3 个附件'}).click();await expect(page.locator('.chat-attachment-item')).toHaveCount(2);
- await page.locator('#dockChatSendBtn').click();await expect.poll(()=>page.evaluate(()=>window.__batchFiles)).toEqual(['two.png','one.png']);await expect(page.locator('#dockChatSendBtn')).toBeEnabled();await page.waitForTimeout(500);expect(await page.evaluate(()=>window.__batchFiles)).toEqual(['two.png','one.png']);expect(await page.evaluate(()=>window.__chatTestCalls.filter(c=>c.url.includes('/api/dm/send')).length)).toBe(2);
+ await page.locator('#dockChatSendBtn').click();await expect.poll(()=>page.evaluate(()=>window.__batchFiles)).toEqual(['two.jpg','one.jpg']);await expect(page.locator('#dockChatSendBtn')).toBeEnabled();await page.waitForTimeout(500);expect(await page.evaluate(()=>window.__batchFiles)).toEqual(['two.jpg','one.jpg']);expect(await page.evaluate(()=>window.__chatTestCalls.filter(c=>c.url.includes('/api/dm/send')).length)).toBe(2);
 });
 test('actual MediaRecorder output contains nonzero audio and sending starts as a wave bubble',async({page})=>{
  await setup(page);test.skip(await page.evaluate(()=>typeof MediaRecorder!=='function'),'Cloud Linux WebKit lacks MediaRecorder; real WAV playback and mocked recording lifecycle are tested separately.');await expect(page.locator('#dockChatInput')).toBeEnabled();
@@ -652,17 +652,19 @@ async function setupFlash(page, options={}) {
     const previous=window.xtjProtectedFetch;window.__flashOpens=0;window.__flashForms=[];window.__flashRevoked=0;
     const revoke=URL.revokeObjectURL.bind(URL);URL.revokeObjectURL=(url)=>{if(url.startsWith('blob:'))window.__flashRevoked++;revoke(url);};
     window.xtjProtectedFetch=async(url,opts={})=>{
+      if(url.includes('/flash/quota'))return new Response(JSON.stringify({ok:true,remaining:options.remaining===undefined?3:options.remaining,used:0,limit:3}),{headers:{'Content-Type':'application/json'}});
+      if(url.includes('/flash/viewed')){window.__flashViewed=(window.__flashViewed||0)+1;return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json'}});}
       if(url.includes('/flash/send')){
         window.__flashForms.push({client:opts.body.get('client_id'),peer:opts.body.get('target_user'),file:opts.body.get('image').size,isFormData:opts.body instanceof FormData});
         if(options.delaySend)await new Promise(r=>{window.__releaseFlashSend=r;});
         if(options.quota)return new Response(JSON.stringify({ok:false,error:'今日闪图次数已用完'}),{status:429});
-        return new Response(JSON.stringify({ok:true,message:{id,user_name:'tester',media_url:'peer',media_type:'__dm__',created_at:new Date().toISOString(),content:JSON.stringify({text:'[闪图 3 秒]',flash:{id,duration_ms:3000,state:'ready'}})}}));
+        return new Response(JSON.stringify({ok:true,message:{id,user_name:options.sender?'tester':'peer',media_url:options.sender?'peer':'tester',media_type:'__dm__',created_at:new Date().toISOString(),content:JSON.stringify({text:'[闪图 3 秒]',flash:{id,duration_ms:3000,state:'ready'}})}}));
       }
       if(url.includes('/flash/open')){
         window.__flashOpens++;
         if(options.delayOpen)await new Promise(r=>{window.__releaseFlashOpen=r;});
-        if(window.__flashOpens>1)return new Response(JSON.stringify({ok:false,error:'闪图已失效'}),{status:410});
-        return new Response(Uint8Array.from(atob(png),c=>c.charCodeAt(0)),{headers:{'Content-Type':'image/png'}});
+        if(!options.sender&&window.__flashViewed)return new Response(JSON.stringify({ok:false,error:'闪图已失效'}),{status:410});
+        return new Response(options.badImage?new Uint8Array([0,1,2]):Uint8Array.from(atob(png),c=>c.charCodeAt(0)),{headers:{'Content-Type':'image/png',...(options.noRoleHeader?{}:{'X-Flash-Role':options.sender?'sender':'recipient'})}});
       }
       return previous(url,opts);
     };
@@ -671,7 +673,7 @@ async function setupFlash(page, options={}) {
   await expect(page.locator('#chatFlashSendBtn')).toBeVisible();
 }
 
-test('flash button sends multipart original file above send; lightning preview contains no image URL',async({page})=>{
+test('flash button sends multipart photo above send; lightning preview contains no image URL',async({page})=>{
   await setupFlash(page);
   const positions=await page.evaluate(()=>({flash:document.getElementById('chatFlashSendBtn').getBoundingClientRect().y,send:document.getElementById('dockChatSendBtn').getBoundingClientRect().y}));
   expect(positions.flash).toBeLessThan(positions.send);
@@ -699,9 +701,30 @@ test('flash quota failure retains selection and stable retry id',async({page})=>
   await page.waitForFunction(()=>window.__flashForms.length===2);const forms=await page.evaluate(()=>window.__flashForms);expect(forms[0].client).toBe(forms[1].client);await expect(page.locator('#dockChatFilePreview')).toBeVisible();await expect(page.locator('.chat-flash-card')).toHaveCount(0);
 });
 test('flash late image response after closing never creates an image URL',async({page})=>{
-  await setupFlash(page,{delayOpen:true});await page.locator('#chatFlashSendBtn').click();await page.locator('.chat-flash-card').click();await page.waitForFunction(()=>typeof window.__releaseFlashOpen==='function');await page.locator('#chatFlashViewer .flash-close').click();await page.evaluate(()=>window.__releaseFlashOpen());await page.waitForTimeout(250);await expect(page.locator('#chatFlashViewer')).toHaveCount(0);await expect(page.locator('.chat-flash-card')).toBeDisabled();
+  await setupFlash(page,{delayOpen:true});await page.locator('#chatFlashSendBtn').click();await page.locator('.chat-flash-card').click();await page.waitForFunction(()=>typeof window.__releaseFlashOpen==='function');await page.locator('#chatFlashViewer .flash-close').click();await page.evaluate(()=>window.__releaseFlashOpen());await page.waitForTimeout(250);await expect(page.locator('#chatFlashViewer')).toHaveCount(0);await expect(page.locator('.chat-flash-card')).toBeEnabled();
 });
 test('flash sending account teardown discards late response and does not block next conversation',async({page})=>{
   await setupFlash(page,{delaySend:true});await page.locator('#chatFlashSendBtn').click();await page.waitForFunction(()=>typeof window.__releaseFlashSend==='function');
   await page.evaluate(()=>{window.__xtjResetChatPanels();window.__releaseFlashSend();});await page.waitForTimeout(200);await expect(page.locator('.chat-flash-card')).toHaveCount(0);await page.evaluate(()=>window.openChat('peer'));await expect(page.locator('#dockChatInput')).toBeEnabled();await page.locator('#dockChatInput').fill('after teardown');await page.locator('#dockChatSendBtn').click();await expect(page.locator('#dockChatMessages .chat-msg').filter({hasText:'after teardown'})).toHaveCount(1);
+});
+
+test('flash sender can reopen own flash indefinitely and self view sends no recipient receipt',async({page})=>{
+ await setupFlash(page,{sender:true,noRoleHeader:true});await expect(page.locator('#chatFlashQuota')).toHaveText('今日剩余 3 次');await page.locator('#chatFlashSendBtn').click();
+ for(let i=0;i<2;i++){await page.locator('.chat-flash-card').click();await expect(page.locator('#chatFlashViewer.is-sender img')).toBeVisible();await expect(page.locator('#chatFlashViewer .flash-clock')).toBeHidden();if(i===0)await page.waitForTimeout(3200);await expect(page.locator('#chatFlashViewer img')).toBeVisible();await page.locator('.flash-close').click();await expect(page.locator('#chatFlashViewer')).toHaveCount(0);await expect(page.locator('.chat-flash-card')).toBeEnabled();}
+ expect(await page.evaluate(()=>window.__flashOpens)).toBe(2);expect(await page.evaluate(()=>window.__flashViewed||0)).toBe(0);
+});
+test('flash failed image decoding leaves recipient view unused and retryable',async({page})=>{
+ await setupFlash(page,{badImage:true});await page.locator('#chatFlashSendBtn').click();await page.locator('.chat-flash-card').click();await expect(page.locator('#chatFlashViewer')).toHaveCount(0);await expect(page.locator('.chat-flash-card')).toBeEnabled();expect(await page.evaluate(()=>window.__flashViewed||0)).toBe(0);await page.locator('.chat-flash-card').click();await expect.poll(()=>page.evaluate(()=>window.__flashOpens)).toBe(2);
+});
+
+test('flash image loads through real protected fetch and presents pixels before sending receipt',async({page})=>{
+ await setup(page);const png=await require('sharp')({create:{width:120,height:80,channels:3,background:'#1baa88'}}).png().toBuffer();let viewed=0;
+ await page.route('**/api/chat/flash/open',r=>r.fulfill({status:200,headers:{'Content-Type':'image/png','X-Flash-Role':'recipient'},body:png}));await page.route('**/api/chat/flash/viewed',r=>{viewed++;return r.fulfill({json:{ok:true}});});
+ await page.evaluate(({id})=>{window.API_BASE=location.origin;const fixture=window.xtjProtectedFetch;window.xtjProtectedFetch=(url,opts)=>url.includes('/flash/')?window.__realProtectedFetch(url,opts):fixture(url,opts);window.openChatFlash(id);},{id});
+ await expect(page.locator('#chatFlashViewer.is-viewing img')).toHaveJSProperty('naturalWidth',120);await expect.poll(()=>viewed).toBe(1);const image=page.locator('#chatFlashViewer img');await expect(image).toHaveCSS('opacity','1');await expect(page.locator('.flash-loading')).toHaveCount(0);await page.locator('.flash-close').click();await expect(page.locator('#chatFlashViewer')).toHaveCount(0);
+});
+for(const original of [false,true])test('chat static photo '+(original?'original preserves exact bytes':'unchecked original actually compresses small files'),async({page})=>{
+ await setup(page);const png=await require('sharp')({create:{width:1700,height:1000,channels:3,background:'#1baa88'}}).png().toBuffer();
+ await page.evaluate((original)=>{localStorage.setItem('xtj_dm_send_original',original?'1':'0');const NativeXHR=window.XMLHttpRequest;class XHR extends NativeXHR{open(method,url,...rest){this.mockUpload=url.includes('/api/dm/upload?');if(!this.mockUpload)super.open(method,url,...rest);}setRequestHeader(...args){if(!this.mockUpload)super.setRequestHeader(...args);}send(file){if(!this.mockUpload)return super.send(file);file.arrayBuffer().then(b=>{window.__compressedUpload={type:file.type,name:file.name,bytes:Array.from(new Uint8Array(b))};Object.defineProperty(this,'status',{value:200});Object.defineProperty(this,'responseText',{value:JSON.stringify({ok:true,storage_path:'chat/test.jpg',public_url:'https://example.invalid/sent.png'})});this.onload();});}}window.XMLHttpRequest=XHR;window.__chatSendDelay=10;},original);
+ await page.locator('#dockChatFileInp').setInputFiles({name:'small.png',mimeType:'image/png',buffer:png});await page.locator('#dockChatSendBtn').click();await page.waitForFunction(()=>!!window.__compressedUpload);const upload=await page.evaluate(()=>window.__compressedUpload),bytes=Buffer.from(upload.bytes);if(original){expect(bytes.equals(png)).toBe(true);expect(upload.type).toBe('image/png');}else{expect(bytes.equals(png)).toBe(false);expect(upload.type).toBe('image/jpeg');expect((await require('sharp')(bytes).metadata()).width).toBe(1600);}
 });
