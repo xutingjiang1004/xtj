@@ -475,8 +475,8 @@ test('photo view count is wired when the preview opens', () => {
   // 修复前：syncPhotoViewCount 定义并导出但从未被调用，"浏览"数永远不涨
   assert.match(dataSource, /window\.syncPhotoViewCount = syncPhotoViewCount/);
   const openPreview = renderSource.slice(renderSource.indexOf('function openPhotoWallPreviewAt'), renderSource.indexOf('function photoCardHtml'));
-  assert.match(openPreview, /window\.syncPhotoViewCount/);
-  assert.match(openPreview, /previewTarget/);
+  assert.match(fs.readFileSync(path.join(ROOT, 'js/photo-wall/preview.js'), 'utf8'), /window\.syncPhotoViewCount/);
+  assert.doesNotMatch(openPreview, /window\.syncPhotoViewCount/);
 });
 
 test('photo wall renders 500-item batches at 500, 501, and 1001 photo boundaries', async () => {

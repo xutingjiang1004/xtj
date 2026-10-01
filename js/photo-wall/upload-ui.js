@@ -4,6 +4,7 @@
   var MARKER = '__photo_wall__';
   var state = {
     photoFiles: [],
+    photoCaptions: new Map(),
     photoUrls: [],
     skippedFiles: [],
     uploading: false,
@@ -625,6 +626,7 @@
     if (!options.force) {
       revoke('photoUrls');
       state.photoFiles = [];
+      state.photoCaptions.clear();
       state.skippedFiles = [];
       var grid = byId('pwUploadSheetGrid');
       if (grid) grid.innerHTML = '';
@@ -765,6 +767,7 @@
     if (!sheet || !grid) { toast('上传面板未加载，请刷新页面'); return; }
     revoke('photoUrls');
     state.photoFiles = files.slice();
+    state.photoCaptions = new Map();
     state.skippedFiles = (skipped || []).slice();
     grid.innerHTML = '';
     files.forEach(function(file, index){
@@ -794,6 +797,12 @@
         if (!state.photoFiles.length) { var input=byId('photoFileInput');if(input) input.value=''; }
       });
       item.appendChild(remove);
+      var caption = document.createElement('textarea');
+      caption.className = 'pw-photo-caption'; caption.maxLength = 1000; caption.rows = 3;
+      caption.placeholder = '写下这张照片的故事…';
+      caption.setAttribute('aria-label', '照片说明：' + file.name);
+      caption.addEventListener('input', function(){ state.photoCaptions.set(file, caption.value); });
+      item.appendChild(caption);
       grid.appendChild(item);
     });
     if (title) title.textContent = '上传照片';
@@ -954,7 +963,8 @@
           upload_id: uploadId,
           file_size: uploadFile.size || file.size || 0,
           original_size: file.size || 0,
-          mime_type: type
+          mime_type: type,
+          caption: job.caption || ''
         }),
         signal: controller.signal
       });
@@ -1238,7 +1248,7 @@
     // ★ 上传不再强制依赖 window.sb：直连缺失时回退服务端上传（/api/photo/upload）
     if (!state.photoFiles.length) { toast('请选择照片'); return; }
     var jobs = state.photoFiles.map(function(f){
-      return { file: f, uploadId: genUploadId(), status: 'pending' };
+      return { file: f, caption: state.photoCaptions.get(f) || '', uploadId: genUploadId(), status: 'pending' };
     });
     state.batchJobs = jobs;
     state.failedJobs = [];
@@ -1248,6 +1258,7 @@
     } finally {
       // 无论上传成功/失败/异常，都清理选择状态，避免 Blob URL 泄漏与残留
       state.photoFiles = [];
+      state.photoCaptions.clear();
       var input = byId('photoFileInput');
       if (input) input.value = '';
       revoke('photoUrls');

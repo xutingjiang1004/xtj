@@ -2994,3 +2994,12 @@ html.theme-composited::view-transition-image-pair(*) { isolation:isolate; }
 html.theme-composited::view-transition-old(*) { animation:none; opacity:1; mix-blend-mode:normal; }
 html.theme-composited::view-transition-new(*) { animation:xtjThemeSnapshotFade 1000ms linear both; mix-blend-mode:normal; }
 @keyframes xtjThemeSnapshotFade { from { opacity:0; } to { opacity:1; } }
+
+/* iPad Safari uses the same visual viewport shell as iPhone. Keep scrolling
+   inside panels so keyboard/tab restoration cannot lift the top controls. */
+html.xtj-ios-viewport,html.xtj-ios-viewport body { overflow:hidden;overscroll-behavior:none; }
+html.xtj-ios-viewport .app-container {
+  position:fixed!important;top:var(--xtj-visual-top,0px)!important;bottom:auto!important;
+  inset-inline:0;width:100%!important;height:var(--xtj-app-height,100dvh)!important;
+  margin-top:0!important;margin-bottom:0!important;min-height:0!important;
+}

@@ -5,7 +5,7 @@ const { removeStorageWithQueue } = require('./storage-cleanup');
 const MAX_MEDIA_URL_LENGTH = 2048;
 const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
 const MAX_MIME_TYPE_LENGTH = 128;
-const MAX_CONTENT_LENGTH = 2048;
+const MAX_CONTENT_LENGTH = 8192;
 const MAX_UPLOAD_ID_LENGTH = 128;
 const UPLOAD_ID_RE = /^[a-zA-Z0-9_\-]{6,128}$/;
 const STORAGE_PUBLIC_PHOTO_PREFIX = '/storage/v1/object/public/uploads/photos/';
@@ -101,9 +101,12 @@ function validatePhotoCreatePayload(body, supabaseUrl) {
     if (typeof body.upload_id !== 'string' || !UPLOAD_ID_RE.test(body.upload_id)) return invalid('upload_id 无效', 'INVALID_INPUT');
     uploadId = body.upload_id;
   }
+  const caption = body.caption === undefined ? '' : body.caption;
+  if (typeof caption !== 'string' || caption.length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(caption)) return invalid('照片说明最多 1000 字', 'INVALID_INPUT');
   const storagePath = urlResult.storagePath;
   const contentObj = {
     type: 'photo_wall',
+    caption: caption.trim(),
     mediaKind: 'image',
     thumb: '',
     fileSize: body.file_size,

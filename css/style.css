@@ -16943,3 +16943,11 @@ html[data-xtj-motion="off"] #pwUploadProgressOverlay .pw-upload-progress-bar-fil
 .chat-transcription-status button { margin-left:8px; padding:4px 8px; min-height:32px; font-size:12px; background:transparent; box-shadow:none; color:inherit; text-decoration:underline; }
 .chat-transcription-status button[hidden] { display:none; }
 #photoPreviewOverlay #ppDeleteBtn[hidden] { display:none !important; }
+
+/* Each selected photo carries its own optional description. */
+#pwUploadSheet .pw-upload-sheet-grid { grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:12px; }
+#pwUploadSheet .pw-upload-sheet-thumb { aspect-ratio:auto;overflow:visible;background:transparent;border-radius:12px; }
+#pwUploadSheet .pw-upload-sheet-thumb img { height:144px!important;object-fit:cover;border-radius:12px; }
+#pwUploadSheet .pw-photo-caption { display:block;width:100%;min-height:78px;max-height:150px;box-sizing:border-box;margin:8px 0 0;padding:10px;border:1px solid var(--xtj-content-line,rgba(128,155,143,.22));border-radius:10px;background:var(--xtj-content-surface,rgba(128,155,143,.06));color:var(--text-main);font:inherit;font-size:12px;line-height:1.6;resize:vertical; }
+.chat-list-sync-status { padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--text-muted); }
+.chat-list-sync-status button { background:none;border:0;box-shadow:none;padding:6px;color:var(--primary);font-size:11px; }

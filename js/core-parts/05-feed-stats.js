@@ -1176,10 +1176,11 @@
             //   启动时两者在同一帧先后触发，等于并发打两次同一个重接口。
             //   这里做单飞 + 3 秒短缓存；缓存的是**解析后的 JSON**（Response body 只能消费一次，
             //   直接共享 Response 会让第二个调用方拿到 "body already used"）。
-            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0 };
+            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0, retryAt: 0, failures: 0 };
             window.__xtjInvalidateDmListShared = function() {
                 _dmListShared.epoch++;
                 _dmListShared.at = 0;
+                _dmListShared.retryAt = 0; _dmListShared.failures = 0;
                 _dmListShared.json = null;
                 _dmListShared.inflight = null;
                 _dmUnreadFetchedAt = 0;
@@ -1215,20 +1216,35 @@
                     return Promise.resolve(_dmListShared.json);
                 }
                 if (_dmListShared.inflight) return _dmListShared.inflight;
+                if (now < _dmListShared.retryAt) return Promise.resolve(null);
                 // ★ 2026-09-27（M15 配套）：本函数是 DM 轮询的主链路
                 //   （startDMPolling → pollNow → updateUnreadBadge → 这里），属后台被动请求。
                 //   显式标记 background，让 ensureProtectedOperationAuth 保留 refresh 冷却，
                 //   避免每 60 秒一轮的轮询把「401/403 后 30 秒不重试」的冷却反复清零，
                 //   持续打 /api/user/refresh。用户主动操作（点按钮）走其它路径，不受影响。
-                var p = window.xtjProtectedFetch('/api/dm/list?limit=' + encodeURIComponent(String(limit || 180)), { background: true })
-                    .then(function(resp) { return (resp && resp.ok) ? resp.json().catch(function() { return null; }) : null; })
-                    .then(function(json) {
-                        if (_dmListShared.epoch !== epoch || window.currentUser !== owner) return null;
-                        if (json && json.ok) { _dmListShared.json = json; _dmListShared.at = Date.now(); }
-                        _dmListShared.inflight = null;
-                        return json;
-                    })
-                    .catch(function() { if (_dmListShared.epoch === epoch) _dmListShared.inflight = null; return null; });
+                async function fetchListAttempt() {
+                    for (var attempt=0; attempt<2; attempt++) {
+                        if (_dmListShared.epoch!==epoch || window.currentUser!==owner) return null;
+                        try {
+                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:true,timeoutMs:12000});
+                            if (response && response.ok) return await response.json();
+                            if (!response || (response.status!==429 && response.status<500)) return null;
+                        } catch (_) {}
+                        if (attempt===0) await new Promise(function(resolve){setTimeout(resolve,800);});
+                    }
+                    return null;
+                }
+                var p=fetchListAttempt().then(function(json){
+                    if (_dmListShared.epoch!==epoch || window.currentUser!==owner) return null;
+                    if (json && json.ok) {
+                        _dmListShared.json=json; _dmListShared.at=Date.now();
+                        _dmListShared.retryAt=0; _dmListShared.failures=0;
+                    } else {
+                        _dmListShared.failures++;
+                        _dmListShared.retryAt=Date.now()+Math.min(60000,5000*Math.pow(2,_dmListShared.failures-1));
+                    }
+                    _dmListShared.inflight=null;return json;
+                }).catch(function(){if(_dmListShared.epoch===epoch){_dmListShared.inflight=null;_dmListShared.retryAt=Date.now()+5000;}return null;});
                 _dmListShared.inflight = p;
                 return p;
             }

@@ -101,7 +101,7 @@ async function uploadFixture(page, origin = '') {
 
 test('original upload keeps its bytes and renders committed rows without waiting for wall refresh', async ({page}) => {
   const buffer = await sharp({create:{width:1600,height:900,channels:3,background:'#28553e'}}).jpeg({quality:100}).toBuffer();
-  let uploaded;
+  let uploaded,created;
   // WebKit does not expose every File-backed body through its route inspector.
   // Check the bytes actually received by HTTP in both browser engines.
   const server = http.createServer((req,res) => {
@@ -109,7 +109,7 @@ test('original upload keeps its bytes and renders committed rows without waiting
     req.on('data',chunk=>chunks.push(chunk));
     req.on('end',()=>{
       const upload=req.url.startsWith('/api/photo/upload?');
-      if(upload) uploaded=Buffer.concat(chunks);
+      if(upload) uploaded=Buffer.concat(chunks); else created=JSON.parse(Buffer.concat(chunks).toString());
       res.setHeader('Content-Type','application/json');
       res.end(JSON.stringify(upload ? {ok:true,public_url:'https://example.test/original.jpg'} : {ok:true,data:{id:'original',media_url:'https://example.test/original.jpg'}}));
     });
@@ -125,8 +125,10 @@ test('original upload keeps its bytes and renders committed rows without waiting
   });
   await page.locator('#photoFileInput').setInputFiles({name:'original.jpg',mimeType:'image/jpeg',buffer});
   await expect(page.locator('#pwUploadSheetMeta')).toContainText('原图上传');
+  await page.locator('.pw-photo-caption').fill('雪山下的一天');
   await page.locator('#pwStartUploadBtn').click();
   await expect(page.locator('#pwUploadResultTitle')).toHaveText('上传成功');
+  expect(created.caption).toBe('雪山下的一天');
   expect(uploaded.equals(buffer)).toBe(true);
   expect(await page.evaluate(() => window.__rendered)).toEqual(['original']);
   await expect(page.locator('#pwUploadProgressOverlay')).toBeHidden();
@@ -252,9 +254,11 @@ test('upload selection removes any photo, updates counts, and disables upload wh
  await uploadFixture(page);const buffer=await sharp({create:{width:12,height:12,channels:3,background:'#28553e'}}).png().toBuffer();
  await page.locator('#photoFileInput').setInputFiles(['one.png','two.png','three.png'].map(name=>({name,mimeType:'image/png',buffer})));
  await expect(page.locator('.pw-upload-remove')).toHaveCount(3);
+ await page.getByRole('textbox',{name:'照片说明：two.png',exact:true}).fill('保留下来的第二张说明');
  await page.getByRole('button',{name:'移除第 3 张照片：three.png',exact:true}).click();await expect(page.locator('#pwUploadSheetMeta')).toContainText('2 张');
  await page.getByRole('button',{name:'移除第 1 张照片：one.png',exact:true}).click();await expect(page.locator('.pw-upload-remove')).toHaveCount(1);
  await expect(page.locator('.pw-upload-remove')).toHaveAttribute('data-file-name','two.png');
+ await expect(page.getByRole('textbox',{name:'照片说明：two.png',exact:true})).toHaveValue('保留下来的第二张说明');
  await page.locator('.pw-upload-remove').click();await expect(page.locator('#pwStartUploadBtn')).toBeDisabled();
  await page.locator('#photoFileInput').setInputFiles({name:'one.png',mimeType:'image/png',buffer});await expect(page.locator('#pwStartUploadBtn')).toBeEnabled();
 });
