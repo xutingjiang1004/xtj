@@ -997,7 +997,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 var entry = avatarCache[userName];
                 if (!entry || entry.state === 'not_fetched') return false;
                 var age = Date.now() - (entry.fetched_at || 0);
-                return age < AVATAR_FETCH_TTL_MS;
+                return age < (entry.state==='fetch_failed'?5000:entry.state==='confirmed_none'?30000:AVATAR_FETCH_TTL_MS);
             }
 
             // 写入内存缓存条目。fetch_failed 时若 url 为空则保留旧 URL（降级）。
@@ -1038,8 +1038,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             // fetch_failed 不持久化（仅内存），防御性跳过
                             if (state === 'fetch_failed') continue;
                             var fetchedAt = entry.fetched_at || 0;
-                            // TTL 按状态区分：has_avatar 24h，confirmed_none 5min
-                            var ttl = state === 'confirmed_none' ? AVATAR_FETCH_TTL_MS : AVATAR_CACHE_TTL_MS;
+                            // TTL 按状态区分：has_avatar 24h，confirmed_none 30s
+                            var ttl = state === 'confirmed_none' ? 30000 : AVATAR_CACHE_TTL_MS;
                             if ((now - fetchedAt) >= ttl) continue;
                             // has_avatar 必须有 url
                             if (state === 'has_avatar' && !entry.url) continue;
@@ -1090,9 +1090,9 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                         if (!entry || typeof entry !== 'object') continue;
                         // 只持久化 has_avatar 和 confirmed_none
                         if (entry.state !== 'has_avatar' && entry.state !== 'confirmed_none') continue;
-                        // 跳过已过期的 confirmed_none（5min TTL）
+                        // 跳过已过期的 confirmed_none（30s TTL）
                         if (entry.state === 'confirmed_none' &&
-                            (now - (entry.fetched_at || 0)) >= AVATAR_FETCH_TTL_MS) continue;
+                            (now - (entry.fetched_at || 0)) >= 30000) continue;
                         // has_avatar 必须有 url
                         if (entry.state === 'has_avatar' && !entry.url) continue;
                         wrapped.data[keys[i]] = {
@@ -1140,8 +1140,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (hasFreshAvatarCache(userName)) {
                     return getAvatarUrl(userName);
                 }
+                var requestedEntry=avatarCache[userName];
                 try {
                     var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
+                    if(avatarCache[userName]!==requestedEntry)return getAvatarUrl(userName);
                     if (!resp.ok) {
                         // P7: 网络失败 — 设置 fetch_failed，不缓存为无头像。
                         // 保留旧 URL 用于降级展示。
@@ -1149,6 +1151,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                         return getAvatarUrl(userName);
                     }
                     var result = await resp.json();
+                    if(avatarCache[userName]!==requestedEntry)return getAvatarUrl(userName);
                     if (result.ok && result.avatar_url) {
                         setAvatarCacheEntry(userName, 'has_avatar', result.avatar_url);
                         return result.avatar_url;
@@ -1164,6 +1167,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     return getAvatarUrl(userName);
                 } catch(e) {
                     // P7: 网络异常 — 设置 fetch_failed，降级返回旧缓存 URL。
+                    if(avatarCache[userName]!==requestedEntry)return getAvatarUrl(userName);
                     setAvatarCacheEntry(userName, 'fetch_failed', null);
                     return getAvatarUrl(userName);
                 }

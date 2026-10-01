@@ -1211,11 +1211,11 @@
         if (m && m[1] && m[1].length >= 3) return m[1] + (m[1].length < t.length ? '***' : '');
         return t.length > 4 ? t.slice(0, 4) + '***' : t;
     }
-    // 遮罩开关状态（仅内存，不持久化——避免"上次点过显示"变成永久明文）
-    var _showSensitiveInSession = false;
+    // 经认证的管理员按用户要求完整显示 IP 和位置。
+    var _showSensitiveInSession = true;
     function revealSensitive() {
         _showSensitiveInSession = true;
-        try { showToast('已显示完整 IP 与位置（刷新后自动复原为遮罩）'); } catch (e) {}
+        try { showToast('已显示完整 IP 与位置'); } catch (e) {}
         if (typeof renderAdminTab === 'function' && currentTab) { try { renderAdminTab(currentTab); } catch (e) {} }
     }
     window.revealSensitive = revealSensitive;
@@ -3698,15 +3698,23 @@
 
     function bindAdminGpsHistory(userName,firstPage){
         var host=document.getElementById('adminGpsHistoryRows'),more=document.getElementById('adminGpsHistoryMore'),error=document.getElementById('adminGpsHistoryError');if(!host||!more)return;
-        var cursor=null,busy=false,seen=new Set();
-        function paint(body){
-            (body.items||[]).forEach(function(row){if(seen.has(row.id))return;seen.add(row.id);var line=document.createElement('div');line.style.cssText='padding:8px 0;border-bottom:1px solid rgba(148,163,184,.12);font-size:12px;';
-                var lat=Number(row.latitude),lng=Number(row.longitude),link=document.createElement('a');link.target='_blank';link.rel='noopener noreferrer';link.href='https://www.openstreetmap.org/?mlat='+encodeURIComponent(lat)+'&mlon='+encodeURIComponent(lng)+'#map=16/'+encodeURIComponent(lat)+'/'+encodeURIComponent(lng);link.textContent=lat.toFixed(6)+', '+lng.toFixed(6);line.appendChild(link);
-                var detail=document.createElement('span');detail.textContent=' · '+(row.accuracy_m==null?'精度未提供':'精度 '+Math.round(row.accuracy_m)+' 米')+' · '+formatTime(row.captured_at)+' · '+(row.capture_reason==='post_location'?'发布帖子定位':row.capture_reason==='legacy_retained'?'保留历史':row.capture_reason||'主动定位')+' · '+(row.resolved_address|| (row.resolution_status==='failed'?'地址解析失败':'地址解析中'));line.appendChild(detail);host.appendChild(line);
-            });cursor=body.next_cursor;more.hidden=!body.has_more;more.textContent='加载更多';error.textContent='';
+        var cursor=null,busy=false,seen=new Map(),polls=0;
+        function paint(body,refresh){
+            (body.items||[]).forEach(function(row){var previous=seen.get(row.id);var line=document.createElement('div');line.style.cssText='padding:8px 0;border-bottom:1px solid rgba(148,163,184,.12);font-size:12px;';
+                var lat=Number(row.latitude),lng=Number(row.longitude),link=document.createElement('a');link.target='_blank';link.rel='noopener noreferrer';link.href='https://www.openstreetmap.org/?mlat='+encodeURIComponent(lat)+'&mlon='+encodeURIComponent(lng)+'#map=16/'+encodeURIComponent(lat)+'/'+encodeURIComponent(lng);link.textContent=String(row.latitude)+', '+String(row.longitude);line.appendChild(link);
+                var detail=document.createElement('span');detail.textContent=' · '+(row.accuracy_m==null?'精度未提供':'精度 '+Math.round(row.accuracy_m)+' 米')+' · '+formatTime(row.captured_at)+' · '+(row.capture_reason==='post_location'?'发布帖子定位':row.capture_reason==='legacy_retained'?'保留历史':row.capture_reason||'主动定位')+' · '+(row.resolved_address|| (row.resolution_status==='failed'?'地址解析失败':'地址解析中'));line.appendChild(detail);
+                if(row.resolution_status!=='resolved'){var retry=document.createElement('button');retry.type='button';retry.textContent='重新解析';retry.style.cssText='min-height:44px;padding:0 8px;border:0;background:none;color:var(--primary)';retry.onclick=function(){window.adminReResolveLocation(userName,'',row.id);};line.appendChild(retry);}
+                var latest=document.getElementById('adminGpsLatestStatus');if(latest&&latest.dataset.locationId===row.id){latest.textContent=row.resolved_address||(row.resolution_status==='failed'?'解析失败':'解析中');}
+                if(previous)previous.line.replaceWith(line);else host.appendChild(line);seen.set(row.id,{line:line,pending:row.resolution_status==='pending'});
+            });if(!refresh){cursor=body.next_cursor;more.hidden=!body.has_more;}more.textContent='加载更多';error.textContent='';
         }
         async function load(){if(busy||!host.isConnected)return;busy=true;more.disabled=true;try{var body=await apiCall('GET','/admin/user-location-history?user_name='+encodeURIComponent(userName)+(cursor?'&cursor='+encodeURIComponent(cursor):''));if(host.isConnected)paint(body);}catch(e){if(host.isConnected){error.textContent=e.message||'读取失败，请重试';more.hidden=false;}}finally{busy=false;more.disabled=false;}}
         more.onclick=load;if(firstPage)paint(firstPage);else load();
+        async function poll(){var modal=host.closest('.modal-overlay');if(!host.isConnected||document.getElementById('adminGpsHistoryRows')!==host||(modal&&!modal.classList.contains('active'))||polls++>=12)return;
+            if(Array.from(seen.values()).some(function(row){return row.pending;})){try{var body=await apiCall('GET','/admin/user-location-history?user_name='+encodeURIComponent(userName));if(host.isConnected&&document.getElementById('adminGpsHistoryRows')===host)paint(body,true);}catch(e){/* Keep existing evidence during transient failures. */}}
+            if(Array.from(seen.values()).some(function(row){return row.pending;}))setTimeout(poll,10000);
+        }
+        setTimeout(poll,10000);
     }
 
     window.showUserDetailModal = async function(userName) {
@@ -3858,29 +3866,29 @@
             var mapUrl = 'https://www.openstreetmap.org/?mlat=' + encodeURIComponent(latitude) + '&mlon=' + encodeURIComponent(longitude) + '#map=16/' + encodeURIComponent(latitude) + '/' + encodeURIComponent(longitude);
 
             html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;font-size:12px;">';
-            html += '<div><span style="color:var(--text-muted);">纬度</span><br>' + escapeHtml(latitude.toFixed(6)) + '</div>';
-            html += '<div><span style="color:var(--text-muted);">经度</span><br>' + escapeHtml(longitude.toFixed(6)) + '</div>';
+            html += '<div><span style="color:var(--text-muted);">纬度</span><br>' + escapeHtml(String(latestLoc.latitude)) + '</div>';
+            html += '<div><span style="color:var(--text-muted);">经度</span><br>' + escapeHtml(String(latestLoc.longitude)) + '</div>';
             html += '<div><span style="color:var(--text-muted);">精度</span><br>' + (accuracyM===null?'未提供':escapeHtml(String(accuracyM))+' 米') + '</div>';
             html += '<div><span style="color:var(--text-muted);">采集时间</span><br>' + escapeHtml(capturedAt ? formatTime(capturedAt) : '-') + '</div>';
             html += '<div><span style="color:var(--text-muted);">接收时间</span><br>' + escapeHtml(receivedAt ? formatTime(receivedAt) : '-') + '</div>';
             if (captureReason) {
-                var reasonLabel = captureReason === 'post_location' ? '发布帖子定位' : captureReason === 'legacy_retained' ? '保留历史' : captureReason === 'post_location' ? '发布帖子定位' : captureReason === 'legacy_retained' ? '保留历史' : captureReason === 'login' ? '登录时' : (captureReason === 'register' ? '注册时' : (captureReason === 'page_refresh' ? '刷新时' : escapeHtml(captureReason)));
+                var reasonLabel = captureReason === 'post_location' ? '发布帖子定位' : captureReason === 'legacy_retained' ? '保留历史' : captureReason === 'login' ? '登录时' : (captureReason === 'register' ? '注册时' : (captureReason === 'page_refresh' ? '刷新时' : escapeHtml(captureReason)));
                 html += '<div><span style="color:var(--text-muted);">触发场景</span><br>' + reasonLabel + '</div>';
             }
-            html += '<div><span style="color:var(--text-muted);">地址解析</span><br>';
+            html += '<div><span style="color:var(--text-muted);">地址解析</span><br><span id="adminGpsLatestStatus" data-location-id="'+escapeHtml(latestLoc.id||'')+'">';
             if (resolutionStatus === 'resolved' && resolvedAddress) {
-                html += '<span style="color:var(--success);">已解析</span> · ' + escapeHtml(String(resolvedAddress).slice(0, 80));
+                html += '<span style="color:var(--success);">已解析</span> · ' + escapeHtml(String(resolvedAddress));
             } else if (resolutionStatus === 'pending') {
                 html += '<span style="color:var(--warning);">解析中</span>';
             } else if (resolutionStatus === 'failed') {
                 html += '<span style="color:var(--danger);">解析失败</span>';
-                if (resolveError) html += ' · ' + escapeHtml(String(resolveError).slice(0, 40));
+                if (resolveError) html += ' · ' + escapeHtml(String(resolveError));
             } else {
                 html += '<span style="color:var(--text-muted);">未知</span>';
             }
-            html += '</div>';
-            if (resolutionStatus !== 'resolved' && resolutionStatus !== 'pending' && latestLoc.page_load_id) {
-                html += '<div><span style="color:var(--text-muted);">操作</span><br><button onclick="adminReResolveLocation(\'' + safeJsStr(userName) + '\',\'' + safeJsStr(latestLoc.page_load_id || '') + '\');return false;" style="font-size:11px;padding:3px 10px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer;">重新解析</button></div>';
+            html += '</span></div>';
+            if (resolutionStatus !== 'resolved' && (latestLoc.id||latestLoc.page_load_id)) {
+                html += '<div><span style="color:var(--text-muted);">操作</span><br><button onclick="adminReResolveLocation(\'' + safeJsStr(userName) + '\',\'' + safeJsStr(latestLoc.page_load_id || '') + '\',\'' + safeJsStr(latestLoc.id || '') + '\');return false;" style="font-size:11px;padding:3px 10px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer;">重新解析</button></div>';
             }
             if (pageLoadId) {
                 html += '<div><span style="color:var(--text-muted);">Page ID</span><br><span style="font-size:10px;font-family:monospace;">' + escapeHtml(pageLoadId.slice(0, 20)) + '</span></div>';
@@ -3967,12 +3975,13 @@
     };
 
     // 管理员手动重新解析 GPS 地址
-    window.adminReResolveLocation = async function(userName, pageLoadId) {
+    window.adminReResolveLocation = async function(userName, pageLoadId, locationId) {
         try {
             showToast('正在重新解析地址…', 'info');
             var res = await apiCall('POST', '/admin/user/resolve-location', {
                 user_name: userName,
-                page_load_id: pageLoadId || ''
+                page_load_id: pageLoadId || '',
+                location_id: locationId || ''
             });
             if (res && res.ok) {
                 showToast('地址解析成功：' + (res.address || '已更新'), 'success');
@@ -5830,7 +5839,7 @@
             h += '<div style="' + rowStyle + ';flex-direction:column;align-items:flex-start;gap:6px"><span>位置</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(_showSensitiveInSession ? (p.latest_location.text || '') : maskGeo(p.latest_location.text)) + '</span></div>';
             if (p.latest_location.latitude && p.latest_location.longitude) {
                 // GPS 坐标精确到 4 位小数 ≈ 11 米，等同于精确住址，属于最敏感一档
-                h += '<div style="' + rowStyle + '"><span>坐标</span><span style="' + valStyle + '">' + (_showSensitiveInSession ? (Number(p.latest_location.latitude).toFixed(4) + ', ' + Number(p.latest_location.longitude).toFixed(4)) : '***.***, ***.***（已遮罩）') + '</span></div>';
+                h += '<div style="' + rowStyle + '"><span>坐标</span><span style="' + valStyle + '">' + (_showSensitiveInSession ? (String(p.latest_location.latitude) + ', ' + String(p.latest_location.longitude)) : '***.***, ***.***（已遮罩）') + '</span></div>';
             }
             if (p.latest_location.country_code) h += '<div style="' + rowStyle + '"><span>国家代码</span><span style="' + valStyle + '">' + escapeHtml(p.latest_location.country_code) + '</span></div>';
             if (p.latest_location.postal) h += '<div style="' + rowStyle + '"><span>邮编</span><span style="' + valStyle + '">' + (_showSensitiveInSession ? escapeHtml(p.latest_location.postal) : escapeHtml(String(p.latest_location.postal).slice(0, 2) + '***')) + '</span></div>';
