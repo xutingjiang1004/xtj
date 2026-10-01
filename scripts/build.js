@@ -117,6 +117,7 @@ const JS_FILES = [
    'js/ai-agent.js',
   'js/theme-toggle.js',
   'js/voice-transcription.js',
+  'js/photo-wall/story.js',
   'js/desktop-shell.js',
   'js/config.js',
   'js/photo-wall/data.js',
