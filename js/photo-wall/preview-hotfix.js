@@ -823,21 +823,32 @@
     return html;
   }
 
-  function fetchPhotoFileSize(photo) {
-    if (!photo) return Promise.resolve(null);
-    if (photo.fileSize) return Promise.resolve(photo.fileSize);
-    if (!photo.imageUrl) return Promise.resolve(null);
-    return fetch(photo.imageUrl, { method: 'HEAD', mode: 'cors', credentials: 'omit' })
-      .then(function(res) {
-        var cl = res.headers.get('content-length');
-        if (cl) return parseInt(cl, 10);
-        return fetch(photo.imageUrl, { method: 'GET', mode: 'cors', credentials: 'omit' })
-          .then(function(gRes) {
-            var gCl = gRes.headers.get('content-length');
-            return gCl ? parseInt(gCl, 10) : null;
-          });
-      })
-      .catch(function() { return null; });
+  async function fetchPhotoFileSize(photo) {
+    if (!photo) return null;
+    if (Number.isFinite(Number(photo.fileSize)) && Number(photo.fileSize) > 0) return Number(photo.fileSize);
+    if (!photo.imageUrl) return null;
+    var controller = new AbortController();
+    var timer = setTimeout(function(){ controller.abort(); }, 10000);
+    try {
+      var size = null, response;
+      try {
+        response = await fetch(photo.imageUrl, { method:'HEAD', mode:'cors', credentials:'omit', signal:controller.signal });
+        if (response.ok) size = Number(response.headers.get('content-length')) || null;
+      } catch (error) { if (controller.signal.aborted) return null; }
+      if (!Number.isSafeInteger(size) || size <= 0) {
+        // Ask for one byte and cancel the body if the server ignores Range.
+        response = await fetch(photo.imageUrl, { method:'GET', headers:{Range:'bytes=0-0'}, mode:'cors', credentials:'omit', signal:controller.signal });
+        try {
+          if (response.ok) {
+            var total = /\/(\d+)$/.exec(response.headers.get('content-range') || '');
+            size = total ? Number(total[1]) : response.status === 206 ? null : Number(response.headers.get('content-length')) || null;
+          } else size = null;
+        } finally { if (response.body) await response.body.cancel().catch(function(){}); }
+      }
+      if (!Number.isSafeInteger(size) || size <= 0) return null;
+      photo.fileSize = size;
+      return size;
+    } catch (_) { return null; } finally { clearTimeout(timer); }
   }
 
   function bindInfoModal() {

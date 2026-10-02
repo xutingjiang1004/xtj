@@ -38,7 +38,7 @@ async function setup(page) {
   await page.route('**/slow-bad.png**', async route => { await new Promise(resolve => setTimeout(resolve, 120)); await route.fulfill({ status: 404, contentType: 'text/plain', body: 'slow nope' }); });
   await page.route('**/rapid-*.png**', async route => { await new Promise(resolve => setTimeout(resolve, 15)); await route.fulfill({ status: 200, contentType: 'image/png', body: okPng }); });
   await page.addInitScript(installListenerMonitor);
-  await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
+  await page.setContent('<!doctype html><head><base href="http://127.0.0.1:4173/"></head><body><div id="photoGrid"></div></body>');
   await page.evaluate(installListenerMonitor);
   await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.showToast=function(){}; window.currentUser="tester";' + script });
   return pageErrors;
@@ -85,7 +85,7 @@ test('photo with thumbnail paints instantly then upgrades to full image', async 
     await new Promise(resolve => setTimeout(resolve, 300));
     await route.fulfill({ status: 200, contentType: 'image/png', body: okPng });
   });
-  await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
+  await page.setContent('<!doctype html><head><base href="http://127.0.0.1:4173/"></head><body><div id="photoGrid"></div></body>');
   await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.showToast=function(){}; window.currentUser="tester";' + script });
   await page.evaluate(({ thumbUrl, fullUrl }) => window.openPhotoPreview(0, [{ imageUrl: fullUrl, thumbUrl: thumbUrl, username: 'u', timestamp: Date.now() }]), { thumbUrl, fullUrl });
   // 原图尚未返回前，主槽应已秒显缩略图
@@ -107,7 +107,10 @@ test('same URL repeated while loading does not remove the only effective listene
   await page.waitForTimeout(40);
   const state = await previewState(page);
   // Both load paths must retire after the request settles; peaks alone do not detect leaks.
-  await page.waitForTimeout(600);
+  await page.waitForFunction(() => {
+    const image = document.getElementById('photoPreviewImage');
+    return image && ((image.complete && image.naturalWidth > 0) || image.classList.contains('pp-placeholder'));
+  }, null, { timeout: 8000 });
   const settled=await previewState(page);
   expect(settled.stats.active).toBe(0);
   expect(settled.openCleanup).toBe(false);
@@ -162,7 +165,10 @@ test('rapidly switching 50 photos keeps the newest image and bounded listeners',
   await expect(page.locator('#photoPreviewImage')).toHaveCSS('opacity', '1');
   const state = await previewState(page);
   // Both load paths must retire after the request settles; peaks alone do not detect leaks.
-  await page.waitForTimeout(600);
+  await page.waitForFunction(() => {
+    const image = document.getElementById('photoPreviewImage');
+    return image && ((image.complete && image.naturalWidth > 0) || image.classList.contains('pp-placeholder'));
+  }, null, { timeout: 8000 });
   const settled=await previewState(page);
   expect(settled.stats.active).toBe(0);
   expect(settled.openCleanup).toBe(false);
@@ -198,20 +204,21 @@ test('photo controls and info dialog expose names, trap focus, close on Escape, 
 test('photo grid warm loading uses the bounded queue and recovers broken images', async ({ page }) => {
   const errors = [];
   let active = 0;
-  let maxActive = 0;
+  let maxActive = 0, requests = 0, brokenAttempts = 0;
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/queued-*.png', async route => {
+    requests += 1;
     active += 1;
     maxActive = Math.max(maxActive, active);
     await new Promise(resolve => setTimeout(resolve, 40));
     active -= 1;
-    if (route.request().url().includes('queued-3.png')) {
+    if (route.request().url().includes('queued-3.png') && ++brokenAttempts === 1) {
       await route.fulfill({ status: 404, contentType: 'text/plain', body: 'broken' });
     } else {
       await route.fulfill({ status: 200, contentType: 'image/png', body: okPng });
     }
   });
-  await page.setContent('<!doctype html><body><div id="photoGrid"></div></body>');
+  await page.setContent('<!doctype html><head><base href="http://127.0.0.1:4173/"><style>#photoGrid{display:grid;grid-template-columns:repeat(4,100px)}#photoGrid img{width:100px;height:100px}</style></head><body><div id="photoGrid"></div></body>');
   await page.evaluate(() => { window.IntersectionObserver = undefined; });
   await page.addScriptTag({ content: renderScript });
   await page.evaluate(() => {
@@ -223,8 +230,17 @@ test('photo grid warm loading uses the bounded queue and recovers broken images'
     }));
     window.renderPhotoWallWithoutReload();
   });
-  await expect(page.locator('#photoGrid img[data-src]')).toHaveCount(0, { timeout: 5000 });
+  await expect(page.locator('#photoGrid img:not([data-src])')).toHaveCount(7, { timeout: 5000 });
+  await expect(page.locator('#photoGrid img[data-src]')).toHaveCount(1);
+  expect(maxActive).toBe(4);
+  expect(requests).toBe(8);
+  const failed = page.locator('.photo-wall-item').nth(3).locator('img');
+  await expect(failed).toHaveAttribute('src', /^data:image\/svg\+xml/);
+  await expect(failed).toHaveAttribute('data-src', /queued-3\.png$/);
+  await failed.click();
+  await expect(page.locator('#photoGrid img[data-src]')).toHaveCount(0);
+  await expect(failed).toHaveJSProperty('naturalWidth', 1);
+  expect(requests).toBe(9);
   expect(maxActive).toBeLessThanOrEqual(4);
-  await expect(page.locator('.photo-wall-item').nth(3).locator('img')).toHaveAttribute('src', /^data:image\/svg\+xml/);
   expect(errors).toEqual([]);
 });

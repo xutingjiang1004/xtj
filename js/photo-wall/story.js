@@ -1,6 +1,6 @@
 (function(){
   'use strict';
-  var current = null, epoch = 0, controller = null, social = null, expanded = false, mutationVersion = 0;
+  var current = null, epoch = 0, controller = null, social = null, expanded = false, mutationVersion = 0, storyAuthEpoch = 0, commentVersion = 0;
   var likeStates = new Map(), avatars = new Map(), commentAnimation = null, commentSequence = 0;
   var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function el(id){ return document.getElementById(id); }
@@ -8,16 +8,19 @@
   var heart=icon('<path d="M20.5 5.7a5.2 5.2 0 0 0-7.4 0L12 6.8l-1.1-1.1a5.2 5.2 0 0 0-7.4 7.4L12 21l8.5-7.9a5.2 5.2 0 0 0 0-7.4Z"/>');
   var bubble=icon('<path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2v-9.5A8.5 8.5 0 0 1 10.5 4H13a8 8 0 0 1 8 7.5Z"/>');
   async function request(path,options){
-    options=options||{};
+    if(options.authEpoch!==authEpoch()||options.authOwner!==(window.currentUser||''))throw new Error('identity_changed');
     if(window.currentUser && window.xtjProtectedFetch) return window.xtjProtectedFetch(path,options);
     return fetch((window.API_BASE||location.origin)+path,options);
   }
   async function json(path,options){
+    options=Object.assign({authOwner:current&&current._storyOwner||window.currentUser||'',authEpoch:storyAuthEpoch},options||{});
     var response=await request(path,options);var body=response ? await response.json().catch(function(){return{};}) : {};
+    if(options.authEpoch!==authEpoch()||options.authOwner!==(window.currentUser||''))throw new Error('identity_changed');
     if(!response || !response.ok || body.ok!==true)throw new Error(body.error||'连接暂时不稳定，请重试');
     return body;
   }
-  function valid(token,owner,id){return token===epoch && current && String(current.cloudId)===String(id) && (window.currentUser||'')===owner;}
+  function authEpoch(){return window.__xtjGetAuthEpoch?window.__xtjGetAuthEpoch():0;}
+  function valid(token,owner,id){return storyAuthEpoch===authEpoch() && token===epoch && current && String(current.cloudId)===String(id) && (window.currentUser||'')===owner;}
   function isWall(photo){return !!(photo && UUID.test(String(photo.cloudId||'')));}
   function ensure(){
     var root=el('photoPreviewOverlay'),info=root&&root.querySelector('.photo-preview-info');if(!info)return false;
@@ -55,11 +58,11 @@
     el('ppCommentsTitle').textContent=Number.isFinite(social.comment_count)?'评论 '+social.comment_count:'评论';
   }
   async function loadSocial(token,owner,id){
-    var version=mutationVersion;
+    var version=mutationVersion, commentsAtStart=commentVersion;
     try {
       var body=await json('/api/photo/'+encodeURIComponent(id)+'/social',{background:true,signal:controller.signal});
-      if(!valid(token,owner,id)||version!==mutationVersion)return;
-      social=body;var saved=likeStates.get(owner+':'+id);if(saved&&saved.pending){social.liked=saved.desired;social.like_count=Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed));}else{likeStates.set(owner+':'+id,{confirmed:!!body.liked,desired:!!body.liked,count:body.like_count||0,pending:false});}current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
+      if(!valid(token,owner,id)||commentsAtStart!==commentVersion)return;
+      social=body;var saved=likeStates.get(owner+':'+id);if(saved&&saved.authEpoch===storyAuthEpoch&&(saved.pending||version!==mutationVersion)){social.liked=saved.desired;social.like_count=Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed));}else{likeStates.set(owner+':'+id,{confirmed:!!body.liked,desired:!!body.liked,count:body.like_count||0,pending:false,authEpoch:storyAuthEpoch});}current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
     }catch(error){if(!valid(token,owner,id)||error.name==='AbortError')return;el('ppSocialStatus').textContent='互动暂未加载，点击重试';el('ppSocialStatus').onclick=function(){loadSocial(epoch,window.currentUser||'',current.cloudId);};el('ppLikeBtn').disabled=!likeStates.has(owner+':'+id);}
   }
   function motion(){return !!(el('ppCommentsPanel').animate && document.documentElement.getAttribute('data-xtj-motion')!=='off' && !matchMedia('(prefers-reduced-motion: reduce)').matches);}
@@ -112,23 +115,25 @@
   });
   window.renderPhotoStory=function(photo){
     if(!ensure())return;
-    var same=current&&String(current.id)===String(photo.id)&&(current._storyOwner||'')===(window.currentUser||'');
-    current=photo;current._storyOwner=window.currentUser||'';
+    var key=function(p){return p&&(p.cloudId||p.id||p.imageUrl);};
+    var same=current&&key(current)&&String(key(current))===String(key(photo))&&storyAuthEpoch===authEpoch()&&(current._storyOwner||'')===(window.currentUser||'');
+    current=photo;current._storyOwner=window.currentUser||'';storyAuthEpoch=authEpoch();
     if(same){updateCounts();return;}
     var caption=typeof photo.caption==='string'?photo.caption:'';
     if(!caption&&photo.content){try{caption=JSON.parse(photo.content).caption||'';}catch(_){}}
     el('ppStoryCaption').textContent=caption;el('ppStoryCaption').hidden=!caption;
     el('ppCaptionMore').hidden=true;el('ppCaptionMore').setAttribute('aria-expanded','false');
     showAvatar(photo);
-    epoch++;if(controller)controller.abort();controller=new AbortController();social=null;expanded=false;mutationVersion=0;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
+    epoch++;if(controller)controller.abort();controller=new AbortController();social=null;expanded=false;mutationVersion=0;commentVersion=0;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
     commentsVisible(false,true);el('ppCommentInput').value='';el('ppCommentInput').disabled=false;el('ppCommentSend').disabled=false;el('ppCommentError').textContent='';el('ppCommentsList').replaceChildren();
     el('ppLikeCount').textContent='—';el('ppCommentCount').textContent='—';el('ppLikeBtn').setAttribute('aria-pressed','mixed');el('ppLikeBtn').disabled=true;el('ppSocialStatus').textContent='';
     el('ppLikeBtn').hidden=el('ppCommentBtn').hidden=!isWall(photo);
     var token=epoch,owner=window.currentUser||'',id=photo.cloudId;
-    if(isWall(photo)){var saved=likeStates.get(owner+':'+id);if(saved){social={comments:[],liked:saved.desired,like_count:Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed))};updateCounts();el('ppLikeBtn').disabled=false;}loadSocial(token,owner,id);}
+    if(isWall(photo)){var saved=likeStates.get(owner+':'+id);if(saved&&saved.pending&&saved.authEpoch!==storyAuthEpoch){likeStates.delete(owner+':'+id);saved=null;}if(saved){social={comments:[],liked:saved.desired,like_count:Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed))};updateCounts();el('ppLikeBtn').disabled=false;}loadSocial(token,owner,id);}
     requestAnimationFrame(refreshCaptionOverflow);
   };
   function showLikeState(entry,owner,id){
+    if(entry.authEpoch!=null&&entry.authEpoch!==authEpoch())return;
     if(!current || String(current.cloudId)!==String(id) || (window.currentUser||'')!==owner)return;
     social=social||{comments:[]};social.liked=entry.desired;
     social.like_count=Math.max(0,entry.count+Number(entry.desired)-Number(entry.confirmed));updateCounts();
@@ -143,21 +148,21 @@
     if(!current||!isWall(current)||el('ppLikeBtn').disabled)return;
     var owner=window.currentUser||'',id=current.cloudId;if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
     var key=owner+':'+id,entry=likeStates.get(key);
-    if(!entry){entry={confirmed:!!(social&&social.liked),desired:!!(social&&social.liked),count:(social&&social.like_count)||0,pending:false};likeStates.set(key,entry);}
+    if(!entry){entry={confirmed:!!(social&&social.liked),desired:!!(social&&social.liked),count:(social&&social.like_count)||0,pending:false,authEpoch:storyAuthEpoch};likeStates.set(key,entry);}
     entry.desired=!entry.desired;mutationVersion++;showLikeState(entry,owner,id);animateHeart();el('ppSocialStatus').textContent='';
     if(!entry.pending)saveLike(entry,owner,id);
   }
   async function saveLike(entry,owner,id){
-    entry.pending=true;
+    var identityEpoch=authEpoch();entry.authEpoch=identityEpoch;entry.pending=true;
     try{
       while(entry.desired!==entry.confirmed){
         // Never send a queued intention using a different account's credentials.
-        if((window.currentUser||'')!==owner){entry.desired=entry.confirmed;break;}
+        if(identityEpoch!==authEpoch()||(window.currentUser||'')!==owner){entry.desired=entry.confirmed;break;}
         var liked=entry.desired;
-        var body=await json('/api/photo/'+id+'/like',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({liked:liked}),background:true});
+        var body=await json('/api/photo/'+id+'/like',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({liked:liked}),background:true,authOwner:owner,authEpoch:identityEpoch});
         entry.confirmed=!!body.liked;entry.count=Number(body.like_count)||0;showLikeState(entry,owner,id);
       }
-    }catch(error){entry.desired=entry.confirmed;showLikeState(entry,owner,id);if(current&&String(current.cloudId)===String(id)&&(window.currentUser||'')===owner)el('ppSocialStatus').textContent='点赞未保存，请重试';}
+    }catch(error){entry.desired=entry.confirmed;showLikeState(entry,owner,id);if(identityEpoch===authEpoch()&&current&&String(current.cloudId)===String(id)&&(window.currentUser||'')===owner)el('ppSocialStatus').textContent='点赞未保存，请重试';}
     finally{entry.pending=false;if(likeStates.size>256){for(var pair of likeStates){if(!pair[1].pending){likeStates.delete(pair[0]);break;}}}}
   }
   function renderComments(){
@@ -172,24 +177,24 @@
   }
   function openComments(){if(!current||!isWall(current))return;commentsVisible(true);renderComments();if(!social)loadSocial(epoch,window.currentUser||'',current.cloudId);}
   async function moreComments(){
-    if(!social||!social.next_cursor)return;var token=epoch,owner=window.currentUser||'',id=current.cloudId;var button=el('ppCommentsMore');button.disabled=true;
-    try{var body=await json('/api/photo/'+id+'/social?before='+encodeURIComponent(social.next_cursor),{background:true,signal:controller.signal});if(!valid(token,owner,id))return;var rows=social.comments.concat(body.comments),seen=new Set();social.comments=rows.filter(function(r){if(seen.has(r.id))return false;seen.add(r.id);return true;});social.has_more=body.has_more;social.next_cursor=body.next_cursor;renderComments();}
+    if(!social||!social.next_cursor)return;var token=epoch,owner=window.currentUser||'',id=current.cloudId,version=commentVersion;var button=el('ppCommentsMore');button.disabled=true;
+    try{var body=await json('/api/photo/'+id+'/social?before='+encodeURIComponent(social.next_cursor),{background:true,signal:controller.signal});if(!valid(token,owner,id)||version!==commentVersion)return;var rows=social.comments.concat(body.comments),seen=new Set();social.comments=rows.filter(function(r){if(seen.has(r.id))return false;seen.add(r.id);return true;});social.has_more=body.has_more;social.next_cursor=body.next_cursor;renderComments();}
     catch(error){if(valid(token,owner,id))el('ppCommentError').textContent=error.message;}finally{if(token===epoch)button.disabled=false;}
   }
   async function sendComment(event){
     event.preventDefault();if(!current||!isWall(current)||el('ppCommentSend').disabled)return;
     var input=el('ppCommentInput'),content=input.value.trim();if(!content)return;
     var token=epoch,owner=window.currentUser||'',id=current.cloudId;if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
-    mutationVersion++;input.disabled=true;el('ppCommentSend').disabled=true;
+    mutationVersion++;commentVersion++;input.disabled=true;el('ppCommentSend').disabled=true;
     try{var body=await json('/api/photo/'+id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content})});if(!valid(token,owner,id))return;
-      social=social||{comments:[]};social.comments.unshift(body.comment);if(Number.isFinite(social.comment_count))social.comment_count++;input.value='';el('ppCommentError').textContent='';updateCounts();renderComments();}
-    catch(error){if(valid(token,owner,id))el('ppCommentError').textContent=error.message;}
+      social=social||{comments:[]};social.comments.unshift(body.comment);if(Number.isFinite(social.comment_count))social.comment_count++;input.value='';el('ppCommentError').textContent='';updateCounts();renderComments();loadSocial(token,owner,id);}
+    catch(error){if(valid(token,owner,id)){el('ppCommentError').textContent=error.message;loadSocial(token,owner,id);}}
     finally{if(valid(token,owner,id)){input.disabled=false;el('ppCommentSend').disabled=false;}}
   }
   async function deleteComment(row,button){
-    if(button.disabled)return;var token=epoch,owner=window.currentUser||'',id=current.cloudId;button.disabled=true;
-    try{await json('/api/post/comment/'+encodeURIComponent(row.id),{method:'DELETE'});if(!valid(token,owner,id))return;social.comments=social.comments.filter(function(r){return r.id!==row.id;});if(Number.isFinite(social.comment_count))social.comment_count=Math.max(0,social.comment_count-1);updateCounts();renderComments();}
-    catch(error){if(valid(token,owner,id)){el('ppCommentError').textContent=error.message;button.disabled=false;}}
+    if(button.disabled)return;commentVersion++;var token=epoch,owner=window.currentUser||'',id=current.cloudId;button.disabled=true;
+    try{await json('/api/post/comment/'+encodeURIComponent(row.id),{method:'DELETE'});if(!valid(token,owner,id))return;social.comments=social.comments.filter(function(r){return r.id!==row.id;});if(Number.isFinite(social.comment_count))social.comment_count=Math.max(0,social.comment_count-1);updateCounts();renderComments();loadSocial(token,owner,id);}
+    catch(error){if(valid(token,owner,id)){el('ppCommentError').textContent=error.message;button.disabled=false;loadSocial(token,owner,id);}}
   }
   window.preloadPhotoStoryAvatars(window.photoWallData||[]);
   document.addEventListener('keydown',function(event){if(event.key==='Escape'&&el('ppCommentsPanel')&&!el('ppCommentsPanel').hidden){event.stopImmediatePropagation();event.preventDefault();el('ppCommentsClose').click();}},true);
