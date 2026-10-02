@@ -258,48 +258,41 @@
     }
     activeLoads += 1;
     img._pwActiveLoad = _pwRenderGeneration;
+    var loadGeneration = _pwRenderGeneration, loadToken = {};
+    img._pwLoadToken = loadToken;
     var settled = false;
-    var fallbackTimer = setTimeout(function(){
-      if (!settled && img && img.isConnected) {
-        if (!img.getAttribute('data-src')) {
-          img.classList.add('pw-load-timeout');
-          return;
-        }
-        // P6: 超时后释放加载槽，换成内置占位图，支持点击重试原 URL
-        if (img._pwActiveLoad === _pwRenderGeneration) {
-          activeLoads = Math.max(0, activeLoads - 1);
-          img._pwActiveLoad = 0;
-        }
-        img._pwQueued = false;
-        if (imgObserver) imgObserver.unobserve(img);
-        img._pwLoadFailed = true;
-        img.classList.add('pw-load-timeout', 'pw-load-error');
-        img.style.cursor = 'pointer';
-        img.src = ERROR_IMG;
-        img.onclick = function(ev){
-          if (ev && ev.stopPropagation) ev.stopPropagation();
-          retryImageLoad(img);
-        };
-      }
-    }, 10000);
-    function settleImage(failed){
+    var fallbackTimer = setTimeout(function(){ settleImage(true, true); }, 10000);
+    function settleImage(failed, timedOut){
       if (settled) return;
       settled = true;
       clearTimeout(fallbackTimer);
-      // ★ 只有当前 generation 的加载才更新状态
+      if (loadGeneration !== _pwRenderGeneration || img._pwLoadToken !== loadToken) { pumpImages(); return; }
       if (img._pwActiveLoad === _pwRenderGeneration) {
         activeLoads = Math.max(0, activeLoads - 1);
         img._pwActiveLoad = 0;
       }
       img.onload = null;
       img.onerror = null;
-      img.onclick = null;
-      img.style.cursor = '';
-      if (failed) img.src = FALLBACK_IMG;
-      img.removeAttribute('data-src');
-      // ★ 只有 img 还在 DOM 中且属于当前 generation 才完成
-      if (img.isConnected && img._pwGeneration === _pwRenderGeneration) {
+      var current = img.isConnected && img._pwGeneration === _pwRenderGeneration;
+      if (current) {
         finishImg(img);
+        if (failed) {
+          // Preserve the original for both HTTP failures and timeouts. The
+          // placeholder must not count as success or consume a loading slot.
+          img._pwLoadFailed = true;
+          img.classList.add('pw-load-error');
+          if (timedOut) img.classList.add('pw-load-timeout');
+          img.src = ERROR_IMG;
+          img.style.cursor = 'pointer';
+          img.onclick = function(ev){
+            if (ev && ev.stopPropagation) ev.stopPropagation();
+            retryImageLoad(img);
+          };
+        } else {
+          img.removeAttribute('data-src');
+          img.onclick = null;
+          img.style.cursor = '';
+        }
       }
       pumpImages();
     }
@@ -316,6 +309,7 @@
     if (img.complete) {
       settleImage(img.naturalWidth === 0);
     }
+    pumpImages();
   }
 
   function queueImage(img){

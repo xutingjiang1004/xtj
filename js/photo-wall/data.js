@@ -527,54 +527,41 @@
   async function deleteCloudPhoto(item){
     if (!item || !(item.cloudId || item.id)) return false;
     var id = item.cloudId || item.id;
-    var authHeaders = typeof window.getUserAuthHeaders === 'function'
-      ? await window.getUserAuthHeaders()
-      : {};
-    // ★ 添加 AbortController 和超时控制
+    var owner = window.currentUser || '', authEpoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+    function assertIdentity(){
+      if (owner !== (window.currentUser || '') || authEpoch !== (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0)) throw new Error('identity_changed');
+    }
+    var authHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
+    assertIdentity();
     var controller = new AbortController();
     var timeoutId = setTimeout(function() { controller.abort(); }, 20000);
     try {
       var response = await fetch(apiUrl('/api/photo/delete'), {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type':'application/json' }, authHeaders || {}),
-        body: JSON.stringify({ photoId:id }),
-        signal: controller.signal
+        method:'POST', headers:Object.assign({ 'Content-Type':'application/json' }, authHeaders || {}),
+        body:JSON.stringify({ photoId:id }), signal:controller.signal
       });
-      clearTimeout(timeoutId);
-      var result = await response.json().catch(function(){ return {}; });
+      var result = await response.json();
+      assertIdentity();
       if (!response.ok || !result.ok) throw new Error(result.error || 'cloud_delete_failed');
       return result;
     } catch (err) {
-      clearTimeout(timeoutId);
-      // ★ 超时后查询服务端权威删除状态（使用只读状态接口，不重复执行删除）
+      assertIdentity();
+      // A timed out response body is ambiguous too: query without repeating the deletion.
       if (err.name === 'AbortError') {
+        var statusController = new AbortController();
+        var statusTimeoutId = setTimeout(function() { statusController.abort(); }, 12000);
         try {
-          var statusController = new AbortController();
-          var statusTimeoutId = setTimeout(function() { statusController.abort(); }, 12000);
           var statusResponse = await fetch(apiUrl('/api/photo/delete-status?photo_id=' + encodeURIComponent(id)), {
-            method: 'GET',
-            headers: Object.assign({}, authHeaders || {}),
-            signal: statusController.signal
+            method:'GET', headers:Object.assign({}, authHeaders || {}), signal:statusController.signal
           });
-          clearTimeout(statusTimeoutId);
-          var statusResult = await statusResponse.json().catch(function(){ return {}; });
-          if (statusResult.status === 'deleted') {
-            return { ok: true, already_deleted: true };
-          }
-          if (statusResult.status === 'exists') {
-            // 照片还存在，删除未成功
-            throw new Error('delete_status_uncertain');
-          }
-          // not_found 或 unknown 也视为不确定
+          var statusResult = await statusResponse.json();
+          assertIdentity();
+          if (statusResponse.ok && statusResult.status === 'deleted') return { ok:true, already_deleted:true };
           throw new Error('delete_status_uncertain');
-        } catch (statusErr) {
-          if (statusErr.message === 'delete_status_uncertain') throw statusErr;
-          console.warn('[PhotoWall] delete status check failed', statusErr);
-          throw err; // 保留原始 AbortError
-        }
+        } finally { clearTimeout(statusTimeoutId); }
       }
       throw err;
-    }
+    } finally { clearTimeout(timeoutId); }
   }
 
   function canDeletePhotoWallPhoto(item) {
@@ -663,19 +650,19 @@
 
   var countedPhotoViewers = new Set();
   async function syncPhotoViewCount(item){
-    var owner = window.currentUser || '';
+    var owner = window.currentUser || '', authEpoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
     if (!item || !item.cloudId || !owner) return;
     var key = owner + ':' + item.cloudId;
     if (countedPhotoViewers.has(key)) return;
     var controller = new AbortController(), timer = setTimeout(function(){controller.abort();},10000);
     try {
       var options = { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include',
-        body:JSON.stringify({photo_id:item.cloudId}), signal:controller.signal, background:true };
+        body:JSON.stringify({photo_id:item.cloudId}), signal:controller.signal, background:true, authOwner:owner, authEpoch:authEpoch };
       var response;
       if (window.xtjProtectedFetch) response=await window.xtjProtectedFetch('/api/photo/view',options);
-      else { options.headers=Object.assign({},options.headers,await Promise.resolve(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}));response=await fetch(apiUrl('/api/photo/view'),options); }
+      else { options.headers=Object.assign({},options.headers,await Promise.resolve(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}));if(owner!==(window.currentUser||'')||authEpoch!==(window.__xtjGetAuthEpoch?window.__xtjGetAuthEpoch():0))return;response=await fetch(apiUrl('/api/photo/view'),options); }
       var result=response ? await response.json().catch(function(){return{};}) : {};
-      if (!response || !response.ok || result.ok!==true || !Number.isFinite(result.views) || owner!==(window.currentUser||'')) return;
+      if (!response || !response.ok || result.ok!==true || !Number.isFinite(result.views) || owner!==(window.currentUser||'') || authEpoch!==(window.__xtjGetAuthEpoch?window.__xtjGetAuthEpoch():0)) return;
       countedPhotoViewers.add(key);if(countedPhotoViewers.size>1000)countedPhotoViewers.delete(countedPhotoViewers.values().next().value);
       item.views=Math.max(Number(item.views)||0,result.views);updatePhotoViewDisplays(item);
     } catch (_) {} finally { clearTimeout(timer); }

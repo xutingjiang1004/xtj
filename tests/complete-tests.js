@@ -361,7 +361,7 @@ test('Storage upload success but fetch network error preserves file for reconcil
   var s = read('js/photo-wall/upload-ui.js');
   assert.ok(s.indexOf("await cleanupStorage(path, uploadId, cleanupAfterCreateOptions)") >= 0, 'ambiguous create failure must use backend cleanup');
   assert.ok(s.indexOf('savePendingPhotoUpload') >= 0, 'ambiguous create failure must be reconciled');
-  assert.ok(s.indexOf("fetchError.photoUploadCode = 'backend_unreachable'") >= 0, 'network error code missing');
+  assert.match(s, /fetchError\.photoUploadCode\s*=\s*(?:fetchError\.photoUploadCode\s*\|\|\s*)?'backend_unreachable'/, 'network error code missing');
 });
 test('fetch throws timeout sets AbortController and clears timer', function(){
   var s = read('js/photo-wall/upload-ui.js');
@@ -407,7 +407,9 @@ test('photo create headers always retain JSON content type', function(){
 
 test('photo create request sends only controlled metadata', function(){
   var source = read('js/photo-wall/upload-ui.js');
-  var request = source.slice(source.indexOf("fetch(apiUrl('/api/photo/create')"), source.indexOf('var createData;'));
+  var start = source.search(/createRes\s*=\s*await\s+(?:photoFetch|fetch)\(apiUrl\('\/api\/photo\/create'\)/);
+  assert.ok(start >= 0, 'missing photo create request');
+  var request = source.slice(start, source.indexOf('var createData;', start));
   ['content:', 'actor_key:'].forEach(function(field) {
     assert.strictEqual(request.indexOf(field), -1, 'legacy client field remains: ' + field);
   });

@@ -13,7 +13,8 @@
     batchController: null,
     batchJobs: [],
     postPreviewUrls: [],
-    failedJobs: []
+    failedJobs: [],
+    identity: null
   };
 
   window.PHOTO_WALL_MARKER = window.PHOTO_WALL_MARKER || MARKER;
@@ -47,6 +48,47 @@
       try { return localStorage.getItem('xtj_user') || ''; }
       catch (_) { return ''; }
     })();
+  }
+
+  function photoIdentity(){ return { owner: getCurrentUser(), epoch: window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0 }; }
+  function photoIdentityCurrent(identity){ return !!identity && identity.owner === getCurrentUser() && identity.epoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0); }
+  function assertPhotoIdentity(identity){ if (!photoIdentityCurrent(identity)) throw createPhotoUploadError('identity_changed'); }
+  async function photoFetch(url, options){
+    options = options || {};
+    var identity = options.authIdentity || state.identity || photoIdentity();
+    assertPhotoIdentity(identity);
+    var controller = new AbortController(), signal = options.signal;
+    var abort = function(){ controller.abort(); };
+    if (signal) {
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once:true });
+    }
+    // Keep the deadline through JSON consumption, including retry/status calls.
+    // Transmitting original bytes retains the existing ten minute upload limit.
+    var timeout = /\/api\/photo\/upload(?:\?|$)/.test(url) ? 10 * 60 * 1000 : PHOTO_UPLOAD_TIMEOUT_MS;
+    var timer = setTimeout(abort, timeout);
+    function dispose(){ clearTimeout(timer); if (signal) signal.removeEventListener('abort', abort); }
+    try {
+      var response = await fetch(url, Object.assign({}, options, {signal:controller.signal}));
+      assertPhotoIdentity(identity);
+      return { ok:response.ok, status:response.status, headers:response.headers,
+        json:async function(){
+          try { var body = await response.json(); assertPhotoIdentity(identity); return body; }
+          finally { dispose(); }
+        } };
+    } catch (error) { dispose(); throw error; }
+  }
+  // Merge against the latest durable snapshot. A status request must not erase
+  // an upload that was added or updated while that request was in flight.
+  function queueSnapshot(key){ return new Map(readJson(key,[]).map(function(entry){ return [entry.uploadId,JSON.stringify(entry)]; })); }
+  function commitQueue(key, snapshot, remaining){
+    var kept=new Map(remaining.map(function(entry){ return [entry.uploadId,entry]; }));
+    var merged=readJson(key,[]).filter(function(entry){
+      if(!snapshot.has(entry.uploadId)||snapshot.get(entry.uploadId)!==JSON.stringify(entry))return true;
+      return kept.has(entry.uploadId);
+    }).map(function(entry){return snapshot.has(entry.uploadId)&&snapshot.get(entry.uploadId)===JSON.stringify(entry)?kept.get(entry.uploadId):entry;});
+    remaining.forEach(function(entry){if(!snapshot.has(entry.uploadId)&&!merged.some(function(item){return item.uploadId===entry.uploadId;}))merged.push(entry);});
+    writeJson(key,merged.slice(-50));
   }
 
   // G5 修复：除拒绝 SVG 外，仅允许位图 MIME 白名单（与后端 photo-create.js 一致）。
@@ -88,6 +130,7 @@
     var code = error && error.photoUploadCode;
     var status = Number(error && (error.status || error.statusCode)) || 0;
     var message = String(error && error.message || '').toLowerCase();
+    if (code === 'identity_changed') return '账号已变化，上传已停止';
     if (code === 'cancelled' || (error && error.name === 'AbortError')) return '已取消';
     if (code === 'unsupported_type') return '文件类型不支持';
     if (code === 'file_too_large') return '文件超过 50 MB 限制';
@@ -103,13 +146,14 @@
   function cleanupStorage(path, uploadId, options){
     if (!path) return Promise.resolve();
     options = options || {};
+    var identity = options.identity || state.identity || photoIdentity();
     // Once /api/photo/create has been called, the response may be lost after
     // the server commits the database row.  Never delete Storage directly in
     // that ambiguous window; ask the authenticated backend to verify the
     // reference first and retain a durable pending record if that request
     // itself cannot be confirmed.
     if (options.serverOnly) {
-      var pendingInfo = Object.assign({ uploadId: uploadId, path: path }, options.pendingInfo || {});
+      var pendingInfo = Object.assign({ uploadId: uploadId, path: path, owner: identity.owner }, options.pendingInfo || {});
       var rememberPending = function () {
         if (pendingInfo.uploadId && pendingInfo.path) savePendingPhotoUpload(pendingInfo);
       };
@@ -118,9 +162,10 @@
         return Promise.resolve(authHeaders).then(function (resolvedHeaders) {
           var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
           var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
-          return fetch(apiUrl('/api/photo/cleanup'), {
+          return photoFetch(apiUrl('/api/photo/cleanup'), {
             method: 'POST',
-            headers: buildPhotoCreateHeaders(resolvedHeaders || {}),
+            authIdentity: identity,
+          headers: buildPhotoCreateHeaders(resolvedHeaders || {}),
             body: JSON.stringify({ path: path, upload_id: uploadId }),
             signal: controller ? controller.signal : undefined
           }).then(function (response) {
@@ -151,8 +196,9 @@
       return Promise.resolve(authHeaders).then(function (resolvedHeaders) {
         var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
         var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
-        return fetch(apiUrl('/api/photo/cleanup'), {
+        return photoFetch(apiUrl('/api/photo/cleanup'), {
           method: 'POST',
+          authIdentity: identity,
           headers: buildPhotoCreateHeaders(resolvedHeaders || {}),
           body: JSON.stringify({ path: path, upload_id: uploadId }),
           signal: controller ? controller.signal : undefined
@@ -161,7 +207,7 @@
             if (response.ok && data && data.ok === true) return { ok: true, data: data };
             // ★ fetch 请求失败（503/非 ok 响应）时保存 durable pending 记录，
             // 等待后续 reconcile 重试清理，避免 Storage 残留孤儿文件。
-            if (uploadId && path) savePendingPhotoUpload({ uploadId: uploadId, path: path });
+            if (uploadId && path) savePendingPhotoUpload({ uploadId: uploadId, path: path, owner: identity.owner });
             return { ok: false, status: response.status, data: data };
           });
         }).finally(function () {
@@ -170,7 +216,7 @@
       });
     }).catch(function (error) {
       // ★ 网络异常/超时也保存 durable pending 记录
-      if (uploadId && path) savePendingPhotoUpload({ uploadId: uploadId, path: path });
+      if (uploadId && path) savePendingPhotoUpload({ uploadId: uploadId, path: path, owner: identity.owner });
       console.error('[photo-upload] Backend cleanup could not be confirmed', error);
       return { ok: false, error: error };
     });
@@ -181,6 +227,7 @@
   // 更新 activePath / updatedAt / attempt；新记录则 allPaths 初始化为 [path]。
   function savePendingPhotoUpload(info) {
     try {
+      info.owner = info.owner || (state.identity ? state.identity.owner : getCurrentUser());
       var pending = readJson('xtj_photo_upload_pending', []);
       var now = Date.now();
       var newPath = info.path || info.activePath;
@@ -195,6 +242,7 @@
         var allPaths = Array.isArray(existing.allPaths) ? existing.allPaths.slice() : (existing.path ? [existing.path] : []);
         if (newPath && allPaths.indexOf(newPath) < 0) allPaths.push(newPath);
         existing.allPaths = allPaths;
+        if(info.owner)existing.owner=info.owner;
         existing.activePath = newPath || existing.activePath || existing.path;
         // 维持向后兼容：path 字段同步为 activePath
         existing.path = existing.activePath;
@@ -209,6 +257,7 @@
         // ★ 新记录：allPaths 初始化为 [path]
         pending.push({
           uploadId: info.uploadId,
+          owner: info.owner,
           path: newPath,
           activePath: newPath,
           allPaths: newPath ? [newPath] : [],
@@ -234,11 +283,13 @@
   var _reconcileLocks = {};
   window.reconcilePendingPhotoUploads = async function() {
     try {
+      var identity=photoIdentity(), snapshot=queueSnapshot('xtj_photo_upload_pending');
       var pending = readJson('xtj_photo_upload_pending', []);
       if (!pending.length) return;
       var now = Date.now();
       var maxAge = 7 * 24 * 60 * 60 * 1000; // 7 天过期
       var remaining = [];
+      var lowFreqSnapshot=queueSnapshot('xtj_photo_upload_lowfreq');
       var lowFreqQueue = readJson('xtj_photo_upload_lowfreq', []); // P5: 低频率重试队列
       var reconciled = 0;
 
@@ -250,6 +301,7 @@
       for (var i = 0; i < pending.length; i++) {
         var entry = pending[i];
         if (!entry.uploadId) continue;
+        if (!photoIdentityCurrent(identity)||(entry.owner&&entry.owner!==identity.owner)){remaining.push(entry);continue;}
         // P5: 超过 7 天过期的记录 — 移入低频率重试队列，不直接丢弃
         if ((now - entry.createdAt) > maxAge) {
           entry.stale = true;
@@ -280,9 +332,10 @@
           var controller = new AbortController();
           var timeoutId = setTimeout(function() { controller.abort(); }, 15000);
           var authHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-          var resp = await fetch(apiUrl('/api/photo/status'), {
+          var resp = await photoFetch(apiUrl('/api/photo/status'), {
             method: 'POST',
-            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
+            authIdentity: identity,
+          headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
             body: JSON.stringify({ upload_id: entry.uploadId }),
             signal: controller.signal
           });
@@ -309,8 +362,9 @@
               _cleanupInProgress[entry.uploadId] = cleanupToken;
               try {
                 var cleanupAuthHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-                var cleanupResp = await fetch(apiUrl('/api/photo/cleanup'), {
+                var cleanupResp = await photoFetch(apiUrl('/api/photo/cleanup'), {
                   method: 'POST',
+                  authIdentity: identity,
                   headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupAuthHeaders || {}),
                   body: JSON.stringify({ path: entry.path, upload_id: entry.uploadId })
                 });
@@ -342,13 +396,14 @@
           // 网络错误，保留记录，不删除 Storage
           remaining.push(entry);
         } finally {
+          clearTimeout(timeoutId);
           if (_reconcileLocks[entry.uploadId] === reconcileToken) delete _reconcileLocks[entry.uploadId];
         }
       }
 
       // P5: 保存低频率重试队列，限制大小
-      writeJson('xtj_photo_upload_lowfreq', lowFreqQueue.slice(-50));
-      writeJson('xtj_photo_upload_pending', remaining);
+      commitQueue('xtj_photo_upload_lowfreq',lowFreqSnapshot,lowFreqQueue);
+      commitQueue('xtj_photo_upload_pending',snapshot,remaining);
       if (reconciled > 0 && typeof window.initPhotoWall === 'function') {
         window.initPhotoWall(true).catch(function() {});
       }
@@ -361,6 +416,7 @@
   var _lowFreqLocks = window._photoLowFreqLocks = window._photoLowFreqLocks || {};
   window.recheckLowFreqPhotoQueue = async function() {
     try {
+      var identity=photoIdentity(), snapshot=queueSnapshot('xtj_photo_upload_lowfreq');
       var lowFreq = readJson('xtj_photo_upload_lowfreq', []);
       if (!lowFreq.length) return;
       var now = Date.now();
@@ -368,6 +424,7 @@
       for (var i = 0; i < lowFreq.length; i++) {
         var entry = lowFreq[i];
         if (!entry || !entry.uploadId) continue;
+        if (!photoIdentityCurrent(identity)||(entry.owner&&entry.owner!==identity.owner)){remaining.push(entry);continue;}
         if (entry.lastLowFreqCheckAt && (now - entry.lastLowFreqCheckAt) < 24 * 60 * 60 * 1000) {
           remaining.push(entry);
           continue;
@@ -387,9 +444,10 @@
           controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
           timeoutId = controller ? setTimeout(function() { controller.abort(); }, 15000) : null;
           var authHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-          var resp = await fetch(apiUrl('/api/photo/status'), {
+          var resp = await photoFetch(apiUrl('/api/photo/status'), {
             method: 'POST',
-            headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
+            authIdentity: identity,
+          headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders || {}),
             body: JSON.stringify({ upload_id: entry.uploadId }),
             signal: controller ? controller.signal : undefined
           });
@@ -405,8 +463,9 @@
               var cleanupTimeoutId = cleanupController ? setTimeout(function() { cleanupController.abort(); }, 15000) : null;
               try {
                 var cleanupAuthHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-                var cleanupResp = await fetch(apiUrl('/api/photo/cleanup'), {
+                var cleanupResp = await photoFetch(apiUrl('/api/photo/cleanup'), {
                   method: 'POST',
+                  authIdentity: identity,
                   headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupAuthHeaders || {}),
                   body: JSON.stringify({ path: entry.path, upload_id: entry.uploadId }),
                   signal: cleanupController ? cleanupController.signal : undefined
@@ -431,7 +490,7 @@
           window.initPhotoWall(true).catch(function() {});
         }
       }
-      writeJson('xtj_photo_upload_lowfreq', remaining.slice(-50));
+      commitQueue('xtj_photo_upload_lowfreq',snapshot,remaining);
     } catch (e) {
       console.warn('[PhotoWall] recheckLowFreqPhotoQueue failed', e);
     }
@@ -548,9 +607,12 @@
 
   // Send the untouched File through the authenticated upload API. XHR exposes
   // real transmitted bytes; server storage and record saving are separate stages.
-  async function uploadPhotoToStorage(path, file, type, signal, onProgress) {
+  async function uploadPhotoToStorage(path, file, type, signal, onProgress, identity) {
+    identity=identity||state.identity||photoIdentity();
+    assertPhotoIdentity(identity);
     var authHeaders = (typeof window.getUserAuthHeaders === 'function') ? window.getUserAuthHeaders() : {};
     var headers = Object.assign({}, await Promise.resolve(authHeaders), { 'Content-Type': 'application/octet-stream' });
+    assertPhotoIdentity(identity);
     var qs = 'path=' + encodeURIComponent(path) + '&mime_type=' + encodeURIComponent(type || 'image/jpeg');
     var url = apiUrl('/api/photo/upload') + '?' + qs;
     var resp;
@@ -571,11 +633,13 @@
         xhr.timeout = 10 * 60 * 1000;
         Object.keys(headers).forEach(function(key){ xhr.setRequestHeader(key, headers[key]); });
         xhr.upload.onprogress = function(event){
+          if (!photoIdentityCurrent(identity)){ abort(); return; }
           if (!event.lengthComputable || settled) return;
           if (onProgress) onProgress(Math.min(file.size, event.loaded), event.loaded >= event.total);
         };
         xhr.upload.onload = function(){ if (!settled && onProgress) onProgress(file.size, true); };
         xhr.onload = function(){
+          try { assertPhotoIdentity(identity); } catch(error) { finish(error); return; }
           var status = xhr.status, body = xhr.responseText;
           finish(null, { ok:status >= 200 && status < 300, status:status,
             json:function(){ return Promise.resolve().then(function(){ return JSON.parse(body); }); } });
@@ -588,9 +652,10 @@
         xhr.send(file);
       });
     } else {
-      resp = await fetch(url, { method:'POST', headers:headers, body:file, signal:signal || undefined });
+      resp = await photoFetch(url, { method:'POST', headers:headers, body:file, signal:signal || undefined, authIdentity:identity });
     }
     var data = await resp.json().catch(function () { return {}; });
+    assertPhotoIdentity(identity);
     if (!resp.ok || !data.ok || !data.public_url) {
       var err = new Error((data && data.error) || '图片上传失败');
       err.status = resp.status;
@@ -901,6 +966,8 @@
   }
 
   async function uploadOnePhotoWallFile(job, signal){
+    var identity=job.identity||state.identity||photoIdentity();
+    job.identity=identity;assertPhotoIdentity(identity);
     var file = job.file;
     var uploadId = job.uploadId;
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
@@ -913,6 +980,7 @@
     if (job.onProgress) job.onProgress();
     var type = isImage(file) && file.type ? file.type : 'image/jpeg';
     uploadFile = await preprocessImageFile(file, signal);
+    assertPhotoIdentity(identity);
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
     var publicUrl;
     try {
@@ -922,32 +990,34 @@
         job.sentBytes = bytes;
         job.progress = .88 * (bytes / Math.max(1, uploadFile.size));
         job.phase = sent ? 'storing' : 'uploading';
-        if (job.onProgress) job.onProgress();
-      });
+        if (photoIdentityCurrent(identity)&&job.onProgress) job.onProgress();
+      }, identity);
       job.progress = 0.94;
       job.phase = 'saving';
       if (job.onProgress) job.onProgress();
     } catch (storageError) {
       // The browser may abort after sending the body while the server is still
       // storing it. Reconcile this known path on resume instead of losing it.
-      if (state.cancelRequested || (signal && signal.aborted))
-        savePendingPhotoUpload({uploadId:uploadId,path:path,fileName:file.name,fileSize:file.size,mimeType:type});
+      if (storageError.photoUploadCode === 'identity_changed' || state.cancelRequested || (signal && signal.aborted))
+        savePendingPhotoUpload({uploadId:uploadId,path:path,fileName:file.name,fileSize:file.size,mimeType:type,owner:identity.owner});
       storageError.photoUploadStage = 'storage';
       throw storageError;
     }
     if (state.cancelRequested || (signal && signal.aborted)) {
       // 取消上传：必须走后端 /api/photo/cleanup 校验路径归属，禁止前端 anon key 直删 Storage
-      await cleanupStorage(path, uploadId);
+      await cleanupStorage(path, uploadId, {identity:identity});
       throw createPhotoUploadError('cancelled');
     }
     var cleanupAfterCreateOptions = {
+      identity: identity,
       serverOnly: true,
-      pendingInfo: { uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type }
+      pendingInfo: { uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type, owner: identity.owner }
     };
     var authHeaders = (typeof window.getUserAuthHeaders === 'function')
       ? window.getUserAuthHeaders()
       : null;
     var headers = await Promise.resolve(authHeaders);
+    assertPhotoIdentity(identity);
     var controller = new AbortController();
     var timeoutTimer = setTimeout(function() { controller.abort(); }, PHOTO_UPLOAD_TIMEOUT_MS);
     var timedOut = false;
@@ -955,8 +1025,9 @@
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
     var createRes;
     try {
-      createRes = await fetch(apiUrl('/api/photo/create'), {
+      createRes = await photoFetch(apiUrl('/api/photo/create'), {
         method: 'POST',
+        authIdentity: identity,
         headers: buildPhotoCreateHeaders(headers),
         body: JSON.stringify({
           media_url: publicUrl,
@@ -984,8 +1055,9 @@
           var statusTimeout = statusController ? setTimeout(function() { statusController.abort(); }, 10000) : null;
           var statusData;
           try {
-            var statusRes = await fetch(apiUrl('/api/photo/status'), {
+            var statusRes = await photoFetch(apiUrl('/api/photo/status'), {
               method: 'POST',
+              authIdentity: identity,
               headers: buildPhotoCreateHeaders(headers),
               body: JSON.stringify({ upload_id: uploadId }),
               signal: statusController ? statusController.signal : undefined
@@ -1004,7 +1076,7 @@
             // is not proof that the request will never commit. Keep the
             // object and let the authoritative status reconciliation decide
             // later; deleting here can create an orphaned committed record.
-            savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
+            savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type, owner: identity.owner });
             fetchError.photoUploadStage = 'pending';
             fetchError._pendingRetry = true;
             fetchError._statusWasTerminal = true;
@@ -1012,7 +1084,7 @@
           }
           // ★ 状态不确定（processing / 其他），不得删除 Storage
           // 保存 pending 状态，继续查询权威结果
-          savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
+          savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type, owner: identity.owner });
           fetchError.photoUploadStage = 'pending';
           fetchError._pendingRetry = true;
           throw fetchError;
@@ -1023,19 +1095,19 @@
             fetchError._statusQueryError = statusErr;
           }
           if (!fetchError._pendingRetry) {
-            savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
+            savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type, owner: identity.owner });
             fetchError.photoUploadStage = 'pending';
             fetchError._pendingRetry = true;
           }
           throw fetchError;
         }
       } else {
-        fetchError.photoUploadCode = 'backend_unreachable';
+        fetchError.photoUploadCode = fetchError.photoUploadCode || 'backend_unreachable';
         // A connection failure is ambiguous: the server may have committed
         // the row before the response was lost. Preserve the object and let
         // status reconciliation decide; deleting here could destroy a valid
         // photo record.
-        savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type });
+        savePendingPhotoUpload({ uploadId: uploadId, path: path, publicUrl: publicUrl, fileName: file.name, fileSize: file.size, mimeType: type, owner: identity.owner });
         fetchError.photoUploadStage = 'pending';
         fetchError._pendingRetry = true;
         throw fetchError;
@@ -1061,6 +1133,7 @@
       await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
       throw createPhotoUploadError('record');
     }
+    assertPhotoIdentity(identity);
     return createData.data;
   }
 
@@ -1079,6 +1152,8 @@
     var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     state.batchController = controller;
     var signal = controller ? controller.signal : null;
+    var identity=state.identity||photoIdentity();
+    var identityTimer=setInterval(function(){if(!photoIdentityCurrent(identity))cancelCurrentUpload();},200);
     var total = jobs.length;
     var nextIdx = 0;
     var processed = 0;
@@ -1086,7 +1161,7 @@
     var fail = 0;
     var cancelled = 0;
     function runOne(){
-      if (state.cancelRequested) return Promise.resolve();
+      if (state.cancelRequested || !photoIdentityCurrent(identity)) return Promise.resolve();
       if (nextIdx >= total) return Promise.resolve();
       var idx = nextIdx; nextIdx += 1;
       var job = jobs[idx];
@@ -1118,7 +1193,7 @@
     var largeFiles = jobs.some(function(job){ return job.file && job.file.size > 20 * 1024 * 1024; });
     var workerLimit = largeFiles ? 2 : CONCURRENCY;
     for (var w = 0; w < Math.min(workerLimit, Math.max(1, total)); w++) workers.push(runOne());
-    return Promise.all(workers).then(function(){ return { processed: processed, ok: ok, fail: fail, cancelled: cancelled, total: total }; });
+    return Promise.all(workers).then(function(){ return { processed: processed, ok: ok, fail: fail, cancelled: cancelled, total: total }; }).finally(function(){clearInterval(identityTimer);});
   }
 
   function buildSummary(processed, total, ok, fail, cancelled){
@@ -1132,6 +1207,9 @@
   }
 
   async function performUpload(jobs){
+    var identity=jobs[0]&&jobs[0].identity||photoIdentity();
+    assertPhotoIdentity(identity);state.identity=identity;
+    jobs.forEach(function(job){job.identity=identity;});
     state.uploading = true;
     state.batchJobs = jobs;
     state.cancelRequested = false;
@@ -1166,6 +1244,10 @@
       // 取消按钮文案由实际取消完成（本 finally）驱动复位，不再固定 500ms
       var _cancelBtn = byId('pwUploadProgressCancel');
       if (_cancelBtn) { _cancelBtn.disabled = false; _cancelBtn.textContent = '取消上传'; }
+    }
+    if(!photoIdentityCurrent(identity)){
+      jobs.forEach(function(job){job.file=null;job.onProgress=null;});
+      state.failedJobs=[];state.batchJobs=[];state.uploading=false;state.identity=null;return;
     }
     // 收尾整体包裹 try/catch：任何一步抛错都必须保证 uploading 最终复位，
     // 避免标志永久卡死导致上传功能不可用。
@@ -1238,6 +1320,7 @@
       });
       state.batchJobs = [];
       state.uploading = false;
+      state.identity=null;
     }
   }
 
@@ -1268,9 +1351,11 @@
   async function retryFailedUploads(){
     // ★ 修复：并发守卫——即使双监听路径已移除，仍防止快速连点/跨路径并发
     if (isBusy()) { toast('正在上传，请等待'); return; }
+    var identity=photoIdentity();
     state.retrying = true;
     try {
-    var jobs = (state.failedJobs || []).filter(function(j){ return j && j.file && !j.succeeded; });
+    var jobs = (state.failedJobs || []).filter(function(j){ return j && j.file && !j.succeeded && (!j.identity||j.identity.owner===identity.owner); });
+    jobs.forEach(function(job){job.identity=identity;});
     if (!jobs.length) { toast('没有可重试的失败项'); return; }
     state.skippedFiles = [];
     // H-30: 先查询服务端权威状态，再决定是否清理旧文件并重新上传。
@@ -1279,12 +1364,14 @@
     var pendingJobs = [];
     var settledJobs = [];
     for (var i = 0; i < jobs.length; i++) {
+      if(!photoIdentityCurrent(identity))break;
       var j = jobs[i];
       var statusData = null;
       try {
         var statusHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-        var statusResp = await fetch(apiUrl('/api/photo/status'), {
+        var statusResp = await photoFetch(apiUrl('/api/photo/status'), {
           method: 'POST',
+          authIdentity: identity,
           headers: Object.assign({ 'Content-Type': 'application/json' }, statusHeaders || {}),
           body: JSON.stringify({ upload_id: j.uploadId })
         });
@@ -1323,9 +1410,10 @@
       if (j.storagePath) {
         try {
           var cleanupHeaders = typeof window.getUserAuthHeaders === 'function' ? await window.getUserAuthHeaders() : {};
-          var cleanupResp = await fetch(apiUrl('/api/photo/cleanup'), {
+          var cleanupResp = await photoFetch(apiUrl('/api/photo/cleanup'), {
             method: 'POST',
-            headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupHeaders || {}),
+          authIdentity: identity,
+          headers: Object.assign({ 'Content-Type': 'application/json' }, cleanupHeaders || {}),
             body: JSON.stringify({ path: j.storagePath, upload_id: j.uploadId })
           });
           var cleanupData = await cleanupResp.json().catch(function(){ return {}; });
@@ -1346,9 +1434,10 @@
       j.uploadId = genUploadId();
       retryJobs.push(j);
     }
+    if(!photoIdentityCurrent(identity)){state.failedJobs=[];return;}
     var uploadJobs = settledJobs.concat(retryJobs);
     if (uploadJobs.length) await performUpload(uploadJobs);
-    state.failedJobs = (state.failedJobs || []).concat(pendingJobs);
+    state.failedJobs = photoIdentityCurrent(identity)?(state.failedJobs || []).concat(pendingJobs):[];
     if (!uploadJobs.length && pendingJobs.length) toast('照片状态仍在确认中，请稍后重试');
     } finally {
       state.retrying = false;
