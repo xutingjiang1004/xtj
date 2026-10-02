@@ -559,6 +559,7 @@
 
                 currentUser = '';
                 window.currentUser = '';
+                try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 window._lastKnownUser = '';
                 window.currentUserInfoSnapshot = null;
@@ -1364,6 +1365,11 @@ function renderProfileActivityList(kind) {
 
             window.deleteFeedComment = async function(commentId, btn) {
                 if (!confirm('确定要永久删除这条评论吗？')) return;
+                if (!currentUser || !commentId || (btn && btn.disabled)) return;
+                var owner = currentUser, epoch = _authStateEpoch;
+                function sameAccount() { return owner === currentUser && epoch === _authStateEpoch; }
+                var targetComment = (feedAllComments || []).find(function(item) { return String(item.id) === String(commentId); });
+                var targetPostId = targetComment ? targetComment.post_id : null;
                 var originalText = btn ? btn.textContent : '删除';
                 var controller = typeof AbortController === 'function' ? new AbortController() : null;
                 var timeout = setTimeout(function() {
@@ -1375,20 +1381,19 @@ function renderProfileActivityList(kind) {
                         btn.textContent = '删除中..';
                     }
                     var response = await window.xtjProtectedFetch('/api/post/comment/' + encodeURIComponent(commentId), {
-                        method: 'DELETE',
+                        method: 'DELETE', authOwner: owner, authEpoch: epoch,
                         signal: controller ? controller.signal : undefined
                     });
                     var result = await response.json().catch(function() { return {}; });
+                    if (!sameAccount()) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
                     
                     feedAllComments = (feedAllComments || []).filter(function(item) {
                         return String(item.id) !== String(commentId);
                     });
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
-                    if (typeof renderFeedFromMemoryState === 'function') {
-                        renderFeedFromMemoryState();
-                    } else if (typeof rebuildFeedFromCurrentState === 'function') {
-                        rebuildFeedFromCurrentState().catch(function() {});
+                    if (targetPostId && typeof window.__xtjSchedulePostCardPatch === 'function') {
+                        window.__xtjSchedulePostCardPatch(targetPostId);
                     }
                     // 成功路径同样恢复按钮（disabled/textContent），
                     // 与 catch/finally 行为保持一致，避免按钮残留"删除中.."
@@ -1399,6 +1404,7 @@ function renderProfileActivityList(kind) {
                     loadPersonalRecordSummary(currentUser, true);
                     showToast('评论已删除');
                 } catch (e) {
+                    if (!sameAccount()) return;
                     console.error('deleteFeedComment error:', e);
                     showToast(e && e.name === 'AbortError' ? '删除超时，请重试' : (e.message || '删除失败'));
                     if (btn) {
@@ -1411,7 +1417,11 @@ function renderProfileActivityList(kind) {
             };
 
             window.deleteProfileComment = async function(commentId, postId, btn) {
-                if (!currentUser || !commentId) return;
+                if (!currentUser || !commentId || (btn && btn.disabled)) return;
+                var owner = currentUser, epoch = _authStateEpoch;
+                function sameAccount() { return owner === currentUser && epoch === _authStateEpoch; }
+                var targetComment = (feedAllComments || []).find(function(item) { return String(item.id) === String(commentId); });
+                var targetPostId = targetComment ? targetComment.post_id : postId;
                 var originalText = btn ? btn.textContent : '';
                 try {
                     if (btn) {
@@ -1419,9 +1429,10 @@ function renderProfileActivityList(kind) {
                         btn.textContent = '删除中..';
                     }
                     var response = await window.xtjProtectedFetch('/api/post/comment/' + encodeURIComponent(commentId), {
-                        method: 'DELETE'
+                        method: 'DELETE', authOwner: owner, authEpoch: epoch
                     });
                     var result = await response.json();
+                    if (!sameAccount()) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
 
                     profileActivityState.comments = (profileActivityState.comments || []).filter(function(item) {
@@ -1436,17 +1447,18 @@ function renderProfileActivityList(kind) {
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (typeof updateFeedStats === 'function') updateFeedStats();
                     if (typeof refreshStatModal === 'function') refreshStatModal();
-                    if (typeof rebuildFeedFromCurrentState === 'function') {
-                        rebuildFeedFromCurrentState().catch(function() {});
+                    if (targetPostId && typeof window.__xtjSchedulePostCardPatch === 'function') {
+                        window.__xtjSchedulePostCardPatch(targetPostId);
                     }
                     renderProfileActivity();
                     showToast('已删除评论');
                 } catch (e) {
+                    if (!sameAccount()) return;
                     console.error('deleteProfileComment error:', e);
                     showToast('删除评论失败');
                     if (btn) btn.textContent = originalText || '删除评论';
                 } finally {
-                    if (btn) {
+                    if (sameAccount() && btn) {
                         btn.disabled = false;
                         if (btn.textContent === '删除中..') btn.textContent = originalText || '删除评论';
                     }

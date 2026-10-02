@@ -8559,9 +8559,19 @@
 
             // S7 修复：帖子详情请求代次号，防止快速切换详情时旧响应覆盖新内容
             var _postDetailReqSeq = 0;
+            window.__xtjCancelPostDetail = function() {
+                _postDetailReqSeq++;
+                window.__xtjPostDetailCurrentId = '';
+                var modal = document.getElementById('postDetailModal');
+                var body = document.getElementById('postDetailBody');
+                if (modal) modal.classList.remove('active');
+                if (body) body.textContent = '';
+            };
 
             window.openPostDetail = async function(postId) {
                 var _seq = ++_postDetailReqSeq;
+                var owner = currentUser;
+                var epoch = _authStateEpoch;
                 window.__xtjPostDetailCurrentId = String(postId || '');
                 var title = document.getElementById('postDetailTitle');
                 var body = document.getElementById('postDetailBody');
@@ -8569,40 +8579,49 @@
                 if (title) title.textContent = '帖子详情';
                 if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
                 if (modal) modal.classList.add('active');
+                function isCurrentDetail() {
+                    return _seq === _postDetailReqSeq && owner === currentUser && epoch === _authStateEpoch &&
+                        window.__xtjPostDetailCurrentId === String(postId || '') &&
+                        !!modal && modal.classList.contains('active');
+                }
 
                 try {
                     var detailPath = '/api/post/detail/' + encodeURIComponent(postId);
                     var apiUrl = (window.API_BASE || '') + detailPath;
                     var apiRes;
                     if (typeof window.xtjOptionalAuthFetch === 'function') {
-                        apiRes = await window.xtjOptionalAuthFetch(detailPath, { timeoutMs: 18000 });
+                        apiRes = await window.xtjOptionalAuthFetch(detailPath, { timeoutMs: 18000, authOwner: owner, authEpoch: epoch });
                     } else {
                         var detailHeaders = { 'Accept': 'application/json' };
                         var detailToken = '';
                         try { detailToken = typeof getUserToken === 'function' ? String(getUserToken() || '') : ''; } catch (_) {}
                         if (detailToken) detailHeaders.Authorization = 'Bearer ' + detailToken;
-                        apiRes = await fetch(apiUrl, { credentials: 'include', headers: detailHeaders });
+                        apiRes = await window.xtjFetch(apiUrl, { credentials: 'include', headers: detailHeaders }, 18000);
                     }
                     if (!apiRes.ok && (!apiRes.headers.get('content-type') || !apiRes.headers.get('content-type').includes('application/json'))) {
-                        if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">无法获取帖子详情（' + apiRes.status + '）。</div>';
+                        if (isCurrentDetail() && body) body.innerHTML = '<div class="stat-empty">无法获取帖子详情（' + apiRes.status + '）。</div>';
                         return;
                     }
                     var apiData;
                     try {
                         apiData = await apiRes.json();
                     } catch(e) {
-                        if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">解析帖子详情失败，请稍后重试。</div>';
+                        if (isCurrentDetail() && body) body.innerHTML = '<div class="stat-empty">解析帖子详情失败，请稍后重试。</div>';
                         return;
                     }
                     if (!apiRes.ok || !apiData || !apiData.ok) {
                         var errMsg = (apiData && apiData.message) || '该帖子不存在、已删除或不可查看。';
                         // 错误消息来自服务端，先转义再拼 HTML，防 XSS 注入
-                        if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">' + escapeHtml(errMsg) + '</div>';
+                        if (isCurrentDetail() && body) body.innerHTML = '<div class="stat-empty">' + escapeHtml(errMsg) + '</div>';
                         return;
                     }
                     // S7 修复：响应落地前校验是否已被新请求替代
-                    if (_seq !== _postDetailReqSeq) return;
+                    if (!isCurrentDetail()) return;
                     var post = apiData.post;
+                    if (!post || typeof post !== 'object') {
+                        if (body) body.innerHTML = '<div class="stat-empty">该帖子不存在、已删除或不可查看。</div>';
+                        return;
+                    }
                     var likes = apiData.likes || [];
                     var comments = apiData.comments || [];
                     // normalize to match renderPostDetail expectations；避免真实 views 被清零
@@ -8614,7 +8633,7 @@
                     trackView(postId);
                     renderPostDetail(post, likes, comments);
                 } catch (e) {
-                    if (_seq === _postDetailReqSeq && body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
+                    if (isCurrentDetail() && body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error(e);
                 }
             };
