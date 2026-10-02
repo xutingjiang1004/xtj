@@ -11,8 +11,7 @@ const coreSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'core.js'), 
 function notifBlock(src) {
   const start = src.indexOf('function showNotification(');
   assert.notEqual(start, -1, 'showNotification 必须存在');
-  // 到下一个顶层函数定义结束（showNotification 很短，固定窗口足够）
-  return src.slice(start, start + 3200);
+  return src.slice(start, src.indexOf('// ==== 测试通知', start));
 }
 
 // ---------------------------------------------------------------- M-7

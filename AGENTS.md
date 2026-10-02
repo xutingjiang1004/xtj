@@ -5,3 +5,5 @@ Before changing product behavior, read `docs/current-product-decisions.md` and t
 Keep the bottom Dock buttons, capsule, dimensions and animations unchanged. The independently completed transparent, click-through outer area remains in place.
 
 Edit `js/core-parts/*`, then assemble and build; do not hand-edit generated `js/core.js` or minified assets. Run the relevant runtime tests, full `npm test`, syntax checks and build consistency check before publishing. Browser emulation and Linux WebKit do not count as physical iPhone/iPad or genuine multi-device acceptance.
+
+Do not create or commit audit reports, fix reports, acceptance reports, or their screenshots/JSON artifacts unless the user explicitly requests them. Explain findings and verification in the conversation; keep temporary test output outside the repository or in ignored output directories.

@@ -12233,6 +12233,7 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
 
 // 限制状态只通过服务端按当前 access token 查询，避免公开 RPC 接口被用来
 // 枚举任意用户名的封禁、拉黑和禁言状态。
+require('./account-events').installAccountProfile(app,{supabase,authenticateUser,rateLimit});
 app.get('/api/user/restrictions', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   try {
     var restrictionResult = await supabase.rpc('get_user_restrictions', { p_user_name: req.userName });

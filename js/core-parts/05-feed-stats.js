@@ -31,11 +31,40 @@
 
             // ===================== 帖子渲染函数 =====================
             let activeNotifications = [];
+            var dmNotificationIdentity = '', dmNotificationIds = new Set(), dmSnapshotReady = false;
+            window.__xtjResetDmNotifications=function(){
+                activeNotifications.forEach(function(n){n.element.remove();});activeNotifications=[];
+                dmNotificationIdentity='';dmNotificationIds.clear();dmSnapshotReady=false;
+            };
+            function resetDmNotificationIdentity() {
+                var identity=(typeof _authStateEpoch==='number'?_authStateEpoch:0)+':'+(window.currentUser||'');
+                if(identity!==dmNotificationIdentity){
+                    dmNotificationIdentity=identity;dmNotificationIds.clear();dmSnapshotReady=false;
+                    activeNotifications.forEach(function(n){n.element.remove();});activeNotifications=[];
+                }
+            }
+            function observeDmSnapshot(result) {
+                resetDmNotificationIdentity();
+                if(Array.isArray(result.conversations))authoritativeDmUnread(result.conversations);
+                var rows=(result.data||[]).slice().sort(function(a,b){return String(a.created_at||'').localeCompare(String(b.created_at||''));});
+                rows.forEach(function(message){
+                    if(!message.id||message.user_name===window.currentUser||message.media_url!==window.currentUser)return;
+                    var id=String(message.id);
+                    if(dmNotificationIds.has(id))return;
+                    if(dmSnapshotReady&&!getDMMessageReadAt(message)&&window.__xtjDmMuteReady&&!window.__xtjMutedChatPeers[message.user_name])
+                        showNotification(message.user_name,getDockChatMessagePreview(message),id);
+                    dmNotificationIds.add(id);
+                });
+                dmSnapshotReady=true;
+                while(dmNotificationIds.size>500)dmNotificationIds.delete(dmNotificationIds.values().next().value);
+            }
 
-            function showNotification(userName, message) {
+            function showNotification(userName, message, messageId) {
+                resetDmNotificationIdentity();
+                if(messageId){if(dmNotificationIds.has(String(messageId)))return;dmNotificationIds.add(String(messageId));}
                 if (!userName || !message) return;
                 if (window.safeStorage.get('xtj-notif') === 'off') return;
-                if (currentDockTab === 'chat' && dockChatActiveUser === userName) return;
+                if (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === userName) return;
 
                 const container = document.getElementById('notificationContainer');
                 if (!container) return;
@@ -687,7 +716,7 @@
                             if (m.user_name !== window.currentUser && m.media_url !== window.currentUser) return;
                             var otherUser = m.user_name === window.currentUser ? m.media_url : m.user_name;
                             if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
-                                if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[m.user_name]) showNotification(m.user_name, getDockChatMessagePreview(m));
+                                if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[m.user_name]) showNotification(m.user_name, getDockChatMessagePreview(m), m.id);
                             }
                             window.dockChatListCacheTime = 0;
                             if (dockChatActiveUser && dockChatActiveUser === otherUser) {
@@ -787,7 +816,7 @@
                     // 增量：把 payload 直接并入该会话缓存（同 id 的乐观消息就地被替换），
                     //   不再触发 loadDockChatMessages 的全量回拉。
                     upsertDockChatCacheMessage(otherUser, message);
-                    var convOpen = (dockChatActiveUser === otherUser);
+                    var convOpen = (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === otherUser);
                     if (convOpen) {
                         var key = getDockChatCacheKey(otherUser);
                         _chatRenderSignature[otherUser] = undefined;
@@ -809,7 +838,7 @@
                     }
                     if (!isMine && !convOpen) {
                         updateUnreadBadge();
-                        if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[message.user_name]) showNotification(message.user_name, getDockChatMessagePreview(message));
+                        if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[message.user_name]) showNotification(message.user_name, getDockChatMessagePreview(message), message.id);
                     }
                 } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
             }
@@ -1124,24 +1153,25 @@
             });
 
             function startDMPolling(interval, skipImmediate) {
-                // 修复：5 分钟（300000ms）内不重复轮询
-                interval = interval || 300000;
+                // Broadcast is immediate; a sitewide list-only poll covers disconnections.
+                interval = Math.min(interval || 30000,30000);
                 if (dmpollTimer) {
                     if (dmpollInterval === interval) return;
                     clearInterval(dmpollTimer); dmpollTimer = null;
                 }
                 dmpollInterval = interval;
+                var polling = false;
                 async function pollNow() {
-                    if (!window.currentUser) return;
+                    if (!window.currentUser || document.hidden || polling) return;
+                    polling=true;
                     try {
-                        if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
+                        await updateUnreadBadge();
+                        if (currentDockTab === 'chat' && typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
                             // ★ 2026-09-25：轮询属于后台刷新，禁止动 loading 骨架/空状态，
                             //   否则回包会把用户当前界面顶掉重画（闪屏）。
                             await loadDockChatMessages(dockChatActiveUser, false, true);
-                        } else {
-                            await updateUnreadBadge();
                         }
-                    } catch(e) {}
+                    } catch(e) {} finally { polling=false; }
                 }
                 if (!skipImmediate) pollNow();
                 dmpollTimer = setInterval(pollNow, interval);
@@ -1239,6 +1269,7 @@
                     if (json && json.ok) {
                         _dmListShared.json=json; _dmListShared.at=Date.now();
                         _dmListShared.retryAt=0; _dmListShared.failures=0;
+                        observeDmSnapshot(json);
                     } else {
                         _dmListShared.failures++;
                         _dmListShared.retryAt=Date.now()+Math.min(60000,5000*Math.pow(2,_dmListShared.failures-1));

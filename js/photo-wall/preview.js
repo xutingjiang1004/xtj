@@ -10,7 +10,7 @@
         opacity: 1
     }, P = null, E = !1, L = Object.create(null);
     var pendingPreviewDeletes = new Set();
-    window.addEventListener('xtj:visual-viewport-change', function(){if(e){M();if(s){s.style.transition="none";s.style.transform="translate3d("+-a+"px,0,0)";}l=0;}});
+    window.addEventListener('xtj:visual-viewport-change', function(){if(e){M();if(s){s.style.transition="none";s.style.left = -a + "px";}l=0;}});
     window.addEventListener('xtj:permissions-ready', function() { if (e && t) j(i); });
     function T(e) {
         return "close" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span>' : "info" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span>' : "share" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span>' : "rotate" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(-1.5,0)"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></g></svg></span>' : "delete" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>' : "";
@@ -108,20 +108,20 @@
         image._ppCleanup && image._ppCleanup(), image._ppCleanup = null, image._ppLoadGen = (image._ppLoadGen || 0) + 1,
         image._ppUrl = null, image._ppProgressiveUrl = null, image._ppListenerUrl = null, image.onload = null, image.onerror = null,
         image.classList.remove("pp-placeholder"), image.style.transition = "none";
-        resetSource && (image.removeAttribute("src"), image.style.opacity = "0");
+        resetSource && (image.removeAttribute("src"), image.style.visibility = "hidden");
     }
     function D(e, t) {
         if (e) {
             if (!t) {
                 clearPreviewImageLoad(e, !0);
-                e.style.opacity = "0";
+                e.style.visibility = "hidden";
                 e.classList.remove("pp-placeholder");
                 return;
             }
             if (e._ppUrl === t) {
                 // 若当前展示的是该 URL 的 Blob 对象图（渐进加载中），保持不动，避免用原 URL 覆盖
-                if (e._ppObjectUrl) return e.style.transition = "none", void (e.style.opacity = "1");
-                if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
+                if (e._ppObjectUrl) return e.style.transition = "none", void (e.style.visibility = "visible");
+                if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.visibility = "visible");
                 if (e._ppListenerUrl === t && e._ppCleanup) return;
             } else {
                 // 换 URL 前彻底清旧图，避免切换时残影；同时取消缩略图打开时的原图预加载回调。
@@ -130,7 +130,7 @@
                 e._ppCleanup && e._ppCleanup();
                 e._ppObjectUrl && (URL.revokeObjectURL(e._ppObjectUrl), e._ppObjectUrl = null);
                 e.style.transition = "none";
-                e.style.opacity = "0";
+                e.style.visibility = "hidden";
                 e.classList.remove("pp-placeholder");
                 try { e.removeAttribute("src"); } catch (err) {}
             }
@@ -138,7 +138,7 @@
             // Even an HTTP cache hit must decode the new source before becoming visible.
             e.decoding = "async";
             e.fetchPriority = e.id === "photoPreviewImage" ? "high" : "low";
-            e.style.transition = "none", e.removeAttribute("src"), e.style.opacity = "0";
+            e.style.transition = "none", e.removeAttribute("src"), e.style.visibility = "hidden";
             // 重置该 URL 的失败预算：每次导航到(或重载)此图都重新获得完整的重试次数，
             // 避免"看坏图→切走→再切回"时 H[url] 沿用旧值导致只试 1 次就显示占位图。
             delete H[t];
@@ -155,9 +155,9 @@
                 ready.then(function() {
                     if (e._ppLoadGen !== a || e._ppUrl !== t) return;
                     e.style.transition = "none";
-                    e.style.opacity = "1";
+                    e.style.visibility = "visible";
                 }, function() {
-                    if (e._ppLoadGen === a && e._ppUrl === t && e.complete && e.naturalWidth > 0) e.style.opacity = "1";
+                    if (e._ppLoadGen === a && e._ppUrl === t && e.complete && e.naturalWidth > 0) e.style.visibility = "visible";
                 });
             }
             function handleError() {
@@ -165,7 +165,7 @@
                     e._ppUrl === t && e._ppLoadGen === a && (n = !1, e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.removeAttribute("src"), e.src = t);
                 }, 500 * i)) : (n = !0, e._ppUrl = null, delete H[t], function(e) {
                     if (!e) return;
-                    e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
+                    e.style.transition = "none", e.style.visibility = "visible", e.classList.add("pp-placeholder");
                 }(e)));
             }
             e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = t, e.complete && e.naturalWidth > 0 && handleLoad();
@@ -180,7 +180,7 @@
             if (r) { clearPreviewImageLoad(r, !0); }
             t[e] && D(i, t[e].imageUrl), e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null),
             e < t.length - 1 && t[e + 1] ? D(r, t[e + 1].imageUrl) : D(r, null), l = 0, c = !1,
-            s.classList.remove("snapping"), s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)",
+            s.classList.remove("snapping"), s.style.transition = "none", s.style.left = -a + "px",
             // 强制一次回流后再允许 transition，防止残影叠在滑动层
             void s.offsetWidth,
             t[e] && window.updateAmbientBackground && window.updateAmbientBackground(t[e].imageUrl);
@@ -197,7 +197,7 @@
         var reduced = document.documentElement.getAttribute("data-xtj-motion") === "off" ||
             (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
         var duration = reduced ? 0 : 260;
-        s.style.transition = "transform " + duration + "ms cubic-bezier(0.33, 1, 0.68, 1)";
+        s.style.transition = "left " + duration + "ms cubic-bezier(0.33, 1, 0.68, 1)";
         var done = !1, timer = null;
         function cleanup() {
             done = !0;
@@ -207,7 +207,7 @@
             s.classList.remove("snapping");
         }
         function finish(event) {
-            if (event && (event.target !== s || event.propertyName !== "transform")) return;
+            if (event && (event.target !== s || event.propertyName !== "left")) return;
             if (done) return;
             cleanup(); c = !1;
             if (t) t();
@@ -215,18 +215,18 @@
         s._ppAnimationCleanup = cleanup;
         s.addEventListener("transitionend", finish);
         timer = setTimeout(finish, duration + 100);
-        s.style.transform = "translate3d(" + e + "px, 0, 0)";
+        s.style.left = e + "px";
         if (reduced) finish();
     }
     function A(e) {
         if (s) {
             c = !0;
             var t = Math.abs(l - e), o = Math.min(Math.max(.5 * t, 150), 400);
-            s.classList.add("snapping"), s.style.transition = "transform " + o + "ms cubic-bezier(0.33, 1, 0.68, 1)";
+            s.classList.add("snapping"), s.style.transition = "left " + o + "ms cubic-bezier(0.33, 1, 0.68, 1)";
             // P4: 幂等 finish — transitionend 与 setTimeout 谁先触发都只执行一次，
             // 防止 transitionend 未触发时动画锁 c 永久卡死（与函数 R 一致）。
             var _done = !1, _fallback = null, r = function(event) {
-                if (event && (event.target !== s || event.propertyName !== "transform")) return;
+                if (event && (event.target !== s || event.propertyName !== "left")) return;
                 if (_done) return;
                 _done = !0;
                 s.removeEventListener("transitionend", r);
@@ -255,7 +255,7 @@
             // P4: setTimeout 兜底（transition 时长 + 120ms，与 R 的 320+120=440 模式一致）
             _fallback = setTimeout(r, o + 120);
             var d = -a + e;
-            s.style.transform = "translate3d(" + d + "px, 0, 0)";
+            s.style.left = d + "px";
         }
     }
     function N(e) {
@@ -263,7 +263,7 @@
         if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
         if (s) {
             s.style.transition = "none";
-            s.style.transform = "translate3d(" + -a + "px, 0, 0)";
+            s.style.left = -a + "px";
             s.classList.remove("snapping");
         }
         l = 0, c = !1, O(e), n[e] && window.updateAmbientBackground && window.updateAmbientBackground(n[e].imageUrl),
@@ -281,7 +281,7 @@
                     // 动画结束后硬重置轨道与三槽，杜绝上一张残留
                     if (s) {
                         s.style.transition = "none";
-                        s.style.transform = "translate3d(" + -a + "px, 0, 0)";
+                        s.style.left = -a + "px";
                     }
                     N(t);
                 });
@@ -575,7 +575,7 @@
             var _ = document.getElementById("photoPreviewOverlay");
             if (!_) {
                 var H = document.createElement("div");
-                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><div class="pp-preview-toolbar"><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button></div><button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div></div></div>',
+                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><div class="pp-preview-toolbar"><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button><button hidden id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button></div><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div></div></div>',
                 document.body.appendChild(H), _ = H;
             }
             _ && function(e) {
@@ -692,7 +692,7 @@
                                 var A = -a + l, N = 1;
                                 0 === i && t > 0 && (N = 1 + t / a * 2), i === n.length - 1 && t < 0 && (N = 1 - t / a * 2),
                                 A = t / N - a, h && cancelAnimationFrame(h), h = requestAnimationFrame(function() {
-                                    s.style.transform = "translate3d(" + A + "px, 0, 0)", h = null;
+                                    s.style.left = A + "px", h = null;
                                 });
                             }
                         }
@@ -788,7 +788,7 @@
             if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
             var S = n[b];
             // 缩略图路径下方已有独立原图预加载器；不要再由缓存预热器并发下载同一原图。
-            S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
+            S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.left = -a + "px");
             var D = null, W = null, Y = document.getElementById("photoGrid");
             if (Y && S && null != S.id) {
                 // ★ 审计修复：旧转义只处理双引号不处理反斜杠，id 含 "\" 时选择器
@@ -804,7 +804,7 @@
             }
             _._openOrigin = D, _._openOriginImg = W, W && (W.style.transition = "none", W.style.opacity = "0"),
             _.classList.add("active"), document.body.classList.add("photo-previewing"), _.style.opacity = "1",
-            M(), s && (s.style.transition = "none", s.style.transform = "translate3d(" + -a + "px, 0, 0)");
+            M(), s && (s.style.transition = "none", s.style.left = -a + "px");
             j(b), F(b);
             var J = document.getElementById("photoPreviewImage"), Q = !1, $ = null, ee = (_._openLoadGen || 0) + 1;
             function cleanupOpenListeners(cancelFullPreload) {

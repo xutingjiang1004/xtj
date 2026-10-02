@@ -536,6 +536,7 @@ const ADMIN_NAME = "xxz";
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; window._xtjCanonicalUser = ''; window._xtjAuthState = 'unauthenticated'; } catch(e) {}
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
+                try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
@@ -3558,36 +3559,20 @@ function isAdmin() {
                 document.getElementById('profileDetailName').textContent = currentUser;
                 document.getElementById('profileDetailId').textContent = currentUser;
                 
-                // 获取用户信息（注册时间等）
+                // Only the authenticated server can read the account's creation fact.
+                var profileEpoch = _authStateEpoch;
                 try {
-                    const userInfoRes = await sb.from("posts")
-                        .select("content")
-                        .eq("user_name", profileOwner)
-                        .eq("media_type", "__user_info__")
-                        .order("created_at", { ascending: false })
-                        .limit(1);
-                    
-                    if (currentUser !== profileOwner) return;
-                    if (userInfoRes.data && userInfoRes.data.length > 0) {
-                        try {
-                            const userInfo = JSON.parse(userInfoRes.data[0].content);
-                            if (userInfo.reg_time) {
-                                document.getElementById('profileDetailRegTime').textContent = window.safeParseDate(userInfo.reg_time).toLocaleString();
-                            } else {
-                                document.getElementById('profileDetailRegTime').textContent = '-';
-                            }
-                        } catch(e) {
-                            document.getElementById('profileDetailRegTime').textContent = '-';
-                        }
-                    } else {
-                        document.getElementById('profileDetailRegTime').textContent = '-';
-                    }
-                } catch(e) {
-                    if (currentUser !== profileOwner) return;
-                    console.error("获取用户信息失败:", e);
-                    document.getElementById('profileDetailRegTime').textContent = '-';
+                    var response = await window.xtjProtectedFetch('/api/user/profile', { authOwner: profileOwner, authEpoch: profileEpoch });
+                    var body = response && await response.json();
+                    if (currentUser !== profileOwner || _authStateEpoch !== profileEpoch) return;
+                    if (!response || !response.ok || !body || !body.ok) throw new Error('profile_unavailable');
+                    var registered = body.registered_at && new Date(body.registered_at);
+                    document.getElementById('profileDetailRegTime').textContent = registered && Number.isFinite(registered.getTime())
+                        ? registered.toLocaleString('zh-CN') : '未保留注册时间';
+                } catch (error) {
+                    if (currentUser !== profileOwner || _authStateEpoch !== profileEpoch) return;
+                    document.getElementById('profileDetailRegTime').textContent = '暂时无法读取，请重新打开重试';
                 }
-                
             };
 
             var profileAvatarRequestSeq = 0;
@@ -3942,6 +3927,7 @@ function isAdmin() {
                 currentUser = '';
                 window.currentUser = '';
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
+                try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 window._lastKnownUser = '';
                 window.currentUserInfoSnapshot = null;
@@ -10670,11 +10656,40 @@ function renderProfileActivityList(kind) {
 
             // ===================== 帖子渲染函数 =====================
             let activeNotifications = [];
+            var dmNotificationIdentity = '', dmNotificationIds = new Set(), dmSnapshotReady = false;
+            window.__xtjResetDmNotifications=function(){
+                activeNotifications.forEach(function(n){n.element.remove();});activeNotifications=[];
+                dmNotificationIdentity='';dmNotificationIds.clear();dmSnapshotReady=false;
+            };
+            function resetDmNotificationIdentity() {
+                var identity=(typeof _authStateEpoch==='number'?_authStateEpoch:0)+':'+(window.currentUser||'');
+                if(identity!==dmNotificationIdentity){
+                    dmNotificationIdentity=identity;dmNotificationIds.clear();dmSnapshotReady=false;
+                    activeNotifications.forEach(function(n){n.element.remove();});activeNotifications=[];
+                }
+            }
+            function observeDmSnapshot(result) {
+                resetDmNotificationIdentity();
+                if(Array.isArray(result.conversations))authoritativeDmUnread(result.conversations);
+                var rows=(result.data||[]).slice().sort(function(a,b){return String(a.created_at||'').localeCompare(String(b.created_at||''));});
+                rows.forEach(function(message){
+                    if(!message.id||message.user_name===window.currentUser||message.media_url!==window.currentUser)return;
+                    var id=String(message.id);
+                    if(dmNotificationIds.has(id))return;
+                    if(dmSnapshotReady&&!getDMMessageReadAt(message)&&window.__xtjDmMuteReady&&!window.__xtjMutedChatPeers[message.user_name])
+                        showNotification(message.user_name,getDockChatMessagePreview(message),id);
+                    dmNotificationIds.add(id);
+                });
+                dmSnapshotReady=true;
+                while(dmNotificationIds.size>500)dmNotificationIds.delete(dmNotificationIds.values().next().value);
+            }
 
-            function showNotification(userName, message) {
+            function showNotification(userName, message, messageId) {
+                resetDmNotificationIdentity();
+                if(messageId){if(dmNotificationIds.has(String(messageId)))return;dmNotificationIds.add(String(messageId));}
                 if (!userName || !message) return;
                 if (window.safeStorage.get('xtj-notif') === 'off') return;
-                if (currentDockTab === 'chat' && dockChatActiveUser === userName) return;
+                if (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === userName) return;
 
                 const container = document.getElementById('notificationContainer');
                 if (!container) return;
@@ -11326,7 +11341,7 @@ function renderProfileActivityList(kind) {
                             if (m.user_name !== window.currentUser && m.media_url !== window.currentUser) return;
                             var otherUser = m.user_name === window.currentUser ? m.media_url : m.user_name;
                             if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
-                                if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[m.user_name]) showNotification(m.user_name, getDockChatMessagePreview(m));
+                                if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[m.user_name]) showNotification(m.user_name, getDockChatMessagePreview(m), m.id);
                             }
                             window.dockChatListCacheTime = 0;
                             if (dockChatActiveUser && dockChatActiveUser === otherUser) {
@@ -11426,7 +11441,7 @@ function renderProfileActivityList(kind) {
                     // 增量：把 payload 直接并入该会话缓存（同 id 的乐观消息就地被替换），
                     //   不再触发 loadDockChatMessages 的全量回拉。
                     upsertDockChatCacheMessage(otherUser, message);
-                    var convOpen = (dockChatActiveUser === otherUser);
+                    var convOpen = (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === otherUser);
                     if (convOpen) {
                         var key = getDockChatCacheKey(otherUser);
                         _chatRenderSignature[otherUser] = undefined;
@@ -11448,7 +11463,7 @@ function renderProfileActivityList(kind) {
                     }
                     if (!isMine && !convOpen) {
                         updateUnreadBadge();
-                        if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[message.user_name]) showNotification(message.user_name, getDockChatMessagePreview(message));
+                        if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[message.user_name]) showNotification(message.user_name, getDockChatMessagePreview(message), message.id);
                     }
                 } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
             }
@@ -11763,24 +11778,25 @@ function renderProfileActivityList(kind) {
             });
 
             function startDMPolling(interval, skipImmediate) {
-                // 修复：5 分钟（300000ms）内不重复轮询
-                interval = interval || 300000;
+                // Broadcast is immediate; a sitewide list-only poll covers disconnections.
+                interval = Math.min(interval || 30000,30000);
                 if (dmpollTimer) {
                     if (dmpollInterval === interval) return;
                     clearInterval(dmpollTimer); dmpollTimer = null;
                 }
                 dmpollInterval = interval;
+                var polling = false;
                 async function pollNow() {
-                    if (!window.currentUser) return;
+                    if (!window.currentUser || document.hidden || polling) return;
+                    polling=true;
                     try {
-                        if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
+                        await updateUnreadBadge();
+                        if (currentDockTab === 'chat' && typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
                             // ★ 2026-09-25：轮询属于后台刷新，禁止动 loading 骨架/空状态，
                             //   否则回包会把用户当前界面顶掉重画（闪屏）。
                             await loadDockChatMessages(dockChatActiveUser, false, true);
-                        } else {
-                            await updateUnreadBadge();
                         }
-                    } catch(e) {}
+                    } catch(e) {} finally { polling=false; }
                 }
                 if (!skipImmediate) pollNow();
                 dmpollTimer = setInterval(pollNow, interval);
@@ -11878,6 +11894,7 @@ function renderProfileActivityList(kind) {
                     if (json && json.ok) {
                         _dmListShared.json=json; _dmListShared.at=Date.now();
                         _dmListShared.retryAt=0; _dmListShared.failures=0;
+                        observeDmSnapshot(json);
                     } else {
                         _dmListShared.failures++;
                         _dmListShared.retryAt=Date.now()+Math.min(60000,5000*Math.pow(2,_dmListShared.failures-1));
@@ -12455,18 +12472,8 @@ function renderProfileActivityList(kind) {
                     window.cleanupPhotoWallTransientState();
                 }
                 var previousPanel = document.querySelector('.dock-panel.active');
-                // ★ 2026-09-27 修复（审计 C16：私信轮询离开聊天页未停止）：
-                //   调查结论 —— stopDMPolling 此前**只在登出/清 auth 时**被调用
-                //   （03-profile-report-ai.js 的 doLogout / clearAllAuthState），
-                //   而 startDMPolling 在「切到聊天 Tab / 返回列表 / openChat」三处都会启动。
-                //   于是从 openChat 进入会话后启动的 60s 轮询，切到帖子/我的/照片墙后
-                //   仍在后台持续跑（pollNow 里只要 dockChatActiveUser 还在就会一直刷新该会话），
-                //   属于真实的"离开聊天页仍轮询"问题（visibilitychange 只负责恢复、不负责暂停）。
-                //   修法：切离聊天 Tab 时停止轮询；切回聊天 Tab 时会由下面的分支重新 startDMPolling。
-                //   注意：只在此处（06）处理 Tab 维度，登出路径仍由 03 的 stopDMPolling 负责。
-                if (previousPanel && previousPanel.id !== 'panelChat' && currentDockTab === 'chat' && tab !== 'chat') {
-                    try { if (typeof stopDMPolling === 'function') stopDMPolling(); } catch (eStopPoll) {}
-                }
+                // Keep receiving sitewide messages; off-tab polling only reads the list.
+                if (window.currentUser) startDMPolling(30000, true);
                 currentDockTab = tab;
                 window.safeStorage.set('xtj_current_tab', tab);
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
@@ -12476,8 +12483,8 @@ function renderProfileActivityList(kind) {
                     try { dockPanelAnimation.cancel(); } catch (_) {}
                     dockPanelAnimation = null;
                 }
-                var reduceDockMotion = false;
-                try { reduceDockMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+                var reduceDockMotion = document.documentElement.getAttribute('data-xtj-motion') === 'off';
+                try { reduceDockMotion = reduceDockMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
                 document.querySelectorAll('.dock-panel').forEach(function(candidate) {
                     if (candidate !== previousPanel && candidate !== panel) candidate.classList.remove('active', 'is-entering', 'is-leaving');
                 });
@@ -12490,12 +12497,12 @@ function renderProfileActivityList(kind) {
                         previousPanel.classList.remove('active', 'is-entering', 'is-leaving');
                         panel.classList.add('active');
                         panel.classList.remove('is-entering', 'is-leaving');
-                        var animatedSurface = panel.firstElementChild || panel;
+                        var animatedSurface = panel;
                         if (animatedSurface && typeof animatedSurface.animate === 'function') {
                             dockPanelAnimation = animatedSurface.animate([
-                                { opacity: 0, transform: 'translate3d(0, 8px, 0)' },
-                                { opacity: 1, transform: 'translate3d(0, 0, 0)' }
-                            ], { duration: 240, easing: 'cubic-bezier(.16,1,.3,1)' });
+                                { opacity: .65 },
+                                { opacity: 1 }
+                            ], { duration: 180, easing: 'ease-out' });
                             dockPanelAnimation.onfinish = dockPanelAnimation.oncancel = function() {
                                 dockPanelAnimation = null;
                             };
@@ -17460,7 +17467,7 @@ function renderProfileActivityList(kind) {
                 renderDockChatSocialTab(tab || 'friends');
                 refreshChatSocialBadge(true);
                 setTimeout(function() {
-                    if (_dockChatSocialTab === 'search') {
+                    if (!sheet.hidden && !sheet.inert && !sheet.classList.contains('hidden') && _dockChatSocialTab === 'search') {
                         var input = document.querySelector('#dockChatSocialSearchForm input[name="q"]');
                         if (input) input.focus({ preventScroll: true });
                     }
@@ -17470,6 +17477,8 @@ function renderProfileActivityList(kind) {
             function closeDockChatSocialSheet() {
                 var sheet = document.getElementById('dockChatSocialSheet');
                 if (!sheet) return;
+                var rail=document.getElementById('dockChatSocialTabs');
+                if(rail&&rail.__xtjCancelSlider)rail.__xtjCancelSlider();
                 transitionChatSurface(sheet,false);
                 _dockChatSocialLoadSeq++;
                 var opener = document.getElementById('dockChatSocialBtn');
@@ -17508,7 +17517,10 @@ function renderProfileActivityList(kind) {
                     rail.querySelectorAll('[data-chat-social-tab]').forEach(function(b,i){b.toggleAttribute('data-drag-active',i===Math.round(left/cellWidth()));});
                 });
                 rail.addEventListener('pointerup',function(e){release(e,false);});rail.addEventListener('pointercancel',function(e){release(e,true);});rail.addEventListener('lostpointercapture',function(e){release(e,true);});
-                rail.addEventListener('click',function(e){if(Date.now()<suppressClickUntil){e.preventDefault();e.stopPropagation();}},true);
+                rail.__xtjCancelSlider=function(){if(pointer!==null)release({pointerId:pointer},true);};
+                window.addEventListener('resize',rail.__xtjCancelSlider);
+                window.addEventListener('blur',rail.__xtjCancelSlider);
+                rail.addEventListener('click',function(e){if(e.detail!==0&&Date.now()<suppressClickUntil){e.preventDefault();e.stopPropagation();}},true);
                 rail.addEventListener('keydown',function(event){
                     if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();var i=Math.max(0,tabs.indexOf(_dockChatSocialTab));
                     i=event.key==='Home'?0:event.key==='End'?3:(i+(event.key==='ArrowRight'?1:3))%4;renderDockChatSocialTab(tabs[i]);rail.querySelector('[data-chat-social-tab="'+tabs[i]+'"]').focus({preventScroll:true});
@@ -17605,6 +17617,8 @@ function renderProfileActivityList(kind) {
                     content.innerHTML = '<form id="dockChatSocialSearchForm" class="chat-social-search-form" autocomplete="off">' +
                         '<input name="q" type="search" minlength="2" maxlength="64" placeholder="输入用户名，至少 2 个字符" value="' + escapeHtml(_dockChatSocialQuery) + '" aria-label="搜索用户名">' +
                         '<button type="submit">搜索</button></form><div id="dockChatSocialResults" class="chat-social-results"><div class="chat-social-empty">搜索公开用户名，查看好友关系并发送申请。</div></div>';
+                    content.dataset.renderMarkup='';
+                    content.setAttribute('aria-busy','false');
                     if (_dockChatSocialQuery) loadDockChatSocialSearch(_dockChatSocialQuery, seq);
                     return;
                 }

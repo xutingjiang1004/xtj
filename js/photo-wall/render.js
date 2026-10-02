@@ -317,6 +317,11 @@
     img._pwQueued = true;
     img._pwGeneration = _pwRenderGeneration;
     pendingImgs.push({ target:img });
+    if(window.preloadPhotoStorySocial && img.closest){
+      var card=img.closest('.photo-wall-item[data-photo-id]');
+      var photo=card&&findPhotoById(card.getAttribute('data-photo-id'),window.photoWallData||[]);
+      if(photo)window.preloadPhotoStorySocial([photo]);
+    }
   }
 
   function loadVisiblePhotoWallImages(container, limit){
@@ -744,6 +749,7 @@
 
   function renderSorted(photos, preserveBatch){
     if(window.preloadPhotoStoryAvatars)window.preloadPhotoStoryAvatars(photos);
+    if(window.preloadPhotoStorySocial)window.preloadPhotoStorySocial(photos);
     var grid = document.getElementById('photoGrid');
     if (!grid) return;
     if (!preserveBatch) photoBatchStart = 0;
@@ -852,6 +858,7 @@
 
   function renderPhotoWallWithoutReload(){
     if(window.preloadPhotoStoryAvatars)window.preloadPhotoStoryAvatars(window.photoWallData||[]);
+    if(window.preloadPhotoStorySocial)window.preloadPhotoStorySocial(window.photoWallData||[]);
     var key = window.pwSortKey || 'date_desc';
     renderSorted(sortPhotoWallData(window.photoWallData || [], key));
   }

@@ -309,6 +309,7 @@
     if (animate) toggleTimedClass(root, 'pp-animate-image', 240);
     else root.classList.remove('pp-animate-image');
     img.classList.toggle('zoomed', state.scale > 1.01);
+    root.classList.toggle('pp-image-transformed', state.scale !== 1 || state.tx !== 0 || state.ty !== 0 || state.rotation !== 0);
   }
 
   function centerTrackOffset(extraX) {
@@ -322,8 +323,8 @@
     var offset = centerTrackOffset(extraX);
     setPreviewVars({ '--pp-track-x': offset + 'px' });
     // The legacy navigator owns an inline transform; update it for gestures too.
-    track.style.transition = animate ? 'transform 220ms ease-out' : 'none';
-    track.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
+    track.style.transition = animate ? 'left 220ms ease-out' : 'none';
+    track.style.left = offset + 'px';
     if (animate) toggleTimedClass(root, 'pp-animate-track', 240);
     else root.classList.remove('pp-animate-track');
   }
