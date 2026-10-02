@@ -14,7 +14,7 @@ const migration = fs.readFileSync(
   'utf8'
 );
 
-test('billable tokens include prompt + completion + reasoning and never undercount total', () => {
+test('billable tokens preserve independent reasoning only without authoritative provider totals', () => {
   assert.equal(quotaMod.computeBillableTokens({
     prompt_tokens: 100,
     completion_tokens: 50,
@@ -32,7 +32,7 @@ test('billable tokens include prompt + completion + reasoning and never undercou
     completion_tokens: 5,
     reasoning_tokens: 20,
     total_tokens: 15
-  }), 35);
+  }), 15);
 
   // fallback estimate when provider omits usage
   var est = quotaMod.computeBillableTokens(null, {

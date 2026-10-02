@@ -185,7 +185,9 @@ test('aiSitePersistResults does not throw on error, returns original results', (
 test('patchToast skips empty messages instead of showing "操作成功"', () => {
   assert.match(features, /function patchToast/);
   assert.doesNotMatch(features, /\|\| '操作成功'/);
-  assert.match(features, /if \(!args\[0\]\) return/);
+  assert.match(features, /if \(!args\[0\] \|\| !String\(args\[0\]\)\.trim\(\)\) return/);
+  const toast = features.slice(features.indexOf('function patchToast()'), features.indexOf('function patchChat()'));
+  assert.doesNotMatch(toast, /fixText\(/);
 });
 
 test('scheduleAiPreload is defined and called for lazy AI module loading', () => {

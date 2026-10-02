@@ -105,7 +105,8 @@ test('slider follows forward/reverse movement before release, with transparent r
       ? getComputedStyle(document.documentElement,'::view-transition-new(root)').opacity
       : getComputedStyle(n).color);
   expect(middlePaint).not.toBe('rgba(0, 0, 0, 0)');
-  await expect(page.locator('#pubBtn')).toHaveCSS('color','rgb(255, 255, 255)');
+  await expect(page.locator('#pubBtn')).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
+  await expect(page.locator('#pubBtn')).toHaveCSS('color','rgb(22, 160, 133)');
   expect(await page.evaluate(() => window.XTJThemeController.getProgress())).toBeCloseTo(.5,2);
   expect(middle.x - start.x).toBeGreaterThan(9);
   expect(middle.x - start.x).toBeLessThan(13);

@@ -106,3 +106,8 @@ test('合约：帖子属地重试对私网 IP 直接落定失败', () => {
     'retryIpRegionAsync 必须对私网 IP 跳过无效重试'
   );
 });
+
+test('byte-level reserved classification is identical for expanded and compressed IPv6 and mapped IPv4',()=>{
+ for(const ip of ['0:0:0:0:0:0:0:1','0000:0000:0000:0000:0000:0000:0000:0001','0:0:0:0:0:ffff:7f00:1','::ffff:192.168.1.1','0:0:0:0:0:ffff:c0a8:101','192.0.2.1','2001:0db8:0:0:0:0:0:1','3fff::1','100::1'])assert.equal(isPrivateOrReservedIp(ip),true,ip);
+ for(const ip of ['::ffff:8.8.8.8','0:0:0:0:0:ffff:808:808','2001:4860:4860::8888','2606:4700::1111'])assert.equal(isPrivateOrReservedIp(ip),false,ip);
+});

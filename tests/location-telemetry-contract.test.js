@@ -8,8 +8,8 @@ const html = fs.readFileSync('index.html', 'utf8');
 const admin = fs.readFileSync('js/admin/admin.js', 'utf8');
 const sharedHeaders = require('../render-api/security-headers.js');
 
-test('precise geolocation is system-managed and can be stopped', () => {
-  // 定位已改为后台自动管理，不再有用户手动开关
+test('precise geolocation requires user consent, binds identity and can be stopped', () => {
+  // GPS may only restore explicit same-account authorization; no unsolicited permission prompt.
   assert.doesNotMatch(html, /id="profileLocationToggle"/);
   assert.match(device, /window\.xtjSetLocationSharing\s*=\s*function/);
   assert.match(device, /navigator\.geolocation\.watchPosition/);
@@ -42,10 +42,13 @@ test('location endpoint validates coordinates and keeps one bounded record per p
   assert.match(permissionsPolicy, /geolocation=\(self\)/);
 });
 
-test('device telemetry includes bounded network and capability metadata', () => {
-  for (const token of ['hardware_concurrency', 'device_memory_gb', 'color_depth', 'effective_type', 'downlink_mbps', 'rtt_ms', 'save_data']) {
+test('browser context only includes bounded language, timezone and network facts', () => {
+  for (const token of ['language', 'languages', 'timezone', 'effective_type', 'downlink_mbps', 'rtt_ms', 'save_data']) {
     assert.ok(device.includes(token), `missing ${token}`);
   }
+  for (const retired of ['getDeviceMeta', 'getBrowserFingerprint', 'getCanvasFingerprint', 'getWebglFingerprint', 'getBatteryInfo', 'getMediaDevices', '/api/log-login-event', '/api/security-settings']) assert.equal(device.includes(retired), false, retired);
+  assert.match(device, /authOwner:actor,authEpoch:epoch/);
+  assert.match(device, /xtj_location_sharing_owner/);
   assert.match(server, /if \(ip\.indexOf\('::ffff:'\) === 0\) ip = ip\.slice\(7\)/);
   assert.match(admin, /用户授权 GPS 精确定位/);
   assert.match(admin, /openstreetmap\.org/);

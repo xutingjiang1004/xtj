@@ -29,16 +29,16 @@ function computeBillableTokens(usage, opts) {
   opts = opts || {};
   var prompt = Math.max(0, Math.floor(Number(usage.prompt_tokens) || Number(usage.input_tokens) || 0));
   var completion = Math.max(0, Math.floor(Number(usage.completion_tokens) || Number(usage.output_tokens) || 0));
-  var reasoning = Math.max(0, Math.floor(
-    Number(usage.reasoning_tokens) ||
-    Number(usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens) ||
-    Number(usage.output_tokens_details && usage.output_tokens_details.reasoning_tokens) ||
-    0
-  ));
+  // Details are a subset of completion/output, not an extra billable category.
+  // Keep the legacy independent top-level reasoning field supported.
+  var reasoning = usage.reasoning_included_in_completion === true ? 0
+    : Math.max(0, Math.floor(Number(usage.reasoning_tokens) || 0));
   var total = Math.max(0, Math.floor(Number(usage.total_tokens) || 0));
   var sumParts = prompt + completion + reasoning;
   if (total > 0 || sumParts > 0) {
-    return Math.max(total, sumParts);
+    // An authoritative total includes reasoning as well. Internal aggregates
+    // mark their flattened reasoning as a subset for providers omitting total.
+    return total > 0 ? Math.max(total, prompt + completion) : sumParts;
   }
   // Fallback only when provider omitted usage entirely (should be rare).
   var msg = String(opts.message || '');

@@ -436,10 +436,18 @@ test('refresh failure does not re-upload files', function(){
   assert.ok(upload.indexOf('state.photoFiles = [];') > upload.indexOf('await performUpload(jobs);'), 'photoFiles must clear after result refresh');
 });
 
-test('showToast wrapper forwards all arguments after text repair', function(){
-  var source = read('js/features.js');
-  assert.ok(source.indexOf('original.apply(this, args)') >= 0, 'showToast wrapper does not forward all arguments');
-  assert.ok(source.indexOf('args[0] = fixText') >= 0, 'showToast text repair missing');
+test('showToast suppresses empty feedback and forwards literal user text with all arguments', function(){
+  var source = read('js/features.js'), calls = [];
+  var start = source.indexOf('  function patchToast()'), end = source.indexOf('  function patchChat()', start);
+  assert.ok(start >= 0 && end > start, 'toast function boundaries missing');
+  var context = { window: { showToast: function() { calls.push(Array.prototype.slice.call(arguments)); } } };
+  vm.runInNewContext(source.slice(start, end) + '; patchToast();', context);
+  context.window.showToast(''); context.window.showToast('   ');
+  var options = { retained: true };
+  context.window.showToast(' 鍔犺浇 ', 'info', options);
+  assert.strictEqual(calls.length, 1, 'empty feedback must not display');
+  assert.strictEqual(calls[0][0], ' 鍔犺浇 ', 'user text must remain verbatim');
+  assert.strictEqual(calls[0][1], 'info'); assert.strictEqual(calls[0][2], options);
 });
 
 test('wide Dock and iPad post layout use explicit visible and single-column overrides', function(){
@@ -616,8 +624,8 @@ test('3. 新帖子创建时写入 ip_lookup_started_at', function(){
   assert.ok(s.indexOf('ip_lookup_started_at') >= 0, 'server.js must set ip_lookup_started_at');
   // 确保 pending 状态时设置了 ip_lookup_started_at
   var createIdx = s.indexOf("app.post('/api/post/create'");
-  var createSection = s.slice(createIdx, createIdx + 5000);
-  assert.ok(createSection.indexOf('ip_lookup_started_at') >= 0, 'POST /api/post/create must set ip_lookup_started_at');
+  var createSection = s.slice(createIdx, s.indexOf("app.post('/api/location/reverse'", createIdx));
+  assert.ok(/ip_lookup_started_at:\s*ipLookupStartedAt/.test(createSection), 'POST /api/post/create must persist the actual lookup start timestamp');
 });
 
 test('4. 解析成功显示省份+城市', function(){

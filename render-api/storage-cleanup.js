@@ -4,7 +4,6 @@ const crypto = require('crypto');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // 与 server.js 的 STORAGE_CLEANUP_MAX_ATTEMPTS 对齐：合并/重排 job 时不再重置 attempts，
 // 让 worker 的 attempts 上限判定能最终触发，避免"失败路径被反复并入并重置计数"导致无限重试。
-const MAX_CLEANUP_JOB_ATTEMPTS = 5;
 
 function normalizePhotoId(value, bucket, paths) {
   const candidate = String(value || '').trim();
@@ -51,96 +50,25 @@ async function enqueueStorageCleanupJob(supabase, options) {
   options = options || {};
   const paths = normalizePaths(options.paths);
   if (!paths.length) return { ok: true, queued: false, failed: false, paths: [] };
-  if (!supabase || typeof supabase.from !== 'function') {
-    return { ok: false, queued: false, failed: true, paths: paths, error: { code: 'SUPABASE_UNAVAILABLE', message: 'Storage cleanup queue is unavailable' } };
+  if (!supabase || typeof supabase.rpc !== 'function') {
+    return { ok: false, queued: false, failed: true, paths,
+      error: { code: 'SUPABASE_UNAVAILABLE', message: 'Atomic storage cleanup queue is unavailable' } };
   }
-
-  // storage_cleanup_jobs.photo_id is UUID-typed. Photo rollback callers may
-  // pass an actor key such as photo_<upload-id>; map that key deterministically
-  // instead of allowing a PostgreSQL 22P02 to discard the cleanup request.
-  const photoId = normalizePhotoId(options.photoId, options.bucket, paths);
-  const payload = {
-    photo_id: photoId,
-    bucket: String(options.bucket || 'uploads'),
-    paths: paths,
-    status: 'pending',
-    attempts: 0,
-    last_error: String(options.lastError || '').slice(0, 1000) || null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  };
-
-  let result;
+  // The RPC merges paths under the row lock. SELECT + UPDATE loses concurrent
+  // additions across instances; deliberately do not fall back to that sequence.
   try {
-    result = await supabase.from('storage_cleanup_jobs').insert(payload).select('id,photo_id,paths').maybeSingle();
-  } catch (error) {
-    return { ok: false, queued: false, failed: true, paths: paths, error: error };
-  }
-
-  if (result && result.error && String(result.error.code || '') === '23505') {
-    let existing;
-    try {
-      existing = await supabase.from('storage_cleanup_jobs').select('id,photo_id,paths,status,claim_token,attempts').eq('photo_id', photoId).maybeSingle();
-    } catch (error) {
-      return { ok: false, queued: false, failed: true, paths: paths, error: error };
+    const result = await supabase.rpc('enqueue_storage_cleanup', {
+      p_photo_id: normalizePhotoId(options.photoId, options.bucket, paths),
+      p_bucket: String(options.bucket || 'uploads'),
+      p_paths: paths,
+      p_last_error: String(options.lastError || '').slice(0, 1000) || null
+    });
+    if (!result || result.error || !result.data || result.data.ok !== true || result.data.queued !== true) {
+      return { ok: false, queued: false, failed: true, paths,
+        error: result && result.error || { code: 'QUEUE_INSERT_NOT_CONFIRMED', message: 'Atomic cleanup queue update was not confirmed' } };
     }
-    if (existing && existing.error) return { ok: false, queued: false, failed: true, paths: paths, error: existing.error };
-    if (existing && existing.data) {
-      // 正在处理（processing）或已完成的 job 不能被并发重复提交强制重置：
-      // 否则会打断持 claim_token 的 worker，导致无限重试循环。
-      const existingStatus = String(existing.data.status || '');
-      if (existingStatus === 'processing') {
-        // M-1b: processing 期间新提交的路径不能静默丢弃（否则新路径成孤儿）。
-        // 合并进已有 job 并重置为 pending（清 claim），worker 的 finalUpdate
-        // 因状态不匹配不会覆盖；下一轮按序重跑全部路径，remove 幂等无害。
-        let merged;
-        try {
-          merged = await supabase.from('storage_cleanup_jobs').update({
-            status: 'pending',
-            // 审计 🟡：不再重置 attempts，避免"持续失败路径被反复并入并归零计数"→ worker 永不触发上限
-            attempts: Math.min(Number(existing.data.attempts || 0), MAX_CLEANUP_JOB_ATTEMPTS),
-            paths: normalizePaths((existing.data.paths || []).concat(paths)),
-            last_error: payload.last_error,
-            updated_at: payload.updated_at,
-            completed_at: null,
-            claim_token: null,
-            lease_until: null
-          }).eq('id', existing.data.id).select('id').maybeSingle();
-        } catch (error) {
-          return { ok: false, queued: false, failed: true, paths: paths, error: error };
-        }
-        if (merged && merged.error) return { ok: false, queued: false, failed: true, paths: paths, error: merged.error };
-        if (!merged || !merged.data) return { ok: false, queued: false, failed: true, paths: paths, error: { code: 'QUEUE_UPDATE_NOT_CONFIRMED', message: 'Cleanup queue update was not confirmed' } };
-        return { ok: true, queued: true, failed: false, duplicate: true, jobId: existing.data.id, paths: paths };
-      }
-      if (existingStatus === 'completed' || existingStatus === 'failed') {
-        // 终态 job 允许重新排队重试
-        let update;
-        try {
-          update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', attempts: Math.min(Number(existing.data.attempts || 0), MAX_CLEANUP_JOB_ATTEMPTS), paths: paths, last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
-        } catch (error) {
-          return { ok: false, queued: false, failed: true, paths: paths, error: error };
-        }
-        if (update && update.error) return { ok: false, queued: false, failed: true, paths: paths, error: update.error };
-        if (!update || !update.data) return { ok: false, queued: false, failed: true, paths: paths, error: { code: 'QUEUE_UPDATE_NOT_CONFIRMED', message: 'Cleanup queue update was not confirmed' } };
-        return { ok: true, queued: true, failed: false, duplicate: true, jobId: existing.data.id, paths: paths };
-      }
-      // pending / 其他状态：M-2b 幂等合并必须做并集，不能整体覆盖（否则旧路径被丢弃）
-      let update;
-      try {
-        update = await supabase.from('storage_cleanup_jobs').update({ status: 'pending', attempts: Math.min(Number(existing.data.attempts || 0), MAX_CLEANUP_JOB_ATTEMPTS), paths: normalizePaths((existing.data.paths || []).concat(paths)), last_error: payload.last_error, updated_at: payload.updated_at, completed_at: null, claim_token: null, lease_until: null }).eq('id', existing.data.id).select('id').maybeSingle();
-      } catch (error) {
-        return { ok: false, queued: false, failed: true, paths: paths, error: error };
-      }
-      if (update && update.error) return { ok: false, queued: false, failed: true, paths: paths, error: update.error };
-      if (!update || !update.data) return { ok: false, queued: false, failed: true, paths: paths, error: { code: 'QUEUE_UPDATE_NOT_CONFIRMED', message: 'Cleanup queue update was not confirmed' } };
-      return { ok: true, queued: true, failed: false, duplicate: true, jobId: existing.data.id, paths: paths };
-    }
-  }
-
-  if (result && result.error) return { ok: false, queued: false, failed: true, paths: paths, error: result.error };
-  if (!result || !result.data) return { ok: false, queued: false, failed: true, paths: paths, error: { code: 'QUEUE_INSERT_NOT_CONFIRMED', message: 'Cleanup queue insert was not confirmed' } };
-  return { ok: true, queued: true, failed: false, jobId: result.data.id, paths: paths };
+    return Object.assign({}, result.data, { ok: true, queued: true, failed: false });
+  } catch (error) { return { ok: false, queued: false, failed: true, paths, error }; }
 }
 
 async function removeStorageWithQueue(supabase, options) {

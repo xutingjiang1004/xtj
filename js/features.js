@@ -52,6 +52,11 @@
     repairPattern.lastIndex = 0;
     return repairPattern.test(String(value == null ? '' : value));
   }
+  function isMarkedSystemText(node) {
+    var element = node && node.nodeType === 1 ? node : node && node.parentNode;
+    // A marker only authorizes this element's own text and labels, not user descendants.
+    return !!(element && element.hasAttribute && element.hasAttribute(LEGACY_MARKER));
+  }
   function isInProtectedSubtree(node) {
     var element = node && node.nodeType === 1 ? node : (node && node.parentNode);
     while (element && element.nodeType === 1) {
@@ -65,7 +70,7 @@
     if (!node) return;
     // Content in source/code samples, templates, and form controls is literal data.
     // A queued node can also be moved into one of these subtrees before the RAF runs.
-    if (isInProtectedSubtree(node)) return;
+    if (isInProtectedSubtree(node) || !isMarkedSystemText(node)) return;
     if (node.nodeType === 3) {
       var originalText = node.nodeValue || '';
       var fixedText = fixText(originalText);
@@ -73,9 +78,7 @@
       return;
     }
     if (node.nodeType !== 1) return;
-    // ★ 修复：此前要求节点带 data-xtj-legacy-text 属性，但全项目没有任何代码设置该标记，
-    // 导致页面乱码修复（除 toast 外）从不生效。改为直接对节点文本做幂等修复：
-    // 修复后的文本不再命中乱码对，重复处理无副作用；属性修复仅对匹配属性生效。
+    // Only explicitly marked system UI owns repairable text. Published user content stays literal.
     Array.prototype.forEach.call(node.childNodes, function (child) {
       if (child.nodeType === 3) {
         var originalText = child.nodeValue || '';
@@ -91,7 +94,7 @@
         if (fixedAttr !== originalAttr) node.setAttribute(attr, fixedAttr);
       } catch (_) {}
     });
-    if (node.hasAttribute(LEGACY_MARKER)) node.removeAttribute(LEGACY_MARKER);
+    // Keep the marker so later updates to this system label remain repairable.
   }
 
   function flushRepairs() {
@@ -115,14 +118,14 @@
     if (!node) return;
     if (isInProtectedSubtree(node)) return;
     if (node.nodeType === 3) {
-      if (needsRepair(node.nodeValue)) scheduleRepair(node);
+      if (isMarkedSystemText(node) && needsRepair(node.nodeValue)) scheduleRepair(node);
       return;
     }
     if (node.nodeType !== 1) return;
     var tag = String(node.tagName || '').toUpperCase();
     if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'INPUT') return;
     function collectElement(el) {
-      if (isInProtectedSubtree(el)) return;
+      if (isInProtectedSubtree(el) || !isMarkedSystemText(el)) return;
       if (el.hasAttribute(LEGACY_MARKER)) scheduleRepair(el);
       REPAIR_ATTRS.forEach(function(attr) {
         try { if (el.hasAttribute(attr) && needsRepair(el.getAttribute(attr))) scheduleRepair(el); } catch (_) {}
@@ -136,14 +139,12 @@
   }
 
   function patchToast() {
-    if (typeof window.showToast !== 'function' || window.showToast.__xtjPatchedV10) return;
+    // Preserve user-derived text verbatim; only suppress empty feedback.
     var original = window.showToast;
-    window.showToast = function () {
+    if (typeof original !== 'function' || original.__xtjPatchedV10) return;
+    window.showToast = function() {
       var args = Array.prototype.slice.call(arguments);
-      if (args.length > 0 && args[0] != null) {
-        args[0] = fixText(String(args[0])).trim();
-        if (!args[0]) return; // skip empty messages, don't show "操作成功"
-      }
+      if (!args[0] || !String(args[0]).trim()) return;
       return original.apply(this, args);
     };
     window.showToast.__xtjPatchedV10 = true;
@@ -188,11 +189,11 @@
         if (record.type === 'childList') {
           Array.prototype.forEach.call(record.addedNodes || [], collectMarkedNodes);
         } else if (record.type === 'characterData') {
-          if (!isInProtectedSubtree(record.target) && needsRepair(record.target.nodeValue)) scheduleRepair(record.target);
-        } else if (record.type === 'attributes' && !isInProtectedSubtree(record.target)) {
+          if (!isInProtectedSubtree(record.target) && isMarkedSystemText(record.target) && needsRepair(record.target.nodeValue)) scheduleRepair(record.target);
+        } else if (record.type === 'attributes' && !isInProtectedSubtree(record.target) && isMarkedSystemText(record.target)) {
           var attr = record.attributeName;
           if (attr === LEGACY_MARKER && record.target.hasAttribute(LEGACY_MARKER)) {
-            scheduleRepair(record.target);
+            collectMarkedNodes(record.target);
           } else if (REPAIR_ATTRS.indexOf(attr) !== -1 && needsRepair(record.target.getAttribute(attr))) {
             scheduleRepair(record.target);
           }

@@ -162,6 +162,8 @@
   function bindButtonPress() {
     if (window.__xtjBtnPressBound) return;
     window.__xtjBtnPressBound = true;
+    var pressed = new Map();
+    function clearAllPresses() { pressed.forEach(function(btn) { btn.classList.remove('xtj-pressing'); }); pressed.clear(); }
     document.addEventListener(
       'pointerdown',
       function (e) {
@@ -170,18 +172,22 @@
         var btn = t.closest && t.closest('button:not(.dock-tab), .btn, .action-btn, .send-btn, .ai-chat-send, .dt-action-btn, .desktop-nav-item');
         if (!btn || isDock(btn)) return;
         if (window.__xtjPerfProfile === 'lite') return;
+        var previous = pressed.get(e.pointerId);
+        if (previous) previous.classList.remove('xtj-pressing');
+        pressed.set(e.pointerId, btn);
         btn.classList.add('xtj-pressing');
       },
       true
     );
     function clearPress(e) {
-      var t = e.target;
-      if (!t || !t.closest) return;
-      var btn = t.closest('.xtj-pressing');
+      var btn = pressed.get(e.pointerId);
       if (btn) btn.classList.remove('xtj-pressing');
+      pressed.delete(e.pointerId);
     }
     document.addEventListener('pointerup', clearPress, true);
     document.addEventListener('pointercancel', clearPress, true);
+    window.addEventListener('blur', clearAllPresses);
+    window.addEventListener('pagehide', clearAllPresses);
   }
 
   // ---------- Site 2 chat: typing indicator + long-press menu ----------

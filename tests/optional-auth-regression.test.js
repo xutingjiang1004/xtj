@@ -41,7 +41,8 @@ test('feed requests attach identity when available but keep anonymous fallback n
   const feed = between(core, 'async function fetchFeedPageChunk', 'function hydrateDeferredFeedRelations');
   const authors = between(core, 'async function loadPostFilterUsers', 'window.selectPostFilterUser');
   assert.match(optional, /ensureUserToken\(\)/);
-  assert.match(optional, /headers\.Authorization = 'Bearer ' \+ token/);
+  assert.match(optional, /normalizedAuthHeaders\(options, token\)/);
+  assert.match(core, /headers\.set\('Authorization', 'Bearer ' \+ token\)/);
   assert.match(optional, /response\.status === 401/);
   assert.match(optional, /refreshUserToken\(true\)/);
   assert.doesNotMatch(optional, /handleProtectedAuthFailure/);

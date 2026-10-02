@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Chromium for runtime browser tests
+        run: npx playwright install --with-deps chromium
+
       - name: Build assets
         run: npm run build
 
@@ -63,6 +66,36 @@ jobs:
 
       - name: Finish
         run: echo "ALL SYNTAX CHECKS PASSED"
+
+  database:
+    name: Database migrations and atomic APIs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Replay migrations and verify roles, races, rollback and identity
+        env:
+          AUDIT_DATABASE_URL: postgresql://postgres:local-ci-only@127.0.0.1:5432/postgres
+        run: node scripts/test-database-migrations.js
 
   ui:
     name: UI Tests

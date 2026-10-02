@@ -15,37 +15,6 @@
 
 
     var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
-    var CHECK_DELAY_MS = 300;
-    var SEND_COOLDOWN_MS = 10000;
-    var VISIT_COOLDOWN_MS = 15000;
-    var debounceTimer = null;
-    var lastSendAtByKey = {};
-
-    // 安全设置缓存（懒加载，1分钟缓存）
-    var cachedSecuritySettings = null;
-    var settingsLastFetch = 0;
-    function getSecuritySettings() {
-        var now = Date.now();
-        if (cachedSecuritySettings && (now - settingsLastFetch < 60000)) {
-            return Promise.resolve(cachedSecuritySettings);
-        }
-        return fetch(API_BASE + '/api/security-settings')
-            .then(function(res) {
-                if (!res.ok) throw new Error('security-settings status: ' + res.status);
-                return res.json();
-            })
-            .then(function(data) {
-                cachedSecuritySettings = (data && data.settings) || { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
-                settingsLastFetch = now;
-                return cachedSecuritySettings;
-            })
-            .catch(function() {
-                // 负缓存：写入失败时间，防止故障期间对同一端点请求放大
-                settingsLastFetch = now;
-                return { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
-            });
-    }
-
     // 获取或生成 device_id
     function getOrCreateDeviceId() {
         try {
@@ -62,602 +31,11 @@
         return id;
     }
 
-    // 设备类型
-    function detectDeviceType(ua) {
-        if (/iPhone/i.test(ua)) return 'iPhone';
-        if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad';
-        if (/Android/i.test(ua)) return 'Android';
-        if (/Mobi/i.test(ua)) return 'Mobile';
-        return 'Desktop';
-    }
-
-    // 操作系统
-    function detectOS(ua) {
-        if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) return 'iPadOS';
-        if (/iPhone|iPod/i.test(ua)) return 'iOS';
-        if (/Android/i.test(ua)) return 'Android';
-        if (/Windows/i.test(ua)) return 'Windows';
-        if (/Macintosh|Mac OS X/i.test(ua)) return 'macOS';
-        if (/Linux/i.test(ua)) return 'Linux';
-        return 'Unknown';
-    }
-
-    // 浏览器
-    function detectBrowser(ua) {
-        if (/MicroMessenger/i.test(ua)) return 'WeChat';
-        if (/Edg\//i.test(ua)) return 'Edge';
-        if (/Firefox/i.test(ua)) return 'Firefox';
-        if (/Chrome/i.test(ua)) return 'Chrome';
-        if (/Safari/i.test(ua)) return 'Safari';
-        return 'Unknown';
-    }
-
-
-    // 根据 iOS/Safari 暴露的屏幕参数推测 iPhone 疑似型号（非精确识别）
-    // 结合 iOS 版本号缩小猜测范围
-    function getPossibleDeviceModel(info) {
-        info = info || {};
-        var ua = String(info.user_agent || (navigator && navigator.userAgent) || '');
-        var platform = String(info.platform || (navigator && navigator.platform) || '');
-        var maxTouchPoints = Number(info.max_touch_points || (navigator && navigator.maxTouchPoints) || 0);
-        var isIPhone = /iPhone/i.test(ua) || (/Mac/i.test(platform) && maxTouchPoints > 1 && Math.min(Number(info.screen_width) || 0, Number(info.screen_height) || 0) < 600);
-        if (!isIPhone) return '';
-
-        var sw = Number(info.screen_width || info.visual_viewport_width || info.inner_width) || 0;
-        var sh = Number(info.screen_height || info.visual_viewport_height || info.inner_height) || 0;
-        var dpr = Number(info.device_pixel_ratio) || 0;
-        var shortSide = Math.min(sw, sh);
-        var longSide = Math.max(sw, sh);
-        var key = shortSide + 'x' + longSide + '@' + (dpr || '');
-        var iosVer = getIosMajorVersion(ua);
-        var modelMap = {
-            '440x956@3': function() {
-                if (iosVer !== null && iosVer < 19) return 'iPhone 16 Pro Max';
-                return 'iPhone 16 Pro Max / iPhone 17 Pro Max';
-            },
-            '402x874@3': function() {
-                if (iosVer !== null && iosVer < 19) return 'iPhone 16 Pro';
-                if (iosVer !== null && iosVer >= 19) return 'iPhone 17 / iPhone 17 Pro';
-                return 'iPhone 16 Pro / iPhone 17 / iPhone 17 Pro';
-            },
-            '393x852@3': function() {
-                if (iosVer !== null && iosVer === 16) return 'iPhone 14 Pro';
-                if (iosVer !== null && iosVer === 17) return 'iPhone 15 / iPhone 15 Pro';
-                if (iosVer !== null && iosVer >= 18) return 'iPhone 16';
-                return 'iPhone 14 Pro / iPhone 15 / iPhone 15 Pro / iPhone 16';
-            },
-            '430x932@3': function() {
-                if (iosVer !== null && iosVer === 16) return 'iPhone 14 Pro Max';
-                if (iosVer !== null && iosVer === 17) return 'iPhone 15 Plus / iPhone 15 Pro Max';
-                if (iosVer !== null && iosVer >= 18) return 'iPhone 16 Plus';
-                return 'iPhone 14 Pro Max / iPhone 15 Plus / iPhone 15 Pro Max / iPhone 16 Plus';
-            },
-            '428x926@3': function() {
-                if (iosVer !== null && iosVer <= 15) return 'iPhone 12 Pro Max / iPhone 13 Pro Max';
-                if (iosVer !== null && iosVer >= 16) return 'iPhone 14 Plus';
-                return 'iPhone 12 Pro Max / iPhone 13 Pro Max / iPhone 14 Plus';
-            },
-            '390x844@3': function() {
-                if (iosVer !== null && iosVer <= 14) return 'iPhone 12 / iPhone 12 Pro';
-                if (iosVer !== null && iosVer === 15) return 'iPhone 13 / iPhone 13 Pro';
-                if (iosVer !== null && iosVer >= 16) return 'iPhone 14';
-                return 'iPhone 12 / iPhone 12 Pro / iPhone 13 / iPhone 13 Pro / iPhone 14';
-            },
-            '375x812@3': function() {
-                if (iosVer !== null && iosVer <= 11) return 'iPhone X';
-                if (iosVer !== null && iosVer === 12) return 'iPhone XS';
-                if (iosVer !== null && iosVer === 13) return 'iPhone 11 Pro';
-                if (iosVer !== null && iosVer === 14) return 'iPhone 12 mini';
-                if (iosVer !== null && iosVer >= 15) return 'iPhone 13 mini';
-                return 'iPhone X / iPhone XS / iPhone 11 Pro / iPhone 12 mini / iPhone 13 mini';
-            },
-            '414x896@3': function() {
-                if (iosVer !== null && iosVer <= 12) return 'iPhone XS Max';
-                if (iosVer !== null && iosVer >= 13) return 'iPhone 11 Pro Max';
-                return 'iPhone XS Max / iPhone 11 Pro Max';
-            },
-            '414x896@2': function() {
-                if (iosVer !== null && iosVer <= 12) return 'iPhone XR';
-                if (iosVer !== null && iosVer >= 13) return 'iPhone 11';
-                return 'iPhone XR / iPhone 11';
-            },
-            '414x736@3': 'iPhone 6 Plus / 6s Plus / 7 Plus / 8 Plus',
-            '375x667@2': 'iPhone 6 / 6s / 7 / 8 / SE（第 2/3 代）',
-            '320x568@2': 'iPhone 5 / 5s / SE（第 1 代）'
-        };
-        var matcher = modelMap[key];
-        if (typeof matcher === 'function') return matcher();
-        return matcher || '';
-    }
-
-    // 从 User-Agent 提取 iOS 主版本号
-    function getIosMajorVersion(ua) {
-        var match = ua.match(/iPhone OS (\d+)_/);
-        if (match) return parseInt(match[1], 10);
-        return null;
-    }
-
-    // 精确设备型号（通过 UA Client Hints API，仅 Chromium 浏览器支持）
-    function getExactDeviceModel() {
-        try {
-            if (typeof navigator !== 'undefined' && navigator.userAgentData && typeof navigator.userAgentData.getHighEntropyValues === 'function') {
-                return navigator.userAgentData.getHighEntropyValues(['model'])
-                    .then(function(hints) {
-                        if (!hints) return null;
-                        var model = hints.model || '';
-                        return model && model !== '' ? model : null;
-                    })
-                    .catch(function() {
-                        return null;
-                    });
-            }
-        } catch(e) {}
-        return null;
-    }
-
-    // 设备元信息（仅基础信息，不做跨站追踪）
-    function getDeviceMeta() {
-        try {
-            var meta = {
-                screen: (window.screen ? window.screen.width + 'x' + window.screen.height : 'unknown'),
-                screen_width: window.screen ? window.screen.width : null,
-                screen_height: window.screen ? window.screen.height : null,
-                screen_avail_width: window.screen ? window.screen.availWidth : null,
-                screen_avail_height: window.screen ? window.screen.availHeight : null,
-                inner_width: window.innerWidth || null,
-                inner_height: window.innerHeight || null,
-                visual_viewport_width: window.visualViewport ? window.visualViewport.width : null,
-                visual_viewport_height: window.visualViewport ? window.visualViewport.height : null,
-                orientation: window.screen && window.screen.orientation ? window.screen.orientation.type : null,
-                dpr: window.devicePixelRatio || 1,
-                device_pixel_ratio: window.devicePixelRatio || 1,
-                language: (navigator.language || navigator.userLanguage || 'unknown'),
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
-                platform: (navigator.platform || 'unknown'),
-                hardware_concurrency: Number(navigator.hardwareConcurrency) || null,
-                device_memory_gb: Number(navigator.deviceMemory) || null,
-                color_depth: window.screen ? Number(window.screen.colorDepth) || null : null,
-                pixel_depth: window.screen ? Number(window.screen.pixelDepth) || null : null,
-                cookies_enabled: navigator.cookieEnabled === true,
-                online: navigator.onLine !== false,
-                max_touch_points: navigator.maxTouchPoints || 0,
-                touch: ('ontouchstart' in window || navigator.maxTouchPoints > 0),
-                timezone_offset_min: new Date().getTimezoneOffset(),
-                languages: navigator.languages ? Array.prototype.slice.call(navigator.languages, 0, 5) : [navigator.language || ''],
-                do_not_track: navigator.doNotTrack === '1' || window.doNotTrack === '1',
-                pdf_viewer: !!(navigator.pdfViewerEnabled),
-                plugins_count: navigator.plugins ? navigator.plugins.length : 0
-            };
-            var connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-            if (connection) {
-                meta.network = {
-                    effective_type: String(connection.effectiveType || '').slice(0, 20),
-                    downlink_mbps: Number.isFinite(Number(connection.downlink)) ? Number(connection.downlink) : null,
-                    rtt_ms: Number.isFinite(Number(connection.rtt)) ? Number(connection.rtt) : null,
-                    save_data: connection.saveData === true,
-                    type: String(connection.type || '').slice(0, 20)
-                };
-            }
-            try {
-                var url = new URL(window.location.href);
-                var referrerUrl = document.referrer ? new URL(document.referrer) : null;
-                meta.traffic_source = {
-                    referrer_origin: referrerUrl ? referrerUrl.origin : 'direct',
-                    utm_source: String(url.searchParams.get('utm_source') || '').slice(0, 80),
-                    utm_medium: String(url.searchParams.get('utm_medium') || '').slice(0, 80),
-                    utm_campaign: String(url.searchParams.get('utm_campaign') || '').slice(0, 80),
-                    landing_path: String(url.pathname || '/').slice(0, 160)
-                };
-            } catch (e) {}
-            // WebGL GPU 渲染器（对设备型号识别极有价值）
-            try {
-                var cvs = document.createElement('canvas');
-                var wgl = cvs.getContext('webgl') || cvs.getContext('experimental-webgl');
-                if (wgl) {
-                    var dbg = wgl.getExtension('WEBGL_debug_renderer_info');
-                    if (dbg) {
-                        meta.gpu_vendor = String(wgl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) || '').slice(0, 120);
-                        meta.gpu_renderer = String(wgl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '').slice(0, 200);
-                    }
-                    var ext = wgl.getExtension('WEBGL_lose_context');
-                    if (ext) ext.loseContext();
-                }
-            } catch(e) {}
-            meta.possible_device_model = getPossibleDeviceModel({
-                screen_width: meta.screen_width,
-                screen_height: meta.screen_height,
-                inner_width: meta.inner_width,
-                inner_height: meta.inner_height,
-                device_pixel_ratio: meta.device_pixel_ratio,
-                platform: meta.platform,
-                max_touch_points: meta.max_touch_points,
-                user_agent: navigator.userAgent || ''
-            });
-            return meta;
-        } catch(e) {
-            return null;
-        }
-    }
-
-    // 温和浏览器指纹 hash（SHA-256，仅保存 hash）
-    function getBrowserFingerprint() {
-        try {
-            if (typeof crypto === 'undefined' || !crypto.subtle || !crypto.subtle.digest) {
-                return null;
-            }
-            var fp = [
-                window.screen ? window.screen.width + 'x' + window.screen.height + 'x' + (window.screen.colorDepth || '') : '',
-                window.devicePixelRatio || 1,
-                navigator.language || navigator.userLanguage || '',
-                Intl.DateTimeFormat().resolvedOptions().timeZone || '',
-                navigator.platform || '',
-                navigator.hardwareConcurrency || 'unknown',
-                navigator.deviceMemory || 'unknown',
-                ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? '1' : '0',
-                detectBrowser(navigator.userAgent || ''),
-                detectOS(navigator.userAgent || '')
-            ].join('|');
-
-            // 同步计算 hash（SHA-256，不阻塞主线程太久）
-            var encoder = new TextEncoder();
-            var data = encoder.encode(fp);
-            return crypto.subtle.digest('SHA-256', data).then(function(hashBuffer) {
-                var hashArray = Array.from(new Uint8Array(hashBuffer));
-                return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-            }).catch(function() {
-                return null;
-            });
-        } catch(e) {
-            return null;
-        }
-    }
-
-    // Canvas 指纹 hash（仅辅助判断，不保存图像）
-    function getCanvasFingerprint() {
-        try {
-            var canvas = document.createElement('canvas');
-            canvas.width = 200;
-            canvas.height = 40;
-            canvas.style.display = 'none';
-            var ctx = canvas.getContext('2d');
-            if (!ctx) return null;
-
-            // 绘制温和的识别文本
-            ctx.textBaseline = 'top';
-            ctx.font = '14px Arial';
-            ctx.fillStyle = '#059669';
-            ctx.fillText('XTJ ' + (new Date().getFullYear()), 4, 4);
-
-            ctx.font = '12px sans-serif';
-            ctx.fillStyle = '#333';
-            ctx.fillText('device check only', 4, 22);
-
-            // 尝试读取像素（浏览器可能阻止）
-            try {
-                var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                var pixels = imageData.data;
-
-                // 只计算 hash，不保存像素数据
-                if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
-                    return crypto.subtle.digest('SHA-256', pixels.slice(0, 512)).then(function(hashBuffer) {
-                        var hashArray = Array.from(new Uint8Array(hashBuffer));
-                        return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-                    }).catch(function() {
-                        return null;
-                    });
-                }
-                return null;
-            } catch(e) {
-                // Canvas 被浏览器限制（如隐私模式），记录 null
-                return null;
-            }
-        } catch(e) {
-            return null;
-        }
-    }
-
-    // 电池状态采集（仅 Chromium 支持）
-    function getBatteryInfo() {
-        try {
-            if (!navigator.getBattery) return Promise.resolve(null);
-            return navigator.getBattery().then(function(battery) {
-                return {
-                    level: battery.level,
-                    charging: battery.charging,
-                    charging_time: Number.isFinite(battery.chargingTime) ? battery.chargingTime : null,
-                    discharging_time: Number.isFinite(battery.dischargingTime) ? battery.dischargingTime : null
-                };
-            }).catch(function() { return null; });
-        } catch(e) { return Promise.resolve(null); }
-    }
-
-    // 存储容量估算（quota 近似设备磁盘大小）
-    function getStorageEstimate() {
-        try {
-            if (!navigator.storage || !navigator.storage.estimate) return Promise.resolve(null);
-            return navigator.storage.estimate().then(function(est) {
-                return { quota: est.quota || null, usage: est.usage || null };
-            }).catch(function() { return null; });
-        } catch(e) { return Promise.resolve(null); }
-    }
-
-    // 媒体设备枚举（摄像头/麦克风/扬声器数量，不需要权限即可获取数量）
-    function getMediaDevices() {
-        try {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return Promise.resolve(null);
-            return navigator.mediaDevices.enumerateDevices().then(function(devices) {
-                var counts = { audioinput: 0, audiooutput: 0, videoinput: 0, total: 0 };
-                for (var i = 0; i < devices.length; i++) {
-                    var kind = devices[i].kind;
-                    if (kind === 'audioinput') counts.audioinput++;
-                    else if (kind === 'audiooutput') counts.audiooutput++;
-                    else if (kind === 'videoinput') counts.videoinput++;
-                    counts.total++;
-                }
-                return counts;
-            }).catch(function() { return null; });
-        } catch(e) { return Promise.resolve(null); }
-    }
-
-    // WebGL 指纹 hash（GPU 型号 + 渲染器，跨浏览器稳定）
-    function cleanupWebgl(canvas, gl) {
-        try {
-            var ext = gl && gl.getExtension('WEBGL_lose_context');
-            if (ext) ext.loseContext();
-        } catch (_) {}
-        if (canvas) {
-            canvas.width = 1;
-            canvas.height = 1;
-        }
-    }
-
-    function getWebglFingerprint() {
-        var canvas = null;
-        var gl = null;
-        var raw = null;
-        try {
-            canvas = document.createElement('canvas');
-            canvas.width = 256;
-            canvas.height = 256;
-            gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-            if (!gl) return null;
-
-            var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-            if (!debugInfo) return null;
-
-            var renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
-            var vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '';
-
-            var extensions = [];
-            try {
-                var exts = gl.getSupportedExtensions() || [];
-                extensions = exts.sort();
-            } catch(ex) {}
-
-            raw = [renderer, vendor, extensions.join(',')].join('|');
-            if (!raw || raw.length < 10) return null;
-        } catch(e) {
-            return null;
-        } finally {
-            cleanupWebgl(canvas, gl);
-        }
-
-        if (raw && typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
-            var encoder = new TextEncoder();
-            var data = encoder.encode(raw);
-            return crypto.subtle.digest('SHA-256', data).then(function(hashBuffer) {
-                var hashArray = Array.from(new Uint8Array(hashBuffer));
-                return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-            }).catch(function() {
-                return null;
-            });
-        }
-        return null;
-    }
-
-    // WebGL 元数据（原始 GPU 信息，仅管理员可见）
-    function getWebglMeta() {
-        var canvas = null;
-        var gl = null;
-        try {
-            canvas = document.createElement('canvas');
-            gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-            if (!gl) return null;
-            var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-            if (!debugInfo) return null;
-
-            return {
-                gpu_renderer: String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '').slice(0, 200),
-                gpu_vendor: String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '').slice(0, 100)
-            };
-        } catch(e) {
-            return null;
-        } finally {
-            cleanupWebgl(canvas, gl);
-        }
-    }
-
-    // S9（隐私红线，2026-09-03 审计）：WebRTC 枚举内网 IP 的采集逻辑已整体移除
-    // （原 getWebRtcLocalIps：RTCPeerConnection/onicecandidate 收集局域网地址）。
-    // 内网拓扑泄露属于不可接受风险，不再采集，webrtc_local_ips 字段不再上传。
-
-    // 检查冷却（10s 内存级别）
-    function isInCooldown(sentKey) {
-        var lastAt = lastSendAtByKey[sentKey] || 0;
-        return (Date.now() - lastAt) < SEND_COOLDOWN_MS;
-    }
-
-    // 发送登录事件
-    function doSend(userName, deviceId, sentKey, source) {
-        try {
-            if (isInCooldown(sentKey)) return;
-
-            var ua = navigator.userAgent || '';
-
-            // S10/M56（安全默认）：先读服务端采集开关再做采集与上传。开关未明确
-            // 开启（record_device 缺省 false，接口失败/未下发也回退 false）时，本
-            // 函数直接返回——不做任何设备信息采集，也不上传登录事件（原实现即使
-            // 开关关闭也会先同步执行 getDeviceMeta 采集一整份设备信息后再丢弃，
-            // 属无效采集；且原逻辑在关闭时仍会发送事件体）。
-            getSecuritySettings().then(function(settings) {
-                if (!settings.record_device) return;
-
-                var deviceMeta = getDeviceMeta();
-                // 构建基础 body
-                var bodyObj = {
-                    user_name: userName,
-                    device_id: deviceId,
-                    device_type: detectDeviceType(ua),
-                    os: detectOS(ua),
-                    browser: detectBrowser(ua),
-                    user_agent: ua,
-                    source: source,
-                    device_meta: deviceMeta
-                };
-
-                // 发送请求（指纹异步采集）
-                var sendReq = async function() {
-                    lastSendAtByKey[sentKey] = Date.now();
-                    var headers = { 'Content-Type': 'application/json' };
-                    var token = '';
-                    try {
-                        if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
-                        else if (typeof window.getUserToken === 'function') token = window.getUserToken();
-                    } catch (e) {
-                        // L1 修复：token 刷新失败时清除冷却，允许后续重试；不得产生未捕获的 rejection
-                        lastSendAtByKey[sentKey] = 0;
-                        return;
-                    }
-                    if (!token) { lastSendAtByKey[sentKey] = 0; return; }
-                    headers['Authorization'] = 'Bearer ' + token;
-                    fetch(API_BASE + '/api/log-login-event', {
-                        method: 'POST',
-                        headers: headers,
-                        credentials: 'include',
-                        body: JSON.stringify(bodyObj)
-                    }).then(function(res) {
-                        if (!res.ok) { lastSendAtByKey[sentKey] = 0; return; }
-                        if (source === 'login_success') {
-                            try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
-                        }
-                    }).catch(function() {
-                        // 请求失败清除冷却，允许重试
-                        lastSendAtByKey[sentKey] = 0;
-                    });
-                };
-
-                // advanced_fingerprint 作为主开关：开启时等同启用所有指纹采集
-                var advFp = !!settings.advanced_fingerprint;
-                var browserFpPromise = (advFp || settings.browser_fingerprint) ? getBrowserFingerprint() : null;
-                var canvasFpPromise = (advFp || settings.canvas_fingerprint) ? getCanvasFingerprint() : null;
-                var webglFpPromise = (advFp || settings.webgl_fingerprint) ? getWebglFingerprint() : null;
-                var webglMeta = (advFp || settings.webgl_fingerprint) ? getWebglMeta() : null;
-                // S9：WebRTC 内网 IP 采集已整体移除，webrtc_local_ips 不再采集/上传。
-                // 高敏感采集必须受开关控制：电池/存储配额/媒体设备枚举是强设备指纹，
-                // 默认仅在 advanced_fingerprint 或对应独立开关开启时才采集
-                var batteryPromise = (advFp || settings.battery_fingerprint) ? getBatteryInfo() : null;
-                var storagePromise = (advFp || settings.storage_fingerprint) ? getStorageEstimate() : null;
-                var mediaDevicesPromise = (advFp || settings.media_devices_fingerprint) ? getMediaDevices() : null;
-
-                // 始终采集时钟偏移（轻量，不涉及隐私）
-
-                // 精确设备型号（UA Client Hints）：此处 record_device 已确认为 true
-                var exactModelPromise = getExactDeviceModel();
-
-                // 收集所有异步指纹，然后统一发送
-                var collectAndSend = function() {
-                    // 收集已完成的指纹
-                    if (webglMeta) bodyObj.webgl_meta = webglMeta;
-                    // 将指纹 Promise 转为统一收集
-                    var promises = [];
-
-                    if (browserFpPromise && browserFpPromise.then) {
-                        promises.push(browserFpPromise.then(function(h) { if (h) bodyObj.browser_fingerprint_hash = h; }));
-                    }
-                    if (canvasFpPromise && canvasFpPromise.then) {
-                        promises.push(canvasFpPromise.then(function(h) { if (h) bodyObj.canvas_fingerprint_hash = h; }));
-                    }
-                    if (webglFpPromise && webglFpPromise.then) {
-                        promises.push(webglFpPromise.then(function(h) { if (h) bodyObj.webgl_fingerprint_hash = h; }));
-                    }
-                    if (exactModelPromise && exactModelPromise.then) {
-                        promises.push(exactModelPromise.then(function(m) { if (m) bodyObj.exact_device_model = m; }));
-                    }
-                    if (batteryPromise && batteryPromise.then) {
-                        promises.push(batteryPromise.then(function(b) { if (b) bodyObj.battery_info = b; }));
-                    }
-                    if (storagePromise && storagePromise.then) {
-                        promises.push(storagePromise.then(function(s) { if (s) bodyObj.storage_estimate = s; }));
-                    }
-                    if (mediaDevicesPromise && mediaDevicesPromise.then) {
-                        promises.push(mediaDevicesPromise.then(function(d) { if (d) bodyObj.media_devices = d; }));
-                    }
-
-                    if (promises.length > 0) {
-                        Promise.allSettled(promises).then(function() { sendReq(); });
-                    } else {
-                        sendReq();
-                    }
-                };
-                collectAndSend();
-            }).catch(function() {
-                // 设置拉取失败时静默忽略：开关读取已在 getSecuritySettings 内回退 false，
-                // 这里只收敛 promise，避免产生 unhandled rejection
-            });
-        } catch(e) {}
-    }
-
-    // 登录/注册成功后主动调用（由 core.js 触发）
-    window.logLoginEventSafe = function(userName, source) {
-        if (!userName) return;
-        var deviceId = getOrCreateDeviceId();
-        var sentKey = 'xtj_login_event_sent_' + userName + '_' + deviceId;
-        try {
-            if (sessionStorage.getItem(sentKey)) return;
-        } catch(e) {}
-        var userToken = '';
-        if (typeof window.getUserToken === 'function') {
-            userToken = window.getUserToken();
-        }
-        if (!userToken && typeof window.ensureUserToken !== 'function') return;
-        var src = source || 'login_success';
-        // 设置页面访问冷却，避免登录成功后 15 秒内重复产生 page_visit
-        var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
-        try { window.safeStorage.set(visitKey, String(Date.now())); } catch(e) {}
-        doSend(userName, deviceId, sentKey, src);
-    };
-
-    // 页面访问记录（15 秒冷却，页面刷新/打开时记录）
-    function trySendPageVisit() {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(function() {
-            debounceTimer = null;
-            var userName, deviceId;
-            try {
-                userName = window.safeStorage.get('xtj_user');
-                deviceId = window.safeStorage.get('xtj_device_id');
-            } catch(e) { return; }
-
-            if (!userName || !deviceId) return;
-            var userToken = typeof window.getUserToken === 'function' ? window.getUserToken() : '';
-            if (!userToken && typeof window.ensureUserToken !== 'function') return;
-
-            // 15s localStorage 冷却
-            var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
-            var lastAt = 0;
-            try { lastAt = parseInt(window.safeStorage.get(visitKey)) || 0; } catch(e) {}
-            if (Date.now() - lastAt < VISIT_COOLDOWN_MS) return;
-            try { window.safeStorage.set(visitKey, String(Date.now())); } catch(e) {}
-
-            var sentKey = 'xtj_login_visit_' + userName + '_' + deviceId;
-            doSend(userName, deviceId, sentKey, 'page_visit');
-        }, CHECK_DELAY_MS);
-    }
-
-    // 暴露页面访问手动调用接口
-    window.logLoginVisitSafe = function() {
-        trySendPageVisit();
-    };
+    // Retired client login/device collectors cannot be re-enabled by historical settings.
+    // Authoritative authentication events are recorded on the server.
+    function doSend() { return; }
+    window.logLoginEventSafe = function() { return; };
+    window.logLoginVisitSafe = function() { return; };
 
     // 精确位置只能由用户主动开启。浏览器会显示系统权限提示；拒绝后不重试或绕过。
     var locationWatchId = null;
@@ -685,7 +63,11 @@
         var x = dLng * Math.cos((a.lat + b.lat) * rad / 2);
         return Math.sqrt(dLat * dLat + x * x) * 6371000;
     }
-    async function sendPreciseLocation(position, captureReason) {
+    function locationIdentity() { return { owner: window.currentUser, epoch: window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0 }; }
+    function locationIdentityCurrent(identity) { return !!identity.owner && identity.owner === window.currentUser && identity.epoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0); }
+    async function sendPreciseLocation(position, captureReason, identity) {
+        identity = identity || locationIdentity();
+        if (!locationIdentityCurrent(identity)) return;
         var coords = position && position.coords;
         if (!coords) return;
         var now = Date.now();
@@ -713,15 +95,15 @@
             locationWatchId = null;
         }
         var reason = captureReason || 'page_refresh';
-        var token = typeof window.ensureUserToken === 'function' ? await window.ensureUserToken() : '';
-        if (!token) { locationSentForPage = false; setLocationStatus('请先登录后再共享位置'); return; }
+        if (!window.xtjProtectedFetch) { locationSentForPage = false; setLocationStatus('请先登录后再共享位置'); return; }
         setLocationStatus('正在上传坐标…');
         var response;
         try {
-            response = await fetch(API_BASE + '/api/user/location', {
+            response = await window.xtjProtectedFetch('/api/user/location', {
+                authOwner: identity.owner, authEpoch: identity.epoch,
                 method: 'POST',
                 credentials: 'include',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     latitude: point.lat,
                     longitude: point.lng,
@@ -736,13 +118,16 @@
                 })
             });
         } catch (netErr) {
+            if (!locationIdentityCurrent(identity)) return;
             locationSentForPage = false;
             setLocationStatus('上传失败：网络错误，点击重试');
             return;
         }
+        if (!locationIdentityCurrent(identity)) return;
         var data = null;
         var parseError = null;
         try { data = await response.json(); } catch (e) { parseError = e; }
+        if (!locationIdentityCurrent(identity)) return;
         if (!response.ok || parseError) {
             locationSentForPage = false;
             var serverCode = (data && data.code) || 'unknown';
@@ -771,7 +156,7 @@
             return;
         }
         // 所有验证通过，locationSentForPage已在函数开头设置，无需重复
-        try { window.safeStorage.set('xtj_location_sharing_enabled', '1'); } catch (e) {}
+        try { window.safeStorage.set('xtj_location_sharing_enabled', '1'); window.safeStorage.set('xtj_location_sharing_owner', identity.owner); } catch (e) {}
         var resolutionStatus = data.resolution_status || 'pending';
         var accuracyText = Math.round(Number(coords.accuracy) || 0) + ' 米';
         if (resolutionStatus === 'resolved' && data.address) {
@@ -786,58 +171,43 @@
     }
     window.xtjSetLocationSharing = function(enabled) {
         if (!enabled) {
-            try { window.safeStorage.remove('xtj_location_sharing_enabled'); } catch (e) {}
-            stopLocationSharing('位置共享已关闭');
-            return;
+            try { window.safeStorage.remove('xtj_location_sharing_enabled'); window.safeStorage.remove('xtj_location_sharing_owner'); } catch (_) {}
+            stopLocationSharing('位置共享已关闭'); return;
         }
-        if (!window.isSecureContext || !navigator.geolocation) {
-            stopLocationSharing('当前浏览器不支持安全定位');
-            return;
-        }
+        var identity = locationIdentity();
+        if (!identity.owner) { setLocationStatus('请先登录后再共享位置'); return; }
+        if (!window.isSecureContext || !navigator.geolocation) { stopLocationSharing('当前浏览器不支持安全定位'); return; }
         if (locationWatchId !== null) return;
-        // 重置页面级发送标记，允许重试
         locationSentForPage = false;
         setLocationStatus('正在请求系统定位权限…');
-        // 先使用 getCurrentPosition 获取首个位置，再启动 watchPosition 持续更新
-        navigator.geolocation.getCurrentPosition(function(position) {
-            setLocationStatus('正在获取坐标…');
-            sendPreciseLocation(position).catch(function() {
-                setLocationStatus('位置上传失败，点击重试');
-            });
-            // 成功后启动持续监听
-            if (locationSentForPage) {
-                locationWatchId = navigator.geolocation.watchPosition(function(pos) {
-                    sendPreciseLocation(pos, 'watch_update').catch(function(err) {
-                        console.warn('[XTJ-LOC] watch上传失败:', err && err.message ? err.message : err);
-                    });
-                }, function(watchErr) {
-                    console.warn('[XTJ-LOC] watch定位错误:', watchErr && watchErr.message);
-                }, { enableHighAccuracy: true, timeout: 30000, maximumAge: 60000 });
-            } else {
-                // 首次未成功，启动 watch 继续尝试
-                locationWatchId = navigator.geolocation.watchPosition(function(pos) {
-                    sendPreciseLocation(pos, 'watch_retry').catch(function(err) {
-                        console.warn('[XTJ-LOC] watch重试上传失败:', err && err.message ? err.message : err);
-                    });
-                }, function(error) {
-                    var message = error && error.code === 1 ? '定位权限已拒绝' : (error && error.code === 2 ? '暂时无法获取位置' : '定位请求超时');
-                    console.warn('[XTJ-LOC] watch错误:', message);
-                    if (error && error.code === 1) {
-                        try { window.safeStorage.remove('xtj_location_sharing_enabled'); } catch (e) {}
-                    }
-                    stopLocationSharing(message);
-                }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
-            }
+        navigator.geolocation.getCurrentPosition(async function(position) {
+            if (!locationIdentityCurrent(identity)) return;
+            try { await sendPreciseLocation(position, 'manual', identity); }
+            catch (_) { if (locationIdentityCurrent(identity)) setLocationStatus('位置上传失败，点击重试'); }
+            if (!locationIdentityCurrent(identity)) return;
+            locationWatchId = navigator.geolocation.watchPosition(function(pos) {
+                if (!locationIdentityCurrent(identity)) return;
+                sendPreciseLocation(pos, 'watch_update', identity).catch(function(err) { if (locationIdentityCurrent(identity)) console.warn('[XTJ-LOC]', err); });
+            }, function(error) {
+                if (!locationIdentityCurrent(identity)) return;
+                if (error && error.code === 1) {
+                    try { window.safeStorage.remove('xtj_location_sharing_enabled'); window.safeStorage.remove('xtj_location_sharing_owner'); } catch (_) {}
+                    stopLocationSharing('定位权限已拒绝');
+                } else setLocationStatus('定位失败，请重试');
+            }, { enableHighAccuracy: true, timeout: 30000, maximumAge: 60000 });
         }, function(error) {
-            var message = error && error.code === 1 ? '定位权限已拒绝' : (error && error.code === 2 ? '暂时无法获取位置' : '定位请求超时');
-            if (error && error.code === 1) {
-                try { window.safeStorage.remove('xtj_location_sharing_enabled'); } catch (e) {}
-            }
-            stopLocationSharing(message);
+            if (!locationIdentityCurrent(identity)) return;
+            stopLocationSharing(error && error.code === 1 ? '定位权限已拒绝' : '定位失败，请重试');
         }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
     };
     window.xtjStopLocationSharing = stopLocationSharing;
     window.addEventListener('pagehide', function() { stopLocationSharing('位置共享已暂停'); });
+    var locationSessionIdentity = locationIdentity();
+    window.addEventListener('auth-ready', function() {
+        var next = locationIdentity();
+        if (next.owner === locationSessionIdentity.owner && next.epoch === locationSessionIdentity.epoch) return;
+        locationSessionIdentity = next; stopLocationSharing('位置共享已暂停'); locationSentForPage = false; lastLocationSentAt = 0; lastLocationPoint = null;
+    });
 
 
     // DATA_COLLECTION_COMPLIANCE.js marks per-user behavior tracking OFF. There is
@@ -1157,15 +527,19 @@
         // 不得自行触发权限弹窗。持久化 opt-in 只用于恢复既有授权。
         var optedIn = false;
         try { optedIn = window.safeStorage.get('xtj_location_sharing_enabled') === '1'; } catch (e) {}
-        if (!optedIn) return;
+        var identity = locationIdentity();
+        if (!optedIn || !identity.owner || window.safeStorage.get('xtj_location_sharing_owner') !== identity.owner) return;
         setLocationStatus('正在获取定位…');
         navigator.geolocation.getCurrentPosition(function(position) {
+            if (!locationIdentityCurrent(identity)) return;
             setLocationStatus('已获取坐标，准备上传');
-            sendPreciseLocation(position).catch(function(err) {
+            sendPreciseLocation(position, 'page_refresh', identity).catch(function(err) {
+                if (!locationIdentityCurrent(identity)) return;
                 console.warn('[XTJ-LOC] 上传定位失败:', err && err.message ? err.message : err);
                 setLocationStatus('位置上传失败: ' + (err && err.message ? err.message : '未知错误'));
             });
         }, function(error) {
+            if (!locationIdentityCurrent(identity)) return;
             // 记录具体错误原因，不再静默
             var errMsg = '';
             if (error) {
@@ -1183,12 +557,12 @@
 
     var contextOwner='',contextSentAt=0,contextSending=false;
     async function sendBrowserContext(){
-        var actor=window.currentUser;if(!actor||!window.xtjProtectedFetch||contextSending||actor===contextOwner&&Date.now()-contextSentAt<60000)return;
+        var actor=window.currentUser,epoch=window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;if(!actor||!window.xtjProtectedFetch||contextSending||actor===contextOwner&&Date.now()-contextSentAt<60000)return;
         contextSending=true;var connection=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
         var body={language:navigator.language||null,languages:Array.from(navigator.languages||[]).slice(0,5),timezone:null,online:navigator.onLine!==false,network:{supported:false}};
         try{body.timezone=Intl.DateTimeFormat().resolvedOptions().timeZone;}catch(_){}
         if(connection)body.network={supported:true,effective_type:connection.effectiveType,downlink_mbps:connection.downlink,rtt_ms:connection.rtt,save_data:connection.saveData===true};
-        try{if(actor!==window.currentUser)return;var response=await window.xtjProtectedFetch('/api/user/browser-context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),background:true});if(response.ok&&actor===window.currentUser){contextOwner=actor;contextSentAt=Date.now();}}
+        try{if(actor!==window.currentUser)return;var response=await window.xtjProtectedFetch('/api/user/browser-context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),background:true,authOwner:actor,authEpoch:epoch});if(response.ok&&actor===window.currentUser&&epoch===(window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0)){contextOwner=actor;contextSentAt=Date.now();}}
         catch(_){}finally{contextSending=false;if(actor!==window.currentUser&&window.currentUser)sendBrowserContext();}
     }
     window.addEventListener('auth-ready',sendBrowserContext);window.addEventListener('online',sendBrowserContext);
@@ -1245,40 +619,6 @@
             if (!_autoLocationAttempted) { _autoLocationAttempted = true; setTimeout(tryAutoLocationOnLoad, 0); }
         }
     }
-
-    // 监听用户会话建立，用于记录页面访问
-    // M57（保守收敛）：全局改写 localStorage.setItem 属历史设计，风险面是影响
-    // 其它模块对全局对象的假设；收敛为“显式封装”需要同步改造所有写入方，属于
-    // 产品/架构决策（见输出说明）。此处只做安全默认的保守处理：幂等保护 + 保留
-    // 原始方法返回值语义 + 钩子异常不影响原始写入。
-    try {
-        if (!localStorage.setItem.__xtjVisitHook) {
-            var _origSetItem = localStorage.setItem.bind(localStorage);
-            var _visitHook = function(key, value) {
-                try {
-                    // 始终执行原始方法，并返回其结果
-                    var _result = _origSetItem(key, value);
-                    try {
-                        if (key === 'xtj_user') {
-                            trySendPageVisit();
-                        }
-                    } catch (_hookErr) {
-                        // 钩子自身异常不影响原始写入结果
-                    }
-                    return _result;
-                } catch (_origErr) {
-                    // 原始方法异常：记录并传播，避免调用方误以为写入成功
-                    console.warn('[login-device] localStorage.setItem failed', _origErr);
-                    throw _origErr;
-                }
-            };
-            try { _visitHook.__xtjVisitHook = true; } catch (_markErr) {}
-            localStorage.setItem = _visitHook;
-        }
-    } catch(e) {}
-
-    // 已登录用户刷新页面时记录一次
-    trySendPageVisit();
 
     // ===================== 前端错误监控（不采集输入内容） =====================
     (function() {

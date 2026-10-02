@@ -30,7 +30,7 @@
      任何异常都回退整段替换，正确性优先。 */
   function patchInnerHTML(targetEl, html) {
     if (!targetEl) return;
-    var kids = targetEl.childNodes;
+    var kids = Array.from(targetEl.childNodes).filter(function (node) { return !(node.nodeType === 1 && node.classList.contains('ai-stream-cursor')); });
     if (!kids || kids.length === 0) { targetEl.innerHTML = html; return; }
     try {
       var holder = document.createElement('div');
@@ -43,12 +43,12 @@
       for (var i = 0; i < next.length; i++) {
         var want = next[i];
         var have = kids[i];
-        if (!have) { targetEl.appendChild(want.cloneNode(true)); continue; }
-        if (have.outerHTML === want.outerHTML) continue;   // 未变化：不碰
+        if (!have) { var cursorNode = targetEl.querySelector('.ai-stream-cursor'); targetEl.insertBefore(want.cloneNode(true), cursorNode); continue; }
+        if (have.nodeType === want.nodeType && (have.nodeType === 3 ? have.data === want.data : have.outerHTML === want.outerHTML)) continue;   // 未变化：不碰
         targetEl.replaceChild(want.cloneNode(true), have);
       }
-      while (targetEl.childNodes.length > next.length) {
-        targetEl.removeChild(targetEl.lastChild);
+      for (var j = next.length; j < kids.length; j++) {
+        if (kids[j].parentNode === targetEl) targetEl.removeChild(kids[j]);
       }
     } catch (e) {
       try { targetEl.innerHTML = html; } catch (e2) {}
@@ -80,7 +80,9 @@
     var cursor = null;
 
     function ensureCursor() {
-      if (cursor || finished || cancelled) return;
+      if (finished || cancelled) return;
+      if (cursor && cursor.parentNode === targetEl) return;
+      cursor = null;
       try {
         cursor = document.createElement('span');
         cursor.className = 'ai-stream-cursor';

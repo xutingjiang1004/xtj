@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord, inspectPhotoOriginal, validatePhotoCreatePayload } = require('./photo-create');
+const { installPostMedia, createPostWithMedia, parsePostMediaUrl, isLocalUploadUrl, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads } = require('./post-media');
 const {
   claimDmMediaUpload,
   reserveDmMediaUpload,
@@ -65,7 +66,7 @@ const {
   withSearchProviderTimeout
 } = require('./search-providers');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
-const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer } = require('./web-fetch');
+const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer, fetchSafeRedirectBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
 const { createChatFeatures } = require('./chat-features');
@@ -243,6 +244,11 @@ const supabase = createClient(
 );
 // Token 额度 + Pro 会员（Stripe 接入点预留）
 const aiQuota = createAiQuota(supabase);
+const claimDurableSearchCredit = require('./search-credit').createSearchCredit({
+  supabase: supabase, limits: aiQuota.limits ? aiQuota.limits() : {
+    free_token_limit: FREE_TOKEN_LIMIT, pro_token_limit: PRO_TOKEN_LIMIT, free_search_limit: FREE_SEARCH_LIMIT
+  }, adminName: 'xxz'
+});
 
 // ===================== DeepSeek AI 配置 =====================
 // ★ DeepSeek API Key 只能放后端环境变量，绝对不能放前端
@@ -5244,31 +5250,17 @@ var IP_CACHE_TTL_FAIL = 120000;
 function isPrivateOrReservedIp(ip) {
   var v = String(ip || '').trim().toLowerCase();
   if (!v || v === 'unknown' || !require('net').isIP(v)) return true;
-  var mapped = v.match(/^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (mapped) v = mapped.slice(1).join('.');
-  if (v.indexOf(':') >= 0) {
-    if (v.startsWith('2001:db8:') || v.startsWith('ff')) return true;
-    if (v === '::1' || v === '::' || v.indexOf('::ffff:127.') === 0) return true;
-    var first = parseInt(v.split(':')[0], 16);
-    if (isNaN(first)) return true; // 非法形式，不外发
-    if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 ULA
-    if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
-    if ((first & 0xffc0) === 0xfec0) return true; // fec0::/10 site-local
-    return false;
-  }
-  var parts = v.split('.').map(Number);
-  if (parts.length !== 4 || parts.some(function(p) { return isNaN(p) || p < 0 || p > 255; })) return true; // 非法 → 不外发
-  var a = parts[0], b = parts[1], c = parts[2];
-  if (a === 0 || a === 10 || a === 127 || a > 223) return true;              // 0/8, 10/8, 127/8, 组播+保留段
-  if (a === 169 && b === 254) return true;                                  // 169.254/16 link-local
-  if (a === 100 && b >= 64 && b <= 127) return true;                        // 100.64/10 CGNAT
-  if (a === 172 && b >= 16 && b <= 31) return true;                         // 172.16/12
-  if (a === 192 && b === 168) return true;                                  // 192.168/16
-  if (a === 192 && b === 0 && c === 0) return true;                         // IETF 协议保留
-  if (a === 198 && (b === 18 || b === 19)) return true;                     // 198.18/15 benchmark
-  if (a === 198 && b === 51 && c === 100) return true;                      // TEST-NET-2
-  if (a === 203 && b === 0 && c === 113) return true;                       // TEST-NET-3
-  return false;
+  // proxy-addr parses bytes and IPv4-mapped IPv6, so expanded/compressed
+  // spellings cannot change loopback/private/documentation classification.
+  if (!isPrivateOrReservedIp.matches) isPrivateOrReservedIp.matches = require('proxy-addr').compile([
+    '0.0.0.0/8','10.0.0.0/8','100.64.0.0/10','127.0.0.0/8','169.254.0.0/16',
+    '172.16.0.0/12','192.0.0.0/24','192.0.2.0/24','192.168.0.0/16',
+    '198.18.0.0/15','198.51.100.0/24','203.0.113.0/24','224.0.0.0/3',
+    '::/96','100::/64','64:ff9b:1::/48','2001:2::/48','2001:db8::/32',
+    '2001:10::/28','2001:20::/28','3fff::/20','5f00::/16','fc00::/7',
+    'fe80::/10','fec0::/10','ff00::/8'
+  ]);
+  try { return isPrivateOrReservedIp.matches(v); } catch (_) { return true; }
 }
 // 2026-09-22：IP 属地中文化映射表 + 归一函数。
 // ipwho.is 带 lang=zh-CN 直接返回中文；但并行竞速下不支持语言参数的
@@ -9222,6 +9214,7 @@ function responsesUsageToInternal(u) {
     //   导致 Responses 全链路的 input/output 拆分恒为 0。补输出旧字段名别名。
     prompt_tokens: _in,
     completion_tokens: _out,
+    reasoning_included_in_completion: true,
     total_tokens: Math.max(0, Number(u.total_tokens) || 0),
     input_tokens_details: u.input_tokens_details || null,
     output_tokens_details: u.output_tokens_details || null,
@@ -9977,6 +9970,7 @@ async function callDeepSeekViaResponses(messages, options) {
         total_tokens: totalUsage.total_tokens || (lastUsage && lastUsage.total_tokens) || 0,
         // ★ M22 审计修复：顶层补 reasoning_tokens，供 computeBillableTokens/扣减 RPC 计费
         reasoning_tokens: totalUsage.reasoning_tokens || (lastUsage && lastUsage.reasoning_tokens) || 0,
+        reasoning_included_in_completion: true,
         tool_call_count: toolCallsInfo.length
       };
     }
@@ -10042,16 +10036,13 @@ async function runMultiAgentFlow(opts) {
   //   只把 Synthesizer 单次调用的 usage 作为 synth_usage 返回 → max 档只记约 1/8 用量，
   //   low/medium/high 走单智能体时甚至没有该字段（退化为按字符数估算）。
   //   这里累计全链路用量，作为对外计费与展示口径。
-  var flowUsageAgg = { total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0 };
+  var flowUsageAgg = { total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0, reasoning_included_in_completion: true };
   function addFlowUsage(u) {
     if (!u || typeof u !== 'object') return;
     flowUsageAgg.prompt_tokens += Math.max(0, Number(u.prompt_tokens) || Number(u.input_tokens) || 0);
     flowUsageAgg.completion_tokens += Math.max(0, Number(u.completion_tokens) || Number(u.output_tokens) || 0);
     flowUsageAgg.total_tokens += Math.max(0, Number(u.total_tokens) || 0);
-    flowUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || 0);
-    if (u.completion_tokens_details && typeof u.completion_tokens_details.reasoning_tokens === 'number') {
-      flowUsageAgg.reasoning_tokens += Math.max(0, u.completion_tokens_details.reasoning_tokens);
-    }
+    flowUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || Number(u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || Number(u.output_tokens_details && u.output_tokens_details.reasoning_tokens) || 0);
   }
 
   function sseSend(obj) {
@@ -10776,16 +10767,13 @@ async function runDeepThinkWorker(opts) {
   var searchCountAccum = { count: 0 };
   // ★ 计量修复（S8）：Worker 一轮可能包含多次 tool_use 上游调用，此前只返回文本、
   //   完全不返回 usage → 多智能体链路最终只统计到 Synthesizer 一次调用的 token。
-  var workerUsageAgg = { total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0 };
+  var workerUsageAgg = { total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0, reasoning_included_in_completion: true };
   function addWorkerUsage(u) {
     if (!u || typeof u !== 'object') return;
     workerUsageAgg.prompt_tokens += Math.max(0, Number(u.prompt_tokens) || Number(u.input_tokens) || 0);
     workerUsageAgg.completion_tokens += Math.max(0, Number(u.completion_tokens) || Number(u.output_tokens) || 0);
     workerUsageAgg.total_tokens += Math.max(0, Number(u.total_tokens) || 0);
-    workerUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || 0);
-    if (u.completion_tokens_details && typeof u.completion_tokens_details.reasoning_tokens === 'number') {
-      workerUsageAgg.reasoning_tokens += Math.max(0, u.completion_tokens_details.reasoning_tokens);
-    }
+    workerUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || Number(u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || Number(u.output_tokens_details && u.output_tokens_details.reasoning_tokens) || 0);
   }
 
   var searchHint = needSearch
@@ -11012,7 +11000,8 @@ async function recordAiTurnUsage(userName, usage, options) {
   // 用户可无限免费使用）。改为重试 3 次，最终失败时输出醒目告警便于人工补扣。
   for (var attempt = 0; attempt < 3; attempt++) {
     try {
-      var recorded = await aiQuota.recordUsage(userName, usage || {}, options || {});
+      // Searches are already charged atomically before their provider call.
+      var recorded = await aiQuota.recordUsage(userName, usage || {}, Object.assign({}, options || {}, { search_count: 0, did_search: false }));
       if (recorded) return recorded;
     } catch (e) {
       console.error('[AI-QUOTA] recordAiTurnUsage attempt ' + (attempt + 1) + ' failed:', e && e.message);
@@ -11122,20 +11111,7 @@ function searchQuotaErrorPayload(reason) {
 //   被拒的调用算进计数。预占仅为进程内记账，真正的扣费仍在 DB 侧
 //   consume_ai_token_usage，因此账目准确性不受影响。
 async function claimSearchSlot(context) {
-  if (!context || typeof context !== 'object') {
-    return measureSearchQuota('', 0);
-  }
-  var prev = (typeof context.searchConsumed === 'number' && context.searchConsumed > 0) ? context.searchConsumed : 0;
-  context.searchConsumed = prev + 1;              // 乐观预占
-  var gate = await measureSearchQuota(context.userName, prev);
-  if (!gate || !gate.allowed) {
-    // ★ 回滚只能用「减一」，绝不能写回 prev 快照。
-    //   prev 是本次调用**开始时**的值；在 await 门禁期间，其他并发调用可能又占了
-    //   若干槽，写回 prev 会把它们的计数一并抹掉，导致额度判定重新放宽。
-    //   JS 单线程下 ++/-- 不会被打断，减一是安全的。
-    context.searchConsumed = Math.max(0, context.searchConsumed - 1);
-  }
-  return gate;
+  return claimDurableSearchCredit(context);
 }
 
 // ★ P1-9：请求级共享的搜索配额 context。
@@ -11149,7 +11125,8 @@ function requestSearchCtx(req, userName) {
   var host = (req && typeof req === 'object') ? req : null;
   if (!host) return { userName: userName || '', searchConsumed: 0 };
   if (!host._searchCtx || typeof host._searchCtx !== 'object') {
-    host._searchCtx = { userName: userName || '', searchConsumed: 0 };
+    host._searchCtx = host._searchApiCalls && typeof host._searchApiCalls === 'object'
+      ? host._searchApiCalls : { userName: userName || '', searchConsumed: 0 };
   }
   if (!host._searchCtx.userName) host._searchCtx.userName = userName || '';
   return host._searchCtx;
@@ -11169,7 +11146,9 @@ async function canUseThirdPartySearch(userName) {
 // F-1: searchApiCounter 为可选的请求级计数器对象（{ n }），仅在真实发起搜索后自增，
 // 供 recordAiTurnUsage 按真实次数而非"轮次"记账（失败/未发起不计）。
 async function searchWebForUser(userName, query, maxResults, searchApiCounter) {
-  var gate = await measureSearchQuota(userName);
+  var shared = searchApiCounter && typeof searchApiCounter === 'object' ? searchApiCounter : {};
+  shared.userName = userName;
+  var gate = await claimSearchSlot(shared);
   if (!gate.allowed) {
     return {
       results: [],
@@ -12110,6 +12089,26 @@ async function issueUserSession(res, userName, deviceId, opts) {
       res.status(503).json({error:'登录记录暂时无法保存，请重试',code:'auth_event_store_failed',retryable:true});
       return null;
     }
+    // Security alerts follow a committed password/register event, never a
+    // refresh or client visit. Geolocation/check failures must not block login.
+    if (authEvent && ['login_success','register_success'].includes(opts.audit.source)) {
+      try {
+        var authenticatedIp=getClientIp(opts.audit.req);
+        var authenticatedAt=authEvent.login_at;
+        var authenticatedSource=opts.audit.source;
+        var authenticatedEventId=authEvent.event_id;
+        void Promise.resolve().then(async function() {
+          var authenticatedLocation=null;
+          try { authenticatedLocation=await resolveIpLocation(authenticatedIp); } catch (_) {}
+          if(authenticatedLocation) {
+            try {
+              await require('./account-events').recordAuthenticationIpLocation({supabase,eventId:authenticatedEventId,ip:authenticatedIp,location:authenticatedLocation});
+            } catch (_) { console.warn('[Security] authentication IP location unavailable'); }
+          }
+          await runSecurityChecks(userName,deviceId,authenticatedIp,authenticatedLocation,authenticatedSource,authenticatedAt,null,null);
+        }).catch(function() { console.warn('[Security] authentication checks unavailable'); });
+      } catch (_) { console.warn('[Security] authentication checks unavailable'); }
+    }
   }
   res.cookie('xtj_user_refresh', refreshToken, {
     httpOnly: true,
@@ -12370,8 +12369,19 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
 // 用户登出（撤销 refresh token）
 app.post('/api/user/logout', rateLimit(60000, 30), async (req, res) => {
   try {
+    var companionActor = null;
+    if (req.body && req.body.admin_companion_logout === true) {
+      if (!(await waitForRevocationState(res))) return;
+      var companionAdminToken = (req.cookies && req.cookies.xtj_admin_token) || '';
+      var companionAdmin = companionAdminToken ? verifySignedToken(companionAdminToken) : null;
+      if (!companionAdmin || companionAdmin.type || companionAdmin.user !== ADMIN_USERNAME || isTokenRevoked(companionAdminToken)) {
+        return res.status(401).json({ error: '管理员附带会话认证无效' });
+      }
+      companionActor = companionAdmin.user;
+    }
     var accessToken = _getTokenFromRequest(req);
     var accessPayload = accessToken ? verifyUserAccessToken(accessToken) : null;
+    if (companionActor && accessPayload && accessPayload.user_name !== companionActor) accessPayload = null;
     if (accessPayload && accessPayload.jti) {
       var accessRevoked = await persistRevokedToken(accessToken, accessPayload.exp);
       if (!accessRevoked) return res.status(503).json({ error: '退出状态同步失败，请重试' });
@@ -12379,6 +12389,11 @@ app.post('/api/user/logout', rateLimit(60000, 30), async (req, res) => {
     var refreshToken = (req.cookies && req.cookies.xtj_user_refresh) || '';
     if (refreshToken) {
       var payload = verifyUserRefreshToken(refreshToken);
+      // A stale access token must never revoke another account's refresh Cookie.
+      var logoutActor = companionActor || (accessPayload && accessPayload.user_name);
+      if (payload && logoutActor && payload.user_name !== logoutActor) {
+        return res.json({ ok: true, preserved_other_session: true });
+      }
       if (payload && payload.jti) {
         // ★ 加固：refresh token 撤销失败必须让客户端知道，不能静默返回 ok:true。
         //   否则 DB 抖动时用户以为已登出，refresh token 仍可在 30 天内续期。
@@ -12411,6 +12426,8 @@ app.post('/admin/logout', verifyToken, async (req, res) => {
   // ★ 加固：路由级 try/catch，与其他管理路由对齐（persistRevokedToken 当前不 reject，
   //   但未来重构或 Map/Cookie 操作异常时应返回 500 而非挂起请求）。
   try {
+  // Clear this browser's credential even when durable revocation needs a retry.
+  res.clearCookie('xtj_admin_token', { path: '/' });
   var token = req.adminToken;
   adminTokens.delete(token);
   var payload = verifySignedToken(token);
@@ -12420,7 +12437,6 @@ app.post('/admin/logout', verifyToken, async (req, res) => {
   if (!revoked) {
     return res.status(503).json({ error: '退出状态同步失败，请重试' });
   }
-  res.clearCookie('xtj_admin_token', { path: '/' });
   return res.json({ ok: true });
   } catch (e) { console.error('[admin] logout:', e && e.message); return res.status(500).json({ error: '退出失败，请稍后重试' }); }
 });
@@ -13466,9 +13482,20 @@ async function processStorageCleanupJobs() {
         if (job.claim_token) claimQuery = claimQuery.eq('claim_token', job.claim_token);
         else claimQuery = claimQuery.is('claim_token', null);
       }
-      var claim = await claimQuery.select('id, claim_token').maybeSingle();
+      var claim = await claimQuery.select('id, bucket, paths, attempts, claim_token').maybeSingle();
       if (claim.error || !claim.data) {
         if (claim.error) console.warn('[storage-cleanup] claim failed:', claim.error.message);
+        continue;
+      }
+      // Enqueue can merge new paths between the initial SELECT and this claim.
+      // Process the row returned by the locked UPDATE, never the stale SELECT.
+      job = claim.data;
+      paths = Array.isArray(job.paths) ? job.paths.filter(function(path) {
+        return typeof path === 'string' && path && path.indexOf('..') < 0 && path.indexOf('\\') < 0;
+      }) : [];
+      if (!Array.isArray(job.paths) || paths.length !== job.paths.length) {
+        await supabase.from('storage_cleanup_jobs').update({ status: 'failed', last_error: 'unsafe_path_list', claim_token: null, lease_until: null })
+          .eq('id', job.id).eq('status', 'processing').eq('claim_token', claimToken);
         continue;
       }
       var nextAttempts = Number(job.attempts || 0) + 1;
@@ -13706,6 +13733,7 @@ function normalizeFallbackIpLocation(value) {
 }
 
 
+installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanError }).start();
 app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
     // ★ 封禁强制：服务端写端点必须校验限制状态，防止绕过前端本地禁点
@@ -13722,6 +13750,12 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     // ★ 2026-09-26（审计 P2-7）：media_url 此前只校验 https 前缀，配合全局 12MB
     //   body 上限，单行可写入约 12MB 的 URL，造成 DB 行膨胀与前端渲染/日志负担。
     if (mediaUrl.length > 2048) return res.status(400).json({ error: '媒体地址过长', code: 'media_url_too_long' });
+    var postMediaPath = parsePostMediaUrl(mediaUrl, SUPABASE_URL);
+    if (mediaUrl && isLocalUploadUrl(mediaUrl, SUPABASE_URL) && !postMediaPath) return res.status(400).json({ error: '媒体地址无效', code: 'media_ownership' });
+    var postMediaUploadId = req.body && req.body.media_upload_id;
+    if (postMediaPath && (req.body.media_storage_path !== postMediaPath || typeof postMediaUploadId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(postMediaUploadId))) {
+      return res.status(400).json({ error: '媒体上传登记无效，请重新选择附件', code: 'media_ownership' });
+    }
     // ★ 2026-09-26（审计 P2-7）：actor_key（幂等键）此前完全无校验，客户端可写入
     //   任意长度/任意字符，混淆唯一索引语义。这里限定形态与长度，非法时改用服务端生成值。
     var clientActorKey = String(req.body && req.body.actor_key || '');
@@ -13791,10 +13825,15 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       ip_lookup_started_at: ipLookupStartedAt,
       ip_region_error: ipRetryRequired ? String(ipRegion.error || 'initial_lookup_failed').slice(0, 500) : null
     };
-    var inserted = await supabase.from('posts').insert([payload]).select('*').single();
+    var inserted = postMediaPath
+      ? await createPostWithMedia(supabase, req.userName, postMediaPath, postMediaUploadId, payload)
+      : await supabase.from('posts').insert([payload]).select('*').single();
     var degraded = false;
     var degradedFields = [];
     if (inserted.error) {
+      // Registered uploads require the transactional attach/cleanup boundary.
+      // Missing migrations or errors must never downgrade to an unlocked insert.
+      if (postMediaPath) return res.status(503).json({ error: '媒体保存暂不可用，请重试', code: inserted.error.code || 'create_failed', retryable: true });
       // 检测具体缺失的列名，仅对可选字段降级
       var errMsg = String(inserted.error.message || '');
       var missingCols = [];
@@ -13885,15 +13924,16 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
 // POST /api/location/reverse - 经纬度反向地址解析（用户发布帖子时选择位置）
 // 超时 8 秒，最多重试 2 次，区分超时/无结果/接口错误
 app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async (req, res) => {
-  var lat = parseFloat(req.body && req.body.latitude);
-  var lng = parseFloat(req.body && req.body.longitude);
-  if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+  var lat = req.body && req.body.latitude;
+  var lng = req.body && req.body.longitude;
+  if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     return res.status(400).json({ error: '经纬度无效', code: 'invalid_coords' });
   }
 
   var locationFix;
   try{locationFix=await require('./location-history').recordLocationFix({supabase,actor:req.userName,body:req.body,reason:'post_location',ip:getClientIp(req)});}
-  catch(_){return res.status(503).json({error:'位置记录暂时无法保存，请重试',code:'location_history_save_failed',retryable:true});}
+  catch(error){if(error.status===400||error.status===409)return res.status(error.status).json({error:error.status===409?'定位记录标识已对应其他位置':'位置参数无效',code:error.code});return res.status(503).json({error:'位置记录暂时无法保存，请重试',code:'location_history_save_failed',retryable:true});}
+  lat=locationFix.location.latitude;lng=locationFix.location.longitude;
   var lastError = null;
   var lastErrorType = '';
 
@@ -13967,7 +14007,7 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
     if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
     // ★ 2026-09-26（审计 P3-6）：解构 error 并 fail-closed，避免 DB 故障被误报为
     //   "帖子不存在"(404)，误导客户端。
-    var { data: post, error: postLookupError } = await supabase.from('posts').select('user_name, media_type').eq('id', postId).maybeSingle();
+    var { data: post, error: postLookupError } = await supabase.from('posts').select('user_name, media_type, media_url').eq('id', postId).maybeSingle();
     if (postLookupError) return res.status(503).json({ error: '修改校验暂不可用，请稍后重试', code: 'update_lookup_failed', retryable: true });
     if (!post) return res.status(404).json({ error: '帖子不存在' });
     var isAdmin = req.userName === ADMIN_USERNAME;
@@ -13981,7 +14021,8 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
     var updates = {};
     if (Object.prototype.hasOwnProperty.call(req.body, 'visibility')) {
       var v = String(req.body.visibility);
-      if (['public', 'private'].indexOf(v) >= 0) updates.visibility = v;
+      if (['public', 'private'].indexOf(v) < 0) return res.status(400).json({ error: '可见范围无效', code: 'invalid_visibility' });
+      updates.visibility = v;
     }
     // Pinning has its own transactional endpoint. Keeping it out of this
     // generic update route prevents a stale client from bypassing the
@@ -13992,11 +14033,12 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
     if (Object.prototype.hasOwnProperty.call(req.body, 'content')) {
       var contentStr = String(req.body.content);
       if (contentStr.length > 50000) return res.status(400).json({ error: '内容长度超过限制（50000字符）' });
+      if (!contentStr.trim() && !post.media_url) return res.status(400).json({ error: '请输入帖子内容', code: 'empty_post' });
       updates.content = contentStr;
     }
     // 服务端生成 updated_at（不允许客户端传入）
-    updates.updated_at = new Date().toISOString();
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: '没有要更新的字段' });
+    updates.updated_at = new Date().toISOString();
     var { data: updatedPost, error } = await supabase.from('posts').update(updates).eq('id', postId).select('*').maybeSingle();
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     if (!updatedPost) return res.status(500).json({ error: '更新失败：未返回数据' });
@@ -14051,8 +14093,7 @@ app.post('/api/post/pin', authenticateUser, rateLimit(60000, 30), async (req, re
       //   42501（权限不足）/22P02（类型错误）是真实业务错误，降级会绕过
       //   "每作者仅一条 pinned"等 RPC 内不变量。
       var migrationMissing = rpcError.code === 'PGRST202'
-        || rpcError.code === '42883'
-        || /set_post_pin|schema cache|could not find the function/i.test(rpcMessage);
+        || rpcError.code === '42883';
       if (migrationMissing) {
         // 兼容路径：无 RPC 时尽量收敛为单 pinned。置顶先写目标再清其它，
         // 避免"先全清后写"窗口出现短暂零 pinned；仍非完美事务，生产应 apply set_post_pin。
@@ -16976,6 +17017,12 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     dmRegistryRows = Array.from(dmRegistryById.values());
     dmRegistryRows.forEach(function(row) { addAccountStoragePath(row.storage_path); });
 
+    try {
+      var registeredPostPaths = await retireAccountPostMediaUploads(supabase, userName);
+      registeredPostPaths.forEach(addAccountStoragePath);
+    } catch (postMediaCleanupError) {
+      return res.status(503).json({ error: '删除失败：待发布媒体清理未确认，请重试', code: 'delete_user_post_media_failed', partial: partialDeleted });
+    }
     // Storage delete is idempotent. Partial failures must be durably queued; a failed
     // queue write halts account deletion so the remaining paths are not orphaned.
     var storagePending = 0;
@@ -17040,6 +17087,8 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
 
     // 清除账号私有 AI 工具数据和媒体注册行；不碰审计/邀请/会员/额度表。
     var accountCleanupQueries = [
+      { key: 'post_media_uploads', query: deleteQueuedAccountPostMediaUploads(supabase, userName, registeredPostPaths) },
+      { key: 'ai_search_credit_claims', query: supabase.from('ai_search_credit_claims').delete().eq('user_name', String(userName).trim().toLowerCase()) },
       { key: 'ai_search_results', query: supabase.from('ai_search_results').delete().eq('owner_name', userName) },
       { key: 'ai_drafts', query: supabase.from('ai_drafts').delete().eq('owner_name', userName) },
       { key: 'ai_action_confirmations', query: supabase.from('ai_action_confirmations').delete().eq('owner_name', userName) }
@@ -18231,14 +18280,14 @@ async function mergeResolvedPreciseLocation(userName, pageLoadId, resolvedLocati
 app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (req, res) => {
   try {
     var body = req.body || {};
-    var latitude = Number(body.latitude);
-    var longitude = Number(body.longitude);
-    var accuracy = Number(body.accuracy);
+    var latitude = body.latitude;
+    var longitude = body.longitude;
+    var accuracy = body.accuracy;
     var pageLoadId = String(body.page_load_id || '').trim();
     var captureReason = String(body.capture_reason || 'page_refresh').trim().slice(0, 30);
-    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
-        !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
-        !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
+    if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+        typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+        typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100000) {
       return res.status(400).json({ error: '位置参数无效', code: 'invalid_location' });
     }
     if (!/^page_[a-z0-9_]{8,80}$/i.test(pageLoadId)) {
@@ -18250,7 +18299,7 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
       return Number.isFinite(number) && number >= min && number <= max ? number : null;
     }
     var capturedAt = new Date(String(body.captured_at || ''));
-    if (!Number.isFinite(capturedAt.getTime()) || Math.abs(Date.now() - capturedAt.getTime()) > 10 * 60 * 1000) {
+    if (!Number.isFinite(capturedAt.getTime()) || Math.abs(Date.now() - capturedAt.getTime()) > 86400000) {
       capturedAt = new Date();
     }
     var preciseLocation = {
@@ -18273,6 +18322,12 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
     };
     var savedLocationFix=await require('./location-history').recordLocationFix({supabase,actor:req.userName,body:body,reason:captureReason,ip:getClientIp(req)});
     preciseLocation.capture_id=savedLocationFix.captureId;
+    preciseLocation.captured_at=savedLocationFix.location.captured_at;
+    preciseLocation.received_at=savedLocationFix.location.received_at;
+    preciseLocation.resolution_status=savedLocationFix.location.resolution_status;
+    preciseLocation.resolved_address=savedLocationFix.location.resolved_address;
+    preciseLocation.resolve_error=savedLocationFix.location.resolve_error;
+    preciseLocation.resolved_at=savedLocationFix.location.resolved_at;
     var existing = await supabase.from('posts').select('id, content')
       .eq('user_name', req.userName).eq('media_type', USER_INFO_MARKER)
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -18299,8 +18354,8 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
         captured_at: preciseLocation.captured_at,
         received_at: preciseLocation.received_at
       },
-      resolution_status: 'pending',
-      address: null
+      resolution_status: preciseLocation.resolution_status,
+      address: preciseLocation.resolved_address
     });
     // 坐标保存成功后创建后台解析任务（不阻塞响应）
     try {
@@ -18310,6 +18365,7 @@ app.post('/api/user/location', rateLimit(60000, 10), authenticateUser, async (re
     }
     return;
   } catch (error) {
+    if(error.status===400||error.status===409)return res.status(error.status).json({error:error.status===409?'定位记录标识已对应其他位置':'位置参数无效',code:error.code});
     console.error('[API] user location:', error && error.message);
     return res.status(500).json({ error: '位置保存失败', code: 'location_save_failed' });
   }
@@ -18738,294 +18794,17 @@ function cleanLoginValue(value, depth) {
   }
   return null;
 }
-app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (req, res) => {
-  try {
-    const { device_id, device_type, os, browser, user_agent, source, device_meta, exact_device_model, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips, battery_info, storage_estimate, media_devices } = req.body;
-
-    // ★ S3 审计修复：该路由 body 来源为全局 express.json({limit:'80mb'})。
-    //   先做后置解析体总量校验（超限直接拒绝，避免超大请求体在后续清洗前滞留）；
-    //   关键防护在字段级白名单清洗与整体大小上限（见下方 cleanLoginValue）。
-    try {
-      var rawBodyLen = JSON.stringify(req.body || {}).length;
-      if (!(rawBodyLen >= 0) || rawBodyLen > 128 * 1024) {
-        return res.status(413).json({ error: '请求体过大', code: 'payload_too_large' });
-      }
-    } catch (_) { /* 无法序列化则继续走字段级校验 */ }
-
-    // ★ S3：对 device_meta / battery_info / storage_estimate / media_devices /
-    //   webrtc_local_ips / webgl_meta / 指纹 hash / exact_device_model 做白名单清洗。
-    var safeDeviceMeta = isPlainLoginObject(device_meta) ? cleanLoginValue(device_meta, 0) : {};
-    var safeBatteryInfo = isPlainLoginObject(battery_info) ? cleanLoginValue(battery_info, 0) : null;
-    var safeStorageEstimate = isPlainLoginObject(storage_estimate) ? cleanLoginValue(storage_estimate, 0) : null;
-    var safeMediaDevices = Array.isArray(media_devices) ? cleanLoginValue(media_devices, 0) : null;
-    var safeWebrtcIps = Array.isArray(webrtc_local_ips) ? cleanLoginValue(webrtc_local_ips, 0) : null;
-    var safeWebglMeta = (typeof webgl_meta === 'string') ? webgl_meta.slice(0, 500) : (isPlainLoginObject(webgl_meta) ? cleanLoginValue(webgl_meta, 0) : null);
-    var safeExactModel = typeof exact_device_model === 'string' ? exact_device_model.slice(0, 200) : null;
-    var safeBrowserFp = typeof browser_fingerprint_hash === 'string' ? browser_fingerprint_hash.slice(0, 200) : null;
-    var safeCanvasFp = typeof canvas_fingerprint_hash === 'string' ? canvas_fingerprint_hash.slice(0, 200) : null;
-    var safeWebglFp = typeof webgl_fingerprint_hash === 'string' ? webgl_fingerprint_hash.slice(0, 200) : null;
-
-    // ★ S3：整体 8KB 上限（用户可控部分）
-    var userControlledJson = JSON.stringify({
-      device_meta: safeDeviceMeta, battery_info: safeBatteryInfo, storage_estimate: safeStorageEstimate,
-      media_devices: safeMediaDevices, webrtc_local_ips: safeWebrtcIps, webgl_meta: safeWebglMeta,
-      exact_device_model: safeExactModel
-    });
-    if (userControlledJson && userControlledJson.length > 8 * 1024) {
-      return res.status(400).json({ error: '事件数据过大', code: 'payload_too_large' });
-    }
-
-    const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
-    const reportedSource = VALID_SOURCES.includes(source) ? source : 'page_visit';
-    const srcVal = 'page_visit'; // Client reports never establish password authentication.
-
-    const userNameVal = req.userName;
-
-    const deviceIdVal = validateString(device_id, 120, '设备ID');
-    if (deviceIdVal && deviceIdVal.error) return res.status(400).json({ error: deviceIdVal.error });
-    if (!deviceIdVal) return res.status(400).json({ error: '缺少设备ID' });
-
-    // IP 由后端获取，前端不允许传 ip
-    const ip = getClientIp(req);
-    const loginAt = new Date().toISOString();
-    const random = Math.random().toString(36).slice(2, 10);
-
-    // 解析 IP 地区（多源 fallback，失败有日志）
-    var ipLocation = null;
-    try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
-
-    // 加载安全设置，按开关决定是否写入
-    var securitySettings = { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false };
-    try {
-      var { data: settingsData } = await supabase.from('posts')
-        .select('content')
-        .eq('media_type', ADMIN_META_MARKER)
-        .eq('media_url', 'security_settings')
-        .maybeSingle();
-      if (settingsData && settingsData.content) {
-        var parsed = {};
-        try { parsed = JSON.parse(settingsData.content); } catch (_) { parsed = {}; }
-        if (typeof parsed.record_device === 'boolean') securitySettings.record_device = parsed.record_device;
-        if (typeof parsed.browser_fingerprint === 'boolean') securitySettings.browser_fingerprint = parsed.browser_fingerprint;
-        if (typeof parsed.canvas_fingerprint === 'boolean') securitySettings.canvas_fingerprint = parsed.canvas_fingerprint;
-        if (typeof parsed.webgl_fingerprint === 'boolean') securitySettings.webgl_fingerprint = parsed.webgl_fingerprint;
-        if (typeof parsed.webrtc_local_ip === 'boolean') securitySettings.webrtc_local_ip = parsed.webrtc_local_ip;
-        if (typeof parsed.advanced_fingerprint === 'boolean') securitySettings.advanced_fingerprint = parsed.advanced_fingerprint;
-      }
-    } catch(e) {}
-
-    var finalDeviceMeta = securitySettings.record_device ? (safeDeviceMeta || {}) : null;
-    var requestUserAgent = String(req.get('user-agent') || '').slice(0, 500);
-    var reportedUserAgent = String(user_agent || '').slice(0, 500);
-    var trustedUserAgent = requestUserAgent || reportedUserAgent;
-    var possibleDeviceModel = '';
-    if (finalDeviceMeta && typeof finalDeviceMeta === 'object') {
-      if (safeBatteryInfo) finalDeviceMeta.battery_info = safeBatteryInfo;
-      if (safeStorageEstimate) finalDeviceMeta.storage_estimate = safeStorageEstimate;
-      if (safeMediaDevices) finalDeviceMeta.media_devices = safeMediaDevices;
-      possibleDeviceModel = getPossibleDeviceModel(Object.assign({}, finalDeviceMeta, { user_agent: trustedUserAgent }));
-      if (possibleDeviceModel) finalDeviceMeta.possible_device_model = possibleDeviceModel;
-    }
-    var normalizedDevice = normalizeDeviceSnapshot({
-      user_agent: trustedUserAgent,
-      device_type: device_type,
-      os: os,
-      browser: browser,
-      exact_device_model: safeExactModel,
-      possible_device_model: possibleDeviceModel,
-      device_meta: finalDeviceMeta
-    });
-    var finalBrowserFp = securitySettings.browser_fingerprint ? (safeBrowserFp || null) : null;
-    var finalCanvasFp = securitySettings.canvas_fingerprint ? (safeCanvasFp || null) : null;
-    var finalWebglFp = securitySettings.webgl_fingerprint ? (safeWebglFp || null) : null;
-    var finalWebglMeta = securitySettings.webgl_fingerprint ? (safeWebglMeta || null) : null;
-    var finalWebrtcIps = securitySettings.webrtc_local_ip ? (safeWebrtcIps || null) : null;
-
-    // HTTP Header 顺序指纹（记录 header 名称的排列顺序）
-    var headerOrderHash = null;
-    var headerOrderPreview = null;
-    try {
-      if (req.rawHeaders && req.rawHeaders.length > 0) {
-        var headerNames = [];
-        for (var hi = 0; hi < req.rawHeaders.length; hi += 2) {
-          var headerName = String(req.rawHeaders[hi] || '').toLowerCase().trim();
-          if (headerName) headerNames.push(headerName);
-        }
-        if (headerNames.length > 0) {
-          headerOrderHash = crypto.createHash('sha256').update(headerNames.join('|')).digest('hex');
-          headerOrderPreview = headerNames.slice(0, 12);
-        }
-      }
-    } catch(e) {}
-
-    // TLS 指纹（尝试获取，云平台可能不可用）
-    var tlsInfo = null;
-    try {
-      var socket = req.socket || req.connection;
-      if (socket && socket.getCipher && socket.getCipher()) {
-        var cipher = socket.getCipher();
-        tlsInfo = {
-          name: cipher.name || '',
-          version: cipher.version || '',
-          protocol: (socket.getProtocol && socket.getProtocol()) || ''
-        };
-      }
-    } catch(e) {}
-
-    // 确定最终 ASN/ISP 信息
-    var asnInfo = null;
-    if (ipLocation && (ipLocation.asn || ipLocation.isp || ipLocation.is_proxy || ipLocation.is_hosting)) {
-      asnInfo = {
-        asn: ipLocation.asn || '',
-        isp: ipLocation.isp || '',
-        org: ipLocation.org || '',
-        is_mobile: ipLocation.is_mobile || false,
-        is_proxy: ipLocation.is_proxy || false,
-        is_hosting: ipLocation.is_hosting || false
-      };
-    }
-
-    // VPN/代理检测（时区对比 + 可疑请求头 + IP类型）
-    var proxyDetection = null;
-    try {
-      var clientTimezone = finalDeviceMeta && finalDeviceMeta.timezone ? String(finalDeviceMeta.timezone) : '';
-      var ipTimezone = ipLocation && ipLocation.timezone ? String(ipLocation.timezone) : '';
-      var suspiciousHeaders = ['via', 'x-proxy-id', 'forwarded'].filter(function(h) { return !!req.headers[h]; });
-      proxyDetection = {
-        timezone_match: (!clientTimezone || !ipTimezone) ? 'unknown' : (clientTimezone === ipTimezone ? 'match' : 'mismatch'),
-        client_timezone: clientTimezone || null,
-        ip_timezone: ipTimezone || null,
-        suspicious_headers: suspiciousHeaders.length > 0 ? suspiciousHeaders : null,
-        is_proxy: (asnInfo && asnInfo.is_proxy) || false,
-        is_hosting: (asnInfo && asnInfo.is_hosting) || false,
-        is_vpn: (ipLocation && ipLocation.is_vpn) || false,
-        is_tor: (ipLocation && ipLocation.is_tor) || false,
-        language_match: 'unknown',
-        risk_level: 'low',
-        risk_signals: []
-      };
-      // 语言与地区匹配检测
-      try {
-        var clientLangs = finalDeviceMeta && finalDeviceMeta.languages ? finalDeviceMeta.languages : [];
-        var ipCountryCode = ipLocation && ipLocation.country_code ? ipLocation.country_code.toUpperCase() : '';
-        if (clientLangs.length > 0 && ipCountryCode) {
-          var primaryLang = String(clientLangs[0] || '').slice(0, 5).toUpperCase();
-          var langCountryMap = { 'CN': ['ZH'], 'US': ['EN'], 'GB': ['EN'], 'JP': ['JA'], 'KR': ['KO'], 'DE': ['DE'], 'FR': ['FR'], 'RU': ['RU'], 'BR': ['PT'], 'ES': ['ES'], 'IT': ['IT'], 'TW': ['ZH'], 'HK': ['ZH'] };
-          var expectedLangs = langCountryMap[ipCountryCode];
-          if (expectedLangs) {
-            var langPrefix = primaryLang.split('-')[0];
-            proxyDetection.language_match = expectedLangs.indexOf(langPrefix) >= 0 ? 'match' : 'mismatch';
-          }
-        }
-      } catch(e) {}
-      // 风险信号聚合
-      if (proxyDetection.timezone_match === 'mismatch') proxyDetection.risk_signals.push('timezone_mismatch');
-      if (proxyDetection.language_match === 'mismatch') proxyDetection.risk_signals.push('language_mismatch');
-      if (proxyDetection.is_proxy) proxyDetection.risk_signals.push('proxy_ip');
-      if (proxyDetection.is_vpn) proxyDetection.risk_signals.push('vpn');
-      if (proxyDetection.is_tor) proxyDetection.risk_signals.push('tor');
-      if (proxyDetection.is_hosting) proxyDetection.risk_signals.push('hosting_ip');
-      if (suspiciousHeaders.length > 0) proxyDetection.risk_signals.push('suspicious_headers');
-      // 风险等级计算
-      var riskScore = proxyDetection.risk_signals.length;
-      if (riskScore === 0) proxyDetection.risk_level = 'low';
-      else if (riskScore === 1) proxyDetection.risk_level = 'medium';
-      else if (riskScore <= 3) proxyDetection.risk_level = 'high';
-      else proxyDetection.risk_level = 'critical';
-    } catch(e) {}
-
-    // 写入 posts 表（短期方案，不新建表）
-    const { error } = await supabase.from('posts').insert([{
-      user_name: userNameVal,
-      media_type: LOGIN_EVENT_MARKER,
-      media_url: deviceIdVal,
-      content: JSON.stringify({
-        device_id: deviceIdVal,
-        device_type: normalizedDevice.type,
-        os: normalizedDevice.os,
-        browser: normalizedDevice.browser,
-        user_agent: normalizedDevice.user_agent,
-        possible_device_model: possibleDeviceModel,
-        ip: ip,
-        ip_version: ip.indexOf(':') >= 0 ? 6 : (ip === 'unknown' ? null : 4),
-        ip_source: req._clientIpSource || 'unknown',
-        ip_geolocation_precision: 'approximate_city',
-        ip_location: ipLocation,
-        visit_at: loginAt,
-        received_at: loginAt,
-        authority: 'client_telemetry',
-        reported_source: reportedSource,
-        source: srcVal,
-        device_meta: finalDeviceMeta,
-        exact_device_model: safeExactModel,
-        browser_fingerprint_hash: finalBrowserFp,
-        canvas_fingerprint_hash: finalCanvasFp,
-        webgl_fingerprint_hash: finalWebglFp,
-        webgl_meta: finalWebglMeta,
-        webrtc_local_ips: finalWebrtcIps,
-        asn_info: asnInfo,
-        proxy_detection: proxyDetection,
-        header_order_hash: headerOrderHash,
-        header_order_preview: headerOrderPreview,
-        tls_info: tlsInfo
-      }),
-      actor_key: 'login_' + Date.now() + '_' + random
-    }]);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
-
-    // 同步更新 user_info（记录最近设备/IP/地区/登录时间）
-    try {
-      const now = new Date().toISOString();
-      var infoPatch = {
-        last_visit: now,
-        last_device: normalizedDevice.type + ' · ' + normalizedDevice.os + ' · ' + normalizedDevice.browser,
-        last_device_id: deviceIdVal,
-        last_ip: ip
-      };
-      // last_login is written only by successful server authentication.
-      if (ipLocation) infoPatch.last_ip_location = ipLocation;
-      await mergeUserInfo(userNameVal, infoPatch);
-    } catch(e) {
-      console.warn('[API] 同步 user_info 失败:', e.message || e);
-    }
-
-    // 异步执行安全检测（不影响响应速度，错误静默处理）
-    runSecurityChecks(userNameVal, deviceIdVal, ip, ipLocation, srcVal, loginAt, safeBrowserFp || null, safeCanvasFp || null).catch(function(e) {
-      console.warn('[Security] 安全检测异常:', e.message || e);
-    });
-
-    return res.json({ ok: true });
-  } catch(e) {
-    console.error('[API] 登录事件记录失败:', e.message);
-    return res.status(500).json({ error: '记录失败' });
-  }
+// Retired client telemetry is never authentication evidence. Keep an authenticated
+// terminal response for old clients without reading settings or collecting facts.
+app.post('/api/log-login-event', authenticateUser, rateLimit(60000, 30), (req, res) => {
+  res.set('Cache-Control','no-store');
+  return res.status(410).json({ok:false,error:'旧设备诊断采集已停用',code:'client_telemetry_retired'});
 });
 
-// ===================== 安全设置（前端公开读取） =====================
-app.get('/api/security-settings', rateLimit(60000, 60), async (req, res) => {
-  try {
-    var { data } = await supabase.from('posts')
-      .select('content')
-      .eq('media_type', ADMIN_META_MARKER)
-      .eq('media_url', 'security_settings')
-      .maybeSingle();
-    var settings = { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
-    if (data && data.content) {
-      try {
-        var parsed = JSON.parse(data.content);
-        if (parsed.record_device !== undefined) settings.record_device = parsed.record_device;
-        if (parsed.browser_fingerprint !== undefined) settings.browser_fingerprint = parsed.browser_fingerprint;
-        if (parsed.canvas_fingerprint !== undefined) settings.canvas_fingerprint = parsed.canvas_fingerprint;
-        if (parsed.webgl_fingerprint !== undefined) settings.webgl_fingerprint = parsed.webgl_fingerprint;
-        if (parsed.webrtc_local_ip !== undefined) settings.webrtc_local_ip = parsed.webrtc_local_ip;
-        if (parsed.advanced_fingerprint !== undefined) settings.advanced_fingerprint = parsed.advanced_fingerprint;
-        if (parsed.security_alerts !== undefined) settings.security_alerts = parsed.security_alerts;
-      } catch(e) {}
-    }
-    return res.json({ settings: settings });
-  } catch(e) {
-    return res.json({ settings: { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false } });
-  }
+// Old clients must never restore retired fingerprint collectors from saved flags.
+app.get('/api/security-settings', rateLimit(60000, 60), (req, res) => {
+  res.set('Cache-Control','no-store');
+  return res.json({settings:{record_device:false,browser_fingerprint:false,canvas_fingerprint:false,webgl_fingerprint:false,webrtc_local_ip:false,advanced_fingerprint:false,security_alerts:false}});
 });
 
 // ===================== 登录事件查询（管理员） =====================
@@ -19163,14 +18942,15 @@ app.post('/admin/security-alerts/status', verifyToken, rateLimit(60000, 10), asy
 // ===================== 安全设置 =====================
 app.get('/admin/security-settings', verifyToken, rateLimit(60000, 20), async (req, res) => {
   try {
-    var { data } = await supabase.from('posts')
+    var { data, error: settingsReadError } = await supabase.from('posts')
       .select('content')
       .eq('media_type', ADMIN_META_MARKER)
       .eq('media_url', 'security_settings')
       .maybeSingle();
+    if(settingsReadError)throw new Error('security_settings_lookup_failed');
     var settings = { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: false };
     if (data && data.content) {
-      try { var parsed = JSON.parse(data.content); Object.assign(settings, parsed); } catch(e) {}
+      try { var parsed = JSON.parse(data.content); settings.security_alerts=parsed.security_alerts===true; } catch(e) {}
     }
     return res.json({ settings: settings });
   } catch(e) {
@@ -19181,42 +18961,41 @@ app.get('/admin/security-settings', verifyToken, rateLimit(60000, 20), async (re
 
 app.post('/admin/security-settings', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var { record_device, browser_fingerprint, canvas_fingerprint, webgl_fingerprint, webrtc_local_ip, advanced_fingerprint, security_alerts } = req.body;
-    var settings = {};
-    if (typeof record_device === 'boolean') settings.record_device = record_device;
-    if (typeof browser_fingerprint === 'boolean') settings.browser_fingerprint = browser_fingerprint;
-    if (typeof canvas_fingerprint === 'boolean') settings.canvas_fingerprint = canvas_fingerprint;
-    if (typeof webgl_fingerprint === 'boolean') settings.webgl_fingerprint = webgl_fingerprint;
-    if (typeof webrtc_local_ip === 'boolean') settings.webrtc_local_ip = webrtc_local_ip;
-    if (typeof advanced_fingerprint === 'boolean') settings.advanced_fingerprint = advanced_fingerprint;
+    var { security_alerts } = req.body;
+    var settings = {record_device:false,browser_fingerprint:false,canvas_fingerprint:false,webgl_fingerprint:false,webrtc_local_ip:false,advanced_fingerprint:false};
     if (typeof security_alerts === 'boolean') settings.security_alerts = security_alerts;
 
-    var { data: existing } = await supabase.from('posts')
+    var { data: existing, error: settingsLookupError } = await supabase.from('posts')
       .select('id')
       .eq('media_type', ADMIN_META_MARKER)
       .eq('media_url', 'security_settings')
       .maybeSingle();
+    if(settingsLookupError)throw new Error('security_settings_lookup_failed');
 
     var oldSettings = {};
     if (existing) {
       // Merge with existing
-      var { data: oldData } = await supabase.from('posts')
+      var { data: oldData, error: oldSettingsError } = await supabase.from('posts')
         .select('content')
         .eq('id', existing.id)
         .maybeSingle();
+      if(oldSettingsError)throw new Error('security_settings_lookup_failed');
       if (oldData && oldData.content) {
         try { oldSettings = JSON.parse(oldData.content); } catch(e) {}
       }
       Object.assign(oldSettings, settings);
-      await supabase.from('posts').update({ content: JSON.stringify(oldSettings) }).eq('id', existing.id);
+      var savedSettings=await supabase.from('posts').update({ content: JSON.stringify(oldSettings) }).eq('id', existing.id);
+      if(!savedSettings||savedSettings.error)throw new Error('security_settings_save_failed');
     } else {
-      await supabase.from('posts').insert([{
+      oldSettings=Object.assign({},settings);
+      var insertedSettings=await supabase.from('posts').insert([{
         user_name: ADMIN_USERNAME,
         media_type: ADMIN_META_MARKER,
         media_url: 'security_settings',
         content: JSON.stringify(settings),
         actor_key: 'sec_settings_' + Date.now()
       }]);
+      if(!insertedSettings||insertedSettings.error)throw new Error('security_settings_save_failed');
     }
 
     // Audit log
@@ -22204,7 +21983,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
   try {
     var userName = req.userName;
     // F-1: 请求级搜索 API 调用计数器（供 recordAiTurnUsage 按真实次数记账）
-    req._searchApiCalls = { n: 0 };
+    req._searchApiCalls = { n: 0, userName: userName, signal: requestAbortCtrl.signal };
 
     // 1. 先验证输入，避免空消息仍扣配额
     var messageEarly = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
@@ -23386,7 +23165,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
   //   原来是裸 number + 「先 await 门禁再 ++」，RPC 往返期间所有并发 worker 读到
   //   同一个旧值，6×3=18 次检索可以一次性打穿当日额度。改成对象 + claimSearchSlot
   //   乐观预占后，并发调用各自抢占到递增的序号，额度判定即时生效。
-  var searchCtx = { userName: req.userName || '', searchConsumed: 0 };
+  var searchCtx = { userName: req.userName || '', searchConsumed: 0, signal: controller.signal };
   var sources = [];
   var thinkingAcc = '';
   var reasoningStartedFlag = false;
@@ -23446,14 +23225,13 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
           var q = String(queries[qi] || '').trim().slice(0, 100);
           if (!q) continue;
           // ★ P1-9：乐观预占（内部已把 searchCtx.searchConsumed 加一，拒绝则回滚）
-          var gate = await claimSearchSlot(searchCtx);
-          if (!gate.allowed) break;
           // 工具时间线 + 搜索状态条（主聊天循环兼容事件）
           sseSend({ type: 'tool_calls', tools: [{ name: 'search_web', args: { query: q } }] });
           var sr = null;
           // ★ S6 审计修复：改用 searchWebForUser（内部 enforceSearchQuota 门禁），
           //   直接调 searchWeb 会把第三方搜索 API 当免费通道打穿
-          try { sr = await searchWebForUser(req.userName, q, 5, null); } catch (_) { sr = null; }
+          try { sr = await searchWebForUser(req.userName, q, 5, searchCtx); } catch (_) { sr = null; }
+          if (sr && (sr.search_quota_exceeded || sr.quota_service_unavailable)) break;
           var items = (sr && Array.isArray(sr.results) ? sr.results : []).slice(0, 5);
           items.forEach(function(it) {
             if (it && it.url) sources.push({ title: it.title || '', url: it.url, snippet: it.snippet || '', source: it.source || '' });
@@ -23783,16 +23561,27 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
   var delays = [0, 2500, 4000, 6000, 8000];
   var controller = new AbortController();
   var overallTimer = setTimeout(function() { try { controller.abort(); } catch (_) {} }, 45000);
-  function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+  var onClientClose = function() { if (!res.writableFinished) controller.abort(); };
+  res.once('close', onClientClose);
+  function sleep(ms) {
+    return new Promise(function(resolve, reject) {
+      if (controller.signal.aborted) return reject(new Error('请求已取消'));
+      var onAbort = function() { clearTimeout(timer); reject(new Error('请求已取消')); };
+      var timer = setTimeout(function() { controller.signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
   try {
     for (var i = 0; i < delays.length; i++) {
-      if (i > 0) { try { await sleep(delays[i]); } catch (_) {} }
+      if (i > 0) await sleep(delays[i]);
       var bust = Date.now() + '_' + Math.floor(Math.random() * 1e6);
       var url = base + '?prompt=' + encodeURIComponent(prompt) + '&image_size=' + imageSize + '&_r=' + bust;
       var upstream;
       try {
-        upstream = await fetch(url, { redirect: 'follow', signal: controller.signal, headers: { Accept: 'image/*,*/*' } });
+        upstream = await fetchSafeRedirectBuffer(url, { maxBytes: 16 * 1024 * 1024, signal: controller.signal, headers: { Accept: 'image/*,*/*' } });
       } catch (eNet) {
+        if (eNet.code === 'IMAGE_UPSTREAM_BLOCKED') return res.status(502).json({ error: '生图服务返回了不允许的地址', code: 'image_upstream_blocked' });
+        if (eNet.code === 'IMAGE_TOO_LARGE') return res.status(502).json({ error: '生图服务返回内容过大', code: 'image_too_large' });
         if (controller.signal.aborted) break;
         continue;
       }
@@ -23839,7 +23628,7 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
       if (contentLength > 16 * 1024 * 1024) {
         return res.status(502).json({ error: '生图服务返回内容过大', code: 'image_too_large' });
       }
-      var buf = Buffer.from(await upstream.arrayBuffer());
+      var buf = upstream.buffer;
       if (buf.length > 16 * 1024 * 1024) {
         return res.status(502).json({ error: '生图服务返回内容过大', code: 'image_too_large' });
       }
@@ -23857,6 +23646,7 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
     if (!res.headersSent) return res.status(502).json({ error: '生图服务响应中断，请重试', code: 'image_upstream_error' });
   } finally {
     clearTimeout(overallTimer);
+    res.removeListener('close', onClientClose);
   }
 });
 
@@ -23875,6 +23665,8 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
   // 被外层 catch 包装成 "AI 连接中断，请稍后重试"。
   var requestAbortCtrl = new AbortController();
   var clientReqId = String((req.body && req.body.client_request_id) || '').trim();
+  req._searchApiCalls.signal = requestAbortCtrl.signal;
+  req._searchApiCalls.userName = userName;
   var streamSeq = 0;
   // ★ P0 修复：client_request_id 防串流去重
   //   客户端因超时/重试会复用同一 client_request_id，但服务器此前仅用于日志，
@@ -26276,7 +26068,7 @@ async function runResearchSubAgent(opts) {
 
   var sources = [];
   var queries = [];
-  var subUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0 };
+  var subUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0, reasoning_included_in_completion: true };
   function addSubUsage(u) {
     if (!u || typeof u !== 'object') return;
     subUsage.prompt_tokens += Number(u.prompt_tokens) || Number(u.input_tokens) || 0;
@@ -26608,16 +26400,13 @@ async function runSelfResearchFlow(opts) {
   };
   var range = modeMap[model] || modeMap.pro;
   // 累计全链路 token：规划/改写/子智能体/汇总 都计入账户额度
-  var researchUsageAgg = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0 };
+  var researchUsageAgg = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0, reasoning_included_in_completion: true };
   function accumulateResearchUsage(u) {
     if (!u || typeof u !== 'object') return;
     researchUsageAgg.prompt_tokens += Math.max(0, Number(u.prompt_tokens) || Number(u.input_tokens) || 0);
     researchUsageAgg.completion_tokens += Math.max(0, Number(u.completion_tokens) || Number(u.output_tokens) || 0);
     researchUsageAgg.total_tokens += Math.max(0, Number(u.total_tokens) || 0);
-    researchUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || 0);
-    if (u.completion_tokens_details && typeof u.completion_tokens_details.reasoning_tokens === 'number') {
-      researchUsageAgg.reasoning_tokens += Math.max(0, u.completion_tokens_details.reasoning_tokens);
-    }
+    researchUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || Number(u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || Number(u.output_tokens_details && u.output_tokens_details.reasoning_tokens) || 0);
   }
 
   if (isCancelled()) return { answer: '', sources: [], agents: [], usage: researchUsageAgg, search_count: 0 };

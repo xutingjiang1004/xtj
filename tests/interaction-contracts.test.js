@@ -24,7 +24,8 @@ function between(source, start, end) {
 
 test('protected requests attach Bearer auth and retry only once after 401', () => {
   const block = between(core, 'window.xtjProtectedFetch = async function', 'let avatarCache');
-  assert.match(block, /headers\.Authorization\s*=\s*'Bearer '\s*\+\s*token/);
+  assert.match(block, /normalizedAuthHeaders\(options, token\)/);
+  assert.match(core, /headers\.set\('Authorization', 'Bearer ' \+ token\)/);
   assert.match(block, /if \(response\.status === 401\)[\s\S]*refreshUserToken\(true\)/);
   assert.match(block, /credentials:\s*'include'/);
 });
@@ -167,5 +168,7 @@ test('publishing exposes busy state and inserts the created post without full fe
   const insertion = between(core, 'function insertPublishedPostIntoFeed', 'window.doPublish = async function');
   assert.match(insertion, /insertBefore|prepend/);
   assert.match(publish, /await loadFeed\(true\)/, 'a failed local insertion retains a safe full-feed fallback');
-  assert.match(publish, /setAttribute\(['"]aria-busy['"],\s*['"]false['"]\)|removeAttribute\(['"]aria-busy['"]\)/);
+  assert.match(publish, /if \(postPublishFlight === flight\)[\s\S]*restorePostPublishButton\(flight\)/);
+  const restore = between(core, 'function restorePostPublishButton', 'function pendingPostMediaKey');
+  assert.match(restore, /setAttribute\('aria-busy', 'false'\)/);
 });

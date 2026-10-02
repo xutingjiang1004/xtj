@@ -29,14 +29,14 @@ test('admin login form prevents default submit', () => {
 
 test('admin login saves token before initAdminClient', () => {
   assert.match(adminJs, /var loginToken = data\.user_token/);
-  assert.match(adminJs, /ADMIN = name;\s+setToken\(loginToken\)/);
-  assert.match(adminJs, /setToken\(loginToken\);\s+try\s*\{/);
+  assert.match(adminJs, /ADMIN = name;[\s\S]{0,150}typeof loginToken === 'string' && loginToken\.trim\(\)/);
+  assert.match(adminJs, /setToken\(loginToken\);[\s\S]{0,180}try\s*\{/);
 });
 
 test('admin login validates data.ok before proceeding', () => {
   assert.match(adminJs, /data\.ok !== true/);
   assert.match(adminJs, /var loginToken = data\.user_token/);
-  assert.match(adminJs, /!loginToken \|\| typeof loginToken !== 'string' \|\| !loginToken\.trim\(\)/);
+  assert.match(adminJs, /else clearToken\(\);/);
 });
 
 test('admin login and admin API requests retain the HttpOnly admin cookie', () => {
@@ -46,9 +46,9 @@ test('admin login and admin API requests retain the HttpOnly admin cookie', () =
   assert.doesNotMatch(api, /var token = getToken\(\);/);
 });
 
-test('admin login validates token is non-empty string', () => {
-  assert.match(adminJs, /typeof loginToken !== 'string'/);
-  assert.match(adminJs, /!loginToken\.trim\(\)/);
+test('admin login only stores a non-empty optional user token', () => {
+  assert.match(adminJs, /typeof loginToken === 'string'/);
+  assert.match(adminJs, /loginToken\.trim\(\)/);
 });
 
 test('admin login restores button state on error', () => {
@@ -65,7 +65,7 @@ test('admin login hides dashboard on init failure', () => {
   assert.match(adminJs, /getElementById\('dashboard'\)\.style\.display = 'none'/);
 });
 
-test('admin login does not set ADMIN before token validation', () => {
+test('admin login initializes after storing its optional ordinary access token', () => {
   // Token must be validated before ADMIN is set — the order in doAdminLogin must be:
   // 1. parse response 2. check ok 3. check token 4. set ADMIN 5. setToken 6. initAdminClient
   var loginFn = adminJs.match(/window\.doAdminLogin = async function[\s\S]{0,4000}?catch\(e\)/);

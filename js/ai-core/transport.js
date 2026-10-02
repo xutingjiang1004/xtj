@@ -155,7 +155,9 @@
 
   function processSSEBuffer(rawBuffer, onEvent, options, sseState) {
     sseState = sseState || { currentEvent: null, dataLines: [] };
-    var lines = rawBuffer.split('\n');
+    // Retain a trailing CR until the next chunk so split CRLF is one delimiter.
+    var trailingCR = /\r$/.test(rawBuffer);
+    var lines = (trailingCR ? rawBuffer.slice(0, -1) : rawBuffer).split(/\r\n|\n|\r/);
     // Keep the last partial line in the buffer
     var lastLine = lines[lines.length - 1];
     var completeLines = lines.slice(0, -1);
@@ -200,7 +202,7 @@
       }
     }
 
-    return lastLine; // Return remaining buffer
+    return lastLine + (trailingCR ? '\r' : ''); // Return remaining buffer
   }
 
   // ── Public API ─────────────────────────────────────────────────────────

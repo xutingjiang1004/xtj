@@ -1663,7 +1663,9 @@
     root._motionOriginId=activePhoto()&&activePhoto().id;
     var origin=originForCurrent(),from=origin?motionTransform(origin):'none';
     var token=motionEpoch;
-    motionAnimations=[wrap.animate([{transform:from,opacity:.6},{transform:'none',opacity:1}],{duration:240,easing:'cubic-bezier(.22,1,.36,1)'}),root.animate([{opacity:0},{opacity:1}],{duration:180,easing:'ease-out'})];
+    // Keep image ancestors opaque while the original expands: alpha compositing can
+    // change HDR presentation on WebKit even when the image bytes stay identical.
+    motionAnimations=[wrap.animate([{transform:from},{transform:'none'}],{duration:240,easing:'cubic-bezier(.22,1,.36,1)'})];
     Promise.all(motionAnimations.map(function(a){return a.finished;})).then(function(){if(token===motionEpoch)motionAnimations=[];}).catch(function(){});
   }
   function animatePreviewClose(){

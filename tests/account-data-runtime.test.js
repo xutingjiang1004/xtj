@@ -52,3 +52,75 @@ test('Render and Cloudflare proxy chain resolves the client and cannot accept sp
  const arbitrary=await request(app).get('/').set('X-Forwarded-For','6.6.6.6, 8.8.8.8').set('CF-Connecting-IP','6.6.6.6');assert.equal(arbitrary.body.ip,'8.8.8.8');
  const ipv6=await request(app).get('/').set('X-Forwarded-For','2001:4860:4860::8888, 2606:4700::1, 10.1.1.1');assert.equal(ipv6.body.ip,'2001:4860:4860::8888');
 });
+
+test('retired client telemetry authenticates then returns 410 without database or fingerprint work',async()=>{
+ const vm=require('node:vm'),source=fs.readFileSync(require.resolve('../render-api/server'),'utf8'),app=express();app.use(express.json());
+ const begin=source.indexOf("app.post('/api/log-login-event'"),end=source.indexOf('// ===================== 登录事件查询（管理员）',begin);
+ const blocked=new Proxy({}, {get(){throw Error('retired path accessed database');}});
+ vm.runInNewContext(source.slice(begin,end),{app,authenticateUser:auth,rateLimit(){return(req,res,next)=>next();},supabase:blocked,getClientIp(){throw Error('retired IP lookup');}});
+ await request(app).post('/api/log-login-event').send({device_meta:{password:'secret'}}).expect(401);
+ const r=await request(app).post('/api/log-login-event').set('x-user','A').send({browser_fingerprint_hash:'hash',device_meta:{clipboard:'private'}}).expect(410);assert.equal(r.body.code,'client_telemetry_retired');assert.equal(r.headers['cache-control'],'no-store');
+ const settings=await request(app).get('/api/security-settings').expect(200);assert(Object.values(settings.body.settings).every(v=>v===false));
+});
+test('strict personal export fails on a private attachment signing failure while conversation hydration stays available',async()=>{
+ const {createDmPrivateStorage}=require('../render-api/dm-private-storage');let fail=true;
+ const storage=createDmPrivateStorage({storage:{from(){return{async createSignedUrl(){return fail?{error:{message:'offline'}}:{data:{signedUrl:'https://example.com/signed'}};}};}}});
+ const row={id:'message',content:'saved',payload:{media:{bucket:'dm-private',storage_path:'chat/abcdef123456_private_12345_voice.webm',url:'expired'}}};
+ const store={async rpc(){return{data:[structuredClone(row)]};}};const app=express();app.use('/export',createPersonalExport({express,supabase:store,authenticateUser:auth,privateStorage:storage}));
+ const broken=await request(app).get('/export?kind=messages').set('x-user','A').expect(503);assert.equal(broken.body.code,'export_unavailable');assert.equal(broken.body.items,undefined);
+ const conversation=structuredClone(row);await storage.hydrateMessage(conversation);assert.equal(conversation.payload.media.unavailable,true);assert.equal(conversation.payload.media.url,'');
+ fail=false;const ok=await request(app).get('/export?kind=messages').set('x-user','A').expect(200);assert.equal(ok.body.items[0].payload.media.url,'https://example.com/signed');
+});
+
+test('password and registration routes schedule basic safety checks after committed authentication without blocking login',async()=>{
+ const vm=require('node:vm'),source=fs.readFileSync(require.resolve('../render-api/server'),'utf8'),app=express();app.use(express.json());
+ const events=[],alerts=[],geoWrites=[];let auditUnavailable=false,releaseGeo;
+ let geo=new Promise(resolve=>{releaseGeo=resolve;});
+ const store={async rpc(name,args){if(name==='record_auth_ip_location'){geoWrites.push(args);return{data:{ok:true,current_updated:true}};}assert.equal(name,'record_user_auth_event');events.push(args);return auditUnavailable?{error:{message:'unavailable'}}:{data:{event_id:'recorded',login_at:'2026-10-02T00:00:00Z',registered_at:'2026-10-01T00:00:00Z'}};},from(){return{select(){return this;},eq(){return this;},async maybeSingle(){return{data:null};},async insert(){return{error:null};}};}};
+ const context=vm.createContext({app,supabase:store,require(name){if(name==='./account-events')return require('../render-api/account-events');return require(name);},securityRateLimit(){return(req,res,next)=>next();},validateString(v){return typeof v==='string'?v:null;},MAX_USERNAME_LEN:20,AUTH_MARKER:'__auth__',AUTH_VERIFIER_PREFIX:'scrypt:',ADMIN_USERNAME:'xxz',async readAuthRecord(){return{media_url:'scrypt:valid'};},async verifyAuthPassword(_,password){return password==='realpass';},async deriveAuthVerifier(){return'scrypt:valid';},async loadUserRestrictions(){return{};},_getDeviceIdFromRequest(){return'basic-session-device';},isValidEmailAddress(){return true;},signUserAccessToken(){return'access';},signUserRefreshToken(){return'refresh';},async storeRefreshToken(){return true;},USER_REFRESH_TOKEN_EXPIRY_MS:1000,getClientIp(req){req._clientIpSource='express_req_ip';return'8.8.8.8';},detectDeviceTypeFromUA(){return'phone';},detectOSFromUA(){return'iOS';},detectBrowserFromUA(){return'Safari';},resolveIpLocation(){return geo;},async runSecurityChecks(...args){alerts.push(args);},console});
+ const begin=source.indexOf('async function issueUserSession('),end=source.indexOf('// 限制状态只通过服务端',begin);vm.runInContext(source.slice(begin,end),context);
+ await request(app).post('/api/user/login').send({user_name:'Alice',password:'wrong',browser_fingerprint_hash:'private'}).expect(401);assert.equal(events.length,0);assert.equal(alerts.length,0);
+ const login=await request(app).post('/api/user/login').set('User-Agent','Safari').send({user_name:'Alice',password:'realpass',ip:'6.6.6.6',browser_fingerprint_hash:'private',canvas_fingerprint_hash:'private'}).expect(200);
+ assert.equal(login.body.authenticated_at,'2026-10-02T00:00:00Z');assert.equal(events.length,1);assert.equal(alerts.length,0);assert.equal(events[0].p_event.ip,'8.8.8.8');assert.doesNotMatch(JSON.stringify(events),/realpass|private|6\.6\.6\.6/);
+ releaseGeo({text:'安全事件IP大致地区'});await new Promise(resolve=>setImmediate(resolve));assert.equal(alerts.length,1);assert.deepEqual(alerts[0].slice(0,3),['Alice','basic-session-device','8.8.8.8']);assert.equal(alerts[0][4],'login_success');assert.equal(alerts[0][5],login.body.authenticated_at);assert.equal(alerts[0][6],null);assert.equal(alerts[0][7],null);assert.equal(geoWrites.length,1);assert.equal(geoWrites[0].p_event_id,'recorded');assert.equal(geoWrites[0].p_ip,'8.8.8.8');
+ geo=Promise.reject(Error('IP lookup unavailable'));geo.catch(()=>{});await request(app).post('/api/user/register').send({user_name:'Newbie',password:'realpass'}).expect(201);await new Promise(resolve=>setImmediate(resolve));assert.equal(alerts.length,2);assert.equal(alerts[1][4],'register_success');assert.equal(alerts[1][3],null);
+ // Refresh/session reuse has no opts.audit; it cannot create authentication or alerts.
+ await context.issueUserSession({cookie(){}},'Alice','basic-session-device');assert.equal(events.length,2);assert.equal(alerts.length,2);
+ auditUnavailable=true;await request(app).post('/api/user/login').send({user_name:'Alice',password:'realpass'}).expect(503);await new Promise(resolve=>setImmediate(resolve));assert.equal(alerts.length,2);
+});
+
+test('administrator settings cannot re-enable retired precision collectors, while safety alerts remain configurable',async()=>{
+ const vm=require('node:vm'),source=fs.readFileSync(require.resolve('../render-api/server'),'utf8'),app=express();app.use(express.json());
+ let saved={record_device:true,browser_fingerprint:true,canvas_fingerprint:true,webgl_fingerprint:true,webrtc_local_ip:true,advanced_fingerprint:true,security_alerts:true};let fail=false;
+ const store={from(){let update;const q={select(){return q;},eq(){return q;},async maybeSingle(){return{data:{id:'settings',content:JSON.stringify(saved)}};},update(row){update=JSON.parse(row.content);return q;},then(resolve){if(!fail)saved=update;return Promise.resolve({error:fail?{code:'offline'}:null}).then(resolve);}};return q;}};
+ const begin=source.indexOf("app.get('/admin/security-settings'"),end=source.indexOf('// ===================== 日志清理',begin);
+ vm.runInNewContext(source.slice(begin,end),{app,supabase:store,verifyToken:auth,rateLimit(){return(req,res,next)=>next();},ADMIN_META_MARKER:'__admin_meta__',ADMIN_USERNAME:'xxz',async logAdminAudit(){},console});
+ const current=await request(app).get('/admin/security-settings').set('x-user','xxz').expect(200);assert.equal(current.body.settings.security_alerts,true);for(const [key,value]of Object.entries(current.body.settings))if(key!=='security_alerts')assert.equal(value,false,key);
+ const changed=await request(app).post('/admin/security-settings').set('x-user','xxz').send({...saved,security_alerts:false}).expect(200);assert.equal(changed.body.settings.security_alerts,false);for(const [key,value]of Object.entries(saved))assert.equal(value,false,key);
+ fail=true;await request(app).post('/admin/security-settings').set('x-user','xxz').send({security_alerts:true}).expect(500);assert.equal(saved.security_alerts,false);
+});
+
+test('late authentication geolocation updates its confirmed event but cannot replace a newer login IP region',async()=>{
+ const vm=require('node:vm'),source=fs.readFileSync(require.resolve('../render-api/server'),'utf8');const events=new Map(),geo=new Map(),releases=new Map();let current={},sequence=0;const alerts=[];
+ for(const ip of ['8.8.8.8','1.1.1.1'])geo.set(ip,new Promise(resolve=>releases.set(ip,resolve)));
+ const store={async rpc(name,args){
+  if(name==='record_user_auth_event'){
+   const id='event_'+(++sequence),loginAt='2026-10-02T00:00:0'+sequence+'Z';events.set(id,{...args.p_event,user_name:args.p_user_name,authority:'server_authentication',login_at:loginAt});current={last_auth_event_id:id,last_login:loginAt,last_ip:args.p_event.ip,last_ip_location:null};return{data:{event_id:id,login_at:loginAt}};
+  }
+  assert.equal(name,'record_auth_ip_location');const event=events.get(args.p_event_id);
+  if(!event||event.authority!=='server_authentication'||event.ip!==args.p_ip)return{data:{ok:false,code:'event_mismatch'}};
+  event.ip_location=args.p_location;const isCurrent=current.last_auth_event_id===args.p_event_id&&current.last_login===event.login_at&&current.last_ip===args.p_ip;
+  if(isCurrent)current.last_ip_location=args.p_location;
+  return{data:{ok:true,event_updated:true,current_updated:isCurrent}};
+ }};
+ const context=vm.createContext({supabase:store,require(name){if(name==='./account-events')return require('../render-api/account-events');return require(name);},signUserAccessToken(){return'access';},signUserRefreshToken(){return'refresh';},async storeRefreshToken(){return true;},USER_REFRESH_TOKEN_EXPIRY_MS:1000,getClientIp(req){return req.ip;},detectDeviceTypeFromUA(){return'phone';},detectOSFromUA(){return'OS';},detectBrowserFromUA(){return'browser';},resolveIpLocation(ip){return geo.get(ip);},async runSecurityChecks(...args){alerts.push(args);},console});
+ const begin=source.indexOf('async function issueUserSession('),end=source.indexOf('// 用户登录/获取 token',begin);vm.runInContext(source.slice(begin,end),context);
+ for(const ip of ['8.8.8.8','1.1.1.1'])await context.issueUserSession({cookie(){}},'Alice','device',{audit:{req:{ip,headers:{'user-agent':'Safari'},body:{ip:'spoof',ip_location:'spoof'}},source:'login_success'}});
+ assert.equal(current.last_ip,'1.1.1.1');assert.equal(current.last_ip_location,null);
+ releases.get('1.1.1.1')({text:'新登录地区',country:'new'});await new Promise(resolve=>setImmediate(resolve));assert.equal(current.last_ip_location.text,'新登录地区');
+ releases.get('8.8.8.8')({text:'旧登录地区',country:'old'});await new Promise(resolve=>setImmediate(resolve));assert.equal(current.last_ip_location.text,'新登录地区');assert.equal(current.last_login,'2026-10-02T00:00:02Z');assert.equal(events.get('event_1').ip_location.text,'旧登录地区');assert.equal(events.get('event_2').ip_location.text,'新登录地区');assert.equal(alerts.length,2);
+ const {recordAuthenticationIpLocation}=require('../render-api/account-events');
+ await assert.rejects(recordAuthenticationIpLocation({supabase:store,eventId:'event_1',ip:'1.1.1.1',location:{text:'伪造地区'}}),/auth_ip_location_store_failed/);assert.equal(current.last_ip_location.text,'新登录地区');
+ assert.equal(await recordAuthenticationIpLocation({supabase:store,eventId:'event_1',ip:'unknown',location:{text:'地区'}}),false);
+ assert.equal(await recordAuthenticationIpLocation({supabase:store,eventId:'event_1',ip:'8.8.8.8',location:null}),false);
+});
