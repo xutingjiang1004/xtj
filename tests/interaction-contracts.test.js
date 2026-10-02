@@ -106,7 +106,8 @@ test('like UI is optimistic, coalesces rapid toggles, and keeps the control inte
   assert.match(flush, /xtjProtectedFetch\('\/api\/post\/like'/);
   assert.match(flush, /JSON\.stringify\(\{ post_id:\s*normalizedPostId,\s*liked:\s*requestedLiked \}\)/);
   assert.match(flush, /operation\.desired !== operation\.confirmed/);
-  assert.match(flush, /updatePostLikeCount\(postId, likeResult\.like_count\)/);
+  assert.match(flush, /intentDelta = Number\(operation\.desired\) - Number\(requestedLiked\)/);
+  assert.match(flush, /updatePostLikeCount\(postId, Math\.max\(0, Number\(likeResult\.like_count\) \+ intentDelta\)\)/);
   assert.match(core, /likeBtn\.disabled\s*=\s*false/);
   assert.doesNotMatch(toggle, /showToast\(nextLiked/);
 });
