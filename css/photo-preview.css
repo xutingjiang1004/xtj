@@ -69,7 +69,7 @@ html.xtj-photo-preview-ready #photoPreviewOverlay {
   --pp-scale: 1;
   --pp-rotate: 0deg;
   opacity: var(--pp-overlay-opacity);
-  contain: layout paint style;
+  contain: layout style;
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-root {
@@ -77,12 +77,12 @@ html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-root {
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack {
-  transform: translate3d(var(--pp-track-x), 0, 0);
-  will-change: transform;
+  transform: none;
+  will-change: auto;
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-track #ppSlideTrack {
-  transition: transform var(--pp-dur-base) var(--pp-ease-standard);
+  transition: left var(--pp-dur-base) var(--pp-ease-standard);
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage {
@@ -582,3 +582,28 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-slot {
   padding:0!important;min-height:0;color:rgba(255,255,255,.8)!important;text-align:left;
 }
 #photoPreviewOverlay .pp-social-status:not(:empty) { min-height:44px; }
+
+/* Original HDR images must not sit inside permanent 3D/alpha paint layers.
+   Safari can tone-map these layers differently from the wall's original img. */
+html.xtj-photo-preview-ready #photoPreviewOverlay,
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppImageWrapper,
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack,
+html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage,
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-slot,
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-img {
+  transform: none !important;
+  -webkit-transform: none !important;
+  transform-style: flat !important;
+  backface-visibility: visible !important;
+  -webkit-backface-visibility: visible !important;
+  will-change: auto !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack { position: relative; }
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-image-transformed #photoPreviewImage {
+  transform: translate(var(--pp-img-x),var(--pp-img-y)) scale(var(--pp-scale)) rotate(var(--pp-rotate)) !important;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar,
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppDeleteBtn { animation:none!important;transition:none!important; }

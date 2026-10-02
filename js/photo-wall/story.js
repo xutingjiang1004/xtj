@@ -2,6 +2,49 @@
   'use strict';
   var current = null, epoch = 0, controller = null, social = null, expanded = false, mutationVersion = 0, storyAuthEpoch = 0, commentVersion = 0;
   var likeStates = new Map(), avatars = new Map(), commentAnimation = null, commentSequence = 0;
+  var socialCache = new Map(), refreshTimer = 0;
+  function socialKey(owner,id){return authEpoch()+':'+owner+':'+id;}
+  function invalidateSocial(){if(current)socialCache.delete(socialKey(window.currentUser||'',current.cloudId));}
+  function stopRefresh(){clearTimeout(refreshTimer);refreshTimer=0;}
+  function scheduleRefresh(token,owner,id){
+    stopRefresh();
+    refreshTimer=setTimeout(function(){
+      if(valid(token,owner,id)&&!document.hidden)loadSocial(token,owner,id,true);
+    },15000);
+  }
+  function fetchSocial(owner,id,force){
+    var key=socialKey(owner,id),saved=socialCache.get(key);
+    if(saved&&saved.promise)return saved.promise;
+    if(!force&&saved&&saved.body&&Date.now()-saved.at<15000)return Promise.resolve(saved.body);
+    var entry={body:saved&&saved.body,at:saved&&saved.at||0},abort=new AbortController();
+    var timer=setTimeout(function(){abort.abort();},10000);
+    var identity=authEpoch();
+    entry.promise=json('/api/photo/'+encodeURIComponent(id)+'/social',{background:true,signal:abort.signal,authOwner:owner,authEpoch:identity}).then(function(body){
+      if(identity===authEpoch()&&owner===(window.currentUser||'')&&socialCache.get(key)===entry){entry.body=body;entry.at=Date.now();}
+      return body;
+    }).finally(function(){clearTimeout(timer);entry.promise=null;});
+    socialCache.set(key,entry);
+    if(socialCache.size>80){for(var pair of socialCache){if(!pair[1].promise&&pair[0]!==key){socialCache.delete(pair[0]);break;}}}
+    return entry.promise;
+  }
+  var socialWarmQueue=[], socialWarmKeys=new Set(), socialWarmActive=0;
+  function pumpSocialWarm(){
+    while(socialWarmActive<2&&socialWarmQueue.length){
+      var job=socialWarmQueue.shift();
+      if(job.identity!==authEpoch()||job.owner!==(window.currentUser||'')){socialWarmKeys.delete(job.key);continue;}
+      socialWarmActive++;
+      (function(task){fetchSocial(task.owner,task.id,false).catch(function(){}).finally(function(){socialWarmActive--;socialWarmKeys.delete(task.key);pumpSocialWarm();});})(job);
+    }
+  }
+  window.preloadPhotoStorySocial=function(photos){
+    var owner=window.currentUser||'',identity=authEpoch();
+    (photos||[]).filter(isWall).slice(0,12).forEach(function(photo){
+      var key=socialKey(owner,photo.cloudId),saved=socialCache.get(key);
+      if(socialWarmKeys.has(key)||saved&&(saved.promise||saved.body&&Date.now()-saved.at<15000)||socialWarmQueue.length>=24)return;
+      socialWarmKeys.add(key);socialWarmQueue.push({key:key,id:photo.cloudId,owner:owner,identity:identity});
+    });
+    pumpSocialWarm();
+  };
   var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function el(id){ return document.getElementById(id); }
   function icon(path){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+path+'</svg>'; }
@@ -25,7 +68,7 @@
   function ensure(){
     var root=el('photoPreviewOverlay'),info=root&&root.querySelector('.photo-preview-info');if(!info)return false;
     if(info.classList.contains('pp-story'))return true;
-    new MutationObserver(function(){if(!root.classList.contains('active')){epoch++;if(controller)controller.abort();current=null;commentsVisible(false,true);}}).observe(root,{attributes:true,attributeFilter:['class']});
+    new MutationObserver(function(){if(!root.classList.contains('active')){epoch++;stopRefresh();if(controller)controller.abort();current=null;commentsVisible(false,true);}}).observe(root,{attributes:true,attributeFilter:['class']});
     info.classList.add('pp-story');
     var user=el('photoPreviewUser'),time=el('photoPreviewTime'),views=el('photoPreviewViews');
     var author=document.createElement('div');author.className='pp-story-author';
@@ -53,17 +96,18 @@
   }
   function updateCounts(){
     if(!social)return;
-    el('ppLikeCount').textContent=Number.isFinite(social.like_count)?social.like_count:'—';el('ppCommentCount').textContent=Number.isFinite(social.comment_count)?social.comment_count:'—';
+    el('ppLikeCount').textContent=Number.isFinite(social.like_count)?social.like_count:'';el('ppCommentCount').textContent=Number.isFinite(social.comment_count)?social.comment_count:'';
     el('ppLikeBtn').setAttribute('aria-pressed',typeof social.liked==='boolean'?String(social.liked):'mixed');
     el('ppCommentsTitle').textContent=Number.isFinite(social.comment_count)?'评论 '+social.comment_count:'评论';
   }
-  async function loadSocial(token,owner,id){
+  async function loadSocial(token,owner,id,force){
     var version=mutationVersion, commentsAtStart=commentVersion;
     try {
-      var body=await json('/api/photo/'+encodeURIComponent(id)+'/social',{background:true,signal:controller.signal});
+      var body=await fetchSocial(owner,id,force!==false);
       if(!valid(token,owner,id)||commentsAtStart!==commentVersion)return;
       social=body;var saved=likeStates.get(owner+':'+id);if(saved&&saved.authEpoch===storyAuthEpoch&&(saved.pending||version!==mutationVersion)){social.liked=saved.desired;social.like_count=Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed));}else{likeStates.set(owner+':'+id,{confirmed:!!body.liked,desired:!!body.liked,count:body.like_count||0,pending:false,authEpoch:storyAuthEpoch});}current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
-    }catch(error){if(!valid(token,owner,id)||error.name==='AbortError')return;el('ppSocialStatus').textContent='互动暂未加载，点击重试';el('ppSocialStatus').onclick=function(){loadSocial(epoch,window.currentUser||'',current.cloudId);};el('ppLikeBtn').disabled=!likeStates.has(owner+':'+id);}
+    }catch(error){if(!valid(token,owner,id))return;el('ppSocialStatus').textContent='互动暂未加载，点击重试';el('ppSocialStatus').onclick=function(){loadSocial(epoch,window.currentUser||'',current.cloudId);};el('ppLikeBtn').disabled=!likeStates.has(owner+':'+id);}
+    finally{if(valid(token,owner,id))scheduleRefresh(token,owner,id);}
   }
   function motion(){return !!(el('ppCommentsPanel').animate && document.documentElement.getAttribute('data-xtj-motion')!=='off' && !matchMedia('(prefers-reduced-motion: reduce)').matches);}
   function commentsVisible(show, immediate){
@@ -124,12 +168,13 @@
     el('ppStoryCaption').textContent=caption;el('ppStoryCaption').hidden=!caption;
     el('ppCaptionMore').hidden=true;el('ppCaptionMore').setAttribute('aria-expanded','false');
     showAvatar(photo);
-    epoch++;if(controller)controller.abort();controller=new AbortController();social=null;expanded=false;mutationVersion=0;commentVersion=0;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
+    epoch++;stopRefresh();if(controller)controller.abort();controller=new AbortController();social=null;expanded=false;mutationVersion=0;commentVersion=0;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
     commentsVisible(false,true);el('ppCommentInput').value='';el('ppCommentInput').disabled=false;el('ppCommentSend').disabled=false;el('ppCommentError').textContent='';el('ppCommentsList').replaceChildren();
-    el('ppLikeCount').textContent='—';el('ppCommentCount').textContent='—';el('ppLikeBtn').setAttribute('aria-pressed','mixed');el('ppLikeBtn').disabled=true;el('ppSocialStatus').textContent='';
+    el('ppLikeCount').textContent='';el('ppCommentCount').textContent='';el('ppLikeBtn').setAttribute('aria-pressed','mixed');el('ppLikeBtn').disabled=true;el('ppSocialStatus').textContent='';
     el('ppLikeBtn').hidden=el('ppCommentBtn').hidden=!isWall(photo);
     var token=epoch,owner=window.currentUser||'',id=photo.cloudId;
-    if(isWall(photo)){var saved=likeStates.get(owner+':'+id);if(saved&&saved.pending&&saved.authEpoch!==storyAuthEpoch){likeStates.delete(owner+':'+id);saved=null;}if(saved){social={comments:[],liked:saved.desired,like_count:Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed))};updateCounts();el('ppLikeBtn').disabled=false;}loadSocial(token,owner,id);}
+    if(isWall(photo)){var cached=socialCache.get(socialKey(owner,id));if(cached&&cached.body){social=Object.assign({},cached.body);updateCounts();el('ppLikeBtn').disabled=false;}var saved=likeStates.get(owner+':'+id);if(saved&&saved.authEpoch!==storyAuthEpoch){likeStates.delete(owner+':'+id);saved=null;}if(saved){social=Object.assign({comments:[]},social||{},{liked:saved.desired,like_count:Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed))});updateCounts();el('ppLikeBtn').disabled=false;}loadSocial(token,owner,id,true);}
+    if(window.preloadPhotoStorySocial){var rows=window.__xtjPreviewExplicitPhotos||window.photoWallData||[],index=rows.indexOf(photo);if(index>=0)window.preloadPhotoStorySocial(rows.slice(Math.max(0,index-1),index+3));}
     requestAnimationFrame(refreshCaptionOverflow);
   };
   function showLikeState(entry,owner,id){
@@ -149,7 +194,7 @@
     var owner=window.currentUser||'',id=current.cloudId;if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
     var key=owner+':'+id,entry=likeStates.get(key);
     if(!entry){entry={confirmed:!!(social&&social.liked),desired:!!(social&&social.liked),count:(social&&social.like_count)||0,pending:false,authEpoch:storyAuthEpoch};likeStates.set(key,entry);}
-    entry.desired=!entry.desired;mutationVersion++;showLikeState(entry,owner,id);animateHeart();el('ppSocialStatus').textContent='';
+    entry.desired=!entry.desired;invalidateSocial();mutationVersion++;showLikeState(entry,owner,id);animateHeart();el('ppSocialStatus').textContent='';
     if(!entry.pending)saveLike(entry,owner,id);
   }
   async function saveLike(entry,owner,id){
@@ -185,17 +230,20 @@
     event.preventDefault();if(!current||!isWall(current)||el('ppCommentSend').disabled)return;
     var input=el('ppCommentInput'),content=input.value.trim();if(!content)return;
     var token=epoch,owner=window.currentUser||'',id=current.cloudId;if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
-    mutationVersion++;commentVersion++;input.disabled=true;el('ppCommentSend').disabled=true;
+    invalidateSocial();mutationVersion++;commentVersion++;input.disabled=true;el('ppCommentSend').disabled=true;
     try{var body=await json('/api/photo/'+id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content})});if(!valid(token,owner,id))return;
+      invalidateSocial();commentVersion++;
       social=social||{comments:[]};social.comments.unshift(body.comment);if(Number.isFinite(social.comment_count))social.comment_count++;input.value='';el('ppCommentError').textContent='';updateCounts();renderComments();loadSocial(token,owner,id);}
     catch(error){if(valid(token,owner,id)){el('ppCommentError').textContent=error.message;loadSocial(token,owner,id);}}
     finally{if(valid(token,owner,id)){input.disabled=false;el('ppCommentSend').disabled=false;}}
   }
   async function deleteComment(row,button){
-    if(button.disabled)return;commentVersion++;var token=epoch,owner=window.currentUser||'',id=current.cloudId;button.disabled=true;
-    try{await json('/api/post/comment/'+encodeURIComponent(row.id),{method:'DELETE'});if(!valid(token,owner,id))return;social.comments=social.comments.filter(function(r){return r.id!==row.id;});if(Number.isFinite(social.comment_count))social.comment_count=Math.max(0,social.comment_count-1);updateCounts();renderComments();loadSocial(token,owner,id);}
+    if(button.disabled)return;invalidateSocial();commentVersion++;var token=epoch,owner=window.currentUser||'',id=current.cloudId;button.disabled=true;
+    try{await json('/api/post/comment/'+encodeURIComponent(row.id),{method:'DELETE'});if(!valid(token,owner,id))return;invalidateSocial();commentVersion++;social.comments=social.comments.filter(function(r){return r.id!==row.id;});if(Number.isFinite(social.comment_count))social.comment_count=Math.max(0,social.comment_count-1);updateCounts();renderComments();loadSocial(token,owner,id);}
     catch(error){if(valid(token,owner,id)){el('ppCommentError').textContent=error.message;button.disabled=false;loadSocial(token,owner,id);}}
   }
   window.preloadPhotoStoryAvatars(window.photoWallData||[]);
+  window.preloadPhotoStorySocial(window.photoWallData||[]);
+  document.addEventListener('visibilitychange',function(){stopRefresh();if(!document.hidden&&current&&isWall(current))loadSocial(epoch,window.currentUser||'',current.cloudId,true);});
   document.addEventListener('keydown',function(event){if(event.key==='Escape'&&el('ppCommentsPanel')&&!el('ppCommentsPanel').hidden){event.stopImmediatePropagation();event.preventDefault();el('ppCommentsClose').click();}},true);
 })();

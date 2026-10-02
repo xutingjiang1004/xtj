@@ -91,7 +91,7 @@
 
   // Read both palettes in batches. Never interleave a selector-affecting write
   // with a computed-style read: that used to force a full style pass per node.
-  var palette = null, paletteFrame = 0, paletteCleanupFrame = 0, currentProgress = null;
+  var palette = null, paletteFrame = 0, paletteCleanupFrame = 0, currentProgress = null, completionTimer = 0;
   var localProgress = false;
   try {
     // Non-inherited values keep each frame from invalidating the entire app,
@@ -143,6 +143,7 @@
     paletteFrame = 0;
   }
   function clearPalette() {
+    clearTimeout(completionTimer);completionTimer=0;
     stopPaletteAnimation();
     if (palette) {
       clearTimeout(palette.captureDeadline);
@@ -169,7 +170,14 @@
     if (palette) return;
     htmlEl.classList.add('theme-switching');
     var original = htmlEl.getAttribute('data-theme');
-    if (!forceLive && motionEnabled() && typeof document.startViewTransition === 'function') {
+    // An offscreen named orb can leave a misplaced snapshot on WebKit. The
+    // personal/settings page uses the same live palette as a dragged slider.
+    var themeBox = themeBtn && themeBtn.getBoundingClientRect();
+    var visibleOrb = themeBox && themeBox.width > 0 && themeBox.height > 0 &&
+      themeBox.bottom > 0 && themeBox.top < innerHeight;
+    var appleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!forceLive && !appleTouch && visibleOrb && motionEnabled() && typeof document.startViewTransition === 'function') {
       var origin = original === 'dark' ? 1 : 0;
       var capture = {composited:true,ready:false,origin:origin,nodes:[],animations:[],finalMode:resolveThemeMode()};
       palette=capture; currentProgress=origin;
@@ -343,6 +351,9 @@
     // applyThemeMode synchronizes controls; immediately restore their live position.
     paintProgress(currentProgress);
     animatePalette(target,function() { clearPalette(); applyThemeMode(next); });
+    // Never retain a paused native snapshot if a browser stops delivering frames.
+    clearTimeout(completionTimer);
+    completionTimer=setTimeout(function(){applyThemeMode(resolveThemeMode());clearPalette();clearThemeSwitching();},1200);
   }
 
   function switchTheme() {

@@ -176,36 +176,20 @@
                 document.getElementById('profileDetailName').textContent = currentUser;
                 document.getElementById('profileDetailId').textContent = currentUser;
                 
-                // 获取用户信息（注册时间等）
+                // Only the authenticated server can read the account's creation fact.
+                var profileEpoch = _authStateEpoch;
                 try {
-                    const userInfoRes = await sb.from("posts")
-                        .select("content")
-                        .eq("user_name", profileOwner)
-                        .eq("media_type", "__user_info__")
-                        .order("created_at", { ascending: false })
-                        .limit(1);
-                    
-                    if (currentUser !== profileOwner) return;
-                    if (userInfoRes.data && userInfoRes.data.length > 0) {
-                        try {
-                            const userInfo = JSON.parse(userInfoRes.data[0].content);
-                            if (userInfo.reg_time) {
-                                document.getElementById('profileDetailRegTime').textContent = window.safeParseDate(userInfo.reg_time).toLocaleString();
-                            } else {
-                                document.getElementById('profileDetailRegTime').textContent = '-';
-                            }
-                        } catch(e) {
-                            document.getElementById('profileDetailRegTime').textContent = '-';
-                        }
-                    } else {
-                        document.getElementById('profileDetailRegTime').textContent = '-';
-                    }
-                } catch(e) {
-                    if (currentUser !== profileOwner) return;
-                    console.error("获取用户信息失败:", e);
-                    document.getElementById('profileDetailRegTime').textContent = '-';
+                    var response = await window.xtjProtectedFetch('/api/user/profile', { authOwner: profileOwner, authEpoch: profileEpoch });
+                    var body = response && await response.json();
+                    if (currentUser !== profileOwner || _authStateEpoch !== profileEpoch) return;
+                    if (!response || !response.ok || !body || !body.ok) throw new Error('profile_unavailable');
+                    var registered = body.registered_at && new Date(body.registered_at);
+                    document.getElementById('profileDetailRegTime').textContent = registered && Number.isFinite(registered.getTime())
+                        ? registered.toLocaleString('zh-CN') : '未保留注册时间';
+                } catch (error) {
+                    if (currentUser !== profileOwner || _authStateEpoch !== profileEpoch) return;
+                    document.getElementById('profileDetailRegTime').textContent = '暂时无法读取，请重新打开重试';
                 }
-                
             };
 
             var profileAvatarRequestSeq = 0;
@@ -560,6 +544,7 @@
                 currentUser = '';
                 window.currentUser = '';
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
+                try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
                 window._lastKnownUser = '';
                 window.currentUserInfoSnapshot = null;
