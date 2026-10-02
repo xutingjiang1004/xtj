@@ -74,7 +74,8 @@ function isPrivateAddress(address) {
       (first === 169 && octets[1] === 254) ||
       (first === 172 && octets[1] >= 16 && octets[1] <= 31) ||
       (first === 192 && (octets[1] === 168 || (octets[1] === 0 && octets[2] === 0) || (octets[1] === 0 && octets[2] === 2))) ||
-      (first === 198 && (octets[1] === 18 || octets[1] === 19 || octets[1] === 51)) ||
+      (first === 192 && octets[1] === 88 && octets[2] === 99) ||
+      (first === 198 && (octets[1] === 18 || octets[1] === 19 || (octets[1] === 51 && octets[2] === 100))) ||
       (first === 203 && octets[1] === 0 && octets[2] === 113);
   }
   if (net.isIP(value) === 6) {
@@ -90,12 +91,15 @@ function isPrivateAddress(address) {
     }
     // 审计 🟡：补齐 6to4(2002::/16，可内嵌任意 IPv4)、Teredo(2001::/32)、
     // 文档段(2001:db8::/32)、NAT64(64:ff9b::/96) 与组播(ff00::/8)
-    return (groups[0] & 0xfe00) === 0xfc00 ||
+    return (groups[0] & 0xe000) !== 0x2000 ||
+      (groups[0] & 0xfe00) === 0xfc00 ||
       (groups[0] & 0xffc0) === 0xfe80 ||
       (groups[0] & 0xff00) === 0xff00 ||
       (groups[0] === 0x64 && groups[1] === 0xff9b) ||
       groups[0] === 0x2002 ||
-      (groups[0] === 0x2001 && (groups[1] === 0x0 || groups[1] === 0x0db8));
+      (groups[0] === 0x3fff && (groups[1] & 0xf000) === 0) ||
+      (groups[0] === 0x2001 && (groups[1] === 0x0 || groups[1] === 0x2 ||
+        (groups[1] & 0xfff0) === 0x10 || (groups[1] & 0xfff0) === 0x20 || groups[1] === 0x0db8));
   }
   return false;
 }
@@ -126,7 +130,7 @@ async function assertSafeWebUrl(rawUrl, lookupImpl) {
   // Free-tier cold starts / transient resolver blips: retry DNS a couple times.
   for (var attempt = 0; attempt < 3; attempt++) {
     try {
-      addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
+      addresses = await lookup(parsed.hostname.replace(/^\[|\]$/g, ''), { all: true, verbatim: true });
       lastLookupError = null;
       break;
     } catch (err) {
@@ -390,6 +394,7 @@ async function fetchSafeWebPage(rawUrl, options) {
   try {
     return await fetchSafeWebPageDirect(current, { lookupImpl: lookupImpl, maxBytes: maxBytes, timeoutMs: timeoutMs, signal: externalSignal, headers: options.headers, allowJinaFallback: options.allowJinaFallback });
   } catch (err) {
+    if (externalSignal && externalSignal.aborted) throw err;
     directErr = err;
   }
 
@@ -399,6 +404,7 @@ async function fetchSafeWebPage(rawUrl, options) {
   //   若不复查，黑名单目标会经公共代理整体绕过 assertSafeWebUrl 的内网判定。
   //   兜底前对目标做与直接路径同等的校验，命中黑名单则保留原始错误。
   if (options.allowJinaFallback !== false) {
+    if (externalSignal && externalSignal.aborted) throw new Error('请求已取消');
     try {
       await assertSafeWebUrl(current, lookupImpl);
     } catch (safeErr) {
@@ -408,7 +414,8 @@ async function fetchSafeWebPage(rawUrl, options) {
       var jina = await fetchViaJinaReader(current, {
         lookupImpl: lookupImpl,
         maxBytes: Math.min(maxBytes, 900 * 1024),
-        timeoutMs: Math.min(timeoutMs, 18000)
+        timeoutMs: Math.min(timeoutMs, 18000),
+        signal: externalSignal
       });
       if (jina && jina.content && jina.content.replace(/\s+/g, '').length >= 1) {
         return {
@@ -483,14 +490,18 @@ async function fetchSafeWebPageDirect(current, options) {
         var jina = await fetchViaJinaReader(parsed.toString(), {
           lookupImpl: lookupImpl,
           maxBytes: Math.min(maxBytes, 900 * 1024),
-          timeoutMs: Math.min(timeoutMs, 14000)
+          timeoutMs: Math.min(timeoutMs, 14000),
+          signal: externalSignal
         });
         if (jina && jina.content && jina.content.replace(/\s+/g, '').length > content.replace(/\s+/g, '').length) {
           content = jina.content;
           if (jina.title) title = jina.title;
           usedFallback = true;
         }
-      } catch (_) { /* keep direct extract */ }
+      } catch (err) {
+        if (externalSignal && externalSignal.aborted) throw err;
+        /* keep direct extract */
+      }
     }
 
     if (!content) throw new Error('未能从页面提取可读文本');
@@ -516,6 +527,7 @@ async function fetchSafeWebPageDirect(current, options) {
  */
 async function fetchViaJinaReader(targetUrl, options) {
   options = options || {};
+  if (options.signal && options.signal.aborted) throw new Error('请求已取消');
   // 截掉 hash（对抓取无意义）后整体 encodeURIComponent 作为 r.jina.ai 的 path，
   // 避免 query/hash 被 URL 解析器当成 r.jina.ai 自身的参数
   var jinaUrl = 'https://r.jina.ai/' + encodeURIComponent(String(targetUrl || '').split('#')[0]);
@@ -529,7 +541,8 @@ async function fetchViaJinaReader(targetUrl, options) {
     {
       Accept: 'text/plain,text/markdown,text/html;q=0.8,*/*;q=0.5',
       'X-Return-Format': 'markdown'
-    }
+    },
+    options.signal || null
   );
   if (!response || !response.ok) throw new Error('Jina 阅读失败 HTTP ' + (response && response.status || 0));
   var raw = response.body.toString('utf8');
@@ -552,6 +565,7 @@ module.exports = {
   fetchViaJinaReader: fetchViaJinaReader,
   fetchSafeRaw: fetchSafeRaw,
   fetchSafeBuffer: fetchSafeBuffer,
+  fetchSafeRedirectBuffer: fetchSafeRedirectBuffer,
   isPrivateAddress: isPrivateAddress,
   isBlockedWebHost: isBlockedWebHost,
   assertSafeWebUrl: assertSafeWebUrl,
@@ -565,6 +579,60 @@ module.exports = {
   //   纯函数、无网络副作用，导出不改变运行时行为。
   parseWebText: normalizeWebText
 };
+
+// Binary image proxy: validate and pin every hop before connecting. The bounded
+// transport stops reading at the byte limit, including redirects and compressed
+// responses. Decompression preserves the original image bytes without recoding.
+async function fetchSafeRedirectBuffer(rawUrl, options) {
+  options = options || {};
+  var current = String(rawUrl || '');
+  var maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 16 * 1024 * 1024;
+  var maxRedirects = Math.min(5, Math.max(0, options.maxRedirects == null ? 3 : Number(options.maxRedirects)));
+  var signal = options.signal;
+  for (var hop = 0; hop <= maxRedirects; hop++) {
+    if (signal && signal.aborted) throw new Error('请求已取消');
+    var safe;
+    try {
+      var parsed = new URL(current);
+      if (parsed.protocol !== 'https:') throw new Error('仅支持 HTTPS 图片地址');
+      safe = await assertSafeWebUrl(current, options.lookupImpl);
+    } catch (error) { error.code = 'IMAGE_UPSTREAM_BLOCKED'; throw error; }
+    if (signal && signal.aborted) throw new Error('请求已取消');
+    var response;
+    try {
+      response = await requestPinnedHttps(safe.parsed, safe.addresses, maxBytes,
+        options.timeoutMs || 45000,
+        Object.assign({}, options.headers || {}, { 'Accept-Encoding': 'identity' }), signal);
+    } catch (error) {
+      if (/超过大小限制/.test(error.message || '')) error.code = 'IMAGE_TOO_LARGE';
+      throw error;
+    }
+    if ([301, 302, 303, 307, 308].indexOf(response.status) >= 0) {
+      var location = response.headers.get('location');
+      if (!location || hop === maxRedirects) {
+        var redirectError = new Error('图片重定向无效或次数过多');
+        redirectError.code = 'IMAGE_UPSTREAM_BLOCKED'; throw redirectError;
+      }
+      try { current = new URL(location, safe.parsed).toString(); }
+      catch (error) { error.code = 'IMAGE_UPSTREAM_BLOCKED'; throw error; }
+      continue;
+    }
+    var body = response.body;
+    var encoding = String(response.headers.get('content-encoding') || '').toLowerCase();
+    var decode = encoding === 'gzip' || encoding === 'x-gzip' ? zlib.gunzip
+      : encoding === 'deflate' ? zlib.inflate : encoding === 'br' ? zlib.brotliDecompress : null;
+    if (decode) {
+      try {
+        body = await new Promise(function(resolve, reject) {
+          decode(body, { maxOutputLength: maxBytes }, function(error, value) { if (error) reject(error); else resolve(value); });
+        });
+      } catch (error) { if (error.code === 'ERR_BUFFER_TOO_LARGE') error.code = 'IMAGE_TOO_LARGE'; throw error; }
+    } else if (encoding && encoding !== 'identity') throw new Error('图片响应编码不支持');
+    if (signal && signal.aborted) throw new Error('请求已取消');
+    return { ok: response.ok, status: response.status, headers: response.headers,
+      url: safe.parsed.toString(), buffer: body, bytes: body.length };
+  }
+}
 
 // ── 安全二进制下载（供 read_zip / image_info / image_process 使用）───────────
 // ★ 2026-09-13 修复 S-1 遗漏面：与 fetchSafeRaw 同理 —— 把「解析 → 校验 → 连接」

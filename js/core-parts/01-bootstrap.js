@@ -626,6 +626,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
 
             // 通过 HttpOnly cookie 中的 refresh token 刷新 access token
             var _authStateEpoch = 0;
+            window.__xtjGetAuthEpoch = function() { return _authStateEpoch; };
             var _refreshPromise = null;
             var _sessionRequestQueue = Promise.resolve();
             function withSessionRequestLock(task) {
@@ -783,11 +784,13 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             window.ensureProtectedOperationAuth = async function(opts) {
                 // 后台/被动路径显式传 { background: true }；默认（无参）= 用户主动操作。
                 var _isBackground = !!(opts && opts.background);
+                var operationEpoch = _authStateEpoch;
                 // ★ 启动验证未完成时，等待验证完成（最多 5 秒）
                 if (window._xtjAuthState === 'auth_pending') {
                     var waitStart = Date.now();
                     while (window._xtjAuthState === 'auth_pending' && (Date.now() - waitStart) < 5000) {
                         await new Promise(function(r) { setTimeout(r, 150); });
+                        if (operationEpoch !== _authStateEpoch) return { ok: false, reason: 'identity_changed', token: '', user_name: '' };
                     }
                 }
                 try {
@@ -827,7 +830,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     // A protected background call may have started for A while
                     // the user was logging in as B. Its late refresh is no
                     // longer evidence about B's session and must not clear it.
-                    if (String(currentUser || '') !== userName) return { ok: false, reason: 'identity_changed', token: '', user_name: '' };
+                    if (operationEpoch !== _authStateEpoch || String(currentUser || '') !== userName) return { ok: false, reason: 'identity_changed', token: '', user_name: '' };
                     if (token) {
                         // ★ 验证 token 身份与 UI 身份一致
                         // 优先使用刷新时服务端返回的规范 user_name
@@ -864,9 +867,32 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             };
             window.ensureRealUserAuth = window.ensureProtectedOperationAuth;
 
+            function captureAuthRequestFence(options) {
+                var owner = Object.prototype.hasOwnProperty.call(options, 'authOwner') ? options.authOwner : currentUser;
+                var epoch = Object.prototype.hasOwnProperty.call(options, 'authEpoch') ? options.authEpoch : _authStateEpoch;
+                return { check: function() {
+                    if (owner !== currentUser || epoch !== _authStateEpoch) {
+                        var error = new Error('账号已切换，操作已停止');
+                        error.code = 'identity_changed';
+                        throw error;
+                    }
+                }};
+            }
+            function normalizedAuthHeaders(options, token) {
+                var headers = new Headers(options.headers || {});
+                // Headers performs case-insensitive replacement, including caller-supplied arrays.
+                headers.delete('Authorization');
+                if (token) headers.set('Authorization', 'Bearer ' + token);
+                var isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+                if (!isFormData && !headers.has('Content-Type') && options.body != null) headers.set('Content-Type', 'application/json');
+                return headers;
+            }
+
             window.xtjProtectedFetch = async function(path, options) {
                 options = options || {};
                 var timeoutMs = options.timeoutMs != null ? options.timeoutMs : 15000;
+                var fence = captureAuthRequestFence(options);
+                fence.check();
                 // ★ 2026-09-26（审计 P2-30）：离线时立即给出明确文案，不再让用户等到超时
                 //   之后收到笼统的"网络不稳定"提示（写操作在离线状态注定失败）。
                 if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -891,6 +917,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 var auth = await window.ensureProtectedOperationAuth(
                     options.background ? { background: true } : undefined
                 );
+                fence.check();
                 if (!auth.ok) {
                     // ★ 修复「静默无反馈」：确证失效已在 ensureProtectedOperationAuth 内弹窗；
                     //   网络类失败（unavailable/network_error）此前只 throw，调用方多半静默
@@ -910,28 +937,31 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     throw authError;
                 }
                 async function send(token) {
-                    var headers = Object.assign({}, options.headers || {});
-                    var isFormData = options.body instanceof FormData;
-                    if (!isFormData && !headers['Content-Type'] && options.body != null) {
-                        headers['Content-Type'] = 'application/json';
-                    }
-                    headers.Authorization = 'Bearer ' + token;
+                    fence.check();
+                    var headers = normalizedAuthHeaders(options, token);
                     var fetchOpts = Object.assign({}, options, {
                         credentials: 'include',
                         headers: headers
                     });
                     delete fetchOpts.timeoutMs;
+                    delete fetchOpts.authOwner; delete fetchOpts.authEpoch; delete fetchOpts.background;
                     var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
-                    return doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                    var result = await doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                    fence.check();
+                    return result;
                 }
                 var response = await send(auth.token);
                 if (response.status === 401) {
+                    fence.check();
                     var renewed = await window.refreshUserToken(true);
+                    fence.check();
                     if (renewed) response = await send(renewed);
                 }
                 if (response.status === 401) {
+                    fence.check();
                     window.handleProtectedAuthFailure({ background: !!options.background });
                 }
+                fence.check();
                 return response;
             };
 
@@ -939,18 +969,23 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             window.xtjOptionalAuthFetch = async function(path, options) {
                 options = options || {};
                 var timeoutMs = options.timeoutMs != null ? options.timeoutMs : 15000;
+                var fence = captureAuthRequestFence(options);
+                fence.check();
                 var knownUser = String(currentUser || window.safeStorage.get('xtj_user') || '').trim();
 
                 async function send(token) {
-                    var headers = Object.assign({}, options.headers || {});
-                    if (token) headers.Authorization = 'Bearer ' + token;
+                    fence.check();
+                    var headers = normalizedAuthHeaders(options, token);
                     var fetchOpts = Object.assign({}, options, {
                         credentials: 'include',
                         headers: headers
                     });
                     delete fetchOpts.timeoutMs;
+                    delete fetchOpts.authOwner; delete fetchOpts.authEpoch; delete fetchOpts.background;
                     var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
-                    return doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                    var result = await doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                    fence.check();
+                    return result;
                 }
 
                 var token = getUserToken();
@@ -958,16 +993,21 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (!token && knownUser) {
                     try {
                         token = await ensureUserToken();
+                        fence.check();
                     } catch (tokenErr) {
+                        fence.check();
                         console.warn('[XTJ] optional-auth token refresh failed:', tokenErr && tokenErr.message);
                         token = '';
                     }
                 }
                 var response = await send(token);
                 if (token && response.status === 401) {
+                    fence.check();
                     var renewed = await window.refreshUserToken(true);
+                    fence.check();
                     response = await send(renewed || '');
                 }
+                fence.check();
                 return response;
             };
 

@@ -175,12 +175,9 @@ test.describe('release validation', () => {
         '.photo-preview-close',
         '#ppPrevBtn',
         '#ppNextBtn',
-        '#ppZoomOutBtn',
-        '#ppZoomInBtn',
         '#ppInfoBtn',
         '#ppShareBtn',
-        '#ppRotateBtn',
-        '#ppDeleteBtn'
+        '#ppRotateBtn'
       ];
       return selectors.map((selector) => {
         const el = document.querySelector(selector);
@@ -188,6 +185,9 @@ test.describe('release validation', () => {
         return { selector, width: rect.width, height: rect.height };
       });
     });
+    await expect(page.locator('#ppZoomOutBtn')).toBeHidden();
+    await expect(page.locator('#ppZoomInBtn')).toBeHidden();
+    await expect(page.locator('#ppDeleteBtn')).toBeHidden();
     previewButtons.forEach((entry) => {
       expect(entry.width, entry.selector).toBeGreaterThanOrEqual(44);
       expect(entry.height, entry.selector).toBeGreaterThanOrEqual(44);
@@ -215,51 +215,50 @@ test.describe('release validation', () => {
     await context.close();
   });
 
-  test('post tools retain 44px targets and the profile becomes a two-column layout on desktop', async ({ browser }) => {
+  test('compact header tools remain clickable and ordered, with safe desktop profile layout', async ({ browser }) => {
     const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const mobilePage = await mobile.newPage();
     await gotoApp(mobilePage);
     const mobileState = await mobilePage.evaluate(() => {
       document.getElementById('announcement-btn-wrapper').style.display = 'block';
       document.getElementById('report-btn-wrapper').style.display = 'block';
-      return ['#announcementBtn', '#reportBtn'].map((selector) => {
+      return ['#announcementBtn', '#reportBtn', '#filterToggleBtn'].map((selector) => {
         const rect = document.querySelector(selector).getBoundingClientRect();
-        return { selector, width: rect.width, height: rect.height, overflow: document.documentElement.scrollWidth > window.innerWidth + 1 };
+        const center = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return { selector, hit: !!(center && (center === document.querySelector(selector) || document.querySelector(selector).contains(center))), width: rect.width, height: rect.height, overflow: document.documentElement.scrollWidth > window.innerWidth + 1 };
       });
     });
     mobileState.forEach((entry) => {
-      expect(entry.width, entry.selector).toBeGreaterThanOrEqual(44);
-      expect(entry.height, entry.selector).toBeGreaterThanOrEqual(44);
+      expect(entry.width, entry.selector).toBeGreaterThanOrEqual(24);
+      expect(entry.height, entry.selector).toBeGreaterThanOrEqual(24);
       expect(entry.overflow, entry.selector).toBeFalsy();
+      expect(entry.hit, entry.selector).toBe(true);
     });
     const mobileLayout = await mobilePage.evaluate(() => {
       const nav = document.querySelector('#panelPosts .posts-nav');
-      const children = Array.from(nav.children);
-      const cards = Array.from(document.querySelectorAll('#panelPosts .stats .stat-card'));
-      return {
-        announcementIndex: children.indexOf(document.getElementById('announcement-btn-wrapper')),
-        reportIndex: children.indexOf(document.getElementById('report-btn-wrapper')),
-        authIndex: children.indexOf(nav.querySelector('.nav-auth')),
-        statsGap: parseFloat(getComputedStyle(document.querySelector('#panelPosts .stats')).columnGap),
-        statRadii: cards.map((card) => parseFloat(getComputedStyle(card).borderRadius))
-      };
+      const tools = nav.querySelector('.posts-nav-tools');
+      const announcement = document.getElementById('announcementBtn').getBoundingClientRect();
+      const report = document.getElementById('reportBtn').getBoundingClientRect();
+      const filter = document.getElementById('filterToggleBtn').getBoundingClientRect();
+      return { tools: !!tools, announcementRight: announcement.right, reportLeft: report.left, reportRight: report.right, filterLeft: filter.left, statsCount: document.querySelectorAll('#panelPosts .stats .stat-card').length };
     });
-    expect(mobileLayout.announcementIndex).toBeLessThan(mobileLayout.reportIndex);
-    expect(mobileLayout.reportIndex).toBeLessThan(mobileLayout.authIndex);
-    expect(mobileLayout.statsGap).toBeGreaterThanOrEqual(7);
-    mobileLayout.statRadii.forEach((radius) => expect(radius).toBeGreaterThanOrEqual(16));
+    expect(mobileLayout.tools).toBe(true);
+    expect(mobileLayout.announcementRight).toBeLessThanOrEqual(mobileLayout.reportLeft);
+    expect(mobileLayout.reportRight).toBeLessThanOrEqual(mobileLayout.filterLeft);
+    expect(mobileLayout.statsCount).toBe(0);
     await mobile.close();
 
     const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const desktopPage = await desktop.newPage();
     await gotoApp(desktopPage);
     await switchTab(desktopPage, 'profile');
-    const columns = await desktopPage.evaluate(() => getComputedStyle(document.getElementById('profileMainView')).gridTemplateColumns);
+    const columns = await desktopPage.evaluate(() => getComputedStyle(document.querySelector('#profileMainView .profile-activity-board')).gridTemplateColumns);
+    await expect(desktopPage.locator('#profileMainView .profile-activity-card')).toHaveCount(4);
     expect(columns.trim().split(/\s+/).length).toBe(2);
     const profileSafety = await desktopPage.evaluate(() => {
       const container = document.querySelector('#panelProfile .dock-profile-container');
       const dock = document.getElementById('dockBar').getBoundingClientRect();
-      const last = document.getElementById('profileTotalsBar').getBoundingClientRect();
+      const last = document.querySelector('#profileMainView .profile-settings').getBoundingClientRect();
       return {
         overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
         paddingBottom: parseFloat(getComputedStyle(container).paddingBottom),
@@ -312,7 +311,7 @@ test.describe('release validation', () => {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
       await gotoApp(page);
-      await page.locator('.dock-tab[data-tab="chat"]').click();
+      await page.locator('.desktop-nav-item[data-desktop-tab="chat"]').click();
       await expect(page.locator('#dockChatListView')).toBeVisible();
       await expect(page.locator('#dockChatDetailView')).toBeVisible();
       expect(await page.locator('#dockChatContainer').evaluate(el => getComputedStyle(el).display)).toBe('grid');
@@ -526,6 +525,7 @@ test.describe('release validation', () => {
       addEventListener('unhandledrejection', event => window.__unhandledRejections.push(String(event.reason && event.reason.message || event.reason)));
     });
     page.on('pageerror', error => pageErrors.push(error.message));
+    await page.setViewportSize({ width: 390, height: 844 });
     await gotoApp(page);
     const order = ['posts', 'chat', 'ai', 'profile'];
     for (let index = 0; index < 30; index += 1) {

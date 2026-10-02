@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),express=req
 const {recordLocationFix,createLocationHistory}=require('../render-api/location-history');
 const {browserContext,createBrowserContext}=require('../render-api/browser-context');
 test('GPS record binds the authenticated actor and account; duplicate retries do not overwrite evidence',async()=>{
- const writes=[];const db={from(table){if(table==='posts')return{select(){return this;},eq(){return this;},async maybeSingle(){return{data:{id:'account-A'}};}};return{async upsert(row,options){writes.push({row,options});return{error:null};}};}};
+ const writes=[];let stored;const db={from(table){if(table==='posts')return{select(){return this;},eq(){return this;},async maybeSingle(){return{data:{id:'account-A'}};}};return{async upsert(row,options){writes.push({row,options});stored={...row,received_at:new Date().toISOString(),resolution_status:'pending'};return{error:null};},select(){return this;},eq(){return this;},async maybeSingle(){return{data:stored};}};}};
  await recordLocationFix({supabase:db,actor:'A',body:{user_name:'B',latitude:26,longitude:119,accuracy:0,captured_at:new Date().toISOString(),capture_id:'post_one'},reason:'post_location',ip:'1.2.3.4'});
  assert.equal(writes[0].row.user_name,'A');assert.equal(writes[0].row.account_id,'account-A');assert.equal(writes[0].row.accuracy_m,0);assert.equal(writes[0].options.ignoreDuplicates,true);assert.equal(writes[0].row.capture_reason,'post_location');
  await assert.rejects(recordLocationFix({supabase:db,actor:'A',body:{latitude:200,longitude:119},reason:'post_location'}));assert.equal(writes.length,1);
@@ -67,4 +67,44 @@ test('orphaned GPS history is resolved or marked failed instead of remaining pen
  const db={from(){let patch=null;const q={select(){return q;},eq(k,v){filters[k]=v;return q;},order(){return q;},limit(){return q;},update(value){patch=value;filters={};return q;},then(resolve){if(patch)writes.push({patch,filters:{...filters}});return Promise.resolve({data:patch?null:rows,error:null}).then(resolve);}};return q;}};
  await resolvePendingHistory({supabase:db,async resolver(lat){return lat===26?{address:'resolved address'}:{error:'rate_limited'};}});
  assert.equal(writes[0].patch.resolution_status,'resolved');assert.equal(writes[0].filters.account_id,'A');assert.equal(writes[1].patch.resolution_status,'failed');assert.equal(writes[1].filters.capture_id,'legacy_two');
+});
+
+function immutableLocationStore(){
+ const facts=new Map();let writes=0;
+ return {facts,get writes(){return writes;},from(table){
+  if(table==='posts')return{select(){return this;},eq(){return this;},order(){return this;},limit(){return this;},async maybeSingle(){return{data:{id:'account-A'}};}};
+  const filters={};const q={select(){return q;},eq(k,v){filters[k]=v;return q;},async upsert(row){writes++;const key=row.account_id+':'+row.capture_id;if(!facts.has(key))facts.set(key,{...row,received_at:new Date().toISOString(),resolution_status:'pending'});return{error:null};},async maybeSingle(){return{data:facts.get(filters.account_id+':'+filters.capture_id)};}};return q;
+ }};
+}
+test('GPS ids are immutable across retries and competing writes, including accuracy/page identity',async()=>{
+ const db=immutableLocationStore(),body={latitude:30,longitude:120,accuracy:20,capture_id:'same',page_load_id:'page_12345678',captured_at:new Date(Date.now()-3600000).toISOString()};
+ const fix=await recordLocationFix({supabase:db,actor:'A',body,reason:'post_location'});
+ const duplicate=await recordLocationFix({supabase:db,actor:'A',body:{...body,captured_at:new Date().toISOString()},reason:'post_location'});
+ assert.equal(duplicate.location.captured_at,fix.location.captured_at);assert.equal(duplicate.location.received_at,fix.location.received_at);
+ for(const patch of [{latitude:40,longitude:116},{accuracy:0},{page_load_id:'page_other123'}])await assert.rejects(recordLocationFix({supabase:db,actor:'A',body:{...body,...patch},reason:'post_location'}),e=>e.status===409&&e.code==='location_capture_conflict');
+ const row=db.facts.get('account-A:same');assert.equal(row.latitude,30);assert.equal(row.longitude,120);assert.equal(row.accuracy_m,20);
+ const outcomes=await Promise.allSettled([30,40].map(latitude=>recordLocationFix({supabase:db,actor:'A',body:{latitude,longitude:120,capture_id:'race'},reason:'post_location'})));
+ assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(outcomes.find(r=>r.status==='rejected').reason.status,409);
+});
+test('GPS rejects coercible strings/booleans and capture id truncation before any ledger write',async()=>{
+ const db=immutableLocationStore();
+ for(const patch of [{latitude:''},{longitude:false},{accuracy:''},{latitude:'30'},{capture_id:'x'.repeat(161)},{capture_id:123},{capture_id:' '}])await assert.rejects(recordLocationFix({supabase:db,actor:'A',body:{latitude:30,longitude:120,accuracy:0,...patch},reason:'post_location'}),e=>e.status===400);
+ assert.equal(db.writes,0);
+ const fix=await recordLocationFix({supabase:db,actor:'A',body:{latitude:0,longitude:0,accuracy:0},reason:'post_location'});assert.equal(fix.location.latitude,0);assert.equal(fix.location.accuracy_m,0);
+});
+test('real GPS routes reject invalid types and duplicate id conflicts before reverse geocoding',async()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync(require.resolve('../render-api/server'),'utf8');
+ const db=immutableLocationStore(),app=express();app.use(express.json());let geocodes=0;let merged;
+ const context={app,supabase:db,authenticateUser(req,res,next){req.userName='A';next();},rateLimit(){return(req,res,next)=>next();},getClientIp(){return'8.8.8.8';},require(name){if(name==='./location-history')return require('../render-api/location-history');return require(name);},console,async fetch(){geocodes++;return{ok:true,async json(){return{display_name:'原始地址',address:{city:'城市'}};}};},AbortController,setTimeout,clearTimeout,USER_INFO_MARKER:'__user_info__',async mergeUserInfo(actor,patch){merged=patch;},async createLocationTask(){},sanitizeError(){return'error';}};
+ let start=source.indexOf("app.post('/api/location/reverse'");vm.runInNewContext(source.slice(start,source.indexOf("app.post('/api/post/update'",start)),context);
+ // Test the conflict before the route's address update and avoid external traffic.
+ await recordLocationFix({supabase:db,actor:'A',body:{latitude:30,longitude:120,accuracy:0,capture_id:'same'},reason:'post_location'});
+ await request(app).post('/api/location/reverse').send({latitude:40,longitude:116,accuracy:0,capture_id:'same'}).expect(409);
+ await request(app).post('/api/location/reverse').send({latitude:'30',longitude:120}).expect(400);assert.equal(geocodes,0);
+ start=source.indexOf("app.post('/api/user/location'");vm.runInNewContext(source.slice(start,source.indexOf('// GET /api/user/location/status',start)),context);
+ await request(app).post('/api/user/location').send({latitude:'',longitude:false,accuracy:'',page_load_id:'page_12345678'}).expect(400);
+ await request(app).post('/api/user/location').send({latitude:40,longitude:116,accuracy:0,page_load_id:'page_12345678',capture_id:'same'}).expect(409);
+ // The account query doubles as an empty user-info row in this isolated DB.
+ const captured=new Date(Date.now()-3600000).toISOString();const r=await request(app).post('/api/user/location').send({latitude:30,longitude:120,accuracy:0,page_load_id:'page_12345678',capture_id:'hour_old',captured_at:captured}).expect(200);
+ assert.equal(r.body.location.captured_at,captured);assert.equal(merged.last_precise_location.captured_at,db.facts.get('account-A:hour_old').captured_at);assert.equal(r.body.location.received_at,db.facts.get('account-A:hour_old').received_at);
 });

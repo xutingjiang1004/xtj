@@ -32,10 +32,8 @@ test('retired behavior API refuses collection without touching storage', () => {
   assert.doesNotMatch(segment, /supabase\.from|events\.map/);
 });
 
-test('traffic attribution retains only origin, UTM labels, and landing path', () => {
-  const meta = client.slice(client.indexOf('function getDeviceMeta()'), client.indexOf('function getBrowserFingerprint'));
-  assert.match(meta, /referrer_origin/);
-  assert.match(meta, /utm_source/);
-  assert.match(meta, /landing_path/);
-  assert.doesNotMatch(meta, /searchParams\.get\('email'\)/);
+test('retired device collectors and traffic attribution cannot be re-enabled by server flags', () => {
+  assert.doesNotMatch(client, /function getDeviceMeta|function getBrowserFingerprint|referrer_origin|utm_source|landing_path|\/api\/log-login-event|\/api\/security-settings/);
+  assert.match(client, /window\.logLoginEventSafe = function\(\) \{ return; \}/);
+  assert.match(client, /window\.logLoginVisitSafe = function\(\) \{ return; \}/);
 });

@@ -32,7 +32,7 @@ function validateApiBase(raw, env = process.env) {
   }
 
   const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
-  const isLocal = localHosts.has(url.host.toLowerCase());
+  const isLocal = localHosts.has(url.hostname.toLowerCase());
   const localOptIn = env.NODE_ENV !== "production" && env.XTJ_MCP_ALLOW_LOCALHOST === "true" && isLocal;
   if (url.protocol !== "https:" && !(localOptIn && url.protocol === "http:")) {
     throw new Error("XTJ_API_BASE 必须使用 HTTPS（仅非生产 localhost 可显式允许 HTTP）");

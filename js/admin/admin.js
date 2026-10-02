@@ -250,6 +250,10 @@
     var _allDataLoadPromise = null; // ★ M51：loadAllData in-flight Promise（复用，替代仅布尔锁）
     var _allDataLoadGeneration = 0;
     var _allDataAbortController = null;
+    var _adminSessionGeneration = 0;
+    var _adminLogoutPromise = null;
+    var _adminDetailGeneration = 0;
+    var _adminDetailAbortController = null;
     var adminTabSwitchGeneration = 0;
     var searchUser = '', searchPost = '';
     // 主 Tab 白名单：refreshAdminTab / switchTab / initAdminClient 共用，避免三份名单漂移
@@ -469,16 +473,21 @@
     }
 
     async function refreshUserAccessToken() {
+        var generation = _adminSessionGeneration;
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); }, 15000);
         try {
             var response = await fetch(API_BASE + '/api/user/refresh', {
-                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }
+                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, signal: controller.signal
             });
             var data = await response.json().catch(function() { return {}; });
-            if (!response.ok || !data || !data.token) return '';
+            if (generation !== _adminSessionGeneration || !response.ok || !data || !data.token) return '';
             setToken(data.token);
             return data.token;
         } catch (e) {
             return '';
+        } finally {
+            clearTimeout(timer);
         }
     }
 
@@ -489,6 +498,7 @@
 
     async function apiCall(method, path, body, options) {
         options = options || {};
+        var generation = _adminSessionGeneration;
         if (!API_BASE) {
             throw new Error('API_BASE 未配置');
         }
@@ -500,6 +510,7 @@
         };
         var token = useUserAccessToken ? getToken() : '';
         if (useUserAccessToken && !token) token = await refreshUserAccessToken();
+        if (generation !== _adminSessionGeneration) throw new DOMException('会话已改变', 'AbortError');
         if (useUserAccessToken && !token) throw new Error('用户访问凭证不可用');
         if (token) opts.headers['Authorization'] = 'Bearer ' + token;
         if (body) opts.body = JSON.stringify(body);
@@ -527,7 +538,8 @@
                     }));
                 }
             }
-            if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
+            // Keep the deadline and cancellation active while reading the body.
+            if (generation !== _adminSessionGeneration) throw new DOMException('会话已改变', 'AbortError');
         } catch (fetchErr) {
             clearTimeout(at);
             if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
@@ -536,9 +548,10 @@
             }
             throw new Error('网络连接失败，请检查: ' + (fetchErr.message || '未知错误'));
         }
-        clearTimeout(at);
         // ★ 401 会话清理前置：后端返回非 JSON（HTML 网关错误页）时也能正确清理会话
         if (res.status === 401 && !useUserAccessToken) {
+            clearTimeout(at);
+            if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
             clearSession();
             try {
                 document.getElementById('dashboard').style.display = 'none';
@@ -550,8 +563,13 @@
         try {
             data = await res.json();
         } catch (jsonErr) {
+            if (ac.signal.aborted || generation !== _adminSessionGeneration) throw new DOMException('请求已取消或超时', 'AbortError');
             data = {};
+        } finally {
+            clearTimeout(at);
+            if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
         }
+        if (generation !== _adminSessionGeneration) throw new DOMException('会话已改变', 'AbortError');
         if (!res.ok) throw new Error(data.error || '请求失败 (HTTP ' + res.status + ')');
         saveSession();
         return data;
@@ -835,6 +853,8 @@
         // 便于与后端/其它超时统一调优；超时触发 abort 后由 catch 提示、finally 恢复按钮。
         var loginTimeout = setTimeout(function() { loginAbortController.abort(); }, ADMIN_LOGIN_TIMEOUT_MS);
         try {
+            if (_adminLogoutPromise) await _adminLogoutPromise;
+            _adminSessionGeneration++;
             var res = await fetch(API_BASE + '/admin/login', {
                 method: 'POST',
                 credentials: 'include',
@@ -850,14 +870,9 @@
                 return;
             }
             var loginToken = data.user_token;
-            if (!loginToken || typeof loginToken !== 'string' || !loginToken.trim()) {
-                err.textContent = '服务端未返回有效 Token，请重试';
-                btn.disabled = false;
-                btn.textContent = '登录';
-                return;
-            }
             ADMIN = name;
-            setToken(loginToken);
+            if (typeof loginToken === 'string' && loginToken.trim()) setToken(loginToken);
+            else clearToken(); // The administrator Cookie remains valid during user-session outages.
             try {
                 await initAdminClient();
             } catch (initErr) {
@@ -894,16 +909,11 @@
     };
 
     window.doAdminLogout = async function() {
-        try {
-            if (API_BASE) {
-                var _token = getToken();
-                // ★ 修复：跨域登出必须携带 Cookie（credentials:'include'）并 await，
-                // 确保服务端会话被注销后再清理本地状态，否则共享电脑的下一人仍可直连 /admin/* 接口
-                var _opts = { method: 'POST', credentials: 'include' };
-                if (_token) _opts.headers = { 'Authorization': 'Bearer ' + _token };
-                await fetch(API_BASE + '/admin/logout', _opts).catch(function() {});
-            }
-        } catch(e) { /* 忽略登出请求异常，仍继续清理本地状态 */ }
+        if (_adminLogoutPromise) return _adminLogoutPromise;
+        var companionToken = getToken();
+        _adminSessionGeneration++;
+        ADMIN = null;
+        window.closeAdminDetailModal();
         stopRegisterAlertPolling();
         _allDataLoadGeneration++;
         if (_allDataAbortController) {
@@ -937,6 +947,48 @@
         document.getElementById('dashboard').style.display = 'none';
         document.getElementById('loginName').value = '';
         document.getElementById('loginPw').value = '';
+        var loginError = document.getElementById('loginErr');
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); }, 15000);
+        _adminLogoutPromise = (async function() {
+            try {
+                if (!API_BASE) throw new Error('后台 API 未配置');
+                // The refresh Cookie is scoped to /api/user. Authenticate the
+                // companion logout with the administrator Cookie before revoking it.
+                var companionHeaders = { 'Content-Type': 'application/json' };
+                if (companionToken) companionHeaders.Authorization = 'Bearer ' + companionToken;
+                var companionResponse = await fetch(API_BASE + '/api/user/logout', {
+                    method: 'POST', credentials: 'include', signal: controller.signal,
+                    headers: companionHeaders, body: JSON.stringify({ admin_companion_logout: true })
+                });
+                var companionBody = await companionResponse.json().catch(function() { return {}; });
+                // Retain the administrator credential for a retry until its
+                // same-browser companion has been durably revoked.
+                if (!companionResponse.ok || companionBody.ok !== true) throw new Error(companionBody.error || '附带站点会话退出尚未确认');
+                var response = await fetch(API_BASE + '/admin/logout', {
+                    method: 'POST', credentials: 'include', signal: controller.signal
+                });
+                var body = await response.json().catch(function() { return {}; });
+                if (!response.ok || body.ok !== true) throw new Error(body.error || '退出状态尚未确认');
+                if (loginError) loginError.textContent = '';
+                return true;
+            } catch (error) {
+                if (loginError) loginError.textContent = '管理界面已退出，服务端撤销未确认：' + (error.name === 'AbortError' ? '请求超时' : error.message) + '。请重试退出。';
+                if (loginError) {
+                    var retry = document.createElement('button');
+                    retry.type = 'button';
+                    retry.textContent = '重试退出';
+                    retry.onclick = function() { window.doAdminLogout(); };
+                    loginError.appendChild(retry);
+                }
+                showToast('服务端退出未确认，请重试', 'error');
+                return false;
+            } finally {
+                clearTimeout(timer);
+                _adminLogoutPromise = null;
+            }
+        })();
+        return _adminLogoutPromise;
     };
 
     // 登录表单键盘导航：Enter 切换到下一栏/提交
@@ -3673,6 +3725,14 @@
         el.innerHTML = h;
     };
 
+    window.closeAdminDetailModal = function() {
+        _adminDetailGeneration++;
+        if (_adminDetailAbortController) _adminDetailAbortController.abort();
+        _adminDetailAbortController = null;
+        var overlay = document.getElementById('detailModal');
+        if (overlay) { overlay.classList.remove('active'); overlay.innerHTML = ''; }
+    };
+
     function showModal(title, contentHtml) {
         var overlay = document.getElementById('detailModal');
         if (!overlay) {
@@ -3684,7 +3744,7 @@
 
         overlay.onclick = function(e) {
             if (e.target === overlay) {
-                overlay.classList.remove('active');
+                window.closeAdminDetailModal();
             }
         };
 
@@ -3692,7 +3752,7 @@
             '<div class="modal-dialog admin-detail-dialog" onclick="event.stopPropagation()">' +
                 '<div class="admin-detail-head">' +
                     '<h3>' + escapeHtml(String(title || '')) + '</h3>' +
-                    '<button class="admin-detail-close" onclick="document.getElementById(\'detailModal\').classList.remove(\'active\')">&times;</button>' +
+                    '<button class="admin-detail-close" onclick="window.closeAdminDetailModal()">&times;</button>' +
                 '</div>' +
                 '<div class="admin-detail-body">' + contentHtml + '</div>' +
             '</div>';
@@ -3733,6 +3793,14 @@
     }
 
     window.showUserDetailModal = async function(userName) {
+        window.closeAdminDetailModal();
+        var detailGeneration = _adminDetailGeneration;
+        var sessionGeneration = _adminSessionGeneration;
+        var detailController = new AbortController();
+        _adminDetailAbortController = detailController;
+        function isCurrentDetail() {
+            return detailGeneration === _adminDetailGeneration && sessionGeneration === _adminSessionGeneration && !detailController.signal.aborted;
+        }
         // Find user info
         var userObj = null;
         for (var i = 0; i < allUsers.length; i++) {
@@ -3742,7 +3810,8 @@
         var apiFailed = false;
         var apiErrorText = '';
         try {
-            var sensitive = await apiCall('GET', '/admin/user-data?user_name=' + encodeURIComponent(userName));
+            var sensitive = await apiCall('GET', '/admin/user-data?user_name=' + encodeURIComponent(userName), null, { signal: detailController.signal });
+            if (!isCurrentDetail()) return;
             if (userObj) userObj.info = mergeAdminUserInfo(userObj.info, sensitive.info || {});
             else {
                 // userObj 不在 allUsers 中（例如搜索了不在当前页的用户），构建临时对象
@@ -3752,6 +3821,7 @@
             allLoginEvents = (sensitive.login_events || []).concat(allLoginEvents.filter(function(row) { return row.user_name !== userName; }));
             allBehaviorEvents = (sensitive.behavior_events || []).concat(allBehaviorEvents.filter(function(row) { return row.user_name !== userName; }));
         } catch (error) {
+            if (!isCurrentDetail()) return;
             apiFailed = true;
             apiErrorText = error && error.message ? error.message : '接口请求失败';
             showToast('授权数据加载失败：' + apiErrorText + '，显示缓存摘要', 'error');
@@ -3759,7 +3829,8 @@
             if (!userObj) userObj = { name: userName, info: {} };
         }
         var userInfo = (userObj && userObj.info) || {};
-        var gpsFirstPage=null;try{gpsFirstPage=await apiCall('GET','/admin/user-location-history?user_name='+encodeURIComponent(userName));if(gpsFirstPage.items&&gpsFirstPage.items.length){userInfo=Object.assign({},userInfo,{last_precise_location:gpsFirstPage.items[0],precise_location_history:gpsFirstPage.items});}}catch(_){}
+        var gpsFirstPage=null;try{gpsFirstPage=await apiCall('GET','/admin/user-location-history?user_name='+encodeURIComponent(userName),null,{signal:detailController.signal});if(!isCurrentDetail())return;if(gpsFirstPage.items&&gpsFirstPage.items.length){userInfo=Object.assign({},userInfo,{last_precise_location:gpsFirstPage.items[0],precise_location_history:gpsFirstPage.items});}}catch(_){}
+        if (!isCurrentDetail()) return;
         var stats = getUserActivityStats(userName);
         var flags = getUserStateFlags(userName);
 
@@ -3962,10 +4033,7 @@
                 html += '<td style="padding:4px 6px;">' + escapeHtml(vm) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(ev.info.ip || '-') + '</td>';
                 var evLocV2 = ev.info.ip_location;
-                if (!evLocV2 && userInfo) {
-                    evLocV2 = userInfo.last_ip_location || userInfo.last_location || null;
-                }
-                html += '<td style="padding:4px 6px;">' + escapeHtml(evLocV2 ? adminFormatLocation(evLocV2) : '-') + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml(evLocV2 ? adminFormatLocation(evLocV2) : '未记录') + '</td>';
                 html += '</tr>';
             });
             html += '</tbody></table></div>';

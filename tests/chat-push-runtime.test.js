@@ -28,9 +28,9 @@ test('VAPID keys are stable and library produces an encrypted authenticated Web 
 });
 test('service worker hides cross-account pushes, suppresses visible current chat and opens matching account',async()=>{
  const handlers={},shown=[],opened=[];let owner='actor',peer='peer',visible=false;
- const client={url:'https://xtj.onrender.com/',get visibilityState(){return visible?'visible':'hidden';},postMessage(m){opened.push(m);},async focus(){}};
+ const client={id:'window-one',url:'https://xtj.onrender.com/',get visibilityState(){return visible?'visible':'hidden';},postMessage(m){opened.push(m);},async focus(){}};
  const self={location:{origin:'https://xtj.onrender.com'},addEventListener(k,f){handlers[k]=f;},registration:{async showNotification(title,data){shown.push({title,data});}},clients:{async matchAll(){return [client];},async openWindow(url){opened.push(url);}}};
- const caches={async open(){return {async match(){return new Response(JSON.stringify({owner,peer}));},async put(){}};}};
+ const caches={async open(){return {async match(){return new Response(JSON.stringify({owner,clients:{'window-one':{owner,peer}}}));},async put(){}};}};
  vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname,'../chat-notifications-sw.js'),'utf8'),{self,caches,URL,Response});
  async function push(data){let promise;handlers.push({data:{json:()=>data},waitUntil(p){promise=p;}});await promise;}
  const data={type:'chat-message',owner:'actor',peer:'peer',id:'id',body:'DO NOT DISPLAY THIS'};

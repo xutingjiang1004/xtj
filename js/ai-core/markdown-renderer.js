@@ -208,17 +208,17 @@
       if (allowDataImage && s === 'data' && /^data:image\/(?!svg\b)/i.test(u)) return { ok: true, url: u };
       return { ok: false, url: u };
     }
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) {
-      var h = safeHref(url, false);
-      if (!h.ok) return '<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>';
-      return '<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>';
-    });
-
     // 6. Images: ![alt](url)
     s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) {
       var h = safeHref(url, true);
       if (!h.ok) return _escapeHtml(alt || '图片');
-      return '<img src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />';
+      return stashInline('<img src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />');
+    });
+
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) {
+      var h = safeHref(url, false);
+      if (!h.ok) return '<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>';
+      return '<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>';
     });
 
     // 7. Tables: | col1 | col2 |

@@ -21,17 +21,10 @@ function cleanupQueueSupabase(insertResult) {
         };
       }
     },
-    from(table) {
-      assert.equal(table, 'storage_cleanup_jobs');
-      return {
-        insert(payload) {
-          jobs.push(payload);
-          return {
-            select() { return this; },
-            async maybeSingle() { return insertResult; }
-          };
-        }
-      };
+    async rpc(name, payload) {
+      assert.equal(name, 'enqueue_storage_cleanup');
+      jobs.push({ paths: payload.p_paths, photo_id: payload.p_photo_id });
+      return insertResult.error ? insertResult : { data: { ok: true, queued: true, jobId: 'cleanup-1', paths: payload.p_paths } };
     }
   };
 }

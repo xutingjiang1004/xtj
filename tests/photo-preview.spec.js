@@ -106,7 +106,11 @@ test('same URL repeated while loading does not remove the only effective listene
   });
   await page.waitForTimeout(40);
   const state = await previewState(page);
-  expect(state.stats.max).toBeLessThanOrEqual(2);
+  // Both load paths must retire after the request settles; peaks alone do not detect leaks.
+  await page.waitForTimeout(600);
+  const settled=await previewState(page);
+  expect(settled.stats.active).toBe(0);
+  expect(settled.openCleanup).toBe(false);
   const completed = await page.locator('#photoPreviewImage').evaluate(img => img.complete);
   expect(state.openCleanup || state.stats.active > 0 || completed).toBe(true);
   expect(errors).toEqual([]);
@@ -157,7 +161,11 @@ test('rapidly switching 50 photos keeps the newest image and bounded listeners',
   await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /rapid-49\.png/);
   await expect(page.locator('#photoPreviewImage')).toHaveCSS('opacity', '1');
   const state = await previewState(page);
-  expect(state.stats.max).toBeLessThanOrEqual(2);
+  // Both load paths must retire after the request settles; peaks alone do not detect leaks.
+  await page.waitForTimeout(600);
+  const settled=await previewState(page);
+  expect(settled.stats.active).toBe(0);
+  expect(settled.openCleanup).toBe(false);
   expect(state.stats.active).toBe(0);
   expect(errors).toEqual([]);
 });

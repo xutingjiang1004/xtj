@@ -8,9 +8,9 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.8.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@sendgrid/mail": "^8.1.4",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "10.0.13",
     "zod": "^3.25.0"
   }
 }

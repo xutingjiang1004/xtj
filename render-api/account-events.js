@@ -9,4 +9,12 @@ async function recordAccountAuthentication({supabase,req,userName,source,getClie
  return result.data;
 }
 function authenticationEvents(events){return events.filter(event=>event.authority==='server_authentication'||event.source==='admin_login');}
-module.exports={recordAccountAuthentication,authenticationEvents};
+async function recordAuthenticationIpLocation({supabase,eventId,ip,location}) {
+ // Called only for a freshly committed authentication event and the geocoder's
+ // result, never a client-reported location. The RPC verifies the event again.
+ if(!require('net').isIP(ip)||!location||typeof location!=='object'||Array.isArray(location)||!(location.text||location.country||location.region||location.city))return false;
+ const result=await supabase.rpc('record_auth_ip_location',{p_event_id:eventId,p_ip:ip,p_location:location});
+ if(!result||result.error||!result.data||result.data.ok!==true)throw new Error('auth_ip_location_store_failed');
+ return true;
+}
+module.exports={recordAccountAuthentication,authenticationEvents,recordAuthenticationIpLocation};

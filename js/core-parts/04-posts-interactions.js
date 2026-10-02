@@ -2185,14 +2185,17 @@
                 return meta;
             }
 
-            async function insertPostRecord(payload, fallbackContent) {
+            async function insertPostRecord(payload, fallbackContent, flight) {
                 try {
+                    assertPostPublishIdentity(flight);
                     var body = {
                         content: payload.content || fallbackContent || '',
                         media_url: payload.media_url || '',
                         media_type: payload.media_type || '',
                         actor_key: payload.actor_key || '',
-                        visibility: payload.visibility || 'public'
+                        visibility: payload.visibility || 'public',
+                        media_upload_id: payload.media_upload_id || null,
+                        media_storage_path: payload.media_storage_path || null
                     };
                     // 位置字段（可选，用户主动选择）
                     if (payload.location && payload.location.name) {
@@ -2206,9 +2209,11 @@
                     }
                     var response = await window.xtjProtectedFetch('/api/post/create', {
                         method: 'POST',
+                        authOwner: flight.owner, authEpoch: flight.epoch,
                         body: JSON.stringify(body)
                     });
                     var result = await response.json().catch(function() { return {}; });
+                    assertPostPublishIdentity(flight);
                     if (!response.ok || !result.ok || !result.data) {
                         return { ok: false, error: new Error(result.error || '发布失败') };
                     }
@@ -2216,11 +2221,14 @@
                     if (data && data.id && (!data.ip_region_text || !data.ip_region_status || !data.location_name)) {
                         try {
                             var fresh = await fetchPostSnapshot(data.id);
+                            assertPostPublishIdentity(flight);
                             if (fresh) data = normalizePost(fresh);
                         } catch (snapshotError) {
+                            if (snapshotError && snapshotError.code === 'identity_changed') throw snapshotError;
                             console.warn('[post-create] snapshot refresh failed', snapshotError);
                         }
                     }
+                    assertPostPublishIdentity(flight);
                     return { ok: true, fallback: false, data: data };
                 } catch (error) {
                     return { ok: false, error: error };
@@ -4302,6 +4310,59 @@
                 if (btn) { btn.disabled = false; restorePostLocationButton(btn); }
             }
 
+            var postPublishFlight = null;
+            function postPublishIdentityCurrent(flight) {
+                return !!flight && flight.owner === currentUser && flight.epoch === _authStateEpoch && postPublishFlight === flight;
+            }
+            function assertPostPublishIdentity(flight) {
+                if (!postPublishIdentityCurrent(flight)) { var error = new Error('账号已切换，发布已停止'); error.code = 'identity_changed'; throw error; }
+            }
+            function restorePostPublishButton(flight) {
+                var btn = flight.button;
+                btn.disabled = false; btn.classList.remove('is-loading'); btn.setAttribute('aria-busy', 'false');
+                btn.innerHTML = flight.markup || '<span>发动态</span>'; delete btn._composeMarkup; delete btn.dataset.originalText;
+            }
+            function pendingPostMediaKey(owner) { return 'xtj_post_media_pending_' + encodeURIComponent(owner); }
+            function readPendingPostMedia(owner) {
+                try { var rows = JSON.parse(window.safeStorage.get(pendingPostMediaKey(owner)) || '[]'); return Array.isArray(rows) ? rows : []; } catch (_) { return []; }
+            }
+            function rememberPendingPostMedia(owner, path, uploadId) {
+                var rows = readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; });
+                rows.push({ storage_path: path, upload_id: uploadId });
+                try { window.safeStorage.set(pendingPostMediaKey(owner), JSON.stringify(rows)); } catch (_) {}
+            }
+            function forgetPendingPostMedia(owner, path) {
+                try { window.safeStorage.set(pendingPostMediaKey(owner), JSON.stringify(readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; }))); } catch (_) {}
+            }
+            async function cleanupPendingPostMedia(identity, path, uploadId) {
+                // Never use a new account to clean an old upload; the server's registry handles abandoned sessions.
+                if (identity.owner !== currentUser || identity.epoch !== _authStateEpoch) return;
+                try {
+                    var response = await window.xtjProtectedFetch('/api/post/media/cleanup', { method: 'POST', authOwner: identity.owner, authEpoch: identity.epoch, body: JSON.stringify({ storage_path: path, upload_id: uploadId }) });
+                    var result = await response.json();
+                    if (identity.owner !== currentUser || identity.epoch !== _authStateEpoch) return;
+                    if (response.ok && result.ok) forgetPendingPostMedia(identity.owner, path);
+                } catch (error) { console.warn('[post-publish] orphan cleanup failed', error); }
+            }
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden || !currentUser) return;
+                retryPendingPostMedia();
+            });
+            function retryPendingPostMedia() {
+                var identity = { owner: currentUser, epoch: _authStateEpoch };
+                if (!identity.owner) return;
+                readPendingPostMedia(identity.owner).forEach(function(row) {
+                    if (postPublishFlight && postPublishFlight.owner === identity.owner) return;
+                    cleanupPendingPostMedia(identity, row.storage_path, row.upload_id);
+                });
+            }
+            window.addEventListener('auth-ready', function() {
+                if (postPublishFlight && (postPublishFlight.owner !== currentUser || postPublishFlight.epoch !== _authStateEpoch)) {
+                    var old = postPublishFlight; postPublishFlight = null; restorePostPublishButton(old);
+                }
+                retryPendingPostMedia();
+            });
+
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
                 var btn = document.getElementById("pubBtn");
@@ -4326,12 +4387,15 @@
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
+                var flight = { owner: currentUser, epoch: _authStateEpoch, button: btn, markup: btn.innerHTML };
+                postPublishFlight = flight;
+                var publishLocation = postLocationData ? Object.assign({}, postLocationData) : null;
                 btn.disabled = true;
                 btn.classList.add('is-loading');
                 btn.setAttribute('aria-busy', 'true');
                 btn.dataset.originalText = btn.textContent;btn._composeMarkup=btn.innerHTML;
                 btn.innerHTML = '<span>发布中</span>';
-                var uploadedPath = '';
+                var uploadedPath = '', mediaUploadId = '';
                 try {
                     var media_url = "";
                     var media_type = "";
@@ -4340,17 +4404,26 @@
                         var blockedUpload = /\.(svgz?|html?|xml|swf)$/i.test(String(file && file.name || '')) || /^image\/svg\+xml/i.test(String(file && file.type || ''));
                         if (blockedUpload) throw new Error('file type not allowed');
                         var path = buildStorageUploadPath('posts', file.name);
-                        var uploadRes = await sb.storage.from("uploads").upload(path, file);
+                        mediaUploadId = crypto.randomUUID();
+                        var prepareResponse = await window.xtjProtectedFetch('/api/post/media/prepare', { method: 'POST', authOwner: flight.owner, authEpoch: flight.epoch, body: JSON.stringify({ storage_path: path, upload_id: mediaUploadId }) });
+                        var prepared = await prepareResponse.json();
+                        assertPostPublishIdentity(flight);
+                        if (!prepareResponse.ok || !prepared.ok || !prepared.storage_path || !String(prepared.storage_path).startsWith('posts/')) throw new Error(prepared.error || '上传准备失败');
+                        path = prepared.storage_path;
+                        uploadedPath = path;
+                        rememberPendingPostMedia(flight.owner, path, mediaUploadId);
+                        var uploadRes = await sb.storage.from("uploads").upload(path, file, { upsert: false });
+                        assertPostPublishIdentity(flight);
                         if (uploadRes.error) throw uploadRes.error;
                         uploadedPath = path;
                         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
                         media_type = file.type.startsWith("image/") ? "image" : (file.type.startsWith("audio/") ? "audio" : "video");
                     }
                     var plainText = content.slice(0, 2000);
-                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: postLocationData || null }) : { visibility: visibility || "public" };
+                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: publishLocation }) : { visibility: visibility || "public" };
                     var contentPayload = buildPostContentPayload(plainText, metadata);
                     var payload = {
-                        user_name: currentUser,
+                        user_name: flight.owner,
                         content: contentPayload,
                         media_url: media_url,
                         media_type: media_type || null,
@@ -4359,21 +4432,22 @@
                         is_pinned: false,
                         pinned_at: null,
                         updated_at: null,
-                        location: postLocationData || null
+                        location: publishLocation,
+                        media_upload_id: mediaUploadId || null,
+                        media_storage_path: uploadedPath || null
                     };
-                    var insertRes = await insertPostRecord(payload, contentPayload);
+                    assertPostPublishIdentity(flight);
+                    var insertRes = await insertPostRecord(payload, contentPayload, flight);
+                    assertPostPublishIdentity(flight);
                     if (!insertRes.ok) {
-                        if (uploadedPath) {
-                            try {
-                                var cleanupResult = await sb.storage.from('uploads').remove([uploadedPath]);
-                                if (cleanupResult && cleanupResult.error) console.warn('[post-publish] orphan cleanup failed', cleanupResult.error);
-                            } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
-                            uploadedPath = '';
-                        }
+                        if (uploadedPath) await cleanupPendingPostMedia(flight, uploadedPath, mediaUploadId);
+                        assertPostPublishIdentity(flight);
                         showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
                         return;
                     }
+                    forgetPendingPostMedia(flight.owner, uploadedPath);
                     uploadedPath = '';
+                    assertPostPublishIdentity(flight);
                     touchUserSession(false);
                     resetPostComposer();
                     // ★ 2026-09-27 修复（审计 P13-②：失败仍 resetPostPreview 导致
@@ -4386,30 +4460,22 @@
                     if (!insertPublishedPostIntoFeed(insertRes.data)) {
                         clearFeedCache();
                         await loadFeed(true);
+                        assertPostPublishIdentity(flight);
                     } else {
                         writeFeedCacheSnapshot();
                     }
                     if (insertRes.data && insertRes.data.id) {
                         schedulePublishedPostIpRefresh(insertRes.data.id);
                     }
-                    loadProfileActivity(true);
+                    loadProfileActivity(true).catch(function() {});
                 } catch (e) {
-                    if (uploadedPath) {
-                        try {
-                            var catchCleanupResult = await sb.storage.from('uploads').remove([uploadedPath]);
-                            if (catchCleanupResult && catchCleanupResult.error) console.warn('[post-publish] orphan cleanup failed', catchCleanupResult.error);
-                        } catch (cleanupError) { console.warn('[post-publish] orphan cleanup failed', cleanupError); }
-                    }
-                    showToast("发布失败: " + (e.message || "网络错误"));
+                    if (uploadedPath) await cleanupPendingPostMedia(flight, uploadedPath, mediaUploadId);
+                    if (postPublishIdentityCurrent(flight)) showToast("发布失败: " + (e.message || "网络错误"));
                 } finally {
-                    btn.disabled = false;
-                    btn.classList.remove('is-loading');
-                    btn.setAttribute('aria-busy', 'false');
-                    btn.innerHTML = btn._composeMarkup || '<span>发动态</span>';delete btn._composeMarkup;
-                    delete btn.dataset.originalText;
-                    // ★ 2026-09-27（审计 P13-②）：此处不再无条件 resetPostPreview()，
-                    //   失败时保留预览与已选文件，避免"显示 0 个文件但文件还在"的错乱状态。
-                    //   成功路径已在上方显式清理。
+                    if (postPublishFlight === flight) {
+                        postPublishFlight = null;
+                        restorePostPublishButton(flight);
+                    }
                 }
             };
 

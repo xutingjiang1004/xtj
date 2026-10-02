@@ -2,16 +2,26 @@
 const {readAuthRecord}=require('./auth-record');
 const crypto=require('node:crypto');
 const TABLE='user_location_history';
+function locationError(code,status=400){const error=new Error(code);error.code=code;error.status=status;return error;}
 async function recordLocationFix({supabase,actor,body,reason,ip}){
+ body=body&&typeof body==='object'?body:{};
  const account=await readAuthRecord(supabase,actor,'__auth__');if(!account)throw new Error('location_account_unavailable');
- const latitude=Number(body.latitude),longitude=Number(body.longitude);
- if(body.latitude==null||body.longitude==null||!Number.isFinite(latitude)||!Number.isFinite(longitude)||Math.abs(latitude)>90||Math.abs(longitude)>180)throw new Error('invalid_location');
- const accuracy=body.accuracy==null?null:Number(body.accuracy);if(accuracy!==null&&(!Number.isFinite(accuracy)||accuracy<0||accuracy>100000))throw new Error('invalid_location');
+ const latitude=body.latitude,longitude=body.longitude;
+ if(typeof latitude!=='number'||typeof longitude!=='number'||!Number.isFinite(latitude)||!Number.isFinite(longitude)||Math.abs(latitude)>90||Math.abs(longitude)>180)throw locationError('invalid_location');
+ const accuracy=body.accuracy==null?null:body.accuracy;if(accuracy!==null&&(typeof accuracy!=='number'||!Number.isFinite(accuracy)||accuracy<0||accuracy>100000))throw locationError('invalid_location');
  const captured=new Date(body.captured_at||'');const capturedAt=Number.isFinite(captured.getTime())&&Math.abs(Date.now()-captured.getTime())<=86400000?captured.toISOString():new Date().toISOString();
- const captureId=String(body.capture_id||((body.page_load_id||'fix_'+crypto.randomUUID())+'_'+capturedAt)).slice(0,160);
+ if(body.capture_id!==undefined&&(typeof body.capture_id!=='string'||!body.capture_id.trim()||body.capture_id.length>160))throw locationError('invalid_capture_id');
+ const captureId=body.capture_id||((body.page_load_id||'fix_'+crypto.randomUUID())+'_'+capturedAt);
+ if(captureId.length>160)throw locationError('invalid_capture_id');
  const row={account_id:account.id,user_name:actor,capture_id:captureId,latitude,longitude,accuracy_m:accuracy,captured_at:capturedAt,page_load_id:/^page_[a-z0-9_]{8,80}$/i.test(String(body.page_load_id||''))?String(body.page_load_id):null,capture_reason:String(reason||'user_location').slice(0,40),ip:String(ip||'unknown').slice(0,80)};
  const result=await supabase.from(TABLE).upsert(row,{onConflict:'account_id,capture_id',ignoreDuplicates:true});if(!result||result.error)throw new Error('location_history_save_failed');
- return {accountId:account.id,captureId};
+ // A retry must resolve the immutable fact already stored, never new coordinates
+ // supplied under an existing id. Re-read also makes concurrent inserts agree.
+ const stored=await supabase.from(TABLE).select('*').eq('account_id',account.id).eq('capture_id',captureId).maybeSingle();
+ if(!stored||stored.error||!stored.data)throw new Error('location_history_lookup_failed');
+ const fix=stored.data;
+ if(fix.latitude!==latitude||fix.longitude!==longitude||fix.accuracy_m!==accuracy||fix.page_load_id!==row.page_load_id)throw locationError('location_capture_conflict',409);
+ return {accountId:account.id,captureId,location:fix};
 }
 async function resolveLocationFix(supabase,fix,address,error){
  const result=await supabase.from(TABLE).update({resolution_status:address?'resolved':'failed',resolved_address:address?String(address).slice(0,1000):null,resolve_error:error?String(error).slice(0,160):null,resolved_at:new Date().toISOString()}).eq('account_id',fix.accountId).eq('capture_id',fix.captureId);

@@ -49,7 +49,7 @@ function createPersonalExport({express,supabase,authenticateUser,rateLimit,priva
     if(kind==='photo_views')rows=rows.map(r=>({...r,id:r.photo_id}));
    }
    const hasMore=rows.length>200,items=rows.slice(0,200).map(safeRecord);
-   if(kind==='messages'&&privateStorage){for(let i=0;i<items.length;i+=8)await Promise.all(items.slice(i,i+8).map(async row=>{if(row.withdrawn_at)return;await privateStorage.hydrateMessage(row);}));}
+   if(kind==='messages'&&privateStorage){for(let i=0;i<items.length;i+=8)await Promise.all(items.slice(i,i+8).map(async row=>{if(row.withdrawn_at)return;await privateStorage.hydrateMessage(row,{strict:true});}));}
    // Profile identity timestamps come from the authentication record, never browser input.
    let account=null;
    if(kind==='profile'){

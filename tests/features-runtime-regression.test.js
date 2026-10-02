@@ -148,10 +148,10 @@ function addProtectedSample(parent, tag) {
 }
 
 test('features repairs initial and dynamic UI text and allowed labels', () => {
-  const heading = new FakeElement('h2');
+  const heading = new FakeElement('h2', { 'data-xtj-legacy-text': '' });
   const headingText = new FakeText('鍏ㄩ儴甯栧瓙');
   heading.appendChild(headingText);
-  const button = new FakeElement('button', { title: '鍙戦€' });
+  const button = new FakeElement('button', { title: '鍙戦€', 'data-xtj-legacy-text': '' });
   const runtime = makeRuntime((body) => {
     body.appendChild(heading);
     body.appendChild(button);
@@ -162,7 +162,7 @@ test('features repairs initial and dynamic UI text and allowed labels', () => {
   assert.equal(headingText.nodeValue, '全部帖子');
   assert.equal(button.getAttribute('title'), '发送');
 
-  const dynamic = new FakeElement('div');
+  const dynamic = new FakeElement('div', { 'data-xtj-legacy-text': '' });
   const dynamicText = new FakeText('鍔犺浇');
   dynamic.appendChild(dynamicText);
   runtime.body.appendChild(dynamic);
@@ -204,7 +204,7 @@ test('features leaves literal text alone in protected elements and their descend
 
   // Also cover a text node queued while visible, then moved under a code sample
   // before the animation-frame repair flush.
-  const movable = new FakeElement('span');
+  const movable = new FakeElement('span', { 'data-xtj-legacy-text': '' });
   const movableText = new FakeText('鍙戦€');
   movable.appendChild(movableText);
   runtime.body.appendChild(movable);
@@ -216,7 +216,7 @@ test('features leaves literal text alone in protected elements and their descend
 });
 
 test('features observer does not reschedule repairs for its own corrected mutations', () => {
-  const label = new FakeElement('button', { title: '鍙戦€' });
+  const label = new FakeElement('button', { title: '鍙戦€', 'data-xtj-legacy-text': '' });
   const text = new FakeText('鍙戦€');
   label.appendChild(text);
   const runtime = makeRuntime((body) => body.appendChild(label));
@@ -229,10 +229,26 @@ test('features observer does not reschedule repairs for its own corrected mutati
   runtime.observer.callback([
     { type: 'characterData', target: text },
     { type: 'attributes', target: label, attributeName: 'title' },
-    { type: 'attributes', target: label, attributeName: 'data-xtj-legacy-text' }
+    { type: 'attributes', target: label, attributeName: 'title' }
   ]);
   assert.equal(runtime.frames.length, 0, 'already repaired values should not schedule a frame');
   runtime.flushFrames();
   assert.equal(text.assignments, textWrites, 'corrected text must not be assigned repeatedly');
   assert.equal(label.attributeWrites, attributeWrites, 'corrected attributes must not be assigned repeatedly');
+});
+
+test('ordinary published user text and labels remain literal, including dynamic updates', () => {
+  const user = new FakeElement('div', { title: '鍙戦€' }), text = new FakeText('鍒嗕韩 鍔犺浇');
+  user.appendChild(text); const runtime = makeRuntime(body => body.appendChild(user)); runtime.flushFrames();
+  assert.equal(text.nodeValue, '鍒嗕韩 鍔犺浇'); assert.equal(user.getAttribute('title'), '鍙戦€');
+  text.nodeValue = '鍙戦€'; runtime.observer.callback([{ type:'characterData', target:text }]); runtime.flushFrames();
+  assert.equal(text.nodeValue, '鍙戦€');
+});
+
+test('empty toast feedback is suppressed while user-derived literals and whitespace are preserved', () => {
+  const calls = [], sandbox = { window: { showToast: (...args) => calls.push(args) }, document: { readyState:'loading', addEventListener() {} } };
+  const from = FEATURES_SOURCE.indexOf('  function patchToast()'), to = FEATURES_SOURCE.indexOf('  function patchChat()', from);
+  vm.runInNewContext(FEATURES_SOURCE.slice(from, to) + '; patchToast();', sandbox);
+  sandbox.window.showToast(''); sandbox.window.showToast('   '); sandbox.window.showToast(' 鍔犺浇 ', 'info');
+  assert.equal(calls.length, 1); assert.equal(calls[0][0], ' 鍔犺浇 '); assert.equal(calls[0][1], 'info');
 });

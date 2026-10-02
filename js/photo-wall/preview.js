@@ -946,6 +946,8 @@
                 }
             } else re();
         } } else if (e) {
+            var activeOverlay=document.getElementById('photoPreviewOverlay');
+            if(activeOverlay){if(activeOverlay._cleanupOpenListeners)activeOverlay._cleanupOpenListeners(true);activeOverlay._openLoadGen=(activeOverlay._openLoadGen||0)+1;}
             // Explicit outer braces keep this branch reachable during quick reopen.
             // ★ 已打开时切换到目标 index（不再静默 no-op）
             if (Array.isArray(L)) n = L.slice();

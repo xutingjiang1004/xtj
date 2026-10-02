@@ -30,22 +30,29 @@
     var identity=document.createElement('div');identity.className='pp-story-identity';identity.appendChild(user);identity.appendChild(time);
     author.appendChild(avatar);author.appendChild(identity);info.prepend(author);
     var caption=document.createElement('p');caption.id='ppStoryCaption';caption.className='pp-story-caption';info.appendChild(caption);
-    var more=document.createElement('button');more.type='button';more.id='ppCaptionMore';more.className='pp-caption-more';more.textContent='展开';more.hidden=true;more.onclick=function(){expanded=!expanded;caption.classList.toggle('expanded',expanded);more.textContent=expanded?'收起':'展开';more.setAttribute('aria-expanded',String(expanded));};info.appendChild(more);
+    var more=document.createElement('button');more.type='button';more.id='ppCaptionMore';more.className='pp-caption-more';more.textContent='展开';more.hidden=true;more.onclick=function(){expanded=!expanded;caption.classList.toggle('expanded',expanded);more.textContent=expanded?'收起':'展开';more.setAttribute('aria-expanded',String(expanded));refreshCaptionOverflow();};info.appendChild(more);
     var stats=document.createElement('div');stats.className='pp-story-stats';stats.appendChild(views);
     var like=document.createElement('button');like.type='button';like.id='ppLikeBtn';like.setAttribute('aria-label','点赞照片');like.setAttribute('aria-pressed','false');like.innerHTML=heart+'<span id="ppLikeCount">0</span>';like.onclick=toggleLike;
     var comment=document.createElement('button');comment.type='button';comment.id='ppCommentBtn';comment.setAttribute('aria-label','查看照片评论');comment.innerHTML=bubble+'<span id="ppCommentCount">0</span>';comment.onclick=openComments;
     stats.appendChild(like);stats.appendChild(comment);info.appendChild(stats);
-    var status=document.createElement('span');status.id='ppSocialStatus';status.className='pp-social-status';status.setAttribute('role','status');info.appendChild(status);
+    var status=document.createElement('button');status.id='ppSocialStatus';status.className='pp-social-status';status.type='button';status.setAttribute('aria-live','polite');info.appendChild(status);
     var panel=document.createElement('section');panel.id='ppCommentsPanel';panel.className='pp-comments-panel';panel.hidden=true;panel.setAttribute('aria-label','照片评论');
     panel.innerHTML='<div class="pp-comments-head"><strong id="ppCommentsTitle">评论</strong><button type="button" id="ppCommentsClose" aria-label="关闭评论">×</button></div><div id="ppCommentsList" class="pp-comments-list"></div><button type="button" id="ppCommentsMore" hidden>加载更多评论</button><form id="ppCommentForm"><label class="sr-only" for="ppCommentInput">写评论</label><textarea id="ppCommentInput" maxlength="1000" rows="2" placeholder="说说你的想法…"></textarea><button type="submit" id="ppCommentSend">发送</button></form><div id="ppCommentError" role="status"></div>';
-    root.appendChild(panel);el('ppCommentsClose').onclick=function(){commentsVisible(false);el('ppCommentBtn').focus();};el('ppCommentForm').onsubmit=sendComment;el('ppCommentsMore').onclick=moreComments;
+    root.appendChild(panel);
+    if(window.ResizeObserver)new ResizeObserver(refreshCaptionOverflow).observe(caption);
+    window.addEventListener('resize',refreshCaptionOverflow);
+    el('ppCommentsClose').onclick=function(){commentsVisible(false);el('ppCommentBtn').focus();};el('ppCommentForm').onsubmit=sendComment;el('ppCommentsMore').onclick=moreComments;
     return true;
+  }
+  function refreshCaptionOverflow(){
+    var caption=el('ppStoryCaption'),more=el('ppCaptionMore');if(!caption||!more)return;
+    more.hidden=!expanded&&(caption.hidden||caption.scrollHeight<=caption.clientHeight+1);
   }
   function updateCounts(){
     if(!social)return;
-    el('ppLikeCount').textContent=social.like_count||0;el('ppCommentCount').textContent=social.comment_count||0;
-    el('ppLikeBtn').setAttribute('aria-pressed',String(!!social.liked));
-    el('ppCommentsTitle').textContent='评论 '+(social.comment_count||0);
+    el('ppLikeCount').textContent=Number.isFinite(social.like_count)?social.like_count:'—';el('ppCommentCount').textContent=Number.isFinite(social.comment_count)?social.comment_count:'—';
+    el('ppLikeBtn').setAttribute('aria-pressed',typeof social.liked==='boolean'?String(social.liked):'mixed');
+    el('ppCommentsTitle').textContent=Number.isFinite(social.comment_count)?'评论 '+social.comment_count:'评论';
   }
   async function loadSocial(token,owner,id){
     var version=mutationVersion;
@@ -53,7 +60,7 @@
       var body=await json('/api/photo/'+encodeURIComponent(id)+'/social',{background:true,signal:controller.signal});
       if(!valid(token,owner,id)||version!==mutationVersion)return;
       social=body;var saved=likeStates.get(owner+':'+id);if(saved&&saved.pending){social.liked=saved.desired;social.like_count=Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed));}else{likeStates.set(owner+':'+id,{confirmed:!!body.liked,desired:!!body.liked,count:body.like_count||0,pending:false});}current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
-    }catch(error){if(!valid(token,owner,id)||error.name==='AbortError')return;el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;}
+    }catch(error){if(!valid(token,owner,id)||error.name==='AbortError')return;el('ppSocialStatus').textContent='互动暂未加载，点击重试';el('ppSocialStatus').onclick=function(){loadSocial(epoch,window.currentUser||'',current.cloudId);};el('ppLikeBtn').disabled=!likeStates.has(owner+':'+id);}
   }
   function motion(){return !!(el('ppCommentsPanel').animate && document.documentElement.getAttribute('data-xtj-motion')!=='off' && !matchMedia('(prefers-reduced-motion: reduce)').matches);}
   function commentsVisible(show, immediate){
@@ -111,18 +118,19 @@
     var caption=typeof photo.caption==='string'?photo.caption:'';
     if(!caption&&photo.content){try{caption=JSON.parse(photo.content).caption||'';}catch(_){}}
     el('ppStoryCaption').textContent=caption;el('ppStoryCaption').hidden=!caption;
-    el('ppCaptionMore').hidden=caption.length<100&&!/\n/.test(caption);el('ppCaptionMore').setAttribute('aria-expanded','false');
+    el('ppCaptionMore').hidden=true;el('ppCaptionMore').setAttribute('aria-expanded','false');
     showAvatar(photo);
     epoch++;if(controller)controller.abort();controller=new AbortController();social=null;expanded=false;mutationVersion=0;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
     commentsVisible(false,true);el('ppCommentInput').value='';el('ppCommentInput').disabled=false;el('ppCommentSend').disabled=false;el('ppCommentError').textContent='';el('ppCommentsList').replaceChildren();
-    el('ppLikeCount').textContent='0';el('ppCommentCount').textContent='0';el('ppLikeBtn').setAttribute('aria-pressed','false');el('ppLikeBtn').disabled=true;el('ppSocialStatus').textContent='';
+    el('ppLikeCount').textContent='—';el('ppCommentCount').textContent='—';el('ppLikeBtn').setAttribute('aria-pressed','mixed');el('ppLikeBtn').disabled=true;el('ppSocialStatus').textContent='';
     el('ppLikeBtn').hidden=el('ppCommentBtn').hidden=!isWall(photo);
     var token=epoch,owner=window.currentUser||'',id=photo.cloudId;
-    if(isWall(photo)){var saved=likeStates.get(owner+':'+id);if(saved){social={comments:[],comment_count:0,liked:saved.desired,like_count:Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed))};updateCounts();el('ppLikeBtn').disabled=false;}loadSocial(token,owner,id);}
+    if(isWall(photo)){var saved=likeStates.get(owner+':'+id);if(saved){social={comments:[],liked:saved.desired,like_count:Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed))};updateCounts();el('ppLikeBtn').disabled=false;}loadSocial(token,owner,id);}
+    requestAnimationFrame(refreshCaptionOverflow);
   };
   function showLikeState(entry,owner,id){
     if(!current || String(current.cloudId)!==String(id) || (window.currentUser||'')!==owner)return;
-    social=social||{comments:[],comment_count:0};social.liked=entry.desired;
+    social=social||{comments:[]};social.liked=entry.desired;
     social.like_count=Math.max(0,entry.count+Number(entry.desired)-Number(entry.confirmed));updateCounts();
   }
   function animateHeart(){
@@ -174,13 +182,13 @@
     var token=epoch,owner=window.currentUser||'',id=current.cloudId;if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
     mutationVersion++;input.disabled=true;el('ppCommentSend').disabled=true;
     try{var body=await json('/api/photo/'+id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content})});if(!valid(token,owner,id))return;
-      social=social||{comments:[],like_count:0,liked:false,comment_count:0};social.comments.unshift(body.comment);social.comment_count++;input.value='';el('ppCommentError').textContent='';updateCounts();renderComments();}
+      social=social||{comments:[]};social.comments.unshift(body.comment);if(Number.isFinite(social.comment_count))social.comment_count++;input.value='';el('ppCommentError').textContent='';updateCounts();renderComments();}
     catch(error){if(valid(token,owner,id))el('ppCommentError').textContent=error.message;}
     finally{if(valid(token,owner,id)){input.disabled=false;el('ppCommentSend').disabled=false;}}
   }
   async function deleteComment(row,button){
     if(button.disabled)return;var token=epoch,owner=window.currentUser||'',id=current.cloudId;button.disabled=true;
-    try{await json('/api/post/comment/'+encodeURIComponent(row.id),{method:'DELETE'});if(!valid(token,owner,id))return;social.comments=social.comments.filter(function(r){return r.id!==row.id;});social.comment_count=Math.max(0,social.comment_count-1);updateCounts();renderComments();}
+    try{await json('/api/post/comment/'+encodeURIComponent(row.id),{method:'DELETE'});if(!valid(token,owner,id))return;social.comments=social.comments.filter(function(r){return r.id!==row.id;});if(Number.isFinite(social.comment_count))social.comment_count=Math.max(0,social.comment_count-1);updateCounts();renderComments();}
     catch(error){if(valid(token,owner,id)){el('ppCommentError').textContent=error.message;button.disabled=false;}}
   }
   window.preloadPhotoStoryAvatars(window.photoWallData||[]);

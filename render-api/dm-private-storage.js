@@ -17,7 +17,7 @@ function createDmPrivateStorage(supabase) {
     })().finally(() => pending.delete(path));
     pending.set(path, request); return request;
   }
-  async function hydrateMessage(row) {
+  async function hydrateMessage(row, options = {}) {
     let payload;
     if (row.payload) payload = row.payload;
     else { try { payload = JSON.parse(row.content); } catch (_) { return; } }
@@ -25,7 +25,7 @@ function createDmPrivateStorage(supabase) {
     const path = payload.media.storage_path;
     let url = '', unavailable = false;
     try { url = await sign(path); }
-    catch (_) { unavailable = true; }
+    catch (error) { if(options.strict)throw error; unavailable = true; }
     // One unavailable attachment must not erase the entire conversation or
     // its saved transcripts. Never fall back to an expired/public private URL.
     const next = { ...payload, media: { ...payload.media, url, unavailable } };

@@ -89,7 +89,7 @@ test('online users use latest login telemetry and profile tab exposes the comple
   assert.match(server, /eq\('media_type', USER_INFO_MARKER\)[\s\S]{0,180}\.in\('user_name', activeNames\)/);
   assert.match(server, /function normalizeDeviceSnapshot/);
   assert.match(server, /function onlineDeviceCategory/);
-  assert.match(server, /requestUserAgent = String\(req\.get\('user-agent'\)/);
+  assert.match(server, /supabase, req: opts\.audit\.req, userName, source: opts\.audit\.source/);
   assert.match(admin, /device_label \|\| \[u\.device_type, u\.os, u\.browser, u\.model\]/);
   assert.match(admin, /async function loadProfileDirectory/);
   assert.match(admin, /apiCall\('GET', '\/admin\/users'\)/);

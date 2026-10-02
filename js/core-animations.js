@@ -8,15 +8,17 @@
     return typeof window.gsap !== 'undefined';
   }
 
+  var gsapRetryAfter = 0;
   function runWithGSAP(fn) {
+    if (perfMode() === 'lite' || Date.now() < gsapRetryAfter) return false;
     if (hasGSAP()) {
       fn();
       return true;
     }
     if (typeof window.ensureGsap === 'function') {
       window.ensureGsap().then(function(loadedGsap) {
-        if (loadedGsap && hasGSAP()) fn();
-      });
+        if (loadedGsap && hasGSAP() && perfMode() !== 'lite') fn();
+      }).catch(function() { gsapRetryAfter = Date.now() + 30000; /* Keep the plain UI and avoid repeated CDN failures. */ });
     }
     return false;
   }
@@ -24,6 +26,7 @@
   function perfMode() {
     var root = document.documentElement;
     if (!root) return 'full';
+    if (root.getAttribute('data-xtj-motion') === 'off' || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return 'lite';
     if (root.classList.contains('perf-lite')) return 'lite';
     if (root.classList.contains('perf-balanced')) return 'balanced';
     return 'full';

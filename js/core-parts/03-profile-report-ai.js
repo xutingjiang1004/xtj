@@ -149,6 +149,7 @@
                         upcLoginEl.textContent = '最近登录：-';
                     }
                 } catch(e) {
+                    if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
                     upcLoginEl.textContent = '最近登录：加载失败';
                 }
             };
@@ -207,47 +208,53 @@
                 
             };
 
+            var profileAvatarRequestSeq = 0;
             async function loadProfileAvatar() {
-                var avatarOwner = currentUser;
-                const avatarEl = document.getElementById('profileDetailAvatar');
-                if (!avatarEl) return;
-                
-                // localStorage 兼容处理
-                try {
-                    var cachedAvatars = readAvatarCacheFromStorage();
-                    if (cachedAvatars[currentUser] && cachedAvatars[currentUser].url) {
-                        avatarCache[currentUser] = cachedAvatars[currentUser];
-                        avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser].url)) + '" alt="头像">';
-                        return;
+                var avatarOwner = currentUser, avatarEpoch = _authStateEpoch, seq = ++profileAvatarRequestSeq;
+                var avatarEl = document.getElementById('profileDetailAvatar');
+                if (!avatarEl || !avatarOwner) return;
+                function isCurrent() { return currentUser === avatarOwner && _authStateEpoch === avatarEpoch && seq === profileAvatarRequestSeq; }
+                function placeholder() { if (isCurrent()) avatarEl.textContent = avatarOwner.charAt(0).toUpperCase(); }
+                async function displayAvatar(url) {
+                    if (!url || !isCurrent()) return false;
+                    var safeUrl = sanitizeUrl(url);
+                    if (!safeUrl) return false;
+                    var img = new Image();
+                    img.alt = '头像'; img.decoding = 'async';
+                    try {
+                        await new Promise(function(resolve, reject) {
+                            var timer = setTimeout(function() { reject(new Error('avatar_timeout')); }, 10000);
+                            img.onload = function() { clearTimeout(timer); resolve(); };
+                            img.onerror = function() { clearTimeout(timer); reject(new Error('avatar_unavailable')); };
+                            img.src = safeUrl;
+                        });
+                        if (typeof img.decode === 'function') await img.decode();
+                        if (!isCurrent() || getAvatarUrl(avatarOwner) !== url) return false;
+                        avatarEl.replaceChildren(img);
+                        return true;
+                    } catch (_) {
+                        if (isCurrent() && getAvatarUrl(avatarOwner) === url) {
+                            delete avatarCache[avatarOwner];
+                            try { var cv = readAvatarCacheFromStorage(); delete cv[avatarOwner]; writeAvatarCacheToStorage(cv); } catch (_) {}
+                            placeholder();
+                        }
+                        return false;
                     }
-                } catch(e) {}
-
-                // 优先使用内存缓存中的头像 URL
-                var memUrl = getAvatarUrl(currentUser);
-                if (memUrl) {
-                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(memUrl)) + '" alt="头像">';
                 }
-
                 try {
-                    var avatarUrl = await fetchAvatarUrl(avatarOwner);
-                    if (currentUser !== avatarOwner) return;
-
-                    if (avatarUrl) {
-                        var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                        avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + safeAvatarUrl + '" alt="头像">';
-                        setAvatarCacheEntry(currentUser, 'has_avatar', avatarUrl);
-                        // 写入 localStorage
-                        try {
-                            var cv = readAvatarCacheFromStorage();
-                            cv[currentUser] = { state: 'has_avatar', url: avatarUrl, fetched_at: Date.now() };
-                            writeAvatarCacheToStorage(cv);
-                        } catch(e) {}
-                    } else if (!getAvatarUrl(currentUser)) {
-                        avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? escapeHtml(currentUser[0].toUpperCase()) : '?') + '</span>';
-                    }
-                } catch(e) {
-                    console.error("加载头像失败:", e);
-                }
+                    var stored = readAvatarCacheFromStorage()[avatarOwner];
+                    if (stored && (!avatarCache[avatarOwner] || Number(stored.fetched_at) > Number(avatarCache[avatarOwner].fetched_at))) avatarCache[avatarOwner] = stored;
+                } catch (_) {}
+                var cachedUrl = getAvatarUrl(avatarOwner);
+                if (cachedUrl) await displayAvatar(cachedUrl); else placeholder();
+                if (!isCurrent()) return;
+                var avatarUrl = await fetchAvatarUrl(avatarOwner);
+                if (!isCurrent()) return;
+                if (avatarUrl) {
+                    await displayAvatar(avatarUrl);
+                    if (!isCurrent() || getAvatarUrl(avatarOwner) !== avatarUrl) return;
+                    try { var cv = readAvatarCacheFromStorage(); cv[avatarOwner] = avatarCache[avatarOwner]; writeAvatarCacheToStorage(cv); } catch (_) {}
+                } else placeholder();
             }
 
             function compressImage(file, maxW, maxH, quality) {

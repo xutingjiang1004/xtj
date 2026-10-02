@@ -566,3 +566,19 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-info.pp-story {
 }
 #photoPreviewOverlay .pp-story-stats :is(button,.pp-views,span,svg)::before,
 #photoPreviewOverlay .pp-story-stats :is(button,.pp-views,span,svg)::after { content:none!important;display:none!important; }
+
+/* Original pixels stay outside full-screen backdrop effects and nested 3D scenes.
+   Navigation/zoom transforms remain on the track/image; only redundant ancestors flatten. */
+html.xtj-photo-preview-ready #photoPreviewOverlay {
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppImageWrapper,
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack,
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-slot {
+  transform-style:flat;-webkit-transform-style:flat;
+}
+#photoPreviewOverlay .pp-social-status {
+  background:none!important;border:0!important;border-radius:0!important;box-shadow:none!important;
+  padding:0!important;min-height:0;color:rgba(255,255,255,.8)!important;text-align:left;
+}
+#photoPreviewOverlay .pp-social-status:not(:empty) { min-height:44px; }

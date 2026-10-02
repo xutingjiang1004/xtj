@@ -1,11 +1,12 @@
 'use strict';
 const crypto=require('node:crypto'),multer=require('multer');
 const {readAuthRecord}=require('./auth-record');
+const {scanStorageOrphans}=require('./storage-orphan-scan');
 const BUCKET='dm-flash',UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function seal(bytes){const key=crypto.randomBytes(32),iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',key,iv);return{bytes:Buffer.concat([cipher.update(bytes),cipher.final()]),key,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64')};}
 function unseal(bytes,key,iv,tag){const decipher=crypto.createDecipheriv('aes-256-gcm',key,Buffer.from(iv,'base64'));decipher.setAuthTag(Buffer.from(tag,'base64'));return Buffer.concat([decipher.update(bytes),decipher.final()]);}
 function createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,rateLimit,canSend,banError,publish,notifyConsumed,audit,setPro}){
- const router=express.Router(),store=()=>supabase.storage.from(BUCKET);let timer,busy=false,inFlightUploads=0;
+ const router=express.Router(),store=()=>supabase.storage.from(BUCKET);let timer,busy=false,inFlightUploads=0,orphanOffset=0;
  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:20*1024*1024,files:1,fields:2,fieldSize:200}}).single('image');
  async function checked(query){const r=await query;if(!r||r.error)throw Error('flash_store_unavailable');return r.data;}
  const limited=rateLimit?rateLimit(60000,30):(req,res,next)=>next();
@@ -78,8 +79,7 @@ function createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,
   const now=new Date().toISOString();const rows=await checked(supabase.from('dm_flash_photos').select('id,storage_path,message_id,consumed_at').is('cleaned_at',null).or('key_material.is.null,message_id.is.null').limit(50));
   for(const row of rows||[]){try{await checked(supabase.from('dm_flash_photos').update({key_material:null,consumed_at:row.consumed_at||now}).eq('id',row.id));if(row.message_id){const post=await checked(supabase.from('posts').select('content').eq('id',row.message_id).maybeSingle());if(post){let body=JSON.parse(post.content);if(body.flash){body.flash.state='expired';await checked(supabase.from('posts').update({content:JSON.stringify(body)}).eq('id',row.message_id));}}}await remove(row.storage_path,row.id);}catch(_){console.warn('[flash] object cleanup will retry');}}
   // Failed sends and account deletions can leave ciphertext with no ledger row.
-  const files=await checked(store().list('',{limit:100,sortBy:{column:'created_at',order:'asc'}}));
-  for(const file of files||[]){if(!UUID.test(String(file.name).replace(/\.bin$/,''))||!Number.isFinite(Date.parse(file.created_at))||Date.parse(file.created_at)>Date.now()-86400000)continue;const row=await checked(supabase.from('dm_flash_photos').select('id').eq('storage_path',file.name).maybeSingle());if(!row)await remove(file.name);}
+  orphanOffset=await scanStorageOrphans({store:store(),offset:orphanOffset,lookup:path=>checked(supabase.from('dm_flash_photos').select('id').eq('storage_path',path).maybeSingle()),remove:path=>remove(path),onError:()=>console.warn('[flash] orphan cleanup will retry')});
  }catch(_){console.warn('[flash] cleanup will retry');}finally{busy=false;}}
  return{router,sweep,start(){void sweep();timer=setInterval(sweep,15000);timer.unref();},stop(){clearInterval(timer);}};
 }

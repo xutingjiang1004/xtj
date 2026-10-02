@@ -142,11 +142,10 @@ test('storage removal queues every failed path and confirms the queue insert', a
     storage: { from: function () {
       return { remove: async function () { return { error: { message: 'network unavailable' } }; } };
     } },
-    from: function (table) {
-      assert.equal(table, 'storage_cleanup_jobs');
-      const q = chain({ data: { id: 7 }, error: null });
-      q.insert = function (payload) { queuedPayload = payload; return q; };
-      return q;
+    rpc: async function (name, payload) {
+      assert.equal(name, 'enqueue_storage_cleanup');
+      queuedPayload = { paths: payload.p_paths, photo_id: payload.p_photo_id };
+      return { data: { ok: true, queued: true, jobId: '7', paths: payload.p_paths } };
     }
   };
   const result = await removeStorageWithQueue(supabase, {
