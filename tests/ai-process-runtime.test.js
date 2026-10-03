@@ -169,6 +169,7 @@ for(const model of ['deepseek-flash','deepseek-v4-pro','custom:test-custom']) te
  assert.equal(await page.locator('.ai-search-detail').isVisible(),false);
  const heading=page.locator('.ai-tool-result-card-title');assert.match(await heading.textContent(),/找到 5 个网页/);
  const row=await page.locator('.ai-tool-step-title').boundingBox(),countBox=await heading.boundingBox();assert.ok(Math.abs(row.y-countBox.y)<8,'result count stays on the search row');
+ const queryBox=await page.locator('.ai-tool-step-detail').boundingBox();assert.ok(countBox.x-queryBox.x-queryBox.width>=0&&countBox.x-queryBox.x-queryBox.width<=8,'result follows the query closely '+JSON.stringify({queryBox,countBox}));
  const before=await heading.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.closest('.ai-tool-step-body').getBoundingClientRect();return{x:a.x-b.x,y:a.y-b.y};});await page.locator('.ai-tool-inline-result > button').click();assert.equal(await page.locator('.ai-search-detail').isVisible(),true);
  const after=await heading.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.closest('.ai-tool-step-body').getBoundingClientRect();return{x:a.x-b.x,y:a.y-b.y};}),result=await page.locator('.ai-search-detail').boundingBox();
  assert.ok(Math.abs(before.x-after.x)<1&&Math.abs(before.y-after.y)<1,'count heading must not drift on expansion');
@@ -216,4 +217,41 @@ test('older card-only search results stay compact, counted and available after r
  assert.match(await page.locator('.ai-tool-data-details summary').textContent(),/2 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').isVisible(),false);
  await page.locator('.ai-tool-data-details summary').click();assert.equal(await page.locator('.ai-tool-card--web_search a').count(),2);
  await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForSelector('.ai-tool-data-details');assert.equal(await page.locator('.ai-tool-card--web_search').isVisible(),false);
+});
+
+test('tool rows have a real entrance, nearby result receipts and reversible result transitions',async t=>{
+ const page=await fixture(t,'max');await page.setViewportSize({width:390,height:844});
+ await page.locator('#aiChatMsgInput').fill('搜索资料');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>emit({type:'tool_calls',tools:[{id:'motion',name:'search_web',args:{query:'资料'}}]}));
+ await page.waitForSelector('[data-tool-call-id="motion"]');
+ const motion=await page.locator('[data-tool-call-id="motion"]').evaluate(node=>({animations:node.getAnimations().map(a=>a.effect.getKeyframes()),opacity:getComputedStyle(node).opacity}));
+ assert.ok(motion.animations.some(frames=>frames.some(frame=>frame.opacity==='0')&&frames.some(frame=>frame.opacity==='1')),JSON.stringify(motion));
+ await page.evaluate(()=>emit({type:'tool_result',call_id:'motion',tool_name:'search_web',success:true,count:3,items:[{url:'https://example.com/one',title:'结果一'}]}));
+ const receipt=page.locator('[data-tool-call-id="motion"] .ai-tool-result-card-title'),panel=page.locator('[data-tool-call-id="motion"] .ai-search-detail');await receipt.waitFor();
+ const coords=await page.locator('[data-tool-call-id="motion"]').evaluate(node=>{const query=node.querySelector('.ai-tool-step-detail').getBoundingClientRect(),count=node.querySelector('.ai-tool-result-card-title').getBoundingClientRect();return{gap:count.left-query.right,dy:Math.abs(count.top-query.top)};});
+ assert.ok(coords.gap<=8&&coords.gap>=0&&coords.dy<8,JSON.stringify(coords));
+ await receipt.click();assert.ok(await panel.evaluate(node=>node.getAnimations().length>0));
+ await receipt.click();assert.equal(await receipt.getAttribute('aria-expanded'),'false');
+ await receipt.click();assert.equal(await receipt.getAttribute('aria-expanded'),'true');await page.waitForTimeout(190);assert.equal(await panel.isVisible(),true);
+ await receipt.click();await panel.waitFor({state:'hidden'});assert.equal(await receipt.getAttribute('aria-expanded'),'false');
+ await page.evaluate(()=>{document.documentElement.setAttribute('data-xtj-motion','off');});await receipt.click();assert.equal(await panel.evaluate(node=>node.getAnimations().length),0);
+ await page.evaluate(()=>{emit({type:'done',content:'检索完成。',thinking_mode:'max',complete:true,saved:true});stream.close();});
+});
+
+test('a sanitized final answer keeps the existing prefix and reveals new text in reading order instead of flashing a full replacement',async t=>{
+ const page=await fixture(t,'off');await page.locator('#aiChatMsgInput').fill('详细回答');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>emit({type:'content',text:'先到的正文。'}));await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('先到的正文。'));
+ await page.evaluate(()=>{window.originalAnswerParagraph=document.querySelector('.ai-msg.assistant .ai-msg-bubble').firstElementChild;window.testFinalAnswer='先到的正文。\n\n'+('后续内容自然出现，保持从左到右的阅读顺序。'.repeat(18));emit({type:'done',content:'需要被替换的旧正文',sanitized_content:testFinalAnswer,complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+ const state=await page.locator('.ai-msg.assistant .ai-msg-bubble').evaluate(node=>{const runs=Array.from(node.querySelectorAll('.ai-stream-reveal'));return{prefix:node.firstElementChild===originalAnswerParagraph,text:node.textContent,starts:runs.map(run=>run.__aiRevealAt),tailOpacity:getComputedStyle(runs.at(-1)).opacity};});
+ assert.equal(state.prefix,true);assert.equal(state.text,(await page.evaluate(()=>testFinalAnswer)).replace(/\n/g,''));assert.ok(state.starts.length>20);assert.ok(state.starts.every((x,i)=>i===0||x>state.starts[i-1]));assert.ok(Number(state.tailOpacity)<0.5,state.tailOpacity);
+ await page.waitForFunction(()=>document.querySelectorAll('.ai-msg-bubble .ai-stream-reveal').length===0);assert.equal(await page.locator('.ai-msg.assistant .ai-msg-bubble').textContent(),(await page.evaluate(()=>testFinalAnswer)).replace(/\n/g,''));
+});
+
+test('plus menu removes quick commands and both model/effort popups provide a close button without changing the choice',async t=>{
+ const page=await fixture(t);await page.locator('#aiPlusBtn').click();assert.equal(await page.locator('#aiQuickGrid,.ai-panel-group--quick').count(),0);assert.doesNotMatch(await page.locator('.ai-plus-panel-content').textContent(),/快捷指令/);
+ for(const action of ['open-model','open-think']){
+  const row=page.locator('[data-action="'+action+'"]');const before=await row.textContent();await row.click();const popup=page.locator('.ai-select-pop:not(.is-closing)');await popup.waitFor();const close=popup.getByRole('button',{name:'关闭',exact:true});assert.equal(await close.isVisible(),true);const size=await close.boundingBox();assert.ok(size.width>=44&&size.height>=44);
+  await close.click();await popup.waitFor({state:'detached'});assert.equal(await row.textContent(),before);assert.equal(await row.evaluate(el=>el===document.activeElement),true);
+ }
 });

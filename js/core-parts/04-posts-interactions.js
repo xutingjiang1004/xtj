@@ -3438,7 +3438,7 @@
                         return like && firstPageIds.has(String(like.post_id || ''));
                     });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({
-                        version: 7,
+                        version: 8,
                         data: {
                             posts: cachePosts,
                             comments: cacheComments,
@@ -3510,7 +3510,7 @@
                     }];
                 }
                 return {
-                    version: parsed.version || 7, // 必须与 CACHE_KEY v7 一致，旧缓存自动以新版本重写
+                    version: parsed.version || 8, // v8 snapshots retain complete media lists
                     timestamp: parsed.timestamp || 0,
                     data: {
                         posts: posts,
@@ -3751,7 +3751,24 @@
                     );
                     if (requestId && requestId !== feedLoadRequestId) return null;
                     if (postRes.error) throw postRes.error;
-                    posts = normalizePosts(postRes.data || []);
+                    var fallbackPosts = postRes.data || [];
+                    if (fallbackPosts.some(function(post) { return post.media_type === 'album'; })) {
+                        // Direct post rows have only a cover. Hydrate the visible
+                        // page in one server-authorized request before normalizing.
+                        var mediaResponse = await window.xtjOptionalAuthFetch('/api/post/media/batch', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ post_ids: fallbackPosts.map(function(post) { return post.id; }) }),
+                            timeoutMs: FEED_NET_TIMEOUT_MS
+                        });
+                        if (!mediaResponse || !mediaResponse.ok) throw new Error('帖子图片加载失败，请重试');
+                        var mediaData = await mediaResponse.json();
+                        if (!mediaData.ok || !Array.isArray(mediaData.posts) || mediaData.posts.some(function(post) { return !post || !Array.isArray(post.media_items); })) throw new Error('帖子图片加载失败，请重试');
+                        var visibleMedia = new Map(mediaData.posts.map(function(post) { return [String(post.id), post.media_items]; }));
+                        fallbackPosts = fallbackPosts.filter(function(post) { return visibleMedia.has(String(post.id)); }).map(function(post) {
+                            return Object.assign({}, post, { media_items: visibleMedia.get(String(post.id)) });
+                        });
+                    }
+                    posts = normalizePosts(fallbackPosts);
                     endReached = posts.length < FEED_PAGE_SIZE;
                     if (posts.length) {
                         var fallbackLastPost = posts[posts.length - 1];
