@@ -83,18 +83,9 @@ test('方案A：挂载时必须保留兜底（活动区创建失败也不能丢�
 });
 
 // ── 3. "整理中"必须归位到活动区（本次核心修复）────────────────────────
-test('方案A：「整理中」占位必须挂进活动区 body，而非直挂 timeline', function () {
-  const idx = aiAgent.indexOf("'data-organizing': '1'");
-  assert.ok(idx > 0, '未找到"整理中"占位创建点');
-  // 取创建点后 1600 字符为窗口（含后续 refreshOwningToolActivity 调用）
-  const window = aiAgent.slice(Math.max(0, idx - 500), idx + 1600);
-  assert.match(window, /toolActivityBody\(_organizeBar\)/,
-    '"整理中"必须经 toolActivityBody 挂进活动区，否则会再次落到轮次容器之外');
-  assert.ok(!/_organizeBar\.appendChild\(/.test(window),
-    '"整理中"不得再直挂 _organizeBar（这正是改造前样式不一致的根因）');
-  // 创建后应立即刷新活动区总摘要
-  assert.match(window, /refreshOwningToolActivity\(/,
-    '"整理中"插入后必须刷新活动区摘要，否则总摘要不会切到"正在整理结果"');
+test('已返回的工具不再被虚构的整理步骤保持为运行中', function () {
+  assert.doesNotMatch(aiAgent, /'data-organizing': '1'/);
+  assert.match(aiAgent, /processBody\(\)\.appendChild\(activeToolTimeline\)/);
 });
 
 // ── 4. 总摘要联动刷新 ─────────────────────────────────────────────────
@@ -206,8 +197,8 @@ test('方案A：必须覆盖深色主题与 reduced-motion 降级', function () 
 test('方案A：timeline 容器与既有查询路径必须保持可用', function () {
   // timeline 仍是外层容器（外部定位/清理逻辑依赖它）
   assert.match(aiAgent, /class:\s*'ai-tool-timeline ai-tool-status'/, 'timeline 容器不得被移除');
-  assert.match(aiAgent, /assistantNode\.insertBefore\(timeline, assistantBubble\)/,
-    'timeline 仍必须插在 assistantBubble 之前');
+  assert.match(aiAgent, /processBody\(\)\.appendChild\(activeToolTimeline\)/,
+    '开启思考时工具必须按顺序插进思考过程');
   // 既有以 timeline 为根的轮次查询必须仍然成立（活动区是其子节点）
   assert.match(aiAgent, /timeline\.querySelectorAll\('\.ai-tool-round\.is-running'\)/,
     '轮次查询不得从 timeline 根上移除（活动区在下一层，后代查询仍应生效）');

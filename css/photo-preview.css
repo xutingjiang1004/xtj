@@ -77,17 +77,17 @@ html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-root {
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack {
-  transform: none;
+  transform: translateX(var(--pp-track-x));
   will-change: auto;
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-track #ppSlideTrack {
-  transition: left var(--pp-dur-base) var(--pp-ease-standard);
+  transition: transform var(--pp-dur-base) var(--pp-ease-standard);
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage {
-  transform: translate3d(var(--pp-img-x), var(--pp-img-y), 0) scale(var(--pp-scale)) rotate(var(--pp-rotate));
-  will-change: transform;
+  transform: translate(var(--pp-img-x), var(--pp-img-y)) scale(var(--pp-scale)) rotate(var(--pp-rotate));
+  will-change: auto;
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-image #photoPreviewImage {
@@ -457,8 +457,8 @@ html.xtj-photo-preview-ready #photoPreviewOverlay #ppDeleteBtn {
   max-width:100%!important;max-height:100%!important;width:auto;height:auto;object-fit:contain;
   transition:none!important;image-orientation:from-image;
 }
-#photoPreviewOverlay .pp-slide-track.snapping .pp-slide-img { transform:translateZ(0)!important;filter:none!important;transition:none!important; }
-html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage { transform:translate3d(var(--pp-img-x),var(--pp-img-y),0) scale(var(--pp-scale)) rotate(var(--pp-rotate))!important; }
+#photoPreviewOverlay .pp-slide-track.snapping .pp-slide-img { transform:none!important;filter:none!important;transition:none!important; }
+html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage { transform:translate(var(--pp-img-x),var(--pp-img-y)) scale(var(--pp-scale)) rotate(var(--pp-rotate))!important; }
 #photoPreviewOverlay::after { content:none; }
 #photoPreviewOverlay .photo-preview-info.pp-story {
   position:absolute!important;left:max(16px,env(safe-area-inset-left,0px))!important;right:max(16px,env(safe-area-inset-right,0px))!important;
@@ -583,27 +583,27 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-slot {
 }
 #photoPreviewOverlay .pp-social-status:not(:empty) { min-height:44px; }
 
-/* Original HDR images must not sit inside permanent 3D/alpha paint layers.
-   Safari can tone-map these layers differently from the wall's original img. */
-html.xtj-photo-preview-ready #photoPreviewOverlay,
-html.xtj-photo-preview-ready #photoPreviewOverlay #ppImageWrapper,
-html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack,
-html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage,
-html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-slot,
-html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-img {
-  transform: none !important;
-  -webkit-transform: none !important;
-  transform-style: flat !important;
-  backface-visibility: visible !important;
-  -webkit-backface-visibility: visible !important;
-  will-change: auto !important;
-  filter: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack { position: relative; }
-html.xtj-photo-preview-ready #photoPreviewOverlay.pp-image-transformed #photoPreviewImage {
-  transform: translate(var(--pp-img-x),var(--pp-img-y)) scale(var(--pp-scale)) rotate(var(--pp-rotate)) !important;
-}
+/* Keep the permission-controlled delete action stable from the first frame. */
 html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar,
 html.xtj-photo-preview-ready #photoPreviewOverlay #ppDeleteBtn { animation:none!important;transition:none!important; }
+
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-motion-active #ppImageWrapper { will-change:transform,opacity; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-info { animation:none!important;transition:none!important; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-identity { min-height:42px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-stats { min-height:44px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-story-stats span { font-variant-numeric:tabular-nums; }
+
+html.xtj-photo-preview-ready #photoPreviewOverlay { transform:none!important; }
+html.xtj-photo-preview-ready #ppImageWrapper { transform:none; }
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack.snapping { will-change:transform; }
+
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppImageWrapper,
+html.xtj-photo-preview-ready #photoPreviewOverlay #ppSlideTrack,
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-slot,
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-img {
+  transform-style:flat!important;backface-visibility:visible!important;-webkit-backface-visibility:visible!important;
+  filter:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-slot,
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-img:not(#photoPreviewImage) { transform:none!important;will-change:auto!important; }

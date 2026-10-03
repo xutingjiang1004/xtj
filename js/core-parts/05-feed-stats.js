@@ -1231,12 +1231,14 @@
                 return total;
             }
             window.__xtjAuthoritativeDmUnread = authoritativeDmUnread;
-            function fetchDmListShared(limit) {
+            function fetchDmListShared(limit, options) {
+                options = options || {};
                 var now = Date.now();
-                var owner = window.currentUser || '';
-                if (_dmListShared.owner !== owner) {
+                var owner = window.currentUser || '', identityEpoch = window._authStateEpoch || 0;
+                if (_dmListShared.owner !== owner || _dmListShared.authEpoch !== identityEpoch) {
                     window.__xtjInvalidateDmListShared();
                     _dmListShared.owner = owner;
+                    _dmListShared.authEpoch = identityEpoch;
                     window.__xtjMutedChatPeers = {};
                     window.__xtjDmMuteReady = false;
                     setUnreadBadgeCount(0);
@@ -1254,9 +1256,9 @@
                 //   持续打 /api/user/refresh。用户主动操作（点按钮）走其它路径，不受影响。
                 async function fetchListAttempt() {
                     for (var attempt=0; attempt<2; attempt++) {
-                        if (_dmListShared.epoch!==epoch || window.currentUser!==owner) return null;
+                        if (_dmListShared.epoch!==epoch || window.currentUser!==owner || (window._authStateEpoch || 0)!==identityEpoch) return null;
                         try {
-                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:true,timeoutMs:12000});
+                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:options.background !== false,timeoutMs:12000,authOwner:owner,authEpoch:identityEpoch});
                             if (response && response.ok) return await response.json();
                             if (!response || (response.status!==429 && response.status<500)) return null;
                         } catch (_) {}
@@ -1265,7 +1267,7 @@
                     return null;
                 }
                 var p=fetchListAttempt().then(function(json){
-                    if (_dmListShared.epoch!==epoch || window.currentUser!==owner) return null;
+                    if (_dmListShared.epoch!==epoch || window.currentUser!==owner || (window._authStateEpoch || 0)!==identityEpoch) return null;
                     if (json && json.ok) {
                         _dmListShared.json=json; _dmListShared.at=Date.now();
                         _dmListShared.retryAt=0; _dmListShared.failures=0;

@@ -75,6 +75,32 @@ test('original photo stays bright after opening and navigation, and toolbar geom
  async function pixel(){return Array.from(await sharp(await p.screenshot()).extract({left:510,top:382,width:1,height:1}).removeAlpha().raw().toBuffer());}
  await p.waitForTimeout(300);const before=await p.locator('#ppDeleteBtn').boundingBox();assert.deepEqual(await pixel(),[255,0,0]);await p.waitForTimeout(1200);assert.deepEqual(await pixel(),[255,0,0]);assert.deepEqual(await p.locator('#ppDeleteBtn').boundingBox(),before);
  await p.evaluate(()=>ppNextPhoto());await p.waitForFunction(()=>photoPreviewCurrent.id==='1');await p.waitForTimeout(1400);assert.deepEqual(await pixel(),[0,255,0]);
- const computed=await p.evaluate(()=>['photoPreviewOverlay','ppImageWrapper','ppSlideTrack','photoPreviewImage'].map(id=>{const s=getComputedStyle(document.getElementById(id));return {transform:s.transform,filter:s.filter,willChange:s.willChange};}));assert.ok(computed.every(s=>s.transform==='none'&&s.filter==='none'&&s.willChange==='auto'),JSON.stringify(computed));
+ const computed=await p.evaluate(()=>['photoPreviewOverlay','ppImageWrapper','ppSlideTrack','photoPreviewImage'].map(id=>{const s=getComputedStyle(document.getElementById(id));return {transform:s.transform,filter:s.filter,willChange:s.willChange};}));assert.ok(computed.every(s=>s.filter==='none'&&s.willChange==='auto'),JSON.stringify(computed));assert.equal(computed[0].transform,'none');assert.equal(computed[2].transform,'matrix(1, 0, 0, 1, -1024, 0)');
  await p.evaluate(()=>ppRotatePhoto());assert.notEqual(await p.locator('#photoPreviewImage').evaluate(n=>getComputedStyle(n).transform),'none');
+});
+for(const viewport of [{width:390,height:844},{width:1024,height:768},{width:1440,height:900}])test('photo opening/return/slide retain native motion and stable author metadata at '+viewport.width+'px',async t=>{
+ const p=await pageFor(t,'<html class="xtj-photo-preview-ready"><body><div id="photoGrid"><div class="photo-wall-item" data-photo-id="0"><img id="origin" style="position:absolute;left:30px;top:50px;width:180px;height:90px"></div></div></body></html>',viewport);
+ p.setDefaultTimeout(6000);
+ for(const path of ['css/style.css','css/ui-shell.css','css/photo-preview.css'])await p.addStyleTag({path});
+ await p.evaluate(()=>{window.currentUser='A';window.isAdmin=()=>false;window.sanitizeUrl=s=>s;window.escapeHtml=String;window.xtjFetchAvatarUrl=async()=>'';const c=document.createElement('canvas');c.width=200;c.height=100;c.getContext('2d').fillRect(0,0,200,100);window.photos=[0,1].map(i=>({id:String(i),username:'A',timestamp:1760000000000,views:12+i,imageUrl:c.toDataURL(),width:200,height:100}));document.getElementById('origin').src=photos[0].imageUrl;});
+ for(const path of ['js/photo-wall/preview.js','js/photo-wall/story.js','js/photo-wall/preview-hotfix.js'])await p.addScriptTag({path});
+ const opening=await p.evaluate(()=>{
+   openPhotoPreview(0,{photos,originEl:document.getElementById('origin')});
+   var wrap=document.getElementById('ppImageWrapper'), motion=wrap.getAnimations()[0];
+   motion.pause();motion.currentTime=100;
+   var author=document.querySelector('.photo-preview-info');window.metadataMutations=0;
+   window.metadataObserver=new MutationObserver(records=>{metadataMutations+=records.filter(r=>r.target.closest&&r.target.closest('#photoPreviewUser,#photoPreviewTime,#photoPreviewViewsCount')).length;});
+   metadataObserver.observe(author,{childList:true,subtree:true,characterData:true});
+   window.metadataRects=['photoPreviewUser','photoPreviewTime','photoPreviewViewsCount','ppDeleteBtn'].map(id=>{var r=document.getElementById(id).getBoundingClientRect();return[r.x,r.y,r.width,r.height];});
+   return {transform:getComputedStyle(wrap).transform,frames:motion.effect.getKeyframes().map(k=>k.transform),duration:motion.effect.getTiming().duration};
+ });
+ assert.notEqual(opening.transform,'none');assert.ok(opening.frames[0].includes('scale('));assert.equal(opening.duration,240);
+ await p.evaluate(()=>document.getElementById('ppImageWrapper').getAnimations()[0].finish());await p.waitForFunction(()=>document.getElementById('photoPreviewImage').naturalWidth>0);await p.waitForTimeout(300);
+ assert.equal(await p.evaluate(()=>metadataMutations),0);
+ assert.deepEqual(await p.evaluate(()=>['photoPreviewUser','photoPreviewTime','photoPreviewViewsCount','ppDeleteBtn'].map(id=>{var r=document.getElementById(id).getBoundingClientRect();return[r.x,r.y,r.width,r.height];})),await p.evaluate(()=>metadataRects));
+ const slide=await p.evaluate(()=>{ppNextPhoto();var track=document.getElementById('ppSlideTrack');return{property:getComputedStyle(track).transitionProperty,active:track.classList.contains('snapping')};});assert.equal(slide.property,'transform');assert.equal(slide.active,true);
+ await p.waitForFunction(()=>photoPreviewCurrent.id==='1');await p.evaluate(()=>ppPrevPhoto());await p.waitForFunction(()=>photoPreviewCurrent.id==='0');
+ const closing=await p.evaluate(()=>{closePhotoPreview();var wrap=document.getElementById('ppImageWrapper'),a=wrap.getAnimations()[0];a.pause();a.currentTime=100;return{transform:getComputedStyle(wrap).transform,frames:a.effect.getKeyframes().map(k=>k.transform)};});
+ assert.notEqual(closing.transform,'none');assert.ok(closing.frames[1].includes('scale('));
+ await p.evaluate(()=>document.getElementById('ppImageWrapper').getAnimations()[0].finish());await p.waitForFunction(()=>!document.getElementById('photoPreviewOverlay').classList.contains('active'));
 });
