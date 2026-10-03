@@ -16,7 +16,7 @@ function between(source, start, end) {
 }
 
 test('chat list ignores stale responses and keeps one retry control', () => {
-  const list = between(core, 'async function loadDockChatList()', 'function hydrateDockChatAvatars');
+  const list = between(core, 'async function loadDockChatList(userRetry)', 'function hydrateDockChatAvatars');
   assert.match(list, /listLoadSeq\s*=\s*\+\+_dockChatListLoadSeq/);
   assert.match(list, /if \(listLoadSeq !== _dockChatListLoadSeq\) return/);
   assert.match(list, /querySelector\('\.chat-load-retry'\)[\s\S]*previousRetry\.remove\(\)/);
@@ -24,9 +24,9 @@ test('chat list ignores stale responses and keeps one retry control', () => {
 
 test('chat detail ignores stale conversations and deduplicates retry controls', () => {
   // ★ 2026-09-25：签名新增 muteLoadingSkeleton（轮询/后台刷新不得重绘 loading 骨架）。
-  const detail = between(core, 'async function loadDockChatMessages(userName, forceScroll, muteLoadingSkeleton)', 'function renderDockMessages');
+  const detail = between(core, 'async function loadDockChatMessages(userName, forceScroll, muteLoadingSkeleton, userRetry)', 'function renderDockMessages');
   assert.match(detail, /loadSeq\s*=\s*\+\+_dockChatLoadSeq/);
-  assert.match(detail, /loadSeq !== _dockChatLoadSeq \|\| dockChatActiveUser !== userName/);
+  assert.match(detail, /loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName/);
   assert.match(detail, /requestController/);
   assert.match(detail, /12000/);
   assert.match(detail, /querySelector\('\.chat-load-retry'\)[\s\S]*previousRetry\.remove\(\)/);
@@ -62,7 +62,7 @@ test('media bubble image must not be sized relative to the bubble itself', () =>
 });
 
 test('opening a chat does not immediately duplicate the detail request through polling', () => {
-  const openChat = between(core, 'window.openChat = function(userName)', 'async function loadDockChatList()');
+  const openChat = between(core, 'window.openChat = function(userName)', 'async function loadDockChatList(userRetry)');
   assert.match(openChat, /startDMPolling\(60000, true\)/);
   assert.match(core, /startDMPolling\(300000, !!\(options && options\.source === 'openChat'\)\)/);
 });

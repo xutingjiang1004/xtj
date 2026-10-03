@@ -8,6 +8,8 @@
 // 2026-08-12 修复：drain 回调改为命名函数 onDrain（原 arguments.callee 在严格模式
 // 下同步抛 TypeError，导致二次背压时监听器未注册、缓冲永不复排）。
 
+const { appendProcessEvent } = require('./ai-process-events');
+
 const MAX_SSE_BUFFER_BYTES = 256 * 1024;
 // ★ 2026 修复：支持可选 event 名（此前只写 'data: ' 帧，带事件名的路由只能裸 res.write
 // 绕过背压上限）。向后兼容：未传 eventName 时行为与旧版完全一致。
@@ -27,6 +29,7 @@ function writeSse(res, payload, eventName) {
         try { res.end(); } catch (_) {}
         return false;
       }
+      appendProcessEvent(res, payload);
       // 注意：命名函数 onDrain 代替 arguments.callee（后者在 'use strict' 下访问会同步抛
       // TypeError，导致二次背压时 drain 监听器未注册、缓冲永不复排、连接关闭时静默丢失）。
       function onDrain() {

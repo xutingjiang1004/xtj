@@ -1914,3 +1914,32 @@ html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step,
 html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step { animation: none !important; }
 html[data-xtj-motion=off] .ai-tool-activity-body,
 html[data-xtj-motion=off] .ai-tool-round-list-wrap { transition: none !important; }
+
+/* Reasoning and tools share one chronological, collapsible reading flow. */
+.ai-thinking-body .ai-reasoning-segment { white-space:pre-wrap; }
+.ai-process-timeline { margin:8px 0!important; }
+.ai-process-timeline .ai-tool-activity-head,
+.ai-process-timeline .ai-tool-round-head { display:none!important; }
+.ai-process-timeline .ai-tool-activity,
+.ai-process-timeline .ai-tool-round { padding:0!important;border:0!important;background:none!important;box-shadow:none!important; }
+.ai-process-timeline .ai-tool-activity-body,
+.ai-process-timeline .ai-tool-activity.is-collapsed .ai-tool-activity-body,
+.ai-process-timeline .ai-tool-round.is-collapsed .ai-tool-round-list-wrap {
+  height:auto!important;max-height:none!important;grid-template-rows:1fr!important;opacity:1!important;visibility:visible!important;pointer-events:auto!important;
+}
+.ai-process-timeline .ai-tool-round-list .ai-tool-step-title { font-size:12px;line-height:1.6;font-weight:500; }
+.ai-process-timeline .ai-tool-step-detail { font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.ai-process-timeline .ai-tool-step-status { font-size:11px; }
+.ai-process-timeline .ai-tool-inline-result {
+  margin:2px 0!important;padding:2px 0!important;border:0!important;border-radius:0!important;
+  background:none!important;box-shadow:none!important;animation:none!important;font-size:11px;
+}
+.ai-process-timeline .ai-tool-inline-result[hidden] { display:none!important; }
+.ai-process-timeline .ai-tool-result-card-title { font-size:11px;font-weight:400;display:inline;color:var(--primary); }
+.ai-process-timeline .ai-tool-result-error { font-size:11px;color:var(--ai-muted);overflow-wrap:anywhere; }
+.ai-process-timeline .ai-search-detail { white-space:normal; }
+.ai-process-timeline .ai-tool-round-list-wrap { transition:none!important; }
+
+.ai-process-timeline .ai-tool-step { padding:3px 0; }
+.ai-process-timeline > .ai-tool-step .ai-tool-step-title { font-size:12px; }
+.ai-process-timeline details.ai-tool-inline-result > a { display:block; }

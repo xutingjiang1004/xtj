@@ -158,7 +158,11 @@
     avatars.delete(name);if(current&&current.username===name)showAvatar(current);
   });
   window.renderPhotoStory=function(photo){
-    if(!ensure())return;
+    if(!photo||!ensure())return;
+    function stableText(id,value){var node=el(id),text=String(value);if(node&&node.textContent!==text)node.textContent=text;}
+    stableText('photoPreviewUser',photo.username||photo.user_name||(photo.__xtjSource==='chat'?'':'未知用户'));
+    stableText('photoPreviewTime',photo.timestamp?new Date(photo.timestamp).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'');
+    stableText('photoPreviewViewsCount',photo.views==null?'':photo.views);
     var key=function(p){return p&&(p.cloudId||p.id||p.imageUrl);};
     var same=current&&key(current)&&String(key(current))===String(key(photo))&&storyAuthEpoch===authEpoch()&&(current._storyOwner||'')===(window.currentUser||'');
     current=photo;current._storyOwner=window.currentUser||'';storyAuthEpoch=authEpoch();

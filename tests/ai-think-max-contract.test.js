@@ -56,9 +56,9 @@ test('前端：加号菜单含工作模式开关行，且位于思考 与 网页
 });
 
 test('前端：请求体携带 thinking_max / work_mode，关闭时上下文限制 256 并压缩，开启时放大', () => {
-  assert.equal((agentSource.match(/thinking_max: S\.thinkMax === true/g) || []).length, 2);
-  assert.equal((agentSource.match(/work_mode: S\.workMode === true/g) || []).length, 2);
-  assert.match(agentSource, /var _ctxCap = S\.thinkMax \? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;/);
+  assert.equal((agentSource.match(/thinking_max: sendSettings\.thinkMax === true/g) || []).length, 2);
+  assert.equal((agentSource.match(/work_mode: sendSettings\.workMode === true/g) || []).length, 2);
+  assert.match(agentSource, /var _ctxCap = sendSettings\.thinkMax \? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;/);
   assert.match(agentSource, /buildAiConversationHistory\(_ctxCap, _ctxChars, userMsg, attachmentPayload\)/);
 });
 

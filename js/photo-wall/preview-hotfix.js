@@ -212,6 +212,7 @@
 
   function syncPreviewMeta(photo) {
     photo = photo || activePhoto();
+    if (photo && window.renderPhotoStory) { window.renderPhotoStory(photo); return; }
     var userEl = document.getElementById('photoPreviewUser');
     var timeEl = document.getElementById('photoPreviewTime');
     var viewsEl = document.getElementById('photoPreviewViewsCount');
@@ -230,15 +231,18 @@
   }
 
   function currentPhotoIndex() {
-    var current = activePhoto();
-    var list = photoList();
+    var current = activePhoto(), list = photoList();
     if (!current || !list.length) return -1;
     var currentId = current.id == null ? '' : String(current.id);
+    if (currentId) {
+      for (var idx = 0; idx < list.length; idx++) {
+        if (list[idx] && list[idx].id != null && String(list[idx].id) === currentId) return idx;
+      }
+    }
     var currentUrl = String(current.imageUrl || '');
-    for (var idx = 0; idx < list.length; idx++) {
-      var item = list[idx] || {};
-      if ((item.id != null && String(item.id) === currentId) || String(item.imageUrl || '') === currentUrl) {
-        return idx;
+    if (currentUrl) {
+      for (var fallback = 0; fallback < list.length; fallback++) {
+        if (list[fallback] && String(list[fallback].imageUrl || '') === currentUrl) return fallback;
       }
     }
     return -1;
@@ -309,7 +313,6 @@
     if (animate) toggleTimedClass(root, 'pp-animate-image', 240);
     else root.classList.remove('pp-animate-image');
     img.classList.toggle('zoomed', state.scale > 1.01);
-    root.classList.toggle('pp-image-transformed', state.scale !== 1 || state.tx !== 0 || state.ty !== 0 || state.rotation !== 0);
   }
 
   function centerTrackOffset(extraX) {
@@ -323,8 +326,8 @@
     var offset = centerTrackOffset(extraX);
     setPreviewVars({ '--pp-track-x': offset + 'px' });
     // The legacy navigator owns an inline transform; update it for gestures too.
-    track.style.transition = animate ? 'left 220ms ease-out' : 'none';
-    track.style.left = offset + 'px';
+    track.style.transition = animate ? 'transform 220ms ease-out' : 'none';
+    track.style.transform = 'translateX(' + offset + 'px)';
     if (animate) toggleTimedClass(root, 'pp-animate-track', 240);
     else root.classList.remove('pp-animate-track');
   }
@@ -1650,7 +1653,7 @@
   function reducedMotion(){return document.documentElement.getAttribute('data-xtj-motion')==='off'||(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);}
   function cancelPreviewMotion(){
     motionEpoch++;motionAnimations.forEach(function(animation){animation.cancel();});motionAnimations=[];motionClosing=false;
-    var root=overlay();if(root)root.classList.remove('pp-transition-closing');
+    var root=overlay();if(root)root.classList.remove('pp-transition-closing','pp-motion-active');
   }
   function originForCurrent(){
     var photo=activePhoto(),grid=document.getElementById('photoGrid'),root=overlay(),node=null;
@@ -1668,17 +1671,15 @@
     var photo=activePhoto();width=width||(photo&&photo.width)||screen.width;height=height||(photo&&photo.height)||screen.height;
     var fit=Math.min(screen.width/width,screen.height/height),imageWidth=width*fit,imageHeight=height*fit;
     var rect=origin.rect,scale=Math.min(rect.width/imageWidth,rect.height/imageHeight);
-    return 'translate3d('+(rect.left+rect.width/2-screen.left-screen.width/2)+'px,'+(rect.top+rect.height/2-screen.top-screen.height/2)+'px,0) scale('+scale+')';
+    return 'translate('+(rect.left+rect.width/2-screen.left-screen.width/2)+'px,'+(rect.top+rect.height/2-screen.top-screen.height/2)+'px) scale('+scale+')';
   }
   function animatePreviewOpen(){
     var root=overlay(),wrap=wrapper();if(!root||!wrap||!wrap.animate||reducedMotion())return;
     root._motionOriginId=activePhoto()&&activePhoto().id;
     var origin=originForCurrent(),from=origin?motionTransform(origin):'none';
-    var token=motionEpoch;
-    // Keep image ancestors opaque while the original expands: alpha compositing can
-    // change HDR presentation on WebKit even when the image bytes stay identical.
-    motionAnimations=[wrap.animate([{transform:from},{transform:'none'}],{duration:240,easing:'cubic-bezier(.22,1,.36,1)'})];
-    Promise.all(motionAnimations.map(function(a){return a.finished;})).then(function(){if(token===motionEpoch)motionAnimations=[];}).catch(function(){});
+    var token=motionEpoch;root.classList.add('pp-motion-active');
+    motionAnimations=[wrap.animate([{transform:from,opacity:.6},{transform:'none',opacity:1}],{duration:240,easing:'cubic-bezier(.22,1,.36,1)'}),root.animate([{opacity:0},{opacity:1}],{duration:180,easing:'ease-out'})];
+    Promise.all(motionAnimations.map(function(a){return a.finished;})).then(function(){if(token===motionEpoch){motionAnimations=[];root.classList.remove('pp-motion-active');}}).catch(function(){});
   }
   function animatePreviewClose(){
     var root=overlay(),wrap=wrapper();if(!root||!root.classList.contains('active')||motionClosing)return;
@@ -1690,7 +1691,7 @@
     var from=getComputedStyle(previewImage()).transform;
     state.scale=1;state.tx=0;state.ty=0;state.rotation=0;applyImageTransform(false);
     if(reducedMotion()||!wrap||!wrap.animate){forceClosePhotoPreview();return;}
-    root.classList.add('pp-transition-closing');var token=motionEpoch;
+    root.classList.add('pp-transition-closing','pp-motion-active');var token=motionEpoch;
     motionAnimations=[wrap.animate([{transform:from,opacity:1},{transform:to,opacity:.3}],{duration:240,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}),root.animate([{opacity:getComputedStyle(root).opacity},{opacity:0}],{duration:240,easing:'ease-in',fill:'forwards'})];
     motionAnimations[0].finished.then(function(){if(token===motionEpoch)forceClosePhotoPreview();}).catch(function(){});
   }

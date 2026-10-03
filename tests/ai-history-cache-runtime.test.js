@@ -160,7 +160,7 @@ test('deep research sends use an independent lock and invalidate pending auth on
   const start = aiSource.indexOf('async function handleDeepThinkPageSend');
   const end = aiSource.indexOf('var _dtListeners', start);
   const deepSend = aiSource.slice(start, end);
-  assert.match(deepSend, /if \(S\._dtSending\)/);
+  assert.match(deepSend, /if \(S\._dtSending \|\| S\._dtCreating \|\| S\._dtDeleting\)/);
   assert.match(deepSend, /var dtSendToken = \(S\._dtSendSeq/);
   assert.match(deepSend, /await ensureUserAuthOrNotify\(\);\s*if \(!isCurrentDeepSend\(\)\)/);
   assert.match(deepSend, /await getUserAuthPayload\(\{ forceNoToken: false \}\);[\s\S]{0,500}if \(!isCurrentDeepSend\(\)/);

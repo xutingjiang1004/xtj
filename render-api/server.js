@@ -69,6 +69,7 @@ const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = requi
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer, fetchSafeRedirectBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { writeSse } = require('./sse-write');
+const { getProcessEvents } = require('./ai-process-events');
 const { createChatFeatures } = require('./chat-features');
 const { createDmPrivateStorage, dmStorageBucket, PRIVATE_BUCKET } = require('./dm-private-storage');
 const { sniffDocument } = require('./dm-file-magic');
@@ -3763,7 +3764,7 @@ async function finishStream(res, opt) {
           user_name: opt.userName,
           content: content,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs, { site_cards: Array.isArray(opt.siteCards) ? opt.siteCards.slice(0, 8) : [] }),
+          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs, { site_cards: Array.isArray(opt.siteCards) ? opt.siteCards.slice(0, 8) : [], process_events: getProcessEvents(res) }),
           actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
           created_at: assistantCreatedAt
         }
@@ -9884,7 +9885,7 @@ async function callDeepSeekViaResponses(messages, options) {
       // 工具执行进度上报：前端据此显示"正在调用 X"，避免长时间无反馈像卡死
       try {
         if (typeof options.onToolCall === 'function' && functionCalls.length) {
-          options.onToolCall(functionCalls.map(function(fc) { return { name: fc.name, args: fc.arguments }; }));
+          options.onToolCall(functionCalls.map(function(fc, index) { return { id: fc.id || ('call_r' + round + '_' + index + '_' + String(fc.name || 'tool').replace(/[^a-zA-Z0-9_]/g, '')), name: fc.name, args: fc.arguments }; }));
         }
       } catch (e) {}
 
@@ -9911,7 +9912,7 @@ async function callDeepSeekViaResponses(messages, options) {
         var tStart = Date.now();
         var toolResult = null;
         try {
-          toolResult = await toolExecutor({ function: { name: fc.name, arguments: fc.arguments } }, respToolCallCtx);
+          toolResult = await toolExecutor({ id: fc.id || ('call_r' + round + '_' + fi + '_' + String(fc.name || 'tool').replace(/[^a-zA-Z0-9_]/g, '')), function: { name: fc.name, arguments: fc.arguments } }, respToolCallCtx);
         } catch (e) {
           if (externalSignal && externalSignal.aborted) throw e;
           toolResult = { tool_name: fc.name, error: (e && e.message) || '工具执行失败' };
@@ -20128,6 +20129,7 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
     if (Array.isArray(extra.worker_results)) obj.worker_results = extra.worker_results;
     if (Array.isArray(extra.thinking_log)) obj.thinking_log = extra.thinking_log;
     if (Array.isArray(extra.site_cards) && extra.site_cards.length) obj.site_cards = extra.site_cards;
+    if (Array.isArray(extra.process_events) && extra.process_events.length) obj.process_events = extra.process_events;
     if (typeof extra.think_duration_ms === 'number' && extra.think_duration_ms > 0) {
       obj.think_duration_ms = extra.think_duration_ms;
     }
@@ -22351,7 +22353,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
           user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled }),
+          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res) }),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -22839,19 +22841,19 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
             tools: dsmlTcs.map(function(t) {
               var a = {};
               try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {}
-              return { name: t.function.name, args: a };
+              return { id: t.id, name: t.function.name, args: a };
             })
           });
           for (var drI = 0; drI < dsmlTcs.length; drI++) {
             var dtcRaw = { function: { name: dsmlTcs[drI].function.name, arguments: dsmlTcs[drI].function.arguments } };
-            writeSse(res, { type: 'tool_pending', tool_name: dsmlTcs[drI].function.name });
+            writeSse(res, { type: 'tool_pending', call_id: dsmlTcs[drI].id, tool_name: dsmlTcs[drI].function.name });
             var dRes;
             try { dRes = await executeToolCall(dtcRaw, toolContext); } catch (e) { dRes = { tool_name: dsmlTcs[drI].function.name, error: '工具执行失败' }; }
             if (dRes && dRes.error) {
-              writeSse(res, { type: 'tool_error', tool_name: dsmlTcs[drI].function.name, error: String(dRes.error).slice(0, 200) });
+              writeSse(res, { type: 'tool_error', call_id: dsmlTcs[drI].id, tool_name: dsmlTcs[drI].function.name, error: String(dRes.error).slice(0, 200) });
             } else {
               var dCount = (dRes && (dRes.results_count || (Array.isArray(dRes.results) ? dRes.results.length : 0))) || 0;
-              writeSse(res, { type: 'tool_result', tool_name: dsmlTcs[drI].function.name, success: true, count: dCount, location: (dRes && dRes.location) || '' });
+              writeSse(res, { type: 'tool_result', call_id: dsmlTcs[drI].id, tool_name: dsmlTcs[drI].function.name, success: true, count: dCount, location: (dRes && dRes.location) || '' });
             }
             var dBody = '';
             if (dRes && dRes.content) dBody = dRes.content;
@@ -22885,17 +22887,17 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         }
       }
       // 前端时间线：先展示"进行中"
-      writeSse(res, { type: 'tool_calls', tools: tcs.map(function(t) { var a = {}; try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {} return { name: t.function.name, args: a }; }) });
+      writeSse(res, { type: 'tool_calls', tools: tcs.map(function(t) { var a = {}; try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {} return { id: t.id, name: t.function.name, args: a }; }) });
       for (var rI = 0; rI < tcs.length; rI++) {
         var tcRaw = { function: { name: tcs[rI].function.name, arguments: tcs[rI].function.arguments } };
-        writeSse(res, { type: 'tool_pending', tool_name: tcs[rI].function.name });
+        writeSse(res, { type: 'tool_pending', call_id: tcs[rI].id, tool_name: tcs[rI].function.name });
         var tRes;
         try { tRes = await executeToolCall(tcRaw, toolContext); } catch (e) { tRes = { tool_name: tcs[rI].function.name, error: '工具执行失败' }; }
         if (tRes && tRes.error) {
-          writeSse(res, { type: 'tool_error', tool_name: tcs[rI].function.name, error: String(tRes.error).slice(0, 200) });
+          writeSse(res, { type: 'tool_error', call_id: tcs[rI].id, tool_name: tcs[rI].function.name, error: String(tRes.error).slice(0, 200) });
         } else {
           var toolCount = (tRes && (tRes.results_count || (Array.isArray(tRes.results) ? tRes.results.length : 0))) || 0;
-          writeSse(res, { type: 'tool_result', tool_name: tcs[rI].function.name, success: true, count: toolCount, location: (tRes && tRes.location) || '' });
+          writeSse(res, { type: 'tool_result', call_id: tcs[rI].id, tool_name: tcs[rI].function.name, success: true, count: toolCount, location: (tRes && tRes.location) || '' });
         }
         var toolBody = '';
         if (tRes && tRes.content) toolBody = tRes.content;
@@ -24257,7 +24259,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
             var tcs = (Array.isArray(list) ? list : []).slice(0, 12).map(function(t) {
               var a = {};
               try { a = JSON.parse((t && t.args) || '{}'); } catch (e) { a = {}; }
-              return { name: (t && t.name) || 'tool', args: a };
+              return { id: t && t.id, name: (t && t.name) || 'tool', args: a };
             });
             writeSse(res, { type: 'tool_calls', tools: tcs });
           } catch (e) {}
@@ -24284,6 +24286,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
               var _n2 = normalizeToolResultItems(_rItems, 12);
               writeSse(res, {
                 type: 'tool_result',
+                call_id: toolCall && toolCall.id,
                 tool_name: _okName,
                 success: !(tcResult && tcResult.error),
                 count: _cnt,
@@ -24498,7 +24501,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
             user_name: userName,
             content: responsesContent,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled }),
+            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res) }),
             actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
           }
         ]);
@@ -24685,6 +24688,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
               var _n1 = normalizeToolResultItems(trItems, 12);
               if (!writeSse(res, {
                 type: 'tool_result',
+                call_id: item.toolCallId,
                 tool_name: item.toolResult.tool_name || '',
                 success: !item.toolResult.error,
                 count: item.toolResult.results_count || 0,
@@ -25538,10 +25542,10 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       var toolsInfo = toolCallsArr.map(function(t) {
         var args;
         try { args = JSON.parse(t.args); } catch (e) { args = {}; }
-        return { name: t.name, args: args };
+        return { id: t.id, name: t.name, args: args };
       });
       writeSse(res, { type: 'tool_calls', tools: toolsInfo });
-      toolsInfo.forEach(function(tool) { writeSse(res, { type: 'tool_pending', tool_name: tool.name }); });
+      toolsInfo.forEach(function(tool) { writeSse(res, { type: 'tool_pending', call_id: tool.id, tool_name: tool.name }); });
       
       // ★ 2026-09-15 流畅性优化：工具执行期按 3s 推送 tool_progress，
       //   避免前端"正在使用工具…"长时间静止（详见 Responses 路径同名注释）。
@@ -25611,6 +25615,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
         var _n2 = normalizeToolResultItems(toolResult.content, 12);
         writeSse(res, {
           type: 'tool_result',
+          call_id: toolResults[ti].id,
           tool_name: toolResult.tool_name || '',
           success: !toolResult.error,
           count: toolResult.results_count || 0,
@@ -25623,7 +25628,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
           query: toolResult.query || '',
           error: toolResult.error || null
         });
-        if (toolResult.error) writeSse(res, { type: 'tool_error', tool_name: toolResult.tool_name || '', error: toolResult.error });
+        if (toolResult.error) writeSse(res, { type: 'tool_error', call_id: toolResults[ti].id, tool_name: toolResult.tool_name || '', error: toolResult.error });
         if (Array.isArray(toolResult.cards)) {
           toolResult.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
         }
@@ -25654,10 +25659,10 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       var dsmlToolsInfo = dsmlFallbackCalls.map(function(t) {
         var a = {};
         try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {}
-        return { name: t.function.name, args: a };
+        return { id: t.id, name: t.function.name, args: a };
       });
       writeSse(res, { type: 'tool_calls', tools: dsmlToolsInfo });
-      dsmlToolsInfo.forEach(function(tool) { writeSse(res, { type: 'tool_pending', tool_name: tool.name }); });
+      dsmlToolsInfo.forEach(function(tool) { writeSse(res, { type: 'tool_pending', call_id: tool.id, tool_name: tool.name }); });
       var _dsmlToolProgress = setInterval(function() {
         if (res.writableEnded || aborted) return;
         try { writeSse(res, { type: 'tool_progress', tools: dsmlToolsInfo.map(function(t) { return t.name; }), phase: 'running' }); } catch (_) {}
@@ -25690,6 +25695,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
         var _n3 = normalizeToolResultItems(dTRes.content, 12);
         writeSse(res, {
           type: 'tool_result',
+          call_id: dsmlToolResults[dti].id,
           tool_name: dTRes.tool_name || dsmlToolResults[dti].name,
           success: !dTRes.error,
           count: dTRes.results_count || 0,
@@ -25701,7 +25707,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
           query: dTRes.query || '',
           error: dTRes.error || null
         });
-        if (dTRes.error) writeSse(res, { type: 'tool_error', tool_name: dsmlToolResults[dti].name, error: dTRes.error });
+        if (dTRes.error) writeSse(res, { type: 'tool_error', call_id: dsmlToolResults[dti].id, tool_name: dsmlToolResults[dti].name, error: dTRes.error });
         if (Array.isArray(dTRes.cards)) dTRes.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
         roundMessages.push({ role: 'tool', content: JSON.stringify(dTRes), tool_call_id: dsmlToolResults[dti].id });
       }
@@ -27524,6 +27530,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           role: m.role || 'user',
           content: content,
           reasoning: reasoning,
+          process_events: Array.isArray(m.process_events) ? m.process_events : [],
           created_at: r.created_at,
           conversation_id: m.convId || convId,
           usage: m.usage || null,

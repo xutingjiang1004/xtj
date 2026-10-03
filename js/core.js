@@ -11856,12 +11856,14 @@ function renderProfileActivityList(kind) {
                 return total;
             }
             window.__xtjAuthoritativeDmUnread = authoritativeDmUnread;
-            function fetchDmListShared(limit) {
+            function fetchDmListShared(limit, options) {
+                options = options || {};
                 var now = Date.now();
-                var owner = window.currentUser || '';
-                if (_dmListShared.owner !== owner) {
+                var owner = window.currentUser || '', identityEpoch = window._authStateEpoch || 0;
+                if (_dmListShared.owner !== owner || _dmListShared.authEpoch !== identityEpoch) {
                     window.__xtjInvalidateDmListShared();
                     _dmListShared.owner = owner;
+                    _dmListShared.authEpoch = identityEpoch;
                     window.__xtjMutedChatPeers = {};
                     window.__xtjDmMuteReady = false;
                     setUnreadBadgeCount(0);
@@ -11879,9 +11881,9 @@ function renderProfileActivityList(kind) {
                 //   持续打 /api/user/refresh。用户主动操作（点按钮）走其它路径，不受影响。
                 async function fetchListAttempt() {
                     for (var attempt=0; attempt<2; attempt++) {
-                        if (_dmListShared.epoch!==epoch || window.currentUser!==owner) return null;
+                        if (_dmListShared.epoch!==epoch || window.currentUser!==owner || (window._authStateEpoch || 0)!==identityEpoch) return null;
                         try {
-                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:true,timeoutMs:12000});
+                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:options.background !== false,timeoutMs:12000,authOwner:owner,authEpoch:identityEpoch});
                             if (response && response.ok) return await response.json();
                             if (!response || (response.status!==429 && response.status<500)) return null;
                         } catch (_) {}
@@ -11890,7 +11892,7 @@ function renderProfileActivityList(kind) {
                     return null;
                 }
                 var p=fetchListAttempt().then(function(json){
-                    if (_dmListShared.epoch!==epoch || window.currentUser!==owner) return null;
+                    if (_dmListShared.epoch!==epoch || window.currentUser!==owner || (window._authStateEpoch || 0)!==identityEpoch) return null;
                     if (json && json.ok) {
                         _dmListShared.json=json; _dmListShared.at=Date.now();
                         _dmListShared.retryAt=0; _dmListShared.failures=0;
@@ -13179,7 +13181,7 @@ function renderProfileActivityList(kind) {
             }
 
             var _dockChatListRetryTimer = 0;
-            async function loadDockChatList() {
+            async function loadDockChatList(userRetry) {
                 if (_dockChatListRetryTimer) { clearTimeout(_dockChatListRetryTimer); _dockChatListRetryTimer=0; }
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
@@ -13209,7 +13211,7 @@ function renderProfileActivityList(kind) {
                 //        A 的在途响应会被当作最新数据渲染出来。
                 //   现在同时快照「请求发起时的登录账号」，回填前核对当前账号与登录态，
                 //   只要对不上就整段丢弃（不 toast、不重试，由新账号自己的请求接管）。
-                var listOwner = window.currentUser || '';
+                var listOwner = window.currentUser || '', listAuthEpoch = window._authStateEpoch || 0;
                 if (_dockChatConversationOwner !== listOwner) {
                     _dockChatConversationStates = {};
                     _dockChatConversationOwner = listOwner;
@@ -13225,7 +13227,7 @@ function renderProfileActivityList(kind) {
                 var listResultStale = function() {
                     if (listLoadSeq !== _dockChatListLoadSeq) return true;
                     if (!window.currentUser) return true;
-                    if ((window.currentUser || '') !== listOwner) return true;
+                    if ((window.currentUser || '') !== listOwner || (window._authStateEpoch || 0) !== listAuthEpoch) return true;
                     return false;
                 };
                 if (!el.querySelector('.chat-list-item[data-chat-user]')) {
@@ -13243,7 +13245,7 @@ function renderProfileActivityList(kind) {
                     }
                     // 走共享单飞请求（与未读角标复用同一份结果），并显式传 limit=180 ——
                     //   与下面 mergeDockChatRowsById 的窗口一致，避免"拉了 1000 条只用 180 条"。
-                    const dmResult = await window.fetchDmListShared(180);
+                    const dmResult = await window.fetchDmListShared(180, { background: !userRetry });
                     if (!dmResult || !dmResult.ok) throw new Error((dmResult && dmResult.error) || 'DM list fetch failed');
                     if (listResultStale()) return;
                     var syncStatus=el.querySelector('.chat-list-sync-status');if(syncStatus)syncStatus.remove();
@@ -13335,7 +13337,9 @@ function renderProfileActivityList(kind) {
                         retry.textContent = '消息加载失败，点击重试';
                         retry.addEventListener('click', function() {
                             retry.remove();
-                            loadDockChatList();
+                            window.dockChatListCacheTime = 0;
+                            if (window.__xtjInvalidateDmListShared) window.__xtjInvalidateDmListShared();
+                            loadDockChatList(true);
                         }, { once: true });
                         el.appendChild(retry);
                         window.dockChatListCacheTime = 0;
@@ -13344,7 +13348,7 @@ function renderProfileActivityList(kind) {
                             var status=document.createElement('div');status.className='chat-list-sync-status';status.setAttribute('role','status');
                             var message=document.createElement('span');message.textContent='连接暂时不稳定，稍后自动重试';
                             var retryButton=document.createElement('button');retryButton.type='button';retryButton.textContent='重试';
-                            retryButton.onclick=function(){window.dockChatListCacheTime=0;if(window.__xtjInvalidateDmListShared)window.__xtjInvalidateDmListShared();loadDockChatList();};
+                            retryButton.onclick=function(){window.dockChatListCacheTime=0;if(window.__xtjInvalidateDmListShared)window.__xtjInvalidateDmListShared();loadDockChatList(true);};
                             status.append(message,retryButton);el.appendChild(status);
                         }
                         window.dockChatListCacheTime=Date.now();
@@ -13454,6 +13458,7 @@ function renderProfileActivityList(kind) {
             var _chatCommittedRevision = 0;
             var _chatRenderSignature = {};
             var _dockChatLoadSeq = 0;
+            var _dockChatMessageLoad = null;
             var _dockChatListLoadSeq = 0;
             var _dockChatListRefreshTimer = null;
             var _dockChatListRenderSignature = '';
@@ -14306,14 +14311,28 @@ function renderProfileActivityList(kind) {
 
             // ★ 2026-09-25：muteLoadingSkeleton=true 表示「轮询/后台刷新」，不允许动 loading 骨架
             //   与空状态，避免后台回包把用户正在看的界面顶掉重画。
-            async function loadDockChatMessages(userName, forceScroll, muteLoadingSkeleton) {
-                if (_chatHistoryFocus === userName && !forceScroll) return;
+            async function loadDockChatMessages(userName, forceScroll, muteLoadingSkeleton, userRetry) {
+                if (_chatHistoryFocus === userName && !forceScroll && !userRetry) return;
+                if (userRetry) { _chatHistoryFocus = ''; _chatRenderSignature[userName] = undefined; }
                 var el0 = document.getElementById('dockChatMessages');
                 if (!window.currentUser) {
                     if (el0) el0.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div></div>';
                     return;
                 }
+                if (!el0 || dockChatActiveUser !== userName) return;
+                var loadOwner = window.currentUser || '', loadEpoch = window._authStateEpoch || 0;
+                var previousLoad = _dockChatMessageLoad;
+                if (!userRetry && previousLoad && previousLoad.seq === _dockChatLoadSeq &&
+                    previousLoad.peer === userName && previousLoad.owner === loadOwner && previousLoad.epoch === loadEpoch) return;
+                if (previousLoad && previousLoad.controller) previousLoad.controller.abort();
                 var loadSeq = ++_dockChatLoadSeq;
+                var requestController = typeof AbortController === 'function' ? new AbortController() : null;
+                var flight = { seq: loadSeq, peer: userName, owner: loadOwner, epoch: loadEpoch, controller: requestController };
+                _dockChatMessageLoad = flight;
+                function currentLoad() {
+                    return loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName &&
+                        window.currentUser === loadOwner && (window._authStateEpoch || 0) === loadEpoch;
+                }
                 var readRevision = _chatCommittedRevision;
                 // 当前用户优先使用 localStorage 缓存的头像
                 if (currentUser) {
@@ -14338,28 +14357,28 @@ function renderProfileActivityList(kind) {
                     renderDockMessages(userName, [], false);
                 }
                 hydrateDockChatAvatars([currentUser, userName], function(changed) {
-                    if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
+                    if (!currentLoad()) return;
                     // ★ 修复：头像变化只就地替换头像节点，不再整段重渲染消息列表
                     //   （整段重建会让已加载的图片重新请求，造成"气泡闪白"）。
                     patchDockChatMessageAvatars(userName);
                 });
                 const el = el0;
                 try {
-                    var requestController = typeof AbortController === 'function' ? new AbortController() : null;
                     var requestTimeout = setTimeout(function() {
                         if (requestController) requestController.abort();
                     }, 12000);
-                    var messagesResp;
+                    var messagesResp, messagesResult;
                     try {
                         messagesResp = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(userName) + '&limit=180', {
-                            signal: requestController ? requestController.signal : undefined
+                            signal: requestController ? requestController.signal : undefined,
+                            authOwner: loadOwner, authEpoch: loadEpoch, timeoutMs: 12000, background: !!muteLoadingSkeleton
                         });
+                        messagesResult = await messagesResp.json();
                     } finally {
                         clearTimeout(requestTimeout);
                     }
-                    var messagesResult = await messagesResp.json().catch(function() { return {}; });
                     if (!messagesResp.ok || !messagesResult.ok) throw new Error(messagesResult.error || 'DM messages failed');
-                    if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
+                    if (!currentLoad()) return;
                     var mergedMessages = mergeDockChatMessages(userName, mergeDockChatRowsById(messagesResult.data || [], true, 180), readRevision).filter(function(m) {
                         // 本地已删除的消息不再进入缓存（否则未读统计/会话预览还会带上它）
                         return !isDmMessageLocallyDeleted(m);
@@ -14372,6 +14391,7 @@ function renderProfileActivityList(kind) {
                         pendingReadUpdates.push({ id: message.id });
                     });
                     _chatCache[cacheKey] = mergedMessages;
+                    var oldRetry = el.querySelector('.chat-load-retry'); if (oldRetry) oldRetry.remove();
                     renderDockMessages(userName, mergedMessages, forceScroll);
                     if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
@@ -14381,7 +14401,7 @@ function renderProfileActivityList(kind) {
                         updateUnreadBadge();
                     }
                 } catch(e) {
-                    if (loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName) {
+                    if (currentLoad()) {
                         if (!(_chatCache[cacheKey] && _chatCache[cacheKey].length)) el.innerHTML = '';
                         var previousRetry = el.querySelector('.chat-load-retry');
                         if (previousRetry) previousRetry.remove();
@@ -14393,10 +14413,12 @@ function renderProfileActivityList(kind) {
                         retry.textContent = '消息加载失败，点击重试';
                         retry.addEventListener('click', function() {
                             retry.remove();
-                            loadDockChatMessages(userName, false);
+                            loadDockChatMessages(userName, false, false, true);
                         }, { once: true });
                         el.appendChild(retry);
                     }
+                } finally {
+                    if (_dockChatMessageLoad === flight) _dockChatMessageLoad = null;
                 }
             }
 

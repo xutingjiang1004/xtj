@@ -2778,6 +2778,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var key = String(name || '');
     return TOOL_LABELS[key] || key || '工具';
   }
+  function toolRunningLabel(name) {
+    if (/search/.test(name || '')) return '搜索中';
+    if (/read_web|web_extract|page_meta/.test(name || '')) return '读取中';
+    if (/get_weather|get_stock|get_exchange|get_current/.test(name || '')) return '查询中';
+    return '处理中';
+  }
+
 
   // ★★★ 2026-09-29（Claude/ChatGPT 形态对齐）：完成态**名词化**标签。
   //   用户明确要求：回复完之后不要在正文上方堆"已完成 N 个工具 · 用时 X.Xs"
@@ -3559,6 +3566,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     for (var i = 0; i < timelines.length; i++) {
       var tl = timelines[i];
       if (!tl || !tl.parentNode) continue;
+      if (tl.classList.contains('ai-process-timeline') || tl.closest('.ai-thinking')) continue;
       // ② 仍在跑的工具留在正文**上方** —— 那是过程流，用户此刻正盯着看
       try { if (tl.querySelector('.is-running')) continue; } catch (eRun) {}
       // ③ 幂等：已经在正文之后就不再动（避免每个 content chunk 都做一次 DOM 搬移）
@@ -3743,6 +3751,71 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return min > 0 ? (min + 'm ' + s + 's') : (s + 's');
   }
 
+  function snapshotAiProcess(node) {
+    var body = node && node.querySelector('.ai-thinking-body');
+    var hosts = body && body.__orderedProcess ? Array.from(body.children) : Array.from(node.querySelectorAll('.ai-process-timeline'));
+    var events = [], room = 64000, toolRoom = 128;
+    hosts.slice(0, 128).forEach(function(host) {
+      if (host.classList.contains('ai-reasoning-segment')) {
+        var text = host.textContent.slice(0, room); room -= text.length;
+        if (text) events.push({ type: 'reasoning', text: text });
+      } else if (host.classList.contains('ai-process-timeline')) {
+        var tools = Array.from(host.querySelectorAll('.ai-tool-step')).slice(0, Math.min(32, toolRoom)).map(function(step) {
+          var detail = step.querySelector('.ai-tool-step-detail');
+          var error = step.querySelector('.ai-tool-result-error');
+          var items = Array.from(step.querySelectorAll('.ai-search-detail-item')).slice(0, 10).map(function(item) {
+            var link = item.querySelector('a'), snippet = item.querySelector('.ai-search-detail-snippet');
+            return { title: link ? link.textContent : '', url: link ? link.getAttribute('href') : '', snippet: snippet ? snippet.textContent : '' };
+          });
+          return { call_id: step.getAttribute('data-tool-call-id') || '', tool_name: step.getAttribute('data-tool-name') || '', detail: detail ? detail.textContent.slice(0, 240) : '', status: step.classList.contains('is-done') ? 'done' : step.classList.contains('is-error') ? 'error' : 'interrupted', error: error ? error.textContent.slice(0, 240) : '', items: items };
+        });
+        toolRoom -= tools.length;
+        if (tools.length) events.push({ type: 'tools', tools: tools });
+      }
+    });
+    return events;
+  }
+
+  function buildOrderedProcessNode(msg, messagesEl) {
+    var reasoning = getMessageThinkingMode(msg) !== 'off';
+    var node = reasoning ? buildReasoningNode('', messagesEl, msg.thinking_elapsed_ms) : el('div', { class: 'ai-process-history' });
+    var body = reasoning ? node.querySelector('.ai-thinking-body') : node;
+    body.textContent = ''; body.__orderedProcess = true;
+    node.classList.add('ai-ordered-process');
+    var room = 64000;
+    (msg.process_events || []).slice(0, 128).forEach(function(event) {
+      if (event.type === 'reasoning' && reasoning) {
+        var text = String(event.text || '').slice(0, room); room -= text.length;
+        if (text) body.appendChild(el('div', { class: 'ai-reasoning-segment', text: cleanReasoningText(text) }));
+      } else if (event.type === 'tools' && Array.isArray(event.tools)) {
+        var group = el('div', { class: 'ai-tool-timeline ai-process-timeline' });
+        event.tools.slice(0, 32).forEach(function(tool) {
+          var done = tool.status === 'done';
+          var step = el('div', { class: 'ai-tool-step ' + (done ? 'is-done' : 'is-error'), 'data-tool-name': String(tool.tool_name || ''), 'data-tool-call-id': String(tool.call_id || '') });
+          step.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
+          var detail = el('div', { class: 'ai-tool-step-body' });
+          detail.appendChild(el('div', { class: 'ai-tool-step-title', text: toolLabel(tool.tool_name) }));
+          if (tool.detail) detail.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(tool.detail).slice(0, 240) }));
+          detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? '已完成' : tool.status === 'interrupted' ? '已中断' : '失败' }));
+          if (tool.error) detail.appendChild(el('div', { class: 'ai-tool-result-error', text: String(tool.error).slice(0, 240) }));
+          if (Array.isArray(tool.items) && tool.items.length) {
+            var results = el('details', { class: 'ai-tool-result-card ai-tool-inline-result' });
+            results.appendChild(el('summary', { class: 'ai-tool-result-card-title', text: '查看结果' }));
+            tool.items.slice(0, 10).forEach(function(item) {
+              var url = safeSearchUrl(item.url);
+              if (url) results.appendChild(el('a', { class: 'ai-search-detail-title', href: url, target: '_blank', rel: 'noopener noreferrer', text: String(item.title || item.url).slice(0, 240) }));
+            });
+            detail.appendChild(results);
+          }
+          step.appendChild(detail); group.appendChild(step);
+        });
+        body.appendChild(group);
+      }
+    });
+    if (reasoning) setThinkingStatus(node, msg.thinking_elapsed_ms > 0 ? '已思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考过程');
+    return node;
+  }
+
   function buildMessageNode(msg, messagesEl) {
     var role = msg.role === 'assistant' ? 'assistant' : 'user';
     // ★ O 修复 Bug 4: deep_think 消息渲染成 ai-think-card (从 history 恢复)
@@ -3750,7 +3823,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return buildThinkCardFromHistory(msg, messagesEl);
     }
     var node = el('div', { class: 'ai-msg ' + role + ' entering' });
-    if (role === 'assistant' && shouldRenderReasoning(msg)) {
+    if (role === 'assistant' && Array.isArray(msg.process_events) && msg.process_events.length) {
+      node.appendChild(buildOrderedProcessNode(msg, messagesEl));
+    } else if (role === 'assistant' && shouldRenderReasoning(msg)) {
       node.appendChild(buildReasoningNode(msg.reasoning, messagesEl, msg.thinking_elapsed_ms));
     }
     var contentForRender = msg.content || '';
@@ -5794,24 +5869,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     loadResearchHistoryList(body);
   }
 
-  function loadResearchHistoryList(bodyEl) {
-    var items = [];
-    // ★ 修复 S1：历史研究列表同样需要鉴权头，与 /research/stream 对齐
-    getUserAuthPayload({ forceNoToken: false }).then(function(authPayload) {
-      var authHeaders = (authPayload && authPayload.headers) || {};
-      return fetch(API_BASE + '/research/history?limit=10', { method: 'GET', credentials: 'include', headers: authHeaders });
-    }).then(function(resp) {
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        return resp.json();
-      })
-      .then(function(data) {
-        if (Array.isArray(data)) items = data;
-        else if (data && Array.isArray(data.data)) items = data.data;
-        renderResearchHistoryList(bodyEl, items);
-      })
-      .catch(function() {
-        renderResearchHistoryList(bodyEl, items);
-      });
+  async function loadResearchHistoryList(bodyEl) {
+    if (!bodyEl || !bodyEl.isConnected) return;
+    var owner = window.currentUser || '', epoch = window._authStateEpoch || 0, lifecycle = S.dtLifecycleId;
+    var seq = bodyEl.__loadSeq = (bodyEl.__loadSeq || 0) + 1;
+    function current() { return bodyEl.isConnected && seq === bodyEl.__loadSeq && lifecycle === S.dtLifecycleId &&
+      owner === (window.currentUser || '') && epoch === (window._authStateEpoch || 0); }
+    bodyEl.textContent = '加载中…'; bodyEl.setAttribute('aria-busy', 'true');
+    try {
+      var result = await apiRequest('GET', '/research/history?limit=10', null, { timeoutMs: 15000 });
+      if (!current()) return;
+      var data = result && result.data;
+      var items = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : null);
+      if (!result || !result.ok || !items) throw new Error('研究记录暂不可用');
+      renderResearchHistoryList(bodyEl, items);
+    } catch (error) {
+      if (!current()) return;
+      bodyEl.textContent = '研究记录加载失败，原有记录仍保留';
+      var retry = el('button', { type: 'button', text: '重试', class: 'ai-history-retry' });
+      retry.addEventListener('click', function() { loadResearchHistoryList(bodyEl); });
+      bodyEl.appendChild(retry);
+    } finally { if (current()) bodyEl.removeAttribute('aria-busy'); }
   }
 
   function renderResearchHistoryList(bodyEl, items) {
@@ -6949,6 +7027,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // ★ P-29：改用深研页独立计数器（原 S.lifecycleId++ 会连带作废主聊天在途回调）
     S.dtLifecycleId++;
     var pageLifecycle = S.dtLifecycleId;
+    var pageOwner = window.currentUser || '', pageAuthEpoch = window._authStateEpoch || 0;
+    function currentPage() { return S.dtLifecycleId === pageLifecycle && !panel._dtClosed && pageOwner === (window.currentUser || '') && pageAuthEpoch === (window._authStateEpoch || 0); }
 
     // Enter the research surface immediately; auth and history can complete in the background.
     panel.classList.remove('hidden');
@@ -6958,7 +7038,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) return;
-    if (S.dtLifecycleId !== pageLifecycle || panel._dtClosed) return;
+    if (!currentPage()) return;
 
     // 先从 localStorage 恢复会话 ID（刷新页面后也能恢复）
     if (!S.dtConversationId) {
@@ -6966,7 +7046,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     // 已有会话 → 如果消息区不为空且不是页面刷新，直接显示缓存内容
-    if (S.dtConversationId && msgs.children.length > 0 && !msgs.querySelector('.dt-empty, .dt-loading')) {
+    if (S.dtConversationId && msgs.children.length > 0 && !msgs.querySelector('.dt-empty, .dt-loading, .dt-history-error')) {
       // 已有缓存的 DOM 内容，直接显示
     } else if (S.dtConversationId) {
       msgs.innerHTML = '';
@@ -6974,13 +7054,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       msgs.appendChild(loadHint);
       try {
         var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think', null, { timeoutMs: 8000 });
-        if (S.dtLifecycleId !== pageLifecycle || panel._dtClosed) return;
+        if (!currentPage()) return;
+        if (!hist || !hist.ok || !hist.data || !Array.isArray(hist.data.messages)) throw new Error('深度思考记录暂不可用');
         var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
         if (!hasMessages) {
           S.dtConversationId = null;
           saveDtConvId();
           resetDeepThinkPageEmpty();
           var newConversation = await apiRequest('POST', '/chat/new', null);
+          if (!currentPage()) return;
           if (newConversation && newConversation.ok && newConversation.data && newConversation.data.conversation_id) {
             S.dtConversationId = newConversation.data.conversation_id;
             saveDtConvId();
@@ -7012,14 +7094,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
         }
       } catch (e) {
-        if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
+        if (!currentPage()) return;
+        msgs.replaceChildren(el('div', { class: 'dt-history-error', text: '聊天记录加载失败，原有对话仍保留' }));
+        var historyRetry = el('button', { type: 'button', class: 'ai-history-retry', text: '重新加载聊天记录' });
+        historyRetry.addEventListener('click', function() { msgs.replaceChildren(); openDeepThinkPage(); });
+        msgs.appendChild(historyRetry);
       }
     } else {
       // 首次打开，创建新会话
       resetDeepThinkPageEmpty();
       try {
         var r = await apiRequest('POST', '/chat/new', null);
-        if (S.dtLifecycleId !== pageLifecycle || panel._dtClosed) return;
+        if (!currentPage()) return;
         if (r && r.ok && r.data && r.data.conversation_id) {
           S.dtConversationId = r.data.conversation_id;
           saveDtConvId();
@@ -7059,6 +7145,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // controllers.  Hiding the panel alone leaves a DeepSeek stream alive.
       // ★ P-29：只作废深研页自己的在途回调；主聊天用 S.lifecycleId，互不影响。
       S.dtLifecycleId++;
+      S._dtCreateSeq = (S._dtCreateSeq || 0) + 1;
+      S._dtCreating = false; S._dtDeleting = false;
       S._dtSendSeq = (S._dtSendSeq || 0) + 1;
       S._dtSending = false;
       if (S._dtFetchTimeoutTimer) { clearTimeout(S._dtFetchTimeoutTimer); S._dtFetchTimeoutTimer = null; }
@@ -7101,6 +7189,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   // 文件上传状态 (dt 页面)
   var _dtFileData = null;
+  var _dtFileSelectionSeq = 0;
 
   function consumeAiAttachment(fileData) {
     if (!fileData || typeof fileData.onSuccess !== 'function') return;
@@ -7139,12 +7228,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // The research page has its own synchronous lock and generation token. Set
     // them before quota/auth awaits so double taps cannot start parallel work,
     // and so closing the page invalidates every pending continuation.
-    if (S._dtSending) {
+    if (S._dtSending || S._dtCreating || S._dtDeleting) {
       try { notify('正在生成回复，请稍候'); } catch (eBusy) {}
       return;
     }
     var dtSendToken = (S._dtSendSeq = (S._dtSendSeq || 0) + 1);
     var dtLifecycle = S.dtLifecycleId;
+    var dtOwner = window.currentUser || '', dtAuthEpoch = window._authStateEpoch || 0;
+    var dtSettings = { effort: S.deepThinkEffort || 'max', webSearch: S.webSearchEnabled === true, model: S.selectedModel };
     var dtPanel = document.getElementById('panelDeepThink');
     S._dtClientRequestId = (S._dtClientRequestId || 0) + 1;
     var reqId = 'dt_cr_' + S._dtClientRequestId + '_' + Date.now();
@@ -7152,7 +7243,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S._dtCurrentReqId = reqId;
     function isCurrentDeepSend() {
       return S._dtSendSeq === dtSendToken && S._dtSending && S._dtCurrentReqId === reqId &&
-        S.dtLifecycleId === dtLifecycle && !(dtPanel && dtPanel._dtClosed);
+        S.dtLifecycleId === dtLifecycle && !(dtPanel && dtPanel._dtClosed) && dtOwner === (window.currentUser || '') && dtAuthEpoch === (window._authStateEpoch || 0);
     }
     function releaseDeepPreflightLock() {
       if (!isCurrentDeepSend()) return;
@@ -7329,19 +7420,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       client_request_id: reqId,
       deep_think: true,
       chat_mode: 'deep_think',
-      thinking_mode: S.deepThinkEffort || 'max',
+      thinking_mode: dtSettings.effort,
       // Omit the field for ordinary messages so the server's response cache
       // remains eligible; an empty attachments array is truthy in JS.
       attachments: attachmentPayload || undefined,
-      web_search: S.webSearchEnabled,
-      model: S.selectedModel
+      web_search: dtSettings.webSearch,
+      model: dtSettings.model
     });
 
     var aborted = false;
     var aiContent = '';
     var finalMeta = null;
     var finalModel = '';
-    var finalThinkingMode = S.deepThinkEffort || 'max';
+    var finalThinkingMode = dtSettings.effort;
     var streamConvId = null;
     // P5: using assistantNode (single DOM node)
     var contentRenderer = null;
@@ -7582,7 +7673,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         onSuccess: function() { consumeAiAttachment(fileData); },
         onResetSending: resetSendingIfCurrent
       });
-      if (sc.value) { S.dtConversationId = sc.value; saveDtConvId(); }
+      if (sc.value && S.dtLifecycleId === dtLifecycle && S._dtSendSeq === dtSendToken && !(dtPanel && dtPanel._dtClosed) && !ab.value) {
+        S.dtConversationId = sc.value; saveDtConvId();
+      }
       if (sseResult && sseResult.timedOut && isResearchCard(progressCard)) {
         safeRemoveProgressCard(false);
         preserveResearchAnswer(progressCard, c.value);
@@ -7694,12 +7787,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // 文件上传（按钮选择 / 粘贴 / 拖拽）
     function clearDtFilePreview() {
+      _dtFileSelectionSeq += 1;
       _dtFileData = null;
       if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
       if (fileInput) fileInput.value = '';
     }
     function acceptDtFile(rawFile) {
+      var fileSeq = ++_dtFileSelectionSeq, fileLife = S.dtLifecycleId, fileCid = S.dtConversationId, fileOwner = window.currentUser || '', fileAuthEpoch = window._authStateEpoch || 0;
       readAiAttachmentFile(rawFile, function(fileData) {
+        if (fileSeq !== _dtFileSelectionSeq || fileLife !== S.dtLifecycleId || fileCid !== S.dtConversationId || fileOwner !== (window.currentUser || '') || fileAuthEpoch !== (window._authStateEpoch || 0) || !document.getElementById('panelDeepThink') || document.getElementById('panelDeepThink')._dtClosed) return;
         _dtFileData = { name: fileData.name, type: fileData.type, dataUrl: fileData.dataUrl };
         if (filePreview) renderAiFilePreview(filePreview, fileData, clearDtFilePreview);
       }, { sizeMsg: '文件不能超过 50MB（data URL 编码后）' });
@@ -7729,9 +7825,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (newBtn) addDtListener(newBtn, 'click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      if (S.sending) return;
+      if (S._dtSending || S._dtCreating || S._dtDeleting) { notify('正在处理当前对话，请稍候'); return; }
+      S._dtCreating = true;
+      var createLife = S.dtLifecycleId, createCid = S.dtConversationId;
+      var owner = window.currentUser || '', epoch = window._authStateEpoch || 0;
+      var createSeq = S._dtCreateSeq = (S._dtCreateSeq || 0) + 1;
+      function current() { return createSeq === S._dtCreateSeq && createLife === S.dtLifecycleId && createCid === S.dtConversationId &&
+        owner === (window.currentUser || '') && epoch === (window._authStateEpoch || 0); }
       newBtn.disabled = true;
       try {
+        var r = await apiRequest('POST', '/chat/new', null);
+        if (!current()) return;
+        if (r && r.ok && r.data && r.data.conversation_id) {
         // A new research conversation must not inherit a pending attachment
         // from the previous one.
         _dtFileData = null;
@@ -7739,32 +7844,39 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (fileInput) fileInput.value = '';
         resetResearchCardDisclosure(document.getElementById('dtMessages'));
         resetDeepThinkPageEmpty();
-        var r = await apiRequest('POST', '/chat/new', null);
-        if (r && r.ok && r.data && r.data.conversation_id) {
+
           S.dtConversationId = r.data.conversation_id;
           saveDtConvId();
-        }
+        } else notify(describeError(r, '创建新会话失败'));
       } catch (e) {
-        notify('创建新会话失败');
+        if (current()) notify('创建新会话失败');
       } finally {
-        newBtn.disabled = false;
+        if (createSeq === S._dtCreateSeq) S._dtCreating = false;
+        if (newBtn.isConnected) newBtn.disabled = false;
       }
     });
 
     if (delBtn) addDtListener(delBtn, 'click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      if (!S.dtConversationId) return;
+      if (!S.dtConversationId || S._dtSending || S._dtCreating || S._dtDeleting) return;
       if (!confirm('确定删除当前深度思考会话吗？删除后不可恢复。')) return;
+      S._dtDeleting = true;
+      var deleteLife = S.dtLifecycleId, deleteCid = S.dtConversationId;
+      var deleteOwner = window.currentUser || '', deleteEpoch = window._authStateEpoch || 0;
+      function currentDelete() { return deleteLife === S.dtLifecycleId && deleteCid === S.dtConversationId &&
+        deleteOwner === (window.currentUser || '') && deleteEpoch === (window._authStateEpoch || 0); }
       delBtn.disabled = true;
       try {
         var dr = await apiRequest('POST', '/chat/delete', { conversation_id: S.dtConversationId });
+        if (!currentDelete()) return;
         if (dr && dr.ok) {
           S.dtConversationId = null;
           saveDtConvId();
           resetResearchCardDisclosure(document.getElementById('dtMessages'));
           resetDeepThinkPageEmpty();
           var r2 = await apiRequest('POST', '/chat/new', null);
+          if (deleteLife !== S.dtLifecycleId || deleteOwner !== (window.currentUser || '') || deleteEpoch !== (window._authStateEpoch || 0)) return;
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.dtConversationId = r2.data.conversation_id;
             saveDtConvId();
@@ -7775,7 +7887,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } catch (e) {
         notify('删除失败');
       } finally {
-        delBtn.disabled = false;
+        if (deleteLife === S.dtLifecycleId) S._dtDeleting = false;
+        if (delBtn.isConnected) delBtn.disabled = false;
       }
     });
 
@@ -8517,7 +8630,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
     var text = String(input.value || '').trim();
     var originalUserText = text;
-    // ★ 多文件/文件夹：支持数组（最多 10 个），兼容旧的单文件调用
+    if (S._newChatBusy) { notify('正在创建新对话，请稍候'); return; }
+    // ★ 多文件：支持数组（最多 10 个），兼容旧的单文件调用
     var fileList = Array.isArray(fileData) ? fileData.slice(0, 10) : (fileData ? [fileData] : []);
     var sendFingerprint = originalUserText + '\u0000' + fileList.map(function(f) {
       return String(f.name || '') + ':' + String(f.dataUrl || '').length;
@@ -8538,6 +8652,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // S.abortController 尚未创建），两个 /chat/stream 会并行。使用发送令牌：
     // 新发送自增 S.sendSeq；旧发送在创建流之前发现令牌已过期即让位退出。
     var sendToken = (S.sendSeq = (S.sendSeq || 0) + 1);
+    var _sendThinkingMode = (ALLOWED_THINKING_MODES.indexOf(S.thinkingMode) >= 0)
+      ? S.thinkingMode
+      : DEFAULT_THINKING_MODE;
+    var sendSettings = { model: S.selectedModel, thinkMax: S.thinkMax === true, workMode: S.workMode === true, webSearch: S.webSearchEnabled === true, responseProfile: S.responseProfile };
+    var sendCustomCfg = isCustomModelId(sendSettings.model) ? Object.assign({}, resolveCustomModelConfig(sendSettings.model)) : null;
     // Lock synchronously before the first await (auth/token acquisition), so
     // two clicks in the same event loop cannot create two streams.
     S.sending = true;
@@ -8547,7 +8666,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息'); } catch(e) {}
     var displayText = text;
     var attachmentPayload = null;
-    // 如果有文件（单/多/文件夹）: UI 显示占位，发送给服务器用附带 data_url 的结构化附件
+    // 如果有文件（单/多）: UI 显示占位，发送给服务器用附带 data_url 的结构化附件
     if (fileList.length) {
       attachmentPayload = [];
       var uiLines = [];
@@ -8708,7 +8827,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     assistantNode.appendChild(assistantBubble);
     // 思考模式开启时：立即插入思考节点，用户一点发送就看到反馈
     var _earlyThinkingShown = false;
-    if (S.thinkingMode && S.thinkingMode !== 'off') {
+    if (_sendThinkingMode !== 'off') {
       try {
         // 发送后立刻展示思考节点，并默认展开，保证流式思考过程可见
         var earlyRn = buildReasoningNode('', messagesEl);
@@ -8806,13 +8925,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     // ★ 自定义第三方模型：走独立转发路由，不消耗本站配额
-    var isCustomModel = isCustomModelId(S.selectedModel);
-    var customCfg = isCustomModel ? resolveCustomModelConfig(S.selectedModel) : null;
+    var isCustomModel = isCustomModelId(sendSettings.model);
+    var customCfg = sendCustomCfg;
     // thinking_mode 必须显式传 'off'；不能用 || 'max'（'off' 虽为真值，
     // 但非法/空值应回落默认，不能把用户「关闭思考」误当成 max）。
-    var _sendThinkingMode = (ALLOWED_THINKING_MODES.indexOf(S.thinkingMode) >= 0)
-      ? S.thinkingMode
-      : DEFAULT_THINKING_MODE;
+
     // 思考「极致(max)」档只代表模型厂商原生的最大 reasoning effort，不再因此强制改走
     // 多智能体“深入研究”(deep-stream) 流程；是否更多搜索/工具协作由 webSearch / thinkMax 决定。
     var url = isCustomModel ? (API_BASE + '/custom-chat/stream') : (API_BASE + '/chat/stream');
@@ -8824,8 +8941,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
       //   关闭时限制在 CONTEXT_LIMIT_NORMAL 条（256），超过即自动压缩丢弃更早内容，
       //   每条再按字符上限截断防止超长，兼顾便宜与稳定。
-      var _ctxCap = S.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
-      var _ctxChars = S.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
+      var _ctxCap = sendSettings.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
+      var _ctxChars = sendSettings.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
       var hl = buildAiConversationHistory(_ctxCap, _ctxChars, userMsg, attachmentPayload);
       fetchBody = JSON.stringify({
         provider: customCfg.provider,
@@ -8836,10 +8953,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messages: hl,
         messages_include_current: false,
         thinking_mode: _sendThinkingMode,
-        thinking_max: S.thinkMax === true,
-        work_mode: S.workMode === true,
-        web_search: S.webSearchEnabled === true,
-        tools_enabled: (S.webSearchEnabled === true || S.thinkMax === true || S.workMode === true),
+        thinking_max: sendSettings.thinkMax === true,
+        work_mode: sendSettings.workMode === true,
+        web_search: sendSettings.webSearch === true,
+        tools_enabled: (sendSettings.webSearch === true || sendSettings.thinkMax === true || sendSettings.workMode === true),
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
         client_request_id: reqId,
@@ -8855,8 +8972,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   服务端优先使用它，前端未传时才回退查库。
       //   复用与自定义模型相同的裁剪策略（条数 + 每条字符上限），
       //   避免超长历史撑爆 prompt。
-      var _bCtxCap = S.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
-      var _bCtxChars = S.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
+      var _bCtxCap = sendSettings.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
+      var _bCtxChars = sendSettings.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
       var _builtinHist = buildAiConversationHistory(_bCtxCap, _bCtxChars, userMsg, attachmentPayload);
       fetchBody = JSON.stringify({
         message: text,
@@ -8866,12 +8983,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messages_include_current: false,
         client_request_id: reqId,
         thinking_mode: _sendThinkingMode,
-        thinking_max: S.thinkMax === true,
-        work_mode: S.workMode === true,
-        response_profile: S.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
+        thinking_max: sendSettings.thinkMax === true,
+        work_mode: sendSettings.workMode === true,
+        response_profile: sendSettings.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
         attachments: attachmentPayload || undefined,
-        web_search: S.webSearchEnabled,
-        model: S.selectedModel
+        web_search: sendSettings.webSearch,
+        model: sendSettings.model
       });
     }
     
@@ -8993,12 +9110,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   保证交接逻辑在同一轮回复里只执行一次。
       var _thinkingSettledOnContent = false;
       var usageResult = null;
-      var finalModel = '';
-      var finalThinkingMode = '';
+      var finalModel = sendSettings.model;
+      var finalThinkingMode = _sendThinkingMode;
       // ★ 工作模式追踪：记录本次请求是否处于工作模式、实际调用了多少次工具。
       //   用于回复完成后在底部显示「工作模式」徽标与工具调用次数，
       //   让用户能直观确认工作模式确实生效（而不是「感觉跟没打开一样」）。
-      var streamWorkMode = S.workMode === true;
+      var streamWorkMode = sendSettings.workMode;
       var streamToolCount = 0;
       var streamConvId = null;
       var doneReceived = false;
@@ -9217,7 +9334,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (thinkingTimer) {
           finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
         }
-        if (reasoningRenderer) reasoningRenderer.finish(thinking || '');
+        if (reasoningRenderer) reasoningRenderer.finish();
 
         // 判断是否有有效正文；没有时给出兜底提示，避免气泡完全空白
         var hasContent = !!(content && String(content).trim().length > 0);
@@ -9256,10 +9373,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         setAiRootState('ai-idle');
         
-        if (thinking && finalThinkingMode !== 'off' && S.thinkingMode !== 'off') {
+        if ((thinking || node.querySelector('.ai-process-timeline')) && finalThinkingMode !== 'off' && _sendThinkingMode !== 'off') {
           // ★ 修复：优先用 reasoningContainer（流式期间创建的），但必须验证节点仍在 DOM 中。
-          //   C 修复：额外用用户意图 S.thinkingMode 判断——即便后端未 Honor 'off' 仍回 reasoning，
-          //   只要用户关了思考，收尾也强制不渲染思考节点（走下方 else 分支移除）。
+          //   本轮使用发送时的档位，切换设置只影响下一次发送。
           //   此前若 reasoningContainer 持有脱离 DOM 的陈旧引用（search_supplement 重置、
           //   sanitized_content 替换 innerHTML 等场景），代码误以为按钮已存在而跳过创建，
           //   导致"已思考"折叠按钮消失。现在双重校验：变量非空 + 节点仍连接在文档中。
@@ -9269,7 +9385,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             node.insertBefore(rNode, node.firstChild);
           } else if (rNode) {
             var body = rNode.querySelector('.ai-thinking-body');
-            if (body) body.textContent = cleanReasoningText(thinking);
+            if (body && !body.__orderedProcess) body.textContent = cleanReasoningText(thinking);
           }
           if (rNode) {
             setThinkingExpanded(rNode, !!rNode.classList.contains('expanded'), messagesEl);
@@ -9293,6 +9409,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           role: 'assistant',
           content: content,
           reasoning: (finalThinkingMode !== 'off' ? thinking : ''),
+          process_events: snapshotAiProcess(node),
           created_at: new Date().toISOString(),
           thinking_mode: finalThinkingMode,
           search_count: searchCount,
@@ -9445,6 +9562,48 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           setThinkingExpanded(reasoningContainer, true, messagesEl);
         }
         return reasoningContainer;
+      }
+
+      var activeToolTimeline = null, activeReasoningSegment = null;
+      function closeReasoningSegment() {
+        if (reasoningRenderer) { reasoningRenderer.finish(); reasoningRenderer = null; }
+        activeReasoningSegment = null;
+      }
+      function processBody() {
+        var rn = ensureReasoningNode(), body = rn.querySelector('.ai-thinking-body');
+        if (!body.__orderedProcess) { body.textContent = ''; body.__orderedProcess = true; rn.classList.add('ai-ordered-process'); }
+        return body;
+      }
+      function reasoningSegment() {
+        if (!activeReasoningSegment) {
+          activeToolTimeline = null;
+          activeReasoningSegment = el('div', { class: 'ai-reasoning-segment' });
+          processBody().appendChild(activeReasoningSegment);
+        }
+        return activeReasoningSegment;
+      }
+      function ensureToolTimeline(newRound, event) {
+        var callId = event && (event.call_id || event.tool_call_id);
+        if (!callId && newRound && event && Array.isArray(event.tools) && event.tools.length) {
+          var firstId = event.tools[0].id || event.tools[0].call_id;
+          var allKnown = firstId && event.tools.every(function(tool) { return Array.from(assistantNode.querySelectorAll('.ai-tool-step[data-tool-call-id]')).some(function(step) { return step.getAttribute('data-tool-call-id') === String(tool.id || tool.call_id || ''); }); });
+          if (allKnown) callId = firstId;
+        }
+        if (callId) {
+          var known = assistantNode.querySelectorAll('.ai-tool-step[data-tool-call-id]');
+          for (var i = 0; i < known.length; i++) {
+            if (known[i].getAttribute('data-tool-call-id') === String(callId)) return known[i].closest('.ai-tool-timeline');
+          }
+        }
+        if (newRound && activeToolTimeline && activeToolTimeline.__formalRound) activeToolTimeline = null;
+        if (!activeToolTimeline) {
+          closeReasoningSegment();
+          activeToolTimeline = el('div', { class: 'ai-tool-timeline ai-tool-status ai-process-timeline', role: 'status', 'aria-live': 'polite' });
+          if (_sendThinkingMode !== 'off') processBody().appendChild(activeToolTimeline);
+          else assistantNode.insertBefore(activeToolTimeline, assistantBubble);
+        }
+        if (newRound) activeToolTimeline.__formalRound = true;
+        return activeToolTimeline;
       }
 
       function ensureThinkingTimer() {
@@ -9701,11 +9860,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'tool_calls') {
             var toolList = evt.tools || [];
             streamToolCount += toolList.length;
-            var timeline = assistantNode.querySelector('.ai-tool-timeline');
-            if (!timeline) {
-              timeline = el('div', { class: 'ai-tool-timeline ai-tool-status', role: 'status', 'aria-live': 'polite' });
-              assistantNode.insertBefore(timeline, assistantBubble);
-            }
+            var timeline = ensureToolTimeline(true, evt);
             // ★★★ 2026-09-17 重写（P0「工具调用动画全部展开、堆叠占位」）：
             //   用户诉求：像 ChatGPT / Codex 那样——并行调用 N 个工具时只显示
             //   N 行紧凑的"正在搜索中…"，全部完成后原地换成"已完成"，
@@ -9768,7 +9923,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               // Identical calls belong to distinct execution rounds; never resurrect a
               // settled historical entry, or a later result may be assigned to the wrong call.
               var existing = null;
-              if (detail) {
+              var invocationId = String(t.id || t.call_id || '');
+              if (invocationId) {
+                var byId = timeline.querySelectorAll('[data-tool-call-id]');
+                for (var bi = 0; bi < byId.length; bi++) if (byId[bi].getAttribute('data-tool-call-id') === invocationId) existing = byId[bi];
+              }
+              if (!invocationId && detail) {
                 var candidates = timeline.querySelectorAll('[data-tool-step="' + stepId + '"]');
                 for (var ci = candidates.length - 1; ci >= 0; ci--) {
                   // ★ 2026-09-28：必须同时满足"还在跑"且"尚未被任何 result 认领"。
@@ -9793,6 +9953,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   var pendingStep = pendingSteps[pi];
                   var pendingName = pendingStep.getAttribute('data-tool-name') || '';
                   if (pendingName === String(t.name || '')
+                      && (!invocationId || !pendingStep.getAttribute('data-tool-call-id') || pendingStep.getAttribute('data-tool-call-id') === invocationId)
                       && pendingStep.getAttribute('data-tool-claimed') !== '1') {
                     existing = pendingStep;
                     break;
@@ -9800,6 +9961,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 }
               }
               if (existing) {
+                if (invocationId && !existing.classList.contains('is-running')) return;
                 // 重激活 = 开启**新的执行轮次**，必须清掉上一轮的认领标记，
                 // 否则这一轮的 tool_result 会因为 claimed=1 而认领不到它 → 永远转圈。
                 existing.removeAttribute('data-tool-claimed');
@@ -9808,6 +9970,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 existing.classList.add('is-running');
                 existing.classList.remove('is-done', 'is-error');
                 existing.setAttribute('data-tool-name', String(t.name || ''));
+                if (invocationId) existing.setAttribute('data-tool-call-id', invocationId);
                 existing.setAttribute('data-tool-step', stepId);
                 var stepTitle = existing.querySelector('.ai-tool-step-title');
                 if (stepTitle) stepTitle.textContent = label;
@@ -9821,13 +9984,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   } else stepDetail.textContent = detail;
                 }
                 var st = existing.querySelector('.ai-tool-step-status');
-                if (st) st.textContent = '搜索中';
+                if (st) st.textContent = toolRunningLabel(t.name);
                 try { refreshOwningToolRound(existing); } catch (eExistingRound) {}
                 return;
               }
               // 紧凑单行条目：状态图标 + 名称 +（查询词/参数）
               var step = el('div', { class: 'ai-tool-step is-running' });
               step.setAttribute('data-tool-step', stepId);
+              if (invocationId) step.setAttribute('data-tool-call-id', invocationId);
               step.setAttribute('data-tool-name', String(t.name || ''));
               // ★ 2026-09-28（方案 D）：显示名说人话，内部名保留进 title 供悬停查看
               if (t.name && label !== String(t.name)) step.setAttribute('title', String(t.name));
@@ -9835,7 +9999,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var body = el('div', { class: 'ai-tool-step-body' });
               body.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
               if (detail) body.appendChild(el('div', { class: 'ai-tool-step-detail', text: detail }));
-              body.appendChild(el('div', { class: 'ai-tool-step-status', text: '搜索中' }));
+              body.appendChild(el('div', { class: 'ai-tool-step-status', text: toolRunningLabel(t.name) }));
               step.appendChild(body);
               roundList.appendChild(step);
             });
@@ -9885,7 +10049,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (_pStatusEl) {
                 // ★ 2026-09-17：文案与两态模型统一（搜索中 → 已完成），
                 //   进行中只追加计时，不改状态词，避免出现第三、第四种表述。
-                _pStatusEl.textContent = _pElapsed >= 3 ? ('搜索中 · 已 ' + _pElapsed + 's') : '搜索中';
+                var runningLabel = toolRunningLabel(_pSteps[_pi].getAttribute('data-tool-name'));
+                _pStatusEl.textContent = runningLabel + (_pElapsed >= 3 ? (' · 已 ' + _pElapsed + 's') : '');
               }
             }
             // 同步刷新每个轮次摘要上的 x/y 计数
@@ -9906,7 +10071,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   新实现：pending 只作为「该工具即将执行」的轻量占位——
             //   若同名工具条目已存在则直接复用并保持运行态；否则只登记一个
             //   紧凑占位，等 tool_calls 到达时把详情补齐、状态统一为"搜索中"。
-            var pendingBar = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
+            var pendingBar = ensureToolTimeline(false, evt);
+            var pendingCallId = String(evt.call_id || evt.tool_call_id || '');
             var pendName = String(evt.tool_name || '');
             // ★★★ 2026-09-28 修复（必现：同一批两个同名工具＝赤字）：
             //   原式 `pendingBar.querySelector('[data-tool-name="X"]')` 取的是
@@ -9934,6 +10100,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 for (var _pendI = _pendCands.length - 1; _pendI >= 0; _pendI--) {
                   var _pendC = _pendCands[_pendI];
                   // "整理中"占位（历史数据）不参与复用
+                  if (pendingCallId && _pendC.getAttribute('data-tool-call-id') !== pendingCallId) continue;
+                  if (pendingCallId && !_pendC.classList.contains('is-running')) { pendExisting = _pendC; break; }
                   if (_pendC.classList.contains('ai-tool-organizing')) continue;
                   if (!_pendC.classList.contains('is-running')) continue;   // ★ 已终态不复活
                   if (_pendC.getAttribute('data-tool-claimed') === '1') continue; // ★ 已认领不复活
@@ -9943,10 +10111,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               } catch (ePendQ) {}
             }
             if (pendExisting) {
+              if (!pendExisting.classList.contains('is-running')) continue;
               pendExisting.classList.add('is-running');
               pendExisting.classList.remove('is-done', 'is-error');
               var pendSt = pendExisting.querySelector('.ai-tool-step-status');
-              if (pendSt) pendSt.textContent = '搜索中';
+              if (pendSt) pendSt.textContent = toolRunningLabel(pendName);
               try { refreshOwningToolRound(pendExisting); } catch (ePendRound) {}
               followToolProgress(messagesEl, _aiUserPinnedUp);
               continue;
@@ -9976,6 +10145,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var pendList = pendRound.querySelector('.ai-tool-round-list');
             var pendStep = el('div', { class: 'ai-tool-step is-running' });
             if (pendName) pendStep.setAttribute('data-tool-name', pendName);
+            if (pendingCallId) pendStep.setAttribute('data-tool-call-id', pendingCallId);
             // ★★★ 2026-09-28：给 pending 占位打**语义标记**，供 tool_calls 分支
             //   识别"这是我提前建的占位轮次，应该复用它而不是再新建一轮"。
             //   原实现靠文案匹配（标题 === '准备工具'），但占位标题已改为
@@ -10002,7 +10172,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // A tool error is a terminal result for this call, not a terminal
             // event for the whole assistant turn: keep independent parallel calls
             // running and let the final answer consume the failure feedback.
-            var errTimeline = assistantNode.querySelector('.ai-tool-timeline');
+            var errTimeline = ensureToolTimeline(false, evt);
+            var errCallId = String(evt.call_id || evt.tool_call_id || '');
             if (errTimeline) {
               // ★ 2026-09-17：优先把**同名**的进行中条目就地转为失败态（不新增重复条目）；
               //   找不到同名条目时才补建一条，保证信息不丢。
@@ -10011,6 +10182,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (errName) {
                 var errSteps = errTimeline.querySelectorAll('.ai-tool-step');
                 for (var eIdx = errSteps.length - 1; eIdx >= 0; eIdx--) {
+                  if (errCallId && errSteps[eIdx].getAttribute('data-tool-call-id') !== errCallId) continue;
                   if ((errSteps[eIdx].getAttribute('data-tool-name') || '') !== errName) continue;
                   if (!errMatch || errSteps[eIdx].classList.contains('is-running')) errMatch = errSteps[eIdx];
                   if (errSteps[eIdx].classList.contains('is-running')) break;
@@ -10031,9 +10203,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 try { refreshOwningToolRound(errMatch); } catch (eErrRound) {}
               } else {
                 var errStep = el('div', { class: 'ai-tool-step is-error' });
+                errStep.setAttribute('data-tool-name', errName);
+                if (errCallId) errStep.setAttribute('data-tool-call-id', errCallId);
                 errStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
                 var errBody = el('div', { class: 'ai-tool-step-body' });
-                errBody.appendChild(el('div', { class: 'ai-tool-step-title', text: evt.tool_name || '工具' }));
+                errBody.appendChild(el('div', { class: 'ai-tool-step-title', text: toolLabel(evt.tool_name) || '工具' }));
                 errBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '失败' }));
                 if (evt.error) errBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(evt.error).slice(0, 120) }));
                 errStep.appendChild(errBody);
@@ -10066,7 +10240,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
 
           if (evt.type === 'tool_result') {
-            var toolBar2 = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
+            var toolBar2 = ensureToolTimeline(false, evt);
             if (!toolBar2) {
               toolBar2 = el('div', { class: 'ai-tool-timeline ai-tool-status' });
               assistantNode.insertBefore(toolBar2, assistantBubble);
@@ -10114,12 +10288,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var unclaimedNamedStep = null;
             var claimedNamedStep = null;
             var resultQuery = String(evt.query || '').trim();
+            var resultCallId = String(evt.call_id || evt.tool_call_id || '');
             var steps = toolBar2.querySelectorAll('.ai-tool-step');
             // tool_result events carry a name (and often the original query), not
             // an id. Matching only by name from the end marks the wrong entry when
             // parallel rounds call the same tool with different queries.
             for (var si = 0; si < steps.length; si++) {
               var candidate = steps[si];
+              if (resultCallId) {
+                if (candidate.getAttribute('data-tool-call-id') === resultCallId) { matchStep = candidate; break; }
+                continue;
+              }
               if ((candidate.getAttribute('data-tool-name') || '') !== String(evt.tool_name || '')) continue;
               // "整理中"占位也带 data-tool-name（历史数据），不参与认领
               if (candidate.classList.contains('ai-tool-organizing')) continue;
@@ -10135,7 +10314,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 claimedNamedStep = candidate;
               }
             }
-            matchStep = exactRunningStep || unclaimedNamedStep || claimedNamedStep;
+            matchStep = matchStep || exactRunningStep || unclaimedNamedStep || claimedNamedStep;
             // 认领标记：防止同一 result 重复命中，也保证同名并行工具 FIFO 配对
             if (matchStep) matchStep.setAttribute('data-tool-claimed', '1');
             // ★ 2026-09-29：为完成态「已搜索 N 个网页」累加真实结果条数。
@@ -10159,7 +10338,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   此时把该活动区内所有仍 running 的同名条目一并收敛，避免永久转圈。
             //   （只在兜底路径触发，不干扰正常的多轮并行：并行场景下 unclaimedNamedStep
             //     一定命中，不会走到这里。）
-            if (matchStep && !exactRunningStep && !unclaimedNamedStep) {
+            if (matchStep && !resultCallId && !exactRunningStep && !unclaimedNamedStep) {
               try {
                 var _stragglers = toolBar2.querySelectorAll('.ai-tool-step.is-running');
                 for (var _sg = 0; _sg < _stragglers.length; _sg++) {
@@ -10179,6 +10358,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               matchStep = el('div', { class: 'ai-tool-step' });
               matchStep.setAttribute('data-tool-name', String(evt.tool_name || ''));
               matchStep.setAttribute('data-tool-claimed', '1');
+              if (resultCallId) matchStep.setAttribute('data-tool-call-id', resultCallId);
               matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
               var mbody = el('div', { class: 'ai-tool-step-body' });
               mbody.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
@@ -10214,7 +10394,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var resultCard;
             function fillResultCard(card) {
               while (card.firstChild) card.removeChild(card.firstChild);
-              card.appendChild(el('div', { class: 'ai-tool-result-card-title', text: summaryText }));
+              card.classList.add('ai-tool-inline-result');
+              card.hidden = !evt.error && !(Array.isArray(evt.items) && evt.items.length);
+              card.onclick = null; card.toggleFn = null;
+              card.removeAttribute('role'); card.removeAttribute('tabindex'); card.removeAttribute('aria-expanded');
+              if (!evt.error) card.appendChild(el('div', { class: 'ai-tool-result-card-title', text: '查看结果' }));
               if (evt.error) {
                 card.appendChild(el('div', { class: 'ai-tool-result-error', text: String(evt.error).slice(0, 240) }));
               }
@@ -10230,14 +10414,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   改为按工具名在**所属轮次内**查找已有卡片去重：
             //   同一轮 + 同一工具 → 复用（只更新内容），跨轮则各自保留（轮次是独立的）。
             var owningRoundForCard = matchStep && matchStep.closest ? matchStep.closest('.ai-tool-round') : null;
-            var cardKey = String(evt.tool_name || '');
+            var cardKey = resultCallId || (String(evt.tool_name || '') + ':' + resultQuery);
             var existingCard = null;
             if (cardKey) {
               var cardScope = owningRoundForCard || toolActivityBody(toolBar2) || toolBar2;
               try {
                 var _cards = cardScope.querySelectorAll('.ai-tool-result-card');
                 for (var _ci = _cards.length - 1; _ci >= 0; _ci--) {
-                  if ((_cards[_ci].getAttribute('data-tool-name') || '') === cardKey) {
+                  if ((_cards[_ci].getAttribute('data-tool-result-key') || '') === cardKey) {
                     existingCard = _cards[_ci]; break;
                   }
                 }
@@ -10247,25 +10431,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               resultCard = fillResultCard(existingCard);      // 复用同一轮内同工具的卡片
             } else {
               resultCard = fillResultCard(el('div', { class: 'ai-tool-result-card' }));
-              if (cardKey) resultCard.setAttribute('data-tool-name', cardKey);
+              if (cardKey) resultCard.setAttribute('data-tool-result-key', cardKey);
+              resultCard.setAttribute('data-tool-name', String(evt.tool_name || ''));
               // ★ 卡片落点：优先插在**所属轮次**内、`.ai-tool-round-list-wrap` 之后。
               //   为什么不是紧贴 matchStep：.ai-tool-round-list 的每条子元素都靠
               //   ::after 画导轨节点、并按 :nth-child 做错峰入场；往中间塞一个非
               //   step 节点会让导轨断开、动画序号错位。放在整轮条目之后既保持了
               //   导轨完整，又让"这张卡片属于哪一轮"归属清晰。
-              var owningRound = owningRoundForCard;
-              if (owningRound) {
-                var roundWrap = owningRound.querySelector('.ai-tool-round-list-wrap');
-                if (roundWrap && roundWrap.parentNode === owningRound) {
-                  owningRound.insertBefore(resultCard, roundWrap.nextSibling);
-                } else {
-                  owningRound.appendChild(resultCard);
-                }
-              } else if (matchStep && matchStep.parentNode) {
-                matchStep.parentNode.insertBefore(resultCard, matchStep.nextSibling);
-              } else {
-                (toolActivityBody(toolBar2) || toolBar2).appendChild(resultCard);
-              }
+              var detailHost = matchStep && matchStep.querySelector('.ai-tool-step-body');
+              if (detailHost) detailHost.appendChild(resultCard);
+              else (toolActivityBody(toolBar2) || toolBar2).appendChild(resultCard);
             }
             // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」核心修复）：
             //   此前 `tool_result` 只更新**匹配到 data-tool-name 的那一个** step，
@@ -10313,25 +10488,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   ★ 2026-09-28（方案 A 修复）：此前它 append 到 .ai-tool-timeline，
             //   **落在轮次容器之外** → 样式与轮次条目不一致，且收敛路径覆盖不到。
             //   现改为挂进统一活动区 body，与轮次同层级、共享同一套样式与折叠。
-            try {
-              var _organizeBar = assistantNode.querySelector('.ai-tool-timeline') || assistantNode.querySelector('.ai-tool-status');
-              if (_organizeBar && !_organizeBar.querySelector('.ai-tool-organizing')) {
-                var _orgHost = toolActivityBody(_organizeBar) || _organizeBar;
-                _orgHost.appendChild(el('div', {
-                  class: 'ai-tool-step ai-tool-organizing is-running',
-                  'data-organizing': '1'
-                }));
-                var _orgStep = _orgHost.querySelector('.ai-tool-organizing');
-                if (_orgStep) {
-                  _orgStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
-                  var _orgBody = el('div', { class: 'ai-tool-step-body' });
-                  _orgBody.appendChild(el('div', { class: 'ai-tool-step-title', text: '整理检索结果并作答' }));
-                  _orgBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '整理中' }));
-                  _orgStep.appendChild(_orgBody);
-                }
-                try { refreshOwningToolActivity(_orgHost); } catch (eOrgAct) {}
-              }
-            } catch (eOrganize) {}
             toolProgressTick = 0;
             // Expandable result list attaches to the result card
             toolBar2 = resultCard;
@@ -10350,6 +10506,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var toggleBtn2 = el('span', { class: 'ai-search-toggle' }, ' ▸');
               toolBar2.appendChild(toggleBtn2);
               toolBar2.style.cursor = 'pointer';
+              toolBar2.setAttribute('role', 'button'); toolBar2.setAttribute('tabindex', '0');
+              toolBar2.setAttribute('aria-expanded', 'false');
+              if (!toolBar2.__keyBound) {
+                toolBar2.__keyBound = true;
+                toolBar2.addEventListener('keydown', function(event) { if ((event.key === 'Enter' || event.key === ' ') && event.target === this) { event.preventDefault(); this.click(); } });
+              }
               var detailPanel2 = el('div', { class: 'ai-search-detail', style: 'display:none;' });
               toolBar2.appendChild(detailPanel2);
               if (queryStr2) {
@@ -10391,15 +10553,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               } else if (itemsArr.length > maxItems2) {
                 detailPanel2.appendChild(el('div', { class: 'ai-search-detail-more', text: '还有 ' + (itemsArr.length - maxItems2) + ' 条结果未显示' }));
               }
-              toolBar2.toggleFn = function() {
-                var isHidden = detailPanel2.style.display === 'none';
-                detailPanel2.style.display = isHidden ? '' : 'none';
-                toggleBtn2.textContent = isHidden ? ' ▾' : ' ▸';
-              };
-              toolBar2.onclick = function(e) {
-                if (e.target.tagName === 'A') return;
-                if (this.toggleFn) this.toggleFn();
-              };
+              (function(card, panel, arrow) {
+                card.toggleFn = function() {
+                  var opening = panel.style.display === 'none';
+                  panel.style.display = opening ? 'block' : 'none';
+                  arrow.textContent = opening ? ' ▾' : ' ▸';
+                  card.setAttribute('aria-expanded', String(opening));
+                };
+                card.onclick = function(e) {
+                  if (e.target.closest && e.target.closest('a')) return;
+                  card.toggleFn();
+                };
+              })(toolBar2, detailPanel2, toggleBtn2);
             }
             followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
@@ -10477,7 +10642,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'reasoning_start' && !reasoningStarted) {
             reasoningStarted = true;
             // C 修复：用户关闭思考时，仅记录状态、不创建/渲染思考节点
-            if (S.thinkingMode === 'off') continue;
+            if (_sendThinkingMode === 'off') continue;
             var rnStart = ensureReasoningNode();
             if (rnStart) setThinkingExpanded(rnStart, true, messagesEl);
             ensureThinkingTimer();
@@ -10490,10 +10655,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var chunkText = String(evt.text || '');
             if (aiReasoning.length < 200000) {
               var room = 200000 - aiReasoning.length;
-              aiReasoning += room > 0 ? chunkText.slice(0, room) : '';
-            }
+              chunkText = room > 0 ? chunkText.slice(0, room) : '';
+              aiReasoning += chunkText;
+            } else { chunkText = ''; }
             // C 修复：用户关闭思考时，跳过流式渲染（仅静默累积，收尾由 finishAiMessage 统一隐藏）
-            if (S.thinkingMode === 'off') continue;
+            if (_sendThinkingMode === 'off') continue;
             // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
             if (!reasoningStarted) {
               reasoningStarted = true;
@@ -10505,7 +10671,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (rn && !rn.classList.contains('expanded')) {
               setThinkingExpanded(rn, true, messagesEl);
             }
-            var body = rn.querySelector('.ai-thinking-body');
+            var body = reasoningSegment();
             if (body) {
               if (!reasoningRenderer) {
                 body.textContent = '';
@@ -10530,8 +10696,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 });
               }
               // ★ 修复：渲染器按剩余配额接收（200k 上限此前只截累积字符串，渲染器无界增长）
-              var _reasonRoom2 = 200000 - aiReasoning.length;
-              if (_reasonRoom2 > 0) reasoningRenderer.append(String(evt.text || '').slice(0, _reasonRoom2));
+              if (chunkText && aiReasoning.length <= 200000) reasoningRenderer.append(chunkText);
             }
             continue;
           }
@@ -10614,7 +10779,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             try {
               usageResult = evt.usage || null;
               finalModel = evt.model || '';
-              finalThinkingMode = evt.thinking_mode || evt.applied_thinking_mode || S.thinkingMode;
+              finalThinkingMode = evt.thinking_mode || evt.applied_thinking_mode || _sendThinkingMode;
               // ★ 工作模式：以后端实际回传为准（后端才真正知道这次是否按工作模式跑的）
               if (typeof evt.work_mode === 'boolean') streamWorkMode = evt.work_mode;
               // sanitized_content 优先：后端清洗后的正文
@@ -10880,6 +11045,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     else S.loading = true;
     var requestId = ++S.historyRequestId;
     var requestedConversationId = S.conversationId;
+    var historyOwner = window.currentUser || '', historyEpoch = window._authStateEpoch || 0;
     var loadController = typeof AbortController === 'function' ? new AbortController() : null;
     // ★ 修复：历史加载使用独立 controller，不得覆盖 S.abortController——
     // 否则流式发送中滚动加载历史会把发送请求的停止能力（停止按钮）指向已完成的加载请求。
@@ -10939,7 +11105,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       }
 
-      if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active) return;
+      if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active ||
+          historyOwner !== (window.currentUser || '') || historyEpoch !== (window._authStateEpoch || 0)) return;
 
       if (!r.ok || !r.data) {
         if (!before) {
@@ -11103,25 +11270,32 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } catch (e2) {}
       }
     } finally {
-      S.loading = false;
-      S.loadingMore = false;
-      if (S.historyController === loadController) S.historyController = null;
-      if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
+      if (requestId === S.historyRequestId) {
+        S.loading = false;
+        S.loadingMore = false;
+        if (S.historyController === loadController) S.historyController = null;
+        if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
+      }
     }
   }
 
   // 获取会话列表（普通聊天只显示普通会话，深度研究会话分开管理）
   async function fetchConversations() {
+    var seq = ++S.conversationRequestId, life = S.lifecycleId;
+    var owner = window.currentUser || '', epoch = window._authStateEpoch || 0;
+    function current() { return seq === S.conversationRequestId && life === S.lifecycleId && owner === (window.currentUser || '') && epoch === (window._authStateEpoch || 0); }
     try {
-      var r = await apiRequest('GET', '/chat/conversations?limit=50&mode=normal');
-      if (r && r.ok && r.data && Array.isArray(r.data.conversations)) {
-        S.conversations = r.data.conversations;
-      }
-    } catch (e) {
-      try { console.warn('[AI-CONV] fetchConversations error:', e && e.message); } catch(ee) {}
+      var r = await apiRequest('GET', '/chat/conversations?limit=50&mode=normal', null, { timeoutMs: 15000 });
+      if (!current()) return false;
+      if (!r || !r.ok || !r.data || !Array.isArray(r.data.conversations)) throw new Error('历史会话加载失败');
+      S.conversations = r.data.conversations;
+      return true;
+    } catch (error) {
+      if (!current()) return false;
+      throw error;
     }
   }
-  
+
   // 切换会话
   // ★ 新增：会话自定义标题（localStorage 覆盖，仅本设备生效，不动后端）
   function getConversationTitleOverride(cid) {
@@ -11208,9 +11382,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function deleteConversation(cid, itemEl) {
-    if (!cid) return;
+    if (!cid || S._newChatBusy || (S.sending && cid === S.conversationId)) return;
+    var deleteLife = S.lifecycleId, deleteOwner = window.currentUser || '', deleteEpoch = window._authStateEpoch || 0;
+    function currentDelete() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === (window._authStateEpoch || 0); }
     try {
       var r = await apiRequest('POST', '/chat/delete', { conversation_id: cid });
+      if (!currentDelete()) return;
       if (r && r.ok) {
         if (itemEl && itemEl.parentElement) itemEl.remove();
         // 从 S.conversations 中移除
@@ -11229,10 +11406,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         showConversationList();
       } else {
-        notify('删除失败');
+        if (currentDelete()) notify('删除失败');
       }
     } catch (e) {
-      notify('删除失败');
+      if (currentDelete()) notify('删除失败');
     }
   }
 
@@ -11458,19 +11635,27 @@ function showChatMessages() {
       // 立即打开二级页并显示骨架屏（点击即反馈，不等网络）
       openConversationListPage();
       syncAiHeaderButtons(histBtn, newBtn);
-      fetchConversations().then(function() {
+      var historyLife = S.lifecycleId;
+      fetchConversations().then(function(loaded) {
+        if (historyLife !== S.lifecycleId || !histBtn.isConnected) return;
         S._historyBusy = false;
         histBtn.disabled = false;
         if (!histBtn.textContent || histBtn.textContent === '加载中') histBtn.textContent = _prevText;
         syncAiHeaderButtons(histBtn, newBtn);
-        renderConversationListStyled(S.conversationsEl);
+        if (loaded && S.conversationsEl) renderConversationListStyled(S.conversationsEl);
       }).catch(function() {
+        if (historyLife !== S.lifecycleId || !histBtn.isConnected) return;
         S._historyBusy = false;
         histBtn.disabled = false;
         histBtn.textContent = _prevText;
         syncAiHeaderButtons(histBtn, newBtn);
         notify('历史会话加载失败，请稍后重试');
-        if (S.conversationsEl) renderConversationListStyled(S.conversationsEl);
+        if (S.conversationsEl) {
+          renderConversationListStyled(S.conversationsEl);
+          var retryHistory = el('button', { type: 'button', class: 'ai-history-retry', text: '加载失败，点击重试' });
+          retryHistory.onclick = function() { S.showingHistory = false; histBtn.click(); };
+          S.conversationsEl.insertBefore(retryHistory, S.conversationsEl.firstChild);
+        }
       });
     });
     header.appendChild(histBtn);
@@ -11488,11 +11673,14 @@ function showChatMessages() {
     delBtn.addEventListener('click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      if (!S.conversationId) return;
+      if (!S.conversationId || S.sending || S._newChatBusy) return;
+      var deleteCid = S.conversationId, deleteLife = S.lifecycleId, deleteOwner = window.currentUser || '', deleteEpoch = window._authStateEpoch || 0;
+      function currentDelete() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === (window._authStateEpoch || 0) && (S.conversationId === deleteCid || !S.conversationId); }
       if (!confirm('确定删除当前对话吗？删除后不可恢复。')) return;
       delBtn.disabled = true;
       try {
-        var dr = await apiRequest('POST', '/chat/delete', { conversation_id: S.conversationId });
+        var dr = await apiRequest('POST', '/chat/delete', { conversation_id: deleteCid });
+        if (!currentDelete()) return;
         if (dr && dr.ok) {
           S.messages = [];
           S.oldestCursor = null;
@@ -11502,6 +11690,7 @@ function showChatMessages() {
           setAiRootState('ai-empty');
           // 开启新对话
           var r2 = await apiRequest('POST', '/chat/new', null);
+          if (!currentDelete()) return;
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.conversationId = r2.data.conversation_id;
             writeConvId(r2.data.conversation_id);
@@ -11517,10 +11706,10 @@ function showChatMessages() {
             }
           }
         } else {
-          notify('删除失败');
+          if (currentDelete()) notify('删除失败');
         }
       } catch (e) {
-        notify('删除失败');
+        if (currentDelete()) notify('删除失败');
       } finally {
         delBtn.disabled = false;
       }
@@ -11541,16 +11730,26 @@ function showChatMessages() {
       //   期间按钮无 loading 态、无并发锁，用户重复点击会并发创建多个会话。
       if (S._newChatBusy) return; // 并发锁：忽略重复点击
       S._newChatBusy = true;
+      var createSeq = S._newChatRequestId = (S._newChatRequestId || 0) + 1;
+      var createLifecycle = S.lifecycleId, createCid = S.conversationId;
+      var createOwner = window.currentUser || '', createEpoch = window._authStateEpoch || 0;
+      function currentCreate() { return createSeq === S._newChatRequestId && S.active && createLifecycle === S.lifecycleId &&
+        createCid === S.conversationId && createOwner === (window.currentUser || '') && createEpoch === (window._authStateEpoch || 0); }
       var _prevLabel = newBtn.textContent;
       newBtn.disabled = true;
       newBtn.textContent = '创建中';
       try {
+        var r = await apiRequest('POST', '/chat/new', null);
+        if (!currentCreate()) return;
+        if (r && r.ok && r.data && r.data.conversation_id) {
+          abortCurrentRequest('chat');
+          S.historyRequestId += 1;
+          S._pendingLocalMsgs = [];
         // Pending attachments belong to the current conversation only.
-        _aiChatFiles = [];
+        _aiChatFiles = []; _aiChatFileSelectionSeq++;
         if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
         if (fileInput) fileInput.value = '';
-        var r = await apiRequest('POST', '/chat/new', null);
-        if (r && r.ok && r.data && r.data.conversation_id) {
+
           S.conversationId = r.data.conversation_id;
           writeConvId(r.data.conversation_id);
           S.messages = [];
@@ -11571,11 +11770,10 @@ function showChatMessages() {
           notify(describeError(r, '创建新对话失败'));
         }
       } catch (eNew) {
-        notify('创建新对话失败，请检查网络后重试');
+        if (currentCreate()) notify('创建新对话失败，请检查网络后重试');
       } finally {
-        S._newChatBusy = false;
-        newBtn.disabled = false;
-        newBtn.textContent = _prevLabel;
+        if (createSeq === S._newChatRequestId) S._newChatBusy = false;
+        if (newBtn.isConnected) { newBtn.disabled = false; newBtn.textContent = _prevLabel; }
       }
     });
     header.appendChild(newBtn);
@@ -11737,11 +11935,6 @@ function showChatMessages() {
               '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--upload" aria-hidden="true">' + ICO.upload + '</span>' +
                 '<span class="ai-panel-row-title">上传文件</span>' +
-                rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
-              '</button>' +
-              '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload-folder">' +
-                '<span class="ai-panel-row-icon ai-panel-row-icon--upload" aria-hidden="true">' + ICO.folder + '</span>' +
-                '<span class="ai-panel-row-title">选择文件夹</span>' +
                 rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
               '</button>' +
               '<div class="ai-panel-row ai-panel-row--select" data-action="open-model" role="button" tabindex="0" aria-haspopup="listbox">' +
@@ -12955,14 +13148,6 @@ function showChatMessages() {
         }, 50);
         return;
       }
-      if (action === 'upload-folder') {
-        closePanel();
-        setTimeout(function() {
-          var fi = document.getElementById('aiChatFolderInp');
-          if (fi) fi.click();
-        }, 50);
-        return;
-      }
       if (action === 'work-mode') {
         S.workMode = !S.workMode;
         // 工作模式继承原「思考Max」语义：开启时不压缩上下文
@@ -13159,7 +13344,7 @@ function showChatMessages() {
       var text = String(input.value || '').trim();
       var fileList = (_aiChatFiles && _aiChatFiles.length) ? _aiChatFiles.slice(0, 10) : [];
       if (!text && !fileList.length) return;
-      // ★ 多文件/文件夹：附件已在 handleSendMessage 同步复制进请求体，
+      // ★ 多文件：附件已在 handleSendMessage 同步复制进请求体，
       //   发送后立即清理预览（保证不阻塞连续发送）
       handleSendMessage(input, sendBtn, messagesEl, fileList);
       clearAiChatFilePreview();
@@ -13224,13 +13409,14 @@ function showChatMessages() {
     });
     input.addEventListener('input', autoresize);
 
-    // 文件上传逻辑（按钮多选 / 选择文件夹 / 粘贴 / 拖拽）—— 支持任意格式、多文件与文件夹
+    // 文件上传逻辑（按钮多选 / 粘贴 / 拖拽）—— 支持任意格式与多文件
+    var _aiChatFileSelectionSeq = 0;
     var _aiChatFiles = []; // [{ name, type, dataUrl, size }]
     // ★ 加固：_aiChatFiles 是 renderAiRoot 的闭包变量，closeAiChat 在外部作用域无法直接访问，
     //   此前关闭聊天/登出后附件数组不会被清理（会话残留）。此处把清理函数挂到 S 上，
     //   由 closeAiChat 统一调用；函数每次 renderAiRoot 重建，指向当前闭包，无泄漏。
     S._aiChatFilesCleanup = function() {
-      try { _aiChatFiles = []; } catch (e) {}
+      try { _aiChatFiles = []; _aiChatFileSelectionSeq++; } catch (e) {}
     };
     // ★ 2026-09-29（审计 M5「发送失败只回填文字，附件不可恢复」）：
     //   供 handleSendMessage 的失败收尾（restoreInputText）把本次附件放回输入区
@@ -13243,11 +13429,11 @@ function showChatMessages() {
       } catch (eRestore) {}
     };
     function clearAiChatFilePreview() {
+      _aiChatFileSelectionSeq++;
       _aiChatFiles = [];
       filePreview.style.display = 'none';
       filePreview.innerHTML = '';
       fileInput.value = '';
-      try { if (folderInput) folderInput.value = ''; } catch (eF) {}
     }
     function renderAiMultiFilePreview(files) {
       filePreview.innerHTML = '';
@@ -13270,12 +13456,17 @@ function showChatMessages() {
       filePreview.style.display = 'flex';
     }
     function acceptAiChatFiles(rawFiles) {
+      var fileSeq = ++_aiChatFileSelectionSeq, fileCid = S.conversationId, fileLifecycle = S.lifecycleId;
+      var fileOwner = window.currentUser || '', fileEpoch = window._authStateEpoch || 0;
+      function currentFiles() { return fileSeq === _aiChatFileSelectionSeq && fileCid === S.conversationId && fileLifecycle === S.lifecycleId &&
+        fileOwner === (window.currentUser || '') && fileEpoch === (window._authStateEpoch || 0); }
       var list = Array.prototype.slice.call(rawFiles || []);
       if (!list.length) { notify('没有可上传的文件'); return; }
       var attachments = [];
       var totalBytes = 0;
       var skipped = 0;
       function next(i) {
+        if (!currentFiles()) return;
         if (i >= list.length) {
           if (!attachments.length) {
             notify(list.length ? '文件都超过 50MB 或数量超限（最多 10 个、合计约 50MB），请选择更小的文件' : '没有可上传的文件');
@@ -13298,6 +13489,7 @@ function showChatMessages() {
         if (pass && estTotal > AI_ATTACH_TOTAL_B64_BUDGET) { skipped++; pass = false; }
         if (!pass) { next(i + 1); return; }
         var okRead = readAiAttachmentFile(f, function(fileData) {
+          if (!currentFiles()) return;
           if (fileData) {
             attachments.push({ name: fileData.name, type: fileData.type || 'application/octet-stream', dataUrl: fileData.dataUrl, size: Number(f.size || 0) });
             totalBytes += Math.ceil((fileData.dataUrl.length * 3) / 4);
@@ -13308,19 +13500,11 @@ function showChatMessages() {
       }
       next(0);
     }
-    var folderInput = el('input', { type: 'file', id: 'aiChatFolderInp', style: 'display:none' });
-    try { folderInput.setAttribute('webkitdirectory', ''); } catch (eDir) {}
     fileBtn.addEventListener('click', function() { fileInput.click(); });
     fileInput.addEventListener('change', function() {
       var fs = this.files;
       if (!fs || !fs.length) return;
       acceptAiChatFiles(Array.prototype.slice.call(fs));
-      this.value = '';
-    });
-    folderInput.addEventListener('change', function() {
-      var fs = this.files;
-      if (!fs || !fs.length) return;
-      acceptAiChatFiles(Array.prototype.slice.call(fs).slice(0, 40));
       this.value = '';
     });
     bindAiComposerPasteDrop([inputBar, input], function(rawFile) { acceptAiChatFiles([rawFile]); });
@@ -13329,7 +13513,6 @@ function showChatMessages() {
     inputBar.appendChild(panelShell);
     inputBar.appendChild(fileBtn);
     inputBar.appendChild(fileInput);
-    inputBar.appendChild(folderInput);
     inputBar.appendChild(filePreview);
     inputBar.appendChild(input);
     inputBar.appendChild(voiceBtn);
@@ -13508,6 +13691,9 @@ function showChatMessages() {
     S._dockMode = false;
     S.active = false;
     S.lifecycleId += 1;
+    S._newChatRequestId = (S._newChatRequestId || 0) + 1;
+    S._newChatBusy = false;
+    S._historyBusy = false;
     S.sendSeq = (S.sendSeq || 0) + 1;
     S.historyRequestId += 1;
     S.conversationRequestId += 1;
@@ -13518,6 +13704,9 @@ function showChatMessages() {
     // deep preflight too, since it may be awaiting quota/auth before a controller exists.
     S._dtSendSeq = (S._dtSendSeq || 0) + 1;
     S._dtSending = false;
+    S._dtCreating = false; S._dtDeleting = false;
+    S._dtCreateSeq = (S._dtCreateSeq || 0) + 1;
+    _dtFileSelectionSeq += 1;
     S._dtCurrentReqId = null;
     if (S._dtFetchTimeoutTimer) { clearTimeout(S._dtFetchTimeoutTimer); S._dtFetchTimeoutTimer = null; }
     if (S._dtAbortController && S._dtAbortController !== S.deepThinkJob) {

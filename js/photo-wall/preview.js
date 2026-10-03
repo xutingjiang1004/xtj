@@ -10,7 +10,7 @@
         opacity: 1
     }, P = null, E = !1, L = Object.create(null);
     var pendingPreviewDeletes = new Set();
-    window.addEventListener('xtj:visual-viewport-change', function(){if(e){M();if(s){s.style.transition="none";s.style.left = -a + "px";}l=0;}});
+    window.addEventListener('xtj:visual-viewport-change', function(){if(e){M();if(s){s.style.transition="none";s.style.transform="translate3d("+-a+"px,0,0)";}l=0;}});
     window.addEventListener('xtj:permissions-ready', function() { if (e && t) j(i); });
     function T(e) {
         return "close" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span>' : "info" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span>' : "share" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span>' : "rotate" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(-1.5,0)"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></g></svg></span>' : "delete" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>' : "";
@@ -22,9 +22,13 @@
         e && console.warn("[photo-preview]", e);
     });
     function M() {
-        (a = (document.getElementById("photoPreviewOverlay") || {}).clientWidth || window.innerWidth, r = (document.getElementById("photoPreviewOverlay") || {}).clientHeight || window.innerHeight, s = document.getElementById("ppSlideTrack")) && (s.querySelectorAll(".pp-slide-slot").forEach(function(e) {
-            e.style.width = a + "px", e.style.height = r + "px";
-        }), s.style.width = 3 * a + "px", s.style.height = r + "px");
+        var root = document.getElementById("photoPreviewOverlay");
+        a = root && root.clientWidth || window.innerWidth; r = root && root.clientHeight || window.innerHeight;
+        s = document.getElementById("ppSlideTrack");
+        if (!s || (s._ppWidth === a && s._ppHeight === r)) return;
+        s._ppWidth = a; s._ppHeight = r;
+        s.querySelectorAll(".pp-slide-slot").forEach(function(slot) { slot.style.width = a + "px"; slot.style.height = r + "px"; });
+        s.style.width = 3 * a + "px"; s.style.height = r + "px";
     }
     function k(e) {
         for (var t = n, o = -1; o <= 1; o++) {
@@ -108,20 +112,20 @@
         image._ppCleanup && image._ppCleanup(), image._ppCleanup = null, image._ppLoadGen = (image._ppLoadGen || 0) + 1,
         image._ppUrl = null, image._ppProgressiveUrl = null, image._ppListenerUrl = null, image.onload = null, image.onerror = null,
         image.classList.remove("pp-placeholder"), image.style.transition = "none";
-        resetSource && (image.removeAttribute("src"), image.style.visibility = "hidden");
+        resetSource && (image.removeAttribute("src"), image.style.opacity = "0");
     }
     function D(e, t) {
         if (e) {
             if (!t) {
                 clearPreviewImageLoad(e, !0);
-                e.style.visibility = "hidden";
+                e.style.opacity = "0";
                 e.classList.remove("pp-placeholder");
                 return;
             }
             if (e._ppUrl === t) {
                 // 若当前展示的是该 URL 的 Blob 对象图（渐进加载中），保持不动，避免用原 URL 覆盖
-                if (e._ppObjectUrl) return e.style.transition = "none", void (e.style.visibility = "visible");
-                if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.visibility = "visible");
+                if (e._ppObjectUrl) return e.style.transition = "none", void (e.style.opacity = "1");
+                if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
                 if (e._ppListenerUrl === t && e._ppCleanup) return;
             } else {
                 // 换 URL 前彻底清旧图，避免切换时残影；同时取消缩略图打开时的原图预加载回调。
@@ -130,7 +134,7 @@
                 e._ppCleanup && e._ppCleanup();
                 e._ppObjectUrl && (URL.revokeObjectURL(e._ppObjectUrl), e._ppObjectUrl = null);
                 e.style.transition = "none";
-                e.style.visibility = "hidden";
+                e.style.opacity = "0";
                 e.classList.remove("pp-placeholder");
                 try { e.removeAttribute("src"); } catch (err) {}
             }
@@ -138,7 +142,7 @@
             // Even an HTTP cache hit must decode the new source before becoming visible.
             e.decoding = "async";
             e.fetchPriority = e.id === "photoPreviewImage" ? "high" : "low";
-            e.style.transition = "none", e.removeAttribute("src"), e.style.visibility = "hidden";
+            e.style.transition = "none", e.removeAttribute("src"), e.style.opacity = "0";
             // 重置该 URL 的失败预算：每次导航到(或重载)此图都重新获得完整的重试次数，
             // 避免"看坏图→切走→再切回"时 H[url] 沿用旧值导致只试 1 次就显示占位图。
             delete H[t];
@@ -155,9 +159,9 @@
                 ready.then(function() {
                     if (e._ppLoadGen !== a || e._ppUrl !== t) return;
                     e.style.transition = "none";
-                    e.style.visibility = "visible";
+                    e.style.opacity = "1";
                 }, function() {
-                    if (e._ppLoadGen === a && e._ppUrl === t && e.complete && e.naturalWidth > 0) e.style.visibility = "visible";
+                    if (e._ppLoadGen === a && e._ppUrl === t && e.complete && e.naturalWidth > 0) e.style.opacity = "1";
                 });
             }
             function handleError() {
@@ -165,7 +169,7 @@
                     e._ppUrl === t && e._ppLoadGen === a && (n = !1, e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.removeAttribute("src"), e.src = t);
                 }, 500 * i)) : (n = !0, e._ppUrl = null, delete H[t], function(e) {
                     if (!e) return;
-                    e.style.transition = "none", e.style.visibility = "visible", e.classList.add("pp-placeholder");
+                    e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
                 }(e)));
             }
             e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = t, e.complete && e.naturalWidth > 0 && handleLoad();
@@ -180,7 +184,7 @@
             if (r) { clearPreviewImageLoad(r, !0); }
             t[e] && D(i, t[e].imageUrl), e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null),
             e < t.length - 1 && t[e + 1] ? D(r, t[e + 1].imageUrl) : D(r, null), l = 0, c = !1,
-            s.classList.remove("snapping"), s.style.transition = "none", s.style.left = -a + "px",
+            s.classList.remove("snapping"), s.style.transition = "none", s.style.transform = "translateX(" + -a + "px)",
             // 强制一次回流后再允许 transition，防止残影叠在滑动层
             void s.offsetWidth,
             t[e] && window.updateAmbientBackground && window.updateAmbientBackground(t[e].imageUrl);
@@ -197,7 +201,7 @@
         var reduced = document.documentElement.getAttribute("data-xtj-motion") === "off" ||
             (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
         var duration = reduced ? 0 : 260;
-        s.style.transition = "left " + duration + "ms cubic-bezier(0.33, 1, 0.68, 1)";
+        s.style.transition = "transform " + duration + "ms cubic-bezier(0.33, 1, 0.68, 1)";
         var done = !1, timer = null;
         function cleanup() {
             done = !0;
@@ -207,7 +211,7 @@
             s.classList.remove("snapping");
         }
         function finish(event) {
-            if (event && (event.target !== s || event.propertyName !== "left")) return;
+            if (event && (event.target !== s || event.propertyName !== "transform")) return;
             if (done) return;
             cleanup(); c = !1;
             if (t) t();
@@ -215,18 +219,18 @@
         s._ppAnimationCleanup = cleanup;
         s.addEventListener("transitionend", finish);
         timer = setTimeout(finish, duration + 100);
-        s.style.left = e + "px";
+        s.style.transform = "translateX(" + e + "px)";
         if (reduced) finish();
     }
     function A(e) {
         if (s) {
             c = !0;
             var t = Math.abs(l - e), o = Math.min(Math.max(.5 * t, 150), 400);
-            s.classList.add("snapping"), s.style.transition = "left " + o + "ms cubic-bezier(0.33, 1, 0.68, 1)";
+            s.classList.add("snapping"), s.style.transition = "transform " + o + "ms cubic-bezier(0.33, 1, 0.68, 1)";
             // P4: 幂等 finish — transitionend 与 setTimeout 谁先触发都只执行一次，
             // 防止 transitionend 未触发时动画锁 c 永久卡死（与函数 R 一致）。
             var _done = !1, _fallback = null, r = function(event) {
-                if (event && (event.target !== s || event.propertyName !== "left")) return;
+                if (event && (event.target !== s || event.propertyName !== "transform")) return;
                 if (_done) return;
                 _done = !0;
                 s.removeEventListener("transitionend", r);
@@ -255,7 +259,7 @@
             // P4: setTimeout 兜底（transition 时长 + 120ms，与 R 的 320+120=440 模式一致）
             _fallback = setTimeout(r, o + 120);
             var d = -a + e;
-            s.style.left = d + "px";
+            s.style.transform = "translateX(" + d + "px)";
         }
     }
     function N(e) {
@@ -263,7 +267,7 @@
         if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
         if (s) {
             s.style.transition = "none";
-            s.style.left = -a + "px";
+            s.style.transform = "translateX(" + -a + "px)";
             s.classList.remove("snapping");
         }
         l = 0, c = !1, O(e), n[e] && window.updateAmbientBackground && window.updateAmbientBackground(n[e].imageUrl),
@@ -281,7 +285,7 @@
                     // 动画结束后硬重置轨道与三槽，杜绝上一张残留
                     if (s) {
                         s.style.transition = "none";
-                        s.style.left = -a + "px";
+                        s.style.transform = "translateX(" + -a + "px)";
                     }
                     N(t);
                 });
@@ -293,19 +297,13 @@
         if (o[e]) {
             var i = o[e];
             t = i, window.photoPreviewCurrent = i;
-            var a = document.getElementById("photoPreviewUser"), r = document.getElementById("photoPreviewTime"), s = document.getElementById("photoPreviewViewsCount");
-            if (a && (a.textContent = i.username || "未知用户"), r) {
-                var l = new Date(i.timestamp);
-                r.textContent = l.toLocaleString("zh-CN", {
-                    year: "numeric",
-                    month: "2-digit",
-                    day: "2-digit",
-                    hour: "2-digit",
-                    minute: "2-digit"
-                });
-            }
-            s && (s.textContent = i.views || "0");
             if (window.renderPhotoStory) window.renderPhotoStory(i);
+            else {
+                var user = document.getElementById("photoPreviewUser"), time = document.getElementById("photoPreviewTime"), views = document.getElementById("photoPreviewViewsCount");
+                if (user) user.textContent = i.username || "未知用户";
+                if (time) time.textContent = new Date(i.timestamp).toLocaleString("zh-CN", {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
+                if (views) views.textContent = i.views || "0";
+            }
             var c = document.getElementById("ppDeleteBtn");
             if (c) {
                 c.disabled = pendingPreviewDeletes.has(String(i.id));
@@ -692,7 +690,7 @@
                                 var A = -a + l, N = 1;
                                 0 === i && t > 0 && (N = 1 + t / a * 2), i === n.length - 1 && t < 0 && (N = 1 - t / a * 2),
                                 A = t / N - a, h && cancelAnimationFrame(h), h = requestAnimationFrame(function() {
-                                    s.style.left = A + "px", h = null;
+                                    s.style.transform = "translateX(" + A + "px)", h = null;
                                 });
                             }
                         }
@@ -788,7 +786,7 @@
             if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
             var S = n[b];
             // 缩略图路径下方已有独立原图预加载器；不要再由缓存预热器并发下载同一原图。
-            S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.left = -a + "px");
+            S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translateX(" + -a + "px)");
             var D = null, W = null, Y = document.getElementById("photoGrid");
             if (Y && S && null != S.id) {
                 // ★ 审计修复：旧转义只处理双引号不处理反斜杠，id 含 "\" 时选择器
@@ -804,7 +802,7 @@
             }
             _._openOrigin = D, _._openOriginImg = W, W && (W.style.transition = "none", W.style.opacity = "0"),
             _.classList.add("active"), document.body.classList.add("photo-previewing"), _.style.opacity = "1",
-            M(), s && (s.style.transition = "none", s.style.left = -a + "px");
+            M(), s && (s.style.transition = "none", s.style.transform = "translateX(" + -a + "px)");
             j(b), F(b);
             var J = document.getElementById("photoPreviewImage"), Q = !1, $ = null, ee = (_._openLoadGen || 0) + 1;
             function cleanupOpenListeners(cancelFullPreload) {
@@ -969,7 +967,7 @@
             // 此前"G15 修复"误改用全局 window.__ppReExecuted 且从不重置，
             // 导致第二次起 O(b)/j(b)/F(b) 不再执行（分页圆点等缺失），已还原。
             Q || (Q = !0, _ && _._cleanupOpenListeners && _._cleanupOpenListeners(), J && (J.style.transition = "", J.style.transform = "", J.style.transformOrigin = "",
-            J.style.borderRadius = ""), _.style.transition = "", O(b), j(b), F(b), W && (W.style.transition = "",
+            J.style.borderRadius = ""), _.style.transition = "", (J && J._ppUrl !== S.imageUrl && O(b)), j(b), F(b), W && (W.style.transition = "",
             W.style.opacity = ""));
         }
     }, window.closePhotoPreview = V, Q = function() {
