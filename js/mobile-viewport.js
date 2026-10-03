@@ -1,6 +1,9 @@
 (function(){
   'use strict';
   var frozenMedia = [], desktopLink = null, originalLinkMedia = '', restoreTimer;
+  var touchHardware = Number(navigator.maxTouchPoints || 0) > 0;
+  window.__xtjTouchViewportDevice = /iPad|iPhone|iPod|Android/.test(navigator.userAgent + ' ' + navigator.platform) || (touchHardware && /Mac/.test(navigator.platform));
+  window.__xtjViewportBootHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
   function editable(node) { return node && node.matches && node.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),textarea,select,[contenteditable="true"]'); }
   function restoreTabletLayout() {
     frozenMedia.forEach(function(item){ item.rule.media.mediaText = item.media; }); frozenMedia = [];
@@ -18,7 +21,7 @@
   }
   document.addEventListener('focusin', function(event){
     clearTimeout(restoreTimer);
-    if (!editable(event.target) || desktopLink || !matchMedia('(min-width:768px) and (min-height:480px)').matches || !matchMedia('(pointer:coarse)').matches) return;
+    if (!editable(event.target) || desktopLink || !matchMedia('(min-width:768px) and (min-height:480px)').matches || !(touchHardware || window.__xtjTouchViewportDevice || matchMedia('(pointer:coarse)').matches)) return;
     desktopLink = document.querySelector('link[href*="desktop.min.css"]');
     if (!desktopLink) return;
     originalLinkMedia = desktopLink.media; desktopLink.media = '(min-width:768px)';

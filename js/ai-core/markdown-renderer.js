@@ -258,8 +258,8 @@
     // 全部生成完后再分别包裹 <ul>/<ol>，最后去掉标记
     s = s.replace(/^[\*\-]\s+(.+)$/gm, function (_, t) { return '<li>' + _escapeHtml(t) + '</li>'; });
     s = s.replace(/^\d+\.\s+(.+)$/gm, function (_, t) { return '<li data-ol="1">' + _escapeHtml(t) + '</li>'; });
-    s = s.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-    s = s.replace(/(<li data-ol="1">.*<\/li>\n?)+/g, '<ol>$&</ol>');
+    s = s.replace(/(<li>.*<\/li>(?:\n+(?=<li>)|\n)?)+/g, function(list) { return '<ul>' + list.replace(/\n+/g, '') + '</ul>'; });
+    s = s.replace(/(<li data-ol="1">.*<\/li>(?:\n+(?=<li data-ol="1">)|\n)?)+/g, function(list) { return '<ol>' + list.replace(/\n+/g, '') + '</ol>'; });
     s = s.replace(/<li data-ol="1">/g, '<li>');
 
     // 13. Paragraphs: double newlines

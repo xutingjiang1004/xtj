@@ -199,7 +199,7 @@
 
     function clearStaleDockDisplay() {
         var dockBar = document.getElementById('dockBar') || document.querySelector('.dock-bar');
-        if (dockBar && dockBar.style && dockBar.style.display === 'none') {
+        if (!document.documentElement.classList.contains('xtj-keyboard-open') && dockBar && dockBar.style && dockBar.style.display === 'none') {
             dockBar.style.display = '';
         }
     }

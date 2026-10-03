@@ -43,7 +43,7 @@ test('增量补丁必须保留未变化节点（这是性能保证的核心）',
   const i = agentSrc.indexOf('function patchInnerHTML');
   const seg = agentSrc.slice(i, agentSrc.indexOf('function createSmoothTextRenderer', i));
   // 相同则跳过 —— 不碰未变节点
-  assert.match(seg, /have\.outerHTML === want\.outerHTML\)\) return/,
+  assert.match(seg, /have\.isEqualNode\(want\)\)\) return/,
     '未变化节点必须跳过，否则等于整段重建');
   // 不同的才替换
   assert.match(seg, /replaceChild\(/, '变化节点必须用 replaceChild 就地替换');
@@ -55,10 +55,10 @@ test('增量补丁必须保留未变化节点（这是性能保证的核心）',
 
 test('流式渲染门限已收紧（流畅度的直接来源）', () => {
   // 增量补丁把每帧成本降到 O(1) 后，门限才能从 90/140ms 收紧到 0/16ms
-  assert.match(agentSrc, /rendered\.length < 600 \? 0 : 16/,
-    'ai-agent.js 门限必须收紧到 0/16ms');
-  assert.match(coreSrc, /rendered\.length < 600 \? 0 : 16/,
-    'stream-renderer.js 门限必须收紧到 0/16ms');
+  assert.match(agentSrc, /var _renderGap = 0;/,
+    'ai-agent.js 每个 requestAnimationFrame 都应允许正文补丁，不用固定毫秒门限跳帧');
+  assert.match(coreSrc, /var _renderGap = 0;/,
+    'stream-renderer.js 每个 requestAnimationFrame 都应允许正文补丁，不用固定毫秒门限跳帧');
   // 不得回退到旧的 90/140
   assert.doesNotMatch(agentSrc, /rendered\.length < 600 \? 90 : 140/,
     '不得回退到旧的 90/140ms 门限');
@@ -96,7 +96,7 @@ test('未闭合代码围栏必须按代码块渲染（不得让反引号裸奔�
   assert.ok(escCount >= 3, `已闭合与未闭合两条路径都必须转义（当前 ${escCount} 处调用）`);
 });
 
-test('未闭合围栏的渲染结果必须与已闭合同形态（无跳变）', () => {
+test('未闭合围栏的渲染结果必须与已闭合同形态（无跳变）', async () => {
   // 用真实实现验证：中途与闭合后都应产出 <pre><code>
   const path2 = require('node:path');
   const src = fs.readFileSync(path2.join(root, 'js', 'ai-agent.js'), 'utf8');
@@ -112,15 +112,18 @@ test('未闭合围栏的渲染结果必须与已闭合同形态（无跳变）',
     function escapeHtml(s){return escapeAttr(String(s));}
     function aiDecodeHtmlEntities(s){return String(s).replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'");}
   `;
-  const savedDoc = global.document, savedWin = global.window;
-  global.document = { createElement: () => ({ set href(v) {}, set target(v) {}, set rel(v) {}, set textContent(v) {}, get outerHTML() { return '<a></a>'; } }) };
-  global.window = { location: { origin: 'https://x.local' } };
-  let rm;
-  try { rm = new Function(helpers + src.slice(i, end) + '; return renderMarkdown;')(); }
-  finally { global.document = savedDoc; global.window = savedWin; }
+  const { chromium } = require('playwright');
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
+  let mid, done;
+  try {
+    const page = await browser.newPage();
+    const result = await page.evaluate(code => {
+      const rm = new Function(code + '; return renderMarkdown;')();
+      return { mid: rm('说明：\n\n```js\nconst a = 1;'), done: rm('说明：\n\n```js\nconst a = 1;\n```') };
+    }, helpers + src.slice(i, end));
+    mid = result.mid; done = result.done;
+  } finally { await browser.close(); }
 
-  const mid = rm('说明：\n\n```js\nconst a = 1;');
-  const done = rm('说明：\n\n```js\nconst a = 1;\n```');
   assert.match(mid, /<pre><code>/, '流式中途就必须是代码块形态');
   assert.doesNotMatch(mid, /```/, '不得把裸反引号显示给用户');
   assert.match(done, /<pre><code>/, '闭合后仍是代码块形态');
@@ -142,7 +145,7 @@ test('正文增量淡入不重新包裹整个旧尾段', () => {
 
 test('新增文字动效限制延迟，不移动正文位置', () => {
   const css = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8');
-  assert.match(css, /aiTextFlow 220ms/);
+  assert.match(css, /aiTextFlow 180ms/);
   assert.match(css, /@keyframes aiTextFlow/);
   for (const source of [agentSrc, coreSrc]) assert.match(source, /Math\.min\(900, chars \* 3\)/);
 });

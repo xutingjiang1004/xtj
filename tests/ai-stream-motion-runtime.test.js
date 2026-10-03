@@ -181,3 +181,24 @@ for(const implementation of ['main','shared'])test(implementation+': all new run
   assert.deepEqual(result,{stable:true,ordered:true,filters:['none','none','none'],clean:true,quiet:0});
  }finally{await browser.close();}
 });
+
+for(const implementation of ['main','shared'])test(implementation+': completed glyph runs are retired during a long stream without replaying the paragraph',{timeout:30000},async()=>{
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(async kind=>{
+   const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);let maxRuns=0;
+   for(let i=0;i<110;i++){renderer.append('正文继续');renderer.flush();maxRuns=Math.max(maxRuns,output.querySelectorAll('.ai-stream-reveal').length);await new Promise(r=>setTimeout(r,16));}
+   const text=output.textContent;renderer.finish();await new Promise(r=>setTimeout(r,400));return{maxRuns,text,remaining:output.querySelectorAll('.ai-stream-reveal').length,queued:output.__aiRevealQueue.length};
+  },implementation);
+  assert.ok(result.maxRuns<32,JSON.stringify({maxRuns:result.maxRuns}));assert.equal(result.text,'正文继续'.repeat(110));assert.equal(result.remaining,0);assert.equal(result.queued,0);
+ }finally{await browser.close();}
+});
+for(const implementation of ['main','shared'])for(const hz of [60,120])test(implementation+': a '+hz+' Hz display permits a text update on every scheduled frame',async()=>{
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(({kind,hz,sharedSource})=>{
+   let sequence=0,time=1000;const frames=new Map();window.requestAnimationFrame=fn=>{frames.set(++sequence,fn);return sequence;};window.cancelAnimationFrame=id=>frames.delete(id);Date.now=()=>Math.floor(time);if(kind==='shared')window.eval(sharedSource);
+   const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);renderer.append('正文'.repeat(700));let changed=0,before='';
+   for(let i=1;i<=24;i++){const entry=frames.entries().next().value;frames.delete(entry[0]);time=1000+i*1000/hz;entry[1](time);if(output.textContent!==before)changed++;before=output.textContent;}
+   renderer.stop();return{changed,text:before};
+  },{kind:implementation,hz,sharedSource:fs.readFileSync('js/ai-core/stream-renderer.js','utf8')});assert.equal(result.changed,24);assert.ok(result.text.length>24);
+ }finally{await browser.close();}
+});

@@ -7526,8 +7526,8 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 @media (pointer:coarse) { .ai-msg-actions .ai-msg-act { min-height:44px; } }
 
 /* New glyph runs fade in without moving or repainting the preceding answer. */
-.ai-stream-reveal { animation:aiTextFlow 220ms ease-out var(--ai-reveal-delay,0ms) both; }
-@keyframes aiTextFlow { from { opacity:0; } to { opacity:1; } }
+.ai-stream-reveal { animation:aiTextFlow 180ms ease-out var(--ai-reveal-delay,0ms) both; }
+@keyframes aiTextFlow { from { opacity:.18; } to { opacity:1; } }
 .ai-msg-bubble.ai-streaming-soft,.ai-thinking-body.ai-streaming-soft,
 [data-theme="dark"] .ai-msg-bubble.ai-streaming-soft,[data-theme="dark"] .ai-thinking-body.ai-streaming-soft { opacity:1;filter:none; }
 @media (prefers-reduced-motion:reduce) { .ai-stream-reveal { animation:none; } }
@@ -7596,3 +7596,23 @@ html.xtj-ios-viewport.xtj-keyboard-open .ai-chat-input-bar { padding-bottom:8px!
 }
 .ai-select-pop-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .ai-select-pop-close:focus-visible { outline: 2px solid var(--ai-accent, #4fa68d); outline-offset: -4px; border-radius: 12px; }
+
+/* Rich replies own their paragraph spacing; raw user input retains its newlines. */
+.ai-msg.assistant .ai-msg-bubble,
+.ai-think-answer { white-space: normal; }
+.ai-msg.assistant .ai-msg-bubble > p,
+.ai-think-answer > p { margin: 0; }
+.ai-msg.assistant .ai-msg-bubble > :is(p,ul,ol,pre,table,h1,h2,h3,h4,h5,h6,blockquote) + :is(p,ul,ol,pre,table,h1,h2,h3,h4,h5,h6,blockquote),
+.ai-think-answer > :is(p,ul,ol,pre,table,h1,h2,h3,h4,h5,h6,blockquote) + :is(p,ul,ol,pre,table,h1,h2,h3,h4,h5,h6,blockquote) { margin-top: .7em; }
+.ai-msg.assistant .ai-msg-bubble > :first-child,
+.ai-think-answer > :first-child { margin-top: 0; }
+.ai-msg.assistant .ai-msg-bubble > :last-child,
+.ai-think-answer > :last-child { margin-bottom: 0; }
+.ai-msg.assistant .ai-msg-bubble li,
+.ai-think-answer li { margin-block: .2em; }
+.ai-msg.assistant .ai-msg-bubble pre,
+.ai-think-answer pre { white-space: pre; }
+.ai-msg.assistant .ai-msg-bubble code,
+.ai-think-answer code { white-space: pre-wrap; }
+.ai-msg-footer .ai-msg-agent-badge { font-size: 11px; line-height: 1.35; color: rgba(95,116,113,.72); }
+[data-theme="dark"] .ai-msg-footer .ai-msg-agent-badge { color: rgba(197,216,210,.72); }

@@ -1513,18 +1513,42 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return (whole.charAt(0) === '\n' ? '\n' : '') + html;
     });
     s = s.replace(/^- (.+)$/gm, '<li class="ul-item">$1</li>');
-    s = s.replace(/(<li class="ul-item">.*<\/li>\n?)+/g, function(m) {
-      return '<ul>' + m.replace(/ class="ul-item"/g, '') + '</ul>';
+    s = s.replace(/(<li class="ul-item">.*<\/li>(?:\n+(?=<li class="ul-item">)|\n)?)+/g, function(m) {
+      return '<ul>' + m.replace(/ class="ul-item"/g, '').replace(/\n+/g, '') + '</ul>';
     });
     s = s.replace(/^\d+\. (.+)$/gm, '<li class="ol-item">$1</li>');
-    s = s.replace(/(<li class="ol-item">.*<\/li>\n?)+/g, function(m) {
-      return '<ol>' + m.replace(/ class="ol-item"/g, '') + '</ol>';
+    s = s.replace(/(<li class="ol-item">.*<\/li>(?:\n+(?=<li class="ol-item">)|\n)?)+/g, function(m) {
+      return '<ol>' + m.replace(/ class="ol-item"/g, '').replace(/\n+/g, '') + '</ol>';
     });
-    s = s.replace(/\n/g, '<br>');
     // ★ 恢复代码块
     s = s.replace(/\x00XCB(\d+)\x00/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
-    // Incremental text runs own their reveal; markup stays identical at completion.
-    return s;
+    // Parse only the already-escaped markup. Paragraph boundaries belong to
+    // layout, rather than extra <br> rows around headings, lists and code.
+    var holder = document.createElement('div'); holder.innerHTML = s;
+    var output = document.createElement('div'), paragraph = document.createElement('p');
+    function flushParagraph() {
+      while (paragraph.firstChild && (paragraph.firstChild.nodeName === 'BR' ||
+        (paragraph.firstChild.nodeType === 3 && !paragraph.firstChild.data.trim()))) paragraph.firstChild.remove();
+      while (paragraph.lastChild && (paragraph.lastChild.nodeName === 'BR' ||
+        (paragraph.lastChild.nodeType === 3 && !paragraph.lastChild.data.trim()))) paragraph.lastChild.remove();
+      if (paragraph.childNodes.length) output.appendChild(paragraph);
+      paragraph = document.createElement('p');
+    }
+    Array.from(holder.childNodes).forEach(function(node) {
+      if (node.nodeType === 1 && /^(H[1-6]|UL|OL|TABLE|PRE|BLOCKQUOTE|HR)$/.test(node.nodeName)) {
+        flushParagraph(); output.appendChild(node); return;
+      }
+      if (node.nodeType !== 3) { paragraph.appendChild(node); return; }
+      node.data.split(/(\n[ \t]*\n+)/).forEach(function(part) {
+        if (/^\n[ \t]*\n/.test(part)) { flushParagraph(); return; }
+        part.split('\n').forEach(function(line, index) {
+          if (index && paragraph.childNodes.length) paragraph.appendChild(document.createElement('br'));
+          if (line && (line.trim() || paragraph.childNodes.length)) paragraph.appendChild(document.createTextNode(line));
+        });
+      });
+    });
+    flushParagraph();
+    return output.innerHTML;
   }
 
   function setupBubbleCopy(bubbleEl, containerEl) {
@@ -4144,6 +4168,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
       !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     var revealRuns = [];
+    var revealNow = window.performance && window.performance.now ? window.performance.now() : Date.now();
+    var revealQueue = targetEl.__aiRevealQueue || [];
+    var retired = 0;
+    while (retired < revealQueue.length && revealQueue[retired].__aiRevealAt + 180 <= revealNow) {
+      var previousRun = revealQueue[retired++];
+      if (!previousRun.parentNode) continue;
+      var text = document.createTextNode(previousRun.textContent);
+      previousRun.replaceWith(text);
+      if (text.previousSibling && text.previousSibling.nodeType === 3) {
+        text.previousSibling.data += text.data;
+        var merged = text.previousSibling; text.remove(); text = merged;
+      }
+      if (text.nextSibling && text.nextSibling.nodeType === 3) {
+        text.data += text.nextSibling.data; text.nextSibling.remove();
+      }
+    }
+    if (retired) revealQueue.splice(0, retired);
+    targetEl.__aiRevealQueue = revealQueue;
     function isReveal(node) { return node.nodeType === 1 && node.classList.contains('ai-stream-reveal'); }
     function isText(node) { return node && (node.nodeType === 3 || isReveal(node)); }
     function textPart(text) {
@@ -4182,7 +4224,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (!have) { parent.insertBefore(copy(want), parent.querySelector(':scope > .ai-stream-cursor')); return; }
         pos++;
-        if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.outerHTML === want.outerHTML)) return;
+        if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.isEqualNode(want))) return;
         var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
         if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
         if (same) children(have, want, depth + 1);
@@ -4203,6 +4245,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var spacing = duration / revealRuns.length;
         revealRuns.forEach(function(span, index) {
           span.__aiRevealAt = start + index * spacing;
+          revealQueue.push(span);
           span.style.setProperty('--ai-reveal-delay', Math.round(span.__aiRevealAt - now) + 'ms');
         });
         targetEl.__aiRevealUntil = start + duration;
@@ -4225,7 +4268,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // until the user explicitly resumes.
     var paused = !!S.paused;
     var streamClass = options.streamClass || 'ai-streaming-soft';
-    if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; }
+    if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; targetEl.__aiRevealQueue = []; }
     if (targetEl && !options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow', 'on');
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
@@ -4302,18 +4345,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         next = pending;
         pending = '';
       } else {
-        // V6: 流水跟包 — 积压时加速追赶，接近实时；仍按自然断点切块避免生硬
-        // ★ 2026-09-17 流动性优化（本轮重点）：
-        //   旧算法的问题在于「增速曲线」——积压首次超过 120 字符才允许加速，
-        //   而 48~120 之间只给 0.28 倍，16~48 只给固定 20 字符/帧。
-        //   实际观感：模型稳定输出时帧预算长期卡在 20 字符左右，
-        //   遇到 markdown 长段落（表格/列表/代码块）就显得一格一格地"顿"。
-        //   新算法改为：
-        //   ① 门槛下调到 64，让加速更早介入；
-        //   ② 系数提高（0.45→0.62 / 0.28→0.40），积压吸收更快、更接近实时；
-        //   ③ 新增「追平保护」：若积压按当前预算 3 帧内仍消化不完，
-        //      直接把预算提到 1/3 积压量，避免尾部越拖越长（用户感知为"卡住"）。
-        var frameBudget = Math.max(1, Math.floor(budget || 4), Math.ceil(pending.length / 20));
+        // Keep catch-up bounded so a large packet does not appear in one jump.
+        var frameBudget = Math.max(1, Math.floor(budget || 4), Math.min(32, Math.ceil(pending.length / 20)));
         var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
@@ -4331,16 +4364,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // 用 data 设置文本，高效
         try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
-        // ★ 2026-09-22 流式卡顿修复：
-        //   根因不是 Markdown 解析（实测 12000 字符仅 0.33ms），而是
-        //   `innerHTML = ...` 每帧重建整棵 DOM 子树 —— 正文越长节点越多，
-        //   每帧成本线性增长，观感就是"越回越卡、一块块跳"。
-        //   改为：整体渲染（正确性不变）+ 增量补丁落地（只动真正变化的节点），
-        //   每帧实际改动 O(1) 个节点，与全文长度无关。
-        //   成本降下来后，门限可从 90/140ms 收紧到 48/64ms，
-        //   让文字接近逐帧渗出 —— 这才是 Siri 那种连续流淌的观感来源。
+        // Reconcile only changed nodes on each scheduled display frame.
         var now = Date.now();
-        var _renderGap = rendered.length < 600 ? 0 : 16;
+        var _renderGap = 0; // requestAnimationFrame already limits each patch to a display frame.
         var shouldRender = (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending);
         if (shouldRender && !isSelectionInTarget(targetEl)) {
           patchInnerHTML(targetEl, renderMarkdown(rendered, true));
@@ -4442,6 +4468,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (selection && !selection.isCollapsed && completedTarget.contains(selection.anchorNode)) return;
           completedTarget.querySelectorAll('.ai-stream-reveal').forEach(function(span) { span.replaceWith(document.createTextNode(span.textContent)); });
           completedTarget.normalize();
+          completedTarget.__aiRevealQueue = [];
           completedTarget.removeAttribute('data-ai-flow');
         }, revealCleanupDelay);
         if (typeof options.onDone === 'function') {
