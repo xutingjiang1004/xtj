@@ -2816,6 +2816,41 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return '已完成' + (event.location ? ' · ' + String(event.location).slice(0, 100) : '');
   }
 
+  var toolResultListSeq = 0;
+  function populateToolResultDisclosure(card, event) {
+    var expanded = card.querySelector('button[aria-expanded="true"]');
+    var previousPanel = card.querySelector('.ai-search-detail');
+    var scrollTop = previousPanel ? previousPanel.scrollTop : 0;
+    card.replaceChildren(); card.classList.add('ai-tool-inline-result');
+    var items = Array.isArray(event.items) ? event.items : [];
+    card.hidden = !event.error && !items.length;
+    if (event.error) {
+      card.appendChild(el('div', {class:'ai-tool-result-error',text:String(event.error).slice(0,240)}));
+      return card;
+    }
+    var button=el('button',{type:'button',class:'ai-tool-result-card-title','aria-expanded':String(!!expanded)});
+    button.appendChild(document.createTextNode(toolResultFeedback(event)));
+    var arrow=el('span',{class:'ai-search-toggle','aria-hidden':'true',text:expanded?' ▾':' ▸'});button.appendChild(arrow);
+    var panel=el('div',{class:'ai-search-detail',id:'ai-tool-results-'+(++toolResultListSeq)});
+    panel.hidden=!expanded; panel.style.display='block'; button.setAttribute('aria-controls',panel.id);
+    if(event.query)panel.appendChild(el('div',{class:'ai-search-detail-query',text:'搜索：'+String(event.query).slice(0,240)}));
+    items.slice(0,10).forEach(function(item){
+      if(!item || typeof item!=='object')return;
+      var url=safeSearchUrl(item.url);if(!url)return;
+      var row=el('div',{class:'ai-search-detail-item'});
+      row.appendChild(el('a',{class:'ai-search-detail-title',href:url,target:'_blank',rel:'noopener noreferrer',text:String(item.title||url).slice(0,240)}));
+      if(item.snippet)row.appendChild(el('div',{class:'ai-search-detail-snippet',text:String(item.snippet).slice(0,200)}));
+      var meta=[safeSearchHost(url),item.source,item.published_at].filter(Boolean).join(' · ');
+      if(meta)row.appendChild(el('div',{class:'ai-search-detail-source',text:meta}));
+      panel.appendChild(row);
+    });
+    var total=Number.isInteger(event.items_total)&&event.items_total>0?event.items_total:items.length;
+    if(event.items_truncated || items.length>10)panel.appendChild(el('div',{class:'ai-search-detail-more',text:'共 '+total+' 条结果，此处展示其中 '+Math.min(items.length,10)+' 条'}));
+    button.onclick=function(e){e.stopPropagation();panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',String(!panel.hidden));arrow.textContent=panel.hidden?' ▸':' ▾';};
+    card.appendChild(button);card.appendChild(panel);panel.scrollTop=scrollTop;
+    return card;
+  }
+
   function toolDoneLabel(name) {
     var key = String(name || '');
     return TOOL_DONE_LABELS[key] || toolLabel(key);
@@ -3790,19 +3825,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? toolResultFeedback(tool) : tool.status === 'interrupted' ? '已中断' : '失败' }));
           if (tool.error) detail.appendChild(el('div', { class: 'ai-tool-result-error', text: String(tool.error).slice(0, 240) }));
           if (Array.isArray(tool.items) && tool.items.length) {
-            var results = el('details', { class: 'ai-tool-result-card ai-tool-inline-result' });
-            results.appendChild(el('summary', { class: 'ai-tool-result-card-title', text: toolResultFeedback(tool) }));
-            var historyList = el('div', { class:'ai-search-detail' });
-            tool.items.slice(0, 10).forEach(function(item) {
-              var url = safeSearchUrl(item.url);
-              if (!url) return;
-              var row = el('div', { class:'ai-search-detail-item' });
-              row.appendChild(el('a', { class: 'ai-search-detail-title', href: url, target: '_blank', rel: 'noopener noreferrer', text: String(item.title || item.url).slice(0, 240) }));
-              if (item.snippet) row.appendChild(el('div', { class:'ai-search-detail-snippet', text:String(item.snippet).slice(0,200) }));
-              row.appendChild(el('div', { class:'ai-search-detail-source', text:String(item.source || new URL(url).hostname) }));
-              historyList.appendChild(row);
-            });
-            results.appendChild(historyList);
+            var results = populateToolResultDisclosure(el('div', {class:'ai-tool-result-card'}), tool);
             detail.appendChild(results);
           }
           if (done) step.setAttribute('data-tool-summary', toolResultFeedback(tool));
@@ -4109,7 +4132,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var animate = targetEl.getAttribute('data-ai-flow') === 'on' &&
       document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
       !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    var revealCount = 0;
+    var revealCount = 0, newBlocks = [];
     function isReveal(node) { return node.nodeType === 1 && node.classList.contains('ai-stream-reveal'); }
     function isText(node) { return node && (node.nodeType === 3 || isReveal(node)); }
     function textPart(text) {
@@ -4117,11 +4140,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!animate || !text) { fragment.appendChild(document.createTextNode(text)); return fragment; }
       var chars = Array.from(text);
       for (var i = 0; i < chars.length;) {
-        var size = revealCount < 64 ? 24 : chars.length;
+        var size = revealCount < 96 ? 8 : chars.length;
         var span = document.createElement('span');
         span.className = 'ai-stream-reveal';
         span.textContent = chars.slice(i, i + size).join('');
-        span.style.setProperty('--ai-reveal-delay', Math.min(100, revealCount * 8) + 'ms');
+        span.style.setProperty('--ai-reveal-delay', Math.min(100, revealCount * 4) + 'ms');
         fragment.appendChild(span); revealCount++; i += size;
       }
       return fragment;
@@ -4129,6 +4152,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function copy(node) {
       if (node.nodeType === 3) return textPart(node.data);
       var clone = node.cloneNode(false);
+      if (animate && /^(P|LI|H[1-6]|BLOCKQUOTE)$/.test(clone.tagName)) newBlocks.push(clone);
       Array.from(node.childNodes).forEach(function(child) { clone.appendChild(copy(child)); });
       return clone;
     }
@@ -4159,6 +4183,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try {
       var holder = document.createElement('div'); holder.innerHTML = html;
       children(targetEl, holder, 0);
+      var blockSet = new Set(newBlocks);
+      newBlocks.filter(function(block) { for (var parent=block.parentElement;parent && parent!==targetEl;parent=parent.parentElement) if (blockSet.has(parent)) return false; return true; }).slice(0,48).forEach(function(block, index) {
+        if (typeof block.animate === 'function') block.animate([
+          { clipPath:'inset(0 0 100% 0)', opacity:0.35 },
+          { clipPath:'inset(0 0 0% 0)', opacity:1 }
+        ], { duration:220, delay:Math.min(64,index*12), easing:'cubic-bezier(.22,.7,.3,1)' });
+      });
     } catch (_) {
       targetEl.innerHTML = html;
     }
@@ -4292,7 +4323,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   成本降下来后，门限可从 90/140ms 收紧到 48/64ms，
         //   让文字接近逐帧渗出 —— 这才是 Siri 那种连续流淌的观感来源。
         var now = Date.now();
-        var _renderGap = rendered.length < 600 ? 48 : 64;
+        var _renderGap = rendered.length < 600 ? 0 : 16;
         var shouldRender = (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending);
         if (shouldRender && !isSelectionInTarget(targetEl)) {
           patchInnerHTML(targetEl, renderMarkdown(rendered, true));
@@ -4442,6 +4473,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         keyboardHeight = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
         viewportHeight = Math.max(280, Math.round(vv.height));
       }
+      if (document.documentElement.classList.contains('xtj-ios-viewport')) {
+        // The site shell already follows VisualViewport; a second fixed input
+        // offset would lift the composer and leave a keyboard-sized blank area.
+        inputBar.style.position = ''; inputBar.style.bottom = '';
+        inputBar.style.left = ''; inputBar.style.width = ''; inputBar.style.zIndex = '';
+        messagesEl.style.paddingBottom = '';
+        root.classList.toggle('ai-keyboard-open', document.documentElement.classList.contains('xtj-keyboard-open'));
+        updateRootVar('--ai-keyboard-offset', '0px'); updateRootVar('--ai-viewport-height', '100%');
+        updateInputMetrics(); return;
+      }
       // ★ U3: clamp keyboardHeight 防某些浏览器算出异常值
       var maxKb = Math.round(window.innerHeight * 0.6);
       if (keyboardHeight > maxKb) keyboardHeight = maxKb;
@@ -4506,7 +4547,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       S.keyboardResetTimer = setTimeout(function() {
         S.keyboardResetTimer = null;
-        if (!S.sending) resetViewport();
+        resetViewport();
       }, 100);
     };
     var onFocus = function() {
@@ -4519,6 +4560,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       vv.addEventListener('scroll', viewportHandler);
     }
     window.addEventListener('resize', viewportHandler);
+    window.addEventListener('xtj:visual-viewport-change', viewportHandler);
     input.addEventListener('blur', onBlur);
     input.addEventListener('focus', onFocus);
     applyViewport();
@@ -4534,6 +4576,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         vv.removeEventListener('scroll', viewportHandler);
       }
       window.removeEventListener('resize', viewportHandler);
+      window.removeEventListener('xtj:visual-viewport-change', viewportHandler);
       input.removeEventListener('blur', onBlur);
       input.removeEventListener('focus', onFocus);
       inputBar.style.position = '';
@@ -10395,18 +10438,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   否则新建并插到 matchStep 之后。matchStep 在轮次内时，卡片同样落进
             //   那个 .ai-tool-round-list，缩进与导轨自动对齐。
             var resultCard;
-            function fillResultCard(card) {
-              while (card.firstChild) card.removeChild(card.firstChild);
-              card.classList.add('ai-tool-inline-result');
-              card.hidden = !evt.error && !(Array.isArray(evt.items) && evt.items.length);
-              card.onclick = null; card.toggleFn = null;
-              card.removeAttribute('role'); card.removeAttribute('tabindex'); card.removeAttribute('aria-expanded');
-              if (!evt.error) card.appendChild(el('div', { class: 'ai-tool-result-card-title', text: toolResultFeedback(evt) }));
-              if (evt.error) {
-                card.appendChild(el('div', { class: 'ai-tool-result-error', text: String(evt.error).slice(0, 240) }));
-              }
-              return card;
-            }
+            function fillResultCard(card) { return populateToolResultDisclosure(card, evt); }
             // ★★★ 2026-09-28 修复（重复结果卡片）：
             //   原实现用 `matchStep.nextElementSibling` 判断"紧接着的下一条是否已是卡片"，
             //   但卡片实际被插到**整轮条目之后**（.ai-tool-round-list-wrap 的后面），
@@ -10492,83 +10524,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   **落在轮次容器之外** → 样式与轮次条目不一致，且收敛路径覆盖不到。
             //   现改为挂进统一活动区 body，与轮次同层级、共享同一套样式与折叠。
             toolProgressTick = 0;
-            // Expandable result list attaches to the result card
-            toolBar2 = resultCard;
-            var itemsArr = evt.items;
-            var queryStr2 = evt.query || '';
-            // ★★★ 2026-09-22 修复（P0「网页搜索/读网页显示超大板块」）：
-            //   旧判断 `itemsArr && itemsArr.length > 0` 对**字符串**同样成立
-            //   （字符串也有 .length），于是后端误把整段网页正文放进 items 时，
-            //   这里会把它当数组 .slice(0,10) 切出 10 个**字符**，
-            //   每个元素 url/title/snippet 全 undefined → 渲染成满屏碎片文字，
-            //   且 r2.snippet.slice(0,200) 直接抛异常（被外层 try 吞掉）。
-            //   修复：必须是**数组**才当作结果列表渲染；字符串/对象一律不渲染列表。
-            //   后端已同步加 normalizeToolResultItems 统一契约，这里再兜一层。
-            if (!Array.isArray(itemsArr)) itemsArr = null;
-            if (itemsArr && itemsArr.length > 0) {
-              var toggleBtn2 = el('span', { class: 'ai-search-toggle' }, ' ▸');
-              toolBar2.appendChild(toggleBtn2);
-              toolBar2.style.cursor = 'pointer';
-              toolBar2.setAttribute('role', 'button'); toolBar2.setAttribute('tabindex', '0');
-              toolBar2.setAttribute('aria-expanded', 'false');
-              if (!toolBar2.__keyBound) {
-                toolBar2.__keyBound = true;
-                toolBar2.addEventListener('keydown', function(event) { if ((event.key === 'Enter' || event.key === ' ') && event.target === this) { event.preventDefault(); this.click(); } });
-              }
-              var detailPanel2 = el('div', { class: 'ai-search-detail', style: 'display:none;' });
-              toolBar2.appendChild(detailPanel2);
-              if (queryStr2) {
-                detailPanel2.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr2 }));
-              }
-              var maxItems2 = 10; // 条目上限：避免后端异常/聚合返回上百条时一次性创建大量 DOM
-              var shown2 = itemsArr.slice(0, maxItems2);
-              for (var ri2 = 0; ri2 < shown2.length; ri2++) {
-                // 逐项做空值防御：任何一个字段缺失都不能让整段渲染崩掉或漏出 undefined
-                var r2 = shown2[ri2] || {};
-                var itemEl2 = el('div', { class: 'ai-search-detail-item' });
-                var linkEl2 = el('a', {
-                  class: 'ai-search-detail-title',
-                  href: safeSearchUrl(r2.url) || '#',
-                  target: '_blank',
-                  rel: 'noopener noreferrer',
-                  text: (r2.title && String(r2.title)) || (r2.url && String(r2.url)) || '无标题'
-                });
-                itemEl2.appendChild(linkEl2);
-                if (r2.snippet && typeof r2.snippet === 'string') {
-                  itemEl2.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r2.snippet.slice(0, 200) }));
-                }
-                // ★ 2026-09-28（方案 D）：域名前置，让"这条结果来自哪个站"一眼可见
-                var host2 = safeSearchHost(r2.url);
-                var meta2 = [host2, r2.source, r2.published_at].filter(function(v) { return !!v; }).join(' · ');
-                if (meta2) itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: meta2 }));
-                detailPanel2.appendChild(itemEl2);
-              }
-              // ★ 第三轮审计：后端此前静默截断（超过 12 条直接丢弃，前端无从得知）。
-              //   现在后端在 tool_result 事件里带 items_total / items_truncated，
-              //   这里如实提示，避免用户以为"就这么多结果"。
-              //   兼容旧后端：字段缺失时退回原有的本地长度推断，行为不变。
-              var totalKnown2 = (typeof evt.items_total === 'number' && evt.items_total > 0) ? evt.items_total : itemsArr.length;
-              if (evt.items_truncated === true) {
-                detailPanel2.appendChild(el('div', {
-                  class: 'ai-search-detail-more',
-                  text: '共 ' + totalKnown2 + ' 条结果，此处展示其中 ' + shown2.length + ' 条（其余已省略）'
-                }));
-              } else if (itemsArr.length > maxItems2) {
-                detailPanel2.appendChild(el('div', { class: 'ai-search-detail-more', text: '还有 ' + (itemsArr.length - maxItems2) + ' 条结果未显示' }));
-              }
-              (function(card, panel, arrow) {
-                card.toggleFn = function() {
-                  var opening = panel.style.display === 'none';
-                  panel.style.display = opening ? 'block' : 'none';
-                  arrow.textContent = opening ? ' ▾' : ' ▸';
-                  card.setAttribute('aria-expanded', String(opening));
-                };
-                card.onclick = function(e) {
-                  if (e.target.closest && e.target.closest('a')) return;
-                  card.toggleFn();
-                };
-              })(toolBar2, detailPanel2, toggleBtn2);
-            }
             followToolProgress(messagesEl, _aiUserPinnedUp);
             continue;
           }

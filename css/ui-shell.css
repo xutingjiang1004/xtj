@@ -3164,3 +3164,6 @@ html[data-xtj-motion="off"] #notificationContainer .notification-bubble { transi
 @media (pointer: coarse), (max-width: 767px) {
   input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable="true"] { font-size: 16px !important; }
 }
+/* Keyboard visibility changes the shell, never the Dock's geometry. */
+html.xtj-keyboard-open #dockBar { display:none!important; }
+html.xtj-ios-viewport.xtj-keyboard-open .dock-panel { padding-bottom:0!important; scroll-padding-bottom:0!important; }

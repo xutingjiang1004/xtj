@@ -2989,9 +2989,19 @@
                 cell.style.setProperty('--post-single-viewport-width', (ratio * 65) + 'vh');
             };
 
+            var expandedPostComments = new Set(), expandedCommentsOwner = currentUser;
+            function canOpenFeedPostDetail(post) {
+                return !!post && getPostMediaItems(post).filter(function(item) { return item.media_type === 'image'; }).length > 9;
+            }
+            window.showFeedPostComments = function(postId) {
+                var post = (feedAllPosts || []).find(function(p) { return String(p.id) === String(postId); });
+                if (canOpenFeedPostDetail(post)) { window.openPostDetail(postId); return; }
+                expandedPostComments.add(String(postId)); schedulePostCardPatch(postId);
+            };
+            if (typeof window.addEventListener === 'function') window.addEventListener('auth-ready', function() { if (expandedCommentsOwner !== currentUser) { expandedPostComments.clear(); expandedCommentsOwner = currentUser; } });
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
-                var limit = options && options.detail ? Infinity : 3;
+                var limit = (options && options.detail) || expandedPostComments.has(String(post.id)) ? Infinity : 3;
                 function commentDeleteButton(comment) {
                     if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
                     return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
@@ -3027,7 +3037,7 @@
                 var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
                 pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
-                if (pComms.length > _count) html += '<button type="button" class="post-all-comments" onclick="openPostDetail(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + pComms.length + ' 条评论</button>';
+                if (pComms.length > _count) html += '<button type="button" class="post-all-comments" onclick="showFeedPostComments(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + pComms.length + ' 条评论</button>';
                 return '<div class="comments">' + html + '</div>';
             }
             window.buildPostCommentsHtml = buildPostCommentsHtml;
@@ -4365,11 +4375,21 @@
                     return;
                 }
             });
+            var feedDetailGesture = null, suppressFeedDetailUntil = 0;
+            document.addEventListener('pointerdown', function(e) {
+                var card = e.target.closest && e.target.closest('#feed > .post-feed-item');
+                feedDetailGesture = card && e.pointerType === 'touch' ? {id:e.pointerId,x:e.clientX,y:e.clientY} : null;
+            }, {passive:true});
+            document.addEventListener('pointermove', function(e) {
+                if (feedDetailGesture && feedDetailGesture.id === e.pointerId && Math.hypot(e.clientX-feedDetailGesture.x,e.clientY-feedDetailGesture.y)>10) suppressFeedDetailUntil=Date.now()+400;
+            }, {passive:true});
+            document.addEventListener('pointercancel', function() { if(feedDetailGesture)suppressFeedDetailUntil=Date.now()+400;feedDetailGesture=null; }, {passive:true});
             document.addEventListener('click', function(e) {
                 var card = e.target.closest && e.target.closest('#feed > .post-feed-item');
-                if (!card || e.defaultPrevented || e.target.closest('button,a,input,textarea,select,video,audio,img,.actions,.comments,.inline-comment-box,.avatar,.avatar-wrap,.post-badge-stack')) return;
+                if (!card || Date.now()<suppressFeedDetailUntil || e.defaultPrevented || e.target.closest('button,a,input,textarea,select,video,audio,img,.actions,.comments,.inline-comment-box,.avatar,.avatar-wrap,.post-badge-stack')) return;
                 if (window.getSelection && String(window.getSelection()).trim()) return;
-                window.openPostDetail(card.getAttribute('data-post-id'));
+                var post = (feedAllPosts || []).find(function(p) { return String(p.id) === card.getAttribute('data-post-id'); });
+                if (canOpenFeedPostDetail(post)) window.openPostDetail(post.id);
             });
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') closePostToolsMenu();
