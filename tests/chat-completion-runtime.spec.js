@@ -728,3 +728,15 @@ for(const original of [false,true])test('chat static photo '+(original?'original
  await page.evaluate((original)=>{localStorage.setItem('xtj_dm_send_original',original?'1':'0');const NativeXHR=window.XMLHttpRequest;class XHR extends NativeXHR{open(method,url,...rest){this.mockUpload=url.includes('/api/dm/upload?');if(!this.mockUpload)super.open(method,url,...rest);}setRequestHeader(...args){if(!this.mockUpload)super.setRequestHeader(...args);}send(file){if(!this.mockUpload)return super.send(file);file.arrayBuffer().then(b=>{window.__compressedUpload={type:file.type,name:file.name,bytes:Array.from(new Uint8Array(b))};Object.defineProperty(this,'status',{value:200});Object.defineProperty(this,'responseText',{value:JSON.stringify({ok:true,storage_path:'chat/test.jpg',public_url:'https://example.invalid/sent.png'})});this.onload();});}}window.XMLHttpRequest=XHR;window.__chatSendDelay=10;},original);
  await page.locator('#dockChatFileInp').setInputFiles({name:'small.png',mimeType:'image/png',buffer:png});await page.locator('#dockChatSendBtn').click();await page.waitForFunction(()=>!!window.__compressedUpload);const upload=await page.evaluate(()=>window.__compressedUpload),bytes=Buffer.from(upload.bytes);if(original){expect(bytes.equals(png)).toBe(true);expect(upload.type).toBe('image/png');}else{expect(bytes.equals(png)).toBe(false);expect(upload.type).toBe('image/jpeg');expect((await require('sharp')(bytes).metadata()).width).toBe(1600);}
 });
+
+test('chat gallery renews an expired private image from authorized metadata without duplicating the message',async({page})=>{
+ await page.setViewportSize({width:390,height:844});await setup(page);await page.waitForTimeout(400);
+ const sharp=require('sharp'),image=await sharp({create:{width:900,height:1200,channels:3,background:'#769683'}}).jpeg().toBuffer();
+ await page.route('https://example.invalid/expired-image.jpg',r=>r.fulfill({status:403,body:'expired signature'}));
+ await page.route('https://example.invalid/renewed-image.jpg',r=>r.fulfill({contentType:'image/jpeg',body:image}));
+ await page.evaluate(({id,stamp})=>{const base=window.xtjProtectedFetch;window.xtjProtectedFetch=async(url,options)=>{
+  if(url.includes('/api/dm/messages'))return new Response(JSON.stringify({ok:true,data:[{id,user_name:'peer',media_url:'tester',created_at:stamp,content:JSON.stringify({media:{kind:'image',url:'https://example.invalid/expired-image.jpg',w:900,h:1200}})}]}));
+  if(url.includes('/history/search'))return new Response(JSON.stringify({ok:true,items:[{message_id:id,legacy_post_id:id,sent_at:stamp,payload:{media:{kind:'image',url:'https://example.invalid/renewed-image.jpg'}}}],has_more:false}));return base(url,options);
+ };window.openChat('peer');},{id,stamp});
+ await page.locator('.msg-img').click();await expect(page.locator('#chatGallery img')).toHaveAttribute('src','https://example.invalid/renewed-image.jpg');await expect(page.locator('#chatGallery img')).toHaveJSProperty('naturalWidth',900);await expect(page.locator('.chat-gallery-title')).toContainText('1 / 1');await page.locator('[data-gallery="close"]').click();await expect(page.locator('#chatGallery')).toHaveCount(0);
+});

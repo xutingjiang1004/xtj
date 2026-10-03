@@ -618,3 +618,11 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-slide-slot::before { conte
 @keyframes ppSprout { from { opacity:.35; transform:scale(.82); } to { opacity:1; transform:scale(1); } }
 @media (prefers-reduced-motion:reduce) { #photoPreviewOverlay .pp-leaf { animation:none; } }
 html[data-xtj-motion="off"] #photoPreviewOverlay .pp-leaf { animation:none; }
+
+#photoPreviewOverlay .pp-error-retry {
+  pointer-events: auto; min-height: 44px; padding: 10px 12px !important;
+  color: rgba(232,249,242,.9) !important; font-size: 14px;
+  background: transparent !important; border: 0 !important;
+  box-shadow: none !important; filter: none !important;
+}
+#photoPreviewOverlay .pp-error-retry:focus-visible { outline: 2px solid #a7d8c6; outline-offset: 2px; }

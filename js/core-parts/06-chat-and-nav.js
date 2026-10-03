@@ -4340,7 +4340,15 @@
                 async function loadOlder(moveBack){if(loading || !hasMore || closed)return;loading=true;paint();var active=items[current]?.id;
                     try{var result=await chatFeatureApi('history/search?peer='+encodeURIComponent(peer)+'&kind=image&limit=50'+(cursor?'&cursor_at='+encodeURIComponent(cursor.at)+'&cursor_id='+encodeURIComponent(cursor.id):''));
                         if(closed || owner!==window.currentUser || peer!==dockChatActiveUser)return;
-                        (result.items||[]).forEach(function(item){var media=item.payload && item.payload.media,url=media && sanitizeUrl(media.url);if(url && !items.some(function(i){return i.id===item.message_id || i.id===item.legacy_post_id;}))items.push({id:item.legacy_post_id || item.message_id,url:url,date:item.sent_at});});
+                        (result.items||[]).forEach(function(item){
+                            var media=item.payload && item.payload.media,url=media && sanitizeUrl(media.url);
+                            if(!url)return;
+                            var existing=items.find(function(i){return i.id===item.message_id || i.id===item.legacy_post_id;});
+                            // The authorized metadata page renews private URLs.
+                            // Deduplicating an image must not discard its fresh signature.
+                            if(existing){existing.url=url;existing.date=item.sent_at || existing.date;}
+                            else items.push({id:item.legacy_post_id || item.message_id,url:url,date:item.sent_at});
+                        });
                         items.sort(function(a,b){return Date.parse(a.date)-Date.parse(b.date);});current=Math.max(0,items.findIndex(function(i){return i.id===active;}));
                         hasMore=!!result.has_more && !!result.next_cursor_id;cursor={at:result.next_cursor_at,id:result.next_cursor_id};
                         if(moveBack && current>0)current--;

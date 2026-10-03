@@ -604,7 +604,7 @@
                     if (d._ppOrientationHandler) { window.removeEventListener("orientationchange", d._ppOrientationHandler); d._ppOrientationHandler = null; }
                 }
                 d._cleanupPreview = _ppCleanupFn, d.addEventListener("pointerdown", function(e) {
-                    var n = e.target, i = n.closest(".pp-story, .pp-comments-panel, .photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn"), a = n.closest(".pp-info-modal-content, .pp-download-confirm-content"), r = n.closest(".pp-info-modal, .pp-download-confirm-overlay"), l = E;
+                    var n = e.target, i = n.closest(".pp-story, .pp-comments-panel, .photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-error-retry"), a = n.closest(".pp-info-modal-content, .pp-download-confirm-content"), r = n.closest(".pp-info-modal, .pp-download-confirm-overlay"), l = E;
                     if (I && (clearTimeout(I), I = null), P && (clearTimeout(P), P = null), i || l) e.stopPropagation(); else if (a) e.stopPropagation(); else {
                         r && e.stopPropagation(), Date.now(), b = e.clientX, L = e.clientY, x = 0;
                         var d = e.pointerId, p = {
@@ -970,7 +970,11 @@
             J.style.borderRadius = ""), _.style.transition = "", (J && J._ppUrl !== S.imageUrl && O(b)), j(b), F(b), W && (W.style.transition = "",
             W.style.opacity = ""));
         }
-    }, window.closePhotoPreview = V, Q = function() {
+    }, window.closePhotoPreview = V, window.retryPhotoPreviewImage = function() {
+        var image = document.getElementById("photoPreviewImage");
+        if (!e || !t || !t.imageUrl || !image) return false;
+        D(image, t.imageUrl); return true;
+    }, Q = function() {
         var e = t;
         if (e) {
             var o = document.getElementById("ppInfoModal");

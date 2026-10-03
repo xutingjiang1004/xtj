@@ -4130,8 +4130,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     pending = String(pending || '');
     if (!pending) return '';
     // V6: 流水跟包默认更大块，减少「一顿一顿」
-    var minChunk = Math.max(1, options && options.minChunk || 6);
-    var maxChunk = Math.max(minChunk, options && options.maxChunk || 48);
+    var maxChunk = Math.max(1, options && options.maxChunk || 48);
+    var minChunk = Math.min(maxChunk, Math.max(1, options && options.minChunk || 6));
     if (pending.length <= maxChunk) return pending;
 
     var punctuation = /[，。！？；：?!.?:;\n]/;
@@ -4146,6 +4146,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     }
 
+    if (/[\uD800-\uDBFF]/.test(pending.charAt(maxChunk - 1)) && /[\uDC00-\uDFFF]/.test(pending.charAt(maxChunk))) maxChunk++;
     return pending.slice(0, maxChunk);
   }
 
@@ -4164,95 +4165,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
      安全网：任何异常 / 结构异常（节点数骤减等）都回退整段替换，保证显示正确。 */
   function patchInnerHTML(targetEl, html) {
     if (!targetEl) return;
-    var animate = targetEl.getAttribute('data-ai-flow') === 'on' &&
-      document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
-      !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    var revealRuns = [];
-    var revealNow = window.performance && window.performance.now ? window.performance.now() : Date.now();
-    var revealQueue = targetEl.__aiRevealQueue || [];
-    var retired = 0;
-    while (retired < revealQueue.length && revealQueue[retired].__aiRevealAt + 180 <= revealNow) {
-      var previousRun = revealQueue[retired++];
-      if (!previousRun.parentNode) continue;
-      var text = document.createTextNode(previousRun.textContent);
-      previousRun.replaceWith(text);
-      if (text.previousSibling && text.previousSibling.nodeType === 3) {
-        text.previousSibling.data += text.data;
-        var merged = text.previousSibling; text.remove(); text = merged;
-      }
-      if (text.nextSibling && text.nextSibling.nodeType === 3) {
-        text.data += text.nextSibling.data; text.nextSibling.remove();
-      }
-    }
-    if (retired) revealQueue.splice(0, retired);
-    targetEl.__aiRevealQueue = revealQueue;
-    function isReveal(node) { return node.nodeType === 1 && node.classList.contains('ai-stream-reveal'); }
-    function isText(node) { return node && (node.nodeType === 3 || isReveal(node)); }
-    function textPart(text) {
-      var fragment = document.createDocumentFragment();
-      if (!animate || !text) { fragment.appendChild(document.createTextNode(text)); return fragment; }
-      var chars = Array.from(text);
-      for (var i = 0; i < chars.length;) {
-        var size = Math.max(4, Math.ceil(chars.length / Math.max(1, 256 - revealRuns.length)));
-        var span = document.createElement('span');
-        span.className = 'ai-stream-reveal';
-        span.textContent = chars.slice(i, i + size).join('');
-        revealRuns.push(span);
-        fragment.appendChild(span); i += size;
-      }
-      return fragment;
-    }
-    function copy(node) {
-      if (node.nodeType === 3) return textPart(node.data);
-      var clone = node.cloneNode(false);
-      Array.from(node.childNodes).forEach(function(child) { clone.appendChild(copy(child)); });
-      return clone;
-    }
     function children(parent, wanted, depth) {
       var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
       var pos = 0;
       Array.from(wanted.childNodes).forEach(function(want) {
-        var have = old[pos];
-        if (want.nodeType === 3 && isText(have)) {
-          var run = [], content = '';
-          while (isText(old[pos])) { run.push(old[pos]); content += old[pos].textContent; pos++; }
-          if (want.data === content) return;
-          var after = run[run.length - 1].nextSibling;
-          if (want.data.indexOf(content) === 0) parent.insertBefore(textPart(want.data.slice(content.length)), after);
-          else { parent.insertBefore(textPart(want.data), run[0]); run.forEach(function(n) { n.remove(); }); }
-          return;
-        }
-        if (!have) { parent.insertBefore(copy(want), parent.querySelector(':scope > .ai-stream-cursor')); return; }
-        pos++;
+        var have = old[pos++];
+        if (!have) { parent.insertBefore(want.cloneNode(true), parent.querySelector(':scope > .ai-stream-cursor')); return; }
         if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.isEqualNode(want))) return;
+        if (have.nodeType === 3 && want.nodeType === 3) { have.data = want.data; return; }
         var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
         if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
         if (same) children(have, want, depth + 1);
-        else parent.replaceChild(copy(want), have);
+        else parent.replaceChild(want.cloneNode(true), have);
       });
       for (; pos < old.length; pos++) if (old[pos].parentNode === parent) old[pos].remove();
     }
     try {
       var holder = document.createElement('div'); holder.innerHTML = html;
       children(targetEl, holder, 0);
-      // One clock for all newly arrived runs, in DOM reading order. Paragraph
-      // clipping used a separate clock and could expose later lines first.
-      if (revealRuns.length) {
-        var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
-        var start = Math.max(now, targetEl.__aiRevealUntil || 0);
-        var chars = revealRuns.reduce(function(total, span) { return total + span.textContent.length; }, 0);
-        var duration = Math.min(900, chars * 3);
-        var spacing = duration / revealRuns.length;
-        revealRuns.forEach(function(span, index) {
-          span.__aiRevealAt = start + index * spacing;
-          revealQueue.push(span);
-          span.style.setProperty('--ai-reveal-delay', Math.round(span.__aiRevealAt - now) + 'ms');
-        });
-        targetEl.__aiRevealUntil = start + duration;
-      }
-    } catch (_) {
-      targetEl.innerHTML = html;
-    }
+    } catch (_) { targetEl.innerHTML = html; }
   }
 
   function createSmoothTextRenderer(targetEl, options) {
@@ -4263,13 +4194,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var rafId = 0;
     var cancelled = false;
     var finished = false;
+    var drainState = null;
+    function settleDrain(ok) {
+      var state = drainState; drainState = null;
+      if (!state) return;
+      if (state.signal) state.signal.removeEventListener('abort', state.abort);
+      state.resolve(ok);
+    }
     // A renderer can be created after the global pause button was pressed.
     // Inherit that state so the next streamed chunk cannot restart animation
     // until the user explicitly resumes.
     var paused = !!S.paused;
     var streamClass = options.streamClass || 'ai-streaming-soft';
-    if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; targetEl.__aiRevealQueue = []; }
-    if (targetEl && !options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow', 'on');
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
 
@@ -4346,7 +4282,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         pending = '';
       } else {
         // Keep catch-up bounded so a large packet does not appear in one jump.
-        var frameBudget = Math.max(1, Math.floor(budget || 4), Math.min(32, Math.ceil(pending.length / 20)));
+        var frameBudget = Math.min(32, Math.max(1, Math.floor(budget || 4), Math.ceil(pending.length / 20)));
         var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
@@ -4395,6 +4331,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var budget = Math.max(1, Math.floor(Math.min(40, elapsed || 16) * charsPerMs));
       emitText(false, budget);
       if (pending) schedule();
+      else if (drainState) api.finish(drainState.finalText);
     }
 
     function schedule() {
@@ -4422,6 +4359,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (cancelled || !targetEl) return;
         clearFrame();
         emitText(true);
+        if (drainState) api.finish(drainState.finalText);
       },
       pause: function() {
         paused = true;
@@ -4433,6 +4371,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (pending) schedule();
       },
       isPaused: function() { return paused; },
+      drain: function(finalText, signal) {
+        if (cancelled || !targetEl) return Promise.resolve(false);
+        if (drainState) return drainState.promise;
+        if (finished) return Promise.resolve(true);
+        var final = typeof finalText === 'string' && finalText.length ? finalText : rendered + pending;
+        // A sanitized replacement must take effect immediately. Only an unseen
+        // suffix can follow the existing stream without replaying old text.
+        if (final.indexOf(rendered) !== 0 || reducedMotion || !final) {
+          api.finish(final); return Promise.resolve(true);
+        }
+        pending = final.slice(rendered.length); paused = false;
+        if (!pending) { api.finish(final); return Promise.resolve(true); }
+        var state = { finalText: final, signal: signal, resolve: null, abort: function() { api.stop(); } };
+        state.promise = new Promise(function(resolve) { state.resolve = resolve; });
+        drainState = state;
+        if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
+        if (signal) {
+          if (signal.aborted) { api.stop(); return state.promise; }
+          signal.addEventListener('abort', state.abort, { once: true });
+        }
+        schedule(); return state.promise;
+      },
       finish: function(finalText) {
         var idx = S.activeRenderers.indexOf(api);
         if (idx !== -1) S.activeRenderers.splice(idx, 1);
@@ -4459,21 +4419,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (typeof options.onRender === 'function') {
           try { options.onRender(rendered); } catch (e3) {}
         }
-        var completedTarget = targetEl, completedEpoch = targetEl.__aiFlowEpoch;
-        var completedNow = window.performance && window.performance.now ? window.performance.now() : Date.now();
-        var revealCleanupDelay = Math.max(300, Math.ceil((targetEl.__aiRevealUntil || 0) - completedNow) + 250);
-        setTimeout(function() {
-          if (!completedTarget || !completedTarget.isConnected || completedTarget.__aiFlowEpoch !== completedEpoch) return;
-          var selection = window.getSelection && window.getSelection();
-          if (selection && !selection.isCollapsed && completedTarget.contains(selection.anchorNode)) return;
-          completedTarget.querySelectorAll('.ai-stream-reveal').forEach(function(span) { span.replaceWith(document.createTextNode(span.textContent)); });
-          completedTarget.normalize();
-          completedTarget.__aiRevealQueue = [];
-          completedTarget.removeAttribute('data-ai-flow');
-        }, revealCleanupDelay);
         if (typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}
         }
+        settleDrain(true);
       },
       stop: function() {
         if (cancelled) return;
@@ -4484,12 +4433,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (streamClass && targetEl) targetEl.classList.remove(streamClass);
         var stopIndex = S.activeRenderers.indexOf(api);
         if (stopIndex !== -1) S.activeRenderers.splice(stopIndex, 1);
+        settleDrain(false);
       },
       cancel: function() {
         var idx2 = S.activeRenderers.indexOf(api);
         if (idx2 !== -1) S.activeRenderers.splice(idx2, 1);
         if (cancelled) return;
         cancelled = true;
+        settleDrain(false);
         api.isCancelled = true;
         clearFrame();
         removeCursor();
@@ -6778,7 +6729,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function _resetIdle() { _lastDataTime = Date.now(); }
 
     // SSE 事件处理函数
-    function _handleSseEvent(evt) {
+    async function _handleSseEvent(evt) {
       if (S._dtCurrentReqId !== reqId) { if (abortedRef) abortedRef.value = true; return; }
 
         if (evt.type === 'meta') {
@@ -6911,6 +6862,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // deep 通道渲染器调用 cancel()（清空 DOM、置 targetEl=null），若先执行，
           // 后续 finishThinkCard 里 answerRenderer.finish() 因已取消而空操作，
           // 已流式渲染的最终答案会被清空且不再重绘（答案区空白）。
+          clearInterval(_idleCheckTimer);
+          var answerTarget = aiNodeRef.value && aiNodeRef.value.querySelector('.ai-think-answer');
+          if (answerTarget && !answerRendererRef.value) answerRendererRef.value = createSmoothTextRenderer(answerTarget, { channel: 'deep' });
+          if (answerRendererRef.value) {
+            var deepDrained = await answerRendererRef.value.drain(aiContentRef.value, controller.signal);
+            if (!deepDrained || S._dtCurrentReqId !== reqId || controller.signal.aborted || aiNodeRef.value.isConnected === false) return;
+          }
           finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
           resetActiveRenderersByChannel('deep');
           if (typeof opts.onSuccess === 'function') { try { opts.onSuccess(evt); } catch (eSuccess) {} }
@@ -6962,7 +6920,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (eEventStr.length > MAX_EVENT_SIZE) continue;
               var eEvt;
               try { eEvt = JSON.parse(eEventStr); } catch (ex) { continue; }
-              if (eEvt) _handleSseEvent(eEvt);
+              if (eEvt) await _handleSseEvent(eEvt);
             }
           }
           buffer = '';
@@ -6997,7 +6955,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           continue;
         }
         if (!evt) continue;
-        _handleSseEvent(evt);
+        await _handleSseEvent(evt);
       }
 
       if (doneReceivedRef && doneReceivedRef.value) return;
@@ -9468,7 +9426,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           //   （浅色 #223130 / 深色 #edf2ef），这里之前写死 '#1f2937' 会覆盖暗色模式变量，
           //   导致深色背景下回复文字对比度不足看不清。
           assistantBubble.style.removeProperty('color');
-          assistantBubble.style.fontSize = '14px';
+          // Responsive CSS owns the font throughout the reply. A completion-only
+          // inline size would rewrap every mobile paragraph at the last frame.
+          assistantBubble.style.removeProperty('font-size');
         }
         setAiRootState('ai-idle');
         
@@ -10759,7 +10719,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'done') {
             hideAssistantTyping();
-            S.sending = false;
             S.paused = false;
             // ★★ 2026-09-29（审计 M11「done 先取消渲染器致气泡清空，长回复收尾闪一下」）：
             //   现象：一条长回复写到最后时，气泡内容瞬间消失再整段重绘（"闪一下"），
@@ -10770,7 +10729,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   的兜底重绘 —— 中间存在一帧空气泡。
             //   修法：把渲染器清理**挪到 finishAiMessage 之后**；finish() 已把最终内容
             //   写进气泡并置 finished=true，此后的 cancel() 不会再清空 DOM。
-            S.abortController = null;
             if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             if (thinkingTimer) {
@@ -10814,8 +10772,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             
             if (assistantNode) {
               ensureAssistantBubbleReady();
+              clearInterval(_idleCheckTimer);
+              var drained = await contentRenderer.drain(aiContent, controller.signal);
+              if (S._currentReqId !== reqId || assistantNode.isConnected === false) return;
+              if (!drained || controller.signal.aborted) throw new DOMException('Reply cancelled', 'AbortError');
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
             }
+            S.sending = false;
+            S.abortController = null;
             // ★ 2026-09-29（审计 M11，接上方注释）：收尾渲染完成后再清理渲染器，
             //   避免"先清空气泡再兜底重绘"造成的收尾闪烁。
             resetActiveRenderersByChannel('chat');
