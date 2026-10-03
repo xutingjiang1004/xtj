@@ -104,3 +104,18 @@ for(const viewport of [{width:390,height:844},{width:1024,height:768},{width:144
  assert.notEqual(closing.transform,'none');assert.ok(closing.frames[1].includes('scale('));
  await p.evaluate(()=>document.getElementById('ppImageWrapper').getAnimations()[0].finish());await p.waitForFunction(()=>!document.getElementById('photoPreviewOverlay').classList.contains('active'));
 });
+
+test('photo root fades over unchanged page paint and Dock without premature close cleanup', async t => {
+ const p=await pageFor(t,'<html class="xtj-photo-preview-ready"><body style="background:rgb(12,34,56)"><header id="top">顶部</header><nav id="dockBar" class="dock-bar">导航</nav><div id="photoGrid"><div class="photo-wall-item" data-photo-id="0"><img id="origin" style="position:absolute;left:30px;top:50px;width:180px;height:90px"></div></div></body></html>');
+ for(const path of ['css/style.css','css/ui-shell.css','css/photo-preview.css'])await p.addStyleTag({path});
+ await p.evaluate(()=>{window.currentUser='A';window.isAdmin=()=>false;window.sanitizeUrl=s=>s;window.escapeHtml=String;const c=document.createElement('canvas');c.width=200;c.height=100;c.getContext('2d').fillRect(0,0,200,100);window.photos=[{id:'0',username:'A',imageUrl:c.toDataURL(),width:200,height:100}];origin.src=photos[0].imageUrl;window.readPaint=()=>[getComputedStyle(document.body).backgroundColor,getComputedStyle(dockBar).display,getComputedStyle(dockBar).opacity,getComputedStyle(dockBar).visibility,getComputedStyle(document.querySelector('.photo-wall-item')).opacity];window.paintBefore=readPaint();});
+ for(const path of ['js/photo-wall/preview.js','js/photo-wall/preview-hotfix.js'])await p.addScriptTag({path});
+ await p.evaluate(()=>openPhotoPreview(0,{photos,originEl:origin}));
+ assert.deepEqual(await p.evaluate(()=>readPaint()),await p.evaluate(()=>paintBefore));
+ await p.waitForTimeout(320);
+ const closing=await p.evaluate(()=>{closePhotoPreview();var root=photoPreviewOverlay,wrap=ppImageWrapper;var rootMotion=root.getAnimations()[0],wrapMotion=wrap.getAnimations()[0];rootMotion.pause();rootMotion.currentTime=120;wrapMotion.finish();return {root:root.classList.contains('active'),opacity:getComputedStyle(root).opacity};});
+ assert.equal(closing.root,true);assert.ok(Number(closing.opacity)>0&&Number(closing.opacity)<1);
+ await p.waitForTimeout(30);assert.equal(await p.locator('#photoPreviewOverlay').evaluate(n=>n.classList.contains('active')),true);
+ await p.evaluate(()=>photoPreviewOverlay.getAnimations()[0].finish());await p.waitForFunction(()=>!photoPreviewOverlay.classList.contains('active'));
+ assert.deepEqual(await p.evaluate(()=>readPaint()),await p.evaluate(()=>paintBefore));assert.equal(await p.locator('#photoPreviewOverlay').evaluate(n=>n.getAnimations().length),0);
+});

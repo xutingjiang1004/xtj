@@ -129,39 +129,28 @@ test('未闭合围栏的渲染结果必须与已闭合同形态（无跳变）',
     '中途与闭合必须同形态，避免跳变');
 });
 
-/* ── C) 软揭示：新到达的文字要"渗"进来，不是"跳"进来 ─────────────────
-   背景（2026-09-22 实测）：
-     CSS 原本靠 `.ai-streaming-soft > :last-child` 做新块浮起，但
-     renderMarkdown 的输出里**根本没有 <p>**（段落是裸文本 + <br>），
-     所以那条规则基本从未生效；且增量补丁不重建未变节点，
-     一次性入场动画也不会重放。
-   修复：流式期间由 renderMarkdown 把**纯文本尾巴**包成 .ai-stream-soft；
-     内容一变，该 span 就是新节点 → 动画必定重放。
-     只在纯文本尾巴上包裹，绝不横跨 </ul>/</pre> 等块边界。 */
-test('流式期间必须产出软揭示标记，最终态必须干净', () => {
-  assert.match(agentSrc, /function renderMarkdown\(txt, streaming\)/,
-    'renderMarkdown 必须接受 streaming 参数以区分流式/最终态');
-  assert.match(agentSrc, /class="ai-stream-soft"/, '流式期间必须产出软揭示标记');
-  // 渲染调用点必须传 streaming=true
-  assert.match(agentSrc, /renderMarkdown\(rendered, true\)/,
-    '正文流式渲染必须传 streaming=true');
+// Animate only appended text. Markdown must keep the same structure at completion.
+test('正文增量淡入不重新包裹整个旧尾段', () => {
+  for (const source of [agentSrc, coreSrc]) {
+    assert.match(source, /function isReveal/);
+    assert.match(source, /className = 'ai-stream-reveal'/);
+    assert.match(source, /document.createTextNode/);
+    assert.match(source, /__aiFlowEpoch !== completedEpoch/);
+  }
+  assert.doesNotMatch(agentSrc, /class="ai-stream-soft"/);
 });
 
-test('软揭示只得包裹纯文本尾巴（绝不横跨块级边界）', () => {
-  const c = agentSrc; // 便于阅读
-  // 必须是"末尾纯文本"判定：从最后一个 '>' 之后取尾巴，且尾巴不含 '<'
-  assert.match(c, /lastIndexOf\('>'\)/, '必须通过最后一个标签闭合定位尾巴');
-  assert.match(c, /tail\.indexOf\('<'\) < 0/, '尾巴必须不含标签（否则会横跨块边界）');
+test('新增文字动效限制延迟，不移动正文位置', () => {
+  const css = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8');
+  assert.match(css, /aiTextFlow 180ms/);
+  assert.match(css, /@keyframes aiTextFlow/);
+  for (const source of [agentSrc, coreSrc]) assert.match(source, /Math\.min\(100/);
 });
 
-test('软揭示必须受 reduced-motion 与动效开关管控', () => {
-  const i = cssEnhance.indexOf('.ai-stream-soft');
-  assert.ok(i > 0, 'ui-enhance.css 必须定义 .ai-stream-soft');
-  // reduced-motion 块必须覆盖它
-  assert.match(cssEnhance, /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,400}ai-stream-soft/,
-    'reduced-motion 必须关掉软揭示');
-  assert.match(cssEnhance, /data-xtj-motion=off[\s\S]{0,400}ai-stream-soft/,
-    '动效开关 off 必须关掉软揭示');
+test('正文淡入受系统及站内关闭动效设置管控', () => {
+  const css = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8');
+  assert.match(css, /@media \(prefers-reduced-motion:reduce\).*ai-stream-reveal/);
+  assert.match(css, /data-xtj-motion="off".*ai-stream-reveal/);
 });
 
 test('流式光标必须是流动渐变（不是整根明暗呼吸）', () => {

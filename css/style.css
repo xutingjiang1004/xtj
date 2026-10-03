@@ -2783,10 +2783,8 @@
         }
         body.photo-previewing .dock-bar,
         body.photo-previewing #dockBar {
-            display: none !important;
-            opacity: 0;
-            visibility: hidden;
-            transform: translateY(22px);
+            /* The fullscreen preview covers the Dock. Keep its painted state
+               intact underneath the fade, rather than removing it from layout. */
             pointer-events: none;
         }
 
@@ -3075,7 +3073,6 @@
             overflow: hidden !important;
             width: 100% !important;
             max-width: 100% !important;
-            background: #000 !important;
         }
         .dock-tab {
             flex: 1;

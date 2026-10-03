@@ -800,7 +800,7 @@
                     G && G.width > 0 && G.height > 0 && (D = G, W = K);
                 }
             }
-            _._openOrigin = D, _._openOriginImg = W, W && (W.style.transition = "none", W.style.opacity = "0"),
+            _._openOrigin = D, _._openOriginImg = W,
             _.classList.add("active"), document.body.classList.add("photo-previewing"), _.style.opacity = "1",
             M(), s && (s.style.transition = "none", s.style.transform = "translateX(" + -a + "px)");
             j(b), F(b);

@@ -123,10 +123,10 @@ test('沙箱：实现内部保留关键安全护栏', () => {
 });
 
 test('工作模式：system prompt 注入含工作模式指令与沙箱提示', () => {
-  assert.match(serverSrc, /【工作模式】/);
+  assert.match(serverSrc, /【普通聊天工具能力】/);
   assert.match(serverSrc, /run_code（在强隔离沙箱里跑 JavaScript/);
   // 两条聊天路径均应注入
-  const cnt = (serverSrc.match(/【工作模式】/g) || []).length;
+  const cnt = (serverSrc.match(/【普通聊天工具能力】/g) || []).length;
   assert.ok(cnt >= 2, '工作模式 prompt 应注入到两条聊天路径，实际: ' + cnt);
 });
 
@@ -175,5 +175,5 @@ test('工作模式：工具轮数提升到 8 且保留硬上限', () => {
 test('工作模式：绕过关键词意图预判', () => {
   // ★ 2026-09-21：去掉 !useThinking 限制——工作模式 + 思考也不允许"零工具裸跑"，
   //   否则模型只能在正文里输出 DSML 协议文本假装调用（截图实证的 P0）。
-  assert.match(serverSrc, /if \(workModeEnabled && !aborted\) needsFcCheck = true;/);
+  assert.match(serverSrc, /apiBody\.tools = aiToolsForWorkMode\(\);/);
 });

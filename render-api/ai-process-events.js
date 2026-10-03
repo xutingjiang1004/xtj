@@ -52,6 +52,9 @@ function appendProcessEvent(res, event) {
   if (!tool || event.type === 'tool_pending') return;
   tool.status = event.type === 'tool_result' && event.success === true && !event.error ? 'done' : 'error';
   if (event.error) tool.error = String(event.error).slice(0, 240);
+  if (event.summary) tool.summary = String(event.summary).slice(0, 160);
+  if (Number.isInteger(event.count) && event.count >= 0) tool.count = event.count;
+  if (Number.isInteger(event.items_total) && event.items_total >= 0) tool.items_total = event.items_total;
   if (Array.isArray(event.items)) tool.items = event.items.slice(0, 10).map(item => ({
     title: String(item && item.title || '').slice(0, 240),
     url: String(item && item.url || '').slice(0, 2048),

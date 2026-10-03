@@ -192,18 +192,18 @@ function findResponsesToolExecutor() {
 test('体验：工具结果含 cards 时下发 card 事件（A 档图表/文件可见）', () => {
   const te = findResponsesToolExecutor();
   assert.ok(te, '未找到 Responses 路径的 tool_executor');
-  assert.match(te.seg, /type: 'card', card: card/, 'Responses 的 tool_executor 内未下发工具卡片');
-  assert.match(te.seg, /type: 'tool_result'/, 'Responses 的 tool_executor 内未下发工具结果回执');
+  assert.match(te.seg, /type: 'card', call_id:/, 'Responses 的 tool_executor 内未下发工具卡片');
+  assert.match(te.seg, /toolFeedback\(tcResult/, 'Responses 的 tool_executor 内未下发工具结果回执');
 });
 
 test('体验：工具结果回执携带成功/失败与计数', () => {
   const te = findResponsesToolExecutor();
   assert.ok(te, '未找到 Responses 路径的 tool_executor');
-  const trIdx = te.seg.indexOf("type: 'tool_result'");
-  assert.ok(trIdx > -1, '未找到 tool_result 下发');
-  const trSeg = te.seg.slice(trIdx, trIdx + 800);
-  assert.match(trSeg, /success:/, 'tool_result 缺少 success 字段');
-  assert.match(trSeg, /count:/, 'tool_result 缺少 count 字段');
+  assert.match(te.seg, /toolFeedback\(tcResult, toolCall && toolCall\.id, normalizeToolResultItems/);
+  const feedback = require('../render-api/ai-tool-feedback').toolFeedback;
+  const event = feedback({tool_name:'search_web',results_count:5}, 'one', () => null);
+  assert.equal(event.success,true);assert.equal(event.count,5);assert.match(event.summary,/5/);
+  assert.equal(feedback({error:'失败'},'two',()=>null).success,false);
 });
 
 test('工作模式 prompt 覆盖 A 档可视化工具说明', () => {

@@ -245,9 +245,9 @@ test('后端：done 事件与落库元数据都带 work_mode 标记', () => {
   assert.match(serverSrcTop, /reqWorkMode: req\._workMode === true/, '各 finishStream 调用点应透传请求级 work_mode');
 });
 
-test('前端：工作模式徽标与工具调用计数已接线', () => {
-  assert.match(jsSrcTop, /ai-msg-work-badge/, '应有工作模式徽标样式类');
-  assert.match(jsSrcTop, /text: '工作模式'/, '徽标文案应为「工作模式」');
+test('前端：普通聊天保留工具次数，移除独立工作模式徽标', () => {
+  assert.doesNotMatch(jsSrcTop, /text: '工作模式'/);
+  assert.match(jsSrcTop, /workMode: true/);
   assert.match(jsSrcTop, /streamWorkMode/, '应追踪本次是否工作模式');
   assert.match(jsSrcTop, /streamToolCount/, '应统计工具调用次数');
   assert.match(jsSrcTop, /调用工具 ' \+ streamToolCount \+ ' 次'/, '应展示调用次数');
