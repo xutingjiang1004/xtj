@@ -2,6 +2,8 @@
 // ⚠️ 数据采集合规声明：本文件中的用户数据采集、IP解析、VPN检测、画像聚合等功能
 // 均已通过法律审核，用户已同意隐私条款。详见 DATA_COLLECTION_COMPLIANCE.js —— 请勿删除。
 const express = require('express');
+const { toolFeedback, runRequiredSearch } = require('./ai-tool-feedback');
+const { saveCustomChatTurn } = require('./ai-chat-save');
 
 const cors = require('cors');
 const crypto = require('crypto');
@@ -1720,7 +1722,11 @@ async function executeToolCall(toolCall, context) {
       if (swGate.degraded) { try { console.warn('[SEARCH-QUOTA] search_web fail-open (quota service unavailable)'); } catch (e) {} }
       try {
         var result = await searchWeb(q, maxR);
-        var resultsArr = result && result.results ? result.results : [];
+        var resultsArr = result && Array.isArray(result.results) ? result.results : [];
+        var searchDiagnostics = result && result.diagnostics;
+        if (!resultsArr.length && (result && result.error || searchDiagnostics && searchDiagnostics.provider_errors && searchDiagnostics.provider_errors.length && !(searchDiagnostics.provider_results || []).length)) {
+          return { tool_name: name, query: q, error: '搜索服务暂时不可用，请稍后重试' };
+        }
         var webItems = resultsArr.slice(0, 20).map(function(r) {
           var rawUrl = String(r.url || r.link || '');
           // URL 协议白名单：只保留 http/https，其余丢弃（防 javascript:/data: 直达前端）
@@ -22033,15 +22039,13 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
 
     // 6. 组装 system prompt
     var corePrompt = buildAiCorePrompt(config);
-    // ★ 工作模式（work_mode）：请求级开关，普通聊天在当前对话框直接切换（非独立页面）。
-    //   与 deep_think 深度研究严格区分：工作模式=真的动手完成任务，研究=出报告。
-    var workModeEnabled = !!(req.body && req.body.work_mode === true);
-    // ★ 挂到 req 上供 finishStream 读取：需要在 done 事件与落库元数据里标记本次为工作模式，
-    //   使前端能显示「工作模式」徽标（否则用户开了开关却看不出任何区别）。
+    // 普通聊天默认开放工具；旧 work_mode 字段仅作协议兼容。
+    var workModeEnabled = true; // Ordinary chat always has autonomous tools.
+    // 保留旧响应字段，兼容已有客户端；界面不再区分工作模式。
     req._workMode = workModeEnabled;
     if (workModeEnabled) {
       corePrompt += '\n' + [
-        '【工作模式】你现在处于工作模式，必须真正动手完成用户交代的任务，而不是给出建议、思路或研究报告。工作方法：',
+        '【普通聊天工具能力】按需自主拆解任务并调用工具完成，简单闲聊直接回答。工作方法：',
         '① 先判断任务需要哪些步骤，可多步按顺序推进，不要只做一步就交差；',
         '② 查资料用 web_search / web_extract（web_extract 能抓网页正文，比摘要更全）；搜社媒账号或内容用 search_social；',
         '③ 读文档用 read_document（支持 PDF / Word / Excel / CSV / TXT，传文件链接即可，会返回正文或表格内容）；',
@@ -22111,17 +22115,19 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
     //   避免 Responses API 省略 reasoning 参数导致推理模型仍默认思考，同时响应更快。
     //   第三方搜索受日额度约束：用尽后关闭第三方搜索，仅保留模型内置 web_search。
     var useTavilyCluster = thirdPartySearchOk && (webSearchPref === true);
-    var useBuiltInSearch = (webSearchPref === true);
-    var webSearchEnabled = (webSearchPref === true);
-    if (useBuiltInSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
-      // ★ 网页搜索改造：Responses API 目前仅支持 V4 Flash Vision，强制回退避免 400
-      validatedModel = DEEPSEEK_RESPONSES_MODEL;
+    var useBuiltInSearch = webSearchPref === true && validatedModel === DEEPSEEK_RESPONSES_MODEL;
+    var webSearchEnabled = webSearchPref === true;
+    var requiredSearch = await runRequiredSearch({ enabled: webSearchEnabled, text: message, messages: messages, execute: executeToolCall, context: requestSearchCtx(req, userName), write: function() { return !aborted; }, normalizeItems: normalizeToolResultItems });
+    if (requiredSearch && !requiredSearch.error) {
+      var requiredItems = normalizeToolResultItems(requiredSearch.content, 12);
+      if (requiredItems) searchResultsCollected = searchResultsCollected.concat(requiredItems.items);
+      searchQueriesCollected.push(requiredSearch.query || message);
     }
     if (useBuiltInSearch && !aborted) {
       // Tavily 并行搜索
       var tavilyPromise = null;
       var tavilyResults = null;
-      if (useTavilyCluster) {
+      if (useTavilyCluster && !webSearchEnabled) {
         var tavilyQuery = message.slice(0, 150);
         tavilyPromise = searchWebForUser(userName, tavilyQuery, 20, req._searchApiCalls).then(function(r) {
           if (r && Array.isArray(r.results)) tavilyResults = r.results;
@@ -22254,12 +22260,12 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
       model: validatedModel,
       thinking_mode: thinkingMode,
       // ★ 搜索配额：额度用尽时过滤掉 search_web / tavily_search，避免模型调用第三方 API
-      tools: thirdPartySearchOk ? AI_TOOLS : AI_TOOLS.filter(function(t) {
+      tools: thirdPartySearchOk ? aiToolsForWorkMode() : aiToolsForWorkMode().filter(function(t) {
         var name = t && t.function ? t.function.name : '';
         return name !== 'search_web' && name !== 'tavily_search';
       }),
       tool_choice: 'auto',
-      max_tool_rounds: 4,
+      max_tool_rounds: 8,
       signal: requestAbortCtrl.signal,
       // ★ wrapper：拦截 search_web 的真实 results 数组
       tool_executor: async function(toolCall) {
@@ -22458,6 +22464,15 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   //   使上面的长度上限形同虚设（实际转发内容仅受全局 80mb body 限制）。
   //   validateString 成功时返回清洗后的字符串，直接复用即可。
   var text = message;
+  var customConvId = String(body.conversation_id || '').trim().slice(0, 100);
+  if (!/^[A-Z0-9\-]{6,}$/i.test(customConvId)) customConvId = genConvId();
+  writeSse(res, { type: 'meta', conversation_id: customConvId });
+  var customSiteCards = [];
+  function sendCustomCard(card, callId) {
+    var linked = Object.assign({}, card, { tool_call_id: callId });
+    if (customSiteCards.length < 32) customSiteCards.push(linked);
+    return writeSse(res, { type: 'card', call_id: callId, card: linked });
+  }
   if (!provider || !apiKey || !model || !text) {
     writeSse(res, { type: 'error', error: '缺少自定义模型参数，请重新配置' });
     return safeEnd();
@@ -22520,6 +22535,9 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
 
   var timeoutMs = Math.max(15000, Math.min(Number(body.timeout_ms) || 180000, 300000));
   var controller = new AbortController();
+  function abortCustomUpstream() { if (aborted) { try { controller.abort(); } catch (_) {} } }
+  req.on('aborted', abortCustomUpstream);
+  res.on('close', abortCustomUpstream);
   var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
   var reqId = String(body.client_request_id || '').slice(0, 64);
 
@@ -22545,16 +22563,6 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       }
     } else if (provider === 'qwen') {
       extra.enable_thinking = false; // 千问支持显式关闭思考
-    }
-    if (_webSearch) {
-      if (provider === 'qwen') {
-        // 千问兼容模式原生联网搜索
-        extra.enable_search = true;
-      } else if (provider === 'kimi') {
-        // Kimi(Moonshot) 内置联网搜索函数
-        extra.tools = [{ type: 'builtin_function', function: { name: '$web_search' } }];
-      }
-      // deepseek 等 chat/completions 无标准内置搜索参数：交由 Function Calling 工具兜底
     }
     return extra;
   }
@@ -22627,51 +22635,17 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     fwdMessages = built;
   }
 
-  // ★ 工具调用：仅当 tools_enabled 时挂载 Function Calling 工具。
-  var toolsEnabled = body.tools_enabled === true;
-  // ★★★ 2026-09-15 修复（P0-3「第三方模型无法调用系统工具」）：
-  //   旧实现用 CUSTOM_TOOL_NAMES 白名单只放行 9 个工具
-  //   （search_web / tavily_search / read_web_page / get_weather / get_current_time /
-  //     get_exchange_rate / get_stock_quote / calculate / convert_units），
-  //   而系统提示词（buildAiCorePrompt → CAT_AI_TOOL_SUMMARY）是**从全量 AI_TOOLS
-  //   动态生成**的，会向模型宣称"你有 35 个工具"。
-  //   结果：模型读到 35 个工具名，实际只收到 9 个定义 →
-  //   (a) search_social / run_code / read_document / make_file / make_chart /
-  //       task_plan 等 26 个工具彻底不可用；
-  //   (b) 模型对未下发的工具只能靠"幻觉"徒手写 XML 文本，于是
-  //       `<tool_calls><invoke name="search_social">` 这类原始协议文本
-  //       直接漏进正文，用户看到未解析的 XML。
-  //   修复：与官方链路对齐，工作模式下放开全量 35 个工具
-  //   （配额 gate 由 executeToolCall 在实际调用时处理并返回可读提示，
-  //     因此这里不做工具级裁剪是安全且语义正确的）。
+  // The same full, server-owned tool set is available to every chat model.
   var TOOL_ROUNDS_MAX = 10;
-  // 保留白名单常量仅供非工作模式（轻量对话）降级使用，避免一次性暴露全部工具。
-  var CUSTOM_TOOL_NAMES = {
-    search_web: 1, tavily_search: 1, read_web_page: 1,
-    get_weather: 1, get_current_time: 1, get_exchange_rate: 1,
-    get_stock_quote: 1, calculate: 1, convert_units: 1
-  };
-  // ★ 第三方链路读取 work_mode（此前全文零引用，导致工作模式对第三方模型完全失效：
-  //   不注入工作模式 prompt、不放开工具集、轮数固定为 6）。
-  var customWorkMode = body.work_mode === true;
-  function buildCustomTools() {
-    // 工作模式：返回完整工具集，语义与官方链路 aiToolsForWorkMode() 一致。
-    if (customWorkMode) return aiToolsForWorkMode();
-    var out = [];
-    for (var tI = 0; tI < AI_TOOLS.length; tI++) {
-      var t = AI_TOOLS[tI];
-      var nm = t && t.function && t.function.name;
-      if (nm && CUSTOM_TOOL_NAMES[nm]) out.push(t);
-    }
-    return out;
-  }
-  var customTools = toolsEnabled ? buildCustomTools() : null;
-  try {
-    console.log('[CUSTOM-CHAT] tools=%d work_mode=%s tools_enabled=%s',
-      customTools ? customTools.length : 0, String(customWorkMode), String(toolsEnabled));
-  } catch (eLogTools) {}
+  var customTools = aiToolsForWorkMode();
   var toolContext = { userName: req.userName || '', signal: controller.signal, searchConsumed: 0 };
-  var conversation = fwdMessages.slice();
+  var customConfig;
+  try { customConfig = await getAiConfig(); } catch (_) {
+    clearTimeout(timer);
+    writeSse(res, { type: 'error', error: 'AI 配置暂时无法加载，请重试', code: 'CUSTOM_CONFIG_FAILED' });
+    return safeEnd();
+  }
+  var conversation = [{ role: 'system', content: buildAiCorePrompt(customConfig) + '\n按需使用工具自主完成用户任务；简单闲聊直接回答。工具失败必须如实说明，不能编造执行结果。' }].concat(fwdMessages);
   var reasoningText = '';
   var reasoningSentStart = false;
   var reasoningEffortFinal = _thinkMode === 'off' ? 'off' : (_thinkMode === 'max' || _thinkMode === 'high' ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low'));
@@ -22833,7 +22807,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
           // 绝不能把原始 DSML 文本当作正文推给前端。
           var dsmlVisible = String(dsmlProbe.visibleContent || '').trim();
           if (dsmlVisible) {
-            try { if (!res.writableEnded && !aborted) writeSse(res, { type: 'content', text: dsmlVisible + '\n\n' }); } catch (e) {}
+            try { if (!res.writableEnded && !aborted) writeSse(res, { type: _thinkMode === 'off' ? 'content' : 'reasoning', text: dsmlVisible + '\n\n' }); } catch (e) {}
           }
           conversation.push({ role: 'assistant', content: dsmlVisible || null, tool_calls: dsmlTcs });
           writeSse(res, {
@@ -22852,8 +22826,8 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
             if (dRes && dRes.error) {
               writeSse(res, { type: 'tool_error', call_id: dsmlTcs[drI].id, tool_name: dsmlTcs[drI].function.name, error: String(dRes.error).slice(0, 200) });
             } else {
-              var dCount = (dRes && (dRes.results_count || (Array.isArray(dRes.results) ? dRes.results.length : 0))) || 0;
-              writeSse(res, { type: 'tool_result', call_id: dsmlTcs[drI].id, tool_name: dsmlTcs[drI].function.name, success: true, count: dCount, location: (dRes && dRes.location) || '' });
+              writeSse(res, toolFeedback(dRes, dsmlTcs[drI].id, normalizeToolResultItems, dsmlTcs[drI].function.name));
+              if (Array.isArray(dRes.cards)) dRes.cards.forEach(card => sendCustomCard(card, dsmlTcs[drI].id));
             }
             var dBody = '';
             if (dRes && dRes.content) dBody = dRes.content;
@@ -22883,7 +22857,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         if (finalReplyContainsInternalProtocolGlobal(_cnNarr) || looksLikeToolArgsFragment(_cnNarr)) {
           console.error('[CUSTOM] suppressed internal tool protocol from tool-round narration');
         } else {
-          try { if (!res.writableEnded && !aborted) writeSse(res, { type: 'content', text: _cnNarr + '\n\n' }); } catch (e) {}
+          try { if (!res.writableEnded && !aborted) writeSse(res, { type: _thinkMode === 'off' ? 'content' : 'reasoning', text: _cnNarr + '\n\n' }); } catch (e) {}
         }
       }
       // 前端时间线：先展示"进行中"
@@ -22896,8 +22870,8 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         if (tRes && tRes.error) {
           writeSse(res, { type: 'tool_error', call_id: tcs[rI].id, tool_name: tcs[rI].function.name, error: String(tRes.error).slice(0, 200) });
         } else {
-          var toolCount = (tRes && (tRes.results_count || (Array.isArray(tRes.results) ? tRes.results.length : 0))) || 0;
-          writeSse(res, { type: 'tool_result', call_id: tcs[rI].id, tool_name: tcs[rI].function.name, success: true, count: toolCount, location: (tRes && tRes.location) || '' });
+          writeSse(res, toolFeedback(tRes, tcs[rI].id, normalizeToolResultItems, tcs[rI].function.name));
+          if (Array.isArray(tRes.cards)) tRes.cards.forEach(card => sendCustomCard(card, tcs[rI].id));
         }
         var toolBody = '';
         if (tRes && tRes.content) toolBody = tRes.content;
@@ -22939,12 +22913,18 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         try { writeSse(res, { type: 'content', text: _cnFinal }); } catch (e) {}
         finalAssistantContent = _cnFinal; // ★ S6：供 finally 记账时写入落库内容
       }
+      var customSaved = await saveCustomChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
+        message: customFinalText, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
+        thinkingMode: _thinkMode, webSearch: _webSearch, processEvents: getProcessEvents(res), cards: customSiteCards,
+        visionUrls: customVisionUrls, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER });
       writeSse(res, {
         type: 'done',
+        conversation_id: customConvId,
+        content: finalAssistantContent,
         model: chosenModel,
         provider: provider,
         complete: true,
-        saved: true,
+        saved: customSaved,
         custom: true,
         thinking_mode: _thinkMode,
         web_search: _webSearch === true,
@@ -22958,13 +22938,15 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   var toolsInUse = !!customTools;
   var rounds = 0;
   try {
-    while (rounds <= TOOL_ROUNDS_MAX) {
+    await runRequiredSearch({ enabled: _webSearch, text: text, messages: conversation, execute: executeToolCall, context: toolContext, write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
+    while (rounds <= TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) {
       var rr = await runCustomRound(toolsInUse);
       if (rr.stop) break;
       if (rr.retryWithoutTools) { toolsInUse = false; continue; }
       if (rr.continueRound) { rounds++; continue; }
       break;
     }
+    if (rounds > TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) writeSse(res, { type: 'error', error: '本轮工具调用已达上限，请缩小任务后重试', code: 'CUSTOM_TOOL_ROUND_LIMIT' });
   } catch (eUp) {
     if (!aborted && !res.writableEnded) {
       var reason = (eUp && eUp.name === 'AbortError') ? '第三方模型响应超时，请重试' : '第三方模型连接失败，请检查 API Key 或网络';
@@ -22972,6 +22954,8 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     }
   } finally {
     try { clearTimeout(timer); } catch (e) {}
+    req.removeListener('aborted', abortCustomUpstream);
+    res.removeListener('close', abortCustomUpstream);
     // ★ S6 审计修复：正常完成 / 中断 / 失败路径统一记账。
     //   search_count 取自 toolContext.searchConsumed —— 与门禁 measureSearchQuota
     //   同一计数源，因此落账后 search_used 才会真正增长，第三方搜索额度才有效。
@@ -23883,16 +23867,13 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
 
     // 组装 system prompt — 缓存优化：corePrompt 必须完全固定且放在最前
     var corePrompt = buildAiCorePrompt(config);
-    // ★ 工作模式（work_mode）：请求级开关，用户在普通聊天「+」面板直接切换，无缝衔接（非独立页面）。
-    //   与 deep_think 深度研究严格区分：工作模式=真的动手完成任务，研究=出一份报告。
-    //   注意：此段拼接在 corePrompt 之后（不修改 corePrompt 本身，避免破坏前缀缓存）。
-    var workModeEnabled = !!(req.body && req.body.work_mode === true);
-    // ★ 挂到 req 上供 finishStream 读取：需要在 done 事件与落库元数据里标记本次为工作模式，
-    //   使前端能显示「工作模式」徽标（否则用户开了开关却看不出任何区别）。
+    // 普通聊天默认开放工具；能力说明保留在固定 prompt 前缀中。
+    var workModeEnabled = true; // Ordinary chat always has autonomous tools.
+    // 保留旧响应字段，兼容已有客户端；界面不再区分工作模式。
     req._workMode = workModeEnabled;
     if (workModeEnabled) {
       corePrompt += '\n' + [
-        '【工作模式】你现在处于工作模式，必须真正动手完成用户交代的任务，而不是给出建议、思路或研究报告。工作方法：',
+        '【普通聊天工具能力】按需自主拆解任务并调用工具完成，简单闲聊直接回答。工作方法：',
         '① 先判断任务需要哪些步骤，可多步按顺序推进，不要只做一步就交差；',
         '② 查资料用 web_search / web_extract（web_extract 能抓网页正文，比摘要更全）；搜社媒账号或内容用 search_social；',
         '③ 读文档用 read_document（支持 PDF / Word / Excel / CSV / TXT，传文件链接即可，会返回正文或表格内容）；',
@@ -23973,7 +23954,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     var liveInfoIntent = /最新|实时|今天|现在|当前|新闻|资讯|价格|多少钱|汇率|天气|温度|赛程|比分|发布|上市|官宣/i.test(searchCleanMessage);
     var siteToolIntent = /私信|发送消息|草稿|公告|维修任务/i.test(searchCleanMessage);
     // 仅站内动作与 thinking+tools 冲突时关思考；普通「搜一下」保留思考过程展示
-    if (siteToolIntent) thinkingMode = 'off';
+    // Preserve the selected effort for site tools as for other tools.
     // 上传图片识别场景：默认不主动联网，除非用户明确说「搜一下」
     var blockAutoSearchForOcr = hasImageOcrMsg && !explicitSearchIntent;
 
@@ -24021,7 +24002,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     var _preloadedSearchPromise = null;
     var _preloadedSearchResults = null;
     var _preloadedQuery = '';
-    if (thirdPartySearchOkEarly && useThinking && proactiveSearch && !aborted) {
+    if (thirdPartySearchOkEarly && useThinking && proactiveSearch && webSearchPref !== true && !aborted) {
       var _quickSearchHint = explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|搜搜|最新|今天|现在|当前|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|攻略|旅游|景点|推荐|百科|介绍|区别|对比|vs|排行|教程|方法|怎么办|如何|怎么|政策|公告|电影|电视剧|综艺|纪录片|动漫|动画|番剧|iPhone|iPad|Mac|安卓|苹果|三星|华为|小米|oppo|vivo|荣耀|百度|google|谷歌|查查|查资料/i.test(searchCleanMessage);
       if (_quickSearchHint && searchCleanMessage.length >= 2) {
         var _psQuery = searchCleanMessage.slice(0, 80);
@@ -24132,53 +24113,9 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     var thirdPartySearchOk = thirdPartySearchOkEarly;
     var useTavilyCluster = thirdPartySearchOk && ((webSearchPref === true) || (webSearchPref === false && proactiveSearch));
     var webSearchEnabled = (webSearchPref === true);
-    // ★ 修复：视觉直传（多模态图片内容块）时不强制切 Responses API——
-    //   Responses 路径对 content 做 String() 会把多模态数组毁成 "[object Object]"，
-    //   图片丢失。视觉直传时保留标准路径（roundMessages 直接透传数组，图片可达模型），
-    //   网页搜索由标准路径的第三方工具 + 预搜注入承担。
-    var _webSearchForceResponses = !_visionEngaged;
-    // 切换模型：web_search=true 或 第三方额度用尽但有搜索意图 → 强制 flash（Responses API 内置搜索）
-    if (_webSearchForceResponses && webSearchPref === true && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
-      validatedModel = DEEPSEEK_RESPONSES_MODEL;
-    }
-    // ★ 修复：第三方搜索额度用尽但有搜索意图时，强制切 flash 走内置搜索，
-    //   避免回退到标准路径（带 search_web/tavily_search 工具）导致模型调用第三方 API
-    if (_webSearchForceResponses && !thirdPartySearchOk && proactiveSearch && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
-      validatedModel = DEEPSEEK_RESPONSES_MODEL;
-    }
-    // ★★★ 2026-09-17 修复（P0「内置 Flash 模型无法使用，Pro 正常」）：
-    //   症状：选择内置 Flash（deepseek-flash）时调用失败；选择 Pro（deepseek-v4-pro）正常。
-    //   根因（逻辑耦合）：
-    //     `DEEPSEEK_RESPONSES_MODEL === DEEPSEEK_MODEL_FLASH === 'deepseek-flash'`
-    //     —— 两个常量指向同一个值。于是下方原判断中
-    //        `webSearchPref === false && validatedModel === DEEPSEEK_RESPONSES_MODEL`
-    //     在用户选 Flash 时**恒为 true**（哪怕网页搜索开关完全关闭），
-    //     导致 Flash 被**无条件强制**走 Responses API 路径；
-    //     而选 Pro 时 validatedModel 为 'deepseek-v4-pro'，两个条件均不成立，
-    //     默认走 Chat Completions —— 于是形成"Pro 能跑、Flash 必走另一条路"的分裂。
-    //     一旦 Responses 路径出现任何问题（参数/上游兼容/流式解析），
-    //     用户看到的就是"Pro 正常、Flash 用不了"。
-    //   修复：把"是否使用内置搜索"与"用户选了哪个模型"**解耦**。
-    //     Responses 路径只在**确实需要内置 web_search 能力**时启用：
-    //     ① 用户显式打开网页搜索开关；或
-    //     ② 服务端判定需要主动联网（proactiveSearch 且有搜索意图），
-    //        且第三方搜额度不可用（需内置搜索兜底）。
-    //     其余情况（含用户选 Flash 但未开搜索）一律走标准 Chat Completions 路径，
-    //     与 Pro 保持同一套经过验证的代码路径，消除模型间的行为分裂。
-    // ★ 修复（P0「工具调用被当成正文回复」根因之三）：
-    //   工作模式必须"有手有头脑"。原逻辑下工作模式 + 思考 + 搜索开关关时
-    //   useBuiltInSearch=false → 落到标准路径 → needsFcCheck 因思考被跳过 →
-    //   全程无工具，模型只能拿 DSML 文本假装调用。工作模式（非视觉直传）一律
-    //   走 Responses 路径（该路径实测 thinking+tools 可共存，且工作模式工具集
-    //   就是按 /responses 设计的），并把模型归一到 DEEPSEEK_RESPONSES_MODEL。
-    if (workModeEnabled && !_visionEngaged && validatedModel !== DEEPSEEK_RESPONSES_MODEL) {
-      validatedModel = DEEPSEEK_RESPONSES_MODEL;
-    }
-    var useBuiltInSearch = (workModeEnabled && !_visionEngaged) || (_webSearchForceResponses && (
-        (webSearchPref === true)
-        || (!thirdPartySearchOk && proactiveSearch)
-        || (proactiveSearch && (explicitSearchIntent || liveInfoIntent) && webSearchPref !== false)
-      ));
+    await runRequiredSearch({ enabled: webSearchEnabled, text: searchCleanMessage || message, messages: messages, execute: executeToolCall, context: Object.assign(requestSearchCtx(req, userName), { signal: requestAbortCtrl.signal }), write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
+    if (aborted || res.writableEnded) return safeEnd();
+    var useBuiltInSearch = !_visionEngaged && validatedModel === DEEPSEEK_RESPONSES_MODEL;
     try {
       console.log('[AGENT-STREAM] route=%s model=%s web_search=%s proactive=%s thirdPartyOk=%s',
         useBuiltInSearch ? 'responses' : 'chat_completions',
@@ -24190,13 +24127,14 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       var responsesReasoning = '';
       var responsesUsage = null;
       var responsesToolCallsInfo = [];
+      var responsesSiteCards = attachmentCardsStream.slice(0, 32);
       var searchResultsCollected = [];
       var searchQueriesCollected = [];
 
       // 服务端预搜补充（仅第三方额度未用尽时）
       var tavilyPromise = null;
       var tavilyResults = null;
-      var shouldServerSearch = thirdPartySearchOk && allowSearch && !blockAutoSearchForOcr && (
+      var shouldServerSearch = webSearchPref !== true && thirdPartySearchOk && allowSearch && !blockAutoSearchForOcr && (
         (useTavilyCluster && !hasImageOcrMsg)
         || (useThinking && proactiveSearch)
         || (explicitSearchIntent || liveInfoIntent)
@@ -24284,24 +24222,18 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
               var _rItems = null;
               try { _rItems = JSON.parse((tcResult && tcResult.content) || '[]'); } catch (_re) { _rItems = null; }
               var _n2 = normalizeToolResultItems(_rItems, 12);
-              writeSse(res, {
-                type: 'tool_result',
-                call_id: toolCall && toolCall.id,
-                tool_name: _okName,
-                success: !(tcResult && tcResult.error),
-                count: _cnt,
-                items: _n2 ? _n2.items : null,
-                items_total: _n2 ? _n2.total : 0,
-                items_truncated: _n2 ? _n2.truncated : false,
-                error: (tcResult && tcResult.error) ? String(tcResult.error).slice(0, 120) : ''
-              });
+              writeSse(res, toolFeedback(tcResult, toolCall && toolCall.id, normalizeToolResultItems, _okName));
               // ★ 修复（A 档工具卡片在工作模式里从不显示）：
               //   图表/PDF/二维码/表格等新工具的结果全部靠 cards 承载，
               //   旧 Responses 路径没有下发入口 → 用户看不到图表和下载按钮。
               //   这里把工具返回的卡片按既有 card 协议推给前端。
               if (tcResult && Array.isArray(tcResult.cards) && tcResult.cards.length) {
                 tcResult.cards.forEach(function(card) {
-                  try { writeSse(res, { type: 'card', card: card }); } catch (e) {}
+                  try {
+                    var responseCard = Object.assign({}, card, { tool_call_id: toolCall && toolCall.id });
+                    if (responsesSiteCards.length < 32) responsesSiteCards.push(responseCard);
+                    writeSse(res, { type: 'card', call_id: toolCall && toolCall.id, card: responseCard });
+                  } catch (e) {}
                 });
               }
             }
@@ -24501,7 +24433,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
             user_name: userName,
             content: responsesContent,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res) }),
+            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res), site_cards: responsesSiteCards }),
             actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
           }
         ]);
@@ -24588,7 +24520,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     //   普通聊天靠上面关键词命中才挂工具，工作模式要"有手有头脑"，不能靠关键词赌。
     //   ★ 2026-09-21：去掉 !useThinking 限制——工作模式 + 思考时也不允许"零工具裸跑"
     //   （视觉直传等工作模式仍走标准路径的场景下，这是最后一道工具挂载防线）。
-    if (workModeEnabled && !aborted) needsFcCheck = true;
+    // Autonomous tools are attached to the streaming request in every thinking mode.
     var hasCalledTools = false;
     // Only persist server-generated cards. The model never supplies executable UI.
     var siteToolCards = [];
@@ -24686,24 +24618,9 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
                 try { console.warn('[AI-FC] parse tool result error:', e && e.message); } catch(ee) {}
               }
               var _n1 = normalizeToolResultItems(trItems, 12);
-              if (!writeSse(res, {
-                type: 'tool_result',
-                call_id: item.toolCallId,
-                tool_name: item.toolResult.tool_name || '',
-                success: !item.toolResult.error,
-                count: item.toolResult.results_count || 0,
-                error: item.toolResult.error || null,
-                location: item.toolResult.location || null,
-                query: item.toolResult.query || null,
-                // ★ 2026-09-22：路径 A 虽已是数组，仍走统一出口做字段净化，
-                //   保证三条路径对前端的契约完全一致。
-                // ★ 第三轮审计：改取 { items, total, truncated }，如实上报截断状态。
-                items: _n1 ? _n1.items : null,
-                items_total: _n1 ? _n1.total : 0,
-                items_truncated: _n1 ? _n1.truncated : false
-              })) { aborted = true; return safeEnd(); }
+              if (!writeSse(res, toolFeedback(item.toolResult, item.toolCallId, normalizeToolResultItems))) { aborted = true; return safeEnd(); }
               if (Array.isArray(item.toolResult.cards)) {
-                item.toolResult.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
+                item.toolResult.cards.forEach(function(card) { card = Object.assign({}, card, { tool_call_id: item.toolCallId }); siteToolCards.push(card); writeSse(res, { type: 'card', call_id: item.toolCallId, card: card }); });
               }
             }
 
@@ -25139,18 +25056,8 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       // DeepSeek API reasoning_effort 仅接受 low/medium/high，max 映射为 high
       apiBody.reasoning_effort = thinkingMode === 'max' ? 'high' : thinkingMode;
     }
-    // 思考模式下不同时发 tools（DeepSeek reasoning 模型不支持
-    // thinking + tools 并存，会返回 400），搜索靠 regex 回退注入
-    // ★ 修复：非思考且无搜索需求时不再 attach function tools —— 部分接入的
-    //   DeepSeek 兼容模型会对「普通闲聊 + 附加工具」返回 4xx「请求参数被拒绝」。
-    //   普通聊天不需要工具即可作答；仅明确要搜索 / 时效追问时才挂工具，
-    //   使中转站默认（思考 off、未开搜索）也能直接正常对话。
-    if (!useThinking) {
-      var _needToolsOff = (webSearchPref === true) || explicitSearchIntent || liveInfoIntent;
-      if (_needToolsOff) {
-        apiBody.tools = aiToolsForSearch(true);
-      }
-    }
+    apiBody.tools = aiToolsForWorkMode();
+    apiBody.tool_choice = 'auto';
 
     // ★ H-3 修复（真正生效）：contentBuffer 必须在 while 循环外初始化。
     //   多轮工具调用之间正文必须累积——若放在循环体内，每轮迭代都会重新赋值
@@ -25613,24 +25520,10 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
         }
         
         var _n2 = normalizeToolResultItems(toolResult.content, 12);
-        writeSse(res, {
-          type: 'tool_result',
-          call_id: toolResults[ti].id,
-          tool_name: toolResult.tool_name || '',
-          success: !toolResult.error,
-          count: toolResult.results_count || 0,
-          // ★ 2026-09-22：原先直接把整段正文（content）塞进 items，
-          //   前端当成结果数组渲染 → 整屏碎片文字。改为走统一出口校验。
-          // ★ 第三轮审计：改取 { items, total, truncated }，如实上报截断状态。
-          items: _n2 ? _n2.items : null,
-          items_total: _n2 ? _n2.total : 0,
-          items_truncated: _n2 ? _n2.truncated : false,
-          query: toolResult.query || '',
-          error: toolResult.error || null
-        });
+        writeSse(res, toolFeedback(toolResult, toolResults[ti].id, normalizeToolResultItems, ''));
         if (toolResult.error) writeSse(res, { type: 'tool_error', call_id: toolResults[ti].id, tool_name: toolResult.tool_name || '', error: toolResult.error });
         if (Array.isArray(toolResult.cards)) {
-          toolResult.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
+          toolResult.cards.forEach(function(card) { card = Object.assign({}, card, { tool_call_id: toolResults[ti].id }); siteToolCards.push(card); writeSse(res, { type: 'card', call_id: toolResults[ti].id, card: card }); });
         }
         
         roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolResults[ti].id });
@@ -25641,11 +25534,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
          // 与 roundMessages 共享引用被后续 push 干扰）。思考模式不带 tools（DeepSeek 限制），
          // 非思考模式复用原 apiBody（含 AI_TOOLS，消息数组为同一引用自动同步）。
          var freshMsgs = roundMessages.slice();
-         apiBody = {
-           model: usedModel,
-           messages: freshMsgs,
-           stream: true
-         };
+         apiBody = Object.assign({}, apiBody, { messages: freshMsgs });
        }
        continue;
     }
@@ -25693,29 +25582,16 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
           }
         }
         var _n3 = normalizeToolResultItems(dTRes.content, 12);
-        writeSse(res, {
-          type: 'tool_result',
-          call_id: dsmlToolResults[dti].id,
-          tool_name: dTRes.tool_name || dsmlToolResults[dti].name,
-          success: !dTRes.error,
-          count: dTRes.results_count || 0,
-          // ★ 2026-09-22：同路径 B，整段正文不得当结果列表下发
-          // ★ 第三轮审计：改取 { items, total, truncated }，如实上报截断状态。
-          items: _n3 ? _n3.items : null,
-          items_total: _n3 ? _n3.total : 0,
-          items_truncated: _n3 ? _n3.truncated : false,
-          query: dTRes.query || '',
-          error: dTRes.error || null
-        });
+        writeSse(res, toolFeedback(dTRes, dsmlToolResults[dti].id, normalizeToolResultItems, dsmlToolResults[dti].name));
         if (dTRes.error) writeSse(res, { type: 'tool_error', call_id: dsmlToolResults[dti].id, tool_name: dsmlToolResults[dti].name, error: dTRes.error });
-        if (Array.isArray(dTRes.cards)) dTRes.cards.forEach(function(card) { siteToolCards.push(card); writeSse(res, { type: 'card', card: card }); });
+        if (Array.isArray(dTRes.cards)) dTRes.cards.forEach(function(card) { card = Object.assign({}, card, { tool_call_id: dsmlToolResults[dti].id }); siteToolCards.push(card); writeSse(res, { type: 'card', call_id: dsmlToolResults[dti].id, card: card }); });
         roundMessages.push({ role: 'tool', content: JSON.stringify(dTRes), tool_call_id: dsmlToolResults[dti].id });
       }
       toolRound++;
       dsmlFallbackCalls = null;
       if (useThinking) {
         var dFreshMsgs = roundMessages.slice();
-        apiBody = { model: usedModel, messages: dFreshMsgs, stream: true };
+        apiBody = Object.assign({}, apiBody, { messages: dFreshMsgs });
       }
       continue;
     }

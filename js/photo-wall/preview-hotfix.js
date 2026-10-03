@@ -1020,6 +1020,9 @@
     var root = overlay();
     if (state.forceClosing) return;
     state.forceClosing = true;
+    // Hide before cancelling fill-forwards animations, so cleanup cannot reveal
+    // the opaque fullscreen preview for a final frame.
+    if (root) root.classList.remove('active');
     clearCloseFallbackTimer();
     // ★ 关闭预览时清除单击延迟关闭定时器，避免关闭后再次触发二次 close
     if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
@@ -1693,7 +1696,7 @@
     if(reducedMotion()||!wrap||!wrap.animate){forceClosePhotoPreview();return;}
     root.classList.add('pp-transition-closing','pp-motion-active');var token=motionEpoch;
     motionAnimations=[wrap.animate([{transform:from,opacity:1},{transform:to,opacity:.3}],{duration:240,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}),root.animate([{opacity:getComputedStyle(root).opacity},{opacity:0}],{duration:240,easing:'ease-in',fill:'forwards'})];
-    motionAnimations[0].finished.then(function(){if(token===motionEpoch)forceClosePhotoPreview();}).catch(function(){});
+    Promise.all(motionAnimations.map(function(animation){return animation.finished;})).then(function(){if(token===motionEpoch)forceClosePhotoPreview();}).catch(function(){});
   }
 
   window.showPhotoInfo = function () {

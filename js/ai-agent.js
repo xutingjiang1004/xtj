@@ -462,9 +462,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // ★ 工作模式（work_mode）：在当前对话框直接切换，AI 自主拆解任务并调用全部工具完成，
     //   输出"任务结果"而非研究报告（区别于深度研究 deep_think，那是独立二级页面出报告）。
     //   开启时同时继承原「思考Max」的长上下文特性（不自动压缩）。
-    workMode: false,
+    workMode: true,
     // ★ 思考Max（已并入工作模式，保留字段兼容旧数据/旧逻辑）
-    thinkMax: false,
+    thinkMax: true,
     // ★ 小猫AI dock 模式：作为移动端 dock 中间 tab 打开时置为 true，隐藏多余返回按钮
     _dockMode: false,
     selectedModel: resolveInitialModel(),
@@ -777,7 +777,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function prefersReducedMotion() {
-    try { return !!(window.matchMedia && window.matchMedia(REDUCED_MOTION_QUERY).matches); }
+    try { return document.documentElement.getAttribute('data-xtj-motion') === 'off' || !!(window.matchMedia && window.matchMedia(REDUCED_MOTION_QUERY).matches); }
     catch (e) { return false; }
   }
 
@@ -1523,27 +1523,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     s = s.replace(/\n/g, '<br>');
     // ★ 恢复代码块
     s = s.replace(/\x00XCB(\d+)\x00/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
-    // ★ 2026-09-22 软揭示（C）：
-    //   背景：CSS 那边原本靠 `.ai-streaming-soft > :last-child { animation }`
-    //   做"新块浮起"，但实测 renderMarkdown 的输出里**根本没有 <p>** ——
-    //   段落是裸文本 + <br>，所以那条规则基本没生效过。
-    //   且增量补丁不重建未变节点，一次性入场动画也不会重放。
-    //   做法：流式期间把**尾部的文本残余**包成一个专用 span。它每次内容
-    //   更新都会是"新节点"（旧节点 outerHTML 不同 → 被 replaceChild），
-    //   因此入场动画必定重放 —— 新到达的文字是"渗"进来的，不是"跳"进来的。
-    //   只在 streaming=true 时启用；最终态走 streaming=false，DOM 保持干净。
-    if (streaming && s) {
-      // 只包裹**纯文本尾巴**：从末尾往前扫，遇到第一个 '>' 就停 ——
-      // 即最后一段文本节点（前面必有标签闭合）。
-      // 这样绝不会横跨 </ul> / </pre> 之类的块边界，不会产出非法 HTML；
-      // 若末尾正好是标签收尾（如代码块刚闭合），则本帧不包裹（下一帧再包）。
-      var gt = s.lastIndexOf('>');
-      var tail = gt >= 0 ? s.slice(gt + 1) : s;
-      // 尾巴必须非空、且不含 '<'（确保是纯文本，不夹带标签）
-      if (tail && tail.indexOf('<') < 0) {
-        s = s.slice(0, gt + 1) + '<span class="ai-stream-soft">' + tail + '</span>';
-      }
-    }
+    // Incremental text runs own their reveal; markup stays identical at completion.
     return s;
   }
 
@@ -2825,6 +2805,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   把它们混加进「已搜索 N 个网页」会得到一个似是而非的数字，
   //   所以只有真正的检索引擎结果才参与网页计数。
   var TOOL_WEBSEARCH_KINDS = { search_web: 1, tavily_search: 1, search_social: 1 };
+  function toolResultFeedback(event) {
+    if (event.summary) return String(event.summary).slice(0, 160);
+    if (TOOL_WEBSEARCH_KINDS[String(event.tool_name || '')]) {
+      var count = Number.isInteger(event.count) && event.count >= 0 ? event.count
+        : Number.isInteger(event.items_total) && event.items_total > 0 ? event.items_total
+        : Array.isArray(event.items) ? event.items.length : null;
+      return count == null ? '检索完成，未提供数量' : '找到 ' + count + ' 个网页';
+    }
+    return '已完成' + (event.location ? ' · ' + String(event.location).slice(0, 100) : '');
+  }
+
   function toolDoneLabel(name) {
     var key = String(name || '');
     return TOOL_DONE_LABELS[key] || toolLabel(key);
@@ -3767,7 +3758,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var link = item.querySelector('a'), snippet = item.querySelector('.ai-search-detail-snippet');
             return { title: link ? link.textContent : '', url: link ? link.getAttribute('href') : '', snippet: snippet ? snippet.textContent : '' };
           });
-          return { call_id: step.getAttribute('data-tool-call-id') || '', tool_name: step.getAttribute('data-tool-name') || '', detail: detail ? detail.textContent.slice(0, 240) : '', status: step.classList.contains('is-done') ? 'done' : step.classList.contains('is-error') ? 'error' : 'interrupted', error: error ? error.textContent.slice(0, 240) : '', items: items };
+          return { call_id: step.getAttribute('data-tool-call-id') || '', tool_name: step.getAttribute('data-tool-name') || '', detail: detail ? detail.textContent.slice(0, 240) : '', summary: step.getAttribute('data-tool-summary') || '', status: step.classList.contains('is-done') ? 'done' : step.classList.contains('is-error') ? 'error' : 'interrupted', error: error ? error.textContent.slice(0, 240) : '', items: items };
         });
         toolRoom -= tools.length;
         if (tools.length) events.push({ type: 'tools', tools: tools });
@@ -3796,7 +3787,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var detail = el('div', { class: 'ai-tool-step-body' });
           detail.appendChild(el('div', { class: 'ai-tool-step-title', text: toolLabel(tool.tool_name) }));
           if (tool.detail) detail.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(tool.detail).slice(0, 240) }));
-          detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? '已完成' : tool.status === 'interrupted' ? '已中断' : '失败' }));
+          detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? toolResultFeedback(tool) : tool.status === 'interrupted' ? '已中断' : '失败' }));
           if (tool.error) detail.appendChild(el('div', { class: 'ai-tool-result-error', text: String(tool.error).slice(0, 240) }));
           if (Array.isArray(tool.items) && tool.items.length) {
             var results = el('details', { class: 'ai-tool-result-card ai-tool-inline-result' });
@@ -3807,6 +3798,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             });
             detail.appendChild(results);
           }
+          if (done) step.setAttribute('data-tool-summary', toolResultFeedback(tool));
           step.appendChild(detail); group.appendChild(step);
         });
         body.appendChild(group);
@@ -3904,7 +3896,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         triggerRegenerate(messagesEl, msg);
       });
       actionRow.appendChild(regenBtn);
-      footer.appendChild(actionRow);
+      footer.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
     }
     if (footer.children.length > 0) node.appendChild(footer);
     return node;
@@ -4036,7 +4028,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     messagesEl.appendChild(node);
     if (msg && msg.role === 'assistant' && Array.isArray(msg.site_cards)) {
       msg.site_cards.forEach(function(card) {
-        try { renderAiToolCard(messagesEl, card); } catch (e) {}
+        try { renderAiToolCard(node, card, node.querySelector('.ai-msg-bubble')); } catch (e) {}
       });
     }
     return node;
@@ -4055,7 +4047,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.site_cards)) return;
       var insertBeforeNode = nodes[index + 1] || nextNodes[index] || null;
       msg.site_cards.forEach(function(card) {
-        try { renderAiToolCard(messagesEl, card, insertBeforeNode); } catch (e) {}
+        try { renderAiToolCard(nodes[index] || messagesEl, card, nodes[index] ? nodes[index].querySelector('.ai-msg-bubble') : insertBeforeNode); } catch (e) {}
       });
     });
   }
@@ -4107,84 +4099,61 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
      安全网：任何异常 / 结构异常（节点数骤减等）都回退整段替换，保证显示正确。 */
   function patchInnerHTML(targetEl, html) {
     if (!targetEl) return;
-    // 存在用户选区时不做增量改动，避免破坏选区
-    // ★ 2026-09-26（审计 AI 前端 P2-3）：增量补丁此前被自家的"打字光标"节点击穿——
-    //   ensureCursor() 把 .ai-stream-cursor 挂在同一个 targetEl 上，而 renderMarkdown
-    //   的输出不含该节点，于是 `next.length < kids.length` 恒成立 → 每帧仍走整段
-    //   innerHTML 替换（性能优化完全失效），且光标被抹掉后 cursor 变量不为 null，
-    //   ensureCursor() 直接 return → 光标只在第一帧可见（打字光标消失）。
-    //   这里把所有 .ai-stream-cursor 节点从现有子节点列表中剔除后再做比对，
-    //   让补丁恢复 O(1) 增量；光标由下方 ensureCursor() 负责重新挂载。
-    var kids = [];
-    function patchNode(have, want, depth) {
-      if (!have || have.nodeType !== want.nodeType || depth > 32) return false;
-      if (have.nodeType === 3) { if (have.data !== want.data) have.data = want.data; return true; }
-      if (have.nodeType !== 1 || have.tagName !== want.tagName) return false;
-      if (have.attributes.length !== want.attributes.length) return false;
-      for (var a = 0; a < want.attributes.length; a++) {
-        var attr = want.attributes[a];
-        if (have.getAttribute(attr.name) !== attr.value) return false;
+    var animate = targetEl.getAttribute('data-ai-flow') === 'on' &&
+      document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
+      !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    var revealCount = 0;
+    function isReveal(node) { return node.nodeType === 1 && node.classList.contains('ai-stream-reveal'); }
+    function isText(node) { return node && (node.nodeType === 3 || isReveal(node)); }
+    function textPart(text) {
+      var fragment = document.createDocumentFragment();
+      if (!animate || !text) { fragment.appendChild(document.createTextNode(text)); return fragment; }
+      var chars = Array.from(text);
+      for (var i = 0; i < chars.length;) {
+        var size = revealCount < 64 ? 24 : chars.length;
+        var span = document.createElement('span');
+        span.className = 'ai-stream-reveal';
+        span.textContent = chars.slice(i, i + size).join('');
+        span.style.setProperty('--ai-reveal-delay', Math.min(100, revealCount * 8) + 'ms');
+        fragment.appendChild(span); revealCount++; i += size;
       }
-      var oldChildren = Array.from(have.childNodes), newChildren = Array.from(want.childNodes);
-      for (var c = 0; c < newChildren.length; c++) {
-        if (!oldChildren[c]) have.appendChild(newChildren[c].cloneNode(true));
-        else if (!patchNode(oldChildren[c], newChildren[c], depth + 1)) have.replaceChild(newChildren[c].cloneNode(true), oldChildren[c]);
-      }
-      for (var r = newChildren.length; r < oldChildren.length; r++) have.removeChild(oldChildren[r]);
-      return true;
+      return fragment;
+    }
+    function copy(node) {
+      if (node.nodeType === 3) return textPart(node.data);
+      var clone = node.cloneNode(false);
+      Array.from(node.childNodes).forEach(function(child) { clone.appendChild(copy(child)); });
+      return clone;
+    }
+    function children(parent, wanted, depth) {
+      var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
+      var pos = 0;
+      Array.from(wanted.childNodes).forEach(function(want) {
+        var have = old[pos];
+        if (want.nodeType === 3 && isText(have)) {
+          var run = [], content = '';
+          while (isText(old[pos])) { run.push(old[pos]); content += old[pos].textContent; pos++; }
+          if (want.data === content) return;
+          var after = run[run.length - 1].nextSibling;
+          if (want.data.indexOf(content) === 0) parent.insertBefore(textPart(want.data.slice(content.length)), after);
+          else { parent.insertBefore(textPart(want.data), run[0]); run.forEach(function(n) { n.remove(); }); }
+          return;
+        }
+        if (!have) { parent.insertBefore(copy(want), parent.querySelector(':scope > .ai-stream-cursor')); return; }
+        pos++;
+        if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.outerHTML === want.outerHTML)) return;
+        var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
+        if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
+        if (same) children(have, want, depth + 1);
+        else parent.replaceChild(copy(want), have);
+      });
+      for (; pos < old.length; pos++) if (old[pos].parentNode === parent) old[pos].remove();
     }
     try {
-      var _rawKids = targetEl.childNodes;
-      for (var _ki = 0; _ki < _rawKids.length; _ki++) {
-        var _kn = _rawKids[_ki];
-        if (_kn && _kn.nodeType === 1 && _kn.classList && _kn.classList.contains('ai-stream-cursor')) continue;
-        kids.push(_kn);
-      }
-    } catch (eKids) { kids = targetEl.childNodes; }
-    if (!kids || kids.length === 0) { targetEl.innerHTML = html; return; }
-    try {
-      var holder = document.createElement('div');
-      holder.innerHTML = html;
-      var next = holder.childNodes;
-      // 结构异常保护：新内容节点数远少于现有（说明发生了重排/回退），
-      // 或差距过大时直接整段替换，避免逐位比对做无用功
-      if (next.length < kids.length || next.length - kids.length > 4) {
-        targetEl.innerHTML = html;
-        return;
-      }
-      // 逐位比对：相同的保留，不同的替换
-      for (var i = 0; i < next.length; i++) {
-        var want = next[i];
-        var have = kids[i];
-        if (!have) { targetEl.insertBefore(want.cloneNode(true), targetEl.querySelector('.ai-stream-cursor')); continue; }
-        // ★ 2026-09-29（审计 M6）：原比对一律取 outerHTML，但 **文本节点没有
-        //   outerHTML**（两侧都是 undefined），`undefined === undefined` 恒判定
-        //   "未变化" —— 一旦流式输出里出现裸文本节点，该位置永远不再更新，
-        //   表现为「后面新写的内容不显示 / 卡在旧文字」。
-        //   修法：按 nodeType 分支比对（文本节点比 data，元素比 outerHTML）；
-        //   类型不同（文本↔元素）直接视为变化并替换。
-        var wantHtml = (want.nodeType === 3) ? want.data : want.outerHTML;
-        var haveHtml = (have.nodeType === 3) ? have.data : have.outerHTML;
-        if (have.nodeType === want.nodeType && haveHtml === wantHtml) continue;   // 未变化：完全不碰
-        if (!patchNode(have, want, 0)) targetEl.replaceChild(want.cloneNode(true), have);
-      }
-      // 多余的旧节点（理论上不会走到，兜底清理）
-      // ★ 2026-09-26（审计 AI 前端 P2-3）：清理时跳过打字光标节点，否则每帧都会
-      //   把光标删掉（且 cursor 变量仍非 null，ensureCursor 不再重挂 → 光标消失）。
-      while (true) {
-        var _contentKids = [];
-        for (var _ci = 0; _ci < targetEl.childNodes.length; _ci++) {
-          var _cn = targetEl.childNodes[_ci];
-          if (_cn && _cn.nodeType === 1 && _cn.classList && _cn.classList.contains('ai-stream-cursor')) continue;
-          _contentKids.push(_cn);
-        }
-        if (_contentKids.length <= next.length) break;
-        var _victim = _contentKids[_contentKids.length - 1];
-        if (!_victim) break;
-        targetEl.removeChild(_victim);
-      }
-    } catch (e) {
-      try { targetEl.innerHTML = html; } catch (e2) {}
+      var holder = document.createElement('div'); holder.innerHTML = html;
+      children(targetEl, holder, 0);
+    } catch (_) {
+      targetEl.innerHTML = html;
     }
   }
 
@@ -4201,6 +4170,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // until the user explicitly resumes.
     var paused = !!S.paused;
     var streamClass = options.streamClass || 'ai-streaming-soft';
+    if (targetEl) targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1;
+    if (targetEl && !options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow', 'on');
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
 
@@ -4219,7 +4190,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 以网络到达为准：最大程度跟上 DeepSeek 输出节奏；积压追赶与 50ms markdown 门限仍防卡顿
     var charsPerMs = options.charsPerMs != null
       ? options.charsPerMs
-      : 100;
+      : 0.14;
+    if (charsPerMs > 1) charsPerMs /= 1000;
     // plainStream 模式：单文本节点复用，避免每帧 createTextNode 触发 reflow
     var plainTextNode = null;
     var plainTextBuffer = '';
@@ -4286,13 +4258,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   ② 系数提高（0.45→0.62 / 0.28→0.40），积压吸收更快、更接近实时；
         //   ③ 新增「追平保护」：若积压按当前预算 3 帧内仍消化不完，
         //      直接把预算提到 1/3 积压量，避免尾部越拖越长（用户感知为"卡住"）。
-        var baseBudget = Math.max(12, Math.floor(budget || 24));
-        if (pending.length > 64) baseBudget = Math.max(baseBudget, Math.floor(pending.length * 0.62));
-        else if (pending.length > 32) baseBudget = Math.max(baseBudget, Math.floor(pending.length * 0.40));
-        else if (pending.length > 12) baseBudget = Math.max(baseBudget, 18);
-        // 追平保护：3 帧内消化不完就提额，防止积压雪球越滚越大
-        if (pending.length / baseBudget > 3) baseBudget = Math.floor(pending.length / 3);
-        var frameBudget = baseBudget;
+        var frameBudget = Math.max(1, Math.floor(budget || 4), Math.ceil(pending.length / 20));
         var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
@@ -4345,7 +4311,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var elapsed = timestamp - lastFrameTime;
       lastFrameTime = timestamp;
       // 下限提高：慢帧也至少吐一批，保证「流水」感
-      var budget = Math.max(12, Math.floor(elapsed * charsPerMs));
+      var budget = Math.max(1, Math.floor(Math.min(40, elapsed || 16) * charsPerMs));
       emitText(false, budget);
       if (pending) schedule();
     }
@@ -4356,7 +4322,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         emitText(true);
         return;
       }
-      lastFrameTime = 0;
       rafId = requestFrame(tick);
     }
 
@@ -4367,6 +4332,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       isCancelled: false,
       append: function(text) {
         if (cancelled || !targetEl || !text || finished) return;
+        if (!pending) lastFrameTime = 0;
         pending += String(text);
         if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
         if (!paused) schedule();
@@ -4412,6 +4378,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (typeof options.onRender === 'function') {
           try { options.onRender(rendered); } catch (e3) {}
         }
+        var completedTarget = targetEl, completedEpoch = targetEl.__aiFlowEpoch;
+        setTimeout(function() {
+          if (!completedTarget || !completedTarget.isConnected || completedTarget.__aiFlowEpoch !== completedEpoch) return;
+          var selection = window.getSelection && window.getSelection();
+          if (selection && !selection.isCollapsed && completedTarget.contains(selection.anchorNode)) return;
+          completedTarget.querySelectorAll('.ai-stream-reveal').forEach(function(span) { span.replaceWith(document.createTextNode(span.textContent)); });
+          completedTarget.normalize();
+          completedTarget.removeAttribute('data-ai-flow');
+        }, 300);
         if (typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}
         }
@@ -6763,7 +6738,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var aEl = aiNodeRef.value.querySelector('.ai-think-answer');
           if (aEl && !answerRendererRef.value) {
             aEl.innerHTML = '';
-            answerRendererRef.value = createSmoothTextRenderer(aEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100, plainStream: true });
+            answerRendererRef.value = createSmoothTextRenderer(aEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 0.14, plainStream: false });
           }
           if (!contentTruncated && aiContentRef.value.length >= AI_CONTENT_MAX_LEN) {
             contentTruncated = true;
@@ -8016,6 +7991,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function renderAiToolCard(messagesEl, card, insertBeforeNode) {
     if (!messagesEl || !card || card.protocol !== 'xtj.ai.ui.v1') return null;
+    if (card.type === 'web_search') {
+      // Older history can contain only a structured search card. Keep its sources compact.
+      var searchSteps = messagesEl.querySelectorAll('.ai-tool-step');
+      for (var si = 0; si < searchSteps.length; si++) {
+        var searchStep = searchSteps[si];
+        if (card.tool_call_id ? searchStep.getAttribute('data-tool-call-id') === String(card.tool_call_id) : TOOL_WEBSEARCH_KINDS[searchStep.getAttribute('data-tool-name')]) {
+          if (searchStep.querySelector('.ai-tool-result-card')) return null;
+        }
+      }
+      if (messagesEl.querySelector('.ai-search-status')) return null;
+    }
     var cardId = String(card.id || '');
     if (!messagesEl.__xtjAiCardIds) messagesEl.__xtjAiCardIds = {};
     if (cardId && messagesEl.__xtjAiCardIds[cardId]) return null;
@@ -8414,9 +8400,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: '操作已完成。' }));
     }
 
-    if (insertBeforeNode && insertBeforeNode.parentNode) {
+    var compactKinds = { weather:1,time:1,calculate:1,unit_convert:1,exchange_rate:1,stock_quote:1,page_read:1,page_meta:1,task_plan:1,web_search:1 };
+    if (compactKinds[type]) {
+      var resultDetails = el('details', { class:'ai-tool-data-details' });
+      resultDetails.appendChild(el('summary', { text:type === 'web_search' && Array.isArray(data.results) ? '找到 ' + data.results.length + ' 个网页 · 查看结果' : '查看数据' }));
+      resultDetails.appendChild(shell);
+      var step = null;
+      var toolNames = { weather:'get_weather',time:'get_current_time',calculate:'calculate',unit_convert:'convert_units',exchange_rate:'get_exchange_rate',stock_quote:'get_stock_quote',page_read:'read_web_page',page_meta:'page_meta',task_plan:'task_plan',web_search:'search_web' };
+      var candidates = messagesEl.querySelectorAll('.ai-tool-step');
+      for (var ci = candidates.length - 1; ci >= 0; ci--) {
+        if (card.tool_call_id ? candidates[ci].getAttribute('data-tool-call-id') === String(card.tool_call_id) : candidates[ci].getAttribute('data-tool-name') === toolNames[type]) { step=candidates[ci];break; }
+      }
+      if (step) step.querySelector('.ai-tool-step-body').appendChild(resultDetails);
+      else if (insertBeforeNode && insertBeforeNode.parentNode) insertBeforeNode.parentNode.insertBefore(resultDetails, insertBeforeNode);
+      else messagesEl.appendChild(resultDetails);
+    } else if (insertBeforeNode && insertBeforeNode.parentNode) {
       insertBeforeNode.parentNode.insertBefore(shell, insertBeforeNode);
-    } else if (messagesEl) {
+    } else {
       messagesEl.appendChild(shell);
     }
     try {
@@ -8946,6 +8946,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var hl = buildAiConversationHistory(_ctxCap, _ctxChars, userMsg, attachmentPayload);
       fetchBody = JSON.stringify({
         provider: customCfg.provider,
+        conversation_id: S.conversationId,
         api_key: customCfg.api_key,
         model: customCfg.model,
         base_url: customCfg.base_url,
@@ -9117,6 +9118,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   让用户能直观确认工作模式确实生效（而不是「感觉跟没打开一样」）。
       var streamWorkMode = sendSettings.workMode;
       var streamToolCount = 0;
+      var streamSiteCards = [];
       var streamConvId = null;
       var doneReceived = false;
       var _eofReached = false; // ★ 修复：SSE EOF flush 前置标志此前未声明（严格模式下 EOF 即抛 ReferenceError）
@@ -9410,6 +9412,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           content: content,
           reasoning: (finalThinkingMode !== 'off' ? thinking : ''),
           process_events: snapshotAiProcess(node),
+          site_cards: streamSiteCards.slice(0, 32),
           created_at: new Date().toISOString(),
           thinking_mode: finalThinkingMode,
           search_count: searchCount,
@@ -9454,9 +9457,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // ★ 工作模式徽标：让用户能明确看到「这条回复是工作模式产出的」，
           //   避免开了工作模式却因为界面无变化而误以为没生效。
           //   优先用本次流式实时记录（streamWorkMode），历史回看回退到消息持久化字段。
-          if (streamWorkMode || aiMsg.work_mode === true) {
-            footer.appendChild(el('span', { class: 'ai-msg-thinking-badge ai-msg-work-badge', text: '工作模式' }));
-          }
+
           if (streamToolCount > 0) {
             footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: '调用工具 ' + streamToolCount + ' 次' }));
           }
@@ -9495,7 +9496,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             triggerRegenerate(messagesEl, aiMsg);
           });
           actionRow.appendChild(regenBtn);
-          footer.appendChild(actionRow);
+          footer.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
           if (footer.children.length > 0) node.appendChild(footer);
           // ★★★ 2026-09-15 修复（P1-9「内置模型回复后 复制/分享/重新生成 按钮消失」）：
           //   症状（用户截图实证）：用内置模型回复完成后，消息底部的
@@ -9520,7 +9521,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               // 极端情况下（footer 被清空但仍在 DOM）：重新补齐按钮行
               var _foot = _realNode.querySelector('.ai-msg-footer');
               if (_foot && !_foot.querySelector('.ai-msg-actions')) {
-                _foot.appendChild(actionRow);
+                _foot.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
               }
             }
           } catch (eEnsureActs) {}
@@ -10023,6 +10024,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'card') {
             try {
+              if (evt.card) {
+                if (evt.call_id) evt.card.tool_call_id = evt.call_id;
+                if ((evt.card.type !== 'web_search' || !assistantNode.querySelector('.ai-tool-step')) && !streamSiteCards.some(function(card) { return card.id && card.id === evt.card.id; })) streamSiteCards.push(evt.card);
+              }
               // Prefer placing cards inside the assistant turn (before bubble),
               // fall back to transcript end for early attachment OCR cards.
               if (assistantNode && assistantBubble) {
@@ -10247,17 +10252,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             // ★ 2026-09-28（方案 D）：改走统一映射表（原先这里有一份重复的 nameMap）
             var label = toolLabel(evt.tool_name);
-            var summaryText = '';
             var toolSucceeded = evt.success === true && !evt.error;
-            if (toolSucceeded) {
-              if (evt.count > 0) {
-                summaryText = label + ' · ' + evt.count + ' 条结果' + (evt.location ? (' · ' + evt.location) : '');
-              } else {
-                summaryText = label + ' · 完成' + (evt.location ? (' · ' + evt.location) : '');
-              }
-            } else {
-              summaryText = label + ' · 失败' + (evt.error ? (': ' + evt.error.slice(0, 80)) : '');
-            }
             // ★★★ 2026-09-28 修复（用户报障：「工具搜完了，下面又出现一个已完成，
             //   但上面原先那个工具还在转圈圈」）：
             //
@@ -10362,7 +10357,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
               var mbody = el('div', { class: 'ai-tool-step-body' });
               mbody.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
-              mbody.appendChild(el('div', { class: 'ai-tool-step-status', text: toolSucceeded ? '已完成' : '失败' }));
+              mbody.appendChild(el('div', { class: 'ai-tool-step-status', text: toolSucceeded ? toolResultFeedback(evt) : '失败' }));
               matchStep.appendChild(mbody);
               matchStep.classList.add(toolSucceeded ? 'is-done' : 'is-error');
               // ★ 新增条目必须落在**活动区内**，否则又会在活动区外面凭空冒出一行
@@ -10374,8 +10369,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var stEl = matchStep.querySelector('.ai-tool-step-status');
               // ★ 2026-09-17：状态文案统一为"已完成"，与用户要求的
               //   「搜索中 → 已完成」两态切换保持一致。
-              if (stEl) stEl.textContent = toolSucceeded ? '已完成' : '失败';
+              if (stEl) stEl.textContent = toolSucceeded ? toolResultFeedback(evt) : '失败';
             }
+            if (matchStep && toolSucceeded) matchStep.setAttribute('data-tool-summary', toolResultFeedback(evt));
             // ★★★ 2026-09-28 修复（同上一处报障的另一半：结果卡片挂错父节点）：
             //   旧代码是 `toolBar2.appendChild(resultCard)`，而 toolBar2 是**外层
             //   .ai-tool-timeline** —— 于是结果卡片被追加到 `.ai-tool-activity`
@@ -11837,16 +11833,9 @@ function showChatMessages() {
       }
     } catch (e) {}
 
-    // ★ 工作模式持久化恢复（兼容旧「思考Max」数据：旧数据自动迁移为工作模式）
-    try {
-      var savedWorkMode = localStorage.getItem('xtj_ai_work_mode');
-      if (savedWorkMode === null) {
-        // 老用户迁移：曾经开过思考Max 的，视为开工作模式
-        savedWorkMode = localStorage.getItem('xtj_ai_think_max');
-      }
-      S.workMode = savedWorkMode === 'true';
-      S.thinkMax = S.workMode;
-    } catch (eWorkMode) {}
+    // Legacy off switches cannot disable the tools now built into ordinary chat.
+    S.workMode = true;
+    S.thinkMax = true;
 
     // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
     var modelLabels = {
@@ -11953,15 +11942,7 @@ function showChatMessages() {
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
               '</div>' +
-              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="work-mode" aria-checked="false" title="工作模式：AI 自主拆解并调用全部工具完成任务">' +
-                '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.thinkMax + '</span>' +
-                '<span class="ai-panel-row-title">工作模式</span>' +
-                rowEnd(
-                  '',
-                  '<span class="ai-search-switch" id="aiWorkModeStatus" aria-hidden="true"><i></i></span>'
-                ) +
-              '</button>' +
-              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false">' +
+              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false" title="开启后，本轮必须实际执行网页检索；关闭时由 AI 自主判断">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
                 rowEnd(
@@ -12363,19 +12344,6 @@ function showChatMessages() {
         else plusBtn.classList.remove('ws-on');
       }
     }
-    function updateThinkMaxStatus() {
-      var st = panelShell.querySelector('#aiWorkModeStatus');
-      var btn = panelShell.querySelector('[data-action="work-mode"]');
-      if (st) {
-        st.setAttribute('data-on', S.workMode ? '1' : '0');
-        st.classList.toggle('on', !!S.workMode);
-      }
-      if (btn) {
-        btn.setAttribute('aria-checked', S.workMode ? 'true' : 'false');
-        btn.classList.toggle('is-selected', !!S.workMode);
-      }
-    }
-
     function renderQuotaUI() {
       var q = S.quota || defaultQuotaShape();
       var used = Math.max(0, Number(q.tokens_used) || 0);
@@ -13148,16 +13116,6 @@ function showChatMessages() {
         }, 50);
         return;
       }
-      if (action === 'work-mode') {
-        S.workMode = !S.workMode;
-        // 工作模式继承原「思考Max」语义：开启时不压缩上下文
-        S.thinkMax = S.workMode;
-        try { localStorage.setItem('xtj_ai_work_mode', S.workMode ? 'true' : 'false'); } catch (err) {}
-        try { localStorage.setItem('xtj_ai_think_max', S.thinkMax ? 'true' : 'false'); } catch (err) {}
-        updateThinkMaxStatus();
-        notify(S.workMode ? '工作模式已开启：AI 将自主拆解并调用工具完成任务' : '工作模式已关闭：恢复普通对话');
-        return;
-      }
       if (action === 'search') {
         var q = S.quota;
         if (!S.webSearchEnabled) {
@@ -13175,7 +13133,7 @@ function showChatMessages() {
         S.webSearchEnabled = !S.webSearchEnabled;
         try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (err) {}
         updateSearchStatus();
-        notify(S.webSearchEnabled ? '网页搜索已开启' : '网页搜索已关闭');
+        notify(S.webSearchEnabled ? '强制网页搜索已开启' : '已恢复自动判断是否搜索');
       }
     });
 
@@ -13211,7 +13169,6 @@ function showChatMessages() {
     updateModelUI();
     updateThinkUI();
     updateSearchStatus();
-    updateThinkMaxStatus();
     renderQuotaUI();
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
     inputBar.id = 'aiChatInputBar';

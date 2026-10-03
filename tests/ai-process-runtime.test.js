@@ -3,7 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict'), fs = 
 const { chromium } = require('playwright');
 const { appendProcessEvent, getProcessEvents } = require('../render-api/ai-process-events');
 const read = path => fs.readFileSync(path, 'utf8');
-async function fixture(t, effort='max') {
+async function fixture(t, effort='max', model='deepseek-flash') {
   const browser = await chromium.launch({executablePath:'/usr/bin/chromium', args:['--no-sandbox']}); t.after(() => browser.close());
   const page = await browser.newPage(); page.setDefaultTimeout(6000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -11,8 +11,12 @@ async function fixture(t, effort='max') {
   await page.goto('https://process.test/');
   await page.addStyleTag({content:'.hidden {display:none!important}'});
   for (const file of ['css/ai-agent.css','css/ui-enhance.css']) await page.addStyleTag({content:read(file)});
-  await page.evaluate(effort => {
+  await page.evaluate(({effort,model}) => {
     window.testEffort=effort;localStorage.setItem('xtj_ai_thinking_mode',effort);
+    localStorage.setItem('xtj_ai_work_mode','false');localStorage.setItem('xtj_ai_think_max','false');
+    localStorage.setItem('xtj_ai_model',model);
+    window.mockModels=model.startsWith('custom:')?[{uid:'test-custom',label:'第三方模型',provider:'openai',model:'test-model',base_url:'https://provider.test/v1',api_key:'test-key'}]:[];
+    localStorage.setItem('xtj_ai_custom_models__tester',JSON.stringify(mockModels));
     window.currentUser = 'tester'; window._authStateEpoch = 1;
     window.ensureProtectedOperationAuth = async () => ({ok:true,token:'test-token'});
     window.ensureUserToken = async () => 'test-token';
@@ -23,18 +27,19 @@ async function fixture(t, effort='max') {
       let body={ok:true};
       if (path.endsWith('/config')) body={enabled:true,thinking_mode:testEffort,name:'小猫'};
       if (path.endsWith('/quota')) body={ok:true,quota:{can_chat:true,tokens_remaining:100000,search_remaining:100}};
-      if (path.endsWith('/custom-models')) body={ok:true,models:[]};
+      if (path.endsWith('/custom-models')) body={ok:true,models:mockModels};
       if (path.endsWith('/chat/conversations')) body=failHistoryList?{ok:false,error:'offline'}:{ok:true,conversations:[]};
       if (path.endsWith('/chat/history')) body=failDeepHistory&&String(url).includes('deep_think')?{ok:false,error:'offline'}:{ok:true,conversation_id:'test-cid',messages:[],has_more:false};
       if (path.endsWith('/chat/new')) {window.newCalls=(window.newCalls||0)+1;body={ok:true,conversation_id:'new-cid'};}
-      if (path.endsWith('/chat/stream')) {
+      if (path.endsWith('/chat/stream') || path.endsWith('/custom-chat/stream')) {
+        window.sentURL=path;
         window.sent = JSON.parse(options.body);
         return new Response(new ReadableStream({start(controller){window.stream=controller;}}),{headers:{'Content-Type':'text/event-stream'}});
       }
       return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}});
     };
     window.emit = event => {frames.push(event);stream.enqueue(new TextEncoder().encode('data: '+JSON.stringify(event)+'\n\n'));};
-  },effort);
+  },{effort,model});
   await page.addScriptTag({content:read('js/ai-agent.js')});
   await page.evaluate(() => __xtjAiAgent.open());
   await page.waitForFunction(() => document.querySelector('.ai-chat-empty')).catch(error=>{throw new Error(error.message+' '+JSON.stringify(errors));});
@@ -145,4 +150,60 @@ test('SSE accepted events persist the same ordered process in assistant metadata
   assert.equal(meta.process_events[1].tools[0].status,'done');
   assert.equal(meta.process_events[1].tools[0].items[0].url,'https://example.com/');
   assert.equal(frames.length,4);
+});
+
+for(const model of ['deepseek-flash','deepseek-v4-pro','custom:test-custom']) test(model+': normal chat exposes tools by default and compact result counts survive history',async t=>{
+ const page=await fixture(t,'off',model);await page.setViewportSize({width:390,height:844});
+ await page.locator('#aiPlusBtn').click();assert.equal(await page.locator('[data-action="work-mode"]').count(),0);await page.locator('[data-action="search"]').click();
+ await page.locator('#aiChatMsgInput').fill('查最新资料');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ const sent=await page.evaluate(()=>({body:sent,url:sentURL}));assert.equal(sent.body.work_mode,true);assert.equal(sent.body.web_search,true);
+ if(model.startsWith('custom:')) {assert.equal(sent.body.tools_enabled,true);assert.match(sent.url,/custom-chat/);}
+ else assert.equal(sent.body.model,model);
+ await page.evaluate(()=>{
+  emit({type:'tool_calls',tools:[{id:'search',name:'search_web',args:{query:'最新资料'}}]});
+  emit({type:'tool_result',call_id:'search',tool_name:'search_web',success:true,count:5,summary:'找到 5 个网页',items:[{title:'资料一',url:'https://example.com/a',snippet:'摘要'}]});
+  emit({type:'card',call_id:'search',card:{protocol:'xtj.ai.ui.v1',id:'web-card',type:'web_search',title:'检索结果',data:{results:[{url:'https://example.com/a',title:'资料一'}]}}});
+ });
+ await page.waitForFunction(()=>document.querySelector('.ai-tool-step.is-done'));
+ assert.match(await page.locator('.ai-tool-step-status').textContent(),/找到 5 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').count(),0);
+ assert.equal(await page.locator('.ai-search-detail').isVisible(),false);await page.locator('.ai-tool-inline-result').click();assert.equal(await page.locator('.ai-search-detail').isVisible(),true);
+ await page.evaluate(()=>{emit({type:'done',content:'已找到相关资料。',thinking_mode:'off',complete:true,saved:true});stream.close();});await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+ const geometry=await page.evaluate(()=>{const b=document.querySelector('.ai-msg.assistant .ai-msg-bubble').getBoundingClientRect(),a=document.querySelector('.ai-msg-actions').getBoundingClientRect();return{left:a.left-b.left,below:a.top>=b.bottom,width:a.width,view:innerWidth};});
+ assert.ok(geometry.below);assert.ok(Math.abs(geometry.left)<10,JSON.stringify(geometry));assert.ok(geometry.width<geometry.view);
+ await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-tool-step-status'));
+ assert.match(await page.locator('.ai-tool-step-status').textContent(),/找到 5 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').count(),0);
+});
+test('weather feedback has actual facts and optional data stays collapsed in its own tool row',async t=>{
+ const page=await fixture(t);
+ await page.locator('#aiChatMsgInput').fill('福州天气');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>{
+  emit({type:'tool_calls',tools:[{id:'weather',name:'get_weather',args:{location:'福州'}}]});
+  emit({type:'tool_result',call_id:'weather',tool_name:'get_weather',success:true,summary:'已查询天气 · 福州 · 晴 · 26.7°C'});
+  emit({type:'card',call_id:'weather',card:{protocol:'xtj.ai.ui.v1',id:'weather-card',type:'weather',title:'福州天气',data:{city:'福州',condition:'晴',temperature_c:26.7}}});
+ });
+ await page.waitForSelector('.ai-tool-data-details');assert.match(await page.locator('.ai-tool-step-status').textContent(),/晴.*26.7/);
+ assert.equal(await page.locator('.ai-thinking-body [data-tool-call-id="weather"] .ai-tool-data-details').count(),1);assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),false);
+ await page.locator('.ai-tool-data-details > summary').click();assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),true);
+ await page.evaluate(()=>{emit({type:'done',content:'福州晴。',reasoning:'',thinking_mode:'max',complete:true,saved:true});stream.close();});
+});
+test('answer flow animates new text only, keeps complete copyable text and removes temporary spans',async t=>{
+ const page=await fixture(t,'off');
+ await page.locator('#aiChatMsgInput').fill('回答');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>{emit({type:'content',text:'第一段回答。'});});await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('第一段回答。'));
+ const old=await page.locator('.ai-msg.assistant .ai-msg-bubble').evaluate(n=>{window.answerFirstNode=n.firstElementChild;return n.firstElementChild.textContent;});
+ await page.evaluate(()=>{emit({type:'done',content:'第一段回答。\n\n第二段回答，包含 **加粗内容** 和完整的数据说明。',thinking_mode:'off',complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+ const state=await page.locator('.ai-msg.assistant .ai-msg-bubble').evaluate(n=>({preserved:n.firstElementChild===answerFirstNode,first:n.firstElementChild.textContent,animated:n.querySelectorAll('.ai-stream-reveal').length,text:n.textContent,animation:n.querySelector('.ai-stream-reveal')&&getComputedStyle(n.querySelector('.ai-stream-reveal')).animationName}));
+ assert.equal(state.preserved,true);assert.equal(state.first,old);assert.ok(state.animated>0);assert.match(state.text,/完整的数据说明/);assert.equal(state.animation,'aiTextFlow');
+ await page.waitForTimeout(380);assert.equal(await page.locator('.ai-msg-bubble .ai-stream-reveal').count(),0);assert.equal(await page.locator('.ai-msg-bubble .ai-stream-cursor').count(),0);
+});
+
+test('older card-only search results stay compact, counted and available after reopening history',async t=>{
+ const page=await fixture(t,'off');
+ await page.locator('#aiChatMsgInput').fill('搜索资料');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>{emit({type:'card',card:{protocol:'xtj.ai.ui.v1',id:'old-search-card',type:'web_search',title:'搜索资料',data:{query:'资料',results:[{title:'网页一',url:'https://example.com/1'},{title:'网页二',url:'https://example.com/2'}]}}});emit({type:'done',content:'检索完成。',thinking_mode:'off',complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+ assert.match(await page.locator('.ai-tool-data-details summary').textContent(),/2 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').isVisible(),false);
+ await page.locator('.ai-tool-data-details summary').click();assert.equal(await page.locator('.ai-tool-card--web_search a').count(),2);
+ await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForSelector('.ai-tool-data-details');assert.equal(await page.locator('.ai-tool-card--web_search').isVisible(),false);
 });

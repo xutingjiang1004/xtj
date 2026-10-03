@@ -14,12 +14,13 @@ async function fixture() {
   const page = await browser.newPage();
   await page.setContent('<div id="output"></div><div id="timeline"></div>');
   await page.addStyleTag({ content: fs.readFileSync('css/ui-enhance.css', 'utf8') });
+  await page.addStyleTag({ content: fs.readFileSync('css/ai-agent.css', 'utf8') });
   await page.addScriptTag({ content: fs.readFileSync('js/ai-core/stream-renderer.js', 'utf8') });
   await page.evaluate(({ stream, tools }) => {
     window.S = { paused: false, activeRenderers: [] };
     window.AI_DEBUG = false;
     window.prefersReducedMotion = () => false;
-    window.renderMarkdown = text => '<span class="ai-stream-soft">' + text + '</span>';
+    window.renderMarkdown = text => '<span>' + text + '</span>';
     window.XtjAiCore.Markdown = { render: window.renderMarkdown };
     window.el = (tag, attrs) => {
       const node = document.createElement(tag);
@@ -122,5 +123,42 @@ test('shared renderer reset clears a queued frame and the previous plain text no
       return { afterReset, final: output.textContent, cursors: output.querySelectorAll('.ai-stream-cursor').length };
     });
     assert.deepEqual(result, { afterReset: '', final: 'new', cursors: 0 });
+  } finally { await browser.close(); }
+});
+
+for (const implementation of ['main', 'shared']) test(implementation + ': text fades only on new runs and respects reduced motion', async () => {
+  const { browser, page } = await fixture();
+  try {
+    const result = await page.evaluate(async kind => {
+      const output = document.getElementById('output');
+      const create = () => kind === 'main' ? createSmoothTextRenderer(output) : XtjAiCore.StreamRenderer.create(output);
+      const renderer = create(); renderer.append('已有文字'); renderer.flush();
+      const prefix = output.querySelector('.ai-stream-reveal');
+      renderer.append('新到达的文字🐈'); renderer.flush();
+      const animation = getComputedStyle(output.querySelector('.ai-stream-reveal')).animationName;
+      const stable = prefix.isConnected && prefix.textContent === '已有文字';
+      renderer.finish();
+      await new Promise(r => setTimeout(r, 350));
+      const clean = output.querySelectorAll('.ai-stream-reveal,.ai-stream-cursor').length === 0;
+      document.documentElement.setAttribute('data-xtj-motion', 'off');
+      window.prefersReducedMotion = () => true;
+      output.replaceChildren(); const quiet = create(); quiet.append('立即显示'); quiet.flush(); quiet.finish();
+      return {stable,animation,clean,quietText:output.textContent,quietSpans:output.querySelectorAll('.ai-stream-reveal').length};
+    }, implementation);
+    assert.deepEqual(result, {stable:true,animation:'aiTextFlow',clean:true,quietText:'立即显示',quietSpans:0});
+  } finally { await browser.close(); }
+});
+test('shared: finishing an old answer cannot strip a new answer animation after reset', async () => {
+  const { browser, page } = await fixture();
+  try {
+    const result = await page.evaluate(async () => {
+      const output=document.getElementById('output'), renderer=XtjAiCore.StreamRenderer.create(output);
+      renderer.append('旧回答');renderer.finish();renderer.reset();renderer.append('新回答');renderer.flush();
+      await new Promise(r=>setTimeout(r,350));
+      const retained=output.getAttribute('data-ai-flow')==='on' && output.querySelectorAll('.ai-stream-reveal').length>0;
+      renderer.finish();await new Promise(r=>setTimeout(r,350));
+      return {retained,text:output.textContent,clean:output.querySelectorAll('.ai-stream-reveal').length===0};
+    });
+    assert.deepEqual(result,{retained:true,text:'新回答',clean:true});
   } finally { await browser.close(); }
 });

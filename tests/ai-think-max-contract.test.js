@@ -38,21 +38,17 @@ test('后端：aiChatHistoryBudget 实现限量 + 自动压缩 + 保底最近一
   assert.match(serverSource, /保底保留最近一条/);
 });
 
-test('前端：存在工作模式状态、持久化键与 256 上下文常量', () => {
-  assert.match(agentSource, /workMode: false/);
-  assert.match(agentSource, /xtj_ai_work_mode/);
+test('前端：普通聊天默认工具与长上下文，同时保留上下文边界', () => {
+  assert.match(agentSource, /workMode: true/);
+  assert.match(agentSource, /S\.thinkMax = true;/);
   assert.match(agentSource, /var CONTEXT_LIMIT_NORMAL = 256;/);
   assert.match(agentSource, /var CONTEXT_LIMIT_MAX = 2048;/);
 });
 
-test('前端：加号菜单含工作模式开关行，且位于思考 与 网页搜索 之间', () => {
-  const workRow = agentSource.indexOf('data-action="work-mode"');
-  const thinkRowSel = agentSource.indexOf('data-action="open-think"');
-  const searchBtn = agentSource.indexOf('data-action="search"');
-  assert.ok(workRow > -1, '工作模式 行缺失');
-  assert.ok(workRow > thinkRowSel, '工作模式 应位于 思考 之后');
-  assert.ok(searchBtn > workRow, '工作模式 应位于 网页搜索 之前');
-  assert.match(agentSource, /updateThinkMaxStatus/);
+test('前端：工具融合普通聊天，加号菜单保留思考和强制搜索', () => {
+  assert.doesNotMatch(agentSource, /data-action="work-mode"/);
+  assert.match(agentSource, /data-action="open-think"/);
+  assert.match(agentSource, /data-action="search"/);
 });
 
 test('前端：请求体携带 thinking_max / work_mode，关闭时上下文限制 256 并压缩，开启时放大', () => {
@@ -62,10 +58,9 @@ test('前端：请求体携带 thinking_max / work_mode，关闭时上下文限�
   assert.match(agentSource, /buildAiConversationHistory\(_ctxCap, _ctxChars, userMsg, attachmentPayload\)/);
 });
 
-test('前端：工作模式开关切回默认不自动压缩（work-mode 点击处理）', () => {
-  assert.match(agentSource, /if \(action === 'work-mode'\)/);
-  assert.match(agentSource, /S\.workMode = !S\.workMode;/);
-  assert.match(agentSource, /localStorage\.setItem\('xtj_ai_work_mode'/);
+test('前端：旧工作模式开关不会关闭普通聊天工具能力', () => {
+  assert.match(agentSource, /S\.workMode = true;/);
+  assert.doesNotMatch(agentSource, /S\.workMode = !S\.workMode/);
 });
 
 test('移动端：dock 小猫AI 可切换，并提供独立返回按钮', () => {
