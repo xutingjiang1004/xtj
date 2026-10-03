@@ -108,8 +108,20 @@
         try {
           time = p.created_at ? new Date(p.created_at).toLocaleString() : '';
         } catch (e) {}
+        var mediaSpace = '';
+        if (window.XtjPostMedia) {
+          var items = window.XtjPostMedia.getPostMediaItems(p);
+          if (items.length && items[0].media_type === 'image') {
+            mediaSpace = '<div class="media post-media-grid' + (items.length === 1 ? ' post-media-grid--single' : '') + '" aria-hidden="true" style="--post-grid-columns:' + window.XtjPostMedia.gridColumns(items.length) + '">' +
+              items.slice(0, 9).map(function(item) {
+                var w = Number(item.width), h = Number(item.height);
+                var ratio = w > 0 && h > 0 && w <= 20000 && h <= 20000 ? w + ' / ' + h : '4 / 3';
+                return '<span class="post-media-cell" style="--post-image-ratio:' + ratio + '"></span>';
+              }).join('') + '</div>';
+          }
+        }
         return (
-          '<div class="post glass visible" data-post-id="' +
+          '<div class="post post-feed-item visible" data-post-id="' +
           esc(p.id) +
           '" data-early="1">' +
           '<div class="post-header"><span class="avatar">' +
@@ -121,7 +133,7 @@
           '</span></div></div>' +
           '<div class="content">' +
           (text || '&nbsp;') +
-          '</div></div>'
+          '</div>' + mediaSpace + '</div>'
         );
       })
       .join('');

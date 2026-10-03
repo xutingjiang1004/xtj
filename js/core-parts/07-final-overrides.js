@@ -31,6 +31,7 @@
                         user_name: cached.user_name || '',
                         media_url: cached.media_url || '',
                         media_type: cached.media_type || '',
+                        media_items: cached.media_items || [],
                         created_at: cached.created_at || '',
                         views: Number(cached.views || 0)
                     });
@@ -53,6 +54,7 @@
                     user_name: cached.user_name || '',
                     media_url: cached.media_url || '',
                     media_type: cached.media_type || '',
+                    media_items: cached.media_items || [],
                     created_at: cached.created_at || '',
                     views: Number(cached.views || 0)
                 });
@@ -61,7 +63,7 @@
             function formatPostSummary(post) {
                 var normalized = normalizePost(post || {});
                 var text = String(normalized.content || '').trim();
-                var hasImg = !!(normalized.media_url && normalized.media_type === 'image');
+                var hasImg = !!(normalized.media_url && ['image','photo','album'].indexOf(normalized.media_type) >= 0);
                 var hasVid = !!(normalized.media_url && normalized.media_type === 'video');
                 var summary = text.length > 28 ? text.slice(0, 28) + '...' : text;
                 return {
@@ -113,7 +115,7 @@
             function getStatPostMediaHtml(post, postId) {
                 var normalized = post ? normalizePost(post) : null;
                 if (!normalized || !normalized.media_url) return '';
-                if (normalized.media_type === 'image') {
+                if (['image','photo','album'].indexOf(normalized.media_type) >= 0) {
                     // ★ 修复（XSS 防护一致性）：同 03 文件的 profileActivityMedia，
                     //   媒体 URL 需过 sanitizeUrl 协议白名单，拒绝 javascript:/data:text/html。
                     var statMediaUrl = sanitizeUrl(normalized.media_url);

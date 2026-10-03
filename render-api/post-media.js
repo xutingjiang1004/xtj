@@ -1,4 +1,5 @@
 'use strict';
+const { MAX_POST_IMAGES } = require('../js/post-media');
 const { removeStorageWithQueue, enqueueStorageCleanupJob } = require('./storage-cleanup');
 const PATH = /^posts\/[a-zA-Z0-9_\u4e00-\u9fff.-]{1,200}$/;
 const ID = /^[a-zA-Z0-9_-]{8,128}$/;
@@ -20,7 +21,7 @@ async function checked(query) { const result = await query; if (!result || resul
 function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanError }) {
   let timer, busy = false, cursor = '';
   function unavailable(res) { return res.status(503).json({ ok: false, error: '媒体操作暂不可用，请重试', retryable: true }); }
-  app.post('/api/post/media/prepare', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  app.post('/api/post/media/prepare', authenticateUser, rateLimit(60000, MAX_POST_IMAGES * 4), async (req, res) => {
     const path = req.body && req.body.storage_path, uploadId = req.body && req.body.upload_id;
     if (!validPath(path) || typeof uploadId !== 'string' || !ID.test(uploadId)) return res.status(400).json({ ok: false, code: 'invalid_media_path' });
     const ban = userBanError(req); if (ban) return res.status(ban.status || 403).json({ ok: false, error: ban.message });
@@ -38,7 +39,7 @@ function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanE
       res.json({ ok: true, storage_path: path, upload_id: uploadId });
     } catch (_) { unavailable(res); }
   });
-  app.post('/api/post/media/cleanup', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  app.post('/api/post/media/cleanup', authenticateUser, rateLimit(60000, MAX_POST_IMAGES * 4), async (req, res) => {
     const path = req.body && req.body.storage_path, uploadId = req.body && req.body.upload_id;
     if (!validPath(path) || typeof uploadId !== 'string' || !ID.test(uploadId)) return res.status(400).json({ ok: false, code: 'invalid_media_path' });
     try {

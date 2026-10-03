@@ -1567,6 +1567,7 @@
   }
 
   function attachPostPreview(){
+    if (window.XtjPostComposerMedia) return;
     var input = byId('fileInp');
     if (input && !input.__xtjPostPreviewBound) {
       input.__xtjPostPreviewBound = true;
@@ -1583,7 +1584,7 @@
   window.triggerPhotoWallUpload = uploadPhotoWallFiles;
   window.cancelPhotoWallUpload = cancelCurrentUpload;
   window.retryFailedPhotoUploads = retryFailedUploads;
-  window.resetPostPreview = resetPostPreview;
+  if (!window.XtjPostComposerMedia) window.resetPostPreview = resetPostPreview;
   window.setPhotoUploadResult = setUploadResult;
   window.setPhotoUploadResultState = setUploadResultState;
   window.clearPhotoUploadResult = clearUploadResult;

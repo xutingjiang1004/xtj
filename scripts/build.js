@@ -105,6 +105,8 @@ function validateHtmlMinifiedRefs(htmlFile) {
 }
 
 const JS_FILES = [
+  'js/post-media.js',
+  'js/post-composer-media.js',
   'js/early-feed.js',
   'js/core-utils.js',
   'js/core.js',
@@ -162,6 +164,7 @@ function injectConfigSecrets(source, filePath) {
 }
 
 const CSS_FILES = [
+  'css/post-feed.css',
   'css/style.css',
   'css/ui-enhance.css',
   'css/desktop.css',

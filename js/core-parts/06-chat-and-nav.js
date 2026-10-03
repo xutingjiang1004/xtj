@@ -8433,36 +8433,16 @@
                 var vc = Math.max(Number(normalizedPost.views) || 0, (post && post.views) || 0);
                 var likeCount = Number.isFinite(Number(normalizedPost.like_count)) ? Number(normalizedPost.like_count) : (likes || []).length;
                 var commentCount = Number.isFinite(Number(normalizedPost.comment_count)) ? Number(normalizedPost.comment_count) : (comments || []).length;
-                var detailMediaAttrs = buildPostDetailMediaAttrs(normalizedPost);
-                // ★ 2026-09-27 修复（审计 P5：详情弹窗媒体只 escapeHtml，未过协议白名单）：
-                //   卡片/feed 里的媒体 URL 早就统一走 sanitizeUrl（拒绝 javascript: /
-                //   data:text/html / data:image/svg+xml 等），但详情弹窗这三条分支漏了 ——
-                //   escapeHtml 只挡引号与尖括号，`javascript:alert(1)` 这种**不含特殊字符**的
-                //   协议串会原样进入 src。虽然 <img>/<video> 的 src 执行 JS 的能力有限，
-                //   但这条链路与其它渲染点策略不一致本身即为风险面（例如后续被复用成
-                //   可点击的 media 形态），且 data:image/svg+xml 在部分浏览器可触发脚本。
-                //   现在与 1219/1268/1277 行保持完全一致：非法协议 → 空串 → 不渲染媒体。
-                var safeMediaUrl = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(normalizedPost.media_url || '')) : '';
-                var mediaHtml = (normalizedPost.media_url && safeMediaUrl) ? (
-                    normalizedPost.media_type === 'video'
-                        ? '<video src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata" playsinline></video>'
-                        : (normalizedPost.media_type === 'audio'
-                            ? '<audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio>'
-                            : '<img ' + detailMediaAttrs + ' data-actor-key="' + escapeHtml(String(normalizedPost.actor_key || "")) + '" data-can-delete="' + (canDeletePost(normalizedPost) ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)" loading="lazy" decoding="async" fetchpriority="low" />')
-                ) : '';
+                var mediaHtml = renderPostMediaGrid(normalizedPost, { detail: true });
                 var visibilityLabel = normalizedPost.visibility === 'private' ? '私密' : '公开';
                 var contentText = String(normalizedPost.content || '').trim();
-                var detailActions = [];
-                detailActions.push('<button type="button" class="action-btn post-tools-trigger" data-post-id="' + escapeHtml(String(normalizedPost.id)) + '" aria-haspopup="menu" aria-expanded="false" aria-label="更多帖子工具">•••</button>');
-                if (canDeletePost(normalizedPost)) {
-                    detailActions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(String(normalizedPost.id)) + '\', \'' + safeJsStr(String(normalizedPost.actor_key || "")) + '\')">删除</button>');
-                }
+                var detailActions = [buildPostActionHtml(normalizedPost, typeof normalizedPost.liked_by_me === 'boolean' ? normalizedPost.liked_by_me : (likes || []).some(function(l) { return l.user_name === currentUser; }), canDeletePost(normalizedPost))];
                 return [
-                    '<article class="post-detail-shell post-detail-shell--clean">',
+                    '<article class="post post-detail-shell post-detail-shell--clean" data-post-id="' + escapeHtml(String(normalizedPost.id)) + '" data-post-user="' + escapeHtml(normalizedPost.user_name || '') + '">',
                     '  <section class="post-detail-main-card">',
                     '    <header class="post-detail-top">',
                     '      <div class="post-detail-owner">',
-                    '        <div class="post-detail-avatar">' + escapeHtml(String(normalizedPost.user_name || '?').slice(0, 1).toUpperCase()) + '</div>',
+                    getAvatarHtml(normalizedPost.user_name, normalizedPost),
                     '        <div class="post-detail-owner-copy">',
                     '          <div class="pdh-name">' + escapeHtml(normalizedPost.user_name || '未知用户') + '</div>',
                     '          <div class="pdh-time">' + window.safeParseDate(normalizedPost.created_at).toLocaleString() + '</div>',
@@ -8470,12 +8450,12 @@
                     '      </div>',
                     '      <span class="post-detail-visibility">' + visibilityLabel + '</span>',
                     '    </header>',
+                    contentText ? '<div class="post-detail-content">' + buildPostContentHtml(contentText) + '</div>' : '',
                     mediaHtml ? '<div class="post-detail-media-card"><div class="post-detail-media">' + mediaHtml + '</div></div>' : '',
-                    contentText ? '<div class="post-detail-content">' + escapeHtml(contentText) + '</div>' : '',
                     // 2026-09-22：详情弹窗与 feed 卡片一致展示位置/IP 属地（此前详情不显示）
                     (typeof window.buildPostLocationHtml === 'function' ? window.buildPostLocationHtml(normalizedPost) : ''),
-                    '    <div class="post-detail-stats">' + buildPostStatsLine(normalizedPost, likeCount, commentCount) + '</div>',
-                    detailActions.length ? '<div class="post-detail-actions">' + detailActions.join("") + '</div>' : '',
+                    '    <div class="post-stats-text post-detail-stats">' + buildPostStatsLine(normalizedPost, likeCount, commentCount) + '</div>',
+                    detailActions.length ? '<div class="actions post-detail-actions">' + detailActions.join("") + '</div>' : '',
                     '  </section>',
                     '  <section class="post-detail-panel post-detail-panel--stack">',
                     '    <div class="post-detail-panel-title">点赞用户 <span>' + likeCount + '</span></div>',
@@ -8483,11 +8463,9 @@
                         return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + window.safeParseDate(l.created_at).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>',
                     '  </section>',
-                    '  <section class="post-detail-panel post-detail-panel--stack">',
+                    '  <section class="post-detail-panel post-detail-panel--stack post-detail-comments-panel">',
                     '    <div class="post-detail-panel-title">评论记录 <span>' + commentCount + '</span></div>',
-                    comments.length ? comments.map(function(c) {
-                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(c.user_name) + '</div><div class="post-detail-mini-copy">' + escapeHtml(c.content || '无评论内容') + '</div></div><span class="post-detail-mini-time">' + window.safeParseDate(c.created_at).toLocaleString() + '</span></article>';
-                    }).join('') : '<div class="stat-empty post-detail-empty">暂无评论</div>',
+                    comments.length ? buildPostCommentsHtml(normalizedPost, comments, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>',
                     '  </section>',
                     '</article>'
                 ].join('');
@@ -8496,7 +8474,55 @@
             renderPostDetail = function(post, likes, comments) {
                 var body = document.getElementById('postDetailBody');
                 if (!body) return;
-                body.innerHTML = statPostDetailMarkup(post, likes, comments);
+                window.__xtjPostDetailSnapshot = normalizePost(post);
+                window.__xtjPostDetailLikes = likes || [];
+                (likes || []).forEach(function(like) {
+                    var row = Object.assign({}, like, { post_id: post.id });
+                    if (!(feedAllLikes || []).some(function(l) { return String(l.id) === String(row.id); })) feedAllLikes.push(row);
+                });
+                if (post.liked_by_me && !(feedAllLikes || []).some(function(l) { return String(l.post_id) === String(post.id) && l.user_name === currentUser; })) feedAllLikes.push({ post_id: post.id, user_name: currentUser });
+                window.__xtjPostDetailComments = comments || [];
+                body.innerHTML = statPostDetailMarkup(post, likes || [], comments || []);
+            };
+
+            window.__xtjPatchPostDetailInteractions = function(postId) {
+                var post = window.__xtjPostDetailSnapshot;
+                if (!post || String(post.id) !== String(postId) || window.__xtjPostDetailCurrentId !== String(postId)) return;
+                var body = document.getElementById('postDetailBody');
+                if (!body) return;
+                var comments = window.__xtjPostDetailComments || [], likes = window.__xtjPostDetailLikes || [];
+                var panel = body.querySelector('.post-detail-comments-panel');
+                if (panel) panel.innerHTML = '<div class="post-detail-panel-title">评论记录 <span>' + comments.length + '</span></div>' +
+                    (comments.length ? buildPostCommentsHtml(post, comments, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>');
+                var stats = body.querySelector('.post-detail-stats');
+                if (stats) stats.innerHTML = buildPostStatsLine(post, Number.isFinite(Number(post.like_count)) ? Number(post.like_count) : likes.length, comments.length);
+            };
+            window.__xtjMergePostDetailComments = function(postId, incoming) {
+                var post = window.__xtjPostDetailSnapshot;
+                if (!post || String(post.id) !== String(postId)) return;
+                var list = window.__xtjPostDetailComments || [], map = new Map(list.map(function(c) { return [String(c.id), c]; })), changed = false;
+                (incoming || []).forEach(function(row) {
+                    if (String(row.post_id) !== String(postId)) return;
+                    var old = map.get(String(row.id));
+                    if (!old || old.content !== row.content || old.parent_comment_id !== row.parent_comment_id || old.generated_by_ai !== row.generated_by_ai) { map.set(String(row.id), row); changed = true; }
+                });
+                if (!changed) return;
+                window.__xtjPostDetailComments = Array.from(map.values()).sort(function(a,b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id).localeCompare(String(b.id)); });
+                window.__xtjPatchPostDetailInteractions(postId);
+            };
+            window.__xtjApplyPostDetailComment = function(eventType, row) {
+                var post = window.__xtjPostDetailSnapshot;
+                if (!post || !row || row.id == null || (row.post_id != null && String(row.post_id) !== String(post.id))) return;
+                var list = window.__xtjPostDetailComments || [];
+                if (eventType !== 'DELETE' && row.post_id == null) return;
+                if (eventType === 'DELETE') list = list.filter(function(c) { return String(c.id) !== String(row.id); });
+                else {
+                    var index = list.findIndex(function(c) { return String(c.id) === String(row.id); });
+                    if (index < 0) list.push(row); else list[index] = row;
+                    list.sort(function(a,b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id).localeCompare(String(b.id)); });
+                }
+                window.__xtjPostDetailComments = list;
+                window.__xtjPatchPostDetailInteractions(post.id);
             };
 
             function statGetPostMap() {
@@ -8579,6 +8605,9 @@
             window.__xtjCancelPostDetail = function() {
                 _postDetailReqSeq++;
                 window.__xtjPostDetailCurrentId = '';
+                window.__xtjPostDetailSnapshot = null;
+                window.__xtjPostDetailLikes = [];
+                window.__xtjPostDetailComments = [];
                 var modal = document.getElementById('postDetailModal');
                 var body = document.getElementById('postDetailBody');
                 if (modal) modal.classList.remove('active');
