@@ -32,6 +32,23 @@
     if (!targetEl) return;
     var kids = Array.from(targetEl.childNodes).filter(function (node) { return !(node.nodeType === 1 && node.classList.contains('ai-stream-cursor')); });
     if (!kids || kids.length === 0) { targetEl.innerHTML = html; return; }
+    function patchNode(have, want, depth) {
+      if (!have || have.nodeType !== want.nodeType || depth > 32) return false;
+      if (have.nodeType === 3) { if (have.data !== want.data) have.data = want.data; return true; }
+      if (have.nodeType !== 1 || have.tagName !== want.tagName) return false;
+      if (have.attributes.length !== want.attributes.length) return false;
+      for (var a = 0; a < want.attributes.length; a++) {
+        var attr = want.attributes[a];
+        if (have.getAttribute(attr.name) !== attr.value) return false;
+      }
+      var oldChildren = Array.from(have.childNodes), newChildren = Array.from(want.childNodes);
+      for (var c = 0; c < newChildren.length; c++) {
+        if (!oldChildren[c]) have.appendChild(newChildren[c].cloneNode(true));
+        else if (!patchNode(oldChildren[c], newChildren[c], depth + 1)) have.replaceChild(newChildren[c].cloneNode(true), oldChildren[c]);
+      }
+      for (var r = newChildren.length; r < oldChildren.length; r++) have.removeChild(oldChildren[r]);
+      return true;
+    }
     try {
       var holder = document.createElement('div');
       holder.innerHTML = html;
@@ -45,7 +62,7 @@
         var have = kids[i];
         if (!have) { var cursorNode = targetEl.querySelector('.ai-stream-cursor'); targetEl.insertBefore(want.cloneNode(true), cursorNode); continue; }
         if (have.nodeType === want.nodeType && (have.nodeType === 3 ? have.data === want.data : have.outerHTML === want.outerHTML)) continue;   // 未变化：不碰
-        targetEl.replaceChild(want.cloneNode(true), have);
+        if (!patchNode(have, want, 0)) targetEl.replaceChild(want.cloneNode(true), have);
       }
       for (var j = next.length; j < kids.length; j++) {
         if (kids[j].parentNode === targetEl) targetEl.removeChild(kids[j]);
@@ -232,7 +249,7 @@
       isPaused: function () { return paused; },
       getRendered: function () { return rendered; },
       finish: function (finalText) {
-        if (cancelled || !targetEl) return;
+        if (cancelled || finished || !targetEl) return;
         var hasFinal = (typeof finalText === 'string' && finalText.length > 0);
         // M60：未提供 finalText 时先刷新未刷出的缓冲，避免流式尾部内容被丢弃
         // （此处的 emitText 在 finished 置位前执行，不会重复触发 onDone）。
@@ -257,7 +274,7 @@
           var pNode = ensurePlainTextNode();
           try { pNode.data = rendered; } catch (e3) { pNode.textContent = rendered; }
         } else {
-          targetEl.innerHTML = renderRich(rendered);
+          patchInnerHTML(targetEl, renderRich(rendered));
         }
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
@@ -285,11 +302,13 @@
         if (!finished) {
           try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
         }
+        if (streamClass && targetEl) targetEl.classList.remove(streamClass);
         // ★ 保留 targetEl 引用（cancelled 标志已使 append/flush/finish 短路）
       },
       // ★ 新增：供调用方感知取消/重建实例
       isCancelled: function () { return cancelled; },
       reset: function () {
+        clearFrame();
         cancelled = false;
         finished = false;
         paused = false;
@@ -298,6 +317,8 @@
         plainTextBuffer = '';
         lastFrameTime = 0;
         removeCursor();
+        if (targetEl) targetEl.replaceChildren();
+        plainTextNode = null;
         if (streamClass && targetEl) targetEl.classList.remove(streamClass);
       }
     };

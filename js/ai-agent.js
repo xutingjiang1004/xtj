@@ -2890,6 +2890,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // 运行中不允许收起：进度是用户此刻唯一想看的东西
       if (activity.classList.contains('is-running')) return;
       var collapsed = activity.classList.toggle('is-collapsed');
+      activity.__userCollapsed = collapsed;
       try { head.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); } catch (eArA) {}
     }
     head.addEventListener('click', function(ev) {
@@ -2984,8 +2985,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     if (settled) {
       activity.classList.remove('is-running');
-      activity.classList.add('is-done', 'is-collapsed');
-      if (head) { try { head.setAttribute('aria-expanded', 'false'); } catch (eArA2) {} }
+      activity.classList.add('is-done');
+      var activityCollapsed = activity.__userCollapsed !== false;
+      activity.classList.toggle('is-collapsed', activityCollapsed);
+      if (head) { try { head.setAttribute('aria-expanded', activityCollapsed ? 'false' : 'true'); } catch (eArA2) {} }
       // ★ 2026-09-28 修复（失败态视觉缺失）：
       //   CSS 为失败态准备了 `.ai-tool-activity.is-done.is-error .ai-tool-activity-icon::before
       //   {content:'!'}`，但 JS 从来没给容器加过 is-error（is-error 只加在条目上），
@@ -3124,6 +3127,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // 运行中不允许收起：进度是用户此刻唯一想看的东西
       if (box.classList.contains('is-running')) return;
       var collapsed = box.classList.toggle('is-collapsed');
+      box.__userCollapsed = collapsed;
       try { head.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); } catch (eAr) {}
     }
     head.addEventListener('click', function(ev) {
@@ -3160,7 +3164,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   处理：无条目时视为"已收敛"，走终态落定（而不是直接 return）。
     if (!total) {
       roundBox.classList.remove('is-running');
-      roundBox.classList.add('is-done', 'is-collapsed');
+      roundBox.classList.add('is-done');
+      roundBox.classList.toggle('is-collapsed', roundBox.__userCollapsed !== false);
+      var emptyHead = roundBox.querySelector('.ai-tool-round-head');
+      if (emptyHead) emptyHead.setAttribute('aria-expanded', roundBox.__userCollapsed === false ? 'true' : 'false');
+      var emptyLabel = roundBox.querySelector('.ai-tool-round-label');
+      if (emptyLabel) emptyLabel.textContent = '未调用工具';
       try { refreshOwningToolActivity(roundBox); } catch (eEmptyRoundAct) {}
       return;
     }
@@ -3179,10 +3188,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       roundBox.classList.add('is-done');
       // ★ 2026-09-22：整轮结束后自动折叠为一行（Codex 手感）。
       //   用户仍可点摘要行展开回看明细，屏幕上不再留一坨历史条目。
-      roundBox.classList.add('is-collapsed');
+      var roundCollapsed = roundBox.__userCollapsed !== false;
+      roundBox.classList.toggle('is-collapsed', roundCollapsed);
       var caretHost = roundBox.querySelector('.ai-tool-round-head');
       if (caretHost) {
-        try { caretHost.setAttribute('aria-expanded', 'false'); } catch (eAr2) {}
+        try { caretHost.setAttribute('aria-expanded', roundCollapsed ? 'false' : 'true'); } catch (eAr2) {}
       }
       // ★ 2026-09-28 修复（同上：轮次容器也需要 is-error，否则 `.ai-tool-round.is-error
       //   .ai-tool-round-icon::before{content:'!'}` 永远不生效）
@@ -4031,6 +4041,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   这里把所有 .ai-stream-cursor 节点从现有子节点列表中剔除后再做比对，
     //   让补丁恢复 O(1) 增量；光标由下方 ensureCursor() 负责重新挂载。
     var kids = [];
+    function patchNode(have, want, depth) {
+      if (!have || have.nodeType !== want.nodeType || depth > 32) return false;
+      if (have.nodeType === 3) { if (have.data !== want.data) have.data = want.data; return true; }
+      if (have.nodeType !== 1 || have.tagName !== want.tagName) return false;
+      if (have.attributes.length !== want.attributes.length) return false;
+      for (var a = 0; a < want.attributes.length; a++) {
+        var attr = want.attributes[a];
+        if (have.getAttribute(attr.name) !== attr.value) return false;
+      }
+      var oldChildren = Array.from(have.childNodes), newChildren = Array.from(want.childNodes);
+      for (var c = 0; c < newChildren.length; c++) {
+        if (!oldChildren[c]) have.appendChild(newChildren[c].cloneNode(true));
+        else if (!patchNode(oldChildren[c], newChildren[c], depth + 1)) have.replaceChild(newChildren[c].cloneNode(true), oldChildren[c]);
+      }
+      for (var r = newChildren.length; r < oldChildren.length; r++) have.removeChild(oldChildren[r]);
+      return true;
+    }
     try {
       var _rawKids = targetEl.childNodes;
       for (var _ki = 0; _ki < _rawKids.length; _ki++) {
@@ -4054,7 +4081,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       for (var i = 0; i < next.length; i++) {
         var want = next[i];
         var have = kids[i];
-        if (!have) { targetEl.appendChild(want.cloneNode(true)); continue; }
+        if (!have) { targetEl.insertBefore(want.cloneNode(true), targetEl.querySelector('.ai-stream-cursor')); continue; }
         // ★ 2026-09-29（审计 M6）：原比对一律取 outerHTML，但 **文本节点没有
         //   outerHTML**（两侧都是 undefined），`undefined === undefined` 恒判定
         //   "未变化" —— 一旦流式输出里出现裸文本节点，该位置永远不再更新，
@@ -4064,7 +4091,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var wantHtml = (want.nodeType === 3) ? want.data : want.outerHTML;
         var haveHtml = (have.nodeType === 3) ? have.data : have.outerHTML;
         if (have.nodeType === want.nodeType && haveHtml === wantHtml) continue;   // 未变化：完全不碰
-        targetEl.replaceChild(want.cloneNode(true), have);
+        if (!patchNode(have, want, 0)) targetEl.replaceChild(want.cloneNode(true), have);
       }
       // 多余的旧节点（理论上不会走到，兜底清理）
       // ★ 2026-09-26（审计 AI 前端 P2-3）：清理时跳过打字光标节点，否则每帧都会
@@ -4287,8 +4314,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       finish: function(finalText) {
         var idx = S.activeRenderers.indexOf(api);
         if (idx !== -1) S.activeRenderers.splice(idx, 1);
-        if (cancelled || !targetEl) return;
+        if (cancelled || finished || !targetEl) return;
         clearFrame();
+        if (pending && !(typeof finalText === 'string' && finalText.length > 0)) emitText(true);
         finished = true;
         paused = false;
         // 只用有效内容覆盖, 避免空字符串清掉已流式渲染的文字
@@ -4301,7 +4329,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           targetEl.classList.add('ai-empty-fallback');
         }
         try { if (AI_DEBUG) console.log('[AI-RENDER] finish len:', rendered.length, 'el:', targetEl.tagName, targetEl.className); } catch(_) {}
-        targetEl.innerHTML = renderMarkdown(rendered);
+        if (options.plainStream) {
+          plainTextBuffer = rendered;
+          ensurePlainTextNode().data = rendered;
+        } else patchInnerHTML(targetEl, renderMarkdown(rendered));
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
           try { options.onRender(rendered); } catch (e3) {}
@@ -4314,6 +4345,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (cancelled) return;
         clearFrame();
         if (pending) emitText(true);
+        finished = true;
+        removeCursor();
+        if (streamClass && targetEl) targetEl.classList.remove(streamClass);
+        var stopIndex = S.activeRenderers.indexOf(api);
+        if (stopIndex !== -1) S.activeRenderers.splice(stopIndex, 1);
       },
       cancel: function() {
         var idx2 = S.activeRenderers.indexOf(api);
@@ -4329,6 +4365,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!finished) {
           try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
         }
+        if (streamClass && targetEl) targetEl.classList.remove(streamClass);
         targetEl = null;
       }
     };
