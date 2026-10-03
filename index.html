@@ -69,18 +69,18 @@
          这里加 preload 让浏览器解析到本行就立即高优先级抓取，缩短空窗期。
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
-    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=e560ba776a" />
+    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=3e45390040" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a2d91421e6" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" /><link rel="stylesheet" href="css/ui-shell.min.css?v=943e29965b" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=a2d91421e6" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=3e45390040" /><link rel="stylesheet" href="css/ui-shell.min.css?v=943e29965b" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d1d9232b4d" />
-    <link rel="stylesheet" href="css/ui-enhance.min.css?v=e560ba776a" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-enhance.min.css?v=3e45390040" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=943e29965b">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=a2d91421e6">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=23297903fa">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=55d1597a1a">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=dc8d27da61">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=002a86f0c4">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=6e7fd54a13">
@@ -1215,7 +1215,7 @@
     <script defer src="js/ai-core/transport.min.js?v=98bffa2a95"></script>
     <script defer src="js/ai-core/markdown-renderer.min.js?v=5dcd04889a"></script>
     <script defer src="js/ai-core/scroll-controller.min.js?v=34059556ba"></script>
-    <script defer src="js/ai-core/stream-renderer.min.js?v=f9064bf221"></script>
+    <script defer src="js/ai-core/stream-renderer.min.js?v=bbd6606f6d"></script>
     <script defer src="js/ai-core/telemetry.min.js?v=6b7b8750d6"></script>
     <!-- Keep the database SDK on the same origin. The former public-CDN request
          was a single point of failure on restricted/mobile networks and could

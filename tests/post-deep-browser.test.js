@@ -40,7 +40,12 @@ for (const [name, viewport] of [['desktop', { width: 1280, height: 800 }], ['mob
 test('feed rebuild removes the mention dropdown and resets combobox accessibility state', async () => {
   const browser = await chromium.launch(browserOptions);
   try {
-    const page = await commentPage(browser); await page.locator('.inline-comment-inp').fill('@小');
+    const page = await commentPage(browser);
+    // This case tests teardown; initialize its mention state with an explicit caret.
+    await page.locator('.inline-comment-inp').evaluate(inp => {
+      inp.focus(); inp.value = '@小'; inp.setSelectionRange(2, 2);
+      inp.dispatchEvent(new InputEvent('input', { bubbles: true, data: '小', isComposing: false }));
+    });
     assert.equal(await page.locator('.mention-dropdown').count(), 1);
     await page.evaluate(() => __xtjRunMentionCleanups());
     assert.equal(await page.locator('.mention-dropdown').count(), 0);

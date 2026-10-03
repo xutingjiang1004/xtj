@@ -41,9 +41,9 @@ test('正文流式渲染必须走增量补丁（不得每帧整段替换 innerHT
 
 test('增量补丁必须保留未变化节点（这是性能保证的核心）', () => {
   const i = agentSrc.indexOf('function patchInnerHTML');
-  const seg = agentSrc.slice(i, i + 2400);
+  const seg = agentSrc.slice(i, agentSrc.indexOf('function createSmoothTextRenderer', i));
   // 相同则跳过 —— 不碰未变节点
-  assert.match(seg, /outerHTML === wantHtml\)\s*continue/,
+  assert.match(seg, /haveHtml === wantHtml\)\s*continue/,
     '未变化节点必须跳过，否则等于整段重建');
   // 不同的才替换
   assert.match(seg, /replaceChild\(/, '变化节点必须用 replaceChild 就地替换');

@@ -1752,31 +1752,14 @@ html[data-xtj-motion="weak"] *::after {
   50%      { box-shadow: 0 0 0 3.5px rgba(66, 155, 122, 0.22); }
 }
 
-/* ── 5) 新到达的正文：软揭示（不是整块砸下） ───────────────────────────
-   ★ 2026-09-22 修正：原先用 `.ai-streaming-soft > :last-child` 选块元素，
-     但实测 renderMarkdown 的输出里**没有 <p>**（段落是裸文本 + <br>），
-     所以那条规则基本从未生效。
-     现在改由 renderMarkdown 在流式期间把**尾部文本残余**包成
-     `.ai-stream-soft`；由于增量补丁会因内容不同而 replaceChild，
-     该 span 每次更新都是新节点，动画必定重放 ——
-     新文字是"渗"进来的，不是"跳"进来的。 */
+/* 流式正文复用已有文本和元素；新段落只在首次插入时轻微淡入。 */
 @keyframes xtjBlockRise {
   from { opacity: 0; transform: translate3d(0, 3px, 0); }
   to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 .ai-streaming-soft .ai-stream-soft {
   animation: xtjBlockRise .22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-  /* ★★★ 2026-09-29 修复（审计报告 S 级「图层 churn」）：
-     这里原本常驻 `will-change: opacity, transform`。而 .ai-stream-soft 是
-     renderMarkdown 在流式期间把**尾部文本残余**包出来的节点，增量补丁走
-     replaceChild —— **每个 chunk 都是全新节点**。于是每秒十几次地：
-       新建合成层 → 播放 220ms 动画 → 节点被丢弃 → 层被销毁。
-     常驻 will-change 把每一次重建都强制提升为独立合成层，层数随吐字频率
-     线性抖动（低端机上直接表现为掉帧），而它带来的收益极小：
-     动画只有 220ms 且只做 opacity + 3px 位移，浏览器本就会在动画期间
-     自动提层。去掉常驻 will-change 后，提层只在动画真正播放的那一小段
-     时间发生，节点丢弃即释放，不再有常驻残留。
-     ★ 不要在高频重建的节点上写常驻 will-change（这是本条的通用结论）。 */
+
 }
 
 /* ── 6) 无障碍降级：所有流动动画必须能被彻底停掉 ────────────────────────
@@ -1908,3 +1891,26 @@ html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label {
   /* 小屏上 detail 的 46ch 上限会把查询词压得比标题还窄，放宽到 60ch */
   .ai-tool-round-list .ai-tool-step-detail { max-width: 60ch; }
 }
+
+/* 工具进度保留行式层级，以状态图标表达活动，减少重复扫光和脉冲。 */
+[data-theme="dark"] .ai-tool-round.is-running .ai-tool-round-label,
+.ai-tool-round.is-running .ai-tool-round-label {
+  animation: none;
+  background-image: none;
+  -webkit-text-fill-color: currentColor;
+}
+.ai-tool-round-list .ai-tool-step.is-running::before,
+.ai-tool-round-list .ai-tool-step.is-running::after { animation: none; }
+.ai-tool-activity-body,
+.ai-tool-round-list-wrap {
+  transition-duration: 200ms;
+}
+.ai-tool-round-list .ai-tool-step { animation: xtjBlockRise 160ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .ai-tool-round-list .ai-tool-step { animation: none !important; }
+  .ai-tool-activity-body, .ai-tool-round-list-wrap { transition: none !important; }
+}
+html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step,
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step { animation: none !important; }
+html[data-xtj-motion=off] .ai-tool-activity-body,
+html[data-xtj-motion=off] .ai-tool-round-list-wrap { transition: none !important; }
