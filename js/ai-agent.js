@@ -3791,11 +3791,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (tool.error) detail.appendChild(el('div', { class: 'ai-tool-result-error', text: String(tool.error).slice(0, 240) }));
           if (Array.isArray(tool.items) && tool.items.length) {
             var results = el('details', { class: 'ai-tool-result-card ai-tool-inline-result' });
-            results.appendChild(el('summary', { class: 'ai-tool-result-card-title', text: '查看结果' }));
+            results.appendChild(el('summary', { class: 'ai-tool-result-card-title', text: toolResultFeedback(tool) }));
+            var historyList = el('div', { class:'ai-search-detail' });
             tool.items.slice(0, 10).forEach(function(item) {
               var url = safeSearchUrl(item.url);
-              if (url) results.appendChild(el('a', { class: 'ai-search-detail-title', href: url, target: '_blank', rel: 'noopener noreferrer', text: String(item.title || item.url).slice(0, 240) }));
+              if (!url) return;
+              var row = el('div', { class:'ai-search-detail-item' });
+              row.appendChild(el('a', { class: 'ai-search-detail-title', href: url, target: '_blank', rel: 'noopener noreferrer', text: String(item.title || item.url).slice(0, 240) }));
+              if (item.snippet) row.appendChild(el('div', { class:'ai-search-detail-snippet', text:String(item.snippet).slice(0,200) }));
+              row.appendChild(el('div', { class:'ai-search-detail-source', text:String(item.source || new URL(url).hostname) }));
+              historyList.appendChild(row);
             });
+            results.appendChild(historyList);
             detail.appendChild(results);
           }
           if (done) step.setAttribute('data-tool-summary', toolResultFeedback(tool));
@@ -8403,7 +8410,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var compactKinds = { weather:1,time:1,calculate:1,unit_convert:1,exchange_rate:1,stock_quote:1,page_read:1,page_meta:1,task_plan:1,web_search:1 };
     if (compactKinds[type]) {
       var resultDetails = el('details', { class:'ai-tool-data-details' });
-      resultDetails.appendChild(el('summary', { text:type === 'web_search' && Array.isArray(data.results) ? '找到 ' + data.results.length + ' 个网页 · 查看结果' : '查看数据' }));
+      resultDetails.appendChild(el('summary', { text:type === 'web_search' && Array.isArray(data.results) ? '找到 ' + data.results.length + ' 个网页' : '查看数据' }));
       resultDetails.appendChild(shell);
       var step = null;
       var toolNames = { weather:'get_weather',time:'get_current_time',calculate:'calculate',unit_convert:'convert_units',exchange_rate:'get_exchange_rate',stock_quote:'get_stock_quote',page_read:'read_web_page',page_meta:'page_meta',task_plan:'task_plan',web_search:'search_web' };
@@ -10394,7 +10401,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               card.hidden = !evt.error && !(Array.isArray(evt.items) && evt.items.length);
               card.onclick = null; card.toggleFn = null;
               card.removeAttribute('role'); card.removeAttribute('tabindex'); card.removeAttribute('aria-expanded');
-              if (!evt.error) card.appendChild(el('div', { class: 'ai-tool-result-card-title', text: '查看结果' }));
+              if (!evt.error) card.appendChild(el('div', { class: 'ai-tool-result-card-title', text: toolResultFeedback(evt) }));
               if (evt.error) {
                 card.appendChild(el('div', { class: 'ai-tool-result-error', text: String(evt.error).slice(0, 240) }));
               }

@@ -7537,3 +7537,22 @@ html[data-xtj-motion="off"] .ai-stream-reveal { animation:none; }
 .ai-tool-data-details > summary { cursor:pointer;color:var(--primary);padding:5px 0; }
 .ai-tool-data-details > .ai-tool-card { margin:6px 0;max-width:100%; }
 .ai-tool-step-status { overflow-wrap:anywhere; }
+
+/* Search receipts remain a stable disclosure above a full-width result list. */
+.ai-process-timeline .ai-tool-step-body { min-width:0; flex:1; display:flex; flex-wrap:wrap; align-items:baseline; gap:3px 6px; }
+.ai-process-timeline .ai-tool-inline-result, .ai-tool-step-body > .ai-tool-data-details { flex:0 0 100%; min-width:0; width:100%; max-width:100%; display:block; }
+.ai-process-timeline .ai-tool-inline-result > .ai-search-detail { width:100%; min-width:0; max-width:100%; box-sizing:border-box; margin:6px 0 0; }
+.ai-process-timeline .ai-tool-step-body:has(.ai-tool-inline-result:not([hidden])) > .ai-tool-step-status,
+.ai-tool-step-body:has(.ai-tool-data-details) > .ai-tool-step-status { display:none; }
+.ai-process-timeline .ai-tool-result-card-title, .ai-tool-data-details > summary { font-size:12px; font-weight:500; line-height:1.7; }
+.ai-process-timeline .ai-search-detail-item, .ai-process-timeline .ai-search-detail-title, .ai-process-timeline .ai-search-detail-snippet, .ai-tool-card--web_search .ai-tool-result { min-width:0; max-width:100%; overflow-wrap:anywhere; white-space:normal; }
+.ai-process-timeline .ai-search-detail-item { display:block; margin:8px 0; }
+.ai-process-timeline .ai-tool-inline-result > .ai-search-toggle { display:inline-block; margin-left:4px; }
+.ai-process-timeline { width:100%; max-width:560px; box-sizing:border-box; align-self:stretch; }
+.ai-process-timeline .ai-tool-activity, .ai-process-timeline .ai-tool-activity-body,
+.ai-process-timeline .ai-tool-round, .ai-process-timeline .ai-tool-round-list-wrap { min-width:0; width:100%; box-sizing:border-box; }
+.ai-process-timeline details.ai-tool-inline-result[open] > .ai-search-detail { display:block; }
+.ai-process-timeline details.ai-tool-inline-result > summary { display:block; cursor:pointer; list-style:none; }
+.ai-process-timeline details.ai-tool-inline-result > summary::-webkit-details-marker { display:none; }
+.ai-process-timeline details.ai-tool-inline-result > summary::after { content:'▸'; display:inline-block; margin-left:4px; color:#5b9783; }
+.ai-process-timeline details.ai-tool-inline-result[open] > summary::after { content:'▾'; }

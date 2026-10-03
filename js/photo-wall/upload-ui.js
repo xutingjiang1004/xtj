@@ -1272,6 +1272,7 @@
         try {
           var item = window.normalizePhotoWallRow(row);
           if (item && item.imageUrl) {
+            if(typeof window.registerRecentlyUploadedPhoto==='function')window.registerRecentlyUploadedPhoto(item,j.file);
             window.photoWallData = Array.isArray(window.photoWallData) ? window.photoWallData : [];
             var newId = item.id || item.cloudId;
             var exists = window.photoWallData.some(function(p) { return (p.id && newId && String(p.id) === String(newId)) || (p.cloudId && newId && String(p.cloudId) === String(newId)); });

@@ -3159,3 +3159,8 @@ html #ppConfirmOverlay.photo-delete-confirm.closing .pp-confirm-dialog > * { ani
 #notificationContainer { z-index:12000; }
 @media(prefers-reduced-motion:reduce) { #notificationContainer .notification-bubble { transition:none!important;animation:none!important; } }
 html[data-xtj-motion="off"] #notificationContainer .notification-bubble { transition:none!important;animation:none!important; }
+
+/* Avoid Safari focus zoom across dynamically mounted forms, including AI. */
+@media (pointer: coarse), (max-width: 767px) {
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable="true"] { font-size: 16px !important; }
+}

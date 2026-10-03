@@ -2967,17 +2967,27 @@
                     var url = sanitizeUrl(item.media_url), width = Number(item.width), height = Number(item.height);
                     var validDims = width > 0 && height > 0 && width <= 20000 && height <= 20000;
                     var ratio = validDims ? width + ' / ' + height : '4 / 3';
+                    var aspect = validDims ? width / height : 4 / 3;
+                    var singleSize = '--post-single-max-width:' + (aspect * 520) + 'px;--post-single-viewport-width:' + (aspect * 65) + 'vh;';
                     var attrs = 'data-post-id="' + escapeHtml(String(post.id)) + '" data-post-media-index="' + index + '" data-media-url="' + escapeHtml(url) + '"' +
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
                     var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
-                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + '" onclick="openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
-                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low">' +
+                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
+                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)">' +
                         (index === 8 && items.length > visible.length ? '<span class="post-media-overflow">+' + (items.length - visible.length) + '</span>' : '') + '</button>';
                 }).join('') + '</div>';
             }
             window.getPostMediaItems = getPostMediaItems;
             window.renderPostMediaGrid = renderPostMediaGrid;
+            window.syncPostImageRatio = function(img) {
+                var cell = img && img.closest('.post-media-grid--single .post-media-cell');
+                if (!cell || !img.naturalWidth || !img.naturalHeight) return;
+                var ratio = img.naturalWidth / img.naturalHeight;
+                cell.style.setProperty('--post-image-ratio', img.naturalWidth + ' / ' + img.naturalHeight);
+                cell.style.setProperty('--post-single-max-width', (ratio * 520) + 'px');
+                cell.style.setProperty('--post-single-viewport-width', (ratio * 65) + 'vh');
+            };
 
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';

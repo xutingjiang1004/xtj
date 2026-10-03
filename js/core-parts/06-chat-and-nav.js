@@ -379,7 +379,7 @@
                     window.innerHeight || 0,
                     document.documentElement ? (document.documentElement.clientHeight || 0) : 0
                 );
-                return width >= 768 && height >= 480;
+                return width >= 768 && (height >= 480 || document.documentElement.classList.contains('xtj-tablet-keyboard'));
             }
 
             function renderDockChatDesktopEmptyState() {
@@ -5730,15 +5730,15 @@
 
                     function updateIOSViewport() {
                         var vv = window.visualViewport;
-                        if (vv && Math.abs(vv.scale - 1)>0.02) return;
+                        var viewportScale = vv && Number(vv.scale) > 0 ? Number(vv.scale) : 1;
                         // Panels own scrolling; Safari must not retain an outer-page
                         // scroll from focusing a form or restoring a cached iPad tab.
-                        if (!hasActiveInput() && window.scrollY!==0) window.scrollTo(0,0);
-                        var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
+                        if (window.scrollY!==0) window.scrollTo(0,0);
+                        var appHeight = vv ? Math.round(vv.height * viewportScale) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
-                        root.style.setProperty('--xtj-visual-top', (vv ? Math.max(0, Math.round(vv.offsetTop)) : 0) + 'px');
+                        root.style.setProperty('--xtj-visual-top', '0px');
                         window.dispatchEvent(new CustomEvent('xtj:visual-viewport-change'));
-                        var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+                        var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - appHeight)) : 0;
                         // ★ 2026-09-22 视口差基线（微信 web-view / 微信内置浏览器 / 开发者工具模拟器通吃）：
                         //   这些环境里 window.innerHeight 与 visualViewport 存在**环境固有的恒定差值**
                         //   （微信的导航栏工具栏、调试器里的 iframe 都不参与 visualViewport），

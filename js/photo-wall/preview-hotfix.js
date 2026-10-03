@@ -1513,6 +1513,36 @@
     }
   }
 
+  function syncPreviewImageFit(img) {
+    var root=overlay(); if (!root || !img || !img.naturalWidth || !img.naturalHeight) return;
+    var fit=Math.min(root.clientWidth/img.naturalWidth,root.clientHeight/img.naturalHeight);
+    var width=(img.naturalWidth*fit)+'px',height=(img.naturalHeight*fit)+'px';
+    if(img.style.width!==width)img.style.setProperty('width',width,'important');
+    if(img.style.height!==height)img.style.setProperty('height',height,'important');
+    if(img.style.aspectRatio!=='auto')img.style.setProperty('aspect-ratio','auto','important');
+  }
+  function installPreviewLoadFeedback() {
+    var root=overlay(); if (!root) return;
+    root.querySelectorAll('.pp-slide-img').forEach(function(img){
+      var slot=img.parentElement; if (!slot || img.__xtjLoadFeedback) return;
+      img.__xtjLoadFeedback=true;
+      var loader=document.createElement('div'); loader.className='pp-image-loading';
+      loader.setAttribute('aria-hidden','true');
+      loader.innerHTML='<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 36V20"/><path class="pp-leaf pp-leaf-left" d="M24 29C14 29 11 23 12 17C20 17 24 21 24 29Z"/><path class="pp-leaf pp-leaf-right" d="M24 23C24 16 29 12 37 12C37 19 32 24 24 23Z"/><path d="M16 37H32"/></svg><span>正在加载照片…</span>';
+      slot.appendChild(loader);
+      function sync(){
+        syncPreviewImageFit(img);
+        var ready=img.complete&&img.naturalWidth>0&&img.style.opacity!=='0';
+        loader.hidden=ready||!img.getAttribute('src')||root.classList.contains('pp-img-error');
+      }
+      img.addEventListener('load',sync); img.addEventListener('error',function(){loader.hidden=true;});
+      new MutationObserver(sync).observe(img,{attributes:true,attributeFilter:['src','style']});
+      sync();
+    });
+  }
+  window.addEventListener('resize',function(){var root=overlay();if(root&&root.classList.contains('active'))root.querySelectorAll('.pp-slide-img').forEach(syncPreviewImageFit);});
+  window.addEventListener('xtj:visual-viewport-change',function(){var root=overlay();if(root&&root.classList.contains('active'))root.querySelectorAll('.pp-slide-img').forEach(syncPreviewImageFit);});
+
   function afterOpen() {
     clearCloseFallbackTimer();
     closeLegacyViewer();
@@ -1537,6 +1567,7 @@
     installUnifiedPointerHandlers();
     clearImageError();
     installImageErrorHandler();
+    installPreviewLoadFeedback();
     syncPreviewMeta(activePhoto());
     applyImageTransform(false);
     syncTrackTransform(0, false);

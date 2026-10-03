@@ -126,7 +126,12 @@ test('profile shell cancels legacy named-grid tracks on wide layouts', function(
 test('desktop chat layout helper switches at the phone boundary', function(){
   var source = read('js/core.js');
   assert.ok(source.indexOf('function shouldUseDesktopChatSplitLayout()') >= 0, 'missing desktop chat layout helper');
-  assert.ok(/function shouldUseDesktopChatSplitLayout\(\)[\s\S]*?return width >= 768 && height >= 480;/.test(source), 'desktop chat split must match the desktop.css media query (>=768px wide AND >=480px tall)');
+  // Keyboard height must not turn an already active tablet shell into a phone shell.
+  var helper = source.match(/function shouldUseDesktopChatSplitLayout\(\)[\s\S]*?\n            }/)[0];
+  [[390,844,false,false],[844,390,false,false],[1024,768,false,true],[1024,350,false,false],[1024,350,true,true],[390,350,true,false]].forEach(function(c){
+    var result=vm.runInNewContext('('+helper+')()', {window:{innerWidth:c[0],innerHeight:c[1]},document:{documentElement:{clientWidth:c[0],clientHeight:c[1],classList:{contains:function(name){return name==='xtj-tablet-keyboard'&&c[2];}}}}});
+    assert.strictEqual(result,c[3], 'desktop boundary and tablet keyboard exception at '+c[0]+'x'+c[1]);
+  });
   assert.ok(source.indexOf('function syncDockChatLayoutState()') >= 0, 'missing chat layout state sync');
   assert.ok(source.indexOf('选择一条会话开始聊天') >= 0, 'desktop chat empty state missing');
 });
