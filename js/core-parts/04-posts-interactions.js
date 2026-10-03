@@ -102,6 +102,7 @@
 
             function updatePostLikeCount(postId, likeCount) {
                 var count = Number(likeCount);
+                if (window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === String(postId) && Number.isFinite(count)) window.__xtjPostDetailSnapshot.like_count = count;
                 if (!Number.isFinite(count) || count < 0) return;
                 var pid = String(postId || '');
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
@@ -162,7 +163,8 @@
             window.__xtjApplyRealtimeLike = function(eventType, row) {
                 if (!row || row.id == null || row.post_id == null) return;
                 var postId = String(row.post_id);
-                if (!(feedAllPosts || []).some(function(post) { return String(post && post.id) === postId; })) return;
+                var detail = window.__xtjPostDetailSnapshot;
+                if (!(feedAllPosts || []).some(function(post) { return String(post && post.id) === postId; }) && !(detail && String(detail.id) === postId)) return;
                 // The API response owns the in-flight optimistic update on this device.
                 if (likeOperations[postId] && likeOperations[postId].running) return;
                 var likes = Array.isArray(feedAllLikes) ? feedAllLikes : (feedAllLikes = []);
@@ -193,6 +195,7 @@
                     return;
                 }
                 feedAllLikes = likes;
+                if (detail && String(detail.id) === postId && Number.isFinite(Number(detail.like_count)) && (eventType === 'DELETE' || shouldIncrement)) detail.like_count = Math.max(0, Number(detail.like_count) + (eventType === 'INSERT' ? 1 : -1));
                 document.querySelectorAll('.post[data-post-id]').forEach(function(card) {
                     if (String(card.getAttribute('data-post-id') || '') !== postId) return;
                     var stats = card.querySelector('.post-stats-text');
@@ -316,7 +319,7 @@
                     delete likeOperations[pid];
                     operation = null;
                 }
-                var visibleButton = getPostLikeButtons(pid)[0] || btn;
+                var visibleButton = btn && btn.classList ? btn : getPostLikeButtons(pid)[0];
                 var currentLiked = operation ? operation.desired : visibleButton.classList.contains('liked');
                 var nextLiked = !currentLiked;
                 if (!operation) {
@@ -474,6 +477,8 @@
                 }
                 
                 var postEl = findBySafePostSelector(postId);
+                var detail = document.getElementById('postDetailModal');
+                if (detail && detail.classList.contains('active')) { var detailSel = safePostSelector(postId); var detailCard = detailSel && detail.querySelector(detailSel); if (detailCard) postEl = detailCard; }
                 if (!postEl) return;
                 
                 // 如果已经存在，则收起（切换显示状态）
@@ -757,6 +762,7 @@
                             feedAllComments = (feedAllComments || []).filter(function(item) {
                                 return !(item && item.id != null && String(item.id) === String(insertedComment.id));
                             }).concat([insertedComment]);
+                            if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('INSERT', insertedComment);
                             writeFeedCacheSnapshot();
                             if (typeof window.__xtjSchedulePostCardPatch === 'function') {
                                 window.__xtjSchedulePostCardPatch(targetPostId);
@@ -963,6 +969,7 @@
             }
             function applyConfirmedPostDeletion(postId, session) {
                 removeDeletedPostFromFeed(postId);
+                if (String(window.__xtjPostDetailCurrentId || '') === String(postId) && typeof window.closeModal === 'function') window.closeModal('postDetailModal');
                 if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
 
                 // 删除只过渡合成属性，完成后一次移除节点，避免连续重算整张卡片的布局。
@@ -1338,7 +1345,7 @@
                 overlay.classList.toggle('pp-post-mode', isPostPhoto);
                 // ★ 修复：单图预览（帖子图 / 聊天图）都隐藏左右翻页箭头——只有一张图时
                 //   箭头点了没反应，反而和关闭按钮一起造成「按钮很多但没用」的观感。
-                var singleItem = isPostPhoto || isChatPhoto ||
+                var singleItem = isChatPhoto ||
                     (Array.isArray(window.__xtjPreviewExplicitPhotos) && window.__xtjPreviewExplicitPhotos.length <= 1);
                 var prevBtn = document.getElementById('ppPrevBtn');
                 var nextBtn = document.getElementById('ppNextBtn');
@@ -1348,13 +1355,16 @@
                 if (deleteBtn) {
                     if (isPostPhoto) {
                         setCtBtnDisplay(deleteBtn, photo.__xtjCanDelete ? 'flex' : 'none');
-                        deleteBtn.title = '删除帖子';
+                        deleteBtn.title = '删除帖子'; deleteBtn.setAttribute('aria-label', '删除帖子');
+                        deleteBtn.__xtjPostDeleteBound = true;
+                        deleteBtn.onclick = function() { window.deletePostPhotoFromPreview(); };
                     } else {
                         // 聊天图 / 通用图不属于当前用户可删除的内容，强制隐藏。
                         // 必须用 setProperty(...,'important')：style.css 里
                         // #photoPreviewOverlay .pp-delete-btn { display:flex !important }
                         // 会压过普通内联值（实测改完后按钮仍在工具栏里显示）。
                         setCtBtnDisplay(deleteBtn, 'none');
+                        deleteBtn.onclick = function() { window.deletePhotoFromPreview(); };
                     }
                 }
                 // 聊天图片不提供「分享」（复制图片直链给他人并无意义，且聊天图多为
@@ -1400,16 +1410,34 @@
                     actorKey: photo.__xtjActorKey || '',
                     canDelete: !!photo.__xtjCanDelete
                 };
-                window.openPhotoPreview(0, { photos: [photo], originEl: triggerEl && triggerEl.getBoundingClientRect ? triggerEl : null });
+                var photos = [photo], index = 0;
+                if (photo.__xtjSource === 'post') {
+                    var detailPost = window.__xtjPostDetailSnapshot;
+                    var post = detailPost && String(detailPost.id) === photo.__xtjPostId ? detailPost :
+                        (feedAllPosts || []).find(function(p) { return String(p.id) === photo.__xtjPostId; });
+                    var mediaItems = post ? getPostMediaItems(post).filter(function(item) { return item.media_type === 'image' && !!sanitizeUrl(item.media_url); }) : [];
+                    if (mediaItems.length) {
+                        photos = mediaItems.map(function(item, position) {
+                            return Object.assign({}, photo, { id: 'post_' + photo.__xtjPostId + '_' + (item.id || position), imageUrl: sanitizeUrl(item.media_url),
+                                thumbUrl: sanitizeUrl(item.media_url), width: item.width || null, height: item.height || null, fileSize: item.file_size || null, views: Number(post.views) || 0, __xtjCanDelete: canDeletePost(post), __xtjMediaIndex: position });
+                        });
+                        index = Math.max(0, photos.findIndex(function(item) { return item.imageUrl === photo.imageUrl; }));
+                        var clickedIndex = Number(triggerEl && triggerEl.getAttribute('data-post-media-index'));
+                        if (Number.isInteger(clickedIndex) && photos[clickedIndex] && photos[clickedIndex].imageUrl === photo.imageUrl) index = clickedIndex;
+                    }
+                }
+                photo = photos[index];
+                window.openPhotoPreview(index, { photos: photos, originEl: triggerEl && triggerEl.getBoundingClientRect ? triggerEl : null });
                 window.photoPreviewCurrent = photo;
                 // 同步 chrome 需要等 hotfix 的 afterOpen（双 rAF + 打开动画）走完，
                 // 否则按钮会在其后的重置里被改回来。这里在两个时间点各同步一次：
                 // 30ms 覆盖快路径，480ms 兜底覆盖慢路径/动画较长的设备。
-                setTimeout(function() { syncPostPhotoPreviewChrome(photo); }, 30);
-                setTimeout(function() { syncPostPhotoPreviewChrome(photo); }, 480);
+                setTimeout(function() { if (window.photoPreviewCurrent && window.photoPreviewCurrent.__xtjPostId === photo.__xtjPostId) syncPostPhotoPreviewChrome(window.photoPreviewCurrent); }, 30);
+                setTimeout(function() { if (window.photoPreviewCurrent && window.photoPreviewCurrent.__xtjPostId === photo.__xtjPostId) syncPostPhotoPreviewChrome(window.photoPreviewCurrent); }, 480);
                 return true;
             }
             window.openPostImagePreview = openPostImagePreview;
+            window.syncPostPhotoPreviewChrome = syncPostPhotoPreviewChrome;
 
             window.openImageViewer = function (src, triggerEl) {
                 function fallbackOpen() {
@@ -1457,17 +1485,18 @@
                 document.body.style.overflow = '';
             };
 
-            window.deleteCurrentPhoto = function() {
+            window.deletePostPhotoFromPreview = function() {
                 var ctx = window.__xtjPhotoPreviewContext || null;
                 var current = window.photoPreviewCurrent || null;
-                if (ctx && ctx.kind === 'post' && current && current.__xtjSource === 'post') {
-                    if (!ctx.canDelete) {
+                if (current && current.__xtjSource === 'post') {
+                    if (!ctx || ctx.kind !== 'post' || String(ctx.postId) !== String(current.__xtjPostId) || !ctx.canDelete || !current.__xtjCanDelete) {
                         showToast('仅发布者可删除');
                         return;
                     }
+                    var identity = capturePostActionIdentity();
                     if (typeof window.closePhotoPreview === 'function') window.closePhotoPreview();
                     setTimeout(function() {
-                        openDelete(ctx.postId, ctx.actorKey || '');
+                        if (postActionIdentityCurrent(identity)) openDelete(ctx.postId, ctx.actorKey || '');
                     }, 60);
                     return;
                 }
@@ -1475,6 +1504,8 @@
                     window.deletePhotoFromPreview();
                 }
             };
+
+            window.deleteCurrentPhoto = window.deletePostPhotoFromPreview;
 
             document.addEventListener('keydown', function (e) {
                 if (e.key !== 'Escape') return;
@@ -1802,7 +1833,8 @@
                 var found = Array.isArray(feedAllPosts) ? feedAllPosts.find(function(post) {
                     return post && String(post.id) === String(postId);
                 }) : null;
-                return found || postInfoCache[postId] || null;
+                var detail = window.__xtjPostDetailSnapshot;
+                return (detail && String(detail.id) === String(postId) ? detail : null) || found || postInfoCache[postId] || null;
             };
 
             let feedPage = 1;
@@ -1878,6 +1910,7 @@
                     user_name: normalized.user_name || '',
                     media_url: normalized.media_url || '',
                     media_type: normalized.media_type || '',
+                    media_items: normalized.media_items || [],
                     created_at: normalized.created_at || '',
                     views: Number(normalized.views || 0)
                 };
@@ -2289,7 +2322,8 @@
                         actor_key: payload.actor_key || '',
                         visibility: payload.visibility || 'public',
                         media_upload_id: payload.media_upload_id || null,
-                        media_storage_path: payload.media_storage_path || null
+                        media_storage_path: payload.media_storage_path || null,
+                        attachments: payload.attachments || undefined
                     };
                     // 位置字段（可选，用户主动选择）
                     if (payload.location && payload.location.name) {
@@ -2316,7 +2350,7 @@
                         try {
                             var fresh = await fetchPostSnapshot(data.id);
                             assertPostPublishIdentity(flight);
-                            if (fresh) data = normalizePost(fresh);
+                            if (fresh) data = normalizePost(Object.assign({}, data, fresh, { media_items: data.media_items }));
                         } catch (snapshotError) {
                             if (snapshotError && snapshotError.code === 'identity_changed') throw snapshotError;
                             console.warn('[post-create] snapshot refresh failed', snapshotError);
@@ -2431,7 +2465,7 @@
                 var key = String(postId);
                 if (publishedPostIpRefreshTimers[key]) return;
                 publishedPostIpRefreshTimers[key] = true;
-                var attempts = 0;
+                var attempts = 0, owner = currentUser, epoch = _authStateEpoch;
                 // Track the complete server retry schedule: an immediate retry, then 30s,
                 // then 5m. The extra polling margin covers the resolver deadline on the
                 // final attempt so a successful backend update is not missed by this card.
@@ -2444,8 +2478,10 @@
                     delete publishedPostIpRefreshTimers[key];
                 }
                 function run() {
+                    if (owner !== currentUser || epoch !== _authStateEpoch) { cleanup(); return; }
                     attempts++;
                     fetchPostSnapshot(postId).then(function(freshPost) {
+                        if (owner !== currentUser || epoch !== _authStateEpoch) { cleanup(); return; }
                         var normalized = freshPost ? normalizePost(freshPost) : null;
                         var ipText = normalized ? String(normalized.ip_region_text || "").trim() : "";
                         var ipStatus = normalized ? String(normalized.ip_region_status || "").trim() : "";
@@ -2493,6 +2529,7 @@
                 var visibilityEl = document.getElementById("postVisibility");
                 if (postInp) postInp.value = "";
                 if (fileInp) fileInp.value = "";
+                if (window.XtjPostComposerMedia) window.XtjPostComposerMedia.clear();
                 if (visibilityEl) visibilityEl.value = "public";
                 resetPostLocation();
             }
@@ -2523,7 +2560,10 @@
             async function fetchPostSnapshot(postId) {
                 var fetched = await sb.from("posts").select("*").eq("id", postId).maybeSingle();
                 if (fetched.error) throw fetched.error;
-                return fetched.data || null;
+                if (!fetched.data) return null;
+                var existing = (feedAllPosts || []).find(function(post) { return String(post.id) === String(postId); });
+                if (!existing && window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === String(postId)) existing = window.__xtjPostDetailSnapshot;
+                return existing && Array.isArray(existing.media_items) ? Object.assign({}, fetched.data, { media_items: existing.media_items }) : fetched.data;
             }
 
             async function updatePostRecord(post, updates) {
@@ -2702,7 +2742,9 @@
             var activePostAiSession = null;
             function getPostToolAnchor(postId) {
                 var esc = escapeCssIdent(postId);
-                return esc ? document.querySelector('.post-tools-trigger[data-post-id="' + esc + '"]') : null;
+                var detail = document.getElementById('postDetailModal');
+                var scope = detail && detail.classList.contains('active') ? detail : document;
+                return esc ? scope.querySelector('.post-tools-trigger[data-post-id="' + esc + '"]') : null;
             }
             function postToolFetch(body) {
                 var identity = capturePostActionIdentity();
@@ -2910,6 +2952,76 @@
                 }
             }
 
+            function getPostMediaItems(post) {
+                return window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(post) : (post.media_url ? [{ media_url: post.media_url, media_type: post.media_type, position: 0 }] : []);
+            }
+            function renderPostMediaGrid(post, options) {
+                var items = getPostMediaItems(post).filter(function(item) { return !!sanitizeUrl(item.media_url || ''); });
+                if (!items.length) return '';
+                var first = items[0], safeMediaUrl = sanitizeUrl(first.media_url);
+                if (first.media_type === 'video') return '<div class="media"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="none" playsinline></video></div>';
+                if (first.media_type === 'audio') return '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
+                var visible = options && options.detail ? items : items.slice(0, 9);
+                var columns = window.XtjPostMedia ? window.XtjPostMedia.gridColumns(items.length) : 1;
+                return '<div class="media post-media-grid' + (items.length === 1 ? ' post-media-grid--single' : '') + '" style="--post-grid-columns:' + columns + '">' + visible.map(function(item, index) {
+                    var url = sanitizeUrl(item.media_url), width = Number(item.width), height = Number(item.height);
+                    var validDims = width > 0 && height > 0 && width <= 20000 && height <= 20000;
+                    var ratio = validDims ? width + ' / ' + height : '4 / 3';
+                    var attrs = 'data-post-id="' + escapeHtml(String(post.id)) + '" data-post-media-index="' + index + '" data-media-url="' + escapeHtml(url) + '"' +
+                        ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
+                        ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
+                    var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
+                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + '" onclick="openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
+                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low">' +
+                        (index === 8 && items.length > visible.length ? '<span class="post-media-overflow">+' + (items.length - visible.length) + '</span>' : '') + '</button>';
+                }).join('') + '</div>';
+            }
+            window.getPostMediaItems = getPostMediaItems;
+            window.renderPostMediaGrid = renderPostMediaGrid;
+
+            function buildPostCommentsHtml(post, pComms, options) {
+                if (!pComms.length) return '';
+                var limit = options && options.detail ? Infinity : 3;
+                function commentDeleteButton(comment) {
+                    if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
+                    return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
+                }
+                      var _byId = {}; var _seen = Object.create(null); var _count = 0;
+                      pComms.forEach(function(c) { _byId[String(c.id)] = c; });
+                      var _childrenOf = {};
+                      var _roots = [];
+                      pComms.forEach(function(c) {
+                        var _pid = (c.parent_comment_id != null && String(c.parent_comment_id) !== '') ? String(c.parent_comment_id) : '';
+                        if (_pid && _byId[_pid]) {
+                          (_childrenOf[_pid] = _childrenOf[_pid] || []).push(c);
+                        } else {
+                          _roots.push(c);
+                        }
+                      });
+                      function _renderCommentNode(c, depth) {
+                        depth = typeof depth === 'number' ? depth : 0;
+                        if (_seen[String(c.id)] || _count >= limit) return '';
+                        _seen[String(c.id)] = true; _count++;
+                        var _node;
+                        if (c.user_name === 'cat_ai' && c.generated_by_ai) {
+                          _node = '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
+                        } else {
+                          _node = '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
+                        }
+                        var _kids = _childrenOf[String(c.id)] || [];
+                        if (_kids.length && depth < 8 && _count < limit) {
+                          _node += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + _kids.map(function(child) { return _renderCommentNode(child, depth + 1); }).join('') + '</div>';
+                        }
+                        return _node;
+                      }
+                var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
+                // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
+                pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
+                if (pComms.length > _count) html += '<button type="button" class="post-all-comments" onclick="openPostDetail(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + pComms.length + ' 条评论</button>';
+                return '<div class="comments">' + html + '</div>';
+            }
+            window.buildPostCommentsHtml = buildPostCommentsHtml;
+
             function renderPostCard(post, commentMap, likeMap, likeUserMap) {
                 var normalized = normalizePost(post);
                 // 安全兜底：content 是系统遥测/定位 JSON 则跳过
@@ -2920,49 +3032,9 @@
                 var pComms = commentMap[normalized.id] || [];
                 var isLiked = isPostLikedByCurrentUser(likeUserMap, normalized.id);
                 var canDelete = canDeletePost(normalized);
-                function commentDeleteButton(comment) {
-                    if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
-                    return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
-                }
-                // ★ 修复：媒体 URL 复用 sanitizeUrl 清洗（拒绝 javascript:/data: 等非白名单协议）
-                var safeMediaUrl = sanitizeUrl(normalized.media_url || '');
-                var mediaDataAttrs = [
-                    'data-post-id="' + escapeHtml(String(normalized.id)) + '"',
-                    'data-media-url="' + escapeHtml(safeMediaUrl) + '"',
-                    'data-post-user="' + escapeHtml(String(normalized.user_name || "")) + '"',
-                    'data-post-created-at="' + escapeHtml(String(normalized.created_at || "")) + '"',
-                    'data-post-views="' + escapeHtml(String(normalized.views || 0)) + '"',
-                    'data-file-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.fileSize) || "")) + '"',
-                    'data-original-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.originalSize) || "")) + '"'
-                ].join(" ");
-                var mediaMarkup = '';
-                if (safeMediaUrl) {
-                    if (normalized.media_type === 'video') mediaMarkup = '<div class="media"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="none" playsinline></video></div>';
-                    else if (normalized.media_type === 'audio') mediaMarkup = '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
-                    else {
-                        // ★ 2026-09-27 修复（审计 P9：feed 媒体 <img> 无尺寸占位，CLS 跳动）：
-                        //   根因：feed 卡片图片只有 loading="lazy" 没有宽高/aspect-ratio，
-                        //   图片解码前盒子高度为 0，解码完成后撑开 → 整列内容下移（CLS）。
-                        //   修法：参照聊天气泡约定（06-chat-and-nav 的 msg-img）写内联
-                        //   aspect-ratio；有真实宽高就同时写 width/height 属性。
-                        //   现状：帖子接口未持久化像素尺寸（服务端 posts 表无 media_width/height，
-                        //   normalizePost 的 _contentMeta 也无 w/h），因此这里对已有字段做
-                        //   「有则用、无则兜底」的防御性处理：万一后续接口补上 width/height
-                        //   或 _contentMeta.w/h，立刻生效；确实拿不到时兜 4:3。
-                        //   注意：aspect-ratio 需至少一维确定才生效，而 CSS 已给
-                        //   `.media img { width:100% }`，宽度确定 → aspect-ratio 可算出高度，
-                        //   盒子立即有尺寸，消除加载前后跳动。仅渲染属性，不影响照片墙直传。
-                        var _mw = Math.round(Number(normalized.media_width || normalized.width || (normalized._contentMeta && normalized._contentMeta.w) || 0));
-                        var _mh = Math.round(Number(normalized.media_height || normalized.height || (normalized._contentMeta && normalized._contentMeta.h) || 0));
-                        var hasRealDims = (_mw > 0 && _mh > 0 && _mw <= 20000 && _mh <= 20000);
-                        if (!hasRealDims) { _mw = 4; _mh = 3; }
-                        var imgDimAttr = ' style="aspect-ratio:' + _mw + ' / ' + _mh + '"';
-                        if (hasRealDims) imgDimAttr += ' width="' + _mw + '" height="' + _mh + '"';
-                        mediaMarkup = '<div class="media"><img ' + mediaDataAttrs + imgDimAttr + ' data-actor-key="' + escapeHtml(String(normalized.actor_key || '')) + '" data-can-delete="' + (canDelete ? '1' : '0') + '" src="' + escapeHtml(safeMediaUrl) + '" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer(\'' + safeJsStr(safeMediaUrl) + '\', this)"></div>';
-                    }
-                }
+                var mediaMarkup = renderPostMediaGrid(normalized);
                 return `
-                <div class="post glass" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
+                <div class="post post-feed-item" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
                   <div class="post-header">
                     ${getAvatarHtml(normalized.user_name, normalized)}
                     <div class="post-header-main">
@@ -2978,39 +3050,7 @@
                   ${buildPostLocationHtml(normalized)}
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
-                  ${pComms.length ? `<div class="comments">${(function(){
-                      // ★ 修复：递归建树渲染评论。旧实现只把 parent 是 root 的回复当
-                      // 子节点，回复的回复（grandchild）被当成 root 直接子级错乱嵌套；
-                      // 父评论缺失/已删的回复既不渲染却仍计入评论数（数量不一致）。
-                      // 现按 parent_comment_id 递归建树：父缺失的回复提升为顶层展示，
-                      // 全部 pComms 均被渲染，评论数口径与实际渲染一致。
-                      var _byId = {};
-                      pComms.forEach(function(c) { _byId[String(c.id)] = c; });
-                      var _childrenOf = {};
-                      var _roots = [];
-                      pComms.forEach(function(c) {
-                        var _pid = (c.parent_comment_id != null && String(c.parent_comment_id) !== '') ? String(c.parent_comment_id) : '';
-                        if (_pid && _byId[_pid]) {
-                          (_childrenOf[_pid] = _childrenOf[_pid] || []).push(c);
-                        } else {
-                          _roots.push(c);
-                        }
-                      });
-                      function _renderCommentNode(c) {
-                        var _node;
-                        if (c.user_name === 'cat_ai' && c.generated_by_ai) {
-                          _node = '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
-                        } else {
-                          _node = '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
-                        }
-                        var _kids = _childrenOf[String(c.id)] || [];
-                        if (_kids.length) {
-                          _node += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + _kids.map(_renderCommentNode).join('') + '</div>';
-                        }
-                        return _node;
-                      }
-                      return _roots.map(_renderCommentNode).join('');
-                  })()}</div>` : ''}
+                  ${buildPostCommentsHtml(normalized, pComms)}
                 </div>`;
             }
 
@@ -3105,6 +3145,7 @@
                 var epoch = typeof _authStateEpoch === 'number' ? _authStateEpoch : 0;
                 var run = function() {
                     if (owner !== currentUser || epoch !== (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0)) return;
+                    if (window.__xtjMergePostDetailComments) window.__xtjMergePostDetailComments(postId, feedAllComments || []);
                     var feed = document.getElementById('feed');
                     // Off-screen posts do not require a rebuild of every visible card.
                     if (!feed || !feed.querySelector(safePostSelector(postId))) return;
@@ -3903,7 +3944,7 @@
                 feedAllPosts = sortPosts((feedAllPosts || []).map(function(post) {
                     if (!post || String(post.id) !== String(normalized.id)) return post;
                     exists = true;
-                    return Object.assign({}, post, normalized);
+                    return Object.assign({}, post, normalized, { media_items: Array.isArray(serverPost.media_items) || Array.isArray(serverPost.attachments) || normalized.media_url !== post.media_url ? normalized.media_items : post.media_items });
                 }));
                 if (!exists) {
                     feedAllPosts = sortPosts([normalized].concat(feedAllPosts || []));
@@ -4314,6 +4355,12 @@
                     return;
                 }
             });
+            document.addEventListener('click', function(e) {
+                var card = e.target.closest && e.target.closest('#feed > .post-feed-item');
+                if (!card || e.defaultPrevented || e.target.closest('button,a,input,textarea,select,video,audio,img,.actions,.comments,.inline-comment-box,.avatar,.avatar-wrap,.post-badge-stack')) return;
+                if (window.getSelection && String(window.getSelection()).trim()) return;
+                window.openPostDetail(card.getAttribute('data-post-id'));
+            });
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') closePostToolsMenu();
             });
@@ -4474,6 +4521,7 @@
             }
 
             var postPublishFlight = null;
+            var activePostUploadFlights = new Set();
             function postPublishIdentityCurrent(flight) {
                 return !!flight && flight.owner === currentUser && flight.epoch === _authStateEpoch && postPublishFlight === flight;
             }
@@ -4515,7 +4563,7 @@
                 var identity = { owner: currentUser, epoch: _authStateEpoch };
                 if (!identity.owner) return;
                 readPendingPostMedia(identity.owner).forEach(function(row) {
-                    if (postPublishFlight && postPublishFlight.owner === identity.owner) return;
+                    if (Array.from(activePostUploadFlights).some(function(flight) { return flight.owner === identity.owner; })) return;
                     cleanupPendingPostMedia(identity, row.storage_path, row.upload_id);
                 });
             }
@@ -4525,6 +4573,20 @@
                 }
                 retryPendingPostMedia();
             });
+
+            async function readPostImageDimensions(file) {
+                var url = URL.createObjectURL(file);
+                try {
+                    return await new Promise(function(resolve) {
+                        var img = new Image(), finished = false;
+                        var timer = setTimeout(function() { finish({ width: null, height: null }); }, 8000);
+                        function finish(value) { if (finished) return; finished = true; clearTimeout(timer); img.onload = img.onerror = null; resolve(value); }
+                        img.onload = function() { finish(img.naturalWidth > 0 && img.naturalHeight > 0 && img.naturalWidth <= 20000 && img.naturalHeight <= 20000
+                            ? { width: img.naturalWidth, height: img.naturalHeight } : { width: null, height: null }); };
+                        img.onerror = function() { finish({ width: null, height: null }); }; img.src = url;
+                    });
+                } finally { URL.revokeObjectURL(url); }
+            }
 
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
@@ -4538,7 +4600,10 @@
                 var fileInpEl = document.getElementById("fileInp");
                 if (!postInpEl) { showToast("发布框未就绪，请刷新后重试"); return; }
                 var content = postInpEl.value.trim();
-                var file = (fileInpEl && fileInpEl.files && fileInpEl.files[0]) || null;
+                var selectedPostMedia = window.XtjPostComposerMedia ? window.XtjPostComposerMedia.getFiles() : Array.from((fileInpEl && fileInpEl.files) || []);
+                try { if (window.XtjPostMedia) window.XtjPostMedia.validateSelection(selectedPostMedia); }
+                catch (selectionError) { showToast(selectionError.message); return; }
+                var file = selectedPostMedia[0] || null;
                 var visibilityEl = document.getElementById("postVisibility");
                 var visibility = visibilityEl ? visibilityEl.value : "public";
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
@@ -4552,35 +4617,43 @@
                 }
                 var flight = { owner: currentUser, epoch: _authStateEpoch, button: btn, markup: btn.innerHTML };
                 postPublishFlight = flight;
+                activePostUploadFlights.add(flight);
                 var publishLocation = postLocationData ? Object.assign({}, postLocationData) : null;
                 btn.disabled = true;
                 btn.classList.add('is-loading');
                 btn.setAttribute('aria-busy', 'true');
                 btn.dataset.originalText = btn.textContent;btn._composeMarkup=btn.innerHTML;
                 btn.innerHTML = '<span>发布中</span>';
-                var uploadedPath = '', mediaUploadId = '';
+                var uploadedPath = '', mediaUploadId = '', uploadedMedia = [];
                 try {
                     var media_url = "";
                     var media_type = "";
-                    if (file) {
-                        // ★ 类型黑名单：anon 直传 Storage 拒绝可执行/脚本类文件（svg/svgz/html/xml/swf）
-                        var blockedUpload = /\.(svgz?|html?|xml|swf)$/i.test(String(file && file.name || '')) || /^image\/svg\+xml/i.test(String(file && file.type || ''));
-                        if (blockedUpload) throw new Error('file type not allowed');
-                        var path = buildStorageUploadPath('posts', file.name);
-                        mediaUploadId = crypto.randomUUID();
-                        var prepareResponse = await window.xtjProtectedFetch('/api/post/media/prepare', { method: 'POST', authOwner: flight.owner, authEpoch: flight.epoch, body: JSON.stringify({ storage_path: path, upload_id: mediaUploadId }) });
-                        var prepared = await prepareResponse.json();
-                        assertPostPublishIdentity(flight);
-                        if (!prepareResponse.ok || !prepared.ok || !prepared.storage_path || !String(prepared.storage_path).startsWith('posts/')) throw new Error(prepared.error || '上传准备失败');
-                        path = prepared.storage_path;
-                        uploadedPath = path;
-                        rememberPendingPostMedia(flight.owner, path, mediaUploadId);
-                        var uploadRes = await sb.storage.from("uploads").upload(path, file, { upsert: false });
-                        assertPostPublishIdentity(flight);
-                        if (uploadRes.error) throw uploadRes.error;
-                        uploadedPath = path;
-                        media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
-                        media_type = file.type.startsWith("image/") ? "image" : (file.type.startsWith("audio/") ? "audio" : "video");
+                    var attachments = [];
+                    if (file && window.XtjPostMedia) {
+                        var uploaded = await window.XtjPostMedia.mapUploads(selectedPostMedia, async function(selectedFile, position) {
+                            assertPostPublishIdentity(flight);
+                            var path = buildStorageUploadPath('posts', selectedFile.name), uploadId = crypto.randomUUID();
+                            var pending = { storage_path: path, upload_id: uploadId };
+                            uploadedMedia.push(pending);
+                            rememberPendingPostMedia(flight.owner, path, uploadId);
+                            var prepareResponse = await window.xtjProtectedFetch('/api/post/media/prepare', { method: 'POST', authOwner: flight.owner, authEpoch: flight.epoch, body: JSON.stringify(pending) });
+                            var prepared = await prepareResponse.json();
+                            assertPostPublishIdentity(flight);
+                            if (!prepareResponse.ok || !prepared.ok || prepared.storage_path !== path) throw new Error(prepared.error || '上传准备失败');
+                            var uploadRes = await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false });
+                            assertPostPublishIdentity(flight);
+                            if (uploadRes.error) throw uploadRes.error;
+                            var dimensions = selectedFile.type.startsWith('image/') ? await readPostImageDimensions(selectedFile) : {};
+                            assertPostPublishIdentity(flight);
+                            return Object.assign({}, pending, dimensions, { position: position, media_type: selectedFile.type.split('/')[0],
+                                media_url: sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
+                        }, 3);
+                        media_url = uploaded[0].media_url;
+                        media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
+                        if (media_type === 'album' || media_type === 'image') attachments = uploaded;
+                        else { uploadedPath = uploaded[0].storage_path; mediaUploadId = uploaded[0].upload_id; }
+                    } else if (file) {
+                        throw new Error('附件模块未加载，请刷新后重试');
                     }
                     var plainText = content.slice(0, 2000);
                     var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: publishLocation }) : { visibility: visibility || "public" };
@@ -4597,18 +4670,20 @@
                         updated_at: null,
                         location: publishLocation,
                         media_upload_id: mediaUploadId || null,
-                        media_storage_path: uploadedPath || null
+                        media_storage_path: uploadedPath || null,
+                        attachments: attachments.length ? attachments : null
                     };
                     assertPostPublishIdentity(flight);
                     var insertRes = await insertPostRecord(payload, contentPayload, flight);
                     assertPostPublishIdentity(flight);
                     if (!insertRes.ok) {
-                        if (uploadedPath) await cleanupPendingPostMedia(flight, uploadedPath, mediaUploadId);
+                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
                         assertPostPublishIdentity(flight);
                         showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
                         return;
                     }
-                    forgetPendingPostMedia(flight.owner, uploadedPath);
+                    uploadedMedia.forEach(function(item) { forgetPendingPostMedia(flight.owner, item.storage_path); });
+                    uploadedMedia = [];
                     uploadedPath = '';
                     assertPostPublishIdentity(flight);
                     touchUserSession(false);
@@ -4632,9 +4707,11 @@
                     }
                     loadProfileActivity(true).catch(function() {});
                 } catch (e) {
-                    if (uploadedPath) await cleanupPendingPostMedia(flight, uploadedPath, mediaUploadId);
+                    await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
                     if (postPublishIdentityCurrent(flight)) showToast("发布失败: " + (e.message || "网络错误"));
                 } finally {
+                    activePostUploadFlights.delete(flight);
+                    if (!postPublishIdentityCurrent(flight) && currentUser === flight.owner) retryPendingPostMedia();
                     if (postPublishFlight === flight) {
                         postPublishFlight = null;
                         restorePostPublishButton(flight);

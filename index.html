@@ -79,12 +79,13 @@
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d1d9232b4d" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=6327543bb4" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=943e29965b">
+    <link rel="stylesheet" href="css/post-feed.min.css?v=1c57690d09">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=54248dc057">
     <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=19c662768f">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=736f2d9bb1">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=07206f896f">
-    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=332d5656a7">
-    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=07878cedb8">
+    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=1cc6625671">
+    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=e360d41582">
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=6865cc5b27">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=4f061a924f">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=21d7c3bc7e">
@@ -253,7 +254,7 @@
                     </div>
                     <div class="publish-footer">
                         <button type="button" class="file-label compose-tool" onclick="document.getElementById('fileInp').click()" aria-label="选择照片、视频或音频"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg><span>照片视频</span></button>
-                        <input type="file" id="fileInp" accept="image/*,video/*,audio/*" style="display:none" />
+                        <input type="file" id="fileInp" multiple accept="image/*,video/*,audio/*" style="display:none" />
                         <button class="compose-tool compose-send" id="pubBtn" onclick="doPublish()" aria-label="发动态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7-7-2Z"/><path d="m11 13 9-9"/></svg><span>发动态</span></button>
                     </div>
                 </div>
@@ -314,7 +315,8 @@
                     </div>
                 </div>
                 <!-- 首屏并行拉帖：不依赖 core.js / supabase，避免大包未下载完时永久 skeleton -->
-                <script src="js/early-feed.min.js?v=4b616978cd"></script>
+                <script src="js/post-media.min.js?v=59f8bf7bbc"></script>
+                <script src="js/early-feed.min.js?v=785ea4d526"></script>
             </div>
         </div>
 
@@ -1225,10 +1227,11 @@
     <script defer src="js/vendor/supabase.min.js?v=e8c548fa1b"></script>
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
+    <script defer src="js/post-composer-media.min.js?v=ff8d19f1ce"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
     <script defer src="js/photo-wall/story.min.js?v=3dd8ec6135"></script>
     <script defer src="js/voice-transcription.min.js?v=39cfe95168"></script>
-    <script defer src="js/core.min.js?v=8ddd9a0bbc"></script>
+    <script defer src="js/core.min.js?v=d84650f876"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=09b5c7ef68"></script>
     <script defer src="js/desktop-shell.min.js?v=d911eea54e"></script>

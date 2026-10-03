@@ -2374,6 +2374,7 @@ function isAdmin() {
                 location_city: post && post.location_city ? post.location_city : metaLocationCity,
                 location_district: post && post.location_district ? post.location_district : metaLocationDistrict,
                 location_level: post && post.location_level ? post.location_level : metaLocationLevel,
+                media_items: window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(Object.assign({}, post, { _contentMeta: meta })) : (post && post.media_items),
                 _contentMeta: meta
             });
         }

@@ -927,6 +927,7 @@
                         .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, function(payload) {
                             var row = payload.new || payload.old;
                             if (!row || row.id == null) return;
+                            if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment(payload.eventType, row);
                             var commentId = String(row.id);
                             if (payload.eventType === 'DELETE') {
                                 feedAllComments = (feedAllComments || []).filter(function(comment) {

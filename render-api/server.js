@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord, inspectPhotoOriginal, validatePhotoCreatePayload } = require('./photo-create');
+const { validatePostAttachments, loadPostAttachments, createPostWithAttachments } = require('./post-attachments');
 const { installPostMedia, createPostWithMedia, parsePostMediaUrl, isLocalUploadUrl, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads } = require('./post-media');
 const {
   claimDmMediaUpload,
@@ -4963,6 +4964,16 @@ function validateSearchResult(item) {
 }
 
 // ===================== 帖子详情 API =====================
+async function readPostDetailComments(db, postId) {
+  var data = [], count = null;
+  for (var offset = 0;; offset += 500) {
+    var result = await db.from('comments').select('id,post_id,user_name,content,parent_comment_id,generated_by_ai,created_at', { count: 'exact' }).eq('post_id', postId).order('created_at', { ascending: true }).order('id').range(offset, offset + 499);
+    if (result.error) return result;
+    count = result.count; data = data.concat(result.data || []);
+    if ((result.data || []).length < 500) return { data: data, count: count };
+  }
+}
+
 app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
   try {
     var postId = req.params.id;
@@ -4981,9 +4992,12 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
       //   /api/post/like 的口径保持一致。
       return res.status(404).json({ ok: false, error: 'post_not_found', message: '该帖子不存在、已删除或不可查看。' });
     }
+    try { post = (await loadPostAttachments(supabase, [post]))[0]; }
+    catch (error) { return res.status(503).json({ ok: false, error: error.code || 'attachments_unavailable', message: '帖子图片加载失败，请重试。', retryable: true }); }
     var likesRes = await supabase.from('likes').select('id,user_name,created_at', { count: 'exact' }).eq('post_id', postId).order('created_at', { ascending: false }).limit(50);
-    var commentsRes = await supabase.from('comments').select('id,user_name,content,created_at', { count: 'exact' }).eq('post_id', postId).order('created_at', { ascending: true }).limit(50);
-    if (likesRes.error || commentsRes.error) {
+    var commentsRes = await readPostDetailComments(supabase, postId);
+    var myLikeRes = req.userName ? await supabase.from('likes').select('id').eq('post_id', postId).eq('user_name', req.userName).limit(1) : { data: [] };
+    if (likesRes.error || commentsRes.error || myLikeRes.error) {
       return res.status(503).json({ ok: false, error: 'detail_relations_failed', message: '互动数据加载失败，请重试。' });
     }
     return res.json({
@@ -4991,13 +5005,15 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
       post: {
         id: post.id, user_name: post.user_name || '匿名用户',
         content: post.content || '', media_type: post.media_type || null,
-        media_url: post.media_url || null, visibility: post.visibility || 'public',
+        media_url: post.media_url || null, media_items: post.media_items, visibility: post.visibility || 'public',
+        is_pinned: post.is_pinned === true, pinned_at: post.pinned_at || null, updated_at: post.updated_at || null,
         created_at: post.created_at,
         // ★ 2026-09-26（审计 P3-2）：posts 表只有 views 列，不存在
         //   view_count/like_count/comment_count —— 原实现恒返回 0 且丢掉了真实
         //   浏览量。这里返回真实 views 与不受展示列表 limit 影响的精确互动总数。
         views: Number(post.views) || 0,
         view_count: Number(post.views) || 0,
+        liked_by_me: !!(myLikeRes.data && myLikeRes.data.length),
         like_count: Number.isFinite(Number(likesRes.count)) ? Number(likesRes.count) : (likesRes.data || []).length,
         comment_count: Number.isFinite(Number(commentsRes.count)) ? Number(commentsRes.count) : (commentsRes.data || []).length,
         // 2026-09-22：详情弹窗需要与 feed 卡片一致地展示 IP 属地/位置
@@ -5009,7 +5025,7 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
         ip_lookup_started_at: post.ip_lookup_started_at || null
       },
       likes: (likesRes.data || []).map(function(l) { return { id: l.id, user_name: l.user_name, created_at: l.created_at }; }),
-      comments: (commentsRes.data || []).map(function(c) { return { id: c.id, user_name: c.user_name, content: c.content, created_at: c.created_at }; })
+      comments: (commentsRes.data || []).map(function(c) { return { id: c.id, post_id: post.id, user_name: c.user_name, content: c.content, parent_comment_id: c.parent_comment_id, generated_by_ai: c.generated_by_ai, created_at: c.created_at }; })
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: 'internal_error', message: '服务器内部错误' });
@@ -13751,6 +13767,13 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     var mediaUrl = String(req.body && req.body.media_url || '');
     var mediaType = String(req.body && req.body.media_type || '');
     var visibility = String(req.body && req.body.visibility || 'public');
+    var attachments;
+    try { attachments = validatePostAttachments(req.body && req.body.attachments, SUPABASE_URL); }
+    catch (error) { return res.status(400).json({ error: error.message, code: error.code }); }
+    if (attachments.length) {
+      if (mediaType && !['image','album'].includes(mediaType)) return res.status(400).json({ error: '不能混合图片、视频或音频', code: 'mixed_media' });
+      mediaUrl = attachments[0].media_url; mediaType = attachments.length > 1 ? 'album' : 'image';
+    }
     if (!content.trim() && !mediaUrl) return res.status(400).json({ error: '请输入帖子内容', code: 'empty_post' });
     if (content.length > 50000) return res.status(400).json({ error: '内容长度超过限制', code: 'content_too_long' });
     if (['public', 'private'].indexOf(visibility) < 0) return res.status(400).json({ error: '可见范围无效', code: 'invalid_visibility' });
@@ -13761,7 +13784,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     var postMediaPath = parsePostMediaUrl(mediaUrl, SUPABASE_URL);
     if (mediaUrl && isLocalUploadUrl(mediaUrl, SUPABASE_URL) && !postMediaPath) return res.status(400).json({ error: '媒体地址无效', code: 'media_ownership' });
     var postMediaUploadId = req.body && req.body.media_upload_id;
-    if (postMediaPath && (req.body.media_storage_path !== postMediaPath || typeof postMediaUploadId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(postMediaUploadId))) {
+    if (!attachments.length && postMediaPath && (req.body.media_storage_path !== postMediaPath || typeof postMediaUploadId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(postMediaUploadId))) {
       return res.status(400).json({ error: '媒体上传登记无效，请重新选择附件', code: 'media_ownership' });
     }
     // ★ 2026-09-26（审计 P2-7）：actor_key（幂等键）此前完全无校验，客户端可写入
@@ -13770,7 +13793,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     if (clientActorKey && !/^[A-Za-z0-9_:.\-]{1,128}$/.test(clientActorKey)) {
       return res.status(400).json({ error: '幂等键格式无效', code: 'invalid_actor_key' });
     }
-    if (mediaType && ['image', 'video', 'audio'].indexOf(mediaType) < 0) return res.status(400).json({ error: '媒体类型无效', code: 'invalid_media_type' });
+    if (mediaType && ['image', 'video', 'audio'].indexOf(mediaType) < 0 && !(attachments.length && mediaType === 'album')) return res.status(400).json({ error: '媒体类型无效', code: 'invalid_media_type' });
 
     // ── 位置字段（可选，用户主动选择） ──
     var location = req.body && req.body.location;
@@ -13833,7 +13856,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       ip_lookup_started_at: ipLookupStartedAt,
       ip_region_error: ipRetryRequired ? String(ipRegion.error || 'initial_lookup_failed').slice(0, 500) : null
     };
-    var inserted = postMediaPath
+    var inserted = attachments.length ? await createPostWithAttachments(supabase, req.userName, payload, attachments) : postMediaPath
       ? await createPostWithMedia(supabase, req.userName, postMediaPath, postMediaUploadId, payload)
       : await supabase.from('posts').insert([payload]).select('*').single();
     var degraded = false;
@@ -13841,7 +13864,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     if (inserted.error) {
       // Registered uploads require the transactional attach/cleanup boundary.
       // Missing migrations or errors must never downgrade to an unlocked insert.
-      if (postMediaPath) return res.status(503).json({ error: '媒体保存暂不可用，请重试', code: inserted.error.code || 'create_failed', retryable: true });
+      if (postMediaPath || attachments.length) return res.status(503).json({ error: '媒体保存暂不可用，请重试', code: inserted.error.code || 'create_failed', retryable: true });
       // 检测具体缺失的列名，仅对可选字段降级
       var errMsg = String(inserted.error.message || '');
       var missingCols = [];
@@ -14145,7 +14168,7 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
   try {
     var postId = normalizePostId(req.body && req.body.post_id);
     if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
-    var lookup = await supabase.from('posts').select('user_name, actor_key, media_type').eq('id', postId).maybeSingle();
+    var lookup = await supabase.from('posts').select('user_name, actor_key, media_type, media_url').eq('id', postId).maybeSingle();
     if (lookup.error) return res.status(500).json({ error: sanitizeError(lookup.error), code: 'delete_lookup_failed' });
     var post = lookup.data;
     if (!post) return res.json({ ok: true, deleted: false, already_deleted: true, post_id: postId });
@@ -14164,7 +14187,7 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
       isAdmin: isAdmin,
       expectPhoto: false,
       actorKey: actorKey,
-      storagePaths: []
+      storagePaths: parsePostMediaUrl(post.media_url, SUPABASE_URL) ? [parsePostMediaUrl(post.media_url, SUPABASE_URL)] : []
     });
     if (hardDelete.error) return res.status(500).json({ error: sanitizeError(hardDelete.error), code: 'delete_failed' });
     var result = hardDelete.result || {};
@@ -14779,6 +14802,8 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       }
     }
 
+    try { posts = await loadPostAttachments(supabase, posts); }
+    catch (error) { return res.status(503).json({ error: '帖子图片加载失败，请重试', code: error.code || 'attachments_unavailable', retryable: true }); }
     // 获取相关评论和点赞
     var postIds = posts.map(function(p) { return p.id; });
     var comments = [];

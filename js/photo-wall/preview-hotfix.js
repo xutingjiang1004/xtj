@@ -211,7 +211,15 @@
   }
 
   function syncPreviewMeta(photo) {
+    if (photo && photo.__xtjSource && typeof window.syncPostPhotoPreviewChrome === 'function') window.syncPostPhotoPreviewChrome(photo);
     photo = photo || activePhoto();
+    var deleteBtn = document.getElementById('ppDeleteBtn');
+    if (photo && !photo.__xtjSource && deleteBtn && deleteBtn.__xtjPostDeleteBound) {
+      deleteBtn.__xtjPostDeleteBound = false;
+      deleteBtn.onclick = function() { window.deletePhotoFromPreview(); };
+      deleteBtn.title = '删除'; deleteBtn.setAttribute('aria-label', '删除');
+      deleteBtn.style.removeProperty('display');
+    }
     if (photo && window.renderPhotoStory) { window.renderPhotoStory(photo); return; }
     var userEl = document.getElementById('photoPreviewUser');
     var timeEl = document.getElementById('photoPreviewTime');
@@ -1661,6 +1669,11 @@
   function originForCurrent(){
     var photo=activePhoto(),grid=document.getElementById('photoGrid'),root=overlay(),node=null;
     if(photo&&grid){var cards=grid.querySelectorAll('.photo-wall-item');for(var k=0;k<cards.length;k++){if(String(cards[k].getAttribute('data-photo-id'))===String(photo.id)){node=cards[k].querySelector('img');break;}}}
+    if(photo&&photo.__xtjSource==='post'){
+      var detail=document.getElementById('postDetailModal'),scope=detail&&detail.classList.contains('active')?detail:document.getElementById('feed');
+      var candidates=scope?scope.querySelectorAll('img[data-post-id][data-post-media-index]'):[];
+      for(var j=0;j<candidates.length;j++){if(String(candidates[j].getAttribute('data-post-id'))===String(photo.__xtjPostId)&&Number(candidates[j].getAttribute('data-post-media-index'))===photo.__xtjMediaIndex){node=candidates[j];break;}}
+    }
     if(!node&&root&&root._openOriginImg&&photo&&String(photo.id)===String(root._motionOriginId))node=root._openOriginImg;
     if(!node||!node.isConnected)return null;
     var rect=node.getBoundingClientRect(),screen=overlay().getBoundingClientRect();

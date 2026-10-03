@@ -755,7 +755,7 @@
                 var text = buildProfileActivityExcerpt(normalized.content || '', maxLength || 120);
                 if (text) return text;
                 if (normalized.media_type === 'video') return '视频动态';
-                if (normalized.media_type === 'image') return '图片动态';
+                if (['image','photo','album'].indexOf(normalized.media_type) >= 0) return '图片动态';
                 return '无文字内容';
             }
 
@@ -763,7 +763,7 @@
                 var normalized = normalizePost(post || {});
                 if (!normalized.media_url) return '';
                 var onclick = "event.stopPropagation();openProfileActivityMedia('" + safeJsStr(String(postId || normalized.id || '')) + "')";
-                if (normalized.media_type === 'image') {
+                if (['image','photo','album'].indexOf(normalized.media_type) >= 0) {
                     // ★ 修复（XSS 防护一致性）：媒体 URL 此前只 escapeHtml，未过 sanitizeUrl
                     //   协议白名单。media_url 来自帖子数据（用户可控），必须拒绝
                     //   javascript: / data:text/html 等可执行载荷（见 04 文件 2516 行的同类修复）。
@@ -1373,6 +1373,7 @@ function renderProfileActivityList(kind) {
                     if (!sameAccount()) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
                     
+                    if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('DELETE', { id: commentId, post_id: targetPostId });
                     feedAllComments = (feedAllComments || []).filter(function(item) {
                         return String(item.id) !== String(commentId);
                     });
