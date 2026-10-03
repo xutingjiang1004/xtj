@@ -536,8 +536,8 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_feed_cache_v7'); } catch(e) {}
-                try { sessionStorage.removeItem('xtj_feed_cache_v7'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_feed_cache_v8'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_feed_cache_v8'); } catch(e) {}
                 // ★ 清理 AI 相关的异步请求和 pending 状态
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
@@ -1748,7 +1748,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 }, 400);
             }
         }
-        const CACHE_KEY = "xtj_feed_cache_v7";
+        const CACHE_KEY = "xtj_feed_cache_v8";
         const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
 
         const POST_METADATA_MARKER = "__xtj_post_v2__";

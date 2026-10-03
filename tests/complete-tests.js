@@ -681,7 +681,7 @@ test('8. /api/feed 白名单过滤只允许正常帖子 media_type', function(){
 // 三、缓存升级
 test('9. 缓存版本已从 v6 升级到 v7', function(){
   var s = read('js/core.js');
-  assert.ok(s.indexOf('xtj_feed_cache_v7') >= 0, 'cache version must be upgraded to v7');
+  assert.ok(s.indexOf('xtj_feed_cache_v8') >= 0, 'v8 must invalidate cover-only Feed caches after attachment hydration changes');
   assert.ok(s.indexOf('xtj_feed_cache_v6') === -1, 'old cache version v6 must be removed');
 });
 

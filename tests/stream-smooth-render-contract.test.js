@@ -142,9 +142,9 @@ test('正文增量淡入不重新包裹整个旧尾段', () => {
 
 test('新增文字动效限制延迟，不移动正文位置', () => {
   const css = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8');
-  assert.match(css, /aiTextFlow 180ms/);
+  assert.match(css, /aiTextFlow 220ms/);
   assert.match(css, /@keyframes aiTextFlow/);
-  for (const source of [agentSrc, coreSrc]) assert.match(source, /Math\.min\(100/);
+  for (const source of [agentSrc, coreSrc]) assert.match(source, /Math\.min\(900, chars \* 3\)/);
 });
 
 test('正文淡入受系统及站内关闭动效设置管控', () => {

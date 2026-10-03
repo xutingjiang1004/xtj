@@ -11,7 +11,7 @@ function fixture(){
  const app=express();app.use(express.json());const auth=(req,res,next)=>{req.userName=req.get('x-user')||'';next();};
  const context={console,app,supabase:db,optionalAuth:auth,authenticateUser:(req,res,next)=>req.get('x-user')?auth(req,res,next):res.sendStatus(401),rateLimit:()=>auth,userBanError:()=>null,...attachments,parsePostMediaUrl,isLocalUploadUrl,isNormalPost,SUPABASE_URL:origin,ADMIN_USERNAME:'xxz',pgrstQuote:v=>'"'+v+'"',looksLikeSystemTelemetry:()=>false,getClientIp:()=>'',isPrivateOrReservedIp:()=>false,resolveIpRegion:async()=>({status:'pending'}),sanitizeError:e=>e.message};vm.createContext(context);
  const start=source.indexOf('async function readPostDetailComments('),end=source.indexOf('async function aiSiteCreateConfirmation(',start);vm.runInContext(source.slice(start,end),context);
- const feed=source.indexOf("app.get('/api/feed'"),feedEnd=source.indexOf('// ===================== 照片墙接口',feed);vm.runInContext(source.slice(feed,feedEnd),context);
+ const feed=source.indexOf("app.post('/api/post/media/batch'"),feedEnd=source.indexOf('// ===================== 照片墙接口',feed);vm.runInContext(source.slice(feed,feedEnd),context);
  const create=source.indexOf("app.post('/api/post/create'"),createEnd=source.indexOf("app.post('/api/post/update'",create);vm.runInContext(source.slice(create,createEnd),context);
  return{app,reads,rpc,posts,media,comments,setFailAttachments(v){failAttachments=v;}};
 }
@@ -36,4 +36,12 @@ test('real Create route derives author and cover server-side and rejects oversiz
  assert.equal(res.body.data.user_name,'alice');assert.equal(res.body.data.media_url,items[0].media_url);assert.equal(f.rpc.length,1);assert.equal(f.rpc[0].name,'create_post_with_attachments');assert.equal(f.rpc[0].args.p_attachments.length,2);
  for(const body of [{attachments:Array.from({length:19},(_,n)=>picture(id(1),n))},{attachments:items,media_type:'video'},{attachments:[items[0],items[0]]}])await request(f.app).post('/api/post/create').set('x-user','alice').send(body).expect(400);
  assert.equal(f.rpc.length,1);
+});
+
+test('attachment batch gives author and other accounts the same public gallery, protects private/system/deleted posts and validates bounded IDs',async()=>{
+ const f=fixture();const ids=f.posts.map(p=>p.id);
+ for(const actor of ['', 'bob']){const res=await request(f.app).post('/api/post/media/batch').set('x-user',actor).send({post_ids:ids}).expect(200);assert.deepEqual(res.body.posts.map(p=>p.id),[id(1)]);assert.equal(res.body.posts[0].media_items.length,2);assert.deepEqual(f.reads.at(-1),[id(1)]);assert.ok(res.body.posts[0].media_items.every(p=>!('storage_path'in p)&&!('upload_id'in p)));assert.equal(res.headers['cache-control'],'no-store');}
+ const own=await request(f.app).post('/api/post/media/batch').set('x-user','alice').send({post_ids:ids}).expect(200);assert.deepEqual(own.body.posts.map(p=>p.id),[id(1),id(2)]);assert.equal(own.body.posts[0].media_items.length,2);
+ for(const post_ids of [[],['bad-id'],Array(51).fill(id(1))])await request(f.app).post('/api/post/media/batch').send({post_ids}).expect(400);
+ f.setFailAttachments(true);const unavailable=await request(f.app).post('/api/post/media/batch').send({post_ids:[id(1)]}).expect(503);assert.equal(unavailable.body.retryable,true);
 });

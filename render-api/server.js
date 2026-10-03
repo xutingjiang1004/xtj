@@ -14676,6 +14676,29 @@ app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, 
 // 未登录用户：仅公开帖子
 // 普通用户：公开帖子 + 自己的私密帖子
 // 管理员：全部帖子
+// The direct Feed fallback must hydrate albums without exposing the service-only
+// attachment table or fetching one Detail request per post.
+app.post('/api/post/media/batch', optionalAuth, rateLimit(60000, 120), async (req, res) => {
+  try {
+    var ids = req.body && req.body.post_ids;
+    if (!Array.isArray(ids) || !ids.length || ids.length > 50 || ids.some(function(id) {
+      return typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    })) return res.status(400).json({ ok: false, code: 'invalid_post_ids' });
+    ids = Array.from(new Set(ids));
+    var result = await supabase.from('posts').select('id,user_name,media_type,media_url,visibility,is_deleted,content').in('id', ids);
+    if (result.error) return res.status(503).json({ ok: false, code: 'media_lookup_failed', retryable: true });
+    var visible = (result.data || []).filter(function(post) {
+      return isNormalPost(post) && !looksLikeSystemTelemetry(post.content) &&
+        (!post.visibility || post.visibility === 'public' || post.user_name === (req.userName || ''));
+    });
+    var posts = await loadPostAttachments(supabase, visible);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, posts: posts.map(function(post) { return { id: post.id, media_items: post.media_items }; }) });
+  } catch (error) {
+    return res.status(503).json({ ok: false, code: error.code || 'attachments_unavailable', retryable: true });
+  }
+});
+
 app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
   try {
     var page = Math.max(0, parseInt(req.query.page, 10) || 0);

@@ -159,6 +159,10 @@
     rejectEarly = reject;
   });
 
+  // Authenticated boot can bypass the anonymous promise. Mark its rejection
+  // handled while preserving the original rejection for callers that await it.
+  window.__xtjEarlyFeedPromise.catch(function () {});
+
   function finishOk(data) {
     state.status = 'ok';
     state.data = data;

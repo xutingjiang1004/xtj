@@ -33,7 +33,7 @@
     var animate = targetEl.getAttribute('data-ai-flow') === 'on' &&
       document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
       !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    var revealCount = 0, newBlocks = [];
+    var revealRuns = [];
     function isReveal(node) { return node.nodeType === 1 && node.classList.contains('ai-stream-reveal'); }
     function isText(node) { return node && (node.nodeType === 3 || isReveal(node)); }
     function textPart(text) {
@@ -41,19 +41,18 @@
       if (!animate || !text) { fragment.appendChild(document.createTextNode(text)); return fragment; }
       var chars = Array.from(text);
       for (var i = 0; i < chars.length;) {
-        var size = revealCount < 96 ? 8 : chars.length;
+        var size = Math.max(4, Math.ceil(chars.length / Math.max(1, 256 - revealRuns.length)));
         var span = document.createElement('span');
         span.className = 'ai-stream-reveal';
         span.textContent = chars.slice(i, i + size).join('');
-        span.style.setProperty('--ai-reveal-delay', Math.min(100, revealCount * 4) + 'ms');
-        fragment.appendChild(span); revealCount++; i += size;
+        revealRuns.push(span);
+        fragment.appendChild(span); i += size;
       }
       return fragment;
     }
     function copy(node) {
       if (node.nodeType === 3) return textPart(node.data);
       var clone = node.cloneNode(false);
-      if (animate && /^(P|LI|H[1-6]|BLOCKQUOTE)$/.test(clone.tagName)) newBlocks.push(clone);
       Array.from(node.childNodes).forEach(function(child) { clone.appendChild(copy(child)); });
       return clone;
     }
@@ -84,13 +83,20 @@
     try {
       var holder = document.createElement('div'); holder.innerHTML = html;
       children(targetEl, holder, 0);
-      var blockSet = new Set(newBlocks);
-      newBlocks.filter(function(block) { for (var parent=block.parentElement;parent && parent!==targetEl;parent=parent.parentElement) if (blockSet.has(parent)) return false; return true; }).slice(0,48).forEach(function(block, index) {
-        if (typeof block.animate === 'function') block.animate([
-          { clipPath:'inset(0 0 100% 0)', opacity:0.35 },
-          { clipPath:'inset(0 0 0% 0)', opacity:1 }
-        ], { duration:220, delay:Math.min(64,index*12), easing:'cubic-bezier(.22,.7,.3,1)' });
-      });
+      // One clock for all newly arrived runs, in DOM reading order. Paragraph
+      // clipping used a separate clock and could expose later lines first.
+      if (revealRuns.length) {
+        var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+        var start = Math.max(now, targetEl.__aiRevealUntil || 0);
+        var chars = revealRuns.reduce(function(total, span) { return total + span.textContent.length; }, 0);
+        var duration = Math.min(900, chars * 3);
+        var spacing = duration / revealRuns.length;
+        revealRuns.forEach(function(span, index) {
+          span.__aiRevealAt = start + index * spacing;
+          span.style.setProperty('--ai-reveal-delay', Math.round(span.__aiRevealAt - now) + 'ms');
+        });
+        targetEl.__aiRevealUntil = start + duration;
+      }
     } catch (_) {
       targetEl.innerHTML = html;
     }
@@ -108,7 +114,7 @@
     var finished = false;
     var paused = false;
     var streamClass = options.streamClass || 'ai-streaming-soft';
-    if (targetEl) targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1;
+    if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; }
     if (targetEl && !options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow', 'on');
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function (cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
@@ -304,6 +310,8 @@
           try { options.onRender(rendered); } catch (e) {}
         }
         var completedTarget = targetEl, completedEpoch = targetEl.__aiFlowEpoch;
+        var completedNow = window.performance && window.performance.now ? window.performance.now() : Date.now();
+        var revealCleanupDelay = Math.max(300, Math.ceil((targetEl.__aiRevealUntil || 0) - completedNow) + 250);
         setTimeout(function() {
           if (!completedTarget || !completedTarget.isConnected || completedTarget.__aiFlowEpoch !== completedEpoch) return;
           var selection = window.getSelection && window.getSelection();
@@ -311,7 +319,7 @@
           completedTarget.querySelectorAll('.ai-stream-reveal').forEach(function(span) { span.replaceWith(document.createTextNode(span.textContent)); });
           completedTarget.normalize();
           completedTarget.removeAttribute('data-ai-flow');
-        }, 300);
+        }, revealCleanupDelay);
         if (typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}
         }
@@ -341,7 +349,7 @@
       isCancelled: function () { return cancelled; },
       reset: function () {
         clearFrame();
-        if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; if (!options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow','on'); }
+        if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; if (!options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow','on'); }
         cancelled = false;
         finished = false;
         paused = false;

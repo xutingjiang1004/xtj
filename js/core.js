@@ -542,8 +542,8 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_feed_cache_v7'); } catch(e) {}
-                try { sessionStorage.removeItem('xtj_feed_cache_v7'); } catch(e) {}
+                try { window.safeStorage.remove('xtj_feed_cache_v8'); } catch(e) {}
+                try { sessionStorage.removeItem('xtj_feed_cache_v8'); } catch(e) {}
                 // ★ 清理 AI 相关的异步请求和 pending 状态
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
@@ -1754,7 +1754,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 }, 400);
             }
         }
-        const CACHE_KEY = "xtj_feed_cache_v7";
+        const CACHE_KEY = "xtj_feed_cache_v8";
         const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
 
         const POST_METADATA_MARKER = "__xtj_post_v2__";
@@ -8943,7 +8943,7 @@ function renderProfileActivityList(kind) {
                         return like && firstPageIds.has(String(like.post_id || ''));
                     });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({
-                        version: 7,
+                        version: 8,
                         data: {
                             posts: cachePosts,
                             comments: cacheComments,
@@ -9015,7 +9015,7 @@ function renderProfileActivityList(kind) {
                     }];
                 }
                 return {
-                    version: parsed.version || 7, // 必须与 CACHE_KEY v7 一致，旧缓存自动以新版本重写
+                    version: parsed.version || 8, // v8 snapshots retain complete media lists
                     timestamp: parsed.timestamp || 0,
                     data: {
                         posts: posts,
@@ -9256,7 +9256,24 @@ function renderProfileActivityList(kind) {
                     );
                     if (requestId && requestId !== feedLoadRequestId) return null;
                     if (postRes.error) throw postRes.error;
-                    posts = normalizePosts(postRes.data || []);
+                    var fallbackPosts = postRes.data || [];
+                    if (fallbackPosts.some(function(post) { return post.media_type === 'album'; })) {
+                        // Direct post rows have only a cover. Hydrate the visible
+                        // page in one server-authorized request before normalizing.
+                        var mediaResponse = await window.xtjOptionalAuthFetch('/api/post/media/batch', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ post_ids: fallbackPosts.map(function(post) { return post.id; }) }),
+                            timeoutMs: FEED_NET_TIMEOUT_MS
+                        });
+                        if (!mediaResponse || !mediaResponse.ok) throw new Error('帖子图片加载失败，请重试');
+                        var mediaData = await mediaResponse.json();
+                        if (!mediaData.ok || !Array.isArray(mediaData.posts) || mediaData.posts.some(function(post) { return !post || !Array.isArray(post.media_items); })) throw new Error('帖子图片加载失败，请重试');
+                        var visibleMedia = new Map(mediaData.posts.map(function(post) { return [String(post.id), post.media_items]; }));
+                        fallbackPosts = fallbackPosts.filter(function(post) { return visibleMedia.has(String(post.id)); }).map(function(post) {
+                            return Object.assign({}, post, { media_items: visibleMedia.get(String(post.id)) });
+                        });
+                    }
+                    posts = normalizePosts(fallbackPosts);
                     endReached = posts.length < FEED_PAGE_SIZE;
                     if (posts.length) {
                         var fallbackLastPost = posts[posts.length - 1];
@@ -18122,6 +18139,9 @@ function renderProfileActivityList(kind) {
                     var keyboardFollowLatest=true;
                     // 环境固有的视口差（非键盘部分），取历史最小值当基线。见 updateIOSViewport。
                     var viewportBaseline = Infinity;
+                    var closedViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                    var viewportWidth = window.innerWidth;
+                    var previousFocusedInput = null;
 
                     function hasActiveInput() {
                         var active = document.activeElement;
@@ -18136,23 +18156,57 @@ function renderProfileActivityList(kind) {
                         var visibleHeight = vv ? Math.round(vv.height * viewportScale) : layoutHeight;
                         var rawDiff = Math.max(0, layoutHeight - visibleHeight);
                         if (rawDiff < viewportBaseline) viewportBaseline = rawDiff;
-                        var keyboardGap = focused ? Math.max(0, rawDiff - viewportBaseline) : 0;
-                        var isKeyboardVisible = keyboardGap > Math.max(100, layoutHeight * 0.15);
+                        if (window.innerWidth !== viewportWidth) {
+                            viewportWidth = window.innerWidth;
+                            closedViewportHeight = Math.max(visibleHeight, layoutHeight);
+                            viewportBaseline = rawDiff;
+                        }
+                        // Safari can shrink innerHeight together with VisualViewport,
+                        // or leave innerHeight stale after the keyboard has closed.
+                        var keyboardGap = Math.max(0, closedViewportHeight - visibleHeight, rawDiff - viewportBaseline);
+                        var viewportShrunk = keyboardGap > Math.max(100, closedViewportHeight * 0.18);
+                        var isKeyboardVisible = focused && viewportShrunk;
+                        if (!viewportShrunk) closedViewportHeight = visibleHeight;
                         // The shell owns the viewport. Fixed controls must not add
                         // the keyboard offset again after the shell has resized.
-                        var appHeight = isKeyboardVisible ? visibleHeight : layoutHeight;
-                        if (window.scrollY !== 0) window.scrollTo(0, 0);
+                        var appHeight = isKeyboardVisible ? visibleHeight : closedViewportHeight;
+                        var previousHeight = parseFloat(root.style.getPropertyValue('--xtj-app-height')) || appHeight;
+                        var visualTop = isKeyboardVisible && vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+                        if (!isKeyboardVisible && window.scrollY !== 0) window.scrollTo(0, 0);
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
-                        root.style.setProperty('--xtj-visual-top', '0px');
+                        root.style.setProperty('--xtj-visual-top', visualTop + 'px');
                         root.style.setProperty('--xtj-visual-bottom', '0px');
                         root.style.setProperty('--xtj-ios-keyboard-gap', isKeyboardVisible ? keyboardGap + 'px' : '0px');
+                        var keyboardWasVisible = root.classList.contains('xtj-keyboard-open');
                         root.classList.toggle('xtj-keyboard-open', isKeyboardVisible);
+                        if (isKeyboardVisible && !keyboardWasVisible) {
+                            // Focusing during the AI page's entrance must not leave
+                            // the composer below the visual edge or replay on blur.
+                            document.querySelectorAll('#panelAiChat, #aiChatRoot').forEach(function(node) {
+                                if (typeof node.getAnimations !== 'function') return;
+                                node.getAnimations().forEach(function(motion) {
+                                    if (/^xtj-ai-(panel|dock)-enter$/.test(motion.animationName || '')) motion.finish();
+                                });
+                            });
+                        }
                         var chatFocused = focused && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
                         document.body.classList.toggle('ios-chat-keyboard-open', !!(chatFocused && isKeyboardVisible));
                         if (dockBar) dockBar.style.display = isKeyboardVisible ? 'none' : '';
+                        if (isKeyboardVisible && (!keyboardWasVisible || previousHeight !== appHeight || previousFocusedInput !== document.activeElement)) {
+                            var input = document.activeElement, scroller = input && input.parentElement;
+                            while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+                            if (scroller && scroller !== document.body) {
+                                var inputRect = input.getBoundingClientRect(), scrollRect = scroller.getBoundingClientRect();
+                                var bottom = Math.min(scrollRect.bottom, visualTop + appHeight) - 12;
+                                var top = Math.max(scrollRect.top, visualTop) + 12;
+                                if (inputRect.bottom > bottom) scroller.scrollTop += inputRect.bottom - bottom;
+                                else if (inputRect.top < top) scroller.scrollTop -= top - inputRect.top;
+                            }
+                        }
                         if (dockBar && !isKeyboardVisible && !shouldUseDesktopChatSplitLayout() && dockBar.getClientRects().length) {
                             root.style.setProperty('--xtj-dock-reserve', (Math.ceil(dockBar.getBoundingClientRect().height) + 20) + 'px');
                         }
+                        previousFocusedInput = focused ? document.activeElement : null;
                         window.dispatchEvent(new CustomEvent('xtj:visual-viewport-change'));
                         if (chatFocused && keyboardOpen && keyboardFollowLatest) requestAnimationFrame(scrollDockChatBottom);
                     }
@@ -18190,14 +18244,8 @@ function renderProfileActivityList(kind) {
                         keyboardFollowLatest=isDockChatNearBottom(document.getElementById('dockChatMessages'),100) && !_chatHistoryFocus;
                         keyboardOpen = true;
                         updateIOSViewport();
-                        setTimeout(() => {
-                            if (document.activeElement !== e.target) return;
-                            if (e.target && e.target.scrollIntoViewIfNeeded) {
-                                e.target.scrollIntoViewIfNeeded(true);
-                            } else if (e.target && e.target.scrollIntoView) {
-                                e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                            }
-                        }, 300);
+                        // Native focus scroll and VisualViewport own the keyboard
+                        // movement. A delayed whole-page scroll races that movement.
                     }
 
                     function handleBlur() {
@@ -18238,7 +18286,7 @@ function renderProfileActivityList(kind) {
                         setTimeout(updateIOSViewport, 180);
                     });
                     window.addEventListener('resize', function() {
-                        if (!keyboardOpen) updateIOSViewport();
+                        updateIOSViewport();
                     });
                     updateIOSViewport();
                 })();

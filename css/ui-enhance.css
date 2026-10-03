@@ -1892,7 +1892,11 @@ html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label {
 .ai-tool-round-list-wrap {
   transition-duration: 200ms;
 }
-.ai-tool-round-list .ai-tool-step { animation: xtjBlockRise 160ms ease-out both; }
+@keyframes xtjBlockRise {
+  from { opacity:0; transform:translateY(3px); }
+  to { opacity:1; transform:translateY(0); }
+}
+.ai-tool-round-list .ai-tool-step { animation: xtjBlockRise 200ms ease-out both; }
 @media (prefers-reduced-motion: reduce) {
   .ai-tool-round-list .ai-tool-step { animation: none !important; }
   .ai-tool-activity-body, .ai-tool-round-list-wrap { transition: none !important; }

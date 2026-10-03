@@ -5721,6 +5721,9 @@
                     var keyboardFollowLatest=true;
                     // 环境固有的视口差（非键盘部分），取历史最小值当基线。见 updateIOSViewport。
                     var viewportBaseline = Infinity;
+                    var closedViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                    var viewportWidth = window.innerWidth;
+                    var previousFocusedInput = null;
 
                     function hasActiveInput() {
                         var active = document.activeElement;
@@ -5735,23 +5738,57 @@
                         var visibleHeight = vv ? Math.round(vv.height * viewportScale) : layoutHeight;
                         var rawDiff = Math.max(0, layoutHeight - visibleHeight);
                         if (rawDiff < viewportBaseline) viewportBaseline = rawDiff;
-                        var keyboardGap = focused ? Math.max(0, rawDiff - viewportBaseline) : 0;
-                        var isKeyboardVisible = keyboardGap > Math.max(100, layoutHeight * 0.15);
+                        if (window.innerWidth !== viewportWidth) {
+                            viewportWidth = window.innerWidth;
+                            closedViewportHeight = Math.max(visibleHeight, layoutHeight);
+                            viewportBaseline = rawDiff;
+                        }
+                        // Safari can shrink innerHeight together with VisualViewport,
+                        // or leave innerHeight stale after the keyboard has closed.
+                        var keyboardGap = Math.max(0, closedViewportHeight - visibleHeight, rawDiff - viewportBaseline);
+                        var viewportShrunk = keyboardGap > Math.max(100, closedViewportHeight * 0.18);
+                        var isKeyboardVisible = focused && viewportShrunk;
+                        if (!viewportShrunk) closedViewportHeight = visibleHeight;
                         // The shell owns the viewport. Fixed controls must not add
                         // the keyboard offset again after the shell has resized.
-                        var appHeight = isKeyboardVisible ? visibleHeight : layoutHeight;
-                        if (window.scrollY !== 0) window.scrollTo(0, 0);
+                        var appHeight = isKeyboardVisible ? visibleHeight : closedViewportHeight;
+                        var previousHeight = parseFloat(root.style.getPropertyValue('--xtj-app-height')) || appHeight;
+                        var visualTop = isKeyboardVisible && vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+                        if (!isKeyboardVisible && window.scrollY !== 0) window.scrollTo(0, 0);
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
-                        root.style.setProperty('--xtj-visual-top', '0px');
+                        root.style.setProperty('--xtj-visual-top', visualTop + 'px');
                         root.style.setProperty('--xtj-visual-bottom', '0px');
                         root.style.setProperty('--xtj-ios-keyboard-gap', isKeyboardVisible ? keyboardGap + 'px' : '0px');
+                        var keyboardWasVisible = root.classList.contains('xtj-keyboard-open');
                         root.classList.toggle('xtj-keyboard-open', isKeyboardVisible);
+                        if (isKeyboardVisible && !keyboardWasVisible) {
+                            // Focusing during the AI page's entrance must not leave
+                            // the composer below the visual edge or replay on blur.
+                            document.querySelectorAll('#panelAiChat, #aiChatRoot').forEach(function(node) {
+                                if (typeof node.getAnimations !== 'function') return;
+                                node.getAnimations().forEach(function(motion) {
+                                    if (/^xtj-ai-(panel|dock)-enter$/.test(motion.animationName || '')) motion.finish();
+                                });
+                            });
+                        }
                         var chatFocused = focused && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
                         document.body.classList.toggle('ios-chat-keyboard-open', !!(chatFocused && isKeyboardVisible));
                         if (dockBar) dockBar.style.display = isKeyboardVisible ? 'none' : '';
+                        if (isKeyboardVisible && (!keyboardWasVisible || previousHeight !== appHeight || previousFocusedInput !== document.activeElement)) {
+                            var input = document.activeElement, scroller = input && input.parentElement;
+                            while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+                            if (scroller && scroller !== document.body) {
+                                var inputRect = input.getBoundingClientRect(), scrollRect = scroller.getBoundingClientRect();
+                                var bottom = Math.min(scrollRect.bottom, visualTop + appHeight) - 12;
+                                var top = Math.max(scrollRect.top, visualTop) + 12;
+                                if (inputRect.bottom > bottom) scroller.scrollTop += inputRect.bottom - bottom;
+                                else if (inputRect.top < top) scroller.scrollTop -= top - inputRect.top;
+                            }
+                        }
                         if (dockBar && !isKeyboardVisible && !shouldUseDesktopChatSplitLayout() && dockBar.getClientRects().length) {
                             root.style.setProperty('--xtj-dock-reserve', (Math.ceil(dockBar.getBoundingClientRect().height) + 20) + 'px');
                         }
+                        previousFocusedInput = focused ? document.activeElement : null;
                         window.dispatchEvent(new CustomEvent('xtj:visual-viewport-change'));
                         if (chatFocused && keyboardOpen && keyboardFollowLatest) requestAnimationFrame(scrollDockChatBottom);
                     }
@@ -5789,14 +5826,8 @@
                         keyboardFollowLatest=isDockChatNearBottom(document.getElementById('dockChatMessages'),100) && !_chatHistoryFocus;
                         keyboardOpen = true;
                         updateIOSViewport();
-                        setTimeout(() => {
-                            if (document.activeElement !== e.target) return;
-                            if (e.target && e.target.scrollIntoViewIfNeeded) {
-                                e.target.scrollIntoViewIfNeeded(true);
-                            } else if (e.target && e.target.scrollIntoView) {
-                                e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                            }
-                        }, 300);
+                        // Native focus scroll and VisualViewport own the keyboard
+                        // movement. A delayed whole-page scroll races that movement.
                     }
 
                     function handleBlur() {
@@ -5837,7 +5868,7 @@
                         setTimeout(updateIOSViewport, 180);
                     });
                     window.addEventListener('resize', function() {
-                        if (!keyboardOpen) updateIOSViewport();
+                        updateIOSViewport();
                     });
                     updateIOSViewport();
                 })();

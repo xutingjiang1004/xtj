@@ -2846,7 +2846,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
     var total=Number.isInteger(event.items_total)&&event.items_total>0?event.items_total:items.length;
     if(event.items_truncated || items.length>10)panel.appendChild(el('div',{class:'ai-search-detail-more',text:'共 '+total+' 条结果，此处展示其中 '+Math.min(items.length,10)+' 条'}));
-    button.onclick=function(e){e.stopPropagation();panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',String(!panel.hidden));arrow.textContent=panel.hidden?' ▸':' ▾';};
+    button.onclick=function(e){
+      e.stopPropagation();
+      var opening=button.getAttribute('aria-expanded')!=='true';
+      button.setAttribute('aria-expanded',String(opening));arrow.textContent=opening?' ▾':' ▸';
+      if(panel.__aiDisclosureMotion)panel.__aiDisclosureMotion.cancel();
+      panel.__aiDisclosureMotion=null;
+      if(prefersReducedMotion() || typeof panel.animate!=='function'){panel.hidden=!opening;return;}
+      if(opening)panel.hidden=false;
+      var motion=panel.animate(opening ? [{opacity:0,transform:'translateY(2px)'},{opacity:1,transform:'translateY(0)'}] : [{opacity:1},{opacity:0}],{duration:opening?160:120,easing:'ease-out'});
+      panel.__aiDisclosureMotion=motion;
+      motion.onfinish=function(){if(panel.__aiDisclosureMotion!==motion)return;panel.hidden=!opening;panel.__aiDisclosureMotion=null;};
+    };
     card.appendChild(button);card.appendChild(panel);panel.scrollTop=scrollTop;
     return card;
   }
@@ -4132,7 +4143,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var animate = targetEl.getAttribute('data-ai-flow') === 'on' &&
       document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
       !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    var revealCount = 0, newBlocks = [];
+    var revealRuns = [];
     function isReveal(node) { return node.nodeType === 1 && node.classList.contains('ai-stream-reveal'); }
     function isText(node) { return node && (node.nodeType === 3 || isReveal(node)); }
     function textPart(text) {
@@ -4140,19 +4151,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!animate || !text) { fragment.appendChild(document.createTextNode(text)); return fragment; }
       var chars = Array.from(text);
       for (var i = 0; i < chars.length;) {
-        var size = revealCount < 96 ? 8 : chars.length;
+        var size = Math.max(4, Math.ceil(chars.length / Math.max(1, 256 - revealRuns.length)));
         var span = document.createElement('span');
         span.className = 'ai-stream-reveal';
         span.textContent = chars.slice(i, i + size).join('');
-        span.style.setProperty('--ai-reveal-delay', Math.min(100, revealCount * 4) + 'ms');
-        fragment.appendChild(span); revealCount++; i += size;
+        revealRuns.push(span);
+        fragment.appendChild(span); i += size;
       }
       return fragment;
     }
     function copy(node) {
       if (node.nodeType === 3) return textPart(node.data);
       var clone = node.cloneNode(false);
-      if (animate && /^(P|LI|H[1-6]|BLOCKQUOTE)$/.test(clone.tagName)) newBlocks.push(clone);
       Array.from(node.childNodes).forEach(function(child) { clone.appendChild(copy(child)); });
       return clone;
     }
@@ -4183,13 +4193,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try {
       var holder = document.createElement('div'); holder.innerHTML = html;
       children(targetEl, holder, 0);
-      var blockSet = new Set(newBlocks);
-      newBlocks.filter(function(block) { for (var parent=block.parentElement;parent && parent!==targetEl;parent=parent.parentElement) if (blockSet.has(parent)) return false; return true; }).slice(0,48).forEach(function(block, index) {
-        if (typeof block.animate === 'function') block.animate([
-          { clipPath:'inset(0 0 100% 0)', opacity:0.35 },
-          { clipPath:'inset(0 0 0% 0)', opacity:1 }
-        ], { duration:220, delay:Math.min(64,index*12), easing:'cubic-bezier(.22,.7,.3,1)' });
-      });
+      // One clock for all newly arrived runs, in DOM reading order. Paragraph
+      // clipping used a separate clock and could expose later lines first.
+      if (revealRuns.length) {
+        var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+        var start = Math.max(now, targetEl.__aiRevealUntil || 0);
+        var chars = revealRuns.reduce(function(total, span) { return total + span.textContent.length; }, 0);
+        var duration = Math.min(900, chars * 3);
+        var spacing = duration / revealRuns.length;
+        revealRuns.forEach(function(span, index) {
+          span.__aiRevealAt = start + index * spacing;
+          span.style.setProperty('--ai-reveal-delay', Math.round(span.__aiRevealAt - now) + 'ms');
+        });
+        targetEl.__aiRevealUntil = start + duration;
+      }
     } catch (_) {
       targetEl.innerHTML = html;
     }
@@ -4208,7 +4225,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // until the user explicitly resumes.
     var paused = !!S.paused;
     var streamClass = options.streamClass || 'ai-streaming-soft';
-    if (targetEl) targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1;
+    if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; }
     if (targetEl && !options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow', 'on');
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
@@ -4417,6 +4434,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           try { options.onRender(rendered); } catch (e3) {}
         }
         var completedTarget = targetEl, completedEpoch = targetEl.__aiFlowEpoch;
+        var completedNow = window.performance && window.performance.now ? window.performance.now() : Date.now();
+        var revealCleanupDelay = Math.max(300, Math.ceil((targetEl.__aiRevealUntil || 0) - completedNow) + 250);
         setTimeout(function() {
           if (!completedTarget || !completedTarget.isConnected || completedTarget.__aiFlowEpoch !== completedEpoch) return;
           var selection = window.getSelection && window.getSelection();
@@ -4424,7 +4443,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           completedTarget.querySelectorAll('.ai-stream-reveal').forEach(function(span) { span.replaceWith(document.createTextNode(span.textContent)); });
           completedTarget.normalize();
           completedTarget.removeAttribute('data-ai-flow');
-        }, 300);
+        }, revealCleanupDelay);
         if (typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}
         }
@@ -4547,7 +4566,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       S.keyboardResetTimer = setTimeout(function() {
         S.keyboardResetTimer = null;
-        resetViewport();
+        if (document.documentElement.classList.contains('xtj-ios-viewport')) applyViewport();
+        else resetViewport();
       }, 100);
     };
     var onFocus = function() {
@@ -9405,7 +9425,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // finish() 因 cancelled 直接 return，必须回退到直接以最终 content 重绘，
           // 否则气泡被清空且内容丢失。
           if (assistantBubble) {
-            assistantBubble.innerHTML = renderMarkdown(hasContent ? content : fallbackText);
+            createSmoothTextRenderer(assistantBubble).finish(hasContent ? content : fallbackText);
           }
         }
         cleanupRenderers();
@@ -10754,27 +10774,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               else fetchAiQuota(true);
             } catch (e) {}
             
-            var _sanitizedRendered = false;
-            if (evt.sanitized_content && evt.sanitized_content.length > 0 && assistantBubble) {
-              // P4 修复: 只有当 sanitized_content 与当前内容不同时才重绘
-              var currentText = (assistantBubble.textContent || '').trim();
-              var sanitizedTrimmed = (evt.sanitized_content || '').trim();
-              if (currentText !== sanitizedTrimmed) {
-                if (contentRenderer) {
-                  try { contentRenderer.cancel(); } catch (e) {}
-                  contentRenderer = null;
-                }
-                // 使用 DocumentFragment 避免空白闪烁
-                var frag = document.createDocumentFragment();
-                var tmpDiv = el('div');
-                tmpDiv.innerHTML = renderMarkdown(evt.sanitized_content);
-                while (tmpDiv.firstChild) frag.appendChild(tmpDiv.firstChild);
-                assistantBubble.innerHTML = '';
-                assistantBubble.appendChild(frag);
-                _sanitizedRendered = true;
-              }
-            }
-            
+            // Sanitized final content was already selected above. Let the same
+            // renderer reconcile it, retaining reading order and existing nodes.
+
             // ★★★ 2026-09-15 修复（P1-6）：`interrupted` 判定必须与 `complete` 交叉校验。
             //   后端 complete=true 表示本轮正常收尾；此时即便 interrupted 被误置为
             //   true（例如上游关闭连接时 finishReason 被记成 upstream_error），
@@ -11913,138 +11915,13 @@ function showChatMessages() {
                 ) +
               '</button>' +
             '</div>' +
-            '<div class="ai-panel-group ai-panel-group--quick">' +
-              '<div class="ai-panel-group-title">快捷指令</div>' +
-              '<div class="ai-quick-grid" id="aiQuickGrid"></div>' +
-            '</div>' +
           '</div>' +
         '</div>' +
       '</div>';
 
-    // ★ 新增：快捷指令（预设 + 自定义 + 识物/调Bug 识图场景）、AI 生图、导出对话
-    var QUICK_PRESETS = [
-      { id: 'sum', label: '总结', template: '请帮我总结以下内容，输出要点清单：\n' },
-      { id: 'trans', label: '翻译', template: '请将以下内容翻译成：\n' },
-      { id: 'polish', label: '润色', template: '请帮我润色以下文字，使其更通顺自然：\n' },
-      { id: 'code', label: '写代码', template: '请帮我编写代码：\n' },
-      { id: 'title', label: '起标题', template: '请根据以下内容起一个吸引人的标题：\n' },
-      { id: 'photo', label: '识物', template: '（请查看我上传的图片）请识别图片内容并详细讲解这是什么、有什么用途。' },
-      { id: 'debug', label: '调Bug', template: '（请查看我上传的截图）请分析截图中的报错或代码，定位问题并给出修复方案。' }
-    ];
-    function loadCustomQuickCommands() {
-      try { var arr = JSON.parse(localStorage.getItem('xtj_ai_quick_custom') || '[]'); return Array.isArray(arr) ? arr : []; } catch (e) { return []; }
-    }
-    function saveCustomQuickCommands(arr) {
-      try { localStorage.setItem('xtj_ai_quick_custom', JSON.stringify((arr || []).slice(0, 12))); } catch (e) {}
-    }
-    function renderQuickChips() {
-      var grid = panelShell.querySelector('#aiQuickGrid');
-      if (!grid) return;
-      grid.innerHTML = '';
-      // 快捷指令：固定三项 + 用户自定义指令（最多展示 6 个，避免面板拥挤）
-      grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--gen', 'data-qc': 'genimg', text: 'AI生图' }));
-      grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--export', 'data-qc': 'export', text: '导出对话' }));
-      grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--manage', 'data-qc': 'custom', text: '增加快捷指令' }));
-      // ★ 修复：用户通过「增加快捷指令」弹窗保存的指令此前从不渲染（添加后不显示、
-      // 无法触发），而点击处理器已有 data-custom 分支（死代码）。这里补上渲染。
-      var customs = loadCustomQuickCommands();
-      var showCount = Math.min(customs.length, 6);
-      for (var ci = 0; ci < showCount; ci++) {
-        var c = customs[ci];
-        grid.appendChild(el('button', { type: 'button', class: 'ai-quick-chip ai-quick-chip--custom', 'data-custom': String(ci), text: String(c && c.label || '指令') }));
-      }
-    }
-    function insertQuickTemplate(templateText) {
-      var existing = String(input.value || '');
-      if (existing.trim()) input.value = existing.replace(/\s+$/, '') + '\n' + templateText;
-      else input.value = templateText;
-      autoresize();
-      closePanel();
-      try { input.focus(); } catch (e) {}
-    }
-    function handleQuickCommand(qc) {
-      if (qc === 'genimg') { closePanel(); openImageGenModal(); return; }
-      if (qc === 'export') { closePanel(); exportConversationMarkdown(); return; }
-      if (qc === 'custom') { openCustomCommandModal(); return; }
-      if (qc === 'photo' || qc === 'debug') {
-        for (var i = 0; i < QUICK_PRESETS.length; i++) {
-          if (QUICK_PRESETS[i].id === qc) { insertQuickTemplate(QUICK_PRESETS[i].template); break; }
-        }
-        // 必须同步触发：iOS/iPadOS Safari 对 setTimeout 后的 file.click() 可能拦截
-        var fi = document.getElementById('aiChatFileInp');
-        if (fi) { try { fi.click(); } catch (eF) {} }
-        return;
-      }
-      for (var j = 0; j < QUICK_PRESETS.length; j++) {
-        if (QUICK_PRESETS[j].id === qc) { insertQuickTemplate(QUICK_PRESETS[j].template); return; }
-      }
-    }
     function closeQuickModal(id) {
-      var m = document.getElementById(id);
-      if (m && m.parentNode) m.parentNode.removeChild(m);
-    }
-    function openCustomCommandModal() {
-      closeQuickModal('aiCustomCmdModal');
-      var modal = document.createElement('div');
-      modal.id = 'aiCustomCmdModal';
-      modal.className = 'ai-invite-modal';
-      modal.setAttribute('role', 'dialog');
-      modal.setAttribute('aria-modal', 'true');
-      var customs = loadCustomQuickCommands();
-      var listHtml = '';
-      customs.forEach(function(c, idx) {
-        listHtml += '<div class="ai-cmd-row" data-idx="' + idx + '">' +
-          '<div class="ai-cmd-row-main">' +
-            '<div class="ai-cmd-row-label">' + escapeHtml(c.label) + '</div>' +
-            '<div class="ai-cmd-row-tpl">' + escapeHtml(String(c.template || '').slice(0, 40)) + '</div>' +
-          '</div>' +
-          '<button type="button" class="ai-cmd-row-del" data-del="' + idx + '">删除</button>' +
-        '</div>';
-      });
-      if (!listHtml) listHtml = '<div class="ai-cmd-empty">还没有自定义指令，先添加一个吧</div>';
-      modal.innerHTML =
-        '<div class="ai-invite-modal-box ai-cmd-modal-box">' +
-          '<div class="ai-invite-modal-hero" aria-hidden="true"><span class="ai-invite-modal-hero-badge">指令</span><p class="ai-invite-modal-hero-sub">自定义快捷指令</p></div>' +
-          '<div class="ai-invite-modal-body">' +
-            '<h3 class="ai-invite-modal-title">快捷指令管理</h3>' +
-            '<div class="ai-cmd-list" id="aiCmdList">' + listHtml + '</div>' +
-            '<label class="ai-cmd-label" for="aiCmdLabelInp">指令名</label>' +
-            '<input type="text" id="aiCmdLabelInp" class="ai-invite-code-input" placeholder="例如：写周报" maxlength="12" />' +
-            '<label class="ai-cmd-label" for="aiCmdTplInp">指令内容（发送给 AI 的话）</label>' +
-            '<textarea id="aiCmdTplInp" class="ai-cmd-tpl-inp" rows="3" placeholder="例如：请帮我写一篇本周工作周报，包含完成事项、遇到的问题、下周计划。" maxlength="300"></textarea>' +
-          '</div>' +
-          '<div class="ai-invite-modal-foot">' +
-            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel" id="aiCmdCancel">关闭</button>' +
-            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiCmdAdd">添加指令</button>' +
-          '</div>' +
-        '</div>';
-      document.body.appendChild(modal);
-      requestAnimationFrame(function() { try { modal.classList.add('is-ready'); } catch (e) {} });
-      modal.querySelector('#aiCmdCancel').addEventListener('click', function() { closeQuickModal('aiCustomCmdModal'); });
-      modal.querySelector('#aiCmdAdd').addEventListener('click', function() {
-        var label = String(modal.querySelector('#aiCmdLabelInp').value || '').trim();
-        var tpl = String(modal.querySelector('#aiCmdTplInp').value || '').trim();
-        if (!label) { notify('请填写指令名'); return; }
-        if (!tpl) { notify('请填写指令内容'); return; }
-        var arr = loadCustomQuickCommands();
-        arr.push({ label: label, template: tpl });
-        saveCustomQuickCommands(arr);
-        renderQuickChips();
-        closeQuickModal('aiCustomCmdModal');
-        notify('已添加指令：' + label);
-      });
-      modal.addEventListener('click', function(ev) {
-        var del = ev.target.closest('[data-del]');
-        if (del) {
-          var idx = parseInt(del.getAttribute('data-del'), 10);
-          var arr = loadCustomQuickCommands();
-          if (idx >= 0 && idx < arr.length) arr.splice(idx, 1);
-          saveCustomQuickCommands(arr);
-          renderQuickChips();
-          var row = del.closest('.ai-cmd-row');
-          if (row && row.parentNode) row.parentNode.removeChild(row);
-        }
-      });
+      var modal = document.getElementById(id);
+      if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
     }
     // ★ 生图服务地址：改走自建后端代理 /api/agent/image。
     //   服务端负责转发生图请求、识别 default.jpeg 占位图并带退避重试取回真图，
@@ -12202,7 +12079,6 @@ function showChatMessages() {
       setTimeout(function() { try { URL.revokeObjectURL(a.href); } catch (e) {} if (a.parentNode) a.parentNode.removeChild(a); }, 500);
       notify('已导出 Markdown 文件');
     }
-    renderQuickChips();
 
     // ★ 清理（死代码）：此处原有一对 `panelShell.querySelector('#aiPlusModelSelect')` /
     //   `#aiPlusThinkSelect` 取元素 + fillSelect 填值。但这两个 id 在**全仓库 0 命中**
@@ -12447,12 +12323,27 @@ function showChatMessages() {
         listEl.appendChild(item);
       });
       _selectPopEl = el('div', { class: 'ai-select-pop', role: 'menu', 'aria-label': kind === 'model' ? '选择模型' : '选择思考程度' });
+      var heading = el('div', { class: 'ai-select-pop-heading' });
+      heading.appendChild(el('span', { text: kind === 'model' ? '选择模型' : '选择思考程度' }));
+      var closeButton = el('button', { type: 'button', class: 'ai-select-pop-close', 'aria-label': '关闭' });
+      closeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
+      closeButton.addEventListener('click', function(event) {
+        event.preventDefault(); event.stopPropagation(); closeSelectPopup();
+        if (anchor && typeof anchor.focus === 'function') anchor.focus({ preventScroll: true });
+      });
+      heading.appendChild(closeButton);
+      _selectPopEl.appendChild(heading);
       _selectPopEl.appendChild(listEl);
       document.body.appendChild(_selectPopEl);
       var rect = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
-      var width = Math.max(rect ? rect.width : 260, 260);
+      var viewport = window.visualViewport;
+      var visibleTop = viewport ? viewport.offsetTop : 0;
+      var visibleHeight = viewport ? viewport.height : window.innerHeight;
+      var width = Math.min(window.innerWidth - 24, Math.max(rect ? rect.width : 260, 260));
       var left = rect ? Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)) : 12;
-      var top = rect ? Math.min(rect.bottom + 6, window.innerHeight - 360) : 60;
+      var maxHeight = Math.max(100, visibleHeight - 24);
+      _selectPopEl.style.maxHeight = Math.min(maxHeight, visibleHeight * 0.8) + 'px';
+      var top = Math.max(visibleTop + 12, rect ? Math.min(rect.bottom + 6, visibleTop + visibleHeight - Math.min(360, maxHeight) - 12) : visibleTop + 12);
       _selectPopEl.style.left = left + 'px';
       _selectPopEl.style.top = top + 'px';
       _selectPopEl.style.minWidth = width + 'px';
@@ -13041,21 +12932,6 @@ function showChatMessages() {
       e.stopPropagation();
       // select 自己处理模型/思考，不要拦截
       if (e.target && (e.target.tagName === 'SELECT' || e.target.closest('select'))) return;
-
-      // ★ 新增：快捷指令芯片
-      var chip = e.target.closest('.ai-quick-chip');
-      if (chip) {
-        var qcId = chip.getAttribute('data-qc');
-        if (qcId) { handleQuickCommand(qcId); return; }
-        var customIdx = chip.getAttribute('data-custom');
-        if (customIdx != null) {
-          var customs = loadCustomQuickCommands();
-          var customCmd = customs[parseInt(customIdx, 10)];
-          if (customCmd) insertQuickTemplate(customCmd.template);
-          return;
-        }
-        return;
-      }
 
       var t = e.target.closest('[data-action]');
       if (!t) return;

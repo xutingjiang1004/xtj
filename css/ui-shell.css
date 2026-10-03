@@ -3167,3 +3167,22 @@ html[data-xtj-motion="off"] #notificationContainer .notification-bubble { transi
 /* Keyboard visibility changes the shell, never the Dock's geometry. */
 html.xtj-keyboard-open #dockBar { display:none!important; }
 html.xtj-ios-viewport.xtj-keyboard-open .dock-panel { padding-bottom:0!important; scroll-padding-bottom:0!important; }
+html.xtj-ios-viewport.xtj-keyboard-open #dockChatContainer .chat-input-area { padding-bottom:8px!important; }
+
+/* Keep auth fields in a bounded, locally scrollable viewport while Safari pans. */
+html.xtj-ios-viewport.xtj-keyboard-open #loginModal,
+html.xtj-ios-viewport.xtj-keyboard-open #registerModal {
+    top: var(--xtj-visual-top, 0px);
+    bottom: auto;
+    height: var(--xtj-app-height);
+    box-sizing: border-box;
+    align-items: flex-start;
+    padding: 12px 0;
+}
+html.xtj-ios-viewport.xtj-keyboard-open #loginModal .modal-box,
+html.xtj-ios-viewport.xtj-keyboard-open #registerModal .modal-box {
+    max-height: calc(var(--xtj-app-height) - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-behavior: auto;
+}

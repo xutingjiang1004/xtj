@@ -207,3 +207,61 @@ for(const theme of ['light','dark'])test(theme+': Feed comments use compact tran
   await f.page.locator('#feed .post-all-comments').click();await f.page.waitForFunction(()=>document.querySelectorAll('#feed [data-comment-id]').length===6);assert.equal(await f.page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);
  }finally{await f.close();}
 });
+
+for (const [device,viewport] of [['phone',{width:390,height:844}],['tablet',{width:1024,height:768}]]) {
+ test(device+': Safari keyboard pan aligns both edges, clears Dock reserve, and recovers while input remains focused',{timeout:30000},async()=>{
+  const f=await postBrowserFixture({counts:[3],ios:true,viewport});try{
+   const {page}=f;const dockWasVisible=await page.locator('#dockBar').isVisible();await page.evaluate(()=>__xtjOpenAiChat());await page.waitForSelector('#aiChatMsgInput');await page.waitForTimeout(350);
+   await page.locator('#aiChatMsgInput').focus();
+   await page.evaluate(()=>{testKeyboardViewport.height=360;testKeyboardViewport.offsetTop=86;testKeyboardViewport.dispatchEvent(new Event('resize'));testKeyboardViewport.dispatchEvent(new Event('scroll'));});
+   await page.waitForFunction(()=>document.documentElement.style.getPropertyValue('--xtj-visual-top')==='86px');
+   let bounds=await page.evaluate(()=>({top:document.querySelector('.ai-chat-header').getBoundingClientRect().top,bottom:document.querySelector('.ai-chat-input-bar').getBoundingClientRect().bottom,padding:getComputedStyle(document.getElementById('aiChatRoot')).paddingBottom,hidden:!document.getElementById('dockBar').getClientRects().length}));
+   assert.ok(Math.abs(bounds.top-86)<=2,JSON.stringify(bounds));assert.ok(Math.abs(bounds.bottom-446)<=2,JSON.stringify(bounds));assert.equal(bounds.padding,'0px');assert.equal(bounds.hidden,true);
+   // Keyboard moves both coordinate origins, then Safari retains a stale
+   // innerHeight even though VisualViewport has already expanded.
+   await page.evaluate(()=>{Object.defineProperty(window,'innerHeight',{value:360,configurable:true});testKeyboardViewport.offsetTop=120;testKeyboardViewport.dispatchEvent(new Event('scroll'));window.dispatchEvent(new Event('resize'));});
+   await page.waitForFunction(()=>document.documentElement.style.getPropertyValue('--xtj-visual-top')==='120px');
+   assert.ok(Math.abs((await page.locator('.ai-chat-input-bar').boundingBox()).y+(await page.locator('.ai-chat-input-bar').boundingBox()).height-480)<=2);
+   await page.evaluate(height=>{testKeyboardViewport.height=height;testKeyboardViewport.offsetTop=0;testKeyboardViewport.dispatchEvent(new Event('resize'));},viewport.height);
+   await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));
+   assert.equal(await page.locator('#dockBar').isVisible(),dockWasVisible);assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),viewport.height+'px');
+   assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-visual-top')),'0px');assert.equal(await page.evaluate(()=>document.activeElement.id),'aiChatMsgInput');
+   await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());await page.waitForTimeout(250);
+   assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),viewport.height+'px');assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+ });
+}
+
+test('Safari post comment focus stays inside its own scroll panel as the keyboard opens and closing restores the full shell',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[3],ios:true});try{
+  const {page}=f;await page.locator('#feed .actions').getByRole('button',{name:'评论',exact:true}).click();const input=page.locator('#feed .inline-comment-inp');await input.focus();
+  await page.evaluate(()=>{testKeyboardViewport.height=360;testKeyboardViewport.offsetTop=80;testKeyboardViewport.dispatchEvent(new Event('resize'));});
+  await page.waitForFunction(()=>document.documentElement.style.getPropertyValue('--xtj-visual-top')==='80px');
+  const rect=await input.boundingBox();assert.ok(rect.y>=80&&rect.y+rect.height<=440,JSON.stringify(rect));assert.equal(await page.evaluate(()=>scrollY),0);assert.equal(await page.locator('#dockBar').isVisible(),false);
+  await input.evaluate(el=>el.blur());await page.evaluate(()=>{testKeyboardViewport.height=844;testKeyboardViewport.offsetTop=0;testKeyboardViewport.dispatchEvent(new Event('resize'));});
+  await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),'844px');assert.equal(await page.locator('#dockBar').isVisible(),true);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+for(const actor of ['alice','bob'])test(actor+': a public three-image post keeps its complete gallery through API fallback and ignores old cover-only caches',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[3],user:actor,publicPosts:true,feedUnavailable:true,legacyCoverCache:true});try{
+  const {page}=f;assert.equal(await page.locator('#feed .post-media-cell').count(),3);
+  assert.ok(f.calls.some(c=>c.path==='/api/post/media/batch'));assert.equal(f.calls.filter(c=>c.path.startsWith('/api/post/detail/')).length,0);
+  await page.locator('#feed .post-media-cell').nth(2).click();await page.waitForFunction(()=>window.photoPreviewCurrent?.__xtjMediaIndex===2);assert.equal(await page.evaluate(()=>__xtjPreviewExplicitPhotos.length),3);
+  await page.evaluate(()=>closePhotoPreview());await page.waitForFunction(()=>!document.getElementById('photoPreviewOverlay').classList.contains('active'));
+  f.setFailMediaBatch(true);await page.evaluate(()=>loadFeed(true));assert.equal(await page.locator('#feed .post-media-cell').count(),3,'failed attachment refresh retains a complete gallery');
+  f.setFailMediaBatch(false);await page.evaluate(()=>loadFeed(true));assert.equal(await page.locator('#feed .post-media-cell').count(),3);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+for(const auth of [['loginModal','loginPwInp'],['registerModal','regPwInp']])test(auth[0]+': Safari keyboard keeps the focused auth field inside a local scroll region and restores the shell',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[3],ios:true});try{
+  const {page}=f;await page.evaluate(id=>openAuthModal(id==='loginModal'?'login':'register'),auth[0]);await page.waitForTimeout(260);
+  await page.locator('#'+auth[1]).focus();await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:300,offsetTop:90});testKeyboardViewport.dispatchEvent(new Event('resize'));});
+  await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-keyboard-open'));
+  const box=page.locator('#'+auth[0]+' .modal-box');const rect=await box.boundingBox();assert.ok(rect.y>=90&&rect.y+rect.height<=390.5,JSON.stringify(rect));
+  const input=await page.locator('#'+auth[1]).boundingBox();assert.ok(input.y>=90&&input.y+input.height<=390.5,JSON.stringify(input));assert.equal(await page.locator('#dockBar').isVisible(),false);
+  const first=auth[0]==='loginModal'?'loginNickInp':'regNickInp';await page.locator('#'+first).focus();await page.waitForTimeout(50);const nick=await page.locator('#'+first).boundingBox();assert.ok(nick.y>=90&&nick.y+nick.height<=390.5,JSON.stringify(nick));
+  await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:844,offsetTop:0});testKeyboardViewport.dispatchEvent(new Event('resize'));});await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));
+  assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),'844px');await page.evaluate(id=>closeModal(id),auth[0]);assert.equal(await page.locator('#dockBar').isVisible(),true);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
