@@ -11,7 +11,9 @@ for(const [name,viewport] of [['390px',{width:390,height:844}],['desktop',{width
     const cols=await grid.evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length);assert.equal(cols,post.media_items.length===2||post.media_items.length===4?2:3);
     assert.equal(await card.evaluate(el=>getComputedStyle(el).borderRadius),'0px');
     if(post.media_items.length>9)assert.equal(await card.locator('.post-media-overflow').textContent(),'+'+(post.media_items.length-9));
-    await card.locator('.content').click();await page.waitForFunction(id=>window.__xtjPostDetailSnapshot?.id===id,post.id);
+    await card.locator('.content').click();
+    if(post.media_items.length<=9){assert.equal(await page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);continue;}
+    await page.waitForFunction(id=>window.__xtjPostDetailSnapshot?.id===id,post.id);
     assert.equal(await page.locator('#postDetailBody .post-media-cell').count(),post.media_items.length);
     await page.evaluate(()=>closeModal('postDetailModal'));await page.waitForFunction(()=>!document.getElementById('postDetailModal').classList.contains('active'));
    }
@@ -23,7 +25,7 @@ for(const [name,viewport] of [['390px',{width:390,height:844}],['desktop',{width
    await page.waitForTimeout(500);assert.equal(await page.locator('#ppDeleteBtn').getAttribute('aria-label'),'删除帖子');
    await page.evaluate(()=>closePhotoPreview());await page.waitForFunction(()=>!document.getElementById('photoPreviewOverlay').classList.contains('active'));
    const first=f.posts[0],firstCard=page.locator(`#feed .post[data-post-id="${first.id}"]`);await firstCard.scrollIntoViewIfNeeded();
-   assert.equal(await firstCard.locator('[data-comment-id]').count(),3);await firstCard.getByRole('button',{name:'查看全部 6 条评论'}).click();await page.waitForFunction(()=>document.querySelectorAll('#postDetailBody [data-comment-id]').length===6);
+   assert.equal(await firstCard.locator('[data-comment-id]').count(),3);await firstCard.getByRole('button',{name:'查看全部 6 条评论'}).click();await page.waitForFunction(()=>document.querySelectorAll('#feed .post:first-child [data-comment-id]').length===6);assert.equal(await page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);await page.evaluate(id=>openPostDetail(id),first.id);await page.waitForFunction(()=>document.querySelectorAll('#postDetailBody [data-comment-id]').length===6);
    await page.locator('#postDetailBody .like-btn').click();await page.waitForFunction(()=>document.querySelector('#postDetailBody .like-btn').getAttribute('aria-busy')!=='true');assert.equal(await page.locator('#postDetailBody .like-btn').getAttribute('aria-pressed'),'true');
    await page.locator('#postDetailBody').getByRole('button',{name:'评论',exact:true}).click();await page.locator('#postDetailBody .inline-comment-inp').fill('详情发表评论');await page.locator('#postDetailBody .inline-comment-inp').press('Enter');await page.waitForFunction(()=>document.querySelector('#postDetailBody .comments')?.textContent.includes('详情发表评论'));
    assert.equal(await page.locator('#postDetailBody [data-comment-id]').count(),7);
@@ -169,5 +171,39 @@ test('the gallery still pinches the photo in and out while the page scale remain
   await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewOverlay').style.getPropertyValue('--pp-scale'))<=1);
   await page.evaluate(()=>{testPhotoPointer('pointerup',3,170);testPhotoPointer('pointerup',4,220);});
   assert.equal(await page.evaluate(()=>visualViewport.scale),1);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('iOS keyboard uses one viewport owner, hides rather than lifts the Dock and restores the full page after blur',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[3],ios:true});try{
+  const {page}=f;await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-ios-viewport'));
+  const dock=await page.locator('#dockBar').boundingBox();
+  async function keyboard(input){
+   await input.focus();await page.evaluate(()=>{testKeyboardViewport.height=420;testKeyboardViewport.dispatchEvent(new Event('resize'));});
+   await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-keyboard-open'));
+   assert.equal(await page.locator('#dockBar').isVisible(),false);
+   assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-visual-bottom')),'0px');
+   assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),'420px');
+   await input.evaluate(el=>el.blur());await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));
+   assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),'844px','blur restores height even before Safari reports the final viewport event');
+   await page.evaluate(()=>{testKeyboardViewport.height=844;testKeyboardViewport.dispatchEvent(new Event('resize'));});
+   assert.deepEqual(await page.locator('#dockBar').boundingBox(),dock);
+  }
+  await keyboard(page.locator('#postInp'));
+  await page.evaluate(()=>__xtjOpenAiChat());await page.waitForSelector('#aiChatMsgInput');
+  await page.locator('#aiChatMsgInput').focus();await page.evaluate(()=>{testKeyboardViewport.height=420;testKeyboardViewport.dispatchEvent(new Event('resize'));});
+  await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-keyboard-open'));
+  const bar=page.locator('.ai-chat-input-bar');assert.equal(await bar.evaluate(el=>el.style.bottom),'');assert.equal(await bar.evaluate(el=>el.style.position),'');
+  const geometry=await bar.boundingBox();assert.ok(geometry.y+geometry.height<=421,JSON.stringify(geometry));assert.equal(await page.locator('#dockBar').isVisible(),false);
+  await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());await page.waitForFunction(()=>document.documentElement.style.getPropertyValue('--xtj-app-height')==='844px');
+  await page.evaluate(()=>{testKeyboardViewport.height=844;testKeyboardViewport.dispatchEvent(new Event('resize'));});assert.equal(await page.locator('#dockBar').isVisible(),true);
+ }finally{await f.close();}
+});
+
+for(const theme of ['light','dark'])test(theme+': Feed comments use compact transparent rows and retain inline expansion',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[3],theme});try{
+  const row=f.page.locator('#feed .comment-item').first();const style=await row.evaluate(el=>{const s=getComputedStyle(el);return{background:s.backgroundColor,shadow:s.boxShadow,blur:s.backdropFilter,height:el.offsetHeight,padding:s.paddingTop};});
+  assert.equal(style.background,'rgba(0, 0, 0, 0)');assert.equal(style.shadow,'none');assert.equal(style.blur,'none');assert.ok(style.height<=40,JSON.stringify(style));
+  await f.page.locator('#feed .post-all-comments').click();await f.page.waitForFunction(()=>document.querySelectorAll('#feed [data-comment-id]').length===6);assert.equal(await f.page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);
  }finally{await f.close();}
 });

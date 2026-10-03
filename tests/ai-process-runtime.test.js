@@ -73,10 +73,10 @@ test('live reasoning and tools remain in chronological order; completed calls st
   assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-process-timeline')?'tools':'reasoning')),['reasoning','tools','reasoning']);
   assert.equal(await page.locator('.ai-tool-result-card').count(),2);
   assert.ok(await page.locator('.ai-tool-step').first().isVisible());
-  await page.locator('[data-tool-call-id="a"] .ai-tool-result-card').click();
+  await page.locator('[data-tool-call-id="a"] .ai-tool-result-card > button').click();
   assert.equal(await page.locator('[data-tool-call-id="a"] .ai-search-detail').isVisible(),true);
   assert.equal(await page.locator('[data-tool-call-id="b"] .ai-search-detail').isVisible(),false);
-  await page.locator('[data-tool-call-id="b"] .ai-tool-result-card').focus(); await page.keyboard.press('Enter');
+  await page.locator('[data-tool-call-id="b"] .ai-tool-result-card > button').focus(); await page.keyboard.press('Enter');
   assert.equal(await page.locator('[data-tool-call-id="b"] .ai-search-detail').isVisible(),true);
   await page.evaluate(()=>{emit({type:'content',text:'两座城市天气如下。'});emit({type:'done',content:'两座城市天气如下。',reasoning:'先比较两座城市。再结合工具结果判断。',thinking_mode:'max',complete:true,saved:true});stream.close();});
   await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
@@ -167,9 +167,10 @@ for(const model of ['deepseek-flash','deepseek-v4-pro','custom:test-custom']) te
  await page.waitForFunction(()=>document.querySelector('.ai-tool-step.is-done'));
  assert.match(await page.locator('.ai-tool-step-status').textContent(),/找到 5 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').count(),0);
  assert.equal(await page.locator('.ai-search-detail').isVisible(),false);
- const heading=page.locator('.ai-tool-result-card-title');assert.equal(await heading.textContent(),'找到 5 个网页');
- const before=await heading.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.parentElement.getBoundingClientRect();return{x:a.x-b.x,y:a.y-b.y};});await page.locator('.ai-tool-inline-result').click();assert.equal(await page.locator('.ai-search-detail').isVisible(),true);
- const after=await heading.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.parentElement.getBoundingClientRect();return{x:a.x-b.x,y:a.y-b.y};}),result=await page.locator('.ai-search-detail').boundingBox();
+ const heading=page.locator('.ai-tool-result-card-title');assert.match(await heading.textContent(),/找到 5 个网页/);
+ const row=await page.locator('.ai-tool-step-title').boundingBox(),countBox=await heading.boundingBox();assert.ok(Math.abs(row.y-countBox.y)<8,'result count stays on the search row');
+ const before=await heading.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.closest('.ai-tool-step-body').getBoundingClientRect();return{x:a.x-b.x,y:a.y-b.y};});await page.locator('.ai-tool-inline-result > button').click();assert.equal(await page.locator('.ai-search-detail').isVisible(),true);
+ const after=await heading.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.closest('.ai-tool-step-body').getBoundingClientRect();return{x:a.x-b.x,y:a.y-b.y};}),result=await page.locator('.ai-search-detail').boundingBox();
  assert.ok(Math.abs(before.x-after.x)<1&&Math.abs(before.y-after.y)<1,'count heading must not drift on expansion');
  assert.ok(result.width>200&&result.x+result.width<=390,'mobile results use a readable full-width column '+JSON.stringify({before,after,result}));
  assert.doesNotMatch(await page.locator('.ai-tool-step').textContent(),/查看结果/);
@@ -178,9 +179,9 @@ for(const model of ['deepseek-flash','deepseek-v4-pro','custom:test-custom']) te
  assert.ok(geometry.below);assert.ok(Math.abs(geometry.left)<10,JSON.stringify(geometry));assert.ok(geometry.width<geometry.view);
  await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-tool-step-status'));
  assert.match(await page.locator('.ai-tool-step-status').textContent(),/找到 5 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').count(),0);
- const restored=page.locator('details.ai-tool-inline-result');assert.equal(await restored.locator('summary').textContent(),'找到 5 个网页');
- assert.equal(await restored.locator('summary').evaluate(el=>getComputedStyle(el,'::after').content),'"▸"');await restored.locator('summary').click();
- assert.equal(await restored.locator('.ai-search-detail').isVisible(),true);assert.equal(await restored.locator('summary').evaluate(el=>getComputedStyle(el,'::after').content),'"▾"');
+ const restored=page.locator('.ai-tool-inline-result');assert.match(await restored.locator('button').textContent(),/找到 5 个网页/);
+ assert.equal(await restored.locator('.ai-search-toggle').textContent(),' ▸');await restored.locator('button').click();
+ assert.equal(await restored.locator('.ai-search-detail').isVisible(),true);assert.equal(await restored.locator('.ai-search-toggle').textContent(),' ▾');
 });
 test('weather feedback has actual facts and optional data stays collapsed in its own tool row',async t=>{
  const page=await fixture(t);

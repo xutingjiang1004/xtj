@@ -2,7 +2,7 @@
 const fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {chromium,webkit}=require('playwright');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVxkAAAAASUVORK5CYII=','base64');
-async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false}={}){
+async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false}={}){
  const root=path.resolve('.'),mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.mjs':'application/javascript'};
  const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;
   if(pathname.startsWith('/test-image/')){const colors=['#71b8a3','#d3a579','#849ebe','#c78998'];const index=Number(pathname.match(/-(\d+)\.png$/)?.[1]||0)%colors.length;const svg='<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300"><rect width="400" height="300" fill="'+colors[index]+'"/><circle cx="300" cy="70" r="45" fill="#ffffff" opacity=".55"/><path d="M0 300L150 120L400 300Z" fill="#163e35" opacity=".4"/></svg>';res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'max-age=3600'}).end(svg);return;}
@@ -14,6 +14,12 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
  const posts=counts.map((count,n)=>({id:`8c1cb02d-74d0-4e45-9e15-${String(n+1).padStart(12,'0')}`,user_name:'alice',content:`${count} 张图片：正文和媒体排版`,media_type:count>1?'album':'image',media_url:origin+'/test-image/'+n+'-0.png',visibility:'private',created_at:'2026-10-03T12:00:00.000Z',views:4,ip_region_text:'福建',ip_region_status:'resolved',media_items:Array.from({length:count},(_,i)=>({id:`attachment-${n}-${i}`,position:i,media_type:'image',media_url:origin+`/test-image/${n}-${i}.png`,width:400,height:300,file_size:png.length}))}));
  const comments=Array.from({length:6},(_,i)=>({id:`33333333-3333-4333-8333-${String(i+1).padStart(12,'0')}`,post_id:posts[0].id,user_name:i===2?'cat_ai':'alice',generated_by_ai:i===2,parent_comment_id:i===1?`33333333-3333-4333-8333-000000000001`:null,content:'评论 '+i,created_at:`2026-10-03T12:0${i}:00.000Z`})),likes=[];
  page.on('pageerror',error=>errors.push(error.message));
+ if(ios) await page.addInitScript(()=>{
+  Object.defineProperty(navigator,'userAgent',{value:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18 Mobile Safari/604.1'});
+  window.ontouchstart=null;
+  const vv=new EventTarget();Object.assign(vv,{height:innerHeight,width:innerWidth,scale:1,offsetTop:0,offsetLeft:0,pageTop:0,pageLeft:0});
+  Object.defineProperty(window,'visualViewport',{value:vv,configurable:true});window.testKeyboardViewport=vv;
+ });
  await page.addInitScript(theme=>{localStorage.setItem('xtj_user','alice');localStorage.setItem('xtj_theme',theme);},theme);
  await page.route('**/*',async route=>{
   const url=new URL(route.request().url());if(holdImages&&url.pathname.startsWith('/test-image/'))await imageWait;if(url.origin!==origin){await route.abort();return;}

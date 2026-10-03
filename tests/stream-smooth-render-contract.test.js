@@ -43,22 +43,22 @@ test('增量补丁必须保留未变化节点（这是性能保证的核心）',
   const i = agentSrc.indexOf('function patchInnerHTML');
   const seg = agentSrc.slice(i, agentSrc.indexOf('function createSmoothTextRenderer', i));
   // 相同则跳过 —— 不碰未变节点
-  assert.match(seg, /haveHtml === wantHtml\)\s*continue/,
+  assert.match(seg, /have\.outerHTML === want\.outerHTML\)\) return/,
     '未变化节点必须跳过，否则等于整段重建');
   // 不同的才替换
   assert.match(seg, /replaceChild\(/, '变化节点必须用 replaceChild 就地替换');
   // 结构异常兜底：整段替换，保证显示正确性
   assert.match(seg, /targetEl\.innerHTML = html/, '必须保留整段替换兜底');
   // 节点数骤减说明发生重排 —— 直接整段替换
-  assert.match(seg, /next\.length < kids\.length/, '节点数骤减时必须回退整段替换');
+  assert.match(seg, /for \(; pos < old\.length; pos\+\+\)/, '结构收缩时必须移除旧的尾部节点');
 });
 
 test('流式渲染门限已收紧（流畅度的直接来源）', () => {
-  // 增量补丁把每帧成本降到 O(1) 后，门限才能从 90/140ms 收紧到 48/64ms
-  assert.match(agentSrc, /rendered\.length < 600 \? 48 : 64/,
-    'ai-agent.js 门限必须收紧到 48/64ms');
-  assert.match(coreSrc, /rendered\.length < 600 \? 48 : 64/,
-    'stream-renderer.js 门限必须收紧到 48/64ms');
+  // 增量补丁把每帧成本降到 O(1) 后，门限才能从 90/140ms 收紧到 0/16ms
+  assert.match(agentSrc, /rendered\.length < 600 \? 0 : 16/,
+    'ai-agent.js 门限必须收紧到 0/16ms');
+  assert.match(coreSrc, /rendered\.length < 600 \? 0 : 16/,
+    'stream-renderer.js 门限必须收紧到 0/16ms');
   // 不得回退到旧的 90/140
   assert.doesNotMatch(agentSrc, /rendered\.length < 600 \? 90 : 140/,
     '不得回退到旧的 90/140ms 门限');

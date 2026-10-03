@@ -8494,9 +8494,19 @@ function renderProfileActivityList(kind) {
                 cell.style.setProperty('--post-single-viewport-width', (ratio * 65) + 'vh');
             };
 
+            var expandedPostComments = new Set(), expandedCommentsOwner = currentUser;
+            function canOpenFeedPostDetail(post) {
+                return !!post && getPostMediaItems(post).filter(function(item) { return item.media_type === 'image'; }).length > 9;
+            }
+            window.showFeedPostComments = function(postId) {
+                var post = (feedAllPosts || []).find(function(p) { return String(p.id) === String(postId); });
+                if (canOpenFeedPostDetail(post)) { window.openPostDetail(postId); return; }
+                expandedPostComments.add(String(postId)); schedulePostCardPatch(postId);
+            };
+            if (typeof window.addEventListener === 'function') window.addEventListener('auth-ready', function() { if (expandedCommentsOwner !== currentUser) { expandedPostComments.clear(); expandedCommentsOwner = currentUser; } });
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
-                var limit = options && options.detail ? Infinity : 3;
+                var limit = (options && options.detail) || expandedPostComments.has(String(post.id)) ? Infinity : 3;
                 function commentDeleteButton(comment) {
                     if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
                     return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
@@ -8532,7 +8542,7 @@ function renderProfileActivityList(kind) {
                 var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
                 pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
-                if (pComms.length > _count) html += '<button type="button" class="post-all-comments" onclick="openPostDetail(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + pComms.length + ' 条评论</button>';
+                if (pComms.length > _count) html += '<button type="button" class="post-all-comments" onclick="showFeedPostComments(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + pComms.length + ' 条评论</button>';
                 return '<div class="comments">' + html + '</div>';
             }
             window.buildPostCommentsHtml = buildPostCommentsHtml;
@@ -9870,11 +9880,21 @@ function renderProfileActivityList(kind) {
                     return;
                 }
             });
+            var feedDetailGesture = null, suppressFeedDetailUntil = 0;
+            document.addEventListener('pointerdown', function(e) {
+                var card = e.target.closest && e.target.closest('#feed > .post-feed-item');
+                feedDetailGesture = card && e.pointerType === 'touch' ? {id:e.pointerId,x:e.clientX,y:e.clientY} : null;
+            }, {passive:true});
+            document.addEventListener('pointermove', function(e) {
+                if (feedDetailGesture && feedDetailGesture.id === e.pointerId && Math.hypot(e.clientX-feedDetailGesture.x,e.clientY-feedDetailGesture.y)>10) suppressFeedDetailUntil=Date.now()+400;
+            }, {passive:true});
+            document.addEventListener('pointercancel', function() { if(feedDetailGesture)suppressFeedDetailUntil=Date.now()+400;feedDetailGesture=null; }, {passive:true});
             document.addEventListener('click', function(e) {
                 var card = e.target.closest && e.target.closest('#feed > .post-feed-item');
-                if (!card || e.defaultPrevented || e.target.closest('button,a,input,textarea,select,video,audio,img,.actions,.comments,.inline-comment-box,.avatar,.avatar-wrap,.post-badge-stack')) return;
+                if (!card || Date.now()<suppressFeedDetailUntil || e.defaultPrevented || e.target.closest('button,a,input,textarea,select,video,audio,img,.actions,.comments,.inline-comment-box,.avatar,.avatar-wrap,.post-badge-stack')) return;
                 if (window.getSelection && String(window.getSelection()).trim()) return;
-                window.openPostDetail(card.getAttribute('data-post-id'));
+                var post = (feedAllPosts || []).find(function(p) { return String(p.id) === card.getAttribute('data-post-id'); });
+                if (canOpenFeedPostDetail(post)) window.openPostDetail(post.id);
             });
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') closePostToolsMenu();
@@ -18096,7 +18116,6 @@ function renderProfileActivityList(kind) {
                     if (!isIOS) return;
 
                     const dockBar = document.getElementById('dockBar');
-                    const inputs = ['dockChatInput', 'postInp', 'announcementAdminInput', 'announcementAdminTitle', 'authUserInput', 'authPassInput'];
                     const root = document.documentElement;
                     root.classList.add('xtj-ios-viewport');
                     let keyboardOpen = false;
@@ -18111,36 +18130,30 @@ function renderProfileActivityList(kind) {
 
                     function updateIOSViewport() {
                         var vv = window.visualViewport;
+                        var focused = hasActiveInput();
                         var viewportScale = vv && Number(vv.scale) > 0 ? Number(vv.scale) : 1;
-                        // Panels own scrolling; Safari must not retain an outer-page
-                        // scroll from focusing a form or restoring a cached iPad tab.
-                        if (window.scrollY!==0) window.scrollTo(0,0);
-                        var appHeight = vv ? Math.round(vv.height * viewportScale) : window.innerHeight;
+                        var layoutHeight = window.innerHeight;
+                        var visibleHeight = vv ? Math.round(vv.height * viewportScale) : layoutHeight;
+                        var rawDiff = Math.max(0, layoutHeight - visibleHeight);
+                        if (rawDiff < viewportBaseline) viewportBaseline = rawDiff;
+                        var keyboardGap = focused ? Math.max(0, rawDiff - viewportBaseline) : 0;
+                        var isKeyboardVisible = keyboardGap > Math.max(100, layoutHeight * 0.15);
+                        // The shell owns the viewport. Fixed controls must not add
+                        // the keyboard offset again after the shell has resized.
+                        var appHeight = isKeyboardVisible ? visibleHeight : layoutHeight;
+                        if (window.scrollY !== 0) window.scrollTo(0, 0);
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
                         root.style.setProperty('--xtj-visual-top', '0px');
-                        window.dispatchEvent(new CustomEvent('xtj:visual-viewport-change'));
-                        var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - appHeight)) : 0;
-                        // ★ 2026-09-22 视口差基线（微信 web-view / 微信内置浏览器 / 开发者工具模拟器通吃）：
-                        //   这些环境里 window.innerHeight 与 visualViewport 存在**环境固有的恒定差值**
-                        //   （微信的导航栏工具栏、调试器里的 iframe 都不参与 visualViewport），
-                        //   它并不是键盘造成的。若直接把它当键盘高度，.dock-bar 的
-                        //   bottom: max(--xtj-visual-bottom, inset-bottom) 就会把 Dock 顶到屏幕中下部。
-                        //   做法：用**历史最小值当基线**，只有超出基线的增量才算真正的键盘。
-                        //   好处：不依赖 UA（模拟器/真机/内置浏览器都成立），纯浏览器里基线恒为 0，
-                        //   行为与修复前逐像素一致。
-                        if (rawDiff < viewportBaseline) viewportBaseline = rawDiff;
-                        var viewportBottom = Math.max(0, rawDiff - viewportBaseline);
-                        root.style.setProperty('--xtj-visual-bottom', viewportBottom + 'px');
-                        if (dockBar && !shouldUseDesktopChatSplitLayout() && dockBar.getClientRects().length) {
-                            // Reserve the real Dock footprint so the last post never scrolls behind it.
+                        root.style.setProperty('--xtj-visual-bottom', '0px');
+                        root.style.setProperty('--xtj-ios-keyboard-gap', isKeyboardVisible ? keyboardGap + 'px' : '0px');
+                        root.classList.toggle('xtj-keyboard-open', isKeyboardVisible);
+                        var chatFocused = focused && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
+                        document.body.classList.toggle('ios-chat-keyboard-open', !!(chatFocused && isKeyboardVisible));
+                        if (dockBar) dockBar.style.display = isKeyboardVisible ? 'none' : '';
+                        if (dockBar && !isKeyboardVisible && !shouldUseDesktopChatSplitLayout() && dockBar.getClientRects().length) {
                             root.style.setProperty('--xtj-dock-reserve', (Math.ceil(dockBar.getBoundingClientRect().height) + 20) + 'px');
                         }
-                        var keyboardGap = viewportBottom;
-                        root.style.setProperty('--xtj-ios-keyboard-gap', keyboardGap + 'px');
-                        var chatFocused = document.activeElement && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
-                        var shouldCollapseDock = !!(chatFocused && keyboardGap > 0);
-                        document.body.classList.toggle('ios-chat-keyboard-open', shouldCollapseDock);
-                        if (dockBar) dockBar.style.display = shouldCollapseDock ? 'none' : '';
+                        window.dispatchEvent(new CustomEvent('xtj:visual-viewport-change'));
                         if (chatFocused && keyboardOpen && keyboardFollowLatest) requestAnimationFrame(scrollDockChatBottom);
                     }
 
@@ -18178,6 +18191,7 @@ function renderProfileActivityList(kind) {
                         keyboardOpen = true;
                         updateIOSViewport();
                         setTimeout(() => {
+                            if (document.activeElement !== e.target) return;
                             if (e.target && e.target.scrollIntoViewIfNeeded) {
                                 e.target.scrollIntoViewIfNeeded(true);
                             } else if (e.target && e.target.scrollIntoView) {
@@ -18200,13 +18214,8 @@ function renderProfileActivityList(kind) {
                         }, 80);
                     }
 
-                    inputs.forEach(id => {
-                        const el = document.getElementById(id);
-                        if (el) {
-                            el.addEventListener('focus', handleFocus);
-                            el.addEventListener('blur', handleBlur);
-                        }
-                    });
+                    document.addEventListener('focusin', function(e) { if (hasActiveInput()) handleFocus(e); });
+                    document.addEventListener('focusout', handleBlur);
                     if (window.visualViewport) {
                         var _iosVvTicking = false, _iosVvFrame=0, _iosVvTimer=0;
                         function _iosVvHandler() {

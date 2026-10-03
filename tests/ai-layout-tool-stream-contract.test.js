@@ -76,8 +76,14 @@ test('tool results match active same-name calls and only explicit success is sho
   assert.match(result, /setAttribute\('data-tool-claimed', '1'\)/,
     '认领后必须打 data-tool-claimed，否则同一 result 重复命中、另一条同名条目永远转圈');
   assert.match(result, /matchStep\.classList\.remove\('is-running', 'is-done', 'is-error'\)/);
-  assert.match(result, /class: 'ai-tool-result-error'/);
-  assert.match(result, /Array\.isArray\(itemsArr\)/);
+  // Result rendering is shared by live events and restored history; validate that
+  // boundary instead of requiring the old duplicate renderer inside this handler.
+  assert.match(result, /populateToolResultDisclosure\(card, evt\)/);
+  const disclosure = agent.slice(agent.indexOf('function populateToolResultDisclosure'), agent.indexOf('function toolDoneLabel'));
+  assert.match(disclosure, /if \(event\.error\)/);
+  assert.match(disclosure, /class:'ai-tool-result-error'/);
+  assert.match(disclosure, /Array\.isArray\(event\.items\)/);
+  assert.match(disclosure, /safeSearchUrl\(item\.url\)/);
 });
 
 test('a tool failure does not falsely settle parallel siblings, and unresolved tools are not marked completed', () => {

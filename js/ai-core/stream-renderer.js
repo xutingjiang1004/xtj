@@ -33,7 +33,7 @@
     var animate = targetEl.getAttribute('data-ai-flow') === 'on' &&
       document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
       !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    var revealCount = 0;
+    var revealCount = 0, newBlocks = [];
     function isReveal(node) { return node.nodeType === 1 && node.classList.contains('ai-stream-reveal'); }
     function isText(node) { return node && (node.nodeType === 3 || isReveal(node)); }
     function textPart(text) {
@@ -41,11 +41,11 @@
       if (!animate || !text) { fragment.appendChild(document.createTextNode(text)); return fragment; }
       var chars = Array.from(text);
       for (var i = 0; i < chars.length;) {
-        var size = revealCount < 64 ? 24 : chars.length;
+        var size = revealCount < 96 ? 8 : chars.length;
         var span = document.createElement('span');
         span.className = 'ai-stream-reveal';
         span.textContent = chars.slice(i, i + size).join('');
-        span.style.setProperty('--ai-reveal-delay', Math.min(100, revealCount * 8) + 'ms');
+        span.style.setProperty('--ai-reveal-delay', Math.min(100, revealCount * 4) + 'ms');
         fragment.appendChild(span); revealCount++; i += size;
       }
       return fragment;
@@ -53,6 +53,7 @@
     function copy(node) {
       if (node.nodeType === 3) return textPart(node.data);
       var clone = node.cloneNode(false);
+      if (animate && /^(P|LI|H[1-6]|BLOCKQUOTE)$/.test(clone.tagName)) newBlocks.push(clone);
       Array.from(node.childNodes).forEach(function(child) { clone.appendChild(copy(child)); });
       return clone;
     }
@@ -83,6 +84,13 @@
     try {
       var holder = document.createElement('div'); holder.innerHTML = html;
       children(targetEl, holder, 0);
+      var blockSet = new Set(newBlocks);
+      newBlocks.filter(function(block) { for (var parent=block.parentElement;parent && parent!==targetEl;parent=parent.parentElement) if (blockSet.has(parent)) return false; return true; }).slice(0,48).forEach(function(block, index) {
+        if (typeof block.animate === 'function') block.animate([
+          { clipPath:'inset(0 0 100% 0)', opacity:0.35 },
+          { clipPath:'inset(0 0 0% 0)', opacity:1 }
+        ], { duration:220, delay:Math.min(64,index*12), easing:'cubic-bezier(.22,.7,.3,1)' });
+      });
     } catch (_) {
       targetEl.innerHTML = html;
     }
@@ -202,7 +210,7 @@
         //   改为只替换真正变化的节点后，门限可从 90/140ms 收紧到 48/64ms，
         //   文字接近逐帧渗出，得到 Siri 式的连续流淌观感。
         var now = Date.now();
-        var _renderGap = rendered.length < 600 ? 48 : 64;
+        var _renderGap = rendered.length < 600 ? 0 : 16;
         if (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending) {
           patchInnerHTML(targetEl, renderRich(rendered));
           targetEl._lastRender = now;

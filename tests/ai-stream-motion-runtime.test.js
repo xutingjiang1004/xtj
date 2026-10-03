@@ -162,3 +162,21 @@ test('shared: finishing an old answer cannot strip a new answer animation after 
     assert.deepEqual(result,{retained:true,text:'新回答',clean:true});
   } finally { await browser.close(); }
 });
+
+for(const implementation of ['main','shared'])test(implementation+': new paragraphs reveal from top to bottom without restarting existing text or adding visual effects',async()=>{
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(async kind=>{
+   renderMarkdown=text=>text.split('\n\n').map(part=>'<p>'+part+'</p>').join('');XtjAiCore.Markdown.render=renderMarkdown;
+   const output=document.getElementById('output'),create=()=>kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);
+   const renderer=create();renderer.append('第一段正文');renderer.flush();const first=output.querySelector('p'),motion=first.getAnimations()[0];
+   const frames=motion.effect.getKeyframes().map(frame=>frame.clipPath);renderer.append('\n\n第二段正文\n\n第三段正文');renderer.flush();
+   const blocks=output.querySelectorAll('p'),stable=blocks[0]===first&&first.getAnimations()[0]===motion;
+   const delays=Array.from(blocks).slice(1).map(block=>block.getAnimations()[0].effect.getTiming().delay);
+   renderer.finish();await new Promise(r=>setTimeout(r,350));
+   const filters=Array.from(blocks).map(block=>getComputedStyle(block).filter);
+   document.documentElement.setAttribute('data-xtj-motion','off');output.replaceChildren();const quiet=create();quiet.append('关闭动效');quiet.flush();quiet.finish();
+   return{frames,stable,ordered:delays[1]>delays[0],filters,quiet:output.getAnimations({subtree:true}).length};
+  },implementation);
+  assert.deepEqual(result,{frames:['inset(0px 0px 100%)','inset(0px 0px 0%)'],stable:true,ordered:true,filters:['none','none','none'],quiet:0});
+ }finally{await browser.close();}
+});
