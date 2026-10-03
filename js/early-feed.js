@@ -116,7 +116,7 @@
               items.slice(0, 9).map(function(item) {
                 var w = Number(item.width), h = Number(item.height);
                 var ratio = w > 0 && h > 0 && w <= 20000 && h <= 20000 ? w + ' / ' + h : '4 / 3';
-                return '<span class="post-media-cell" style="--post-image-ratio:' + ratio + '"></span>';
+                return '<span class="post-media-cell" style="--post-image-ratio:' + ratio + ';--post-single-max-width:' + ((w > 0 && h > 0 ? w / h : 4 / 3) * 520) + 'px;--post-single-viewport-width:' + ((w > 0 && h > 0 ? w / h : 4 / 3) * 65) + 'vh"></span>';
               }).join('') + '</div>';
           }
         }

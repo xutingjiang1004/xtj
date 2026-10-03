@@ -99,3 +99,75 @@ test('opening a wall photo after a post gallery restores the wall delete semanti
   await page.locator('#ppDeleteBtn').click();assert.equal(await page.evaluate(()=>wallDeleteCalls),1);assert.equal(f.calls.filter(c=>c.path==='/api/post/delete').length,0);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('portrait originals fill their own Feed frame and scale to the gallery viewport without stretching',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[1,3]});try{
+  const {page}=f;
+  const src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#8bbcab"/></svg>');
+  await page.evaluate(src=>{const img=document.querySelector('#feed .post-media-grid--single img');img.src=src;img.setAttribute('data-src',src);},src);
+  await page.waitForFunction(()=>document.querySelector('#feed .post-media-grid--single img').naturalHeight===400);
+  const frame=await page.locator('#feed .post-media-grid--single .post-media-cell').boundingBox();assert.ok(Math.abs(frame.width/frame.height-.75)<.01);
+  await page.evaluate(src=>{openPhotoPreview(0,{photos:[{id:'ratio-check',imageUrl:src,thumbUrl:src,username:'alice'}]});},src);
+  await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalHeight===400&&parseFloat(getComputedStyle(document.getElementById('photoPreviewImage')).opacity)===1);
+  const image=await page.locator('#photoPreviewImage').boundingBox();assert.ok(Math.abs(image.width/image.height-.75)<.01);assert.ok(image.width>=389&&image.height<=844);
+  assert.equal(await page.locator('#photoPreviewImage').evaluate(img=>img.parentElement.querySelector('.pp-image-loading').hidden),true);
+  assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('tablet keyboard preserves desktop media rules and restores them on blur; page gesture guard allows photo zoom',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({viewport:{width:1024,height:768},counts:[1]});try{
+  const {page}=f;await page.emulateMedia({reducedMotion:'reduce'});
+  await page.evaluate(()=>{const match=window.matchMedia.bind(window);window.matchMedia=q=>q==='(pointer:coarse)'?{matches:true}:match(q);document.getElementById('postInp').focus();});
+  await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  await page.setViewportSize({width:1024,height:350});
+  assert.equal(await page.locator('#dockBar').isVisible(),false);
+  assert.equal(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),'(min-width:768px)');
+  await page.evaluate(()=>document.activeElement.blur());await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  assert.match(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),/min-height/);
+  const gestures=await page.evaluate(()=>{function probe(el){const event=new Event('gesturestart',{bubbles:true,cancelable:true});el.dispatchEvent(event);return event.defaultPrevented;}const blocked=probe(document.body);const viewer=document.getElementById('photoPreviewOverlay');viewer.classList.add('active');const own=probe(viewer);viewer.classList.remove('active');return{blocked,own};});assert.deepEqual(gestures,{blocked:true,own:false});
+ }finally{await f.close();}
+});
+
+test('new wall upload shows the original local File while the server image is pending and switches after decode',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[1]});let release;try{
+  const {page}=f;await page.addScriptTag({path:'js/photo-wall/render.js'});const pending=new Promise(resolve=>release=resolve);
+  await page.route('**/new-wall-original.svg',async route=>{await pending;await route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#84c2aa"/></svg>'});});
+  await page.evaluate(async()=>{
+   const svg='<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#84c2aa"/></svg>';
+   const file=new File([svg],'original.svg',{type:'image/svg+xml'});
+   const photo={id:'instant-upload',imageUrl:location.origin+'/new-wall-original.svg',username:'alice',timestamp:Date.now(),width:300,height:400};
+   photoWallData=[photo];registerRecentlyUploadedPhoto(photo,file);renderPhotoWallWithoutReload();
+  });
+  const img=page.locator('#photoGrid img[data-recent-upload-id="instant-upload"]');await page.waitForFunction(()=>document.querySelector('#photoGrid img[data-recent-upload-id]')?.naturalHeight===400);
+  assert.match(await img.getAttribute('src'),/^blob:/);assert.equal(await img.getAttribute('data-src'),null);
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('auth-ready')));assert.match(await img.getAttribute('src'),/^blob:/,'same-user token refresh keeps local image');
+  release();await page.waitForFunction(()=>{const img=document.querySelector('#photoGrid img');return img?.src.endsWith('/new-wall-original.svg')&&!img.hasAttribute('data-recent-upload-id')&&img.naturalHeight===400;});assert.deepEqual(f.errors,[]);
+ }finally{if(release)release();await f.close();}
+});
+
+test('gallery uses a small botanical loading indicator only while the original image is pending',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[3],holdImages:true});try{
+  const {page}=f;page.setDefaultTimeout(6000);await page.locator('#feed .post-media-cell').first().click();
+  await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.parentElement.querySelector('.pp-image-loading:not([hidden])'));
+  assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage) .pp-image-loading svg').count(),1);
+  assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage)').evaluate(el=>getComputedStyle(el,'::before').content),'none');
+  f.releaseImages();await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth>0&&document.getElementById('photoPreviewImage').parentElement.querySelector('.pp-image-loading').hidden);
+  assert.deepEqual(f.errors,[]);
+ }finally{f.releaseImages();await f.close();}
+});
+
+test('the gallery still pinches the photo in and out while the page scale remains unchanged',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[1]});try{
+  const {page}=f;await page.locator('#feed .post-media-cell').click();await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth>0);
+  await page.evaluate(()=>{
+   window.testPhotoPointer=function(type,id,x){document.getElementById('photoPreviewImage').dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,pointerId:id,pointerType:'touch',clientX:x,clientY:400,buttons:type==='pointerup'?0:1}));};
+   testPhotoPointer('pointerdown',1,120);testPhotoPointer('pointerdown',2,220);testPhotoPointer('pointermove',1,80);testPhotoPointer('pointermove',2,260);
+  });
+  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewOverlay').style.getPropertyValue('--pp-scale'))>1.5);
+  await page.evaluate(()=>{testPhotoPointer('pointerup',1,80);testPhotoPointer('pointerup',2,260);testPhotoPointer('pointerdown',3,80);testPhotoPointer('pointerdown',4,260);testPhotoPointer('pointermove',3,170);testPhotoPointer('pointermove',4,220);});
+  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewOverlay').style.getPropertyValue('--pp-scale'))<=1);
+  await page.evaluate(()=>{testPhotoPointer('pointerup',3,170);testPhotoPointer('pointerup',4,220);});
+  assert.equal(await page.evaluate(()=>visualViewport.scale),1);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

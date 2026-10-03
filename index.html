@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="description" content="XTJ - 照片墙与社区平台" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, shrink-to-fit=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no" />
 
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -71,23 +71,23 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=6327543bb4" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=54248dc057" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=6327543bb4" /><link rel="stylesheet" href="css/ui-shell.min.css?v=943e29965b" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=8464d137a6" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=6327543bb4" /><link rel="stylesheet" href="css/ui-shell.min.css?v=48ee9a6bed" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d1d9232b4d" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=6327543bb4" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=943e29965b">
-    <link rel="stylesheet" href="css/post-feed.min.css?v=1c57690d09">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=54248dc057">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=19c662768f">
-    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=736f2d9bb1">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=48ee9a6bed">
+    <link rel="stylesheet" href="css/post-feed.min.css?v=7a081c8f8d">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=8464d137a6">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=28bdaf2f2d">
+    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=4eacf3bdf0">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=07206f896f">
-    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=1cc6625671">
-    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=e360d41582">
+    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=21a8cabc19">
+    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=a9297cdf1d">
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=6865cc5b27">
-    <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=4f061a924f">
+    <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=59e4bc80ff">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=21d7c3bc7e">
     <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=fe03e3c8b3">
     <meta name="xtj-module-features" content="js/features.min.js?v=93266150b7">
@@ -316,7 +316,7 @@
                 </div>
                 <!-- 首屏并行拉帖：不依赖 core.js / supabase，避免大包未下载完时永久 skeleton -->
                 <script src="js/post-media.min.js?v=59f8bf7bbc"></script>
-                <script src="js/early-feed.min.js?v=785ea4d526"></script>
+                <script src="js/early-feed.min.js?v=f60a2840ad"></script>
             </div>
         </div>
 
@@ -1227,14 +1227,15 @@
     <script defer src="js/vendor/supabase.min.js?v=e8c548fa1b"></script>
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
+    <script defer src="js/mobile-viewport.min.js?v=3735002b1c"></script>
     <script defer src="js/post-composer-media.min.js?v=ff8d19f1ce"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
     <script defer src="js/photo-wall/story.min.js?v=3dd8ec6135"></script>
     <script defer src="js/voice-transcription.min.js?v=39cfe95168"></script>
-    <script defer src="js/core.min.js?v=d84650f876"></script>
+    <script defer src="js/core.min.js?v=0997568620"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=09b5c7ef68"></script>
-    <script defer src="js/desktop-shell.min.js?v=d911eea54e"></script>
+    <script defer src="js/desktop-shell.min.js?v=086938c9c6"></script>
     <script defer src="js/ux-features.min.js?v=b5cf6a04c7"></script>
 
 <!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->

@@ -13,11 +13,11 @@ test('real UI modules preserve user literals, release a pressed button outside a
     await page.addScriptTag({path:'js/core-animations.js'});await page.evaluate(()=>window.openModal('modal'));await page.waitForTimeout(100);await page.evaluate(()=>window.openModal('modal'));assert.deepEqual(await page.evaluate(()=>window.rejections),[]);assert.equal(await page.evaluate(()=>window.gsapCalls),1);assert.equal(await page.locator('#modal').evaluate(n=>n.classList.contains('active')),true);
   }finally{await browser.close();}
 });
-test('page retains native text zoom and media viewers remain responsible for their pinch gestures',async()=>{
+test('page zoom is locked at the user requested scale while photo viewers retain their own gestures',async()=>{
   const browser=await chromium.launch(browserOptions);try{
     const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});const page=await context.newPage();
-    const meta=fs.readFileSync('index.html','utf8').match(/<meta name="viewport"[^>]*>/)[0];await page.setContent(meta+'<main>正常文本</main>');await page.addScriptTag({path:'js/desktop-shell.js'});
-    const cdp=await context.newCDPSession(page);await cdp.send('Emulation.setPageScaleFactor',{pageScaleFactor:1.25});assert.equal(await page.evaluate(()=>visualViewport.scale),1.25);await context.close();
+    const meta=fs.readFileSync('index.html','utf8').match(/<meta name="viewport"[^>]*>/)[0];await page.setContent(meta+'<main>正常文本</main>');await page.addScriptTag({path:'js/mobile-viewport.js'});
+    const cdp=await context.newCDPSession(page);await cdp.send('Emulation.setPageScaleFactor',{pageScaleFactor:1.25});assert.equal(await page.evaluate(()=>visualViewport.scale),1);await context.close();
   }finally{await browser.close();}
 });
 test('profile avatar revalidates local cache and ignores a late decode/response after identity changes',async()=>{

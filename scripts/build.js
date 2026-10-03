@@ -106,6 +106,7 @@ function validateHtmlMinifiedRefs(htmlFile) {
 
 const JS_FILES = [
   'js/post-media.js',
+  'js/mobile-viewport.js',
   'js/post-composer-media.js',
   'js/early-feed.js',
   'js/core-utils.js',

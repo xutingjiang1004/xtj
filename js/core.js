@@ -8472,17 +8472,27 @@ function renderProfileActivityList(kind) {
                     var url = sanitizeUrl(item.media_url), width = Number(item.width), height = Number(item.height);
                     var validDims = width > 0 && height > 0 && width <= 20000 && height <= 20000;
                     var ratio = validDims ? width + ' / ' + height : '4 / 3';
+                    var aspect = validDims ? width / height : 4 / 3;
+                    var singleSize = '--post-single-max-width:' + (aspect * 520) + 'px;--post-single-viewport-width:' + (aspect * 65) + 'vh;';
                     var attrs = 'data-post-id="' + escapeHtml(String(post.id)) + '" data-post-media-index="' + index + '" data-media-url="' + escapeHtml(url) + '"' +
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
                     var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
-                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + '" onclick="openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
-                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low">' +
+                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
+                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)">' +
                         (index === 8 && items.length > visible.length ? '<span class="post-media-overflow">+' + (items.length - visible.length) + '</span>' : '') + '</button>';
                 }).join('') + '</div>';
             }
             window.getPostMediaItems = getPostMediaItems;
             window.renderPostMediaGrid = renderPostMediaGrid;
+            window.syncPostImageRatio = function(img) {
+                var cell = img && img.closest('.post-media-grid--single .post-media-cell');
+                if (!cell || !img.naturalWidth || !img.naturalHeight) return;
+                var ratio = img.naturalWidth / img.naturalHeight;
+                cell.style.setProperty('--post-image-ratio', img.naturalWidth + ' / ' + img.naturalHeight);
+                cell.style.setProperty('--post-single-max-width', (ratio * 520) + 'px');
+                cell.style.setProperty('--post-single-viewport-width', (ratio * 65) + 'vh');
+            };
 
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
@@ -12750,7 +12760,7 @@ function renderProfileActivityList(kind) {
                     window.innerHeight || 0,
                     document.documentElement ? (document.documentElement.clientHeight || 0) : 0
                 );
-                return width >= 768 && height >= 480;
+                return width >= 768 && (height >= 480 || document.documentElement.classList.contains('xtj-tablet-keyboard'));
             }
 
             function renderDockChatDesktopEmptyState() {
@@ -18101,15 +18111,15 @@ function renderProfileActivityList(kind) {
 
                     function updateIOSViewport() {
                         var vv = window.visualViewport;
-                        if (vv && Math.abs(vv.scale - 1)>0.02) return;
+                        var viewportScale = vv && Number(vv.scale) > 0 ? Number(vv.scale) : 1;
                         // Panels own scrolling; Safari must not retain an outer-page
                         // scroll from focusing a form or restoring a cached iPad tab.
-                        if (!hasActiveInput() && window.scrollY!==0) window.scrollTo(0,0);
-                        var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
+                        if (window.scrollY!==0) window.scrollTo(0,0);
+                        var appHeight = vv ? Math.round(vv.height * viewportScale) : window.innerHeight;
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
-                        root.style.setProperty('--xtj-visual-top', (vv ? Math.max(0, Math.round(vv.offsetTop)) : 0) + 'px');
+                        root.style.setProperty('--xtj-visual-top', '0px');
                         window.dispatchEvent(new CustomEvent('xtj:visual-viewport-change'));
-                        var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+                        var rawDiff = vv ? Math.max(0, Math.round(window.innerHeight - appHeight)) : 0;
                         // ★ 2026-09-22 视口差基线（微信 web-view / 微信内置浏览器 / 开发者工具模拟器通吃）：
                         //   这些环境里 window.innerHeight 与 visualViewport 存在**环境固有的恒定差值**
                         //   （微信的导航栏工具栏、调试器里的 iframe 都不参与 visualViewport），

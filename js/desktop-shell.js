@@ -4,7 +4,7 @@
   if (window.__xtjDesktopShellBound) return;
   window.__xtjDesktopShellBound = true;
 
-  // Media viewers implement their own pinch handling. Normal page text retains browser zoom.
+  // Media viewers implement their own pinch handling; page gestures are handled by mobile-viewport.js.
 
   function openTab(tab) {
     var aiPanel = document.getElementById('panelAiChat');

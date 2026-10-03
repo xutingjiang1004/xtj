@@ -166,12 +166,21 @@ for(const model of ['deepseek-flash','deepseek-v4-pro','custom:test-custom']) te
  });
  await page.waitForFunction(()=>document.querySelector('.ai-tool-step.is-done'));
  assert.match(await page.locator('.ai-tool-step-status').textContent(),/找到 5 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').count(),0);
- assert.equal(await page.locator('.ai-search-detail').isVisible(),false);await page.locator('.ai-tool-inline-result').click();assert.equal(await page.locator('.ai-search-detail').isVisible(),true);
+ assert.equal(await page.locator('.ai-search-detail').isVisible(),false);
+ const heading=page.locator('.ai-tool-result-card-title');assert.equal(await heading.textContent(),'找到 5 个网页');
+ const before=await heading.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.parentElement.getBoundingClientRect();return{x:a.x-b.x,y:a.y-b.y};});await page.locator('.ai-tool-inline-result').click();assert.equal(await page.locator('.ai-search-detail').isVisible(),true);
+ const after=await heading.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.parentElement.getBoundingClientRect();return{x:a.x-b.x,y:a.y-b.y};}),result=await page.locator('.ai-search-detail').boundingBox();
+ assert.ok(Math.abs(before.x-after.x)<1&&Math.abs(before.y-after.y)<1,'count heading must not drift on expansion');
+ assert.ok(result.width>200&&result.x+result.width<=390,'mobile results use a readable full-width column '+JSON.stringify({before,after,result}));
+ assert.doesNotMatch(await page.locator('.ai-tool-step').textContent(),/查看结果/);
  await page.evaluate(()=>{emit({type:'done',content:'已找到相关资料。',thinking_mode:'off',complete:true,saved:true});stream.close();});await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
  const geometry=await page.evaluate(()=>{const b=document.querySelector('.ai-msg.assistant .ai-msg-bubble').getBoundingClientRect(),a=document.querySelector('.ai-msg-actions').getBoundingClientRect();return{left:a.left-b.left,below:a.top>=b.bottom,width:a.width,view:innerWidth};});
  assert.ok(geometry.below);assert.ok(Math.abs(geometry.left)<10,JSON.stringify(geometry));assert.ok(geometry.width<geometry.view);
  await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-tool-step-status'));
  assert.match(await page.locator('.ai-tool-step-status').textContent(),/找到 5 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').count(),0);
+ const restored=page.locator('details.ai-tool-inline-result');assert.equal(await restored.locator('summary').textContent(),'找到 5 个网页');
+ assert.equal(await restored.locator('summary').evaluate(el=>getComputedStyle(el,'::after').content),'"▸"');await restored.locator('summary').click();
+ assert.equal(await restored.locator('.ai-search-detail').isVisible(),true);assert.equal(await restored.locator('summary').evaluate(el=>getComputedStyle(el,'::after').content),'"▾"');
 });
 test('weather feedback has actual facts and optional data stays collapsed in its own tool row',async t=>{
  const page=await fixture(t);

@@ -7,6 +7,35 @@
   // P6: DOM 卡片数量上限 — 超过后不再 append 新卡片，避免数组/DOM 无限增长
   var MAX_DOM_PHOTOS = 500;
   var photoBatchStart = 0;
+  var recentPhotos=new Map(),recentBytes=0,recentOwner=String(window.currentUser || "");
+  function retireRecentPhoto(id){
+    var entry=recentPhotos.get(id);if(!entry)return;
+    recentPhotos.delete(id);recentBytes-=entry.bytes;clearTimeout(entry.timer);
+    if(entry.image){entry.image.onload=entry.image.onerror=null;entry.image.removeAttribute('src');}
+    URL.revokeObjectURL(entry.url);
+  }
+  window.registerRecentlyUploadedPhoto=function(photo,file){
+    if(!photo||!file||!photo.id||!file.size)return;
+    var id=String(photo.id);retireRecentPhoto(id);
+    while(recentPhotos.size>=8||recentBytes+file.size>100*1024*1024){var oldest=recentPhotos.keys().next().value;if(!oldest)break;retireRecentPhoto(oldest);}
+    var entry={url:URL.createObjectURL(file),bytes:file.size,remote:photo.imageUrl,image:new Image()};
+    recentPhotos.set(id,entry);recentBytes+=file.size;
+    entry.timer=setTimeout(function(){retireRecentPhoto(id);},180000);
+    entry.image.onload=function(){
+      var ready=entry.image.decode?entry.image.decode():Promise.resolve();
+      ready.then(function(){
+        if(recentPhotos.get(id)!==entry)return;
+        document.querySelectorAll('img[data-recent-upload-id]').forEach(function(img){if(img.getAttribute('data-recent-upload-id')===id){img.src=entry.remote;img.removeAttribute('data-recent-upload-id');}});
+        retireRecentPhoto(id);
+      }).catch(function(){});
+    };
+    entry.image.src=entry.remote;
+  };
+  if(typeof window.addEventListener==='function'){
+    window.addEventListener('auth-ready',function(){var owner=String(window.currentUser || '');if(owner!==recentOwner){Array.from(recentPhotos.keys()).forEach(retireRecentPhoto);recentOwner=owner;}});
+    window.addEventListener('pagehide',function(event){if(!event.persisted)Array.from(recentPhotos.keys()).forEach(retireRecentPhoto);});
+  }
+
 
   function esc(value){
     if (window.escapeHtml) return window.escapeHtml(String(value == null ? '' : value));
@@ -142,7 +171,7 @@
     if (typeof window.openPhotoPreview !== 'function') return;
     if (nextIndex < 0) nextIndex = 0;
     if (nextIndex >= list.length) nextIndex = list.length - 1;
-    window.openPhotoPreview(nextIndex, { photos: list });
+    window.openPhotoPreview(nextIndex, { photos: list.map(function(photo){var recent=recentPhotos.get(String(photo.id));return recent?Object.assign({},photo,{thumbUrl:recent.url}):photo;}) });
   }
 
   function photoCardHtml(photos, startIndex){
@@ -158,7 +187,8 @@
       var index = base + i;
       var delay = Math.min(index * 30, 300);
       html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + esc(String(p.id)) + '" style="animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)">';
-      html += '<img src="' + FALLBACK_IMG + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
+      var recent=recentPhotos.get(String(p.id));
+      html += recent ? '<img src="' + safeUrl(recent.url) + '" alt="photo" class="pw-blur-done" data-recent-upload-id="' + esc(String(p.id)) + '" loading="eager" decoding="async">' : '<img src="' + FALLBACK_IMG + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
       html += '<div class="pw-item-info"><div class="pw-item-name">' + esc(username) + '</div><div class="pw-item-meta"><span>' + esc(time) + '</span><span>浏览 <b class="pw-view-count">' + esc(p.views || 0) + '</b></span></div></div></div>';
     }
     return html;

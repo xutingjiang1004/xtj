@@ -78,7 +78,8 @@
 #panelPosts #feed .post-media-grid--single .post-media-cell,
 #postDetailBody .post-media-grid--single .post-media-cell {
   aspect-ratio: var(--post-image-ratio, 4 / 3);
-  max-height: min(520px, 65vh);
+  width: min(100%, var(--post-single-max-width, 693px), var(--post-single-viewport-width, 86.66vh));
+  max-height: none;
   background: transparent;
 }
 #panelPosts #feed .post-media-grid--single .post-media-cell img,
