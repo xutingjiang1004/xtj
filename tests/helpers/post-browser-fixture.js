@@ -14,12 +14,13 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
  const posts=counts.map((count,n)=>({id:`8c1cb02d-74d0-4e45-9e15-${String(n+1).padStart(12,'0')}`,user_name:'alice',content:`${count} 张图片：正文和媒体排版`,media_type:count>1?'album':'image',media_url:origin+'/test-image/'+n+'-0.png',visibility:publicPosts?'public':'private',created_at:'2026-10-03T12:00:00.000Z',views:4,ip_region_text:'福建',ip_region_status:'resolved',media_items:Array.from({length:count},(_,i)=>({id:`attachment-${n}-${i}`,position:i,media_type:'image',media_url:origin+`/test-image/${n}-${i}.png`,width:400,height:300,file_size:png.length}))}));
  const comments=Array.from({length:6},(_,i)=>({id:`33333333-3333-4333-8333-${String(i+1).padStart(12,'0')}`,post_id:posts[0].id,user_name:i===2?'cat_ai':'alice',generated_by_ai:i===2,parent_comment_id:i===1?`33333333-3333-4333-8333-000000000001`:null,content:'评论 '+i,created_at:`2026-10-03T12:0${i}:00.000Z`})),likes=[];
  page.on('pageerror',error=>errors.push(error.message));
- if(ios) await page.addInitScript(()=>{
-  Object.defineProperty(navigator,'userAgent',{value:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18 Mobile Safari/604.1'});
+ if(ios) await page.addInitScript(ios=>{
+  Object.defineProperty(navigator,'userAgent',{configurable:true,value:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18 Mobile Safari/604.1'});
   window.ontouchstart=null;
   const vv=new EventTarget();Object.assign(vv,{height:innerHeight,width:innerWidth,scale:1,offsetTop:0,offsetLeft:0,pageTop:0,pageLeft:0});
   Object.defineProperty(window,'visualViewport',{value:vv,configurable:true});window.testKeyboardViewport=vv;
- });
+  if(ios==='ipad-desktop'){Object.defineProperty(navigator,'userAgent',{value:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Version/18 Safari/605.1.15'});Object.defineProperty(navigator,'platform',{value:'iPad'});Object.defineProperty(navigator,'maxTouchPoints',{value:5});const match=window.matchMedia.bind(window);window.matchMedia=q=>q==='(pointer:coarse)'?{matches:false}:match(q);}
+ },ios);
  await page.addInitScript(({theme,user,legacyCoverCache,posts})=>{
   localStorage.setItem('xtj_user',user);localStorage.setItem('xtj_theme',theme);
   if(legacyCoverCache)localStorage.setItem('xtj_feed_cache_v7',JSON.stringify({version:7,timestamp:Date.now(),data:{posts:posts.map(p=>{const copy={...p};delete copy.media_items;return copy;}),comments:[],likes:[]}}));
@@ -50,4 +51,20 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
  await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
  return{page,posts,comments,likes,calls,errors,uploads,origin,png,releaseImages, setFailUploadAt(n){failUploadAt=n;uploadNumber=0;},setFailCreate(v){failCreate=v;},setFeedUnavailable(v){feedUnavailable=v;},setFailMediaBatch(v){failMediaBatch=v;},getCreated(){return created;},async close(){await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}};
 }
-module.exports={postBrowserFixture};
+async function wireAiChat(page){
+ await page.evaluate(()=>{
+  const base=window.fetch;
+  window.fetch=async(url,options={})=>{
+   const path=new URL(url,location.href).pathname;if(!path.startsWith('/api/agent/'))return base(url,options);
+   let data={ok:true};if(path.endsWith('/config'))data={enabled:true,name:'小猫',thinking_mode:'max'};
+   if(path.endsWith('/quota'))data={ok:true,quota:{can_chat:true,tokens_remaining:100000,search_remaining:100}};
+   if(path.endsWith('/custom-models'))data={ok:true,models:[]};
+   if(path.endsWith('/chat/history'))data={ok:true,conversation_id:'test',messages:[],has_more:false};
+   if(path.endsWith('/chat/stream'))return new Response(new ReadableStream({start(c){window.testStream=c;}}),{headers:{'Content-Type':'text/event-stream'}});
+   return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
+  };
+  window.testEmit=e=>testStream.enqueue(new TextEncoder().encode('data: '+JSON.stringify(e)+'\n\n'));
+ });
+ await page.evaluate(()=>__xtjOpenAiChat());await page.waitForSelector('#aiChatMsgInput');
+}
+module.exports={postBrowserFixture,wireAiChat};

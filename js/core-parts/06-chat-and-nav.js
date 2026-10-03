@@ -5711,7 +5711,7 @@
             window.addEventListener('DOMContentLoaded', async function() {
                 // iOS 键盘与可视视口适配
                 (function() {
-                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                    const isIOS = window.__xtjTouchViewportDevice || /iPad|iPhone|iPod/.test(navigator.userAgent + ' ' + navigator.platform) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 0);
                     if (!isIOS) return;
 
                     const dockBar = document.getElementById('dockBar');
@@ -5721,7 +5721,7 @@
                     var keyboardFollowLatest=true;
                     // 环境固有的视口差（非键盘部分），取历史最小值当基线。见 updateIOSViewport。
                     var viewportBaseline = Infinity;
-                    var closedViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                    var closedViewportHeight = window.__xtjViewportBootHeight || (window.visualViewport ? window.visualViewport.height : window.innerHeight);
                     var viewportWidth = window.innerWidth;
                     var previousFocusedInput = null;
 

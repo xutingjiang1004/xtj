@@ -34,6 +34,24 @@
       document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
       !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     var revealRuns = [];
+    var revealNow = window.performance && window.performance.now ? window.performance.now() : Date.now();
+    var revealQueue = targetEl.__aiRevealQueue || [];
+    var retired = 0;
+    while (retired < revealQueue.length && revealQueue[retired].__aiRevealAt + 180 <= revealNow) {
+      var previousRun = revealQueue[retired++];
+      if (!previousRun.parentNode) continue;
+      var text = document.createTextNode(previousRun.textContent);
+      previousRun.replaceWith(text);
+      if (text.previousSibling && text.previousSibling.nodeType === 3) {
+        text.previousSibling.data += text.data;
+        var merged = text.previousSibling; text.remove(); text = merged;
+      }
+      if (text.nextSibling && text.nextSibling.nodeType === 3) {
+        text.data += text.nextSibling.data; text.nextSibling.remove();
+      }
+    }
+    if (retired) revealQueue.splice(0, retired);
+    targetEl.__aiRevealQueue = revealQueue;
     function isReveal(node) { return node.nodeType === 1 && node.classList.contains('ai-stream-reveal'); }
     function isText(node) { return node && (node.nodeType === 3 || isReveal(node)); }
     function textPart(text) {
@@ -72,7 +90,7 @@
         }
         if (!have) { parent.insertBefore(copy(want), parent.querySelector(':scope > .ai-stream-cursor')); return; }
         pos++;
-        if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.outerHTML === want.outerHTML)) return;
+        if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.isEqualNode(want))) return;
         var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
         if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
         if (same) children(have, want, depth + 1);
@@ -93,6 +111,7 @@
         var spacing = duration / revealRuns.length;
         revealRuns.forEach(function(span, index) {
           span.__aiRevealAt = start + index * spacing;
+          revealQueue.push(span);
           span.style.setProperty('--ai-reveal-delay', Math.round(span.__aiRevealAt - now) + 'ms');
         });
         targetEl.__aiRevealUntil = start + duration;
@@ -114,7 +133,7 @@
     var finished = false;
     var paused = false;
     var streamClass = options.streamClass || 'ai-streaming-soft';
-    if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; }
+    if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; targetEl.__aiRevealQueue = []; }
     if (targetEl && !options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow', 'on');
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function (cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
@@ -192,10 +211,8 @@
         next = pending;
         pending = '';
       } else {
-        // ★ 2026-09-17 流动性优化：与 ai-agent.js 内实现保持同一算法
-        //   （积压门槛 64 / 系数 0.62、0.40 / 3 帧追平保护），
-        //   避免两条渲染路径观感不一致。
-        var frameBudget = Math.max(1, Math.floor(budget || 4), Math.ceil(pending.length / 20));
+        // Keep catch-up bounded so a large packet does not appear in one jump.
+        var frameBudget = Math.max(1, Math.floor(budget || 4), Math.min(32, Math.ceil(pending.length / 20)));
         var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
@@ -211,12 +228,9 @@
         var node = ensurePlainTextNode();
         try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
-        // ★ 2026-09-22 流式卡顿修复：整体渲染 + 增量补丁落地。
-        //   卡顿来自每帧重建整棵 DOM 子树（随长度线性变重），而非解析本身。
-        //   改为只替换真正变化的节点后，门限可从 90/140ms 收紧到 48/64ms，
-        //   文字接近逐帧渗出，得到 Siri 式的连续流淌观感。
+        // Reconcile only changed nodes on each scheduled display frame.
         var now = Date.now();
-        var _renderGap = rendered.length < 600 ? 0 : 16;
+        var _renderGap = 0; // requestAnimationFrame already limits each patch to a display frame.
         if (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending) {
           patchInnerHTML(targetEl, renderRich(rendered));
           targetEl._lastRender = now;
@@ -318,6 +332,7 @@
           if (selection && !selection.isCollapsed && completedTarget.contains(selection.anchorNode)) return;
           completedTarget.querySelectorAll('.ai-stream-reveal').forEach(function(span) { span.replaceWith(document.createTextNode(span.textContent)); });
           completedTarget.normalize();
+          completedTarget.__aiRevealQueue = [];
           completedTarget.removeAttribute('data-ai-flow');
         }, revealCleanupDelay);
         if (typeof options.onDone === 'function') {
@@ -349,7 +364,7 @@
       isCancelled: function () { return cancelled; },
       reset: function () {
         clearFrame();
-        if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; if (!options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow','on'); }
+        if (targetEl) { targetEl.__aiFlowEpoch = (targetEl.__aiFlowEpoch || 0) + 1; targetEl.__aiRevealUntil = 0; targetEl.__aiRevealQueue = []; if (!options.plainStream && !reducedMotion) targetEl.setAttribute('data-ai-flow','on'); }
         cancelled = false;
         finished = false;
         paused = false;

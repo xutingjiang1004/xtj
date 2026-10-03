@@ -1,5 +1,5 @@
 'use strict';
-const test=require('node:test'),assert=require('node:assert/strict'),{postBrowserFixture}=require('./helpers/post-browser-fixture');
+const test=require('node:test'),assert=require('node:assert/strict'),{postBrowserFixture,wireAiChat}=require('./helpers/post-browser-fixture');
 for(const [name,viewport] of [['390px',{width:390,height:844}],['desktop',{width:1280,height:900}]])for(const theme of ['light','dark']){
  test(`${name} ${theme}: real homepage grids, full Detail, ordered viewer and existing interactions`,{timeout:60000},async()=>{
   const f=await postBrowserFixture({viewport,theme});try{
@@ -263,5 +263,27 @@ for(const auth of [['loginModal','loginPwInp'],['registerModal','regPwInp']])tes
   const first=auth[0]==='loginModal'?'loginNickInp':'regNickInp';await page.locator('#'+first).focus();await page.waitForTimeout(50);const nick=await page.locator('#'+first).boundingBox();assert.ok(nick.y>=90&&nick.y+nick.height<=390.5,JSON.stringify(nick));
   await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:844,offsetTop:0});testKeyboardViewport.dispatchEvent(new Event('resize'));});await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));
   assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),'844px');await page.evaluate(id=>closeModal(id),auth[0]);assert.equal(await page.locator('#dockBar').isVisible(),true);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+for(const viewport of [{width:390,height:844},{width:1280,height:800}])test(viewport.width+'px: real AI replies have one paragraph gap, compact loose lists and matching footer text sizes',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({viewport,counts:[3],ios:viewport.width>1000?'ipad-desktop':true});try{
+  const {page}=f;await wireAiChat(page);await page.locator('#aiChatMsgInput').fill('天气');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.testStream);
+  const text='\n\n\n查到了，数据可靠。\n\n\n**明天上海天气：**\n\n- 天气：阴雨\n\n- 气温：20～24°C\n\n- 降水量：3～8mm\n\n- 风力：偏北风4～5级，阵风6级\n\n\n请带一把伞。';
+  await page.evaluate(text=>{testEmit({type:'tool_calls',tools:[{id:'1',name:'get_weather',args:{location:'上海'}}]});testEmit({type:'tool_result',call_id:'1',tool_name:'get_weather',success:true});testEmit({type:'content',text});testEmit({type:'done',content:text,thinking_mode:'max',complete:true,saved:true});testStream.close();},text);
+  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await page.waitForTimeout(1000);
+  const metrics=await page.locator('.ai-msg.assistant .ai-msg-bubble').last().evaluate(el=>{const rect=el.getBoundingClientRect(),first=el.firstElementChild.getBoundingClientRect(),list=Array.from(el.querySelectorAll('li')).map(n=>n.getBoundingClientRect());return{html:el.innerHTML,height:rect.height,firstGap:first.top-rect.top,whiteSpace:getComputedStyle(el).whiteSpace,lists:el.querySelectorAll('ul').length,listGaps:list.slice(1).map((box,i)=>box.top-list[i].bottom)};});
+  assert.equal(metrics.whiteSpace,'normal');assert.equal(metrics.lists,1);assert.ok(metrics.firstGap<=16,JSON.stringify(metrics));assert.ok(metrics.height<350,JSON.stringify(metrics));assert.ok(metrics.listGaps.every(gap=>gap>=0&&gap<=8),JSON.stringify(metrics));assert.doesNotMatch(metrics.html,/<br><br>|<ul><br>/);
+  const sizes=await page.locator('.ai-msg.assistant .ai-msg-footer').last().evaluate(el=>['.ai-msg-time','.ai-msg-agent-badge','.ai-msg-thinking-badge'].map(s=>getComputedStyle(el.querySelector(s)).fontSize));assert.deepEqual(sizes,['11px','11px','11px']);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('desktop-UA iPad with a fine pointer freezes desktop layout during an actual landscape resize and never reveals the Dock above the keyboard',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({viewport:{width:1280,height:800},ios:'ipad-desktop',counts:[3]});try{
+  const {page}=f;await wireAiChat(page);const dockBefore=await page.locator('#dockBar').isVisible();await page.locator('#aiChatMsgInput').focus();await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:310,offsetTop:20});testKeyboardViewport.dispatchEvent(new Event('resize'));});await page.setViewportSize({width:1280,height:340});await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-keyboard-open'));
+  assert.equal(await page.locator('#dockBar').isVisible(),false);assert.equal(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),'(min-width:768px)');assert.equal(await page.locator('#desktopWorkbenchSidebar').isVisible().catch(()=>false),true);
+  const composer=await page.locator('.ai-chat-input-bar').boundingBox();assert.ok(Math.abs(composer.y+composer.height-330)<=2,JSON.stringify(composer));
+  await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:800,offsetTop:0});testKeyboardViewport.dispatchEvent(new Event('resize'));});await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));
+  assert.equal(await page.locator('#dockBar').isVisible(),dockBefore);await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
