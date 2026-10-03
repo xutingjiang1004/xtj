@@ -132,28 +132,23 @@ test('未闭合围栏的渲染结果必须与已闭合同形态（无跳变）',
     '中途与闭合必须同形态，避免跳变');
 });
 
-// Animate only appended text. Markdown must keep the same structure at completion.
-test('正文增量淡入不重新包裹整个旧尾段', () => {
+// The user requested removal of the gray glyph fade, while retaining buffered streaming.
+test('正文恢复正常文本节点，不生成灰色逐字淡入层', () => {
   for (const source of [agentSrc, coreSrc]) {
-    assert.match(source, /function isReveal/);
-    assert.match(source, /className = 'ai-stream-reveal'/);
-    assert.match(source, /document.createTextNode/);
-    assert.match(source, /__aiFlowEpoch !== completedEpoch/);
+    assert.doesNotMatch(source, /ai-stream-reveal|__aiReveal|data-ai-flow/);
+    assert.match(source, /have.data = want.data/);
+    assert.match(source, /drain: function/);
   }
-  assert.doesNotMatch(agentSrc, /class="ai-stream-soft"/);
 });
-
-test('新增文字动效限制延迟，不移动正文位置', () => {
-  const css = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8');
-  assert.match(css, /aiTextFlow 180ms/);
-  assert.match(css, /@keyframes aiTextFlow/);
-  for (const source of [agentSrc, coreSrc]) assert.match(source, /Math\.min\(900, chars \* 3\)/);
+test('完成事件等待未显示的正文，不把尾部一次性闪现', () => {
+  assert.match(agentSrc, /await contentRenderer.drain\(aiContent, controller.signal\)/);
+  assert.match(agentSrc, /await answerRendererRef.value.drain/);
+  for (const source of [agentSrc, coreSrc]) assert.match(source, /Math.min\(32, Math.max\(1,/);
 });
-
-test('正文淡入受系统及站内关闭动效设置管控', () => {
+test('正文没有延迟透明度动画，关闭动效仍支持立即完成', () => {
   const css = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8');
-  assert.match(css, /@media \(prefers-reduced-motion:reduce\).*ai-stream-reveal/);
-  assert.match(css, /data-xtj-motion="off".*ai-stream-reveal/);
+  assert.doesNotMatch(css, /aiTextFlow|ai-stream-reveal/);
+  for (const source of [agentSrc, coreSrc]) assert.match(source, /final.indexOf\(rendered\) !== 0 \|\| reducedMotion/);
 });
 
 test('流式光标必须是流动渐变（不是整根明暗呼吸）', () => {

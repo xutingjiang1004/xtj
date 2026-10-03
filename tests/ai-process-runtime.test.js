@@ -197,7 +197,7 @@ test('weather feedback has actual facts and optional data stays collapsed in its
  await page.locator('.ai-tool-data-details > summary').click();assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),true);
  await page.evaluate(()=>{emit({type:'done',content:'福州晴。',reasoning:'',thinking_mode:'max',complete:true,saved:true});stream.close();});
 });
-test('answer flow animates new text only, keeps complete copyable text and removes temporary spans',async t=>{
+test('answer completion keeps the existing prefix, readable text and copyable final output',async t=>{
  const page=await fixture(t,'off');
  await page.locator('#aiChatMsgInput').fill('回答');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
  await page.evaluate(()=>{emit({type:'content',text:'第一段回答。'});});await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('第一段回答。'));
@@ -205,7 +205,7 @@ test('answer flow animates new text only, keeps complete copyable text and remov
  await page.evaluate(()=>{emit({type:'done',content:'第一段回答。\n\n第二段回答，包含 **加粗内容** 和完整的数据说明。',thinking_mode:'off',complete:true,saved:true});stream.close();});
  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
  const state=await page.locator('.ai-msg.assistant .ai-msg-bubble').evaluate(n=>({preserved:n.firstElementChild===answerFirstNode,first:n.firstElementChild.textContent,animated:n.querySelectorAll('.ai-stream-reveal').length,text:n.textContent,animation:n.querySelector('.ai-stream-reveal')&&getComputedStyle(n.querySelector('.ai-stream-reveal')).animationName}));
- assert.equal(state.preserved,true);assert.equal(state.first,old);assert.ok(state.animated>0);assert.match(state.text,/完整的数据说明/);assert.equal(state.animation,'aiTextFlow');
+ assert.equal(state.preserved,true);assert.equal(state.first,old);assert.equal(state.animated,0);assert.match(state.text,/完整的数据说明/);assert.equal(state.animation,null);
  await page.waitForTimeout(380);assert.equal(await page.locator('.ai-msg-bubble .ai-stream-reveal').count(),0);assert.equal(await page.locator('.ai-msg-bubble .ai-stream-cursor').count(),0);
 });
 
@@ -243,9 +243,9 @@ test('a sanitized final answer keeps the existing prefix and reveals new text in
  await page.evaluate(()=>emit({type:'content',text:'先到的正文。'}));await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('先到的正文。'));
  await page.evaluate(()=>{window.originalAnswerParagraph=document.querySelector('.ai-msg.assistant .ai-msg-bubble').firstElementChild;window.testFinalAnswer='先到的正文。\n\n'+('后续内容自然出现，保持从左到右的阅读顺序。'.repeat(18));emit({type:'done',content:'需要被替换的旧正文',sanitized_content:testFinalAnswer,complete:true,saved:true});stream.close();});
  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
- const state=await page.locator('.ai-msg.assistant .ai-msg-bubble').evaluate(node=>{const runs=Array.from(node.querySelectorAll('.ai-stream-reveal'));return{prefix:node.firstElementChild===originalAnswerParagraph,text:node.textContent,starts:runs.map(run=>run.__aiRevealAt),tailOpacity:getComputedStyle(runs.at(-1)).opacity};});
- assert.equal(state.prefix,true);assert.equal(state.text,(await page.evaluate(()=>testFinalAnswer)).replace(/\n/g,''));assert.ok(state.starts.length>20);assert.ok(state.starts.every((x,i)=>i===0||x>state.starts[i-1]));assert.ok(Number(state.tailOpacity)<0.5,state.tailOpacity);
- await page.waitForFunction(()=>document.querySelectorAll('.ai-msg-bubble .ai-stream-reveal').length===0);assert.equal(await page.locator('.ai-msg.assistant .ai-msg-bubble').textContent(),(await page.evaluate(()=>testFinalAnswer)).replace(/\n/g,''));
+ const state=await page.locator('.ai-msg.assistant .ai-msg-bubble').evaluate(node=>({prefix:node.firstElementChild===originalAnswerParagraph,text:node.textContent,opacity:Array.from(node.children).map(p=>getComputedStyle(p).opacity),runs:node.querySelectorAll('.ai-stream-reveal').length}));
+ assert.equal(state.prefix,true);assert.equal(state.text,(await page.evaluate(()=>testFinalAnswer)).replace(/\n/g,''));assert.equal(state.runs,0);assert.ok(state.opacity.every(value=>value==='1'));
+
 });
 
 test('plus menu removes quick commands and both model/effort popups provide a close button without changing the choice',async t=>{
@@ -254,4 +254,29 @@ test('plus menu removes quick commands and both model/effort popups provide a cl
   const row=page.locator('[data-action="'+action+'"]');const before=await row.textContent();await row.click();const popup=page.locator('.ai-select-pop:not(.is-closing)');await popup.waitFor();const close=popup.getByRole('button',{name:'关闭',exact:true});assert.equal(await close.isVisible(),true);const size=await close.boundingBox();assert.ok(size.width>=44&&size.height>=44);
   await close.click();await popup.waitFor({state:'detached'});assert.equal(await row.textContent(),before);assert.equal(await row.evaluate(el=>el===document.activeElement),true);
  }
+});
+
+test('a long English answer grows across actual display frames and completion never exposes a gray future paragraph',async t=>{
+ const page=await fixture(t,'off');await page.locator('#aiChatMsgInput').fill('English essay');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>{
+  window.essay='The Impact of Short Videos on College Students\n\n'+('In recent years, short videos have swept across campuses like a storm. '.repeat(15))+'\n\nWe should control the screen, not be controlled by it.';
+  window.replyFrameTexts=[];window.grayFrame=false;window.doubleCursor=false;window.sampleReply=true;
+  function frame(){const bubble=document.querySelector('.ai-msg.assistant .ai-msg-bubble');if(bubble){replyFrameTexts.push(bubble.textContent);if(Array.from(bubble.querySelectorAll('p,span:not(.ai-stream-cursor),strong,em')).some(n=>Number(getComputedStyle(n).opacity)<1))grayFrame=true;const pseudo=getComputedStyle(bubble,'::after');if(bubble.querySelector('.ai-stream-cursor')&&pseudo.content!=='none'&&pseudo.content!=='normal'&&pseudo.display!=='none')doubleCursor=true;}if(sampleReply)requestAnimationFrame(frame);}requestAnimationFrame(frame);
+  emit({type:'content',text:essay});emit({type:'done',content:essay,thinking_mode:'off',complete:true,saved:true});stream.close();
+ });
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));const state=await page.evaluate(()=>{sampleReply=false;return{texts:replyFrameTexts.filter((s,i,a)=>i===0||s!==a[i-1]),gray:grayFrame,doubleCursor,final:document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent,expected:essay.replace(/\n/g,''),runs:document.querySelectorAll('.ai-stream-reveal').length};});
+ assert.ok(state.texts.length>20);assert.ok(state.texts.every((s,i)=>!i||s.startsWith(state.texts[i-1])));assert.ok(state.texts.slice(1).every((s,i)=>s.length-state.texts[i].length<=34));assert.equal(state.gray,false);assert.equal(state.doubleCursor,false);assert.equal(state.final,state.expected);assert.equal(state.runs,0);
+});
+
+test('leaving chat during a completion-only drain cancels the old answer and releases the next send',async t=>{
+ const page=await fixture(t,'off');await page.locator('#aiChatMsgInput').fill('旧会话');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>{window.oldStream=stream;emit({type:'done',content:'旧回答'+('未显示的尾部'.repeat(250)),thinking_mode:'off',complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('旧回答'));
+ assert.equal(await page.locator('.ai-msg.generating').count(),1);
+ await page.getByRole('button',{name:'新对话',exact:true}).click();assert.equal(await page.evaluate(()=>window.newCalls||0),0);
+ await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-chat-empty'));
+ await page.locator('#aiChatMsgInput').fill('新会话');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>stream!==oldStream);
+ await page.evaluate(()=>{emit({type:'content',text:'新会话的回答。'});emit({type:'done',content:'新会话的回答。',thinking_mode:'off',complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await page.waitForTimeout(300);
+ assert.equal(await page.locator('.ai-msg.assistant').count(),1);assert.equal(await page.locator('.ai-msg.assistant .ai-msg-bubble').textContent(),'新会话的回答。');assert.equal(await page.locator('.ai-stream-cursor').count(),0);
 });

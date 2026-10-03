@@ -269,9 +269,11 @@ for(const auth of [['loginModal','loginPwInp'],['registerModal','regPwInp']])tes
 for(const viewport of [{width:390,height:844},{width:1280,height:800}])test(viewport.width+'px: real AI replies have one paragraph gap, compact loose lists and matching footer text sizes',{timeout:30000},async()=>{
  const f=await postBrowserFixture({viewport,counts:[3],ios:viewport.width>1000?'ipad-desktop':true});try{
   const {page}=f;await wireAiChat(page);await page.locator('#aiChatMsgInput').fill('天气');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.testStream);
+  const liveFont=await page.locator('.ai-msg.assistant .ai-msg-bubble').last().evaluate(el=>({size:getComputedStyle(el).fontSize,lineHeight:getComputedStyle(el).lineHeight}));
   const text='\n\n\n查到了，数据可靠。\n\n\n**明天上海天气：**\n\n- 天气：阴雨\n\n- 气温：20～24°C\n\n- 降水量：3～8mm\n\n- 风力：偏北风4～5级，阵风6级\n\n\n请带一把伞。';
   await page.evaluate(text=>{testEmit({type:'tool_calls',tools:[{id:'1',name:'get_weather',args:{location:'上海'}}]});testEmit({type:'tool_result',call_id:'1',tool_name:'get_weather',success:true});testEmit({type:'content',text});testEmit({type:'done',content:text,thinking_mode:'max',complete:true,saved:true});testStream.close();},text);
   await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await page.waitForTimeout(1000);
+  const finalFont=await page.locator('.ai-msg.assistant .ai-msg-bubble').last().evaluate(el=>({size:getComputedStyle(el).fontSize,lineHeight:getComputedStyle(el).lineHeight}));assert.deepEqual(finalFont,liveFont,'completion must not change mobile typography or rewrap existing lines');
   const metrics=await page.locator('.ai-msg.assistant .ai-msg-bubble').last().evaluate(el=>{const rect=el.getBoundingClientRect(),first=el.firstElementChild.getBoundingClientRect(),list=Array.from(el.querySelectorAll('li')).map(n=>n.getBoundingClientRect());return{html:el.innerHTML,height:rect.height,firstGap:first.top-rect.top,whiteSpace:getComputedStyle(el).whiteSpace,lists:el.querySelectorAll('ul').length,listGaps:list.slice(1).map((box,i)=>box.top-list[i].bottom)};});
   assert.equal(metrics.whiteSpace,'normal');assert.equal(metrics.lists,1);assert.ok(metrics.firstGap<=16,JSON.stringify(metrics));assert.ok(metrics.height<350,JSON.stringify(metrics));assert.ok(metrics.listGaps.every(gap=>gap>=0&&gap<=8),JSON.stringify(metrics));assert.doesNotMatch(metrics.html,/<br><br>|<ul><br>/);
   const sizes=await page.locator('.ai-msg.assistant .ai-msg-footer').last().evaluate(el=>['.ai-msg-time','.ai-msg-agent-badge','.ai-msg-thinking-badge'].map(s=>getComputedStyle(el.querySelector(s)).fontSize));assert.deepEqual(sizes,['11px','11px','11px']);assert.deepEqual(f.errors,[]);
@@ -285,5 +287,28 @@ test('desktop-UA iPad with a fine pointer freezes desktop layout during an actua
   const composer=await page.locator('.ai-chat-input-bar').boundingBox();assert.ok(Math.abs(composer.y+composer.height-330)<=2,JSON.stringify(composer));
   await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:800,offsetTop:0});testKeyboardViewport.dispatchEvent(new Event('resize'));});await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));
   assert.equal(await page.locator('#dockBar').isVisible(),dockBefore);await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('a failed Feed original retries in place without opening Detail or the gallery and preserves adjacent photos',async()=>{
+ const f=await postBrowserFixture({counts:[3]});try{
+  const {page}=f,cell=page.locator('#feed .post-media-cell').first();await page.locator('#feed .post-media-cell img').first().waitFor();
+  await page.route('**/test-image/*?offline',route=>route.fulfill({status:503,body:'temporary outage'}));
+  await cell.locator('img').evaluate(img=>{window.adjacentPhoto=document.querySelectorAll('#feed .post-media-cell img')[1];window.failedCell=img.closest('button');img.src=img.dataset.mediaUrl+'?offline';});
+  await page.waitForFunction(()=>document.querySelector('#feed .post-media-cell').classList.contains('post-image-failed'));const before=await cell.boundingBox();await cell.click();
+  await page.waitForFunction(()=>!document.querySelector('#feed .post-media-cell').classList.contains('post-image-failed')&&document.querySelector('#feed .post-media-cell img').naturalWidth>0);
+  assert.deepEqual(await cell.boundingBox(),before);assert.equal(await page.evaluate(()=>document.querySelector('#feed .post-media-cell')===failedCell&&document.querySelectorAll('#feed .post-media-cell img')[1]===adjacentPhoto),true);
+  assert.equal(await page.locator('#photoPreviewOverlay.active').count(),0);assert.equal(await page.locator('#postDetailModal.active').count(),0);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('photo preview offers a working original-image retry after all automatic attempts fail', {timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[3]});try{
+  const {page}=f,url=f.origin+'/test-preview-original.png';let failed=true;
+  await page.route(url,route=>failed?route.fulfill({status:503,body:'temporary outage'}):route.fulfill({contentType:'image/png',body:f.png}));
+  await page.locator('#feed .post-media-cell').first().click();await page.waitForFunction(()=>document.querySelector('#photoPreviewOverlay.active'));
+  await page.evaluate(url=>openPhotoPreview(0,{photos:[{id:'retry-wall',imageUrl:url,thumbUrl:url,username:'alice',date:'2026-10-03T12:00:00Z'}]}),url);
+  const retry=page.locator('.pp-error-retry');await retry.waitFor({state:'visible'});failed=false;await retry.click();
+  await page.waitForFunction(()=>document.getElementById('photoPreviewImage').naturalWidth>0&&getComputedStyle(document.getElementById('photoPreviewImage')).opacity==='1');
+  assert.equal(await page.locator('.pp-error-placeholder').count(),0);assert.equal(await page.locator('#photoPreviewOverlay.active').count(),1);assert.equal(await page.locator('#photoPreviewImage').getAttribute('src'),url);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });

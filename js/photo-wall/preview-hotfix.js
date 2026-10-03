@@ -180,6 +180,7 @@
       '.pp-share-btn,' +
       '.pp-rotate-btn,' +
       '.pp-delete-btn,' +
+      '.pp-error-retry,' +
       '.pp-info-modal-close,' +
       '.pp-info-modal,' +
       '.pp-info-modal-content,' +
@@ -1478,7 +1479,16 @@
         img.style.display = 'none';
         var placeholder = document.createElement('div');
         placeholder.className = 'pp-error-placeholder';
-        placeholder.textContent = '图片加载失败';
+        var retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'pp-error-retry';
+        retry.textContent = '图片加载失败 · 重试';
+        retry.addEventListener('pointerdown', function(event) { event.stopPropagation(); });
+        retry.addEventListener('click', function(event) {
+          event.preventDefault(); event.stopPropagation();
+          clearImageError();
+          if (typeof window.retryPhotoPreviewImage === 'function') window.retryPhotoPreviewImage();
+        });
+        placeholder.appendChild(retry);
         slot.appendChild(placeholder);
       }, ERROR_UI_DELAY_MS);
     });

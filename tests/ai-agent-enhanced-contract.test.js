@@ -12,7 +12,11 @@ test('enhanced Cat AI terminal cleanup removes only transient per-message indica
   assert.match(aiAgent, /function clearAssistantTransientStatus\(node\)/);
   assert.match(aiAgent, /\.ai-enhanced-status, \.ai-tool-status, \.ai-search-supplement/);
   assert.match(aiAgent, /clearAssistantTransientStatus\(node\);/);
-  assert.match(aiAgent, /if \(assistantNode\) \{\s*ensureAssistantBubbleReady\(\);\s*finishAiMessage\(assistantNode, aiContent, aiReasoning, evt\);/s);
+  // Completion now awaits the unseen suffix rather than flashing it all at
+  // once. Keep checking finalization after the drain and its cancellation guard.
+  const done = aiAgent.slice(aiAgent.indexOf("if (evt.type === 'done') {", aiAgent.indexOf('async function handleSendMessage(')));
+  assert.match(done, /ensureAssistantBubbleReady\(\);\s*clearInterval\(_idleCheckTimer\);\s*var drained = await contentRenderer\.drain\(aiContent, controller\.signal\);/);
+  assert.match(done, /if \(!drained \|\| controller\.signal\.aborted\) throw new DOMException\('Reply cancelled', 'AbortError'\);\s*finishAiMessage\(assistantNode, aiContent, aiReasoning, evt\);/);
 });
 
 test('enhanced Cat AI uses a bounded server-owned search plan without entering deep research', () => {

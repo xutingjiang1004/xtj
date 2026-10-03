@@ -2973,14 +2973,28 @@
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
                     var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
-                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
-                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)">' +
+                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="if(this.classList.contains(\'post-image-failed\'))retryPostImage(this);else openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
+                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)" onerror="markPostImageFailed(this)">' +
+                        '<span class="post-media-error" role="status">图片未加载 · 点击重试</span>' +
                         (index === 8 && items.length > visible.length ? '<span class="post-media-overflow">+' + (items.length - visible.length) + '</span>' : '') + '</button>';
                 }).join('') + '</div>';
             }
             window.getPostMediaItems = getPostMediaItems;
             window.renderPostMediaGrid = renderPostMediaGrid;
+            window.markPostImageFailed = function(img) {
+                var cell = img && img.closest('.post-media-cell');
+                if (cell) cell.classList.add('post-image-failed');
+            };
+            window.retryPostImage = function(cell) {
+                var img = cell && cell.querySelector('img');
+                var url = img && sanitizeUrl(img.getAttribute('data-media-url') || '');
+                if (!url) return;
+                cell.classList.remove('post-image-failed');
+                img.removeAttribute('src'); img.src = url;
+            };
             window.syncPostImageRatio = function(img) {
+                var parent = img && img.closest('.post-media-cell');
+                if (parent) parent.classList.remove('post-image-failed');
                 var cell = img && img.closest('.post-media-grid--single .post-media-cell');
                 if (!cell || !img.naturalWidth || !img.naturalHeight) return;
                 var ratio = img.naturalWidth / img.naturalHeight;

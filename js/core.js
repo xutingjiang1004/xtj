@@ -8478,14 +8478,28 @@ function renderProfileActivityList(kind) {
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
                     var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
-                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
-                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)">' +
+                    return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="if(this.classList.contains(\'post-image-failed\'))retryPostImage(this);else openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
+                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)" onerror="markPostImageFailed(this)">' +
+                        '<span class="post-media-error" role="status">图片未加载 · 点击重试</span>' +
                         (index === 8 && items.length > visible.length ? '<span class="post-media-overflow">+' + (items.length - visible.length) + '</span>' : '') + '</button>';
                 }).join('') + '</div>';
             }
             window.getPostMediaItems = getPostMediaItems;
             window.renderPostMediaGrid = renderPostMediaGrid;
+            window.markPostImageFailed = function(img) {
+                var cell = img && img.closest('.post-media-cell');
+                if (cell) cell.classList.add('post-image-failed');
+            };
+            window.retryPostImage = function(cell) {
+                var img = cell && cell.querySelector('img');
+                var url = img && sanitizeUrl(img.getAttribute('data-media-url') || '');
+                if (!url) return;
+                cell.classList.remove('post-image-failed');
+                img.removeAttribute('src'); img.src = url;
+            };
             window.syncPostImageRatio = function(img) {
+                var parent = img && img.closest('.post-media-cell');
+                if (parent) parent.classList.remove('post-image-failed');
                 var cell = img && img.closest('.post-media-grid--single .post-media-cell');
                 if (!cell || !img.naturalWidth || !img.naturalHeight) return;
                 var ratio = img.naturalWidth / img.naturalHeight;
@@ -16758,7 +16772,15 @@ function renderProfileActivityList(kind) {
                 async function loadOlder(moveBack){if(loading || !hasMore || closed)return;loading=true;paint();var active=items[current]?.id;
                     try{var result=await chatFeatureApi('history/search?peer='+encodeURIComponent(peer)+'&kind=image&limit=50'+(cursor?'&cursor_at='+encodeURIComponent(cursor.at)+'&cursor_id='+encodeURIComponent(cursor.id):''));
                         if(closed || owner!==window.currentUser || peer!==dockChatActiveUser)return;
-                        (result.items||[]).forEach(function(item){var media=item.payload && item.payload.media,url=media && sanitizeUrl(media.url);if(url && !items.some(function(i){return i.id===item.message_id || i.id===item.legacy_post_id;}))items.push({id:item.legacy_post_id || item.message_id,url:url,date:item.sent_at});});
+                        (result.items||[]).forEach(function(item){
+                            var media=item.payload && item.payload.media,url=media && sanitizeUrl(media.url);
+                            if(!url)return;
+                            var existing=items.find(function(i){return i.id===item.message_id || i.id===item.legacy_post_id;});
+                            // The authorized metadata page renews private URLs.
+                            // Deduplicating an image must not discard its fresh signature.
+                            if(existing){existing.url=url;existing.date=item.sent_at || existing.date;}
+                            else items.push({id:item.legacy_post_id || item.message_id,url:url,date:item.sent_at});
+                        });
                         items.sort(function(a,b){return Date.parse(a.date)-Date.parse(b.date);});current=Math.max(0,items.findIndex(function(i){return i.id===active;}));
                         hasMore=!!result.has_more && !!result.next_cursor_id;cursor={at:result.next_cursor_at,id:result.next_cursor_id};
                         if(moveBack && current>0)current--;

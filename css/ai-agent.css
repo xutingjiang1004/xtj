@@ -7525,13 +7525,10 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .ai-msg-actions .ai-msg-act { min-height:36px; padding:5px 10px; }
 @media (pointer:coarse) { .ai-msg-actions .ai-msg-act { min-height:44px; } }
 
-/* New glyph runs fade in without moving or repainting the preceding answer. */
-.ai-stream-reveal { animation:aiTextFlow 180ms ease-out var(--ai-reveal-delay,0ms) both; }
-@keyframes aiTextFlow { from { opacity:.18; } to { opacity:1; } }
+/* Keep streamed text readable at full opacity; content arrival owns its pace. */
+.ai-msg-bubble.ai-typing::after { content:none; }
 .ai-msg-bubble.ai-streaming-soft,.ai-thinking-body.ai-streaming-soft,
 [data-theme="dark"] .ai-msg-bubble.ai-streaming-soft,[data-theme="dark"] .ai-thinking-body.ai-streaming-soft { opacity:1;filter:none; }
-@media (prefers-reduced-motion:reduce) { .ai-stream-reveal { animation:none; } }
-html[data-xtj-motion="off"] .ai-stream-reveal { animation:none; }
 
 .ai-tool-data-details { margin:4px 0;min-width:0;max-width:100%;font-size:12px; }
 .ai-tool-data-details > summary { cursor:pointer;color:var(--primary);padding:5px 0; }

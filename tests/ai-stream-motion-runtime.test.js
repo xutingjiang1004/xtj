@@ -126,70 +126,47 @@ test('shared renderer reset clears a queued frame and the previous plain text no
   } finally { await browser.close(); }
 });
 
-for (const implementation of ['main', 'shared']) test(implementation + ': text fades only on new runs and respects reduced motion', async () => {
-  const { browser, page } = await fixture();
-  try {
-    const result = await page.evaluate(async kind => {
-      const output = document.getElementById('output');
-      const create = () => kind === 'main' ? createSmoothTextRenderer(output) : XtjAiCore.StreamRenderer.create(output);
-      const renderer = create(); renderer.append('已有文字'); renderer.flush();
-      const prefix = output.querySelector('.ai-stream-reveal');
-      renderer.append('新到达的文字🐈'); renderer.flush();
-      const animation = getComputedStyle(output.querySelector('.ai-stream-reveal')).animationName;
-      const stable = prefix.isConnected && prefix.textContent === '已有文字';
-      renderer.finish();
-      await new Promise(r => setTimeout(r, 350));
-      const clean = output.querySelectorAll('.ai-stream-reveal,.ai-stream-cursor').length === 0;
-      document.documentElement.setAttribute('data-xtj-motion', 'off');
-      window.prefersReducedMotion = () => true;
-      output.replaceChildren(); const quiet = create(); quiet.append('立即显示'); quiet.flush(); quiet.finish();
-      return {stable,animation,clean,quietText:output.textContent,quietSpans:output.querySelectorAll('.ai-stream-reveal').length};
-    }, implementation);
-    assert.deepEqual(result, {stable:true,animation:'aiTextFlow',clean:true,quietText:'立即显示',quietSpans:0});
-  } finally { await browser.close(); }
+// The user rejected the glyph fade. Assert readable, ordered stream updates instead.
+for (const implementation of ['main', 'shared']) test(implementation + ': streamed text remains opaque and reuses the existing text node', async () => {
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(kind=>{
+   const output=document.getElementById('output'),create=()=>kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);
+   const renderer=create();renderer.append('已有文字');renderer.flush();const prefix=output.firstElementChild, text=prefix.firstChild;
+   renderer.append('新到达的文字🐈');renderer.flush();const stable=output.firstElementChild===prefix&&prefix.firstChild===text;
+   const opacity=getComputedStyle(text.parentElement).opacity;renderer.finish();const complete=output.textContent;
+   document.documentElement.setAttribute('data-xtj-motion','off');window.prefersReducedMotion=()=>true;output.replaceChildren();const quiet=create();quiet.append('立即显示');quiet.finish();
+   return{stable,opacity,complete,runs:output.querySelectorAll('.ai-stream-reveal').length,quiet:output.textContent};
+  },implementation);assert.deepEqual(result,{stable:true,opacity:'1',complete:'已有文字新到达的文字🐈',runs:0,quiet:'立即显示'});
+ }finally{await browser.close();}
 });
-test('shared: finishing an old answer cannot strip a new answer animation after reset', async () => {
-  const { browser, page } = await fixture();
-  try {
-    const result = await page.evaluate(async () => {
-      const output=document.getElementById('output'), renderer=XtjAiCore.StreamRenderer.create(output);
-      renderer.append('旧回答');renderer.finish();renderer.reset();renderer.append('新回答');renderer.flush();
-      await new Promise(r=>setTimeout(r,350));
-      const retained=output.getAttribute('data-ai-flow')==='on' && output.querySelectorAll('.ai-stream-reveal').length>0;
-      renderer.finish();await new Promise(r=>setTimeout(r,350));
-      return {retained,text:output.textContent,clean:output.querySelectorAll('.ai-stream-reveal').length===0};
-    });
-    assert.deepEqual(result,{retained:true,text:'新回答',clean:true});
-  } finally { await browser.close(); }
+test('shared: reset cancels the old drain and cannot modify the next answer', async () => {
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(async()=>{const output=document.getElementById('output'),renderer=XtjAiCore.StreamRenderer.create(output);renderer.append('旧回答');renderer.flush();const drain=renderer.drain('旧回答'+('旧尾部'.repeat(100)));renderer.reset();renderer.append('新回答');renderer.finish();const old=await drain;await new Promise(r=>setTimeout(r,50));return{old,text:output.textContent,cursors:output.querySelectorAll('.ai-stream-cursor').length};});
+  assert.deepEqual(result,{old:false,text:'新回答',cursors:0});
+ }finally{await browser.close();}
 });
-
-for(const implementation of ['main','shared'])test(implementation+': all new runs follow reading order across packets and paragraphs without replaying existing text',async()=>{
+for(const implementation of ['main','shared'])test(implementation+': completion drains only the unseen suffix in reading order without a gray future paragraph',async()=>{
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(async kind=>{
    renderMarkdown=text=>text.split('\n\n').map(part=>'<p>'+part+'</p>').join('');XtjAiCore.Markdown.render=renderMarkdown;
-   const output=document.getElementById('output'),create=()=>kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);
-   const renderer=create();renderer.append('第一段正文');renderer.flush();const first=output.querySelector('p'),run=first.querySelector('.ai-stream-reveal'),motion=run.getAnimations()[0];
-   renderer.append('\n\n第二段正文内容\n\n第三段正文内容');renderer.flush();
-   const blocks=output.querySelectorAll('p'),stable=blocks[0]===first&&run.getAnimations()[0]===motion;
-   const starts=Array.from(output.querySelectorAll('.ai-stream-reveal')).map(span=>span.__aiRevealAt);
-   const ordered=starts.every((time,index)=>index===0||time>starts[index-1]);
-   renderer.finish();await new Promise(r=>setTimeout(r,450));
-   const filters=Array.from(blocks).map(block=>getComputedStyle(block).filter),clean=output.querySelectorAll('.ai-stream-reveal').length===0;
-   document.documentElement.setAttribute('data-xtj-motion','off');output.replaceChildren();const quiet=create();quiet.append('关闭动效');quiet.flush();quiet.finish();
-   return{stable,ordered,filters,clean,quiet:output.getAnimations({subtree:true}).length};
-  },implementation);
-  assert.deepEqual(result,{stable:true,ordered:true,filters:['none','none','none'],clean:true,quiet:0});
+   const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);
+   renderer.append('第一段正文');renderer.flush();const first=output.querySelector('p'),text=first.firstChild,final='第一段正文\n\n'+('第二段英文 English answer. '.repeat(30));let frames=[],running=true;
+   function sample(){frames.push(output.textContent);if(running)requestAnimationFrame(sample);}requestAnimationFrame(sample);
+   const drain=renderer.drain(final);const immediately=output.textContent;await drain;running=false;const paragraphs=Array.from(output.querySelectorAll('p'));
+   return{immediately,stable:paragraphs[0]===first&&first.firstChild===text,frames,text:output.textContent,opacity:paragraphs.map(p=>getComputedStyle(p).opacity),runs:output.querySelectorAll('.ai-stream-reveal,.ai-stream-cursor').length};
+  },implementation);assert.equal(result.immediately,'第一段正文');assert.ok(result.frames.length>12);assert.ok(result.frames.every((s,i)=>i===0||s.startsWith(result.frames[i-1])));assert.ok(result.frames.slice(1).every((s,i)=>s.length-result.frames[i].length<=33));assert.equal(result.stable,true);assert.equal(result.text,'第一段正文'+('第二段英文 English answer. '.repeat(30)));assert.deepEqual(result.opacity,['1','1']);assert.equal(result.runs,0);
  }finally{await browser.close();}
 });
-
-for(const implementation of ['main','shared'])test(implementation+': completed glyph runs are retired during a long stream without replaying the paragraph',{timeout:30000},async()=>{
+for(const implementation of ['main','shared'])test(implementation+': a long stream keeps one text node and adds no glyph animation nodes',async()=>{
  const {browser,page}=await fixture();try{
-  const result=await page.evaluate(async kind=>{
-   const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);let maxRuns=0;
-   for(let i=0;i<110;i++){renderer.append('正文继续');renderer.flush();maxRuns=Math.max(maxRuns,output.querySelectorAll('.ai-stream-reveal').length);await new Promise(r=>setTimeout(r,16));}
-   const text=output.textContent;renderer.finish();await new Promise(r=>setTimeout(r,400));return{maxRuns,text,remaining:output.querySelectorAll('.ai-stream-reveal').length,queued:output.__aiRevealQueue.length};
-  },implementation);
-  assert.ok(result.maxRuns<32,JSON.stringify({maxRuns:result.maxRuns}));assert.equal(result.text,'正文继续'.repeat(110));assert.equal(result.remaining,0);assert.equal(result.queued,0);
+  const result=await page.evaluate(kind=>{const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);for(let i=0;i<110;i++){renderer.append('正文继续');renderer.flush();}const nodes=output.firstChild.childNodes.length;renderer.finish();return{nodes,text:output.textContent,runs:output.querySelectorAll('.ai-stream-reveal').length};},implementation);
+  assert.deepEqual(result,{nodes:1,text:'正文继续'.repeat(110),runs:0});
+ }finally{await browser.close();}
+});
+for(const implementation of ['main','shared'])test(implementation+': abort settles the drain once and sanitized replacements are immediately authoritative',async()=>{
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(async kind=>{const output=document.getElementById('output'),create=()=>kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output),renderer=create(),controller=new AbortController();renderer.append('前缀');renderer.flush();const drain=renderer.drain('前缀'+('尚未显示'.repeat(80)),controller.signal);controller.abort();const aborted=await drain;output.replaceChildren();const revised=create();revised.append('旧的内容');revised.flush();const completed=await revised.drain('修正后的安全正文');return{aborted,completed,text:output.textContent,cursors:output.querySelectorAll('.ai-stream-cursor').length};},implementation);
+  assert.deepEqual(result,{aborted:false,completed:true,text:'修正后的安全正文',cursors:0});
  }finally{await browser.close();}
 });
 for(const implementation of ['main','shared'])for(const hz of [60,120])test(implementation+': a '+hz+' Hz display permits a text update on every scheduled frame',async()=>{
