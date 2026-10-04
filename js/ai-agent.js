@@ -3568,6 +3568,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       'aria-label': '思考过程'
     });
     var label = el('span', { class: 'ai-thinking-label', text: elapsedMs > 0 ? ('已思考 ' + formatThinkingElapsed(elapsedMs)) : '思考中' });
+    if (typeof elapsedMs === 'number' && elapsedMs === 0) label.textContent = '已思考 0s';
     toggle.appendChild(label);
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
@@ -3869,7 +3870,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         body.appendChild(group);
       }
     });
-    if (reasoning) setThinkingStatus(node, msg.thinking_elapsed_ms > 0 ? '已思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考过程');
+    if (reasoning) setThinkingStatus(node, typeof msg.thinking_elapsed_ms === 'number' && msg.thinking_elapsed_ms >= 0 ? '已思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考过程');
     return node;
   }
 
@@ -3918,7 +3919,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // 搜索到此结束
       var thinkingMode = getMessageThinkingMode(msg);
       if (thinkingMode && thinkingMode !== 'off') {
-        var badgeText = msg.thinking_elapsed_ms > 0 ? ('思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms)) : ('思考 ' + thinkingMode);
+        var badgeText = '思考 ' + thinkingMode;
         footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: badgeText }));
       }
       if (msg.usage && isAdminUser()) {
@@ -9391,6 +9392,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (thinkingTimer) {
           finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
         }
+        if (evt && typeof evt.thinking_elapsed_ms === 'number' && Number.isFinite(evt.thinking_elapsed_ms) && evt.thinking_elapsed_ms >= 0) finalThinkingElapsedMs = evt.thinking_elapsed_ms;
         if (reasoningRenderer) reasoningRenderer.finish();
 
         // 判断是否有有效正文；没有时给出兜底提示，避免气泡完全空白
@@ -9472,6 +9474,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           site_cards: streamSiteCards.slice(0, 32),
           created_at: new Date().toISOString(),
           thinking_mode: finalThinkingMode,
+          thinking_elapsed_ms: finalThinkingElapsedMs,
           search_count: searchCount,
           search_query: searchQuery,
           search_results: searchResults,

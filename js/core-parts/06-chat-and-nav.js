@@ -8652,7 +8652,14 @@
                 var modal = document.getElementById('postDetailModal');
                 if (title) title.textContent = '帖子详情';
                 if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
-                if (modal) modal.classList.add('active');
+                if (modal) {
+                    modal.removeAttribute('inert');
+                    modal.setAttribute('aria-hidden', 'false');
+                    // Reuse the modal lifecycle: direct class changes bypassed
+                    // cancellation of a pending close and animation restoration.
+                    window.openModal('postDetailModal');
+                }
+                if (body) { body.setAttribute('aria-busy', 'true'); body.scrollTop = 0; }
                 function isCurrentDetail() {
                     return _seq === _postDetailReqSeq && owner === currentUser && epoch === _authStateEpoch &&
                         window.__xtjPostDetailCurrentId === String(postId || '') &&
@@ -8709,6 +8716,15 @@
                 } catch (e) {
                     if (isCurrentDetail() && body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error(e);
+                } finally {
+                    if (isCurrentDetail() && body) {
+                        body.setAttribute('aria-busy', 'false');
+                        if (!body.querySelector('.post-detail-shell')) {
+                            var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-ghost'; retry.textContent = '重新加载';
+                            retry.addEventListener('click', function() { window.openPostDetail(postId); });
+                            body.appendChild(retry);
+                        }
+                    }
                 }
             };
 

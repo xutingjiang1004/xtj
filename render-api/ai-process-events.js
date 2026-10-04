@@ -4,6 +4,12 @@
 const MAX_EVENTS = 128;
 const MAX_TEXT = 64000;
 function appendProcessEvent(res, event) {
+  if (event && ['reasoning_start', 'reasoning', 'tool_calls'].includes(event.type) && res._aiThinkingStartedAt == null) res._aiThinkingStartedAt = Date.now();
+  // Stop when the answer starts, rather than counting the answer's generation,
+  // database save or quota accounting as thinking. Retain a genuine zero too.
+  if (event && event.type === 'content' && String(event.text || '').trim() && res._aiThinkingElapsedMs == null && res._aiThinkingStartedAt != null) {
+    res._aiThinkingElapsedMs = Math.max(0, Date.now() - res._aiThinkingStartedAt);
+  }
   if (!event || !['reasoning', 'tool_calls', 'tool_pending', 'tool_result', 'tool_error'].includes(event.type)) return;
   const events = res._aiProcessEvents || (res._aiProcessEvents = []);
   if (event.type === 'reasoning') {

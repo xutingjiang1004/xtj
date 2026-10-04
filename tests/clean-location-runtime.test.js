@@ -76,6 +76,16 @@ function immutableLocationStore(){
   const filters={};const q={select(){return q;},eq(k,v){filters[k]=v;return q;},async upsert(row){writes++;const key=row.account_id+':'+row.capture_id;if(!facts.has(key))facts.set(key,{...row,received_at:new Date().toISOString(),resolution_status:'pending'});return{error:null};},async maybeSingle(){return{data:facts.get(filters.account_id+':'+filters.capture_id)};}};return q;
  }};
 }
+test('float8 JSON rounding does not turn a valid GPS retry into a capture conflict',async()=>{
+ const db=immutableLocationStore(),body={latitude:26.08325858234683,longitude:119.31234567891234,accuracy:18.123456789123456,capture_id:'float_roundtrip'};
+ await recordLocationFix({supabase:db,actor:'A',body,reason:'post_location'});
+ const stored=db.facts.get('account-A:float_roundtrip');
+ stored.latitude=26.0832585823468;stored.longitude=119.312345678912;stored.accuracy_m=18.1234567891235;
+ const fix=await recordLocationFix({supabase:db,actor:'A',body,reason:'post_location'});
+ assert.equal(fix.location.latitude,stored.latitude);assert.equal(fix.location.longitude,stored.longitude);
+ for(const patch of [{latitude:body.latitude+.00000001},{accuracy:body.accuracy+.00000001},{accuracy:null}])
+  await assert.rejects(recordLocationFix({supabase:db,actor:'A',body:{...body,...patch},reason:'post_location'}),e=>e.code==='location_capture_conflict');
+});
 test('GPS ids are immutable across retries and competing writes, including accuracy/page identity',async()=>{
  const db=immutableLocationStore(),body={latitude:30,longitude:120,accuracy:20,capture_id:'same',page_load_id:'page_12345678',captured_at:new Date(Date.now()-3600000).toISOString()};
  const fix=await recordLocationFix({supabase:db,actor:'A',body,reason:'post_location'});

@@ -39,10 +39,14 @@ test('edit does not accidentally invoke the dedicated pin contract', () => {
 test('all post mutations preserve production UUID identifiers', () => {
   assert.match(server, /function normalizePostId[\s\S]*\[0-9a-f\]\{8\}/);
   for (const endpoint of ['/api/post/update', '/api/post/pin', '/api/post/delete', '/api/post/like', '/api/post/view']) {
-    const start = server.indexOf(`app.post('${endpoint}'`);
+    // Views moved into the installed module so the transaction can be tested
+    // without booting AI, workers, or external services. Keep UUID/auth checks.
+    const source = endpoint === '/api/post/view' ? fs.readFileSync(path.join(root, 'render-api', 'post-views.js'), 'utf8') : server;
+    if (endpoint === '/api/post/view') assert.match(server, /require\('\.\/post-views'\)\.installPostViews/);
+    const start = source.indexOf(`app.post('${endpoint}'`);
     assert.notEqual(start, -1, `missing ${endpoint}`);
-    const next = server.indexOf('\napp.', start + 10);
-    const route = server.slice(start, next < 0 ? server.length : next);
+    const next = source.indexOf('\napp.', start + 10);
+    const route = source.slice(start, next < 0 ? source.length : next);
     assert.match(route, /normalizePostId\(/, `${endpoint} must validate a UUID without numeric coercion`);
     assert.doesNotMatch(route, /parseInt\([^\n]*post_id|Number\([^\n]*post_id/);
   }

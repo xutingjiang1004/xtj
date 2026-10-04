@@ -68,6 +68,13 @@
   window.openModal = function (id) {
     var overlay = document.getElementById(id);
     if (!overlay) return;
+    delete _closeModalGuard[id];
+    var existingBox = overlay.querySelector('.modal-box');
+    if (existingBox) {
+      if (hasGSAP()) gsap.killTweensOf(existingBox);
+      existingBox.style.removeProperty('opacity');
+      existingBox.style.removeProperty('transform');
+    }
     var orig = window.__xtjOrigOpenModal;
     if (typeof orig === 'function') orig(id);
     else { overlay.style.display = ''; overlay.classList.add('active'); }
@@ -75,6 +82,7 @@
     var overlayRef = overlay;
     delete _closeModalGuard[id];
     runWithGSAP(function() {
+    if (!overlayRef.classList.contains('active')) return;
     var box = overlayRef.querySelector('.modal-box');
     if (!box) return;
     var cleanup = withTransientWillChange(box, 'transform, opacity');
@@ -106,6 +114,7 @@
       return;
     }
     _closeModalGuard[id] = true;
+    gsap.killTweensOf(box);
     var cleanup = withTransientWillChange(box, 'transform, opacity');
     gsap.to(box, {
       y: 12,
@@ -117,6 +126,8 @@
         if (_closeModalGuard[id]) {
           delete _closeModalGuard[id];
           if (_origCloseModal) _origCloseModal(id);
+          box.style.removeProperty('opacity');
+          box.style.removeProperty('transform');
         }
       }
     });

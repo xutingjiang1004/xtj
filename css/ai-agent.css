@@ -7595,6 +7595,13 @@ html.xtj-ios-viewport.xtj-keyboard-open .ai-chat-input-bar { padding-bottom:8px!
 .ai-select-pop-close:focus-visible { outline: 2px solid var(--ai-accent, #4fa68d); outline-offset: -4px; border-radius: 12px; }
 
 /* Rich replies own their paragraph spacing; raw user input retains its newlines. */
+.ai-msg.user .ai-msg-bubble { white-space:normal; }
+.ai-msg.user .ai-msg-bubble > p { margin:0; }
+.ai-msg.user .ai-msg-bubble > p + p { margin-top:.7em; }
+.ai-msg.user .ai-msg-bubble > :first-child { margin-top:0; }
+.ai-msg.user .ai-msg-bubble > :last-child { margin-bottom:0; }
+.ai-msg.user .ai-msg-bubble pre { white-space:pre; }
+.ai-msg.user .ai-msg-bubble code { white-space:pre-wrap; }
 .ai-msg.assistant .ai-msg-bubble,
 .ai-think-answer { white-space: normal; }
 .ai-msg.assistant .ai-msg-bubble > p,

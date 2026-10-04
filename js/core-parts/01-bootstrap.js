@@ -1650,9 +1650,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
         }
         function schedulePostDwellTracking(postId) {
             if (!postId || postDwellTimers.has(postId) || !canTrackViewNow(postId)) return;
+            var dwellOwner = currentUser, dwellEpoch = _authStateEpoch;
             var timerId = setTimeout(function() {
                 postDwellTimers.delete(postId);
-                trackView(postId);
+                if (currentUser === dwellOwner && _authStateEpoch === dwellEpoch) trackView(postId);
             }, POST_DWELL_DELAY);
             postDwellTimers.set(postId, timerId);
         }
@@ -1680,13 +1681,16 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             var target = entry && entry.target;
                             var postId = target ? String(target.getAttribute('data-post-id') || '').trim() : '';
                             if (!postId) return;
-                            if (entry.isIntersecting && entry.intersectionRatio >= POST_DWELL_THRESHOLD) {
+                            var postHeight = entry.boundingClientRect && entry.boundingClientRect.height;
+                            var viewportHeight = entry.rootBounds && entry.rootBounds.height || window.innerHeight;
+                            var enoughVisible = postHeight && entry.intersectionRect ? entry.intersectionRect.height >= Math.min(postHeight, viewportHeight) * POST_DWELL_THRESHOLD : entry.intersectionRatio >= POST_DWELL_THRESHOLD;
+                            if (entry.isIntersecting && enoughVisible) {
                                 schedulePostDwellTracking(postId);
                             } else {
                                 clearPostDwellTimer(postId);
                             }
                         });
-                    }, { threshold: [0, POST_DWELL_THRESHOLD, 1] });
+                    }, { threshold: Array.from({ length: 21 }, function(_, n) { return n / 20; }) });
                 } catch (_) {
                     postDwellObserver = {
                         observe: function() {},

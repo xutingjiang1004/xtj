@@ -36,3 +36,8 @@ for(const failSave of [false,true])test('actual third-party route shares convers
 test('closing a third-party stream aborts the upstream and clears cancellation listeners',async()=>{
  const result=await routeFixture({disconnect:true});assert.equal(result.signal.aborted,true);assert.equal(result.frames.some(frame=>frame.type==='done'),false);assert.equal(result.stored.length,0);assert.equal(result.req.listenerCount('aborted'),1);assert.equal(result.res.listenerCount('close'),1);
 });
+
+test('thinking duration stops at the first answer and survives third-party cloud metadata, including zero',async(t)=>{
+ let now=1000;t.mock.method(Date,'now',()=>now);const res={};appendProcessEvent(res,{type:'reasoning_start'});now=10000;appendProcessEvent(res,{type:'content',text:'答案'});now=90000;appendProcessEvent(res,{type:'done'});assert.equal(res._aiThinkingElapsedMs,9000);
+ for(const duration of [9000,0]){let rows;const db={from(){return{async insert(value){rows=value;return{error:null}}}}};assert.equal(await saveCustomChatTurn({...args,db,thinkingElapsedMs:duration}),true);assert.equal(JSON.parse(rows[1].media_url).thinking_elapsed_ms,duration)}
+});
