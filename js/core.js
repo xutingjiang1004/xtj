@@ -20927,7 +20927,7 @@ function renderProfileActivityList(kind) {
                 var contentText = String(normalizedPost.content || '').trim();
                 var detailActions = [buildPostActionHtml(normalizedPost, typeof normalizedPost.liked_by_me === 'boolean' ? normalizedPost.liked_by_me : (likes || []).some(function(l) { return l.user_name === currentUser; }), canDeletePost(normalizedPost))];
                 return [
-                    '<article class="post post-detail-shell post-detail-shell--clean" data-post-id="' + escapeHtml(String(normalizedPost.id)) + '" data-post-user="' + escapeHtml(normalizedPost.user_name || '') + '">',
+                    '<article class="post visible post-detail-shell post-detail-shell--clean" data-post-id="' + escapeHtml(String(normalizedPost.id)) + '" data-post-user="' + escapeHtml(normalizedPost.user_name || '') + '">',
                     '  <section class="post-detail-main-card">',
                     '    <header class="post-detail-top">',
                     '      <div class="post-detail-owner">',

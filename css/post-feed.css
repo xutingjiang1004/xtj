@@ -115,7 +115,7 @@
   background: rgba(0, 0, 0, .55); border: 0; border-radius: 0 6px 0 12px;
   box-shadow: none;
 }
-#postDetailBody .post-detail-shell { padding: 0; background: transparent; box-shadow: none !important; border: 0; border-radius: 0; transform: none; }
+#postDetailBody .post-detail-shell { padding: 0; background: transparent; box-shadow: none !important; border: 0; border-radius: 0; transform: none !important; opacity: 1 !important; animation: none !important; transition: none; }
 #postDetailBody .post-detail-main-card,
 #postDetailBody .post-detail-panel { padding: 16px 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; }
 #postDetailBody .post-detail-owner .avatar { width: 42px; height: 42px; flex: 0 0 42px; }
