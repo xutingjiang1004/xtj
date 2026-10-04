@@ -1893,7 +1893,7 @@
                 if (feedScrollObserver) feedScrollObserver.disconnect();
                 if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 resetPostActionModals();
-                closePostToolsMenu();
+                closePostToolsMenu(true);
                 document.querySelectorAll('.post-tool-critique').forEach(function(panel) {
                     if (panel.__aiSession) { panel.__aiSession.isClosed = true; panel.__aiSession.controller.abort(); }
                 });
@@ -2380,7 +2380,7 @@
                 }
             }
 
-            function insertPublishedPostIntoFeed(post) {
+            function insertPublishedPostIntoFeed(post, publishingMotion) {
                 if (!post || !post.id) return false;
                 post = normalizePost(post);
                 if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
@@ -2402,7 +2402,8 @@
                 template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
                 var postEl = template.content.firstElementChild;
                 if (!postEl) return false;
-                postEl.classList.add('visible', 'is-newly-published');
+                postEl.classList.add('visible');
+                if (!publishingMotion) postEl.classList.add('is-newly-published');
                 postEl.style.setProperty('--post-enter-delay', '0ms');
                 feed.insertBefore(postEl, feed.firstChild);
                 observePostViewportState([postEl]);
@@ -2704,12 +2705,53 @@
             }
 
             var activePostToolsMenu = null;
-            function closePostToolsMenu() {
+            var closingPostToolsMenus = new Set();
+            function removePostToolsMenu(entry) {
+                closingPostToolsMenus.delete(entry);
+                if (entry.animation) { entry.animation.cancel(); entry.animation = null; }
+                entry.menu.remove();
+            }
+            function animatePostToolsMenu(entry, opening, fresh) {
+                var menu = entry.menu;
+                if (typeof menu.animate !== 'function' || document.documentElement.getAttribute('data-xtj-motion') === 'off' ||
+                    (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+                    if (!opening) removePostToolsMenu(entry);
+                    return;
+                }
+                // Snapshot the interrupted frame so rapid close/reopen reverses smoothly.
+                var style = getComputedStyle(menu);
+                var from = fresh ? {opacity:0,transform:'translate3d(0,-5px,0) scale(.97)'} : {opacity:style.opacity,transform:style.transform};
+                if (entry.animation) entry.animation.cancel();
+                var animation = menu.animate([from, opening ? {opacity:1,transform:'translate3d(0,0,0) scale(1)'} : {opacity:0,transform:'translate3d(0,-4px,0) scale(.98)'}],
+                    {duration:opening ? 190 : 150,easing:'cubic-bezier(.2,.7,.2,1)',fill:'both'});
+                entry.animation = animation;
+                animation.finished.then(function() {
+                    if (entry.animation !== animation) return;
+                    if (opening) { entry.animation = null; animation.cancel(); }
+                    else removePostToolsMenu(entry);
+                }, function() {});
+            }
+            function closePostToolsMenu(immediate) {
+                if (immediate === true) Array.from(closingPostToolsMenus).forEach(removePostToolsMenu);
                 if (!activePostToolsMenu) return;
-                var trigger = activePostToolsMenu.trigger;
-                activePostToolsMenu.menu.remove();
-                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+                var entry = activePostToolsMenu;
                 activePostToolsMenu = null;
+                if (entry.trigger) entry.trigger.setAttribute('aria-expanded', 'false');
+                entry.menu.classList.add('is-closing');
+                entry.menu.setAttribute('aria-hidden', 'true'); entry.menu.setAttribute('inert', '');
+                closingPostToolsMenus.add(entry);
+                if (immediate === true) removePostToolsMenu(entry);
+                else animatePostToolsMenu(entry, false);
+            }
+            function activatePostToolsMenu(entry, fresh) {
+                var menu = entry.menu, trigger = entry.trigger;
+                var rect = trigger.getBoundingClientRect(), width = menu.offsetWidth || 148, height = menu.offsetHeight;
+                menu.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
+                menu.style.top = Math.max(8, Math.min(window.innerHeight - height - 8, rect.bottom + 6)) + 'px';
+                menu.classList.remove('is-closing'); menu.removeAttribute('aria-hidden'); menu.removeAttribute('inert');
+                closingPostToolsMenus.delete(entry);
+                trigger.setAttribute('aria-expanded', 'true'); activePostToolsMenu = entry;
+                animatePostToolsMenu(entry, true, fresh);
             }
 
             function openPostToolsMenu(trigger) {
@@ -2719,6 +2761,8 @@
                     return;
                 }
                 closePostToolsMenu();
+                var returning = Array.from(closingPostToolsMenus).find(function(entry) { return entry.trigger === trigger; });
+                if (returning) { activatePostToolsMenu(returning, false); return; }
                 var postId = String(trigger.getAttribute('data-post-id') || '');
                 if (!postId) return;
                 var menu = document.createElement('div');
@@ -2735,15 +2779,10 @@
                 menu.innerHTML = btnTranslate + btnAi +
                                  '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
                 document.body.appendChild(menu);
-                var rect = trigger.getBoundingClientRect();
-                var width = menu.offsetWidth || 148;
-                menu.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
-                menu.style.top = Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, rect.bottom + 6)) + 'px';
-                trigger.setAttribute('aria-expanded', 'true');
-                activePostToolsMenu = { menu: menu, trigger: trigger };
+                activatePostToolsMenu({ menu: menu, trigger: trigger, animation: null }, true);
             }
             window.closePostToolsMenu = closePostToolsMenu;
-            window.addEventListener('pagehide', closePostToolsMenu);
+            window.addEventListener('pagehide', function() { closePostToolsMenu(true); });
             window.addEventListener('scroll', closePostToolsMenu, { passive: true });
             window.addEventListener('resize', closePostToolsMenu, { passive: true });
             if (window.visualViewport) {
@@ -2753,7 +2792,7 @@
             // Capture scroll from dock panels as well as the document; the menu is appended to body.
             document.addEventListener('scroll', closePostToolsMenu, { capture: true, passive: true });
             document.addEventListener('visibilitychange', function() {
-                if (document.hidden) closePostToolsMenu();
+                if (document.hidden) closePostToolsMenu(true);
             });
 
             var activePostAiSession = null;
@@ -4778,7 +4817,7 @@
                     //   不必重新选文件。重新选择文件时 setPostPreview 会先 revoke 旧 blob，无泄漏。
                     if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
-                    if (!insertPublishedPostIntoFeed(insertRes.data)) {
+                    if (!insertPublishedPostIntoFeed(insertRes.data, !!publishMotion)) {
                         clearFeedCache();
                         await loadFeed(true);
                         assertPostPublishIdentity(flight);
