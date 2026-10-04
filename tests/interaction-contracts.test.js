@@ -165,7 +165,8 @@ test('AI stays in the homepage tools center instead of the direct-message list',
 test('publishing exposes busy state and inserts the created post without full feed reload', () => {
   const publish = between(core, 'window.doPublish = async function', 'loadFeed = async function');
   assert.match(publish, /setAttribute\(['"]aria-busy['"],\s*['"]true['"]\)/);
-  assert.match(publish, /insertPublishedPostIntoFeed\(insertRes\.data\)/);
+  // The shared flight suppresses the old card movement so the target stays still.
+  assert.match(publish, /insertPublishedPostIntoFeed\(insertRes\.data, !!publishMotion\)/);
   const insertion = between(core, 'function insertPublishedPostIntoFeed', 'window.doPublish = async function');
   assert.match(insertion, /insertBefore|prepend/);
   assert.match(publish, /await loadFeed\(true\)/, 'a failed local insertion retains a safe full-feed fallback');

@@ -74,7 +74,8 @@ test('post tools menu closes when any scroll container, viewport, or page visibi
   assert.match(tools, /document\.addEventListener\('scroll',\s*closePostToolsMenu,\s*\{ capture: true, passive: true \}\)/);
   assert.match(tools, /window\.addEventListener\('resize',\s*closePostToolsMenu/);
   assert.match(tools, /visualViewport\.addEventListener\('scroll',\s*closePostToolsMenu/);
-  assert.match(tools, /document\.hidden\) closePostToolsMenu\(\)/);
+  // Hidden/account-reset menus disappear immediately instead of leaving a closing layer.
+  assert.match(tools, /document\.hidden\) closePostToolsMenu\(true\)/);
 });
 
 test('like operation resets running flag so a failed sync never locks the button permanently', () => {
