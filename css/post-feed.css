@@ -125,6 +125,21 @@
 #postDetailBody .post-detail-media-card,
 #postDetailBody .post-detail-media { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 #postDetailBody .comments { max-height: none; }
+/* Publish feedback stays inside the existing action area. */
+.post-publish-flight {
+  position:fixed; z-index:120; margin:0; padding:0; border:0; border-radius:6px;
+  pointer-events:none; transform-origin:top left; box-shadow:none; background:transparent;
+  color:var(--text-main); white-space:pre-wrap; overflow:hidden; will-change:transform;
+}
+#pubBtn.is-loading { min-width:132px; }
+#pubBtn.is-loading:has(.post-publish-progress)::after { content:none; display:none; animation:none; }
+#pubBtn.is-loading:has(.post-publish-progress) { opacity:1; }
+#pubBtn .post-publish-progress { display:flex; align-items:center; gap:6px; font-size:12px; line-height:1.4; }
+#pubBtn .post-publish-progress .pw-garden { width:44px; margin:0; }
+#pubBtn .post-publish-progress-copy { display:flex; flex-direction:column; gap:5px; min-width:70px; }
+#pubBtn .post-publish-progress-track { display:block; height:3px; width:100%; overflow:hidden; border-radius:3px; background:rgba(87,157,137,.15); }
+#pubBtn .post-publish-progress-track > span { display:block; width:100%; height:100%; background:var(--primary); transform:scaleX(0); transform-origin:left center; transition:transform 160ms linear; }
+@media(prefers-reduced-motion:reduce) { #pubBtn .post-publish-progress-track > span { transition:none; } }
 @media (min-width: 768px) and (min-height: 480px) {
   #panelPosts #feed > .post-feed-item,
   #panelPosts.active #feed > .post-feed-item { padding: 24px !important; }

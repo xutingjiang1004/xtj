@@ -3,6 +3,13 @@ const {readAuthRecord}=require('./auth-record');
 const crypto=require('node:crypto');
 const TABLE='user_location_history';
 function locationError(code,status=400){const error=new Error(code);error.code=code;error.status=status;return error;}
+function sameFloat(a,b){
+ if(a===b)return true;
+ // PostgREST serializes float8 using the database's extra_float_digits setting.
+ // At 0 that drops the final JS digits. Allow only machine rounding, not a
+ // different GPS fix or accuracy, and always return the immutable stored fact.
+ return typeof a==='number'&&typeof b==='number'&&Number.isFinite(a)&&Number.isFinite(b)&&Math.abs(a-b)<=32*Number.EPSILON*Math.max(1,Math.abs(a),Math.abs(b));
+}
 async function recordLocationFix({supabase,actor,body,reason,ip}){
  body=body&&typeof body==='object'?body:{};
  const account=await readAuthRecord(supabase,actor,'__auth__');if(!account)throw new Error('location_account_unavailable');
@@ -20,7 +27,7 @@ async function recordLocationFix({supabase,actor,body,reason,ip}){
  const stored=await supabase.from(TABLE).select('*').eq('account_id',account.id).eq('capture_id',captureId).maybeSingle();
  if(!stored||stored.error||!stored.data)throw new Error('location_history_lookup_failed');
  const fix=stored.data;
- if(fix.latitude!==latitude||fix.longitude!==longitude||fix.accuracy_m!==accuracy||fix.page_load_id!==row.page_load_id)throw locationError('location_capture_conflict',409);
+ if(!sameFloat(fix.latitude,latitude)||!sameFloat(fix.longitude,longitude)||!sameFloat(fix.accuracy_m,accuracy)||fix.page_load_id!==row.page_load_id)throw locationError('location_capture_conflict',409);
  return {accountId:account.id,captureId,location:fix};
 }
 async function resolveLocationFix(supabase,fix,address,error){

@@ -2,9 +2,13 @@
 const fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {chromium,webkit}=require('playwright');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVxkAAAAASUVORK5CYII=','base64');
-async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false,user='alice',publicPosts=false,feedUnavailable=false,legacyCoverCache=false}={}){
+async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false,user='alice',publicPosts=false,feedUnavailable=false,legacyCoverCache=false,realUploads=false}={}){
+ let releaseStorageResponses;const storageWait=new Promise(resolve=>releaseStorageResponses=resolve),storageRequests=[];
  const root=path.resolve('.'),mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.mjs':'application/javascript'};
  const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;
+  if(realUploads&&req.method==='POST'&&pathname.startsWith('/test-supabase/storage/v1/object/uploads/')){
+   const chunks=[];req.on('data',chunk=>chunks.push(chunk));req.on('end',async()=>{storageRequests.push({headers:req.headers,body:Buffer.concat(chunks)});await storageWait;if(!res.destroyed)res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({Key:'uploads/'+pathname.split('/uploads/')[1]}));});return;
+  }
   if(pathname.startsWith('/test-image/')){const colors=['#71b8a3','#d3a579','#849ebe','#c78998'];const index=Number(pathname.match(/-(\d+)\.png$/)?.[1]||0)%colors.length;const svg='<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300"><rect width="400" height="300" fill="'+colors[index]+'"/><circle cx="300" cy="70" r="45" fill="#ffffff" opacity=".55"/><path d="M0 300L150 120L400 300Z" fill="#163e35" opacity=".4"/></svg>';res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'max-age=3600'}).end(svg);return;}
   const file=path.join(root,pathname==='/'?'index.html':pathname);if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   fs.readFile(file,(error,data)=>{if(error){res.writeHead(404).end();return;}res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream'}).end(data);});});
@@ -49,7 +53,7 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
  });
  await page.goto(origin,{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.currentUser===localStorage.getItem('xtj_user')&&document.querySelector('#feed .post-media-grid img'));
  await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
- return{page,posts,comments,likes,calls,errors,uploads,origin,png,releaseImages, setFailUploadAt(n){failUploadAt=n;uploadNumber=0;},setFailCreate(v){failCreate=v;},setFeedUnavailable(v){feedUnavailable=v;},setFailMediaBatch(v){failMediaBatch=v;},getCreated(){return created;},async close(){await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}};
+ return{page,posts,comments,likes,calls,errors,uploads,origin,png,releaseImages,storageRequests,releaseStorageResponses, setFailUploadAt(n){failUploadAt=n;uploadNumber=0;},setFailCreate(v){failCreate=v;},setFeedUnavailable(v){feedUnavailable=v;},setFailMediaBatch(v){failMediaBatch=v;},getCreated(){return created;},async close(){releaseStorageResponses();await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}};
 }
 async function wireAiChat(page){
  await page.evaluate(()=>{

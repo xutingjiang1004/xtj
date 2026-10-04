@@ -59,10 +59,10 @@ test('comment patch coalescing renders the final burst state and leaves unrelate
   for (const fn of timers.values()) fn(); assert.deepEqual(patches, [[id, 1], [id, 3]]);
 });
 function detailRuntime() {
-  const body = { innerHTML: '' }, modal = { classList: { contains: () => true, add() {} } }, json = deferred(), rendered = [];
+  const body = { innerHTML: '', setAttribute() {} }, modal = { removeAttribute() {}, setAttribute() {}, classList: { contains: () => true, add() {} } }, json = deferred(), rendered = [];
   const ctx = { currentUser: 'alice', _authStateEpoch: 1, console: { error() {} }, encodeURIComponent,
     document: { getElementById: key => key === 'postDetailBody' ? body : key === 'postDetailModal' ? modal : {} },
-    window: { xtjOptionalAuthFetch: async () => ({ ok: true, headers: { get: () => 'application/json' }, json: () => json.promise }) },
+    window: { openModal() { modal.classList.add('active'); }, xtjOptionalAuthFetch: async () => ({ ok: true, headers: { get: () => 'application/json' }, json: () => json.promise }) },
     getXtjLoadingHtml: () => 'loading', escapeHtml: String, trackView() {}, renderPostDetail: post => rendered.push(post) };
   vm.runInNewContext(detail.slice(detail.indexOf('            var _postDetailReqSeq'), detail.lastIndexOf('        })();')), ctx);
   return { ctx, json, rendered, body };
@@ -166,7 +166,7 @@ test('late visibility update JSON is rejected before verification and cache/UI w
 
 test('logout clears private feed memory, cached detail and pending repaint tasks immediately', () => {
   const nodes = { feed: { textContent: 'private feed' } }, cancelled = [];
-  const ctx = { currentUser: '', _authStateEpoch: 2, window: { _xtjFeedDomTrimmed: 12, __xtjCancelPostDetail: () => cancelled.push('detail'),
+  const ctx = { currentUser: '', _authStateEpoch: 2, upcRequestSeq: 0, upcTargetUser: 'alice', window: { _xtjFeedDomTrimmed: 12, __xtjCancelPostDetail: () => cancelled.push('detail'),
     __xtjRunMentionCleanups: () => cancelled.push('mention') },
     likeOperations: { old: {} }, _persistLikesTimer: 10, feedCacheWriteTimer: null, _pendingCardPatchTimers: { [id]: { timer: 11 } },
     postInfoCache: { [id]: { content: 'private' } }, clearTimeout: value => cancelled.push(value),
@@ -178,6 +178,7 @@ test('logout clears private feed memory, cached detail and pending repaint tasks
   assert.equal(vm.runInNewContext('feedAllPosts.length + feedAllComments.length + feedAllLikes.length', ctx), 0);
   assert.equal(vm.runInNewContext('feedLoadRequestId', ctx), 6); assert.equal(vm.runInNewContext('feedPageFetchPending', ctx), false);
   assert.equal(nodes.feed.textContent, ''); assert.equal(Object.keys(ctx.postInfoCache).length, 0); assert.equal(ctx.window._xtjFeedDomTrimmed, 0);
+  assert.equal(ctx.upcTargetUser, null); assert.equal(ctx.upcRequestSeq, 1);
   assert.ok(cancelled.includes('detail') && cancelled.includes('mention') && cancelled.includes(10) && cancelled.includes(11));
 });
 

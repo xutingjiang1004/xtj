@@ -3739,7 +3739,7 @@ async function finishStream(res, opt) {
   var isComplete = finishReason === 'stop' || finishReason === 'length' || (hasContent && finishReason === 'upstream_closed') || finishReason === 'idle_timeout' || finishReason === 'partial_content';
   var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
   var searchMeta = opt.searchMeta || null;
-  var thinkingElapsedMs = opt.reasoningStartedAt > 0 ? Date.now() - opt.reasoningStartedAt : 0;
+  var thinkingElapsedMs = typeof res._aiThinkingElapsedMs === 'number' ? res._aiThinkingElapsedMs : (opt.reasoningStartedAt > 0 ? Date.now() - opt.reasoningStartedAt : 0);
 
   // 有内容时尽量保存
   if (hasContent && opt.userName && opt.convId && opt.message) {
@@ -3840,6 +3840,7 @@ async function finishStream(res, opt) {
     requested_thinking_mode: thinkingMode,
     applied_thinking_mode: useThinking ? thinkingMode : 'off',
     reasoning_length: reasoning.length,
+    thinking_elapsed_ms: thinkingElapsedMs,
     content_length: content.length,
     // ★ 工作模式标记：前端据此显示「工作模式」徽标，让用户确认开关确实生效。
     work_mode: workModeForStream,
@@ -11939,6 +11940,7 @@ app.use('/api/chat', createChatSocialRouter({
 }));
 
 app.use('/api/profile/records', require('./profile-records').createProfileRecords({ express, supabase, authenticateUser, rateLimit }));
+app.use('/api/profile/posts', require('./author-posts').createAuthorPosts({ express, supabase, optionalAuth, rateLimit, adminName: ADMIN_USERNAME, looksLikeSystemTelemetry }));
 app.use('/api/user/behavior-consent', require('./behavior-consent').createBehaviorConsent({ express, supabase, authenticateUser, rateLimit }));
 app.use('/api/user/export', require('./personal-export').createPersonalExport({ express, supabase, authenticateUser, rateLimit, privateStorage: dmPrivateStorage }));
 app.use(require('./location-history').createLocationHistory({express,supabase,verifyToken,authenticateUser,rateLimit,audit:logAdminAudit}));
@@ -14552,21 +14554,6 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
   }
 });
 
-// 进程内浏览去重缓存（key: viewKey -> 最近记录时间戳）。
-// 用于防并发双击双计：DB 层 actor_key 无唯一约束（view 记录不匹配 photo_ 前缀的 partial unique index），
-// dupCheck+insert 之间存在 TOCTOU 窗口，进程内缓存把同一 key 的并发请求收敛到单次记录。
-// 不进 DB 迁移，只做代码层加固；缓存窗口很短，天然定期过期，不会无限增长。
-var POST_VIEW_DUP_CACHE = new Map();
-var POST_VIEW_DUP_WINDOW_MS = 30 * 1000;
-// ★ M19 审计修复：缓存只 set 不 delete → 无界增长。定时清理超过窗口的条目
-//   （key 内已含当天日期，过期条目不再有任何用途）。
-setInterval(function() {
-  var viewCutoff = Date.now() - POST_VIEW_DUP_WINDOW_MS;
-  POST_VIEW_DUP_CACHE.forEach(function(ts, key) {
-    if (!ts || ts < viewCutoff) POST_VIEW_DUP_CACHE.delete(key);
-  });
-}, 300000).unref();
-
 require('./photo-social').installPhotoSocial(app, { supabase, authenticateUser, optionalAuth, rateLimit, userBanError });
 
 app.post('/api/photo/view', authenticateUser, rateLimit(60000, 60), async (req, res) => {
@@ -14599,77 +14586,7 @@ app.post('/api/photo/view', authenticateUser, rateLimit(60000, 60), async (req, 
   }
 });
 
-app.post('/api/post/view', authenticateUser, rateLimit(60000, 120), async (req, res) => {
-  try {
-    var postId = normalizePostId(req.body && req.body.post_id);
-    if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
-    var postResult = await applyPublicPostExclusions(supabase.from('posts')
-      .select('id, user_name, visibility, content, media_url, media_type').eq('id', postId)).maybeSingle();
-    if (postResult.error) return res.status(500).json({ error: sanitizeError(postResult.error), code: 'post_view_lookup_failed' });
-    var post = postResult.data;
-    if (!post || (post.visibility && post.visibility !== 'public' && post.user_name !== req.userName)) {
-      return res.status(404).json({ error: '帖子不存在', code: 'post_not_found' });
-    }
-    if (String(post.user_name || '') === String(req.userName || '')) {
-      var selfView = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
-      return res.json({ ok: true, recorded: false, reason: 'self_view', views: Number(selfView.data && selfView.data.views) || 0 });
-    }
-    var now = new Date().toISOString();
-    var dayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD 自然日去重
-    var viewKey = 'pview_' + String(postId) + '_' + String(req.userName || '').toLowerCase() + '_' + dayKey;
-    // 进程内去重：同一 viewKey 在最近窗口内已记录则跳过（防并发双击双计，不改 DB）
-    var _viewLastRecorded = POST_VIEW_DUP_CACHE.get(viewKey);
-    if (_viewLastRecorded && (Date.now() - _viewLastRecorded) < POST_VIEW_DUP_WINDOW_MS) {
-      var _dupCached = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
-      if (!_dupCached.error) {
-        return res.json({ ok: true, recorded: false, reason: 'already_viewed_today', views: Number(_dupCached.data && _dupCached.data.views) || 0 });
-      }
-      // 查询失败不阻塞主流程，继续走 DB 检查
-    }
-    // 当日同一用户对同一帖子只记录一次浏览，防止刷新刷量
-    var dupCheck = await supabase.from('posts')
-      .select('id')
-      .eq('media_type', POST_VIEW_MARKER)
-      .eq('media_url', String(postId))
-      .eq('user_name', req.userName)
-      .eq('actor_key', viewKey)
-      .limit(1)
-      .maybeSingle();
-    if (dupCheck.error) return res.status(500).json({ error: sanitizeError(dupCheck.error), code: 'post_view_record_failed' });
-    if (dupCheck.data) {
-      var dupCount = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
-      return res.json({ ok: true, recorded: false, reason: 'already_viewed_today', views: Number(dupCount.data && dupCount.data.views) || 0 });
-    }
-    var postText = String(post.content || '');
-    try {
-      var parsed = JSON.parse(postText);
-      if (parsed && typeof parsed === 'object' && parsed.__type === '__xtj_post_v2__') {
-        postText = typeof parsed.text === 'string' ? parsed.text : postText;
-      }
-    } catch (_) {}
-    var eventResult = await supabase.from('posts').insert([{
-      user_name: req.userName,
-      media_type: POST_VIEW_MARKER,
-      media_url: String(postId),
-      content: JSON.stringify({ post_id: postId, post_author: post.user_name || '', post_content: postText.slice(0, 200), media_url: post.media_url || '', media_type: post.media_type || '', viewed_at: now }),
-      actor_key: viewKey
-    }]).select('id, created_at').single();
-    if (eventResult.error) return res.status(500).json({ error: sanitizeError(eventResult.error), code: 'post_view_record_failed' });
-    var incrementResult = await supabase.rpc('increment_post_views', { p_post_id: postId });
-    if (incrementResult.error) {
-      if (eventResult.data && eventResult.data.id) await supabase.from('posts').delete().eq('id', eventResult.data.id).eq('media_type', POST_VIEW_MARKER);
-      return res.status(500).json({ error: sanitizeError(incrementResult.error), code: 'post_view_increment_failed' });
-    }
-    // 记录成功后再写进程内去重缓存（失败回滚时不应缓存）
-    POST_VIEW_DUP_CACHE.set(viewKey, Date.now());
-    var countResult = await supabase.from('posts').select('views').eq('id', postId).maybeSingle();
-    if (countResult.error) return res.status(500).json({ error: sanitizeError(countResult.error), code: 'post_view_count_failed' });
-    return res.json({ ok: true, recorded: true, id: eventResult.data && eventResult.data.id, viewed_at: eventResult.data && eventResult.data.created_at || now, views: Number(countResult.data && countResult.data.views) || 0 });
-  } catch (e) {
-    console.error('[API] post view:', e && e.message ? e.message : e);
-    return res.status(500).json({ error: '浏览记录失败', code: 'post_view_record_failed' });
-  }
-});
+require('./post-views').installPostViews(app, { supabase, authenticateUser, rateLimit, normalizePostId });
 
 // ===================== 帖子列表接口（统一可见性过滤） ======================
 // GET /api/feed - 获取帖子列表，根据认证用户身份过滤可见性
@@ -20158,7 +20075,7 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
   if (usage) obj.usage = usage;
   if (reasoning) obj.reasoning = reasoning;
   if (typeof seq === 'number') obj.seq = seq;
-  if (typeof thinkingElapsedMs === 'number' && thinkingElapsedMs > 0) obj.thinking_elapsed_ms = thinkingElapsedMs;
+  if (typeof thinkingElapsedMs === 'number' && Number.isFinite(thinkingElapsedMs) && thinkingElapsedMs >= 0) obj.thinking_elapsed_ms = thinkingElapsedMs;
   if (searchMeta) {
     if (searchMeta.count) obj.search_count = searchMeta.count;
     if (searchMeta.query) obj.search_query = searchMeta.query;
@@ -22407,7 +22324,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
           user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res) }),
+          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2, searchMetaToStore, res._aiThinkingElapsedMs || 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res) }),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -22964,7 +22881,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       var customSaved = await saveCustomChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
         message: customFinalText, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
         thinkingMode: _thinkMode, webSearch: _webSearch, processEvents: getProcessEvents(res), cards: customSiteCards,
-        visionUrls: customVisionUrls, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER });
+        visionUrls: customVisionUrls, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0 });
       writeSse(res, {
         type: 'done',
         conversation_id: customConvId,
@@ -22974,6 +22891,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         complete: true,
         saved: customSaved,
         custom: true,
+        thinking_elapsed_ms: res._aiThinkingElapsedMs || 0,
         thinking_mode: _thinkMode,
         web_search: _webSearch === true,
         reasoning_effort: reasoningEffortFinal,
@@ -24481,7 +24399,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
             user_name: userName,
             content: responsesContent,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res), site_cards: responsesSiteCards }),
+            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, res._aiThinkingElapsedMs || 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res), site_cards: responsesSiteCards }),
             actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
           }
         ]);
@@ -24522,6 +24440,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
         requested_thinking_mode: thinkingMode,
         applied_thinking_mode: useThinking ? thinkingMode : 'off',
         reasoning: thinkingMode !== 'off' ? responsesReasoning : '',
+        thinking_elapsed_ms: res._aiThinkingElapsedMs || 0,
         content: responsesContent,
         content_length: responsesContent.length,
         reasoning_length: responsesReasoning.length,

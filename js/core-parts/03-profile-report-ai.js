@@ -76,6 +76,7 @@
                 }
                 
                 openModal('userProfileModal');
+                if (typeof window.__xtjOpenAuthorPosts === 'function') window.__xtjOpenAuthorPosts(userName);
                 
                 // 加载用户头像
                 try {
@@ -157,8 +158,9 @@
             window.upcSendMessage = function() {
                 if (!upcTargetUser || !currentUser) return;
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
+                var target = upcTargetUser;
                 closeModal('userProfileModal');
-                setTimeout(function() { openChat(upcTargetUser); }, 300);
+                setTimeout(function() { openChat(target); }, 300);
             };
 
             // ========== 个人资料详情功能 ==========
