@@ -437,7 +437,7 @@
   }
 
   #panelAi .photo-wall-item {
-    aspect-ratio: auto;
+    aspect-ratio: var(--pw-aspect, 1 / 1);
     align-self: start;
     border-radius: 10px;
     background: var(--panel-bg, #fafafa);
@@ -453,22 +453,26 @@
     background: transparent;
     color: var(--text-main, #222);
     padding: 10px 4px 4px;
-    position: static;
-    border-radius: 0;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    border-radius: 0 0 16px 16px;
+    background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));
     transform: none;
     opacity: 1;
   }
   #panelAi .photo-wall-item img {
-    height: auto;
+    height: 100%;
     aspect-ratio: var(--pw-aspect, 1 / 1);
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
+    border-radius: inherit;
   }
   #panelAi .photo-wall-item .pw-item-info .pw-item-name {
-    color: var(--text-main, #222);
+    color: white;
   }
   #panelAi .photo-wall-item .pw-item-info .pw-item-meta {
-    color: var(--text-muted, #777);
+    color: rgba(255,255,255,.7);
   }
 
   /* 相册分组卡片（pw-album-card）—— 统一简洁风格：矩形 + 封面 + 文字 */
@@ -510,12 +514,10 @@
     background: rgba(25, 30, 38, 0.86);
     border-color: rgba(255, 255, 255, 0.08);
   }
-  [data-theme="dark"] #panelAi .pw-album-title,
-  [data-theme="dark"] #panelAi .photo-wall-item .pw-item-name {
+  [data-theme="dark"] #panelAi .pw-album-title {
     color: #e6ebe8;
   }
-  [data-theme="dark"] #panelAi .pw-album-count,
-  [data-theme="dark"] #panelAi .photo-wall-item .pw-item-meta {
+  [data-theme="dark"] #panelAi .pw-album-count {
     color: rgba(230, 235, 232, 0.55);
   }
 

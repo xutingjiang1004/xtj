@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { postBrowserFixture } = require('./helpers/post-browser-fixture');
 
-for (const width of [390, 1280]) {
+for (const width of [390, 1024, 1280]) {
   test(`wall metadata stays inside the card and composer fonts match at ${width}px`, async () => {
     const f = await postBrowserFixture({ counts: [1], viewport: { width, height: 880 } });
     try {
@@ -21,9 +21,14 @@ for (const width of [390, 1280]) {
       await page.waitForTimeout(350);
       const boxes = await page.locator('.photo-wall-item').evaluate(el => {
         const card = el.getBoundingClientRect(), info = el.querySelector('.pw-item-info').getBoundingClientRect();
-        return { top: info.top - card.top, bottom: card.bottom - info.bottom, text: el.querySelector('.pw-item-info').textContent };
+        const img = el.querySelector('img').getBoundingClientRect();
+        const style = getComputedStyle(el.querySelector('.pw-item-info'));
+        return { top: info.top - card.top, bottom: card.bottom - info.bottom, imageBottom: img.bottom - info.bottom, position: style.position, color: getComputedStyle(el.querySelector('.pw-item-name')).color, text: el.querySelector('.pw-item-info').textContent };
       });
       assert.ok(boxes.top >= 0 && boxes.bottom >= -1, JSON.stringify(boxes));
+      assert.ok(boxes.imageBottom >= -1, JSON.stringify(boxes));
+      assert.equal(boxes.position, 'absolute');
+      assert.equal(boxes.color, 'rgb(255, 255, 255)');
       assert.match(boxes.text, /发布者.*刚刚.*浏览 42/);
       assert.deepEqual(f.errors, []);
     } finally { await f.close(); }
