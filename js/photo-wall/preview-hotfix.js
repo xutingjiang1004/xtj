@@ -1461,10 +1461,7 @@
     if (!img) return;
     if (img._ppHotfixErrorBound) return;
     img._ppHotfixErrorBound = true;
-    img.addEventListener('error', function () {
-      clearErrorUiTimer();
-      errorUiTimer = window.setTimeout(function () {
-        errorUiTimer = 0;
+    function showImageError() {
         if (!img || !img.isConnected) return;
         // 延迟窗口内已成功加载则不需要错误 UI
         if (img.complete && img.naturalWidth > 0) { clearImageError(); return; }
@@ -1490,6 +1487,14 @@
         });
         placeholder.appendChild(retry);
         slot.appendChild(placeholder);
+    }
+    img.addEventListener('xtj:image-timeout', function () { clearErrorUiTimer(); showImageError(); });
+    img.addEventListener('xtj:image-request', clearImageError);
+    img.addEventListener('error', function () {
+      clearErrorUiTimer();
+      errorUiTimer = window.setTimeout(function () {
+        errorUiTimer = 0;
+        showImageError();
       }, ERROR_UI_DELAY_MS);
     });
     img.addEventListener('load', function () {

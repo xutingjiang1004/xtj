@@ -10,7 +10,7 @@ function fixture(){
 test('publish progress weights actual bytes, stays below completion until confirmed and retains originals',async()=>{
  const f=fixture(),a=f.progress.upload({},'posts/a',f.files[0],0),b=f.progress.upload({},'posts/b',f.files[1],1);
  assert.equal(f.xhrs[0].body,f.files[0]);assert.equal(f.xhrs[0].headers.apikey,'public-key');f.xhrs[0].upload.onprogress({lengthComputable:true,total:100,loaded:50});assert.equal(f.track.attrs['aria-valuenow'],'11');f.xhrs[1].upload.onprogress({lengthComputable:true,total:300,loaded:150});assert.equal(f.track.attrs['aria-valuenow'],'45');
- for(const xhr of f.xhrs){xhr.upload.onload();xhr.status=200;xhr.responseText='{}';xhr.onload()}await Promise.all([a,b]);assert.equal(f.track.attrs['aria-valuenow'],'90');f.progress.saving();assert.equal(f.track.attrs['aria-valuenow'],'95');assert.match(f.label.textContent,/保存中/);f.progress.confirmed();assert.equal(f.track.attrs['aria-valuenow'],'100');
+ for(const xhr of f.xhrs){xhr.upload.onload();xhr.status=200;xhr.responseText='{}';xhr.onload()}await Promise.all([a,b]);assert.equal(f.track.attrs['aria-valuenow'],'90');f.progress.saving();assert.equal(f.track.attrs['aria-valuenow'],'95');assert.match(f.label.textContent,/发布中/);f.progress.confirmed();assert.equal(f.track.attrs['aria-valuenow'],'100');
 });
 test('identity change aborts all in-flight uploads and prevents late progress updates',async()=>{
  const f=fixture(),pending=f.progress.upload({},'posts/a',f.files[0],0);f.deactivate();f.progress.cancel();const result=await pending;assert.ok(result.error);assert.equal(f.xhrs[0].upload.onprogress,null);assert.equal(f.track.attrs['aria-valuenow'],'0');

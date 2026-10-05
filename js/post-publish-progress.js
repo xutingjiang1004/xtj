@@ -72,7 +72,7 @@
           if (!result.error) { loaded[index] = file.size; update(total ? loaded.reduce(function (sum, value) { return sum + value; }, 0) / total * 90 : 0, '上传中'); }
           return result;
         },
-        saving: function () { update(total ? 95 : 0, '保存中'); },
+        saving: function () { update(total ? 95 : 0, '发布中'); },
         confirmed: function () { update(100, '已发布'); },
         cancel: function () { stopped = true; Array.from(requests).forEach(function (xhr) { xhr.abort(); }); requests.clear(); }
       };
