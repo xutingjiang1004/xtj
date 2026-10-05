@@ -437,6 +437,8 @@
   }
 
   #panelAi .photo-wall-item {
+    aspect-ratio: auto;
+    align-self: start;
     border-radius: 10px;
     background: var(--panel-bg, #fafafa);
     box-shadow: none;
@@ -453,6 +455,14 @@
     padding: 10px 4px 4px;
     position: static;
     border-radius: 0;
+    transform: none;
+    opacity: 1;
+  }
+  #panelAi .photo-wall-item img {
+    height: auto;
+    aspect-ratio: var(--pw-aspect, 1 / 1);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
   }
   #panelAi .photo-wall-item .pw-item-info .pw-item-name {
     color: var(--text-main, #222);

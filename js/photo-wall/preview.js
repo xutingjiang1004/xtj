@@ -114,7 +114,7 @@
         image.classList.remove("pp-placeholder"), image.style.transition = "none";
         resetSource && (image.removeAttribute("src"), image.style.opacity = "0");
     }
-    function D(e, t) {
+    function D(e, t, forceReload) {
         if (e) {
             if (!t) {
                 clearPreviewImageLoad(e, !0);
@@ -126,7 +126,7 @@
                 // 若当前展示的是该 URL 的 Blob 对象图（渐进加载中），保持不动，避免用原 URL 覆盖
                 if (e._ppObjectUrl) return e.style.transition = "none", void (e.style.opacity = "1");
                 if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
-                if (e._ppListenerUrl === t && e._ppCleanup) return;
+                if (!forceReload && e._ppListenerUrl === t && e._ppCleanup) return;
             } else {
                 // 换 URL 前彻底清旧图，避免切换时残影；同时取消缩略图打开时的原图预加载回调。
                 e._ppFullPreloadCleanup && e._ppFullPreloadCleanup(!0);
@@ -138,6 +138,7 @@
                 e.classList.remove("pp-placeholder");
                 try { e.removeAttribute("src"); } catch (err) {}
             }
+            e._ppCleanup && e._ppCleanup();
             e._ppUrl = t;
             // Even an HTTP cache hit must decode the new source before becoming visible.
             e.decoding = "async";
@@ -172,7 +173,7 @@
                     e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
                 }(e)));
             }
-            e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = t, e.complete && e.naturalWidth > 0 && handleLoad();
+            e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = forceReload && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : t, e.complete && e.naturalWidth > 0 && handleLoad();
         }
     }
     function O(e) {
@@ -973,7 +974,8 @@
     }, window.closePhotoPreview = V, window.retryPhotoPreviewImage = function() {
         var image = document.getElementById("photoPreviewImage");
         if (!e || !t || !t.imageUrl || !image) return false;
-        D(image, t.imageUrl); return true;
+        clearPreviewImageLoad(image, !0);
+        D(image, t.imageUrl, !0); return true;
     }, Q = function() {
         var e = t;
         if (e) {

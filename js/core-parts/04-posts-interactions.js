@@ -3047,7 +3047,7 @@
                 var url = img && sanitizeUrl(img.getAttribute('data-media-url') || '');
                 if (!url) return;
                 cell.classList.remove('post-image-failed');
-                img.removeAttribute('src'); img.src = url;
+                img.removeAttribute('src'); img.src = window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(url) : url;
             };
             window.syncPostImageRatio = function(img) {
                 var parent = img && img.closest('.post-media-cell');

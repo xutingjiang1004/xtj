@@ -6158,7 +6158,7 @@
             background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));
             color: white;
             opacity: .88;
-            transform: translateY(8px);
+            transform: translateY(0);
             transition: opacity .35s ease, transform .35s cubic-bezier(0.16,1,0.3,1);
         }
         .photo-wall-item:focus-visible::before,
@@ -16926,7 +16926,7 @@ html[data-xtj-motion="off"] #pwUploadProgressOverlay .pw-upload-progress-bar-fil
 @keyframes pwGardenLight { from { opacity:.55; } to { opacity:.9; } }
 @media(max-height:500px) { #pwUploadProgressOverlay .pw-garden { width:155px; } #pwUploadProgressOverlay .pw-upload-progress-container { gap:10px; padding:16px 20px; } }
 @media(prefers-reduced-motion:reduce) { .pw-garden.is-growing * { animation:none !important; } #pwUploadProgressOverlay .pw-upload-progress-bar-fill { transition:none; } }
-html[data-xtj-motion="off"] .pw-garden.is-growing *, html[data-perf="lite"] .pw-garden.is-growing * { animation:none !important; }
+html[data-xtj-motion="off"] .pw-garden.is-growing * { animation:none !important; }
 html[data-xtj-motion="off"] #pwUploadProgressOverlay .pw-upload-progress-bar-fill { transition:none; }
 /* Decode the original once; avoid a large blur filter on every scrolling tile. */
 .photo-wall-item img.pw-blur-in { filter:none; transform:none; opacity:.3; }

@@ -141,7 +141,7 @@
   grid-column:1/3; grid-row:2; display:flex; align-items:center; gap:4px; min-width:0;
 }
 #panelPosts.active #publishBox .post-compose-controls .post-compose-label { flex:0 0 auto; font-size:12px; white-space:nowrap; }
-#panelPosts.active #publishBox .post-compose-controls .post-visibility-select { flex:0 0 72px; width:72px; min-width:0!important; }
+#panelPosts.active #publishBox .post-compose-controls .post-visibility-select { flex:0 0 72px; width:72px; min-width:0!important; font-size:12px!important; }
 #panelPosts.active #publishBox .post-compose-controls > .post-location-row { grid-column:1!important; grid-row:1!important; }
 #panelPosts.active #publishBox .post-compose-controls > .publish-footer { display:contents!important; }
 #panelPosts.active #publishBox .post-compose-controls .file-label { grid-column:2; grid-row:1; }
@@ -154,7 +154,7 @@
 #pubBtn .post-publish-progress .pw-garden { width:88px; max-width:52%; flex:0 1 88px; margin:0; }
 #pubBtn .pw-garden.is-growing .pw-garden-stitch path { animation-duration:1.4s; animation-delay:-.55s; }
 #pubBtn .pw-garden.is-growing .pw-garden-leaves path { animation-duration:.8s; animation-delay:-.3s; }
-#pubBtn .pw-garden.is-growing .pw-garden-flower { animation:pwGardenBloom 1.2s cubic-bezier(.22,.8,.3,1) -.4s both, pwGardenBreeze 5s ease-in-out .8s infinite; }
+#pubBtn .pw-garden.is-growing .pw-garden-flower { animation:pwGardenBloom 1.2s cubic-bezier(.22,.8,.3,1) -.4s both, pwGardenBreeze 3s ease-in-out -1s infinite; }
 #pubBtn .post-publish-progress-copy { display:flex; flex-direction:column; gap:8px; flex:1 1 72px; min-width:0; max-width:190px; text-align:left; }
 #pubBtn .post-publish-progress-label { white-space:nowrap; font-variant-numeric:tabular-nums; }
 #pubBtn .post-publish-progress-track { display:block; height:5px; width:100%; overflow:hidden; border-radius:5px; background:rgba(87,157,137,.15); }
