@@ -112,7 +112,7 @@ test('failed AI requests remove the temporary typing bubble and reveal quota out
   const httpErrorBody = sendBody.slice(sendBody.indexOf('if (!resp.ok)'), sendBody.indexOf('if (!resp.body)'));
   const bodylessError = sendBody.slice(sendBody.indexOf('if (!resp.body)'), sendBody.indexOf('var reader = resp.body.getReader()'));
   assert.match(httpErrorBody, /assistantNode\.remove\(\)/);
-  assert.match(bodylessError, /assistantNode\.remove\(\)/);
+  assert.match(bodylessError, /preserveFailedTurn\(\)/);
   assert.match(sendBody, /catch \(e\) \{ throw e; \}/);
   assert.match(serverSource, /function getAiQuotaErrorMessage\(reason\)/);
   assert.match(serverSource, /reason === 'quota_unavailable'/);

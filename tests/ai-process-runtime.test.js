@@ -29,12 +29,14 @@ async function fixture(t, effort='max', model='deepseek-flash') {
       if (path.endsWith('/quota')) body={ok:true,quota:{can_chat:true,tokens_remaining:100000,search_remaining:100}};
       if (path.endsWith('/custom-models')) body={ok:true,models:mockModels};
       if (path.endsWith('/chat/conversations')) body=failHistoryList?{ok:false,error:'offline'}:{ok:true,conversations:[]};
-      if (path.endsWith('/chat/history')) body=failDeepHistory&&String(url).includes('deep_think')?{ok:false,error:'offline'}:{ok:true,conversation_id:'test-cid',messages:[],has_more:false};
+      if (path.endsWith('/chat/history')) body=failDeepHistory&&String(url).includes('deep_think')?{ok:false,error:'offline'}:{ok:true,conversation_id:'test-cid',messages:window.mockHistory||[],has_more:false};
       if (path.endsWith('/chat/new')) {window.newCalls=(window.newCalls||0)+1;body={ok:true,conversation_id:'new-cid'};}
       if (path.endsWith('/chat/stream') || path.endsWith('/custom-chat/stream')) {
         window.sentURL=path;
         window.sent = JSON.parse(options.body);
-        return new Response(new ReadableStream({start(controller){window.stream=controller;}}),{headers:{'Content-Type':'text/event-stream'}});
+        const turn={body:window.sent,signal:options.signal,cancelled:false};
+        (window.turns||(window.turns=[])).push(turn);
+        return new Response(new ReadableStream({start(controller){window.stream=turn.stream=controller;},cancel(){turn.cancelled=true;}}),{headers:{'Content-Type':'text/event-stream'}});
       }
       return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}});
     };
@@ -279,4 +281,70 @@ test('leaving chat during a completion-only drain cancels the old answer and rel
  await page.evaluate(()=>{emit({type:'content',text:'新会话的回答。'});emit({type:'done',content:'新会话的回答。',thinking_mode:'off',complete:true,saved:true});stream.close();});
  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await page.waitForTimeout(300);
  assert.equal(await page.locator('.ai-msg.assistant').count(),1);assert.equal(await page.locator('.ai-msg.assistant .ai-msg-bubble').textContent(),'新会话的回答。');assert.equal(await page.locator('.ai-stream-cursor').count(),0);
+});
+
+for(const model of ['deepseek-flash','custom:test-custom'])test(model+': sending a new question interrupts the old stream, preserves partial context and ignores late output',async t=>{
+ const page=await fixture(t,'max',model);
+ await page.locator('#aiChatMsgInput').fill('旧问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.turns?.length===1);
+ await page.evaluate(()=>{emit({type:'reasoning',text:'未完成的思考过程。'});emit({type:'content',text:'旧回复的部分内容。'});});
+ await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('旧回复'));
+ assert.equal(await page.locator('#aiChatSendBtn').isEnabled(),true);
+ await page.locator('#aiChatMsgInput').fill('改成回答新问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>turns.length===2);
+ assert.equal(await page.evaluate(()=>turns[0].signal.aborted&&turns[0].cancelled),true);
+ const history=await page.evaluate(()=>sent.messages);
+ assert.ok(history.some(m=>m.role==='user'&&m.content==='旧问题'));
+ assert.ok(history.some(m=>m.role==='assistant'&&m.content==='旧回复的部分内容。'));
+ assert.equal(await page.locator('.ai-msg.generating').count(),1);
+ assert.match(await page.locator('.ai-thinking-body').first().textContent(),/未完成的思考过程/);
+ await page.evaluate(()=>{try{turns[0].stream.enqueue(new TextEncoder().encode('data: {"type":"done","content":"不应出现的旧结果"}\n\n'));}catch(_){}emit({type:'done',content:'新问题的答案。',complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+ assert.equal(await page.locator('.ai-msg.assistant').count(),2);assert.doesNotMatch(await page.locator('#panelAiChat').textContent(),/不应出现的旧结果/);
+ await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelectorAll('.ai-msg.user').length===2);
+ assert.match(await page.locator('#panelAiChat').textContent(),/旧回复的部分内容/);
+ assert.equal(await page.locator('.ai-msg.assistant').last().locator('.ai-msg-bubble').textContent(),'新问题的答案。');
+});
+
+test('pause actually cancels a reasoning-only stream and keeps the question and reasoning available after reopening',async t=>{
+ const page=await fixture(t);await page.locator('#aiChatMsgInput').fill('没有完成的问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>emit({type:'reasoning',text:'思考到这里还没完成。'}));await page.waitForFunction(()=>document.querySelector('.ai-thinking-body').textContent.includes('思考到这里'));
+ await page.locator('#aiChatPauseBtn').click();await page.waitForFunction(()=>turns[0].signal.aborted);
+ assert.equal(await page.locator('.ai-msg.generating').count(),0);assert.equal(await page.locator('#aiChatSendBtn').isEnabled(),true);
+ await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-msg.user'));
+ assert.match(await page.locator('#panelAiChat').textContent(),/没有完成的问题/);assert.match(await page.locator('.ai-thinking-body').textContent(),/思考到这里/);
+ await page.locator('#aiChatMsgInput').fill('继续回答新的问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>turns.length===2);
+ assert.ok((await page.evaluate(()=>sent.messages)).some(m=>m.content==='没有完成的问题'));
+});
+
+test('a new send supersedes pending authentication and retains the unanswered question without allowing a late request',async t=>{
+ const page=await fixture(t,'off');await page.evaluate(()=>{let first=true;window.ensureProtectedOperationAuth=()=>{if(first){first=false;return new Promise(resolve=>window.releaseOldAuth=resolve);}return Promise.resolve({ok:true,token:'test-token'});};});
+ await page.locator('#aiChatMsgInput').fill('鉴权时等待的旧问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.releaseOldAuth);
+ await page.locator('#aiChatMsgInput').fill('现在的新问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.turns?.length===1);
+ assert.equal(await page.evaluate(()=>sent.message),'现在的新问题');assert.ok((await page.evaluate(()=>sent.messages)).some(m=>m.content==='鉴权时等待的旧问题'));
+ await page.evaluate(()=>releaseOldAuth({ok:true,token:'test-token'}));await page.waitForTimeout(200);assert.equal(await page.evaluate(()=>turns.length),1);
+ assert.equal(await page.locator('.ai-msg.generating').count(),1);
+ await page.evaluate(()=>{emit({type:'done',content:'新的回答',complete:true,saved:true});stream.close();});await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+});
+
+test('an unexpected empty stream preserves the unanswered question in the next request context',async t=>{
+ const page=await fixture(t,'off');await page.locator('#aiChatMsgInput').fill('连接断开前的问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>stream.close());await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+ assert.equal(await page.locator('.ai-msg.user').count(),1);
+ await page.locator('#aiChatMsgInput').fill('接着回答这个');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>turns.length===2);
+ assert.ok((await page.evaluate(()=>sent.messages)).some(m=>m.content==='连接断开前的问题'));
+});
+
+test('stopping before any output retains only the question and leaves no blank assistant bubble',async t=>{
+ const page=await fixture(t,'off');await page.locator('#aiChatMsgInput').fill('停止前的问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.locator('#aiChatPauseBtn').click();assert.equal(await page.locator('.ai-msg.assistant').count(),0);assert.equal(await page.locator('.ai-msg.user').count(),1);
+ await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-msg.user'));
+ assert.equal(await page.locator('.ai-msg.assistant').count(),0);await page.locator('#aiChatMsgInput').fill('新的问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>turns.length===2);
+ assert.ok((await page.evaluate(()=>sent.messages)).some(m=>m.content==='停止前的问题'));
+});
+
+test('cloud history catches up with a reasoning-only interrupted turn without duplicating the cached messages',async t=>{
+ const page=await fixture(t);await page.locator('#aiChatMsgInput').fill('云端同步中的问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>emit({type:'reasoning',text:'只完成了思考。'}));await page.waitForFunction(()=>document.querySelector('.ai-thinking-body').textContent.includes('只完成了'));
+ await page.locator('#aiChatPauseBtn').click();await page.evaluate(()=>{const entry=Object.keys(sessionStorage).find(k=>k.startsWith('xtj_ai_history:'));mockHistory=JSON.parse(sessionStorage.getItem(entry)).messages.map(m=>({...m,id:Math.random()}));});
+ await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-msg.user'));await page.waitForTimeout(250);
+ assert.equal(await page.locator('.ai-msg.user').count(),1);assert.equal(await page.locator('.ai-msg.assistant').count(),1);assert.match(await page.locator('.ai-thinking-body').textContent(),/只完成了思考/);
 });

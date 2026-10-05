@@ -50,11 +50,10 @@
     var copy = make('span', 'author-post-copy');
     if (textOf(post)) copy.appendChild(make('span', 'author-post-text', textOf(post)));
     var labels = [];
-    if (items.length) labels.push(items.length + ' 张图片');
     if (post.visibility === 'private') labels.push('仅自己可见');
     if (post.location_name) labels.push(post.location_name);
-    copy.appendChild(make('span', 'author-post-meta', labels.join(' · ') || '文字动态'));
-    button.appendChild(copy);
+    if (labels.length) copy.appendChild(make('span', 'author-post-meta', labels.join(' · ')));
+    if (copy.childNodes.length) button.appendChild(copy);
     button.addEventListener('click', function () { if (state && current(state) && typeof window.openPostDetail === 'function') window.openPostDetail(post.id); });
     row.append(stamp, button);
     return { row: row, day: day };

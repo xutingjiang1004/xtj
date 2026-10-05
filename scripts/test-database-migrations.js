@@ -25,6 +25,20 @@ async function main(){
   console.log('PASS clean PostgreSQL migration replay ('+migrations.length+' files)');checks++;
   await c.query(`INSERT INTO public.posts(user_name,media_type,content) VALUES ('audit_a','__auth__','{}'),('audit_b','__auth__','{}');`);
   pool=new Pool({connectionString:url.toString(),max:12});
+  const modelSql='SELECT public.save_ai_custom_models_snapshot($1,$2::jsonb,$3::jsonb,$4::jsonb,$5) AS result';
+  const modelParams=(models=[],deleted=[],prefs={},replace=false)=>['audit_a',JSON.stringify(models),JSON.stringify(deleted),JSON.stringify(prefs),replace];
+  const modelSave=async(models=[],deleted=[],prefs={},replace=false)=>(await pool.query(modelSql,modelParams(models,deleted,prefs,replace))).rows[0].result;
+  const model=uid=>({uid,model:'fixture',api_key_enc:'encrypted-fixture'});
+  await modelSave([model('last')]);let snap=await modelSave([],['last']);assert.equal(snap.models.length,0);
+  snap=await modelSave([model('last')],[],{},true);assert.equal(snap.models.length,0);assert.ok(snap.deleted_uids.includes('last'));checks++;console.log('PASS deleting the final model survives stale and legacy snapshots');
+  await Promise.all(Array.from({length:8},(_,i)=>modelSave([model('new-'+i)])));
+  snap=await modelSave([],[],{research_model:'flash'});assert.equal(snap.models.length,8);assert.equal(snap.ai_prefs.research_model,'flash');
+  await Promise.all([modelSave([],['new-0']),modelSave([model('new-0')]),modelSave([model('extra')])]);
+  snap=await modelSave();assert.equal(snap.models.length,8);assert.ok(snap.deleted_uids.includes('new-0'));assert.ok(!snap.models.some(m=>m.uid==='new-0'));checks++;console.log('PASS concurrent device mutations preserve all additions and permanent deletions');
+  await c.query('BEGIN');await c.query(modelSql,modelParams([model('rolled-back')],['extra']));await c.query('ROLLBACK');
+  snap=await modelSave();assert.ok(snap.models.some(m=>m.uid==='extra'));assert.ok(!snap.models.some(m=>m.uid==='rolled-back'));assert.equal((await c.query("SELECT count(*)::int AS count FROM public.posts WHERE user_name='audit_a' AND media_type='__custom_ai_models__'")).rows[0].count,1);checks++;console.log('PASS model snapshot rollback is atomic and leaves exactly one account snapshot');
+  for(const role of ['anon','authenticated']){await c.query('SET ROLE '+role);try{await assert.rejects(c.query(modelSql,modelParams()),/permission denied/);}finally{await c.query('RESET ROLE');}}
+  await c.query('SET ROLE service_role');try{assert.equal((await c.query(modelSql,modelParams())).rows[0].result.ok,true);}finally{await c.query('RESET ROLE');}checks++;console.log('PASS model mutation RPC is restricted to the server service role');
   const sqlClaim='SELECT public.claim_ai_search_credit($1,$2,$3,100000::bigint,1000000::bigint,$4) AS result';
   const claim=async(user,id,limit=3)=> (await pool.query(sqlClaim,[user,id,id,limit])).rows[0].result;
   const claims=await Promise.all(Array.from({length:20},()=>claim('audit_a',crypto.randomUUID())));
