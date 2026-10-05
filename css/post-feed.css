@@ -107,6 +107,10 @@
 #postMediaPreviewGrid .post-media-preview-thumb video { display: block; width: 100%; height: 100%; object-fit: cover; }
 #postMediaPreviewGrid .post-media-preview-thumb.is-audio { aspect-ratio: auto; min-height: 70px; padding-top: 40px; }
 #postMediaPreviewGrid .post-media-preview-thumb audio { width: 100%; }
+#postMediaPreviewGrid .post-media-preview-thumb.is-sortable { touch-action:none; cursor:grab; }
+#postMediaPreviewGrid .post-media-preview-thumb.is-dragging { opacity:.45; cursor:grabbing; }
+#postMediaPreviewGrid .post-media-preview-thumb:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+.post-media-drag-ghost { position:fixed; pointer-events:none; z-index:1000; transform:translate(-50%,-50%) scale(1.04); object-fit:cover; border-radius:6px; box-shadow:0 8px 24px rgba(20,65,50,.2); }
 #postMediaPreviewGrid .post-media-remove {
   position: absolute; top: 0; right: 0;
   display: grid; place-items: center;

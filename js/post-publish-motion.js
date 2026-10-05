@@ -69,6 +69,7 @@
   // Show the same local original until the canonical Storage URL has decoded.
   // URL ownership lasts until BOTH the flight and that handoff are finished.
   function bridgeOriginal(state, item, img) {
+    if (window.XtjPostOriginals) { item.mediaReady=true; return; }
     if (img.complete && img.naturalWidth > 0) { item.mediaReady=true; return; }
     var remote = img.getAttribute('src'), loader = new Image(), settled = false, timer;
     function restore() {

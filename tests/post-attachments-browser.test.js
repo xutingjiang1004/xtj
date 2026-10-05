@@ -37,7 +37,7 @@ for(const [name,viewport] of [['390px',{width:390,height:844}],['desktop',{width
 }
 test('real composer appends, removes, rejects mixing; upload/create failures retain draft and clean all paths; retry succeeds',{timeout:60000},async()=>{
  const f=await postBrowserFixture({counts:[2]});try{
-  const {page}=f;await page.evaluate(()=>{window.revokedPostUrls=[];const revoke=URL.revokeObjectURL;URL.revokeObjectURL=function(url){revokedPostUrls.push(url);return revoke.call(URL,url);};});
+  const {page}=f;await page.route('**/test-supabase/storage/v1/object/public/uploads/**',route=>route.fulfill({contentType:'image/png',body:f.png}));await page.evaluate(()=>{window.createdPostUrls=[];const create=URL.createObjectURL;URL.createObjectURL=function(file){const url=create.call(URL,file);createdPostUrls.push(url);return url;};window.revokedPostUrls=[];const revoke=URL.revokeObjectURL;URL.revokeObjectURL=function(url){revokedPostUrls.push(url);return revoke.call(URL,url);};});
   const images=[0,1,2,3,4].map(n=>({name:`original-${n}.png`,mimeType:'image/png',buffer:f.png}));
   await page.locator('#fileInp').setInputFiles(images.slice(0,2));await page.locator('#fileInp').setInputFiles(images.slice(2));assert.equal(await page.evaluate(()=>selectedPostMedia.length),5);
   await page.locator('#postMediaPreviewGrid .post-media-remove').nth(1).click();assert.deepEqual(await page.evaluate(()=>selectedPostMedia.map(f=>f.name)),['original-0.png','original-2.png','original-3.png','original-4.png']);
@@ -48,7 +48,7 @@ test('real composer appends, removes, rejects mixing; upload/create failures ret
   assert.equal(f.uploads.size,0);assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.ok(f.calls.some(c=>c.path==='/api/post/create'));
   f.setFailCreate(false);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled&&selectedPostMedia.length===0);
   const created=f.getCreated();assert.equal(created.attachments.length,4);assert.deepEqual(created.attachments.map(a=>a.position),[0,1,2,3]);assert.equal(new Set(created.attachments.map(a=>a.upload_id)).size,4);assert.equal(new Set(created.attachments.map(a=>a.storage_path)).size,4);assert.ok(created.attachments.every(a=>a.width===1&&a.height===1));assert.equal(created.media_type,'album');
-  assert.equal(await page.locator('#postInp').inputValue(),'');assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] .post-media-cell`).count(),4);assert.ok(await page.evaluate(()=>revokedPostUrls.length>=9));assert.deepEqual(f.errors,[]);
+  assert.equal(await page.locator('#postInp').inputValue(),'');assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] .post-media-cell`).count(),4);await page.waitForFunction(()=>createdPostUrls.length>=5&&createdPostUrls.every(url=>revokedPostUrls.includes(url)));assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] img`).evaluateAll(imgs=>imgs.every(img=>!img.src.startsWith('blob:')&&img.complete&&img.naturalWidth>0)),true);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 
