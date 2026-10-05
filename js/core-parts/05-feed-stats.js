@@ -63,7 +63,9 @@
                 resetDmNotificationIdentity();
                 if(messageId){if(dmNotificationIds.has(String(messageId)))return;dmNotificationIds.add(String(messageId));}
                 if (!userName || !message) return;
-                if (window.safeStorage.get('xtj-notif') === 'off') return;
+                var preferences = window.__xtjProfileMessagePreferences;
+                var ownPreferences = preferences && preferences.owner === currentUser && preferences.epoch === _authStateEpoch;
+                if (ownPreferences ? preferences.enabled === false : window.safeStorage.get('xtj-notif') === 'off') return;
                 if (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === userName) return;
 
                 const container = document.getElementById('notificationContainer');
@@ -77,7 +79,7 @@
                     `<img loading="lazy" decoding="async" src="${escapeHtml(safeAvatarUrl)}" alt="${escapeHtml(userName)}">` : 
                     escapeHtml(String(userName)[0] || '').toUpperCase();
 
-                const truncatedMsg = message.length > 50 ? message.slice(0, 50) + '...' : message;
+                const truncatedMsg = ownPreferences && preferences.preview === false ? '收到一条新消息' : (message.length > 50 ? message.slice(0, 50) + '...' : message);
 
                 bubble.innerHTML = `
                     <div class="notification-avatar">${avatarHtml}</div>

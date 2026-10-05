@@ -1827,27 +1827,6 @@ function isAdmin() {
             }
         };
 
-        // ★ 修复 M-1：个人中心"通知"开关此前完全没有绑定，拨动无任何持久化效果。
-        // 初始化时读取 xtj-notif 设置 checked 状态，change 时写入偏好（'off' 表示关闭）。
-        function initProfileNotificationToggle() {
-            var toggle = document.getElementById('profileNotifToggle');
-            if (!toggle || toggle.__xtjNotifBound) return;
-            toggle.__xtjNotifBound = true;
-            try {
-                toggle.checked = window.safeStorage.get('xtj-notif') !== 'off';
-            } catch (e) {}
-            toggle.addEventListener('change', function() {
-                try {
-                    window.safeStorage.set('xtj-notif', toggle.checked ? 'on' : 'off');
-                } catch (e) {}
-            });
-        }
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initProfileNotificationToggle);
-        } else {
-            initProfileNotificationToggle();
-        }
-
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
             'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },

@@ -137,6 +137,8 @@ const { isNormalPost, applyNormalPostAllowlist, applyPublicPostExclusions, NORMA
 const { safeJsonParse, toTimeMs, pickEarlierIso, pickLaterIso, getUtcDateKey } = require('./util-helpers');
 // ★ A 档工具辅助函数（图表 / PDF / 二维码 / diff / 表格 / 公式 等纯计算实现，零新增付费依赖）
 const toolHelpers = require('./tool-helpers');
+const aiTaskPolicy = require('./ai-task-policy');
+const responsesContext = require('./responses-context');
 const {
   createAiQuota,
   getTokenQuotaErrorMessage,
@@ -2664,13 +2666,13 @@ async function executeToolCall(toolCall, context) {
     }
     // ===================== A 档工具执行分支 =====================
     case 'make_chart': {
-      var mcType = ['bar', 'line', 'pie', 'scatter'].indexOf(String(args.type || 'bar').toLowerCase()) >= 0
-        ? String(args.type).toLowerCase() : 'bar';
+      var mcRequestedType = String(args.type || 'bar').toLowerCase();
+      var mcType = ['bar', 'line', 'pie', 'scatter'].indexOf(mcRequestedType) >= 0 ? mcRequestedType : 'bar';
       var mcTitle = toolHelpers.clampText(args.title || '', 60);
       var mcLabels = Array.isArray(args.labels) ? args.labels.slice(0, 200).map(function(l) { return String(l).slice(0, 20); }) : [];
-      var mcSeries = toolHelpers.normalizeSeries(args.series, 200);
-      if (!mcSeries.length) return { tool_name: name, error: 'series 数据为空，请提供形如 [{"name":"销售额","data":[120,200]}] 的数据' };
       try {
+        var mcSeries = toolHelpers.normalizeSeries(args.series, 200);
+        if (!mcSeries.length) return { tool_name: name, error: 'series 数据为空，请提供形如 [{"name":"销售额","data":[120,200]}] 的数据' };
         var mcSvg = toolHelpers.buildChartSvg(mcType, mcTitle, mcLabels, mcSeries, args.x_label, args.y_label, args.width, args.height);
         var mcPng = await toolHelpers.svgToPngDataUrl(sharp, mcSvg);
         var mcPoints = 0;
@@ -7871,8 +7873,8 @@ async function callDeepSeek(messages, options) {
     toolCallCtx.signal = signal;
     return executeToolCall(toolCall, toolCallCtx);
   };
-  // ★ 防止爆：tool_use 最多循环 4 次
-  var maxToolRounds = Math.min(Math.max(parseInt(options && options.max_tool_rounds) || 4, 1), 8);
+  // Default callers use four rounds; ordinary chat explicitly shares the ten-round cap.
+  var maxToolRounds = Math.min(Math.max(parseInt(options && options.max_tool_rounds) || 4, 1), aiTaskPolicy.MAX_TOOL_ROUNDS);
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort, 'useTools:', useTools); } catch (e) {}
   var controller = new AbortController();
   // P0: Multi-layer timeout strategy instead of single fixed timeout
@@ -9281,7 +9283,7 @@ async function callDeepSeekViaResponses(messages, options) {
   var hasThinkCb = options && typeof options.onThinkingChunk === 'function';
   var hasContentCb = options && typeof options.onContentChunk === 'function';
   var toolExecutor = (options && typeof options.tool_executor === 'function') ? options.tool_executor : executeToolCall;
-  var maxToolRounds = Math.min(Math.max(parseInt(options && options.max_tool_rounds) || 4, 1), 8);
+  var maxToolRounds = Math.min(Math.max(parseInt(options && options.max_tool_rounds) || 4, 1), aiTaskPolicy.MAX_TOOL_ROUNDS);
   var externalSignal = options && options.signal ? options.signal : null;
 
   // 分离 instructions（system 消息）和 input（非 system 消息）
@@ -9607,7 +9609,8 @@ async function callDeepSeekViaResponses(messages, options) {
       //   而 deepseek-flash 默认开启思考，因此「工作模式 + 工具」的第 2 轮起
       //   必然触发该 400 —— 这正是用户看到 `AI 调用失败（HTTP 400）` 的根因。
       //   这里收集本轮 reasoning 项（含 id），下一轮回填到 workingInput。
-      var roundReasoningItems = [];
+      var roundReasoningCollector = responsesContext.createReasoningCollector();
+      var roundReasoningItems = roundReasoningCollector.items;
 
       if (useStream) {
         // ===== 流式解析 Responses API SSE =====
@@ -9655,42 +9658,14 @@ async function callDeepSeekViaResponses(messages, options) {
             }
             // 推理增量
             if (evtType === 'response.reasoning_text.delta' || evtType === 'reasoning_text.delta') {
+              roundReasoningCollector.delta(sJson);
               var rDelta = sJson.delta || '';
               roundReasoning += rDelta;
               onProgress();
               try { if (hasThinkCb) options.onThinkingChunk(String(rDelta)); } catch (e) {}
             }
-            // ★ 修复：收集 reasoning 输出项（带 id），供下一轮原样回传。
-            //   DeepSeek 要求：带 tools 的请求必须在后续请求回传 reasoning，
-            //   否则 400。流式下 reasoning 以 output_item.added/done 形式到达。
-            if (evtType === 'response.output_item.added' && sJson.item && sJson.item.type === 'reasoning') {
-              roundReasoningItems.push({
-                id: sJson.item.id || '',
-                text: (typeof sJson.item.text === 'string' ? sJson.item.text : '') || ''
-              });
-            }
-            if (evtType === 'response.output_item.done' && sJson.item && sJson.item.type === 'reasoning') {
-              var _rDone = sJson.item;
-              var _rText = '';
-              // done 事件可能带完整 text，或 content 数组
-              if (typeof _rDone.text === 'string' && _rDone.text) _rText = _rDone.text;
-              else if (Array.isArray(_rDone.content)) {
-                for (var _rci = 0; _rci < _rDone.content.length; _rci++) {
-                  var _rc = _rDone.content[_rci];
-                  if (_rc && typeof _rc.text === 'string') _rText += _rc.text;
-                }
-              }
-              // 按 id 归并（added 已建条目则补全 text）
-              var _rIdx = -1;
-              for (var _ri = 0; _ri < roundReasoningItems.length; _ri++) {
-                if (roundReasoningItems[_ri].id && roundReasoningItems[_ri].id === (_rDone.id || '')) { _rIdx = _ri; break; }
-              }
-              if (_rIdx >= 0) {
-                if (_rText) roundReasoningItems[_rIdx].text = _rText;
-                if (!roundReasoningItems[_rIdx].id && _rDone.id) roundReasoningItems[_rIdx].id = _rDone.id;
-              } else {
-                roundReasoningItems.push({ id: _rDone.id || '', text: _rText });
-              }
+            if ((evtType === 'response.output_item.added' || evtType === 'response.output_item.done') && sJson.item && sJson.item.type === 'reasoning') {
+              roundReasoningCollector.add(sJson.item, sJson.output_index);
             }
             // 内置 web_search 状态透传（黑盒：搜索结果由服务端注入上下文，不外吐，
             // 仅告知前端"正在联网搜索 / 已联网"，避免用户混淆数据来源）
@@ -9713,15 +9688,16 @@ async function callDeepSeekViaResponses(messages, options) {
                 //   这里两个字段都记录，回传时优先用 call_id。
                 id: sJson.item.call_id || sJson.item.id || '',
                 itemId: sJson.item.id || '',
+                outputIndex: sJson.output_index,
                 name: sJson.item.name || '',
                 arguments: sJson.item.arguments || ''
               });
             }
             // 函数调用参数增量
             if (evtType === 'response.function_call_arguments.delta') {
-              if (functionCalls.length > 0) {
-                functionCalls[functionCalls.length - 1].arguments += (sJson.delta || '');
-              }
+              var deltaCall = functionCalls.find(function(fc) { return (sJson.item_id && fc.itemId === sJson.item_id) || (sJson.output_index != null && fc.outputIndex === sJson.output_index); });
+              if (!deltaCall && sJson.item_id == null && sJson.output_index == null) deltaCall = functionCalls[functionCalls.length - 1];
+              if (deltaCall) deltaCall.arguments += (sJson.delta || '');
             }
             // ★ 修复（工具轮第 2 轮 400 嫌疑）：output_item.added 时 item.id 在部分
             //   实现中为空，真正的 id/完整 arguments 在 output_item.done 才下发。
@@ -9733,7 +9709,7 @@ async function callDeepSeekViaResponses(messages, options) {
               // 按 added 顺序找到对应条目：优先匹配名字，其次取第一个 id 为空的
               var _fcIdx = -1;
               for (var _fci = 0; _fci < functionCalls.length; _fci++) {
-                if (_fcDone.name && functionCalls[_fci].name === _fcDone.name && (!functionCalls[_fci].id || functionCalls[_fci].id === _fcDone.id)) { _fcIdx = _fci; break; }
+                if ((_fcDone.call_id && functionCalls[_fci].id === _fcDone.call_id) || (_fcDone.id && functionCalls[_fci].itemId === _fcDone.id) || (sJson.output_index != null && functionCalls[_fci].outputIndex === sJson.output_index)) { _fcIdx = _fci; break; }
               }
               if (_fcIdx < 0) {
                 for (var _fcj = 0; _fcj < functionCalls.length; _fcj++) {
@@ -9745,7 +9721,7 @@ async function callDeepSeekViaResponses(messages, options) {
                 var _fcDoneId = _fcDone.call_id || _fcDone.id || '';
                 if (_fcDoneId && !functionCalls[_fcIdx].id) functionCalls[_fcIdx].id = _fcDoneId;
                 if (_fcDone.id && !functionCalls[_fcIdx].itemId) functionCalls[_fcIdx].itemId = _fcDone.id;
-                if (typeof _fcDone.arguments === 'string' && _fcDone.arguments && !functionCalls[_fcIdx].arguments) functionCalls[_fcIdx].arguments = _fcDone.arguments;
+                if (typeof _fcDone.arguments === 'string' && _fcDone.arguments) functionCalls[_fcIdx].arguments = _fcDone.arguments;
               }
             }
             // 完成事件
@@ -9777,6 +9753,9 @@ async function callDeepSeekViaResponses(messages, options) {
               // 截断类：内容照常使用（max_tokens 截断优于空回复），仅记录
             }
             if (evtType === 'response.completed') {
+              if (sJson.response && Array.isArray(sJson.response.output)) {
+                sJson.response.output.forEach(function(item, index) { if (item && item.type === 'reasoning') roundReasoningCollector.add(item, index); });
+              }
               if (sJson.response && sJson.response.usage) {
                 lastUsage = responsesUsageToInternal(sJson.response.usage);
                 totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
@@ -9797,6 +9776,10 @@ async function callDeepSeekViaResponses(messages, options) {
           if (rd.done) break;
         }
         try { reader.cancel(); } catch (e) {}
+        if (!roundReasoning) {
+          roundReasoning = roundReasoningItems.map(responsesContext.reasoningText).join('');
+          try { if (hasThinkCb && roundReasoning) options.onThinkingChunk(roundReasoning); } catch (e) {}
+        }
         finalReasoning = roundReasoning;
       } else {
         // ===== 非流式 =====
@@ -9821,22 +9804,15 @@ async function callDeepSeekViaResponses(messages, options) {
             }
             if (item.type === 'function_call') {
               functionCalls.push({
-                id: item.id || '',
+                id: item.call_id || item.id || '',
+                itemId: item.id || '',
                 name: item.name || '',
                 arguments: item.arguments || '{}'
               });
             }
             if (item.type === 'reasoning') {
-              var _nrText = '';
-              if (typeof item.text === 'string') _nrText = item.text;
-              else if (Array.isArray(item.content)) {
-                for (var _nci = 0; _nci < item.content.length; _nci++) {
-                  var _nc = item.content[_nci];
-                  if (_nc && typeof _nc.text === 'string') _nrText += _nc.text;
-                }
-              }
-              roundReasoning += _nrText;
-              roundReasoningItems.push({ id: item.id || '', text: _nrText });
+              roundReasoning += responsesContext.reasoningText(item);
+              roundReasoningCollector.add(item, oi);
             }
           }
         }
@@ -9887,15 +9863,12 @@ async function callDeepSeekViaResponses(messages, options) {
         if (roundReasoningItems.length) {
           for (var _rri = 0; _rri < roundReasoningItems.length; _rri++) {
             var _rItem = roundReasoningItems[_rri];
-            var _rItemObj = { type: 'reasoning' };
-            if (_rItem.id) _rItemObj.id = _rItem.id;
-            if (_rItem.text) _rItemObj.text = _rItem.text;
-            workingInput.push(_rItemObj);
+            workingInput.push(_rItem);
           }
         } else if (roundReasoning) {
           // 兜底：未能拿到结构化 reasoning 项，但确实有推理文本时，
           // 以纯文本 reasoning 项回填（协议允许 reasoning 项携带 content）。
-          workingInput.push({ type: 'reasoning', text: String(roundReasoning) });
+          workingInput.push({ type: 'reasoning', content: [{ type: 'reasoning_text', text: String(roundReasoning) }] });
         }
       }
 
@@ -9912,7 +9885,7 @@ async function callDeepSeekViaResponses(messages, options) {
           console.error('[RESPONSES] suppressed internal tool protocol from tool-round narration', 'round', round);
         } else {
           toolRoundsNarration.push(trNarration);
-          try { if (hasContentCb) options.onContentChunk(trNarration + '\n\n'); } catch (e) {}
+          try { if (hasContentCb) options.onContentChunk('\n\n'); } catch (e) {}
         }
       }
 
@@ -9975,7 +9948,7 @@ async function callDeepSeekViaResponses(messages, options) {
         var _pairCallId = r.fcId || r.fallbackId;
         // ★ 2026-09-22：同时写 id 与 call_id（值相同），兼容两种上游配对校验实现，
         //   消除"id/call_id 不一致导致回传 400"的间歇性失败。
-        workingInput.push({ type: 'function_call', id: _pairCallId, call_id: _pairCallId, name: r.fcName, arguments: r.fcArgs || '{}' });
+        workingInput.push({ type: 'function_call', id: r.fcItemId || _pairCallId, call_id: _pairCallId, name: r.fcName, arguments: r.fcArgs || '{}' });
         workingInput.push({ type: 'function_call_output', call_id: _pairCallId, output: toolContent });
       });
     }
@@ -20915,7 +20888,7 @@ function buildAiCorePrompt(config) {
     '当前场景：AI 聊天（' + name + '）。',
     persona ? '用户额外人设：' + persona : '',
     sysPrompt ? '用户额外指令：' + sysPrompt : '',
-    '风格 ' + style + '，每条回复 ≤ ' + (rs.max_reply_chars || 1200) + ' 字' + (rs.use_emoji === true ? '；偶尔可加 1 个有意义的 emoji，禁止一连串表情' : '；不用 emoji') + '。',
+    '风格 ' + style + '，普通闲聊尽量控制在 ' + (rs.max_reply_chars || 1200) + ' 字内；复杂任务以准确完成和清晰排版为先' + (rs.use_emoji === true ? '；偶尔可加 1 个有意义的 emoji，禁止一连串表情' : '；不用 emoji') + '。',
     allowWebSearch
       ? '可用工具（' + CAT_AI_TOOL_SUMMARY + '）。用户发具体 HTTPS 链接时必须用 read_web_page 读正文，禁止声称“工具打不开链接/不能访问网页”。时效问题先搜索再按需读页。算数用 calculate，单位换算用 convert_units，别口算；要处理数据、生成文件、做图表、读文档等，直接调用对应工具，不要说自己没有这个能力。'
       : '可用工具（' + CAT_AI_TOOL_SUMMARY_NO_SEARCH + '）。用户发 HTTPS 链接时必须 read_web_page，禁止声称无法打开链接。算数用 calculate，单位换算用 convert_units，要处理数据 / 生成文件 / 做图表 / 读文档时直接调用对应工具，不要声称自己没有该能力。',
@@ -20924,7 +20897,8 @@ function buildAiCorePrompt(config) {
     //   2) 失败处理：区分 recoverable / unrecoverable，禁止复述英文错误码或编造数据；
     //   3) 本轮已实测过：模型在工具报错后常直接编造天气/汇率数据，或以"换个城市名"敷衍过去。
     '工具使用规范：① 查天气时 location 只传规范城市名（如“成都”“大阪”“Los Angeles”），不要传省市区全称、不要带“市/区/县”后缀；② 查汇率/行情只传标准代码（如 USD、CNY、AAPL）；③ 工具返回中若含 recoverable=true，可修正参数重试一次；若 recoverable=false，说明是服务侧故障，直接如实告诉用户“该服务暂时不可用”，绝不编造数据、不反复重试同一工具；④ 绝不要把工具返回里的英文错误码或 JSON 原文念给用户，要用自然中文转述；⑤ 工具失败时告知真实原因（参数问题 vs 服务问题），不要笼统地说“换个城市名试试”来敷衍。',
-    '回复规则：一条回复一个核心观点，短句不罗列，不写“作为一个 AI”开场白，不用括号动作描写；图片消息只依据其中文字回答业务问题，不讨论 OCR/识别引擎；只答对话内容，不编造已执行操作，不查他人记录。中文回复。'
+    '回复规则：优先直接回答，按内容使用段落、列表或表格；不写“作为一个 AI”开场白，不用括号动作描写；图片消息只依据其中文字回答业务问题，不讨论 OCR/识别引擎；只答对话内容，不编造已执行操作，不查他人记录。中文回复。',
+    aiTaskPolicy.TASK_POLICY
   ];
 
   return lines.filter(Boolean).join('\n');
@@ -22026,39 +22000,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
     var workModeEnabled = true; // Ordinary chat always has autonomous tools.
     // 保留旧响应字段，兼容已有客户端；界面不再区分工作模式。
     req._workMode = workModeEnabled;
-    if (workModeEnabled) {
-      corePrompt += '\n' + [
-        '【普通聊天工具能力】按需自主拆解任务并调用工具完成，简单闲聊直接回答。工作方法：',
-        '① 先判断任务需要哪些步骤，可多步按顺序推进，不要只做一步就交差；',
-        '② 查资料用 web_search / web_extract（web_extract 能抓网页正文，比摘要更全）；搜社媒账号或内容用 search_social；',
-        '③ 读文档用 read_document（支持 PDF / Word / Excel / CSV / TXT，传文件链接即可，会返回正文或表格内容）；',
-        '④ 要算数、处理数据、分析文本用 run_code（在强隔离沙箱里跑 JavaScript，支持大量计算与格式转换）、process_json、text_stats、date_calc、encode_decode；',
-        '   ★ run_code 沙箱已预装常用库可直接用（无需 require）：_ / lodash（集合处理）、math / mathjs（数学计算）、Papa（CSV）、dayjs（日期）、Decimal（高精度小数）、fxp（XML 解析）；',
-        '⑤ 要交付文件用 make_file（生成 CSV / Excel / TXT 供用户下载，Excel 支持多工作表）；',
-        '⑥ 步骤多、任务复杂的，先用 task_plan 列出计划再逐步执行，每完成一步更新进度；',
-        '⑦ 每一步根据上一步的真实结果决定下一步，直到任务真正完成为止；',
-        '⑧ 主动调用工具获取事实，绝不凭记忆编造；工具失败时如实说明并换思路或换参数重试，不要假装成功；',
-        '⑨ 最终交付的是「任务结果」——你实际做了什么、得到了什么结论或数据，而不是一份研究报告；',
-        '⑩ 简单闲聊或纯常识问题仍直接回答，不必强行套流程；不要把内部步骤编号、工具名、JSON 原文念给用户，用自然中文汇报结果。',
-        '',
-        '【可视化与文件产出工具】（用户需要"看得见"的成果时优先使用，不要只用文字描述）：',
-        '· make_chart —— 生成柱状图 / 折线图 / 饼图 / 散点图。用户提到"画个图""趋势""占比""对比"时用，结果以图片卡片展示；',
-        '· generate_pdf —— 生成 PDF 文档（⚠ 仅支持英文/数字；中文内容请改用 make_file 出 Excel/CSV）；',
-        '· markdown_table —— 把结构化数据整理成 Markdown 表格直接展示给用户；',
-        '· qr_code —— 把链接或文本生成二维码图片（内容不超过 271 字节）；',
-        '· image_info / image_process —— 读取图片的尺寸格式信息 / 缩放裁剪压缩转格式；',
-        '· read_zip —— 读取 ZIP 压缩包的清单或某个文本文件的内容（传直链）；',
-        '· diff_text —— 对比两段文本的差异（改稿、版本对比场景）；',
-        '· sort_filter —— 对数组数据做去重 / 筛选 / 排序 / 取前 N；',
-        '· batch_calc —— 按公式对多行数据批量计算（如"单价*数量*(1+税率)"）；',
-        '· convert_data —— CSV / JSON / TSV 互相转换；',
-        '· regex_test —— 测试正则表达式的匹配结果；',
-        '· url_parse —— 解析网址的协议、域名、参数、跟踪参数；',
-        '· page_meta / extract_links —— 抓取网页的元信息（标题/描述/OG）或页面内所有链接；',
-        '· password_tool —— 生成强密码或评估密码强度。',
-        '使用这些工具时要先用工具产出真实结果，再用一两句话说明结论，不要用文字假装生成了图表或文件。'
-      ].join('\n');
-    }
+    // The shared core includes task execution and tool capabilities for every provider.
 
     // 7. 组装 messages
     var messages = [
@@ -22131,7 +22073,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
           ? aiToolsForWorkMode()
           : aiToolsForSearch(useTavilyCluster),
         tool_choice: 'auto',
-        max_tool_rounds: workModeEnabled ? 8 : 4,
+        max_tool_rounds: workModeEnabled ? aiTaskPolicy.MAX_TOOL_ROUNDS : 4,
         signal: requestAbortCtrl.signal,
         _userName: userName,
         tool_executor: async function(toolCall) {
@@ -22620,7 +22562,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   }
 
   // The same full, server-owned tool set is available to every chat model.
-  var TOOL_ROUNDS_MAX = 10;
+  var TOOL_ROUNDS_MAX = aiTaskPolicy.MAX_TOOL_ROUNDS;
   var customTools = aiToolsForWorkMode();
   var toolContext = { userName: req.userName || '', signal: controller.signal, searchConsumed: 0 };
   var customConfig;
@@ -22629,7 +22571,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     writeSse(res, { type: 'error', error: 'AI 配置暂时无法加载，请重试', code: 'CUSTOM_CONFIG_FAILED' });
     return safeEnd();
   }
-  var conversation = [{ role: 'system', content: buildAiCorePrompt(customConfig) + '\n按需使用工具自主完成用户任务；简单闲聊直接回答。工具失败必须如实说明，不能编造执行结果。' }].concat(fwdMessages);
+  var conversation = [{ role: 'system', content: buildAiCorePrompt(customConfig) }].concat(fwdMessages);
   var reasoningText = '';
   var reasoningSentStart = false;
   var reasoningEffortFinal = _thinkMode === 'off' ? 'off' : (_thinkMode === 'max' || _thinkMode === 'high' ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low'));
@@ -23836,39 +23778,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     var workModeEnabled = true; // Ordinary chat always has autonomous tools.
     // 保留旧响应字段，兼容已有客户端；界面不再区分工作模式。
     req._workMode = workModeEnabled;
-    if (workModeEnabled) {
-      corePrompt += '\n' + [
-        '【普通聊天工具能力】按需自主拆解任务并调用工具完成，简单闲聊直接回答。工作方法：',
-        '① 先判断任务需要哪些步骤，可多步按顺序推进，不要只做一步就交差；',
-        '② 查资料用 web_search / web_extract（web_extract 能抓网页正文，比摘要更全）；搜社媒账号或内容用 search_social；',
-        '③ 读文档用 read_document（支持 PDF / Word / Excel / CSV / TXT，传文件链接即可，会返回正文或表格内容）；',
-        '④ 要算数、处理数据、分析文本用 run_code（在强隔离沙箱里跑 JavaScript，支持大量计算与格式转换）、process_json、text_stats、date_calc、encode_decode；',
-        '   ★ run_code 沙箱已预装常用库可直接用（无需 require）：_ / lodash（集合处理）、math / mathjs（数学计算）、Papa（CSV）、dayjs（日期）、Decimal（高精度小数）、fxp（XML 解析）；',
-        '⑤ 要交付文件用 make_file（生成 CSV / Excel / TXT 供用户下载，Excel 支持多工作表）；',
-        '⑥ 步骤多、任务复杂的，先用 task_plan 列出计划再逐步执行，每完成一步更新进度；',
-        '⑦ 每一步根据上一步的真实结果决定下一步，直到任务真正完成为止；',
-        '⑧ 主动调用工具获取事实，绝不凭记忆编造；工具失败时如实说明并换思路或换参数重试，不要假装成功；',
-        '⑨ 最终交付的是「任务结果」——你实际做了什么、得到了什么结论或数据，而不是一份研究报告；',
-        '⑩ 简单闲聊或纯常识问题仍直接回答，不必强行套流程；不要把内部步骤编号、工具名、JSON 原文念给用户，用自然中文汇报结果。',
-        '',
-        '【可视化与文件产出工具】（用户需要"看得见"的成果时优先使用，不要只用文字描述）：',
-        '· make_chart —— 生成柱状图 / 折线图 / 饼图 / 散点图。用户提到"画个图""趋势""占比""对比"时用，结果以图片卡片展示；',
-        '· generate_pdf —— 生成 PDF 文档（⚠ 仅支持英文/数字；中文内容请改用 make_file 出 Excel/CSV）；',
-        '· markdown_table —— 把结构化数据整理成 Markdown 表格直接展示给用户；',
-        '· qr_code —— 把链接或文本生成二维码图片（内容不超过 271 字节）；',
-        '· image_info / image_process —— 读取图片的尺寸格式信息 / 缩放裁剪压缩转格式；',
-        '· read_zip —— 读取 ZIP 压缩包的清单或某个文本文件的内容（传直链）；',
-        '· diff_text —— 对比两段文本的差异（改稿、版本对比场景）；',
-        '· sort_filter —— 对数组数据做去重 / 筛选 / 排序 / 取前 N；',
-        '· batch_calc —— 按公式对多行数据批量计算（如"单价*数量*(1+税率)"）；',
-        '· convert_data —— CSV / JSON / TSV 互相转换；',
-        '· regex_test —— 测试正则表达式的匹配结果；',
-        '· url_parse —— 解析网址的协议、域名、参数、跟踪参数；',
-        '· page_meta / extract_links —— 抓取网页的元信息（标题/描述/OG）或页面内所有链接；',
-        '· password_tool —— 生成强密码或评估密码强度。',
-        '使用这些工具时要先用工具产出真实结果，再用一两句话说明结论，不要用文字假装生成了图表或文件。'
-      ].join('\n');
-    }
+    // The shared core includes task execution and tool capabilities for every provider.
 
     // ★ 缓存优化：消息顺序 = corePrompt(固定) → history(稳定) → user(新) → [time/weather 仅必要时后置]
     // 当前时间从 system 提前位移到末尾，且仅在时间相关查询时注入，避免每分钟破坏缓存前缀
@@ -24135,7 +24045,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
         thinking_mode: thinkingMode,
         tools: responsesTools,
         tool_choice: 'auto',
-        max_tool_rounds: workModeEnabled ? 8 : 4,
+        max_tool_rounds: workModeEnabled ? aiTaskPolicy.MAX_TOOL_ROUNDS : 4,
         signal: requestAbortCtrl ? requestAbortCtrl.signal : null,
         _userName: userName,
         onThinkingChunk: function(chunk) {
@@ -24878,7 +24788,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     // 调用 DeepSeek（流式）
     if (aborted) return safeEnd();
 
-    var MAX_TOOL_ROUNDS = 3;
+    var MAX_TOOL_ROUNDS = aiTaskPolicy.MAX_TOOL_ROUNDS;
     var toolRound = 0;
     var roundMessages = messages;
     // 跨轮次保留的推理内容（第一次流产生的，第二次流不会重复）

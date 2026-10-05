@@ -147,25 +147,21 @@
 #panelPosts.active #publishBox .post-compose-controls .file-label { grid-column:2; grid-row:1; }
 #panelPosts.active #publishBox .post-compose-controls #pubBtn { grid-column:3; grid-row:1/3; align-self:start; justify-self:end; }
 #panelPosts.active #publishBox .post-compose-controls #pubBtn.is-loading { align-self:stretch; width:100%; min-width:0; padding:0!important; opacity:1; }
-#panelPosts.active #publishBox #pubBtn .post-publish-progress .pw-garden svg { width:100%; height:auto; stroke:none; }
 #pubBtn.is-loading:has(.post-publish-progress)::after { content:none; display:none; animation:none; }
 #pubBtn.is-loading:has(.post-publish-progress) { opacity:1; }
 #pubBtn .post-publish-progress { display:flex; align-items:center; justify-content:flex-end; gap:8px; width:100%; height:100%; font-size:14px; line-height:1.5; }
-#pubBtn .post-publish-progress .pw-garden { width:88px; max-width:52%; flex:0 1 88px; margin:0; }
-#pubBtn .pw-garden.is-growing .pw-garden-stitch path { animation-duration:1.4s; animation-delay:-.55s; }
-#pubBtn .pw-garden.is-growing .pw-garden-leaves path { animation-duration:.8s; animation-delay:-.3s; }
-#pubBtn .pw-garden.is-growing .pw-garden-flower { animation:pwGardenBloom 1.2s cubic-bezier(.22,.8,.3,1) -.4s both, pwGardenBreeze 3s ease-in-out -1s infinite; }
-#pubBtn .post-publish-progress-copy { display:flex; flex-direction:column; gap:8px; flex:1 1 72px; min-width:0; max-width:190px; text-align:left; }
+#pubBtn .post-publish-progress-copy { display:flex; flex-direction:column; gap:8px; flex:1 1 72px; min-width:0; max-width:190px; text-align:left; animation:postProgressEnter 180ms ease-out; }
 #pubBtn .post-publish-progress-label { white-space:nowrap; font-variant-numeric:tabular-nums; }
 #pubBtn .post-publish-progress-track { display:block; height:5px; width:100%; overflow:hidden; border-radius:5px; background:rgba(87,157,137,.15); }
-#pubBtn .post-publish-progress-track > span { display:block; width:100%; height:100%; background:var(--primary); transform:scaleX(0); transform-origin:left center; transition:transform 160ms linear; }
+#pubBtn .post-publish-progress-track > span { display:block; width:100%; height:100%; background:var(--primary); transform:scaleX(0); transform-origin:left center; transition:transform 220ms cubic-bezier(.2,.7,.3,1); }
 @media(max-width:359px) {
   #panelPosts.active #publishBox > .post-compose-controls { column-gap:8px; grid-template-columns:44px 56px minmax(0,1fr); }
   #panelPosts.active #publishBox .post-compose-controls .post-visibility-select { flex-basis:56px; width:56px; }
   #pubBtn .post-publish-progress { gap:4px; font-size:12px; }
-  #pubBtn .post-publish-progress .pw-garden { flex-basis:64px; }
 }
-@media(prefers-reduced-motion:reduce) { #pubBtn .post-publish-progress-track > span { transition:none; } }
+@keyframes postProgressEnter { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+@media(prefers-reduced-motion:reduce) { #pubBtn .post-publish-progress-track > span { transition:none; } #pubBtn .post-publish-progress-copy { animation:none; } }
+html[data-xtj-motion="off"] #pubBtn .post-publish-progress-copy { animation:none; }
 .post-tools-menu { transform-origin:top right; }
 .post-tools-menu.is-closing { pointer-events:none; }
 @media (min-width: 768px) and (min-height: 480px) {

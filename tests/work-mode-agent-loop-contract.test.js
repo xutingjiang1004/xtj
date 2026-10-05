@@ -207,6 +207,8 @@ test('体验：工具结果回执携带成功/失败与计数', () => {
 });
 
 test('工作模式 prompt 覆盖 A 档可视化工具说明', () => {
+  const sharedPrompt = require('../render-api/ai-task-policy').TASK_POLICY;
+  assert.match(serverSrc, /aiTaskPolicy\.TASK_POLICY/);
   // 注：page_meta 与 extract_links 在 prompt 中合并为一条说明（"· page_meta / extract_links —— "），
   //     因此按「条目」而非「单个工具名」断言，避免把正常合并写法误判为缺失。
   const promptEntries = [
@@ -216,10 +218,10 @@ test('工作模式 prompt 覆盖 A 档可视化工具说明', () => {
     'url_parse —— ', 'page_meta / extract_links —— ', 'password_tool —— '
   ];
   promptEntries.forEach((entry) => {
-    assert.match(serverSrc, new RegExp(entry.replace(/[/+]/g, '\$&')), '工作模式 prompt 缺少说明条目: ' + entry);
+    assert.match(sharedPrompt, new RegExp(entry.replace(/[/+]/g, '\$&')), '工作模式 prompt 缺少说明条目: ' + entry);
   });
   // 必须同时说明「不得用文字假装生成了图表或文件」的行为约束
-  assert.match(serverSrc, /不要用文字假装生成了图表或文件/, '缺少防假装产出的行为约束');
+  assert.match(sharedPrompt, /不要用文字假装生成了图表或文件/, '缺少防假装产出的行为约束');
 });
 
 // ── 模块级协议检测函数的行为验证（与实现同源抽取）──

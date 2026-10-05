@@ -20,10 +20,12 @@
 .author-post-year:not(:first-child) { margin-top:24px; }
 .author-post-row { display:flex; gap:12px; padding:12px 0; }
 .author-post-date { flex:0 0 52px; display:flex; align-items:baseline; gap:3px; color:var(--text-main); }
-.author-post-day { font-size:25px; line-height:1.1; font-weight:600; }
+.author-post-day { font-size:25px; line-height:1.1; font-weight:600; white-space:nowrap; flex:none; }
 .author-post-month { font-size:11px; }
 .author-post-entry { display:flex; gap:12px; flex:1; min-width:0; padding:0; border:0; background:transparent; color:var(--text-main); text-align:left; cursor:pointer; font:inherit; }
 #userProfileModal .author-post-entry {
+  justify-content: flex-start;
+  align-items: flex-start;
   padding:0!important; border:0!important; border-radius:0!important; background:transparent!important;
   box-shadow:none!important; backdrop-filter:none!important; -webkit-backdrop-filter:none!important; filter:none!important;
 }

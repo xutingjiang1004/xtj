@@ -10,7 +10,7 @@ test('Avatar image fills container correctly and handles CSS constraints', async
     body: JSON.stringify({
       ok: true,
       avatars: {
-        'testUser': 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="20"><rect width="100" height="20" fill="red"/></svg>'
+        'testUser': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAAAUCAIAAAD0og/CAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAWElEQVRYhe3WwQnAMAzF0AzqpbRGp+wKuRRTeJAJhPTjM0/e3EE4SM21LmAFVl8Uw6zAilntfkcyDKyYlQz7y2FsswIrZiXD1sfIZgVWzGo9MadDYLVl1gsz02xln+5ddgAAAABJRU5ErkJggg=='
       }
     })
   }));

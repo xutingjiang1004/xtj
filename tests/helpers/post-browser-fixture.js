@@ -2,7 +2,7 @@
 const fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {chromium,webkit}=require('playwright');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVxkAAAAASUVORK5CYII=','base64');
-async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false,user='alice',publicPosts=false,feedUnavailable=false,legacyCoverCache=false,realUploads=false}={}){
+async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false,user='alice',publicPosts=false,feedUnavailable=false,legacyCoverCache=false,realUploads=false,dmMessages=[]}={}){
  let releaseStorageResponses;const storageWait=new Promise(resolve=>releaseStorageResponses=resolve),storageRequests=[];
  const root=path.resolve('.'),mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.mjs':'application/javascript'};
  const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;
@@ -23,7 +23,7 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
   window.ontouchstart=null;
   const vv=new EventTarget();Object.assign(vv,{height:innerHeight,width:innerWidth,scale:1,offsetTop:0,offsetLeft:0,pageTop:0,pageLeft:0});
   Object.defineProperty(window,'visualViewport',{value:vv,configurable:true});window.testKeyboardViewport=vv;
-  if(ios==='ipad-desktop'){Object.defineProperty(navigator,'userAgent',{value:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Version/18 Safari/605.1.15'});Object.defineProperty(navigator,'platform',{value:'iPad'});Object.defineProperty(navigator,'maxTouchPoints',{value:5});const match=window.matchMedia.bind(window);window.matchMedia=q=>q==='(pointer:coarse)'?{matches:false}:match(q);}
+  if(ios==='ipad-desktop'){Object.defineProperty(navigator,'userAgent',{value:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Version/18 Safari/605.1.15'});Object.defineProperty(navigator,'platform',{value:'MacIntel'});Object.defineProperty(navigator,'maxTouchPoints',{value:5});const match=window.matchMedia.bind(window);window.matchMedia=q=>q==='(pointer:coarse)'?{matches:false}:match(q);}
  },ios);
  await page.addInitScript(({theme,user,legacyCoverCache,posts})=>{
   localStorage.setItem('xtj_user',user);localStorage.setItem('xtj_theme',theme);
@@ -36,6 +36,7 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
   let data={ok:true,data:[],users:[],items:[],totals:{posts:posts.length,views:4,likes:0,comments:comments.length}},status=200;
   if(url.pathname==='/api/config/public')data={supabase_url:origin+'/test-supabase',supabase_anon_key:'sb_publishable_test_only_never_production'};
   if(url.pathname==='/api/user/refresh')data={token:'test-only-token',user_name:user};
+  if(url.pathname==='/api/dm/list')data={ok:true,data:dmMessages,muted_peers:[]};
   if(url.pathname==='/api/feed'){data={ok:true,posts,comments,likes,next_offset:posts.length,next_cursor:null,endReached:true,total_post_count:posts.length};if(feedUnavailable){status=503;data={ok:false,retryable:true};}}
   if(url.pathname==='/api/post/media/batch'){if(failMediaBatch){status=503;data={ok:false,retryable:true};}else data={ok:true,posts:posts.filter(p=>body.post_ids.includes(p.id)&&(p.visibility==='public'||p.user_name===user)).map(p=>({id:p.id,media_items:p.media_items}))};}
   if(url.pathname==='/api/avatar/batch')data={ok:true,avatars:{}};

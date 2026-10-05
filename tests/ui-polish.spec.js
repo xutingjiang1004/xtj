@@ -94,8 +94,8 @@ for(const width of [320,390,768,1440]) {
         await expect(icon).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
         await expect(icon).toHaveCSS('border-width','0px');
         await expect(icon).toHaveCSS('box-shadow','none');
-        await expect(icon.locator('svg')).toHaveCSS('width','18px');
-        await expect(icon.locator('svg')).toHaveCSS('height','18px');
+        await expect(icon.locator('svg')).toHaveCSS('width',width < 768 ? '20px' : '24px');
+        await expect(icon.locator('svg')).toHaveCSS('height',width < 768 ? '20px' : '24px');
       }
     }
     const boxes=await icons.evaluateAll(nodes=>nodes.map(el=>{const r=el.getBoundingClientRect();return {x:r.x,right:r.right,width:r.width};}));

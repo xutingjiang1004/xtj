@@ -256,7 +256,7 @@ test.beforeEach(async ({ page }) => {
 // ============================================================
 
 test.describe('Avatar CSS and Rendering', () => {
-// The avatar spec (40x40 fixed square + cover crop) is the base/mobile size;
+// The avatar spec (42x42 fixed square + cover crop) is the base/mobile size;
 // desktop breakpoints intentionally scale it to 44/48px. Run at a mobile
 // viewport so the assertions lock the base contract.
 test.use({ viewport: { width: 390, height: 844 } });
@@ -275,7 +275,7 @@ test.beforeEach(async ({ page }) => {
     views: 0
   };
 
-  test('B1: Avatar image boundingBox is 40x40', async ({ page }) => {
+  test('B1: Avatar image boundingBox is 42x42', async ({ page }) => {
     await page.route('**/api/feed**', route => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
@@ -287,7 +287,7 @@ test.beforeEach(async ({ page }) => {
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        avatars: { 'TestUser': 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>' }
+        avatars: { 'TestUser': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAACXBIWXMAAAPoAAAD6AG1e1JrAAABFElEQVR4nO3WwQ1CAQzDUAb9S3kNpmQFLihFelInsJw0r+ede76D8ELq+VoXsAKrXySGWYEVs9q+IzEMrJiVGPYvw1hnBVbMSgybl5HOCqyY1TxipkNgxazunwUfWDErMWxeRjorsGJW84iZDoEVs7p/FnxgxazEsHkZ6azAilnNI2Y6BFbM6v5Z8IEVsxLD5mWkswIrZjWPmOkQWDGr+2fBB1bMSgybl5HOCqyY1TxipkNgxazunwUfWDErMWxeRjorsGJW84iZDoEVs7p/FnxgxazEsHkZ6azAilnNI2Y6BFbM6v5Z8IEVsxLD5mWkswIrZjWPmOkQWDGr+2fBB1bMSgybl5HOCqyY1TxipkNgtTLrA5SYHhPFcDsYAAAAAElFTkSuQmCC' }
       })
     }));
 
@@ -299,8 +299,8 @@ test.beforeEach(async ({ page }) => {
     await expect(avatarImg).toBeVisible({ timeout: 5000 });
     const box = await avatarImg.boundingBox();
     expect(box).not.toBeNull();
-    expect(Math.round(box.width)).toBe(40);
-    expect(Math.round(box.height)).toBe(40);
+    expect(Math.round(box.width)).toBe(42);
+    expect(Math.round(box.height)).toBe(42);
   });
 
   test('B2: Avatar has-image class added on successful load', async ({ page }) => {
@@ -315,7 +315,7 @@ test.beforeEach(async ({ page }) => {
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        avatars: { 'TestUser': 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>' }
+        avatars: { 'TestUser': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAACXBIWXMAAAPoAAAD6AG1e1JrAAABFElEQVR4nO3WwQ1CAQzDUAb9S3kNpmQFLihFelInsJw0r+ede76D8ELq+VoXsAKrXySGWYEVs9q+IzEMrJiVGPYvw1hnBVbMSgybl5HOCqyY1TxipkNgxazunwUfWDErMWxeRjorsGJW84iZDoEVs7p/FnxgxazEsHkZ6azAilnNI2Y6BFbM6v5Z8IEVsxLD5mWkswIrZjWPmOkQWDGr+2fBB1bMSgybl5HOCqyY1TxipkNgxazunwUfWDErMWxeRjorsGJW84iZDoEVs7p/FnxgxazEsHkZ6azAilnNI2Y6BFbM6v5Z8IEVsxLD5mWkswIrZjWPmOkQWDGr+2fBB1bMSgybl5HOCqyY1TxipkNgtTLrA5SYHhPFcDsYAAAAAElFTkSuQmCC' }
       })
     }));
 
@@ -374,7 +374,7 @@ test.beforeEach(async ({ page }) => {
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        avatars: { 'TestUser': 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>' }
+        avatars: { 'TestUser': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAACXBIWXMAAAPoAAAD6AG1e1JrAAABFElEQVR4nO3WwQ1CAQzDUAb9S3kNpmQFLihFelInsJw0r+ede76D8ELq+VoXsAKrXySGWYEVs9q+IzEMrJiVGPYvw1hnBVbMSgybl5HOCqyY1TxipkNgxazunwUfWDErMWxeRjorsGJW84iZDoEVs7p/FnxgxazEsHkZ6azAilnNI2Y6BFbM6v5Z8IEVsxLD5mWkswIrZjWPmOkQWDGr+2fBB1bMSgybl5HOCqyY1TxipkNgxazunwUfWDErMWxeRjorsGJW84iZDoEVs7p/FnxgxazEsHkZ6azAilnNI2Y6BFbM6v5Z8IEVsxLD5mWkswIrZjWPmOkQWDGr+2fBB1bMSgybl5HOCqyY1TxipkNgtTLrA5SYHhPFcDsYAAAAAElFTkSuQmCC' }
       })
     }));
 
@@ -412,7 +412,7 @@ test.beforeEach(async ({ page }) => {
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        avatars: { 'TestUser': 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>' }
+        avatars: { 'TestUser': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAACXBIWXMAAAPoAAAD6AG1e1JrAAABFElEQVR4nO3WwQ1CAQzDUAb9S3kNpmQFLihFelInsJw0r+ede76D8ELq+VoXsAKrXySGWYEVs9q+IzEMrJiVGPYvw1hnBVbMSgybl5HOCqyY1TxipkNgxazunwUfWDErMWxeRjorsGJW84iZDoEVs7p/FnxgxazEsHkZ6azAilnNI2Y6BFbM6v5Z8IEVsxLD5mWkswIrZjWPmOkQWDGr+2fBB1bMSgybl5HOCqyY1TxipkNgxazunwUfWDErMWxeRjorsGJW84iZDoEVs7p/FnxgxazEsHkZ6azAilnNI2Y6BFbM6v5Z8IEVsxLD5mWkswIrZjWPmOkQWDGr+2fBB1bMSgybl5HOCqyY1TxipkNgtTLrA5SYHhPFcDsYAAAAAElFTkSuQmCC' }
       })
     }));
 
@@ -439,8 +439,8 @@ test.beforeEach(async ({ page }) => {
   });
 
   test('B6: Avatar with extra-wide image crops correctly', async ({ page }) => {
-    // 200x50 image in a 40x40 container
-    const wideSvg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50"><rect width="200" height="50" fill="red"/><circle cx="25" cy="25" r="20" fill="green"/></svg>';
+    // 200x50 image in a 42x42 container
+    const widePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAAAyCAIAAACWMwO2AAAACXBIWXMAAAPoAAAD6AG1e1JrAAABFklEQVR4nO2UAQnAQACEFtRSX2MpV2JDdggmOOUu7hMtwNsZXG3aAnxwLoVVWKewiuD85V97LN8BixSW74BFCst3wCKF5TtgkcLyHbBIYfkOWKSwfAcsUli+AxYpLN8BixSW74BFCst3wCKF5TtgkcLyHbBIYfkOWKSwfAcsUli+AxYpLN8BixSW74BFCst3wCKF5TtgkcLyHbBIYfkOWKSwfAcsUli+AxYpLN8BixSW74BFCst3wCKF5TtgkcLyHbBIYfkOWKSwfAcsUli+AxYpLN8BixSW74BFCst3wCKF5TtgkcLyHbBIYfkOWKSwfAcsUli+AxYpLN8BixSW74BFCst3wCKF5TtgkcLyHbBIYfkOWOQBpHceE2VWJfoAAAAASUVORK5CYII=';
     await page.route('**/api/feed**', route => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
@@ -450,7 +450,7 @@ test.beforeEach(async ({ page }) => {
     }));
     await page.route('**/api/avatar/batch', route => route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ ok: true, avatars: { 'WideUser': wideSvg } })
+      body: JSON.stringify({ ok: true, avatars: { 'WideUser': widePng } })
     }));
 
     await page.goto('/', { waitUntil: 'networkidle' });
@@ -461,12 +461,12 @@ test.beforeEach(async ({ page }) => {
     await img.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
     const box = await img.boundingBox();
     expect(box).not.toBeNull();
-    expect(Math.round(box.width)).toBe(40);
-    expect(Math.round(box.height)).toBe(40);
+    expect(Math.round(box.width)).toBe(42);
+    expect(Math.round(box.height)).toBe(42);
   });
 
   test('B7: Avatar with extra-tall image crops correctly', async ({ page }) => {
-    const tallSvg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="50" height="200"><rect width="50" height="200" fill="purple"/><circle cx="25" cy="25" r="20" fill="yellow"/></svg>';
+    const tallPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAADICAIAAAAlVCWZAAAACXBIWXMAAAPoAAAD6AG1e1JrAAABI0lEQVR4nO3TQQ0AMAzDwAE1qdAIyhHYP3tYKoAq8h2aD+/MP8C34lq1LdboUGJcq7bFGh1KjGvVtlijQ4lxrdoWa3QoMa5V22KNDiXGtWpbrNGhxLhWbYs1OpQY16ptsUaHEuNatS3W6FBiXKu2xRodSoxr1bZYo0OJca3aFmt0KDGuVdtijQ4lxrVqW6zRocS4Vm2LNTqUGNeqbbFGhxLjWrUt1uhQYlyrtsUaHUqMa9W2WKNDiXGt2hZrdCgxrlXbYo0OJca1alus0aHEuFZtizU6lBjXqm2xRocS41q1LdboUGJcq7bFGh1KjGvVtlijQ4lxrdoWa3QoMa5V22KNDiXGtWpbrNGhxLhWbYs1OpQY16ptsUaHEuNatS3W6J53AXTaHhM9O94VAAAAAElFTkSuQmCC';
     await page.route('**/api/feed**', route => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
@@ -476,7 +476,7 @@ test.beforeEach(async ({ page }) => {
     }));
     await page.route('**/api/avatar/batch', route => route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ ok: true, avatars: { 'TallUser': tallSvg } })
+      body: JSON.stringify({ ok: true, avatars: { 'TallUser': tallPng } })
     }));
 
     await page.goto('/', { waitUntil: 'networkidle' });
@@ -487,7 +487,7 @@ test.beforeEach(async ({ page }) => {
     await img.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
     const box = await img.boundingBox();
     expect(box).not.toBeNull();
-    expect(Math.round(box.width)).toBe(40);
-    expect(Math.round(box.height)).toBe(40);
+    expect(Math.round(box.width)).toBe(42);
+    expect(Math.round(box.height)).toBe(42);
   });
 });

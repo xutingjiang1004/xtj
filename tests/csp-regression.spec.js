@@ -53,13 +53,13 @@ test.describe('CSP Regression (PR #366 production outage)', () => {
     expect(csp).toContain("script-src");
     expect(csp).toContain("'self'");
     expect(csp).toContain("'unsafe-inline'");
-    expect(csp).toContain("'unsafe-eval'");
+    expect(csp).not.toContain("'unsafe-eval'");
     expect(csp).toContain("'wasm-unsafe-eval'");
     expect(csp).toContain("worker-src 'self' blob:");
     expect(csp).toContain("https://cdn.jsdelivr.net");
     // 2026-09-22：Vercel 已弃用，原「vercel.json 的 CSP 必须等于共享模块」改为
     // 直接校验「线上响应的 CSP」与 render-api/security-headers.js 完全一致（单一事实来源）。
-    expect(csp).toBe(sharedSecurityHeaders.CSP);
+    expect(csp).toBe(sharedSecurityHeaders.CSP_LOCAL);
   });
 
   test('CSP header includes style-src with jsDelivr', async ({ request }) => {

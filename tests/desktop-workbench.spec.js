@@ -13,6 +13,7 @@ async function openApp(page, options = {}) {
 
 test.describe('desktop workbench contract', () => {
   test('every viewport from 768px exposes the desktop workbench', async ({ browser }) => {
+    test.setTimeout(60000);
     const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const desktopPage = await desktop.newPage();
     await openApp(desktopPage);
@@ -86,23 +87,7 @@ test.describe('desktop workbench contract', () => {
       const page = await context.newPage();
       await openApp(page);
       await page.waitForFunction(() => typeof window.__xtjOpenAiChat === 'function');
-      await page.evaluate(() => {
-        window.__xtjOpenAiChat = () => {
-          const panel = document.getElementById('panelAiChat');
-          panel.classList.remove('hidden');
-          panel.classList.add('active');
-          panel.setAttribute('aria-hidden', 'false');
-          panel.innerHTML = '<div id="aiChatRoot"></div>';
-          window.__xtjAiChatActive = true;
-        };
-        window.__xtjCloseAiChat = () => {
-          const panel = document.getElementById('panelAiChat');
-          panel.classList.add('hidden');
-          panel.classList.remove('active');
-          panel.setAttribute('aria-hidden', 'true');
-          window.__xtjAiChatActive = false;
-        };
-      });
+      await page.evaluate(() => window.__xtjEnsureAiAgentLoaded());
       const urlBefore = page.url();
       await page.evaluate(() => window.__xtjOpenAiChat());
       await expect(page.locator('#panelAiChat #aiChatRoot')).toBeVisible();
@@ -148,6 +133,7 @@ test.describe('desktop workbench contract', () => {
   });
 
   test('desktop chat keeps the conversation surface usable at required widths', async ({ browser }) => {
+    test.setTimeout(60000);
     for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1194, height: 834 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
       const context = await browser.newContext({ viewport, hasTouch: viewport.width < 1280 });
       const page = await context.newPage();

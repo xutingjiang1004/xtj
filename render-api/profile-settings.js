@@ -14,6 +14,8 @@ const DEFAULTS = Object.freeze({
   guests_allowed: true,
   timeline_range: "all",
   default_visibility: "public",
+  message_notifications: true,
+  notification_preview: true,
 });
 async function readProfileSettings(supabase, actor) {
   const auth = await readAuthRecord(supabase, actor, "__auth__", "id");
@@ -56,7 +58,14 @@ function validatePatch(body) {
       )
         throw Error("invalid_signature");
       patch[key] = value.trim();
-    } else if (key === "timeline_visible" || key === "guests_allowed") {
+    } else if (
+      [
+        "timeline_visible",
+        "guests_allowed",
+        "message_notifications",
+        "notification_preview",
+      ].includes(key)
+    ) {
       if (typeof value !== "boolean") throw Error("invalid_privacy");
       patch[key] = value;
     } else if (enums[key]) {
@@ -81,7 +90,7 @@ function createProfileSettings({
 }) {
   const router = express.Router();
   router.use(authenticateUser);
-  if (rateLimit) router.use(rateLimit(60000, 30));
+  if (rateLimit) router.use(rateLimit(60000, 120));
   router.use((req, res, next) => {
     res.set("Cache-Control", "no-store");
     next();
@@ -149,12 +158,10 @@ function createProfileSettings({
         avif: "image/avif",
       };
       if (!meta || !formats[meta.format])
-        return res
-          .status(400)
-          .json({
-            ok: false,
-            error: "请选择 JPG、PNG、WebP、GIF 或 AVIF 图片",
-          });
+        return res.status(400).json({
+          ok: false,
+          error: "请选择 JPG、PNG、WebP、GIF 或 AVIF 图片",
+        });
       const path =
         "profile-images/" +
         crypto

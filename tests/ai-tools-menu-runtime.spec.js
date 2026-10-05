@@ -11,6 +11,11 @@ async function pickAiTool(page, value) {
 }
 
 async function prepareAuthenticatedPage(page) {
+  await page.route('**/api/**', route => route.fulfill({ json: {
+    ok: true, data: [], users: [], posts: [], comments: [], likes: [], items: [],
+    totals: { posts: 0, views: 0, likes: 0, comments: 0 },
+    settings: require('../render-api/profile-settings').DEFAULTS
+  } }));
   await page.addInitScript(() => {
     localStorage.setItem('xtj_user', 'ai-tools-user');
     localStorage.setItem('xtj_device_id', 'ai_tools_menu_test');

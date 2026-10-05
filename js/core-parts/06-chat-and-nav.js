@@ -379,7 +379,7 @@
                     window.innerHeight || 0,
                     document.documentElement ? (document.documentElement.clientHeight || 0) : 0
                 );
-                return width >= 768 && (height >= 480 || document.documentElement.classList.contains('xtj-tablet-keyboard'));
+                return width >= 768 && (height >= 480 || document.documentElement.classList.contains('xtj-tablet-layout'));
             }
 
             function renderDockChatDesktopEmptyState() {
@@ -670,6 +670,47 @@
             }
 
             var _chatDomSnapshots = new Map();
+            var _chatRouteMotion = null;
+            function finishDockChatRoute() {
+                var job = _chatRouteMotion;
+                if (!job) return;
+                _chatRouteMotion = null;
+                job.animations.forEach(function(animation) { animation.cancel(); });
+                job.detail.classList.remove('chat-route-layer');
+                job.detail.inert = false;
+                ['--chat-route-top','--chat-route-left','--chat-route-width','--chat-route-height'].forEach(function(key) { job.detail.style.removeProperty(key); });
+                if (!dockChatActiveUser && !shouldUseDesktopChatSplitLayout()) job.detail.classList.add('hidden');
+            }
+            function prepareDockChatExit() {
+                finishDockChatRoute();
+                var detail = document.getElementById('dockChatDetailView'), container = document.getElementById('dockChatContainer');
+                if (shouldUseDesktopChatSplitLayout() || chatReducedMotion() || !detail || detail.classList.contains('hidden') || !container) return false;
+                var box = detail.getBoundingClientRect(), frame = container.getBoundingClientRect();
+                detail.style.setProperty('--chat-route-top',box.top-frame.top+'px');
+                detail.style.setProperty('--chat-route-left',box.left-frame.left+'px');
+                detail.style.setProperty('--chat-route-width',box.width+'px');
+                detail.style.setProperty('--chat-route-height',box.height+'px');
+                detail.classList.add('chat-route-layer'); detail.inert = true;
+                return true;
+            }
+            function animateDockChatRoute(open) {
+                if (open) finishDockChatRoute();
+                var detail = document.getElementById('dockChatDetailView');
+                if (!detail || chatReducedMotion() || typeof detail.animate !== 'function') { if(!open && detail){detail.classList.remove('chat-route-layer');detail.inert=false;} return; }
+                var header = document.querySelector('#dockChatContainer > .chat-header');
+                var distance = shouldUseDesktopChatSplitLayout() ? '24px' : '100%';
+                var frames = open ? [{transform:'translate3d('+distance+',0,0)'},{transform:'translate3d(0,0,0)'}] : [{transform:'translate3d(0,0,0)'},{transform:'translate3d(100%,0,0)'}];
+                var job = {detail:detail,animations:[]}; _chatRouteMotion = job;
+                var start = document.timeline.currentTime;
+                [detail,open && !shouldUseDesktopChatSplitLayout() ? header : null].filter(Boolean).forEach(function(node) {
+                    var animation = node.animate(frames,{duration:300,easing:'cubic-bezier(.22,.7,.25,1)',fill:'both'});
+                    animation.startTime=start;job.animations.push(animation);
+                });
+                Promise.all(job.animations.map(function(animation){return animation.finished.catch(function(){});})).then(function(){if(_chatRouteMotion===job)finishDockChatRoute();});
+            }
+            window.addEventListener('resize',finishDockChatRoute);
+            window.addEventListener('pagehide',finishDockChatRoute);
+            window.addEventListener('auth-ready',finishDockChatRoute);
             function forgetDockChatConversationMessages(peer) {
                 _chatDomSnapshots.delete(getDockChatCacheKey(peer));
                 _chatCache[getDockChatCacheKey(peer)] = [];
@@ -677,6 +718,7 @@
             }
 
             function dockChatGoBack() {
+                var routeExit = prepareDockChatExit();
                 cancelChatFlashSend();
                 closeAuthorSupport();
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
@@ -705,6 +747,7 @@
                 }
                 window.dockChatListCacheTime = 0;
                 syncDockChatLayoutState();
+                if (routeExit) animateDockChatRoute(false);
                 // ★ 2026-09-25 修复：返回会话列表时 0 值即"缓存失效"，缓存时长被提到 20s 后
                 //   这里会必然触发一次 /api/dm/list 往返（列表明明还在屏幕上）。改为标记为刚刷新。
                 // ★ 2026-09-27 修复（C11）：若列表**从未加载成功过**（例如从帖子直接 openChat
@@ -742,6 +785,7 @@
             let restorePostsScroll = null;
 
             window.openChat = function(userName) {
+                finishDockChatRoute();
                 cancelChatFlashSend();
                 if(_flashViewer)_flashViewer.close();
                 cancelDockChatSendFlights();
@@ -798,6 +842,7 @@
                 var titleEl = document.getElementById('dockChatTitle');
                 if (titleEl) titleEl.textContent = _dockChatFriendNotes[userName] || userName;
                 updateDockChatComposerPermission(userName);
+                animateDockChatRoute(true);
                 switchDockTab('chat', true, { source: 'openChat' });
                 loadDockChatMessages(userName, true);
                 startDMPolling(60000, true);
@@ -5213,6 +5258,12 @@
                 }, 30);
             }
 
+            window.openProfileBlocks = function() {
+                if (window.__xtjAiChatActive && window.__xtjCloseAiChat) window.__xtjCloseAiChat();
+                switchDockTab('chat',true,{animate:true});
+                openDockChatSocialSheet('blocks');
+            };
+
             function closeDockChatSocialSheet() {
                 var sheet = document.getElementById('dockChatSocialSheet');
                 if (!sheet) return;
@@ -5726,12 +5777,28 @@
                     const root = document.documentElement;
                     root.classList.add('xtj-ios-viewport');
                     let keyboardOpen = false;
+                    var awaitingKeyboardCloseViewport = false;
                     var keyboardFollowLatest=true;
                     // 环境固有的视口差（非键盘部分），取历史最小值当基线。见 updateIOSViewport。
                     var viewportBaseline = Infinity;
                     var closedViewportHeight = window.__xtjViewportBootHeight || (window.visualViewport ? window.visualViewport.height : window.innerHeight);
                     var viewportWidth = window.innerWidth;
                     var previousFocusedInput = null;
+
+                    function fitFocusedInput(input) {
+                        if (!input || input !== document.activeElement || !root.classList.contains('xtj-keyboard-open')) return;
+                        var visualTop = parseFloat(root.style.getPropertyValue('--xtj-visual-top')) || 0;
+                        var appHeight = parseFloat(root.style.getPropertyValue('--xtj-app-height')) || window.innerHeight;
+                        var scroller = input.parentElement;
+                        while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+                        if (scroller && scroller !== document.body) {
+                            var inputRect = input.getBoundingClientRect(), scrollRect = scroller.getBoundingClientRect();
+                            var bottom = Math.min(scrollRect.bottom, visualTop + appHeight) - 12;
+                            var top = Math.max(scrollRect.top, visualTop) + 12;
+                            if (inputRect.bottom > bottom) scroller.scrollTop += inputRect.bottom - bottom;
+                            else if (inputRect.top < top) scroller.scrollTop -= top - inputRect.top;
+                        }
+                    }
 
                     function hasActiveInput() {
                         var active = document.activeElement;
@@ -5759,9 +5826,11 @@
                         if (!viewportShrunk) closedViewportHeight = visibleHeight;
                         // The shell owns the viewport. Fixed controls must not add
                         // the keyboard offset again after the shell has resized.
-                        var appHeight = isKeyboardVisible ? visibleHeight : closedViewportHeight;
+                        if (root.classList.contains('xtj-keyboard-open') && !focused && viewportShrunk) awaitingKeyboardCloseViewport = true;
+                        if (focused || !viewportShrunk) awaitingKeyboardCloseViewport = false;
+                        var appHeight = awaitingKeyboardCloseViewport ? closedViewportHeight : visibleHeight;
                         var previousHeight = parseFloat(root.style.getPropertyValue('--xtj-app-height')) || appHeight;
-                        var visualTop = isKeyboardVisible && vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+                        var visualTop = !awaitingKeyboardCloseViewport && vv ? Math.max(0, Math.round(vv.offsetTop * viewportScale)) : 0;
                         if (!isKeyboardVisible && window.scrollY !== 0) window.scrollTo(0, 0);
                         root.style.setProperty('--xtj-app-height', appHeight + 'px');
                         root.style.setProperty('--xtj-visual-top', visualTop + 'px');
@@ -5783,15 +5852,11 @@
                         document.body.classList.toggle('ios-chat-keyboard-open', !!(chatFocused && isKeyboardVisible));
                         if (dockBar) dockBar.style.display = isKeyboardVisible ? 'none' : '';
                         if (isKeyboardVisible && (!keyboardWasVisible || previousHeight !== appHeight || previousFocusedInput !== document.activeElement)) {
-                            var input = document.activeElement, scroller = input && input.parentElement;
-                            while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
-                            if (scroller && scroller !== document.body) {
-                                var inputRect = input.getBoundingClientRect(), scrollRect = scroller.getBoundingClientRect();
-                                var bottom = Math.min(scrollRect.bottom, visualTop + appHeight) - 12;
-                                var top = Math.max(scrollRect.top, visualTop) + 12;
-                                if (inputRect.bottom > bottom) scroller.scrollTop += inputRect.bottom - bottom;
-                                else if (inputRect.top < top) scroller.scrollTop -= top - inputRect.top;
-                            }
+                            var input = document.activeElement;
+                            fitFocusedInput(input);
+                            // Inline comments and Safari focus scrolling can finish
+                            // their layout after the first viewport event.
+                            requestAnimationFrame(function() { fitFocusedInput(input); });
                         }
                         if (dockBar && !isKeyboardVisible && !shouldUseDesktopChatSplitLayout() && dockBar.getClientRects().length) {
                             root.style.setProperty('--xtj-dock-reserve', (Math.ceil(dockBar.getBoundingClientRect().height) + 20) + 'px');

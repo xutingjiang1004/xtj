@@ -16,12 +16,12 @@ for (const [width,height,theme] of [[320,760,'light'],[390,844,'light'],[1024,76
       await page.waitForFunction(() => Number(document.querySelector('#pubBtn [role="progressbar"]')?.getAttribute('aria-valuenow')) === 90);
       const geometry = await page.evaluate(() => {
         const box = selector => {const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,right:r.right,bottom:r.bottom}};
-        return {button:box('#pubBtn'),svg:box('#pubBtn .pw-garden svg'),track:box('#pubBtn [role="progressbar"]'),
+        return {button:box('#pubBtn'),flowers:document.querySelectorAll('#pubBtn .pw-garden').length,track:box('#pubBtn [role="progressbar"]'),
           photo:box('.publish-footer .file-label'),visibility:box('#postVisibility'),label:box('.post-compose-label'),controls:box('.post-compose-controls'),
           height:publishBox.offsetHeight,dock:[dockBar.offsetWidth,dockBar.offsetHeight],overflow:document.body.scrollWidth>innerWidth};
       });
       assert.ok(geometry.button.h >= 80, 'feedback must use both toolbar rows');
-      assert.ok(geometry.svg.h >= 58 && geometry.svg.w >= 60, 'garden must escape the generic 23px SVG rule');
+      assert.equal(geometry.flowers,0,'post progress must have no illustration');
       assert.ok(geometry.track.w >= 65 && geometry.track.h >= 5);
       assert.ok(geometry.button.x >= geometry.photo.right + 4, 'upload feedback must not cover the file picker');
       assert.ok(geometry.visibility.right <= geometry.button.x, 'visibility must stay outside the feedback area');

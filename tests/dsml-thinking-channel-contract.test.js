@@ -14,6 +14,7 @@ function loadCallDeepSeek(fetchImpl) {
   assert.ok(start >= 0 && end > start, 'callDeepSeek 源码应可提取');
 
   const sandbox = {
+    aiTaskPolicy: require('../render-api/ai-task-policy'),
     fetch: fetchImpl,
     AbortController,
     DOMException,

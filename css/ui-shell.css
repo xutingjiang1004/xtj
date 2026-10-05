@@ -3168,7 +3168,15 @@ html[data-xtj-motion="off"] #notificationContainer .notification-bubble { transi
 html.xtj-keyboard-open #dockBar { display:none!important; }
 /* Keep the existing tablet sidebar when Safari shrinks the layout viewport.
    The mobile Dock must not appear between the conversation and keyboard. */
-html.xtj-tablet-keyboard #dockBar { display:none!important; }
+html.xtj-tablet-layout #dockBar { display:none!important; }
+html.xtj-tablet-layout #panelChat .dock-chat-container { min-height:0; }
+#dockChatContainer { position:relative; overflow:hidden; }
+#dockChatContainer #dockChatDetailView.chat-route-layer {
+  display:flex!important; position:absolute; z-index:8;
+  top:var(--chat-route-top); left:var(--chat-route-left);
+  width:var(--chat-route-width); height:var(--chat-route-height);
+  background:var(--chat-surface,var(--bg-card,#fff)); pointer-events:none;
+}
 html.xtj-ios-viewport.xtj-keyboard-open .dock-panel { padding-bottom:0!important; scroll-padding-bottom:0!important; }
 html.xtj-ios-viewport.xtj-keyboard-open #dockChatContainer .chat-input-area { padding-bottom:8px!important; }
 

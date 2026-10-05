@@ -71,22 +71,22 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=775c4dc55c" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=ae8735d41d" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=e76c18dc68" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=d3d5309f17" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=5c0fa70909" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d872211228" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=e76c18dc68">
-    <link rel="stylesheet" href="css/post-feed.min.css?v=7884e96c00">
-    <link rel="stylesheet" href="css/profile-settings.min.css?v=fba818a827">
-    <link rel="stylesheet" href="css/author-posts.min.css?v=df80c9f5e2">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=ae8735d41d">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=653294a4a9">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=5c0fa70909">
+    <link rel="stylesheet" href="css/post-feed.min.css?v=34b65e4137">
+    <link rel="stylesheet" href="css/profile-settings.min.css?v=8cf8b72868">
+    <link rel="stylesheet" href="css/author-posts.min.css?v=db0e12784e">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=d3d5309f17">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=b9799aa19e">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=2c251f505f">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=39ca2d7e68">
-    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=4b163f88d4">
+    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=cd057c27ac">
     <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=a9297cdf1d">
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=6865cc5b27">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=59e4bc80ff">
@@ -602,7 +602,6 @@
                 <div class="profile-header">
                     <span class="profile-title">我的</span>
                 </div>
-                <div class="profile-own-cover" id="profileOwnCover" aria-label="我的朋友圈封面"></div>
                 <div class="profile-user-card" id="profileUserCard" onclick="handleProfileCardClick()">
                     <span class="avatar profile-avatar" id="profileAvatar">?</span>
                     <div class="profile-user-info">
@@ -638,75 +637,38 @@
                         <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" hidden>查看更多</button>
                     </section>
                 </div>
-                <form id="profilePreferences" class="profile-preferences">
-                    <fieldset><legend>个人资料与背景</legend>
-                        <label class="profile-signature-field">个性签名<input type="text" name="signature" maxlength="120" placeholder="写点关于自己的话"></label>
-                        <small>朋友圈封面和签名会展示在个人动态页，界面背景仅用于自己的界面。</small>
-                        <div class="profile-image-actions"><button type="button" data-image-kind="cover">更换朋友圈封面</button><button type="button" data-image-clear="cover">恢复默认封面</button></div>
-                        <div class="profile-image-actions"><button type="button" data-image-kind="background">更换界面背景</button><button type="button" data-image-clear="background">恢复默认背景</button></div>
-                        <input type="file" id="profileImageUpload" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden>
-                    </fieldset>
-                    <fieldset><legend>外观与个性化</legend>
-                        <label>外观<select name="theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
-                        <label>主题色<select name="accent"><option value="mint">薄荷绿</option><option value="blue">晴空蓝</option><option value="rose">玫瑰粉</option><option value="violet">浅紫</option></select></label>
-                        <label>文字大小<select name="font_size"><option value="normal">标准</option><option value="large">大字</option></select></label>
-                        <label>帖子间距<select name="density"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></label>
-                        <label>动画效果<select name="motion"><option value="system">跟随系统</option><option value="off">减少动效</option></select></label>
-                    </fieldset>
-                    <fieldset><legend>隐私</legend>
-                        <label>允许他人查看个人动态页<input type="checkbox" name="timeline_visible"></label>
-                        <label>允许未登录访客查看动态页<input type="checkbox" name="guests_allowed"></label>
-                        <label>对他人展示动态<select name="timeline_range"><option value="all">全部</option><option value="3d">最近三天</option><option value="1m">最近一个月</option><option value="6m">最近半年</option></select></label>
-                        <label>默认发布范围<select name="default_visibility"><option value="public">公开</option><option value="private">仅自己可见</option></select></label>
-                        <small>动态页访问与时间范围不会改变已公开帖子的发布范围。每条动态仍可单独设置可见范围。</small>
-                    </fieldset>
-                    <div class="profile-image-actions"><button type="submit">保存设置</button><button type="button" id="profileSettingsReload">重新读取</button></div>
-                    <p class="profile-settings-status" id="profileSettingsStatus" role="status" aria-live="polite"></p>
+                <form id="profilePreferences" class="profile-preferences" data-sync-state="loading">
+                    <section class="profile-settings-group" aria-labelledby="profilePrivacyTitle">
+                        <h2 id="profilePrivacyTitle">隐私</h2>
+                        <div class="profile-settings">
+                            <label class="profile-setting-item">允许他人查看个人动态页<span class="profile-switch"><input type="checkbox" name="timeline_visible"><span class="profile-slider"></span></span></label>
+                            <label class="profile-setting-item">允许未登录访客查看<span class="profile-switch"><input type="checkbox" name="guests_allowed"><span class="profile-slider"></span></span></label>
+                            <label class="profile-setting-item">对他人展示动态<select name="timeline_range"><option value="all">全部</option><option value="3d">最近三天</option><option value="1m">最近一个月</option><option value="6m">最近半年</option></select></label>
+                            <label class="profile-setting-item">默认发布范围<select name="default_visibility"><option value="public">公开</option><option value="private">仅自己可见</option></select></label>
+                            <label class="profile-setting-item">站内通知显示消息内容<span class="profile-switch"><input type="checkbox" name="notification_preview"><span class="profile-slider"></span></span></label>
+                            <div class="profile-setting-item"><span>黑名单</span><button type="button" id="profileBlocksButton" class="profile-row-action">管理<span aria-hidden="true"> ›</span></button></div>
+                        </div>
+                    </section>
+                    <section class="profile-settings-group" aria-labelledby="profileGeneralTitle">
+                        <h2 id="profileGeneralTitle">通用</h2>
+                        <div class="profile-settings profile-general-settings">
+                            <button type="button" class="profile-setting-item profile-image-row" id="profileOwnCover" data-image-kind="cover"><span>朋友圈封面</span><span class="profile-image-value"><img id="profileCoverThumbnail" alt="我的朋友圈封面" hidden><span data-image-label>设置</span><span aria-hidden="true">›</span></span></button>
+                            <button type="button" class="profile-setting-item profile-image-row" id="profileOwnBackground" data-image-kind="background"><span>界面背景</span><span class="profile-image-value"><img id="profileBackgroundThumbnail" alt="我的界面背景" hidden><span data-image-label>设置</span><span aria-hidden="true">›</span></span></button>
+                            <label class="profile-setting-item profile-signature-field">个性签名<input type="text" name="signature" maxlength="120" placeholder="未设置" autocomplete="off"></label>
+                            <label class="profile-setting-item">站内消息提醒<span class="profile-switch"><input type="checkbox" id="profileNotifToggle" name="message_notifications"><span class="profile-slider"></span></span></label>
+                            <div class="profile-setting-item"><span>关于</span><span class="profile-setting-value">xtj v0.95.0</span></div>
+                        </div>
+                    </section>
+                    <div class="profile-sync-feedback"><p class="profile-settings-status" id="profileSettingsStatus" role="status" aria-live="polite"></p><button type="button" id="profileSettingsRetry" hidden>重试</button></div>
+                    <input type="file" id="profileImageUpload" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden>
                 </form>
-                <div class="profile-settings">
-                    <div class="profile-setting-item">
-                        <div class="profile-setting-label">
-                            <span class="profile-setting-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
-                                </svg>
-                            </span>
-                            <span class="profile-setting-text">深色模式</span>
-                        </div>
-                        <label class="profile-switch">
-                            <input type="checkbox" id="profileThemeToggle">
-                            <span class="profile-slider"></span>
-                        </label>
-                    </div>
-                    <div class="profile-setting-item">
-                        <div class="profile-setting-label">
-                            <span class="profile-setting-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-                                </svg>
-                            </span>
-                            <span class="profile-setting-text">通知</span>
-                        </div>
-                        <label class="profile-switch">
-                            <input type="checkbox" id="profileNotifToggle" checked>
-                            <span class="profile-slider"></span>
-                        </label>
-                    </div>
-                    <div class="profile-setting-item">
-                        <div class="profile-setting-label">
-                            <span class="profile-setting-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                                    <circle cx="12" cy="12" r="9"></circle>
-                                    <path d="M12 10v6"></path>
-                                    <path d="M12 7h.01"></path>
-                                </svg>
-                            </span>
-                            <span class="profile-setting-text">关于</span>
-                        </div>
-                        <span class="profile-setting-value">xtj v0.95.0</span>
-                    </div>
-                </div>
+                <dialog id="profileImageMenu" class="profile-image-menu">
+                    <h3 id="profileImageMenuTitle">更换照片</h3>
+                    <img id="profileImageMenuPreview" alt="当前背景图" hidden>
+                    <button type="button" data-profile-image-action="choose">更换照片</button>
+                    <button type="button" data-profile-image-action="clear">移除图片</button>
+                    <button type="button" data-profile-image-action="close">取消</button>
+                </dialog>
                 </div><!-- /profileMainView -->
            </div>
         </div>
@@ -1263,21 +1225,21 @@
     <script defer src="js/vendor/supabase.min.js?v=e8c548fa1b"></script>
     <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
-    <script defer src="js/mobile-viewport.min.js?v=ae123f93e5"></script>
+    <script defer src="js/mobile-viewport.min.js?v=f7c7dd7cdb"></script>
     <script defer src="js/image-load-guard.min.js?v=814dedc74b"></script>
     <script defer src="js/post-composer-media.min.js?v=0902303519"></script>
-    <script defer src="js/post-publish-progress.min.js?v=797ee34db0"></script>
-    <script defer src="js/post-publish-motion.min.js?v=f461dc6c4b"></script>
-    <script defer src="js/profile-settings.min.js?v=e149fb63c3"></script>
+    <script defer src="js/post-publish-progress.min.js?v=3ef713325f"></script>
+    <script defer src="js/post-publish-motion.min.js?v=1562a7253a"></script>
+    <script defer src="js/profile-settings.min.js?v=90ae915e04"></script>
     <script defer src="js/author-posts.min.js?v=cdd73719be"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
     <script defer src="js/photo-wall/story.min.js?v=3dd8ec6135"></script>
     <script defer src="js/voice-transcription.min.js?v=39cfe95168"></script>
-    <script defer src="js/core.min.js?v=87fbb9ac19"></script>
+    <script defer src="js/core.min.js?v=44993fd554"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
-    <script defer src="js/theme-toggle.min.js?v=09b5c7ef68"></script>
+    <script defer src="js/theme-toggle.min.js?v=dd3746237f"></script>
     <script defer src="js/desktop-shell.min.js?v=086938c9c6"></script>
-    <script defer src="js/ux-features.min.js?v=b5cf6a04c7"></script>
+    <script defer src="js/ux-features.min.js?v=97ee18ea6c"></script>
 
 <!-- 深入研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">

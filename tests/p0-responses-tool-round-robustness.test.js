@@ -50,7 +50,7 @@ test('P0：function_call_output 回传时空 id 必须有确定性占位兜底',
   // ★ 2026-09-22：function_call 回传必须同时写 id 与 call_id，兼容两种上游配对校验
   assert.match(
     body,
-    /type: 'function_call', id: _pairCallId, call_id: _pairCallId/,
+    /type: 'function_call', id: r\.fcItemId \|\| _pairCallId, call_id: _pairCallId/,
     'function_call 项必须同时携带 id 与 call_id（值相同），消除 id/call_id 不一致的 400'
   );
 });

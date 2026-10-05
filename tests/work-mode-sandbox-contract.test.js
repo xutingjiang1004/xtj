@@ -11,6 +11,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const taskPolicySrc = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'ai-task-policy.js'), 'utf8');
 const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');
 const sandbox = require(path.join(__dirname, '..', 'render-api', 'sandbox.js'));
 
@@ -123,11 +124,11 @@ test('沙箱：实现内部保留关键安全护栏', () => {
 });
 
 test('工作模式：system prompt 注入含工作模式指令与沙箱提示', () => {
-  assert.match(serverSrc, /【普通聊天工具能力】/);
-  assert.match(serverSrc, /run_code（在强隔离沙箱里跑 JavaScript/);
-  // 两条聊天路径均应注入
-  const cnt = (serverSrc.match(/【普通聊天工具能力】/g) || []).length;
-  assert.ok(cnt >= 2, '工作模式 prompt 应注入到两条聊天路径，实际: ' + cnt);
+  assert.match(taskPolicySrc, /【普通聊天工具能力】/);
+  assert.match(taskPolicySrc, /run_code（在强隔离沙箱里跑 JavaScript/);
+  assert.match(serverSrc, /aiTaskPolicy\.TASK_POLICY/);
+  assert.equal((taskPolicySrc.match(/【普通聊天工具能力】/g) || []).length, 1);
+  assert.ok((serverSrc.match(/var corePrompt = buildAiCorePrompt\(config\)/g) || []).length >= 3);
 });
 
 test('工具定义：AI_TOOLS 含 read_document / make_file / web_extract / task_plan', () => {
@@ -138,10 +139,10 @@ test('工具定义：AI_TOOLS 含 read_document / make_file / web_extract / task
 });
 
 test('工作模式：prompt 明确提示文档/文件/网页/计划四类新工具', () => {
-  assert.match(serverSrc, /read_document（支持 PDF \/ Word \/ Excel \/ CSV \/ TXT/);
-  assert.match(serverSrc, /make_file（生成 CSV \/ Excel \/ TXT/);
-  assert.match(serverSrc, /web_extract 能抓网页正文/);
-  assert.match(serverSrc, /task_plan 列出计划/);
+  assert.match(taskPolicySrc, /read_document（支持 PDF \/ Word \/ Excel \/ CSV \/ TXT/);
+  assert.match(taskPolicySrc, /make_file（生成 CSV \/ Excel \/ TXT/);
+  assert.match(taskPolicySrc, /web_extract 能抓网页正文/);
+  assert.match(taskPolicySrc, /task_plan 列出计划/);
 });
 
 test('前端：工具中文名映射覆盖新增工具', () => {
@@ -167,9 +168,9 @@ test('前端：make_file / task_plan 卡片有渲染分支', () => {
   assert.match(jsSrc, /type === 'task_plan'/);
 });
 
-test('工作模式：工具轮数提升到 8 且保留硬上限', () => {
-  assert.match(serverSrc, /max_tool_rounds: workModeEnabled \? 8 : 4/);
-  assert.match(serverSrc, /Math\.min\(Math\.max\(parseInt\(options && options\.max_tool_rounds\) \|\| 4, 1\), 8\)/);
+test('工作模式：工具轮数统一为 10 且保留硬上限', () => {
+  assert.match(serverSrc, /max_tool_rounds: workModeEnabled \? aiTaskPolicy\.MAX_TOOL_ROUNDS : 4/);
+  assert.match(serverSrc, /Math\.min\(Math\.max\(parseInt\(options && options\.max_tool_rounds\) \|\| 4, 1\), aiTaskPolicy\.MAX_TOOL_ROUNDS\)/);
 });
 
 test('工作模式：绕过关键词意图预判', () => {

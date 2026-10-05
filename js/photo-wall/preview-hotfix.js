@@ -1740,7 +1740,7 @@
     root._motionOriginId=activePhoto()&&activePhoto().id;
     var origin=originForCurrent(),from=origin?motionTransform(origin):'none';
     var token=motionEpoch;root.classList.add('pp-motion-active');
-    motionAnimations=[wrap.animate([{transform:from,opacity:.6},{transform:'none',opacity:1}],{duration:240,easing:'cubic-bezier(.22,1,.36,1)'}),root.animate([{opacity:0},{opacity:1}],{duration:180,easing:'ease-out'})];
+    motionAnimations=[wrap.animate([{transform:from},{transform:'none'}],{duration:240,easing:'cubic-bezier(.22,1,.36,1)'}),root.animate([{opacity:0},{opacity:1}],{duration:180,easing:'ease-out'})];
     Promise.all(motionAnimations.map(function(a){return a.finished;})).then(function(){if(token===motionEpoch){motionAnimations=[];root.classList.remove('pp-motion-active');}}).catch(function(){});
   }
   function animatePreviewClose(){
