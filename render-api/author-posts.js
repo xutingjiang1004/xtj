@@ -5,7 +5,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const FIELDS = 'id,user_name,content,media_type,media_url,created_at,visibility,is_deleted,is_pinned,pinned_at,updated_at,views,location_name,ip_region_text,ip_region_status';
 
-function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLikeSystemTelemetry = () => false }) {
+function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLikeSystemTelemetry = () => false, readSettings = async () => ({timeline_visible:true}) }) {
   const router = express.Router();
   router.use(optionalAuth);
   if (rateLimit) router.use(rateLimit(60000, 90));
@@ -24,6 +24,9 @@ function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLi
     let cursor = at ? { at, id } : null, exhausted = false;
     const visible = [];
     try {
+      const settings = await readSettings(author);
+      const profile = require('./profile-settings').publicProfile(settings);
+      if (!canSeePrivate && (settings.timeline_visible === false || (!req.userName && settings.guests_allowed === false))) return res.json({ok:true,author,profile:{timeline_visible:false},posts:[],has_more:false,next_cursor:null,restricted:true});
       // Fill bounded pages past legacy telemetry. Preserve PostgreSQL's fractional
       // seconds in the cursor; Date.toISOString() would lose microseconds.
       for (let scan = 0; scan < 8 && visible.length <= limit && !exhausted; scan++) {
@@ -32,6 +35,8 @@ function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLi
         const filters = ['or(' + normal + ')'];
         if (!canSeePrivate) filters.push('or(visibility.is.null,visibility.eq.public)');
         if (before) filters.push('or(' + before + ')');
+        const rangeDays = { '3d':3, '1m':30, '6m':180 }[settings.timeline_range];
+        if (!canSeePrivate && rangeDays) filters.push('created_at.gte.' + new Date(Date.now()-rangeDays*86400000).toISOString());
         query = query.or('and(' + filters.join(',') + ')');
         const result = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
         if (!result || result.error) throw Error('author_posts_unavailable');
@@ -48,7 +53,7 @@ function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLi
       const last = page[page.length - 1];
       // One attachment query for the whole visible page, never one per post.
       const posts = await loadPostAttachments(supabase, page);
-      res.json({ ok: true, author, posts, has_more: hasMore,
+      res.json({ ok: true, author, profile, posts, has_more: hasMore,
         next_cursor: hasMore ? (visible.length > limit && last ? { at: last.created_at, id: last.id } : cursor) : null });
     } catch (_) {
       res.status(503).json({ ok: false, retryable: true, error: '动态暂时无法加载，请重试' });

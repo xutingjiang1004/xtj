@@ -7620,3 +7620,8 @@ html.xtj-ios-viewport.xtj-keyboard-open .ai-chat-input-bar { padding-bottom:8px!
 .ai-think-answer code { white-space: pre-wrap; }
 .ai-msg-footer .ai-msg-agent-badge { font-size: 11px; line-height: 1.35; color: rgba(95,116,113,.72); }
 [data-theme="dark"] .ai-msg-footer .ai-msg-agent-badge { color: rgba(197,216,210,.72); }
+
+/* Keep the research surface isolated while Safari recomposites for its keyboard. */
+body.xtj-research-open #panelAiChat { visibility:hidden!important; pointer-events:none!important; }
+#panelDeepThink .ai-think-thinking[open] > .ai-think-thinking-body { display:block; max-height:280px; overflow:auto; }
+#panelDeepThink .ai-think-answer { white-space:normal; }

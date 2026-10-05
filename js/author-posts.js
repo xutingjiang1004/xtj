@@ -69,7 +69,11 @@
     list.replaceChildren(frag);
     var cover = byId('authorPostsCover'); cover.replaceChildren();
     var coverItem;
-    s.posts.some(function (post) { coverItem = media(post).find(function (item) { return /^(image|photo)$/.test(item.media_type) && safeUrl(item.media_url); }); return !!coverItem; });
+    if (s.profile && safeUrl(s.profile.cover_url)) coverItem = {media_url:s.profile.cover_url};
+    if (!coverItem && !s.profile) s.posts.some(function (post) { coverItem = media(post).find(function (item) { return /^(image|photo)$/.test(item.media_type) && safeUrl(item.media_url); }); return !!coverItem; });
+    var signature = byId('authorPostsSignature');
+    if (!signature) { signature=make('div','author-post-signature'); signature.id='authorPostsSignature'; byId('upcName').insertAdjacentElement('afterend',signature); }
+    signature.textContent = s.profile && s.profile.signature || '';
     if (coverItem) {
       var img = document.createElement('img'); img.alt = ''; img.src = safeUrl(coverItem.media_url); img.decoding = 'async';
       img.addEventListener('error', function () { img.remove(); }); cover.appendChild(img);
@@ -98,8 +102,10 @@
       if (!response.ok || !data.ok || !Array.isArray(data.posts)) throw Error(data.error || '动态加载失败');
       var seen = new Set(s.posts.map(function (post) { return String(post.id); }));
       data.posts.forEach(function (post) { if (post.user_name === s.author && !seen.has(String(post.id))) { s.posts.push(post); seen.add(String(post.id)); } });
+      s.profile = data.profile || s.profile; s.restricted = !!data.restricted;
+      if (s.restricted) s.posts = [];
       s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.loading = false;
-      render(s); status(s, !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
+      render(s); status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
     } catch (error) {
       if (!current(s)) return;
       s.loading = false; status(s, error.message || '动态暂时无法加载', true);
@@ -109,7 +115,7 @@
     generation++;
     if (state && state.controller) state.controller.abort();
     state = null;
-    ['authorPostsList', 'authorPostsCover', 'authorPostsStatus'].forEach(function (id) { var node = byId(id); if (node) node.replaceChildren(); });
+    ['authorPostsList', 'authorPostsCover', 'authorPostsStatus', 'authorPostsSignature'].forEach(function (id) { var node = byId(id); if (node) node.replaceChildren(); });
   };
   window.__xtjOpenAuthorPosts = function (author) {
     var detail = byId('postDetailModal');
@@ -120,11 +126,17 @@
     var scroll = byId('authorPostsScroll'); if (scroll) scroll.scrollTop = 0;
     load(state);
   };
+  window.__xtjUpdateAuthorPost = function (post) {
+    if (!state || !current(state) || !post || post.user_name !== state.author) return;
+    state.posts = state.posts.map(function (old) { return String(old.id)===String(post.id) ? Object.assign({}, old, post) : old; });
+    render(state);
+  };
   window.__xtjRemoveAuthorPost = function (id) {
     if (!state || !current(state)) return;
     state.posts = state.posts.filter(function (post) { return String(post.id) !== String(id); }); render(state);
     status(state, state.posts.length ? '' : '还没有可查看的动态');
   };
+  window.addEventListener('xtj:profile-settings-saved', function(event) { if(state && current(state) && state.author===event.detail.owner) { state.profile=event.detail.settings; render(state); } });
   window.addEventListener('auth-ready', function () {
     if (!state || current(state)) return;
     window.__xtjCloseAuthorPosts();

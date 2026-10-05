@@ -1,0 +1,150 @@
+.profile-own-cover {
+  height: 158px;
+  border-radius: 22px;
+  overflow: hidden;
+  background: linear-gradient(130deg, #92cdbb, #caddec);
+  margin: 0 0 14px;
+}
+.profile-own-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.profile-own-signature {
+  margin: 0 0 18px;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.profile-preferences {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+  text-align: left;
+}
+.profile-preferences fieldset {
+  min-width: 0;
+  border: 1px solid rgba(128, 161, 153, 0.2);
+  border-radius: 20px;
+  padding: 18px;
+  background: var(--bg-card, rgba(255, 255, 255, 0.65));
+  display: grid;
+  gap: 16px;
+}
+.profile-preferences legend {
+  padding: 0 8px;
+  font-weight: 600;
+  color: var(--profile-accent, #299b79);
+}
+.profile-preferences label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+}
+.profile-preferences .profile-signature-field {
+  display: grid;
+  gap: 8px;
+}
+.profile-preferences input[type="text"],
+.profile-preferences select {
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(128, 161, 153, 0.3);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #24463d);
+  font: inherit;
+}
+.profile-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.profile-preferences button {
+  border: 1px solid rgba(128, 161, 153, 0.3);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font: inherit;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #24463d);
+  cursor: pointer;
+}
+.profile-preferences button[type="submit"] {
+  background: var(--profile-accent, #299b79);
+  color: white;
+  border: 0;
+}
+.profile-preferences button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.profile-settings-status {
+  font-size: 13px;
+  color: var(--text-secondary, #648379);
+  line-height: 1.6;
+  min-height: 22px;
+  margin: 0;
+}
+html.profile-custom-background .app-container {
+  background-image:
+    linear-gradient(var(--bg-primary, #fff), rgba(255, 255, 255, 0.75)),
+    var(--profile-background);
+  background-size: cover;
+  background-position: center;
+}
+html.profile-custom-background .dock-profile-container {
+  background-image: var(--profile-background);
+  background-size: cover;
+  background-position: center;
+  background-attachment: local;
+}
+html[data-profile-density="compact"] #panelPosts .post {
+  padding-block: 12px !important;
+}
+html[data-profile-font="large"] #panelPosts .post .content,
+html[data-profile-font="large"] .dt-msg-content,
+html[data-profile-font="large"] .ai-think-answer,
+html[data-profile-font="large"] .ai-msg-bubble,
+html[data-profile-font="large"] .profile-preferences {
+  font-size: 18px !important;
+}
+html[data-profile-font="large"] .author-post-text {
+  font-size: 17px;
+}
+[data-theme="dark"] .profile-preferences fieldset {
+  background: rgba(25, 43, 37, 0.9);
+}
+[data-theme="dark"].profile-custom-background .app-container {
+  background-image:
+    linear-gradient(rgba(15, 29, 24, 0.9), rgba(15, 29, 24, 0.75)),
+    var(--profile-background);
+}
+@media (max-width: 767px) {
+  .profile-own-cover {
+    height: 136px;
+  }
+  .profile-preferences fieldset {
+    padding: 14px;
+  }
+  .profile-preferences label {
+    flex-wrap: wrap;
+  }
+  .profile-preferences select {
+    max-width: 180px;
+  }
+}
+
+#panelProfile .profile-user-name {
+  color: var(--profile-accent, #299b79);
+}
+html[data-profile-accent] #pubBtn {
+  background: var(--profile-accent) !important;
+}
+html[data-profile-accent] .post .like-btn.liked {
+  color: var(--profile-accent) !important;
+}

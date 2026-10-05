@@ -3,7 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict'), fs = 
 const { chromium } = require('playwright');
 const { appendProcessEvent, getProcessEvents } = require('../render-api/ai-process-events');
 const read = path => fs.readFileSync(path, 'utf8');
-async function fixture(t, effort='max', model='deepseek-flash') {
+async function fixture(t, effort='max', model='deepseek-flash', researchPipeline=false) {
   const browser = await chromium.launch({executablePath:'/usr/bin/chromium', args:['--no-sandbox']}); t.after(() => browser.close());
   const page = await browser.newPage(); page.setDefaultTimeout(6000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -11,8 +11,8 @@ async function fixture(t, effort='max', model='deepseek-flash') {
   await page.goto('https://process.test/');
   await page.addStyleTag({content:'.hidden {display:none!important}'});
   for (const file of ['css/ai-agent.css','css/ui-enhance.css']) await page.addStyleTag({content:read(file)});
-  await page.evaluate(({effort,model}) => {
-    window.testEffort=effort;localStorage.setItem('xtj_ai_thinking_mode',effort);
+  await page.evaluate(({effort,model,researchPipeline}) => {
+    window.testEffort=effort;window.testResearchPipeline=researchPipeline;localStorage.setItem('xtj_ai_thinking_mode',effort);
     localStorage.setItem('xtj_ai_work_mode','false');localStorage.setItem('xtj_ai_think_max','false');
     localStorage.setItem('xtj_ai_model',model);
     window.mockModels=model.startsWith('custom:')?[{uid:'test-custom',label:'第三方模型',provider:'openai',model:'test-model',base_url:'https://provider.test/v1',api_key:'test-key'}]:[];
@@ -25,7 +25,7 @@ async function fixture(t, effort='max', model='deepseek-flash') {
     window.fetch = async (url, options={}) => {
       const path = new URL(url,location.href).pathname;
       let body={ok:true};
-      if (path.endsWith('/config')) body={enabled:true,thinking_mode:testEffort,name:'小猫'};
+      if (path.endsWith('/config')) body=testResearchPipeline?{ok:true,config:{enabled:true,thinking_mode:testEffort,name:'小猫',tavily_research:{enabled:true}}}:{enabled:true,thinking_mode:testEffort,name:'小猫'};
       if (path.endsWith('/quota')) body={ok:true,quota:{can_chat:true,tokens_remaining:100000,search_remaining:100}};
       if (path.endsWith('/custom-models')) body={ok:true,models:mockModels};
       if (path.endsWith('/chat/conversations')) body=failHistoryList?{ok:false,error:'offline'}:{ok:true,conversations:[]};
@@ -41,7 +41,7 @@ async function fixture(t, effort='max', model='deepseek-flash') {
       return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}});
     };
     window.emit = event => {frames.push(event);stream.enqueue(new TextEncoder().encode('data: '+JSON.stringify(event)+'\n\n'));};
-  },{effort,model});
+  },{effort,model,researchPipeline});
   await page.addScriptTag({content:read('js/ai-agent.js')});
   await page.evaluate(() => __xtjAiAgent.open());
   await page.waitForFunction(() => document.querySelector('.ai-chat-empty')).catch(error=>{throw new Error(error.message+' '+JSON.stringify(errors));});
@@ -347,4 +347,29 @@ test('cloud history catches up with a reasoning-only interrupted turn without du
  await page.locator('#aiChatPauseBtn').click();await page.evaluate(()=>{const entry=Object.keys(sessionStorage).find(k=>k.startsWith('xtj_ai_history:'));mockHistory=JSON.parse(sessionStorage.getItem(entry)).messages.map(m=>({...m,id:Math.random()}));});
  await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-msg.user'));await page.waitForTimeout(250);
  assert.equal(await page.locator('.ai-msg.user').count(),1);assert.equal(await page.locator('.ai-msg.assistant').count(),1);assert.match(await page.locator('.ai-thinking-body').textContent(),/只完成了思考/);
+});
+
+test('research formats custom content from first packets and keeps live reasoning after completion',async t=>{
+ const page=await fixture(t);
+ await page.evaluate(()=>{const base=fetch;window.fetch=async(url,options={})=>{if(new URL(url,location.href).pathname.endsWith('/chat'))return new Response(new ReadableStream({start(c){window.researchStream=c;}}),{headers:{'Content-Type':'text/event-stream'}});return base(url,options);};window.researchEmit=e=>researchStream.enqueue(new TextEncoder().encode('data: '+JSON.stringify(e)+'\n\n'));});
+ await page.evaluate(()=>__xtjAiAgent.openDeepThink());await page.locator('#dtInput').fill('调查福州的天气');await page.locator('#dtSendBtn').click();await page.waitForFunction(()=>!!window.researchStream);
+ await page.evaluate(()=>researchEmit({type:'reasoning',text:'核对实际天气来源'}));
+ await page.waitForFunction(()=>document.querySelector('#dtMessages .ai-think-thinking[open] .ai-thought-chunk')?.textContent.includes('核对实际天气来源'));
+ assert.equal(await page.locator('#panelAiChat').evaluate(n=>getComputedStyle(n).visibility),'hidden');
+ await page.evaluate(()=>researchEmit({type:'content',text:'## 实时结论\n\n**晴天**\n\n- 气温适宜\n'}));
+ await page.waitForSelector('#dtMessages .ai-think-answer h2');await page.waitForSelector('#dtMessages .ai-think-answer strong');await page.waitForSelector('#dtMessages .ai-think-answer li');
+ assert.equal(await page.locator('#dtMessages .ai-research-done').count(),0,'formatting must precede done');
+ await page.evaluate(()=>researchEmit({type:'done',content:'## 实时结论\n\n**晴天**\n\n- 气温适宜\n',conversation_id:'new-cid'}));
+ await page.waitForSelector('#dtMessages .ai-research-done');assert.ok(await page.locator('#dtMessages .ai-think-thinking').isVisible());assert.match(await page.locator('#dtMessages .ai-think-thinking-body').textContent(),/核对实际天气来源/);
+});
+
+test('research pipeline formats report chunks and displays genuine stages before completion',async t=>{
+ const page=await fixture(t,'max','deepseek-flash',true);
+ await page.evaluate(()=>{const base=fetch;window.fetch=async(url,options={})=>{const path=new URL(url,location.href).pathname;if(path.endsWith('/config'))return new Response(JSON.stringify({ok:true,config:{enabled:true,name:'小猫',tavily_research:{enabled:true}}}));if(path.endsWith('/research/stream'))return new Response(new ReadableStream({start(c){window.researchStream=c;}}),{headers:{'Content-Type':'text/event-stream'}});return base(url,options);};window.researchEmit=e=>researchStream.enqueue(new TextEncoder().encode('data: '+JSON.stringify(e)+'\n\n'));});
+ // Reopen the main page to reload capabilities before entering research.
+ await page.evaluate(()=>{__xtjAiAgent.close();return __xtjAiAgent.open();});await page.evaluate(()=>__xtjAiAgent.openDeepThink());
+ await page.locator('#dtInput').fill('请调查福州天气变化');await page.locator('#dtSendBtn').click();await page.waitForFunction(()=>!!window.researchStream);
+ await page.evaluate(()=>{researchEmit({type:'research_stage',stage:'collect',message:'正在查阅天气来源'});researchEmit({type:'research_thinking',agent_role:'综合研判',chunk:'核对不同来源的时间口径'});researchEmit({type:'research_content',content:'## 来源整理\n\n**天气数据**\n\n- 已核对来源\n'});});
+ await page.waitForSelector('#dtMessages .ai-think-answer h2');assert.ok(await page.locator('#dtMessages .ai-think-answer strong').isVisible());assert.match(await page.locator('#dtMessages .ai-think-thinking[open]').textContent(),/正在查阅天气来源/);assert.match(await page.locator('#dtMessages .ai-think-thinking[open]').textContent(),/核对不同来源的时间口径/);
+ await page.evaluate(()=>researchEmit({type:'research_done',sources:[]}));await page.waitForSelector('#dtMessages .ai-research-done');
 });
