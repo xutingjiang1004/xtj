@@ -128,6 +128,14 @@ npm start
 
 > 部署生效有 1–5 分钟构建延迟，页面未更新时先强刷（`Ctrl/Cmd + Shift + R`）排除本地缓存，再到部署平台查看构建状态；构建产物带内容指纹（`?v=hash`），`npm run build` 会自动刷新。
 
+### 免费服务保活
+
+`.github/workflows/render-keepalive.yml` 在默认分支上北京时间每天 06:00 至次日 02:00，每 10 分钟请求一次 `https://xtj.onrender.com/health`（保活时段内每小时第 3、13、23、33、43、53 分钟），也可在 GitHub Actions 的 **Render Keep Alive → Run workflow** 手动运行。无需额外账号或密钥，失败或仍在唤醒时最多尝试 3 次；不请求首页，不新增网站访问统计。
+
+Render 免费服务连续 15 分钟无请求就会休眠，定时访问可减少因此产生的冷启动。GitHub 定时任务可能延迟或漏跑，公开仓库连续 60 天无活动会自动停用定时工作流，因此这个免费方案不保证永不休眠；需要时到 Actions 重新启用。Render 每个工作区每月共用 750 个免费实例小时，每天安排主站保活 20 小时，31 天约 620 小时，另留约 130 小时给唤醒尾段和其他服务。其余时段仍能正常访问，但可能需要唤醒。保活只针对主站，不同时保活 `xtj-ov3u`；其他免费服务的运行时间仍会占用同一额度。
+
+暂停保活：在 GitHub Actions 中选择 **Render Keep Alive → Disable workflow**。限制说明见 [Render 免费实例文档](https://render.com/docs/free) 与 [GitHub 定时任务文档](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)。
+
 ## 最近重点更新
 
 ### v0.94 - 2026-09-01 小猫AI全量加固 + 第三方模型账号同步/可编辑 + 思考档回归原生 + Code工作区增强

@@ -3,7 +3,7 @@
 // 均已通过法律审核，用户已同意隐私条款。详见 DATA_COLLECTION_COMPLIANCE.js —— 请勿删除。
 const express = require('express');
 const { toolFeedback, runRequiredSearch } = require('./ai-tool-feedback');
-const { saveCustomChatTurn } = require('./ai-chat-save');
+const { saveCustomChatTurn, saveInterruptedChatTurn } = require('./ai-chat-save');
 
 const cors = require('cors');
 const crypto = require('crypto');
@@ -3720,6 +3720,7 @@ async function persistResearchRecord(userName, convId, query, answer, sources) {
 // 统一流结束收尾：保存消息 + 发送 done
 async function finishStream(res, opt) {
   if (res.writableEnded) return;
+  res._aiTurnFinishing = true;
   var rawContent = String(opt.contentBuffer || '');
   // ★ 修复：角色扮演开启时跳过动作描写清洗，保留扮演中的动作神态描写
   var content = sanitizeAssistantVisibleText(rawContent, { skipActionCleanup: !!(opt && opt.roleplayEnabled) });
@@ -3763,7 +3764,7 @@ async function finishStream(res, opt) {
           user_name: opt.userName,
           content: opt.message,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('user', opt.convId, null, null, seqUser),
+          media_url: buildMsgMeta('user', opt.convId, null, null, seqUser, null, null, { client_request_id: res._aiClientRequestId }),
           actor_key: 'ai_msg_conv_' + opt.convId + '_user_' + opt.userName + '_' + nowSave,
           created_at: userCreatedAt
         },
@@ -3771,7 +3772,7 @@ async function finishStream(res, opt) {
           user_name: opt.userName,
           content: content,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs, { site_cards: Array.isArray(opt.siteCards) ? opt.siteCards.slice(0, 8) : [], process_events: getProcessEvents(res) }),
+          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs, { client_request_id: res._aiClientRequestId, interrupted: !isComplete, site_cards: Array.isArray(opt.siteCards) ? opt.siteCards.slice(0, 8) : [], process_events: getProcessEvents(res) }),
           actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
           created_at: assistantCreatedAt
         }
@@ -3786,6 +3787,15 @@ async function finishStream(res, opt) {
     } catch (saveErr) {
       console.error('[AGENT-STREAM] save failed:', saveErr && saveErr.message, 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length);
     }
+  }
+
+  if (!hasContent && opt.userName && opt.convId && opt.message) {
+    saved = await saveInterruptedChatTurn({ db: supabase, userName: opt.userName, convId: opt.convId,
+      message: opt.message, reasoning, model: usedModel, thinkingMode,
+      processEvents: getProcessEvents(res), cards: opt.siteCards, buildMeta: buildMsgMeta,
+      marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs,
+      startedAt: res._aiStartedAt || opt.startTime, requestId: res._aiClientRequestId,
+      finishReason });
   }
 
   // 发送 done
@@ -20093,6 +20103,10 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
   }
   // ★ O 修复 Bug 4: 额外字段 (deep_think / planner / worker_results / thinking_log / think_duration_ms)
   if (extra && typeof extra === 'object') {
+    if (extra.interrupted === true) obj.interrupted = true;
+    if (extra.complete === false) obj.complete = false;
+    if (extra.finish_reason) obj.finish_reason = String(extra.finish_reason).slice(0, 40);
+    if (extra.client_request_id) obj.client_request_id = String(extra.client_request_id).slice(0, 80);
     if (extra.deep_think) obj.deep_think = true;
     if (extra.chat_mode) obj.chat_mode = extra.chat_mode;
     if (typeof extra.agent_count === 'number') obj.agent_count = extra.agent_count;
@@ -22397,6 +22411,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
 //     同时推送 tool_calls/tool_pending/tool_result/tool_error SSE 供前端展示时间线。
 //     上游不支持 function calling（400/404/422）时自动回退为不带工具重试。
 app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), async (req, res) => {
+  var customStartedAt = Date.now(), customTurnFinished = false;
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -22878,6 +22893,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         try { writeSse(res, { type: 'content', text: _cnFinal }); } catch (e) {}
         finalAssistantContent = _cnFinal; // ★ S6：供 finally 记账时写入落库内容
       }
+      customTurnFinished = true;
       var customSaved = await saveCustomChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
         message: customFinalText, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
         thinkingMode: _thinkMode, webSearch: _webSearch, processEvents: getProcessEvents(res), cards: customSiteCards,
@@ -22922,6 +22938,14 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     try { clearTimeout(timer); } catch (e) {}
     req.removeListener('aborted', abortCustomUpstream);
     res.removeListener('close', abortCustomUpstream);
+    if (_customGatePassed && !customTurnFinished) {
+      await saveInterruptedChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
+        message: text, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
+        thinkingMode: _thinkMode, processEvents: getProcessEvents(res), cards: customSiteCards,
+        visionUrls: customVisionUrls, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER,
+        thinkingElapsedMs: res._aiThinkingElapsedMs || 0, startedAt: customStartedAt, requestId: reqId,
+        finishReason: aborted ? 'cancelled' : 'upstream_error' });
+    }
     // ★ S6 审计修复：正常完成 / 中断 / 失败路径统一记账。
     //   search_count 取自 toolContext.searchConsumed —— 与门禁 measureSearchQuota
     //   同一计数源，因此落账后 search_used 才会真正增长，第三方搜索额度才有效。
@@ -23361,7 +23385,7 @@ function cleanAiPrefs(input) {
 async function fetchLatestAiModelsSnapshot(userName) {
   var lookup = await supabase.from('posts').select('content,created_at')
     .eq('user_name', userName).eq('media_type', CUSTOM_AI_MODELS_MARKER)
-    .order('created_at', { ascending: false }).limit(1);
+    .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(1);
   if (lookup.error) throw lookup.error;
   var rows = Array.isArray(lookup.data) ? lookup.data : [];
   if (!rows.length) return { models: [], deletedUids: [], aiPrefs: {}, updatedAt: '' };
@@ -23417,73 +23441,24 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
       var clean = cleanAiModelIn(raw[i]);
       if (clean) models.push(clean);
     }
-    var incomingUids = models.map(function(m) { return m.uid; });
-    // ★ 2026-09-24 修复（课题②）：合并墓碑。本次快照未包含、但历史快照包含过的 uid，
-    //   视为用户主动删除，写入 deleted_uids，避免旧残留行把它们复活。
-    var prevSnap = { models: [], deletedUids: [] };
-    try { prevSnap = await fetchLatestAiModelsSnapshot(req.userName); } catch (ePrev) {
-      console.warn('[ai-models] 读取上一版快照失败(继续保存):', ePrev && ePrev.message);
-    }
-    var deletedUids = cleanDeletedUidList(prevSnap.deletedUids);
-    var incomingSet = {};
-    incomingUids.forEach(function(uid) { incomingSet[uid] = 1; });
-    prevSnap.models.forEach(function(m) {
-      if (!m || !m.uid) return;
-      var uid = String(m.uid);
-      if (!incomingSet[uid] && deletedUids.indexOf(uid) < 0) deletedUids.push(uid);
+    // One database transaction owns the read/merge/write/cleanup sequence.
+    // A stale device cannot erase deletion tombstones or revive an old UID.
+    var saved = await supabase.rpc('save_ai_custom_models_snapshot', {
+      p_user_name: req.userName, p_models: models,
+      p_deleted_uids: cleanDeletedUidList(body.deleted_uids),
+      p_ai_prefs: cleanAiPrefs(body.ai_prefs), p_replace: body.merge !== true
     });
-    // 本次显式删除声明（前端可传 deleted_uids，做精确墓碑）
-    cleanDeletedUidList(body.deleted_uids).forEach(function(uid) {
-      if (!incomingSet[uid] && deletedUids.indexOf(uid) < 0) deletedUids.push(uid);
-    });
-    // 仍在列表中的 uid 不应留在墓碑里（用户重新加回来）
-    deletedUids = deletedUids.filter(function(uid) { return !incomingSet[uid]; });
-    deletedUids = cleanDeletedUidList(deletedUids);
-
-    var snapshotContent = JSON.stringify({
-      models: models,
-      deleted_uids: deletedUids,
-      // ★ 2026-09-25：保存/合并 UI 偏好。前端只在用户真正改动选择器时才传 ai_prefs，
-      //   不传则沿用上一版快照的值，避免把已有偏好清空。
-      ai_prefs: Object.assign({}, (prevSnap.aiPrefs || {}), cleanAiPrefs(body.ai_prefs)),
-      updated_at: new Date().toISOString()
-    });
-
-    // 先立后破：先插入本次完整快照并拿回 id，成功后再删除其它旧快照行。
-    // ★ 2026-09-24 修复：旧代码在删除旧行失败时只 console.warn 放过，导致旧行永久残留
-    //   （进而被 GET 复活）。现改为：删除失败即视为保存失败，回滚刚插入的新行并返回 5xx，
-    //   让前端明确感知失败，不再产生「看起来保存成功、实际旧行还在」的假成功。
-    var ins = await supabase.from('posts').insert([{
-      user_name: req.userName,
-      media_type: CUSTOM_AI_MODELS_MARKER,
-      content: snapshotContent,
-      actor_key: 'ai_models_' + Date.now()
-    }]).select('id').maybeSingle();
-    if (ins.error) throw ins.error;
-    var keepId = ins.data && ins.data.id;
-    var delQ = supabase.from('posts').delete()
-      .eq('user_name', req.userName).eq('media_type', CUSTOM_AI_MODELS_MARKER);
-    if (keepId != null) delQ = delQ.neq('id', keepId);
-    var del = await delQ;
-    if (del.error && String(del.error.code) !== 'PGRST116') {
-      console.error('[ai-models] 清理旧快照失败，回滚本次插入:', del.error && del.error.message);
-      // 回滚：删除本次新插入的行，保持数据与用户操作前的状态一致
-      try {
-        if (keepId != null) {
-          await supabase.from('posts').delete().eq('id', keepId);
-        }
-      } catch (eRollback) {
-        console.error('[ai-models] 回滚失败(需人工清理重复快照行):', eRollback && eRollback.message);
-      }
-      return res.status(500).json({ error: '保存自定义模型失败(旧快照清理失败，已回滚)', code: 'ai_models_cleanup_failed' });
-    }
+    if (saved.error || !saved.data || saved.data.ok !== true) throw saved.error || Error('Model snapshot was not saved');
+    models = saved.data.models;
+    var deletedUids = saved.data.deleted_uids;
+    var savedPrefs = saved.data.ai_prefs;
     var echo = models.map(function(m) {
       var copy = Object.assign({}, m);
       copy.api_key = decryptAiModelSecret(copy.api_key_enc);
       delete copy.api_key_enc;
       return copy;
     });
-    return res.json({ ok: true, models: echo, deleted_uids: deletedUids, ai_prefs: Object.assign({}, (prevSnap.aiPrefs || {}), cleanAiPrefs(body.ai_prefs)) });
+    return res.json({ ok: true, models: echo, deleted_uids: deletedUids, ai_prefs: savedPrefs });
   } catch (e) {
     console.error('[ai-models] 保存失败:', e && e.message);
     return res.status(500).json({ error: '保存自定义模型失败', code: 'ai_models_write_error' });
@@ -23618,6 +23593,8 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
   // 被外层 catch 包装成 "AI 连接中断，请稍后重试"。
   var requestAbortCtrl = new AbortController();
   var clientReqId = String((req.body && req.body.client_request_id) || '').trim();
+  res._aiClientRequestId = clientReqId;
+  res._aiStartedAt = T0;
   req._searchApiCalls.signal = requestAbortCtrl.signal;
   req._searchApiCalls.userName = userName;
   var streamSeq = 0;
@@ -23663,6 +23640,21 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
   //   使前端 doneReceived 语义闭合，从而保留真实错误信息、不再误报中断。
   var _terminalSent = false;
   var _inFlightRegistered = false; // 本请求是否已在 inFlightStreams 注册（safeEnd 清理条件）
+  var _turnAccepted = false;
+  var interruptedSave = null;
+  function preserveDisconnectedTurn() {
+    if (interruptedSave || !_turnAccepted || res._aiTurnFinishing || !convId || !message) return;
+    interruptedSave = saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId,
+      message: _visionRawText || message,
+      content: sanitizeAssistantVisibleText(contentBuffer || responsesContent || '', { skipActionCleanup: !!roleplayEnabled }),
+      reasoning: persistentReasoning || reasoningBuffer || responsesReasoning || '',
+      model: usedModel, thinkingMode: thinkingMode, processEvents: getProcessEvents(res),
+      cards: siteToolCards, visionUrls: _visionImageUrls, buildMeta: buildMsgMeta,
+      marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0,
+      startedAt: T0, requestId: clientReqId || ('server_' + T0),
+      finishReason: aborted ? 'cancelled' : 'upstream_error' });
+    interruptedSave.then(function(saved) { if (!saved) console.warn('[AGENT-STREAM] interrupted history save failed'); });
+  }
   function terminateWithError(errObj) {
     if (_terminalSent) return;
     _terminalSent = true;
@@ -23684,6 +23676,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
 
   function safeEnd() {
     clearStreamHeartbeat();
+    if (aborted || _terminalSent) preserveDisconnectedTurn();
     try { clearTimeout(_totalTimer); } catch (e) {}
     try { _totalTimer = null; } catch (e) {}
     // ★ P0：清理去重注册，避免 Map 無限增長
@@ -23699,6 +23692,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
   function markStreamDisconnected() {
     if (aborted) return;
     aborted = true;
+    preserveDisconnectedTurn();
     clearStreamHeartbeat();
     try { console.log('[AGENT-STREAM] client disconnected, reqId:', clientReqId || '?'); } catch (e) {}
     try { _controller && _controller.abort(); } catch (e) {}
@@ -23788,6 +23782,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       inFlightStreams.set(sKey, requestAbortCtrl);
       _inFlightRegistered = true;
     }
+    _turnAccepted = true;
 
     // 附件解析与 config/ctx 并行，无附件时 extract 应快速返回
     // ★ 视觉模型（V4 Flash / V4 Flash Vision）带图时跳过图片 OCR，不再生成「图片文字未识别」卡片
@@ -27373,6 +27368,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           role: m.role || 'user',
           content: content,
           reasoning: reasoning,
+          interrupted: m.interrupted === true,
+          client_request_id: m.client_request_id || '',
           process_events: Array.isArray(m.process_events) ? m.process_events : [],
           created_at: r.created_at,
           conversation_id: m.convId || convId,

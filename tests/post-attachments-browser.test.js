@@ -117,7 +117,7 @@ test('portrait originals fill their own Feed frame and scale to the gallery view
  }finally{await f.close();}
 });
 
-test('tablet keyboard preserves desktop media rules and restores them on blur; page gesture guard allows photo zoom',{timeout:30000},async()=>{
+test('tablet keyboard preserves desktop media rules until the keyboard closes; page gesture guard allows photo zoom',{timeout:30000},async()=>{
  const f=await postBrowserFixture({viewport:{width:1024,height:768},counts:[1]});try{
   const {page}=f;await page.emulateMedia({reducedMotion:'reduce'});
   await page.evaluate(()=>{const match=window.matchMedia.bind(window);window.matchMedia=q=>q==='(pointer:coarse)'?{matches:true}:match(q);document.getElementById('postInp').focus();});
@@ -125,7 +125,9 @@ test('tablet keyboard preserves desktop media rules and restores them on blur; p
   await page.setViewportSize({width:1024,height:350});
   assert.equal(await page.locator('#dockBar').isVisible(),false);
   assert.equal(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),'(min-width:768px)');
-  await page.evaluate(()=>document.activeElement.blur());await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  await page.evaluate(()=>document.activeElement.blur());await page.waitForTimeout(150);
+  assert.equal(await page.locator('#dockBar').isVisible(),false);
+  await page.setViewportSize({width:1024,height:768});await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));
   assert.match(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),/min-height/);
   const gestures=await page.evaluate(()=>{function probe(el){const event=new Event('gesturestart',{bubbles:true,cancelable:true});el.dispatchEvent(event);return event.defaultPrevented;}const blocked=probe(document.body);const viewer=document.getElementById('photoPreviewOverlay');viewer.classList.add('active');const own=probe(viewer);viewer.classList.remove('active');return{blocked,own};});assert.deepEqual(gestures,{blocked:true,own:false});
  }finally{await f.close();}
@@ -310,5 +312,27 @@ test('photo preview offers a working original-image retry after all automatic at
   const retry=page.locator('.pp-error-retry');await retry.waitFor({state:'visible'});failed=false;await retry.click();
   await page.waitForFunction(()=>document.getElementById('photoPreviewImage').naturalWidth>0&&getComputedStyle(document.getElementById('photoPreviewImage')).opacity==='1');
   assert.equal(await page.locator('.pp-error-placeholder').count(),0);assert.equal(await page.locator('#photoPreviewOverlay.active').count(),1);assert.equal(await page.locator('#photoPreviewImage').getAttribute('src'),url);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('iPad keyboard shrinking before focus keeps the sidebar and hides the Dock until the closing resize finishes',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({viewport:{width:1280,height:800},ios:'ipad-desktop',counts:[3]});try{
+  const {page}=f;await wireAiChat(page);await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());
+  await page.setViewportSize({width:1280,height:340});await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:310,offsetTop:20});testKeyboardViewport.dispatchEvent(new Event('resize'));});
+  await page.locator('#aiChatMsgInput').focus();await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  assert.equal(await page.locator('#dockBar').isVisible(),false);assert.equal(await page.locator('#desktopWorkbenchSidebar').isVisible(),true);
+  await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());await page.waitForTimeout(200);
+  assert.equal(await page.locator('html').evaluate(el=>el.classList.contains('xtj-tablet-keyboard')),true);assert.equal(await page.locator('#dockBar').isVisible(),false);
+  await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:800,offsetTop:0});testKeyboardViewport.dispatchEvent(new Event('resize'));});
+  await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  assert.equal(await page.locator('#desktopWorkbenchSidebar').isVisible(),true);assert.equal(await page.locator('#dockBar').isVisible(),false);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('rotating a portrait phone does not activate the tablet layout when its keyboard opens',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({viewport:{width:390,height:844},ios:true,counts:[1]});try{
+  const {page}=f;await page.setViewportSize({width:844,height:390});await page.evaluate(()=>{testKeyboardViewport.height=390;testKeyboardViewport.dispatchEvent(new Event('resize'));});
+  await page.locator('#postInp').focus();await page.setViewportSize({width:844,height:250});await page.evaluate(()=>{testKeyboardViewport.height=250;testKeyboardViewport.dispatchEvent(new Event('resize'));});
+  assert.equal(await page.locator('html').evaluate(el=>el.classList.contains('xtj-tablet-keyboard')),false);assert.match(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),/min-height/);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });

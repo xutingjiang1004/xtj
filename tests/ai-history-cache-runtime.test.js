@@ -179,3 +179,54 @@ test('normal and custom chat send prior history only, then append the current me
   assert.match(aiSource, /buildAiConversationHistory\(_bCtxCap, _bCtxChars, userMsg, attachmentPayload\)/);
   assert.match(aiSource, /reconcileAiHistoryPending\(S\._pendingLocalMsgs, msgs, S\.messages\)/);
 });
+
+function customModelFixture({localModels=[],deleted=[],pending=null,fetchImpl}={}) {
+  const values=new Map();const calls=[];
+  const localStorage={getItem:key=>values.has(key)?values.get(key):null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key)};
+  localStorage.setItem('xtj_ai_custom_models__A',JSON.stringify(localModels));
+  localStorage.setItem('xtj_ai_models_deleted_uids__A',JSON.stringify(deleted));
+  if(pending)localStorage.setItem('xtj_ai_models_pending__A',JSON.stringify(pending));
+  const context=vm.createContext({window:{currentUser:'A',_authStateEpoch:1},localStorage,AbortController,setTimeout,clearTimeout,
+    CUSTOM_MODELS_KEY:'xtj_ai_custom_models',CUSTOM_MODEL_PREFIX:'custom:',DEFAULT_AI_MODEL:'deepseek-flash',API_BASE:'/api/agent',S:{selectedModel:'deepseek-flash'},
+    isCustomModelId:value=>value.startsWith('custom:'),getUserAuthPayload:async()=>({token:'token',headers:{Authorization:'Bearer token'}}),
+    fetch:async(url,options={})=>{const call={url,method:options.method,body:options.body?JSON.parse(options.body):null};calls.push(call);return fetchImpl?fetchImpl(call):{ok:true,json:async()=>({ok:true,models:[],deleted_uids:[]})};}});
+  const start=aiSource.indexOf('  function aiStorageScopeName()');const end=aiSource.indexOf('  function genCustomModelUid()',start);
+  vm.runInContext(aiSource.slice(start,end)+'\nglobalThis.models={sync:syncCustomModelsFromServer,save:saveCustomModels,markDeleted:markModelUidsDeleted,load:loadCustomModels,pref:persistResearchModelPref};',context);
+  return {context,values,calls,models:context.models};
+}
+const staleModel={uid:'last',model:'GLM-5-Base',api_key:'fixture-key',provider:'custom',base_url:'https://fixture.invalid/v1'};
+
+test('a server-side deletion of the last model clears stale device caches without uploading them again',async()=>{
+ const f=customModelFixture({localModels:[staleModel]});assert.equal(await f.models.sync(),true);
+ assert.equal(f.models.load().length,0);assert.equal(f.calls.filter(c=>c.method==='PUT').length,0);
+ assert.equal(JSON.parse(f.values.get('xtj_ai_custom_models__A')).length,0);
+});
+
+test('failed model deletions remain hidden locally and retry after a reload before reading account state',async()=>{
+ let online=false,server=[staleModel],tombs=[];
+ const network=async call=>{if(!online)throw Error('offline');if(call.method==='PUT'){tombs=[...new Set([...tombs,...call.body.deleted_uids])];server=call.body.models.filter(m=>!tombs.includes(m.uid));}return{ok:true,json:async()=>({ok:true,models:server,deleted_uids:tombs})};};
+ const f=customModelFixture({localModels:[staleModel],fetchImpl:network});f.models.markDeleted(['last']);assert.equal(await f.models.save([]),false);
+ assert.equal(f.models.load().length,0);const pending=JSON.parse(f.values.get('xtj_ai_models_pending__A'));assert.ok(pending.deleted_uids.includes('last'));
+ online=true;const reloaded=customModelFixture({localModels:[staleModel],deleted:['last'],pending,fetchImpl:network});assert.equal(await reloaded.models.sync(),true);
+ assert.equal(reloaded.models.load().length,0);assert.equal(server.length,0);assert.deepEqual(reloaded.calls.map(c=>c.method),['PUT','GET']);assert.equal(reloaded.values.has('xtj_ai_models_pending__A'),false);
+});
+
+test('a late model response cannot restore deleted models after an intervening local mutation',async()=>{
+ let resolveRead;const f=customModelFixture({fetchImpl:async call=>({ok:true,json:()=>call.method==='GET'?new Promise(resolve=>resolveRead=resolve):Promise.resolve({ok:true,models:[],deleted_uids:['last']})})});
+ const read=f.models.sync();await new Promise(resolve=>setImmediate(resolve));f.models.markDeleted(['last']);await f.models.save([]);
+ resolveRead({ok:true,models:[staleModel],deleted_uids:[]});assert.equal(await read,false);assert.equal(f.models.load().length,0);
+});
+
+test('A to B to A account changes discard old model responses even when the account name matches again',async()=>{
+ let resolveRead;const f=customModelFixture({fetchImpl:async()=>({ok:true,json:()=>new Promise(resolve=>resolveRead=resolve)})});
+ const read=f.models.sync();await new Promise(resolve=>setImmediate(resolve));f.context.window.currentUser='B';f.context.window._authStateEpoch=2;
+ f.values.set('xtj_ai_custom_models__B','[]');f.context.window.currentUser='A';f.context.window._authStateEpoch=3;
+ resolveRead({ok:true,models:[staleModel],deleted_uids:[]});assert.equal(await read,false);assert.equal(f.models.load().length,0);
+ assert.equal(f.values.get('xtj_ai_custom_models__B'),'[]');
+});
+
+test('research preferences do not upload stale model lists and newer deletion records survive the local limit',async()=>{
+ const f=customModelFixture({localModels:[staleModel],deleted:Array.from({length:200},(_,i)=>'old-'+i)});
+ f.models.markDeleted(['last']);assert.equal(f.models.load().length,0);f.models.pref('flash');await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.calls[0].body.models.length,0);assert.ok(f.calls[0].body.deleted_uids.includes('last'));assert.equal(f.calls[0].body.ai_prefs.research_model,'flash');
+});
