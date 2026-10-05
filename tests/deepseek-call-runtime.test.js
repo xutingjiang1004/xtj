@@ -12,6 +12,7 @@ function loadCallDeepSeek(fetchImpl) {
   assert.ok(start >= 0 && end > start, 'callDeepSeek source should be extractable');
 
   const sandbox = {
+    aiTaskPolicy: require('../render-api/ai-task-policy'),
     fetch: fetchImpl,
     AbortController,
     DOMException,
@@ -437,4 +438,18 @@ test('request timeout signal is wired into pending tool cancellation', () => {
   assert.match(helper, /controller\.signal/);
   assert.match(helper, /Promise\.race/);
   assert.match(helper, /removeEventListener/);
+});
+
+
+test('ordinary task budget can complete nine evidence searches before answering', async () => {
+  let requests = 0, tools = 0;
+  const call = loadCallDeepSeek(async (_url, init) => {
+    requests++;
+    const body = JSON.parse(init.body);
+    if (tools < 9) return jsonResponse({ choices: [{ message: { content: '', tool_calls: [{ id: 'search-' + requests, type: 'function', function: { name: 'lookup', arguments: '{}' } }] } }] });
+    assert.equal(body.messages.filter(m => m.role === 'tool').length, 9);
+    return jsonResponse({ choices: [{ message: { content: '已核对九次搜索证据' } }] });
+  });
+  const result = await call([{ role: 'user', content: '逐项核对九个来源' }], { tools: [{ type: 'function', function: { name: 'lookup', parameters: { type: 'object' } } }], max_tool_rounds: 10, tool_executor: async () => { tools++; return { ok: true }; } });
+  assert.equal(tools, 9); assert.equal(requests, 10); assert.equal(result.content, '已核对九次搜索证据');
 });

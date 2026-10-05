@@ -189,19 +189,27 @@ test.describe('AI Agent Chat Fixes Validation', () => {
     // 用探针计数是最可靠的方式。
     await page.addInitScript(() => {
       if (window.__xtjListenerStats) return;
-      window.__xtjListenerStats = { added: 0, removed: 0 };
+      const live = [];
+      window.__xtjListenerStats = { live };
       const proto = EventTarget.prototype;
-      const isLongLivedTarget = target => target === window || target === document || target === window.visualViewport;
-      const origAdd = proto.addEventListener;
-      const origRemove = proto.removeEventListener;
-      proto.addEventListener = function (type, fn, opts) {
-        // Detached chat controls are collectible even without removeListener.
-        // Only global targets can keep a closed chat alive through a listener.
-        if (isLongLivedTarget(this)) window.__xtjListenerStats.added += 1;
-        return origAdd.call(this, type, fn, opts);
+      const isGlobal = target => target === window || target === document || target === window.visualViewport;
+      const origAdd = proto.addEventListener, origRemove = proto.removeEventListener;
+      const capture = opts => typeof opts === 'boolean' ? opts : !!(opts && opts.capture);
+      const forget = entry => { const i = live.indexOf(entry); if (i >= 0) live.splice(i, 1); };
+      proto.addEventListener = function(type, fn, opts) {
+        if (!isGlobal(this) || !fn) return origAdd.call(this, type, fn, opts);
+        if (opts && opts.signal && opts.signal.aborted) return;
+        const existing = live.find(e => e.target === this && e.type === type && e.fn === fn && e.capture === capture(opts));
+        if (existing) return;
+        const entry = { target: this, type, fn, capture: capture(opts), wrapped: fn };
+        if (opts && opts.once) entry.wrapped = function(event) { forget(entry); return typeof fn === 'function' ? fn.call(this, event) : fn.handleEvent(event); };
+        live.push(entry);
+        if (opts && opts.signal) origAdd.call(opts.signal, 'abort', () => forget(entry), { once: true });
+        return origAdd.call(this, type, entry.wrapped, opts);
       };
-      proto.removeEventListener = function (type, fn, opts) {
-        if (isLongLivedTarget(this)) window.__xtjListenerStats.removed += 1;
+      proto.removeEventListener = function(type, fn, opts) {
+        const entry = live.find(e => e.target === this && e.type === type && e.fn === fn && e.capture === capture(opts));
+        if (entry) { forget(entry); return origRemove.call(this, type, entry.wrapped, opts); }
         return origRemove.call(this, type, fn, opts);
       };
     });
@@ -209,8 +217,14 @@ test.describe('AI Agent Chat Fixes Validation', () => {
     await page.evaluate(() => window.__xtjEnsureAiAgentLoaded());
     await page.waitForFunction(() => !!(window.__xtjAiAgent && window.__xtjAiAgent.open));
 
-    const readBalance = () => page.evaluate(() => window.__xtjListenerStats.added - window.__xtjListenerStats.removed);
+    const readBalance = () => page.evaluate(() => window.__xtjListenerStats.live.length);
 
+    // Opening also initializes shared lazy modules once. Measure repeated AI
+    // lifecycles after that first initialization has settled.
+    await page.evaluate(() => window.__xtjAiAgent.open());
+    await page.waitForTimeout(250);
+    await page.evaluate(() => window.__xtjAiAgent.close());
+    await page.waitForTimeout(250);
     const baseline = await readBalance();
     for (let i = 0; i < 2; i++) {
       await page.evaluate(() => window.__xtjAiAgent.open());

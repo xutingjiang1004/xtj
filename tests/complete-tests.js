@@ -129,7 +129,7 @@ test('desktop chat layout helper switches at the phone boundary', function(){
   // Keyboard height must not turn an already active tablet shell into a phone shell.
   var helper = source.match(/function shouldUseDesktopChatSplitLayout\(\)[\s\S]*?\n            }/)[0];
   [[390,844,false,false],[844,390,false,false],[1024,768,false,true],[1024,350,false,false],[1024,350,true,true],[390,350,true,false]].forEach(function(c){
-    var result=vm.runInNewContext('('+helper+')()', {window:{innerWidth:c[0],innerHeight:c[1]},document:{documentElement:{clientWidth:c[0],clientHeight:c[1],classList:{contains:function(name){return name==='xtj-tablet-keyboard'&&c[2];}}}}});
+    var result=vm.runInNewContext('('+helper+')()', {window:{innerWidth:c[0],innerHeight:c[1]},document:{documentElement:{clientWidth:c[0],clientHeight:c[1],classList:{contains:function(name){return name==='xtj-tablet-layout'&&c[2];}}}}});
     assert.strictEqual(result,c[3], 'desktop boundary and tablet keyboard exception at '+c[0]+'x'+c[1]);
   });
   assert.ok(source.indexOf('function syncDockChatLayoutState()') >= 0, 'missing chat layout state sync');

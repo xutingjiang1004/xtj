@@ -5,6 +5,8 @@ test('publish button sends once, shows busy state, and inserts the returned post
   page.on('pageerror', error => pageErrors.push(error.message));
   const createdId = '11111111-1111-4111-8111-111111111111';
   let createCalls = 0;
+  let releaseCreate;
+  const createWait = new Promise(resolve => { releaseCreate = resolve; });
   await page.addInitScript(() => {
     localStorage.setItem('xtj_user', 'publisher');
     localStorage.setItem('xtj_device_id', 'device_publish_test');
@@ -16,7 +18,7 @@ test('publish button sends once, shows busy state, and inserts the returned post
   }));
   await page.route('**/api/post/create', async route => {
     createCalls += 1;
-    await new Promise(resolve => setTimeout(resolve, 120));
+    await createWait;
     const request = route.request();
     expect(request.headers().authorization).toBe('Bearer test-access-token');
     const payload = request.postDataJSON();
@@ -47,6 +49,8 @@ test('publish button sends once, shows busy state, and inserts the returned post
   await button.click();
   await page.evaluate(() => window.doPublish());
   await expect(button).toHaveAttribute('aria-busy', 'true');
+  await expect(button).toBeDisabled();
+  releaseCreate();
   await expect(page.locator(`.post[data-post-id="${createdId}"]`)).toBeVisible();
   await expect(button).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('#postInp')).toHaveValue('');

@@ -1477,6 +1477,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       codeBlocks.push('<pre><code>' + escapeCode(code.replace(/\n$/, '')) + '</code></pre>');
       return '\x00XCB' + idx + '\x00';
     });
+    // Some providers flatten Markdown blocks into one line. Repair only clear
+    // block boundaries; fenced and inline code keep their literal contents.
+    var inlineCode = [];
+    s = s.replace(/`[^`\n]*`/g, function(code) { inlineCode.push(code); return '\x00XIC' + (inlineCode.length - 1) + '\x00'; });
+    s = s.replace(/([^\n])[ \t]+(#{1,6})[ \t]+/g, '$1\n\n$2 ');
+    s = s.replace(/[^\n]+/g, function(line) {
+      if (!/\|[ \t]*:?-{3,}:?[ \t]*\|/.test(line) || !/\|[ \t]+\|/.test(line)) return line;
+      var firstPipe = line.indexOf('|'), prefix = line.slice(0, firstPipe).trim();
+      var lastPipe = line.lastIndexOf('|'), suffix = line.slice(lastPipe + 1).trim();
+      var rows = line.slice(firstPipe, lastPipe + 1).split(/\|[ \t]+\|/);
+      var separatorIndex = rows.findIndex(function(row) { return /^\s*\|?[ \t]*:?-{3,}:?(?:[ \t]*\|[ \t]*:?-{3,}:?)+[ \t]*\|?\s*$/.test(row); });
+      if (separatorIndex !== 1 || rows.length < 3) return line;
+      return (prefix ? prefix + '\n\n' : '\n\n') + rows.map(function(row) { return '|' + row.trim().replace(/^\|/, '').replace(/\|$/, '') + '|'; }).join('\n') + '\n\n' + suffix;
+    });
+    s = s.replace(/\x00XIC(\d+)\x00/g, function(_, index) { return inlineCode[Number(index)] || ''; });
     // ★ 普通正文：HTML 转义
     s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -9705,7 +9720,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!reasoningContainer) {
           reasoningContainer = buildReasoningNode('思考中...', messagesEl);
           assistantNode.insertBefore(reasoningContainer, assistantNode.firstChild);
-          setThinkingExpanded(reasoningContainer, true, messagesEl);
+          setThinkingExpanded(reasoningContainer, !aiContent, messagesEl);
         }
         return reasoningContainer;
       }
@@ -10695,7 +10710,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // C 修复：用户关闭思考时，仅记录状态、不创建/渲染思考节点
             if (_sendThinkingMode === 'off') continue;
             var rnStart = ensureReasoningNode();
-            if (rnStart) setThinkingExpanded(rnStart, true, messagesEl);
+            if (rnStart && !aiContent) setThinkingExpanded(rnStart, true, messagesEl);
             ensureThinkingTimer();
             continue;
           }
@@ -10719,7 +10734,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             var rn = ensureReasoningNode();
             // 流式思考过程中强制展开，避免「只见标题、要等回复结束才能看内容」
-            if (rn && !rn.classList.contains('expanded')) {
+            if (rn && !aiContent && !rn.classList.contains('expanded')) {
               setThinkingExpanded(rn, true, messagesEl);
             }
             var body = reasoningSegment();
@@ -13496,7 +13511,7 @@ function showChatMessages() {
     var inp = document.getElementById('aiChatMsgInput');
     if (inp) inp.placeholder = '和 ' + AI_DISPLAY_NAME + ' 说点什么吧…';
 
-    var empty = document.querySelector('#aiChatRoot .ai-chat-empty');
+    var empty = document.querySelector('#aiChatRoot .ai-chat-empty:not(.ai-history-loading):not(.ai-history-unavailable)');
     if (empty) {
       var e1 = empty.querySelector('.ai-chat-empty-emoji');
       if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);

@@ -10,6 +10,8 @@
 var MAX_TEXT_LEN = 200000;      // 单段文本上限 20 万字符
 var MAX_ROWS = 5000;            // 数据行上限
 var MAX_COLS = 80;              // 数据列上限
+var CHART_FONT_FILE = require('node:path').join(__dirname, 'assets/fonts/wqy-microhei.ttc');
+var chartFontReady = null;
 
 function clampInt(v, min, max, dflt) {
   var n = parseInt(v, 10);
@@ -65,7 +67,12 @@ function normalizeSeries(series, maxPoints) {
     var data = Array.isArray(s) ? s : (Array.isArray(s.data) ? s.data : []);
     var nm = Array.isArray(s) ? ('系列' + (out.length + 1)) : String(s.name || ('系列' + (out.length + 1))).slice(0, 40);
     var nums = [];
-    for (var j = 0; j < data.length && nums.length < maxPoints; j++) nums.push(toNum(data[j]));
+    for (var j = 0; j < data.length && nums.length < maxPoints; j++) {
+      var raw = data[j];
+      var number = typeof raw === 'number' ? raw : Number(String(raw == null ? '' : raw).replace(/[,\s￥$¥%]/g, ''));
+      if ((typeof raw !== 'number' && typeof raw !== 'string') || String(raw).trim() === '' || !isFinite(number)) throw new Error('图表第 ' + (i + 1) + ' 个系列、第 ' + (j + 1) + ' 个数据不是有效数字；请补齐数据，不要把未知值写成零');
+      nums.push(number);
+    }
     if (nums.length) out.push({ name: nm, data: nums });
   }
   return out;
@@ -78,7 +85,7 @@ function buildChartSvg(type, title, labels, series, xLabel, yLabel, width, heigh
   var plotW = Math.max(W - PAD_L - PAD_R, 40);
   var plotH = Math.max(H - PAD_T - PAD_B, 40);
   var parts = [];
-  var fontStack = 'PingFang SC,Hiragino Sans GB,Microsoft YaHei,Noto Sans CJK SC,sans-serif';
+  var fontStack = 'WenQuanYi Micro Hei,PingFang SC,Hiragino Sans GB,Microsoft YaHei,Noto Sans CJK SC,sans-serif';
 
   parts.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">');
   parts.push('<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>');
@@ -161,6 +168,7 @@ function buildChartSvg(type, title, labels, series, xLabel, yLabel, width, heigh
 
   function yPos(v) { return PAD_T + plotH - ((v - minV) / range) * plotH; }
   function xPos(i) {
+    if (type === 'bar') return PAD_L + ((i + 0.5) / Math.max(maxPoints, 1)) * plotW;
     if (maxPoints <= 1) return PAD_L + plotW / 2;
     return PAD_L + (i / (maxPoints - 1)) * plotW;
   }
@@ -257,6 +265,10 @@ function buildChartSvg(type, title, labels, series, xLabel, yLabel, width, heigh
 async function svgToPngDataUrl(sharpLib, svg) {
   if (!sharpLib) return null;
   try {
+    // Register the bundled CJK font with Pango/fontconfig before librsvg draws
+    // text. Naming a font in SVG does not install it on a fresh Render host.
+    if (!chartFontReady) chartFontReady = sharpLib({ text: { text: '中文', font: 'WenQuanYi Micro Hei', fontfile: CHART_FONT_FILE } }).png().toBuffer().catch(function(error) { chartFontReady = null; throw error; });
+    await chartFontReady;
     var png = await sharpLib(Buffer.from(svg, 'utf8'), { density: 144 })
       .png({ compressionLevel: 9 })
       .toBuffer();

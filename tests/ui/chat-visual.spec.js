@@ -262,10 +262,10 @@ test('消息操作条贴近气泡，切换原图有状态反馈，转发仍可�
   expect(diag, 'action panel not found').not.toBeNull();
 
   expect(diag.panelW, 'action panel too wide').toBeLessThanOrEqual(370);
-  expect(diag.panelH, 'horizontal action bar too tall').toBeLessThanOrEqual(105);
+  expect(diag.panelH, 'action grid exceeds two rows').toBeLessThanOrEqual(180);
   expect(diag.panelBottom <= diag.anchorTop + 1 || diag.panelTop >= diag.anchorBottom - 1,
     'action bar should appear above or below its bubble').toBeTruthy();
-  expect(diag.items, 'expected one row of actions').toBeGreaterThanOrEqual(4);
+  expect(diag.items, 'expected complete action grid').toBeGreaterThanOrEqual(4);
   // 全局按钮系统不得覆盖菜单的紧凑布局。
   expect(diag.itemBgImage === 'none' || diag.itemBgImage === '', 'item picked up the global glass gradient').toBeTruthy();
   expect(parseFloat(diag.itemMinH), 'item height should fit a touch target').toBeGreaterThanOrEqual(50);

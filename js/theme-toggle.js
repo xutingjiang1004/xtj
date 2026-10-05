@@ -8,7 +8,7 @@
   var STORAGE_KEY = 'xtj_theme';
   var LEGACY_STORAGE_KEY = 'xtj-theme';
   var htmlEl = document.documentElement;
-  var themeBtn, profileThemeToggle, desktopThemeMode, systemThemeQuery;
+  var themeBtn, desktopThemeMode, systemThemeQuery;
   var gesture = null;
   var dragFrame = 0;
   var suppressPointerClick = false;
@@ -50,10 +50,6 @@
       themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
       themeBtn.setAttribute('aria-label', isDark ? '切换浅色模式，可左右拖动' : '切换深色模式，可左右拖动');
       themeBtn.setAttribute('title', isDark ? '切换浅色模式' : '切换深色模式');
-    }
-    if (profileThemeToggle) {
-      profileThemeToggle.checked = isDark;
-      profileThemeToggle.setAttribute('aria-checked', isDark ? 'true' : 'false');
     }
     if (desktopThemeMode) desktopThemeMode.value = mode;
   }
@@ -432,7 +428,6 @@
 
   function bindThemeToggle() {
     themeBtn = document.getElementById('themeToggle');
-    profileThemeToggle = document.getElementById('profileThemeToggle');
     desktopThemeMode = document.getElementById('desktopThemeMode');
     if (themeBtn) {
       themeBtn.addEventListener('click', function (event) {
@@ -463,9 +458,6 @@
         setThemeMode(event.key === 'ArrowRight' || event.key === 'End' ? 'dark' : 'light');
       });
     }
-    if (profileThemeToggle) profileThemeToggle.addEventListener('change', function () {
-      setThemeMode(this.checked ? 'dark' : 'light');
-    });
     if (desktopThemeMode) desktopThemeMode.addEventListener('change', function () { setThemeMode(this.value); });
   }
 

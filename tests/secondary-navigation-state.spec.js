@@ -15,6 +15,7 @@ async function mainState(page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await page.waitForFunction(() => window.XTJSecondaryPageState && window.restoreMainNavigationState);
 });

@@ -7,8 +7,6 @@
       var loaded = files.map(function () { return 0; }), total = files.reduce(function (sum, file) { return sum + file.size; }, 0);
       var requests = new Set(), percent = 0, stopped = false;
       var host = document.createElement('span'); host.className = 'post-publish-progress';
-      var garden = document.getElementById('pwUploadGarden');
-      if (garden) { var plant = garden.cloneNode(true); plant.removeAttribute('id'); plant.classList.add('is-growing'); var illustration=plant.querySelector('svg'); if(illustration) illustration.setAttribute('viewBox','60 10 180 175'); host.appendChild(plant); }
       var copy = document.createElement('span'); copy.className = 'post-publish-progress-copy';
       var label = document.createElement('span'); label.className = 'post-publish-progress-label';
       var track = document.createElement('span'); track.className = 'post-publish-progress-track';

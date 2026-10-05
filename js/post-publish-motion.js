@@ -1,6 +1,6 @@
 'use strict';
 (function() {
-  var active = new Set(), duration = 420;
+  var active = new Set(), duration = 480;
   function permitted() {
     return typeof Element.prototype.animate === 'function' && !matchMedia('(prefers-reduced-motion: reduce)').matches &&
       document.documentElement.getAttribute('data-xtj-motion') !== 'off';
@@ -23,6 +23,9 @@
   function capture(files, text, isCurrent) {
     if (!permitted() || !isCurrent()) return null;
     var state = {items:[],ghosts:[],animations:[],restores:[],current:isCurrent,stopped:false,motionDone:false};
+    state.feed = Array.from(document.querySelectorAll('#feed > .post')).map(function(node) {
+      return {node:node,box:rect(node)};
+    }).filter(function(item) { return visible(item.box); });
     var previews = document.querySelectorAll('#postMediaPreviewGrid .post-media-preview-thumb');
     // Read all geometry first. Borrow the already decoded preview node and URL;
     // never create another Blob or decode the original again to start a flight.
@@ -105,7 +108,19 @@
         var destination=rect(target);
         plans.push({item:item,target:target,destination:destination,fit:target&&item.image?getComputedStyle(target).objectFit:null,visibility:target?target.style.visibility:''});
       });
-      var jobs=[], timing={duration:duration,easing:'cubic-bezier(.22,.68,.12,1)',fill:'both'};
+      var movements=state.feed.filter(function(item) { return item.node.isConnected; }).map(function(item) {
+        return {node:item.node,before:item.box,after:rect(item.node)};
+      });
+      var jobs=[], timing={duration:duration,easing:'cubic-bezier(.25,.65,.2,1)',fill:'both'};
+      // Existing visible rows follow the layout change on the same clock.
+      // Their sudden jump used to make the otherwise smooth image flight feel abrupt.
+      movements.forEach(function(item) {
+        if (!visible(item.after)) return;
+        var dx=item.before.left-item.after.left,dy=item.before.top-item.after.top;
+        if (Math.abs(dx)+Math.abs(dy)<1) return;
+        var movement=item.node.animate([{transform:'translate3d('+dx+'px,'+dy+'px,0)'},{transform:'translate3d(0,0,0)'}],timing);
+        state.animations.push(movement);jobs.push(movement.finished.catch(function() {}).then(function(){movement.cancel();}));
+      });
       plans.forEach(function(plan) {
         var item=plan.item, target=plan.target, destination=plan.destination, ghost=item.ghost;
         if (!visible(destination)) { ghost.remove(); item.flightDone=item.mediaReady=true; release(state,item); return; }

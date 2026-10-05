@@ -118,17 +118,17 @@ test('portrait originals fill their own Feed frame and scale to the gallery view
 });
 
 test('tablet keyboard preserves desktop media rules until the keyboard closes; page gesture guard allows photo zoom',{timeout:30000},async()=>{
- const f=await postBrowserFixture({viewport:{width:1024,height:768},counts:[1]});try{
+ const f=await postBrowserFixture({viewport:{width:1024,height:768},ios:'ipad-desktop',counts:[1]});try{
   const {page}=f;await page.emulateMedia({reducedMotion:'reduce'});
   await page.evaluate(()=>{const match=window.matchMedia.bind(window);window.matchMedia=q=>q==='(pointer:coarse)'?{matches:true}:match(q);document.getElementById('postInp').focus();});
-  await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-layout'));
   await page.setViewportSize({width:1024,height:350});
   assert.equal(await page.locator('#dockBar').isVisible(),false);
   assert.equal(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),'(min-width:768px)');
   await page.evaluate(()=>document.activeElement.blur());await page.waitForTimeout(150);
   assert.equal(await page.locator('#dockBar').isVisible(),false);
-  await page.setViewportSize({width:1024,height:768});await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));
-  assert.match(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),/min-height/);
+  await page.setViewportSize({width:1024,height:768});assert.equal(await page.locator('html').evaluate(n=>n.classList.contains('xtj-tablet-layout')),true);
+  assert.equal(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),'(min-width:768px)');
   const gestures=await page.evaluate(()=>{function probe(el){const event=new Event('gesturestart',{bubbles:true,cancelable:true});el.dispatchEvent(event);return event.defaultPrevented;}const blocked=probe(document.body);const viewer=document.getElementById('photoPreviewOverlay');viewer.classList.add('active');const own=probe(viewer);viewer.classList.remove('active');return{blocked,own};});assert.deepEqual(gestures,{blocked:true,own:false});
  }finally{await f.close();}
 });
@@ -212,18 +212,20 @@ for(const theme of ['light','dark'])test(theme+': Feed comments use compact tran
 
 for (const [device,viewport] of [['phone',{width:390,height:844}],['tablet',{width:1024,height:768}]]) {
  test(device+': Safari keyboard pan aligns both edges, clears Dock reserve, and recovers while input remains focused',{timeout:30000},async()=>{
-  const f=await postBrowserFixture({counts:[3],ios:true,viewport});try{
+  const f=await postBrowserFixture({counts:[3],ios:device==='tablet'?'ipad-desktop':true,viewport});try{
    const {page}=f;const dockWasVisible=await page.locator('#dockBar').isVisible();await page.evaluate(()=>__xtjOpenAiChat());await page.waitForSelector('#aiChatMsgInput');await page.waitForTimeout(350);
    await page.locator('#aiChatMsgInput').focus();
    await page.evaluate(()=>{testKeyboardViewport.height=360;testKeyboardViewport.offsetTop=86;testKeyboardViewport.dispatchEvent(new Event('resize'));testKeyboardViewport.dispatchEvent(new Event('scroll'));});
    await page.waitForFunction(()=>document.documentElement.style.getPropertyValue('--xtj-visual-top')==='86px');
    let bounds=await page.evaluate(()=>({top:document.querySelector('.ai-chat-header').getBoundingClientRect().top,bottom:document.querySelector('.ai-chat-input-bar').getBoundingClientRect().bottom,padding:getComputedStyle(document.getElementById('aiChatRoot')).paddingBottom,hidden:!document.getElementById('dockBar').getClientRects().length}));
-   assert.ok(Math.abs(bounds.top-86)<=2,JSON.stringify(bounds));assert.ok(Math.abs(bounds.bottom-446)<=2,JSON.stringify(bounds));assert.equal(bounds.padding,'0px');assert.equal(bounds.hidden,true);
+   const content=await page.locator('#dockPanels').boundingBox();
+   assert.ok(Math.abs(bounds.top-(device==='tablet'?content.y:86))<=2,JSON.stringify(bounds));assert.ok(Math.abs(bounds.bottom-(device==='tablet'?content.y+content.height:446))<=2,JSON.stringify(bounds));assert.equal(bounds.padding,'0px');assert.equal(bounds.hidden,true);
    // Keyboard moves both coordinate origins, then Safari retains a stale
    // innerHeight even though VisualViewport has already expanded.
    await page.evaluate(()=>{Object.defineProperty(window,'innerHeight',{value:360,configurable:true});testKeyboardViewport.offsetTop=120;testKeyboardViewport.dispatchEvent(new Event('scroll'));window.dispatchEvent(new Event('resize'));});
    await page.waitForFunction(()=>document.documentElement.style.getPropertyValue('--xtj-visual-top')==='120px');
-   assert.ok(Math.abs((await page.locator('.ai-chat-input-bar').boundingBox()).y+(await page.locator('.ai-chat-input-bar').boundingBox()).height-480)<=2);
+   const panned=await page.locator('#dockPanels').boundingBox();
+   assert.ok(Math.abs((await page.locator('.ai-chat-input-bar').boundingBox()).y+(await page.locator('.ai-chat-input-bar').boundingBox()).height-(device==='tablet'?panned.y+panned.height:480))<=2);
    await page.evaluate(height=>{testKeyboardViewport.height=height;testKeyboardViewport.offsetTop=0;testKeyboardViewport.dispatchEvent(new Event('resize'));},viewport.height);
    await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));
    assert.equal(await page.locator('#dockBar').isVisible(),dockWasVisible);assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),viewport.height+'px');
@@ -283,12 +285,12 @@ for(const viewport of [{width:390,height:844},{width:1280,height:800}])test(view
 });
 test('desktop-UA iPad with a fine pointer freezes desktop layout during an actual landscape resize and never reveals the Dock above the keyboard',{timeout:30000},async()=>{
  const f=await postBrowserFixture({viewport:{width:1280,height:800},ios:'ipad-desktop',counts:[3]});try{
-  const {page}=f;await wireAiChat(page);const dockBefore=await page.locator('#dockBar').isVisible();await page.locator('#aiChatMsgInput').focus();await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  const {page}=f;await wireAiChat(page);const dockBefore=await page.locator('#dockBar').isVisible();await page.locator('#aiChatMsgInput').focus();await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-layout'));
   await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:310,offsetTop:20});testKeyboardViewport.dispatchEvent(new Event('resize'));});await page.setViewportSize({width:1280,height:340});await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-keyboard-open'));
   assert.equal(await page.locator('#dockBar').isVisible(),false);assert.equal(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),'(min-width:768px)');assert.equal(await page.locator('#desktopWorkbenchSidebar').isVisible().catch(()=>false),true);
-  const composer=await page.locator('.ai-chat-input-bar').boundingBox();assert.ok(Math.abs(composer.y+composer.height-330)<=2,JSON.stringify(composer));
+  const composer=await page.locator('.ai-chat-input-bar').boundingBox();const content=await page.locator('#dockPanels').boundingBox();assert.ok(Math.abs(composer.y+composer.height-content.y-content.height)<=2,JSON.stringify({composer,content}));
   await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:800,offsetTop:0});testKeyboardViewport.dispatchEvent(new Event('resize'));});await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));
-  assert.equal(await page.locator('#dockBar').isVisible(),dockBefore);await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));assert.deepEqual(f.errors,[]);
+  assert.equal(await page.locator('#dockBar').isVisible(),dockBefore);await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());assert.equal(await page.locator('html').evaluate(n=>n.classList.contains('xtj-tablet-layout')),true);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 
@@ -319,12 +321,12 @@ test('iPad keyboard shrinking before focus keeps the sidebar and hides the Dock 
  const f=await postBrowserFixture({viewport:{width:1280,height:800},ios:'ipad-desktop',counts:[3]});try{
   const {page}=f;await wireAiChat(page);await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());
   await page.setViewportSize({width:1280,height:340});await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:310,offsetTop:20});testKeyboardViewport.dispatchEvent(new Event('resize'));});
-  await page.locator('#aiChatMsgInput').focus();await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  await page.locator('#aiChatMsgInput').focus();await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-tablet-layout'));
   assert.equal(await page.locator('#dockBar').isVisible(),false);assert.equal(await page.locator('#desktopWorkbenchSidebar').isVisible(),true);
   await page.locator('#aiChatMsgInput').evaluate(el=>el.blur());await page.waitForTimeout(200);
-  assert.equal(await page.locator('html').evaluate(el=>el.classList.contains('xtj-tablet-keyboard')),true);assert.equal(await page.locator('#dockBar').isVisible(),false);
+  assert.equal(await page.locator('html').evaluate(el=>el.classList.contains('xtj-tablet-layout')),true);assert.equal(await page.locator('#dockBar').isVisible(),false);
   await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>{Object.assign(testKeyboardViewport,{height:800,offsetTop:0});testKeyboardViewport.dispatchEvent(new Event('resize'));});
-  await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-tablet-keyboard'));
+  assert.equal(await page.locator('html').evaluate(n=>n.classList.contains('xtj-tablet-layout')),true);
   assert.equal(await page.locator('#desktopWorkbenchSidebar').isVisible(),true);assert.equal(await page.locator('#dockBar').isVisible(),false);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
@@ -333,6 +335,6 @@ test('rotating a portrait phone does not activate the tablet layout when its key
  const f=await postBrowserFixture({viewport:{width:390,height:844},ios:true,counts:[1]});try{
   const {page}=f;await page.setViewportSize({width:844,height:390});await page.evaluate(()=>{testKeyboardViewport.height=390;testKeyboardViewport.dispatchEvent(new Event('resize'));});
   await page.locator('#postInp').focus();await page.setViewportSize({width:844,height:250});await page.evaluate(()=>{testKeyboardViewport.height=250;testKeyboardViewport.dispatchEvent(new Event('resize'));});
-  assert.equal(await page.locator('html').evaluate(el=>el.classList.contains('xtj-tablet-keyboard')),false);assert.match(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),/min-height/);assert.deepEqual(f.errors,[]);
+  assert.equal(await page.locator('html').evaluate(el=>el.classList.contains('xtj-tablet-layout')),false);assert.match(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),/min-height/);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });

@@ -22,7 +22,7 @@ test('personal detail renders server registration time and fences an A to B to A
  await p.evaluate(()=>{currentUser='B';_authStateEpoch++;currentUser='A';_authStateEpoch++;document.getElementById('profileDetailRegTime').textContent='新会话';release();});await p.evaluate(()=>task);assert.equal(await p.locator('#profileDetailRegTime').textContent(),'新会话');
 });
 test('hidden theme control uses live colors, rapid reversal finishes and removes temporary paint',async t=>{
- const p=await pageFor(t,'<button id="themeToggle" hidden><span class="theme-toggle-orb"></span></button><input id="profileThemeToggle" type="checkbox"><div style="background:var(--test-color)">资料</div>');
+ const p=await pageFor(t,'<button id="themeToggle" hidden><span class="theme-toggle-orb"></span></button><div style="background:var(--test-color)">资料</div>');
  await p.addStyleTag({content:'html[data-theme="light"]{--test-color:#fff}html[data-theme="dark"]{--test-color:#111}'});
  await p.evaluate(()=>{window.snapshots=0;document.startViewTransition=()=>{snapshots++;throw Error('hidden orb must not be captured');};});await p.addScriptTag({path:'js/theme-toggle.js'});
  await p.evaluate(()=>{XTJThemeController.setMode('dark');XTJThemeController.setMode('light');XTJThemeController.setMode('dark');});await p.waitForFunction(()=>!document.documentElement.classList.contains('theme-switching'));

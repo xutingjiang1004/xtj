@@ -1,87 +1,10 @@
-const { test, expect } = require('@playwright/test');
-
-// 移动视口：桌面 CSS（>=900px）会隐藏底部 dock，而这些用例通过 dock 切换面板
-test.beforeEach(async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+const {test,expect}=require('@playwright/test');
+test.beforeEach(async({page})=>{await page.setViewportSize({width:390,height:844});await page.route('**/api/**',r=>r.fulfill({json:{ok:true,data:[],token:'test-token'}}));});
+async function open(page){await page.goto('/');await page.waitForFunction(()=>typeof requestPostLocation==='function');await page.evaluate(()=>{window.currentUser='location_tester';window.ensureProtectedOperationAuth=async()=>({ok:true,token:'test-token'});window.xtjProtectedFetch=(url,opts)=>fetch(url,opts);});}
+test('post location is requested only after a click, can be selected and removed',async({page,context})=>{
+ await context.grantPermissions(['geolocation']);await context.setGeolocation({latitude:31.2304,longitude:121.4737,accuracy:18});let calls=0;
+ await page.route('**/api/location/reverse',r=>{calls++;const b=r.request().postDataJSON();expect(b.latitude).toBeCloseTo(31.2304,4);expect(b.longitude).toBeCloseTo(121.4737,4);return r.fulfill({json:{ok:true,address:'上海市',display_name:'上海市',province:'上海',city:'上海',options:[{name:'上海市',address:'上海市',latitude:31.2304,longitude:121.4737}]}});});
+ await open(page);await page.waitForTimeout(150);expect(calls).toBe(0);await page.locator('#postLocationAddBtn').click();await expect.poll(()=>calls).toBe(1);await expect(page.locator('#postLocationPanel')).toBeVisible();const option=page.locator('#postLocationOptions [role=button]').first();await option.click();await expect(page.locator('#postLocationPreview')).toBeVisible();await page.locator('#postLocationPreview button').click();await expect(page.locator('#postLocationPreview')).toBeHidden();
 });
-
-test('precise location is sent only after the user enables sharing', async ({ page, context }) => {
-  await context.grantPermissions(['geolocation'], { origin: 'http://127.0.0.1:4173' });
-  await context.setGeolocation({ latitude: 31.2304, longitude: 121.4737, accuracy: 18 });
-  await page.addInitScript(() => {
-    localStorage.setItem('xtj_user', 'location_tester');
-    localStorage.setItem('xtj_device_id', 'location_device');
-  });
-  let locationCalls = 0;
-  const pageLoadIds = [];
-  await page.route('**/api/user/refresh', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: JSON.stringify({ token: 'location-token' })
-  }));
-  await page.route('**/api/user/location', async route => {
-    locationCalls += 1;
-    expect(route.request().headers().authorization).toBe('Bearer location-token');
-    const body = route.request().postDataJSON();
-    pageLoadIds.push(body.page_load_id);
-    expect(body.latitude).toBeCloseTo(31.2304, 4);
-    expect(body.longitude).toBeCloseTo(121.4737, 4);
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
-  });
-
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => typeof window.xtjSetLocationSharing === 'function');
-  await page.waitForTimeout(300);
-  expect(locationCalls).toBe(0);
-  await page.locator('.dock-tab[data-tab="profile"]').click();
-  await expect(page.locator('#panelProfile')).toHaveClass(/active/);
-  const toggle = page.locator('#profileLocationToggle');
-  await page.locator('label.profile-switch:has(#profileLocationToggle)').click();
-  await expect.poll(() => locationCalls).toBe(1);
-  await expect(page.locator('#profileLocationStatus')).toContainText('精度约');
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect.poll(() => locationCalls).toBe(2);
-  expect(pageLoadIds).toHaveLength(2);
-  expect(pageLoadIds[0]).toMatch(/^page_[a-z0-9_]+$/i);
-  expect(pageLoadIds[1]).not.toBe(pageLoadIds[0]);
-  await page.locator('.dock-tab[data-tab="profile"]').click();
-  await page.locator('label.profile-switch:has(#profileLocationToggle)').click();
-  await expect(page.locator('#profileLocationStatus')).toContainText('已关闭');
-});
-
-test('denied location permission leaves sharing off with readable status', async ({ page, context }) => {
-  await context.clearPermissions();
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => typeof window.xtjSetLocationSharing === 'function');
-  await page.locator('.dock-tab[data-tab="profile"]').click();
-  await expect(page.locator('#panelProfile')).toHaveClass(/active/);
-  await page.locator('label.profile-switch:has(#profileLocationToggle)').click();
-  await expect(page.locator('#profileLocationStatus')).toContainText(/拒绝|无法|不支持|超时/);
-  await expect(page.locator('#profileLocationToggle')).not.toBeChecked();
-});
-
-test('remembered location consent is cleared after permission denial and does not retry on refresh', async ({ page }) => {
-  let watchCalls = 0;
-  await page.exposeFunction('recordLocationWatch', () => { watchCalls += 1; });
-  await page.addInitScript(() => {
-    if (!sessionStorage.getItem('xtj_location_test_seeded')) {
-      localStorage.setItem('xtj_location_sharing_enabled', '1');
-      sessionStorage.setItem('xtj_location_test_seeded', '1');
-    }
-    Object.defineProperty(navigator, 'geolocation', {
-      configurable: true,
-      value: {
-        watchPosition: (_success, error) => {
-          window.recordLocationWatch();
-          setTimeout(() => error({ code: 1 }), 0);
-          return 7;
-        },
-        clearWatch: () => {}
-      }
-    });
-  });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await expect.poll(() => watchCalls).toBe(1);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('xtj_location_sharing_enabled'))).toBeNull();
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(250);
-  expect(watchCalls).toBe(1);
-});
+test('denied post location restores the clickable button with readable feedback',async({page})=>{await page.addInitScript(()=>Object.defineProperty(navigator,'geolocation',{value:{getCurrentPosition:(_ok,error)=>error({code:1,message:'denied'})}}));await open(page);await page.locator('#postLocationAddBtn').click();await expect(page.locator('#postLocationAddBtn')).toBeEnabled();await expect(page.locator('#postLocationPanel')).toBeHidden();await expect(page.locator('body')).toContainText(/拒绝|允许|定位权限/);});
+test('old location sharing preference never triggers passive tracking after a refresh',async({page})=>{await page.addInitScript(()=>{localStorage.setItem('xtj_location_sharing_enabled','1');window.locationReads=0;Object.defineProperty(navigator,'geolocation',{value:{getCurrentPosition(){locationReads++},watchPosition(){locationReads++;return 7},clearWatch(){}}});});await open(page);await page.reload();await page.waitForFunction(()=>typeof requestPostLocation==='function');expect(await page.evaluate(()=>locationReads)).toBe(0);await expect(page.locator('#profileLocationToggle')).toHaveCount(0);});

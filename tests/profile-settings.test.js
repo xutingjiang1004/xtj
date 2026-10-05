@@ -14,6 +14,9 @@ test('profile preferences use verified owner, merge partial fields and publish o
  await request(f.app).patch('/settings').set('x-user','alice').send({theme:'dark',accent:'rose'}).expect(200);
  const a=await request(f.app).get('/settings').set('x-user','alice').expect(200);assert.equal(a.body.settings.signature,'你好');assert.equal(a.body.settings.timeline_visible,false);assert.equal(a.body.settings.default_visibility,'private');assert.equal(a.body.settings.theme,'dark');
  const b=await request(f.app).get('/settings').set('x-user','bob').expect(200);assert.deepEqual(b.body.settings,DEFAULTS);
+ await request(f.app).patch('/settings').set('x-user','alice').send({message_notifications:false,notification_preview:false}).expect(200);
+ const notices=await request(f.app).get('/settings').set('x-user','alice').expect(200);assert.equal(notices.body.settings.message_notifications,false);assert.equal(notices.body.settings.notification_preview,false);
+ await request(f.app).patch('/settings').set('x-user','alice').send({notification_preview:'false'}).expect(400);
  for(const patch of [{user_name:'bob'},{cover_url:'https://evil.test/image'},{background_url:'javascript:alert(1)'},{signature:'a'.repeat(121)},{timeline_visible:'false'},{accent:'evil'}])await request(f.app).patch('/settings').set('x-user','alice').send(patch).expect(400);
  assert.deepEqual(Object.keys(publicProfile(a.body.settings)).sort(),['cover_url','signature','timeline_visible']);f.fail(true);await request(f.app).get('/settings').set('x-user','alice').expect(503);await request(f.app).patch('/settings').set('x-user','alice').send({signature:'未保存'}).expect(503);assert.equal(f.settings.alice.settings.signature,'你好');
 });

@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 test('admin tabs activate before data resolves and deduplicate concurrent loads', async ({ page }) => {
   const counts = Object.create(null);
-  const seenAuth = [];
+  const seenCookies = [];
   const json = (route, body) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -16,11 +16,10 @@ test('admin tabs activate before data resolves and deduplicate concurrent loads'
     if (!key.startsWith('/admin/')) return route.continue();
     counts[key] = (counts[key] || 0) + 1;
 
-    const auth = route.request().headers().authorization;
-    if (auth) seenAuth.push(auth);
+    if (key !== '/admin/login') seenCookies.push(route.request().headers().cookie || '');
 
     // admin.js:726 实际读取 data.user_token（而非 user_user_token）
-    if (key === '/admin/login') return json(route, { ok: true, user_token: 'test-admin-token' });
+    if (key === '/admin/login') return route.fulfill({json:{ok:true,user_token:'test-admin-token'},headers:{'Set-Cookie':'xtj_admin_session=test-cookie; Path=/; HttpOnly; SameSite=Lax'}});
     if (key === '/admin/data') return json(route, {
       posts: [], likes: [], comments: [], announcements: [], bans: []
     });
@@ -43,8 +42,8 @@ test('admin tabs activate before data resolves and deduplicate concurrent loads'
   await page.locator('#loginPw').fill('test-password');
   await page.evaluate(() => window.doAdminLogin());
   await expect(page.locator('#dashboard')).toBeVisible();
-  // dashboard 渲染依赖登录返回的 user_token：后续 admin 数据请求必须携带该 token
-  expect(seenAuth).toContain('Bearer test-admin-token');
+  // Admin APIs use the HttpOnly admin session independently of optional user tokens.
+  await expect.poll(() => seenCookies.some(value => value.includes('xtj_admin_session=test-cookie'))).toBe(true);
   await expect(page.locator('#tabAnn')).toHaveClass(/active/);
 
   const activatedInMs = await page.evaluate(() => {

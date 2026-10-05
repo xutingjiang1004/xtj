@@ -294,7 +294,7 @@ test.describe('release validation', () => {
         await switchTab(page, tab);
         const state = await collectViewportOverflowState(page);
         const scale = await page.evaluate(() => window.visualViewport && window.visualViewport.scale);
-        if (Math.abs((scale || 0) - 1.25) > 0.01) {
+        if (Math.abs((scale || 0) - (viewport.isMobile ? 1 : 1.25)) > 0.01) {
           failures.push(`scale-miss:${viewport.width}x${viewport.height}:${scale}`);
         }
         if (state.scrollWidth > state.innerWidth + 1) {

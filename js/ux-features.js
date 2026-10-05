@@ -1,7 +1,7 @@
 /**
  * Requested UX features only:
  * - Fluency: unified skeleton helper, tab prefetch, image lazy polish, toast grades, send/loading feedback
- * - Site: chat typing + long-press, settings (font/motion/cache/export), announcement pulse, photo confetti hook
+ * - Site: chat typing + long-press, settings (cache/export), announcement pulse, photo confetti hook
  * Does not touch mobile dock bar / capsule animations.
  */
 (function () {
@@ -230,21 +230,6 @@
   }
 
   // ---------- Site 4 settings ----------
-  function applyFontScale(scale) {
-    document.documentElement.style.setProperty('--xtj-font-scale', String(scale || 1));
-    try {
-      window.safeStorage && window.safeStorage.set('xtj_font_scale', String(scale));
-    } catch (e) {}
-  }
-
-  function applyMotion(mode) {
-    document.documentElement.setAttribute('data-xtj-motion', mode || 'full');
-    if (mode === 'off') document.documentElement.classList.add('perf-lite');
-    try {
-      window.safeStorage && window.safeStorage.set('xtj_motion', mode || 'full');
-    } catch (e) {}
-  }
-
   function clearLocalCache() {
     try {
       var keys = [];
@@ -254,7 +239,7 @@
         // keep auth keys（M63：xtj_user_session 等会话/身份键此前被 ^xtj_user$ 精确匹配漏保而误删，导致用户被登出）
         // ★ 2026-09-22：xtj_device_id 必须保活 —— 它是"本机 30 天免登录"的锚点，
         //   一旦被清理，下次登录会生成一个新 ID，等于设备身份丢失。
-        if (/^xtj_user$|^xtj_user_session$|^xtj_admin_session$|^xtj_username$|^xtj_user_name$|^xtj_user_id$|^xtj_pw_hash$|^xtj_device_id$|^xtj_.*token|^xtj_theme|^xtj_font_scale|^xtj_motion|^xtj-notif/.test(k)) continue;
+        if (/^xtj_user$|^xtj_user_session$|^xtj_admin_session$|^xtj_username$|^xtj_user_name$|^xtj_user_id$|^xtj_pw_hash$|^xtj_device_id$|^xtj_.*token|^xtj_theme|^xtj-notif/.test(k)) continue;
         if (k.indexOf('xtj_') === 0 || k.indexOf('xtj-') === 0) keys.push(k);
       }
       keys.forEach(function (k) {
@@ -312,8 +297,8 @@
   }
 
   function injectProfileSettings() {
-    var box = document.querySelector('#panelProfile .profile-settings');
-    if (!box || box.querySelector('#xtjFontScale')) return;
+    var box = document.querySelector('#panelProfile .profile-general-settings');
+    if (!box || box.querySelector('#xtjClearCacheBtn')) return;
 
     function row(label, innerHtml) {
       var div = document.createElement('div');
@@ -327,45 +312,12 @@
       return div;
     }
 
-    var fontRow = row(
-      '字体大小',
-      '<select id="xtjFontScale" class="profile-select" aria-label="字体大小"><option value="0.92">小</option><option value="1">标准</option><option value="1.08">大</option><option value="1.16">更大</option></select>'
-    );
-    var motionRow = row(
-      '动效强度',
-      '<select id="xtjMotionMode" class="profile-select" aria-label="动效强度"><option value="full">满</option><option value="weak">弱</option><option value="off">关</option></select>'
-    );
-    var cacheRow = row('清理缓存', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjClearCacheBtn">清理</button>');
+    var cacheRow = row('清理本机缓存', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjClearCacheBtn">清理</button>');
     var exportRow = row('导出我的数据', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjExportDataBtn">导出</button>');
-    box.appendChild(fontRow);
-    box.appendChild(motionRow);
-    box.appendChild(cacheRow);
-    box.appendChild(exportRow);
-
-    var savedScale = '1';
-    var savedMotion = 'full';
-    try {
-      savedScale = (window.safeStorage && window.safeStorage.get('xtj_font_scale')) || '1';
-      savedMotion = (window.safeStorage && window.safeStorage.get('xtj_motion')) || 'full';
-    } catch (e) {}
-    var fontSel = document.getElementById('xtjFontScale');
-    var motionSel = document.getElementById('xtjMotionMode');
-    if (fontSel) {
-      fontSel.value = savedScale;
-      applyFontScale(savedScale);
-      fontSel.addEventListener('change', function () {
-        applyFontScale(fontSel.value);
-        if (typeof window.showToast === 'function') window.showToast('字体已更新', 'success');
-      });
-    }
-    if (motionSel) {
-      motionSel.value = savedMotion;
-      applyMotion(savedMotion);
-      motionSel.addEventListener('change', function () {
-        applyMotion(motionSel.value);
-        if (typeof window.showToast === 'function') window.showToast('动效已更新', 'success');
-      });
-    }
+    var target = document.querySelector('#panelProfile .profile-general-settings') || box;
+    var about = target.lastElementChild;
+    target.insertBefore(cacheRow,about);
+    target.insertBefore(exportRow,about);
     var clearBtn = document.getElementById('xtjClearCacheBtn');
     if (clearBtn) clearBtn.addEventListener('click', clearLocalCache);
     var exportBtn = document.getElementById('xtjExportDataBtn');
@@ -458,14 +410,6 @@
       });
       moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
     } catch (eObs) {}
-
-    // restore prefs
-    try {
-      var fs = window.safeStorage && window.safeStorage.get('xtj_font_scale');
-      if (fs) applyFontScale(fs);
-      var mo = window.safeStorage && window.safeStorage.get('xtj_motion');
-      if (mo) applyMotion(mo);
-    } catch (e) {}
 
     // observe feed mutations for new images
     try {

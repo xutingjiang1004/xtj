@@ -6506,14 +6506,15 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
  */
 @media (min-width: 768px) {
   #panelAiChat.ai-secondary-panel {
-    --ai-workbench-sidebar: 236px;
-    inset-block: 0;
-    /* ★ 修复：直接占满"侧栏右缘 → 窗口右缘"整个主内容区；
-       此前 inset 按 1536px 居中公式预留空隙，窄于 1536 的窗口右侧留出空白、窗口显得"没适配" */
-    inset-inline-start: var(--ai-workbench-sidebar);
-    inset-inline-end: 0;
+    /* The absolute grid child uses the actual content column, including the
+       shell padding and centered wide-screen margins. */
+    position: absolute;
+    grid-column: 2 / 3;
+    grid-row: 1 / 2;
+    inset: 0;
     width: auto;
-    height: 100dvh;
+    height: 100%;
+    max-height: 100%;
     z-index: 40;
   }
 
@@ -6912,10 +6913,6 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 /* Tablet workbench: keep desktop navigation while collapsing the optional
  * context rail so the conversation remains readable on iPad-sized screens. */
 @media (min-width: 768px) and (max-width: 1179.98px) {
-  #panelAiChat.ai-secondary-panel {
-    --ai-workbench-sidebar: clamp(184px, 23vw, 220px);
-  }
-
   .ai-secondary-panel #aiChatRoot {
     --ai-desktop-history: clamp(190px, 25vw, 236px);
     --ai-desktop-context: 0px;
@@ -7526,6 +7523,10 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 @media (pointer:coarse) { .ai-msg-actions .ai-msg-act { min-height:44px; } }
 
 /* Keep streamed text readable at full opacity; content arrival owns its pace. */
+.ai-chat-messages, .ai-messages, .dt-messages {
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
 .ai-msg-bubble.ai-typing::after { content:none; }
 .ai-msg-bubble.ai-streaming-soft,.ai-thinking-body.ai-streaming-soft,
 [data-theme="dark"] .ai-msg-bubble.ai-streaming-soft,[data-theme="dark"] .ai-thinking-body.ai-streaming-soft { opacity:1;filter:none; }
@@ -7568,6 +7569,14 @@ html.xtj-ios-viewport .ai-site-search-panel,
 html.xtj-ios-viewport #panelDeepThink { height:var(--xtj-app-height)!important; max-height:var(--xtj-app-height)!important; top:var(--xtj-visual-top,0px)!important; bottom:auto!important; }
 html.xtj-ios-viewport.xtj-keyboard-open #panelAiChat.ai-secondary-panel .ai-chat-root { padding-bottom:0!important; }
 html.xtj-ios-viewport.xtj-keyboard-open .ai-chat-input-bar { padding-bottom:8px!important; }
+@media (min-width:768px) {
+  html.xtj-ios-viewport #panelAiChat.ai-secondary-panel {
+    height: 100% !important;
+    max-height: 100% !important;
+    top: 0 !important;
+    bottom: 0 !important;
+  }
+}
 
 .ai-select-pop-heading {
     display: flex;

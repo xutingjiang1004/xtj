@@ -5,7 +5,7 @@ function fixture(){
  const xhrs=[];class XHR{constructor(){this.upload={};this.headers={};xhrs.push(this)}open(method,url){this.url=url}setRequestHeader(k,v){this.headers[k]=v}send(body){this.body=body}getAllResponseHeaders(){return'content-type: application/json'}abort(){if(this.onabort)this.onabort()}}
  const button=new Element(),files=[{size:100},{size:300}];let active=true;
  const c={document:{createElement:()=>new Element(),getElementById:()=>new Element()},window:{XTJ_CONFIG:{SUPABASE_URL:'https://test.supabase.co',SUPABASE_ANON_KEY:'public-key'},supabase:{createClient:(url,key,options)=>({storage:{from:()=>({upload:async(path,file)=>{try{const r=await options.global.fetch(url+'/storage/v1/object/uploads/'+path,{method:'POST',headers:{apikey:key},body:file});return r.ok?{error:null}:{error:new Error('upload failed')}}catch(error){return{error}}}})}})}},Headers,Response,XMLHttpRequest:XHR,DOMException,URL,fetch};
- vm.runInNewContext(fs.readFileSync('js/post-publish-progress.js','utf8'),c);const progress=c.window.XtjPostPublishProgress.begin(button,files,()=>active);const copy=button.children[0].children[1];return{progress,files,xhrs,label:copy.children[0],track:copy.children[1],deactivate(){active=false}};
+ vm.runInNewContext(fs.readFileSync('js/post-publish-progress.js','utf8'),c);const progress=c.window.XtjPostPublishProgress.begin(button,files,()=>active);const copy=button.children[0].children[0];return{progress,files,xhrs,label:copy.children[0],track:copy.children[1],deactivate(){active=false}};
 }
 test('publish progress weights actual bytes, stays below completion until confirmed and retains originals',async()=>{
  const f=fixture(),a=f.progress.upload({},'posts/a',f.files[0],0),b=f.progress.upload({},'posts/b',f.files[1],1);

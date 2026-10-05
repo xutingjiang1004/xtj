@@ -94,10 +94,10 @@ test('run_code 工具描述提到预装库', () => {
   assert.ok(/dayjs/.test(seg), 'run_code 描述未提及 dayjs');
 });
 
-test('工作模式 prompt 提示沙箱预装库（两处）', () => {
-  const matches = serverSrc.match(/run_code 沙箱已预装常用库/g) || [];
-  assert.ok(matches.length >= 2,
-    '应在两处工作模式 prompt 中各提示一次，实际 ' + matches.length + ' 处');
+test('普通聊天共享 prompt 提示沙箱预装库', () => {
+  const sharedPrompt = require('../render-api/ai-task-policy').TASK_POLICY;
+  assert.match(sharedPrompt, /run_code 沙箱已预装常用库/);
+  assert.match(serverSrc, /aiTaskPolicy\.TASK_POLICY/);
 });
 
 // ---------------------------------------------------------------------------

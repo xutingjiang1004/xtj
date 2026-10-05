@@ -35,7 +35,7 @@ for (const width of [390, 1024, 1280]) {
   });
 }
 
-test('actual publishing shows 发布中 and garden keeps moving in automatic lite mode', async () => {
+test('actual publishing shows 发布中 without flowers and keeps failed text', async () => {
   const f = await postBrowserFixture({ counts: [1] });
   let release;
   const pending = new Promise(resolve => { release = resolve; });
@@ -45,15 +45,8 @@ test('actual publishing shows 发布中 and garden keeps moving in automatic lit
     await f.page.locator('#postInp').fill('这是一条文字动态');
     await f.page.locator('#pubBtn').click();
     await f.page.waitForFunction(() => document.querySelector('.post-publish-progress-label')?.textContent === '发布中');
-    const moving = await f.page.locator('#pubBtn .pw-garden-flower').first().evaluate(async el => {
-      const style = getComputedStyle(el), first = style.transform;
-      await new Promise(resolve => setTimeout(resolve, 400));
-      return { name: style.animationName, first, next: getComputedStyle(el).transform };
-    });
-    assert.match(moving.name, /pwGardenBreeze/);
-    assert.notEqual(moving.first, moving.next);
-    await f.page.evaluate(() => document.documentElement.dataset.xtjMotion = 'off');
-    assert.equal(await f.page.locator('#pubBtn .pw-garden-flower').first().evaluate(el => getComputedStyle(el).animationName), 'none');
+    assert.equal(await f.page.locator('#pubBtn .pw-garden').count(),0);
+    assert.equal(await f.page.locator('#pubBtn [role=progressbar]').count(),1);
     release();
     await f.page.waitForFunction(() => !document.getElementById('pubBtn').disabled);
     assert.equal(await f.page.locator('#postInp').inputValue(), '这是一条文字动态');
