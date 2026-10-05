@@ -52,7 +52,7 @@
         if (t.isConnected) {
             var cached = new Image();
             cached.decoding = "async";
-            cached.src = e;
+            cached.src = t.currentSrc || t.src || e;
             t = cached;
         }
         t._ppCachedPixels = pixelCost;
@@ -96,7 +96,7 @@
                     delete _[e], delete H[e], t();
                 });
             }
-            o.src = e, "decode" in o ? o.decode().then(function() {
+            o.src = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(e) : e, "decode" in o ? o.decode().then(function() {
                 safeCacheAndResolve();
             }).catch(function() {
                 n();
@@ -173,14 +173,32 @@
                     e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
                 }(e)));
             }
-            e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = forceReload && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : t, e.complete && e.naturalWidth > 0 && handleLoad();
+            e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t;
+            var displaySource = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(t) : t;
+            e.src = forceReload && displaySource === t && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : displaySource;
+            e.complete && e.naturalWidth > 0 && handleLoad();
         }
     }
     function O(e) {
         cancelTrackAnimation();
         if (M(), s) {
             var t = n, o = document.getElementById("ppPrevImg"), i = document.getElementById("photoPreviewImage"), r = document.getElementById("ppNextImg");
-            // 先硬清邻槽，避免切图瞬间露出上一轮残留图
+            // Promote the exact decoded neighbor node instead of showing it,
+            // then clearing/reloading that same original in the center slot.
+            var desired = t[e] && t[e].imageUrl;
+            var ready = [o, r].find(function (image) {
+                return image && image._ppUrl === desired && image.complete && image.naturalWidth > 0 && image.style.opacity !== '0';
+            });
+            if (ready && i && i._ppUrl !== desired) {
+                var nextSlot = ready.parentNode, currentSlot = i.parentNode, sideId = ready.id;
+                ready.id = 'photoPreviewImage'; i.id = sideId;
+                currentSlot.appendChild(ready); nextSlot.appendChild(i);
+                if (ready.__xtjLoadingElement) currentSlot.appendChild(ready.__xtjLoadingElement);
+                if (i.__xtjLoadingElement) nextSlot.appendChild(i.__xtjLoadingElement);
+                i = ready;
+                o = document.getElementById('ppPrevImg'); r = document.getElementById('ppNextImg');
+            }
+            // Only recycle side slots after the decoded neighbor owns the center.
             if (o) { clearPreviewImageLoad(o, !0); }
             if (r) { clearPreviewImageLoad(r, !0); }
             t[e] && D(i, t[e].imageUrl), e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null),
@@ -283,7 +301,7 @@
                 var o = 1 === e ? -2 * a : 0;
                 // 预取目标与邻图，但不提前把错误 URL 留在当前中槽
                 k(t), z(i), R(o, function() {
-                    // 动画结束后硬重置轨道与三槽，杜绝上一张残留
+                    // Recenter and promote the decoded next image in one task.
                     if (s) {
                         s.style.transition = "none";
                         s.style.transform = "translateX(" + -a + "px)";
@@ -836,7 +854,7 @@
                 J.style.transition = "none", J.style.opacity = "0";
                 if (oe && oe.complete && oe.naturalWidth > 0) {
                     J._ppUrl = S.imageUrl;
-                    J.src = S.imageUrl;
+                    J.src = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(S.imageUrl) : S.imageUrl;
                     if (J.offsetHeight, D) {
                         var ne = J.getBoundingClientRect();
                         if (ne && ne.width > 0) {
@@ -938,7 +956,7 @@
                     // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
                     if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
                 } else {
-                    J.src = S.imageUrl;
+                    J.src = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(S.imageUrl) : S.imageUrl;
                     J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
                         _._openLoadGen === ee && (cleanupOpenListeners(), re());
                     }, 8e3);

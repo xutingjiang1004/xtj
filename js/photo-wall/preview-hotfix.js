@@ -1462,7 +1462,7 @@
     if (img._ppHotfixErrorBound) return;
     img._ppHotfixErrorBound = true;
     function showImageError() {
-        if (!img || !img.isConnected) return;
+        if (!img || !img.isConnected || img.id !== 'photoPreviewImage') return;
         // 延迟窗口内已成功加载则不需要错误 UI
         if (img.complete && img.naturalWidth > 0) { clearImageError(); return; }
         var root = overlay();
@@ -1491,6 +1491,7 @@
     img.addEventListener('xtj:image-timeout', function () { clearErrorUiTimer(); showImageError(); });
     img.addEventListener('xtj:image-request', clearImageError);
     img.addEventListener('error', function () {
+      if (img.id !== 'photoPreviewImage') return;
       clearErrorUiTimer();
       errorUiTimer = window.setTimeout(function () {
         errorUiTimer = 0;
@@ -1498,6 +1499,7 @@
       }, ERROR_UI_DELAY_MS);
     });
     img.addEventListener('load', function () {
+      if (img.id !== 'photoPreviewImage') return;
       clearErrorUiTimer();
       clearImageError();
     });
@@ -1542,15 +1544,26 @@
       var slot=img.parentElement; if (!slot || img.__xtjLoadFeedback) return;
       img.__xtjLoadFeedback=true;
       var loader=document.createElement('div'); loader.className='pp-image-loading';
+      img.__xtjLoadingElement=loader;
       loader.setAttribute('aria-hidden','true');
       loader.innerHTML='<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 36V20"/><path class="pp-leaf pp-leaf-left" d="M24 29C14 29 11 23 12 17C20 17 24 21 24 29Z"/><path class="pp-leaf pp-leaf-right" d="M24 23C24 16 29 12 37 12C37 19 32 24 24 23Z"/><path d="M16 37H32"/></svg><span>正在加载照片…</span>';
       slot.appendChild(loader);
+      var delayed = 0;
+      loader.hidden = true;
       function sync(){
+        clearTimeout(delayed);
         syncPreviewImageFit(img);
-        var ready=img.complete&&img.naturalWidth>0&&img.style.opacity!=='0';
-        loader.hidden=ready||!img.getAttribute('src')||root.classList.contains('pp-img-error');
+        // Loading is source readiness, never a transition's temporary opacity.
+        var ready=img.complete&&img.naturalWidth>0;
+        loader.hidden=true;
+        if (!ready && img.getAttribute('src') && !root.classList.contains('pp-img-error')) {
+          var source=img.getAttribute('src');
+          delayed=setTimeout(function(){
+            if(img.getAttribute('src')===source && !(img.complete&&img.naturalWidth>0) && !root.classList.contains('pp-img-error')) loader.hidden=false;
+          },180);
+        }
       }
-      img.addEventListener('load',sync); img.addEventListener('error',function(){loader.hidden=true;});
+      img.addEventListener('load',sync); img.addEventListener('error',function(){clearTimeout(delayed);loader.hidden=true;});
       new MutationObserver(sync).observe(img,{attributes:true,attributeFilter:['src','style']});
       sync();
     });
@@ -1702,7 +1715,7 @@
   }
   window.addEventListener('xtj:photo-changed',function(){
     if(navTimer)clearTimeout(navTimer);navTimer=0;navBusy=false;
-    syncPreviewMeta(activePhoto());clearImageError();requestAnimationFrame(pumpNavigation);
+    syncPreviewMeta(activePhoto());clearImageError();installImageErrorHandler();installPreviewLoadFeedback();requestAnimationFrame(pumpNavigation);
   });
   function wrapNavigation(kind){return function(){requestNavigation(kind);};}
 

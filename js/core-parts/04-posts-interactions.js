@@ -2363,16 +2363,8 @@
                         return { ok: false, error: new Error(result.error || '发布失败') };
                     }
                     var data = normalizePost(result.data);
-                    if (data && data.id && (!data.ip_region_text || !data.ip_region_status || !data.location_name)) {
-                        try {
-                            var fresh = await fetchPostSnapshot(data.id);
-                            assertPostPublishIdentity(flight);
-                            if (fresh) data = normalizePost(Object.assign({}, data, fresh, { media_items: data.media_items }));
-                        } catch (snapshotError) {
-                            if (snapshotError && snapshotError.code === 'identity_changed') throw snapshotError;
-                            console.warn('[post-create] snapshot refresh failed', snapshotError);
-                        }
-                    }
+                    // The create acknowledgement is enough to render the post.
+                    // IP metadata is refreshed separately, never on the critical path.
                     assertPostPublishIdentity(flight);
                     return { ok: true, fallback: false, data: data };
                 } catch (error) {
@@ -2980,6 +2972,10 @@
                     if (!ipText && (ipStatus === 'failed' || ipStatus === 'resolved')) ipText = '未知';
                     if (!ipText) ipText = '未知';
                 }
+                // Existing posts, cached metadata and new resolver results share this display rule.
+                if (ipProvince) ipText = ipProvince;
+                var provinceMatch = ipText.match(/^(北京市?|天津市?|上海市?|重庆市?|河北省?|山西省?|辽宁省?|吉林省?|黑龙江省?|江苏省?|浙江省?|安徽省?|福建省?|江西省?|山东省?|河南省?|湖北省?|湖南省?|广东省?|海南省?|四川省?|贵州省?|云南省?|陕西省?|甘肃省?|青海省?|台湾省?|内蒙古(?:自治区)?|广西(?:壮族自治区)?|西藏(?:自治区)?|宁夏(?:回族自治区)?|新疆(?:维吾尔自治区)?|香港(?:特别行政区)?|澳门(?:特别行政区)?)/);
+                if (provinceMatch) ipText = provinceMatch[1].replace(/省$|市$|壮族自治区$|回族自治区$|维吾尔自治区$|自治区$|特别行政区$/, '');
                 if (ipText) {
                     parts.push('<div class="post-ip-region">IP属地：' + escapeHtml(ipText) + '</div>');
                 }
@@ -3031,7 +3027,7 @@
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
                     var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
                     return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="if(this.classList.contains(\'post-image-failed\'))retryPostImage(this);else openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
-                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)" onerror="markPostImageFailed(this)">' +
+                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)" onerror="markPostImageFailed(this)">' +
                         '<span class="post-media-error" role="status">图片未加载 · 点击重试</span>' +
                         (index === 8 && items.length > visible.length ? '<span class="post-media-overflow">+' + (items.length - visible.length) + '</span>' : '') + '</button>';
                 }).join('') + '</div>';
@@ -3040,6 +3036,15 @@
             window.renderPostMediaGrid = renderPostMediaGrid;
             window.markPostImageFailed = function(img) {
                 var cell = img && img.closest('.post-media-cell');
+                var original = img && img.getAttribute('data-media-url');
+                if (cell && img.complete && original && window.xtjRetryOriginalImageUrl && img._xtjAutoRetryOriginal !== original) {
+                    var retry = window.xtjRetryOriginalImageUrl(original);
+                    if (retry !== original) {
+                        img._xtjAutoRetryOriginal = original;
+                        img.src = retry;
+                        return;
+                    }
+                }
                 if (cell) cell.classList.add('post-image-failed');
             };
             window.retryPostImage = function(cell) {
@@ -4694,6 +4699,8 @@
             });
 
             async function readPostImageDimensions(file) {
+                var preview = window.XtjPostComposerMedia && window.XtjPostComposerMedia.imageDimensions(file);
+                if (preview && preview.width <= 20000 && preview.height <= 20000) return preview;
                 var url = URL.createObjectURL(file);
                 try {
                     return await new Promise(function(resolve) {
@@ -4809,6 +4816,7 @@
                     uploadedPath = '';
                     assertPostPublishIdentity(flight);
                     touchUserSession(false);
+                    if (window.XtjPostOriginals) window.XtjPostOriginals.prepare(selectedPostMedia, insertRes.data);
                     var publishMotion = window.XtjPostPublishMotion && window.XtjPostPublishMotion.capture(selectedPostMedia, plainText, function() { return currentUser === flight.owner && _authStateEpoch === flight.epoch; });
                     resetPostComposer();
                     // ★ 2026-09-27 修复（审计 P13-②：失败仍 resetPostPreview 导致

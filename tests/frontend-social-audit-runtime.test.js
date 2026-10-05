@@ -58,8 +58,8 @@ test('delayed create JSON cannot reset a switched identity and old finally canno
   second.resolve({ok:true,data:{id:'id-b',ip_region_text:'r',ip_region_status:'resolved',location_name:'l'}});await fresh;
   assert.equal(r.calls.filter(x=>x.url==='/api/post/create').length,2);assert.deepEqual(r.resets,['composer','preview']);assert.equal(r.button.disabled,false);
 });
-test('snapshot completion after A→B→A is dropped before cache and composer mutations',async()=>{
-  const snapshot=deferred(),json=deferred(),r=publishRuntime({snapshot,createJson:json});const task=r.ctx.window.doPublish();json.resolve({ok:true,data:{id:'id'}});await new Promise(resolve=>setImmediate(resolve));r.switch('B');r.switch('A');r.elements.postInp.value='new A draft';snapshot.resolve({id:'id',ip_region_text:'r'});await task;
+test('create acknowledgement after A→B→A is dropped before cache and composer mutations',async()=>{
+  const snapshot=deferred(),json=deferred(),r=publishRuntime({snapshot,createJson:json});const task=r.ctx.window.doPublish();await new Promise(resolve=>setImmediate(resolve));r.switch('B');r.switch('A');r.elements.postInp.value='new A draft';json.resolve({ok:true,data:{id:'id'}});await task;
   assert.deepEqual(r.resets,[]);assert.equal(r.elements.postInp.value,'new A draft');
 });
 test('failed media publish uses authenticated cleanup and retains retry metadata when cleanup fails',async()=>{
@@ -78,3 +78,13 @@ test('A→B→A does not clean abandoned A paths until the old in-flight upload 
   r.switch('B');r.switch('A');await new Promise(resolve=>setImmediate(resolve));assert.equal(r.calls.filter(c=>c.url==='/api/post/media/cleanup').length,0);
   upload.resolve({});await task;await new Promise(resolve=>setImmediate(resolve));assert.equal(r.calls.filter(c=>c.url==='/api/post/media/cleanup').length,1);assert.equal(r.calls.filter(c=>c.url==='/api/post/create').length,0);assert.deepEqual(JSON.parse(r.storage.get('xtj_post_media_pending_A')),[]);
 });
+
+ test('existing and newly resolved post IP displays omit cities',()=>{
+ const ctx={window:{},escapeHtml:x=>x};
+ const start=postSource.indexOf('            function buildPostLocationHtml('),end=postSource.indexOf('            window.buildPostLocationHtml =',start);
+ vm.runInNewContext(postSource.slice(start,end),ctx);
+ for(const post of [{ip_region_text:'浙江 舟山'},{ip_region_text:'浙江杭州'},{ip_province:'浙江省',ip_city:'湖州',ip_region_text:'浙江 湖州'},{_contentMeta:{ip_region_text:'广东 深圳'}},{ip_region_text:'广西壮族自治区 南宁'}]){
+ const html=ctx.buildPostLocationHtml(post);assert.match(html,/IP属地：(浙江|广东|广西)<\/div>/);assert.doesNotMatch(html,/舟山|杭州|湖州|深圳|南宁/);
+ }
+ assert.match(ctx.buildPostLocationHtml({ip_region_text:'日本'}),/IP属地：日本/);
+ });
