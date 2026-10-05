@@ -42,6 +42,35 @@ async function synced(page) {
       "synced",
   );
 }
+for (const [width, height, theme] of [[1280, 800, "light"], [1920, 900, "dark"], [1024, 600, "light"]])
+  test(`${width}px: personal settings scroll down and back up with the mouse wheel`, { timeout: 45000 }, async () => {
+    const f = await postBrowserFixture({ viewport: { width, height }, theme, counts: [1] });
+    try {
+      const { page } = f;
+      await preferences(f, { theme });
+      await page.evaluate(() => XTJModuleLoader.load("enhancements"));
+      await page.waitForSelector("#xtjClearCacheBtn");
+      await page.waitForTimeout(400);
+      const panel = page.locator("#panelProfile");
+      assert.equal(await panel.evaluate(n => getComputedStyle(n).overflowY), "auto");
+      const sidebarBefore = await page.locator("#desktopWorkbenchSidebar").boundingBox();
+      const box = await panel.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 2500);
+      await page.waitForFunction(() => {
+        const n = document.getElementById("panelProfile");
+        return n.scrollTop > 100 && n.scrollTop + n.clientHeight >= n.scrollHeight - 2;
+      });
+      assert.equal(await page.locator("#xtjClearCacheBtn").evaluate(n => {
+        const r = n.getBoundingClientRect(), p = document.getElementById("panelProfile").getBoundingClientRect();
+        return r.top >= p.top && r.bottom <= p.bottom;
+      }), true, "last general setting is reached by wheel scrolling");
+      await page.mouse.wheel(0, -2500);
+      await page.waitForFunction(() => document.getElementById("panelProfile").scrollTop === 0);
+      assert.deepEqual(await page.locator("#desktopWorkbenchSidebar").boundingBox(), sidebarBefore);
+      assert.deepEqual(f.errors, []);
+    } finally { await f.close(); }
+  });
 test("actual AI page stays in the content column at tablet, desktop and centered wide-screen widths", { timeout: 60000 }, async () => {
   for (const width of [834, 1280, 1920]) {
     const f = await postBrowserFixture({ viewport: { width, height: 880 }, theme: "dark", counts: [1] });

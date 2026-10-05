@@ -44,7 +44,17 @@
 .author-post-meta { font-size:11px; color:var(--text-secondary); line-height:1.5; }
 .author-post-media-label { display:grid; place-items:center; flex:0 0 96px; height:72px; border-radius:5px; color:var(--primary); background:rgba(99,153,137,.08); font-size:14px; }
 .author-post-status { padding:20px; display:flex; align-items:center; justify-content:center; gap:10px; color:var(--text-secondary); font-size:12px; }
-.author-post-load-more { min-height:44px; padding:8px 15px; border:1px solid var(--border); border-radius:18px; background:transparent; color:var(--primary); cursor:pointer; }
+#userProfileModal .author-post-load-more {
+  min-height:44px; padding:8px 15px; border:0!important; border-radius:0!important;
+  background:transparent!important; color:var(--primary); font:inherit; font-size:13px;
+  box-shadow:none!important; backdrop-filter:none!important; -webkit-backdrop-filter:none!important;
+  filter:none!important; transform:none!important; cursor:pointer;
+}
+#userProfileModal .author-post-load-more::before,
+#userProfileModal .author-post-load-more::after { content:none!important; }
+#userProfileModal .author-post-load-more:hover:not(:disabled) { text-decoration:underline; text-underline-offset:4px; }
+#userProfileModal .author-post-load-more:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+#userProfileModal .author-post-load-more:disabled { opacity:.55; cursor:wait; }
 [data-theme="dark"] .author-post-cover { background:linear-gradient(155deg,#25453c,#253936 60%,#35474d); }
 /* Author navigation and the existing post detail are separate stacked surfaces. */
 #userProfileModal { z-index:105; }
