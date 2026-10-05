@@ -3633,9 +3633,9 @@ function researchCacheGet(key) {
   return entry;
 }
 
-function researchCacheSet(key, answer, sources) {
+function researchCacheSet(key, answer, sources, thinkingLog) {
   if (researchCache.has(key)) researchCache.delete(key);
-  researchCache.set(key, { answer: String(answer || ''), sources: Array.isArray(sources) ? sources : [], ts: Date.now() });
+  researchCache.set(key, { answer: String(answer || ''), sources: Array.isArray(sources) ? sources : [], thinking_log: Array.isArray(thinkingLog) ? thinkingLog : [], ts: Date.now() });
   if (researchCache.size > RESEARCH_CACHE_MAX) {
     var oldestKey = researchCache.keys().next().value;
     if (oldestKey !== undefined) researchCache.delete(oldestKey);
@@ -3676,7 +3676,7 @@ async function rewriteResearchQuery(query) {
 // D. 研究记录持久化：posts 表（media_type=AI_AGENT_MESSAGE_MARKER, actor_key=ai_msg_conv_<convId>_<ts>）
 //    content 存 JSON {type:'tavily_research', query, answer, sources}；失败不阻断流（console.warn）
 //    返回插入 id；失败时返回 actor_key，异常时返回 null
-async function persistResearchRecord(userName, convId, query, answer, sources) {
+async function persistResearchRecord(userName, convId, query, answer, sources, thinkingLog) {
   if (!userName || !convId) return null;
   try {
     var nowTs = Date.now();
@@ -3684,7 +3684,8 @@ async function persistResearchRecord(userName, convId, query, answer, sources) {
       type: 'tavily_research',
       query: String(query || ''),
       answer: String(answer || ''),
-      sources: Array.isArray(sources) ? sources : []
+      sources: Array.isArray(sources) ? sources : [],
+      thinking_log: Array.isArray(thinkingLog) ? thinkingLog : []
     });
     var actorKey = 'ai_msg_conv_' + convId + '_' + nowTs;
     var insertResult = await supabase.from('posts').insert({
@@ -11950,7 +11951,9 @@ app.use('/api/chat', createChatSocialRouter({
 }));
 
 app.use('/api/profile/records', require('./profile-records').createProfileRecords({ express, supabase, authenticateUser, rateLimit }));
-app.use('/api/profile/posts', require('./author-posts').createAuthorPosts({ express, supabase, optionalAuth, rateLimit, adminName: ADMIN_USERNAME, looksLikeSystemTelemetry }));
+const profileSettings = require('./profile-settings');
+app.use('/api/profile/settings', profileSettings.createProfileSettings({ express, supabase, authenticateUser, rateLimit, sharp }));
+app.use('/api/profile/posts', require('./author-posts').createAuthorPosts({ express, supabase, optionalAuth, rateLimit, adminName: ADMIN_USERNAME, looksLikeSystemTelemetry, readSettings: author => profileSettings.readProfileSettings(supabase, author) }));
 app.use('/api/user/behavior-consent', require('./behavior-consent').createBehaviorConsent({ express, supabase, authenticateUser, rateLimit }));
 app.use('/api/user/export', require('./personal-export').createPersonalExport({ express, supabase, authenticateUser, rateLimit, privateStorage: dmPrivateStorage }));
 app.use(require('./location-history').createLocationHistory({express,supabase,verifyToken,authenticateUser,rateLimit,audit:logAdminAudit}));
@@ -13801,6 +13804,7 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     }
     // ★ 2026-09-26（审计 P2-7）：actor_key（幂等键）此前完全无校验，客户端可写入
     //   任意长度/任意字符，混淆唯一索引语义。这里限定形态与长度，非法时改用服务端生成值。
+    if (!req.body.visibility) visibility = (await profileSettings.readProfileSettings(supabase, req.userName)).default_visibility;
     var clientActorKey = String(req.body && req.body.actor_key || '');
     if (clientActorKey && !/^[A-Za-z0-9_:.\-]{1,128}$/.test(clientActorKey)) {
       return res.status(400).json({ error: '幂等键格式无效', code: 'invalid_actor_key' });
@@ -23053,7 +23057,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       model: chosenModel,
       messages: msgs,
       temperature: typeof options.temperature === 'number' ? options.temperature : 0.6,
-      max_tokens: options.maxTokens || 2000
+      max_tokens: options.maxTokens || options.max_tokens || 2000
     };
     if (options.stream) payload.stream = true;
     // ★ P1-3 修复：同 /custom-chat/stream —— `agent:` 对内置 fetch 无效，
@@ -25993,6 +25997,7 @@ async function runResearchSubAgent(opts) {
       thinking_mode: 'high',
       max_tokens: 4000,
       signal: subAbortCtrl.signal,
+      onThinkingChunk: opts.onThinkingChunk,
       onContentChunk: function (c) { analysis += c; }
     });
     if (!analysis && r2 && r2.content) analysis = r2.content;
@@ -26054,7 +26059,7 @@ async function callCustomModelOnce(cm, messages, options) {
       model: chosenModel,
       messages: messages,
       temperature: typeof options.temperature === 'number' ? options.temperature : 0.6,
-      max_tokens: options.maxTokens || 2000
+      max_tokens: options.maxTokens || options.max_tokens || 2000
     };
     if (!wantStream && options.jsonObject) payload.response_format = { type: 'json_object' };
     if (wantStream) payload.stream = true;
@@ -26088,6 +26093,8 @@ async function callCustomModelOnce(cm, messages, options) {
             if (!raw || raw === '[DONE]') continue;
             try {
               var j = JSON.parse(raw);
+              var thought = j && j.choices && j.choices[0] && j.choices[0].delta && (j.choices[0].delta.reasoning_content || j.choices[0].delta.reasoning);
+              if (thought && typeof options.onThinkingChunk === 'function') options.onThinkingChunk(String(thought));
               var delta = j && j.choices && j.choices[0] && ((j.choices[0].delta && j.choices[0].delta.content) || j.choices[0].text);
               if (delta) {
                 full += String(delta);
@@ -26107,6 +26114,8 @@ async function callCustomModelOnce(cm, messages, options) {
     }
     var data = await upstream.json();
     var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    var thought = data && data.choices && data.choices[0] && data.choices[0].message && (data.choices[0].message.reasoning_content || data.choices[0].message.reasoning);
+    if (thought && typeof options.onThinkingChunk === 'function') options.onThinkingChunk(String(thought));
     var usage = (data && data.usage) || null;
     return { content: String(content || '').trim(), usage: usage, model_used: chosenModel };
   } finally {
@@ -26198,7 +26207,8 @@ async function runSelfResearchFlow(opts) {
         temperature: params.temperature,
         jsonObject: !!(params.response_format && params.response_format.type === 'json_object'),
         signal: flowAbortCtrl.signal,
-        timeoutMs: 180000
+        timeoutMs: 180000,
+        onThinkingChunk: params.onThinkingChunk
       });
       return { content: r.content, usage: r.usage, reasoning_tokens: 0, model_used: researchCustomModel.model };
     }
@@ -26231,8 +26241,11 @@ async function runSelfResearchFlow(opts) {
     try { clearTimeout(flowWallTimer); } catch (e) {}
   }
 
+  var processLog = require('./research-process').createResearchProcess();
+  function emitThinking(role, chunk) { if (!isCancelled() && chunk) sseSend({type:'research_thinking',agent_role:role,chunk:String(chunk)}); }
   function sseSend(obj) {
     if (res.writableEnded) return;
+    processLog.record(obj);
     try { writeSse(res, obj); } catch (e) {}
   }
   function isCancelled() { return cancelToken.cancelled === true || res.writableEnded; }
@@ -26293,6 +26306,7 @@ async function runSelfResearchFlow(opts) {
         thinking_mode: 'high',
         max_tokens: 4096,
         response_format: { type: 'json_object' },
+        onThinkingChunk: function(chunk) { emitThinking('总指挥 · 研究规划',chunk); },
         // ★ M38 审计修复：传入流程级 abort signal，客户端断开/整体超时立即中断在途调用
         signal: flowAbortCtrl.signal
       })
@@ -26344,6 +26358,7 @@ async function runSelfResearchFlow(opts) {
     return runResearchSubAgent({
       agent: agent, originalMessage: researchQuery, sharedPrefix: sharedPrefix,
       cancelToken: cancelToken, deep: deepMode, signal: flowAbortCtrl.signal,
+      onThinkingChunk: function(chunk) { emitThinking(agent.role+' · 分析',chunk); },
       onSearch: function () { searchCountTotal++; }
     }).then(function (wr) {
       if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
@@ -26375,7 +26390,7 @@ async function runSelfResearchFlow(opts) {
           { role: 'user', content: '研究主题: ' + researchQuery + '\n\n已有材料摘要:\n' + gapDigest.slice(0, 6000) + '\n\n请输出缺口 JSON。' }
         ],
         // ★ M38 审计修复：传入流程级 abort signal
-        { thinking_mode: 'high', max_tokens: 1500, response_format: { type: 'json_object' }, model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER), signal: flowAbortCtrl.signal }
+        { onThinkingChunk:function(chunk){emitThinking('总指挥 · 查漏补缺',chunk);}, thinking_mode: 'high', max_tokens: 1500, response_format: { type: 'json_object' }, model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER), signal: flowAbortCtrl.signal }
       );
       if (gapRes && gapRes.usage) accumulateResearchUsage(gapRes.usage);
       var gapPlan = null;
@@ -26476,6 +26491,7 @@ async function runSelfResearchFlow(opts) {
         max_tokens: 8192,
         signal: synthAbort.signal,
         timeoutMs: 300000,
+        onThinkingChunk: function(chunk) { emitThinking('总指挥 · 综合研判',chunk); },
         onContentChunk: function (chunk) {
           if (isCancelled() || synthAbort.signal.aborted) return;
           finalAnswer += chunk;
@@ -26489,6 +26505,7 @@ async function runSelfResearchFlow(opts) {
         total_timeout_ms: 600000, // 长报告 + high 思考，放宽到 10 分钟
         model: activeResearchModel,
         signal: synthAbort.signal,
+        onThinkingChunk: function(chunk) { emitThinking('总指挥 · 综合研判',chunk); },
         onContentChunk: function (chunk) {
           if (isCancelled() || synthAbort.signal.aborted) return;
           finalAnswer += chunk;
@@ -26519,7 +26536,8 @@ async function runSelfResearchFlow(opts) {
       sources: allSources,
       agents: agents,
       usage: researchUsageAgg,
-      search_count: searchCountTotal
+      search_count: searchCountTotal,
+      thinking_log: processLog.snapshot()
     };
   }
   if (!finalAnswer || !finalAnswer.trim()) finalAnswer = '（研究未完成，请重试）';
@@ -26529,7 +26547,8 @@ async function runSelfResearchFlow(opts) {
     queries: allQueries,
     agents: agents,
     usage: researchUsageAgg,
-    search_count: searchCountTotal
+    search_count: searchCountTotal,
+    thinking_log: processLog.snapshot()
   };
 }
 
@@ -26699,7 +26718,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
           }
         } catch (e) { /* 查询失败则按新记录处理 */ }
         if (!cachedMsgId) {
-          cachedMsgId = await persistResearchRecord(userName, convId, query, cachedAnswer, cached.sources);
+          cachedMsgId = await persistResearchRecord(userName, convId, query, cachedAnswer, cached.sources, cached.thinking_log);
         }
         // S-6: 缓存命中路径轻量记账（tokens=0），防止研究被免费无限重放
         recordAiTurnUsage(userName, null, {
@@ -26712,6 +26731,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
           search_count: 0,
           did_search: false
         }).catch(function() {});
+        if (!aborted && Array.isArray(cached.thinking_log)) cached.thinking_log.forEach(function(entry){writeSse(res,{type:'research_thinking',agent_role:entry.agent_role,chunk:entry.chunk});});
         if (!aborted) writeSse(res, { type: 'research_done', answer: cachedAnswer, sources: cached.sources, message_id: cachedMsgId, cached: true });
       }
       return safeEnd();
@@ -26754,7 +26774,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     }
 
     // D. 持久化 + 缓存写入 + 结束事件
-    var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources);
+    var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log);
     // ★ 修复 S4（簇 A，续）：持久化已完成 → 本次研究的所有上游费用均已实际发生，
     //   此处断开同样必须补记账（此前直接 return 会漏掉整笔研究用量）。
     if (aborted) {
@@ -26767,7 +26787,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       });
       return safeEnd();
     }
-    researchCacheSet(cacheKey, selfResult.answer, selfResult.sources);
+    researchCacheSet(cacheKey, selfResult.answer, selfResult.sources, selfResult.thinking_log);
 
     // 扣减深入研究全链路 token（输入/思考/输出）与实际搜索次数
     var researchQuota = null;
@@ -27355,6 +27375,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
               content = c.answer;
               researchQuery = typeof c.query === 'string' ? c.query : '';
               researchSources = Array.isArray(c.sources) ? c.sources : [];
+              if (Array.isArray(c.thinking_log)) m.thinking_log = c.thinking_log;
             } else if (c && typeof c.reply === 'string') {
               reasoning = c.reasoning || '';
               content = c.reply;

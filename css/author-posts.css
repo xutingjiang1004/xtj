@@ -54,3 +54,5 @@
   .author-post-date { flex-basis:49px; }
   .author-post-mosaic { width:90px; height:90px; flex-basis:90px; }
 }
+
+.author-post-signature { max-width:100%; color:var(--text-secondary,#648379); font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; }

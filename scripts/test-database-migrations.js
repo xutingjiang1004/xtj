@@ -39,6 +39,15 @@ async function main(){
   snap=await modelSave();assert.ok(snap.models.some(m=>m.uid==='extra'));assert.ok(!snap.models.some(m=>m.uid==='rolled-back'));assert.equal((await c.query("SELECT count(*)::int AS count FROM public.posts WHERE user_name='audit_a' AND media_type='__custom_ai_models__'")).rows[0].count,1);checks++;console.log('PASS model snapshot rollback is atomic and leaves exactly one account snapshot');
   for(const role of ['anon','authenticated']){await c.query('SET ROLE '+role);try{await assert.rejects(c.query(modelSql,modelParams()),/permission denied/);}finally{await c.query('RESET ROLE');}}
   await c.query('SET ROLE service_role');try{assert.equal((await c.query(modelSql,modelParams())).rows[0].result.ok,true);}finally{await c.query('RESET ROLE');}checks++;console.log('PASS model mutation RPC is restricted to the server service role');
+  const profileOwner=(await c.query("SELECT id FROM public.posts WHERE user_name='audit_a' AND media_type='__auth__'")).rows[0].id;
+  const profileSql='SELECT public.save_account_profile_settings($1,$2,$3::jsonb) AS saved';
+  const profileSave=async patch=>(await pool.query(profileSql,['audit_a',profileOwner,JSON.stringify(patch)])).rows[0].saved;
+  await Promise.all([profileSave({signature:'first'}),profileSave({accent:'blue'}),profileSave({timeline_visible:false}),profileSave({default_visibility:'private'})]);
+  const profile=await profileSave({font_size:'large'});assert.equal(profile.signature,'first');assert.equal(profile.accent,'blue');assert.equal(profile.timeline_visible,false);assert.equal(profile.default_visibility,'private');
+  await assert.rejects(c.query(profileSql,['audit_b',profileOwner,'{}']),/invalid profile owner/);
+  for(const role of ['anon','authenticated']){await c.query('SET ROLE '+role);try{await assert.rejects(c.query('SELECT * FROM public.account_profile_settings'),/permission denied/);await assert.rejects(c.query(profileSql,['audit_a',profileOwner,'{}']),/permission denied/);}finally{await c.query('RESET ROLE');}}
+  await c.query('SET ROLE service_role');try{assert.equal((await c.query(profileSql,['audit_a',profileOwner,'{"density":"compact"}'])).rows[0].saved.density,'compact');}finally{await c.query('RESET ROLE');}
+  checks++;console.log('PASS account profile settings merge concurrently, verify account identity and deny direct client reads/writes');
   const sqlClaim='SELECT public.claim_ai_search_credit($1,$2,$3,100000::bigint,1000000::bigint,$4) AS result';
   const claim=async(user,id,limit=3)=> (await pool.query(sqlClaim,[user,id,id,limit])).rows[0].result;
   const claims=await Promise.all(Array.from({length:20},()=>claim('audit_a',crypto.randomUUID())));

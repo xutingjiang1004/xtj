@@ -418,17 +418,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Normal chat has a bounded, tool-aware middle gear.  It is intentionally
     // separate from deep research so the latter remains a dedicated flow.
     responseProfile: 'normal',
-    // ★ P 新增: 深度思考专用思考程度(从后端 config 同步, 与普通聊天分开)
+    // ★ P 新增: 深入研究专用思考程度(从后端 config 同步, 与普通聊天分开)
     deepThinkEffort: 'max',
     deepThinkEnabled: true,    // 后端 config.deep_think.enabled
     tavilyResearchEnabled: false, // 后端 config.tavily_research.enabled (Tavily Deep Research)
-    // ★ M: 深度思考模式 toggle 状态
+    // ★ M: 深入研究模式 toggle 状态
     //   开启后本会话所有消息走 Planner→Workers→Synthesizer 多 agent 流程
     //   持久化到 localStorage, 重开对话框后恢复
     deepThink: false,
     deepThinkJob: null,         // AbortController for current deep think request
     deepThinkProgressCard: null, // DOM node for progress card
-    dtConversationId: null,      // 深度思考二级页面当前会话 ID（与普通聊天分开）
+    dtConversationId: null,      // 深入研究二级页面当前会话 ID（与普通聊天分开）
     active: false,
     rootEl: null,
     messagesEl: null,
@@ -460,14 +460,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   （userMsg / aiMsg）。首屏历史到达时靠它把"本地还没同步的轮次"保留下来，
     //   避免被 loadHistory 的整体覆盖抹掉。只在 S.messages 里仍然存在的才算数。
     _pendingLocalMsgs: [],
-    // ★ 修复：深度思考二级页面独立请求 ID 通道，与普通聊天 _currentReqId 隔离，
+    // ★ 修复：深入研究二级页面独立请求 ID 通道，与普通聊天 _currentReqId 隔离，
     // 避免深页流式输出期间打开普通聊天发消息导致深页 SSE 被误判"被取代"而中断。
     _dtCurrentReqId: null,
     _dtSending: false,
     _dtSendSeq: 0,
     _dtClientRequestId: 0,
     _dtFetchTimeoutTimer: null,
-    // ★ 修复：深度思考二级页面独立 AbortController，与普通聊天 S.abortController 隔离，
+    // ★ 修复：深入研究二级页面独立 AbortController，与普通聊天 S.abortController 隔离，
     // 避免深页关闭/超时误杀普通聊天正在进行的流式请求。
     _dtAbortController: null,
     _lastMsgDedupKey: '',
@@ -489,7 +489,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     lastSendAt: 0,
     webSearchEnabled: false,
     // ★ 工作模式（work_mode）：在当前对话框直接切换，AI 自主拆解任务并调用全部工具完成，
-    //   输出"任务结果"而非研究报告（区别于深度研究 deep_think，那是独立二级页面出报告）。
+    //   输出"任务结果"而非研究报告（区别于深入研究 deep_think，那是独立二级页面出报告）。
     //   开启时同时继承原「思考Max」的长上下文特性（不自动压缩）。
     workMode: true,
     // ★ 思考Max（已并入工作模式，保留字段兼容旧数据/旧逻辑）
@@ -2413,9 +2413,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
   }
 
-  // 深度思考与主聊天共用 S 状态但互为独立流程：
-  // 主聊天发送新消息时不得静默取消正在进行的深度思考研究（S6），
-  // 反之深度思考页发送时也不得取消主聊天回复。
+  // 深入研究与主聊天共用 S 状态但互为独立流程：
+  // 主聊天发送新消息时不得静默取消正在进行的深入研究研究（S6），
+  // 反之深入研究页发送时也不得取消主聊天回复。
   // 该函数在"页面级关闭/登出"等全局场景才完整清理两套状态。
   function abortAllAiRequests() {
     abortCurrentRequest();
@@ -3821,7 +3821,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         });
         // 更新 summary 显示合并后的步数（两种模式都更新）
         var summaryTextEl = node.querySelector('.ai-thinking-summary-text');
-        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
+        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + (mergedLog.length || (thinkLogBox && thinkLogBox.children.length) || 0) + ' 步)';
       }
     }
 
@@ -4502,11 +4502,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function bindVisualViewport(messagesEl, input, inputBar) {
-    var root = getAiRoot();
+    var root = input.closest("#panelDeepThink") || getAiRoot();
+    var researchViewport = root && root.id === "panelDeepThink";
     if (!root) return function() {};
 
     function applyViewport() {
-      if (!S.active) return;
+      if (researchViewport ? root.classList.contains("hidden") : !S.active || document.body.classList.contains("xtj-research-open")) return;
       var vv = window.visualViewport;
       var keyboardHeight = 0;
       var viewportHeight = null;
@@ -4521,8 +4522,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         inputBar.style.left = ''; inputBar.style.width = ''; inputBar.style.zIndex = '';
         messagesEl.style.paddingBottom = '';
         root.classList.toggle('ai-keyboard-open', document.documentElement.classList.contains('xtj-keyboard-open'));
-        updateRootVar('--ai-keyboard-offset', '0px'); updateRootVar('--ai-viewport-height', '100%');
-        updateInputMetrics(); return;
+        root.style.setProperty('--ai-keyboard-offset', '0px'); root.style.setProperty('--ai-viewport-height', '100%');
+        if (!researchViewport) updateInputMetrics(); return;
       }
       // ★ U3: clamp keyboardHeight 防某些浏览器算出异常值
       var maxKb = Math.round(window.innerHeight * 0.6);
@@ -4550,10 +4551,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       } else {
         // 桌面端：保持原有行为（缩放高度）
-        updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
-        updateRootVar('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
+        root.style.setProperty('--ai-keyboard-offset', keyboardHeight + 'px');
+        root.style.setProperty('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
       }
-      updateInputMetrics();
+      if (!researchViewport) updateInputMetrics();
       if (keyboardHeight > 0 && isNearBottom(messagesEl, 120)) {
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
@@ -4570,9 +4571,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messagesEl.style.paddingBottom = '';
       }
       root.classList.remove('ai-keyboard-open');
-      updateRootVar('--ai-keyboard-offset', '0px');
-      updateRootVar('--ai-viewport-height', '100%');
-      updateInputMetrics();
+      root.style.setProperty('--ai-keyboard-offset', '0px');
+      root.style.setProperty('--ai-viewport-height', '100%');
+      if (!researchViewport) updateInputMetrics();
       if (isNearBottom(messagesEl, 120)) {
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
@@ -4630,14 +4631,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
-  // ===================== M: 深度思考模式 · 进度条 / toggle / cancel =====================
-  // 切换深度思考模式：改为打开独立二级页面，不再切换普通聊天的 S.deepThink
+  // ===================== M: 深入研究模式 · 进度条 / toggle / cancel =====================
+  // 切换深入研究模式：改为打开独立二级页面，不再切换普通聊天的 S.deepThink
   function toggleDeepThink() {
     if (!S.deepThinkEnabled) {
-      notify('深度思考模式已被管理员关闭');
+      notify('深入研究模式已被管理员关闭');
       return;
     }
-    // 普通聊天中深度思考入口统一走二级页面，避免与普通聊天共用气泡面板
+    // 普通聊天中深入研究入口统一走二级页面，避免与普通聊天共用气泡面板
     openDeepThinkPage();
   }
 
@@ -4649,7 +4650,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // ★ P 新增: 后端禁用时显示禁用样式
       if (!S.deepThinkEnabled) {
         btn.classList.add('disabled');
-        btn.setAttribute('title', '深度思考模式已被管理员关闭');
+        btn.setAttribute('title', '深入研究模式已被管理员关闭');
       } else {
         btn.classList.remove('disabled');
         btn.removeAttribute('title');
@@ -4657,7 +4658,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 深度思考已改为独立二级页面，普通聊天不再恢复 deepThink 状态
+  // 深入研究已改为独立二级页面，普通聊天不再恢复 deepThink 状态
   function restoreDeepThinkState() {
     S.deepThink = false;
   }
@@ -4727,7 +4728,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var summary = (refs && refs.summaryText) || card.querySelector('.ai-thinking-summary-text');
     var details = (refs && refs.details) || card.querySelector('.ai-think-thinking');
     if (!body) return 0;
-    var msg = String(text || '').trim();
+    var msg = options.stream ? String(text || '') : String(text || '').trim();
     if (!msg) return body.children.length;
     var role = String(roleLabel || '研究进程').trim() || '研究进程';
 
@@ -4737,7 +4738,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var chunk = last.querySelector('.ai-thought-chunk');
       if (chunk) {
         var prev = String(chunk.textContent || '');
-        chunk.textContent = prev && prev !== msg ? (prev + '\n' + msg) : msg;
+        chunk.textContent = options.stream ? prev + msg : (prev && prev !== msg ? prev + '\n' + msg : msg);
       }
     } else {
       var entry = document.createElement('div');
@@ -4930,7 +4931,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     if (state.state === 'preparing') {
       refs.title.textContent = '深入研究中';
-      refs.status.textContent = '正在进入深度思考...';
+      refs.status.textContent = '正在进入深入研究...';
       syncResearchElapsed(card, state.elapsedMs || 0);
       setResearchSteps(card, 0, 0);
       updateResearchProgress(card, typeof state.progress === 'number' ? state.progress : 0.08);
@@ -5246,7 +5247,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       '<div class="ai-research-visual">' +
         '<canvas class="ai-research-particles" aria-hidden="true"></canvas>' +
         '<div class="ai-research-orbit" aria-hidden="true"></div>' +
-        '<div class="ai-research-status">正在进入深度思考...</div>' +
+        '<div class="ai-research-status">正在进入深入研究...</div>' +
         '<div class="ai-research-scan"><i></i></div>' +
         '<div class="ai-research-steps">' +
           AI_RESEARCH_STEPS.map(function(step) { return '<span>' + step + '</span>'; }).join('') +
@@ -5394,6 +5395,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return;
       }
       if (evt.type === 'deep_think_tool') {
+        appendResearchThinkingEntry(card, '研究工具', evt.tool_name || evt.tool || '正在使用研究工具', { forceNew: true });
         var nextSearchCount = Math.max((research.searchCount || 0) + 1, 1);
         setResearchCardState(card, 'researching', {
           elapsedMs: research.elapsedMs || 0,
@@ -5482,7 +5484,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 取消深度思考（convId 可选，二级页面使用 S.dtConversationId）
+  // 取消深入研究（convId 可选，二级页面使用 S.dtConversationId）
   function cancelDeepThink(convId) {
     var dtPanel = document.getElementById('panelDeepThink');
     var isDeepPageCancel = arguments.length > 0 || !!(dtPanel && dtPanel.classList.contains('active') && !dtPanel.classList.contains('hidden'));
@@ -5617,7 +5619,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return box;
   }
 
-  // ===== 深度研究二级页增强: 研究强度选择器 + 三阶段状态 + 流式渲染 + 历史回看 =====
+  // ===== 深入研究二级页增强: 研究强度选择器 + 三阶段状态 + 流式渲染 + 历史回看 =====
 
   // 将研究结果渲染进研究卡 (Tavily 流程与历史回看共用)
   function renderTavilyResearchReport(card, answerText, sourcesList, startedAtMs, labelText, researchMode) {
@@ -6008,11 +6010,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (hp) { try { hp.remove(); } catch (e) {} }
   }
 
-  // ★ 2026-09-11 修复（深度研究"连接中断"根因之二）：
-  //   深度研究流水线包含「Planner 拆解 → 3-5 个子智能体并行检索 → 查漏补缺 → Synthesizer 汇总」，
+  // ★ 2026-09-11 修复（深入研究"连接中断"根因之二）：
+  //   深入研究流水线包含「Planner 拆解 → 3-5 个子智能体并行检索 → 查漏补缺 → Synthesizer 汇总」，
   //   其中末段 Synthesizer 以 thinking_mode:'high' 生成 16K 长报告，服务端为其预留了
   //   最长 10 分钟（total_timeout_ms: 600000）。原前端 idle 阈值仅 45 秒，
-  //   在"子智能体检索完毕 → 汇总开始输出"的静默窗口（含模型深度思考）极容易被误判为超时，
+  //   在"子智能体检索完毕 → 汇总开始输出"的静默窗口（含模型深入研究）极容易被误判为超时，
   //   前端随即渲染「连接中断 / 超过 45 秒未收到新数据」。
   //   阈值放宽到 180 秒：既能容忍 high 思考期的长静默，又仍能在服务端真实挂死时
   //   及时收束（服务端 heartbeat 每 8s 一次，正常情况下该计时器根本不会触发）。
@@ -6104,6 +6106,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (onProgress) { try { onProgress({ content: accepted }); } catch (e) {} }
           }
         }
+      } else if (evt.type === 'research_thinking') {
+        if (onProgress && evt.chunk) onProgress({thinking:{role:evt.agent_role||'模型思考',chunk:String(evt.chunk)}});
       } else if (evt.type === 'research_sources') {
         var srcs = Array.isArray(evt.sources) ? evt.sources : (Array.isArray(evt.data) ? evt.data : []);
         if (srcs.length) sources = srcs;
@@ -6268,8 +6272,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return done;
   }
 
-  // Tavily 深度研究完整流程: 研究卡状态机 + 报告/来源展示
-  //   返回 'done' = 流程已终结(成功/取消/超时); 'fallback' = 回退到原有深度思考流程
+  // Tavily 深入研究完整流程: 研究卡状态机 + 报告/来源展示
+  //   返回 'done' = 流程已终结(成功/取消/超时); 'fallback' = 回退到原有深入研究流程
   async function runTavilyResearchFlow(opts) {
     var dtMessagesEl = opts.messagesEl;
     var text = opts.text;
@@ -6380,7 +6384,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!chunk || !isResearchCard(progressCard)) return;
       var answerEl = progressCard.querySelector('.ai-think-answer');
       if (!answerEl) return;
-      answerEl.textContent = (answerEl.textContent || '') + String(chunk);
+      patchInnerHTML(answerEl, renderMarkdown(answer, true));
       scrollToBottom(dtMessagesEl, false);
     }
 
@@ -6426,6 +6430,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             return;
           }
           if (!prog) return;
+          if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true});
           if (prog.stage) handleResearchStage(prog.stage, prog.message);
           if (typeof prog.step === 'number') {
             setStep(prog.step);
@@ -6468,6 +6473,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           return;
         }
         if (!prog) return;
+        if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true});
         if (prog.stage) handleResearchStage(prog.stage, prog.message);
         if (typeof prog.step === 'number') {
           setStep(prog.step);
@@ -6508,7 +6514,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         try { notify('研究超时，请重试'); } catch (e) {}
         return 'done';
       }
-      // ★ 2026-09-11 修复（深度研究"连接中断"根因之三）：
+      // ★ 2026-09-11 修复（深入研究"连接中断"根因之三）：
       //   以下错误【回退到 deep think 也没有意义，反而会产生误导】：
       //   - concurrent：/api/agent/chat(deep_think) 与 /api/agent/research/stream 共用
       //     tryAcquireDeepResearch 并发闸门，回退过去必然再撞一次同一闸门；
@@ -6532,8 +6538,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         try { notify(terminalMsg); } catch (eNotify) {}
         return 'done';
       }
-      // tavily_not_configured / 网络错误 / 其他 SSE error → 回退到原有深度思考流程
-      console.warn('[AI] Tavily research 失败，回退到深度思考流程:', errMsg, (err && err.status) ? ('HTTP ' + err.status) : '');
+      // tavily_not_configured / 网络错误 / 其他 SSE error → 回退到原有深入研究流程
+      console.warn('[AI] Tavily research 失败，回退到深入研究流程:', errMsg, (err && err.status) ? ('HTTP ' + err.status) : '');
       removeTavilyCard();
       return 'fallback';
     }
@@ -6542,7 +6548,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
 
   // ===================== 共享 SSE 处理循环 =====================
-  // 由 handleDeepThinkPageSend 调用（深度思考页发送流程）
+  // 由 handleDeepThinkPageSend 调用（深入研究页发送流程）
   async function processDeepThinkSSE(opts) {
     var reader = opts.reader;
     var controller = opts.controller;
@@ -6644,7 +6650,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
       var usage = evt && evt.usage ? evt.usage : null;
       var agentCount = evt && evt.agent_count ? evt.agent_count : 0;
-      var thinkingLog = evt && Array.isArray(evt.thinking_log) ? evt.thinking_log : [];
+      var thinkingLog = evt && Array.isArray(evt.thinking_log) && evt.thinking_log.length ? evt.thinking_log : (node._thinkingLog || []);
+      if (!thinkingLog.length && evt && evt.reasoning) thinkingLog = [{agent_role:'模型思考',chunk:evt.reasoning}];
       var thinkDurationMs = evt && typeof evt.think_duration_ms === 'number' ? evt.think_duration_ms : 0;
       var finalThinkingMode = finalThinkingModeRef.value || 'max';
       var answerEl = node.querySelector('.ai-think-answer');
@@ -6687,7 +6694,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       }
 
-      if (detailsEl) detailsEl.style.display = mergedLog.length ? '' : 'none';
+      if (detailsEl) detailsEl.style.display = mergedLog.length || (thinkLogBox && thinkLogBox.children.length) ? '' : 'none';
       if (thinkLogBox && mergedLog.length > 0) {
         thinkLogBox.innerHTML = '';
         mergedLog.forEach(function(entry) {
@@ -6698,7 +6705,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           thinkLogBox.appendChild(entEl);
         });
       }
-      if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
+      if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + (mergedLog.length || (thinkLogBox && thinkLogBox.children.length) || 0) + ' 步)';
 
       var footer = node.querySelector('.ai-msg-footer');
       if (footer) {
@@ -6776,6 +6783,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     async function _handleSseEvent(evt) {
       if (S._dtCurrentReqId !== reqId) { if (abortedRef) abortedRef.value = true; return; }
 
+        // Custom providers use the regular content/reasoning protocol. Route
+        // it through the same live report renderer as native research.
+        if (evt.type === 'reasoning') return _handleSseEvent({type:'thinking_chunk', chunk:evt.text || evt.reasoning || '', agent_role:'模型思考'});
+        if (evt.type === 'content') return _handleSseEvent({type:'answer_chunk',chunk:evt.text || ''});
         if (evt.type === 'meta') {
           if (streamConvIdRef) streamConvIdRef.value = evt.conversation_id;
           return;
@@ -6809,7 +6820,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               while (thinkBody.children.length > 80) thinkBody.removeChild(thinkBody.firstChild);
             }
             if (summaryEl) summaryEl.textContent = '查看思考过程 (' + (thinkBody ? thinkBody.children.length : 0) + ' 步)';
-            if (detailsEl && !detailsEl.open && !isResearchCard(aiNodeRef.value)) detailsEl.open = true;
+            if (isResearchCard(aiNodeRef.value)) {
+              aiNodeRef.value._researchState.persistExpanded = !aiNodeRef.value._researchState.userPinnedClosed;
+              setResearchDisclosure(aiNodeRef.value, aiNodeRef.value._researchState.persistExpanded);
+            } else if (detailsEl && !detailsEl.open) detailsEl.open = true;
             var tTitle = aiNodeRef.value.querySelector('.ai-think-title');
             if (tTitle && !isResearchCard(aiNodeRef.value)) tTitle.textContent = '思考中...';
           }
@@ -6841,23 +6855,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           aiContentRef.value += accepted;
           if (answerRendererRef.value && accepted) answerRendererRef.value.append(accepted);
           scrollToBottom(scrollEl, false);
-          return;
-        }
-        if (evt.type === 'content') {
-          if (!contentTruncated && aiContentRef.value.length >= AI_CONTENT_MAX_LEN) {
-            contentTruncated = true;
-            notify('回复过长，已截断');
-          }
-          var room2 = AI_CONTENT_MAX_LEN - aiContentRef.value.length;
-          var accepted2 = room2 > 0 ? String(evt.text || '').slice(0, room2) : '';
-          aiContentRef.value += accepted2;
-          ensureThinkCardNode();
-          if (!answerStartedRef.value && evt.text) {
-            answerStartedRef.value = true;
-            if (typeof opts.onAnswerStart === 'function') {
-              try { opts.onAnswerStart(aiNodeRef.value, evt); } catch (e10) {}
-            }
-          }
           return;
         }
         if (evt.type === 'error') {
@@ -7040,15 +7037,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   // ★ 清理（死代码）：此处原有 handleSendDeepThink(text, input, sendBtn, messagesEl)，
-  //   是「深度思考模式发送」的旧版独立流程。经全仓检索，该函数**无任何调用点**
-  //   （深度思考发送已由 handleDeepThinkPageSend 走 /api/agent/chat + processDeepThinkSSE 承接）。
+  //   是「深入研究模式发送」的旧版独立流程。经全仓检索，该函数**无任何调用点**
+  //   （深入研究发送已由 handleDeepThinkPageSend 走 /api/agent/chat + processDeepThinkSSE 承接）。
   //   且其内部 ensureThinkCardNode() 引用的 `aiNodeRef` 从未在函数作用域内声明
   //   （aiNodeRef 仅作为 opts 字段传入 processDeepThinkSSE，并非本函数的局部变量），
   //   一旦被调用即 ReferenceError。为消除误用面一并删除。
   //
   //   processDeepThinkSSE 保留 —— 它是活代码，被 handleDeepThinkPageSend 正常调用。
 
-  // ===================== 深度思考页 =====================
+  // ===================== 深入研究页 =====================
 
   function resetDeepThinkPageEmpty() {
     var msgs = document.getElementById('dtMessages');
@@ -7056,7 +7053,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     msgs.innerHTML = '';
     msgs.appendChild(el('div', { class: 'dt-empty' }, [
       el('div', { class: 'dt-empty-icon', text: '🐾' }),
-      el('div', { class: 'dt-empty-title', text: '深度思考' }),
+      el('div', { class: 'dt-empty-title', text: '深入研究' }),
       el('div', { class: 'dt-empty-desc', text: '输入复杂问题，AI 会调用多阶段分析、检索和整理流程来生成回答。' })
     ]));
   }
@@ -7086,7 +7083,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   async function openDeepThinkPage() {
     if (!window.currentUser) {
-      notify('请先登录后再使用深度思考');
+      notify('请先登录后再使用深入研究');
       return;
     }
     var panel = document.getElementById('panelDeepThink');
@@ -7107,6 +7104,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Enter the research surface immediately; auth and history can complete in the background.
     panel.classList.remove('hidden');
     panel.classList.add('active');
+    document.body.classList.add('xtj-research-open');
     updateSecondaryPageState(true);
     initDeepThinkResearchUi();
 
@@ -7129,7 +7127,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try {
         var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think', null, { timeoutMs: 8000 });
         if (!currentPage()) return;
-        if (!hist || !hist.ok || !hist.data || !Array.isArray(hist.data.messages)) throw new Error('深度思考记录暂不可用');
+        if (!hist || !hist.ok || !hist.data || !Array.isArray(hist.data.messages)) throw new Error('深入研究记录暂不可用');
         var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
         if (!hasMessages) {
           S.dtConversationId = null;
@@ -7145,7 +7143,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (hasMessages) {
           msgs.innerHTML = '';
           hist.data.messages.forEach(function(msg) {
-            // ★ 修复：深度研究记录只持久化了 assistant 一条（无单独 user 行），
+            // ★ 修复：深入研究记录只持久化了 assistant 一条（无单独 user 行），
             //   这里按服务端还原出的 research_query 补出「你」的问题气泡，
             //   避免历史里只有研究报告、没有原始提问，观感残缺。
             if (msg.is_research && msg.research_query) {
@@ -7207,7 +7205,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var input = document.getElementById('dtInput');
     if (input) {
       setTimeout(function() {
-        try { input.focus(); } catch (e) {}
+        if (currentPage()) { try { input.focus(); } catch (e) {} }
       }, 80);
     }
   }
@@ -7250,6 +7248,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         panel.classList.add('hidden');
         panel.classList.remove('active');
       }
+      document.body.classList.remove('xtj-research-open');
       // 标记 panel 为已关闭, SSE 回调可检测此标志避免写旧 DOM
       if (panel) panel._dtClosed = true;
       saveDtConvId();
@@ -7392,11 +7391,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // 2. 创建进度卡
 
-    // ===== Tavily Deep Research: 研究型问题优先走 Tavily 多 agent 深度研究 =====
+    // ===== Tavily Deep Research: 研究型问题优先走 Tavily 多 agent 深入研究 =====
     // 后端已启用 Tavily (config.tavily_research.enabled) 且消息长度 >= 6 时,
     // 优先走 /api/agent/research/stream SSE 研究流程; 失败时回退到下方原有 deep think 流程。
-    // 注: S.deepThink 在独立二级页面架构下恒为 false (深度思考已迁至独立页面, 见 toggleDeepThink),
-    //     此处位于深度思考页发送函数内, 即代表深度思考模式。
+    // 注: S.deepThink 在独立二级页面架构下恒为 false (深入研究已迁至独立页面, 见 toggleDeepThink),
+    //     此处位于深入研究页发送函数内, 即代表深入研究模式。
     if (S.tavilyResearchEnabled && !fileData && originalUserText.length >= 6) {
       // 3a. 清空输入框 (Tavily 流程先行; 回退时下方 step 3 会再清一次, 无副作用)
       input.value = '';
@@ -7405,8 +7404,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       else { try { input.focus(); } catch (e2) {} }
 
       var tavilyOutcome;
-      // ★ 修复: Tavily 深度研究同样消耗每日第三方搜索次数。超限时不发起研究请求，
-      //   直接回退到下方深度思考流程（与 Tavily 流程失败时的行为一致）。
+      // ★ 修复: Tavily 深入研究同样消耗每日第三方搜索次数。超限时不发起研究请求，
+      //   直接回退到下方深入研究流程（与 Tavily 流程失败时的行为一致）。
       if (S.quota && searchQuotaExhausted(S.quota)) {
         notify('今日网页搜索次数已达上限，开通 Pro 可无限搜索');
         tavilyOutcome = 'fallback';
@@ -7460,7 +7459,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S._dtAbortController = controller;
     S.deepThinkJob = controller;
     S.currentStreamAborted = false;
-    // 深度思考 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
+    // 深入研究 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
     // 请求可无限挂起。这里加 300s 绝对超时兜底（后端最长 5 分钟思考，
     // 此前 120s 会在后端完成前被前端掐断。超时只 abort 本次，不清理全局状态）。
     var dtFetchTimeoutTimer = setTimeout(function() {
@@ -7579,7 +7578,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
       var usage = evt && evt.usage ? evt.usage : null;
       var agentCount = evt && evt.agent_count ? evt.agent_count : 0;
-      var thinkingLog = evt && Array.isArray(evt.thinking_log) ? evt.thinking_log : [];
+      var thinkingLog = evt && Array.isArray(evt.thinking_log) && evt.thinking_log.length ? evt.thinking_log : (node._thinkingLog || []);
+      if (!thinkingLog.length && evt && evt.reasoning) thinkingLog = [{agent_role:'模型思考',chunk:evt.reasoning}];
       var thinkDurationMs = evt && typeof evt.think_duration_ms === 'number' ? evt.think_duration_ms : 0;
 
       if (node) {
@@ -7620,7 +7620,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var thinkLogBox = node.querySelector('.ai-think-thinking-body');
         var detailsEl = node.querySelector('.ai-think-thinking');
         var summaryTextEl = node.querySelector('.ai-thinking-summary-text');
-        if (detailsEl) detailsEl.style.display = mergedLog.length ? '' : 'none';
+        if (detailsEl) detailsEl.style.display = mergedLog.length || (thinkLogBox && thinkLogBox.children.length) ? '' : 'none';
         if (thinkLogBox && mergedLog.length > 0) {
           thinkLogBox.innerHTML = '';
           mergedLog.forEach(function(entry) {
@@ -7632,7 +7632,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             thinkLogBox.appendChild(entEl);
           });
         }
-        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
+        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + (mergedLog.length || (thinkLogBox && thinkLogBox.children.length) || 0) + ' 步)';
 
         var footer = node.querySelector('.ai-msg-footer');
         if (footer) {
@@ -7934,7 +7934,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       ev.preventDefault();
       ev.stopPropagation();
       if (!S.dtConversationId || S._dtSending || S._dtCreating || S._dtDeleting) return;
-      if (!confirm('确定删除当前深度思考会话吗？删除后不可恢复。')) return;
+      if (!confirm('确定删除当前深入研究会话吗？删除后不可恢复。')) return;
       S._dtDeleting = true;
       var deleteLife = S.dtLifecycleId, deleteCid = S.dtConversationId;
       var deleteOwner = window.currentUser || '', deleteEpoch = window._authStateEpoch || 0;
@@ -8003,7 +8003,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       });
     }
 
-    // 深度研究页面滚动监听：用户向上翻时停止自动滚动
+    // 深入研究页面滚动监听：用户向上翻时停止自动滚动
     var dtMessagesEl = document.getElementById('dtMessages');
     if (dtMessagesEl) {
       addDtListener(dtMessagesEl, 'scroll', function() {
@@ -9018,7 +9018,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: reqId,
         clientRequestId: 'cr_' + S.clientRequestId,
-        // ★ 优化：后端深度思考/长思考最长 5 分钟，前端 120s 会提前掐断，
+        // ★ 优化：后端深入研究/长思考最长 5 分钟，前端 120s 会提前掐断，
         // 对齐为 300s（SSE idle 看门狗 45s/120s 仍负责真正的假死检测）。
         timeoutMs: 300000
       });
@@ -11313,7 +11313,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 获取会话列表（普通聊天只显示普通会话，深度研究会话分开管理）
+  // 获取会话列表（普通聊天只显示普通会话，深入研究会话分开管理）
   async function fetchConversations() {
     var seq = ++S.conversationRequestId, life = S.lifecycleId;
     var owner = window.currentUser || '', epoch = window._authStateEpoch || 0;
@@ -11621,22 +11621,22 @@ function showChatMessages() {
     }
 
     // ★ 2026-09-23 移除头部「头像 + 小猫/在线」：按维护者要求只保留功能入口
-    //   （返回、深度思考、Code、历史、新建/删除等），不再显示头像与在线状态。
+    //   （返回、深入研究、Code、历史、新建/删除等），不再显示头像与在线状态。
     //   对应的 applyConfigToUI/updateAiStatus 里对 #aiChatHeaderAvatar / Name / Status
     //   的调用都带 if (el) 守卫，元素不存在时自动跳过，无需改动其它逻辑。
 
-    // 深度思考?toggle 按钮
+    // 深入研究?toggle 按钮
     var deepThinkBtn = el('button', {
       type: 'button',
       class: 'ai-deep-think-toggle' + (S.deepThink ? ' on' : ''),
-      'aria-label': '深度思考模式',
-      title: '深度思考模式 - AI 会先做更深入的分析再回答',
+      'aria-label': '深入研究模式',
+      title: '深入研究模式 - AI 会先做更深入的分析再回答',
       id: 'aiDeepThinkToggle'
     });
     var dtIcon = el('span', { class: 'ai-deep-think-icon' });
     dtIcon.innerHTML = AI_THINK_ICON;
     deepThinkBtn.appendChild(dtIcon);
-    deepThinkBtn.appendChild(el('span', { class: 'ai-deep-think-label', text: '深度思考' }));
+    deepThinkBtn.appendChild(el('span', { class: 'ai-deep-think-label', text: '深入研究' }));
     deepThinkBtn.addEventListener('click', function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -12205,7 +12205,7 @@ function showChatMessages() {
         else sum.textContent = modelLabels[S.selectedModel] || S.selectedModel;
         if (flash) flashPanelValue(sum);
       }
-      // ★ 2026-09-24（课题④）：自定义模型增删后，同步刷新深度研究页的模型下拉，
+      // ★ 2026-09-24（课题④）：自定义模型增删后，同步刷新深入研究页的模型下拉，
       //   否则用户在小猫AI 里新加的第三方模型，研究板块选不到。
       try { refreshResearchModelOptions(document.getElementById('panelDeepThink')); } catch (eRmo) {}
     }
@@ -13371,7 +13371,7 @@ function showChatMessages() {
 
     S.resizeTimer = setTimeout(autoresize, 0);
 
-    // ★ M: 渲染后立即同步深度思考 toggle 视觉
+    // ★ M: 渲染后立即同步深入研究 toggle 视觉
     refreshDeepThinkToggle();
 
     S.pauseBtnEl = pauseBtn;
@@ -13391,7 +13391,7 @@ function showChatMessages() {
     S._dockMode = !!(opts && opts.dock);
     // ★ 小猫AI 页面始终可打开（即使未登录也进入独立页面；随后 ensureUserAuthOrNotify
     //   会在未登录/凭证失效时提示登录并在面板内给出提示，而不是什么都不发生）。
-    // ★ M: 恢复深度思考模式状态
+    // ★ M: 恢复深入研究模式状态
     restoreDeepThinkState();
     S.active = true;
     var lifecycleId = ++S.lifecycleId;
@@ -13479,7 +13479,7 @@ function showChatMessages() {
     }).then(function() {
       if (lifecycleId !== S.lifecycleId || !S.active || r.messagesEl !== S.messagesEl) return;
       setTimeout(function() {
-        try { r.input.focus(); } catch (e) {}
+        if (!document.body.classList.contains('xtj-research-open') && S.active && r.input === S.inputEl) { try { r.input.focus(); } catch (e) {} }
         updateInputMetrics();
       }, 80);
     });
@@ -13517,15 +13517,15 @@ function showChatMessages() {
         }
         S.deepThinkEnabled = cfg.deep_think.enabled !== false;
         // ★ Tavily Deep Research: 同步后端配置 (config.tavily_research.enabled)
-        S.tavilyResearchEnabled = !!(cfg.tavily_research && cfg.tavily_research.enabled);
       }
+      S.tavilyResearchEnabled = !!(cfg.tavily_research && cfg.tavily_research.enabled);
       // 思考程度档位是网站固定预设（关闭/轻度/中度/深度/极致），以用户本人选择为准
       // （localStorage > 网站默认 DEFAULT_THINKING_MODE），不再被后端“系统默认思考档”自动覆盖，
-      // 避免系统级下发在多处造成菜单显示与实际档位不一致。深度思考二级页的 deepThinkEffort
+      // 避免系统级下发在多处造成菜单显示与实际档位不一致。深入研究二级页的 deepThinkEffort
       // 已在上方由 cfg.deep_think 独立同步，与主聊天档位互不影响。
     } catch (e) { /* 容错 */ }
 
-    // ★ P 新增: 如果后端禁用了深度思考，强制关闭 toggle
+    // ★ P 新增: 如果后端禁用了深入研究，强制关闭 toggle
     if (!S.deepThinkEnabled && S.deepThink) {
     S.deepThink = false;
     try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
@@ -13547,9 +13547,10 @@ function showChatMessages() {
     S.historyRequestId += 1;
     S.conversationRequestId += 1;
     window.__xtjAiChatActive = false;
+    document.body.classList.remove('xtj-research-open');
     stopQuotaPolling();
     clearReplyTimer();
-    // 页面级关闭：完整清理主聊天 + 深度思考两套状态。 Invalidate the
+    // 页面级关闭：完整清理主聊天 + 深入研究两套状态。 Invalidate the
     // deep preflight too, since it may be awaiting quota/auth before a controller exists.
     S._dtSendSeq = (S._dtSendSeq || 0) + 1;
     S._dtSending = false;
@@ -13568,7 +13569,7 @@ function showChatMessages() {
     //   （只清主聊天通道，深页独立通道 _dtCurrentReqId 由深页自己管理。）
     S._currentReqId = null;
     S._pendingLocalMsgs = [];
-    // 关闭深度思考二级页面，避免它残留在普通聊天之中
+    // 关闭深入研究二级页面，避免它残留在普通聊天之中
     // Clean up deep think state
     if (S.deepThinkProgressCard) {
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
@@ -13718,7 +13719,7 @@ function showChatMessages() {
       if (tab !== 'chat' && tab !== 'ai-chat' && S.active) {
         try { closeAiChat(); } catch (e) {}
       }
-      // 切换出聊天 tab 时一并关闭深度思考二级页面（ai-chat 属于 AI 页面子级，需保留）
+      // 切换出聊天 tab 时一并关闭深入研究二级页面（ai-chat 属于 AI 页面子级，需保留）
       if (tab !== 'chat' && tab !== 'ai-chat') {
         try { closeDeepThinkPage(); } catch (e) {}
       }

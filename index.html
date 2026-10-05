@@ -71,7 +71,7 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=775c4dc55c" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=0bc0f12e84" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=2c58aa69a3" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=ae8735d41d" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=2c58aa69a3" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
@@ -80,9 +80,10 @@
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=2c58aa69a3">
     <link rel="stylesheet" href="css/post-feed.min.css?v=b335bd86cf">
-    <link rel="stylesheet" href="css/author-posts.min.css?v=fef10a45ca">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=0bc0f12e84">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=3ef5f7f42f">
+    <link rel="stylesheet" href="css/profile-settings.min.css?v=fba818a827">
+    <link rel="stylesheet" href="css/author-posts.min.css?v=df80c9f5e2">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=ae8735d41d">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=653294a4a9">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=2c251f505f">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=f384a73243">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=3dadcdaa23">
@@ -180,7 +181,7 @@
                             </button>
                             <button type="button" role="menuitem" data-ai-tool="research">
                                 <span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></span>
-                                <span><b>深度研究</b><small>多步检索与长文分析</small></span>
+                                <span><b>深入研究</b><small>多步检索与长文分析</small></span>
                             </button>
                             <button type="button" role="menuitem" data-ai-tool="search">
                                 <span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg></span>
@@ -601,6 +602,7 @@
                 <div class="profile-header">
                     <span class="profile-title">我的</span>
                 </div>
+                <div class="profile-own-cover" id="profileOwnCover" aria-label="我的朋友圈封面"></div>
                 <div class="profile-user-card" id="profileUserCard" onclick="handleProfileCardClick()">
                     <span class="avatar profile-avatar" id="profileAvatar">?</span>
                     <div class="profile-user-info">
@@ -609,6 +611,7 @@
                     </div>
                     <span class="profile-chevron">→</span>
                 </div>
+                <div class="profile-own-signature" id="profileOwnSignature"></div>
                 <div class="profile-activity-board" aria-label="我的记录">
                     <section class="profile-activity-card profile-activity-card--summary" id="profilePostsCard" role="button" tabindex="0" onclick="toggleProfileActivity('posts')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('posts');}">
                         <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9M14 3l7 7M14 3v7h7M7 14h10M7 18h6"/></svg></div>
@@ -635,6 +638,31 @@
                         <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" hidden>查看更多</button>
                     </section>
                 </div>
+                <form id="profilePreferences" class="profile-preferences">
+                    <fieldset><legend>个人资料与背景</legend>
+                        <label class="profile-signature-field">个性签名<input type="text" name="signature" maxlength="120" placeholder="写点关于自己的话"></label>
+                        <small>朋友圈封面和签名会展示在个人动态页，界面背景仅用于自己的界面。</small>
+                        <div class="profile-image-actions"><button type="button" data-image-kind="cover">更换朋友圈封面</button><button type="button" data-image-clear="cover">恢复默认封面</button></div>
+                        <div class="profile-image-actions"><button type="button" data-image-kind="background">更换界面背景</button><button type="button" data-image-clear="background">恢复默认背景</button></div>
+                        <input type="file" id="profileImageUpload" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden>
+                    </fieldset>
+                    <fieldset><legend>外观与个性化</legend>
+                        <label>外观<select name="theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+                        <label>主题色<select name="accent"><option value="mint">薄荷绿</option><option value="blue">晴空蓝</option><option value="rose">玫瑰粉</option><option value="violet">浅紫</option></select></label>
+                        <label>文字大小<select name="font_size"><option value="normal">标准</option><option value="large">大字</option></select></label>
+                        <label>帖子间距<select name="density"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></label>
+                        <label>动画效果<select name="motion"><option value="system">跟随系统</option><option value="off">减少动效</option></select></label>
+                    </fieldset>
+                    <fieldset><legend>隐私</legend>
+                        <label>允许他人查看个人动态页<input type="checkbox" name="timeline_visible"></label>
+                        <label>允许未登录访客查看动态页<input type="checkbox" name="guests_allowed"></label>
+                        <label>对他人展示动态<select name="timeline_range"><option value="all">全部</option><option value="3d">最近三天</option><option value="1m">最近一个月</option><option value="6m">最近半年</option></select></label>
+                        <label>默认发布范围<select name="default_visibility"><option value="public">公开</option><option value="private">仅自己可见</option></select></label>
+                        <small>动态页访问与时间范围不会改变已公开帖子的发布范围。每条动态仍可单独设置可见范围。</small>
+                    </fieldset>
+                    <div class="profile-image-actions"><button type="submit">保存设置</button><button type="button" id="profileSettingsReload">重新读取</button></div>
+                    <p class="profile-settings-status" id="profileSettingsStatus" role="status" aria-live="polite"></p>
+                </form>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
@@ -1239,22 +1267,23 @@
     <script defer src="js/post-composer-media.min.js?v=0902303519"></script>
     <script defer src="js/post-publish-progress.min.js?v=9b161647fc"></script>
     <script defer src="js/post-publish-motion.min.js?v=f461dc6c4b"></script>
-    <script defer src="js/author-posts.min.js?v=4e622975a7"></script>
+    <script defer src="js/profile-settings.min.js?v=e149fb63c3"></script>
+    <script defer src="js/author-posts.min.js?v=cdd73719be"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
     <script defer src="js/photo-wall/story.min.js?v=3dd8ec6135"></script>
     <script defer src="js/voice-transcription.min.js?v=39cfe95168"></script>
-    <script defer src="js/core.min.js?v=8a4be75685"></script>
+    <script defer src="js/core.min.js?v=2842c98e32"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=09b5c7ef68"></script>
     <script defer src="js/desktop-shell.min.js?v=086938c9c6"></script>
     <script defer src="js/ux-features.min.js?v=b5cf6a04c7"></script>
 
-<!-- 深度研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
+<!-- 深入研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">
     <div class="dt-page">
         <div class="dt-header">
             <button type="button" class="dt-back" id="dtBackBtn" aria-label="返回">← 返回</button>
-            <h3 class="dt-title">深度研究</h3>
+            <h3 class="dt-title">深入研究</h3>
             <div class="dt-actions">
                 <button type="button" class="dt-action-btn" id="dtNewChatBtn">新对话</button>
                 <button type="button" class="dt-action-btn dt-danger" id="dtDeleteChatBtn">删除</button>
@@ -1263,7 +1292,7 @@
         <div class="dt-messages" id="dtMessages">
             <div class="dt-empty" id="dtEmpty">
                 <div class="dt-empty-icon">🐾</div>
-                <div class="dt-empty-title">深度研究</div>
+                <div class="dt-empty-title">深入研究</div>
                 <div class="dt-empty-desc">输入任何问题，AI 会调用多个领域专家协同分析、深度搜索资料并给出有洞察力的回复。</div>
             </div>
         </div>
@@ -1273,7 +1302,7 @@
             </button>
             <input type="file" id="dtFileInp" accept="image/*,.pdf,.docx,.txt,.csv,.xlsx" style="display:none" />
             <div class="dt-file-preview" id="dtFilePreview" style="display:none"></div>
-            <textarea class="dt-input" id="dtInput" placeholder="输入问题，AI 将深入思考..." rows="1"></textarea>
+            <textarea class="dt-input" id="dtInput" placeholder="输入问题，AI 将深入研究..." rows="1"></textarea>
             <button type="button" class="dt-pause" id="dtPauseBtn" style="display:none" aria-label="暂停">暂停</button>
             <button type="button" class="dt-send" id="dtSendBtn">发送</button>
         </div>

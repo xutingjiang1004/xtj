@@ -2548,7 +2548,7 @@
                 if (postInp) postInp.value = "";
                 if (fileInp) fileInp.value = "";
                 if (window.XtjPostComposerMedia) window.XtjPostComposerMedia.clear();
-                if (visibilityEl) visibilityEl.value = "public";
+                if (visibilityEl) visibilityEl.value = window.__xtjDefaultPostVisibility || "public";
                 resetPostLocation();
             }
 
@@ -2639,6 +2639,7 @@
                 if (Object.prototype.hasOwnProperty.call(updates, "pinned_at") && String(verified.pinned_at || "") !== String(nextPinnedAt || "")) {
                     return { ok: false, error: new Error("更新失败：pinned_at 未实际生效") };
                 }
+                if (typeof window.__xtjUpdateAuthorPost === "function") window.__xtjUpdateAuthorPost(verified);
                 return { ok: true, data: verified };
             }
 

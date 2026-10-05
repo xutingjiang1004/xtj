@@ -111,6 +111,7 @@ const JS_FILES = [
   'js/post-publish-progress.js',
   'js/post-publish-motion.js',
   'js/author-posts.js',
+  'js/profile-settings.js',
   'js/early-feed.js',
   'js/core-utils.js',
   'js/core.js',
@@ -170,6 +171,7 @@ function injectConfigSecrets(source, filePath) {
 const CSS_FILES = [
   'css/post-feed.css',
   'css/author-posts.css',
+  'css/profile-settings.css',
   'css/style.css',
   'css/ui-enhance.css',
   'css/desktop.css',
