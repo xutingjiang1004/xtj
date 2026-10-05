@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium for runtime browser tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Build assets
+        run: npm run build
+
+      - name: Run build consistency check
+        run: npm run test:consistency
+
+      - name: Run project tests
+        run: npm test
+
+      - name: Verify generated assets are committed
+        run: git diff --exit-code
+
+  syntax:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unified syntax check
+        run: npm run test:syntax
+
+      - name: Finish
+        run: echo "ALL SYNTAX CHECKS PASSED"
+
+  database:
+    name: Database migrations and atomic APIs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Replay migrations and verify roles, races, rollback and identity
+        env:
+          AUDIT_DATABASE_URL: postgresql://postgres:local-ci-only@127.0.0.1:5432/postgres
+        run: node scripts/test-database-migrations.js
+      - name: Verify multi-image post transactions and cleanup
+        env:
+          XTJ_TEST_DATABASE_URL: postgresql://postgres:local-ci-only@127.0.0.1:5432/postgres
+        run: node --test tests/post-attachments-db.test.js
+
+  ui:
+    name: UI Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test, syntax]
+
+    env:
+      API_SECRET: test-ci-secret-key-123456
+      SUPABASE_SERVICE_KEY: test-ci-service-key-123456
+      ADMIN_PASSWORD: test-admin-password-ci
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build frontend assets
+        run: npm run build && npm run test:consistency
+
+      - name: Run UI tests
+        run: npm run test:ui

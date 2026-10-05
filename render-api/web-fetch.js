@@ -1,0 +1,1020 @@
+'use strict';
+
+/**
+ * SSRF-safe HTTPS page fetch + readable text extraction for Cat AI tools.
+ * Ported from code-agent patterns (DNS pin, private IP block, size/time limits).
+ */
+
+var dns = require('dns');
+var http = require('http');
+var https = require('https');
+var net = require('net');
+var zlib = require('zlib');
+var Readable = require('stream').Readable;
+
+var WEB_MAX_BYTES = 1.5 * 1024 * 1024;
+// ★ 2026-09-22 修复（read_web_page 对慢站/反爬站频繁失败）：
+//   原 12s 对 mayoclinic.org（Cloudflare 挑战页）、mem.gov.cn（跨境慢）等不够。
+//   提到 20s，配合下方「直接抓取失败自动走 Jina 兜底」双保险。
+var WEB_TIMEOUT_MS = 20000;
+var WEB_MAX_REDIRECTS = 3;
+var WEB_TEXT_MAX = 24000;
+
+/**
+ * Promise-based DNS lookup. Node's dns.lookup REQUIRES a callback and does NOT
+ * return a Promise when omitted (throws ERR_INVALID_ARG_TYPE) — so await dns.lookup
+ * silently breaks every web tool. Always use dns.promises (or an injected impl).
+ */
+function defaultDnsLookup(hostname, options) {
+  return dns.promises.lookup(hostname, options || { all: true, verbatim: true });
+}
+
+// 把 IPv6 归一化为 8 个 16 位组（含 "::" 展开与内嵌 IPv4 写法）；无法解析返回 null。
+// 用于识别 IPv4-mapped（::ffff:a9fe:a9fe）等形变，避免只认点分写法。
+function ipv6Groups(address) {
+  var value = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
+  var zone = value.indexOf('%');
+  if (zone >= 0) value = value.slice(0, zone);
+  if (value.indexOf('.') >= 0) {
+    var lastColon = value.lastIndexOf(':');
+    if (lastColon < 0) return null;
+    var embedded = value.slice(lastColon + 1);
+    if (net.isIP(embedded) !== 4) return null;
+    var embeddedOctets = embedded.split('.').map(Number);
+    value = value.slice(0, lastColon + 1) +
+      (((embeddedOctets[0] << 8) | embeddedOctets[1]).toString(16)) + ':' +
+      (((embeddedOctets[2] << 8) | embeddedOctets[3]).toString(16));
+  }
+  var halves = value.split('::');
+  if (halves.length > 2) return null;
+  var head = halves[0] ? halves[0].split(':') : [];
+  var tail = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
+  var groups = head;
+  if (halves.length === 2) {
+    var missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    groups = head.concat(new Array(missing).fill('0')).concat(tail);
+  }
+  if (groups.length !== 8) return null;
+  var result = [];
+  for (var i = 0; i < 8; i++) {
+    if (!/^[0-9a-f]{1,4}$/.test(groups[i])) return null;
+    result.push(parseInt(groups[i], 16));
+  }
+  return result;
+}
+
+function isPrivateAddress(address) {
+  var value = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (net.isIP(value) === 4) {
+    var octets = value.split('.').map(Number);
+    var first = octets[0];
+    return first === 0 || first === 10 || first === 127 || first >= 224 ||
+      (first === 100 && octets[1] >= 64 && octets[1] <= 127) ||
+      (first === 169 && octets[1] === 254) ||
+      (first === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (first === 192 && (octets[1] === 168 || (octets[1] === 0 && octets[2] === 0) || (octets[1] === 0 && octets[2] === 2))) ||
+      (first === 192 && octets[1] === 88 && octets[2] === 99) ||
+      (first === 198 && (octets[1] === 18 || octets[1] === 19 || (octets[1] === 51 && octets[2] === 100))) ||
+      (first === 203 && octets[1] === 0 && octets[2] === 113);
+  }
+  if (net.isIP(value) === 6) {
+    var groups = ipv6Groups(value);
+    // 解析不了的 IPv6 一律按内网处理（fail-closed），避免未知形变绕过
+    if (!groups) return true;
+    // IPv4-mapped(::ffff:0:0/96) 与 IPv4-compatible(::/96) 的内嵌 IPv4：
+    // 点分写法 "::ffff:169.254.169.254" 与十六进制写法 "::ffff:a9fe:a9fe" 必须都识别。
+    // （注：URL 中的 IPv6 必须带方括号，且 dns.lookup 通常会把 mapped 形式归一化回点分，
+    //   因此本条目前不可直接利用；但本函数作为唯一内网判定入口，应自身正确。）
+    if (groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0 && groups[4] === 0 && (groups[5] === 0 || groups[5] === 0xffff)) {
+      return isPrivateAddress(((groups[6] >> 8) & 255) + '.' + (groups[6] & 255) + '.' + ((groups[7] >> 8) & 255) + '.' + (groups[7] & 255));
+    }
+    // 审计 🟡：补齐 6to4(2002::/16，可内嵌任意 IPv4)、Teredo(2001::/32)、
+    // 文档段(2001:db8::/32)、NAT64(64:ff9b::/96) 与组播(ff00::/8)
+    return (groups[0] & 0xe000) !== 0x2000 ||
+      (groups[0] & 0xfe00) === 0xfc00 ||
+      (groups[0] & 0xffc0) === 0xfe80 ||
+      (groups[0] & 0xff00) === 0xff00 ||
+      (groups[0] === 0x64 && groups[1] === 0xff9b) ||
+      groups[0] === 0x2002 ||
+      (groups[0] === 0x3fff && (groups[1] & 0xf000) === 0) ||
+      (groups[0] === 0x2001 && (groups[1] === 0x0 || groups[1] === 0x2 ||
+        (groups[1] & 0xfff0) === 0x10 || (groups[1] & 0xfff0) === 0x20 || groups[1] === 0x0db8));
+  }
+  return false;
+}
+
+function isBlockedWebHost(hostname) {
+  var host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  return !host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') ||
+    host === 'metadata.google.internal' || host === 'metadata' || host.endsWith('.internal') ||
+    isPrivateAddress(host);
+}
+
+async function assertSafeWebUrl(rawUrl, lookupImpl) {
+  var parsed;
+  try {
+    parsed = new URL(String(rawUrl || ''));
+  } catch (_) {
+    throw new Error('网址格式无效');
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('仅支持 HTTP/HTTPS 链接');
+  var isHttps = parsed.protocol === 'https:';
+  if (parsed.port && parsed.port !== (isHttps ? '443' : '80')) throw new Error('仅支持标准端口（HTTP 80 / HTTPS 443）');
+  if (parsed.username || parsed.password) throw new Error('网址不允许包含凭据');
+  if (isBlockedWebHost(parsed.hostname)) throw new Error('网址主机不在允许范围内');
+
+  var lookup = lookupImpl || defaultDnsLookup;
+  var addresses = null;
+  var lastLookupError = null;
+  // Free-tier cold starts / transient resolver blips: retry DNS a couple times.
+  for (var attempt = 0; attempt < 3; attempt++) {
+    try {
+      addresses = await lookup(parsed.hostname.replace(/^\[|\]$/g, ''), { all: true, verbatim: true });
+      lastLookupError = null;
+      break;
+    } catch (err) {
+      lastLookupError = err;
+      addresses = null;
+      if (attempt < 2) {
+        await new Promise(function(resolve) { setTimeout(resolve, 180 * (attempt + 1)); });
+      }
+    }
+  }
+  if (lastLookupError || !Array.isArray(addresses) || !addresses.length) {
+    throw new Error('无法解析网页主机');
+  }
+  if (addresses.some(function(item) { return isPrivateAddress(item && item.address); })) {
+    throw new Error('网页主机解析到禁止访问的内网地址');
+  }
+  return {
+    parsed: parsed,
+    addresses: addresses.map(function(item) { return item.address; })
+  };
+}
+
+function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, externalSignal) {
+  return new Promise(function(resolve, reject) {
+    var chunks = [];
+    var total = 0;
+    var settled = false;
+    function onExternalAbort() {
+      if (!settled) {
+        settled = true;
+        try { request.destroy(new Error('请求已取消')); } catch (_) {}
+        // abort 路径同样拆除监听，避免泄漏
+        try {
+          if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+        } catch (_) {}
+        reject(new Error('请求已取消'));
+      }
+    }
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        return reject(new Error('请求已取消'));
+      }
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+    var isHttps = parsed.protocol !== 'http:';
+    var transport = isHttps ? https : http;
+    var request = transport.request({
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      port: isHttps ? 443 : 80,
+      path: parsed.pathname + parsed.search,
+      method: 'GET',
+      servername: parsed.hostname,
+      rejectUnauthorized: true,
+      headers: Object.assign({
+        Host: parsed.host,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+      }, headers || {}),
+      // ★ 2026-09-13 修复 P0（read_web_page 100% 失败 "Invalid IP address: undefined"）：
+      //   Node 22 的 net.connect 在 IPv4/IPv6 双栈场景会传 options.all = true，
+      //   此时 lookup 回调**必须返回对象数组** [{ address, family }]；
+      //   旧实现恒返回 callback(null, addresses[0], family) 的单地址形态，
+      //   Node 取 items[i].address 得到 undefined → new ConnectOpts 抛
+      //   "Invalid IP address: undefined"，导致所有网页读取请求全量失败。
+      lookup: pinnedLookup(addresses)
+    }, function(response) {
+      var declared = Number(response.headers['content-length']);
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        settled = true;
+        request.destroy();
+        cleanupExternalAbort();
+        reject(new Error('网页内容超过大小限制'));
+        return;
+      }
+      response.on('data', function(chunk) {
+        total += chunk.length;
+        if (total > maxBytes) {
+          request.destroy();
+          if (!settled) {
+            settled = true;
+            cleanupExternalAbort();
+            reject(new Error('网页内容超过大小限制'));
+          }
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', function() {
+        if (settled) return;
+        settled = true;
+        cleanupExternalAbort();
+        var body = Buffer.concat(chunks, total);
+        resolve({
+          status: response.statusCode || 0,
+          ok: (response.statusCode || 0) >= 200 && (response.statusCode || 0) < 300,
+          headers: {
+            get: function(key) {
+              return response.headers[String(key).toLowerCase()] || null;
+            }
+          },
+          body: body
+        });
+      });
+      response.on('error', function(err) {
+        if (!settled) {
+          settled = true;
+          cleanupExternalAbort();
+          reject(err);
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, function() {
+      request.destroy(new Error('网页请求超时'));
+    });
+    request.on('error', function(err) {
+      if (!settled) {
+        settled = true;
+        cleanupExternalAbort();
+        reject(err);
+      }
+    });
+    // 仅在请求真正结束（settled）后移除 abort 监听；
+    // 此前错误地在 end() 后 microtask 立即 cleanup，导致用户取消无效。
+    function cleanupExternalAbort() {
+      if (externalSignal) {
+        try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+      }
+    }
+    request.end();
+  });
+}
+
+function decodeHtmlEntities(text) {
+  return String(text || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, function(_, hex) {
+      try { return String.fromCodePoint(parseInt(hex, 16)); } catch (e) { return ''; }
+    })
+    .replace(/&#(\d+);/g, function(_, num) {
+      // ★ 2026-09-24 修复：十进制实体此前误按 16 进制解析（&#39;→"9"、&#65;→"e"）
+      try { return String.fromCodePoint(parseInt(num, 10)); } catch (e) { return ''; }
+    });
+}
+
+function extractTitle(html) {
+  var m = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (!m) {
+    var og = String(html || '').match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
+      || String(html || '').match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+    if (og) return decodeHtmlEntities(og[1]).replace(/\s+/g, ' ').trim().slice(0, 200);
+    return '';
+  }
+  return decodeHtmlEntities(m[1]).replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+function getTextDecoder() {
+  try {
+    var utilMod = require('util');
+    if (utilMod && typeof utilMod.TextDecoder === 'function') return utilMod.TextDecoder;
+  } catch (_) {}
+  try {
+    if (typeof global.TextDecoder === 'function') return global.TextDecoder;
+  } catch (_) {}
+  return null;
+}
+
+function normalizeCharset(name) {
+  var n = String(name || '').trim().toLowerCase().replace(/["'\s]/g, '');
+  if (!n) return '';
+  var aliases = {
+    'utf8': 'utf-8',
+    'utf8-sig': 'utf-8',
+    'gb2312': 'gb18030',
+    'gb_2312': 'gb18030',
+    'gb_2312-80': 'gb18030',
+    'csgb2312': 'gb18030',
+    'chinese': 'gb18030',
+    'windows-31j': 'shift_jis'
+  };
+  return aliases[n] || n;
+}
+
+function detectCharset(buffer, contentTypeHeader) {
+  // 1. BOM（字节级事实，最可靠）
+  if (buffer && buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) return 'utf-8';
+  if (buffer && buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) return 'utf-16le';
+  if (buffer && buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) return 'utf-16be';
+  // 2. HTTP 响应头 Content-Type 的 charset
+  var header = String(contentTypeHeader || '').match(/charset\s*=\s*["']?\s*([a-zA-Z0-9_\-]+)/i);
+  var charset = header ? normalizeCharset(header[1]) : '';
+  // 3. HTML <meta charset> / http-equiv 声明（仅看前 8KB，取首个命中）
+  if (!charset && buffer && buffer.length) {
+    // latin1 按字节无损映射，避免非 UTF-8 内容在切片时已被破坏
+    var head = buffer.slice(0, 8192).toString('latin1');
+    var m = head.match(/<meta[^>]+charset\s*=\s*["']?\s*([a-zA-Z0-9_\-]+)/i)
+      || head.match(/<meta[^>]+http-equiv\s*=\s*["']?content-type["']?[^>]+content\s*=\s*["'][^"']*charset\s*=\s*([a-zA-Z0-9_\-]+)/i)
+      || head.match(/<meta[^>]+content\s*=\s*["'][^"']*charset\s*=\s*([a-zA-Z0-9_\-]+)[^"']*["'][^>]+http-equiv\s*=\s*["']?content-type["']?/i);
+    if (m) charset = normalizeCharset(m[1]);
+  }
+  return charset;
+}
+
+function decodeBuffer(buffer, charset) {
+  if (!charset || /^utf-?8$/i.test(charset) || !Buffer.isBuffer(buffer)) return buffer.toString('utf8');
+  var TextDecoderCtor = getTextDecoder();
+  if (!TextDecoderCtor) return buffer.toString('utf8');
+  try {
+    return new TextDecoderCtor(charset, { fatal: false }).decode(buffer);
+  } catch (_) {
+    return buffer.toString('utf8');
+  }
+}
+
+function normalizeWebText(buffer, contentType) {
+  var charset = detectCharset(buffer, contentType);
+  var raw = decodeBuffer(buffer, charset);
+  var title = '';
+  var text = raw;
+  if (/html/i.test(contentType || '') || /<\s*html[\s>]/i.test(raw.slice(0, 2000))) {
+    title = extractTitle(raw);
+    text = raw
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<\/(p|div|h[1-6]|li|tr|br|section|article)>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ');
+    text = decodeHtmlEntities(text);
+  }
+  text = text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+  var truncated = text.length > WEB_TEXT_MAX;
+  if (truncated) text = text.slice(0, WEB_TEXT_MAX);
+  return { title: title, text: text, truncated: truncated };
+}
+
+/**
+ * Fetch one HTTPS page and return readable text.
+ * @returns {{ ok: boolean, url: string, title: string, content: string, content_type: string, bytes: number, truncated: boolean, status: number }}
+ */
+async function fetchSafeWebPage(rawUrl, options) {
+  options = options || {};
+  var lookupImpl = options.lookupImpl || defaultDnsLookup;
+  var maxBytes = options.maxBytes || WEB_MAX_BYTES;
+  var timeoutMs = options.timeoutMs || WEB_TIMEOUT_MS;
+  var externalSignal = options.signal || null;
+  var current = String(rawUrl || '').trim();
+
+  // ★ 2026-09-22 修复（read_web_page 对慢站/反爬站频繁失败）：
+  //   直接抓取（含最多 3 次重定向）整体失败时，自动用 Jina Reader 再试一次。
+  //   Jina 走 r.jina.ai 公共代理，对 Cloudflare 挑战页、跨境慢站、SPA 空壳页
+  //   都有更好的兼容性。仍走 assertSafeWebUrl + DNS pin，SSRF 防护不降级。
+  var directErr = null;
+  try {
+    return await fetchSafeWebPageDirect(current, { lookupImpl: lookupImpl, maxBytes: maxBytes, timeoutMs: timeoutMs, signal: externalSignal, headers: options.headers, allowJinaFallback: options.allowJinaFallback });
+  } catch (err) {
+    if (externalSignal && externalSignal.aborted) throw err;
+    directErr = err;
+  }
+
+  // 直接抓取失败 → Jina Reader 兜底（除非显式禁用）
+  // ★ 2026-09-24 修复（SSRF）：直接路径的失败可能正是因为目标 URL 命中黑名单
+  //   （内网/元数据地址）。fetchViaJinaReader 只校验 r.jina.ai 自身、不校验目标 URL，
+  //   若不复查，黑名单目标会经公共代理整体绕过 assertSafeWebUrl 的内网判定。
+  //   兜底前对目标做与直接路径同等的校验，命中黑名单则保留原始错误。
+  if (options.allowJinaFallback !== false) {
+    if (externalSignal && externalSignal.aborted) throw new Error('请求已取消');
+    try {
+      await assertSafeWebUrl(current, lookupImpl);
+    } catch (safeErr) {
+      throw directErr || safeErr;
+    }
+    try {
+      var jina = await fetchViaJinaReader(current, {
+        lookupImpl: lookupImpl,
+        maxBytes: Math.min(maxBytes, 900 * 1024),
+        timeoutMs: Math.min(timeoutMs, 18000),
+        signal: externalSignal
+      });
+      if (jina && jina.content && jina.content.replace(/\s+/g, '').length >= 1) {
+        return {
+          ok: true,
+          url: current,
+          title: jina.title || '',
+          content: jina.content,
+          content_type: 'text/markdown',
+          bytes: jina.bytes || 0,
+          truncated: false,
+          status: 200,
+          via_jina: true
+        };
+      }
+    } catch (_) { /* Jina 也失败，走原始错误 */ }
+  }
+
+  throw directErr || new Error('网页请求失败');
+}
+
+/**
+ * 直接抓取（含重定向）的内部实现，被 fetchSafeWebPage 调用。
+ * 抽出来是为了让外层能在整体失败后走 Jina 兜底。
+ */
+async function fetchSafeWebPageDirect(current, options) {
+  var lookupImpl = options.lookupImpl || defaultDnsLookup;
+  var maxBytes = options.maxBytes || WEB_MAX_BYTES;
+  var timeoutMs = options.timeoutMs || WEB_TIMEOUT_MS;
+  var externalSignal = options.signal || null;
+
+  for (var redirect = 0; redirect <= WEB_MAX_REDIRECTS; redirect++) {
+    var safeTarget = await assertSafeWebUrl(current, lookupImpl);
+    var parsed = safeTarget.parsed;
+    var response;
+    try {
+      response = await requestPinnedHttps(
+        parsed,
+        safeTarget.addresses,
+        maxBytes,
+        timeoutMs,
+        options.headers || {},
+        externalSignal
+      );
+    } catch (err) {
+      throw new Error((err && err.message) || '网页请求失败');
+    }
+
+    if (response && response.status >= 300 && response.status < 400) {
+      if (redirect === WEB_MAX_REDIRECTS) throw new Error('网页重定向次数过多');
+      var location = response.headers && response.headers.get ? response.headers.get('location') : '';
+      if (!location) throw new Error('网页重定向缺少目标');
+      current = new URL(location, parsed).toString();
+      continue;
+    }
+
+    if (!response || !response.ok) {
+      throw new Error('网页返回 HTTP ' + (response && response.status || 0));
+    }
+
+    var contentType = response.headers && response.headers.get
+      ? (response.headers.get('content-type') || '')
+      : '';
+    var normalized = normalizeWebText(response.body, contentType);
+    var content = normalized.text || '';
+    var title = normalized.title || '';
+    var usedFallback = false;
+
+    // SPA / 壳页面常几乎无正文：用 Jina Reader 公共代理再抽一次（仍走 SSRF 校验）。
+    // 阈值降到 40 字，避免正常短页（短新闻 / API 返回）被误判为空壳
+    if (content.replace(/\s+/g, '').length < 40 && options.allowJinaFallback !== false) {
+      try {
+        var jina = await fetchViaJinaReader(parsed.toString(), {
+          lookupImpl: lookupImpl,
+          maxBytes: Math.min(maxBytes, 900 * 1024),
+          timeoutMs: Math.min(timeoutMs, 14000),
+          signal: externalSignal
+        });
+        if (jina && jina.content && jina.content.replace(/\s+/g, '').length > content.replace(/\s+/g, '').length) {
+          content = jina.content;
+          if (jina.title) title = jina.title;
+          usedFallback = true;
+        }
+      } catch (err) {
+        if (externalSignal && externalSignal.aborted) throw err;
+        /* keep direct extract */
+      }
+    }
+
+    if (!content) throw new Error('未能从页面提取可读文本');
+
+    return {
+      ok: true,
+      url: parsed.toString(),
+      title: title || '',
+      content: content,
+      content_type: contentType.split(';')[0] || 'text/html',
+      bytes: response.body.length,
+      truncated: normalized.truncated || response.body.length >= maxBytes,
+      status: response.status,
+      via_jina: usedFallback
+    };
+  }
+  throw new Error('网页重定向失败');
+}
+
+/**
+ * Jina Reader: https://r.jina.ai/<url>
+ * 用于 SPA 空壳页的可读正文兜底。目标仍是公网 HTTPS，DNS pin 到 jina 主机。
+ */
+async function fetchViaJinaReader(targetUrl, options) {
+  options = options || {};
+  if (options.signal && options.signal.aborted) throw new Error('请求已取消');
+  // 截掉 hash（对抓取无意义）后整体 encodeURIComponent 作为 r.jina.ai 的 path，
+  // 避免 query/hash 被 URL 解析器当成 r.jina.ai 自身的参数
+  var jinaUrl = 'https://r.jina.ai/' + encodeURIComponent(String(targetUrl || '').split('#')[0]);
+  var safe = await assertSafeWebUrl(jinaUrl, options.lookupImpl);
+  // jina 主机本身不能是内网；assertSafeWebUrl 已保证
+  var response = await requestPinnedHttps(
+    safe.parsed,
+    safe.addresses,
+    options.maxBytes || WEB_MAX_BYTES,
+    options.timeoutMs || WEB_TIMEOUT_MS,
+    {
+      Accept: 'text/plain,text/markdown,text/html;q=0.8,*/*;q=0.5',
+      'X-Return-Format': 'markdown'
+    },
+    options.signal || null
+  );
+  if (!response || !response.ok) throw new Error('Jina 阅读失败 HTTP ' + (response && response.status || 0));
+  var raw = response.body.toString('utf8');
+  var title = '';
+  var tm = raw.match(/^Title:\s*(.+)$/im) || raw.match(/^#\s+(.+)$/m);
+  if (tm) title = tm[1].trim().slice(0, 200);
+  // 保留段落感
+  var text = raw
+    .replace(/^URL Source:.*$/gim, '')
+    .replace(/^Title:.*$/gim, '')
+    .replace(/^Markdown Content:\s*/im, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, WEB_TEXT_MAX);
+  return { title: title, content: text, bytes: response.body.length };
+}
+
+module.exports = {
+  fetchSafeWebPage: fetchSafeWebPage,
+  fetchViaJinaReader: fetchViaJinaReader,
+  fetchSafeRaw: fetchSafeRaw,
+  fetchSafeBuffer: fetchSafeBuffer,
+  fetchSafeRedirectBuffer: fetchSafeRedirectBuffer,
+  isPrivateAddress: isPrivateAddress,
+  isBlockedWebHost: isBlockedWebHost,
+  assertSafeWebUrl: assertSafeWebUrl,
+  defaultDnsLookup: defaultDnsLookup,
+  requestPinnedJson: requestPinnedJson,
+  requestPinnedStream: requestPinnedStream,
+  createPinnedAgent: createPinnedAgent,
+  // ★ 2026-09-25：导出网页文本解析层（charset 嗅探 → 解码 → 标题/正文抽取）。
+  //   供契约测试确定性验证非 UTF-8（GBK）中文站点的解析正确性 ——
+  //   此前该场景只能靠抓真实外网站点验证，在 CI 上因外网抖动长期失败。
+  //   纯函数、无网络副作用，导出不改变运行时行为。
+  parseWebText: normalizeWebText
+};
+
+// Binary image proxy: validate and pin every hop before connecting. The bounded
+// transport stops reading at the byte limit, including redirects and compressed
+// responses. Decompression preserves the original image bytes without recoding.
+async function fetchSafeRedirectBuffer(rawUrl, options) {
+  options = options || {};
+  var current = String(rawUrl || '');
+  var maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 16 * 1024 * 1024;
+  var maxRedirects = Math.min(5, Math.max(0, options.maxRedirects == null ? 3 : Number(options.maxRedirects)));
+  var signal = options.signal;
+  for (var hop = 0; hop <= maxRedirects; hop++) {
+    if (signal && signal.aborted) throw new Error('请求已取消');
+    var safe;
+    try {
+      var parsed = new URL(current);
+      if (parsed.protocol !== 'https:') throw new Error('仅支持 HTTPS 图片地址');
+      safe = await assertSafeWebUrl(current, options.lookupImpl);
+    } catch (error) { error.code = 'IMAGE_UPSTREAM_BLOCKED'; throw error; }
+    if (signal && signal.aborted) throw new Error('请求已取消');
+    var response;
+    try {
+      response = await requestPinnedHttps(safe.parsed, safe.addresses, maxBytes,
+        options.timeoutMs || 45000,
+        Object.assign({}, options.headers || {}, { 'Accept-Encoding': 'identity' }), signal);
+    } catch (error) {
+      if (/超过大小限制/.test(error.message || '')) error.code = 'IMAGE_TOO_LARGE';
+      throw error;
+    }
+    if ([301, 302, 303, 307, 308].indexOf(response.status) >= 0) {
+      var location = response.headers.get('location');
+      if (!location || hop === maxRedirects) {
+        var redirectError = new Error('图片重定向无效或次数过多');
+        redirectError.code = 'IMAGE_UPSTREAM_BLOCKED'; throw redirectError;
+      }
+      try { current = new URL(location, safe.parsed).toString(); }
+      catch (error) { error.code = 'IMAGE_UPSTREAM_BLOCKED'; throw error; }
+      continue;
+    }
+    var body = response.body;
+    var encoding = String(response.headers.get('content-encoding') || '').toLowerCase();
+    var decode = encoding === 'gzip' || encoding === 'x-gzip' ? zlib.gunzip
+      : encoding === 'deflate' ? zlib.inflate : encoding === 'br' ? zlib.brotliDecompress : null;
+    if (decode) {
+      try {
+        body = await new Promise(function(resolve, reject) {
+          decode(body, { maxOutputLength: maxBytes }, function(error, value) { if (error) reject(error); else resolve(value); });
+        });
+      } catch (error) { if (error.code === 'ERR_BUFFER_TOO_LARGE') error.code = 'IMAGE_TOO_LARGE'; throw error; }
+    } else if (encoding && encoding !== 'identity') throw new Error('图片响应编码不支持');
+    if (signal && signal.aborted) throw new Error('请求已取消');
+    return { ok: response.ok, status: response.status, headers: response.headers,
+      url: safe.parsed.toString(), buffer: body, bytes: body.length };
+  }
+}
+
+// ── 安全二进制下载（供 read_zip / image_info / image_process 使用）───────────
+// ★ 2026-09-13 修复 S-1 遗漏面：与 fetchSafeRaw 同理 —— 把「解析 → 校验 → 连接」
+//   绑定到同一组已解析地址，并拒绝重定向跟随，消除 DNS rebinding 与 302 绕过。
+// 返回：{ status, ok, buffer, bytes }
+async function fetchSafeBuffer(url, options) {
+  options = options || {};
+  var maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 30 * 1024 * 1024;
+  var timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 30000;
+  var safe = await assertSafeWebUrl(url, options.lookupImpl);
+  var response = await requestPinnedHttps(
+    safe.parsed,
+    safe.addresses,
+    maxBytes,
+    timeoutMs,
+    options.headers || {},
+    options.signal || null
+  );
+  var status = response.status;
+  if (status >= 300 && status < 400) {
+    var err = new Error('该地址返回重定向，已拒绝跟随（可能指向内部网络）');
+    err.code = 'REDIRECT_NOT_FOLLOWED';
+    err.status = status;
+    throw err;
+  }
+  return {
+    status: status,
+    ok: status >= 200 && status < 300,
+    buffer: response.body || Buffer.alloc(0),
+    bytes: response.body ? response.body.length : 0,
+    headers: {
+      get: function(key) {
+        return response.headers.get ? response.headers.get(key) : null;
+      }
+    }
+  };
+}
+
+// ── 安全原始抓取（供 page_meta / extract_links / read_zip / image_* 等使用）────
+// ★ 2026-09-13 修复 S-1 遗漏面：
+//   此前 server.js 里 page_meta / extract_links / read_zip / image_info /
+//   image_process 五处都是「先 await assertSafeWebUrl(url) 校验 → 再裸
+//   fetch(url, { redirect: 'follow' })」。这存在两重问题：
+//     ① TOCTOU：fetch 内部会**独立再解析一次 DNS**，攻击者控制的域名可让
+//        校验那次的解析返回公网 IP（通过），连接那次返回 127.0.0.1 /
+//        169.254.169.254 → 直接 SSRF 到内网与云元数据；
+//     ② redirect:'follow' 让第一次响应可 302 到内网，绕过初始校验。
+//   本函数把「解析 → 校验 → 连接」绑定到同一组已解析地址，并**拒绝重定向**
+//   （交由调用方决定是否自行跟随，主链路一律不跟随）。
+//
+// 返回：{ status, ok, text, bytes, headers: { get(k) } }
+//   ok 语义对齐 fetch：status 200-299 视为 ok。
+// 说明：为兼容既有调用点签名，文本类抓取（HTML 源码）用本函数的 text 字段；
+//   二进制下载另有 requestPinnedBuffer 需求，此处不做（既有调用点均为文本）。
+async function fetchSafeRaw(url, options) {
+  options = options || {};
+  var maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 3 * 1024 * 1024;
+  var timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : WEB_TIMEOUT_MS;
+  var safe = await assertSafeWebUrl(url, options.lookupImpl);
+  var response = await requestPinnedHttps(
+    safe.parsed,
+    safe.addresses,
+    maxBytes,
+    timeoutMs,
+    options.headers || {},
+    options.signal || null
+  );
+  var status = response.status;
+  // 拒绝重定向：3xx 不回传给调用方当正文用（否则会把跳转页当内容解析）。
+  // 若确实需要跟随，调用方应重新走一次 assertSafeWebUrl。
+  if (status >= 300 && status < 400) {
+    var err = new Error('该地址返回重定向，已拒绝跟随（可能指向内部网络）');
+    err.code = 'REDIRECT_NOT_FOLLOWED';
+    err.status = status;
+    throw err;
+  }
+  return {
+    status: status,
+    ok: status >= 200 && status < 300,
+    text: response.body ? response.body.toString('utf8') : '',
+    bytes: response.body ? response.body.length : 0,
+    headers: {
+      get: function(key) {
+        return response.headers.get ? response.headers.get(key) : null;
+      }
+    }
+  };
+}
+
+// ── 已校验地址的 HTTPS Agent 工厂（供 fetch 复用，消除 SSRF TOCTOU）──────────
+// ★ 2026-09-13 修复 S-1：
+//   fetch(https://...) 内部会自行做一次 DNS 解析，与 assertSafeWebUrl 的解析
+//   相互独立 → 校验通过后仍可能连到内网（TOCTOU / DNS rebinding）。
+//   把「已校验过的地址」通过 Agent.lookup 固定下来，使 fetch 复用同一组地址，
+//   校验与连接不再分离。同时强制 rejectUnauthorized，保持与主链路一致。
+//
+// 用法：fetch(url, { agent: createPinnedAgent(addresses), redirect: 'manual' })
+function createPinnedAgent(addresses) {
+  if (!Array.isArray(addresses) || !addresses.length) {
+    throw new Error('createPinnedAgent 需要非空的已校验地址列表');
+  }
+  return new https.Agent({
+    keepAlive: false,
+    // 强制使用已校验地址，杜绝 fetch 内部二次解析
+    lookup: pinnedLookup(addresses)
+  });
+}
+
+// ── DNS pin 的 lookup 实现（集中一处，避免三份拷贝各自漂移）────────────────────
+// ★ 2026-09-13 修复 P0：
+//   Node 22 的 net.connect 在双栈场景传 options.all = true，此时回调**必须**
+//   返回对象数组 [{ address, family }]；传 options.all 为空/0 时返回
+//   (err, address, family) 的单地址形态。旧实现在三处都恒返回单地址，
+//   于是每个走 pin 的请求都抛 "Invalid IP address: undefined" ——
+//   这正是 read_web_page 100% 报"工具暂时故障"的根因。
+//
+// 参数 addresses：已通过 assertSafeWebUrl 校验的**地址字符串数组**
+function pinnedLookup(addresses) {
+  return function(_hostname, options, callback) {
+    var first = addresses[0];
+    if (options && options.all) {
+      return callback(null, addresses.map(function(addr) {
+        return { address: addr, family: net.isIP(addr) || 4 };
+      }));
+    }
+    return callback(null, first, net.isIP(first) || 4);
+  };
+}
+
+// ── DNS-pinned JSON 请求（供自定义模型 base_url 调用）────────────────────────
+// ★ 2026-09-13 修复 S-1（SSRF TOCTOU）：
+//   原实现先用 assertSafeWebUrl() 做一次「解析 + 校验私有地址」，随后用全局
+//   fetch(baseUrl + path) 独立发起连接 —— 两次 DNS 解析相互独立。攻击者控制的
+//   域名可让第一次返回公网 IP（校验通过）、第二次返回 127.0.0.1 / 169.254.169.254
+//   → 校验与连接分离（TOCTOU），可 SSRF 到内网与云元数据。
+//   本函数把「解析 → 校验 → 连接」绑定到同一组已解析地址（lookup 覆写 pin），
+//   与 web-fetch 主链路 requestPinnedHttps 使用同一套安全模型。
+//
+// 参数：parsedUrl(URL) / addresses(已校验的地址数组) / opts{method, headers, body, timeoutMs, maxBytes, signal}
+// 返回：{ status, headers: {get(k)}, text }
+// 注意：本函数不做重定向跟随（重定向交由调用方显式拒绝），避免绕过校验。
+function requestPinnedJson(parsedUrl, addresses, opts) {
+  opts = opts || {};
+  var maxBytes = Number(opts.maxBytes) > 0 ? Number(opts.maxBytes) : 2 * 1024 * 1024;
+  var timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 180000;
+  var bodyBuf = null;
+  if (opts.body !== undefined && opts.body !== null) {
+    bodyBuf = Buffer.isBuffer(opts.body) ? opts.body : Buffer.from(String(opts.body), 'utf8');
+  }
+  return new Promise(function(resolve, reject) {
+    var chunks = [];
+    var total = 0;
+    var settled = false;
+    var externalSignal = opts.signal;
+    function onExternalAbort() {
+      if (!settled) {
+        settled = true;
+        try { request.destroy(new Error('请求已取消')); } catch (_) {}
+        try { if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+        reject(new Error('请求已取消'));
+      }
+    }
+    function cleanupExternalAbort() {
+      if (externalSignal) {
+        try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+      }
+    }
+    if (externalSignal) {
+      if (externalSignal.aborted) return reject(new Error('请求已取消'));
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+    var headers = Object.assign({
+      Host: parsedUrl.host,
+      'User-Agent': 'xtj-server/1.0',
+      Accept: 'application/json,text/plain,*/*;q=0.8'
+    }, opts.headers || {});
+    if (bodyBuf) {
+      headers['Content-Length'] = bodyBuf.length;
+      if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    }
+    var request = https.request({
+      protocol: 'https:',
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port ? Number(parsedUrl.port) : 443,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: String(opts.method || 'GET').toUpperCase(),
+      servername: parsedUrl.hostname,
+      rejectUnauthorized: true,
+      headers: headers,
+      // ★ 关键：DNS pin —— 强制使用已校验过的地址，杜绝二次解析被劫持
+      lookup: pinnedLookup(addresses)
+    }, function(response) {
+      var declared = Number(response.headers['content-length']);
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        settled = true;
+        request.destroy();
+        cleanupExternalAbort();
+        reject(new Error('响应超过大小限制'));
+        return;
+      }
+      response.on('data', function(chunk) {
+        total += chunk.length;
+        if (total > maxBytes) {
+          request.destroy();
+          if (!settled) {
+            settled = true;
+            cleanupExternalAbort();
+            reject(new Error('响应超过大小限制'));
+          }
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', function() {
+        if (settled) return;
+        settled = true;
+        cleanupExternalAbort();
+        var text = Buffer.concat(chunks).toString('utf8');
+        resolve({
+          status: response.statusCode,
+          headers: {
+            get: function(key) {
+              return response.headers[String(key).toLowerCase()] || null;
+            }
+          },
+          text: text
+        });
+      });
+      response.on('error', function(err) {
+        if (!settled) {
+          settled = true;
+          cleanupExternalAbort();
+          reject(err);
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, function() {
+      request.destroy(new Error('请求超时'));
+    });
+    request.on('error', function(err) {
+      if (!settled) {
+        settled = true;
+        cleanupExternalAbort();
+        reject(err);
+      }
+    });
+    if (bodyBuf) request.write(bodyBuf);
+    request.end();
+  });
+}
+
+// ── DNS-pinned 流式请求（供自定义模型 base_url 的 SSE/非流式调用）──────────────
+// ★ P1-3 审计修复：
+//   此前 server.js 的自定义模型调用写成
+//     fetch(baseUrl + '/chat/completions', { ..., agent: createPinnedAgent(addrs) })
+//   但 Node 内置 fetch 走的是 undici，**不认识 http.Agent，也不读 `agent` 选项**
+//   —— 只认 `dispatcher`。结果是这个参数被静默忽略：fetch 仍旧自己解析一次 DNS，
+//   与 assertSafeWebUrl 的解析相互独立，注释里声称的「消除 TOCTOU / DNS rebinding」
+//   实际上完全没有生效，攻击者控制的域名仍可让校验通过后再连到内网或云元数据。
+//
+//   本函数改用 https.request + pinnedLookup（真正的 DNS pin），并把响应包装成
+//   WHATWG Response —— 调用方继续用 ok / status / headers.get() / body.getReader()
+//   即可，无需改动消费逻辑。
+//
+//   另外两点与 fetch(..., { redirect: 'manual' }) 等价：
+//     · https.request 从不跟随重定向，3xx 原样返回，由调用方显式拒绝；
+//     · Response 的 type 恒为 'default'，调用方对 3xx 的状态码判断已覆盖。
+//
+// 参数：parsedUrl(URL) / addresses(已校验地址数组) / opts{method, headers, body, signal, timeoutMs}
+// 返回：Promise<Response>
+function requestPinnedStream(parsedUrl, addresses, opts) {
+  opts = opts || {};
+  if (!Array.isArray(addresses) || !addresses.length) {
+    return Promise.reject(new Error('requestPinnedStream 需要非空的已校验地址列表'));
+  }
+  var timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 0;
+  var bodyBuf = null;
+  if (opts.body !== undefined && opts.body !== null) {
+    bodyBuf = Buffer.isBuffer(opts.body) ? opts.body : Buffer.from(String(opts.body), 'utf8');
+  }
+  var isHttps = parsedUrl.protocol !== 'http:';
+  var transport = isHttps ? https : http;
+
+  return new Promise(function(resolve, reject) {
+    var settled = false;
+    var request = null;
+    var externalSignal = opts.signal;
+
+    function cleanupExternalAbort() {
+      if (externalSignal) {
+        try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+      }
+    }
+    function onExternalAbort() {
+      if (!settled) {
+        settled = true;
+        try { if (request) request.destroy(new Error('请求已取消')); } catch (_) {}
+        cleanupExternalAbort();
+        reject(new Error('请求已取消'));
+      }
+    }
+    if (externalSignal) {
+      if (externalSignal.aborted) return reject(new Error('请求已取消'));
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+
+    var headers = Object.assign({
+      Host: parsedUrl.host,
+      'User-Agent': 'xtj-server/1.0',
+      Accept: 'application/json,text/event-stream,*/*;q=0.8',
+      // ★ 与 fetch 不同：https.request 不会自动解压响应体。若上游仍返回
+      //   gzip/deflate/br，SSE 与 json() 都会拿到压缩字节而解析失败，
+      //   因此显式要求 identity，并在下方按 content-encoding 做兜底解压。
+      'Accept-Encoding': 'identity'
+    }, opts.headers || {});
+    if (bodyBuf) {
+      headers['Content-Length'] = bodyBuf.length;
+      if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    }
+
+    request = transport.request({
+      protocol: isHttps ? 'https:' : 'http:',
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port ? Number(parsedUrl.port) : (isHttps ? 443 : 80),
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: String(opts.method || 'POST').toUpperCase(),
+      servername: isHttps ? parsedUrl.hostname : undefined,
+      rejectUnauthorized: true,
+      headers: headers,
+      // ★ 关键：真正的 DNS pin —— 连接复用已校验地址，杜绝二次解析被劫持
+      lookup: pinnedLookup(addresses)
+    }, function(response) {
+      if (settled) return;
+      settled = true;
+      cleanupExternalAbort();
+      // 把数组型头（如 set-cookie）摊平成字符串，否则 Headers 构造会抛错。
+      var flatHeaders = {};
+      try {
+        Object.keys(response.headers || {}).forEach(function(k) {
+          var v = response.headers[k];
+          flatHeaders[k] = Array.isArray(v) ? v.join(', ') : String(v);
+        });
+      } catch (_) { flatHeaders = {}; }
+
+      // 兜底解压：上游无视 Accept-Encoding: identity 时仍能正确拿到明文。
+      var src = response;
+      var enc = String(response.headers['content-encoding'] || '').toLowerCase();
+      try {
+        if (enc === 'gzip' || enc === 'x-gzip') src = response.pipe(zlib.createGunzip());
+        else if (enc === 'deflate') src = response.pipe(zlib.createInflate());
+        else if (enc === 'br') src = response.pipe(zlib.createBrotliDecompress());
+      } catch (_) { src = response; }
+      if (src !== response) {
+        // 已解压，再保留 content-length / content-encoding 会让调用方误判
+        delete flatHeaders['content-length'];
+        delete flatHeaders['content-encoding'];
+      }
+
+      var init = { status: response.statusCode || 0, statusText: response.statusMessage || '' };
+      try {
+        init.headers = flatHeaders;
+        resolve(new Response(Readable.toWeb(src), init));
+      } catch (eHeaders) {
+        // 极端情况下上游头不合法 → 丢弃头信息，保留流（状态码判断仍可用）
+        try { delete init.headers; resolve(new Response(Readable.toWeb(src), init)); }
+        catch (eFatal) { reject(eFatal); }
+      }
+    });
+
+    if (timeoutMs > 0) {
+      request.setTimeout(timeoutMs, function() {
+        try { request.destroy(new Error('请求超时')); } catch (_) {}
+      });
+    }
+    request.on('error', function(err) {
+      if (!settled) {
+        settled = true;
+        cleanupExternalAbort();
+        reject(err);
+      }
+    });
+    if (bodyBuf) request.write(bodyBuf);
+    request.end();
+  });
+}

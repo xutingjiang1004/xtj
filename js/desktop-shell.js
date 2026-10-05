@@ -1,0 +1,388 @@
+(function () {
+  'use strict';
+
+  if (window.__xtjDesktopShellBound) return;
+  window.__xtjDesktopShellBound = true;
+
+  // Media viewers implement their own pinch handling; page gestures are handled by mobile-viewport.js.
+
+  function openTab(tab) {
+    var aiPanel = document.getElementById('panelAiChat');
+    var aiVisible = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
+    if ((window.__xtjAiChatActive || aiVisible) && typeof window.__xtjCloseAiChat === 'function') {
+      window.__xtjCloseAiChat();
+    }
+    if (typeof window.switchDockTab === 'function') {
+      window.switchDockTab(tab, true, { animate: true, source: 'desktop-sidebar' });
+    }
+  }
+
+  function openAiChat() {
+    if (typeof window.__xtjOpenAiChat === 'function') {
+      return window.__xtjOpenAiChat();
+    }
+    var fallback = document.querySelector('[data-ai-tool="chat"]');
+    if (fallback) fallback.click();
+  }
+
+  function syncActiveTab() {
+    var aiPanel = document.getElementById('panelAiChat');
+    var aiActive = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
+    var activePanel = document.querySelector('.dock-panel.active');
+    var tab = activePanel && activePanel.id ? activePanel.id.replace(/^panel/, '').toLowerCase() : 'posts';
+    document.querySelectorAll('.desktop-nav-item').forEach(function (button) {
+      var active = aiActive
+        ? button.getAttribute('data-desktop-action') === 'ai-chat'
+        : button.getAttribute('data-desktop-tab') === tab;
+      button.classList.toggle('is-active', active);
+      if (button.classList.contains('desktop-nav-item')) {
+        if (active) button.setAttribute('aria-current', 'page');
+        else button.removeAttribute('aria-current');
+      }
+    });
+  }
+
+  function syncUser() {
+    var sourceAvatar = document.getElementById('myAvatar');
+    var sourceName = document.getElementById('myName');
+    var targetAvatar = document.getElementById('desktopWorkbenchAvatar');
+    var targetName = document.getElementById('desktopWorkbenchName');
+    var targetStatus = document.getElementById('desktopWorkbenchStatus');
+    if (!targetAvatar || !targetName || !targetStatus) return;
+
+    var loggedIn = !!window.currentUser;
+    targetName.textContent = loggedIn ? ((sourceName && sourceName.textContent.trim()) || String(window.currentUser)) : '未登录';
+    targetStatus.textContent = loggedIn ? '欢迎回来' : '登录后同步个人信息';
+    if (sourceAvatar) {
+      targetAvatar.className = sourceAvatar.className + ' desktop-workbench-avatar';
+      targetAvatar.style.backgroundImage = sourceAvatar.style.backgroundImage || '';
+      targetAvatar.replaceChildren();
+
+      Array.prototype.forEach.call(sourceAvatar.childNodes, function (node) {
+        targetAvatar.appendChild(node.cloneNode(true));
+      });
+
+      var targetImage = targetAvatar.querySelector('img');
+      if (targetImage) {
+        targetImage.removeAttribute('id');
+        targetImage.addEventListener('error', function () {
+          targetAvatar.textContent = loggedIn && String(window.currentUser)
+            ? String(window.currentUser).slice(0, 1).toUpperCase()
+            : '?';
+        }, { once: true });
+      } else if (!targetAvatar.textContent.trim() && !targetAvatar.style.backgroundImage) {
+        targetAvatar.textContent = loggedIn && String(window.currentUser)
+          ? String(window.currentUser).slice(0, 1).toUpperCase()
+          : '?';
+      }
+    }
+    syncContacts();
+  }
+
+  function syncChatBadge() {
+    var source = document.getElementById('navChatBadge');
+    var target = document.getElementById('desktopChatBadge');
+    if (!source || !target) return;
+    target.textContent = source.textContent || '';
+    target.hidden = !target.textContent.trim() || source.style.display === 'none';
+  }
+
+  function syncContacts() {
+    var target = document.getElementById('desktopContactsPreview');
+    if (!target) return;
+    target.replaceChildren();
+
+    if (!window.currentUser) {
+      var authEmpty = document.createElement('span');
+      authEmpty.className = 'desktop-contacts-empty';
+      authEmpty.textContent = '登录后显示最近联系人';
+      target.appendChild(authEmpty);
+      return;
+    }
+
+    var rows = Array.prototype.slice.call(document.querySelectorAll('#dockChatList .chat-list-item[data-chat-user]'), 0, 4);
+    if (!rows.length) {
+      var empty = document.createElement('span');
+      empty.className = 'desktop-contacts-empty';
+      empty.textContent = '暂无最近联系人';
+      target.appendChild(empty);
+      return;
+    }
+
+    rows.forEach(function (row) {
+      var userName = row.getAttribute('data-chat-user') || '';
+      if (!userName) return;
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'desktop-contact-preview';
+      item.setAttribute('aria-label', '与 ' + userName + ' 聊天');
+
+      var avatar = document.createElement('span');
+      avatar.className = 'desktop-contact-preview__avatar';
+      var sourceAvatar = row.querySelector('.cli-avatar');
+      var sourceImage = sourceAvatar && sourceAvatar.querySelector('img');
+      var sourceUrl = sourceImage && (sourceImage.currentSrc || sourceImage.getAttribute('src') || '');
+      var safeUrl = '';
+      if (sourceUrl) {
+        try {
+          var parsedUrl = new URL(sourceUrl, document.baseURI);
+          if (['http:', 'https:', 'data:', 'blob:'].indexOf(parsedUrl.protocol) >= 0) safeUrl = parsedUrl.href;
+        } catch (_) {}
+      }
+      if (safeUrl) {
+        var image = document.createElement('img');
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.alt = '';
+        image.src = safeUrl;
+        image.addEventListener('error', function () {
+          image.remove();
+          avatar.textContent = userName.slice(0, 1).toUpperCase();
+        }, { once: true });
+        avatar.appendChild(image);
+      } else {
+        avatar.textContent = userName.slice(0, 1).toUpperCase();
+      }
+
+      var copy = document.createElement('span');
+      copy.className = 'desktop-contact-preview__copy';
+      var name = document.createElement('b');
+      name.className = 'desktop-contact-preview__name';
+      name.textContent = userName;
+      var preview = document.createElement('small');
+      preview.className = 'desktop-contact-preview__preview';
+      preview.textContent = (row.querySelector('.cli-preview') || {}).textContent || '暂无消息';
+      copy.appendChild(name);
+      copy.appendChild(preview);
+      item.appendChild(avatar);
+      item.appendChild(copy);
+
+      var badge = row.querySelector('.cli-badge');
+      if (badge && badge.textContent.trim()) {
+        var badgeEl = document.createElement('span');
+        badgeEl.className = 'desktop-contact-preview__badge';
+        badgeEl.textContent = badge.textContent.trim();
+        item.appendChild(badgeEl);
+      }
+      item.addEventListener('click', function () {
+        if (typeof window.openChat === 'function') window.openChat(userName);
+      });
+      target.appendChild(item);
+    });
+  }
+
+  var contactsSyncPending = false;
+  // 导出供 performRefresh('chat') 等外部流程调用（原为 IIFE 私有函数）
+  window.syncContacts = syncContacts;
+  window.syncChatBadge = syncChatBadge;
+
+  function scheduleContactsSync() {
+    if (contactsSyncPending) return;
+    contactsSyncPending = true;
+    var run = function () {
+      contactsSyncPending = false;
+      syncContacts();
+    };
+    if (window.requestAnimationFrame) window.requestAnimationFrame(run);
+    else window.setTimeout(run, 0);
+  }
+
+  // ★ 双击刷新：每个导航项的 Promise 锁防抖
+  var _refreshLocks = {};
+
+  function refreshTab(tab) {
+    if (_refreshLocks[tab]) return _refreshLocks[tab];
+    _refreshLocks[tab] = performRefresh(tab);
+    return _refreshLocks[tab];
+  }
+
+  function callRefreshSafely(callback) {
+    try {
+      return Promise.resolve(callback()).catch(function () {});
+    } catch (e) {
+      return Promise.resolve();
+    }
+  }
+
+  async function performRefresh(tab) {
+    try {
+      try {
+        if (typeof window.showToast === 'function') window.showToast('正在刷新…', 'info');
+      } catch (e) {}
+
+      switch (tab) {
+        case 'posts':
+          if (typeof window.loadFeed === 'function') await window.loadFeed(true);
+          break;
+
+        case 'chat':
+          var chatPromises = [];
+          if (typeof window.updateUnreadBadge === 'function') {
+            chatPromises.push(callRefreshSafely(function () { return window.updateUnreadBadge(); }));
+          }
+          if (typeof window.startDMPolling === 'function') {
+            chatPromises.push(callRefreshSafely(function () { return window.startDMPolling(300000, false); }));
+          }
+          if (typeof window.syncContacts === 'function') {
+            chatPromises.push(callRefreshSafely(function () { return window.syncContacts(); }));
+          }
+          if (typeof window.syncChatBadge === 'function') {
+            chatPromises.push(callRefreshSafely(function () { return window.syncChatBadge(); }));
+          }
+          if (typeof window.dockChatActiveUser !== 'undefined' && window.dockChatActiveUser) {
+            if (typeof window.loadDockChatMessages === 'function') {
+              chatPromises.push(callRefreshSafely(function () { return window.loadDockChatMessages(window.dockChatActiveUser, false); }));
+            }
+          }
+          if (chatPromises.length) await Promise.allSettled(chatPromises);
+          break;
+
+        case 'ai':
+          var aiPromises = [];
+          if (typeof window.__xtjRefreshAiSession === 'function') {
+            aiPromises.push(window.__xtjRefreshAiSession().catch(function() {}));
+          }
+          if (typeof window.__xtjRefreshAiConfig === 'function') {
+            aiPromises.push(window.__xtjRefreshAiConfig().catch(function() {}));
+          }
+          if (aiPromises.length) await Promise.allSettled(aiPromises);
+          break;
+
+        case 'photos':
+          if (typeof window.__xtjPhotoWallForceSync === 'function') {
+            await window.__xtjPhotoWallForceSync();
+          }
+          break;
+
+        case 'profile':
+          var profilePromises = [];
+          if (typeof window.loadCurrentUserInfoSnapshot === 'function' && window.currentUser) {
+            profilePromises.push(window.loadCurrentUserInfoSnapshot(window.currentUser).catch(function() {}));
+          }
+          if (typeof window.renderProfileActivity === 'function') {
+            try { window.renderProfileActivity(); } catch (e) {}
+          }
+          if (typeof window.syncUser === 'function') {
+            profilePromises.push(window.syncUser().catch(function() {}));
+          }
+          if (profilePromises.length) await Promise.allSettled(profilePromises);
+          break;
+
+        default:
+          break;
+      }
+    } finally {
+      delete _refreshLocks[tab];
+    }
+  }
+  function init() {
+    // P0: 存储 MutationObserver 引用，页面切换时断开防止内存泄漏
+    var _observers = [];
+
+    // ★ 双击刷新处理
+    document.addEventListener('dblclick', function (event) {
+      var tabButton = event.target.closest('[data-desktop-tab]');
+      if (tabButton) {
+        event.preventDefault();
+        var tab = tabButton.getAttribute('data-desktop-tab');
+        if (tabButton.classList.contains('is-active')) {
+          refreshTab(tab);
+        }
+        return;
+      }
+      var _t = event.target;
+      if (!_t || typeof _t.closest !== 'function') return;
+      var actionButton = _t.closest('[data-desktop-action="ai-chat"]');
+      if (actionButton && actionButton.classList.contains('is-active')) {
+        event.preventDefault();
+        refreshTab('ai');
+      }
+    });
+
+    document.addEventListener('click', function (event) {
+      var _t2 = event.target;
+      if (!_t2 || typeof _t2.closest !== 'function') return;
+      var tabButton = _t2.closest('[data-desktop-tab]');
+      if (tabButton) {
+        event.preventDefault();
+        var tab = tabButton.getAttribute('data-desktop-tab');
+        openTab(tab);
+        window.requestAnimationFrame(syncActiveTab);
+        return;
+      }
+      var actionButton = event.target.closest('[data-desktop-action="ai-chat"]');
+      if (actionButton) {
+        event.preventDefault();
+        openAiChat();
+        window.requestAnimationFrame(syncActiveTab);
+      }
+    });
+
+    var panels = document.getElementById('dockPanels');
+    if (panels && window.MutationObserver) {
+      var obs1 = new MutationObserver(syncActiveTab);
+      obs1.observe(panels, { attributes: true, subtree: true, attributeFilter: ['class'] });
+      _observers.push(obs1);
+    }
+    var aiPanel = document.getElementById('panelAiChat');
+    if (aiPanel && window.MutationObserver) {
+      var obs2 = new MutationObserver(syncActiveTab);
+      obs2.observe(aiPanel, { attributes: true, attributeFilter: ['class'] });
+      _observers.push(obs2);
+    }
+    var auth = document.querySelector('.nav-auth');
+    if (auth && window.MutationObserver) {
+      // ★ rAF 合并防抖：一帧内多次变更只同步一次用户状态
+      var _userSyncRaf = 0;
+      function scheduleUserSync() {
+        if (_userSyncRaf) return;
+        _userSyncRaf = requestAnimationFrame(function () {
+          _userSyncRaf = 0;
+          syncUser();
+        });
+      }
+      var obs3 = new MutationObserver(scheduleUserSync);
+      obs3.observe(auth, { attributes: true, childList: true, subtree: true, attributeFilter: ['class', 'data-user', 'data-username'] });
+      _observers.push(obs3);
+    }
+    var badge = document.getElementById('navChatBadge');
+    if (badge && window.MutationObserver) {
+      var obs4 = new MutationObserver(syncChatBadge);
+      obs4.observe(badge, { attributes: true, childList: true, characterData: true });
+      _observers.push(obs4);
+    }
+    var chatList = document.getElementById('dockChatList');
+    if (chatList && window.MutationObserver) {
+      var obs5 = new MutationObserver(scheduleContactsSync);
+      obs5.observe(chatList, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributeFilter: ['data-chat-user']
+      });
+      _observers.push(obs5);
+    }
+
+    // P0: 在页面卸载时断开所有 Observer
+    window.addEventListener('beforeunload', function() {
+      for (var i = 0; i < _observers.length; i++) {
+        try { _observers[i].disconnect(); } catch (e) {}
+      }
+      _observers.length = 0;
+    });
+    syncActiveTab();
+    syncUser();
+    syncChatBadge();
+    syncContacts();
+  }
+
+  // 2026-09-23 侧栏折叠功能已移除。
+  //   原实现（提交 a90273e）存在无法修复的布局缺陷：展开按钮放在 <aside> 之外、
+  //   成为 .app-container 网格的直接子元素，侧栏 display:none 后它与 .dock-panels
+  //   被自动排成两行，内容区落到第 2 行（实测 y=884、h=0）→ 折叠后整页空白。
+  //   经确认该功能从未真正可用，故整体移除，侧栏保持常驻显示。
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+})();

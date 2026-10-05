@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="XTJ 管理后台">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<title>xtj 管理后台</title>
+<link rel="icon" type="image/svg+xml" href="icon.svg" />
+<link rel="stylesheet" href="css/admin.min.css?v=204715698d">
+<script defer src="js/config.min.js?v=57f8a9a8d6"></script>
+</head>
+<body>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal-overlay" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMsg" aria-hidden="true">
+    <div class="modal-dialog">
+        <h3 id="confirmTitle">确认操作</h3>
+        <p id="confirmMsg">确定要执行此操作吗？</p>
+        <div class="modal-btns">
+            <button class="btn-cancel" onclick="closeConfirm()">取消</button>
+            <button class="btn-danger" id="confirmOkBtn" onclick="execConfirm()">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="photoPreviewModal" style="display:none;align-items:center;justify-content:center;z-index:10000;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);">
+    <div style="position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;">
+        <button onclick="adminClosePhotoPreview()" style="position:absolute;top:16px;right:20px;z-index:10;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:22px;cursor:pointer;line-height:44px;text-align:center;transition:background 0.2s;">✕</button>
+        <img id="photoPreviewImg" src="" alt="照片预览" style="display:block;max-width:95vw;max-height:95vh;object-fit:contain;border-radius:4px;">
+        <div id="photoPreviewInfo" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);padding:8px 20px;background:rgba(0,0,0,0.65);color:#ccc;font-size:12px;border-radius:20px;text-align:center;"></div>
+    </div>
+</div>
+
+<div class="login-wrap" id="loginWrap">
+    <div class="login-card">
+        <h1>🔐 xtj 管理后台</h1>
+        <p>仅限管理员登录</p>
+        <form id="adminLoginForm" onsubmit="event.preventDefault(); window.doAdminLogin(); return false;">
+            <input id="loginName" placeholder="管理员账号" autocomplete="username" aria-label="管理员账号" />
+            <input id="loginPw" type="password" placeholder="管理员密码" autocomplete="current-password" aria-label="管理员密码" />
+            <button type="submit">登录后台</button>
+        </form>
+        <div class="login-err" id="loginErr" role="alert" aria-live="assertive"></div>
+    </div>
+</div>
+
+<div class="dashboard" id="dashboard">
+    <div class="dash-header">
+        <h1>⚙️ xtj 管理后台</h1>
+        <div class="dh-right">
+            <div role="tablist" aria-label="管理后台功能" style="display:contents">
+            <button type="button" role="tab" aria-selected="true" aria-controls="tabAnn" id="tabAnnBtn" class="active" onclick="switchTab('ann')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11v2"/><path d="M6 9.5v5L16 18V6L6 9.5z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M6 14.5 7.5 19h2.5"/></svg></span><span class="admin-tab-label">公告管理</span></button>
+            <button type="button" role="tab" aria-selected="false" aria-controls="tabStats" id="tabStatsBtn" onclick="switchTab('stats')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 16v-5"/><path d="M12 16V8"/><path d="M17 16V4"/></svg></span><span class="admin-tab-label">数据统计</span></button>
+            <button type="button" role="tab" aria-selected="false" aria-controls="tabUsers" id="tabUsersBtn" onclick="switchTab('users')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3"/><path d="M20 21v-2a4 4 0 0 0-3-3.87"/><path d="M15 4.13a3 3 0 0 1 0 5.74"/></svg></span><span class="admin-tab-label">用户数据</span></button>
+            <button type="button" role="tab" aria-selected="false" aria-controls="tabSecurity" id="tabSecurityBtn" onclick="switchTab('security')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 5 3.5 8 7 9 3.5-1 7-4 7-9V6l-7-3z"/><path d="m9 12 2 2 4-4"/></svg></span><span class="admin-tab-label">安全中心</span></button>
+            <button type="button" role="tab" aria-selected="false" aria-controls="tabAudit" id="tabAuditBtn" onclick="switchTab('audit')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 6H8a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2"/><path d="M9 12h6"/><path d="M9 16h4"/><rect x="9" y="2" width="6" height="4" rx="1"/></svg></span><span class="admin-tab-label">操作审计</span></button>
+            <button id="tabBehaviorBtn" onclick="switchTab('behavior')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 16 4-4 4 4 4-8"/></svg></span><span class="admin-tab-label">用户行为</span></button>
+            <button id="tabErrorLogBtn" onclick="switchTab('errorlog')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 3 1 2"/><path d="m16 3-1 2"/><path d="M9 9h.01"/><path d="M15 9h.01"/><path d="M8 13h8"/><path d="M5 10a7 7 0 0 1 14 0v5a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3v-5z"/></svg></span><span class="admin-tab-label">错误日志</span></button>
+            <button id="tabPostsBtn" onclick="switchTab('posts')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3h5v5"/><path d="M10 14 19 5"/><path d="M5 7a2 2 0 0 1 2-2h4"/><path d="M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg></span><span class="admin-tab-label">帖子管理</span></button>
+            <button id="tabLikesBtn" onclick="switchTab('likes')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 20-1.4-1.3C5.4 14 2 10.9 2 7.1 2 4.8 3.8 3 6.1 3c1.4 0 2.8.7 3.9 1.9C11.1 3.7 12.5 3 13.9 3 16.2 3 18 4.8 18 7.1c0 3.8-3.4 6.9-8.6 11.6L12 20z"/></svg></span><span class="admin-tab-label">点赞数据</span></button>
+            <button id="tabCommentsBtn" onclick="switchTab('comments')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg></span><span class="admin-tab-label">评论数据</span></button>
+            <button id="tabReportsBtn" onclick="switchTab('reports')" style="position:relative;overflow:visible"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4 3 20h18L12 4z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span><span class="admin-tab-label">举报管理</span><span id="reportBadge" class="notif-badge" style="display:none">0</span></button>
+            <button id="tabBansBtn" onclick="switchTab('bans')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="admin-tab-label">拉黑封禁</span></button>
+            <button id="tabMutesBtn" onclick="switchTab('mutes')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m17 9 4 6"/><path d="m21 9-4 6"/></svg></span><span class="admin-tab-label">禁言管理</span></button>
+            <button type="button" id="tabSupportBtn" role="tab" aria-selected="false" aria-controls="tabSupport" onclick="switchTab('support')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 8c-4-2-6 0-5 2s5 1 5 3-3 3-6 1M12 6v12"/></svg></span><span class="admin-tab-label">作者打赏</span></button>
+            <button id="tabPhotosBtn" onclick="switchTab('photos')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h4l2-2h4l2 2h4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="12" r="3.5"/></svg></span><span class="admin-tab-label">照片管理</span></button>
+            <button id="tabEmailBtn" onclick="switchTab('email')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><span class="admin-tab-label">邮件通知</span></button>
+            <button id="tabOnlineBtn" onclick="switchTab('online')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="#4ade80"/><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span><span class="admin-tab-label">实时在线</span></button>
+            <button id="tabProfileBtn" onclick="switchTab('profile')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 12c2.7 0 5-2.3 5-5s-2.3-5-5-5-5 2.3-5 5 2.3 5 5 5z"/><path d="M2 20c0-3.3 4-6 10-6s10 2.7 10 6"/></svg></span><span class="admin-tab-label">用户画像</span></button>
+            <button id="tabAiBtn" onclick="switchTab('ai')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.2c-3.6 0-6.5 2.5-6.5 5.6 0 1.7.8 3.2 2.1 4.2-.1.5-.3 1.4-.7 2.4 1.3-.3 2.3-.8 2.9-1.2.7.2 1.4.3 2.2.3 3.6 0 6.5-2.5 6.5-5.7S15.6 3.2 12 3.2z"/><path d="M8.2 18.8c.8-.4 1.6-.7 2.4-.9"/><path d="M15.8 18.8c-.8-.4-1.6-.7-2.4-.9"/><path d="M9.2 8.6h.01"/><path d="M14.8 8.6h.01"/><path d="M9.5 11.2c.7.7 1.6 1.1 2.5 1.1s1.8-.4 2.5-1.1"/><path d="m17.8 4.2.7 1.5 1.5.3-1.2 1.1.4 1.5-1.4-.8-1.4.8.4-1.5-1.2-1.1 1.5-.3z"/></svg></span><span class="admin-tab-label">AI管理</span></button>
+            </div>
+            <button onclick="toggleTheme()" title="切换主题"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v2.5"/><path d="M12 18.5V21"/><path d="m5.64 5.64 1.77 1.77"/><path d="m16.59 16.59 1.77 1.77"/><path d="M3 12h2.5"/><path d="M18.5 12H21"/><path d="m5.64 18.36 1.77-1.77"/><path d="m16.59 7.41 1.77-1.77"/><circle cx="12" cy="12" r="4"/></svg></span><span class="admin-tab-label">主题</span></button>
+            <button class="danger" onclick="confirmLogout()"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></span><span class="admin-tab-label">退出</span></button>
+            </div>
+        </div>
+    </div>
+    <div class="dash-content">
+        <div class="tab-panel active" id="tabAnn" role="tabpanel" aria-labelledby="tabAnnBtn" tabindex="0"></div>
+        <div class="tab-panel" id="tabStats"></div>
+        <div class="tab-panel" id="tabUsers"></div>
+        <div class="tab-panel" id="tabSecurity"></div>
+        <div class="tab-panel" id="tabSupport" role="tabpanel" aria-labelledby="tabSupportBtn"></div>
+        <div class="tab-panel" id="tabPosts"></div>
+        <div class="tab-panel" id="tabLikes"></div>
+        <div class="tab-panel" id="tabComments"></div>
+        <div class="tab-panel" id="tabReports"></div>
+        <div class="tab-panel" id="tabBans"></div>
+        <div class="tab-panel" id="tabMutes"></div>
+        <div class="tab-panel" id="tabPhotos"></div>
+        <div class="tab-panel" id="tabEmail"></div>
+        <div class="tab-panel" id="tabAudit"></div>
+        <div class="tab-panel" id="tabBehavior"></div>
+        <div class="tab-panel" id="tabErrorLog"></div>
+        <div class="tab-panel" id="tabOnline"></div>
+        <div class="tab-panel" id="tabProfile"></div>
+        <div class="tab-panel" id="tabAi"></div>
+    </div>
+</div>
+
+<script defer src="js/admin/admin.min.js?v=1aa62a3dd2"></script>
+</body>
+</html>

@@ -1,0 +1,1233 @@
+!function() {
+    var e = !1, t = null, o = {
+        scale: 1,
+        tx: 0,
+        ty: 0
+    }, n = [], i = -1, a = 0, r = 0, s = null, l = 0, c = !1, d = !1, p = 0, u = !1, f = !1, m = new Map, v = null, y = null, h = null, w = 1 / 0, g = 0, b = 0, x = 0, I = null, B = {
+        isActive: !1,
+        dy: 0,
+        scale: 1,
+        opacity: 1
+    }, P = null, E = !1, L = Object.create(null);
+    var pendingPreviewDeletes = new Set();
+    window.addEventListener('xtj:visual-viewport-change', function(){if(e){M();if(s){s.style.transition="none";s.style.transform="translate3d("+-a+"px,0,0)";}l=0;}});
+    window.addEventListener('xtj:permissions-ready', function() { if (e && t) j(i); });
+    function T(e) {
+        return "close" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span>' : "info" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span>' : "share" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span>' : "rotate" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(-1.5,0)"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></g></svg></span>' : "delete" === e ? '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>' : "";
+    }
+    // P4: removed duplicate function N for toast — it was shadowed by the
+    // index setter declared at line ~159 and never reachable. window.showToast
+    // is already defined independently below.
+    "function" != typeof window.showToast && (window.showToast = function(e) {
+        e && console.warn("[photo-preview]", e);
+    });
+    function M() {
+        var root = document.getElementById("photoPreviewOverlay");
+        a = root && root.clientWidth || window.innerWidth; r = root && root.clientHeight || window.innerHeight;
+        s = document.getElementById("ppSlideTrack");
+        if (!s || (s._ppWidth === a && s._ppHeight === r)) return;
+        s._ppWidth = a; s._ppHeight = r;
+        s.querySelectorAll(".pp-slide-slot").forEach(function(slot) { slot.style.width = a + "px"; slot.style.height = r + "px"; });
+        s.style.width = 3 * a + "px"; s.style.height = r + "px";
+    }
+    function k(e) {
+        for (var t = n, o = -1; o <= 1; o++) {
+            var i = e + o;
+            i >= 0 && i < t.length && t[i].imageUrl && U(t[i].imageUrl);
+        }
+    }
+    function z(e) {
+        var t = n;
+        if (s) {
+            var o = document.getElementById("ppPrevImg"), i = document.getElementById("ppNextImg");
+            e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null), e < t.length - 1 && t[e + 1] ? D(i, t[e + 1].imageUrl) : D(i, null);
+        }
+    }
+    var C = {}, _ = {}, H = {}, S = 3, previewCacheOrder = [], PREVIEW_CACHE_LIMIT = 12, PREVIEW_CACHE_PIXELS = 32 * 1024 * 1024;
+    function cachePreviewImage(e, t) {
+        if (!e || !t) return;
+        var pixelCost = t.naturalWidth * t.naturalHeight;
+        if (pixelCost > PREVIEW_CACHE_PIXELS) return;
+        // Cache detached images only: slide nodes change URL on every navigation.
+        if (t.isConnected) {
+            var cached = new Image();
+            cached.decoding = "async";
+            cached.src = e;
+            t = cached;
+        }
+        t._ppCachedPixels = pixelCost;
+        C[e] = t;
+        var o = previewCacheOrder.indexOf(e);
+        o >= 0 && previewCacheOrder.splice(o, 1), previewCacheOrder.push(e);
+        var pixels = previewCacheOrder.reduce(function(sum, url) {
+            var image = C[url];
+            return sum + (image ? image._ppCachedPixels || 0 : 0);
+        }, 0);
+        while (previewCacheOrder.length > 1 && (previewCacheOrder.length > PREVIEW_CACHE_LIMIT || pixels > PREVIEW_CACHE_PIXELS)) {
+            var oldest = previewCacheOrder.shift(), image = C[oldest];
+            pixels -= image ? image._ppCachedPixels || 0 : 0;
+            delete C[oldest];
+        }
+    }
+    document.addEventListener("visibilitychange", function() {
+        if (!document.hidden) return;
+        previewCacheOrder.length = 0, Object.keys(C).forEach(function(e) {
+            delete C[e];
+        });
+    });
+    function U(e) {
+        if (!e) return Promise.resolve();
+        if (C[e]) return Promise.resolve();
+        if (_[e]) return _[e];
+        var t = new Promise(function(t) {
+            var o = new Image;
+            o.decoding = "async";
+            o.fetchPriority = "low";
+            function safeCacheAndResolve() {
+                // P4: only cache images that truly loaded (naturalWidth > 0).
+                // Broken images have naturalWidth === 0; caching them wastes a
+                // cache slot and permanently blocks retry (U returns early on C[e]).
+                o.naturalWidth > 0 && cachePreviewImage(e, o);
+                delete _[e], delete H[e], t();
+            }
+            function n() {
+                o.complete ? safeCacheAndResolve() : (o.onload = safeCacheAndResolve, o.onerror = function() {
+                    // P4: onerror — do NOT cache the broken image, just resolve
+                    delete _[e], delete H[e], t();
+                });
+            }
+            o.src = e, "decode" in o ? o.decode().then(function() {
+                safeCacheAndResolve();
+            }).catch(function() {
+                n();
+            }) : n();
+        });
+        return _[e] = t, t;
+    }
+    function clearPreviewImageLoad(image, resetSource) {
+        if (!image) return;
+        image._ppFullPreloadCleanup && image._ppFullPreloadCleanup(!0);
+        image._ppFullPreloadCleanup = null;
+        image._ppObjectUrl && (URL.revokeObjectURL(image._ppObjectUrl), image._ppObjectUrl = null);
+        image._ppCleanup && image._ppCleanup(), image._ppCleanup = null, image._ppLoadGen = (image._ppLoadGen || 0) + 1,
+        image._ppUrl = null, image._ppProgressiveUrl = null, image._ppListenerUrl = null, image.onload = null, image.onerror = null,
+        image.classList.remove("pp-placeholder"), image.style.transition = "none";
+        resetSource && (image.removeAttribute("src"), image.style.opacity = "0");
+    }
+    function D(e, t, forceReload) {
+        if (e) {
+            if (!t) {
+                clearPreviewImageLoad(e, !0);
+                e.style.opacity = "0";
+                e.classList.remove("pp-placeholder");
+                return;
+            }
+            if (e._ppUrl === t) {
+                // 若当前展示的是该 URL 的 Blob 对象图（渐进加载中），保持不动，避免用原 URL 覆盖
+                if (e._ppObjectUrl) return e.style.transition = "none", void (e.style.opacity = "1");
+                if (e.complete && e.naturalWidth > 0) return e.style.transition = "none", void (e.style.opacity = "1");
+                if (!forceReload && e._ppListenerUrl === t && e._ppCleanup) return;
+            } else {
+                // 换 URL 前彻底清旧图，避免切换时残影；同时取消缩略图打开时的原图预加载回调。
+                e._ppFullPreloadCleanup && e._ppFullPreloadCleanup(!0);
+                e._ppFullPreloadCleanup = null;
+                e._ppCleanup && e._ppCleanup();
+                e._ppObjectUrl && (URL.revokeObjectURL(e._ppObjectUrl), e._ppObjectUrl = null);
+                e.style.transition = "none";
+                e.style.opacity = "0";
+                e.classList.remove("pp-placeholder");
+                try { e.removeAttribute("src"); } catch (err) {}
+            }
+            e._ppCleanup && e._ppCleanup();
+            e._ppUrl = t;
+            // Even an HTTP cache hit must decode the new source before becoming visible.
+            e.decoding = "async";
+            e.fetchPriority = e.id === "photoPreviewImage" ? "high" : "low";
+            e.style.transition = "none", e.removeAttribute("src"), e.style.opacity = "0";
+            // 重置该 URL 的失败预算：每次导航到(或重载)此图都重新获得完整的重试次数，
+            // 避免"看坏图→切走→再切回"时 H[url] 沿用旧值导致只试 1 次就显示占位图。
+            delete H[t];
+            var n = !1, i = 0, a = (e._ppLoadGen || 0) + 1, r = null;
+            e._ppLoadGen = a;
+            function cleanup() {
+                r && (clearTimeout(r), r = null), e.removeEventListener("load", handleLoad), e.removeEventListener("error", handleError), e.onload = null, e.onerror = null, e._ppListenerUrl === t && (e._ppListenerUrl = null), e._ppCleanup === cleanup && (e._ppCleanup = null);
+            }
+            function handleLoad() {
+                n || e._ppLoadGen !== a || e._ppUrl !== t || (n = !0, cleanup(), C[t] || cachePreviewImage(t, e), delete H[t], revealDecoded());
+            }
+            function revealDecoded() {
+                var ready = typeof e.decode === "function" ? e.decode() : Promise.resolve();
+                ready.then(function() {
+                    if (e._ppLoadGen !== a || e._ppUrl !== t) return;
+                    e.style.transition = "none";
+                    e.style.opacity = "1";
+                }, function() {
+                    if (e._ppLoadGen === a && e._ppUrl === t && e.complete && e.naturalWidth > 0) e.style.opacity = "1";
+                });
+            }
+            function handleError() {
+                n || e._ppLoadGen !== a || e._ppUrl !== t || (cleanup(), (i = (H[t] || 0) + 1) <= S ? (H[t] = i, r = setTimeout(function() {
+                    e._ppUrl === t && e._ppLoadGen === a && (n = !1, e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.removeAttribute("src"), e.src = t);
+                }, 500 * i)) : (n = !0, e._ppUrl = null, delete H[t], function(e) {
+                    if (!e) return;
+                    e.style.transition = "opacity 0.3s ease", e.style.opacity = "1", e.classList.add("pp-placeholder");
+                }(e)));
+            }
+            e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t, e.src = forceReload && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : t, e.complete && e.naturalWidth > 0 && handleLoad();
+        }
+    }
+    function O(e) {
+        cancelTrackAnimation();
+        if (M(), s) {
+            var t = n, o = document.getElementById("ppPrevImg"), i = document.getElementById("photoPreviewImage"), r = document.getElementById("ppNextImg");
+            // 先硬清邻槽，避免切图瞬间露出上一轮残留图
+            if (o) { clearPreviewImageLoad(o, !0); }
+            if (r) { clearPreviewImageLoad(r, !0); }
+            t[e] && D(i, t[e].imageUrl), e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null),
+            e < t.length - 1 && t[e + 1] ? D(r, t[e + 1].imageUrl) : D(r, null), l = 0, c = !1,
+            s.classList.remove("snapping"), s.style.transition = "none", s.style.transform = "translateX(" + -a + "px)",
+            // 强制一次回流后再允许 transition，防止残影叠在滑动层
+            void s.offsetWidth,
+            t[e] && window.updateAmbientBackground && window.updateAmbientBackground(t[e].imageUrl);
+        }
+    }
+    function cancelTrackAnimation() {
+        if (s && s._ppAnimationCleanup) s._ppAnimationCleanup();
+        c = !1; f = !1;
+    }
+    function R(e, t) {
+        if (!s) { if (t) t(); return; }
+        c = !0;
+        s.classList.add("snapping");
+        var reduced = document.documentElement.getAttribute("data-xtj-motion") === "off" ||
+            (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+        var duration = reduced ? 0 : 260;
+        s.style.transition = "transform " + duration + "ms cubic-bezier(0.33, 1, 0.68, 1)";
+        var done = !1, timer = null;
+        function cleanup() {
+            done = !0;
+            if (timer) clearTimeout(timer);
+            s.removeEventListener("transitionend", finish);
+            s._ppAnimationCleanup = null;
+            s.classList.remove("snapping");
+        }
+        function finish(event) {
+            if (event && (event.target !== s || event.propertyName !== "transform")) return;
+            if (done) return;
+            cleanup(); c = !1;
+            if (t) t();
+        }
+        s._ppAnimationCleanup = cleanup;
+        s.addEventListener("transitionend", finish);
+        timer = setTimeout(finish, duration + 100);
+        s.style.transform = "translateX(" + e + "px)";
+        if (reduced) finish();
+    }
+    function A(e) {
+        if (s) {
+            c = !0;
+            var t = Math.abs(l - e), o = Math.min(Math.max(.5 * t, 150), 400);
+            s.classList.add("snapping"), s.style.transition = "transform " + o + "ms cubic-bezier(0.33, 1, 0.68, 1)";
+            // P4: 幂等 finish — transitionend 与 setTimeout 谁先触发都只执行一次，
+            // 防止 transitionend 未触发时动画锁 c 永久卡死（与函数 R 一致）。
+            var _done = !1, _fallback = null, r = function(event) {
+                if (event && (event.target !== s || event.propertyName !== "transform")) return;
+                if (_done) return;
+                _done = !0;
+                s.removeEventListener("transitionend", r);
+                s._ppAnimationCleanup = null;
+                if (_fallback) { clearTimeout(_fallback); _fallback = null; }
+                s.classList.remove("snapping"), c = !1,
+                // ★ 修复 B3：回弹完成后位移 l 归零。此前 W() 越界回弹不重置 l，
+                // 残留位移会导致下一次 pointerup 的翻页判定（|U| > a/4）误判方向。
+                l = 0,
+                Y(10);
+                var e = i, t = n, o = document.getElementById("ppPrevImg"), a = (document.getElementById("photoPreviewImage"),
+                document.getElementById("ppNextImg"));
+                e > 0 && t[e - 1] ? D(o, t[e - 1].imageUrl) : D(o, null), e < t.length - 1 && t[e + 1] ? D(a, t[e + 1].imageUrl) : D(a, null),
+                setTimeout(function() {
+                    k(e);
+                }, 500);
+            };
+            s._ppAnimationCleanup = function() {
+                _done = !0;
+                s.removeEventListener("transitionend", r);
+                if (_fallback) clearTimeout(_fallback);
+                s._ppAnimationCleanup = null;
+                s.classList.remove("snapping");
+            };
+            s.addEventListener("transitionend", r);
+            // P4: setTimeout 兜底（transition 时长 + 120ms，与 R 的 320+120=440 模式一致）
+            _fallback = setTimeout(r, o + 120);
+            var d = -a + e;
+            s.style.transform = "translateX(" + d + "px)";
+        }
+    }
+    function N(e) {
+        i = e, q(), t = n[e], j(e), F(e), M();
+        if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
+        if (s) {
+            s.style.transition = "none";
+            s.style.transform = "translateX(" + -a + "px)";
+            s.classList.remove("snapping");
+        }
+        l = 0, c = !1, O(e), n[e] && window.updateAmbientBackground && window.updateAmbientBackground(n[e].imageUrl),
+        f = !1;
+        window.dispatchEvent(new CustomEvent("xtj:photo-changed"));
+    }
+    function W(e) {
+        if (!f) {
+            var t = i + e;
+            if (t < 0 || t >= n.length) Math.abs(l) > 2 && A(0); else {
+                f = !0, M();
+                var o = 1 === e ? -2 * a : 0;
+                // 预取目标与邻图，但不提前把错误 URL 留在当前中槽
+                k(t), z(i), R(o, function() {
+                    // 动画结束后硬重置轨道与三槽，杜绝上一张残留
+                    if (s) {
+                        s.style.transition = "none";
+                        s.style.transform = "translateX(" + -a + "px)";
+                    }
+                    N(t);
+                });
+            }
+        }
+    }
+    function j(e) {
+        var o = n;
+        if (o[e]) {
+            var i = o[e];
+            t = i, window.photoPreviewCurrent = i;
+            if (window.renderPhotoStory) window.renderPhotoStory(i);
+            else {
+                var user = document.getElementById("photoPreviewUser"), time = document.getElementById("photoPreviewTime"), views = document.getElementById("photoPreviewViewsCount");
+                if (user) user.textContent = i.username || "未知用户";
+                if (time) time.textContent = new Date(i.timestamp).toLocaleString("zh-CN", {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
+                if (views) views.textContent = i.views || "0";
+            }
+            var c = document.getElementById("ppDeleteBtn");
+            if (c) {
+                c.disabled = pendingPreviewDeletes.has(String(i.id));
+                // L3 修复：移除硬编码管理员名 'xxz'，改用 isAdmin()（后端仍独立校验）
+                var d = window.currentUser === 'xxz' && typeof window.isAdmin === "function" && window.isAdmin(), p = !!window.currentUser && window.currentUser === i.username;
+                c.hidden = !(d || p);
+                c.style.display = d || p ? 'flex' : 'none';
+                c.title = '删除';
+            }
+        }
+    }
+    function F(e) {
+        var t = n, o = document.getElementById("ppDots");
+        if (!o || t.length <= 1) o && (o.style.display = "none"); else {
+            o.style.display = "flex";
+            for (var i = "", a = 0; a < t.length; a++) i += '<span class="pp-dot' + (a === e ? " active" : "") + '" data-index="' + a + '"></span>';
+            o.innerHTML = i;
+        }
+    }
+    function q() {
+        o = {
+            scale: 1,
+            tx: 0,
+            ty: 0
+        }, v = null, b = 0, document.querySelectorAll(".pp-slide-img").forEach(function(e) {
+            e.style.transform = "", e.style.borderRadius = "";
+        });
+    }
+    function X(e, t) {
+        var n = document.getElementById("photoPreviewImage");
+        if (n) if (o.scale > 1.01) q(), n.classList.remove("zoomed"); else {
+            var i = n.getBoundingClientRect();
+            if (o.scale = 2, void 0 !== e && void 0 !== t) {
+                var a = (e - i.left) / i.width, r = (t - i.top) / i.height, s = i.left + i.width * a, l = i.top + i.height * r;
+                o.tx = -1 * (window.innerWidth / 2 - s), o.ty = -1 * (window.innerHeight / 2 - l);
+            } else {
+                var c = i.left + i.width / 2, d = i.top + i.height / 2;
+                o.tx = -1 * (window.innerWidth / 2 - c), o.ty = -1 * (window.innerHeight / 2 - d);
+            }
+            var p = "translate3d(" + o.tx + "px," + o.ty + "px,0) scale(" + o.scale + ")";
+            n.style.transform = p, n.classList.add("zoomed");
+        }
+    }
+    function Y(e) {
+        if (navigator.vibrate) try {
+            navigator.vibrate(e);
+        } catch (e) {}
+    }
+    function V(immediate) {
+        cancelTrackAnimation();
+        if (e) {
+            e = !1;
+            var t = document.getElementById("photoPreviewOverlay");
+            if (t) {
+                // ★ 修复：关闭动画的延迟清槽定时器存入 overlay，重开预览时取消，
+                // 防止 220/280ms 后误清掉新打开图片的 src（快速 关→开 竞态）。
+                t._ppCloseWipeTimer && (clearTimeout(t._ppCloseWipeTimer), t._ppCloseWipeTimer = null);
+                t._cleanupPreview && t._cleanupPreview(), t._cleanupOpenListeners && t._cleanupOpenListeners(), t._openLoadGen = (t._openLoadGen || 0) + 1, q();
+                var o = document.getElementById("photoPreviewImage"), n = t._openOrigin, i = t._openOriginImg, a = null;
+                clearPreviewImageLoad(o, !1);
+                if (immediate === true) {
+                    ["photoPreviewImage", "ppPrevImg", "ppNextImg"].forEach(function(id){clearPreviewImageLoad(document.getElementById(id),!0);});
+                    if(i){i.style.transition="";i.style.opacity="";}
+                    t.style.opacity="";t.style.transition="";t.classList.remove("active");document.body.classList.remove("photo-previewing");return;
+                }
+                if (o && (a = o.getBoundingClientRect()), n && a && i && a.width > 0 && a.height > 0 && n.width > 0 && n.height > 0) {
+                    i.style.transition = "none", i.style.opacity = "0";
+                    var r = n.left - a.left, s = n.top - a.top, l = n.width / a.width, c = n.height / a.height, d = Math.min(l, c);
+                    o.style.transition = "none", o.style.transform = "translate(0, 0) scale(1)", o.style.transformOrigin = "top left",
+                    o.style.borderRadius = "0px", o.offsetHeight, t.style.transition = "opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+                    o.style.transition = "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
+                    o.style.transform = "translate(" + r + "px, " + s + "px) scale(" + d + ")", o.style.borderRadius = 14 / d + "px",
+                    t.style.opacity = "0", t._ppCloseWipeTimer = setTimeout(function() {
+                        i && (i.style.transition = "", i.style.opacity = "");
+                        // 关闭后清空三槽，防止下次打开残留
+                        ["photoPreviewImage", "ppPrevImg", "ppNextImg"].forEach(function(id) {
+                            var img = document.getElementById(id);
+                            if (img) {
+                                clearPreviewImageLoad(img, !0);
+                                img.style.transform = "";
+                                img.style.transformOrigin = "";
+                                img.style.borderRadius = "";
+                                img.style.opacity = "";
+                            }
+                        });
+                        t.style.transition = "", t.style.opacity = "", t.classList.remove("active"), document.body.classList.remove("photo-previewing");
+                    }, 280);
+                } else t.style.transition = "opacity 0.22s cubic-bezier(0.55, 0, 1, 0.45)", t.style.opacity = "0",
+                t._ppCloseWipeTimer = setTimeout(function() {
+                    t.style.opacity = "", t.style.transition = "", t.classList.remove("active");
+                    ["photoPreviewImage", "ppPrevImg", "ppNextImg"].forEach(function(id) {
+                        var img = document.getElementById(id);
+                        if (img) {
+                            clearPreviewImageLoad(img, !0);
+                            img.style.transform = "";
+                            img.style.transformOrigin = "";
+                            img.style.borderRadius = "";
+                            img.style.opacity = "";
+                        }
+                    });
+                    i && (i.style.transition = "", i.style.opacity = ""), document.body.classList.remove("photo-previewing");
+                }, 220);
+            } else document.body.classList.remove("photo-previewing");
+        }
+    }
+    function Z(e) {
+        return e || 0 === e ? e >= 1048576 ? (e / 1048576).toFixed(2) + " MB" : e >= 1024 ? (e / 1024).toFixed(1) + " KB" : e + " B" : "--";
+    }
+    function K(e, t) {
+        return '<div class="pp-info-row"><span class="pp-info-label">' + e + '</span><span class="pp-info-value">' + t + "</span></div>";
+    }
+    function G(e, t) {
+        var o = null == e || "" === e ? t || "--" : e;
+        // 内置 escapeHtml 兜底：core.js 加载顺序变化或独立复用时，避免用户可控字段（username/exif）
+        // 原样拼入 innerHTML 形成存储型 XSS（同 hotfix 的 escapeValue）
+        var escapeFn = typeof window.escapeHtml === 'function' ? window.escapeHtml : function(s) {
+            return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        };
+        return escapeFn(String(o));
+    }
+    function J(e) {
+        if (!e) return "";
+        var t = e.timestamp ? new Date(e.timestamp).toLocaleString("zh-CN") : "--", o = "";
+        o += K("作者", G(e.username, "--")), o += K("时间", G(t, "--")), o += K("浏览", G(null != e.views ? e.views : 0, "0"));
+        var n = "";
+        n += K("大小", G(Z(e.fileSize), "--")), e.originalSize && Number(e.originalSize) > 0 && Number(e.originalSize) !== Number(e.fileSize || 0) && (n += K("原始大小", G(Z(e.originalSize), "--")));
+        var i = "";
+        e.exif && ((e.exif.make || e.exif.model) && (i += K("设备", G(e.exif.model || e.exif.make, "--"))),
+        e.exif.fNumber && (i += K("光圈", G("f/" + e.exif.fNumber, "--"))), e.exif.exposureTime && (i += K("快门", G(e.exif.exposureTime, "--"))),
+        e.exif.iso && (i += K("ISO", G(e.exif.iso, "--"))), e.exif.focalLength && (i += K("焦距", G(e.exif.focalLength + "mm", "--"))));
+        var a = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + o + '</div><div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">文件信息</div>' + n + "</div>";
+        return i && (a += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF 数据</div>' + i + "</div>"),
+        a;
+    }
+    // P4: known duplicate — this function Q declaration is hoisted and later
+    // overwritten by `Q = function() { ... }` in the assignment chain (~line 655).
+    // The hoisted function is also used as a truthy flag in re() (~line 651:
+    // `Q || (Q = !0, ...)`). Removing the declaration would change re()'s
+    // behavior, so we keep it but document that the function body below is
+    // dead code — the active version is the assignment at line ~655.
+    function Q() {
+        var e = t;
+        if (e) {
+            var o = document.getElementById("ppInfoModal");
+            if (o && ("flex" === o.style.display || o.classList.contains("active") || o.classList.contains("closing"))) window.closePhotoInfo(); else {
+                if (!o) {
+                    var n = document.createElement("div");
+                    n.className = "pp-info-modal", n.id = "ppInfoModal", n.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>',
+                    document.body.appendChild(n), o = n;
+                }
+                var infoTitle = o.querySelector(".pp-info-modal-title"), infoClose = o.querySelector(".pp-info-modal-close");
+                infoTitle && !infoTitle.id && (infoTitle.id = "ppInfoModalTitle"), o.setAttribute("role", "dialog"),
+                o.setAttribute("aria-modal", "true"), o.setAttribute("aria-labelledby", "ppInfoModalTitle"),
+                infoClose && infoClose.setAttribute("aria-label", "关闭照片信息"), o._focusTrapInstalled || (o._focusTrapInstalled = !0,
+                o.addEventListener("keydown", function(e) {
+                    if ("Escape" === e.key) return e.preventDefault(), void window.closePhotoInfo();
+                    if ("Tab" !== e.key) return;
+                    var t = Array.from(o.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(function(e) {
+                        return null !== e.offsetParent;
+                    });
+                    if (!t.length) return e.preventDefault();
+                    var n = t[0], i = t[t.length - 1];
+                    e.shiftKey && document.activeElement === n ? (e.preventDefault(), i.focus()) : !e.shiftKey && document.activeElement === i && (e.preventDefault(), n.focus());
+                }));
+                o._bgListener || (o._bgListener = !0, o.addEventListener("click", function(e) {
+                    e.target === o && window.closePhotoInfo();
+                }));
+                var i = "--";
+                if (e.fileSize) {
+                    var a = e.fileSize;
+                    i = a >= 1048576 ? (a / 1048576).toFixed(2) + " MB" : a >= 1024 ? (a / 1024).toFixed(1) + " KB" : a + " B";
+                }
+                var r = "--";
+                e.timestamp && (r = new Date(e.timestamp).toLocaleString("zh-CN"));
+                var s = "";
+                s += x("作者", I(e.username, "--")), s += x("时间", I(r, "--")), s += x("浏览", I(e.views || 0, "0"));
+                var l = "";
+                l += x("大小", I(i, "--"));
+                var c = "";
+                e.exif && ((e.exif.make || e.exif.model) && (c += x("设备", I(e.exif.model || e.exif.make, "--"))),
+                e.exif.fNumber && (c += x("光圈", I("f/" + e.exif.fNumber, "--"))), e.exif.exposureTime && (c += x("快门", I(e.exif.exposureTime, "--"))),
+                e.exif.iso && (c += x("ISO", I(e.exif.iso, "--"))), e.exif.focalLength && (c += x("焦距", I(e.exif.focalLength + "mm", "--"))));
+                var d = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + s + '</div><div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">文件信息</div>' + l + "</div>";
+                c && (d += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF 数据</div>' + c + "</div>");
+                var p = document.getElementById("ppInfoModalBody");
+                p && (p.innerHTML = d), o._closeTimeout && (clearTimeout(o._closeTimeout), o._closeTimeout = null);
+                var u = o.querySelector(".pp-info-modal-content"), f = document.getElementById("ppInfoBtn"), m = null;
+                if (f && (m = f.getBoundingClientRect()), o.classList.remove("closing"), o.classList.add("active"),
+                o.style.display = "flex", o.style.opacity = "1", u.style.transition = "none", u.style.transform = "",
+                u.style.opacity = "1", u.offsetHeight, m) {
+                    var v = u.getBoundingClientRect(), y = m.left - v.left, h = m.top - v.top, w = m.width / v.width, g = m.height / v.height, b = Math.min(w, g);
+                    u.style.transform = "translate(" + y + "px, " + h + "px) scale(" + b + ")", u.style.transformOrigin = "top left",
+                    u.style.opacity = "0", o._ppInfoOrigin = {
+                        dx: y,
+                        dy: h,
+                        scale: b,
+                        btnWidth: m.width,
+                        btnHeight: m.height
+                    };
+                }
+                u.offsetHeight, o.style.transition = "opacity 0.25s ease-out", o.style.opacity = "0",
+                o.offsetHeight, o.style.opacity = "1", m ? (u.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out",
+                u.style.transform = "translate(0, 0) scale(1)", u.style.opacity = "1") : (u.style.transition = "none",
+                u.style.transform = "scale(0.9)", u.style.opacity = "0", u.offsetHeight, u.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out",
+                u.style.transform = "scale(1)", u.style.opacity = "1");
+            }
+        }
+        function x(e, t) {
+            return '<div class="pp-info-row"><span class="pp-info-label">' + e + '</span><span class="pp-info-value">' + t + "</span></div>";
+        }
+        function I(e, t) {
+            // ★ 2026-09-26（审计 AI 前端 P2-6）：与上方 G() 保持同一套转义兜底。
+            //   本文件里同一段"取默认值 + 转义"逻辑存在两份实现，此前只给 G() 补了
+            //   window.escapeHtml 缺失时的兜底，I() 仍直接调用 window.escapeHtml ——
+            //   一旦 core.js 加载顺序变化（预览模块被独立复用/延后加载），这里就会
+            //   TypeError 或把用户可控字段（username/exif）原样拼进 innerHTML。
+            var o = null == e || "" === e ? t || "--" : e;
+            var escapeFn = typeof window.escapeHtml === 'function' ? window.escapeHtml : function(s) {
+                return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            };
+            return escapeFn(String(o));
+        }
+    }
+    function $() {
+        try {
+            var e = document.getElementById("ppDownloadOverlay");
+            e && (e.style.display = "none");
+            var t = document.getElementById("ppDownloadProgressBar");
+            t && (t.style.width = "0%");
+        } catch (e) {
+            console.error("Error hiding download overlay:", e);
+        }
+    }
+    function ee(e, t) {
+        try {
+            var o = document.getElementById("ppDownloadProgressBar");
+            o && (o.style.width = Math.max(0, Math.min(100, e)) + "%");
+            var n = document.getElementById("ppDownloadText");
+            n && t && (n.textContent = t);
+        } catch (e) {
+            console.error("Error updating download progress:", e);
+        }
+    }
+    function te() {
+        try {
+            var e = document.getElementById("ppDownloadConfirmModal");
+            e && (e.classList.remove("show"), setTimeout(function() {
+                try {
+                    e && e.style && (e.style.display = "none");
+                } catch (e) {
+                    console.error("Error in hide timeout:", e);
+                }
+            }, 300));
+        } catch (e) {
+            console.error("Error hiding download confirm modal:", e);
+        }
+    }
+    window.ppPrevPhoto = function() {
+        W(-1);
+    }, window.ppNextPhoto = function() {
+        W(1);
+    }, window.openPhotoPreview = function(b, L) {
+        cancelTrackAnimation();
+        if (!e) { if (Array.isArray(L) ? n = L.slice() : n = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : window.photoWallData ? window.photoWallData.slice() : [],
+        n && 0 !== n.length) {
+            b < 0 && (b = 0), b >= n.length && (b = n.length - 1);
+            var _ = document.getElementById("photoPreviewOverlay");
+            if (!_) {
+                var H = document.createElement("div");
+                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><div class="pp-preview-toolbar"><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button><button hidden id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button></div><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div></div></div>',
+                document.body.appendChild(H), _ = H;
+            }
+            _ && function(e) {
+                [["ppZoomOutBtn", "缩小"], ["ppZoomInBtn", "放大"], ["ppInfoBtn", "照片信息"], ["ppShareBtn", "分享"], ["ppRotateBtn", "旋转 90 度"], ["ppDeleteBtn", "删除"]].forEach(function(t) {
+                    var o = e.querySelector("#" + t[0]);
+                    o && o.setAttribute("aria-label", t[1]);
+                });
+                var t = e.querySelector("#ppInfoModal");
+                t && (t.setAttribute("role", "dialog"), t.setAttribute("aria-modal", "true"), t.setAttribute("aria-labelledby", "ppInfoModalTitle"));
+                var o = e.querySelector(".pp-info-modal-title");
+                o && !o.id && (o.id = "ppInfoModalTitle");
+                var n = e.querySelector(".pp-info-modal-close");
+                n && n.setAttribute("aria-label", "关闭照片信息");
+            }(_);
+            // ★ 修复：取消上一次关闭动画遗留的清槽定时器，防止其清掉本次新打开的图片
+            _._ppCloseWipeTimer && (clearTimeout(_._ppCloseWipeTimer), _._ppCloseWipeTimer = null);
+            d || (!function(d) {
+                var b, L;
+                d.querySelector(".photo-preview-image-wrapper");
+                // P4: renamed from T to _ppCleanupFn to avoid shadowing the
+                // outer-scope icon generator T(e) defined at line 12.
+                function _ppCleanupFn() {
+                    P && (clearTimeout(P), P = null), I && (clearTimeout(I), I = null), h && (cancelAnimationFrame(h),
+                    h = null), m.clear(), v = null, y = null, B.isActive = !1;
+                    // 移除 resize 监听器，防止内存泄漏
+                    if (d._ppResizeHandler) { window.removeEventListener("resize", d._ppResizeHandler); d._ppResizeHandler = null; }
+                    // P4: 移除 orientationchange 监听器
+                    if (d._ppOrientationHandler) { window.removeEventListener("orientationchange", d._ppOrientationHandler); d._ppOrientationHandler = null; }
+                }
+                d._cleanupPreview = _ppCleanupFn, d.addEventListener("pointerdown", function(e) {
+                    var n = e.target, i = n.closest(".pp-story, .pp-comments-panel, .photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-error-retry"), a = n.closest(".pp-info-modal-content, .pp-download-confirm-content"), r = n.closest(".pp-info-modal, .pp-download-confirm-overlay"), l = E;
+                    if (I && (clearTimeout(I), I = null), P && (clearTimeout(P), P = null), i || l) e.stopPropagation(); else if (a) e.stopPropagation(); else {
+                        r && e.stopPropagation(), Date.now(), b = e.clientX, L = e.clientY, x = 0;
+                        var d = e.pointerId, p = {
+                            x: e.clientX,
+                            y: e.clientY
+                        };
+                        if (m.set(d, p), 1 === m.size && (P = setTimeout(function() {
+                            !function() {
+                                try {
+                                    if (E) return;
+                                    if (!t || !t.imageUrl) return void window.showToast("没有可下载的照片");
+                                    !function() {
+                                        try {
+                                            var e = document.getElementById("photoPreviewOverlay");
+                                            if (!e) return;
+                                            var t = document.getElementById("ppDownloadConfirmModal");
+                                            if (t) return t.style.display = "flex", t.offsetHeight, void t.classList.add("show");
+                                            var o = document.createElement("div");
+                                            o.id = "ppDownloadConfirmModal", o.className = "pp-download-confirm-overlay", o.innerHTML = '<div class="pp-download-confirm-content"><div class="pp-download-confirm-title">是否要下载该图片？</div><div class="pp-download-confirm-buttons"><button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">取消</button><button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">确认</button></div></div>',
+                                            e.appendChild(o), o.offsetHeight, o.classList.add("show");
+                                        } catch (e) {
+                                            console.error("Error showing download confirm modal:", e);
+                                        }
+                                    }();
+                                } catch (e) {
+                                    console.error("Error in download current photo:", e), window.showToast("操作失败，请重试");
+                                }
+                            }();
+                        }, 500)), 2 === m.size) {
+                            var u = Array.from(m.values()), f = u[1].x - u[0].x, h = u[1].y - u[0].y, T = Math.sqrt(f * f + h * h), M = window.innerWidth / 2, k = window.innerHeight / 2, z = (u[0].x + u[1].x) / 2, C = (u[0].y + u[1].y) / 2, _ = o.scale || 1;
+                            v = {
+                                dist: T,
+                                scale: _,
+                                ax: (z - M) / _ - o.tx,
+                                ay: (C - k) / _ - o.ty
+                            }, w = T, g = T, y = {
+                                x: z,
+                                y: C,
+                                zx: o.tx,
+                                zy: o.ty,
+                                pointers: 2
+                            };
+                        } else c && (c = !1, s.style.transition = "none"), o.scale > 1.01 ? y = {
+                            x: e.clientX,
+                            y: e.clientY,
+                            zx: o.tx,
+                            zy: o.ty,
+                            pointers: 1
+                        } : (B.isActive = !0, B.dy = 0, B.scale = 1, B.opacity = 1);
+                    }
+                }), d.addEventListener("pointermove", function(e) {
+                    if (0 !== m.size) {
+                        var t = e.clientX - b, p = e.clientY - L;
+                        (x = Math.abs(t) + Math.abs(p)) > 15 && P && (clearTimeout(P), P = null);
+                        var u = e.pointerId;
+                        if (m.set(u, {
+                            x: e.clientX,
+                            y: e.clientY
+                        }), 2 === m.size) {
+                            var f = Array.from(m.values()), I = f[1].x - f[0].x, E = f[1].y - f[0].y, T = Math.sqrt(I * I + E * E);
+                            w = Math.min(w, T), g = Math.max(g, T);
+                            var M = window.innerWidth / 2, k = window.innerHeight / 2, z = (f[0].x + f[1].x) / 2, C = (f[0].y + f[1].y) / 2;
+                            0;
+                            var _ = T / v.dist, H = Math.max(1, Math.min(8, v.scale * _));
+                            if (o.scale = H, o.tx = z - M - v.ax * H, o.ty = C - k - v.ay * H, O = document.getElementById("photoPreviewImage")) {
+                                var S = "translate3d(" + o.tx + "px," + o.ty + "px,0) scale(" + o.scale + ")";
+                                O.style.transform = S, O.classList.add("zoomed");
+                            }
+                        } else if (1 === m.size && y && 1 === y.pointers) {
+                            var U = e.clientX - y.x, D = e.clientY - y.y;
+                            if (o.tx = y.zx + U, o.ty = y.zy + D, O = document.getElementById("photoPreviewImage")) {
+                                S = "translate3d(" + o.tx + "px," + o.ty + "px,0) scale(" + o.scale + ")";
+                                O.style.transform = S;
+                            }
+                        } else if (o.scale <= 1.01 && B.isActive && p > 0) {
+                            B.dy = p;
+                            var O, R = Math.max(.7, 1 - p / (2 * r));
+                            B.scale = R, B.opacity = Math.max(0, 1 - p / r), (O = document.getElementById("photoPreviewImage")) && (d.style.opacity = B.opacity,
+                            O.style.transform = "translate(0, " + p + "px) scale(" + B.scale + ")");
+                        } else {
+                            if (c) return;
+                            if (l = t, !(o.scale > 1.01)) {
+                                var A = -a + l, N = 1;
+                                0 === i && t > 0 && (N = 1 + t / a * 2), i === n.length - 1 && t < 0 && (N = 1 - t / a * 2),
+                                A = t / N - a, h && cancelAnimationFrame(h), h = requestAnimationFrame(function() {
+                                    s.style.transform = "translateX(" + A + "px)", h = null;
+                                });
+                            }
+                        }
+                    }
+                }), d.addEventListener("pointerup", function(e) {
+                    P && (clearTimeout(P), P = null);
+                    var t = e.target, r = t.closest(".photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-story, .pp-comments-panel"), s = t.closest(".pp-info-modal-content, .pp-download-confirm-content"), h = t.closest(".pp-info-modal, .pp-download-confirm-overlay");
+                    if (r || E) return e.stopPropagation(), m.clear(), y = null, void (B.isActive = !1);
+                    if (s) return e.stopPropagation(), m.clear(), y = null, void (B.isActive = !1);
+                    if (h) {
+                        e.stopPropagation(), m.clear(), y = null, B.isActive = !1;
+                        var b = document.getElementById("ppInfoModal");
+                        b && "none" !== b.style.display && window.closePhotoInfo();
+                        var L = document.getElementById("ppDownloadConfirmModal");
+                        L && "none" !== L.style.display && te();
+                    } else {
+                        var T = e.pointerId;
+                        if (m.delete(T), 0 === m.size) {
+                            var M = Date.now(), C = x > 15;
+                            if (B.isActive && o.scale <= 1.01 && B.dy > 0) {
+                                var _ = 150;
+                                if (B.dy > _) return B.isActive = !1, void V();
+                                var H = document.getElementById("photoPreviewImage");
+                                H && (d.style.transition = "opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)", H.style.transition = "transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)",
+                                d.style.opacity = 1, H.style.transform = ""), B.isActive = !1;
+                            }
+                            if (v) {
+                                if (g - w < 10) o = {
+                                    scale: 1,
+                                    tx: 0,
+                                    ty: 0
+                                }, document.querySelectorAll(".pp-slide-img").forEach(function(e) {
+                                    e.style.transform = "";
+                                });
+                                v = null;
+                            }
+                            var S = o.scale > 1.01;
+                            if (!S && !c) {
+                                var U = l, D = Math.abs(U) > a / 4;
+                                if (D) {
+                                    var O = U > 0 ? -1 : 1;
+                                    -1 === O && i > 0 ? (f = !0, k(i - 1), z(i - 1), R(0, function() {
+                                        N(i - 1);
+                                    })) : 1 === O && i < n.length - 1 ? (f = !0, k(i + 1), z(i + 1), R(-2 * a, function() {
+                                        N(i + 1);
+                                    })) : A(0);
+                                }
+                                l = 0, D || (C = !1);
+                            }
+                            if (!C) if (S) M - p < 300 && !u && (I && (clearTimeout(I), I = null), X(e.clientX, e.clientY),
+                            u = !0, setTimeout(function() {
+                                u = !1;
+                            }, 300)), p = M; else if (M - p < 300 && !u && o.scale <= 1.01 && (I && (clearTimeout(I),
+                            I = null), X(e.clientX, e.clientY), u = !0, setTimeout(function() {
+                                u = !1;
+                            }, 300)), p = M, !u && o.scale <= 1.01 && !f) {
+                                var W = document.getElementById("ppInfoModal");
+                                if (W && "none" !== W.style.display && W.classList.contains("active")) return window.closePhotoInfo(),
+                                void (y = null);
+                                I && clearTimeout(I), I = null;
+                            }
+                            y = null;
+                        }
+                    }
+                }), d.addEventListener("pointercancel", function(e) {
+                    // 仅删除被 cancel 的指针，保留其他手指的状态，避免双指缩放卡死
+                    if (P && (clearTimeout(P), P = null), m.delete(e.pointerId), v = null, y = null, B.isActive) {
+                        var t = document.getElementById("photoPreviewImage");
+                        t && (d.style.transition = "opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)", t.style.transition = "transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)",
+                        d.style.opacity = 1, t.style.transform = ""), B.isActive = !1;
+                    }
+                    o.scale <= 1.01 && A(0);
+                });
+                // 将 resize handler 存为具名引用，便于 _cleanupPreview 时移除，防止内存泄漏
+                d._ppResizeHandler = function() { e && (M(), O(i), q()); };
+                window.addEventListener("resize", d._ppResizeHandler);
+                // P4: orientationchange 时释放动画锁（c）并清理交互状态
+                d._ppOrientationHandler = function() {
+                    if (!e) return;
+                    // 释放动画锁，防止旋转时 transitionend 丢失导致 c 卡死
+                    c = !1;
+                    if (s) {
+                        s.classList.remove("snapping");
+                        s.style.transition = "";
+                    }
+                    // 重新计算视口尺寸并重置滑动轨道位置
+                    M();
+                    O(i);
+                    q();
+                };
+                window.addEventListener("orientationchange", d._ppOrientationHandler);
+            }(_), d = !0), q(), e = !0, t = n[b] || null, window.photoPreviewCurrent = t, i = b;
+            if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
+            var S = n[b];
+            // 缩略图路径下方已有独立原图预加载器；不要再由缓存预热器并发下载同一原图。
+            S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl), M(), s && (s.style.transition = "none", s.style.transform = "translateX(" + -a + "px)");
+            var D = null, W = null, Y = document.getElementById("photoGrid");
+            if (Y && S && null != S.id) {
+                // ★ 审计修复：旧转义只处理双引号不处理反斜杠，id 含 "\" 时选择器
+                //   断裂抛 SyntaxError 导致预览打不开。统一用 CSS.escape
+                //   （data.js 已有同款先例），带降级兜底。
+                var _pidRaw = String(S.id);
+                var _pidSel = (window.CSS && typeof CSS.escape === "function") ? CSS.escape(_pidRaw) : _pidRaw.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                var Z = Y.querySelector('.photo-wall-item[data-photo-id="' + _pidSel + '"]'), K = Z ? Z.querySelector("img") : null;
+                if (K && K.complete) {
+                    var G = K.getBoundingClientRect();
+                    G && G.width > 0 && G.height > 0 && (D = G, W = K);
+                }
+            }
+            _._openOrigin = D, _._openOriginImg = W,
+            _.classList.add("active"), document.body.classList.add("photo-previewing"), _.style.opacity = "1",
+            M(), s && (s.style.transition = "none", s.style.transform = "translateX(" + -a + "px)");
+            j(b), F(b);
+            var J = document.getElementById("photoPreviewImage"), Q = !1, $ = null, ee = (_._openLoadGen || 0) + 1;
+            function cleanupOpenListeners(cancelFullPreload) {
+                $ && (clearTimeout($), $ = null), J && (J.removeEventListener("load", handleOpenLoad), J.removeEventListener("error", handleOpenError)), _ && _._cleanupOpenListeners === cleanupOpenListeners && (_._cleanupOpenListeners = null);
+                if (cancelFullPreload && J && J._ppFullPreloadCleanup) {
+                    J._ppFullPreloadCleanup(!0);
+                    J._ppFullPreloadCleanup = null;
+                }
+            }
+            var fullRequestStarted = !1;
+            function handleOpenLoad() {
+                if (hasThumb && !fullRequestStarted) return;
+                _._openLoadGen === ee && (cleanupOpenListeners(!0), J.offsetHeight, J.style.opacity = "1", re());
+            }
+            function handleOpenError() {
+                if (hasThumb && !fullRequestStarted) return;
+                _._openLoadGen === ee && (cleanupOpenListeners(!0), J.style.opacity = "1", re());
+            }
+            _._openLoadGen = ee, _._cleanupOpenListeners && _._cleanupOpenListeners(!0), _._cleanupOpenListeners = cleanupOpenListeners;
+            if (J && S && S.imageUrl) {
+                clearPreviewImageLoad(J, !0);
+                // 清槽会递增图片加载代次；用当前代次绑定本次打开的主图加载。
+                ee = (_._openLoadGen || 0) + 1;
+                _._openLoadGen = ee;
+                var oe = C[S.imageUrl];
+                // 性能优化：原图未解码完成前，先用已缓存的缩略图秒开（墙格卡片通常已加载同一缩略图），
+                // 同时在后台解码原图，就绪后无缝替换，避免每次打开都长时间等待原图下载而黑屏。
+                var thumbSrc = S.thumbUrl || S.thumb || '';
+                var hasThumb = !!(thumbSrc && thumbSrc !== S.imageUrl);
+                J.style.transition = "none", J.style.opacity = "0";
+                if (oe && oe.complete && oe.naturalWidth > 0) {
+                    J._ppUrl = S.imageUrl;
+                    J.src = S.imageUrl;
+                    if (J.offsetHeight, D) {
+                        var ne = J.getBoundingClientRect();
+                        if (ne && ne.width > 0) {
+                            var ie = D.left - ne.left, ae = D.top - ne.top, se = D.width / ne.width, te = D.height / ne.height, le = Math.min(se, te);
+                            J.style.transform = "translate(" + ie + "px, " + ae + "px) scale(" + le + ")", J.style.transformOrigin = "top left",
+                            J.style.borderRadius = 14 / le + "px", J.style.opacity = "1";
+                        }
+                    }
+                    J.offsetHeight, D && J.getBoundingClientRect().width > 0 ? (_.style.transition = "opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1)",
+                    J.style.transition = "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
+                    J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", $ = setTimeout(re, 220)) : (J.style.opacity = "1",
+                    $ = setTimeout(re, 150));
+                } else if (hasThumb) {
+                    // ★ 2026-09-23 原图提速：原先走 fetch→Blob→objectURL，必须等原图 100%
+                    //   下载完才能替换显示，慢网下大图要干等数秒（期间一直看缩略图），
+                    //   且 Blob 会多一次内存拷贝、带 credentials 的 fetch 还常绕过 CDN 共享缓存。
+                    //   现改为：保留缩略图做首帧占位，直接把 <img> 指向原图 URL——
+                    //   浏览器可复用 HTTP 缓存、并按渐进式（逐行扫描）边下边渲染，
+                    //   用户能立刻看到逐渐清晰的画面，明显快于等待整个 Blob。
+                    J.src = thumbSrc, J.style.opacity = "1";
+                    J._ppProgressiveUrl = S.imageUrl;
+                    var openFullUrl = S.imageUrl;
+                    var openLoadSettled = !1;
+                    function finishOpenLoad() {
+                        if (openLoadSettled || _._openLoadGen !== ee || t !== S) return;
+                        openLoadSettled = !0;
+                        if ($) { clearTimeout($); $ = null; }
+                        re();
+                    }
+                    $ = setTimeout(function() {
+                        // 兜底：原图迟迟未就绪（如超慢网络）时先完成打开阶段，
+                        // 但保留预加载器，以便后续完成仍可升级到清晰原图。
+                        finishOpenLoad();
+                    }, 4e3);
+
+                    // 用独立的预加载 Image 探测原图就绪，就绪后切主图，避免缩略图切换时闪白。
+                    // 预加载对象与槽位同生命周期；切图/关闭时移除回调，旧请求不能操作新预览。
+                    var preImg = new Image();
+                    var preDone = !1;
+                    function cleanupFullPreload(cancelRequest) {
+                        var wasPending = !preDone;
+                        preDone = !0;
+                        preImg.onload = null;
+                        preImg.onerror = null;
+                        if (cancelRequest && wasPending) {
+                            try { preImg.src = ''; } catch (e) {}
+                        }
+                        if (J && J._ppFullPreloadCleanup === cleanupFullPreload) J._ppFullPreloadCleanup = null;
+                    }
+                    function swapToFull() {
+                        if (preDone) return;
+                        cleanupFullPreload(!1);
+                        cachePreviewImage(openFullUrl, preImg);
+                        if (!(_._openLoadGen === ee && t === S && J && J.isConnected)) return;
+                        if (J._ppUrl !== openFullUrl) {
+                            fullRequestStarted = !0;
+                            J._ppUrl = openFullUrl;
+                            J.addEventListener("load", handleOpenLoad);
+                            J.addEventListener("error", handleOpenError);
+                            J.style.transition = "none";
+                            J.src = openFullUrl;
+                            J.style.opacity = "1";
+                            if (J.complete) {
+                                J.naturalWidth > 0 ? handleOpenLoad() : handleOpenError();
+                            }
+                        } else {
+                            // already progressive-loaded; remove the stale thumb-era listeners
+                            cleanupOpenListeners();
+                        }
+                        if (!fullRequestStarted) {
+                            openLoadSettled = !0;
+                            if ($) { clearTimeout($); $ = null; }
+                            re();
+                        }
+                    }
+                    J._ppFullPreloadCleanup = cleanupFullPreload;
+                    // 提升原图请求优先级，让浏览器更快开始拉取大图
+                    try { preImg.fetchPriority = "high"; } catch (e) {}
+                    preImg.decoding = "async";
+                    preImg.onload = function() {
+                        var decoded = typeof preImg.decode === "function" ? preImg.decode() : Promise.resolve();
+                        decoded.then(swapToFull, swapToFull);
+                    };
+                    // 原图失败时回退为直接请求原图，让主图的重试 / 错误 UI 逻辑生效。
+                    preImg.onerror = function() {
+                        cleanupFullPreload(!0);
+                        if (!(_._openLoadGen === ee && t === S && J && J.isConnected)) return;
+                        fullRequestStarted = !0;
+                        J._ppProgressiveUrl = null;
+                        J._ppUrl = openFullUrl;
+                        J.addEventListener("load", handleOpenLoad);
+                        J.addEventListener("error", handleOpenError);
+                        J.src = openFullUrl;
+                        if (J.complete) {
+                            J.naturalWidth > 0 ? handleOpenLoad() : handleOpenError();
+                        }
+                    };
+                    preImg.src = openFullUrl;
+                    // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
+                    if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
+                } else {
+                    J.src = S.imageUrl;
+                    J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
+                        _._openLoadGen === ee && (cleanupOpenListeners(), re());
+                    }, 8e3);
+                }
+            } else re();
+        } } else if (e) {
+            var activeOverlay=document.getElementById('photoPreviewOverlay');
+            if(activeOverlay){if(activeOverlay._cleanupOpenListeners)activeOverlay._cleanupOpenListeners(true);activeOverlay._openLoadGen=(activeOverlay._openLoadGen||0)+1;}
+            // Explicit outer braces keep this branch reachable during quick reopen.
+            // ★ 已打开时切换到目标 index（不再静默 no-op）
+            if (Array.isArray(L)) n = L.slice();
+            else if (window.pwCurrentSortedPhotos && window.pwCurrentSortedPhotos.length) n = window.pwCurrentSortedPhotos.slice();
+            else if (window.photoWallData && window.photoWallData.length) n = window.photoWallData.slice();
+            if (n && n.length) {
+                b < 0 && (b = 0), b >= n.length && (b = n.length - 1);
+                i = b, t = n[b] || null, window.photoPreviewCurrent = t;
+                var S = n[b];
+                S && S.imageUrl && !(S.thumbUrl || S.thumb) && U(S.imageUrl);
+                N(b);
+            }
+        }
+        function re() {
+            // G15 还原：re() 中的 Q 是 openPhotoPreview 作用域内（约 630 行）
+            // `var Q = !1` 声明的局部变量，遮蔽了外层 hoisted 的 function Q，
+            // 每次打开预览都会重新初始化为 false，因此 `Q || (...)` 每次打开
+            // 恰好执行一次收尾（O(b)/j(b)/F(b)：同步元信息/前后图/分页圆点）。
+            // 此前"G15 修复"误改用全局 window.__ppReExecuted 且从不重置，
+            // 导致第二次起 O(b)/j(b)/F(b) 不再执行（分页圆点等缺失），已还原。
+            Q || (Q = !0, _ && _._cleanupOpenListeners && _._cleanupOpenListeners(), J && (J.style.transition = "", J.style.transform = "", J.style.transformOrigin = "",
+            J.style.borderRadius = ""), _.style.transition = "", (J && J._ppUrl !== S.imageUrl && O(b)), j(b), F(b), W && (W.style.transition = "",
+            W.style.opacity = ""));
+        }
+    }, window.closePhotoPreview = V, window.retryPhotoPreviewImage = function() {
+        var image = document.getElementById("photoPreviewImage");
+        if (!e || !t || !t.imageUrl || !image) return false;
+        clearPreviewImageLoad(image, !0);
+        D(image, t.imageUrl, !0); return true;
+    }, Q = function() {
+        var e = t;
+        if (e) {
+            var o = document.getElementById("ppInfoModal");
+            if (o && ("flex" === o.style.display || o.classList.contains("active") || o.classList.contains("closing"))) window.closePhotoInfo(); else {
+                if (!o) {
+                    var n = document.createElement("div");
+                    n.className = "pp-info-modal", n.id = "ppInfoModal", n.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>',
+                    document.body.appendChild(n), o = n;
+                }
+                var finalInfoTitle = o.querySelector(".pp-info-modal-title"), finalInfoClose = o.querySelector(".pp-info-modal-close");
+                finalInfoTitle && !finalInfoTitle.id && (finalInfoTitle.id = "ppInfoModalTitle"), o.setAttribute("role", "dialog"),
+                o.setAttribute("aria-modal", "true"), o.setAttribute("aria-labelledby", "ppInfoModalTitle"),
+                finalInfoClose && finalInfoClose.setAttribute("aria-label", "关闭照片信息"), o._focusTrapInstalled || (o._focusTrapInstalled = !0,
+                o.addEventListener("keydown", function(e) {
+                    if ("Escape" === e.key) return e.preventDefault(), void window.closePhotoInfo();
+                    if ("Tab" !== e.key) return;
+                    var t = Array.from(o.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(function(e) {
+                        return null !== e.offsetParent;
+                    });
+                    if (!t.length) return e.preventDefault();
+                    var n = t[0], i = t[t.length - 1];
+                    e.shiftKey && document.activeElement === n ? (e.preventDefault(), i.focus()) : !e.shiftKey && document.activeElement === i && (e.preventDefault(), n.focus());
+                }));
+                o._bgListener || (o._bgListener = !0, o.addEventListener("click", function(e) {
+                    e.target === o && window.closePhotoInfo();
+                }));
+                var i = document.getElementById("ppInfoModalBody");
+                i && (i.innerHTML = J(e)), o._closeTimeout && (clearTimeout(o._closeTimeout), o._closeTimeout = null);
+                var a = o.querySelector(".pp-info-modal-content"), r = document.getElementById("ppInfoBtn"), s = r ? r.getBoundingClientRect() : null;
+                if (o.classList.remove("closing"), o.classList.add("active"), o.style.display = "flex",
+                o.style.opacity = "1", a.style.transition = "none", a.style.transform = "", a.style.opacity = "1",
+                o._restoreFocus = document.activeElement, setTimeout(function() {
+                    var e = o.querySelector(".pp-info-modal-close");
+                    e && e.focus();
+                }, 0),
+                a.offsetHeight, s) {
+                    var l = a.getBoundingClientRect(), c = s.left - l.left, d = s.top - l.top, p = s.width / l.width, u = s.height / l.height, f = Math.min(p, u);
+                    a.style.transform = "translate(" + c + "px, " + d + "px) scale(" + f + ")", a.style.transformOrigin = "top left",
+                    a.style.opacity = "0", o._ppInfoOrigin = {
+                        dx: c,
+                        dy: d,
+                        scale: f,
+                        btnWidth: s.width,
+                        btnHeight: s.height
+                    };
+                }
+                a.offsetHeight, o.style.transition = "opacity 0.25s ease-out", o.style.opacity = "0",
+                o.offsetHeight, o.style.opacity = "1", s ? (a.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out",
+                a.style.transform = "translate(0, 0) scale(1)", a.style.opacity = "1") : (a.style.transition = "none",
+                a.style.transform = "scale(0.9)", a.style.opacity = "0", a.offsetHeight, a.style.transition = "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out",
+                a.style.transform = "scale(1)", a.style.opacity = "1"), !e.fileSize && e.imageUrl && async function(e) {
+                    if (!e || e.fileSize || !e.imageUrl) return e ? e.fileSize : null;
+                    if (L[e.imageUrl]) return e.fileSize = L[e.imageUrl], e.fileSize;
+                    try {
+                        var t = await fetch(e.imageUrl, {
+                            cache: "force-cache"
+                        });
+                        if (!t || !t.ok) return null;
+                        var o = await t.blob();
+                        return o && o.size ? (L[e.imageUrl] = o.size, e.fileSize = o.size, o.size) : null;
+                    } catch (e) {
+                        return null;
+                    }
+                }(e).then(function(o) {
+                    if (o && t === e) {
+                        var n = document.getElementById("ppInfoModal"), i = document.getElementById("ppInfoModalBody");
+                        n && i && n.classList.contains("active") && (i.innerHTML = J(e));
+                    }
+                });
+            }
+        }
+    }, window.showPhotoInfo = Q, window.closePhotoInfo = function() {
+        var e = document.getElementById("ppInfoModal");
+        if (e && !e.classList.contains("closing")) {
+            var t = e.querySelector(".pp-info-modal-content");
+            e.classList.remove("active"), e.classList.add("closing");
+            var o = e._ppInfoOrigin;
+            if (o && t) {
+                var n = t.getBoundingClientRect(), i = document.getElementById("ppInfoBtn"), a = i ? i.getBoundingClientRect() : null, r = 0, s = 0, l = .3;
+                a ? (r = a.left - n.left, s = a.top - n.top, l = Math.min(a.width / n.width, a.height / n.height)) : (r = o.dx,
+                s = o.dy, l = o.scale || .3), t.style.transition = "none", t.style.transform = "translate(0, 0) scale(1)",
+                t.style.opacity = "1", t.offsetHeight, t.style.transition = "transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in",
+                t.style.transform = "translate(" + r + "px, " + s + "px) scale(" + l + ")", t.style.opacity = "0",
+                e.style.transition = "opacity 0.25s ease-in", e.style.opacity = "0", e._closeTimeout && clearTimeout(e._closeTimeout),
+                e._closeTimeout = setTimeout(function() {
+                    t.style.transition = "none", t.style.transform = "", t.style.opacity = "", t.style.transformOrigin = "",
+                    e.style.display = "none", e.style.opacity = "", e.style.transition = "", e.classList.remove("closing"),
+                    e._closeTimeout = null, e._restoreFocus && e._restoreFocus.isConnected && e._restoreFocus.focus(), e._restoreFocus = null;
+                }, 320);
+            } else t && (t.style.transition = "none", t.style.transform = "scale(1)", t.style.opacity = "1",
+            t.offsetHeight, t.style.transition = "transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in",
+            t.style.transform = "scale(0.9)", t.style.opacity = "0"), e.style.transition = "opacity 0.25s ease-in",
+            e.style.opacity = "0", e._closeTimeout = setTimeout(function() {
+                e.style.display = "none", e.style.opacity = "", e.style.transition = "", e.classList.remove("closing"),
+                t && (t.style.transition = "none", t.style.transform = "", t.style.opacity = "",
+                t.style.transformOrigin = ""), e._closeTimeout = null, e._restoreFocus && e._restoreFocus.isConnected && e._restoreFocus.focus(), e._restoreFocus = null;
+            }, 320);
+        }
+    }, window.shareCurrentPhoto = function() {
+        var e = t;
+        if (e && e.imageUrl) {
+            if ("vibrate" in navigator && "function" == typeof navigator.vibrate) try {
+                navigator.vibrate(10);
+            } catch (e) {}
+            var o = document.getElementById("ppShareBtn");
+            if (o) {
+                if (o._copying) return;
+                o._copying = !0, o._origHTML = o.innerHTML, o.textContent = "✓", o.classList.add("copied");
+            }
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) return void navigator.clipboard.writeText(e.imageUrl).then(r).catch(s);
+            } catch (e) {}
+            try {
+                var n = document.createElement("textarea");
+                n.value = e.imageUrl, document.body.appendChild(n), n.select();
+                var i = document.execCommand("copy");
+                if (document.body.removeChild(n), i) return void r();
+            } catch (e) {}
+            s();
+        } else window.showToast("暂无可分享的图片");
+        function a() {
+            o && (o.innerHTML = o._origHTML || "🔗", o.classList.remove("copied"), o.style.transform = "",
+            o._copying = !1);
+        }
+        function r() {
+            window.showToast("图片链接已复制"), setTimeout(a, 1500);
+        }
+        function s() {
+            window.showToast("复制失败，请重试"), setTimeout(a, 1500);
+        }
+    }, window.deleteCurrentPhoto = function() {
+        window.deletePhotoFromPreview();
+    }, window.deletePhotoFromPreview = function() {
+        if (e) {
+            var selectedPhoto = t;
+            if (!selectedPhoto || pendingPreviewDeletes.has(String(selectedPhoto.id))) return;
+            if (!window.currentUser || (selectedPhoto.username !== window.currentUser &&
+                !(window.currentUser === 'xxz' && typeof window.isAdmin === 'function' && window.isAdmin()))) {
+                window.showToast('无权删除这张照片'); return;
+            }
+            Y(10);
+            var deleteButton = document.getElementById("ppDeleteBtn"), o = deleteButton ? deleteButton.getBoundingClientRect() : null;
+            if (o) {
+                var a = o.left + o.width / 2, r = o.top + o.height / 2;
+                window._confirmOrigin = {
+                    btnCx: a,
+                    btnCy: r,
+                    btnWidth: o.width,
+                    btnHeight: o.height
+                };
+            }
+            window.showConfirm("删除照片", "删除后无法恢复，确定删除吗？", "确定删除", async function() {
+                var id=String(selectedPhoto.id), button=document.getElementById('ppDeleteBtn');
+                if (pendingPreviewDeletes.has(id)) return;
+                if (typeof window.deletePhotoWallPhoto!=='function') { window.showToast('删除功能正在加载，请稍后重试');return; }
+                pendingPreviewDeletes.add(id);
+                if (button && t && String(t.id)===id) button.disabled=true;
+                window.showToast('正在删除...');
+                try {
+                    var result=await window.deletePhotoWallPhoto(selectedPhoto,{render:false});
+                    if (!result || !result.ok) return;
+                    n=n.filter(function(photo){return photo && String(photo.id)!==id;});
+                    if (t && String(t.id)===id) V();
+                    else if (t) { i=n.findIndex(function(photo){return String(photo.id)===String(t.id);});F(i); }
+                    window.showToast('照片已从照片墙删除');
+                } catch (error) { window.showToast('删除失败，请稍后重试'); }
+                finally {
+                    pendingPreviewDeletes.delete(id);
+                    if (button) button.disabled=!!(t && pendingPreviewDeletes.has(String(t.id)));
+                }
+            });
+        }
+    // G16 修复：删除失效的 ppRotatePhoto（查询全项目不存在的 .pp-active 类，
+    // 旋转功能实际由 preview-hotfix.js 的 window.ppRotatePhoto 提供）。此处只删除
+    // 原实现，保留 window.ppRotatePhoto 赋值占位，避免 hotfix 的 original 引用丢失。
+    }, window.ppRotatePhoto = function() {
+        if (window.__xtjPhotoPreviewHotfixInstalled) return;
+        window.showToast && window.showToast("当前预览不支持旋转");
+    }, window.ppCancelDownload = function() {
+        try {
+            te();
+        } catch (e) {
+            console.error("Error in cancel download:", e);
+        }
+    }, window.ppConfirmDownload = function() {
+        try {
+            te(), async function() {
+                try {
+                    if (E) return;
+                    var e = t;
+                    if (!e || !e.imageUrl) return void window.showToast("没有可下载的照片");
+                    if (E = !0, function() {
+                        try {
+                            var e = document.getElementById("ppDownloadOverlay");
+                            e && (e.style.display = "flex");
+                        } catch (e) {
+                            console.error("Error showing download overlay:", e);
+                        }
+                    }(), ee(10, "正在下载..."), "vibrate" in navigator && "function" == typeof navigator.vibrate) try {
+                        navigator.vibrate(10);
+                    } catch (e) {}
+                    var o = setInterval(function() {
+                        var e = document.getElementById("ppDownloadProgressBar");
+                        if (e) {
+                            var t = parseInt(e.style.width) || 10;
+                            t < 85 && ee(t + 2);
+                        } else clearInterval(o);
+                    }, 150); var fetchRes = await fetch(e.imageUrl);
+                    if (clearInterval(o), !fetchRes.ok) throw new Error("HTTP error " + fetchRes.status);
+                    ee(90, "正在保存..."), function(e, t) {
+                        try {
+                            var o = window.URL.createObjectURL(e), n = document.createElement("a");
+                            n.href = o;
+                            var i = "photo_" + Date.now() + ".jpg";
+                            if (t) {
+                                var a = t.split("/"), r = a[a.length - 1].split("?")[0];
+                                r && r.length > 0 && (i = r);
+                            }
+                            n.download = i, document.body.appendChild(n), n.click(), setTimeout(function() {
+                                try {
+                                    document.body.removeChild(n), window.URL.revokeObjectURL(o);
+                                } catch (e) {}
+                            }, 4000), ee(100, "下载成功!"), setTimeout(function() {
+                                $(), E = !1, window.showToast("下载成功");
+                            }, 800);
+                        } catch (e) {
+                            console.error("Blob download error:", e), $(), E = !1, window.showToast("下载失败，请重试");
+                        }
+                    }(await fetchRes.blob(), e.imageUrl);
+                } catch (t) {
+                    clearInterval(o), console.error("Download error:", t), $(), E = !1;
+                    try {
+                        var i = document.createElement("a");
+                        // ★ 安全修复：兜底分支会立即 click()，此前把 imageUrl 原样写入 href，
+                        //   若为 javascript:/data:text/html 等伪协议即在页面上下文执行脚本。
+                        //   只放行 http(s) / blob / 图片 data URL / 站内相对路径，其余替换为 about:blank。
+                        var _rawHref = String(e.imageUrl || "").trim();
+                        var _safeHref = (/^https?:\/\//i.test(_rawHref) || /^blob:/i.test(_rawHref) || /^data:image\//i.test(_rawHref) || /^\/(?!\/)/.test(_rawHref) || /^\.\.?\//.test(_rawHref)) ? _rawHref : "about:blank";
+                        i.href = _safeHref, i.target = "_blank", i.rel = "noopener noreferrer", i.download = "photo_" + Date.now() + ".jpg",
+                        document.body.appendChild(i), i.click(), setTimeout(function() {
+                            try {
+                                document.body.removeChild(i);
+                            } catch (e) {}
+                        }, 100), window.showToast(_safeHref === "about:blank" ? "该图片地址无法下载" : "已在新窗口打开下载");
+                    } catch (e) {
+                        window.showToast("下载失败，请重试");
+                    }
+                }
+            }();
+        } catch (e) {
+            console.error("Error in confirm download:", e);
+        }
+    };
+}();

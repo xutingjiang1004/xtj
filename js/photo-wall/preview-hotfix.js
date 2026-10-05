@@ -1,0 +1,1831 @@
+(function () {
+  'use strict';
+
+  var HOTFIX_MARKER = '__xtjPhotoPreviewHotfixInstalled';
+  if (window[HOTFIX_MARKER]) return;
+  window[HOTFIX_MARKER] = true;
+  window.__xtjPreviewHotfixV1 = true;
+  window.__xtjDisableEmbeddedPhotoPreviewHotfix = true;
+  window.__xtjPhotoInfoAnimationFixInstalledV10 = true;
+
+  var original = {
+    openPhotoPreview: window.openPhotoPreview,
+    closePhotoPreview: window.closePhotoPreview,
+    prevPhoto: window.ppPrevPhoto,
+    nextPhoto: window.ppNextPhoto,
+    shareCurrentPhoto: window.shareCurrentPhoto,
+    deletePhotoFromPreview: window.deletePhotoFromPreview,
+    deleteCurrentPhoto: window.deleteCurrentPhoto,
+    rotatePhoto: window.ppRotatePhoto,
+    showPhotoInfo: window.showPhotoInfo,
+    closePhotoInfo: window.closePhotoInfo,
+    closeImageViewer: window.closeImageViewer
+  };
+
+  var state = {
+    scale: 1,
+    tx: 0,
+    ty: 0,
+    rotation: 0,
+    mode: 'idle',
+    pointers: new Map(),
+    activePointerId: null,
+    pointerType: '',
+    mouseDown: false,
+    moved: false,
+    startX: 0,
+    startY: 0,
+    startTx: 0,
+    startTy: 0,
+    startScale: 1,
+    pinchStartDistance: 0,
+    pinchAnchorX: 0,
+    pinchAnchorY: 0,
+    dragAxis: '',
+    lastTapAt: 0,
+    lastTapX: 0,
+    lastTapY: 0,
+    ignoreNativeDblClickUntil: 0,
+    suppressTapUntil: 0,
+    closeFallbackTimer: 0,
+    singleTapCloseTimer: 0,
+    longPressTimer: 0,
+    forceClosing: false,
+    callingOriginalClose: false,
+    infoOpen: false,
+    previewReturnFocus: null,
+    infoReturnFocus: null,
+    moveRaf: 0,
+    pendingMove: null,
+    viewportWidthCache: 0,
+    viewportHeightCache: 0
+  };
+
+  function cancelPendingMoveFrame() {
+    if (state.moveRaf) {
+      cancelAnimationFrame(state.moveRaf);
+      state.moveRaf = 0;
+    }
+    state.pendingMove = null;
+  }
+
+  function flushPendingMoveFrame() {
+    var pending = state.pendingMove;
+    state.pendingMove = null;
+    state.moveRaf = 0;
+    if (!pending) return;
+    if (pending.kind === 'pinch') {
+      updatePinch();
+    } else if (pending.kind === 'refresh-single') {
+      refreshSinglePointerStart();
+    } else if (pending.kind === 'pan-or-tap') {
+      updatePanOrTapCandidate(pending.point);
+    } else if (pending.kind === 'pan') {
+      updatePan(pending.point);
+    } else if (pending.kind === 'swipe-dismiss') {
+      updateSwipeDismiss(pending.point);
+    } else if (pending.kind === 'mouse-move') {
+      if (Math.abs(pending.point.x - state.startX) + Math.abs(pending.point.y - state.startY) > 8) {
+        state.moved = true;
+      }
+    }
+  }
+
+  function schedulePointerMoveVisual(kind, point) {
+    state.pendingMove = { kind: kind, point: point };
+    if (state.moveRaf) return;
+    state.moveRaf = requestAnimationFrame(flushPendingMoveFrame);
+  }
+
+  function flushPendingMoveBeforePointerEnd() {
+    if (!state.pendingMove) return;
+    if (state.moveRaf) {
+      cancelAnimationFrame(state.moveRaf);
+      state.moveRaf = 0;
+    }
+    flushPendingMoveFrame();
+  }
+
+  function overlay() {
+    return document.getElementById('photoPreviewOverlay');
+  }
+
+  function wrapper() {
+    return document.getElementById('ppImageWrapper');
+  }
+
+  function slideTrack() {
+    return document.getElementById('ppSlideTrack');
+  }
+
+  function previewImage() {
+    return document.getElementById('photoPreviewImage');
+  }
+
+  function infoModal() {
+    return document.getElementById('ppInfoModal');
+  }
+
+  function infoBody() {
+    return document.getElementById('ppInfoModalBody');
+  }
+
+  function closeLegacyViewer() {
+    var viewer = document.getElementById('imgViewer');
+    if (!viewer || !viewer.classList.contains('active')) return;
+    if (typeof original.closeImageViewer === 'function') {
+      try {
+        original.closeImageViewer();
+      } catch (_) {}
+      return;
+    }
+    viewer.classList.remove('active');
+  }
+
+  function installFinalStyle() {
+    if (document.documentElement) {
+      document.documentElement.classList.add('xtj-photo-preview-ready');
+    }
+  }
+
+  function viewportWidth() {
+    if (state.viewportWidthCache) return state.viewportWidthCache;
+    var wrap = wrapper();
+    return wrap && wrap.clientWidth ? wrap.clientWidth : window.innerWidth;
+  }
+
+  function viewportHeight() {
+    if (state.viewportHeightCache) return state.viewportHeightCache;
+    var wrap = wrapper();
+    return wrap && wrap.clientHeight ? wrap.clientHeight : window.innerHeight;
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function isModalOpen() {
+    var modal = infoModal();
+    return !!(modal && modal.classList.contains('active'));
+  }
+
+  function isControl(target) {
+    return !!(target && target.closest && target.closest(
+      '.pp-story,' +
+      '.pp-comments-panel,' +
+      '.photo-preview-close,' +
+      '.pp-nav-arrow,' +
+      '.pp-zoom-btn,' +
+      '.pp-info-btn,' +
+      '.pp-share-btn,' +
+      '.pp-rotate-btn,' +
+      '.pp-delete-btn,' +
+      '.pp-error-retry,' +
+      '.pp-info-modal-close,' +
+      '.pp-info-modal,' +
+      '.pp-info-modal-content,' +
+      '.pp-download-confirm-overlay,' +
+      '.pp-download-confirm-content'
+    ));
+  }
+
+  function photoList() {
+    if (Array.isArray(window.__xtjPreviewExplicitPhotos) && window.__xtjPreviewExplicitPhotos.length) {
+      return window.__xtjPreviewExplicitPhotos;
+    }
+    if (Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length) {
+      return window.pwCurrentSortedPhotos;
+    }
+    if (Array.isArray(window.photoWallData) && window.photoWallData.length) {
+      return window.photoWallData;
+    }
+    return [];
+  }
+
+  function activePhoto() {
+    return window.photoPreviewCurrent || null;
+  }
+
+  function photoUsername(photo) {
+    if (!photo) return '';
+    return String(photo.username || photo.user_name || photo.userName || '').trim();
+  }
+
+  function syncPreviewMeta(photo) {
+    if (photo && photo.__xtjSource && typeof window.syncPostPhotoPreviewChrome === 'function') window.syncPostPhotoPreviewChrome(photo);
+    photo = photo || activePhoto();
+    var deleteBtn = document.getElementById('ppDeleteBtn');
+    if (photo && !photo.__xtjSource && deleteBtn && deleteBtn.__xtjPostDeleteBound) {
+      deleteBtn.__xtjPostDeleteBound = false;
+      deleteBtn.onclick = function() { window.deletePhotoFromPreview(); };
+      deleteBtn.title = '删除'; deleteBtn.setAttribute('aria-label', '删除');
+      deleteBtn.style.removeProperty('display');
+    }
+    if (photo && window.renderPhotoStory) { window.renderPhotoStory(photo); return; }
+    var userEl = document.getElementById('photoPreviewUser');
+    var timeEl = document.getElementById('photoPreviewTime');
+    var viewsEl = document.getElementById('photoPreviewViewsCount');
+    // ★ 2026-09-25 修复：聊天图片没有"浏览量"概念，页脚却一直显示 👁 0，看着像数据丢了。
+    //   同理，作者未知时不再硬写「未知用户」制造"信息缺失"的观感。
+    var isChatPhotoMeta = !!(photo && String(photo.__xtjSource || '') === 'chat');
+    var viewsWrap = document.getElementById('photoPreviewViews');
+    if (viewsWrap) viewsWrap.style.display = isChatPhotoMeta ? 'none' : '';
+    if (userEl) userEl.textContent = photo ? (photoUsername(photo) || (isChatPhotoMeta ? '' : '未知用户')) : '';
+    if (timeEl) {
+      timeEl.textContent = photo && photo.timestamp
+        ? new Date(photo.timestamp).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        : '';
+    }
+    if (viewsEl) viewsEl.textContent = photo && photo.views != null ? String(photo.views) : '0';
+  }
+
+  function currentPhotoIndex() {
+    var current = activePhoto(), list = photoList();
+    if (!current || !list.length) return -1;
+    var currentId = current.id == null ? '' : String(current.id);
+    if (currentId) {
+      for (var idx = 0; idx < list.length; idx++) {
+        if (list[idx] && list[idx].id != null && String(list[idx].id) === currentId) return idx;
+      }
+    }
+    var currentUrl = String(current.imageUrl || '');
+    if (currentUrl) {
+      for (var fallback = 0; fallback < list.length; fallback++) {
+        if (list[fallback] && String(list[fallback].imageUrl || '') === currentUrl) return fallback;
+      }
+    }
+    return -1;
+  }
+
+  function withPreviewGuardDisabled(fn, ctx, args) {
+    if (typeof fn !== 'function') return;
+    var prevHotfix = window.__xtjPhotoPreviewHotfixInstalled;
+    var prevLegacy = window.__xtjPreviewHotfixV1;
+    window.__xtjPhotoPreviewHotfixInstalled = false;
+    window.__xtjPreviewHotfixV1 = prevLegacy;
+    try {
+      return fn.apply(ctx || window, args || []);
+    } finally {
+      window.__xtjPhotoPreviewHotfixInstalled = prevHotfix;
+      window.__xtjPreviewHotfixV1 = prevLegacy;
+    }
+  }
+
+  function clearCloseFallbackTimer() {
+    if (state.closeFallbackTimer) {
+      clearTimeout(state.closeFallbackTimer);
+      state.closeFallbackTimer = 0;
+    }
+  }
+
+  function scheduleCloseFallback(delay) {
+    clearCloseFallbackTimer();
+    state.closeFallbackTimer = window.setTimeout(function () {
+      state.closeFallbackTimer = 0;
+      var root = overlay();
+      if (root && root.classList.contains('active')) {
+        forceClosePhotoPreview();
+      }
+    }, delay || 520);
+  }
+
+  function toggleTimedClass(node, className, delay) {
+    if (!node) return;
+    node.classList.remove(className);
+    if (node._xtjMotionFrame) cancelAnimationFrame(node._xtjMotionFrame);
+    node._xtjMotionFrame = requestAnimationFrame(function () {
+      node.classList.add(className);
+      window.setTimeout(function () {
+        if (node) node.classList.remove(className);
+      }, delay || 240);
+    });
+  }
+
+  function setPreviewVars(patch) {
+    var root = overlay();
+    if (!root || !patch) return;
+    Object.keys(patch).forEach(function(key) {
+      root.style.setProperty(key, String(patch[key]));
+    });
+  }
+
+  function applyImageTransform(animate) {
+    var img = previewImage();
+    var root = overlay();
+    if (!img || !root) return;
+    setPreviewVars({
+      '--pp-img-x': state.tx + 'px',
+      '--pp-img-y': state.ty + 'px',
+      '--pp-scale': state.scale,
+      '--pp-rotate': state.rotation + 'deg'
+    });
+    if (animate) toggleTimedClass(root, 'pp-animate-image', 240);
+    else root.classList.remove('pp-animate-image');
+    img.classList.toggle('zoomed', state.scale > 1.01);
+  }
+
+  function centerTrackOffset(extraX) {
+    return -viewportWidth() + (extraX || 0);
+  }
+
+  function syncTrackTransform(extraX, animate) {
+    var track = slideTrack();
+    var root = overlay();
+    if (!track || !root) return;
+    var offset = centerTrackOffset(extraX);
+    setPreviewVars({ '--pp-track-x': offset + 'px' });
+    // The legacy navigator owns an inline transform; update it for gestures too.
+    track.style.transition = animate ? 'transform 220ms ease-out' : 'none';
+    track.style.transform = 'translateX(' + offset + 'px)';
+    if (animate) toggleTimedClass(root, 'pp-animate-track', 240);
+    else root.classList.remove('pp-animate-track');
+  }
+
+  function clearDismissVisual(animate) {
+    var root = overlay();
+    if (root) {
+      setPreviewVars({ '--pp-overlay-opacity': 1 });
+      if (animate) toggleTimedClass(root, 'pp-animate-root', 240);
+      else root.classList.remove('pp-animate-root');
+    }
+    applyImageTransform(animate);
+  }
+
+  function resetPreviewState(options) {
+    var opts = options || {};
+    clearInteractionState();
+    state.scale = 1;
+    state.tx = 0;
+    state.ty = 0;
+    if (opts.resetRotation !== false) state.rotation = 0;
+    if (!opts.keepSuppressTap) {
+      state.suppressTapUntil = 0;
+      state.lastTapAt = 0;
+      state.lastTapX = 0;
+      state.lastTapY = 0;
+    }
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+    if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
+    clearDismissVisual(!!opts.animate);
+    if (!opts.keepTrack) syncTrackTransform(0, !!opts.animate);
+    applyImageTransform(!!opts.animate);
+  }
+
+  function reboundScaleIfNeeded(animate) {
+    if (state.scale < 1) {
+      resetPreviewState({ animate: animate, resetRotation: false, keepSuppressTap: true });
+      return;
+    }
+    if (state.scale <= 1.01) {
+      state.scale = 1;
+      state.tx = 0;
+      state.ty = 0;
+    }
+    applyImageTransform(animate);
+  }
+
+  function zoomAt(clientX, clientY, nextScale, animate) {
+    var oldScale = Math.max(state.scale || 1, 0.0001);
+    var width = viewportWidth();
+    var height = viewportHeight();
+    var pointX = clientX == null ? width / 2 : clientX;
+    var pointY = clientY == null ? height / 2 : clientY;
+    var anchorX = (pointX - width / 2 - state.tx) / oldScale;
+    var anchorY = (pointY - height / 2 - state.ty) / oldScale;
+    state.scale = clamp(nextScale, 1, 5);
+    state.tx = pointX - width / 2 - anchorX * state.scale;
+    state.ty = pointY - height / 2 - anchorY * state.scale;
+    reboundScaleIfNeeded(animate);
+  }
+
+  function toggleZoomAt(point) {
+    var nextScale = state.scale > 1.01 ? 1 : 2;
+    zoomAt(point.x, point.y, nextScale, true);
+    state.lastTapAt = 0;
+    state.lastTapX = 0;
+    state.lastTapY = 0;
+    state.suppressTapUntil = Date.now() + 350;
+  }
+
+  function maybeHandleTouchDoubleTap(point) {
+    var now = Date.now();
+    if (now < state.suppressTapUntil) return;
+    if (now - state.lastTapAt < 280 && Math.abs(point.x - state.lastTapX) < 24 && Math.abs(point.y - state.lastTapY) < 24) {
+      // H-32: 双击（缩放）取消单次单击的延迟关闭
+      if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+      state.ignoreNativeDblClickUntil = now + 520;
+      // ★ 修复：双击命中后重置 lastTapAt 与坐标，防止随后的 dblclick 事件
+      // 在关闭定时器已被取消的间隙再次进入单击判定（先关后开 / 关不掉）。
+      state.lastTapAt = 0;
+      state.lastTapX = 0;
+      state.lastTapY = 0;
+      toggleZoomAt(point);
+      return;
+    }
+    // ★ 修复：非双击命中的新点击先取消旧定时器再启动新定时器，
+    // 避免"第一次点击的关闭定时器在第二次点击后才触发"导致的时序竞争。
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+    state.lastTapAt = now;
+    state.lastTapX = point.x;
+    state.lastTapY = point.y;
+
+  }
+
+  function beginPan(point) {
+    state.mode = 'pan';
+    state.dragAxis = '';
+    state.startX = point.x;
+    state.startY = point.y;
+    state.startTx = state.tx;
+    state.startTy = state.ty;
+    state.moved = false;
+  }
+
+  function beginPanOrTap(point) {
+    state.mode = 'pan-or-tap';
+    state.dragAxis = '';
+    state.startX = point.x;
+    state.startY = point.y;
+    state.startTx = state.tx;
+    state.startTy = state.ty;
+    state.moved = false;
+  }
+
+  function beginSwipeDismiss(point) {
+    state.mode = 'swipe-dismiss';
+    state.dragAxis = '';
+    state.startX = point.x;
+    state.startY = point.y;
+    state.startTx = 0;
+    state.startTy = 0;
+    state.moved = false;
+    syncTrackTransform(0, false);
+    clearDismissVisual(false);
+  }
+
+  function refreshSinglePointerStart() {
+    var remaining = Array.from(state.pointers.values())[0];
+    if (!remaining) return;
+    // A remaining finger belongs to the pinch, never to a new dismiss gesture.
+    beginPan(remaining);
+  }
+
+  function beginPinch() {
+    var points = Array.from(state.pointers.values());
+    if (points.length < 2) return;
+    var width = viewportWidth();
+    var height = viewportHeight();
+    var centerX = (points[0].x + points[1].x) / 2;
+    var centerY = (points[0].y + points[1].y) / 2;
+    var distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) || 1;
+    state.mode = 'pinch';
+    state.dragAxis = '';
+    state.startScale = Math.max(state.scale || 1, 1);
+    state.pinchStartDistance = distance;
+    state.pinchAnchorX = (centerX - width / 2 - state.tx) / state.startScale;
+    state.pinchAnchorY = (centerY - height / 2 - state.ty) / state.startScale;
+    state.moved = true;
+    state.suppressTapUntil = Date.now() + 350;
+    clearDismissVisual(false);
+  }
+
+  function updatePinch() {
+    var points = Array.from(state.pointers.values());
+    if (points.length < 2) return;
+    var width = viewportWidth();
+    var height = viewportHeight();
+    var centerX = (points[0].x + points[1].x) / 2;
+    var centerY = (points[0].y + points[1].y) / 2;
+    var distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) || 1;
+    var rawScale = state.startScale * (distance / Math.max(state.pinchStartDistance, 1));
+    state.scale = clamp(rawScale, 0.85, 5);
+    state.tx = centerX - width / 2 - state.pinchAnchorX * state.scale;
+    state.ty = centerY - height / 2 - state.pinchAnchorY * state.scale;
+    applyImageTransform(false);
+  }
+
+  function updatePan(point) {
+    state.tx = state.startTx + (point.x - state.startX);
+    state.ty = state.startTy + (point.y - state.startY);
+    if (Math.abs(point.x - state.startX) + Math.abs(point.y - state.startY) > 8) {
+      state.moved = true;
+    }
+    applyImageTransform(false);
+  }
+
+  function updatePanOrTapCandidate(point) {
+    var dx = point.x - state.startX;
+    var dy = point.y - state.startY;
+    if (Math.abs(dx) + Math.abs(dy) <= 8) return;
+    state.moved = true;
+    state.mode = 'pan';
+    updatePan(point);
+  }
+
+  function updateSwipeDismiss(point) {
+    var dx = point.x - state.startX;
+    var dy = point.y - state.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 8) state.moved = true;
+    if (!state.dragAxis) {
+      if (dy > 12 && dy > Math.abs(dx) * 1.2) {
+        state.dragAxis = 'dismiss';
+      } else if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        state.dragAxis = 'swipe';
+      } else {
+        return;
+      }
+    }
+
+    if (state.dragAxis === 'dismiss') {
+      var root = overlay();
+      var opacity = Math.max(0.35, 1 - dy / viewportHeight());
+      var scale = Math.max(0.82, 1 - dy / 900);
+      if (root) {
+        root.classList.remove('pp-animate-root', 'pp-animate-image');
+        setPreviewVars({
+          '--pp-overlay-opacity': opacity,
+          '--pp-img-x': '0px',
+          '--pp-img-y': dy + 'px',
+          '--pp-scale': scale,
+          '--pp-rotate': state.rotation + 'deg'
+        });
+      }
+      return;
+    }
+
+    if (state.dragAxis === 'swipe') {
+      var currentIndex = currentPhotoIndex();
+      var list = photoList();
+      var extraX = dx;
+      if (currentIndex === 0 && dx > 0) extraX = dx * 0.35;
+      if (currentIndex === list.length - 1 && dx < 0) extraX = dx * 0.35;
+      syncTrackTransform(extraX, false);
+    }
+  }
+
+  function handleTouchGestureEnd(point) {
+    var dx = point.x - state.startX;
+    var dy = point.y - state.startY;
+    var distance = Math.abs(dx) + Math.abs(dy);
+
+    if (state.mode === 'nav-wait') {
+      if(Math.abs(dx)>70 && Math.abs(dx)>Math.abs(dy))requestNavigation(dx<0?'next':'prev');
+      clearInteractionState();requestAnimationFrame(pumpNavigation);return;
+    }
+
+    if (state.mode === 'pinch') {
+      state.suppressTapUntil = Date.now() + 350;
+      reboundScaleIfNeeded(true);
+      clearInteractionState();
+      return;
+    }
+
+    if (state.mode === 'pan') {
+      state.suppressTapUntil = Date.now() + 350;
+      reboundScaleIfNeeded(true);
+      clearInteractionState();
+      return;
+    }
+
+    if (state.mode === 'pan-or-tap') {
+      if (!state.moved) {
+        maybeHandleTouchDoubleTap(point);
+      } else {
+        reboundScaleIfNeeded(true);
+      }
+      clearInteractionState();
+      return;
+    }
+
+    if (state.mode === 'swipe-dismiss') {
+      if (state.dragAxis === 'dismiss') {
+        state.suppressTapUntil = Date.now() + 350;
+        if (dy > 140 && dy > Math.abs(dx) * 1.15) {
+          window.closePhotoPreview();
+        } else {
+          clearDismissVisual(true);
+          syncTrackTransform(0, true);
+        }
+        clearInteractionState();
+        return;
+      }
+
+      if (state.dragAxis === 'swipe') {
+        state.suppressTapUntil = Date.now() + 350;
+        if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
+          if (dx < 0 && typeof window.ppNextPhoto === 'function') {
+            window.ppNextPhoto();
+          } else if (dx > 0 && typeof window.ppPrevPhoto === 'function') {
+            window.ppPrevPhoto();
+          } else {
+            syncTrackTransform(0, true);
+          }
+        } else {
+          syncTrackTransform(0, true);
+        }
+        clearInteractionState();
+        return;
+      }
+
+      syncTrackTransform(0, true);
+      clearDismissVisual(true);
+      if (distance > 8) {
+        state.suppressTapUntil = Date.now() + 350;
+      }
+      if (!state.moved) {
+        maybeHandleTouchDoubleTap(point);
+      }
+      clearInteractionState();
+    }
+  }
+
+  function clearInteractionState() {
+    state.mode = 'idle';
+    state.pointers.clear();
+    state.activePointerId = null;
+    state.pointerType = '';
+    state.mouseDown = false;
+    state.moved = false;
+    state.dragAxis = '';
+    state.startX = 0;
+    state.startY = 0;
+    state.startTx = state.tx;
+    state.startTy = state.ty;
+    state.startScale = state.scale;
+    state.pinchStartDistance = 0;
+    state.pinchAnchorX = 0;
+    state.pinchAnchorY = 0;
+    state.viewportWidthCache = 0;
+    state.viewportHeightCache = 0;
+    clearDismissVisual(true);
+    cancelPendingMoveFrame();
+  }
+
+  function releasePointerCapture(surface, pointerId) {
+    if (!surface || pointerId == null) return;
+    try {
+      surface.releasePointerCapture(pointerId);
+    } catch (_) {}
+  }
+
+  function cleanupLegacyControls(root) {
+    root = root || overlay();
+    if (!root) return;
+    root.querySelectorAll('#ppCompactBtn,.pp-compact-btn').forEach(function (button) {
+      button.remove();
+    });
+    var rotateSvg = root.querySelector('#ppRotateBtn svg');
+    if (rotateSvg) {
+      rotateSvg.innerHTML = '<path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path>';
+    }
+  }
+
+  function ensurePreviewToolbar(root) {
+    root = root || overlay();
+    if (!root) return null;
+    var toolbar = root.querySelector('.pp-preview-toolbar');
+    if (!toolbar) {
+      toolbar = document.createElement('div');
+      toolbar.className = 'pp-preview-toolbar';
+      root.appendChild(toolbar);
+    }
+    [
+      'ppZoomOutBtn',
+      'ppZoomInBtn',
+      'ppDeleteBtn',
+      'ppInfoBtn',
+      'ppShareBtn',
+      'ppRotateBtn'
+    ].forEach(function (id) {
+      var button = root.querySelector('#' + id);
+      if (button && button.parentNode !== toolbar) {
+        toolbar.appendChild(button);
+      }
+    });
+    // ★ 修复：隐藏两个不明确的缩放按钮（− / +）——照片在角落里被误认为“不明按钮”，
+    // 缩放仍可通过 双击 / 滚轮 / 双指捏合 使用，工具栏只保留 信息/旋转/分享/删除。
+    //
+    // ★ 2026-09-25 修复（按钮位置错乱 / 隐藏失效）：
+    //   style.css:14051 有一组后置规则
+    //     #photoPreviewOverlay .pp-zoom-btn { … display: flex !important; width:42px !important; … }
+    //   它用 !important 覆盖了这里设置的普通内联 display:none，导致这两个按钮在线上
+    //   始终可见（实测 computed display = flex，而 style.display = none）。
+    //   更糟的是同一文件 7738 行还给了 .pp-zoom-btn { position:absolute; bottom:100px }
+    //   ——于是它们既不隐藏，又被定位到远离底部工具栏的左上角落，正是用户反馈的
+    //   「按钮的位置也不对」。
+    //   这里必须用 setProperty(..., 'important') 才能压过样式表里的 !important。
+    ['ppZoomOutBtn', 'ppZoomInBtn'].forEach(function (id) {
+      var zoomBtn = root.querySelector('#' + id);
+      if (!zoomBtn) return;
+      zoomBtn.style.setProperty('display', 'none', 'important');
+      zoomBtn.setAttribute('aria-hidden', 'true');
+      zoomBtn.setAttribute('tabindex', '-1');
+    });
+    // ★ 修复：内联固定工具栏/关闭钮/指示器位置——新样式表（photo-preview.css）未加载或
+    // 加载失败时，style.css 里的旧版规则会把工具栏挤到错误位置（贴底被裁、关闭钮错位）。
+    //
+    // ★ 2026-09-25：style.css 后段出现了一组带 !important 的覆盖规则
+    //   （#photoPreviewOverlay .pp-preview-toolbar / .photo-preview-close / .pp-dots，
+    //    见 style.css 约 14040 行起）。普通内联样式**压不过 !important**，
+    //   所以这里统一改用 setProperty(..., 'important')，确保这套定位在任何
+    //   样式表加载顺序下都稳定生效。
+    function setImportant(node, prop, value) {
+      if (node) node.style.setProperty(prop, value, 'important');
+    }
+    setImportant(toolbar, 'position', 'absolute');
+    setImportant(toolbar, 'left', 'auto');
+    setImportant(toolbar, 'right', 'max(14px, env(safe-area-inset-right, 0px))');
+    setImportant(toolbar, 'top', 'auto');
+    setImportant(toolbar, 'margin', '0');
+    setImportant(toolbar, 'bottom', 'calc(18px + env(safe-area-inset-bottom, 0px))');
+    setImportant(toolbar, 'transform', 'none');
+    setImportant(toolbar, 'z-index', '24');
+    setImportant(toolbar, 'display', 'flex');
+    setImportant(toolbar, 'align-items', 'center');
+    setImportant(toolbar, 'justify-content', 'center');
+    setImportant(toolbar, 'gap', '2px');
+    setImportant(toolbar, 'padding', '0');
+    setImportant(toolbar, 'border-radius', '0');
+    setImportant(toolbar, 'background', 'transparent');
+    setImportant(toolbar, 'border', '0');
+    setImportant(toolbar, 'box-shadow', 'none');
+    setImportant(toolbar, 'backdrop-filter', 'none');
+    setImportant(toolbar, '-webkit-backdrop-filter', 'none');
+    var closeBtn = root.querySelector('.photo-preview-close');
+    if (closeBtn) {
+      setImportant(closeBtn, 'position', 'absolute');
+      setImportant(closeBtn, 'top', 'calc(max(16px, env(safe-area-inset-top, 0px)))');
+      setImportant(closeBtn, 'right', 'calc(12px + env(safe-area-inset-right, 0px))');
+      setImportant(closeBtn, 'left', 'auto');
+      setImportant(closeBtn, 'bottom', 'auto');
+      setImportant(closeBtn, 'transform', 'none');
+      setImportant(closeBtn, 'z-index', '46');
+      setImportant(closeBtn, 'margin', '0');
+      setImportant(closeBtn, 'display', 'grid');
+      setImportant(closeBtn, 'place-items', 'center');
+      setImportant(closeBtn, 'pointer-events', 'auto');
+    }
+    var dots = root.querySelector('.pp-dots');
+    if (dots) {
+      setImportant(dots, 'position', 'absolute');
+      setImportant(dots, 'top', 'calc(14px + env(safe-area-inset-top, 0px))');
+      setImportant(dots, 'bottom', 'auto');
+      setImportant(dots, 'left', '50%');
+      setImportant(dots, 'transform', 'translateX(-50%)');
+      setImportant(dots, 'z-index', '11');
+      setImportant(dots, 'pointer-events', 'none');
+    }
+    return toolbar;
+  }
+
+  function formatFileSize(size) {
+    if (!size && size !== 0) return '--';
+    if (size >= 1048576) return (size / 1048576).toFixed(2) + ' MB';
+    if (size >= 1024) return (size / 1024).toFixed(1) + ' KB';
+    return String(size) + ' B';
+  }
+
+  function escapeValue(value) {
+    if (window.escapeHtml) return window.escapeHtml(String(value == null ? '' : value));
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function infoRow(label, value) {
+    return '<div class="pp-info-row"><span class="pp-info-label">' + escapeValue(label) + '</span><span class="pp-info-value">' + escapeValue(value || '--') + '</span></div>';
+  }
+
+  function buildPhotoInfoHtml(photo) {
+    if (!photo) return '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + infoRow('状态', '暂无数据') + '</div>';
+    // ★ 2026-09-25 修复（"照片详情点开什么都没有"）：原实现无条件输出四行，缺数据时
+    //   用 '--' / '未知用户' 占位 —— 而聊天图片此前不带任何元数据，于是整个面板
+    //   全是空占位。现在改为：有值才出行；聊天图片不显示"浏览"（私聊图片没有浏览量
+    //   概念）；一个字段都没有时给明确空态，而不是四个破折号。
+    var isChatPhoto = String(photo.__xtjSource || '') === 'chat';
+    var parts = [];
+    var who = photoUsername(photo);
+    if (who) parts.push(infoRow('作者', who));
+    if (photo.timestamp) {
+      var tsDate = new Date(photo.timestamp);
+      if (!isNaN(tsDate.getTime())) parts.push(infoRow('时间', tsDate.toLocaleString('zh-CN')));
+    }
+    if (!isChatPhoto && photo.views != null) parts.push(infoRow('浏览', photo.views));
+    if (photo.fileSize) parts.push(infoRow('大小', formatFileSize(photo.fileSize)));
+    if (photo.originalSize && Number(photo.originalSize) > 0 && Number(photo.originalSize) !== Number(photo.fileSize || 0)) {
+      parts.push(infoRow('原始大小', formatFileSize(photo.originalSize)));
+    }
+    if (isChatPhoto) parts.push(infoRow('来源', '聊天图片'));
+    if (!parts.length) parts.push(infoRow('状态', '这张图片没有可显示的元数据'));
+    var html = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + parts.join('') + '</div>';
+    var exif = photo.exif || null;
+    if (exif) {
+      var exifRows = [];
+      if (exif.model || exif.make) exifRows.push(infoRow('设备', exif.model || exif.make));
+      if (exif.fNumber) exifRows.push(infoRow('光圈', 'f/' + exif.fNumber));
+      if (exif.exposureTime) exifRows.push(infoRow('快门', exif.exposureTime));
+      if (exif.iso) exifRows.push(infoRow('ISO', exif.iso));
+      if (exif.focalLength) exifRows.push(infoRow('焦距', exif.focalLength + 'mm'));
+      if (exifRows.length) {
+        html += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF</div>' + exifRows.join('') + '</div>';
+      }
+    }
+    return html;
+  }
+
+  async function fetchPhotoFileSize(photo) {
+    if (!photo) return null;
+    if (Number.isFinite(Number(photo.fileSize)) && Number(photo.fileSize) > 0) return Number(photo.fileSize);
+    if (!photo.imageUrl) return null;
+    var controller = new AbortController();
+    var timer = setTimeout(function(){ controller.abort(); }, 10000);
+    try {
+      var size = null, response;
+      try {
+        response = await fetch(photo.imageUrl, { method:'HEAD', mode:'cors', credentials:'omit', signal:controller.signal });
+        if (response.ok) size = Number(response.headers.get('content-length')) || null;
+      } catch (error) { if (controller.signal.aborted) return null; }
+      if (!Number.isSafeInteger(size) || size <= 0) {
+        // Ask for one byte and cancel the body if the server ignores Range.
+        response = await fetch(photo.imageUrl, { method:'GET', headers:{Range:'bytes=0-0'}, mode:'cors', credentials:'omit', signal:controller.signal });
+        try {
+          if (response.ok) {
+            var total = /\/(\d+)$/.exec(response.headers.get('content-range') || '');
+            size = total ? Number(total[1]) : response.status === 206 ? null : Number(response.headers.get('content-length')) || null;
+          } else size = null;
+        } finally { if (response.body) await response.body.cancel().catch(function(){}); }
+      }
+      if (!Number.isSafeInteger(size) || size <= 0) return null;
+      photo.fileSize = size;
+      return size;
+    } catch (_) { return null; } finally { clearTimeout(timer); }
+  }
+
+  function bindInfoModal() {
+    var modal = infoModal();
+    if (!modal || modal.__xtjInfoBound) return;
+    modal.__xtjInfoBound = true;
+    modal.addEventListener('click', function (event) {
+      if (event.target === modal) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        window.closePhotoInfo();
+      }
+    }, true);
+    var closeBtn = modal.querySelector('.pp-info-modal-close');
+    if (closeBtn && !closeBtn.__xtjInfoCloseBound) {
+      closeBtn.__xtjInfoCloseBound = true;
+      closeBtn.addEventListener('pointerdown', function (event) {
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }, true);
+      closeBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        window.closePhotoInfo();
+      }, true);
+    }
+    var content = modal.querySelector('.pp-info-modal-content');
+    if (content) {
+      content.addEventListener('click', function (event) {
+        event.stopPropagation();
+      });
+      content.addEventListener('pointerdown', function (event) {
+        event.stopPropagation();
+      });
+    }
+    modal.addEventListener('keydown', function (event) {
+      if (!state.infoOpen) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        window.closePhotoInfo();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      var focusable = Array.prototype.filter.call(modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'), function (node) {
+        return !node.disabled && node.getAttribute('aria-hidden') !== 'true' && node.offsetParent !== null;
+      });
+      if (!focusable.length) {
+        event.preventDefault();
+        if (content) content.focus();
+        return;
+      }
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+  }
+
+  function closePhotoInfoInternal(silent) {
+    var modal = infoModal();
+    var root = overlay();
+    state.infoOpen = false;
+    if (root) root.classList.remove('pp-info-open');
+    if (!modal) return;
+    modal.setAttribute('aria-hidden', 'true');
+    if (modal.__xtjInfoCloseTimer) {
+      clearTimeout(modal.__xtjInfoCloseTimer);
+      modal.__xtjInfoCloseTimer = 0;
+    }
+    var content = modal.querySelector('.pp-info-modal-content');
+    var body = infoBody();
+    modal.classList.remove('active');
+    modal.classList.add('closing');
+    modal.style.pointerEvents = 'none';
+    if (!content) {
+      modal.style.display = 'none';
+      modal.classList.remove('closing');
+      modal.style.pointerEvents = '';
+      if (!silent && body) body.innerHTML = '';
+      if (!silent && state.infoReturnFocus && document.contains(state.infoReturnFocus)) state.infoReturnFocus.focus();
+      state.infoReturnFocus = null;
+      return;
+    }
+    modal.__xtjInfoCloseTimer = window.setTimeout(function () {
+      modal.__xtjInfoCloseTimer = 0;
+      modal.style.display = 'none';
+      modal.classList.remove('closing');
+      modal.style.pointerEvents = '';
+      if (!silent && body) body.innerHTML = '';
+      if (!silent && state.infoReturnFocus && document.contains(state.infoReturnFocus)) state.infoReturnFocus.focus();
+      state.infoReturnFocus = null;
+    }, 240);
+  }
+
+  function showPhotoInfoInternal() {
+    if(!infoModal()&&overlay()){
+      var created=document.createElement('div');created.id='ppInfoModal';created.className='pp-info-modal';created.setAttribute('role','dialog');created.setAttribute('aria-modal','true');created.setAttribute('aria-label','照片详情');
+      created.innerHTML='<div class="pp-info-modal-content" tabindex="-1"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button type="button" class="pp-info-modal-close" aria-label="关闭照片信息">×</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
+      overlay().appendChild(created);
+    }
+    var photo = activePhoto();
+    var modal = infoModal();
+    var body = infoBody();
+    var root = overlay();
+    if (!modal || !body || !photo) return;
+    state.infoReturnFocus = document.activeElement;
+    bindInfoModal();
+    if (modal.__xtjInfoCloseTimer) {
+      clearTimeout(modal.__xtjInfoCloseTimer);
+      modal.__xtjInfoCloseTimer = 0;
+    }
+    var content = modal.querySelector('.pp-info-modal-content');
+    body.innerHTML = buildPhotoInfoHtml(photo);
+    modal.classList.remove('closing');
+    modal.classList.add('pp-info-prep');
+    // ★ 2026-09-23 改为**全屏居中**：此前把面板锚定在 ⓘ 按钮正上方
+    //   （right = innerWidth − 按钮右边距，bottom = innerHeight − 按钮顶部 + 14），
+    //   而 ⓘ 按钮在工具栏里偏左，结果面板被推到屏幕左侧、还压住照片主体。
+    //   现在按维护者要求居中（.pp-info-modal 在 style.css 里本就是 inset:0 + flex 居中，
+    //   这里用行内样式显式再写一遍，避免历史行内残留把它们覆盖掉）。
+    try {
+      modal.style.position = 'fixed';
+      modal.style.inset = '0';
+      modal.style.left = '0';
+      modal.style.top = '0';
+      modal.style.right = '0';
+      modal.style.bottom = '0';
+      modal.style.alignItems = 'center';
+      modal.style.justifyContent = 'center';
+      modal.style.zIndex = '60';
+      modal.style.maxWidth = '100%';
+    } catch (eAnchor) {}
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.pointerEvents = 'auto';
+    state.infoOpen = true;
+    if (root) root.classList.add('pp-info-open');
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        modal.classList.remove('pp-info-prep');
+        modal.classList.add('active');
+        var closeBtn = modal.querySelector('.pp-info-modal-close');
+        if (closeBtn) closeBtn.focus();
+        else if (content) content.focus();
+      });
+    });
+    if (!photo.fileSize) {
+      fetchPhotoFileSize(photo).then(function (size) {
+        if (!size) return;
+        if (!state.infoOpen || activePhoto() !== photo) return;
+        var latestBody = infoBody();
+        if (latestBody) latestBody.innerHTML = buildPhotoInfoHtml(photo);
+      });
+    }
+  }
+
+  function forceClosePhotoPreview() {
+    var root = overlay();
+    if (state.forceClosing) return;
+    state.forceClosing = true;
+    // Hide before cancelling fill-forwards animations, so cleanup cannot reveal
+    // the opaque fullscreen preview for a final frame.
+    if (root) root.classList.remove('active');
+    clearCloseFallbackTimer();
+    // ★ 关闭预览时清除单击延迟关闭定时器，避免关闭后再次触发二次 close
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+    // ★ 修复 A2：关闭时移除键盘导航监听，避免每次打开预览重复注册
+    if (state.__keydownHandler) {
+      try { document.removeEventListener('keydown', state.__keydownHandler, true); } catch (_) {}
+      state.__keydownHandler = null;
+    }
+    try {
+      closePhotoInfoInternal(true);
+      if (state.activePointerId != null) {
+        releasePointerCapture(root || wrapper(), state.activePointerId);
+      }
+      cancelPreviewMotion();
+      cancelNavigation();
+      clearInteractionState();
+      clearImageError();
+    // H-32: 关闭预览时隐藏下载确认弹窗，防止全屏遮罩残留阻塞页面
+      try {
+        var dm = document.getElementById('ppDownloadConfirmModal');
+        if (dm) { dm.classList.remove('show'); dm.style.display = 'none'; }
+      } catch (_) {}
+      delete window.__xtjPreviewExplicitPhotos;
+      window.__xtjPhotoPreviewContext = null;
+      window.photoPreviewCurrent = null;
+      state.scale = 1;
+      state.tx = 0;
+      state.ty = 0;
+      state.rotation = 0;
+
+      if (!state.callingOriginalClose && typeof original.closePhotoPreview === 'function') {
+        state.callingOriginalClose = true;
+        try {
+          withPreviewGuardDisabled(original.closePhotoPreview, window, [true]);
+        } catch (_) {}
+        state.callingOriginalClose = false;
+      }
+
+      if (root && typeof root._cleanupPreview === 'function' && !root.__xtjCleanupRunning) {
+        root.__xtjCleanupRunning = true;
+        try {
+          root._cleanupPreview();
+        } catch (_) {}
+        root.__xtjCleanupRunning = false;
+      }
+
+      if (root) {
+        root.classList.remove('active', 'closing', 'pp-closing', 'pp-hotfix-closing', 'pp-hotfix-basic-close', 'pp-post-mode', 'pp-info-open');
+        root.classList.remove('pp-animate-root', 'pp-animate-track', 'pp-animate-image');
+        root.style.pointerEvents = '';
+        root.style.removeProperty('--pp-overlay-opacity');
+        root.style.removeProperty('--pp-track-x');
+        root.style.removeProperty('--pp-img-x');
+        root.style.removeProperty('--pp-img-y');
+        root.style.removeProperty('--pp-scale');
+        root.style.removeProperty('--pp-rotate');
+        root.setAttribute('aria-hidden', 'true');
+      }
+
+      if (state.previewReturnFocus && document.contains(state.previewReturnFocus)) state.previewReturnFocus.focus();
+      state.previewReturnFocus = null;
+
+      var img = previewImage();
+      if (img) {
+        img.style.opacity = '';
+        img.style.borderRadius = '';
+        img.style.transformOrigin = '';
+        img.classList.remove('zoomed', 'pp-placeholder');
+      }
+
+      var track = slideTrack();
+      if (track) track.classList.remove('snapping');
+
+      var wrap = wrapper();
+      if (wrap) wrap.classList.remove('pp-wrap-animating');
+
+      if (root && root._openOriginImg) {
+        root._openOriginImg.style.transition = '';
+        root._openOriginImg.style.opacity = '';
+      }
+
+      document.body.classList.remove('photo-previewing');
+      document.body.style.overflow = '';
+    } finally {
+      state.forceClosing = false;
+    }
+  }
+
+  function showDownloadConfirmModal() {
+    // H-32: hotfix 模式拦截指针事件后，原 preview.js 的长按下载不可达，
+    // 这里在 hotfix 内自建下载确认弹窗（复用原 ppCancelDownload/ppConfirmDownload）。
+    var root = overlay();
+    if (!root || isModalOpen()) return;
+    var photo = activePhoto();
+    if (!photo || !photo.imageUrl) {
+      if (window.showToast) window.showToast('没有可下载的照片');
+      return;
+    }
+    var modal = document.getElementById('ppDownloadConfirmModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'ppDownloadConfirmModal';
+      modal.className = 'pp-download-confirm-overlay';
+      modal.innerHTML = '<div class="pp-download-confirm-content"><div class="pp-download-confirm-title">是否要下载该图片？</div><div class="pp-download-confirm-buttons"><button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">取消</button><button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">确认</button></div></div>';
+      root.appendChild(modal);
+    }
+    modal.style.display = 'flex';
+    modal.offsetHeight;
+    modal.classList.add('show');
+  }
+
+  function bindCloseButton(root) {
+    root = root || overlay();
+    if (!root) return;
+    var closeBtn = root.querySelector('.photo-preview-close');
+    if (!closeBtn || closeBtn.__xtjCloseBound) return;
+    closeBtn.__xtjCloseBound = true;
+    closeBtn.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      window.closePhotoPreview();
+    }, true);
+  }
+
+  function bindInfoButton(root) {
+    root = root || overlay();
+    if (!root) return;
+    var infoBtn = root.querySelector('#ppInfoBtn');
+    if (!infoBtn || infoBtn.__xtjInfoBtnBound) return;
+    infoBtn.__xtjInfoBtnBound = true;
+    infoBtn.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (isModalOpen()) {
+        window.closePhotoInfo();
+      } else {
+        window.showPhotoInfo();
+      }
+    }, true);
+  }
+
+  function installUnifiedPointerHandlers() {
+    var root = overlay();
+    var surface = root || wrapper();
+    if (!root || !surface || surface.__xtjUnifiedPreviewHandlersInstalled) return;
+    surface.__xtjUnifiedPreviewHandlersInstalled = true;
+    if (window.__xtjPreviewWindowHandlersInstalled) return;
+    window.__xtjPreviewWindowHandlersInstalled = true;
+
+    surface.addEventListener('pointerdown', function (event) {
+      if (isControl(event.target)) return;
+      // H-32: 新的指针交互取消尚未触发的单击关闭定时器
+      if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+      if (isModalOpen()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+
+      if(motionClosing){event.preventDefault();event.stopImmediatePropagation();return;}
+      cancelPreviewMotion();
+      var isTouchLike = event.pointerType === 'touch';
+      var isMouse = event.pointerType === 'mouse';
+      if (isMouse && event.button !== 0) return;
+
+      state.pointerType = event.pointerType || (isTouchLike ? 'touch' : 'mouse');
+      state.activePointerId = event.pointerId;
+      state.moved = false;
+      state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (state.pointers.size === 1) {
+        state.viewportWidthCache = 0;
+        state.viewportHeightCache = 0;
+        state.viewportWidthCache = viewportWidth();
+        state.viewportHeightCache = viewportHeight();
+      }
+
+      if (isTouchLike) {
+        if (state.pointers.size >= 2) {
+          // H-32: 双指缩放取消长按
+          if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
+          beginPinch();
+        } else if (state.scale > 1.01) {
+          beginPanOrTap({ x: event.clientX, y: event.clientY });
+        } else if (navBusy) {
+          state.mode='nav-wait';state.startX=event.clientX;state.startY=event.clientY;
+        } else {
+          beginSwipeDismiss({ x: event.clientX, y: event.clientY });
+          // H-32: 长按（550ms 未移动）触发下载确认弹窗，与原 preview.js 行为一致
+          if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
+          state.longPressTimer = setTimeout(function () {
+            state.longPressTimer = 0;
+            if (state.moved || state.pointers.size !== 1 || isModalOpen() || state.scale > 1.01) return;
+            showDownloadConfirmModal();
+          }, 550);
+        }
+      } else {
+        state.mouseDown = true;
+        if (state.scale > 1.01) {
+          beginPan({ x: event.clientX, y: event.clientY });
+        } else {
+          state.mode = 'mouse-idle';
+          state.startX = event.clientX;
+          state.startY = event.clientY;
+        }
+      }
+
+      try {
+        surface.setPointerCapture(event.pointerId);
+      } catch (_) {}
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+
+    surface.addEventListener('pointermove', function (event) {
+      if (isControl(event.target) || isModalOpen()) return;
+      if (state.activePointerId == null && event.pointerType !== 'touch') return;
+      if (event.pointerType === 'touch' && !state.pointers.has(event.pointerId)) return;
+      if (event.pointerType !== 'touch' && !state.mouseDown) return;
+
+      // H-32: 移动超过阈值即取消长按下载
+      if (state.longPressTimer &&
+        Math.abs(event.clientX - state.startX) + Math.abs(event.clientY - state.startY) > 8) {
+        clearTimeout(state.longPressTimer);
+        state.longPressTimer = 0;
+      }
+
+      if (event.pointerType === 'touch') {
+        state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (state.pointers.size >= 2) {
+          if (state.mode !== 'pinch') beginPinch();
+          schedulePointerMoveVisual('pinch');
+        } else if (state.mode === 'pinch') {
+          schedulePointerMoveVisual('refresh-single');
+        } else if (state.mode === 'nav-wait') {
+          // Track the next intention without moving a track still finishing its prior slide.
+        } else if (state.mode === 'pan-or-tap') {
+          schedulePointerMoveVisual('pan-or-tap', { x: event.clientX, y: event.clientY });
+        } else if (state.scale > 1.01 || state.mode === 'pan') {
+          schedulePointerMoveVisual('pan', { x: event.clientX, y: event.clientY });
+        } else {
+          schedulePointerMoveVisual('swipe-dismiss', { x: event.clientX, y: event.clientY });
+        }
+      } else {
+        if (state.mode === 'pan' && state.scale > 1.01) {
+          schedulePointerMoveVisual('pan', { x: event.clientX, y: event.clientY });
+        } else {
+          schedulePointerMoveVisual('mouse-move', { x: event.clientX, y: event.clientY });
+        }
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+
+    function finishPointer(event) {
+      if(isControl(event.target)&&!state.pointers.has(event.pointerId))return;
+      flushPendingMoveBeforePointerEnd();
+      if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
+      if (event.pointerType === 'touch') {
+        if (!state.pointers.has(event.pointerId)){event.preventDefault();event.stopImmediatePropagation();return;}
+        state.pointers.delete(event.pointerId);
+        releasePointerCapture(surface, event.pointerId);
+
+        if (state.mode === 'pinch') {
+          if (state.pointers.size >= 2) {
+            beginPinch();
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+          }
+          if (state.pointers.size === 1) {
+            state.suppressTapUntil = Date.now() + 350;
+            refreshSinglePointerStart();
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+          }
+        } else if (state.pointers.size === 1 && (state.mode === 'pan' || state.mode === 'pan-or-tap' || state.mode === 'swipe-dismiss')) {
+          state.suppressTapUntil = Date.now() + 350;
+          refreshSinglePointerStart();
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        } else if (state.pointers.size > 0) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+
+        handleTouchGestureEnd({ x: event.clientX, y: event.clientY });
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+
+      if (state.activePointerId !== event.pointerId && event.pointerType === 'mouse') return;
+      releasePointerCapture(surface, event.pointerId);
+      state.mouseDown = false;
+      state.activePointerId = null;
+
+      if (state.mode === 'pan' && state.scale > 1.01) {
+        state.suppressTapUntil = Date.now() + 350;
+        reboundScaleIfNeeded(true);
+      } else if (!state.moved && state.scale <= 1.01 && !isModalOpen() && state.mode === 'mouse-idle') {
+        // H-32: 鼠标单击（无拖动、未缩放）关闭预览，双击缩放仍在
+        // maybeHandleTouchDoubleTap 的 280ms 窗口内优先生效。
+        maybeHandleTouchDoubleTap({ x: event.clientX, y: event.clientY });
+      }
+      clearInteractionState();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+
+    surface.addEventListener('pointerup', finishPointer, true);
+    surface.addEventListener('pointercancel', function (event) {
+      cancelPendingMoveFrame();
+      releasePointerCapture(surface, event.pointerId);
+      clearInteractionState();
+      if(!navBusy)syncTrackTransform(0,true);
+      clearDismissVisual(true);
+      reboundScaleIfNeeded(true);
+      requestAnimationFrame(pumpNavigation);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+
+    surface.addEventListener('click', function (event) {
+      if (isControl(event.target)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+
+    surface.addEventListener('dblclick', function (event) {
+      if (isControl(event.target) || isModalOpen()) return;
+      if (Date.now() < state.ignoreNativeDblClickUntil) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      toggleZoomAt({ x: event.clientX, y: event.clientY });
+    }, true);
+
+    window.addEventListener('mouseup', function () {
+      state.mouseDown = false;
+      if (state.mode === 'pan' && state.scale > 1.01) reboundScaleIfNeeded(true);
+      clearInteractionState();
+    }, true);
+
+    window.addEventListener('mouseleave', function () {
+      state.mouseDown = false;
+      clearInteractionState();
+    }, true);
+
+    window.addEventListener('blur', function () {
+      state.mouseDown = false;
+      clearInteractionState();
+    }, true);
+
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) return;
+      state.mouseDown = false;
+      clearInteractionState();
+    }, true);
+
+    // P4: orientationchange 时清理交互状态并重置缩放/位移，避免旋转后视觉错位
+    window.addEventListener('orientationchange', function () {
+      state.mouseDown = false;
+      clearInteractionState();
+      var root = overlay();
+      if (root && root.classList.contains('active')) {
+        // 重置缩放/位移状态（保留旋转角度），适配新视口尺寸
+        resetPreviewState({ animate: false, resetRotation: false, keepSuppressTap: true });
+      }
+    }, true);
+
+    // ★ 修复 A2：预览键盘导航（捕获阶段，避免被页面其他监听吞掉）
+    ensurePreviewKeydownHandler();
+  }
+
+  // ★ 修复 A2：注册/恢复预览键盘导航监听。
+  // 每次打开预览时调用（forceClosePhotoPreview 关闭时会移除，防止累积重复监听）。
+  function ensurePreviewKeydownHandler() {
+    if (state.__keydownHandler) return;
+    var keydownHandler = function (event) {
+      var root = overlay();
+      if (!root || !root.classList.contains('active')) return;
+      // 输入框/文本域内不劫持方向键
+      var tag = event.target && event.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (event.target && event.target.isContentEditable)) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (isModalOpen())window.closePhotoInfo();else window.closePhotoPreview();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        if (typeof window.ppPrevPhoto === 'function') window.ppPrevPhoto();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        if (typeof window.ppNextPhoto === 'function') window.ppNextPhoto();
+      }
+    };
+    document.addEventListener('keydown', keydownHandler, true);
+    state.__keydownHandler = keydownHandler;
+  }
+
+  // 错误 UI 与 preview.js 原 3 次重试逻辑协调：
+  // preview.js 的 D() 对图片加载失败会自动重试（500/1000/1500ms 退避，最多 3 次）。
+  // 若错误 UI 立即显示，瞬时失败会直接盖住重试中的图片（且旧实现里 img.onload
+  // 属性处理器会被 preview.js 的 cleanup() 置空，导致重试成功后错误 UI 残留）。
+  // 因此这里：1) 用 addEventListener（preview.js 只清理属性处理器，不移除监听）；
+  // 2) 错误 UI 延迟到重试窗口之后才显示；3) 任意成功加载立即清除错误 UI。
+  var errorUiTimer = 0;
+  var ERROR_UI_DELAY_MS = 2500;
+
+  function clearErrorUiTimer() {
+    if (errorUiTimer) { clearTimeout(errorUiTimer); errorUiTimer = 0; }
+  }
+
+  function installImageErrorHandler() {
+    var img = previewImage();
+    if (!img) return;
+    if (img._ppHotfixErrorBound) return;
+    img._ppHotfixErrorBound = true;
+    function showImageError() {
+        if (!img || !img.isConnected) return;
+        // 延迟窗口内已成功加载则不需要错误 UI
+        if (img.complete && img.naturalWidth > 0) { clearImageError(); return; }
+        var root = overlay();
+        if (!root || !root.classList.contains('active')) return;
+        if (root.classList.contains('pp-img-error')) return;
+        root.classList.add('pp-img-error');
+        var slot = img.parentElement;
+        if (!slot) return;
+        var existing = root.querySelector('.pp-error-placeholder');
+        if (existing) return;
+        img.style.display = 'none';
+        var placeholder = document.createElement('div');
+        placeholder.className = 'pp-error-placeholder';
+        var retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'pp-error-retry';
+        retry.textContent = '图片加载失败 · 重试';
+        retry.addEventListener('pointerdown', function(event) { event.stopPropagation(); });
+        retry.addEventListener('click', function(event) {
+          event.preventDefault(); event.stopPropagation();
+          clearImageError();
+          if (typeof window.retryPhotoPreviewImage === 'function') window.retryPhotoPreviewImage();
+        });
+        placeholder.appendChild(retry);
+        slot.appendChild(placeholder);
+    }
+    img.addEventListener('xtj:image-timeout', function () { clearErrorUiTimer(); showImageError(); });
+    img.addEventListener('xtj:image-request', clearImageError);
+    img.addEventListener('error', function () {
+      clearErrorUiTimer();
+      errorUiTimer = window.setTimeout(function () {
+        errorUiTimer = 0;
+        showImageError();
+      }, ERROR_UI_DELAY_MS);
+    });
+    img.addEventListener('load', function () {
+      clearErrorUiTimer();
+      clearImageError();
+    });
+  }
+
+  function clearImageError() {
+    clearErrorUiTimer();
+    var root = overlay();
+    var img = previewImage();
+    if (root) {
+      root.classList.remove('pp-img-error');
+      var ph = root.querySelector('.pp-error-placeholder');
+      if (ph) ph.remove();
+      // ★ 修复 B6：前后邻图槽位（ppPrevImg/ppNextImg）加载失败时也会挂 pp-placeholder，
+      // 此前 clearImageError 只清理主图占位符，邻图失败块残留到切换时才闪烁。
+      ['ppPrevImg', 'ppNextImg'].forEach(function(id) {
+        var sideImg = document.getElementById(id);
+        if (!sideImg) return;
+        sideImg.classList.remove('pp-placeholder');
+        var sidePh = sideImg.parentNode && sideImg.parentNode.querySelector('.pp-error-placeholder');
+        if (sidePh) sidePh.remove();
+      });
+    }
+    if (img) {
+      img.style.display = '';
+      img.onerror = null;
+      img.onload = null;
+    }
+  }
+
+  function syncPreviewImageFit(img) {
+    var root=overlay(); if (!root || !img || !img.naturalWidth || !img.naturalHeight) return;
+    var fit=Math.min(root.clientWidth/img.naturalWidth,root.clientHeight/img.naturalHeight);
+    var width=(img.naturalWidth*fit)+'px',height=(img.naturalHeight*fit)+'px';
+    if(img.style.width!==width)img.style.setProperty('width',width,'important');
+    if(img.style.height!==height)img.style.setProperty('height',height,'important');
+    if(img.style.aspectRatio!=='auto')img.style.setProperty('aspect-ratio','auto','important');
+  }
+  function installPreviewLoadFeedback() {
+    var root=overlay(); if (!root) return;
+    root.querySelectorAll('.pp-slide-img').forEach(function(img){
+      var slot=img.parentElement; if (!slot || img.__xtjLoadFeedback) return;
+      img.__xtjLoadFeedback=true;
+      var loader=document.createElement('div'); loader.className='pp-image-loading';
+      loader.setAttribute('aria-hidden','true');
+      loader.innerHTML='<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 36V20"/><path class="pp-leaf pp-leaf-left" d="M24 29C14 29 11 23 12 17C20 17 24 21 24 29Z"/><path class="pp-leaf pp-leaf-right" d="M24 23C24 16 29 12 37 12C37 19 32 24 24 23Z"/><path d="M16 37H32"/></svg><span>正在加载照片…</span>';
+      slot.appendChild(loader);
+      function sync(){
+        syncPreviewImageFit(img);
+        var ready=img.complete&&img.naturalWidth>0&&img.style.opacity!=='0';
+        loader.hidden=ready||!img.getAttribute('src')||root.classList.contains('pp-img-error');
+      }
+      img.addEventListener('load',sync); img.addEventListener('error',function(){loader.hidden=true;});
+      new MutationObserver(sync).observe(img,{attributes:true,attributeFilter:['src','style']});
+      sync();
+    });
+  }
+  window.addEventListener('resize',function(){var root=overlay();if(root&&root.classList.contains('active'))root.querySelectorAll('.pp-slide-img').forEach(syncPreviewImageFit);});
+  window.addEventListener('xtj:visual-viewport-change',function(){var root=overlay();if(root&&root.classList.contains('active'))root.querySelectorAll('.pp-slide-img').forEach(syncPreviewImageFit);});
+
+  function afterOpen() {
+    clearCloseFallbackTimer();
+    closeLegacyViewer();
+    closePhotoInfoInternal(true);
+    state.scale = 1;
+    state.tx = 0;
+    state.ty = 0;
+    state.rotation = 0;
+    state.suppressTapUntil = 0;
+    state.lastTapAt = 0;
+    state.lastTapX = 0;
+    state.lastTapY = 0;
+    state.ignoreNativeDblClickUntil = 0;
+    if (state.singleTapCloseTimer) { clearTimeout(state.singleTapCloseTimer); state.singleTapCloseTimer = 0; }
+    if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0; }
+    clearInteractionState();
+    cleanupLegacyControls();
+    ensurePreviewToolbar();
+    bindCloseButton();
+    bindInfoButton();
+    bindInfoModal();
+    installUnifiedPointerHandlers();
+    clearImageError();
+    installImageErrorHandler();
+    installPreviewLoadFeedback();
+    syncPreviewMeta(activePhoto());
+    applyImageTransform(false);
+    syncTrackTransform(0, false);
+    clearDismissVisual(false);
+    var root = overlay();
+    if (root) root.setAttribute('aria-hidden', 'false');
+    var closeBtn = root && root.querySelector('.photo-preview-close');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function resolvePhotoArray(arg1) {
+    if (Array.isArray(arg1)) return arg1.slice();
+    if (arg1 && Array.isArray(arg1.photos)) return arg1.photos.slice();
+    return null;
+  }
+
+  function resolveFallbackPhotoArray() {
+    if (typeof window.getCurrentRenderablePhotoWallPhotos === 'function') {
+      var derived = window.getCurrentRenderablePhotoWallPhotos();
+      if (Array.isArray(derived) && derived.length) return derived.slice();
+    }
+    var list = photoList();
+    return Array.isArray(list) && list.length ? list.slice() : null;
+  }
+
+  function openWithExplicitPhotos(index, photos, options) {
+    var originEl = options && options.originEl && options.originEl.getBoundingClientRect
+      ? options.originEl
+      : null;
+    var originRect = null;
+    if (originEl) {
+      try {
+        var rect = originEl.getBoundingClientRect();
+        if (rect && rect.width > 0 && rect.height > 0) {
+          originRect = {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            right: rect.right,
+            bottom: rect.bottom
+          };
+        }
+      } catch (_) {}
+    }
+    var prevSorted = window.pwCurrentSortedPhotos;
+    var prevWall = window.photoWallData;
+    window.__xtjPreviewExplicitPhotos = photos.slice();
+    try {
+      // ★ 不再临时改写全局数组（会污染 Realtime 回调），直接以参数传入
+      return withPreviewGuardDisabled(original.openPhotoPreview, window, [index, photos.slice()]);
+    } finally {
+      var root = overlay();
+      if (root && originEl && originRect) {
+        root._xtjOriginImg = originEl;
+        root._xtjOriginRect = originRect;
+        root._openOriginImg = originEl;
+        root._openOrigin = originRect;
+      }
+      if (typeof prevSorted === 'undefined') delete window.pwCurrentSortedPhotos;
+      else window.pwCurrentSortedPhotos = prevSorted;
+      if (typeof prevWall === 'undefined') delete window.photoWallData;
+      else window.photoWallData = prevWall;
+    }
+  }
+
+  function wrapOpenPreview() {
+    if (typeof original.openPhotoPreview !== 'function') return;
+    if (window.openPhotoPreview && window.openPhotoPreview.__xtjHotfixWrapped) return;
+    window.openPhotoPreview = function (index, options) {
+      closeLegacyViewer();
+      state.previewReturnFocus = document.activeElement;
+      var explicitPhotos = resolvePhotoArray(options);
+      if (!explicitPhotos || !explicitPhotos.length) {
+        explicitPhotos = resolveFallbackPhotoArray();
+      }
+      if (!explicitPhotos || !explicitPhotos.length) {
+        if (window.showToast) window.showToast('照片数据加载中，请稍后重试');
+        return;
+      }
+      var safeIndex = Number(index || 0);
+      if (safeIndex < 0) safeIndex = 0;
+      if (safeIndex >= explicitPhotos.length) safeIndex = explicitPhotos.length - 1;
+      resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
+      clearImageError();
+      // ★ 修复 A2：每次打开预览确保键盘导航监听存在（关闭时会被移除）
+      ensurePreviewKeydownHandler();
+      var wasActive=overlay()&&overlay().classList.contains('active');
+      cancelPreviewMotion();cancelNavigation();
+      var result = openWithExplicitPhotos(safeIndex, explicitPhotos, options || null);
+      afterOpen();
+      if(!wasActive)animatePreviewOpen();
+      return result;
+    };
+    window.openPhotoPreview.__xtjHotfixWrapped = true;
+  }
+
+  var navBusy=false, navQueue=[], navTimer=0;
+  function cancelNavigation(){navBusy=false;navQueue=[];if(navTimer)clearTimeout(navTimer);navTimer=0;}
+  function pumpNavigation(){
+    var root=overlay();if(navBusy||state.pointers.size||!root||!root.classList.contains('active')||root.classList.contains('pp-transition-closing'))return;
+    var kind=navQueue.shift();if(!kind)return;
+    var index=currentPhotoIndex(),list=photoList();
+    if((kind==='next'&&index>=list.length-1)||(kind==='prev'&&index<=0)){syncTrackTransform(0,true);requestAnimationFrame(pumpNavigation);return;}
+    cancelPreviewMotion();closePhotoInfoInternal(true);
+    resetPreviewState({resetRotation:true,animate:false,keepSuppressTap:true,keepTrack:true});
+    // Detach a slow initial-open callback before it can restore the old index.
+    if(root._cleanupOpenListeners)root._cleanupOpenListeners(true);
+    root._openLoadGen=(root._openLoadGen||0)+1;
+    navBusy=true;
+    withPreviewGuardDisabled(kind==='next'?original.nextPhoto:original.prevPhoto,window,[]);
+    if(navBusy)navTimer=setTimeout(function(){navTimer=0;navBusy=false;syncTrackTransform(0,false);requestAnimationFrame(pumpNavigation);},650);
+  }
+  function requestNavigation(kind){
+    if(navQueue.length<8)navQueue.push(kind);
+    pumpNavigation();
+  }
+  window.addEventListener('xtj:photo-changed',function(){
+    if(navTimer)clearTimeout(navTimer);navTimer=0;navBusy=false;
+    syncPreviewMeta(activePhoto());clearImageError();requestAnimationFrame(pumpNavigation);
+  });
+  function wrapNavigation(kind){return function(){requestNavigation(kind);};}
+
+  var motionEpoch=0,motionAnimations=[],motionClosing=false;
+  function reducedMotion(){return document.documentElement.getAttribute('data-xtj-motion')==='off'||(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);}
+  function cancelPreviewMotion(){
+    motionEpoch++;motionAnimations.forEach(function(animation){animation.cancel();});motionAnimations=[];motionClosing=false;
+    var root=overlay();if(root)root.classList.remove('pp-transition-closing','pp-motion-active');
+  }
+  function originForCurrent(){
+    var photo=activePhoto(),grid=document.getElementById('photoGrid'),root=overlay(),node=null;
+    if(photo&&grid){var cards=grid.querySelectorAll('.photo-wall-item');for(var k=0;k<cards.length;k++){if(String(cards[k].getAttribute('data-photo-id'))===String(photo.id)){node=cards[k].querySelector('img');break;}}}
+    if(photo&&photo.__xtjSource==='post'){
+      var detail=document.getElementById('postDetailModal'),scope=detail&&detail.classList.contains('active')?detail:document.getElementById('feed');
+      var candidates=scope?scope.querySelectorAll('img[data-post-id][data-post-media-index]'):[];
+      for(var j=0;j<candidates.length;j++){if(String(candidates[j].getAttribute('data-post-id'))===String(photo.__xtjPostId)&&Number(candidates[j].getAttribute('data-post-media-index'))===photo.__xtjMediaIndex){node=candidates[j];break;}}
+    }
+    if(!node&&root&&root._openOriginImg&&photo&&String(photo.id)===String(root._motionOriginId))node=root._openOriginImg;
+    if(!node||!node.isConnected)return null;
+    var rect=node.getBoundingClientRect(),screen=overlay().getBoundingClientRect();
+    if(!rect.width||!rect.height||rect.bottom<=screen.top||rect.top>=screen.bottom||rect.right<=screen.left||rect.left>=screen.right)return null;
+    return {node:node,rect:rect};
+  }
+  function motionTransform(origin){
+    var root=overlay(),img=previewImage(),screen=root.getBoundingClientRect();
+    var width=img&&img.naturalWidth,height=img&&img.naturalHeight;
+    if(!width&&origin){width=origin.node.naturalWidth;height=origin.node.naturalHeight;}
+    var photo=activePhoto();width=width||(photo&&photo.width)||screen.width;height=height||(photo&&photo.height)||screen.height;
+    var fit=Math.min(screen.width/width,screen.height/height),imageWidth=width*fit,imageHeight=height*fit;
+    var rect=origin.rect,scale=Math.min(rect.width/imageWidth,rect.height/imageHeight);
+    return 'translate('+(rect.left+rect.width/2-screen.left-screen.width/2)+'px,'+(rect.top+rect.height/2-screen.top-screen.height/2)+'px) scale('+scale+')';
+  }
+  function animatePreviewOpen(){
+    var root=overlay(),wrap=wrapper();if(!root||!wrap||!wrap.animate||reducedMotion())return;
+    root._motionOriginId=activePhoto()&&activePhoto().id;
+    var origin=originForCurrent(),from=origin?motionTransform(origin):'none';
+    var token=motionEpoch;root.classList.add('pp-motion-active');
+    motionAnimations=[wrap.animate([{transform:from},{transform:'none'}],{duration:240,easing:'cubic-bezier(.22,1,.36,1)'}),root.animate([{opacity:0},{opacity:1}],{duration:180,easing:'ease-out'})];
+    Promise.all(motionAnimations.map(function(a){return a.finished;})).then(function(){if(token===motionEpoch){motionAnimations=[];root.classList.remove('pp-motion-active');}}).catch(function(){});
+  }
+  function animatePreviewClose(){
+    var root=overlay(),wrap=wrapper();if(!root||!root.classList.contains('active')||motionClosing)return;
+    cancelPreviewMotion();cancelNavigation();motionClosing=true;closePhotoInfoInternal(true);
+    // Stop navigation before measuring the current photograph's return target.
+    var track=slideTrack();if(track&&track._ppAnimationCleanup)track._ppAnimationCleanup();
+    syncTrackTransform(0,false);
+    var origin=originForCurrent(),to=origin?motionTransform(origin):'scale(.98)';
+    var from=getComputedStyle(previewImage()).transform;
+    state.scale=1;state.tx=0;state.ty=0;state.rotation=0;applyImageTransform(false);
+    if(reducedMotion()||!wrap||!wrap.animate){forceClosePhotoPreview();return;}
+    root.classList.add('pp-transition-closing','pp-motion-active');var token=motionEpoch;
+    motionAnimations=[wrap.animate([{transform:from,opacity:1},{transform:to,opacity:.3}],{duration:240,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}),root.animate([{opacity:getComputedStyle(root).opacity},{opacity:0}],{duration:240,easing:'ease-in',fill:'forwards'})];
+    Promise.all(motionAnimations.map(function(animation){return animation.finished;})).then(function(){if(token===motionEpoch)forceClosePhotoPreview();}).catch(function(){});
+  }
+
+  window.showPhotoInfo = function () {
+    showPhotoInfoInternal();
+  };
+
+  window.closePhotoInfo = function () {
+    closePhotoInfoInternal(false);
+  };
+
+  window.closePhotoPreview = function () {animatePreviewClose();};
+
+  window.shareCurrentPhoto = function () {
+    return withPreviewGuardDisabled(original.shareCurrentPhoto, this, arguments);
+  };
+
+  window.deletePhotoFromPreview = function () {
+    closePhotoInfoInternal(true);
+    resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
+    var result = withPreviewGuardDisabled(original.deletePhotoFromPreview, this, arguments);
+    return result;
+  };
+
+  window.deleteCurrentPhoto = function () {
+    if (typeof original.deleteCurrentPhoto === 'function') {
+      return original.deleteCurrentPhoto.apply(this, arguments);
+    }
+    return window.deletePhotoFromPreview.apply(this, arguments);
+  };
+
+  window.ppPrevPhoto = wrapNavigation('prev');
+  window.ppNextPhoto = wrapNavigation('next');
+
+  window.zoomIn = function () {
+    state.suppressTapUntil = Date.now() + 350;
+    zoomAt(viewportWidth() / 2, viewportHeight() / 2, state.scale > 1.01 ? state.scale + 0.5 : 2, true);
+  };
+
+  window.zoomOut = function () {
+    state.suppressTapUntil = Date.now() + 350;
+    if (state.scale <= 1.25) {
+      resetPreviewState({ animate: true, resetRotation: false, keepSuppressTap: true });
+      return;
+    }
+    zoomAt(viewportWidth() / 2, viewportHeight() / 2, state.scale - 0.5, true);
+  };
+
+  window.ppRotatePhoto = function () {
+    state.rotation = (state.rotation + 90) % 360;
+    applyImageTransform(true);
+    if (window.showToast) window.showToast('已旋转');
+  };
+
+  function boot() {
+    installFinalStyle();
+    cleanupLegacyControls();
+    ensurePreviewToolbar();
+    bindCloseButton();
+    bindInfoButton();
+    bindInfoModal();
+    installUnifiedPointerHandlers();
+    wrapOpenPreview();
+    closeLegacyViewer();
+  }
+
+  window.forceClosePhotoPreview = forceClosePhotoPreview;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();

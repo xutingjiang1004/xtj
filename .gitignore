@@ -1,0 +1,124 @@
+.vercel
+.env
+.env.local
+.env.*
+node_modules/
+.trae/
+*.log
+.DS_Store
+
+.codex/
+.workbuddy/
+
+# Command Code 工具配置目录（本地工具产物，不进版本库）
+.commandcode/
+
+# Workbuddy 工具记忆目录（本地工具产物，不进版本库）
+.workbuddy/
+
+# Playwright CLI debug artifacts
+.playwright-cli/
+
+# Private keys
+*.pem
+*.key
+secrets.*
+output/
+playwright-report/
+test-results/
+
+# Test/audit scratch artifacts
+/audit_summary.txt
+/runs.json
+/test-out.txt
+/test-results.txt
+/test-results2.txt
+
+# Local backups and accidental files
+*.bak
+*.lnk
+/null
+
+# User-data backup output from cleanup/maintenance scripts
+backups/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Temporary visual audit output
+/screenshots/
+
+# 审计报告（本仓库为 public：报告含未修复问题细节、内网/后台信息，仅保留在本地，不进版本库）
+/audit-reports/
+
+# 微信开发者工具的本地私有配置（含本机项目名/基础库版本，官方建议不入库）
+project.private.config.json
+
+# 小程序 npm 构建产物
+miniprogram_npm/
+
+# 站点 HTML 打包产物与本地移动端调试脚本（构建/调试产物，非源码，不入版本库）
+# ★ 2026-09-23：已执行 `git rm -r --cached .trae-html-share-packages` 解除跟踪
+#   （本地文件保留在磁盘上，仅移出版本库）。
+.trae-html-share-packages/
+
+# ============================================================================
+# 工作区临时产物防复发规则。这些文件此前虽未被跟踪，但既没有忽略规则
+#   也没有被静态服务黑名单拦截，一旦 `git add .` 就会随部署公开托管。
+# ============================================================================
+
+# 抓取/下载产物目录（含数百 MB 的安装包，与项目代码无关）
+/downloads/
+
+# 一次性网络探测脚本与其输出（含禁用证书校验、反自动化规避代码，禁止入库/托管）
+/net-probe.js
+/node-tls.js
+/tls-deep.js
+/http2-fetch.js
+/http2-debug.js
+/retry.js
+/pw-recon.js
+/reach.js
+/edge.js
+/slow.js
+/fast.js
+/hdr.js
+/hdr2.js
+/hosts-test.js
+/ips.js
+
+# 根目录临时报告文本（微信校验文件 MP_verify_*.txt 例外，必须保留）
+/*.txt
+!/MP_verify_*.txt
+/pw-log.txt
+
+# 页面快照 / 截图残留
+/page-*.html
+/page_*.html
+/lanzou-page.html
+/dl-page.html
+/grab-*.html
+/slow-*.html
+/shot-*.png
+/screenshot*.png
+
+# 与本项目无关的本机脚本（DSH Web GUI 局域网放通等）
+/enable-phone-access.ps1
+/enable-phone-access.cmd
+
+# 一次性探测/归档脚本
+/scripts/archive/
+
+# 临时本地调试/复现脚本目录（Playwright 复现、生产探针、视觉截图等，非源码，不入版本库）
+/tests-tmp/
+
+
+# Supabase CLI version cache
+/supabase/.temp/
+
+# 用户明确要求：修复/审计报告和验收截图不提交到仓库
+/docs/fixes/
+/docs/**/*-report.json
+/docs/chat-*-20??-??-??/
+/docs/social-ui-20??-??-??/

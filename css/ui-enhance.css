@@ -1,0 +1,1936 @@
+/* ============================================================
+   XTJ UI Enhancement Suite
+   Visual refinements, click effects, particles
+   Tailored for the frontend-skill & algorithmic-art directives
+   ============================================================ */
+
+/* ========== 4. Post Card Enhanced Entry ========== */
+.post {
+  --post-enter-scale: 0.97;
+}
+.post.visible {
+  animation: xtjPostReveal 0.16s ease forwards;
+}
+@keyframes xtjPostReveal {
+  0% {
+    opacity: 0;
+    transform: none;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ========== 5. Modal Enhanced Animation ========== */
+.modal-box {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+}
+.modal-overlay {
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.modal-overlay.active {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ========== 6. Like Button Enhanced Heart Particles ========== */
+.xtj-heart-burst {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+}
+.xtj-heart-particle {
+  position: absolute;
+  font-size: 16px;
+  pointer-events: none;
+  animation: xtjHeartFly 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  }
+@keyframes xtjHeartFly {
+  0% {
+    transform: translate(0, 0) scale(0.3) rotate(0deg);
+    opacity: 1;
+  }
+  30% {
+    transform: translate(var(--hx1), var(--hy1)) scale(1.4) rotate(-15deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--hx2), var(--hy2)) scale(0) rotate(25deg);
+    opacity: 0;
+  }
+}
+
+/* ========== 7. Glass Refinements ========== */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.stat-card {
+  background: rgba(255, 255, 255, 0.72);
+  position: relative;
+  overflow: hidden;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%);
+  pointer-events: none;
+}
+[data-theme="dark"] .stat-card::after {
+  background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, transparent 50%);
+}
+
+/* ========== 8. Toast Enhanced ========== */
+.toast {
+  animation: xtjToastIn 0.4s cubic-bezier(0.18, 1.3, 0.28, 1) forwards;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3),
+              inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+@keyframes xtjToastIn {
+  0% {
+    transform: scale(0.65) translateY(-24px);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.05) translateY(2px);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ========== 9. Chat Message Enhanced Entry ========== */
+.chat-msg {
+  animation: xtjMsgFade 0.18s ease-out forwards;
+  }
+@keyframes xtjMsgFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.chat-msg.sent {
+  background: linear-gradient(135deg, #059669, #10b981);
+  box-shadow: 0 4px 16px rgba(5, 150, 105, 0.25);
+}
+.chat-msg.received {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* ========== 10. Photo Wall Enhanced ========== */
+.photo-wall-grid .pw-item {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.photo-wall-grid .pw-item:active {
+  transform: scale(0.98);
+}
+
+/* ========== 11. Primary Button Hover Glow ========== */
+.btn-primary {
+  position: relative;
+}
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--primary), #34d399, #60a5fa, var(--primary));
+  background-size: 300% 300%;
+  animation: none;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.btn-primary:hover::before,
+.btn-primary:focus-visible::before {
+  opacity: 0.45;
+  animation: xtjBtnShimmer 4s ease-in-out infinite;
+}
+.perf-balanced .btn-primary::before,
+.perf-lite .btn-primary::before {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce), (hover: none) {
+  .btn-primary::before {
+    animation: none !important;
+  }
+}
+@keyframes xtjBtnShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* ========== 12. Scrollbar Refinement ========== */
+.dock-panel::-webkit-scrollbar {
+  width: 4px;
+}
+.dock-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dock-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+}
+[data-theme="dark"] .dock-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ========== 13. Publish Box Focus Glow ========== */
+.publish-box:focus-within {
+  border-color: rgba(5, 150, 105, 0.35);
+  box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12),
+              0 0 0 4px rgba(5, 150, 105, 0.08);
+}
+
+/* ========== 14. Dark Mode Refinements ========== */
+[data-theme="dark"] .post {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+[data-theme="dark"] .chat-msg.received {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* ========== 15. Auth Form Refinement ========== */
+.auth-form .af-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ========== 16. Report Modal & Announcement Modal Refinements ========== */
+.report-modal {
+  transform-origin: center;
+  animation: xtjModalSlide 0.35s cubic-bezier(0.18, 1.1, 0.28, 1) forwards;
+}
+.announcement-modal {
+  transform-origin: center;
+  animation: xtjModalSlide 0.35s cubic-bezier(0.18, 1.1, 0.28, 1) forwards;
+}
+@keyframes xtjModalSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ========== 17. Image Viewer Enhancement ========== */
+.img-viewer.active {
+}
+
+/* ========== 18. Loading Skeleton Soft Pulse ========== */
+.xtj-skeleton-card {
+  animation: xtjSkeletonPulse 2s ease-in-out infinite;
+}
+@keyframes xtjSkeletonPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ========== 19. Chat Entry Bar Enhancement ========== */
+.chat-entry-bar {
+  background: linear-gradient(135deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.08) 100%);
+
+}
+[data-theme="dark"] .chat-entry-bar {
+  background: linear-gradient(135deg, rgba(30,30,50,0.35) 0%, rgba(25,25,45,0.15) 100%);
+}
+
+/* ========== 20. Photo Preview Enhancement ========== */
+.photo-preview-overlay {
+}
+.pp-slide-img {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.3s ease;
+}
+
+/* ========== 21. Dock Panel Slide Transition ========== */
+.dock-panel {
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dock-panel:not(.active) {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0) scale(0.98);
+  pointer-events: none;
+}
+.perf-balanced .dock-panel {
+  transition: opacity 160ms ease;
+}
+.perf-balanced .dock-panel:not(.active) {
+  transform: none;
+}
+.perf-lite .dock-panel {
+  transition: none;
+  transform: none;
+}
+.perf-lite .dock-panel:not(.active) {
+  transform: none;
+}
+
+/* ========== 22. Chat Send Button Ripple ========== */
+.send-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ========== 23. Upload Button Enhancement ========== */
+.photo-wall-upload-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ========== 24. User Profile Card Enhancement ========== */
+.profile-user-card {
+  cursor: pointer;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.profile-user-card:active {
+  transform: scale(0.98);
+}
+
+/* ========== 25. Announcement Items Refinement ========== */
+.announcement-item {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.25s ease;
+}
+
+/* ========== 26. Chat List Items Lift ========== */
+.chat-list-item {
+  transition: background 0.25s cubic-bezier(0.25, 1, 0.3, 1),
+              transform 0.25s cubic-bezier(0.25, 1, 0.3, 1);
+}
+.chat-list-item:hover {
+}
+.chat-list-item:active {
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .photo-wall-grid .pw-item:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+    z-index: 2;
+  }
+
+  .profile-user-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(5, 150, 105, 0.12);
+  }
+
+  .announcement-item.visible:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  }
+}
+
+.perf-lite .xtj-glass-card,
+.perf-lite .xtj-floating-panel,
+.perf-lite .announcement-item,
+.perf-lite .chat-list-item {
+  box-shadow: none !important;
+}
+
+.perf-balanced .xtj-glass-card,
+.perf-balanced .xtj-floating-panel {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xtj-skeleton-card {
+    animation: none !important;
+  }
+}
+
+/* ===== Desktop auth and modal accessibility pass ===== */
+@media (min-width: 1280px) and (hover: hover) and (pointer: fine) {
+  .modal-overlay,
+  .announcement-modal-overlay,
+  .report-modal-overlay {
+    padding: 32px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .modal-overlay .modal-box,
+  .announcement-modal,
+  .report-modal {
+    width: min(100%, 720px);
+    max-width: 720px;
+    max-height: min(90dvh, 820px);
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #loginModal .modal-box,
+  #registerModal .modal-box {
+    width: min(100%, 520px);
+    max-width: 520px;
+    padding: 40px !important;
+  }
+
+  .auth-form {
+    width: min(100%, 440px);
+    margin-inline: auto;
+  }
+
+  .auth-form .af-title,
+  .auth-form p,
+  .auth-form .af-link {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.55;
+  }
+
+  .auth-form .af-input,
+  .auth-form .af-btn {
+    min-height: 48px;
+  }
+
+  .stat-detail-modal,
+  .profile-detail-modal,
+  .user-profile-card-modal,
+  .announcement-modal,
+  .report-modal {
+    min-height: 0;
+  }
+
+  .stat-detail-body,
+  .profile-detail-body,
+  .announcement-content,
+  .report-modal-content {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .announcement-detail-content,
+  .report-loading,
+  .report-error,
+  .report-records-empty,
+  .report-selected-preview,
+  .modal-overlay .modal-box,
+  .announcement-modal,
+  .report-modal {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.55;
+  }
+
+  .report-loading,
+  .report-error,
+  .report-records-empty {
+    min-height: 72px;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    text-align: center;
+  }
+
+  :where(
+    button,
+    a,
+    input,
+    textarea,
+    select,
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline: 3px solid rgba(45, 160, 103, 0.9) !important;
+    outline-offset: 3px !important;
+  }
+
+  :where(input, textarea, select):focus-visible {
+    border-color: var(--accent, #2da067) !important;
+    box-shadow: 0 0 0 3px rgba(45, 160, 103, 0.18) !important;
+  }
+}
+
+/* ========== UX features pack (requested) ========== */
+:root { --xtj-font-scale: 1; }
+html { font-size: calc(16px * var(--xtj-font-scale, 1)); }
+
+.xtj-sk-pack { display: grid; gap: 12px; padding: 8px 4px; }
+.xtj-sk-row { display: flex; gap: 12px; align-items: flex-start; }
+.xtj-sk-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(90deg, rgba(140,196,158,.18), rgba(140,196,158,.08), rgba(140,196,158,.18)); background-size: 200% 100%; animation: xtjSk 1.2s ease infinite; flex: 0 0 auto; }
+.xtj-sk-lines { flex: 1 1 auto; display: grid; gap: 8px; min-width: 0; }
+.xtj-sk-line, .xtj-sk-lines i { display: block; height: 10px; border-radius: 999px; background: linear-gradient(90deg, rgba(140,196,158,.16), rgba(140,196,158,.07), rgba(140,196,158,.16)); background-size: 200% 100%; animation: xtjSk 1.2s ease infinite; }
+.xtj-sk-line.long, .xtj-sk-lines i.long { width: 92%; }
+.xtj-sk-line.med, .xtj-sk-lines i.med { width: 68%; }
+.xtj-sk-line.short, .xtj-sk-lines i.short { width: 42%; }
+.xtj-sk-media { width: 100%; height: 120px; border-radius: 14px; margin-top: 4px; background: linear-gradient(90deg, rgba(140,196,158,.12), rgba(140,196,158,.05), rgba(140,196,158,.12)); background-size: 200% 100%; animation: xtjSk 1.2s ease infinite; }
+@keyframes xtjSk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.toast-success { border-color: rgba(64,167,116,.45) !important; background: linear-gradient(135deg, rgba(225,247,235,.96), rgba(240,252,247,.94)) !important; color: #1f6b4f !important; }
+.toast-info { border-color: rgba(82,150,180,.4) !important; background: linear-gradient(135deg, rgba(230,245,252,.96), rgba(242,250,253,.94)) !important; color: #2a6078 !important; }
+.toast-warn, .toast-warning { border-color: rgba(210,160,60,.45) !important; background: linear-gradient(135deg, rgba(255,246,220,.96), rgba(255,250,236,.94)) !important; color: #8a6418 !important; }
+
+button.xtj-pressing, .btn.xtj-pressing, .action-btn.xtj-pressing, .send-btn.xtj-pressing, .ai-chat-send.xtj-pressing {
+  transform: scale(0.98) !important;
+  box-shadow: none !important;
+  filter: none !important;
+  /* 禁止额外 inset/中心阴影类反馈 */
+  background-image: none !important;
+  transition: transform .12s ease, background .12s ease !important;
+}
+.action-btn.xtj-pressing {
+  background: rgba(140, 196, 158, 0.12) !important;
+}
+/* 菜单/选项：按下只做轻缩放，不要中心高光 */
+.ai-panel-option:active,
+.ai-tools-menu button:active,
+.ai-panel-option.xtj-pressing {
+  box-shadow: none !important;
+  filter: none !important;
+  background-image: none !important;
+}
+
+.xtj-img-soft { transition: opacity .28s ease; }
+.xtj-img-soft:not([src]), .xtj-img-soft[src=""] { opacity: .35; }
+
+.chat-typing-indicator { display: flex; align-items: center; gap: 8px; padding: 6px 14px 10px; color: var(--text-muted, #7a8f89); font-size: 12px; }
+.chat-typing-indicator[hidden] { display: none !important; }
+.chat-typing-dots { display: inline-flex; gap: 3px; }
+.chat-typing-dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .35; animation: xtjTyping 1s infinite ease-in-out; }
+.chat-typing-dots i:nth-child(2) { animation-delay: .15s; }
+.chat-typing-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes xtjTyping { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+.msg-read-status.is-read { color: #3a9271; font-weight: 600; animation: xtjReadIn .28s ease; }
+@keyframes xtjReadIn { from { opacity: .2; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+.chat-msg-action-menu {
+  position: fixed; z-index: 100020; display: flex; flex-direction: column; gap: 4px;
+  min-width: 132px; padding: 6px; border-radius: 14px;
+  background: rgba(255,255,255,.96); border: 1px solid rgba(120,177,170,.28);
+  box-shadow: 0 14px 34px rgba(53,102,88,.16);
+}
+.chat-msg-action-menu button {
+  border: 0; background: transparent; text-align: left; padding: 10px 12px; border-radius: 10px;
+  font-size: 13px; color: #35544b; cursor: pointer;
+}
+.chat-msg-action-menu button:hover { background: rgba(225,247,235,.8); }
+
+.profile-setting-control { display: flex; align-items: center; gap: 8px; }
+.profile-select {
+  min-height: 32px; border-radius: 10px; border: 1px solid rgba(120,177,170,.28);
+  background: rgba(255,255,255,.72); color: inherit; padding: 4px 8px; font-size: 13px;
+}
+.profile-mini-btn { min-height: 32px; padding: 4px 12px !important; font-size: 12px !important; }
+
+.xtj-ann-pulse { animation: xtjAnnPulse 1.4s ease infinite; }
+@keyframes xtjAnnPulse { 0%,100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239,71,111,.35); } 50% { transform: scale(1.08); box-shadow: 0 0 0 6px rgba(239,71,111,0); } }
+.xtj-ann-btn { position: relative; }
+
+.xtj-photo-grid-polish { gap: 10px !important; }
+.xtj-photo-item-polish { border-radius: 16px !important; overflow: hidden; }
+
+/* ★ 2026-09-23 移除 .xtj-photo-preview-actions（「设为头像 / 问小猫描述」）样式。
+   该浮动条 bottom 锚定在预览底部、z-index 20，与 6 个导航按钮的工具栏（z-index 24）
+   几乎完全重叠，看起来像"工具栏背后多出来的两个按钮"。对应 JS 已一并删除。 */
+
+.xtj-confetti-layer { position: fixed; inset: 0; pointer-events: none; z-index: 100050; overflow: hidden; }
+.xtj-confetti-layer i {
+  position: absolute; top: -12px; width: 8px; height: 12px; border-radius: 2px;
+  animation-name: xtjConfetti; animation-timing-function: cubic-bezier(.2,.7,.2,1); animation-fill-mode: forwards;
+}
+@keyframes xtjConfetti {
+  0% { transform: translate3d(0,0,0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(var(--dx, 20px), 110vh, 0) rotate(540deg); opacity: 0; }
+}
+
+/* AI tool timeline + continue
+   ★ 2026-09-22 Codex 化改版：
+     工具进展不再是"一张白底卡片"，而是**气泡正文的一部分**——
+     去掉边框与背景块，只留极淡的容器，让工具行与正文同一呼吸节奏。 */
+.ai-tool-timeline {
+  display: flex; flex-direction: column; gap: 2px; margin: 4px 0 8px;
+  padding: 0; border: 0; border-radius: 0;
+  /* ★★ 2026-09-29 修复（审计报告 M 级「工具区与正文/页脚宽度对不齐」）：
+     原为 min(96%, 720px)，而正文气泡 .ai-msg-bubble 与页脚是 min(92%, 720px)
+     （css/ai-agent.css:400）。工具区被搬到正文下方后，两条右边界不同口径，
+     390px 视口下实测右边沿错开约 15px，看起来像"工具区单独凸出去一块"。
+     统一到 92%（与正文/页脚同一口径）。 */
+  background: transparent; max-width: min(92%, 720px);
+}
+.ai-tool-step { display: flex; gap: 10px; align-items: flex-start; }
+.ai-tool-step-icon { flex: 0 0 auto; width: 22px; text-align: center; line-height: 1.4; }
+.ai-tool-step-title { font-size: 13px; font-weight: 700; color: #35544b; }
+.ai-tool-step-detail { font-size: 12px; color: #6f8580; margin-top: 2px; word-break: break-word; }
+.ai-tool-step-status { font-size: 11px; margin-top: 2px; color: #3a9271; font-weight: 650; }
+.ai-tool-step.is-running .ai-tool-step-status { color: #2f7f9e; }
+.ai-tool-step.is-error .ai-tool-step-status { color: #c44b5a; }
+
+/* ── 工具「活动区」外壳（P0 + 方案 A，2026-09-28）──────────────────────
+   产品诉求：像 ChatGPT 那样——一个回复里的所有工具活动归到**同一个区域**，
+   由一个总摘要行统一控制折叠，而不是 N 个各自独立的小块 + 一行孤零零的"整理中"。
+   层级：
+     .ai-tool-activity
+       ├─ .ai-tool-activity-head   总摘要行（轮数/工具数 + 折叠箭头）
+       └─ .ai-tool-activity-body   可折叠体
+            ├─ .ai-tool-round  ... 每轮一段（不再自带外框）
+            └─ .ai-tool-organizing "整理检索结果并作答"（归位到同一层级）
+   设计要点：
+   1) 活动区比单轮**更弱化**——单轮已经有摘要行，活动区只在外层加一条极淡的
+      左侧导引线，避免"框套框"的视觉噪音；
+   2) 轮次之间的分隔用间距 + 导引线，而不是各自的外框；
+   3) 完成态整区折叠为一行，与单轮的行为一致，只是收敛层级更高。 */
+.ai-tool-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: 8px;
+  transition: opacity 200ms ease;
+}
+/* 总摘要行：比轮次摘要行更轻（字号更小、颜色更淡），形成层级差。
+   三级字号梯度（有合同测试钉住）：活动区 11px < 轮次 12px < 条目 12.5px */
+.ai-tool-activity-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 650;
+  color: #4d7268;
+  line-height: 1.5;
+  min-height: 20px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 160ms ease, color 200ms ease;
+}
+.ai-tool-activity-head:hover { background: rgba(91, 151, 131, .08); }
+.ai-tool-activity.is-running .ai-tool-activity-head { cursor: default; }
+.ai-tool-activity.is-running .ai-tool-activity-head:hover { background: transparent; }
+
+/* 总摘要图标：同样 CSS 绘制（运行中旋转环 / 完成 ✓ / 失败 !） */
+.ai-tool-activity-icon {
+  flex: 0 0 auto;
+  position: relative;
+  width: 13px; height: 13px;
+  font-size: 0;
+  text-align: center;
+  /* D8 兜底：JS 写入的 ✅ / ⏳ / ⚠️ emoji 必须完全隐身（见 .ai-tool-step-icon 注释）。
+     ★ 只用 font-size:0 + color:transparent 不够：emoji 是**彩色字形**，
+       color 对它无效；font-size:0 在 Chromium 下会让部分 emoji 退化成
+       fallback 字形（实测渲染成 ▷ 小三角）。补 text-indent 把残留字形
+       推出可视区 —— running 态的 ::before 是 absolute 定位，脱离文本流，
+       不受 text-indent 影响；done/error 态是 static，需在各自规则里重置为 0。 */
+  color: transparent;
+  text-indent: -999px;
+  overflow: hidden;
+}
+.ai-tool-activity-icon::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 1.6px solid rgba(47, 127, 158, .2);
+  border-top-color: rgba(47, 127, 158, .9);
+  /* ★★★ 2026-09-29 修复（审计报告 M 级「spinner 全靠 JS 收敛，CSS 零兜底」）：
+     原来是 `infinite` —— 停转**完全等价于** JS 给容器加上 is-done / is-error。
+     一旦流中断、后端少发一个 tool_result、或 updateToolActivity 抛错，
+     这个环就会一直转到用户离开页面（CHANGELOG 里"头永远在转圈"的形态）。
+     改为**限定圈数** 80：0.72s × 80 ≈ 58s 后自然停在 360°（= 停在起点角度，
+     视觉上就是一个静止的空心环，不会突兀）。
+     · 正常运行不受影响：一个工具调用通常在数秒内收敛，远不到 58s；
+     · 中断时 CSS 侧也能自愈：最多转 58s 就停，不再无限转；
+     · `both` 保证停在终帧（360°），不会在动画结束后弹回 0°。 */
+  animation: xtjToolSpin .72s linear 80 both;
+}
+.ai-tool-activity.is-done .ai-tool-activity-icon::before {
+  content: '✓';
+  position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
+  width: auto; height: auto;
+  border: 0; border-radius: 0;
+  font-size: 11.5px; font-weight: 800;
+  color: #2f9e6e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+.ai-tool-activity.is-done.is-error .ai-tool-activity-icon::before {
+  content: '!';
+  color: #c0505e;
+}
+.ai-tool-activity-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-tool-activity-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 650;
+  color: #2f7f9e;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 180ms ease;
+}
+.ai-tool-activity.is-done .ai-tool-activity-head { color: #2f7a5f; }
+/* ★ 2026-09-28（方案 C）：完成态的 count 位改放「用时 X.Xs」——
+   原为 opacity:0（隐藏进度计数），但用时是完成时才有价值的信息，必须可见。
+   降饱和 + 缩字号以区别于运行中的进度计数。 */
+.ai-tool-activity.is-done .ai-tool-activity-count {
+  opacity: .72;
+  color: #6b8b80;
+  font-weight: 600;
+}
+.ai-tool-activity-caret {
+  flex: 0 0 auto;
+  width: 12px; height: 12px;
+  font-size: 0;
+  position: relative;
+  opacity: 0;
+  transition: opacity 180ms ease, transform 200ms cubic-bezier(.16, 1, .3, 1);
+}
+.ai-tool-activity-caret::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 5px; height: 5px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transform-origin: center;
+}
+.ai-tool-activity.is-done .ai-tool-activity-caret,
+.ai-tool-activity.is-error .ai-tool-activity-caret { opacity: .55; }
+.ai-tool-activity.is-collapsed .ai-tool-activity-caret { transform: rotate(-90deg); }
+
+/* 折叠体：与单轮同一手法（grid-template-rows 才能平滑过渡未知高度）
+   ★★★ 2026-09-28 修复（真实渲染实测出来的 bug）：
+   原写法把 `min-height:0; overflow:hidden` 挂在 `.ai-tool-activity-body`
+   自身上，**没有作用到它的 grid item 子节点**。而 `grid-template-rows: 0fr`
+   只是把轨道高度设为 0，轨道里的 item 默认 `min-height: auto`（= min-content），
+   会把 0fr 轨道**重新撑开**——实测收起后 body 仍有 24px（见 Chromium 量测），
+   表现为"收起后留一条白杠"，折叠形同失效。
+   正确修法（与单轮 list-wrap 同一套路）：
+     ① body 自身只管轨道与过渡；
+     ② 给 body 的**直接子元素**（轮次分段 / 整理中占位）补 `min-height: 0`，
+        让它们真的能被压到 0；
+     ③ `overflow: hidden` 只放在 body 上做裁剪。 */
+.ai-tool-activity-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  /* ★ 2026-09-28（二次修复，接上面 0fr 撑开问题）：
+     多轮间距改由 row-gap 承担 —— gap 是**轨道间距**，
+     不参与任何 item 的 min-content / min-height 计算，
+     天然不会像 margin-top 那样在收起态顶开轨道（实测 62px 残留的成因之一）。
+     因此轮次/占位的首间距与轮间距一律禁止再用 margin 表达（下方有守卫注释）。 */
+  row-gap: 3px;
+  min-height: 0;
+  overflow: hidden;
+  transition: grid-template-rows 260ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
+}
+.ai-tool-activity-body > * { min-height: 0; }
+/* ★★★ 2026-09-28（折叠保守改动）：
+   真实渲染复盘发现：grid-template-rows 的最小值是 minmax(auto, 0fr)，
+   即便给 body 的直接子元素全部补 min-height:0，嵌套内容
+   （round-head 的 padding 2px 4px + min-height 20px、result-card 的
+   margin-top 4px + border 1px + padding 10px）仍会通过嵌套 grid/flex 的
+   min-content 链条把 0fr 轨道撑开 —— 实测从 118px 平滑收拢到 ~49px 后
+   再也压不下去；把这些漏网元素再 overflow+height 全压扁，仍剩 23px。
+   这些样式是内容自身的必要样式，不能删。
+   结论：**折叠的最终态不能依赖 grid 轨道计算**，必须由 height 兜底锁死。
+   过渡本身仍然由 0fr 负责（唯一能对未知高度做平滑的手段）。 */
+.ai-tool-activity.is-collapsed .ai-tool-activity-body {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  /* 收起后不再参与命中测试，避免"看不见但能点到" */
+  pointer-events: none;
+  /* ★★★ 2026-09-28（两阶段折叠 —— 既严格归零，又保留收起动感）：
+     实测数据：单独用 0fr 时容器从 118px 平滑收到 ~49px 后**再也压不动**
+     （minmax(auto,0fr) 的最小值由嵌套内容的 min-content 决定，
+     把 result-card / organizing 全部 overflow+height 压扁后仍有 23px 残留）；
+     而直接 height:0 虽然严格归零，却让收起瞬间从 118 跳到 0（“硬跳”）。
+     折中方案：**两阶段收起** ——
+       ① 0~180ms：opacity 由 1 淡到 0（内容先被擦除），
+          同时 grid-template-rows 由 1fr 过渡到 0fr（容器缓慢收拢）；
+       ② 180ms 之后（内容此时已不可见）：height / min-height 才归零并锁死，
+          最后这一步“布局收拢”发生在看不见内容的时候，不会有内容跳动。
+     展开方向不受影响：本规则在展开时不命中，height 回到 auto，
+     由 grid-template-rows 0fr→1fr 提供平滑展开。 */
+  /* 最终态仍由 height 锁死（见上方注释：0fr 的最小值压不到 0）。
+     ★ 注意：这里**不能用 transition-delay** —— height 由 auto→0 属于
+     不可插值变更，transition 根本不会生成，延迟写了也不生效（实测 0ms 就归零）。
+     改用关键帧的**离散插值**：两个关键帧之间在 50% 处翻转，
+     配合 360ms 时长 → 恰好在第 180ms（内容已随 opacity 淡完）才锁死，
+     forwards 保证收起后停在 0。 */
+  /* 注意：不能写 !important —— 规范规定 !important 声明**胜过** animation，
+     写了会让延迟锁失效、退回 0ms 立即归零（实测踩过）。
+     动画的 forwards 填充已经能保证收起后停在 0，无需 important。 */
+  height: 0;
+  min-height: 0;
+  transition:
+    grid-template-rows 260ms cubic-bezier(.16, 1, .3, 1),
+    opacity 180ms ease;
+  animation: xtjActivityLockHeight 360ms linear forwards;
+}
+
+/* 只有“锁定”这一个动作，不需要视觉插值：auto 撑开阶段不干扰 0fr 的收拢动画 */
+/* ★★ 2026-09-29（审计报告 M 级「折叠动画用 height/min-height」）处置结论：
+   **保留现状，不重写为 scaleY / content-visibility**。理由（实测 + 规范）：
+     ① `height: auto → 0` 是**不可插值**的变更（min-height: auto → 0 同理：
+        本元素是 .ai-tool-activity 的 flex item，auto 解析为内容最小尺寸）。
+        Chromium 对此走**离散插值** —— 只在 50%（第 180ms）翻转一次，
+        **不是**逐帧重排；真正逐帧跑的是并行的 grid-template-rows 过渡
+        （那已是过渡未知高度的最省手段，且不可替换）。
+     ② 报告建议的 scaleY 替代**不可用**：scaleY(0) 只是视觉塌陷，布局高度
+        仍然保留 ⇒ 收起后会在正文下方留一条空洞（正是本次形态重构要避免的）；
+     ③ content-visibility:hidden 与现有 opacity 淡出 + 延迟锁语义重复，
+        且同样不可动画（离散），收益为 0、回归风险为正。
+   因此本条只做**说明性加固**：确认关键帧保持 from(height:auto) → to(height:0)
+   的离散翻转语义（ai-tool-activity-render-defects 的 D9 用例钉住了它）。
+   真正的并发压力来自同帧的 box-shadow 无限动画 —— 那部分已在本轮修掉
+   （xtjToolNodePulse 改为纯 opacity 合成，见 1163 行）。 */
+@keyframes xtjActivityLockHeight {
+  from { height: auto; min-height: auto; }
+  to { height: 0; min-height: 0; }
+}
+/* ★ 2026-09-28（随 row-gap 改造移除）：原规则给首个 round/step 补
+   margin-top: 2px —— margin 属于 item 盒子，会计入收起态的
+   min-content 链条顶开 0fr 轨道，是折叠残留的成因之一；
+   视觉上它本就是多余的微调，首间距统一由 row-gap 承担。
+   禁止恢复任何形如 `.ai-tool-activity-body > *:first-child { margin-top }` 的规则。 */
+/* 轮次在活动区内改为"分段"：去掉各自的外框与额外间距，只保留极淡的区隔 */
+.ai-tool-activity .ai-tool-round {
+  background: transparent;
+  border-radius: 0;
+}
+/* 轮次摘要行在活动区里降半级：字号略小于裸轮次、颜色更淡，
+   形成 活动区(11px) < 轮次(12px) < 条目(12.5px) 的三级层次。
+   注意：活动区摘要必须**严格小于**轮次摘要，否则层级感消失（有合同测试钉住）。 */
+.ai-tool-activity .ai-tool-round-head {
+  font-size: 12px;
+  color: #4f7568;
+  min-height: 20px;
+}
+/* ★★★ 2026-09-28 核心修复（D3「三层摘要重复」）：
+   真实渲染发现一个回复里会同时出现【活动区总摘要 + 每个轮次的摘要行】，
+   两轮就是 3 行「正在使用工具 / 已完成 N 个工具 / 正在调用 N 个工具」，
+   信息完全重复，与 ChatGPT / Claude「全部工具活动只有一行总结」的形态不符。
+   收敛策略：
+     · 活动区**总摘要行** = 唯一的状态来源（轮数/条目数/失败数/用时）；
+     · 活动区内**运行中**的轮次摘要行保留 —— 它承载「x/y 完成」这条
+       活动区给不出的实时进度，但**隐去重复的图标**，只留进度与折叠箭头；
+     · 活动区内**已完成**的历史轮次摘要行**整行隐藏** —— 它的信息
+       （"已完成 N 个工具"）已经被总摘要归纳，留着就是纯噪声；
+       明细仍可通过总摘要行展开回看（导轨与条目都在，只是不再有二级标题）。 */
+.ai-tool-activity .ai-tool-round.is-done > .ai-tool-round-head {
+  display: none;
+}
+/* 运行中的轮次摘要行：只作为「进度轨道」，不作为第二套标题。
+   去掉图标（活动区头已有旋转环），文案交由 updateToolRoundState 写「x/y 完成」。 */
+.ai-tool-activity .ai-tool-round.is-running > .ai-tool-round-head .ai-tool-round-icon {
+  display: none;
+}
+.ai-tool-activity .ai-tool-round.is-running > .ai-tool-round-head {
+  color: #6b8b80;
+  font-weight: 600;
+}
+/* ★★★ 2026-09-28（D3 续）：单轮时运行中的轮次摘要行**整行隐藏**。
+   真实渲染的最终形态对齐 ChatGPT / Claude：
+     · 只有一个轮次时 —— 活动区头一行足够（"正在使用工具 · 2/2 完成"），
+       再来一行"正在调用 2 个工具"就是同义反复；
+     · 有多个轮次时 —— 轮次摘要行才有存在意义（区分"第几轮"）。
+   这里用 body 内轮次数做判定：`:only-of-type` 表示"活动区里只有一个轮次"，
+   同时排除存在"整理中"占位的情况（占位也算一个兄弟节点，故用 :first-child
+   与 :last-child 同时满足来表达"唯一子元素"）。 */
+.ai-tool-activity .ai-tool-round.is-running:first-child:last-child > .ai-tool-round-head {
+  display: none;
+}
+/* ★ 2026-09-28（随 row-gap 改造移除）：原规则
+   `.ai-tool-round.is-done:not(:first-child) { margin-top: 2px }` 已删。
+   一是 margin 顶开收起态轨道（62px 残留成因），二是它使 :first-child
+   语义失真、干扰折叠状态排查。轮间距统一由 .ai-tool-activity-body 的
+   row-gap 承担。 */
+/* 多轮之间用一条细分隔线，而不是各自的框。
+   已完成轮次没有摘要行了，虚线改由轮次容器自身承载。
+   ★ 2026-09-28：margin-top 交给 body 的 row-gap（这里显式清零，
+   压掉下方全局 `.ai-tool-round + .ai-tool-round { margin-top: 2px }`
+   对活动区内轮次的命中——gap 与 margin 双重叠加会让轮距忽大忽小）。 */
+.ai-tool-activity .ai-tool-round + .ai-tool-round {
+  margin-top: 0;
+  padding-top: 3px;
+  border-top: 1px dashed rgba(91, 151, 131, .14);
+}
+
+/* ── 工具调用「并行轮次」紧凑布局（Codex 风格）─────────────────────────
+   产品诉求（用户原话）："并行搜索五个网页或工具，就直接显示五个正在搜索中，
+   全部搜索之后就把搜索中那些字和图标换成已完成……不要全部展开占很多位置，
+   类似 ChatGPT / Codex 那种"。
+   设计要点：
+   1) 一轮并行工具 = 一个 .ai-tool-round 容器，内含 N 条**单行**紧凑条目；
+   2) 摘要行常驻，显示「正在调用 N 个工具 · x/y 完成」，完成后变「已完成 N 个工具」；
+   3) 条目单行呈现（图标 + 名称 + 查询词同行），不再每个工具占四行；
+   4) 完成后整轮平滑折叠为一行，点击可展开回看（Codex 的"可折叠步骤"手感）；
+   5) 运行中用纯 CSS 旋转环（不再用 ⏳/🔍 这类会随系统字体变色的 emoji）。 */
+.ai-tool-round {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: 8px;
+  transition: background 180ms ease, opacity 180ms ease;
+}
+.ai-tool-round + .ai-tool-round { margin-top: 2px; }
+
+/* 摘要行：整轮唯一常驻元素，也是折叠/展开的点击热区 */
+.ai-tool-round-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #3f6b5e;
+  line-height: 1.5;
+  min-height: 22px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 160ms ease, color 200ms ease;
+}
+.ai-tool-round-head:hover { background: rgba(91, 151, 131, .09); }
+.ai-tool-round.is-running .ai-tool-round-head { cursor: default; }
+.ai-tool-round.is-running .ai-tool-round-head:hover { background: transparent; }
+
+/* 摘要图标：emoji 文本置为 font-size:0 隐身，图形全部由 CSS 绘制 */
+.ai-tool-round-icon {
+  flex: 0 0 auto;
+  position: relative;
+  width: 14px; height: 14px;
+  font-size: 0;
+  text-align: center;
+  /* D8 兜底：JS 写入的 ⏳ / ✅ / ⚠️ emoji 完全隐身（同 .ai-tool-activity-icon） */
+  color: transparent;
+  text-indent: -999px;
+  overflow: hidden;
+}
+.ai-tool-round-icon::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  border: 1.7px solid rgba(47, 127, 158, .22);
+  border-top-color: rgba(47, 127, 158, .95);
+  /* ★ 2026-09-29（同上 S/M 级 spinner 兜底）：轮次摘要图标同样限定 80 圈
+     （≈58s）后自停，避免 JS 未收敛时永久旋转。 */
+  animation: xtjToolSpin .72s linear 80 both;
+}
+.ai-tool-round.is-done .ai-tool-round-icon::before {
+  content: '✓';
+  position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
+  width: auto; height: auto;
+  border: 0; border-radius: 0;
+  font-size: 12px; font-weight: 800;
+  color: #2f9e6e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+.ai-tool-round.is-error .ai-tool-round-icon::before {
+  content: '!';
+  position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
+  width: auto; height: auto;
+  border: 0; border-radius: 0;
+  font-size: 12px; font-weight: 800;
+  color: #c0505e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+@keyframes xtjToolSpin { to { transform: rotate(360deg); } }
+@keyframes xtjToolPop {
+  0%   { opacity: 0; transform: scale(.4); }
+  60%  { opacity: 1; transform: scale(1.18); }
+  100% { opacity: 1; transform: scale(1); }
+}
+/* ★★ 2026-09-29 修复（审计报告 M 级「spinner 全靠 JS 收敛」的第二道兜底）：
+   上面三个旋转环已经把 infinite 换成限定圈数（第一道兜底：CSS 自己会停）。
+   这里再补一道**终态强制只播一次**：
+     容器一旦带上 is-done / is-error，无论此刻 ::before 上挂的是落定动画
+     （xtjToolPop）还是因任何原因残留的旋转环，都只允许播 1 次。
+   · 正常路径下 xtjToolPop 本就是 1 次，本规则不改变观感；
+   · 异常路径（终态类已加但旋转环选择器仍命中）下，环最多再转一圈就停，
+     杜绝"已经完成却还在转圈"这一历史缺陷形态。
+   ★ 这里**不能**写 `animation: none !important` —— 那会把落定的 xtjToolPop
+     ✓ 缩放反馈一并杀掉（用户看不到"完成"的落定感）。只压 iteration-count。 */
+.ai-tool-activity.is-done .ai-tool-activity-icon::before,
+.ai-tool-activity.is-error .ai-tool-activity-icon::before,
+.ai-tool-round.is-done .ai-tool-round-icon::before,
+.ai-tool-round.is-error .ai-tool-round-icon::before,
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon::before,
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon::before {
+  animation-iteration-count: 1 !important;
+}
+/* 运行中标题的三点脉冲：比文字"搜索中…"更接近 Codex 的呼吸感 */
+.ai-tool-round-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-tool-round-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 650;
+  color: #2f7f9e;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 180ms ease;
+}
+.ai-tool-round.is-done .ai-tool-round-head { color: #2f7a5f; }
+.ai-tool-round.is-done .ai-tool-round-count { opacity: 0; }
+/* 折叠指示箭头：仅在可折叠（已收敛）时出现 */
+.ai-tool-round-caret {
+  flex: 0 0 auto;
+  width: 12px; height: 12px;
+  font-size: 0;
+  position: relative;
+  opacity: 0;
+  transition: opacity 180ms ease, transform 200ms cubic-bezier(.16, 1, .3, 1);
+}
+.ai-tool-round-caret::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 5px; height: 5px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transform-origin: center;
+}
+.ai-tool-round.is-done .ai-tool-round-caret,
+.ai-tool-round.is-error .ai-tool-round-caret { opacity: .55; }
+.ai-tool-round.is-collapsed .ai-tool-round-caret { transform: rotate(-90deg); }
+
+/* 折叠容器：grid-template-rows 0fr↔1fr 是唯一能平滑过渡"未知高度"的方案
+   （max-height 需要写死数值，条目多时要么裁切要么延迟）。
+   ★ 2026-09-28：与活动区 body 同一处修复 —— grid item 必须显式
+   `min-height: 0`，否则 0fr 轨道会被 item 的 min-content 撑开；
+   list 自身已有 min-height:0，这里再对子选择器兜底一次防回归。 */
+.ai-tool-round-list-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-height: 0;
+  /* ★ 2026-09-28：折叠裁切由 wrap 承担（而不是 list）。
+     原因：导轨节点 ::after 用了负偏移（left: -14px）把自己放在 list
+     左边界之外；若 list 带 overflow:hidden，节点会被**裁掉左半边**
+     （真实渲染 4x 放大截图实证）。wrap 的左边界比 list 更靠外，
+     把裁切职责上移到 wrap，节点就能完整露出。 */
+  overflow: hidden;
+  transition: grid-template-rows 240ms cubic-bezier(.16, 1, .3, 1), opacity 180ms ease;
+}
+.ai-tool-round-list-wrap > * { min-height: 0; }
+/* ★ 2026-09-28（确定性收法，与活动区 body 同一修法）：
+   0fr 最终态会被嵌套内容的 min-content 链条顶开（实测第二轮收起后
+   仍残留 62px 可见高度），收起态直接锁死 height:0，
+   展开态由 0fr→1fr 过渡保证平滑。 */
+.ai-tool-round.is-collapsed .ai-tool-round-list-wrap {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  /* 与活动区 body 同一套两阶段收起（详见上方注释）：
+     0~180ms 由 0fr 平滑收拢，180ms 后由关键帧把 height 锁死到 0。
+     同样不能写 !important（!important 胜过 animation，会让延迟锁失效）。
+     导轨线（border 不随高度归零）与诉诸 visibility，但这里**不能立即隐藏** ——
+     否则内容还在淡出时导轨线先消失，出现“线先没、字后没”的割裂感，
+     因此把 visibility 一并交给同一组延迟关键帧处理。 */
+  height: 0;
+  min-height: 0;
+  transition:
+    grid-template-rows 240ms cubic-bezier(.16, 1, .3, 1),
+    opacity 180ms ease;
+  animation: xtjRoundLockHeight 360ms linear forwards, xtjRoundHideTrack 360ms linear forwards;
+}
+
+/* ★ 2026-09-29（审计报告 M 级）：与 xtjActivityLockHeight 同一处置结论 ——
+   height/min-height 的 auto→0 属离散插值，只在第 180ms 翻转一次，
+   保留现状（详见 783 行那组注释）。 */
+@keyframes xtjRoundLockHeight {
+  from { height: auto; min-height: auto; }
+  to { height: 0; min-height: 0; }
+}
+@keyframes xtjRoundHideTrack {
+  from { visibility: visible; }
+  to { visibility: hidden; }
+}
+/* 条目列表：单行紧凑，左侧一条细分隔线形成"组"的视觉归属。
+   ★ 2026-09-28（方案 B）：这条线升级为"导轨"——加粗、加深，配合每条目
+   ::after 的节点圆点构成时间轴。改 padding-left 或 border-left 宽度时，
+   必须同步改 .ai-tool-step::after 的 left（见下方时间轴注释）。 */
+.ai-tool-round-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  /* 注意：这里**不能**加 overflow:hidden —— 会裁掉导轨节点的左半边。
+     折叠裁切职责已上移到 .ai-tool-round-list-wrap。 */
+  margin-left: 9px;
+  padding-left: 10px;
+  /* ★ 2026-09-28 真实渲染调优：原 rgba(...,.26) 在移动端与高分屏上
+     几乎不可见（4x 放大截图里导轨线完全消失），时间轴的"贯穿感"就没了。
+     提到 .38 保住"低调但看得见"的平衡；线条本身仍比节点淡一档。 */
+  border-left: 1.5px solid rgba(91, 151, 131, .38);
+}
+/* 轮次内的步骤改为单行：图标 + 文字块同一基线，取消大间距 */
+.ai-tool-round-list .ai-tool-step {
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 0;
+  min-height: 19px;
+}
+/* 步骤图标同样改 CSS 绘制：运行中=旋转环，完成=✓，失败=! */
+.ai-tool-round-list .ai-tool-step-icon {
+  /* ★ 2026-09-28（去冗余，对齐 Claude / ChatGPT 的时间轴语言）：
+     条目左侧原本同时存在两个表达"状态"的圆 ——
+       ① .ai-tool-step::after 导轨节点（8px，三态：running 实心蓝+光晕+脉冲 /
+          done 实心绿 / error 实心红）
+       ② .ai-tool-step-icon::before 图标位（9px 空心环 / ✓ / !）
+     两者位置相邻（4x 放大截图里就是"实心蓝点 + 空心圆环"并排），
+     信息完全重复，视觉上像两个零件叠在一起。
+     该函数的第二套状态全部由导轨节点承载（节点底色 + 光晕 + pulse 已经能
+     区分运行中/完成/失败），因此这里整块隐藏图标位，只留节点。
+     —— JS 仍照常写 .ai-tool-step-icon 节点，不改动 DOM 契约；
+        本规则是纯视觉收敛，撤销只需恢复 display。 */
+  display: none;
+}
+.ai-tool-round-list .ai-tool-step-icon::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(47, 127, 158, .2);
+  border-top-color: rgba(47, 127, 158, .9);
+  animation: xtjToolSpin .72s linear infinite;
+}
+/* 去冗余：完成/失败态不再画 ✓ / !，状态由导轨节点底色独家表达。
+   父级 .ai-tool-step-icon 已 display:none；此处显式收敛 ::before，
+   防止未来恢复父级 display 时"节点 + 符号"两套状态语言同时出现。 */
+.ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before,
+.ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before,
+.ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon,
+.ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon {
+  display: none;
+}
+.ai-tool-round-list .ai-tool-step-body {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ai-tool-round-list .ai-tool-step-title { font-size: 12.5px; font-weight: 650; }
+.ai-tool-round-list .ai-tool-step-detail {
+  font-size: 11.5px;
+  margin-top: 0;
+  color: #8299a0;
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-tool-round-list .ai-tool-step-status {
+  font-size: 11px; margin-top: 0; font-variant-numeric: tabular-nums;
+  transition: color .22s ease;
+}
+
+/* 单行条目不再需要左侧粗光晕（会显得笨重），改为整行轻微底纹 */
+.ai-tool-round-list .ai-tool-step.is-running { padding-left: 0; }
+.ai-tool-round-list .ai-tool-step.is-running::before { display: none; }
+/* ★★★ 2026-09-28 修复（真实渲染发现）：
+   "整理检索结果并作答"占位同时带 `.ai-tool-step.is-running`，于是继承了
+   `.ai-tool-step.is-running::before` 那条 **3px 宽的渐变光晕条**。
+   旧规则只在 `.ai-tool-round-list` 上下文里关掉了它，而占位是活动区的
+   直接子元素、不在任何 list 内 → 光晕条完整露出，在真实渲染里表现为
+   占位左侧一条粗蓝绿渐变竖线（与 1.5px 低调导轨并存，非常突兀）。
+   占位已经有自己的 `border-left` 导轨，这里把光晕条彻底关掉。 */
+.ai-tool-activity-body > .ai-tool-step.ai-tool-organizing::before,
+.ai-tool-step.ai-tool-organizing.is-running::before { display: none; }
+
+/* ── 2026-09-28（方案 B）：导轨式时间轴 ──────────────────────────────
+   产品参照：Claude 的思考过程是一条竖线贯穿 + 节点逐个点亮，而不是一叠
+   独立卡片。纵向占用小得多，且"进度到哪一步"一眼可见。
+   实现：容器左侧竖线作导轨（下面把 .ai-tool-round-list 的 border-left
+   加粗），每个条目用 ::after 在导轨上画一个节点圆点。
+   三态语义：
+     · 未到达（默认）  空心、极淡   —— 还没轮到
+     · 当前（is-running）实心 + 光晕 —— 正在做
+     · 已过（is-done）  实心低饱和绿 —— 做完了，视觉退后
+     · 失败（is-error） 实心红
+   ★ 关键：节点必须准确落在导轨线上。
+     ★ 2026-09-28 用真实渲染量测校正（原注释的 10.75px 是错的）：
+     `.ai-tool-round-list` 有 margin-left:9px + border-left:1.5px + padding-left:10px，
+     实测 step 左边缘距 list 左外沿 **11.5px**（1.5 边框 + 10 内边距），
+     导轨线中心在距 list 左外沿 **0.75px** 处。
+     ⇒ step 左边缘距导轨中心 = 11.5 - 0.75 = 10.75px …是"相对 list 外沿"的算法，
+        但从 **step 自身** 看：导轨中心在 step 左边缘左侧 11.5 - 0.75 = 10.75px 处。
+     节点总宽 7px（半径 3.5），故 left = -(10.75 + 3.5) = -14.25px。
+     取 -14px（亚像素差异不可见）。**改 padding/border 时必须重算此值**，
+     并可用 tests/ai-tool-activity-shell-contract.test.js 的几何断言兜底。 */
+.ai-tool-round-list .ai-tool-step { position: relative; }
+.ai-tool-round-list .ai-tool-step::after {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 5.5px;
+  /* ★ 2026-09-28（去冗余后调优）：节点从 7px 升到 8px。
+     过去它与条目内 11px 图标位并列，只作"辅助点缀"，尺寸刻意压小；
+     现在图标位已隐藏、节点成为**唯一**的状态载体（实心蓝=运行中 /
+     实心绿=完成 / 实心红=失败），给到 8px 让它读起来更像时间轴节点本身，
+     而不是一个可有可无的小装饰。 */
+  width: 8px; height: 8px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid rgba(91, 151, 131, .3);
+  transition: background 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+/* 当前节点：实心强调色 + 柔和光晕（与运行中的呼吸节奏呼应） */
+.ai-tool-round-list .ai-tool-step.is-running::after {
+  background: #2f7f9e;
+  border-color: #2f7f9e;
+  /* ★★ 2026-09-29 修复（审计报告 M 级「box-shadow 无限动画无法合成」）：
+     这里原本让 xtjToolNodePulse 逐帧插值 **box-shadow** —— box-shadow 不是
+     可合成属性，每帧都要重绘（并行 N 个工具就是 N 条重绘流，与折叠的
+     height 动画同帧触发完整布局，实测 5 条并行时并发 infinite 到 ~13 个）。
+     改为：**光晕静态预置**（下面这行 box-shadow 一次性画好），动画只插值
+     **opacity**（纯合成属性，走 GPU，不触发重排/重绘）。
+     额外收益：深色主题（1508 行）可以直接覆盖静态 box-shadow 的配色，
+     不再被关键帧里的浅色硬编码 box-shadow 顶掉。 */
+  box-shadow: 0 0 0 3px rgba(47, 127, 158, .16), 0 0 7px rgba(47, 127, 158, .4);
+  animation: xtjToolNodePulse 2.4s ease-in-out infinite;
+}
+/* 已过节点：实心低饱和绿，视觉退后让"当前"保持主角地位。
+   去冗余后节点独自承担"完成"语义，补一圈极淡的静态光晕避免读成脏点。 */
+.ai-tool-round-list .ai-tool-step.is-done::after {
+  background: #3a9271;
+  border-color: #3a9271;
+  box-shadow: 0 0 0 2.5px rgba(58, 146, 113, .12);
+  animation: none;
+}
+.ai-tool-round-list .ai-tool-step.is-error::after {
+  background: #c44b5a;
+  border-color: #c44b5a;
+  box-shadow: none;
+  animation: none;
+}
+/* ★ 2026-09-29（同上）：关键帧只插值 opacity —— 光晕的**形状**交给元素上
+   那条静态 box-shadow 声明（含深色主题覆盖），这里只做明暗呼吸。
+   原实现在关键帧里插值 box-shadow 半径（3px→4px / 7px→10px），既不可合成，
+   又把浅色硬编码写死在关键帧里，深色主题覆盖不到。 */
+@keyframes xtjToolNodePulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .62; }
+}
+@keyframes xtjToolIconBreath {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+
+/* 已完成的历史轮次：视觉降权，让最新一轮保持主角地位 */
+.ai-tool-round.is-done { opacity: .9; }
+.ai-tool-round.is-done .ai-tool-round-list { border-left-color: rgba(91, 151, 131, .12); }
+
+/* 条目错峰进入：并行 5 个工具时是"依次落下"而不是整块砸出来 */
+.ai-tool-round-list .ai-tool-step:nth-child(1) { animation-delay: 0ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(2) { animation-delay: 40ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(3) { animation-delay: 80ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(4) { animation-delay: 120ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(5) { animation-delay: 160ms; }
+.ai-tool-round-list .ai-tool-step:nth-child(n+6) { animation-delay: 200ms; }
+
+/* ── 2026-09-11 工具调用 UI / 动画优化 ──────────────────────────────
+   目标（对应产品反馈："优化调用工具的动画以及显示 UI"）：
+   1) 工具步骤出现时有明确的进入动画，用户能立刻感知"AI 正在用工具"；
+   2) 运行中状态有持续但不刺眼的视觉信号（图标脉动 + 左侧进度条），
+      让"正在执行"与"已完成"一眼可辨；
+   3) 状态切换（进行中 → 完成 / 失败）有平滑过渡，而不是硬跳；
+   4) 结果卡片以轻微上浮淡入呈现，避免与上方时间线"糊"在一起；
+   5) 全量遵守 reduced-motion 与项目既有的 data-xtj-motion=off/weak 开关。 */
+
+/* ★ 2026-09-22：进入动画改为「轻微左上滑入」——Codex 的条目是"长出来"的，
+   不是从上方砸下来的；位移量也更小（4px），避免整块抖动。 */
+@keyframes xtjToolStepIn {
+  0%   { opacity: 0; transform: translate3d(-4px, -3px, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+/* ★ 2026-09-13：移除 xtjToolPulse（图标闪烁）与 xtjToolBarRun（跑马灯）。
+   用户反馈原效果"太吵"：图标 1.15s 高频闪烁、左侧条纹 .75s 快速跑动，
+   加上 progress-shimmer，一屏内有三处高频动效同时闪烁。
+   改为「柔和呼吸光晕」：单一 2.4s 缓慢呼吸的淡青光晕，无位移、无闪烁、
+   无跑马灯，视觉上只在"轻柔地活着"，不抢注意力。 */
+@keyframes xtjToolGlow {
+  0%, 100% { opacity: .28; transform: scaleY(.86); }
+  50%      { opacity: .58; transform: scaleY(1); }
+}
+@keyframes xtjToolResultIn {
+  0%   { opacity: 0; transform: translateY(6px) scale(.985); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 1) 步骤进入动画 */
+.ai-tool-step { animation: xtjToolStepIn .22s cubic-bezier(.16, 1, .3, 1) both; }
+
+/* 2) 运行中：柔和呼吸光晕（取代原"图标闪烁 + 跑马灯"） */
+.ai-tool-step.is-running {
+  position: relative;
+  padding-left: 8px;
+}
+.ai-tool-step.is-running::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 2px; bottom: 2px;
+  width: 3px;
+  border-radius: 999px;
+  background: rgba(47, 127, 158, .85);
+  /* 光晕而非条纹：无 background-position 位移，只有缓慢明暗与纵向轻呼吸 */
+  box-shadow: 0 0 6px rgba(47, 127, 158, .35);
+  transform-origin: center;
+  animation: xtjToolGlow 2.4s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+/* 运行中图标保持稳定，不再闪烁 */
+.ai-tool-step.is-running .ai-tool-step-icon {
+  animation: none;
+  opacity: 1;
+}
+/* ★ 2026-09-17：轮次紧凑条目里，运行中图标改用柔和呼吸（覆盖上面的 none）。
+   放在此处是为了保证在源码顺序上晚于通用规则、选择器也更具体，
+   不依赖 !important 即可稳定生效。
+   ★ 2026-09-28（去冗余）：条目内图标位整体隐藏，状态改由导轨节点独家承载。
+   本选择器是 3 类（.ai-tool-round-list + .is-running + .ai-tool-step-icon），
+   优先级高于上方 2 类的隐藏规则，因此**必须在这里也写 display:none**，
+   否则运行中的条目仍会把空心圆环画出来（真实渲染 4x 放大截图实证：
+   节点旁边并排一个空心环）。 */
+.ai-tool-round-list .ai-tool-step.is-running .ai-tool-step-icon {
+  display: none;
+  animation: none;
+}
+
+/* 3) 状态切换过渡：完成/失败时颜色与位移平滑变化 */
+.ai-tool-step.is-done .ai-tool-step-status,
+.ai-tool-step.is-error .ai-tool-step-status {
+  transition: color .25s ease;
+}
+.ai-tool-step.is-done .ai-tool-step-icon,
+.ai-tool-step.is-error .ai-tool-step-icon {
+  /* 完成瞬间给一个轻微"落定"的缩放反馈 */
+  animation: xtjToolStepIn .2s cubic-bezier(.16, 1, .3, 1) both;
+}
+.ai-tool-step.is-done .ai-tool-step-title { color: #2f7a5f; }
+.ai-tool-step.is-error .ai-tool-step-title { color: #a83f4d; }
+
+/* 4) 结果卡片淡入上浮 */
+.ai-tool-result-card {
+  margin-top: 4px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid rgba(91,151,131,.16); background: rgba(248,253,250,.9);
+  animation: xtjToolResultIn .24s cubic-bezier(.16, 1, .3, 1) both;
+  transition: border-color .25s ease, box-shadow .25s ease;
+  /* ★ 2026-09-22：卡片整体限高 —— 展开的结果列表不得把整屏吃掉 */
+  max-width: min(100%, 560px);
+  overflow: hidden;
+}
+/* ★★★ 2026-09-22 修复（P0「网页搜索时显示很大板块的内容」）：
+   .ai-search-detail 有两条渲染路径，此前**只有 .ai-search-status 那条**限了高
+   （max-height: min(36vh,280px) + overflow-y:auto）；
+   挂在 .ai-tool-result-card 内的这条**完全没有高度约束**，
+   于是展开后整屏铺开（用户截图实证）。
+   这里给卡片内的 detail 补上同样的约束，两条路径口径一致。 */
+.ai-tool-result-card .ai-search-detail {
+  max-height: min(36vh, 280px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+/* 卡片内的长文本（读网页返回的正文片段）同样要夹住，避免单条撑爆 */
+.ai-tool-result-card .ai-search-detail-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ai-tool-result-card[style*="cursor: pointer"]:hover {
+  border-color: rgba(91,151,131,.34);
+  box-shadow: 0 4px 14px rgba(53,102,88,.08);
+}
+.ai-tool-result-card-title { font-size: 12px; font-weight: 700; color: #35544b; }
+.ai-search-toggle { display: inline-block; transition: transform .2s ease; color: #5b9783; }
+
+/* 5) 无障碍与性能开关：用户要求减弱/关闭动效时全部停用
+   ★ 2026-09-22：新增的 CSS 旋转环 / 落定缩放同样纳入开关管控，
+     否则 prefers-reduced-motion 用户会看到一个永远在转的圈。 */
+@media (prefers-reduced-motion: reduce) {
+  .ai-tool-step,
+  .ai-tool-result-card,
+  .ai-tool-step.is-done .ai-tool-step-icon,
+  .ai-tool-step.is-error .ai-tool-step-icon { animation: none !important; }
+  .ai-tool-step.is-running .ai-tool-step-icon { animation: none !important; opacity: 1; }
+  .ai-tool-step.is-running::before {
+    animation: none !important;
+    opacity: .5;
+    transform: none;
+    box-shadow: none;
+  }
+  .ai-tool-round-icon::before,
+  .ai-tool-round.is-done .ai-tool-round-icon::before,
+  .ai-tool-round.is-error .ai-tool-round-icon::before,
+  .ai-tool-round-list .ai-tool-step-icon::before,
+  .ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before,
+  .ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before,
+  .ai-tool-activity-icon::before,
+  .ai-tool-activity.is-done .ai-tool-activity-icon::before { animation: none !important; }
+  .ai-tool-round-list-wrap,
+  .ai-tool-activity-body { transition: none !important; }
+}
+html[data-xtj-motion=off] .ai-tool-step,
+html[data-xtj-motion=off] .ai-tool-result-card,
+html[data-xtj-motion=off] .ai-tool-step.is-running .ai-tool-step-icon,
+html[data-xtj-motion=off] .ai-tool-step.is-running::before,
+html[data-xtj-motion=weak] .ai-tool-step.is-running .ai-tool-step-icon,
+html[data-xtj-motion=weak] .ai-tool-step.is-running::before {
+  animation: none !important;
+}
+html[data-xtj-motion=off] .ai-tool-round-icon::before,
+html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step-icon::before,
+html[data-xtj-motion=off] .ai-tool-activity-icon::before,
+html[data-xtj-motion=weak] .ai-tool-round-icon::before,
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step-icon::before,
+html[data-xtj-motion=weak] .ai-tool-activity-icon::before {
+  animation: none !important;
+}
+
+.ai-continue-btn {
+  margin-top: 8px; border: 1px solid rgba(91,151,131,.3); border-radius: 999px;
+  background: linear-gradient(135deg, rgba(64,167,116,.95), rgba(82,182,160,.95));
+  color: #fff; font-size: 12px; font-weight: 700; padding: 6px 14px; cursor: pointer;
+}
+.ai-continue-btn:disabled { opacity: .65; cursor: wait; }
+
+html[data-xtj-motion="off"] *,
+html[data-xtj-motion="off"] *::before,
+html[data-xtj-motion="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+html[data-xtj-motion="weak"] .xtj-heart-particle,
+html[data-xtj-motion="weak"] .xtj-confetti-layer { display: none !important; }
+/* ★★★ 2026-09-29 修复（审计报告 M 级「weak 无全局降级」）：
+   现象：站内"弱动效"开关对 AI 面板基本无效 —— off 有上面那条全局收敛，
+   weak 却只显式关掉了粒子/彩带与工具区那几条；css/ai-agent.css 全文仅
+   3653-3654 两行涉及 data-xtj-motion，深度思考族（dt-sparkle-wiggle /
+   dt-soft-float / dt-dot-breathe）、进度卡（progress-shimmer）、语音脉冲
+   （ai-voice-pulse）、猫头像呼吸/发光/眨眼全部照常 infinite 循环。
+   根因：历史上只给 off 写了全局兜底，weak 没有对应物；而 ai-agent.css 是
+   后加载的模块样式，从未纳入开关体系。
+   修法：**不彻底关动画**（那和 off 就没区别了），改为把周期压到 400ms 且
+   **只播一次** —— 保留"有反馈"的手感，去掉"永远在动"的负担。
+   ★ 必须用 !important：ai-agent.min.css 是运行时动态注入、顺序在 ui-enhance
+   之后；同为作者样式时，!important 声明优先于普通声明（与上面 off 那组同理）。
+   ★ 不影响一次性动画的观感：进入/落定类动画本就是 1 次、时长数百毫秒，
+     这里只是把超过 400ms 的收敛到 400ms。 */
+html[data-xtj-motion="weak"] *,
+html[data-xtj-motion="weak"] *::before,
+html[data-xtj-motion="weak"] *::after {
+  animation-duration: .4s !important;
+  animation-iteration-count: 1 !important;
+}
+
+/* ── 2026-09-22 Codex 化收尾：整理中占位 + 深色主题配色 ──────────────── */
+
+/* 「整理检索结果并作答」这类收尾占位挂在 timeline 根上，
+   沿用通用 .ai-tool-step 样式会带一条左侧光晕条，与轮次内的条目语言不一致。
+   这里统一成同一个旋转环，视觉上就是"还在动，但已经接近尾声"。 */
+.ai-tool-step.ai-tool-organizing {
+  align-items: center;
+  padding-left: 0;
+  min-height: 20px;
+}
+/* ★ 2026-09-28 修复（D4「整理中缩进错位」）：
+   "整理检索结果并作答"占位在活动区里与轮次条目**同级**，但轮次条目的
+   左边缘经过了 .ai-tool-round-list 的 `margin-left:9px + border 1px
+   + padding-left:10px` 共 20px 的缩进；占位直接挂在活动区 body 上，
+   没有任何缩进 → 真实渲染里它比上面两条条目**左移 20px**，视觉上像
+   脱出了这一组。这里把同一套缩进复用到占位，让导轨、条目、占位左边缘对齐。 */
+.ai-tool-activity-body > .ai-tool-step.ai-tool-organizing {
+  margin-left: 9px;
+  padding-left: 10px;
+  /* ★ 2026-09-28 真实渲染调优：原 rgba(...,.26) 在移动端与高分屏上
+     几乎不可见（4x 放大截图里导轨线完全消失），时间轴的"贯穿感"就没了。
+     提到 .38 保住"低调但看得见"的平衡；线条本身仍比节点淡一档。 */
+  border-left: 1.5px solid rgba(91, 151, 131, .38);
+  /* 与 .ai-tool-round-list 的 padding 对齐后，条目图标与占位图标落在同一竖线 */
+  box-sizing: border-box;
+  /* ★ 2026-09-28：两条必要约束
+     ① `align-self: flex-start` —— 活动区 body 是 flex column，默认 stretch 会把
+        占位盒子拉满剩余高度，其 border-left（导轨线）随之被拉长成一条"拖尾"，
+        真实渲染里表现为占位下方的竖线一直垂到容器底部（截图实证）。
+     ② 覆盖 `.ai-tool-activity-body > * { min-height: 0 }` —— 那条是给折叠用的，
+        对内容元素会把 20px 的最小行高压掉；占位要保住自身高度。 */
+  align-self: flex-start;
+  min-height: 20px;
+  width: auto;
+}
+/* 占位的图标比条目图标宽（11px vs 11px），但条目有 gap:6px + 图标定宽，
+   这里显式对齐 icon 槽位，避免因 flex 基线不同产生的 1~2px 抖动。 */
+.ai-tool-activity-body > .ai-tool-step.ai-tool-organizing .ai-tool-step-icon {
+  margin-right: 6px;
+}
+.ai-tool-step.ai-tool-organizing::before { display: none; }
+.ai-tool-step.ai-tool-organizing .ai-tool-step-icon {
+  position: relative;
+  width: 11px; height: 11px;
+  font-size: 0;
+  flex: 0 0 auto;
+  /* D8 兜底：🧠 / ✍️ emoji 完全隐身（同 .ai-tool-step-icon） */
+  color: transparent;
+  text-indent: -999px;
+  overflow: hidden;
+}
+.ai-tool-step.ai-tool-organizing .ai-tool-step-icon::before {
+  content: '';
+  position: absolute; inset: 0; margin: auto;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(91, 151, 131, .22);
+  border-top-color: rgba(91, 151, 131, .9);
+  /* ★ 2026-09-29（同上 spinner 兜底）：1.1s × 40 ≈ 44s 后自停。
+     该占位目前被 1700 行 display:none 屏蔽（不渲染），但状态机仍在：
+     一旦恢复显示，同样不能依赖 JS 收敛才能停。 */
+  animation: xtjToolSpin 1.1s linear 40 both;
+}
+.ai-tool-step.ai-tool-organizing .ai-tool-step-body {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.ai-tool-step.ai-tool-organizing .ai-tool-step-title { font-size: 12.5px; font-weight: 600; }
+.ai-tool-step.ai-tool-organizing .ai-tool-step-status { margin-top: 0; font-size: 11px; }
+/* ★★★ 2026-09-22：终态覆盖 —— 这条规则是"圈能停下来"的唯一开关。
+   上面那条 ::before 的 xtjToolSpin 是**无条件 infinite** 动画，
+   只把 is-running 去掉完全不会停转。必须由 .is-done / .is-error 把
+   ::before 换成静态符号（并把标题降权），否则用户看到的就是
+   "工具早就完成了、回复都出完了，这里还在一直转圈"。 */
+/* 用一个 CSS 画的 ✓ 替换旋转环：border 旋转环 -> 只留右侧+下侧边的对勾。
+   ★ 不能写 content: none —— 那样图标位会变成**空心**（就是用户截图里
+     那个"完成"旁边空荡荡的圆圈），必须给出可见的终态图形。 */
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon::before {
+  content: '';
+  position: absolute;
+  inset: 0; margin: auto;
+  width: 7px; height: 4px;
+  border-radius: 0;
+  border: 0;
+  border-left: 1.8px solid #2f9e6e;
+  border-bottom: 1.8px solid #2f9e6e;
+  transform: rotate(-45deg) translate(1px, -1px);
+  transform-origin: center;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon::before {
+  content: '!';
+  position: static;
+  text-indent: 0; /* 覆盖父级为隐身 emoji 设的 text-indent */
+  width: auto; height: auto;
+  border: 0; border-radius: 0;
+  font-size: 11px; font-weight: 800;
+  color: #c0505e;
+  animation: xtjToolPop .26s cubic-bezier(.16, 1, .3, 1) both;
+}
+/* emoji 文本（🧠/✍️）在终态下隐身，图形全部由 ::before 绘制，
+   避免不同系统字体把 emoji 渲染成不同颜色/形状 */
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-icon,
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon {
+  font-size: 0;
+}
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-icon {
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  color: #c0505e;
+}
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-title { color: #4a6b60; font-weight: 550; }
+.ai-tool-step.ai-tool-organizing.is-done .ai-tool-step-status { color: #7f958d; }
+.ai-tool-step.ai-tool-organizing.is-error .ai-tool-step-title { color: #a83f4d; }
+
+/* 深色主题下工具进展的配色（此前工具 UI 全是浅色硬编码） */
+/* 活动区外壳（方案 A）：与轮次同一套深色语言，但更淡一档以保持层级差 */
+[data-theme="dark"] .ai-tool-activity-head { color: #93b6a9; }
+[data-theme="dark"] .ai-tool-activity-head:hover { background: rgba(110, 165, 140, .1); }
+[data-theme="dark"] .ai-tool-activity.is-done .ai-tool-activity-head { color: #7fc9a5; }
+[data-theme="dark"] .ai-tool-activity-icon::before {
+  border-color: rgba(124, 196, 224, .2);
+  border-top-color: rgba(124, 196, 224, .88);
+}
+[data-theme="dark"] .ai-tool-activity.is-done .ai-tool-activity-icon::before { color: #6ad6a8; }
+[data-theme="dark"] .ai-tool-activity.is-done.is-error .ai-tool-activity-icon::before { color: #e2808c; }
+[data-theme="dark"] .ai-tool-activity-count { color: #7cc4dd; }
+[data-theme="dark"] .ai-tool-activity .ai-tool-round-head { color: #8fb0a4; }
+[data-theme="dark"] .ai-tool-activity .ai-tool-round + .ai-tool-round {
+  border-top-color: rgba(110, 165, 140, .18);
+}
+[data-theme="dark"] .ai-tool-activity .ai-tool-step.ai-tool-organizing {
+  border-top-color: rgba(110, 165, 140, .18);
+}
+
+[data-theme="dark"] .ai-tool-round-head { color: #a8c8bd; }[data-theme="dark"] .ai-tool-round-head:hover { background: rgba(110, 165, 140, .12); }
+[data-theme="dark"] .ai-tool-round.is-done .ai-tool-round-head { color: #7fc9a5; }
+[data-theme="dark"] .ai-tool-round-icon::before {
+  border-color: rgba(124, 196, 224, .22);
+  border-top-color: rgba(124, 196, 224, .92);
+}
+[data-theme="dark"] .ai-tool-round.is-done .ai-tool-round-icon::before { color: #6ad6a8; }
+[data-theme="dark"] .ai-tool-round.is-error .ai-tool-round-icon::before { color: #e2808c; }
+[data-theme="dark"] .ai-tool-round-count { color: #7cc4dd; }
+[data-theme="dark"] .ai-tool-round-list { border-left-color: rgba(110, 165, 140, .3); }
+/* 导轨节点（方案 B）：深色下节点底色要跟着容器变，不能残留白色圆点 */
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step::after { background: #1d2b27; border-color: rgba(110, 165, 140, .34); }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-running::after {
+  background: #7cc4dd; border-color: #7cc4dd;
+  box-shadow: 0 0 0 3px rgba(124, 196, 224, .16), 0 0 7px rgba(124, 196, 224, .4);
+}
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-done::after { background: #6ad6a8; border-color: #6ad6a8; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-error::after { background: #e2808c; border-color: #e2808c; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step-icon::before {
+  border-color: rgba(124, 196, 224, .2);
+  border-top-color: rgba(124, 196, 224, .9);
+}
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-done .ai-tool-step-icon::before { color: #6ad6a8; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-error .ai-tool-step-icon::before { color: #e2808c; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step-title { color: #d3e4dd; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step-detail { color: #8fa6a0; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step-status { color: #7fc9a5; }
+[data-theme="dark"] .ai-tool-round-list .ai-tool-step.is-running .ai-tool-step-status { color: #7cc4dd; }
+[data-theme="dark"] .ai-tool-result-card {
+  background: rgba(24, 40, 36, .82);
+  border-color: rgba(110, 165, 140, .2);
+}
+[data-theme="dark"] .ai-tool-result-card-title { color: #d3e4dd; }
+[data-theme="dark"] .ai-tool-step.ai-tool-organizing .ai-tool-step-icon::before {
+  border-color: rgba(124, 196, 224, .2);
+  border-top-color: rgba(124, 196, 224, .9);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ★ 2026-09-22 「流动感」动效层
+   参考目标：iOS 27 Siri（动态岛 orb + 边缘流光）/ ChatGPT·Codex 流式输出
+   设计原则：
+     1) 流动 ≠ 弹跳。用**连续位移的渐变扫过**（background-position /
+        mask-position）表达"还在流"，而不是用 scale 回弹或 opacity 闪烁。
+     2) 全部分级降级：prefers-reduced-motion 与 data-xtj-motion=off/weak
+        必须能彻底停掉，否则无障碍用户会看到永不停歇的光。
+     3) 只在"进行中"存在，终态立刻归零 —— 动画是状态的可视化，
+        不是装饰，流已结束就必须停下来。
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── 1) 工具轮摘要行：流光沿标题扫过（运行中） ──────────────────────────
+   做法：把渐变铺在摘要行上，用 background-position 让它横向平移。
+   之所以用「渐变扫过」而不是「整体呼吸」：呼吸是整块明暗变化（跳），
+   扫过是有方向的连续位移（流）—— 这正是 Siri 边缘光的观感。
+   ★★★ 2026-09-28 修复（真实渲染发现）：
+   原先 `.ai-tool-round-label` 是 `flex: 1 1 auto`，会**撑满整行剩余宽度**，
+   于是这条渐变横跨约 590px，看起来像一整块"被选中的蓝色高亮条"，
+   而不是"文字上有一道光扫过"（4x 放大截图实证，观感很重且误导）。
+   修法：把 label 改为按内容宽度收缩（`flex: 0 1 auto`），渐变就只覆盖
+   文字本身；`min-width:0 + overflow:hidden` 仍保留，长文案照常省略号截断。 */
+.ai-tool-round.is-running .ai-tool-round-label { flex: 0 1 auto; max-width: 100%; }
+.ai-tool-round.is-running .ai-tool-round-label {
+  background-image: linear-gradient(
+    100deg,
+    rgba(47, 127, 158, 0) 0%,
+    rgba(47, 127, 158, 0.16) 38%,
+    rgba(47, 127, 158, 0.30) 50%,
+    rgba(47, 127, 158, 0.16) 62%,
+    rgba(47, 127, 158, 0) 100%
+  );
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  animation: xtjToolFlow 1.5s linear infinite;
+  border-radius: 4px;
+}
+@keyframes xtjToolFlow {
+  from { background-position: 130% 0; }
+  to   { background-position: -30% 0; }
+}
+/* 终态立刻归零：流已结束，光必须停 */
+.ai-tool-round.is-done .ai-tool-round-label,
+.ai-tool-round.is-error .ai-tool-round-label {
+  background-image: none;
+  animation: none;
+}
+[data-theme="dark"] .ai-tool-round.is-running .ai-tool-round-label {
+  background-image: linear-gradient(
+    100deg,
+    rgba(124, 196, 224, 0) 0%,
+    rgba(124, 196, 224, 0.18) 38%,
+    rgba(124, 196, 224, 0.34) 50%,
+    rgba(124, 196, 224, 0.18) 62%,
+    rgba(124, 196, 224, 0) 100%
+  );
+}
+
+/* ── 2) 运行中的步骤：左侧光条改为「向下流动的液柱」 ────────────────────
+   旧实现 xtjToolGlow 是 2.4s 的整体明暗呼吸（没有方向感）。
+   改为渐变位置持续下移，视觉上像液体在管里往下淌。
+
+   ⚠️⚠️ 2026-09-29 审计报告 M 级：整段是**死代码，从未上过屏**，请勿继续依赖。
+   现象：`.ai-tool-round-list .ai-tool-step.is-running::before` 这个**同一
+   选择器**在 1093 行被 `display: none`（当时的注释：单行条目不再需要左侧
+   粗光晕）；本段后来只补了 background 与 animation，**忘了恢复 display**。
+   两条规则优先级相同，1093 在前但 display:none 不被本段覆盖 ⇒
+   Chromium 实测 display = none、animation-name = xtjToolFlowDown，
+   而 document.getAnimations() **不含该动画** —— 它从未渲染过一帧。
+   目前运行中的条目只剩 ::after 导轨节点那一个脉动信号（见 1143 行）。
+   处置：**按决策要求只做标注，不删除**。两份候选方案留待产品决策——
+     ① 直接删除本段与下方 @keyframes xtjToolFlowDown（省一份死代码）；
+     ② 若确要液柱，改挂到导轨节点的兄弟伪元素或 .ai-tool-round-list::before，
+        并显式 display: block（否则仍会被 1093 行压掉）。 */
+.ai-tool-round-list .ai-tool-step.is-running::before {
+  background: linear-gradient(
+    180deg,
+    rgba(47, 127, 158, 0.15) 0%,
+    rgba(47, 127, 158, 0.9) 45%,
+    rgba(47, 127, 158, 0.15) 100%
+  );
+  background-size: 100% 200%;
+  animation: xtjToolFlowDown 1.35s linear infinite;
+}
+@keyframes xtjToolFlowDown {
+  from { background-position: 0 -100%; }
+  to   { background-position: 0 100%; }
+}
+
+/* ── 3) 结果卡片：渐进揭示（从左下角擦除式出现） ────────────────────────
+   与 + 面板同一套语言：clip-path inset 揭示，而不是整块淡入。
+   这样工具结果与菜单开合在动效上是**同一套语法**，观感统一。 */
+@keyframes xtjToolResultReveal {
+  from { opacity: 0; clip-path: inset(0 100% 0 0 round 12px); transform: translateY(2px); }
+  to   { opacity: 1; clip-path: inset(0 0 0 0 round 12px);    transform: translateY(0); }
+}
+.ai-tool-result-card {
+  animation: xtjToolResultReveal .34s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* ── 4) 流式正文：光标带柔光（Siri 的"正在书写"感） ────────────────────
+   旧光标是一根 2px 硬竖线在呼吸，太"电报灯"。
+   改为：竖线 + 一圈柔和外发光，发光随时间缓慢脉动；
+   竖线本身保持清晰（保证可读性），光晕负责流动感。 */
+/* ★★★ 2026-09-29 修复（审计报告 L 级「.ai-stream-cursor 双定义互相覆盖」）：
+   同一个组件在「模块样式」css/ai-agent.css:6912 与「增强样式」本文件各写一遍，
+   两边同优先级（各 1 个类），胜负**只由加载顺序决定**：
+     ai-agent.min.css 是运行时按 meta[xtj-module-ai-style] 动态注入的，
+     后于 ui-enhance.min.css ⇒ 生效的一直是 ai-agent 那套 ai-cursor-flow
+     （background-position 流动渐变）。
+   后果：本文件的 ai-cursor-breathe + ai-cursor-halo **从未执行**，但
+   `box-shadow: 0 0 0 2px …` 与 `border-radius` 未被覆盖仍然生效 ——
+   留下一个与流动渐变叠加的**静态光晕圈**（两套房叠在一起的视觉噪音），
+   同时 ai-cursor-halo 这条逐帧插值 box-shadow 的 infinite 动画白挂着。
+   修法：把本套降级为**@supports 回退** —— 仅在不支持 color-mix 的老引擎上
+   生效（那正是 ai-agent.css 自己把光标退回纯色的同一条件，见其 6934 行），
+   老引擎于是仍能拿到"柔和呼吸 + 外发光"；现代引擎只跑 ai-agent 那套流动
+   渐变，不再有双份定义与残留静态光晕。 */
+@supports not (background: color-mix(in srgb, red 50%, transparent)) {
+  .ai-stream-cursor {
+    width: 2px;
+    border-radius: 1px;
+    background: var(--primary);
+    box-shadow: 0 0 0 2px rgba(66, 155, 122, 0.14);
+    animation:
+      ai-cursor-breathe 1.15s ease-in-out infinite,
+      ai-cursor-halo 1.9s ease-in-out infinite;
+  }
+}
+@keyframes ai-cursor-halo {
+  0%, 100% { box-shadow: 0 0 0 1.5px rgba(66, 155, 122, 0.10); }
+  50%      { box-shadow: 0 0 0 3.5px rgba(66, 155, 122, 0.22); }
+}
+
+/* ── 6) 无障碍降级：所有流动动画必须能被彻底停掉 ────────────────────────
+   这一条是硬要求 —— 否则 reduced-motion 用户会看到永远在扫的光。 */
+@media (prefers-reduced-motion: reduce) {
+  .ai-tool-round.is-running .ai-tool-round-label,
+  .ai-tool-round-list .ai-tool-step.is-running::before,
+  /* 方案 B 导轨节点的脉冲同样必须能停（保留静态高亮，只去掉呼吸） */
+  .ai-tool-round-list .ai-tool-step.is-running::after,
+  .ai-tool-result-card,
+  .ai-stream-cursor { animation: none !important; }
+  .ai-tool-round.is-running .ai-tool-round-label { background-image: none !important; }
+}
+html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label,
+html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step.is-running::before,
+html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step.is-running::after,
+html[data-xtj-motion=off] .ai-tool-result-card,
+html[data-xtj-motion=off] .ai-stream-cursor,
+html[data-xtj-motion=weak] .ai-tool-round.is-running .ai-tool-round-label,
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step.is-running::before,
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step.is-running::after,
+html[data-xtj-motion=weak] .ai-stream-cursor {
+  animation: none !important;
+}
+html[data-xtj-motion=off] .ai-tool-round.is-running .ai-tool-round-label {
+  background-image: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   2026-09-29 Claude / ChatGPT 形态对齐（用户连续报障「很丑」）
+   目标形态：
+     ① 过程流（思考 + 工具进度）留在正文**上方** —— 那是"它正在干嘛"
+     ② 结果摘要挪到正文**下方**一行 —— "已搜索 3 个网页 ▾"，可展开看明细
+     ③ 正文上方不再出现任何"已完成 N 个工具 · 用时 X.Xs"横幅
+   ══════════════════════════════════════════════════════════════ */
+
+/* ① "整理检索结果并作答 · 整理中"占位：不再上屏。
+   用户原话「写这个东西真的很丑」。Claude / ChatGPT 都没有这一行 ——
+   工具跑完后就是正文，中间不插一个"我在整理"的自述步骤。
+   ★ 只在视觉层隐藏：DOM 节点与 is-running 状态机**完整保留**。
+     updateToolActivity 的 organizingRunning 判据、settleOrganizingStep 的
+     收敛、以及"只有占位"场景的 settled 判定，全部依赖该元素存在；
+     直接不创建或 remove() 会打穿状态机（历史上已因此出过"头永远在转圈"）。 */
+.ai-tool-step.ai-tool-organizing { display: none !important; }
+
+/* ② 完成态摘要行：极简、低调，对齐 ChatGPT "Searched 3 sites" / Claude 行式收敛。
+   原先是加粗绿字 + 完成图标 + 用时，形式感过重，夹在思考与正文之间很扎眼。 */
+.ai-tool-activity.is-done .ai-tool-activity-head {
+  font-weight: 500;
+  font-size: 11.5px;
+  /* ★ 对比度：初版降重用 #8a9691，对白底仅 3.06:1 —— 低于 WCAG AA 的 4.5:1，
+     "低调"变成了"看不清"。改 #64736e = 4.98:1，达标且观感仍是次要信息。 */
+  color: #64736e;
+  background: transparent;
+  /* ★ 触摸热区：原 padding 1px 4px 实测整行仅 22px 高，移动端很难点中展开。
+     补到 32px（AA 建议的最小触摸目标尺寸）。 */
+  padding: 6px 4px;
+  min-height: 32px;
+}
+.ai-tool-activity.is-done .ai-tool-activity-head:hover { background: transparent; }
+[data-theme="dark"] .ai-tool-activity.is-done .ai-tool-activity-head { color: #7d8f89; }
+
+/* ③ 工具区被搬到正文**下方**后，与正文之间留一点呼吸，避免贴着正文尾巴
+   ★★ 2026-09-29 修复（审计报告 M 级「下间距对不齐 / margin-bottom 被压成 0」）：
+     原规则只写了 `margin-top: 9px`，而 .ai-tool-timeline 同时带 .ai-tool-status
+     （见 ai-agent.js: class 'ai-tool-timeline ai-tool-status'），后者
+     `margin: 2px 0 0`（css/ai-agent.css:3660）把 **margin-bottom 打成 0** ——
+     实测工具摘要下方与 .ai-msg-footer（margin-top:3px）只隔 3px，下边缘贴死。
+     修法：**连同 margin-bottom 一起写**（margin: 9px 0 6px），
+     而不是只写 margin-top。
+     ★ 优先级说明：本选择器是 2 个类，`.ai-tool-status` 只有 1 个类，
+       因此本规则胜出 —— 不需要去改 ai-agent.css:3660 那条**共享**状态行样式
+       （.ai-enhanced-status / .ai-search-supplement 也用它，改了会波及别处）。 */
+.ai-msg-bubble + .ai-tool-timeline { margin: 9px 0 6px; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   ★ 2026-09-29 工具活动区移动端断点（审计报告 M 级「零移动端断点」）
+   现象：css/ui-enhance.css 全文原本**零个** @media (max-width:…)
+   （对照 css/ai-agent.css 在 944/2728/3054/5718/6089/6399/7297/8261/8269
+     都有断点）。活动区摘要 11px、轮次 12px、条目 12.5px、详情 11.5px，
+   以及 min-height 20/22px、`.ai-tool-round-list` 的 margin-left:9px +
+   padding-left:10px、节点 ::after 的 left:-14px，在 320~390px 屏上与桌面
+   完全同值 —— 小屏上字号偏小、热区偏矮，且 -14px 的负偏移距容器左沿仅
+   ~10px，父级横向 padding 一变就可能被裁切。
+   修法（**只做字号与缩进微调，不重排布局**）：
+     ① 字号整体 +1px，保持 活动区(12) < 轮次(13) < 条目(13.5) 的三级梯度
+        （有合同测试钉住这个严格小于关系，见 ai-tool-activity-shell-contract）；
+     ② 摘要行热区补到 32px（AA 最小触摸目标），与完成态摘要行口径一致；
+     ③ 导轨缩进收到 margin-left:6px + padding-left:8px，**同步重算节点 left**。
+   断点取 480px：与 ai-agent.css:8269 既有的 480px 断点同一口径。
+   ══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  /* ① 三级字号梯度整体上移一档（层级关系不变：12 < 13 < 13.5） */
+  .ai-tool-activity-head { font-size: 12px; }
+  .ai-tool-activity .ai-tool-round-head { font-size: 13px; }
+  .ai-tool-round-head { font-size: 13px; }
+  .ai-tool-round-list .ai-tool-step-title { font-size: 13.5px; }
+  .ai-tool-round-list .ai-tool-step-detail { font-size: 12.5px; }
+  .ai-tool-round-list .ai-tool-step-status { font-size: 12px; }
+  .ai-tool-step-detail { font-size: 13px; }
+  .ai-tool-step-status { font-size: 12px; }
+  .ai-tool-step.ai-tool-organizing .ai-tool-step-title { font-size: 13.5px; }
+  .ai-tool-step.ai-tool-organizing .ai-tool-step-status { font-size: 12px; }
+
+  /* ② 摘要行触摸热区：20px → 32px（AA 建议的最小触摸目标尺寸）。
+       用 min-height 撑（不改 padding），避免动到折叠高度计算。 */
+  .ai-tool-activity-head { min-height: 32px; }
+
+  /* ③ 导轨缩进收紧：margin-left 9→6、padding-left 10→8，
+       给窄屏多让出 5px 横向空间，降低节点被裁切的风险。 */
+  .ai-tool-round-list {
+    margin-left: 6px;
+    padding-left: 8px;
+  }
+  /* ★ 节点 left 必须跟随上面的缩进**同步重算**（原注释已写明）：
+       step 左边缘距 list 左外沿 = border 1.5 + padding 8 = 9.5px；
+       导轨线中心在距 list 左外沿 0.75px 处；
+       ⇒ 导轨中心在 step 左边缘左侧 9.5 - 0.75 = 8.75px 处；
+       节点总宽 8px（半径 4）⇒ left = -(8.75 + 4) = -12.75px，取 -13px。 */
+  .ai-tool-round-list .ai-tool-step::after { left: -13px; }
+  /* 「整理中」占位沿用同一套缩进（它要与条目左边缘对齐，见 1378 行注释） */
+  .ai-tool-activity-body > .ai-tool-step.ai-tool-organizing {
+    margin-left: 6px;
+    padding-left: 8px;
+  }
+  /* 小屏上 detail 的 46ch 上限会把查询词压得比标题还窄，放宽到 60ch */
+  .ai-tool-round-list .ai-tool-step-detail { max-width: 60ch; }
+}
+
+/* 工具进度保留行式层级，以状态图标表达活动，减少重复扫光和脉冲。 */
+[data-theme="dark"] .ai-tool-round.is-running .ai-tool-round-label,
+.ai-tool-round.is-running .ai-tool-round-label {
+  animation: none;
+  background-image: none;
+  -webkit-text-fill-color: currentColor;
+}
+.ai-tool-round-list .ai-tool-step.is-running::before,
+.ai-tool-round-list .ai-tool-step.is-running::after { animation: none; }
+.ai-tool-activity-body,
+.ai-tool-round-list-wrap {
+  transition-duration: 200ms;
+}
+@keyframes xtjBlockRise {
+  from { opacity:0; transform:translateY(3px); }
+  to { opacity:1; transform:translateY(0); }
+}
+.ai-tool-round-list .ai-tool-step { animation: xtjBlockRise 200ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .ai-tool-round-list .ai-tool-step { animation: none !important; }
+  .ai-tool-activity-body, .ai-tool-round-list-wrap { transition: none !important; }
+}
+html[data-xtj-motion=off] .ai-tool-round-list .ai-tool-step,
+html[data-xtj-motion=weak] .ai-tool-round-list .ai-tool-step { animation: none !important; }
+html[data-xtj-motion=off] .ai-tool-activity-body,
+html[data-xtj-motion=off] .ai-tool-round-list-wrap { transition: none !important; }
+
+/* Reasoning and tools share one chronological, collapsible reading flow. */
+.ai-thinking-body .ai-reasoning-segment { white-space:pre-wrap; }
+.ai-process-timeline { margin:8px 0!important; }
+.ai-process-timeline .ai-tool-activity-head,
+.ai-process-timeline .ai-tool-round-head { display:none!important; }
+.ai-process-timeline .ai-tool-activity,
+.ai-process-timeline .ai-tool-round { padding:0!important;border:0!important;background:none!important;box-shadow:none!important; }
+.ai-process-timeline .ai-tool-activity-body,
+.ai-process-timeline .ai-tool-activity.is-collapsed .ai-tool-activity-body,
+.ai-process-timeline .ai-tool-round.is-collapsed .ai-tool-round-list-wrap {
+  height:auto!important;max-height:none!important;grid-template-rows:1fr!important;opacity:1!important;visibility:visible!important;pointer-events:auto!important;
+}
+.ai-process-timeline .ai-tool-round-list .ai-tool-step-title { font-size:12px;line-height:1.6;font-weight:500; }
+.ai-process-timeline .ai-tool-step-detail { font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.ai-process-timeline .ai-tool-step-status { font-size:11px; }
+.ai-process-timeline .ai-tool-inline-result {
+  margin:2px 0!important;padding:2px 0!important;border:0!important;border-radius:0!important;
+  background:none!important;box-shadow:none!important;animation:none!important;font-size:11px;
+}
+.ai-process-timeline .ai-tool-inline-result[hidden] { display:none!important; }
+.ai-process-timeline .ai-tool-result-card-title { font-size:11px;font-weight:400;display:inline;color:var(--primary); }
+.ai-process-timeline .ai-tool-result-error { font-size:11px;color:var(--ai-muted);overflow-wrap:anywhere; }
+.ai-process-timeline .ai-search-detail { white-space:normal; }
+.ai-process-timeline .ai-tool-round-list-wrap { transition:none!important; }
+
+.ai-process-timeline .ai-tool-step { padding:3px 0; }
+.ai-process-timeline > .ai-tool-step .ai-tool-step-title { font-size:12px; }
+.ai-process-timeline details.ai-tool-inline-result > a { display:block; }

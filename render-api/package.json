@@ -1,0 +1,29 @@
+{
+  "name": "xtj-render-api",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "scripts": {
+    "start": "node --env-file=.env server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.106.2",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "isolated-vm": "^6.2.0",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.0",
+    "multer": "2.4.0",
+    "nodemailer": "10.0.13",
+    "pdf-parse": "^2.4.5",
+    "sharp": "0.35.5",
+    "web-push": "3.6.7",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "0.8.15",
+    "qs": "6.16.0"
+  }
+}

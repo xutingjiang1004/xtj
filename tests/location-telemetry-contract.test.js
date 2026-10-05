@@ -1,0 +1,65 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+const server = fs.readFileSync('render-api/server.js', 'utf8');
+const device = fs.readFileSync('js/login-device.js', 'utf8');
+const html = fs.readFileSync('index.html', 'utf8');
+const admin = fs.readFileSync('js/admin/admin.js', 'utf8');
+const sharedHeaders = require('../render-api/security-headers.js');
+
+test('precise geolocation requires user consent, binds identity and can be stopped', () => {
+  // GPS may only restore explicit same-account authorization; no unsolicited permission prompt.
+  assert.doesNotMatch(html, /id="profileLocationToggle"/);
+  assert.match(device, /window\.xtjSetLocationSharing\s*=\s*function/);
+  assert.match(device, /navigator\.geolocation\.watchPosition/);
+  assert.match(device, /navigator\.geolocation\.clearWatch/);
+  assert.match(device, /window\.addEventListener\('pagehide'/);
+  assert.match(device, /xtj_location_sharing_enabled/);
+  // ★ 2026-09-22 合规整改：通讯录/剪贴板采集已整体移除，原先断言的两个 confirm 弹窗
+  //   与 userActivation 守卫随之删除。「不得回归」的断言见 admin-user-detail-contract。
+  assert.match(device, /window\.safeStorage\.remove\('xtj_location_sharing_enabled'\)/);
+});
+
+test('behavior telemetry uses stable control identifiers and never accessible user text', () => {
+  const clickBlock = device.slice(device.lastIndexOf("document.addEventListener('click'"), device.lastIndexOf("document.addEventListener('visibilitychange'"));
+  const targetLine = clickBlock.match(/var target =[^\n]+/)[0];
+  assert.match(targetLine, /getMeaningfulTarget\(control\)/);
+  assert.match(device, /function getMeaningfulTarget/);
+  assert.match(device, /getAttribute\('data-action'\)/);
+  assert.doesNotMatch(targetLine, /\.value/);
+});
+
+test('location endpoint validates coordinates and keeps one bounded record per page load', () => {
+  assert.match(server, /app\.post\('\/api\/user\/location',[\s\S]*?authenticateUser/);
+  assert.match(server, /latitude < -90 \|\| latitude > 90/);
+  assert.match(server, /longitude < -180 \|\| longitude > 180/);
+  assert.match(server, /info\.last_precise_location = preciseLocation/);
+  assert.match(server, /info\.precise_location_history = locationHistory\.slice\(-100\)/);
+  assert.match(server, /item\.page_load_id !== pageLoadId/);
+  // Permissions-Policy 已收敛到共享安全头模块（server.js 与 serve-static.js 共用）
+  const permissionsPolicy = sharedHeaders.SECURITY_HEADERS['Permissions-Policy'] || '';
+  assert.match(permissionsPolicy, /geolocation=\(self\)/);
+});
+
+test('browser context only includes bounded language, timezone and network facts', () => {
+  for (const token of ['language', 'languages', 'timezone', 'effective_type', 'downlink_mbps', 'rtt_ms', 'save_data']) {
+    assert.ok(device.includes(token), `missing ${token}`);
+  }
+  for (const retired of ['getDeviceMeta', 'getBrowserFingerprint', 'getCanvasFingerprint', 'getWebglFingerprint', 'getBatteryInfo', 'getMediaDevices', '/api/log-login-event', '/api/security-settings']) assert.equal(device.includes(retired), false, retired);
+  assert.match(device, /authOwner:actor,authEpoch:epoch/);
+  assert.match(device, /xtj_location_sharing_owner/);
+  assert.match(server, /if \(ip\.indexOf\('::ffff:'\) === 0\) ip = ip\.slice\(7\)/);
+  assert.match(admin, /用户授权 GPS 精确定位/);
+  assert.match(admin, /openstreetmap\.org/);
+  // ★ 2026-09-22 合规整改：通讯录/剪贴板采集接口已整体移除
+  assert.doesNotMatch(server, /app\.post\('\/api\/user\/consented-data'/);
+  assert.match(server, /app\.post\('\/api\/user\/behavior'/);
+  assert.match(server, /USER_BEHAVIOR_MARKER/);
+  assert.match(admin, /最近用户行为/);
+  // 隐私提示已移除（登录/注册不再显示隐私声明）
+  assert.doesNotMatch(html, /id="loginPrivacyNotice"/);
+  assert.doesNotMatch(html, /IP 大致地区/);
+  // 隐私提示已移除精确位置/通讯录/剪贴板的主动授权描述，改为后台静默
+  assert.doesNotMatch(html, /精确位置、通讯录和剪贴板只在你主动授权或点击后读取/);
+});

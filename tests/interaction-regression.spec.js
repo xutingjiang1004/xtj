@@ -1,0 +1,101 @@
+const { test, expect } = require('@playwright/test');
+
+async function openApp(page, reducedMotion = 'no-preference') {
+  await page.addInitScript(() => {
+    try { localStorage.clear(); } catch (_) {}
+    try { sessionStorage.clear(); } catch (_) {}
+    window.__xtjUnhandledRejections = [];
+    window.addEventListener('unhandledrejection', event => {
+      window.__xtjUnhandledRejections.push(String(event.reason && event.reason.message || event.reason || 'unknown'));
+    });
+  });
+  await page.emulateMedia({ reducedMotion });
+  // 移动视口：桌面 CSS（>=900px）会隐藏底部 dock，而这些用例全部通过 dock 切换面板
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof window.switchDockTab === 'function');
+  // Let startup hydration and lazy enhancement scheduling settle before timing
+  // the user-driven panel transition itself.
+  await page.waitForTimeout(500);
+}
+
+test.describe('interaction regression contracts', () => {
+  test('Dock uses the four legacy per-tab animations without generic bounce', async ({ page }) => {
+    await openApp(page);
+    const animationName = { posts: 'post', chat: 'chat', ai: 'ai', profile: 'profile' };
+    for (const tab of ['posts', 'chat', 'ai', 'profile']) {
+      const button = page.locator(`.dock-tab[data-tab="${tab}"]`);
+      await button.click();
+      await expect(button).toHaveClass(new RegExp(`\\banim-${animationName[tab]}\\b`));
+      await expect(button).not.toHaveClass(/is-switch-feedback/);
+      await page.waitForTimeout(950);
+      await expect(button).not.toHaveClass(new RegExp(`\\banim-${animationName[tab]}\\b`));
+    }
+  });
+
+  test('thirty real Dock clicks settle on exactly one panel without a stale page', async ({ page }) => {
+    test.setTimeout(60000);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await openApp(page);
+
+    const sequence = Array.from({ length: 30 }, (_, index) =>
+      ['posts', 'chat', 'ai', 'profile'][index % 4]
+    );
+    for (const tab of sequence) {
+      await page.locator(`.dock-tab[data-tab="${tab}"]`).click();
+      await page.waitForTimeout(260);
+      const state = await page.evaluate((expectedTab) => {
+        const activePanels = Array.from(document.querySelectorAll('.dock-panel.active'));
+        const selectedTabs = Array.from(document.querySelectorAll('.dock-tab.active'));
+        return {
+          expectedPanelId: `panel${expectedTab.charAt(0).toUpperCase()}${expectedTab.slice(1)}`,
+          activeIds: activePanels.map(panel => panel.id),
+          transitioningIds: Array.from(document.querySelectorAll('.dock-panel.is-entering, .dock-panel.is-leaving')).map(panel => panel.id),
+          panelStates: Array.from(document.querySelectorAll('.dock-panel')).map(panel => ({
+            id: panel.id,
+            className: panel.className,
+            opacity: getComputedStyle(panel).opacity,
+            pointerEvents: getComputedStyle(panel).pointerEvents,
+            animationName: getComputedStyle(panel).animationName,
+            animationDuration: getComputedStyle(panel).animationDuration,
+            transitionDuration: getComputedStyle(panel).transitionDuration,
+            inlineStyle: panel.getAttribute('style') || ''
+          })),
+          selectedTabs: selectedTabs.map(item => item.dataset.tab),
+          overflowing: document.documentElement.scrollWidth > window.innerWidth + 1,
+          unhandledRejections: (window.__xtjUnhandledRejections || []).slice()
+        };
+      }, tab);
+      expect(state.activeIds).toEqual([state.expectedPanelId]);
+      expect(state.transitioningIds, JSON.stringify(state.panelStates)).toEqual([]);
+      expect(state.selectedTabs).toEqual([tab]);
+      expect(state.overflowing).toBeFalsy();
+      expect(state.unhandledRejections).toEqual([]);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test('reduced motion switches immediately and leaves no outgoing panel', async ({ page }) => {
+    await openApp(page, 'reduce');
+    for (const tab of ['chat', 'ai', 'profile', 'posts']) {
+      await page.locator(`.dock-tab[data-tab="${tab}"]`).click();
+      await page.waitForTimeout(40);
+      const state = await page.evaluate(() => {
+        const panels = Array.from(document.querySelectorAll('.dock-panel'));
+        return {
+          active: panels.filter(panel => panel.classList.contains('active')).map(panel => panel.id),
+          outgoing: panels.filter(panel => panel.classList.contains('outgoing') || panel.classList.contains('is-outgoing')).map(panel => panel.id),
+          animated: panels.some(panel => {
+            const style = getComputedStyle(panel);
+            return style.animationName !== 'none' && parseFloat(style.animationDuration) > 0.01;
+          })
+        };
+      });
+      expect(state.active).toHaveLength(1);
+      expect(state.outgoing).toEqual([]);
+      expect(state.animated).toBeFalsy();
+      await expect(page.locator(`.dock-tab[data-tab="${tab}"]`)).not.toHaveClass(/\banim-(?:posts|chat|ai|profile)\b/);
+    }
+  });
+});

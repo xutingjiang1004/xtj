@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="description" content="XTJ - 照片墙与社区平台" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no" />
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>xtj</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <link rel="preconnect" href="https://ithowxqignlhkwaykglt.supabase.co" />
+    <link rel="dns-prefetch" href="https://ithowxqignlhkwaykglt.supabase.co" />
+    <script>
+        (function () {
+            window.__xtjThemeControllerV2 = true;
+            try {
+                var storageKey = 'xtj_theme';
+                var legacyKey = 'xtj-theme';
+                var storedTheme = localStorage.getItem(storageKey);
+                if (!storedTheme) {
+                    var legacyTheme = localStorage.getItem(legacyKey);
+                    if (legacyTheme === 'dark' || legacyTheme === 'light') {
+                        storedTheme = legacyTheme;
+                        localStorage.setItem(storageKey, legacyTheme);
+                    }
+                }
+                var themeMode = (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system')
+                    ? storedTheme
+                    : 'system';
+                var resolvedTheme = themeMode === 'system'
+                    ? ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light')
+                    : themeMode;
+                document.documentElement.setAttribute('data-theme-mode', themeMode);
+                document.documentElement.setAttribute('data-theme', resolvedTheme);
+            } catch (_) {
+                try {
+                    var fallbackTheme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+                        ? 'dark'
+                        : 'light';
+                    document.documentElement.setAttribute('data-theme-mode', 'system');
+                    document.documentElement.setAttribute('data-theme', fallbackTheme);
+                } catch (__){}
+            }
+        })();
+    </script>
+    <script>
+        // 2026-09-22：微信内置 webview 适配标记（覆盖小程序 web-view、微信内置浏览器、
+        //           以及微信开发者工具的模拟器）。
+        // 微信把页面放在自己的导航栏「下方」，但 iOS/模拟器仍按「全屏」上报安全区与视口差值：
+        // 顶部会多出一块空白（顶部安全区被重复计算），底部 Dock 会被 --xtj-visual-bottom 顶上去。
+        // 判据（三者任一即命中；普通浏览器一个都不含）：
+        //   · MicroMessenger —— 真机微信（小程序 web-view 与微信内置浏览器都含）
+        //   · miniProgram    —— 小程序的 UA 标记
+        //   · wechatdevtools —— 微信开发者工具的模拟器（UA 不含 MicroMessenger，
+        //                       只认 MicroMessenger 会造成"模拟器里没适配"的假象）
+        try {
+            if (/MicroMessenger|miniProgram|wechatdevtools/i.test(navigator.userAgent)) {
+                document.documentElement.classList.add('xtj-wechat');
+            }
+        } catch (_) {}
+    </script>
+    <link rel="stylesheet" href="css/style.min.css?v=71a327af22" />
+    <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
+    <!-- ★ 2026-09-22 响应式修复：下面两个 CSS 是「media="print" onload 切 all」的异步加载，
+         浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
+         这里加 preload 让浏览器解析到本行就立即高优先级抓取，缩短空窗期。
+         注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
+    <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
+    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=775c4dc55c" />
+    <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=d3d5309f17" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=5c0fa70909" /></noscript>
+    <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
+         只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
+         已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
+         故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
+    <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d872211228" />
+    <link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=5c0fa70909">
+    <link rel="stylesheet" href="css/post-feed.min.css?v=34b65e4137">
+    <link rel="stylesheet" href="css/profile-settings.min.css?v=8cf8b72868">
+    <link rel="stylesheet" href="css/author-posts.min.css?v=db0e12784e">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=d3d5309f17">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=b9799aa19e">
+    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=2c251f505f">
+    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=39ca2d7e68">
+    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=cd057c27ac">
+    <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=a9297cdf1d">
+    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=6865cc5b27">
+    <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=59e4bc80ff">
+    <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=21d7c3bc7e">
+    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=8c60421271">
+    <meta name="xtj-module-features" content="js/features.min.js?v=93266150b7">
+    <meta name="xtj-module-ui-effects" content="js/ui-effects.min.js?v=91dbf623d2">
+
+        </head>
+<body>
+    <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
+        <defs>
+            <filter id="xtj-liquid-refract" x="-20%" y="-20%" width="140%" height="140%">
+                <feTurbulence
+                    type="fractalNoise"
+                    baseFrequency="0.018 0.055"
+                    numOctaves="2"
+                    seed="8"
+                    result="noise"
+                />
+                <feGaussianBlur
+                    in="noise"
+                    stdDeviation="0.35"
+                    result="softNoise"
+                />
+                <feDisplacementMap
+                    in="SourceGraphic"
+                    in2="softNoise"
+                    scale="7"
+                    xChannelSelector="R"
+                    yChannelSelector="G"
+                    result="displaced"
+                />
+                <feColorMatrix
+                    in="displaced"
+                    type="matrix"
+                    values="
+                        1.05 0    0    0 0
+                        0    1.08 0    0 0
+                        0    0    1.10 0 0
+                        0    0    0    1 0"
+                />
+            </filter>
+        </defs>
+    </svg>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <div class="notification-container" id="notificationContainer"></div>
+
+    <!-- photo upload progress overlay moved to photo wall panel -->
+
+    <div class="app-container">
+
+    <aside class="desktop-workbench-sidebar" id="desktopWorkbenchSidebar" aria-label="电脑端主导航">
+        <div class="desktop-workbench-brand">xtj</div>
+        <div class="desktop-workbench-user" aria-label="当前账户">
+            <span class="avatar desktop-workbench-avatar" id="desktopWorkbenchAvatar">?</span>
+            <span class="desktop-workbench-user-copy"><b id="desktopWorkbenchName">未登录</b><small id="desktopWorkbenchStatus">登录后同步个人信息</small></span>
+        </div>
+        <nav class="desktop-workbench-nav" aria-label="主要页面">
+            <button type="button" class="desktop-nav-item is-active" data-desktop-tab="posts" aria-current="page"><span class="desktop-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></span><span>帖子</span></button>
+            <button type="button" class="desktop-nav-item" data-desktop-tab="chat"><span class="desktop-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span><span>聊天</span><span class="desktop-nav-badge" id="desktopChatBadge"></span></button>
+            <button type="button" class="desktop-nav-item" data-desktop-action="ai-chat"><span class="desktop-nav-icon desktop-nav-icon--ai" aria-hidden="true"><svg viewBox="-2 -2 28 28" fill="none"><g transform="translate(12,12)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(0)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(60)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(120)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(180)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(240)"></ellipse><ellipse cx="0" cy="-6" rx="3.2" ry="6" transform="rotate(300)"></ellipse><circle cx="0" cy="0" r="2.5"></circle></g></svg></span><span>小猫AI</span></button>
+            <button type="button" class="desktop-nav-item" data-desktop-tab="ai"><span class="desktop-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="8.5" cy="10" r="1.5"></circle><path d="m5 17 4.5-4 3.2 3 2.3-2.1 4 3.1"></path></svg></span><span>照片墙</span></button>
+            <button type="button" class="desktop-nav-item" data-desktop-tab="profile"><span class="desktop-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 21c.8-4.2 3.1-6.3 7-6.3s6.2 2.1 7 6.3"></path></svg></span><span>我的</span></button>
+        </nav>
+        <div class="desktop-workbench-footer">
+            <label class="desktop-theme-control" for="desktopThemeMode"><span>外观</span><select id="desktopThemeMode" aria-label="选择外观模式"><option value="system">跟随系统</option><option value="light">浅色模式</option><option value="dark">深色模式</option></select></label>
+        </div>
+    </aside>
+
+    <div class="dock-panels" id="dockPanels">
+        <div class="dock-panel active" id="panelPosts">
+            <nav class="posts-nav">
+                <div class="posts-nav-brand">
+                    <h1>xtj</h1>
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题" aria-label="切换主题">
+                        <span class="theme-toggle-orb" aria-hidden="true"><span class="theme-toggle-core"><svg class="theme-symbol theme-symbol-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="theme-symbol theme-symbol-moon" viewBox="0 0 24 24" fill="currentColor"><path d="M19.8 14.1A8.4 8.4 0 0 1 9.9 4.2a8.4 8.4 0 1 0 9.9 9.9Z"/></svg></span></span>
+                    </button>
+                </div>
+                <div class="posts-nav-tools" aria-label="帖子操作">
+                    <div class="ai-tools-nav" id="aiToolsNav">
+                        <!-- 自定义下拉：Win 原生 select 会空弹「选择…」 -->
+                        <button type="button" class="posts-nav-icon-btn ai-tools-trigger" id="aiToolsBtn" title="AI 工具" aria-label="AI 工具" aria-haspopup="menu" aria-expanded="false" aria-controls="aiToolsMenu">
+                            <svg class="ai-tools-trigger-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.7-5.3 1.7L12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z"></path><path d="m18.3 15 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"></path></svg>
+                            <span class="ai-tools-sr-only">AI 工具</span>
+                        </button>
+                        <div class="ai-tools-menu" id="aiToolsMenu" role="menu" aria-label="AI 工具" hidden>
+                            <button type="button" role="menuitem" data-ai-tool="chat">
+                                <span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
+                                <span><b>小猫AI</b><small>对话与历史</small></span>
+                            </button>
+                            <button type="button" role="menuitem" data-ai-tool="research">
+                                <span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></span>
+                                <span><b>深入研究</b><small>多步检索与长文分析</small></span>
+                            </button>
+                            <button type="button" role="menuitem" data-ai-tool="search">
+                                <span class="ai-tools-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg></span>
+                                <span><b>站内搜索</b><small>搜帖子与评论</small></span>
+                            </button>
+                        </div>
+                    </div>
+                <div id="announcement-btn-wrapper" style="display:none; margin-right:8px; position:relative; z-index:3; pointer-events:auto;">
+                    <button class="announcement-btn posts-nav-icon-btn" id="announcementBtn" title="公告" aria-label="公告" onclick="openAnnouncementModal()">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                        <span class="announcement-badge" id="announcementBadge" style="display:none;">0</span>
+                    </button>
+                </div>
+                <div id="report-btn-wrapper" style="display:none; margin-right:8px; position:relative; z-index:3; pointer-events:auto;">
+                    <button class="report-btn posts-nav-icon-btn" id="reportBtn" title="举报" aria-label="举报" onclick="openReportModal()" style="position:relative;overflow:visible;">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
+                            <line x1="4" y1="22" x2="4" y2="15"></line>
+                        </svg>
+                        <span id="reportBtnBadge" class="nav-chat-badge" style="display:none;">0</span>
+                    </button>
+                </div>
+                    <button class="posts-nav-icon-btn filter-toggle-btn" type="button" onclick="toggleFilterPanel()" id="filterToggleBtn" aria-label="搜索与筛选帖子" title="搜索与筛选帖子" aria-expanded="false" aria-controls="postFilterPanel">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+                        <span class="filter-active-badge" id="filterActiveBadge">0</span>
+                    </button>
+                </div>
+                <div class="nav-auth">
+                    <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
+                        <button class="btn btn-primary" onclick="openAuthModal('login')">登录</button>
+                        <button class="btn btn-ghost" onclick="openAuthModal('register')">注册</button>
+                    </div>
+                    <div id="authUI" style="display: none;">
+                        <div class="user-pill">
+                            <button type="button" class="nav-account-profile" onclick="openProfileDetail()" aria-label="查看个人资料"><span class="avatar" id="myAvatar" style="width:24px; height:24px; font-size:12px;">?</span><span id="myName"></span></button>
+                            <button type="button" class="nav-account-logout" aria-label="退出登录" onclick="doLogout()" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:18px; line-height:1;">&times;</button>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+            <div class="wrap" style="position:relative; z-index:2; margin:0; padding:16px 0; max-width:100%;">
+                <div class="publish-box glass" id="publishBox">
+                    <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
+                    <div class="post-media-preview" id="postMediaPreview" style="display:none;">
+                        <div class="post-media-preview-grid" id="postMediaPreviewGrid"></div>
+                        <div class="post-media-preview-count" id="postMediaPreviewCount">已选择 0 个文件</div>
+                    </div>
+                    <div class="post-compose-controls">
+                        <div class="post-compose-row">
+                            <label class="post-compose-label" for="postVisibility">可见范围</label>
+                            <select id="postVisibility" class="post-filter-select post-visibility-select">
+                                <option value="public">公开</option>
+                                <option value="private">私密</option>
+                            </select>
+                        </div>
+                        <div class="post-compose-row post-location-row" id="postLocationAddRow">
+                            <button class="post-location-btn" type="button" id="postLocationAddBtn" onclick="requestPostLocation()">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="compose-tool-label">定位</span>
+                            </button>
+                        </div>
+                        <div class="publish-footer">
+                            <button type="button" class="file-label compose-tool" onclick="document.getElementById('fileInp').click()" aria-label="选择照片、视频或音频"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg><span>照片视频</span></button>
+                            <input type="file" id="fileInp" multiple accept="image/*,video/*,audio/*" style="display:none" />
+                            <button class="compose-tool compose-send" id="pubBtn" onclick="doPublish()" aria-label="发动态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7-7-2Z"/><path d="m11 13 9-9"/></svg><span>发动态</span></button>
+                        </div>
+                    </div>
+                    <div class="post-location-preview" id="postLocationPreview" style="display:none;">
+                        <span class="post-location-icon">📍</span>
+                        <span class="post-location-name" id="postLocationName"></span>
+                        <button class="post-location-remove" type="button" onclick="removePostLocation()" title="取消位置">x</button>
+                    </div>
+                    <div class="post-location-panel" id="postLocationPanel" style="display:none;">
+                        <div class="post-location-panel-header">选择显示位置</div>
+                        <div class="post-location-options" id="postLocationOptions"></div>
+                        <button class="post-location-no-btn" type="button" onclick="selectPostLocationOption(null)">不显示位置</button>
+                    </div>
+                </div>
+
+                <div class="post-filter-panel" id="postFilterPanel" style="display:none;">
+                        <div class="post-filter-tools"><span id="postFilterSummary" role="status"></span><button type="button" onclick="clearPostFilters()" id="filterClearBtn">清除筛选</button></div>
+                        <div class="post-filter-row post-filter-row--top">
+                            <input id="postSearchInput" class="post-search-input" type="search" placeholder="搜索帖子、用户、评论.." autocomplete="off" />
+                            <select id="postVisibilityFilter" class="post-filter-select">
+                                <option value="all">全部可见状态</option>
+                                <option value="public">公开</option>
+                                <option value="private">私密</option>
+                            </select>
+                        </div>
+                        <div class="post-filter-user-block">
+                            <div class="post-filter-user-head">
+                                <span class="post-filter-user-label">筛选用户</span>
+                                <button class="post-filter-user-reset" id="postUserFilterReset" type="button" onclick="selectPostFilterUser('')">清空</button>
+                            </div>
+                            <input id="postUserFilter" type="hidden" value="" />
+                            <div class="post-user-quick-list" id="postUserQuickList"></div>
+                        </div>
+                        <div class="post-filter-row post-filter-row--dates">
+                            <input id="postStartDate" class="post-filter-input" type="date" />
+                            <input id="postEndDate" class="post-filter-input" type="date" />
+                            <label class="post-filter-toggle">
+                                <input id="postOnlyMine" type="checkbox" />
+                                <span>只看我的</span>
+                            </label>
+                        </div>
+                </div>
+
+                <aside class="desktop-right-rail" aria-label="桌面辅助信息">
+                    <section class="desktop-rail-card desktop-contacts-card">
+                        <div class="desktop-rail-heading"><span>最近联系人</span><button type="button" data-desktop-tab="chat">查看聊天</button></div>
+                        <div class="desktop-contacts-preview" id="desktopContactsPreview"><span class="desktop-contacts-empty">登录后显示最近联系人</span></div>
+                    </section>
+                    <section class="desktop-rail-card desktop-ai-card">
+                        <div class="desktop-rail-heading"><span>小猫AI</span><small>你的智能助手</small></div>
+                        <button type="button" class="desktop-ai-prompt" data-desktop-action="ai-chat"><span>和小猫聊聊</span><b aria-hidden="true">→</b></button>
+                    </section>
+                </aside>
+
+                <div id="feed" class="feed">
+                    <div class="xtj-loading-skeleton">
+                      <div class="xtj-skeleton-card">
+                        <div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>
+                        <div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div>
+                      </div>
+                      <div class="xtj-skeleton-card">
+                        <div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>
+                        <div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div>
+                      </div>
+                      <div class="xtj-skeleton-card">
+                        <div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>
+                        <div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div>
+                      </div>
+                    </div>
+                </div>
+                <!-- 首屏并行拉帖：不依赖 core.js / supabase，避免大包未下载完时永久 skeleton -->
+                <script src="js/post-media.min.js?v=59f8bf7bbc"></script>
+                <script src="js/early-feed.min.js?v=17c2c56c96"></script>
+            </div>
+        </div>
+
+        <div class="dock-panel" id="panelChat">
+            <div class="dock-chat-container" id="dockChatContainer">
+                <div class="chat-header">
+                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()" aria-label="返回会话列表"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6"/></svg></button>
+                    <div class="chat-title-stack"><h3 id="dockChatTitle">消息</h3><span id="dockChatPresence" class="chat-presence" hidden aria-live="polite"></span></div>
+                    <button type="button" id="authorSupportButton" class="chat-feature-button" hidden aria-label="打赏作者" title="打赏作者" aria-haspopup="dialog" aria-controls="authorSupportDialog"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="6.5" stroke-width=".8"/><path d="M15 8.5c-3-2-6 0-5 2s5 1 5 3-3 3.5-6 1M12 6.5v11"/></svg></button>
+                    <button type="button" id="dockChatSocialBtn" class="chat-feature-button" aria-label="联系人与添加好友" title="联系人与添加好友" aria-haspopup="dialog" aria-controls="dockChatSocialSheet"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="16" height="18" rx="3"/><path d="M3 7h4M3 12h4M3 17h4"/><circle cx="13" cy="9" r="2.5"/><path d="M9 17c0-4 8-4 8 0"/></svg><span id="dockChatSocialPendingBadge" class="chat-social-badge" hidden>0</span></button>
+                    <button type="button" id="chatSearchButton" class="chat-feature-button" aria-label="搜索用户与聊天记录" title="搜索用户与聊天记录"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+                    <button type="button" id="chatMediaButton" class="chat-feature-button" aria-label="聊天记录与附件" title="聊天记录与附件"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2"/></svg></button>
+                    <button type="button" id="dockChatConversationBtn" class="chat-conversation-trigger" hidden aria-haspopup="dialog" aria-controls="dockChatConversationMenu" aria-label="会话设置" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+                </div>
+                <section id="chatHistoryPanel" class="chat-history-panel" hidden aria-hidden="true" aria-label="聊天搜索与媒体中心">
+                    <div class="chat-history-head"><strong>聊天记录</strong><button type="button" id="chatHistoryClose" aria-label="关闭聊天记录">×</button></div>
+                    <div id="chatSearchTabs" class="chat-search-tabs" role="tablist" aria-label="搜索类别"><button type="button" data-chat-search-mode="users" role="tab" aria-selected="true">找人</button><button type="button" data-chat-search-mode="messages" role="tab" aria-selected="false">聊天记录</button></div>
+                    <form id="chatHistoryForm">
+                        <div class="chat-history-query"><input id="chatHistoryQuery" type="search" maxlength="120" placeholder="搜索文字、转写或文件名" aria-label="搜索关键词"><button type="submit">搜索</button></div>
+                        <div class="chat-history-filters">
+                            <select id="chatHistoryScope" aria-label="搜索范围"><option value="current">当前聊天</option><option value="global">全部聊天</option></select>
+                            <select id="chatHistoryKind" aria-label="消息类型"><option value="all">全部消息</option><option value="media">全部媒体</option><option value="image">图片</option><option value="video">视频</option><option value="audio">语音</option><option value="file">文件</option><option value="link">链接</option></select>
+                            <label>从<input id="chatHistoryFrom" type="date" aria-label="开始日期"></label><label>到<input id="chatHistoryTo" type="date" aria-label="结束日期"></label>
+                        </div>
+                    </form>
+                    <p id="chatHistoryStatus" role="status"></p><div id="chatHistoryResults" class="chat-history-results"></div>
+                    <button type="button" id="chatHistoryMore" hidden>加载更多</button>
+                </section>
+                <dialog id="authorSupportDialog" class="author-support-dialog" aria-labelledby="authorSupportTitle">
+                    <div class="author-support-head"><div><span class="author-support-kicker">一份心意</span><h3 id="authorSupportTitle">打赏作者</h3></div><button type="button" id="authorSupportClose" aria-label="关闭打赏">×</button></div>
+                    <p class="author-support-intro">感谢你支持这个小小的网站。</p>
+                    <div id="authorSupportCodes" class="author-support-codes" aria-live="polite"></div>
+                    <p id="authorSupportDisclaimer" class="author-support-disclaimer"></p>
+                </dialog>
+                <div id="dockChatConversationMenu" class="chat-conversation-menu hidden" role="dialog" aria-modal="true" aria-label="会话管理" aria-hidden="true">
+                    <div class="chat-conversation-menu-card">
+                        <div class="chat-conversation-menu-head"><strong id="dockChatConversationMenuTitle">会话管理</strong><button type="button" id="dockChatConversationMenuClose" aria-label="关闭">×</button></div>
+                        <div id="dockChatConversationMenuActions" class="chat-conversation-menu-actions"></div>
+                    </div>
+                </div>
+                <section id="dockChatSocialSheet" class="chat-social-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="dockChatSocialTitle" aria-hidden="true">
+                    <div class="chat-social-card">
+                        <div class="chat-social-head">
+                            <div><h3 id="dockChatSocialTitle">好友与联系人</h3><p>联系人、添加好友与新的申请</p></div>
+                            <button type="button" id="dockChatSocialClose" class="chat-social-close" aria-label="关闭好友面板">×</button>
+                        </div>
+                        <div class="chat-social-tabs" id="dockChatSocialTabs" role="tablist" aria-label="好友功能">
+                            <span class="chat-social-slider" aria-hidden="true"></span>
+                            <button type="button" data-chat-social-tab="search" role="tab">添加好友</button>
+                            <button type="button" data-chat-social-tab="friends" role="tab">好友</button>
+                            <button type="button" data-chat-social-tab="requests" role="tab">申请</button>
+                            <button type="button" data-chat-social-tab="blocks" role="tab">黑名单</button>
+                        </div>
+                        <div id="dockChatSocialContent" class="chat-social-content" role="tabpanel" aria-live="polite"></div>
+                    </div>
+                </section>
+                <div id="dockChatListView" class="chat-view">
+                    <div class="chat-list-tools"><span>会话</span>
+                    </div>
+                    <div id="dockChatList" class="chat-list"></div>
+                </div>
+                <div id="dockChatDetailView" class="chat-view hidden">
+                    <div id="dockChatRelationshipNotice" class="chat-relationship-notice" hidden aria-live="polite">
+                        <span id="dockChatRelationshipText"></span>
+                        <button type="button" id="dockChatRelationshipAction" hidden></button>
+                    </div>
+                    <div id="dockChatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
+                    <button type="button" id="dockChatJumpLatest" class="chat-jump-latest" hidden aria-label="跳转到最新消息">↓ <span>最新消息</span></button>
+                    <div class="chat-input-area">
+                        <div id="dockChatFilePreview" class="chat-file-preview hidden" aria-live="polite">
+                            <div class="cfp-thumb" id="dockCfpThumb" aria-hidden="true"></div>
+                            <div class="cfp-details">
+                                <span class="cfp-name" id="dockCfpName"></span>
+                                <span class="cfp-meta" id="dockCfpMeta">准备发送</span>
+                            </div>
+                            <button type="button" class="cfp-x" id="dockCfpRemove" title="移除附件" aria-label="移除待发送附件">×</button>
+                        </div>
+                        <div id="chatMessageContext" class="chat-message-context" hidden><span></span><button type="button" id="chatMessageContextClose" aria-label="取消引用或编辑">×</button></div>
+                        <p id="chatVoiceStatus" class="chat-voice-status" hidden role="status"></p>
+                        <div class="chat-input-row">
+                            <div class="chat-input-wrap">
+                                <div id="chatRecordingIndicator" class="chat-recording-indicator" hidden><span class="chat-recording-dot" aria-hidden="true"></span><span class="chat-recording-wave" aria-hidden="true"><i style="--record-delay:-0.0s"></i><i style="--record-delay:-0.07s"></i><i style="--record-delay:-0.14s"></i><i style="--record-delay:-0.21000000000000002s"></i><i style="--record-delay:-0.28s"></i><i style="--record-delay:-0.35000000000000003s"></i><i style="--record-delay:-0.42000000000000004s"></i><i style="--record-delay:-0.49000000000000005s"></i><i style="--record-delay:-0.56s"></i><i style="--record-delay:-0.6300000000000001s"></i><i style="--record-delay:-0.7000000000000001s"></i><i style="--record-delay:-0.77s"></i></span><span id="chatRecordingTimer">00:00</span></div>
+                                <input id="dockChatInput" placeholder="输入消息 · 空白处长按录音" title="空白输入框长按录音，松开发送，上滑取消" maxlength="500" />
+                            </div>
+                            <!-- ★ 2026-09-26：原图开关改成「圆圈 + 圆点」的单选反馈（未选＝空心圆，已选＝圆里有个点）。
+                                 默认「未选」＝照片压缩后发送；主动勾选才按原始画质发送
+                                 （见 isDmOriginalSendEnabled / toggleDmOriginalSend）。 -->
+                            <button class="chat-orig-btn" id="dockChatOrigBtn" type="button" role="switch" aria-checked="false" title="原图：开启后照片按原始画质发送，关闭则压缩发送">
+                                <span class="cor-ring" aria-hidden="true"><span class="cor-dot"></span></span>
+                                <span class="cor-label">原图</span>
+                            </button>
+                            <button type="button" class="chat-feature-button" id="chatVoiceButton" aria-label="录制语音" title="录制语音"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6"/></svg></button>
+                            <button type="button" class="chat-feature-button" id="chatVoiceCancel" hidden>取消</button>
+                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送附件" aria-label="发送附件"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8m-3 11 6-6"/></svg></button>
+                            <div class="chat-send-stack"><span id="chatFlashQuota" hidden aria-live="polite"></span><button type="button" id="chatFlashSendBtn" class="chat-flash-send" hidden onclick="sendChatFlash()" title="发送当前预览的照片；本人可重复查看，对方只能查看一次、清晰显示 3 秒。">闪图</button><button class="send-btn" id="dockChatSendBtn" aria-label="发送消息"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div>
+                        </div>
+                    </div>
+                    <input type="file" id="dockChatFileInp" multiple accept="image/*,video/*,audio/*,.pdf,.txt,.csv,.rtf,.docx,.xlsx,.pptx,.zip" style="display:none" />
+                </div>
+            </div>
+        </div>
+
+        <div class="dock-panel" id="panelAi">
+                        <div class="photo-wall-container" id="photoWallContainer">
+                <div class="photo-wall-header">
+                    <div class="photo-wall-title">
+                        <span class="ui-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 7h4l2-2h4l2 2h4a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V9a2 2 0 0 1 2-2Z"></path>
+                                <circle cx="12" cy="13" r="4"></circle>
+                            </svg>
+                        </span>
+                        <span class="photo-wall-title-text">
+                            <span>照片墙</span>
+                            <small>记录光影和日常</small>
+                        </span>
+                    </div>
+                    <div class="photo-wall-sync-status is-idle" id="pwSyncStatus" aria-live="polite">
+                        <span class="pw-sync-dot"></span>
+                        <span class="pw-sync-label" id="pwSyncLabel">已同步</span>
+                    </div>
+                    <div class="photo-wall-controls">
+                        <select id="pwAlbumSort" class="photo-wall-select" onchange="switchPhotoWallView()">
+                            <option value="date_desc">按日期 ↓</option>
+                            <option value="date_asc">按日期 ↑</option>
+                            <option value="name">按名称</option>
+                            <option value="size">按大小</option>
+                            <option value="views">按热度</option>
+                        </select>
+                        <button class="photo-wall-btn" id="pwAlbumToggle" onclick="toggleAlbumView()" title="相册视图">
+                            <span class="ui-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9Z"></path>
+                                </svg>
+                            </span>
+                            <span>相册</span>
+                        </button>
+                        <button class="photo-wall-upload-btn" id="photoUploadBtn" onclick="window.xtjUploadBtn()">
+                            <span class="ui-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 1 1 .5 6.96H15"></path>
+                                    <path d="M12 11v9"></path>
+                                    <path d="m8.5 14.5 3.5-3.5 3.5 3.5"></path>
+                                </svg>
+                            </span>
+                            <span>上传</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="pwAlbumContainer" style="display:none;"></div>
+                <div class="photo-wall-grid" id="photoGrid"></div>
+                <div class="pw-upload-sheet" id="pwUploadSheet" aria-hidden="true">
+                    <div class="pw-upload-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwUploadSheetTitle">
+                        <div class="pw-upload-sheet-head">
+                            <div>
+                                <div class="pw-upload-sheet-kicker">照片墙上传</div>
+                                <h4 id="pwUploadSheetTitle">上传照片</h4>
+                                <p id="pwUploadSheetMeta">保留原始画质，确认后开始上传。</p>
+                            </div>
+                            <button type="button" class="pw-upload-sheet-close" id="pwUploadSheetClose" aria-label="关闭">×</button>
+                        </div>
+                        <div class="pw-upload-sheet-grid" id="pwUploadSheetGrid"></div>
+                        <div class="pw-upload-sheet-footer">
+                            <div class="pw-upload-sheet-count" id="pwUploadSheetCount">0 张照片</div>
+                            <div class="pw-upload-sheet-actions">
+                                <button type="button" class="pw-upload-sheet-btn is-ghost" id="pwUploadReselectBtn">重新选择</button>
+                                <button type="button" class="pw-upload-sheet-btn is-primary" id="pwStartUploadBtn">开始上传</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <input type="file" id="photoFileInput" accept="image/*" multiple style="position:fixed;top:-100px;left:-100px;width:1px;height:1px;opacity:0;pointer-events:none;">
+                <div id="pwUploadProgressOverlay" style="display:none;" class="pw-upload-local-overlay" aria-hidden="true">
+                    <div class="pw-upload-progress-container" role="status" aria-live="polite">
+                        <div class="pw-upload-progress-hero">
+                            <div class="pw-garden" id="pwUploadGarden" aria-hidden="true">
+                                <svg viewBox="0 0 300 190" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path class="pw-garden-sky" d="M66 166V89a84 84 0 0 1 168 0v77Z"/>
+                                    <path class="pw-garden-arch" d="M66 166V89a84 84 0 0 1 168 0v77"/>
+                                    <g class="pw-garden-stars">
+                                        <path d="m150 24 2.5 6.5 7 1-5.5 4.5 1.5 7-5.5-3.5-5.5 3.5 1.5-7-5.5-4.5 7-1Z"/>
+                                        <path d="m101 58 1.5 3.5 3.5 1-3.5 1.5-1.5 3.5-1-3.5-3.5-1.5 3.5-1Z"/>
+                                        <path d="m196 45 1 3 3 1-3 1-1 3-1-3-3-1 3-1Z"/>
+                                        <circle cx="117" cy="36" r="1"/><circle cx="178" cy="65" r="1.4"/>
+                                        <circle cx="214" cy="79" r="1"/><circle cx="85" cy="87" r="1.2"/>
+                                    </g>
+                                    <g class="pw-garden-stitch" stroke-linecap="round" stroke-linejoin="round">
+                                        <path pathLength="1" d="M41 170c37-7 63-3 108-4 48 0 71-2 110 4"/>
+                                        <path pathLength="1" style="--stitch-delay:.1s" d="M75 167c2-26 0-42-10-65m11 40-15-12m13-3 11-17"/>
+                                        <path pathLength="1" style="--stitch-delay:.35s" d="M224 167c-1-30 0-57 12-80m-11 55 15-15m-12-6-10-19"/>
+                                        <path pathLength="1" style="--stitch-delay:.6s" d="M104 166c1-23-2-43-5-60"/>
+                                        <path pathLength="1" style="--stitch-delay:.8s" d="M196 166c-2-22-1-33 5-54"/>
+                                        <path pathLength="1" style="--stitch-delay:.2s" d="M148 166c5-30 1-53 3-80"/>
+                                        <path pathLength="1" style="--stitch-delay:1.2s" d="M130 167c-2-14-7-26-16-32m12 18 8-10"/>
+                                        <path pathLength="1" style="--stitch-delay:1s" d="M177 167c0-12 5-25 12-31m-10 17-7-9"/>
+                                    </g>
+                                    <g class="pw-garden-leaves">
+                                        <path style="--leaf-delay:.6s;transform-origin:73px 127px" d="M73 127c-15-2-19-9-20-17 12 1 18 7 20 17Z"/>
+                                        <path style="--leaf-delay:.9s;transform-origin:77px 143px" d="M77 143c1-15 7-22 17-25 0 13-7 21-17 25Z"/>
+                                        <path style="--leaf-delay:1.2s;transform-origin:223px 125px" d="M223 125c-12-5-16-14-14-23 11 5 15 13 14 23Z"/>
+                                        <path style="--leaf-delay:1.4s;transform-origin:225px 143px" d="M225 143c3-15 11-22 22-24-3 13-11 22-22 24Z"/>
+                                        <path style="--leaf-delay:1.3s;transform-origin:149px 143px" d="M149 143c-18-2-28-13-29-26 16 3 26 12 29 26Z"/>
+                                        <path style="--leaf-delay:1.7s;transform-origin:151px 127px" d="M151 127c3-16 11-26 24-28-2 15-9 23-24 28Z"/>
+                                        <path style="--leaf-delay:1.1s;transform-origin:103px 144px" d="M103 144c-12-1-18-8-19-17 12 2 17 8 19 17Z"/>
+                                        <path style="--leaf-delay:1.5s;transform-origin:196px 150px" d="M196 150c3-12 9-19 20-20-2 11-8 18-20 20Z"/>
+                                    </g>
+                                    <g class="pw-garden-flower" style="--bloom-delay:1.5s;transform-origin:151px 86px">
+                                        <g class="pw-garden-petals">
+                                            <path d="M151 86c-17-10-20-22-11-25 8-3 14 8 11 25Z"/>
+                                            <path d="M151 86c-2-20 5-31 13-25 7 6 2 18-13 25Z"/>
+                                            <path d="M151 86c14-14 28-15 29-5 1 9-12 13-29 5Z"/>
+                                            <path d="M151 86c20 2 30 11 23 18-7 7-19-1-23-18Z"/>
+                                            <path d="M151 86c7 19 3 32-7 29-9-3-9-17 7-29Z"/>
+                                            <path d="M151 86c-10 18-22 23-26 13-4-9 8-17 26-13Z"/>
+                                            <path d="M151 86c-19 4-31-2-26-11 5-8 18-4 26 11Z"/>
+                                        </g>
+                                        <circle class="pw-garden-center" cx="151" cy="86" r="7"/>
+                                        <g class="pw-garden-seeds"><circle cx="149" cy="83" r=".8"/><circle cx="154" cy="85" r=".8"/><circle cx="149" cy="88" r=".8"/></g>
+                                    </g>
+                                    <g class="pw-garden-flower pw-garden-flower-small" style="--bloom-delay:2.1s;transform-origin:99px 108px">
+                                        <path class="pw-garden-petals" d="M99 108c-15-4-16-15-8-14 1-12 11-11 12-2 12-4 15 5 5 11 7 10-1 16-8 8-8 9-17 2-8-5Z"/>
+                                        <circle class="pw-garden-center" cx="99" cy="105" r="4"/>
+                                    </g>
+                                    <g class="pw-garden-flower pw-garden-flower-small" style="--bloom-delay:2.6s;transform-origin:201px 113px">
+                                        <path class="pw-garden-petals" d="M201 113c-14-6-11-16-4-12 6-11 15-6 11 2 12 3 10 12 0 12 1 13-9 13-11 4-12 3-15-6-5-9Z"/>
+                                        <circle class="pw-garden-center" cx="201" cy="111" r="4"/>
+                                    </g>
+                                    <g class="pw-garden-grass pw-garden-stitch" stroke-linecap="round">
+                                        <path pathLength="1" style="--stitch-delay:1.4s" d="m57 168-8-16m8 16 5-22m35 20-3-12m15 13 6-13m92 14 3-13m31 14 9-16m-9 16-1-20"/>
+                                    </g>
+                                    <g class="pw-garden-grain"><circle cx="53" cy="179" r=".7"/><circle cx="88" cy="175" r=".6"/><circle cx="126" cy="179" r=".8"/><circle cx="163" cy="175" r=".6"/><circle cx="219" cy="178" r=".7"/><circle cx="250" cy="176" r=".6"/></g>
+                                </svg>
+                            </div>
+                            <div class="pw-upload-progress-copy">
+                                <div class="pw-upload-progress-stage" id="pwUploadProgressStage">上传中</div>
+                                <div class="pw-upload-progress-text" id="pwUploadProgressText">准备上传</div>
+                                <div class="pw-upload-progress-stats" id="pwUploadProgressStats" aria-hidden="true">
+                                    <span class="pw-upload-progress-stat"><span class="k">已处理</span><span class="v" id="pwUploadProgressProcessed">0</span></span>
+                                    <span class="pw-upload-progress-stat is-ok"><span class="k">成功</span><span class="v" id="pwUploadProgressOk">0</span></span>
+                                    <span class="pw-upload-progress-stat is-fail"><span class="k">失败</span><span class="v" id="pwUploadProgressFail">0</span></span>
+                                    <span class="pw-upload-progress-stat is-pct"><span class="k">进度</span><span class="v" id="pwUploadProgressPct">0%</span></span>
+                                </div>
+                                <div class="pw-upload-progress-status" id="pwUploadProgressStatus">正在整理本次上传任务。</div>
+                                <div class="pw-upload-progress-bytes" id="pwUploadProgressBytes"></div>
+                            </div>
+                        </div>
+                        <div class="pw-upload-progress-bar-track" id="pwUploadProgressTrack" role="progressbar" aria-label="照片处理进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+                            <div class="pw-upload-progress-bar-fill" id="pwUploadProgressFill"></div>
+                        </div>
+                        <button type="button" class="pw-upload-sheet-btn is-ghost" id="pwUploadProgressCancel">取消上传</button>
+                    </div>
+                </div>
+                <div id="pwUploadResult" class="pw-upload-result" role="alert" data-state="idle" hidden>
+                    <div class="pw-upload-result-row">
+                        <span class="pw-upload-result-icon" aria-hidden="true"></span>
+                        <div class="pw-upload-result-body">
+                            <div class="pw-upload-result-title" id="pwUploadResultTitle"></div>
+                            <div class="pw-upload-result-detail" id="pwUploadResultDetail"></div>
+                        </div>
+                        <button type="button" class="pw-upload-result-close" id="pwUploadResultClose" aria-label="关闭结果提示" hidden>
+                            <span aria-hidden="true">×</span>
+                        </button>
+                    </div>
+                    <div class="pw-upload-result-actions" id="pwUploadResultActions" hidden>
+                        <button type="button" class="pw-upload-result-action" id="pwUploadResultRetry" data-action="retry-failed" hidden>
+                            重试失败项
+                        </button>
+                        <button type="button" class="pw-upload-result-action" id="pwUploadResultRefreshBtn" data-action="refresh-photos">
+                            刷新照片
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        <div class="dock-panel" id="panelProfile">
+            <div class="dock-profile-container">
+                <div class="profile-main-view" id="profileMainView">
+                <div class="profile-header">
+                    <span class="profile-title">我的</span>
+                </div>
+                <div class="profile-user-card" id="profileUserCard" onclick="handleProfileCardClick()">
+                    <span class="avatar profile-avatar" id="profileAvatar">?</span>
+                    <div class="profile-user-info">
+                        <div class="profile-user-name" id="profileName">未登录</div>
+                        <div class="profile-user-status" id="profileStatus">点击登录</div>
+                    </div>
+                    <span class="profile-chevron">→</span>
+                </div>
+                <div class="profile-own-signature" id="profileOwnSignature"></div>
+                <div class="profile-activity-board" aria-label="我的记录">
+                    <section class="profile-activity-card profile-activity-card--summary" id="profilePostsCard" role="button" tabindex="0" onclick="toggleProfileActivity('posts')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('posts');}">
+                        <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9M14 3l7 7M14 3v7h7M7 14h10M7 18h6"/></svg></div>
+                        <div class="profile-activity-head"><h4>我的动态</h4><span class="profile-activity-count" id="profilePostsCount">0</span></div>
+                        <div class="profile-activity-list" id="profilePostsList" hidden></div>
+                        <button type="button" class="profile-activity-more" id="profilePostsMoreBtn" hidden>查看更多</button>
+                    </section>
+                    <section class="profile-activity-card profile-activity-card--summary" id="profileViewsCard" role="button" tabindex="0" onclick="toggleProfileActivity('views')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('views');}">
+                        <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v6h6M12 7v5l3 2"/></svg></div>
+                        <div class="profile-activity-head"><h4>浏览记录</h4><span class="profile-activity-count" id="profileViewsCount">0</span></div>
+                        <div class="profile-activity-list" id="profileViewsList" hidden></div>
+                        <button type="button" class="profile-activity-more" id="profileViewsMoreBtn" hidden>查看更多</button>
+                    </section>
+                    <section class="profile-activity-card profile-activity-card--summary" id="profileLikesCard" role="button" tabindex="0" onclick="toggleProfileActivity('likes')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('likes');}">
+                        <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg></div>
+                        <div class="profile-activity-head"><h4>点赞记录</h4><span class="profile-activity-count" id="profileLikesCount">0</span></div>
+                        <div class="profile-activity-list" id="profileLikesList" hidden></div>
+                        <button type="button" class="profile-activity-more" id="profileLikesMoreBtn" hidden>查看更多</button>
+                    </section>
+                    <section class="profile-activity-card profile-activity-card--summary" id="profileCommentsCard" role="button" tabindex="0" onclick="toggleProfileActivity('comments')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('comments');}">
+                        <div class="profile-record-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM7 8h10M7 12h7"/></svg></div>
+                        <div class="profile-activity-head"><h4>评论记录</h4><span class="profile-activity-count" id="profileCommentsCount">0</span></div>
+                        <div class="profile-activity-list" id="profileCommentsList" hidden></div>
+                        <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" hidden>查看更多</button>
+                    </section>
+                </div>
+                <form id="profilePreferences" class="profile-preferences" data-sync-state="loading">
+                    <section class="profile-settings-group" aria-labelledby="profilePrivacyTitle">
+                        <h2 id="profilePrivacyTitle">隐私</h2>
+                        <div class="profile-settings">
+                            <label class="profile-setting-item">允许他人查看个人动态页<span class="profile-switch"><input type="checkbox" name="timeline_visible"><span class="profile-slider"></span></span></label>
+                            <label class="profile-setting-item">允许未登录访客查看<span class="profile-switch"><input type="checkbox" name="guests_allowed"><span class="profile-slider"></span></span></label>
+                            <label class="profile-setting-item">对他人展示动态<select name="timeline_range"><option value="all">全部</option><option value="3d">最近三天</option><option value="1m">最近一个月</option><option value="6m">最近半年</option></select></label>
+                            <label class="profile-setting-item">默认发布范围<select name="default_visibility"><option value="public">公开</option><option value="private">仅自己可见</option></select></label>
+                            <label class="profile-setting-item">站内通知显示消息内容<span class="profile-switch"><input type="checkbox" name="notification_preview"><span class="profile-slider"></span></span></label>
+                            <div class="profile-setting-item"><span>黑名单</span><button type="button" id="profileBlocksButton" class="profile-row-action">管理<span aria-hidden="true"> ›</span></button></div>
+                        </div>
+                    </section>
+                    <section class="profile-settings-group" aria-labelledby="profileGeneralTitle">
+                        <h2 id="profileGeneralTitle">通用</h2>
+                        <div class="profile-settings profile-general-settings">
+                            <button type="button" class="profile-setting-item profile-image-row" id="profileOwnCover" data-image-kind="cover"><span>朋友圈封面</span><span class="profile-image-value"><img id="profileCoverThumbnail" alt="我的朋友圈封面" hidden><span data-image-label>设置</span><span aria-hidden="true">›</span></span></button>
+                            <button type="button" class="profile-setting-item profile-image-row" id="profileOwnBackground" data-image-kind="background"><span>界面背景</span><span class="profile-image-value"><img id="profileBackgroundThumbnail" alt="我的界面背景" hidden><span data-image-label>设置</span><span aria-hidden="true">›</span></span></button>
+                            <label class="profile-setting-item profile-signature-field">个性签名<input type="text" name="signature" maxlength="120" placeholder="未设置" autocomplete="off"></label>
+                            <label class="profile-setting-item">站内消息提醒<span class="profile-switch"><input type="checkbox" id="profileNotifToggle" name="message_notifications"><span class="profile-slider"></span></span></label>
+                            <div class="profile-setting-item"><span>关于</span><span class="profile-setting-value">xtj v0.95.0</span></div>
+                        </div>
+                    </section>
+                    <div class="profile-sync-feedback"><p class="profile-settings-status" id="profileSettingsStatus" role="status" aria-live="polite"></p><button type="button" id="profileSettingsRetry" hidden>重试</button></div>
+                    <input type="file" id="profileImageUpload" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden>
+                </form>
+                <dialog id="profileImageMenu" class="profile-image-menu">
+                    <h3 id="profileImageMenuTitle">更换照片</h3>
+                    <img id="profileImageMenuPreview" alt="当前背景图" hidden>
+                    <button type="button" data-profile-image-action="choose">更换照片</button>
+                    <button type="button" data-profile-image-action="clear">移除图片</button>
+                    <button type="button" data-profile-image-action="close">取消</button>
+                </dialog>
+                </div><!-- /profileMainView -->
+           </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="profileActivityModal" role="dialog" aria-modal="true" aria-labelledby="profileActivityModalTitle" onclick="if(event.target===this)closeProfileActivityModal()">
+        <div class="modal-box glass profile-activity-modal" onclick="event.stopPropagation()">
+            <div class="profile-activity-modal-head">
+                <div>
+                    <div class="profile-activity-kicker" id="profileActivityModalKicker">我的互动</div>
+                    <h3 id="profileActivityModalTitle">点赞记录</h3>
+                </div>
+                <button class="btn btn-ghost stat-close-btn" type="button" onclick="closeProfileActivityModal()" aria-label="关闭我的记录">✕</button>
+            </div>
+            <div class="profile-activity-list profile-activity-modal-list" id="profileActivityModalList"></div>
+        </div>
+    </div>
+
+    <div class="dock-bar" id="dockBar">
+        <div class="dock-indicator" id="dockIndicator" aria-hidden="true">
+            <span class="dock-liquid-lens"></span>
+            <span class="dock-liquid-shine"></span>
+        </div>
+        <button class="dock-tab active" data-tab="posts">
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                    <path d="m15 5 4 4"/>
+                </svg>
+            </span>
+            <span class="dt-label">帖子</span>
+            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
+                <defs>
+                    <linearGradient id="g-stroke" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stop-color="#FF6B6B"/>
+                        <stop offset="50%" stop-color="#4ECDC4"/>
+                        <stop offset="100%" stop-color="#FFE66D"/>
+                    </linearGradient>
+                </defs>
+                <path class="al-path" d="M 8,32 Q 22,12 38,28 T 70,18" fill="none" stroke="url(#g-stroke)" stroke-width="3" stroke-linecap="round"/>
+                <g class="al-pen">
+                    <!-- 修长蜡笔 - rotate(25)使笔尖更倾斜，跟着路径方向 -->
+                    <g transform="rotate(25)">
+                        <!-- 蜡笔身体 - 缩短1/4，从32减到24 -->
+                        <rect x="-2" y="-4" width="5" height="24" rx="1.5" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
+                        <!-- 蜡笔标签条纹 -->
+                        <rect x="-2" y="6" width="5" height="4" rx="1" fill="#FBBF24" opacity="0.5"/>
+                        <!-- 蜡笔金属包边 - 位置相应调整 -->
+                        <rect x="-2" y="18" width="5" height="3" rx="0.5" fill="#9CA3AF" stroke="#6B7280" stroke-width="0.5"/>
+                        <!-- 蜡笔笔尖 - 三角形位置调整 -->
+                        <path d="M-2,21 L0.5,28 L3,21 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.6"/>
+                        <!-- 笔尖尖端颜色 -->
+                        <path d="M0,24 L0.5,28 L1,24 Z" fill="#FF6B6B"/>
+                    </g>
+                </g>
+            </svg>
+        </button>
+        <button class="dock-tab" data-tab="chat">
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+            </span>
+            <span id="navChatBadge" class="nav-chat-badge"></span>
+            <span class="dt-label">聊天</span>
+            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
+                <!-- 3个气泡各自独立定位，明显分开 -->
+                <!-- Bubble 1 (Big)：主气泡 - 在中心偏右 -->
+                <g class="al-bubble-1" opacity="0" transform="translate(8, 20)">
+                    <path d="M0,0 Q0,-12 14,-12 L28,-12 Q32,-12 32,-8 L32,6 Q32,10 28,10 L18,10 L14,16 L10,10 L0,10 Q-4,10 -4,6 L-4,-8 Q-4,-12 0,0 Z" 
+                          fill="rgba(74,108,247,0.15)" stroke="rgba(74,108,247,0.4)" stroke-width="1.2"/>
+                    <line x1="4" y1="-4" x2="24" y2="-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+                    <line x1="4" y1="2" x2="18" y2="2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+                    <line x1="4" y1="8" x2="20" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
+                </g>
+                <!-- Bubble 2 (Medium)：中气泡 - 在大气泡右上方-->
+                <g class="al-bubble-2" opacity="0" transform="translate(50, 5)">
+                    <path d="M0,0 Q0,-10 10,-10 L20,-10 Q24,-10 24,-6 L24,4 Q24,8 20,8 L12,8 L9,13 L6,8 L0,8 Q-4,8 -4,4 L-4,-6 Q-4,-10 0,0 Z" 
+                          fill="rgba(74,108,247,0.12)" stroke="rgba(74,108,247,0.3)" stroke-width="1"/>
+                    <line x1="2" y1="-3" x2="16" y2="-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.35"/>
+                    <line x1="2" y1="2" x2="12" y2="2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.25"/>
+                </g>
+                <!-- Bubble 3 (Small)：小气泡 - 在大气泡上方 -->
+                <g class="al-bubble-3" opacity="0" transform="translate(0, 2)">
+                    <path d="M0,0 Q0,-7 7,-7 L14,-7 Q17,-7 17,-4 L17,3 Q17,6 14,6 L8,6 L5,10 L2,6 L0,6 Q-4,6 -4,3 L-4,-4 Q-4,-7 0,0 Z" 
+                          fill="rgba(74,108,247,0.1)" stroke="rgba(74,108,247,0.25)" stroke-width="1"/>
+                    <line x1="1" y1="-1" x2="11" y2="-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
+                    <line x1="1" y1="3" x2="8" y2="3" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.2"/>
+                </g>
+                <!-- 打字指示点-->
+                <circle class="al-dot-1" cx="31" cy="25" r="2.8" fill="currentColor" opacity="0"/>
+                <circle class="al-dot-2" cx="40" cy="25" r="2.8" fill="currentColor" opacity="0"/>
+                <circle class="al-dot-3" cx="49" cy="25" r="2.8" fill="currentColor" opacity="0"/>
+            </svg>
+        </button>
+        <button class="dock-tab" data-tab="ai-chat">
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3c-1.7.6-2.7 1.9-3 3.4C7.2 7 5.6 8.5 5.3 10.5 4.5 11 4 12 4 13.2a5 5 0 0 0 2.4 4.3c1 .5 2.3.8 3.8.8H14c1.5 0 2.8-.3 3.8-.8a5 5 0 0 0 2.4-4.3c0-1.2-.5-2.2-1.3-2.7C18.6 8.5 17 7 15.3 6.4 15 4.9 14 3.6 12.3 3Z"/>
+                    <path d="M9 14h.01"/><path d="M12.5 14.5h.01"/><path d="M15 13.5h.01"/>
+                    <path d="M7.5 18l-.8 3M16.5 18l.8 3"/>
+                </svg>
+            </span>
+            <span class="dt-label">小猫AI</span>
+            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
+                <g class="al-person" transform="translate(40, 30)">
+                    <circle class="al-person-head" cx="0" cy="-8" r="5" fill="currentColor" opacity="0"/>
+                    <path class="al-person-body" d="M-7,2 a7,6 0 0,1 14,0" fill="currentColor" opacity="0"/>
+                    <!-- AI 思考火花：点击时从头顶/两侧迸发 -->
+                    <g class="al-spark-0" opacity="0"><circle cx="0" cy="-14" r="1.8" fill="#FBBF24"/></g>
+                    <g class="al-spark-1" opacity="0"><circle cx="7" cy="-10" r="1.5" fill="#60A5FA"/></g>
+                    <g class="al-spark-2" opacity="0"><circle cx="-7" cy="-10" r="1.5" fill="#34D399"/></g>
+                    <g class="al-spark-3" opacity="0"><circle cx="4" cy="-16" r="1.2" fill="#F472B6"/></g>
+                </g>
+            </svg>
+        </button>
+        <button class="dock-tab" data-tab="ai">
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="-2 -2 28 28" width="20" height="20" fill="none">
+                    <g transform="translate(12,12)">
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.1" transform="rotate(0)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.1" transform="rotate(60)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.1" transform="rotate(120)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.1" transform="rotate(180)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.1" transform="rotate(240)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.1" transform="rotate(300)"/>
+                        <circle cx="0" cy="0" r="2.3" fill="none" stroke="#D97706" stroke-width="1.1"/>
+                    </g>
+                </svg>
+            </span>
+            <span class="dt-label" style="height:0;overflow:hidden;pointer-events:none;">.</span>
+            <svg class="anim-layer" viewBox="0 0 90 70" width="90" height="70" overflow="visible">
+                <defs>
+                    <radialGradient id="flower-flash" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="white" stop-opacity="0.9"/>
+                        <stop offset="100%" stop-color="white" stop-opacity="0"/>
+                    </radialGradient>
+                </defs>
+                <g class="al-flower" transform="translate(45, 35)">
+                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <circle class="al-flower-center" cx="0" cy="0" r="2.5" fill="#FBBF24" stroke="#D97706" stroke-width="1"/>
+                    <circle class="al-flash" cx="0" cy="0" r="10" fill="url(#flower-flash)" opacity="0"/>
+                </g>
+            </svg>
+        </button>
+        <button class="dock-tab" data-tab="profile">
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+                </svg>
+            </span>
+            <span id="navReportBadge" class="nav-chat-badge"></span>
+            <span class="dt-label">我的</span>
+            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
+                <g class="al-person" transform="translate(40, 30)">
+                    <circle class="al-person-head" cx="0" cy="-8" r="5" fill="currentColor" opacity="0"/>
+                    <path class="al-person-body" d="M-7,2 a7,6 0 0,1 14,0" fill="currentColor" opacity="0"/>
+                    <!-- 5条光波：从脑袋边缘散射，只向上和左右，下方不 -->
+                    <!-- 上：从头顶发出 -->
+                    <g class="al-wave-0" opacity="0"><line x1="0" y1="-14" x2="0" y2="-26" stroke="#FF6B6B" stroke-width="2" stroke-linecap="round"/></g>
+                    <!-- 右上：从右上方发出-->
+                    <g class="al-wave-1" opacity="0"><line x1="4" y1="-12" x2="15" y2="-22" stroke="#FBBF24" stroke-width="2" stroke-linecap="round"/></g>
+                    <!-- 右：从右耳发出-->
+                    <g class="al-wave-2" opacity="0"><line x1="6" y1="-8" x2="20" y2="-8" stroke="#34D399" stroke-width="2" stroke-linecap="round"/></g>
+                    <!-- 左：从左耳发出 -->
+                    <g class="al-wave-3" opacity="0"><line x1="-6" y1="-8" x2="-20" y2="-8" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/></g>
+                    <!-- 左上：从左上方发出-->
+                    <g class="al-wave-4" opacity="0"><line x1="-4" y1="-12" x2="-15" y2="-22" stroke="#A78BFA" stroke-width="2" stroke-linecap="round"/></g>
+                </g>
+            </svg>
+        </button>
+    </div>
+    </div>
+
+    <!-- 照片墙全屏预览 - 必须在 body 直接子级，避免父级 transform 破坏 position:fixed -->
+    <div class="photo-preview-overlay" id="photoPreviewOverlay" role="dialog" aria-modal="true" aria-label="照片预览" aria-hidden="true" tabindex="-1">
+        <div class="pp-ambient-bg" id="ppAmbientBg"></div>
+        <div class="pp-dots" id="ppDots"></div>
+        <button class="photo-preview-close" onclick="window.closePhotoPreview()" aria-label="关闭预览">
+            <span class="ui-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 6 6 18"></path>
+                    <path d="m6 6 12 12"></path>
+                </svg>
+            </span>
+        </button>
+        <button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="photo-preview-image-wrapper" id="ppImageWrapper">
+            <div class="pp-slide-track" id="ppSlideTrack">
+                <div class="pp-slide-slot"><img class="pp-slide-img" id="ppPrevImg" src="" alt="" draggable="false" loading="eager"></div>
+                <div class="pp-slide-slot"><img class="pp-slide-img" id="photoPreviewImage" src="" alt="preview" draggable="false" loading="eager"></div>
+                <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
+            </div>
+        </div>
+        <div class="pp-preview-toolbar" role="toolbar" aria-label="照片操作">
+        <button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" aria-label="缩小" onclick="window.zoomOut()">
+            <span class="ui-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <path d="M5 12h14"></path>
+                </svg>
+            </span>
+        </button>
+        <button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" aria-label="放大" onclick="window.zoomIn()">
+            <span class="ui-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <path d="M12 5v14"></path>
+                    <path d="M5 12h14"></path>
+                </svg>
+            </span>
+        </button>
+        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" aria-label="照片信息" onclick="window.showPhotoInfo()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span></button>
+        <button class="pp-share-btn" id="ppShareBtn" title="分享" aria-label="分享" onclick="window.shareCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span></button>
+        <button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90°" aria-label="旋转 90 度" onclick="window.ppRotatePhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span></button>
+        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" aria-label="删除" style="display:none;" onclick="window.deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
+        </div>
+        
+        <!-- 照片信息弹窗 -->
+        <div class="pp-info-modal" id="ppInfoModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="ppInfoModalTitle" aria-hidden="true" onclick="if(event.target===this)window.closePhotoInfo()">
+            <div class="pp-info-modal-content" tabindex="-1" onclick="event.stopPropagation()">
+                <div class="pp-info-modal-header">
+                    <span class="pp-info-modal-title" id="ppInfoModalTitle">照片详情</span>
+                    <button class="pp-info-modal-close" aria-label="关闭照片详情" onclick="window.closePhotoInfo()">&times;</button>
+                </div>
+                <div class="pp-info-modal-body" id="ppInfoModalBody">
+                </div>
+            </div>
+        </div>
+        <div class="photo-preview-info">
+            <span class="pp-user" id="photoPreviewUser"></span>
+            <span class="pp-time" id="photoPreviewTime"></span>
+            <span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span>
+        </div>
+    </div>
+
+
+    <div class="modal-overlay post-action-modal" id="delModal" onclick="if(event.target===this)closeModal('delModal')">
+        <div class="modal-box glass post-action-box post-delete-modal" onclick="event.stopPropagation()">
+            <h3 class="post-action-title post-delete-title">删除这条动态？</h3>
+            <p class="post-delete-message">删除后无法恢复</p>
+            <div class="post-action-actions post-delete-actions">
+                <button class="btn btn-ghost post-delete-cancel" onclick="closeModal('delModal')">取消</button>
+                <button class="btn btn-primary post-delete-confirm" id="delBtn">确认删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="pp-confirm-overlay" id="ppConfirmOverlay" onclick="if(event.target===this)window.closeConfirm()">
+        <div class="pp-confirm-dialog" onclick="event.stopPropagation()">
+            <h3 class="pp-confirm-title" id="ppConfirmTitle">确认操作</h3>
+            <p class="pp-confirm-msg" id="ppConfirmMsg">确定要执行此操作吗？</p>
+            <div class="pp-confirm-actions">
+                <button class="pp-confirm-btn pp-confirm-cancel" onclick="window.closeConfirm()">取消</button>
+                <button class="pp-confirm-btn pp-confirm-ok" id="ppConfirmOkBtn" onclick="window.execConfirm()">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="loginModal" onclick="if(event.target===this)closeModal('loginModal')" aria-hidden="true" inert>
+        <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle" aria-describedby="">
+            <div class="auth-form">
+                <p class="af-title" id="loginModalTitle">欢迎回来</p>
+                <label class="sr-only" for="loginNickInp">昵称</label>
+                <input id="loginNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
+                <label class="sr-only" for="loginPwInp">密码</label>
+                <input id="loginPwInp" class="af-input" type="password" placeholder="密码" />
+                
+                <button class="btn btn-primary af-btn" id="loginSubmitBtn">登录</button>
+                <button type="button" class="af-link" onclick="closeModal('loginModal');openAuthModal('register')">没有账号？去注册</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="registerModal" onclick="if(event.target===this)closeModal('registerModal')" aria-hidden="true" inert>
+        <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="registerModalTitle" aria-describedby="">
+            <div class="auth-form">
+                <p class="af-title" id="registerModalTitle">创建账号</p>
+                <label class="sr-only" for="regNickInp">昵称</label>
+                <input id="regNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
+                <label class="sr-only" for="regEmailInp">邮箱（可选，用于接收通知）</label>
+                <input id="regEmailInp" class="af-input" type="email" placeholder="邮箱（可选，用于接收通知）" autocomplete="email" />
+                <p style="margin:-4px 0 4px 0;font-size:12px;color:#888;text-align:left">有事情我会偷偷发邮箱给你的宝宝（不会骚扰你）</p>
+                <label class="sr-only" for="regPwInp">密码（至少6位）</label>
+                <input id="regPwInp" class="af-input" type="password" placeholder="密码（至少6位）" />
+                
+                <button class="btn btn-primary af-btn" id="registerSubmitBtn">注册</button>
+                <button type="button" class="af-link" onclick="closeModal('registerModal');openAuthModal('login')">已有账号？去登录</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="img-viewer" id="imgViewer">
+        <button id="ivClose" class="iv-close" onclick="window.closeImageViewer()">&times;</button>
+        <div class="iv-wrapper" id="ivWrapper">
+            <img id="ivImg" src="" alt="预览" draggable="false" />
+        </div>
+        <div class="iv-zoom-hint" id="ivZoomHint">双指捏合可缩放</div>
+    </div>
+
+    <div class="modal-overlay" id="statModal" onclick="if(event.target===this)closeModal('statModal')">
+        <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
+            <div class="stat-detail-header">
+                <h3 id="statModalTitle">统计详情</h3>
+                <button class="btn btn-ghost stat-close-btn" onclick="closeModal('statModal')" aria-label="关闭统计详情">✕</button>
+            </div>
+            <div class="stat-detail-body" id="statModalBody">
+                <div class="xtj-loading-skeleton" style="max-width:400px;margin:0 auto">
+                  <div class="xtj-skeleton-card" style="min-height:80px"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar" style="width:32px;height:32px"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div></div>
+                  <div class="xtj-skeleton-card" style="min-height:80px"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar" style="width:32px;height:32px"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div></div>
+                  <div class="xtj-skeleton-card" style="min-height:80px"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar" style="width:32px;height:32px"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="postDetailModal" onclick="if(event.target===this)closeModal('postDetailModal')">
+        <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
+            <div class="stat-detail-header">
+                <h3 id="postDetailTitle">帖子详情</h3>
+                <button class="btn btn-ghost stat-close-btn" onclick="closeModal('postDetailModal')" aria-label="关闭帖子详情">✕</button>
+            </div>
+            <div class="stat-detail-body" id="postDetailBody">
+                <div class="xtj-loading-skeleton" style="max-width:400px;margin:0 auto">
+                  <div class="xtj-skeleton-card" style="min-height:80px"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar" style="width:32px;height:32px"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div></div>
+                  <div class="xtj-skeleton-card" style="min-height:80px"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar" style="width:32px;height:32px"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 个人资料详情模态框 -->
+    <div class="modal-overlay" id="profileDetailModal" onclick="if(event.target===this)closeModal('profileDetailModal')">
+        <div class="modal-box glass profile-detail-modal" onclick="event.stopPropagation()">
+            <div class="profile-detail-header">
+                <h3>个人资料</h3>
+                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+            </div>
+            <div class="profile-detail-body">
+                <div class="profile-detail-avatar-wrapper">
+                    <div class="profile-detail-avatar" id="profileDetailAvatar" onclick="triggerAvatarUpload()">
+                        <span id="profileDetailAvatarText">?</span>
+                    </div>
+                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="更换头像">📷</div>
+                    <input type="file" id="avatarUploadInput" accept="image/*" style="display:none;" onchange="handleAvatarUpload(event)">
+                </div>
+                <div class="profile-detail-info">
+                    <div class="profile-detail-info-item">
+                        <span class="profile-detail-info-label">用户名</span>
+                        <span class="profile-detail-info-value" id="profileDetailName">-</span>
+                    </div>
+                    <div class="profile-detail-info-item">
+                        <span class="profile-detail-info-label">用户ID</span>
+                        <span class="profile-detail-info-value" id="profileDetailId">-</span>
+                    </div>
+                    <div class="profile-detail-info-item">
+                        <span class="profile-detail-info-label">注册时间</span>
+                        <span class="profile-detail-info-value" id="profileDetailRegTime">-</span>
+                    </div>
+                </div>
+                <div class="profile-account-actions"><button type="button" class="profile-detail-switch-btn" onclick="switchAccount()">切换账号</button><button type="button" class="profile-detail-logout-btn" onclick="doLogoutFromProfile()">退出登录</button></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 查看用户资料卡片模态框 -->
+    <div class="modal-overlay" id="userProfileModal" onclick="if(event.target===this)closeModal('userProfileModal')">
+        <div class="modal-box glass user-profile-card-modal" onclick="event.stopPropagation()">
+            <div class="upc-header">
+                <h3>个人动态</h3>
+                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" aria-label="关闭个人动态">✕</button>
+            </div>
+            <div class="author-post-scroll" id="authorPostsScroll">
+            <div class="author-post-cover" id="authorPostsCover" aria-hidden="true"></div>
+            <div class="upc-body">
+                <div class="upc-avatar" id="upcAvatar">
+                    <span id="upcAvatarText">?</span>
+                </div>
+                <div class="upc-name" id="upcName">-</div>
+                <div class="upc-login" id="upcLogin">最近登录：加载中...</div>
+                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">💬 发消息</button>
+            </div>
+            <div class="author-post-list" id="authorPostsList"></div>
+            <div class="author-post-status" id="authorPostsStatus" role="status" aria-live="polite"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 公告模态框 -->
+    <div class="announcement-modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
+        <div class="announcement-modal" onclick="event.stopPropagation()">
+            <div class="announcement-header">
+                <div class="announcement-tab-bar">
+                    <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
+                    <button class="announcement-tab" data-tab="changelog">📝 更新日志</button>
+                </div>
+                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
+            </div>
+            <div class="announcement-content">
+                <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
+                    <div class="announcement-admin-title">📝 发布新公告</div>
+                    <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="输入公告标题（可选）">
+                    <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容（可选）"></textarea>
+                    <div class="announcement-admin-row">
+                        <button class="announcement-admin-btn primary" onclick="publishAnnouncement()">发布</button>
+                    </div>
+                </div>
+                <div id="announcementListContainer">
+                    <div class="announcement-list" id="announcementList"></div>
+                </div>
+                <div id="announcementDetail" class="announcement-detail">
+                    <button class="announcement-back-btn" onclick="showAnnouncementList()">← 返回</button>
+                    <div class="announcement-detail-header">
+                        <div class="announcement-detail-left">
+                            <div class="announcement-detail-user" id="announcementDetailUserInfo"></div>
+                            <div class="announcement-detail-title" id="announcementDetailTitle"></div>
+                            <div class="announcement-detail-time" id="announcementDetailTime"></div>
+                        </div>
+                    </div>
+                    <div class="announcement-detail-content" id="announcementDetailContent"></div>
+                </div>
+                <div id="changelogContainer" style="display:none;">
+                    <div class="changelog-list" id="changelogList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 举报模态框 -->
+    <div class="report-modal-overlay" id="reportModal" onclick="if(event.target===this)closeReportModal()">
+        <div class="report-modal" onclick="event.stopPropagation()">
+            <div class="report-modal-header">
+                <div class="report-modal-header-left">
+                    <button class="report-view-tab active" id="reportViewFormBtn" onclick="switchReportView('form')" aria-selected="true">举报表单</button>
+                    <button class="report-view-tab" id="reportRecordsViewBtn" onclick="switchReportView('records')" aria-selected="false">举报记录</button>
+                    <button class="report-records-btn" id="reportRecordsToggleBtn" onclick="toggleReportRecords()" aria-label="打开举报记录">📋 浮动</button>
+                </div>
+                <button class="report-modal-close" onclick="closeReportModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted);padding:6px 12px;line-height:1;border-radius:6px;" aria-label="关闭">✕</button>
+            </div>
+            <div class="report-modal-content">
+                <!-- 举报表单 -->
+                <div class="report-modal-body" id="reportModalFormBody">
+                    <div class="report-field">
+                        <label>选择举报类型</label>
+                        <div class="report-type-tabs">
+                            <button class="report-type-tab active" data-type="post" onclick="switchReportType('post')">📝 帖子</button>
+                            <button class="report-type-tab" data-type="photo" onclick="switchReportType('photo')">🖼️ 照片墙</button>
+                        </div>
+                    </div>
+                    <div class="report-field">
+                        <label>选择要举报的内容</label>
+                        <div class="report-content-select" id="reportContentList">
+                            <div class="report-loading">加载中...</div>
+                        </div>
+                    </div>
+                    <div class="report-field">
+                        <label>举报原因</label>
+                        <div class="report-reason-grid" id="reportReasonGrid">
+                            <button class="report-reason-btn" data-reason="垃圾广告" onclick="selectReportReason(this)">垃圾广告</button>
+                            <button class="report-reason-btn" data-reason="色情低俗" onclick="selectReportReason(this)">色情低俗</button>
+                            <button class="report-reason-btn" data-reason="人身攻击" onclick="selectReportReason(this)">人身攻击</button>
+                            <button class="report-reason-btn" data-reason="虚假信息" onclick="selectReportReason(this)">虚假信息</button>
+                            <button class="report-reason-btn" data-reason="侵权内容" onclick="selectReportReason(this)">侵权内容</button>
+                            <button class="report-reason-btn" data-reason="违规内容" onclick="selectReportReason(this)">违规内容</button>
+                        </div>
+                        <textarea id="reportCustomReason" class="report-reason-input" placeholder="补充说明（选填）" rows="2"></textarea>
+                    </div>
+                    <div class="report-field" id="reportSelectedInfo" style="display:none;">
+                        <div class="report-selected-preview"></div>
+                    </div>
+                    <button class="btn btn-primary report-submit-btn" id="reportSubmitBtn" onclick="submitReport()" disabled>提交举报</button>
+                    <div class="report-error" id="reportError" style="display:none;"></div>
+                </div>
+                <!-- 举报记录面板 -->
+                <div class="report-records-panel" id="reportRecordsPanel">
+                    <div class="report-records-header">📋 我的举报记录</div>
+                    <div class="report-records-list" id="reportRecordsList">
+                        <div class="report-records-empty">点击上方「举报记录」查看</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // 防御性 fallback: 保证 inline onclick 引用的核心函数永远存在
+        // core.js 加载并正确定义后会覆盖这些, 这里只是兜底防止 ReferenceError
+        (function() {
+            function showModalById(id) {
+                var el = document.getElementById(id);
+                if (el) el.classList.add('active');
+                else document.addEventListener('DOMContentLoaded', function() {
+                    var el2 = document.getElementById(id);
+                    if (el2) el2.classList.add('active');
+                });
+            }
+            window.openAuthModal = window.openAuthModal || function(mode) {
+                showModalById(mode === 'login' ? 'loginModal' : 'registerModal');
+            };
+            window.openReportModal = window.openReportModal || function() {
+                showModalById('reportModal');
+            };
+            window.doLogout = window.doLogout || function() {
+                try { localStorage.removeItem('xtj_user_session'); } catch (e) {}
+                try { localStorage.removeItem('xtj_user'); } catch (e) {}
+                try { sessionStorage.clear(); } catch (e) {}
+                if (typeof window.location !== 'undefined') window.location.reload();
+            };
+        })();
+    </script>
+
+    <script>
+        // 集中噪音过滤: 静默已知的 SDK 中止噪音
+        // (1) ERR_ABORTED = Supabase SDK AbortController 5s timeout / page unload 自动 abort, 不是真错误
+        (function() {
+            function isAbort(reason) {
+                if (!reason) return false;
+                if (reason.name === 'AbortError') return true;
+                var msg = String(reason.message || reason || '');
+                return /abort/i.test(msg) || /ERR_ABORTED/i.test(msg);
+            }
+            // 静默 AbortError unhandled rejection (记录 warn 级别日志)
+            window.addEventListener('unhandledrejection', function(e) {
+                if (isAbort(e.reason)) {
+                    console.warn('[XTJ] Suppressed AbortError (not a real error):', e.reason);
+                    e.preventDefault();
+                }
+            });
+        })();
+    </script>
+    <!-- AI Core shared modules (must load before ai-agent) -->
+    <script defer src="js/ai-core/errors.min.js?v=c054599831"></script>
+    <script defer src="js/ai-core/request-controller.min.js?v=81e0ead2b2"></script>
+    <script defer src="js/ai-core/transport.min.js?v=98bffa2a95"></script>
+    <script defer src="js/ai-core/markdown-renderer.min.js?v=96bbd20f99"></script>
+    <script defer src="js/ai-core/scroll-controller.min.js?v=34059556ba"></script>
+    <script defer src="js/ai-core/stream-renderer.min.js?v=1dbdc550cb"></script>
+    <script defer src="js/ai-core/telemetry.min.js?v=6b7b8750d6"></script>
+    <!-- Keep the database SDK on the same origin. The former public-CDN request
+         was a single point of failure on restricted/mobile networks and could
+         leave the feed permanently unavailable. `defer` preserves script order
+         so the client exists before core.js starts, without blocking HTML parsing.
+         core.js also listens for `xtj:supabase-ready` as a fallback. -->
+    <script defer src="js/vendor/supabase.min.js?v=e8c548fa1b"></script>
+    <script defer src="js/config.min.js?v=57f8a9a8d6"></script>
+    <script defer src="js/performance.min.js?v=ac348c42e0"></script>
+    <script defer src="js/mobile-viewport.min.js?v=f7c7dd7cdb"></script>
+    <script defer src="js/image-load-guard.min.js?v=814dedc74b"></script>
+    <script defer src="js/post-composer-media.min.js?v=0902303519"></script>
+    <script defer src="js/post-publish-progress.min.js?v=3ef713325f"></script>
+    <script defer src="js/post-publish-motion.min.js?v=1562a7253a"></script>
+    <script defer src="js/profile-settings.min.js?v=90ae915e04"></script>
+    <script defer src="js/author-posts.min.js?v=cdd73719be"></script>
+    <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
+    <script defer src="js/photo-wall/story.min.js?v=3dd8ec6135"></script>
+    <script defer src="js/voice-transcription.min.js?v=39cfe95168"></script>
+    <script defer src="js/core.min.js?v=44993fd554"></script>
+    <script defer src="js/login-device.min.js?v=7f402fc787"></script>
+    <script defer src="js/theme-toggle.min.js?v=dd3746237f"></script>
+    <script defer src="js/desktop-shell.min.js?v=086938c9c6"></script>
+    <script defer src="js/ux-features.min.js?v=97ee18ea6c"></script>
+
+<!-- 深入研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
+<div class="dock-panel hidden" id="panelDeepThink">
+    <div class="dt-page">
+        <div class="dt-header">
+            <button type="button" class="dt-back" id="dtBackBtn" aria-label="返回">← 返回</button>
+            <h3 class="dt-title">深入研究</h3>
+            <div class="dt-actions">
+                <button type="button" class="dt-action-btn" id="dtNewChatBtn">新对话</button>
+                <button type="button" class="dt-action-btn dt-danger" id="dtDeleteChatBtn">删除</button>
+            </div>
+        </div>
+        <div class="dt-messages" id="dtMessages">
+            <div class="dt-empty" id="dtEmpty">
+                <div class="dt-empty-icon">🐾</div>
+                <div class="dt-empty-title">深入研究</div>
+                <div class="dt-empty-desc">输入任何问题，AI 会调用多个领域专家协同分析、深度搜索资料并给出有洞察力的回复。</div>
+            </div>
+        </div>
+        <div class="dt-input-bar">
+            <button type="button" class="dt-file-btn" id="dtFileBtn" aria-label="上传文件" title="上传图片或文件">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            </button>
+            <input type="file" id="dtFileInp" accept="image/*,.pdf,.docx,.txt,.csv,.xlsx" style="display:none" />
+            <div class="dt-file-preview" id="dtFilePreview" style="display:none"></div>
+            <textarea class="dt-input" id="dtInput" placeholder="输入问题，AI 将深入研究..." rows="1"></textarea>
+            <button type="button" class="dt-pause" id="dtPauseBtn" style="display:none" aria-label="暂停">暂停</button>
+            <button type="button" class="dt-send" id="dtSendBtn">发送</button>
+        </div>
+    </div>
+</div>
+
+<!-- AI 聊天作为独立二级页面，不复用底部私聊面板。 -->
+<div class="ai-secondary-panel hidden" id="panelAiChat" aria-hidden="true"></div>
+
+<!-- Code 代码工作区：云端 GitHub 代码查看/修改/提交（独立二级页面）。 -->
+<div class="ai-secondary-panel hidden" id="panelCode" aria-hidden="true"></div>
+
+<!-- 站内搜索拥有独立界面，结果只通过已验证的服务端搜索接口加载。 -->
+<section class="ai-site-search-panel hidden" id="aiSiteSearchPanel" aria-hidden="true" aria-labelledby="aiSiteSearchTitle">
+    <div class="ai-site-search-page">
+        <header class="ai-site-search-header">
+            <button type="button" class="ai-site-search-back" id="aiSiteSearchBack" aria-label="返回帖子">返回</button>
+            <div>
+                <p>AI 工具</p>
+                <h2 id="aiSiteSearchTitle">站内搜索</h2>
+            </div>
+        </header>
+        <main class="ai-site-search-content">
+            <form class="ai-site-search-form" id="aiSiteSearchForm" role="search">
+                <label for="aiSiteSearchInput">搜索你的站内内容</label>
+                <div class="ai-site-search-input-row">
+                    <input id="aiSiteSearchInput" type="search" maxlength="120" autocomplete="off" placeholder="例如：我在哪里提到过广州旅行？" />
+                    <button type="submit">搜索</button>
+                </div>
+            </form>
+            <div class="ai-site-search-sources" aria-label="搜索范围">
+                <button type="button" class="is-selected" data-ai-search-source="posts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9l3 3V20H6zM9 10h6M9 14h6"></path></svg><span>帖子</span></button>
+                <button type="button" data-ai-search-source="comments"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v10H9l-4 4zM9 9h6M9 12h4"></path></svg><span>评论</span></button>
+                <button type="button" data-ai-search-source="photos"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"></rect><circle cx="9" cy="10" r="1.4"></circle><path d="m6.5 17 4.3-4 2.7 2.3 2.2-2.1 2.3 3.8"></path></svg><span>照片</span></button>
+                <button type="button" data-ai-search-source="dm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v11H8l-4 3zM8 10.5h8M8 13.5h5"></path></svg><span>聊天</span></button>
+                <button type="button" data-ai-search-source="ai_history"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"></circle><path d="M12 7.7v4.7l3.1 1.8"></path></svg><span>小猫历史</span></button>
+                <button type="button" data-ai-search-source="users"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"></circle><path d="M5.5 20c.7-3.3 3-5.1 6.5-5.1s5.8 1.8 6.5 5.1"></path></svg><span>用户</span></button>
+            </div>
+            <p class="ai-site-search-status" id="aiSiteSearchStatus" aria-live="polite">输入关键词后搜索帖子、聊天和小猫历史。</p>
+            <div class="ai-site-search-results" id="aiSiteSearchResults"></div>
+        </main>
+    </div>
+</section>
+</body>
+</html>

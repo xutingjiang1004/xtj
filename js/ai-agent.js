@@ -1,0 +1,13819 @@
+
+// ★ 使用安全的 throttleRAF（复用 core.js 版本或添加 try/finally）
+if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) {
+    var ticking = false, args, ctx;
+    return function() {
+        args = arguments;
+        ctx = this;
+        if (!ticking) {
+            ticking = true;
+            requestAnimationFrame(function() {
+                try {
+                    fn.apply(ctx, args);
+                } finally {
+                    ticking = false;
+                }
+            });
+        }
+    };
+};
+
+(function() {
+  'use strict';
+
+  var ROOT_API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
+  ROOT_API_BASE = (ROOT_API_BASE || '').replace(/\/$/, '');
+  var API_BASE = ROOT_API_BASE + '/api/agent';
+  var AI_DEBUG = (function() { try { return localStorage.getItem('xtj_ai_debug') === '1'; } catch (e) { return false; } })();
+  if (AI_DEBUG) { try { console.warn('[AI] API_BASE =', API_BASE); } catch (e) {} }
+
+  var AI_DISPLAY_NAME = '小猫';
+  // Keep the first network payload small; older messages remain available by scrolling.
+  var HISTORY_PAGE_SIZE = 10;
+  var CONFIG_CACHE_TTL = 5 * 60 * 1000;
+  var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // ★ U3: 与 TTL 保持一致，避免每分钟做无用功
+  var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
+  var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+  var DT_CONV_KEY = 'xtj_ai_dt_conversation_id';
+  var USER_NAME_KEYS = ['xtj_user', 'xtj_username', 'xtj_user_name'];
+  var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
+  var escapeHtml = window.escapeHtml || function(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;'); };
+
+  // ★ P0-1 修复: 唯一默认思考程度常量。状态优先级固定为
+  //   后端配置 (applyConfigToUI) > localStorage > DEFAULT_THINKING_MODE
+  //   之前 S 对象内出现两个 thinkingMode 字段 (low/medium)，后者静默覆盖前者，
+  //   注释却又声称默认 max。此处删除重复字段，建立唯一真源。
+  var DEFAULT_THINKING_MODE = 'max';
+  // ★ 2026-09-11 模型升级：DeepSeek 官方发布 V4.1-Flash（GA 2026-09-10），
+  //   旧 ID deepseek-v4-flash / deepseek-v4-flash-vision-exp 已下线（仅保留临时兼容别名），
+  //   新正规 ID 为 deepseek-flash。V4.1-Flash 原生支持多模态，无需单独 vision-exp ID。
+  var DEFAULT_AI_MODEL = 'deepseek-flash';
+  var LEGACY_AI_MODEL_ALIASES = {
+    'deepseek-v4-flash-vision-exp': 'deepseek-flash',
+    'deepseek-v4-flash': 'deepseek-flash',
+    'deepseek-flash-4.1': 'deepseek-flash',
+    'deepseek-v4.1-flash': 'deepseek-flash',
+    'deepseek-v4-1-flash': 'deepseek-flash',
+    'deepseek-chat': 'deepseek-flash',
+    'deepseek-reasoner': 'deepseek-flash'
+  };
+  // 把历史 localStorage / 服务端配置里的旧模型 ID 收敛到新 ID，避免命中已下线模型。
+  function normalizeAiModelId(id) {
+    var key = String(id || '').trim();
+    if (!key) return '';
+    return LEGACY_AI_MODEL_ALIASES[key.toLowerCase()] || key;
+  }
+  var ALLOWED_THINKING_MODES = ['off', 'low', 'medium', 'high', 'max'];
+  var ALLOWED_AI_MODELS = ['deepseek-flash', 'deepseek-v4-pro'];
+
+  // ── 思考Max 上下文边界 ─────────────────────────────────────────────────
+  // 关闭思考Max（默认）：上下文限制在 CONTEXT_LIMIT_NORMAL(256) 条，
+  //   超过即自动压缩（只保留最近 256 条）；每条按 MSG_MAX_CHARS_NORMAL 截断，便宜更快。
+  // 开启思考Max：不自动压缩，尽量保留全部上下文，每条上限放大到 MSG_MAX_CHARS_MAX，
+  //   服务端同步用 thinking_max 字段联动（挤干模型性能、更聪明但更贵）。
+  var CONTEXT_LIMIT_NORMAL = 256;
+  var CONTEXT_LIMIT_MAX = 2048;
+  var MSG_MAX_CHARS_NORMAL = 4000;
+  var MSG_MAX_CHARS_MAX = 32000;
+
+  // ── 自定义第三方模型（千问/豆包/DeepSeek/Kimi/智谱/OpenAI/自定义）────────────
+  // ★ 账号级同步：模型配置（含 API Key）既存本地 localStorage，也在登录后同步到
+  //   服务端（/api/agent/custom-models，Key 加密存储），换设备/更新后自动恢复。
+  //   未登录或同步失败时静默降级为仅本地，不影响离线使用。
+  var CUSTOM_MODELS_KEY = 'xtj_ai_custom_models';
+  var CUSTOM_MODEL_PREFIX = 'custom:';
+  // ★ 账号级隔离：自定义模型（含 API Key）按当前登录账号存 localStorage，
+  //   换账号互不可见；旧版全局键仅作回退，首次写入后自动迁移并清除。
+  function aiStorageScopeName() {
+    var u = '';
+    try { u = String(window.currentUser || window._xtjCanonicalUser || '').trim(); } catch (e) {}
+    if (!u) u = 'guest';
+    u = String(u).replace(/[^a-zA-Z0-9_@\-\u4e00-\u9fa5]/g, '_').slice(0, 64);
+    return u || 'guest';
+  }
+  function scopedStorageGet(base) {
+    try {
+      var k = String(base) + '__' + aiStorageScopeName();
+      var v = localStorage.getItem(k);
+      if (v !== null && v !== undefined) return v;
+      // ★ 2026-09-26（审计 P1-10）：**不再回退到未做账号隔离的全局旧键**。
+      //   旧键 `xtj_ai_custom_models` 里可能残留上一个账号（甚至匿名）写入的自定义
+      //   模型配置，其中 api_key 是明文第三方凭据。原实现回退读取 → B 账号能看到
+      //   A 账号的 Key，配合"编辑"回填（apiKeyInput.value = m.api_key）与"保存"
+      //   （pushServerCustomModels）还会把 A 的 Key 写进 B 的账号，属真实凭据泄露。
+      //   现在只做"清理"不做"读取"：命中全局键即删除，配置改由服务端同步路径
+      //   （syncCustomModelsFromServer）按当前账号恢复。
+      try {
+        if (localStorage.getItem(base) !== null) localStorage.removeItem(base);
+      } catch (_rm) { /* 隐私模式下可能失败，忽略 */ }
+      return null;
+    } catch (e) { return null; }
+  }
+  function scopedStorageSet(base, value) {
+    try {
+      var k = String(base) + '__' + aiStorageScopeName();
+      localStorage.setItem(k, value);
+      if (localStorage.getItem(base) !== null) localStorage.removeItem(base);
+    } catch (e) {}
+  }
+  // 预置服务商模板：用户只需填 API Key（可改模型名）
+  var CUSTOM_MODEL_PROVIDERS = [
+    { key: 'qwen',    label: '千问 Qwen',      base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', models: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'] },
+    { key: 'doubao',  label: '豆包 Doubao',     base: 'https://ark.cn-beijing.volces.com/api/v3',           defaultModel: 'doubao-1-5-pro-32k', models: ['doubao-1-5-pro-32k', 'doubao-1-5-lite-32k', 'doubao-pro-32k'] },
+    { key: 'deepseek',label: 'DeepSeek',        base: 'https://api.deepseek.com',                           defaultModel: 'deepseek-chat', models: ['deepseek-chat', 'deepseek-reasoner'] },
+    { key: 'kimi',    label: 'Kimi 月之暗面',    base: 'https://api.moonshot.cn/v1',                         defaultModel: 'moonshot-v1-8k', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
+    { key: 'zhipu',   label: '智谱 GLM',        base: 'https://open.bigmodel.cn/api/paas/v4',               defaultModel: 'glm-4-flash', models: ['glm-4-flash', 'glm-4-air', 'glm-4', 'glm-4-plus'] },
+    { key: 'openai',  label: 'OpenAI',          base: 'https://api.openai.com/v1',                          defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
+    { key: 'custom',  label: '自定义(OpenAI兼容)', base: '',                                                 defaultModel: '', models: [] }
+  ];
+  // 统一服务商显示字段：本地惯用驼峰 providerLabel，服务端存储用下划线 provider_label
+  function normalizeCustomModelRecord(m) {
+    if (!m) return m;
+    var pl = m.providerLabel || m.provider_label || '';
+    m.providerLabel = pl;
+    m.provider_label = pl;
+    return m;
+  }
+  function toStoredModel(m) {
+    if (!m) return m;
+    var pl = m.providerLabel || m.provider_label || '';
+    return Object.assign({}, m, { providerLabel: pl, provider_label: pl });
+  }
+  function loadCustomModels() {
+    try {
+      var raw = scopedStorageGet(CUSTOM_MODELS_KEY);
+      if (!raw) return [];
+      var list = JSON.parse(raw);
+      if (!Array.isArray(list)) return [];
+      var deleted = loadDeletedModelUids();
+      return list.filter(function(m) { return m && m.uid && m.api_key && deleted.indexOf(String(m.uid)) < 0; }).map(normalizeCustomModelRecord);
+    } catch (e) { return []; }
+  }
+  function saveCustomModelsLocal(list) {
+    try {
+      var stored = (list || []).map(toStoredModel).slice(0, 12);
+      scopedStorageSet(CUSTOM_MODELS_KEY, JSON.stringify(stored));
+    } catch (e) {}
+  }
+  // 本地保存 + 账号同步（未登录/失败时静默降级为仅本地）
+  // ★ 2026-09-24：删除的 uid 会写入本地墓碑（xtj_ai_models_deleted_uids），
+  //   同步时一并上报服务端，双端墓碑交叉校验，杜绝「删掉又复活」。
+  var CUSTOM_MODELS_DELETED_KEY = 'xtj_ai_models_deleted_uids';
+  function loadDeletedModelUids() {
+    try {
+      var raw = scopedStorageGet(CUSTOM_MODELS_DELETED_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.filter(function(x) { return typeof x === 'string' && x; }) : [];
+    } catch (e) { return []; }
+  }
+  function saveDeletedModelUids(list) {
+    try {
+      var arr = (list || []).filter(function(x) { return typeof x === 'string' && x; });
+      // 去重 + 上限，避免无限增长
+      var seen = {};
+      var out = [];
+      for (var i = 0; i < arr.length; i++) {
+        if (seen[arr[i]]) continue;
+        seen[arr[i]] = 1;
+        out.push(arr[i]);
+      }
+      scopedStorageSet(CUSTOM_MODELS_DELETED_KEY, JSON.stringify(out.slice(-200)));
+    } catch (e) {}
+  }
+  function markModelUidsDeleted(uids) {
+    var cur = loadDeletedModelUids();
+    (uids || []).forEach(function(uid) {
+      if (uid && cur.indexOf(uid) < 0) cur.push(uid);
+    });
+    saveDeletedModelUids(cur);
+  }
+  function unmarkModelUidsDeleted(uids) {
+    var kill = {};
+    (uids || []).forEach(function(uid) { if (uid) kill[uid] = 1; });
+    saveDeletedModelUids(loadDeletedModelUids().filter(function(uid) { return !kill[uid]; }));
+  }
+  var customModelWriteQueue = Promise.resolve();
+  var customModelMutationSeq = 0;
+  var CUSTOM_MODEL_PENDING_KEY = 'xtj_ai_models_pending';
+  function customModelIdentity() {
+    return { scope: aiStorageScopeName(), epoch: typeof window.__xtjGetAuthEpoch === 'function' ? window.__xtjGetAuthEpoch() : (window._authStateEpoch || 0) };
+  }
+  function customModelIdentityCurrent(owner) {
+    var now = customModelIdentity();
+    return owner.scope === now.scope && owner.epoch === now.epoch;
+  }
+  function saveCustomModels(list) {
+    var deleted = loadDeletedModelUids();
+    var alive = (list || []).filter(function(m) { return m && m.uid && deleted.indexOf(String(m.uid)) < 0; });
+    saveCustomModelsLocal(alive);
+    return pushServerCustomModels(alive);
+  }
+  function pushServerCustomModels(list, deletedUids, aiPrefs) {
+    // Capture the account, mutation and payload before any auth/network await.
+    var owner = customModelIdentity(), seq = ++customModelMutationSeq;
+    var pending;
+    try { pending = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null'); } catch (_) {}
+    var modelMap = Object.create(null);
+    ((pending && pending.models) || []).concat(list || []).forEach(function(m) { if (m && m.uid) modelMap[m.uid] = toStoredModel(m); });
+    var deleted = loadDeletedModelUids().concat(deletedUids || []);
+    deleted = deleted.filter(function(uid, index) { return uid && deleted.indexOf(uid) === index; });
+    var payload = { models: Object.keys(modelMap).filter(function(uid) { return deleted.indexOf(uid) < 0; }).map(function(uid) { return modelMap[uid]; }).slice(0, 20),
+      deleted_uids: deleted, merge: true };
+    if ((pending && pending.ai_prefs) || aiPrefs) payload.ai_prefs = Object.assign({}, pending && pending.ai_prefs || {}, aiPrefs || {});
+    scopedStorageSet(CUSTOM_MODEL_PENDING_KEY, JSON.stringify(payload));
+    var work = async function() {
+      if (!customModelIdentityCurrent(owner)) return false;
+      var timer, controller = new AbortController();
+      try {
+        var auth = await getUserAuthPayload({ forceNoToken: false });
+        if (!auth.token || !customModelIdentityCurrent(owner)) return false;
+        timer = setTimeout(function() { controller.abort(); }, 15000);
+        var resp = await fetch(API_BASE + '/custom-models', { method: 'PUT', headers: auth.headers,
+          body: JSON.stringify(payload), signal: controller.signal });
+        if (!resp.ok) return false;
+        var data = await resp.json();
+        if (!customModelIdentityCurrent(owner)) return false;
+        if (!data || !data.ok) return false;
+        if (Array.isArray(data.deleted_uids)) markModelUidsDeleted(data.deleted_uids);
+        if (seq === customModelMutationSeq) {
+          if (Array.isArray(data.models)) saveCustomModelsLocal(data.models.map(normalizeCustomModelRecord));
+          localStorage.removeItem(CUSTOM_MODEL_PENDING_KEY + '__' + owner.scope);
+        }
+        return true;
+      } catch (_) { return false; }
+      finally { if (timer) clearTimeout(timer); }
+    };
+    var result = customModelWriteQueue.then(work, work);
+    customModelWriteQueue = result.catch(function() { return false; });
+    return result;
+  }
+  // ★ 2026-09-25 新增：把「深入研究模型」选择持久化到服务端（随模型快照同行），
+  //   解决换设备/清缓存后选择丢失的问题。失败静默忽略，localStorage 仍是兜底。
+  function persistResearchModelPref(modelId) {
+    try {
+      var v = String(modelId || '').trim();
+      if (!/^(pro|flash|custom:[A-Za-z0-9_-]{1,60})$/.test(v)) return;
+      pushServerCustomModels([], loadDeletedModelUids(), { research_model: v }).catch(function() {});
+    } catch (e) {}
+  }
+  async function fetchServerCustomModels() {
+    var owner = customModelIdentity(), seq = customModelMutationSeq;
+    try {
+      var auth = await getUserAuthPayload({ forceNoToken: false });
+      if (!auth.token) return null;
+      if (!customModelIdentityCurrent(owner)) return null;
+      var resp = await fetch(API_BASE + '/custom-models', { method: 'GET', headers: auth.headers });
+      if (!resp.ok) return null;
+      var data = await resp.json();
+      if (!customModelIdentityCurrent(owner) || seq !== customModelMutationSeq) return null;
+      if (data && data.ok && Array.isArray(data.models)) {
+        // ★ 2026-09-24：同步服务端墓碑到本地，保证「已删 uid 不再复活」双端一致
+        if (Array.isArray(data.deleted_uids) && data.deleted_uids.length) {
+          var mergedTomb = loadDeletedModelUids();
+          data.deleted_uids.forEach(function(uid) {
+            if (uid && mergedTomb.indexOf(uid) < 0) mergedTomb.push(uid);
+          });
+          saveDeletedModelUids(mergedTomb);
+        }
+        // ★ 2026-09-25：恢复服务端保存的「深入研究模型」选择（本地已有值时以本地为准，
+        //   因为本地代表用户最近一次显式选择）。
+        try {
+          var prefModel = data.ai_prefs && data.ai_prefs.research_model;
+          if (prefModel && typeof prefModel === 'string') {
+            S.dtResearchModel = prefModel;
+            try {
+              if (!localStorage.getItem('xtj_ai_research_model')) {
+                localStorage.setItem('xtj_ai_research_model', prefModel);
+              }
+            } catch (ePref) {}
+          }
+        } catch (ePref2) {}
+        var tombstones = loadDeletedModelUids();
+        return data.models.filter(function(m) {
+          if (!m || !m.uid || !m.api_key) return false;
+          return tombstones.indexOf(String(m.uid)) < 0; // 墓碑兜底：即使服务端返回也丢弃
+        }).map(normalizeCustomModelRecord);
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+  // 登录后恢复账号配置；只重试明确记录的未同步修改。
+  // ★ 2026-09-24 修复（课题②「删除的模型自动复活」）：
+  //   旧实现合并后只要与 server 不等价就 pushServerCustomModels(merged) 反向写回服务端 ——
+  //   而服务端旧快照可能残留已删模型（见后端同名修复注释），于是「复活项」被写回并固化，
+  //   用户越删越顽固。现改为：合并结果只落本地，绝不自动反写服务端；服务端数据仅由
+  //   用户在「模型管理」里的显式增删操作（saveCustomModels）驱动，且删除会带 deleted_uids 墓碑。
+  async function syncCustomModelsFromServer() {
+    var owner = customModelIdentity();
+    try {
+      await customModelWriteQueue;
+      if (!customModelIdentityCurrent(owner)) return false;
+      var pending;
+      try { pending = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null'); } catch (_) {}
+      var deleted = loadDeletedModelUids();
+      if (pending || deleted.length) {
+        await pushServerCustomModels(pending ? pending.models : [], deleted, pending && pending.ai_prefs);
+        if (!customModelIdentityCurrent(owner)) return false;
+      }
+      var readSeq = customModelMutationSeq;
+      var server = await fetchServerCustomModels();
+      if (!customModelIdentityCurrent(owner) || readSeq !== customModelMutationSeq) return false;
+      if (server === null) return false; // 未登录或网络失败，保持本地
+      // The authenticated account is authoritative. Local caches are never
+      // merged back unless they contain an explicit, unsynced user mutation.
+      var pending;
+      try { pending = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null'); } catch (_) {}
+      if (!pending) saveCustomModelsLocal(server);
+      // 当前选中的自定义模型 uid 若已不存在，回退到第一个自定义模型或默认模型
+      if (S.selectedModel && isCustomModelId(S.selectedModel)) {
+        var uid = S.selectedModel.slice(CUSTOM_MODEL_PREFIX.length);
+        if (!findCustomModel(uid)) {
+          var first = loadCustomModels()[0];
+          S.selectedModel = first ? (CUSTOM_MODEL_PREFIX + first.uid) : DEFAULT_AI_MODEL;
+          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (eLs) {}
+        }
+      }
+      return true;
+    } catch (e) { return false; }
+  }
+  function genCustomModelUid() {
+    return 'cm_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e6).toString(36);
+  }
+  function findCustomModel(uid) {
+    var list = loadCustomModels();
+    for (var i = 0; i < list.length; i++) { if (list[i].uid === uid) return list[i]; }
+    return null;
+  }
+  function isCustomModelId(mid) {
+    return typeof mid === 'string' && mid.indexOf(CUSTOM_MODEL_PREFIX) === 0;
+  }
+  function customModelDisplayName(mid) {
+    if (!isCustomModelId(mid)) return '';
+    var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
+    var m = findCustomModel(uid);
+    if (!m) return '自定义模型';
+    return (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '');
+  }
+  // 解析自定义模型的选项值 → 配置对象（含 provider/base/api_key/model）
+  function resolveCustomModelConfig(mid) {
+    if (!isCustomModelId(mid)) return null;
+    var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
+    var m = findCustomModel(uid);
+    if (!m) return null;
+    var p = null;
+    for (var i = 0; i < CUSTOM_MODEL_PROVIDERS.length; i++) { if (CUSTOM_MODEL_PROVIDERS[i].key === m.provider) p = CUSTOM_MODEL_PROVIDERS[i]; }
+    return {
+      provider: m.provider,
+      providerLabel: m.providerLabel || (p && p.label) || '自定义',
+      api_key: String(m.api_key || ''),
+      model: String(m.model || (p && p.defaultModel) || ''),
+      base_url: String(m.base_url || (p && p.base) || '')
+    };
+  }
+
+  // 初始化思考程度：localStorage > 默认值（后端配置在 applyConfigToUI 中再覆盖）
+  //   注意：初始化只发生一次；后端配置到达后会通过 applyConfigToUI 显式赋值，
+  //   不会被这里的旧默认值再次覆盖（applyConfigToUI 在每次 config 刷新时执行）。
+  function resolveInitialThinkingMode() {
+    try {
+      var saved = localStorage.getItem('xtj_ai_thinking_mode');
+      if (saved && ALLOWED_THINKING_MODES.indexOf(saved) >= 0) return saved;
+    } catch (e) {}
+    return DEFAULT_THINKING_MODE;
+  }
+  function resolveInitialModel() {
+    try {
+      var saved = localStorage.getItem('xtj_ai_model');
+      // ★ 2026-09-11 迁移：存量 localStorage 里可能是已下线的旧模型 ID
+      //   （deepseek-v4-flash-vision-exp 等）。先归一化到当前 ID 再校验，
+      //   否则老用户会被静默踢回默认模型、且旧值一直残留在存储里。
+      if (saved) {
+        var migrated = normalizeAiModelId(saved);
+        if (migrated !== saved) {
+          saved = migrated;
+          try { localStorage.setItem('xtj_ai_model', migrated); } catch (eMig) {}
+        }
+      }
+      if (saved && ALLOWED_AI_MODELS.indexOf(saved) >= 0) return saved;
+      // 自定义第三方模型：校验该 uid 仍存在
+      if (saved && isCustomModelId(saved)) {
+        var uid = saved.slice(CUSTOM_MODEL_PREFIX.length);
+        if (findCustomModel(uid)) return saved;
+      }
+    } catch (e) {}
+    return DEFAULT_AI_MODEL;
+  }
+
+  var S = {
+    config: null,
+    configFetchedAt: 0,
+    conversationId: null,
+    messages: [],
+    oldestCursor: null,
+    hasMore: false,
+    sending: false,
+    loading: false,
+    loadingMore: false,
+    thinkingMode: resolveInitialThinkingMode(),
+    // Normal chat has a bounded, tool-aware middle gear.  It is intentionally
+    // separate from deep research so the latter remains a dedicated flow.
+    responseProfile: 'normal',
+    // ★ P 新增: 深入研究专用思考程度(从后端 config 同步, 与普通聊天分开)
+    deepThinkEffort: 'max',
+    deepThinkEnabled: true,    // 后端 config.deep_think.enabled
+    tavilyResearchEnabled: false, // 后端 config.tavily_research.enabled (Tavily Deep Research)
+    // ★ M: 深入研究模式 toggle 状态
+    //   开启后本会话所有消息走 Planner→Workers→Synthesizer 多 agent 流程
+    //   持久化到 localStorage, 重开对话框后恢复
+    deepThink: false,
+    deepThinkJob: null,         // AbortController for current deep think request
+    deepThinkProgressCard: null, // DOM node for progress card
+    dtConversationId: null,      // 深入研究二级页面当前会话 ID（与普通聊天分开）
+    active: false,
+    rootEl: null,
+    messagesEl: null,
+    inputBarEl: null,
+    inputEl: null,
+    sendBtnEl: null,
+    pauseBtnEl: null,
+    bound: false,
+    autoScrollPinned: true,
+    viewportCleanup: null,
+    thinkMenuController: null,
+    keyboardResetTimer: null,
+    avatarPopTimer: null,
+    statusTimer: null,
+    replyTimer: null,
+    streamCleanup: null,
+    abortController: null,
+    clientRequestId: 0,
+    currentStreamAborted: false,
+    paused: false,
+    activeRenderers: [],
+    conversations: [],
+    conversationsEl: null,
+    showingHistory: false,
+    headerButtonsCleanup: null,
+    _currentReqId: null,
+    _interruptChat: null,
+    // ★ 2026-09-29（审计 S1）：本次发送产生的、服务端尚未收录的消息对象引用
+    //   （userMsg / aiMsg）。首屏历史到达时靠它把"本地还没同步的轮次"保留下来，
+    //   避免被 loadHistory 的整体覆盖抹掉。只在 S.messages 里仍然存在的才算数。
+    _pendingLocalMsgs: [],
+    // ★ 修复：深入研究二级页面独立请求 ID 通道，与普通聊天 _currentReqId 隔离，
+    // 避免深页流式输出期间打开普通聊天发消息导致深页 SSE 被误判"被取代"而中断。
+    _dtCurrentReqId: null,
+    _dtSending: false,
+    _dtSendSeq: 0,
+    _dtClientRequestId: 0,
+    _dtFetchTimeoutTimer: null,
+    // ★ 修复：深入研究二级页面独立 AbortController，与普通聊天 S.abortController 隔离，
+    // 避免深页关闭/超时误杀普通聊天正在进行的流式请求。
+    _dtAbortController: null,
+    _lastMsgDedupKey: '',
+    _lastDtDedupKey: '',
+    _lastConfigVersion: 0,
+    serviceStatus: 'checking',
+    serviceStatusDetail: '',
+    resizeTimer: null,
+    _configRefreshTimer: null,
+    historyRequestId: 0,
+    conversationRequestId: 0,
+    lifecycleId: 0,
+    // ★ 2026-09-13 修复（P-29）：depth 研究页此前与主聊天共用 lifecycleId，
+    //   两边互相 ++ 导致对方的在途回调被判定为"过期"而静默丢弃——
+    //   典型症状：主聊天发着消息时点开深研页，回来发现回复不写入 / 历史不刷新。
+    //   这里给深研页独立计数器，两通道互不干扰。
+    dtLifecycleId: 0,
+    lastSendFingerprint: '',
+    lastSendAt: 0,
+    webSearchEnabled: false,
+    // ★ 工作模式（work_mode）：在当前对话框直接切换，AI 自主拆解任务并调用全部工具完成，
+    //   输出"任务结果"而非研究报告（区别于深入研究 deep_think，那是独立二级页面出报告）。
+    //   开启时同时继承原「思考Max」的长上下文特性（不自动压缩）。
+    workMode: true,
+    // ★ 思考Max（已并入工作模式，保留字段兼容旧数据/旧逻辑）
+    thinkMax: true,
+    // ★ 小猫AI dock 模式：作为移动端 dock 中间 tab 打开时置为 true，隐藏多余返回按钮
+    _dockMode: false,
+    selectedModel: resolveInitialModel(),
+    _userPickedThinkingMode: false,
+    _userPickedModel: false,
+    // AI 额度 / Pro（服务端权威；前端 90s 轮询 + done 事件即时刷新）
+    quota: null,
+    quotaFetchedAt: 0,
+    _quotaTimer: null,
+    _quotaInflight: null,
+    _quotaInflightStartedAt: 0
+  };
+
+  var QUOTA_POLL_MS = 30000;
+  var FREE_TOKEN_DEFAULT = 100000;
+  var PRO_TOKEN_DEFAULT = 1000000;
+  var FREE_SEARCH_DEFAULT = 10;
+
+  function formatTokenCount(n) {
+    var num = Number(n);
+    if (num === Infinity || num === -Infinity) return '∞';
+    n = Math.max(0, Math.floor(num || 0));
+    if (n >= 1000000) {
+      var m = n / 1000000;
+      return (Math.round(m * 10) / 10) + 'M';
+    }
+    if (n >= 1000) {
+      var k = n / 1000;
+      return (k >= 100 ? Math.round(k) : (Math.round(k * 10) / 10)) + 'k';
+    }
+    return String(n);
+  }
+
+  function defaultQuotaShape() {
+    return {
+      ok: true,
+      plan: 'free',
+      is_pro: false,
+      tokens_used: 0,
+      tokens_limit: FREE_TOKEN_DEFAULT,
+      tokens_remaining: FREE_TOKEN_DEFAULT,
+      tokens_percent: 0,
+      search_used: 0,
+      search_limit: FREE_SEARCH_DEFAULT,
+      search_remaining: FREE_SEARCH_DEFAULT,
+      search_unlimited: false,
+      can_chat: true,
+      can_search: true
+    };
+  }
+
+  function proCeremonyStorageKey() {
+    var uid = '';
+    try {
+      var u = window.currentUser;
+      if (u) uid = String(u.id || u.user_id || u.uid || '');
+    } catch (e) {}
+    if (!uid) {
+      try { uid = String(localStorage.getItem('xtj_user_id') || localStorage.getItem('xtj_user') || ''); } catch (e2) {}
+    }
+    return 'xtj_ai_pro_ceremony_seen:' + (uid || 'anon');
+  }
+
+  function hasSeenProCeremony() {
+    try { return localStorage.getItem(proCeremonyStorageKey()) === '1'; } catch (e) { return false; }
+  }
+
+  function markProCeremonySeen() {
+    try { localStorage.setItem(proCeremonyStorageKey(), '1'); } catch (e) {}
+  }
+
+  function clearProCeremonySeen() {
+    try { localStorage.removeItem(proCeremonyStorageKey()); } catch (e) {}
+  }
+
+  function playProActivatedCeremony(quota) {
+    try {
+      var old = document.getElementById('aiProActivateOverlay');
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+    } catch (e0) {}
+
+    var overlay = document.createElement('div');
+    overlay.id = 'aiProActivateOverlay';
+    overlay.className = 'ai-pro-activate-overlay';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+
+    var descText = '额度已刷新，可立即使用';
+    if (quota) {
+      var dTokLim = Number(quota.tokens_limit);
+      var dTokUnlim = dTokLim === -1;
+      var dLimit = dTokUnlim ? -1 : (dTokLim || PRO_TOKEN_DEFAULT);
+      var dSearchUnlim = quota.search_unlimited === true || Number(quota.search_limit) < 0;
+      var dSearchLimit = Number(quota.search_limit);
+      descText = (dTokUnlim ? 'Token 无限' : ('每日 ' + formatTokenCount(dLimit) + ' tokens'))
+        + (dSearchUnlim ? ' · 无限搜索' : (' · 搜索 ' + Math.max(0, dSearchLimit) + ' 次/日'));
+    }
+
+    var quotaLine = '';
+    if (quota) {
+      var tokLim = Number(quota.tokens_limit);
+      var tokUnlim = tokLim === -1;
+      var limit = tokUnlim ? -1 : (tokLim || PRO_TOKEN_DEFAULT);
+      var used = Number(quota.tokens_used) || 0;
+      var remain = tokUnlim ? -1 : Math.max(0, limit - used);
+      quotaLine = tokUnlim
+        ? '今日已用 ' + formatTokenCount(used) + ' · 无限额度'
+        : '今日可用 ' + formatTokenCount(remain) + ' / ' + formatTokenCount(limit);
+    }
+
+    overlay.innerHTML =
+      '<div class="ai-pro-activate-card">' +
+        '<div class="ai-pro-activate-check" aria-hidden="true">' +
+          '<svg viewBox="0 0 48 48" width="48" height="48">' +
+            '<circle class="ai-pro-activate-ring" cx="24" cy="24" r="20" fill="none"/>' +
+            '<path class="ai-pro-activate-tick" d="M15 24.5l6 6 12-13" fill="none"/>' +
+          '</svg>' +
+        '</div>' +
+        '<div class="ai-pro-activate-badge">PRO</div>' +
+        '<div class="ai-pro-activate-title">开通成功</div>' +
+        '<div class="ai-pro-activate-desc"></div>' +
+        (quotaLine ? '<div class="ai-pro-activate-quota" id="aiProActivateQuotaLine"></div>' : '') +
+      '</div>';
+    var descEl = overlay.querySelector('.ai-pro-activate-desc');
+    if (descEl) descEl.textContent = descText;
+    var line = overlay.querySelector('#aiProActivateQuotaLine');
+    if (line) line.textContent = quotaLine;
+    document.body.appendChild(overlay);
+
+    try { void overlay.offsetWidth; } catch (e1) {}
+    requestAnimationFrame(function() {
+      overlay.classList.add('is-visible');
+    });
+
+    try {
+      var card = document.getElementById('aiQuotaCard');
+      if (card) {
+        card.classList.remove('ai-quota-just-pro');
+        void card.offsetWidth;
+        card.classList.add('ai-quota-just-pro');
+        setTimeout(function() {
+          try { card.classList.remove('ai-quota-just-pro'); } catch (e2) {}
+        }, 1600);
+      }
+      var fill = document.getElementById('aiQuotaBarFill');
+      if (fill) {
+        fill.classList.add('ai-quota-fill-boost');
+        setTimeout(function() {
+          try { fill.classList.remove('ai-quota-fill-boost'); } catch (e3) {}
+        }, 1200);
+      }
+    } catch (e4) {}
+
+    setTimeout(function() {
+      try {
+        overlay.classList.remove('is-visible');
+        overlay.classList.add('is-leaving');
+      } catch (e5) {}
+      setTimeout(function() {
+        try { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (e6) {}
+      }, 380);
+    }, 2200);
+  }
+
+  function applyQuota(quota, opts) {
+    opts = opts || {};
+    if (!quota || typeof quota !== 'object') return S.quota;
+    // S.quota === null 表示「还没拉过额度」，不能当成免费→Pro
+    var hadPriorQuota = S.quota != null;
+    var wasPro = !!(S.quota && S.quota.is_pro);
+    S.quota = Object.assign(defaultQuotaShape(), quota);
+    S.quotaFetchedAt = Date.now();
+    // ★ 修复: 轮询/刷新拉到的新额度若显示搜索已不可用（search_remaining<=0 且非无限），
+    //   自动关闭搜索开关（覆盖「原本已开启、额度刚耗尽」的场景），并同步持久化；
+    //   随后 S._renderQuotaUI 会以关闭后的状态刷新 UI。避免带着超限开关继续触发第三方搜索。
+    if (S.webSearchEnabled && searchQuotaExhausted(S.quota)) {
+      S.webSearchEnabled = false;
+      try { localStorage.setItem('xtj_ai_web_search', 'false'); } catch (eLS) {}
+      notify('网页搜索次数已达上限，已为你关闭搜索');
+    }
+    var nowPro = !!S.quota.is_pro;
+    try {
+      if (typeof window.dispatchEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('xtj-ai-quota', { detail: S.quota }));
+      }
+    } catch (e) {}
+    if (typeof S._renderQuotaUI === 'function') {
+      try { S._renderQuotaUI(); } catch (e2) {}
+    }
+
+    // Pro 掉级：清标记，下次真正再开通还能播一次
+    if (hadPriorQuota && wasPro && !nowPro) {
+      clearProCeremonySeen();
+    }
+
+    // 只在真正「开通当下」播一次：
+    // 1) 邀请码激活 forceCeremony
+    // 2) 本会话内已知 free → pro
+    // 首次打开网页拉到已是 Pro：只记状态，绝不弹窗
+    if (nowPro && !hadPriorQuota) {
+      markProCeremonySeen();
+    } else if (nowPro && (opts.forceCeremony || (hadPriorQuota && !wasPro))) {
+      if (opts.forceCeremony || !hasSeenProCeremony()) {
+        playProActivatedCeremony(S.quota);
+        markProCeremonySeen();
+        if (!opts.skipRefetch) {
+          setTimeout(function() { fetchAiQuota(true); }, 80);
+        }
+      }
+    }
+    return S.quota;
+  }
+
+  async function fetchAiQuota(force) {
+    if (!window.currentUser) return S.quota;
+    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 20000 && S._quotaInflight) {
+      return S._quotaInflight;
+    }
+    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 15000) {
+      return S.quota;
+    }
+    if (S._quotaInflight && (Date.now() - S._quotaInflightStartedAt) < 20000) return S._quotaInflight;
+    S._quotaInflightStartedAt = Date.now();
+    S._quotaInflight = (async function() {
+      try {
+        var r = await apiRequest('GET', '/quota');
+        var payload = r && r.data ? r.data : null;
+        if (r && r.ok && payload && payload.quota) {
+          applyQuota(payload.quota);
+          if (payload.features) {
+            if (payload.features.free_tokens_daily) FREE_TOKEN_DEFAULT = payload.features.free_tokens_daily;
+            if (payload.features.pro_tokens_daily) PRO_TOKEN_DEFAULT = payload.features.pro_tokens_daily;
+            if (payload.features.free_search_daily != null) FREE_SEARCH_DEFAULT = payload.features.free_search_daily;
+          }
+          return S.quota;
+        }
+      } catch (e) {
+        try { if (AI_DEBUG) console.warn('[AI] quota fetch failed', e); } catch (e2) {}
+      } finally {
+        S._quotaInflight = null;
+        S._quotaInflightStartedAt = 0;
+      }
+      return S.quota;
+    })();
+    return S._quotaInflight;
+  }
+
+  function startQuotaPolling() {
+    stopQuotaPolling();
+    fetchAiQuota(true);
+    S._quotaTimer = setInterval(function() {
+      if (!S.active) return;
+      fetchAiQuota(false);
+    }, QUOTA_POLL_MS);
+  }
+
+  function stopQuotaPolling() {
+    if (S._quotaTimer) {
+      try { clearInterval(S._quotaTimer); } catch (e) {}
+      S._quotaTimer = null;
+    }
+  }
+
+  function isSearchUnlimited(q) {
+    return !!(q && (q.search_unlimited === true || Number(q.search_limit) < 0));
+  }
+
+  // 搜索额度是否已耗尽：仅当额度信息存在且非无限时判断（can_search===false 或 search_remaining<=0）
+  function searchQuotaExhausted(q) {
+    if (!q || isSearchUnlimited(q)) return false;
+    if (q.can_search === false) return true;
+    if (typeof q.search_remaining === 'number' && q.search_remaining <= 0) return true;
+    return false;
+  }
+
+  function canSendWithQuota() {
+    var q = S.quota;
+    if (!q) {
+      // 额度信息缺失（拉取失败/未完成）：开启搜索时一律不放行，避免绕过第三方搜索次数限制
+      if (S.webSearchEnabled) {
+        return { ok: false, reason: 'quota_unavailable', message: '额度信息暂不可用，请稍后重试或刷新页面' };
+      }
+      return { ok: true };
+    }
+    // tokens_limit === -1 表示无限额度（与 search 一致）。此时服务端把
+    // tokens_remaining 置为 -1，旧判断 `tokens_remaining <= 0` 会把「无限」误判为
+    // 「已用完」而拦截，导致兑换无限额邀请码后仍提示额度不足。改为以 can_chat 为主，
+    // 仅在非无限时再判 remaining<=0。
+    var _tokUnlimited = q.tokens_unlimited === true || Number(q.tokens_limit) === -1;
+    if (q.can_chat === false ||
+        (!_tokUnlimited && typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0)) {
+      return { ok: false, reason: 'token_limit', message: '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度' };
+    }
+    if (S.webSearchEnabled && searchQuotaExhausted(q)) {
+      return { ok: false, reason: 'search_limit', message: '今日网页搜索次数已达上限，开通 Pro 可无限搜索' };
+    }
+    return { ok: true };
+  }
+
+  function getAiStatusText() {
+    if (S.serviceStatus === 'ready') return '在线';
+    if (S.serviceStatus === 'degraded') return '服务暂不可用';
+    if (S.serviceStatus === 'offline') return '服务离线';
+    return '正在检查服务…';
+  }
+
+  function updateAiStatus() {
+    var el = document.getElementById('aiChatHeaderStatus');
+    if (el) el.textContent = getAiStatusText();
+  }
+
+  function prefersReducedMotion() {
+    try { return document.documentElement.getAttribute('data-xtj-motion') === 'off' || !!(window.matchMedia && window.matchMedia(REDUCED_MOTION_QUERY).matches); }
+    catch (e) { return false; }
+  }
+
+  function el(tag, attrs, children) {
+    var node = document.createElement(tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (!Object.prototype.hasOwnProperty.call(attrs, k)) continue;
+        var v = attrs[k];
+        if (v === undefined || v === null) continue;
+        if (k === 'class') node.className = v;
+        else if (k === 'text') node.textContent = v;
+        else if (k === 'html') node.textContent = v; // ★ 安全: 禁用 innerHTML, 改用 textContent
+        else if (k === 'style') node.style.cssText = v;
+        else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2).toLowerCase(), v);
+        else node.setAttribute(k, v);
+      }
+    }
+    if (children !== undefined && children !== null) {
+      if (typeof children === 'string') node.textContent = children;
+      else if (Array.isArray(children)) {
+        children.forEach(function(c) {
+          if (!c) return;
+          node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+        });
+      }
+    }
+    return node;
+  }
+
+  // ★★★ 2026-09-15 新增（P1-7「点击下载按钮没有真正下载」核心修复）：
+  //   症状（用户截图实证）：AI 生成的 HTML/PDF/data 文件，卡片上点"⬇ 下载"
+  //   完全没有反应，文件没有下载下来。
+  //   根因：后端把文件编码为 `data:text/html;base64,...` 形式的 data URL，
+  //   前端 `<a href="data:..." download="xxx.html">`。而 **Chromium 出于安全
+  //   限制会忽略 href 为 data: / 跨源 URL 上的 download 属性** —— 浏览器不会
+  //   下载，而是尝试直接导航打开该 data: URL；若导航被拦截（iframe/CSP/沙箱），
+  //   表现就是"点了没反应"。
+  //   修复：拦截点击，把 data URL 解码成 Blob，用同源 blob: URL 触发下载，
+  //   下载结束（或超时 30s）后 revoke 释放内存。对非 data: 的普通 URL
+  //   （如后端签发的同源下载链接）保留原生行为，不做干预。
+  function triggerFileDownload(href, filename) {
+    var url = String(href || '');
+    if (!url) return false;
+    // 仅接管 data: URL；http(s)/blob: 交给浏览器原生处理
+    if (url.indexOf('data:') !== 0) return false;
+    try {
+      var commaIdx = url.indexOf(',');
+      if (commaIdx < 0) return false;
+      var meta = url.slice(5, commaIdx);        // 例如 "text/html;base64"
+      var payload = url.slice(commaIdx + 1);
+      var isBase64 = /;base64/i.test(meta);
+      var mime = meta.replace(/;base64/i, '') || 'application/octet-stream';
+      var bytes;
+      if (isBase64) {
+        var bin = atob(payload);
+        bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      } else {
+        // 非 base64 形式：percent-encoding 解码后按 UTF-8 编码
+        var text = decodeURIComponent(payload);
+        bytes = new TextEncoder().encode(text);
+      }
+      // ★ 关键：用 blob: URL 替换 data: URL，规避 Chromium 对 data: 的 download 限制
+      var blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      var a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = String(filename || 'download');
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      // 释放：立即 revoke 会让部分浏览器来不及读取，延迟 30s 稳妥回收
+      setTimeout(function() {
+        try { URL.revokeObjectURL(blobUrl); } catch (e) {}
+        try { if (a.parentNode) a.parentNode.removeChild(a); } catch (e) {}
+      }, 30000);
+      return true;
+    } catch (eDl) {
+      try { console.warn('[AI-DOWNLOAD] blob download failed, fallback:', eDl && eDl.message); } catch (e) {}
+      return false;
+    }
+  }
+
+  /**
+   * 构造一个"可靠的"文件下载链接元素。
+   * - data: URL → 绑定 click 处理器转 Blob 下载（见 triggerFileDownload）
+   * - 其他 URL → 原生 <a download> 行为
+   * 所有 generate_pdf / make_file / 图片下载卡片统一走此函数，避免各处重复实现。
+   */
+  function buildDownloadLink(dataUrl, filename, linkText) {
+    // ★ 2026-09-26（审计 AI 前端 P2-8）：先做协议白名单。原实现只拦 data:，
+    //   当 data_url 为 `javascript:` 时 <a download> 的 download 属性不生效、
+    //   点击即执行脚本。这里仅放行 http/https/blob/data: 与站内相对路径，
+    //   其余一律降级为不可点击的纯文本。
+    var rawUrl = String(dataUrl == null ? '' : dataUrl).trim();
+    var urlOk = /^(https?:|blob:|data:)/i.test(rawUrl)
+      || (/^\.\.?\//.test(rawUrl))
+      || (/^\//.test(rawUrl) && !/^\/\//.test(rawUrl));
+    if (!urlOk) {
+      return el('span', { class: 'ai-tool-card-link is-disabled', text: (linkText || ('⬇ 下载 ' + filename)) + '（链接不可用）' });
+    }
+    var a = el('a', {
+      class: 'ai-tool-card-link',
+      href: rawUrl,
+      download: String(filename),
+      text: linkText || ('⬇ 下载 ' + filename)
+    });
+    a.addEventListener('click', function(ev) {
+      // 仅拦截 data: URL；其余保持默认跳转/下载
+      if (String(a.getAttribute('href') || '').indexOf('data:') === 0) {
+        var ok = triggerFileDownload(a.getAttribute('href'), filename);
+        if (ok) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+        // ok=false 时走浏览器默认行为（导航打开），至少不会完全无响应
+      }
+    });
+    return a;
+  }
+
+  /**
+   * ★ 2026-09-26（审计 AI 前端 P1-2）：SVG 白名单重建。
+   * 只保留图表实际用到的元素与呈现属性，丢弃全部 on* 事件与 href/xlink:href；
+   * 解析失败或结果为空串时返回 ''（调用方不渲染）。相比正则黑名单，白名单不会
+   * 因为"漏了一条规则"而被绕过。
+   */
+  var SVG_ALLOWED_TAGS = {
+    svg: 1, g: 1, rect: 1, circle: 1, ellipse: 1, line: 1, polyline: 1, polygon: 1,
+    path: 1, text: 1, tspan: 1, title: 1, desc: 1, defs: 1,
+    linearGradient: 1, radialGradient: 1, stop: 1, clipPath: 1
+  };
+  var SVG_ALLOWED_ATTRS = {
+    xmlns: 1, viewBox: 1, width: 1, height: 1, x: 1, y: 1, x1: 1, y1: 1, x2: 1, y2: 1,
+    cx: 1, cy: 1, r: 1, rx: 1, ry: 1, d: 1, points: 1, transform: 1, id: 1, class: 1,
+    fill: 1, 'fill-opacity': 1, 'fill-rule': 1, stroke: 1, 'stroke-width': 1,
+    'stroke-dasharray': 1, 'stroke-linecap': 1, 'stroke-linejoin': 1, 'stroke-opacity': 1,
+    opacity: 1, 'font-size': 1, 'font-family': 1, 'font-weight': 1, 'font-style': 1,
+    'text-anchor': 1, 'dominant-baseline': 1, dx: 1, dy: 1, offset: 1,
+    'stop-color': 1, 'stop-opacity': 1, gradientUnits: 1, gradientTransform: 1,
+    'clip-path': 1, 'stroke-miterlimit': 1
+  };
+  function sanitizeSvgMarkup(svgText) {
+    var raw = String(svgText || '').trim();
+    if (!raw || raw.length > 200000) return '';
+    try {
+      var doc = new DOMParser().parseFromString(raw, 'image/svg+xml');
+      if (!doc || !doc.documentElement) return '';
+      if (doc.getElementsByTagName('parsererror').length) return '';
+      var root = doc.documentElement;
+      if (!root || String(root.nodeName).toLowerCase() !== 'svg') return '';
+      var out = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      copySvgNode(root, out);
+      return out.outerHTML;
+    } catch (e) {
+      return '';
+    }
+  }
+  function copySvgNode(src, dest) {
+    var tag = String(src.nodeName || '').toLowerCase();
+    if (!SVG_ALLOWED_TAGS[tag]) return;
+    // 属性白名单：只复制呈现类属性，任何 on* 与 href/xlink:href 一律丢弃
+    for (var i = 0; i < src.attributes.length; i++) {
+      var attr = src.attributes[i];
+      var name = String(attr.name || '');
+      var lower = name.toLowerCase();
+      if (lower.indexOf('on') === 0) continue;
+      if (lower === 'href' || lower === 'xlink:href' || lower.indexOf('href') >= 0) continue;
+      if (lower.indexOf('style') === 0) continue;
+      if (!SVG_ALLOWED_ATTRS[name] && !SVG_ALLOWED_ATTRS[lower]) continue;
+      var val = String(attr.value == null ? '' : attr.value);
+      // 属性值兜底：拒绝可执行的伪协议（白名单属性里理论上不会出现，纵深防御）
+      if (/javascript:|vbscript:/i.test(val)) continue;
+      try { dest.setAttribute(name, val); } catch (eA) {}
+    }
+    var kids = src.childNodes || [];
+    for (var k = 0; k < kids.length; k++) {
+      var child = kids[k];
+      if (child.nodeType === 3) {
+        var textNode = document.createTextNode(String(child.nodeValue || ''));
+        dest.appendChild(textNode);
+      } else if (child.nodeType === 1) {
+        var childTag = String(child.nodeName || '').toLowerCase();
+        if (!SVG_ALLOWED_TAGS[childTag]) continue;
+        var childEl = document.createElementNS('http://www.w3.org/2000/svg', childTag);
+        copySvgNode(child, childEl);
+        dest.appendChild(childEl);
+      }
+    }
+  }
+
+  function notify(msg, type, duration) {
+    try {
+      if (typeof window.showToast === 'function') { window.showToast(msg, type || 'info', duration); return; }
+      if (typeof window.showNotify === 'function') { window.showNotify(msg, type); return; }
+    } catch (e) {}
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '';
+    try {
+      var d = window.safeParseDate(iso);
+      if (isNaN(d.getTime())) return '';
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  var _copyMenuActive = null;
+  var _menuAbort = null; // ★ U3: 管理复制菜单的 document 监听器
+
+  function closeCopyMenu() {
+    if (_copyMenuActive) {
+      try {
+        if (_copyMenuActive.parentNode) _copyMenuActive.parentNode.removeChild(_copyMenuActive);
+      } catch (e) {}
+      _copyMenuActive = null;
+    }
+    // ★ U3: 关闭菜单时立即取消 pending 的 document 监听器, 避免累积
+    if (_menuAbort) {
+      try { _menuAbort.abort(); } catch (e) {}
+      _menuAbort = null;
+    }
+  }
+
+  // 清理模型 reasoning 内容里常见的整段括号包裹，提升可读性
+  function cleanReasoningText(txt) {
+    if (!txt) return '';
+    return String(txt).split('\n').map(function(line) {
+      var trimmed = line.trim();
+      if (!trimmed) return line;
+      // 仅当整段以 ( 开头、以 ) 结尾时去掉最外层括号
+      if (trimmed.charAt(0) === '(' && trimmed.charAt(trimmed.length - 1) === ')') {
+        return trimmed.slice(1, -1);
+      }
+      return line;
+    }).join('\n');
+  }
+
+  // 简单 Markdown → HTML 渲染
+  function escapeAttr(val) {
+    if (!val) return '';
+    return String(val).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // Search results are supplied by the server, but are still untrusted data.
+  // Keep navigation on web URLs only; never let a malformed result become a
+  // javascript:, data:, blob:, or relative navigation target.
+  function safeSearchUrl(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    if (!/^https?:\/\//i.test(raw)) return '';
+    try {
+      var parsed = new URL(raw, window.location.origin);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+      return parsed.href;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // ★ 2026-09-28（方案 D「来源可信度」）：从 URL 提取域名用于来源条目展示。
+  //   ChatGPT 的搜索卡片会显示 favicon + 域名，这是"结果可信"的关键视觉线索。
+  //   这里只取域名文字，**不引入任何外部 favicon 请求**（避免第三方追踪与额外失败点）。
+  //   URL 非法时返回空串，调用方据此决定是否渲染域名位。
+  function safeSearchHost(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+      var parsed = new URL(raw, window.location.origin);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+      return (parsed.hostname || '').replace(/^www\./i, '');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /**
+   * 对话内「已联网」状态：纯文字元信息（不要胶囊/边框）。
+   * opts: { count, query, results, expired, statusText, simple }
+   * - simple: 仅状态文案（搜索中/内置搜索等），不可展开
+   */
+  function buildSearchStatusBar(opts) {
+    opts = opts || {};
+    var expired = !!opts.expired;
+    var bar = el('div', { class: 'ai-search-status' + (expired ? ' expired' : '') });
+    var head = el('div', { class: 'ai-search-status-head' });
+    var count = typeof opts.count === 'number' ? opts.count : 0;
+    var labelText = opts.statusText;
+    if (!labelText) {
+      if (count > 0) labelText = '已联网搜索 · ' + count + ' 条';
+      else labelText = '联网完成';
+      if (expired) labelText += '（过期）';
+    }
+    head.appendChild(el('span', { class: 'ai-search-status-label', text: labelText }));
+    bar.appendChild(head);
+
+    if (opts.simple) return bar;
+
+    var queryStr = String(opts.query || '').trim();
+    var results = Array.isArray(opts.results) ? opts.results : [];
+    var canExpand = !expired && (results.length > 0 || !!queryStr);
+    if (!canExpand) return bar;
+
+    var toggleBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
+    head.appendChild(document.createTextNode(' · '));
+    head.appendChild(toggleBtn);
+    var detail = el('div', { class: 'ai-search-detail', hidden: true });
+    if (queryStr) {
+      detail.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
+    }
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i] || {};
+      var item = el('div', { class: 'ai-search-detail-item' });
+      var href = safeSearchUrl(r.url) || '#';
+      item.appendChild(el('a', {
+        class: 'ai-search-detail-title',
+        href: href,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        text: r.title || '无标题'
+      }));
+      if (r.snippet) {
+        item.appendChild(el('div', {
+          class: 'ai-search-detail-snippet',
+          text: String(r.snippet).slice(0, 200)
+        }));
+      }
+      // ★ 2026-09-28（方案 D）：域名前置（与 tool_result 分支同一套来源展示逻辑）
+      var host1 = safeSearchHost(r.url);
+      var meta = [host1, r.source, r.published_at].filter(function(v) { return !!v; }).join(' · ');
+      if (meta) item.appendChild(el('div', { class: 'ai-search-detail-source', text: meta }));
+      detail.appendChild(item);
+    }
+    bar.appendChild(detail);
+    bar.style.cursor = 'pointer';
+    bar.addEventListener('click', function(ev) {
+      if (ev && ev.target && (ev.target.tagName === 'A' ||
+          (ev.target.classList && ev.target.classList.contains('ai-search-detail-title')))) return;
+      var open = bar.classList.toggle('is-open');
+      if (open) detail.removeAttribute('hidden');
+      else detail.setAttribute('hidden', '');
+      try { toggleBtn.textContent = open ? '收起' : '展开'; } catch (eT) {}
+    });
+    return bar;
+  }
+
+  /** 就地替换已有搜索条（保留 DOM 位置） */
+
+  /**
+   * 搜索状态收敛（★ 2026-09-13 修复"已搜完仍显示正在搜索中"）。
+   *
+   * 问题：搜索状态条只写入"联网中…/正在搜索"，而 `done` 事件从不处理它，
+   * 工具轮结束后也不会切换状态 → 状态条永久停留在"正在搜索中"，动画一直闪。
+   *
+   * 策略（用户确认：保留显示，仅修正状态）：
+   * - 已完成的搜索条：把 running 态清掉、切到静默完成态（不再有动画），保留在会话里。
+   * - 未完成的（仍 running，说明这一轮没搜出结果或被中断）：切到"联网结束"。
+   * 统一入口，供 done / 工具轮完成 / error / 中断 各路径调用。
+   */
+  function settleSearchStatus(node, opts) {
+    if (!node) return;
+    opts = opts || {};
+    // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」）：
+    //   原实现 `node.querySelector('.ai-search-status')` **只取第一个**匹配节点。
+    //   而实际渲染中会先后插入多个状态容器：
+    //     search_status(8223) / multi_agent(8171) / search_supplement(8194)
+    //   —— 各自 replaceChild 时只处理自己那一个节点，于是同一气泡内可能
+    //   同时存在 2~3 个 .ai-search-status，旧逻辑只收敛第一个，
+    //   剩下的永久停留在"联网中…/正在搜索"，动画无限闪烁。
+    //   修复：改用 querySelectorAll 遍历收敛**全部**状态条；
+    //   同时把 .ai-search-supplement 纳入同一收敛口径（此前它只在 done 被
+    //   remove()，与"保留显示"语义冲突，且工具轮结束后同样会残留动画）。
+    var bars = node.querySelectorAll('.ai-search-status, .ai-search-supplement');
+    for (var bi = 0; bi < bars.length; bi++) {
+      settleOneStatusBar(bars[bi], opts);
+    }
+  }
+
+  /** 收敛单个状态条：清掉 running 态、改写为终态文案、停止动画。 */
+  function settleOneStatusBar(bar, opts) {
+    if (!bar) return;
+    opts = opts || {};
+    var label = bar.querySelector('.ai-search-status-label');
+    var curText = label ? String(label.textContent || '') : '';
+    // ★ 早退条件修正：原逻辑只判断 is-settled 就 return，导致
+    //   「已加 is-settled 但 is-running 仍残留」的节点被永久跳过。
+    //   改为：仅在"已终结 且 不含 is-running"时才跳过。
+    var alreadySettled = bar.classList.contains('is-settled') && !bar.classList.contains('is-running');
+    if (alreadySettled) return;
+    var isPending = /中|正在|搜索中|联网中|使用中/.test(curText) || !curText;
+    if (isPending) {
+      var fail = opts.failed === true;
+      var text = fail ? (opts.failText || '联网失败') : (opts.doneText || '联网完成');
+      if (label) label.textContent = text;
+    }
+    bar.classList.add('is-settled');
+    bar.classList.remove('is-running');
+  }
+
+  function isSupportedAiFile(file) {
+    if (!file) return false;
+    // ★ 全格式支持：任意文件都可上传（图片直传视觉模型/OCR，PDF/DOCX/XLSX/TXT
+    // 经服务端解析器提取文字，其余二进制文件回退 UTF-8 文本探测并说明）。
+    var name = String(file.name || '').trim();
+    return name.length > 0 && name !== 'blob';
+  }
+
+  // ★ 2026-09-29：单文件上限 7MB → 50MB（用户要求）。base64 膨胀 4/3 后约 67MB，
+  //   后端 express.json 全局上限已同步放宽到 80mb（server.js）。
+  var AI_FILE_MAX_BYTES = 50 * 1024 * 1024;
+
+  // 部分系统不上报 MIME（type 为空）：按扩展名推断，保证后端解析器能正确识别
+  function mimeFromFilename(name) {
+    var n = String(name || '').toLowerCase();
+    if (/\.pdf$/i.test(n)) return 'application/pdf';
+    if (/\.docx$/i.test(n)) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (/\.xlsx$/i.test(n)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (/\.(txt|md|log|srt|vtt)$/i.test(n)) return 'text/plain';
+    if (/\.csv$/i.test(n)) return 'text/csv';
+    if (/\.json$/i.test(n)) return 'application/json';
+    if (/\.(png|jpg|jpeg|gif|webp|bmp|ico|avif|svg)$/i.test(n)) {
+      var ext = n.match(/\.([a-z0-9]+)$/i)[1];
+      return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' })[ext] || 'image/png';
+    }
+    return '';
+  }
+
+  function normalizeAiAttachmentFile(file) {
+    if (!file) return null;
+    var type = String(file.type || '');
+    var name = String(file.name || '').trim();
+    if (!name || name === 'blob' || name === 'image') {
+      var ext = 'bin';
+      if (type.indexOf('image/') === 0) {
+        ext = (type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+      } else if (/\.pdf$/i.test(name)) {
+        ext = 'pdf';
+      } else {
+        ext = (type.split('/')[1] || 'bin').split(';')[0] || 'bin';
+      }
+      name = 'paste-' + Date.now() + '.' + ext;
+      try {
+        return new File([file], name, { type: type || 'application/octet-stream', lastModified: Date.now() });
+      } catch (e) {
+        return file;
+      }
+    }
+    return file;
+  }
+
+  function pickFirstAiAttachment(fileList) {
+    if (!fileList || !fileList.length) return null;
+    for (var i = 0; i < fileList.length; i++) {
+      if (isSupportedAiFile(fileList[i])) return fileList[i];
+    }
+    return null;
+  }
+
+  function extractClipboardAiFile(clipboardData) {
+    if (!clipboardData) return null;
+    var items = clipboardData.items;
+    if (items && items.length) {
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        if (!item || item.kind !== 'file') continue;
+        var asFile = item.getAsFile && item.getAsFile();
+        if (asFile && isSupportedAiFile(asFile)) return asFile;
+        // Clipboard screenshots often only advertise image/* on the item.
+        if (asFile && String(item.type || '').indexOf('image/') === 0) return asFile;
+      }
+    }
+    return pickFirstAiAttachment(clipboardData.files);
+  }
+
+  function dataTransferHasFiles(e) {
+    var types = e && e.dataTransfer && e.dataTransfer.types;
+    if (!types) return false;
+    if (typeof types.contains === 'function') return types.contains('Files');
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'Files') return true;
+    }
+    return false;
+  }
+
+  /**
+   * Shared file-preview loader for normal chat + deep-think composers.
+   * onLoaded({ name, type, dataUrl }) is called after FileReader finishes.
+   */
+  function readAiAttachmentFile(rawFile, onLoaded, opts) {
+    opts = opts || {};
+    var file = normalizeAiAttachmentFile(rawFile);
+    if (!file) return false;
+    if (!isSupportedAiFile(file) && String(file.type || '').indexOf('image/') !== 0) {
+      notify(opts.rejectMsg || '不支持该文件');
+      return false;
+    }
+    if (file.size > AI_FILE_MAX_BYTES) {
+      notify(opts.sizeMsg || '文件不能超过 50MB');
+      return false;
+    }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        onLoaded({ name: file.name, type: file.type || mimeFromFilename(file.name) || 'application/octet-stream', dataUrl: e.target.result, size: file.size });
+      } catch (err) {}
+    };
+    reader.onerror = function() {
+      notify('读取文件失败，请重试');
+    };
+    reader.readAsDataURL(file);
+    return true;
+  }
+
+  function renderAiFilePreview(filePreview, fileData, onRemove) {
+    if (!filePreview || !fileData) return;
+    filePreview.innerHTML = '';
+    var thumb = String(fileData.type || '').indexOf('image/') === 0
+      ? el('img', { src: fileData.dataUrl, class: 'ai-file-thumb' })
+      : el('div', { class: 'ai-file-icon' }, '📄');
+    var sizeLabel = fileData.size
+      ? Math.round(fileData.size / 1024)
+      : Math.round(((fileData.dataUrl || '').length * 3 / 4) / 1024);
+    var info = el('span', { class: 'ai-file-info', text: fileData.name + ' (' + sizeLabel + 'KB)' });
+    var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
+    removeBtn.addEventListener('click', function() {
+      if (typeof onRemove === 'function') onRemove();
+    });
+    filePreview.appendChild(thumb);
+    filePreview.appendChild(info);
+    filePreview.appendChild(removeBtn);
+    filePreview.style.display = 'flex';
+  }
+
+  function bindAiComposerPasteDrop(targets, onFile) {
+    var list = (Array.isArray(targets) ? targets : [targets]).filter(Boolean);
+    var dragDepth = 0;
+    var dropHost = null;
+    var cleanups = [];
+    for (var t = 0; t < list.length; t++) {
+      if (list[t] && list[t].classList && (
+        list[t].classList.contains('ai-chat-input-bar') ||
+        list[t].classList.contains('dt-input-bar') ||
+        list[t].classList.contains('dt-input-area') ||
+        list[t].classList.contains('dt-composer')
+      )) {
+        dropHost = list[t];
+        break;
+      }
+    }
+    if (!dropHost) {
+      for (var u = 0; u < list.length; u++) {
+        if (list[u]) { dropHost = list[u]; break; }
+      }
+    }
+
+    function setDropActive(on) {
+      if (!dropHost) return;
+      if (on) dropHost.classList.add('is-file-dragover');
+      else dropHost.classList.remove('is-file-dragover');
+    }
+
+    function onPaste(e) {
+      var media = extractClipboardAiFile(e.clipboardData || window.clipboardData);
+      if (!media) return;
+      e.preventDefault();
+      onFile(media);
+    }
+
+    function onDragEnter(e) {
+      if (!dataTransferHasFiles(e)) return;
+      e.preventDefault();
+      dragDepth++;
+      setDropActive(true);
+    }
+    function onDragOver(e) {
+      if (!dataTransferHasFiles(e)) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'copy'; } catch (err) {}
+      setDropActive(true);
+    }
+    function onDragLeave(e) {
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDropActive(false);
+    }
+    function onDrop(e) {
+      if (!dataTransferHasFiles(e)) return;
+      e.preventDefault();
+      dragDepth = 0;
+      setDropActive(false);
+      var media = pickFirstAiAttachment(e.dataTransfer && e.dataTransfer.files);
+      if (media) onFile(media);
+      else notify('请拖入图片或支持的文件');
+    }
+    function onDragEnd() {
+      dragDepth = 0;
+      setDropActive(false);
+    }
+
+    list.forEach(function(node) {
+      if (!node || !node.addEventListener) return;
+      node.addEventListener('paste', onPaste);
+      cleanups.push(function() { node.removeEventListener('paste', onPaste); });
+    });
+
+    if (dropHost) {
+      dropHost.addEventListener('dragenter', onDragEnter);
+      dropHost.addEventListener('dragover', onDragOver);
+      dropHost.addEventListener('dragleave', onDragLeave);
+      dropHost.addEventListener('drop', onDrop);
+      dropHost.addEventListener('dragend', onDragEnd);
+      cleanups.push(function() {
+        dropHost.removeEventListener('dragenter', onDragEnter);
+        dropHost.removeEventListener('dragover', onDragOver);
+        dropHost.removeEventListener('dragleave', onDragLeave);
+        dropHost.removeEventListener('drop', onDrop);
+        dropHost.removeEventListener('dragend', onDragEnd);
+        setDropActive(false);
+      });
+    }
+
+    return function cleanupAiComposerPasteDrop() {
+      cleanups.forEach(function(fn) { try { fn(); } catch (e) {} });
+      cleanups = [];
+    };
+  }
+
+  // 仅解码本文件 escapeHtml/escapeAttr 会引入的五个实体（用于显示场景还原，
+  // 不引入任意实体解码，避免二次注入面）。
+  function aiDecodeHtmlEntities(str) {
+    return String(str == null ? '' : str)
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#x27;/g, "'");
+  }
+
+  function renderMarkdown(txt, streaming) {
+    if (!txt) return '';
+    var s = String(txt);
+    // ★ 先提取代码块，避免重复转义
+    var codeBlocks = [];
+    function escapeCode(code) {
+      return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    // ★ 2026-09-22 流式容错：未闭合的代码围栏也必须按代码块渲染。
+    //   旧实现只匹配**已闭合**的 ```…```，流式中途（模型刚吐出 ```js\n
+    //   还没给结尾围栏）整块匹配不上，于是裸反引号被当作普通正文转义后
+    //   直接显示给用户 —— 屏幕上先闪出一串 ```，等闭合围栏到达的瞬间又
+    //   整块突变（跳）成 <pre> 代码块。这就是"闪一下 / 跳一下"的直接来源。
+    //   现在：先处理已闭合的，再单独兜住"只有开头围栏"的尾部残余。
+    s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
+      var idx = codeBlocks.length;
+      // 代码块只转义一次
+      codeBlocks.push('<pre><code>' + escapeCode(code) + '</code></pre>');
+      return '\x00XCB' + idx + '\x00';
+    });
+    // 未闭合围栏：到字符串末尾仍未出现结束 ```（流式进行中的常态）。
+    // 用 [\s\S]*$ 兜住尾部，同样渲染为代码块 —— 闭合到来时只是内容增长，
+    // 不会发生"裸文本 → 代码块"的形态突变。
+    s = s.replace(/```(\w*)\n([\s\S]*)$/, function(m, lang, code) {
+      var idx = codeBlocks.length;
+      codeBlocks.push('<pre><code>' + escapeCode(code.replace(/\n$/, '')) + '</code></pre>');
+      return '\x00XCB' + idx + '\x00';
+    });
+    // Some providers flatten Markdown blocks into one line. Repair only clear
+    // block boundaries; fenced and inline code keep their literal contents.
+    var inlineCode = [];
+    s = s.replace(/`[^`\n]*`/g, function(code) { inlineCode.push(code); return '\x00XIC' + (inlineCode.length - 1) + '\x00'; });
+    s = s.replace(/([^\n])[ \t]+(#{1,6})[ \t]+/g, '$1\n\n$2 ');
+    s = s.replace(/[^\n]+/g, function(line) {
+      if (!/\|[ \t]*:?-{3,}:?[ \t]*\|/.test(line) || !/\|[ \t]+\|/.test(line)) return line;
+      var firstPipe = line.indexOf('|'), prefix = line.slice(0, firstPipe).trim();
+      var lastPipe = line.lastIndexOf('|'), suffix = line.slice(lastPipe + 1).trim();
+      var rows = line.slice(firstPipe, lastPipe + 1).split(/\|[ \t]+\|/);
+      var separatorIndex = rows.findIndex(function(row) { return /^\s*\|?[ \t]*:?-{3,}:?(?:[ \t]*\|[ \t]*:?-{3,}:?)+[ \t]*\|?\s*$/.test(row); });
+      if (separatorIndex !== 1 || rows.length < 3) return line;
+      return (prefix ? prefix + '\n\n' : '\n\n') + rows.map(function(row) { return '|' + row.trim().replace(/^\|/, '').replace(/\|$/, '') + '|'; }).join('\n') + '\n\n' + suffix;
+    });
+    s = s.replace(/\x00XIC(\d+)\x00/g, function(_, index) { return inlineCode[Number(index)] || ''; });
+    // ★ 普通正文：HTML 转义
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    // 图片: 只允许 data:image/ 协议
+    s = s.replace(/!\[([^\]]*)\]\(data:image\/([^;]+);base64,([^)]+)\)/g, function(m, alt, ext, b64) {
+      return '<img src="data:image/' + escapeAttr(ext) + ';base64,' + escapeAttr(b64) + '" alt="' + escapeAttr(aiDecodeHtmlEntities(alt)) + '" class="ai-uploaded-image" loading="lazy" style="max-width:100%;max-height:300px;border-radius:8px;margin:4px 0;">';
+    });
+    // 链接: 使用 DOM API 防 XSS, 白名单协议: http:, https:, mailto:
+    // ★ 安全: 用 new URL() 解析协议而非字符串前缀匹配。前缀匹配会被
+    //   实体编码 (如 java&#x09;script:) 或协议混淆 (如 https://x@javascript:)
+    //   绕过,交给浏览器解析后可能执行。URL 解析后浏览器会对协议做
+    //   规范化,这里再校验最终协议,双重防护。
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
+      // ★ 修复：正文先整体 HTML 转义（&→&amp;），此处提取到的 href 含实体，
+      // 若直接赋给 a.href（DOM 属性赋值不做实体解码），带 & 查询参数会被
+      // 请求为 ...&amp;b=2 而损坏。赋前先还原实体。
+      var cleanHref = aiDecodeHtmlEntities(String(href).trim());
+      var protocolOk = false;
+      try {
+        var parsedUrl = new URL(cleanHref, window.location && window.location.origin ? window.location.origin : 'https://xtj.local');
+        var proto = String(parsedUrl.protocol || '').toLowerCase();
+        protocolOk = (proto === 'http:' || proto === 'https:' || proto === 'mailto:');
+      } catch (_) { protocolOk = false; }
+      if (!protocolOk) {
+        if (cleanHref.toLowerCase().indexOf('data:') === 0) return '<span class="ai-file-link" title="' + escapeAttr(aiDecodeHtmlEntities(label)) + '">' + escapeHtml(aiDecodeHtmlEntities(label)) + '</span>';
+        return '<span class="ai-blocked-link" title="' + escapeAttr(aiDecodeHtmlEntities(label)) + '">' + escapeHtml(aiDecodeHtmlEntities(label)) + '</span>';
+      }
+      var a = document.createElement('a');
+      a.href = cleanHref;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = aiDecodeHtmlEntities(label);
+      return a.outerHTML;
+    });
+    s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+    s = s.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+    s = s.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+    s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    // Markdown tables: convert only blocks with a real separator row. The
+    // text has already been HTML-escaped above, so cell contents are safe to
+    // place in the generated table markup.
+    s = s.replace(/(?:^|\n)((?:\s*\|?[^\n]*\|[^\n]*(?:\n|$)){2,})/g, function (whole, block) {
+      var lines = block.trim().split(/\n/).map(function (line) { return line.trim(); });
+      if (lines.length < 2) return whole;
+      var separator = /^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?$/;
+      if (!separator.test(lines[1])) return whole;
+      function cells(line) {
+        var value = line.replace(/^\|\s*/, '').replace(/\s*\|$/, '');
+        return value.split('|').map(function (cell) { return cell.trim(); });
+      }
+      var header = cells(lines[0]);
+      var rows = lines.slice(2).map(cells);
+      var html = '<table><thead><tr>' + header.map(function (cell) { return '<th>' + cell + '</th>'; }).join('') + '</tr></thead>';
+      if (rows.length) {
+        html += '<tbody>' + rows.map(function (row) {
+          return '<tr>' + header.map(function (_, index) { return '<td>' + (row[index] || '') + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody>';
+      }
+      return (whole.charAt(0) === '\n' ? '\n' : '') + html;
+    });
+    s = s.replace(/^- (.+)$/gm, '<li class="ul-item">$1</li>');
+    s = s.replace(/(<li class="ul-item">.*<\/li>(?:\n+(?=<li class="ul-item">)|\n)?)+/g, function(m) {
+      return '<ul>' + m.replace(/ class="ul-item"/g, '').replace(/\n+/g, '') + '</ul>';
+    });
+    s = s.replace(/^\d+\. (.+)$/gm, '<li class="ol-item">$1</li>');
+    s = s.replace(/(<li class="ol-item">.*<\/li>(?:\n+(?=<li class="ol-item">)|\n)?)+/g, function(m) {
+      return '<ol>' + m.replace(/ class="ol-item"/g, '').replace(/\n+/g, '') + '</ol>';
+    });
+    // ★ 恢复代码块
+    s = s.replace(/\x00XCB(\d+)\x00/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
+    // Parse only the already-escaped markup. Paragraph boundaries belong to
+    // layout, rather than extra <br> rows around headings, lists and code.
+    var holder = document.createElement('div'); holder.innerHTML = s;
+    var output = document.createElement('div'), paragraph = document.createElement('p');
+    function flushParagraph() {
+      while (paragraph.firstChild && (paragraph.firstChild.nodeName === 'BR' ||
+        (paragraph.firstChild.nodeType === 3 && !paragraph.firstChild.data.trim()))) paragraph.firstChild.remove();
+      while (paragraph.lastChild && (paragraph.lastChild.nodeName === 'BR' ||
+        (paragraph.lastChild.nodeType === 3 && !paragraph.lastChild.data.trim()))) paragraph.lastChild.remove();
+      if (paragraph.childNodes.length) output.appendChild(paragraph);
+      paragraph = document.createElement('p');
+    }
+    Array.from(holder.childNodes).forEach(function(node) {
+      if (node.nodeType === 1 && /^(H[1-6]|UL|OL|TABLE|PRE|BLOCKQUOTE|HR)$/.test(node.nodeName)) {
+        flushParagraph(); output.appendChild(node); return;
+      }
+      if (node.nodeType !== 3) { paragraph.appendChild(node); return; }
+      node.data.split(/(\n[ \t]*\n+)/).forEach(function(part) {
+        if (/^\n[ \t]*\n/.test(part)) { flushParagraph(); return; }
+        part.split('\n').forEach(function(line, index) {
+          if (index && paragraph.childNodes.length) paragraph.appendChild(document.createElement('br'));
+          if (line && (line.trim() || paragraph.childNodes.length)) paragraph.appendChild(document.createTextNode(line));
+        });
+      });
+    });
+    flushParagraph();
+    return output.innerHTML;
+  }
+
+  function setupBubbleCopy(bubbleEl, containerEl) {
+    if (!bubbleEl || !bubbleEl.parentNode) return;
+    var _longPressTimer = null;
+    var _longPressStarted = false;
+    // L10 修复：原文为 UTF-8 被按 GBK 解读产生的乱码注释，恢复正确文案
+    // ★ U3: AbortController 管理所有监听器，移除时统一清理
+    var _bubbleAbort = new AbortController();
+
+    function getBubbleText() {
+      return (bubbleEl.textContent || '').trim();
+    }
+
+    function showCopyMenu(ev) {
+      if (_copyMenuActive && _copyMenuActive.isConnected) return;
+      if (_copyMenuActive && !_copyMenuActive.isConnected) _copyMenuActive = null;
+      ev.preventDefault();
+      ev.stopPropagation();
+      var text = getBubbleText();
+      if (!text) return;
+      closeCopyMenu();
+      var rect = bubbleEl.getBoundingClientRect();
+      var menu = el('div', { class: 'ai-copy-menu' });
+      var btn = el('button', {
+        type: 'button',
+        class: 'ai-copy-btn',
+        text: '复制'
+      });
+      btn.addEventListener('mouseenter', function() { btn.style.background = 'rgba(46,148,101,0.06)'; });
+      btn.addEventListener('mouseleave', function() { btn.style.background = ''; });
+      btn.addEventListener('click', function(ce) {
+        ce.preventDefault(); ce.stopPropagation();
+        doCopy(text);
+        closeCopyMenu();
+      });
+      menu.appendChild(btn);
+      document.body.appendChild(menu);
+      _copyMenuActive = menu;
+      // ★★★ 2026-09-15 修复（P1-8「复制按钮飘到上面/位置错乱」）：
+      //   症状（用户截图实证）：AI 回复完成后，那个"复制"浮层出现在消息气泡
+      //   **上方的顶部区域**，而不是手指长按的位置附近。
+      //   根因：`position: fixed` 菜单使用 `getBoundingClientRect()` 的视口坐标
+      //   定位（这一步是对的），但**菜单创建后没有任何"跟随/失效"机制**：
+      //   ① 用户长按后页面一旦滚动（或键盘弹出、视口尺寸变化），气泡位置改变，
+      //      菜单却停在原地 → 视觉上就"飘"到了别处（常见于移动端长按后滚动）；
+      //   ② 长按期间 pointermove 取消逻辑不完整时，菜单会在滚动后残留。
+      //      实测表现：气泡已滚到下方，菜单仍停留在滚动前的顶部坐标。
+      //   修复：菜单创建后监听 scroll / resize / 视口变化，任一发生即关闭菜单；
+      //   同时在定位时对 left 做上下界约束，避免小视口下溢出到屏幕外。
+      var menuRect = menu.getBoundingClientRect();
+      var left = Math.min(rect.left, window.innerWidth - menuRect.width - 8);
+      var top = rect.bottom + 4;
+      if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 4;
+      // 上下界约束：确保菜单始终完整落在视口内（此前只约束了下界 8）
+      var maxTop = window.innerHeight - menuRect.height - 8;
+      top = Math.min(Math.max(8, top), Math.max(8, maxTop));
+      menu.style.left = Math.max(8, left) + 'px';
+      menu.style.top = top + 'px';
+      // ★ U3: 用 AbortController 关闭旧的 document 监听器
+      if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
+      _menuAbort = new AbortController();
+      var currentAbort = _menuAbort;
+      var _menuSig = _menuAbort.signal;
+      // 滚动/缩放即关闭：菜单是"瞬时操作入口"，不应在页面变动后残留错位
+      var _onMenuViewportChange = function() {
+        if (currentAbort && !currentAbort.signal.aborted) closeCopyMenu();
+      };
+      window.addEventListener('scroll', _onMenuViewportChange, { signal: _menuSig, passive: true, capture: true });
+      window.addEventListener('resize', _onMenuViewportChange, { signal: _menuSig, passive: true });
+      if (window.visualViewport) {
+        try { window.visualViewport.addEventListener('resize', _onMenuViewportChange, { signal: _menuSig }); } catch (e) {}
+        try { window.visualViewport.addEventListener('scroll', _onMenuViewportChange, { signal: _menuSig, passive: true }); } catch (e) {}
+      }
+      setTimeout(function() {
+        if (!currentAbort || currentAbort.signal.aborted) return;
+        document.addEventListener('click', function onDoc(ce2) {
+          if (!menu.contains(ce2.target) && ce2.target !== bubbleEl) {
+            closeCopyMenu();
+          }
+        }, { signal: _menuSig, once: true });
+      }, 0);
+    }
+
+    function startLongPress(ev) {
+      if (ev.pointerType === 'touch' || ev.pointerType === 'pen') {
+        _longPressStarted = false;
+        _longPressTimer = setTimeout(function() {
+          _longPressStarted = true;
+          showCopyMenu(ev);
+        }, 500);
+      }
+    }
+
+    function cancelLongPress(ev) {
+      if (_longPressTimer) {
+        clearTimeout(_longPressTimer);
+        _longPressTimer = null;
+      }
+      if (ev && ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
+      if (_longPressStarted) {
+        ev && ev.preventDefault();
+        _longPressStarted = false;
+      }
+    }
+
+    // ★ U3: 所有事件监听统一通过 AbortController 管理
+    bubbleEl.addEventListener('pointerdown', startLongPress, { signal: _bubbleAbort.signal });
+    bubbleEl.addEventListener('pointerup', cancelLongPress, { signal: _bubbleAbort.signal });
+    bubbleEl.addEventListener('pointercancel', cancelLongPress, { signal: _bubbleAbort.signal });
+    bubbleEl.addEventListener('pointermove', function(ev) {
+      if (_longPressTimer && ev.pointerType === 'touch') {
+        clearTimeout(_longPressTimer);
+        _longPressTimer = null;
+      }
+    }, { signal: _bubbleAbort.signal });
+    bubbleEl.addEventListener('contextmenu', function(ev) {
+      var text = getBubbleText();
+      if (text) showCopyMenu(ev);
+    }, { signal: _bubbleAbort.signal });
+
+    // 暴露 cleanup 钩子供软删除时调用
+    bubbleEl._aiCleanupBubble = function() {
+      try { _bubbleAbort.abort(); } catch (e) {}
+      if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
+      if (_longPressTimer) { try { clearTimeout(_longPressTimer); } catch (e) {} }
+    };
+  }
+
+  // ★ 2026-09-13 修复（P-23）：分享失败此前被 .catch(function(){}) 完全静默吞掉，
+  //   用户点「分享」后若失败（权限被拒 / 不支持该内容类型 / 非用户取消的真实错误），
+  //   界面毫无反应，只能反复点击。此处区分两类情况：
+  //   - AbortError：用户在系统面板里主动取消 —— 不做任何提示（属正常交互）；
+  //   - 其他错误：明确提示并提供降级（复制到剪贴板），保证用户目标能达成。
+  function handleShareError(err, text) {
+    var name = (err && err.name) || '';
+    if (name === 'AbortError' || /abort|cancel/i.test(String((err && err.message) || ''))) return;
+    try {
+      var msg = '分享失败';
+      if (name === 'NotAllowedError') msg = '分享被系统拒绝（可能未授予权限）';
+      else if (name === 'TypeError') msg = '当前内容不支持分享';
+      else if (err && err.message) msg = '分享失败: ' + err.message;
+      notify(msg + '，已为你复制到剪贴板');
+    } catch (e) {}
+    try { doCopy(text); } catch (e) {}
+  }
+
+  function doCopy(text) {
+    if (!text) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+          try { notify('已复制'); } catch (e) {}
+        }).catch(function() {
+          fallbackCopy(text);
+        });
+      } else {
+        fallbackCopy(text);
+      }
+    } catch (e) {
+      fallbackCopy(text);
+    }
+  }
+
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      try { notify('已复制'); } catch (e) {}
+    } catch (e) {
+      try { notify('复制失败，请手动选择文本'); } catch (e2) {}
+    }
+  }
+
+  function getAiRoot() {
+    return S.rootEl || document.getElementById('aiChatRoot');
+  }
+
+  function updateRootVar(name, value) {
+    var root = getAiRoot();
+    if (root) root.style.setProperty(name, value);
+  }
+
+  function clearReplyTimer() {
+    if (!S.replyTimer) return;
+    try { clearTimeout(S.replyTimer); } catch (e) {}
+    S.replyTimer = null;
+  }
+
+  function clearStreamCleanup() {
+    if (!S.streamCleanup) return;
+    try { S.streamCleanup(); } catch (e) {}
+    S.streamCleanup = null;
+  }
+
+  function triggerAvatarPop() {
+    var root = getAiRoot();
+    if (!root) return;
+    root.classList.remove('ai-avatar-pop');
+    try { void root.offsetWidth; } catch (e) {}
+    root.classList.add('ai-avatar-pop');
+    if (S.avatarPopTimer) {
+      try { clearTimeout(S.avatarPopTimer); } catch (e2) {}
+    }
+    S.avatarPopTimer = setTimeout(function() {
+      var root2 = getAiRoot();
+      if (root2) root2.classList.remove('ai-avatar-pop');
+      S.avatarPopTimer = null;
+    }, 240);
+  }
+
+  function setAiRootState(state) {
+    var root = getAiRoot();
+    if (!root) return;
+    root.classList.remove('ai-idle', 'ai-thinking', 'ai-replying');
+    root.classList.add(state || 'ai-idle');
+    if (state === 'ai-replying') triggerAvatarPop();
+  }
+
+  function buildCatAvatarMarkup(extraClass) {
+    return (
+      '<span class="ai-cat-avatar' + (extraClass ? ' ' + extraClass : '') + '" aria-hidden="true">' +
+        '<span class="ai-cat-aura"></span>' +
+        '<span class="ai-cat-ring"></span>' +
+        '<svg class="ai-cat-svg" viewBox="0 0 72 72" focusable="false" aria-hidden="true">' +
+          '<defs>' +
+            '<linearGradient id="aiCatFaceGrad" x1="0%" y1="0%" x2="100%" y2="100%">' +
+              '<stop offset="0%" stop-color="#fffaf2"></stop>' +
+              '<stop offset="55%" stop-color="#f0f8ef"></stop>' +
+              '<stop offset="100%" stop-color="#dff3ef"></stop>' +
+            '</linearGradient>' +
+          '</defs>' +
+          '<path class="ai-cat-head" d="M21 23 L28 12 C29 10 31 9 33 10 L36 15 L39 10 C41 9 43 10 44 12 L51 23 C56 27 59 33 59 40 C59 52 49 61 36 61 C23 61 13 52 13 40 C13 33 16 27 21 23 Z"></path>' +
+          '<path class="ai-cat-inner-ear" d="M27.8 21.4 L31.2 14.8 L34.2 22.2 Z"></path>' +
+          '<path class="ai-cat-inner-ear" d="M44.2 21.4 L40.8 14.8 L37.8 22.2 Z"></path>' +
+          '<path class="ai-cat-brow" d="M26.4 31.6 C28 30.4 29.6 30 31.2 30.4"></path>' +
+          '<path class="ai-cat-brow" d="M40.8 30.4 C42.4 30 44 30.4 45.6 31.6"></path>' +
+          '<ellipse class="ai-cat-eye" cx="29.6" cy="35.8" rx="2.2" ry="3.2"></ellipse>' +
+          '<ellipse class="ai-cat-eye" cx="42.4" cy="35.8" rx="2.2" ry="3.2"></ellipse>' +
+          '<path class="ai-cat-mouth" d="M33.8 41.6 C35.2 43.1 36.8 43.1 38.2 41.6"></path>' +
+          '<path class="ai-cat-mouth" d="M36 39.2 L36 42.4"></path>' +
+          '<path class="ai-cat-mouth" d="M28.6 43.8 C31.1 44.6 33 44.7 34.8 44.2"></path>' +
+          '<path class="ai-cat-mouth" d="M43.4 43.8 C40.9 44.6 39 44.7 37.2 44.2"></path>' +
+        '</svg>' +
+      '</span>'
+    );
+  }
+
+  function renderHeaderAvatar(target, avatarUrl, avatarVersion) {
+    if (!target) return;
+    // ★ U3: 如果 version 相同且已有内容，跳过重建 (避免每分钟重新下载头像)
+    if (target._aiAvatarVersion === avatarVersion && target._aiAvatarUrl === avatarUrl && target.children.length > 0) {
+      return;
+    }
+    target._aiAvatarVersion = avatarVersion;
+    target._aiAvatarUrl = avatarUrl;
+    target.innerHTML = '';
+    if (avatarUrl) {
+      var wrapper = el('span', { class: 'ai-avatar-image-wrapper' });
+      var img = el('img', { class: 'ai-avatar-image', alt: '', loading: 'lazy' });
+      img.src = avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '');
+      img.addEventListener('error', function() {
+        img.style.display = 'none';
+        wrapper.innerHTML = buildCatAvatarMarkup('');
+      });
+      wrapper.appendChild(img);
+      target.appendChild(wrapper);
+    } else {
+      target.innerHTML = buildCatAvatarMarkup('');
+    }
+  }
+
+  function renderCatAvatarNode(target, extraClass, avatarUrl, avatarVersion) {
+    if (!target) return;
+    target.innerHTML = '';
+    if (avatarUrl) {
+      var wrapper = el('span', { class: 'ai-avatar-image-wrapper' });
+      var img = el('img', { class: 'ai-avatar-image', alt: '', loading: 'lazy' });
+      img.src = avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '');
+      img.addEventListener('error', function() {
+        img.style.display = 'none';
+        wrapper.innerHTML = buildCatAvatarMarkup(extraClass || '');
+      });
+      wrapper.appendChild(img);
+      target.appendChild(wrapper);
+    } else {
+      target.innerHTML = buildCatAvatarMarkup(extraClass || '');
+    }
+  }
+
+  function isCompactAiHeader() {
+    return window.innerWidth <= 640;
+  }
+
+  function getNewButtonText() {
+    return isCompactAiHeader() ? '新' : '新对话';
+  }
+
+  function getHistoryButtonText(showingHistory) {
+    if (showingHistory) return isCompactAiHeader() ? '返回' : '返回聊天';
+    return '历史';
+  }
+
+  function syncAiHeaderButtons(histBtn, newBtn) {
+    if (!histBtn || !newBtn) return;
+    histBtn.textContent = getHistoryButtonText(!!S.showingHistory);
+    newBtn.textContent = getNewButtonText();
+  }
+
+  function bindAiHeaderButtons(histBtn, newBtn) {
+    function onResize() {
+      syncAiHeaderButtons(histBtn, newBtn);
+    }
+    var _onResizeWrapped = window.throttleRAF(onResize);
+    window.addEventListener('resize', _onResizeWrapped);
+    onResize();
+    return function() {
+      window.removeEventListener('resize', _onResizeWrapped);
+    };
+  }
+
+  function upgradeEmptyStateAvatar(scope) {
+    if (!scope || !scope.querySelectorAll) return;
+    var nodes = scope.querySelectorAll('.ai-chat-empty-emoji');
+    for (var i = 0; i < nodes.length; i++) {
+      renderCatAvatarNode(nodes[i], 'ai-chat-empty-avatar');
+    }
+  }
+
+  function appendEmptyState(container, tipText) {
+    if (!container) return null;
+    var node = buildEmptyState(tipText);
+    container.appendChild(node);
+    upgradeEmptyStateAvatar(container);
+    return node;
+  }
+
+  function normalizeDateKey(dateValue) {
+    if (!dateValue) return '';
+    var d = window.safeParseDate(dateValue);
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function getConversationGroupLabel(dateValue) {
+    var d = window.safeParseDate(dateValue || 0);
+    if (isNaN(d.getTime())) return '更早';
+    var now = new Date();
+    var todayKey = normalizeDateKey(now);
+    var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    var dateKey = normalizeDateKey(d);
+    if (dateKey === todayKey) return '今天';
+    if (dateKey === normalizeDateKey(yesterday)) return '昨天';
+    return '更早';
+  }
+
+  function getConversationPreview(conv) {
+    if (!conv) return '继续这段对话';
+    var preview = conv.summary || conv.preview || conv.last_message || conv.last_message_preview || '';
+    preview = String(preview || '').replace(/\s+/g, ' ').trim();
+    return preview || '继续这段对话';
+  }
+
+  function getConversationCountText(conv) {
+    var count = Number(conv && (conv.message_count || conv.messages_count || conv.turn_count || conv.count));
+    if (!isFinite(count) || count <= 0) return '消息数未知';
+    return count + ' 条消息';
+  }
+
+  function writeConvId(v) {
+    try {
+      // ★ 修复：存储键并入用户名，防止同一浏览器多账号切换时串会话
+      var un = readUserName();
+      var key = CONV_ID_KEY + (un ? ':' + encodeURIComponent(un) : '');
+      if (v) localStorage.setItem(key, v);
+      else localStorage.removeItem(key);
+    } catch (e) {}
+  }
+
+  function readConvId() {
+    try {
+      var un = readUserName();
+      var key = CONV_ID_KEY + (un ? ':' + encodeURIComponent(un) : '');
+      var v = localStorage.getItem(key);
+      if (v && /^[A-Z0-9\-]{6,}$/i.test(v)) return v;
+      // 兼容旧版无用户名前缀的键
+      var legacy = localStorage.getItem(CONV_ID_KEY);
+      if (legacy && /^[A-Z0-9\-]{6,}$/i.test(legacy)) return legacy;
+    } catch (e) {}
+    return '';
+  }
+
+  function readUserName() {
+    if (window.currentUser) {
+      if (typeof window.currentUser === 'string' && window.currentUser.indexOf('[object Object]') === -1) return window.currentUser;
+      if (window.currentUser.user_name) return window.currentUser.user_name;
+      if (window.currentUser.name) return window.currentUser.name;
+    }
+    for (var i = 0; i < USER_NAME_KEYS.length; i++) {
+      try {
+        var v = localStorage.getItem(USER_NAME_KEYS[i]);
+        if (v) return v;
+      } catch (e) {}
+      try {
+        var sv = sessionStorage.getItem(USER_NAME_KEYS[i]);
+        if (sv) return sv;
+      } catch (e2) {}
+    }
+    return '';
+  }
+
+  function getAiHistoryCacheUserKey() {
+    var un = readUserName();
+    if (!un || un.indexOf('[object Object]') !== -1) return null;
+    return encodeURIComponent(un);
+  }
+
+  function getAiHistoryCacheKey(cid, mode) {
+    var uk = getAiHistoryCacheUserKey();
+    if (!uk) return null;
+    mode = mode || 'normal';
+    return 'xtj_ai_history:' + uk + ':' + encodeURIComponent(mode) + ':' + encodeURIComponent(cid || 'default');
+  }
+
+  function getLegacyAiHistoryCacheKey(cid) {
+    var uk = getAiHistoryCacheUserKey();
+    if (!uk) return null;
+    return 'xtj_ai_history:' + uk + ':' + encodeURIComponent(cid || 'default');
+  }
+
+  function extractCompleteTurns(msgs, maxTurns) {
+    if (!Array.isArray(msgs) || !msgs.length) return [];
+    maxTurns = maxTurns || 6;
+    var turns = [];
+    var currentTurn = [];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      if (!m) continue;
+      if (m.role === 'user') {
+        if (currentTurn.length > 0) {
+          if (currentTurn.some(function(tm) { return tm && (tm.role === 'assistant' || tm.interrupted === true); })) {
+            turns.push(currentTurn);
+          }
+        }
+        currentTurn = [m];
+      } else {
+        if (currentTurn.length > 0) {
+          currentTurn.push(m);
+        }
+      }
+    }
+    if (currentTurn.length > 0 && currentTurn.some(function(tm) { return tm && (tm.role === 'assistant' || tm.interrupted === true); })) {
+      turns.push(currentTurn);
+    }
+    var recentTurns = turns.slice(-maxTurns);
+    var resultMsgs = [];
+    recentTurns.forEach(function(t) {
+      resultMsgs = resultMsgs.concat(t);
+    });
+    return resultMsgs;
+  }
+
+  // ★ 缓存体积保护：图片 data URL 可能达数 MB，而 sessionStorage 配额约 5MB，
+  //   序列化前把内联图片替换为占位标记，避免缓存静默失败导致刷新后本地历史缺失。
+  function sanitizeCacheMsgs(msgs) {
+    var out = [];
+    for (var si = 0; si < msgs.length; si++) {
+      var m = msgs[si];
+      if (!m) { out.push(m); continue; }
+      var c = String(m.content || '');
+      var hasDataUrl = c.indexOf('data:') !== -1 || /!\[[^\]]*\]\(data:/.test(c);
+      // ★ 2026-09-13 修复（P-18 残留）：此前只清理 content，漏了 vision_urls。
+      //   用户消息的 vision_urls 存的就是原始 data URL（见历史恢复处构造 attachments），
+      //   单张 7MB 图 × 多张会轻松突破 sessionStorage 约 5MB 配额，
+      //   触发 QuotaExceededError 被 catch 静默吞掉 → 刷新后本地历史整段丢失。
+      var vus = m.vision_urls;
+      var hasVisionData = Array.isArray(vus) && vus.some(function(u) { return String(u || '').indexOf('data:') === 0; });
+      var atts = Array.isArray(m.attachments) ? m.attachments : [];
+      var hasAttachmentData = atts.some(function(a) {
+        return !!(a && (String(a.data_url || '').indexOf('data:') === 0 || String(a.dataUrl || '').indexOf('data:') === 0));
+      });
+      if (!hasDataUrl && !hasVisionData && !hasAttachmentData) { out.push(m); continue; }
+      var copy = {};
+      for (var k in m) {
+        if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
+      }
+      if (hasDataUrl) {
+        copy.content = c
+          .replace(/!\[([^\]]*)\]\(data:[^)]+\)/g, '[图片: $1]')
+          .replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[图片数据]');
+      }
+      if (hasVisionData) {
+        // 换成同长度的占位标记，保留数组结构（长度/下标），
+        // 这样缓存命中后仍是"这条消息有几张图"，只是图本身需要联网重取。
+        copy.vision_urls = vus.map(function(u) {
+          return String(u || '').indexOf('data:') === 0 ? '[图片数据]' : u;
+        });
+      }
+      if (hasAttachmentData) {
+        copy.attachments = atts.map(function(a) {
+          if (!a || (!a.data_url && !a.dataUrl)) return a;
+          var clean = {};
+          for (var ak in a) {
+            if (Object.prototype.hasOwnProperty.call(a, ak) && ak !== 'data_url' && ak !== 'dataUrl') clean[ak] = a[ak];
+          }
+          clean.data_unavailable = true;
+          return clean;
+        });
+      }
+      out.push(copy);
+    }
+    return out;
+  }
+
+  // Build a compact prior-turn history. The current turn is sent separately as
+  // `message` and top-level `attachments`, so it must never also appear in `messages`.
+  function stripAiHistoryAttachmentData(content) {
+    return String(content || '')
+      .replace(/!\[([^\]]*)\]\(data:[^)]+\)/g, '[图片: $1]')
+      .replace(/data:[^;,\s]+;base64,[A-Za-z0-9+/=\r\n]+/g, '[附件数据]')
+      .replace(/【用户上传图片的可读文字[\s\S]*?--- 图片文字结束 ---/g, ' ')
+      .replace(/【用户上传图片 ·[\s\S]*?(?=【|$)/g, ' ')
+      .replace(/【图片 OCR[\s\S]*?(?=【|$)/g, ' ')
+      .replace(/【用户上传文件:[\s\S]*?【文件结束】/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function buildAiConversationHistory(maxMessages, maxChars, currentUserMsg, currentAttachments) {
+    var source = Array.isArray(S.messages) ? S.messages : [];
+    var candidates = [];
+    for (var i = 0; i < source.length; i++) {
+      var msg = source[i];
+      if (!msg || msg === currentUserMsg) continue;
+      var role = String(msg.role || '');
+      if (role !== 'user' && role !== 'assistant') continue;
+      if (!String(msg.content || '').trim() && !(Array.isArray(msg.attachments) && msg.attachments.length)) continue;
+      candidates.push(msg);
+    }
+    var cap = Math.max(1, Number(maxMessages) || CONTEXT_LIMIT_NORMAL);
+    candidates = candidates.slice(-cap);
+
+    // Stay below the server's 80 MiB JSON parser limit, leaving headroom for
+    // current-turn attachments, message text, and JSON encoding overhead.
+    var historyDataBudget = 68 * 1024 * 1024;
+    var current = Array.isArray(currentAttachments) ? currentAttachments : [];
+    var currentAttachmentCount = 0;
+    for (var ci = 0; ci < current.length; ci++) {
+      var currentUrl = String(current[ci] && (current[ci].data_url || current[ci].dataUrl) || '');
+      if (currentUrl.indexOf('data:') === 0) {
+        historyDataBudget -= currentUrl.length;
+        currentAttachmentCount++;
+      }
+    }
+    historyDataBudget = Math.max(0, historyDataBudget);
+    var historyDataUsed = 0;
+    var attachmentCount = Math.min(10, currentAttachmentCount);
+    var result = [];
+    var charCap = Math.max(1, Number(maxChars) || MSG_MAX_CHARS_NORMAL);
+
+    for (var hi = candidates.length - 1; hi >= 0; hi--) {
+      var item = candidates[hi];
+      var itemRole = String(item.role || '');
+      var itemContent = stripAiHistoryAttachmentData(item.content || '');
+      var itemAttachments = Array.isArray(item.attachments) ? item.attachments : [];
+      var forwarded = [];
+      var omittedNames = [];
+      for (var ai = 0; ai < itemAttachments.length; ai++) {
+        var attachment = itemAttachments[ai];
+        if (!attachment || typeof attachment !== 'object') continue;
+        var name = String(attachment.name || '附件').slice(0, 120);
+        var type = String(attachment.type || 'application/octet-stream').slice(0, 120);
+        var dataUrl = String(attachment.data_url || attachment.dataUrl || '');
+        if (dataUrl.indexOf('data:') === 0 && attachmentCount < 10 && historyDataUsed + dataUrl.length <= historyDataBudget) {
+          forwarded.push({ name: name, type: type, data_url: dataUrl });
+          historyDataUsed += dataUrl.length;
+          attachmentCount++;
+        } else {
+          omittedNames.push(name);
+        }
+      }
+      if (itemAttachments.length) {
+        var attachmentNote = itemAttachments.map(function(a) { return String((a && a.name) || '附件').slice(0, 120); }).join('、');
+        if (attachmentNote) itemContent = (itemContent ? itemContent + ' ' : '') + '[此前上传附件: ' + attachmentNote + ']';
+      }
+      if (omittedNames.length) {
+        itemContent += ' [历史附件数据未随本次请求发送: ' + omittedNames.join('、') + ']';
+      }
+      var entry = { role: itemRole, content: itemContent.slice(0, charCap) };
+      if (forwarded.length) entry.attachments = forwarded;
+      if (Array.isArray(item.vision_urls) && item.vision_urls.length && !forwarded.length) {
+        entry.vision_urls = [];
+        for (var vi = 0; vi < item.vision_urls.length && attachmentCount < 10; vi++) {
+          var visionUrl = item.vision_urls[vi];
+          if (typeof visionUrl !== 'string' || visionUrl.indexOf('data:') !== 0 || historyDataUsed + visionUrl.length > historyDataBudget) continue;
+          entry.vision_urls.push(visionUrl);
+          historyDataUsed += visionUrl.length;
+          attachmentCount++;
+        }
+      }
+      result.push(entry);
+    }
+    result.reverse();
+    return result;
+  }
+
+  function normalizeAiHistoryMatchContent(msg) {
+    return stripAiHistoryAttachmentData(msg && msg.content || '')
+      .replace(/\[(?:本地)?(?:图片|文件)[^\]]*\]/g, ' ')
+      .replace(/\[📄[^\]]*\]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function aiHistoryMessagesMatch(local, remote) {
+    if (!local || !remote || String(local.role || '') !== String(remote.role || '')) return false;
+    if (local.client_request_id && remote.client_request_id) return local.client_request_id === remote.client_request_id;
+    var localText = normalizeAiHistoryMatchContent(local);
+    var remoteText = normalizeAiHistoryMatchContent(remote);
+    var localTime = Date.parse(local.created_at || local.createdAt || '');
+    var remoteTime = Date.parse(remote.created_at || remote.createdAt || '');
+    var hasCloseTime = isFinite(localTime) && isFinite(remoteTime) && Math.abs(localTime - remoteTime) <= 15 * 60 * 1000;
+    if (localText && remoteText) return localText === remoteText && (!isFinite(localTime) || !isFinite(remoteTime) || hasCloseTime);
+    if (localText || remoteText) return false;
+    var localAttachments = Array.isArray(local.attachments) ? local.attachments : [];
+    var remoteAttachments = Array.isArray(remote.attachments) ? remote.attachments : [];
+    function attachmentNames(msg, attachments) {
+      var names = attachments.map(function(a) { return String((a && a.name) || '').toLowerCase(); }).filter(Boolean);
+      if (!names.length) {
+        var raw = String(msg && msg.content || '');
+        var re = /(?:!\[([^\]]+)\]\(data:[^)]+\)|\[📄\s*([^\]·]+)|\[文件:\s*([^\]·]+)|【用户上传文件:\s*([^】\n]+))/g;
+        var match;
+        while ((match = re.exec(raw))) names.push(String(match[1] || match[2] || match[3] || match[4] || '').split(/[·（(]/)[0].trim().toLowerCase());
+      }
+      return names.filter(Boolean).sort();
+    }
+    var localNames = attachmentNames(local, localAttachments);
+    var remoteNames = attachmentNames(remote, remoteAttachments);
+    if (localNames.length && remoteNames.length && localNames.join('|') === remoteNames.join('|')) return !isFinite(localTime) || !isFinite(remoteTime) || hasCloseTime;
+    function imageCount(msg, attachments) {
+      var count = attachments.filter(function(a) {
+        return /^image\//i.test(String((a && a.type) || '')) || /^data:image\//i.test(String((a && (a.data_url || a.dataUrl)) || ''));
+      }).length;
+      return count || (Array.isArray(msg && msg.vision_urls) ? msg.vision_urls.length : 0);
+    }
+    var localImageCount = imageCount(local, localAttachments);
+    var remoteImageCount = imageCount(remote, remoteAttachments);
+    return localImageCount > 0 && localImageCount === remoteImageCount && (!isFinite(localTime) || !isFinite(remoteTime) || hasCloseTime);
+  }
+
+  function reconcileAiHistoryPending(pending, remoteMessages, liveMessages) {
+    var unmatched = [];
+    var remotes = Array.isArray(remoteMessages) ? remoteMessages : [];
+    var live = Array.isArray(liveMessages) ? liveMessages : [];
+    var remoteMatched = [];
+    var candidates = Array.isArray(pending) ? pending.slice(-40) : [];
+    for (var pi = 0; pi < candidates.length; pi++) {
+      var local = candidates[pi];
+      if (!local || live.indexOf(local) < 0) continue;
+      var bestMatch = -1;
+      var bestDelta = Infinity;
+      for (var ri = 0; ri < remotes.length; ri++) {
+        if (remoteMatched[ri] || !aiHistoryMessagesMatch(local, remotes[ri])) continue;
+        var localTime = Date.parse(local.created_at || local.createdAt || '');
+        var remoteTime = Date.parse(remotes[ri].created_at || remotes[ri].createdAt || '');
+        var delta = isFinite(localTime) && isFinite(remoteTime) ? Math.abs(localTime - remoteTime) : 0;
+        if (delta < bestDelta) { bestDelta = delta; bestMatch = ri; }
+      }
+      if (bestMatch >= 0) remoteMatched[bestMatch] = true;
+      else unmatched.push(local);
+    }
+    return unmatched.slice(-40);
+  }
+
+  function setAiHistoryCache(cid, msgs) {
+    var mode = arguments.length > 2 && arguments[2] ? String(arguments[2]) : 'normal';
+    var key = getAiHistoryCacheKey(cid, mode);
+    if (!key) return;
+    try {
+      var completeMsgs = sanitizeCacheMsgs(extractCompleteTurns(msgs, 6));
+      if (!completeMsgs.length) {
+        sessionStorage.removeItem(key);
+        return;
+      }
+      var cacheObj = {
+        conversation_id: cid || 'default',
+        messages: completeMsgs,
+        partial: true,
+        cached_at: Date.now()
+      };
+      sessionStorage.setItem(key, JSON.stringify(cacheObj));
+      // The first open after a reload has not resolved a conversation id yet.
+      // Keep a per-user latest alias so it can paint immediately while the server refreshes it.
+      if (cid) {
+        var latestKey = getAiHistoryCacheKey(null, mode);
+        if (latestKey && latestKey !== key) sessionStorage.setItem(latestKey, JSON.stringify(cacheObj));
+      }
+    } catch (e) {}
+  }
+
+  function getAiHistoryCache(cid) {
+    var mode = arguments.length > 1 && arguments[1] ? String(arguments[1]) : 'normal';
+    var key = getAiHistoryCacheKey(cid, mode);
+    if (!key) return null;
+    try {
+      var str = sessionStorage.getItem(key);
+      // Read legacy normal-chat entries once for backwards compatibility, but
+      // never write them again; deep/research mode can no longer collide with
+      // normal history in the new key space.
+      if (!str && mode === 'normal') str = sessionStorage.getItem(getLegacyAiHistoryCacheKey(cid));
+      if (!str) return null;
+      var obj = JSON.parse(str);
+      if (!obj) return null;
+      var rawMsgs = Array.isArray(obj) ? obj : (obj.messages && Array.isArray(obj.messages) ? obj.messages : null);
+      if (!rawMsgs || !rawMsgs.length) return null;
+      if (obj.conversation_id && cid && obj.conversation_id !== cid && obj.conversation_id !== 'default') return null;
+      var validMsgs = extractCompleteTurns(rawMsgs, 6);
+      if (!validMsgs.length) validMsgs = rawMsgs;
+      return { conversation_id: (obj && obj.conversation_id) || cid || 'default', messages: validMsgs, partial: true, cached_at: (obj && obj.cached_at) || 0 };
+    } catch (e) {}
+    return null;
+  }
+
+  function clearAiHistoryCacheForUser() {
+    var uk = getAiHistoryCacheUserKey();
+    try {
+      var keysToRemove = [];
+      for (var i = 0; i < sessionStorage.length; i++) {
+        var key = sessionStorage.key(i);
+        if (!key) continue;
+        if (uk && key.indexOf('xtj_ai_history:' + uk + ':') === 0) {
+          keysToRemove.push(key);
+        } else if (key.indexOf('xtj_ai_history:') === 0) {
+          // If no specific user, or clearing general AI history cache
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(function(k) { sessionStorage.removeItem(k); });
+    } catch (e) {}
+  }
+  window.clearAiHistoryCacheForUser = clearAiHistoryCacheForUser;
+
+  // ★ activeRenderers 按通道隔离：普通聊天与深页流式渲染共用同一个
+  // S.activeRenderers，深页取消/完成时只能清理 deep 通道的渲染器，
+  // 否则会误伤普通聊天正在流式输出的渲染器（暂停/继续按钮与
+  // abortAllAiRequests 的 cancel 兜底都依赖数组中的活跃渲染器）。
+  function resetActiveRenderersByChannel(channel) {
+    var keep = [];
+    var arr = S.activeRenderers || [];
+    for (var i = 0; i < arr.length; i++) {
+      var r = arr[i];
+      if (!r) continue;
+      if (r.channel && r.channel !== channel) {
+        keep.push(r);
+        continue;
+      }
+      if (typeof r.cancel === 'function') {
+        try { r.cancel(); } catch (eCancel) {}
+      }
+    }
+    S.activeRenderers = keep;
+  }
+
+  function interruptCurrentChat() {
+    var turn = S._interruptChat;
+    S._interruptChat = null;
+    // Snapshot the old turn while it still owns the UI, before a new send can
+    // append messages. Its late fetch/reader callbacks lose ownership below.
+    if (turn && typeof turn.stop === 'function') turn.stop();
+    S.sendSeq = (S.sendSeq || 0) + 1;
+    S._currentReqId = null;
+    abortCurrentRequest('chat');
+    setAiSendBtnDisabled(false);
+    setAiRootState('ai-idle');
+  }
+
+  function abortCurrentRequest(channelOnly) {
+    clearStreamCleanup();
+    // Phase 1: Cancel shared controller in-flight request
+    if (window.XtjAiCore && window.XtjAiCore.RequestController) {
+      var inFlight = window.XtjAiCore.RequestController.getInFlight('cat_ai');
+      if (inFlight && inFlight.isActive()) {
+        try { inFlight.cancel('aborted'); } catch (e) {}
+      }
+      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', inFlight);
+    }
+    if (S.abortController) {
+      try {
+        S.abortController._abortReason = 'aborted';
+        if (typeof S.abortController.abort === 'function') S.abortController.abort('aborted');
+      } catch (e) {}
+      S.abortController = null;
+    }
+    // ★ 修复：同时中止历史加载请求（独立 controller，避免与流式发送共用）
+    if (S.historyController) {
+      try {
+        S.historyController._abortReason = 'aborted';
+        if (typeof S.historyController.abort === 'function') S.historyController.abort('aborted');
+      } catch (e) {}
+      S.historyController = null;
+    }
+    S.sending = false;
+    S.paused = false;
+    S.loading = false;
+    S.loadingMore = false;
+    // ★ 修复：显式 cancel 所有活跃渲染器，防止未完成的 rAF 帧继续写入
+    // 旧 DOM（仅清空数组会让渲染器后台继续运行，快速打断+新消息时产生
+    // 交叉渲染/光标残留）
+    var liveRenderers = S.activeRenderers || [];
+    for (var rIdx = 0; rIdx < liveRenderers.length; rIdx++) {
+      var liveR = liveRenderers[rIdx];
+      // ★ 修复：按通道中止——普通聊天发送/切换会话时仅清理主聊天渲染器，
+      // 深页（channel 'deep'）渲染器保持；此前注释声称按通道隔离，此处却全量 cancel。
+      if (channelOnly) {
+        if (liveR && liveR.channel && liveR.channel !== channelOnly) continue;
+        if (liveR && liveR.channel === 'deep') continue;
+      }
+      if (liveR && typeof liveR.cancel === 'function') {
+        try { liveR.cancel(); } catch (eCancel) {}
+      }
+    }
+    S.activeRenderers = channelOnly
+      ? (S.activeRenderers || []).filter(function(r) { return r && r.channel === 'deep'; })
+      : [];
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+  }
+
+  // 深入研究与主聊天共用 S 状态但互为独立流程：
+  // 主聊天发送新消息时不得静默取消正在进行的深入研究研究（S6），
+  // 反之深入研究页发送时也不得取消主聊天回复。
+  // 该函数在"页面级关闭/登出"等全局场景才完整清理两套状态。
+  function abortAllAiRequests() {
+    abortCurrentRequest();
+    if (S.deepThinkJob) {
+      try {
+        S.deepThinkJob._abortReason = 'aborted';
+        if (typeof S.deepThinkJob.abort === 'function') S.deepThinkJob.abort('aborted');
+      } catch (e) {}
+      S.deepThinkJob = null;
+    }
+    if (S.deepThinkProgressCard) {
+      try { S.deepThinkProgressCard.classList.add('ai-progress-card-done'); } catch (e) {}
+      try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
+      try { if (S.deepThinkProgressCard.parentNode) S.deepThinkProgressCard.parentNode.removeChild(S.deepThinkProgressCard); } catch (e) {}
+      S.deepThinkProgressCard = null;
+    }
+  }
+  
+  function isAdminUser() {
+    try {
+      return !!(window.currentUser && window.ADMIN_USERNAME && window.currentUser === window.ADMIN_USERNAME);
+    } catch (e) { return false; }
+  }
+
+  function diagCollectContext() {
+    return {
+      apiBase: API_BASE,
+      locationOrigin: typeof location !== 'undefined' ? location.origin : '',
+      hasXtjConfig: !!window.XTJ_CONFIG,
+      xtjConfigApiBase: window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE,
+      hasCurrentUser: !!window.currentUser,
+      currentUserName: readUserName() || null,
+      hasEnsureUserToken: typeof window.ensureUserToken === 'function',
+      hasRefreshUserToken: typeof window.refreshUserToken === 'function',
+      hasClearUserToken: typeof window.clearUserToken === 'function',
+      scriptSrc: (function() {
+        try {
+          var ss = document.getElementsByTagName('script');
+          for (var i = 0; i < ss.length; i++) {
+            var src = ss[i].getAttribute('src') || '';
+            if (src.indexOf('ai-agent.js') >= 0) return src;
+          }
+        } catch (e) {}
+        return null;
+      })()
+    };
+  }
+
+  function diagPrintContext(label) {
+    try {
+      var ctx = diagCollectContext();
+      console.warn('[AI-DIAG' + (label ? '/' + label : '') + ']', ctx);
+      return ctx;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function diagRun(label) {
+    try {
+      var ctx = diagPrintContext(label);
+      if (!ctx) return null;
+      console.warn('[AI-DIAG] test /api/agent/config ...');
+      var r = await sendOnce('GET', '/config', null, { forceNoToken: false });
+      console.warn('[AI-DIAG] /config result', { status: r && r.status, ok: r && r.ok, url: r && r.url });
+      return ctx;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 仅本地开发或显式开启 ai_debug 参数时挂载诊断钩子：生产环境普通用户
+  // 从控制台调用会泄露 API Base 与凭据上下文
+  var _isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (_isLocalDev) {
+    window.__xtjAiAuthDiag = function() {
+      return diagRun('manual');
+    };
+  }
+
+
+  async function getUserAuthPayload(options) {
+    options = options || {};
+    var forceNoToken = !!options.forceNoToken;
+    var token = '';
+    if (!forceNoToken) {
+      try {
+        if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
+      } catch (e) {
+        token = '';
+      }
+    }
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = 'Bearer ' + token;
+
+    var un = readUserName();
+    var body = {};
+    return { token: token, headers: headers, body: body, query: {}, userName: un };
+  }
+
+  async function sendOnce(method, path, body, options) {
+    options = options || {};
+    var url = API_BASE + path;
+    try {
+      var auth = await getUserAuthPayload({ forceNoToken: !!options.forceNoToken });
+      var headers = auth.headers;
+      var opts = { method: method, headers: headers };
+      var requestController = typeof AbortController === 'function' ? new AbortController() : null;
+      var requestTimer = null;
+      var externalSignal = options.signal || (options.abortController && options.abortController.signal) || null;
+      var externalAbortHandler = null;
+      if (requestController) {
+        opts.signal = requestController.signal;
+        if (externalSignal) {
+          externalAbortHandler = function() {
+            try {
+              requestController._abortReason = 'aborted';
+              try { requestController.abort(requestController._abortReason); }
+              catch (eAbortReason) { requestController.abort(); }
+            } catch (eExternalAbort) {}
+          };
+          if (externalSignal.aborted) externalAbortHandler();
+          else if (typeof externalSignal.addEventListener === 'function') externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
+        }
+        requestTimer = setTimeout(function() {
+          try {
+            requestController._abortReason = 'timeout';
+            if (typeof requestController.abort === 'function') requestController.abort('timeout');
+          } catch (eAbort) {}
+        }, Math.max(3000, Number(options.timeoutMs) || 12000));
+      }
+
+      if (method === 'GET') {
+        var extra = [];
+        for (var qk in auth.query) {
+          if (Object.prototype.hasOwnProperty.call(auth.query, qk) && auth.query[qk] !== undefined && auth.query[qk] !== null) {
+            extra.push(encodeURIComponent(qk) + '=' + encodeURIComponent(auth.query[qk]));
+          }
+        }
+        if (extra.length) url += (path.indexOf('?') >= 0 ? '&' : '?') + extra.join('&');
+      } else {
+        var merged = {};
+        var src = body || {};
+        for (var bk in src) {
+          if (Object.prototype.hasOwnProperty.call(src, bk)) merged[bk] = src[bk];
+        }
+        for (var ak in auth.body) {
+          if (Object.prototype.hasOwnProperty.call(auth.body, ak) && merged[ak] === undefined) merged[ak] = auth.body[ak];
+        }
+        if (Object.keys(merged).length) opts.body = JSON.stringify(merged);
+      }
+
+      var resp;
+      var rawText = '';
+      try {
+        resp = await fetch(url, opts);
+        // Keep timeout and external cancellation active while the response
+        // body is being consumed; fetch() can resolve at headers and then stall.
+        rawText = await resp.text();
+      } finally {
+        if (requestTimer) clearTimeout(requestTimer);
+        if (externalSignal && externalAbortHandler && typeof externalSignal.removeEventListener === 'function') {
+          try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (eRemoveAbort) {}
+        }
+      }
+      var data = null;
+      if (rawText) {
+        try { data = JSON.parse(rawText); } catch (e3) {}
+      }
+      if (!resp.ok && !options.retry) {
+        try { console.warn('[AI] request failed', { method: method, url: url, status: resp.status, data: data }); } catch (e4) {}
+      }
+      return {
+        ok: resp.ok,
+        status: resp.status,
+        data: data,
+        error: data && data.error ? data.error : null,
+        url: url,
+        rawText: rawText ? String(rawText).slice(0, 300) : ''
+      };
+    } catch (e) {
+      var isAbort = e && e.name === 'AbortError';
+      var reason = (requestController && requestController._abortReason) || (opts && opts.signal && opts.signal.reason);
+      var errCode = 'network_error';
+      var errMsg = (e && e.message) || '网络异常';
+      if (isAbort) {
+        if (reason === 'aborted' || options.userAborted) {
+          errCode = 'aborted';
+          errMsg = '请求已取消';
+        } else {
+          errCode = 'timeout';
+          errMsg = '请求超时';
+        }
+      }
+      try { console.warn('[AI] request exception', { method: method, url: url, error: errMsg, error_code: errCode }); } catch (e5) {}
+      return { ok: false, status: 0, data: null, error: errMsg, error_code: errCode, url: url, rawText: '' };
+    }
+  }
+
+  async function apiRequest(method, path, body, opts) {
+    if (AI_DEBUG) { try { console.warn('[AI] apiRequest start', { method: method, path: path, apiBase: API_BASE }); } catch (e) {} }
+    var first = await sendOnce(method, path, body, Object.assign({ forceNoToken: false }, opts || {}));
+    if (AI_DEBUG) { try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e2) {} }
+    if (first && first.status === 401 && first.error_code !== 'aborted') {
+      if (typeof window.refreshUserToken === 'function') {
+        try {
+          var refreshed = await window.refreshUserToken(true);
+          if (refreshed) {
+            var third = await sendOnce(method, path, body, Object.assign({ forceNoToken: false, retry: true }, opts || {}));
+            try { if (AI_DEBUG) console.warn('[AI] retry result (refreshed token)', { status: third && third.status, ok: third && third.ok, url: third && third.url }); } catch (e5) {}
+            return third;
+          }
+        } catch (e6) {}
+      }
+      try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e7) {}
+    }
+    return first;
+  }
+
+  function describeError(r, fallback) {
+    if (!r) return fallback || '请求失败';
+    if (r.status === 401) {
+      try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e) {}
+      return '凭据异常，请重新登录后再和小猫聊天';
+    }
+    if (r.status === 403) return '当前账号没有执行此操作的权限';
+    if (r.status === 404) return 'AI 接口不存在，请检查 API_BASE 或部署域名';
+    if (r.status === 405) return 'AI 接口方法不允许，请检查 API_BASE 或部署域名';
+    if (r.status === 429) {
+      // 额度类 429：立即刷新一次额度（管理员取消 Pro / 额度变更后快速感知），节流防递归
+      var nowMs = Date.now();
+      if (nowMs - (S._lastQuotaErrorRefreshAt || 0) > 10000) {
+        S._lastQuotaErrorRefreshAt = nowMs;
+        try { fetchAiQuota(true); } catch (e) {}
+      }
+      // ★ 修复：code/quota 可能出现在顶层或 data 内层（不同接口返回形状不同），
+      // 两个层级都读取，否则 429 永远只显示通用文案。
+      var _quotaCode = r.code || (r.data && r.data.code);
+      var _quotaData = r.quota || (r.data && r.data.quota);
+      if (_quotaCode === 'token_limit' || (_quotaData && _quotaData.can_chat === false)) {
+        return '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
+      }
+      if (_quotaCode === 'search_limit') {
+        return '今日网页搜索次数已达上限，开通 Pro 可无限搜索';
+      }
+      return '小猫调用额度已达上限，请稍后再试或开通 Pro';
+    }
+    if (r.status === 502) return 'AI 服务调用失败，请检查配置或服务日志';
+    if (r.status === 500) return '服务端错误，请稍后再试';
+    if (r.status === 0 || r.error_code === 'timeout' || r.error_code === 'network_error') {
+      if (r.error_code === 'aborted') return '请求已取消';
+      if (r.error_code === 'timeout') return '聊天记录加载超时，可继续发送消息或点击重试';
+      return '聊天记录更新失败，请检查网络后重试';
+    }
+    if (r.error) return r.error;
+    return fallback || '请求失败';
+  }
+
+  async function ensureConfig() {
+    var now = Date.now();
+    if (S.config && now - S.configFetchedAt < CONFIG_CACHE_TTL) {
+      if (S._lastConfigVersion && S.config.config_version !== S._lastConfigVersion) {
+        S.configFetchedAt = 0;
+        S.config = null;
+      } else {
+        return S.config;
+      }
+    }
+    var r = await apiRequest('GET', '/config');
+    if (r.ok && r.data && r.data.config) {
+      S.config = r.data.config;
+      S.serviceStatus = 'ready';
+      S.serviceStatusDetail = '';
+      S.configFetchedAt = now;
+      S._lastConfigVersion = r.data.config.config_version || 0;
+      return S.config;
+    }
+    S.serviceStatus = r && (r.status === 0 || r.error_code === 'timeout') ? 'offline' : 'degraded';
+    S.serviceStatusDetail = describeError(r, 'AI 配置暂不可用');
+    S.config = S.config || {
+      name: '小猫',
+      avatar: '🐈',
+      description: '服务暂不可用，请稍后重试',
+      welcome_message: '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
+    };
+    updateAiStatus();
+    return S.config;
+  }
+
+  function buildUsageLine(usage) {
+    if (!usage || typeof usage !== 'object') return null;
+    var parts = [];
+    var isAdmin = isAdminUser();
+    if (isAdmin) {
+      if (typeof usage.prompt_tokens === 'number') parts.push('输入 ' + usage.prompt_tokens);
+      if (typeof usage.completion_tokens === 'number') parts.push('输出 ' + usage.completion_tokens);
+      if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + usage.prompt_cache_hit_tokens);
+      if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
+      if (typeof usage.cost === 'number' && usage.cost > 0) {
+        // ★ U3: 动态 currency 符号
+        var currency = usage.currency || 'CNY';
+        var symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : '';
+        parts.push(symbol + usage.cost.toFixed(6) + ' ' + currency);
+      }
+    }
+    return parts.length ? parts.join(' · ') : null;
+  }
+
+  function getMessageThinkingMode(msg) {
+    if (!msg) return 'off';
+    if (msg.usage && msg.usage.thinking_mode) return msg.usage.thinking_mode;
+    if (msg.thinking_mode) return msg.thinking_mode;
+    return msg.reasoning ? 'medium' : 'off';
+  }
+
+  function shouldRenderReasoning(msg) {
+    return !!(msg && msg.reasoning && getMessageThinkingMode(msg) !== 'off');
+  }
+
+  // ★ 2026-09-11：工具进展自动跟随所需的两个状态（见 followToolProgress 注释）。
+  //   _aiUserPinnedUp        —— 用户是否【主动】上翻查看历史（工具进展此时不再打扰）
+  //   _aiAwayFromBottomCount —— 连续"不在底部"的 scroll 事件计数，用于把
+  //                             "容器长高导致的程序性偏离"与"用户真实上翻"区分开
+  var _aiUserPinnedUp = false;
+  var _aiAwayFromBottomCount = 0;
+
+  function isNearBottom(container, threshold) {
+    if (!container) return true;
+    var gap = Math.max(24, threshold || 72);
+    return container.scrollHeight - container.scrollTop - container.clientHeight <= gap;
+  }
+
+  // ★ 2026-09-11 修复（用户报障：调用工具时页面不跟着走，要手动往下拉）：
+  //   工具调用会产生 4 类 DOM 变化——tool_calls（时间线新增步骤）、tool_pending（⏳ 准备工具）、
+  //   tool_result（结果卡片，含可展开列表）、card（工具结果卡片）。这些节点全部插在
+  //   assistantBubble 【之前】，会让整个回复容器瞬间长高。
+  //   此前这 4 个分支内没有任何滚动调用，而普通正文流式渲染只会在 onRender 时滚动；
+  //   于是"工具阶段"页面始终停在旧位置，必须用户手动下拉才能看到工具进展。
+  //   这里统一封装：工具节点变更后把视口跟到底部。
+  //   与普通流式滚动的区别：工具事件是"离散的、低频的、用户明确想看到的进展"，
+  //   因此即便 autoScrollPinned 因上一次滚动校准被置 false，也强制跟随一次；
+  //   但若用户【明确向上翻看历史】（userPinnedUp）则尊重用户意图不打扰。
+  function followToolProgress(container, userPinnedUp) {
+    if (!container) return;
+    if (userPinnedUp) return;
+    // 直接强制滚动到底：该 helper 每次调用会被 requestAnimationFrame 合并，
+    // 连续多个工具事件不会造成抖动。
+    scrollToBottom(container, true);
+  }
+
+  // ★ 2026-09-28 新增（P0 + 方案 A）：统一「工具活动区」外壳。
+  //   问题（改造前）：
+  //     ① 一个回复里的多轮工具是 N 个**各自独立**的 .ai-tool-round，视觉上是
+  //        一堆孤立的小块，缺少 ChatGPT 那种"所有工具活动归到一个区域"的整体感；
+  //     ② "整理检索结果并作答"占位是直接 append 到 .ai-tool-timeline 上的，
+  //        **落在轮次容器之外** —— 样式与轮次条目不一致，收敛路径也覆盖不到它
+  //        （2026-09-22 那次修复只是给它单独补了收敛函数，父节点仍然挂错）。
+  //   方案 A：
+  //     .ai-tool-timeline                     ← 保持原样（外部定位/清理逻辑都依赖它）
+  //       └─ .ai-tool-activity                ← 新增：统一活动区
+  //            ├─ .ai-tool-activity-head      ← 总摘要行（轮数/工具数/失败数 + 折叠箭头）
+  //            └─ .ai-tool-activity-body      ← 可折叠体（grid-template-rows 过渡）
+  //                 ├─ .ai-tool-round  ...    ← 轮次降级为区内"分段"，不再自带外框
+  //                 └─ .ai-tool-organizing    ← "整理中"归位到同一层级
+  //   兼容性：timeline 上的 querySelectorAll('.ai-tool-round') 是后代查询，
+  //   多一层 wrapper 不受影响；清空/移除逻辑移除 timeline 时活动区随之移除。
+  // ★ 2026-09-28（方案 D「工具名说人话」）：统一工具名映射表。
+  //   此前 nameMapCall（tool_calls）与 nameMap（tool_result）**各写一份且不一致**，
+  //   改名时容易漏改一边导致同一工具在"调用中"和"已完成"显示成两个名字。
+  //   现收敛为单一来源，两处共用。
+  //
+  //   命名原则：**用动作描述，不用产品名/技术名**。
+  //   ChatGPT 会说"正在搜索网页"，不会说"正在调用 Tavily"——后者是内部实现，
+  //   对用户没有意义。内部名不丢失：调用点仍会把原始 tool_name 写进
+  //   data-tool-name（供对账/去重）与 title（供鼠标悬停查看）。
+  //
+  //   ★★ 作用域红线：TOOL_LABELS / toolLabel 必须定义在**模块级**（与
+  //     ensureToolActivity / toolActivityBody 同一层），不能写进任何函数体内部。
+  //     2026-09-28 曾误把这段插进 ensureToolActivity 中间：后果是
+  //       ① ensureToolActivity 被拦腰截断，尾部（activity.__startedAt /
+  //          timeline.appendChild / return activity）变成函数外的裸语句；
+  //       ② toolLabel 沦为 ensureToolActivity 的**局部函数**，而 tool_calls /
+  //          tool_result 分支在别的作用域调用它 → 一旦真的触发工具调用就抛
+  //          ReferenceError: Can't find variable: toolLabel（线上实测报障）。
+  //     压缩后症状更隐蔽：调用点保留原名、定义被 mangle 改名，产物里只剩调用。
+  var TOOL_LABELS = {
+    // 检索类
+    search_web: '搜索网页', tavily_search: '搜索网页', read_web_page: '阅读网页',
+    web_extract: '提取网页内容', extract_links: '提取链接', page_meta: '查看网页信息',
+    search_social: '搜索社交内容',
+    // 实时信息类
+    get_weather: '查询天气', get_current_time: '获取当前时间',
+    get_exchange_rate: '查询汇率', get_stock_quote: '查询股票行情',
+    // 计算/数据类
+    calculate: '计算', convert_units: '单位换算', date_calc: '日期计算',
+    text_stats: '统计文本', batch_calc: '批量计算', sort_filter: '整理数据',
+    convert_data: '转换数据格式', process_json: '处理数据', regex_test: '校验表达式',
+    encode_decode: '编码转换', run_code: '运行代码',
+    // 文件生成/读取类
+    read_document: '读取文档', read_zip: '读取压缩包', make_file: '生成文件',
+    generate_pdf: '生成 PDF', make_chart: '生成图表', markdown_table: '生成表格',
+    qr_code: '生成二维码', image_info: '查看图片信息', image_process: '处理图片',
+    diff_text: '对比文本', url_parse: '解析网址', password_tool: '生成密码',
+    task_plan: '规划任务'
+  };
+  function toolLabel(name) {
+    var key = String(name || '');
+    return TOOL_LABELS[key] || key || '工具';
+  }
+  function toolRunningLabel(name) {
+    if (/search/.test(name || '')) return '搜索中';
+    if (/read_web|web_extract|page_meta/.test(name || '')) return '读取中';
+    if (/get_weather|get_stock|get_exchange|get_current/.test(name || '')) return '查询中';
+    return '处理中';
+  }
+
+
+  // ★★★ 2026-09-29（Claude/ChatGPT 形态对齐）：完成态**名词化**标签。
+  //   用户明确要求：回复完之后不要在正文上方堆"已完成 N 个工具 · 用时 X.Xs"
+  //   这种总结横幅，而是在正文**下方**给一行极简结果：
+  //     搜索类 → 「已搜索 3 个网页」（可展开看拿到哪些网页）
+  //     其他   → 「已调用天气工具」/「已调用 PDF 工具」/「已生成文件」
+  //     混杂   → 「已使用 N 个工具」
+  //   与 ChatGPT 的 "Searched 3 sites"、Claude 的行式收敛是同一形态。
+  //   ★ 作用域红线同 TOOL_LABELS：必须模块级，不得写进任何函数体内部。
+  var TOOL_DONE_LABELS = {
+    // 检索类 —— 走"已搜索 N 个网页"专用句式，这里只标记类型
+    search_web: '网页', tavily_search: '网页', read_web_page: '网页',
+    web_extract: '网页', extract_links: '链接', page_meta: '网页信息',
+    search_social: '社交内容',
+    // 实时信息类
+    get_weather: '天气工具', get_current_time: '时间工具',
+    get_exchange_rate: '汇率工具', get_stock_quote: '行情工具',
+    // 计算/数据类
+    calculate: '计算工具', convert_units: '换算工具', date_calc: '日期计算',
+    text_stats: '文本统计', batch_calc: '批量计算', sort_filter: '数据整理',
+    convert_data: '数据转换', process_json: '数据处理', regex_test: '表达式校验',
+    encode_decode: '编码转换', run_code: '代码运行',
+    // 文件生成/读取类
+    read_document: '文档读取', read_zip: '压缩包读取', make_file: '文件生成',
+    generate_pdf: 'PDF 工具', make_chart: '图表工具', markdown_table: '表格生成',
+    qr_code: '二维码工具', image_info: '图片分析', image_process: '图片处理',
+    diff_text: '文本对比', url_parse: '网址解析', password_tool: '密码工具',
+    task_plan: '任务规划'
+  };
+  // 检索类工具：命中则走"已搜索 N 个网页"句式（用户点名要的形态）
+  var TOOL_SEARCH_KINDS = {
+    search_web: 1, tavily_search: 1, read_web_page: 1,
+    web_extract: 1, extract_links: 1, page_meta: 1, search_social: 1
+  };
+  // ★ count 语义**可当作"网页/结果条数"**的那一小撮。
+  //   协议侧确证：后端 9 处 tool_result 的 count 语义并不统一 ——
+  //   extract_links 是链接数、*_table 是行数、read_web_page 恒为 1。
+  //   把它们混加进「已搜索 N 个网页」会得到一个似是而非的数字，
+  //   所以只有真正的检索引擎结果才参与网页计数。
+  var TOOL_WEBSEARCH_KINDS = { search_web: 1, tavily_search: 1, search_social: 1 };
+  function toolResultFeedback(event) {
+    if (event.summary) return String(event.summary).slice(0, 160);
+    if (TOOL_WEBSEARCH_KINDS[String(event.tool_name || '')]) {
+      var count = Number.isInteger(event.count) && event.count >= 0 ? event.count
+        : Number.isInteger(event.items_total) && event.items_total > 0 ? event.items_total
+        : Array.isArray(event.items) ? event.items.length : null;
+      return count == null ? '检索完成，未提供数量' : '找到 ' + count + ' 个网页';
+    }
+    return '已完成' + (event.location ? ' · ' + String(event.location).slice(0, 100) : '');
+  }
+
+  var toolResultListSeq = 0;
+  function populateToolResultDisclosure(card, event) {
+    var expanded = card.querySelector('button[aria-expanded="true"]');
+    var previousPanel = card.querySelector('.ai-search-detail');
+    var scrollTop = previousPanel ? previousPanel.scrollTop : 0;
+    card.replaceChildren(); card.classList.add('ai-tool-inline-result');
+    var items = Array.isArray(event.items) ? event.items : [];
+    card.hidden = !event.error && !items.length;
+    if (event.error) {
+      card.appendChild(el('div', {class:'ai-tool-result-error',text:String(event.error).slice(0,240)}));
+      return card;
+    }
+    var button=el('button',{type:'button',class:'ai-tool-result-card-title','aria-expanded':String(!!expanded)});
+    button.appendChild(document.createTextNode(toolResultFeedback(event)));
+    var arrow=el('span',{class:'ai-search-toggle','aria-hidden':'true',text:expanded?' ▾':' ▸'});button.appendChild(arrow);
+    var panel=el('div',{class:'ai-search-detail',id:'ai-tool-results-'+(++toolResultListSeq)});
+    panel.hidden=!expanded; panel.style.display='block'; button.setAttribute('aria-controls',panel.id);
+    if(event.query)panel.appendChild(el('div',{class:'ai-search-detail-query',text:'搜索：'+String(event.query).slice(0,240)}));
+    items.slice(0,10).forEach(function(item){
+      if(!item || typeof item!=='object')return;
+      var url=safeSearchUrl(item.url);if(!url)return;
+      var row=el('div',{class:'ai-search-detail-item'});
+      row.appendChild(el('a',{class:'ai-search-detail-title',href:url,target:'_blank',rel:'noopener noreferrer',text:String(item.title||url).slice(0,240)}));
+      if(item.snippet)row.appendChild(el('div',{class:'ai-search-detail-snippet',text:String(item.snippet).slice(0,200)}));
+      var meta=[safeSearchHost(url),item.source,item.published_at].filter(Boolean).join(' · ');
+      if(meta)row.appendChild(el('div',{class:'ai-search-detail-source',text:meta}));
+      panel.appendChild(row);
+    });
+    var total=Number.isInteger(event.items_total)&&event.items_total>0?event.items_total:items.length;
+    if(event.items_truncated || items.length>10)panel.appendChild(el('div',{class:'ai-search-detail-more',text:'共 '+total+' 条结果，此处展示其中 '+Math.min(items.length,10)+' 条'}));
+    button.onclick=function(e){
+      e.stopPropagation();
+      var opening=button.getAttribute('aria-expanded')!=='true';
+      button.setAttribute('aria-expanded',String(opening));arrow.textContent=opening?' ▾':' ▸';
+      if(panel.__aiDisclosureMotion)panel.__aiDisclosureMotion.cancel();
+      panel.__aiDisclosureMotion=null;
+      if(prefersReducedMotion() || typeof panel.animate!=='function'){panel.hidden=!opening;return;}
+      if(opening)panel.hidden=false;
+      var motion=panel.animate(opening ? [{opacity:0,transform:'translateY(2px)'},{opacity:1,transform:'translateY(0)'}] : [{opacity:1},{opacity:0}],{duration:opening?160:120,easing:'ease-out'});
+      panel.__aiDisclosureMotion=motion;
+      motion.onfinish=function(){if(panel.__aiDisclosureMotion!==motion)return;panel.hidden=!opening;panel.__aiDisclosureMotion=null;};
+    };
+    card.appendChild(button);card.appendChild(panel);panel.scrollTop=scrollTop;
+    return card;
+  }
+
+  function toolDoneLabel(name) {
+    var key = String(name || '');
+    return TOOL_DONE_LABELS[key] || toolLabel(key);
+  }
+
+  // 汇总一个活动区"到底干了什么"，产出一行极简文案。
+  //   countSource：activity.__searchCount（tool_result 里累加的真实结果条数）
+  function toolActivityDoneLabel(activity) {
+    if (!activity) return '工具调用完成';
+    var names = [];
+    var seen = {};
+    try {
+      var items = activity.querySelectorAll('[data-tool-name]');
+      for (var i = 0; i < items.length; i++) {
+        var n = String(items[i].getAttribute('data-tool-name') || '').trim();
+        if (!n || seen[n]) continue;
+        seen[n] = 1;
+        names.push(n);
+      }
+    } catch (eNames) {}
+    if (!names.length) return '工具调用完成';
+
+    var searchKinds = 0, otherKinds = 0, lastOther = '';
+    for (var k = 0; k < names.length; k++) {
+      if (TOOL_SEARCH_KINDS[names[k]]) searchKinds++;
+      else { otherKinds++; lastOther = names[k]; }
+    }
+    // 纯检索：用户点名的形态 —— 「已搜索 N 个网页」
+    if (searchKinds > 0 && otherKinds === 0) {
+      var n = Number(activity && activity.__searchCount || 0);
+      // 后端多数 tool_result 带 count；拿不到条数时不硬编数字，退化成无数量措辞
+      // ★ 只有拿到真实条数才报数字。绝不能用"工具种数"冒充 ——
+      //   那会凭空造出「已搜索 2 个网页」这种数字（实际可能一个网页都没有）。
+      if (n > 0) return '已搜索 ' + n + ' 个网页';
+      return '已搜索网页';
+    }
+    // 只有一种非检索工具：「已调用天气工具」/「已调用 PDF 工具」
+    if (otherKinds === 1 && searchKinds === 0) {
+      var lb = toolDoneLabel(lastOther);
+      // 拉丁字母开头的标签（PDF/JSON/QR）补一个空格，避免挤成「已调用PDF 工具」
+      return '已调用' + (/^[A-Za-z]/.test(lb) ? ' ' : '') + lb;
+    }
+    // 混杂：不给一长串工具名（那是"丑"的根源），只报数量
+    var totalKinds = names.length;
+    return '已使用 ' + totalKinds + ' 个工具';
+  }
+
+  function ensureToolActivity(timeline) {
+    if (!timeline) return null;
+    var activity = timeline.querySelector('.ai-tool-activity');
+    if (activity) return activity;
+    activity = el('div', { class: 'ai-tool-activity' });
+    var head = el('div', {
+      class: 'ai-tool-activity-head',
+      role: 'button',
+      tabindex: '0',
+      'aria-expanded': 'true',
+      title: '点击收起/展开工具活动'
+    });
+    head.appendChild(el('span', { class: 'ai-tool-activity-icon', 'aria-hidden': 'true' }));
+    var headLabel = el('span', { class: 'ai-tool-activity-label', text: '正在使用工具' });
+    head.appendChild(headLabel);
+    head.appendChild(el('span', { class: 'ai-tool-activity-count', text: '' }));
+    head.appendChild(el('span', { class: 'ai-tool-activity-caret', 'aria-hidden': 'true' }));
+    activity.appendChild(head);
+    var body = el('div', { class: 'ai-tool-activity-body' });
+    activity.appendChild(body);
+    // ★ 折叠交互放在活动区**摘要行**上；轮次自己的摘要行仍然可独立折叠明细。
+    function toggleActivity() {
+      // 运行中不允许收起：进度是用户此刻唯一想看的东西
+      if (activity.classList.contains('is-running')) return;
+      var collapsed = activity.classList.toggle('is-collapsed');
+      activity.__userCollapsed = collapsed;
+      try { head.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); } catch (eArA) {}
+    }
+    head.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleActivity();
+    });
+    head.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+        ev.preventDefault();
+        toggleActivity();
+      }
+    });
+    // ★ 2026-09-28（方案 C）：记录活动区起点，用于完成后在摘要行显示「用时 X.Xs」。
+    //   ChatGPT / Claude 都有这个——低成本高感知，让人知道"它确实干了活"。
+    activity.__startedAt = Date.now();
+    activity.__body = body;
+    timeline.appendChild(activity);
+    return activity;
+  }
+
+  // 取活动区 body（没有就创建）。轮次与"整理中"占位一律挂到这里，
+  // 保证二者在同一层级、共享同一套样式与折叠行为。
+  function toolActivityBody(timeline) {
+    if (!timeline) return null;
+    var activity = ensureToolActivity(timeline);
+    if (!activity) return null;
+    return activity.__body || activity.querySelector('.ai-tool-activity-body');
+  }
+
+  // ★ 2026-09-28（方案 A）：活动区总摘要刷新。
+  //   汇总所有轮次的条目数与成败数，外加"整理中"是否仍在进行。
+  //   全部轮次收敛后：整区加 is-done、自动折叠为一行（与单轮的行为一致，
+  //   只是收敛层级从"每轮"上升到"整个活动区"，历史明细不再堆在屏幕上）。
+  function updateToolActivity(activity) {
+    if (!activity) return;
+    var rounds = activity.querySelectorAll('.ai-tool-round');
+    var totalRounds = rounds.length;
+    // ★ 2026-09-28 修复：不能在这里直接 return。
+    //   存在"只有「整理中」占位、还没有任何轮次"的中间态（后端先把
+    //   tool_pending/organizing 推过来、tool_calls 稍后才到）。原写法
+    //   在这种状态下直接退出，活动区头一直停在初始文案「正在使用工具」，
+    //   既不显示"正在整理结果"，也无法在占位结束后收敛。
+    var totalSteps = 0, totalDone = 0, totalFailed = 0, runningRounds = 0, runningSteps = 0;
+    for (var i = 0; i < totalRounds; i++) {
+      var steps = rounds[i].querySelectorAll('.ai-tool-step');
+      var roundRunning = rounds[i].classList.contains('is-running');
+      if (roundRunning) runningRounds++;
+      for (var j = 0; j < steps.length; j++) {
+        totalSteps++;
+        if (steps[j].classList.contains('is-done')) totalDone++;
+        else if (steps[j].classList.contains('is-error')) totalFailed++;
+        else if (steps[j].classList.contains('is-running')) runningSteps++;
+      }
+    }
+    // "整理中"占位仍在跑 → 整区不能算完成（否则摘要行会显示"已完成"但下面还在转）
+    var organizing = activity.querySelector('.ai-tool-organizing');
+    var organizingRunning = !!(organizing && organizing.classList.contains('is-running'));
+    // 直挂活动区 body 的条目（典型是"整理中"占位，不属于任何轮次）。
+    // ★★★ 2026-09-28 二次修复（用户报障：「整理中已显示完成，头还在转圈」）：
+    //   上一版用 `totalSteps > 0 && runningRounds === 0 && ...` 判定 settled，
+    //   在「只有一个 organizing 占位、压根没有 .ai-tool-round」的场景下
+    //   totalSteps 恒为 0 → settled 恒为 false → 头行永远停在"正在使用工具"
+    //   且旋转环不停，哪怕占位自己已经变成"完成"。
+    //   根因：totalSteps 只统计了**轮次内**的条目，漏掉了直挂 body 的那部分。
+    //   现把两部分合并统计，并以"是否存在任何未收敛证据"为准，
+    //   而不是用 totalSteps>0 这种粗暴前置条件。
+    var looseSteps = activity.querySelectorAll('.ai-tool-activity-body > .ai-tool-step');
+    for (var k = 0; k < looseSteps.length; k++) {
+      var ls = looseSteps[k];
+      var isOrg = ls.classList.contains('ai-tool-organizing');
+      var lsRunning = ls.classList.contains('is-running');
+      // organizing 占位单独由 organizingRunning 表达"仍在进行"，这里不重复计入
+      if (isOrg) continue;
+      totalSteps++;
+      if (ls.classList.contains('is-done')) totalDone++;
+      else if (ls.classList.contains('is-error')) totalFailed++;
+      else if (lsRunning) runningSteps++;
+    }
+    // 是否还有"正在进行"的证据：运行中的轮次 / 运行中的条目 / 运行中的占位
+    var stillRunning = runningRounds > 0 || runningSteps > 0 || organizingRunning;
+    // settled 的充分条件：有条目（含占位）且再无任何进行中证据。
+    // 用 (totalSteps + (organizing ? 1 : 0)) > 0 代替原 totalSteps > 0 ——
+    // 后者在"只有占位"的场景下恒 false，正是本次线上缺陷。
+    var hasAnyContent = (totalSteps + (organizing ? 1 : 0)) > 0;
+    var settled = hasAnyContent && !stillRunning;
+
+    var icon = activity.querySelector('.ai-tool-activity-icon');
+    var label = activity.querySelector('.ai-tool-activity-label');
+    var count = activity.querySelector('.ai-tool-activity-count');
+    var head = activity.querySelector('.ai-tool-activity-head');
+
+    if (settled) {
+      activity.classList.remove('is-running');
+      activity.classList.add('is-done');
+      var activityCollapsed = activity.__userCollapsed !== false;
+      activity.classList.toggle('is-collapsed', activityCollapsed);
+      if (head) { try { head.setAttribute('aria-expanded', activityCollapsed ? 'false' : 'true'); } catch (eArA2) {} }
+      // ★ 2026-09-28 修复（失败态视觉缺失）：
+      //   CSS 为失败态准备了 `.ai-tool-activity.is-done.is-error .ai-tool-activity-icon::before
+      //   {content:'!'}`，但 JS 从来没给容器加过 is-error（is-error 只加在条目上），
+      //   而这里写入的 ⚠️ emoji 又被 CSS 的 `font-size:0; text-indent:-999px` 隐身 ——
+      //   于是成功失败长得一模一样（都是绿勾），只有文字里能看出差别。
+      if (totalFailed > 0) activity.classList.add('is-error');
+      else activity.classList.remove('is-error');
+      if (icon) icon.textContent = totalFailed > 0 ? '⚠️' : '✅';
+      // ★ 2026-09-28（方案 C）：用时只在**首次**收敛时锁定。
+      //   若每次刷新都重算，中途展开/再收敛会让耗时一直涨，与"这次工具花了多久"的语义不符。
+      if (activity.__elapsedMs === undefined) {
+        var startedAt = Number(activity.__startedAt || 0);
+        activity.__elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+      }
+      // 用时放在右侧 count 位：左边是"做了什么"，右边是"花了多久"，各司其职。
+      // <1s 不显示（"用时 0.2s"既无信息量又像是卡顿）；≥100s 转分钟避免数字过长。
+      var elapsedText = '';
+      if (activity.__elapsedMs >= 1000) {
+        var elapsedSec = activity.__elapsedMs / 1000;
+        elapsedText = elapsedSec >= 100
+          ? ('用时 ' + Math.round(elapsedSec / 60) + 'min')
+          : ('用时 ' + elapsedSec.toFixed(1) + 's');
+      }
+      // ★★★ 2026-09-29（用户报障：「正文上面还要写调用几个工具，真的很丑」）：
+      //   完成态摘要改走 toolActivityDoneLabel —— 搜索类「已搜索 N 个网页」、
+      //   单类「已调用天气工具」、混杂「已使用 N 个工具」，对齐 ChatGPT 的
+      //   "Searched 3 sites" / Claude 的行式收敛形态。
+      //   ★ elapsedText 仍然计算但**不再上屏**：用户明确嫌"用时 X.Xs"丑。
+      //     这里保留 __elapsedMs 的写入是**必需的** —— running 分支靠
+      //     "__elapsedMs !== undefined" 识别"曾收敛过 → 当下是新一轮"来解锁重算
+      //     （M4 多轮计时复位修复）。若删掉赋值，该解锁永不触发，多轮场景
+      //     "用时"会回退成首轮快照。故：算、但不用。
+      var doneText = toolActivityDoneLabel(activity);
+      if (totalFailed > 0) doneText += '（' + totalFailed + ' 个失败）';
+      if (label) label.textContent = doneText;
+      // count 位清空：不再显示"用时"，也不显示"N/M 完成"这类过程计数
+      if (count) count.textContent = '';
+      // ★ 补搬（对应上面①）：正文先到时 content 分支搬了个寂寞（工具区尚未创建），
+      //   这里在"工具刚刚全部收敛"这个时机再问一次 —— 此时正文已在，理应归位到下方。
+      //   moveToolAreaBelowBubble 是幂等的，重复调用无副作用。
+      try {
+        var _host = (activity.closest && activity.closest('.ai-msg')) || null;
+        if (!_host) {
+          var _p = activity.parentNode;
+          while (_p && _p !== document.body && _p.querySelector && !_p.querySelector('.ai-msg-bubble')) _p = _p.parentNode;
+          _host = _p;
+        }
+        if (_host && _host.querySelector) moveToolAreaBelowBubble(_host);
+      } catch (eMoveLate) {}
+    } else {
+      // ★ 2026-09-28 修复（多轮/补搜场景"用时"显示的是**第一轮**的耗时）：
+      //   原 __elapsedMs 首次收敛后就锁死、__startedAt 也从不复位。但工具可以
+      //   **分多轮跑**（后端每轮 tool_calls 前会推一段 narration content），
+      //   第一轮结束时 __elapsedMs 就被锁定；第二轮再跑时不重算，
+      //   最终展示第一轮快照（体感 30s 却写着 3.2s —— 典型的"它在骗我"）。
+      //   识别"新一轮开始了"：计时若已锁定过，说明中途发生过收敛，
+      //   当下必然是新一轮 → 解锁并把起点拨到现在。
+      if (activity.__elapsedMs !== undefined) {
+        delete activity.__elapsedMs;
+        activity.__startedAt = Date.now();
+      }
+      activity.classList.add('is-running');
+      activity.classList.remove('is-done', 'is-collapsed');
+      if (head) { try { head.setAttribute('aria-expanded', 'true'); } catch (eArA3) {} }
+      if (icon) icon.textContent = '⏳';
+      if (label) {
+        // ★ 2026-09-28（D3 续）：文案分工
+        //   活动区头 = **状态**，"整理中"占位 = **具体动作**（"整理检索结果并作答"）。
+        //   两者若都写"整理"，就是同义反复（真实渲染里表现为上下两行说同一件事）。
+        //   organizing 期间头行收敛为"正在使用工具"，动作交给占位行。
+        label.textContent = totalRounds > 1
+          ? ('正在使用工具（第 ' + totalRounds + ' 轮）')
+          : '正在使用工具';
+      }
+      if (count) {
+        // ★ 2026-09-29：运行中也清空计数。原「1/2 完成」这类过程计数偏技术面，
+        //   而进度本身已由下方工具行的 spinner 直观表达，再叠一层数字就是噪音。
+        count.textContent = '';
+      }
+    }
+  }
+
+  // 从任意节点反查相关的活动区并刷新（供轮次/占位状态变化后联动调用）。
+  // ★★★ 2026-09-28 修复（用户报障：「整理中已完成，上面的头还在转圈」）：
+  //   原实现只用 `node.closest('.ai-tool-activity')`，而 closest **只朝祖先方向**查找。
+  //   但多数调用点传入的是**外层容器**（assistantNode / .ai-tool-timeline），
+  //   活动区是它们的**后代** → closest 恒返回 null → 活动区摘要从不刷新，
+  //   于是即使在条目的"整理中"已经变成"完成"、正文也开始渲染，
+  //   活动区头的旋转环与"正在使用工具"文案仍然一直转。
+  //   改为双向查找：
+  //     ① 向上：节点本身/祖先就是活动区（进度中最常见的形态）；
+  //     ② 向下：节点是容器，其内部包含活动区（settleOrganizingStep /
+  //        clearAssistantTransientStatus 传 assistantNode 时属这种）；
+  //     ③ 容器内可能有多个活动区（理论上极少），全部刷新。
+  function refreshOwningToolActivity(node) {
+    if (!node) return;
+    var activity = null;
+    try { activity = node.closest ? node.closest('.ai-tool-activity') : null; } catch (eCl) {}
+    if (activity) { updateToolActivity(activity); return; }
+    var list = null;
+    try { list = node.querySelectorAll ? node.querySelectorAll('.ai-tool-activity') : null; } catch (eQ) {}
+    if (!list) return;
+    for (var i = 0; i < list.length; i++) {
+      try { updateToolActivity(list[i]); } catch (eUp) {}
+    }
+  }
+
+  // ★ 2026-09-22 新增：统一构造「工具轮次」容器。
+  //   结构：摘要行（旋转环 + 文案 + 计数 + 折叠箭头）+ 可折叠条目区。
+  //   收起/展开用 grid-template-rows 平滑过渡，完成后自动折叠为一行，
+  //   这是 ChatGPT / Codex 那种"工具步骤可折叠"的手感来源。
+  //   三处创建点（tool_calls / tool_pending / tool_error）此前各写一遍 DOM，
+  //   结构不一致时 CSS 折叠会失效，故统一收敛到本函数。
+  //   ★ 2026-09-28（方案 A）：轮次不再自带独立外框，改为活动区内的一段；
+  //   调用方需把返回的 box 挂到 toolActivityBody(timeline) 下（见各处调用点）。
+  function createToolRound(labelText, roundKey) {
+    var box = el('div', { class: 'ai-tool-round is-running' });
+    if (roundKey) box.setAttribute('data-tool-round', roundKey);
+    var head = el('div', {
+      class: 'ai-tool-round-head',
+      role: 'button',
+      tabindex: '0',
+      'aria-expanded': 'true',
+      title: '点击收起/展开工具明细'
+    });
+    head.appendChild(el('span', { class: 'ai-tool-round-icon', 'aria-hidden': 'true' }));
+    head.appendChild(el('span', { class: 'ai-tool-round-label', text: labelText || '调用工具' }));
+    head.appendChild(el('span', { class: 'ai-tool-round-count', text: '' }));
+    head.appendChild(el('span', { class: 'ai-tool-round-caret', 'aria-hidden': 'true' }));
+    box.appendChild(head);
+    var wrap = el('div', { class: 'ai-tool-round-list-wrap' });
+    var list = el('div', { class: 'ai-tool-round-list' });
+    wrap.appendChild(list);
+    box.appendChild(wrap);
+    function toggleRound() {
+      // 运行中不允许收起：进度是用户此刻唯一想看的东西
+      if (box.classList.contains('is-running')) return;
+      var collapsed = box.classList.toggle('is-collapsed');
+      box.__userCollapsed = collapsed;
+      try { head.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); } catch (eAr) {}
+    }
+    head.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleRound();
+    });
+    head.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+        ev.preventDefault();
+        toggleRound();
+      }
+    });
+    return { box: box, head: head, list: list };
+  }
+
+  // ★ 2026-09-17 新增：工具轮次状态收敛。
+  //   一个"轮次"= 一次 tool_calls 事件产生的并行工具集合。
+  //   运行中：摘要行显示「并行调用 N 个工具 · x/y 完成」，条目各自显示「搜索中」；
+  //   全部完成：摘要行改为「✅ N 个工具已完成」，整轮加 is-done 停止动画，
+  //   条目图标由 🔍 换成 ✅、状态文字换成「已完成」——即用户要求的
+  //   「全部搜索完之后就把搜索中那些字和图标换成已完成」。
+  function updateToolRoundState(roundBox) {
+    if (!roundBox) return;
+    var steps = roundBox.querySelectorAll('.ai-tool-step');
+    var total = steps.length;
+    // ★ 2026-09-28 修复（零条目轮次永不收敛）：
+    //   原写法 `if (!total) return;` —— 空轮次连 is-running 都不会被摘掉，
+    //   于是摘要行一直挂着"正在调用工具"、整轮永远处于进行态，
+    //   反过来让 updateToolActivity 的 runningRounds>0 恒真、活动区永不收敛。
+    //   而注释里专门为此写的 forceSettleToolRound 在全文件竟然没有调用点。
+    //   真实来源：tool_calls 的 evt.tools 为空（一条都没建）、
+    //   或所有条目都被复用到别的轮次。
+    //   处理：无条目时视为"已收敛"，走终态落定（而不是直接 return）。
+    if (!total) {
+      roundBox.classList.remove('is-running');
+      roundBox.classList.add('is-done');
+      roundBox.classList.toggle('is-collapsed', roundBox.__userCollapsed !== false);
+      var emptyHead = roundBox.querySelector('.ai-tool-round-head');
+      if (emptyHead) emptyHead.setAttribute('aria-expanded', roundBox.__userCollapsed === false ? 'true' : 'false');
+      var emptyLabel = roundBox.querySelector('.ai-tool-round-label');
+      if (emptyLabel) emptyLabel.textContent = '未调用工具';
+      try { refreshOwningToolActivity(roundBox); } catch (eEmptyRoundAct) {}
+      return;
+    }
+    var done = 0, failed = 0;
+    for (var i = 0; i < total; i++) {
+      if (steps[i].classList.contains('is-done')) done++;
+      else if (steps[i].classList.contains('is-error')) failed++;
+    }
+    var settled = (done + failed) >= total;
+    var icon = roundBox.querySelector('.ai-tool-round-icon');
+    var label = roundBox.querySelector('.ai-tool-round-label');
+    var count = roundBox.querySelector('.ai-tool-round-count');
+
+    if (settled) {
+      roundBox.classList.remove('is-running');
+      roundBox.classList.add('is-done');
+      // ★ 2026-09-22：整轮结束后自动折叠为一行（Codex 手感）。
+      //   用户仍可点摘要行展开回看明细，屏幕上不再留一坨历史条目。
+      var roundCollapsed = roundBox.__userCollapsed !== false;
+      roundBox.classList.toggle('is-collapsed', roundCollapsed);
+      var caretHost = roundBox.querySelector('.ai-tool-round-head');
+      if (caretHost) {
+        try { caretHost.setAttribute('aria-expanded', roundCollapsed ? 'false' : 'true'); } catch (eAr2) {}
+      }
+      // ★ 2026-09-28 修复（同上：轮次容器也需要 is-error，否则 `.ai-tool-round.is-error
+      //   .ai-tool-round-icon::before{content:'!'}` 永远不生效）
+      if (failed > 0) roundBox.classList.add('is-error');
+      else roundBox.classList.remove('is-error');
+      if (icon) icon.textContent = failed > 0 ? '⚠️' : '✅';
+      if (label) {
+        // ★ 2026-09-29：轮次摘要同步去掉"已完成 N 个工具"的横幅措辞（用户嫌丑）。
+        //   活动区 head 已改极简，轮次里若还写着"已完成 N 个工具"，展开明细
+        //   照样是一句横幅。展开区只需中性计数，成败交给图标与各条目自身表达。
+        label.textContent = failed > 0
+          ? (total + ' 个工具（' + failed + ' 个失败）')
+          : (total + ' 个工具');
+      }
+      if (count) count.textContent = '';
+    } else {
+      roundBox.classList.add('is-running');
+      roundBox.classList.remove('is-done', 'is-collapsed');
+      var caretHost2 = roundBox.querySelector('.ai-tool-round-head');
+      if (caretHost2) {
+        try { caretHost2.setAttribute('aria-expanded', 'true'); } catch (eAr3) {}
+      }
+      if (icon) icon.textContent = '⏳';
+      if (label) label.textContent = total > 1 ? ('正在调用 ' + total + ' 个工具') : '正在调用工具';
+      if (count) count.textContent = (done + failed) + '/' + total + ' 完成';
+    }
+    // ★ 2026-09-28（方案 A）：轮次状态变化后联动刷新**活动区总摘要**。
+    //   收敛层级从"每轮各自一行"上升到"整个活动区一行"，多轮场景下
+    //   历史明细统一收进活动区，不再在屏幕上堆成一串孤立小块。
+    try { refreshOwningToolActivity(roundBox); } catch (eActRef) {}
+  }
+
+  // ★★★ 2026-09-22 修复（用户报障：「工具明明完成了、回复也出来了，'整理检索结果并作答'
+  //   还一直转圈，每条回复、每次用工具都这样，根本停不下来」）：
+  //   根因 —— 这个占位步骤是 append 到 `.ai-tool-timeline`（**轮次容器之外**）的，
+  //   而收敛逻辑有两条且都覆盖不到它：
+  //     ① updateToolRoundState / forceSettleToolRound 只遍历 `.ai-tool-round` 内部的
+  //        `.ai-tool-step`，它是 timeline 的直接子节点，不在任何 round 里 → 永不命中；
+  //     ② clearAssistantTransientStatus 里的 `.ai-tool-status` 容器循环虽然会
+  //        `classList.remove('is-running')`，但 CSS 的旋转动画是挂在
+  //        `.ai-tool-organizing .ai-tool-step-icon::before` 上的**无条件 infinite 动画**，
+  //        只有加 `.is-done` 才会被换成静态 ✓ —— 光去 is-running 完全停不下来。
+  //   另外它唯一被"正常"收敛的时机是 `content` 事件（正文首字到达），而带思考的
+  //   回复正文来得晚（甚至先出一大段 reasoning 再出正文），这段空窗用户看到的就是
+  //   一个永远在转的圈。
+  //   修复：抽出统一的收敛函数，在所有终态路径（done / content / error / 中断 /
+  //   超时 / 切换会话）都调用它，并**必须加 .is-done**（而非只去 is-running）。
+  function settleOrganizingStep(node, opts) {
+    if (!node) return;
+    opts = opts || {};
+    var host = node;
+    // 兼容传入的可能是明细子节点（如 assistantNode 之外的局部容器）
+    var list;
+    try { list = host.querySelectorAll('.ai-tool-organizing'); } catch (eQ) { return; }
+    for (var i = 0; i < list.length; i++) {
+      var step = list[i];
+      if (step.classList.contains('is-done')) continue;
+      var ok = opts.failed !== true;
+      step.classList.remove('is-running');
+      step.classList.add(ok ? 'is-done' : 'is-error');
+      var icon = step.querySelector('.ai-tool-step-icon');
+      // 图标文字在此类步骤里被 font-size:0 隐藏，图形由 CSS ::before 绘制；
+      // 写回文字保持语义完整（同时 .is-done 会覆盖 ::before 为静态 ✓）。
+      if (icon) icon.textContent = ok ? '✍️' : '⚠️';
+      var st = step.querySelector('.ai-tool-step-status');
+      if (st) {
+        var cur = String(st.textContent || '');
+        // ★★★ 2026-09-28（用户三次报障收敛点：「他竟然整理好了，不应该把
+        //   整理中三个字变成整理完成吗？」）：落定文案必须是**整理完成**，
+        //   而不是裸的「完成」——用户盯着的那行字是「整理检索结果并作答 ·
+        //   整理中」，收杆时把「整理中」原位替换成「整理完成」，
+        //   交互叙事才闭合（运行中 → 完成，原位变化，不新增条目）。
+        if (!cur || /整理|中|正在/.test(cur)) st.textContent = ok ? '整理完成' : '整理失败';
+      }
+    }
+    // ★ 2026-09-28（方案 A）："整理中"收敛后同样要刷新活动区总摘要，
+    //   否则它会一直停在"正在整理结果"而下面已经全是完成态。
+    //   ★★ 二次修复：宿主可能是 assistantNode（活动区是它的**后代**），
+    //      refreshOwningToolActivity 已改为双向查找，这里直接调用即可。
+    try { refreshOwningToolActivity(host); } catch (eSettleAct) {}
+    // ★★★ 2026-09-28 修复（用户报障：「条目显示完成了、活动区头还在转圈」）：
+    //   organizing 占位被收敛后，**轮次容器自己**（.ai-tool-round.is-running）
+    //   与活动区（.ai-tool-activity.is-running）的进行态并没有被清掉 ——
+    //   它们不在 organizing 的 DOM 子树里，本函数上面的循环只处理
+    //   .ai-tool-organizing 本身。结果是：占位行显示"完成"，但活动区头的
+    //   旋转环与"正在使用工具"文案继续转；updateToolActivity 又因为
+    //   runningRounds > 0 判不出 settled，循环自锁。
+    //   这里在宿主范围内把所有工具轮次/活动区的进行态一并落定。
+    try {
+      var _settleRounds = host.querySelectorAll('.ai-tool-round.is-running');
+      for (var _sr = 0; _sr < _settleRounds.length; _sr++) {
+        var _srEl = _settleRounds[_sr];
+        // 轮次内若仍有真实条目在跑，交给它们各自的 tool_result 收敛，不越权
+        var _srRunningSteps = _srEl.querySelectorAll('.ai-tool-round-list .ai-tool-step.is-running');
+        var _srHasLive = false;
+        for (var _ss = 0; _ss < _srRunningSteps.length; _ss++) {
+          if (!_srRunningSteps[_ss].classList.contains('ai-tool-organizing')) { _srHasLive = true; break; }
+        }
+        if (_srHasLive) continue;
+        _srEl.classList.remove('is-running');
+        _srEl.classList.add('is-done', 'is-collapsed');
+      }
+      var _settleActs = host.querySelectorAll('.ai-tool-activity.is-running');
+      for (var _sa = 0; _sa < _settleActs.length; _sa++) {
+        var _actEl = _settleActs[_sa];
+        // 与上面同理：活动区内还有真实条目在跑时不强行落定
+        var _actLiveSteps = _actEl.querySelectorAll('.ai-tool-step.is-running');
+        var _actHasLive = false;
+        for (var _as = 0; _as < _actLiveSteps.length; _as++) {
+          var _asEl = _actLiveSteps[_as];
+          if (_asEl.classList.contains('ai-tool-organizing')) continue;
+          _actHasLive = true; break;
+        }
+        if (_actHasLive) continue;
+        try { updateToolActivity(_actEl); } catch (eUpA) {}
+      }
+    } catch (eSettleRounds) {}
+  }
+
+  // 找到某条目所属的轮次并刷新它；用于 tool_result / tool_error 之后收敛
+  function refreshOwningToolRound(stepEl) {
+    if (!stepEl) return;
+    var round = stepEl.closest ? stepEl.closest('.ai-tool-round') : null;
+    if (round) updateToolRoundState(round);
+  }
+  // ★ 2026-09-15：终态强制收敛某个轮次（用于中断/超时/错误收尾）。
+  //   与 updateToolRoundState 的区别：不依赖子条目状态，直接把整轮置为终态，
+  //   停掉所有跳动动画，避免用户看到"流已结束但轮次还在转圈"。
+  function forceSettleToolRound(roundBox) {
+    if (!roundBox) return;
+    var steps = roundBox.querySelectorAll('.ai-tool-step');
+    for (var i = 0; i < steps.length; i++) {
+      var st = steps[i];
+      if (st.classList.contains('is-running')) {
+        st.classList.remove('is-running');
+        st.classList.add('is-done');
+        var stIcon = st.querySelector('.ai-tool-step-icon');
+        var stStatus = st.querySelector('.ai-tool-step-status');
+        if (stIcon) stIcon.textContent = '✅';
+        if (stStatus) stStatus.textContent = '已完成';
+      }
+    }
+    updateToolRoundState(roundBox);
+    if (roundBox.classList.contains('is-running')) {
+      // 理论上 updateToolRoundState 已处理；这里兜底，防止零条目的空轮次卡住
+      roundBox.classList.remove('is-running');
+      roundBox.classList.add('is-done');
+      var bi = roundBox.querySelector('.ai-tool-round-icon');
+      var bl = roundBox.querySelector('.ai-tool-round-label');
+      var bc = roundBox.querySelector('.ai-tool-round-count');
+      if (bi) bi.textContent = '✅';
+      if (bl) bl.textContent = '工具调用结束';
+      if (bc) bc.textContent = '';
+      // ★ 2026-09-28（方案 A）：兜底路径也要刷新活动区，否则总摘要会残留进行态
+      try { refreshOwningToolActivity(roundBox); } catch (eForceAct) {}
+    }
+  }
+
+  function scrollToBottom(container, force) {
+    if (!container) return;
+    if (!force && !S.autoScrollPinned) return;
+    var now = Date.now();
+    if (!force && container._dtLastScrollTs && (now - container._dtLastScrollTs) < 80) return;
+    if (container._dtScrollRaf) return;
+    container._dtScrollRaf = true;
+    try {
+      requestAnimationFrame(function() {
+        container._dtScrollRaf = false;
+        container._dtLastScrollTs = Date.now();
+        try { container.scrollTop = container.scrollHeight; } catch (e) {}
+      });
+    } catch (e2) {
+      container._dtScrollRaf = false;
+      container._dtLastScrollTs = Date.now();
+      try { container.scrollTop = container.scrollHeight; } catch (e3) {}
+    }
+  }
+
+  // ★ 2026-09-29（审计 S4「发送按钮从不禁用，可并行开多条流」）：
+  //   现象：网络慢时连点发送/连按回车，界面出现两条用户消息和两条并行 AI 回复，
+  //   停止按钮只能停掉最后一条，前一条的「思考中」永远转；额度按次数重复扣。
+  //   修法：发送期间把发送按钮置为 disabled（视觉上直接挡住连点），
+  //   任何收尾路径（成功/失败/中止/超时）都会重新启用；只改 disabled，
+  //   不触碰 dock bar / dock capsule 相关任何代码。
+  function setAiSendBtnDisabled(disabled) {
+    var btn = S.sendBtnEl;
+    if (!btn) return;
+    try { btn.disabled = !!disabled; } catch (e) {}
+  }
+
+  function updateInputMetrics() {
+    var root = getAiRoot();
+    var bar = S.inputBarEl;
+    if (!root || !bar) return;
+    root.style.setProperty('--ai-input-height', Math.max(64, bar.offsetHeight || 0) + 'px');
+  }
+
+  function maybeRestoreEmptyState(messagesEl) {
+    if (!messagesEl) return;
+    if (messagesEl.querySelector('.ai-msg')) return;
+    if (messagesEl.querySelector('.ai-chat-empty')) return;
+    messagesEl.innerHTML = '';
+    appendEmptyState(messagesEl);
+  }
+
+  function setThinkingExpanded(container, expanded, messagesEl) {
+    if (!container) return;
+    var toggle = container.querySelector('.ai-thinking-toggle');
+    var panel = container.querySelector('.ai-thinking-panel');
+    var caret = container.querySelector('.ai-thinking-caret');
+    if (!toggle || !panel || !caret) return;
+    container.classList.toggle('expanded', !!expanded);
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    caret.textContent = '\u25be';
+    if (messagesEl && expanded) {
+      scrollToBottom(messagesEl, false);
+    }
+  }
+
+  function formatThinkingElapsed(ms) {
+    var totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+    if (totalSeconds < 60) return totalSeconds + 's';
+    var minutes = Math.floor(totalSeconds / 60);
+    var seconds = totalSeconds % 60;
+    return seconds > 0 ? (minutes + 'm' + seconds + 's') : (minutes + 'min');
+  }
+
+  function setThinkingStatus(node, text) {
+    if (!node || !node.querySelector) return;
+    var label = node.querySelector('.ai-thinking-label');
+    if (!label) return;
+    label.textContent = text || '思考';
+  }
+
+  // ★ 2026-09-17 新增：标记「思考正在进行」。
+  //   作用：① 让 CSS 能给标题加一层轻微流动的高光，明确"还在实时产出"，
+  //         与"思考已结束"的静态观感区分开；
+  //         ② 提供稳定的状态锚点，便于收尾时统一清除，避免残留动画。
+  function setThinkingActive(node, active) {
+    if (!node || !node.classList) return;
+    try {
+      if (active) node.classList.add('is-thinking');
+      else node.classList.remove('is-thinking');
+    } catch (e) {}
+  }
+
+  function createThinkingTimer(reasoningNode) {
+    var intervalId = null;
+    var startedAt = 0;
+    var stopped = false;
+
+    function update(prefix, elapsedMs) {
+      if (!reasoningNode || !reasoningNode.isConnected) return;
+      setThinkingStatus(reasoningNode, prefix + ' ' + formatThinkingElapsed(elapsedMs));
+    }
+
+    return {
+      start: function() {
+        if (stopped || intervalId) return;
+        startedAt = Date.now();
+        update('正在思考中', 0);
+        setThinkingActive(reasoningNode, true);
+        intervalId = setInterval(function() {
+          if (!reasoningNode || !reasoningNode.isConnected) return;
+          update('正在思考中', Date.now() - startedAt);
+        }, 500);
+      },
+      stop: function() {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+        setThinkingActive(reasoningNode, false);
+        return startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+      },
+      cancel: function() {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+        setThinkingActive(reasoningNode, false);
+      },
+      syncFinal: function(ms) {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+        setThinkingActive(reasoningNode, false);
+        if (reasoningNode && reasoningNode.isConnected) {
+          setThinkingStatus(reasoningNode, '已思考 ' + formatThinkingElapsed(ms));
+        }
+      }
+    };
+  }
+
+  function buildReasoningNode(reasoning, messagesEl, elapsedMs) {
+    var container = el('div', { class: 'ai-thinking' });
+    var toggle = el('button', {
+      type: 'button',
+      class: 'ai-thinking-toggle',
+      'aria-expanded': 'false',
+      'aria-label': '思考过程'
+    });
+    var label = el('span', { class: 'ai-thinking-label', text: elapsedMs > 0 ? ('已思考 ' + formatThinkingElapsed(elapsedMs)) : '思考中' });
+    if (typeof elapsedMs === 'number' && elapsedMs === 0) label.textContent = '已思考 0s';
+    toggle.appendChild(label);
+    toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
+
+    var panel = el('div', { class: 'ai-thinking-panel' });
+    panel.appendChild(el('div', { class: 'ai-thinking-body', text: cleanReasoningText(reasoning) }));
+
+    toggle.addEventListener('click', function() {
+      setThinkingExpanded(container, !container.classList.contains('expanded'), messagesEl || S.messagesEl);
+    });
+
+    container.appendChild(toggle);
+    container.appendChild(panel);
+    return container;
+  }
+
+  // ★★★ 2026-09-28 新增：回收"从未被真实思考内容接管"的占位思考节点。
+  //   为降低感知延迟，发送瞬间会在 thinkingMode 开启时插入一个占位节点
+  //   （标签写死的「思考中」）。模型不是每次都输出 reasoning —— 简单提问或
+  //   工具直答时根本没有思考过程，这个节点若不回收就会永久停留在"思考中"。
+  //   判定条件刻意收紧，避免误删真正有内容的思考面板：
+  //     ① 标签仍是初始的「思考中」（说明没有任何 reasoning 流进来改写过它）；
+  //     ② 且思考正文区域为空（没有被后续流填充）。
+  // ★★★ 2026-09-29（用户连续报障：「正文上面还要写调用几个工具，真的很丑」）：
+  //   工具活动区原本固定在正文气泡**上方**、完成后折叠成一行"已完成 N 个工具 · 用时"，
+  //   正好卡在思考块和正文之间 —— 用户原话"很丑"，且反复修了十几次仍不满意。
+  //   对齐 ChatGPT / Claude 的真实形态：
+  //     · 过程流（思考 + 工具进度）留在正文**上方**（那是"它正在干嘛"）
+  //     · 结果摘要挪到正文**下方**一行（"已搜索 3 个网页 ▾"，可展开看明细）
+  //   时机选在**正文首字到达**：此刻"过程"结束、"结果"才开始有意义。
+  //   纯工具失败/无正文的回复不移动 —— 那种情况下用户正需要看见发生了什么。
+  // 找最近的真正可滚动祖先（用于搬移后的滚动锚定补偿）
+  function findScrollParent(el) {
+    var p = el && el.parentNode;
+    while (p && p !== document.body && p !== document.documentElement && p.getBoundingClientRect) {
+      var oy = '';
+      try { oy = String(getComputedStyle(p).overflowY || ''); } catch (eOy) {}
+      if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight + 1) return p;
+      p = p.parentNode;
+    }
+    return null;
+  }
+
+  function moveToolAreaBelowBubble(node) {
+    if (!node) return;
+    var bubble = node.querySelector('.ai-msg-bubble');
+    if (!bubble || !bubble.parentNode) return;
+    // ① 正文必须**真的开始了**（气泡里有内容）。
+    //    ★ 修复（协议侧确证）：后端存在 content 早于工具事件的确定性路径
+    //      （server.js 22566/22616 先推 narration content，工具事件随后）。
+    //      旧实现用一次性标志 __toolAreaMoved，正文先到时把标志提前消耗掉，
+    //      之后才建起来的工具区就**永久停在正文上方** —— 正是用户要消灭的形态。
+    //      改为幂等：不记"搬过"，只问"当下该不该在下面"。
+    var hasText = false;
+    try { hasText = String(bubble.textContent || '').trim().length > 0; } catch (eTxt) {}
+    if (!hasText) return;
+    var timelines = node.querySelectorAll('.ai-tool-timeline');
+    for (var i = 0; i < timelines.length; i++) {
+      var tl = timelines[i];
+      if (!tl || !tl.parentNode) continue;
+      if (tl.classList.contains('ai-process-timeline') || tl.closest('.ai-thinking')) continue;
+      // ② 仍在跑的工具留在正文**上方** —— 那是过程流，用户此刻正盯着看
+      try { if (tl.querySelector('.is-running')) continue; } catch (eRun) {}
+      // ③ 幂等：已经在正文之后就不再动（避免每个 content chunk 都做一次 DOM 搬移）
+      var alreadyAfter = false;
+      try { alreadyAfter = !!(bubble.compareDocumentPosition(tl) & 4); }
+      catch (eCmp) { alreadyAfter = (bubble.nextElementSibling === tl); }
+      if (alreadyAfter) continue;
+      // ④ ★ 滚动锚定补偿：工具区从正文上方消失、又在下方出现，正文整体往上一跳
+      //    （Chromium 实测：85px 高的 timeline 造成气泡上跳 87px，且常与思考面板
+      //     收起同帧叠加 —— 用户正在读正文开头却被拽走）。
+      //    移动前后各量一次气泡的视口位置，把差值补回滚动条，视觉上正文纹丝不动。
+      var scroller = findScrollParent(bubble);
+      var beforeTop = 0;
+      try { beforeTop = bubble.getBoundingClientRect().top; } catch (eRect) {}
+      try { bubble.parentNode.insertBefore(tl, bubble.nextSibling); } catch (eMove) { continue; }
+      if (scroller) {
+        var afterTop = beforeTop;
+        try { afterTop = bubble.getBoundingClientRect().top; } catch (eRect2) {}
+        var delta = afterTop - beforeTop;
+        if (delta) {
+          try {
+            if (scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body) {
+              window.scrollBy(0, delta);
+            } else {
+              scroller.scrollTop += delta;
+            }
+          } catch (eScroll) {}
+        }
+      }
+    }
+  }
+
+  function settleUnusedEarlyThinkingNode(target) {
+    if (!target || !target.querySelectorAll) return;
+    // 容器真实类名为 .ai-thinking（buildReasoningNode 的产出），必须是这一个，
+    // 写错名字会导致本函数静默空转（守卫测试已钉住）。
+    var nodes = target.querySelectorAll('.ai-thinking');
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var label = node.querySelector('.ai-thinking-label');
+      if (!label) continue;
+      if (String(label.textContent || '').trim() !== '思考中') continue; // 已被真实内容接管
+      var hasBody = false;
+      try {
+        var bodies = node.querySelectorAll('.ai-thinking-body, .ai-thinking-panel, .ai-reasoning-body');
+        for (var b = 0; b < bodies.length; b++) {
+          if (String(bodies[b].textContent || '').trim()) { hasBody = true; break; }
+        }
+      } catch (eBody) {}
+      if (hasBody) continue;
+      try { node.remove(); } catch (eRm) {}
+    }
+  }
+
+  // ★ O 修复 Bug 4: 从 history 恢复 think-card
+  //   退出ai聊天页重进时 deep_think=true 的消息渲染成 think-card
+  // ★ Q 重做: 极简版（与 handleSendDeepThink 一致结构）
+  function buildThinkCardFromHistory(msg, messagesEl, simpleMode) {
+    var thinkingLog = Array.isArray(msg.thinking_log) ? msg.thinking_log : [];
+    var workerResults = Array.isArray(msg.worker_results) ? msg.worker_results : [];
+    var agentCount = msg.agent_count || (workerResults.length || 0);
+    var thinkDurationMs = typeof msg.think_duration_ms === 'number' ? msg.think_duration_ms : 0;
+    var searchResults = Array.isArray(msg.search_results) ? msg.search_results : [];
+    var finalThinkingMode = (msg.usage && msg.usage.thinking_mode) || msg.thinking_mode || 'max';
+
+    var node;
+    if (simpleMode) {
+      node = buildResearchCardShell({
+        state: 'done',
+        canToggle: true,
+        expanded: false,
+        durationMs: thinkDurationMs,
+        agentCount: agentCount,
+        searchCount: msg.search_count || 0,
+        extraClass: 'ai-research-history ai-research-card--summary'
+      });
+      node._done = true;
+      stopResearchCardAnimation(node);
+    } else {
+      node = el('div', { class: 'ai-think-card collapsed' });
+      node.innerHTML =
+        '<div class="ai-think-header">' +
+          '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
+          '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
+          '<span class="ai-think-chevron">▾</span>' +
+        '</div>' +
+        '<div class="ai-think-body">' +
+          (thinkingLog.length > 0 ?
+            '<details class="ai-think-thinking">' +
+              '<summary><span>查看思考过程 (' + thinkingLog.length + ' 步)</span></summary>' +
+              '<div class="ai-think-thinking-body"></div>' +
+            '</details>' : '') +
+          (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
+          '<div class="ai-think-answer"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
+
+      // header 点击可展开/折叠
+      var headerEl = node.querySelector('.ai-think-header');
+      var chevronEl = node.querySelector('.ai-think-chevron');
+      headerEl.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var isCollapsed = node.classList.contains('collapsed');
+        if (isCollapsed) {
+          node.classList.remove('collapsed');
+          node.classList.add('expanded');
+          if (chevronEl) chevronEl.textContent = '▾';
+        } else {
+          node.classList.add('collapsed');
+          node.classList.remove('expanded');
+          if (chevronEl) chevronEl.textContent = '▸';
+        }
+      });
+    }
+
+    var contentForRender = msg.content || '';
+    var answerEl = node.querySelector('.ai-think-answer');
+    if (!contentForRender || !String(contentForRender).trim()) {
+      var hasThinkingLog = thinkingLog.length > 0 || (msg.reasoning && String(msg.reasoning).trim());
+      contentForRender = hasThinkingLog ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复。';
+    }
+    answerEl.innerHTML = renderMarkdown(contentForRender);
+    setupBubbleCopy(answerEl, messagesEl);
+
+    // 渲染思考过程日志(放进 <details> 内, 先合并同角色)
+    if (thinkingLog.length > 0) {
+      var thinkLogBox = node.querySelector('.ai-think-thinking-body');
+      if (thinkLogBox) {
+        var mergedLog = [];
+        for (var tli = 0; tli < thinkingLog.length; tli++) {
+          var mtl = thinkingLog[tli];
+          var mlast = mergedLog[mergedLog.length - 1];
+          if (mlast && mlast.agent_role === (mtl.agent_role || 'AI 智能体') && mlast.round === (mtl.round || 0)) {
+            mlast.chunk = (mlast.chunk || '') + (mtl.chunk || '');
+          } else {
+            mergedLog.push({ agent_role: mtl.agent_role || 'AI 智能体', chunk: mtl.chunk || '', round: mtl.round || 0 });
+          }
+        }
+        mergedLog.forEach(function(entry) {
+          var entEl = el('div', { class: 'ai-thought-entry' });
+          var roleLabel = entry.agent_role || 'AI';
+          var roundLabel = entry.round ? (' · 第' + entry.round + '轮') : '';
+          entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + escapeHtml(roundLabel) + '</div><div class="ai-thought-chunk"></div>';
+          entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
+          thinkLogBox.appendChild(entEl);
+        });
+        // 更新 summary 显示合并后的步数（两种模式都更新）
+        var summaryTextEl = node.querySelector('.ai-thinking-summary-text');
+        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + (mergedLog.length || (thinkLogBox && thinkLogBox.children.length) || 0) + ' 步)';
+      }
+    }
+
+    // footer (鏃堕棿 + 鎬濊€冪▼搴?+ agent 鏁?
+    var footer = node.querySelector('.ai-msg-footer');
+    if (footer) {
+      footer.innerHTML = '';
+      if (msg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
+      var badge = el('span', { class: 'ai-msg-thinking-badge' });
+      // ★ XSS 修复：服务端回传的 thinking_mode 一律 textContent 写入，
+      // SVG 图标为本文件常量（硬编码字符串），单独用 insertAdjacentHTML 插入。
+      badge.insertAdjacentHTML('afterbegin', AI_THINK_ICON);
+      badge.appendChild(document.createTextNode(' ' + finalThinkingMode));
+      footer.appendChild(badge);
+      if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+      if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索：' + (msg.search_count || 0) }));
+      if (msg.usage) {
+        var usageLine = buildUsageLine(msg.usage);
+        if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
+      }
+    }
+
+    return node;
+  }
+
+  // ★ O 修复 Bug 4: 格式化 think_duration_ms
+  function formatThinkDuration(ms) {
+    if (!ms || ms <= 0) return '0s';
+    var sec = Math.round(ms / 1000);
+    var min = Math.floor(sec / 60);
+    var s = sec % 60;
+    return min > 0 ? (min + 'm ' + s + 's') : (s + 's');
+  }
+
+  function snapshotAiProcess(node) {
+    var body = node && node.querySelector('.ai-thinking-body');
+    var hosts = body && body.__orderedProcess ? Array.from(body.children) : Array.from(node.querySelectorAll('.ai-process-timeline'));
+    var events = [], room = 64000, toolRoom = 128;
+    hosts.slice(0, 128).forEach(function(host) {
+      if (host.classList.contains('ai-reasoning-segment')) {
+        var text = host.textContent.slice(0, room); room -= text.length;
+        if (text) events.push({ type: 'reasoning', text: text });
+      } else if (host.classList.contains('ai-process-timeline')) {
+        var tools = Array.from(host.querySelectorAll('.ai-tool-step')).slice(0, Math.min(32, toolRoom)).map(function(step) {
+          var detail = step.querySelector('.ai-tool-step-detail');
+          var error = step.querySelector('.ai-tool-result-error');
+          var items = Array.from(step.querySelectorAll('.ai-search-detail-item')).slice(0, 10).map(function(item) {
+            var link = item.querySelector('a'), snippet = item.querySelector('.ai-search-detail-snippet');
+            return { title: link ? link.textContent : '', url: link ? link.getAttribute('href') : '', snippet: snippet ? snippet.textContent : '' };
+          });
+          return { call_id: step.getAttribute('data-tool-call-id') || '', tool_name: step.getAttribute('data-tool-name') || '', detail: detail ? detail.textContent.slice(0, 240) : '', summary: step.getAttribute('data-tool-summary') || '', status: step.classList.contains('is-done') ? 'done' : step.classList.contains('is-error') ? 'error' : 'interrupted', error: error ? error.textContent.slice(0, 240) : '', items: items };
+        });
+        toolRoom -= tools.length;
+        if (tools.length) events.push({ type: 'tools', tools: tools });
+      }
+    });
+    return events;
+  }
+
+  function buildOrderedProcessNode(msg, messagesEl) {
+    var reasoning = getMessageThinkingMode(msg) !== 'off';
+    var node = reasoning ? buildReasoningNode('', messagesEl, msg.thinking_elapsed_ms) : el('div', { class: 'ai-process-history' });
+    var body = reasoning ? node.querySelector('.ai-thinking-body') : node;
+    body.textContent = ''; body.__orderedProcess = true;
+    node.classList.add('ai-ordered-process');
+    var room = 64000;
+    (msg.process_events || []).slice(0, 128).forEach(function(event) {
+      if (event.type === 'reasoning' && reasoning) {
+        var text = String(event.text || '').slice(0, room); room -= text.length;
+        if (text) body.appendChild(el('div', { class: 'ai-reasoning-segment', text: cleanReasoningText(text) }));
+      } else if (event.type === 'tools' && Array.isArray(event.tools)) {
+        var group = el('div', { class: 'ai-tool-timeline ai-process-timeline' });
+        event.tools.slice(0, 32).forEach(function(tool) {
+          var done = tool.status === 'done';
+          var step = el('div', { class: 'ai-tool-step ' + (done ? 'is-done' : 'is-error'), 'data-tool-name': String(tool.tool_name || ''), 'data-tool-call-id': String(tool.call_id || '') });
+          step.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
+          var detail = el('div', { class: 'ai-tool-step-body' });
+          detail.appendChild(el('div', { class: 'ai-tool-step-title', text: toolLabel(tool.tool_name) }));
+          if (tool.detail) detail.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(tool.detail).slice(0, 240) }));
+          detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? toolResultFeedback(tool) : tool.status === 'interrupted' ? '已中断' : '失败' }));
+          if (tool.error) detail.appendChild(el('div', { class: 'ai-tool-result-error', text: String(tool.error).slice(0, 240) }));
+          if (Array.isArray(tool.items) && tool.items.length) {
+            var results = populateToolResultDisclosure(el('div', {class:'ai-tool-result-card'}), tool);
+            detail.appendChild(results);
+          }
+          if (done) step.setAttribute('data-tool-summary', toolResultFeedback(tool));
+          step.appendChild(detail); group.appendChild(step);
+        });
+        body.appendChild(group);
+      }
+    });
+    if (reasoning) setThinkingStatus(node, typeof msg.thinking_elapsed_ms === 'number' && msg.thinking_elapsed_ms >= 0 ? '已思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考过程');
+    return node;
+  }
+
+  function buildMessageNode(msg, messagesEl) {
+    var role = msg.role === 'assistant' ? 'assistant' : 'user';
+    // ★ O 修复 Bug 4: deep_think 消息渲染成 ai-think-card (从 history 恢复)
+    if (role === 'assistant' && msg.deep_think === true) {
+      return buildThinkCardFromHistory(msg, messagesEl);
+    }
+    var node = el('div', { class: 'ai-msg ' + role + ' entering' });
+    if (role === 'assistant' && Array.isArray(msg.process_events) && msg.process_events.length) {
+      node.appendChild(buildOrderedProcessNode(msg, messagesEl));
+    } else if (role === 'assistant' && shouldRenderReasoning(msg)) {
+      node.appendChild(buildReasoningNode(msg.reasoning, messagesEl, msg.thinking_elapsed_ms));
+    }
+    var contentForRender = msg.content || '';
+    var bubble = el('div', { class: 'ai-msg-bubble' });
+    if (!contentForRender || !String(contentForRender).trim()) {
+      var hasReasoning = !!(msg.reasoning && String(msg.reasoning).trim());
+      contentForRender = hasReasoning ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复。';
+    }
+    bubble.innerHTML = renderMarkdown(contentForRender);
+    setupBubbleCopy(bubble, messagesEl);
+    node.appendChild(bubble);
+    // 底部信息栏：时间 · 思考程度 · 用量（仅 assistant 有思考标签和用量）
+    var footer = el('div', { class: 'ai-msg-footer' });
+    if (msg.created_at) {
+      footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
+    }
+    if (role === 'assistant') {
+      // ★ P1 关键修：搜索端
+      //   - 1 天内（search_expires_at > now）：完整显示"已联网搜索 · N 条结果 + 可展开结果列表"
+      //   - 1 天后：端保持显示，但标记结果已过期
+      //   - 永远显示端（用户原话：重新进对话才显示已联网搜索搜到多少条信息）
+      if (msg.search_count > 0) {
+        var nowMs = Date.now();
+        var expiresAt = typeof msg.search_expires_at === 'number' ? msg.search_expires_at : 0;
+        var isExpired = expiresAt > 0 && nowMs > expiresAt;
+        node.appendChild(buildSearchStatusBar({
+          count: msg.search_count,
+          query: isExpired ? '' : (msg.search_query || ''),
+          results: isExpired ? [] : (msg.search_results || []),
+          expired: isExpired
+        }));
+      }
+      // 搜索到此结束
+      var thinkingMode = getMessageThinkingMode(msg);
+      if (thinkingMode && thinkingMode !== 'off') {
+        var badgeText = '思考 ' + thinkingMode;
+        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: badgeText }));
+      }
+      if (msg.usage && isAdminUser()) {
+        var parts = [];
+        if (msg.usage.prompt_tokens) parts.push('输入 ' + msg.usage.prompt_tokens);
+        if (msg.usage.completion_tokens) parts.push('输出 ' + msg.usage.completion_tokens);
+        if (typeof msg.usage.prompt_cache_hit_tokens === 'number' && msg.usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + msg.usage.prompt_cache_hit_tokens);
+        if (typeof msg.usage.prompt_cache_miss_tokens === 'number' && msg.usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + msg.usage.prompt_cache_miss_tokens);
+        if (typeof msg.usage.cost === 'number' && msg.usage.cost > 0) parts.push('¥' + msg.usage.cost.toFixed(6) + ' ' + (msg.usage.currency || 'CNY'));
+        if (parts.length) footer.appendChild(el('span', { class: 'ai-msg-usage', text: parts.join(' · ') }));
+      }
+    }
+    // ★ 新增：AI 回复底部「复制 / 分享」显式操作按钮
+    if (role === 'assistant') {
+      var actionRow = el('div', { class: 'ai-msg-actions' });
+      var copyBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-copy', 'aria-label': '复制回复', text: '复制' });
+      copyBtn.addEventListener('click', function(ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        var t = (bubble.textContent || '').trim();
+        if (!t) return;
+        doCopy(t);
+        copyBtn.textContent = '已复制';
+        setTimeout(function() { copyBtn.textContent = '复制'; }, 2000);
+      });
+      actionRow.appendChild(copyBtn);
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        var shareBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-share', 'aria-label': '分享回复', text: '分享' });
+        shareBtn.addEventListener('click', function(ev) {
+          ev.preventDefault(); ev.stopPropagation();
+          var t = (bubble.textContent || '').trim();
+          if (!t) return;
+          navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function(err) { handleShareError(err, t); });
+        });
+        actionRow.appendChild(shareBtn);
+      }
+      // ★ 重新生成：重新发送本条回复对应的上一条用户消息
+      var regenBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-regen', 'aria-label': '重新生成回复', text: '重新生成' });
+      regenBtn.addEventListener('click', function(ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        triggerRegenerate(messagesEl, msg);
+      });
+      actionRow.appendChild(regenBtn);
+      footer.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
+    }
+    if (footer.children.length > 0) node.appendChild(footer);
+    return node;
+  }
+
+  // ★ 重新生成：定位当前 assistant 消息之前最近的一条用户消息，重新发送
+  //   live 会话中的用户消息带有 attachments（含图片 data URL），可原样复用；
+  //   历史/跨端加载的消息无附件，则退回纯文本重发。
+  function triggerRegenerate(messagesEl, anchorMsg) {
+    try {
+      if (S.sending) { try { notify('请等待当前回复完成后重试'); } catch (eRg) {} return; }
+      var msgs = Array.isArray(S.messages) ? S.messages : [];
+      var idx = anchorMsg ? msgs.indexOf(anchorMsg) : -1;
+      if (idx < 0) idx = msgs.length - 1;
+      var userMsg = null;
+      for (var ri = idx - 1; ri >= 0; ri--) {
+        if (msgs[ri] && msgs[ri].role === 'user') { userMsg = msgs[ri]; break; }
+      }
+      if (!userMsg) { try { notify('未找到可重新生成的消息'); } catch (eNo) {} return; }
+      var raw = String(userMsg.content || '');
+      // 去掉图片/文件标记，还原纯文本
+      var plain = raw
+        .replace(/!\[[^\]]*\]\(data:[^)]+\)/g, ' ')
+        .replace(/\[图片:[^\]]*\]/g, ' ')
+        .replace(/\[文件:[^\]]*\]/g, ' ')
+        .replace(/\[📄[^\]]*\]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      var atts = (userMsg.attachments && userMsg.attachments.length) ? userMsg.attachments : null;
+      if (!plain && !atts) { try { notify('这条消息无法重新生成'); } catch (eEmp) {} return; }
+      if (typeof S._resendFn === 'function') {
+        S._resendFn(plain || raw, atts);
+      } else {
+        try { notify('重新生成暂不可用，请手动重发'); } catch (eNoFn) {}
+      }
+    } catch (e) {
+      try { notify('重新生成失败，请手动重发'); } catch (e2) {}
+    }
+  }
+
+  function buildEmptyState(tipText) {
+    var cfg = S.config || {};
+    var empty = el('div', { class: 'ai-chat-empty' });
+    var visual = el('div', { class: 'ai-chat-empty-visual' });
+    var emojiSlot = el('div', { class: 'ai-chat-empty-emoji' });
+    renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
+    visual.appendChild(emojiSlot);
+    empty.appendChild(visual);
+    empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + AI_DISPLAY_NAME + ' 聊聊天' }));
+    empty.appendChild(el('div', { class: 'ai-chat-empty-tip', text: tipText || (cfg.welcome_message || '嗨，来聊天吧。') }));
+    return empty;
+  }
+
+  function removeHistoryUnavailableBanner(messagesEl) {
+    if (!messagesEl) return;
+    var banner = messagesEl.querySelector('.ai-history-cache-banner');
+    if (banner) {
+      try { banner.remove(); } catch (e) {}
+    }
+  }
+
+  function renderHistoryUnavailable(messagesEl, r, options) {
+    if (!messagesEl) return;
+    var opts = options || {};
+    if (r && r.error_code === 'aborted') {
+      removeHistoryUnavailableBanner(messagesEl);
+      return;
+    }
+    
+    var hasVisibleMessages = !!messagesEl.querySelector('.ai-msg');
+    if (opts.preserveExistingMessages || hasVisibleMessages) {
+      var existingBanner = messagesEl.querySelector('.ai-history-cache-banner');
+      if (!existingBanner) {
+        existingBanner = el('div', { class: 'ai-history-cache-banner' });
+        var textSpan = el('span', { class: 'ai-history-cache-banner-text', text: '当前显示缓存记录，刷新失败' });
+        var retryBtn = el('button', {
+          type: 'button',
+          class: 'ai-history-cache-retry',
+          text: '重试',
+          'aria-label': '重试刷新聊天记录'
+        });
+        retryBtn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          loadHistory(messagesEl, null);
+        });
+        existingBanner.appendChild(textSpan);
+        existingBanner.appendChild(retryBtn);
+        if (messagesEl.firstChild) {
+          messagesEl.insertBefore(existingBanner, messagesEl.firstChild);
+        } else {
+          messagesEl.appendChild(existingBanner);
+        }
+      }
+      return;
+    }
+    
+    removeHistoryUnavailableBanner(messagesEl);
+    messagesEl.innerHTML = '';
+    var isTimeout = r && (r.status === 0 || r.error_code === 'timeout');
+    var isNetwork = r && r.error_code === 'network_error';
+    var tip = isTimeout
+      ? '聊天记录加载超时，可继续发送消息或点击重试'
+      : (isNetwork ? '网络连接异常，聊天记录更新失败' : '聊天记录暂时无法加载，你仍可发送新消息');
+    var state = buildEmptyState(tip);
+    state.classList.add('ai-history-unavailable');
+    var retry = el('button', {
+      type: 'button',
+      class: 'ai-history-retry',
+      text: '重新加载聊天记录',
+      'aria-label': '重新加载聊天记录'
+    });
+    retry.addEventListener('click', function() {
+      loadHistory(messagesEl, null);
+    });
+    state.appendChild(retry);
+    messagesEl.appendChild(state);
+  }
+
+  function appendMessage(messagesEl, msg) {
+    if (!messagesEl) return null;
+    var empty = messagesEl.querySelector('.ai-chat-empty');
+    if (empty) {
+      try { empty.remove(); } catch (e) {}
+    }
+    var node = buildMessageNode(msg, messagesEl);
+    // ★ 2026-09-29（审计 S1）：把消息对象与 DOM 节点互相关联。历史到达后需要按
+    //   「这个节点是不是本地未同步的轮次」来决定保留/摘除，光靠顺序或 class 不够可靠。
+    node._msgRef = msg;
+    messagesEl.appendChild(node);
+    if (msg && msg.role === 'assistant' && Array.isArray(msg.site_cards)) {
+      msg.site_cards.forEach(function(card) {
+        try { renderAiToolCard(node, card, node.querySelector('.ai-msg-bubble')); } catch (e) {}
+      });
+    }
+    return node;
+  }
+
+  // History rows are built in batches rather than through appendMessage, so
+  // restore their structured tool cards here as well. `nextMessageNodes` keeps
+  // each card attached to the assistant turn that produced it (and lets older
+  // paginated rows insert before the already-rendered history).
+  function renderAiHistoryCards(messagesEl, messages, messageNodes, nextMessageNodes) {
+    if (!messagesEl) return;
+    var rows = Array.isArray(messages) ? messages : [];
+    var nodes = Array.isArray(messageNodes) ? messageNodes : [];
+    var nextNodes = Array.isArray(nextMessageNodes) ? nextMessageNodes : [];
+    rows.forEach(function(msg, index) {
+      if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.site_cards)) return;
+      var insertBeforeNode = nodes[index + 1] || nextNodes[index] || null;
+      msg.site_cards.forEach(function(card) {
+        try { renderAiToolCard(nodes[index] || messagesEl, card, nodes[index] ? nodes[index].querySelector('.ai-msg-bubble') : insertBeforeNode); } catch (e) {}
+      });
+    });
+  }
+
+  function removeLastUserMessage(messagesEl) {
+    if (!messagesEl) return;
+    var nodes = messagesEl.querySelectorAll('.ai-msg.user');
+    if (nodes && nodes.length) {
+      try { nodes[nodes.length - 1].remove(); } catch (e) {}
+    }
+    maybeRestoreEmptyState(messagesEl);
+  }
+
+  function takeSmoothTextChunk(pending, options) {
+    pending = String(pending || '');
+    if (!pending) return '';
+    // V6: 流水跟包默认更大块，减少「一顿一顿」
+    var maxChunk = Math.max(1, options && options.maxChunk || 48);
+    var minChunk = Math.min(maxChunk, Math.max(1, options && options.minChunk || 6));
+    if (pending.length <= maxChunk) return pending;
+
+    var punctuation = /[，。！？；：?!.?:;\n]/;
+    for (var i = Math.min(maxChunk - 1, pending.length - 1); i >= minChunk - 1; i--) {
+      if (punctuation.test(pending.charAt(i))) return pending.slice(0, i + 1);
+    }
+
+    if (/^[\x00-\x7F]/.test(pending)) {
+      for (var j = Math.min(maxChunk, pending.length - 1); j >= minChunk; j--) {
+        var ch = pending.charAt(j);
+        if (/\s/.test(ch) || /[,.!?;:]/.test(ch)) return pending.slice(0, j + 1);
+      }
+    }
+
+    if (/[\uD800-\uDBFF]/.test(pending.charAt(maxChunk - 1)) && /[\uDC00-\uDFFF]/.test(pending.charAt(maxChunk))) maxChunk++;
+    return pending.slice(0, maxChunk);
+  }
+
+  /* ── 流式落地的增量补丁（2026-09-22）──────────────────────────────────
+     诊断结论（实测，勿凭直觉改回）：
+       · renderMarkdown 本身极快 —— 12000 字符仅 0.33ms，**不是**卡顿来源；
+       · 真正的开销在 `targetEl.innerHTML = html`：浏览器要销毁并重建整棵
+         DOM 子树，再重算样式、重排。正文字数越多节点越多，每帧成本随长度
+         线性增长，于是"越回越卡、一块块跳"。
+     做法：
+       整体渲染结果（正确性 100% 与旧实现一致）先放进游离容器解析，
+       再与目标容器的现有子节点**逐位比对**，只替换真正变化的那部分：
+       前面所有节点若 outerHTML 相同就原样留着（浏览器完全不用碰它们），
+       只更新最后一个（正在增长的）节点、并在必要时追加新节点。
+       这样每帧真正改动的是 O(1) 个节点，与全文长度无关。
+     安全网：任何异常 / 结构异常（节点数骤减等）都回退整段替换，保证显示正确。 */
+  function patchInnerHTML(targetEl, html) {
+    if (!targetEl) return;
+    function children(parent, wanted, depth) {
+      var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
+      var pos = 0;
+      Array.from(wanted.childNodes).forEach(function(want) {
+        var have = old[pos++];
+        if (!have) { parent.insertBefore(want.cloneNode(true), parent.querySelector(':scope > .ai-stream-cursor')); return; }
+        if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.isEqualNode(want))) return;
+        if (have.nodeType === 3 && want.nodeType === 3) { have.data = want.data; return; }
+        var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
+        if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
+        if (same) children(have, want, depth + 1);
+        else parent.replaceChild(want.cloneNode(true), have);
+      });
+      for (; pos < old.length; pos++) if (old[pos].parentNode === parent) old[pos].remove();
+    }
+    try {
+      var holder = document.createElement('div'); holder.innerHTML = html;
+      children(targetEl, holder, 0);
+    } catch (_) { targetEl.innerHTML = html; }
+  }
+
+  function createSmoothTextRenderer(targetEl, options) {
+    options = options || {};
+    var reducedMotion = prefersReducedMotion();
+    var pending = '';
+    var rendered = '';
+    var rafId = 0;
+    var cancelled = false;
+    var finished = false;
+    var drainState = null;
+    function settleDrain(ok) {
+      var state = drainState; drainState = null;
+      if (!state) return;
+      if (state.signal) state.signal.removeEventListener('abort', state.abort);
+      state.resolve(ok);
+    }
+    // A renderer can be created after the global pause button was pressed.
+    // Inherit that state so the next streamed chunk cannot restart animation
+    // until the user explicitly resumes.
+    var paused = !!S.paused;
+    var streamClass = options.streamClass || 'ai-streaming-soft';
+    var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
+    var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
+
+    // P1-4: 检测用户选区是否落在目标元素内，若是则跳过 innerHTML 替换
+    function isSelectionInTarget(el) {
+      try {
+        var sel = window.getSelection && window.getSelection();
+        if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+        var range = sel.getRangeAt(0);
+        if (!range) return false;
+        return el && el.contains(range.commonAncestorContainer);
+      } catch (e) { return false; }
+    }
+    // V6: 流水跟包 — 高吞吐 + 积压追赶，避免打字机一顿一顿
+    var lastFrameTime = 0;
+    // 以网络到达为准：最大程度跟上 DeepSeek 输出节奏；积压追赶与 50ms markdown 门限仍防卡顿
+    var charsPerMs = options.charsPerMs != null
+      ? options.charsPerMs
+      : 0.14;
+    if (charsPerMs > 1) charsPerMs /= 1000;
+    // plainStream 模式：单文本节点复用，避免每帧 createTextNode 触发 reflow
+    var plainTextNode = null;
+    var plainTextBuffer = '';
+    // V3: 末尾呼吸竖线光标 (替代闪光光点)
+    var cursor = null;
+    function ensureCursor() {
+      // ★ 2026-09-26（审计 AI 前端 P2-3）：光标被 innerHTML 重建抹掉后，cursor 变量
+      //   仍指向游离节点 → 原实现直接 return，光标永远不再出现（实测只在第一帧可见）。
+      //   这里检测到已脱离 DOM 就把引用置空，走下面的重新创建分支。
+      if (cursor && cursor.parentNode !== targetEl) cursor = null;
+      if (cursor || finished || cancelled) return;
+      try {
+        cursor = document.createElement('span');
+        cursor.className = 'ai-stream-cursor';
+        cursor.setAttribute('aria-hidden', 'true');
+        if (options.plainStream && plainTextNode && plainTextNode.parentNode === targetEl) {
+          // 插在 plainTextNode 之后
+          if (plainTextNode.nextSibling) targetEl.insertBefore(cursor, plainTextNode.nextSibling);
+          else targetEl.appendChild(cursor);
+        } else {
+          targetEl.appendChild(cursor);
+        }
+      } catch (e) {}
+    }
+    function removeCursor() {
+      try { if (cursor && cursor.parentNode) cursor.parentNode.removeChild(cursor); } catch (e) {}
+      cursor = null;
+    }
+
+    function clearFrame() {
+      if (!rafId) return;
+      try { cancelFrame(rafId); } catch (e) {}
+      rafId = 0;
+    }
+
+    function ensurePlainTextNode() {
+      if (plainTextNode && plainTextNode.parentNode === targetEl) return plainTextNode;
+      // 初始化时插入新文本节点（放在光标前面，光标可能尚未存在）
+      plainTextNode = document.createTextNode('');
+      targetEl.insertBefore(plainTextNode, cursor || null);
+      return plainTextNode;
+    }
+
+    function emitText(forceAll, budget) {
+      if (cancelled || !targetEl) return;
+      if (!pending) {
+        if (streamClass) targetEl.classList.remove(streamClass);
+        return;
+      }
+      if (streamClass) targetEl.classList.add(streamClass);
+      var next = '';
+      if (reducedMotion || forceAll) {
+        next = pending;
+        pending = '';
+      } else {
+        // Keep catch-up bounded so a large packet does not appear in one jump.
+        var frameBudget = Math.min(32, Math.max(1, Math.floor(budget || 4), Math.ceil(pending.length / 20)));
+        var maxChunkOpt = options.maxChunk || 48;
+        while (pending && next.length < frameBudget) {
+          var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
+          if (!chunk) break;
+          next += chunk;
+          pending = pending.slice(chunk.length);
+        }
+      }
+      if (!next) return;
+      rendered += next;
+      if (options.plainStream) {
+        // 流水模式：累积到 plainTextBuffer，一次写入单文本节点（不每帧建节点）
+        plainTextBuffer += next;
+        var node = ensurePlainTextNode();
+        // 用 data 设置文本，高效
+        try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
+      } else {
+        // Reconcile only changed nodes on each scheduled display frame.
+        var now = Date.now();
+        var _renderGap = 0; // requestAnimationFrame already limits each patch to a display frame.
+        var shouldRender = (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending);
+        if (shouldRender && !isSelectionInTarget(targetEl)) {
+          patchInnerHTML(targetEl, renderMarkdown(rendered, true));
+          targetEl._lastRender = now;
+        }
+      }
+      ensureCursor();
+      if (typeof options.onRender === 'function') {
+        try { options.onRender(rendered); } catch (e2) {}
+      }
+      if (!pending) {
+        if (streamClass) targetEl.classList.remove(streamClass);
+        if (finished && typeof options.onDone === 'function') {
+          try { options.onDone(); } catch (e) {}
+        }
+      }
+    }
+
+    function tick(timestamp) {
+      rafId = 0;
+      if (cancelled || paused) return;
+      if (!lastFrameTime) lastFrameTime = timestamp;
+      var elapsed = timestamp - lastFrameTime;
+      lastFrameTime = timestamp;
+      // 下限提高：慢帧也至少吐一批，保证「流水」感
+      var budget = Math.max(1, Math.floor(Math.min(40, elapsed || 16) * charsPerMs));
+      emitText(false, budget);
+      if (pending) schedule();
+      else if (drainState) api.finish(drainState.finalText);
+    }
+
+    function schedule() {
+      if (cancelled || !pending || rafId || paused) return;
+      if (reducedMotion) {
+        emitText(true);
+        return;
+      }
+      rafId = requestFrame(tick);
+    }
+
+    var api = {
+      // ★ 渲染器通道标记：'chat'（普通聊天）/ 'deep'（深页），供按通道清理
+      channel: options.channel || 'chat',
+      // ★ 是否会被取消：cancel() 会置位。收尾判定是否仍可安全对目标写内容。
+      isCancelled: false,
+      append: function(text) {
+        if (cancelled || !targetEl || !text || finished) return;
+        if (!pending) lastFrameTime = 0;
+        pending += String(text);
+        if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
+        if (!paused) schedule();
+      },
+      flush: function() {
+        if (cancelled || !targetEl) return;
+        clearFrame();
+        emitText(true);
+        if (drainState) api.finish(drainState.finalText);
+      },
+      pause: function() {
+        paused = true;
+        clearFrame();
+      },
+      resume: function() {
+        if (!paused) return;
+        paused = false;
+        if (pending) schedule();
+      },
+      isPaused: function() { return paused; },
+      drain: function(finalText, signal) {
+        if (cancelled || !targetEl) return Promise.resolve(false);
+        if (drainState) return drainState.promise;
+        if (finished) return Promise.resolve(true);
+        var final = typeof finalText === 'string' && finalText.length ? finalText : rendered + pending;
+        // A sanitized replacement must take effect immediately. Only an unseen
+        // suffix can follow the existing stream without replaying old text.
+        if (final.indexOf(rendered) !== 0 || reducedMotion || !final) {
+          api.finish(final); return Promise.resolve(true);
+        }
+        pending = final.slice(rendered.length); paused = false;
+        if (!pending) { api.finish(final); return Promise.resolve(true); }
+        var state = { finalText: final, signal: signal, resolve: null, abort: function() { api.stop(); } };
+        state.promise = new Promise(function(resolve) { state.resolve = resolve; });
+        drainState = state;
+        if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
+        if (signal) {
+          if (signal.aborted) { api.stop(); return state.promise; }
+          signal.addEventListener('abort', state.abort, { once: true });
+        }
+        schedule(); return state.promise;
+      },
+      finish: function(finalText) {
+        var idx = S.activeRenderers.indexOf(api);
+        if (idx !== -1) S.activeRenderers.splice(idx, 1);
+        if (cancelled || finished || !targetEl) return;
+        clearFrame();
+        if (pending && !(typeof finalText === 'string' && finalText.length > 0)) emitText(true);
+        finished = true;
+        paused = false;
+        // 只用有效内容覆盖, 避免空字符串清掉已流式渲染的文字
+        if (typeof finalText === 'string' && finalText.length > 0) rendered = finalText;
+        pending = '';
+        removeCursor();
+        // 兜底: 如果渲染完还是空的, 显示提示
+        if (!rendered || rendered.trim().length === 0) {
+          rendered = 'AI 暂无回复，请重试。';
+          targetEl.classList.add('ai-empty-fallback');
+        }
+        try { if (AI_DEBUG) console.log('[AI-RENDER] finish len:', rendered.length, 'el:', targetEl.tagName, targetEl.className); } catch(_) {}
+        if (options.plainStream) {
+          plainTextBuffer = rendered;
+          ensurePlainTextNode().data = rendered;
+        } else patchInnerHTML(targetEl, renderMarkdown(rendered));
+        targetEl.classList.remove(streamClass);
+        if (typeof options.onRender === 'function') {
+          try { options.onRender(rendered); } catch (e3) {}
+        }
+        if (typeof options.onDone === 'function') {
+          try { options.onDone(); } catch (e) {}
+        }
+        settleDrain(true);
+      },
+      stop: function() {
+        if (cancelled) return;
+        clearFrame();
+        if (pending) emitText(true);
+        finished = true;
+        removeCursor();
+        if (streamClass && targetEl) targetEl.classList.remove(streamClass);
+        var stopIndex = S.activeRenderers.indexOf(api);
+        if (stopIndex !== -1) S.activeRenderers.splice(stopIndex, 1);
+        settleDrain(false);
+      },
+      cancel: function() {
+        var idx2 = S.activeRenderers.indexOf(api);
+        if (idx2 !== -1) S.activeRenderers.splice(idx2, 1);
+        if (cancelled) return;
+        cancelled = true;
+        settleDrain(false);
+        api.isCancelled = true;
+        clearFrame();
+        removeCursor();
+        pending = '';
+        rendered = '';
+        // 如果已经 finish（正常完成），不要清空目标元素，避免把最终内容抹掉
+        if (!finished) {
+          try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
+        }
+        if (streamClass && targetEl) targetEl.classList.remove(streamClass);
+        targetEl = null;
+      }
+    };
+    return api;
+  }
+
+  function bindVisualViewport(messagesEl, input, inputBar) {
+    var root = input.closest("#panelDeepThink") || getAiRoot();
+    var researchViewport = root && root.id === "panelDeepThink";
+    if (!root) return function() {};
+
+    function applyViewport() {
+      if (researchViewport ? root.classList.contains("hidden") : !S.active || document.body.classList.contains("xtj-research-open")) return;
+      var vv = window.visualViewport;
+      var keyboardHeight = 0;
+      var viewportHeight = null;
+      if (vv) {
+        keyboardHeight = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+        viewportHeight = Math.max(280, Math.round(vv.height));
+      }
+      if (document.documentElement.classList.contains('xtj-ios-viewport')) {
+        // The site shell already follows VisualViewport; a second fixed input
+        // offset would lift the composer and leave a keyboard-sized blank area.
+        inputBar.style.position = ''; inputBar.style.bottom = '';
+        inputBar.style.left = ''; inputBar.style.width = ''; inputBar.style.zIndex = '';
+        messagesEl.style.paddingBottom = '';
+        root.classList.toggle('ai-keyboard-open', document.documentElement.classList.contains('xtj-keyboard-open'));
+        root.style.setProperty('--ai-keyboard-offset', '0px'); root.style.setProperty('--ai-viewport-height', '100%');
+        if (!researchViewport) updateInputMetrics(); return;
+      }
+      // ★ U3: clamp keyboardHeight 防某些浏览器算出异常值
+      var maxKb = Math.round(window.innerHeight * 0.6);
+      if (keyboardHeight > maxKb) keyboardHeight = maxKb;
+      root.classList.toggle('ai-keyboard-open', keyboardHeight > 0);
+
+      if (_isTouchMobile) {
+        // 移动端：输入框 position:fixed 浮在键盘上方，容器不缩放
+        if (keyboardHeight > 0) {
+          var barRect = inputBar.getBoundingClientRect();
+          var rootRect = root.getBoundingClientRect();
+          inputBar.style.position = 'fixed';
+          inputBar.style.bottom = keyboardHeight + 'px';
+          inputBar.style.left = rootRect.left + 'px';
+          inputBar.style.width = rootRect.width + 'px';
+          inputBar.style.zIndex = '100';
+          messagesEl.style.paddingBottom = 'calc(var(--ai-input-height, 72px) + ' + keyboardHeight + 'px + 14px)';
+        } else {
+          inputBar.style.position = '';
+          inputBar.style.bottom = '';
+          inputBar.style.left = '';
+          inputBar.style.width = '';
+          inputBar.style.zIndex = '';
+          messagesEl.style.paddingBottom = '';
+        }
+      } else {
+        // 桌面端：保持原有行为（缩放高度）
+        root.style.setProperty('--ai-keyboard-offset', keyboardHeight + 'px');
+        root.style.setProperty('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
+      }
+      if (!researchViewport) updateInputMetrics();
+      if (keyboardHeight > 0 && isNearBottom(messagesEl, 120)) {
+        S.autoScrollPinned = true;
+        scrollToBottom(messagesEl, true);
+      }
+    }
+
+    function resetViewport() {
+      if (_isTouchMobile) {
+        inputBar.style.position = '';
+        inputBar.style.bottom = '';
+        inputBar.style.left = '';
+        inputBar.style.width = '';
+        inputBar.style.zIndex = '';
+        messagesEl.style.paddingBottom = '';
+      }
+      root.classList.remove('ai-keyboard-open');
+      root.style.setProperty('--ai-keyboard-offset', '0px');
+      root.style.setProperty('--ai-viewport-height', '100%');
+      if (!researchViewport) updateInputMetrics();
+      if (isNearBottom(messagesEl, 120)) {
+        S.autoScrollPinned = true;
+        scrollToBottom(messagesEl, true);
+      }
+    }
+
+    var disposed = false;
+    var onViewportChange = function() { if (!disposed) applyViewport(); };
+    var viewportHandler = window.throttleRAF(onViewportChange);
+    var onBlur = function() {
+      if (S.keyboardResetTimer) {
+        try { clearTimeout(S.keyboardResetTimer); } catch (e) {}
+      }
+      S.keyboardResetTimer = setTimeout(function() {
+        S.keyboardResetTimer = null;
+        if (document.documentElement.classList.contains('xtj-ios-viewport')) applyViewport();
+        else resetViewport();
+      }, 100);
+    };
+    var onFocus = function() {
+      applyViewport();
+    };
+
+    var vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener('resize', viewportHandler);
+      vv.addEventListener('scroll', viewportHandler);
+    }
+    window.addEventListener('resize', viewportHandler);
+    window.addEventListener('xtj:visual-viewport-change', viewportHandler);
+    input.addEventListener('blur', onBlur);
+    input.addEventListener('focus', onFocus);
+    applyViewport();
+
+    return function() {
+      disposed = true;
+      if (S.keyboardResetTimer) {
+        try { clearTimeout(S.keyboardResetTimer); } catch (e2) {}
+        S.keyboardResetTimer = null;
+      }
+      if (vv) {
+        vv.removeEventListener('resize', viewportHandler);
+        vv.removeEventListener('scroll', viewportHandler);
+      }
+      window.removeEventListener('resize', viewportHandler);
+      window.removeEventListener('xtj:visual-viewport-change', viewportHandler);
+      input.removeEventListener('blur', onBlur);
+      input.removeEventListener('focus', onFocus);
+      inputBar.style.position = '';
+      inputBar.style.bottom = '';
+      inputBar.style.left = '';
+      inputBar.style.width = '';
+      inputBar.style.zIndex = '';
+      messagesEl.style.paddingBottom = '';
+    };
+  }
+
+  // ===================== M: 深入研究模式 · 进度条 / toggle / cancel =====================
+  // 切换深入研究模式：改为打开独立二级页面，不再切换普通聊天的 S.deepThink
+  function toggleDeepThink() {
+    if (!S.deepThinkEnabled) {
+      notify('深入研究模式已被管理员关闭');
+      return;
+    }
+    // 普通聊天中深入研究入口统一走二级页面，避免与普通聊天共用气泡面板
+    openDeepThinkPage();
+  }
+
+  function refreshDeepThinkToggle() {
+    var btn = document.getElementById('aiDeepThinkToggle');
+    if (btn) {
+      if (S.deepThink) btn.classList.add('on');
+      else btn.classList.remove('on');
+      // ★ P 新增: 后端禁用时显示禁用样式
+      if (!S.deepThinkEnabled) {
+        btn.classList.add('disabled');
+        btn.setAttribute('title', '深入研究模式已被管理员关闭');
+      } else {
+        btn.classList.remove('disabled');
+        btn.removeAttribute('title');
+      }
+    }
+  }
+
+  // 深入研究已改为独立二级页面，普通聊天不再恢复 deepThink 状态
+  function restoreDeepThinkState() {
+    S.deepThink = false;
+  }
+
+  // 鏋勯€犳繁搴︽€濊€冭繘搴﹀崱鐗?(鏋佺畝椋庢牸)
+  // ★ U2 重做: 4 角凸起 sparkle (ChatGPT/Claude 风格, 替代菱形)
+  var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none" style="vertical-align:-2px"><ellipse cx="8" cy="11.2" rx="3.4" ry="2.7"/><circle cx="4.6" cy="6.6" r="1.5"/><circle cx="8" cy="5" r="1.5"/><circle cx="11.4" cy="6.6" r="1.5"/></svg>';
+  // ★ 流式正文内容长度上限：与 reasoning 200k 上限对齐，防止超长回复/异常流
+  // 让字符串无限累积并导致每帧 renderMarkdown 的 O(n²) 渲染越来越卡。
+  var AI_CONTENT_MAX_LEN = 500000;
+  // 带上限追加：返回截断到 cap 以内的新字符串
+  var AI_RESEARCH_STEPS = ['拆解问题', '分析信息', '组织结构', '生成回答'];
+  var AI_RESEARCH_THINKING_TEXTS = ['正在拆解问题', '正在分析上下文', '正在组织思路', '正在构建回答结构'];
+  var AI_RESEARCH_RESEARCH_TEXTS = ['正在检索相关信息', '正在归纳研究要点', '正在生成研究结论'];
+
+  function isResearchCard(card) {
+    return !!(card && card._researchState && card.classList && card.classList.contains('ai-research-card'));
+  }
+
+  function ensureResearchCardRefs(card) {
+    if (!card) return null;
+    if (!card._researchRefs) {
+      card._researchRefs = {
+        header: card.querySelector('.ai-research-header'),
+        title: card.querySelector('.ai-research-title'),
+        meta: card.querySelector('.ai-research-meta'),
+        status: card.querySelector('.ai-research-status'),
+        steps: Array.prototype.slice.call(card.querySelectorAll('.ai-research-steps span')),
+        stop: card.querySelector('.ai-research-stop'),
+        details: card.querySelector('.ai-think-thinking'),
+        summaryText: card.querySelector('.ai-thinking-summary-text'),
+        thinkingBody: card.querySelector('.ai-think-thinking-body'),
+        answer: card.querySelector('.ai-think-answer'),
+        footer: card.querySelector('.ai-msg-footer'),
+        retry: card.querySelector('.ai-research-retry'),
+        failureSlot: card.querySelector('.ai-research-failure-slot'),
+        canvas: card.querySelector('.ai-research-particles'),
+        searchBox: null
+      };
+    }
+    return card._researchRefs;
+  }
+
+  function setResearchDisclosure(card, expanded) {
+    if (!isResearchCard(card)) return;
+    var refs = ensureResearchCardRefs(card);
+    var state = card._researchState || {};
+    var canToggle = !!state.canToggle;
+    if (state.userPinnedOpen && canToggle) expanded = true;
+    if (!canToggle) expanded = false;
+    armResearchMotionWindow(card);
+    card.classList.toggle('expanded', !!expanded && canToggle);
+    card.classList.toggle('collapsed', !expanded || !canToggle);
+    if (refs && refs.details) refs.details.open = !!expanded && canToggle;
+    syncResearchCardAnimatorState(card);
+  }
+
+  /**
+   * 把深入研究阶段写入「查看思考过程」日志，并更新步数。
+   * 之前只改了状态条文案，details 一直是 0 步，用户展开什么都没有。
+   */
+  function appendResearchThinkingEntry(card, roleLabel, text, options) {
+    if (!isResearchCard(card)) return 0;
+    options = options || {};
+    var refs = ensureResearchCardRefs(card);
+    var body = (refs && refs.thinkingBody) || card.querySelector('.ai-think-thinking-body');
+    var summary = (refs && refs.summaryText) || card.querySelector('.ai-thinking-summary-text');
+    var details = (refs && refs.details) || card.querySelector('.ai-think-thinking');
+    if (!body) return 0;
+    var msg = options.stream ? String(text || '') : String(text || '').trim();
+    if (!msg) return body.children.length;
+    var role = String(roleLabel || '研究进程').trim() || '研究进程';
+
+    // 同角色连续阶段：合并到最后一条，避免刷屏
+    var last = body.lastElementChild;
+    if (last && last._role === role && !options.forceNew) {
+      var chunk = last.querySelector('.ai-thought-chunk');
+      if (chunk) {
+        var prev = String(chunk.textContent || '');
+        chunk.textContent = options.stream ? prev + msg : (prev && prev !== msg ? prev + '\n' + msg : msg);
+      }
+    } else {
+      var entry = document.createElement('div');
+      entry.className = 'ai-thought-entry';
+      entry._role = role;
+      entry.innerHTML = '<div class="ai-thought-role"></div><div class="ai-thought-chunk"></div>';
+      entry.querySelector('.ai-thought-role').textContent = role;
+      entry.querySelector('.ai-thought-chunk').textContent = msg;
+      body.appendChild(entry);
+    }
+
+    var n = body.children.length;
+    if (summary) summary.textContent = '查看思考过程 (' + n + ' 步)';
+    if (card._researchState) {
+      card._researchState.canToggle = true;
+      card._researchState.stepCount = n;
+      // 研究进行中默认展开思考过程，方便实时看
+      if (options.autoOpen !== false && !card._researchState.userPinnedClosed) {
+        card._researchState.persistExpanded = true;
+        if (details) details.open = true;
+        card.classList.add('expanded');
+        card.classList.remove('collapsed');
+      }
+    }
+    return n;
+  }
+
+  function resetResearchCardDisclosure(root) {
+    if (!root || !root.querySelectorAll) return;
+    var cards = root.querySelectorAll('.ai-research-card');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      if (!isResearchCard(card)) continue;
+      if (card._researchState) {
+        card._researchState.persistExpanded = false;
+        card._researchState.userPinnedOpen = false;
+      }
+      setResearchDisclosure(card, false);
+    }
+  }
+
+  function preserveResearchAnswer(card, content) {
+    if (!isResearchCard(card) || !content) return;
+    var answer = card.querySelector('.ai-think-answer');
+    if (!answer || String(answer.textContent || '').trim()) return;
+    try { answer.innerHTML = renderMarkdown(String(content)); } catch (e) {}
+  }
+
+  function syncResearchFailureNote(card, statusText) {
+    if (!isResearchCard(card)) return;
+    var refs = ensureResearchCardRefs(card);
+    if (!refs || !refs.failureSlot) return;
+    var note = refs.failureSlot.querySelector('.ai-research-failure-note');
+    var state = card._researchState || {};
+    var show = !!statusText && (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled');
+    if (!show) {
+      if (note && note.parentNode) note.parentNode.removeChild(note);
+      return;
+    }
+    if (!note) {
+      note = el('div', { class: 'ai-error-note ai-research-failure-note' });
+      refs.failureSlot.appendChild(note);
+    }
+    note.textContent = statusText;
+  }
+
+  function markResearchCardOutcome(card, nextState, statusText) {
+    if (!isResearchCard(card)) return;
+    setResearchCardState(card, nextState, { statusText: statusText });
+    syncResearchFailureNote(card, statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002');
+  }
+
+  function updateResearchProgress(card, ratio) {
+    if (!isResearchCard(card)) return;
+    var safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+    card.style.setProperty('--ai-research-progress', (safeRatio * 100).toFixed(2) + '%');
+    if (card._researchState) card._researchState.progress = safeRatio;
+  }
+
+  function setResearchSteps(card, activeIndex, doneCount) {
+    var refs = ensureResearchCardRefs(card);
+    if (!refs || !refs.steps) return;
+    refs.steps.forEach(function(step, idx) {
+      step.classList.remove('done', 'active');
+      if (idx < doneCount) step.classList.add('done');
+      else if (idx === activeIndex) step.classList.add('active');
+    });
+  }
+
+  function stopResearchCardAnimation(card) {
+    if (!isResearchCard(card)) return;
+    var state = card._researchState;
+    if (!state) return;
+    if (state.elapsedTimer) {
+      try { clearInterval(state.elapsedTimer); } catch (e) {}
+      state.elapsedTimer = null;
+    }
+    if (state.animator) {
+      try { state.animator.stop(); } catch (e2) {}
+      state.animator = null;
+    }
+  }
+
+  function getResearchAnimationProfile() {
+    var root = document.documentElement;
+    var profile = window.__xtjPerfProfile || root.getAttribute('data-xtj-perf-profile') || root.dataset.xtjPerfProfile || '';
+    if (!profile && root.classList.contains('perf-lite')) profile = 'lite';
+    if (!profile && root.classList.contains('perf-balanced')) profile = 'balanced';
+    if (!profile) profile = 'full';
+    // P1-5: 降低渲染成本 — 节点数/FPS/DPR 全部降档
+    if (profile === 'lite') return { mode: 'lite', canvas: false, minNodes: 0, maxNodes: 0, fps: 0, dpr: 1 };
+    if (profile === 'balanced') return { mode: 'balanced', canvas: true, minNodes: 18, maxNodes: 24, fps: 24, dpr: 1 };
+    return { mode: 'full', canvas: true, minNodes: 28, maxNodes: 32, fps: 30, dpr: 1.25 };
+  }
+
+  function armResearchMotionWindow(card) {
+    var refs = ensureResearchCardRefs(card);
+    if (!refs || !refs.details) return;
+    refs.details.classList.add('ai-motion-window');
+    clearTimeout(refs.details._motionWindowTimer);
+    refs.details._motionWindowTimer = setTimeout(function() {
+      refs.details.classList.remove('ai-motion-window');
+    }, 380);
+  }
+
+  function shouldResearchCardAnimate(card) {
+    if (!isResearchCard(card) || !card.isConnected || document.hidden) return false;
+    var state = card._researchState || {};
+    if (state.state !== 'preparing' && state.state !== 'thinking' && state.state !== 'researching') return false;
+    return !(state.canToggle && card.classList.contains('collapsed'));
+  }
+
+  function syncResearchCardAnimatorState(card) {
+    if (!isResearchCard(card) || !card._researchState || !card._researchState.animator) return;
+    if (typeof card._researchState.animator.sync === 'function') card._researchState.animator.sync();
+  }
+
+  function syncResearchElapsed(card, ms) {
+    if (!isResearchCard(card)) return;
+    var refs = ensureResearchCardRefs(card);
+    var state = card._researchState;
+    if (!refs || !refs.meta || !state) return;
+    state.elapsedMs = Math.max(0, ms || 0);
+    if (state.state === 'responding' || state.state === 'done' || state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') {
+      refs.meta.textContent = '';
+      return;
+    }
+    refs.meta.textContent = '已思考 ' + formatThinkDuration(state.elapsedMs);
+  }
+
+  function setResearchCardState(card, nextState, opts) {
+    if (!isResearchCard(card)) return;
+    opts = opts || {};
+    var refs = ensureResearchCardRefs(card);
+    var state = card._researchState;
+    if (!refs || !state) return;
+    if (nextState === 'error') nextState = 'interrupted';
+    if ((state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') && nextState === 'done') return;
+    if (typeof opts.elapsedMs === 'number') state.elapsedMs = opts.elapsedMs;
+    if (typeof opts.durationMs === 'number' && opts.durationMs >= 0) state.durationMs = opts.durationMs;
+    if (typeof opts.agentCount === 'number') state.agentCount = opts.agentCount;
+    if (typeof opts.allowToggle === 'boolean') state.canToggle = opts.allowToggle;
+    if (typeof opts.stepCount === 'number') state.stepCount = opts.stepCount;
+    if (typeof opts.searchCount === 'number') state.searchCount = opts.searchCount;
+    if (typeof opts.persistExpanded === 'boolean') state.persistExpanded = opts.persistExpanded;
+    if (typeof opts.progress === 'number') state.progress = opts.progress;
+    state.state = nextState || state.state || 'preparing';
+
+    if (state.stepCount > 0) state.canToggle = true;
+
+    card.setAttribute('data-research-state', state.state);
+    card.classList.remove('ai-research-preparing', 'ai-research-thinking', 'ai-research-researching', 'ai-research-responding', 'ai-research-done', 'ai-research-timeout', 'ai-research-interrupted', 'ai-research-cancelled', 'ai-research-error');
+    card.classList.add('ai-research-' + state.state);
+    if (state.state === 'interrupted') card.classList.add('ai-research-error');
+    syncResearchFailureNote(card, null);
+
+    if (state.state === 'responding' || state.state === 'done' || state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') {
+      card.classList.remove('generating');
+      state.canToggle = true;
+      var shouldExpandTerminal = state.persistExpanded ? true : !!opts.expanded;
+      if (!shouldExpandTerminal && (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled')) {
+        shouldExpandTerminal = true;
+      }
+      setResearchDisclosure(card, shouldExpandTerminal);
+      stopResearchCardAnimation(card);
+    } else {
+      card.classList.add('generating');
+      setResearchDisclosure(card, state.persistExpanded ? true : false);
+    }
+
+    if (state.state === 'preparing') {
+      refs.title.textContent = '深入研究中';
+      refs.status.textContent = '正在进入深入研究...';
+      syncResearchElapsed(card, state.elapsedMs || 0);
+      setResearchSteps(card, 0, 0);
+      updateResearchProgress(card, typeof state.progress === 'number' ? state.progress : 0.08);
+    } else if (state.state === 'thinking') {
+      refs.title.textContent = '深入研究中';
+      refs.status.textContent = opts.statusText || AI_RESEARCH_THINKING_TEXTS[state.thinkingTick % AI_RESEARCH_THINKING_TEXTS.length];
+      state.thinkingTick += 1;
+      syncResearchElapsed(card, state.elapsedMs || 0);
+      if (state.thinkingTick <= 1) setResearchSteps(card, 0, 0);
+      else if (state.thinkingTick === 2) setResearchSteps(card, 1, 1);
+      else setResearchSteps(card, 2, 2);
+      updateResearchProgress(card, typeof state.progress === 'number' ? state.progress : Math.min(0.62, 0.18 + state.stepCount * 0.06));
+    } else if (state.state === 'researching') {
+      refs.title.textContent = '深入研究中';
+      refs.status.textContent = opts.statusText || AI_RESEARCH_RESEARCH_TEXTS[state.researchTick % AI_RESEARCH_RESEARCH_TEXTS.length];
+      state.researchTick += 1;
+      syncResearchElapsed(card, state.elapsedMs || 0);
+      if (state.researchTick <= 1) setResearchSteps(card, 1, 1);
+      else setResearchSteps(card, 2, 2);
+      updateResearchProgress(card, typeof state.progress === 'number' ? state.progress : Math.min(0.9, 0.68 + Math.max(state.searchCount || 0, state.researchTick) * 0.04));
+    } else if (state.state === 'responding') {
+      refs.title.textContent = '已思考 ' + formatThinkDuration(state.durationMs || state.elapsedMs || 0) + ' · 深入研究完成';
+      refs.status.textContent = '正在生成回答...';
+      refs.meta.textContent = '';
+      setResearchSteps(card, 3, 3);
+      updateResearchProgress(card, 0.96);
+    } else if (state.state === 'done') {
+      refs.title.textContent = '已思考 ' + formatThinkDuration(state.durationMs || state.elapsedMs || 0) + ' · 深入研究完成';
+      refs.status.textContent = '研究摘要已生成，可展开查看思考过程。';
+      refs.meta.textContent = '';
+      setResearchSteps(card, -1, 4);
+      updateResearchProgress(card, 1);
+    } else if (state.state === 'timeout') {
+      refs.title.textContent = '\u8fde\u63a5\u8d85\u65f6';
+      refs.status.textContent = opts.statusText || '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002';
+      refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.12, state.progress || 0));
+      syncResearchFailureNote(card, refs.status.textContent);
+    } else if (state.state === 'interrupted') {
+      refs.title.textContent = '\u8fde\u63a5\u4e2d\u65ad';
+      refs.status.textContent = opts.statusText || '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u672a\u5b8c\u6210\u3002';
+      refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.12, state.progress || 0));
+      syncResearchFailureNote(card, refs.status.textContent);
+    } else if (state.state === 'cancelled') {
+      refs.title.textContent = '已取消';
+      refs.status.textContent = '已取消本次深入研究。';
+      refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.18, state.progress || 0));
+      syncResearchFailureNote(card, refs.status.textContent);
+    } else if (state.state === 'error') {
+      refs.title.textContent = '研究失败，请重试';
+      refs.status.textContent = opts.statusText || '本次深入研究未能完成。';
+      refs.meta.textContent = '';
+      updateResearchProgress(card, Math.max(0.12, state.progress || 0));
+    }
+
+    syncResearchCardAnimatorState(card);
+    if (refs.stop) refs.stop.style.display = (state.state === 'preparing' || state.state === 'thinking' || state.state === 'researching') ? '' : 'none';
+    if (refs.retry) refs.retry.style.display = (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') ? '' : 'none';
+  }
+
+  function createResearchCardAnimator(card) {
+    if (!isResearchCard(card) || prefersReducedMotion()) return null;
+    var refs = ensureResearchCardRefs(card);
+    var canvas = refs && refs.canvas;
+    if (!canvas || !canvas.getContext) return null;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    var profile = getResearchAnimationProfile();
+    var state = { running: true, paused: false, rafId: 0, nodes: [], width: 0, height: 0, dpr: 1, profile: profile, lastFrameTs: 0, isOffscreen: false, observer: null, resizeObserver: null, glowSprite: null };
+    card.classList.toggle('ai-research-static', !profile.canvas);
+
+    // P1-5: 预渲染发光粒子贴图，替代每帧每节点 shadowBlur（成本极高）
+    //   离屏 canvas 绘制一次径向渐变圆点，draw 时只需 drawImage
+    function buildGlowSprite() {
+      try {
+        var size = 24;
+        var off = document.createElement('canvas');
+        off.width = size; off.height = size;
+        var octx = off.getContext('2d');
+        if (!octx) return null;
+        var cx = size / 2, cy = size / 2;
+        var grad = octx.createRadialGradient(cx, cy, 0, cx, cy, cx);
+        grad.addColorStop(0, 'rgba(150, 245, 232, 0.95)');
+        grad.addColorStop(0.35, 'rgba(132, 234, 236, 0.55)');
+        grad.addColorStop(1, 'rgba(132, 234, 236, 0)');
+        octx.fillStyle = grad;
+        octx.fillRect(0, 0, size, size);
+        return off;
+      } catch (e) { return null; }
+    }
+    state.glowSprite = buildGlowSprite();
+
+    function scheduleFrame() {
+      if (!state.running || state.paused || !state.profile.canvas) return;
+      if (state.rafId) cancelAnimationFrame(state.rafId);
+      state.rafId = requestAnimationFrame(draw);
+    }
+
+    function resize() {
+      if (!canvas.isConnected) return;
+      var rect = canvas.getBoundingClientRect();
+      state.width = Math.max(10, Math.floor(rect.width));
+      state.height = Math.max(10, Math.floor(rect.height));
+      state.dpr = Math.min(window.devicePixelRatio || 1, state.profile.dpr);
+      canvas.width = state.width * state.dpr;
+      canvas.height = state.height * state.dpr;
+      ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+      if (!state.profile.canvas) {
+        ctx.clearRect(0, 0, state.width, state.height);
+        return;
+      }
+      var targetCount = Math.max(state.profile.minNodes, Math.min(state.profile.maxNodes, state.profile.minNodes + Math.floor((state.width * state.height) / 24000)));
+      state.nodes = Array.from({ length: targetCount }, function() {
+        return {
+          x: Math.random() * state.width,
+          y: Math.random() * state.height,
+          vx: (Math.random() - 0.5) * 0.24,
+          vy: (Math.random() - 0.5) * 0.24,
+          p: Math.random() * Math.PI * 2
+        };
+      });
+    }
+
+    // P1-5: 空间网格 — 每个节点只连接最近的 2-3 个邻居，替代 O(n²) 全两两连线
+    function buildSpatialGrid() {
+      var cellSize = Math.max(40, Math.min(state.width, state.height) / 4);
+      var cols = Math.max(1, Math.ceil(state.width / cellSize));
+      var rows = Math.max(1, Math.ceil(state.height / cellSize));
+      var grid = [];
+      for (var i = 0; i < cols * rows; i++) grid.push([]);
+      for (var n = 0; n < state.nodes.length; n++) {
+        var node = state.nodes[n];
+        var cx = Math.max(0, Math.min(cols - 1, Math.floor(node.x / cellSize)));
+        var cy = Math.max(0, Math.min(rows - 1, Math.floor(node.y / cellSize)));
+        grid[cy * cols + cx].push(n);
+      }
+      return { grid: grid, cols: cols, rows: rows, cellSize: cellSize };
+    }
+
+    function draw(ts) {
+      if (!state.running || state.paused) return;
+      if (state.profile.fps && state.lastFrameTs && ts - state.lastFrameTs < (1000 / state.profile.fps)) {
+        state.rafId = requestAnimationFrame(draw);
+        return;
+      }
+      state.lastFrameTs = ts;
+      ctx.clearRect(0, 0, state.width, state.height);
+      var mx = state.width / 2 + Math.cos(ts * 0.00055) * state.width * 0.12;
+      var my = state.height / 2 + Math.sin(ts * 0.00085) * state.height * 0.12;
+      // 更新节点位置
+      for (var i = 0; i < state.nodes.length; i++) {
+        var node = state.nodes[i];
+        node.x += node.vx;
+        node.y += node.vy;
+        node.p += 0.018;
+        if (node.x < 0 || node.x > state.width) node.vx *= -1;
+        if (node.y < 0 || node.y > state.height) node.vy *= -1;
+      }
+      // P1-5: 空间网格邻居连线（每节点最多连 3 个最近邻居），替代 O(n²)
+      var sp = buildSpatialGrid();
+      var lineLimit = Math.min(122, Math.max(80, state.width * 0.2));
+      var drawn = {}; // 去重 "a-b" 边
+      ctx.lineWidth = 0.8;
+      for (var a = 0; a < state.nodes.length; a++) {
+        var n1 = state.nodes[a];
+        var cx = Math.max(0, Math.min(sp.cols - 1, Math.floor(n1.x / sp.cellSize)));
+        var cy = Math.max(0, Math.min(sp.rows - 1, Math.floor(n1.y / sp.cellSize)));
+        // 检查 3x3 邻域单元格
+        var neighbors = [];
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            var ncx = cx + dx, ncy = cy + dy;
+            if (ncx < 0 || ncx >= sp.cols || ncy < 0 || ncy >= sp.rows) continue;
+            var cell = sp.grid[ncy * sp.cols + ncx];
+            for (var ci = 0; ci < cell.length; ci++) {
+              var b = cell[ci];
+              if (b === a) continue;
+              var n2 = state.nodes[b];
+              var ddx = n1.x - n2.x, ddy = n1.y - n2.y;
+              var dist = Math.sqrt(ddx * ddx + ddy * ddy);
+              if (dist < lineLimit) neighbors.push({ idx: b, dist: dist });
+            }
+          }
+        }
+        // 按距离排序，只连最近 3 个
+        neighbors.sort(function(p, q) { return p.dist - q.dist; });
+        var maxConn = Math.min(3, neighbors.length);
+        for (var k = 0; k < maxConn; k++) {
+          var bIdx = neighbors[k].idx;
+          var key = a < bIdx ? (a + '-' + bIdx) : (bIdx + '-' + a);
+          if (drawn[key]) continue;
+          drawn[key] = true;
+          var n2b = state.nodes[bIdx];
+          var alpha = (1 - neighbors[k].dist / lineLimit) * 0.24;
+          ctx.strokeStyle = 'rgba(124, 255, 227, ' + alpha.toFixed(3) + ')';
+          ctx.beginPath();
+          ctx.moveTo(n1.x, n1.y);
+          ctx.lineTo(n2b.x, n2b.y);
+          ctx.stroke();
+        }
+      }
+      // P1-5: 用预渲染贴图 drawImage 绘制粒子，替代每节点 shadowBlur
+      var sprite = state.glowSprite;
+      for (var j = 0; j < state.nodes.length; j++) {
+        var dot = state.nodes[j];
+        var glowDx = dot.x - mx;
+        var glowDy = dot.y - my;
+        var glow = Math.max(0, 1 - Math.sqrt(glowDx * glowDx + glowDy * glowDy) / 210);
+        var radius = 1.4 + Math.sin(dot.p) * 0.4 + glow;
+        if (sprite) {
+          // 贴图方式：根据 glow 调整尺寸和透明度
+          var spriteSize = 6 + glow * 10;
+          ctx.globalAlpha = 0.5 + glow * 0.5;
+          ctx.drawImage(sprite, dot.x - spriteSize / 2, dot.y - spriteSize / 2, spriteSize, spriteSize);
+          ctx.globalAlpha = 1;
+        } else {
+          // 降级：简单渐变圆点（无 shadowBlur）
+          ctx.beginPath();
+          ctx.fillStyle = 'rgba(' + Math.round(132 + glow * 26) + ', ' + Math.round(234 + glow * 18) + ', 236, ' + (0.4 + glow * 0.5).toFixed(3) + ')';
+          ctx.arc(dot.x, dot.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      state.rafId = requestAnimationFrame(draw);
+    }
+
+    function pause() {
+      state.paused = true;
+      if (state.rafId) cancelAnimationFrame(state.rafId);
+      state.rafId = 0;
+    }
+
+    function resume() {
+      if (!state.running || !state.paused || !state.profile.canvas) return;
+      state.paused = false;
+      scheduleFrame();
+    }
+
+    function sync() {
+      var shouldRun = shouldResearchCardAnimate(card) && !state.isOffscreen;
+      if (!state.profile.canvas) {
+        if (!shouldRun) pause();
+        return;
+      }
+      if (shouldRun) {
+        if (state.paused) resume();
+        else if (!state.rafId) scheduleFrame();
+      } else {
+        pause();
+      }
+    }
+
+    var disposed = false;
+    var throttledResize = window.throttleRAF(function() {
+      if (!disposed) resize();
+    });
+
+    function stop() {
+      disposed = true;
+      state.running = false;
+      pause();
+      try { window.removeEventListener('resize', throttledResize); } catch (e) {}
+      try { document.removeEventListener('visibilitychange', handleVisibility); } catch (e2) {}
+      try { if (state.observer) state.observer.disconnect(); } catch (e3) {}
+      // P1-5: 清理 ResizeObserver
+      try { if (state.resizeObserver) state.resizeObserver.disconnect(); } catch (e4) {}
+      state.resizeObserver = null;
+      ctx.clearRect(0, 0, state.width, state.height);
+    }
+
+    function handleVisibility() {
+      if (!state.running) return;
+      sync();
+    }
+
+    function handleIntersection(entries) {
+      if (!entries || !entries.length) return;
+      state.isOffscreen = !entries[0].isIntersecting;
+      sync();
+    }
+
+    resize();
+    window.addEventListener('resize', throttledResize);
+    document.addEventListener('visibilitychange', handleVisibility);
+    if (window.IntersectionObserver) {
+      state.observer = new IntersectionObserver(handleIntersection, { threshold: 0.08 });
+      state.observer.observe(card);
+    }
+    // P1-5: 用 ResizeObserver 监听卡片尺寸变化（替代仅 window resize）
+    if (window.ResizeObserver) {
+      try {
+        state.resizeObserver = new ResizeObserver(throttledResize);
+        state.resizeObserver.observe(card);
+      } catch (e) {}
+    }
+    state.paused = !shouldResearchCardAnimate(card);
+    if (state.profile.canvas && !state.paused) scheduleFrame();
+    return { stop: stop, pause: pause, resume: resume, resize: resize, sync: sync };
+  }
+
+  function buildResearchCardShell(options) {
+    options = options || {};
+    var card = el('div', { class: 'ai-think-card ai-progress-card ai-research-card dt-simple-card collapsed generating ' + (options.extraClass || '') });
+    card.innerHTML =
+      '<div class="ai-think-header ai-research-header">' +
+        '<span class="ai-think-icon ai-research-icon">' + AI_THINK_ICON + '</span>' +
+        '<span class="ai-think-title ai-research-title">深入研究中</span>' +
+        '<span class="ai-think-meta ai-research-meta">已思考 0s</span>' +
+        '<span class="ai-think-chevron ai-research-chevron">▾</span>' +
+      '</div>' +
+      '<div class="ai-research-visual">' +
+        '<canvas class="ai-research-particles" aria-hidden="true"></canvas>' +
+        '<div class="ai-research-orbit" aria-hidden="true"></div>' +
+        '<div class="ai-research-status">正在进入深入研究...</div>' +
+        '<div class="ai-research-scan"><i></i></div>' +
+        '<div class="ai-research-steps">' +
+          AI_RESEARCH_STEPS.map(function(step) { return '<span>' + step + '</span>'; }).join('') +
+        '</div>' +
+        '<button type="button" class="ai-research-stop">停止思考</button>' +
+        '<button type="button" class="ai-progress-stop ai-research-retry" style="display:none">\u91cd\u8bd5</button>' +
+      '</div>' +
+      '<div class="ai-think-body">' +
+        '<details class="ai-think-thinking">' +
+          '<summary><span class="ai-thinking-summary-text">查看思考过程 (0 步)</span><span class="ai-thinking-chevron">▾</span></summary>' +
+          '<div class="ai-think-thinking-body"></div>' +
+        '</details>' +
+        '<div class="ai-think-answer"></div>' +
+        '<div class="ai-msg-footer"></div>' +
+      '</div>';
+    card._researchState = {
+      state: options.state || 'preparing',
+      elapsedMs: options.elapsedMs || 0,
+      durationMs: options.durationMs || 0,
+      agentCount: options.agentCount || 0,
+      canToggle: !!options.canToggle,
+      thinkingTick: 0,
+      researchTick: 0,
+      stepCount: options.stepCount || 0,
+      searchCount: options.searchCount || 0,
+      persistExpanded: !!options.expanded,
+      userPinnedOpen: !!options.expanded,
+      progress: typeof options.progress === 'number' ? options.progress : 0.08,
+      elapsedTimer: null,
+      animator: null
+    };
+    ensureResearchCardRefs(card);
+    var refs = card._researchRefs;
+    if (refs && refs.stop) {
+      refs.stop.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof options.cancelFn === 'function') options.cancelFn();
+        else cancelDeepThink();
+      });
+    }
+    if (refs && refs.header) {
+      refs.header.addEventListener('click', function(ev) {
+        var target = ev.target;
+        if (target && target.closest && target.closest('.ai-research-stop')) return;
+        if (!card._researchState.canToggle) return;
+        var nextExpanded = card.classList.contains('collapsed');
+        card._researchState.persistExpanded = nextExpanded;
+        card._researchState.userPinnedOpen = nextExpanded;
+        setResearchDisclosure(card, nextExpanded);
+      });
+    }
+    if (refs && refs.retry) {
+      refs.retry.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof options.retryFn === 'function') options.retryFn();
+      });
+    }
+    if (refs && refs.details) {
+      refs.details.addEventListener('toggle', function() {
+        if (!card._researchState.canToggle) return;
+        armResearchMotionWindow(card);
+        card._researchState.persistExpanded = !!refs.details.open;
+        card._researchState.userPinnedOpen = !!refs.details.open;
+        card.classList.toggle('expanded', !!refs.details.open);
+        card.classList.toggle('collapsed', !refs.details.open);
+        syncResearchCardAnimatorState(card);
+      });
+    }
+    setResearchDisclosure(card, !!options.expanded && !!options.canToggle);
+    setResearchCardState(card, options.state || 'preparing', options);
+    return card;
+  }
+
+  function buildDeepThinkProgressCard(options) {
+    options = options || {};
+    if (options.variant === 'research') {
+      var researchCard = buildResearchCardShell({
+        state: 'preparing',
+        canToggle: false,
+        extraClass: 'ai-research-card--loading',
+        cancelFn: options.cancelFn,
+        retryFn: options.retryFn
+      });
+      researchCard._researchState.startedAt = Date.now();
+      var elapsedTimer = setInterval(function() {
+        // ★ 定时器泄漏修复：_done 后自清理，避免历史回看卡片空转永久驻留
+        if (researchCard._done) { try { clearInterval(elapsedTimer); } catch (e) {} researchCard._researchState.elapsedTimer = null; return; }
+        syncResearchElapsed(researchCard, Date.now() - researchCard._researchState.startedAt);
+      }, 1000);
+      researchCard._researchState.elapsedTimer = elapsedTimer;
+      researchCard._researchState.animator = createResearchCardAnimator(researchCard);
+      researchCard._cleanupTimer = function() {
+        stopResearchCardAnimation(researchCard);
+      };
+      return researchCard;
+    }
+    var card = el('div', { class: 'ai-progress-card' });
+    card.innerHTML =
+      '<div class="ai-progress-header">' +
+        '<span class="ai-progress-icon">' + AI_THINK_ICON + '</span>' +
+        '<span class="ai-progress-title">思考中...</span>' +
+        '<span class="ai-progress-elapsed">0s</span>' +
+      '</div>' +
+      '<div class="ai-progress-thinking-log" style="display:none"></div>' +
+      '<button type="button" class="ai-progress-stop">\u505c\u6b62\u601d\u8003</button>';
+    card.querySelector('.ai-progress-stop').addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof options.cancelFn === 'function') options.cancelFn();
+      else cancelDeepThink();
+    });
+    var cardStart = Date.now();
+    var cardEl = card;
+    var cardTimer = setInterval(function() {
+      if (S.deepThinkProgressCard !== cardEl || cardEl._done) { clearInterval(cardTimer); return; }
+      var el = cardEl.querySelector('.ai-progress-elapsed');
+      if (el) {
+        var sec = Math.floor((Date.now() - cardStart) / 1000);
+        var min = Math.floor(sec / 60);
+        el.textContent = min > 0 ? (min + 'm ' + (sec % 60) + 's') : (sec + 's');
+      }
+    }, 1000);
+    card._elapsedTimer = cardTimer;
+    card._cleanupTimer = function() { try { clearInterval(cardTimer); } catch (e) {} };
+    return card;
+  }
+
+  // 更新进度卡
+  function updateDeepThinkProgressCard(card, evt) {
+    if (!card) return;
+    if (isResearchCard(card)) {
+      var research = card._researchState || {};
+      if (evt.type === 'heartbeat') {
+        syncResearchElapsed(card, evt.elapsed_ms || research.elapsedMs || 0);
+        return;
+      }
+      if (evt.type === 'deep_think_stage') {
+        if (evt.stage === 'init') setResearchCardState(card, 'preparing', { elapsedMs: research.elapsedMs || 0, progress: 0.08 });
+        else if (evt.stage === 'agent') setResearchCardState(card, 'thinking', { elapsedMs: research.elapsedMs || 0, progress: Math.max(research.progress || 0.12, 0.22) });
+        else if (evt.stage === 'searching') setResearchCardState(card, 'researching', { elapsedMs: research.elapsedMs || 0, progress: Math.max(research.progress || 0.66, 0.72) });
+        else if (evt.stage === 'done') setResearchCardState(card, 'done', { durationMs: research.durationMs || research.elapsedMs || 0, expanded: false, progress: 1 });
+        else if (evt.stage === 'error') setResearchCardState(card, 'interrupted', { statusText: '研究失败，请重试', expanded: false });
+        return;
+      }
+      if (evt.type === 'deep_think_tool') {
+        appendResearchThinkingEntry(card, '研究工具', evt.tool_name || evt.tool || '正在使用研究工具', { forceNew: true });
+        var nextSearchCount = Math.max((research.searchCount || 0) + 1, 1);
+        setResearchCardState(card, 'researching', {
+          elapsedMs: research.elapsedMs || 0,
+          searchCount: nextSearchCount,
+          progress: Math.min(0.9, Math.max(research.progress || 0.68, 0.68 + nextSearchCount * 0.05))
+        });
+        return;
+      }
+      if (evt.type === 'thinking_chunk') {
+        if (!card._thinkingLog) card._thinkingLog = [];
+        card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
+        setResearchCardState(card, 'thinking', {
+          elapsedMs: research.elapsedMs || 0,
+          stepCount: card._thinkingLog.length,
+          allowToggle: card._thinkingLog.length > 0,
+          progress: Math.min(0.62, 0.18 + card._thinkingLog.length * 0.06)
+        });
+        return;
+      }
+      if (evt.type === 'done') {
+        setResearchCardState(card, 'done', {
+          durationMs: evt.think_duration_ms || research.elapsedMs || 0,
+          expanded: false,
+          agentCount: evt.agent_count || research.agentCount || 0,
+          searchCount: evt.search_count || 0,
+          progress: 1
+        });
+        return;
+      }
+      if (evt.type === 'error') {
+        setResearchCardState(card, 'interrupted', { statusText: evt.error || '研究失败，请重试', expanded: false });
+        return;
+      }
+    }
+    // ★ U3: 缓存 querySelector 结果, 避免每个事件都做 DOM 查询
+    if (!card._cached) {
+      card._cached = {
+        titleText: card.querySelector('.ai-progress-title'),
+        logBox: card.querySelector('.ai-progress-thinking-log'),
+        lastEntry: null
+      };
+    }
+    var cached = card._cached;
+    var titleText = cached.titleText;
+
+    if (evt.type === 'deep_think_stage') {
+      var stageMap = { init: '准备中...', agent: '思考中...', searching: '搜索中...', error: '失败' };
+      if (titleText) titleText.textContent = stageMap[evt.stage] || evt.stage;
+    } else if (evt.type === 'deep_think_tool') {
+      if (titleText) titleText.textContent = '搜索中...';
+    } else if (evt.type === 'thinking_chunk') {
+      if (!card._thinkingLog) card._thinkingLog = [];
+      card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
+      var logBox = cached.logBox;
+      if (logBox) {
+        if (logBox.style.display === 'none') logBox.style.display = '';
+        var roleLabel = escapeHtml(evt.agent_role || 'AI');
+        // ★ U3: 同角色累积到最后一条条目(缓存 lastEntry 加速)
+        if (cached.lastEntry && cached.lastEntry._role === roleLabel && cached.lastEntry.parentNode === logBox) {
+          var lastChunk = cached.lastEntry.querySelector('.ai-thought-chunk');
+          if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000));
+        } else {
+          var entry = el('div', { class: 'ai-thought-entry' });
+          entry._role = roleLabel;
+          entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
+          entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(evt.chunk).slice(0, 4000));
+          logBox.appendChild(entry);
+          cached.lastEntry = entry;
+        }
+        try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
+        while (logBox.children.length > 50) logBox.removeChild(logBox.firstChild);
+      }
+    } else if (evt.type === 'heartbeat') {
+      var elapsedSec = Math.floor((evt.elapsed_ms || 0) / 1000);
+      var min = Math.floor(elapsedSec / 60);
+      var sec = elapsedSec % 60;
+      var el = card.querySelector('.ai-progress-elapsed');
+      if (el) el.textContent = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
+    } else if (evt.type === 'done') {
+      if (titleText) titleText.textContent = '思考完成';
+      card.classList.add('ai-progress-card-done');
+    } else if (evt.type === 'error') {
+      if (titleText) titleText.textContent = '思考中断';
+      card.classList.add('ai-progress-card-error');
+      card.classList.add('ai-progress-card-done');
+    }
+  }
+
+  // 取消深入研究（convId 可选，二级页面使用 S.dtConversationId）
+  function cancelDeepThink(convId) {
+    var dtPanel = document.getElementById('panelDeepThink');
+    var isDeepPageCancel = arguments.length > 0 || !!(dtPanel && dtPanel.classList.contains('active') && !dtPanel.classList.contains('hidden'));
+    var cancelController = isDeepPageCancel ? S._dtAbortController : S.deepThinkJob;
+    if (isDeepPageCancel) {
+      S._dtSendSeq = (S._dtSendSeq || 0) + 1;
+      S._dtCurrentReqId = null;
+      S._dtSending = false;
+    }
+    if (cancelController) {
+      try { cancelController._abortReason = 'aborted'; } catch (eReason) {}
+      try { cancelController.abort('aborted'); } catch (e) { try { cancelController.abort(); } catch (e2) {} }
+    }
+    // Cleanup progress card timer and state.
+    if (S.deepThinkProgressCard) {
+      if (isResearchCard(S.deepThinkProgressCard)) {
+        try {
+          setResearchCardState(S.deepThinkProgressCard, 'cancelled', {
+            durationMs: (S.deepThinkProgressCard._researchState && (S.deepThinkProgressCard._researchState.durationMs || S.deepThinkProgressCard._researchState.elapsedMs)) || 0,
+            expanded: false
+          });
+        } catch (e) {}
+        try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e2) {}
+        try { S.deepThinkProgressCard._done = true; } catch (e3) {}
+      } else {
+        try { S.deepThinkProgressCard.classList.add('ai-progress-card-done'); } catch (e4) {}
+        try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e5) {}
+        try { if (S.deepThinkProgressCard.parentNode) S.deepThinkProgressCard.parentNode.removeChild(S.deepThinkProgressCard); } catch (e6) {}
+      }
+    }
+    // Releasing the research page must not release a normal-chat send lock.
+    if (!isDeepPageCancel) S.sending = false;
+    if (!S.sending) S.paused = false;
+    resetActiveRenderersByChannel('deep');
+    if (S.deepThinkJob === cancelController) S.deepThinkJob = null;
+    S.deepThinkProgressCard = null;
+    if (S._dtAbortController === cancelController) S._dtAbortController = null;
+    if (isDeepPageCancel && S._dtFetchTimeoutTimer) {
+      try { clearTimeout(S._dtFetchTimeoutTimer); } catch (eTimer) {}
+      S._dtFetchTimeoutTimer = null;
+    }
+    var dtPauseBtn = document.getElementById('dtPauseBtn');
+    if (dtPauseBtn) { dtPauseBtn.style.display = 'none'; dtPauseBtn.textContent = '暂停'; }
+    if (!isDeepPageCancel && S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+    // Fire-and-forget cancel to server.
+    try {
+      var tokenPromise = typeof window.ensureUserToken === 'function'
+        ? Promise.resolve(window.ensureUserToken()).catch(function() { return ''; })
+        : Promise.resolve('');
+      tokenPromise.then(function(token) {
+        var headers = { 'Content-Type': 'application/json' };
+        if (token) headers.Authorization = 'Bearer ' + token;
+        var targetConversationId = isDeepPageCancel
+          ? (convId || S.dtConversationId || '')
+          : (convId || S.conversationId || '');
+        return fetch(API_BASE + '/chat/cancel', {
+          method: 'POST',
+          headers: headers,
+          credentials: 'include',
+          body: JSON.stringify({ conversation_id: targetConversationId })
+        });
+      }).catch(function() {});
+    } catch (e) {}
+    notify('已取消思考');
+  }
+
+  async function ensureUserAuthOrNotify() {
+    var preflight = window.ensureProtectedOperationAuth || window.ensureRealUserAuth;
+    if (typeof preflight !== 'function') return true;
+    try {
+      var auth = await preflight();
+      if (auth && auth.ok) return true;
+      var reason = auth && auth.reason;
+      if (reason === 'no_user') {
+        notify('请先登录后再和小猫聊天');
+        return false;
+      }
+      // 其他认证失败原因也给出明确提示
+      if (reason === 'expired') {
+        notify('登录已失效，请重新登录');
+        return false;
+      }
+      if (reason === 'auth_pending') {
+        notify('正在验证身份，请稍后再试');
+        return false;
+      }
+      notify('认证服务暂时不可用，请稍后重试');
+      return false;
+    } catch (e) {
+      try { console.warn('[AI-AUTH] ensureRealUserAuth error:', e && e.message); } catch(ee) {}
+    }
+    try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e2) {}
+    notify('认证失败，请重新登录');
+    return false;
+  }
+
+  // ===================== Tavily Deep Research =====================
+  // 前端集成: POST /api/agent/research/stream (SSE) → 研究报告 + 来源列表
+  //   事件: research_step / research_stage / research_content(流式) / research_sources / research_done / error / heartbeat
+  //   45s 无任何事件 → reject timeout; 支持取消 (promise.cancel / AbortController)
+
+  // Tavily 来源列表: 渲染为引用链接列表 (escapeHtml 转义 + safeSearchUrl 白名单)
+  function buildTavilySourcesBox(sources) {
+    var list = Array.isArray(sources) ? sources : [];
+    if (!list.length) return null;
+    var box = document.createElement('div');
+    box.className = 'ai-search-supplement ai-tavily-sources';
+    var html = '📚 研究来源 (' + list.length + ' 条)<br>';
+    var shown = list.slice(0, 10);
+    for (var si = 0; si < shown.length; si++) {
+      var item = shown[si];
+      var url = '';
+      var title = '';
+      if (item && typeof item === 'object') {
+        url = String(item.url || item.link || '');
+        title = String(item.title || item.name || url);
+      } else {
+        url = String(item || '');
+        title = url;
+      }
+      var safeUrl = safeSearchUrl(url);
+      if (safeUrl) {
+        html += '<a class="ai-search-detail-title" href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(title) + '</a><br>';
+      } else {
+        html += '<span class="ai-search-detail-title">[' + (si + 1) + '] ' + escapeHtml(title) + '</span><br>';
+      }
+    }
+    if (list.length > 10) {
+      html += '<span style="font-size:10px;color:#999">... 还有 ' + (list.length - 10) + ' 条来源</span>';
+    }
+    box.innerHTML = html;
+    return box;
+  }
+
+  // ===== 深入研究二级页增强: 研究强度选择器 + 三阶段状态 + 流式渲染 + 历史回看 =====
+
+  // 将研究结果渲染进研究卡 (Tavily 流程与历史回看共用)
+  function renderTavilyResearchReport(card, answerText, sourcesList, startedAtMs, labelText, researchMode) {
+    if (!isResearchCard(card)) return;
+    var srcs = Array.isArray(sourcesList) ? sourcesList : [];
+    var modeVal = researchMode || S.dtResearchMode || 'pro';
+    var modeLabelMap = { mini: '快速模式', pro: '深度模式', auto: '自动模式' };
+    var modeLabel = modeLabelMap[modeVal] || '深度模式';
+    // 研究总时长：实时研究用 startedAt 计算；历史回显无 startedAt 时回退到卡片已存时长
+    var durationMs = startedAtMs
+      ? (Date.now() - startedAtMs)
+      : ((card._researchState && card._researchState.durationMs) || 0);
+    if (durationMs < 0) durationMs = 0;
+    card._researchState.durationMs = durationMs;
+    card._researchState.searchCount = srcs.length;
+
+    var answerEl = card.querySelector('.ai-think-answer');
+    if (answerEl && answerText) {
+      try { answerEl.innerHTML = renderMarkdown(String(answerText)); } catch (e) {}
+      if (!answerEl.querySelector('.ai-tavily-note')) {
+        var noteEl = document.createElement('div');
+        noteEl.className = 'ai-tavily-note';
+        noteEl.style.cssText = 'font-size:11px;color:#999;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(127,127,127,.25);';
+        // 脚注带强度档位 + 研究总时长（如 15min）
+        var footnote = (labelText || '由 XTJ 多智能体深入研究生成') + ' · ' + modeLabel;
+        if (durationMs > 0) footnote += ' · 用时 ' + formatThinkingElapsed(durationMs);
+        noteEl.textContent = footnote;
+        answerEl.appendChild(noteEl);
+      }
+    }
+
+    var sourcesBox = buildTavilySourcesBox(srcs);
+    if (sourcesBox) {
+      var thinkBody = card.querySelector('.ai-think-body');
+      var answerEl2 = card.querySelector('.ai-think-answer');
+      if (thinkBody) {
+        if (answerEl2) thinkBody.insertBefore(sourcesBox, answerEl2);
+        else thinkBody.appendChild(sourcesBox);
+      }
+    }
+
+    var footer = card.querySelector('.ai-msg-footer');
+    if (footer) {
+      footer.innerHTML = '';
+      footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
+      footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '深入研究' }));
+      // 搜索数量：网页搜索 N（如 网页搜索 100）
+      footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '网页搜索 ' + srcs.length }));
+      // ★ 优化：结果不满意时可"重新研究"（后端 refresh=true 跳过 24h 缓存重新跑）
+      if (card._researchRefreshFn) {
+        var refreshBtn = el('button', {
+          type: 'button',
+          class: 'ai-msg-refresh-research',
+          text: '↻ 重新研究',
+          style: 'margin-left:8px;padding:2px 10px;border-radius:999px;border:1px solid rgba(140,196,158,.35);background:rgba(255,255,255,.06);color:var(--ai-text,#35544b);font-size:11px;cursor:pointer;'
+        });
+        refreshBtn.addEventListener('click', function() {
+          if (refreshBtn.disabled) return;
+          refreshBtn.disabled = true;
+          refreshBtn.textContent = '研究中…';
+          try { if (card._researchRefreshFn) card._researchRefreshFn(); } catch (e) {}
+        });
+        footer.appendChild(refreshBtn);
+      }
+      // 导出：复制研究报告全文
+      var exportBtn = el('button', {
+        type: 'button',
+        class: 'ai-msg-export-research',
+        text: '复制全文',
+        style: 'margin-left:8px;padding:2px 10px;border-radius:999px;border:1px solid rgba(140,196,158,.35);background:rgba(255,255,255,.06);color:var(--ai-text,#35544b);font-size:11px;cursor:pointer;'
+      });
+      exportBtn.addEventListener('click', function() {
+        var text = '';
+        try {
+          var ans = card.querySelector('.ai-think-answer');
+          text = (ans && (ans.innerText || ans.textContent)) || String(answerText || '');
+        } catch (e) {
+          text = String(answerText || '');
+        }
+        text = String(text || '').trim();
+        if (!text) {
+          notify('暂无可复制内容');
+          return;
+        }
+        function ok() {
+          exportBtn.textContent = '已复制';
+          setTimeout(function() { exportBtn.textContent = '复制全文'; }, 1400);
+          notify('研究报告已复制');
+        }
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(ok).catch(function() {
+              var ta = document.createElement('textarea');
+              ta.value = text;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              ta.remove();
+              ok();
+            });
+          } else {
+            var ta2 = document.createElement('textarea');
+            ta2.value = text;
+            document.body.appendChild(ta2);
+            ta2.select();
+            document.execCommand('copy');
+            ta2.remove();
+            ok();
+          }
+        } catch (e2) {
+          notify('复制失败');
+        }
+      });
+      footer.appendChild(exportBtn);
+    }
+
+    setResearchCardState(card, 'done', { durationMs: durationMs, searchCount: srcs.length, expanded: false, progress: 1 });
+    setResearchSteps(card, -1, 4);
+  }
+
+  // 二级页研究强度选择器 (快速 mini / 深度 pro / 自动 auto), 选中值存 S.dtResearchMode
+  function initDeepThinkResearchUi() {
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel || panel._dtResearchUiReady) return;
+    panel._dtResearchUiReady = true;
+    if (!S.dtResearchMode) S.dtResearchMode = 'pro';
+
+    // 历史入口按钮 (dt-title 旁 → dt-actions 首位)
+    var actions = panel.querySelector('.dt-actions');
+    if (actions && !panel.querySelector('.dt-research-history-btn')) {
+      var histBtn = el('button', { type: 'button', class: 'dt-action-btn dt-research-history-btn', text: '历史' });
+      histBtn.addEventListener('click', function() { toggleResearchHistoryPanel(); });
+      actions.insertBefore(histBtn, actions.firstChild);
+    }
+
+    // 研究强度选择器 (输入框上方, 动态插入 dt-input-bar 之前)
+    var inputBar = panel.querySelector('.dt-input-bar');
+    if (inputBar && !panel.querySelector('.dt-research-mode-bar')) {
+      var modeBar = el('div', { class: 'dt-research-mode-bar', style: 'display:flex;align-items:center;gap:8px;padding:8px 16px 0;flex:0 0 auto;' });
+      modeBar.appendChild(el('span', { text: '研究强度', style: 'font-size:11px;color:rgba(100,130,120,.9);flex:0 0 auto;' }));
+      var seg = el('div', { style: 'display:inline-flex;gap:2px;padding:2px;border:1px solid rgba(140,196,158,.3);border-radius:12px;background:rgba(140,196,158,.14);' });
+      var modes = [
+        ['mini', '快速', '约 1 分钟 · 简要结论'],
+        ['pro', '深度', '约 2–3 分钟 · 多角度分析'],
+        ['auto', '自动', '约 1–5 分钟 · 按问题自动调档']
+      ];
+      for (var mi = 0; mi < modes.length; mi++) {
+        (function(modeVal, modeText, modeHint) {
+          var opt = el('button', { type: 'button', class: 'dt-research-mode-opt', text: modeText, title: modeHint });
+          opt._mode = modeVal;
+          opt._hint = modeHint;
+          opt.addEventListener('click', function() {
+            S.dtResearchMode = modeVal;
+            syncResearchModeUi(panel);
+          });
+          seg.appendChild(opt);
+        })(modes[mi][0], modes[mi][1], modes[mi][2]);
+      }
+      modeBar.appendChild(seg);
+      var hint = el('div', {
+        class: 'dt-research-mode-hint',
+        text: '深度：约 2–3 分钟 · 多角度分析',
+        style: 'font-size:11px;color:rgba(100,130,120,.85);margin-left:4px;flex:1 1 auto;'
+      });
+      modeBar.appendChild(hint);
+      inputBar.parentNode.insertBefore(modeBar, inputBar);
+    }
+
+    // ★ 2026-09-24 新增（课题④）：研究报告「模型选择器」。
+    //   需求：内置两个模型之外，还可用用户在小猫AI 里添加的第三方 API 模型，
+    //   选定后研究流程（Planner / 子智能体 / Synthesizer）全部按所选模型执行。
+    //   模型池与小猫AI 共用 loadCustomModels()，无需重复配置。
+    if (inputBar && !panel.querySelector('.dt-research-model-bar')) {
+      var modelBar = el('div', { class: 'dt-research-model-bar', style: 'display:flex;align-items:center;gap:8px;padding:6px 16px 0;flex:0 0 auto;flex-wrap:wrap;' });
+      modelBar.appendChild(el('span', { text: '模型', style: 'font-size:11px;color:rgba(100,130,120,.9);flex:0 0 auto;' }));
+      var modelSel = el('select', {
+        class: 'dt-research-model-select',
+        'aria-label': '选择研究模型',
+        style: 'flex:0 1 auto;max-width:min(320px,72%);padding:5px 10px;border-radius:10px;border:1px solid rgba(140,196,158,.34);background:rgba(255,255,255,.9);color:#2f4b45;font-size:12px;cursor:pointer;outline:none;'
+      });
+      modelSel.addEventListener('change', function() {
+        var v = String(modelSel.value || '');
+        S.dtResearchModel = v;
+        try { localStorage.setItem('xtj_ai_research_model', v); } catch (eSt) {}
+        // ★ 2026-09-25：同步到服务端，换设备/清缓存后选择仍在
+        persistResearchModelPref(v);
+        syncResearchModelUi(panel);
+      });
+      modelBar.appendChild(modelSel);
+      var modelHint = el('div', {
+        class: 'dt-research-model-hint',
+        text: '',
+        style: 'font-size:11px;color:rgba(100,130,120,.85);flex:1 1 auto;min-width:0;'
+      });
+      modelBar.appendChild(modelHint);
+      inputBar.parentNode.insertBefore(modelBar, inputBar);
+      // 恢复上次选择（默认 = 内置推理模型 pro）
+      try {
+        var savedResearchModel = localStorage.getItem('xtj_ai_research_model');
+        if (savedResearchModel) S.dtResearchModel = savedResearchModel;
+      } catch (eRm) {}
+    }
+    refreshResearchModelOptions(panel);
+    syncResearchModeUi(panel);
+  }
+
+  // 内置研究模型（对齐后端 DEEPSEEK_MODEL_REASONER / DEEPSEEK_MODEL_FAST）
+  var RESEARCH_BUILTIN_MODELS = [
+    { id: 'pro', label: 'V4 Pro · 深度推理', hint: '内置推理模型，多角度深度分析（默认）' },
+    { id: 'flash', label: 'V4.1 Flash · 快速', hint: '内置快速模型，响应更快、适合简要研究' }
+  ];
+
+  // 重建模型下拉选项：内置两个 + 全部自定义（第三方 API）模型
+  function refreshResearchModelOptions(panel) {
+    panel = panel || document.getElementById('panelDeepThink');
+    if (!panel) return;
+    var sel = panel.querySelector('.dt-research-model-select');
+    if (!sel) return;
+    var prev = sel.value || S.dtResearchModel || 'pro';
+    sel.innerHTML = '';
+    // 内置
+    var builtinGroup = el('optgroup', { label: '内置模型' });
+    RESEARCH_BUILTIN_MODELS.forEach(function(m) {
+      builtinGroup.appendChild(el('option', { value: m.id, text: m.label }));
+    });
+    sel.appendChild(builtinGroup);
+    // 自定义（第三方 API），与小猫AI 共用模型池
+    var customs = [];
+    try { customs = loadCustomModels() || []; } catch (eCl) { customs = []; }
+    if (customs.length) {
+      var customGroup = el('optgroup', { label: '我的第三方模型' });
+      customs.forEach(function(cm) {
+        if (!cm || !cm.uid) return;
+        var val = CUSTOM_MODEL_PREFIX + cm.uid;
+        var pv = cm.providerLabel || cm.provider || '';
+        var txt = (cm.label || cm.model || '未命名') + (pv ? (' · ' + pv) : '');
+        customGroup.appendChild(el('option', { value: val, text: txt }));
+      });
+      sel.appendChild(customGroup);
+    }
+    // 回填当前值；若已不存在则回落到 pro
+    var valid = false;
+    for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === prev) { valid = true; break; } }
+    sel.value = valid ? prev : 'pro';
+    S.dtResearchModel = sel.value;
+    syncResearchModelUi(panel);
+  }
+
+  function syncResearchModelUi(panel) {
+    panel = panel || document.getElementById('panelDeepThink');
+    if (!panel) return;
+    var sel = panel.querySelector('.dt-research-model-select');
+    var hintEl = panel.querySelector('.dt-research-model-hint');
+    if (!sel) return;
+    var v = String(S.dtResearchModel || sel.value || 'pro');
+    var text = '';
+    if (v === 'pro') text = '内置推理模型：分析最深入，耗时较长';
+    else if (v === 'flash') text = '内置快速模型：速度快，适合快速结论';
+    else if (v.indexOf(CUSTOM_MODEL_PREFIX) === 0) {
+      var cm = findCustomModel(v.slice(CUSTOM_MODEL_PREFIX.length));
+      text = cm ? ('第三方：' + (cm.providerLabel || cm.provider || '') + ' / ' + (cm.model || '')) : '第三方模型（已失效，请重新选择）';
+    }
+    if (hintEl) hintEl.textContent = text;
+    // 深色主题适配
+    var isDark = isDeepThinkDarkTheme();
+    sel.style.background = isDark ? 'rgba(24,44,38,.92)' : 'rgba(255,255,255,.9)';
+    sel.style.color = isDark ? '#d6ece5' : '#2f4b45';
+    sel.style.borderColor = isDark ? 'rgba(140,196,158,.28)' : 'rgba(140,196,158,.34)';
+  }
+
+  function syncResearchModeUi(panel) {
+    if (!panel) return;
+    var isDark = isDeepThinkDarkTheme();
+    var opts = panel.querySelectorAll('.dt-research-mode-opt');
+    var activeHint = '';
+    for (var i = 0; i < opts.length; i++) {
+      var active = opts[i]._mode === S.dtResearchMode;
+      if (active) activeHint = opts[i]._hint || opts[i].getAttribute('title') || '';
+      opts[i].style.cssText = active
+        ? 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:linear-gradient(135deg,rgba(64,167,116,.95),rgba(82,182,160,.95));color:#fff;font-weight:600;'
+        : 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:transparent;color:' + (isDark ? 'rgba(214,236,229,.92)' : 'rgba(66,95,85,.95)') + ';';
+    }
+    var hintEl = panel.querySelector('.dt-research-mode-hint');
+    if (hintEl && activeHint) hintEl.textContent = activeHint;
+  }
+
+  function isDeepThinkDarkTheme() {
+    try {
+      var dtAttr = document.documentElement.getAttribute('data-theme') || '';
+      return dtAttr.indexOf('dark') !== -1 || document.documentElement.classList.contains('dark');
+    } catch (e) { return false; }
+  }
+
+  // ===== 历史研究回看 =====
+  function toggleResearchHistoryPanel() {
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel) return;
+    if (panel.querySelector('.dt-research-history-panel')) { closeResearchHistoryPanel(); return; }
+    openResearchHistoryPanel();
+  }
+
+  function openResearchHistoryPanel() {
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel || panel.querySelector('.dt-research-history-panel')) return;
+    var isDark = isDeepThinkDarkTheme();
+    var wrap = el('div', { class: 'dt-research-history-panel', style: 'position:absolute;top:64px;right:16px;z-index:1200;width:min(420px,92vw);max-height:min(60vh,480px);overflow:auto;border:1px solid rgba(140,196,158,.3);border-radius:16px;background:' + (isDark ? 'rgba(20,42,36,.98)' : 'rgba(255,255,255,.98)') + ';box-shadow:0 18px 40px rgba(61,113,99,.18);padding:10px;' });
+    var head = el('div', { style: 'display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px;font-size:13px;font-weight:700;color:' + (isDark ? 'rgba(224,241,235,.95)' : '#35544b') + ';' });
+    head.appendChild(el('span', { text: '历史研究' }));
+    var closeBtn = el('button', { type: 'button', text: '关闭', style: 'border:1px solid rgba(140,196,158,.32);border-radius:10px;background:rgba(255,255,255,.7);color:#46715f;font-size:11px;padding:3px 10px;cursor:pointer;' });
+    closeBtn.addEventListener('click', closeResearchHistoryPanel);
+    head.appendChild(closeBtn);
+    wrap.appendChild(head);
+    var body = el('div', { class: 'dt-research-history-body', text: '加载中...', style: 'padding:12px 8px;font-size:12px;color:' + (isDark ? 'rgba(180,206,198,.85)' : '#7a8f89') + ';text-align:center;' });
+    wrap.appendChild(body);
+    panel.appendChild(wrap);
+    loadResearchHistoryList(body);
+  }
+
+  async function loadResearchHistoryList(bodyEl) {
+    if (!bodyEl || !bodyEl.isConnected) return;
+    var owner = window.currentUser || '', epoch = window._authStateEpoch || 0, lifecycle = S.dtLifecycleId;
+    var seq = bodyEl.__loadSeq = (bodyEl.__loadSeq || 0) + 1;
+    function current() { return bodyEl.isConnected && seq === bodyEl.__loadSeq && lifecycle === S.dtLifecycleId &&
+      owner === (window.currentUser || '') && epoch === (window._authStateEpoch || 0); }
+    bodyEl.textContent = '加载中…'; bodyEl.setAttribute('aria-busy', 'true');
+    try {
+      var result = await apiRequest('GET', '/research/history?limit=10', null, { timeoutMs: 15000 });
+      if (!current()) return;
+      var data = result && result.data;
+      var items = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : null);
+      if (!result || !result.ok || !items) throw new Error('研究记录暂不可用');
+      renderResearchHistoryList(bodyEl, items);
+    } catch (error) {
+      if (!current()) return;
+      bodyEl.textContent = '研究记录加载失败，原有记录仍保留';
+      var retry = el('button', { type: 'button', text: '重试', class: 'ai-history-retry' });
+      retry.addEventListener('click', function() { loadResearchHistoryList(bodyEl); });
+      bodyEl.appendChild(retry);
+    } finally { if (current()) bodyEl.removeAttribute('aria-busy'); }
+  }
+
+  function renderResearchHistoryList(bodyEl, items) {
+    if (!bodyEl || !bodyEl.isConnected) return;
+    bodyEl.innerHTML = '';
+    if (!items.length) {
+      bodyEl.textContent = '暂无历史研究';
+      return;
+    }
+    var isDark = isDeepThinkDarkTheme();
+    for (var hi = 0; hi < items.length; hi++) {
+      (function(item) {
+        var row = el('button', { type: 'button', style: 'display:block;width:100%;text-align:left;border:1px solid rgba(140,196,158,.2);border-radius:12px;background:' + (isDark ? 'rgba(28,60,52,.75)' : 'rgba(248,252,250,.85)') + ';padding:9px 11px;margin-bottom:8px;cursor:pointer;font:inherit;' });
+        var qText = String(item.query || '未命名研究');
+        var tText = item.created_at ? fmtTime(item.created_at) : '';
+        var absText = String(item.answer || '').slice(0, 60);
+        row.appendChild(el('div', { text: qText, style: 'font-size:13px;font-weight:600;color:' + (isDark ? 'rgba(226,243,237,.95)' : '#2f4d44') + ';line-height:1.4;' }));
+        row.appendChild(el('div', { text: (tText ? tText + ' · ' : '') + '摘要: ' + absText, style: 'font-size:11px;color:' + (isDark ? 'rgba(185,211,203,.8)' : '#7a918a') + ';margin-top:4px;line-height:1.5;' }));
+        row.addEventListener('click', function() { showResearchHistoryItem(item); });
+        bodyEl.appendChild(row);
+      })(items[hi]);
+    }
+  }
+
+  function showResearchHistoryItem(item) {
+    var dtMessagesEl = document.getElementById('dtMessages');
+    if (!dtMessagesEl) return;
+    closeResearchHistoryPanel();
+    var empty = dtMessagesEl.querySelector('.dt-empty');
+    if (empty) { try { empty.remove(); } catch (e) {} }
+    var card = buildDeepThinkProgressCard({ variant: 'research' });
+    card.classList.add('dt-animate-in');
+    dtMessagesEl.appendChild(card);
+    scrollToBottom(dtMessagesEl, true);
+    var label = '历史研究记录' + (item.query ? '：' + String(item.query).slice(0, 48) : '');
+    renderTavilyResearchReport(card, item.answer, item.sources, null, label, item.mode || S.dtResearchMode);
+    // ★ 定时器/动画泄漏修复：历史回看完成后显式清理 interval 与 canvas rAF，
+    // 否则每次点击一条历史研究都会残留一个每秒空转的 setInterval + 常驻动画帧。
+    try { if (card._cleanupTimer) card._cleanupTimer(); } catch (eCleanup) {}
+    try { stopResearchCardAnimation(card); } catch (eAnim) {}
+    try { card._done = true; } catch (e) {}
+    scrollToBottom(dtMessagesEl, true);
+  }
+
+  function closeResearchHistoryPanel() {
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel) return;
+    var hp = panel.querySelector('.dt-research-history-panel');
+    if (hp) { try { hp.remove(); } catch (e) {} }
+  }
+
+  // ★ 2026-09-11 修复（深入研究"连接中断"根因之二）：
+  //   深入研究流水线包含「Planner 拆解 → 3-5 个子智能体并行检索 → 查漏补缺 → Synthesizer 汇总」，
+  //   其中末段 Synthesizer 以 thinking_mode:'high' 生成 16K 长报告，服务端为其预留了
+  //   最长 10 分钟（total_timeout_ms: 600000）。原前端 idle 阈值仅 45 秒，
+  //   在"子智能体检索完毕 → 汇总开始输出"的静默窗口（含模型深入研究）极容易被误判为超时，
+  //   前端随即渲染「连接中断 / 超过 45 秒未收到新数据」。
+  //   阈值放宽到 180 秒：既能容忍 high 思考期的长静默，又仍能在服务端真实挂死时
+  //   及时收束（服务端 heartbeat 每 8s 一次，正常情况下该计时器根本不会触发）。
+  var RESEARCH_IDLE_TIMEOUT_MS = 180000;
+
+  // Tavily Deep Research SSE 调用
+  //   resolve({ answer, sources, message_id }); reject(Error) — err.cancelled / err.tavilyTimeout / err.networkError / err.status
+  function runTavilyResearch(query, onProgress, opts) {
+    // ★ 2026-08-05: 支持外部传入 controller（flow 的 S.deepThinkJob），
+    //   否则 cancelDeepThink 的 abort 无法中断内部 fetch（取消链断裂）
+    var controller = (opts && opts.controller) || new AbortController();
+    var MAX_EVENT_SIZE = 512 * 1024;
+    var settled = false;
+    var idleTimer = null;
+    var timedOut = false;
+    var content = '';
+    var contentCapped = false;
+    var sources = [];
+
+    var resolveDone, rejectDone;
+    var done = new Promise(function(res, rej) { resolveDone = res; rejectDone = rej; });
+
+    function fail(err) {
+      if (settled) return;
+      settled = true;
+      if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) {} idleTimer = null; }
+      try { controller.abort(); } catch (e) {}
+      rejectDone(err);
+    }
+    function succeed(result) {
+      if (settled) return;
+      settled = true;
+      if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) {} idleTimer = null; }
+      resolveDone(result);
+    }
+    function resetIdle() {
+      if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) {} }
+      idleTimer = setTimeout(function() {
+        if (settled) return;
+        timedOut = true;
+        var te = new Error('研究超时（' + Math.round(RESEARCH_IDLE_TIMEOUT_MS / 1000) + ' 秒未收到数据）');
+        te.tavilyTimeout = true;
+        fail(te);
+      }, RESEARCH_IDLE_TIMEOUT_MS);
+    }
+
+    // 取消支持: promise.cancel() 或外部直接 abort controller (如 cancelDeepThink)
+    done.cancel = function() {
+      if (settled) return;
+      try { controller.abort('cancel'); } catch (e) {}
+      var ce = new Error('已取消');
+      ce.cancelled = true;
+      fail(ce);
+    };
+    controller.signal.addEventListener('abort', function() {
+      if (settled) return;
+      if (controller._abortReason === 'timeout') {
+        timedOut = true;
+        var te2 = new Error('研究超时（' + Math.round(RESEARCH_IDLE_TIMEOUT_MS / 1000) + ' 秒未收到数据）');
+        te2.tavilyTimeout = true;
+        fail(te2);
+        return;
+      }
+      var ce2 = new Error('已取消');
+      ce2.cancelled = true;
+      fail(ce2);
+    });
+
+    function handleEvent(evt) {
+      if (!evt || !evt.type) return;
+      if (evt.type === 'research_step') {
+        var stepN = Math.max(0, Math.min(3, Number(evt.step != null ? evt.step : evt.phase) || 0));
+        var toolN = evt.tool != null ? String(evt.tool) : (evt.name != null ? String(evt.name) : '');
+        if (onProgress) {
+          try { onProgress({ step: stepN, tool: toolN }); } catch (e) {}
+        }
+      } else if (evt.type === 'research_content') {
+        var chunk = evt.content != null ? String(evt.content) : (evt.text != null ? String(evt.text) : '');
+        // ★ 内容长度上限：与普通/深页正文 500k 上限对齐，防止异常流无限累积
+        if (chunk) {
+          if (!contentCapped && content.length >= AI_CONTENT_MAX_LEN) {
+            contentCapped = true;
+            notify('回复过长，已截断');
+          }
+          var room = AI_CONTENT_MAX_LEN - content.length;
+          var accepted = room > 0 ? chunk.slice(0, room) : '';
+          if (accepted) {
+            content += accepted;
+            if (onProgress) { try { onProgress({ content: accepted }); } catch (e) {} }
+          }
+        }
+      } else if (evt.type === 'research_thinking') {
+        if (onProgress && evt.chunk) onProgress({thinking:{role:evt.agent_role||'模型思考',chunk:String(evt.chunk)}});
+      } else if (evt.type === 'research_sources') {
+        var srcs = Array.isArray(evt.sources) ? evt.sources : (Array.isArray(evt.data) ? evt.data : []);
+        if (srcs.length) sources = srcs;
+        if (onProgress) { try { onProgress({ sources: sources }); } catch (e) {} }
+      } else if (evt.type === 'research_stage') {
+        if (onProgress) { try { onProgress({ stage: String(evt.stage || ''), message: evt.message != null ? String(evt.message) : '' }); } catch (e) {} }
+      } else if (evt.type === 'research_done') {
+        var finalAnswer = (content && String(content).trim()) ? content : (evt.answer || '');
+        succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id != null ? evt.message_id : undefined });
+      } else if (evt.type === 'error') {
+        // ★ 2026-09-11：错误文案优先级修正。后端并发分支发的是
+        //   { error: 'concurrent', code: 'concurrent', message: '请等待上一个研究请求完成' }，
+        //   此前用 evt.error 作文案 → 用户直接看到英文码 "concurrent"。
+        //   改为优先取可读的 message，其次 error；同时把错误码统一收敛到 ee.code。
+        var ee = new Error(evt.message || evt.error || '研究失败');
+        ee.tavilyError = true;
+        // 额度/搜索不足时把 reason 带上，便于上层提示
+        if (evt.code) ee.code = evt.code;
+        else if (evt.error) ee.code = String(evt.error);
+        if (evt.quota) ee.quota = evt.quota;
+        fail(ee);
+      }
+      // heartbeat / 其他事件: 忽略
+    }
+
+    (async function() {
+      try {
+        var resp;
+        try {
+          // ★ 修复 S1：研究接口此前不带 Authorization 头（与全站其他 AI 请求不一致），
+          // 后端若按 token 鉴权将 401，或产生鉴权模型不一致。改用统一鉴权 payload。
+          var authPayload = await getUserAuthPayload({ forceNoToken: false });
+          var authHeaders = (authPayload && authPayload.headers) || {};
+          resp = await fetch(API_BASE + '/research/stream', {
+            method: 'POST',
+            headers: authHeaders,
+            credentials: 'include',
+            body: JSON.stringify({
+              query: String(query || ''),
+              model: (opts && opts.model) || 'pro',
+              // ★ 2026-09-24 新增（课题④）：把用户在「模型」下拉里选定的模型传给后端。
+              //   内置：'pro' | 'flash'；第三方：'custom:<uid>'（后端解密对应 api_key/base_url 调用）。
+              research_model: String(S.dtResearchModel || 'pro'),
+              mode: (opts && opts.mode) || 'hybrid',
+              rewrite: (opts && typeof opts.rewrite === 'boolean') ? opts.rewrite : true,
+              // ★ 优化：refresh=true 时后端跳过 24h 缓存重新研究（结果不满意重试）
+              refresh: !!(opts && opts.refresh === true),
+              // ★ 优化：研究通道沿用深页会话 ID，让多次研究归入同一会话、
+              // 历史面板可按会话聚合（此前后端每次生成新 convId，上下文不延续）。
+              conversation_id: S && S.dtConversationId ? S.dtConversationId : undefined
+            }),
+            signal: controller.signal
+          });
+        } catch (e) {
+          if (settled) return;
+          var ne = new Error('网络错误，无法连接研究服务');
+          ne.networkError = true;
+          fail(ne);
+          return;
+        }
+        if (settled) return;
+        if (!resp.ok) {
+          var rawErr = '';
+          try { rawErr = await resp.text(); } catch (e2) {}
+          var detail = 'HTTP ' + resp.status;
+          try {
+            var ej = JSON.parse(rawErr);
+            if (ej && (ej.error || ej.detail)) detail = String(ej.error || ej.detail);
+          } catch (e3) {}
+          var he = new Error(detail);
+          he.status = resp.status;
+          he.tavilyNotConfigured = /tavily[_-]?not[_-]?configured|not[_-]?configured/i.test(rawErr + ' ' + detail);
+          fail(he);
+          return;
+        }
+        if (!resp.body) {
+          var be = new Error('AI 没有响应');
+          be.networkError = true;
+          fail(be);
+          return;
+        }
+
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        resetIdle();
+        try {
+          while (true) {
+            var readResult;
+            try {
+              readResult = await reader.read();
+            } catch (e) {
+              // abort: cancel / timeout 已由 fail() 处理, 这里兜底
+              if (!settled) {
+                if (timedOut) { var te3 = new Error('研究超时（' + Math.round(RESEARCH_IDLE_TIMEOUT_MS / 1000) + ' 秒未收到数据）'); te3.tavilyTimeout = true; fail(te3); }
+                else { var ae = new Error('研究已中断'); ae.networkError = true; fail(ae); }
+              }
+              break;
+            }
+            if (readResult.done) {
+              if (buffer) {
+                buffer += decoder.decode();
+                var eofLines = buffer.split('\n');
+                for (var ei = 0; ei < eofLines.length; ei++) {
+                  var eLine = eofLines[ei].replace(/\r$/, '');
+                  if (!eLine || eLine.startsWith(':') || !eLine.startsWith('data: ')) continue;
+                  var eEventStr = eLine.slice(6);
+                  if (eEventStr.length > MAX_EVENT_SIZE) continue;
+                  var eEvt;
+                  try { eEvt = JSON.parse(eEventStr); } catch (ex) { continue; }
+                  if (eEvt) handleEvent(eEvt);
+                  if (settled) break;
+                }
+              }
+              buffer = '';
+              break;
+            }
+            resetIdle();
+            buffer += decoder.decode(readResult.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            // ★ 2026-09-13 修复（P-12）：单行有 MAX_EVENT_SIZE 上限，但残留在 buffer 里的
+            //   「未闭合尾部」此前无上限。若上游持续发送不含换行的数据（异常实现或被中间人
+            //   篡改的响应），buffer 会无界增长直至 OOM。这里设一个远大于任何合法事件的
+            //   上限，超限即判定为流异常并中断，避免把内存交给不可信的输入。
+            if (buffer.length > MAX_EVENT_SIZE * 2) {
+              var _ovErr = new Error('数据流异常：单条事件超过上限，已中断');
+              _ovErr.networkError = true;
+              fail(_ovErr);
+              break;
+            }
+            for (var li = 0; li < lines.length; li++) {
+              var line = lines[li].replace(/\r$/, '');
+              if (!line || line.startsWith(':')) continue;
+              if (!line.startsWith('data: ')) continue;
+              var eventStr = line.slice(6);
+              if (eventStr.length > MAX_EVENT_SIZE) continue;
+              var evt;
+              try { evt = JSON.parse(eventStr); } catch (e) { continue; }
+              if (!evt) continue;
+              handleEvent(evt);
+              if (settled) break;
+            }
+            if (settled) break;
+          }
+        } finally {
+          if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) {} idleTimer = null; }
+        }
+        if (!settled) {
+          if (content && String(content).trim()) succeed({ answer: content, sources: sources });
+          else { var fe = new Error('研究未完成：未收到完整结果'); fe.networkError = true; fail(fe); }
+        }
+      } catch (err) {
+        if (!settled) {
+          var ue = new Error((err && err.message) || '研究异常');
+          ue.networkError = true;
+          fail(ue);
+        }
+      }
+    })();
+
+    return done;
+  }
+
+  // Tavily 深入研究完整流程: 研究卡状态机 + 报告/来源展示
+  //   返回 'done' = 流程已终结(成功/取消/超时); 'fallback' = 回退到原有深入研究流程
+  async function runTavilyResearchFlow(opts) {
+    var dtMessagesEl = opts.messagesEl;
+    var text = opts.text;
+    var originalUserText = opts.originalUserText;
+    var fileData = opts.fileData;
+    var reqId = opts.reqId;
+    var progressCard = null;
+    var controller = null;
+    var startedAt = Date.now();
+    var answer = '';
+    var sources = [];
+    var responding = false;
+    var researchModel = opts.model || 'pro';
+
+    function setStep(stepIdx) {
+      if (!isResearchCard(progressCard)) return;
+      if (stepIdx === 0) {
+        setResearchCardState(progressCard, 'thinking', { statusText: AI_RESEARCH_THINKING_TEXTS[0], progress: 0.25 });
+      } else if (stepIdx === 1) {
+        setResearchCardState(progressCard, 'researching', { statusText: AI_RESEARCH_RESEARCH_TEXTS[0], progress: 0.5 });
+      } else if (stepIdx === 2) {
+        setResearchCardState(progressCard, 'researching', { statusText: AI_RESEARCH_RESEARCH_TEXTS[1], progress: 0.72 });
+      }
+      setResearchSteps(progressCard, stepIdx, stepIdx);
+    }
+
+    function renderResearchResult() {
+      renderTavilyResearchReport(progressCard, answer, sources, startedAt, undefined, researchModel);
+    }
+
+    // 三阶段状态展示 (新协议 research_stage 事件; 未知 stage 忽略, 保持原行为)
+    // 同时写入「查看思考过程」日志，避免一直显示 0 步
+    function handleResearchStage(stage, message) {
+      if (!isResearchCard(progressCard)) return;
+      var msg = message != null ? String(message) : '';
+      if (stage === 'rewrite') {
+        setResearchCardState(progressCard, 'thinking', {
+          statusText: msg || '正在优化研究问题…',
+          progress: 0.25,
+          allowToggle: true
+        });
+        setResearchSteps(progressCard, 0, 0);
+        appendResearchThinkingEntry(progressCard, '总指挥 · 拆解问题', msg || '正在理解并拆解研究任务…', { forceNew: true });
+      } else if (stage === 'rewrite_done') {
+        setResearchCardState(progressCard, 'thinking', {
+          statusText: msg || '问题已优化，开始多智能体研究…',
+          progress: 0.32,
+          allowToggle: true
+        });
+        setResearchSteps(progressCard, 0, 0);
+        appendResearchThinkingEntry(progressCard, '总指挥 · 任务规划', msg || '任务已拆解，准备派出研究小队…', { forceNew: true });
+      } else if (stage === 'collect') {
+        if (progressCard._researchState) progressCard._researchState.researchTick = 0;
+        setResearchCardState(progressCard, 'researching', {
+          statusText: msg || '多智能体并行研究中…',
+          progress: 0.5,
+          allowToggle: true
+        });
+        setResearchSteps(progressCard, 1, 1);
+        appendResearchThinkingEntry(progressCard, '研究小队 · 并行调研', msg || '子智能体正在联网检索与整理材料…', { forceNew: true });
+      } else if (stage === 'gapfill') {
+        setResearchCardState(progressCard, 'researching', {
+          statusText: msg || '发现信息缺口，正在补充查证…',
+          progress: 0.68,
+          allowToggle: true
+        });
+        setResearchSteps(progressCard, 2, 2);
+        appendResearchThinkingEntry(progressCard, '总指挥 · 查漏补缺', msg || '正在对关键缺口做补充检索…', { forceNew: true });
+      } else if (stage === 'synthesize') {
+        responding = true;
+        setResearchCardState(progressCard, 'responding', {
+          durationMs: Date.now() - startedAt,
+          expanded: true,
+          allowToggle: true,
+          progress: 0.96
+        });
+        var synthStatus = progressCard.querySelector('.ai-research-status');
+        if (synthStatus) synthStatus.textContent = msg || '正在综合生成中文报告…';
+        setResearchSteps(progressCard, 3, 3);
+        appendResearchThinkingEntry(progressCard, '总指挥 · 生成报告', msg || '正在交叉验证材料并撰写研究报告…', { forceNew: true });
+      } else if (stage || msg) {
+        // 未知 stage：仍记入思考日志，避免静默丢事件
+        appendResearchThinkingEntry(
+          progressCard,
+          stage ? ('研究进程 · ' + stage) : '研究进程',
+          msg || ('阶段：' + stage),
+          { forceNew: true }
+        );
+      }
+    }
+
+    function handleResearchStepEvent(step, tool) {
+      if (!isResearchCard(progressCard)) return;
+      var toolName = tool ? String(tool) : '';
+      var labels = ['拆解问题', '分析信息', '组织结构', '生成回答'];
+      var idx = Math.max(0, Math.min(3, Number(step) || 0));
+      var label = labels[idx] || ('步骤 ' + (idx + 1));
+      appendResearchThinkingEntry(
+        progressCard,
+        '流程 · ' + label,
+        toolName ? ('工具：' + toolName) : ('进入「' + label + '」阶段'),
+        { forceNew: true }
+      );
+    }
+
+    // 流式渲染: research_content 小块实时追加到报告区 (纯文本; done 后整体 markdown 替换)
+    function appendStreamChunk(chunk) {
+      if (!chunk || !isResearchCard(progressCard)) return;
+      var answerEl = progressCard.querySelector('.ai-think-answer');
+      if (!answerEl) return;
+      patchInnerHTML(answerEl, renderMarkdown(answer, true));
+      scrollToBottom(dtMessagesEl, false);
+    }
+
+    function removeTavilyCard() {
+      if (!progressCard) return;
+      try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
+      try { progressCard._done = true; } catch (e) {}
+      try { progressCard.remove(); } catch (e) {}
+      if (S.deepThinkProgressCard === progressCard) S.deepThinkProgressCard = null;
+      if (controller && S.deepThinkJob === controller) S.deepThinkJob = null;
+      if (controller && S._dtAbortController === controller) S._dtAbortController = null;
+    }
+
+    try {
+      progressCard = buildDeepThinkProgressCard({
+        variant: 'research',
+        cancelFn: function() { cancelDeepThink(S.dtConversationId); },
+        retryFn: function() { handleDeepThinkPageSend(originalUserText, fileData); }
+      });
+      progressCard.classList.add('dt-animate-in');
+      // 研究一开始就允许展开思考过程（不再锁死 0 步）
+      if (progressCard._researchState) {
+        progressCard._researchState.canToggle = true;
+      }
+      appendResearchThinkingEntry(progressCard, '研究启动', '已收到研究任务，正在连接多智能体流水线…', { forceNew: true });
+      S.deepThinkProgressCard = progressCard;
+      dtMessagesEl.appendChild(progressCard);
+      scrollToBottom(dtMessagesEl, true);
+
+      // ★ 优化：结果不满意时"重新研究"（refresh=true 跳过后端 24h 缓存）
+      progressCard._researchRefreshFn = function() {
+        if (!isResearchCard(progressCard) || (progressCard._researchState && progressCard._researchState.state === 'researching')) return;
+        // 重置卡片为研究中状态，用同一 query 强制重新研究
+        answer = '';
+        sources = [];
+        setResearchCardState(progressCard, 'researching', { statusText: '正在重新研究…', progress: 0.2, expanded: false });
+        var answerEl = progressCard.querySelector('.ai-think-answer');
+        if (answerEl) { try { answerEl.innerHTML = ''; } catch (e) {} }
+        var oldSourcesBox = progressCard.querySelector('.ai-tavily-sources-box');
+        if (oldSourcesBox) { try { oldSourcesBox.remove(); } catch (e) {} }
+        runTavilyResearch(text, function(prog) {
+          if (S._dtCurrentReqId !== reqId) {
+            return;
+          }
+          if (!prog) return;
+          if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true});
+          if (prog.stage) handleResearchStage(prog.stage, prog.message);
+          if (typeof prog.step === 'number') {
+            setStep(prog.step);
+            if (prog.tool) handleResearchStepEvent(prog.step, prog.tool);
+          }
+          if (prog.content) {
+            answer += String(prog.content);
+            appendStreamChunk(String(prog.content));
+            if (!responding) {
+              responding = true;
+              if (isResearchCard(progressCard)) {
+                setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: true, allowToggle: true });
+                setResearchSteps(progressCard, 3, 3);
+                appendResearchThinkingEntry(progressCard, '总指挥 · 生成报告', '开始流式输出研究报告…', { forceNew: true });
+              }
+            }
+          }
+          if (prog.sources) sources = prog.sources;
+        }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: true }).then(function(result) {
+          answer = (result && result.answer) || '';
+          sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
+          renderResearchResult();
+        }).catch(function(err) {
+          console.warn('[AI] Tavily re-research failed:', err && err.message);
+          if (isResearchCard(progressCard)) {
+            markResearchCardOutcome(progressCard, 'error', '重新研究失败：' + ((err && err.message) || '未知错误'));
+          }
+        });
+      };
+
+      controller = new AbortController();
+      // ★ 修复：Tavily 深页流程也走深页独立通道
+      S._dtAbortController = controller;
+      S.deepThinkJob = controller;
+      S.currentStreamAborted = false;
+
+      var researchPromise = runTavilyResearch(text, function(prog) {
+        if (S._dtCurrentReqId !== reqId) {
+          try { if (researchPromise && researchPromise.cancel) researchPromise.cancel(); } catch (e) {}
+          return;
+        }
+        if (!prog) return;
+        if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true});
+        if (prog.stage) handleResearchStage(prog.stage, prog.message);
+        if (typeof prog.step === 'number') {
+          setStep(prog.step);
+          if (prog.tool) handleResearchStepEvent(prog.step, prog.tool);
+        }
+        if (prog.content) {
+          answer += String(prog.content);
+          appendStreamChunk(String(prog.content));
+          if (!responding) {
+            responding = true;
+            if (isResearchCard(progressCard)) {
+              setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: true, allowToggle: true });
+              setResearchSteps(progressCard, 3, 3);
+              appendResearchThinkingEntry(progressCard, '总指挥 · 生成报告', '开始流式输出研究报告…', { forceNew: true });
+            }
+          }
+        }
+        if (prog.sources) sources = prog.sources;
+      }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller });
+      var result = await researchPromise;
+      answer = (result && result.answer) || '';
+      sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
+      renderResearchResult();
+      return 'done';
+    } catch (err) {
+      var errMsg = (err && err.message) || '研究失败';
+      var cardState = (progressCard && progressCard._researchState) ? progressCard._researchState.state : null;
+      if ((err && err.cancelled) || cardState === 'cancelled') {
+        // 用户点击停止/取消: 卡片已由 cancelDeepThink 置为 cancelled
+        console.warn('[AI] Tavily research cancelled:', errMsg);
+        return 'done';
+      }
+      if (err && err.tavilyTimeout) {
+        console.warn('[AI] Tavily research timeout:', errMsg);
+        if (isResearchCard(progressCard) && cardState !== 'cancelled') {
+          markResearchCardOutcome(progressCard, 'timeout', '超过 ' + Math.round(RESEARCH_IDLE_TIMEOUT_MS / 1000) + ' 秒未收到新数据，本次研究已停止。');
+        }
+        try { notify('研究超时，请重试'); } catch (e) {}
+        return 'done';
+      }
+      // ★ 2026-09-11 修复（深入研究"连接中断"根因之三）：
+      //   以下错误【回退到 deep think 也没有意义，反而会产生误导】：
+      //   - concurrent：/api/agent/chat(deep_think) 与 /api/agent/research/stream 共用
+      //     tryAcquireDeepResearch 并发闸门，回退过去必然再撞一次同一闸门；
+      //   - 配额类（quota_exceeded / search_limit / rate_limited / daily_limit...）：
+      //     换通道同样会被拦，且用户需要知道的是"额度/次数用完"而不是"连接中断"。
+      //   此前这些错误统一 return 'fallback' → deep think 再次失败 →
+      //   外层把最后一个错误渲染为「连接中断」，用户看到的文案与真实原因完全不符。
+      //   现在直接终结在研究会话卡上，给出可执行的准确提示。
+      var errCode = String((err && (err.code || err.error)) || '');
+      var isConcurrent = errCode === 'concurrent' || /上一个(研究)?请求|请等待上一个/.test(errMsg);
+      var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/.test(errCode)
+        || /次数已达上限|额度|开通 Pro|访问过于频繁/.test(errMsg);
+      if (isConcurrent || isQuota) {
+        console.warn('[AI] Tavily research 终结于不可回退错误:', errCode || errMsg);
+        var terminalMsg = isConcurrent
+          ? '上一个请求仍在进行中，请等它结束后重试'
+          : (errMsg || '当前额度不足，无法发起研究');
+        if (isResearchCard(progressCard) && cardState !== 'cancelled') {
+          markResearchCardOutcome(progressCard, 'interrupted', terminalMsg);
+        }
+        try { notify(terminalMsg); } catch (eNotify) {}
+        return 'done';
+      }
+      // tavily_not_configured / 网络错误 / 其他 SSE error → 回退到原有深入研究流程
+      console.warn('[AI] Tavily research 失败，回退到深入研究流程:', errMsg, (err && err.status) ? ('HTTP ' + err.status) : '');
+      removeTavilyCard();
+      return 'fallback';
+    }
+  }
+
+
+
+  // ===================== 共享 SSE 处理循环 =====================
+  // 由 handleDeepThinkPageSend 调用（深入研究页发送流程）
+  async function processDeepThinkSSE(opts) {
+    var reader = opts.reader;
+    var controller = opts.controller;
+    var progressCard = opts.progressCard;
+    var reqId = opts.reqId;
+    var aiNodeRef = opts.aiNodeRef;       // { value: null } 引用, 内部更新
+    var aiContentRef = opts.aiContentRef;   // { value: '' }
+    var finalMetaRef = opts.finalMetaRef;
+    var finalModelRef = opts.finalModelRef;
+    var finalThinkingModeRef = opts.finalThinkingModeRef;
+    var answerRendererRef = opts.answerRendererRef;
+    var contentRendererRef = opts.contentRendererRef;
+    var answerStartedRef = opts.answerStartedRef;
+    var doneReceivedRef = opts.doneReceivedRef;
+    var evtHandledRef = opts.evtHandledRef;
+    var streamConvIdRef = opts.streamConvIdRef;
+    var abortedRef = opts.abortedRef;
+    var messagesEl = opts.messagesEl;
+    var scrollEl = opts.scrollEl || messagesEl;
+
+    var decoder = new TextDecoder();
+    var buffer = '';
+    var timedOut = false;
+    var contentTruncated = false;
+    var MAX_EVENT_SIZE = 512 * 1024; // 512KB
+
+    function safeRemoveProgressCard(removeNode) {
+      if (!progressCard) return;
+      if (isResearchCard(progressCard)) {
+        try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
+        try { progressCard._done = true; } catch (e2) {}
+        if (removeNode && progressCard.parentNode) {
+          try { progressCard.remove(); } catch (e3) {}
+        }
+        return;
+      }
+      try { progressCard.classList.add('ai-progress-card-done'); } catch (e4) {}
+      try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e5) {}
+      if (removeNode !== false) {
+        try { progressCard.remove(); } catch (e6) {}
+      }
+      try { progressCard._done = true; } catch (e7) {}
+    }
+
+    function ensureThinkCardNode() {
+      if (aiNodeRef.value) return aiNodeRef.value;
+      if (isResearchCard(progressCard)) {
+        aiNodeRef.value = progressCard;
+        return aiNodeRef.value;
+      }
+      safeRemoveProgressCard();
+      var node = el('div', { class: 'ai-think-card expanded generating' });
+      node.innerHTML =
+        '<div class="ai-think-header">' +
+          '<span class="ai-think-title">思考中...</span>' +
+          '<span class="ai-think-meta"></span>' +
+          '<span class="ai-think-chevron">▾</span>' +
+        '</div>' +
+        '<div class="ai-think-body">' +
+          '<details class="ai-think-thinking">' +
+            '<summary><span>查看思考过程</span></summary>' +
+            '<div class="ai-think-thinking-body"></div>' +
+          '</details>' +
+        '</div>' +
+        '<div class="ai-think-answer"></div>' +
+        '<div class="ai-msg-footer"></div>';
+      var headerEl = node.querySelector('.ai-think-header');
+      var chevronEl = node.querySelector('.ai-think-chevron');
+      headerEl.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var isCollapsed = node.classList.contains('collapsed');
+        if (isCollapsed) {
+          node.classList.remove('collapsed');
+          node.classList.add('expanded');
+          if (chevronEl) chevronEl.textContent = '▾';
+        } else {
+          node.classList.add('collapsed');
+          node.classList.remove('expanded');
+          if (chevronEl) chevronEl.textContent = '▸';
+        }
+      });
+      messagesEl.appendChild(node);
+      aiNodeRef.value = node;
+      S.autoScrollPinned = true;
+      scrollToBottom(scrollEl, true);
+      return node;
+    }
+
+    function finishThinkCard(node, content, evt) {
+      if (!node) return;
+      if (isResearchCard(node) && node._researchState &&
+          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
+      node.classList.remove('generating');
+      node.classList.add('done');
+
+      var searchCount = evt ? (evt.search_count || 0) : 0;
+      var searchQuery = evt ? (evt.search_query || '') : '';
+      var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
+      var usage = evt && evt.usage ? evt.usage : null;
+      var agentCount = evt && evt.agent_count ? evt.agent_count : 0;
+      var thinkingLog = evt && Array.isArray(evt.thinking_log) && evt.thinking_log.length ? evt.thinking_log : (node._thinkingLog || []);
+      if (!thinkingLog.length && evt && evt.reasoning) thinkingLog = [{agent_role:'模型思考',chunk:evt.reasoning}];
+      var thinkDurationMs = evt && typeof evt.think_duration_ms === 'number' ? evt.think_duration_ms : 0;
+      var finalThinkingMode = finalThinkingModeRef.value || 'max';
+      var answerEl = node.querySelector('.ai-think-answer');
+      var detailsEl = node.querySelector('.ai-think-thinking');
+      var thinkLogBox = node.querySelector('.ai-think-thinking-body');
+      var summaryTextEl = node.querySelector('.ai-thinking-summary-text') || node.querySelector('.ai-think-thinking summary span');
+
+      function finalizeAnswer() {
+        if (answerEl) setupBubbleCopy(answerEl, messagesEl);
+        if (!isResearchCard(node)) {
+          var titleEl2 = node.querySelector('.ai-think-title');
+          if (titleEl2) titleEl2.textContent = '已思考';
+        }
+      }
+
+      if (answerEl) {
+        var contentForRender = content || '';
+        if (answerRendererRef.value) {
+          answerRendererRef.value.finish(contentForRender);
+          answerRendererRef.value = null;
+          finalizeAnswer();
+        } else {
+          if (contentRendererRef.value) { try { contentRendererRef.value.stop(); } catch (e8) {} }
+          answerEl.innerHTML = '';
+          contentRendererRef.value = createSmoothTextRenderer(answerEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100, onDone: function() { finalizeAnswer(); } });
+          contentRendererRef.value.append(contentForRender);
+          contentRendererRef.value.finish(contentForRender);
+          contentRendererRef.value = null;
+        }
+      }
+
+      var mergedLog = [];
+      for (var tli = 0; tli < thinkingLog.length; tli++) {
+        var entryRaw = thinkingLog[tli];
+        var lastMerged = mergedLog[mergedLog.length - 1];
+        if (lastMerged && lastMerged.agent_role === (entryRaw.agent_role || 'AI') && lastMerged.round === (entryRaw.round || 0)) {
+          lastMerged.chunk = (lastMerged.chunk || '') + (entryRaw.chunk || '');
+        } else {
+          mergedLog.push({ agent_role: entryRaw.agent_role || 'AI', chunk: entryRaw.chunk || '', round: entryRaw.round || 0 });
+        }
+      }
+
+      if (detailsEl) detailsEl.style.display = mergedLog.length || (thinkLogBox && thinkLogBox.children.length) ? '' : 'none';
+      if (thinkLogBox && mergedLog.length > 0) {
+        thinkLogBox.innerHTML = '';
+        mergedLog.forEach(function(entry) {
+          var entEl = el('div', { class: 'ai-thought-entry' });
+          var roundLabel = entry.round ? (' · 第' + entry.round + '轮') : '';
+          entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(entry.agent_role || 'AI') + escapeHtml(roundLabel) + '</div><div class="ai-thought-chunk"></div>';
+          entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
+          thinkLogBox.appendChild(entEl);
+        });
+      }
+      if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + (mergedLog.length || (thinkLogBox && thinkLogBox.children.length) || 0) + ' 步)';
+
+      var footer = node.querySelector('.ai-msg-footer');
+      if (footer) {
+        footer.innerHTML = '';
+        footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
+        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: finalThinkingMode + ' 思考' }));
+        if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+        if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已研究 ' + searchCount + ' 个来源' }));
+        if (usage || finalModelRef.value) {
+          var usageLine = buildUsageLine(Object.assign({}, usage || {}, { model: finalModelRef.value, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount }));
+          if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
+        }
+      }
+
+      if (searchResults && searchResults.length > 0 && searchQuery) {
+        var refs = isResearchCard(node) ? ensureResearchCardRefs(node) : null;
+        if (refs && refs.searchBox && refs.searchBox.parentNode) {
+          try { refs.searchBox.parentNode.removeChild(refs.searchBox); } catch (e9) {}
+          refs.searchBox = null;
+        }
+        var searchBox = document.createElement('div');
+        searchBox.className = 'ai-search-supplement';
+        var searchHtml = '研究来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果)<br>';
+        searchResults.slice(0, 5).forEach(function(sr, si) {
+          var safeSrUrl = safeSearchUrl(sr.url);
+          if (safeSrUrl) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title || safeSrUrl) + '</a><br>';
+        });
+        if (searchResults.length > 5) searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 条来源</span>';
+        searchBox.innerHTML = searchHtml;
+        var thinkBody = node.querySelector('.ai-think-body');
+        if (thinkBody) {
+          if (answerEl) thinkBody.insertBefore(searchBox, answerEl);
+          else thinkBody.appendChild(searchBox);
+        }
+        if (refs) refs.searchBox = searchBox;
+      }
+
+      if (isResearchCard(node)) {
+        node._researchState.durationMs = thinkDurationMs || node._researchState.elapsedMs || 0;
+        node._researchState.agentCount = agentCount;
+        node._researchState.searchCount = searchCount;
+        setResearchCardState(node, 'done', {
+          durationMs: node._researchState.durationMs,
+          agentCount: agentCount,
+          searchCount: searchCount,
+          expanded: false
+        });
+        return;
+      }
+
+      var titleEl = node.querySelector('.ai-think-title');
+      var metaEl = node.querySelector('.ai-think-meta');
+      if (titleEl) titleEl.textContent = '已思考 ' + formatThinkDuration(thinkDurationMs);
+      if (metaEl) metaEl.textContent = '';
+      if (node.classList.contains('collapsed')) {
+        node.classList.remove('collapsed');
+        node.classList.add('expanded');
+      }
+    }
+
+    var _lastDataTime = Date.now();
+    var _idleCheckTimer = setInterval(function() {
+      if (Date.now() - _lastDataTime > 45000) {
+        timedOut = true;
+        if (isResearchCard(progressCard)) {
+          markResearchCardOutcome(progressCard, 'timeout', '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002');
+        }
+        try { reader.cancel(); } catch (e) {}
+        if (abortedRef) abortedRef.value = true;
+      }
+    }, 5000);
+    function _resetIdle() { _lastDataTime = Date.now(); }
+
+    // SSE 事件处理函数
+    async function _handleSseEvent(evt) {
+      if (S._dtCurrentReqId !== reqId) { if (abortedRef) abortedRef.value = true; return; }
+
+        // Custom providers use the regular content/reasoning protocol. Route
+        // it through the same live report renderer as native research.
+        if (evt.type === 'reasoning') return _handleSseEvent({type:'thinking_chunk', chunk:evt.text || evt.reasoning || '', agent_role:'模型思考'});
+        if (evt.type === 'content') return _handleSseEvent({type:'answer_chunk',chunk:evt.text || ''});
+        if (evt.type === 'meta') {
+          if (streamConvIdRef) streamConvIdRef.value = evt.conversation_id;
+          return;
+        }
+        if (evt.type === 'heartbeat' || evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_tool' || evt.type === 'deep_think_init') {
+          updateDeepThinkProgressCard(progressCard, evt);
+          return;
+        }
+        if (evt.type === 'thinking_chunk') {
+          if (!aiNodeRef.value) ensureThinkCardNode();
+          if (evt.chunk) {
+            updateDeepThinkProgressCard(progressCard, evt);
+            var thinkBody = aiNodeRef.value.querySelector('.ai-think-thinking-body');
+            var detailsEl = aiNodeRef.value.querySelector('.ai-think-thinking');
+            var summaryEl = aiNodeRef.value.querySelector('.ai-thinking-summary-text') || aiNodeRef.value.querySelector('.ai-think-thinking summary span:last-child');
+            if (thinkBody) {
+              var roleLabel = evt.agent_role || 'AI 智能体';
+              var chunkText = String(evt.chunk).slice(0, 4000);
+              var lastEntry = thinkBody.lastElementChild;
+              if (lastEntry && lastEntry._role === roleLabel) {
+                var lc = lastEntry.querySelector('.ai-thought-chunk');
+                if (lc) lc.textContent = cleanReasoningText((lc.textContent || '') + chunkText);
+              } else {
+                var entry = document.createElement('div');
+                entry.className = 'ai-thought-entry'; entry._role = roleLabel;
+                entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
+                entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(chunkText);
+                thinkBody.appendChild(entry);
+              }
+              try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
+              while (thinkBody.children.length > 80) thinkBody.removeChild(thinkBody.firstChild);
+            }
+            if (summaryEl) summaryEl.textContent = '查看思考过程 (' + (thinkBody ? thinkBody.children.length : 0) + ' 步)';
+            if (isResearchCard(aiNodeRef.value)) {
+              aiNodeRef.value._researchState.persistExpanded = !aiNodeRef.value._researchState.userPinnedClosed;
+              setResearchDisclosure(aiNodeRef.value, aiNodeRef.value._researchState.persistExpanded);
+            } else if (detailsEl && !detailsEl.open) detailsEl.open = true;
+            var tTitle = aiNodeRef.value.querySelector('.ai-think-title');
+            if (tTitle && !isResearchCard(aiNodeRef.value)) tTitle.textContent = '思考中...';
+          }
+          scrollToBottom(scrollEl, false);
+          return;
+        }
+        if (evt.type === 'answer_chunk') {
+          if (!evt.chunk) return;
+          if (!aiNodeRef.value) ensureThinkCardNode();
+          if (!answerStartedRef.value) {
+            answerStartedRef.value = true;
+            if (typeof opts.onAnswerStart === 'function') {
+              try { opts.onAnswerStart(aiNodeRef.value, evt); } catch (e0) {}
+            }
+            var tT = aiNodeRef.value.querySelector('.ai-think-title');
+            if (tT && !isResearchCard(aiNodeRef.value)) tT.textContent = '回答中...';
+          }
+          var aEl = aiNodeRef.value.querySelector('.ai-think-answer');
+          if (aEl && !answerRendererRef.value) {
+            aEl.innerHTML = '';
+            answerRendererRef.value = createSmoothTextRenderer(aEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 0.14, plainStream: false });
+          }
+          if (!contentTruncated && aiContentRef.value.length >= AI_CONTENT_MAX_LEN) {
+            contentTruncated = true;
+            notify('回复过长，已截断');
+          }
+          var room = AI_CONTENT_MAX_LEN - aiContentRef.value.length;
+          var accepted = room > 0 ? String(evt.chunk).slice(0, room) : '';
+          aiContentRef.value += accepted;
+          if (answerRendererRef.value && accepted) answerRendererRef.value.append(accepted);
+          scrollToBottom(scrollEl, false);
+          return;
+        }
+        if (evt.type === 'error') {
+          if (isResearchCard(progressCard)) {
+            safeRemoveProgressCard(false);
+            if (!aiNodeRef.value) ensureThinkCardNode();
+            preserveResearchAnswer(progressCard, aiContentRef.value);
+            markResearchCardOutcome(progressCard, 'interrupted', evt.error || '研究失败，请重试');
+          } else {
+            safeRemoveProgressCard();
+          }
+          if (aiContentRef.value && !isResearchCard(progressCard)) {
+            ensureThinkCardNode();
+            aiNodeRef.value.appendChild(el('div', { class: 'ai-error-note' }, evt.error || 'AI 调用失败'));
+            finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
+            // ★ 修复：已保留并渲染部分回答，标记 evtHandled 防止外层
+            // `S._currentReqId !== reqId || ab.value` 分支把节点删除（回答闪现后消失）
+            if (evtHandledRef) evtHandledRef.value = true;
+          } else {
+            notify(evt.error || 'AI 调用失败');
+            if (!isResearchCard(progressCard) && opts.onErrorNoContent) opts.onErrorNoContent();
+          }
+          if (opts.onResetSending) opts.onResetSending();
+          if (reader) try { reader.cancel(); } catch (e) {}
+          if (abortedRef) abortedRef.value = true;
+          if (doneReceivedRef) doneReceivedRef.value = true;
+          // ★ 2026-09-24 修复：error 分支提前 return 后，循环尾守卫（doneReceived 已置位）
+          //   会跳过 clearInterval —— 看门狗每 5s 继续运行并把已收尾的卡片反复翻转。
+          try { clearInterval(_idleCheckTimer); } catch (e) {}
+          return;
+        }
+        if (evt.type === 'done') {
+          safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
+          // The caller owns the deep-page lock and releases it after all final
+          // rendering is complete. Do not mutate the normal-chat lock here.
+          if (progressCard) { try { progressCard._done = true; } catch (e) {} }
+          try {
+            finalModelRef.value = evt.model || 'deepseek-flash';
+            finalThinkingModeRef.value = evt.thinking_mode || opts.defaultThinkingMode || 'max';
+            aiContentRef.value = evt.sanitized_content || evt.content || '';
+            if (finalMetaRef) finalMetaRef.value = evt;
+          } catch (e) {}
+          if (!aiNodeRef.value) ensureThinkCardNode();
+          if (!aiContentRef.value || !String(aiContentRef.value).trim()) aiContentRef.value = 'AI 只返回了思考过程，没有生成正文回复。';
+          // ★ 修复：必须先 finish 再 reset。resetActiveRenderersByChannel('deep') 会对
+          // deep 通道渲染器调用 cancel()（清空 DOM、置 targetEl=null），若先执行，
+          // 后续 finishThinkCard 里 answerRenderer.finish() 因已取消而空操作，
+          // 已流式渲染的最终答案会被清空且不再重绘（答案区空白）。
+          clearInterval(_idleCheckTimer);
+          var answerTarget = aiNodeRef.value && aiNodeRef.value.querySelector('.ai-think-answer');
+          if (answerTarget && !answerRendererRef.value) answerRendererRef.value = createSmoothTextRenderer(answerTarget, { channel: 'deep' });
+          if (answerRendererRef.value) {
+            var deepDrained = await answerRendererRef.value.drain(aiContentRef.value, controller.signal);
+            if (!deepDrained || S._dtCurrentReqId !== reqId || controller.signal.aborted || aiNodeRef.value.isConnected === false) return;
+          }
+          finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
+          resetActiveRenderersByChannel('deep');
+          if (typeof opts.onSuccess === 'function') { try { opts.onSuccess(evt); } catch (eSuccess) {} }
+          if (doneReceivedRef) doneReceivedRef.value = true;
+          if (evtHandledRef) evtHandledRef.value = true;
+          try { clearInterval(_idleCheckTimer); } catch (e) {}
+          return;
+        }
+    }
+
+    while (true) {
+      if (S._dtCurrentReqId !== reqId || controller.signal.aborted || (abortedRef && abortedRef.value)) {
+        if (abortedRef) abortedRef.value = true;
+        // 120s 绝对超时中止：标记 timedOut，让循环后的兜底逻辑统一收尾
+        if (controller && controller.signal.aborted && controller._abortReason === 'timeout') {
+          timedOut = true;
+          if (isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
+            markResearchCardOutcome(progressCard, 'timeout', '思考超时，请重试');
+          }
+        }
+        if (reader) try { reader.cancel(); } catch (e) {}
+        break;
+      }
+      var readResult;
+      try { readResult = await reader.read(); } catch (e) {
+        // 120s 绝对超时中止（reader.read() 被 abort 拒绝）：标记 timedOut 并给研究卡打超时状态
+        if (controller && controller.signal.aborted && controller._abortReason === 'timeout') {
+          timedOut = true;
+          if (isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
+            markResearchCardOutcome(progressCard, 'timeout', '思考超时，请重试');
+          }
+        } else if (!timedOut && isResearchCard(progressCard) && progressCard._researchState.state !== 'cancelled') {
+          markResearchCardOutcome(progressCard, 'interrupted', '\u672c\u6b21\u6df1\u5ea6\u7814\u7a76\u4e2d\u65ad\u3002');
+        }
+        break;
+      }
+      if (readResult.done) {
+        // ★ EOF: flush TextDecoder 剩余 buffer
+        if (buffer) {
+          buffer += decoder.decode();
+          var eofLines = buffer.split('\n');
+          for (var ei = 0; ei < eofLines.length; ei++) {
+            var eLine = eofLines[ei];
+            // 支持 CRLF
+            eLine = eLine.replace(/\r$/, '');
+            if (!eLine || eLine.startsWith(':')) continue;
+            if (eLine.startsWith('data: ')) {
+              var eEventStr = eLine.slice(6);
+              if (eEventStr.length > MAX_EVENT_SIZE) continue;
+              var eEvt;
+              try { eEvt = JSON.parse(eEventStr); } catch (ex) { continue; }
+              if (eEvt) await _handleSseEvent(eEvt);
+            }
+          }
+          buffer = '';
+        }
+        break;
+      }
+      _resetIdle();
+      buffer += decoder.decode(readResult.value, { stream: true });
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      // ★ 2026-09-13 修复（P-12）：与深研流同样加残留下限，防无换行长数据撑爆内存
+      if (buffer.length > MAX_EVENT_SIZE * 2) {
+        if (!abortedRef || !abortedRef.value) {
+          try { controller.abort(new Error('数据流异常：单条事件超过上限')); } catch (_oe) {}
+        }
+        break;
+      }
+
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li];
+        // 支持 CRLF
+        line = line.replace(/\r$/, '');
+        // 忽略空行和注释行（heartbeat comments）
+        if (!line || line.startsWith(':')) continue;
+        if (!line.startsWith('data: ')) continue;
+        var eventStr = line.slice(6);
+        // 大小限制
+        if (eventStr.length > MAX_EVENT_SIZE) continue;
+        var evt;
+        try { evt = JSON.parse(eventStr); } catch (e) {
+          // Malformed JSON - 跳过，不阻塞其他事件
+          continue;
+        }
+        if (!evt) continue;
+        await _handleSseEvent(evt);
+      }
+
+      if (doneReceivedRef && doneReceivedRef.value) return;
+      if (abortedRef && abortedRef.value) return;
+    }
+    // H-25: 45s 无数据超时 / 120s 绝对超时 — 清理卡片、复位状态并提示，避免永久"处理中"
+    // research 卡片的超时由调用方（sseResult.timedOut）专门处理，这里跳过
+    if (timedOut && !isResearchCard(progressCard)) {
+      var timeoutMsg = (controller && controller._abortReason === 'timeout')
+        ? '思考超时（120 秒未完成），请重试'
+        : 'AI 响应超时（45 秒未收到数据），请重试';
+      safeRemoveProgressCard();
+      if (aiContentRef.value) {
+        ensureThinkCardNode();
+        if (aiNodeRef.value) {
+          aiNodeRef.value.appendChild(el('div', { class: 'ai-error-note' }, timeoutMsg));
+        }
+        finishThinkCard(aiNodeRef.value, aiContentRef.value, null);
+        // 已保留并渲染部分内容，标记 evtHandled 防止外层分支删除节点
+        if (evtHandledRef) evtHandledRef.value = true;
+      } else {
+        if (aiNodeRef.value) { try { aiNodeRef.value.remove(); } catch (e) {} }
+        aiNodeRef.value = null;
+      }
+      if (opts.onResetSending) { try { opts.onResetSending(); } catch (e) {} }
+      notify(timeoutMsg);
+      try { clearInterval(_idleCheckTimer); } catch (e) {}
+      return;
+    }
+    try { clearInterval(_idleCheckTimer); } catch (e) {}
+    return {
+      aborted: abortedRef ? abortedRef.value : false,
+      timedOut: timedOut,
+      aiContent: aiContentRef.value,
+      doneReceived: doneReceivedRef ? doneReceivedRef.value : false,
+      evtHandled: evtHandledRef ? evtHandledRef.value : false
+    };
+  }
+
+  // ★ 清理（死代码）：此处原有 handleSendDeepThink(text, input, sendBtn, messagesEl)，
+  //   是「深入研究模式发送」的旧版独立流程。经全仓检索，该函数**无任何调用点**
+  //   （深入研究发送已由 handleDeepThinkPageSend 走 /api/agent/chat + processDeepThinkSSE 承接）。
+  //   且其内部 ensureThinkCardNode() 引用的 `aiNodeRef` 从未在函数作用域内声明
+  //   （aiNodeRef 仅作为 opts 字段传入 processDeepThinkSSE，并非本函数的局部变量），
+  //   一旦被调用即 ReferenceError。为消除误用面一并删除。
+  //
+  //   processDeepThinkSSE 保留 —— 它是活代码，被 handleDeepThinkPageSend 正常调用。
+
+  // ===================== 深入研究页 =====================
+
+  function resetDeepThinkPageEmpty() {
+    var msgs = document.getElementById('dtMessages');
+    if (!msgs) return;
+    msgs.innerHTML = '';
+    msgs.appendChild(el('div', { class: 'dt-empty' }, [
+      el('div', { class: 'dt-empty-icon', text: '🐾' }),
+      el('div', { class: 'dt-empty-title', text: '深入研究' }),
+      el('div', { class: 'dt-empty-desc', text: '输入复杂问题，AI 会调用多阶段分析、检索和整理流程来生成回答。' })
+    ]));
+  }
+
+  var secondaryPageOwners = {};
+
+  function updateSecondaryPageState(open, owner) {
+    owner = owner || 'deep-think';
+    try {
+      if (window.XTJSecondaryPageState) {
+        if (open && !secondaryPageOwners[owner]) {
+          window.XTJSecondaryPageState.open(owner);
+          secondaryPageOwners[owner] = true;
+        } else if (!open && secondaryPageOwners[owner]) {
+          window.XTJSecondaryPageState.close(owner);
+          delete secondaryPageOwners[owner];
+        }
+      } else if (window.restoreMainNavigationState) {
+        window.restoreMainNavigationState();
+      }
+    } catch (e) {}
+  }
+
+  function saveDtConvId() {
+    try { if (S.dtConversationId) localStorage.setItem(DT_CONV_KEY, S.dtConversationId); else localStorage.removeItem(DT_CONV_KEY); } catch (e) {}
+  }
+
+  async function openDeepThinkPage() {
+    if (!window.currentUser) {
+      notify('请先登录后再使用深入研究');
+      return;
+    }
+    var panel = document.getElementById('panelDeepThink');
+    if (!panel) return;
+
+    var msgs = document.getElementById('dtMessages');
+    if (!msgs) return;
+
+    // A reopened panel belongs to a new lifecycle.  This prevents a late
+    // history/SSE callback from writing into the next session's DOM.
+    panel._dtClosed = false;
+    // ★ P-29：改用深研页独立计数器（原 S.lifecycleId++ 会连带作废主聊天在途回调）
+    S.dtLifecycleId++;
+    var pageLifecycle = S.dtLifecycleId;
+    var pageOwner = window.currentUser || '', pageAuthEpoch = window._authStateEpoch || 0;
+    function currentPage() { return S.dtLifecycleId === pageLifecycle && !panel._dtClosed && pageOwner === (window.currentUser || '') && pageAuthEpoch === (window._authStateEpoch || 0); }
+
+    // Enter the research surface immediately; auth and history can complete in the background.
+    panel.classList.remove('hidden');
+    panel.classList.add('active');
+    document.body.classList.add('xtj-research-open');
+    updateSecondaryPageState(true);
+    initDeepThinkResearchUi();
+
+    var authOk = await ensureUserAuthOrNotify();
+    if (!authOk) return;
+    if (!currentPage()) return;
+
+    // 先从 localStorage 恢复会话 ID（刷新页面后也能恢复）
+    if (!S.dtConversationId) {
+      try { var saved = localStorage.getItem(DT_CONV_KEY); if (saved) S.dtConversationId = saved; } catch (e) {}
+    }
+
+    // 已有会话 → 如果消息区不为空且不是页面刷新，直接显示缓存内容
+    if (S.dtConversationId && msgs.children.length > 0 && !msgs.querySelector('.dt-empty, .dt-loading, .dt-history-error')) {
+      // 已有缓存的 DOM 内容，直接显示
+    } else if (S.dtConversationId) {
+      msgs.innerHTML = '';
+      var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' });
+      msgs.appendChild(loadHint);
+      try {
+        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think', null, { timeoutMs: 8000 });
+        if (!currentPage()) return;
+        if (!hist || !hist.ok || !hist.data || !Array.isArray(hist.data.messages)) throw new Error('深入研究记录暂不可用');
+        var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
+        if (!hasMessages) {
+          S.dtConversationId = null;
+          saveDtConvId();
+          resetDeepThinkPageEmpty();
+          var newConversation = await apiRequest('POST', '/chat/new', null);
+          if (!currentPage()) return;
+          if (newConversation && newConversation.ok && newConversation.data && newConversation.data.conversation_id) {
+            S.dtConversationId = newConversation.data.conversation_id;
+            saveDtConvId();
+          }
+        }
+        if (hasMessages) {
+          msgs.innerHTML = '';
+          hist.data.messages.forEach(function(msg) {
+            // ★ 修复：深入研究记录只持久化了 assistant 一条（无单独 user 行），
+            //   这里按服务端还原出的 research_query 补出「你」的问题气泡，
+            //   避免历史里只有研究报告、没有原始提问，观感残缺。
+            if (msg.is_research && msg.research_query) {
+              var qNode = el('div', { class: 'dt-msg user' });
+              qNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+              qNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.research_query }));
+              msgs.appendChild(qNode);
+            }
+            if (msg.role === 'user') {
+              var userNode = el('div', { class: 'dt-msg user' });
+              userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+              userNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.content || '' }));
+              msgs.appendChild(userNode);
+            } else if (msg.role === 'assistant') {
+              var thinkNode = buildThinkCardFromHistory(msg, msgs, true);
+              if (thinkNode) msgs.appendChild(thinkNode);
+            }
+          });
+        } else {
+          if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
+        }
+      } catch (e) {
+        if (!currentPage()) return;
+        msgs.replaceChildren(el('div', { class: 'dt-history-error', text: '聊天记录加载失败，原有对话仍保留' }));
+        var historyRetry = el('button', { type: 'button', class: 'ai-history-retry', text: '重新加载聊天记录' });
+        historyRetry.addEventListener('click', function() { msgs.replaceChildren(); openDeepThinkPage(); });
+        msgs.appendChild(historyRetry);
+      }
+    } else {
+      // 首次打开，创建新会话
+      resetDeepThinkPageEmpty();
+      try {
+        var r = await apiRequest('POST', '/chat/new', null);
+        if (!currentPage()) return;
+        if (r && r.ok && r.data && r.data.conversation_id) {
+          S.dtConversationId = r.data.conversation_id;
+          saveDtConvId();
+        }
+      } catch (e) {}
+    }
+
+    // 等待两帧 + 一个小延时，确保所有子元素布局完成（markdown 渲染、图片等）
+    // 然后用 scrollIntoView 定位到最后一条消息，scrollIntoView 兼容性比 scrollTop=scrollHeight 更好
+    if (msgs) {
+      var scrollToEnd = function() {
+        try {
+          // 找最后一条用户消息或助手消息
+          var last = msgs.lastElementChild;
+          if (last && last !== msgs) {
+            try { last.scrollIntoView({ block: 'end', behavior: 'auto' }); } catch (e) {}
+          }
+          // 兜底：直接设 scrollTop
+          try { msgs.scrollTop = msgs.scrollHeight; } catch (e) {}
+        } catch (e) {}
+      };
+      requestAnimationFrame(scrollToEnd);
+    }
+
+    var input = document.getElementById('dtInput');
+    if (input) {
+      setTimeout(function() {
+        if (currentPage()) { try { input.focus(); } catch (e) {} }
+      }, 80);
+    }
+  }
+
+  function closeDeepThinkPage() {
+    var panel = document.getElementById('panelDeepThink');
+    try {
+      // Invalidate every callback first, then abort the actual network
+      // controllers.  Hiding the panel alone leaves a DeepSeek stream alive.
+      // ★ P-29：只作废深研页自己的在途回调；主聊天用 S.lifecycleId，互不影响。
+      S.dtLifecycleId++;
+      S._dtCreateSeq = (S._dtCreateSeq || 0) + 1;
+      S._dtCreating = false; S._dtDeleting = false;
+      S._dtSendSeq = (S._dtSendSeq || 0) + 1;
+      S._dtSending = false;
+      if (S._dtFetchTimeoutTimer) { clearTimeout(S._dtFetchTimeoutTimer); S._dtFetchTimeoutTimer = null; }
+      // ★ 修复：只清深页独立请求通道，不动普通聊天的 _currentReqId，
+      // 避免关闭深页时误杀正在进行的普通聊天流。
+      S._dtCurrentReqId = null;
+      // ★ 修复：只 abort 深页自己的 controller（_dtAbortController / deepThinkJob），
+      // 不再触碰普通聊天共享的 S.abortController。
+      var dtController = S._dtAbortController;
+      if (dtController) {
+        try {
+          dtController._abortReason = 'aborted';
+          try { dtController.abort('aborted'); } catch (eAbortReason) { dtController.abort(); }
+        } catch (eAbort) {}
+      }
+      if (S.deepThinkJob === dtController) S.deepThinkJob = null;
+      S._dtAbortController = null;
+      // A file selected in the research composer is session-scoped.  Never
+      // carry it into a later conversation after the page is closed.
+      _dtFileData = null;
+      var closedFileInput = document.getElementById('dtFileInp');
+      if (closedFileInput) closedFileInput.value = '';
+      var closedFilePreview = document.getElementById('dtFilePreview');
+      if (closedFilePreview) { closedFilePreview.style.display = 'none'; closedFilePreview.innerHTML = ''; }
+      resetResearchCardDisclosure(document.getElementById('dtMessages'));
+      if (panel) {
+        panel.classList.add('hidden');
+        panel.classList.remove('active');
+      }
+      document.body.classList.remove('xtj-research-open');
+      // 标记 panel 为已关闭, SSE 回调可检测此标志避免写旧 DOM
+      if (panel) panel._dtClosed = true;
+      saveDtConvId();
+      var input = document.getElementById('dtInput');
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+    } finally {
+      updateSecondaryPageState(false);
+      if (window.restoreMainNavigationState) window.restoreMainNavigationState();
+    }
+  }
+
+  // 文件上传状态 (dt 页面)
+  var _dtFileData = null;
+  var _dtFileSelectionSeq = 0;
+
+  function consumeAiAttachment(fileData) {
+    if (!fileData || typeof fileData.onSuccess !== 'function') return;
+    try { fileData.onSuccess(); } catch (e) {}
+  }
+
+  async function handleDeepThinkPageSend(text, fileData) {
+    var dtMessagesEl = document.getElementById('dtMessages');
+    var input = document.getElementById('dtInput');
+    if (!dtMessagesEl || !input) return;
+
+    var originalUserText = text || '';
+    var displayText = text;
+    var attachmentPayload = null;
+
+    // 如果有文件: 区分: UI 显示用完整 data URL 或文件占位，发送给服务器用简短标记
+    if (fileData) {
+      var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5\u3040-\u30ff]/g, '_').slice(0, 80);
+      var isImage2 = fileData.type.startsWith('image/');
+      var sizeKB2 = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
+      // UI 显示
+      if (isImage2) {
+        displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
+      } else {
+        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' · ' + sizeKB2 + 'KB]';
+      }
+      // 发送给服务器: 简短标记
+      var serverTag2 = isImage2
+        ? '[图片: ' + safeName + ' · ' + sizeKB2 + 'KB]'
+        : '[文件: ' + safeName + ' · ' + sizeKB2 + 'KB]';
+      text = text ? text + '\n' + serverTag2 : serverTag2;
+      attachmentPayload = [{ name: safeName, type: fileData.type || 'application/octet-stream', data_url: fileData.dataUrl }];
+    }
+    if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
+
+    // The research page has its own synchronous lock and generation token. Set
+    // them before quota/auth awaits so double taps cannot start parallel work,
+    // and so closing the page invalidates every pending continuation.
+    if (S._dtSending || S._dtCreating || S._dtDeleting) {
+      try { notify('正在生成回复，请稍候'); } catch (eBusy) {}
+      return;
+    }
+    var dtSendToken = (S._dtSendSeq = (S._dtSendSeq || 0) + 1);
+    var dtLifecycle = S.dtLifecycleId;
+    var dtOwner = window.currentUser || '', dtAuthEpoch = window._authStateEpoch || 0;
+    var dtSettings = { effort: S.deepThinkEffort || 'max', webSearch: S.webSearchEnabled === true, model: S.selectedModel };
+    var dtPanel = document.getElementById('panelDeepThink');
+    S._dtClientRequestId = (S._dtClientRequestId || 0) + 1;
+    var reqId = 'dt_cr_' + S._dtClientRequestId + '_' + Date.now();
+    S._dtSending = true;
+    S._dtCurrentReqId = reqId;
+    function isCurrentDeepSend() {
+      return S._dtSendSeq === dtSendToken && S._dtSending && S._dtCurrentReqId === reqId &&
+        S.dtLifecycleId === dtLifecycle && !(dtPanel && dtPanel._dtClosed) && dtOwner === (window.currentUser || '') && dtAuthEpoch === (window._authStateEpoch || 0);
+    }
+    function releaseDeepPreflightLock() {
+      if (!isCurrentDeepSend()) return;
+      S._dtSending = false;
+      S._dtCurrentReqId = null;
+    }
+
+    // ★ 深页发送同样受每日第三方搜索次数限制；校验在 await 后重新确认请求仍有效。
+    if (S.webSearchEnabled) {
+      try {
+        if (!S.quota || (Date.now() - S.quotaFetchedAt) > 120000) {
+          await fetchAiQuota(true);
+        }
+      } catch (eQ) {}
+      if (!isCurrentDeepSend()) return;
+      var qGateDT = canSendWithQuota();
+      if (!qGateDT.ok) {
+        notify(qGateDT.message || '今日额度已用完');
+        releaseDeepPreflightLock();
+        return;
+      }
+    }
+
+    var originalText = text;
+    function restoreInputText() {
+      input.value = originalUserText;
+      input.style.height = 'auto';
+      try { input.style.height = Math.min(input.scrollHeight, 140) + 'px'; if (!_isTouchMobile) input.focus(); } catch (e) {}
+    }
+
+    var authOk = await ensureUserAuthOrNotify();
+    if (!isCurrentDeepSend()) return;
+    if (!authOk) { releaseDeepPreflightLock(); return; }
+
+    function resetSendingIfCurrent() {
+      if (!isCurrentDeepSend()) return;
+      if (dtFetchTimeoutTimer) { clearTimeout(dtFetchTimeoutTimer); dtFetchTimeoutTimer = null; }
+      if (S._dtFetchTimeoutTimer) { clearTimeout(S._dtFetchTimeoutTimer); S._dtFetchTimeoutTimer = null; }
+      var finishedController = S._dtAbortController;
+      if (S.deepThinkJob === finishedController) S.deepThinkJob = null;
+      S._dtAbortController = null;
+      S.deepThinkProgressCard = null;
+      S._dtSending = false;
+      S._dtCurrentReqId = null;
+      if (!S.sending) S.paused = false;
+      resetActiveRenderersByChannel('deep');
+      var dtPB = document.getElementById('dtPauseBtn');
+      if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '暂停'; }
+    }
+
+    // 显示暂停按钮
+    var dtPauseBtn = document.getElementById('dtPauseBtn');
+    if (dtPauseBtn) { dtPauseBtn.style.display = ''; dtPauseBtn.textContent = '暂停'; }
+
+    // 1. 追加 user 消息（手动创建 .dt-msg.user，不使用气泡）
+    var empty = dtMessagesEl.querySelector('.dt-empty');
+    if (empty) { try { empty.remove(); } catch (e) {} }
+    var userNode = el('div', { class: 'dt-msg user' });
+    userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+    var userContent = el('div', { class: 'dt-msg-content' });
+    // 渲染 markdown (包含图片 data URL 或文件占位)
+    // ★ 2026-09-26（审计 AI 前端 P2-5）：不再委托给可变的 window.renderMarkdown。
+    //   该全局全仓库从未被赋值，任何第三方脚本把它改成 `s => s` 就能让用户消息原样
+    //   进入 innerHTML（存储型/反射型 XSS）。这里固定使用本模块内的 renderMarkdown
+    //   （escape-first + 协议白名单），只做函数判型兜底。
+    var renderFn = (typeof renderMarkdown === 'function') ? renderMarkdown
+      : ((typeof window.renderMarkdown === 'function') ? window.renderMarkdown : function (s) { return escapeHtml(String(s || '')); });
+    userContent.innerHTML = renderFn(displayText);
+    userNode.appendChild(userContent);
+    dtMessagesEl.appendChild(userNode);
+    scrollToBottom(dtMessagesEl, true);
+
+    // 2. 创建进度卡
+
+    // ===== Tavily Deep Research: 研究型问题优先走 Tavily 多 agent 深入研究 =====
+    // 后端已启用 Tavily (config.tavily_research.enabled) 且消息长度 >= 6 时,
+    // 优先走 /api/agent/research/stream SSE 研究流程; 失败时回退到下方原有 deep think 流程。
+    // 注: S.deepThink 在独立二级页面架构下恒为 false (深入研究已迁至独立页面, 见 toggleDeepThink),
+    //     此处位于深入研究页发送函数内, 即代表深入研究模式。
+    if (S.tavilyResearchEnabled && !fileData && originalUserText.length >= 6) {
+      // 3a. 清空输入框 (Tavily 流程先行; 回退时下方 step 3 会再清一次, 无副作用)
+      input.value = '';
+      input.style.height = 'auto';
+      if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
+      else { try { input.focus(); } catch (e2) {} }
+
+      var tavilyOutcome;
+      // ★ 修复: Tavily 深入研究同样消耗每日第三方搜索次数。超限时不发起研究请求，
+      //   直接回退到下方深入研究流程（与 Tavily 流程失败时的行为一致）。
+      if (S.quota && searchQuotaExhausted(S.quota)) {
+        notify('今日网页搜索次数已达上限，开通 Pro 可无限搜索');
+        tavilyOutcome = 'fallback';
+      } else {
+        try {
+          tavilyOutcome = await runTavilyResearchFlow({
+            messagesEl: dtMessagesEl,
+            text: text,
+            originalUserText: originalUserText,
+            fileData: fileData,
+            reqId: reqId,
+            model: S.dtResearchMode || 'pro',
+            mode: 'hybrid',
+            rewrite: true
+          });
+        } catch (eTavily) {
+          console.warn('[AI] Tavily research flow error, fallback to deep think:', eTavily && eTavily.message);
+          tavilyOutcome = 'fallback';
+        }
+      }
+      if (tavilyOutcome !== 'fallback') {
+        // 成功 / 取消 / 超时: Tavily 流程已收尾, 结束本次发送
+        resetSendingIfCurrent();
+        if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+        updateInputMetrics();
+        scrollToBottom(dtMessagesEl, false);
+        return;
+      }
+      // 回退: Tavily 研究卡已移除, 继续下方原有 deep think 流程 (step 2 会新建进度卡)
+    }
+
+    var progressCard = buildDeepThinkProgressCard({
+      variant: 'research',
+      cancelFn: function() { cancelDeepThink(S.dtConversationId); },
+      retryFn: function() { handleDeepThinkPageSend(originalUserText, fileData); }
+    });
+    progressCard.classList.add('dt-animate-in');
+    S.deepThinkProgressCard = progressCard;
+    dtMessagesEl.appendChild(progressCard);
+    scrollToBottom(dtMessagesEl, true);
+
+    // 3. 清空输入框
+    input.value = '';
+    input.style.height = 'auto';
+    if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
+    else { try { input.focus(); } catch (e2) {} }
+
+    // 4. 创建 AbortController
+    var controller = new AbortController();
+    // ★ 修复：深页 controller 存独立通道，不再覆盖普通聊天的 S.abortController
+    S._dtAbortController = controller;
+    S.deepThinkJob = controller;
+    S.currentStreamAborted = false;
+    // 深入研究 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
+    // 请求可无限挂起。这里加 300s 绝对超时兜底（后端最长 5 分钟思考，
+    // 此前 120s 会在后端完成前被前端掐断。超时只 abort 本次，不清理全局状态）。
+    var dtFetchTimeoutTimer = setTimeout(function() {
+      if (!isCurrentDeepSend()) return;
+      try { controller.abort('timeout'); } catch (e) {}
+      controller._abortReason = 'timeout';
+    }, 300000);
+    S._dtFetchTimeoutTimer = dtFetchTimeoutTimer;
+    if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
+
+    var url = API_BASE + '/chat';
+    var auth;
+    try {
+      auth = await getUserAuthPayload({ forceNoToken: false });
+    } catch (eDeepAuth) {
+      if (isCurrentDeepSend()) {
+        notify('认证服务暂时不可用，请稍后重试');
+        resetSendingIfCurrent();
+      }
+      return;
+    }
+    if (!isCurrentDeepSend() || controller.signal.aborted) {
+      if (isCurrentDeepSend()) resetSendingIfCurrent();
+      else if (dtFetchTimeoutTimer) { clearTimeout(dtFetchTimeoutTimer); if (S._dtFetchTimeoutTimer === dtFetchTimeoutTimer) S._dtFetchTimeoutTimer = null; }
+      return;
+    }
+    var headers = auth.headers || {};
+    var fetchBody = JSON.stringify({
+      message: text,
+      conversation_id: S.dtConversationId,
+      client_request_id: reqId,
+      deep_think: true,
+      chat_mode: 'deep_think',
+      thinking_mode: dtSettings.effort,
+      // Omit the field for ordinary messages so the server's response cache
+      // remains eligible; an empty attachments array is truthy in JS.
+      attachments: attachmentPayload || undefined,
+      web_search: dtSettings.webSearch,
+      model: dtSettings.model
+    });
+
+    var aborted = false;
+    var aiContent = '';
+    var finalMeta = null;
+    var finalModel = '';
+    var finalThinkingMode = dtSettings.effort;
+    var streamConvId = null;
+    // P5: using assistantNode (single DOM node)
+    var contentRenderer = null;
+    var answerRenderer = null;
+    var answerStarted = false;
+    var doneReceived = false;
+    var evtHandled = false;
+
+    function safeRemoveProgressCard(removeNode) {
+      if (!progressCard) return;
+      if (isResearchCard(progressCard)) {
+        try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
+        try { progressCard._done = true; } catch (e2) {}
+        if (removeNode && progressCard.parentNode) {
+          try { progressCard.remove(); } catch (e3) {}
+        }
+        return;
+      }
+      try { progressCard.classList.add('ai-progress-card-done'); } catch (e4) {}
+      try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e5) {}
+      if (removeNode !== false) {
+        try { progressCard.remove(); } catch (e6) {}
+      }
+      try { progressCard._done = true; } catch (e7) {}
+    }
+
+    function removeLastDtUserMessage() {
+      var nodes = dtMessagesEl.querySelectorAll('.dt-msg.user');
+      if (nodes && nodes.length) {
+        try { nodes[nodes.length - 1].remove(); } catch (e) {}
+      }
+      if (!dtMessagesEl.querySelector('.dt-msg') && !dtMessagesEl.querySelector('.ai-think-card') && !dtMessagesEl.querySelector('.ai-progress-card')) {
+        resetDeepThinkPageEmpty();
+      }
+    }
+
+    function ensureThinkCardNode() {
+      if (r && r.value) return r.value;
+      if (isResearchCard(progressCard)) {
+        if (r) r.value = progressCard;
+        return progressCard;
+      }
+      safeRemoveProgressCard();
+      var node = el('div', { class: 'ai-think-card expanded generating dt-simple-card' });
+      node.innerHTML =
+        '<div class="ai-think-header">' +
+          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
+          '<span class="ai-think-title">思考中...</span>' +
+          '<span class="ai-think-meta"></span>' +
+        '</div>' +
+        '<div class="ai-think-body">' +
+          '<div class="ai-think-thinking-body"></div>' +
+          '<div class="ai-think-answer"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
+      dtMessagesEl.appendChild(node);
+      if (r) r.value = node;
+      scrollToBottom(dtMessagesEl, true);
+      return node;
+    }
+
+    function finishThinkCard(node, content, evt) {
+      if (isResearchCard(node) && node._researchState &&
+          (node._researchState.state === 'timeout' || node._researchState.state === 'interrupted' || node._researchState.state === 'cancelled')) return;
+      if (node) node.classList.remove('generating');
+      if (node) node.classList.add('done');
+
+      var searchCount = evt ? (evt.search_count || 0) : 0;
+      var searchQuery = evt ? (evt.search_query || '') : '';
+      var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
+      var usage = evt && evt.usage ? evt.usage : null;
+      var agentCount = evt && evt.agent_count ? evt.agent_count : 0;
+      var thinkingLog = evt && Array.isArray(evt.thinking_log) && evt.thinking_log.length ? evt.thinking_log : (node._thinkingLog || []);
+      if (!thinkingLog.length && evt && evt.reasoning) thinkingLog = [{agent_role:'模型思考',chunk:evt.reasoning}];
+      var thinkDurationMs = evt && typeof evt.think_duration_ms === 'number' ? evt.think_duration_ms : 0;
+
+      if (node) {
+        var contentForRender = content || '';
+        var answerEl = node.querySelector('.ai-think-answer');
+        function finalizeAnswer() {
+          setupBubbleCopy(answerEl, dtMessagesEl);
+        }
+        if (answerEl) {
+          if (answerRenderer) {
+            answerRenderer.finish(contentForRender);
+            answerRenderer = null;
+            finalizeAnswer();
+          } else {
+            if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
+            answerEl.innerHTML = '';
+            contentRenderer = createSmoothTextRenderer(answerEl, {
+              channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100,
+              onDone: function() { finalizeAnswer(); }
+            });
+            contentRenderer.append(contentForRender);
+            contentRenderer.finish(contentForRender);
+            contentRenderer = null;
+          }
+        }
+
+        var mergedLog = [];
+        for (var tli = 0; tli < thinkingLog.length; tli++) {
+          var mtl = thinkingLog[tli];
+          var mlast = mergedLog[mergedLog.length - 1];
+          if (mlast && mlast.agent_role === (mtl.agent_role || 'AI') && mlast.round === (mtl.round || 0)) {
+            mlast.chunk = (mlast.chunk || '') + (mtl.chunk || '');
+          } else {
+            mergedLog.push({ agent_role: mtl.agent_role || 'AI', chunk: mtl.chunk || '', round: mtl.round || 0 });
+          }
+        }
+
+        var thinkLogBox = node.querySelector('.ai-think-thinking-body');
+        var detailsEl = node.querySelector('.ai-think-thinking');
+        var summaryTextEl = node.querySelector('.ai-thinking-summary-text');
+        if (detailsEl) detailsEl.style.display = mergedLog.length || (thinkLogBox && thinkLogBox.children.length) ? '' : 'none';
+        if (thinkLogBox && mergedLog.length > 0) {
+          thinkLogBox.innerHTML = '';
+          mergedLog.forEach(function(entry) {
+            var entEl = el('div', { class: 'ai-thought-entry' });
+            var roleLabel = entry.agent_role || 'AI';
+            var roundLabel = entry.round ? ' · 第' + entry.round + '轮' : '';
+            entEl.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + escapeHtml(roundLabel) + '</div><div class="ai-thought-chunk"></div>';
+            entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
+            thinkLogBox.appendChild(entEl);
+          });
+        }
+        if (summaryTextEl) summaryTextEl.textContent = '查看思考过程 (' + (mergedLog.length || (thinkLogBox && thinkLogBox.children.length) || 0) + ' 步)';
+
+        var footer = node.querySelector('.ai-msg-footer');
+        if (footer) {
+          footer.innerHTML = '';
+          footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
+          footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
+          if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
+          if (searchCount > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已研究 ' + searchCount + ' 个来源' }));
+          if (usage || finalModel) {
+            var usageLine = buildUsageLine(Object.assign({}, usage || {}, { model: finalModel, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount }));
+            if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
+          }
+        }
+
+        if (searchResults && searchResults.length > 0 && searchQuery) {
+          var refs = isResearchCard(node) ? ensureResearchCardRefs(node) : null;
+          if (refs && refs.searchBox && refs.searchBox.parentNode) {
+            try { refs.searchBox.parentNode.removeChild(refs.searchBox); } catch (e2) {}
+            refs.searchBox = null;
+          }
+          var searchBox = document.createElement('div');
+          searchBox.className = 'ai-search-supplement';
+          var searchHtml = '研究来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果)<br>';
+          var shownResults = searchResults.slice(0, 5);
+          for (var si = 0; si < shownResults.length; si++) {
+            var sr = shownResults[si];
+            var safeSrUrl2 = safeSearchUrl(sr.url);
+            if (safeSrUrl2 && sr.title) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl2) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title) + '</a><br>';
+            else if (safeSrUrl2) searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(safeSrUrl2) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(safeSrUrl2) + '</a><br>';
+          }
+          if (searchResults.length > 5) searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 条来源</span>';
+          searchBox.innerHTML = searchHtml;
+          var thinkBody = node.querySelector('.ai-think-body');
+          if (thinkBody) {
+            answerEl = node.querySelector('.ai-think-answer');
+            if (answerEl) thinkBody.insertBefore(searchBox, answerEl);
+            else thinkBody.appendChild(searchBox);
+          }
+          if (refs) refs.searchBox = searchBox;
+        }
+
+        if (isResearchCard(node)) {
+          node._researchState.durationMs = thinkDurationMs || node._researchState.elapsedMs || 0;
+          node._researchState.agentCount = agentCount;
+          node._researchState.searchCount = searchCount;
+          setResearchCardState(node, 'done', {
+            durationMs: node._researchState.durationMs,
+            agentCount: agentCount,
+            searchCount: searchCount,
+            expanded: false
+          });
+        } else {
+          var durationSec = Math.round(thinkDurationMs / 1000);
+          var min = Math.floor(durationSec / 60);
+          var sec = durationSec % 60;
+          var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
+          var titleEl = node.querySelector('.ai-think-title');
+          var metaEl = node.querySelector('.ai-think-meta');
+          if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 已思考 ' + durationStr;
+          if (metaEl) metaEl.textContent = '';
+          if (detailsEl) detailsEl.open = false;
+        }
+      }
+    }
+    try {
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: fetchBody,
+        signal: controller.signal
+      });
+      if (!resp.ok) {
+        try {
+          var rawErrText = await resp.text().catch(function(){ return ''; });
+          var ej = null;
+          if (rawErrText) {
+            try { ej = JSON.parse(rawErrText); } catch (parseErr) {
+              console.warn('[AI] Non-JSON error response', { status: resp.status, contentType: resp.headers.get('content-type'), bodyPreview: rawErrText.slice(0, 200) });
+            }
+          }
+          if (S._dtCurrentReqId !== reqId) return;
+          if (isResearchCard(progressCard)) markResearchCardOutcome(progressCard, 'interrupted', String((ej&&ej.error) || ('AI 失败 (' + resp.status + ')')));
+          else { safeRemoveProgressCard(); notify(String((ej&&ej.error)||('AI 失败 ('+resp.status+')'))); }
+        } catch(e){}
+        resetSendingIfCurrent(); return;
+      }
+      if (!resp.body) {
+        if (isResearchCard(progressCard)) markResearchCardOutcome(progressCard, 'interrupted', 'AI 没有响应');
+        else { safeRemoveProgressCard(); notify('AI 没有响应'); }
+        resetSendingIfCurrent(); return;
+      }
+
+      var reader = resp.body.getReader();
+      var r = { value: null }, c = { value: '' }, fm = {}, fmod = { value: '' }, ft = { value: S.deepThinkEffort || 'max' };
+      var ar = { value: null }, cr = { value: null }, as = { value: false }, dr = { value: false }, eh = { value: false };
+      var sc = { value: null }, ab = { value: false };
+      var sseResult = await processDeepThinkSSE({
+        reader: reader, controller: controller, progressCard: progressCard, reqId: reqId,
+        aiNodeRef: r, aiContentRef: c, finalMetaRef: fm, finalModelRef: fmod, finalThinkingModeRef: ft,
+        answerRendererRef: ar, contentRendererRef: cr, answerStartedRef: as, doneReceivedRef: dr, evtHandledRef: eh,
+        streamConvIdRef: sc, abortedRef: ab, messagesEl: dtMessagesEl, scrollEl: dtMessagesEl,
+        defaultThinkingMode: S.deepThinkEffort || 'max',
+        onAnswerStart: function(node) {
+          if (!isResearchCard(node)) return;
+          node._researchState.durationMs = node._researchState.elapsedMs || (Date.now() - (node._researchState.startedAt || Date.now()));
+          setResearchCardState(node, 'responding', {
+            durationMs: node._researchState.durationMs,
+            expanded: false
+          });
+        },
+        onErrorNoContent: function() { removeLastDtUserMessage(); restoreInputText(); },
+        onSuccess: function() { consumeAiAttachment(fileData); },
+        onResetSending: resetSendingIfCurrent
+      });
+      if (sc.value && S.dtLifecycleId === dtLifecycle && S._dtSendSeq === dtSendToken && !(dtPanel && dtPanel._dtClosed) && !ab.value) {
+        S.dtConversationId = sc.value; saveDtConvId();
+      }
+      if (sseResult && sseResult.timedOut && isResearchCard(progressCard)) {
+        safeRemoveProgressCard(false);
+        preserveResearchAnswer(progressCard, c.value);
+        resetSendingIfCurrent();
+        return;
+      }
+      if (S._dtCurrentReqId !== reqId || ab.value) {
+        if (ab.value && isResearchCard(progressCard)) {
+          // ★ 修复：120s 绝对超时中止时标记卡片状态，避免卡在"深入研究中"
+          if (controller && controller._abortReason === 'timeout' && progressCard._researchState.state !== 'cancelled') {
+            markResearchCardOutcome(progressCard, 'timeout', '思考超时，请重试');
+          }
+          safeRemoveProgressCard(false);
+          if (ar.value) try { ar.value.cancel(); } catch(e){}
+          resetSendingIfCurrent();
+          return;
+        }
+        safeRemoveProgressCard();
+        if (ar.value) try { ar.value.cancel(); } catch(e){}
+        if (r.value) try { r.value.remove(); } catch(e){}
+        resetSendingIfCurrent();
+        return;
+      }
+      safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
+      if (progressCard) try { progressCard._done = true; } catch(e){}
+      if (!eh.value) {
+        if (r.value && c.value) { finishThinkCard(r.value, c.value, fm.value); }
+        else if (!dr.value && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
+        else if (!dr.value) {
+          if (isResearchCard(progressCard)) {
+            preserveResearchAnswer(progressCard, c.value);
+            markResearchCardOutcome(progressCard, 'interrupted', '研究失败，请重试');
+          } else {
+            removeLastDtUserMessage();
+            restoreInputText();
+            notify('AI 暂时没有回应');
+          }
+        }
+      }
+    } catch (fetchErr) {
+      if (S._dtCurrentReqId !== reqId) { safeRemoveProgressCard(); return; }
+      safeRemoveProgressCard(isResearchCard(progressCard) ? false : undefined);
+      if (progressCard) try { progressCard._done = true; } catch(e){}
+      if (fetchErr && fetchErr.name !== 'AbortError') {
+        if (isResearchCard(progressCard)) {
+          preserveResearchAnswer(progressCard, c.value);
+          markResearchCardOutcome(progressCard, 'interrupted', '研究失败，请重试');
+        }
+        if (c && c.value && !isResearchCard(progressCard)) { if (!r.value) ensureThinkCardNode(); r.value.appendChild(el('div',{class:'ai-error-note'},'连接中断')); finishThinkCard(r.value, c.value, fm.value); }
+        else if (!isResearchCard(progressCard)) { removeLastDtUserMessage(); restoreInputText(); notify('网络异常'); }
+      } else {
+        // 120s 绝对超时（fetch 阶段被 abort）：标记超时状态并提示
+        var dtTimeoutAbort = !!(controller && controller._abortReason === 'timeout');
+        if (isResearchCard(progressCard)) {
+          preserveResearchAnswer(progressCard, c.value);
+          if (progressCard._researchState.state !== 'cancelled') {
+            markResearchCardOutcome(progressCard, dtTimeoutAbort ? 'timeout' : 'interrupted', dtTimeoutAbort ? '思考超时，请重试' : '本次研究已中断，请重试');
+          }
+        } else if (c && c.value) { if (!r.value) ensureThinkCardNode(); finishThinkCard(r.value, c.value, fm.value); }
+        else if (!isResearchCard(progressCard)) { removeLastDtUserMessage(); }
+        if (dtTimeoutAbort) notify('思考超时，请重试');
+      }
+    }
+    resetSendingIfCurrent();
+    if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+    updateInputMetrics();
+    scrollToBottom(dtMessagesEl, false);
+  }
+
+  var _dtListeners = []; // 存储事件监听引用用于清除
+
+  function bindDeepThinkPageEvents() {
+    var backBtn = document.getElementById('dtBackBtn');
+    var newBtn = document.getElementById('dtNewChatBtn');
+    var delBtn = document.getElementById('dtDeleteChatBtn');
+    var sendBtn = document.getElementById('dtSendBtn');
+    var pauseBtn = document.getElementById('dtPauseBtn');
+    var input = document.getElementById('dtInput');
+    var fileBtn = document.getElementById('dtFileBtn');
+    var fileInput = document.getElementById('dtFileInp');
+    var filePreview = document.getElementById('dtFilePreview');
+
+    // 清除之前的监听器（防止重复绑定泄漏）
+    _dtListeners.forEach(function(fn) { try { fn(); } catch (e) {} });
+    _dtListeners = [];
+
+    function addDtListener(el, event, handler) {
+      if (!el) return;
+      el.addEventListener(event, handler);
+      _dtListeners.push(function() { el.removeEventListener(event, handler); });
+    }
+
+    function dtDoSend() {
+      var text = String(input.value || '').trim();
+      var fData = _dtFileData;
+      if (!text && !fData) return;
+      var totalLen = text.length + (fData ? (fData.type.startsWith('image/') ? 0 : fData.dataUrl.length) : 0);
+      if (totalLen > 50000) { notify('消息过长，最多 50000 字符'); return; }
+      if (fData) {
+        fData.onSuccess = function() {
+          if (_dtFileData !== fData) return;
+          _dtFileData = null;
+          if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+          if (fileInput) fileInput.value = '';
+        };
+      }
+      handleDeepThinkPageSend(text, fData);
+    }
+
+    // 文件上传（按钮选择 / 粘贴 / 拖拽）
+    function clearDtFilePreview() {
+      _dtFileSelectionSeq += 1;
+      _dtFileData = null;
+      if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+      if (fileInput) fileInput.value = '';
+    }
+    function acceptDtFile(rawFile) {
+      var fileSeq = ++_dtFileSelectionSeq, fileLife = S.dtLifecycleId, fileCid = S.dtConversationId, fileOwner = window.currentUser || '', fileAuthEpoch = window._authStateEpoch || 0;
+      readAiAttachmentFile(rawFile, function(fileData) {
+        if (fileSeq !== _dtFileSelectionSeq || fileLife !== S.dtLifecycleId || fileCid !== S.dtConversationId || fileOwner !== (window.currentUser || '') || fileAuthEpoch !== (window._authStateEpoch || 0) || !document.getElementById('panelDeepThink') || document.getElementById('panelDeepThink')._dtClosed) return;
+        _dtFileData = { name: fileData.name, type: fileData.type, dataUrl: fileData.dataUrl };
+        if (filePreview) renderAiFilePreview(filePreview, fileData, clearDtFilePreview);
+      }, { sizeMsg: '文件不能超过 50MB（data URL 编码后）' });
+    }
+    if (fileBtn && fileInput) {
+      addDtListener(fileBtn, 'click', function() { fileInput.click(); });
+      addDtListener(fileInput, 'change', function() {
+        var f = this.files && this.files[0];
+        if (!f) return;
+        if (!isSupportedAiFile(f)) { notify('不支持该文件'); this.value = ''; return; }
+        acceptDtFile(f);
+      });
+    }
+    // Deep-think input area: paste image + drag-drop onto the composer row.
+    var dtInputArea = document.querySelector('#panelDeepThink .dt-input-bar') || (input && input.parentElement);
+    if (dtInputArea || input) {
+      var unbindPasteDrop = bindAiComposerPasteDrop([dtInputArea, input].filter(Boolean), acceptDtFile);
+      if (typeof unbindPasteDrop === 'function') _dtListeners.push(unbindPasteDrop);
+    }
+
+    if (backBtn) addDtListener(backBtn, 'click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeDeepThinkPage();
+    });
+
+    if (newBtn) addDtListener(newBtn, 'click', async function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (S._dtSending || S._dtCreating || S._dtDeleting) { notify('正在处理当前对话，请稍候'); return; }
+      S._dtCreating = true;
+      var createLife = S.dtLifecycleId, createCid = S.dtConversationId;
+      var owner = window.currentUser || '', epoch = window._authStateEpoch || 0;
+      var createSeq = S._dtCreateSeq = (S._dtCreateSeq || 0) + 1;
+      function current() { return createSeq === S._dtCreateSeq && createLife === S.dtLifecycleId && createCid === S.dtConversationId &&
+        owner === (window.currentUser || '') && epoch === (window._authStateEpoch || 0); }
+      newBtn.disabled = true;
+      try {
+        var r = await apiRequest('POST', '/chat/new', null);
+        if (!current()) return;
+        if (r && r.ok && r.data && r.data.conversation_id) {
+        // A new research conversation must not inherit a pending attachment
+        // from the previous one.
+        _dtFileData = null;
+        if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+        if (fileInput) fileInput.value = '';
+        resetResearchCardDisclosure(document.getElementById('dtMessages'));
+        resetDeepThinkPageEmpty();
+
+          S.dtConversationId = r.data.conversation_id;
+          saveDtConvId();
+        } else notify(describeError(r, '创建新会话失败'));
+      } catch (e) {
+        if (current()) notify('创建新会话失败');
+      } finally {
+        if (createSeq === S._dtCreateSeq) S._dtCreating = false;
+        if (newBtn.isConnected) newBtn.disabled = false;
+      }
+    });
+
+    if (delBtn) addDtListener(delBtn, 'click', async function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!S.dtConversationId || S._dtSending || S._dtCreating || S._dtDeleting) return;
+      if (!confirm('确定删除当前深入研究会话吗？删除后不可恢复。')) return;
+      S._dtDeleting = true;
+      var deleteLife = S.dtLifecycleId, deleteCid = S.dtConversationId;
+      var deleteOwner = window.currentUser || '', deleteEpoch = window._authStateEpoch || 0;
+      function currentDelete() { return deleteLife === S.dtLifecycleId && deleteCid === S.dtConversationId &&
+        deleteOwner === (window.currentUser || '') && deleteEpoch === (window._authStateEpoch || 0); }
+      delBtn.disabled = true;
+      try {
+        var dr = await apiRequest('POST', '/chat/delete', { conversation_id: S.dtConversationId });
+        if (!currentDelete()) return;
+        if (dr && dr.ok) {
+          S.dtConversationId = null;
+          saveDtConvId();
+          resetResearchCardDisclosure(document.getElementById('dtMessages'));
+          resetDeepThinkPageEmpty();
+          var r2 = await apiRequest('POST', '/chat/new', null);
+          if (deleteLife !== S.dtLifecycleId || deleteOwner !== (window.currentUser || '') || deleteEpoch !== (window._authStateEpoch || 0)) return;
+          if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
+            S.dtConversationId = r2.data.conversation_id;
+            saveDtConvId();
+          }
+        } else {
+          notify('删除失败');
+        }
+      } catch (e) {
+        notify('删除失败');
+      } finally {
+        if (deleteLife === S.dtLifecycleId) S._dtDeleting = false;
+        if (delBtn.isConnected) delBtn.disabled = false;
+      }
+    });
+
+    if (sendBtn) addDtListener(sendBtn, 'click', dtDoSend);
+
+    // 暂停按钮：真正中止（取消）SSE 请求 + 暂停渲染
+    if (pauseBtn) {
+      addDtListener(pauseBtn, 'click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (!S.sending && !S.paused) return;
+        var anyPaused = S.activeRenderers && S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
+        if (anyPaused) {
+          if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
+          S.paused = false;
+          pauseBtn.textContent = '暂停';
+        } else {
+          // H-24: 只暂停渲染器，不中止 SSE 请求 / deepThinkJob（中止会永久丢失回复）
+          if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
+          S.paused = true;
+          pauseBtn.textContent = '继续';
+        }
+      });
+    }
+
+    if (input) {
+      addDtListener(input, 'keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+          e.preventDefault();
+          dtDoSend();
+        }
+      });
+      addDtListener(input, 'input', function() {
+        try {
+          input.style.height = 'auto';
+          input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+        } catch (e) {}
+      });
+    }
+
+    // 深入研究页面滚动监听：用户向上翻时停止自动滚动
+    var dtMessagesEl = document.getElementById('dtMessages');
+    if (dtMessagesEl) {
+      addDtListener(dtMessagesEl, 'scroll', function() {
+        S.autoScrollPinned = isNearBottom(dtMessagesEl, 84);
+      });
+    }
+  }
+
+  function openAiSearchTarget(item) {
+    var target = item && item.jump_target || {};
+    var closeSecondary = function() {
+      try { closeSiteSearch(); } catch (e) {}
+      try { closeAiChat(); } catch (e2) {}
+    };
+    var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if ((target.type === 'post' || target.type === 'comment') && typeof window.openPostDetail === 'function') {
+      // validate: source must be posts, source_id must be valid UUID
+      if (item.source !== 'posts') {
+        console.warn('[site-search] blocked invalid post result', { source: item.source, source_id: item.source_id });
+        return;
+      }
+      // ★ 修复：comment 类型同样要求 posts 来源 + UUID，防止伪造跳转目标越权打开任意帖子详情
+      var postId = String(target.post_id || item.source_id || '');
+      if (!UUID_RE.test(postId)) {
+        console.warn('[site-search] blocked invalid post_id', postId);
+        return;
+      }
+      closeSecondary();
+      window.openPostDetail(postId);
+    } else if (target.type === 'photo' && target.image_url && typeof window.openPhotoPreview === 'function') {
+      // ★ 修复：photo 类型校验来源与 id 格式，避免越权预览
+      var photoId = String(target.post_id || item.source_id || '');
+      if ((item.source !== 'posts' && item.source !== 'photos') || !photoId) {
+        console.warn('[site-search] blocked invalid photo result', { source: item.source, source_id: photoId });
+        return;
+      }
+      closeSecondary();
+      window.openPhotoPreview(0, { photos: [{ id: photoId, cloudId: target.post_id || null, imageUrl: target.image_url, thumbUrl: target.image_url, username: target.user_name || '', timestamp: item.created_at || '', content: item.snippet || '' }] });
+    } else if (target.type === 'photo' && typeof window.openPostDetail === 'function') {
+      var photoPostId = String(target.post_id || item.source_id || '');
+      if (item.source !== 'posts' || !UUID_RE.test(photoPostId)) {
+        console.warn('[site-search] blocked invalid photo post result', { source: item.source, source_id: photoPostId });
+        return;
+      }
+      closeSecondary();
+      window.openPostDetail(photoPostId);
+    } else if (target.type === 'dm' && typeof window.openChat === 'function') {
+      // ★ 修复：dm 跳转必须有明确的会话对象，空 user 直接拦截
+      if (!target.user || typeof target.user !== 'string') {
+        console.warn('[site-search] blocked invalid dm target', target);
+        return;
+      }
+      closeSecondary();
+      window.openChat(target.user);
+    } else if (target.type === 'ai_history' && window.__xtjAiAgent && typeof window.__xtjAiAgent.openConversation === 'function') {
+      if (!target.conversation_id) {
+        console.warn('[site-search] blocked invalid ai_history target', target);
+        return;
+      }
+      try { closeSiteSearch(); } catch (e3) {}
+      window.__xtjAiAgent.openConversation(target.conversation_id, target.mode);
+    } else if (target.type === 'user' && typeof window.openUserProfile === 'function') {
+      var userName = target.user_name || item.title || '';
+      if (!userName || typeof userName !== 'string') {
+        console.warn('[site-search] blocked invalid user target', target);
+        return;
+      }
+      closeSecondary();
+      window.openUserProfile(userName);
+    }
+  }
+
+  function buildAiSearchMeta(item) {
+    var meta = [];
+    if (item && item.source) meta.push(String(item.source));
+    if (item && item.created_at) {
+      var created = window.safeParseDate(item.created_at);
+      if (!isNaN(created.getTime())) meta.push(created.toLocaleString('zh-CN'));
+    }
+    if (item && Array.isArray(item.matched_keywords) && item.matched_keywords.length) meta.push('匹配：' + item.matched_keywords.slice(0, 3).join('、'));
+    if (item && typeof item.relevance === 'number' && item.relevance > 0) meta.push('相关度 ' + Math.round(item.relevance * 100) + '%');
+    return meta.join(' · ');
+  }
+
+  function renderAiToolCard(messagesEl, card, insertBeforeNode) {
+    if (!messagesEl || !card || card.protocol !== 'xtj.ai.ui.v1') return null;
+    if (card.type === 'web_search') {
+      // Older history can contain only a structured search card. Keep its sources compact.
+      var searchSteps = messagesEl.querySelectorAll('.ai-tool-step');
+      for (var si = 0; si < searchSteps.length; si++) {
+        var searchStep = searchSteps[si];
+        if (card.tool_call_id ? searchStep.getAttribute('data-tool-call-id') === String(card.tool_call_id) : TOOL_WEBSEARCH_KINDS[searchStep.getAttribute('data-tool-name')]) {
+          if (searchStep.querySelector('.ai-tool-result-card')) return null;
+        }
+      }
+      if (messagesEl.querySelector('.ai-search-status')) return null;
+    }
+    var cardId = String(card.id || '');
+    if (!messagesEl.__xtjAiCardIds) messagesEl.__xtjAiCardIds = {};
+    if (cardId && messagesEl.__xtjAiCardIds[cardId]) return null;
+    if (cardId) messagesEl.__xtjAiCardIds[cardId] = true;
+    var type = String(card.type || 'tool_result').replace(/[^a-z_]/g, '');
+    var shell = el('section', { class: 'ai-tool-card ai-tool-card--' + type });
+    if (cardId) shell.setAttribute('data-ai-card-id', cardId);
+    shell.appendChild(el('div', { class: 'ai-tool-card-title', text: String(card.title || 'AI 工具结果') }));
+    var data = card.data || {};
+
+    function appendKvGrid(pairs) {
+      var grid = el('div', { class: 'ai-tool-card-kv' });
+      pairs.forEach(function(pair) {
+        if (pair[1] === undefined || pair[1] === null || pair[1] === '') return;
+        var row = el('div', { class: 'ai-tool-card-kv-row' });
+        row.appendChild(el('span', { class: 'ai-tool-card-kv-k', text: pair[0] }));
+        row.appendChild(el('span', { class: 'ai-tool-card-kv-v', text: String(pair[1]) }));
+        grid.appendChild(row);
+      });
+      if (grid.childNodes.length) shell.appendChild(grid);
+    }
+
+    if (type === 'weather') {
+      var tempLine = el('div', { class: 'ai-tool-card-hero' });
+      tempLine.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: (data.temperature_c != null ? data.temperature_c + '°C' : '—') }));
+      tempLine.appendChild(el('span', { class: 'ai-tool-card-hero-sub', text: String(data.condition || data.city || '') }));
+      shell.appendChild(tempLine);
+      appendKvGrid([
+        ['地点', data.city],
+        ['湿度', data.humidity != null ? data.humidity + '%' : ''],
+        ['风速', data.wind_kmh != null ? data.wind_kmh + ' km/h' : ''],
+        ['今日最高', data.high_c != null ? data.high_c + '°C' : ''],
+        ['今日最低', data.low_c != null ? data.low_c + '°C' : ''],
+        ['降雨概率', data.precip_prob != null ? data.precip_prob + '%' : ''],
+        ['更新', data.queried_at]
+      ]);
+    } else if (type === 'exchange_rate') {
+      var rateHero = el('div', { class: 'ai-tool-card-hero' });
+      rateHero.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: data.rate != null ? Number(data.rate).toFixed(4) : '—' }));
+      rateHero.appendChild(el('span', { class: 'ai-tool-card-hero-sub', text: (data.from || '') + ' → ' + (data.to || '') }));
+      shell.appendChild(rateHero);
+      appendKvGrid([
+        ['换算', (data.amount != null ? data.amount : 1) + ' ' + (data.from || '') + ' ≈ ' + (data.converted != null ? data.converted : '—') + ' ' + (data.to || '')],
+        ['更新', data.updated_at]
+      ]);
+    } else if (type === 'stock_quote') {
+      var stockHero = el('div', { class: 'ai-tool-card-hero' });
+      stockHero.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: String(data.price != null ? data.price : '—') }));
+      var chg = String(data.change || '');
+      var chgPct = String(data.change_pct || '');
+      var chgText = (chg ? chg : '') + (chgPct ? ' (' + chgPct + '%)' : '');
+      var chgClass = 'ai-tool-card-hero-sub';
+      if (/^-/.test(chg) || /^-/.test(chgPct)) chgClass += ' is-down';
+      else if (chg && chg !== '0' && chg !== '0.00') chgClass += ' is-up';
+      stockHero.appendChild(el('span', { class: chgClass, text: chgText || String(data.symbol || '') }));
+      shell.appendChild(stockHero);
+      appendKvGrid([
+        ['名称', data.name],
+        ['代码', data.symbol],
+        ['CNY', data.price_cny],
+        ['今开', data.open],
+        ['最高', data.high],
+        ['最低', data.low],
+        ['昨收', data.prev_close],
+        ['时间', data.time]
+      ]);
+    } else if (type === 'time') {
+      appendKvGrid([
+        ['当地时间', data.local_time || data.beijing_time],
+        ['北京时间', data.beijing_time],
+        ['星期', data.weekday],
+        ['时区', data.timezone]
+      ]);
+    } else if (type === 'calculate') {
+      var calcHero = el('div', { class: 'ai-tool-card-hero' });
+      calcHero.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: data.result != null ? String(data.result) : '—' }));
+      calcHero.appendChild(el('span', { class: 'ai-tool-card-hero-sub', text: String(data.expression || '') }));
+      shell.appendChild(calcHero);
+    } else if (type === 'unit_convert') {
+      var unitHero = el('div', { class: 'ai-tool-card-hero' });
+      unitHero.appendChild(el('span', { class: 'ai-tool-card-hero-main', text: data.result != null ? String(data.result) + ' ' + String(data.to_unit || '') : '—' }));
+      unitHero.appendChild(el('span', { class: 'ai-tool-card-hero-sub', text: (data.value != null ? data.value : '') + ' ' + (data.from_unit || '') + ' → ' + (data.to_unit || '') }));
+      shell.appendChild(unitHero);
+      appendKvGrid([
+        ['类别', data.category],
+        ['原值', data.value != null ? data.value + ' ' + (data.from_unit || '') : ''],
+        ['结果', data.result != null ? data.result + ' ' + (data.to_unit || '') : '']
+      ]);
+    } else if (type === 'page_read') {
+      var pageTitle = el('div', { class: 'ai-tool-card-page-title', text: String(data.title || '网页') });
+      shell.appendChild(pageTitle);
+      if (data.url) {
+        var safeHref = '';
+        try {
+          var u = new URL(String(data.url));
+          if (u.protocol === 'https:' || u.protocol === 'http:') safeHref = u.toString();
+        } catch (e) {}
+        if (safeHref) {
+          var link = el('a', {
+            class: 'ai-tool-card-link',
+            href: safeHref,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            text: safeHref.length > 72 ? safeHref.slice(0, 72) + '…' : safeHref
+          });
+          shell.appendChild(link);
+        }
+      }
+      if (data.error && !data.snippet) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-summary ai-tool-card-summary--warn', text: String(data.error).slice(0, 200) }));
+      } else if (data.snippet) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: String(data.snippet).slice(0, 360) }));
+      }
+      var pageMeta = [];
+      if (data.via_jina) pageMeta.push('增强阅读');
+      if (data.truncated) pageMeta.push('正文已截断');
+      if (data.bytes) pageMeta.push((data.bytes > 1024 ? (data.bytes / 1024).toFixed(1) + ' KB' : data.bytes + ' B'));
+      if (pageMeta.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: pageMeta.join(' · ') }));
+    } else if (type === 'image_ocr') {
+      if (data.error && !data.text) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-summary ai-tool-card-summary--warn', text: '未识别到文字：' + String(data.error).slice(0, 200) }));
+      } else {
+        var ocrBody = el('div', { class: 'ai-tool-card-ocr-text' });
+        ocrBody.textContent = String(data.text || '').slice(0, 1200) || '（无文字）';
+        shell.appendChild(ocrBody);
+      }
+      var ocrMeta = el('div', { class: 'ai-tool-card-meta ai-tool-card-ocr-meta' });
+      var metaBits = [];
+      if (data.file_name) metaBits.push(String(data.file_name).slice(0, 48));
+      if (data.chars != null) metaBits.push(data.chars + ' 字');
+      if (data.provider) metaBits.push(String(data.provider));
+      ocrMeta.textContent = metaBits.join(' · ');
+      if (metaBits.length) shell.appendChild(ocrMeta);
+    } else if (type === 'make_file') {
+      var mfName = el('div', { class: 'ai-tool-card-page-title', text: String(data.filename || '数据文件') });
+      shell.appendChild(mfName);
+      var mfMeta = [];
+      if (data.rows != null) mfMeta.push(data.rows + ' 行数据');
+      if (data.format) mfMeta.push(String(data.format).toUpperCase());
+      if (mfMeta.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: mfMeta.join(' · ') }));
+      if (data.data_url) {
+        // ★ 2026-09-15 修复（P1-7）：data: URL 转 Blob 下载
+        shell.appendChild(buildDownloadLink(
+          String(data.data_url),
+          String(data.filename || 'data'),
+          '⬇ 下载 ' + String(data.filename || '文件')
+        ));
+      }
+    } else if (type === 'task_plan') {
+      if (data.goal) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.goal).slice(0, 200) }));
+      }
+      var tpList = el('div', { class: 'ai-tool-card-list' });
+      (Array.isArray(data.steps) ? data.steps : []).slice(0, 12).forEach(function(step, idx) {
+        var tpRow = el('div', { class: 'ai-tool-result' });
+        tpRow.appendChild(el('b', { text: (idx + 1) + '. ' + String(step).slice(0, 160) }));
+        tpList.appendChild(tpRow);
+      });
+      shell.appendChild(tpList);
+    } else if (type === 'make_chart') {
+      // 图表卡片：优先展示栅格化 PNG，回退到内联 SVG
+      if (data.title) shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.title).slice(0, 120) }));
+      var mcWrap = el('div', { class: 'ai-tool-card-chart' });
+      if (data.image) {
+        // ★ 2026-09-26（审计 AI 前端 P2-8）：src 走协议白名单（此前无校验）
+        var mcImgSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(String(data.image)) : '';
+        if (mcImgSrc) {
+          var mcImg = el('img', {
+            class: 'ai-tool-card-chart-img',
+            src: mcImgSrc,
+            alt: String(data.title || data.chart_type || '图表'),
+            loading: 'lazy'
+          });
+          mcWrap.appendChild(mcImg);
+        }
+      } else if (data.svg) {
+        // ★ 2026-09-26（审计 AI 前端 P1-2/P2-4）：放弃"正则黑名单过滤 SVG"。
+        //   黑名单已被证明可绕：未闭合 <foreignObject> 不命中、拼接标签击穿单趟正则、
+        //   href 正则强制要求引号、实体编码 jav&#x61;script: 也不命中。这里改为
+        //   **白名单重建**：DOMParser 解析（XML 文档中的脚本不会执行），只保留
+        //   图表需要的元素/属性，逐个丢弃 on* 与任何 href/xlink:href。
+        var safeSvg = sanitizeSvgMarkup(String(data.svg));
+        if (safeSvg) mcWrap.innerHTML = safeSvg;
+      }
+      if (mcWrap.childNodes.length) shell.appendChild(mcWrap);
+      var mcBits = [];
+      var mcTypeName = { bar: '柱状图', line: '折线图', pie: '饼图', scatter: '散点图' }[String(data.chart_type || '')] || '';
+      if (mcTypeName) mcBits.push(mcTypeName);
+      if (Array.isArray(data.series)) {
+        var mcPt = 0;
+        data.series.forEach(function(s) { if (s && Array.isArray(s.data)) mcPt += s.data.length; });
+        if (mcPt) mcBits.push(mcPt + ' 个数据点');
+      }
+      if (!data.image && data.rasterized === false) mcBits.push('矢量图');
+      if (mcBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: mcBits.join(' · ') }));
+    } else if (type === 'generate_pdf') {
+      // ★ 2026-09-13：中文内容改由后端以 HTML 交付（PDF 内置字体无 CJK 字形），
+      //   卡片需按 format / is_html_delivery 自适应文案与提示，避免用户以为下载到的是 PDF。
+      var gpHtml = data.is_html_delivery === true || String(data.format || '').toLowerCase() === 'html';
+      var gpFallbackName = gpHtml ? '文档.html' : '文档.pdf';
+      shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.filename || gpFallbackName) }));
+      var pdfMeta = [];
+      if (data.bytes) pdfMeta.push(data.bytes > 1048576 ? (data.bytes / 1048576).toFixed(2) + ' MB' : Math.round(data.bytes / 1024) + ' KB');
+      if (data.blocks) pdfMeta.push(data.blocks + ' 个内容块');
+      pdfMeta.push(gpHtml ? 'HTML 文档' : 'PDF');
+      shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: pdfMeta.join(' · ') }));
+      if (data.data_url) {
+        // ★ 2026-09-15 修复（P1-7）：改用 buildDownloadLink，把 data: URL 转 Blob 下载
+        shell.appendChild(buildDownloadLink(
+          String(data.data_url),
+          String(data.filename || gpFallbackName),
+          '⬇ 下载 ' + String(data.filename || (gpHtml ? '文档' : 'PDF 文档'))
+        ));
+      }
+      if (gpHtml) {
+        shell.appendChild(el('div', {
+          class: 'ai-tool-card-meta',
+          text: '提示：下载后用浏览器打开，选择「打印 → 另存为 PDF」即可得到中文 PDF'
+        }));
+      }
+    } else if (type === 'qr_code') {
+      var qcWrap = el('div', { class: 'ai-tool-card-qr' });
+      if (data.image) {
+        qcWrap.appendChild(el('img', {
+          class: 'ai-tool-card-qr-img',
+          src: String(data.image),
+          alt: '二维码',
+          loading: 'lazy'
+        }));
+      }
+      shell.appendChild(qcWrap);
+      if (data.text) shell.appendChild(el('div', { class: 'ai-tool-card-summary ai-tool-card-qr-text', text: String(data.text).slice(0, 300) }));
+      var qcBits = [];
+      if (data.version) qcBits.push('版本 ' + data.version);
+      if (data.format) qcBits.push(String(data.format).toUpperCase());
+      if (qcBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: qcBits.join(' · ') }));
+      if (data.image) {
+        // ★ 审计修复：下载链接的 href 此前直接取服务端字符串，未经协议白名单
+        //   （同文件 page_read/page_meta 分支均已限定协议）。若字段被污染为
+        //   javascript: URI，点击"保存二维码"即执行脚本。现仅放行 https/http
+        //   与 data:image/*。
+        var _qrHrefRaw = String(data.image);
+        var _qrSafeHref = '';
+        if (/^data:image\//i.test(_qrHrefRaw)) {
+          _qrSafeHref = _qrHrefRaw;
+        } else {
+          try {
+            var _qrUrl = new URL(_qrHrefRaw, location.href);
+            if (_qrUrl.protocol === 'https:' || _qrUrl.protocol === 'http:') _qrSafeHref = _qrUrl.href;
+          } catch (e) {}
+        }
+        if (_qrSafeHref) shell.appendChild(el('a', {
+          class: 'ai-tool-card-link',
+          href: _qrSafeHref,
+          download: 'qrcode.' + String(data.format || 'png'),
+          text: '⬇ 保存二维码'
+        }));
+      }
+    } else if (type === 'image_process') {
+      shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.filename || '图片') }));
+      if (data.data_url) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-imgwrap' }).appendChild(el('img', {
+          class: 'ai-tool-card-img',
+          src: String(data.data_url),
+          alt: String(data.filename || '处理后的图片'),
+          loading: 'lazy'
+        })).parentNode);
+      }
+      var ipBits = [];
+      if (data.width && data.height) ipBits.push(data.width + ' × ' + data.height);
+      if (data.format) ipBits.push(String(data.format).toUpperCase());
+      if (data.bytes) ipBits.push(data.bytes > 1048576 ? (data.bytes / 1048576).toFixed(2) + ' MB' : Math.round(data.bytes / 1024) + ' KB');
+      if (data.original_bytes && data.bytes) {
+        var ipDiff = data.original_bytes - data.bytes;
+        ipBits.push(ipDiff >= 0 ? '压缩 ' + Math.round((ipDiff / data.original_bytes) * 100) + '%' : '增大 ' + Math.round((Math.abs(ipDiff) / data.original_bytes) * 100) + '%');
+      }
+      if (ipBits.length) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: ipBits.join(' · ') }));
+      if (data.data_url) {
+        // ★ 2026-09-15 修复（P1-7）：data: URL 转 Blob 下载
+        shell.appendChild(buildDownloadLink(
+          String(data.data_url),
+          String(data.filename || 'image'),
+          '⬇ 下载 ' + String(data.filename || '图片')
+        ));
+      }
+    } else if (type === 'page_meta') {
+      shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.title || data.url || '网页').slice(0, 160) }));
+      if (data.site_name) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: String(data.site_name).slice(0, 80) }));
+      if (data.url) {
+        var pmHref = '';
+        try {
+          var pmU = new URL(String(data.url));
+          if (pmU.protocol === 'https:' || pmU.protocol === 'http:') pmHref = pmU.toString();
+        } catch (ePmU) {}
+        if (pmHref) {
+          shell.appendChild(el('a', {
+            class: 'ai-tool-card-link',
+            href: pmHref,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            text: pmHref.length > 72 ? pmHref.slice(0, 72) + '…' : pmHref
+          }));
+        }
+      }
+      if (data.description) shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: String(data.description).slice(0, 360) }));
+      if (data.image) {
+        var pmImgHref = '';
+        try {
+          var pmIU = new URL(String(data.image), String(data.url || 'https://x/'));
+          if (pmIU.protocol === 'https:' || pmIU.protocol === 'http:') pmImgHref = pmIU.toString();
+        } catch (ePmI) {}
+        if (pmImgHref) {
+          shell.appendChild(el('div', { class: 'ai-tool-card-imgwrap' }).appendChild(el('img', {
+            class: 'ai-tool-card-img',
+            src: pmImgHref,
+            alt: '预览图',
+            loading: 'lazy'
+          })).parentNode);
+        }
+      }
+    } else if (type === 'markdown_table') {
+      var mtRows = Array.isArray(data.rows_data) ? data.rows_data : (Array.isArray(data.rows) ? data.rows : null);
+      if (mtRows && mtRows.length && typeof mtRows[0] === 'object') {
+        var mtHeaders = Array.isArray(data.headers) ? data.headers : Object.keys(mtRows[0]);
+        var mtTable = el('table', { class: 'ai-tool-card-table' });
+        var mtThead = el('thead');
+        var mtHr = el('tr');
+        mtHeaders.forEach(function(h) { mtHr.appendChild(el('th', { text: String(h) })); });
+        mtThead.appendChild(mtHr);
+        mtTable.appendChild(mtThead);
+        var mtTbody = el('tbody');
+        mtRows.slice(0, 100).forEach(function(r) {
+          var tr = el('tr');
+          mtHeaders.forEach(function(h) { tr.appendChild(el('td', { text: String(r[h] === undefined || r[h] === null ? '' : r[h]) })); });
+          mtTbody.appendChild(tr);
+        });
+        mtTable.appendChild(mtTbody);
+        shell.appendChild(mtTable);
+      } else if (data.markdown) {
+        // 退化：直接渲染 Markdown 文本（等宽字体，保留表格视觉）
+        var mtPre = el('pre', { class: 'ai-tool-card-mdtable' });
+        mtPre.textContent = String(data.markdown).slice(0, 8000);
+        shell.appendChild(mtPre);
+      }
+      if (data.rows) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: data.rows + ' 行数据' }));
+    } else if (type === 'web_search' && Array.isArray(data.results)) {
+      if (data.query) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '搜索：' + String(data.query).slice(0, 120) }));
+      }
+      var webList = el('div', { class: 'ai-tool-card-list' });
+      data.results.slice(0, 12).forEach(function(item) {
+        var row = el('div', { class: 'ai-tool-result ai-tool-result--link' });
+        var href = '';
+        try {
+          var wu = new URL(String(item.url || ''));
+          if (wu.protocol === 'https:' || wu.protocol === 'http:') href = wu.toString();
+        } catch (e2) {}
+        if (href) {
+          row.appendChild(el('a', {
+            class: 'ai-tool-result-title-link',
+            href: href,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            text: String(item.title || item.url || '结果').slice(0, 120)
+          }));
+        } else {
+          row.appendChild(el('b', { text: String(item.title || '结果').slice(0, 120) }));
+        }
+        if (item.snippet) row.appendChild(el('span', { text: String(item.snippet).slice(0, 180) }));
+        if (item.source) row.appendChild(el('small', { class: 'ai-tool-result-meta', text: String(item.source) }));
+        webList.appendChild(row);
+      });
+      shell.appendChild(webList);
+    } else if (Array.isArray(data.results)) {
+      var list = el('div', { class: 'ai-tool-card-list' });
+      data.results.slice(0, 20).forEach(function(item) {
+        var result = el('button', { class: 'ai-tool-result', type: 'button' });
+        result.appendChild(el('b', { text: String(item.title || item.source || '结果') }));
+        result.appendChild(el('span', { text: String(item.snippet || '').slice(0, 180) }));
+        var resultMeta = buildAiSearchMeta(item);
+        if (resultMeta) result.appendChild(el('small', { class: 'ai-tool-result-meta', text: resultMeta }));
+        result.addEventListener('click', function() {
+          openAiSearchTarget(item);
+        });
+        list.appendChild(result);
+      });
+      shell.appendChild(list);
+    } else if (data.payload && data.payload.args) {
+      var args = data.payload.args;
+      var summary = [];
+      ['target_user', 'title', 'module', 'severity', 'status', 'content', 'body'].forEach(function(key) {
+        if (args[key]) summary.push(key + '：' + String(args[key]).slice(0, 240));
+      });
+      if (summary.length) shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: summary.join('\n') }));
+    } else if (data.task || data.draft || data.message || data.announcement) {
+      shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: '操作已完成。' }));
+    }
+
+    var compactKinds = { weather:1,time:1,calculate:1,unit_convert:1,exchange_rate:1,stock_quote:1,page_read:1,page_meta:1,task_plan:1,web_search:1 };
+    if (compactKinds[type]) {
+      var resultDetails = el('details', { class:'ai-tool-data-details' });
+      resultDetails.appendChild(el('summary', { text:type === 'web_search' && Array.isArray(data.results) ? '找到 ' + data.results.length + ' 个网页' : '查看数据' }));
+      resultDetails.appendChild(shell);
+      var step = null;
+      var toolNames = { weather:'get_weather',time:'get_current_time',calculate:'calculate',unit_convert:'convert_units',exchange_rate:'get_exchange_rate',stock_quote:'get_stock_quote',page_read:'read_web_page',page_meta:'page_meta',task_plan:'task_plan',web_search:'search_web' };
+      var candidates = messagesEl.querySelectorAll('.ai-tool-step');
+      for (var ci = candidates.length - 1; ci >= 0; ci--) {
+        if (card.tool_call_id ? candidates[ci].getAttribute('data-tool-call-id') === String(card.tool_call_id) : candidates[ci].getAttribute('data-tool-name') === toolNames[type]) { step=candidates[ci];break; }
+      }
+      if (step) step.querySelector('.ai-tool-step-body').appendChild(resultDetails);
+      else if (insertBeforeNode && insertBeforeNode.parentNode) insertBeforeNode.parentNode.insertBefore(resultDetails, insertBeforeNode);
+      else messagesEl.appendChild(resultDetails);
+    } else if (insertBeforeNode && insertBeforeNode.parentNode) {
+      insertBeforeNode.parentNode.insertBefore(shell, insertBeforeNode);
+    } else {
+      messagesEl.appendChild(shell);
+    }
+    try {
+      var scroller = messagesEl && messagesEl.classList && messagesEl.classList.contains('ai-messages')
+        ? messagesEl
+        : (messagesEl && messagesEl.closest && messagesEl.closest('.ai-messages'));
+      if (scroller) scrollToBottom(scroller, false);
+    } catch (eScroll) {}
+    return shell;
+  }
+
+  var AI_SEARCH_SOURCES = ['posts', 'comments', 'photos', 'dm', 'ai_history', 'users'];
+
+  function closeSiteSearch() {
+    var panel = document.getElementById('aiSiteSearchPanel');
+    if (panel) {
+      panel.classList.add('hidden');
+      panel.classList.remove('active');
+      panel.setAttribute('aria-hidden', 'true');
+    }
+    updateSecondaryPageState(false, 'site-search');
+    // cancel any ongoing search request
+    if (S.siteSearchCtrl) {
+      try { S.siteSearchCtrl.abort(); } catch (e) {}
+      S.siteSearchCtrl = null;
+    }
+    S.siteSearchRequestId = (S.siteSearchRequestId || 0) + 1;
+    S.siteSearchLifecycleId = (S.siteSearchLifecycleId || 0) + 1;
+  }
+
+  function selectedSiteSearchSources() {
+    var selected = [];
+    var buttons = document.querySelectorAll('[data-ai-search-source].is-selected');
+    for (var i = 0; i < buttons.length; i++) {
+      var source = buttons[i].getAttribute('data-ai-search-source');
+      if (AI_SEARCH_SOURCES.indexOf(source) >= 0) selected.push(source);
+    }
+    return selected;
+  }
+
+  function renderSiteSearchResults(results) {
+    var host = document.getElementById('aiSiteSearchResults');
+    if (!host) return;
+    host.innerHTML = '';
+    (Array.isArray(results) ? results : []).slice(0, 40).forEach(function(item) {
+      var result = el('button', { type: 'button', class: 'ai-site-search-result' });
+      result.appendChild(el('b', { text: String(item.title || item.source || '搜索结果') }));
+      if (item.snippet) result.appendChild(el('span', { text: String(item.snippet).slice(0, 280) }));
+      var meta = buildAiSearchMeta(item);
+      if (meta) result.appendChild(el('small', { text: meta }));
+      result.addEventListener('click', function() { openAiSearchTarget(item); });
+      host.appendChild(result);
+    });
+  }
+
+  function renderSiteSearchLoading() {
+    var host = document.getElementById('aiSiteSearchResults');
+    if (!host) return;
+    host.innerHTML = '';
+    host.classList.add('is-loading');
+    host.setAttribute('aria-busy', 'true');
+    for (var i = 0; i < 3; i++) {
+      var row = el('div', { class: 'ai-site-search-skeleton', 'aria-hidden': 'true' });
+      row.appendChild(el('i'));
+      row.appendChild(el('i'));
+      row.appendChild(el('i'));
+      host.appendChild(row);
+    }
+  }
+
+  async function runSiteSearch() {
+    var input = document.getElementById('aiSiteSearchInput');
+    var status = document.getElementById('aiSiteSearchStatus');
+    var submit = document.querySelector('#aiSiteSearchForm button[type="submit"]');
+    var query = String(input && input.value || '').trim();
+    var sources = selectedSiteSearchSources();
+    if (!query) {
+      if (status) status.textContent = '请输入要查找的关键词。';
+      if (input) input.focus();
+      return;
+    }
+    if (!sources.length) {
+      if (status) status.textContent = '请至少选择一个搜索范围。';
+      return;
+    }
+    // cancel previous search
+    if (S.siteSearchCtrl) { try { S.siteSearchCtrl.abort(); } catch (e) {} }
+    var controller = new AbortController();
+    S.siteSearchCtrl = controller;
+    S.siteSearchRequestId = (S.siteSearchRequestId || 0) + 1;
+    var requestId = S.siteSearchRequestId;
+    var lifecycleId = S.siteSearchLifecycleId;
+    var querySnapshot = query;
+    var sourcesSnapshot = sources.slice();
+    if (submit) submit.disabled = true;
+    renderSiteSearchLoading();
+    if (status) status.textContent = '正在检索站内内容…';
+    var startTime = Date.now();
+    try {
+      var response = await apiRequest('POST', '/site-search', { query: query, sources: sources, limit: 40 }, { signal: S.siteSearchCtrl.signal });
+      // guard: check if this request is still valid
+      if (requestId !== S.siteSearchRequestId || lifecycleId !== S.siteSearchLifecycleId || query !== querySnapshot || sources.join(',') !== sourcesSnapshot.join(',')) return;
+      var data = response && response.data;
+      if (!response || !response.ok || !data || !data.ok) throw new Error(response && response.error || data && data.error || '搜索失败');
+      var elapsed = Date.now() - startTime;
+      // guard again before rendering
+      if (requestId !== S.siteSearchRequestId || lifecycleId !== S.siteSearchLifecycleId) return;
+      renderSiteSearchResults(data.results);
+      var msg = data.results && data.results.length ? '找到 ' + data.results.length + ' 条相关内容（' + elapsed + 'ms）。' : '没有找到相关内容。';
+      if (data.source_errors && data.source_errors.length) {
+        msg += ' 部分范围搜索失败：' + data.source_errors.map(function(e) { return e.message; }).join('；');
+      }
+      if (status) status.textContent = msg;
+    } catch (e) {
+      if (e && e.name === 'AbortError') { if (status) status.textContent = ''; return; }
+      renderSiteSearchResults([]);
+      var message = (e && e.message) || '';
+      if (message === 'AI 工具数据表尚未迁移') message = '搜索服务正在初始化，请稍后重试。';
+      if (status) status.textContent = message || '搜索暂不可用，请重试。';
+    } finally {
+      if (S.siteSearchCtrl && S.siteSearchCtrl === controller) S.siteSearchCtrl = null;
+      var results = document.getElementById('aiSiteSearchResults');
+      if (results) {
+        results.classList.remove('is-loading');
+        results.removeAttribute('aria-busy');
+      }
+      if (submit) submit.disabled = false;
+    }
+  }
+
+  function bindSiteSearchPage() {
+    var panel = document.getElementById('aiSiteSearchPanel');
+    if (!panel || panel.__xtjAiSearchBound) return;
+    panel.__xtjAiSearchBound = true;
+    var form = document.getElementById('aiSiteSearchForm');
+    var back = document.getElementById('aiSiteSearchBack');
+    if (form) form.addEventListener('submit', function(event) { event.preventDefault(); runSiteSearch(); });
+    if (back) back.addEventListener('click', closeSiteSearch);
+    panel.addEventListener('click', function(event) {
+      var button = event.target.closest('[data-ai-search-source]');
+      if (!button) return;
+      button.classList.toggle('is-selected');
+    });
+  }
+
+  async function openSiteSearchPage() {
+    if (!window.currentUser) {
+      notify('请先登录后再使用站内搜索');
+      return;
+    }
+    try { closeAiChat(); } catch (e) {}
+    try { closeDeepThinkPage(); } catch (e2) {}
+    var panel = document.getElementById('aiSiteSearchPanel');
+    if (!panel) return;
+    bindSiteSearchPage();
+    panel.classList.remove('hidden');
+    panel.classList.add('active');
+    panel.setAttribute('aria-hidden', 'false');
+    updateSecondaryPageState(true, 'site-search');
+    var input = document.getElementById('aiSiteSearchInput');
+    if (input) setTimeout(function() { try { input.focus(); } catch (e3) {} }, 50);
+    // verify auth in background — don't block page visibility
+    ensureUserAuthOrNotify().catch(function(e) { console.error('[site-search] auth check failed:', e && e.message); });
+  }
+
+  function bindTopAiTools() {
+    // 顶栏 AI 工具已由 core bootstrap 绑定自定义菜单；仅未绑定时兜底
+    var nav = document.getElementById('aiToolsNav');
+    var trigger = document.getElementById('aiToolsBtn');
+    var menu = document.getElementById('aiToolsMenu');
+    if (!nav || !trigger || !menu || nav.__xtjAiToolsBound) return;
+    nav.__xtjAiToolsBound = true;
+
+    var legacySelect = document.getElementById('aiToolsNativeSelect');
+    if (legacySelect && legacySelect.parentNode) {
+      try { legacySelect.parentNode.removeChild(legacySelect); } catch (eRem) {}
+    }
+
+    var open = false;
+    function setOpen(next) {
+      open = !!next;
+      menu.hidden = !open;
+      menu.setAttribute('aria-hidden', open ? 'false' : 'true');
+      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      nav.classList.toggle('is-open', open);
+    }
+
+    trigger.addEventListener('click', function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(!open);
+    });
+    menu.addEventListener('click', async function(event) {
+      event.stopPropagation();
+      var btn = event.target && event.target.closest ? event.target.closest('[data-ai-tool]') : null;
+      if (!btn) return;
+      var tool = btn.getAttribute('data-ai-tool');
+      if (!tool) return;
+      setOpen(false);
+      if (tool === 'research') await openDeepThinkPage();
+      else if (tool === 'search') await openSiteSearchPage();
+      else await openAiChat();
+    });
+    document.addEventListener('click', function(event) {
+      if (!open) return;
+      if (nav.contains(event.target)) return;
+      setOpen(false);
+    });
+  }
+
+  async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
+    var text = String(input.value || '').trim();
+    var originalUserText = text;
+    if (S._newChatBusy) { notify('正在创建新对话，请稍候'); return; }
+    // ★ 多文件：支持数组（最多 10 个），兼容旧的单文件调用
+    var fileList = Array.isArray(fileData) ? fileData.slice(0, 10) : (fileData ? [fileData] : []);
+    var sendFingerprint = originalUserText + '\u0000' + fileList.map(function(f) {
+      return String(f.name || '') + ':' + String(f.dataUrl || '').length;
+    }).join('|');
+    if (S.sending && S.lastSendFingerprint === sendFingerprint && Date.now() - S.lastSendAt < 1500) {
+      try { notify('已发送，请勿重复点击'); } catch (eDuplicate) {}
+      return;
+    }
+    // Empty/invalid drafts must never interrupt a reply. A distinct valid send
+    // replaces the active turn synchronously, including its auth/preflight phase.
+    if (!text && !fileList.some(function(f) { return f && f.dataUrl; })) return;
+    if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
+    if (S.sending || S._interruptChat) interruptCurrentChat();
+    S.lastSendFingerprint = sendFingerprint;
+    S.lastSendAt = Date.now();
+    // ★ 修复（H5/并发重复请求）：认证/配额窗口期间第二个请求不会中止第一个（此时
+    // S.abortController 尚未创建），两个 /chat/stream 会并行。使用发送令牌：
+    // 新发送自增 S.sendSeq；旧发送在创建流之前发现令牌已过期即让位退出。
+    var sendToken = (S.sendSeq = (S.sendSeq || 0) + 1);
+    var _sendThinkingMode = (ALLOWED_THINKING_MODES.indexOf(S.thinkingMode) >= 0)
+      ? S.thinkingMode
+      : DEFAULT_THINKING_MODE;
+    var sendSettings = { model: S.selectedModel, thinkMax: S.thinkMax === true, workMode: S.workMode === true, webSearch: S.webSearchEnabled === true, responseProfile: S.responseProfile };
+    var sendCustomCfg = isCustomModelId(sendSettings.model) ? Object.assign({}, resolveCustomModelConfig(sendSettings.model)) : null;
+    // Lock synchronously before the first await (auth/token acquisition), so
+    // two clicks in the same event loop cannot create two streams.
+    S.sending = true;
+    setAiSendBtnDisabled(false);
+    if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
+    // ★ 修复：遥测不再上传提问内容（原 30 字符随行为记录上行，AI 提问可能含敏感信息）
+    try { if (typeof window.queueBehavior === 'function') window.queueBehavior('ai_chat', '向AI发送消息'); } catch(e) {}
+    var displayText = text;
+    var attachmentPayload = null;
+    // 如果有文件（单/多）: UI 显示占位，发送给服务器用附带 data_url 的结构化附件
+    if (fileList.length) {
+      attachmentPayload = [];
+      var uiLines = [];
+      var serverTags = [];
+      for (var fli = 0; fli < fileList.length; fli++) {
+        var oneFile = fileList[fli];
+        if (!oneFile || !oneFile.dataUrl) continue;
+        var safeName = String(oneFile.name || 'file').replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5\u3040-\u30ff]/g, '_').slice(0, 80);
+        var isImage = String(oneFile.type || '').indexOf('image/') === 0;
+        // 估算文件大小（data URL 约 4/3 倍原始大小）
+        var sizeKB = Math.round((oneFile.dataUrl.length * 3 / 4) / 1024);
+        // UI 显示：首图为内联缩略，其余为文件条目
+        uiLines.push(isImage ? '![' + safeName + '](' + oneFile.dataUrl + ')' : '[📄 ' + safeName + ' · ' + sizeKB + 'KB]');
+        serverTags.push(isImage ? '[图片: ' + safeName + ' · ' + sizeKB + 'KB]' : '[文件: ' + safeName + ' · ' + sizeKB + 'KB]');
+        attachmentPayload.push({ name: safeName, type: oneFile.type || 'application/octet-stream', data_url: oneFile.dataUrl });
+      }
+      if (attachmentPayload.length) {
+        displayText = text ? text + '\n' + uiLines.join('\n') : uiLines.join('\n');
+        text = text ? text + '\n' + serverTags.join(' ') : serverTags.join(' ');
+      } else {
+        attachmentPayload = null;
+      }
+    }
+    if (!text) { S.sending = false; setAiSendBtnDisabled(false); return; }
+    if (text.length > 50000) {
+      notify('消息过长，最多 50000 字符，请精简后重试');
+      S.sending = false;
+      setAiSendBtnDisabled(false);
+      return;
+    }
+
+    // ★ 立即标记发送中，防止并发竞态
+    // P1: UI立即显示，认证异步执行
+    // ★★ 2026-09-29（审计 S4「过期发送令牌把 S.sending 错误清零」）：
+    //   现象：新发送自增 S.sendSeq 后，旧发送在 await fetchAiQuota() 之后的令牌
+    //   校验处 return 前执行了 `S.sending = false` —— 此时**新发送正在流式进行**，
+    //   全局发送锁被错误清零，后续 triggerRegenerate / 继续生成等基于 S.sending
+    //   的并发保护全部失效，于是能并行开多条流、额度按次重复扣。
+    //   修法：过期令牌分支只 return，**不动 S.sending**（复位统一交给
+    //   resetSendingIfCurrent() 按 reqId 比对后执行）。
+    if (sendToken !== S.sendSeq) { return; } // 已有更新的发送接管
+    S.sending = true;
+    if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
+    clearReplyTimer();
+
+    if (sendToken !== S.sendSeq) { return; } // 已有更新的发送接管（同上，不清 S.sending）
+
+    S.clientRequestId++;
+    var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
+    S._currentReqId = reqId;
+    function resetSendingIfCurrent() {
+      if (S._currentReqId === reqId) {
+        S.sending = false;
+        // ★ 2026-09-29（审计 S4）：发送锁释放处统一重新启用发送按钮，
+        //   保证任何收尾路径（成功/失败/中止/超时）都不会把按钮永久禁用。
+        setAiSendBtnDisabled(false);
+        S.abortController = null;
+        if (S._interruptChat && S._interruptChat.reqId === reqId) S._interruptChat = null;
+        S.paused = false;
+        resetActiveRenderersByChannel('chat');
+        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+      }
+    }
+
+    var originalText = originalUserText;
+    function restoreInputText() {
+      if (S._currentReqId !== reqId || String(input.value || '').trim()) return;
+      input.value = originalText;
+      input.style.height = 'auto';
+      try {
+        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+        if (!_isTouchMobile) input.focus();
+      } catch (e) {}
+      updateInputMetrics();
+      // ★ 2026-09-29（审计 M5「发送失败只回填文字，已选附件不可恢复」）：
+      //   现象：选好图片/PDF 后发送，遇到鉴权失败/HTTP 错误/断网/45s 超时，
+      //   输入框文字回来了但附件预览已经没了，用户必须重新选一遍文件。
+      //   根因：doSend 在调用 async 的 handleSendMessage 后立即清空预览，
+      //   而所有失败路径只有本函数在恢复文字，没有对应的附件恢复。
+      //   修法：回填文字的同时把本次附件副本交还输入区重新渲染预览。
+      try {
+        if (typeof S._restoreAiChatFiles === 'function' && fileList && fileList.length) {
+          S._restoreAiChatFiles(fileList.slice(0, 10));
+        }
+      } catch (eRestoreFiles) {}
+    }
+
+    // ★ 2026-09-29（审计 M12「失败路径 S.messages.pop() 不校验目标」）：
+    //   现象：竞态下（首屏历史覆盖、切会话、旧请求迟到）失败收尾会把**当前会话
+    //   最后一条无关消息**从内存数组里弹掉，同时删掉 DOM 里最后一个用户气泡
+    //   —— 用户看到历史里最后一条问答凭空消失。
+    //   根因：pop() 只保证"弹最后一个"，但那一条未必是本次发送压入的 userMsg
+    //   （loadHistory 会整体替换 S.messages，switchConversation 会清空它）。
+    //   修法：按引用定位本次的 userMsg 再 splice，DOM 侧删除它对应的节点；
+    //   找不到时才回退到原来的"删最后一个用户气泡"。
+    function removeThisUserMessage() {
+      // Remove only this send's pending reference and exact DOM node. Other local
+      // turns may still be waiting for the history endpoint to catch up.
+      try {
+        S._pendingLocalMsgs = (Array.isArray(S._pendingLocalMsgs) ? S._pendingLocalMsgs : []).filter(function(m) { return m !== userMsg; });
+      } catch (ePendClear) {}
+      try {
+        var at = S.messages.indexOf(userMsg);
+        if (at >= 0) S.messages.splice(at, 1);
+      } catch (eRmMsg) {}
+      try {
+        if (userNode && userNode.parentNode) userNode.parentNode.removeChild(userNode);
+        maybeRestoreEmptyState(messagesEl);
+      } catch (eRmDom) {}
+    }
+
+    // ============================================================
+    // P1 修复: 立即显示用户消息和助手等待节点 (<=100ms)
+    // 认证和Token获取异步进行，不阻塞UI反馈
+    // ============================================================
+    var nowIso = new Date().toISOString();
+    // ★ 记录附件（含图片 data URL），供「重新生成」时原样复用
+    var userMsg = { role: 'user', content: displayText, created_at: nowIso, attachments: attachmentPayload || null, client_request_id: reqId };
+    S.messages.push(userMsg);
+    // ★ 2026-09-29（审计 S1/S2）：登记"本轮本地消息"，供首屏历史到达时保留、
+    //   以及失败收尾时精确定位（不再盲 pop / 盲删最后一个用户气泡）。
+    S._pendingLocalMsgs = (Array.isArray(S._pendingLocalMsgs) ? S._pendingLocalMsgs : []).filter(function(m) { return m && S.messages.indexOf(m) >= 0; });
+    S._pendingLocalMsgs.push(userMsg);
+    if (S._pendingLocalMsgs.length > 40) S._pendingLocalMsgs = S._pendingLocalMsgs.slice(-40);
+    try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache) {}
+    var userNode = appendMessage(messagesEl, userMsg);
+    S.autoScrollPinned = true;
+    scrollToBottom(messagesEl, true);
+
+    // P5 修复: 创建单一助手节点，typing dots 放在节点内部
+    // 从发送到完成，始终使用同一个 DOM 节点
+    // ★ 优化：发送后立刻展示「思考中」占位，不等服务端首包（降低感知延迟）
+    var assistantNode = el('div', { class: 'ai-msg assistant entering generating' });
+    var assistantBubble = el('div', { class: 'ai-msg-bubble' });
+    // 气泡先隐藏，等 content 到达再显示；思考占位单独可见
+    assistantBubble.style.display = 'none';
+    assistantNode.appendChild(assistantBubble);
+    // 思考模式开启时：立即插入思考节点，用户一点发送就看到反馈
+    var _earlyThinkingShown = false;
+    if (_sendThinkingMode !== 'off') {
+      try {
+        // 发送后立刻展示思考节点，并默认展开，保证流式思考过程可见
+        var earlyRn = buildReasoningNode('', messagesEl);
+        var earlyLabel = earlyRn.querySelector('.ai-thinking-label');
+        if (earlyLabel) earlyLabel.textContent = '思考中';
+        setThinkingExpanded(earlyRn, true, messagesEl);
+        assistantNode.insertBefore(earlyRn, assistantNode.firstChild);
+        _earlyThinkingShown = true;
+      } catch (eEarly) {}
+    } else {
+      // 关闭思考时给轻量「准备中」占位，避免空白等太久
+      try {
+        assistantBubble.style.display = 'block';
+        assistantBubble.classList.add('ai-reply-pending');
+        assistantBubble.textContent = '正在回复…';
+      } catch (ePending) {}
+    }
+    messagesEl.appendChild(assistantNode);
+    scrollToBottom(messagesEl, true);
+
+    var interruptedFinalizer = null;
+    function preserveInterruptedTurn() {
+      if (S._currentReqId !== reqId || assistantNode.isConnected === false) return;
+      userMsg.interrupted = true;
+      if (interruptedFinalizer) interruptedFinalizer();
+      else {
+        assistantNode.classList.remove('generating');
+        assistantNode.remove();
+      }
+      try { setAiHistoryCache(S.conversationId, S.messages); } catch (eInterruptedCache) {}
+    }
+    S._interruptChat = { reqId: reqId, stop: preserveInterruptedTurn };
+
+    function preserveFailedTurn() {
+      if (S._currentReqId !== reqId) return;
+      userMsg.interrupted = true;
+      if (interruptedFinalizer && (aiContent || aiReasoning || assistantNode.querySelector('.ai-process-timeline'))) interruptedFinalizer();
+      else {
+        try { assistantNode.remove(); } catch (eFailedNode) {}
+        try { setAiHistoryCache(S.conversationId, S.messages); } catch (eFailedCache) {}
+      }
+    }
+
+    // Available before fetch() returns an HTTP error, so a rejected request
+    // cannot leave the temporary typing bubble on screen.
+    function hideAssistantTyping() {
+      try {
+        assistantBubble.classList.remove('ai-typing-bubble');
+        if (assistantBubble.classList.contains('ai-reply-pending') && assistantBubble.textContent === '正在回复…') {
+          assistantBubble.textContent = '';
+        }
+        assistantBubble.classList.add('ai-reply-pending');
+      } catch (e) {}
+    }
+
+    // 清空输入框
+    input.value = '';
+    input.style.height = 'auto';
+    updateInputMetrics();
+    if (_isTouchMobile) {
+      try { input.blur(); } catch (e2) {}
+    } else {
+      try { input.focus(); } catch (e2) {}
+    }
+
+    // ============================================================
+    // P1 修复: 认证异步执行，失败时恢复UI
+    // ============================================================
+    // 额度预检（服务端仍是权威；此处避免无额度空请求）
+    try {
+      if (!S.quota || (Date.now() - S.quotaFetchedAt) > 120000) {
+        await fetchAiQuota(true);
+      }
+    } catch (eQ) {}
+    // A close/reopen can start a new send while this quota request is pending.
+    // The stale send must not clear or reuse the newer send's state.
+    if (sendToken !== S.sendSeq || !S.active) return;
+    var qGate = canSendWithQuota();
+    if (!qGate.ok) {
+      notify(qGate.message || '今日额度已用完');
+      assistantNode.remove();
+      removeThisUserMessage();
+      restoreInputText();
+      resetSendingIfCurrent();
+      return;
+    }
+
+    var authOk = await ensureUserAuthOrNotify();
+    if (sendToken !== S.sendSeq || S._currentReqId !== reqId || !S.active) return;
+    if (!authOk) {
+      // 认证失败 => 清理UI，恢复状态
+      try { assistantNode.remove(); } catch (e) {}
+      removeThisUserMessage();
+      restoreInputText();
+      resetSendingIfCurrent();
+      return;
+    }
+
+    var aborted = false;
+
+    // 创建 AbortController
+    var controller = new AbortController();
+    S.abortController = controller;
+    S.currentStreamAborted = false;
+
+    // Phase 1: Shared request controller + telemetry (feature-flagged)
+    var sharedCtrl = null;
+    var telemetry = null;
+    var sharedAbortHandler = null;
+    if (window.XtjAiCore && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+      sharedCtrl = window.XtjAiCore.RequestController.create({
+        requestId: reqId,
+        clientRequestId: 'cr_' + S.clientRequestId,
+        // ★ 优化：后端深入研究/长思考最长 5 分钟，前端 120s 会提前掐断，
+        // 对齐为 300s（SSE idle 看门狗 45s/120s 仍负责真正的假死检测）。
+        timeoutMs: 300000
+      });
+      sharedCtrl.start();
+      window.XtjAiCore.RequestController.registerInFlight('cat_ai', sharedCtrl);
+      if (window.XtjAiCore.Telemetry) {
+        telemetry = window.XtjAiCore.Telemetry.create();
+        telemetry.start(reqId, 'cr_' + S.clientRequestId);
+      }
+      // ★ 双 AbortController 统一：fetch 始终绑定本地 controller.signal，
+      // sharedCtrl 的超时/取消通过 externalSignal 转发到同一个 controller（参考 sendOnce 转发模式），
+      // 避免看门狗 abort 落空导致 300s 绝对超时失效。
+      if (sharedCtrl && sharedCtrl.signal) {
+        sharedAbortHandler = function() {
+          try {
+            controller._abortReason = (sharedCtrl.getCancelReason && sharedCtrl.getCancelReason()) || 'shared';
+            try { controller.abort(controller._abortReason); } catch (e) {}
+          } catch (eShared) {}
+        };
+        if (sharedCtrl.signal.aborted) sharedAbortHandler();
+        else if (typeof sharedCtrl.signal.addEventListener === 'function') sharedCtrl.signal.addEventListener('abort', sharedAbortHandler, { once: true });
+      }
+    }
+
+    // ★ 自定义第三方模型：走独立转发路由，不消耗本站配额
+    var isCustomModel = isCustomModelId(sendSettings.model);
+    var customCfg = sendCustomCfg;
+    // thinking_mode 必须显式传 'off'；不能用 || 'max'（'off' 虽为真值，
+    // 但非法/空值应回落默认，不能把用户「关闭思考」误当成 max）。
+
+    // 思考「极致(max)」档只代表模型厂商原生的最大 reasoning effort，不再因此强制改走
+    // 多智能体“深入研究”(deep-stream) 流程；是否更多搜索/工具协作由 webSearch / thinkMax 决定。
+    var url = isCustomModel ? (API_BASE + '/custom-chat/stream') : (API_BASE + '/chat/stream');
+    var auth = await getUserAuthPayload({ forceNoToken: false });
+    if (sendToken !== S.sendSeq || S._currentReqId !== reqId || !S.active || controller.signal.aborted) return;
+    var headers = auth.headers || {};
+    var fetchBody;
+    if (isCustomModel && customCfg) {
+      // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
+      //   关闭时限制在 CONTEXT_LIMIT_NORMAL 条（256），超过即自动压缩丢弃更早内容，
+      //   每条再按字符上限截断防止超长，兼顾便宜与稳定。
+      var _ctxCap = sendSettings.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
+      var _ctxChars = sendSettings.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
+      var hl = buildAiConversationHistory(_ctxCap, _ctxChars, userMsg, attachmentPayload);
+      fetchBody = JSON.stringify({
+        provider: customCfg.provider,
+        conversation_id: S.conversationId,
+        api_key: customCfg.api_key,
+        model: customCfg.model,
+        base_url: customCfg.base_url,
+        message: text,
+        messages: hl,
+        messages_include_current: false,
+        thinking_mode: _sendThinkingMode,
+        thinking_max: sendSettings.thinkMax === true,
+        work_mode: sendSettings.workMode === true,
+        web_search: sendSettings.webSearch === true,
+        tools_enabled: (sendSettings.webSearch === true || sendSettings.thinkMax === true || sendSettings.workMode === true),
+        // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
+        attachments: attachmentPayload || undefined,
+        client_request_id: reqId,
+        timeout_ms: 240000
+      });
+    } else {
+      // ★★★ 2026-09-17 修复（P0「内置模型上下文丢失」）：
+      //   内置链路此前**只发当前一条 message + conversation_id**，历史完全依赖
+      //   服务端按 convId 查库还原。这条链路太脆弱：convId 一旦在前端丢失/被重置/
+      //   未持久化，或 Supabase 查询失败，历史就静默变空 —— 用户感知为"每条消息
+      //   都是独立对话"，而第三方链路（显式带 messages）却一切正常。
+      //   现改为：与第三方链路对齐，把本地已有的对话历史一并发送；
+      //   服务端优先使用它，前端未传时才回退查库。
+      //   复用与自定义模型相同的裁剪策略（条数 + 每条字符上限），
+      //   避免超长历史撑爆 prompt。
+      var _bCtxCap = sendSettings.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
+      var _bCtxChars = sendSettings.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
+      var _builtinHist = buildAiConversationHistory(_bCtxCap, _bCtxChars, userMsg, attachmentPayload);
+      fetchBody = JSON.stringify({
+        message: text,
+        conversation_id: S.conversationId,
+        // ★ 关键修复：携带历史，服务端优先使用（不再强依赖 convId 查库）
+        messages: _builtinHist,
+        messages_include_current: false,
+        client_request_id: reqId,
+        thinking_mode: _sendThinkingMode,
+        thinking_max: sendSettings.thinkMax === true,
+        work_mode: sendSettings.workMode === true,
+        response_profile: sendSettings.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
+        attachments: attachmentPayload || undefined,
+        web_search: sendSettings.webSearch,
+        model: sendSettings.model
+      });
+    }
+    
+    try {
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: fetchBody,
+        signal: controller.signal
+      });
+      if (sendToken !== S.sendSeq || S._currentReqId !== reqId || !S.active || controller.signal.aborted) {
+        if (resp && resp.body) { try { resp.body.cancel().catch(function() {}); } catch (_) {} }
+        return;
+      }
+
+      // ★★ 2026-09-29（审计 S3「聊天流 401 不做 token 刷新，凭证失效永久卡住」）：
+      //   现象：登录态过期后发消息，只弹一句「AI 服务暂时不可用，请稍后重试」，
+      //   之后每次发送都失败；不提示重新登录也不跳转登录页，只有刷新页面才恢复。
+      //   根因：本函数走原生 fetch，绕过了 apiRequest 里已有的
+      //   「401 → refreshUserToken(true) → 重发一次」链路，!resp.ok 一律回落通用文案。
+      //   修法：401 时先刷新 token，成功则携带新凭证**重发一次**（仅一次，防死循环）；
+      //   刷新失败/重发仍 401 则交给 handleProtectedAuthFailure 并给出明确登录提示。
+      if (resp && resp.status === 401 && typeof window.refreshUserToken === 'function') {
+        var _refreshed = false;
+        try { _refreshed = await window.refreshUserToken(true); } catch (eRefresh) {}
+        if (sendToken !== S.sendSeq || S._currentReqId !== reqId || controller.signal.aborted) return;
+        if (_refreshed) {
+          try {
+            var _auth2 = await getUserAuthPayload({ forceNoToken: false });
+            if (sendToken !== S.sendSeq || S._currentReqId !== reqId || controller.signal.aborted) return;
+            var _resp2 = await fetch(url, {
+              method: 'POST',
+              headers: (_auth2 && _auth2.headers) || headers,
+              body: fetchBody,
+              signal: controller.signal
+            });
+            if (_resp2) resp = _resp2;
+          } catch (eRetry401) {
+            // 重发本身失败（网络/中断）：保留原始 401 响应走下方统一错误分支
+          }
+        }
+        if (sendToken !== S.sendSeq || S._currentReqId !== reqId || controller.signal.aborted) return;
+        if (!resp.ok && resp.status === 401) {
+          try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (eAuthFail) {}
+        }
+      }
+
+      if (!resp.ok) {
+        var responseMessage = 'AI 服务暂时不可用，请稍后重试';
+        var errorCode = '';
+        try {
+          var rawErrText = await resp.text().catch(function(){ return ''; });
+          var errJson = null;
+          if (rawErrText) {
+            try { errJson = JSON.parse(rawErrText); } catch (parseErr) {
+              console.warn('[AI] Non-JSON error response', { status: resp.status, contentType: resp.headers.get('content-type'), bodyPreview: rawErrText.slice(0, 200) });
+            }
+          }
+          if (errJson && errJson.error) responseMessage = String(errJson.error);
+          if (errJson && errJson.code) errorCode = String(errJson.code);
+          if (errJson && errJson.quota) applyQuota(errJson.quota);
+          if (errorCode === 'token_limit') {
+            responseMessage = '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
+          } else if (errorCode === 'search_limit') {
+            responseMessage = '今日网页搜索次数已达上限，开通 Pro 可无限搜索';
+          } else if (resp.status === 401) {
+            // ★ 2026-09-29（审计 S3）：401 走到这里说明上面刷新+重发也失败了，
+            //   此时别再回落通用的「AI 服务暂时不可用」（用户会以为 AI 坏了，
+            //   其实是登录态失效），给出可操作的文案。
+            responseMessage = '登录已失效，请重新登录';
+          }
+        } catch(e) {}
+        // Phase 3: Use shared error classification when enabled
+        // （额度类 429 保留专用文案，不被通用分类覆盖）
+        if (errorCode !== 'token_limit' && errorCode !== 'search_limit' &&
+            window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+          var classified = window.XtjAiCore.Errors.classify(new Error(responseMessage), {
+            httpStatus: resp.status,
+            requestId: reqId,
+            phase: 'http_response'
+          });
+          responseMessage = classified.message;
+          errorCode = classified.code;
+        }
+        if (S._currentReqId !== reqId) return;
+        if (sharedCtrl) {
+          sharedCtrl.error('http_' + (resp.status || 0));
+          if (telemetry) { telemetry.finalize('error', { code: errorCode, phase: 'http_response', message: responseMessage }); }
+        }
+        hideAssistantTyping();
+        try { assistantNode.remove(); } catch (e) {}
+        removeThisUserMessage();
+        restoreInputText();
+        notify(responseMessage);
+        resetSendingIfCurrent();
+        return;
+      }
+      
+      if (!resp.body) {
+        hideAssistantTyping();
+        preserveFailedTurn();
+        restoreInputText();
+        notify('AI 没有响应');
+        resetSendingIfCurrent();
+        return;
+      }
+      
+      // 读取 SSE 流
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+      var aiContent = '';
+      var aiReasoning = '';
+      var contentTruncated = false;
+      var reasoningStarted = false;
+      // P5: using assistantNode (single DOM node)
+      // P5: using assistantBubble (single DOM node)
+      var reasoningContainer = null;
+      var contentRenderer = null;
+      var reasoningRenderer = null;
+      var thinkingTimer = null;
+      var thinkingStartedAt = 0;
+      var finalThinkingElapsedMs = 0;
+      // ★ 2026-09-17：标记"正文已开始、思考面板已自动收起"，
+      //   保证交接逻辑在同一轮回复里只执行一次。
+      var _thinkingSettledOnContent = false;
+      var usageResult = null;
+      var finalModel = sendSettings.model;
+      var finalThinkingMode = _sendThinkingMode;
+      // ★ 工作模式追踪：记录本次请求是否处于工作模式、实际调用了多少次工具。
+      //   用于回复完成后在底部显示「工作模式」徽标与工具调用次数，
+      //   让用户能直观确认工作模式确实生效（而不是「感觉跟没打开一样」）。
+      var streamWorkMode = sendSettings.workMode;
+      var streamToolCount = 0;
+      var streamSiteCards = [];
+      var streamConvId = null;
+      var doneReceived = false;
+      var _eofReached = false; // ★ 修复：SSE EOF flush 前置标志此前未声明（严格模式下 EOF 即抛 ReferenceError）
+      var evtHandled = false;
+      var _finalized = false;
+      // ★ 2026-09-17 新增：服务端已明确报错标志 + 最后一条服务端错误文案。
+      //   用于把"服务端已告知的失败"与"连接真的意外中断"区分开，
+      //   避免后者笼统的"AI 连接中断"文案覆盖前者的真实原因。
+      var terminalErrorSeen = false;
+      var lastServerError = '';
+      // ★ 2026-09-15 新增：工具执行期进度计数（服务端每 3s 推一次 tool_progress），
+      //   用于把"进行中"文案更新为"进行中 · 已 12s"，消除长时间静止的假死感。
+      var toolProgressTick = 0;
+      // ★ 2026-09-17 新增：工具轮次序号。每次 tool_calls 事件开一个新的轮次容器，
+      //   用于把并行工具按"轮"分组展示（新一轮不覆盖旧一轮，旧轮折叠保留）。
+      var toolRoundSeq = 0;
+
+      function clearAssistantTransientStatus(node) {
+        var target = node || assistantNode;
+        if (!target) return;
+        // ★★★ 2026-09-28 修复（用户报障：「我根本没让它思考，它却一直挂着思考中」）：
+        //   发送瞬间为了让用户立刻看到反馈，会在 thinkingMode 开启时
+        //   插入一个占位思考节点（标签写死的「思考中」）。但**并非每次回复都有
+        //   reasoning 内容** —— 简单提问/工具直答时模型不输出思考过程，
+        //   这个占位节点就再也没人管：标签停在「思考中」、思考动画继续转，
+        //   直到用户切走会话都还在。
+        //   本函数是所有终态路径（done / error / 中断 / 超时 / 工具收尾）的公共收敛点，
+        //   放在这里覆盖面最广。只在"确实没有被真实思考内容接管"时才移除：
+        //   ① 节点仍带着初始标签「思考中」（说明没有任何 reasoning 流进来）
+        //   ② 且节点体内没有用户可读的思考正文
+        try { settleUnusedEarlyThinkingNode(target); } catch (eEarlyThink) {}
+        // ★ 2026-09-13 修复（"已搜完仍显示正在搜索中、动画一直闪"）：
+        //   搜索状态条（.ai-search-status）此前不在此函数的清理范围内，且 done 事件
+        //   也不处理它 —— 于是只要走过搜索路径，状态条就永久停留在"联网中…"，
+        //   动画无限循环。用户要求"保留显示但修正状态"，故此处**只收敛状态不删除**：
+        //   把进行中的"联网中…/正在搜索"改写为终态并停掉动画，保留信息可读。
+        try { settleSearchStatus(target); } catch (eSettle2) {}
+        // ★ 2026-09-15：工具"轮次"容器同样需要收敛。轮次是第四轮新增的紧凑动画
+        //   容器（.ai-tool-round），其 is-running 由摘要行驱动；若不处理，中断后
+        //   摘要行会永久停留"并行调用 N 个工具 · 2/5 完成"，图标一直是 ⏳。
+        // A missing tool_result is not evidence of success. On any stream terminal,
+        // stop unresolved tool spinners as failures instead of silently painting them
+        // green; already reported is-done / is-error outcomes remain untouched.
+        try {
+          var runningSteps = target.querySelectorAll('.ai-tool-step.is-running');
+          for (var rsIdx = 0; rsIdx < runningSteps.length; rsIdx++) {
+            var rsEl = runningSteps[rsIdx];
+            if (rsEl.classList.contains('ai-tool-organizing')) continue;
+            rsEl.classList.remove('is-running', 'is-done');
+            rsEl.classList.add('is-error');
+            var rsIcon = rsEl.querySelector('.ai-tool-step-icon');
+            if (rsIcon) rsIcon.textContent = '⚠️';
+            var rsStatus = rsEl.querySelector('.ai-tool-step-status');
+            if (rsStatus) rsStatus.textContent = '未收到结果';
+          }
+          var _runningRounds = target.querySelectorAll('.ai-tool-round.is-running');
+          for (var _rr = 0; _rr < _runningRounds.length; _rr++) updateToolRoundState(_runningRounds[_rr]);
+        } catch (eSettle3) {}
+        // ★★★ 2026-09-15 修复（P1-9 根因 + P0-2 语义统一）：
+        //   原实现直接 `statusEl.remove()` 掉 `.ai-enhanced-status / .ai-tool-status /
+        //   .ai-search-supplement` 三类容器。这带来两个严重副作用：
+        //   ① `.ai-tool-status` 同时是**工具结果时间线的容器**（tool_calls 里创建的
+        //      `class: 'ai-tool-timeline ai-tool-status'`）。把它 remove() 会连带
+        //      删掉整条工具时间线，用户看不到"调用了哪些工具"；
+        //   ② 与 settleSearchStatus「保留显示、只收敛状态」的既有语义直接打架 ——
+        //      同一个节点被两条逻辑争夺（一个要留、一个要删），时序不同就出现
+        //      "有时按钮在、有时消失"的随机表现，正是用户截图里按钮消失的成因。
+        //      同时这些容器的移除会改变 DOM 结构，干扰 footer（复制/分享/重新生成）
+        //      的挂载位置。
+        //   修复策略：**统一改为收敛（保留节点 + 停动画 + 置终态）**，不再删除：
+        //   - 先把剩余的 is-running 清干净（停掉呼吸/闪烁动画）；
+        //   - 保留工具结果卡片与时间线，用户仍可回看执行过程；
+        //   - 仅隐藏纯"进行中"占位（无任何内容）的增强状态条，避免留下空壳。
+        var statuses = target.querySelectorAll('.ai-enhanced-status, .ai-tool-status, .ai-search-supplement');
+        for (var statusIndex = 0; statusIndex < statuses.length; statusIndex++) {
+          var statusEl = statuses[statusIndex];
+          // ① 清除进行中动画态（这是"动画一直闪"的直接来源）
+          try {
+            statusEl.classList.remove('is-running');
+            var _innerRunning = statusEl.querySelectorAll('.is-running');
+            for (var _ir = 0; _ir < _innerRunning.length; _ir++) _innerRunning[_ir].classList.remove('is-running');
+          } catch (eSettleInner) {}
+          // ② 含有实际内容的容器（工具时间线 / 结果卡片）**保留**，仅收敛状态
+          var hasCard = !!statusEl.querySelector('.ai-tool-result-card');
+          var hasSteps = !!statusEl.querySelector('.ai-tool-step');
+          if (hasCard || hasSteps) {
+            statusEl.classList.add('is-settled');
+            continue;
+          }
+          // ③ 纯占位空壳（无卡片无步骤）：隐藏而非删除，避免破坏 DOM 结构与
+          //    其他逻辑持有的节点引用（删除会让后续 append 落在游离节点上）。
+          try {
+            statusEl.style.display = 'none';
+            statusEl.classList.add('is-settled');
+          } catch (eHide) {}
+        }
+        // ★ 2026-09-22：收敛"整理检索结果并作答"占位步骤（详见 settleOrganizingStep 注释）。
+        //   它挂在 timeline 上、不在任何 .ai-tool-round 内，上面两段收敛都覆盖不到，
+        //   必须在这里单独处理，否则工具走完 + 正文到达前它会一直转圈。
+        try { settleOrganizingStep(target); } catch (eSettleOrg) {}
+        // ★★★ 2026-09-28 修复（用户报障：「正文都回答完了，上面还在写整理中/调用中」）：
+        //   上面的收敛只作用于 `.ai-tool-status` 容器内部，而工具轮次
+        //   （.ai-tool-round）与活动区（.ai-tool-activity）位于
+        //   `.ai-tool-timeline` 里，**不在 .ai-tool-status 之内** ——
+        //   于是流结束时它们的 is-running 一直留着：轮次摘要行继续转、活动区
+        //   头的旋转环继续转，正文却已经在下面渲染完毕。
+        //   这里对流终态做一次"无条件兜底收敛"：把时间线里所有残留的
+        //   is-running 全部落定（含轮次、条目、占位），再强制刷新活动区摘要。
+        try {
+          var _tlNodes = target.querySelectorAll('.ai-tool-timeline, .ai-tool-round, .ai-tool-activity');
+          for (var _ti = 0; _ti < _tlNodes.length; _ti++) {
+            var _tlEl = _tlNodes[_ti];
+            if (!_tlEl.classList.contains('is-running')) continue;
+            _tlEl.classList.remove('is-running');
+            if (_tlEl.classList.contains('ai-tool-round')) {
+              _tlEl.classList.add('is-done', 'is-collapsed');
+            } else if (_tlEl.classList.contains('ai-tool-activity')) {
+              _tlEl.classList.add('is-done', 'is-collapsed');
+            }
+          }
+          // 条目级残留（轮次内的 step）
+          var _tlSteps = target.querySelectorAll('.ai-tool-round-list .ai-tool-step.is-running');
+          for (var _ts = 0; _ts < _tlSteps.length; _ts++) {
+            var _tsEl = _tlSteps[_ts];
+            if (_tsEl.classList.contains('ai-tool-organizing')) continue;
+            _tsEl.classList.remove('is-running');
+            _tsEl.classList.add('is-done');
+            var _tsSt = _tsEl.querySelector('.ai-tool-step-status');
+            if (_tsSt) _tsSt.textContent = '已完成';
+          }
+          // 收敛后刷新活动区总摘要（否则头行文案仍停在"正在使用工具"）
+          var _tlActs = target.querySelectorAll('.ai-tool-activity');
+          for (var _ta = 0; _ta < _tlActs.length; _ta++) {
+            try { updateToolActivity(_tlActs[_ta]); } catch (eUpAct) {}
+          }
+        } catch (eSettleTimeline) {}
+      }
+
+      function attachContinueGenerateBtn(node, msgHost) {
+        if (!node || node.querySelector('.ai-continue-btn')) return;
+        var btn = el('button', { type: 'button', class: 'ai-continue-btn', text: '继续生成' });
+        btn.addEventListener('click', function() {
+          if (S.sending) {
+            notify('正在回复中，请稍候');
+            return;
+          }
+          var lastUser = '';
+          for (var i = S.messages.length - 1; i >= 0; i--) {
+            if (S.messages[i] && S.messages[i].role === 'user') {
+              lastUser = String(S.messages[i].content || '');
+              break;
+            }
+          }
+          if (!lastUser) {
+            notify('没有可继续的消息');
+            return;
+          }
+          // ★★ 2026-09-29（审计 M8「继续生成按钮点击后永久停在「继续中…」」）：
+          //   现象：回复被中断后点「继续生成」，按钮变灰显示「继续中…」；新一轮回复
+          //   生成完毕后它仍然是灰的，再想续写只能自己手动输入。
+          //   根因：`btn.disabled = true; btn.textContent = '继续中…'` 之后只在
+          //   catch(eSend) 分支回滚，成功路径没有任何复位；而按钮挂在**旧的**
+          //   assistantNode 上，新一轮生成结束后无人处理它。
+          //   修法：发起新一轮前先移除页面上所有「继续生成」按钮（含本按钮自身）——
+          //   ① 避免同时挂多个按钮；② 本按钮已完成使命，直接移除，
+          //   新一轮若再次中断会由 attachContinueGenerateBtn 重新挂一个全新按钮。
+          btn.disabled = true;
+          btn.textContent = '继续中…';
+          try {
+            var _oldBtns = document.querySelectorAll('.ai-continue-btn');
+            for (var _ob = 0; _ob < _oldBtns.length; _ob++) {
+              var _obEl = _oldBtns[_ob];
+              if (_obEl && _obEl.parentNode) _obEl.parentNode.removeChild(_obEl);
+            }
+          } catch (eOldBtn) {}
+          var inputEl = S.inputEl || document.getElementById('aiChatInput');
+          var sendEl = S.sendBtnEl || document.getElementById('aiChatSend');
+          var host = msgHost || S.messagesEl || document.getElementById('aiChatMessages');
+          if (inputEl) inputEl.value = '请在上文基础上继续写完，不要重复已说内容。';
+          try {
+            if (typeof handleSendMessage === 'function') handleSendMessage(inputEl, sendEl, host, null);
+            else notify('无法继续，请手动重发');
+          } catch (eSend) {
+            notify('继续失败，请手动重发');
+            // ★ 2026-09-29（审计 M8）：发起前已把按钮摘出文档树，回滚时要重新挂回去，
+            //   否则用户连"再试一次"的入口都没有。
+            btn.disabled = false;
+            btn.textContent = '继续生成';
+            try {
+              if (!btn.parentNode && node && node.parentNode) node.appendChild(btn);
+            } catch (eBtnBack) {}
+          }
+        });
+        node.appendChild(btn);
+      }
+
+      function finishAiMessage(node, content, thinking, evt) {
+        // P4 修复: 防止重复 finalize
+        if (_finalized) return;
+        // ★★ 2026-09-29（审计 S2「切会话/中止后旧流仍继续收尾」）：
+        //   现象：A 会话 AI 还在输出时切到 B，B 里会多出一条 A 的 AI 回复并写进 B 的缓存。
+        //   根因：旧流 catch 里只靠 `S._currentReqId === reqId` 判定，而 switchConversation
+        //   此前不作废 _currentReqId，于是收尾照常执行 push + 写缓存。
+        //   修法：① 节点已脱离文档树（随 messagesEl.innerHTML='' 被摘掉）直接返回；
+        //   ② 本请求已不是当前请求（切会话/关面板会把 _currentReqId 置空）也直接返回。
+        //   两道校验都在 push / 写缓存之前，杜绝把上一会话的回复写进新会话。
+        //   注意用 `isConnected === false` 而非 `!isConnected`：某些非标准 DOM 实现
+        //   上没有该属性，取反会误伤（宁可放过，不可错杀）。
+        if (!node || node.isConnected === false) return;
+        if (S._currentReqId !== reqId) return;
+        _finalized = true;
+        // A stage is only a live progress indicator. Keeping it after the
+        // answer is rendered makes a completed answer look permanently stuck.
+        clearAssistantTransientStatus(node);
+        if (thinkingTimer) {
+          finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
+        }
+        if (evt && typeof evt.thinking_elapsed_ms === 'number' && Number.isFinite(evt.thinking_elapsed_ms) && evt.thinking_elapsed_ms >= 0) finalThinkingElapsedMs = evt.thinking_elapsed_ms;
+        if (reasoningRenderer) reasoningRenderer.finish();
+
+        // 判断是否有有效正文；没有时给出兜底提示，避免气泡完全空白
+        var hasContent = !!(content && String(content).trim().length > 0);
+        var hasThinking = !!(thinking && String(thinking).trim().length > 0);
+        var fallbackText = hasThinking ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复，请重试。';
+        if (evt && evt.interrupted === true) fallbackText = '已停止回复';
+
+        if (contentRenderer && !contentRenderer.isCancelled) {
+          if (hasContent) {
+            contentRenderer.finish(content);
+          } else {
+            contentRenderer.finish(fallbackText);
+          }
+        } else {
+          // P4 修复: 无 contentRenderer，或渲染器已被 cancel()（done 收尾前的
+          // resetActiveRenderersByChannel('chat') 会清掉整段流式文本）。此时
+          // finish() 因 cancelled 直接 return，必须回退到直接以最终 content 重绘，
+          // 否则气泡被清空且内容丢失。
+          if (assistantBubble) {
+            createSmoothTextRenderer(assistantBubble).finish(hasContent ? content : fallbackText);
+          }
+        }
+        cleanupRenderers();
+        if (node) {
+          node.classList.remove('generating');
+        }
+        if (assistantBubble) {
+          assistantBubble.classList.remove('ai-typing');
+          assistantBubble.style.opacity = '1';
+          assistantBubble.style.display = 'block';
+          assistantBubble.style.visibility = 'visible';
+          // ★ 修复：不要内联写死气泡文字颜色。CSS 已用 `color: var(--ai-text)` 随主题切换
+          //   （浅色 #223130 / 深色 #edf2ef），这里之前写死 '#1f2937' 会覆盖暗色模式变量，
+          //   导致深色背景下回复文字对比度不足看不清。
+          assistantBubble.style.removeProperty('color');
+          // Responsive CSS owns the font throughout the reply. A completion-only
+          // inline size would rewrap every mobile paragraph at the last frame.
+          assistantBubble.style.removeProperty('font-size');
+        }
+        setAiRootState('ai-idle');
+        
+        if ((thinking || node.querySelector('.ai-process-timeline')) && finalThinkingMode !== 'off' && _sendThinkingMode !== 'off') {
+          // ★ 修复：优先用 reasoningContainer（流式期间创建的），但必须验证节点仍在 DOM 中。
+          //   本轮使用发送时的档位，切换设置只影响下一次发送。
+          //   此前若 reasoningContainer 持有脱离 DOM 的陈旧引用（search_supplement 重置、
+          //   sanitized_content 替换 innerHTML 等场景），代码误以为按钮已存在而跳过创建，
+          //   导致"已思考"折叠按钮消失。现在双重校验：变量非空 + 节点仍连接在文档中。
+          var rNode = (reasoningContainer && reasoningContainer.isConnected) ? reasoningContainer : (node ? node.querySelector('.ai-thinking') : null);
+          if (!rNode && node) {
+            rNode = buildReasoningNode(thinking, messagesEl);
+            node.insertBefore(rNode, node.firstChild);
+          } else if (rNode) {
+            var body = rNode.querySelector('.ai-thinking-body');
+            if (body && !body.__orderedProcess) body.textContent = cleanReasoningText(thinking);
+          }
+          if (rNode) {
+            setThinkingExpanded(rNode, !!rNode.classList.contains('expanded'), messagesEl);
+            if (thinkingTimer) {
+              thinkingTimer.syncFinal(finalThinkingElapsedMs);
+            } else {
+              setThinkingStatus(rNode, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
+            }
+          }
+        } else if (reasoningContainer) {
+          if (thinkingTimer) thinkingTimer.cancel();
+          try { reasoningContainer.remove(); } catch (e) {}
+          reasoningContainer = null;
+        }
+        
+        var searchCount = evt ? evt.search_count : 0;
+        var searchQuery = evt ? evt.search_query : '';
+        var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
+        var searchExpiresAt = evt && typeof evt.search_expires_at === 'number' ? evt.search_expires_at : 0;
+        var aiMsg = {
+          role: 'assistant',
+          content: content,
+          client_request_id: reqId,
+          interrupted: !!(evt && evt.interrupted === true),
+          reasoning: (finalThinkingMode !== 'off' ? thinking : ''),
+          process_events: snapshotAiProcess(node),
+          site_cards: streamSiteCards.slice(0, 32),
+          created_at: new Date().toISOString(),
+          thinking_mode: finalThinkingMode,
+          thinking_elapsed_ms: finalThinkingElapsedMs,
+          search_count: searchCount,
+          search_query: searchQuery,
+          search_results: searchResults,
+          search_expires_at: searchExpiresAt,
+          usage: Object.assign({}, usageResult || {}, {
+            model: finalModel,
+            thinking_mode: finalThinkingMode
+          })
+        };
+        S.messages.push(aiMsg);
+        // ★ 2026-09-29（审计 S1）：登记本轮的本地 assistant 消息，并把节点与消息
+        //   互相关联，供首屏历史到达时按"是否本地未同步"保留气泡。
+        if (S._pendingLocalMsgs.indexOf(aiMsg) === -1) S._pendingLocalMsgs.push(aiMsg);
+        if (node) node._msgRef = aiMsg;
+        // 流式完成后立刻写本地缓存，避免关面板/重进时服务端尚未落库导致「上一条不见了」
+        try { setAiHistoryCache(S.conversationId, S.messages); } catch (eCache) {}
+        // ★ 2026-09-29（审计 S1 收尾）：本轮已成功落定，清空"本地待同步"引用。
+        //   否则若之后又触发 loadHistory(!before)（如重进会话），服务端已落库的
+        //   等价消息会和这里的本地引用被 concat 成两条，造成重复问答。
+        //   只在流式进行中保留 _pendingLocalMsgs，落定即清，生命周期严格对齐。
+        if (S._pendingLocalMsgs.length > 40) S._pendingLocalMsgs = S._pendingLocalMsgs.slice(-40);
+        
+        if (node) {
+          // 如果有搜索结果，把已有的搜索条移入消息节点（而非单独在 container 里）
+          var liveSearchBar = null;
+          if (searchCount > 0) {
+            liveSearchBar = node.querySelector('.ai-search-status');
+          }
+          if (liveSearchBar) {
+            node.appendChild(liveSearchBar);
+          } else if (searchCount > 0) {
+            node.appendChild(buildSearchStatusBar({
+              count: searchCount,
+              query: searchQuery || '',
+              results: searchResults || []
+            }));
+          }
+          var footer = el('div', { class: 'ai-msg-footer' });
+          if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+          // ★ 工作模式徽标：让用户能明确看到「这条回复是工作模式产出的」，
+          //   避免开了工作模式却因为界面无变化而误以为没生效。
+          //   优先用本次流式实时记录（streamWorkMode），历史回看回退到消息持久化字段。
+
+          if (streamToolCount > 0) {
+            footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: '调用工具 ' + streamToolCount + ' 次' }));
+          }
+          if (finalThinkingMode && finalThinkingMode !== 'off') {
+            footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 ' + finalThinkingMode }));
+          }
+          if (usageResult || finalModel) {
+            var usageLine = buildUsageLine(aiMsg.usage);
+            if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
+          }
+          // ★ 直播回复底部操作按钮：复制 / 分享 / 重新生成
+          var actionRow = el('div', { class: 'ai-msg-actions' });
+          var copyBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-copy', 'aria-label': '复制回复', text: '复制' });
+          copyBtn.addEventListener('click', function(ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            var t = (assistantBubble.textContent || '').trim();
+            if (!t) return;
+            doCopy(t);
+            copyBtn.textContent = '已复制';
+            setTimeout(function() { copyBtn.textContent = '复制'; }, 2000);
+          });
+          actionRow.appendChild(copyBtn);
+          if (typeof navigator !== 'undefined' && navigator.share) {
+            var shareBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-share', 'aria-label': '分享回复', text: '分享' });
+            shareBtn.addEventListener('click', function(ev) {
+              ev.preventDefault(); ev.stopPropagation();
+              var t = (assistantBubble.textContent || '').trim();
+              if (!t) return;
+              navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function(err) { handleShareError(err, t); });
+            });
+            actionRow.appendChild(shareBtn);
+          }
+          var regenBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-regen', 'aria-label': '重新生成回复', text: '重新生成' });
+          regenBtn.addEventListener('click', function(ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            triggerRegenerate(messagesEl, aiMsg);
+          });
+          actionRow.appendChild(regenBtn);
+          footer.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
+          if (footer.children.length > 0) node.appendChild(footer);
+          // ★★★ 2026-09-15 修复（P1-9「内置模型回复后 复制/分享/重新生成 按钮消失」）：
+          //   症状（用户截图实证）：用内置模型回复完成后，消息底部的
+          //   「复制 / 分享 / 重新生成」三个操作按钮不见了。
+          //   根因：`clearAssistantTransientStatus(node)`（本函数开头调用）内部会
+          //   对 `.ai-enhanced-status / .ai-tool-status / .ai-search-supplement`
+          //   等节点执行 `remove()`；当这些"状态容器"在 DOM 上恰好是气泡的**兄弟
+          //   或外层包装**时，移除动作会连带影响 footer 的挂载位置；另外
+          //   `node` 若持有脱离文档的陈旧引用（sanitized_content 替换 innerHTML、
+  //   search_supplement 重建等场景），append 上去的 footer 根本不在可见 DOM 里。
+  //   修复：append 后做一次**强制兜底校验**——若操作行不在文档中或数量不足，
+  //   重新挂载到实际可见的气泡容器上，保证三个按钮始终存在。
+          try {
+            var _realNode = (node && node.isConnected) ? node
+              : (assistantBubble && assistantBubble.closest ? assistantBubble.closest('.ai-msg') : null);
+            if (_realNode) {
+              var _actRow = _realNode.querySelector('.ai-msg-actions');
+              if (!_actRow || !_actRow.isConnected) {
+                // footer 丢失或未连接：重建并挂载
+                if (!footer.isConnected) _realNode.appendChild(footer);
+              }
+              // 极端情况下（footer 被清空但仍在 DOM）：重新补齐按钮行
+              var _foot = _realNode.querySelector('.ai-msg-footer');
+              if (_foot && !_foot.querySelector('.ai-msg-actions')) {
+                _foot.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
+              }
+            }
+          } catch (eEnsureActs) {}
+        }
+      }
+
+      interruptedFinalizer = function() {
+        // Read the complete received buffers, including text still waiting for
+        // the animation renderer, and settle timers/tool indicators immediately.
+        if (aiContent || aiReasoning || snapshotAiProcess(assistantNode).length || streamSiteCards.length) {
+          finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
+        } else {
+          _finalized = true;
+          assistantNode.remove();
+        }
+        cleanupRenderers();
+        if (reader) { try { reader.cancel().catch(function() {}); } catch (eCancelRead) {} }
+      };
+
+      function cleanupRenderers() {
+        if (thinkingTimer) {
+          try { thinkingTimer.cancel(); } catch (e0) {}
+          thinkingTimer = null;
+        }
+        if (contentRenderer) {
+          try { contentRenderer.cancel(); } catch (e) {}
+          contentRenderer = null;
+        }
+        if (reasoningRenderer) {
+          try { reasoningRenderer.cancel(); } catch (e2) {}
+          reasoningRenderer = null;
+        }
+        if (S.streamCleanup === cleanupRenderers) {
+          S.streamCleanup = null;
+        }
+      }
+      S.streamCleanup = cleanupRenderers;
+
+      function ensureAssistantReady() {
+        hideAssistantTyping();
+        return assistantNode;
+      }
+
+      function ensureReasoningNode() {
+        ensureAssistantReady();
+        if (!reasoningContainer) {
+          reasoningContainer = assistantNode.querySelector('.ai-thinking');
+        }
+        if (!reasoningContainer) {
+          reasoningContainer = buildReasoningNode('思考中...', messagesEl);
+          assistantNode.insertBefore(reasoningContainer, assistantNode.firstChild);
+          setThinkingExpanded(reasoningContainer, !aiContent, messagesEl);
+        }
+        return reasoningContainer;
+      }
+
+      var activeToolTimeline = null, activeReasoningSegment = null;
+      function closeReasoningSegment() {
+        if (reasoningRenderer) { reasoningRenderer.finish(); reasoningRenderer = null; }
+        activeReasoningSegment = null;
+      }
+      function processBody() {
+        var rn = ensureReasoningNode(), body = rn.querySelector('.ai-thinking-body');
+        if (!body.__orderedProcess) { body.textContent = ''; body.__orderedProcess = true; rn.classList.add('ai-ordered-process'); }
+        return body;
+      }
+      function reasoningSegment() {
+        if (!activeReasoningSegment) {
+          activeToolTimeline = null;
+          activeReasoningSegment = el('div', { class: 'ai-reasoning-segment' });
+          processBody().appendChild(activeReasoningSegment);
+        }
+        return activeReasoningSegment;
+      }
+      function ensureToolTimeline(newRound, event) {
+        var callId = event && (event.call_id || event.tool_call_id);
+        if (!callId && newRound && event && Array.isArray(event.tools) && event.tools.length) {
+          var firstId = event.tools[0].id || event.tools[0].call_id;
+          var allKnown = firstId && event.tools.every(function(tool) { return Array.from(assistantNode.querySelectorAll('.ai-tool-step[data-tool-call-id]')).some(function(step) { return step.getAttribute('data-tool-call-id') === String(tool.id || tool.call_id || ''); }); });
+          if (allKnown) callId = firstId;
+        }
+        if (callId) {
+          var known = assistantNode.querySelectorAll('.ai-tool-step[data-tool-call-id]');
+          for (var i = 0; i < known.length; i++) {
+            if (known[i].getAttribute('data-tool-call-id') === String(callId)) return known[i].closest('.ai-tool-timeline');
+          }
+        }
+        if (newRound && activeToolTimeline && activeToolTimeline.__formalRound) activeToolTimeline = null;
+        if (!activeToolTimeline) {
+          closeReasoningSegment();
+          activeToolTimeline = el('div', { class: 'ai-tool-timeline ai-tool-status ai-process-timeline', role: 'status', 'aria-live': 'polite' });
+          if (_sendThinkingMode !== 'off') processBody().appendChild(activeToolTimeline);
+          else assistantNode.insertBefore(activeToolTimeline, assistantBubble);
+        }
+        if (newRound) activeToolTimeline.__formalRound = true;
+        return activeToolTimeline;
+      }
+
+      function ensureThinkingTimer() {
+        var rn = ensureReasoningNode();
+        if (!thinkingTimer) {
+          thinkingTimer = createThinkingTimer(rn);
+          thinkingStartedAt = Date.now();
+          finalThinkingElapsedMs = 0;
+          thinkingTimer.start();
+        }
+        return thinkingTimer;
+      }
+
+      function ensureAssistantBubbleReady() {
+        hideAssistantTyping();
+        assistantBubble.classList.remove('ai-reply-pending');
+        // 清掉发送后占位文案，避免和流式内容拼在一起
+        if (assistantBubble.textContent === '正在回复…' && !contentRenderer) {
+          try { assistantBubble.textContent = ''; } catch (eClr) {}
+        }
+        assistantBubble.style.display = 'block';
+        assistantBubble.style.visibility = 'visible';
+        if (!assistantBubble.classList.contains('ai-typing')) {
+          assistantBubble.classList.add('ai-typing');
+        }
+        if (!contentRenderer) {
+          // ★ 2026-09-17：正文渲染期的滚动节流时间戳（每轮回复独立，重进函数即重置）
+          var _lastContentScroll = 0;
+          contentRenderer = createSmoothTextRenderer(assistantBubble, {
+            minChunk: 8,
+            maxChunk: 64,
+            // ★ 2026-09-17 正文流优化：charsPerMs 100 → 130，配合预算算法提速，
+            //   减少"字一个个蹦"的延迟感；上限仍受 maxChunk 约束不会暴冲。
+            charsPerMs: 130,
+            streamClass: 'ai-streaming-soft',
+            onRender: function() {
+              // ★ 2026-09-17 滚动节流：原实现每帧都调 scrollToBottom，
+              //   流式高频期间每帧一次布局计算，反而拖慢渲染帧率（越写越卡）。
+              //   改为最多 100ms 一次——跟随依然实时，但不再与渲染抢主线程。
+              var _nowScroll = Date.now();
+              if (_nowScroll - _lastContentScroll < 100) return;
+              _lastContentScroll = _nowScroll;
+              scrollToBottom(messagesEl, false);
+            }
+          });
+          // P4 修复: 设置复制事件监听器
+          setupBubbleCopy(assistantBubble, messagesEl);
+        }
+        return assistantBubble;
+      }
+      
+      // H-25: 普通对话 idle 看门狗 — 无数据视为超时，中止等待并清理，
+      // 避免服务端/provider 挂起时界面永久停在"处理中"。
+      // B 修复：收到首个数据块前用 45s（防连接假死）；一旦收到任何事件（含 reasoning/content），
+      // 说明连接存活、AI 正在工作，放宽到 120s，容忍慢模型在思考阶段的静默，避免误判"AI中断"。
+      var _lastDataTime = Date.now();
+      var timedOut = false;
+      var _receivedAny = false;
+      var _idleCheckTimer = setInterval(function() {
+        if (timedOut || !S.active) return;
+        var idleThreshold = _receivedAny ? 120000 : 45000;
+        if (Date.now() - _lastDataTime > idleThreshold) {
+          timedOut = true;
+          if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
+          if (reader) { try { reader.cancel(); } catch (e) {} }
+        }
+      }, 5000);
+
+      while (true) {
+        if (S._currentReqId !== reqId || controller.signal.aborted) {
+          aborted = true;
+          if (reader) try { reader.cancel(); } catch (e) {}
+          break;
+        }
+        
+        var readResult;
+        try { readResult = await reader.read(); } catch (e) { throw e; }
+        if (readResult.done) {
+          if (!S.active) { aborted = true; if (reader) try { reader.cancel(); } catch (e) {} break; }
+          // ★ 修复（M55）：EOF 时 flush 解码器残留与半行缓冲，避免最后事件（done/error）
+          // 非换行结尾时被静默丢弃（同文件 DT/Tavily 读取器均有 EOF flush）。
+          buffer += decoder.decode();
+          // ★ 2026-09-26（审计 AI 前端 P2-1）：补上真正的"半行派发"。原实现只 flush 了
+          //   解码器，若最后一行没有换行结尾，split('\n') 后它会留在 buffer 里被丢弃 →
+          //   前端收不到最后一条 done/error（表现为"回复完整却提示未保存/连接中断"）。
+          //   这里补一个换行符，让它进入下面的行处理循环；buffer 已被消费为空。
+          if (buffer && buffer.charAt(buffer.length - 1) !== '\n') buffer += '\n';
+          _eofReached = true;
+        }
+        if (!readResult.done && !S.active) {
+          // ★ 修复 M10：break 前必须置 aborted，否则下方 `S._currentReqId !== reqId || aborted`
+          // 判定可能走"完成处理"分支保留半成品节点（回答闪现后消失）。
+          aborted = true;
+          reader.cancel().catch(function(){});
+          break;
+        }
+        
+        buffer += decoder.decode(readResult.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        // ★ 2026-09-13 修复（P-12）：第三处缓冲同样补上限（前两处已加）。
+        //   单行 512KB 上限只拦"已闭合的行"，残留在 buffer 的尾部才是无界增长点。
+        if (buffer.length > 1024 * 1024) {
+          console.warn('[AI] SSE buffer overflow, aborting stream, length=' + buffer.length);
+          aborted = true;
+          reader.cancel().catch(function(){});
+          break;
+        }
+        _lastDataTime = Date.now();
+        _receivedAny = true; // B 修复：已收到任意数据，放宽 idle 阈值到 120s
+        
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li].trim();
+          if (!line || !line.startsWith('data: ')) continue;
+          
+          // ★ 修复：标准 [DONE] 结尾识别（此前被 JSON.parse 静默吞掉，收尾误判）
+          if (line === 'data: [DONE]' || line === 'done') { doneReceived = true; break; }
+          var eventStr = line.slice(6);
+          // ★ 修复：单行事件大小上限（深页循环有 512KB 上限，主循环此前没有）
+          if (eventStr.length > 512 * 1024) { console.warn('[AI] oversized SSE line dropped, length=' + eventStr.length); continue; }
+          var evt;
+          try { evt = JSON.parse(eventStr); } catch (e) { continue; }
+          if (!evt) continue;
+          
+          // 检查是否被新请求取代
+          if (S._currentReqId !== reqId) { aborted = true; break; }
+          
+          if (evt.type === 'meta') {
+            streamConvId = evt.conversation_id;
+            if (streamConvId) {
+              S.conversationId = streamConvId;
+              writeConvId(streamConvId);
+            }
+            continue;
+          }
+          
+          // 服务端心跳保活事件：仅用于保持连接与重置 idle 看门狗，无 UI 副作用
+          if (evt.type === 'heartbeat') {
+            continue;
+          }
+          
+          if (evt.type === 'multi_agent') {
+            var maStatus = assistantNode.querySelector('.ai-search-status');
+            if (evt.action === 'searching') {
+              var qs = evt.queries || [];
+              var maLabel = qs.length
+                ? ('并行搜索 · ' + qs.length)
+                : '多 Agent 搜索中…';
+              var maBar = buildSearchStatusBar({ statusText: maLabel, simple: true });
+              if (maStatus && maStatus.parentNode) maStatus.parentNode.replaceChild(maBar, maStatus);
+              else assistantNode.insertBefore(maBar, assistantBubble);
+              // 把拆解词放进思考过程，不撑宽状态条
+              try {
+                if (qs.length) {
+                  var maThink = ensureReasoningNode();
+                  var maBody = maThink && maThink.querySelector('.ai-thinking-body');
+                  if (maBody) {
+                    var maEntry = el('div', { class: 'ai-thought-entry' });
+                    maEntry.innerHTML = '<div class="ai-thought-role">🔍 多 Agent 拆解搜索词</div><div class="ai-thought-chunk"></div>';
+                    maEntry.querySelector('.ai-thought-chunk').textContent = qs.map(function(q, qi) { return (qi + 1) + '. ' + q; }).join('\n');
+                    maBody.appendChild(maEntry);
+                    try { maBody.scrollTop = maBody.scrollHeight; } catch (e) {}
+                  }
+                  if (maThink) setThinkingExpanded(maThink, true, messagesEl);
+                }
+              } catch (eMa) {}
+            }
+          }
+
+          // 思考后补充搜索：重置内容状态以接收新一轮 stream，保留已显示的思考过程
+          if (evt.type === 'search_supplement') {
+            var searchNote = el('div', { class: 'ai-search-supplement', text: '正在联网补充信息...' });
+            if (assistantNode) assistantNode.insertBefore(searchNote, assistantBubble);
+            // 清空旧内容，让第二轮 stream 重新生成
+            cleanupRenderers();
+            hideAssistantTyping();
+            if (assistantBubble) try { assistantBubble.innerHTML = ''; } catch (e) {}
+            // ★ 修复：reasoning 节点引用一并失效。旧节点可能已随 supplement 被清理/脱管，
+            // 若继续复用脱离 DOM 的节点，新一轮 thinking 内容会插入已 detached 节点而不显示。
+            reasoningContainer = null;
+            if (reasoningRenderer) { try { reasoningRenderer.cancel(); } catch (eR) {} reasoningRenderer = null; }
+            aiContent = '';
+            aiReasoning = '';
+            reasoningStarted = false;
+            doneReceived = false;
+            finalThinkingElapsedMs = 0;
+            finalThinkingMode = null;
+            continue;
+          }
+
+          if (evt.type === 'search_status') {
+            // DeepSeek 内置 web_search 状态（黑盒：结果不外吐，仅提示状态）
+            var stBar = assistantNode.querySelector('.ai-search-status');
+            var stText = evt.status === 'completed' ? '已联网' : '联网中…';
+            var stFresh = buildSearchStatusBar({ statusText: stText, simple: true });
+            // ★ 修复：区分运行态/完成态，供 settleSearchStatus 判断是否还需收敛。
+            //   completed 时直接标记 is-settled（动画停止），in_progress 时标 is-running。
+            if (evt.status === 'completed') {
+              stFresh.classList.add('is-settled');
+            } else {
+              stFresh.classList.add('is-running');
+            }
+            if (stBar && stBar.parentNode) stBar.parentNode.replaceChild(stFresh, stBar);
+            else assistantNode.insertBefore(stFresh, assistantBubble);
+            continue;
+          }
+
+          if (evt.type === 'search') {
+            var searchCount = evt.count;
+            var searchBar = assistantNode.querySelector('.ai-search-status');
+            var searchFresh = buildSearchStatusBar({
+              count: searchCount,
+              query: evt.query || '',
+              results: evt.results || []
+            });
+            // ★ 修复：搜索结果已到达 → 直接标记完成态，动画立即停止，
+            //   不再依赖 done 事件（此前 search 事件只更新文字，动画仍在跑）。
+            searchFresh.classList.add('is-settled');
+            if (searchBar && searchBar.parentNode) searchBar.parentNode.replaceChild(searchFresh, searchBar);
+            else assistantNode.insertBefore(searchFresh, assistantBubble);
+            continue;
+          }
+          
+          if (evt.type === 'search_error') {
+            var searchDiag2 = evt.diagnostics;
+            var errLabel = evt.error || '联网失败';
+            if (errLabel.length > 16) errLabel = errLabel.slice(0, 16) + '…';
+            var searchBar2 = assistantNode.querySelector('.ai-search-status');
+            var errOpts = { statusText: errLabel, simple: true };
+            // 有诊断信息时放到 detail（避免长错误撑宽）
+            if (searchDiag2) {
+              var errDetail = '';
+              if (searchDiag2.provider_errors && searchDiag2.provider_errors.length) {
+                errDetail = searchDiag2.provider_errors.map(function(pe) {
+                  return pe.provider + ': ' + String(pe.error || '').slice(0, 80);
+                }).join('\n');
+              } else if (searchDiag2.missing_env && searchDiag2.missing_env.length) {
+                errDetail = '未配置: ' + searchDiag2.missing_env.join(', ');
+              }
+              if (errDetail) {
+                errOpts.simple = false;
+                errOpts.query = errDetail;
+                errOpts.results = [];
+              }
+            }
+            var errFresh = buildSearchStatusBar(errOpts);
+            // ★ 修复：失败也是终态，停止动画，避免"失败后还在转"
+            errFresh.classList.add('is-settled');
+            if (searchBar2 && searchBar2.parentNode) searchBar2.parentNode.replaceChild(errFresh, searchBar2);
+            else assistantNode.insertBefore(errFresh, assistantBubble);
+            continue;
+          }
+          
+          if (evt.type === 'tool_calls') {
+            var toolList = evt.tools || [];
+            streamToolCount += toolList.length;
+            var timeline = ensureToolTimeline(true, evt);
+            // ★★★ 2026-09-17 重写（P0「工具调用动画全部展开、堆叠占位」）：
+            //   用户诉求：像 ChatGPT / Codex 那样——并行调用 N 个工具时只显示
+            //   N 行紧凑的"正在搜索中…"，全部完成后原地换成"已完成"，
+            //   需要继续调用就再追加新一轮，不要每个工具都展开成一个四行大卡片。
+            //   旧实现的问题：
+            //   ① 每个工具都建一个含「图标+标题+详情+状态」四行的完整卡片，
+            //      并行 5 个就是 20 行，几乎占满整屏；
+            //   ② tool_pending 还会为同一个工具**再建一条**独立步骤，
+            //      于是"准备工具 / 联网搜索 / 社媒检索"反复出现（截图实证）；
+            //   ③ 没有"轮次"概念，多轮工具全部平铺堆积，越长越乱。
+            //   新实现：
+            //   ① 一个"轮次"容器 N 行紧凑条目，单行呈现：状态图标 + 名称 + 查询词；
+            //   ② tool_pending 与 tool_calls 复用同一条目（按工具名归并），去重；
+            //   ③ 同一轮内全部完成后，把整轮收敛为"N 项已完成"，并支持折叠；
+            //   ④ 新一轮工具自动新建轮次容器，历史轮次保持折叠态，不再抢屏幕。
+            // tool_pending may arrive before tool_calls. Promote those placeholders
+            // in their existing round instead of creating a new empty round around them.
+            // ★★★ 2026-09-28 修复（重复轮次根因）：
+            //   原实现靠**文案匹配**识别占位轮次（标题 textContent === '准备工具'）。
+            //   但占位标题已改为 toolLabel(pendName)（"查询天气"等说人话的名字），
+            //   文案匹配必然失效 → 找不到可复用的轮次 → 新建 → 同一件事出现两轮。
+            //   改为读取 [data-tool-pending] 语义标记，与显示文案彻底解耦。
+            var roundBox = null;
+            var pendingRounds = timeline.querySelectorAll('.ai-tool-round.is-running');
+            for (var pr = pendingRounds.length - 1; pr >= 0; pr--) {
+              if (pendingRounds[pr].querySelector('[data-tool-pending]')) { roundBox = pendingRounds[pr]; break; }
+            }
+            var roundList;
+            if (roundBox) {
+              roundList = roundBox.querySelector('.ai-tool-round-list');
+              var roundLabel = roundBox.querySelector('.ai-tool-round-label');
+              if (roundLabel) roundLabel.textContent = toolList.length > 1 ? ('正在调用 ' + toolList.length + ' 个工具') : '正在调用工具';
+            } else {
+              var _roundKey = 'r' + (toolRoundSeq++);
+              // ★ 2026-09-22：轮次容器统一由 createToolRound 构造（含可折叠条目区）
+              var _roundBuilt = createToolRound(
+                toolList.length > 1 ? ('正在调用 ' + toolList.length + ' 个工具') : '正在调用工具',
+                _roundKey
+              );
+              roundBox = _roundBuilt.box;
+              roundList = _roundBuilt.list;
+              // ★ 2026-09-28（方案 A）：轮次挂进统一活动区 body，而不是直接挂 timeline
+              var _actBody = toolActivityBody(timeline);
+              (_actBody || timeline).appendChild(roundBox);
+            }
+
+            toolList.forEach(function(t) {
+              // ★ 2026-09-28（方案 D）：改走统一映射表，工具名用动作描述而非产品名
+              var label = toolLabel(t.name);
+              var detail = '';
+              if (t.args && t.args.query) detail = String(t.args.query);
+              else if (t.args && t.args.url) detail = String(t.args.url).slice(0, 80);
+              else if (t.args && t.args.location) detail = String(t.args.location);
+              else if (t.args && t.args.symbol) detail = String(t.args.symbol);
+              else if (t.args && t.args.from && t.args.to) detail = String(t.args.from) + '→' + String(t.args.to);
+              // ★ 生成时即净化 stepId：剔除引号/反斜杠/方括号等选择器特殊字符与控制字符，
+              // 保证 setAttribute 与 querySelector 取值恒等，杜绝属性选择器注入/失配
+              var stepId = ('tool-step-' + String(t.name || 'tool') + '-' + String(detail).slice(0, 24))
+                .replace(/["\\\]\[\r\n\t]/g, '').replace(/\s+/g, '_');
+              // Identical calls belong to distinct execution rounds; never resurrect a
+              // settled historical entry, or a later result may be assigned to the wrong call.
+              var existing = null;
+              var invocationId = String(t.id || t.call_id || '');
+              if (invocationId) {
+                var byId = timeline.querySelectorAll('[data-tool-call-id]');
+                for (var bi = 0; bi < byId.length; bi++) if (byId[bi].getAttribute('data-tool-call-id') === invocationId) existing = byId[bi];
+              }
+              if (!invocationId && detail) {
+                var candidates = timeline.querySelectorAll('[data-tool-step="' + stepId + '"]');
+                for (var ci = candidates.length - 1; ci >= 0; ci--) {
+                  // ★ 2026-09-28：必须同时满足"还在跑"且"尚未被任何 result 认领"。
+                  //   只判 is-running 会踩到"上一轮同名调用超时未返回、仍处于 running"
+                  //   的那条，把它当成这一轮的重用目标 —— 结果是两次调用共用一条 DOM，
+                  //   谁的结果先到就把这条标完成，另一个永远转圈（用户报障的机制之一）。
+                  if (candidates[ci].classList.contains('is-running')
+                      && candidates[ci].getAttribute('data-tool-claimed') !== '1'
+                      && !candidates[ci].classList.contains('ai-tool-organizing')) {
+                    existing = candidates[ci];
+                    break;
+                  }
+                }
+              }
+              // Reuse a pending placeholder in the current live round, enriching it
+              // with the canonical call identity and query before results arrive.
+              // ★★★ 2026-09-28 修复：同样改为读 [data-tool-pending] 语义标记，
+              //   不再依赖标题文案 '准备工具'（占位标题已改为 toolLabel 结果）。
+              if (!existing) {
+                var pendingSteps = timeline.querySelectorAll('.ai-tool-round.is-running .ai-tool-step[data-tool-pending]');
+                for (var pi = pendingSteps.length - 1; pi >= 0; pi--) {
+                  var pendingStep = pendingSteps[pi];
+                  var pendingName = pendingStep.getAttribute('data-tool-name') || '';
+                  if (pendingName === String(t.name || '')
+                      && (!invocationId || !pendingStep.getAttribute('data-tool-call-id') || pendingStep.getAttribute('data-tool-call-id') === invocationId)
+                      && pendingStep.getAttribute('data-tool-claimed') !== '1') {
+                    existing = pendingStep;
+                    break;
+                  }
+                }
+              }
+              if (existing) {
+                if (invocationId && !existing.classList.contains('is-running')) return;
+                // 重激活 = 开启**新的执行轮次**，必须清掉上一轮的认领标记，
+                // 否则这一轮的 tool_result 会因为 claimed=1 而认领不到它 → 永远转圈。
+                existing.removeAttribute('data-tool-claimed');
+                // 占位转正：清掉 pending 标记（它已是正式条目，不再代表"尚未下发调用"）
+                existing.removeAttribute('data-tool-pending');
+                existing.classList.add('is-running');
+                existing.classList.remove('is-done', 'is-error');
+                existing.setAttribute('data-tool-name', String(t.name || ''));
+                if (invocationId) existing.setAttribute('data-tool-call-id', invocationId);
+                existing.setAttribute('data-tool-step', stepId);
+                var stepTitle = existing.querySelector('.ai-tool-step-title');
+                if (stepTitle) stepTitle.textContent = label;
+                var stepBody = existing.querySelector('.ai-tool-step-body');
+                var stepDetail = existing.querySelector('.ai-tool-step-detail');
+                if (detail && stepBody) {
+                  if (!stepDetail) {
+                    stepDetail = el('div', { class: 'ai-tool-step-detail', text: detail });
+                    var statusNode = existing.querySelector('.ai-tool-step-status');
+                    stepBody.insertBefore(stepDetail, statusNode || null);
+                  } else stepDetail.textContent = detail;
+                }
+                var st = existing.querySelector('.ai-tool-step-status');
+                if (st) st.textContent = toolRunningLabel(t.name);
+                try { refreshOwningToolRound(existing); } catch (eExistingRound) {}
+                return;
+              }
+              // 紧凑单行条目：状态图标 + 名称 +（查询词/参数）
+              var step = el('div', { class: 'ai-tool-step is-running' });
+              step.setAttribute('data-tool-step', stepId);
+              if (invocationId) step.setAttribute('data-tool-call-id', invocationId);
+              step.setAttribute('data-tool-name', String(t.name || ''));
+              // ★ 2026-09-28（方案 D）：显示名说人话，内部名保留进 title 供悬停查看
+              if (t.name && label !== String(t.name)) step.setAttribute('title', String(t.name));
+              step.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
+              var body = el('div', { class: 'ai-tool-step-body' });
+              body.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
+              if (detail) body.appendChild(el('div', { class: 'ai-tool-step-detail', text: detail }));
+              body.appendChild(el('div', { class: 'ai-tool-step-status', text: toolRunningLabel(t.name) }));
+              step.appendChild(body);
+              roundList.appendChild(step);
+            });
+            // 轮次计数：运行中显示"x/y 完成"，全完成时收敛整轮
+            updateToolRoundState(roundBox);
+            followToolProgress(messagesEl, _aiUserPinnedUp);
+            continue;
+          }
+
+          if (evt.type === 'enhanced_stage') {
+            var stageLabel = evt.message || ({ understand: '正在梳理问题与回答结构…', verify: '正在查证必要信息…', answer: '正在组织回答…' }[evt.stage] || '正在增强思考…');
+            var enhancedBar = assistantNode.querySelector('.ai-enhanced-status');
+            if (!enhancedBar) {
+              enhancedBar = el('div', { class: 'ai-enhanced-status', role: 'status', 'aria-live': 'polite' });
+              assistantNode.insertBefore(enhancedBar, assistantBubble);
+            }
+            enhancedBar.textContent = stageLabel;
+            enhancedBar.setAttribute('data-stage', evt.stage || 'working');
+            continue;
+          }
+          
+          if (evt.type === 'card') {
+            try {
+              if (evt.card) {
+                if (evt.call_id) evt.card.tool_call_id = evt.call_id;
+                if ((evt.card.type !== 'web_search' || !assistantNode.querySelector('.ai-tool-step')) && !streamSiteCards.some(function(card) { return card.id && card.id === evt.card.id; })) streamSiteCards.push(evt.card);
+              }
+              // Prefer placing cards inside the assistant turn (before bubble),
+              // fall back to transcript end for early attachment OCR cards.
+              if (assistantNode && assistantBubble) {
+                renderAiToolCard(assistantNode, evt.card, assistantBubble);
+              } else {
+                renderAiToolCard(messagesEl, evt.card);
+              }
+            } catch (cardErr) { notify('AI 卡片加载失败，已保留文字回复'); }
+            followToolProgress(messagesEl, _aiUserPinnedUp);
+            continue;
+          }
+
+          // ★ 2026-09-15 流畅性优化：服务端在工具执行期间每 3s 推一次 tool_progress。
+          //   此前工具执行（read_web_page / run_code / 多路搜索）期间 SSE 无事件，
+          //   前端"搜索中"字样长时间静止，用户以为卡死并手动重发。
+          //   现在原地把运行中步骤的状态改成"搜索中 · 已 12s"，给出真实进展感，
+          //   同时该事件本身就是保活信号，可重置前端 idle 看门狗。
+          if (evt.type === 'tool_progress') {
+            toolProgressTick = (toolProgressTick || 0) + 1;
+            var _pElapsed = toolProgressTick * 3;
+            var _pSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
+            for (var _pi = 0; _pi < _pSteps.length; _pi++) {
+              var _pStatusEl = _pSteps[_pi].querySelector('.ai-tool-step-status');
+              if (_pStatusEl) {
+                // ★ 2026-09-17：文案与两态模型统一（搜索中 → 已完成），
+                //   进行中只追加计时，不改状态词，避免出现第三、第四种表述。
+                var runningLabel = toolRunningLabel(_pSteps[_pi].getAttribute('data-tool-name'));
+                _pStatusEl.textContent = runningLabel + (_pElapsed >= 3 ? (' · 已 ' + _pElapsed + 's') : '');
+              }
+            }
+            // 同步刷新每个轮次摘要上的 x/y 计数
+            try {
+              var _pRounds = assistantNode.querySelectorAll('.ai-tool-round.is-running');
+              for (var _pri = 0; _pri < _pRounds.length; _pri++) updateToolRoundState(_pRounds[_pri]);
+            } catch (eProgRound) {}
+            followToolProgress(messagesEl, _aiUserPinnedUp);
+            continue;
+          }
+
+          if (evt.type === 'tool_pending') {
+            // ★★★ 2026-09-17 重写（消除重复条目）：
+            //   旧实现为每个 tool_pending **无条件新建**一条"准备工具"步骤，
+            //   而紧随其后的 tool_calls 又会为同一工具新建"联网搜索/社媒检索"，
+            //   于是同一件事在时间线里出现两遍（截图实证：
+            //   "准备工具 search_social" 与 "社媒检索" 反复各出现一次）。
+            //   新实现：pending 只作为「该工具即将执行」的轻量占位——
+            //   若同名工具条目已存在则直接复用并保持运行态；否则只登记一个
+            //   紧凑占位，等 tool_calls 到达时把详情补齐、状态统一为"搜索中"。
+            var pendingBar = ensureToolTimeline(false, evt);
+            var pendingCallId = String(evt.call_id || evt.tool_call_id || '');
+            var pendName = String(evt.tool_name || '');
+            // ★★★ 2026-09-28 修复（必现：同一批两个同名工具＝赤字）：
+            //   原式 `pendingBar.querySelector('[data-tool-name="X"]')` 取的是
+            //   **全时间线文档序第一条**同名条目，既不限定是否仍在运行、
+            //   也不排除已被结果认领/已终态的条目。
+            //   后端的发送时序是 `tool_calls`(整批) → 逐个 `tool_pending`
+            //   → `tool_result`（server.js:22620-22630），所以第 2 个 pending
+            //   再次查询时命中的**仍是第 1 条**——而它此时可能已经被自己的
+            //   tool_result 标记了 is-done。原代码随后无条件
+            //   `add('is-running') / remove('is-done','is-error')`，把一条
+            //   **已经完成并打勾**的条目复活成"搜索中"，且没有清掉
+            //   `data-tool-claimed` —— 于是后续 tool_result 的匹配循环里
+            //   它既不算 unclaimedNamedStep（claimed=1）也不算兜底候选，
+            //   再也没人收敛它，只能等流结束被兜底抹成 is-error，
+            //   表现为「工具明明成功了，最后却显示未收到结果 / 失败」。
+            //   用户问"北京和上海的天气"必现（同一批两个 get_weather）。
+            //
+            //   复用候选收紧为：**仍在运行 且 未被结果认领** 的最后一个同名条目。
+            //   已终态（is-done/is-error）与已认领（data-tool-claimed）一律不碰。
+            var pendExisting = null;
+            if (pendName) {
+              try {
+                var _pendCands = pendingBar.querySelectorAll('[data-tool-name="' + pendName.replace(/["\\\]\[]/g, '') + '"]');
+                // 从后往前取：后追加的条目属于更新的轮次
+                for (var _pendI = _pendCands.length - 1; _pendI >= 0; _pendI--) {
+                  var _pendC = _pendCands[_pendI];
+                  // "整理中"占位（历史数据）不参与复用
+                  if (pendingCallId && _pendC.getAttribute('data-tool-call-id') !== pendingCallId) continue;
+                  if (pendingCallId && !_pendC.classList.contains('is-running')) { pendExisting = _pendC; break; }
+                  if (_pendC.classList.contains('ai-tool-organizing')) continue;
+                  if (!_pendC.classList.contains('is-running')) continue;   // ★ 已终态不复活
+                  if (_pendC.getAttribute('data-tool-claimed') === '1') continue; // ★ 已认领不复活
+                  pendExisting = _pendC;
+                  break;
+                }
+              } catch (ePendQ) {}
+            }
+            if (pendExisting) {
+              if (!pendExisting.classList.contains('is-running')) continue;
+              pendExisting.classList.add('is-running');
+              pendExisting.classList.remove('is-done', 'is-error');
+              var pendSt = pendExisting.querySelector('.ai-tool-step-status');
+              if (pendSt) pendSt.textContent = toolRunningLabel(pendName);
+              try { refreshOwningToolRound(pendExisting); } catch (ePendRound) {}
+              followToolProgress(messagesEl, _aiUserPinnedUp);
+              continue;
+            }
+            if (!pendingBar) {
+              pendingBar = el('div', { class: 'ai-tool-timeline ai-tool-status', role: 'status' });
+              assistantNode.insertBefore(pendingBar, assistantBubble);
+            }
+            // ★★★ 2026-09-28 修复（重复轮次）：
+            //   原选择器 `.ai-tool-round.is-running:last-of-type` 是**错误语义** ——
+            //   `:last-of-type` 要求该元素在**所有同级 .ai-tool-round 中排在最后**
+            //   （只按标签名/类型算，不看 class），再叠加 `.is-running` 过滤。
+            //   实测：tool_calls 先建了运行中的轮次 r1 之后，pending 到来时
+            //   r1 不是":last-of-type"→ 查不到 → 新建 r2 → 同一件事出现两个轮次，
+            //   截图里表现为"准备工具 get_weather"与"查询天气"上下各一条。
+            //   正确做法：直接取**最后一个仍在运行的轮次**（不附加 of-type 约束）。
+            var _pendRounds = pendingBar.querySelectorAll('.ai-tool-round.is-running');
+            var pendRound = _pendRounds.length ? _pendRounds[_pendRounds.length - 1] : null;
+            if (!pendRound) {
+              // ★ 2026-09-22：统一走 createToolRound，保证折叠结构与 CSS 一致
+              var _pendBuilt = createToolRound('正在调用工具', 'r' + (toolRoundSeq++));
+              pendRound = _pendBuilt.box;
+              // ★ 2026-09-28（方案 A）：挂进活动区 body
+              var _pendActBody = toolActivityBody(pendingBar);
+              (_pendActBody || pendingBar).appendChild(pendRound);
+            }
+            var pendList = pendRound.querySelector('.ai-tool-round-list');
+            var pendStep = el('div', { class: 'ai-tool-step is-running' });
+            if (pendName) pendStep.setAttribute('data-tool-name', pendName);
+            if (pendingCallId) pendStep.setAttribute('data-tool-call-id', pendingCallId);
+            // ★★★ 2026-09-28：给 pending 占位打**语义标记**，供 tool_calls 分支
+            //   识别"这是我提前建的占位轮次，应该复用它而不是再新建一轮"。
+            //   原实现靠文案匹配（标题 === '准备工具'），但占位标题已改为
+            //   toolLabel(pendName)（说人话），文案匹配因此失效 → 重复轮次。
+            //   改为标记驱动，从此与显示文案解耦。
+            pendStep.setAttribute('data-tool-pending', '1');
+            pendStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
+            var pendBody = el('div', { class: 'ai-tool-step-body' });
+            // ★★★ 2026-09-28 修复（占位说人话）：
+            //   原实现标题写死"准备工具"、详情写**原始技术名**（get_weather），
+            //   用户看到的是内部标识符。tool_calls 到达后会复用/新建正式条目，
+            //   占位只是极短的过渡态，但既然要显示，就该走统一映射表。
+            //   保留原始名到 data-tool-name（对账/去重用），显示层用 toolLabel。
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-title', text: pendName ? toolLabel(pendName) : '准备工具' }));
+            pendBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '准备中' }));
+            pendStep.appendChild(pendBody);
+            pendList.appendChild(pendStep);
+            updateToolRoundState(pendRound);
+            followToolProgress(messagesEl, _aiUserPinnedUp);
+            continue;
+          }
+
+          if (evt.type === 'tool_error') {
+            // A tool error is a terminal result for this call, not a terminal
+            // event for the whole assistant turn: keep independent parallel calls
+            // running and let the final answer consume the failure feedback.
+            var errTimeline = ensureToolTimeline(false, evt);
+            var errCallId = String(evt.call_id || evt.tool_call_id || '');
+            if (errTimeline) {
+              // ★ 2026-09-17：优先把**同名**的进行中条目就地转为失败态（不新增重复条目）；
+              //   找不到同名条目时才补建一条，保证信息不丢。
+              var errName = String(evt.tool_name || '');
+              var errMatch = null;
+              if (errName) {
+                var errSteps = errTimeline.querySelectorAll('.ai-tool-step');
+                for (var eIdx = errSteps.length - 1; eIdx >= 0; eIdx--) {
+                  if (errCallId && errSteps[eIdx].getAttribute('data-tool-call-id') !== errCallId) continue;
+                  if ((errSteps[eIdx].getAttribute('data-tool-name') || '') !== errName) continue;
+                  if (!errMatch || errSteps[eIdx].classList.contains('is-running')) errMatch = errSteps[eIdx];
+                  if (errSteps[eIdx].classList.contains('is-running')) break;
+                }
+              }
+              if (errMatch) {
+                errMatch.classList.remove('is-running', 'is-done');
+                errMatch.classList.add('is-error');
+                var errMatchIcon = errMatch.querySelector('.ai-tool-step-icon');
+                if (errMatchIcon) errMatchIcon.textContent = '⚠️';
+                var errMatchSt = errMatch.querySelector('.ai-tool-step-status');
+                if (errMatchSt) errMatchSt.textContent = '失败';
+                var errMatchDetail = errMatch.querySelector('.ai-tool-step-detail');
+                if (evt.error && !errMatchDetail) {
+                  var errMatchBody = errMatch.querySelector('.ai-tool-step-body');
+                  if (errMatchBody) errMatchBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(evt.error).slice(0, 120) }));
+                }
+                try { refreshOwningToolRound(errMatch); } catch (eErrRound) {}
+              } else {
+                var errStep = el('div', { class: 'ai-tool-step is-error' });
+                errStep.setAttribute('data-tool-name', errName);
+                if (errCallId) errStep.setAttribute('data-tool-call-id', errCallId);
+                errStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
+                var errBody = el('div', { class: 'ai-tool-step-body' });
+                errBody.appendChild(el('div', { class: 'ai-tool-step-title', text: toolLabel(evt.tool_name) || '工具' }));
+                errBody.appendChild(el('div', { class: 'ai-tool-step-status', text: '失败' }));
+                if (evt.error) errBody.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(evt.error).slice(0, 120) }));
+                errStep.appendChild(errBody);
+                // ★★★ 2026-09-28 修复（与 tool_pending 同款，上一轮修复时漏改此处）：
+                //   `.ai-tool-round.is-running:last-of-type` 语义错误 ——
+                //   :last-of-type 要求该元素在**所有同级 .ai-tool-round 中排在最后**
+                //   （只按标签名算，不看 class），再叠加 .is-running 过滤。
+                //   只要 running 轮次后面还排着别的轮次，这里就查不到它，
+                //   于是为本该归属已有轮次的失败条目**新建一个轮次**（孤儿轮次），
+                //   反过来又让该轮永远凑不齐、停在 running 不收敛。
+                //   正确写法：直接取**最后一个仍在运行的轮次**。
+                var _errRounds = errTimeline.querySelectorAll('.ai-tool-round.is-running');
+                var errRound2 = _errRounds.length ? _errRounds[_errRounds.length - 1] : null;
+                if (!errRound2) {
+                  // ★ 2026-09-22：统一走 createToolRound，保证折叠结构与 CSS 一致
+                  var _errBuilt = createToolRound('正在调用工具', 'r' + (toolRoundSeq++));
+                  errRound2 = _errBuilt.box;
+                  // ★ 2026-09-28（方案 A）：挂进活动区 body
+                  var _errActBody = toolActivityBody(errTimeline);
+                  (_errActBody || errTimeline).appendChild(errRound2);
+                }
+                errRound2.querySelector('.ai-tool-round-list').appendChild(errStep);
+                updateToolRoundState(errRound2);
+              }
+            }
+            // Do not settle sibling tools or the shared search indicator here; a
+            // tool_error can precede successful results from other calls in the round.
+            followToolProgress(messagesEl, _aiUserPinnedUp);
+            continue;
+          }
+
+          if (evt.type === 'tool_result') {
+            var toolBar2 = ensureToolTimeline(false, evt);
+            if (!toolBar2) {
+              toolBar2 = el('div', { class: 'ai-tool-timeline ai-tool-status' });
+              assistantNode.insertBefore(toolBar2, assistantBubble);
+            }
+            // ★ 2026-09-28（方案 D）：改走统一映射表（原先这里有一份重复的 nameMap）
+            var label = toolLabel(evt.tool_name);
+            var toolSucceeded = evt.success === true && !evt.error;
+            // ★★★ 2026-09-28 修复（用户报障：「工具搜完了，下面又出现一个已完成，
+            //   但上面原先那个工具还在转圈圈」）：
+            //
+            //   旧匹配逻辑（按优先级）：
+            //     exactRunningStep(名字+query 都精确) → firstRunningStep(第一个还在转的同名)
+            //     → exactNamedStep → lastNamedStep
+            //
+            //   两个真实缺陷：
+            //   ① 后端绝大多数 tool_result **不带 query**（见 server.js 的
+            //      `writeSse(res, { type:'tool_result', tool_name, success, count })`），
+            //      于是 `resultQuery` 恒为空、`exactDetail` 恒为 false，
+            //      exactRunningStep 永远命中不了 → 每次都落到 firstRunningStep。
+            //   ② firstRunningStep 取的是**全 timeline 范围内**第一个还在转的同名条目，
+            //      **完全无视轮次归属**。多轮调用同一工具时（第 1 轮"搜索网页" +
+            //      第 2 轮"搜索网页"），第 2 轮的结果会去认领第 1 轮那条（或反之），
+            //      被认领的那条显示"已完成"，而**真正在跑的那条继续转圈** ——
+            //      这正是用户截图里看到的现象。
+            //
+            //   新匹配策略（严格按"轮次内 FIFO 认领"）：
+            //     a) 优先精确匹配（名字 + query 都对得上）—— 后端若带 query 则最可靠；
+            //     b) 否则在**所有未认领的同名 running 条目**里，取**最早出现**的一条
+            //        （tool_calls 是按调用顺序追加的，最早出现 = 最早发起的调用）；
+            //     c) 认领后打上 data-tool-claimed，保证同一个 result 不会重复认领，
+            //        也保证同一轮里两个同名工具各认领各的（FIFO）；
+            //     d) 全部已认领（result 多于 step，异常情况）再退回 lastNamedStep。
+            var matchStep = null;
+            var exactRunningStep = null;
+            var unclaimedNamedStep = null;
+            var claimedNamedStep = null;
+            var resultQuery = String(evt.query || '').trim();
+            var resultCallId = String(evt.call_id || evt.tool_call_id || '');
+            var steps = toolBar2.querySelectorAll('.ai-tool-step');
+            // tool_result events carry a name (and often the original query), not
+            // an id. Matching only by name from the end marks the wrong entry when
+            // parallel rounds call the same tool with different queries.
+            for (var si = 0; si < steps.length; si++) {
+              var candidate = steps[si];
+              if (resultCallId) {
+                if (candidate.getAttribute('data-tool-call-id') === resultCallId) { matchStep = candidate; break; }
+                continue;
+              }
+              if ((candidate.getAttribute('data-tool-name') || '') !== String(evt.tool_name || '')) continue;
+              // "整理中"占位也带 data-tool-name（历史数据），不参与认领
+              if (candidate.classList.contains('ai-tool-organizing')) continue;
+              var isClaimed = candidate.getAttribute('data-tool-claimed') === '1';
+              var detailEl = candidate.querySelector('.ai-tool-step-detail');
+              var detailText = String(detailEl && detailEl.textContent || '').trim();
+              var exactDetail = !!resultQuery && detailText === resultQuery;
+              if (candidate.classList.contains('is-running')) {
+                if (exactDetail && !isClaimed) exactRunningStep = candidate;
+                if (!isClaimed && !unclaimedNamedStep) unclaimedNamedStep = candidate;
+              } else if (!claimedNamedStep) {
+                // 已完成/已失败的同名条目：仅在异常（result 多于 step）时兜底复用
+                claimedNamedStep = candidate;
+              }
+            }
+            matchStep = matchStep || exactRunningStep || unclaimedNamedStep || claimedNamedStep;
+            // 认领标记：防止同一 result 重复命中，也保证同名并行工具 FIFO 配对
+            if (matchStep) matchStep.setAttribute('data-tool-claimed', '1');
+            // ★ 2026-09-29：为完成态「已搜索 N 个网页」累加真实结果条数。
+            //   后端 tool_result 带 count 字段（见 server.js writeSse 的
+            //   { type:'tool_result', tool_name, success, count }）。
+            //   同一工具会被重复推送（先 count、后带 items），故按**条目**去重：
+            //   每个 step 只贡献一次，多条目相加 = 本次检索拿到的网页总数。
+            if (matchStep && TOOL_WEBSEARCH_KINDS[String(evt.tool_name || '')]) {
+              try {
+                var _c = Number(evt.count || 0);
+                if (_c > 0 && !matchStep.__counted) {
+                  matchStep.__counted = 1;
+                  var _act = toolBar2.querySelector('.ai-tool-activity');
+                  if (_act) _act.__searchCount = (Number(_act.__searchCount) || 0) + _c;
+                }
+              } catch (eCnt) {}
+            }
+            // ★ 2026-09-28 兜底（对应"原先的工具还在转圈"这一现象）：
+            //   若本次只匹配到了"已完成"的同名条目（claimedNamedStep 兜底路径），
+            //   说明当前活动区里很可能**还有一条同名条目在跑而它的 result 丢失/错配**。
+            //   此时把该活动区内所有仍 running 的同名条目一并收敛，避免永久转圈。
+            //   （只在兜底路径触发，不干扰正常的多轮并行：并行场景下 unclaimedNamedStep
+            //     一定命中，不会走到这里。）
+            if (matchStep && !resultCallId && !exactRunningStep && !unclaimedNamedStep) {
+              try {
+                var _stragglers = toolBar2.querySelectorAll('.ai-tool-step.is-running');
+                for (var _sg = 0; _sg < _stragglers.length; _sg++) {
+                  var _sgEl = _stragglers[_sg];
+                  if (_sgEl.classList.contains('ai-tool-organizing')) continue;
+                  if ((_sgEl.getAttribute('data-tool-name') || '') !== String(evt.tool_name || '')) continue;
+                  _sgEl.setAttribute('data-tool-claimed', '1');
+                  _sgEl.classList.remove('is-running');
+                  _sgEl.classList.add(toolSucceeded ? 'is-done' : 'is-error');
+                  var _sgSt = _sgEl.querySelector('.ai-tool-step-status');
+                  if (_sgSt) _sgSt.textContent = toolSucceeded ? '已完成' : '失败';
+                  try { refreshOwningToolRound(_sgEl); } catch (eSgRound) {}
+                }
+              } catch (eStraggler) {}
+            }
+            if (!matchStep) {
+              matchStep = el('div', { class: 'ai-tool-step' });
+              matchStep.setAttribute('data-tool-name', String(evt.tool_name || ''));
+              matchStep.setAttribute('data-tool-claimed', '1');
+              if (resultCallId) matchStep.setAttribute('data-tool-call-id', resultCallId);
+              matchStep.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
+              var mbody = el('div', { class: 'ai-tool-step-body' });
+              mbody.appendChild(el('div', { class: 'ai-tool-step-title', text: label }));
+              mbody.appendChild(el('div', { class: 'ai-tool-step-status', text: toolSucceeded ? toolResultFeedback(evt) : '失败' }));
+              matchStep.appendChild(mbody);
+              matchStep.classList.add(toolSucceeded ? 'is-done' : 'is-error');
+              // ★ 新增条目必须落在**活动区内**，否则又会在活动区外面凭空冒出一行
+              var _orphanHost = toolActivityBody(toolBar2) || toolBar2;
+              _orphanHost.appendChild(matchStep);
+            } else {
+              matchStep.classList.remove('is-running', 'is-done', 'is-error');
+              matchStep.classList.add(toolSucceeded ? 'is-done' : 'is-error');
+              var stEl = matchStep.querySelector('.ai-tool-step-status');
+              // ★ 2026-09-17：状态文案统一为"已完成"，与用户要求的
+              //   「搜索中 → 已完成」两态切换保持一致。
+              if (stEl) stEl.textContent = toolSucceeded ? toolResultFeedback(evt) : '失败';
+            }
+            if (matchStep && toolSucceeded) matchStep.setAttribute('data-tool-summary', toolResultFeedback(evt));
+            // ★★★ 2026-09-28 修复（同上一处报障的另一半：结果卡片挂错父节点）：
+            //   旧代码是 `toolBar2.appendChild(resultCard)`，而 toolBar2 是**外层
+            //   .ai-tool-timeline** —— 于是结果卡片被追加到 `.ai-tool-activity`
+            //   **外面**。用户在活动区里看到条目还在转圈，活动区下方却凭空多出
+            //   一行「搜索网页 · 8 条结果」，观感就是"又显示了一个已完成工具"。
+            //   而且每个 tool_result 都新建一张卡片、从不去重，多轮多工具时
+            //   卡片在 timeline 末尾堆成一摞，与上面的条目完全对不上号。
+            //
+            //   修法：结果卡片必须
+            //     ① 落在**活动区内**（与条目同一层级、共享折叠与样式）；
+            //     ② **紧跟在它对应的条目之后**，让"哪条结果属于哪个工具"一眼可见；
+            //     ③ 同一工具重复返回时**复用已有卡片**，不重复新建。
+            //   实现：若紧邻的下一个兄弟已是结果卡片 → 只更新它的内容（复用）；
+            //   否则新建并插到 matchStep 之后。matchStep 在轮次内时，卡片同样落进
+            //   那个 .ai-tool-round-list，缩进与导轨自动对齐。
+            var resultCard;
+            function fillResultCard(card) { return populateToolResultDisclosure(card, evt); }
+            // ★★★ 2026-09-28 修复（重复结果卡片）：
+            //   原实现用 `matchStep.nextElementSibling` 判断"紧接着的下一条是否已是卡片"，
+            //   但卡片实际被插到**整轮条目之后**（.ai-tool-round-list-wrap 的后面），
+            //   所以 matchStep 的下一个兄弟通常是**另一条 step**，不是卡片 ——
+            //   复用判断恒为 false，每个 tool_result 都新建一张卡片。
+            //   后端对同一工具会重复推送 tool_result（先 count、后带 items 等），
+            //   实测同一轮里同一工具出现 2 张一模一样的"查询天气 · 1 条结果 · 福州"。
+            //   改为按工具名在**所属轮次内**查找已有卡片去重：
+            //   同一轮 + 同一工具 → 复用（只更新内容），跨轮则各自保留（轮次是独立的）。
+            var owningRoundForCard = matchStep && matchStep.closest ? matchStep.closest('.ai-tool-round') : null;
+            var cardKey = resultCallId || (String(evt.tool_name || '') + ':' + resultQuery);
+            var existingCard = null;
+            if (cardKey) {
+              var cardScope = owningRoundForCard || toolActivityBody(toolBar2) || toolBar2;
+              try {
+                var _cards = cardScope.querySelectorAll('.ai-tool-result-card');
+                for (var _ci = _cards.length - 1; _ci >= 0; _ci--) {
+                  if ((_cards[_ci].getAttribute('data-tool-result-key') || '') === cardKey) {
+                    existingCard = _cards[_ci]; break;
+                  }
+                }
+              } catch (eCardFind) {}
+            }
+            if (existingCard) {
+              resultCard = fillResultCard(existingCard);      // 复用同一轮内同工具的卡片
+            } else {
+              resultCard = fillResultCard(el('div', { class: 'ai-tool-result-card' }));
+              if (cardKey) resultCard.setAttribute('data-tool-result-key', cardKey);
+              resultCard.setAttribute('data-tool-name', String(evt.tool_name || ''));
+              // ★ 卡片落点：优先插在**所属轮次**内、`.ai-tool-round-list-wrap` 之后。
+              //   为什么不是紧贴 matchStep：.ai-tool-round-list 的每条子元素都靠
+              //   ::after 画导轨节点、并按 :nth-child 做错峰入场；往中间塞一个非
+              //   step 节点会让导轨断开、动画序号错位。放在整轮条目之后既保持了
+              //   导轨完整，又让"这张卡片属于哪一轮"归属清晰。
+              var detailHost = matchStep && matchStep.querySelector('.ai-tool-step-body');
+              if (detailHost) detailHost.appendChild(resultCard);
+              else (toolActivityBody(toolBar2) || toolBar2).appendChild(resultCard);
+            }
+            // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」核心修复）：
+            //   此前 `tool_result` 只更新**匹配到 data-tool-name 的那一个** step，
+            //   既不收敛搜索状态条（.ai-search-status），也不处理 tool_pending
+            //   创建的、没有 data-tool-name 的"准备工具"步骤。
+            //   而 settleSearchStatus 全项目只有 2 个调用点（done / finishAiMessage），
+            //   → 工具第一轮成功返回后，到最终 done 之间（多轮工具可达十几秒甚至更久）
+            //     页面上一直显示"正在搜索中/正在使用中"，动画持续闪烁。
+            //   修复：工具一返回就**立即**收敛：
+            //   ① 收敛所有搜索状态条为终态（停动画、保留信息）；
+            //   ② 把所有残留 is-running 的 tool step 置为完成态
+            //      （含无 data-tool-name 的 pending 占位步骤）。
+            try { settleSearchStatus(assistantNode, { doneText: '联网完成' }); } catch (eSettleNow) {}
+            // ★★★ 2026-09-17 修正（并行工具场景的关键 bug）：
+            //   旧实现把**所有** is-running 的步骤一律置为完成。并行调用 5 个工具时，
+            //   第 1 个工具返回就会把其余 4 个"还没返回"的步骤也标成完成 ——
+            //   用户看到的动画与实际执行状态不符（明明还在搜却显示已完成）。
+            //   现改为：只收敛该工具**自己**的步骤，让其余并行步骤继续显示"搜索中"，
+            //   各自在收到自己的 tool_result 时才逐个转成 ✅。这正是用户要的
+            //   「五个正在搜索 → 搜完一个变一个 → 全部搜完就都变已完成」。
+            try { refreshOwningToolRound(matchStep); } catch (eRound1) {}
+            // 兜底：仍残留的"准备工具"占位（无 data-tool-name）在整轮收敛时统一处理，
+            //   此处不再无差别清除，避免打断其他并行工具的真实进行态。
+            try {
+              var _orgDoneSteps = assistantNode.querySelectorAll('.ai-tool-step.is-running');
+              for (var _ods = 0; _ods < _orgDoneSteps.length; _ods++) {
+                var _odsEl = _orgDoneSteps[_ods];
+                if (_odsEl.classList.contains('ai-tool-organizing')) continue;
+                var _odsName = _odsEl.getAttribute('data-tool-name') || '';
+                // 只收敛"无名字的占位步骤"（tool_pending 遗留），有名字的等待自己的结果
+                if (!_odsName) {
+                  _odsEl.classList.remove('is-running');
+                  _odsEl.classList.add('is-done');
+                  var _odsIcon = _odsEl.querySelector('.ai-tool-step-icon');
+                  if (_odsIcon && _odsIcon.textContent === '⏳') _odsIcon.textContent = '✅';
+                  var _odsSt = _odsEl.querySelector('.ai-tool-step-status');
+                  if (_odsSt && /进行中|准备/.test(String(_odsSt.textContent || ''))) _odsSt.textContent = '已完成';
+                }
+              }
+            } catch (eSettleSteps) {}
+            // ★ 2026-09-15 流畅性优化：工具全部返回后，模型还需要时间推理+生成
+            //   最终答案（多轮工具场景可达数秒），此前的"联网完成/完成"是终态，
+            //   用户看到静止的完成态会误以为已经答完了。
+            //   这里补一条明确的进行态提示，并把进度计数归零（下一轮工具重新累计）。
+            //   ★ 2026-09-28（方案 A 修复）：此前它 append 到 .ai-tool-timeline，
+            //   **落在轮次容器之外** → 样式与轮次条目不一致，且收敛路径覆盖不到。
+            //   现改为挂进统一活动区 body，与轮次同层级、共享同一套样式与折叠。
+            toolProgressTick = 0;
+            followToolProgress(messagesEl, _aiUserPinnedUp);
+            continue;
+          }
+          
+          if (evt.type === 'error') {
+            hideAssistantTyping();
+            var errMsg = evt.error || 'AI 调用失败';
+            // ★★★ 2026-09-17 修复（P1「内置模型回复时误报 AI 连接中断」）：
+            //   症状：内置模型调用失败时，用户有时看到"AI 连接中断，请稍后重试"
+            //   而不是真实的失败原因。
+            //   根因：error 事件分支**没有设置 evtHandled**（对比 done 分支有设），
+            //   也没有设置 doneReceived。error 处理完 break 之后，外层收尾判断链
+            //   `if (evtHandled) {} else if (aiContent) {} else if (doneReceived) {}
+            //    else if (!doneReceived) { notify('AI 连接中断...') }`
+            //   会一路落到最后的 `!doneReceived` 兜底分支，**覆盖掉刚展示的正确错误**，
+            //   改报"连接中断"。尤其当 error 事件与流 EOF 同批到达时（_eofReached
+            //   先触发 while 退出），必然踩中这条兜底。
+            //   修复：① error 分支显式置 evtHandled = true，让收尾链走"已完成"分支；
+            //        ② 新增 terminalErrorSeen 标志，记录"服务端已明确报错"，
+            //           使兜底文案能区分"已知服务端错误"与"真的意外断连"。
+            if (doneReceived) {
+              if (!_finalized && aiContent) finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+              resetSendingIfCurrent();
+              if (reader) try { reader.cancel(); } catch (e) {}
+              aborted = true;
+              break;
+            }
+            // 服务端已明确报错（含补发的终态 done）：标记，避免落入"连接中断"兜底
+            terminalErrorSeen = true;
+            evtHandled = true;
+            lastServerError = errMsg;
+            if (aiContent) {
+              // 已有部分回复，保留内容并追加错误提示
+              var errNote = el('div', { class: 'ai-error-note' }, errMsg);
+              try { assistantNode.appendChild(errNote); } catch (e) {}
+              ensureAssistantBubbleReady();
+              finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
+            } else {
+              // 没有内容，回退
+              notify(errMsg);
+              preserveFailedTurn();
+              restoreInputText();
+            }
+            
+            resetSendingIfCurrent();
+            if (reader) try { reader.cancel(); } catch (e) {}
+            aborted = true;
+            break;
+          }
+          
+          // 兼容旧错误格式（无 type 但有 error）
+          if (evt.error && !evt.type) {
+            hideAssistantTyping();
+            var errMsg2 = evt.error || 'AI 调用失败';
+            
+            if (aiContent) {
+              var errNote2 = el('div', { class: 'ai-error-note' }, errMsg2);
+              try { assistantNode.appendChild(errNote2); } catch (e) {}
+              finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
+            } else {
+              notify(errMsg2);
+              preserveFailedTurn();
+              restoreInputText();
+            }
+            
+            resetSendingIfCurrent();
+            if (reader) try { reader.cancel(); } catch (e) {}
+            aborted = true;
+            break;
+          }
+          
+          if (evt.type === 'reasoning_start' && !reasoningStarted) {
+            reasoningStarted = true;
+            // C 修复：用户关闭思考时，仅记录状态、不创建/渲染思考节点
+            if (_sendThinkingMode === 'off') continue;
+            var rnStart = ensureReasoningNode();
+            if (rnStart && !aiContent) setThinkingExpanded(rnStart, true, messagesEl);
+            ensureThinkingTimer();
+            continue;
+          }
+          
+          if (evt.type === 'reasoning') {
+            // ★ 修复 M8：思考文本无限累积会导致内存膨胀与收尾一次性渲染卡顿。
+            // 设 200k 字符上限（深页已有 4000/次切片与上限，普通聊天此前无上限）。
+            var chunkText = String(evt.text || '');
+            if (aiReasoning.length < 200000) {
+              var room = 200000 - aiReasoning.length;
+              chunkText = room > 0 ? chunkText.slice(0, room) : '';
+              aiReasoning += chunkText;
+            } else { chunkText = ''; }
+            // C 修复：用户关闭思考时，跳过流式渲染（仅静默累积，收尾由 finishAiMessage 统一隐藏）
+            if (_sendThinkingMode === 'off') continue;
+            // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
+            if (!reasoningStarted) {
+              reasoningStarted = true;
+              ensureReasoningNode();
+              ensureThinkingTimer();
+            }
+            var rn = ensureReasoningNode();
+            // 流式思考过程中强制展开，避免「只见标题、要等回复结束才能看内容」
+            if (rn && !aiContent && !rn.classList.contains('expanded')) {
+              setThinkingExpanded(rn, true, messagesEl);
+            }
+            var body = reasoningSegment();
+            if (body) {
+              if (!reasoningRenderer) {
+                body.textContent = '';
+                // ★ 2026-09-17 思考流优化：
+                //   ① maxChunk 48 → 64、charsPerMs 100 → 140：思考文本往往比正文更
+                //      密集（长推理段落），沿用正文节奏会显得慢半拍；
+                //   ② 新增 onRender 节流：原实现每帧都调 scrollToBottom，
+                //      reasoning 高频到达时每帧触发一次滚动计算，反过来拖慢渲染帧率
+                //      （越滚越卡）。改为最多 120ms 一次，滚动跟随依然及时。
+                var _lastReasonScroll = 0;
+                reasoningRenderer = createSmoothTextRenderer(body, {
+                  minChunk: 6,
+                  maxChunk: 64,
+                  charsPerMs: 140,
+                  plainStream: true,
+                  onRender: function() {
+                    var _now2 = Date.now();
+                    if (_now2 - _lastReasonScroll < 120) return;
+                    _lastReasonScroll = _now2;
+                    scrollToBottom(messagesEl, false);
+                  }
+                });
+              }
+              // ★ 修复：渲染器按剩余配额接收（200k 上限此前只截累积字符串，渲染器无界增长）
+              if (chunkText && aiReasoning.length <= 200000) reasoningRenderer.append(chunkText);
+            }
+            continue;
+          }
+          
+          if (evt.type === 'content') {
+            if (S.responseProfile === 'enhanced') {
+              var answerStage = assistantNode.querySelector('.ai-enhanced-status');
+              if (answerStage) { answerStage.textContent = '正在组织回答…'; answerStage.setAttribute('data-stage', 'answer'); }
+            }
+            // ★ 2026-09-15：正文开始到达 → "整理检索结果并作答"的占位步骤已完成使命，
+            //   就地收敛为完成态（不删除，保留时间线的完整叙事），避免与真实正文并存造成干扰。
+            // ★ 2026-09-22：统一走 settleOrganizingStep，保证与 done/中断路径收敛口径一致
+            //   （此前这里的手写逻辑与 clearAssistantTransientStatus 各写一套，容易走偏）。
+            try { settleOrganizingStep(assistantNode); } catch (eOrganizeDone) {}
+            // ★ 2026-09-29：正文开始输出 → 工具区从正文上方搬到正文下方（结果摘要位）
+            try { moveToolAreaBelowBubble(assistantNode); } catch (eMoveTool) {}
+            // ★★★ 2026-09-17 思考 → 正文交接优化（本轮流动性重点之一）：
+            //   旧行为：思考流全程强制展开，正文一开始输出后，思考面板**仍占满屏幕**
+            //   继续显示，正文只能挤在下方；用户要一路滚动才能看到回复的开头，
+            //   观感上"回复迟迟不出现"，是"不流畅"的重要来源。
+            //   新行为：正文首个 chunk 到达时，把思考面板**自动收起**并给出终态
+            //   （已思考 Xs），让正文自然接位；用户随时可点标题重新展开回看。
+            //   只在"确实有思考内容"时执行，纯正文回复不受影响。
+            if (!_thinkingSettledOnContent && reasoningStarted) {
+              _thinkingSettledOnContent = true;
+              try {
+                var _tn = assistantNode.querySelector('.ai-thinking');
+                if (_tn) {
+                  if (thinkingTimer) {
+                    finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
+                  }
+                  setThinkingActive(_tn, false);
+                  // 收尾思考渲染器：把缓冲里剩余字符一次性落定，避免尾部丢字
+                  if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF) {} }
+                  setThinkingExpanded(_tn, false, messagesEl);
+                }
+              } catch (eThinkSettle) {}
+            }
+            var contentChunk = evt.text || '';
+            if (!contentChunk) continue;
+            // ★ 内容长度上限：防止超长回复/异常流无限累积
+            if (!contentTruncated && aiContent.length >= AI_CONTENT_MAX_LEN) {
+              contentTruncated = true;
+              notify('回复过长，已截断');
+            }
+            var room = AI_CONTENT_MAX_LEN - aiContent.length;
+            var accepted = room > 0 ? String(contentChunk).slice(0, room) : '';
+            aiContent += accepted;
+            if (accepted) {
+              ensureAssistantBubbleReady();
+              if (contentRenderer) contentRenderer.append(accepted);
+            }
+            continue;
+          }
+          
+          if (evt.type === 'done') {
+            hideAssistantTyping();
+            S.paused = false;
+            // ★★ 2026-09-29（审计 M11「done 先取消渲染器致气泡清空，长回复收尾闪一下」）：
+            //   现象：一条长回复写到最后时，气泡内容瞬间消失再整段重绘（"闪一下"），
+            //   低端机更明显，偶发整段空白停留。
+            //   根因：这里原先**先** resetActiveRenderersByChannel('chat')，
+            //   渲染器的 cancel() 在 !finished 时会执行 targetEl.innerHTML = ''，
+            //   随后 finishAiMessage 只能走 assistantBubble.innerHTML = renderMarkdown(...)
+            //   的兜底重绘 —— 中间存在一帧空气泡。
+            //   修法：把渲染器清理**挪到 finishAiMessage 之后**；finish() 已把最终内容
+            //   写进气泡并置 finished=true，此后的 cancel() 不会再清空 DOM。
+            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+            if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+            if (thinkingTimer) {
+              finalThinkingElapsedMs = thinkingTimer.stop();
+            }
+            
+            // Preserve tool terminal states: a failed call remains failed after the
+            // assistant turn completes instead of being rewritten as a success.
+            try { clearAssistantTransientStatus(assistantNode, { preserveToolExecution: true }); } catch (eToolDone) {}
+            // 更新 usage / done 数据
+            try {
+              usageResult = evt.usage || null;
+              finalModel = evt.model || '';
+              finalThinkingMode = evt.thinking_mode || evt.applied_thinking_mode || _sendThinkingMode;
+              // ★ 工作模式：以后端实际回传为准（后端才真正知道这次是否按工作模式跑的）
+              if (typeof evt.work_mode === 'boolean') streamWorkMode = evt.work_mode;
+              // sanitized_content 优先：后端清洗后的正文
+              if (evt.sanitized_content) {
+                aiContent = evt.sanitized_content;
+              } else if (evt.content) {
+                aiContent = evt.content;
+              }
+              // 搜索路径若流式 reasoning 丢失，done 包里仍可能带完整 reasoning
+              if ((!aiReasoning || !String(aiReasoning).trim()) && evt.reasoning) {
+                aiReasoning = String(evt.reasoning);
+              }
+              if (evt.quota) applyQuota(evt.quota);
+              else fetchAiQuota(true);
+            } catch (e) {}
+            
+            // Sanitized final content was already selected above. Let the same
+            // renderer reconcile it, retaining reading order and existing nodes.
+
+            // ★★★ 2026-09-15 修复（P1-6）：`interrupted` 判定必须与 `complete` 交叉校验。
+            //   后端 complete=true 表示本轮正常收尾；此时即便 interrupted 被误置为
+            //   true（例如上游关闭连接时 finishReason 被记成 upstream_error），
+            //   也不应判定为中断，否则会渲染"回复中断，内容可能不完整"的错误提示。
+            var streamInterrupted = evt.interrupted === true && evt.complete !== true;
+            var streamComplete = evt.complete === true;
+            var streamSaved = evt.saved === true;
+            
+            if (assistantNode) {
+              ensureAssistantBubbleReady();
+              clearInterval(_idleCheckTimer);
+              var drained = await contentRenderer.drain(aiContent, controller.signal);
+              if (S._currentReqId !== reqId || assistantNode.isConnected === false) return;
+              if (!drained || controller.signal.aborted) throw new DOMException('Reply cancelled', 'AbortError');
+              finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
+            }
+            S.sending = false;
+            S.abortController = null;
+            // ★ 2026-09-29（审计 M11，接上方注释）：收尾渲染完成后再清理渲染器，
+            //   避免"先清空气泡再兜底重绘"造成的收尾闪烁。
+            resetActiveRenderersByChannel('chat');
+            // Attachments are single-use: remove the preview only after a
+            // successful terminal event; errors and aborts remain retryable.
+            consumeAiAttachment(fileData);
+            
+            // 中断/未保存提示
+            if (streamInterrupted && aiContent) {
+              var interrNote = el('div', { class: 'ai-interrupt-note' }, '回复中断，内容可能不完整');
+              if (assistantNode) {
+                assistantNode.appendChild(interrNote);
+                try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eCont) {}
+              }
+            }
+            if (!streamSaved && aiContent) {
+              var saveNote = el('div', { class: 'ai-save-note' }, '本次回复未保存，刷新后可能丢失');
+              if (assistantNode) assistantNode.appendChild(saveNote);
+            }
+            
+            // 显示清洗提示
+            if (evt.filtered && aiContent) {
+              var filteredNote = el('div', { class: 'ai-filtered-note' }, '已自动清理动作描述');
+              if (assistantNode) assistantNode.appendChild(filteredNote);
+            }
+            
+            // ★ 修复（"已搜完仍显示正在搜索中"）：无论 done 包里有没有搜索信息，
+            //   都在终态把残留的进行中状态条收敛掉，避免动画永久闪烁。
+            try { settleSearchStatus(assistantNode); } catch (eSettle) {}
+
+            doneReceived = true;
+            evtHandled = true;
+            if (sharedCtrl) {
+              sharedCtrl.done();
+              if (telemetry) {
+                if (evt.usage) telemetry.recordUsage(evt.usage);
+                telemetry.finalize('done');
+              }
+            }
+            break;
+          }
+        }
+        
+        if (doneReceived || aborted || _eofReached) break;
+      }
+      
+      try { clearInterval(_idleCheckTimer); } catch (e) {}
+
+      // H-25: 45s 无数据超时 — 清理节点、复位状态并提示，避免永久"处理中"
+      if (timedOut) {
+        cleanupRenderers();
+        hideAssistantTyping();
+        if (aiContent) {
+          var timeoutNote = el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），已保留部分回复');
+          try { assistantNode.appendChild(timeoutNote); } catch (e) {}
+          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eC1) {}
+        } else {
+          preserveFailedTurn();
+          restoreInputText();
+          notify('AI 响应超时（45 秒未收到数据），请重试');
+        }
+        resetSendingIfCurrent();
+        return;
+      }
+
+      if ((S._currentReqId !== reqId || aborted) && !_finalized) {
+        // 被新请求取代，删除当前创建的任何节点
+        // ★ 修复：若 error 事件已 finishAiMessage（_finalized=true，部分回复已保留并写入
+        // S.messages），不得再删除节点，否则已渲染的回复会闪现后消失且服务端未保存。
+        cleanupRenderers();
+        if (assistantNode) try { assistantNode.remove(); } catch (e) {}
+        hideAssistantTyping();
+        resetSendingIfCurrent();
+        return;
+      }
+      
+      // 完成处理
+      hideAssistantTyping();
+      
+      if (evtHandled) {
+        // 已在 done/error 事件中完成渲染
+      } else if (assistantNode && (aiContent || aiReasoning)) {
+        finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+      } else if (doneReceived) {
+        // ★ 2026-09-22：此分支不经过 finishAiMessage，需显式收敛"整理中"占位，
+        //   否则流已结束但那个旋转环会一直转下去（用户报障的路径之一）。
+        try { settleOrganizingStep(assistantNode); } catch (eOrgD) {}
+        cleanupRenderers();
+      } else if (terminalErrorSeen) {
+        // ★ 2026-09-17 修复：服务端已明确报错（error 事件已展示真实原因），
+        //   此处只做清理，**不得**再弹出"AI 连接中断"覆盖真实错误。
+        // ★ 2026-09-22：同样需要收敛工具/整理占位动画。
+        try { if (assistantNode) clearAssistantTransientStatus(assistantNode); } catch (eOrgE) {}
+        cleanupRenderers();
+      } else if (!doneReceived) {
+        cleanupRenderers();
+        preserveFailedTurn();
+        restoreInputText();
+        // 流意外结束且未收到任何内容，且服务端**未**报错过：才是真的连接中断
+        // （多半是连接被代理/网络切断，而非 AI 拒绝回答）。
+        // 用户消息已回填输入框，可直接重发。
+        notify('AI 连接中断或长时间未响应，请重试');
+      }
+    } catch (fetchErr) {
+      if (S._currentReqId !== reqId) { try { clearInterval(_idleCheckTimer); } catch (e) {} return; }
+      try { clearInterval(_idleCheckTimer); } catch (e) {}
+      // H-25: 超时中止触发的 AbortError 也走超时清理，避免被误判为"用户主动停止"
+      if (timedOut) {
+        cleanupRenderers();
+        hideAssistantTyping();
+        if (aiContent) {
+          var timeoutNote2 = el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），已保留部分回复');
+          try { assistantNode.appendChild(timeoutNote2); } catch (e) {}
+          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+        } else {
+          preserveFailedTurn();
+          restoreInputText();
+          notify('AI 响应超时（45 秒未收到数据），请重试');
+        }
+        resetSendingIfCurrent();
+        return;
+      }
+      // 网络错误或 abort
+      if (fetchErr && fetchErr.name !== 'AbortError') {
+        hideAssistantTyping();
+        // ★★★ 2026-09-15 修复（P1-6「回复已完整却显示 AI 生成中断」）：
+        //   症状（用户截图实证）：AI 把完整回复给完了，底下仍有一行小字
+        //   "连接中断，已保留部分回复" / "AI 连接中断，请稍后重试"。
+        //   根因：后端发完 `done` 事件后**立即关闭 SSE 连接**，此时前端
+        //   reader.read() 会因连接关闭抛出网络错误（非 AbortError），
+        //   于是走进本分支。但**本分支此前没有检查 `doneReceived`**，
+        //   不区分"流是否已正常收尾"，只要 aiContent 非空就无条件追加中断提示。
+        //   修复：只要已经收到 done 事件（doneReceived === true），说明本轮
+        //   响应已正常完成，此时任何后续读取异常都是"服务端正常关闭连接"的
+        //   副产物，必须静默忽略，不得渲染任何中断文案。
+        if (doneReceived) {
+          // 已完成：静默收尾，不加任何中断提示（内容已完整推送给用户）。
+          try { clearInterval(_idleCheckTimer); } catch (e) {}
+          if (!_finalized && aiContent) {
+            finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+          }
+          resetSendingIfCurrent();
+          return;
+        }
+        if (aiContent) {
+          // 已有部分回复，保留并提示连接中断
+          var connNote = el('div', { class: 'ai-error-note' }, '连接中断，已保留部分回复');
+          try { assistantNode.appendChild(connNote); } catch (e) {}
+          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eC2) {}
+        } else {
+          preserveFailedTurn();
+          restoreInputText();
+          // Phase 3: Use shared error classification
+          var netErrMsg = '网络连接异常，请检查网络后重试';
+          if (window.XtjAiCore && window.XtjAiCore.Errors && window.XtjAiCore.RequestController && window.XtjAiCore.RequestController.FEATURE_FLAG) {
+            var netClassified = window.XtjAiCore.Errors.classify(fetchErr, { phase: 'stream_read', requestId: reqId });
+            netErrMsg = netClassified.message;
+          }
+          notify(netErrMsg);
+        }
+        if (sharedCtrl) {
+          sharedCtrl.error('stream_read_error');
+          if (telemetry) { telemetry.finalize('error', { code: 'STREAM_INTERRUPTED', phase: 'stream_read', message: String(fetchErr && fetchErr.message || '') }); }
+        }
+      } else {
+        // AbortError: 用户主动停止，或 sharedCtrl 300s 绝对超时
+        var sharedTimedOut = !!(sharedCtrl && typeof sharedCtrl.getCancelReason === 'function' && sharedCtrl.getCancelReason() === 'timeout');
+        var ctrlReason = (controller && controller._abortReason) || '';
+        var timedOut300 = sharedTimedOut || ctrlReason === 'timeout';
+        if (sharedCtrl) {
+          sharedCtrl.cancel(timedOut300 ? 'timeout' : 'user_cancelled');
+          if (telemetry) { telemetry.finalize(timedOut300 ? 'timeout' : 'cancelled', { code: timedOut300 ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED', phase: 'stream_read', message: timedOut300 ? '思考超时' : '用户取消' }); }
+        }
+        // ★ 300s 绝对超时与用户取消区分：给出明确提示，避免用户误以为
+        // AI 未回复而重发导致重复扣费/重复请求。
+        if (timedOut300) notify('思考超时（超过 5 分钟），请重试');
+        if (aiContent) {
+          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+          if (timedOut300) {
+            try {
+              assistantNode.appendChild(el('div', { class: 'ai-error-note' }, '思考超时，回复可能不完整'));
+            } catch (eTimeoutNote) {}
+          }
+        } else {
+          hideAssistantTyping();
+          preserveFailedTurn();
+        }
+      }
+    }
+    
+    if (sharedCtrl) {
+      if (sharedAbortHandler && typeof sharedCtrl.signal.removeEventListener === 'function') {
+        try { sharedCtrl.signal.removeEventListener('abort', sharedAbortHandler); } catch (eRemoveShared) {}
+      }
+      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', sharedCtrl);
+      sharedCtrl.dispose();
+    }
+    resetSendingIfCurrent();
+    if (S._currentReqId !== reqId) return;
+    if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+    updateInputMetrics();
+    scrollToBottom(messagesEl, true);
+  }
+
+  async function loadHistory(messagesEl, before) {
+    if (S.loading || S.loadingMore) return;
+    if (before) S.loadingMore = true;
+    else S.loading = true;
+    var requestId = ++S.historyRequestId;
+    var requestedConversationId = S.conversationId;
+    var historyOwner = window.currentUser || '', historyEpoch = window._authStateEpoch || 0;
+    var loadController = typeof AbortController === 'function' ? new AbortController() : null;
+    // ★ 修复：历史加载使用独立 controller，不得覆盖 S.abortController——
+    // 否则流式发送中滚动加载历史会把发送请求的停止能力（停止按钮）指向已完成的加载请求。
+    S.historyController = loadController;
+
+    var hasCache = false;
+    var cachedMsgs = null;
+    if (!before && messagesEl) {
+      messagesEl.setAttribute('aria-busy', 'true');
+      var cachedData = getAiHistoryCache(S.conversationId);
+      cachedMsgs = cachedData && cachedData.messages;
+      
+      if (cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
+        hasCache = true;
+        S.messages = cachedMsgs;
+        S._pendingLocalMsgs = cachedMsgs.filter(function(m) { return m && m.interrupted === true; });
+        messagesEl.innerHTML = '';
+        messagesEl.__xtjAiCardIds = {};
+        var frag = document.createDocumentFragment();
+        var cachedNodes = [];
+        cachedMsgs.forEach(function(m) {
+          var cachedNode = buildMessageNode(m, messagesEl);
+          cachedNodes.push(cachedNode);
+          frag.appendChild(cachedNode);
+        });
+        messagesEl.appendChild(frag);
+        renderAiHistoryCards(messagesEl, cachedMsgs, cachedNodes, []);
+        S.autoScrollPinned = true;
+        scrollToBottom(messagesEl, true);
+      } else if (!messagesEl.children.length
+          || messagesEl.querySelector('.ai-history-unavailable')
+          // renderAiRoot starts with the welcome empty-state, so checking only
+          // children.length skipped the loading indicator on every cold open.
+          || messagesEl.querySelector('.ai-chat-empty')) {
+        messagesEl.innerHTML = '';
+        var loadingState = buildEmptyState('正在加载聊天记录…');
+        loadingState.classList.add('ai-history-loading');
+        messagesEl.appendChild(loadingState);
+      }
+    }
+
+    try {
+      var qs = '?limit=' + HISTORY_PAGE_SIZE;
+      if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
+      if (before) qs += '&before=' + encodeURIComponent(before);
+      qs += '&mode=normal';
+      // 历史接口偶发慢/弱网：超时放宽并做一次静默重试，减少「缓存记录，刷新失败」误报
+      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 15000, abortController: loadController });
+      if ((!r.ok || !r.data) && !before && r && r.error_code !== 'aborted') {
+        var canRetry = r.status === 0 || r.error_code === 'timeout' || r.error_code === 'network_error' || (r.status >= 500);
+        if (canRetry && requestId === S.historyRequestId) {
+          try {
+            await new Promise(function(resolve) { setTimeout(resolve, 400); });
+            if (requestId === S.historyRequestId && (!loadController || !loadController.signal || !loadController.signal.aborted)) {
+              r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 18000, abortController: loadController });
+            }
+          } catch (eRetry) {}
+        }
+      }
+
+      if (requestId !== S.historyRequestId || requestedConversationId !== S.conversationId || messagesEl !== S.messagesEl || !S.active ||
+          historyOwner !== (window.currentUser || '') || historyEpoch !== (window._authStateEpoch || 0)) return;
+
+      if (!r.ok || !r.data) {
+        if (!before) {
+          try { console.warn('[AI] loadHistory failed:', r.status, r.error, r.error_code); } catch (e) {}
+          // 已有缓存时：仅在真正失败后提示；中止请求不刷横幅
+          if (r.error_code === 'aborted') {
+            removeHistoryUnavailableBanner(messagesEl);
+          } else {
+            renderHistoryUnavailable(messagesEl, r, { preserveExistingMessages: hasCache || !!messagesEl.querySelector('.ai-msg') });
+          }
+        }
+        return;
+      }
+
+      removeHistoryUnavailableBanner(messagesEl);
+
+      if (r.data.conversation_id) {
+        S.conversationId = r.data.conversation_id;
+        writeConvId(r.data.conversation_id);
+      }
+      S.hasMore = !!r.data.has_more;
+      S.oldestCursor = r.data.oldest || S.oldestCursor;
+      var msgs = r.data.messages || [];
+      // ★ 历史图片消息：把后端带回来的 vision_urls 转成 attachments，
+      //   供「重新生成」时复用原图（历史/刷新后加载的图片消息同样可重新生成）。
+      //   ★ 修 bug：图片消息在历史里应渲染为真实图片，而不是内部占位标签 + 服务端注入说明。
+      msgs = msgs.map(function(m) {
+        if (m && m.role === 'user' && Array.isArray(m.vision_urls) && m.vision_urls.length) {
+          var atts = m.vision_urls.map(function(url, ui) {
+            var mime = 'image/png';
+            var m2 = String(url || '').match(/^data:([^;,]+);/);
+            if (m2 && m2[1]) mime = m2[1];
+            return { name: '图片' + (ui + 1), type: mime, data_url: url };
+          });
+          m.attachments = atts;
+          // 清掉 [图片:...]/[文件:...] 内部标签与【用户上传…→【文件结束】/OCR 注入文本，
+          // 保留用户真实文字，再用 vision_urls 重建 markdown 图片（与 live 会话 displayText 一致）。
+          var visualText = String(m.content || '')
+            .replace(/\[图片:[^\]]*\]/g, ' ')
+            .replace(/\[文件:[^\]]*\]/g, ' ')
+            .replace(/\[📄[^\]]*\]/g, ' ')
+            .replace(/【用户上传文件:[\s\S]*?【文件结束】/g, ' ')
+            .replace(/【用户上传图片的可读文字[\s\S]*?--- 图片文字结束 ---/g, ' ')
+            .replace(/【用户上传图片 ·[\s\S]*?(?=【|$)/g, ' ')
+            .replace(/【图片 OCR[\s\S]*?(?=【|$)/g, ' ')
+            .replace(/!\[[^\]]*\]\(data:[^)]+\)/g, ' ')
+            .replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          var imgMarkdown = atts.map(function(a, i) { return '![图片' + (i + 1) + '](' + a.data_url + ')'; }).join('\n');
+          m.content = (visualText ? visualText + '\n' : '') + imgMarkdown;
+        }
+        return m;
+      });
+
+      if (!msgs.length && !before) {
+        // 服务端暂无消息时：若本地/缓存已有完整对话，保留不擦掉（刚聊完尚未落库、或短暂查询空窗）
+        var keepLocal = (S.messages && S.messages.length > 0)
+          ? S.messages
+          : (hasCache && cachedMsgs && cachedMsgs.length ? cachedMsgs : null);
+        if (keepLocal && keepLocal.length) {
+          S.messages = keepLocal;
+          if (!messagesEl.querySelector('.ai-msg')) {
+            messagesEl.innerHTML = '';
+            var keepFrag = document.createDocumentFragment();
+            keepLocal.forEach(function(m) { keepFrag.appendChild(buildMessageNode(m, messagesEl)); });
+            messagesEl.appendChild(keepFrag);
+          }
+          try { setAiHistoryCache(S.conversationId || (r.data && r.data.conversation_id), keepLocal); } catch (eKeep) {}
+          return;
+        }
+        S.messages = [];
+        messagesEl.innerHTML = '';
+        appendEmptyState(messagesEl);
+        return;
+      }
+
+      if (!before) {
+        // ★★ 2026-09-29（审计 S1「首屏历史到达时整体清空容器」）：
+        //   现象：打开小猫AI 后立刻发一条消息（鉴权/网络较慢时有 1~3 秒窗口，
+        //   输入框此时已可用），气泡先正常出现，几百毫秒后被整体清掉重画历史：
+        //   提问消失、AI 的回复再也看不到；S.messages 也被整体替换，后续追问
+        //   不再带这条上下文。
+        //   根因：这里无条件 `S.messages = msgs; messagesEl.innerHTML = ''`，
+        //   既不检查 S.sending，也不保留本地已 append 的 .ai-msg 节点。正在流式
+        //   写入的 assistantNode 被摘出文档树，之后 finishAiMessage /
+        //   clearAssistantTransientStatus 全部落在游离节点上，用户永远看不到内容。
+        //   修法：渲染历史前先把"本地尚未被服务端收录的轮次"（S._pendingLocalMsgs
+        //   里的消息对象 + 正在流式的 .generating 节点）从容器摘出，历史渲染完
+        //   再原样追加回末尾，并把它们并回 S.messages，保证上下文不丢。
+        // Consume locally saved rows only when a distinct remote row matches each
+        // reference. Keep unmatched refs: the response may have been fetched before save.
+        var _localPending = reconcileAiHistoryPending(S._pendingLocalMsgs, msgs, S.messages);
+        S._pendingLocalMsgs = _localPending;
+        var _localNodes = [];
+        try {
+          var _kids = messagesEl.querySelectorAll('.ai-msg');
+          for (var _ki2 = 0; _ki2 < _kids.length; _ki2++) {
+            var _kn2 = _kids[_ki2];
+            var _isLocal = _kn2.classList.contains('generating')
+              || (_kn2._msgRef && _localPending.indexOf(_kn2._msgRef) >= 0);
+            if (!_isLocal) continue;
+            _localNodes.push(_kn2);
+            if (_kn2.parentNode) _kn2.parentNode.removeChild(_kn2);
+          }
+        } catch (eDetach) {}
+
+        S.messages = msgs.concat(_localPending);
+        messagesEl.innerHTML = '';
+        // The prior DOM is discarded below, so its card-id dedupe map must be
+        // discarded too or restored cards would be incorrectly suppressed.
+        messagesEl.__xtjAiCardIds = {};
+        var frag = document.createDocumentFragment();
+        var _historyNodes = [];
+        msgs.forEach(function(m) {
+          var _historyNode = buildMessageNode(m, messagesEl);
+          _historyNodes.push(_historyNode);
+          frag.appendChild(_historyNode);
+        });
+        messagesEl.appendChild(frag);
+        renderAiHistoryCards(messagesEl, msgs, _historyNodes, []);
+        // 历史渲染完再把本地未同步的轮次放回末尾（节点原样复用，流式写入不中断）
+        for (var _li = 0; _li < _localNodes.length; _li++) {
+          try { messagesEl.appendChild(_localNodes[_li]); } catch (eReappend) {}
+        }
+        S.autoScrollPinned = true;
+        scrollToBottom(messagesEl, true);
+        try {
+          setAiHistoryCache(S.conversationId, S.messages);
+        } catch (e) {}
+      } else {
+        // 加载更早历史：DOM 前置 + 同步 S.messages（避免内存历史与 DOM 不一致）
+        if (msgs.length) S.messages = msgs.concat(S.messages);
+        // ★ 2026-09-29（审计 M9「历史分页滚动锚点用 scrollHeight 差值，加载完跳位」）：
+        //   现象：上翻加载更早消息后，视口没有停在原来那条消息上，而是跳几十像素；
+        //   连续翻页时跳动累积，接近"历史加载后内容乱跳"。
+        //   根因：原代码 `oldScroll = scrollHeight` 再 `scrollTop = scrollHeight - oldScroll`
+        //   算出来的其实是"新增高度 Δ"，等价于假设加载前 scrollTop === 0；但触发条件
+        //   是 `scrollTop < 60`（见 bindAiChatScroll 的分页判断），真实 scrollTop 可能
+        //   是 0~59，误差最多 59px。
+        //   修法：额外记住加载前的 scrollTop，插入后设 scrollTop = oldScrollTop + Δ。
+        var oldScroll = messagesEl.scrollHeight;
+        var oldScrollTop = messagesEl.scrollTop;
+        var _existingFirstNode = messagesEl.firstChild;
+        var frag = document.createDocumentFragment();
+        var _historyNodes = [];
+        for (var mi = 0; mi < msgs.length; mi++) {
+          var node = buildMessageNode(msgs[mi], messagesEl);
+          _historyNodes.push(node);
+          frag.appendChild(node);
+        }
+        messagesEl.insertBefore(frag, _existingFirstNode);
+        renderAiHistoryCards(messagesEl, msgs, _historyNodes, msgs.map(function() { return _existingFirstNode; }));
+        try {
+          requestAnimationFrame(function() {
+            // ★ 2026-09-29（审计 M9，接上方注释）：Δ 是"新增内容高度"，
+            //   锚点 = 加载前的 scrollTop + Δ，才能停在原来那条消息上。
+            var delta = messagesEl.scrollHeight - oldScroll;
+            messagesEl.scrollTop = oldScrollTop + delta;
+          });
+        } catch (e2) {}
+      }
+    } finally {
+      if (requestId === S.historyRequestId) {
+        S.loading = false;
+        S.loadingMore = false;
+        if (S.historyController === loadController) S.historyController = null;
+        if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
+      }
+    }
+  }
+
+  // 获取会话列表（普通聊天只显示普通会话，深入研究会话分开管理）
+  async function fetchConversations() {
+    var seq = ++S.conversationRequestId, life = S.lifecycleId;
+    var owner = window.currentUser || '', epoch = window._authStateEpoch || 0;
+    function current() { return seq === S.conversationRequestId && life === S.lifecycleId && owner === (window.currentUser || '') && epoch === (window._authStateEpoch || 0); }
+    try {
+      var r = await apiRequest('GET', '/chat/conversations?limit=50&mode=normal', null, { timeoutMs: 15000 });
+      if (!current()) return false;
+      if (!r || !r.ok || !r.data || !Array.isArray(r.data.conversations)) throw new Error('历史会话加载失败');
+      S.conversations = r.data.conversations;
+      return true;
+    } catch (error) {
+      if (!current()) return false;
+      throw error;
+    }
+  }
+
+  // 切换会话
+  // ★ 新增：会话自定义标题（localStorage 覆盖，仅本设备生效，不动后端）
+  function getConversationTitleOverride(cid) {
+    if (!cid) return '';
+    try { var m = JSON.parse(localStorage.getItem('xtj_ai_conv_titles') || '{}'); return m[cid] || ''; } catch (e) { return ''; }
+  }
+  function setConversationTitleOverride(cid, title) {
+    if (!cid) return;
+    try {
+      var m = JSON.parse(localStorage.getItem('xtj_ai_conv_titles') || '{}');
+      var clean = String(title || '').trim();
+      if (clean) m[cid] = clean.slice(0, 40); else delete m[cid];
+      localStorage.setItem('xtj_ai_conv_titles', JSON.stringify(m));
+    } catch (e) {}
+  }
+  function renameConversation(cid) {
+    if (!cid) return;
+    var current = getConversationTitleOverride(cid) || '';
+    var next = prompt('输入新的会话名称（留空恢复默认）：', current);
+    if (next === null) return;
+    setConversationTitleOverride(cid, next);
+    if (S.conversationsEl) renderConversationListStyled(S.conversationsEl);
+  }
+
+  function renderConversationListStyled(container) {
+    container.innerHTML = '';
+    if (!S.conversations.length) {
+      container.appendChild(el('div', { class: 'ai-no-history', text: '暂无聊天记录' }));
+      return;
+    }
+    var groups = {};
+    var ordered = [];
+    S.conversations.forEach(function(conv) {
+      var key = getConversationGroupLabel(conv.updated_at || conv.created_at || '');
+      if (!groups[key]) {
+        groups[key] = [];
+        ordered.push(key);
+      }
+      groups[key].push(conv);
+    });
+    ordered.forEach(function(groupLabel) {
+      var section = el('section', { class: 'ai-conv-group' });
+      section.appendChild(el('div', { class: 'ai-conv-group-title', text: groupLabel }));
+      (groups[groupLabel] || []).forEach(function(conv) {
+        var item = el('button', {
+          type: 'button',
+          class: 'ai-conv-item' + (conv.conversation_id === S.conversationId ? ' active' : ''),
+          'data-conv-id': conv.conversation_id
+        });
+        item.appendChild(el('div', { class: 'ai-conv-title', text: (getConversationTitleOverride(conv.conversation_id) || conv.title || '新对话') }));
+        item.appendChild(el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
+        item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
+        var meta = el('div', { class: 'ai-conv-meta' });
+        meta.appendChild(el('span', { class: 'ai-conv-count', text: getConversationCountText(conv) }));
+        // ★ 新增：重命名按钮
+        var renameBtn = el('span', { class: 'ai-conv-rename', title: '重命名此对话', 'aria-label': '重命名对话' }, '✎');
+        (function(cid) {
+          renameBtn.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            renameConversation(cid);
+          });
+        })(conv.conversation_id);
+        meta.appendChild(renameBtn);
+        // 删除按钮
+        var delBtn = el('span', { class: 'ai-conv-del', title: '删除此对话', 'aria-label': '删除对话' }, '×');
+        (function(cid, elRef) {
+          delBtn.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            if (!confirm('确定删除此对话吗？删除后不可恢复。')) return;
+            deleteConversation(cid, elRef);
+          });
+        })(conv.conversation_id, item);
+        meta.appendChild(delBtn);
+        item.appendChild(meta);
+        item.addEventListener('click', function() {
+          if (S.sending) return;
+          var cid = this.getAttribute('data-conv-id');
+          switchConversation(cid);
+        });
+        section.appendChild(item);
+      });
+      container.appendChild(section);
+    });
+  }
+
+  async function deleteConversation(cid, itemEl) {
+    if (!cid || S._newChatBusy || (S.sending && cid === S.conversationId)) return;
+    var deleteLife = S.lifecycleId, deleteOwner = window.currentUser || '', deleteEpoch = window._authStateEpoch || 0;
+    function currentDelete() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === (window._authStateEpoch || 0); }
+    try {
+      var r = await apiRequest('POST', '/chat/delete', { conversation_id: cid });
+      if (!currentDelete()) return;
+      if (r && r.ok) {
+        if (itemEl && itemEl.parentElement) itemEl.remove();
+        // 从 S.conversations 中移除
+        S.conversations = (S.conversations || []).filter(function(c) { return c.conversation_id !== cid; });
+        // 如果删除的是当前对话，重置
+        if (cid === S.conversationId) {
+          S.conversationId = null;
+          S.messages = [];
+          S.oldestCursor = null;
+          S.hasMore = false;
+          if (S.messagesEl) S.messagesEl.innerHTML = '';
+          setAiRootState('ai-empty');
+          // ★ 修复：同步清除本地记录的上次会话 id，避免刷新后
+          // 用已软删除的旧会话继续发消息（写入被删会话）
+          if (typeof writeConvId === 'function') { try { writeConvId(null); } catch (_) {} }
+        }
+        showConversationList();
+      } else {
+        if (currentDelete()) notify('删除失败');
+      }
+    } catch (e) {
+      if (currentDelete()) notify('删除失败');
+    }
+  }
+
+  async function switchConversation(cid) {
+    if (!cid) return;
+    // ★ 2026-09-24（课题③）：从历史二级页选中会话后，立即收起浮层回到聊天区，
+    //   并给出"正在打开"反馈，避免用户以为点击无效。
+    var _histBtn = document.querySelector('.ai-chat-hist-btn');
+    var _newBtn = document.querySelector('.ai-chat-new-btn');
+    hideConversationListPage();
+    if (_histBtn) syncAiHeaderButtons(_histBtn, _newBtn);
+    if (cid === S.conversationId && S.messages.length > 0) return;
+    abortCurrentRequest();
+    // ★★ 2026-09-29（审计 S2「切会话后旧流仍继续收尾，污染新会话」）：
+    //   现象：A 会话 AI 还在输出时切到 B，B 里会莫名多出一条 A 的 AI 回复，
+    //   并被写进 B 的本地缓存（下次打开 B 还能看到"别人的回答"）；若 A 流还没
+    //   收到正文，则反过来把 B 刚加载出来的最后一条用户消息连同气泡删掉。
+    //   根因：这里只调 abortCurrentRequest()，既没有作废 S._currentReqId，
+    //   也没有标记旧流已收尾。旧流 catch 里 `S._currentReqId !== reqId` 判定
+    //   仍然通过，于是继续 finishAiMessage → push 到**新会话**的 S.messages + 写缓存。
+    //   修法：切会话时把 _currentReqId 置空，旧流所有收尾路径（含 finishAiMessage）
+    //   都会因"我不再是当前请求"而短路；同时作废本轮的本地待同步消息引用。
+    S._currentReqId = null;
+    S._pendingLocalMsgs = [];
+    removeHistoryUnavailableBanner(S.messagesEl);
+    
+    S.historyRequestId += 1;
+    S.loading = false;
+    S.loadingMore = false;
+    S.conversationId = cid;
+    writeConvId(cid);
+    S.messages = [];
+    S.oldestCursor = null;
+    S.hasMore = false;
+    if (S.messagesEl) {
+      S.messagesEl.innerHTML = '';
+      removeHistoryUnavailableBanner(S.messagesEl);
+    }
+    showChatMessages();
+    if (S.messagesEl) {
+      S.loading = false;
+      S.loadingMore = false;
+      await loadHistory(S.messagesEl, null);
+    }
+  }
+  
+function showChatMessages() {
+    if (S.conversationsEl) {
+      S.conversationsEl.style.display = 'none';
+      S.conversationsEl.classList.remove('is-open');
+    }
+    // ★ 2026-09-24 修复（课题③「返回后历史仍显示在页面上」）：
+    //   旧实现只切 display，未清理二级页状态与视觉残留，返回后历史列表仍可见。
+    closeConversationListPage();
+    if (S.messagesEl) S.messagesEl.style.display = '';
+    var infoBar = document.getElementById('aiChatHistoryInfo');
+    if (infoBar) infoBar.style.display = 'none';
+    var inputBar = document.getElementById('aiChatInputBar');
+    if (inputBar) inputBar.style.display = '';
+    S.showingHistory = false;
+    var root = getAiRoot();
+    if (root) root.classList.remove('showing-history');
+  }
+
+  // ★ 2026-09-24（课题③）：历史对话改为「独立二级信息页」——
+  //   以浮层卡片形式展示（非全屏覆盖），带滑入/滑出过渡动画，
+  //   可点击关闭按钮或直接选中某个历史会话返回聊天区。
+  function ensureConversationPageShell() {
+    var root = getAiRoot();
+    if (!root || !S.conversationsEl) return null;
+    var shell = root.querySelector('.ai-conv-page-shell');
+    if (shell) return shell;
+    shell = el('div', { class: 'ai-conv-page-shell', role: 'dialog', 'aria-modal': 'false', 'aria-label': '历史会话' });
+    var card = el('div', { class: 'ai-conv-page-card' });
+    var head = el('div', { class: 'ai-conv-page-head' });
+    head.appendChild(el('div', { class: 'ai-conv-page-title', text: '历史会话' }));
+    var closeBtn = el('button', { type: 'button', class: 'ai-conv-page-close', 'aria-label': '关闭历史会话' }, '×');
+    closeBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var histBtnNow = document.querySelector('.ai-chat-hist-btn');
+      var newBtnNow = document.querySelector('.ai-chat-new-btn');
+      hideConversationListPage();
+      if (histBtnNow) syncAiHeaderButtons(histBtnNow, newBtnNow);
+    });
+    head.appendChild(closeBtn);
+    card.appendChild(head);
+    // 把会话列表与提示栏移入浮层卡片（保留原引用，逻辑不变）
+    var infoBar = document.getElementById('aiChatHistoryInfo');
+    if (infoBar) card.appendChild(infoBar);
+    card.appendChild(S.conversationsEl);
+    shell.appendChild(card);
+    root.appendChild(shell);
+    return shell;
+  }
+
+  function openConversationListPage() {
+    if (S.messagesEl) S.messagesEl.style.display = 'none';
+    var inputBar = document.getElementById('aiChatInputBar');
+    if (inputBar) inputBar.style.display = 'none';
+    var infoBar = document.getElementById('aiChatHistoryInfo');
+    if (infoBar) infoBar.style.display = '';
+    if (S.conversationsEl) {
+      S.conversationsEl.style.display = '';
+      renderConversationListStyled(S.conversationsEl);
+    }
+    var shell = ensureConversationPageShell();
+    S.showingHistory = true;
+    var root = getAiRoot();
+    if (root) root.classList.add('showing-history');
+    // 下一帧加 is-open 触发滑入动画（保证 transition 生效）
+    if (shell) {
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() { shell.classList.add('is-open'); });
+      });
+    }
+  }
+
+  // 关闭二级浮层（带滑出动画），但不改变聊天区可见性 —— 供 showChatMessages 复用
+  function closeConversationListPage() {
+    var root = getAiRoot();
+    var shell = root ? root.querySelector('.ai-conv-page-shell') : null;
+    if (!shell) return;
+    shell.classList.remove('is-open');
+    shell.classList.add('is-leaving');
+    setTimeout(function() {
+      // 动画结束后把会话列表与提示栏移回 root（保持 DOM 引用稳定，避免后续逻辑找不到节点）
+      try {
+        if (S.conversationsEl && shell.contains(S.conversationsEl)) {
+          S.conversationsEl.style.display = 'none';
+          root.appendChild(S.conversationsEl);
+        }
+        var infoBar = shell.querySelector('#aiChatHistoryInfo');
+        if (infoBar) { infoBar.style.display = 'none'; root.appendChild(infoBar); }
+        if (shell.parentNode) shell.parentNode.removeChild(shell);
+      } catch (eShell) {}
+    }, 260);
+  }
+
+  // 返回聊天区（供页面内"返回"入口调用）
+  function hideConversationListPage() {
+    closeConversationListPage();
+    if (S.messagesEl) S.messagesEl.style.display = '';
+    var inputBar = document.getElementById('aiChatInputBar');
+    if (inputBar) inputBar.style.display = '';
+    S.showingHistory = false;
+    var root = getAiRoot();
+    if (root) root.classList.remove('showing-history');
+  }
+
+  function showConversationList() {
+    openConversationListPage();
+  }
+
+  function renderAiRoot() {
+    var old = document.getElementById('aiChatRoot');
+    if (old) {
+      if (S.statusTimer) { try { clearInterval(S.statusTimer); } catch (e) {} S.statusTimer = null; }
+      try { old.remove(); } catch (e) {}
+    }
+
+    var root = el('div', { id: 'aiChatRoot', class: 'ai-chat-root ai-idle' + (S._dockMode ? ' ai-chat-dock' : '') });
+
+    var header = el('div', { class: 'ai-chat-header' });
+    // ★ dock 模式：作为移动端 dock 中间 tab 打开（等同首页），无需额外返回按钮，
+    //   底部 dock 即导航，可切换到其它板块；其它入口（上下文菜单/桌面）保留返回。
+    {
+      var backBtn = el('button', { type: 'button', class: 'ai-chat-back', 'aria-label': '返回', text: '‹' });
+      backBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeAiChat();
+      });
+      header.appendChild(backBtn);
+    }
+
+    // ★ 2026-09-23 移除头部「头像 + 小猫/在线」：按维护者要求只保留功能入口
+    //   （返回、深入研究、Code、历史、新建/删除等），不再显示头像与在线状态。
+    //   对应的 applyConfigToUI/updateAiStatus 里对 #aiChatHeaderAvatar / Name / Status
+    //   的调用都带 if (el) 守卫，元素不存在时自动跳过，无需改动其它逻辑。
+
+    // 深入研究?toggle 按钮
+    var deepThinkBtn = el('button', {
+      type: 'button',
+      class: 'ai-deep-think-toggle' + (S.deepThink ? ' on' : ''),
+      'aria-label': '深入研究模式',
+      title: '深入研究模式 - AI 会先做更深入的分析再回答',
+      id: 'aiDeepThinkToggle'
+    });
+    var dtIcon = el('span', { class: 'ai-deep-think-icon' });
+    dtIcon.innerHTML = AI_THINK_ICON;
+    deepThinkBtn.appendChild(dtIcon);
+    deepThinkBtn.appendChild(el('span', { class: 'ai-deep-think-label', text: '深入研究' }));
+    deepThinkBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleDeepThink();
+    });
+    header.appendChild(deepThinkBtn);
+
+    // 历史会话按钮
+    var histBtn = el('button', {
+      type: 'button', class: 'ai-chat-hist-btn', 'aria-label': '历史会话',
+      title: '历史会话'
+    }, '历史对话');
+    // ★ 2026-09-24 修复（课题①「历史按钮点不动/有延迟」）：
+    //   旧实现点击后直接 await fetchConversations()，网络往返期间界面零反馈，
+    //   用户以为没点到而反复点击 → 重复请求 → 更卡。现改为：
+    //   ① 点击瞬间立刻进入 loading 态（按钮禁用 + 文案「加载中」+ 面板显示骨架）；
+    //   ② 加 _historyBusy 并发锁，进行中忽略重复点击；
+    //   ③ 失败时明确提示并保持原状，不再静默显示空列表。
+    histBtn.addEventListener('click', function() {
+      if (S.showingHistory) {
+        hideConversationListPage();
+        syncAiHeaderButtons(histBtn, newBtn);
+        return;
+      }
+      if (S._historyBusy) return; // 并发锁：忽略重复点击
+      S._historyBusy = true;
+      var _prevText = histBtn.textContent;
+      histBtn.disabled = true;
+      histBtn.textContent = '加载中';
+      // 立即打开二级页并显示骨架屏（点击即反馈，不等网络）
+      openConversationListPage();
+      syncAiHeaderButtons(histBtn, newBtn);
+      var historyLife = S.lifecycleId;
+      fetchConversations().then(function(loaded) {
+        if (historyLife !== S.lifecycleId || !histBtn.isConnected) return;
+        S._historyBusy = false;
+        histBtn.disabled = false;
+        if (!histBtn.textContent || histBtn.textContent === '加载中') histBtn.textContent = _prevText;
+        syncAiHeaderButtons(histBtn, newBtn);
+        if (loaded && S.conversationsEl) renderConversationListStyled(S.conversationsEl);
+      }).catch(function() {
+        if (historyLife !== S.lifecycleId || !histBtn.isConnected) return;
+        S._historyBusy = false;
+        histBtn.disabled = false;
+        histBtn.textContent = _prevText;
+        syncAiHeaderButtons(histBtn, newBtn);
+        notify('历史会话加载失败，请稍后重试');
+        if (S.conversationsEl) {
+          renderConversationListStyled(S.conversationsEl);
+          var retryHistory = el('button', { type: 'button', class: 'ai-history-retry', text: '加载失败，点击重试' });
+          retryHistory.onclick = function() { S.showingHistory = false; histBtn.click(); };
+          S.conversationsEl.insertBefore(retryHistory, S.conversationsEl.firstChild);
+        }
+      });
+    });
+    header.appendChild(histBtn);
+
+
+
+
+    // 删除当前对话按钮
+    var delBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-del-btn',
+      'aria-label': '删除当前对话',
+      title: '删除当前对话'
+    }, '删除');
+    delBtn.addEventListener('click', async function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!S.conversationId || S.sending || S._newChatBusy) return;
+      var deleteCid = S.conversationId, deleteLife = S.lifecycleId, deleteOwner = window.currentUser || '', deleteEpoch = window._authStateEpoch || 0;
+      function currentDelete() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === (window._authStateEpoch || 0) && (S.conversationId === deleteCid || !S.conversationId); }
+      if (!confirm('确定删除当前对话吗？删除后不可恢复。')) return;
+      delBtn.disabled = true;
+      try {
+        var dr = await apiRequest('POST', '/chat/delete', { conversation_id: deleteCid });
+        if (!currentDelete()) return;
+        if (dr && dr.ok) {
+          S.messages = [];
+          S.oldestCursor = null;
+          S.hasMore = false;
+          S.conversationId = null;
+          if (S.messagesEl) S.messagesEl.innerHTML = '';
+          setAiRootState('ai-empty');
+          // 开启新对话
+          var r2 = await apiRequest('POST', '/chat/new', null);
+          if (!currentDelete()) return;
+          if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
+            S.conversationId = r2.data.conversation_id;
+            writeConvId(r2.data.conversation_id);
+            // 恢复 empty state（先清 loading 再追加）
+            if (S.messagesEl) {
+              S.messagesEl.innerHTML = '';
+              if (typeof appendEmptyState === 'function') appendEmptyState(S.messagesEl);
+            }
+          } else {
+            if (S.messagesEl) {
+              S.messagesEl.innerHTML = '';
+              if (typeof appendEmptyState === 'function') appendEmptyState(S.messagesEl);
+            }
+          }
+        } else {
+          if (currentDelete()) notify('删除失败');
+        }
+      } catch (e) {
+        if (currentDelete()) notify('删除失败');
+      } finally {
+        delBtn.disabled = false;
+      }
+    });
+
+    var newBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-new-btn',
+      'aria-label': '新对话',
+      title: '开始新对话（不删除历史）'
+    }, '新对话');
+    newBtn.addEventListener('click', async function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (S.sending) { notify('正在回复中，请稍候再新建对话'); return; }
+      // ★ 2026-09-24 修复（课题①「新对话点不动/有延迟」）：
+      //   旧实现只有 S.sending 守卫，点击后要等 /chat/new 网络往返才有视觉变化，
+      //   期间按钮无 loading 态、无并发锁，用户重复点击会并发创建多个会话。
+      if (S._newChatBusy) return; // 并发锁：忽略重复点击
+      S._newChatBusy = true;
+      var createSeq = S._newChatRequestId = (S._newChatRequestId || 0) + 1;
+      var createLifecycle = S.lifecycleId, createCid = S.conversationId;
+      var createOwner = window.currentUser || '', createEpoch = window._authStateEpoch || 0;
+      function currentCreate() { return createSeq === S._newChatRequestId && S.active && createLifecycle === S.lifecycleId &&
+        createCid === S.conversationId && createOwner === (window.currentUser || '') && createEpoch === (window._authStateEpoch || 0); }
+      var _prevLabel = newBtn.textContent;
+      newBtn.disabled = true;
+      newBtn.textContent = '创建中';
+      try {
+        var r = await apiRequest('POST', '/chat/new', null);
+        if (!currentCreate()) return;
+        if (r && r.ok && r.data && r.data.conversation_id) {
+          abortCurrentRequest('chat');
+          S.historyRequestId += 1;
+          S._pendingLocalMsgs = [];
+        // Pending attachments belong to the current conversation only.
+        _aiChatFiles = []; _aiChatFileSelectionSeq++;
+        if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+        if (fileInput) fileInput.value = '';
+
+          S.conversationId = r.data.conversation_id;
+          writeConvId(r.data.conversation_id);
+          S.messages = [];
+          S.oldestCursor = null;
+          S.hasMore = false;
+          if (S.messagesEl) {
+            S.messagesEl.innerHTML = '';
+            appendEmptyState(S.messagesEl);
+          }
+          setAiRootState('ai-idle');
+          // 若当前正停留在历史二级页，自动收起回到聊天区
+          if (S.showingHistory) {
+            hideConversationListPage();
+            if (typeof histBtn !== 'undefined' && histBtn) syncAiHeaderButtons(histBtn, newBtn);
+          }
+          notify('已开始新对话，旧对话仍保留在历史中');
+        } else {
+          notify(describeError(r, '创建新对话失败'));
+        }
+      } catch (eNew) {
+        if (currentCreate()) notify('创建新对话失败，请检查网络后重试');
+      } finally {
+        if (createSeq === S._newChatRequestId) S._newChatBusy = false;
+        if (newBtn.isConnected) { newBtn.disabled = false; newBtn.textContent = _prevLabel; }
+      }
+    });
+    header.appendChild(newBtn);
+    header.insertBefore(delBtn, newBtn);
+    if (S.headerButtonsCleanup) {
+      try { S.headerButtonsCleanup(); } catch (eCleanup) {}
+    }
+    S.headerButtonsCleanup = bindAiHeaderButtons(histBtn, newBtn);
+    root.appendChild(header);
+
+    var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
+    messagesEl.addEventListener('scroll', window.throttleRAF(function() {
+      var _nearBottom = isNearBottom(messagesEl, 84);
+      S.autoScrollPinned = _nearBottom;
+      // ★ 2026-09-11：区分"用户主动上翻看历史"与"程序触发的滚动校准"。
+      //   工具事件（tool_calls/tool_result/card）会让容器高度突增，scroll 事件随之
+      //   触发且此刻已不在底部 —— 若把它当成用户意图，工具进展就永远不会自动跟随。
+      //   用户连续两次远离底部才判定为"主动上翻"，此后工具进展不再打扰用户阅读。
+      if (_nearBottom) {
+        _aiUserPinnedUp = false;
+        _aiAwayFromBottomCount = 0;
+      } else {
+        _aiAwayFromBottomCount++;
+        if (_aiAwayFromBottomCount >= 2) _aiUserPinnedUp = true;
+      }
+      // ★ 修复 M2：历史会话列表页（messagesEl display:none）或 hasMore 残留时
+      // 不得触发历史分页加载，避免拼接错乱/误拉取。offsetParent 为 null 表示元素不可见。
+      if (S.showingHistory || !messagesEl.offsetParent) return;
+      if (messagesEl.scrollTop < 60 && S.hasMore && !S.loading && !S.loadingMore && S.oldestCursor) {
+        loadHistory(messagesEl, S.oldestCursor);
+      }
+    }));
+    root.appendChild(messagesEl);
+
+    // 历史会话提示栏
+    var histInfo = el('div', { id: 'aiChatHistoryInfo', style: 'display:none;padding:8px 12px;font-size:12px;color:#666;text-align:center;border-bottom:1px solid var(--border,rgba(140,196,158,0.30))' });
+    histInfo.textContent = '点击下方会话继续聊天';
+    histInfo.className = 'ai-chat-history-info';
+    histInfo.style.cssText = 'display:none';
+    root.appendChild(histInfo);
+    
+    // 会话列表
+    var convList = el('div', { class: 'ai-conversation-list', style: 'display:none' });
+    root.appendChild(convList);
+    S.conversationsEl = convList;
+
+    // ★ P0-1 修复: 状态初始化已在 S 对象声明时通过 resolveInitial* 完成一次。
+    //   此处仅恢复 web_search（因其默认 false 且未在 S 声明中读取 localStorage）。
+    //   不再重复赋值 selectedModel / thinkingMode，避免后端 config 到达前的二次覆盖。
+    //   后端配置优先级由 applyConfigToUI 保证。
+    try {
+      var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
+      S.webSearchEnabled = savedWebSearch === 'true';
+      // ★ 修复: 恢复搜索开关时校验额度。若额度显示搜索已不可用，自动关闭该开关，
+      //   避免刷新后带着超限状态继续触发第三方搜索。额度未拉到（S.quota 为 null）时
+      //   交给 applyQuota 在额度到达后兜底关闭。
+      if (S.webSearchEnabled && S.quota && searchQuotaExhausted(S.quota)) {
+        S.webSearchEnabled = false;
+        try { localStorage.setItem('xtj_ai_web_search', 'false'); } catch (e2) {}
+        notify('网页搜索次数已达上限，已为你关闭搜索');
+      }
+    } catch (e) {}
+
+    // Legacy off switches cannot disable the tools now built into ordinary chat.
+    S.workMode = true;
+    S.thinkMax = true;
+
+    // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
+    var modelLabels = {
+      'deepseek-v4-pro': 'V4 Pro',
+      'deepseek-flash': 'V4.1 Flash'
+    };
+    var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
+
+    // 固定盒包一层，杜绝 active 阴影/描边把 + 按钮顶得上下抽
+    var plusWrap = el('div', { class: 'ai-plus-wrap', id: 'aiPlusWrap' });
+    var plusBtn = el('button', {
+      type: 'button',
+      class: 'ai-plus-btn',
+      id: 'aiPlusBtn',
+      'aria-label': '更多选项',
+      'aria-haspopup': 'menu',
+      'aria-expanded': 'false',
+      'aria-controls': 'aiPlusPanelShell',
+      title: '额度、模型、思考、搜索与 Pro'
+    });
+    plusBtn.innerHTML =
+      '<span class="ai-plus-btn-icon" aria-hidden="true">' +
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
+          '<line x1="12" y1="5" x2="12" y2="19"/>' +
+          '<line x1="5" y1="12" x2="19" y2="12"/>' +
+        '</svg>' +
+      '</span>';
+    plusWrap.appendChild(plusBtn);
+
+    // ★ 清理（死代码）：fillSelect 原用于填充 #aiPlusModelSelect/#aiPlusThinkSelect
+    //   两个透明 select，随该段移除后已无任何调用点，一并删除。
+
+    var panelShell = el('div', {
+      class: 'ai-plus-panel-shell',
+      id: 'aiPlusPanelShell',
+      role: 'menu',
+      'aria-label': '更多选项'
+    });
+    // 简洁可辨识图标（星 / 云上传 / 立方体 / 大脑 / 地球）
+    var ICO = {
+      pro: '<svg class="ai-panel-svg ai-panel-svg--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.1l2.2 5.1 5.5.5-4.2 3.6 1.3 5.4L12 14.9 7.2 17.7l1.3-5.4-4.2-3.6 5.5-.5L12 3.1z"/></svg>',
+      upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 17.5h8.2a3.3 3.3 0 0 0 .3-6.6 5 5 0 0 0-9.6-1.3A3.6 3.6 0 0 0 8 17.5z"/><path d="M12 15.2V9.8"/><path d="M9.8 11.6L12 9.4l2.2 2.2"/></svg>',
+      folder: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.4h8.8A1.5 1.5 0 0 1 21 8.9v8.1a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17z"/></svg>',
+      model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L5 7.2v9.6L12 20.5l7-3.7V7.2L12 3.5z"/><path d="M5 7.2l7 3.8 7-3.8"/><path d="M12 11v9.5"/></svg>',
+      think: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5.2a3 3 0 0 0-2.8 4.1A2.7 2.7 0 0 0 5.2 12c0 1.4.9 2.5 2.2 2.9-.1.4-.2.8-.2 1.2 0 1.8 1.3 3.2 3 3.4"/><path d="M14.5 5.2a3 3 0 0 1 2.8 4.1A2.7 2.7 0 0 1 18.8 12c0 1.4-.9 2.5-2.2 2.9.1.4.2.8.2 1.2 0 1.8-1.3 3.2-3 3.4"/><path d="M9.8 18.3h4.4"/><path d="M12 6.2v8.6"/><path d="M9.8 10c.7-.7 1.5-1 2.2-1s1.5.3 2.2 1"/><path d="M9.8 13c.7-.6 1.5-.9 2.2-.9s1.5.3 2.2.9"/></svg>',
+      search: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M4.5 12h15"/><path d="M12 4.5c2 2.2 3.1 4.7 3.1 7.5s-1.1 5.3-3.1 7.5C10 17.3 8.9 14.8 8.9 12S10 6.7 12 4.5z"/></svg>',
+      thinkMax: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5h5L8.5 22 19 10.5h-5L13 2z"/><path d="M12 13h2l-1 4 3-3"/></svg>',
+      chev: '<svg class="ai-panel-chev-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
+    };
+    function rowEnd(valueHtml, trailHtml) {
+      return (
+        '<span class="ai-panel-row-end">' +
+          (valueHtml || '') +
+          (trailHtml || '') +
+        '</span>'
+      );
+    }
+    // 模型 / 思考行：视觉层 + 透明 select 全行热区
+    panelShell.innerHTML =
+      '<div class="ai-plus-panel-content">' +
+        '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
+          '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
+            '<div class="ai-quota-card-head">' +
+              '<span class="ai-quota-card-title">今日额度</span>' +
+              '<span class="ai-quota-plan-badge" id="aiQuotaPlanBadge">免费</span>' +
+            '</div>' +
+            '<div class="ai-quota-bar" aria-hidden="true"><i id="aiQuotaBarFill"></i></div>' +
+            '<div class="ai-quota-meta">' +
+              '<span id="aiQuotaTokenText">加载中…</span>' +
+              '<span id="aiQuotaPercentText">—</span>' +
+            '</div>' +
+            '<div class="ai-quota-search-line" id="aiQuotaSearchLine">搜索 —</div>' +
+          '</div>' +
+          '<div class="ai-panel-menu-list" role="group" aria-label="功能选项">' +
+            '<div class="ai-panel-group">' +
+              '<button type="button" class="ai-panel-row ai-panel-row--pro" data-action="pro" id="aiProOpenBtn">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--pro" aria-hidden="true">' + ICO.pro + '</span>' +
+                '<span class="ai-panel-row-title" id="aiProCardTitle">开通 Pro</span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value ai-panel-row-value--pro" id="aiProCardDesc">邀请码</span>',
+                  '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
+                ) +
+              '</button>' +
+            '</div>' +
+            '<div class="ai-panel-group">' +
+              '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--upload" aria-hidden="true">' + ICO.upload + '</span>' +
+                '<span class="ai-panel-row-title">上传文件</span>' +
+                rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
+              '</button>' +
+              '<div class="ai-panel-row ai-panel-row--select" data-action="open-model" role="button" tabindex="0" aria-haspopup="listbox">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
+                '<span class="ai-panel-row-title">模型</span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">V4.1 Flash</span>',
+                  '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
+                ) +
+              '</div>' +
+              '<div class="ai-panel-row ai-panel-row--select" data-action="open-think" role="button" tabindex="0" aria-haspopup="listbox">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.think + '</span>' +
+                '<span class="ai-panel-row-title">思考</span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value ai-panel-row-value--think" id="aiThinkSummary">轻度</span>',
+                  '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
+                ) +
+              '</div>' +
+              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false" title="开启后，本轮必须实际执行网页检索；关闭时由 AI 自主判断">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
+                '<span class="ai-panel-row-title">网页搜索</span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value" id="aiSearchRemainHint">—</span>',
+                  '<span class="ai-search-switch" id="aiSearchStatus" aria-hidden="true"><i></i></span>'
+                ) +
+              '</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    function closeQuickModal(id) {
+      var modal = document.getElementById(id);
+      if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
+    }
+    // ★ 生图服务地址：改走自建后端代理 /api/agent/image。
+    //   服务端负责转发生图请求、识别 default.jpeg 占位图并带退避重试取回真图，
+    //   拿不到时返回明确错误，前端据此提示"生成失败/服务繁忙"，不再无限"生成中"。
+    function genImageApiUrl(prompt, bust) {
+      var base = API_BASE + '/image';
+      var q = '?prompt=' + encodeURIComponent(String(prompt || '')) + '&image_size=square_hd';
+      // 重试时追加随机参数绕过浏览器缓存，避免复用旧响应
+      if (bust) q += '&_r=' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+      return base + q;
+    }
+    // ★ 生成图片（预载验证可用性后回调）
+    // 修复：旧实现直连第三方并用 new Image() 轮询同一 URL 等"成图落地"，但第三方
+    // 服务常返回 default.jpeg 占位图（可正常 onload），前端无法区分，导致一直显示
+    // "生成中"却永远不交付真图。现在占位图检测/重试全部收敛到后端代理，前端只需
+    // 加载一次：onload 即真图，onerror 即失败（服务端已返回明确错误）。
+    function loadGenImage(prompt, onOk, onErr) {
+      var url = genImageApiUrl(prompt, true);
+      var img = new Image();
+      var done = false;
+      img.onload = function() {
+        if (done) return;
+        done = true;
+        onOk(url);
+      };
+      img.onerror = function() {
+        if (done) return;
+        done = true;
+        onErr('生成失败：图片服务繁忙或不可用，请稍后重试');
+      };
+      img.src = url;
+    }
+    function openImageGenModal() {
+      closeQuickModal('aiGenImgModal');
+      var modal = document.createElement('div');
+      modal.id = 'aiGenImgModal';
+      modal.className = 'ai-invite-modal';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.innerHTML =
+        '<div class="ai-invite-modal-box ai-genimg-modal-box">' +
+          '<div class="ai-invite-modal-hero" aria-hidden="true"><span class="ai-invite-modal-hero-badge">生图</span><p class="ai-invite-modal-hero-sub">AI 生成图片</p></div>' +
+          '<div class="ai-invite-modal-body">' +
+            '<h3 class="ai-invite-modal-title">描述你想生成的图片</h3>' +
+            '<textarea id="aiGenPromptInp" class="ai-cmd-tpl-inp" rows="3" placeholder="例如：一只戴眼镜的橘猫在写代码，卡通风格" maxlength="500"></textarea>' +
+            '<div class="ai-genimg-preview" id="aiGenPreview" style="display:none"></div>' +
+            '<div class="ai-genimg-status" id="aiGenStatus" aria-live="polite"></div>' +
+          '</div>' +
+          '<div class="ai-invite-modal-foot">' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel" id="aiGenClose">关闭</button>' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiGenRun">生成图片</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(modal);
+      requestAnimationFrame(function() { try { modal.classList.add('is-ready'); } catch (e) {} });
+      modal.querySelector('#aiGenClose').addEventListener('click', function() { closeQuickModal('aiGenImgModal'); });
+      modal.querySelector('#aiGenRun').addEventListener('click', function() {
+        var prompt = String(modal.querySelector('#aiGenPromptInp').value || '').trim();
+        if (!prompt) { notify('请先描述要生成的图片'); return; }
+        var statusEl = modal.querySelector('#aiGenStatus');
+        var previewEl = modal.querySelector('#aiGenPreview');
+        statusEl.textContent = '正在生成图片，请稍候…';
+        previewEl.style.display = 'none';
+        loadGenImage(prompt, function(genUrl) {
+          statusEl.textContent = '生成完成';
+          previewEl.innerHTML = '';
+          previewEl.appendChild(el('img', { class: 'ai-genimg-result', src: genUrl, alt: 'AI 生成图片', loading: 'lazy' }));
+          var row = el('div', { class: 'ai-genimg-result-actions' });
+          row.appendChild(el('a', { class: 'ai-genimg-dl', href: genUrl, target: '_blank', rel: 'noopener', text: '打开原图' }));
+          var copyLnk = el('button', { type: 'button', class: 'ai-genimg-copy', text: '复制链接' });
+          copyLnk.addEventListener('click', function() { doCopy(genUrl); });
+          row.appendChild(copyLnk);
+          var insertBtn = el('button', { type: 'button', class: 'ai-genimg-insert', text: '发到对话' });
+          insertBtn.addEventListener('click', function() { insertGeneratedImage(genUrl, prompt); });
+          row.appendChild(insertBtn);
+          previewEl.appendChild(row);
+          previewEl.style.display = 'block';
+        }, function(errMsg) {
+          statusEl.textContent = errMsg || '生成失败：图片服务繁忙或不可用，请稍后重试';
+        });
+      });
+    }
+    // ★ 构建 AI 生图回复卡片（含「打开原图 / 复制链接 / 再生成一张」）
+    function buildGenImageCard(genUrl, prompt) {
+      var card = el('div', { class: 'ai-msg assistant entering' });
+      var bubble = el('div', { class: 'ai-msg-bubble ai-genimg-bubble' });
+      bubble.innerHTML =
+        '<div class="ai-genimg-card">' +
+          '<div class="ai-genimg-card-head">AI 生成图片</div>' +
+          '<img class="ai-genimg-card-img" src="' + escapeAttr(genUrl) + '" alt="AI 生成图片" loading="lazy">' +
+          '<div class="ai-genimg-card-actions">' +
+            '<a class="ai-genimg-dl" href="' + escapeAttr(genUrl) + '" target="_blank" rel="noopener">打开原图</a>' +
+            '<button type="button" class="ai-genimg-copy" data-url="' + escapeAttr(genUrl) + '">复制链接</button>' +
+            '<button type="button" class="ai-genimg-regen">再生成一张</button>' +
+          '</div>' +
+        '</div>';
+      card.appendChild(bubble);
+      var copyLnk = bubble.querySelector('.ai-genimg-copy');
+      if (copyLnk) copyLnk.addEventListener('click', function() { doCopy(copyLnk.getAttribute('data-url')); });
+      // ★ 再生成一张：用同一描述生成新图并追加到对话
+      var regenBtn = bubble.querySelector('.ai-genimg-regen');
+      if (regenBtn) {
+        regenBtn.addEventListener('click', function(ev) {
+          ev.preventDefault(); ev.stopPropagation();
+          if (S.sending) { notify('正在回复中，请稍候'); return; }
+          regenBtn.disabled = true;
+          regenBtn.textContent = '生成中…';
+          loadGenImage(prompt, function(newUrl) {
+            try { regenBtn.disabled = false; regenBtn.textContent = '再生成一张'; } catch (eRb) {}
+            var newCard = buildGenImageCard(newUrl, prompt);
+            if (S.messagesEl) {
+              S.messagesEl.appendChild(newCard);
+              try { scrollToBottom(S.messagesEl, true); } catch (eSc) {}
+            }
+          }, function(errMsg) {
+            try { regenBtn.disabled = false; regenBtn.textContent = '再生成一张'; } catch (eRb) {}
+            notify(errMsg || '生成失败：图片服务繁忙或不可用，请稍后重试');
+          });
+        });
+      }
+      return card;
+    }
+    function insertGeneratedImage(genUrl, prompt) {
+      closeQuickModal('aiGenImgModal');
+      var nowIso = new Date().toISOString();
+      var userMsg = { role: 'user', content: '生成图片：' + prompt, created_at: nowIso };
+      S.messages.push(userMsg);
+      try { setAiHistoryCache(S.conversationId, S.messages); } catch (e) {}
+      if (S.messagesEl) appendMessage(S.messagesEl, userMsg);
+      var card = buildGenImageCard(genUrl, prompt);
+      if (S.messagesEl) {
+        S.messagesEl.appendChild(card);
+        try { scrollToBottom(S.messagesEl, true); } catch (e) {}
+      }
+      notify('图片已生成并插入对话');
+    }
+    function exportConversationMarkdown() {
+      var msgs = (S.messages || []).filter(function(m) { return m && m.content; });
+      if (!msgs.length) { notify('当前对话还没有内容'); return; }
+      var displayName = (S.config && S.config.name) || AI_DISPLAY_NAME;
+      var lines = ['# ' + displayName + ' 对话记录', '', '导出时间：' + new Date().toLocaleString(), '模型：' + (isCustomModelId(S.selectedModel) ? (customModelDisplayName(S.selectedModel) || S.selectedModel) : (modelLabels[S.selectedModel] || S.selectedModel)), ''];
+      msgs.forEach(function(m) {
+        var role = m.role === 'assistant' ? '🤖 ' + displayName : '🧑 我';
+        lines.push('## ' + role + (m.created_at ? ' · ' + fmtTime(m.created_at) : ''));
+        lines.push('');
+        lines.push(String(m.content || ''));
+        lines.push('');
+      });
+      var blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = displayName + '对话_' + (S.conversationId ? S.conversationId.slice(-6) : new Date().getTime().toString(36)) + '.md';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() { try { URL.revokeObjectURL(a.href); } catch (e) {} if (a.parentNode) a.parentNode.removeChild(a); }, 500);
+      notify('已导出 Markdown 文件');
+    }
+
+    // ★ 清理（死代码）：此处原有一对 `panelShell.querySelector('#aiPlusModelSelect')` /
+    //   `#aiPlusThinkSelect` 取元素 + fillSelect 填值。但这两个 id 在**全仓库 0 命中**
+    //   （面板模板 panelShell.innerHTML 里从未生成过它们），querySelector 恒返回 null，
+    //   fillSelect 首行 `if (!sel) return` 直接短路。模型/思考选择现由
+    //   `openSelectPopup(kind, anchor)` 弹出的 .ai-select-pop-list 承载。
+    //   注意：`buildModelOptions()` 不是死代码（openSelectPopup 10978 行在用），保留。
+
+    // ★ 模型下拉：内置模型 + 用户添加的第三方模型 + 「添加自定义模型」入口
+    function buildModelOptions() {
+      var opts = [
+        { value: 'deepseek-v4-pro', label: 'V4 Pro' },
+        { value: 'deepseek-flash', label: 'V4.1 Flash' }
+      ];
+      var customs = loadCustomModels();
+      customs.forEach(function(m) {
+        opts.push({ value: CUSTOM_MODEL_PREFIX + m.uid, label: (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '') });
+      });
+      opts.push({ value: '__add_custom__', label: '＋ 添加自定义模型' });
+      return opts;
+    }
+
+    var panelOpen = false;
+    var panelClosing = false;
+    var closeTimer = null;
+    var currentPanelPage = 'primary';
+
+    function showPanelPage(page) {
+      currentPanelPage = page || 'primary';
+      panelShell.classList.toggle('is-subpage', currentPanelPage !== 'primary');
+    }
+
+    // ★ 2026-09-22：值变更后给一个短暂高亮，让"我选的东西生效了"被看见。
+    //   只在用户主动改动时触发（构造/恢复状态时不闪）。
+    function flashPanelValue(node) {
+      if (!node) return;
+      try {
+        node.classList.remove('is-updated');
+        void node.offsetWidth;
+        node.classList.add('is-updated');
+      } catch (eFlash) {}
+      setTimeout(function() {
+        try { node.classList.remove('is-updated'); } catch (eFlash2) {}
+      }, 520);
+    }
+    function updateModelUI(flash) {
+      var sum = panelShell.querySelector('#aiModelSummary');
+      if (sum) {
+        if (isCustomModelId(S.selectedModel)) sum.textContent = customModelDisplayName(S.selectedModel) || '自定义模型';
+        else sum.textContent = modelLabels[S.selectedModel] || S.selectedModel;
+        if (flash) flashPanelValue(sum);
+      }
+      // ★ 2026-09-24（课题④）：自定义模型增删后，同步刷新深入研究页的模型下拉，
+      //   否则用户在小猫AI 里新加的第三方模型，研究板块选不到。
+      try { refreshResearchModelOptions(document.getElementById('panelDeepThink')); } catch (eRmo) {}
+    }
+    function updateThinkUI(flash) {
+      var sum = panelShell.querySelector('#aiThinkSummary');
+      if (sum) {
+        sum.textContent = thinkLabels[S.thinkingMode] || S.thinkingMode;
+        if (flash) flashPanelValue(sum);
+      }
+    }
+    function updateSearchStatus() {
+      var st = panelShell.querySelector('#aiSearchStatus');
+      var btn = panelShell.querySelector('[data-action="search"]');
+      var hint = panelShell.querySelector('#aiSearchRemainHint');
+      var q = S.quota;
+      if (st) {
+        // 开关形态：不再写「开/关」文字，用 .on 控制样式
+        if (st.tagName === 'SPAN' && st.classList.contains('ai-search-switch')) {
+          st.setAttribute('data-on', S.webSearchEnabled ? '1' : '0');
+        } else {
+          st.textContent = S.webSearchEnabled ? '开' : '关';
+        }
+        st.classList.toggle('on', !!S.webSearchEnabled);
+      }
+      if (btn) {
+        btn.setAttribute('aria-checked', S.webSearchEnabled ? 'true' : 'false');
+        btn.classList.toggle('is-selected', !!S.webSearchEnabled);
+        var blocked = !!(q && !q.search_unlimited && q.can_search === false);
+        btn.classList.toggle('is-disabled', blocked);
+        btn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+      }
+      if (hint) {
+        if (q && (q.search_unlimited === true || Number(q.search_limit) < 0)) {
+          hint.textContent = '无限';
+        } else if (q && q.search_limit != null) {
+          var rem = typeof q.search_remaining === 'number'
+            ? Math.max(0, q.search_remaining)
+            : Math.max(0, Number(q.search_limit) - (Number(q.search_used) || 0));
+          hint.textContent = rem + '/' + Math.max(0, Number(q.search_limit));
+        } else if (q) {
+          hint.textContent = String(Math.max(0, q.search_remaining || 0));
+        } else {
+          hint.textContent = '—';
+        }
+      }
+      if (plusBtn) {
+        if (S.webSearchEnabled) plusBtn.classList.add('ws-on');
+        else plusBtn.classList.remove('ws-on');
+      }
+    }
+    function renderQuotaUI() {
+      var q = S.quota || defaultQuotaShape();
+      var used = Math.max(0, Number(q.tokens_used) || 0);
+      // tokens_limit: -1 = 无限（与 search 的 -1 语义一致）
+      var tokensUnlimited = Number(q.tokens_limit) === -1;
+      var limit = tokensUnlimited ? -1 : Math.max(1, Number(q.tokens_limit) || FREE_TOKEN_DEFAULT);
+      var pct = tokensUnlimited ? 0
+        : (typeof q.tokens_percent === 'number'
+          ? Math.min(100, Math.max(0, q.tokens_percent))
+          : Math.min(100, Math.round((used * 1000) / limit) / 10));
+      var fill = panelShell.querySelector('#aiQuotaBarFill');
+      var tokenText = panelShell.querySelector('#aiQuotaTokenText');
+      var pctText = panelShell.querySelector('#aiQuotaPercentText');
+      var searchLine = panelShell.querySelector('#aiQuotaSearchLine');
+      var planBadge = panelShell.querySelector('#aiQuotaPlanBadge');
+      var proTitle = panelShell.querySelector('#aiProCardTitle');
+      var proDesc = panelShell.querySelector('#aiProCardDesc');
+      var proBtn = panelShell.querySelector('#aiProOpenBtn');
+      if (fill) {
+        fill.style.width = pct + '%';
+        fill.classList.toggle('is-warn', pct >= 70 && pct < 92);
+        fill.classList.toggle('is-danger', pct >= 92);
+      }
+      if (tokenText) {
+        tokenText.textContent = tokensUnlimited
+          ? formatTokenCount(used) + ' / 无限 tokens'
+          : formatTokenCount(used) + ' / ' + formatTokenCount(limit) + ' tokens';
+      }
+      if (pctText) pctText.textContent = pct + '%';
+      // 搜索额度：只看 search_unlimited / search_limit，不要用 is_pro 一刀切成「无限」
+      // （邀请码可给 Pro + 自定义每日搜索次数，例如 10 次/天）
+      var searchUsed = Math.max(0, Number(q.search_used) || 0);
+      var searchLimit = q.search_limit == null
+        ? (q.is_pro ? -1 : FREE_SEARCH_DEFAULT)
+        : Number(q.search_limit);
+      var searchUnlimited = q.search_unlimited === true || searchLimit < 0;
+      if (searchLine) {
+        if (searchUnlimited) {
+          searchLine.textContent = '网页搜索：无限';
+        } else {
+          searchLine.textContent = '网页搜索：' + searchUsed + ' / ' + Math.max(0, searchLimit) + ' 次';
+        }
+      }
+      if (planBadge) {
+        planBadge.textContent = q.is_pro ? 'Pro' : '免费';
+        planBadge.classList.toggle('is-pro', !!q.is_pro);
+      }
+      if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 会员' : '开通 Pro';
+      if (proDesc) {
+        // 右侧只放短文案，避免盖住标题
+        if (q.is_pro) {
+          proDesc.textContent = searchUnlimited ? '无限搜索' : ('搜' + Math.max(0, searchLimit) + '/日');
+        } else {
+          proDesc.textContent = '邀请码';
+        }
+      }
+      if (proBtn) proBtn.classList.toggle('is-pro', !!q.is_pro);
+      updateSearchStatus();
+    }
+    S._renderQuotaUI = renderQuotaUI;
+
+    function positionPanel() {
+      if (!plusBtn || !panelShell || !panelShell.parentNode) return;
+      var btnRect = plusBtn.getBoundingClientRect();
+      var bar = panelShell.parentNode.getBoundingClientRect();
+      var panelW = Math.min(308, Math.max(268, bar.width - 16));
+      panelShell.style.width = panelW + 'px';
+      // 菜单左缘尽量贴 + 按钮
+      var left = btnRect.left - bar.left;
+      var maxLeft = Math.max(8, bar.width - panelW - 8);
+      if (left > maxLeft) left = maxLeft;
+      if (left < 8) left = 8;
+      panelShell.style.left = left + 'px';
+      panelShell.style.right = 'auto';
+      // Hero：从 + 按钮中心飞出/收回（matched geometry）
+      var originX = Math.round(btnRect.left + btnRect.width / 2 - bar.left - left);
+      if (originX < 12) originX = 12;
+      if (originX > panelW - 12) originX = panelW - 12;
+      panelShell.style.transformOrigin = originX + 'px 100%';
+      panelShell.style.setProperty('--hero-ox', originX + 'px');
+    }
+
+    // ── 自定义「模型 / 思考」选择弹层 ★（替代系统原生 select：部分设备原生下拉
+    //    渲染不全/错位；改用站点自绘选项列表，跨设备一致）──
+    var _selectPopEl = null;
+    var _selectPopCloseTimer = null;
+    // ★ 2026-09-22：关闭改为「先播退场动画再移除节点」。
+    //   旧实现直接 removeChild，弹层是"啪"地消失——和面板的柔和开合完全不搭。
+    //   instant=true 用于"立刻换一个弹层"的场景（避免两个层叠在一起）。
+    function closeSelectPopup(instant) {
+      if (_selectPopCloseTimer) {
+        clearTimeout(_selectPopCloseTimer);
+        _selectPopCloseTimer = null;
+      }
+      if (!_selectPopEl) return;
+      var node = _selectPopEl;
+      _selectPopEl = null;
+      if (instant === true || !node.parentNode) {
+        if (node.parentNode) node.parentNode.removeChild(node);
+        return;
+      }
+      try { node.classList.add('is-closing'); } catch (eCls) {}
+      // 与 CSS aiSelectPopOut（260ms）对齐，多留 20ms 余量再摘除节点。
+      _selectPopCloseTimer = setTimeout(function() {
+        _selectPopCloseTimer = null;
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+      }, 280);
+    }
+    function openSelectPopup(kind, anchor) {
+      closeSelectPopup(true);
+      var options = kind === 'model'
+        ? buildModelOptions()
+        : [
+            { value: 'off', label: '关闭' },
+            { value: 'low', label: '轻度' },
+            { value: 'medium', label: '中度' },
+            { value: 'high', label: '深度' },
+            { value: 'max', label: '极致' }
+          ];
+      var current = kind === 'model'
+        ? (S.selectedModel || 'deepseek-flash')
+        : (S.thinkingMode || 'medium');
+      var listEl = el('div', { class: 'ai-select-pop-list', role: 'listbox' });
+      options.forEach(function(opt) {
+        var isOn = String(opt.value) === String(current);
+        var item = el('button', {
+          type: 'button',
+          class: 'ai-select-pop-item' + (isOn ? ' on' : ''),
+          role: 'option',
+          'aria-selected': isOn ? 'true' : 'false'
+        });
+        item.appendChild(el('span', { text: opt.label }));
+        item.appendChild(el('span', { class: 'ai-select-pop-check', text: isOn ? '✓' : '' }));
+        item.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          applySelectChoice(kind, opt.value);
+        });
+        listEl.appendChild(item);
+      });
+      _selectPopEl = el('div', { class: 'ai-select-pop', role: 'menu', 'aria-label': kind === 'model' ? '选择模型' : '选择思考程度' });
+      var heading = el('div', { class: 'ai-select-pop-heading' });
+      heading.appendChild(el('span', { text: kind === 'model' ? '选择模型' : '选择思考程度' }));
+      var closeButton = el('button', { type: 'button', class: 'ai-select-pop-close', 'aria-label': '关闭' });
+      closeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
+      closeButton.addEventListener('click', function(event) {
+        event.preventDefault(); event.stopPropagation(); closeSelectPopup();
+        if (anchor && typeof anchor.focus === 'function') anchor.focus({ preventScroll: true });
+      });
+      heading.appendChild(closeButton);
+      _selectPopEl.appendChild(heading);
+      _selectPopEl.appendChild(listEl);
+      document.body.appendChild(_selectPopEl);
+      var rect = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+      var viewport = window.visualViewport;
+      var visibleTop = viewport ? viewport.offsetTop : 0;
+      var visibleHeight = viewport ? viewport.height : window.innerHeight;
+      var width = Math.min(window.innerWidth - 24, Math.max(rect ? rect.width : 260, 260));
+      var left = rect ? Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)) : 12;
+      var maxHeight = Math.max(100, visibleHeight - 24);
+      _selectPopEl.style.maxHeight = Math.min(maxHeight, visibleHeight * 0.8) + 'px';
+      var top = Math.max(visibleTop + 12, rect ? Math.min(rect.bottom + 6, visibleTop + visibleHeight - Math.min(360, maxHeight) - 12) : visibleTop + 12);
+      _selectPopEl.style.left = left + 'px';
+      _selectPopEl.style.top = top + 'px';
+      _selectPopEl.style.minWidth = width + 'px';
+      // ★ 展开原点对齐到锚点行的水平位置，弹层是"从那一行长出来"的
+      if (rect) {
+        var ox = Math.max(8, Math.min(rect.left + rect.width / 2 - left, width - 8));
+        _selectPopEl.style.setProperty('--pop-ox', ox + 'px');
+      }
+    }
+    function applySelectChoice(kind, value) {
+      closeSelectPopup();
+      if (kind === 'model') {
+        if (value === '__add_custom__') { showCustomModelModal(); return; }
+        if (value && value !== S.selectedModel) {
+          S.selectedModel = value;
+          S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model', value); } catch (err) {}
+          notify('模型：' + (isCustomModelId(value) ? customModelDisplayName(value) : (modelLabels[value] || value)));
+        }
+        updateModelUI(true);
+      } else {
+        if (value && value !== S.thinkingMode) {
+          S.thinkingMode = value;
+          S._userPickedThinkingMode = true;
+          try { localStorage.setItem('xtj_ai_thinking_mode', value); } catch (err) {}
+          notify('思考程度：' + (thinkLabels[value] || value));
+        }
+        updateThinkUI(true);
+      }
+    }
+    document.addEventListener('pointerdown', function(ev) {
+      if (!_selectPopEl) return;
+      if (_selectPopEl.contains(ev.target)) return;
+      closeSelectPopup();
+    }, true);
+    document.addEventListener('keydown', function(ev) {
+      if (!_selectPopEl) return;
+      if (ev.key === 'Escape') { ev.preventDefault(); closeSelectPopup(); }
+    }, true);
+
+    function openPanel() {
+      if (panelOpen || panelClosing) return;
+      if (closeTimer) {
+        clearTimeout(closeTimer);
+        closeTimer = null;
+      }
+      panelOpen = true;
+      panelClosing = false;
+      showPanelPage('primary');
+      updateModelUI();
+      updateThinkUI();
+      updateSearchStatus();
+      renderQuotaUI();
+      fetchAiQuota(true);
+      positionPanel();
+      panelShell.classList.remove('is-closing', 'open');
+      panelShell.classList.add('is-opening');
+      plusBtn.classList.add('active');
+      plusWrap.classList.add('is-open');
+      plusBtn.setAttribute('aria-expanded', 'true');
+      // ★ 修复「+ 面板卡死在左下角极小的页面 / 打不开也关不上」：
+      //   旧实现把 .open 放进 requestAnimationFrame 里补加。rAF 一旦被浏览器
+      //   节流/延迟（切窗口、GPU 忙、原生 select 弹层阻塞渲染循环），
+      //   .open 迟迟不加 → 面板停在 is-opening（opacity:0 不可见），
+      //   用户再点 + 又被 panelOpen=true 守卫挡住，表现为点了没反应；
+      //   而被中断的 transform transition 在部分环境下会把元素留在
+      //   scale(0.14) 的中间帧（可见但极小，正是用户截图的形态）。
+      //   现在：reflow 后同步加 .open（过渡起点仍由 reflow 保证），
+      //   视觉补间改用 keyframes 动画（时间驱动、必然到达终态，
+      //   从机制上杜绝卡在中间态）。
+      void panelShell.offsetWidth; // 强制 reflow，保证动画从关闭态起算
+      panelShell.classList.add('open');
+      if (closeTimer) clearTimeout(closeTimer);
+      // 与 CSS clip-path 揭示时长（320ms）对齐，多留 20ms 余量。
+      closeTimer = setTimeout(function() {
+        panelShell.classList.remove('is-opening');
+        closeTimer = null;
+      }, 340);
+    }
+
+    function closePanel(animate) {
+      if (!panelOpen && !panelClosing) return;
+      if (!panelOpen && panelClosing) return;
+      closeSelectPopup();
+      panelClosing = true;
+      panelOpen = false;
+      panelShell.classList.remove('is-opening', 'open');
+      panelShell.classList.add('is-closing');
+      plusBtn.classList.remove('active');
+      plusWrap.classList.remove('is-open');
+      plusBtn.setAttribute('aria-expanded', 'false');
+      showPanelPage('primary');
+      if (animate === false) {
+        panelShell.classList.remove('is-closing');
+        panelClosing = false;
+        if (closeTimer) {
+          clearTimeout(closeTimer);
+          closeTimer = null;
+        }
+        return;
+      }
+      if (closeTimer) clearTimeout(closeTimer);
+      // 与 CSS clip-path 揭示时长（320ms）对齐，多留 20ms 余量。
+      // 锁定窗口必须 ≥ 动画时长，否则"动画还在播、点击已被放行"会与动画打架。
+      closeTimer = setTimeout(function() {
+        panelShell.classList.remove('is-closing');
+        panelClosing = false;
+        closeTimer = null;
+      }, 340);
+    }
+
+    function closeInviteModal() {
+      var m = document.getElementById('aiInviteModal');
+      if (m && m.parentNode) m.parentNode.removeChild(m);
+    }
+
+    function showInviteCodeModal() {
+      try { closeInviteModal(); } catch (e0) {}
+      var modal = document.createElement('div');
+      modal.id = 'aiInviteModal';
+      modal.className = 'ai-invite-modal';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-labelledby', 'aiInviteModalTitle');
+      modal.innerHTML =
+        '<div class="ai-invite-modal-box">' +
+          '<div class="ai-invite-modal-hero" aria-hidden="true">' +
+            '<span class="ai-invite-modal-hero-badge">PRO</span>' +
+            '<p class="ai-invite-modal-hero-sub">解锁更高额度</p>' +
+          '</div>' +
+          '<div class="ai-invite-modal-body">' +
+            '<h3 id="aiInviteModalTitle" class="ai-invite-modal-title">输入邀请码</h3>' +
+            '<p class="ai-invite-modal-tip">向管理员获取邀请码，激活后立即生效</p>' +
+            '<label class="ai-invite-code-label" for="aiInviteCodeInput">邀请码</label>' +
+            '<input type="text" id="aiInviteCodeInput" class="ai-invite-code-input" placeholder="请输入邀请码" autocomplete="off" maxlength="16" autocapitalize="characters" spellcheck="false" inputmode="text" />' +
+            '<div class="ai-invite-code-feedback" id="aiInviteCodeFeedback" aria-live="polite"></div>' +
+          '</div>' +
+          '<div class="ai-invite-modal-foot">' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel">取消</button>' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiInviteConfirmBtn">立即激活</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(modal);
+      requestAnimationFrame(function() {
+        try { modal.classList.add('is-ready'); } catch (eR) {}
+      });
+
+      var input = modal.querySelector('#aiInviteCodeInput');
+      var feedback = modal.querySelector('#aiInviteCodeFeedback');
+      var confirmBtn = modal.querySelector('#aiInviteConfirmBtn');
+      var validating = false;
+      var validateTimer = null;
+      var validCodeInfo = null;
+      var validateSeq = 0;
+
+      function close() {
+        if (validateTimer) clearTimeout(validateTimer);
+        modal.classList.remove('is-ready');
+        modal.classList.add('is-leaving');
+        setTimeout(function() {
+          if (modal.parentNode) modal.parentNode.removeChild(modal);
+        }, 180);
+      }
+      modal.querySelector('.ai-invite-modal-cancel').addEventListener('click', close);
+      modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
+      modal.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') close();
+        if (e.key === 'Enter' && e.target === input) doRedeem();
+      });
+
+      function doValidate() {
+        if (validating) return;
+        var code = String(input.value || '').trim().toUpperCase();
+        feedback.className = 'ai-invite-code-feedback';
+        if (!code) { feedback.textContent = ''; return; }
+        validating = true;
+        var seq = ++validateSeq;
+        feedback.textContent = '校验中…';
+        apiRequest('POST', '/invite/validate', { code: code })
+          .then(function(r) {
+            if (seq !== validateSeq) return; // 丢弃过期响应
+            validating = false;
+            // 兼容 data 包一层 / 扁平两种返回
+            var payload = (r && r.data) || r || {};
+            if (payload && payload.ok) {
+              validCodeInfo = payload;
+              feedback.className = 'ai-invite-code-feedback is-ok';
+              feedback.textContent = payload.message || '邀请码有效，可以激活';
+            } else {
+              validCodeInfo = null;
+              feedback.className = 'ai-invite-code-feedback is-bad';
+              feedback.textContent = (payload && (payload.message || payload.error)) || '邀请码无效';
+            }
+          })
+          .catch(function() {
+            if (seq !== validateSeq) return; // 丢弃过期响应
+            validating = false;
+            validCodeInfo = null;
+            feedback.className = 'ai-invite-code-feedback is-bad';
+            feedback.textContent = '校验失败，请稍后重试';
+          });
+      }
+
+      input.addEventListener('input', function() {
+        // 输入时自动转大写，去掉空格
+        var raw = String(input.value || '').toUpperCase().replace(/\s+/g, '');
+        if (input.value !== raw) input.value = raw;
+        validCodeInfo = null;
+        if (validateTimer) clearTimeout(validateTimer);
+        var code = raw.trim();
+        feedback.className = 'ai-invite-code-feedback';
+        if (!code) { feedback.textContent = ''; return; }
+        validateTimer = setTimeout(doValidate, 280);
+      });
+
+      function doRedeem() {
+        if (confirmBtn.disabled) return;
+        var code = String(input.value || '').trim().toUpperCase();
+        if (!code) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入邀请码'; return; }
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = '激活中…';
+        apiRequest('POST', '/invite/redeem', { code: code })
+          .then(function(r) {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = '立即激活';
+            var payload = (r && r.data) || r || {};
+            if (payload && payload.ok) {
+              close();
+              // 只有「首次真正开通」才弹庆祝；已激活过该码只 toast，不再弹窗
+              var celebrate = !payload.already_redeemed;
+              if (payload.quota) applyQuota(payload.quota, { forceCeremony: celebrate, skipRefetch: true });
+              else fetchAiQuota(true).then(function(q) {
+                if (q && q.is_pro) applyQuota(q, { forceCeremony: celebrate, skipRefetch: true });
+              });
+              notify(payload.already_redeemed ? '你已激活过该码，Pro 仍有效' : 'Pro 开通成功，额度已刷新');
+            } else {
+              feedback.className = 'ai-invite-code-feedback is-bad';
+              feedback.textContent = (payload && (payload.message || payload.error)) || '激活失败';
+              setTimeout(function() { fetchAiQuota(true); }, 300);
+            }
+          })
+          .catch(function() {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = '立即激活';
+            feedback.className = 'ai-invite-code-feedback is-bad';
+            feedback.textContent = '激活失败，请稍后重试';
+          });
+      }
+
+      confirmBtn.addEventListener('click', doRedeem);
+      setTimeout(function() { try { input.focus(); } catch (e1) {} }, 30);
+    }
+
+    // ★ 新增：添加/管理自定义第三方模型（千问/豆包/DeepSeek/Kimi/智谱/OpenAI/自定义）
+    //   密钥仅存浏览器 localStorage，不落服务器；保存后立即在模型下拉中可选。
+    function showCustomModelModal() {
+      try { var _old = document.getElementById('aiCustomModelModal'); if (_old && _old.parentNode) _old.parentNode.removeChild(_old); } catch (eOld) {}
+
+      var providerOptions = '';
+      for (var pi = 0; pi < CUSTOM_MODEL_PROVIDERS.length; pi++) {
+        var pp = CUSTOM_MODEL_PROVIDERS[pi];
+        providerOptions += '<option value="' + pp.key + '">' + pp.label + '</option>';
+      }
+
+      var modal = document.createElement('div');
+      modal.id = 'aiCustomModelModal';
+      modal.className = 'ai-invite-modal ai-custommodel-modal';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-labelledby', 'aiCustomModelTitle');
+      modal.innerHTML =
+        '<div class="ai-invite-modal-box ai-custommodel-box">' +
+          '<div class="ai-invite-modal-body ai-custommodel-body">' +
+            '<h3 id="aiCustomModelTitle" class="ai-invite-modal-title">添加自定义模型</h3>' +
+            '<p class="ai-invite-modal-tip">选择服务商并填入 API Key，即可直接调用第三方 AI 模型。模型配置（含 API Key）会加密同步到你的账号，换设备后自动恢复；所有字段后续都可在下方列表点“编辑”修改。</p>' +
+            '<label class="ai-invite-code-label" for="aiCmProvider">服务商</label>' +
+            '<select id="aiCmProvider" class="ai-cm-select">' + providerOptions + '</select>' +
+            '<label class="ai-invite-code-label" for="aiCmLabel">显示名称（便于自己辨认，可选）</label>' +
+            '<input type="text" id="aiCmLabel" class="ai-invite-code-input ai-cm-input" placeholder="如：我的千问" autocomplete="off" spellcheck="false" maxlength="40" />' +
+            '<label class="ai-invite-code-label" for="aiCmApiKey">API Key</label>' +
+            '<input type="password" id="aiCmApiKey" class="ai-invite-code-input ai-cm-input" placeholder="sk-…" autocomplete="off" spellcheck="false" />' +
+            '<label class="ai-invite-code-label" for="aiCmModel">模型名称（可从候选选择或手动填写）</label>' +
+            '<input type="text" id="aiCmModel" class="ai-invite-code-input ai-cm-input" list="aiCmModelList" placeholder="如 qwen-plus" autocomplete="off" spellcheck="false" maxlength="64" />' +
+            '<datalist id="aiCmModelList"></datalist>' +
+            '<label class="ai-invite-code-label" for="aiCmBase">接口地址（OpenAI 兼容，一般无需修改）</label>' +
+            '<input type="text" id="aiCmBase" class="ai-invite-code-input ai-cm-input" placeholder="https://…/v1" autocomplete="off" spellcheck="false" />' +
+            '<div class="ai-cm-list" id="aiCmList"></div>' +
+            '<div class="ai-invite-code-feedback ai-cm-feedback" id="aiCmFeedback" aria-live="polite"></div>' +
+          '</div>' +
+          '<div class="ai-invite-modal-foot">' +
+            '<button type="button" class="ai-invite-modal-btn ai-cm-edit-cancel" id="aiCmEditCancel" style="display:none">放弃编辑</button>' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-cancel">取消</button>' +
+            '<button type="button" class="ai-invite-modal-btn ai-invite-modal-confirm" id="aiCmSaveBtn">保存并使用</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(modal);
+      requestAnimationFrame(function() { try { modal.classList.add('is-ready'); } catch (eR) {} });
+
+      var editingUid = null;
+      var providerSelect = modal.querySelector('#aiCmProvider');
+      var labelInput = modal.querySelector('#aiCmLabel');
+      var apiKeyInput = modal.querySelector('#aiCmApiKey');
+      var modelInput = modal.querySelector('#aiCmModel');
+      var baseInput = modal.querySelector('#aiCmBase');
+      var modelList = modal.querySelector('#aiCmModelList');
+      var listBox = modal.querySelector('#aiCmList');
+      var feedback = modal.querySelector('#aiCmFeedback');
+      var saveBtn = modal.querySelector('#aiCmSaveBtn');
+      var editCancelBtn = modal.querySelector('#aiCmEditCancel');
+      var titleEl = modal.querySelector('#aiCustomModelTitle');
+
+      function currentProvider() {
+        var key = providerSelect.value;
+        for (var i = 0; i < CUSTOM_MODEL_PROVIDERS.length; i++) {
+          if (CUSTOM_MODEL_PROVIDERS[i].key === key) return CUSTOM_MODEL_PROVIDERS[i];
+        }
+        return null;
+      }
+      function refreshModelCandidates() {
+        var p = currentProvider();
+        var arr = (p && p.models) || [];
+        modelList.innerHTML = arr.map(function(mm) { return '<option value="' + mm + '"></option>'; }).join('');
+      }
+      function syncProviderUI() {
+        var p = currentProvider();
+        var isCustom = !!(p && p.key === 'custom');
+        // 接口地址始终可查看/修改；预置服务商默认填官方地址，自定义服务商必填
+        baseInput.placeholder = (p && p.base) ? p.base : 'https://…/v1';
+        if (!isCustom && p) {
+          if (!baseInput.value || baseInput.dataset.auto === '1') baseInput.value = p.base || '';
+          if (p.defaultModel && (!modelInput.value || modelInput.dataset.auto === '1') && !editingUid) {
+            modelInput.value = p.defaultModel;
+            modelInput.dataset.auto = '1';
+          }
+        }
+        if (isCustom && !editingUid && (!modelInput.value || modelInput.dataset.auto === '1')) {
+          modelInput.value = '';
+          modelInput.dataset.auto = '1';
+        }
+        apiKeyInput.placeholder = p && p.key === 'openai' ? 'sk-…' : '请输入 API Key';
+        refreshModelCandidates();
+      }
+      providerSelect.addEventListener('change', function() {
+        baseInput.dataset.auto = '1';
+        if (!editingUid) modelInput.dataset.auto = '1';
+        syncProviderUI();
+      });
+      modelInput.addEventListener('input', function() { modelInput.dataset.auto = '0'; });
+      baseInput.addEventListener('input', function() { baseInput.dataset.auto = '0'; });
+
+      function renderList() {
+        var customs = loadCustomModels();
+        if (!customs.length) {
+          listBox.innerHTML = '<div class="ai-cm-empty">还没有自定义模型，先添加一个吧</div>';
+          return;
+        }
+        var html = '';
+        for (var i = 0; i < customs.length; i++) {
+          var m = customs[i];
+          // ★ 修复 P-04（存储型 XSS）：m.uid 会经 syncCustomModelsFromServer 从服务端
+          //   同步下来且未做格式校验，此前直接拼进 data-uid="..."。若 uid 形如
+          //   `" onmouseover="alert(1)` 即可突破属性边界注入事件处理器（同源存储型 XSS）。
+          //   修法：不再把不可信 uid 写入 DOM，改用数组下标作为索引桥；
+          //   uid 仅保留在闭包内（下方 items 遍历时通过 customs[idx] 取回真实对象），
+          //   既彻底消除注入面，也避免净化 uid 导致 findCustomModel 失配。
+          html += '<div class="ai-cm-item" data-cm-idx="' + i + '">' +
+                    '<div class="ai-cm-item-info"><div class="ai-cm-item-name"></div><div class="ai-cm-item-sub"></div></div>' +
+                    '<button type="button" class="ai-cm-item-edit" title="编辑" aria-label="编辑">' +
+                      '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
+                      '<span>编辑</span>' +
+                    '</button>' +
+                    '<button type="button" class="ai-cm-item-del" title="删除" aria-label="删除">' +
+                      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+                      '<span>删除</span>' +
+                    '</button>' +
+                  '</div>';
+        }
+        listBox.innerHTML = html;
+        var items = listBox.querySelectorAll('.ai-cm-item');
+        for (var j = 0; j < items.length; j++) {
+          (function(item) {
+            // ★ P-04：通过下标取回真实记录（customs 是渲染时的权威快照），
+            //   绝不把 DOM 属性里的字符串当作 uid 使用。
+            var _idx = parseInt(item.getAttribute('data-cm-idx'), 10);
+            var _rec = (isFinite(_idx) && customs[_idx]) ? customs[_idx] : null;
+            var uid = _rec ? _rec.uid : '';
+            if (!uid) return;
+            var m = findCustomModel(uid);
+            var nameEl = item.querySelector('.ai-cm-item-name');
+            var subEl = item.querySelector('.ai-cm-item-sub');
+            if (m) {
+              nameEl.textContent = (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '');
+              subEl.textContent = (m.model || '') + (m.providerLabel ? ' ｜ ' + m.providerLabel : '');
+            }
+            item.querySelector('.ai-cm-item-del').addEventListener('click', function(e) {
+              e.stopPropagation();
+              doDelete(uid);
+            });
+            var editBtn = item.querySelector('.ai-cm-item-edit');
+            if (editBtn) editBtn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              startEdit(uid);
+            });
+            item.addEventListener('click', function() {
+              // 点击条目主体 = 切换使用该模型
+              S.selectedModel = CUSTOM_MODEL_PREFIX + uid;
+              S._userPickedModel = true;
+              try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+              updateModelUI(true);
+              notify('已切换到：' + (m ? (m.label || m.model) : '自定义模型'));
+              close();
+            });
+          })(items[j]);
+        }
+      }
+
+      function startEdit(uid) {
+        var m = findCustomModel(uid);
+        if (!m) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '未找到该模型配置'; return; }
+        editingUid = uid;
+        var matched = 'custom';
+        for (var k = 0; k < CUSTOM_MODEL_PROVIDERS.length; k++) { if (CUSTOM_MODEL_PROVIDERS[k].key === m.provider) { matched = m.provider; break; } }
+        providerSelect.value = matched;
+        labelInput.value = (m.label && m.label !== m.model) ? m.label : '';
+        // ★ 2026-09-26（审计 P1-10 配套）：编辑时不再把明文 API Key 回填到输入框
+        //   （避免截图/插件/XSS 直接拿走凭据，也避免"看起来能改却改错"）。改为
+        //   "留空即保持原 Key"，需要轮换时用户自行粘贴新 Key。
+        apiKeyInput.value = '';
+        apiKeyInput.dataset.keepExisting = '1';
+        apiKeyInput.placeholder = '留空表示保持原 API Key 不变';
+        modelInput.value = m.model || '';
+        modelInput.dataset.auto = '0';
+        baseInput.value = m.base_url || '';
+        baseInput.dataset.auto = '0';
+        syncProviderUI();
+        titleEl.textContent = '编辑自定义模型';
+        saveBtn.textContent = '保存修改';
+        editCancelBtn.style.display = '';
+        feedback.className = 'ai-invite-code-feedback';
+        feedback.textContent = '正在编辑：' + (m.label || m.model || '自定义模型') + '（保存后即时生效）';
+        try { modal.querySelector('.ai-custommodel-body').scrollTop = 0; } catch (eS) {}
+        setTimeout(function() { try { modelInput.focus(); } catch (eF) {} }, 30);
+      }
+      function resetForm() {
+        editingUid = null;
+        providerSelect.value = CUSTOM_MODEL_PROVIDERS[0].key;
+        labelInput.value = '';
+        apiKeyInput.value = '';
+        delete apiKeyInput.dataset.keepExisting;
+        apiKeyInput.placeholder = '请输入 API Key';
+        modelInput.value = '';
+        modelInput.dataset.auto = '1';
+        baseInput.value = '';
+        baseInput.dataset.auto = '1';
+        syncProviderUI();
+        titleEl.textContent = '添加自定义模型';
+        saveBtn.textContent = '保存并使用';
+        editCancelBtn.style.display = 'none';
+        feedback.className = 'ai-invite-code-feedback';
+        feedback.textContent = '';
+      }
+
+      async function doDelete(uid) {
+        var customs = loadCustomModels();
+        var idx = -1;
+        for (var i = 0; i < customs.length; i++) { if (customs[i].uid === uid) { idx = i; break; } }
+        if (idx < 0) return;
+        var removed = customs[idx];
+        customs.splice(idx, 1);
+        // ★ 2026-09-24 修复（课题②）：删除时写本地墓碑，并随保存一并上报服务端 deleted_uids，
+        //   防止服务端历史残留快照把该模型复活。
+        markModelUidsDeleted([uid]);
+        var savePending = saveCustomModels(customs);
+        if (editingUid === uid) resetForm();
+        if (S.selectedModel === CUSTOM_MODEL_PREFIX + uid) {
+          S.selectedModel = 'deepseek-flash';
+          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+        }
+        updateModelUI(true);
+        renderList();
+        var synced = await savePending;
+        notify(synced ? '已从账号删除：' + (removed ? (removed.label || removed.model) : '该自定义模型') : '已在本机删除，联网后同步到账号');
+      }
+
+      function close() {
+        modal.classList.remove('is-ready');
+        modal.classList.add('is-leaving');
+        setTimeout(function() { if (modal.parentNode) modal.parentNode.removeChild(modal); }, 180);
+      }
+      modal.querySelector('.ai-invite-modal-cancel').addEventListener('click', close);
+      editCancelBtn.addEventListener('click', function() {
+        resetForm();
+        setTimeout(function() { try { apiKeyInput.focus(); } catch (e) {} }, 0);
+      });
+      modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
+      modal.addEventListener('keydown', function(e) { if (e.key === 'Escape') close(); });
+
+      saveBtn.addEventListener('click', function() {
+        var p = currentProvider();
+        var apiKey = String(apiKeyInput.value || '').trim();
+        if (!p) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请选择服务商'; return; }
+        // ★ 2026-09-26（审计 P1-10 配套）：编辑态留空 = 沿用原有 Key（输入框已不再回填明文）
+        var keepExistingKey = false;
+        if (!apiKey && editingUid) {
+          var _prev = findCustomModel(editingUid);
+          if (_prev && _prev.api_key) { apiKey = _prev.api_key; keepExistingKey = true; }
+        }
+        if (!apiKey) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入 API Key'; return; }
+        var model = String(modelInput.value || '').trim();
+        var isCustom = p.key === 'custom';
+        if (!model && !isCustom) model = p.defaultModel || '';
+        if (!model) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入模型名称'; return; }
+        var baseValue = String(baseInput.value || '').trim();
+        if (!baseValue) baseValue = isCustom ? '' : (p.base || '');
+        if (isCustom && !baseValue) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请填写接口地址'; return; }
+        var labelVal = String(labelInput.value || '').trim();
+        var label = labelVal || model;
+        var customs = loadCustomModels();
+        var record = {
+          provider: p.key,
+          providerLabel: p.label,
+          label: label,
+          api_key: apiKey,
+          model: model,
+          base_url: baseValue
+        };
+        var targetUid = editingUid;
+        var existIdx = -1;
+        if (targetUid) {
+          for (var ei = 0; ei < customs.length; ei++) { if (customs[ei].uid === targetUid) { existIdx = ei; break; } }
+        }
+        if (targetUid && existIdx >= 0) {
+          // 编辑：保留原 uid，覆盖全部可编辑字段，账号侧随之同步更新
+          record.uid = targetUid;
+          customs[existIdx] = record;
+          unmarkModelUidsDeleted([targetUid]); // ★ 重新启用该 uid，清除墓碑
+          saveCustomModels(customs);
+          S.selectedModel = CUSTOM_MODEL_PREFIX + targetUid;
+          S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+          updateModelUI(true);
+          renderList();
+          resetForm();
+          notify('已保存修改：' + label + (keepExistingKey ? '（API Key 未变更）' : ''));
+        } else {
+          record.uid = genCustomModelUid();
+          customs.push(record);
+          unmarkModelUidsDeleted([record.uid]); // ★ 新 uid 若曾入墓碑，先清除
+          saveCustomModels(customs);
+          var newUid = record.uid;
+          S.selectedModel = CUSTOM_MODEL_PREFIX + newUid;
+          S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+          updateModelUI(true);
+          close();
+          notify('已添加并切换到：' + label + '（' + p.label + '）');
+        }
+      });
+
+      syncProviderUI();
+      renderList();
+      setTimeout(function() { try { apiKeyInput.focus(); } catch (e1) {} }, 30);
+    }
+
+    function openProCheckout() {
+      // 已是 Pro：轻量提示，不阻塞
+      if (S.quota && S.quota.is_pro) {
+        notify('你已经是 Pro 会员');
+        applyQuota(S.quota, { forceCeremony: false, skipRefetch: true });
+        fetchAiQuota(true);
+        return;
+      }
+      // 立刻弹出邀请码，额度在后台刷新（避免等网络）
+      try { closePanel(false); } catch (e0) {}
+      showInviteCodeModal();
+      fetchAiQuota(false);
+    }
+
+    plusBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (panelOpen) closePanel();
+      else openPanel();
+    });
+
+    panelShell.addEventListener('click', function(e) {
+      e.stopPropagation();
+      // select 自己处理模型/思考，不要拦截
+      if (e.target && (e.target.tagName === 'SELECT' || e.target.closest('select'))) return;
+
+      var t = e.target.closest('[data-action]');
+      if (!t) return;
+
+      var action = t.getAttribute('data-action');
+      if (action === 'open-model' || action === 'open-think') {
+        // ★ 自定义选项弹层（不再交给系统原生 select）
+        openSelectPopup(action === 'open-model' ? 'model' : 'think', t);
+        return;
+      }
+      if (action === 'pro') {
+        openProCheckout();
+        return;
+      }
+      if (action === 'upload') {
+        closePanel();
+        setTimeout(function() {
+          var fi = document.getElementById('aiChatFileInp');
+          if (fi) fi.click();
+        }, 50);
+        return;
+      }
+      if (action === 'search') {
+        var q = S.quota;
+        if (!S.webSearchEnabled) {
+          // ★ 修复: 从关到开时完整校验搜索额度（can_search===false 或 search_remaining<=0），
+          //   同时额度信息缺失（拉取失败）时也不放行，避免绕过第三方搜索次数限制。
+          if (!q) {
+            notify('额度信息暂不可用，请稍后重试或刷新页面');
+            return;
+          }
+          if (searchQuotaExhausted(q)) {
+            notify('今日网页搜索次数已用完，开通 Pro 可无限搜索');
+            return;
+          }
+        }
+        S.webSearchEnabled = !S.webSearchEnabled;
+        try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (err) {}
+        updateSearchStatus();
+        notify(S.webSearchEnabled ? '强制网页搜索已开启' : '已恢复自动判断是否搜索');
+      }
+    });
+
+    var panelAbortController = new AbortController();
+    document.addEventListener('click', function(e) {
+      if (!panelOpen) return;
+      if (panelShell.contains(e.target) || plusWrap.contains(e.target) || plusBtn.contains(e.target) || e.target === plusBtn) return;
+      closePanel();
+    }, { signal: panelAbortController.signal });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && panelOpen) closePanel();
+    }, { signal: panelAbortController.signal });
+    window.addEventListener('resize', function() {
+      if (panelOpen) positionPanel();
+    }, { signal: panelAbortController.signal, passive: true });
+
+    S._panelAbortController = panelAbortController;
+    S._panelCleanup = function() {
+      try { panelAbortController.abort(); } catch (e) {}
+      if (closeTimer) clearTimeout(closeTimer);
+      panelOpen = false;
+      panelClosing = false;
+      // ★ 兜底：清理时连同视觉态一起复位，防止任何路径残留
+      //   open/is-opening/is-closing 类导致面板以错误形态出现
+      try {
+        panelShell.classList.remove('is-opening', 'is-closing', 'open');
+        plusBtn.classList.remove('active');
+        plusWrap.classList.remove('is-open');
+        plusBtn.setAttribute('aria-expanded', 'false');
+      } catch (ePanelCls) {}
+    };
+
+    updateModelUI();
+    updateThinkUI();
+    updateSearchStatus();
+    renderQuotaUI();
+    var inputBar = el('div', { class: 'ai-chat-input-bar' });
+    inputBar.id = 'aiChatInputBar';
+    // 文件上传按钮 (隐藏，通过 + 面板触发)
+    var fileBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-file-btn',
+      id: 'aiChatFileBtn',
+      'aria-label': '上传文件',
+      title: '上传图片或文件',
+      style: 'display:none'
+    });
+    fileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
+    var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', style: 'display:none' });
+    var filePreview = el('div', { class: 'ai-chat-file-preview', id: 'aiChatFilePreview', style: 'display:none' });
+    var input = el('textarea', {
+      class: 'ai-chat-input',
+      id: 'aiChatMsgInput',
+      placeholder: '问问小猫……',
+      rows: '1',
+      'aria-label': '聊天输入框',
+      inputmode: 'text',
+      enterkeyhint: 'send',
+      autocapitalize: 'sentences',
+      autocorrect: 'on',
+      spellcheck: 'true'
+    });
+    var sendBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-send',
+      id: 'aiChatSendBtn',
+      'aria-label': '发送'
+    }, '发送');
+    var pauseBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-pause',
+      id: 'aiChatPauseBtn',
+      'aria-label': '暂停',
+      style: 'display:none'
+    }, '暂停');
+
+    // ★ 新增：语音输入按钮（Web Speech API，点击开始/停止聆听）
+    var voiceBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-voice',
+      id: 'aiChatVoiceBtn',
+      'aria-label': '语音输入',
+      title: '语音输入'
+    });
+    voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
+    var _voiceRecognition = null;
+    var _voiceListening = false;
+    // ★ 修复：interimResults=true 时 onresult 每次携带「累计完整转写」，
+    //   旧逻辑每次把现有值再拼一遍 interim → 输入框出现重复堆叠文字。
+    //   现改为：开始聆听前记住输入框已有内容 _voiceBaseText，
+    //   onresult 一律用 _voiceBaseText + 当前完整转写覆盖输入框，消除重复。
+    var _voiceBaseText = '';
+    voiceBtn.addEventListener('click', function() {
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        // iOS/iPadOS 全系 WebKit 均不支持 SpeechRecognition（含 iPhone/iPad 上的 Chrome/Edge）
+        notify('当前设备不支持语音输入（iOS/iPadOS 均不支持），请使用桌面版 Chrome 或 Edge');
+        return;
+      }
+      if (_voiceListening) {
+        try { if (_voiceRecognition) _voiceRecognition.stop(); } catch (e) {}
+        return;
+      }
+      try {
+        var rec = new SR();
+        _voiceRecognition = rec;
+        rec.lang = 'zh-CN';
+        rec.interimResults = true;
+        rec.continuous = false;
+        _voiceListening = true;
+        // 记录点击时的输入框内容，作为转写前缀；再次 onresult 不会重复叠加
+        _voiceBaseText = String(input.value || '').replace(/\s+$/, '');
+        voiceBtn.classList.add('listening');
+        notify('正在聆听…');
+        rec.onresult = function(ev) {
+          var interim = '';
+          for (var i = 0; i < ev.results.length; i++) {
+            if (ev.results[i] && ev.results[i][0]) interim += ev.results[i][0].transcript;
+          }
+          if (!interim) return;
+          // 以「点击时的内容 + 当前完整转写」整体覆盖，避免重复
+          input.value = _voiceBaseText ? (_voiceBaseText + ' ' + interim) : interim;
+          autoresize();
+        };
+        rec.onend = function() {
+          _voiceListening = false;
+          voiceBtn.classList.remove('listening');
+        };
+        rec.onerror = function(ev) {
+          _voiceListening = false;
+          voiceBtn.classList.remove('listening');
+          if (ev && ev.error && ev.error !== 'aborted' && ev.error !== 'no-speech') {
+            notify('语音识别失败：' + ev.error);
+          }
+        };
+        rec.start();
+      } catch (e) {
+        _voiceListening = false;
+        voiceBtn.classList.remove('listening');
+        notify('语音输入不可用');
+      }
+    });
+
+    function autoresize() {
+      try {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+      } catch (e) {}
+      updateInputMetrics();
+    }
+
+    function doSend() {
+      // The send handler replaces an active reply; duplicate/empty drafts are
+      // rejected before cancellation, so Enter remains safe while streaming.
+      if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+      var text = String(input.value || '').trim();
+      var fileList = (_aiChatFiles && _aiChatFiles.length) ? _aiChatFiles.slice(0, 10) : [];
+      if (!text && !fileList.length) return;
+      // ★ 多文件：附件已在 handleSendMessage 同步复制进请求体，
+      //   发送后立即清理预览（保证不阻塞连续发送）
+      handleSendMessage(input, sendBtn, messagesEl, fileList);
+      clearAiChatFilePreview();
+    }
+    // ★ 重新生成：把指定文本（及可选附件）填入输入框并发起发送。
+    //   供 assistant 消息上的「重新生成」按钮调用，复用现有发送与附件预览机制。
+    S._resendFn = function(resendText, resendAttachments) {
+      try {
+        if (S.sending) { notify('请等待当前回复完成后重试'); return; }
+        var t = String(resendText || '').trim();
+        if (!t && !(resendAttachments && resendAttachments.length)) return;
+        if (_aiChatFiles.length) clearAiChatFilePreview();
+        if (resendAttachments && resendAttachments.length && resendAttachments[0] && resendAttachments[0].data_url) {
+          _aiChatFiles = resendAttachments.slice(0, 10).map(function(a) {
+            return { name: a.name || 'file', type: a.type || '', dataUrl: a.data_url, size: a.size || 0 };
+          });
+          renderAiMultiFilePreview(_aiChatFiles);
+        }
+        input.value = t;
+        autoresize();
+        try { input.focus(); } catch (eFocus) {}
+        doSend();
+      } catch (eRes) {
+        try { notify('重新生成失败，请手动重发'); } catch (eR2) {}
+      }
+    };
+    sendBtn.addEventListener('click', doSend);
+    pauseBtn.addEventListener('click', function() {
+      if (!S.sending && !S.paused) return;
+      interruptCurrentChat();
+    });
+    // ★★ 2026-09-29（审计 M10「输入区没有 compositionstart / compositionend」）：
+    //   现象：中文/日文输入法下用回车确认候选词时消息被提前发送出去，发出去的是
+    //   半截拼音或没上屏的候选；Safari 与部分安卓第三方输入法上更明显。
+    //   根因：全文件只有 `!e.isComposing` 一处判断，没有组合输入状态兜底。部分浏览器
+    //   在 compositionend 之后的那一帧 keydown 上 isComposing 已经变回 false，
+    //   且缺少 e.keyCode === 229（IME 处理中）的兼容判断。
+    //   修法：自己维护 _imeComposing（compositionstart 置真、compositionend 在
+    //   setTimeout(0) 里置假，让同帧的 keydown 仍被拦住），发送条件三选一全不满足才发。
+    var _imeComposing = false;
+    input.addEventListener('compositionstart', function() { _imeComposing = true; });
+    input.addEventListener('compositionend', function() {
+      setTimeout(function() { _imeComposing = false; }, 0);
+    });
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !_imeComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        doSend();
+      }
+    });
+    input.addEventListener('input', autoresize);
+
+    // 文件上传逻辑（按钮多选 / 粘贴 / 拖拽）—— 支持任意格式与多文件
+    var _aiChatFileSelectionSeq = 0;
+    var _aiChatFiles = []; // [{ name, type, dataUrl, size }]
+    // ★ 加固：_aiChatFiles 是 renderAiRoot 的闭包变量，closeAiChat 在外部作用域无法直接访问，
+    //   此前关闭聊天/登出后附件数组不会被清理（会话残留）。此处把清理函数挂到 S 上，
+    //   由 closeAiChat 统一调用；函数每次 renderAiRoot 重建，指向当前闭包，无泄漏。
+    S._aiChatFilesCleanup = function() {
+      try { _aiChatFiles = []; _aiChatFileSelectionSeq++; } catch (e) {}
+    };
+    // ★ 2026-09-29（审计 M5「发送失败只回填文字，附件不可恢复」）：
+    //   供 handleSendMessage 的失败收尾（restoreInputText）把本次附件放回输入区
+    //   并重新渲染预览 —— 此前失败后附件预览永久丢失，用户必须重新选一遍文件。
+    S._restoreAiChatFiles = function(files) {
+      try {
+        if (!files || !files.length) return;
+        _aiChatFiles = files.slice(0, 10);
+        renderAiMultiFilePreview(_aiChatFiles);
+      } catch (eRestore) {}
+    };
+    function clearAiChatFilePreview() {
+      _aiChatFileSelectionSeq++;
+      _aiChatFiles = [];
+      filePreview.style.display = 'none';
+      filePreview.innerHTML = '';
+      fileInput.value = '';
+    }
+    function renderAiMultiFilePreview(files) {
+      filePreview.innerHTML = '';
+      if (!files.length) { filePreview.style.display = 'none'; return; }
+      var first = files[0];
+      var thumb = String(first.type || '').indexOf('image/') === 0
+        ? el('img', { src: first.dataUrl, class: 'ai-file-thumb' })
+        : el('div', { class: 'ai-file-icon' }, '📄');
+      var totalKB = 0;
+      for (var fi = 0; fi < files.length; fi++) totalKB += Math.round(((files[fi].dataUrl || '').length * 3 / 4) / 1024);
+      var label = files.length === 1
+        ? (first.name + ' (' + Math.max(1, Math.round((first.size || totalKB) / 1024)) + 'KB)')
+        : (first.name + ' 等 ' + files.length + ' 个文件（约 ' + Math.round(totalKB / 1024) + 'KB）');
+      var info = el('span', { class: 'ai-file-info', text: label });
+      var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
+      removeBtn.addEventListener('click', clearAiChatFilePreview);
+      filePreview.appendChild(thumb);
+      filePreview.appendChild(info);
+      filePreview.appendChild(removeBtn);
+      filePreview.style.display = 'flex';
+    }
+    function acceptAiChatFiles(rawFiles) {
+      var fileSeq = ++_aiChatFileSelectionSeq, fileCid = S.conversationId, fileLifecycle = S.lifecycleId;
+      var fileOwner = window.currentUser || '', fileEpoch = window._authStateEpoch || 0;
+      function currentFiles() { return fileSeq === _aiChatFileSelectionSeq && fileCid === S.conversationId && fileLifecycle === S.lifecycleId &&
+        fileOwner === (window.currentUser || '') && fileEpoch === (window._authStateEpoch || 0); }
+      var list = Array.prototype.slice.call(rawFiles || []);
+      if (!list.length) { notify('没有可上传的文件'); return; }
+      var attachments = [];
+      var totalBytes = 0;
+      var skipped = 0;
+      function next(i) {
+        if (!currentFiles()) return;
+        if (i >= list.length) {
+          if (!attachments.length) {
+            notify(list.length ? '文件都超过 50MB 或数量超限（最多 10 个、合计约 50MB），请选择更小的文件' : '没有可上传的文件');
+            return;
+          }
+          _aiChatFiles = attachments;
+          renderAiMultiFilePreview(attachments);
+          notify('已选择 ' + attachments.length + ' 个文件' + (skipped ? '（' + skipped + ' 个超限已跳过）' : ''));
+          return;
+        }
+        var f = list[i];
+        var pass = true;
+        if (String(f.size || 0) > AI_FILE_MAX_BYTES) { skipped++; pass = false; }
+        if (attachments.length >= 10) { skipped++; pass = false; }
+        // ★ 总量预算按 base64 编码后口径（原字节 ×4/3），上限 76MB——
+        //   对齐后端 express.json 80mb 上限并留文本/历史余量；
+        //   保证单张 50MB 图（编码后约 67MB）可独立通过。
+        var AI_ATTACH_TOTAL_B64_BUDGET = 76 * 1024 * 1024;
+        var estTotal = Math.ceil((totalBytes + Number(f.size || 0)) * 4 / 3);
+        if (pass && estTotal > AI_ATTACH_TOTAL_B64_BUDGET) { skipped++; pass = false; }
+        if (!pass) { next(i + 1); return; }
+        var okRead = readAiAttachmentFile(f, function(fileData) {
+          if (!currentFiles()) return;
+          if (fileData) {
+            attachments.push({ name: fileData.name, type: fileData.type || 'application/octet-stream', dataUrl: fileData.dataUrl, size: Number(f.size || 0) });
+            totalBytes += Math.ceil((fileData.dataUrl.length * 3) / 4);
+          } else { skipped++; }
+          next(i + 1);
+        }, { sizeMsg: '文件不能超过 50MB' });
+        if (!okRead) { skipped++; next(i + 1); }
+      }
+      next(0);
+    }
+    fileBtn.addEventListener('click', function() { fileInput.click(); });
+    fileInput.addEventListener('change', function() {
+      var fs = this.files;
+      if (!fs || !fs.length) return;
+      acceptAiChatFiles(Array.prototype.slice.call(fs));
+      this.value = '';
+    });
+    bindAiComposerPasteDrop([inputBar, input], function(rawFile) { acceptAiChatFiles([rawFile]); });
+
+    inputBar.appendChild(plusWrap);
+    inputBar.appendChild(panelShell);
+    inputBar.appendChild(fileBtn);
+    inputBar.appendChild(fileInput);
+    inputBar.appendChild(filePreview);
+    inputBar.appendChild(input);
+    inputBar.appendChild(voiceBtn);
+    inputBar.appendChild(sendBtn);
+    inputBar.appendChild(pauseBtn);
+    root.appendChild(inputBar);
+
+    S.resizeTimer = setTimeout(autoresize, 0);
+
+    // ★ M: 渲染后立即同步深入研究 toggle 视觉
+    refreshDeepThinkToggle();
+
+    S.pauseBtnEl = pauseBtn;
+    return {
+      root: root,
+      messagesEl: messagesEl,
+      inputBar: inputBar,
+      input: input,
+      sendBtn: sendBtn,
+      pauseBtn: pauseBtn,
+      updateModelUI: updateModelUI
+    };
+  }
+
+  async function openAiChat(opts) {
+    if (S.active) return;
+    S._dockMode = !!(opts && opts.dock);
+    // ★ 小猫AI 页面始终可打开（即使未登录也进入独立页面；随后 ensureUserAuthOrNotify
+    //   会在未登录/凭证失效时提示登录并在面板内给出提示，而不是什么都不发生）。
+    // ★ M: 恢复深入研究模式状态
+    restoreDeepThinkState();
+    S.active = true;
+    var lifecycleId = ++S.lifecycleId;
+    window.__xtjAiChatActive = true;
+    S.autoScrollPinned = true;
+    // 恢复上次会话 id，避免每次重进变成「无 conversation_id」只靠服务端猜最近一条
+    try {
+      if (!S.conversationId) {
+        var restoredCid = readConvId();
+        if (restoredCid) S.conversationId = restoredCid;
+      }
+    } catch (eRest) {}
+
+    try { closeSiteSearch(); } catch (e) {}
+    var aiPanel = document.getElementById('panelAiChat');
+    if (!aiPanel) {
+      S.active = false;
+      window.__xtjAiChatActive = false;
+      notify('AI 页面未加载，请刷新后重试');
+      return;
+    }
+    // iOS fixes the app container to the visual viewport, creating a stacking
+    // context. Keep AI and the unchanged Dock in that same context.
+    var appContainer = document.querySelector('.app-container');
+    if (appContainer && aiPanel.parentNode !== appContainer) appContainer.appendChild(aiPanel);
+    aiPanel.classList.remove('hidden');
+    aiPanel.classList.add('active');
+    aiPanel.setAttribute('aria-hidden', 'false');
+    // ★ 修复：桌面端作为"独立页面"打开——隐藏底层主内容，避免"覆盖在其他窗口上"的观感
+    try { document.body.classList.add('xtj-ai-page-open'); } catch (eBody) {}
+    aiPanel.removeAttribute('aria-busy');
+    aiPanel.innerHTML = '';
+    updateSecondaryPageState(true, 'ai-chat');
+
+    var r = renderAiRoot();
+    aiPanel.appendChild(r.root);
+    S.rootEl = r.root;
+    S.messagesEl = r.messagesEl;
+    S.inputBarEl = r.inputBar;
+    S.inputEl = r.input;
+    S.sendBtnEl = r.sendBtn;
+    updateInputMetrics();
+    setAiRootState('ai-idle');
+
+    if (S.statusTimer) {
+      try { clearInterval(S.statusTimer); } catch (e2) {}
+    }
+    S.statusTimer = setInterval(updateAiStatus, 60000);
+    if (S._configRefreshTimer) { try { clearInterval(S._configRefreshTimer); } catch(e) {} }
+    S._configRefreshTimer = setInterval(function() { ensureConfig().then(applyConfigToUI).catch(function(){}); }, CONFIG_REFRESH_INTERVAL);
+    startQuotaPolling();
+
+    if (S.viewportCleanup) {
+      try { S.viewportCleanup(); } catch (e3) {}
+    }
+    S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input, r.inputBar);
+
+    // Do not make opening the chat wait for an auth refresh. The shell is useful immediately.
+    ensureUserAuthOrNotify().then(function(authOk) {
+      if (lifecycleId !== S.lifecycleId || !S.active) return null;
+      if (!authOk) {
+        S.active = false;
+        window.__xtjAiChatActive = false;
+        renderHistoryUnavailable(r.messagesEl, { status: 401, error_code: 'auth' });
+        return null;
+      }
+      return Promise.allSettled([
+        ensureConfig().then(function(cfg) {
+          if (lifecycleId === S.lifecycleId && S.active) applyConfigToUI(cfg);
+        }),
+        loadHistory(r.messagesEl, null),
+        // 打开面板时预拉取会话列表，修复"历史对话"点开后才加载、易误判为列表消失的问题
+        fetchConversations().catch(function(e) {
+          try { console.warn('[AI-CONV] 预拉取会话列表失败:', e && e.message); } catch (ee) {}
+        }),
+        // ★ 账号级同步第三方自定义模型（跨设备恢复），完成后刷新模型摘要
+        //   （原先还调 r.repopulate() 重建透明 select，但对应 #aiPlusModelSelect
+        //    元素全仓不存在，该调用恒为空操作，已随死代码一并移除）
+        syncCustomModelsFromServer().then(function() {
+          if (lifecycleId === S.lifecycleId && S.active) {
+            try { if (r.updateModelUI) r.updateModelUI(); } catch (eU) {}
+          }
+        })
+      ]);
+    }).then(function() {
+      if (lifecycleId !== S.lifecycleId || !S.active || r.messagesEl !== S.messagesEl) return;
+      setTimeout(function() {
+        if (!document.body.classList.contains('xtj-research-open') && S.active && r.input === S.inputEl) { try { r.input.focus(); } catch (e) {} }
+        updateInputMetrics();
+      }, 80);
+    });
+  }
+
+  function applyConfigToUI(cfg) {
+    if (!cfg) return;
+    var avatarEl = document.getElementById('aiChatHeaderAvatar');
+    var nameEl = document.getElementById('aiChatHeaderName');
+    if (avatarEl) renderHeaderAvatar(avatarEl, cfg.avatar_url, cfg.avatar_version);
+    if (nameEl) nameEl.textContent = AI_DISPLAY_NAME;
+    updateAiStatus();
+
+    var inp = document.getElementById('aiChatMsgInput');
+    if (inp) inp.placeholder = '和 ' + AI_DISPLAY_NAME + ' 说点什么吧…';
+
+    var empty = document.querySelector('#aiChatRoot .ai-chat-empty:not(.ai-history-loading):not(.ai-history-unavailable)');
+    if (empty) {
+      var e1 = empty.querySelector('.ai-chat-empty-emoji');
+      if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
+      var e2 = empty.querySelector('.ai-chat-empty-title');
+      if (e2) e2.textContent = '和 ' + AI_DISPLAY_NAME + ' 聊聊天';
+      var e3 = empty.querySelector('.ai-chat-empty-tip');
+      if (e3) e3.textContent = cfg.welcome_message || '嗨，来聊天吧。';
+    }
+
+    // ★ P0-1 修复: 同步后端思考程度配置。
+    //   优先级：后端配置 > localStorage > 默认值（仅作用于"首次加载"或"配置版本变更"）。
+    //   一旦用户通过 UI 显式选择思考程度，则用户选择优先，避免 config 定时刷新
+    //   把用户选择重置回后端默认值。
+    try {
+      if (cfg.deep_think) {
+        if (['low', 'medium', 'high', 'max'].indexOf(cfg.deep_think.default_thinking_mode) >= 0) {
+          S.deepThinkEffort = cfg.deep_think.default_thinking_mode;
+        }
+        S.deepThinkEnabled = cfg.deep_think.enabled !== false;
+        // ★ Tavily Deep Research: 同步后端配置 (config.tavily_research.enabled)
+      }
+      S.tavilyResearchEnabled = !!(cfg.tavily_research && cfg.tavily_research.enabled);
+      // 思考程度档位是网站固定预设（关闭/轻度/中度/深度/极致），以用户本人选择为准
+      // （localStorage > 网站默认 DEFAULT_THINKING_MODE），不再被后端“系统默认思考档”自动覆盖，
+      // 避免系统级下发在多处造成菜单显示与实际档位不一致。深入研究二级页的 deepThinkEffort
+      // 已在上方由 cfg.deep_think 独立同步，与主聊天档位互不影响。
+    } catch (e) { /* 容错 */ }
+
+    // ★ P 新增: 如果后端禁用了深入研究，强制关闭 toggle
+    if (!S.deepThinkEnabled && S.deepThink) {
+    S.deepThink = false;
+    try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
+      try { refreshDeepThinkToggle(); } catch (e) {}
+    }
+  }
+
+  function closeAiChat() {
+    var activePanel = document.getElementById('panelAiChat');
+    var panelIsVisible = !!(activePanel && activePanel.classList.contains('active') && !activePanel.classList.contains('hidden'));
+    if (!S.active && !panelIsVisible) return;
+    S._dockMode = false;
+    S.active = false;
+    S.lifecycleId += 1;
+    S._newChatRequestId = (S._newChatRequestId || 0) + 1;
+    S._newChatBusy = false;
+    S._historyBusy = false;
+    S.sendSeq = (S.sendSeq || 0) + 1;
+    S.historyRequestId += 1;
+    S.conversationRequestId += 1;
+    window.__xtjAiChatActive = false;
+    document.body.classList.remove('xtj-research-open');
+    stopQuotaPolling();
+    clearReplyTimer();
+    // 页面级关闭：完整清理主聊天 + 深入研究两套状态。 Invalidate the
+    // deep preflight too, since it may be awaiting quota/auth before a controller exists.
+    S._dtSendSeq = (S._dtSendSeq || 0) + 1;
+    S._dtSending = false;
+    S._dtCreating = false; S._dtDeleting = false;
+    S._dtCreateSeq = (S._dtCreateSeq || 0) + 1;
+    _dtFileSelectionSeq += 1;
+    S._dtCurrentReqId = null;
+    if (S._dtFetchTimeoutTimer) { clearTimeout(S._dtFetchTimeoutTimer); S._dtFetchTimeoutTimer = null; }
+    if (S._dtAbortController && S._dtAbortController !== S.deepThinkJob) {
+      try { S._dtAbortController._abortReason = 'aborted'; S._dtAbortController.abort('aborted'); } catch (eDtAbort) {}
+    }
+    S._dtAbortController = null;
+    abortAllAiRequests();
+    // ★ 2026-09-29（审计 S2）：关闭面板同样要作废 _currentReqId，
+    //   否则旧流的收尾（push 消息 / 写缓存）仍会落在已被清空/替换的 S.messages 上。
+    //   （只清主聊天通道，深页独立通道 _dtCurrentReqId 由深页自己管理。）
+    S._currentReqId = null;
+    S._pendingLocalMsgs = [];
+    // 关闭深入研究二级页面，避免它残留在普通聊天之中
+    // Clean up deep think state
+    if (S.deepThinkProgressCard) {
+      try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
+    }
+    // ★ U3 Bug 4 修复: 不再重置 S.deepThink, 保持用户的 toggle 偏好
+    S.deepThinkJob = null;
+    S.deepThinkProgressCard = null;
+    // 重置所有状态，避免重开后残留
+    S.sending = false;
+    S.paused = false;
+    S.activeRenderers = [];
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+    S.messages = [];
+    S.conversations = [];
+    S.oldestCursor = null;
+    S.hasMore = false;
+    S.loading = false;
+    S.loadingMore = false;
+    S.clientRequestId = 0;
+    if (S.viewportCleanup) {
+      try { S.viewportCleanup(); } catch (e2) {}
+      S.viewportCleanup = null;
+    }
+    // P0-4: 释放加号面板的所有 document/window/visualViewport 监听与计时器
+    if (S._panelCleanup) {
+      try { S._panelCleanup(); } catch (ePanel) {}
+      S._panelCleanup = null;
+      S._panelAbortController = null;
+    }
+    // ★ 加固：清理附件数组，避免关闭聊天/登出后残留上一次会话选中的文件
+    if (S._aiChatFilesCleanup) {
+      try { S._aiChatFilesCleanup(); } catch (eFiles) {}
+      S._aiChatFilesCleanup = null;
+    }
+    if (S.statusTimer) {
+      try { clearInterval(S.statusTimer); } catch (e3) {}
+      S.statusTimer = null;
+    }
+    if (S._configRefreshTimer) {
+      try { clearInterval(S._configRefreshTimer); } catch (e) {}
+      S._configRefreshTimer = null;
+    }
+    if (S.keyboardResetTimer) {
+      try { clearTimeout(S.keyboardResetTimer); } catch (e4) {}
+      S.keyboardResetTimer = null;
+    }
+    if (S.avatarPopTimer) {
+      try { clearTimeout(S.avatarPopTimer); } catch (e5) {}
+      S.avatarPopTimer = null;
+    }
+    if (S.resizeTimer) {
+      try { clearTimeout(S.resizeTimer); } catch (e6) {}
+      S.resizeTimer = null;
+    }
+    if (S.headerButtonsCleanup) {
+      try { S.headerButtonsCleanup(); } catch (e6) {}
+      S.headerButtonsCleanup = null;
+    }
+
+    var aiPanel = document.getElementById('panelAiChat');
+    if (aiPanel) {
+      aiPanel.classList.add('hidden');
+      aiPanel.classList.remove('active');
+      aiPanel.setAttribute('aria-hidden', 'true');
+    }
+    // ★ 修复：关闭后恢复主内容显示
+    try { document.body.classList.remove('xtj-ai-page-open'); } catch (eBody) {}
+    updateSecondaryPageState(false, 'ai-chat');
+
+    if (S.rootEl) {
+      try { S.rootEl.remove(); } catch (e6) {}
+    }
+    S.rootEl = null;
+    S.messagesEl = null;
+    S.inputBarEl = null;
+    S.inputEl = null;
+    S.sendBtnEl = null;
+
+    // Clean up any active text renderers
+    try { window.__xtjActiveRenderers = null; } catch (e) {}
+
+    try {
+      if (typeof window.renderDockChatList === 'function') {
+        var refreshResult = window.renderDockChatList();
+        if (refreshResult && typeof refreshResult.then === 'function') {
+          try { refreshResult.catch(function() { scheduleInsertEntry(); }); } catch (e8) { scheduleInsertEntry(); }
+        }
+      } else {
+        scheduleInsertEntry();
+      }
+    } catch (e9) {
+      scheduleInsertEntry();
+    }
+  }
+
+  function removeAllAiEntries() {
+    try {
+      var panel = document.getElementById('panelChat') || document.body || document;
+      if (!panel || !panel.querySelectorAll) return;
+      var olds = panel.querySelectorAll('[data-chat-user="__ai_agent__"], .ai-agent-entry');
+      for (var i = 0; i < olds.length; i++) {
+        try { olds[i].remove(); } catch (e) {}
+      }
+    } catch (e2) {}
+  }
+
+  // ★ 2026-09-11 死代码清理（P-03）：insertEntry 是已退役功能的遗留实现。
+  // AI 现在只从首页工具菜单启动（见 scheduleInsertEntry 注释），不再作为 dock
+  // 聊天列表的伪联系人在插。该函数此前仅通过 window.__xtjAiAgent.insertEntry
+  // 对外暴露，而全仓库（含测试、脚本、HTML）无任何调用点，已删除。
+  // 注：removeAllAiEntries 仍在使用，保留。
+
+  function scheduleInsertEntry() {
+    // AI is launched only from the homepage tools menu. This keeps cached
+    // chat-list DOM from retaining the retired AI pseudo-contact.
+    removeAllAiEntries();
+  }
+
+  function hookChatList() {
+    if (S.bound) return;
+    var original = window.renderDockChatList;
+    window.renderDockChatList = function() {
+      var ret;
+      if (typeof original === 'function') {
+        try { ret = original.apply(this, arguments); } catch (e) {}
+      }
+      if (ret && typeof ret.finally === 'function') {
+        try { ret.finally(function() { scheduleInsertEntry(); }); } catch (e2) { scheduleInsertEntry(); }
+      } else {
+        scheduleInsertEntry();
+      }
+      return ret;
+    };
+    S.bound = true;
+  }
+
+  function hookAiTabVisibility() {
+    if (window.__xtjAiTabVisibilityHooked) return;
+    if (typeof window.switchDockTab !== 'function') return;
+    var original = window.switchDockTab;
+    window.switchDockTab = function(tab, skipReturn, options) {
+      var result = original.apply(this, arguments);
+      // ★ 修复：切到小猫AI 自身 tab（ai-chat）时保持 AI 页面打开。
+      //   original 已负责打开/恢复 AI 页面（S.active 同步置 true），
+      //   若此处不排除 ai-chat，会在打开后立刻被 closeAiChat() 关掉，
+      //   表现为移动端点击小猫AI「无反应」。
+      if (tab !== 'chat' && tab !== 'ai-chat' && S.active) {
+        try { closeAiChat(); } catch (e) {}
+      }
+      // 切换出聊天 tab 时一并关闭深入研究二级页面（ai-chat 属于 AI 页面子级，需保留）
+      if (tab !== 'chat' && tab !== 'ai-chat') {
+        try { closeDeepThinkPage(); } catch (e) {}
+      }
+      return result;
+    };
+    window.__xtjAiTabVisibilityHooked = true;
+  }
+
+  // ★ 2026-09-11 死代码清理（P-03）：__debugAiClick 是早期调试残留，
+  // 全仓库（含测试、脚本、HTML）零引用，已删除。
+
+  window.__xtjAiAgent = {
+    open: openAiChat,
+    close: closeAiChat,
+    getConfig: function() { return S.config; },
+    getConversationId: function() { return S.conversationId; },
+    openDeepThink: openDeepThinkPage,
+    openSiteSearch: openSiteSearchPage,
+    openConversation: async function(conversationId, mode) {
+      if (!conversationId) return false;
+      if (mode === 'deep_think') {
+        S.dtConversationId = conversationId;
+        saveDtConvId();
+        await openDeepThinkPage();
+        return true;
+      }
+      await openAiChat();
+      await switchConversation(conversationId);
+      return true;
+    }
+  };
+  window.__xtjOpenAiChat = openAiChat;
+  window.__xtjCloseAiChat = closeAiChat;
+  // ★ 小猫AI dock 入口（移动端 dock 中间 tab）：隐藏多余返回按钮
+  window.__xtjOpenAiChatFromDock = function() {
+    return openAiChat({ dock: true });
+  };
+
+  function flushPendingAiChatDock() {
+    // 移动端 dock 恢复 last tab=ai-chat 时，可能早于本模块就绪；补一次打开
+    try {
+      if (window.__xtjPendingAiChatOpen === true) {
+        window.__xtjPendingAiChatOpen = false;
+        if (window.__xtjOpenAiChatFromDock) window.__xtjOpenAiChatFromDock();
+      }
+    } catch (eF) {}
+  }
+
+  function bootstrap() {
+    try { diagPrintContext('boot'); } catch (e) {}
+    flushPendingAiChatDock();
+    setTimeout(flushPendingAiChatDock, 900);
+    ensureConfig().then(function(cfg) {
+      S.config = cfg;
+      scheduleInsertEntry();
+    }).catch(function() {
+      S.config = {
+        name: '小猫',
+        avatar: '🐈',
+        description: 'AI 智能体',
+        welcome_message: '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
+      };
+      scheduleInsertEntry();
+    });
+    // 启动即尝试把账号内的第三方自定义模型同步到本地（换设备/刷新后尽早恢复，不阻塞 UI；
+    // 未登录或失败时 syncCustomModelsFromServer 内部会安全降级为仅本地）
+    try { syncCustomModelsFromServer().catch(function() {}); } catch (eBootSync) {}
+    window.addEventListener('online', function() {
+      if (window.currentUser) syncCustomModelsFromServer().catch(function() {});
+    });
+    bindTopAiTools();
+    hookChatList();
+    hookAiTabVisibility();
+    bindDeepThinkPageEvents();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+  } else {
+    bootstrap();
+  }
+})();

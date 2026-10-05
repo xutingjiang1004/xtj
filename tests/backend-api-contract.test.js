@@ -1,0 +1,218 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+test('Render deployment follows the merged main branch', () => {
+  const renderYaml = fs.readFileSync('render.yaml', 'utf8');
+  assert.match(renderYaml, /branch:\s*main/);
+  assert.doesNotMatch(renderYaml, /branch:\s*xtj-hotfix/);
+});
+const path = require('node:path');
+
+const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');
+const core = fs.readFileSync(path.join(__dirname, '..', 'js', 'core.js'), 'utf8');
+const likeMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '009_atomic_post_like.sql'), 'utf8');
+const pinUuidMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '010_fix_post_pin_uuid.sql'), 'utf8');
+const hardDeleteMigration = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'migrations', '013_hard_delete_content_and_photo_cleanup.sql'), 'utf8');
+
+function routeSource(method, route, nextRoute) {
+  const startToken = `app.${method}('${route}'`;
+  const start = server.indexOf(startToken);
+  assert.notEqual(start, -1, `missing ${method.toUpperCase()} ${route}`);
+  const end = nextRoute ? server.indexOf(nextRoute, start + startToken.length) : server.length;
+  assert.ok(end > start, `could not isolate ${route}`);
+  return server.slice(start, end);
+}
+
+test('DM list queries both sender and recipient fields and merges by message id', () => {
+  const source = routeSource('get', '/api/dm/list', "app.get('/api/dm/messages'");
+  assert.match(source, /\.eq\('user_name', req\.userName\)/);
+  assert.match(source, /\.eq\('media_url', req\.userName\)/);
+  assert.match(source, /new Map\(\)/);
+  assert.match(source, /created_at[\s\S]*localeCompare/);
+  assert.doesNotMatch(source, /actor_key', 'dm_/);
+});
+
+test('DM messages uses exact two-way participant filters and UUID-safe ordering', () => {
+  const source = routeSource('get', '/api/dm/messages', "app.post('/api/dm/read'");
+  assert.match(source, /buildDirectionQuery\(req\.userName, targetUser\)/);
+  assert.match(source, /buildDirectionQuery\(targetUser, req\.userName\)/);
+  assert.match(source, /\.eq\('user_name', sender\)\.eq\('media_url', recipient\)/);
+  // ★ 2026-08-05 修复：分页改为取最新消息（此前 asc 取最旧 N 条，长会话永远取不到新消息）
+  assert.match(source, /order\('created_at', \{ ascending: false \}\)/);
+  assert.doesNotMatch(source, /parseInt\(req\.query\.after_id|\.gt\('id'/);
+  assert.match(source, /new Map\(\)/);
+  assert.doesNotMatch(source, /\.or\(`/);
+});
+
+test('DM read state is authenticated, recipient-scoped, and returned authoritatively', () => {
+  const source = routeSource('post', '/api/dm/read', "app.get('/admin/bans'");
+  assert.match(source, /authenticateUser/);
+  assert.match(source, /\.eq\('media_type', DM_MARKER\)/);
+  assert.match(source, /\.eq\('media_url', req\.userName\)/);
+  assert.match(source, /payload\.read_at = now/);
+  assert.match(source, /partial: failedIds\.length > 0/);
+  assert.match(source, /data: updated/);
+});
+
+test('report notifications use authenticated server identity and do not hide mark-read failures', () => {
+  const listSource = routeSource('get', '/api/report/notifications', "app.post('/api/report/notifications/mark-read'");
+  const markSource = routeSource('post', '/api/report/notifications/mark-read', "app.get('/admin/photos'");
+  assert.match(listSource, /authenticateUser/);
+  assert.match(listSource, /const userName = req\.userName/);
+  assert.doesNotMatch(listSource, /req\.query\.user|req\.body\.user/);
+  assert.match(markSource, /authenticateUser/);
+  assert.match(markSource, /\.eq\('user_name', userName\)/);
+  assert.match(markSource, /if \(updateResult\.error\) failed\+\+/);
+  assert.match(markSource, /res\.status\(500\)[\s\S]*report_mark_read_partial/);
+});
+
+test('report notification UI uses protected fetch without anon Supabase fallback', () => {
+  const start = core.indexOf('async function checkReportReplies()');
+  const end = core.indexOf('let refreshTimeout = null;', start);
+  assert.ok(start >= 0 && end > start);
+  const source = core.slice(start, end);
+  // ★ 2026-09-27：M15 修复后，后台轮询链路（checkReportReplies 由 30s 定时器驱动）
+  //   显式传 { background: true }，让 ensureProtectedOperationAuth 保留 refresh 冷却，
+  //   不再每轮清零零冷却反复打 /api/user/refresh。断言意图不变：仍走 xtjProtectedFetch，
+  //   且不得回退到 anon Supabase / 裸 fetch。故这里允许可选第二参数。
+  assert.match(source, /xtjProtectedFetch\('\/api\/report\/notifications'(?:,\s*\{[^}]*\})?\)/);
+  assert.match(source, /xtjProtectedFetch\('\/api\/report\/notifications\/mark-read'/);
+  assert.doesNotMatch(source, /sb\.from\('posts'\)/);
+  assert.doesNotMatch(source, /fetch\(API_BASE \+ '\/api\/report\/notifications/);
+  assert.match(source, /if \(!response\.ok\) throw new Error\('report_mark_read_failed'\)/);
+});
+
+test('atomic like endpoint validates types and returns authoritative final count', () => {
+  const source = routeSource('post', '/api/post/like', "app.get('/api/stats/snapshot'");
+  assert.match(source, /authenticateUser/);
+  assert.match(source, /normalizePostId\(rawPostId\)/);
+  assert.match(source, /typeof liked !== 'boolean'/);
+  assert.match(source, /existingLike[\s\S]*\.eq\('post_id', postId\)[\s\S]*\.eq\('user_name', req\.userName\)/);
+  assert.match(source, /if \(!existingLike\.data\)[\s\S]*\.insert\(/);
+  assert.match(source, /String\(likeError\.code \|\| ''\) !== '23505'/);
+  assert.match(source, /select\('id', \{ count: 'exact', head: true \}\)/);
+  assert.match(source, /post_id: postId, liked: liked, like_count:/);
+});
+
+test('atomic like migration cleans legacy duplicates and enforces one user like per post', () => {
+  assert.match(likeMigration, /DELETE FROM public\.likes AS older/);
+  assert.match(likeMigration, /CREATE UNIQUE INDEX IF NOT EXISTS likes_one_user_per_post/);
+  assert.match(likeMigration, /\(post_id, user_name\)/);
+});
+
+test('statistics snapshot is authenticated and excludes system markers from feed posts', () => {
+  const source = routeSource('get', '/api/stats/snapshot', "app.get('/api/photos/wall/");
+  assert.match(source, /authenticateUser/);
+  assert.match(source, /applyPublicPostExclusions\(supabase\.from\('posts'\)/);
+  assert.match(source, /\.eq\('media_type', POST_VIEW_MARKER\)/);
+  assert.match(source, /post\.visibility === 'public' \|\| post\.user_name === req\.userName/);
+  assert.match(source, /view_events: viewEvents/);
+  assert.match(source, /totals:/);
+});
+
+test('pin endpoint requires UUID ids and reports readable validation codes', () => {
+  const source = routeSource('post', '/api/post/pin', "app.post('/api/post/delete'");
+  assert.match(source, /normalizePostId\(rawPostId\)/);
+  assert.match(source, /code: 'invalid_post_id'/);
+  assert.match(source, /typeof isPinned !== 'boolean'/);
+  assert.match(source, /code: 'invalid_pin_state'/);
+});
+
+test('deployed pin migration replaces the invalid bigint RPC with a service-role UUID RPC', () => {
+  assert.match(pinUuidMigration, /DROP FUNCTION IF EXISTS public\.set_post_pin\(BIGINT/);
+  assert.match(pinUuidMigration, /p_post_id UUID/);
+  assert.match(pinUuidMigration, /v_unpinned_ids UUID\[\]/);
+  assert.match(pinUuidMigration, /GRANT EXECUTE[\s\S]*TO service_role/);
+});
+
+test('pin endpoint accepts every normal feed type including blank and audio', () => {
+  const source = routeSource('post', '/api/post/pin', "app.post('/api/post/delete'");
+  assert.match(server, /\['', 'text', 'image', 'video', 'audio', 'photo', 'album'\]/);
+  assert.match(server, /String\(post\.media_type == null \? '' : post\.media_type\)\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(source, /code: 'not_pinnable'/);
+});
+
+test('post delete is authenticated, idempotent, and verifies physical removal', () => {
+  const source = routeSource('post', '/api/post/delete', "app.get('/api/likes/user/");
+  assert.match(source, /authenticateUser/);
+  assert.match(source, /already_deleted: true/);
+  assert.match(source, /hardDeleteContent\(/);
+  assert.match(source, /deleted: result\.deleted === true/);
+  assert.match(server, /Content still exists after delete/);
+  assert.match(source, /code: result\.code \|\| 'delete_not_applied'/);
+});
+
+test('post delete status is protected and reports authoritative existence', () => {
+  const source = routeSource('post', '/api/post/delete-status', "app.post('/api/post/like'");
+  assert.match(source, /authenticateUser/);
+  assert.match(source, /exists: false, deleted: true/);
+  assert.match(source, /exists: true, deleted: false/);
+  assert.match(source, /lookup\.data\.user_name !== req\.userName/);
+});
+
+test('missing hard-delete RPC uses checked service-role cleanup and verifies absence', () => {
+  const source = server.slice(server.indexOf('async function hardDeleteContent'), server.indexOf('var _storageCleanupRunning'));
+  assert.match(source, /PGRST202[\s\S]*42883/);
+  assert.match(source, /from\('likes'\)\.delete\(\)\.eq\('post_id', params\.postId\)/);
+  assert.match(source, /from\('comments'\)\.delete\(\)\.eq\('post_id', params\.postId\)/);
+  assert.match(source, /\['__post_view__', '__report__'\]/);
+  assert.match(source, /from\('posts'\)\.delete\(\)\.eq\('id', params\.postId\)/);
+  assert.match(source, /Content still exists after delete/);
+});
+
+test('photo delete removes the database row before durable storage cleanup', () => {
+  const source = routeSource('post', '/api/photo/delete', "app.post('/api/post/create'");
+  assert.match(source, /hardDeleteContent\(/);
+  assert.match(source, /removeStorageWithQueue\(supabase, \{[\s\S]*?bucket: 'uploads',[\s\S]*?paths: storagePaths/);
+  assert.ok(source.indexOf('hardDeleteContent({') < source.indexOf('removeStorageWithQueue(supabase'));
+  assert.match(source, /photoCleanupResult\.cleanup_pending/);
+  assert.match(source, /deleted: deleteResult\.deleted === true/);
+  assert.match(source, /already_deleted: deleteResult\.already_deleted === true/);
+  assert.match(source, /var cleanupStatePending = storageErrors\.length > 0/);
+  assert.match(source, /if \(cleanupStateUpdate\.error \|\| !cleanupStateUpdate\.data\) \{[\s\S]*?cleanupStatePending = true/);
+  assert.match(source, /cleanup_pending: cleanupStatePending/);
+});
+
+test('public photo queries exclude historical soft-deleted rows', () => {
+  const wall = routeSource('get', '/api/photos/wall/:userName', "app.get('/api/photos/public'");
+  const publicWall = routeSource('get', '/api/photos/public', "app.get('/api/avatar/");
+  assert.match(wall, /\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/);
+  assert.match(publicWall, /\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/);
+});
+
+test('hard-delete migration exposes no privileged cleanup surface to clients', () => {
+  assert.match(hardDeleteMigration, /CREATE TABLE IF NOT EXISTS public\.storage_cleanup_jobs/);
+  assert.match(hardDeleteMigration, /ALTER TABLE public\.storage_cleanup_jobs ENABLE ROW LEVEL SECURITY/);
+  assert.match(hardDeleteMigration, /REVOKE ALL ON FUNCTION public\.hard_delete_content[\s\S]*FROM PUBLIC, anon, authenticated/);
+  assert.match(hardDeleteMigration, /GRANT EXECUTE ON FUNCTION public\.hard_delete_content[\s\S]*TO service_role/);
+  assert.match(hardDeleteMigration, /DELETE FROM public\.likes WHERE post_id = p_post_id/);
+  assert.match(hardDeleteMigration, /DELETE FROM public\.comments WHERE post_id = p_post_id/);
+  assert.match(hardDeleteMigration, /DELETE FROM public\.posts WHERE id = p_post_id/);
+});
+
+test('DM send allows media-only messages (storage_path without text)', () => {
+  const source = routeSource('post', '/api/dm/send', "app.post('/api/dm/withdraw'");
+  // 前端支持只选图片/视频/音频就直接发送，后端此前强制要求文字导致纯媒体消息被拒
+  assert.match(source, /if \(!content && !storagePath\)/);
+  assert.match(source, /JSON\.stringify\(\{ text: content, read_at: null, media: mediaPayload \}\)/);
+  assert.doesNotMatch(source, /if \(!content\) \{[\s\S]{0,60}empty_content/);
+});
+
+test('DM realtime subscription auto-reconnects and restores on visibility/network events', () => {
+  const start = core.indexOf('function subscribeToMessages()');
+  const end = core.indexOf('function subscribeToComments()', start);
+  assert.ok(start >= 0 && end > start);
+  const dmSource = core.slice(start, end);
+  // 指数退避重连（对齐 subscribeToComments 模式）
+  assert.match(dmSource, /_dmReconnectAttempts/);
+  assert.match(dmSource, /_dmMaxReconnectAttempts = 10/);
+  assert.match(dmSource, /CHANNEL_ERROR[\s\S]*TIMED_OUT[\s\S]*CLOSED/);
+  assert.match(dmSource, /Math\.min\(1000 \* Math\.pow\(2, _dmReconnectAttempts\), 30000\)/);
+  // visibilitychange / online / pageshow 三个钩子都要恢复 DM 订阅（此前只恢复评论订阅）
+  assert.match(core, /visibilitychange[\s\S]*if \(!chatRealtime \|\| chatRealtime\.state === 'closed'\)[\s\S]*subscribeToMessages\(\)/);
+  assert.match(core, /addEventListener\('online'[\s\S]*if \(!chatRealtime \|\| chatRealtime\.state === 'closed'\)[\s\S]*subscribeToMessages\(\)/);
+  assert.match(core, /addEventListener\('pageshow'[\s\S]*if \(!chatRealtime \|\| chatRealtime\.state === 'closed'\)[\s\S]*subscribeToMessages\(\)/);
+});

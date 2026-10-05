@@ -1,0 +1,114 @@
+# ===== xtj Render 部署配置 =====
+# 方案A：单一 Node.js Web Service（前后端合一）
+# 部署后访问: https://xtj.onrender.com/admin.html
+
+services:
+  - type: web
+    name: xtj
+    runtime: node
+    repo: https://github.com/xutingjiang1004/xtj
+    plan: starter
+    region: singapore
+    # PR 已合并到 main；生产部署跟随默认主分支，避免继续跟随已合并的临时 hotfix 分支。
+    branch: main
+    rootDir: .
+    # 构建阶段做语法级冒烟 + 构建产物一致性校验（避免长测试阻塞部署，完整测试由 CI 承担）。
+    # ★ 2026-09-26（审计 P2-31）：补 test:consistency —— 此前 scripts/build.js 即使因缺少
+    #   SUPABASE_ANON_KEY 产出占位 anon key 也照常 0 退出，且产物与源码漂移无人拦；
+    #   现在构建阶段就会因指纹不一致而失败，阻断"静默降级"上线。
+    buildCommand: npm ci && npm run build && npm run test:syntax && npm run test:consistency && npm run test:smoke
+    startCommand: node render-api/server.js
+    autoDeploy: true
+    # M-4: 声明健康检查路径，Render 不再 ping "/" 污染访问统计
+    #（server.js 已有 /health 端点并专门排除其访问记录）
+    healthCheckPath: /health
+    
+    # 安全环境变量（请在 Render Dashboard 中设置实际值）
+    envVars:
+      - key: NODE_ENV
+        value: production
+      
+      # ⚠️ 管理员密码 — 在 Render Dashboard 手动设置
+      # 不要在此文件中填写明文密码！
+      - key: ADMIN_PASSWORD
+        sync: false  # 标记为手动管理，不会被代码覆盖
+      
+      # ⚠️ Supabase Service Role Key — 在 Render Dashboard 手动设置
+      # 去 https://supabase.com/dashboard → Settings → API → service_role
+      - key: SUPABASE_SERVICE_KEY
+        sync: false  # 标记为手动管理，不会被代码覆盖
+      
+      # ⚠️ API 密钥（用于签发 token）— 在 Render Dashboard 手动设置一个随机字符串
+      # 不设置的话，每次部署重启都会生成新密钥，导致所有已登录用户被迫重新登录
+      - key: API_SECRET
+        sync: false
+
+      # ⚠️ 加密主密钥（第三方 Provider API Key 落库加密）— 在 Render Dashboard 手动设置
+      # 用途：AES-256-GCM 加解密用户配置的第三方模型供应商密钥（provider-registry.js）。
+      # ★ 2026-09-11 起显式声明：此前未声明，运行时只能从 API_SECRET 降级派生
+      #   （sha256('provider-key-derivation:' + API_SECRET)）。降级本身可用，但存在两个隐患：
+      #   1) 轮换 API_SECRET（例如怀疑 token 泄露需重置）会**连带导致所有已加密的
+      #      Provider 密钥无法解密**，属于强耦合；
+      #   2) 一个密钥同时承担"会话签名"与"数据加密"两种用途，违反密钥分离原则。
+      # 建议：填入一个随机字符串（>=32 字节）作为独立密钥。
+      # ⚠️ 迁移注意：一旦从降级路径切到独立密钥，**存量已加密数据将无法解密**，
+      #    需先执行密钥轮换脚本重新加密，或确认当前无存量加密数据后再切换。
+      - key: ENCRYPTION_KEY
+        sync: false
+
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-v4-flash-vision-exp
+      
+      - key: SUPABASE_URL
+        value: https://ithowxqignlhkwaykglt.supabase.co
+
+      # ⚠️ Supabase Anon Key（前端直连用）— 在 Render Dashboard 手动设置
+      # 去 https://supabase.com/dashboard → Settings → API → anon public key
+      # 构建时注入 js/config.min.js：feed 失败回退 / 浏览统计 / 照片墙统计依赖它。
+      # 不设置则前端直连功能保持占位符降级（其余功能不受影响）。
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      
+      # ⚠️ Tavily API Key（**可选增强，非功能开关**）— 在 Render Dashboard 手动设置
+      # 用途：为小猫AI 的搜索通道额外增加一个第三方来源（tavily_search 工具）。
+      # ★ 2026-09-11 起：深入研究（多智能体深度报告）已完全自托管——由 DeepSeek
+      #   内置 web_search 驱动 Planner/子智能体/Synthesizer，**不依赖此密钥**。
+      #   留空时：研究工作流照常可用；仅 tavily_search 工具返回"未配置"提示。
+      #   获取：https://app.tavily.com → API Keys
+      - key: TAVILY_API_KEY
+        sync: false
+      
+      - key: ADMIN_USERNAME
+        value: xxz
+      
+      # CORS 白名单（逗号分隔）。留空则自动检测：
+      # 只放行 Render 同域（SERVER_HOSTNAME）；本机 localhost/127.0.0.1 仅非生产环境放行。
+      # 2026-09-22：Vercel 已弃用，不再通配任何第三方托管域。若将来接入自有域名
+      #（例如小程序业务域名），在此显式填入，如：
+      #   value: "https://xtj.yourdomain.com"
+      - key: ALLOWED_ORIGINS
+        value: ""
+      
+      # ⚠️ Gmail SMTP 邮件发送配置 — 在 Render Dashboard 手动设置
+      # Gmail 邮箱地址
+      - key: GMAIL_USER
+        sync: false
+      # Gmail 应用专用密码（非邮箱登录密码）
+      # 获取方式：https://myaccount.google.com/apppasswords → 选择"邮件" → 生成
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      # SMTP 端口（465=SSL 推荐，587=STARTTLS）
+      - key: SMTP_PORT
+        sync: false
+
+      # Gmail GAS Web App URL（备选邮件通道，用于绕过 SMTP 限制）
+      # 在 Render Dashboard 手动设置
+      - key: GMAIL_GAS_URL
+        sync: false
+
+# 部署后验证：
+# 1. 打开 https://你的服务名.onrender.com/health → 应返回 {"ok":true}
+# 2. 打开 https://你的服务名.onrender.com/admin.html → 应显示登录页面
+# 3. 打开 https://你的服务名.onrender.com/ → 应显示网站首页
