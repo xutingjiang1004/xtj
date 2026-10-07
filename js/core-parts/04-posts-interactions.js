@@ -4442,7 +4442,7 @@
                 }
             };
             // ============== Global click delegation ==============
-            document.addEventListener('click', function(e) {
+            function handlePostActionClick(e) {
                 var postToolTrigger = e.target.closest('.post-tools-trigger');
                 if (postToolTrigger) {
                     e.preventDefault();
@@ -4475,6 +4475,14 @@
                     window.togglePostPin(pid, pinBtn);
                     return;
                 }
+            }
+            document.addEventListener('click', handlePostActionClick);
+            // The detail dialog stops bubbling at its glass box. Delegate
+            // inside its body too, without dispatching an action twice.
+            var postDetailActionRoot = document.getElementById('postDetailBody');
+            if (postDetailActionRoot) postDetailActionRoot.addEventListener('click', function(e) {
+                handlePostActionClick(e);
+                e.stopPropagation();
             });
             var feedDetailGesture = null, suppressFeedDetailUntil = 0;
             document.addEventListener('pointerdown', function(e) {
