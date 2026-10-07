@@ -105,6 +105,7 @@ function validateHtmlMinifiedRefs(htmlFile) {
 }
 
 const JS_FILES = [
+  'js/photo-share.js',
   'js/post-media.js',
   'js/image-load-guard.js',
   'js/mobile-viewport.js',

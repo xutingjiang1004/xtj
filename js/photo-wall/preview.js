@@ -585,6 +585,10 @@
     }, window.ppNextPhoto = function() {
         W(1);
     }, window.openPhotoPreview = function(b, L) {
+        var requestedPhotos = Array.isArray(L) ? L : L && L.photos || window.pwCurrentSortedPhotos || window.photoWallData || [];
+        if (!window.currentUser && requestedPhotos.some(function(photo) { return photo.__xtjSource !== 'post'; })) {
+            if (window.showToast) window.showToast('请登录后查看照片墙'); return;
+        }
         cancelTrackAnimation();
         if (!e) { if (Array.isArray(L) ? n = L.slice() : n = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : window.photoWallData ? window.photoWallData.slice() : [],
         n && 0 !== n.length) {
@@ -1093,38 +1097,55 @@
                 t.style.transformOrigin = ""), e._closeTimeout = null, e._restoreFocus && e._restoreFocus.isConnected && e._restoreFocus.focus(), e._restoreFocus = null;
             }, 320);
         }
-    }, window.shareCurrentPhoto = function() {
-        var e = t;
-        if (e && e.imageUrl) {
-            if ("vibrate" in navigator && "function" == typeof navigator.vibrate) try {
-                navigator.vibrate(10);
-            } catch (e) {}
-            var o = document.getElementById("ppShareBtn");
-            if (o) {
-                if (o._copying) return;
-                o._copying = !0, o._origHTML = o.innerHTML, o.textContent = "✓", o.classList.add("copied");
+    }, window.shareCurrentPhoto = async function() {
+        var photo = t, button = document.getElementById('ppShareBtn');
+        if (!photo || photo.__xtjSource === 'chat') return;
+        if (button && button._copying) return;
+        var owner = window.currentUser || '', epoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+        if (photo.__xtjSource !== 'post' && !owner) { window.showToast('请登录后分享照片'); return; }
+        if (button) { button._copying = true; button.setAttribute('aria-busy','true'); }
+        var resolveLink, rejectLink, earlyCopy;
+        if (photo.__xtjSource !== 'post' && navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem === 'function') {
+            // Safari requires the clipboard write to start in the click gesture.
+            // Its data promise resolves only after the authorized website link exists.
+            var linkData = new Promise(function(resolve,reject) { resolveLink=resolve;rejectLink=reject; });
+            var blobData = linkData.then(function(link) { return new Blob([link],{type:'text/plain'}); });
+            blobData.catch(function() {});
+            try { earlyCopy=navigator.clipboard.write([new ClipboardItem({'text/plain':blobData})]).then(function(){return true;},function(){return false;}); }
+            catch (_) { earlyCopy=Promise.resolve(false); }
+        }
+        try {
+            var path;
+            if (photo.__xtjSource === 'post' && photo.__xtjPostId) path = '/share/posts/' + encodeURIComponent(photo.__xtjPostId);
+            else {
+                var id = String(photo.cloudId || photo.id || '');
+                if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('照片发布完成后才能分享');
+                var endpoint = (window.API_BASE || '').replace(/\/$/, '') + '/api/photo/share';
+                var options = { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:JSON.stringify({photo_ids:[id]}) };
+                var response;
+                if (window.apiAuthFetch) response = await window.apiAuthFetch(endpoint,options);
+                else { Object.assign(options.headers, await window.getUserAuthHeaders()); response = await fetch(endpoint,options); }
+                var result = await response.json();
+                if (!response.ok || !result.ok || !/^\/share\/photos\/[A-Za-z0-9_-]+$/.test(result.share_path || '')) throw new Error(result.error || '分享链接生成失败，请重试');
+                path = result.share_path;
             }
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) return void navigator.clipboard.writeText(e.imageUrl).then(r).catch(s);
-            } catch (e) {}
-            try {
-                var n = document.createElement("textarea");
-                n.value = e.imageUrl, document.body.appendChild(n), n.select();
-                var i = document.execCommand("copy");
-                if (document.body.removeChild(n), i) return void r();
-            } catch (e) {}
-            s();
-        } else window.showToast("暂无可分享的图片");
-        function a() {
-            o && (o.innerHTML = o._origHTML || "🔗", o.classList.remove("copied"), o.style.transform = "",
-            o._copying = !1);
-        }
-        function r() {
-            window.showToast("图片链接已复制"), setTimeout(a, 1500);
-        }
-        function s() {
-            window.showToast("复制失败，请重试"), setTimeout(a, 1500);
-        }
+            if (owner !== (window.currentUser || '') || epoch !== (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0)) {
+                if (rejectLink) rejectLink(new Error('账号已切换')); return;
+            }
+            var link = new URL(path, window.location.origin).href;
+            if (resolveLink) resolveLink(link);
+            var copied = earlyCopy ? await earlyCopy : false;
+            if (!copied && navigator.clipboard && navigator.clipboard.writeText) {
+                try { await navigator.clipboard.writeText(link); copied = true; } catch (_) {}
+            }
+            if (!copied) {
+                var input = document.createElement('textarea'); input.value = link; document.body.appendChild(input); input.select();
+                try { copied = document.execCommand('copy'); } finally { input.remove(); }
+            }
+            if (!copied) throw new Error('复制失败，请重试');
+            window.showToast('网站分享链接已复制');
+        } catch (error) { if (rejectLink) rejectLink(error); window.showToast(error.message || '分享失败，请重试'); }
+        finally { if (button) { button._copying = false; button.removeAttribute('aria-busy'); } }
     }, window.deleteCurrentPhoto = function() {
         window.deletePhotoFromPreview();
     }, window.deletePhotoFromPreview = function() {

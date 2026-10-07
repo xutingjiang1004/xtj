@@ -7,6 +7,9 @@
   window.xtjRetryOriginalImageUrl = function (value) {
     try {
       var url = new URL(value, location.href);
+      if (url.origin === location.origin && /^\/api\/(?:post\/[0-9a-f-]+\/media\/\d+|photo\/[0-9a-f-]+\/media)$/.test(url.pathname)) {
+        url.searchParams.set('xtj_retry', Date.now().toString(36)); return url.href;
+      }
       var storage = new URL(window.XTJ_CONFIG.SUPABASE_URL);
       // Never modify signed/private or third-party URLs.
       if (url.origin !== storage.origin || !url.pathname.startsWith('/storage/v1/object/public/uploads/')) return value;

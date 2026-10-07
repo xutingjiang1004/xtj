@@ -1,4 +1,5 @@
 'use strict';
+const { photoPayload } = require('./photo-access');
 const {PUBLIC_POST_MEDIA_TYPES}=require('./post-markers');
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const CATEGORIES=['profile','posts','photos','likes','comments','photo_views','ai_history','activity','messages','chat_contacts','chat_preferences','locations'];
@@ -48,7 +49,7 @@ function createPersonalExport({express,supabase,authenticateUser,rateLimit,priva
     q=q.lte(time,at);if(after)q=q.gt(key,after);rows=await checked(q.order(key,{ascending:true}).limit(201));
     if(kind==='photo_views')rows=rows.map(r=>({...r,id:r.photo_id}));
    }
-   const hasMore=rows.length>200,items=rows.slice(0,200).map(safeRecord);
+   const hasMore=rows.length>200,items=rows.slice(0,200).map(row=>safeRecord(kind==='photos'?photoPayload(row):row));
    if(kind==='messages'&&privateStorage){for(let i=0;i<items.length;i+=8)await Promise.all(items.slice(i,i+8).map(async row=>{if(row.withdrawn_at)return;await privateStorage.hydrateMessage(row,{strict:true});}));}
    // Profile identity timestamps come from the authentication record, never browser input.
    let account=null;

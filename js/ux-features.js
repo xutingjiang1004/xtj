@@ -283,8 +283,13 @@
         if(!value||typeof value!=='object')return;
         for(var key of Object.keys(value)){
           var item=value[key];
-          if(typeof item==='string'&&/^(url|imageUrl|original_url|media_url|avatar_url)$/.test(key)&&/^https:\/\//i.test(item)&&!seenUrls.has(item)){
-            seenUrls.add(item);payload.attachments.push({record_id:record.id,url:item,storage_path:value.storage_path||null,expires: /\/object\/sign\//.test(item)?'临时签名地址，过期后可重新导出':null});
+          if(typeof item==='string'&&/^(url|imageUrl|original_url|media_url|avatar_url)$/.test(key)){
+            if(/^\/api\/photo\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/media$/i.test(item)) {
+              item=new URL(item,window.location.origin).href;value[key]=item;
+            }
+            if(/^https:\/\//i.test(item)&&!seenUrls.has(item)) {
+              seenUrls.add(item);payload.attachments.push({record_id:record.id,url:item,storage_path:value.storage_path||null,expires: /\/object\/sign\//.test(item)?'临时签名地址，过期后可重新导出':null});
+            }
           }else if(item&&typeof item==='object')files(item,record);
         }
       }

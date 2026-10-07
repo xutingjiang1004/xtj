@@ -8255,7 +8255,7 @@
                 }
             } else {
                 try {
-                    fetch(API_BASE + '/api/photos/public?limit=200')
+                    window.apiAuthFetch(API_BASE + '/api/photos/public?limit=200', {credentials:'include'})
                         .then(function(resp) { return resp.json(); })
                         .then(function(result) {
                             if (reqId !== _reportLoadId) return;

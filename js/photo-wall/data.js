@@ -3,6 +3,7 @@
 
   var MARKER = '__photo_wall__';
   var CACHE_KEY = 'xtj_photos';
+  var CACHE_OWNER_KEY = 'xtj_photos_owner';
   var DELETED_KEY = 'xtj_photos_deleted';
   var SYNC_KEY = 'xtj_photo_sync_data';
   var PAGE_SIZE = 60;
@@ -30,6 +31,32 @@
   // P5: 分页绑定状态 — 按 page 跟踪 requestId、AbortController、generation
   var _fetchPhotoPageState = {};
   var pendingDeletedPhotoIds = new Set();
+  var cacheOwner = String(window.currentUser || '');
+  var cacheEpoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+
+  function resetPhotoWallAccess() {
+    if (window.__xtjResetPhotoWallInitialization) window.__xtjResetPhotoWallInitialization();
+    photoLoadGeneration++;
+    if (activePhotoLoadController) activePhotoLoadController.abort();
+    if (loadMoreController) loadMoreController.abort();
+    abortPhotoPageRequests();
+    unsubscribePhotoWallRealtime();
+    loading = false; firstPageLoaded = false; page = 0; more = true;
+    lastSuccessfulLoadedAt = 0; loadMorePromise = null;
+    window.photoWallData = []; window.pwCurrentSortedPhotos = [];
+    window.photoPreviewCurrent = null; window.__xtjPreviewExplicitPhotos = [];
+    try { window.safeStorage.remove(CACHE_KEY); window.safeStorage.remove(CACHE_OWNER_KEY); } catch (_) {}
+    if (window.forceClosePhotoPreview) window.forceClosePhotoPreview();
+    else if (window.closePhotoPreview) window.closePhotoPreview();
+    if (window.__xtjClearRecentPhotoOriginals) window.__xtjClearRecentPhotoOriginals();
+    var grid = byId('photoGrid'); if (grid) grid.innerHTML = window.currentUser ? '' : '<p class="pw-login-required">登录后查看照片墙</p>';
+  }
+  window.__xtjResetPhotoWallAccess = resetPhotoWallAccess;
+  window.addEventListener('auth-ready', function () {
+    var owner = String(window.currentUser || ''), epoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+    if (owner !== cacheOwner || epoch !== cacheEpoch) resetPhotoWallAccess();
+    cacheOwner = owner; cacheEpoch = epoch;
+  });
 
   function byId(id){ return document.getElementById(id); }
 
@@ -106,15 +133,18 @@
   }
 
   function saveLocalPhotoWallData(){
+    if (!window.currentUser) { resetPhotoWallAccess(); return; }
     var list = (Array.isArray(window.photoWallData) ? window.photoWallData : [])
       .filter(function(item){
         return item && item.imageUrl && item.imageUrl.indexOf('data:') !== 0 && item.mediaKind !== 'video' && !/^video\//i.test(item.mimeType || '');
       })
       .slice(0, 180);
     writeJson(CACHE_KEY, list);
+    writeJson(CACHE_OWNER_KEY, String(window.currentUser));
   }
 
   function loadLocalPhotoWallData(){
+    if (!window.currentUser || readJson(CACHE_OWNER_KEY, '') !== String(window.currentUser)) return [];
     var list = readJson(CACHE_KEY, []);
     return Array.isArray(list) ? list.filter(function(item){
       return item && item.id && item.imageUrl && item.mediaKind !== 'video' && !/^video\//i.test(item.mimeType || '');
@@ -252,6 +282,8 @@
   }
 
   async function fetchPhotoPage(pageIndex, timeoutMs, externalSignal, requestId, requestGeneration){
+    var owner = String(window.currentUser || ''), epoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+    if (!owner) return [];
     var page = pageIndex;
     var limit = PAGE_SIZE;
     // P5: 分页绑定 — 管理每个 page 的请求
@@ -280,14 +312,16 @@
     function isCurrentRequest(){
       var stateIsCurrent = !requestState || (_fetchPhotoPageState[stateKey] === requestState && requestState.generation === currentGen);
       var loadIsCurrent = requestGeneration == null || requestGeneration === photoLoadGeneration;
-      return stateIsCurrent && loadIsCurrent && !controller.signal.aborted;
+      return stateIsCurrent && loadIsCurrent && !controller.signal.aborted && owner === String(window.currentUser || '') && epoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0);
     }
     try {
       if (externalSignal) {
         if (externalSignal.aborted) throw createPhotoAbortError();
         externalSignal.addEventListener('abort', onAbort);
       }
-      var resp = await fetch(apiUrl('/api/photos/public?page=' + page + '&limit=' + limit), { credentials: 'include', signal: controller.signal });
+      var headers = window.getUserAuthHeaders ? await window.getUserAuthHeaders() : {};
+      if (!isCurrentRequest()) throw createPhotoAbortError();
+      var resp = await fetch(apiUrl('/api/photos/public?page=' + page + '&limit=' + limit), { credentials: 'include', headers:headers, signal: controller.signal });
       // P5: 如果 generation 已变化（被新请求替代），丢弃结果
       if (!isCurrentRequest()) throw createPhotoAbortError();
       var result = await resp.json();
@@ -306,6 +340,12 @@
   }
 
   async function loadPhotoWallData(force){
+    if (!window.currentUser) { resetPhotoWallAccess(); return []; }
+    var owner = String(window.currentUser), epoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+    if (owner !== cacheOwner || epoch !== cacheEpoch) {
+      if (window.photoWallData.length) resetPhotoWallAccess();
+      cacheOwner = owner; cacheEpoch = epoch;
+    }
     if (loading && !force) return window.photoWallData;
     // P4: 缓存 TTL 只依据 lastSuccessfulLoadedAt（失败不刷新 TTL）
     if (!force && Array.isArray(window.photoWallData) && window.photoWallData.length && lastSuccessfulLoadedAt && Date.now() - lastSuccessfulLoadedAt < LOAD_CACHE_TTL_MS) return window.photoWallData;
@@ -702,6 +742,7 @@
   window.addEventListener('pagehide', unsubscribePhotoWallRealtime);
 
   function subscribePhotoWallRealtime(){
+    if (!window.currentUser) return;
     if (!window.sb) return;
     if (realtimeChannel) {
       var state = realtimeChannel.state;
