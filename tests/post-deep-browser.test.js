@@ -7,6 +7,29 @@ const source = fs.readFileSync('js/core-parts/04-posts-interactions.js', 'utf8')
 const browserOptions = { executablePath: process.env.CHROMIUM_PATH || (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), headless: true, args: ['--no-sandbox'] };
 const id = '8c1cb02d-74d0-4e45-9e15-17f5cf3aa812';
 function between(start, end) { const a = source.indexOf(start), b = source.indexOf(end, a + start.length); assert.ok(a >= 0 && b > a); return source.slice(a, b); }
+test('detail dialog pin and tools clicks survive its bubbling guard and dispatch once', async () => {
+  const browser = await chromium.launch(browserOptions);
+  try {
+    const page = await browser.newPage();
+    const controls = `<button class="action-btn pin" data-post-id="${id}">置顶</button><button class="post-tools-trigger">更多帖子工具</button>`;
+    await page.setContent(`<div id="feed">${controls}</div><div class="modal-box" onclick="event.stopPropagation()"><div id="postDetailBody">${controls}</div></div>`);
+    await page.evaluate(() => {
+      window.calls = []; window.activePostToolsMenu = null;
+      window.togglePostPin = (id, button) => calls.push({ action:'pin', id, scope:button.parentElement.id });
+      window.openPostToolsMenu = button => calls.push({ action:'tools', scope:button.parentElement.id });
+      window.closePostToolsMenu = () => {};
+    });
+    await page.addScriptTag({ content: between('            // ============== Global click delegation', '            var feedDetailGesture') });
+    for (const scope of ['postDetailBody', 'feed']) {
+      await page.locator('#' + scope + ' .pin').click();
+      await page.locator('#' + scope + ' .post-tools-trigger').click();
+    }
+    assert.deepEqual(await page.evaluate(() => calls), [
+      { action:'pin', id, scope:'postDetailBody' }, { action:'tools', scope:'postDetailBody' },
+      { action:'pin', id, scope:'feed' }, { action:'tools', scope:'feed' }
+    ]);
+  } finally { await browser.close(); }
+});
 async function commentPage(browser, options = {}) {
   const page = await browser.newPage(options);
   await page.setContent(`<div id="panelPosts"><div id="feed"><article class="post" data-post-id="${id}"><div class="actions"></div></article></div></div>`);
