@@ -49,7 +49,9 @@
     if (window.forceClosePhotoPreview) window.forceClosePhotoPreview();
     else if (window.closePhotoPreview) window.closePhotoPreview();
     if (window.__xtjClearRecentPhotoOriginals) window.__xtjClearRecentPhotoOriginals();
-    var grid = byId('photoGrid'); if (grid) grid.innerHTML = window.currentUser ? '' : '<p class="pw-login-required">登录后查看照片墙</p>';
+    var grid = byId('photoGrid');
+    if (!window.currentUser && window.renderPhotoWallLockedState) window.renderPhotoWallLockedState();
+    else if (grid) grid.innerHTML = window.currentUser ? '' : '<div class="photo-wall-empty"><div>请登录查看所有照片</div><button type="button" class="photo-wall-empty-cta" onclick="openAuthModal(\'login\')">立即登录</button></div>';
   }
   window.__xtjResetPhotoWallAccess = resetPhotoWallAccess;
   window.addEventListener('auth-ready', function () {
