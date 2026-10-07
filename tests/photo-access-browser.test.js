@@ -76,17 +76,95 @@ test('the standalone website share page shows its author and opens the granted o
   try {
     const html=renderSharePage([{id:A,user_name:'原创作者',created_at:'2026-10-07',content:'{"caption":"分享给你的照片"}'}],'opaque-grant');
     await f.page.route('**/share/photos/opaque-grant',route=>route.fulfill({contentType:'text/html',body:html}));
-    await f.page.route('**/api/photo/shared/opaque-grant/*/media',route=>route.fulfill({contentType:'image/png',body:f.png}));
+    await f.page.route('**/api/photo/shared/opaque-grant/*/media',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#17836d"/></svg>'}));
     await f.page.goto(f.origin+'/share/photos/opaque-grant',{waitUntil:'domcontentloaded'});
-    await f.page.waitForFunction(()=>document.querySelector('article img')?.naturalWidth===1);
+    await f.page.waitForFunction(()=>document.querySelector('article img')?.naturalWidth===640);
     assert.equal(await f.page.locator('article').count(),1);
     assert.match(await f.page.locator('.author').textContent(),/原创作者/);
     assert.equal(await f.page.getByRole('link',{name:'打开网站'}).getAttribute('href'),'/');
+    assert.equal(await f.page.locator('footer').textContent(),'本次分享包含1张照片，更多照片需登录网站查看。');
     await f.page.locator('.photo').click();
-    await f.page.waitForFunction(()=>document.querySelector('dialog')?.open&&document.querySelector('.viewer img')?.naturalWidth===1);
+    await f.page.waitForFunction(()=>document.querySelector('dialog')?.open&&document.querySelector('.viewer img')?.naturalWidth===640);
     assert.match(await f.page.locator('.viewer img').getAttribute('src'),new RegExp('/api/photo/shared/opaque-grant/'+A+'/media'));
+    const box=await f.page.locator('.viewer').boundingBox();
+    await f.page.mouse.move(box.x+box.width/2,box.y+box.height/3);
+    await f.page.mouse.down();await f.page.mouse.move(box.x+box.width/2,box.y+box.height/3+160,{steps:8});await f.page.mouse.up();
+    assert.equal(await f.page.locator('dialog').evaluate(dialog=>dialog.open),false);
+    await f.page.locator('.photo').click();
+    await f.page.waitForFunction(()=>document.querySelector('dialog')?.open);
     await f.page.getByRole('button',{name:'关闭预览'}).click();
     assert.equal(await f.page.locator('dialog').evaluate(dialog=>dialog.open),false);
     assert.deepEqual(f.errors,[]);
   } finally {await f.close();}
+});
+
+test('guest photo wall shows the login gate rather than an empty upload invitation',async()=>{
+  const f=await postBrowserFixture({user:'',publicPosts:true,counts:[1]});
+  try{
+    await f.page.locator('[data-tab="ai"]').filter({visible:true}).first().click();
+    await f.page.getByText('请登录查看所有照片',{exact:true}).waitFor({state:'visible'});
+    assert.equal(await f.page.getByText('成为第一个分享照片的人',{exact:true}).isVisible(),false);
+    await f.page.getByRole('button',{name:'立即登录',exact:true}).click();
+    assert.equal(await f.page.locator('#loginModal').isVisible(),true);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('guest AI startup cannot clear public posts or open a login dialog',async()=>{
+  const f=await postBrowserFixture({user:'',publicPosts:true,counts:[1]});
+  try{
+    let requests=0;await f.page.route('**/api/agent/config',route=>{requests++;return route.fulfill({status:401,json:{error:'unauthorized'}});});
+    await f.page.reload({waitUntil:'domcontentloaded'});
+    await f.page.waitForFunction(()=>typeof window.__xtjOpenAiChat==='function'&&document.getElementById('aiToolsNav').__xtjAiToolsBound&&document.querySelector('#feed .post'));
+    await f.page.locator('[data-tab="ai"]').filter({visible:true}).click();
+    await f.page.getByText('请登录查看所有照片',{exact:true}).waitFor({state:'visible'});
+    await f.page.locator('[data-tab="posts"]').filter({visible:true}).click();
+    assert.equal(await f.page.locator('#feed .post').count(),1);
+    assert.equal(await f.page.locator('#loginModal.active').count(),0);
+    assert.equal(requests,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('an authenticated post image renews a missing scoped cookie and retries the original',async()=>{
+  const f=await postBrowserFixture({counts:[1]});
+  try{
+    let refreshes=0,failures=0;
+    await f.page.route('**/api/user/refresh',async route=>{
+      refreshes++;await route.fulfill({headers:{'set-cookie':'xtj_post_media_session=fixture; Path=/api/post; HttpOnly; SameSite=Lax'},json:{token:'test-only-token',user_name:'alice'}});
+    });
+    await f.page.route('**/api/post/*/media/*',async route=>{
+      const headers=await route.request().allHeaders();
+      if(!headers.cookie?.includes('xtj_post_media_session=fixture')){failures++;await route.fulfill({status:401,json:{error:'unauthorized'}});return;}
+      await route.fulfill({contentType:'image/png',body:f.png});
+    });
+    await f.page.context().clearCookies();
+    await f.page.evaluate(id=>{
+      const img=document.querySelector('#feed .post-media-cell img');
+      const original=location.origin+'/api/post/'+id+'/media/0';
+      img.setAttribute('data-media-url',original);img.src=original;
+    },f.posts[0].id);
+    await f.page.waitForFunction(()=>document.querySelector('#feed .post-media-cell img')?.naturalWidth===1);
+    assert.ok(failures>=1);assert.equal(refreshes,1);
+    assert.match(await f.page.locator('#feed .post-media-cell img').getAttribute('src'),/xtj_retry=/);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('chat contacts and history switch without leaving two interactive panels stacked',async()=>{
+  const f=await postBrowserFixture({counts:[1]});
+  try{
+    await f.page.locator('[data-tab="chat"]').filter({visible:true}).click();
+    await f.page.locator('#dockChatSocialBtn').click();
+    await f.page.locator('#dockChatSocialSheet').waitFor({state:'visible'});
+    await f.page.locator('#chatSearchButton').click();
+    await f.page.locator('#chatHistoryPanel').waitFor({state:'visible'});
+    assert.equal(await f.page.locator('#dockChatSocialSheet').evaluate(e=>e.inert),true);
+    await f.page.locator('#dockChatSocialBtn').click();
+    await f.page.locator('#dockChatSocialSheet').waitFor({state:'visible'});
+    assert.equal(await f.page.locator('#chatHistoryPanel').evaluate(e=>e.inert),true);
+    await f.page.locator('#dockChatSocialClose').click();
+    await f.page.locator('#dockChatSocialSheet').waitFor({state:'hidden'});
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
 });

@@ -240,6 +240,7 @@
   var pendingImgs = [];
   var activeLoads = 0;
   var MAX_LOADS = 4;
+  var slowImages = new Set();
   // ★ 每次 render 的 generation ID，用于防止旧加载任务修改新页面
   var _pwRenderGeneration = 0;
 
@@ -258,6 +259,9 @@
     if (!img || !img.isConnected) return;
     var url = img.getAttribute('data-src');
     if (!url) return;
+    slowImages.delete(img);
+    img.onload = img.onerror = null;
+    img.removeAttribute('src');
     img._pwLoadFailed = false;
     img._pwQueued = false;
     img.classList.remove('pw-load-error', 'pw-load-timeout');
@@ -268,7 +272,7 @@
   }
 
   function pumpImages(){
-    if (activeLoads >= MAX_LOADS || !pendingImgs.length) return;
+    if (activeLoads >= MAX_LOADS || slowImages.size >= Math.max(2, MAX_LOADS) || !pendingImgs.length) return;
     var item = pendingImgs.shift();
     if (!item || !item.target) return pumpImages();
     var img = item.target;
@@ -291,8 +295,8 @@
     img._pwActiveLoad = _pwRenderGeneration;
     var loadGeneration = _pwRenderGeneration, loadToken = {};
     img._pwLoadToken = loadToken;
-    var settled = false;
-    var fallbackTimer = setTimeout(function(){ settleImage(true, true); }, 10000);
+    var settled = false, requestStarted = false;
+    var fallbackTimer = null;
     function settleImage(failed, timedOut){
       if (settled) return;
       settled = true;
@@ -313,7 +317,25 @@
           img._pwLoadFailed = true;
           img.classList.add('pw-load-error');
           if (timedOut) img.classList.add('pw-load-timeout');
-          img.src = ERROR_IMG;
+          if (timedOut) {
+            slowImages.add(img);
+            // A slow original can still finish. Do not replace its src and
+            // cancel the download just because the retry hint became visible.
+            img.onload = function(){
+              if (loadGeneration !== _pwRenderGeneration || img._pwLoadToken !== loadToken) return;
+              slowImages.delete(img);
+              if (!img.isConnected || img.getAttribute('src') !== url || !img.naturalWidth) { pumpImages(); return; }
+              img.onload = img.onerror = null; img._pwLoadFailed = false;
+              img.classList.remove('pw-load-error', 'pw-load-timeout');
+              img.removeAttribute('data-src'); img.onclick = null; img.style.cursor = ''; finishImg(img); pumpImages();
+            };
+            img.onerror = function(){
+              if (loadGeneration !== _pwRenderGeneration || img._pwLoadToken !== loadToken) return;
+              slowImages.delete(img); img.onload = img.onerror = null;
+              if (img.isConnected) img.src = ERROR_IMG;
+              pumpImages();
+            };
+          } else img.src = ERROR_IMG;
           img.style.cursor = 'pointer';
           img.onclick = function(ev){
             if (ev && ev.stopPropagation) ev.stopPropagation();
@@ -329,16 +351,24 @@
     }
     img.onload = function(){
       // 占位图自身加载完成不进入正常结算流程
-      if (img._pwLoadFailed) return;
+      if (!requestStarted || img._pwLoadFailed) return;
       settleImage(false);
     };
     img.onerror = function(){
-      if (img._pwLoadFailed) return;
+      if (!requestStarted || img._pwLoadFailed) return;
       settleImage(true);
     };
-    img.src = url;
-    if (img.complete) {
-      settleImage(img.naturalWidth === 0);
+    function requestOriginal(){
+      if (!img.isConnected || loadGeneration !== _pwRenderGeneration || img._pwLoadToken !== loadToken) { settleImage(true); return; }
+      requestStarted = true;
+      fallbackTimer = setTimeout(function(){ settleImage(true, true); }, 30000);
+      img.src = url;
+      if (img.complete) settleImage(img.naturalWidth === 0);
+    }
+    if (window.xtjEnsureMediaSession) {
+      Promise.resolve(window.xtjEnsureMediaSession(url)).then(function(ready){ if (ready) requestOriginal(); else settleImage(true); }).catch(function(){ settleImage(true); });
+    } else {
+      requestOriginal();
     }
     pumpImages();
   }
@@ -380,6 +410,11 @@
   function observeImages(container){
     // ★ 清理旧加载任务
     pendingImgs = [];
+    slowImages.forEach(function(img){
+      img.onload = img.onerror = null;
+      if (!img.isConnected) img.removeAttribute('src');
+    });
+    slowImages.clear();
     // 清空旧 generation 的 activeLoads 计数
     activeLoads = 0;
     // 清空旧图片的加载状态
@@ -779,6 +814,13 @@
   }
 
   function renderSorted(photos, preserveBatch){
+    if (!window.currentUser) {
+      window.pwCurrentSortedPhotos = [];
+      if (window.renderPhotoWallLockedState) window.renderPhotoWallLockedState();
+      else { var lockedGrid = document.getElementById('photoGrid'); if (lockedGrid) lockedGrid.innerHTML = '<div class="photo-wall-empty"><div>请登录查看所有照片</div><button type="button" class="photo-wall-empty-cta" onclick="openAuthModal(\'login\')">立即登录</button></div>'; }
+      return;
+    }
+    if (window.setPhotoWallLockedState) window.setPhotoWallLockedState(false);
     if(window.preloadPhotoStoryAvatars)window.preloadPhotoStoryAvatars(photos);
     if(window.preloadPhotoStorySocial)window.preloadPhotoStorySocial(photos);
     var grid = document.getElementById('photoGrid');
@@ -840,6 +882,7 @@
   var _renderPromise = null;
 
   async function renderPhotoWall(){
+    if (!window.currentUser) { renderSorted([]); return; }
     if (rendering) {
       pendingRender = true;
       // ★ 返回当前渲染的 Promise，让调用者可以等待

@@ -41,7 +41,10 @@
     if (tracked.has(img)) return;
     var state = { timer: 0, visible: !observer };
     state.load = function () { stop(state); };
-    state.error = function () { stop(state); };
+    state.error = function () {
+      stop(state);
+      if (img.id === 'photoPreviewImage' && window.xtjRecoverMediaImage) window.xtjRecoverMediaImage(img, img._ppUrl || img.getAttribute('src'));
+    };
     tracked.set(img, state);
     img.addEventListener('load', state.load);
     img.addEventListener('error', state.error);

@@ -507,6 +507,12 @@
                 box.style.opacity = '0';
                 box.style.marginTop = '0px';
                 box.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                box.addEventListener('transitionend', function(event) {
+                    if (event.target === box && event.propertyName === 'grid-template-rows' &&
+                        document.activeElement === inp && window.__xtjRefreshIOSChatViewport) {
+                        window.__xtjRefreshIOSChatViewport({ fitFocus: true });
+                    }
+                });
                 box.style.background = 'transparent'; // 修复底色不统一的问题
                 box.style.borderBottomLeftRadius = '16px';
                 box.style.borderBottomRightRadius = '16px';
@@ -3034,9 +3040,11 @@
             }
             window.getPostMediaItems = getPostMediaItems;
             window.renderPostMediaGrid = renderPostMediaGrid;
-            window.markPostImageFailed = function(img) {
+            window.markPostImageFailed = function(img, options) {
                 var cell = img && img.closest('.post-media-cell');
                 var original = img && img.getAttribute('data-media-url');
+                if (!(options && options.skipAuthRecovery) && img && img.complete && window.xtjRecoverMediaImage &&
+                    window.xtjRecoverMediaImage(img, original, function() { window.markPostImageFailed(img, { skipAuthRecovery: true }); })) return;
                 if (cell && img.complete && original && window.xtjRetryOriginalImageUrl && img._xtjAutoRetryOriginal !== original) {
                     var retry = window.xtjRetryOriginalImageUrl(original);
                     if (retry !== original) {
