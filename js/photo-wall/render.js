@@ -154,6 +154,7 @@
   }
 
   function openPhotoWallPreviewAt(index, triggerEl){
+    if (!window.currentUser) { if (window.showToast) window.showToast('请登录后查看照片墙'); return; }
     var list = getCurrentRenderablePhotoWallPhotos(triggerEl);
     var nextIndex = Number(index || 0);
     if ((!list || !list.length) && triggerEl && triggerEl.closest) {
@@ -902,6 +903,7 @@
   window.loadVisiblePhotoWallImages = loadVisiblePhotoWallImages;
   window.getCurrentRenderablePhotoWallPhotos = getCurrentRenderablePhotoWallPhotos;
   window.openPhotoWallPreviewAt = openPhotoWallPreviewAt;
+  window.__xtjClearRecentPhotoOriginals = function(){ Array.from(recentPhotos.keys()).forEach(retireRecentPhoto); };
   window.renderPhotoWall = renderPhotoWall;
   window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
   window.showPreviousPhotoBatch = showPreviousPhotoBatch;

@@ -545,6 +545,7 @@
 
                 currentUser = '';
                 window.currentUser = '';
+                try { if (window.__xtjResetPhotoWallAccess) window.__xtjResetPhotoWallAccess(); } catch(e) {}
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}

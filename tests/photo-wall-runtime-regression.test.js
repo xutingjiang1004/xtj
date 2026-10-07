@@ -15,6 +15,7 @@ function createPhotoDataRuntime(fetchImpl) {
   const documentListeners = {};
   const window = {
     API_BASE: '',
+    currentUser: 'owner',
     photoWallData: [],
     pwCurrentSortedPhotos: [],
     addEventListener(type, handler) { windowListeners[type] = handler; },
@@ -53,7 +54,7 @@ function createPhotoDataRuntime(fetchImpl) {
   return { window, storage, windowListeners, documentListeners, context };
 }
 
-test('public photo API loads even when window.sb is unavailable', async () => {
+test('authenticated photo API loads even when window.sb is unavailable', async () => {
   let requested = '';
   const runtime = createPhotoDataRuntime(async url => {
     requested = String(url);
@@ -67,6 +68,55 @@ test('public photo API loads even when window.sb is unavailable', async () => {
   assert.match(requested, /^\/api\/photos\/public\?/);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].id, 'p1');
+});
+
+test('anonymous wall reads clear stale originals without requesting data', async () => {
+  let calls = 0;
+  const f = createPhotoDataRuntime(async () => { calls++; throw Error('unexpected'); });
+  f.window.currentUser = '';
+  f.window.photoWallData = [{id:'secret',imageUrl:'https://example.test/private.jpg'}];
+  f.storage.set('xtj_photos', JSON.stringify(f.window.photoWallData));
+  f.storage.set('xtj_photos_owner', JSON.stringify('owner'));
+  assert.equal((await f.window.loadPhotoWallData(true)).length,0);
+  assert.equal(f.window.photoWallData.length,0);assert.equal(calls,0);assert.equal(f.storage.has('xtj_photos'),false);
+});
+
+test('a delayed wall response cannot refill photos after logout or identity change', async () => {
+  let release;
+  const f = createPhotoDataRuntime(() => new Promise(resolve => { release=resolve; }));
+  const load = f.window.loadPhotoWallData(true);
+  await new Promise(resolve => setImmediate(resolve));
+  f.window.currentUser = '';
+  f.window.__xtjResetPhotoWallAccess();
+  release({ok:true,json:async()=>({ok:true,data:[{id:'secret',media_url:'https://example.test/private.jpg'}]})});
+  await load;assert.equal(f.window.photoWallData.length,0);assert.equal(f.storage.has('xtj_photos'),false);
+});
+
+test('normal wall navigation loads the new account after logout without requiring force refresh', async () => {
+  let calls = 0;
+  const f = createPhotoDataRuntime(async () => ({ok:true,json:async()=>({ok:true,data:[{id:'photo-'+(++calls),user_name:f.window.currentUser,media_url:'https://example.test/photo.jpg'}]})}));
+  const grid = {innerHTML:'',get children(){return this.innerHTML ? [1] : [];}};
+  f.context.document.getElementById = id => id === 'photoGrid' ? grid : null;
+  f.window.requestAnimationFrame = callback => callback();
+  f.window.renderPhotoWallWithoutReload = () => {grid.innerHTML=f.window.photoWallData.length?'photo':'empty-state';};
+  f.window.renderPhotoWall = async () => {await f.window.loadPhotoWallData();f.window.renderPhotoWallWithoutReload();};
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT,'js/photo-wall/photo-wall.js'),'utf8'),f.context);
+  await f.window.initPhotoWall();assert.equal(calls,1);
+  f.window.currentUser='';f.window.__xtjResetPhotoWallAccess();
+  f.window.currentUser='new-owner';f.windowListeners['auth-ready']();
+  await f.window.initPhotoWall();
+  assert.equal(calls,2);assert.equal(f.window.photoWallData[0].username,'new-owner');assert.equal(grid.innerHTML,'photo');
+});
+
+test('same-account token refresh after guest login keeps the loaded wall and preview', async () => {
+  const f = createPhotoDataRuntime(async()=>({ok:true,json:async()=>({ok:true,data:[{id:'photo',user_name:'new-owner',media_url:'https://example.test/photo.jpg'}]})}));
+  f.window.currentUser='';f.windowListeners['auth-ready']();
+  // Login commits the token before currentUser, so this first event is a guest.
+  f.windowListeners['auth-ready']();f.window.currentUser='new-owner';
+  await f.window.loadPhotoWallData();
+  let closed=0;f.window.forceClosePhotoPreview=()=>closed++;
+  f.windowListeners['auth-ready']();
+  assert.equal(f.window.photoWallData.length,1);assert.equal(closed,0);
 });
 
 test('failed authenticated delete restores photo and removes local tombstone', async () => {
@@ -380,6 +430,7 @@ function createPhotoWallRenderRuntime(photos, options = {}) {
 
   const toggle = { classList: { toggle() {} }, setAttribute() {} };
   const window = {
+    currentUser: 'owner',
     photoWallData: photos.slice(),
     pwCurrentSortedPhotos: [],
     pwSortKey: 'date_desc',

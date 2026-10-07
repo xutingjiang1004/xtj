@@ -845,12 +845,12 @@
     try {
       var size = null, response;
       try {
-        response = await fetch(photo.imageUrl, { method:'HEAD', mode:'cors', credentials:'omit', signal:controller.signal });
+        response = await fetch(photo.imageUrl, { method:'HEAD', mode:'cors', credentials:'same-origin', signal:controller.signal });
         if (response.ok) size = Number(response.headers.get('content-length')) || null;
       } catch (error) { if (controller.signal.aborted) return null; }
       if (!Number.isSafeInteger(size) || size <= 0) {
         // Ask for one byte and cancel the body if the server ignores Range.
-        response = await fetch(photo.imageUrl, { method:'GET', headers:{Range:'bytes=0-0'}, mode:'cors', credentials:'omit', signal:controller.signal });
+        response = await fetch(photo.imageUrl, { method:'GET', headers:{Range:'bytes=0-0'}, mode:'cors', credentials:'same-origin', signal:controller.signal });
         try {
           if (response.ok) {
             var total = /\/(\d+)$/.exec(response.headers.get('content-range') || '');
@@ -1674,6 +1674,10 @@
       }
       if (!explicitPhotos || !explicitPhotos.length) {
         if (window.showToast) window.showToast('照片数据加载中，请稍后重试');
+        return;
+      }
+      if (!window.currentUser && explicitPhotos.some(function(photo) { return photo.__xtjSource !== 'post'; })) {
+        if (window.showToast) window.showToast('请登录后查看照片墙');
         return;
       }
       var safeIndex = Number(index || 0);

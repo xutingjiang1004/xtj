@@ -110,7 +110,7 @@ test('storage queue submits atomic path union RPC and never silently falls back 
 function cleanupWorkerFixture(interleave) {
   const source = fs.readFileSync(require.resolve('../render-api/server'), 'utf8');
   const start = source.indexOf('async function processStorageCleanupJobs()'), end = source.indexOf("app.post('/api/photo/delete'", start);
-  const row = { id: 1, bucket: 'uploads', paths: ['photos/old'], attempts: 0, status: 'pending', claim_token: null }, removed = [];
+  const row = { id: 1, bucket: 'uploads', paths: interleave === 'mixed' ? ['photos/old','avatars/a'] : ['photos/old'], attempts: 0, status: 'pending', claim_token: null }, removed = [], buckets = [];
   const supabase = {
     from() { let update = null, filters = []; const q = {
       select() { return q; }, in() { return q; }, order() { return q; }, limit() { return q; },
@@ -120,12 +120,19 @@ function cleanupWorkerFixture(interleave) {
         if (!filters.every(f => f(row))) return { data: null }; Object.assign(row, update); return { data: structuredClone(row) };
       }, then(a, b) { return Promise.resolve({ data: [structuredClone(row)] }).then(a, b); }
     }; return q; },
-    storage: { from() { return { async remove(paths) { removed.push(paths.slice()); if (interleave === 'after-claim') { row.status = 'pending'; row.claim_token = null; row.paths.push('photos/new'); } return { data: paths.map(name => ({ name })) }; } }; } }
+    storage: { from(bucket) { return { async remove(paths) { buckets.push(bucket); removed.push(paths.slice()); if (interleave === 'after-claim') { row.status = 'pending'; row.claim_token = null; row.paths.push('photos/new'); } return { data: paths.map(name => ({ name })) }; } }; } }
   };
-  const context = { supabase, _storageCleanupRunning: false, STORAGE_CLEANUP_CLAIM_TIMEOUT_MS: 60000, STORAGE_CLEANUP_LEASE_MS: 60000, STORAGE_CLEANUP_REMOVE_TIMEOUT_MS: 30000, STORAGE_CLEANUP_MAX_ATTEMPTS: 5, crypto: require('node:crypto'), withStorageCleanupTimeout: promise => promise, isNotFoundError: () => false, console: { warn() {} } };
+  const context = { supabase, PHOTO_BUCKET:require('../render-api/photo-access').PHOTO_BUCKET, safePhotoPath:require('../render-api/photo-access').safePhotoPath, _storageCleanupRunning: false, STORAGE_CLEANUP_CLAIM_TIMEOUT_MS: 60000, STORAGE_CLEANUP_LEASE_MS: 60000, STORAGE_CLEANUP_REMOVE_TIMEOUT_MS: 30000, STORAGE_CLEANUP_MAX_ATTEMPTS: 5, crypto: require('node:crypto'), withStorageCleanupTimeout: promise => promise, isNotFoundError: () => false, console: { warn() {} } };
   vm.createContext(context); vm.runInContext(source.slice(start, end), context);
-  return { row, removed, run: context.processStorageCleanupJobs };
+  return { row, removed, buckets, run: context.processStorageCleanupJobs };
 }
+
+test('legacy mixed cleanup jobs remove wall originals from the private bucket and leave public media in uploads', async () => {
+  const f = cleanupWorkerFixture('mixed'); await f.run();
+  assert.deepEqual(f.buckets,['photo-wall','uploads']);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.removed)),[['photos/old'],['avatars/a']]);
+  assert.equal(f.row.status,'completed');
+});
 
 test('cleanup worker removes the locked claim snapshot including paths merged after its initial SELECT', async () => {
   const f = cleanupWorkerFixture('before-claim'); await f.run();

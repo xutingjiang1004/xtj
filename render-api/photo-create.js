@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { removeStorageWithQueue } = require('./storage-cleanup');
+const { PHOTO_BUCKET } = require('./photo-access');
 const MAX_MEDIA_URL_LENGTH = 2048;
 const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
 const MAX_MIME_TYPE_LENGTH = 128;
@@ -26,8 +27,9 @@ function parseStoragePhotoUrl(mediaUrl, supabaseUrl) {
   if (typeof mediaUrl !== 'string' || !mediaUrl || mediaUrl.length > MAX_MEDIA_URL_LENGTH || CONTROL_CHARACTERS.test(mediaUrl)) return invalid('图片地址无效', 'INVALID_INPUT');
   let parsed, storageOrigin;
   try { parsed = new URL(mediaUrl); storageOrigin = new URL(supabaseUrl); } catch (_) { return invalid('图片地址无效', 'INVALID_INPUT'); }
-  if (parsed.protocol !== 'https:' || parsed.hostname !== storageOrigin.hostname || parsed.search || parsed.hash || !parsed.pathname.startsWith(STORAGE_PUBLIC_PHOTO_PREFIX)) return invalid('图片地址无效', 'INVALID_INPUT');
-  const encodedPath = parsed.pathname.slice(STORAGE_PUBLIC_PHOTO_PREFIX.length);
+  const prefix = parsed.pathname.startsWith('/storage/v1/object/public/photo-wall/photos/') ? '/storage/v1/object/public/photo-wall/photos/' : STORAGE_PUBLIC_PHOTO_PREFIX;
+  if (parsed.protocol !== 'https:' || parsed.origin !== storageOrigin.origin || parsed.username || parsed.password || parsed.search || parsed.hash || !parsed.pathname.startsWith(prefix)) return invalid('图片地址无效', 'INVALID_INPUT');
+  const encodedPath = parsed.pathname.slice(prefix.length);
   let storagePath;
   try { storagePath = decodeURIComponent(encodedPath); } catch (_) { return invalid('图片地址无效', 'INVALID_INPUT'); }
   // Reject residual percent-encoding so a downstream storage/router decode
@@ -148,7 +150,7 @@ function storageUrlToStoragePath(url, supabaseUrl) {
       var expectedOrigin = new URL(supabaseUrl).origin;
       if (parsed.origin !== expectedOrigin) return null;
     }
-    var match = parsed.pathname.match(/\/storage\/v1\/object\/public\/uploads\/(.+)$/);
+    var match = parsed.pathname.match(/\/storage\/v1\/object\/public\/(?:uploads|photo-wall)\/(.+)$/);
     if (!match || !match[1]) return null;
     try { return decodeURIComponent(match[1]); } catch (_) { return null; }
   } catch (_) {
@@ -186,12 +188,12 @@ async function inspectPhotoOriginal(options) {
   tooLargeError.code = 'PHOTO_SOURCE_TOO_LARGE';
   // H-6: 下载前先用 list/HEAD 探测对象真实大小，超过上限直接拒绝，
   // 避免把超大对象全量读入内存后才检查（OOM 发生在校验之前）。
-  var sizeProbe = await storageObjectExists(options.supabase, 'uploads', storagePath);
+  var sizeProbe = await storageObjectExists(options.supabase, PHOTO_BUCKET, storagePath);
   if (!sizeProbe.ok && sizeProbe.error) throw sourceError;
   if (Number.isSafeInteger(sizeProbe.size) && sizeProbe.size > MAX_IMAGE_SIZE) {
     throw tooLargeError;
   }
-  var downloaded = await options.supabase.storage.from('uploads').download(storagePath);
+  var downloaded = await options.supabase.storage.from(PHOTO_BUCKET).download(storagePath);
   if (!downloaded || downloaded.error || !downloaded.data) throw sourceError;
   // 探测失败（size 为 null）时不再降级为全量下载：改为流式限量读取，逐块累计，
   // 超 MAX_IMAGE_SIZE 立即 cancel() 并抛错，OOM 防护与探测结果解耦（审计 🟠）
@@ -254,7 +256,7 @@ async function inspectPhotoOriginal(options) {
 async function cleanupStorageFile(supabase, storagePath, logger, options) {
   if (!storagePath) return { ok: true, cleanup_pending: false };
   const result = await removeStorageWithQueue(supabase, {
-    bucket: 'uploads',
+    bucket: PHOTO_BUCKET,
     paths: [storagePath],
     photoId: options && options.photoId
   });
@@ -360,7 +362,7 @@ async function cleanupPhotoPaths(options, paths) {
   const uniquePaths = Array.from(new Set((Array.isArray(paths) ? paths : []).filter(Boolean)));
   if (!uniquePaths.length) return { ok: true, cleanup_pending: false, queue_failed: false, results: [] };
   const result = await removeStorageWithQueue(options.supabase, {
-    bucket: 'uploads',
+    bucket: PHOTO_BUCKET,
     paths: uniquePaths,
     photoId: options.cleanupPhotoId
   });
@@ -410,7 +412,7 @@ async function createPhotoRecord(options) {
         var fileExists = false;
         var fileCheckError = null;
         try {
-          var fileCheck = await storageObjectExists(options.supabase, 'uploads', oldStoragePath);
+          var fileCheck = await storageObjectExists(options.supabase, PHOTO_BUCKET, oldStoragePath);
           fileExists = fileCheck.exists === true;
           if (!fileCheck.ok && fileCheck.error) fileCheckError = fileCheck.error;
         } catch (error) { fileCheckError = error; }

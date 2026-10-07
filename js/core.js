@@ -535,6 +535,8 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理头像缓存
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; window._xtjCanonicalUser = ''; window._xtjAuthState = 'unauthenticated'; } catch(e) {}
+                try { if (window.__xtjResetPhotoWallAccess) window.__xtjResetPhotoWallAccess(); } catch(e) {}
+                try { window.safeStorage.remove('xtj_photos'); window.safeStorage.remove('xtj_photos_owner'); } catch(e) {}
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}
@@ -3912,6 +3914,7 @@ function isAdmin() {
 
                 currentUser = '';
                 window.currentUser = '';
+                try { if (window.__xtjResetPhotoWallAccess) window.__xtjResetPhotoWallAccess(); } catch(e) {}
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
@@ -20745,7 +20748,7 @@ function renderProfileActivityList(kind) {
                 }
             } else {
                 try {
-                    fetch(API_BASE + '/api/photos/public?limit=200')
+                    window.apiAuthFetch(API_BASE + '/api/photos/public?limit=200', {credentials:'include'})
                         .then(function(resp) { return resp.json(); })
                         .then(function(result) {
                             if (reqId !== _reportLoadId) return;

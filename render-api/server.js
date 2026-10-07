@@ -13,6 +13,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { createPhotoRecord, inspectPhotoOriginal, validatePhotoCreatePayload } = require('./photo-create');
 const { validatePostAttachments, loadPostAttachments, createPostWithAttachments } = require('./post-attachments');
 const { installPostMedia, createPostWithMedia, parsePostMediaUrl, isLocalUploadUrl, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads } = require('./post-media');
+const { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoMediaUrl, photoPayload, safePhotoPath, createPhotoAccess } = require('./photo-access');
 const {
   claimDmMediaUpload,
   reserveDmMediaUpload,
@@ -4896,7 +4897,8 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       return aiSiteResult('comments', c.id, c.user_name + ' 的评论', aiSiteSnippet(c.content, q), c.created_at, { type: 'comment', post_id: c.post_id, comment_id: c.id }, q, score);
     });
   } else if (source === 'photos') {
-    var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__');
+    if (!userName) return { results: [] };
+    var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').or('is_deleted.is.null,is_deleted.eq.false');
     var photoOrParts = keywords.map(function(k) { return 'content.ilike.' + pgrstQuote('%' + k.replace(/[%_]/g, '\\$&') + '%'); });
     keywords.forEach(function(k) {
       photoOrParts.push('user_name.ilike.' + pgrstQuote('%' + k.replace(/[%_]/g, '\\$&') + '%'));
@@ -4931,7 +4933,7 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     rows = candidates.slice(0, take).map(function(p) {
       var text = aiSiteText(p.content, 10000);
       var score = aiSiteMatchScore(text, q);
-      return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: aiSitePhotoUrl(p.media_url), user_name: p.user_name }, q, score);
+      return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: photoMediaUrl(p.id), user_name: p.user_name }, q, score);
     });
   } else if (source === 'dm') {
     var dmRes = await supabase.from('posts').select('id,user_name,media_url,content,created_at').eq('media_type', DM_MARKER).or('user_name.eq.' + pgrstQuote(userName) + ',media_url.eq.' + pgrstQuote(userName)).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
@@ -11905,6 +11907,14 @@ async function authenticateUser(req, res, next) {
 
 const dmPrivateStorage = createDmPrivateStorage(supabase);
 app.use(dmPrivateStorage.middleware);
+const photoAccess = createPhotoAccess({ app, supabase, supabaseUrl:SUPABASE_URL, secret:API_SECRET,
+  authenticateUser, verifyToken, optionalAuth, rateLimit, adminName:ADMIN_USERNAME,
+  normalPostAllowed: row => isNormalPost(row) && !looksLikeSystemTelemetry(row.content),
+  activeSession: async function(id,actor) {
+    var result = await supabase.from('posts').select('id').eq('media_type',REFRESH_TOKEN_MARKER).eq('media_url',id).eq('user_name',actor).maybeSingle();
+    if (!result || result.error) throw new Error('media_session_unavailable');
+    return !!result.data;
+  } });
 const flashPhotos=require('./flash-photos').createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,rateLimit,
  canSend:(actor,peer)=>assertCanSendDirectMessage(supabase,actor,peer,ADMIN_USERNAME),banError:userBanError,
  publish:publishDmRealtime,notifyConsumed:(sender,peer)=>{publishChatEvent(sender,'chat-state',{kind:'flash_consumed'});publishChatEvent(peer,'chat-state',{kind:'flash_consumed'});},audit:logAdminAudit,setPro:(actor,active)=>aiQuota.setPro(actor,active,{})});
@@ -12129,6 +12139,7 @@ async function issueUserSession(res, userName, deviceId, opts) {
     sameSite: 'Lax',
     maxAge: USER_REFRESH_TOKEN_EXPIRY_MS, path: '/api/user'
   });
+  setPhotoSession(res, accessToken, verifyUserAccessToken(accessToken).exp, verifyUserRefreshToken(refreshToken).jti);
   return {
     ok: true,
     token: accessToken,
@@ -12358,6 +12369,7 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
         maxAge: USER_REFRESH_TOKEN_EXPIRY_MS,
         path: '/api/user'
       });
+      setPhotoSession(res, newAccessToken, verifyUserAccessToken(newAccessToken).exp, verifyUserRefreshToken(newRefreshToken).jti);
 
       return res.json({
         ok: true,
@@ -12420,6 +12432,8 @@ app.post('/api/user/logout', rateLimit(60000, 30), async (req, res) => {
       }
     }
     res.clearCookie('xtj_user_refresh', { path: '/api/user' });
+    res.clearCookie(PHOTO_COOKIE, { path:'/api/photo' });
+    res.clearCookie(POST_MEDIA_COOKIE, { path:'/api/post' });
     return res.json({ ok: true });
   } catch(e) {
     console.error('[API] logout exception:', e && e.message);
@@ -12827,7 +12841,7 @@ app.get('/admin/photos', verifyToken, async (req, res) => {
     .order('created_at', { ascending: false })
     .limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
-  return res.json({ data });
+  return res.json({ data: (data || []).map(function(row) { return photoPayload(row); }) });
   } catch (e) { console.error('[admin] photos:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
 
@@ -12886,6 +12900,7 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
       inspectOriginal: function(params) { return inspectPhotoOriginal(Object.assign({}, params, { sharp: sharp })); },
       logger: console
     });
+    if (createResult.body && createResult.body.data) createResult.body.data = photoPayload(createResult.body.data);
     return res.status(createResult.status).json(createResult.body);
   } catch (e) { return res.status(500).json({ error: '服务器错误' }); }
 });
@@ -13074,12 +13089,13 @@ app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), photoUpl
     if (!(await claimPhotoUpload(supabase, path, userName, uploadId))) {
       return res.status(403).json({ error: '无权使用这个照片路径', code: 'photo_ownership_forbidden' });
     }
-    var upload = await supabase.storage.from('uploads').upload(path, buf, { contentType: mimeType || 'image/jpeg', cacheControl: '31536000', upsert: false });
+    var upload = await supabase.storage.from(PHOTO_BUCKET).upload(path, buf, { contentType: mimeType || 'image/jpeg', cacheControl: '0', upsert: false });
     if (upload && upload.error) return res.status(500).json({ error: '存储上传失败', code: 'storage_upload_failed' });
     // 字节确实落到 Storage 了 → 额度不再回滚。此前所有 return（含上面各类 4xx
     // 拒绝）都会走到 finally 回滚，所以不存在「拒了也扣」。
     quotaCommitted = true;
-    var publicUrl = supabase.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+    // Identifier accepted by photo/create; this private bucket has no public read.
+    var publicUrl = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
     return res.json({ ok: true, public_url: publicUrl });
   } catch (e) {
     console.error('[photo-upload] server upload failed:', e && e.message);
@@ -13159,7 +13175,7 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
         // 当前上传路径是 photos/<upload_id>_<timestamp>_... 的平面结构。
         // 旧的分层前缀永远匹配不到，导致同一 upload_id 的孤儿文件无法清理。
         var prefix = 'photos/';
-        var storageList = await listStorageObjectsPaged('uploads', 'photos', uploadId + '_');
+        var storageList = await listStorageObjectsPaged(PHOTO_BUCKET, 'photos', uploadId + '_');
         if (!storageList.ok) {
           return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo storage reconciliation is temporarily unavailable' });
         }
@@ -13198,7 +13214,7 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
                 // 存在引用（可能属于其他用户）或无法确认 → 不清理，避免跨用户删除
                 console.warn('[PhotoWall] status cleanup skipped: files referenced or ownership unverifiable', 'uploadId:', uploadId);
               } else {
-                var cleanupResult = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: toClean, photoId: photo.id });
+                var cleanupResult = await removeStorageWithQueue(supabase, { bucket: PHOTO_BUCKET, paths: toClean, photoId: photo.id });
                 if (!cleanupResult.ok && !cleanupResult.cleanup_pending) {
                   return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo cleanup could not be queued' });
                 }
@@ -13215,7 +13231,7 @@ app.post('/api/photo/status', authenticateUser, rateLimit(60000, 30), async (req
       return res.status(503).json({ status: 'retry', retryable: true, error: 'Photo storage reconciliation is temporarily unavailable' });
     }
 
-    return res.json({ status: 'committed', cleanup_pending: photo.cleanup_pending === true, data: photo });
+    return res.json({ status: 'committed', cleanup_pending: photo.cleanup_pending === true, data: photoPayload(photo) });
   } catch(e) {
     return res.status(500).json({ error: '查询失败' });
   }
@@ -13307,7 +13323,7 @@ app.post('/api/photo/cleanup', authenticateUser, rateLimit(60000, 60), async (re
     var cleanupResult;
     try {
       cleanupResult = await removeStorageWithQueue(supabase, {
-        bucket: 'uploads',
+        bucket: PHOTO_BUCKET,
         paths: [path],
         photoId: 'photo_' + uploadId
       });
@@ -13334,7 +13350,7 @@ function collectPhotoStoragePaths(photo) {
     if (raw.indexOf('http://') === 0 || raw.indexOf('https://') === 0) {
       try {
         var parsedUrl = new URL(raw);
-        var urlMatch = parsedUrl.pathname.match(/\/storage\/v1\/object\/public\/uploads\/(.+)$/) || parsedUrl.pathname.match(/\/uploads\/(.+)$/);
+        var urlMatch = parsedUrl.pathname.match(/\/storage\/v1\/object\/public\/(?:uploads|photo-wall)\/(.+)$/) || parsedUrl.pathname.match(/\/uploads\/(.+)$/);
         if (urlMatch && urlMatch[1]) {
           try { path = decodeURIComponent(urlMatch[1]); } catch (_) {}
         }
@@ -13352,7 +13368,7 @@ function collectPhotoStoragePaths(photo) {
   if (photo && photo.media_url) {
     try {
       var parsed = new URL(photo.media_url);
-      var match = parsed.pathname.match(/\/object\/public\/uploads\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
+      var match = parsed.pathname.match(/\/object\/public\/(?:uploads|photo-wall)\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
       var basePath = match && match[1] ? decodeURIComponent(match[1]) : '';
       addPath(basePath);
     } catch (_) {}
@@ -13515,7 +13531,19 @@ async function processStorageCleanupJobs() {
       var retryPaths = paths.slice();
       if (paths.length) {
         try {
-          var removal = await withStorageCleanupTimeout(supabase.storage.from(job.bucket || 'uploads').remove(paths), STORAGE_CLEANUP_REMOVE_TIMEOUT_MS);
+          var cleanupGroups = [{ bucket:job.bucket || 'uploads', paths:paths }];
+          if ((job.bucket || 'uploads') === 'uploads') {
+            cleanupGroups = [
+              { bucket:PHOTO_BUCKET, paths:paths.filter(safePhotoPath) },
+              { bucket:'uploads', paths:paths.filter(function(path) { return !safePhotoPath(path); }) }
+            ].filter(function(group) { return group.paths.length; });
+          }
+          var removal = { data:[], error:null };
+          for (var cleanupGroup of cleanupGroups) {
+            var partRemoval = await withStorageCleanupTimeout(supabase.storage.from(cleanupGroup.bucket).remove(cleanupGroup.paths), STORAGE_CLEANUP_REMOVE_TIMEOUT_MS);
+            if (!partRemoval || partRemoval.error) removal.error = partRemoval && partRemoval.error || new Error('storage_delete_unconfirmed');
+            else if (Array.isArray(partRemoval.data)) removal.data.push.apply(removal.data, partRemoval.data);
+          }
           removeError = removal && removal.error || null;
           // Storage may report only the objects it actually removed. Match paths
           // precisely (basename fallback only when unique), then retry remaining
@@ -13631,7 +13659,7 @@ app.post('/api/photo/delete', authenticateUser, rateLimit(60000, 20), async (req
     if (storagePaths.length) {
       try {
         var photoCleanupResult = await removeStorageWithQueue(supabase, {
-          bucket: 'uploads', paths: storagePaths, photoId: photoId,
+          bucket: PHOTO_BUCKET, paths: storagePaths, photoId: photoId,
           lastError: 'photo_delete_cleanup'
         });
         if (!photoCleanupResult || !photoCleanupResult.ok || photoCleanupResult.cleanup_pending) {
@@ -14803,13 +14831,13 @@ app.get('/api/photos/wall/:userName', authenticateUser, rateLimit(60000, 120), a
     }
     const { data, error } = await query;
     if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true, data: data || [] });
+    return res.json({ ok: true, data: (data || []).map(function(row) { return photoPayload(row); }) });
   } catch (e) { console.error('[API] photo wall get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
-// GET /api/photos/public - 公开照片墙（无需登录，限流）
+// GET /api/photos/public - 登录后浏览公开照片墙。
 // 可见性：仅返回公开照片，私密照片一律不出现。
-app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
+app.get('/api/photos/public', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
     const pageRaw = parseInt(req.query.page, 10);
     const limitRaw = parseInt(req.query.limit, 10);
@@ -14828,7 +14856,7 @@ app.get('/api/photos/public', rateLimit(60000, 120), async (req, res) => {
       .order('id', { ascending: false })
       .range(from, to);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true, data: data || [] });
+    return res.json({ ok: true, data: (data || []).map(function(row) { return photoPayload(row); }) });
   } catch (e) { console.error('[API] public photos:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
@@ -16898,7 +16926,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     dmMessages = Array.from(dmById.values());
     var dmMessageIds = dmMessages.map(function(message) { return message.id; });
 
-    // 收集照片、头像以及关联 DM 的对象路径。只接纳 uploads bucket 公共对象 URL
+    // 收集照片、头像以及关联 DM 的对象路径。接纳自有媒体 bucket 对象 URL
     // 或已校验的 chat/注册路径；查询/解码异常不能被吞掉，否则会丢失清理目标。
     var storagePaths = [];
     function addAccountStoragePath(value) {
@@ -16908,13 +16936,13 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       if (/^https?:\/\//i.test(raw)) {
         try {
           var parsed = new URL(raw);
-          var match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/uploads\/(.+)$/);
+          var match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/(?:uploads|photo-wall)\/(.+)$/);
           if (!match) return;
           storagePath = decodeURIComponent(match[1]);
         } catch (_) { return; }
       }
       storagePath = String(storagePath).replace(/^\/+/, '');
-      if (!/^(?:photos|avatars|chat)\//i.test(storagePath) || storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) return;
+      if (!/^(?:photos|thumbs|avatars|chat)\//i.test(storagePath) || storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) return;
       if (storagePaths.indexOf(storagePath) < 0) storagePaths.push(storagePath);
     }
     var ownedMediaRecords = [];
@@ -16989,7 +17017,12 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     if (storagePaths.length) {
       var cleanup;
       try {
-        cleanup = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: storagePaths, photoId: 'account_' + userName, lastError: 'account_delete_cleanup' });
+        var privatePhotoPaths = storagePaths.filter(safePhotoPath), publicPaths = storagePaths.filter(function(path) { return !safePhotoPath(path); });
+        var mediaCleanups = [];
+        if (privatePhotoPaths.length) mediaCleanups.push(await removeStorageWithQueue(supabase, { bucket:PHOTO_BUCKET, paths:privatePhotoPaths, photoId:'account_photos_' + userName, lastError:'account_delete_cleanup' }));
+        if (publicPaths.length) mediaCleanups.push(await removeStorageWithQueue(supabase, { bucket:'uploads', paths:publicPaths, photoId:'account_' + userName, lastError:'account_delete_cleanup' }));
+        cleanup = { ok:mediaCleanups.every(function(r) { return r.ok; }), removed:mediaCleanups.every(function(r) { return r.removed; }),
+          cleanup_pending:mediaCleanups.some(function(r) { return r.cleanup_pending; }), paths:mediaCleanups.filter(function(r) { return !r.removed; }).flatMap(function(r) { return r.paths || []; }) };
       } catch (storageCleanupError) {
         console.error('[admin] Storage cleanup exception:', storageCleanupError && storageCleanupError.message);
         return res.status(503).json({ error: '删除失败：文件清理未确认，请重试', code: 'delete_user_storage_cleanup_failed', partial: partialDeleted });
@@ -28280,6 +28313,20 @@ _httpServer = app.listen(port, () => {
     });
   }, 6 * 60 * 60 * 1000);
   startDmUnreadNotifier();
+  var photoMigrationBusy = false;
+  async function migratePrivatePhotos() {
+    if (photoMigrationBusy) return;
+    photoMigrationBusy = true;
+    try {
+      var movedPhotos = await photoAccess.migrate();
+      console.log('[photo-access] private storage ready; moved=' + movedPhotos);
+      clearInterval(photoMigrationTimer);
+    } catch (_) { console.error('[photo-access] public photo migration incomplete; retrying'); }
+    finally { photoMigrationBusy = false; }
+  }
+  var photoMigrationTimer = setInterval(migratePrivatePhotos, 60000);
+  photoMigrationTimer.unref();
+  void migratePrivatePhotos();
   console.log('[DM-NOTIFY] 未读消息邮件提醒已启动（间隔' + (DM_UNREAD_NOTIFY_INTERVAL / 1000) + '秒，超时' + (DM_UNREAD_NOTIFY_TIMEOUT / 60000) + '分钟）');
   startLocationTaskProcessor();
   flashPhotos.start();

@@ -69,7 +69,7 @@ function loadAvatarUpdateLock(waitMs) {
 }
 
 test('protected user middleware accepts tokens only and rejects body credential fallback', () => {
-  const block = routeBlock('async function authenticateUser', '// 用户登录/获取 token');
+  const block = routeBlock('async function authenticateUser', 'const dmPrivateStorage =');
   assert.doesNotMatch(block, /body\.password_hash|body\.reporter_name|eq\('media_url'/);
   assert.match(block, /verifyUserAccessToken/);
   assert.match(block, /isTokenRevoked\(token\)/);
