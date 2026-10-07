@@ -89,23 +89,30 @@ async function checked(query) { const result = await query; if (!result || resul
 
 // Storage's cross-bucket move preserves original bytes and invalidates the old
 // public key. A retry never overwrites a different private object.
+async function storedFileExists(bucket, path) {
+  const result = await bucket.exists(path);
+  if (!result || typeof result.data !== 'boolean') throw Error('photo_storage_probe_failed');
+  if (!result.error) return result.data;
+  // storage-js returns data:false AND an error for a missing object's HEAD.
+  const status = Number(result.error.status ?? result.error.originalError?.status ?? result.error.statusCode);
+  if (result.data === false && [400,404].includes(status)) return false;
+  throw Error('photo_storage_probe_failed');
+}
 async function protectPhotoPath(supabase, path) {
   if (!safePhotoPath(path)) throw Error('invalid_photo_storage_path');
   let moves = pendingMoves.get(supabase); if (!moves) pendingMoves.set(supabase, moves = new Map());
   if (moves.has(path)) return moves.get(path);
   const work = (async () => {
     const source = supabase.storage.from('uploads'), target = supabase.storage.from(PHOTO_BUCKET);
-    const old = await source.exists(path);
-    if (!old || old.error) throw Error('photo_storage_probe_failed');
-    if (!old.data) return;
-    const dest = await target.exists(path);
-    if (!dest || dest.error) throw Error('photo_storage_probe_failed');
-    if (!dest.data) {
+    const old = await storedFileExists(source, path);
+    if (!old) return;
+    const dest = await storedFileExists(target, path);
+    if (!dest) {
       const moved = await source.move(path, path, { destinationBucket: PHOTO_BUCKET });
       if (moved && !moved.error) return;
       // Another instance may have moved this exact source while we waited.
-      const after = await source.exists(path), ready = await target.exists(path);
-      if (after && !after.error && after.data === false && ready && !ready.error && ready.data === true) return;
+      const [after, ready] = await Promise.all([storedFileExists(source,path),storedFileExists(target,path)]);
+      if (after === false && ready === true) return;
       throw Error('photo_storage_move_failed');
     }
     const info = await Promise.all([source.info(path), target.info(path)]);
@@ -116,8 +123,8 @@ async function protectPhotoPath(supabase, path) {
     if (hashes[0] !== hashes[1]) throw Error('photo_storage_collision');
     const removed = await source.remove([path]);
     if (!removed || removed.error) throw Error('photo_public_copy_remove_failed');
-    const remains = await source.exists(path);
-    if (!remains || remains.error || remains.data !== false) throw Error('photo_public_copy_remove_failed');
+    const remains = await storedFileExists(source, path);
+    if (remains !== false) throw Error('photo_public_copy_remove_failed');
   })().finally(() => moves.delete(path));
   moves.set(path, work); return work;
 }

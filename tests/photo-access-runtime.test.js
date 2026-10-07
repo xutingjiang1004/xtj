@@ -23,7 +23,7 @@ function fixture() {
     },
     storage:{from(bucket) {
       return {
-        async exists(path) {storageCalls.push(['exists',bucket,path]);return {data:objects.has(bucket+'/'+path),error:null};},
+        async exists(path) {storageCalls.push(['exists',bucket,path]);const present=objects.has(bucket+'/'+path);return {data:present,error:present?null:{status:404}};},
         async info(path) {const value=objects.get(bucket+'/'+path);return value?{data:{size:value.length},error:null}:{error:Error('not found')};},
         async download(path) {const value=objects.get(bucket+'/'+path);return value?{data:new Blob([value]),error:null}:{error:Error('not found')};},
         async move(path,dest,options) {storageCalls.push(['move',bucket,path,options.destinationBucket]);if(moveFailed)return {error:Error('move')};const value=objects.get(bucket+'/'+path);if(!value || objects.has(options.destinationBucket+'/'+dest))return {error:Error('exists')};objects.set(options.destinationBucket+'/'+dest,value);objects.delete(bucket+'/'+path);return {data:{},error:null};},
@@ -107,6 +107,31 @@ test('migration moves historical originals and thumbnails, preserves bytes, retr
   f.setMoveFailed(false);assert.equal(await migratePhotoStorage(f.supabase),8);assert.equal(await migratePhotoStorage(f.supabase),0);assert.equal([...f.objects.keys()].filter(key=>/^uploads\/(photos|thumbs)\//.test(key)).length,0);assert.deepEqual(f.objects.get('uploads/posts/one.png'),png);assert.deepEqual(f.objects.get(PHOTO_BUCKET+'/photos/legacy-folder/original.png'),png);
   f.objects.set('uploads/photos/0.png',png);await protectPhotoPath(f.supabase,'photos/0.png');assert.equal(f.objects.has('uploads/photos/0.png'),false);
   f.objects.set('uploads/photos/0.png',Buffer.alloc(png.length,5));await assert.rejects(protectPhotoPath(f.supabase,'photos/0.png'),/collision/);assert.ok(f.objects.has('uploads/photos/0.png'));assert.deepEqual(f.objects.get(PHOTO_BUCKET+'/photos/0.png'),png);
+});
+test('real storage-js missing-object HEAD errors permit migration; authorization and server failures never do',async()=>{
+  const { createClient } = require('@supabase/supabase-js');
+  for (const absentStatus of [400,404]) {
+    const objects = new Map([['uploads/photos/sdk.png',png]]);
+    let rejectedStatus = 0, moves = 0;
+    const client = createClient(origin,'test-only-service-key',{auth:{persistSession:false,autoRefreshToken:false},global:{fetch:async(url,options={})=>{
+      const path = new URL(url).pathname.replace('/storage/v1/object/','');
+      if (options.method === 'HEAD') return new Response(null,{status:rejectedStatus || (objects.has(path)?200:absentStatus)});
+      assert.equal(path,'move');assert.equal(options.method,'POST');
+      const action=JSON.parse(options.body),key=action.bucketId+'/'+action.sourceKey;
+      moves++;objects.set(action.destinationBucket+'/'+action.destinationKey,objects.get(key));objects.delete(key);
+      return Response.json({message:'Successfully moved'});
+    }}});
+    const missing=await client.storage.from(PHOTO_BUCKET).exists('photos/sdk.png');
+    assert.equal(missing.data,false);assert.equal(missing.error.status,absentStatus);
+    await protectPhotoPath(client,'photos/sdk.png');
+    assert.equal(moves,1);assert.equal(objects.has('uploads/photos/sdk.png'),false);assert.deepEqual(objects.get(PHOTO_BUCKET+'/photos/sdk.png'),png);
+    await protectPhotoPath(client,'photos/sdk.png');assert.equal(moves,1);
+    objects.set('uploads/photos/sdk.png',png);
+    for (const status of [401,403,503]) {
+      rejectedStatus=status;await assert.rejects(protectPhotoPath(client,'photos/sdk.png'));
+      assert.equal(moves,1);assert.deepEqual(objects.get('uploads/photos/sdk.png'),png);
+    }
+  }
 });
 test('authenticated and shared historical derivatives resolve to the original bytes without accepting request paths',async()=>{
   const f=fixture(),original=Buffer.from('AUTHOR-ORIGINAL-BYTES');
