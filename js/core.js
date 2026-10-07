@@ -6000,6 +6000,12 @@ function renderProfileActivityList(kind) {
                 box.style.opacity = '0';
                 box.style.marginTop = '0px';
                 box.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                box.addEventListener('transitionend', function(event) {
+                    if (event.target === box && event.propertyName === 'grid-template-rows' &&
+                        document.activeElement === inp && window.__xtjRefreshIOSChatViewport) {
+                        window.__xtjRefreshIOSChatViewport({ fitFocus: true });
+                    }
+                });
                 box.style.background = 'transparent'; // 修复底色不统一的问题
                 box.style.borderBottomLeftRadius = '16px';
                 box.style.borderBottomRightRadius = '16px';
@@ -8527,9 +8533,11 @@ function renderProfileActivityList(kind) {
             }
             window.getPostMediaItems = getPostMediaItems;
             window.renderPostMediaGrid = renderPostMediaGrid;
-            window.markPostImageFailed = function(img) {
+            window.markPostImageFailed = function(img, options) {
                 var cell = img && img.closest('.post-media-cell');
                 var original = img && img.getAttribute('data-media-url');
+                if (!(options && options.skipAuthRecovery) && img && img.complete && window.xtjRecoverMediaImage &&
+                    window.xtjRecoverMediaImage(img, original, function() { window.markPostImageFailed(img, { skipAuthRecovery: true }); })) return;
                 if (cell && img.complete && original && window.xtjRetryOriginalImageUrl && img._xtjAutoRetryOriginal !== original) {
                     var retry = window.xtjRetryOriginalImageUrl(original);
                     if (retry !== original) {
@@ -12347,15 +12355,18 @@ function renderProfileActivityList(kind) {
                 grid.innerHTML = [
                     '<div class="photo-wall-empty">',
                     '  <div class="photo-wall-empty-icon">🔒</div>',
-                    '  <div>登录后可查看照片墙内容</div>',
-                    '  <div style="font-size:12px;margin-top:8px;">可以切换到这个板块，但未登录时不会加载具体照片数据。</div>',
+                    '  <div>请登录查看所有照片</div>',
                     '  <button type="button" class="photo-wall-empty-cta" onclick="openAuthModal(\'login\')">立即登录</button>',
                     '</div>'
                 ].join('');
             }
+            window.renderPhotoWallLockedState = renderPhotoWallLockedState;
+            window.setPhotoWallLockedState = setPhotoWallLockedState;
 
             async function ensurePhotoWallVisibleContent(options) {
                 var opts = options || {};
+                if (!window.currentUser) { renderPhotoWallLockedState(); return; }
+                setPhotoWallLockedState(false);
                 await ensurePhotoWallLoaded();
                 if (typeof window.initPhotoWall === 'function') {
                     await window.initPhotoWall();
@@ -12556,10 +12567,7 @@ function renderProfileActivityList(kind) {
 
                         if (tab === 'ai') {
                             if (!window.currentUser) {
-                                // ★ 修复：双击刷新在未登录时不再调用 renderPhotoWallLockedState()
-                                // 把整个 photoGrid 替换成"登录提示"锁定页（破坏照片墙网格且无恢复入口）。
-                                // 改为与单击分支一致的 ensurePhotoWallVisibleContent()（未登录时它只做
-                                // 加载/兜底渲染，不替换网格），并复位刷新锁，保留网格不被破坏。
+                                // 未登录时维持明确的登录提示，并复位刷新锁。
                                 isRefreshing[tab] = false;
                                 window.showToast('请先登录');
                                 ensurePhotoWallVisibleContent().catch(function(err) {
@@ -12738,13 +12746,7 @@ function renderProfileActivityList(kind) {
                 }
                 if (tab === 'ai') {
                     if (!window.currentUser) {
-                        // ★ 修复：未登录时不再把整个 photoGrid 替换成"登录提示"锁定页
-                        // （破坏网格且登录后不自动恢复），与 05 双击刷新分支策略对齐：
-                        // 仅提示登录并做可见性兜底，保留网格结构。
-                        if (typeof window.showToast === 'function') window.showToast('请先登录');
-                        ensurePhotoWallVisibleContent().catch(function(err) {
-                            console.warn('[photo-wall] visibility check failed', err);
-                        });
+                        renderPhotoWallLockedState();
                     } else {
                         setPhotoWallLockedState(false);
                         ensurePhotoWallLoaded().then(function() {
@@ -16258,6 +16260,8 @@ function renderProfileActivityList(kind) {
             }
             function openChatHistory(media) {
                 if (!window.currentUser) { showToast('请先登录'); return; }
+                closeDockChatSocialSheet();
+                closeDockChatConversationMenu(true);
                 var panel = document.getElementById('chatHistoryPanel');
                 transitionChatSurface(panel,true,false,panel);
                 setChatSearchMode(media ? 'messages' : 'users');
@@ -17736,6 +17740,8 @@ function renderProfileActivityList(kind) {
             }
 
             function openDockChatSocialSheet(tab) {
+                closeChatHistory();
+                closeDockChatConversationMenu(true);
                 if (!window.currentUser) { showToast('请先登录后管理好友'); return; }
                 var sheet = document.getElementById('dockChatSocialSheet');
                 if (!sheet) return;
@@ -18362,6 +18368,11 @@ function renderProfileActivityList(kind) {
                     window.__xtjRefreshIOSChatViewport = function(options) {
                         options = options || {};
                         updateIOSViewport();
+                        if (options.fitFocus) {
+                            var focusedInput = document.activeElement;
+                            fitFocusedInput(focusedInput);
+                            requestAnimationFrame(function() { fitFocusedInput(focusedInput); });
+                        }
                         if (options.forceScroll) {
                             requestAnimationFrame(function() {
                                 setTimeout(scrollDockChatBottom, 60);

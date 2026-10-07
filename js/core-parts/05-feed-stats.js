@@ -1523,15 +1523,18 @@
                 grid.innerHTML = [
                     '<div class="photo-wall-empty">',
                     '  <div class="photo-wall-empty-icon">🔒</div>',
-                    '  <div>登录后可查看照片墙内容</div>',
-                    '  <div style="font-size:12px;margin-top:8px;">可以切换到这个板块，但未登录时不会加载具体照片数据。</div>',
+                    '  <div>请登录查看所有照片</div>',
                     '  <button type="button" class="photo-wall-empty-cta" onclick="openAuthModal(\'login\')">立即登录</button>',
                     '</div>'
                 ].join('');
             }
+            window.renderPhotoWallLockedState = renderPhotoWallLockedState;
+            window.setPhotoWallLockedState = setPhotoWallLockedState;
 
             async function ensurePhotoWallVisibleContent(options) {
                 var opts = options || {};
+                if (!window.currentUser) { renderPhotoWallLockedState(); return; }
+                setPhotoWallLockedState(false);
                 await ensurePhotoWallLoaded();
                 if (typeof window.initPhotoWall === 'function') {
                     await window.initPhotoWall();

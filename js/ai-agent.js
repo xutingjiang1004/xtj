@@ -2516,7 +2516,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     options = options || {};
     var forceNoToken = !!options.forceNoToken;
     var token = '';
-    if (!forceNoToken) {
+    if (!forceNoToken && readUserName()) {
       try {
         if (typeof window.ensureUserToken === 'function') token = await window.ensureUserToken();
       } catch (e) {
@@ -2631,29 +2631,35 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function apiRequest(method, path, body, opts) {
+    var owner = readUserName(), authEpoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+    function sameIdentity() { return owner === readUserName() && authEpoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0); }
     if (AI_DEBUG) { try { console.warn('[AI] apiRequest start', { method: method, path: path, apiBase: API_BASE }); } catch (e) {} }
     var first = await sendOnce(method, path, body, Object.assign({ forceNoToken: false }, opts || {}));
+    if (!sameIdentity()) return { ok:false, status:0, error_code:'aborted' };
     if (AI_DEBUG) { try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e2) {} }
-    if (first && first.status === 401 && first.error_code !== 'aborted') {
+    if (owner && first && first.status === 401 && first.error_code !== 'aborted') {
       if (typeof window.refreshUserToken === 'function') {
         try {
           var refreshed = await window.refreshUserToken(true);
+          if (!sameIdentity()) return { ok:false, status:0, error_code:'aborted' };
           if (refreshed) {
             var third = await sendOnce(method, path, body, Object.assign({ forceNoToken: false, retry: true }, opts || {}));
+            if (!sameIdentity()) return { ok:false, status:0, error_code:'aborted' };
             try { if (AI_DEBUG) console.warn('[AI] retry result (refreshed token)', { status: third && third.status, ok: third && third.ok, url: third && third.url }); } catch (e5) {}
             return third;
           }
         } catch (e6) {}
       }
-      try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e7) {}
+      if (sameIdentity()) try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure({ background:!!(opts && opts.background) }); } catch (e7) {}
     }
     return first;
   }
 
-  function describeError(r, fallback) {
+  function describeError(r, fallback, options) {
     if (!r) return fallback || '请求失败';
     if (r.status === 401) {
-      try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure(); } catch (e) {}
+      if (!readUserName()) return '请先登录后再和小猫聊天';
+      try { if (typeof window.handleProtectedAuthFailure === 'function') window.handleProtectedAuthFailure({ background:!!(options && options.background) }); } catch (e) {}
       return '凭据异常，请重新登录后再和小猫聊天';
     }
     if (r.status === 403) return '当前账号没有执行此操作的权限';
@@ -2690,6 +2696,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function ensureConfig() {
+    // The protected AI configuration is not a prerequisite for public browsing.
+    // Guests use the existing entry copy without refreshing or clearing login state.
+    if (!readUserName()) return {
+      name:'小猫', avatar:'🐈', description:'AI 智能体',
+      welcome_message:'我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
+    };
     var now = Date.now();
     if (S.config && now - S.configFetchedAt < CONFIG_CACHE_TTL) {
       if (S._lastConfigVersion && S.config.config_version !== S._lastConfigVersion) {
@@ -2699,7 +2711,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return S.config;
       }
     }
-    var r = await apiRequest('GET', '/config');
+    var r = await apiRequest('GET', '/config', null, { background:true });
     if (r.ok && r.data && r.data.config) {
       S.config = r.data.config;
       S.serviceStatus = 'ready';
@@ -2709,7 +2721,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return S.config;
     }
     S.serviceStatus = r && (r.status === 0 || r.error_code === 'timeout') ? 'offline' : 'degraded';
-    S.serviceStatusDetail = describeError(r, 'AI 配置暂不可用');
+    S.serviceStatusDetail = describeError(r, 'AI 配置暂不可用', { background:true });
     S.config = S.config || {
       name: '小猫',
       avatar: '🐈',
