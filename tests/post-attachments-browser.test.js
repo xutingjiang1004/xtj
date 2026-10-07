@@ -241,6 +241,7 @@ test('Safari post comment focus stays inside its own scroll panel as the keyboar
   const {page}=f;await page.locator('#feed .actions').getByRole('button',{name:'评论',exact:true}).click();const input=page.locator('#feed .inline-comment-inp');await input.focus();
   await page.evaluate(()=>{testKeyboardViewport.height=360;testKeyboardViewport.offsetTop=80;testKeyboardViewport.dispatchEvent(new Event('resize'));});
   await page.waitForFunction(()=>document.documentElement.style.getPropertyValue('--xtj-visual-top')==='80px');
+  await page.waitForFunction(()=>{const r=document.querySelector('#feed .inline-comment-inp').getBoundingClientRect();return r.y>=80&&r.bottom<=440;});
   const rect=await input.boundingBox();assert.ok(rect.y>=80&&rect.y+rect.height<=440,JSON.stringify(rect));assert.equal(await page.evaluate(()=>scrollY),0);assert.equal(await page.locator('#dockBar').isVisible(),false);
   await input.evaluate(el=>el.blur());await page.evaluate(()=>{testKeyboardViewport.height=844;testKeyboardViewport.offsetTop=0;testKeyboardViewport.dispatchEvent(new Event('resize'));});
   await page.waitForFunction(()=>!document.documentElement.classList.contains('xtj-keyboard-open'));assert.equal(await page.locator('html').evaluate(el=>el.style.getPropertyValue('--xtj-app-height')),'844px');assert.equal(await page.locator('#dockBar').isVisible(),true);assert.deepEqual(f.errors,[]);
