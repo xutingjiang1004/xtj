@@ -6,6 +6,14 @@
 })(typeof window !== 'undefined' ? window : globalThis, function() {
   var MAX_POST_IMAGES = 18;
   var MAX_POST_FILE_BYTES = 50 * 1024 * 1024;
+  function mediaUrl(post, value, position) {
+    if (typeof window === 'undefined' || !post.id || !/^[0-9a-f-]{36}$/i.test(String(post.id)) || !window.XTJ_CONFIG) return value;
+    try {
+      var url = new URL(value), origin = new URL(window.XTJ_CONFIG.SUPABASE_URL).origin;
+      if (url.origin !== origin || !url.pathname.startsWith('/storage/v1/object/public/uploads/posts/')) return value;
+      return (window.API_BASE || '').replace(/\/$/, '') + '/api/post/' + encodeURIComponent(post.id) + '/media/' + position;
+    } catch (_) { return value; }
+  }
   function getPostMediaItems(post) {
     post = post || {};
     var list = Array.isArray(post.media_items) ? post.media_items : post.attachments;
@@ -13,12 +21,13 @@
       return list.filter(function(item) { return item && typeof item.media_url === 'string' && item.media_url; })
         .map(function(item, index) { return Object.assign({}, item, { width: item.width || (!item.id && (post.media_width || post.width || (post._contentMeta && post._contentMeta.w))) || null,
           height: item.height || (!item.id && (post.media_height || post.height || (post._contentMeta && post._contentMeta.h))) || null,
+          media_url: mediaUrl(post, item.media_url, Number.isInteger(item.position) ? item.position : index),
           position: Number.isInteger(item.position) ? item.position : index }); })
         .sort(function(a, b) { return a.position - b.position; });
     }
     if (!post.media_url) return [];
     var meta = post._contentMeta || {};
-    return [{ media_url: post.media_url, media_type: /^(video|audio)$/.test(post.media_type) ? post.media_type : 'image', position: 0,
+    return [{ media_url: mediaUrl(post, post.media_url, 0), media_type: /^(video|audio)$/.test(post.media_type) ? post.media_type : 'image', position: 0,
       width: post.media_width || post.width || meta.w || null, height: post.media_height || post.height || meta.h || null,
       file_size: meta.fileSize || null }];
   }

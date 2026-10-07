@@ -7,6 +7,14 @@
   // ★ 初始化 generation，用于防止并发竞态
   var _initGeneration = 0;
 
+  window.__xtjResetPhotoWallInitialization = function() {
+    _initGeneration++;
+    initialized = false;
+    initializingPromise = null;
+    if (warmTimer) clearTimeout(warmTimer);
+    warmTimer = null;
+  };
+
   function warmVisibleImages(){
     if (warmTimer) clearTimeout(warmTimer);
     warmTimer = setTimeout(function(){
