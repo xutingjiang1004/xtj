@@ -100,12 +100,15 @@ test('Private DM history handles loading with AbortController and sequence guard
   assert.match(core, /window\.xtjProtectedFetch\('\/api\/dm\/messages\?/);
 });
 
-// 11: Public photos API returns 3 items -> normalized into photo array
-test('Public photo wall endpoint returns public photos without requiring protected auth', () => {
+// 11: Public wall photos require login and expose only website media endpoints.
+test('public photo wall requires protected auth and projects away storage originals', () => {
   const photosEndpoint = routeSource('get', '/api/photos/public', "app.get('/api/avatar/:userName'");
+  assert.match(photosEndpoint, /authenticateUser/);
   assert.match(photosEndpoint, /media_type.*__photo_wall__/);
-  assert.match(photosEndpoint, /res\.json\(\{ ok: true, data: data \|\| \[\] \}\)/);
+  assert.match(photosEndpoint, /data: \(data \|\| \[\]\)\.map/);
+  assert.match(photosEndpoint, /photoPayload\(row\)/);
   assert.match(photoData, /\/api\/photos\/public\?page=/);
+  assert.match(photoData, /getUserAuthHeaders/);
   assert.match(photoData, /normalizePhotoWallRow/);
 });
 

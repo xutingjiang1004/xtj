@@ -14,7 +14,7 @@ function installPhotoSocial(app, options) {
     return isPublicPhoto(result.data) ? result.data : null;
   }
   function unavailable(res) { return res.status(503).json({ok:false,error:'照片互动暂不可用，请稍后重试',retryable:true}); }
-  app.get('/api/photo/:id/social', optionalAuth, rateLimit(60000,120), async (req,res) => {
+  app.get('/api/photo/:id/social', authenticateUser, rateLimit(60000,120), async (req,res) => {
     try {
       if (!(await photo(req.params.id))) return res.status(404).json({ok:false,error:'照片不存在或不可查看'});
       const id = req.params.id;

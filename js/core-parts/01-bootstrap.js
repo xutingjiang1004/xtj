@@ -529,6 +529,8 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理头像缓存
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; window._xtjCanonicalUser = ''; window._xtjAuthState = 'unauthenticated'; } catch(e) {}
+                try { if (window.__xtjResetPhotoWallAccess) window.__xtjResetPhotoWallAccess(); } catch(e) {}
+                try { window.safeStorage.remove('xtj_photos'); window.safeStorage.remove('xtj_photos_owner'); } catch(e) {}
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}

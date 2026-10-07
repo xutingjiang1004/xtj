@@ -1,4 +1,5 @@
 'use strict';
+const { PHOTO_BUCKET } = require('./photo-access');
 async function lookupPhotoUpload(supabase, path) {
   const result = await supabase.from('photo_upload_registry').select('storage_path,user_name,upload_id').eq('storage_path', path).maybeSingle();
   if (!result || result.error) throw (result && result.error || new Error('photo_ownership_unavailable'));
@@ -9,7 +10,7 @@ async function claimPhotoUpload(supabase, path, actor, uploadId) {
   if (previous) return previous.user_name === actor && previous.upload_id === uploadId;
   // A failed upload must not let its caller claim somebody's pre-existing
   // legacy object. Storage deliberately permits only creation of a new path.
-  const exists = await supabase.storage.from('uploads').exists(path);
+  const exists = await supabase.storage.from(PHOTO_BUCKET).exists(path);
   if (!exists || (exists.error && ![400, 404].includes(Number(exists.error.status || exists.error.statusCode)))) throw (exists && exists.error || new Error('photo_storage_unavailable'));
   if (exists.data !== false) return false;
   const insert = await supabase.from('photo_upload_registry').insert({ storage_path: path, user_name: actor, upload_id: uploadId });
