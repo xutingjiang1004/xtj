@@ -5397,7 +5397,14 @@
                 }
                 content.setAttribute('aria-busy','true');
                 var seq = ++_dockChatSocialLoadSeq;
-                if (saved && _dockChatSocialTab==='search') { content.setAttribute('aria-busy','false'); return; }
+                if (saved && _dockChatSocialTab==='search') {
+                    content.setAttribute('aria-busy','false');
+                    // A tab restore or relationship event invalidates the old
+                    // request. Keep the form nodes/draft, but resume its results
+                    // under the new sequence instead of caching a loading state.
+                    if (_dockChatSocialQuery.length >= 2) loadDockChatSocialSearch(_dockChatSocialQuery, seq);
+                    return;
+                }
                 if (_dockChatSocialTab === 'search') {
                     content.innerHTML = '<form id="dockChatSocialSearchForm" class="chat-social-search-form" autocomplete="off">' +
                         '<input name="q" type="search" minlength="2" maxlength="64" placeholder="输入用户名，至少 2 个字符" value="' + escapeHtml(_dockChatSocialQuery) + '" aria-label="搜索用户名">' +

@@ -489,7 +489,7 @@ const ADMIN_NAME = "xxz";
                     // 需要 token 的模块直接调 window.getUserToken()。
                     try {
                         window.__xtjAuthReady = true;
-                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { authenticated: true, user_name: String(window.currentUser || window._lastKnownUser || '') } }));
+                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { authenticated: true, user_name: String(window.currentUser || window._lastKnownUser || ''), media_session_ready: true } }));
                     } catch(e) {}
                 }
             }

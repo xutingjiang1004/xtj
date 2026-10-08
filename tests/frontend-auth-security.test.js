@@ -41,7 +41,8 @@ test('device telemetry is token authenticated and can refresh via the shared hel
 });
 
 test('administrator login receives a separate user access session without browser hash storage', () => {
-  assert.match(core, /setUserToken\(loginRes\.user_token, name\)/);
+  assert.match(core, /loginToken = loginRes\.user_token/);
+  assert.match(core, /setUserToken\(loginToken, confirmedUser\)/);
   assert.doesNotMatch(core, /ADMIN_TOKEN_KEY/);
 });
 

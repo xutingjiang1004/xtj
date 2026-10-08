@@ -166,6 +166,21 @@
   function finishOk(data) {
     state.status = 'ok';
     state.data = data;
+    // Start only the first public album while core prepares the full cards.
+    // The normal media endpoint still checks current visibility; never preload
+    // a raw Storage URL or a whole feed of large originals.
+    try {
+      var first = data.posts && data.posts[0];
+      var restoredTab = localStorage.getItem('xtj_current_tab');
+      if (restoredTab && restoredTab !== 'posts') first = null;
+      if (first && window.XtjPostMedia) window.XtjPostMedia.getPostMediaItems(first).slice(0,3).forEach(function (item) {
+        var url = new URL(item.media_url, location.href);
+        if (item.media_type !== 'image' || url.origin !== location.origin || !/^\/api\/post\/[0-9a-f-]{36}\/media\/\d+$/.test(url.pathname)) return;
+        var link = document.createElement('link');
+        link.rel = 'preload'; link.as = 'image'; link.href = url.href; link.fetchPriority = 'high';
+        document.head.appendChild(link);
+      });
+    } catch (_) {}
     try {
       resolveEarly(data);
     } catch (e) {}

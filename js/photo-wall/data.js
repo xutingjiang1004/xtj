@@ -56,8 +56,13 @@
   window.__xtjResetPhotoWallAccess = resetPhotoWallAccess;
   window.addEventListener('auth-ready', function () {
     var owner = String(window.currentUser || ''), epoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
-    if (owner !== cacheOwner || epoch !== cacheEpoch) resetPhotoWallAccess();
+    var changed = owner !== cacheOwner || epoch !== cacheEpoch;
+    if (changed) resetPhotoWallAccess();
     cacheOwner = owner; cacheEpoch = epoch;
+    // Signing in from the locked wall keeps this panel open. Resume it here
+    // rather than leaving the guest prompt until the user switches tabs.
+    var panel = byId('panelAi');
+    if (changed && owner && panel && panel.classList.contains('active') && window.initPhotoWall) window.initPhotoWall();
   });
 
   function byId(id){ return document.getElementById(id); }
