@@ -75,6 +75,10 @@
   box-shadow: none;
   filter: none;
 }
+#panelPosts #feed .post-media-cell img[data-post-src]:not([src]),
+#postDetailBody .post-media-cell img[data-post-src]:not([src]) {
+  visibility: hidden;
+}
 #panelPosts #feed .post-media-grid--single .post-media-cell,
 #postDetailBody .post-media-grid--single .post-media-cell {
   aspect-ratio: var(--post-image-ratio, 4 / 3);
