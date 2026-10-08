@@ -160,19 +160,44 @@ async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fe
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 120000);
   const closed = () => controller.abort(); res.on('close', closed);
   try {
-    const response = await fetchImpl(signed.data.signedUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers: range ? { Range: range } : {}, redirect: 'error', signal: controller.signal });
-    if (![200,206,416].includes(response.status)) throw Error('media_download_unavailable');
+    const headers = {};
+    if (range) { headers.Range = range; if (req.headers['if-range']) headers['If-Range'] = req.headers['if-range']; }
+    else if (req.headers['if-none-match']) headers['If-None-Match'] = req.headers['if-none-match'];
+    else if (req.headers['if-modified-since']) headers['If-Modified-Since'] = req.headers['if-modified-since'];
+    const response = await fetchImpl(signed.data.signedUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers, redirect: 'error', signal: controller.signal });
+    if (![200,206,304,416].includes(response.status) || (response.status === 304 && (range || (!headers['If-None-Match'] && !headers['If-Modified-Since'])))) throw Error('media_download_unavailable');
     const type = String(response.headers.get('content-type') || '').split(';')[0];
-    if (response.status !== 416 && !/^(image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/i.test(type)) throw Error('media_type_unavailable');
-    res.status(response.status).set({ 'Cache-Control': 'no-store, private', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
-    for (const name of ['content-type','content-length','content-range','accept-ranges']) { const value = response.headers.get(name); if (value) res.set(name, value); }
-    if (req.method === 'HEAD' || response.status === 416) { if (response.body) await response.body.cancel(); return res.end(); }
+    if (![304,416].includes(response.status) && !/^(image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/i.test(type)) throw Error('media_type_unavailable');
+    // Every route authorizes against current session/visibility before reaching
+    // this point. Private caches may reuse bytes only after that fresh check.
+    res.status(response.status).set({ 'Cache-Control': 'private, no-cache, must-revalidate', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+    for (const name of ['etag','last-modified','accept-ranges']) { const value = response.headers.get(name); if (value) res.set(name, value); }
+    if (response.status !== 304) for (const name of ['content-type','content-length','content-range']) { const value = response.headers.get(name); if (value) res.set(name, value); }
+    if (req.method === 'HEAD' || [304,416].includes(response.status)) { if (response.body) await response.body.cancel(); return res.end(); }
     if (!response.body) throw Error('media_body_unavailable');
     await pipeline(Readable.fromWeb(response.body), res);
   } finally { clearTimeout(timer); res.removeListener('close', closed); }
 }
 function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUser, verifyToken, optionalAuth, rateLimit, adminName = 'xxz', fetchImpl, normalPostAllowed = () => true, activeSession = async () => false }) {
   const codec = shareCodec(secret);
+  // Album cells arrive together. Share only unfinished reads, never completed
+  // permission decisions: a later request must see deletion/privacy changes.
+  const postReads = new Map();
+  const attachmentReads = new Map();
+  function readPostMedia(id) {
+    if (postReads.has(id)) return postReads.get(id);
+    const pending = checked(supabase.from('posts').select('id,user_name,media_type,media_url,content,visibility,is_deleted').eq('id',id).maybeSingle());
+    postReads.set(id,pending);
+    pending.then(() => postReads.delete(id), () => postReads.delete(id));
+    return pending;
+  }
+  function readAttachments(row) {
+    if (attachmentReads.has(row.id)) return attachmentReads.get(row.id);
+    const pending = loadPostAttachments(supabase,[row]);
+    attachmentReads.set(row.id,pending);
+    pending.then(() => attachmentReads.delete(row.id), () => attachmentReads.delete(row.id));
+    return pending;
+  }
   const limited = rateLimit(60000, 180);
   async function photo(id) {
     if (!UUID.test(String(id || ''))) return null;
@@ -252,9 +277,9 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
   app.get('/api/post/:id/media/:position', optionalPostMediaAuth, limited, async(req,res) => {
     try {
       if (!UUID.test(req.params.id) || !/^(?:0|[1-9]\d?)$/.test(req.params.position)) return missing(res);
-      const row = await checked(supabase.from('posts').select('id,user_name,media_type,media_url,content,visibility,is_deleted').eq('id',req.params.id).maybeSingle());
+      const row = await readPostMedia(req.params.id);
       if (!row || row.is_deleted === true || !['','text','image','video','audio','photo','album',null].includes(row.media_type) || !normalPostAllowed(row) || (row.visibility && row.visibility !== 'public' && row.user_name !== req.userName && req.userName !== adminName)) return missing(res);
-      const posts = await loadPostAttachments(supabase,[row]);
+      const posts = await readAttachments(row);
       const item = (posts[0].media_items || [])[Number(req.params.position)];
       const path = item && parsePostMediaUrl(item.media_url, supabaseUrl);
       if (!path) return missing(res);

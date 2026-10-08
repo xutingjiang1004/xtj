@@ -3,6 +3,14 @@
   var readyOwner = '', readyEpoch = -1, readyAt = 0, lastForcedAt = 0, pending = null;
   function epoch() { return window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0; }
   function current(owner, generation) { return owner === String(window.currentUser || '') && generation === epoch() && !window.__xtjLogoutPending; }
+  if (typeof window.addEventListener === 'function') window.addEventListener('auth-ready', function (event) {
+    var detail = event && event.detail, owner = String(window.currentUser || '');
+    // Login/register/refresh issue the scoped HttpOnly cookies with the access
+    // token. Avoid immediately rotating that same session a second time.
+    if (detail && detail.media_session_ready === true && owner && detail.user_name === owner && !window.__xtjLogoutPending) {
+      readyOwner = owner; readyEpoch = epoch(); readyAt = Date.now();
+    }
+  });
   function mediaUrl(value) {
     try {
       var url = new URL(value, location.href), api = new URL(window.API_BASE || location.origin, location.href);

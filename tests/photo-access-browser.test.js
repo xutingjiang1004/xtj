@@ -110,6 +110,26 @@ test('guest photo wall shows the login gate rather than an empty upload invitati
   }finally{await f.close();}
 });
 
+for(const mode of ['login','register'])test(`${mode} from the locked wall resumes photos without a tab switch and broadcasts the confirmed owner`,async()=>{
+  const f=await postBrowserFixture({user:'',publicPosts:true,counts:[1]});
+  try{
+    const {page}=f;let photoReads=0;
+    await page.route('**/api/user/'+mode,route=>route.fulfill({json:{ok:true,token:'test-only-token',user_name:'alice'}}));
+    await page.route('**/api/photos/public?*',route=>{photoReads++;return route.fulfill({json:{ok:true,data:[{id:A,user_name:'alice',media_type:'__photo_wall__',media_url:f.origin+'/test-image/0-0.png',content:'{}',visibility:'public',created_at:'2026-10-08T12:00:00Z'}]}});});
+    await page.evaluate(mode=>{window.confirmedOwners=[];window.confirmingLogin=false;document.getElementById(mode==='login'?'loginSubmitBtn':'registerSubmitBtn').addEventListener('click',()=>window.confirmingLogin=true,{capture:true,once:true});window.addEventListener('auth-ready',e=>{if(window.confirmingLogin)confirmedOwners.push({owner:window.currentUser,canonical:window._xtjCanonicalUser,eventOwner:e.detail.user_name});});},mode);
+    await page.locator('[data-tab="ai"]').filter({visible:true}).first().click();
+    await page.getByRole('button',{name:'立即登录',exact:true}).click();
+    if(mode==='register')await page.locator('#loginModal .af-link').click();
+    await page.locator(mode==='login'?'#loginNickInp':'#regNickInp').fill('alice');
+    await page.locator(mode==='login'?'#loginPwInp':'#regPwInp').fill('test-only-password');
+    await page.locator(mode==='login'?'#loginSubmitBtn':'#registerSubmitBtn').click();
+    await page.waitForFunction(()=>document.querySelector('#photoGrid .photo-wall-item img')?.naturalWidth>0);
+    assert.ok(photoReads>0);assert.equal(await page.getByText('请登录查看所有照片',{exact:true}).isVisible(),false);
+    const owners=await page.evaluate(()=>confirmedOwners);assert.ok(owners.length>0);assert.ok(owners.every(e=>e.owner==='alice'&&e.canonical==='alice'&&e.eventOwner==='alice'),JSON.stringify(owners));
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('guest AI startup cannot clear public posts or open a login dialog',async()=>{
   const f=await postBrowserFixture({user:'',publicPosts:true,counts:[1]});
   try{
@@ -167,4 +187,24 @@ test('chat contacts and history switch without leaving two interactive panels st
     await f.page.locator('#dockChatSocialSheet').waitFor({state:'hidden'});
     assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
+});
+
+test('a relationship notification resumes pending user search while retaining the form and ignoring the old result',async()=>{
+  const f=await postBrowserFixture({counts:[1]});let release;
+  try{
+    const {page}=f;let searches=0;const held=new Promise(resolve=>release=resolve);
+    await page.route('**/api/chat/users/search?*',async route=>{
+      const old=++searches===1;if(old)await held;
+      await route.fulfill({json:{ok:true,users:[{user_name:'peer',relationship:old?'none':'request_sent'}]}});
+    });
+    await page.locator('[data-tab="chat"]').filter({visible:true}).click();await page.locator('#dockChatSocialBtn').click();await page.locator('#social-tab-search').click();
+    await page.locator('#dockChatSocialSearchForm input').fill('peer');const requested=page.waitForRequest('**/api/chat/users/search?*');await page.locator('#dockChatSocialSearchForm button').click();await requested;
+    await page.locator('#dockChatSocialSearchForm input').fill('peer draft');
+    await page.evaluate(()=>__xtjRefreshChatSocialState());
+    await page.getByText('等待对方处理',{exact:true}).waitFor({state:'visible'});assert.equal(searches,2);
+    assert.equal(await page.locator('#dockChatSocialSearchForm input').inputValue(),'peer draft');
+    release();await page.waitForTimeout(100);assert.equal(await page.locator('#dockChatSocialResults [data-chat-social-action="friend-request"]').count(),0);
+    await page.locator('#social-tab-friends').click();await page.locator('#social-tab-search').click();await page.getByText('等待对方处理',{exact:true}).waitFor({state:'visible'});
+    assert.equal(await page.locator('#dockChatSocialSearchForm input').inputValue(),'peer draft');assert.deepEqual(f.errors,[]);
+  }finally{if(release)release();await f.close();}
 });

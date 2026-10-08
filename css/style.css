@@ -14518,10 +14518,6 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   transform: none !important;
 }
 
-#photoPreviewOverlay.pp-post-mode .pp-nav-arrow {
-  display: none !important;
-}
-
 [data-theme="dark"],
 [data-theme="dark"] body,
 [data-theme="dark"] .dock-panels,

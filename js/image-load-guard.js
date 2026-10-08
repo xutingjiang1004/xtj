@@ -4,6 +4,28 @@
   // and only run the deadline for visible images (including native lazy loads).
   var selector = '.post-media-cell img[data-media-url], #photoPreviewImage';
   var tracked = new Map();
+  var running = 0;
+  window.xtjPostImageScheduling = true;
+  function release(state) { if (state.loading) { state.loading = false; running--; } }
+  function pump() {
+    var waiting = Array.from(tracked.entries()).filter(function (entry) {
+      return entry[1].visible && entry[0].isConnected && entry[0].getAttribute('data-post-src') && !entry[0].getAttribute('src');
+    });
+    waiting.sort(function (a, b) {
+      var ar = a[0].getBoundingClientRect(), br = b[0].getBoundingClientRect();
+      return Math.max(0, ar.top, -ar.bottom) - Math.max(0, br.top, -br.bottom);
+    });
+    while (running < 4 && waiting.length) {
+      var entry = waiting.shift(), img = entry[0], state = entry[1], source = img.getAttribute('data-post-src');
+      var rect = img.getBoundingClientRect();
+      state.loading = true; running++;
+      img.loading = 'eager';
+      img.fetchPriority = rect.top < innerHeight && rect.bottom > 0 ? 'high' : 'low';
+      img.removeAttribute('data-post-src');
+      img.src = source;
+      arm(img, state);
+    }
+  }
   window.xtjRetryOriginalImageUrl = function (value) {
     try {
       var url = new URL(value, location.href);
@@ -25,8 +47,10 @@
     state.timer = setTimeout(function () {
       state.timer = 0;
       if (!img.isConnected || source !== img.getAttribute('src') || (img.complete && img.naturalWidth > 0)) return;
+      release(state);
       if (img.id === 'photoPreviewImage') img.dispatchEvent(new Event('xtj:image-timeout'));
       else if (window.markPostImageFailed) window.markPostImageFailed(img);
+      pump();
     }, 30000);
   }
   var observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(function (entries) {
@@ -36,14 +60,17 @@
       state.visible = entry.isIntersecting;
       arm(entry.target, state);
     });
-  }) : null;
+    pump();
+  }, { rootMargin: '160px 0px' }) : null;
   function register(img) {
     if (tracked.has(img)) return;
     var state = { timer: 0, visible: !observer };
-    state.load = function () { stop(state); };
+    state.load = function () { stop(state); release(state); pump(); };
     state.error = function () {
       stop(state);
+      release(state);
       if (img.id === 'photoPreviewImage' && window.xtjRecoverMediaImage) window.xtjRecoverMediaImage(img, img._ppUrl || img.getAttribute('src'));
+      pump();
     };
     tracked.set(img, state);
     img.addEventListener('load', state.load);
@@ -73,8 +100,11 @@
       img.removeEventListener('load', state.load);
       img.removeEventListener('error', state.error);
       tracked.delete(img);
+      release(state);
     });
+    pump();
   });
   scan(document.body);
+  pump();
   mutations.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
 })();

@@ -10,3 +10,13 @@ test('a later expiry can recover the same image without creating an immediate re
 test('staggered failures reuse a successful repair instead of rotating a session per image',async()=>{const r=runtime();for(let n=0;n<12;n++){const img={isConnected:true,src:url,getAttribute(){return this.src;}};assert.equal(r.window.xtjRecoverMediaImage(img,url),true);await new Promise(setImmediate);assert.match(img.src,/xtj_retry=/);}assert.equal(r.calls,1);});
 test('recovery cannot restore an image after its owner, source, or connection changes',async()=>{for(const mutation of ['owner','source','connection']){const r=runtime();let release;r.window.refreshUserToken=()=>new Promise(resolve=>release=resolve);const img={isConnected:true,src:url,getAttribute(){return this.src;}};r.window.xtjRecoverMediaImage(img,url);await Promise.resolve();if(mutation==='owner')r.switchUser('bob');if(mutation==='source')img.src='replacement';if(mutation==='connection')img.isConnected=false;const before=img.src;release('access');await new Promise(setImmediate);assert.equal(img.src,before);}});
 test('failed renewal reports failure without publishing an authenticated URL',async()=>{const r=runtime();r.window.refreshUserToken=async()=>{throw Error('offline');};let failed=0;const img={isConnected:true,src:url,getAttribute(){return this.src;}};r.window.xtjRecoverMediaImage(img,url,()=>failed++);await new Promise(setImmediate);assert.equal(failed,1);assert.equal(img.src,url);});
+test('a confirmed cookie-issuing auth response avoids a redundant wall refresh but still repairs missing cookies',async()=>{
+ let epoch=1,now=100000,calls=0;const listeners={};
+ const window={API_BASE:'https://xtj.test',currentUser:'alice',__xtjGetAuthEpoch:()=>epoch,addEventListener:(name,fn)=>listeners[name]=fn,refreshUserToken:async()=>{calls++;return 'access';}};
+ vm.runInNewContext(fs.readFileSync('js/media-session.js','utf8'),{window,location:{href:'https://xtj.test/',origin:'https://xtj.test'},URL,Date:{now:()=>now},Promise});
+ listeners['auth-ready']({detail:{authenticated:true,user_name:'alice',media_session_ready:true}});
+ assert.equal(await window.xtjEnsureMediaSession(url),true);assert.equal(calls,0);
+ const img={isConnected:true,src:url,getAttribute(){return this.src;}};window.xtjRecoverMediaImage(img,url);await new Promise(setImmediate);assert.equal(calls,1);
+ now+=13*60000;await window.xtjEnsureMediaSession(url);assert.equal(calls,2);
+ epoch++;window.currentUser='bob';listeners['auth-ready']({detail:{user_name:'alice',media_session_ready:true}});await window.xtjEnsureMediaSession(url);assert.equal(calls,3);
+});
