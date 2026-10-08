@@ -495,7 +495,7 @@ const ADMIN_NAME = "xxz";
                     // 需要 token 的模块直接调 window.getUserToken()。
                     try {
                         window.__xtjAuthReady = true;
-                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { authenticated: true, user_name: String(window.currentUser || window._lastKnownUser || '') } }));
+                        window.dispatchEvent(new CustomEvent('auth-ready', { detail: { authenticated: true, user_name: String(window.currentUser || window._lastKnownUser || ''), media_session_ready: true } }));
                     } catch(e) {}
                 }
             }
@@ -3159,6 +3159,7 @@ function isAdmin() {
                 if (window.__xtjBeginAuthIdentityChange) window.__xtjBeginAuthIdentityChange();
 
                 try {
+                    var loginToken;
                     if (name === ADMIN_NAME) {
                         // 安全：管理员登录必须通过后端 API，禁止直连 Supabase
                         if (typeof API_BASE === 'undefined' || !API_BASE) {
@@ -3178,7 +3179,7 @@ function isAdmin() {
                                 showToast("管理员用户会话建立失败", "error");
                                 return;
                             }
-                            setUserToken(loginRes.user_token, name);
+                            loginToken = loginRes.user_token;
                         } catch (apiErr) {
                             showToast("管理员登录失败: 无法连接后端 API");
                             return;
@@ -3203,7 +3204,7 @@ function isAdmin() {
                             showToast("账号认证状态异常，请重新登录", "error");
                             return;
                         }
-                        setUserToken(tokenData.token, serverUserName);
+                        loginToken = tokenData.token;
                     }
 
                     // ★ 使用服务端确认的规范身份
@@ -3219,6 +3220,9 @@ function isAdmin() {
                     window._xtjCanonicalUser = confirmedUser;
                     window.__xtjServerIsAdmin = false;
                     window.__xtjServerIsAdminOwner = '';
+                    // auth-ready consumers must observe the confirmed new
+                    // identity, rather than the previous guest/account.
+                    setUserToken(loginToken, confirmedUser);
                     await loadCurrentUserInfoSnapshot(currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function" && confirmedUser !== ADMIN_NAME) {
@@ -3308,7 +3312,6 @@ function isAdmin() {
                         showToast(registerData.error || "注册失败，请重试", "error");
                         return;
                     }
-                    setUserToken(registerData.token, registerData.user_name);
                     // ★ 使用服务端返回的规范 user_name，禁止使用输入框 name
                     var serverUserName = (registerData.user_name || '').trim();
                     if (!serverUserName || serverUserName !== name) {
@@ -3324,6 +3327,7 @@ function isAdmin() {
                     // ★ 审计修复：注册成功同样置位认证状态（与登录路径对称）
                     window._xtjAuthState = 'authenticated';
                     window._xtjCanonicalUser = currentUser;
+                    setUserToken(registerData.token, currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
                             window.logLoginEventSafe(currentUser, "register_success");
@@ -8525,8 +8529,12 @@ function renderProfileActivityList(kind) {
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
                     var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
+                    var displayUrl = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url;
+                    // Local upload previews stay immediate. Network originals
+                    // start when the image scheduler brings them into view.
+                    var source = window.xtjPostImageScheduling && !displayUrl.startsWith('blob:') ? 'data-post-src' : 'src';
                     return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="if(this.classList.contains(\'post-image-failed\'))retryPostImage(this);else openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
-                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)" onerror="markPostImageFailed(this)">' +
+                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" ' + source + '="' + escapeHtml(displayUrl) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="auto" onload="syncPostImageRatio(this)" onerror="markPostImageFailed(this)">' +
                         '<span class="post-media-error" role="status">图片未加载 · 点击重试</span>' +
                         (index === 8 && items.length > visible.length ? '<span class="post-media-overflow">+' + (items.length - visible.length) + '</span>' : '') + '</button>';
                 }).join('') + '</div>';
@@ -17909,7 +17917,14 @@ function renderProfileActivityList(kind) {
                 }
                 content.setAttribute('aria-busy','true');
                 var seq = ++_dockChatSocialLoadSeq;
-                if (saved && _dockChatSocialTab==='search') { content.setAttribute('aria-busy','false'); return; }
+                if (saved && _dockChatSocialTab==='search') {
+                    content.setAttribute('aria-busy','false');
+                    // A tab restore or relationship event invalidates the old
+                    // request. Keep the form nodes/draft, but resume its results
+                    // under the new sequence instead of caching a loading state.
+                    if (_dockChatSocialQuery.length >= 2) loadDockChatSocialSearch(_dockChatSocialQuery, seq);
+                    return;
+                }
                 if (_dockChatSocialTab === 'search') {
                     content.innerHTML = '<form id="dockChatSocialSearchForm" class="chat-social-search-form" autocomplete="off">' +
                         '<input name="q" type="search" minlength="2" maxlength="64" placeholder="输入用户名，至少 2 个字符" value="' + escapeHtml(_dockChatSocialQuery) + '" aria-label="搜索用户名">' +

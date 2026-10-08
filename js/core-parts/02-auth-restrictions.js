@@ -407,6 +407,7 @@
                 if (window.__xtjBeginAuthIdentityChange) window.__xtjBeginAuthIdentityChange();
 
                 try {
+                    var loginToken;
                     if (name === ADMIN_NAME) {
                         // 安全：管理员登录必须通过后端 API，禁止直连 Supabase
                         if (typeof API_BASE === 'undefined' || !API_BASE) {
@@ -426,7 +427,7 @@
                                 showToast("管理员用户会话建立失败", "error");
                                 return;
                             }
-                            setUserToken(loginRes.user_token, name);
+                            loginToken = loginRes.user_token;
                         } catch (apiErr) {
                             showToast("管理员登录失败: 无法连接后端 API");
                             return;
@@ -451,7 +452,7 @@
                             showToast("账号认证状态异常，请重新登录", "error");
                             return;
                         }
-                        setUserToken(tokenData.token, serverUserName);
+                        loginToken = tokenData.token;
                     }
 
                     // ★ 使用服务端确认的规范身份
@@ -467,6 +468,9 @@
                     window._xtjCanonicalUser = confirmedUser;
                     window.__xtjServerIsAdmin = false;
                     window.__xtjServerIsAdminOwner = '';
+                    // auth-ready consumers must observe the confirmed new
+                    // identity, rather than the previous guest/account.
+                    setUserToken(loginToken, confirmedUser);
                     await loadCurrentUserInfoSnapshot(currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function" && confirmedUser !== ADMIN_NAME) {
@@ -556,7 +560,6 @@
                         showToast(registerData.error || "注册失败，请重试", "error");
                         return;
                     }
-                    setUserToken(registerData.token, registerData.user_name);
                     // ★ 使用服务端返回的规范 user_name，禁止使用输入框 name
                     var serverUserName = (registerData.user_name || '').trim();
                     if (!serverUserName || serverUserName !== name) {
@@ -572,6 +575,7 @@
                     // ★ 审计修复：注册成功同样置位认证状态（与登录路径对称）
                     window._xtjAuthState = 'authenticated';
                     window._xtjCanonicalUser = currentUser;
+                    setUserToken(registerData.token, currentUser);
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
                             window.logLoginEventSafe(currentUser, "register_success");

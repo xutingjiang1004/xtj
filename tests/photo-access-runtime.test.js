@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const express = require('express'), request = require('supertest');
+const { createHash } = require('node:crypto');
 const { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, createPhotoAccess, shareCodec, photoPayload, setPhotoSession, protectPhotoPath, migratePhotoStorage } = require('../render-api/photo-access');
 const A = '11111111-1111-4111-8111-111111111111', B = '22222222-2222-4222-8222-222222222222', C = '33333333-3333-4333-8333-333333333333';
 const SESSION = '44444444-4444-4444-8444-444444444444';
@@ -10,15 +11,16 @@ function fixture() {
   const photos = [A,B,C].map((id,i) => ({ id,user_name:'owner',media_type:'__photo_wall__',media_url:origin+'/storage/v1/object/public/uploads/photos/'+i+'.png',visibility:'public',content:JSON.stringify({caption:'作者的照片 '+i,storagePath:'photos/'+i+'.png',thumb:origin+'/storage/v1/object/public/uploads/thumbs/'+i+'.png'}),created_at:'2026-10-07T00:00:00Z' }));
   const publicPost = {id:'55555555-5555-4555-8555-555555555555',user_name:'owner',media_type:'album',media_url:origin+'/storage/v1/object/public/uploads/posts/one.png',visibility:'public',content:'公开帖子'};
   const attachments = [{post_id:publicPost.id,position:0,media_type:'image',media_url:publicPost.media_url}, {post_id:publicPost.id,position:1,media_type:'image',media_url:origin+'/storage/v1/object/public/uploads/posts/two.png'}];
-  const rows = [...photos,publicPost], objects = new Map(), storageCalls = [];
+  const rows = [...photos,publicPost], objects = new Map(), storageCalls = [], reads = [], downloads = [];
   for (let i=0;i<3;i++) { objects.set('uploads/photos/'+i+'.png',png); objects.set('uploads/thumbs/'+i+'.png',png); }
   objects.set('uploads/posts/one.png',png); objects.set('uploads/posts/two.png',png);
-  let dbFailed = false, moveFailed = false, active = true, mimeType = 'image/png';
+  let dbFailed = false, moveFailed = false, active = true, mimeType = 'image/png', dbDelay = 0, attachmentGate = null;
+  async function result(data,table) { reads.push(table); if(dbDelay)await new Promise(resolve=>setTimeout(resolve,dbDelay));if(table==='post_attachments'&&attachmentGate)await attachmentGate;return {data,error:dbFailed?Error('db'):null}; }
   const supabase = {
     from(table) {
       let filtered = table === 'post_attachments' ? attachments.slice() : rows.slice();
       const q = { select(){return this;}, eq(k,v){filtered=filtered.filter(row=>row[k]===v);return this;}, in(k,values){filtered=filtered.filter(row=>values.includes(row[k]));return this;}, order(){return this;},
-        maybeSingle:async()=>({data:filtered[0] || null,error:dbFailed?Error('db'):null}), then(resolve,reject){return Promise.resolve({data:filtered,error:dbFailed?Error('db'):null}).then(resolve,reject);} };
+        maybeSingle:()=>result(filtered[0] || null,table), then(resolve,reject){return result(filtered,table).then(resolve,reject);} };
       return q;
     },
     storage:{from(bucket) {
@@ -41,11 +43,14 @@ function fixture() {
   const api = createPhotoAccess({app,supabase,supabaseUrl:origin,secret:'test-only-shared-secret',authenticateUser,optionalAuth,verifyToken,rateLimit:()=>((req,res,next)=>next()),activeSession:async(id,actor)=>active&&id===SESSION&&actor==='owner',
     fetchImpl:async(url,options)=>{
       const u=new URL(url),value=objects.get(decodeURIComponent(u.pathname.slice(1)));if(!value)return new Response(null,{status:404});
-      let bytes=value,status=200,headers={'Content-Type':mimeType,'Content-Length':String(value.length),'Accept-Ranges':'bytes'};
-      if(options.headers.Range){const [,start,end]=options.headers.Range.match(/^bytes=(\d+)-(\d*)$/) || [];const a=Number(start),b=end?Number(end):value.length-1;bytes=value.subarray(a,b+1);status=206;headers['Content-Range']=`bytes ${a}-${b}/${value.length}`;headers['Content-Length']=String(bytes.length);}
+      downloads.push({path:u.pathname,headers:{...options.headers},method:options.method});
+      const etag='"'+createHash('sha256').update(value).digest('hex')+'"',modified='Wed, 07 Oct 2026 00:00:00 GMT';
+      let bytes=value,status=200,headers={'Content-Type':mimeType,'Content-Length':String(value.length),'Accept-Ranges':'bytes',ETag:etag,'Last-Modified':modified};
+      if(!options.headers.Range&&(options.headers['If-None-Match']===etag||(!options.headers['If-None-Match']&&options.headers['If-Modified-Since']===modified)))return new Response(null,{status:304,headers:{ETag:etag,'Last-Modified':modified}});
+      if(options.headers.Range&&(!options.headers['If-Range']||options.headers['If-Range']===etag)){const [,start,end]=options.headers.Range.match(/^bytes=(\d+)-(\d*)$/) || [];const a=Number(start),b=end?Number(end):value.length-1;bytes=value.subarray(a,b+1);status=206;headers['Content-Range']=`bytes ${a}-${b}/${value.length}`;headers['Content-Length']=String(bytes.length);}
       return new Response(options.method==='HEAD'?null:bytes,{status,headers});
     }});
-  return {app,api,photos,publicPost,objects,storageCalls,supabase,setDbFailed(v){dbFailed=v;},setMoveFailed(v){moveFailed=v;},setActive(v){active=v;},setMime(v){mimeType=v;}};
+  return {app,api,photos,publicPost,objects,storageCalls,reads,downloads,supabase,setAttachmentGate(v){attachmentGate=v;},setDbDelay(v){dbDelay=v;},setDbFailed(v){dbFailed=v;},setMoveFailed(v){moveFailed=v;},setActive(v){active=v;},setMime(v){mimeType=v;}};
 }
 function body(response) { return Buffer.isBuffer(response.body)?response.body:Buffer.from(response.text || ''); }
 
@@ -53,7 +58,7 @@ test('wall bytes deny anonymous/forged requests and preserve authenticated origi
   const f=fixture();await request(f.app).get('/api/photo/'+A+'/media').expect(401);assert.equal(f.storageCalls.length,0);
   await request(f.app).get('/api/photo/'+A+'/media?user_name=owner').set('Authorization','Bearer forged').expect(401);
   const response=await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').expect(200);
-  assert.deepEqual(body(response),png);assert.match(response.headers['cache-control'],/no-store/);assert.equal(f.objects.has('uploads/photos/0.png'),false);assert.deepEqual(f.objects.get(PHOTO_BUCKET+'/photos/0.png'),png);
+  assert.deepEqual(body(response),png);assert.equal(response.headers['cache-control'],'private, no-cache, must-revalidate');assert.equal(f.objects.has('uploads/photos/0.png'),false);assert.deepEqual(f.objects.get(PHOTO_BUCKET+'/photos/0.png'),png);
   const head=await request(f.app).head('/api/photo/'+A+'/media').set('Authorization','Bearer other').expect(200);assert.equal(head.headers['content-length'],String(png.length));
   const range=await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').set('Range','bytes=0-3').expect(206);assert.deepEqual(body(range),png.subarray(0,4));
   await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').set('Range','bytes=0-3,8-10').expect(416);
@@ -153,4 +158,63 @@ test('public post albums and website share pages remain readable by guests; priv
   await request(f.app).get('/api/post/'+A+'/media/0').expect(404);await request(f.app).get(path+'2').expect(404);await request(f.app).get(path+'0?storage_path=photos/0.png').expect(200);
   f.publicPost.visibility='private';await request(f.app).get(path+'0').expect(404);await request(f.app).get('/share/posts/'+f.publicPost.id).expect(404);
   await request(f.app).get(path+'0').set('Cookie',POST_MEDIA_COOKIE+'=owner~'+SESSION).expect(200);f.setActive(false);await request(f.app).get(path+'0').set('Cookie',POST_MEDIA_COOKIE+'=owner~'+SESSION).expect(404);
+});
+
+test('conditional originals reuse unchanged bytes only after fresh authorization, visibility and deletion checks',async()=>{
+  const f=fixture(),path='/api/post/'+f.publicPost.id+'/media/0';
+  const first=await request(f.app).get(path).expect(200),etag=first.headers.etag;
+  assert.ok(etag);assert.deepEqual(body(first),png);
+  const cached=await request(f.app).get(path).set('If-None-Match',etag).expect(304);
+  assert.equal(cached.text,'');assert.equal(cached.headers.etag,etag);assert.equal(cached.headers['cache-control'],'private, no-cache, must-revalidate');
+  await request(f.app).head(path).set('If-Modified-Since',first.headers['last-modified']).expect(304);
+  f.objects.set('uploads/posts/one.png',Buffer.concat([png,Buffer.from('changed')]));
+  const changed=await request(f.app).get(path).set('If-None-Match',etag).expect(200);assert.notEqual(changed.headers.etag,etag);
+  f.publicPost.visibility='private';const before=f.downloads.length;
+  await request(f.app).get(path).set('If-None-Match',changed.headers.etag).expect(404);assert.equal(f.downloads.length,before);
+  const cookie=POST_MEDIA_COOKIE+'=owner~'+SESSION;
+  await request(f.app).get(path).set('Cookie',cookie).set('If-None-Match',changed.headers.etag).expect(304);
+  f.setActive(false);await request(f.app).get(path).set('Cookie',cookie).set('If-None-Match',changed.headers.etag).expect(404);
+  f.publicPost.is_deleted=true;await request(f.app).get(path).set('Authorization','Bearer owner').set('If-None-Match',changed.headers.etag).expect(404);
+  f.setDbFailed(true);await request(f.app).get(path).set('If-None-Match',changed.headers.etag).expect(503);
+});
+
+test('cached wall/share originals cannot revalidate after logout, unsharing or author deletion',async()=>{
+  const f=fixture(),path='/api/photo/'+A+'/media',cookie=PHOTO_COOKIE+'=owner~'+SESSION;
+  const first=await request(f.app).get(path).set('Cookie',cookie).expect(200);
+  await request(f.app).get(path).set('Cookie',cookie).set('If-None-Match',first.headers.etag).expect(304);
+  await request(f.app).get(path).set('If-None-Match',first.headers.etag).expect(401);
+  f.setActive(false);await request(f.app).get(path).set('Cookie',cookie).set('If-None-Match',first.headers.etag).expect(401);
+  const share=await request(f.app).post('/api/photo/share').set('Authorization','Bearer owner').send({photo_ids:[A]}).expect(200);
+  const shared='/api/photo/shared/'+share.body.share_path.split('/').at(-1)+'/'+A+'/media';
+  await request(f.app).get(shared).set('If-None-Match',first.headers.etag).expect(304);
+  f.photos[0].visibility='private';await request(f.app).get(shared).set('If-None-Match',first.headers.etag).expect(404);
+  f.photos[0].visibility='public';f.photos[0].is_deleted=true;await request(f.app).get(shared).set('If-None-Match',first.headers.etag).expect(404);
+});
+
+test('range revalidation preserves bytes and returns the full changed original for a stale If-Range',async()=>{
+  const f=fixture(),path='/api/post/'+f.publicPost.id+'/media/0',first=await request(f.app).get(path).expect(200);
+  const range=await request(f.app).get(path).set('Range','bytes=0-3').set('If-Range',first.headers.etag).set('If-None-Match',first.headers.etag).expect(206);
+  assert.deepEqual(body(range),png.subarray(0,4));assert.equal(f.downloads.at(-1).headers['If-None-Match'],undefined);
+  const full=await request(f.app).get(path).set('Range','bytes=0-3').set('If-Range','"old"').expect(200);assert.deepEqual(body(full),png);
+});
+
+test('simultaneous album cells share only pending reads; the next request observes changed privacy',async()=>{
+  const f=fixture(),path='/api/post/'+f.publicPost.id+'/media/';f.setDbDelay(20);
+  await Promise.all([request(f.app).get(path+'0').expect(200),request(f.app).get(path+'1').expect(200)]);
+  assert.deepEqual(f.reads,['posts','post_attachments']);
+  f.publicPost.visibility='private';await request(f.app).get(path+'0').expect(404);
+  assert.deepEqual(f.reads,['posts','post_attachments','posts']);
+});
+
+test('a stalled attachment read cannot keep an old public permission alive for later requests',async()=>{
+  const f=fixture(),path='/api/post/'+f.publicPost.id+'/media/';let release,timer;
+  f.setAttachmentGate(new Promise(resolve=>release=resolve));
+  const first=request(f.app).get(path+'0').then(response=>response);
+  try{
+    for(let i=0;i<100&&!f.reads.includes('post_attachments');i++)await new Promise(resolve=>setImmediate(resolve));
+    assert.ok(f.reads.includes('post_attachments'));
+    f.publicPost.visibility='private';
+    const second=await Promise.race([request(f.app).get(path+'1').then(response=>response),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('later request reused a completed permission read')),1000);})]);
+    assert.equal(second.status,404);assert.deepEqual(f.reads,['posts','post_attachments','posts']);
+  }finally{clearTimeout(timer);release();await first;}
 });

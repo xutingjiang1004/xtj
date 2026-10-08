@@ -1,5 +1,20 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),{postBrowserFixture,wireAiChat}=require('./helpers/post-browser-fixture');
+test('large original grids request at most four near-viewport images and resume after scrolling or rebuilding', {timeout:45000},async()=>{
+ const f=await postBrowserFixture({holdImages:true,counts:[3,9,9,9,9,9]});try{
+  const {page}=f;
+  await page.waitForFunction(()=>document.querySelectorAll('#feed .post-media-cell img[src]').length>0);
+  const initial=await page.locator('#feed .post-media-cell img').evaluateAll(imgs=>({requested:imgs.filter(img=>img.hasAttribute('src')).length,total:imgs.length,first:imgs.slice(0,3).map(img=>({src:img.getAttribute('src'),priority:img.fetchPriority,loading:img.loading})),waiting:imgs.filter(img=>img.hasAttribute('data-post-src')).length}));
+  assert.ok(initial.requested<=4);assert.ok(initial.total>initial.requested);assert.ok(initial.waiting>0);
+  assert.ok(initial.first.every(img=>img.src&&img.priority==='high'&&img.loading==='eager'));
+  f.releaseImages();await page.waitForFunction(()=>Array.from(document.querySelectorAll('#feed .post-media-cell img')).slice(0,3).every(img=>img.complete&&img.naturalWidth>0));
+  const last=page.locator('#feed .post').last();await last.scrollIntoViewIfNeeded();
+  await page.waitForFunction(id=>{const imgs=Array.from(document.querySelectorAll('#feed .post[data-post-id="'+id+'"] .post-media-cell img')).filter(img=>img.getBoundingClientRect().top<innerHeight&&img.getBoundingClientRect().bottom>0);return imgs.length>0&&imgs.every(img=>img.complete&&img.naturalWidth>0);},f.posts.at(-1).id);
+  await page.evaluate(()=>renderFeed({posts:feedAllPosts,comments:feedAllComments,likes:feedAllLikes}));
+  await page.locator('#feed .post').first().scrollIntoViewIfNeeded();await page.waitForFunction(()=>Array.from(document.querySelectorAll('#feed .post-media-cell img')).slice(0,3).every(img=>img.complete&&img.naturalWidth>0));
+  assert.deepEqual(f.errors,[]);
+ }finally{f.releaseImages();await f.close();}
+});
 for(const [name,viewport] of [['390px',{width:390,height:844}],['desktop',{width:1280,height:900}]])for(const theme of ['light','dark']){
  test(`${name} ${theme}: real homepage grids, full Detail, ordered viewer and existing interactions`,{timeout:60000},async()=>{
   const f=await postBrowserFixture({viewport,theme});try{
@@ -20,8 +35,8 @@ for(const [name,viewport] of [['390px',{width:390,height:844}],['desktop',{width
    const post=f.posts.find(p=>p.media_items.length===15),card=page.locator(`#feed .post[data-post-id="${post.id}"]`);await card.scrollIntoViewIfNeeded();
    await card.locator('.post-media-cell').nth(3).click();await page.waitForFunction(()=>document.getElementById('photoPreviewOverlay')?.classList.contains('active')&&window.photoPreviewCurrent?.__xtjMediaIndex===3);
    assert.equal(await page.evaluate(()=>window.__xtjPreviewExplicitPhotos.length),15);
-   await page.evaluate(()=>ppNextPhoto());await page.waitForFunction(()=>window.photoPreviewCurrent?.__xtjMediaIndex===4);
-   await page.evaluate(()=>ppPrevPhoto());await page.waitForFunction(()=>window.photoPreviewCurrent?.__xtjMediaIndex===3);
+   await page.getByRole('button',{name:'下一张',exact:true}).click();await page.waitForFunction(()=>window.photoPreviewCurrent?.__xtjMediaIndex===4);
+   await page.getByRole('button',{name:'上一张',exact:true}).click();await page.waitForFunction(()=>window.photoPreviewCurrent?.__xtjMediaIndex===3);
    await page.waitForTimeout(500);assert.equal(await page.locator('#ppDeleteBtn').getAttribute('aria-label'),'删除帖子');
    await page.evaluate(()=>closePhotoPreview());await page.waitForFunction(()=>!document.getElementById('photoPreviewOverlay').classList.contains('active'));
    const first=f.posts[0],firstCard=page.locator(`#feed .post[data-post-id="${first.id}"]`);await firstCard.scrollIntoViewIfNeeded();
@@ -49,6 +64,13 @@ test('real composer appends, removes, rejects mixing; upload/create failures ret
   f.setFailCreate(false);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled&&selectedPostMedia.length===0);
   const created=f.getCreated();assert.equal(created.attachments.length,4);assert.deepEqual(created.attachments.map(a=>a.position),[0,1,2,3]);assert.equal(new Set(created.attachments.map(a=>a.upload_id)).size,4);assert.equal(new Set(created.attachments.map(a=>a.storage_path)).size,4);assert.ok(created.attachments.every(a=>a.width===1&&a.height===1));assert.equal(created.media_type,'album');
   assert.equal(await page.locator('#postInp').inputValue(),'');assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] .post-media-cell`).count(),4);await page.waitForFunction(()=>createdPostUrls.length>=5&&createdPostUrls.every(url=>revokedPostUrls.includes(url)));assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] img`).evaluateAll(imgs=>imgs.every(img=>!img.src.startsWith('blob:')&&img.complete&&img.naturalWidth>0)),true);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('a single post original keeps gallery arrows hidden',async()=>{
+ const f=await postBrowserFixture({counts:[1]});try{
+  const {page}=f;await page.locator('#feed .post-media-cell').first().click();await page.waitForFunction(()=>document.getElementById('photoPreviewOverlay')?.classList.contains('active'));await page.waitForTimeout(550);
+  assert.equal(await page.locator('#ppPrevBtn').isVisible(),false);assert.equal(await page.locator('#ppNextBtn').isVisible(),false);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 

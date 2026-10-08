@@ -3032,8 +3032,12 @@
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
                     var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
+                    var displayUrl = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url;
+                    // Local upload previews stay immediate. Network originals
+                    // start when the image scheduler brings them into view.
+                    var source = window.xtjPostImageScheduling && !displayUrl.startsWith('blob:') ? 'data-post-src' : 'src';
                     return '<button type="button" class="post-media-cell" aria-label="查看第' + (index + 1) + '张图片，共' + items.length + '张" style="--post-image-ratio:' + ratio + ';' + singleSize + '" onclick="if(this.classList.contains(\'post-image-failed\'))retryPostImage(this);else openImageViewer(\'' + safeJsStr(url) + '\', this.querySelector(\'img\'))">' +
-                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" src="' + escapeHtml(window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="low" onload="syncPostImageRatio(this)" onerror="markPostImageFailed(this)">' +
+                        '<img ' + attrs + dims + ' style="aspect-ratio:' + ratio + '" ' + source + '="' + escapeHtml(displayUrl) + '" alt="帖子图片 ' + (index + 1) + '" loading="lazy" decoding="async" fetchpriority="auto" onload="syncPostImageRatio(this)" onerror="markPostImageFailed(this)">' +
                         '<span class="post-media-error" role="status">图片未加载 · 点击重试</span>' +
                         (index === 8 && items.length > visible.length ? '<span class="post-media-overflow">+' + (items.length - visible.length) + '</span>' : '') + '</button>';
                 }).join('') + '</div>';
