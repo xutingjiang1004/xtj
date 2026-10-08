@@ -6,8 +6,10 @@ test('large original grids request at most four near-viewport images and resume 
   await page.waitForFunction(()=>document.querySelectorAll('#feed .post-media-cell img[src]').length>0);
   const initial=await page.locator('#feed .post-media-cell img').evaluateAll(imgs=>({requested:imgs.filter(img=>img.hasAttribute('src')).length,total:imgs.length,first:imgs.slice(0,3).map(img=>({src:img.getAttribute('src'),priority:img.fetchPriority,loading:img.loading})),waiting:imgs.filter(img=>img.hasAttribute('data-post-src')).length}));
   assert.ok(initial.requested<=4);assert.ok(initial.total>initial.requested);assert.ok(initial.waiting>0);
+  assert.ok(await page.locator('#feed img[data-post-src]:not([src])').evaluateAll(imgs=>imgs.length>0&&imgs.every(img=>getComputedStyle(img).visibility==='hidden'&&img.getBoundingClientRect().height>0)));
   assert.ok(initial.first.every(img=>img.src&&img.priority==='high'&&img.loading==='eager'));
   f.releaseImages();await page.waitForFunction(()=>Array.from(document.querySelectorAll('#feed .post-media-cell img')).slice(0,3).every(img=>img.complete&&img.naturalWidth>0));
+  assert.ok(await page.locator('#feed .post').first().locator('.post-media-cell img').evaluateAll(imgs=>imgs.every(img=>getComputedStyle(img).visibility==='visible')));
   const last=page.locator('#feed .post').last();await last.scrollIntoViewIfNeeded();
   await page.waitForFunction(id=>{const imgs=Array.from(document.querySelectorAll('#feed .post[data-post-id="'+id+'"] .post-media-cell img')).filter(img=>img.getBoundingClientRect().top<innerHeight&&img.getBoundingClientRect().bottom>0);return imgs.length>0&&imgs.every(img=>img.complete&&img.naturalWidth>0);},f.posts.at(-1).id);
   await page.evaluate(()=>renderFeed({posts:feedAllPosts,comments:feedAllComments,likes:feedAllLikes}));
