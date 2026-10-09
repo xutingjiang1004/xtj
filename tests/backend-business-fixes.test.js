@@ -111,7 +111,7 @@ function cleanupWorkerFixture(interleave) {
   const source = fs.readFileSync(require.resolve('../render-api/server'), 'utf8');
   const start = source.indexOf('async function processStorageCleanupJobs()'), end = source.indexOf("app.post('/api/photo/delete'", start);
   const row = { id: 1, bucket: 'uploads', paths: interleave === 'mixed' ? ['photos/old','avatars/a'] : ['photos/old'], attempts: 0, status: 'pending', claim_token: null }, removed = [], buckets = [];
-  const supabase = {
+  const supabase = { async rpc(name,args){assert.equal(name,'claim_photo_cleanup_paths');return{data:{ok:true,paths:args.p_paths}};},
     from() { let update = null, filters = []; const q = {
       select() { return q; }, in() { return q; }, order() { return q; }, limit() { return q; },
       update(value) { update = value; return q; }, eq(k, v) { filters.push(r => r[k] === v); return q; }, is(k, v) { filters.push(r => r[k] === v); return q; },
@@ -122,7 +122,7 @@ function cleanupWorkerFixture(interleave) {
     }; return q; },
     storage: { from(bucket) { return { async remove(paths) { buckets.push(bucket); removed.push(paths.slice()); if (interleave === 'after-claim') { row.status = 'pending'; row.claim_token = null; row.paths.push('photos/new'); } return { data: paths.map(name => ({ name })) }; } }; } }
   };
-  const context = { supabase, PHOTO_BUCKET:require('../render-api/photo-access').PHOTO_BUCKET, safePhotoPath:require('../render-api/photo-access').safePhotoPath, _storageCleanupRunning: false, STORAGE_CLEANUP_CLAIM_TIMEOUT_MS: 60000, STORAGE_CLEANUP_LEASE_MS: 60000, STORAGE_CLEANUP_REMOVE_TIMEOUT_MS: 30000, STORAGE_CLEANUP_MAX_ATTEMPTS: 5, crypto: require('node:crypto'), withStorageCleanupTimeout: promise => promise, isNotFoundError: () => false, console: { warn() {} } };
+  const context = { require(name){assert.equal(name,'./storage-cleanup');return require('../render-api/storage-cleanup');}, supabase, PHOTO_BUCKET:require('../render-api/photo-access').PHOTO_BUCKET, safePhotoPath:require('../render-api/photo-access').safePhotoPath, _storageCleanupRunning: false, STORAGE_CLEANUP_CLAIM_TIMEOUT_MS: 60000, STORAGE_CLEANUP_LEASE_MS: 60000, STORAGE_CLEANUP_REMOVE_TIMEOUT_MS: 30000, STORAGE_CLEANUP_MAX_ATTEMPTS: 5, crypto: require('node:crypto'), withStorageCleanupTimeout: promise => promise, isNotFoundError: () => false, console: { warn() {} } };
   vm.createContext(context); vm.runInContext(source.slice(start, end), context);
   return { row, removed, buckets, run: context.processStorageCleanupJobs };
 }

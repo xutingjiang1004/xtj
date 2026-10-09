@@ -20,7 +20,7 @@ function createAuthorSupport({ express, supabase, sharp, authenticateUser, verif
     for (const provider of PROVIDERS) {
       const path = codes[provider];
       if (typeof path === 'string' && /^site-support\/(wechat|alipay)_[a-f0-9-]+\.(png|jpg|webp)$/.test(path)) {
-        out[provider + '_url'] = storage().getPublicUrl(path).data.publicUrl;
+        out[provider + '_url'] = '/api/uploads/media?path=' + encodeURIComponent(path);
       }
     }
     return out;

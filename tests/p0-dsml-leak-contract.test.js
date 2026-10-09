@@ -34,13 +34,9 @@ test('② Responses 路径思考模式不得清空 tools（宣称 ≡ 下发）'
   assert.match(serverSrc, /var responsesTools = workModeEnabled\s*\n?\s*\?\s*aiToolsForWorkMode\(\)/);
 });
 
-test('③ 工作模式（非视觉直传）强制走 Responses 路径', () => {
-  assert.match(serverSrc,
-    /if \(workModeEnabled && !_visionEngaged && validatedModel !== DEEPSEEK_RESPONSES_MODEL\)\s*\{\s*\n\s*validatedModel = DEEPSEEK_RESPONSES_MODEL;/,
-    '工作模式未归一到 responses 模型');
-  assert.match(serverSrc,
-    /var useBuiltInSearch = \(workModeEnabled && !_visionEngaged\)/,
-    '工作模式未强制启用内置搜索（Responses）路径');
+test('③ 普通模型保留选择，并按原生协议调用工具', () => {
+  assert.doesNotMatch(serverSrc, /if \(workModeEnabled && !_visionEngaged && validatedModel !== DEEPSEEK_RESPONSES_MODEL\)/);
+  assert.match(serverSrc, /var useBuiltInSearch = !_visionEngaged && validatedModel === DEEPSEEK_RESPONSES_MODEL;/);
 });
 
 test('④ 标准路径思考模式下 prompt 工具宣称改写为如实口径', () => {
@@ -52,7 +48,8 @@ test('④ 标准路径思考模式下 prompt 工具宣称改写为如实口径',
     '改写条件缺失');
 });
 
-test('⑤ 工作模式 FC 预检兜底不再要求关闭思考', () => {
-  assert.match(serverSrc, /if \(workModeEnabled && !aborted\) needsFcCheck = true;/);
+test('⑤ 思考模式直接挂载工具并受统一轮次上限约束', () => {
+  assert.match(serverSrc, /var allowToolsWithThinking = true;/);
+  assert.match(serverSrc, /max_tool_rounds: workModeEnabled \? aiTaskPolicy\.MAX_TOOL_ROUNDS : 4/);
   assert.doesNotMatch(serverSrc, /if \(workModeEnabled && !useThinking && !aborted\) needsFcCheck = true;/);
 });

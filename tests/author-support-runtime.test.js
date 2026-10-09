@@ -43,7 +43,7 @@ test('both QR codes retain original bytes and concurrent saves retain the other 
     request(f.app).post('/admin/author-support').set('Authorization','Bearer admin').send({provider,image:bytes.toString('base64')}).expect(200)));
   const r=await request(f.app).get('/api/chat/author-support').set('Authorization','Bearer viewer').expect(200);
   assert.equal(r.headers['cache-control'],'no-store');
-  assert.match(r.body.wechat_url,/site-support\/wechat_/);assert.match(r.body.alipay_url,/site-support\/alipay_/);
+  assert.match(new URL(r.body.wechat_url,'https://xtj.test').searchParams.get('path'),/site-support\/wechat_/);assert.match(new URL(r.body.alipay_url,'https://xtj.test').searchParams.get('path'),/site-support\/alipay_/);
   const codes=JSON.parse(f.getRow().content);
   assert.ok(f.uploaded.get(codes.wechat).equals(wechat));assert.ok(f.uploaded.get(codes.alipay).equals(alipay));
   assert.deepEqual(Object.keys(r.body).sort(),['ok','author','disclaimer','wechat_url','alipay_url'].sort());

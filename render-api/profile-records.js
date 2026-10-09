@@ -1,6 +1,7 @@
 'use strict';
 const { NORMAL_POST_MEDIA_TYPES, isNormalPost } = require('./post-query');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const KINDS = ['posts', 'views', 'likes', 'comments'];
 const FIELDS = 'id,user_name,content,media_type,media_url,created_at,visibility,is_deleted';
 async function result(query) {
@@ -38,13 +39,13 @@ function createProfileRecords({ express, supabase, authenticateUser, rateLimit }
   });
   router.get('/', async (req, res) => {
     const kind = String(req.query.kind || ''), at = req.query.before_at, id = req.query.before_id;
-    if (!KINDS.includes(kind) || !!at !== !!id || (at && (!/^\d{4}-\d{2}-\d{2}T/.test(at) || !Number.isFinite(Date.parse(at)) || !UUID.test(id)))) {
+    if (!KINDS.includes(kind) || !!at !== !!id || (at && (typeof at !== 'string' || !TIMESTAMP.test(at) || !Number.isFinite(Date.parse(at)) || !UUID.test(id)))) {
       return res.status(400).json({ ok: false, error: '记录参数无效' });
     }
     const limit = Math.min(40, Math.max(1, parseInt(req.query.limit, 10) || 20));
     try {
       // Match timestamps AND ids so equal-time rows do not disappear between pages.
-      const cursor = at ? 'created_at.lt.' + new Date(at).toISOString() + ',and(created_at.eq.' + new Date(at).toISOString() + ',id.lt.' + id + ')' : '';
+      const cursor = at ? 'created_at.lt.' + at + ',and(created_at.eq.' + at + ',id.lt.' + id + ')' : '';
       let q = query(req.userName, kind, false, cursor);
       const page = await result(q.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1));
       const all = page.data || [], rows = all.slice(0, limit);

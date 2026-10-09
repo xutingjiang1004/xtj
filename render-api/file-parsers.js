@@ -23,80 +23,35 @@ function getXlsxParser() {
   return xlsxParser;
 }
 
-// code-agent.js 专用：PDF buffer 解析
-// ★ 安全加固：体积上限 + 解析超时 + 并发信号量，防止恶意 PDF（zip-bomb/深层嵌套）
-//   OOM 或挂死事件循环。pdf-parse 的同步解析无法被 Promise.race 中断，
-//   因此用信号量限制同时解析数，把单事件循环被占满的窗口收敛到固定上限（审计 🟠）。
-//   长期方案：将解析移入 worker_threads 并对可中断信号做响应，从根本上缩短单次
-//   解析占满事件循环的时长（超出本模块范围，暂以耗时告警 + 信号量缓解）。
-var MAX_PDF_BUFFER_BYTES = 8 * 1024 * 1024; // 8MB（由 15MB 下调）
-var PDF_PARSE_TIMEOUT_MS = 15000;
-var MAX_CONCURRENT_PDF_PARSES = 2;
-var _pdfParseInFlight = 0;
-var _pdfParseWaiters = [];
 
-// 进程级并发信号量：最多 MAX_CONCURRENT_PDF_PARSES 个 PDF 同时解析，
-// 超出排队等待，防止并发恶意 PDF 反复占满事件循环。
-// ★ 审计修复：旧实现"先等后计"存在竞态 —— finally 中 `_pdfParseInFlight--`
-//   与唤醒排队者（next()）之后，被唤醒方要等 microtask 恢复才执行自己的
-//   `_pdfParseInFlight++`；此间隙内新调用方检查 `>= 2` 仍通过并先行占位，
-//   唤醒者再叠加，并发数可超过上限。改为**入队即计数**：进入函数先 ++，
-//   超限时排队（名额已持有），唤醒后直接执行，计数全程精确。
-async function withPdfParseSlot(fn) {
-  _pdfParseInFlight++;
-  if (_pdfParseInFlight > MAX_CONCURRENT_PDF_PARSES) {
-    await new Promise(function(resolve) { _pdfParseWaiters.push(resolve); });
-  }
-  var parseStartAt = Date.now();
+const { Worker } = require('node:worker_threads');
+const path = require('node:path');
+let active = 0;
+const waiters = [];
+async function parseDocumentBuffer(buffer, kind) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > (kind === 'pdf' ? 8 : 20) * 1024 * 1024) throw Error('文档大小超出允许范围');
+  if (!['pdf','docx','xlsx'].includes(kind)) throw Error('不支持的文档类型');
+  if (active >= 2) {
+    if (waiters.length >= 8) throw Error('文档解析繁忙，请稍后重试');
+    await new Promise(resolve => waiters.push(resolve));
+  } else active++;
   try {
-    return await fn();
-  } finally {
-    _pdfParseInFlight--;
-    // 审计 🟠 单次解析耗时告警：同步解析即便超时仍占满事件循环，>5s 的解析说明
-    // 该 PDF 复杂度异常，告警供观测；不改变 8MB/15s/信号量上限。
-    var elapsedMs = Date.now() - parseStartAt;
-    if (elapsedMs > 5000) {
-      console.warn('[PARSER] PDF parse took ' + elapsedMs + 'ms (>5s); investigate PDF complexity or move to worker_threads');
-    }
-    var next = _pdfParseWaiters.shift();
-    if (next) next();
-  }
-}
-
-async function parsePdfBuffer(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length === 0 || buffer.length > MAX_PDF_BUFFER_BYTES) {
-    throw new Error('PDF 文件大小超出允许范围');
-  }
-  var library = getPdfParser();
-  if (!library) throw new Error('PDF 解析库不可用');
-  return await withPdfParseSlot(async function() {
-    if (typeof library === 'function') {
-      return await withTimeout(Promise.resolve(library(buffer)), PDF_PARSE_TIMEOUT_MS, 'PDF 解析超时');
-    }
-    if (typeof library.PDFParse !== 'function') throw new Error('PDF 解析库版本不兼容');
-    var parser = new library.PDFParse({ data: new Uint8Array(buffer) });
-    try {
-      var result = await withTimeout(parser.getText(), PDF_PARSE_TIMEOUT_MS, 'PDF 解析超时');
-      return {
-        text: result && result.text || '',
-        numpages: result && Number(result.total) || 0,
-        info: {}
+    return await new Promise((resolve,reject) => {
+      const worker = new Worker(path.join(__dirname,'document-parser-worker.js'), {
+        workerData:{bytes:buffer,kind},resourceLimits:{maxOldGenerationSizeMb:128,maxYoungGenerationSizeMb:16,stackSizeMb:4}
+      });
+      let done = false;
+      const finish = async (error,result) => {
+        if (done) return; done = true; clearTimeout(timer);
+        await worker.terminate();
+        if (error) reject(error); else resolve(result);
       };
-    } finally {
-      try { await parser.destroy(); } catch (_) {}
-    }
-  });
+      const timer = setTimeout(() => finish(Error('文档解析超时')),15000);
+      worker.once('message', result => finish(result.ok ? null : Error(result.error),result));
+      worker.once('error', error => finish(error));
+      worker.once('exit', () => { if (!done) finish(Error('文档解析已停止')); });
+    });
+  } finally { const next=waiters.shift(); if(next)next(); else active--; }
 }
-
-function withTimeout(promise, ms, message) {
-  var timer = null;
-  var timeoutPromise = new Promise(function (_, reject) {
-    timer = setTimeout(function () { reject(new Error(message)); }, ms);
-    if (timer.unref) timer.unref();
-  });
-  return Promise.race([promise, timeoutPromise]).finally(function () {
-    if (timer) clearTimeout(timer);
-  });
-}
-
-module.exports = { loadFileParser, getPdfParser, getMammothParser, getXlsxParser, parsePdfBuffer };
+function parsePdfBuffer(buffer) { return parseDocumentBuffer(buffer,'pdf'); }
+module.exports = { loadFileParser, getPdfParser, getMammothParser, getXlsxParser, parsePdfBuffer, parseDocumentBuffer };

@@ -99,7 +99,7 @@ jobs:
       - name: Verify multi-image post transactions and cleanup
         env:
           XTJ_TEST_DATABASE_URL: postgresql://postgres:local-ci-only@127.0.0.1:5432/postgres
-        run: node --test tests/post-attachments-db.test.js
+          run: node --test tests/post-attachments-db.test.js tests/maintenance-boundaries-db.test.js
 
   ui:
     name: UI Tests

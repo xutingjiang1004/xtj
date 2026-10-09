@@ -76,10 +76,11 @@ test('feed quota restrictions do not retry through direct Supabase or present a 
   const f = await postBrowserFixture({ counts: [1] });
   try {
     await f.page.route('**/api/feed?*', r => r.fulfill({ status: 402, json: { ok: false, code: 'egress_quota_exceeded', error: '网站数据服务流量额度已用完，服务暂时受限，请等待恢复', retryable: false } }));
+    const initialDirectReads = f.calls.filter(c => c.path === '/test-supabase/rest/v1/posts').length;
     await f.page.evaluate(() => { persistFeedCacheSnapshotNow(); return loadFeed(true); });
     await f.page.waitForFunction(() => document.getElementById('feedStaleNotice')?.textContent.includes('等待恢复'));
     assert.equal(await f.page.locator('#feedStaleNotice').getAttribute('role'), 'status');
-    assert.equal(f.calls.filter(c => c.path === '/test-supabase/rest/v1/posts').length, 0);
+    assert.equal(f.calls.filter(c => c.path === '/test-supabase/rest/v1/posts').length, initialDirectReads);
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });

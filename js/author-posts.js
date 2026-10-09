@@ -8,7 +8,7 @@
     return state === s && s.generation === generation && s.owner === now.owner && s.epoch === now.epoch && modal && modal.classList.contains('active');
   }
   function safeUrl(value) {
-    try { var url = new URL(value, location.href); return /^https?:$/.test(url.protocol) ? url.href : ''; } catch (_) { return ''; }
+    try { var url = new URL(window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(value) : value, location.href); return /^https?:$/.test(url.protocol) ? url.href : ''; } catch (_) { return ''; }
   }
   function textOf(post) {
     try { var payload = JSON.parse(post.content); if (payload && payload.__type === '__xtj_post_v2__') return String(payload.text || ''); } catch (_) {}

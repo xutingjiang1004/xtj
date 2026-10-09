@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {chromium}=require('playwright'),express=require('express'),request=require('supertest');
 const read=p=>fs.readFileSync(p,'utf8');
 async function pageFor(t,html,viewport={width:1024,height:768}) {
- const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});t.after(()=>browser.close());
+ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH || (require('node:fs').existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});t.after(()=>browser.close());
  const page=await browser.newPage({viewport});await page.route('https://ui.test/**',r=>r.fulfill({contentType:'text/html',body:html}));await page.goto('https://ui.test/');return page;
 }
 function slice(file,from,to){const s=read(file),a=s.indexOf(from);assert.ok(a>=0);return s.slice(a,s.indexOf(to,a));}
@@ -64,7 +64,7 @@ test('panel transition animates all content, rapid switches cancel and motion-of
  await p.evaluate(()=>{window.currentUser='A';window.currentDockTab='posts';window.safeStorage={set:()=>{}};window.startDMPolling=()=>{};window.dockPanelTransitionTimer=0;window.dockPanelAnimation=null;});
  const code=slice('js/core-parts/06-chat-and-nav.js',"                var previousPanel = document.querySelector('.dock-panel.active');",'                const tabBtn =');await p.addScriptTag({content:'window.changePanel=function(tab){'+code+'};'});
  await p.evaluate(()=>changePanel('chat'));assert.equal(await p.evaluate(()=>dockPanelAnimation.effect.target.id),'panelChat');
- await p.evaluate(()=>changePanel('profile'));await p.waitForTimeout(250);assert.equal(await p.locator('.dock-panel.active').getAttribute('id'),'panelProfile');assert.equal(await p.evaluate(()=>document.getAnimations().length),0);
+ await p.evaluate(async()=>{changePanel('profile');await dockPanelAnimation.finished;});assert.equal(await p.locator('.dock-panel.active').getAttribute('id'),'panelProfile');assert.equal(await p.evaluate(()=>document.getAnimations().length),0);
  await p.evaluate(()=>{document.documentElement.setAttribute('data-xtj-motion','off');changePanel('posts');});assert.equal(await p.evaluate(()=>document.getAnimations().length),0);
 });
 test('original photo stays bright after opening and navigation, and toolbar geometry stays fixed',async t=>{

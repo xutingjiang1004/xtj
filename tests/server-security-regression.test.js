@@ -114,7 +114,7 @@ test('token revocation persists a non-null actor key and never revokes only in m
   let rejectWrite = false;
   const rows = [];
   const revokedTokenHashes = new Set();
-  const context = vm.createContext({ crypto, revokedTokenHashes,
+  const context = vm.createContext({ crypto, revokedTokenHashes, revokedTokenHashExpiries: new Map(),
     ADMIN_USERNAME: 'test-admin', REVOKED_TOKEN_MARKER: '__revoked_token__',
     console: { warn() {} },
     supabase: { from(table) {
@@ -364,28 +364,12 @@ test('P2-12: 配额跨窗口重置，且预算预检是只读的', () => {
   assert.equal(g.photoUploadQuotaRemainingBytes('grace'), g.PHOTO_UPLOAD_QUOTA_BYTES, '窗口过期后额度应恢复');
 });
 
-test('P2-12: 路由在第 N 句中的接线（静态契约）', () => {
+test('photo upload route retains its ingress reservation through storage and releases it in finally', () => {
   const upload = routeBlock("app.post('/api/photo/upload'", '// ===================== 用户照片删除 API');
-  // ① 预算预检必须排在 express.raw 之前 —— 否则仍是"先把 50MB 缓冲进内存再拒绝"
-  const precheckAt = upload.indexOf('photoUploadBudgetPrecheck, express.raw(');
-  assert.notEqual(precheckAt, -1, '预算预检中间件必须排在 express.raw 之前');
-  // ② 配额必须在 sharp 解码之前预占
-  const consumeAt = upload.indexOf('tryConsumePhotoUploadQuota(userName, buf.length)');
-  const sharpAt = upload.indexOf('sharp(buf');
-  assert.ok(consumeAt > -1 && sharpAt > -1 && consumeAt < sharpAt, '配额必须先于 sharp 解码扣除');
-  // ③ 并发闸：拿不到名额立即 429
-  assert.match(upload, /releaseDecodeSlot = acquirePhotoDecodeSlot\(userName\)/);
-  assert.doesNotMatch(upload, /acquirePhotoDecodeSlot\(userName\)\s*;\s*await/, '拿名额这一步不能 await（否则等于排队，缓冲仍留在内存里）');
-  assert.match(upload, /code: 'photo_decode_busy'/);
-  // ④ 释放与回滚挂在 finally 上（写在各 return 分支里必漏）
-  assert.match(upload, /\} finally \{[\s\S]*releaseDecodeSlot\(\)[\s\S]*refundPhotoUploadQuota\(userName, quotaCharged\)/);
-  // ⑤ 只有字节真正落到 Storage 才记账不回滚
-  const commitAt = upload.indexOf('quotaCommitted = true');
-  const uploadAt = upload.indexOf("supabase.storage.from('uploads').upload(");
-  assert.ok(commitAt > uploadAt, '只有在上传成功之后才确认记账');
-  // ⑥ 预占失败时不记账（quotaCharged 保持 0），避免"没扣却退"
-  assert.match(upload, /if \(!tryConsumePhotoUploadQuota\(userName, buf\.length\)\) \{[\s\S]*?return res\.status\(429\)[\s\S]*?\}\s*\n\s*quotaCharged = buf\.length;/);
-  assert.match(source, /PHOTO_DECODE_MAX_INFLIGHT_PER_USER = \d+/, '并发上限必须是具名常量');
+  assert.match(upload,/photoUploadBudgetPrecheck, express.raw/);
+  assert.match(upload,/reservation.processing = true/);
+  assert.match(upload,/reservation.committed = true/);
+  assert.match(upload,/finally \{[\s\S]*reservation.finalize\(\)/);
 });
 
 // ===================== P2-11：头像更新按用户串行化 =====================

@@ -23,4 +23,13 @@
     };
     // 全局 API_BASE 兼容（部分旧模块直接引用 window.API_BASE）
     window.API_BASE = window.XTJ_CONFIG.API_BASE;
+    window.xtjUploadDisplayUrl = function(value) {
+        try {
+            var url = new URL(value, window.location.href);
+            var storage = new URL(window.XTJ_CONFIG.SUPABASE_URL);
+            var prefix = '/storage/v1/object/public/uploads/';
+            if (url.origin !== storage.origin || !url.pathname.startsWith(prefix)) return value;
+            return window.XTJ_CONFIG.API_BASE + '/api/uploads/media?path=' + encodeURIComponent(decodeURIComponent(url.pathname.slice(prefix.length)));
+        } catch (_) { return value; }
+    };
 })();
