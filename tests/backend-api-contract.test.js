@@ -26,25 +26,17 @@ function routeSource(method, route, nextRoute) {
   return server.slice(start, end);
 }
 
-test('DM list queries both sender and recipient fields and merges by message id', () => {
-  const source = routeSource('get', '/api/dm/list', "app.get('/api/dm/messages'");
-  assert.match(source, /\.eq\('user_name', req\.userName\)/);
-  assert.match(source, /\.eq\('media_url', req\.userName\)/);
-  assert.match(source, /new Map\(\)/);
-  assert.match(source, /created_at[\s\S]*localeCompare/);
-  assert.doesNotMatch(source, /actor_key', 'dm_/);
-});
-
-test('DM messages uses exact two-way participant filters and UUID-safe ordering', () => {
-  const source = routeSource('get', '/api/dm/messages', "app.post('/api/dm/read'");
-  assert.match(source, /buildDirectionQuery\(req\.userName, targetUser\)/);
-  assert.match(source, /buildDirectionQuery\(targetUser, req\.userName\)/);
-  assert.match(source, /\.eq\('user_name', sender\)\.eq\('media_url', recipient\)/);
-  // ★ 2026-08-05 修复：分页改为取最新消息（此前 asc 取最旧 N 条，长会话永远取不到新消息）
-  assert.match(source, /order\('created_at', \{ ascending: false \}\)/);
-  assert.doesNotMatch(source, /parseInt\(req\.query\.after_id|\.gt\('id'/);
-  assert.match(source, /new Map\(\)/);
-  assert.doesNotMatch(source, /\.or\(`/);
+test('DM compatibility APIs read canonical participant visibility before pagination', () => {
+  const list = routeSource('get','/api/dm/list',"app.get('/api/dm/messages'");
+  const messages = routeSource('get','/api/dm/messages',"app.post('/api/dm/read'");
+  assert.match(list,/readVisibleDmPosts\(req.userName/);
+  assert.match(messages,/readVisibleDmPosts\(req.userName/);
+  assert.match(messages,/p_peer: targetUser/);
+  const sql=fs.readFileSync('supabase/migrations/20261009102404_account_sessions_and_atomic_visibility.sql','utf8');
+  assert.match(sql,/p.user_name=p_actor OR p.media_url=p_actor/);
+  assert.match(sql,/p.user_name=p_peer OR p.media_url=p_peer/);
+  assert.match(sql,/s.hidden_at IS NULL/);
+  assert.match(sql,/ORDER BY p.created_at DESC,p.id DESC LIMIT/);
 });
 
 test('DM read state is authenticated, recipient-scoped, and returned authoritatively', () => {

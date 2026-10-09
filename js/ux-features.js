@@ -284,7 +284,10 @@
         if(!value||typeof value!=='object')return;
         for(var key of Object.keys(value)){
           var item=value[key];
-          if(typeof item==='string'&&/^(url|imageUrl|original_url|media_url|avatar_url)$/.test(key)){
+          if(typeof item==='string'&&/^(url|imageUrl|original_url|media_url|avatar_url|cover_url|background_url)$/.test(key)){
+              if(window.xtjUploadDisplayUrl)item=window.xtjUploadDisplayUrl(item);
+              if(/^\/api\/(?:uploads\/media\?|post\/[^/]+\/media\/)/.test(item))item=new URL(item,window.location.origin).href;
+              value[key]=item;
             if(/^\/api\/photo\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/media$/i.test(item)) {
               item=new URL(item,window.location.origin).href;value[key]=item;
             }
@@ -295,6 +298,7 @@
         }
       }
       Object.values(payload.data).forEach(function(rows){rows.forEach(function(row){files(row,row);});});
+      files(payload.account,{id:'account-settings'});
       var blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
       a.href=url;a.download='xtj-export-'+owner+'-'+Date.now()+'.json';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(url);a.remove();},1000);
       if(window.showToast)window.showToast('个人记录已完整导出，包含原始附件清单','success');

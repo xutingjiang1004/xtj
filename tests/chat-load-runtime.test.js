@@ -4,7 +4,7 @@ const {chromium}=require('playwright');
 const read=p=>fs.readFileSync(p,'utf8');
 function section(path,start,end){const s=read(path),a=s.indexOf(start);assert.ok(a>=0,start);const b=s.indexOf(end,a);assert.ok(b>=0,end);return s.slice(a,b);}
 async function fixture(t){
- const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});t.after(()=>browser.close());const page=await browser.newPage();page.setDefaultTimeout(6000);
+ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH || (require('node:fs').existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});t.after(()=>browser.close());const page=await browser.newPage();page.setDefaultTimeout(6000);
  await page.setContent('<div id="dockChatMessages"></div><div id="dockChatList"></div>');
  await page.evaluate(()=>{
   window.currentUser='A';window._authStateEpoch=1;window.dockChatActiveUser='peer';window.currentDockTab='chat';

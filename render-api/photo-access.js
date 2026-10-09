@@ -46,6 +46,7 @@ function setPhotoSession(res, token, expiresAt, sessionId) {
   const value = token + '~' + sessionId;
   res.cookie(PHOTO_COOKIE, value, { httpOnly:true, secure:true, sameSite:'Lax', path:'/api/photo', maxAge:expiresAt - Date.now() });
   res.cookie(POST_MEDIA_COOKIE, value, { httpOnly:true, secure:true, sameSite:'Lax', path:'/api/post', maxAge:expiresAt - Date.now() });
+  res.cookie(POST_MEDIA_COOKIE, value, { httpOnly:true, secure:true, sameSite:'Lax', path:'/api/uploads', maxAge:expiresAt - Date.now() });
 }
 function photoPayload(row, mediaUrl = photoMediaUrl(row.id)) {
   const source = metadata(row), content = {};
@@ -152,7 +153,7 @@ async function migratePhotoStorage(supabase) {
   return moved;
 }
 
-async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fetch }) {
+async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fetch, allowDownload = false }) {
   const range = req.headers.range;
   if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) return res.status(416).end();
   const signed = await supabase.storage.from(bucket).createSignedUrl(path, 60);
@@ -167,10 +168,13 @@ async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fe
     const response = await fetchImpl(signed.data.signedUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers, redirect: 'error', signal: controller.signal });
     if (![200,206,304,416].includes(response.status) || (response.status === 304 && (range || (!headers['If-None-Match'] && !headers['If-Modified-Since'])))) throw Error('media_download_unavailable');
     const type = String(response.headers.get('content-type') || '').split(';')[0];
-    if (![304,416].includes(response.status) && !/^(image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/i.test(type)) throw Error('media_type_unavailable');
+    const mediaType = /^(image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/i.test(type);
+    const downloadType = allowDownload && /^(?:application\/(?:pdf|octet-stream|zip|rtf|vnd\.openxmlformats-officedocument\.[a-z.]+)|text\/(?:plain|csv))$/i.test(type);
+    if (![304,416].includes(response.status) && !mediaType && !downloadType) throw Error('media_type_unavailable');
     // Every route authorizes against current session/visibility before reaching
     // this point. Private caches may reuse bytes only after that fresh check.
     res.status(response.status).set({ 'Cache-Control': 'private, no-cache, must-revalidate', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+    if (downloadType) res.set('Content-Disposition','attachment');
     for (const name of ['etag','last-modified','accept-ranges']) { const value = response.headers.get(name); if (value) res.set(name, value); }
     if (response.status !== 304) for (const name of ['content-type','content-length','content-range']) { const value = response.headers.get(name); if (value) res.set(name, value); }
     if (req.method === 'HEAD' || [304,416].includes(response.status)) { if (response.body) await response.body.cancel(); return res.end(); }

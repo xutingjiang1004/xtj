@@ -17,7 +17,7 @@ for (const width of [390,1024]) {
       let rawRequests=0;
       await f.page.route('**/storage/v1/object/public/uploads/posts/*',route=>{rawRequests++;return route.abort();});
       await f.page.route('**/api/post/*/media/*',route=>route.fulfill({contentType:'image/png',body:f.png}));
-      await f.page.reload({waitUntil:'domcontentloaded'});
+      await Promise.all([f.page.waitForResponse(response=>response.url().includes('/api/feed?')),f.page.reload({waitUntil:'domcontentloaded'})]);
       await f.page.waitForFunction(()=>document.querySelector('#feed .post-media-cell img')?.naturalWidth===1);
       assert.equal(rawRequests,0);
       assert.match(await f.page.locator('#feed .post-media-cell img').first().getAttribute('src'),new RegExp('/api/post/'+id+'/media/0'));

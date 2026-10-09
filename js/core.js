@@ -11049,7 +11049,7 @@ function renderProfileActivityList(kind) {
                 //   正常内联图，超出直接拒绝。
                 if (s.length > 2 * 1024 * 1024) return '';
                 // ★ M45：收紧协议白名单——http/https 与 blob:（本地媒体对象）放行
-                if (/^https?:/i.test(s)) return s;
+                if (/^https?:/i.test(s)) return window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(s) : s;
                 if (/^blob:/i.test(s)) return s;
                 // data: 仅放行可安全内联的位图类型，禁止 data:text/html 等可执行载荷
                 // （svg+xml 可能携带脚本面，一并拒绝）
@@ -16227,13 +16227,15 @@ function renderProfileActivityList(kind) {
             }
             function cacheSupportConfig(config,owner){
                 if(owner!==window.currentUser)return;_supportCache=config;_supportCacheAt=Date.now();_supportOwner=owner;
+                ['wechat','alipay'].forEach(function(provider){var raw=config[provider+'_url'];if(raw)config[provider+'_url']=new URL(raw,window.API_BASE||location.href).href;});
                 ['wechat','alipay'].forEach(function(provider){var url=sanitizeUrl(config[provider+'_url']||'');if(!/^https:\/\//i.test(url)||_supportImages.has(url))return;var image=new Image();image.decoding='async';image.src=url;_supportImages.set(url,image);});
                 if(_supportImages.size>4){var keep=[config.wechat_url,config.alipay_url];for(var url of _supportImages.keys())if(keep.indexOf(url)<0)_supportImages.delete(url);}
             }
             function paintSupportCodes(config,codes){
                 codes.replaceChildren();['wechat','alipay'].forEach(function(provider){
                     var card=document.createElement('section'),name=document.createElement('h4');name.textContent=provider==='wechat'?'微信':'支付宝';card.appendChild(name);
-                    var url=sanitizeUrl(config[provider+'_url']||'');
+                    var rawUrl=config[provider+'_url']||'';
+                    var url=rawUrl?sanitizeUrl(new URL(rawUrl,window.API_BASE||location.href).href):'';
                     if(url&&/^https:\/\//i.test(url)){
                         var button=document.createElement('button');button.type='button';button.className='author-support-image-button';button.setAttribute('aria-label','全屏查看'+name.textContent+'收款码');
                         var image=document.createElement('img');image.src=url;image.alt=name.textContent+'收款码';image.decoding='async';button.appendChild(image);card.appendChild(button);

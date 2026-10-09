@@ -196,6 +196,7 @@ app.disable('x-powered-by');
 // The product's only administrator is xxz. Credentials remain environment
 // secrets; missing admin credentials do not prevent ordinary service startup.
 const { readAuthRecord } = require('./auth-record');
+const { readAccountIdentity, matchesAccount } = require('./account-identity');
 const { claimPhotoUpload, ownsPhotoUpload, ownedPhotoUploadPaths } = require('./photo-ownership');
 const ADMIN_USERNAME = 'xxz';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -483,7 +484,7 @@ function getDeepSeekProbeSnapshot() {
   };
 }
 // 文件解析器 — 共用模块
-const { getPdfParser, getMammothParser, getXlsxParser, parsePdfBuffer } = require('./file-parsers');
+const { getPdfParser, getMammothParser, getXlsxParser, parsePdfBuffer, parseDocumentBuffer } = require('./file-parsers');
 
 // ===================== P: 深度研究模式 (Deep Research / Multi-Agent) =====================
 // P 改动:
@@ -2125,24 +2126,8 @@ async function executeToolCall(toolCall, context) {
         if (!dtype) return { tool_name: name, url: docUrl, error: '不支持的文档类型，仅支持 PDF / Word(docx) / Excel(xlsx,xls) / CSV' };
         var docBuf = docResp.buffer;
         var parsedText = '';
-        if (dtype === 'pdf') {
-          var pdfParser = getPdfParser();
-          if (!pdfParser) return { tool_name: name, error: 'PDF 解析器不可用' };
-          var pdfData = await pdfParser(docBuf);
-          parsedText = String(pdfData && pdfData.text || '');
-        } else if (dtype === 'docx') {
-          var mammoth = getMammothParser();
-          if (!mammoth) return { tool_name: name, error: 'Word 解析器不可用' };
-          var docxData = await mammoth.extractRawText({ buffer: docBuf });
-          parsedText = String(docxData && docxData.value || '');
-        } else if (dtype === 'xlsx') {
-          var XLSX2 = getXlsxParser();
-          if (!XLSX2) return { tool_name: name, error: 'Excel 解析器不可用' };
-          var wb = XLSX2.read(docBuf, { type: 'buffer' });
-          parsedText = formatXlsxAsText(wb, 100);
-        } else if (dtype === 'csv') {
-          parsedText = docBuf.toString('utf8');
-        }
+        if (dtype === 'csv') parsedText = docBuf.toString('utf8');
+        else parsedText = (await parseDocumentBuffer(docBuf,dtype)).text;
         parsedText = String(parsedText || '').replace(/\n{3,}/g, '\n\n').trim();
         if (!parsedText) return { tool_name: name, url: docUrl, error: '文档解析后内容为空（可能是扫描件或加密文件）' };
         var truncatedDoc = parsedText.length > 12000;
@@ -4498,6 +4483,9 @@ app.use(function(req, res, next) {
   if (/%[0-9a-fA-F]{2}/.test(p)) return res.status(404).end();
   // 路径穿越 / 反斜杠兜底（send 对 \ 也会做兼容处理）
   if (p.indexOf('..') !== -1 || p.indexOf('\\') !== -1) return res.status(404).end();
+  // Match the path representation used by the static file server. Reject aliases
+  // rather than letting /./ or repeated slashes skip directory restrictions.
+  if (p.includes('//') || p.split('/').some(function(segment) { return segment === '.'; })) return res.status(404).end();
   // 精确文件匹配（2026-09-22：Vercel 已弃用，/vercel.json 条目随文件删除一并移除）
   var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/README.md', '/CHANGELOG.md', '/CODE_INDEX.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore', '/.gitattributes', '/playwright.config.js', '/playwright.config.ts'];
   if (exact.indexOf(p) >= 0) return res.status(404).end();
@@ -4939,8 +4927,9 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       return aiSiteResult('photos', p.id, p.user_name + ' 的照片', aiSiteSnippet(p.content, q), p.created_at, { type: 'photo', post_id: p.id, image_url: photoMediaUrl(p.id), user_name: p.user_name }, q, score);
     });
   } else if (source === 'dm') {
-    var dmRes = await supabase.from('posts').select('id,user_name,media_url,content,created_at').eq('media_type', DM_MARKER).or('user_name.eq.' + pgrstQuote(userName) + ',media_url.eq.' + pgrstQuote(userName)).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
-    if (dmRes.error) { console.error('[aiSiteSearch] dm query error:', dmRes.error); return { results: [], error: { code: 'dm_query_failed', message: '聊天搜索暂时不可用' } }; }
+    var dmRes;
+    try { dmRes = { data: await readVisibleDmPosts(userName, { p_limit: take, p_pattern: pattern }) }; }
+    catch (_) { return { results: [], error: { code: 'dm_query_failed', message: '聊天搜索暂时不可用' } }; }
     rows = (dmRes.data || []).map(function(m) {
       var text = aiSiteText(m.content, 10000);
       var score = aiSiteMatchScore(text, q);
@@ -6619,18 +6608,10 @@ async function extractEmbeddedFiles(text, opts) {
           // 避免裸同步解析被构造 PDF（深层嵌套/zip 炸弹）占满事件循环造成拒绝服务
           var pdfData = await parsePdfBuffer(buffer);
           extractedText = (pdfData && pdfData.text) || '';
-        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && getMammothParser()) {
-          var mammothResult = await getMammothParser().extractRawText({ buffer: buffer });
-          extractedText = mammothResult.value || '';
-        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && getXlsxParser()) {
-          var workbook = getXlsxParser().read(buffer, { type: 'buffer' });
-          var sheets = [];
-          workbook.SheetNames.forEach(function(sName) {
-            var sheet = workbook.Sheets[sName];
-            var csv = getXlsxParser().utils.sheet_to_csv(sheet, { blankrows: false });
-            sheets.push('【工作表: ' + sName + '】\n' + csv);
-          });
-          extractedText = sheets.join('\n\n');
+        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          extractedText = (await parseDocumentBuffer(buffer,'docx')).text;
+        } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || mimeType === 'application/vnd.ms-excel') {
+          extractedText = (await parseDocumentBuffer(buffer,'xlsx')).text;
         } else if (mimeType.startsWith('text/') || mimeType === 'text/csv') {
           extractedText = buffer.toString('utf-8');
         } else if (mimeType.startsWith('image/')) {
@@ -11252,8 +11233,8 @@ const USER_ACCESS_TOKEN_EXPIRY_MS = 15 * 60 * 1000;
 // 长期 refresh token（90天，滑动续期）
 const USER_REFRESH_TOKEN_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000;
 
-function signUserAccessToken(userName) {
-  return _signPayload({ exp: Date.now() + USER_ACCESS_TOKEN_EXPIRY_MS, user_name: userName, type: 'user_access', jti: crypto.randomUUID() });
+function signUserAccessToken(userName, accountId) {
+  return _signPayload({ exp: Date.now() + USER_ACCESS_TOKEN_EXPIRY_MS, account_id: accountId, user_name: userName, type: 'user_access', jti: crypto.randomUUID() });
 }
 
 // ★ 2026-09-22：设备识别 —— 只把设备 ID 的哈希写进令牌，不明文落库/落令牌。
@@ -11270,10 +11251,11 @@ function _getDeviceIdFromRequest(req) {
   return raw ? raw.slice(0, 200) : '';
 }
 
-function signUserRefreshToken(userName, deviceId) {
+function signUserRefreshToken(userName, deviceId, accountId) {
   var payload = {
     exp: Date.now() + USER_REFRESH_TOKEN_EXPIRY_MS,
     user_name: userName,
+    account_id: accountId,
     type: 'user_refresh',
     jti: crypto.randomUUID()
   };
@@ -11309,7 +11291,7 @@ async function storeRefreshToken(userName, refreshToken) {
   try {
     var { error: insErr } = await supabase.from('posts').insert([{
       user_name: userName,
-      content: JSON.stringify({ jti: payload.jti, expires_at: new Date(payload.exp).toISOString() }),
+      content: JSON.stringify({ jti: payload.jti, account_id: payload.account_id, expires_at: new Date(payload.exp).toISOString() }),
       media_type: REFRESH_TOKEN_MARKER,
       media_url: payload.jti,
       actor_key: 'rt_' + payload.jti
@@ -11430,6 +11412,7 @@ async function persistRevokedToken(token, expiresAt) {
     }]);
     if (revokeInsert && revokeInsert.error) throw revokeInsert.error;
     revokedTokenHashes.add(tokenHash);
+    revokedTokenHashExpiries.set(tokenHash, Number(expiresAt));
     return true;
   } catch(e) {
     console.warn('[Revoke] 持久化撤销失败:', e.message);
@@ -11440,11 +11423,20 @@ async function persistRevokedToken(token, expiresAt) {
 async function loadRevokedTokenHashes() {
   try {
     var now = new Date().toISOString();
-    var { data, error: revokeLoadError } = await supabase.from('posts')
-      .select('id, media_url, content')
-      .eq('media_type', REVOKED_TOKEN_MARKER)
-      .not('media_url', 'is', null);
-    if (revokeLoadError) throw revokeLoadError;
+    var data = [], afterId = null;
+    while (true) {
+      var revokeQuery = supabase.from('posts').select('id, media_url, content')
+        .eq('media_type', REVOKED_TOKEN_MARKER).not('media_url', 'is', null).order('id').limit(500);
+      if (afterId) revokeQuery = revokeQuery.gt('id', afterId);
+      var revokePage = await revokeQuery;
+      if (!revokePage || revokePage.error) throw (revokePage && revokePage.error) || new Error('revocations_unavailable');
+      var revokeRows = revokePage.data || [];
+      data = data.concat(revokeRows);
+      if (!revokeRows.length) break;
+      var nextId = revokeRows[revokeRows.length - 1].id;
+      if (!nextId || nextId === afterId) throw new Error('revocation_cursor_stalled');
+      afterId = nextId;
+    }
     // 每次重建新 Set 后原子替换，防止 revokedTokenHashes 只增不减
     var freshHashes = new Set();
     (data || []).forEach(function(row) {
@@ -11455,21 +11447,11 @@ async function loadRevokedTokenHashes() {
         }
       } catch(e) {}
     });
-    // ★ 审计修复（M18）：内存中已过期的吊销 hash 不得再被合入新集合。
-    //   旧实现无脑合入全部内存 hash，导致 expired 的 DB 行删除后 hash 仍在内存
-    //   累积、只增不减。现在仅合入"本次快照中仍未过期"的 hash（并发落库的窗口
-    //   由下方 60s 周期重建兜底，最长延迟不超过一个周期）。
-    var unexpiredDbHashes = new Set();
-    (data || []).forEach(function(row) {
-      try {
-        var rowInfo = JSON.parse(row.content || '{}');
-        if (rowInfo.expires_at && new Date(rowInfo.expires_at).getTime() > Date.now()) {
-          unexpiredDbHashes.add(row.media_url);
-        }
-      } catch(e) {}
-    });
-    revokedTokenHashes.forEach(function(h) {
-      if (unexpiredDbHashes.has(h)) freshHashes.add(h);
+    // Preserve successful writes racing this database snapshot, only until
+    // their actual expiry. Never briefly re-enable a revoked session.
+    revokedTokenHashExpiries.forEach(function(expiry, hash) {
+      if (expiry > Date.now()) freshHashes.add(hash);
+      else revokedTokenHashExpiries.delete(hash);
     });
     revokedTokenHashes = freshHashes;
     // 清理过期吊销记录
@@ -11500,6 +11482,7 @@ async function loadRevokedTokenHashes() {
 }
 
 var revokedTokenHashes = new Set();
+var revokedTokenHashExpiries = new Map();
 var revokedTokenHashesReady = false;
 var revokedTokenHashesLoadError = null;
 async function loadRevokedTokenHashesWithRetry() {
@@ -11885,8 +11868,8 @@ async function authenticateUser(req, res, next) {
     var payload = verifyUserAccessToken(token);
     if (payload && payload.user_name && !isTokenRevoked(token)) {
       try {
-        var userExists = await readAuthRecord(supabase, payload.user_name, AUTH_MARKER);
-        if (!userExists && payload.user_name !== ADMIN_USERNAME) {
+        var userExists = await readAccountIdentity(supabase, payload.user_name, ADMIN_USERNAME);
+        if (!matchesAccount(payload, userExists, USER_ACCESS_TOKEN_EXPIRY_MS)) {
           return res.status(401).json({ error: '用户不存在或已注销', code: 'auth_expired' });
         }
       } catch(e) {
@@ -11894,6 +11877,7 @@ async function authenticateUser(req, res, next) {
         return res.status(503).json({ error: '认证服务暂不可用，请稍后重试', code: 'auth_unavailable', retryable: true });
       }
       req.userName = payload.user_name;
+      req.accountId = String(userExists.id);
       try {
         req.userRestrictions = await loadUserRestrictions(req.userName);
       } catch (_) {
@@ -11924,6 +11908,20 @@ const flashPhotos=require('./flash-photos').createFlashPhotos({express,supabase,
  canSend:(actor,peer)=>assertCanSendDirectMessage(supabase,actor,peer,ADMIN_USERNAME),banError:userBanError,
  publish:publishDmRealtime,notifyConsumed:(sender,peer)=>{publishChatEvent(sender,'chat-state',{kind:'flash_consumed'});publishChatEvent(peer,'chat-state',{kind:'flash_consumed'});},audit:logAdminAudit,setPro:(actor,active)=>aiQuota.setPro(actor,active,{})});
 app.use(flashPhotos.router);
+require('./upload-access').installUploadAccess(app, {supabase,supabaseUrl:SUPABASE_URL,optionalAuth:async function(req,res,next) {
+  var cookieSession = !req.headers.authorization && req.cookies && req.cookies.xtj_post_media_session;
+  if (cookieSession) req.headers.authorization='Bearer '+String(cookieSession).split('~')[0];
+  return optionalAuth(req,res,async function() {
+    if (cookieSession && req.userName) {
+      try {
+        var sessionId=String(cookieSession).split('~')[1];
+        var active=await supabase.from('posts').select('id').eq('media_type',REFRESH_TOKEN_MARKER).eq('media_url',sessionId).eq('user_name',req.userName).maybeSingle();
+        if (!active || active.error || !active.data) req.userName=undefined;
+      } catch (_) { req.userName=undefined; }
+    }
+    next();
+  });
+},rateLimit,adminName:ADMIN_USERNAME});
 
 
 // The service-role backed chat social API is mounted behind the same signed
@@ -11989,32 +11987,9 @@ async function optionalAuth(req, res, next) {
     if (!token) return next();
     var payload = verifyUserAccessToken(token);
     if (!payload || !payload.user_name || isTokenRevoked(token)) return next();
-    var { data: userExists, error: userCheckError } = await supabase.from('posts')
-      .select('id')
-      .eq('user_name', payload.user_name)
-      .eq('media_type', AUTH_MARKER)
-      .maybeSingle();
-    // 多行记录（PGRST116）时回退取最新一条，避免账号因重复记录被锁死
-    if (userCheckError && String(userCheckError.code) === 'PGRST116') {
-      var { data: latestUser, error: latestErr } = await supabase.from('posts')
-        .select('id')
-        .eq('user_name', payload.user_name)
-        .eq('media_type', AUTH_MARKER)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (latestErr) console.error('[auth] 最新认证记录回退查询失败:', latestErr && latestErr.message);
-      userExists = latestUser;
-    } else if (userCheckError) {
-      console.error('[auth] 用户校验查询异常:', userCheckError && userCheckError.message);
-      logAttack(getRealIp(req), 'AUTH_QUERY', 'optional user check error: ' + String(userCheckError.message || userCheckError.code || '').slice(0, 100)).catch(function(){});
-    }
-    if (!userExists && payload.user_name !== ADMIN_USERNAME) {
-      if (userCheckError && String(userCheckError.code) !== 'PGRST116') {
-        console.warn('[auth] 可选认证查询异常，未设置登录态: ' + payload.user_name);
-      }
-      return next();
-    }
+    var userExists = await readAccountIdentity(supabase, payload.user_name, ADMIN_USERNAME);
+    if (!matchesAccount(payload, userExists, USER_ACCESS_TOKEN_EXPIRY_MS)) return next();
+    req.accountId = String(userExists.id);
     req.userName = payload.user_name;
   } catch (_) {
     // 认证失败不阻止请求
@@ -12095,8 +12070,14 @@ async function verifyAuthPassword(stored, password, userName) {
 //   （M23 意图是"管理员主 token 登录不受影响，user_token 传 null"；若此处仍写 503，
 //    调用方继续 res.json 会造成 headersSent 后二次写响应，Node 抛 ERR_HTTP_HEADERS_SENT）
 async function issueUserSession(res, userName, deviceId, opts) {
-  var accessToken = signUserAccessToken(userName);
-  var refreshToken = signUserRefreshToken(userName, deviceId);
+  var account;
+  try { account = await readAccountIdentity(supabase, userName, ADMIN_USERNAME); } catch (_) {}
+  if (!account || (opts && opts.accountId && opts.accountId !== String(account.id))) {
+    if (!(opts && opts.silent)) res.status(503).json({ error: '登录服务暂不可用，请稍后重试', code: 'auth_unavailable', retryable: true });
+    return null;
+  }
+  var accessToken = signUserAccessToken(userName, String(account.id));
+  var refreshToken = signUserRefreshToken(userName, deviceId, String(account.id));
   var stored = await storeRefreshToken(userName, refreshToken);
   if (!stored) {
     if (!(opts && opts.silent)) {
@@ -12167,7 +12148,7 @@ app.post('/api/user/login', securityRateLimit(60000, 10), async (req, res) => {
       return res.status(400).json({ error: '缺少用户名或密码' });
     }
     var authRec;
-    try { authRec = await readAuthRecord(supabase, userNameVal, AUTH_MARKER, 'media_url'); }
+    try { authRec = await readAuthRecord(supabase, userNameVal, AUTH_MARKER, 'id,media_url,created_at'); }
     catch (error) {
       console.error('[auth] login lookup unavailable:', error && error.code || 'database_error');
       return res.status(503).json({ error: '登录服务暂不可用，请稍后重试', code: 'auth_unavailable', retryable: true });
@@ -12198,7 +12179,7 @@ app.post('/api/user/login', securityRateLimit(60000, 10), async (req, res) => {
     if (loginRestrictions.is_banned) {
       return res.status(403).json({ error: '该账号已被封禁，无法登录', code: 'account_banned' });
     }
-    var loginSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req), { audit: { req: req, source: 'login_success' } });
+    var loginSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req), { accountId: String(authRec.id), audit: { req: req, source: 'login_success' } });
     if (loginSession) return res.json(loginSession);
     return; // issueUserSession 失败时已写 503
   } catch(e) {
@@ -12233,7 +12214,9 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
     if (lookupError) return res.status(503).json({ error: '注册服务暂不可用' });
     if (existing) return res.status(409).json({ error: '该昵称已被注册' });
     var verifier = await deriveAuthVerifier(password);
+    var registrationId = crypto.randomUUID();
     var { error: insertError } = await supabase.from('posts').insert([{
+      id: registrationId,
       user_name: userNameVal, content: AUTH_MARKER, media_url: verifier,
       media_type: AUTH_MARKER, actor_key: AUTH_MARKER
     }]);
@@ -12249,7 +12232,7 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
         console.warn('[API] 注册邮箱写入 user_info 失败:', e && e.message || e);
       }
     }
-    var regSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req), { audit: { req: req, source: 'register_success' } });
+    var regSession = await issueUserSession(res, userNameVal, _getDeviceIdFromRequest(req), { accountId: registrationId, audit: { req: req, source: 'register_success' } });
     if (regSession) return res.status(201).json(regSession);
     return; // issueUserSession 失败时已写 503
   } catch (e) {
@@ -12307,13 +12290,12 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
     // 检查是否已撤销：必须区分「确证撤销」与「查询不可用」
     var revokeVerdict = await checkRefreshTokenRevoked(refreshToken);
     if (revokeVerdict.revoked) {
-      // 只有确证撤销（已轮换 / 已登出）才清 cookie；
-      // 查询失败（uncertain）绝不清 —— 否则一次基础设施抖动就把用户永久踢下线。
-      res.clearCookie('xtj_user_refresh', { path: '/api/user' });
-      return res.status(401).json({ error: 'refresh token 已撤销，请重新登录', code: 'refresh_revoked' });
+      // A late request can carry the predecessor after another tab has set
+      // its successor. Reject it without deleting that newer browser Cookie.
+      return res.status(409).json({ error: '会话已更新，请重试', code: 'token_reused', retryable: true });
     }
     if (revokeVerdict.uncertain) {
-      console.warn('[auth] refresh 撤销状态不可判定，按有效续期（避免误踢）:', payload.user_name);
+      return res.status(503).json({ error: '会话状态暂不可用，请稍后重试', code: 'refresh_unavailable', retryable: true });
     }
     // ★ 设备识别（2026-09-22）：换了设备不踢用户，只记录并重新绑定。
     //   硬绑定会在"用户清了本地存储 / 换了浏览器"时把人锁在外面 —— 那正是
@@ -12344,25 +12326,25 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
     }
     refreshTokenInUse.add(payload.jti);
     try {
-      // 签发新的 access token + rotating refresh token（刷新即续期，滑动 30 天）
-      var newAccessToken = signUserAccessToken(payload.user_name);
-      var newRefreshToken = signUserRefreshToken(payload.user_name, presentedDeviceId);
+      // 签发新的 access token + rotating refresh token（滑动 90 天）
+      var account = await readAccountIdentity(supabase, payload.user_name, ADMIN_USERNAME);
+      if (!matchesAccount(payload, account, USER_REFRESH_TOKEN_EXPIRY_MS)) {
+        return res.status(401).json({ error: '账号身份已失效', code: 'auth_expired' });
+      }
+      var newAccessToken = signUserAccessToken(payload.user_name, String(account.id));
+      var newRefreshToken = signUserRefreshToken(payload.user_name, presentedDeviceId, String(account.id));
       // ★ M23：新 refresh token 持久化失败必须显式 503（旧 token 尚未撤销，
       //   用户可用旧 token 重试），不再静默 warn 后继续签发导致 15 分钟后 401。
-      var newTokenStored = await storeRefreshToken(payload.user_name, newRefreshToken);
-      if (!newTokenStored) {
+      var successor = verifyUserRefreshToken(newRefreshToken);
+      var rotation = await supabase.rpc('rotate_user_refresh_token', {
+        p_user_name: payload.user_name, p_account_id: String(account.id),
+        p_old_jti: payload.jti, p_new_jti: successor.jti,
+        p_expires_at: new Date(successor.exp).toISOString()
+      });
+      if (!rotation || rotation.error) {
         return res.status(503).json({ error: '刷新服务暂不可用，请稍后重试', code: 'refresh_store_failed' });
       }
-      // 撤销旧的 refresh token
-      try {
-        var { error: delErr } = await supabase.from('posts').delete()
-          .eq('media_type', REFRESH_TOKEN_MARKER)
-          .eq('media_url', payload.jti);
-        if (delErr) throw delErr;
-      } catch(e) {
-        console.error('[auth] refresh token revoke failed:', e && e.message);
-        return res.status(500).json({ error: 'Failed to revoke old refresh token' });
-      }
+      if (!rotation.data || rotation.data.ok !== true) return res.status(409).json({ error: '会话已更新，请重试', code: 'token_reused', retryable: true });
 
       res.cookie('xtj_user_refresh', newRefreshToken, {
         httpOnly: true,
@@ -12381,7 +12363,7 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
         token: newAccessToken,
         user_name: payload.user_name,
         token_type: 'access',
-        // 让前端能展示"本机已记住 30 天"
+        // 让前端能展示本机会话有效期
         expires_in_ms: USER_REFRESH_TOKEN_EXPIRY_MS
       });
     } finally {
@@ -12391,7 +12373,7 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
     }
   } catch(e) {
     console.error('[API] 刷新 token 失败:', e.message);
-    return res.status(500).json({ error: '刷新失败' });
+    return res.status(503).json({ error: '刷新服务暂不可用，请稍后重试', code: 'refresh_unavailable', retryable: true });
   }
 });
 
@@ -12439,6 +12421,7 @@ app.post('/api/user/logout', rateLimit(60000, 30), async (req, res) => {
     res.clearCookie('xtj_user_refresh', { path: '/api/user' });
     res.clearCookie(PHOTO_COOKIE, { path:'/api/photo' });
     res.clearCookie(POST_MEDIA_COOKIE, { path:'/api/post' });
+    res.clearCookie(POST_MEDIA_COOKIE, { path:'/api/uploads' });
     return res.json({ ok: true });
   } catch(e) {
     console.error('[API] logout exception:', e && e.message);
@@ -12987,20 +12970,42 @@ function acquirePhotoDecodeSlot(userName) {
   };
 }
 
-// ★ P2-12 审计修复（预算预检）：排在 express.raw **之前**，用 Content-Length 在
-//   接收 body 之前就拒绝明显超预算的请求——先缓冲 50MB 再 429 等于白付内存代价。
-//   本中间件只「只读检查」不记账：真正的扣减仍按实际 body 字节数在处理器内进行，
-//   因此不存在「声明长度与实际字节不符」导致的账目偏差。chunked（无 Content-Length）
-//   时体积不可预知，跳过预检交给处理器里的尺寸/配额检查兜底。
+// Reserve user quota, a user slot and global buffered bytes before express.raw.
+// Require a declared length, verify the actual body, and refund failed attempts.
+var photoUploadReservedBytes = 0;
+const PHOTO_UPLOAD_MAX_BUFFERED_BYTES = 128 * 1024 * 1024;
 function photoUploadBudgetPrecheck(req, res, next) {
-  var declared = parseInt(req.headers['content-length'], 10);
-  if (!isFinite(declared) || declared <= 0) return next();
+  var lengthHeader = String(req.headers['content-length'] || '');
+  var declared = Number(lengthHeader);
+  if (!/^\d+$/.test(lengthHeader) || !Number.isSafeInteger(declared) || declared <= 0) {
+    return res.status(411).json({ error: '上传需要明确文件长度', code: 'content_length_required' });
+  }
   if (declared > PHOTO_UPLOAD_MAX_SINGLE_BYTES) {
     return res.status(400).json({ error: '文件过大，单张不超过 50MB', code: 'file_too_large' });
   }
-  if (declared > photoUploadQuotaRemainingBytes(req.userName)) {
+  if (photoUploadReservedBytes + declared > PHOTO_UPLOAD_MAX_BUFFERED_BYTES) {
+    return res.status(429).json({ error: '照片上传繁忙，请稍后重试', code: 'photo_upload_busy', retryable: true });
+  }
+  var release = acquirePhotoDecodeSlot(req.userName);
+  if (!release) return res.status(429).json({ error: '同时处理的照片过多，请稍后再试', code: 'photo_decode_busy', retryable: true });
+  if (!tryConsumePhotoUploadQuota(req.userName, declared)) {
+    release();
     return res.status(429).json({ error: '照片上传已达每小时容量上限，请稍后再试', code: 'photo_quota_exceeded' });
   }
+  photoUploadReservedBytes += declared;
+  var reservation = { bytes: declared, committed: false, processing: false, done: false };
+  reservation.finalize = function () {
+    if (reservation.done) return;
+    reservation.done = true;
+    photoUploadReservedBytes -= declared;
+    release();
+    if (!reservation.committed) refundPhotoUploadQuota(req.userName, declared);
+  };
+  req.photoUploadReservation = reservation;
+  // Parser failures and aborted bodies never reach the handler. During storage
+  // work retain the lease until finally, even when the client disconnects.
+  res.once('finish', function () { if (!reservation.processing) reservation.finalize(); });
+  res.once('close', function () { if (!reservation.processing) reservation.finalize(); });
   return next();
 }
 
@@ -13008,30 +13013,16 @@ app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), photoUpl
   // ★ P2-12：以下两个资源必须在**每一条**返回路径上归还，集中放在 finally 里处理。
   //   写在具体分支里必然会有漏网的 return（新增校验分支时几乎一定会漏），一旦漏掉
   //   就是永久泄漏一个解码名额 + 误扣一份配额。
-  var quotaCharged = 0;      // 已预占、尚未确认提交的字节数
-  var quotaCommitted = false; // 字节确实写进了 Storage → 不再回滚
-  var releaseDecodeSlot = null;
+  var reservation = req.photoUploadReservation;
+  if (!reservation || reservation.done) return res.status(400).json({ error: '上传已中断', code: 'upload_aborted' });
+  reservation.processing = true;
   try {
     var userName = req.userName;
     if (!userName) return res.status(401).json({ error: '未登录', code: 'auth_expired' });
     var buf = req.body;
     if (!Buffer.isBuffer(buf) || buf.length === 0) return res.status(400).json({ error: '缺少文件数据', code: 'INVALID_INPUT' });
     if (buf.length > PHOTO_UPLOAD_MAX_SINGLE_BYTES) return res.status(400).json({ error: '文件过大，单张不超过 50MB', code: 'file_too_large' });
-    // ★ P2-12 审计修复：配额在**解码之前**预占。旧写法把扣减放在 sharp 解码之后，
-    //   等于先干活后算账：解码期间的内存已经付出，配额完全没起到闸门作用。
-    //   提前到此处后，超配额请求根本不会进入 sharp。
-    if (!tryConsumePhotoUploadQuota(userName, buf.length)) {
-      // 未扣到额度 → quotaCharged 保持 0，无需回滚（避免「没扣却退」把并发请求
-      // 在同一窗口里占的额度抹掉）。
-      return res.status(429).json({ error: '照片上传已达每小时容量上限，请稍后再试', code: 'photo_quota_exceeded' });
-    }
-    quotaCharged = buf.length;
-    // ★ P2-12 审计修复：per-user 并发解码闸。拿不到名额就立即 429——不做排队，
-    //   因为排队等于把 50MB 缓冲继续留在内存里等着，正是本条要消除的内存峰值。
-    releaseDecodeSlot = acquirePhotoDecodeSlot(userName);
-    if (!releaseDecodeSlot) {
-      return res.status(429).json({ error: '同时处理的照片过多，请稍后再试', code: 'photo_decode_busy' });
-    }
+    if (buf.length !== reservation.bytes) return res.status(400).json({ error: '文件长度不一致', code: 'invalid_content_length' });
     var path = String(req.query.path || '').trim().slice(0, 300);
     var mimeType = String(req.query.mime_type || '').trim().slice(0, 50);
     if (!/^photos\/[A-Za-z0-9._-]{1,200}$/.test(path)) return res.status(400).json({ error: '存储路径不合法', code: 'INVALID_INPUT' });
@@ -13098,7 +13089,7 @@ app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), photoUpl
     if (upload && upload.error) return res.status(500).json({ error: '存储上传失败', code: 'storage_upload_failed' });
     // 字节确实落到 Storage 了 → 额度不再回滚。此前所有 return（含上面各类 4xx
     // 拒绝）都会走到 finally 回滚，所以不存在「拒了也扣」。
-    quotaCommitted = true;
+    reservation.committed = true;
     // Identifier accepted by photo/create; this private bucket has no public read.
     var publicUrl = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
     return res.json({ ok: true, public_url: publicUrl });
@@ -13108,11 +13099,7 @@ app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), photoUpl
   } finally {
     // ★ P2-12：任何路径（成功 / 4xx 拒绝 / 5xx 异常 / 提前 return）都必须归还。
     //   写在 try 的各个分支里一定会漏，集中在这里才是「必须保证任何路径都释放」。
-    if (releaseDecodeSlot) {
-      try { releaseDecodeSlot(); } catch (slotErr) { console.error('[photo-upload] release decode slot failed:', slotErr && slotErr.message); }
-      releaseDecodeSlot = null;
-    }
-    if (quotaCharged > 0 && !quotaCommitted) refundPhotoUploadQuota(userName, quotaCharged);
+    reservation.finalize();
   }
 });
 
@@ -13544,12 +13531,21 @@ async function processStorageCleanupJobs() {
             ].filter(function(group) { return group.paths.length; });
           }
           var removal = { data:[], error:null };
+          var protectedPaths = new Set();
           for (var cleanupGroup of cleanupGroups) {
+            if (cleanupGroup.bucket === PHOTO_BUCKET) {
+              var candidatePaths = cleanupGroup.paths;
+              cleanupGroup.paths = await require('./storage-cleanup').claimPhotoCleanupPaths(supabase, candidatePaths);
+              candidatePaths.forEach(function(path) { if (!cleanupGroup.paths.includes(path)) protectedPaths.add(path); });
+              if (!cleanupGroup.paths.length) continue;
+            }
             var partRemoval = await withStorageCleanupTimeout(supabase.storage.from(cleanupGroup.bucket).remove(cleanupGroup.paths), STORAGE_CLEANUP_REMOVE_TIMEOUT_MS);
             if (!partRemoval || partRemoval.error) removal.error = partRemoval && partRemoval.error || new Error('storage_delete_unconfirmed');
             else if (Array.isArray(partRemoval.data)) removal.data.push.apply(removal.data, partRemoval.data);
           }
           removeError = removal && removal.error || null;
+          paths = paths.filter(function(path) { return !protectedPaths.has(path); });
+          retryPaths = paths.slice();
           // Storage may report only the objects it actually removed. Match paths
           // precisely (basename fallback only when unique), then retry remaining
           // paths rather than completing a partially successful durable job.
@@ -15226,6 +15222,14 @@ function cleanDmDeletedIds(list) {
   return out;
 }
 
+async function readVisibleDmPosts(actor, options) {
+  var result = await supabase.rpc('read_visible_dm_posts', Object.assign({p_actor:actor},options));
+  if (!result || result.error) throw result && result.error || Error('dm_visibility_unavailable');
+  return (result.data || []).map(function(row) {
+    var out = {}; ['id','user_name','content','media_url','media_type','actor_key','views','created_at'].forEach(function(key) { out[key] = row[key]; }); return out;
+  });
+}
+
 async function fetchDmDeletedSnapshot(userName) {
   var r = await supabase.from('posts')
     .select('id, content')
@@ -15257,26 +15261,10 @@ app.post('/api/dm/deleted', authenticateUser, rateLimit(60000, 30), async (req, 
   try {
     var incoming = cleanDmDeletedIds(req.body && req.body.ids);
     if (!incoming.length) return res.status(400).json({ error: '缺少有效的消息 ID', code: 'invalid_ids' });
-    var snap = await fetchDmDeletedSnapshot(req.userName);
-    // 合并：新删除的在前，历史在后，去重截断
-    var merged = cleanDmDeletedIds(incoming.concat(snap.ids));
-    var ins = await supabase.from('posts').insert([{
-      user_name: req.userName,
-      media_type: DM_DELETED_MARKER,
-      content: JSON.stringify({ ids: merged, updated_at: new Date().toISOString() }),
-      actor_key: 'dm_deleted_' + Date.now()
-    }]).select('id').maybeSingle();
-    if (ins.error) throw ins.error;
+    var saved = await supabase.rpc('merge_dm_deleted_ids', { p_user_name: req.userName, p_ids: incoming });
+    if (!saved || saved.error || !saved.data || !saved.data.ok) throw saved && saved.error || Error('dm_deleted_save_failed');
+    var merged = saved.data.ids;
     publishChatEvent(req.userName, 'chat-state', { kind:'delete_message' });
-    var keepId = ins.data && ins.data.id;
-    if (keepId) {
-      // 先立后破：新快照落库成功后再清理同账号的旧快照行
-      var del = await supabase.from('posts').delete()
-        .eq('user_name', req.userName)
-        .eq('media_type', DM_DELETED_MARKER)
-        .neq('id', keepId);
-      if (del.error) console.warn('[API] dm/deleted cleanup old rows failed:', del.error.message);
-    }
     return res.json({ ok: true, ids: merged });
   } catch (e) {
     console.error('[API] dm/deleted post:', e && e.message);
@@ -15297,26 +15285,7 @@ app.get('/api/dm/list', authenticateUser, rateLimit(60000, 120), async (req, res
     //   现在允许客户端传 limit（夹在 1..500），默认 200；200 ≥ 前端 180 的窗口，
     //   因此界面结果不变，单次载荷约降到 1/5。
     const listLimit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 500);
-    const [sentResult, receivedResult] = await Promise.all([
-      supabase.from('posts').select('id, user_name, content, media_url, views, created_at')
-        .eq('media_type', DM_MARKER).eq('user_name', req.userName).order('created_at', { ascending: false }).limit(listLimit),
-      supabase.from('posts').select('id, user_name, content, media_url, views, created_at')
-        .eq('media_type', DM_MARKER).eq('media_url', req.userName).order('created_at', { ascending: false }).limit(listLimit)
-    ]);
-    if (sentResult.error || receivedResult.error) {
-      return res.status(503).json({ error: '会话列表暂不可用', code: 'dm_list_failed', retryable: true });
-    }
-    var byId = new Map();
-    (sentResult.data || []).concat(receivedResult.data || []).forEach(function(row) {
-      if (row && !byId.has(row.id)) byId.set(row.id, row);
-    });
-    var rows = Array.from(byId.values()).filter(function(row) {
-      var peer = row.user_name === req.userName ? row.media_url : row.user_name;
-      var state = states.get(peer);
-      return !!state && !state.deleted && (!state.cleared_before || Date.parse(row.created_at) > Date.parse(state.cleared_before));
-    }).sort(function(a, b) {
-      return String(b.created_at || '').localeCompare(String(a.created_at || '')) || Number(b.id || 0) - Number(a.id || 0);
-    });
+    var rows = await readVisibleDmPosts(req.userName, { p_limit: listLimit });
     return res.json({ ok: true, data: rows, conversations: conversations });
   } catch (e) { console.error('[API] dm list get:', e.message); return res.status(503).json({ error: '会话列表暂不可用', code: 'dm_list_unavailable', retryable: true }); }
 });
@@ -15355,44 +15324,11 @@ app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req,
     // ★ P2 修复：双向查询都按 created_at 倒序取最新 limit 条。
     // 旧实现 asc+limit 取的是每个方向最旧的 N 条——两边消息数都超过 N 时，
     // 合并后 slice(-limit) 会漏掉真正的最新消息（前端仅传 limit，无游标支持）。
-    function buildDirectionQuery(sender, recipient) {
-      var query = supabase.from('posts')
-        .select('id, user_name, content, media_url, media_type, actor_key, views, created_at')
-        .eq('media_type', DM_MARKER).eq('user_name', sender).eq('media_url', recipient);
-      if (conversationState.cleared_before) query = query.gt('created_at', conversationState.cleared_before);
-      if (before) {
-        if (beforeId) {
-          // 复合 keyset：created_at < before，或 created_at = before 且 id < before_id。
-          // 与排序键 (created_at desc, id desc) 完全一致，翻页不重不漏。
-          query = query.or(
-            'created_at.lt.' + before + ',and(created_at.eq.' + before + ',id.lt.' + beforeId + ')'
-          );
-        } else {
-          query = query.lt('created_at', before);
-        }
-      }
-      // 多取 1 条用来判断"还有更早的"（keyset 分页的标准做法）。
-      // ★ 排序补 id 兜底：同秒消息顺序稳定，否则复合游标的分页边界会漂移。
-      return query
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .limit(limit + 1);
-    }
-    const [outboundResult, inboundResult] = await Promise.all([
-      buildDirectionQuery(req.userName, targetUser),
-      buildDirectionQuery(targetUser, req.userName)
-    ]);
-    if (outboundResult.error || inboundResult.error) {
-      return res.status(400).json({ error: sanitizeError(outboundResult.error || inboundResult.error), code: 'dm_messages_failed' });
-    }
-    var byMessageId = new Map();
-    (outboundResult.data || []).concat(inboundResult.data || []).forEach(function(row) {
-      if (row && !byMessageId.has(row.id)) byMessageId.set(row.id, row);
-    });
-    var mergedMessages = Array.from(byMessageId.values())
-      .sort(function(a, b) {
-        return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id || '').localeCompare(String(b.id || ''));
-      });
+    if (before && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(before)) return res.status(400).json({error:'无效的分页游标'});
+    if (beforeId && !/^[a-f0-9-]{36}$/i.test(beforeId)) return res.status(400).json({error:'无效的消息 ID'});
+    var mergedMessages = (await readVisibleDmPosts(req.userName, {
+      p_peer: targetUser, p_limit: limit + 1, p_before: before || null, p_before_id: beforeId || null
+    })).reverse();
     var hasMore = mergedMessages.length > limit;
     var messages = hasMore ? mergedMessages.slice(mergedMessages.length - limit) : mergedMessages;
     await chatFeatures.transcription.restore(messages);
@@ -16875,7 +16811,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
 
     // 只清理本服务能证明为账号私有/用户内容的数据；法律、审计、封禁/拉黑、
     // 邀请兑换、会员及额度记录不在删除范围内，待保留政策明确后再处理。
-    var deletableTypes = new Set(['text', 'image', 'video', 'audio', 'photo', 'album', '__auth__', '__user_info__', '__avatar__', '__photo_wall__']);
+    var deletableTypes = new Set(['text', 'image', 'video', 'audio', 'photo', 'album', '__auth__', '__user_info__', '__avatar__', '__photo_wall__', '__custom_ai_models__']);
     var partialDeleted = { posts: 0, likes: 0, comments: 0, dm_media: 0, ai_search_results: 0, ai_drafts: 0, ai_action_confirmations: 0, storage_files: 0, storage_cleanup_queued: 0 };
 
     // 先查询该用户发布的帖子 ID，用于级联删除点赞和评论（fail-fast）
@@ -23288,41 +23224,15 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
 // ── 自定义第三方 AI 模型：账号级同步存储（API Key 加密）──────────────────────
 // 原实现只存浏览器 localStorage，换设备/更新即丢失。此处把模型配置（含 API Key）
 // 加密后按账号写到 posts 表的 __custom_ai_models__ 标记行，登录后任何设备可恢复。
-// Key 不落明文数据库：用 AES-256-GCM 加密，密钥由 API_SECRET（或
-// SUPABASE_SERVICE_KEY）派生；解密密钥变化会导致旧数据无法解密（返回空 Key），
-// 前端会提示重新填写，不会崩溃。
+// AES-256-GCM uses the independent encryption key. Legacy signing-derived
+// ciphertext migrates without changing the saved provider key; failures surface.
 var CUSTOM_AI_MODELS_MARKER = '__custom_ai_models__';
-var _aiModelsKey = null;
-function aiModelsEncryptionKey() {
-  if (_aiModelsKey) return _aiModelsKey;
-  var secret = process.env.API_SECRET || process.env.SUPABASE_SERVICE_KEY || '';
-  if (!secret) {
-    console.warn('[ai-models] 未配置 API_SECRET/SUPABASE_SERVICE_KEY，自定义模型 Key 将以内置弱密钥加密（不推荐）');
-    secret = 'xtj-ai-models-dev-fallback';
-  }
-  _aiModelsKey = crypto.createHash('sha256').update('xtj:ai-models:v1:' + secret).digest();
-  return _aiModelsKey;
-}
-function encryptAiModelSecret(plain) {
-  var key = aiModelsEncryptionKey();
-  var iv = crypto.randomBytes(12);
-  var cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  var enc = Buffer.concat([cipher.update(String(plain || ''), 'utf8'), cipher.final()]);
-  var tag = cipher.getAuthTag();
-  return { iv: iv.toString('base64'), tag: tag.toString('base64'), data: enc.toString('base64') };
-}
-function decryptAiModelSecret(blob) {
-  try {
-    if (!blob || typeof blob !== 'object' || !blob.iv || !blob.tag || !blob.data) return '';
-    var key = aiModelsEncryptionKey();
-    var decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(blob.iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(blob.tag, 'base64'));
-    return Buffer.concat([decipher.update(Buffer.from(blob.data, 'base64')), decipher.final()]).toString('utf8');
-  } catch (e) {
-    console.warn('[ai-models] 解密自定义模型 Key 失败:', e && e.message);
-    return '';
-  }
-}
+const aiModelSecrets = require('./ai-model-secrets');
+function encryptAiModelSecret(plain) { return aiModelSecrets.encrypt(plain); }
+function decryptAiModelSecret(blob) { return aiModelSecrets.decrypt(blob); }
+aiModelSecrets.migrateSecrets(supabase).catch(function(e) {
+  console.error('[ai-models] Encryption migration incomplete:', e && e.message);
+});
 function cleanAiModelIn(m) {
   if (!m || typeof m !== 'object') return null;
   var uid = String(m.uid || '').trim().slice(0, 64);
@@ -23367,8 +23277,10 @@ function cleanAiPrefs(input) {
 }
 // 取该账号最新一行快照（不合并历史行）
 async function fetchLatestAiModelsSnapshot(userName) {
+  var identity = await readAccountIdentity(supabase, userName, ADMIN_USERNAME);
+  if (!identity) throw Error('account_missing');
   var lookup = await supabase.from('posts').select('content,created_at')
-    .eq('user_name', userName).eq('media_type', CUSTOM_AI_MODELS_MARKER)
+    .eq('user_name', userName).eq('media_type', CUSTOM_AI_MODELS_MARKER).gte('created_at', identity.created_at)
     .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(1);
   if (lookup.error) throw lookup.error;
   var rows = Array.isArray(lookup.data) ? lookup.data : [];
@@ -23430,7 +23342,7 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
     var saved = await supabase.rpc('save_ai_custom_models_snapshot', {
       p_user_name: req.userName, p_models: models,
       p_deleted_uids: cleanDeletedUidList(body.deleted_uids),
-      p_ai_prefs: cleanAiPrefs(body.ai_prefs), p_replace: body.merge !== true
+      p_ai_prefs: cleanAiPrefs(body.ai_prefs), p_replace: body.merge !== true, p_account_id: req.accountId
     });
     if (saved.error || !saved.data || saved.data.ok !== true) throw saved.error || Error('Model snapshot was not saved');
     models = saved.data.models;

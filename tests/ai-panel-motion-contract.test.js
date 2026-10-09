@@ -229,18 +229,10 @@ test('整理占位：所有终态路径都必须调用收敛（content / done / 
     'doneReceived / terminalErrorSeen 分支必须显式收敛');
 });
 
-test('整理占位：占位必须挂在活动区体内，且不在任何 .ai-tool-round 内', () => {
-  // ★ 契约演进（2026-09 工具 UI 重构）：
-  //   旧实现把占位 `_organizeBar.appendChild` 直接挂到 timeline，视觉上与轮次列表错位 20px；
-  //   现改为挂进 toolActivityBody()，与 .ai-tool-round-list 对齐。
-  //   真正要守住的不变量是：占位**不属于任何轮次**（否则会被 updateToolRoundState 的
-  //   收敛逻辑误算进"已完成工具数"），以及**必须落在活动区体内**（不在则退化成裸挂 timeline）。
-  assert.match(agentSrc, /class:\s*'ai-tool-step ai-tool-organizing is-running'/,
-    'organizing 占位必须仍以该 class 组合创建');
-  assert.match(agentSrc, /var _orgHost = toolActivityBody\(_organizeBar\) \|\| _organizeBar;/,
-    '占位必须优先挂进活动区体内，无活动区时才回退 timeline');
-  assert.match(agentSrc, /_orgHost\.appendChild/, '占位必须 append 到 _orgHost');
-  assert.doesNotMatch(agentSrc, /_organizeBar\.appendChild/, '占位不得再裸挂到 timeline（会与轮次列表错位）');
+test('紧凑过程区不再创建虚构的整理占位', () => {
+  // 当前产品决策：思考与工具事件按实际发生顺序展示，不新增整理占位。
+  assert.doesNotMatch(agentSrc, /class:\s*'ai-tool-step ai-tool-organizing is-running'/);
+  assert.match(agentSrc, /function buildOrderedProcessNode\(/);
 });
 
 /* ── 5) 流动感动效层（参考 iOS 27 Siri / ChatGPT 流式输出）────────────── */
@@ -334,7 +326,7 @@ test('Items 契约：后端必须统一 items 出口（不得把整段正文当�
 });
 
 test('Items 契约：前端必须校验 Array.isArray 才渲染结果列表', () => {
-  assert.match(agentSrc, /if \(!Array\.isArray\(itemsArr\)\) itemsArr = null;/,
+  assert.match(agentSrc, /if \(Array\.isArray\(tool\.items\) && tool\.items\.length\)/,
     '前端必须拒绝非数组的 items（字符串也有 .length，旧判断会被穿透）');
 });
 
