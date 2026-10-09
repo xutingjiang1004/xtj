@@ -8,12 +8,16 @@ test('quota restrictions have a precise non-retryable error and recover on a suc
   const app = express(); app.use(availability.middleware);
   app.get('/api/profile/posts/alice', async (req, res) => { await availability.transport('https://supabase.test/rest/v1/posts'); res.status(503).json({ ok: false, error: 'generic failure', retryable: true }); });
   app.get('/api/photos/public', async (req, res) => { await availability.transport('https://supabase.test/rest/v1/posts'); res.status(503).json({ ok: false, error: 'generic failure' }); });
+  app.get('/api/uploads/media', async (req, res) => { await availability.transport('https://supabase.test/rest/v1/posts'); res.status(503).json({ ok: false, code: 'media_unavailable', retryable: true }); });
   const first = await request(app).get('/api/profile/posts/alice').expect(402);
   assert.equal(first.body.code, 'egress_quota_exceeded'); assert.equal(first.body.retryable, false); assert.equal(first.headers['cache-control'], 'no-store');
   assert.equal(first.headers['x-xtj-service-status'], 'egress_quota_exceeded'); assert.doesNotMatch(first.body.error, /supabase.test/);
   assert.equal((await request(app).get('/api/photos/public').expect(402)).body.code, 'egress_quota_exceeded');
+  const media = await request(app).get('/api/uploads/media').expect(402);
+  assert.equal(media.body.code, 'egress_quota_exceeded'); assert.equal(media.body.retryable, false);
   status = 200; const recovered = await request(app).get('/api/profile/posts/alice').expect(503);
   assert.equal(recovered.body.error, 'generic failure'); assert.equal(availability.restricted(), false);
+  assert.equal((await request(app).get('/api/uploads/media').expect(503)).body.code, 'media_unavailable');
 });
 test('unrelated errors and invalid credentials do not become quota errors; late success does not erase a newer restriction', async () => {
   let release; let n = 0;
@@ -23,6 +27,8 @@ test('unrelated errors and invalid credentials do not become quota errors; late 
   const app = express(); app.use(availability.middleware);
   app.get('/api/profile/denied', (req, res) => res.status(403).json({ error: 'denied' }));
   app.get('/unrelated', (req, res) => res.status(500).json({ error: 'unrelated' }));
+  app.get('/api/uploads/missing', (req, res) => res.status(404).json({ error: 'missing' }));
   assert.equal((await request(app).get('/api/profile/denied').expect(403)).body.error, 'denied');
   assert.equal((await request(app).get('/unrelated').expect(500)).body.error, 'unrelated');
+  assert.equal((await request(app).get('/api/uploads/missing').expect(404)).body.error, 'missing');
 });

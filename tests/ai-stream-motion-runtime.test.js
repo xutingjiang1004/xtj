@@ -179,3 +179,23 @@ for(const implementation of ['main','shared'])for(const hz of [60,120])test(impl
   },{kind:implementation,hz,sharedSource:fs.readFileSync('js/ai-core/stream-renderer.js','utf8')});assert.equal(result.changed,24);assert.ok(result.text.length>24);
  }finally{await browser.close();}
 });
+
+for(const implementation of ['main','shared'])test(implementation+': repeated or adjusted wall clock values cannot suppress scheduled display frames',async()=>{
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(({kind,sharedSource})=>{
+   let sequence=0,wall=1000;const frames=new Map();
+   window.requestAnimationFrame=fn=>{frames.set(++sequence,fn);return sequence;};
+   window.cancelAnimationFrame=id=>frames.delete(id);Date.now=()=>wall;
+   if(kind==='shared')window.eval(sharedSource);
+   const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);
+   renderer.append('正文'.repeat(700));let changed=0,before='';
+   for(let i=1;i<=24;i++){
+    if(i===12)wall=900;
+    const entry=frames.entries().next().value;frames.delete(entry[0]);entry[1](1000+i*1000/120);
+    if(output.textContent!==before)changed++;before=output.textContent;
+   }
+   renderer.stop();return changed;
+  },{kind:implementation,sharedSource:fs.readFileSync('js/ai-core/stream-renderer.js','utf8')});
+  assert.equal(result,24);
+ }finally{await browser.close();}
+});
