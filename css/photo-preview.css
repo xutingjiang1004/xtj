@@ -438,9 +438,9 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow {
 html.xtj-photo-preview-ready #photoPreviewOverlay .photo-preview-close {
   width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;padding:10px!important;
   border-radius:16px!important;color:#fff!important;border:1px solid rgba(255,255,255,.28)!important;
-  background:linear-gradient(145deg,rgba(255,255,255,.2),rgba(255,255,255,.025) 52%,rgba(255,255,255,.09))!important;
-  backdrop-filter:blur(3px) saturate(115%)!important;-webkit-backdrop-filter:blur(3px) saturate(115%)!important;
-  box-shadow:inset 0 1px 1px rgba(255,255,255,.45),inset 0 -1px 1px rgba(255,255,255,.08),0 3px 12px rgba(0,0,0,.12)!important;
+  background:rgba(245,250,248,.2)!important;
+  backdrop-filter:blur(8px) saturate(140%)!important;-webkit-backdrop-filter:blur(8px) saturate(140%)!important;
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.3),0 2px 10px rgba(0,0,0,.12)!important;
 }
 #photoPreviewOverlay .photo-preview-close svg { width:22px;height:22px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
 html.xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar button,

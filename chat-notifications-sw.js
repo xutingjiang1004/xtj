@@ -1,4 +1,5 @@
 'use strict';
+importScripts('/media-originals-sw.js');
 const PREF_CACHE='xtj-chat-push-v1',PREF_URL='/__xtj_chat_push_owner';
 let stateWrites=Promise.resolve();
 self.addEventListener('install',event=>event.waitUntil(self.skipWaiting()));

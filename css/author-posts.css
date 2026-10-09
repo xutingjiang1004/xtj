@@ -15,6 +15,12 @@
 #userProfileModal .upc-name { font-size:18px; margin:0; color:var(--text-main); }
 #userProfileModal .upc-login { display:none; }
 #userProfileModal .upc-msg-btn { min-height:36px; width:auto; padding:6px 16px; font-size:13px; margin:0; box-shadow:none; }
+#userProfileModal .upc-msg-btn.is-self {
+  padding:6px 0!important;border:0!important;border-radius:0!important;background:transparent!important;
+  box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  color:var(--text-secondary)!important;opacity:1!important;cursor:default;transform:none!important;transition:none!important;
+}
+#userProfileModal .upc-msg-btn.is-self::before,#userProfileModal .upc-msg-btn.is-self::after { content:none!important; }
 .author-post-list { padding:0 20px; }
 .author-post-year { font-size:13px; font-weight:500; color:var(--text-secondary); margin:0 0 10px; }
 .author-post-year:not(:first-child) { margin-top:24px; }

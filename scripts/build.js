@@ -109,6 +109,7 @@ const JS_FILES = [
   'js/post-media.js',
   'js/image-load-guard.js',
   'js/media-session.js',
+  'js/media-cache.js',
   'js/mobile-viewport.js',
   'js/post-composer-media.js',
   'js/post-originals.js',

@@ -62,14 +62,17 @@
                 }
                 
                 if (userName === currentUser) {
+                    msgBtn.classList.add('is-self');
                     msgBtn.textContent = '这是你自己';
                     msgBtn.disabled = true;
-                    msgBtn.style.opacity = '0.5';
+                    msgBtn.style.opacity = '1';
                 } else if (!currentUser) {
+                    msgBtn.classList.remove('is-self');
                     msgBtn.textContent = '请先登录再发消息';
                     msgBtn.disabled = true;
                     msgBtn.style.opacity = '0.5';
                 } else {
+                    msgBtn.classList.remove('is-self');
                     msgBtn.textContent = '发消息';
                     msgBtn.disabled = false;
                     msgBtn.style.opacity = '1';
