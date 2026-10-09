@@ -4371,13 +4371,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // 用 data 设置文本，高效
         try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
-        // Reconcile only changed nodes on each scheduled display frame.
-        var now = Date.now();
-        var _renderGap = 0; // requestAnimationFrame already limits each patch to a display frame.
-        var shouldRender = (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending);
-        if (shouldRender && !isSelectionInTarget(targetEl)) {
+        // The display scheduler already bounds patches to a frame. Wall-clock
+        // precision or clock corrections must not suppress an accepted frame.
+        if (!isSelectionInTarget(targetEl)) {
           patchInnerHTML(targetEl, renderMarkdown(rendered, true));
-          targetEl._lastRender = now;
         }
       }
       ensureCursor();

@@ -164,13 +164,9 @@
         var node = ensurePlainTextNode();
         try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
       } else {
-        // Reconcile only changed nodes on each scheduled display frame.
-        var now = Date.now();
-        var _renderGap = 0; // requestAnimationFrame already limits each patch to a display frame.
-        if (!targetEl._lastRender || now - targetEl._lastRender > _renderGap || !pending) {
-          patchInnerHTML(targetEl, renderRich(rendered));
-          targetEl._lastRender = now;
-        }
+        // The display scheduler already bounds patches to a frame. Wall-clock
+        // precision or clock corrections must not suppress an accepted frame.
+        patchInnerHTML(targetEl, renderRich(rendered));
       }
       ensureCursor();
       if (typeof options.onRender === 'function') {

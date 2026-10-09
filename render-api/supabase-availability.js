@@ -16,7 +16,7 @@ function createSupabaseAvailability({ fetchImpl = (...args) => fetch(...args), n
     return response;
   }
   function middleware(req, res, next) {
-    if (!/^(?:\/api\/(?:user|profile|photos?|post|feed)(?:\/|$)|\/health$|\/admin\/login$)/.test(req.path)) return next();
+    if (!/^(?:\/api\/(?:user|profile|photos?|post|feed|uploads)(?:\/|$)|\/health$|\/admin\/login$)/.test(req.path)) return next();
     const json = res.json;
     res.json = function (body) {
       if (res.statusCode >= 500 && restricted()) {

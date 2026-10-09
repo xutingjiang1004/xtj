@@ -60,12 +60,20 @@ for (const surface of ['post', 'preview']) {
     const pending = new Promise(resolve => { release = resolve; });
     try {
       const { page } = f;
+      // Finish the fixture's original image before replacing its source; a
+      // late initial load can otherwise disarm the stalled-request watchdog.
+      await page.waitForFunction(() => {
+        const img = document.querySelector('#feed .post-media-cell img');
+        return img.complete && img.naturalWidth > 0;
+      });
       await page.clock.install();
       const url = f.origin + '/storage/v1/object/public/uploads/posts/retry.png';
       let count = 0;
+      let requestStarted;
+      const started = new Promise(resolve => { requestStarted = resolve; });
       await page.route(url + '*', async route => {
         count++;
-        if (count === 1) await pending;
+        if (count === 1) { requestStarted(); await pending; }
         await route.fulfill({ contentType: 'image/png', body: f.png }).catch(() => {});
       });
       await page.evaluate(({ url, surface }) => {
@@ -77,7 +85,18 @@ for (const surface of ['post', 'preview']) {
           img.src = url;
         }
       }, { url, surface });
-      await page.waitForTimeout(100);
+      await started;
+      // IntersectionObserver runs on real rendering frames, independently of
+      // the fake clock. Wait until the watchdog can observe the visible image
+      // before advancing its deadline.
+      await page.evaluate(surface => new Promise(resolve => {
+        const img = document.querySelector(surface === 'post' ? '#feed .post-media-cell img' : '#photoPreviewImage');
+        const observer = new IntersectionObserver(entries => {
+          if (!entries.some(entry => entry.isIntersecting)) return;
+          observer.disconnect(); requestAnimationFrame(() => resolve());
+        }, { rootMargin: '160px 0px' });
+        observer.observe(img);
+      }), surface);
       await page.clock.runFor(31000);
       const retry = surface === 'post' ? page.locator('#feed .post-media-cell.post-image-failed').first() : page.locator('.pp-error-retry');
       await retry.waitFor({ state: 'visible' });

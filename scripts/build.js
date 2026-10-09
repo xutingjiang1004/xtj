@@ -6,7 +6,7 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 // 直接用 node + 真实 JS 入口执行压缩器（数组参数方式），彻底规避 cmd.exe 转义/引号问题。
-// csso v5+ 已将 CLI 拆分到 csso-cli 包，.bin shim 实际指向 csso-cli/bin/csso。
+// CSS 压缩只需 csso 库，避免引入 CLI 的文件监听及 glob 依赖。
 function resolveNodeBin(pkgEntry, binPath) {
   try {
     return path.resolve(path.dirname(require.resolve(pkgEntry + '/package.json')), binPath);
@@ -15,8 +15,7 @@ function resolveNodeBin(pkgEntry, binPath) {
   }
 }
 const TERSER = resolveNodeBin('terser', 'bin/terser');
-const CSSO = resolveNodeBin('csso-cli', 'bin/csso');
-const CLEAN_CSS = resolveNodeBin('clean-css', 'bin/cleancss');
+const CSS_MINIFIER = path.join(__dirname, 'minify-css.js');
 
 
 function lfNormalize(content) {
@@ -277,16 +276,7 @@ function minifyCSS(filePath, optional) {
     // 临时输出放目标同目录，rename 才能同卷原子替换（跨盘 rename 会抛 EXDEV）
     tempOutPath = outPath + '.tmp-' + process.pid;
     fs.writeFileSync(tempInputPath, normalizedSource, 'utf8');
-    if (!CSSO || !fs.existsSync(CSSO)) {
-      console.log('  csso not installed, trying clean-css...');
-      if (!CLEAN_CSS || !fs.existsSync(CLEAN_CSS)) {
-        console.log('  No CSS minifier available, skipping CSS minification.');
-        return false;
-      }
-      execFileSync(process.execPath, [CLEAN_CSS, '-o', tempOutPath, tempInputPath], { stdio: 'pipe', timeout: 30000 });
-    } else {
-      execFileSync(process.execPath, [CSSO, tempInputPath, '--output', tempOutPath], { stdio: 'pipe', timeout: 30000 });
-    }
+    execFileSync(process.execPath, [CSS_MINIFIER, tempInputPath, tempOutPath], { stdio: 'pipe', timeout: 30000 });
     if (fs.existsSync(tempOutPath)) {
       var cssRaw = fs.readFileSync(tempOutPath, 'utf8');
       var cssNormalized = cssRaw.replace(/\r\n?/g, '\n');
