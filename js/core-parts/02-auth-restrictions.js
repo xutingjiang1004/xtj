@@ -374,10 +374,11 @@
                 }
                 var opts = {
                     method: method,
+                    credentials: 'include',
                     headers: { 'Content-Type': 'application/json' }
                 };
                 if (body) opts.body = JSON.stringify(body);
-                var res = await fetchWithTimeout(API_BASE + path, opts, 10000);
+                var res = await fetchWithTimeout(API_BASE + path, opts, 30000);
                 var contentType = res.headers.get('content-type') || '';
                 var data;
                 if (contentType.indexOf('application/json') !== -1) {
@@ -424,12 +425,12 @@
                                 return;
                             }
                             if (!loginRes.user_token) {
-                                showToast("管理员用户会话建立失败", "error");
+                                showToast(loginRes.user_session_error || "用户会话暂时无法建立，请稍后重试", "error");
                                 return;
                             }
                             loginToken = loginRes.user_token;
                         } catch (apiErr) {
-                            showToast("管理员登录失败: 无法连接后端 API");
+                            showToast(apiErr.name === 'AbortError' ? '登录请求超时，请稍后重试' : (apiErr instanceof TypeError ? '网络连接失败，请检查网络后重试' : apiErr.message || '登录服务暂不可用，请稍后重试'), "error");
                             return;
                         }
                     }

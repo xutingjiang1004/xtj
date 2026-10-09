@@ -3917,6 +3917,9 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   margin: 0 auto;
   position: relative;
   background: inherit;
+  overflow-y: auto;
+  scroll-padding-bottom: 12px;
+  overscroll-behavior: contain;
 }
 
 .dt-header {
@@ -5177,8 +5180,10 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 }
 
 /* 深度思考二级页面暗色模式 */
-[data-theme="dark"] #panelDeepThink {
-  background: linear-gradient(180deg, rgba(18, 26, 30, .98), rgba(14, 22, 26, .98));
+[data-theme="dark"] #panelDeepThink,
+[data-theme="dark"] #panelDeepThink.dock-panel,
+[data-theme="dark"] #panelDeepThink.dock-panel.active {
+  background: linear-gradient(180deg, rgba(18, 26, 30, .98), rgba(14, 22, 26, .98)) !important;
 }
 [data-theme="dark"] .dt-header,
 [data-theme="dark"] .dt-input-bar {
@@ -5424,6 +5429,20 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .dt-file-btn:hover {
   background: rgba(140, 196, 158, .1);
   color: rgba(60, 140, 110, .9);
+}
+#panelDeepThink #dtFileBtn {
+  width:44px;height:44px;min-width:44px;min-height:44px;padding:0;
+  border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--primary,#287b65);
+}
+#panelDeepThink #dtFileBtn::before,#panelDeepThink #dtFileBtn::after { content:none; }
+#panelDeepThink #dtFileBtn svg { display:block;flex:none;width:20px;height:20px;fill:none;stroke:currentColor;overflow:visible; }
+#panelDeepThink .dt-input-bar { flex-wrap:wrap; }
+#panelDeepThink #dtFilePreview { order:-1;flex:0 0 100%;width:100%;max-width:100%;min-width:0;box-sizing:border-box; }
+#panelDeepThink #dtInput { min-width:0; }
+@media(max-width:600px) {
+  #panelDeepThink .dt-header { flex-wrap:wrap; }
+  #panelDeepThink .dt-title { position:static;left:auto;transform:none;flex:1;min-width:0;margin:0;text-align:right; }
+  #panelDeepThink .dt-actions { flex-basis:100%;justify-content:flex-end; }
 }
 
 /* ===================== Deep Think Neural Constellation ===================== */

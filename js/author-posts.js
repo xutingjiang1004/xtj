@@ -38,7 +38,11 @@
         var cell = make('span', 'author-post-thumb'), img = document.createElement('img');
         img.src = safeUrl(item.media_url); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
         if (item.width && item.height) { img.width = item.width; img.height = item.height; }
-        img.addEventListener('error', function () { cell.classList.add('is-unavailable'); img.hidden = true; });
+        img.addEventListener('load', function () { cell.classList.remove('is-unavailable'); img.hidden = false; });
+        img.addEventListener('error', function () {
+          var failed = function () { cell.classList.add('is-unavailable'); img.hidden = true; };
+          if (!window.xtjRecoverMediaImage || !window.xtjRecoverMediaImage(img, img.src, failed)) failed();
+        });
         cell.appendChild(img);
         if (index === Math.min(3, items.length - 1) && items.length > 4) cell.appendChild(make('span', 'author-post-photo-count', '+' + (items.length - 4)));
         mosaic.appendChild(cell);
@@ -83,7 +87,7 @@
     if (!current(s)) return;
     var host = byId('authorPostsStatus'); host.replaceChildren(); host.setAttribute('aria-busy', s.loading ? 'true' : 'false');
     if (label) host.appendChild(make('span', 'author-post-status-text', label));
-    if (retry || s.hasMore) {
+    if ((retry && s.retryable !== false) || (!retry && s.hasMore)) {
       var button = make('button', 'author-post-load-more', retry ? '重试' : '加载更多'); button.type = 'button'; button.disabled = s.loading;
       button.addEventListener('click', function () { load(s); }); host.appendChild(button);
     }
@@ -99,16 +103,16 @@
       var response = await window.xtjOptionalAuthFetch(path, { timeoutMs: 18000, signal: controller.signal, authOwner: s.owner, authEpoch: s.epoch });
       var data = await response.json();
       if (!current(s)) return;
-      if (!response.ok || !data.ok || !Array.isArray(data.posts)) throw Error(data.error || '动态加载失败');
+      if (!response.ok || !data.ok || !Array.isArray(data.posts)) throw Object.assign(Error(data.error || '动态加载失败'), { retryable: data.retryable !== false });
       var seen = new Set(s.posts.map(function (post) { return String(post.id); }));
       data.posts.forEach(function (post) { if (post.user_name === s.author && !seen.has(String(post.id))) { s.posts.push(post); seen.add(String(post.id)); } });
       s.profile = data.profile || s.profile; s.restricted = !!data.restricted;
       if (s.restricted) s.posts = [];
-      s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.loading = false;
+      s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.loading = false; s.retryable = true;
       render(s); status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
     } catch (error) {
       if (!current(s)) return;
-      s.loading = false; status(s, error.message || '动态暂时无法加载', true);
+      s.loading = false; s.retryable = error.retryable !== false; status(s, error.message || '动态暂时无法加载', true);
     } finally { if (s.controller === controller) s.controller = null; }
   }
   window.__xtjCloseAuthorPosts = function () {

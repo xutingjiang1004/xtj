@@ -515,6 +515,7 @@ const ADMIN_NAME = "xxz";
                 var shouldBroadcast = options.broadcast !== false;
                 var reason = options.reason || 'manual';
                 var tokenForRevocation = getUserToken();
+                try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
                 _lastRefreshUser = '';
                 window.__xtjServerIsAdmin = false;
                 window.__xtjServerIsAdminOwner = '';
@@ -651,6 +652,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             }
             window.__xtjWithSessionRequestLock = withSessionRequestLock;
             window.__xtjBeginAuthIdentityChange = function() {
+                try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
                 _authStateEpoch++;
                 _refreshPromise = null;
                 _refreshCooldownUntil = 0;
@@ -957,6 +959,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     delete fetchOpts.authOwner; delete fetchOpts.authEpoch; delete fetchOpts.background;
                     var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
                     var result = await doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                    if (window.xtjObserveServiceResponse) window.xtjObserveServiceResponse(result);
                     fence.check();
                     return result;
                 }
@@ -994,6 +997,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     delete fetchOpts.authOwner; delete fetchOpts.authEpoch; delete fetchOpts.background;
                     var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
                     var result = await doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                    if (window.xtjObserveServiceResponse) window.xtjObserveServiceResponse(result);
                     fence.check();
                     return result;
                 }
@@ -3126,10 +3130,11 @@ function isAdmin() {
                 }
                 var opts = {
                     method: method,
+                    credentials: 'include',
                     headers: { 'Content-Type': 'application/json' }
                 };
                 if (body) opts.body = JSON.stringify(body);
-                var res = await fetchWithTimeout(API_BASE + path, opts, 10000);
+                var res = await fetchWithTimeout(API_BASE + path, opts, 30000);
                 var contentType = res.headers.get('content-type') || '';
                 var data;
                 if (contentType.indexOf('application/json') !== -1) {
@@ -3176,12 +3181,12 @@ function isAdmin() {
                                 return;
                             }
                             if (!loginRes.user_token) {
-                                showToast("管理员用户会话建立失败", "error");
+                                showToast(loginRes.user_session_error || "用户会话暂时无法建立，请稍后重试", "error");
                                 return;
                             }
                             loginToken = loginRes.user_token;
                         } catch (apiErr) {
-                            showToast("管理员登录失败: 无法连接后端 API");
+                            showToast(apiErr.name === 'AbortError' ? '登录请求超时，请稍后重试' : (apiErr instanceof TypeError ? '网络连接失败，请检查网络后重试' : apiErr.message || '登录服务暂不可用，请稍后重试'), "error");
                             return;
                         }
                     }
@@ -3435,14 +3440,17 @@ function isAdmin() {
                 }
                 
                 if (userName === currentUser) {
+                    msgBtn.classList.add('is-self');
                     msgBtn.textContent = '这是你自己';
                     msgBtn.disabled = true;
-                    msgBtn.style.opacity = '0.5';
+                    msgBtn.style.opacity = '1';
                 } else if (!currentUser) {
+                    msgBtn.classList.remove('is-self');
                     msgBtn.textContent = '请先登录再发消息';
                     msgBtn.disabled = true;
                     msgBtn.style.opacity = '0.5';
                 } else {
+                    msgBtn.classList.remove('is-self');
                     msgBtn.textContent = '发消息';
                     msgBtn.disabled = false;
                     msgBtn.style.opacity = '1';
@@ -8269,9 +8277,12 @@ function renderProfileActivityList(kind) {
                 var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
                 var post = feedAllPosts.find(function(p) { return String(p.id) === String(postId); });
                 if (!post && window.currentPost && String(window.currentPost.id) === String(postId)) post = window.currentPost;
-                var hasText = post && String(post.content || '').trim().length > 0;
+                var postText = post ? String(post.content || '') : '';
+                try { var toolPayload = JSON.parse(postText); if (toolPayload && toolPayload.__type === '__xtj_post_v2__') postText = String(toolPayload.text || ''); } catch (_) {}
+                var hasText = postText.trim().length > 0;
+                var hasImages = post && window.XtjPostMedia && window.XtjPostMedia.getPostMediaItems(post).some(function (item) { return /^(image|photo)$/.test(item.media_type); });
                 var btnTranslate = hasText ? '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' : '';
-                var btnAi = hasText ? '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' : '';
+                var btnAi = hasText || hasImages ? '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' : '';
                 menu.innerHTML = btnTranslate + btnAi +
                                  '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
                 document.body.appendChild(menu);
@@ -9227,6 +9238,7 @@ function renderProfileActivityList(kind) {
                 var likes = [];
                 var endReached = false;
                 var usedApi = false;
+                var blockedFeedError = null;
                 // ★ 修复：记录服务端返回的"下一页起始绝对偏移"（已含页宽），
                 // 仅 API/early 路径设置；start 保持为本次请求的起始偏移，不再被改写。
                 var serverNextOffset = null;
@@ -9310,12 +9322,16 @@ function renderProfileActivityList(kind) {
                             serverNextCursor = apiData.next_cursor || null;
                             usedApi = true;
                         }
+                    } else if (apiResp && apiResp.status === 402) {
+                        var restrictedFeed = await apiResp.json().catch(function() { return {}; });
+                        if (restrictedFeed.code === 'egress_quota_exceeded') blockedFeedError = Object.assign(new Error(restrictedFeed.error || '网站数据服务暂时受限，请等待恢复'), { code: 'egress_quota_exceeded' });
                     }
                     }
                 } catch (apiErr) {
                     console.warn('[feed] API unavailable, fallback to Supabase:', apiErr && apiErr.message);
                 }
 
+                if (blockedFeedError) throw blockedFeedError;
                 if (!usedApi) {
                     // 回退：Supabase 直连（RLS 仅返回公开帖子）
                     // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
@@ -10499,7 +10515,8 @@ function renderProfileActivityList(kind) {
                     if (requestId !== feedLoadRequestId) return;
                     console.error(e);
                     var cacheFallbackShown = false;
-                    if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
+                    var quotaLimited = e && e.code === 'egress_quota_exceeded';
+                    if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">' + escapeHtml(quotaLimited ? e.message : '加载失败，请刷新重试') + '</div>';
                     try {
                         var fallbackRaw = window.safeStorage.get(CACHE_KEY);
                         if (fallbackRaw) {
@@ -10521,10 +10538,10 @@ function renderProfileActivityList(kind) {
                             staleNotice = document.createElement('div');
                             staleNotice.id = 'feedStaleNotice';
                             staleNotice.className = 'loading feed-load-more-error';
-                            staleNotice.setAttribute('role', 'button');
-                            staleNotice.setAttribute('tabindex', '0');
-                            staleNotice.textContent = '网络加载失败，当前显示缓存内容，点击重试';
-                            staleNotice.addEventListener('click', function() {
+                            staleNotice.setAttribute('role', quotaLimited ? 'status' : 'button');
+                            if (!quotaLimited) staleNotice.setAttribute('tabindex', '0');
+                            staleNotice.textContent = quotaLimited ? e.message + '。当前显示缓存的帖子记录。' : '网络加载失败，当前显示缓存内容，点击重试';
+                            if (!quotaLimited) staleNotice.addEventListener('click', function() {
                                 var el = document.getElementById('feedStaleNotice');
                                 if (el && el.parentNode) el.parentNode.removeChild(el);
                                 loadFeed(true);
@@ -16867,7 +16884,7 @@ function renderProfileActivityList(kind) {
                 overlay.addEventListener('click',async function(event){var b=event.target.closest('[data-gallery]');if(!b)return;var action=b.dataset.gallery;
                     if(action==='close')close();if(action==='previous')move(-1);if(action==='next')move(1);
                     if(action==='jump'){var id=items[current].id;close();jumpChatHistory(peer,id);}
-                    if(action==='save'){b.disabled=true;try{var response=await fetch(items[current].url);if(!response.ok)throw Error();var blob=await response.blob();if(owner!==window.currentUser || closed)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='chat-photo-'+current+'.'+(blob.type==='image/png'?'png':'jpg');a.click();setTimeout(function(){URL.revokeObjectURL(url);},30000);}catch(_){showToast('图片暂时无法保存，请重试');}finally{b.disabled=false;}}
+                    if(action==='save'){b.disabled=true;try{var response=await fetch(items[current].url);if(!response.ok)throw Error();var blob=await response.blob();if(owner!==window.currentUser || closed)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;var extension={'image/png':'png','image/webp':'webp','image/gif':'gif','image/avif':'avif','image/heic':'heic','image/svg+xml':'svg'}[blob.type]||'jpg';a.download='chat-photo-'+current+'.'+extension;a.click();setTimeout(function(){URL.revokeObjectURL(url);},30000);}catch(_){showToast('图片暂时无法保存，请重试');}finally{b.disabled=false;}}
                 });
                 img.addEventListener('error',function(){if(!closed)showToast('图片暂时不可用，请返回会话刷新');});
                 var stage=overlay.querySelector('.chat-gallery-stage');

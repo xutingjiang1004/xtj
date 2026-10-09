@@ -31,7 +31,9 @@ test('service worker hides cross-account pushes, suppresses visible current chat
  const client={id:'window-one',url:'https://xtj.onrender.com/',get visibilityState(){return visible?'visible':'hidden';},postMessage(m){opened.push(m);},async focus(){}};
  const self={location:{origin:'https://xtj.onrender.com'},addEventListener(k,f){handlers[k]=f;},registration:{async showNotification(title,data){shown.push({title,data});}},clients:{async matchAll(){return [client];},async openWindow(url){opened.push(url);}}};
  const caches={async open(){return {async match(){return new Response(JSON.stringify({owner,clients:{'window-one':{owner,peer}}}));},async put(){}};}};
- vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname,'../chat-notifications-sw.js'),'utf8'),{self,caches,URL,Response});
+ const scope=vm.createContext({self,caches,URL,Response,Request,Headers});
+ scope.importScripts=function(file){vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'..',file),'utf8'),scope);};
+ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../chat-notifications-sw.js'),'utf8'),scope);
  async function push(data){let promise;handlers.push({data:{json:()=>data},waitUntil(p){promise=p;}});await promise;}
  const data={type:'chat-message',owner:'actor',peer:'peer',id:'id',body:'DO NOT DISPLAY THIS'};
  await push(data);assert.equal(shown.length,1);assert.equal(shown[0].data.body,'打开聊天查看');visible=true;await push(data);assert.equal(shown.length,1);visible=false;owner='other';await push(data);assert.equal(shown.length,1);

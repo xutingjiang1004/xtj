@@ -4347,7 +4347,7 @@
                 overlay.addEventListener('click',async function(event){var b=event.target.closest('[data-gallery]');if(!b)return;var action=b.dataset.gallery;
                     if(action==='close')close();if(action==='previous')move(-1);if(action==='next')move(1);
                     if(action==='jump'){var id=items[current].id;close();jumpChatHistory(peer,id);}
-                    if(action==='save'){b.disabled=true;try{var response=await fetch(items[current].url);if(!response.ok)throw Error();var blob=await response.blob();if(owner!==window.currentUser || closed)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='chat-photo-'+current+'.'+(blob.type==='image/png'?'png':'jpg');a.click();setTimeout(function(){URL.revokeObjectURL(url);},30000);}catch(_){showToast('图片暂时无法保存，请重试');}finally{b.disabled=false;}}
+                    if(action==='save'){b.disabled=true;try{var response=await fetch(items[current].url);if(!response.ok)throw Error();var blob=await response.blob();if(owner!==window.currentUser || closed)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;var extension={'image/png':'png','image/webp':'webp','image/gif':'gif','image/avif':'avif','image/heic':'heic','image/svg+xml':'svg'}[blob.type]||'jpg';a.download='chat-photo-'+current+'.'+extension;a.click();setTimeout(function(){URL.revokeObjectURL(url);},30000);}catch(_){showToast('图片暂时无法保存，请重试');}finally{b.disabled=false;}}
                 });
                 img.addEventListener('error',function(){if(!closed)showToast('图片暂时不可用，请返回会话刷新');});
                 var stage=overlay.querySelector('.chat-gallery-stage');

@@ -41,6 +41,8 @@
     byId("profilePreferences")
       .querySelectorAll("input,select,button")
       .forEach(function (control) {
+        // Clearing this browser's cache does not depend on server settings.
+        if (control.id === "xtjClearCacheBtn") return;
         control.disabled = !value;
       });
     byId("profileSettingsRetry").disabled = false;

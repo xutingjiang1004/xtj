@@ -230,7 +230,7 @@
   }
 
   // ---------- Site 4 settings ----------
-  function clearLocalCache() {
+  async function clearLocalCache() {
     try {
       var keys = [];
       for (var i = 0; i < localStorage.length; i++) {
@@ -247,6 +247,7 @@
           localStorage.removeItem(k);
         } catch (e) {}
       });
+      if (window.xtjClearOriginalMediaCache) await window.xtjClearOriginalMediaCache();
       if (typeof window.showToast === 'function') window.showToast('已清理本地缓存', 'success');
     } catch (e) {
       if (typeof window.showToast === 'function') window.showToast('清理失败', 'error');

@@ -509,6 +509,7 @@ const ADMIN_NAME = "xxz";
                 var shouldBroadcast = options.broadcast !== false;
                 var reason = options.reason || 'manual';
                 var tokenForRevocation = getUserToken();
+                try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
                 _lastRefreshUser = '';
                 window.__xtjServerIsAdmin = false;
                 window.__xtjServerIsAdminOwner = '';
@@ -645,6 +646,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             }
             window.__xtjWithSessionRequestLock = withSessionRequestLock;
             window.__xtjBeginAuthIdentityChange = function() {
+                try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
                 _authStateEpoch++;
                 _refreshPromise = null;
                 _refreshCooldownUntil = 0;
@@ -951,6 +953,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     delete fetchOpts.authOwner; delete fetchOpts.authEpoch; delete fetchOpts.background;
                     var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
                     var result = await doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                    if (window.xtjObserveServiceResponse) window.xtjObserveServiceResponse(result);
                     fence.check();
                     return result;
                 }
@@ -988,6 +991,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     delete fetchOpts.authOwner; delete fetchOpts.authEpoch; delete fetchOpts.background;
                     var doFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
                     var result = await doFetch((window.API_BASE || '') + path, fetchOpts, timeoutMs);
+                    if (window.xtjObserveServiceResponse) window.xtjObserveServiceResponse(result);
                     fence.check();
                     return result;
                 }

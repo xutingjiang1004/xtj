@@ -1,0 +1,28 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const express = require('express'), request = require('supertest');
+const { createSupabaseAvailability } = require('../render-api/supabase-availability');
+test('quota restrictions have a precise non-retryable error and recover on a successful upstream request', async () => {
+  let status = 402;
+  const availability = createSupabaseAvailability({ fetchImpl: async () => new Response(status === 402 ? JSON.stringify({ message: 'restricted: exceed_egress_quota' }) : '[]', { status }) });
+  const app = express(); app.use(availability.middleware);
+  app.get('/api/profile/posts/alice', async (req, res) => { await availability.transport('https://supabase.test/rest/v1/posts'); res.status(503).json({ ok: false, error: 'generic failure', retryable: true }); });
+  app.get('/api/photos/public', async (req, res) => { await availability.transport('https://supabase.test/rest/v1/posts'); res.status(503).json({ ok: false, error: 'generic failure' }); });
+  const first = await request(app).get('/api/profile/posts/alice').expect(402);
+  assert.equal(first.body.code, 'egress_quota_exceeded'); assert.equal(first.body.retryable, false); assert.equal(first.headers['cache-control'], 'no-store');
+  assert.equal(first.headers['x-xtj-service-status'], 'egress_quota_exceeded'); assert.doesNotMatch(first.body.error, /supabase.test/);
+  assert.equal((await request(app).get('/api/photos/public').expect(402)).body.code, 'egress_quota_exceeded');
+  status = 200; const recovered = await request(app).get('/api/profile/posts/alice').expect(503);
+  assert.equal(recovered.body.error, 'generic failure'); assert.equal(availability.restricted(), false);
+});
+test('unrelated errors and invalid credentials do not become quota errors; late success does not erase a newer restriction', async () => {
+  let release; let n = 0;
+  const availability = createSupabaseAvailability({ fetchImpl: async () => ++n === 1 ? new Promise(resolve => release = () => resolve(new Response('[]'))) : new Response('exceed_egress_quota', { status: 402 }) });
+  const old = availability.transport('old'); await availability.transport('new'); release(); await old;
+  assert.equal(availability.restricted(), true);
+  const app = express(); app.use(availability.middleware);
+  app.get('/api/profile/denied', (req, res) => res.status(403).json({ error: 'denied' }));
+  app.get('/unrelated', (req, res) => res.status(500).json({ error: 'unrelated' }));
+  assert.equal((await request(app).get('/api/profile/denied').expect(403)).body.error, 'denied');
+  assert.equal((await request(app).get('/unrelated').expect(500)).body.error, 'unrelated');
+});

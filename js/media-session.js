@@ -48,6 +48,7 @@
     var url = mediaUrl(value), owner = String(window.currentUser || ''), generation = epoch();
     if (!url || !owner || !img || !img.isConnected || window.__xtjLogoutPending) return false;
     var key = owner + ':' + generation + ':' + url.pathname, source = img.getAttribute('src');
+    if (window.__xtjServiceRestrictedUntil > Date.now()) return false;
     if (img._xtjMediaAuthRetry === key && Date.now() - img._xtjMediaAuthRetryAt < 60000) return false;
     img._xtjMediaAuthRetry = key;
     img._xtjMediaAuthRetryAt = Date.now();

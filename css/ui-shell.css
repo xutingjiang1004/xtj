@@ -3040,6 +3040,18 @@ html[data-xtj-motion="off"] #photoWallContainer .pw-album-cover { transition:non
 #chatGallery header { top:max(10px,env(safe-area-inset-top)); }
 #chatGallery footer { bottom:max(12px,env(safe-area-inset-bottom)); }
 #chatGallery button { pointer-events:auto; }
+#chatGallery button:is([data-gallery="close"],[data-gallery="save"],[data-gallery="jump"]) {
+  background:rgba(245,250,248,.2)!important;border:1px solid rgba(255,255,255,.25)!important;
+  border-radius:16px!important;color:#fff!important;opacity:1!important;
+  backdrop-filter:blur(8px) saturate(140%)!important;-webkit-backdrop-filter:blur(8px) saturate(140%)!important;
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.3),0 2px 10px rgba(0,0,0,.12)!important;
+  text-shadow:0 1px 2px rgba(0,0,0,.6);background-image:none!important;
+}
+#chatGallery button:is([data-gallery="close"],[data-gallery="save"],[data-gallery="jump"])::before,
+#chatGallery button:is([data-gallery="close"],[data-gallery="save"],[data-gallery="jump"])::after { content:none!important; }
+@media(prefers-reduced-transparency:reduce) {
+  #chatGallery button:is([data-gallery="close"],[data-gallery="save"],[data-gallery="jump"]) { background:#24312f!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important; }
+}
 
 @media(prefers-reduced-motion:reduce) { #photoWallContainer #photoGrid { transition:none!important;animation:none!important; } }
 html[data-xtj-motion="off"] #photoWallContainer #photoGrid { transition:none!important;animation:none!important; }
