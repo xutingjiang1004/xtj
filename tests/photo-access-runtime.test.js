@@ -70,7 +70,7 @@ test('media cookies bind to active login sessions; revoked and late old cookies 
   await request(f.app).get('/api/photo/'+A+'/media').set('Cookie',PHOTO_COOKIE+'=owner').expect(401);
   f.photos[0].visibility='private';await request(f.app).get('/api/photo/'+A+'/media').set('Cookie','xtj_admin_token=admin').expect(200);
   const cookies=[];setPhotoSession({cookie:(name,value,opts)=>cookies.push({name,value,opts})},'access-token',Date.now()+10000,SESSION);
-  assert.equal(cookies.length,2);assert.ok(cookies.every(c=>c.opts.httpOnly&&c.opts.secure&&c.opts.sameSite==='Lax'));assert.deepEqual(cookies.map(c=>c.opts.path),['/api/photo','/api/post']);
+  assert.equal(cookies.length,3);assert.ok(cookies.every(c=>c.opts.httpOnly&&c.opts.secure&&c.opts.sameSite==='Lax'));assert.deepEqual(cookies.map(c=>c.opts.path),['/api/photo','/api/post','/api/uploads']);
 });
 test('accepted TIFF MIME remains readable while active SVG content is refused',async()=>{
   const f=fixture();f.setMime('image/tif');

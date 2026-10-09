@@ -1,5 +1,7 @@
 'use strict';
 const { photoPayload } = require('./photo-access');
+const { loadPostAttachments } = require('./post-attachments');
+const { readProfileSettings } = require('./profile-settings');
 const {PUBLIC_POST_MEDIA_TYPES}=require('./post-markers');
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const CATEGORIES=['profile','posts','photos','likes','comments','photo_views','ai_history','activity','messages','chat_contacts','chat_preferences','locations'];
@@ -47,6 +49,7 @@ function createPersonalExport({express,supabase,authenticateUser,rateLimit,priva
     }
     const key=kind==='photo_views'?'photo_id':'id',time=kind==='locations'?'received_at':kind==='photo_views'?'first_viewed_at':'created_at';
     q=q.lte(time,at);if(after)q=q.gt(key,after);rows=await checked(q.order(key,{ascending:true}).limit(201));
+    if(kind==='posts')rows=await loadPostAttachments(supabase,rows);
     if(kind==='photo_views')rows=rows.map(r=>({...r,id:r.photo_id}));
    }
    const hasMore=rows.length>200,items=rows.slice(0,200).map(row=>safeRecord(kind==='photos'?photoPayload(row):row));
@@ -56,7 +59,7 @@ function createPersonalExport({express,supabase,authenticateUser,rateLimit,priva
    if(kind==='profile'){
     const auth=await checked(supabase.from('posts').select('created_at').eq('user_name',actor).eq('media_type','__auth__').order('created_at',{ascending:true}).limit(1));
     const consent=await checked(supabase.from('user_behavior_consents').select('enabled,updated_at').eq('user_name',actor));
-    account={user_name:actor,registered_at:auth[0]&&auth[0].created_at||null,behavior_consent:consent[0]||{enabled:false}};
+    account={user_name:actor,registered_at:auth[0]&&auth[0].created_at||null,behavior_consent:consent[0]||{enabled:false},settings:await readProfileSettings(supabase,actor)};
    }
    res.json({ok:true,kind,snapshot:at,account,items,has_more:hasMore,next_cursor:hasMore?String(items.at(-1).id):null});
   }catch(_){res.status(503).json({ok:false,error:'个人数据暂时无法完整读取，请重试',code:'export_unavailable'});}

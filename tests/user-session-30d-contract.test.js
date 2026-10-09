@@ -67,7 +67,8 @@ test('refresh 接口：查询不可用（uncertain）时不得清 cookie、不�
   const revokedIdx = body.indexOf('revokeVerdict.revoked)');
   assert.ok(revokedIdx > 0, '必须存在确证撤销分支');
   const revokedSeg = body.slice(revokedIdx, revokedIdx + 320);
-  assert.match(revokedSeg, /clearCookie/, '确证撤销才清 cookie');
+  assert.match(revokedSeg, /status\(409\)/, '旧前驱重放必须拒绝');
+  assert.doesNotMatch(revokedSeg, /clearCookie/, '迟到旧请求不能清除另一标签已写入的新 cookie');
 
   // uncertain 分支：只告警放行，绝不 clearCookie / 401
   const uncertainIdx = body.indexOf('revokeVerdict.uncertain)');
@@ -99,8 +100,8 @@ test('刷新令牌有效期必须是 90 天', () => {
 
 test('刷新即续期：每次 refresh 都要重新签发 90 天令牌（滑动窗口）', () => {
   const start = serverSrc.indexOf("app.post('/api/user/refresh'");
-  const body = serverSrc.slice(start, start + 4200);
-  assert.match(body, /signUserRefreshToken\(payload\.user_name,\s*presentedDeviceId\)/,
+  const body = serverSrc.slice(start, serverSrc.indexOf("app.post('/api/user/logout'", start));
+  assert.match(body, /signUserRefreshToken\(payload\.user_name,\s*presentedDeviceId,\s*String\(account\.id\)\)/,
     'refresh 必须重新签发 refresh token（滑动 90 天，而非固定到期）');
   assert.match(body, /maxAge:\s*USER_REFRESH_TOKEN_EXPIRY_MS/,
     'cookie maxAge 必须同步为 90 天');

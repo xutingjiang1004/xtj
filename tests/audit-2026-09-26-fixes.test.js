@@ -74,7 +74,7 @@ test('P1-7 私信媒体与举报缩略图必须过 sanitizeUrl', () => {
   // ★ 原断言钉住的是 `resolvedImageSrc` 这个已重命名的局部变量，会随重构失效。
   //   安全意图不变：私信图片/视频/音频必须过 sanitizeUrl 协议白名单。
   assert.match(chatNav, /var safeSrc = \(typeof sanitizeUrl === 'function'\) \? sanitizeUrl\((?:remoteSrc|resolvedImageSrc)\) : ''/, '私信图片必须过 sanitizeUrl');
-  assert.match(chatNav, /var safe(?:Video|Audio)Src = \(typeof sanitizeUrl === 'function'\) \? sanitizeUrl\(String\(media\.src \|\| ''\)\) : ''/, '视频/音频必须过 sanitizeUrl');
+  for (const kind of ['Video', 'Audio']) assert.ok(chatNav.includes('var safe' + kind + "Src = sanitizeUrl(String(message.__localPreviewUrl || media.src || ''));"), '视频/音频必须过 sanitizeUrl');
   assert.match(chatNav, /var safeThumb = \(typeof sanitizeUrl === 'function'\) \? sanitizeUrl\(item\.thumb\) : ''/, '举报缩略图必须过 sanitizeUrl');
   assert.doesNotMatch(chatNav, /img\.src\s*=\s*(?:resolvedImageSrc|remoteSrc)\s*[;\n]/, '私信图片不得把原始 URL 直接赋给 src（绕过白名单）');
   assert.match(feedStats, /if \(s\.length > 2 \* 1024 \* 1024\) return '';/, 'sanitizeUrl 必须有长度上限');
@@ -100,13 +100,14 @@ test('P2-2 /api/photo/view 不得再混用白名单与照片标记', () => {
 
 test('P2-3 软删墓碑不得出现在公开可见面', () => {
   assert.match(postQuery, /if \(row\.is_deleted === true\) return false;/, 'isNormalPost 必须拒绝软删行');
-  const feed = server.slice(server.indexOf("app.get('/api/feed'"), server.indexOf("app.get('/api/feed'") + 6000);
-  assert.match(feed, /p\.is_deleted === true/, 'feed 必须过滤软删帖子');
+  const start = server.indexOf("app.get('/api/feed'");
+  const feed = server.slice(start, server.indexOf("app.get(", start + 20));
+  assert.match(feed, /query\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/, 'feed 必须在分页前过滤软删行');
 });
 
 test('P2-6 /api/post/detail 私密帖返回 404 且返回真实 views', () => {
   const start = server.indexOf("app.get('/api/post/detail/:id'");
-  const body = server.slice(start, start + 2500);
+  const body = server.slice(start, server.indexOf("app.", start + 20));
   assert.doesNotMatch(body, /post_not_visible/, '私密帖不得用 403 暴露存在性');
   assert.match(body, /views: Number\(post\.views\) \|\| 0/, '必须返回真实 views');
 });
@@ -145,7 +146,7 @@ test('AI 前端：SVG 白名单重建、下载链接协议白名单、光标与 
   assert.match(aiAgent, /SVG_ALLOWED_TAGS/, '必须有元素白名单');
   assert.match(aiAgent, /var safeSvg = sanitizeSvgMarkup\(String\(data\.svg\)\)/, '图表卡必须走白名单');
   assert.match(aiAgent, /var urlOk = \/\^\(https\?:\|blob:\|data:\)\/i\.test\(rawUrl\)/, '下载链接必须校验协议');
-  assert.match(aiAgent, /ai-stream-cursor'\)\) continue;/, '增量补丁必须忽略打字光标节点');
+  assert.match(aiAgent, /childNodes\)\.filter\(function\(n\) \{ return !\(n\.nodeType === 1 && n\.classList\.contains\('ai-stream-cursor'\)\); \}\)/, '增量补丁必须忽略打字光标节点');
   assert.match(aiAgent, /if \(cursor && cursor\.parentNode !== targetEl\) cursor = null;/, '光标必须能在被抹掉后重挂');
   assert.match(aiAgent, /if \(buffer && buffer\.charAt\(buffer\.length - 1\) !== '\\n'\) buffer \+= '\\n';/, 'EOF 半行必须派发');
   assert.match(aiAgent, /typeof renderMarkdown === 'function'\) \? renderMarkdown/, '不得再委托可变全局 renderMarkdown');

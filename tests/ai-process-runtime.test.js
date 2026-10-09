@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
 const { appendProcessEvent, getProcessEvents } = require('../render-api/ai-process-events');
 const read = path => fs.readFileSync(path, 'utf8');
 async function fixture(t, effort='max', model='deepseek-flash', researchPipeline=false) {
-  const browser = await chromium.launch({executablePath:'/usr/bin/chromium', args:['--no-sandbox']}); t.after(() => browser.close());
+  const browser = await chromium.launch({executablePath:process.env.CHROMIUM_PATH || (require('node:fs').existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined), args:['--no-sandbox']}); t.after(() => browser.close());
   const page = await browser.newPage(); page.setDefaultTimeout(6000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.route('https://process.test/**', route => route.fulfill({contentType:'text/html',body:'<div class="app-container"><div id="panelAiChat"></div><div id="panelDeepThink" class="hidden"><div id="dtMessages"></div><textarea id="dtInput"></textarea><button id="dtSendBtn"></button><button id="dtPauseBtn"></button><button id="dtNewBtn"></button><button id="dtDelBtn"></button></div></div>'}));

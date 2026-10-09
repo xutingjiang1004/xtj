@@ -89,12 +89,12 @@ test('M1: 加载失败后强制重渲染，让错误态必然呈现', () => {
 // ─────────────────────────── M2 截断出口 ───────────────────────────
 
 test('M2: DOM 达上限且服务端仍有更多时，保留可点击入口而非直接断开', () => {
-  const start = renderSource.indexOf('if (domIds.length >= MAX_DOM_PHOTOS)');
+  const start = renderSource.indexOf('if (domIds.length >= MAX_DOM_PHOTOS && visible.length > photoBatchStart + MAX_DOM_PHOTOS)');
   assert.ok(start >= 0, '未找到封顶分支');
   const limitBranch = renderSource.slice(start, start + 900);
-  assert.match(limitBranch, /window\.hasMorePhotos\(\)/, '必须区分服务端是否还有数据');
-  assert.match(limitBranch, /已达当前渲染上限，点击继续加载/);
-  assert.match(limitBranch, /else \{[\s\S]*?disconnect\(\)/, 'disconnect 只能出现在 else 分支');
+  assert.match(limitBranch, /photoBatchStart \+= MAX_DOM_PHOTOS/);
+  assert.match(limitBranch, /renderSorted\(sortedAll, true\)/, '已加载的新照片必须可进入下一批次');
+  assert.match(renderSource, /domPhotoLimitReached\(\) && window\.hasMorePhotos\(\)/, '未加载的新照片仍保留手动入口');
 });
 
 test('M2: IntersectionObserver 在上限时改为提示而非自动触发的空转循环', () => {

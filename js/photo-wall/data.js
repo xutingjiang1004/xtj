@@ -622,6 +622,7 @@
     opts = opts || {};
     if (!item) return { ok:false, error:'missing_photo' };
     var current = window.currentUser || '';
+    var deleteEpoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
     // L3 修复：管理员判断统一走 window.isAdmin()（由后端 /admin/verify 结果驱动），
     // 移除硬编码用户名 'xxz' 的前端后门式提权通道（后端 /api/photo/delete 仍独立校验权限）
     if (!canDeletePhotoWallPhoto(item)) {
@@ -635,6 +636,9 @@
     removePhotoLocal(id, opts.render !== false);
     var deleteResult = null;
     try { deleteResult = await deleteCloudPhoto(item); } catch (err) { console.warn('[PhotoWall] cloud delete failed', err); }
+    if (current !== (window.currentUser || '') || deleteEpoch !== (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0)) {
+      return { ok: false, error: 'identity_changed' };
+    }
     if (!deleteResult) {
       removePendingDeletedPhotoId(item.id);
       removePendingDeletedPhotoId(item.cloudId);

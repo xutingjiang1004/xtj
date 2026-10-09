@@ -28,7 +28,7 @@ test('search scopes protect private records and direct messages', () => {
   assert.match(server, /visibleCommentPosts/);
   assert.match(server, /media_type', DM_MARKER/);
   // DM 搜索的 or() 过滤用 pgrstQuote 转义用户名，防止注入过滤条件
-  assert.match(server, /user_name\.eq\.' \+ pgrstQuote\(userName\)/);
+  assert.match(server, /readVisibleDmPosts\(userName/);
 });
 
 test('new AI tables are RLS protected and service-role only', () => {
@@ -133,7 +133,7 @@ test('aiSiteSearch checks query errors on all sources', () => {
   assert.match(server, /if \(postRes\.error\)/);
   assert.match(server, /if \(commentRes\.error\)/);
   assert.match(server, /if \(photoRes\.error\)/);
-  assert.match(server, /if \(dmRes\.error\)/);
+  assert.match(server, /dm_query_failed/);
   assert.match(server, /if \(aiRes\.error\)/);
   assert.match(server, /if \(userRes\.error\)/);
 });

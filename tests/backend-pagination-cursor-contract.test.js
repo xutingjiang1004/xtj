@@ -40,23 +40,10 @@ test('DM 分页：必须解析复合游标（cursor=<ts>|<id> 或 before+before_
   assert.match(route, /req\.query\.cursor/, '必须支持 cursor 合并参数');
 });
 
-test('DM 分页：复合游标必须生成 (created_at < ts) OR (created_at = ts AND id < id) 谓词', () => {
-  const fn = block(server, 'function buildDirectionQuery(sender, recipient) {', 1200);
-  assert.match(fn, /created_at\.lt\./, '必须保留时间小于的边界');
-  assert.match(fn, /and\(created_at\.eq\./, '同一秒内必须用 id 做二级比较');
-  assert.match(fn, /id\.lt\./, 'id 必须参与游标比较');
-  assert.ok(
-    fn.indexOf('beforeId') < fn.indexOf('created_at.lt.'),
-    '复合分支必须在纯时间分支之前判断，否则 beforeId 永不生效'
-  );
-});
-
-test('DM 分页：排序必须有 id 兜底，与游标键严格对齐', () => {
-  const fn = block(server, 'function buildDirectionQuery(sender, recipient) {', 1200);
-  const createdIdx = fn.indexOf(".order('created_at', { ascending: false })");
-  const idIdx = fn.indexOf(".order('id', { ascending: false })");
-  assert.ok(createdIdx > 0, '必须按 created_at 倒序');
-  assert.ok(idIdx > createdIdx, 'id 兜底排序必须紧跟 created_at，否则分页边界会漂移');
+test('DM keyset SQL keeps timestamp precision and UUID ordering',()=>{
+ const sql=fs.readFileSync('supabase/migrations/20261009102404_account_sessions_and_atomic_visibility.sql','utf8');
+ assert.match(sql,/p.created_at<p_before/);assert.match(sql,/p.created_at=p_before AND p.id<p_before_id/);
+ assert.match(sql,/ORDER BY p.created_at DESC,p.id DESC LIMIT/);
 });
 
 test('DM 分页：next_cursor 必须是复合游标并保留拆分字段', () => {
@@ -66,12 +53,10 @@ test('DM 分页：next_cursor 必须是复合游标并保留拆分字段', () =>
   assert.match(route, /nextCursorTs \+ '\|' \+ nextCursorId/, 'next_cursor 必须是 ts|id 复合串');
 });
 
-test('DM 分页：不传游标时退化为最近 limit 条（向后兼容）', () => {
-  const fn = block(server, 'function buildDirectionQuery(sender, recipient) {', 1200);
-  assert.match(fn, /if \(before\) \{/, '游标必须可选——无游标时不得加 any 过滤条件');
-  assert.match(fn, /\.limit\(limit \+ 1\)/, '必须多取 1 条判断还有更早的');
+test('DM cursor remains optional and fetches one extra visible message',()=>{
+ const route=between(server,"app.get('/api/dm/messages'","app.get('/api/dm/media/authorize'");
+ assert.match(route,/p_limit: limit \+ 1/);assert.match(route,/p_before: before \|\| null/);
 });
-
 // =============================================================== 照片墙稳定排序
 
 test('照片墙（公开列表）：必须有 id 兜底排序', () => {

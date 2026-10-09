@@ -14,7 +14,7 @@
   function mediaUrl(value) {
     try {
       var url = new URL(value, location.href), api = new URL(window.API_BASE || location.origin, location.href);
-      if (url.origin !== api.origin || !/^\/api\/(?:photo\/[0-9a-f-]{36}\/media|post\/[0-9a-f-]{36}\/media\/(?:0|[1-9]\d?))$/i.test(url.pathname)) return null;
+      if (url.origin !== api.origin || !/^\/api\/(?:uploads\/media|photo\/[0-9a-f-]{36}\/media|post\/[0-9a-f-]{36}\/media\/(?:0|[1-9]\d?))$/i.test(url.pathname)) return null;
       return url;
     } catch (_) { return null; }
   }
@@ -22,7 +22,7 @@
     var url = mediaUrl(value);
     if (!url) return Promise.resolve(true);
     var owner = String(window.currentUser || ''), generation = epoch();
-    if (!owner || window.__xtjLogoutPending) return Promise.resolve(url.pathname.indexOf('/api/post/') === 0);
+    if (!owner || window.__xtjLogoutPending) return Promise.resolve(!url.pathname.startsWith('/api/photo/'));
     if (!(options && options.force) && readyOwner === owner && readyEpoch === generation && Date.now() - readyAt < 12 * 60000) return Promise.resolve(true);
     if (pending && pending.owner === owner && pending.epoch === generation) return pending.promise;
     // Staggered failures from one grid must not rotate the same login session
@@ -47,7 +47,7 @@
   window.xtjRecoverMediaImage = function (img, value, failed) {
     var url = mediaUrl(value), owner = String(window.currentUser || ''), generation = epoch();
     if (!url || !owner || !img || !img.isConnected || window.__xtjLogoutPending) return false;
-    var key = owner + ':' + generation + ':' + url.pathname, source = img.getAttribute('src');
+    var key = owner + ':' + generation + ':' + url.pathname + url.search, source = img.getAttribute('src');
     if (window.__xtjServiceRestrictedUntil > Date.now()) return false;
     if (img._xtjMediaAuthRetry === key && Date.now() - img._xtjMediaAuthRetryAt < 60000) return false;
     img._xtjMediaAuthRetry = key;
