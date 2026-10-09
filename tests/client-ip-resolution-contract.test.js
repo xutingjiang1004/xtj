@@ -12,6 +12,16 @@ const path = require('node:path');
 const SERVER = path.join(__dirname, '..', 'render-api', 'server.js');
 const src = fs.readFileSync(SERVER, 'utf8');
 
+test('IPv4 clients cannot match broad IPv6 proxy subnets through mapped-address confusion', () => {
+  const proxyaddr = require('proxy-addr');
+  for (const subnet of ['::ffff:10.0.0.0/8', '::/1']) {
+    assert.equal(proxyaddr.compile(subnet)('8.8.8.8'), false, subnet);
+  }
+  const mappedPrivate = proxyaddr.compile('::ffff:10.0.0.0/104');
+  assert.equal(mappedPrivate('10.1.2.3'), true);
+  assert.equal(mappedPrivate('8.8.8.8'), false);
+});
+
 test('合约：trust proxy 为函数判定（所有私网/保留地址视为受信代理 hop）', () => {
   // ★ 2026-09-24：固定网段列表可能漏掉平台新增内网 hop；改为函数判定后
   //   任何私网 hop 都被信任，req.ip 恒为第一个公网地址（真实客户端）。

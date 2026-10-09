@@ -53,13 +53,9 @@ test('增量补丁必须保留未变化节点（这是性能保证的核心）',
   assert.match(seg, /for \(; pos < old\.length; pos\+\+\)/, '结构收缩时必须移除旧的尾部节点');
 });
 
-test('流式渲染门限已收紧（流畅度的直接来源）', () => {
-  // 增量补丁把每帧成本降到 O(1) 后，门限才能从 90/140ms 收紧到 0/16ms
-  assert.match(agentSrc, /var _renderGap = 0;/,
-    'ai-agent.js 每个 requestAnimationFrame 都应允许正文补丁，不用固定毫秒门限跳帧');
-  assert.match(coreSrc, /var _renderGap = 0;/,
-    'stream-renderer.js 每个 requestAnimationFrame 都应允许正文补丁，不用固定毫秒门限跳帧');
-  // 不得回退到旧的 90/140
+test('流式渲染不恢复旧的固定毫秒门限', () => {
+  // Per-frame behavior, including repeated/adjusted wall-clock values, is
+  // exercised by ai-stream-motion-runtime.test.js rather than a variable name.
   assert.doesNotMatch(agentSrc, /rendered\.length < 600 \? 90 : 140/,
     '不得回退到旧的 90/140ms 门限');
 });
