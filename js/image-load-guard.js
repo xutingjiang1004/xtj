@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   // A stalled request does not emit error. Keep original images recoverable,
-  // and only run the deadline for visible images (including native lazy loads).
+  // Bound every scheduled request, including requests scrolled out of view.
   var selector = '.post-media-cell img[data-media-url], #photoPreviewImage';
   var tracked = new Map();
   var running = 0;
@@ -29,7 +29,7 @@
   window.xtjRetryOriginalImageUrl = function (value) {
     try {
       var url = new URL(value, location.href);
-      if (url.origin === location.origin && /^\/api\/(?:post\/[0-9a-f-]+\/media\/\d+|photo\/[0-9a-f-]+\/media)$/.test(url.pathname)) {
+      if (url.origin === location.origin && /^\/api\/(?:uploads\/media|post\/[0-9a-f-]+\/media\/\d+|photo\/[0-9a-f-]+\/media)$/.test(url.pathname)) {
         url.searchParams.set('xtj_retry', Date.now().toString(36)); return url.href;
       }
       var storage = new URL(window.XTJ_CONFIG.SUPABASE_URL);
@@ -42,8 +42,9 @@
   function stop(state) { clearTimeout(state.timer); state.timer = 0; }
   function arm(img, state) {
     stop(state);
-    if (!state.visible || !img.isConnected || !img.getAttribute('src') || (img.complete && img.naturalWidth > 0)) return;
+    if ((!state.visible && !state.loading) || !img.isConnected || !img.getAttribute('src') || (img.complete && img.naturalWidth > 0)) return;
     var source = img.getAttribute('src');
+    if (state.source !== source) { state.source = source; state.startedAt = Date.now(); }
     state.timer = setTimeout(function () {
       state.timer = 0;
       if (!img.isConnected || source !== img.getAttribute('src') || (img.complete && img.naturalWidth > 0)) return;
@@ -51,7 +52,7 @@
       if (img.id === 'photoPreviewImage') img.dispatchEvent(new Event('xtj:image-timeout'));
       else if (window.markPostImageFailed) window.markPostImageFailed(img);
       pump();
-    }, 30000);
+    }, Math.max(0, 30000 - (Date.now() - state.startedAt)));
   }
   var observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(function (entries) {
     entries.forEach(function (entry) {

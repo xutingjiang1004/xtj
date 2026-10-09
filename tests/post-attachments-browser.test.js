@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),{postBrowse
 test('large original grids request at most four near-viewport images and resume after scrolling or rebuilding', {timeout:45000},async()=>{
  const f=await postBrowserFixture({holdImages:true,counts:[3,9,9,9,9,9]});try{
   const {page}=f;
-  await page.waitForFunction(()=>document.querySelectorAll('#feed .post-media-cell img[src]').length>0);
+  await page.waitForFunction(()=>{const imgs=Array.from(document.querySelectorAll('#feed .post-media-cell img')).slice(0,3);return imgs.length===3&&imgs.every(img=>img.hasAttribute('src'));});
   const initial=await page.locator('#feed .post-media-cell img').evaluateAll(imgs=>({requested:imgs.filter(img=>img.hasAttribute('src')).length,total:imgs.length,first:imgs.slice(0,3).map(img=>({src:img.getAttribute('src'),priority:img.fetchPriority,loading:img.loading})),waiting:imgs.filter(img=>img.hasAttribute('data-post-src')).length}));
   assert.ok(initial.requested<=4);assert.ok(initial.total>initial.requested);assert.ok(initial.waiting>0);
   assert.ok(await page.locator('#feed img[data-post-src]:not([src])').evaluateAll(imgs=>imgs.length>0&&imgs.every(img=>getComputedStyle(img).visibility==='hidden'&&img.getBoundingClientRect().height>0)));
@@ -217,6 +217,9 @@ test('iOS keyboard uses one viewport owner, hides rather than lifts the Dock and
   }
   await keyboard(page.locator('#postInp'));
   await page.evaluate(()=>__xtjOpenAiChat());await page.waitForSelector('#aiChatMsgInput');
+  // Opening chat focuses after its async history/config work. Finish that
+  // real focus transition before testing blur, so it cannot refocus mid-test.
+  await page.waitForFunction(()=>document.activeElement?.id==='aiChatMsgInput');
   await page.locator('#aiChatMsgInput').focus();await page.evaluate(()=>{testKeyboardViewport.height=420;testKeyboardViewport.dispatchEvent(new Event('resize'));});
   await page.waitForFunction(()=>document.documentElement.classList.contains('xtj-keyboard-open'));
   const bar=page.locator('.ai-chat-input-bar');assert.equal(await bar.evaluate(el=>el.style.bottom),'');assert.equal(await bar.evaluate(el=>el.style.position),'');

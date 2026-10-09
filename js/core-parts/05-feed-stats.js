@@ -184,7 +184,7 @@
                 //   正常内联图，超出直接拒绝。
                 if (s.length > 2 * 1024 * 1024) return '';
                 // ★ M45：收紧协议白名单——http/https 与 blob:（本地媒体对象）放行
-                if (/^https?:/i.test(s)) return s;
+                if (/^https?:/i.test(s)) return window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(s) : s;
                 if (/^blob:/i.test(s)) return s;
                 // data: 仅放行可安全内联的位图类型，禁止 data:text/html 等可执行载荷
                 // （svg+xml 可能携带脚本面，一并拒绝）

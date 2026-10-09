@@ -74,20 +74,12 @@ test('AI history keeps each conversation pair in one mode', () => {
   assert.match(server, /buildMsgMeta\('user', convId, null, null, 1, null, 0, \{ chat_mode: chatMode \}\)/);
 });
 
-test('DM APIs are authenticated and select both sides of a conversation', () => {
-  const list = between(server, "app.get('/api/dm/list'", "app.get('/api/dm/messages'");
-  const messages = between(server, "app.get('/api/dm/messages'", '// =====================');
-  assert.match(list, /authenticateUser/);
-  assert.match(list, /\.eq\('user_name',\s*req\.userName\)/);
-  assert.match(list, /\.eq\('media_url',\s*req\.userName\)/);
-  assert.doesNotMatch(list, /\.eq\('actor_key',\s*'dm_'/);
-  assert.match(messages, /authenticateUser/);
-  assert.match(messages, /targetUser/);
-  assert.match(messages, /user_name/);
-  assert.match(messages, /media_url/);
-  assert.match(messages, /Map|Set|dedup|seen/i);
+test('DM APIs authenticate and delegate visibility to the service transaction',()=>{
+ const list=between(server,"app.get('/api/dm/list'","app.get('/api/dm/messages'");
+ const messages=between(server,"app.get('/api/dm/messages'",'// =====================');
+ assert.match(list,/authenticateUser/);assert.match(messages,/authenticateUser/);
+ assert.match(list,/readVisibleDmPosts\(req.userName/);assert.match(messages,/p_peer: targetUser/);
 });
-
 test('atomic like endpoint validates exact types and returns canonical state', () => {
   const endpoint = between(server, "app.post('/api/post/like'", '// ===================== 照片墙接口');
   assert.match(endpoint, /authenticateUser/);

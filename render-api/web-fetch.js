@@ -11,6 +11,8 @@ var https = require('https');
 var net = require('net');
 var zlib = require('zlib');
 var Readable = require('stream').Readable;
+var Transform = require('stream').Transform;
+var pipeline = require('stream').pipeline;
 
 var WEB_MAX_BYTES = 1.5 * 1024 * 1024;
 // ★ 2026-09-22 修复（read_web_page 对慢站/反爬站频繁失败）：
@@ -908,7 +910,8 @@ function requestPinnedStream(parsedUrl, addresses, opts) {
   if (!Array.isArray(addresses) || !addresses.length) {
     return Promise.reject(new Error('requestPinnedStream 需要非空的已校验地址列表'));
   }
-  var timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 0;
+  var timeoutMs = Math.min(300000, Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 300000);
+  var maxBytes = Math.min(16 * 1024 * 1024, Number(opts.maxResponseBytes) > 0 ? Number(opts.maxResponseBytes) : 16 * 1024 * 1024);
   var bodyBuf = null;
   if (opts.body !== undefined && opts.body !== null) {
     bodyBuf = Buffer.isBuffer(opts.body) ? opts.body : Buffer.from(String(opts.body), 'utf8');
@@ -919,6 +922,7 @@ function requestPinnedStream(parsedUrl, addresses, opts) {
   return new Promise(function(resolve, reject) {
     var settled = false;
     var request = null;
+    var responseStream = null, bodyStream = null, finished = false, deadline;
     var externalSignal = opts.signal;
 
     function cleanupExternalAbort() {
@@ -926,18 +930,25 @@ function requestPinnedStream(parsedUrl, addresses, opts) {
         try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
       }
     }
-    function onExternalAbort() {
-      if (!settled) {
-        settled = true;
-        try { if (request) request.destroy(new Error('请求已取消')); } catch (_) {}
-        cleanupExternalAbort();
-        reject(new Error('请求已取消'));
+    function finish(error) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(deadline);
+      cleanupExternalAbort();
+      if (error) {
+        if (bodyStream) bodyStream.destroy(error);
+        if (responseStream) responseStream.destroy(error);
+        if (request) request.destroy(error);
+        if (!settled) { settled = true; reject(error); }
       }
     }
+    function onExternalAbort() { finish(new Error('请求已取消')); }
     if (externalSignal) {
       if (externalSignal.aborted) return reject(new Error('请求已取消'));
       externalSignal.addEventListener('abort', onExternalAbort, { once: true });
     }
+    deadline = setTimeout(function () { finish(new Error('请求超时')); }, timeoutMs);
+    if (deadline.unref) deadline.unref();
 
     var headers = Object.assign({
       Host: parsedUrl.host,
@@ -965,9 +976,8 @@ function requestPinnedStream(parsedUrl, addresses, opts) {
       // ★ 关键：真正的 DNS pin —— 连接复用已校验地址，杜绝二次解析被劫持
       lookup: pinnedLookup(addresses)
     }, function(response) {
-      if (settled) return;
-      settled = true;
-      cleanupExternalAbort();
+      if (finished) { response.destroy(); return; }
+      responseStream = response;
       // 把数组型头（如 set-cookie）摊平成字符串，否则 Headers 构造会抛错。
       var flatHeaders = {};
       try {
@@ -978,41 +988,46 @@ function requestPinnedStream(parsedUrl, addresses, opts) {
       } catch (_) { flatHeaders = {}; }
 
       // 兜底解压：上游无视 Accept-Encoding: identity 时仍能正确拿到明文。
-      var src = response;
+      var streams = [response];
+      function budget() {
+        var bytes = 0;
+        return new Transform({ transform: function (chunk, encoding, callback) {
+          bytes += chunk.length;
+          if (bytes > maxBytes) return callback(new Error('上游响应超过大小限制'));
+          callback(null, chunk);
+        } });
+      }
+      streams.push(budget());
       var enc = String(response.headers['content-encoding'] || '').toLowerCase();
-      try {
-        if (enc === 'gzip' || enc === 'x-gzip') src = response.pipe(zlib.createGunzip());
-        else if (enc === 'deflate') src = response.pipe(zlib.createInflate());
-        else if (enc === 'br') src = response.pipe(zlib.createBrotliDecompress());
-      } catch (_) { src = response; }
-      if (src !== response) {
+      if (enc === 'gzip' || enc === 'x-gzip') streams.push(zlib.createGunzip());
+      else if (enc === 'deflate') streams.push(zlib.createInflate());
+      else if (enc === 'br') streams.push(zlib.createBrotliDecompress());
+      if (streams.length > 2) {
         // 已解压，再保留 content-length / content-encoding 会让调用方误判
         delete flatHeaders['content-length'];
         delete flatHeaders['content-encoding'];
       }
+      bodyStream = budget();
+      streams.push(bodyStream);
+      pipeline(streams, function (error) { finish(error); });
+      bodyStream.once('end', function () { finish(); });
 
       var init = { status: response.statusCode || 0, statusText: response.statusMessage || '' };
       try {
         init.headers = flatHeaders;
-        resolve(new Response(Readable.toWeb(src), init));
+        var result = new Response(Readable.toWeb(bodyStream), init);
+        settled = true;
+        resolve(result);
       } catch (eHeaders) {
         // 极端情况下上游头不合法 → 丢弃头信息，保留流（状态码判断仍可用）
-        try { delete init.headers; resolve(new Response(Readable.toWeb(src), init)); }
-        catch (eFatal) { reject(eFatal); }
+        try { delete init.headers; var fallback = new Response(Readable.toWeb(bodyStream), init); settled = true; resolve(fallback); }
+        catch (eFatal) { finish(eFatal); }
       }
     });
 
-    if (timeoutMs > 0) {
-      request.setTimeout(timeoutMs, function() {
-        try { request.destroy(new Error('请求超时')); } catch (_) {}
-      });
-    }
+    request.setTimeout(Math.min(timeoutMs, 60000), function() { finish(new Error('请求超时')); });
     request.on('error', function(err) {
-      if (!settled) {
-        settled = true;
-        cleanupExternalAbort();
-        reject(err);
-      }
+      finish(err);
     });
     if (bodyBuf) request.write(bodyBuf);
     request.end();

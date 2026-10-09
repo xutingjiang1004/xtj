@@ -73,7 +73,14 @@ async function enqueueStorageCleanupJob(supabase, options) {
 
 async function removeStorageWithQueue(supabase, options) {
   options = options || {};
-  const paths = normalizePaths(options.paths);
+  let paths = normalizePaths(options.paths);
+  const photoPaths = paths.filter(path => /^(photos|thumbs)\//.test(path));
+  if (photoPaths.length && ['photo-wall', 'uploads'].includes(options.bucket || 'uploads')) {
+    try {
+      const allowed = await claimPhotoCleanupPaths(supabase, photoPaths);
+      paths = paths.filter(path => !photoPaths.includes(path) || allowed.includes(path));
+    } catch (error) { return { ok:false, removed:false, cleanup_pending:false, queue_failed:true, paths, error }; }
+  }
   if (!paths.length) return { ok: true, removed: true, cleanup_pending: false, paths: [] };
   if (!supabase || !supabase.storage || typeof supabase.storage.from !== 'function') {
     return {
@@ -168,10 +175,17 @@ async function removeStorageWithQueue(supabase, options) {
   };
 }
 
+async function claimPhotoCleanupPaths(supabase, paths) {
+  const result = await supabase.rpc('claim_photo_cleanup_paths', { p_paths: paths });
+  if (!result || result.error || !result.data || !result.data.ok || !Array.isArray(result.data.paths)) throw result && result.error || Error('photo_cleanup_claim_failed');
+  return result.data.paths;
+}
+
 module.exports = {
   normalizePaths,
   normalizePhotoId,
   isNotFoundError,
   enqueueStorageCleanupJob,
-  removeStorageWithQueue
+  removeStorageWithQueue,
+  claimPhotoCleanupPaths
 };

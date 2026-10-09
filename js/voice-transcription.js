@@ -1,15 +1,17 @@
 (function () {
     'use strict';
     var scriptUrl = document.currentScript.src;
-    var jobs = new Map(), queue = [], active = null, worker = null, owner = '';
+    var jobs = new Map(), queue = [], active = null, worker = null, owner = '', generation = 0;
     var preferredModel=window.navigator&&window.navigator.hardwareConcurrency<4?'tiny':'base';
     var MAX_BYTES = 24 * 1024 * 1024;
-    function sameUser(job) { return String(window.currentUser || '') === job.owner; }
+    function sameUser(job) { return job.generation === generation && String(window.currentUser || '') === job.owner; }
     function notify(job, state, label) {
         job.state = state; job.label = label;
         if (sameUser(job) && job.onState) job.onState(job);
     }
     function reset() {
+        generation++;
+        jobs.forEach(function (job) { if (job.downloadAbort) job.downloadAbort.abort(); });
         if (worker) worker.terminate();
         worker = null;
         if (active && active.cancel) active.cancel();
@@ -28,12 +30,13 @@
             var signed = await request('/api/chat/voice-url?peer=' + encodeURIComponent(job.peer) + '&message_id=' + encodeURIComponent(job.id));
             if (!sameUser(job)) throw new Error('账号已切换');
             var abort = new AbortController();
+            job.downloadAbort = abort;
             var timeout = setTimeout(function () { abort.abort(); }, 45000);
             try {
                 var response = await fetch(signed.url, { signal: abort.signal, credentials: 'omit' });
                 if (!response.ok || Number(response.headers.get('content-length')) > MAX_BYTES) throw new Error('语音无法下载');
                 file = await response.blob();
-            } finally { clearTimeout(timeout); }
+            } finally { clearTimeout(timeout); job.downloadAbort = null; }
         }
         if (!sameUser(job) || !file || file.size > MAX_BYTES) throw new Error('语音不可用');
         var Audio = window.AudioContext || window.webkitAudioContext;
@@ -41,13 +44,20 @@
         if (!Audio || !Offline) throw new Error('当前浏览器不支持语音识别，请升级浏览器');
         var context = new Audio();
         var decoded;
-        try { var bytes = await file.arrayBuffer(); decoded = await context.decodeAudioData(bytes); }
+        try {
+            var bytes = await file.arrayBuffer();
+            if (!sameUser(job)) throw new Error('识别已取消');
+            decoded = await context.decodeAudioData(bytes);
+        }
         finally { try { await context.close(); } catch (_) {} }
+        if (!sameUser(job)) throw new Error('识别已取消');
         if (!decoded.duration || decoded.duration > 180) throw new Error('暂时支持 3 分钟以内的语音');
         var offline = new Offline(1, Math.ceil(decoded.duration * 16000), 16000);
         var source = offline.createBufferSource();
         source.buffer = decoded; source.connect(offline.destination); source.start();
-        return (await offline.startRendering()).getChannelData(0).slice();
+        var rendered = await offline.startRendering();
+        if (!sameUser(job)) throw new Error('识别已取消');
+        return rendered.getChannelData(0).slice();
     }
     function recognize(job, samples) {
         if (!worker) {
@@ -131,7 +141,7 @@
             for (var entry of jobs) { if (entry[1].state === 'done') { jobs.delete(entry[0]); break; } }
             if (jobs.size >= 300) return;
         }
-        var job = Object.assign({}, options, { key: key, state: 'queued', text: '', label: '等待语音转写…' });
+        var job = Object.assign({}, options, { key: key, generation: generation, state: 'queued', text: '', label: '等待语音转写…' });
         jobs.set(key, job);
         if (options.file) queue.unshift(job); else queue.push(job);
         notify(job, 'queued', job.label); void run();

@@ -23,7 +23,7 @@
   }
   function safeUrl(value) {
     try {
-      var url = new URL(value, location.href);
+      var url = new URL(window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(value) : value, location.href);
       return value && /^https?:$/.test(url.protocol) ? url.href : "";
     } catch (_) {
       return "";
@@ -175,6 +175,11 @@
   function queue(patch) {
     var s = state;
     if (!current(s) || !s.ready) return;
+    ["cover", "background"].forEach(function (kind) {
+      if (!Object.prototype.hasOwnProperty.call(patch, kind + "_url")) return;
+      s.images = s.images.filter(function (upload) { return upload.kind !== kind; });
+      if (s.activeUpload && s.activeUpload.kind === kind) s.activeUpload.superseded = true;
+    });
     Object.assign(s.pending, patch);
     render(s, true);
     void drain(s);
@@ -188,6 +193,7 @@
           upload = null;
         s.pending = {};
         if (!Object.keys(patch).length) upload = s.images.shift();
+        s.activeUpload = upload;
         s.inflight = patch;
         note("saving", upload ? "正在上传图片…" : "正在同步…");
         try {
@@ -213,6 +219,7 @@
           if (!response.ok || !data.ok || !data.settings)
             throw Error(data.error || "设置暂未同步，请重试");
           s.settings = data.settings;
+          s.activeUpload = null;
           s.inflight = null;
           render(s, true);
           window.dispatchEvent(
@@ -226,6 +233,8 @@
           // selection, reuse it on another account, or report a failed write as saved.
           s.pending = Object.assign({}, patch, s.pending);
           s.inflight = null;
+          s.activeUpload = null;
+          if (upload && upload.superseded) continue;
           if (upload) s.images.unshift(upload);
           note("error", error.message || "设置暂未同步，请重试");
           return;
@@ -342,7 +351,11 @@
         note("error", "图片正在上传，请稍后再选");
         return;
       }
-      s.images.push({ kind: this.dataset.kind, file: file });
+      var kind = this.dataset.kind;
+      delete s.pending[kind + "_url"];
+      s.images = s.images.filter(function (upload) { return upload.kind !== kind; });
+      if (s.activeUpload && s.activeUpload.kind === kind) s.activeUpload.superseded = true;
+      s.images.push({ kind: kind, file: file });
       void drain(s);
     });
     byId("profileSettingsRetry").addEventListener("click", function () {

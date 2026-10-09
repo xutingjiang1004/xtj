@@ -143,6 +143,7 @@ test('storage removal queues every failed path and confirms the queue insert', a
       return { remove: async function () { return { error: { message: 'network unavailable' } }; } };
     } },
     rpc: async function (name, payload) {
+      if (name === 'claim_photo_cleanup_paths') return {data:{ok:true,paths:payload.p_paths}};
       assert.equal(name, 'enqueue_storage_cleanup');
       queuedPayload = { paths: payload.p_paths, photo_id: payload.p_photo_id };
       return { data: { ok: true, queued: true, jobId: '7', paths: payload.p_paths } };

@@ -39,7 +39,7 @@ function createLocationHistory({express,supabase,verifyToken,authenticateUser,ra
  const router=express.Router();
  function handler(own){return async(req,res)=>{
   res.set('Cache-Control','no-store');const actor=own?req.userName:String(req.query.user_name||'').trim();if(!actor||actor.length>100)return res.status(400).json({error:'用户参数无效'});
-  let cursor=null;if(req.query.cursor){try{if(String(req.query.cursor).length>256)throw new Error();cursor=JSON.parse(Buffer.from(String(req.query.cursor),'base64url').toString());if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(cursor.id)||!Number.isFinite(new Date(cursor.at).getTime()))throw new Error();cursor.at=new Date(cursor.at).toISOString();}catch(_){return res.status(400).json({error:'分页参数无效'});}}
+  let cursor=null;if(req.query.cursor){try{if(String(req.query.cursor).length>256)throw new Error();cursor=JSON.parse(Buffer.from(String(req.query.cursor),'base64url').toString());if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(cursor.id)||typeof cursor.at!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(cursor.at)||!Number.isFinite(new Date(cursor.at).getTime()))throw new Error();}catch(_){return res.status(400).json({error:'分页参数无效'});}}
   try{let q=supabase.from(TABLE).select('id,latitude,longitude,accuracy_m,captured_at,received_at,source,capture_reason,resolution_status,resolved_address,resolve_error,resolved_at,ip').eq('user_name',actor);
    if(own&&cursor)q=q.or('received_at.lt.'+cursor.at+',and(received_at.eq.'+cursor.at+',id.lt.'+cursor.id+')');
    const result=await q.order('received_at',{ascending:false}).order('id',{ascending:false}).limit(own?51:50);if(!result||result.error)throw new Error();
