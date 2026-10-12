@@ -1,4 +1,7 @@
 const { test, expect } = require('@playwright/test');
+// These API fixtures must also own media requests. Real Service Worker/cache
+// authorization has a separate browser suite with a local HTTP backend.
+test.use({ serviceWorkers: 'block' });
 
 const BANNED_ERRORS = [
   'photo_renderer_not_loaded',
@@ -58,56 +61,31 @@ test('photo wall opens and renders content within 500ms', async ({ page }) => {
   }
 });
 
-test('photo wall with cache shows immediately when API is slow', async ({ page }) => {
-  page.on('console', msg => console.log(msg.text()));
-  // 模拟慢速 API
+test('photo wall with authorized account metadata shows immediately when API is slow', async ({ page }) => {
+  const id = '123e4567-e89b-42d3-a456-000000000001';
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVxkAAAAASUVORK5CYII=', 'base64');
+  await page.route('**/api/**', route => route.fulfill({json:{ok:true,data:[],posts:[],comments:[],likes:[],users:[],items:[]}}));
+  await page.route('**/api/user/refresh', route => route.fulfill({json:{ok:true,user_name:'u',token:'local-fixture-token'}}));
+  await page.route('**/api/photo/*/media*', route => route.fulfill({contentType:'image/png',body:png}));
   await page.route('**/api/photos/public**', async route => {
-    await new Promise(resolve => setTimeout(resolve, 15000));
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ok: true, data: [] })
-    });
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    await route.fulfill({json:{ok:true,data:[{id,user_name:'u',media_url:'/api/photo/'+id+'/media',created_at:new Date().toISOString()}]}});
   });
-
-  // 预先注入缓存数据
-  await page.addInitScript(() => {
-    try {
-      window.__xtjPhotoWallCache = JSON.stringify([
-        { id: 'cache-1', cloudId: 'cache-1', imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', timestamp: Date.now() }
-      ]);
-      localStorage.setItem('xtj_photos', window.__xtjPhotoWallCache);
-      localStorage.setItem('xtj_token', 'fake-token');
-      localStorage.setItem('xtj_user', 'u');
-      window.currentUser = 'u';
-    } catch (_) {}
-  });
-
+  await page.addInitScript(() => localStorage.setItem('xtj_user', 'u'));
   const pageErrors = await gotoApp(page, true);
-
+  await page.waitForFunction(() => window.currentUser === 'u' && window._xtjAuthState === 'authenticated');
+  await page.evaluate(() => window.ensurePhotoWallLoaded());
+  await page.waitForFunction(() => typeof window.initPhotoWall === 'function');
+  // Seed metadata only after auth, under the confirmed account. Image bytes
+  // still go through the authorized media endpoint, never an old offline original.
+  await page.evaluate(id => {
+    localStorage.setItem('xtj_photos_owner', JSON.stringify('u'));
+    localStorage.setItem('xtj_photos', JSON.stringify([{id,cloudId:id,username:'u',imageUrl:'/api/photo/'+id+'/media',timestamp:Date.now()}]));
+  }, id);
   await switchToPhotoWall(page);
-
-  // 缓存应该在 2 秒内显示
-  await page.waitForFunction(() => {
-    const grid = document.getElementById('photoGrid');
-    if (!grid) {
-      console.log('grid not found');
-      return false;
-    }
-    const hasItem = grid.querySelector('.photo-wall-item') || grid.querySelector('.pw-skeleton');
-    if (!hasItem) {
-      console.log('grid innerHTML: ', grid.innerHTML);
-    }
-    return hasItem;
-  }, { timeout: 3000 });
-
-  const hasItems = await page.locator('#photoGrid .photo-wall-item').count();
-  expect(hasItems).toBeGreaterThan(0);
-
-  for (const banned of BANNED_ERRORS) {
-    const found = pageErrors.some(e => e.includes(banned));
-    expect(found, `console should not contain "${banned}"`).toBe(false);
-  }
+  await expect(page.locator('#photoGrid .photo-wall-item')).toHaveCount(1, {timeout:1000});
+  await expect(page.locator('#photoGrid img').first()).toHaveJSProperty('naturalWidth',1);
+  for (const banned of BANNED_ERRORS) expect(pageErrors.some(error => error.includes(banned))).toBe(false);
 });
 
 test('photo wall shows error UI when renderPhotoWall throws', async ({ page }) => {

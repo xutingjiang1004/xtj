@@ -2,8 +2,9 @@
   'use strict';
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   var registering = navigator.serviceWorker.register('/chat-notifications-sw.js', { scope: '/', updateViaCache: 'none' }).catch(function () { return null; });
-  window.xtjObserveServiceResponse = function (response) {
-    if (response.headers.get('X-XTJ-Service-Status') === 'egress_quota_exceeded') window.__xtjServiceRestrictedUntil = Date.now() + 60000;
+  window.xtjObserveServiceResponse = function (response, payload) {
+    var status = response && response.headers && typeof response.headers.get === 'function' ? response.headers.get('X-XTJ-Service-Status') : '';
+    if (status === 'egress_quota_exceeded' || payload && payload.code === 'egress_quota_exceeded') window.__xtjServiceRestrictedUntil = Date.now() + 60000;
   };
   window.xtjClearOriginalMediaCache = async function () {
     var registration = await registering;

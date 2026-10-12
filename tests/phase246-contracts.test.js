@@ -24,14 +24,19 @@ function codeOnly(rel) {
 // Phase 4: Photo wall & media
 // ──────────────────────────────────────────────
 
-test('P4-15: empty cloud photo list clears local cache', function () {
-  var s = read('js/photo-wall/data.js');
-  // When rows.length === 0, window.photoWallData must be set to [], not local.
-  var m = s.match(/if\s*\(\s*rows\.length\s*===\s*0\s*\)\s*\{[\s\S]*?window\.photoWallData\s*=\s*\[\]/);
-  assert.ok(m, 'empty cloud result must clear photoWallData to empty array');
-  // Ensure the old "preserve local" behavior is gone.
-  var oldBehavior = s.match(/rows\.length\s*===\s*0[\s\S]{0,80}window\.photoWallData\s*=\s*local/);
-  assert.ok(!oldBehavior, 'old preserve-local behavior must be removed');
+test('P4-15: empty cloud photo list clears local cache', async function () {
+  const { createPhotoDataRuntime } = require('./helpers/photo-data-runtime-fixture');
+  const runtime = createPhotoDataRuntime(async () => ({ ok: true, json: async () => ({ ok: true, data: [] }) }));
+  runtime.window.photoWallData = [{ id: 'old', cloudId: 'old', username: 'owner', imageUrl: 'https://example.test/old.jpg' }];
+  runtime.window.saveLocalPhotoWallData();
+  assert.equal(runtime.window.photoWallData.length, 1);
+  await runtime.window.loadPhotoWallData(true);
+  assert.equal(runtime.window.photoWallData.length, 0, 'successful empty cloud result must remove the old photo');
+  const cachedArrays = Array.from(runtime.storage.values()).map(value => {
+    try { return JSON.parse(value); } catch (_) { return null; }
+  }).filter(Array.isArray);
+  assert.ok(cachedArrays.length > 0, 'the metadata cache must have been written');
+  assert.ok(cachedArrays.every(rows => rows.length === 0), 'empty cloud result must also clear persisted photo metadata');
 });
 
 test('P4-16: unique viewer sync uses the authenticated API and only adopts confirmed counts', function () {

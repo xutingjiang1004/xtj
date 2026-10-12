@@ -7,7 +7,7 @@ async function main(){
  if(!raw)throw new Error('AUDIT_DATABASE_URL must point to a disposable local PostgreSQL server');
  const url=new URL(raw);if(!['localhost','127.0.0.1','[::1]'].includes(url.hostname))throw new Error('Refusing a non-local database');
  const db='xtj_audit_'+process.pid+'_'+crypto.randomBytes(3).toString('hex');const admin=new Client({connectionString:url.toString()});await admin.connect();
- let c,pool;let checks=0;
+ let c,pool;let checks=0;const poolSockets=[];let poolError=null;
  try{
   await admin.query('CREATE DATABASE '+db);url.pathname='/'+db;c=new Client({connectionString:url.toString()});await c.connect();
   await c.query(`DO $$ BEGIN CREATE ROLE anon;EXCEPTION WHEN duplicate_object THEN NULL;END $$;
@@ -25,6 +25,10 @@ async function main(){
   console.log('PASS clean PostgreSQL migration replay ('+migrations.length+' files)');checks++;
   await c.query(`INSERT INTO public.posts(user_name,media_type,content) VALUES ('audit_a','__auth__','{}'),('audit_b','__auth__','{}');`);
   pool=new Pool({connectionString:url.toString(),max:12});
+  // pg-pool.end() can resolve before the sockets emit 'end'. Wait for those
+  // connections before dropping the database; never hide an execution error.
+  pool.on('connect',client=>poolSockets.push(new Promise(resolve=>client.once('end',resolve))));
+  pool.on('error',error=>{poolError=poolError||error;});
   const modelSql='SELECT public.save_ai_custom_models_snapshot($1,$2::jsonb,$3::jsonb,$4::jsonb,$5) AS result';
   const modelParams=(models=[],deleted=[],prefs={},replace=false)=>['audit_a',JSON.stringify(models),JSON.stringify(deleted),JSON.stringify(prefs),replace];
   const modelSave=async(models=[],deleted=[],prefs={},replace=false)=>(await pool.query(modelSql,modelParams(models,deleted,prefs,replace))).rows[0].result;
@@ -81,8 +85,16 @@ async function main(){
   const fake=(await c.query("INSERT INTO public.posts(user_name,media_type,content) VALUES('audit_a','__login_event__',$1) RETURNING id",[JSON.stringify({ip:'1.1.1.1',source:'page_visit'})])).rows[0].id;assert.equal((await c.query(geoSql,[fake,'1.1.1.1',{text:'fake'}])).rows[0].result.ok,false);await c.query('DELETE FROM public.posts WHERE id=$1',[e1.event_id]);assert.equal((await c.query(geoSql,[e1.event_id,'1.1.1.1',{text:'deleted'}])).rows[0].result.ok,false);checks++;console.log('PASS authenticated IP history and late geolocation identity fences');
   await c.query('SET ROLE anon');try{await assert.rejects(c.query(sqlClaim,['audit_a',crypto.randomUUID(),crypto.randomUUID(),3]),/permission denied/);await assert.rejects(c.query('SELECT * FROM public.post_media_uploads'),/permission denied/);await assert.rejects(c.query(geoSql,[e2.event_id,'2.2.2.2',{}]),/permission denied/);}finally{await c.query('RESET ROLE');}
   await c.query('SET ROLE service_role');try{assert.equal((await c.query('SELECT public.get_ai_user_quota($1) AS q',['audit_a'])).rows[0].q.ok,true);const sr=await registerService(c);assert.equal(sr.ok,true);}finally{await c.query('RESET ROLE');}checks++;console.log('PASS browser roles denied and service role can execute atomic APIs');
-  console.log('DATABASE CHECKS PASSED: '+checks);
- }finally{if(pool)await pool.end();if(c)await c.end();await admin.query('DROP DATABASE IF EXISTS '+db+' WITH (FORCE)');await admin.end();}
+  if(poolError)throw poolError;
+ }finally{
+  try{
+   if(pool){await pool.end();await Promise.all(poolSockets);}
+   if(c)await c.end();
+   await admin.query('DROP DATABASE IF EXISTS '+db);
+  }finally{await admin.end();}
+ }
+ if(poolError)throw poolError;
+ console.log('DATABASE CHECKS PASSED: '+checks);
 }
 async function registerService(c){return (await c.query('SELECT public.enqueue_storage_cleanup($1,$2,$3,$4) AS result',[crypto.randomUUID(),'uploads',['photos/service.jpg'],''])).rows[0].result;}
 main().catch(e=>{console.error(e.message);process.exitCode=1;});

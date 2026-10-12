@@ -77,10 +77,11 @@ test('S2: 云端删除失败时先 normalize 再恢复，避免原始行被静�
 // ─────────────────────────── M1 错误态 ───────────────────────────
 
 test('M1: 加载失败后强制重渲染，让错误态必然呈现', () => {
-  const catchBranch = dataSource.slice(
-    dataSource.indexOf("setPhotoWallSyncStatus('error', '同步失败')"),
-    dataSource.indexOf("return window.photoWallData;\n    } finally {")
-  );
+  const start = dataSource.indexOf('window.photoWallLoadError = err;');
+  const end = dataSource.indexOf('return window.photoWallData;\n    } finally {', start);
+  assert.ok(start >= 0 && end > start, '必须找到真实加载失败分支');
+  const catchBranch = dataSource.slice(start, end);
+  assert.match(catchBranch, /setPhotoWallSyncStatus\('error'/, '结构化错误必须标记失败状态');
   assert.match(catchBranch, /renderPhotoWallWithoutReload/, '失败后必须补一次渲染');
   // 空态分支仍需依赖 is-error 判断（render.js 侧）
   assert.match(renderSource, /is-error/, 'render.js 空态分支保留 is-error 判据');

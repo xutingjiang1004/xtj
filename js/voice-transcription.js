@@ -1,10 +1,11 @@
 (function () {
     'use strict';
     var scriptUrl = document.currentScript.src;
-    var jobs = new Map(), queue = [], active = null, worker = null, owner = '', generation = 0;
+    var jobs = new Map(), queue = [], active = null, worker = null, owner = '', ownerEpoch = null, generation = 0;
     var preferredModel=window.navigator&&window.navigator.hardwareConcurrency<4?'tiny':'base';
     var MAX_BYTES = 24 * 1024 * 1024;
-    function sameUser(job) { return job.generation === generation && String(window.currentUser || '') === job.owner; }
+    function authEpoch() { return typeof window.__xtjGetAuthEpoch === 'function' ? window.__xtjGetAuthEpoch() : (window._authStateEpoch || 0); }
+    function sameUser(job) { return job.generation === generation && job.authEpoch === authEpoch() && String(window.currentUser || '') === job.owner; }
     function notify(job, state, label) {
         job.state = state; job.label = label;
         if (sameUser(job) && job.onState) job.onState(job);
@@ -16,6 +17,7 @@
         worker = null;
         if (active && active.cancel) active.cancel();
         active = null; queue = []; jobs.clear();
+        owner = ''; ownerEpoch = null;
     }
     async function request(path, init) {
         if (typeof window.xtjProtectedFetch !== 'function') throw new Error('登录状态不可用');
@@ -123,7 +125,8 @@
     }
     function enqueue(options) {
         if (!options.owner || options.owner !== String(window.currentUser || '')) return;
-        if (owner !== options.owner) { reset(); owner = options.owner; }
+        var epoch = authEpoch();
+        if (owner !== options.owner || ownerEpoch !== epoch) { reset(); owner = options.owner; ownerEpoch = epoch; }
         var key = options.owner + '\n' + options.peer + '\n' + options.id;
         var existing = jobs.get(key);
         if (existing) {
@@ -141,14 +144,14 @@
             for (var entry of jobs) { if (entry[1].state === 'done') { jobs.delete(entry[0]); break; } }
             if (jobs.size >= 300) return;
         }
-        var job = Object.assign({}, options, { key: key, generation: generation, state: 'queued', text: '', label: '等待语音转写…' });
+        var job = Object.assign({}, options, { key: key, generation: generation, authEpoch: epoch, state: 'queued', text: '', label: '等待语音转写…' });
         jobs.set(key, job);
         if (options.file) queue.unshift(job); else queue.push(job);
         notify(job, 'queued', job.label); void run();
     }
     function retry(peer, id) {
         var job = jobs.get(String(window.currentUser || '') + '\n' + peer + '\n' + id);
-        if (!job || job.state !== 'error') return;
+        if (!job || !sameUser(job) || job.state !== 'error') return;
         notify(job, 'queued', '等待重新转写…'); queue.push(job); void run();
     }
     // Logout must release the model and discard private in-memory jobs.

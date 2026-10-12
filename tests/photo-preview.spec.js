@@ -219,7 +219,7 @@ test('photo grid warm loading uses the bounded queue and recovers broken images'
     }
   });
   await page.setContent('<!doctype html><head><base href="http://127.0.0.1:4173/"><style>#photoGrid{display:grid;grid-template-columns:repeat(4,100px)}#photoGrid img{width:100px;height:100px}</style></head><body><div id="photoGrid"></div></body>');
-  await page.evaluate(() => { window.IntersectionObserver = undefined; });
+  await page.evaluate(() => { window.IntersectionObserver = undefined; window.currentUser = 'u'; });
   await page.addScriptTag({ content: renderScript });
   await page.evaluate(() => {
     window.photoWallData = Array.from({ length: 8 }, (_, index) => ({
@@ -230,6 +230,8 @@ test('photo grid warm loading uses the bounded queue and recovers broken images'
     }));
     window.renderPhotoWallWithoutReload();
   });
+  // Placeholder SVG quotes must stay inside src, never become HTML attributes.
+  expect(await page.locator('#photoGrid img').first().evaluate(img => img.hasAttribute('xmlns') || img.hasAttribute('viewbox') || img.hasAttribute('fill'))).toBe(false);
   await expect(page.locator('#photoGrid img:not([data-src])')).toHaveCount(7, { timeout: 5000 });
   await expect(page.locator('#photoGrid img[data-src]')).toHaveCount(1);
   expect(maxActive).toBe(4);

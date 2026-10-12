@@ -67,18 +67,22 @@
     );
   }
 
-  function showError(msg) {
+  function showError(error) {
     var el = feedEl();
     if (!el || el.querySelector('.post')) return;
+    var retryable = !error || error.retryable !== false;
+    var msg = error && error.publicMessage || (error && error.name === 'AbortError' ? '帖子加载超时，请重新加载' : '帖子暂时加载失败，请稍后重试');
     el.innerHTML =
-      '<div class="loading" id="xtjEarlyFeedError" role="button" tabindex="0" style="color:#ff3b60;cursor:pointer;padding:24px;text-align:center;line-height:1.6;">' +
-      esc(msg || '帖子加载失败，点击重试') +
-      '<br><small style="opacity:.75;color:inherit">若一直失败：完全退出 Clash/FlClash，关闭系统代理 127.0.0.1:7890 后 Ctrl+F5</small></div>';
+      '<div class="loading" id="xtjEarlyFeedError" role="' + (retryable ? 'button' : 'status') + '"' + (retryable ? ' tabindex="0"' : '') + ' style="color:#ff3b60;padding:24px;text-align:center;line-height:1.6;">' +
+      esc(msg) + (retryable ? '<br><small style="opacity:.75;color:inherit">点击重新加载</small>' : '') + '</div>';
     var node = document.getElementById('xtjEarlyFeedError');
-    if (node && !node.__bound) {
+    if (retryable && node && !node.__bound) {
       node.__bound = true;
       node.onclick = function () {
         window.location.reload();
+      };
+      node.onkeydown = function (event) {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); node.onclick(); }
       };
     }
   }
@@ -212,13 +216,13 @@
     setTimeout(function () {
       if (pageHidden) return; // S-1
       if (stillSkeleton(feedEl())) {
-        showError('帖子加载超时/失败，点击刷新重试');
+        showError(err);
       }
     }, 300);
     setTimeout(function () {
       if (pageHidden) return; // S-1
       if (stillSkeleton(feedEl())) {
-        showError('帖子加载超时/失败，点击刷新重试');
+        showError(err);
       }
     }, 8000);
   }
@@ -239,9 +243,17 @@
       headers: { Accept: 'application/json' },
       signal: ctrl ? ctrl.signal : undefined,
     })
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
+      .then(async function (res) {
+        var json = await res.json().catch(function () { return null; });
+        if (window.xtjObserveServiceResponse) window.xtjObserveServiceResponse(res, json);
+        if (!res.ok || !json || !json.ok) {
+          var error = new Error('feed_failed');
+          error.status = res.status; error.code = json && json.code || '';
+          error.retryable = !(json && json.retryable === false);
+          error.publicMessage = json && typeof json.error === 'string' ? json.error : '';
+          throw error;
+        }
+        return json;
       })
       .then(function (json) {
         clearTimeout(timer);

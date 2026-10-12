@@ -189,7 +189,7 @@ test('P-29: 深研页拥有独立生命周期计数器', () => {
   // 三处守卫都用独立计数器
   const guards = aiAgent.match(/if \(!currentPage\(\)\) return;/g) || [];
   assert.ok(guards.length >= 3, '深研页每处异步返回都需要独立守卫');
-  assert.match(aiAgent, /pageAuthEpoch === \(window\._authStateEpoch \|\| 0\)/);
+  assert.match(aiAgent, /pageAuthEpoch === readAiAuthEpoch\(\)/);
 });
 
 test('P-29: closeDeepThinkPage 不再递增主聊天计数器（避免误杀主聊天在途流）', () => {

@@ -23,7 +23,7 @@ async function prepareAuthenticatedPage(page) {
   await page.route('**/api/user/refresh', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ token: 'ai-tools-token' })
+    body: JSON.stringify({ ok: true, token: 'ai-tools-token', user_name: 'ai-tools-user' })
   }));
   await page.route('**/api/agent/**', route => route.fulfill({
     status: 200,
@@ -32,6 +32,7 @@ async function prepareAuthenticatedPage(page) {
   }));
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.__xtjEnsureAiAgentLoaded === 'function');
+  await page.waitForFunction(() => window.isAuthenticated?.() && window.getCanonicalUser?.() === 'ai-tools-user');
 }
 
 test('top AI tools menu opens independent pages without switching away from posts', async ({ page }) => {
@@ -133,6 +134,9 @@ test('site search shows a lightweight loading transition until results arrive', 
 test('deep research never imports regular chat history', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('xtj_ai_dt_conversation_id', 'NORMAL-OLD'));
   await prepareAuthenticatedPage(page);
+  await page.evaluate(() => {
+    localStorage.setItem('xtj_ai_dt_conversation_id__ai-tools-user', 'NORMAL-OLD');
+  });
   await page.unroute('**/api/agent/**');
   const historyModes = [];
   await page.route('**/api/agent/**', route => {
@@ -150,8 +154,9 @@ test('deep research never imports regular chat history', async ({ page }) => {
   await pickAiTool(page, 'research');
   await expect(page.locator('#panelDeepThink')).toHaveClass(/active/);
   await expect(page.locator('#dtMessages')).not.toContainText('普通聊天内容');
-  expect(historyModes).toEqual(['deep_think']);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('xtj_ai_dt_conversation_id'))).toBe('DEEP-NEW-1');
+  await expect.poll(() => historyModes).toEqual(['deep_think']);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('xtj_ai_dt_conversation_id__ai-tools-user'))).toBe('DEEP-NEW-1');
+  expect(await page.evaluate(() => localStorage.getItem('xtj_ai_dt_conversation_id'))).toBeNull();
 });
 
 test('restored site-search cards retain source metadata and open a photo preview', async ({ page }) => {

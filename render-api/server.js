@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const { checkedResult, checkedData, checkedRpc, patchReport, reportNotification, mediaGatewayUrl, adminPostPayload, emailOutcome, sendAdminDbFailure, recoverEmailJob } = require('./admin-operations');
 const { createPhotoRecord, inspectPhotoOriginal, validatePhotoCreatePayload } = require('./photo-create');
 const { validatePostAttachments, loadPostAttachments, createPostWithAttachments } = require('./post-attachments');
 const { installPostMedia, createPostWithMedia, parsePostMediaUrl, isLocalUploadUrl, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads } = require('./post-media');
@@ -11668,7 +11669,16 @@ app.get('/api/config/public', rateLimit(60000, 30), (req, res) => {
       // 只接受两种合法形态：JWT 形态（anon key）或新版 publishable key。
       // 其余一律视为未配置——宁可返回 null 让前端走安全的后端上传，
       // 也不能把可疑字符串发给浏览器建 client。
-      var anonOk = /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(anonKey) || /^sb_publishable_/.test(anonKey);
+      var anonOk = /^sb_publishable_[\w-]+$/.test(anonKey);
+      if (/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(anonKey)) {
+        try {
+          // This only classifies the configured key; authentication still uses
+          // signature verification. A privileged JWT must never enter a public
+          // response even if it was assigned to the wrong environment variable.
+          var claims = JSON.parse(Buffer.from(anonKey.split('.')[1], 'base64url').toString('utf8'));
+          anonOk = !!claims && claims.role === 'anon';
+        } catch (_) { anonOk = false; }
+      }
       if (!anonOk) {
         console.warn('[config-public] SUPABASE_ANON_KEY 形态不合法，已忽略并返回 null');
         anonKey = null;
@@ -11909,6 +11919,11 @@ const flashPhotos=require('./flash-photos').createFlashPhotos({express,supabase,
  publish:publishDmRealtime,notifyConsumed:(sender,peer)=>{publishChatEvent(sender,'chat-state',{kind:'flash_consumed'});publishChatEvent(peer,'chat-state',{kind:'flash_consumed'});},audit:logAdminAudit,setPro:(actor,active)=>aiQuota.setPro(actor,active,{})});
 app.use(flashPhotos.router);
 require('./upload-access').installUploadAccess(app, {supabase,supabaseUrl:SUPABASE_URL,optionalAuth:async function(req,res,next) {
+  // The administrator's HttpOnly cookie uses the same verified, revoked-token
+  // boundary as other admin endpoints; it is never inferred from a username.
+  if (req.cookies && req.cookies.xtj_admin_token && !req.headers.authorization) {
+    return verifyToken(req,res,function() { req.userName=ADMIN_USERNAME; next(); });
+  }
   var cookieSession = !req.headers.authorization && req.cookies && req.cookies.xtj_post_media_session;
   if (cookieSession) req.headers.authorization='Bearer '+String(cookieSession).split('~')[0];
   return optionalAuth(req,res,async function() {
@@ -12478,6 +12493,12 @@ async function autoExpireOverdueRecords() {
   }
 }
 
+async function loadAdminPostAttachments(posts) {
+  var result=[];
+  for (var offset=0;offset<posts.length;offset+=200) result.push(...await loadPostAttachments(supabase,posts.slice(offset,offset+200)));
+  return result;
+}
+
 // ===================== 数据加载（只读，但需要认证） ======================
 app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
   try {
@@ -12501,7 +12522,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     }
 
     return res.json({
-      posts: postRes.data || [],
+      posts: (await loadAdminPostAttachments(postRes.data || [])).map(post => adminPostPayload(post, SUPABASE_URL)),
       likes: likeRes.data || [],
       comments: commRes.data || [],
       bans: banRes.data || [],
@@ -12534,7 +12555,7 @@ async function createAnnouncementHandler(req, res) {
       actor_key: 'admin_' + Date.now()
     }]).select().single();
 
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     return res.json({ ok: true, data });
   } catch (e) {
     console.error('Unhandled route error:', e.message);
@@ -12556,7 +12577,7 @@ async function deleteAnnouncementHandler(req, res) {
       p_post_id: id,
       p_actor_key: actorKey
     });
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     if (!rpcData || rpcData.ok !== true) {
       var code = (rpcData && rpcData.code) || 'delete_failed';
       var status = code === 'not_found' ? 404 : code === 'forbidden' ? 403 : 500;
@@ -12717,7 +12738,7 @@ app.delete('/admin/post/:id', verifyToken, rateLimit(1000, 30), async (req, res)
       p_post_id: id,
       p_actor_key: actorKey
     });
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     if (!rpcData || rpcData.ok !== true) {
       var code = (rpcData && rpcData.code) || 'delete_failed';
       var status = code === 'not_found' ? 404 : code === 'forbidden' ? 403 : 500;
@@ -12740,7 +12761,7 @@ app.delete('/admin/comment/:id', verifyToken, securityRateLimit(60000, 30), asyn
     p_deleted_by: ADMIN_USERNAME,
     p_is_admin: true
   });
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   return res.json({ ok: true, data });
   } catch (e) {
     console.error('Unhandled route error:', e.message);
@@ -12749,20 +12770,7 @@ app.delete('/admin/comment/:id', verifyToken, securityRateLimit(60000, 30), asyn
 
 // ===================== 举报通知辅助函数 ======================
 async function addReportNotification(reportId, action, message) {
-  try {
-    const { data: post } = await supabase.from('posts').select('content').eq('id', reportId).maybeSingle();
-    if (!post) return;
-    var c = {};
-    try { c = JSON.parse(post.content || '{}'); } catch(e) {}
-    if (!Array.isArray(c.notifications)) c.notifications = [];
-    c.notifications.push({
-      action: action,
-      message: message,
-      is_read: false,
-      created_at: new Date().toISOString()
-    });
-    await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', reportId);
-  } catch(e) { console.warn('[notif] 通知写入失败:', e.message); }
+  return patchReport(supabase, reportId, {}, reportNotification(action,message));
 }
 
 // ===================== 举报通知查询 API ======================
@@ -12792,6 +12800,7 @@ app.get('/api/report/notifications', authenticateUser, async (req, res) => {
 app.post('/api/report/notifications/mark-read', authenticateUser, async (req, res) => {
   const userName = req.userName;
   try {
+    var readBefore = new Date().toISOString();
     // ★ 2026-09-24 修复：与 GET 端 .limit(160) 对齐，避免举报行多的用户触发
     //   无上限拉取 + 逐行串行 update 的 N+1 放大
     const { data, error } = await supabase.from('posts')
@@ -12802,17 +12811,13 @@ app.post('/api/report/notifications/mark-read', authenticateUser, async (req, re
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     var marked = 0;
     var failed = 0;
-    for (var i = 0; i < (data || []).length; i++) {
-      var p = data[i];
+    for (var i=0; i<(data || []).length; i++) {
       try {
-        var c = JSON.parse(p.content || '{}');
-        if (Array.isArray(c.notifications) && c.notifications.some(function(n) { return !n.is_read; })) {
-          c.notifications.forEach(function(n) { n.is_read = true; });
-          var updateResult = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', p.id).eq('user_name', userName).eq('media_type', '__report__');
-          if (updateResult.error) failed++;
-          else marked++;
-        }
-      } catch(e) { failed++; }
+        var result = await checkedRpc(supabase,'mutate_report_record',{
+          p_report_id:data[i].id,p_patch:{},p_notification:null,p_reader:userName,p_read_before:readBefore
+        });
+        if (result.marked) marked++;
+      } catch (_) { failed++; }
     }
     if (failed) return res.status(500).json({ error: '部分通知未能标记为已读', code: 'report_mark_read_partial', marked: marked, failed: failed });
     return res.json({ ok: true, marked: marked });
@@ -12828,7 +12833,7 @@ app.get('/admin/photos', verifyToken, async (req, res) => {
     .or('is_deleted.is.null,is_deleted.eq.false')
     .order('created_at', { ascending: false })
     .limit(500);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   return res.json({ data: (data || []).map(function(row) { return photoPayload(row); }) });
   } catch (e) { console.error('[admin] photos:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
@@ -12842,7 +12847,7 @@ app.delete('/admin/photo/:id', verifyToken, securityRateLimit(60000, 30), async 
     const lookup = await supabase.from('posts')
       .select('id, user_name, media_url, media_type, actor_key, content')
       .eq('id', id).eq('media_type', '__photo_wall__').maybeSingle();
-    if (lookup.error) return res.status(400).json({ error: sanitizeError(lookup.error) });
+    if (lookup.error) return sendAdminDbFailure(res,lookup.error);
     if (!lookup.data) return res.json({ ok: true, deleted: false, already_deleted: true, photo_id: id });
     const photo = lookup.data;
     const result = await hardDeleteContent({
@@ -14878,7 +14883,7 @@ app.get('/api/avatar/:userName', authenticateUser, async (req, res) => {
     if (!data || data.length === 0) {
       return res.json({ ok: true, avatar_url: null });
     }
-    return res.json({ ok: true, avatar_url: data[0].media_url || null });
+    return res.json({ ok: true, avatar_url: mediaGatewayUrl(data[0].media_url, SUPABASE_URL) || null });
   } catch (e) { console.error('[API] avatar get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
@@ -14898,7 +14903,7 @@ app.get('/api/avatar/public/:userName', rateLimit(60000, 300), async (req, res) 
     if (!data || data.length === 0) {
       return res.json({ ok: true, avatar_url: null });
     }
-    return res.json({ ok: true, avatar_url: data[0].media_url || null });
+    return res.json({ ok: true, avatar_url: mediaGatewayUrl(data[0].media_url, SUPABASE_URL) || null });
   } catch (e) { console.error('[API] public avatar get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
@@ -14921,7 +14926,7 @@ app.post('/api/avatar/batch', rateLimit(60000, 60), async (req, res) => {
     (data || []).forEach(function(row) {
       if (row.media_url && !seen[row.user_name]) {
         seen[row.user_name] = true;
-        result[row.user_name] = row.media_url;
+        result[row.user_name] = mediaGatewayUrl(row.media_url, SUPABASE_URL);
       }
     });
     // P6: 对请求中但无头像的用户返回 null，与单用户接口行为一致。
@@ -16534,7 +16539,7 @@ app.post('/api/dm/withdraw', authenticateUser, rateLimit(60000, 30), async (req,
 app.get('/admin/bans', verifyToken, async (req, res) => {
   try {
   const { data, error } = await supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   return res.json({ data });
   } catch (e) { console.error('[admin] bans:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
@@ -16578,7 +16583,7 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
       is_active: true,
       banned_at: new Date().toISOString()
     }).eq('id', existing[0].id);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
   } else {
     const { error } = await supabase.from('bans').insert([{
       user_name: userNameVal, ban_type: banType, ban_reason: reasonVal || '违反社区规定',
@@ -16596,9 +16601,9 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
           is_active: true,
           banned_at: new Date().toISOString()
         }).eq('user_name', userNameVal);
-        if (updErr) return res.status(400).json({ error: sanitizeError(updErr) });
+        if (updErr) return sendAdminDbFailure(res,updErr);
       } else {
-        return res.status(400).json({ error: sanitizeError(error) });
+        return sendAdminDbFailure(res,error);
       }
     }
   }
@@ -16618,7 +16623,7 @@ app.put('/admin/ban/:id/lift', verifyToken, securityRateLimit(60000, 30), async 
   const { error } = await supabase.from('bans').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
   }).eq('id', id);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   await logAdminAudit('unban_user', auditUser, 'ban_id:' + id);
   return res.json({ ok: true });
   } catch (e) { console.error('[admin] unban:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
@@ -16628,7 +16633,7 @@ app.put('/admin/ban/:id/lift', verifyToken, securityRateLimit(60000, 30), async 
 app.get('/admin/mutes', verifyToken, async (req, res) => {
   try {
   const { data, error } = await supabase.from('mutes').select('*').order('created_at', { ascending: false }).limit(500);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   return res.json({ data });
   } catch (e) { console.error('[admin] mutes:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
@@ -16666,7 +16671,7 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
     expires_at: expiresAt,
     is_active: true
   }]);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   
   await logAdminAudit('mute_user', auditUser, 'user:' + userNameVal);
   return res.json({ ok: true });
@@ -16683,7 +16688,7 @@ app.put('/admin/mute/:id/lift', verifyToken, securityRateLimit(60000, 30), async
   const { error } = await supabase.from('mutes').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
   }).eq('id', id);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   await logAdminAudit('unmute_user', auditUser, 'mute_id:' + id);
   return res.json({ ok: true });
   } catch (e) { console.error('[admin] unmute:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
@@ -16693,7 +16698,7 @@ app.put('/admin/mute/:id/lift', verifyToken, securityRateLimit(60000, 30), async
 app.get('/admin/blacklist', verifyToken, async (req, res) => {
   try {
   const { data, error } = await supabase.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   return res.json({ data });
   } catch (e) { console.error('[admin] blacklist:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
@@ -16729,7 +16734,7 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
       expires_at: expiresAt,
       is_active: true
     }).eq('id', existing[0].id);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
   } else {
     const { error } = await supabase.from('blacklist').insert([{
       user_name: userNameVal,
@@ -16739,7 +16744,7 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
       expires_at: expiresAt,
       is_active: true
     }]);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
   }
   
   // ★ 2026-09-11 修复（S8）：封禁属于高影响管理操作，此前无审计留痕，出问题无法追责
@@ -16758,7 +16763,7 @@ app.put('/admin/blacklist/:id/lift', verifyToken, securityRateLimit(60000, 30), 
   const { error } = await supabase.from('blacklist').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
   }).eq('id', id);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
   if (target) await logAdminAudit('unblacklist_user', ADMIN_USERNAME, 'user:' + target.user_name + ' blacklist_id:' + id);
   return res.json({ ok: true });
   } catch (e) { console.error('[admin] unblacklist:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
@@ -17215,7 +17220,7 @@ function formatAdminReportReason(category, reason) {
 app.get('/admin/reports', verifyToken, async (req, res) => {
   try {
   const { data, error } = await supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (error) return sendAdminDbFailure(res,error);
 
   const reports = (data || []).map(function(p) {
       const normalized = parseReportRecordContent(p.content);
@@ -17277,23 +17282,12 @@ app.put('/admin/report/:id', verifyToken, securityRateLimit(60000, 30), async (r
   if (!allowedStatuses.includes(status)) {
     return res.status(400).json({ error: '无效的状态值' });
   }
-  // 从 posts 表获取举报数据（存储在 content JSON 中）
-  const { data: post, error: fetchErr } = await supabase.from('posts').select('content').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
-  if (fetchErr) return res.status(400).json({ error: sanitizeError(fetchErr) });
-  if (!post) return res.status(404).json({ error: '举报不存在' });
-  var c = {};
-  try { c = JSON.parse(post.content || '{}'); } catch(e) {}
-  c.status = status;
-  c.reviewed_at = new Date().toISOString();
-  c.reviewed_by = ADMIN_USERNAME;
-  const { error } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id).eq('media_type', REPORT_MARKER);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
   var notifMsg = status === 'actioned' ? '管理员已将你的举报标记为已处理' : (status === 'dismissed' ? '管理员已驳回你的举报' : '管理员已审核你的举报');
-  addReportNotification(id, status, notifMsg).catch(function(){});
+  await patchReport(supabase,id,{status,reviewed_at:new Date().toISOString(),reviewed_by:ADMIN_USERNAME},reportNotification(status,notifMsg));
   return res.json({ ok: true });
   } catch (e) {
     console.error('Unhandled route error:', e.message);
-    return res.status(500).json({ error: '服务器内部错误' });
+    return res.status(e.status || 503).json({ ok:false, error: '举报更新失败',code:e.code || 'report_update_failed',retryable:e.status !== 404 });
   }});
 
 // 管理员回复举报
@@ -17308,24 +17302,14 @@ app.put('/admin/report/:id/respond', verifyToken, securityRateLimit(60000, 30), 
   if (responseVal && responseVal.error) return res.status(400).json({ error: responseVal.error });
   // 从 posts 表获取举报数据（存储在 content JSON 中）
   const { data: post, error: fetchErr } = await supabase.from('posts').select('*').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
-  if (fetchErr) return res.status(400).json({ error: sanitizeError(fetchErr) });
+  if (fetchErr) return sendAdminDbFailure(res,fetchErr);
   if (!post) return res.status(404).json({ error: '举报不存在' });
-  var c = {};
-  try { c = JSON.parse(post.content || '{}'); } catch(e) {}
-  c.admin_response = responseVal;
-  c.response_at = new Date().toISOString();
-  c.status = 'actioned';
-  c.reviewed_at = new Date().toISOString();
-  c.reviewed_by = ADMIN_USERNAME;
-  const { error } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
-  // 向举报人发送 DM 通知
+  await patchReport(supabase,id,{admin_response:responseVal,response_at:new Date().toISOString(),status:'actioned',reviewed_at:new Date().toISOString(),reviewed_by:ADMIN_USERNAME},reportNotification('replied','管理员已回复你的举报'));
   sendAdminDm(post.user_name, '[举报回复] ' + responseVal);
-  addReportNotification(id, 'replied', '管理员已回复你的举报').catch(function(){});
   return res.json({ ok: true });
   } catch (e) {
     console.error('Unhandled route error:', e.message);
-    return res.status(500).json({ error: '服务器内部错误' });
+    return res.status(e.status || 503).json({ ok:false, error: '举报更新失败',code:e.code || 'report_update_failed',retryable:e.status !== 404 });
   }});
 
 // 管理员处理举报 + 删除帖子
@@ -17333,18 +17317,19 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
   try {
     const { id } = req.params;
     // 从 posts 表获取举报数据（存储在 content JSON 中）
-    const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
+    const { data: reportPost, error: reportReadError } = await supabase.from('posts').select('*').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
+    if (reportReadError) throw reportReadError;
     if (!reportPost) return res.status(404).json({ error: '举报不存在' });
-    var c = {};
-    try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
+    var c = parseReportRecordContent(reportPost.content);
     const targetType = c.target_type || 'post';
     const targetId = c.target_id || '';
+    if (targetType !== 'post' && targetType !== 'photo') return res.status(400).json({error:'被举报内容类型不支持删除',code:'invalid_target_type'});
     if (targetType === 'post' || targetType === 'photo') {
       const normalizedTargetId = normalizePostId(targetId);
       if (!normalizedTargetId) return res.status(400).json({ error: '被举报内容参数无效', code: 'invalid_target_id' });
       const { data: post, error: fetchPostErr } = await supabase.from('posts')
         .select('id, actor_key, media_type, media_url, content').eq('id', normalizedTargetId).maybeSingle();
-      if (fetchPostErr) return res.status(400).json({ error: sanitizeError(fetchPostErr) });
+      if (fetchPostErr) return sendAdminDbFailure(res,fetchPostErr);
       if (post) {
         const expectPhoto = targetType === 'photo' || post.media_type === '__photo_wall__';
         const deletion = await hardDeleteContent({
@@ -17368,14 +17353,12 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
     c.reviewed_at = new Date().toISOString();
     c.reviewed_by = ADMIN_USERNAME;
     c.admin_response = adminMsg;
-    const { error: updErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-    if (updErr) return res.status(400).json({ error: sanitizeError(updErr) });
+    await patchReport(supabase,id,{status:c.status,reviewed_at:c.reviewed_at,reviewed_by:c.reviewed_by,admin_response:c.admin_response},reportNotification('content_deleted','管理员已删除被举报内容'));
     sendAdminDm(reportPost.user_name, '[举报处理] ' + adminMsg);
-    addReportNotification(id, 'content_deleted', '管理员已删除被举报内容').catch(function(){});
     return res.json({ ok: true });
   } catch(e) {
     console.error('[admin] 举报处理删除帖子失败:', e.message || e);
-    return res.status(500).json({ error: sanitizeError(e) });
+    return res.status(e.status || 503).json({ ok:false, error: sanitizeError(e),code:e.code || 'report_update_failed',retryable:e.status !== 404 });
   }
 });
 
@@ -17392,10 +17375,10 @@ app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30)
     }
     if (durNum > 0 && durNum < 1) durNum = 1;
     // 从 posts 表获取举报数据（存储在 content JSON 中）
-    const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
+    const { data: reportPost, error: reportReadError } = await supabase.from('posts').select('*').eq('id', id).eq('media_type', REPORT_MARKER).maybeSingle();
+    if (reportReadError) throw reportReadError;
     if (!reportPost) return res.status(404).json({ error: '举报不存在' });
-    var c = {};
-    try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
+    var c = parseReportRecordContent(reportPost.content);
     const targetUser = c.target_user;
     const reportReason = c.report_reason || '';
     if (!targetUser) return res.status(400).json({ error: '无法确定被举报用户' });
@@ -17404,8 +17387,9 @@ app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30)
       return res.status(403).json({ error: '不能封禁管理员账号' });
     }
     // ★ 目标用户必须真实存在，防止向不存在的账号写入封禁记录
-    var { data: banTargetRec } = await supabase.from('posts')
+    var { data: banTargetRec, error: banTargetError } = await supabase.from('posts')
       .select('id').eq('user_name', String(targetUser)).eq('media_type', AUTH_MARKER).limit(1).maybeSingle();
+    if (banTargetError) throw banTargetError;
     if (!banTargetRec) return res.status(400).json({ error: '被举报用户不存在，无法封禁' });
 
     const banType = durNum === 0 ? 'permanent' : 'temporary';
@@ -17415,7 +17399,8 @@ app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30)
     }
 
     // 检查是否已有封禁记录
-    const { data: existing } = await supabase.from('bans').select('id, is_active').eq('user_name', targetUser).order('banned_at', { ascending: false }).limit(1);
+    const { data: existing, error: banReadError } = await supabase.from('bans').select('id, is_active').eq('user_name', targetUser).order('banned_at', { ascending: false }).limit(1);
+    if (banReadError) throw banReadError;
     if (existing && existing.length) {
       const activeBan = existing.find(b => b.is_active);
       if (activeBan) {
@@ -17424,10 +17409,8 @@ app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30)
         c.reviewed_at = new Date().toISOString();
         c.reviewed_by = ADMIN_USERNAME;
         c.admin_response = '该用户已被封禁';
-        const { error: updErr1 } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-        if (updErr1) return res.status(400).json({ error: sanitizeError(updErr1) });
+        await patchReport(supabase,id,{status:c.status,reviewed_at:c.reviewed_at,reviewed_by:c.reviewed_by,admin_response:c.admin_response},reportNotification('user_banned','管理员已将举报用户封禁'));
         sendAdminDm(reportPost.user_name, '[举报处理] 该用户已被封禁');
-        addReportNotification(id, 'user_banned', '管理员已将举报用户封禁').catch(function(){});
         return res.json({ ok: true, message: '该用户已被封禁，举报已标记为已处理' });
       }
       const { error: updBanErr } = await supabase.from('bans').update({
@@ -17440,9 +17423,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30)
         banned_at: new Date().toISOString()
       }).eq('id', existing[0].id);
       if (updBanErr) {
-        // 回滚举报状态
-        await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-        return res.status(400).json({ error: sanitizeError(updBanErr) });
+        return sendAdminDbFailure(res,updBanErr);
       }
     } else {
       const { error: insErr } = await supabase.from('bans').insert([{
@@ -17454,7 +17435,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30)
         expires_at: expiresAt,
         is_active: true
       }]);
-      if (insErr) return res.status(400).json({ error: sanitizeError(insErr) });
+      if (insErr) return sendAdminDbFailure(res,insErr);
     }
 
     // 标记举报已处理
@@ -17463,14 +17444,12 @@ app.post('/admin/report/:id/ban-user', verifyToken, securityRateLimit(60000, 30)
     c.reviewed_at = new Date().toISOString();
     c.reviewed_by = ADMIN_USERNAME;
     c.admin_response = banMsg;
-    const { error: finalUpdErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-    if (finalUpdErr) return res.status(400).json({ error: sanitizeError(finalUpdErr) });
+    await patchReport(supabase,id,{status:c.status,reviewed_at:c.reviewed_at,reviewed_by:c.reviewed_by,admin_response:c.admin_response},reportNotification('user_banned','管理员已将举报用户封禁'));
     sendAdminDm(reportPost.user_name, '[举报处理] ' + banMsg);
-    addReportNotification(id, 'user_banned', '管理员已将举报用户封禁').catch(function(){});
     return res.json({ ok: true });
   } catch(e) {
     console.error('[admin] 举报处理封禁用户失败:', e.message || e);
-    return res.status(500).json({ error: sanitizeError(e) });
+    return res.status(e.status || 503).json({ ok:false, error: sanitizeError(e),code:e.code || 'report_update_failed',retryable:e.status !== 404 });
   }
 });
 
@@ -17567,7 +17546,7 @@ app.get('/admin/users', verifyToken, securityRateLimit(60000, 30), async (req, r
     ]);
     return res.json({ data: buildAdminUsersPayload(authRows, userInfoRows) });
   } catch (error) {
-    return res.status(400).json({ error: sanitizeError(error) });
+    return sendAdminDbFailure(res,error);
   }
 });
 
@@ -17620,6 +17599,7 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
         buildSummaryQuery('posts', 'id', 'media_type', '__photo_wall__', 'created_at'),
       ]);
 
+      [postsRes,authRowsRes,visitsRes,attacksRes,likesRes,commentsRes,photosRes].forEach(result => { if (!result || result.error) throw result && result.error || Error('stats_unavailable'); });
       const posts = (postsRes.data || []).filter(p => {
         if (p.content) {
           try { var c = JSON.parse(p.content); if (c && c.target_type) return false; } catch(e) {}
@@ -17672,6 +17652,7 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
         daily_visits: dailyVisits,
         daily_attacks: dailyAttacks,
         attack_types: attackTypes,
+        truncated: [postsRes,authRowsRes,visitsRes,attacksRes,likesRes,commentsRes,photosRes].some(result => (result.data || []).length >= MAX_STATS_LIMIT),
         cached_at: new Date().toISOString()
       };
     }
@@ -17721,7 +17702,7 @@ app.get('/admin/stats/attacks', verifyToken, rateLimit(60000, 20), async (req, r
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
 
     const attacks = (data || []).map(function(a) {
       var detail = {};
@@ -17778,6 +17759,8 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
       fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
     ]);
+
+    [visitsRes,attacksRes,postsRes,commentsRes,likesRes,authRows].forEach(result => { if (!result || result.error) throw result && result.error || Error('stats_unavailable'); });
 
     // 辅助函数：按天聚合
     function aggregateByDate(records, dateField) {
@@ -18416,7 +18399,7 @@ app.post('/admin/user/resolve-ip', verifyToken, rateLimit(60000, 10), async (req
 
     // 获取用户最近一次登录事件中的 IP
     var loginEvent = await supabase.from('posts')
-      .select('content')
+      .select('id, content')
       .eq('user_name', userName)
       .eq('media_type', LOGIN_EVENT_MARKER)
       .order('created_at', { ascending: false })
@@ -18445,30 +18428,17 @@ app.post('/admin/user/resolve-ip', verifyToken, rateLimit(60000, 10), async (req
     var ipLocation = await resolveIpLocation(ip);
     if (!ipLocation) return res.status(404).json({ error: 'IP 地区解析失败（所有数据源均不可用）', code: 'resolve_failed' });
 
-    // 更新 user_info
-    var existing = await supabase.from('posts').select('id, content')
-      .eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error) });
-    var info = {};
-    if (existing.data) { try { info = JSON.parse(existing.data.content || '{}'); } catch (_) {} }
-    info.last_ip_location = ipLocation;
-    info.last_ip = ip;
-    if (existing.data) {
-      await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.data.id);
-    } else {
-      await supabase.from('posts').insert([{
-        user_name: userName, media_type: USER_INFO_MARKER,
-        content: JSON.stringify(info), actor_key: 'user_info_' + Date.now()
-      }]);
-    }
+    var persisted = await checkedRpc(supabase, 'record_auth_ip_location', {
+      p_event_id: loginEvent.data.id, p_ip: ip, p_location: ipLocation
+    });
 
     await logAdminAudit('resolve_user_ip', req.adminName || 'admin', 'target_user=' + userName + '; ip=' + ip + '; text=' + (ipLocation.text || ''));
 
     return res.json({
       ok: true,
       ip: ip,
-      location: ipLocation
+      location: ipLocation,
+      current_updated: persisted.current_updated === true
     });
   } catch (error) {
     console.error('[API] admin resolve ip:', error && error.message);
@@ -18491,7 +18461,7 @@ app.get('/admin/user-data', verifyToken, rateLimit(60000, 30), async (req, res) 
         .eq('media_type', USER_BEHAVIOR_MARKER).order('created_at', { ascending: false }).limit(200)
     ]);
     var firstError = results[0].error || results[1].error || results[2].error;
-    if (firstError) return res.status(400).json({ error: sanitizeError(firstError) });
+    if (firstError) return sendAdminDbFailure(res,firstError);
     var info = {};
     if (results[0].data) { try { info = JSON.parse(results[0].data.content || '{}'); } catch (_) {} }
     await logAdminAudit('view_user_sensitive_data', req.adminName || 'admin', 'target_user=' + userName + '; fields=ip,location,device,behavior');
@@ -18518,7 +18488,7 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
       supabase.rpc('account_security_summary', { p_actor: userName })
     ]);
     var firstError = results[0].error || results[1].error || results[2].error || results[3].error || results[4].error;
-    if (firstError) return res.status(400).json({ error: sanitizeError(firstError) });
+    if (firstError) return sendAdminDbFailure(res,firstError);
     var info = {};
     if (results[0].data) { try { info = JSON.parse(results[0].data.content || '{}'); } catch(_) {} }
     var loginEvents = (results[1].data || []).map(function(row) {
@@ -18613,7 +18583,7 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
       .gte('created_at', fiveMinAgo)
       .order('created_at', { ascending: false })
       .limit(500);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     var activeByUser = {};
     (data || []).forEach(function(row) {
       var name = row.user_name;
@@ -18636,7 +18606,7 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
         supabase.from('posts').select('user_name, content, created_at').eq('media_type', USER_INFO_MARKER)
           .in('user_name', activeNames).order('created_at', { ascending: false }).limit(5000)
       ]);
-      if (related[0].error || related[1].error) return res.status(400).json({ error: sanitizeError(related[0].error || related[1].error) });
+      if (related[0].error || related[1].error) return sendAdminDbFailure(res,related[0].error || related[1].error);
       (related[0].data || []).forEach(function(row) {
         if (!latestLoginByUser[row.user_name]) latestLoginByUser[row.user_name] = safeJsonParse(row.content);
       });
@@ -18655,8 +18625,8 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
       var locationSourceKind = 'unavailable';
       var location = null;
       var locationCandidates = [
-        ['precise', loginInfo.ip_location],
-        ['precise', activeInfo.ip_location],
+        ['ip', loginInfo.ip_location],
+        ['ip', activeInfo.ip_location],
         ['ip', userInfo.last_ip_location],
         ['precise', userInfo.last_precise_location],
         ['ip', userInfo.last_location]
@@ -18748,7 +18718,7 @@ app.get('/admin/login-events', verifyToken, rateLimit(60000, 10), async (req, re
       supabase.from('posts').select('id, user_name, content, media_url, created_at').eq('media_type', LOGIN_EVENT_MARKER).order('created_at', { ascending: false }).limit(500),
       supabase.from('posts').select('id, user_name, content, media_url, created_at').eq('media_type', USER_BEHAVIOR_MARKER).order('created_at', { ascending: false }).limit(500)
     ]);
-    if (loginResult.error || behaviorResult.error) return res.status(400).json({ error: sanitizeError(loginResult.error || behaviorResult.error) });
+    if (loginResult.error || behaviorResult.error) return sendAdminDbFailure(res,loginResult.error || behaviorResult.error);
     return res.json({ data: loginResult.data || [], behavior: behaviorResult.data || [] });
   } catch(e) {
     console.error('[API] 登录事件查询失败:', e.message);
@@ -18776,7 +18746,7 @@ app.get('/admin/security-alerts', verifyToken, rateLimit(60000, 10), async (req,
     }
 
     var { data, error } = await query;
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
 
     // 解析 content JSON
     var alerts = (data || []).map(function(row) {
@@ -18829,7 +18799,7 @@ app.post('/admin/security-alerts/read', verifyToken, rateLimit(60000, 10), async
       .update({ content: JSON.stringify(info) })
       .eq('id', alertId);
 
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     return res.json({ ok: true });
   } catch(e) {
     console.error('[API] 标记安全提醒已读失败:', e.message);
@@ -18863,7 +18833,7 @@ app.post('/admin/security-alerts/status', verifyToken, rateLimit(60000, 10), asy
     var { error } = await supabase.from('posts')
       .update({ content: JSON.stringify(info) })
       .eq('id', id);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
 
     await logAdminAudit('review_security_alert', ADMIN_USERNAME, 'alert:' + id + ' status:' + status);
     return res.json({ ok: true });
@@ -19009,7 +18979,7 @@ app.get('/admin/audit-logs', verifyToken, rateLimit(60000, 10), async (req, res)
       .eq('media_type', AUDIT_LOG_MARKER)
       .order('created_at', { ascending: false })
       .limit(limit);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     var logs = (data || []).map(function(row) {
       var info = {};
       try { info = JSON.parse(row.content || '{}'); } catch(e) {}
@@ -19248,7 +19218,7 @@ app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req
       .eq('media_type', '__user_info__')
       .order('created_at', { ascending: false })
       .limit(200);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     const users = [];
     (data || []).forEach(function(row) {
       try {
@@ -19278,7 +19248,9 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   var timer = setTimeout(function() { controller.abort(); }, timeoutMs || 15000);
   var fetchOptions = Object.assign({}, options || {}, { signal: controller.signal });
   try {
-    return await fetch(url, fetchOptions);
+    var response = await fetch(url, fetchOptions);
+    var body = await response.text();
+    return { ok:response.ok,status:response.status,text:async()=>body,json:async()=>JSON.parse(body) };
   } finally {
     clearTimeout(timer);
   }
@@ -19304,7 +19276,9 @@ async function sendViaSendGrid(to, subject, text, html) {
   }, 15000);
   if (!resp.ok) {
     var body = await resp.text().catch(function(){ return ''; });
-    throw new Error('SendGrid HTTP ' + resp.status + (body ? ': ' + body.slice(0, 200) : ''));
+    var error = new Error('SendGrid HTTP ' + resp.status);
+    error.deliveryState = resp.status >= 400 && resp.status < 500 && resp.status !== 408 ? 'failed' : 'unknown';
+    throw error;
   }
 }
 
@@ -19323,9 +19297,18 @@ async function sendViaGAS(to, subject, text, html) {
   }, 15000);
   if (!resp.ok) {
     var body = await resp.text().catch(function(){ return ''; });
-    throw new Error('GAS HTTP ' + resp.status + (body ? ': ' + body.slice(0, 200) : ''));
+    var error = new Error('GAS HTTP ' + resp.status);
+    error.deliveryState = resp.status >= 400 && resp.status < 500 && resp.status !== 408 ? 'failed' : 'unknown';
+    throw error;
   }
-  return await resp.json().catch(function(){ return { ok: true }; });
+  var confirmation;
+  try { confirmation = await resp.json(); } catch (_) { var invalid = new Error('邮件渠道返回了无法确认的响应'); invalid.code='mail_response_unknown'; invalid.deliveryState='unknown'; throw invalid; }
+  if (!confirmation || confirmation.ok !== true) {
+    var rejected = new Error('邮件渠道未确认发送'); rejected.code='mail_rejected';
+    rejected.deliveryState = confirmation && confirmation.ok === false && !confirmation.unknown ? 'failed' : 'unknown';
+    throw rejected;
+  }
+  return confirmation;
 }
 
 // S-4: 邮件 HTML 白名单净化 —— 管理员填写的 HTML 原样透传会被用于钓鱼/脚本
@@ -19409,228 +19392,83 @@ async function countEmailSentToday() {
   }
 }
 
-// 发送邮件（优先 GAS HTTPS > SendGrid HTTPS > Gmail SMTP）
-app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
-  try {
-    const { recipients, subject, content, content_type } = req.body;
-    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
-      return res.status(400).json({ error: '请至少选择一个收件人' });
+// Channel fallback is safe only after an explicit rejection or a proven
+// pre-connect failure. Timeouts / invalid successful responses stay unknown.
+function emailFailureState(error) {
+  if (error && error.deliveryState) return error.deliveryState;
+  if (error && (['ECONNREFUSED','ENOTFOUND','EAUTH','EENVELOPE'].includes(error.code) ||
+      (error.command === 'CONN' && ['ETIMEDOUT','ECONNRESET'].includes(error.code)))) return 'failed';
+  return 'unknown';
+}
+async function deliverAdminEmail(recipient, subject, text, html) {
+  var payload = {from:'"XTJ 管理员" <'+GMAIL_USER+'>',to:recipient.email,subject,text,html};
+  async function smtp(transporter) {
+    var result=await transporter.sendMail(payload);
+    if (!result || !Array.isArray(result.accepted) || !result.accepted.some(email => String(email).toLowerCase()===recipient.email.toLowerCase())) {
+      var rejected=Error('SMTP 未确认收件人'); rejected.deliveryState=result && Array.isArray(result.rejected) && result.rejected.length ? 'failed' : 'unknown'; throw rejected;
     }
-    if (!subject || !subject.trim()) {
-      return res.status(400).json({ error: '请输入邮件主题' });
-    }
-    if (!content || !content.trim()) {
-      return res.status(400).json({ error: '请输入邮件内容' });
-    }
-    const MAX_RECIPIENTS = 100;
-    if (recipients.length > MAX_RECIPIENTS) {
-      return res.status(400).json({ error: '单次最多发送 ' + MAX_RECIPIENTS + ' 人' });
-    }
-    // M-2: 校验每个收件人 email 格式，防止 undefined/非字符串/控制字符直接进入发送通道
-    const invalidRecipients = recipients.filter(function(r) {
-      const e = normalizeEmailAddress(r && r.email);
-      return !e || !isValidEmailAddress(e);
-    });
-    if (invalidRecipients.length) {
-      return res.status(400).json({ error: '存在无效的收件人邮箱', invalid: invalidRecipients.map(function(r) { return r && r.email; }).slice(0, 20) });
-    }
-    // ★ M32 审计修复：发送前/后写审计；每日发送总量上限（env ADMIN_EMAIL_DAILY_MAX 可配）
-    try {
-      await logAdminAudit('send_email_attempt', req.adminName || 'admin', 'subject:' + String(subject || '').replace(/[\r\n]/g, ' ').slice(0, 80) + ' recipients:' + recipients.length);
-    } catch (_auditErr) {}
-    var sentTodayCount = await countEmailSentToday();
-    if (sentTodayCount < 0 || sentTodayCount + recipients.length > ADMIN_EMAIL_DAILY_MAX) {
-      return res.status(429).json({ error: '今日邮件发送总量已达上限（' + ADMIN_EMAIL_DAILY_MAX + '），请明日再试', code: 'email_daily_limit' });
-    }
-    // 剥离 CRLF，防止 SMTP 头注入（Bcc 等额外头）
-    const subjectVal = String(subject || '').replace(/[\r\n\u0000]+/g, ' ').trim().slice(0, 200);
-    const isHtml = content_type === 'html';
-    const bodyText = isHtml ? emailHtmlToText(content) : content;
-    const bodyHtml = isHtml ? sanitizeEmailHtml(content) : content.split('\n').map(function(l) { return '<p>' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>'; }).join('');
-    var transporter = null;
-    if (!SENDGRID_API_KEY && !GMAIL_GAS_URL) {
-      transporter = getMailTransporter();
-      if (!transporter) {
-        return res.status(500).json({ error: '邮件服务未配置，请在 Render Dashboard 设置 GMAIL_GAS_URL（推荐）或 GMAIL_USER + GMAIL_APP_PASSWORD' });
-      }
-    }
-
-    // 先保存收件人到历史（无论发送是否成功，都先存下来，包含名字）
-    // 使用统一 helper，失败只 console.warn，不阻断邮件发送
-    try {
-      await saveEmailRecipientHistory(recipients);
-    } catch(e) { console.warn('[Email] 保存收件人历史失败:', e.message || e); }
-
-    var usedPort = getMailTransporterPort();
-    const sent = [];
-    const failed = [];
-    for (const r of recipients) {
-      try {
-        if (GMAIL_GAS_URL) {
-          // 优先 Google Apps Script（HTTPS 443，绕过 Render SMTP 端口封锁）
-          await sendViaGAS(r.email, subjectVal, bodyText, bodyHtml);
-        } else if (SENDGRID_API_KEY) {
-          await sendViaSendGrid(r.email, subjectVal, bodyText, bodyHtml);
-        } else {
-          await transporter.sendMail({
-            from: '"XTJ 管理员" <' + GMAIL_USER + '>',
-            to: r.email,
-            subject: subjectVal,
-            text: bodyText,
-            html: bodyHtml
-          });
-        }
-        sent.push(r.user_name || r.email);
-      } catch (e) {
-        var maskedEmail = r.email ? r.email.slice(0, 3) + '***@' + (r.email.split('@')[1] || '') : 'unknown';
-        console.error('[Email] 发送给 ' + maskedEmail + ' 失败: ' + (e.code || '') + ' - ' + e.message);
-        // GAS 失败 → 回退 SendGrid → 回退 SMTP
-        if (GMAIL_GAS_URL && SENDGRID_API_KEY) {
-          try {
-            console.warn('[Email] GAS 失败，回退到 SendGrid');
-            await sendViaSendGrid(r.email, subjectVal, bodyText, bodyHtml);
-            sent.push(r.user_name || r.email);
-            continue;
-          } catch(e2) {
-            console.error('[Email] SendGrid 回退也失败: ' + (e2.code || e2.message || ''));
-            // ★ M32：错误脱敏，不回显上游原文
-            failed.push({ user: r.user_name || r.email, error: 'GAS失败，SendGrid回退也' + maskEmailSendError(e2) });
-            continue;
-          }
-        }
-        if (GMAIL_GAS_URL && !SENDGRID_API_KEY) {
-          // GAS 失败且无 SendGrid，回退到 SMTP
-          try {
-            var gasFallbackT = getMailTransporter();
-            if (gasFallbackT) {
-              await gasFallbackT.sendMail({
-                from: '"XTJ 管理员" <' + GMAIL_USER + '>',
-                to: r.email,
-                subject: subjectVal,
-                text: bodyText,
-                html: bodyHtml
-              });
-              sent.push(r.user_name || r.email);
-              continue;
-            }
-          } catch(e2) {
-            console.error('[Email] SMTP 回退也失败: ' + (e2.code || '') + ' - ' + e2.message);
-          }
-        }
-        if (SENDGRID_API_KEY && !GMAIL_GAS_URL) {
-          // SendGrid 失败 → 回退到 SMTP（不再重置常量，只走本地逻辑开关）
-          try {
-            var sgTransporter = getMailTransporter();
-            if (sgTransporter) {
-              await sgTransporter.sendMail({
-                from: '"XTJ 管理员" <' + GMAIL_USER + '>',
-                to: r.email,
-                subject: subjectVal,
-                text: bodyText,
-                html: bodyHtml
-              });
-              sent.push(r.user_name || r.email);
-              continue;
-            }
-          } catch(e2) {
-            console.error('[Email] SMTP 回退也失败: ' + (e2.code || '') + ' - ' + e2.message);
-          }
-        }
-        // M-4: 465 连接失败时回退 587 STARTTLS——与上方 SendGrid 回退解耦（原为
-        // else if 互斥，配 SendGrid 时 465 失败永远走不到 587）
-        if (!GMAIL_GAS_URL && usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
-          try {
-            console.warn('[Email] 465 连接失败，回退到 587 STARTTLS');
-            var fallbackTransporter = nodemailer.createTransport({
-              host: 'smtp.gmail.com',
-              port: 587,
-              secure: false,
-              requireTLS: true,
-              auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-              connectionTimeout: 10000,
-              greetingTimeout: 10000,
-              socketTimeout: 10000
-            });
-            transporter = fallbackTransporter;
-            await transporter.sendMail({
-              from: '"XTJ 管理员" <' + GMAIL_USER + '>',
-              to: r.email,
-              subject: subjectVal,
-              text: bodyText,
-              html: bodyHtml
-            });
-            sent.push(r.user_name || r.email);
-            continue;
-          } catch(e2) {
-            console.error('[Email] 587 回退也失败: ' + (e2.code || '') + ' - ' + e2.message);
-            // ★ M32：错误脱敏，不回显上游原文（保留错误码供前端判断"端口被封"提示）
-            failed.push({ user: r.user_name || r.email, error: '465/587 均连接失败（' + maskEmailSendError(e2) + '）' });
-            continue;
-          }
-        }
-        // ★ M32：错误脱敏，不回显上游原文（如 SMTP 服务器地址/凭据片段）
-        failed.push({ user: r.user_name || r.email, error: (GMAIL_GAS_URL ? 'GAS失败' : SENDGRID_API_KEY ? 'SendGrid失败，SMTP也' : '发送') + maskEmailSendError(e) });
-      }
-    }
-    try {
-      // 构建详细的收件人列表（包含名字、邮箱、发送结果）
-      var detailList = recipients.map(function(r) {
-        var email = String(r.email || '').trim().toLowerCase();
-        var name = String(r.user_name || '').trim();
-        var isSent = sent.indexOf(r.user_name || r.email) >= 0;
-        var failInfo = null;
-        if (!isSent) {
-          for (var fi = 0; fi < failed.length; fi++) {
-            if (failed[fi].user === (r.user_name || r.email)) { failInfo = failed[fi].error; break; }
-          }
-        }
-        return { email: email, user_name: name || email, status: isSent ? 'sent' : 'failed', error: failInfo };
-      });
-      await supabase.from('posts').insert([{
-        user_name: ADMIN_USERNAME,
-        media_type: EMAIL_SENT_MARKER,
-        content: JSON.stringify({
-          from_email: GMAIL_USER,
-          subject: subjectVal,
-          sent_count: sent.length,
-          failed_count: failed.length,
-          total_recipients: recipients.length,
-          recipients_detail: detailList,
-          sent_at: new Date().toISOString()
-        }),
-        actor_key: 'email_' + Date.now()
-      }]);
-    } catch(e) {
-      console.warn('[Email] 保存发送记录失败:', e.message);
-    }
-    // ★ M32：发送后审计（含成功/失败计数，不落明细邮箱清单）
-    try {
-      await logAdminAudit('send_email_done', req.adminName || 'admin', 'subject:' + subjectVal + ' sent:' + sent.length + ' failed:' + failed.length);
-    } catch (_auditErr) {}
-    if (sent.length === 0 && failed.length > 0) {
-      var firstErr = failed[0].error || '';
-      if (firstErr.indexOf('connect') > -1 || firstErr.indexOf('timeout') > -1 || firstErr.indexOf('ETIMEDOUT') > -1) {
-        return res.json({
-          ok: false,
-          sent_count: 0,
-          failed_count: failed.length,
-          sent: sent,
-          failed: failed,
-          hint: 'SMTP 465/587 出站端口被云平台封锁，重启 Render 实例可能换到未封锁的宿主机。或者在 Render Dashboard 手动 Deploy 触发重启。'
-        });
-      }
-    }
-    return res.json({
-      ok: true,
-      sent_count: sent.length,
-      failed_count: failed.length,
-      sent: sent,
-      failed: failed
-    });
-  } catch (e) {
-    console.error('[Email API] 发送邮件失败:', e.message);
-    return res.status(500).json({ error: '发送邮件失败' });
   }
+  var channels=[];
+  if (GMAIL_GAS_URL) channels.push(()=>sendViaGAS(recipient.email,subject,text,html));
+  if (SENDGRID_API_KEY) channels.push(()=>sendViaSendGrid(recipient.email,subject,text,html));
+  var transporter=getMailTransporter();
+  if (transporter) channels.push(()=>smtp(transporter));
+  if (transporter && getMailTransporterPort()==='465') channels.push(()=>smtp(nodemailer.createTransport({host:'smtp.gmail.com',port:587,secure:false,requireTLS:true,auth:{user:GMAIL_USER,pass:GMAIL_APP_PASSWORD},connectionTimeout:15000,greetingTimeout:15000,socketTimeout:15000})));
+  if (!channels.length) {var disabled=Error('邮件服务未配置');disabled.deliveryState='failed';throw disabled;}
+  for (var i=0;i<channels.length;i++) {
+    try {await channels[i]();return;} catch(error) { if (emailFailureState(error)!=='failed' || i===channels.length-1) throw error; }
+  }
+}
+
+// Atomically reserve a cross-instance daily budget and an idempotent job before
+// handing a recipient to any external transport. Each outcome is durably settled.
+app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
+  var requestId=null, ownsJob=false;
+  try {
+    const {recipients,subject,content,content_type} = req.body || {};
+    if (!Array.isArray(recipients) || recipients.length<1 || recipients.length>100) return res.status(400).json({error:'请选择1-100位收件人'});
+    if (typeof subject!=='string' || !subject.trim() || typeof content!=='string' || !content.trim()) return res.status(400).json({error:'请输入邮件主题和内容'});
+    const normalized=recipients.map(r=>({email:normalizeEmailAddress(r && r.email),user_name:String(r && r.user_name || '').slice(0,100)}));
+    if (normalized.some(r=>!r.email || !isValidEmailAddress(r.email))) return res.status(400).json({error:'存在无效的收件人邮箱'});
+    const unique=Array.from(new Map(normalized.map(r=>[r.email,r])).values()).sort((a,b)=>a.email.localeCompare(b.email));
+    const subjectVal=subject.replace(/[\r\n\u0000]+/g,' ').trim().slice(0,200);
+    const bodyText=content_type==='html' ? emailHtmlToText(content) : content;
+    const bodyHtml=content_type==='html' ? sanitizeEmailHtml(content) : content.split('\n').map(l=>'<p>'+l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</p>').join('');
+    requestId=normalizePostId(req.body.request_id || crypto.randomUUID());
+    if (!requestId) return res.status(400).json({error:'请求编号无效'});
+    const fingerprint=crypto.createHash('sha256').update(JSON.stringify({recipients:unique,subject:subjectVal,text:bodyText,html:bodyHtml})).digest('hex');
+    var job=await checkedRpc(supabase,'reserve_admin_email_job',{p_job_id:requestId,p_actor:ADMIN_USERNAME,p_fingerprint:fingerprint,p_recipients:unique,p_subject:subjectVal,p_daily_limit:ADMIN_EMAIL_DAILY_MAX});
+    if (!job.created) {job=await recoverEmailJob(supabase,job,GMAIL_USER);return res.status(job.status==='processing'?202:200).json(emailOutcome(job));}
+    ownsJob=true;
+    try {await logAdminAudit('send_email_attempt',req.adminName || 'admin','request_id:'+requestId+' recipients:'+unique.length);} catch (_) {}
+    try {await saveEmailRecipientHistory(unique);} catch (_) {console.warn('[Email] recipient history was not confirmed');}
+    for (const recipient of unique) {
+      var claim=await checkedRpc(supabase,'claim_admin_email_delivery',{p_job_id:requestId,p_email:recipient.email});
+      if (!claim.claimed) continue;
+      var status='sent',errorText=null;
+      try {await deliverAdminEmail(recipient,subjectVal,bodyText,bodyHtml);} catch(error) {status=emailFailureState(error);errorText=maskEmailSendError(error);}
+      // Retry only the idempotent database settlement, never the external send.
+      var lastError;
+      for(var retry=0;retry<3;retry++) {
+        try {await checkedRpc(supabase,'settle_admin_email_delivery',{p_job_id:requestId,p_email:recipient.email,p_status:status,p_error:errorText});lastError=null;break;}
+        catch(error) {lastError=error;}
+      }
+      if(lastError) throw lastError;
+    }
+    job=await checkedRpc(supabase,'finish_admin_email_job',{p_job_id:requestId,p_from_email:GMAIL_USER});
+    ownsJob=false;
+    const outcome=emailOutcome(job);
+    try {await logAdminAudit('send_email_done',req.adminName || 'admin','request_id:'+requestId+' sent:'+outcome.sent_count+' failed:'+outcome.failed_count+' unknown:'+outcome.unknown_count);} catch (_) {}
+    return res.status(outcome.partial?207:200).json(outcome);
+  } catch(error) {
+    if(ownsJob && requestId) {try {await checkedRpc(supabase,'finish_admin_email_job',{p_job_id:requestId,p_from_email:GMAIL_USER});} catch (_) {console.warn('[Email] job settlement pending:',requestId);}}
+    console.error('[Email API] send failed:',error && error.code || 'database_error');
+    return res.status(error.status || 503).json({ok:false,request_id:requestId,error:error.code==='email_daily_limit'?'今日邮件发送总量已达上限，请明日再试':'发送结果未确认，请使用同一请求查询记录，勿重复发送',code:error.code || 'email_job_unavailable',retryable:error.code!=='email_daily_limit'});
+  }
+});
+app.get('/admin/email-job/:id',verifyToken,rateLimit(60000,30),async(req,res)=>{
+  try {var id=normalizePostId(req.params.id);if(!id)return res.status(400).json({error:'请求编号无效'});var job=await checkedRpc(supabase,'admin_email_job_snapshot',{p_job_id:id});job=await recoverEmailJob(supabase,job,GMAIL_USER);return res.json(emailOutcome(job));}
+  catch(error){return res.status(error.status || 503).json({ok:false,error:'发送记录暂不可读取',code:error.code || 'email_job_unavailable',retryable:true});}
 });
 
 // 管理员：获取邮件发送历史
@@ -19642,7 +19480,7 @@ app.get('/admin/email-history', verifyToken, rateLimit(60000, 10), async (req, r
       .eq('media_type', EMAIL_SENT_MARKER)
       .order('created_at', { ascending: false })
       .limit(limit);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     var records = (data || []).map(function(row) {
       var info = {};
       try { info = JSON.parse(row.content || '{}'); } catch(e) {}
@@ -19652,6 +19490,8 @@ app.get('/admin/email-history', verifyToken, rateLimit(60000, 10), async (req, r
         subject: info.subject || '',
         sent_count: info.sent_count || 0,
         failed_count: info.failed_count || 0,
+        unknown_count: info.unknown_count || 0,
+        request_id: info.request_id || null,
         total_recipients: info.total_recipients || 0,
         recipients_detail: Array.isArray(info.recipients_detail) ? info.recipients_detail : [],
         sent_at: info.sent_at || row.created_at
@@ -19676,7 +19516,7 @@ app.get('/admin/email-recipient-history', verifyToken, rateLimit(60000, 10), asy
       .eq('user_name', ADMIN_USERNAME)
       .order('created_at', { ascending: false })
       .limit(limit);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     var seen = new Set();
     var recipients = [];
     (data || []).forEach(function(row) {
@@ -19738,7 +19578,7 @@ app.post('/admin/email-recipient-history/delete', verifyToken, rateLimit(60000, 
       .select('id, content')
       .eq('media_type', EMAIL_RECIPIENT_MARKER)
       .eq('user_name', ADMIN_USERNAME);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
     var idsToDelete = [];
     (data || []).forEach(function(row) {
       try {
@@ -19751,10 +19591,14 @@ app.post('/admin/email-recipient-history/delete', verifyToken, rateLimit(60000, 
     if (idsToDelete.length === 0) {
       return res.json({ ok: true, deleted_count: 0 });
     }
-    for (var di = 0; di < idsToDelete.length; di++) {
-      await supabase.from('posts').delete().eq('id', idsToDelete[di]).catch(function(){});
+    var deletedCount=0, failures=[];
+    for (var offset=0;offset<idsToDelete.length;offset+=100) {
+      var batch=idsToDelete.slice(offset,offset+100);
+      var result=await supabase.from('posts').delete().in('id',batch).eq('media_type',EMAIL_RECIPIENT_MARKER).eq('user_name',ADMIN_USERNAME).select('id');
+      if (!result || result.error) failures.push(...batch);
+      else deletedCount+=(result.data || []).length;
     }
-    return res.json({ ok: true, deleted_count: idsToDelete.length });
+    return res.status(failures.length?207:200).json({ok:failures.length===0,partial:deletedCount>0 && failures.length>0,deleted_count:deletedCount,failed_count:failures.length,error:failures.length?'部分历史邮箱未删除':undefined});
   } catch(e) {
     console.error('[Email Recipient History] 删除失败:', e.message);
     return res.status(500).json({ error: '删除失败' });
@@ -19764,11 +19608,8 @@ app.post('/admin/email-recipient-history/delete', verifyToken, rateLimit(60000, 
 // 清空所有历史收件人
 app.post('/admin/email-recipient-history/clear', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    await supabase.from('posts')
-      .delete()
-      .eq('media_type', EMAIL_RECIPIENT_MARKER)
-      .eq('user_name', ADMIN_USERNAME);
-    return res.json({ ok: true });
+    var deleted=await checkedData(supabase.from('posts').delete().eq('media_type',EMAIL_RECIPIENT_MARKER).eq('user_name',ADMIN_USERNAME).select('id'));
+    return res.json({ok:true,deleted_count:(deleted || []).length});
   } catch(e) {
     console.error('[Email Recipient History] 清空失败:', e.message);
     return res.status(500).json({ error: '清空失败' });
@@ -19850,7 +19691,7 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
     }
 
     var { data, error } = await query;
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    if (error) return sendAdminDbFailure(res,error);
 
     var logs = (data || []).map(function(row) {
       var info = {};
@@ -20708,7 +20549,7 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
       config: {
         name: config.name || '小猫',
         avatar: config.avatar || '🤖',
-        avatar_url: config.avatar_url || '',
+        avatar_url: mediaGatewayUrl(config.avatar_url, SUPABASE_URL) || '',
         avatar_type: config.avatar_type || 'emoji',
         avatar_version: config.avatar_version || 0,
         description: config.description || '徐旭泽的犀利毒舌 AI 分身',
@@ -27300,8 +27141,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
 // GET /admin/ai-agent/config - 管理员获取 AI 完整配置
 app.get('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
-    var config = await getAiConfig();
-    return res.json({ ok: true, config: config, deepseek_models: getDeepSeekProbeSnapshot() });
+    var config = (await readPersistedAiConfig()).config;
+    return res.json({ ok: true, config: Object.assign({},config,{avatar_url:mediaGatewayUrl(config.avatar_url,SUPABASE_URL)}), deepseek_models: getDeepSeekProbeSnapshot() });
   } catch (e) {
     console.error('[ADMIN-AI] GET config error:', e.message);
     return res.status(500).json({ error: '查询失败' });
@@ -27311,7 +27152,7 @@ app.get('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 60), asy
 // GET /admin/ai-agent/effective-prompt — 管理员查看当前生效的系统提示词
 app.get('/admin/ai-agent/effective-prompt', verifyToken, securityRateLimit(60000, 60), async (req, res) => {
   try {
-    var config = await getAiConfig();
+    var config = (await readPersistedAiConfig()).config;
     var corePrompt = buildAiCorePrompt(config);
     var allowWebSearch = config.allow_web_search === true || (config.search && config.search.allow_web_search === true);
     var rs = config.reply_style || {};
@@ -27348,7 +27189,8 @@ app.post('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 20), as
     var nowIso = new Date().toISOString();
 
     // 读取现有配置，保留 avatar_url/avatar_type/avatar_version
-    var existingConfig = await getAiConfig();
+    var snapshot = await readPersistedAiConfig();
+    var existingConfig = snapshot.config;
     var avatarUrl = existingConfig.avatar_url || '';
     var avatarType = existingConfig.avatar_type || 'emoji';
     var avatarVersion = existingConfig.avatar_version || 0;
@@ -27360,23 +27202,7 @@ app.post('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 20), as
       updated_at: nowIso, updated_by: req.adminName || 'admin'
     });
 
-    var { data: existing } = await supabase.from('posts')
-      .select('id')
-      .eq('media_type', AI_AGENT_CONFIG_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existing && existing.id) {
-      await supabase.from('posts').update({ content: name, media_url: JSON.stringify(payload), created_at: nowIso }).eq('id', existing.id);
-    } else {
-      await supabase.from('posts').insert([{
-        user_name: req.adminName || 'admin', content: name,
-        media_type: AI_AGENT_CONFIG_MARKER, media_url: JSON.stringify(payload),
-        actor_key: 'ai_config_' + Date.now()
-      }]);
-    }
-
+    payload = await persistAiConfig(snapshot.row,payload);
     // 清理配置缓存
     aiConfigCache = null;
     aiConfigFetchedAt = 0;
@@ -27384,16 +27210,35 @@ app.post('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 20), as
     // 高危操作审计：管理员保存 AI 配置（复用既有 logAdminAudit 审计通道）
     try { await logAdminAudit('ai_config_update', req.adminName || 'admin', 'name:' + name + ' version:' + (payload.avatar_version || 0)); } catch (e) { console.warn('[ADMIN-AI] audit log failed:', e && e.message); }
 
-    return res.json({ ok: true, config: payload });
+    return res.json({ ok: true, config: Object.assign({},payload,{avatar_url:mediaGatewayUrl(payload.avatar_url,SUPABASE_URL)}) });
   } catch (e) {
     console.error('[ADMIN-AI] POST config error:', e.message);
     return res.status(500).json({ error: '保存失败' });
   }
 });
 
+async function readPersistedAiConfig() {
+  var row = await checkedData(supabase.from('posts').select('id,content,media_url').eq('media_type',AI_AGENT_CONFIG_MARKER).order('created_at',{ascending:false}).limit(1).maybeSingle());
+  var config = row && row.media_url ? migrateConfig(JSON.parse(row.media_url)) : JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
+  return { row:row, config:config };
+}
+
+async function persistAiConfig(existing, payload) {
+  var result;
+  if (existing && existing.id) {
+    result = await checkedData(supabase.from('posts').update({content:payload.name || 'AI',media_url:JSON.stringify(payload),created_at:payload.updated_at}).eq('id',existing.id).eq('media_type',AI_AGENT_CONFIG_MARKER).select('id,media_url').single());
+  } else {
+    result = await checkedData(supabase.from('posts').insert([{user_name:payload.updated_by || ADMIN_USERNAME,content:payload.name || 'AI',media_type:AI_AGENT_CONFIG_MARKER,media_url:JSON.stringify(payload),actor_key:'ai_config_'+Date.now()}]).select('id,media_url').single());
+  }
+  if (!result || !result.id || !result.media_url) throw Error('config_not_persisted');
+  return JSON.parse(result.media_url);
+}
+
 // POST /api/admin/ai-agent/avatar (旧路径 /admin/ai-agent/avatar 也保留)
 // 管理员上传 AI 头像图片 — 使用 JSON base64（不依赖 multipart 解析）
 async function handleAvatarUpload(req, res) {
+  var uploadedPath = null;
+  var committed = false;
   try {
     var body = req.body || {};
     var imageBase64 = String(body.image || '').trim();
@@ -27443,15 +27288,18 @@ async function handleAvatarUpload(req, res) {
       return res.status(500).json({ error: '上传失败: ' + (uploadError.message || '') });
     }
     
+    uploadedPath = storagePath;
+    // Persist the stable object path; clients receive an authorized gateway URL.
     // 获取 public URL
     var { data: publicUrlData } = supabase.storage.from('uploads').getPublicUrl(storagePath);
     var publicUrl = publicUrlData ? publicUrlData.publicUrl : '';
     if (!publicUrl) {
-      return res.status(500).json({ error: '获取图片地址失败' });
+      throw Error('avatar_url_unavailable');
     }
     
     // 更新 AI 配置中的头像字段
-    var existingConfig = await getAiConfig();
+    var snapshot = await readPersistedAiConfig();
+    var existingConfig = snapshot.config;
     var newVersion = (existingConfig.avatar_version || 0) + 1;
     var nowIso = new Date().toISOString();
     
@@ -27462,40 +27310,22 @@ async function handleAvatarUpload(req, res) {
     updatedPayload.updated_at = nowIso;
     updatedPayload.updated_by = req.adminName || 'admin';
     
-    // 查找已有配置记录并更新
-    var { data: existing } = await supabase.from('posts')
-      .select('id')
-      .eq('media_type', AI_AGENT_CONFIG_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    
-    if (existing && existing.id) {
-      await supabase.from('posts').update({
-        media_url: JSON.stringify(updatedPayload),
-        created_at: nowIso
-      }).eq('id', existing.id);
-    } else {
-      await supabase.from('posts').insert([{
-        user_name: req.adminName || 'admin',
-        content: updatedPayload.name || 'AI',
-        media_type: AI_AGENT_CONFIG_MARKER,
-        media_url: JSON.stringify(updatedPayload),
-        actor_key: 'ai_config_' + Date.now()
-      }]);
-    }
-    
+    updatedPayload = await persistAiConfig(snapshot.row,updatedPayload);
+    committed = true;
     // 清除配置缓存，使新头像立即可见
     aiConfigCache = null;
     aiConfigFetchedAt = 0;
     
     return res.json({
       ok: true,
-      avatar_url: publicUrl,
+      avatar_url: mediaGatewayUrl(updatedPayload.avatar_url,SUPABASE_URL),
       avatar_version: newVersion,
       message: '头像上传成功'
     });
   } catch (e) {
+    if (uploadedPath && !committed) {
+      try { var cleanup = await removeStorageWithQueue(supabase,{bucket:'uploads',paths:[uploadedPath],photoId:crypto.randomUUID()}); if (!cleanup.ok) console.warn('[ADMIN-AI] avatar cleanup not confirmed:',cleanup.error && cleanup.error.code); } catch (cleanupError) { console.warn('[ADMIN-AI] avatar cleanup queue failed:',cleanupError && cleanupError.code); }
+    }
     console.error('[ADMIN-AI] avatar exception:', e && e.message);
     return res.status(500).json({ error: sanitizeError(e) });
   }
@@ -27629,13 +27459,14 @@ app.get('/admin/ai-agent/users', verifyToken, securityRateLimit(60000, 30), asyn
     if (days > 365) days = 365;
     var since = new Date(Date.now() - days * 86400000).toISOString();
 
-    var { data: rows } = await supabase.from('posts')
+    var { data: rows, error: readError } = await supabase.from('posts')
       .select('user_name, media_url, created_at')
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(50000);
 
+    if (readError) throw readError;
     if (!Array.isArray(rows)) return res.json({ ok: true, users: [], window_days: days });
 
     var userMap = {};
@@ -27711,16 +27542,18 @@ app.get('/admin/ai-agent/conversations', verifyToken, securityRateLimit(60000, 3
     if (days > 365) days = 365;
     var since = new Date(Date.now() - days * 86400000).toISOString();
 
-    var { data: rows } = await supabase.from('posts')
+    var { data: rows, error: readError } = await supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
       .eq('user_name', targetUser)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .gte('created_at', since)
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
       .limit(5000);
 
+    if (readError) throw readError;
     if (!Array.isArray(rows)) return res.json({ ok: true, user_name: targetUser, conversations: [], window_days: days });
 
+    rows.reverse();
     // 按 conversation_id 分组
     var convMap = {};
     rows.forEach(function(r) {
@@ -27787,7 +27620,7 @@ app.get('/admin/ai-agent/conversations', verifyToken, securityRateLimit(60000, 3
 
     conversations.sort(function(a, b) { return (b.last_at || '').localeCompare(a.last_at || ''); });
 
-    return res.json({ ok: true, user_name: targetUser, conversations: conversations, window_days: days });
+    return res.json({ ok: true, user_name: targetUser, conversations: conversations, window_days: days, truncated: rows.length >= 5000 });
   } catch (e) {
     console.error('[ADMIN-AI] GET conversations exception:', e.message);
     return res.status(500).json({ error: '查询失败' });
@@ -27807,14 +27640,15 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
     var query;
     if (convId === 'legacy') {
       // 旧数据没有 conversation_id，用 actor_key 模式匹配回退到普通查询
-      var { data: rows } = await supabase.from('posts')
+      var { data: rows, error: readError } = await supabase.from('posts')
         .select('id, user_name, content, media_url, created_at')
         .eq('user_name', targetUser)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
         .limit(5000);
+      if (readError) throw readError;
       // 按纯字符串 media_url 过滤（旧数据 media_url 是'user'或'assistant'）
-      var legacyRows = (rows || []).filter(function(r) {
+      var legacyRows = (rows || []).reverse().filter(function(r) {
         var raw = r.media_url || '';
         return raw.indexOf('{') !== 0;
       });
@@ -27824,17 +27658,26 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
           content: r.content || '', created_at: r.created_at, usage: null
         };
       });
-      return res.json({ ok: true, user_name: targetUser, conversation_id: 'legacy', messages: msgs });
+      return res.json({ ok: true, user_name: targetUser, conversation_id: 'legacy', messages: msgs, truncated: (rows || []).length >= 5000 });
     }
 
-    var { data: rows } = await supabase.from('posts')
+    var detailLimit = 500;
+    var beforeId = String(req.query.before_id || '');
+    var beforeAt = String(req.query.before_at || '');
+    if ((beforeId || beforeAt) && (!normalizePostId(beforeId) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(beforeAt) || !Number.isFinite(Date.parse(beforeAt)))) return res.status(400).json({error:'分页参数无效'});
+    var detailQuery = supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
-      .eq('user_name', targetUser)
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .eq('user_name', targetUser).eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(detailLimit + 1);
+    if (beforeId) detailQuery = detailQuery.or('created_at.lt.' + beforeAt + ',and(created_at.eq.' + beforeAt + ',id.lt.' + beforeId + ')');
+    var { data: rows, error: readError } = await detailQuery;
 
-    var msgs = (rows || []).map(function(r) {
+    if (readError) throw readError;
+    var hasMore = (rows || []).length > detailLimit;
+    rows = (rows || []).slice(0,detailLimit);
+    var oldest = rows[rows.length-1];
+    var msgs = rows.reverse().map(function(r) {
       var meta = parseMsgMeta(r);
       return {
         id: r.id,
@@ -27852,7 +27695,8 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
       ok: true,
       user_name: targetUser,
       conversation_id: convId,
-      messages: msgs
+      messages: msgs, has_more: hasMore,
+      next_cursor: hasMore && oldest ? { before_at: oldest.created_at, before_id: oldest.id } : null
     });
   } catch (e) {
     console.error('[ADMIN-AI] GET conversation exception:', e.message);

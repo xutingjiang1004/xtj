@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { installFeedMutationRuntime } = require('./helpers/post-state-runtime-fixture');
 const posts = fs.readFileSync('js/core-parts/04-posts-interactions.js', 'utf8');
 const detail = fs.readFileSync('js/core-parts/06-chat-and-nav.js', 'utf8');
 const profile = fs.readFileSync('js/core-parts/03-profile-report-ai.js', 'utf8');
@@ -22,6 +23,7 @@ function likeRuntime() {
     isUserMuted: () => false, showToast: t => toasts.push(t), getPostLikeButtons: () => [button], setPostLikePending() {},
     updatePostLikeUi(_id, on) { button.classList.toggle('liked', on); }, updatePostLikeCount(_id, n) { counts.push(n); },
     updateFeedStats() {}, touchUserSession() {}, scheduleLikeStatRefresh() {}, createLikeBlossom() {} };
+  installFeedMutationRuntime(ctx);
   vm.runInNewContext(between(posts, '            var likeOperations', '            var likeBlossomSequence'), ctx);
   return { ctx, requests, counts, toasts, button };
 }
@@ -31,6 +33,8 @@ test('rapid unlike keeps its optimistic count while the first like response arri
   assert.equal(r.counts.at(-1), 0);
   r.requests[1].body.resolve({ ok: true, liked: false, like_count: 0 }); await task;
   assert.equal(r.button.classList.contains('liked'), false); assert.deepEqual(r.counts, [0, 0]);
+  assert.equal(r.ctx.feedInteractionMutationVersion, 4);
+  assert.equal(r.ctx.feedMapsCache, null);
 });
 test('late like JSON after A→B→A cannot send the queued intent or alter the new UI', async () => {
   const r = likeRuntime(); const old = r.ctx.window.toggleLike(r.button, id); await turn();
@@ -98,6 +102,7 @@ test('late comment deletion cannot mutate a switched account or trigger a full f
   const ctx = { currentUser: 'alice', _authStateEpoch: 1, feedAllComments: [{ id: 'c', post_id: id }], confirm: () => true, AbortController, setTimeout, clearTimeout,
     console: { error() {} }, window: { xtjProtectedFetch: async () => ({ ok: true, json: () => json.promise }), __xtjSchedulePostCardPatch: p => patches.push(p) },
     writeFeedCacheSnapshot: () => writes.push(true), renderFeedFromMemoryState: () => { renders.push(true); return Promise.resolve(); }, loadPersonalRecordSummary() {}, showToast() {} };
+  installFeedMutationRuntime(ctx);
   vm.runInNewContext(between(profile, '            window.deleteFeedComment', '            window.deleteProfileComment'), ctx);
   const task = ctx.window.deleteFeedComment('c', { disabled: false, textContent: '删除' }); await turn(); ctx.currentUser = 'bob'; ctx._authStateEpoch++;
   ctx.feedAllComments = [{ id: 'c', post_id: id, content: 'bob state' }]; json.resolve({ ok: true }); await task;
@@ -108,8 +113,10 @@ test('successful comment deletion patches its card without discarding other draf
   const ctx = { currentUser: 'alice', _authStateEpoch: 1, feedAllComments: [{ id: 'c', post_id: id }], confirm: () => true, AbortController, setTimeout, clearTimeout,
     console, window: { xtjProtectedFetch: async () => ({ ok: true, json: async () => ({ ok: true }) }), __xtjSchedulePostCardPatch: p => patches.push(p) },
     writeFeedCacheSnapshot() {}, renderFeedFromMemoryState: () => { renders.push(true); return Promise.resolve(); }, loadPersonalRecordSummary() {}, showToast() {} };
+  installFeedMutationRuntime(ctx);
   vm.runInNewContext(between(profile, '            window.deleteFeedComment', '            window.deleteProfileComment'), ctx);
   await ctx.window.deleteFeedComment('c', { textContent: '删除' }); assert.deepEqual(patches, [id]); assert.deepEqual(renders, []); assert.equal(ctx.feedAllComments.length, 0);
+  assert.equal(ctx.feedInteractionMutationVersion, 1);
 });
 
 test('a shared device cannot make another account’s like appear as mine or remove its record', () => {

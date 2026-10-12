@@ -2952,6 +2952,13 @@ html[data-xtj-motion="off"] #panelChat .chat-recording-wave i { animation:none; 
 /* All breakpoints keep the gallery toolbar in the same scrolling flow as photos. */
 #panelAi .photo-wall-header { position:relative !important; top:auto !important; }
 
+/* Keep the final photo and paging control above the fixed mobile navigation. */
+@media (max-width: 767.98px) {
+  html:not(.xtj-ios-viewport) #panelAi .photo-wall-container {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
 [data-theme="dark"] #panelPosts .post-filter-select { background-color:#202832 !important; border-color:rgba(255,255,255,.12) !important; color:var(--text-main) !important; }
 
 /* A fixed-size vector chevron avoids gradient layers changing geometry when

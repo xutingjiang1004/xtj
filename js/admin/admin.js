@@ -496,6 +496,13 @@
         return (e && e.name === 'AbortError') || msg.indexOf('abort') >= 0 || msg.indexOf('fetch is aborted') >= 0;
     }
 
+    function adminApiError(message, status, data) {
+        var error = new Error(message); data = data || {};
+        error.status = status || 0; error.code = data.code || (status ? 'http_' + status : 'network_error');
+        error.retryable = typeof data.retryable === 'boolean' ? data.retryable : !status || status === 408 || status === 429 || status >= 500;
+        error.data = data; return error;
+    }
+
     async function apiCall(method, path, body, options) {
         options = options || {};
         var generation = _adminSessionGeneration;
@@ -544,9 +551,9 @@
             clearTimeout(at);
             if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
             if (fetchErr && fetchErr.name === 'AbortError') {
-                throw new Error('请求超时（' + (timeoutMs / 1000) + '秒），请检查网络后重试');
+                throw adminApiError('请求超时（' + (timeoutMs / 1000) + '秒），请稍后重试', 408, { code:'request_timeout', retryable:true });
             }
-            throw new Error('网络连接失败，请检查: ' + (fetchErr.message || '未知错误'));
+            throw adminApiError('网络连接失败，请稍后重试', 0, {code:'network_error',retryable:true});
         }
         // ★ 401 会话清理前置：后端返回非 JSON（HTML 网关错误页）时也能正确清理会话
         if (res.status === 401 && !useUserAccessToken) {
@@ -557,20 +564,20 @@
                 document.getElementById('dashboard').style.display = 'none';
                 document.getElementById('loginWrap').style.display = 'flex';
             } catch (e) {}
-            throw new Error('登录已过期，请重新登录');
+            throw adminApiError('登录已过期，请重新登录',401,{code:'session_expired',retryable:false});
         }
         var data;
         try {
             data = await res.json();
         } catch (jsonErr) {
             if (ac.signal.aborted || generation !== _adminSessionGeneration) throw new DOMException('请求已取消或超时', 'AbortError');
-            data = {};
+            throw adminApiError('服务响应无法解析，请稍后重试',res.status,{code:'invalid_response',retryable:true});
         } finally {
             clearTimeout(at);
             if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
         }
         if (generation !== _adminSessionGeneration) throw new DOMException('会话已改变', 'AbortError');
-        if (!res.ok) throw new Error(data.error || '请求失败 (HTTP ' + res.status + ')');
+        if (!res.ok || (!options.allowBusinessFailure && data.ok === false)) throw adminApiError(data.error || '操作未完成 (HTTP ' + res.status + ')',res.status,data);
         saveSession();
         return data;
     }
@@ -692,9 +699,20 @@
                 await initAdminClient();
                 return true;
             }
-            clearSession();
+            if (res && res.code === 'session_expired') clearSession();
         } catch (e) {
-            clearSession();
+            if (e && e.status === 401) clearSession();
+            else {
+                var message='会话暂时无法验证：'+(e.message || '请稍后重试');
+                showToast(message,'error');
+                var errorEl=document.getElementById('loginErr');
+                if (errorEl) {
+                    errorEl.textContent=message+'。保留登录状态，恢复后可重试。';
+                    var retry=document.createElement('button');retry.type='button';retry.textContent='重试恢复会话';
+                    retry.onclick=function(){retry.disabled=true;tryRestoreAdminSession().finally(function(){retry.disabled=false;});};
+                    errorEl.appendChild(retry);
+                }
+            }
         }
 
         return false;
@@ -932,6 +950,7 @@
             document.removeEventListener(evt, resetActivityTimer);
         });
         allPosts = []; allLikes = []; allComments = []; allUsers = [];
+        (typeof allowedTabs==='undefined'?Object.keys(adminTabDataLoaded):allowedTabs).forEach(function(tab){var panel=document.getElementById('tab'+(tab==='errorlog'?'ErrorLog':tab.charAt(0).toUpperCase()+tab.slice(1)));if(panel){panel.__xtjLastSuccessfulHtml='';panel.__xtjLastSuccessfulNodes=null;}});
         // ★ P2-5：登出时一并清空举报的三态，避免下次登录残留上一次的错误提示
         reportsData = []; reportsLoading = false; reportsLoadError = '';
         allLoginEvents = []; allBehaviorEvents = []; allSecurityAlerts = [];
@@ -1067,6 +1086,7 @@
             allUsers.forEach(function(u) {
                 if (u && u.name && !prevUserByName[u.name]) prevUserByName[u.name] = u;
             });
+            Object.keys(prevUserByName).forEach(function(name){userMap[name]=true;});
             allUsers = Object.keys(userMap).sort().map(function(u) {
                 return prevUserByName[u] || { name: u, info: null };
             });
@@ -1084,6 +1104,9 @@
                 adminTabDataLoaded['audit-logs'] = false;
                 adminTabDataLoaded['error-logs'] = false;
                 adminTabDataLoaded['login-events'] = false;
+                adminTabDataLoaded.logins = false;
+                adminTabDataLoaded.users = false;
+                adminTabDataLoaded['security-alerts'] = false;
                 adminTabDataLoaded.behavior = false;
                 adminTabDataLoaded.photos = false;
                 await loadTabDataIfNeeded(currentTab);
@@ -1094,8 +1117,9 @@
             adminDataLoadedAt = Date.now();
         } catch(e) {
             if (generation === _allDataLoadGeneration && !isFetchAbortError(e)) {
-                showToast('数据加载失败，请刷新重试', 'error');
+                showToast('数据加载失败：'+e.message, 'error');
             }
+            throw e;
         } finally {
             try { clearTimeout(lockTimeout); } catch (e) {}
             if (generation === _allDataLoadGeneration) {
@@ -1163,23 +1187,14 @@
         try {
             if (dataType === 'users') {
                 var userRes = await apiCall('GET', '/admin/users');
-                var userInfoList = userRes.data || [];
-                var userMap = {};
-                allUsers.forEach(function(u) { userMap[u.name] = u; });
-                userInfoList.forEach(function(ui) {
-                    try {
-                        var info = JSON.parse(ui.content || '{}');
-                        var existing = userMap[ui.user_name];
-                        if (existing) {
-                            existing.info = mergeAdminUserInfo(existing.info, info);
-                        } else {
-                            var newUser = { name: ui.user_name, info: mergeAdminUserInfo(null, info) };
-                            allUsers.push(newUser);
-                            userMap[ui.user_name] = newUser;
-                        }
-                    } catch(e) {}
+                if (!userRes || !Array.isArray(userRes.data)) throw new Error('用户目录响应无效');
+                var previousUsers={};allUsers.forEach(function(user){previousUsers[user.name]=user;});
+                var refreshedUsers=userRes.data.map(function(row){
+                    var info=JSON.parse(row.content || '{}');
+                    return {name:row.user_name,info:mergeAdminUserInfo(previousUsers[row.user_name] && previousUsers[row.user_name].info,info)};
                 });
-                adminTabDataLoaded.users = true;
+                allUsers=refreshedUsers;
+                adminTabDataLoaded.users=true;
             } else if (dataType === 'logins' || dataType === 'login-events') {
                 var loginRes = await apiCall('GET', '/admin/login-events');
                 allLoginEvents = (loginRes && loginRes.data) || [];
@@ -1358,6 +1373,14 @@
     var _adminAvatarQueue = [];
     var ADMIN_AVATAR_MAX_CONCURRENCY = 8;
 
+    function adminMediaSource(value) {
+        if (!value) return '';
+        return String(value).indexOf('/api/')===0 ? API_BASE.replace(/\/$/,'')+value : value;
+    }
+    function adminVersionedMedia(value,version) {
+        var url=adminMediaSource(value);return url+(url.indexOf('?')>=0?'&':'?')+'v='+encodeURIComponent(version || 0);
+    }
+
     async function fetchAdminAvatar(userName) {
         if (!userName) return null;
         if (adminAvatarCache[userName]) return adminAvatarCache[userName];
@@ -1374,8 +1397,8 @@
                 if (!resp.ok) return null;
                 var result = await resp.json();
                 if (result.ok && result.avatar_url) {
-                    adminAvatarCache[userName] = result.avatar_url;
-                    return result.avatar_url;
+                    adminAvatarCache[userName] = adminMediaSource(result.avatar_url);
+                    return adminAvatarCache[userName];
                 }
             } catch(e) {}
             return null;
@@ -2059,7 +2082,7 @@
         try {
             var data = await apiCall('GET', '/admin/bans');
             bansData = data.data || [];
-        } catch(e) { bansData = []; }
+        } catch(e) { throw e; }
     }
 
     window.showAddBanModal = function() {
@@ -2143,7 +2166,7 @@
         try {
             var data = await apiCall('GET', '/admin/mutes');
             mutesData = data.data || [];
-        } catch(e) { mutesData = []; }
+        } catch(e) { throw e; }
     }
 
     window.showAddMuteModal = function() {
@@ -2220,7 +2243,7 @@
                 var data = await apiCall('GET', '/admin/blacklist');
                 blacklistData = data.data || [];
             }
-        } catch(e) { blacklistData = []; }
+        } catch(e) { throw e; }
     }
 
     window.showAddBlacklistModal = function() {
@@ -2288,8 +2311,9 @@
     async function loadPhotosAdminData() {
         try {
             var res = await apiCall('GET', '/admin/photos');
-            photosAdminData = res.data || [];
-        } catch(e) { photosAdminData = []; }
+            if (!res || !Array.isArray(res.data)) throw new Error('照片列表响应无效');
+            photosAdminData = res.data;
+        } catch(e) { throw e; }
     }
 
     async function renderPhotosTab(el) {
@@ -2368,14 +2392,16 @@
     window.statsDateEnd = window.statsDateEnd || '';
 
     // 安全设置
-    var securitySettings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true, security_alerts: true };
+    var securitySettings = { record_device: false, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
 
     window.saveSecuritySetting = async function(key, value) {
+        if (key !== 'security_alerts') { showToast('设备和指纹采集已退役','info'); return; }
         var body = {};
         body[key] = value;
         try {
-            await apiCall('POST', '/admin/security-settings', body);
-            securitySettings[key] = value;
+            var saved = await apiCall('POST', '/admin/security-settings', body);
+            securitySettings = saved.settings;
+            renderTab('security');
             showToast('设置已保存', 'success');
         } catch(e) {
             showToast('保存失败', 'error');
@@ -2387,9 +2413,12 @@
         var resultEl = document.getElementById('cleanupResult');
         if (resultEl) resultEl.textContent = '清理中...';
         try {
-            var res = await apiCall('POST', '/admin/cleanup-logs', { types: ['login','security','error'] });
-            if (resultEl) resultEl.textContent = '已清理 ' + (res.total_deleted || 0) + ' 条记录';
-            showToast('清理完成，共删除 ' + (res.total_deleted || 0) + ' 条', 'success');
+            var res = await apiCall('POST', '/admin/cleanup-logs', { types: ['login','security','error'] }, {allowBusinessFailure:true});
+            var succeeded=Number(res.total_succeeded) || 0, failed=Number(res.total_failed) || 0;
+            var detail=Object.keys(res.results || {}).map(function(key){var item=res.results[key];return key+': 成功 '+(item.succeeded || 0)+' / 失败 '+(item.failed || 0);}).join('；');
+            var message='已清理 '+succeeded+' 条记录'+(failed?'，失败 '+failed+' 条':'')+(detail?'（'+detail+'）':'');
+            if(resultEl)resultEl.textContent=message;
+            showToast(message,res.ok===true && !failed?'success':res.partial?'info':'error');
         } catch(e) {
             if (resultEl) resultEl.textContent = '清理失败';
             showToast('清理失败', 'error');
@@ -2406,11 +2435,9 @@
     window.renderSecurityTab = function(el) {
         var alerts = allSecurityAlerts.slice();
         var now = new Date();
-        // G8 修复：created_at 是 UTC（ISO 字符串），比较前必须把"本地今日零点"转为
-        // 等价的 UTC 时刻；旧逻辑直接对本地 Date 调 toISOString()，UTC+8 下会把
-        // "今日"误算成昨天 16:00 起。用 getTimezoneOffset 修正时区偏移。
+        // Local midnight already represents the correct absolute instant.
         var localTodayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        var todayStart = new Date(localTodayMidnight.getTime() - localTodayMidnight.getTimezoneOffset() * 60000).toISOString();
+        var todayStart = localTodayMidnight.toISOString();
 
         var todayAlerts = alerts.filter(function(a) { return a.created_at >= todayStart; });
         var highRiskCount = todayAlerts.filter(function(a) { return a.level === 'high'; }).length;
@@ -2442,14 +2469,8 @@
 
         var h = '';
         // 安全设置卡片
-        h += '<div class="card" style="margin-bottom:12px;"><h3>⚙️ 安全识别开关</h3>';
+        h += '<div class="card" style="margin-bottom:12px;"><h3>⚙️ 安全提醒设置</h3>';
         h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">';
-        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.record_device ? 'checked' : '') + ' onchange="saveSecuritySetting(\'record_device\',this.checked)" /> 基础设备记录</label></div>';
-        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.browser_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'browser_fingerprint\',this.checked)" /> 浏览器指纹 Hash</label></div>';
-        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.canvas_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'canvas_fingerprint\',this.checked)" /> Canvas 指纹 Hash</label></div>';
-        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.webgl_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'webgl_fingerprint\',this.checked)" /> WebGL 指纹 (GPU)</label></div>';
-        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.webrtc_local_ip ? 'checked' : '') + ' onchange="saveSecuritySetting(\'webrtc_local_ip\',this.checked)" /> WebRTC 内网IP检测</label></div>';
-        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.advanced_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'advanced_fingerprint\',this.checked)" /> 增强指纹 (GPU+内网IP)</label></div>';
         h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.security_alerts ? 'checked' : '') + ' onchange="saveSecuritySetting(\'security_alerts\',this.checked)" /> 安全提醒生成</label></div>';
         h += '</div></div>';
 
@@ -2735,12 +2756,18 @@
             '</div>';
     }
 
-    function renderAdminTabLoadError(panel, tab, message) {
+    function renderAdminTabLoadError(panel, tab, failure) {
         if (!panel) return;
         panel.removeAttribute('aria-busy');
-        panel.innerHTML = '<div class="empty-state" role="alert" aria-live="assertive"><div class="icon" aria-hidden="true">!</div>' +
-            '<div class="text">数据加载失败：' + escapeHtml(message || '请重试') + '</div>' +
-            '<button class="btn-sm primary" type="button" onclick="refreshAdminTab(\'' + safeJsStr(tab) + '\')">重新加载</button></div>';
+        var message=failure && failure.message || failure || '请稍后重试';
+        var action=failure && failure.retryable===false ? '<div class="text">请等待服务恢复</div>' : '<button class="btn-sm primary" type="button" onclick="refreshAdminTab(\''+safeJsStr(tab)+'\')">重新加载</button>';
+        var lastData=panel.__xtjLastSuccessfulHtml || '';
+        var lastNodes=panel.__xtjLastSuccessfulNodes;
+        panel.innerHTML='<div class="empty-state" role="alert" aria-live="assertive"><div class="icon" aria-hidden="true">!</div><div class="text">数据加载失败：'+escapeHtml(message)+(lastData?'。下方为最后一次成功获取的数据':'')+'</div>'+action+'</div>';
+        // Reattach the successful nodes so event listeners and entered values
+        // survive a failed refresh. HTML alone cannot preserve those bindings.
+        if(lastNodes && lastNodes.length)lastNodes.forEach(function(node){panel.appendChild(node);});
+        else if(lastData)panel.innerHTML+=lastData;
     }
 
     // 供模板内联 onclick 使用（如统计页「刷新缓存」），必须导出，否则全局作用域 ReferenceError
@@ -2818,6 +2845,7 @@
         var btn = document.getElementById('tab' + getTabDomName(normalized) + 'Btn');
         if (panel) panel.classList.add('active');
         if (btn) btn.classList.add('active');
+        if (panel && panel.innerHTML && panel.innerHTML.indexOf('skeleton-pulse')<0 && panel.innerHTML.indexOf('role="alert"')<0) {panel.__xtjLastSuccessfulHtml=panel.innerHTML;panel.__xtjLastSuccessfulNodes=Array.from(panel.childNodes || []);}
         if (normalized !== 'behavior') renderAdminTabLoading(panel, normalized);
 
         // 视觉切换不能等待提醒写入；后台完成即可。
@@ -2830,7 +2858,7 @@
             window.renderTab(normalized);
         } catch (e) {
             if (switchGeneration !== adminTabSwitchGeneration || currentTab !== normalized) return;
-            renderAdminTabLoadError(panel, normalized, e && e.message);
+            renderAdminTabLoadError(panel, normalized, e);
         }
     };
 
@@ -2904,11 +2932,14 @@
     })();
 
     function buildAdminMediaThumb(post, username, createdAt) {
-        if (!post || !post.media_url) return '-';
-        if (String(post.media_url).indexOf('http') === 0) {
-            return '<img src="' + escapeHtml(post.media_url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\'' + safeJsStr(post.media_url) + '\',\'' + safeJsStr(username || post.user_name || '') + '\',\'' + safeJsStr(createdAt || post.created_at || '') + '\')" title="点击预览大图">';
-        }
-        return '📎';
+        if (!post) return '-';
+        var items=Array.isArray(post.media_items) && post.media_items.length ? post.media_items : [{media_url:post.media_url,media_type:post.media_type}];
+        return items.map(function(item){
+            var url=adminMediaSource(item.media_url);if(!url)return '';
+            if (!/^https?:\/\//.test(url) && url.indexOf('/api/')!==0) return '📎';
+            if (item.media_type==='video' || item.media_type==='audio') return '<a href="'+escapeHtml(url)+'" target="_blank" rel="noopener">查看'+(item.media_type==='video'?'视频':'音频')+'</a>';
+            return '<img src="'+escapeHtml(url)+'" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\''+safeJsStr(url)+'\',\''+safeJsStr(username || post.user_name || '')+'\',\''+safeJsStr(createdAt || post.created_at || '')+'\')" title="点击预览原图">';
+        }).join(' ') || '-';
     }
 
     window.renderPostsTab = async function(el) {
@@ -3037,6 +3068,7 @@
         });
         skeletonHtml += '</div>';
         skeletonHtml += '<div class="card"><h3>用户访问明细</h3><div class="skeleton-pulse" style="height:100px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        if(el.innerHTML && el.innerHTML.indexOf('skeleton-pulse')<0 && el.innerHTML.indexOf('role="alert"')<0) {el.__xtjLastSuccessfulHtml=el.innerHTML;el.__xtjLastSuccessfulNodes=Array.from(el.childNodes || []);}
         el.innerHTML = skeletonHtml;
         try {
             var summary, dailyData;
@@ -3066,6 +3098,7 @@
             if (window.statsDateStart || window.statsDateEnd) h += '<button onclick="window.statsDateStart=\'\';window.statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
             if (API_BASE) h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
             h += '</div></div>';
+            if(summary.truncated)h+='<p role="status">当前统计达到记录上限，部分历史数据未计入；可缩小日期范围查看。</p>';
             h += '<div class="stats-row">';
             h += '<div class="stat-box"><div class="val">' + (summary.total_users || 0) + '</div><div class="lbl">用户数量</div></div>';
             h += '<div class="stat-box"><div class="val">' + (summary.total_posts || 0) + '</div><div class="lbl">帖子数量</div></div>';
@@ -3077,9 +3110,11 @@
             h += '<div id="userVisitStatsContainer"></div>';
             if (summary.cached_at) h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
             el.innerHTML = h;
+            el.__xtjLastSuccessfulHtml=h;
+            el.__xtjLastSuccessfulNodes=Array.from(el.childNodes || []);
             loadUserVisitStats(el);
         } catch(e) {
-            el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
+            renderAdminTabLoadError(el,'stats',e);
         }
     };
 
@@ -4091,7 +4126,7 @@
                 user_name: userName
             });
             if (res && res.ok) {
-                showToast('IP 解析成功：' + (res.location && res.location.text || '已更新'), 'success');
+                showToast('IP 登录记录解析成功：' + (res.location && res.location.text || '已更新')+(res.current_updated===false?'（最新登录已变化，未覆盖当前资料）':''), 'success');
                 if (typeof showUserDetailModal === 'function') {
                     await showUserDetailModal(userName);
                 }
@@ -4134,10 +4169,13 @@
             '<div class="form-group"><label>邮件主题</label><input id="emailSubjectInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件主题" /></div>' +
             '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
             '<button class="btn-sm primary" onclick="emailSend()" id="emailSendBtn">📤 发送邮件</button>' +
+            '<p id="emailPendingJob" hidden>上批发送结果尚未确认。<button type="button" class="btn-sm" onclick="emailQueryPendingJob()">查询本批次结果</button></p>' +
             '<div id="emailResult"></div>' +
             '</div></div>' +
             '<div class="card"><h4>📨 发送记录</h4><div id="emailHistoryWrap"><div class="empty" style="padding:12px;">正在加载...</div></div></div>';
 
+        var pendingEl=document.getElementById('emailPendingJob');
+        if(pendingEl){try{pendingEl.hidden=!sessionStorage.getItem('xtj_email_pending_job');}catch(_){}}
         // 检查是否有草稿
         var draftSubject = null, draftContent = null;
         try {
@@ -4298,8 +4336,28 @@
         emailUpdateCount();
     };
 
+    window.emailQueryPendingJob = async function() {
+        var pending;
+        try{pending=JSON.parse(sessionStorage.getItem('xtj_email_pending_job') || 'null');}catch(_){}
+        if(!pending)return;
+        try{
+            var result=await apiCall('GET','/admin/email-job/'+encodeURIComponent(pending.id),null,{allowBusinessFailure:true});
+            var el=document.getElementById('emailResult');
+            if(el){el.className=result.ok?'send-result success':'send-result error';el.textContent='本批次成功 '+result.sent_count+' 人，失败 '+result.failed_count+' 人，待确认 '+((result.unknown_count || 0)+(result.pending_count || 0))+' 人。';}
+            if(result.status==='completed' && !result.unknown_count){
+                sessionStorage.removeItem('xtj_email_pending_job');
+                var sentEmails=new Set((result.recipients_detail || []).filter(function(r){return r.status==='sent';}).map(function(r){return r.email.toLowerCase();}));
+                document.querySelectorAll('.email-checkbox:checked').forEach(function(cb){if(sentEmails.has(cb.dataset.email.toLowerCase()))cb.checked=false;});
+                document.querySelectorAll('#emailManualList .email-manual-tag').forEach(function(tag){if(sentEmails.has(tag.dataset.email.toLowerCase()))tag.remove();});
+                emailUpdateCount();loadEmailHistory();
+            }
+        }catch(error){showToast(error.message,'error');}
+        var pendingEl=document.getElementById('emailPendingJob');if(pendingEl){try{pendingEl.hidden=!sessionStorage.getItem('xtj_email_pending_job');}catch(_){}}
+    };
+
     window.emailSend = async function() {
         var btn = document.getElementById('emailSendBtn');
+        if (btn && btn.disabled) return;
         var resultEl = document.getElementById('emailResult');
         var subject = document.getElementById('emailSubjectInp').value.trim();
         var content = document.getElementById('emailContentInp').value.trim();
@@ -4319,6 +4377,12 @@
             recipients.push({ email: tag.dataset.email, user_name: tag.dataset.email });
         });
 
+        var signature=JSON.stringify({subject:subject,content:content,recipients:recipients.map(function(r){return r.email.toLowerCase();}).sort()});
+        var pendingRequest=null;
+        try{pendingRequest=JSON.parse(sessionStorage.getItem('xtj_email_pending_job') || 'null');}catch(_){}
+        if(pendingRequest && pendingRequest.signature!==signature){showToast('上批发送结果尚未确认，请先查询原批次结果，避免重复发送','error');await emailQueryPendingJob();return;}
+        var requestId=pendingRequest && pendingRequest.id || crypto.randomUUID();
+
         // 批量发送前二次确认，防止误操作群发
         showConfirm('发送邮件', '确认向 ' + recipients.length + ' 位收件人发送邮件？\n\n主题：' + subject + '\n\n发送后不可撤回。', '确认发送', async function() {
         btn.disabled = true;
@@ -4337,7 +4401,9 @@
         }
 
         try {
-            var data = await apiCall('POST', '/admin/send-email', { recipients: recipients, subject: subject, content: content, content_type: 'text' }, { timeoutMs: 120000 });
+            sessionStorage.setItem('xtj_email_pending_job',JSON.stringify({id:requestId,signature:signature}));
+            var pendingEl=document.getElementById('emailPendingJob');if(pendingEl)pendingEl.hidden=false;
+            var data = await apiCall('POST', '/admin/send-email', { request_id:requestId,recipients: recipients, subject: subject, content: content, content_type: 'text' }, { timeoutMs: 120000,allowBusinessFailure:true });
             // 无论成功/部分失败/全部失败，都尝试保存历史邮箱
             await saveRecipientsHistorySafe();
             if (data.ok) {
@@ -4354,10 +4420,21 @@
                 }
                 resultEl.innerHTML = detailHtml;
                 showToast(msg);
+                sessionStorage.removeItem('xtj_email_pending_job');
                 emailClearDraft();
                 // 发送成功后清空已选收件人（手动+勾选），刷新历史邮箱和发送记录
                 emailClearSelected();
                 loadEmailRecipientHistory();
+                loadEmailHistory();
+            } else if (data.partial || data.unknown_count || data.pending_count) {
+                resultEl.className='send-result error';
+                resultEl.textContent='成功 '+(data.sent_count || 0)+' 人，失败 '+(data.failed_count || 0)+' 人，待确认 '+((data.unknown_count || 0)+(data.pending_count || 0))+' 人。保留草稿；再次点击只查询本批次结果。';
+                if(data.status==='completed' && !data.unknown_count){
+                    var failedEmails=new Set((data.recipients_detail || []).filter(function(r){return r.status==='failed';}).map(function(r){return r.email;}));
+                    checkedCbs.forEach(function(cb){if(!failedEmails.has(cb.dataset.email.toLowerCase()))cb.checked=false;});
+                    manualTags.forEach(function(tag){if(!failedEmails.has(tag.dataset.email.toLowerCase()))tag.remove();});
+                    sessionStorage.removeItem('xtj_email_pending_job');emailUpdateCount();
+                }
                 loadEmailHistory();
             } else if (data.hint) {
                 resultEl.className = 'send-result error';
@@ -4376,6 +4453,7 @@
             } else {
                 resultEl.className = 'send-result error';
                 resultEl.textContent = '发送失败: ' + (data.error || '未知错误');
+                if(data.status==='completed' && !data.unknown_count) sessionStorage.removeItem('xtj_email_pending_job');
                 // 业务错误也刷新历史邮箱
                 loadEmailRecipientHistory();
             }
@@ -4385,13 +4463,15 @@
             try { await loadEmailRecipientHistory(); } catch(_) {}
             resultEl.className = 'send-result error';
             if (isFetchAbortError(e)) {
-                resultEl.textContent = '发送超时：邮件发送耗时较长，请稍后查看发送记录，或减少收件人后重试。';
+                resultEl.textContent = '发送结果尚未确认：请保留当前批次，再次点击查询；不要新建相同批次。';
             } else {
                 resultEl.textContent = '发送异常: ' + e.message;
+                if(e.code==='email_daily_limit' || e.status===400) sessionStorage.removeItem('xtj_email_pending_job');
             }
         } finally {
             btn.disabled = false;
             btn.textContent = '📤 发送邮件';
+            var pendingEl=document.getElementById('emailPendingJob');if(pendingEl){try{pendingEl.hidden=!sessionStorage.getItem('xtj_email_pending_job');}catch(_){}}
         }
         });
     };
@@ -4776,7 +4856,7 @@
                 '<div class="form-group"><label>头像图片</label>',
                 '<div style="display:flex;align-items:center;gap:12px;">',
                 '<div id="aiAvatarPreview" style="width:60px;height:60px;border-radius:50%;overflow:hidden;background:#f0f8ef;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;">',
-                (cfg.avatar_url ? '<img src="' + escapeHtml(cfg.avatar_url) + '?v=' + (cfg.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + safeJsStr(cfg.avatar || '🐱') + '\'">' : escapeHtml(cfg.avatar || '🐱')),
+                (cfg.avatar_url ? '<img src="' + escapeHtml(adminVersionedMedia(cfg.avatar_url,cfg.avatar_version)) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + safeJsStr(cfg.avatar || '🐱') + '\'">' : escapeHtml(cfg.avatar || '🐱')),
                 '</div>',
                 '<input type="file" id="aiAvatarFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />',
                 '<button class="btn" id="aiAvatarUploadBtn" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;">选择图片</button>',
@@ -5175,14 +5255,17 @@
         // ★ M-05/M-06：时间窗状态（由下拉切换）。此前页面无控件，窗口写死在后端默认值，
         //   用户既改不了也看不到自己看的是哪段时间的数据。
         var _win = (window._aiUsageDays === undefined) ? '30' : window._aiUsageDays;
+        var snapshotKey='renderAiAdminUsageSummary|'+String(_win);
+        if(content.__xtjAiSnapshotKey!==snapshotKey){content.__xtjAiSnapshotKey=snapshotKey;content.__xtjLastSuccessfulHtml='';content.__xtjLastSuccessfulNodes=null;}
         try {
             // 加载统计 + 用户列表
             // ★ 关键修复（M-05）：两个接口统一传同一个 days，消除"统计 30 天 / 用户 90 天"的口径分裂
             var _q = '?days=' + encodeURIComponent(_win);
             var [summaryData, usersData] = await Promise.all([
-                apiCall('GET', '/admin/ai-agent/usage-summary' + _q).catch(function() { return null; }),
-                apiCall('GET', '/admin/ai-agent/users' + _q).catch(function() { return null; })
+                apiCall('GET', '/admin/ai-agent/usage-summary' + _q),
+                apiCall('GET', '/admin/ai-agent/users' + _q)
             ]);
+            if (!summaryData || !summaryData.summary || !usersData || !Array.isArray(usersData.users)) throw adminApiError('AI统计响应不完整',503,{code:'invalid_response',retryable:true});
             var summary = summaryData && summaryData.summary ? summaryData.summary : null;
             var users = usersData && usersData.users ? usersData.users : [];
             // ★ 2026-09-13（M-05/M-06 增强）：展示后端真实生效的时间窗，
@@ -5256,6 +5339,8 @@
             content.innerHTML = html.join('\n');
 
             // ★ M-05/M-06：时间窗下拉事件。改变窗口后重新拉数据（同一 days 传给两个接口）。
+            content.__xtjLastSuccessfulHtml=content.innerHTML;
+            content.__xtjLastSuccessfulNodes=Array.from(content.childNodes || []);
             var _daysSel = document.getElementById('aiUsageDaysSel');
             if (_daysSel) {
                 _daysSel.addEventListener('change', function() {
@@ -5277,7 +5362,7 @@
             });
         } catch(e) {
             if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
-            content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
+            renderAdminTabLoadError(content,'ai',e);
         }
     }
 
@@ -5655,6 +5740,8 @@
 
     async function renderAiAdminUserConvs(content) {
         if (!content || !_aiAdminConvUser) return;
+        var snapshotKey='renderAiAdminUserConvs|'+(_aiAdminConvUser || '')+'|'+(_aiAdminConvId || '');
+        if(content.__xtjAiSnapshotKey!==snapshotKey){content.__xtjAiSnapshotKey=snapshotKey;content.__xtjLastSuccessfulHtml='';content.__xtjLastSuccessfulNodes=null;}
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
         var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
         try {
@@ -5666,6 +5753,7 @@
                 '<div class="ai-conv-header"><h3>' + escapeHtml(_aiAdminConvUser) + ' 的会话</h3><div class="conv-stat-line">共 ' + convs.length + ' 个会话</div></div>'
             ];
 
+            if(data.truncated)html.push('<p role="status">仅显示最近5000条消息中的会话，早期统计可能不完整。</p>');
             if (!convs.length) {
                 html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">该用户暂无 AI 聊天记录</div>');
             } else {
@@ -5690,6 +5778,8 @@
 
             if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = html.join('\n');
+            content.__xtjLastSuccessfulHtml=content.innerHTML;
+            content.__xtjLastSuccessfulNodes=Array.from(content.childNodes || []);
 
             // 绑定点击
             content.querySelectorAll('.ai-conversation-item').forEach(function(item) {
@@ -5711,17 +5801,24 @@
             }
         } catch(e) {
             if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
-            content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
+            renderAdminTabLoadError(content,'ai',e);
         }
     }
 
-    async function renderAiAdminConvDetail(content) {
+    async function renderAiAdminConvDetail(content, olderCursor) {
         if (!content || !_aiAdminConvUser || !_aiAdminConvId) return;
+        var snapshotKey='renderAiAdminConvDetail|'+(_aiAdminConvUser || '')+'|'+(_aiAdminConvId || '');
+        if(content.__xtjAiSnapshotKey!==snapshotKey){content.__xtjAiSnapshotKey=snapshotKey;content.__xtjLastSuccessfulHtml='';content.__xtjLastSuccessfulNodes=null;}
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
         var _aiGen = _aiAdminSubTabGeneration; // ★ 代数守卫：捕获当前代数
         try {
-            var data = await apiCall('GET', '/admin/ai-agent/conversation?user_name=' + encodeURIComponent(_aiAdminConvUser) + '&conversation_id=' + encodeURIComponent(_aiAdminConvId));
-            var msgs = data && data.messages ? data.messages : [];
+            var url='/admin/ai-agent/conversation?user_name='+encodeURIComponent(_aiAdminConvUser)+'&conversation_id='+encodeURIComponent(_aiAdminConvId);
+            if(olderCursor)url+='&before_id='+encodeURIComponent(olderCursor.before_id)+'&before_at='+encodeURIComponent(olderCursor.before_at);
+            var data=await apiCall('GET',url);
+            var fresh=data && Array.isArray(data.messages) ? data.messages : [];
+            var msgs=olderCursor ? fresh.concat(content.__xtjAiMessages || []) : fresh;
+            var ids=new Set();msgs=msgs.filter(function(m){if(ids.has(m.id))return false;ids.add(m.id);return true;});
+            content.__xtjAiMessages=msgs;
 
             // 统计
             var totalTokens = 0, totalCost = 0;
@@ -5772,8 +5869,14 @@
             });
 
             html.push('</div>');
+            if(data.next_cursor)html.push('<button type="button" id="aiAdminOlderMessages">加载更早消息</button>');
+            if(data.truncated)html.push('<p role="status">仅显示最近的旧格式消息。</p>');
             if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
             content.innerHTML = html.join('\n');
+            content.__xtjLastSuccessfulHtml=content.innerHTML;
+            content.__xtjLastSuccessfulNodes=Array.from(content.childNodes || []);
+            var olderButton=content.querySelector('#aiAdminOlderMessages');
+            if(olderButton)olderButton.onclick=function(){olderButton.disabled=true;renderAiAdminConvDetail(content,data.next_cursor).finally(function(){if(olderButton.isConnected)olderButton.disabled=false;});};
 
             if (!window._backAiConvList) {
                 window._backAiConvList = function() {
@@ -5783,7 +5886,7 @@
             }
         } catch(e) {
             if (_aiGen !== _aiAdminSubTabGeneration) return; // ★ 过期请求丢弃
-            content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
+            renderAdminTabLoadError(content,'ai',e);
         }
     }
 

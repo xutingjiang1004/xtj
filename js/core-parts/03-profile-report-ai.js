@@ -518,6 +518,7 @@
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
                 } catch (e) {}
+                try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch (e) {}
                 try {
                     // Phase 3-P0-2: 使用统一清理函数，替代分散的内联清理
                     if (typeof cancelCatAiTask === 'function') cancelCatAiTask();
@@ -1380,6 +1381,7 @@ function renderProfileActivityList(kind) {
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
                     
                     if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('DELETE', { id: commentId, post_id: targetPostId });
+                    markFeedInteractionChanged();
                     feedAllComments = (feedAllComments || []).filter(function(item) {
                         return String(item.id) !== String(commentId);
                     });
@@ -1433,6 +1435,7 @@ function renderProfileActivityList(kind) {
                     if (profileActivityState.totals && profileActivityState.totals.comments > 0) {
                         profileActivityState.totals.comments -= 1;
                     }
+                    markFeedInteractionChanged();
                     feedAllComments = (feedAllComments || []).filter(function(item) {
                         return !(item && item.id != null && String(item.id) === String(commentId));
                     });

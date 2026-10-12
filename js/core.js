@@ -29,130 +29,113 @@
               avatar: 'cat_ai',
               username: 'cat_ai'
             };
-            const SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
-            const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
+            var SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
+            var SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
             var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
             var sb;
+            function _isPublicSupabaseConfig(url, key) {
+                try {
+                    var parsed = new URL(url);
+                    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return false;
+                } catch (_) { return false; }
+                return /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(key) || /^sb_publishable_[\w-]+$/.test(key);
+            }
             function initSupabaseClient() {
                 if (sb) return true;
-                if (!window.supabase || typeof window.supabase.createClient !== 'function') return false;
+                if (!_isPublicSupabaseConfig(SUPABASE_URL, SUPABASE_ANON_KEY) || !window.supabase || typeof window.supabase.createClient !== 'function') return false;
                 try {
                     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
                     window.sb = sb;
-                    return true;
+                    return !!sb;
                 } catch (e) {
                     console.error('[XTJ] Supabase client initialization failed:', e && e.message);
                     return false;
                 }
             }
-            // ★ 修复 M6：检查配置完整性，避免静默失败。
-            // 占位符 key（含省略号，如 "eyJhbG...yDDA"）是构建期未注入 env 的标志。
-            // ★ 审计修复：不再显式容忍占位符——真实 anon key 由构建/部署注入，
-            // 本地/CI 遇到占位符一律 console.error 硬警告（fail-fast），
-            // 避免 Supabase 全链路（Realtime/Storage/anon 直连）静默失效掩盖故障。
             var _anonKey = String(SUPABASE_ANON_KEY || '');
-            var _sbConfigOk = !!SUPABASE_URL && !!_anonKey && (
-              /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(_anonKey)
-              || /^sb_publishable_/.test(_anonKey)
-            );
-            // ★ 2026-09-25：把这套「配置有问题」的处理抽成函数，除了首屏调用，
-            //   运行时从后端补到配置后也要能重新跑一遍（见下方 _syncRuntimeConfig）。
+            var _sbConfigOk = _isPublicSupabaseConfig(SUPABASE_URL, _anonKey);
             function _applySupabaseConfigFailure() {
                 _sbConfigOk = false;
                 sb = null;
                 console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
-                console.error('[XTJ] SUPABASE_ANON_KEY 当前为' + (_anonKey ? '占位符/无效 key（需在构建/部署时注入真实 anon key）' : '空值'));
                 document.addEventListener('DOMContentLoaded', function () {
-                    var _feedEl = document.getElementById('feed');
-                    if (_feedEl) _feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">配置错误：Supabase 配置缺失或格式不正确，请检查 config.js</div>';
+                    if (_sbConfigOk) return;
+                    var feedEl = document.getElementById('feed');
+                    if (feedEl) feedEl.innerHTML = '<div class="loading">服务配置暂不可用，请稍后重新加载</div>';
                 });
             }
-            // ★ 2026-09-25 根因修复：前端运行时配置自愈。
-            //   事故背景：构建期未注入 SUPABASE_ANON_KEY 时，scripts/build.js 只打 warning
-            //   照常产出 bundle，线上 config.min.js 里是占位串 "eyJhbG...yDDA"。浏览器拿这串
-            //   垃圾 key 建 client，登录后 Storage 请求带登录 JWT，Supabase 报
-            //   "Invalid Compact JWS"，发图直接失败——这不是 token 问题，是 key 本身是坏的。
-            //   现在改为：首屏若发现 key 无效，异步回源 /api/config/public 取真实 anon key，
-            //   拿到后重建 client 并继续后续初始化。**不阻塞首屏渲染**——回源失败就维持
-            //   现有「走后端上传」的降级路径，功能不中断。
+            // URL and public key are one configuration. Even a valid build-time
+            // key must be checked against the authoritative public runtime pair.
             var _runtimeConfigSynced = false;
+            var _runtimeConfigSyncPromise = null;
             function _syncRuntimeConfig(done) {
-                if (_runtimeConfigSynced) { if (done) done(false); return; }
-                if (typeof fetch !== 'function') { if (done) done(false); return; }
-                var _apiBase = String(API_BASE || window.location.origin || '').replace(/\/$/, '');
-                fetch(_apiBase + '/api/config/public', { method: 'GET', headers: { 'Accept': 'application/json' } })
-                    .then(function (resp) { return resp && resp.ok ? resp.json() : null; })
-                    .then(function (cfg) {
-                        _runtimeConfigSynced = true;
-                        var key = cfg && cfg.supabase_anon_key ? String(cfg.supabase_anon_key) : '';
-                        var url = cfg && cfg.supabase_url ? String(cfg.supabase_url) : '';
-                        if (!key || !url) { if (done) done(false); return; }
-                        if (!(/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(key) || /^sb_publishable_/.test(key))) { if (done) done(false); return; }
-                        // 写回运行时配置，供后续读取 XTJ_CONFIG 的模块（如 ai-agent）复用
-                        try {
-                            window.XTJ_CONFIG.SUPABASE_URL = url;
-                            window.XTJ_CONFIG.SUPABASE_ANON_KEY = key;
-                        } catch (_) {}
-                        // 重建 client：先清掉旧的（可能是用占位 key 建的坏实例或 null）
-                        sb = null;
-                        window.sb = null;
-                        try { if (window.supabase && typeof window.supabase.createClient === 'function') { sb = window.supabase.createClient(url, key); window.sb = sb; } } catch (e) { console.warn('[XTJ] 运行时重建 Supabase client 失败:', e && e.message); sb = null; }
-                        if (sb) {
-                            _sbConfigOk = true;
-                            console.log('[XTJ] 已从服务端补齐 Supabase anon key，客户端已重建');
-                            // Restored login may finish before public config; reconnect after client healing.
-                            if (window.currentUser && typeof window.subscribeToDmBroadcast === 'function') window.subscribeToDmBroadcast();
-                            if (done) done(true);
-                        } else if (done) done(false);
-                    })
-                    .catch(function (e) { if (done) done(false); });
-            }
-            if (!_sbConfigOk) {
-                _applySupabaseConfigFailure();
-                // 异步自愈：SDK 已就绪时立刻重建；未就绪时等 ready 事件后再补。
-                var _healAfterSdkReady = function () {
-                    _syncRuntimeConfig(function (healed) {
-                        if (!healed) return;
-                        if (typeof window.initialLoad === 'function') {
-                            window.initialLoad(true).catch(function (e) {
-                                console.warn('[XTJ] 配置自愈后的数据加载失败:', e && e.message);
-                            });
-                        }
-                    });
-                };
-                if (typeof window.supabase !== 'undefined') {
-                    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _healAfterSdkReady, { once: true });
-                    else _healAfterSdkReady();
-                } else {
-                    window.addEventListener('xtj:supabase-ready', _healAfterSdkReady, { once: true });
+                if (_runtimeConfigSynced) {
+                    if (done) done(false);
+                    return Promise.resolve(false);
                 }
-            } else if (typeof window.supabase !== 'undefined') {
-                initSupabaseClient();
-            } else {
-                console.error('Supabase SDK not loaded');
-                window.addEventListener('xtj:supabase-ready', function () {
-                    if (!initSupabaseClient()) return;
-                    // ★ 2026-09-25 修复：initSupabaseClient 内部只在首次创建时写 window.sb。
-                    //   若此处才补上初始化（SDK 延迟就绪），必须同步 window.sb，
-                    //   否则下面第 80 行的 window.sb = sb（当时为 null）会把它永久钉死为 null，
-                    //   导致后续所有 sb.storage / sb.from 调用抛
-                    //   "null is not an object (evaluating 'sb.storage')" —— 发图失败的根因。
-                    window.sb = sb;
-                    if (typeof window.initialLoad === 'function') {
-                        window.initialLoad(true).catch(function (e) {
-                            console.warn('[XTJ] delayed Supabase feed restore failed:', e && e.message);
+                if (!_runtimeConfigSyncPromise) {
+                    _runtimeConfigSyncPromise = (async function () {
+                        if (typeof fetch !== 'function' || !window.supabase || typeof window.supabase.createClient !== 'function') return false;
+                        var controller = new AbortController();
+                        var timeout = setTimeout(function () { controller.abort(); }, 5000);
+                        try {
+                            var apiBase = String(API_BASE || window.location.origin || '').replace(/\/$/, '');
+                            var resp = await fetch(apiBase + '/api/config/public', { method: 'GET', headers: { 'Accept': 'application/json' }, signal: controller.signal });
+                            if (!resp || !resp.ok) return false;
+                            var cfg = await resp.json();
+                            var key = String(cfg && cfg.supabase_anon_key || '');
+                            var url = String(cfg && cfg.supabase_url || '').replace(/\/$/, '');
+                            if (!_isPublicSupabaseConfig(url, key)) return false;
+                            var changed = !sb || url !== SUPABASE_URL || key !== SUPABASE_ANON_KEY;
+                            if (changed) {
+                                var next = window.supabase.createClient(url, key);
+                                if (!next) return false;
+                                var previous = sb;
+                                sb = next; window.sb = next;
+                                SUPABASE_URL = url; SUPABASE_ANON_KEY = key; _anonKey = key;
+                                window.XTJ_CONFIG.SUPABASE_URL = url;
+                                window.XTJ_CONFIG.SUPABASE_ANON_KEY = key;
+                                if (previous && typeof previous.removeAllChannels === 'function') {
+                                    try { Promise.resolve(previous.removeAllChannels()).catch(function () {}); } catch (_) {}
+                                }
+                            }
+                            _sbConfigOk = true;
+                            _runtimeConfigSynced = true;
+                            if (changed && window.currentUser && typeof window.subscribeToDmBroadcast === 'function') window.subscribeToDmBroadcast();
+                            return changed;
+                        } catch (e) { return false; }
+                        finally { clearTimeout(timeout); }
+                    })().finally(function () { _runtimeConfigSyncPromise = null; });
+                }
+                var work = _runtimeConfigSyncPromise;
+                if (done) work.then(done);
+                return work;
+            }
+            var _runtimeConfigStartupAttempts = 0;
+            function _healAfterSdkReady() {
+                _runtimeConfigStartupAttempts++;
+                _syncRuntimeConfig(function (healed) {
+                    if (healed && typeof window.initialLoad === 'function') {
+                        Promise.resolve(window.initialLoad(true)).catch(function (e) {
+                            console.warn('[XTJ] 配置同步后的数据加载失败:', e && e.message);
                         });
                     }
-                }, { once: true });
-                document.addEventListener('DOMContentLoaded', function() {
-                    var feedEl = document.getElementById('feed');
-                    if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
+                    if (!_runtimeConfigSynced && _runtimeConfigStartupAttempts < 3) {
+                        setTimeout(_healAfterSdkReady, 1000 * _runtimeConfigStartupAttempts);
+                    }
                 });
             }
-            // ★ 2026-09-25 修复：仅在 sb 真正可用时覆盖 window.sb。
-            //   原实现无条件执行 `window.sb = sb`，当 Supabase 尚未就绪（sb 为 null）时
-            //   会把 window.sb 永久置为 null，之后即便 SDK 延迟加载成功也不会再更新，
-            //   造成"发图失败: null is not an object (evaluating 'sb.storage')"。
+            if (!_sbConfigOk) _applySupabaseConfigFailure();
+            if (window.supabase && typeof window.supabase.createClient === 'function') {
+                initSupabaseClient();
+                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _healAfterSdkReady, { once: true });
+                else _healAfterSdkReady();
+            } else {
+                window.addEventListener('xtj:supabase-ready', function () {
+                    initSupabaseClient();
+                    _healAfterSdkReady();
+                }, { once: true });
+            }
             if (sb) window.sb = sb;
 
 
@@ -516,6 +499,7 @@ const ADMIN_NAME = "xxz";
                 var reason = options.reason || 'manual';
                 var tokenForRevocation = getUserToken();
                 try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
+                try { if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests(); } catch (_) {}
                 _lastRefreshUser = '';
                 window.__xtjServerIsAdmin = false;
                 window.__xtjServerIsAdminOwner = '';
@@ -548,9 +532,6 @@ const ADMIN_NAME = "xxz";
                 try { window.safeStorage.remove('xtj_feed_cache_v8'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_feed_cache_v8'); } catch(e) {}
                 // ★ 清理 AI 相关的异步请求和 pending 状态
-                try {
-                    if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
-                } catch(e) {}
                 try {
                     // Phase 3-P0-2: 使用统一清理函数，替代分散的内联清理
                     // 统一清理 timer / AbortController / status DOM / cache 并设置迟到回调防护
@@ -1042,7 +1023,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (!userName) return null;
                 var entry = avatarCache[userName];
                 if (!entry) return null;
-                return entry.url || null;
+                return entry.url && window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(entry.url) : (entry.url || null);
             }
 
             // 内存缓存是否仍处于 TTL 内（调用方不应重新查询后端）。
@@ -1069,7 +1050,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 }
                 avatarCache[userName] = {
                     state: state,
-                    url: resolvedUrl,
+                    url: resolvedUrl && window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(resolvedUrl) : resolvedUrl,
                     fetched_at: now
                 };
             }
@@ -1208,7 +1189,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     if(avatarCache[userName]!==requestedEntry)return getAvatarUrl(userName);
                     if (result.ok && result.avatar_url) {
                         setAvatarCacheEntry(userName, 'has_avatar', result.avatar_url);
-                        return result.avatar_url;
+                        return getAvatarUrl(userName);
                     }
                     if (result.ok && result.avatar_url === null) {
                     // P7: 后端确认无头像 — 清除旧缓存并设置 confirmed_none，TTL 内有效。
@@ -3896,6 +3877,7 @@ function isAdmin() {
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
                 } catch (e) {}
+                try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch (e) {}
                 try {
                     // Phase 3-P0-2: 使用统一清理函数，替代分散的内联清理
                     if (typeof cancelCatAiTask === 'function') cancelCatAiTask();
@@ -4758,6 +4740,7 @@ function renderProfileActivityList(kind) {
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
                     
                     if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('DELETE', { id: commentId, post_id: targetPostId });
+                    markFeedInteractionChanged();
                     feedAllComments = (feedAllComments || []).filter(function(item) {
                         return String(item.id) !== String(commentId);
                     });
@@ -4811,6 +4794,7 @@ function renderProfileActivityList(kind) {
                     if (profileActivityState.totals && profileActivityState.totals.comments > 0) {
                         profileActivityState.totals.comments -= 1;
                     }
+                    markFeedInteractionChanged();
                     feedAllComments = (feedAllComments || []).filter(function(item) {
                         return !(item && item.id != null && String(item.id) === String(commentId));
                     });
@@ -5700,6 +5684,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 feedAllLikes = likes;
+                markFeedInteractionChanged();
                 if (detail && String(detail.id) === postId && Number.isFinite(Number(detail.like_count)) && (eventType === 'DELETE' || shouldIncrement)) detail.like_count = Math.max(0, Number(detail.like_count) + (eventType === 'INSERT' ? 1 : -1));
                 document.querySelectorAll('.post[data-post-id]').forEach(function(card) {
                     if (String(card.getAttribute('data-post-id') || '') !== postId) return;
@@ -5741,6 +5726,7 @@ function renderProfileActivityList(kind) {
             }
 
             function applyPostLikeIntent(postId, liked, sourceButton) {
+                markFeedInteractionChanged();
                 updatePostLikeUi(postId, liked, { post_id: postId, user_name: currentUser, actor_key: deviceId });
                 updateFeedStats();
                 if (liked && sourceButton) createLikeBlossom(sourceButton);
@@ -5763,6 +5749,7 @@ function renderProfileActivityList(kind) {
                             throw new Error(likeResult.error || 'like_state_sync_failed');
                         }
                         operation.confirmed = requestedLiked;
+                        markFeedInteractionChanged();
                         // The response describes the sent intent, while the user may already
                         // have reversed it. Keep the count aligned with the visible intent.
                         var intentDelta = Number(operation.desired) - Number(requestedLiked);
@@ -5989,6 +5976,7 @@ function renderProfileActivityList(kind) {
                 // 如果已经存在，则收起（切换显示状态）
                 var existingBox = postEl.querySelector('.inline-comment-box');
                 if (existingBox) {
+                    existingBox.__xtjClosing = true;
                     existingBox.style.gridTemplateRows = '0fr';
                     existingBox.style.opacity = '0';
                     existingBox.style.marginTop = '0px';
@@ -5998,6 +5986,7 @@ function renderProfileActivityList(kind) {
                 
                 // 移除其他帖子下可能打开的内联输入框，保持界面整洁
                 document.querySelectorAll('.inline-comment-box').forEach(function(el) {
+                    el.__xtjClosing = true;
                     el.style.gridTemplateRows = '0fr';
                     el.style.opacity = '0';
                     el.style.marginTop = '0px';
@@ -6201,11 +6190,16 @@ function renderProfileActivityList(kind) {
                     document.removeEventListener('click', _mentionGlobalClick, true);
                 };
                 window.__xtjMentionCleanups.push(_mentionCleanup);
+                box.__xtjMentionCleanup = _mentionCleanup;
                 if (!window.__xtjRunMentionCleanups) {
-                    window.__xtjRunMentionCleanups = function() {
+                    window.__xtjRunMentionCleanups = function(preserved) {
                         var _arr = window.__xtjMentionCleanups || [];
-                        for (var _ci = 0; _ci < _arr.length; _ci++) { try { _arr[_ci](); } catch (_ce) {} }
-                        window.__xtjMentionCleanups = [];
+                        var retained = [];
+                        for (var _ci = 0; _ci < _arr.length; _ci++) {
+                            if (preserved && preserved.has(_arr[_ci])) retained.push(_arr[_ci]);
+                            else { try { _arr[_ci](); } catch (_ce) {} }
+                        }
+                        window.__xtjMentionCleanups = retained;
                     };
                 }
                 // 帖子关闭或重绘时关闭 + 移除全局监听器
@@ -6260,6 +6254,7 @@ function renderProfileActivityList(kind) {
                         
                         touchUserSession(false);
                         showToast("评论成功");
+                        box.__xtjClosing = true;
                         box.style.gridTemplateRows = '0fr';
                         box.style.opacity = '0';
                         box.style.marginTop = '0px';
@@ -6270,6 +6265,7 @@ function renderProfileActivityList(kind) {
                         var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
                         
                         if (insertedComment) {
+                            markFeedInteractionChanged();
                             feedAllComments = (feedAllComments || []).filter(function(item) {
                                 return !(item && item.id != null && String(item.id) === String(insertedComment.id));
                             }).concat([insertedComment]);
@@ -7368,6 +7364,7 @@ function renderProfileActivityList(kind) {
             let feedScrollObserver = null;
             let feedLoadRequestId = 0;
             let feedStateVersion = 0;
+            let feedInteractionMutationVersion = 0;
             let feedNextOffset = 0;
             let feedNextCursor = null;
             let feedLoadedPages = [];
@@ -7378,6 +7375,7 @@ function renderProfileActivityList(kind) {
 
             window.__xtjResetPostState = function() {
                 feedLoadRequestId++;
+                feedInteractionMutationVersion++;
                 feedPageFetchPending = false;
                 feedLoadMoreFailed = false;
                 feedPage = 1;
@@ -7426,6 +7424,11 @@ function renderProfileActivityList(kind) {
                 feedVisiblePostsCache = null;
                 feedMapsCache = null;
                 return feedStateVersion;
+            }
+
+            function markFeedInteractionChanged() {
+                feedInteractionMutationVersion++;
+                markFeedStateChanged();
             }
 
             function syncPostInfoCache(post) {
@@ -9231,6 +9234,7 @@ function renderProfileActivityList(kind) {
             }
 
             async function fetchFeedPageChunk(offset, requestId, deferRelated) {
+                var relationVersion = feedInteractionMutationVersion;
                 var start = Math.max(0, Number(offset) || 0);
                 var page = Math.floor(start / FEED_PAGE_SIZE);
                 var posts = [];
@@ -9426,7 +9430,8 @@ function renderProfileActivityList(kind) {
                             nextCursor: serverNextCursor,
                             endReached: endReached,
                             postIds: postIds,
-                            relatedPromise: relatedPromise
+                            relatedPromise: relatedPromise,
+                            relationVersion: relationVersion
                         };
                     }
                     var related = await relatedPromise;
@@ -9446,14 +9451,15 @@ function renderProfileActivityList(kind) {
                     nextOffset: computedNextOffset,
                     nextCursor: serverNextCursor,
                     endReached: endReached,
-                    postIds: postIds
+                    postIds: postIds,
+                    relationVersion: relationVersion
                 };
             }
 
             function hydrateDeferredFeedRelations(chunk, requestId) {
                 if (!chunk || !chunk.relatedPromise) return Promise.resolve(false);
                 return chunk.relatedPromise.then(function(related) {
-                    if (requestId !== feedLoadRequestId) return false;
+                    if (requestId !== feedLoadRequestId || chunk.relationVersion !== feedInteractionMutationVersion) return false;
                     if (related[0].error || related[1].error) {
                         throw (related[0].error || related[1].error);
                     }
@@ -9480,10 +9486,11 @@ function renderProfileActivityList(kind) {
                 feedAllPosts = mergeFeedRecords(feedAllPosts, chunk.posts, function(post) {
                     return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
                 }, true);
-                feedAllComments = mergeFeedRecords(feedAllComments, chunk.comments, function(comment) {
+                var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
+                feedAllComments = mergeFeedRecords(feedAllComments, relationsCurrent ? chunk.comments : [], function(comment) {
                     return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
                 });
-                feedAllLikes = mergeFeedRecords(feedAllLikes, chunk.likes, function(like) {
+                feedAllLikes = mergeFeedRecords(feedAllLikes, relationsCurrent ? chunk.likes : [], function(like) {
                     return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
                 });
                 var pagePostIds = chunk.postIds || [];
@@ -9551,6 +9558,7 @@ function renderProfileActivityList(kind) {
                     found = true;
                     return Object.assign({}, post, serverPost);
                 }));
+                if (found) markFeedInteractionChanged();
                 return found;
             }
 
@@ -10384,7 +10392,7 @@ function renderProfileActivityList(kind) {
                 }
             };
 
-            loadFeed = async function(forceRefresh) {
+            loadFeed = async function(forceRefresh, retriedRelations) {
                 // ★ 修复：loadFeed 语义为"重新加载 feed"——所有路径（缓存快路径/
                 //   成功刷新/失败回退）都重置旧式 feedPage 计数器。此前刷新后
                 //   feedPage 残留旧值，加载更多按旧页码计算导致误判 feedEndReached，
@@ -10399,10 +10407,12 @@ function renderProfileActivityList(kind) {
                 var now = Date.now();
                 var requestId = ++feedLoadRequestId;
                 var stateVersionAtRequest = feedStateVersion;
+                var relationVersionAtRequest = feedInteractionMutationVersion;
                 var hadLiveFeed = Array.isArray(feedAllPosts) && feedAllPosts.length > 0;
                 if (forceRefresh) {
                     // Keep the rendered feed intact until a replacement page succeeds.
-                    // A transient empty response must not turn a populated page into an empty one.
+                    // Keep the current view while refreshing; only a failed
+                    // request may preserve data that a successful response removed.
                     feedPageFetchPending = false;
                     // ★ 修复：强制刷新时 early-feed 快照已过期（发帖/删除/置顶后仍复用旧快照
                     // 会拿到旧数据），标记过期并清空，强制走真实 API 重新请求。
@@ -10446,6 +10456,11 @@ function renderProfileActivityList(kind) {
                 try {
                     feedPageFetchPending = true;
                     var chunk = await fetchFeedPageChunk(0, requestId, true);
+                    var pendingLikes = Object.keys(likeOperations).map(function(key) {
+                        var operation = likeOperations[key];
+                        return operation.running ? operation.promise : null;
+                    }).filter(Boolean);
+                    if (pendingLikes.length) await Promise.allSettled(pendingLikes);
                     if (!chunk || requestId !== feedLoadRequestId) {
                         // 竞态取消时不要把 HTML skeleton 永久留住
                         if (feed && !hadLiveFeed) {
@@ -10461,12 +10476,25 @@ function renderProfileActivityList(kind) {
                         }
                         return;
                     }
+                    // A response begun before a like/comment change is obsolete.
+                    // Re-read once after pending likes settle; repeated changes keep
+                    // the current confirmed state instead of starting a retry loop.
+                    if (relationVersionAtRequest !== feedInteractionMutationVersion) {
+                        await renderFeedFromMemoryState();
+                        setupFeedInfiniteScroll();
+                        if (!retriedRelations) return loadFeed(true, true);
+                        return;
+                    }
+                    var recoveredNotice = feed && feed.querySelector('#feedStaleNotice');
+                    if (recoveredNotice) recoveredNotice.remove();
                     // A publish may finish while this request is in flight.
                     // Preserve current state and merge this page when that happens.
                     if (stateVersionAtRequest === feedStateVersion) {
-                        if (!chunk.posts.length && hadLiveFeed) {
-                            console.warn('[feed] ignored empty refresh response while posts are visible');
-                            return;
+                        if (!chunk.posts.length) {
+                            var detailId = String(window.__xtjPostDetailCurrentId || '');
+                            var removedPosts = feedAllPosts.slice();
+                            if (detailId && removedPosts.some(function(post) { return String(post.id) === detailId; })) closeModal('postDetailModal');
+                            if (typeof window.__xtjDropPostMediaCache === 'function') removedPosts.forEach(function(post) { window.__xtjDropPostMediaCache(post.id); });
                         }
                         feedAllPosts = [];
                         feedAllComments = [];
@@ -10514,11 +10542,13 @@ function renderProfileActivityList(kind) {
                 } catch (e) {
                     if (requestId !== feedLoadRequestId) return;
                     console.error(e);
-                    var cacheFallbackShown = false;
+                    var cacheFallbackShown = !!(hadLiveFeed && feed && feed.querySelector('.post'));
                     var quotaLimited = e && e.code === 'egress_quota_exceeded';
                     if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">' + escapeHtml(quotaLimited ? e.message : '加载失败，请刷新重试') + '</div>';
                     try {
-                        var fallbackRaw = window.safeStorage.get(CACHE_KEY);
+                        // The live view contains the newest confirmed mutations.
+                        // Only bootstrap from disk when there is no live feed.
+                        var fallbackRaw = !cacheFallbackShown && window.safeStorage.get(CACHE_KEY);
                         if (fallbackRaw) {
                             var fallbackParsed = JSON.parse(fallbackRaw);
                             if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
@@ -10538,16 +10568,18 @@ function renderProfileActivityList(kind) {
                             staleNotice = document.createElement('div');
                             staleNotice.id = 'feedStaleNotice';
                             staleNotice.className = 'loading feed-load-more-error';
-                            staleNotice.setAttribute('role', quotaLimited ? 'status' : 'button');
-                            if (!quotaLimited) staleNotice.setAttribute('tabindex', '0');
-                            staleNotice.textContent = quotaLimited ? e.message + '。当前显示缓存的帖子记录。' : '网络加载失败，当前显示缓存内容，点击重试';
-                            if (!quotaLimited) staleNotice.addEventListener('click', function() {
-                                var el = document.getElementById('feedStaleNotice');
-                                if (el && el.parentNode) el.parentNode.removeChild(el);
-                                loadFeed(true);
-                            });
                             feed.appendChild(staleNotice);
                         }
+                        staleNotice.setAttribute('role', quotaLimited ? 'status' : 'button');
+                        if (quotaLimited) staleNotice.removeAttribute('tabindex');
+                        else staleNotice.setAttribute('tabindex', '0');
+                        staleNotice.textContent = quotaLimited ? e.message + '。当前显示先前加载的帖子记录。' : '网络加载失败，当前显示先前加载的帖子，点击重试';
+                        staleNotice.onclick = quotaLimited ? null : function() { loadFeed(true); };
+                        staleNotice.onkeydown = quotaLimited ? null : function(event) {
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            loadFeed(true);
+                        };
                     }
                 } finally {
                     if (requestId === feedLoadRequestId) feedPageFetchPending = false;
@@ -10764,8 +10796,18 @@ function renderProfileActivityList(kind) {
             };
 
             renderFeedWithAvatars = function(visiblePosts, comments, likes) {
-                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 var feed = document.getElementById("feed");
+                if (!feed) return;
+                var refreshNotice = feed.querySelector('#feedStaleNotice');
+                var focusedInput = document.activeElement;
+                var selectionStart = focusedInput && focusedInput.selectionStart;
+                var selectionEnd = focusedInput && focusedInput.selectionEnd;
+                var drafts = Array.from(feed.querySelectorAll('.inline-comment-box')).filter(function(box) {
+                    return !box.__xtjClosing;
+                }).map(function(box) {
+                    var card = box.closest('.post[data-post-id]');
+                    return { box: box, postId: card && card.getAttribute('data-post-id') };
+                });
                 var scopedComments = getRenderableComments(comments, visiblePosts);
                 var maps = buildPostMaps(scopedComments, likes);
                 var state = getPostSearchState();
@@ -10777,6 +10819,22 @@ function renderProfileActivityList(kind) {
                 } else {
                     feed.innerHTML = '<div class="loading">' + (hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~') + '</div>';
                 }
+                var preservedCleanups = new Set();
+                drafts.forEach(function(draft) {
+                    var selector = safePostSelector(draft.postId);
+                    var card = selector && feed.querySelector(selector);
+                    if (!card) return;
+                    card.appendChild(draft.box);
+                    if (draft.box.__xtjMentionCleanup) preservedCleanups.add(draft.box.__xtjMentionCleanup);
+                    if (draft.box.contains(focusedInput)) {
+                        try {
+                            focusedInput.focus({ preventScroll: true });
+                            if (selectionStart != null) focusedInput.setSelectionRange(selectionStart, selectionEnd);
+                        } catch (_focusError) {}
+                    }
+                });
+                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups(preservedCleanups);
+                if (refreshNotice) feed.appendChild(refreshNotice);
                 // ★ P1：整段重建后 DOM 从新渲染的前 N 条开始，与内存过滤结果的第 0..N 条对齐，
                 //   此时必须把"已回收条数"归零，否则 loadMoreFeedPosts 的切片起点会多算，
                 //   从中间开始追加 → 帖子重复。
@@ -10785,7 +10843,6 @@ function renderProfileActivityList(kind) {
             };
 
             renderFeed = async function(payload) {
-                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 bindPostFilterEvents();
                 var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);
@@ -11878,6 +11935,7 @@ function renderProfileActivityList(kind) {
                             var affectsLocalFeed = (row && row.post_id != null)
                                 ? (feedAllPosts || []).some(function(p) { return String(p && p.id) === String(row.post_id); })
                                 : true;
+                            if (affectsLocalFeed) markFeedInteractionChanged();
                             if (affectsLocalFeed && typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                             if (affectsLocalFeed && typeof renderProfileActivity === 'function') renderProfileActivity();
                         })

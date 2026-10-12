@@ -156,10 +156,22 @@ const JS_FILES = [
 var CONFIG_ANON_PLACEHOLDER = 'eyJhbG...yDDA';
 function injectConfigSecrets(source, filePath) {
   if (filePath !== 'js/config.js' && filePath !== 'js/core.js') return source;
+  var supabaseUrl = String(process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+  if (supabaseUrl) {
+    var parsed = new URL(supabaseUrl);
+    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) throw new Error('SUPABASE_URL must be an HTTP(S) project URL without credentials');
+    source = source.replace(/(SUPABASE_URL\s*:\s*)(["'])[^"']*\2/g, function (_, prefix) { return prefix + JSON.stringify(supabaseUrl); });
+  }
   var anonKey = process.env.SUPABASE_ANON_KEY || '';
   anonKey = String(anonKey).trim();
   if (!anonKey || anonKey.indexOf('...') !== -1 || anonKey === CONFIG_ANON_PLACEHOLDER) {
     return source;
+  }
+  if (!(/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(anonKey) || /^sb_publishable_[\w-]+$/.test(anonKey))) throw new Error('SUPABASE_ANON_KEY must be a public anon or publishable key');
+  if (anonKey.startsWith('eyJ')) {
+    var claims;
+    try { claims = JSON.parse(Buffer.from(anonKey.split('.')[1], 'base64url').toString('utf8')); } catch (_) {}
+    if (claims && claims.role && claims.role !== 'anon') throw new Error('Refusing to inject a privileged Supabase key into browser assets');
   }
   var occurrences = source.split(CONFIG_ANON_PLACEHOLDER).length - 1;
   if (occurrences > 0) {

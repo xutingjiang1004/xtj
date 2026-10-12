@@ -16,10 +16,11 @@ function createSupabaseAvailability({ fetchImpl = (...args) => fetch(...args), n
     return response;
   }
   function middleware(req, res, next) {
-    if (!/^(?:\/api\/(?:user|profile|photos?|post|feed|uploads)(?:\/|$)|\/health$|\/admin\/login$)/.test(req.path)) return next();
+    if (!/^(?:\/api\/(?:user|profile|photos?|post|feed|uploads|admin)(?:\/|$)|\/health$|\/admin(?:\/|$))/.test(req.path)) return next();
     const json = res.json;
     res.json = function (body) {
-      if (res.statusCode >= 500 && restricted()) {
+      const upstreamLimited = body && /exceed_egress_quota|egress_quota_exceeded/.test(String(body.code || '') + ' ' + String(body.error || ''));
+      if (upstreamLimited || (restricted() && (res.statusCode >= 500 || (res.statusCode === 400 && body && body.code === 'database_error')))) {
         res.status(402).set('X-XTJ-Service-Status', QUOTA_CODE).set('Cache-Control', 'no-store');
         body = Object.assign({}, body, { ok: false, code: QUOTA_CODE, error: QUOTA_MESSAGE, retryable: false });
       }

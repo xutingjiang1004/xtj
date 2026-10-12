@@ -23,130 +23,113 @@
               avatar: 'cat_ai',
               username: 'cat_ai'
             };
-            const SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
-            const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
+            var SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
+            var SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
             var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
             var sb;
+            function _isPublicSupabaseConfig(url, key) {
+                try {
+                    var parsed = new URL(url);
+                    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return false;
+                } catch (_) { return false; }
+                return /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(key) || /^sb_publishable_[\w-]+$/.test(key);
+            }
             function initSupabaseClient() {
                 if (sb) return true;
-                if (!window.supabase || typeof window.supabase.createClient !== 'function') return false;
+                if (!_isPublicSupabaseConfig(SUPABASE_URL, SUPABASE_ANON_KEY) || !window.supabase || typeof window.supabase.createClient !== 'function') return false;
                 try {
                     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
                     window.sb = sb;
-                    return true;
+                    return !!sb;
                 } catch (e) {
                     console.error('[XTJ] Supabase client initialization failed:', e && e.message);
                     return false;
                 }
             }
-            // ★ 修复 M6：检查配置完整性，避免静默失败。
-            // 占位符 key（含省略号，如 "eyJhbG...yDDA"）是构建期未注入 env 的标志。
-            // ★ 审计修复：不再显式容忍占位符——真实 anon key 由构建/部署注入，
-            // 本地/CI 遇到占位符一律 console.error 硬警告（fail-fast），
-            // 避免 Supabase 全链路（Realtime/Storage/anon 直连）静默失效掩盖故障。
             var _anonKey = String(SUPABASE_ANON_KEY || '');
-            var _sbConfigOk = !!SUPABASE_URL && !!_anonKey && (
-              /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(_anonKey)
-              || /^sb_publishable_/.test(_anonKey)
-            );
-            // ★ 2026-09-25：把这套「配置有问题」的处理抽成函数，除了首屏调用，
-            //   运行时从后端补到配置后也要能重新跑一遍（见下方 _syncRuntimeConfig）。
+            var _sbConfigOk = _isPublicSupabaseConfig(SUPABASE_URL, _anonKey);
             function _applySupabaseConfigFailure() {
                 _sbConfigOk = false;
                 sb = null;
                 console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
-                console.error('[XTJ] SUPABASE_ANON_KEY 当前为' + (_anonKey ? '占位符/无效 key（需在构建/部署时注入真实 anon key）' : '空值'));
                 document.addEventListener('DOMContentLoaded', function () {
-                    var _feedEl = document.getElementById('feed');
-                    if (_feedEl) _feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">配置错误：Supabase 配置缺失或格式不正确，请检查 config.js</div>';
+                    if (_sbConfigOk) return;
+                    var feedEl = document.getElementById('feed');
+                    if (feedEl) feedEl.innerHTML = '<div class="loading">服务配置暂不可用，请稍后重新加载</div>';
                 });
             }
-            // ★ 2026-09-25 根因修复：前端运行时配置自愈。
-            //   事故背景：构建期未注入 SUPABASE_ANON_KEY 时，scripts/build.js 只打 warning
-            //   照常产出 bundle，线上 config.min.js 里是占位串 "eyJhbG...yDDA"。浏览器拿这串
-            //   垃圾 key 建 client，登录后 Storage 请求带登录 JWT，Supabase 报
-            //   "Invalid Compact JWS"，发图直接失败——这不是 token 问题，是 key 本身是坏的。
-            //   现在改为：首屏若发现 key 无效，异步回源 /api/config/public 取真实 anon key，
-            //   拿到后重建 client 并继续后续初始化。**不阻塞首屏渲染**——回源失败就维持
-            //   现有「走后端上传」的降级路径，功能不中断。
+            // URL and public key are one configuration. Even a valid build-time
+            // key must be checked against the authoritative public runtime pair.
             var _runtimeConfigSynced = false;
+            var _runtimeConfigSyncPromise = null;
             function _syncRuntimeConfig(done) {
-                if (_runtimeConfigSynced) { if (done) done(false); return; }
-                if (typeof fetch !== 'function') { if (done) done(false); return; }
-                var _apiBase = String(API_BASE || window.location.origin || '').replace(/\/$/, '');
-                fetch(_apiBase + '/api/config/public', { method: 'GET', headers: { 'Accept': 'application/json' } })
-                    .then(function (resp) { return resp && resp.ok ? resp.json() : null; })
-                    .then(function (cfg) {
-                        _runtimeConfigSynced = true;
-                        var key = cfg && cfg.supabase_anon_key ? String(cfg.supabase_anon_key) : '';
-                        var url = cfg && cfg.supabase_url ? String(cfg.supabase_url) : '';
-                        if (!key || !url) { if (done) done(false); return; }
-                        if (!(/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(key) || /^sb_publishable_/.test(key))) { if (done) done(false); return; }
-                        // 写回运行时配置，供后续读取 XTJ_CONFIG 的模块（如 ai-agent）复用
-                        try {
-                            window.XTJ_CONFIG.SUPABASE_URL = url;
-                            window.XTJ_CONFIG.SUPABASE_ANON_KEY = key;
-                        } catch (_) {}
-                        // 重建 client：先清掉旧的（可能是用占位 key 建的坏实例或 null）
-                        sb = null;
-                        window.sb = null;
-                        try { if (window.supabase && typeof window.supabase.createClient === 'function') { sb = window.supabase.createClient(url, key); window.sb = sb; } } catch (e) { console.warn('[XTJ] 运行时重建 Supabase client 失败:', e && e.message); sb = null; }
-                        if (sb) {
-                            _sbConfigOk = true;
-                            console.log('[XTJ] 已从服务端补齐 Supabase anon key，客户端已重建');
-                            // Restored login may finish before public config; reconnect after client healing.
-                            if (window.currentUser && typeof window.subscribeToDmBroadcast === 'function') window.subscribeToDmBroadcast();
-                            if (done) done(true);
-                        } else if (done) done(false);
-                    })
-                    .catch(function (e) { if (done) done(false); });
-            }
-            if (!_sbConfigOk) {
-                _applySupabaseConfigFailure();
-                // 异步自愈：SDK 已就绪时立刻重建；未就绪时等 ready 事件后再补。
-                var _healAfterSdkReady = function () {
-                    _syncRuntimeConfig(function (healed) {
-                        if (!healed) return;
-                        if (typeof window.initialLoad === 'function') {
-                            window.initialLoad(true).catch(function (e) {
-                                console.warn('[XTJ] 配置自愈后的数据加载失败:', e && e.message);
-                            });
-                        }
-                    });
-                };
-                if (typeof window.supabase !== 'undefined') {
-                    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _healAfterSdkReady, { once: true });
-                    else _healAfterSdkReady();
-                } else {
-                    window.addEventListener('xtj:supabase-ready', _healAfterSdkReady, { once: true });
+                if (_runtimeConfigSynced) {
+                    if (done) done(false);
+                    return Promise.resolve(false);
                 }
-            } else if (typeof window.supabase !== 'undefined') {
-                initSupabaseClient();
-            } else {
-                console.error('Supabase SDK not loaded');
-                window.addEventListener('xtj:supabase-ready', function () {
-                    if (!initSupabaseClient()) return;
-                    // ★ 2026-09-25 修复：initSupabaseClient 内部只在首次创建时写 window.sb。
-                    //   若此处才补上初始化（SDK 延迟就绪），必须同步 window.sb，
-                    //   否则下面第 80 行的 window.sb = sb（当时为 null）会把它永久钉死为 null，
-                    //   导致后续所有 sb.storage / sb.from 调用抛
-                    //   "null is not an object (evaluating 'sb.storage')" —— 发图失败的根因。
-                    window.sb = sb;
-                    if (typeof window.initialLoad === 'function') {
-                        window.initialLoad(true).catch(function (e) {
-                            console.warn('[XTJ] delayed Supabase feed restore failed:', e && e.message);
+                if (!_runtimeConfigSyncPromise) {
+                    _runtimeConfigSyncPromise = (async function () {
+                        if (typeof fetch !== 'function' || !window.supabase || typeof window.supabase.createClient !== 'function') return false;
+                        var controller = new AbortController();
+                        var timeout = setTimeout(function () { controller.abort(); }, 5000);
+                        try {
+                            var apiBase = String(API_BASE || window.location.origin || '').replace(/\/$/, '');
+                            var resp = await fetch(apiBase + '/api/config/public', { method: 'GET', headers: { 'Accept': 'application/json' }, signal: controller.signal });
+                            if (!resp || !resp.ok) return false;
+                            var cfg = await resp.json();
+                            var key = String(cfg && cfg.supabase_anon_key || '');
+                            var url = String(cfg && cfg.supabase_url || '').replace(/\/$/, '');
+                            if (!_isPublicSupabaseConfig(url, key)) return false;
+                            var changed = !sb || url !== SUPABASE_URL || key !== SUPABASE_ANON_KEY;
+                            if (changed) {
+                                var next = window.supabase.createClient(url, key);
+                                if (!next) return false;
+                                var previous = sb;
+                                sb = next; window.sb = next;
+                                SUPABASE_URL = url; SUPABASE_ANON_KEY = key; _anonKey = key;
+                                window.XTJ_CONFIG.SUPABASE_URL = url;
+                                window.XTJ_CONFIG.SUPABASE_ANON_KEY = key;
+                                if (previous && typeof previous.removeAllChannels === 'function') {
+                                    try { Promise.resolve(previous.removeAllChannels()).catch(function () {}); } catch (_) {}
+                                }
+                            }
+                            _sbConfigOk = true;
+                            _runtimeConfigSynced = true;
+                            if (changed && window.currentUser && typeof window.subscribeToDmBroadcast === 'function') window.subscribeToDmBroadcast();
+                            return changed;
+                        } catch (e) { return false; }
+                        finally { clearTimeout(timeout); }
+                    })().finally(function () { _runtimeConfigSyncPromise = null; });
+                }
+                var work = _runtimeConfigSyncPromise;
+                if (done) work.then(done);
+                return work;
+            }
+            var _runtimeConfigStartupAttempts = 0;
+            function _healAfterSdkReady() {
+                _runtimeConfigStartupAttempts++;
+                _syncRuntimeConfig(function (healed) {
+                    if (healed && typeof window.initialLoad === 'function') {
+                        Promise.resolve(window.initialLoad(true)).catch(function (e) {
+                            console.warn('[XTJ] 配置同步后的数据加载失败:', e && e.message);
                         });
                     }
-                }, { once: true });
-                document.addEventListener('DOMContentLoaded', function() {
-                    var feedEl = document.getElementById('feed');
-                    if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
+                    if (!_runtimeConfigSynced && _runtimeConfigStartupAttempts < 3) {
+                        setTimeout(_healAfterSdkReady, 1000 * _runtimeConfigStartupAttempts);
+                    }
                 });
             }
-            // ★ 2026-09-25 修复：仅在 sb 真正可用时覆盖 window.sb。
-            //   原实现无条件执行 `window.sb = sb`，当 Supabase 尚未就绪（sb 为 null）时
-            //   会把 window.sb 永久置为 null，之后即便 SDK 延迟加载成功也不会再更新，
-            //   造成"发图失败: null is not an object (evaluating 'sb.storage')"。
+            if (!_sbConfigOk) _applySupabaseConfigFailure();
+            if (window.supabase && typeof window.supabase.createClient === 'function') {
+                initSupabaseClient();
+                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _healAfterSdkReady, { once: true });
+                else _healAfterSdkReady();
+            } else {
+                window.addEventListener('xtj:supabase-ready', function () {
+                    initSupabaseClient();
+                    _healAfterSdkReady();
+                }, { once: true });
+            }
             if (sb) window.sb = sb;
 
 
@@ -510,6 +493,7 @@ const ADMIN_NAME = "xxz";
                 var reason = options.reason || 'manual';
                 var tokenForRevocation = getUserToken();
                 try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
+                try { if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests(); } catch (_) {}
                 _lastRefreshUser = '';
                 window.__xtjServerIsAdmin = false;
                 window.__xtjServerIsAdminOwner = '';
@@ -542,9 +526,6 @@ const ADMIN_NAME = "xxz";
                 try { window.safeStorage.remove('xtj_feed_cache_v8'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_feed_cache_v8'); } catch(e) {}
                 // ★ 清理 AI 相关的异步请求和 pending 状态
-                try {
-                    if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
-                } catch(e) {}
                 try {
                     // Phase 3-P0-2: 使用统一清理函数，替代分散的内联清理
                     // 统一清理 timer / AbortController / status DOM / cache 并设置迟到回调防护
@@ -1036,7 +1017,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (!userName) return null;
                 var entry = avatarCache[userName];
                 if (!entry) return null;
-                return entry.url || null;
+                return entry.url && window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(entry.url) : (entry.url || null);
             }
 
             // 内存缓存是否仍处于 TTL 内（调用方不应重新查询后端）。
@@ -1063,7 +1044,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 }
                 avatarCache[userName] = {
                     state: state,
-                    url: resolvedUrl,
+                    url: resolvedUrl && window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(resolvedUrl) : resolvedUrl,
                     fetched_at: now
                 };
             }
@@ -1202,7 +1183,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     if(avatarCache[userName]!==requestedEntry)return getAvatarUrl(userName);
                     if (result.ok && result.avatar_url) {
                         setAvatarCacheEntry(userName, 'has_avatar', result.avatar_url);
-                        return result.avatar_url;
+                        return getAvatarUrl(userName);
                     }
                     if (result.ok && result.avatar_url === null) {
                     // P7: 后端确认无头像 — 清除旧缓存并设置 confirmed_none，TTL 内有效。

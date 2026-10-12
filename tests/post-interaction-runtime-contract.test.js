@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { installFeedMutationRuntime } = require('./helpers/post-state-runtime-fixture');
 
 const core = fs.readFileSync(path.join(__dirname, '..', 'js', 'core.js'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, '..', 'render-api', 'server.js'), 'utf8');
@@ -133,6 +134,7 @@ test('like failure followed by another tap sends the intended like state', async
     setTimeout,
     clearTimeout
   };
+  installFeedMutationRuntime(runtime);
   vm.runInNewContext(likeRuntime + '\nfunction createLikeBlossom() {}', runtime);
   const postId = '8c1cb02d-74d0-4e45-9e15-17f5cf3aa812';
   await runtime.window.toggleLike(button, postId);

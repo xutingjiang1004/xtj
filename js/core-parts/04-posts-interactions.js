@@ -195,6 +195,7 @@
                     return;
                 }
                 feedAllLikes = likes;
+                markFeedInteractionChanged();
                 if (detail && String(detail.id) === postId && Number.isFinite(Number(detail.like_count)) && (eventType === 'DELETE' || shouldIncrement)) detail.like_count = Math.max(0, Number(detail.like_count) + (eventType === 'INSERT' ? 1 : -1));
                 document.querySelectorAll('.post[data-post-id]').forEach(function(card) {
                     if (String(card.getAttribute('data-post-id') || '') !== postId) return;
@@ -236,6 +237,7 @@
             }
 
             function applyPostLikeIntent(postId, liked, sourceButton) {
+                markFeedInteractionChanged();
                 updatePostLikeUi(postId, liked, { post_id: postId, user_name: currentUser, actor_key: deviceId });
                 updateFeedStats();
                 if (liked && sourceButton) createLikeBlossom(sourceButton);
@@ -258,6 +260,7 @@
                             throw new Error(likeResult.error || 'like_state_sync_failed');
                         }
                         operation.confirmed = requestedLiked;
+                        markFeedInteractionChanged();
                         // The response describes the sent intent, while the user may already
                         // have reversed it. Keep the count aligned with the visible intent.
                         var intentDelta = Number(operation.desired) - Number(requestedLiked);
@@ -484,6 +487,7 @@
                 // 如果已经存在，则收起（切换显示状态）
                 var existingBox = postEl.querySelector('.inline-comment-box');
                 if (existingBox) {
+                    existingBox.__xtjClosing = true;
                     existingBox.style.gridTemplateRows = '0fr';
                     existingBox.style.opacity = '0';
                     existingBox.style.marginTop = '0px';
@@ -493,6 +497,7 @@
                 
                 // 移除其他帖子下可能打开的内联输入框，保持界面整洁
                 document.querySelectorAll('.inline-comment-box').forEach(function(el) {
+                    el.__xtjClosing = true;
                     el.style.gridTemplateRows = '0fr';
                     el.style.opacity = '0';
                     el.style.marginTop = '0px';
@@ -696,11 +701,16 @@
                     document.removeEventListener('click', _mentionGlobalClick, true);
                 };
                 window.__xtjMentionCleanups.push(_mentionCleanup);
+                box.__xtjMentionCleanup = _mentionCleanup;
                 if (!window.__xtjRunMentionCleanups) {
-                    window.__xtjRunMentionCleanups = function() {
+                    window.__xtjRunMentionCleanups = function(preserved) {
                         var _arr = window.__xtjMentionCleanups || [];
-                        for (var _ci = 0; _ci < _arr.length; _ci++) { try { _arr[_ci](); } catch (_ce) {} }
-                        window.__xtjMentionCleanups = [];
+                        var retained = [];
+                        for (var _ci = 0; _ci < _arr.length; _ci++) {
+                            if (preserved && preserved.has(_arr[_ci])) retained.push(_arr[_ci]);
+                            else { try { _arr[_ci](); } catch (_ce) {} }
+                        }
+                        window.__xtjMentionCleanups = retained;
                     };
                 }
                 // 帖子关闭或重绘时关闭 + 移除全局监听器
@@ -755,6 +765,7 @@
                         
                         touchUserSession(false);
                         showToast("评论成功");
+                        box.__xtjClosing = true;
                         box.style.gridTemplateRows = '0fr';
                         box.style.opacity = '0';
                         box.style.marginTop = '0px';
@@ -765,6 +776,7 @@
                         var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
                         
                         if (insertedComment) {
+                            markFeedInteractionChanged();
                             feedAllComments = (feedAllComments || []).filter(function(item) {
                                 return !(item && item.id != null && String(item.id) === String(insertedComment.id));
                             }).concat([insertedComment]);
@@ -1863,6 +1875,7 @@
             let feedScrollObserver = null;
             let feedLoadRequestId = 0;
             let feedStateVersion = 0;
+            let feedInteractionMutationVersion = 0;
             let feedNextOffset = 0;
             let feedNextCursor = null;
             let feedLoadedPages = [];
@@ -1873,6 +1886,7 @@
 
             window.__xtjResetPostState = function() {
                 feedLoadRequestId++;
+                feedInteractionMutationVersion++;
                 feedPageFetchPending = false;
                 feedLoadMoreFailed = false;
                 feedPage = 1;
@@ -1921,6 +1935,11 @@
                 feedVisiblePostsCache = null;
                 feedMapsCache = null;
                 return feedStateVersion;
+            }
+
+            function markFeedInteractionChanged() {
+                feedInteractionMutationVersion++;
+                markFeedStateChanged();
             }
 
             function syncPostInfoCache(post) {
@@ -3726,6 +3745,7 @@
             }
 
             async function fetchFeedPageChunk(offset, requestId, deferRelated) {
+                var relationVersion = feedInteractionMutationVersion;
                 var start = Math.max(0, Number(offset) || 0);
                 var page = Math.floor(start / FEED_PAGE_SIZE);
                 var posts = [];
@@ -3921,7 +3941,8 @@
                             nextCursor: serverNextCursor,
                             endReached: endReached,
                             postIds: postIds,
-                            relatedPromise: relatedPromise
+                            relatedPromise: relatedPromise,
+                            relationVersion: relationVersion
                         };
                     }
                     var related = await relatedPromise;
@@ -3941,14 +3962,15 @@
                     nextOffset: computedNextOffset,
                     nextCursor: serverNextCursor,
                     endReached: endReached,
-                    postIds: postIds
+                    postIds: postIds,
+                    relationVersion: relationVersion
                 };
             }
 
             function hydrateDeferredFeedRelations(chunk, requestId) {
                 if (!chunk || !chunk.relatedPromise) return Promise.resolve(false);
                 return chunk.relatedPromise.then(function(related) {
-                    if (requestId !== feedLoadRequestId) return false;
+                    if (requestId !== feedLoadRequestId || chunk.relationVersion !== feedInteractionMutationVersion) return false;
                     if (related[0].error || related[1].error) {
                         throw (related[0].error || related[1].error);
                     }
@@ -3975,10 +3997,11 @@
                 feedAllPosts = mergeFeedRecords(feedAllPosts, chunk.posts, function(post) {
                     return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
                 }, true);
-                feedAllComments = mergeFeedRecords(feedAllComments, chunk.comments, function(comment) {
+                var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
+                feedAllComments = mergeFeedRecords(feedAllComments, relationsCurrent ? chunk.comments : [], function(comment) {
                     return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
                 });
-                feedAllLikes = mergeFeedRecords(feedAllLikes, chunk.likes, function(like) {
+                feedAllLikes = mergeFeedRecords(feedAllLikes, relationsCurrent ? chunk.likes : [], function(like) {
                     return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
                 });
                 var pagePostIds = chunk.postIds || [];
@@ -4046,6 +4069,7 @@
                     found = true;
                     return Object.assign({}, post, serverPost);
                 }));
+                if (found) markFeedInteractionChanged();
                 return found;
             }
 
@@ -4879,7 +4903,7 @@
                 }
             };
 
-            loadFeed = async function(forceRefresh) {
+            loadFeed = async function(forceRefresh, retriedRelations) {
                 // ★ 修复：loadFeed 语义为"重新加载 feed"——所有路径（缓存快路径/
                 //   成功刷新/失败回退）都重置旧式 feedPage 计数器。此前刷新后
                 //   feedPage 残留旧值，加载更多按旧页码计算导致误判 feedEndReached，
@@ -4894,10 +4918,12 @@
                 var now = Date.now();
                 var requestId = ++feedLoadRequestId;
                 var stateVersionAtRequest = feedStateVersion;
+                var relationVersionAtRequest = feedInteractionMutationVersion;
                 var hadLiveFeed = Array.isArray(feedAllPosts) && feedAllPosts.length > 0;
                 if (forceRefresh) {
                     // Keep the rendered feed intact until a replacement page succeeds.
-                    // A transient empty response must not turn a populated page into an empty one.
+                    // Keep the current view while refreshing; only a failed
+                    // request may preserve data that a successful response removed.
                     feedPageFetchPending = false;
                     // ★ 修复：强制刷新时 early-feed 快照已过期（发帖/删除/置顶后仍复用旧快照
                     // 会拿到旧数据），标记过期并清空，强制走真实 API 重新请求。
@@ -4941,6 +4967,11 @@
                 try {
                     feedPageFetchPending = true;
                     var chunk = await fetchFeedPageChunk(0, requestId, true);
+                    var pendingLikes = Object.keys(likeOperations).map(function(key) {
+                        var operation = likeOperations[key];
+                        return operation.running ? operation.promise : null;
+                    }).filter(Boolean);
+                    if (pendingLikes.length) await Promise.allSettled(pendingLikes);
                     if (!chunk || requestId !== feedLoadRequestId) {
                         // 竞态取消时不要把 HTML skeleton 永久留住
                         if (feed && !hadLiveFeed) {
@@ -4956,12 +4987,25 @@
                         }
                         return;
                     }
+                    // A response begun before a like/comment change is obsolete.
+                    // Re-read once after pending likes settle; repeated changes keep
+                    // the current confirmed state instead of starting a retry loop.
+                    if (relationVersionAtRequest !== feedInteractionMutationVersion) {
+                        await renderFeedFromMemoryState();
+                        setupFeedInfiniteScroll();
+                        if (!retriedRelations) return loadFeed(true, true);
+                        return;
+                    }
+                    var recoveredNotice = feed && feed.querySelector('#feedStaleNotice');
+                    if (recoveredNotice) recoveredNotice.remove();
                     // A publish may finish while this request is in flight.
                     // Preserve current state and merge this page when that happens.
                     if (stateVersionAtRequest === feedStateVersion) {
-                        if (!chunk.posts.length && hadLiveFeed) {
-                            console.warn('[feed] ignored empty refresh response while posts are visible');
-                            return;
+                        if (!chunk.posts.length) {
+                            var detailId = String(window.__xtjPostDetailCurrentId || '');
+                            var removedPosts = feedAllPosts.slice();
+                            if (detailId && removedPosts.some(function(post) { return String(post.id) === detailId; })) closeModal('postDetailModal');
+                            if (typeof window.__xtjDropPostMediaCache === 'function') removedPosts.forEach(function(post) { window.__xtjDropPostMediaCache(post.id); });
                         }
                         feedAllPosts = [];
                         feedAllComments = [];
@@ -5009,11 +5053,13 @@
                 } catch (e) {
                     if (requestId !== feedLoadRequestId) return;
                     console.error(e);
-                    var cacheFallbackShown = false;
+                    var cacheFallbackShown = !!(hadLiveFeed && feed && feed.querySelector('.post'));
                     var quotaLimited = e && e.code === 'egress_quota_exceeded';
                     if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">' + escapeHtml(quotaLimited ? e.message : '加载失败，请刷新重试') + '</div>';
                     try {
-                        var fallbackRaw = window.safeStorage.get(CACHE_KEY);
+                        // The live view contains the newest confirmed mutations.
+                        // Only bootstrap from disk when there is no live feed.
+                        var fallbackRaw = !cacheFallbackShown && window.safeStorage.get(CACHE_KEY);
                         if (fallbackRaw) {
                             var fallbackParsed = JSON.parse(fallbackRaw);
                             if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
@@ -5033,16 +5079,18 @@
                             staleNotice = document.createElement('div');
                             staleNotice.id = 'feedStaleNotice';
                             staleNotice.className = 'loading feed-load-more-error';
-                            staleNotice.setAttribute('role', quotaLimited ? 'status' : 'button');
-                            if (!quotaLimited) staleNotice.setAttribute('tabindex', '0');
-                            staleNotice.textContent = quotaLimited ? e.message + '。当前显示缓存的帖子记录。' : '网络加载失败，当前显示缓存内容，点击重试';
-                            if (!quotaLimited) staleNotice.addEventListener('click', function() {
-                                var el = document.getElementById('feedStaleNotice');
-                                if (el && el.parentNode) el.parentNode.removeChild(el);
-                                loadFeed(true);
-                            });
                             feed.appendChild(staleNotice);
                         }
+                        staleNotice.setAttribute('role', quotaLimited ? 'status' : 'button');
+                        if (quotaLimited) staleNotice.removeAttribute('tabindex');
+                        else staleNotice.setAttribute('tabindex', '0');
+                        staleNotice.textContent = quotaLimited ? e.message + '。当前显示先前加载的帖子记录。' : '网络加载失败，当前显示先前加载的帖子，点击重试';
+                        staleNotice.onclick = quotaLimited ? null : function() { loadFeed(true); };
+                        staleNotice.onkeydown = quotaLimited ? null : function(event) {
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            loadFeed(true);
+                        };
                     }
                 } finally {
                     if (requestId === feedLoadRequestId) feedPageFetchPending = false;
@@ -5259,8 +5307,18 @@
             };
 
             renderFeedWithAvatars = function(visiblePosts, comments, likes) {
-                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 var feed = document.getElementById("feed");
+                if (!feed) return;
+                var refreshNotice = feed.querySelector('#feedStaleNotice');
+                var focusedInput = document.activeElement;
+                var selectionStart = focusedInput && focusedInput.selectionStart;
+                var selectionEnd = focusedInput && focusedInput.selectionEnd;
+                var drafts = Array.from(feed.querySelectorAll('.inline-comment-box')).filter(function(box) {
+                    return !box.__xtjClosing;
+                }).map(function(box) {
+                    var card = box.closest('.post[data-post-id]');
+                    return { box: box, postId: card && card.getAttribute('data-post-id') };
+                });
                 var scopedComments = getRenderableComments(comments, visiblePosts);
                 var maps = buildPostMaps(scopedComments, likes);
                 var state = getPostSearchState();
@@ -5272,6 +5330,22 @@
                 } else {
                     feed.innerHTML = '<div class="loading">' + (hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~') + '</div>';
                 }
+                var preservedCleanups = new Set();
+                drafts.forEach(function(draft) {
+                    var selector = safePostSelector(draft.postId);
+                    var card = selector && feed.querySelector(selector);
+                    if (!card) return;
+                    card.appendChild(draft.box);
+                    if (draft.box.__xtjMentionCleanup) preservedCleanups.add(draft.box.__xtjMentionCleanup);
+                    if (draft.box.contains(focusedInput)) {
+                        try {
+                            focusedInput.focus({ preventScroll: true });
+                            if (selectionStart != null) focusedInput.setSelectionRange(selectionStart, selectionEnd);
+                        } catch (_focusError) {}
+                    }
+                });
+                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups(preservedCleanups);
+                if (refreshNotice) feed.appendChild(refreshNotice);
                 // ★ P1：整段重建后 DOM 从新渲染的前 N 条开始，与内存过滤结果的第 0..N 条对齐，
                 //   此时必须把"已回收条数"归零，否则 loadMoreFeedPosts 的切片起点会多算，
                 //   从中间开始追加 → 帖子重复。
@@ -5280,7 +5354,6 @@
             };
 
             renderFeed = async function(payload) {
-                if (window.__xtjRunMentionCleanups) window.__xtjRunMentionCleanups();
                 bindPostFilterEvents();
                 var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);

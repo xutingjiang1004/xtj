@@ -27,6 +27,7 @@ async function gotoApp(page, options = {}) {
     try { sessionStorage.clear(); } catch (_) {}
   });
   if (options.userName) {
+    await page.route('**/api/user/refresh', route => route.fulfill({json:{ok:true,user_name:options.userName,token:'test-only-session-token'}}));
     await page.addInitScript((userName) => {
       try { localStorage.setItem('xtj_user', userName); } catch (_) {}
     }, options.userName);
@@ -165,7 +166,8 @@ test.describe('release validation', () => {
       isMobile: true
     });
     const page = await context.newPage();
-    await gotoApp(page);
+    await gotoApp(page, { userName: 'preview-fixture' });
+    await page.waitForFunction(() => window.currentUser === 'preview-fixture' && window._xtjAuthState === 'authenticated');
     await page.evaluate((src) => {
       window.openPhotoPreview(0, [{ imageUrl: src, username: 'u', timestamp: Date.now() }]);
     }, PNG_DATA_URL);
