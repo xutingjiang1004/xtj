@@ -28,6 +28,11 @@
   var activePhotoLoadController = null;
   var loadMoreController = null;
   var loadMorePromise = null;
+  var photoPaginationRevision = 0;
+  var photoPaginationDirty = false;
+  var photoPageBoundary = null;
+  var photoPageSeenIds = new Set();
+  var photoSnapshotKnownIds = new Set();
   // P5: 分页绑定状态 — 按 page 跟踪 requestId、AbortController、generation
   var _fetchPhotoPageState = {};
   var pendingDeletedPhotoIds = new Set();
@@ -41,9 +46,16 @@
     if (loadMoreController) loadMoreController.abort();
     abortPhotoPageRequests();
     unsubscribePhotoWallRealtime();
+    pendingDeletedPhotoIds.clear();
+    photoPageBoundary = null;
+    photoPageSeenIds.clear();
+    photoSnapshotKnownIds.clear();
+    photoPaginationRevision++;
+    photoPaginationDirty = false;
     loading = false; firstPageLoaded = false; page = 0; more = true;
     lastSuccessfulLoadedAt = 0; loadMorePromise = null;
     window.photoWallData = []; window.pwCurrentSortedPhotos = [];
+    window.photoWallLoadError = null;
     window.photoPreviewCurrent = null; window.__xtjPreviewExplicitPhotos = [];
     try { window.safeStorage.remove(CACHE_KEY); window.safeStorage.remove(CACHE_OWNER_KEY); } catch (_) {}
     if (window.forceClosePhotoPreview) window.forceClosePhotoPreview();
@@ -334,7 +346,13 @@
       var result = await resp.json();
       // 响应体解析期间也可能发生 force refresh，旧结果不得再返回给调用方。
       if (!isCurrentRequest()) throw createPhotoAbortError();
-      if (!resp.ok || !result.ok) throw new Error(result.error || 'fetch failed');
+      if (typeof window.xtjObserveServiceResponse === 'function') window.xtjObserveServiceResponse(resp, result);
+      if (!resp.ok || !result.ok) {
+        var error = new Error(result.error || '照片墙加载失败，请稍后重试');
+        error.status = resp.status; error.code = result.code || '';
+        error.retryable = result.retryable !== false; error.data = result;
+        throw error;
+      }
       return result.data || [];
     } finally {
       clearTimeout(timer);
@@ -391,6 +409,10 @@
       }
 
       // 首次请求 25s，已有缓存时后台刷新 10s
+      var knownIdsAtRequest = new Set((window.photoWallData || []).filter(Boolean).map(function(item){
+        return String(item.cloudId || item.id);
+      }));
+      var paginationRevisionAtRequest = photoPaginationRevision;
       var requestId = 'load_' + photoLoadGeneration + '_' + Date.now();
       var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000, signal, requestId, currentGen);
       if (currentGen !== photoLoadGeneration) return window.photoWallData; // Aborted by newer request
@@ -398,25 +420,7 @@
       firstPageLoaded = true;
       page = 0;
       more = rows.length >= PAGE_SIZE;
-      if (!more && local.length) {
-        // P4: 云端成功返回空数组 — 用户已在云端删除所有照片。
-        // 必须清除旧本地缓存，否则已删除的照片会持续显示在用户设备上。
-        // 之前这里保留旧缓存是错误的，导致数据永久不一致。
-        if (rows.length === 0) {
-          window.photoWallData = [];
-          saveLocalPhotoWallData();
-        } else {
-          var cloudIds = new Set(rows.map(function(row){ return row && row.id != null ? String(row.id) : ''; }).filter(Boolean));
-          // ★ 过滤本地缓存：只保留云端存在的 ID
-          local = local.filter(function(item){
-            if (!item) return false;
-            var key = item.cloudId != null ? String(item.cloudId) : String(item.id || '');
-            return !key || cloudIds.has(key);
-          });
-          // ★ 使用过滤后的本地缓存参与合并，防止已删除照片被复活
-          window.photoWallData = local;
-        }
-      }
+      photoPaginationDirty = paginationRevisionAtRequest !== photoPaginationRevision;
       // 用 normalizePhotoWallRow 同口径采集"已删除"墓碑（is_deleted / __deleted__ / __pw_del__），
       // 否则 is_deleted 软删行的 id 不会进入墓碑集合，导致它从本地缓存被合并"复活"。
       var deletedRows = rows.filter(function(row){ return !!(row && row.id != null && normalizePhotoWallRow(row).deleted); });
@@ -429,12 +433,32 @@
         var identity = item.cloudId != null ? String(item.cloudId) : String(item.id || '');
         return tombstoneIds.indexOf(identity) < 0 && tombstoneIds.indexOf(String(item.id || '')) < 0 && !isDeletedOrPendingPhoto(item);
       });
-      // 合并云端和本地，按 id/cloudId 去重
-      window.photoWallData = mergePhotoLists(cloud, window.photoWallData);
+      // Reconcile memory even if metadata could not be written to storage.
+      // A complete page is authoritative for old rows, but not for uploads
+      // confirmed after this request started. For a full first page, keep
+      // older pages and timestamp ties beyond its unambiguous coverage.
+      var currentPhotos = (window.photoWallData || []).filter(Boolean);
+      var cloudIds = new Set(rows.filter(Boolean).map(function(row){ return String(row.id); }));
+      var visibleCloudIds = new Set(cloud.map(function(item){ return String(item.cloudId || item.id); }));
+      var dates = rows.map(function(row){ return Date.parse(row && row.created_at || ''); });
+      var boundary = more && dates.every(Number.isFinite) ? Math.min.apply(Math, dates) : null;
+      photoPageBoundary = boundary;
+      photoPageSeenIds = new Set(visibleCloudIds);
+      photoSnapshotKnownIds = knownIdsAtRequest;
+      var retained = currentPhotos.filter(function(item){
+        var key = String(item.cloudId || item.id);
+        if (!knownIdsAtRequest.has(key)) return true;
+        if (!more) return false;
+        if (cloudIds.has(key)) return visibleCloudIds.has(key);
+        return boundary == null || !Number.isFinite(item.timestamp) || item.timestamp <= boundary;
+      });
+      window.photoWallData = mergePhotoLists(cloud, retained);
+      closeRemovedPhotoPreview(knownIdsAtRequest);
       saveLocalPhotoWallData();
       // P4: 仅成功时更新 lastSuccessfulLoadedAt
       lastSuccessfulLoadedAt = Date.now();
       window.photoWallDataLoadedAt = lastSuccessfulLoadedAt;
+      window.photoWallLoadError = null;
       setPhotoWallSyncStatus('synced', '已同步');
       subscribePhotoWallRealtime();
       // 无闪烁刷新：云端数据加载完成后更新UI
@@ -458,7 +482,8 @@
       lastFailureAt = Date.now();
       window.photoWallDataLoadedAt = lastFailureAt;
       if (!isAbort) {
-        setPhotoWallSyncStatus('error', '同步失败');
+        window.photoWallLoadError = err;
+        setPhotoWallSyncStatus('error', err.retryable === false ? (err.message || '服务暂不可用，请等待恢复') : '同步失败');
       }
       // ★ 修复：断网且无缓存时，UI 会停留在「还没有照片」（空态），
       //   而不是「同步失败 + 重新加载」。原因是 render.js 的空态分支靠
@@ -492,7 +517,25 @@
     if (loadMorePromise) return loadMorePromise;
     if (loading || !firstPageLoaded || !more) return Promise.resolve([]);
 
+    // A deletion changes every subsequent offset. If its background refresh
+    // failed, repair page zero before continuing rather than skipping a row.
+    if (photoPaginationDirty) {
+      var owner = String(window.currentUser || ''), epoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+      var repairPromise;
+      repairPromise = loadPhotoWallData(true).then(function(){
+        if (owner !== String(window.currentUser || '') || epoch !== (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0)) throw createPhotoAbortError();
+        if (photoPaginationDirty) throw window.photoWallLoadError || createPhotoAbortError();
+        if (loadMorePromise === repairPromise) loadMorePromise = null;
+        return loadMorePhotos();
+      }).finally(function(){ if (loadMorePromise === repairPromise) loadMorePromise = null; });
+      loadMorePromise = repairPromise;
+      return repairPromise;
+    }
+
     var requestGeneration = photoLoadGeneration;
+    var paginationRevision = photoPaginationRevision;
+    var upperBoundary = photoPageBoundary;
+    var knownIdsAtRequest = new Set((window.photoWallData || []).filter(Boolean).map(function(item){ return String(item.cloudId || item.id); }));
     var nextPage = page + 1;
     var controller = new AbortController();
     var requestId = 'more_' + nextPage + '_' + Date.now();
@@ -501,18 +544,39 @@
     requestPromise = (async function(){
       try {
         var rows = await fetchPhotoPage(nextPage, 10000, controller.signal, requestId, requestGeneration);
-        if (requestGeneration !== photoLoadGeneration || controller.signal.aborted) {
+        if (requestGeneration !== photoLoadGeneration || paginationRevision !== photoPaginationRevision || controller.signal.aborted) {
           throw createPhotoAbortError();
         }
-        var items = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl; });
+        rows.filter(function(row){ return row && row.id != null && normalizePhotoWallRow(row).deleted; }).forEach(function(row){ addDeletedPhotoId(row.id); });
+        var items = rows.map(normalizePhotoWallRow).filter(function(item){ return item && item.imageUrl && !isDeletedOrPendingPhoto(item); });
         // page、more 和列表只在请求成功且仍属于当前 generation 时一起提交。
         if (requestGeneration !== photoLoadGeneration || controller.signal.aborted) {
           throw createPhotoAbortError();
         }
-        window.photoWallData = mergePhotoLists(window.photoWallData.concat(items), []);
+        var nextMore = rows.length >= PAGE_SIZE;
+        var rawIds = new Set(rows.filter(Boolean).map(function(row){ return String(row.id); }));
+        var visibleIds = new Set(items.map(function(item){ return String(item.cloudId || item.id); }));
+        var dates = rows.map(function(row){ return Date.parse(row && row.created_at || ''); });
+        var lowerBoundary = dates.length && dates.every(Number.isFinite) ? Math.min.apply(Math, dates) : null;
+        rawIds.forEach(function(key){ photoPageSeenIds.delete(key); });
+        visibleIds.forEach(function(key){ photoPageSeenIds.add(key); });
+        var currentPhotos = (window.photoWallData || []).filter(Boolean);
+        var retained = currentPhotos.filter(function(item){
+          var key = String(item.cloudId || item.id);
+          if (!knownIdsAtRequest.has(key)) return true;
+          if (rawIds.has(key)) return visibleIds.has(key);
+          if (photoPageSeenIds.has(key) || !photoSnapshotKnownIds.has(key)) return true;
+          if (upperBoundary == null || !Number.isFinite(item.timestamp) || item.timestamp > upperBoundary) return true;
+          return nextMore && (lowerBoundary == null || item.timestamp <= lowerBoundary);
+        });
+        var pruned = retained.length < currentPhotos.length;
+        window.photoWallData = mergePhotoLists(items, retained);
+        photoPageBoundary = lowerBoundary;
+        closeRemovedPhotoPreview(knownIdsAtRequest);
         page = nextPage;
-        more = rows.length >= PAGE_SIZE;
+        more = nextMore;
         saveLocalPhotoWallData();
+        if (pruned && window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload({ preserveBatch: true });
         // P4: 仅成功时更新 lastSuccessfulLoadedAt
         lastSuccessfulLoadedAt = Date.now();
         window.photoWallDataLoadedAt = lastSuccessfulLoadedAt;
@@ -528,6 +592,14 @@
     })();
     loadMorePromise = requestPromise;
     return requestPromise;
+  }
+
+  function closeRemovedPhotoPreview(knownIds){
+    var preview = window.photoPreviewCurrent;
+    if (!preview || !preview.cloudId || !knownIds.has(String(preview.cloudId))) return;
+    if ((window.photoWallData || []).some(function(item){ return item && String(item.cloudId || item.id) === String(preview.cloudId); })) return;
+    if (window.forceClosePhotoPreview) window.forceClosePhotoPreview();
+    else if (window.closePhotoPreview) window.closePhotoPreview();
   }
 
   function hasMorePhotos(){ return !!more; }
@@ -547,6 +619,11 @@
     window.photoWallData = window.photoWallData.filter(function(item){
       return String(item.id) !== key && String(item.cloudId || '') !== key;
     });
+    if (before !== window.photoWallData.length) {
+      photoPaginationRevision++;
+      photoPaginationDirty = true;
+      if (loadMoreController) loadMoreController.abort();
+    }
     saveLocalPhotoWallData();
     // P4: 本地删除是成功操作，更新 lastSuccessfulLoadedAt 保持数据新鲜度
     lastSuccessfulLoadedAt = Date.now();

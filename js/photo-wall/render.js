@@ -189,7 +189,7 @@
       var delay = Math.min(index * 30, 300);
       html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + esc(String(p.id)) + '" style="animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)">';
       var recent=recentPhotos.get(String(p.id));
-      html += recent ? '<img src="' + safeUrl(recent.url) + '" alt="photo" class="pw-blur-done" data-recent-upload-id="' + esc(String(p.id)) + '" loading="eager" decoding="async">' : '<img src="' + FALLBACK_IMG + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
+      html += recent ? '<img src="' + safeUrl(recent.url) + '" alt="photo" class="pw-blur-done" data-recent-upload-id="' + esc(String(p.id)) + '" loading="eager" decoding="async">' : '<img src="' + esc(FALLBACK_IMG) + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
       html += '<div class="pw-item-info"><div class="pw-item-name">' + esc(username) + '</div><div class="pw-item-meta"><span>' + esc(time) + '</span><span>浏览 <b class="pw-view-count">' + esc(p.views || 0) + '</b></span></div></div></div>';
     }
     return html;
@@ -526,7 +526,7 @@
         resetSentinelText(document.getElementById('photoGrid'), stillHasMore ? '当前相册暂无更多照片，点击继续查找' : '没有更多照片', stillHasMore);
       }
     } catch (err) {
-      resetSentinelText(document.getElementById('photoGrid'), '加载失败，点击重试', true);
+      resetSentinelText(document.getElementById('photoGrid'), err && err.retryable === false ? err.message : '加载失败，点击重试', !(err && err.retryable === false));
     } finally {
       loadingMore = false;
     }
@@ -565,15 +565,6 @@
       sentinel.onclick(event);
     };
 
-    // The sentinel is a focusable button for keyboard and no-IntersectionObserver
-    // users; keep Enter/Space behavior in sync with its current click action.
-    sentinel.onkeydown = function(event){
-      if (!event || (event.key !== 'Enter' && event.key !== ' ')) return;
-      if (typeof sentinel.onclick !== 'function') return;
-      if (event.preventDefault) event.preventDefault();
-      sentinel.onclick(event);
-    };
-
     function doLoadMore(){
       if (loadingMore) return;
       var sortedBefore = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
@@ -605,24 +596,31 @@
             if (!hasGroupPhoto) {
               // 新页没有当前分组的照片：不销毁哨兵，提示后等待用户继续滚动/点击，
               // 若服务端还有更多（hasMorePhotos 仍为 true），后续加载仍可能带出本组照片。
-              setSentinelText('当前分组暂无更多照片', true);
+              var hasNextGroupPage = !!(window.hasMorePhotos && window.hasMorePhotos());
+              setSentinelText(hasNextGroupPage ? '当前页没有本组照片，点击继续加载' : '当前分组暂无更多照片', hasNextGroupPage);
+              if (loadMoreObserver) loadMoreObserver.disconnect();
               return;
             }
           }
           // P6: 增量追加新卡片（不动旧节点/不重放 stagger/不重建观察器）
           appendPhotoWallMore();
         } else {
-          setSentinelText('暂无更多', false);
+          var hasNextPage = !!(window.hasMorePhotos && window.hasMorePhotos());
+          setSentinelText(hasNextPage ? '当前页没有可显示照片，点击继续加载' : '暂无更多', hasNextPage);
+          if (loadMoreObserver) loadMoreObserver.disconnect();
+          if (!hasNextPage && !(window.photoWallData || []).length) renderSorted([], true);
         }
       }).catch(function(err){
         var isAbort = !!(err && (err.name === 'AbortError' || /abort/i.test(String(err && err.code || '')) || /abort/i.test(String(err && err.message || ''))));
         if (isAbort) {
           // 被刷新/视图切换/新请求取代：静默恢复，不误报"加载失败"
-          setSentinelText('加载更多...', false);
+          var canContinue = !!(window.hasMorePhotos && window.hasMorePhotos());
+          setSentinelText(canContinue ? '点击继续加载' : '暂无更多', canContinue);
         } else {
           // ★ 修复：真实失败给出可点击重试入口（此前只有一行"加载失败"文案，
           // 且哨兵若仍在视口 IO 不会再次触发，用户无法恢复加载）
-          setSentinelText('加载失败，点击重试', true);
+          setSentinelText(err && err.retryable === false ? err.message : '加载失败，点击重试', !(err && err.retryable === false));
+          if (err && err.retryable === false && loadMoreObserver) loadMoreObserver.disconnect();
         }
       }).finally(function(){
         loadingMore = false;
@@ -813,6 +811,13 @@
     renderSorted(sortedAll, true);
   }
 
+  function photoWallErrorHtml(error) {
+    var err = error || window.photoWallLoadError;
+    var message = err && err.message || '照片墙加载失败，请稍后重试';
+    return '<div class="photo-wall-empty"><div>' + esc(message) + '</div>' +
+      (err && err.retryable === false ? '' : '<button type="button" onclick="window.initPhotoWall(true)">重新加载</button>') + '</div>';
+  }
+
   function renderSorted(photos, preserveBatch){
     if (!window.currentUser) {
       window.pwCurrentSortedPhotos = [];
@@ -826,21 +831,28 @@
     var grid = document.getElementById('photoGrid');
     if (!grid) return;
     if (!preserveBatch) photoBatchStart = 0;
+    else photoBatchStart = Math.min(photoBatchStart, Math.max(0, Math.floor((currentPhotoWallList(photos).length - 1) / MAX_DOM_PHOTOS) * MAX_DOM_PHOTOS));
     // ★ 修复 C3：每次重渲染复位 loadingMore，避免分组切换/返回相册后
     // 旧哨兵的 loadingMore=true 残留，导致新分组哨兵首次 intersect 不触发加载。
     loadingMore = false;
     var toggle = document.getElementById('pwAlbumToggle');
     if (toggle) {toggle.classList.toggle('active', !!window.pwAlbumView);toggle.setAttribute('aria-pressed',String(!!window.pwAlbumView));}
     grid.classList.toggle('pw-album-overview',!!window.pwAlbumView&&!window.pwAlbumGroupKey);
+    if (!photos.length && window.photoWallLoadError) {
+      window.pwCurrentSortedPhotos = [];
+      grid.innerHTML = photoWallErrorHtml();
+      return;
+    }
 
     if (!window.pwAlbumView) {
       window.pwCurrentSortedPhotos = photos.slice();
       if (!photos.length) {
         var syncWrap = document.getElementById('pwSyncStatus') || document.getElementById('photoSyncStatus');
         var isError = syncWrap && syncWrap.classList.contains('is-error');
-        grid.innerHTML = isError
-          ? '<div class="photo-wall-empty"><div>照片墙加载失败，请重试</div><button type="button" onclick="window.initPhotoWall(true)">重新加载</button></div>'
-          : emptyHtml();
+        var hasNextPage = !!(window.hasMorePhotos && window.hasMorePhotos());
+        grid.innerHTML = isError ? photoWallErrorHtml() : hasNextPage
+          ? '<div class="photo-wall-empty">当前页没有可显示照片，可继续加载</div>' : emptyHtml();
+        if (!isError && hasNextPage) installLoadMoreSentinel(grid);
         return;
       }
       grid.innerHTML = photoCardHtml(photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS), photoBatchStart) + photoBatchNavHtml(photos);
@@ -916,7 +928,7 @@
       } catch (err) {
         console.error('[PhotoWall] render failed', err);
         if (currentGen === _pwRenderGeneration) {
-          grid.innerHTML = '<div class="photo-wall-empty"><div>照片墙加载失败，请刷新重试</div><button type="button" onclick="window.initPhotoWall(true)">重新加载</button></div>';
+          grid.innerHTML = photoWallErrorHtml(err);
         }
       }
       rendering = false;
@@ -930,11 +942,11 @@
     return _renderPromise;
   }
 
-  function renderPhotoWallWithoutReload(){
+  function renderPhotoWallWithoutReload(options){
     if(window.preloadPhotoStoryAvatars)window.preloadPhotoStoryAvatars(window.photoWallData||[]);
     if(window.preloadPhotoStorySocial)window.preloadPhotoStorySocial(window.photoWallData||[]);
     var key = window.pwSortKey || 'date_desc';
-    renderSorted(sortPhotoWallData(window.photoWallData || [], key));
+    renderSorted(sortPhotoWallData(window.photoWallData || [], key), !!(options && options.preserveBatch));
   }
 
   window.pwAlbumView = window.pwAlbumView || false;

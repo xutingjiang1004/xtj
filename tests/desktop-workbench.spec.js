@@ -77,12 +77,12 @@ test.describe('desktop workbench contract', () => {
     }
   });
 
-  test('desktop AI stays inside the workbench content beside the sidebar', async ({ browser }) => {
-    for (const viewport of [
+  for (const viewport of [
       { width: 768, height: 1024 },
       { width: 1024, height: 768 },
       { width: 1440, height: 900 }
     ]) {
+    test(`desktop AI stays inside the workbench content beside the sidebar at ${viewport.width}x${viewport.height}`, async ({ browser }) => {
       const context = await browser.newContext({ viewport, hasTouch: viewport.width < 1280 });
       const page = await context.newPage();
       await openApp(page);
@@ -120,8 +120,8 @@ test.describe('desktop workbench contract', () => {
       await expect(page.locator('#panelAiChat')).toBeHidden();
       await expect(page.locator('.desktop-nav-item[data-desktop-tab="posts"]')).toHaveClass(/is-active/);
       await context.close();
-    }
-  });
+    });
+  }
 
   test('desktop AI icon uses the complete six-petal asset', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });

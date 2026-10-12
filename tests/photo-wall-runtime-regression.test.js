@@ -9,50 +9,128 @@ const vm = require('node:vm');
 const ROOT = path.resolve(__dirname, '..');
 const dataSource = fs.readFileSync(path.join(ROOT, 'js/photo-wall/data.js'), 'utf8');
 
-function createPhotoDataRuntime(fetchImpl) {
-  const storage = new Map();
-  const windowListeners = {};
-  const documentListeners = {};
-  const window = {
-    API_BASE: '',
-    currentUser: 'owner',
-    photoWallData: [],
-    pwCurrentSortedPhotos: [],
-    addEventListener(type, handler) { windowListeners[type] = handler; },
-    getUserAuthHeaders: async () => ({ Authorization: 'Bearer test-token' }),
-    safeStorage: {
-      get: key => storage.has(key) ? storage.get(key) : null,
-      set: (key, value) => storage.set(key, String(value)),
-      remove: key => storage.delete(key)
-    }
-  };
-  const context = {
-    window,
-    document: {
-      hidden: false,
-      getElementById: () => null,
-      addEventListener(type, handler) { documentListeners[type] = handler; },
-      querySelector: () => null
-    },
-    localStorage: {
-      getItem: key => storage.has(key) ? storage.get(key) : null,
-      setItem: (key, value) => storage.set(key, String(value)),
-      removeItem: key => storage.delete(key)
-    },
-    navigator: { onLine: true },
-    fetch: fetchImpl,
-    URL,
-    Map,
-    Set,
-    console,
-    setTimeout,
-    clearTimeout,
-    AbortController,
-    Date
-  };
-  vm.runInNewContext(dataSource, context, { filename: 'data.js' });
-  return { window, storage, windowListeners, documentListeners, context };
+const { createPhotoDataRuntime } = require('./helpers/photo-data-runtime-fixture');
+
+function refreshedPhoto(id, offset = 0) {
+  return { id, cloudId: id, username: 'owner', imageUrl: 'https://example.test/' + id + '.jpg',
+    timestamp: Date.UTC(2026, 9, 12) - offset * 1000 };
 }
+
+test('successful empty and partial photo snapshots replace old rows even when storage writes fail', async () => {
+  for (const data of [[], [{ id: 'fresh', user_name: 'owner', media_url: 'https://example.test/fresh.jpg' }]]) {
+    const runtime = createPhotoDataRuntime(async () => ({ ok: true, json: async () => ({ ok: true, data }) }));
+    runtime.window.photoWallData = [refreshedPhoto('old')];
+    runtime.window.safeStorage.set = () => { throw new Error('QuotaExceededError'); };
+    await runtime.window.loadPhotoWallData(true);
+    assert.deepEqual(Array.from(runtime.window.photoWallData, p => p.id), data.map(p => p.id));
+  }
+});
+
+test('an older empty photo snapshot removes old rows without erasing a newly confirmed upload', async () => {
+  let release, started = false;
+  const runtime = createPhotoDataRuntime(async () => ({ ok: true, json: () => {
+    started = true; return new Promise(resolve => { release = resolve; });
+  } }));
+  runtime.window.photoWallData = [refreshedPhoto('old')];
+  runtime.window.saveLocalPhotoWallData();
+  const loading = runtime.window.loadPhotoWallData(true);
+  while (!started) await new Promise(resolve => setImmediate(resolve));
+  runtime.window.photoWallData.unshift(refreshedPhoto('new-upload'));
+  runtime.window.saveLocalPhotoWallData();
+  release({ ok: true, data: [] });
+  await loading;
+  assert.deepEqual(Array.from(runtime.window.photoWallData, p => p.id), ['new-upload']);
+});
+
+test('a refreshed full first page removes absent newer photos while retaining loaded older pages', async () => {
+  let rows = Array.from({ length: 70 }, (_, i) => ({ id: 'photo-' + i, user_name: 'owner',
+    media_url: 'https://example.test/' + i + '.jpg', created_at: new Date(Date.UTC(2026, 9, 12) - i * 1000).toISOString() }));
+  const runtime = createPhotoDataRuntime(async url => {
+    const page = Number(new URL(url, 'https://example.test').searchParams.get('page'));
+    return { ok: true, json: async () => ({ ok: true, data: rows.slice(page * 60, (page + 1) * 60) }) };
+  });
+  await runtime.window.loadPhotoWallData(true); await runtime.window.loadMorePhotos();
+  rows = rows.filter(p => p.id !== 'photo-0');
+  await runtime.window.loadPhotoWallData(true);
+  assert.equal(runtime.window.photoWallData.length, 69);
+  assert.equal(runtime.window.photoWallData.some(p => p.id === 'photo-0'), false);
+  assert.equal(runtime.window.photoWallData.some(p => p.id === 'photo-69'), true);
+});
+
+for (const tied of [false, true]) test('a refreshed final photo page removes old ghosts and retains new uploads' + (tied ? ' across timestamp ties' : ''), async () => {
+  let rows = Array.from({ length: 70 }, (_, i) => ({ id: 'photo-' + i, user_name: 'owner',
+    media_url: 'https://example.test/' + i + '.jpg', created_at: new Date(Date.UTC(2026, 9, 12) - (tied ? 0 : i * 1000)).toISOString() }));
+  const runtime = createPhotoDataRuntime(async url => {
+    const page = Number(new URL(url, 'https://example.test').searchParams.get('page'));
+    return { ok: true, json: async () => ({ ok: true, data: rows.slice(page * 60, (page + 1) * 60) }) };
+  });
+  await runtime.window.loadPhotoWallData(true); await runtime.window.loadMorePhotos();
+  rows.pop(); await runtime.window.loadPhotoWallData(true);
+  runtime.window.photoWallData.unshift(refreshedPhoto('new-upload'));
+  let closed = 0; const renders = [];
+  runtime.window.photoPreviewCurrent = refreshedPhoto('photo-69', tied ? 0 : 69);
+  runtime.window.forceClosePhotoPreview = () => { closed++; runtime.window.photoPreviewCurrent = null; };
+  runtime.window.renderPhotoWallWithoutReload = options => renders.push(options);
+  await runtime.window.loadMorePhotos();
+  assert.equal(runtime.window.photoWallData.length, 70);
+  assert.equal(runtime.window.photoWallData.some(p => p.id === 'photo-69'), false);
+  assert.equal(runtime.window.photoWallData.some(p => p.id === 'photo-59'), true);
+  assert.equal(runtime.window.photoWallData.some(p => p.id === 'new-upload'), true);
+  assert.equal(closed, 1);
+  assert.equal(renders.length, 1);
+  assert.equal(renders[0].preserveBatch, true);
+});
+
+test('a filtered row in a full refresh cannot resurrect its previous image metadata', async () => {
+  const rows = Array.from({ length: 60 }, (_, i) => ({ id: 'photo-' + i, user_name: 'owner',
+    media_url: 'https://example.test/' + i + '.jpg', created_at: new Date(Date.UTC(2026, 9, 12) - i * 1000).toISOString(),
+    content: i === 0 ? JSON.stringify({ mediaKind: 'video', mimeType: 'video/mp4' }) : '' }));
+  const runtime = createPhotoDataRuntime(async () => ({ ok: true, json: async () => ({ ok: true, data: rows }) }));
+  runtime.window.photoWallData = [refreshedPhoto('photo-0')];
+  await runtime.window.loadPhotoWallData(true);
+  assert.equal(runtime.window.photoWallData.length, 59);
+  assert.equal(runtime.window.photoWallData.some(p => p.id === 'photo-0'), false);
+});
+
+for (const nextUser of ['other', 'owner']) test('interrupted deletion cannot filter a fresh ' + nextUser + ' authentication session', async () => {
+  let release, epoch = 0;
+  const runtime = createPhotoDataRuntime(async url => url === '/api/photo/delete'
+    ? new Promise(resolve => { release = () => resolve({ ok: false, json: async () => ({ ok: false, error: 'injected failure' }) }); })
+    : { ok: true, json: async () => ({ ok: true, data: [{ id: 'kept', user_name: 'owner', media_url: 'https://example.test/kept.jpg' }] }) });
+  runtime.window.__xtjGetAuthEpoch = () => epoch;
+  runtime.window.photoWallData = [refreshedPhoto('kept')];
+  const deletion = runtime.window.deletePhotoWallPhoto(runtime.window.photoWallData[0]);
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  runtime.window.currentUser = nextUser; epoch++;
+  runtime.windowListeners['auth-ready']();
+  await runtime.window.loadPhotoWallData(true);
+  release(); assert.equal((await deletion).error, 'identity_changed');
+  assert.equal(runtime.window.pendingDeletedPhotoIds.size, 0);
+  assert.deepEqual(Array.from(runtime.window.photoWallData, p => p.id), ['kept']);
+});
+
+test('pagination repairs its offset after a confirmed deletion whose background refresh failed', async () => {
+  let rows = Array.from({ length: 70 }, (_, i) => ({ id: 'photo-' + i, user_name: 'owner',
+    media_url: 'https://example.test/' + i + '.jpg', created_at: new Date(Date.UTC(2026, 9, 12) - i * 1000).toISOString() }));
+  let failRefresh = false;
+  const runtime = createPhotoDataRuntime(async (url, options) => {
+    if (url === '/api/photo/delete') {
+      const id = JSON.parse(options.body).photoId;
+      rows = rows.filter(p => p.id !== id); failRefresh = true;
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    const page = Number(new URL(url, 'https://example.test').searchParams.get('page'));
+    if (page === 0 && failRefresh) {
+      failRefresh = false; return { ok: false, status: 503, json: async () => ({ ok: false, error: 'refresh failed' }) };
+    }
+    return { ok: true, json: async () => ({ ok: true, data: rows.slice(page * 60, (page + 1) * 60) }) };
+  });
+  await runtime.window.loadPhotoWallData(true);
+  assert.equal((await runtime.window.deletePhotoWallPhoto(runtime.window.photoWallData[0])).ok, true);
+  while (!runtime.window.photoWallLoadError) await new Promise(resolve => setImmediate(resolve));
+  await runtime.window.loadMorePhotos();
+  assert.deepEqual(Array.from(runtime.window.photoWallData, p => p.id).sort(), rows.map(p => p.id).sort());
+});
 
 test('authenticated photo API loads even when window.sb is unavailable', async () => {
   let requested = '';

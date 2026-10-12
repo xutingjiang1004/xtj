@@ -25,6 +25,7 @@
     window.API_BASE = window.XTJ_CONFIG.API_BASE;
     window.xtjUploadDisplayUrl = function(value) {
         try {
+            if (/^\/api\//.test(String(value || ''))) return String(window.XTJ_CONFIG.API_BASE || '').replace(/\/$/, '') + value;
             var url = new URL(value, window.location.href);
             var storage = new URL(window.XTJ_CONFIG.SUPABASE_URL);
             var prefix = '/storage/v1/object/public/uploads/';

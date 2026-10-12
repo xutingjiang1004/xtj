@@ -27,6 +27,11 @@ module.exports = defineConfig({
     baseURL: 'http://127.0.0.1:4173',
     browserName: 'chromium',
     channel: process.env.PW_CHANNEL || (process.env.CI ? undefined : 'msedge'),
+    // CI has no physical capture devices. Use Chromium's synthetic devices;
+    // Permissions-Policy still governs native capture, including denial tests.
+    launchOptions: {
+      args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+    },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure'
   },

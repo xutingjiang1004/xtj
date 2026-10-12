@@ -84,6 +84,36 @@ test('feed quota restrictions do not retry through direct Supabase or present a 
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });
+test('a background avatar/VIP repaint retains a failed refresh notice until a server refresh succeeds', { timeout: 45000 }, async () => {
+  const f = await postBrowserFixture({ counts: [1] });
+  const feedRoute = /\/api\/feed(?:\?|$)/;
+  try {
+    await f.page.evaluate(async () => {
+      window.__xtjVipHistoryCache = {};
+      window.__xtjBatchLoadVipHistory = () => new Promise(resolve => { window.releaseVipRepaint = resolve; });
+      await loadFeed(true);
+      persistFeedCacheSnapshotNow();
+    });
+    await f.page.route(feedRoute, r => r.fulfill({ status: 402, json: {
+      ok: false, code: 'egress_quota_exceeded', error: '服务暂时受限，请等待恢复', retryable: false
+    } }));
+    await f.page.evaluate(() => loadFeed(true));
+    await f.page.waitForSelector('#feedStaleNotice');
+    await f.page.evaluate(async () => {
+      window.releaseVipRepaint();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    assert.equal(await f.page.locator('#feedStaleNotice').count(), 1, 'a background repaint must not erase an unresolved refresh failure');
+    assert.match(await f.page.locator('#feedStaleNotice').textContent(), /等待恢复/);
+    assert.equal(await f.page.locator('#feedStaleNotice').getAttribute('role'), 'status');
+    assert.equal(await f.page.locator('#feed .post').count(), 1);
+    await f.page.unroute(feedRoute);
+    await f.page.evaluate(() => { window.__xtjBatchLoadVipHistory = () => Promise.resolve(); return loadFeed(true); });
+    assert.equal(await f.page.locator('#feedStaleNotice').count(), 0, 'a confirmed successful refresh clears the failure notice');
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
 test('chat preview glass follows the image and saving keeps its original format', { timeout: 45000 }, async () => {
   const messages = [0, 1].map(i => ({ id: '44444444-4444-4444-8444-00000000000' + i, user_name: 'bob', media_url: 'alice', media_type: '__dm__', content: JSON.stringify({ type: 'dm', text: '', media: { kind: 'image', url: '/test-image/0-' + i + '.png', name: 'photo.png', w: 400, h: 300 } }), created_at: '2026-10-09T00:00:0' + i + 'Z' }));
   const f = await postBrowserFixture({ counts: [1], theme: 'dark', dmMessages: messages });

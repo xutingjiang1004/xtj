@@ -13,7 +13,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The runtime suite includes real Chromium flows; allow setup and the full
+    # bounded suite to finish instead of cutting off valid checks mid-run.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -96,15 +98,15 @@ jobs:
         env:
           AUDIT_DATABASE_URL: postgresql://postgres:local-ci-only@127.0.0.1:5432/postgres
         run: node scripts/test-database-migrations.js
-      - name: Verify multi-image post transactions and cleanup
+      - name: Verify media, account boundaries, admin permissions and atomic writes
         env:
           XTJ_TEST_DATABASE_URL: postgresql://postgres:local-ci-only@127.0.0.1:5432/postgres
-          run: node --test tests/post-attachments-db.test.js tests/maintenance-boundaries-db.test.js
+        run: node --test tests/post-attachments-db.test.js tests/maintenance-boundaries-db.test.js tests/post-views-db.test.js tests/admin-audit-fixes-db.test.js
 
   ui:
     name: UI Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     needs: [test, syntax]
 
     env:

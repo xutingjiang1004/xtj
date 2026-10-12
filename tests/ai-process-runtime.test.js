@@ -130,13 +130,13 @@ test('changing effort during auth applies to the next send without hiding the cu
 });
 test('deep history failure retains its conversation and retries the same ID',async t=>{
   const page=await fixture(t);
-  await page.evaluate(()=>{localStorage.setItem('xtj_ai_dt_conversation_id','existing-deep');failDeepHistory=true;return __xtjAiAgent.openDeepThink();});
+  await page.evaluate(()=>{localStorage.setItem('xtj_ai_dt_conversation_id__tester','existing-deep');failDeepHistory=true;return __xtjAiAgent.openDeepThink();});
   assert.equal(await page.locator('.dt-history-error').count(),1);
-  assert.equal(await page.evaluate(()=>localStorage.getItem('xtj_ai_dt_conversation_id')),'existing-deep');
+  assert.equal(await page.evaluate(()=>localStorage.getItem('xtj_ai_dt_conversation_id__tester')),'existing-deep');
   assert.equal(await page.evaluate(()=>window.newCalls||0),0);
   await page.evaluate(()=>{failDeepHistory=false;const original=fetch;fetch=async(url,opts)=>String(url).includes('mode=deep_think')?new Response(JSON.stringify({ok:true,messages:[{role:'user',content:'原来的研究问题'}],has_more:false})):original(url,opts);});
   await page.locator('#panelDeepThink .ai-history-retry').click();await page.waitForFunction(()=>document.getElementById('dtMessages').textContent.includes('原来的研究问题'));
-  assert.equal(await page.evaluate(()=>localStorage.getItem('xtj_ai_dt_conversation_id')),'existing-deep');
+  assert.equal(await page.evaluate(()=>localStorage.getItem('xtj_ai_dt_conversation_id__tester')),'existing-deep');
 });
 test('SSE accepted events persist the same ordered process in assistant metadata',()=>{
   const {writeSse}=require('../render-api/sse-write');
@@ -224,15 +224,24 @@ test('older card-only search results stay compact, counted and available after r
 test('tool rows have a real entrance, nearby result receipts and reversible result transitions',async t=>{
  const page=await fixture(t,'max');await page.setViewportSize({width:390,height:844});
  await page.locator('#aiChatMsgInput').fill('搜索资料');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>{
+  window.toolEntranceMotion=null;
+  const observer=new MutationObserver(()=>{
+   const node=document.querySelector('[data-tool-call-id="motion"]');if(!node)return;
+   const animations=node.getAnimations().map(animation=>animation.effect.getKeyframes());
+   if(animations.length){window.toolEntranceMotion={animations,opacity:getComputedStyle(node).opacity};observer.disconnect();}
+  });
+  observer.observe(document.getElementById('aiChatRoot'),{childList:true,subtree:true,attributes:true});
+ });
  await page.evaluate(()=>emit({type:'tool_calls',tools:[{id:'motion',name:'search_web',args:{query:'资料'}}]}));
- await page.waitForSelector('[data-tool-call-id="motion"]');
- const motion=await page.locator('[data-tool-call-id="motion"]').evaluate(node=>({animations:node.getAnimations().map(a=>a.effect.getKeyframes()),opacity:getComputedStyle(node).opacity}));
+ await page.waitForFunction(()=>window.toolEntranceMotion);
+ const motion=await page.evaluate(()=>window.toolEntranceMotion);
  assert.ok(motion.animations.some(frames=>frames.some(frame=>frame.opacity==='0')&&frames.some(frame=>frame.opacity==='1')),JSON.stringify(motion));
  await page.evaluate(()=>emit({type:'tool_result',call_id:'motion',tool_name:'search_web',success:true,count:3,items:[{url:'https://example.com/one',title:'结果一'}]}));
  const receipt=page.locator('[data-tool-call-id="motion"] .ai-tool-result-card-title'),panel=page.locator('[data-tool-call-id="motion"] .ai-search-detail');await receipt.waitFor();
  const coords=await page.locator('[data-tool-call-id="motion"]').evaluate(node=>{const query=node.querySelector('.ai-tool-step-detail').getBoundingClientRect(),count=node.querySelector('.ai-tool-result-card-title').getBoundingClientRect();return{gap:count.left-query.right,dy:Math.abs(count.top-query.top)};});
  assert.ok(coords.gap<=8&&coords.gap>=0&&coords.dy<8,JSON.stringify(coords));
- await receipt.click();assert.ok(await panel.evaluate(node=>node.getAnimations().length>0));
+ const openingAnimations=await receipt.evaluate(button=>{button.click();return button.closest('[data-tool-call-id="motion"]').querySelector('.ai-search-detail').getAnimations().length;});assert.ok(openingAnimations>0);
  await receipt.click();assert.equal(await receipt.getAttribute('aria-expanded'),'false');
  await receipt.click();assert.equal(await receipt.getAttribute('aria-expanded'),'true');await page.waitForTimeout(190);assert.equal(await panel.isVisible(),true);
  await receipt.click();await panel.waitFor({state:'hidden'});assert.equal(await receipt.getAttribute('aria-expanded'),'false');

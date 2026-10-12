@@ -38,6 +38,21 @@ async function setup(page) {
     window.switchDockTab('chat',true); window.openChat('peer');
   }, {id,stamp});
 }
+async function captureSendFlights(page) {
+  await page.evaluate(()=>{
+    window.__observedSendFlights=[];
+    const animate=Element.prototype.animate;
+    Element.prototype.animate=function(...args){
+      const animation=animate.apply(this,args);
+      if(this.classList.contains('chat-send-flight')){
+        const box=this.getBoundingClientRect(),image=this.querySelector('img');
+        const visible=node=>{const rect=node.getBoundingClientRect(),style=getComputedStyle(node);return rect.width>0&&rect.height>0&&style.display!=='none'&&!['hidden','collapse'].includes(style.visibility);};
+        window.__observedSendFlights.push({frames:animation.effect.getKeyframes(),src:image&&image.src,connected:this.isConnected,width:box.width,height:box.height,visible:visible(this),imageVisible:image&&visible(image)});
+      }
+      return animation;
+    };
+  });
+}
 test('search pages on the server and locates a result', async ({page}) => {
   await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="messages"]').click();
   await page.locator('#chatHistoryQuery').fill('hello'); await page.locator('#chatHistoryForm').dispatchEvent('submit');
@@ -162,10 +177,12 @@ test('conversation settings live only in the detail header and reopen safely dur
 
 test('text flies from the composer and settles without replay on acknowledgement', async ({page}) => {
   await setup(page); await page.evaluate(()=>window.__chatSendDelay=50); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  await captureSendFlights(page);
   await page.locator('#dockChatInput').fill('a new message');
   await page.locator('#dockChatSendBtn').click();
-  await expect(page.locator('.chat-send-flight')).toHaveCount(1);
-  const frames=await page.evaluate(()=>document.querySelector('.chat-send-flight').getAnimations()[0].effect.getKeyframes());
+  await expect.poll(()=>page.evaluate(()=>window.__observedSendFlights.length)).toBe(1);
+  const flight=await page.evaluate(()=>window.__observedSendFlights[0]),frames=flight.frames;
+  expect(flight.connected).toBe(true);expect(flight.visible).toBe(true);expect(flight.width).toBeGreaterThan(0);expect(flight.height).toBeGreaterThan(0);
   expect(frames[0].transform).toContain('translate3d(');
   expect(frames[0].transform).not.toBe(frames[1].transform);
   await expect(page.locator('[data-message-id="123e4567-e89b-42d3-a456-000000000009"]')).toHaveCount(1);
@@ -226,14 +243,12 @@ test('photo flies from attachment preview with a visible local image', async ({p
   await page.route('https://example.invalid/**',route=>route.fulfill({status:200,contentType:'image/png',body:Buffer.from(png,'base64')}));
   await page.setInputFiles('#dockChatFileInp',{name:'photo.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
   await expect(page.locator('#dockChatFilePreview')).toBeVisible();
+  await captureSendFlights(page);
   await page.locator('#dockChatSendBtn').click();
-  await expect(page.locator('.chat-send-flight img')).toBeVisible();
-  const flight=await page.evaluate(()=>{
-    const ghost=document.querySelector('.chat-send-flight');
-    const frames=ghost.getAnimations()[0].effect.getKeyframes();
-    return {src:ghost.querySelector('img').src,first:frames[0].transform,last:frames[1].transform};
-  });
-  expect(flight.src).toMatch(/^blob:/); expect(flight.first).not.toBe(flight.last);
+  await expect.poll(()=>page.evaluate(()=>window.__observedSendFlights.length)).toBe(1);
+  const flight=await page.evaluate(()=>window.__observedSendFlights[0]);
+  expect(flight.connected).toBe(true);expect(flight.visible).toBe(true);expect(flight.imageVisible).toBe(true);expect(flight.width).toBeGreaterThan(0);expect(flight.height).toBeGreaterThan(0);
+  expect(flight.src).toMatch(/^blob:/); expect(flight.frames[0].transform).not.toBe(flight.frames[1].transform);
   await expect(page.locator('.chat-send-flight')).toHaveCount(0);
   await expect(page.locator('#dockChatMessages .chat-msg.has-media img')).toBeVisible();
   await expect(page.locator('#dockChatFilePreview')).toBeHidden();
@@ -287,8 +302,20 @@ async function fakeMic(page,pending=false) {
   await page.addInitScript(pending=>{
     const buffer=new ArrayBuffer(44+48000),v=new DataView(buffer);const word=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};word(0,'RIFF');v.setUint32(4,48036,true);word(8,'WAVE');word(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,24000,true);v.setUint32(28,48000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);word(36,'data');v.setUint32(40,48000,true);
     window.__stoppedTracks=0;
-    const stream={getTracks:()=>[{stop(){window.__stoppedTracks++;}}]};
-    Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:()=>pending ? new Promise(resolve=>window.__resolveMic=()=>resolve(stream)) : Promise.resolve(stream)}});
+    // Feed the real recording meter a valid MediaStream with synthetic PCM.
+    // A plain object throws in createMediaStreamSource and cannot test a waveform.
+    function createStream(){
+      const context=new AudioContext(),oscillator=context.createOscillator(),gain=context.createGain(),destination=context.createMediaStreamDestination();
+      oscillator.frequency.value=440;gain.gain.value=.16;
+      oscillator.connect(gain);gain.connect(destination);oscillator.start();context.resume();
+      const stream=destination.stream;
+      for(const track of stream.getTracks()){
+        const stop=track.stop.bind(track);
+        track.stop=()=>{window.__stoppedTracks++;stop();oscillator.stop();context.close();};
+      }
+      return stream;
+    }
+    Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:()=>pending ? new Promise(resolve=>window.__resolveMic=()=>resolve(createStream())) : Promise.resolve(createStream())}});
     window.MediaRecorder=class {
       static isTypeSupported(){return true;} constructor(){this.state='inactive';this.mimeType='audio/webm';}
       start(){this.state='recording';} stop(){this.state='inactive';this.ondataavailable?.({data:new Blob([buffer],{type:'audio/wav'})});this.onstop?.();}
@@ -629,10 +656,21 @@ test('damaged native recording recovers PCM and plays both before and after deli
 
 test('undecodable recording without PCM is rejected before upload and restores input',async({page})=>{
  await fakeMic(page);await setup(page);await expect(page.locator('#dockChatInput')).toBeEnabled();
- await page.evaluate(()=>{MediaRecorder.prototype.stop=function(){this.state='inactive';this.ondataavailable({data:new Blob(['broken'],{type:'audio/mp4'})});this.onstop();};});
+ let uploads=0;
+ await page.route('**/api/dm/upload?**',route=>{uploads++;return route.fulfill({status:500,body:'Unexpected upload'});});
+ await page.evaluate(()=>{
+  // This negative case needs a browser without PCM capture. The shared valid
+  // MediaStream otherwise lets the real meter recover an undecodable recording.
+  window.__pcmCaptureUnavailable=0;
+  (window.AudioContext||window.webkitAudioContext).prototype.createScriptProcessor=function(){window.__pcmCaptureUnavailable++;throw new DOMException('PCM capture unavailable','NotSupportedError');};
+  MediaRecorder.prototype.stop=function(){this.state='inactive';this.ondataavailable({data:new Blob(['broken'],{type:'audio/mp4'})});this.onstop();};
+ });
  await page.locator('#chatVoiceButton').click();await expect(page.locator('#chatRecordingIndicator')).toBeVisible();await page.locator('#chatVoiceButton').click();
  await expect(page.locator('#dockChatInput')).toBeEnabled();await expect(page.locator('#chatRecordingIndicator')).toBeHidden();
  await expect(page.locator('#dockChatFilePreview')).toBeHidden();
+ expect(await page.evaluate(()=>window.__pcmCaptureUnavailable)).toBe(1);
+ expect(await page.evaluate(()=>window.__stoppedTracks)).toBeGreaterThan(0);
+ expect(uploads).toBe(0);
  expect(await page.evaluate(()=>window.__chatTestCalls.some(call=>call.url.includes('/api/dm/send')))).toBe(false);
 });
 test('chat gallery zoom occupies the full viewport, pans freely and keeps close controls clickable',async({page},info)=>{
@@ -692,8 +730,11 @@ test('flash clear view lasts three seconds then clears image and cannot reopen',
 });
 test('flash close immediately erases clear image before exit transition',async({page})=>{
   await setupFlash(page);await page.locator('#chatFlashSendBtn').click();await page.locator('.chat-flash-card').click();await expect(page.locator('#chatFlashViewer.is-viewing')).toBeVisible();
-  await page.locator('#chatFlashViewer .flash-close').click();
-  expect(await page.locator('#chatFlashViewer img').getAttribute('src')).toBeNull();await expect(page.locator('#chatFlashViewer')).toHaveCount(0);
+  await expect.poll(()=>page.evaluate(()=>window.__flashViewed||0)).toBe(1);
+  // Check the captured image synchronously with closing; safe teardown may
+  // remove the viewer before another browser round trip can locate it.
+  const closed=await page.evaluate(()=>{const viewer=document.getElementById('chatFlashViewer'),image=viewer.querySelector('img');viewer.querySelector('.flash-close').click();return {src:image.getAttribute('src'),liveImage:!!document.querySelector('#chatFlashViewer img[src]')};});
+  expect(closed.src).toBeNull();expect(closed.liveImage).toBe(false);await expect(page.locator('#chatFlashViewer')).toHaveCount(0);
   await expect(page.locator('.chat-flash-card')).toBeDisabled();
 });
 test('flash quota failure retains selection and stable retry id',async({page})=>{

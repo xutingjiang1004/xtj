@@ -31,11 +31,12 @@ test('protected requests attach Bearer auth and retry only once after 401', () =
 });
 
 test('feed refresh preserves visible posts while reconciliation is pending', () => {
-  const loadFeed = between(core, 'loadFeed = async function(forceRefresh)', 'window.loadFeed = loadFeed');
+  const loadFeed = between(core, 'loadFeed = async function(', 'window.loadFeed = loadFeed');
   const refreshSetup = between(loadFeed, 'if (forceRefresh)', 'bindPostFilterEvents');
   assert.match(loadFeed, /var hadLiveFeed = Array\.isArray\(feedAllPosts\) && feedAllPosts\.length > 0/);
   assert.doesNotMatch(refreshSetup, /feedAllPosts\s*=\s*\[\]/);
-  assert.match(loadFeed, /if \(!chunk\.posts\.length && hadLiveFeed\)/);
+  assert.doesNotMatch(loadFeed, /if \(!chunk\.posts\.length && hadLiveFeed\)/);
+  assert.match(loadFeed, /if \(stateVersionAtRequest === feedStateVersion\)\s*\{[\s\S]*?feedAllPosts = \[\]/);
   assert.match(loadFeed, /if \(!hadLiveFeed && feed\) feed\.innerHTML/);
 });
 

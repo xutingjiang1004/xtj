@@ -57,7 +57,10 @@ test('report notifications use authenticated server identity and do not hide mar
   assert.doesNotMatch(listSource, /req\.query\.user|req\.body\.user/);
   assert.match(markSource, /authenticateUser/);
   assert.match(markSource, /\.eq\('user_name', userName\)/);
-  assert.match(markSource, /if \(updateResult\.error\) failed\+\+/);
+  assert.match(markSource, /checkedRpc\(supabase,'mutate_report_record'/);
+  assert.match(markSource, /p_reader:userName,p_read_before:readBefore/);
+  assert.doesNotMatch(markSource, /\.update\(\{\s*content:/);
+  assert.match(markSource, /catch \(_\) \{ failed\+\+; \}/);
   assert.match(markSource, /res\.status\(500\)[\s\S]*report_mark_read_partial/);
 });
 

@@ -1013,6 +1013,7 @@
                             var affectsLocalFeed = (row && row.post_id != null)
                                 ? (feedAllPosts || []).some(function(p) { return String(p && p.id) === String(row.post_id); })
                                 : true;
+                            if (affectsLocalFeed) markFeedInteractionChanged();
                             if (affectsLocalFeed && typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                             if (affectsLocalFeed && typeof renderProfileActivity === 'function') renderProfileActivity();
                         })

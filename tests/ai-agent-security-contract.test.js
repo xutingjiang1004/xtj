@@ -23,7 +23,7 @@ test('server-provided thought labels are HTML escaped', () => {
 });
 
 test('AI close clears recurring status and configuration timers', () => {
-  const closeStart = source.indexOf('function closeAiChat()');
+  const closeStart = source.indexOf('function closeAiChat(force)');
   assert.notEqual(closeStart, -1);
   const closeBody = source.slice(closeStart, source.indexOf('function ', closeStart + 30));
   assert.match(closeBody, /clearInterval\(S\.statusTimer\)/);

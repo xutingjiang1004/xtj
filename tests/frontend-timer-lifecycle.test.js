@@ -60,7 +60,7 @@ test('S-1: early-feed 的延迟回调在页面隐藏后跳过 DOM 改写', () =>
   // 注意：需排除函数定义行本身（function paintMinimal(data) { ... }）
   const callSites = earlyFeed.split('\n')
     .map((line, i) => ({ line: line, no: i + 1 }))
-    .filter(x => /paintMinimal\(data\)|showError\('帖子加载超时/.test(x.line))
+    .filter(x => /paintMinimal\(data\)|showError\(err\)/.test(x.line))
     .filter(x => !/function\s+paintMinimal/.test(x.line));
 
   assert.ok(callSites.length >= 3,
