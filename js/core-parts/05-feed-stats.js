@@ -629,6 +629,7 @@
 
             async function markMessagesRead(senderName, messages, pendingUpdates) {
                 if (!window.currentUser || !senderName) return;
+                var owner = window.currentUser, epoch = _authStateEpoch;
                 var updates = Array.isArray(pendingUpdates) ? pendingUpdates.slice() : [];
                 if (!updates.length && Array.isArray(messages)) {
                     messages.forEach(function(m) {
@@ -639,9 +640,11 @@
                 if (updates.length) {
                     var response = await window.xtjProtectedFetch('/api/dm/read', {
                         method: 'POST',
+                        authOwner: owner, authEpoch: epoch,
                         body: JSON.stringify({ message_ids: updates.map(function(update) { return update.id; }) })
                     });
                     var result = await response.json().catch(function() { return {}; });
+                    if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
                     var readRows = Array.isArray(result.data) ? result.data : [];
                     var readById = new Map(readRows.map(function(row) { return [String(row.id), row]; }));
@@ -649,7 +652,7 @@
                     var cached = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
                     _chatCache[cacheKey] = cached.map(function(message) {
                         var authoritative = readById.get(String(message && message.id));
-                        return authoritative ? Object.assign({}, message, authoritative) : message;
+                        return authoritative ? reconcileDockChatMessage(message, authoritative) : message;
                     });
                     if (dockChatActiveUser === senderName) renderDockMessages(senderName, _chatCache[cacheKey], false);
                 }

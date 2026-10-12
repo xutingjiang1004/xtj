@@ -10,6 +10,77 @@ function sendFixture(){
  c.window={get currentUser(){return c.currentUser;},xtjProtectedFetch:async()=>{calls.push({name:'send'});return{ok:true,json:async()=>({ok:true,message:{id:'server',content:'{}'}})};}};
  vm.createContext(c);vm.runInContext(extract('            async function sendDockChatMessageSingle(', '            // ═════'),c);return{c,calls,input};
 }
+test('delivery acknowledgement leaves the next selected attachment intact',async()=>{
+ const f=sendFixture(),d=deferred();f.c.window.xtjProtectedFetch=async()=>({ok:true,json:()=>d.promise});
+ const pending=f.c.sendDockChatMessageSingle(null,'first message');await new Promise(r=>setImmediate(r));
+ const before=f.calls.length;d.resolve({ok:true,message:{id:'server',content:'{}'}});await pending;
+ assert.equal(f.calls.slice(before).filter(x=>x.name==='clearDockChatFilePreview').length,0);
+});
+test('retrying a failed text does not send or discard the next draft attachment',async()=>{
+ const f=sendFixture(),next={name:'next.png',size:10,type:'image/png'},bodies=[];
+ f.c._chatRecordedFile=next;f.c.prepareDmImageForUpload=async file=>({file});f.c.getMediaUrl=()=> 'https://storage.invalid/next';
+ f.c.window.xtjProtectedFetch=async(path,options)=>{bodies.push(JSON.parse(options.body));return{ok:true,json:async()=>({ok:true,message:{id:'server',content:'{}'}})};};
+ await f.c.sendDockChatMessageSingle(null,'failed text',{isRetry:true,clientMessageId:'stable',replyDraft:null});
+ assert.equal(bodies.length,1);assert.equal(bodies[0].storage_path,undefined);assert.equal(f.c._chatRecordedFile,next);
+ assert.equal(f.input.value,'private draft');
+});
+test('retry action leaves composer text and quote intact and reuses the original quote',async()=>{
+ const failed={id:'old',__tempId:'old',__failed:true,__clientMessageId:'stable',content:JSON.stringify({text:'failed text',reply_to:{id:'original-quote'}})};
+ const input={value:'new draft'},quote={id:'new-quote'},calls=[];
+ const c={currentUser:'A',_authStateEpoch:1,dockChatActiveUser:'peer',dockChatSending:false,
+  _chatReplyDraft:quote,_chatCache:{peer:[failed]},_chatRenderSignature:{},
+  document:{getElementById:id=>id==='dockChatInput'?input:{files:[]}},window:{currentUser:'A'},
+  getDMMessagePayload:m=>JSON.parse(m.content),getDMMessageText:m=>JSON.parse(m.content).text,
+  getDockChatCacheKey:()=> 'peer',isUserMuted:()=>false,showToast(){},renderDockMessages(){},releaseDockChatLocalPreview(){},
+  sendDockChatMessageSingle:async(file,text,options)=>{calls.push({file,text,options,input:input.value});c._chatCache.peer.push({id:'server'});return{queued:true};}};
+ vm.createContext(c);vm.runInContext(extract('            async function resendDmMessage(', '            // Search uses server keyset pagination'),c);
+ await c.resendDmMessage(failed);assert.equal(calls[0].input,'new draft');assert.equal(input.value,'new draft');
+ assert.equal(c._chatReplyDraft,quote);assert.equal(calls[0].options.replyDraft.id,'original-quote');
+ assert.equal(calls[0].options.clientMessageId,'stable');assert.equal(c._chatCache.peer.some(x=>x.id==='old'),false);
+});
+test('an idempotent delivery acknowledgement deduplicates an already-polled server message',()=>{
+ const c={_chatCache:{peer:[{id:'server',content:'{"text":"saved","read_at":"2026-10-12T08:00:00Z"}'},{id:'temp',__tempId:'temp',content:'{"text":"saved"}'}]},
+  getDockChatCacheKey:()=> 'peer',getDMMessagePayload:m=>JSON.parse(m.content),sortDockChatMessages:m=>m,window:{}};
+ vm.createContext(c);vm.runInContext(extract('            function reconcileDockChatMessage(', '            function removeDockChatCacheMessage('),c);
+ const rows=c.replaceDockChatCacheMessage('peer','temp',{id:'server',content:'{"text":"saved"}'});
+ assert.equal(rows.length,1);assert.equal(rows[0].id,'server');assert.equal(JSON.parse(rows[0].content).read_at,'2026-10-12T08:00:00Z');
+});
+test('a stale snapshot never restores withdrawn message content or an older edit',()=>{
+ const c={_chatCache:{peer:[]},getDockChatCacheKey:p=>p,sortDockChatMessages:m=>m,
+  getDMMessagePayload:m=>{try{return JSON.parse(m.content);}catch(_){return null;}},isDockChatLocalPendingMessage:()=>false};
+ vm.createContext(c);vm.runInContext(extract('            function mergeDockChatMessages(', '            function upsertDockChatCacheMessage('),c);
+ const old={id:'message',created_at:'2026-10-12T08:00:00Z',content:JSON.stringify({text:'secret',read_at:null})};
+ c._chatCache.peer=[{...old,content:JSON.stringify({withdrawn:true,text:'',read_at:'2026-10-12T08:01:00Z'})}];
+ assert.equal(JSON.parse(c.mergeDockChatMessages('peer',[old],0)[0].content).withdrawn,true);
+ assert.equal(JSON.parse(c.mergeDockChatMessages('peer',[{...old,content:'legacy private text'}],0)[0].content).withdrawn,true);
+ c._chatCache.peer=[{...old,content:JSON.stringify({text:'corrected',edited_at:'2026-10-12T08:02:00Z',read_at:'2026-10-12T08:01:00Z'})}];
+ const merged=JSON.parse(c.mergeDockChatMessages('peer',[old],0)[0].content);
+ assert.equal(merged.text,'corrected');assert.equal(merged.read_at,'2026-10-12T08:01:00Z');
+});
+test('late read receipts from a previous authentication epoch cannot restore withdrawn content',async()=>{
+ const d=deferred(),fresh={id:'message',content:JSON.stringify({withdrawn:true,text:''})};
+ const c={_authStateEpoch:1,dockChatActiveUser:'peer',_chatCache:{peer:[fresh]},getDockChatCacheKey:()=> 'peer',
+  reconcileDockChatMessage:()=>{throw Error('old receipt must be discarded');},renderDockMessages(){},scheduleDockChatListRefresh(){},updateUnreadBadge(){},Map,Array};
+ c.window={currentUser:'A',xtjProtectedFetch:async()=>({ok:true,json:()=>d.promise})};vm.createContext(c);
+ const stats=fs.readFileSync('js/core-parts/05-feed-stats.js','utf8'),a=stats.indexOf('            async function markMessagesRead('),b=stats.indexOf('            window.markMessagesRead =',a);
+ vm.runInContext(stats.slice(a,b),c);const task=c.markMessagesRead('peer',[],[{id:'message'}]);c._authStateEpoch+=2;
+ d.resolve({ok:true,data:[{id:'message',content:'old private text'}]});await task;
+ assert.equal(c._chatCache.peer[0],fresh);
+});
+test('editing response from a previous login cannot overwrite the new draft or unlock its send',async()=>{
+ const d=deferred(),calls=[],input={value:'new private draft'};
+ const c={currentUser:'A',_authStateEpoch:1,AbortController,dockChatActiveUser:'peer',dockChatSending:false,
+  _chatEditDraft:{owner:'A',peer:'peer',id:'old'},_chatCache:{},_chatRenderSignature:{},
+  chatFeatureApi:()=>d.promise,showToast:x=>calls.push(x),replaceDockChatCacheMessage:()=>calls.push('replace'),
+  renderDockMessages(){},getDockChatCacheKey:()=>'',clearChatMessageDraft:()=>calls.push('clear'),
+  document:{getElementById:()=>input}};
+ c.window={get currentUser(){return c.currentUser;}};vm.createContext(c);
+ vm.runInContext(extract('            async function sendChatEditedMessage(', '            async function setChatReaction('),c);
+ const pending=c.sendChatEditedMessage('old edit');c._authStateEpoch+=2;
+ c._chatEditDraft={owner:'A',peer:'peer',id:'new'};c.dockChatSending=true;
+ d.resolve({message:{id:'old',content:'{}'}});await pending;
+ assert.deepEqual(calls,[]);assert.equal(input.value,'new private draft');assert.equal(c.dockChatSending,true);
+});
 test('image preparation resumed after A→B→A cannot upload or mutate the new session',async()=>{const f=sendFixture(),d=deferred();f.c.prepareDmImageForUpload=()=>d.promise;const promise=f.c.sendDockChatMessageSingle({name:'private.jpg',size:10,type:'image/jpeg'},'secret');f.c.currentUser='B';f.c._authStateEpoch++;f.c.currentUser='A';f.c._authStateEpoch++;f.c._chatSendFlight={newFlight:true};f.c.dockChatSending=true;const before=f.calls.length;d.resolve({file:{name:'ready.jpg',size:5,type:'image/jpeg'},w:2,h:2});await promise;assert.equal(f.calls.slice(before).filter(x=>['upload','send','cache','clearDockChatFilePreview'].includes(x.name)).length,0);assert.equal(f.c.dockChatSending,true);});
 test('late response body from account A never enters account B cache or unlocks its send',async()=>{const f=sendFixture(),d=deferred();f.c.window.xtjProtectedFetch=async()=>({ok:true,json:()=>d.promise});const promise=f.c.sendDockChatMessageSingle(null,'secret');await new Promise(r=>setImmediate(r));f.c.currentUser='B';f.c._authStateEpoch++;f.c._chatSendFlight={newFlight:true};const before=f.calls.length;d.resolve({ok:true,message:{id:'server',content:'{}'}});await promise;assert.equal(f.calls.slice(before).filter(x=>x.name==='cache').length,0);assert.equal(f.c.dockChatSending,true);});
 test('empty stale snapshot retains only messages committed after read start',()=>{const c={_chatCache:{peer:[{id:'old',__committedRevision:1},{id:'new',__committedRevision:3}]},getDockChatCacheKey:p=>p,sortDockChatMessages:m=>m,isDockChatLocalPendingMessage:()=>false};vm.createContext(c);vm.runInContext(extract('            function mergeDockChatMessages(', '            function upsertDockChatCacheMessage('),c);assert.deepEqual(Array.from(c.mergeDockChatMessages('peer',[],2),m=>m.id),['new']);assert.equal(c.mergeDockChatMessages('peer',[],3).length,0);});

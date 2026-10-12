@@ -152,7 +152,7 @@ test('admin and user auth wait for persistent revocation state before accepting 
 test('admin conversation rejects LIKE wildcard identifiers before query construction', () => {
   const block = routeBlock("app.get('/admin/ai-agent/conversation'", "console.log(`[xtj-admin-api]");
   assert.match(block, /convId !== 'legacy' && !\/\^\[A-Z0-9\\-\]\{6,\}\$\/i\.test\(convId\)/);
-  assert.match(block, /filter\('actor_key', 'like', 'ai_msg_conv_' \+ convId \+ '_%'\)/);
+  assert.match(block, /filter\('actor_key', 'like', aiConversationActorPattern\(convId\)\)/);
 });
 
 test('admin type filters are constrained before Supabase equality filters', () => {

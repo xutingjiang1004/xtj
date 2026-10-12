@@ -24,6 +24,35 @@ test('private signing fails closed instead of falling back to public URLs', asyn
   const payload=JSON.parse(body.data[0].content);
   assert.equal(body.ok,true);assert.equal(payload.transcript,'saved words');assert.equal(payload.media.url,'');assert.equal(payload.media.unavailable,true);
 });
+test('legacy uploads attachments are renewed through the private bucket boundary', async () => {
+  const signed = [], media = createDmPrivateStorage({ storage: { from(bucket) {
+    return { async createSignedUrl(path) { signed.push({ bucket, path }); return { data: { signedUrl: 'https://storage.example/private-legacy' } }; } };
+  } } }, { supabaseUrl: 'https://project.supabase.co' });
+  const body = { ok: true, data: [{ actor_key: '__dm_aud__chat/legacy.m4a', content: JSON.stringify({
+    transcript: 'saved words', media: { kind: 'audio', url: 'https://project.supabase.co/storage/v1/object/public/uploads/chat/legacy.m4a' }
+  }) }] };
+  await media.hydrateBody(body);
+  assert.deepEqual(signed, [{ bucket: 'uploads', path: 'chat/legacy.m4a' }]);
+  assert.equal(JSON.parse(body.data[0].content).media.url, 'https://storage.example/private-legacy');
+  assert.equal(JSON.parse(body.data[0].content).transcript, 'saved words');
+  const invalid = { ok: true, data: [{ actor_key: '__dm_aud__chat/legacy.m4a', content: JSON.stringify({
+    media: { url: 'https://attacker.example/storage/v1/object/public/uploads/chat/legacy.m4a' }
+  }) }] };
+  await media.hydrateBody(invalid); assert.equal(signed.length, 1);
+  assert.equal(JSON.parse(invalid.data[0].content).media.url, '');
+  const plain = { ok: true, data: [{ actor_key: '__dm_aud__chat/legacy.m4a', content: 'original caption' }] };
+  await media.hydrateBody(plain);
+  const legacy = JSON.parse(plain.data[0].content);
+  assert.equal(legacy.text, 'original caption'); assert.equal(legacy.media.kind, 'audio');
+  assert.equal(legacy.media.url, 'https://storage.example/private-legacy');
+  for (const content of ['123','null','[]','{"text":"JSON caption"}']) {
+    const row={actor_key:'__dm_img__chat/legacy.jpg',content};await media.hydrateMessage(row);
+    const hydrated=JSON.parse(row.content);assert.equal(hydrated.media.url,'https://storage.example/private-legacy');
+    assert.equal(hydrated.text,content.startsWith('{')?'JSON caption':content);
+  }
+  const before=signed.length,withdrawn={actor_key:'__dm_img__chat/withdrawn.jpg',content:'{"withdrawn":true,"text":""}'};
+  await media.hydrateMessage(withdrawn);assert.equal(signed.length,before);assert.equal(JSON.parse(withdrawn.content).media,undefined);
+});
 test('document registry verification accepts the restricted MIME set and uses the private bucket', async () => {
   const supabase = {storage:{from(bucket){assert.equal(bucket,'dm-private');return{async list(){return{data:[{name:'abcdef123456_private_12345_file.pdf',metadata:{size:9,mimetype:'application/pdf'}}]};}};}}};
   const valid=await verifyStorageObject(supabase,'chat/abcdef123456_private_12345_file.pdf',{kind:'file',mimeType:'application/pdf',sizeBytes:9});

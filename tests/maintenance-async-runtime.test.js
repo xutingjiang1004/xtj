@@ -4,18 +4,14 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const {createRequire}=require('node:module');
+const {createPhotoDataRuntime}=require('./helpers/photo-data-runtime-fixture');
 const ROOT=path.resolve(__dirname,'..');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};}
 async function until(predicate,label){for(let i=0;i<100;i++){if(predicate())return;await tick();}throw new Error('did not reach '+label);}
 async function photoRepro(){
-  const testPath=path.join(ROOT,'tests/photo-wall-runtime-regression.test.js');
-  const testSource=fs.readFileSync(testPath,'utf8');
-  const prefix=testSource.slice(0,testSource.indexOf("test('authenticated photo API loads"));
-  const createRuntime=new Function('require','__dirname',prefix+'\nreturn createPhotoDataRuntime;')(createRequire(testPath),path.dirname(testPath));
   const response=deferred();let started=false,epoch=0,renders=0;const warnings=[];
-  const f=createRuntime(async url=>{assert.equal(url,'/api/photo/delete');started=true;return response.promise;});
+  const f=createPhotoDataRuntime(async url=>{assert.equal(url,'/api/photo/delete');started=true;return response.promise;});
   f.context.console={log(){},warn(...args){warnings.push(String(args[1]&&args[1].message||args[0]));},error(){}};
   f.window.__xtjGetAuthEpoch=()=>epoch;
   f.window.currentUser='A';f.windowListeners['auth-ready']();

@@ -4,6 +4,7 @@
 const express = require('express');
 const { toolFeedback, runRequiredSearch } = require('./ai-tool-feedback');
 const { saveCustomChatTurn, saveInterruptedChatTurn } = require('./ai-chat-save');
+const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
 
 const cors = require('cors');
 const crypto = require('crypto');
@@ -3755,9 +3756,9 @@ async function finishStream(res, opt) {
       var saveResult = await supabase.from('posts').insert([
         {
           user_name: opt.userName,
-          content: opt.message,
+          content: res._aiVisionUrls && res._aiVisionUrls.length ? res._aiVisionRawText : opt.message,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('user', opt.convId, null, null, seqUser, null, null, { client_request_id: res._aiClientRequestId }),
+          media_url: buildMsgMeta('user', opt.convId, null, null, seqUser, null, null, { client_request_id: res._aiClientRequestId, vision_urls: res._aiVisionUrls || opt.visionUrls }),
           actor_key: 'ai_msg_conv_' + opt.convId + '_user_' + opt.userName + '_' + nowSave,
           created_at: userCreatedAt
         },
@@ -3786,7 +3787,7 @@ async function finishStream(res, opt) {
     saved = await saveInterruptedChatTurn({ db: supabase, userName: opt.userName, convId: opt.convId,
       message: opt.message, reasoning, model: usedModel, thinkingMode,
       processEvents: getProcessEvents(res), cards: opt.siteCards, buildMeta: buildMsgMeta,
-      marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs,
+      marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs, visionUrls: res._aiVisionUrls || opt.visionUrls,
       startedAt: res._aiStartedAt || opt.startTime, requestId: res._aiClientRequestId,
       finishReason });
   }
@@ -11904,7 +11905,7 @@ async function authenticateUser(req, res, next) {
   return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
 }
 
-const dmPrivateStorage = createDmPrivateStorage(supabase);
+const dmPrivateStorage = createDmPrivateStorage(supabase, { supabaseUrl: SUPABASE_URL });
 app.use(dmPrivateStorage.middleware);
 const photoAccess = createPhotoAccess({ app, supabase, supabaseUrl:SUPABASE_URL, secret:API_SECRET,
   authenticateUser, verifyToken, optionalAuth, rateLimit, adminName:ADMIN_USERNAME,
@@ -21074,7 +21075,7 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
         .select('user_name, content, media_url, created_at')
         .eq('user_name', userName)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
+        .filter('actor_key', 'like', aiConversationActorPattern(convId))
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .limit(AI_CHAT_HISTORY_FETCH_BUFFER);
@@ -22658,7 +22659,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       var customSaved = await saveCustomChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
         message: customFinalText, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
         thinkingMode: _thinkMode, webSearch: _webSearch, processEvents: getProcessEvents(res), cards: customSiteCards,
-        visionUrls: customVisionUrls, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0 });
+        visionUrls: customVisionUrls, requestId: reqId, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0 });
       writeSse(res, {
         type: 'done',
         conversation_id: customConvId,
@@ -23463,6 +23464,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     //   图片 data URL，并保留用户原始文本（供视觉模型以 image_url 内容块直传）。
     var _visionImageUrls = extractVisionImageUrls(req.body && req.body.attachments);
     var _visionRawText = String((req.body && req.body.message) || '');
+    res._aiVisionUrls = _visionImageUrls; res._aiVisionRawText = _visionRawText;
 
     // ★ 2026-09-22 首包延迟优化（第二轮）：
     //   用户反馈「从发消息到他开始思考，这个过程有点慢」。根因是此处**曾经**是：
@@ -24082,8 +24084,8 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       var _responsesSaved = false;
       // ★ 多模态连续追问：把本条用户消息内联的图片 data URL 存进会话历史，
       //   后续轮次可把图重新发回视觉模型，实现「图片连续追问」。
-      var _userSaveExtra = { chat_mode: 'normal', web_search: webSearchEnabled };
-      if (_visionEngaged && _visionImageUrls.length) {
+      var _userSaveExtra = { chat_mode: 'normal', web_search: webSearchEnabled, client_request_id: res._aiClientRequestId };
+      if (_visionImageUrls.length) {
         _userSaveExtra.vision_urls = _visionImageUrls.slice(0, 3);
       }
       try {
@@ -25380,106 +25382,19 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
 //   不传 mode → 返回全部
 app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
   try {
-    var userName = req.userName;
-    var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
-    var mode = (req.query.mode || '').trim();
-
-    // 取该用户所有 AI 消息，按时间倒序（限制最多 1000 条避免内存膨胀）
-    var { data: rows } = await supabase.from('posts')
-      .select('actor_key, content, media_url, created_at')
-      .eq('user_name', userName)
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .neq('actor_key', '')
-      .order('created_at', { ascending: false })
-      .limit(1000);
-    
-    if (!Array.isArray(rows)) {
-      return res.json({ ok: true, conversations: [] });
-    }
-
-    var conversationModes = {};
-    rows.forEach(function(row) {
-      var rowConvId = resolveConvId(row);
-      if (!rowConvId) return;
-      if (!conversationModes[rowConvId]) conversationModes[rowConvId] = 'normal';
-      if (parseMsgMeta(row).chat_mode === 'deep_think') conversationModes[rowConvId] = 'deep_think';
-    });
-    
-    // 按 convId 分组，统计所有消息
-    // 用两个 pass：第一遍按时间倒序拿最新一条；第二遍计数 & 找第一条 user 消息
-    var convData = {};
-    for (var i = rows.length - 1; i >= 0; i--) {
-      var r = rows[i];
-      var meta = parseMsgMeta(r);
-      if (meta && meta.deleted) continue; // 用户已删除的跳过
-      var convId = resolveConvId(r);
-      if (!convId) continue;
-      
-      // Filter complete conversations so user/assistant pairs cannot be split across pages.
-      if (mode && conversationModes[convId] !== mode) continue;
-      
-      if (!convData[convId]) {
-        convData[convId] = { firstUserMsg: null, lastMsg: null, updated_at: null, msgCount: 0, firstRole: null, title: '' };
-      }
-      convData[convId].msgCount++;
-      
-      meta = parseMsgMeta(r);
-      var msgContent = String(r.content || '');
-      if (meta.role === 'assistant') {
-        try {
-          var c = JSON.parse(r.content || '{}');
-          if (c && typeof c.reply === 'string') msgContent = c.reply;
-        } catch(e) {
-          try { console.warn('[AI-CONV] parse msg meta error:', e && e.message); } catch(ee) {}
-        }
-      }
-      
-      if (meta.role === 'user' && !convData[convId].firstUserMsg) {
-        convData[convId].firstUserMsg = msgContent.slice(0, 20);
-      }
-    }
-    
-    // 第二遍：按时间倒序拿最新消息的 updated_at 和 lastMsg
-    for (var j = 0; j < rows.length; j++) {
-      var r2 = rows[j];
-      var meta2 = parseMsgMeta(r2);
-      if (meta2 && meta2.deleted) continue;
-      var convId2 = resolveConvId(r2);
-      if (!convId2 || !convData[convId2]) continue;
-      
-      if (!convData[convId2].updated_at) {
-        convData[convId2].updated_at = r2.created_at;
-        var msg2 = String(r2.content || '');
-        if (meta2.role === 'assistant') {
-          try {
-            var c2 = JSON.parse(r2.content || '{}');
-            if (c2 && typeof c2.reply === 'string') msg2 = c2.reply;
-          } catch(e) {
-            try { console.warn('[AI-CONV] parse msg meta2 error:', e && e.message); } catch(ee) {}
-          }
-        }
-        convData[convId2].lastMsgString = msg2.slice(0, 100);
-      }
-    }
-    
-    var conversations = Object.keys(convData).sort(function(a, b) {
-      return (convData[b].updated_at || '') > (convData[a].updated_at || '') ? 1 : -1;
-    }).slice(0, limit).map(function(k) {
-      var d = convData[k];
-      return { conversation_id: k, title: d.firstUserMsg || '新对话', last_message: d.lastMsgString || '', updated_at: d.updated_at, message_count: d.msgCount };
-    });
-    
-    console.log('[AGENT-CONV] rows=', rows.length, 'conversations=', conversations.length);
-    if (rows.length > 0 && conversations.length === 0) {
-      for (var di = 0; di < Math.min(3, rows.length); di++) {
-        console.log('[AGENT-CONV] sample row', di, 'actor_key=', rows[di].actor_key, 'media_url=', rows[di].media_url);
-      }
-    }
-    
-    return res.json({ ok: true, conversations: conversations });
+    var mode = String(req.query.mode || '').trim();
+    if (mode && !['normal', 'deep_think'].includes(mode)) return res.status(400).json({ ok: false, error: 'mode 参数无效' });
+    var cursor;
+    try { cursor = parseAiHistoryCursor(String(req.query.before || '').trim(), true); }
+    catch (_) { return res.status(400).json({ ok: false, code: 'invalid_history_cursor' }); }
+    var result = await supabase.rpc('list_ai_conversations', { p_user_name: req.userName, p_mode: mode || null,
+      p_limit: Math.min(Math.max(parseInt(req.query.limit, 10) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100),
+      p_before_at: cursor && cursor.at, p_before_id: cursor && cursor.id });
+    if (!result || result.error || !result.data || result.data.ok !== true) throw new Error('conversation_list_failed');
+    return res.json(result.data);
   } catch (e) {
-    console.error('[AGENT-CONV] list error:', e && e.message);
-    return res.status(500).json({ error: '查询失败' });
+    console.error('[AGENT-CONV] list error:', e && e.code);
+    return res.status(503).json({ ok: false, code: 'conversation_list_failed', retryable: true, error: '历史会话加载失败，请重试' });
   }
 });
 
@@ -26537,36 +26452,12 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
 app.get('/api/agent/research/history', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var limit = Math.min(Math.max(parseInt(req.query && req.query.limit, 10) || 10, 1), 50);
-    var { data: rows, error } = await supabase.from('posts')
-      .select('id, content, created_at')
-      .eq('user_name', req.userName)
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .filter('actor_key', 'like', 'ai_msg_conv_%')
-      .order('created_at', { ascending: false })
-      .limit(200);
-    if (error) {
-      console.error('[RESEARCH] history query error:', error.message);
-      return res.status(500).json({ error: 'research_history_failed' });
-    }
-    // 服务端无法按 content JSON 字段过滤，取回后 JS 过滤 type === 'tavily_research'
-    var items = [];
-    for (var hi = 0; hi < (rows || []).length && items.length < limit; hi++) {
-      var hRow = rows[hi];
-      var hParsed = null;
-      try { hParsed = JSON.parse(hRow.content || ''); } catch (e) { hParsed = null; }
-      if (!hParsed || hParsed.type !== 'tavily_research') continue;
-      items.push({
-        id: hRow.id,
-        query: hParsed.query || '',
-        answer: String(hParsed.answer || ''),
-        sources: Array.isArray(hParsed.sources) ? hParsed.sources : [],
-        created_at: hRow.created_at
-      });
-    }
-    return res.json({ ok: true, items: items });
+    var result = await supabase.rpc('list_ai_research_records', { p_user_name: req.userName, p_limit: limit });
+    if (!result || result.error || !result.data || result.data.ok !== true) throw new Error('research_history_failed');
+    return res.json(result.data);
   } catch (e) {
-    console.error('[RESEARCH] history error:', e && e.message);
-    return res.status(500).json({ error: 'research_history_failed' });
+    console.error('[RESEARCH] history error:', e && e.code);
+    return res.status(503).json({ ok: false, code: 'research_history_failed', retryable: true, error: '研究记录加载失败，请重试' });
   }
 });
 
@@ -26574,40 +26465,16 @@ app.get('/api/agent/research/history', authenticateUser, rateLimit(60000, 30), a
 // rateLimit 参考相邻端点（如 research/history 的 60000/30），防刷量逐条 UPDATE
 app.post('/api/agent/chat/delete', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
-    var userName = req.userName;
     var convId = String(req.body && req.body.conversation_id || '').trim();
-    if (!convId) return res.status(400).json({ error: '缺少 conversation_id' });
-    if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) return res.status(400).json({ error: 'conversation_id 格式无效' });
-
-    // 查该 conv 的所有消息
-    var { data: rows } = await supabase.from('posts')
-      .select('id, media_url')
-      .eq('user_name', userName)
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%');
-
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return res.json({ ok: true, deleted: 0 });
+    if (!/^[A-Za-z0-9-]{6,128}$/.test(convId)) return res.status(400).json({ ok: false, error: 'conversation_id 格式无效' });
+    var result = await supabase.rpc('soft_delete_ai_conversation', { p_user_name: req.userName, p_conversation_id: convId });
+    if (!result || result.error || !result.data || result.data.ok !== true) {
+      return res.status(503).json({ ok: false, code: 'conversation_delete_failed', retryable: true, error: '删除失败，请重试' });
     }
-
-    // 逐条标记 deleted: true
-    var updated = 0;
-    for (var i = 0; i < rows.length; i++) {
-      var meta = parseMsgMeta(rows[i]);
-      if (meta.deleted) continue; // 已删除
-      meta.deleted = true;
-      meta.deleted_at = new Date().toISOString();
-      var { error: upErr } = await supabase.from('posts')
-        .update({ media_url: JSON.stringify(meta) })
-        .eq('id', rows[i].id);
-      if (!upErr) updated++;
-    }
-
-    console.log('[AGENT-CONV] user=' + userName + ' deleted conv=' + convId + ' messages=' + updated);
-    return res.json({ ok: true, deleted: updated });
+    return res.json(result.data);
   } catch (e) {
-    console.error('[AGENT-CONV] delete error:', e && e.message);
-    return res.status(500).json({ error: '删除失败' });
+    console.error('[AGENT-CONV] delete error:', e && e.code);
+    return res.status(503).json({ ok: false, code: 'conversation_delete_failed', retryable: true, error: '删除失败，请重试' });
   }
 });
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
@@ -26966,70 +26833,22 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     if (convId && !/^[A-Z0-9\-]{6,}$/i.test(convId)) return res.status(400).json({ error: 'conversation_id 格式无效' });
     if (mode && mode !== 'normal' && mode !== 'deep_think') return res.status(400).json({ error: 'mode 参数无效' });
     var limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
-    var before = String(req.query.before || '').trim();
+    var before;
+    try { before = parseAiHistoryCursor(String(req.query.before || '').trim()); }
+    catch (_) { return res.status(400).json({ ok: false, code: 'invalid_history_cursor', error: '历史分页参数无效' }); }
 
-    // 不带 convId → 先查最近一条 AI 消息的 convId
-    if (!convId) {
-      var { data: latestRows, error: latestError } = await supabase.from('posts')
-        .select('actor_key, media_url, created_at')
-        .eq('user_name', userName)
-        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .order('created_at', { ascending: false })
-        .limit(AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT);
-      if (latestError) {
-        console.error('[AGENT-CHAT] latest history query error:', latestError.message);
-        return res.status(500).json({ error: '查询失败' });
-      }
-      var recentConversations = {};
-      (latestRows || []).forEach(function(row) {
-        var rowConvId = resolveConvId(row);
-        if (!rowConvId) return;
-        if (!recentConversations[rowConvId]) recentConversations[rowConvId] = [];
-        recentConversations[rowConvId].push(row);
-      });
-      var recentConvIds = Object.keys(recentConversations).sort(function(a, b) {
-        var aTime = recentConversations[a][0] && recentConversations[a][0].created_at || '';
-        var bTime = recentConversations[b][0] && recentConversations[b][0].created_at || '';
-        return aTime < bTime ? 1 : (aTime > bTime ? -1 : 0);
-      });
-      for (var ci = 0; ci < recentConvIds.length; ci++) {
-        var candidateId = recentConvIds[ci];
-        if (!mode || getConversationStorageMode(recentConversations[candidateId]) === mode) {
-          convId = candidateId;
-          break;
-        }
-      }
-      if (!convId) {
-        // 用户从未聊过天
-        return res.json({ ok: true, conversation_id: null, messages: [] });
-      }
-    }
+    // Resolve the mode from the complete live conversation, and select the
+    // most recent live one without a fixed message-scan window.
+    var lookup = await supabase.rpc('list_ai_conversations', { p_user_name: userName, p_mode: mode || null,
+      p_limit: 1, p_conversation_id: convId || null });
+    if (!lookup || lookup.error || !lookup.data || lookup.data.ok !== true) throw new Error('history_unavailable');
+    var candidate = lookup.data.conversations && lookup.data.conversations[0];
+    if (!candidate) return res.json({ ok: true, conversation_id: convId || null, messages: [], has_more: false });
+    convId = candidate.conversation_id;
 
-    // 查指定 convId 的消息（desc + limit+1 用于 has_more 检测）
-    // ★ U3 修复: 多取一条避免 off-by-one
-    var query = supabase.from('posts')
-      .select('id, user_name, content, media_url, created_at')
-      .eq('user_name', userName)
-      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      // Fetch a small buffer for soft-deleted legacy rows instead of transferring 200 full messages.
-      .limit(Math.min(limit + AI_CHAT_HISTORY_FETCH_BUFFER, 100));
-    if (before) {
-      query = query.lt('created_at', before);
-    }
-
-    var { data: rows, error } = await query;
-    if (error) {
-      console.error('[AGENT-CHAT] history query error:', error.message);
-      return res.status(500).json({ error: '查询失败' });
-    }
-
-    var conversationMode = getConversationStorageMode(rows || []);
-    if (mode && conversationMode !== mode) {
-      return res.json({ ok: true, conversation_id: null, messages: [] });
-    }
+    var historyPage = await queryAiHistoryPage(supabase, { userName, marker: AI_AGENT_MESSAGE_MARKER,
+      convId, cursor: before, limit, parseMeta: parseMsgMeta });
+    var rows = historyPage.rows;
 
     // Filter only deleted rows. Mode is resolved once for the complete conversation above.
     var filteredRows = [];
@@ -27043,8 +26862,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     }
 
     // 判断是否还有更多（filteredRows 超过 limit 表示有下一页）
-    var hasMore = filteredRows.length > limit;
-    var pageRows = hasMore ? filteredRows.slice(0, limit) : filteredRows;
+    var hasMore = historyPage.hasMore;
+    var pageRows = filteredRows;
 
     // 内存中稳定排序（created_at > seq > roleWeight）
     function getMsgSortKey(row) {
@@ -27066,7 +26885,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       ok: true,
       conversation_id: convId,
       has_more: hasMore,
-      oldest: sortedRows.length ? sortedRows[0].created_at : null,
+      oldest: pageRows.length ? pageRows[pageRows.length - 1].created_at : null,
+      oldest_id: pageRows.length ? pageRows[pageRows.length - 1].id : null,
       messages: sortedRows.map(function(r) {
         var m = parseMsgMeta(r);
         var content = r.content || '';
@@ -27132,7 +26952,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     });
   } catch (e) {
     console.error('[AGENT-CHAT] history exception:', e.message);
-    return res.status(500).json({ error: '查询失败' });
+    return res.status(503).json({ ok: false, code: e.message === 'history_scan_limit' ? 'history_scan_limit' : 'history_unavailable', retryable: e.message !== 'history_scan_limit', error: e.message === 'history_scan_limit' ? '历史记录较多，请从历史会话列表选择记录' : '历史记录加载失败，请重试' });
   }
 });
 
@@ -27668,7 +27488,7 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
     var detailQuery = supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
       .eq('user_name', targetUser).eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
+      .filter('actor_key', 'like', aiConversationActorPattern(convId))
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(detailLimit + 1);
     if (beforeId) detailQuery = detailQuery.or('created_at.lt.' + beforeAt + ',and(created_at.eq.' + beforeAt + ',id.lt.' + beforeId + ')');
     var { data: rows, error: readError } = await detailQuery;

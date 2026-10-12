@@ -6,9 +6,10 @@ async function saveCustomChatTurn(options) {
     webSearch, processEvents, cards, visionUrls, buildMeta, marker, thinkingElapsedMs } = options;
   if (!userName || !convId || !content) return false;
   const now = Date.now();
-  const userExtra = { chat_mode: 'normal', web_search: webSearch === true, vision_urls: visionUrls };
+  const identity = options.requestId ? { client_request_id: options.requestId } : {};
+  const userExtra = { ...identity, chat_mode: 'normal', web_search: webSearch === true, vision_urls: visionUrls };
   const assistantExtra = { chat_mode: 'normal', web_search: webSearch === true,
-    process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
+    ...identity, process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
   const rows = [
     { user_name: userName, content: String(message).slice(0, 60000), media_type: marker,
       media_url: buildMeta('user', convId, null, null, 1, null, 0, userExtra),

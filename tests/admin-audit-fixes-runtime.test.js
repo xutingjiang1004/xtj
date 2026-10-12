@@ -1,11 +1,12 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),crypto=require('node:crypto');
 const operations=require('../render-api/admin-operations'),markers=require('../render-api/post-markers');
+const history=require('../render-api/ai-history');
 const admin=fs.readFileSync('js/admin/admin.js','utf8'),server=fs.readFileSync('render-api/server.js','utf8');
 function section(src,start,end){const a=src.indexOf(start),b=src.indexOf(end,a+start.length);assert.ok(a>=0&&b>a,start);return src.slice(a,b);}
 function fluent(resolve,details={}){return new Proxy({}, {get(_,key){if(key==='then')return (ok,bad)=>Promise.resolve().then(()=>resolve(details)).then(ok,bad);return (...args)=>{if(['insert','update','delete','upsert'].includes(key)){details.operation=key;details.payload=args[0];}else if(key==='select'){details.operation ||= 'select';details.columns=args[0];}else if(key==='eq'){(details.filters ||= {})[args[0]]=args[1];}else if(key==='in'){(details.in ||= {})[args[0]]=args[1];}else if(key==='order'){(details.orders ||= []).push(args);}return fluent(resolve,details);};}});}
 function node(){return {style:{},innerHTML:'',textContent:'',setAttribute(){},removeAttribute(){},appendChild(){},querySelector(){return null;},querySelectorAll(){return [];},classList:{add(){},remove(){}}};}
-function context(extra={}){const nodes={};return vm.createContext({console:{warn(){},error(){},log(){}},Date,Map,Set,Promise,URL,crypto,Buffer,JSON,setTimeout,clearTimeout,AbortController,DOMException,...operations,...markers,ADMIN_USERNAME:'xxz',window:{},document:{getElementById(id){return nodes[id] ||= node();},createElement:()=>node()},...extra});}
+function context(extra={}){const nodes={};return vm.createContext({console:{warn(){},error(){},log(){}},Date,Map,Set,Promise,URL,crypto,Buffer,JSON,setTimeout,clearTimeout,AbortController,DOMException,...operations,...markers,...history,ADMIN_USERNAME:'xxz',window:{},document:{getElementById(id){return nodes[id] ||= node();},createElement:()=>node()},...extra});}
 function response(){return {statusCode:200,status(n){this.statusCode=n;return this;},json(body){this.body=body;return this;}};}
 function route(start,end,extra={}){const handlers={};const c=context({verifyToken(){},authenticateUser(){},rateLimit:()=>()=>{},securityRateLimit:()=>()=>{},app:Object.fromEntries(['get','post','put','delete'].map(method=>[method,(path,...handlersList)=>{handlers[method+' '+path]=handlersList.at(-1);} ])),...extra});vm.runInContext(section(server,start,end),c);return {c,handler:handlers[Object.keys(handlers)[0]],handlers};}
 const uuid='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',photoId='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';

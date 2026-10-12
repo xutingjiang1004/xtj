@@ -192,9 +192,19 @@ function customModelFixture({localModels=[],deleted=[],pending=null,fetchImpl}={
     fetch:async(url,options={})=>{const call={url,method:options.method,body:options.body?JSON.parse(options.body):null};calls.push(call);return fetchImpl?fetchImpl(call):{ok:true,json:async()=>({ok:true,models:[],deleted_uids:[]})};}});
   const start=aiSource.indexOf('  function aiStorageScopeName()');const end=aiSource.indexOf('  function genCustomModelUid()',start);
   vm.runInContext(aiSource.slice(start,end)+'\nglobalThis.models={sync:syncCustomModelsFromServer,save:saveCustomModels,markDeleted:markModelUidsDeleted,load:loadCustomModels,pref:persistResearchModelPref};',context);
+  vm.runInContext(aiSource.slice(aiSource.indexOf('  function getConversationTitleOverride('),aiSource.indexOf('  function renameConversation('))+
+    '\nmodels.titleGet=getConversationTitleOverride;models.titleSet=setConversationTitleOverride;',context);
   return {context,values,calls,models:context.models};
 }
 const staleModel={uid:'last',model:'GLM-5-Base',api_key:'fixture-key',provider:'custom',base_url:'https://fixture.invalid/v1'};
+
+test('private conversation titles are scoped to the account and do not fall back to global legacy titles',()=>{
+ const f=customModelFixture();f.values.set('xtj_ai_conv_titles',JSON.stringify({ABCDEF:'legacy private title'}));
+ assert.equal(f.models.titleGet('ABCDEF'),'');assert.equal(f.values.has('xtj_ai_conv_titles'),false);
+ f.models.titleSet('ABCDEF','A private title');f.context.window.currentUser='B';f.context.window._authStateEpoch=2;
+ assert.equal(f.models.titleGet('ABCDEF'),'');f.models.titleSet('ABCDEF','B own title');
+ f.context.window.currentUser='A';f.context.window._authStateEpoch=3;assert.equal(f.models.titleGet('ABCDEF'),'A private title');
+});
 
 test('a server-side deletion of the last model clears stale device caches without uploading them again',async()=>{
  const f=customModelFixture({localModels:[staleModel]});assert.equal(await f.models.sync(),true);

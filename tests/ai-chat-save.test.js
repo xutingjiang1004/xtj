@@ -2,6 +2,25 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {EventEmitter}=require('node:events');
 const {saveCustomChatTurn,saveInterruptedChatTurn}=require('../render-api/ai-chat-save');
+test('builtin completion preserves original images and text in durable history',async()=>{
+ const stored=[],frames=[],c={supabase:{from(){return{async insert(rows){stored.push(...rows);return{error:null};}};}},
+  sanitizeAssistantVisibleText:s=>s,normalizeDeepSeekUsageModel:s=>s,DEEPSEEK_MODEL_REASONER:'reasoner',
+  AI_AGENT_MESSAGE_MARKER:'__ai_agent_msg__',getProcessEvents:()=>[],saveInterruptedChatTurn,
+  buildMsgMeta:(role,convId,usage,reasoning,seq,search,elapsed,extra)=>JSON.stringify({role,convId,...extra}),
+  recordAiTurnUsage:async()=>null,maybeUpdateConversationSummary:async()=>{},writeSse:(res,event)=>frames.push(event),console:{error(){},log(){}},Date};
+ const a=source.indexOf('async function finishStream('),b=source.indexOf('\n// ★ 2026-09-13',a);assert.ok(a>=0&&b>a);
+ vm.createContext(c);vm.runInContext(source.slice(a,b),c);
+ const res={_aiClientRequestId:'request-1',_aiVisionUrls:['data:image/png;base64,QQ=='],_aiVisionRawText:'看这张图',writableEnded:false};
+ await c.finishStream(res,{userName:'alice',convId:'ABCDEF',message:'internal OCR annotation',contentBuffer:'一只猫',finishReason:'stop'});
+ assert.equal(stored[0].content,'看这张图');assert.deepEqual(JSON.parse(stored[0].media_url).vision_urls,res._aiVisionUrls);
+ assert.equal(JSON.parse(stored[1].media_url).client_request_id,'request-1');assert.equal(frames.at(-1).saved,true);
+});
+test('custom completion persists request identity for exact pending-turn reconciliation',async()=>{
+ const stored=[];await saveCustomChatTurn({db:{from(){return{async insert(rows){stored.push(...rows);return{error:null};}};}},
+  userName:'alice',convId:'ABCDEF',message:'hello',content:'reply',requestId:'custom-request',
+  buildMeta:(role,convId,usage,reasoning,seq,search,elapsed,extra)=>JSON.stringify({role,convId,...extra}),marker:'__ai_agent_msg__'});
+ assert.equal(stored.length,2);for(const row of stored)assert.equal(JSON.parse(row.media_url).client_request_id,'custom-request');
+});
 const {toolFeedback,runRequiredSearch}=require('../render-api/ai-tool-feedback');
 const {appendProcessEvent,getProcessEvents}=require('../render-api/ai-process-events');
 const source=fs.readFileSync('render-api/server.js','utf8');

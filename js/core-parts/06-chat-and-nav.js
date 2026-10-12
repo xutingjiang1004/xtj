@@ -401,6 +401,7 @@
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
                 cancelChatFlashSend();
+                cancelDmAiAsk();
                 if(_chatSendFlight){_chatSendFlight.controller.abort();_chatSendFlight=null;}
                 if (_chatSocialPanels) _chatSocialPanels.clear();
                 resetChatAttachmentQueue();_chatBatchSending=false;dockChatSending=false;
@@ -1526,14 +1527,7 @@
                     if (!isNaN(lastTs)) snapshotNewestAt = lastTs;
                 }
                 var priorById = new Map(cached.filter(function(row){return row && row.id;}).map(function(row){return [row.id,row];}));
-                var merged = snapshot.map(function(row){
-                    var old=priorById.get(row.id), saved=old && getDMMessagePayload(old), fresh=getDMMessagePayload(row);
-                    // A stale read acknowledgement/snapshot may predate the durable
-                    // transcript. Transcription has no delete action; withdrawal wins.
-                    if (fresh && !fresh.withdrawn && !fresh.transcript && saved && saved.transcript)
-                        return Object.assign({},row,{content:JSON.stringify(Object.assign({},fresh,{transcript:saved.transcript}))});
-                    return row;
-                });
+                var merged = snapshot.map(function(row) { return reconcileDockChatMessage(priorById.get(row.id), row); });
                 cached.forEach(function(msg) {
                     if (!msg || !msg.id) return;
                     var exists = merged.some(function(existing) {
@@ -1554,6 +1548,27 @@
                 return sortDockChatMessages(merged);
             }
 
+            function reconcileDockChatMessage(old, row) {
+                if (!old) return row;
+                var saved = getDMMessagePayload(old), fresh = getDMMessagePayload(row);
+                if (!saved) return row;
+                var payload = Object.assign({}, fresh || { type: 'dm', text: typeof row.content === 'string' ? row.content : '' });
+                // Apply the same monotonic rules to polls, broadcasts, send and read ACKs.
+                if (saved.withdrawn && !payload.withdrawn) payload = Object.assign({}, saved);
+                else if (!payload.withdrawn) {
+                    if (saved.edited_at && (!payload.edited_at || Date.parse(saved.edited_at) > Date.parse(payload.edited_at))) {
+                        payload.text = saved.text; payload.edited_at = saved.edited_at;
+                    }
+                    if (!payload.transcript && saved.transcript) { payload.transcript = saved.transcript; payload.transcript_source = saved.transcript_source; }
+                }
+                if (!payload.read_at && saved.read_at) payload.read_at = saved.read_at;
+                var reconciled = Object.assign({}, row, { content: JSON.stringify(payload),
+                    __committedRevision: Math.max(Number(old.__committedRevision || 0), Number(row.__committedRevision || 0)) });
+                if (!payload.withdrawn && (row.__localPreviewUrl || old.__localPreviewUrl)) reconciled.__localPreviewUrl = row.__localPreviewUrl || old.__localPreviewUrl;
+                if (payload.withdrawn && old.__localPreviewUrl) releaseDockChatLocalPreview(old);
+                return reconciled;
+            }
+
             function upsertDockChatCacheMessage(userName, message) {
                 var cacheKey = getDockChatCacheKey(userName);
                 var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
@@ -1562,7 +1577,7 @@
                     if (message.__tempId && item.__tempId === message.__tempId) return true;
                     return !!(message.id && item.id && message.id === item.id);
                 });
-                if (index >= 0) list[index] = message;
+                if (index >= 0) list[index] = reconcileDockChatMessage(list[index], message);
                 else list.push(message);
                 _chatCache[cacheKey] = sortDockChatMessages(list);
                 return _chatCache[cacheKey];
@@ -1615,7 +1630,19 @@
                         return !!(item && item.id && item.id === message.id);
                     });
                 }
-                if (index >= 0) list[index] = message;
+                if (index >= 0) {
+                    var acknowledged = reconcileDockChatMessage(list[index], message);
+                    list.forEach(function(item, position) {
+                        if (position !== index && item && acknowledged.id && item.id === acknowledged.id)
+                            acknowledged = reconcileDockChatMessage(item, acknowledged);
+                    });
+                    list.forEach(function(item, position) {
+                        if (position !== index && item && item.id === acknowledged.id && item.__localPreviewUrl && item.__localPreviewUrl !== acknowledged.__localPreviewUrl)
+                            releaseDockChatLocalPreview(item);
+                    });
+                    list[index] = acknowledged;
+                    list = list.filter(function(item, position) { return position === index || !item || item.id !== acknowledged.id; });
+                }
                 else list.push(message);
                 _chatCache[cacheKey] = sortDockChatMessages(list);
                 return _chatCache[cacheKey];
@@ -2567,13 +2594,15 @@
                 const inp = document.getElementById('dockChatInput');
                 if (!inp) return;
                 const content = queuedText != null ? queuedText : inp.value.trim();
+                var retrying = !!(retryOptions && retryOptions.isRetry);
                 const fileInput = document.getElementById('dockChatFileInp');
-                let file = queuedFile || _chatRecordedFile || (fileInput && fileInput.files[0]);
+                let file = queuedFile || (!retrying && (_chatRecordedFile || (fileInput && fileInput.files[0]))) || null;
                 if (file) file = normalizeDockChatMediaFile(file);
                 if (_chatVoice) { showToast('请先结束录音'); return; }
-                if (_chatEditDraft) { await sendChatEditedMessage(content); return; }
-                var replyDraftSource = _chatReplyDraft;
+                if (_chatEditDraft && !retrying) { await sendChatEditedMessage(content); return; }
+                var replyDraftSource = retrying ? null : _chatReplyDraft;
                 var replyDraft = replyDraftSource ? Object.assign({}, replyDraftSource) : null;
+                if (retrying && retryOptions.replyDraft) replyDraft = Object.assign({}, retryOptions.replyDraft);
                 if (!content && !file) return;
                 if (!dockChatActiveUser) {
                     if (content) showToast('请先选择一个聊天对象');
@@ -2605,9 +2634,9 @@
                 var sendOriginal=isDmOriginalSendEnabled();
                 var sendOrigin = captureDockChatSendOrigin(file);
                 var flight={controller:new AbortController(),owner:sendOwner,epoch:sendEpoch};_chatSendFlight=flight;
-                dockChatSending = true; if (!queuedFile || inp.value.trim()===content) inp.value = '';
+                dockChatSending = true; if (!retrying && (!queuedFile || inp.value.trim()===content)) inp.value = '';
                 sendDockChatTyping(false);
-                if (_dockChatDraftTimer) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
+                if (_dockChatDraftTimer && !retrying) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
@@ -2663,7 +2692,7 @@
                 renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
                 animateDockChatSend(tempId,targetUser,sendOrigin);
                 applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
-                if (file) clearDockChatFilePreview(false);
+                if (file && !retrying) clearDockChatFilePreview(false);
                 // 失败重发时复用同一个文件对象（File 在内存里保留，页面刷新后重发不可用）
                 var pendingFile = file || null;
                 try {
@@ -2804,7 +2833,8 @@
                     touchUserSession(false);
                     try { if (typeof window.queueBehavior === 'function') window.queueBehavior('message_send', '发送消息给 [' + targetUser + ']'); } catch(e) {
                     if(!sameSender() || flight.controller.signal.aborted){if(localPreviewUrl)URL.revokeObjectURL(localPreviewUrl);return;}}
-                    if(dockChatActiveUser===targetUser)clearDockChatFilePreview(false);
+                    // The selected attachment was consumed before awaiting delivery.
+                    // A new selection now belongs to the next message.
                     // ★ 2026-09-26（用户反馈"气泡先小、再空、最后变成查看图片按钮"）：
                     //   发送成功后**不立刻释放本地原图**。把 blob 挂到真实消息上继续当显示源，
                     //   于是气泡里从头到尾都有图（本地字节，不可能 404）；远端地址交给
@@ -2890,6 +2920,7 @@
                     if (window.currentUser === sendOwner && !inp.value) persistDockChatDraft(targetUser,'');
                     try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(false); } catch (e) {}
                 }
+                return { queued: true, tempId: tempId };
             }
 
             // ══════════════════════════════════════════════════════════════════
@@ -3355,132 +3386,59 @@
             //   ② 图片只给链接：小猫的网页读取工具抓 supabase 公共地址返回 HTTP 400，
             //      而且它本来就没有解码视频/远端图片的能力。改为**把图片作为附件发给它**
             //      （小猫支持图片附件，能直接"看"）——抓取失败时才退回"给链接"。
+            var _dmAiAskTask = null;
+            function cancelDmAiAsk() {
+                var task = _dmAiAskTask; _dmAiAskTask = null;
+                if (task) { clearInterval(task.timer); task.controller.abort(); }
+            }
+            window.__xtjCancelDmAiAsk = cancelDmAiAsk;
             function askAiAboutDmMessage(message) {
                 var text = (getDMMessageText(message) || '').trim();
-                var media = resolveDockChatMedia(message);
-                var mediaUrl = (media && media.src) ? String(media.src) : '';
+                var media = resolveDockChatMedia(message), mediaUrl = String(media && media.src || '');
                 var isImage = !!(media && media.kind === 'image' && mediaUrl);
-                if (!text && !mediaUrl) { showToast('这条消息没有可提问的内容'); return; }
+                if (!currentUser || (!text && !mediaUrl)) { showToast('这条消息没有可提问的内容'); return; }
                 if (typeof window.__xtjOpenAiChat !== 'function') { showToast('请先打开小猫AI'); return; }
-
+                cancelDmAiAsk();
+                window.__xtjOpenAiChat();
+                var task = { owner: currentUser, epoch: _authStateEpoch, controller: new AbortController(),
+                    root: document.getElementById('aiChatRoot'), timer: null };
+                _dmAiAskTask = task;
+                function current() {
+                    return _dmAiAskTask === task && task.owner === currentUser && task.epoch === _authStateEpoch &&
+                        !task.controller.signal.aborted && task.root && task.root.isConnected && document.getElementById('aiChatRoot') === task.root;
+                }
+                var input = task.root && task.root.querySelector('#aiChatMsgInput'), originalDraft = input && input.value;
                 var prompt = isImage ? '请帮我看看这张图片：' : '请帮我看看这条消息：';
                 if (text) prompt += '\n' + text.slice(0, 800);
-                if (mediaUrl && !isImage) {
-                    var kindLabel = (media && media.kind === 'video') ? '视频' : ((media && media.kind === 'audio') ? '音频' : '媒体');
-                    prompt += '\n（' + kindLabel + '链接：' + mediaUrl + '）';
-                }
-
-                window.__xtjOpenAiChat();
-
-                var aiWaited = 0;
-                var aiReadySince = 0;
-                var aiDispatched = false;   // ★ 一旦发出过就不再注入
-                var aiSentAt = 0;
-                var aiRetries = 0;
-                var aiAnchor = prompt.slice(0, 24);
-                var aiAttached = false;
-
-                // 等小猫AI 自己的初始化落定（它异步拉配置 + 载入历史，载入时会重写消息区；
-                //   此前不等这一步，刚显示出来的消息会被那次重写冲掉）。
-                function aiInitSettled() {
-                    var cfg = null;
-                    try {
-                        cfg = (window.__xtjAiAgent && typeof window.__xtjAiAgent.getConfig === 'function')
-                            ? window.__xtjAiAgent.getConfig()
-                            : null;
-                    } catch (e) { cfg = null; }
-                    if (!cfg) { aiReadySince = 0; return false; }
-                    if (!aiReadySince) { aiReadySince = Date.now(); return false; }
-                    return (Date.now() - aiReadySince) >= 500;
-                }
-
-                // 把图片作为附件塞进小猫的附件管线（复用它的 change 处理，与手动选图完全同路径）
-                function attachImageToAi() {
-                    if (aiAttached || !isImage) return Promise.resolve(false);
-                    aiAttached = true;
-                    var fileInput = document.getElementById('aiChatFileInp');
-                    if (!fileInput || typeof fetch !== 'function') return Promise.resolve(false);
-                    return fetch(mediaUrl, { mode: 'cors', credentials: 'omit' })
-                        .then(function(resp) { return resp.ok ? resp.blob() : null; })
+                if (mediaUrl && !isImage) prompt += '\n（媒体链接：' + mediaUrl + '）';
+                var ready = !isImage, attached = false, started = Date.now();
+                if (isImage && current()) {
+                    // Bearer tokens only go to our own API. Signed Storage and local
+                    // blob URLs need no credentials and retain their original bytes.
+                    var parsed = new URL(mediaUrl, location.href), api = new URL(window.API_BASE || location.origin, location.href);
+                    var isApi = parsed.origin === api.origin && /^\/api\//.test(parsed.pathname);
+                    var request = isApi ? window.xtjProtectedFetch(parsed.pathname + parsed.search, { authOwner: task.owner, authEpoch: task.epoch,
+                        signal: task.controller.signal, timeoutMs: 15000 }) : fetch(mediaUrl, { credentials: 'omit', signal: task.controller.signal });
+                    Promise.resolve(request).then(function(response) { if (!response.ok) throw Error('图片暂不可用'); return response.blob(); })
                         .then(function(blob) {
-                            if (!blob) return false;
-                            var name = 'dm-' + Date.now() + '.png';
-                            var file = null;
-                            try { file = new File([blob], name, { type: blob.type || 'image/png' }); }
-                            catch (e) { return false; }
-                            var dt = new DataTransfer();
-                            dt.items.add(file);
-                            fileInput.files = dt.files;
-                            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-                            return true;
-                        })
-                        .catch(function() { return false; });
+                            if (!current()) return;
+                            var fileInput = task.root.querySelector('input[type="file"]');
+                            if (!fileInput || input.value !== originalDraft) throw Error('输入内容已改变，请重新选择问小猫');
+                            var dt = new DataTransfer(); dt.items.add(new File([blob], 'dm-image', { type: blob.type || 'image/png' }));
+                            fileInput.files = dt.files; fileInput.dispatchEvent(new Event('change', { bubbles: true })); attached = true; ready = true;
+                        }).catch(function(error) { if (current()) { showToast(error.message || '图片暂不可用，请重试'); cancelDmAiAsk(); } });
                 }
-
-                attachImageToAi().then(function(attachedOk) {
-                    if (isImage && !attachedOk) {
-                        // 附件注入失败（多为跨域）→ 退回把链接写进提示词，至少不是空手问
-                        prompt += '\n（图片链接：' + mediaUrl + '）';
-                        aiAnchor = prompt.slice(0, 24);
-                    }
-
-                    var aiTimer = setInterval(function() {
-                        aiWaited += 150;
-                        var input = document.getElementById('aiChatMsgInput') || document.getElementById('aiChatInput');
-                        var sendBtn = document.getElementById('aiChatSendBtn');
-                        var list = document.getElementById('aiChatMessages');
-                        if (!input || !sendBtn) {
-                            if (aiWaited >= 6000) {
-                                clearInterval(aiTimer);
-                                showToast('小猫AI 打开失败，请刷新后重试');
-                            }
-                            return;
-                        }
-                        if (!aiInitSettled()) {
-                            if (aiWaited >= 10000) {
-                                clearInterval(aiTimer);
-                                showToast('小猫AI 初始化超时，请重试');
-                            }
-                            return;
-                        }
-
-                        // ① 注入（只在首次发送之前；发出后 AI 会清空输入框，绝不能再写回去）
-                        if (!aiDispatched) {
-                            if (String(input.value || '').indexOf(aiAnchor) < 0) {
-                                var existing = String(input.value || '');
-                                input.value = existing.trim() ? (existing.replace(/\s+$/, '') + '\n' + prompt) : prompt;
-                                try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
-                                return;
-                            }
-                            aiDispatched = true;
-                            aiSentAt = aiWaited;
-                            try { sendBtn.click(); } catch (e2) {}
-                            return;
-                        }
-
-                        // ② 已发出：只校验，不再动输入框
-                        if (aiWaited - aiSentAt < 900) return;
-                        var produced = false;
-                        try {
-                            produced = !!(list && list.querySelector('.ai-msg.user, .ai-msg--user, .ai-msg'));
-                        } catch (eChk) { produced = false; }
-                        if (produced) { clearInterval(aiTimer); return; }
-                        if (aiRetries < 1) {
-                            aiRetries += 1;
-                            aiSentAt = aiWaited;
-                            // 重试前确认输入框真的还有内容，避免空点
-                            if (String(input.value || '').trim()) {
-                                try { sendBtn.click(); } catch (eRe) {}
-                            } else {
-                                clearInterval(aiTimer);
-                                showToast('已发送，但未确认到小猫的回复，请查看对话');
-                            }
-                            return;
-                        }
-                        clearInterval(aiTimer);
-                        showToast('已发送，但未确认到小猫的回复，请查看对话');
-                    }, 150);
-                });
+                task.timer = setInterval(function() {
+                    if (!current()) { clearInterval(task.timer); task.controller.abort(); return; }
+                    if (Date.now() - started > 15000) { showToast('小猫AI 尚未准备好，请重试'); cancelDmAiAsk(); return; }
+                    if (!ready || (attached && !task.root.querySelector('.ai-file-thumb'))) return;
+                    var cfg = window.__xtjAiAgent && window.__xtjAiAgent.getConfig(), button = task.root.querySelector('#aiChatSendBtn');
+                    if (!cfg || !button || button.disabled) return;
+                    if (input.value !== originalDraft) { showToast('输入内容已改变，请重新选择问小猫'); cancelDmAiAsk(); return; }
+                    input.value = originalDraft.trim() ? originalDraft.replace(/\s+$/, '') + '\n' + prompt : prompt;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    cancelDmAiAsk(); button.click();
+                }, 150);
             }
             async function doShareDmMessage(message) {
                 var value = getDmActionValue(message);
@@ -3582,81 +3540,21 @@
 
             async function resendDmMessage(message) {
                 if (!message || !message.__failed) return;
-                var owner=currentUser,epoch=_authStateEpoch;
-                var peer = dockChatActiveUser;
-                if (!peer) return;
-                var file = message.__pendingFile || null;
+                var owner = currentUser, epoch = _authStateEpoch, peer = dockChatActiveUser;
+                if (!peer || !owner) return;
+                if (dockChatSending) { showToast('上一条消息正在发送，请稍候再重发'); return; }
+                var payload = getDMMessagePayload(message) || {}, file = message.__pendingFile || null;
                 var text = (getDMMessageText(message) || '').trim();
                 if (!file && !text) { showToast('这条消息没有可重发的内容'); return; }
-                // ★ 2026-09-27 修复（审计 S8：重发先毁旧气泡，失败即彻底丢失）：
-                //   此前流程是「先把失败气泡从缓存删掉并重渲染 → 释放本地 blob → 再交给
-                //   sendDockChatMessage 重新走一遍」。中间有多个**可失败**环节：
-                //     · `new DataTransfer()` 在部分浏览器/无 File 构造环境下抛错 → 走
-                //       `fileInput.value = ''`，媒体文件**已随 blob 释放而永久消失**；
-                //     · sendDockChatMessage 开头的 `dockChatSending` 防抖命中（调用方恰好是
-                //       在发送中长按重发）→ 直接 return，而旧气泡已经被删掉了；
-                //     · `isUserMuted()` / 50MB 体积 / 类型校验任一不通过 → 同样只 return。
-                //   这些情况下用户得到的是"消息没了、也没有提示"，比失败气泡还糟。
-                //   现在改为**事务式重发**：先做完所有前置校验与文件准备，把旧失败项留在
-                //   缓存里；只有当新一轮乐观气泡确定已入队成功后，才移除旧的失败项。
-                //   任一步骤失败 → 旧气泡原样保留，用户可再试。
-                if (dockChatSending) { showToast('上一条消息正在发送，请稍候再重发'); return; }
-                if (isUserMuted()) { showToast('您已被禁言，无法发送消息'); return; }
-                if (!window.currentUser) { showToast('请先登录'); return; }
-
-                var targetId = String(message.id || message.__tempId || '');
-                var cacheKey = getDockChatCacheKey(peer);
-                var fileInput = document.getElementById('dockChatFileInp');
-                var inp = document.getElementById('dockChatInput');
-                // —— 阶段一：准备（可能失败，此时不改动任何缓存/DOM）——
-                var stagedFileOk = true;
-                var preList = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
-                var preSignature = _chatRenderSignature[peer];
-                var preInputValue = (inp && typeof inp.value === 'string') ? inp.value : undefined;
-                var preFileList = fileInput ? fileInput.files : null;
-                try {
-                    if (file && fileInput) {
-                        var dt = new DataTransfer();
-                        dt.items.add(file);
-                        fileInput.files = dt.files;
-                    }
-                    if (inp && text) inp.value = text;
-                    _chatReplyDraft = (getDMMessagePayload(message) || {}).reply_to || null;
-                } catch (eStage) {
-                    stagedFileOk = false;
-                    try { if (fileInput) fileInput.value = ''; } catch (eStage2) {}
-                    if (inp && typeof preInputValue === 'string') inp.value = preInputValue;
-                }
-                if (!stagedFileOk && file) {
-                    // 文件无法回填到 fileInput → 无法重发媒体。保留旧失败气泡，明确告知。
-                    _chatRenderSignature[peer] = preSignature;
-                    showToast('无法准备原文件，重发未执行（气泡已保留，可清理后重新选择文件发送）');
-                    return;
-                }
-                // —— 阶段二：发起新一轮发送 ——
-                await sendDockChatMessageSingle(file,text,{clientMessageId:message.__clientMessageId || message.__tempId || message.id});
-                if(owner!==currentUser || epoch!==_authStateEpoch || peer!==dockChatActiveUser)return;
-                // —— 阶段三：确认新气泡已入队，才移除旧失败项 ——
-                //   判据：缓存里出现了 targetId 以外的新项（乐观气泡的 tempId 必然是新的）。
-                var postList = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
-                var hasNewItem = postList.some(function(m) {
-                    var id = String((m && (m.id || m.__tempId)) || '');
-                    return id && id !== targetId && !preList.some(function(old){return String(old.id || old.__tempId || '')===id;});
-                });
-                if (!hasNewItem) {
-                    // 新一轮根本没起来（例如内容被清空/被防抖拦下）→ 保留旧失败气泡
-                    _chatCache[cacheKey] = preList;
-                    _chatRenderSignature[peer] = undefined;
-                    renderDockMessages(peer, _chatCache[cacheKey], false);
-                    if (inp && typeof preInputValue === 'string') inp.value = preInputValue;
-                    if (preFileList && fileInput) { try { fileInput.files = preFileList; } catch (eRestore) {} }
-                    return;
-                }
-                _chatCache[cacheKey] = postList.filter(function(m) {
-                    return String((m && (m.id || m.__tempId)) || '') !== targetId;
-                });
+                // Retry the failed turn directly. Never stage it in the composer,
+                // whose text, quote and selected attachment belong to the next turn.
+                var result = await sendDockChatMessageSingle(file, text, { isRetry: true,
+                    replyDraft: payload.reply_to || null, clientMessageId: message.__clientMessageId || message.__tempId || message.id });
+                if (owner !== currentUser || epoch !== _authStateEpoch || !result || !result.queued) return;
+                var cacheKey = getDockChatCacheKey(peer), targetId = String(message.id || message.__tempId || '');
+                _chatCache[cacheKey] = (_chatCache[cacheKey] || []).filter(function(row) { return String(row.id || row.__tempId || '') !== targetId; });
                 _chatRenderSignature[peer] = undefined;
-                renderDockMessages(peer, _chatCache[cacheKey], false);
+                if (peer === dockChatActiveUser) renderDockMessages(peer, _chatCache[cacheKey], false);
                 releaseDockChatLocalPreview(message);
             }
 
@@ -3742,13 +3640,20 @@
                 _supportDialog.addEventListener('click',function(event){var rect=_supportDialog.getBoundingClientRect();if(event.target===_supportDialog && (event.clientX<rect.left || event.clientX>rect.right || event.clientY<rect.top || event.clientY>rect.bottom)) _supportDialog.close();});
             }
 
-            async function chatFeatureApi(path, body) {
-                var response = await window.xtjProtectedFetch('/api/chat/' + path, body ? {
+            async function chatFeatureApi(path, body, options) {
+                var owner = window.currentUser, epoch = _authStateEpoch;
+                var response = await window.xtjProtectedFetch('/api/chat/' + path, Object.assign({}, body ? {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body), timeoutMs: 30000
-                } : { timeoutMs: 20000 });
+                } : { timeoutMs: 20000 }, options || {}, { authOwner: owner, authEpoch: epoch }));
                 var result = await response.json();
-                if (!response.ok || !result.ok) { var error = new Error(result.error || '操作失败，请重试'); error.status = response.status; throw error; }
+                if (owner !== window.currentUser || epoch !== _authStateEpoch) {
+                    var stale = new Error('账号已切换，操作已停止'); stale.code = 'identity_changed'; throw stale;
+                }
+                if (!response.ok || !result.ok) {
+                    var error = new Error(result.error || '操作失败，请重试');
+                    error.status = response.status; error.code = result.code; error.retryable = result.retryable; throw error;
+                }
                 return result;
             }
             function closeChatHistory() {
@@ -3914,14 +3819,24 @@
                 if (!draft || draft.owner !== window.currentUser || draft.peer !== dockChatActiveUser) return;
                 if (!text) { showToast('编辑内容不能为空'); return; }
                 if (dockChatSending) return;
+                var epoch = _authStateEpoch, input = document.getElementById('dockChatInput');
+                var submittedInput = input && input.value;
+                var flight = { owner: draft.owner, epoch: epoch, controller: new AbortController() };
+                _chatSendFlight = flight;
+                function currentEdit() { return draft.owner === window.currentUser && epoch === _authStateEpoch && _chatSendFlight === flight; }
                 dockChatSending = true;
                 try {
-                    var result = await chatFeatureApi('messages/edit', { peer: draft.peer, message_id: draft.id, text: text });
-                    if (draft.owner !== window.currentUser || draft.peer !== dockChatActiveUser) return;
-                    replaceDockChatCacheMessage(draft.peer, draft.id, result.message);
-                    _chatRenderSignature[draft.peer] = undefined; renderDockMessages(draft.peer, _chatCache[getDockChatCacheKey(draft.peer)] || [], false);
-                    clearChatMessageDraft(); document.getElementById('dockChatInput').value = ''; showToast('已编辑');
-                } catch (error) { showToast(error.message); } finally { dockChatSending = false; }
+                    var result = await chatFeatureApi('messages/edit', { peer: draft.peer, message_id: draft.id, text: text }, { signal: flight.controller.signal });
+                    if (!currentEdit()) return;
+                    replaceDockChatCacheMessage(draft.peer, draft.id, Object.assign({}, result.message, { __committedRevision: ++_chatCommittedRevision }));
+                    _chatRenderSignature[draft.peer] = undefined;
+                    if (draft.peer === dockChatActiveUser) {
+                        renderDockMessages(draft.peer, _chatCache[getDockChatCacheKey(draft.peer)] || [], false);
+                        if (_chatEditDraft === draft && input && input.value === submittedInput) { clearChatMessageDraft(); input.value = ''; }
+                    }
+                    showToast('已编辑');
+                } catch (error) { if (currentEdit()) showToast(error.message); }
+                finally { if (currentEdit()) { _chatSendFlight = null; dockChatSending = false; } }
             }
             async function setChatReaction(peer, id, emoji) {
                 var owner = window.currentUser;
