@@ -1,5 +1,21 @@
 'use strict';
 
+async function saveDeepThinkChatTurn(options) {
+  const { db, userName, convId, message, content, marker, buildMeta, userExtra, assistantExtra, usage, searchMeta, durationMs } = options;
+  if (!userName || !convId || !message || !content) return false;
+  const stamp = Date.now(), identity = { chat_mode: 'deep_think', client_request_id: options.requestId || '' };
+  const rows = [
+    { user_name: userName, content: message, media_type: marker,
+      media_url: buildMeta('user', convId, null, null, 1, null, 0, { ...userExtra, ...identity }),
+      actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + stamp },
+    { user_name: userName, content, media_type: marker,
+      media_url: buildMeta('assistant', convId, usage || null, '', 2, searchMeta || null, durationMs || 0, { ...assistantExtra, ...identity }),
+      actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (stamp + 1) }
+  ];
+  try { const result = await db.from('posts').insert(rows); return !!result && !result.error; }
+  catch (_) { return false; }
+}
+
 // Inputs are prepared by the authenticated chat route, never a client-supplied row.
 async function saveCustomChatTurn(options) {
   const { db, userName, convId, message, content, reasoning, model, thinkingMode,
@@ -30,11 +46,13 @@ async function saveInterruptedChatTurn(options) {
   if (!userName || !convId || !message || typeof message !== 'string') return false;
   const stamp = Number.isFinite(options.startedAt) ? options.startedAt : Date.now();
   const turnId = String(options.requestId || stamp).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
-  const extra = { chat_mode: 'normal', interrupted: true, complete: false,
+  const extra = { chat_mode: options.chatMode === 'deep_think' ? 'deep_think' : 'normal', interrupted: true, complete: false,
     finish_reason: options.finishReason || 'cancelled', client_request_id: turnId };
+  if (options.chatMode === 'deep_think') Object.assign(extra, { deep_think: true, thinking_log: options.thinkingLog || [], agent_count: options.agentCount || 0 });
   const rows = [{ user_name: userName, content: message.slice(0, 60000), media_type: marker,
     media_url: buildMeta('user', convId, null, null, 1, null, 0,
-      Object.assign({}, extra, { vision_urls: options.visionUrls || [] })),
+      Object.assign({}, extra, { vision_urls: options.visionUrls || [],
+        ...(typeof options.attachmentContext === 'string' && options.attachmentContext ? { attachment_context: options.attachmentContext.slice(0,60000) } : {}) })),
     actor_key: 'ai_msg_conv_' + convId + '_interrupted_' + userName + '_' + turnId + '_user',
     created_at: new Date(stamp).toISOString() }];
   const content = String(options.content || '').slice(0, 24000);
@@ -52,4 +70,4 @@ async function saveInterruptedChatTurn(options) {
     return !!result && (!result.error || result.error.code === '23505');
   } catch (_) { return false; }
 }
-module.exports = { saveCustomChatTurn, saveInterruptedChatTurn };
+module.exports = { saveCustomChatTurn, saveInterruptedChatTurn, saveDeepThinkChatTurn };

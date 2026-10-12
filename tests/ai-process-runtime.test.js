@@ -8,7 +8,9 @@ async function fixture(t, effort='max', model='deepseek-flash', researchPipeline
   const browser = await chromium.launch({executablePath:process.env.CHROMIUM_PATH || (require('node:fs').existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined), args:['--no-sandbox']}); t.after(() => browser.close());
   const page = await browser.newPage(); page.setDefaultTimeout(6000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.route('https://process.test/**', route => route.fulfill({contentType:'text/html',body:'<div class="app-container"><div id="panelAiChat"></div><div id="panelDeepThink" class="hidden"><div id="dtMessages"></div><textarea id="dtInput"></textarea><button id="dtSendBtn"></button><button id="dtPauseBtn"></button><button id="dtNewBtn"></button><button id="dtDelBtn"></button></div></div>'}));
+  const deepPanel = read('index.html').match(/^<div class="dock-panel hidden" id="panelDeepThink">[\s\S]*?^<\/div>/m);
+  assert.ok(deepPanel, 'the research fixture uses the actual page controls and composer');
+  await page.route('https://process.test/**', route => route.fulfill({contentType:'text/html',body:'<div class="app-container"><div id="panelAiChat"></div>'+deepPanel[0]+'</div>'}));
   await page.goto('https://process.test/');
   await page.addStyleTag({content:'.hidden {display:none!important}'});
   for (const file of ['css/ai-agent.css','css/ui-enhance.css']) await page.addStyleTag({content:read(file)});
@@ -402,5 +404,5 @@ test('research pipeline formats report chunks and displays genuine stages before
  await page.locator('#dtInput').fill('请调查福州天气变化');await page.locator('#dtSendBtn').click();await page.waitForFunction(()=>!!window.researchStream);
  await page.evaluate(()=>{researchEmit({type:'research_stage',stage:'collect',message:'正在查阅天气来源'});researchEmit({type:'research_thinking',agent_role:'综合研判',chunk:'核对不同来源的时间口径'});researchEmit({type:'research_content',content:'## 来源整理\n\n**天气数据**\n\n- 已核对来源\n'});});
  await page.waitForSelector('#dtMessages .ai-think-answer h2');assert.ok(await page.locator('#dtMessages .ai-think-answer strong').isVisible());assert.match(await page.locator('#dtMessages .ai-think-thinking[open]').textContent(),/正在查阅天气来源/);assert.match(await page.locator('#dtMessages .ai-think-thinking[open]').textContent(),/核对不同来源的时间口径/);
- await page.evaluate(()=>researchEmit({type:'research_done',sources:[]}));await page.waitForSelector('#dtMessages .ai-research-done');
+ await page.evaluate(()=>researchEmit({type:'research_done',sources:[],message_id:'fixture-saved-research',saved:true,conversation_id:'new-cid'}));await page.waitForSelector('#dtMessages .ai-research-done');
 });

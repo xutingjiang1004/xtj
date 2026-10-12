@@ -3,7 +3,7 @@
 // 均已通过法律审核，用户已同意隐私条款。详见 DATA_COLLECTION_COMPLIANCE.js —— 请勿删除。
 const express = require('express');
 const { toolFeedback, runRequiredSearch } = require('./ai-tool-feedback');
-const { saveCustomChatTurn, saveInterruptedChatTurn } = require('./ai-chat-save');
+const { saveCustomChatTurn, saveInterruptedChatTurn, saveDeepThinkChatTurn } = require('./ai-chat-save');
 const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
 
 const cors = require('cors');
@@ -590,9 +590,10 @@ function canUseAiCache(ctx, reqBody) {
 }
 
 // 生成缓存 key（基于哈希，不记录原始对话）
-function buildAiCacheKey(userName, message, ctx, reqBody) {
+function buildAiCacheKey(userName, message, ctx, reqBody, accountId) {
   var parts = [
-    'v2',
+    'v3',
+    String(accountId || ''),
     String(userName || ''),
     String(message || '').trim(),
     String(reqBody.thinking_mode || ''),
@@ -3608,11 +3609,11 @@ var researchCache = new Map();
 var RESEARCH_CACHE_MAX = 50;
 var RESEARCH_CACHE_TTL = 24 * 60 * 60 * 1000;
 
-function researchCacheKey(userName, query, model, mode) {
+function researchCacheKey(userName, query, model, mode, accountId) {
   try {
-    return crypto.createHash('sha256').update(String(userName || '') + '|' + String(query || '') + '|' + String(model || '') + '|' + String(mode || '')).digest('hex');
+    return crypto.createHash('sha256').update(JSON.stringify([accountId || '', userName || '', query || '', model || '', mode || ''])).digest('hex');
   } catch (e) {
-    return 'k_' + String(userName || '') + '|' + String(query || '') + '|' + String(model || '') + '|' + String(mode || '');
+    return 'k_' + JSON.stringify([accountId || '', userName || '', query || '', model || '', mode || '']);
   }
 }
 
@@ -3668,8 +3669,8 @@ async function rewriteResearchQuery(query) {
 
 // D. 研究记录持久化：posts 表（media_type=AI_AGENT_MESSAGE_MARKER, actor_key=ai_msg_conv_<convId>_<ts>）
 //    content 存 JSON {type:'tavily_research', query, answer, sources}；失败不阻断流（console.warn）
-//    返回插入 id；失败时返回 actor_key，异常时返回 null
-async function persistResearchRecord(userName, convId, query, answer, sources, thinkingLog) {
+//    Only a database-confirmed ID represents a saved report.
+async function persistResearchRecord(userName, convId, query, answer, sources, thinkingLog, extraMeta) {
   if (!userName || !convId) return null;
   try {
     var nowTs = Date.now();
@@ -3688,16 +3689,16 @@ async function persistResearchRecord(userName, convId, query, answer, sources, t
       // ★ 修复：研究记录归属深度研究(deep_think)会话。此前漏写 chat_mode 导致
       //   /chat/history?mode=deep_think 按会话模式过滤时把整段研究历史丢弃，
       //   前端退出再进入后表现为「历史研究记录消失」。这里显式标记，便于按会话聚合。
-      media_url: JSON.stringify({ role: 'assistant', convId: convId, type: 'tavily_research', chat_mode: 'deep_think' }),
+      media_url: JSON.stringify(Object.assign({}, extraMeta || {}, { role: 'assistant', convId: convId, type: 'tavily_research', chat_mode: 'deep_think' })),
       actor_key: actorKey,
       created_at: new Date(nowTs).toISOString()
     }).select('id');
     if (insertResult && insertResult.error) {
       console.warn('[RESEARCH] persist failed:', insertResult.error && insertResult.error.message);
-      return actorKey;
+      return null;
     }
     var inserted = insertResult && insertResult.data && insertResult.data[0];
-    return (inserted && inserted.id) ? inserted.id : actorKey;
+    return (inserted && inserted.id) ? inserted.id : null;
   } catch (e) {
     console.warn('[RESEARCH] persist error:', e && e.message);
     return null;
@@ -21071,30 +21072,9 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
     var msgRows;
     if (convId) {
       // ★ U3 修复: 避免双查询泄漏 — 用 if/else 而非 query 覆盖
-      var r = await supabase.from('posts')
-        .select('user_name, content, media_url, created_at')
-        .eq('user_name', userName)
-        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .filter('actor_key', 'like', aiConversationActorPattern(convId))
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .limit(AI_CHAT_HISTORY_FETCH_BUFFER);
-      // ★★★ 2026-09-15 修复（P0-1「上下文丢失」）：
-      //   原代码直接 `msgRows = r.data`，从不检查 `r.error`。
-      //   一旦 Supabase 查询返回 error（网络抖动/RLS 拒绝/字段变更），
-      //   `r.data` 为 null → `Array.isArray(null)` 为 false → 整个解析分支被跳过
-      //   → `ctx.history` 静默保持为 `[]`，且**不留任何日志**。
-      //   后果：AI 每次都只拿到当前这一条 user 消息，表现为"读不到历史上下文"，
-      //   甚至在思考过程中回答用户"这就是一个独立的对话，没有上下文"。
-      //   修复：查询失败时显式记录错误日志，便于线上定位；并保持空历史兜底。
-      if (r && r.error) {
-        try {
-          console.error('[AGENT-CHAT] loadAiContext query error (conv branch):',
-            (r.error && r.error.message) || String(r.error),
-            '| user=', userName, '| conv=', convId);
-        } catch (eLog1) {}
-      }
-      msgRows = (r && r.error) ? [] : (r ? r.data : []);
+      var historyPage = await queryAiHistoryPage(supabase, { userName: userName,
+        marker: AI_AGENT_MESSAGE_MARKER, convId: convId, limit: AI_CHAT_HISTORY_FETCH_BUFFER, parseMeta: parseMsgMeta });
+      msgRows = historyPage.rows;
     } else {
       var r2 = await supabase.from('posts')
         .select('user_name, content, media_url, created_at')
@@ -21110,18 +21090,21 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
             (r2.error && r2.error.message) || String(r2.error),
             '| user=', userName);
         } catch (eLog2) {}
+        throw r2.error;
       }
       msgRows = (r2 && r2.error) ? [] : (r2 ? r2.data : []);
     }
     if (Array.isArray(msgRows)) {
       // desc 拿到的是最新在前，reverse 后变正序（旧→新）
-      var parsedRows = msgRows.slice().reverse().map(function(r) {
+      var parsedRows = msgRows.filter(function(r) { return !parseMsgMeta(r).deleted; }).reverse().map(function(r) {
         var meta = parseMsgMeta(r);
         var content = String(r.content || '');
+        if (meta.role === 'user' && typeof meta.attachment_context === 'string' && meta.attachment_context) content = meta.attachment_context;
         if (meta.role === 'assistant') {
           try {
             var c = JSON.parse(r.content || '{}');
             if (c && typeof c.reply === 'string') content = c.reply;
+            else if (c && c.type === 'tavily_research' && typeof c.answer === 'string') content = c.answer;
           } catch(e) {
             try { console.warn('[AI-PARSE] parseMsgMeta error:', e && e.message); } catch(ee) {}
           }
@@ -21161,6 +21144,7 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
     }
   } catch (e) {
     console.error('[AGENT-CHAT] loadAiContext exception:', e.message);
+    throw e;
   }
   // ★★★ 2026-09-15 修复（P0-1「上下文丢失」配套诊断）：
   //   统一输出一行上下文装载结果日志。历史条数异常为 0 时能立刻从日志区分：
@@ -21357,8 +21341,11 @@ async function handleDeepThinkChat(req, res) {
     }, 1500);
 
     // 3. 提取消息中嵌入的文件 (base64 → 文本 / 图片 OCR)
+    var originalDeepMessage = message;
+    var deepUserExtra = { vision_urls: extractVisionImageUrls(req.body && req.body.attachments) };
     var _attachDeep = unwrapAttachmentExtract(await extractChatAttachments(message, req.body && req.body.attachments));
     message = _attachDeep.text;
+    if (message !== originalDeepMessage && (req.body.attachments || []).length) deepUserExtra.attachment_context = String(message).slice(0, 60000);
     if (_attachDeep.cards && _attachDeep.cards.length) {
       _attachDeep.cards.forEach(function(card) { try { sseSend({ type: 'card', card: card }); } catch (_) {} });
     }
@@ -21379,7 +21366,7 @@ async function handleDeepThinkChat(req, res) {
     var cacheKey = '';
     var cachedHit = null;
     if (canUseAiCache(ctx, req.body)) {
-      cacheKey = buildAiCacheKey(userName, message, ctx, req.body);
+      cacheKey = buildAiCacheKey(userName, message, ctx, req.body, req.accountId);
       cachedHit = aiResponseCache.get(cacheKey);
     }
     if (cachedHit && cachedHit.expiresAt > Date.now()) {
@@ -21400,26 +21387,14 @@ async function handleDeepThinkChat(req, res) {
           thinking_log: cachedHit.thinking_log || [],
           think_duration_ms: cachedHit.think_duration_ms || 0
         };
-        await supabase.from('posts').insert([
-          {
-            user_name: userName,
-            content: message,
-            media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: cacheChatMode }),
-            actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
-          },
-          {
-            user_name: userName,
-            content: cachedContent,
-            media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('assistant', convId, cachedUsage, '', 2, null, cacheExtra.think_duration_ms, cacheExtra),
-            actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
-          }
-        ]);
+        var cachedSaved = await saveDeepThinkChatTurn({ db: supabase, userName: userName, convId: convId,
+          message: originalDeepMessage, content: cachedContent, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta,
+          requestId: clientReqId, userExtra: deepUserExtra, assistantExtra: cacheExtra, usage: cachedUsage, durationMs: cacheExtra.think_duration_ms });
       } catch (e) { try { console.error('[AI-CACHE] save on hit failed:', e && e.message); } catch (_) {} }
       sseSend({
         type: 'done',
         content: cachedContent,
+        saved: cachedSaved === true,
         sanitized_content: cachedContent,
         conversation_id: convId,
         deep_think: true,
@@ -21518,6 +21493,11 @@ async function handleDeepThinkChat(req, res) {
 
     try { clearInterval(_heartbeatTimer); } catch (e) {}
     if (aborted) {
+      await saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId,
+        message: originalDeepMessage || message, content: (flowResult && (flowResult.finalContent || flowResult.synth_content)) || '',
+        model: (flowResult && flowResult.model) || DEEPSEEK_MODEL_REASONER, thinkingMode: finalThinkingMode,
+        thinkingLog: flowResult && flowResult.thinking_log, visionUrls: deepUserExtra.vision_urls, attachmentContext: deepUserExtra.attachment_context,
+        chatMode: 'deep_think', requestId: clientReqId, startedAt: startTime, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta });
       // ★ S7 审计修复：此处整个研究流程已跑完（Planner + 并行 Workers + Synthesizer，
       //   含多次第三方搜索，是本项目最贵的一条链路），此前直接 return → 整轮 0 记账，
       //   客户端读完流后在 done 前断开即可反复白嫖（并发名额只限并发、不限累计）。
@@ -21577,6 +21557,7 @@ async function handleDeepThinkChat(req, res) {
     });
 
     // 10. 保存到 messages
+    var deepSaved = false;
     if (!aborted) {
       try {
         var totalDurationMs = Date.now() - startTime;  // ★ O 提前到这里
@@ -21603,22 +21584,10 @@ async function handleDeepThinkChat(req, res) {
           thinking_log: mergedThinkingLog,
           think_duration_ms: totalDurationMs
         };
-        await supabase.from('posts').insert([
-          {
-            user_name: userName,
-            content: message,
-            media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, { chat_mode: chatMode }),
-            actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
-          },
-          {
-            user_name: userName,
-            content: finalContent,
-            media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('assistant', convId, usageToStore, '', 2, searchMetaToStore, totalDurationMs, deepThinkExtra),
-            actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
-          }
-        ]);
+        deepSaved = await saveDeepThinkChatTurn({ db: supabase, userName: userName, convId: convId,
+          message: originalDeepMessage, content: finalContent, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta,
+          requestId: clientReqId, userExtra: deepUserExtra, assistantExtra: deepThinkExtra,
+          usage: usageToStore, searchMeta: searchMetaToStore, durationMs: totalDurationMs });
       } catch (e) {
         console.error('[DEEP-THINK] save messages failed:', e.message);
       }
@@ -21628,7 +21597,7 @@ async function handleDeepThinkChat(req, res) {
     // 仅当无历史/搜索/附件/外部上下文时允许缓存
     if (!aborted && finalContent && !flowResult.cancelled && canUseAiCache(ctx, req.body)) {
       try {
-        var cacheKey2 = buildAiCacheKey(userName, message, ctx, req.body);
+        var cacheKey2 = buildAiCacheKey(userName, message, ctx, req.body, req.accountId);
         var cacheThinkingLog = Array.isArray(flowResult.thinking_log) ? flowResult.thinking_log : [];
         aiResponseCache.set(cacheKey2, {
           content: finalContent,
@@ -21664,6 +21633,7 @@ async function handleDeepThinkChat(req, res) {
       sseSend({
         type: 'done',
         content: finalContent,
+        saved: deepSaved,
         sanitized_content: finalContent,
         conversation_id: convId,
         deep_think: true,
@@ -26137,7 +26107,7 @@ async function runSelfResearchFlow(opts) {
   } catch (e) {
     console.error('[SELF-RESEARCH] synthesizer failed:', e && e.message);
     // 兜底：直接拼接各子智能体结果
-    finalAnswer = workerResults.map(function (wr, idx) {
+    if (!finalAnswer && !isCancelled()) finalAnswer = workerResults.map(function (wr, idx) {
       return '\n【' + (wr.role || ('方向' + (idx + 1))) + '】\n' + (wr.content || '');
     }).join('\n');
   } finally {
@@ -26293,7 +26263,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     var forceRefresh = !!(req.body && req.body.refresh === true);
     // ★ 2026-09-24（课题④）：缓存 key 必须包含 researchModel，
     //   否则换模型研究会命中上一个模型的旧报告（表现为"选了模型但报告没变"）。
-    var cacheKey = researchCacheKey(userName, query, model, mode + '|' + researchModel);
+    var cacheKey = researchCacheKey(userName, query, model, mode + '|' + researchModel, req.accountId);
     if (forceRefresh) {
       try { researchCache.delete(cacheKey); } catch (_) {}
     }
@@ -26315,18 +26285,21 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
         // 按 user+query+answer 查已有记录复用，避免历史表膨胀。
         var cachedMsgId = null;
         try {
-          var { data: existResearchRows } = await supabase.from('posts')
-            .select('id, content')
+          var existingResearch = await supabase.from('posts')
+            .select('id, content, media_url')
             .eq('user_name', userName)
             .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-            .filter('actor_key', 'like', 'ai_msg_conv_%')
+            .filter('actor_key', 'like', aiConversationActorPattern(convId))
             .order('created_at', { ascending: false })
             .limit(50);
+          if (existingResearch.error) throw existingResearch.error;
+          var existResearchRows = existingResearch.data;
           if (existResearchRows && existResearchRows.length) {
             for (var xri = 0; xri < existResearchRows.length; xri++) {
               var xrParsed = null;
               try { xrParsed = JSON.parse(existResearchRows[xri].content || ''); } catch (e) {}
-              if (xrParsed && xrParsed.type === 'tavily_research' && xrParsed.query === query && xrParsed.answer === cachedAnswer) {
+              var xrMeta = parseMsgMeta(existResearchRows[xri]);
+              if (!xrMeta.deleted && !xrMeta.interrupted && xrMeta.convId === convId && xrParsed && xrParsed.type === 'tavily_research' && xrParsed.query === query && xrParsed.answer === cachedAnswer) {
                 cachedMsgId = existResearchRows[xri].id;
                 break;
               }
@@ -26348,7 +26321,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
           did_search: false
         }).catch(function() {});
         if (!aborted && Array.isArray(cached.thinking_log)) cached.thinking_log.forEach(function(entry){writeSse(res,{type:'research_thinking',agent_role:entry.agent_role,chunk:entry.chunk});});
-        if (!aborted) writeSse(res, { type: 'research_done', answer: cachedAnswer, sources: cached.sources, message_id: cachedMsgId, cached: true });
+        if (!aborted) writeSse(res, { type: 'research_done', answer: cachedAnswer, sources: cached.sources, message_id: cachedMsgId, conversation_id: convId, saved: !!cachedMsgId, cached: true });
       }
       return safeEnd();
     }
@@ -26375,6 +26348,10 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     //   内置 web_search），是本仓库【单次成本最高】的路径。客户端在此时断开，
     //   此前直接 return safeEnd() 不扣任何费用 → 可零成本刷爆研究配额。
     if (aborted || (cancelToken && cancelToken.cancelled)) {
+      if (selfResult && (selfResult.answer || (selfResult.thinking_log || []).length)) await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log,
+        { interrupted: true, complete: false, finish_reason: 'cancelled' });
+      else await saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId, message: query,
+        chatMode: 'deep_think', requestId: req.body && req.body.client_request_id, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta });
       await recordAbortedStreamUsage(userName, {
         convId: convId, usedModel: model, source: 'research_stream_aborted',
         message: query,
@@ -26436,6 +26413,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       answer: selfResult.answer,
       sources: selfResult.sources,
       message_id: msgId,
+      conversation_id: convId,
+      saved: !!msgId,
       usage: selfResult.usage || null,
       quota: researchQuota || undefined
     });

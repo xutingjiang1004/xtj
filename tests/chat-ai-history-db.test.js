@@ -2,6 +2,7 @@
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs');
 const { Client } = require('pg'), { randomUUID } = require('node:crypto');
 const { aiConversationActorPattern, parseAiHistoryCursor, applyAiHistoryCursor } = require('../render-api/ai-history');
+const { saveDeepThinkChatTurn, saveInterruptedChatTurn } = require('../render-api/ai-chat-save');
 const connectionString = process.env.XTJ_TEST_DATABASE_URL;
 test('PostgreSQL AI conversation isolation, history completeness and atomic deletion', { skip: !connectionString, timeout: 30000 }, async t => {
   const url = new URL(connectionString); assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname));
@@ -73,6 +74,24 @@ test('PostgreSQL AI conversation isolation, history completeness and atomic dele
         ('00000000-0000-4000-8000-000000000001','alice','__ai_agent_msg__','ai_msg_conv_SEQPAIR_agent_alice_2','{"convId":"SEQPAIR","role":"assistant","seq":2}','Answer','2026-10-12T11:00:00Z')`);
       const result=(await db.query("SELECT list_ai_conversations('alice','normal',100,NULL,NULL,'SEQPAIR') AS result")).rows[0].result;
       assert.equal(result.conversations[0].title,'Question');assert.equal(result.conversations[0].last_message,'Answer');
+    });
+    await t.test('completed and paused research turn writes are atomic, truthful and discoverable in the deep history', async () => {
+      const adapter = { from() { return { async insert(rows) {
+        try { const result = await db.query(`INSERT INTO posts(user_name,media_type,actor_key,media_url,content,created_at)
+          SELECT user_name,media_type,actor_key,media_url,content,COALESCE(created_at,now()) FROM jsonb_to_recordset($1::jsonb)
+          AS x(user_name text,media_type text,actor_key text,media_url text,content text,created_at timestamptz) RETURNING id`, [JSON.stringify(rows)]);
+          return { data: result.rows, error: null }; } catch (error) { return { data: null, error }; }
+      } }; } };
+      const options = { db: adapter, userName: 'alice', convId: 'DEEPSAVE', message: 'REAL QUESTION', content: 'REAL ANSWER', marker: '__ai_agent_msg__', requestId: 'deep-original',
+        userExtra: { vision_urls: ['data:image/png;base64,QUJD'] }, buildMeta: (role,conv,_u,_r,seq,_s,_elapsed,extra) => JSON.stringify({role,convId:conv,seq,...extra}) };
+      assert.equal(await saveDeepThinkChatTurn(options),true);
+      assert.equal(await saveInterruptedChatTurn({...options,convId:'PAUSE111',requestId:'deep-paused',chatMode:'deep_think'}),true);
+      const list=(await db.query("SELECT list_ai_conversations('alice','deep_think',100) AS result")).rows[0].result;
+      assert.ok(list.conversations.some(c=>c.conversation_id==='DEEPSAVE'&&c.message_count===2));
+      assert.ok(list.conversations.some(c=>c.conversation_id==='PAUSE111'&&c.message_count===2));
+      await db.query("CREATE FUNCTION refuse_deep_pair() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN IF NEW.actor_key LIKE '%REJECT11%' AND NEW.media_url::jsonb->>'role'='assistant' THEN RAISE EXCEPTION 'pair refused'; END IF; RETURN NEW; END$$; CREATE TRIGGER refuse_deep_pair BEFORE INSERT ON posts FOR EACH ROW EXECUTE FUNCTION refuse_deep_pair()");
+      assert.equal(await saveDeepThinkChatTurn({...options,convId:'REJECT11'}),false);
+      assert.equal((await db.query("SELECT count(*)::int AS n FROM posts WHERE actor_key LIKE '%REJECT11%'")).rows[0].n,0);
     });
     await t.test('deletion is owner-scoped, idempotent, and preserves concurrent metadata', async () => {
       const other = new Client({connectionString:url.href}); await other.connect();

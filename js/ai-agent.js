@@ -195,6 +195,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var customModelWriteQueue = Promise.resolve();
   var customModelMutationSeq = 0;
   var CUSTOM_MODEL_PENDING_KEY = 'xtj_ai_models_pending';
+  var RESEARCH_MODEL_PREF_KEY = 'xtj_ai_research_model';
   function readAiAuthEpoch() {
     return typeof window.__xtjGetAuthEpoch === 'function' ? window.__xtjGetAuthEpoch() : (window._authStateEpoch || 0);
   }
@@ -242,6 +243,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var aiAccountIdentity = null;
   function ensureAiAccountState() {
     if (aiAccountIdentity && !customModelIdentityCurrent(aiAccountIdentity)) resetAiAccountState();
+    if (!aiAccountIdentity) S.dtResearchModel = scopedStorageGet(RESEARCH_MODEL_PREF_KEY) || 'pro';
     aiAccountIdentity = customModelIdentity();
   }
   function saveCustomModels(list) {
@@ -321,13 +323,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   因为本地代表用户最近一次显式选择）。
         try {
           var prefModel = data.ai_prefs && data.ai_prefs.research_model;
+          var pendingPreference = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null');
+          if (pendingPreference && pendingPreference.ai_prefs && pendingPreference.ai_prefs.research_model) prefModel = pendingPreference.ai_prefs.research_model;
           if (prefModel && typeof prefModel === 'string') {
             S.dtResearchModel = prefModel;
-            try {
-              if (!localStorage.getItem('xtj_ai_research_model')) {
-                localStorage.setItem('xtj_ai_research_model', prefModel);
-              }
-            } catch (ePref) {}
+            scopedStorageSet(RESEARCH_MODEL_PREF_KEY, prefModel);
           }
         } catch (ePref2) {}
         var tombstones = loadDeletedModelUids();
@@ -1361,7 +1361,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } catch (err) {}
     };
     reader.onerror = function() {
+      if (opts.isCurrent && !opts.isCurrent()) return;
       notify('读取文件失败，请重试');
+      if (typeof opts.onError === 'function') opts.onError();
     };
     reader.readAsDataURL(file);
     return true;
@@ -4605,6 +4607,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var researchViewport = root && root.id === "panelDeepThink";
     if (!root) return function() {};
 
+    function fitResearchComposer() {
+      if (!researchViewport || root.classList.contains('hidden') || document.activeElement !== input) return;
+      var scroller = input.closest('.dt-page'), vv = window.visualViewport;
+      if (!scroller) return;
+      var visibleTop = vv ? vv.offsetTop : 0, visibleBottom = visibleTop + (vv ? vv.height : window.innerHeight);
+      var bounds = input.getBoundingClientRect(), parentBounds = scroller.getBoundingClientRect();
+      var bottom = Math.min(parentBounds.bottom, visibleBottom) - 12, top = Math.max(parentBounds.top, visibleTop) + 12;
+      if (bounds.bottom > bottom) scroller.scrollTop += bounds.bottom - bottom;
+      else if (bounds.top < top) scroller.scrollTop -= top - bounds.top;
+    }
+
     function applyViewport() {
       if (researchViewport ? root.classList.contains("hidden") : !S.active || document.body.classList.contains("xtj-research-open")) return;
       var vv = window.visualViewport;
@@ -4622,7 +4635,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messagesEl.style.paddingBottom = '';
         root.classList.toggle('ai-keyboard-open', document.documentElement.classList.contains('xtj-keyboard-open'));
         root.style.setProperty('--ai-keyboard-offset', '0px'); root.style.setProperty('--ai-viewport-height', '100%');
-        if (!researchViewport) updateInputMetrics(); return;
+        if (!researchViewport) updateInputMetrics();
+        else requestAnimationFrame(function() { if (!disposed) fitResearchComposer(); });
+        return;
       }
       // ★ U3: clamp keyboardHeight 防某些浏览器算出异常值
       var maxKb = Math.round(window.innerHeight * 0.6);
@@ -4654,6 +4669,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         root.style.setProperty('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
       }
       if (!researchViewport) updateInputMetrics();
+      else requestAnimationFrame(function() { if (!disposed) fitResearchComposer(); });
       if (keyboardHeight > 0 && isNearBottom(messagesEl, 120)) {
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
@@ -4705,10 +4721,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     window.addEventListener('xtj:visual-viewport-change', viewportHandler);
     input.addEventListener('blur', onBlur);
     input.addEventListener('focus', onFocus);
+    var composerObserver = researchViewport && typeof ResizeObserver === 'function' ? new ResizeObserver(viewportHandler) : null;
+    if (composerObserver) composerObserver.observe(inputBar);
     applyViewport();
 
     return function() {
       disposed = true;
+      if (composerObserver) composerObserver.disconnect();
       if (S.keyboardResetTimer) {
         try { clearTimeout(S.keyboardResetTimer); } catch (e2) {}
         S.keyboardResetTimer = null;
@@ -5594,6 +5613,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S._dtSendSeq = (S._dtSendSeq || 0) + 1;
       S._dtCurrentReqId = null;
       S._dtSending = false;
+      S._dtLastSendFile = null;
     }
     var cancelSeq = isDeepPageCancel ? S._dtSendSeq : S.sendSeq;
     if (cancelController) {
@@ -5781,7 +5801,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (refreshBtn.disabled) return;
           refreshBtn.disabled = true;
           refreshBtn.textContent = '研究中…';
-          try { if (card._researchRefreshFn) card._researchRefreshFn(); } catch (e) {}
+          Promise.resolve().then(function() { return card._researchRefreshFn && card._researchRefreshFn(); }).catch(function() {
+            if (refreshBtn.isConnected) notify('重新研究失败，请重试');
+          }).finally(function() {
+            if (refreshBtn.isConnected) { refreshBtn.disabled = false; refreshBtn.textContent = '↻ 重新研究'; }
+          });
         });
         footer.appendChild(refreshBtn);
       }
@@ -5904,7 +5928,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       modelSel.addEventListener('change', function() {
         var v = String(modelSel.value || '');
         S.dtResearchModel = v;
-        try { localStorage.setItem('xtj_ai_research_model', v); } catch (eSt) {}
+        scopedStorageSet(RESEARCH_MODEL_PREF_KEY, v);
         // ★ 2026-09-25：同步到服务端，换设备/清缓存后选择仍在
         persistResearchModelPref(v);
         syncResearchModelUi(panel);
@@ -5919,7 +5943,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       inputBar.parentNode.insertBefore(modelBar, inputBar);
       // 恢复上次选择（默认 = 内置推理模型 pro）
       try {
-        var savedResearchModel = localStorage.getItem('xtj_ai_research_model');
+        var savedResearchModel = scopedStorageGet(RESEARCH_MODEL_PREF_KEY);
         if (savedResearchModel) S.dtResearchModel = savedResearchModel;
       } catch (eRm) {}
     }
@@ -5939,7 +5963,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!panel) return;
     var sel = panel.querySelector('.dt-research-model-select');
     if (!sel) return;
-    var prev = sel.value || S.dtResearchModel || 'pro';
+    var prev = S.dtResearchModel || sel.value || 'pro';
     sel.innerHTML = '';
     // 内置
     var builtinGroup = el('optgroup', { label: '内置模型' });
@@ -6131,12 +6155,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // Tavily Deep Research SSE 调用
   //   resolve({ answer, sources, message_id }); reject(Error) — err.cancelled / err.tavilyTimeout / err.networkError / err.status
   function runTavilyResearch(query, onProgress, opts) {
+    var requestIdentity = customModelIdentity();
+    var requestConversationId = (opts && opts.conversationId) || S.dtConversationId;
+    var requestResearchModel = (opts && opts.researchModel) || S.dtResearchModel || 'pro';
     // ★ 2026-08-05: 支持外部传入 controller（flow 的 S.deepThinkJob），
     //   否则 cancelDeepThink 的 abort 无法中断内部 fetch（取消链断裂）
     var controller = (opts && opts.controller) || new AbortController();
     var MAX_EVENT_SIZE = 512 * 1024;
     var settled = false;
     var idleTimer = null;
+    var totalTimer = null;
     var timedOut = false;
     var content = '';
     var contentCapped = false;
@@ -6148,14 +6176,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function fail(err) {
       if (settled) return;
       settled = true;
+      err.partialAnswer = content;
+      err.partialSources = sources;
       if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) {} idleTimer = null; }
+      if (totalTimer) { clearTimeout(totalTimer); totalTimer = null; }
       try { controller.abort(); } catch (e) {}
       rejectDone(err);
     }
     function succeed(result) {
       if (settled) return;
+      if (!customModelIdentityCurrent(requestIdentity)) { fail(Object.assign(new Error('账号已切换'), { code: 'identity_changed', cancelled: true })); return; }
       settled = true;
       if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) {} idleTimer = null; }
+      if (totalTimer) { clearTimeout(totalTimer); totalTimer = null; }
       resolveDone(result);
     }
     function resetIdle() {
@@ -6192,6 +6225,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
 
     function handleEvent(evt) {
+      if (settled) return;
+      if (!customModelIdentityCurrent(requestIdentity)) { fail(Object.assign(new Error('账号已切换'), { code: 'identity_changed', cancelled: true })); return; }
       if (!evt || !evt.type) return;
       if (evt.type === 'research_step') {
         var stepN = Math.max(0, Math.min(3, Number(evt.step != null ? evt.step : evt.phase) || 0));
@@ -6224,7 +6259,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (onProgress) { try { onProgress({ stage: String(evt.stage || ''), message: evt.message != null ? String(evt.message) : '' }); } catch (e) {} }
       } else if (evt.type === 'research_done') {
         var finalAnswer = (content && String(content).trim()) ? content : (evt.answer || '');
-        succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id != null ? evt.message_id : undefined });
+        succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id || null,
+          conversation_id: evt.conversation_id || requestConversationId,
+          saved: evt.saved === true || (evt.saved !== false && !!evt.message_id), quota: evt.quota || null });
       } else if (evt.type === 'error') {
         // ★ 2026-09-11：错误文案优先级修正。后端并发分支发的是
         //   { error: 'concurrent', code: 'concurrent', message: '请等待上一个研究请求完成' }，
@@ -6236,11 +6273,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (evt.code) ee.code = evt.code;
         else if (evt.error) ee.code = String(evt.error);
         if (evt.quota) ee.quota = evt.quota;
+        if (typeof evt.retryable === 'boolean') ee.retryable = evt.retryable;
         fail(ee);
       }
       // heartbeat / 其他事件: 忽略
     }
 
+    if (controller.signal.aborted) { done.cancel(); return done; }
+    // The request must also be bounded while awaiting auth/headers and while
+    // heartbeats keep arriving without a terminal report.
+    resetIdle();
+    totalTimer = setTimeout(function() {
+      if (!settled) fail(Object.assign(new Error('研究用时过长，已停止'), { tavilyTimeout: true }));
+    }, 10 * 60 * 1000);
     (async function() {
       try {
         var resp;
@@ -6248,6 +6293,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // ★ 修复 S1：研究接口此前不带 Authorization 头（与全站其他 AI 请求不一致），
           // 后端若按 token 鉴权将 401，或产生鉴权模型不一致。改用统一鉴权 payload。
           var authPayload = await getUserAuthPayload({ forceNoToken: false });
+          if (settled) return;
+          if (!customModelIdentityCurrent(requestIdentity)) { fail(Object.assign(new Error('账号已切换'), { code: 'identity_changed', cancelled: true })); return; }
           var authHeaders = (authPayload && authPayload.headers) || {};
           resp = await fetch(API_BASE + '/research/stream', {
             method: 'POST',
@@ -6255,17 +6302,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             credentials: 'include',
             body: JSON.stringify({
               query: String(query || ''),
+              client_request_id: opts && opts.requestId || undefined,
               model: (opts && opts.model) || 'pro',
               // ★ 2026-09-24 新增（课题④）：把用户在「模型」下拉里选定的模型传给后端。
               //   内置：'pro' | 'flash'；第三方：'custom:<uid>'（后端解密对应 api_key/base_url 调用）。
-              research_model: String(S.dtResearchModel || 'pro'),
+              research_model: String(requestResearchModel),
               mode: (opts && opts.mode) || 'hybrid',
               rewrite: (opts && typeof opts.rewrite === 'boolean') ? opts.rewrite : true,
               // ★ 优化：refresh=true 时后端跳过 24h 缓存重新研究（结果不满意重试）
               refresh: !!(opts && opts.refresh === true),
               // ★ 优化：研究通道沿用深页会话 ID，让多次研究归入同一会话、
               // 历史面板可按会话聚合（此前后端每次生成新 convId，上下文不延续）。
-              conversation_id: S && S.dtConversationId ? S.dtConversationId : undefined
+              conversation_id: requestConversationId || undefined
             }),
             signal: controller.signal
           });
@@ -6281,12 +6329,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var rawErr = '';
           try { rawErr = await resp.text(); } catch (e2) {}
           var detail = 'HTTP ' + resp.status;
+          var ej = null;
           try {
-            var ej = JSON.parse(rawErr);
+            ej = JSON.parse(rawErr);
             if (ej && (ej.error || ej.detail)) detail = String(ej.error || ej.detail);
           } catch (e3) {}
           var he = new Error(detail);
           he.status = resp.status;
+          if (ej && ej.code) he.code = ej.code;
+          if (ej && typeof ej.retryable === 'boolean') he.retryable = ej.retryable;
+          if (typeof window !== 'undefined' && typeof window.xtjObserveServiceResponse === 'function') window.xtjObserveServiceResponse(resp, ej);
           he.tavilyNotConfigured = /tavily[_-]?not[_-]?configured|not[_-]?configured/i.test(rawErr + ' ' + detail);
           fail(he);
           return;
@@ -6363,10 +6415,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         } finally {
           if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) {} idleTimer = null; }
+          try { if (settled) await reader.cancel(); } catch (eCancel) {}
+          try { reader.releaseLock(); } catch (eLock) {}
         }
         if (!settled) {
-          if (content && String(content).trim()) succeed({ answer: content, sources: sources });
-          else { var fe = new Error('研究未完成：未收到完整结果'); fe.networkError = true; fail(fe); }
+          var fe = new Error('研究未完成：未收到完整结果');
+          fe.networkError = true; fe.code = 'research_incomplete'; fail(fe);
         }
       } catch (err) {
         if (!settled) {
@@ -6383,6 +6437,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // Tavily 深入研究完整流程: 研究卡状态机 + 报告/来源展示
   //   返回 'done' = 流程已终结(成功/取消/超时); 'fallback' = 回退到原有深入研究流程
   async function runTavilyResearchFlow(opts) {
+    var flowIdentity = customModelIdentity(), flowLifecycle = S.dtLifecycleId, flowConversationId = S.dtConversationId;
     var dtMessagesEl = opts.messagesEl;
     var text = opts.text;
     var originalUserText = opts.originalUserText;
@@ -6522,51 +6577,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       dtMessagesEl.appendChild(progressCard);
       scrollToBottom(dtMessagesEl, true);
 
-      // ★ 优化：结果不满意时"重新研究"（refresh=true 跳过后端 24h 缓存）
+      // Reuse the ordinary lifecycle so refresh owns its controller, send lock
+      // and pause button. The previous report and current draft remain intact.
       progressCard._researchRefreshFn = function() {
-        if (!isResearchCard(progressCard) || (progressCard._researchState && progressCard._researchState.state === 'researching')) return;
-        // 重置卡片为研究中状态，用同一 query 强制重新研究
-        answer = '';
-        sources = [];
-        setResearchCardState(progressCard, 'researching', { statusText: '正在重新研究…', progress: 0.2, expanded: false });
-        var answerEl = progressCard.querySelector('.ai-think-answer');
-        if (answerEl) { try { answerEl.innerHTML = ''; } catch (e) {} }
-        var oldSourcesBox = progressCard.querySelector('.ai-tavily-sources-box');
-        if (oldSourcesBox) { try { oldSourcesBox.remove(); } catch (e) {} }
-        runTavilyResearch(text, function(prog) {
-          if (S._dtCurrentReqId !== reqId) {
-            return;
-          }
-          if (!prog) return;
-          if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true});
-          if (prog.stage) handleResearchStage(prog.stage, prog.message);
-          if (typeof prog.step === 'number') {
-            setStep(prog.step);
-            if (prog.tool) handleResearchStepEvent(prog.step, prog.tool);
-          }
-          if (prog.content) {
-            answer += String(prog.content);
-            appendStreamChunk(String(prog.content));
-            if (!responding) {
-              responding = true;
-              if (isResearchCard(progressCard)) {
-                setResearchCardState(progressCard, 'responding', { durationMs: Date.now() - startedAt, expanded: true, allowToggle: true });
-                setResearchSteps(progressCard, 3, 3);
-                appendResearchThinkingEntry(progressCard, '总指挥 · 生成报告', '开始流式输出研究报告…', { forceNew: true });
-              }
-            }
-          }
-          if (prog.sources) sources = prog.sources;
-        }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: true }).then(function(result) {
-          answer = (result && result.answer) || '';
-          sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
-          renderResearchResult();
-        }).catch(function(err) {
-          console.warn('[AI] Tavily re-research failed:', err && err.message);
-          if (isResearchCard(progressCard)) {
-            markResearchCardOutcome(progressCard, 'error', '重新研究失败：' + ((err && err.message) || '未知错误'));
-          }
-        });
+        if (!progressCard.isConnected || !customModelIdentityCurrent(flowIdentity) || S.dtConversationId !== flowConversationId || document.getElementById('panelDeepThink')._dtClosed) return Promise.resolve(false);
+        return handleDeepThinkPageSend(originalUserText, fileData, { refresh: true, preserveDraft: true });
       };
 
       controller = new AbortController();
@@ -6600,13 +6615,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) sources = prog.sources;
-      }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller });
+      }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId });
       var result = await researchPromise;
+      if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
       answer = (result && result.answer) || '';
       sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
       renderResearchResult();
+      if (result && result.quota) applyQuota(result.quota);
+      if (result && result.conversation_id && !S.dtConversationId) { S.dtConversationId = result.conversation_id; saveDtConvId(); }
+      if (result && result.saved === false) markResearchCardOutcome(progressCard, 'interrupted', '报告已生成，但聊天记录未保存，请复制保留后重试');
       return 'done';
     } catch (err) {
+      if (!customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
+      if (err && err.partialAnswer) { answer = err.partialAnswer; sources = err.partialSources || sources; preserveResearchAnswer(progressCard, answer); }
       var errMsg = (err && err.message) || '研究失败';
       var cardState = (progressCard && progressCard._researchState) ? progressCard._researchState.state : null;
       if ((err && err.cancelled) || cardState === 'cancelled') {
@@ -6635,11 +6656,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var isConcurrent = errCode === 'concurrent' || /上一个(研究)?请求|请等待上一个/.test(errMsg);
       var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/.test(errCode)
         || /次数已达上限|额度|开通 Pro|访问过于频繁/.test(errMsg);
-      if (isConcurrent || isQuota) {
+      if (isConcurrent || isQuota || (err && err.retryable === false) || answer) {
         console.warn('[AI] Tavily research 终结于不可回退错误:', errCode || errMsg);
         var terminalMsg = isConcurrent
           ? '上一个请求仍在进行中，请等它结束后重试'
-          : (errMsg || '当前额度不足，无法发起研究');
+          : (errMsg || '研究未完成，请重试');
         if (isResearchCard(progressCard) && cardState !== 'cancelled') {
           markResearchCardOutcome(progressCard, 'interrupted', terminalMsg);
         }
@@ -7019,6 +7040,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (!deepDrained || S._dtCurrentReqId !== reqId || controller.signal.aborted || aiNodeRef.value.isConnected === false) return;
           }
           finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
+          if (evt.saved === false && aiNodeRef.value) {
+            var unsavedNote = el('div', { class: 'ai-error-note', text: '回答已生成，但聊天记录未保存，请复制保留后重试' });
+            aiNodeRef.value.appendChild(unsavedNote);
+          }
           resetActiveRenderersByChannel('deep');
           if (typeof opts.onSuccess === 'function') { try { opts.onSuccess(evt); } catch (eSuccess) {} }
           if (doneReceivedRef) doneReceivedRef.value = true;
@@ -7156,6 +7181,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // ===================== 深入研究页 =====================
 
   function resetDeepThinkPageEmpty() {
+    S.dtHistoryPageData = null;
     var msgs = document.getElementById('dtMessages');
     if (!msgs) return;
     msgs.innerHTML = '';
@@ -7193,6 +7219,65 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } catch (e) {}
   }
 
+  function buildDeepThinkHistoryFragment(messages, msgs) {
+    var fragment = document.createDocumentFragment();
+    messages.forEach(function(msg) {
+      if (msg.id && Array.from(msgs.querySelectorAll('[data-ai-history-id]')).some(function(node) { return node.dataset.aiHistoryId === String(msg.id); })) return;
+      if (msg.is_research && msg.research_query) {
+        var queryNode = el('div', { class: 'dt-msg user' });
+        queryNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+        queryNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.research_query }));
+        fragment.appendChild(queryNode);
+      }
+      var node;
+      if (msg.role === 'user') {
+        node = el('div', { class: 'dt-msg user' });
+        node.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
+        var content = el('div', { class: 'dt-msg-content' });
+        var historyContent = msg.content || '';
+        (Array.isArray(msg.vision_urls) ? msg.vision_urls : []).forEach(function(url) {
+          if (/^data:image\/[a-z0-9.+-]+;base64,[a-zA-Z0-9+/=\s]+$/i.test(String(url)) && historyContent.indexOf(url) < 0) historyContent += '\n![历史图片](' + url + ')';
+        });
+        content.innerHTML = renderMarkdown(historyContent);
+        node.appendChild(content);
+      } else if (msg.role === 'assistant') node = buildThinkCardFromHistory(msg, msgs, true);
+      if (node) {
+        if (msg.id) node.dataset.aiHistoryId = String(msg.id);
+        fragment.appendChild(node);
+      }
+    });
+    return fragment;
+  }
+
+  function bindDeepThinkHistoryPagination(msgs, data) {
+    var cid = S.dtConversationId, identity = customModelIdentity(), lifecycle = S.dtLifecycleId;
+    S.dtHistoryPageData = { cid: cid, identity: identity, data: data };
+    msgs.querySelectorAll('.dt-history-more').forEach(function(node) { node.remove(); });
+    if (!data || !data.has_more || !data.next_cursor) return;
+    var button = el('button', { type: 'button', class: 'ai-history-retry dt-history-more', text: '加载更早的研究记录' });
+    function current() { return button.isConnected && customModelIdentityCurrent(identity) && lifecycle === S.dtLifecycleId && cid === S.dtConversationId && !document.getElementById('panelDeepThink')._dtClosed; }
+    button.addEventListener('click', async function() {
+      if (button.disabled || !current()) return;
+      button.disabled = true; button.textContent = '加载中…';
+      try {
+        var result = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(cid) + '&limit=30&mode=deep_think&before=' + encodeURIComponent(data.next_cursor), null, { timeoutMs: 15000 });
+        if (!current()) return;
+        if (!result || !result.ok || !result.data || !Array.isArray(result.data.messages)) {
+          button.textContent = describeError(result, '加载失败，点击重试');
+          button.disabled = !!(result && result.retryable === false); return;
+        }
+        var previousHeight = msgs.scrollHeight;
+        button.remove();
+        msgs.prepend(buildDeepThinkHistoryFragment(result.data.messages, msgs));
+        bindDeepThinkHistoryPagination(msgs, result.data);
+        msgs.scrollTop += Math.max(0, msgs.scrollHeight - previousHeight);
+      } catch (error) {
+        if (current()) { button.textContent = '加载失败，点击重试'; button.disabled = false; }
+      }
+    });
+    msgs.prepend(button);
+  }
+
   async function openDeepThinkPage() {
     ensureAiAccountState();
     if (!window.currentUser) {
@@ -7201,6 +7286,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     var panel = document.getElementById('panelDeepThink');
     if (!panel) return;
+    if (document.documentElement.classList.contains('xtj-ios-viewport')) {
+      var appContainer = document.querySelector('.app-container');
+      if (appContainer && panel.parentNode !== appContainer) appContainer.appendChild(panel);
+      if (appContainer) {
+        panel.style.setProperty('position', 'absolute', 'important');
+        panel.style.setProperty('height', '100%', 'important');
+        panel.style.setProperty('width', '100%', 'important');
+      }
+    }
 
     var msgs = document.getElementById('dtMessages');
     if (!msgs) return;
@@ -7217,6 +7311,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var pageLifecycle = S.dtLifecycleId;
     var pageOwner = window.currentUser || '', pageAuthEpoch = readAiAuthEpoch();
     function currentPage() { return S.dtLifecycleId === pageLifecycle && !panel._dtClosed && pageOwner === (window.currentUser || '') && pageAuthEpoch === readAiAuthEpoch(); }
+    S._dtOpening = true;
 
     // Enter the research surface immediately; auth and history can complete in the background.
     panel.classList.remove('hidden');
@@ -7224,117 +7319,107 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     document.body.classList.add('xtj-research-open');
     updateSecondaryPageState(true);
     initDeepThinkResearchUi();
+    if (S.dtViewportCleanup) S.dtViewportCleanup();
+    S.dtViewportCleanup = bindVisualViewport(msgs, document.getElementById('dtInput'), panel.querySelector('.dt-input-bar'));
 
-    var authOk = await ensureUserAuthOrNotify();
-    if (!authOk) return;
-    if (!currentPage()) return;
+    try {
+      var authOk = await ensureUserAuthOrNotify();
+      if (!authOk) return;
+      if (!currentPage()) return;
 
-    // 已有会话 → 如果消息区不为空且不是页面刷新，直接显示缓存内容
-    if (reuseHistory && S.dtConversationId && msgs.children.length > 0 && !msgs.querySelector('.dt-empty, .dt-loading, .dt-history-error')) {
-      // 已有缓存的 DOM 内容，直接显示
-    } else if (S.dtConversationId) {
-      msgs.innerHTML = '';
-      var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' });
-      msgs.appendChild(loadHint);
-      try {
-        var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think', null, { timeoutMs: 8000 });
-        if (!currentPage()) return;
-        if (!hist || !hist.ok || !hist.data || !Array.isArray(hist.data.messages)) throw new Error('深入研究记录暂不可用');
-        var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
-        if (!hasMessages) {
-          S.dtConversationId = null;
-          saveDtConvId();
-          resetDeepThinkPageEmpty();
-          var newConversation = await apiRequest('POST', '/chat/new', null);
+      // 已有会话 → 如果消息区不为空且不是页面刷新，直接显示缓存内容
+      if (reuseHistory && S.dtConversationId && msgs.children.length > 0 && !msgs.querySelector('.dt-empty, .dt-loading, .dt-history-error')) {
+        // 已有缓存的 DOM 内容，直接显示
+        if (S.dtHistoryPageData && S.dtHistoryPageData.cid === S.dtConversationId && customModelIdentityCurrent(S.dtHistoryPageData.identity)) bindDeepThinkHistoryPagination(msgs, S.dtHistoryPageData.data);
+      } else if (S.dtConversationId) {
+        msgs.innerHTML = '';
+        var loadHint = el('div', { class: 'dt-loading', style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' });
+        msgs.appendChild(loadHint);
+        try {
+          var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=30&mode=deep_think', null, { timeoutMs: 8000 });
           if (!currentPage()) return;
-          if (newConversation && newConversation.ok && newConversation.data && newConversation.data.conversation_id) {
-            S.dtConversationId = newConversation.data.conversation_id;
+          if (!hist || !hist.ok || !hist.data || !Array.isArray(hist.data.messages)) throw new Error('深入研究记录暂不可用');
+          var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
+          if (!hasMessages) {
+            S.dtConversationId = null;
+            saveDtConvId();
+            resetDeepThinkPageEmpty();
+            var newConversation = await apiRequest('POST', '/chat/new', null);
+            if (!currentPage()) return;
+            if (newConversation && newConversation.ok && newConversation.data && newConversation.data.conversation_id) {
+              S.dtConversationId = newConversation.data.conversation_id;
+              saveDtConvId();
+            }
+          }
+          if (hasMessages) {
+            msgs.innerHTML = '';
+            msgs.appendChild(buildDeepThinkHistoryFragment(hist.data.messages, msgs));
+            bindDeepThinkHistoryPagination(msgs, hist.data);
+          } else {
+            if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
+          }
+        } catch (e) {
+          if (!currentPage()) return;
+          msgs.replaceChildren(el('div', { class: 'dt-history-error', text: '聊天记录加载失败，原有对话仍保留' }));
+          var historyRetry = el('button', { type: 'button', class: 'ai-history-retry', text: '重新加载聊天记录' });
+          historyRetry.addEventListener('click', function() { msgs.replaceChildren(); openDeepThinkPage(); });
+          msgs.appendChild(historyRetry);
+        }
+      } else {
+        // 首次打开，创建新会话
+        resetDeepThinkPageEmpty();
+        try {
+          var r = await apiRequest('POST', '/chat/new', null);
+          if (!currentPage()) return;
+          if (r && r.ok && r.data && r.data.conversation_id) {
+            S.dtConversationId = r.data.conversation_id;
             saveDtConvId();
           }
-        }
-        if (hasMessages) {
-          msgs.innerHTML = '';
-          hist.data.messages.forEach(function(msg) {
-            // ★ 修复：深入研究记录只持久化了 assistant 一条（无单独 user 行），
-            //   这里按服务端还原出的 research_query 补出「你」的问题气泡，
-            //   避免历史里只有研究报告、没有原始提问，观感残缺。
-            if (msg.is_research && msg.research_query) {
-              var qNode = el('div', { class: 'dt-msg user' });
-              qNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
-              qNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.research_query }));
-              msgs.appendChild(qNode);
-            }
-            if (msg.role === 'user') {
-              var userNode = el('div', { class: 'dt-msg user' });
-              userNode.appendChild(el('div', { class: 'dt-msg-label', text: '你' }));
-              userNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.content || '' }));
-              msgs.appendChild(userNode);
-            } else if (msg.role === 'assistant') {
-              var thinkNode = buildThinkCardFromHistory(msg, msgs, true);
-              if (thinkNode) msgs.appendChild(thinkNode);
-            }
-          });
-        } else {
-          if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
-        }
-      } catch (e) {
-        if (!currentPage()) return;
-        msgs.replaceChildren(el('div', { class: 'dt-history-error', text: '聊天记录加载失败，原有对话仍保留' }));
-        var historyRetry = el('button', { type: 'button', class: 'ai-history-retry', text: '重新加载聊天记录' });
-        historyRetry.addEventListener('click', function() { msgs.replaceChildren(); openDeepThinkPage(); });
-        msgs.appendChild(historyRetry);
-      }
-    } else {
-      // 首次打开，创建新会话
-      resetDeepThinkPageEmpty();
-      try {
-        var r = await apiRequest('POST', '/chat/new', null);
-        if (!currentPage()) return;
-        if (r && r.ok && r.data && r.data.conversation_id) {
-          S.dtConversationId = r.data.conversation_id;
-          saveDtConvId();
-        }
-      } catch (e) {}
-    }
-
-    if (!currentPage()) return;
-    S.dtDomIdentity = customModelIdentity();
-    S.dtDomConversationId = S.dtConversationId;
-    // 等待两帧 + 一个小延时，确保所有子元素布局完成（markdown 渲染、图片等）
-    // 然后用 scrollIntoView 定位到最后一条消息，scrollIntoView 兼容性比 scrollTop=scrollHeight 更好
-    if (msgs) {
-      var scrollToEnd = function() {
-        if (!currentPage()) return;
-        try {
-          // 找最后一条用户消息或助手消息
-          var last = msgs.lastElementChild;
-          if (last && last !== msgs) {
-            try { last.scrollIntoView({ block: 'end', behavior: 'auto' }); } catch (e) {}
-          }
-          // 兜底：直接设 scrollTop
-          try { msgs.scrollTop = msgs.scrollHeight; } catch (e) {}
         } catch (e) {}
-      };
-      requestAnimationFrame(scrollToEnd);
-    }
+      }
 
-    var input = document.getElementById('dtInput');
-    if (input) {
-      setTimeout(function() {
-        if (currentPage()) { try { input.focus(); } catch (e) {} }
-      }, 80);
-    }
+      if (!currentPage()) return;
+      S.dtDomIdentity = customModelIdentity();
+      S.dtDomConversationId = S.dtConversationId;
+      // 等待两帧 + 一个小延时，确保所有子元素布局完成（markdown 渲染、图片等）
+      // 然后用 scrollIntoView 定位到最后一条消息，scrollIntoView 兼容性比 scrollTop=scrollHeight 更好
+      if (msgs) {
+        var scrollToEnd = function() {
+          if (!currentPage()) return;
+          try {
+            // 找最后一条用户消息或助手消息
+            var last = msgs.lastElementChild;
+            if (last && last !== msgs && document.activeElement !== document.getElementById('dtInput')) {
+              try { last.scrollIntoView({ block: 'end', behavior: 'auto' }); } catch (e) {}
+            }
+            // 兜底：直接设 scrollTop
+            try { msgs.scrollTop = msgs.scrollHeight; } catch (e) {}
+          } catch (e) {}
+        };
+        requestAnimationFrame(scrollToEnd);
+      }
+
+      var input = document.getElementById('dtInput');
+      if (input) {
+        setTimeout(function() {
+          if (currentPage()) { try { input.focus(); } catch (e) {} }
+        }, 80);
+      }
+    } finally { if (currentPage()) S._dtOpening = false; }
   }
 
   function closeDeepThinkPage() {
     var panel = document.getElementById('panelDeepThink');
     try {
+      if (S.dtViewportCleanup) { S.dtViewportCleanup(); S.dtViewportCleanup = null; }
       // Invalidate every callback first, then abort the actual network
       // controllers.  Hiding the panel alone leaves a DeepSeek stream alive.
       // ★ P-29：只作废深研页自己的在途回调；主聊天用 S.lifecycleId，互不影响。
       S.dtLifecycleId++;
       S._dtCreateSeq = (S._dtCreateSeq || 0) + 1;
       S._dtCreating = false; S._dtDeleting = false;
+      S._dtOpening = false;
+      S._dtLastSendFile = null;
       S._dtSendSeq = (S._dtSendSeq || 0) + 1;
       S._dtSending = false;
       if (S._dtFetchTimeoutTimer) { clearTimeout(S._dtFetchTimeoutTimer); S._dtFetchTimeoutTimer = null; }
@@ -7385,10 +7470,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try { fileData.onSuccess(); } catch (e) {}
   }
 
-  async function handleDeepThinkPageSend(text, fileData) {
+  async function handleDeepThinkPageSend(text, fileData, sendOptions) {
+    sendOptions = sendOptions || {};
+    text = String(text || '').trim();
+    if (!text && !fileData) return;
     var dtMessagesEl = document.getElementById('dtMessages');
     var input = document.getElementById('dtInput');
     if (!dtMessagesEl || !input) return;
+    if (S._dtOpening) { notify('正在加载研究对话，请稍候'); return; }
+    var submittedComposerText = input.value, submittedFileVersion = _dtFileSelectionSeq;
+    var composerHandled = false;
+    function clearSubmittedInput() {
+      if (composerHandled) return;
+      composerHandled = true;
+      if (sendOptions.preserveDraft || input.value !== submittedComposerText || _dtFileSelectionSeq !== submittedFileVersion) return;
+      input.value = '';
+      input.style.height = 'auto';
+      if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+      else { try { input.focus(); } catch (e) {} }
+    }
 
     var originalUserText = text || '';
     var displayText = text;
@@ -7417,10 +7517,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // The research page has its own synchronous lock and generation token. Set
     // them before quota/auth awaits so double taps cannot start parallel work,
     // and so closing the page invalidates every pending continuation.
-    if (S._dtSending || S._dtCreating || S._dtDeleting) {
+    if (S._dtCreating || S._dtDeleting) {
       try { notify('正在生成回复，请稍候'); } catch (eBusy) {}
       return;
     }
+    if (S._dtSending && S._dtLastSendText === originalUserText && S._dtLastSendFile === fileData && Date.now() - S._dtLastSendAt < 1500) { notify('已发送，请勿重复点击'); return; }
+    if (S._dtSending) cancelDeepThink(S.dtConversationId);
+    S._dtLastSendText = originalUserText; S._dtLastSendFile = fileData; S._dtLastSendAt = Date.now();
     var dtSendToken = (S._dtSendSeq = (S._dtSendSeq || 0) + 1);
     var dtLifecycle = S.dtLifecycleId;
     var dtOwner = window.currentUser || '', dtAuthEpoch = readAiAuthEpoch();
@@ -7458,6 +7561,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     var originalText = text;
     function restoreInputText() {
+      if (!isCurrentDeepSend() || sendOptions.preserveDraft || String(input.value || '').trim() || _dtFileSelectionSeq !== submittedFileVersion) return;
       input.value = originalUserText;
       input.style.height = 'auto';
       try { input.style.height = Math.min(input.scrollHeight, 140) + 'px'; if (!_isTouchMobile) input.focus(); } catch (e) {}
@@ -7469,6 +7573,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     function resetSendingIfCurrent() {
       if (!isCurrentDeepSend()) return;
+      S._dtLastSendFile = null;
       if (dtFetchTimeoutTimer) { clearTimeout(dtFetchTimeoutTimer); dtFetchTimeoutTimer = null; }
       if (S._dtFetchTimeoutTimer) { clearTimeout(S._dtFetchTimeoutTimer); S._dtFetchTimeoutTimer = null; }
       var finishedController = S._dtAbortController;
@@ -7514,10 +7619,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //     此处位于深入研究页发送函数内, 即代表深入研究模式。
     if (S.tavilyResearchEnabled && !fileData && originalUserText.length >= 6) {
       // 3a. 清空输入框 (Tavily 流程先行; 回退时下方 step 3 会再清一次, 无副作用)
-      input.value = '';
-      input.style.height = 'auto';
-      if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
-      else { try { input.focus(); } catch (e2) {} }
+      clearSubmittedInput();
 
       var tavilyOutcome;
       // ★ 修复: Tavily 深入研究同样消耗每日第三方搜索次数。超限时不发起研究请求，
@@ -7535,13 +7637,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             reqId: reqId,
             model: S.dtResearchMode || 'pro',
             mode: 'hybrid',
-            rewrite: true
+            rewrite: true,
+            refresh: sendOptions.refresh === true
           });
         } catch (eTavily) {
           console.warn('[AI] Tavily research flow error, fallback to deep think:', eTavily && eTavily.message);
           tavilyOutcome = 'fallback';
         }
       }
+      if (!isCurrentDeepSend()) return;
       if (tavilyOutcome !== 'fallback') {
         // 成功 / 取消 / 超时: Tavily 流程已收尾, 结束本次发送
         resetSendingIfCurrent();
@@ -7564,10 +7668,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(dtMessagesEl, true);
 
     // 3. 清空输入框
-    input.value = '';
-    input.style.height = 'auto';
-    if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
-    else { try { input.focus(); } catch (e2) {} }
+    clearSubmittedInput();
 
     // 4. 创建 AbortController
     var controller = new AbortController();
@@ -7813,6 +7914,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       }
     }
+    var r = { value: null }, c = { value: '' }, fm = {}, fmod = { value: '' }, ft = { value: S.deepThinkEffort || 'max' };
+    var ar = { value: null }, cr = { value: null }, as = { value: false }, dr = { value: false }, eh = { value: false };
+    var sc = { value: null }, ab = { value: false };
     try {
       var resp = await fetch(url, {
         method: 'POST',
@@ -7842,9 +7946,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
 
       var reader = resp.body.getReader();
-      var r = { value: null }, c = { value: '' }, fm = {}, fmod = { value: '' }, ft = { value: S.deepThinkEffort || 'max' };
-      var ar = { value: null }, cr = { value: null }, as = { value: false }, dr = { value: false }, eh = { value: false };
-      var sc = { value: null }, ab = { value: false };
       var sseResult = await processDeepThinkSSE({
         reader: reader, controller: controller, progressCard: progressCard, reqId: reqId,
         aiNodeRef: r, aiContentRef: c, finalMetaRef: fm, finalModelRef: fmod, finalThinkingModeRef: ft,
@@ -7860,7 +7961,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           });
         },
         onErrorNoContent: function() { removeLastDtUserMessage(); restoreInputText(); },
-        onSuccess: function() { consumeAiAttachment(fileData); },
+        onSuccess: function(evt) { if (!evt || evt.saved !== false) consumeAiAttachment(fileData); },
         onResetSending: resetSendingIfCurrent
       });
       if (sc.value && S.dtLifecycleId === dtLifecycle && S._dtSendSeq === dtSendToken && !(dtPanel && dtPanel._dtClosed) && !ab.value) {
@@ -7873,13 +7974,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return;
       }
       if (S._dtCurrentReqId !== reqId || ab.value) {
-        if (ab.value && isResearchCard(progressCard)) {
+        if (isResearchCard(progressCard) && dtOwner === (window.currentUser || '') && dtAuthEpoch === readAiAuthEpoch() && progressCard.isConnected) {
           // ★ 修复：120s 绝对超时中止时标记卡片状态，避免卡在"深入研究中"
           if (controller && controller._abortReason === 'timeout' && progressCard._researchState.state !== 'cancelled') {
             markResearchCardOutcome(progressCard, 'timeout', '思考超时，请重试');
           }
           safeRemoveProgressCard(false);
           if (ar.value) try { ar.value.cancel(); } catch(e){}
+          preserveResearchAnswer(progressCard, c.value);
           resetSendingIfCurrent();
           return;
         }
@@ -7962,8 +8064,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var text = String(input.value || '').trim();
       var fData = _dtFileData;
       if (!text && !fData) return;
-      var totalLen = text.length + (fData ? (fData.type.startsWith('image/') ? 0 : fData.dataUrl.length) : 0);
-      if (totalLen > 50000) { notify('消息过长，最多 50000 字符'); return; }
+      if (text.length > 50000) { notify('消息过长，最多 50000 字符'); return; }
       if (fData) {
         fData.onSuccess = function() {
           if (_dtFileData !== fData) return;
@@ -7983,12 +8084,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (fileInput) fileInput.value = '';
     }
     function acceptDtFile(rawFile) {
-      var fileSeq = ++_dtFileSelectionSeq, fileLife = S.dtLifecycleId, fileCid = S.dtConversationId, fileOwner = window.currentUser || '', fileAuthEpoch = readAiAuthEpoch();
+      var fileSeq = ++_dtFileSelectionSeq, fileLife = S.dtLifecycleId, fileOwner = window.currentUser || '', fileAuthEpoch = readAiAuthEpoch();
+      function currentFile() { return fileSeq === _dtFileSelectionSeq && fileLife === S.dtLifecycleId && fileOwner === (window.currentUser || '') && fileAuthEpoch === readAiAuthEpoch() && document.getElementById('panelDeepThink') && !document.getElementById('panelDeepThink')._dtClosed; }
       readAiAttachmentFile(rawFile, function(fileData) {
-        if (fileSeq !== _dtFileSelectionSeq || fileLife !== S.dtLifecycleId || fileCid !== S.dtConversationId || fileOwner !== (window.currentUser || '') || fileAuthEpoch !== readAiAuthEpoch() || !document.getElementById('panelDeepThink') || document.getElementById('panelDeepThink')._dtClosed) return;
+        if (!currentFile()) return;
         _dtFileData = { name: fileData.name, type: fileData.type, dataUrl: fileData.dataUrl };
         if (filePreview) renderAiFilePreview(filePreview, fileData, clearDtFilePreview);
-      }, { sizeMsg: '文件不能超过 50MB（data URL 编码后）' });
+      }, { sizeMsg: '文件不能超过 50MB', isCurrent: currentFile });
     }
     if (fileBtn && fileInput) {
       addDtListener(fileBtn, 'click', function() { fileInput.click(); });
@@ -8015,7 +8117,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (newBtn) addDtListener(newBtn, 'click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      if (S._dtSending || S._dtCreating || S._dtDeleting) { notify('正在处理当前对话，请稍候'); return; }
+      if (S._dtOpening || S._dtSending || S._dtCreating || S._dtDeleting) { notify('正在处理当前对话，请稍候'); return; }
       S._dtCreating = true;
       var createLife = S.dtLifecycleId, createCid = S.dtConversationId;
       var owner = window.currentUser || '', epoch = readAiAuthEpoch();
@@ -8029,6 +8131,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (r && r.ok && r.data && r.data.conversation_id) {
         // A new research conversation must not inherit a pending attachment
         // from the previous one.
+        _dtFileSelectionSeq++;
         _dtFileData = null;
         if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
         if (fileInput) fileInput.value = '';
@@ -8049,7 +8152,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (delBtn) addDtListener(delBtn, 'click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      if (!S.dtConversationId || S._dtSending || S._dtCreating || S._dtDeleting) return;
+      if (!S.dtConversationId || S._dtOpening || S._dtSending || S._dtCreating || S._dtDeleting) return;
       if (!confirm('确定删除当前深入研究会话吗？删除后不可恢复。')) return;
       S._dtDeleting = true;
       var deleteLife = S.dtLifecycleId, deleteCid = S.dtConversationId;
@@ -8089,24 +8192,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       addDtListener(pauseBtn, 'click', function(ev) {
         ev.preventDefault();
         ev.stopPropagation();
-        if (!S.sending && !S.paused) return;
-        var anyPaused = S.activeRenderers && S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
-        if (anyPaused) {
-          if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
-          S.paused = false;
-          pauseBtn.textContent = '暂停';
-        } else {
-          // H-24: 只暂停渲染器，不中止 SSE 请求 / deepThinkJob（中止会永久丢失回复）
-          if (S.activeRenderers) S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
-          S.paused = true;
-          pauseBtn.textContent = '继续';
-        }
+        if (!S._dtSending) return;
+        cancelDeepThink(S.dtConversationId);
       });
     }
 
     if (input) {
+      var composing = false;
+      addDtListener(input, 'compositionstart', function() { composing = true; });
+      addDtListener(input, 'compositionend', function() { setTimeout(function() { composing = false; }, 0); });
       addDtListener(input, 'keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !composing && e.keyCode !== 229) {
           e.preventDefault();
           dtDoSend();
         }
@@ -8849,7 +8945,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
   }
 
-  async function handleSendMessage(input, sendBtn, messagesEl, fileData) {
+  async function handleSendMessage(input, sendBtn, messagesEl, fileData, onAccepted) {
     var text = String(input.value || '').trim();
     var originalUserText = text;
     if (S._newChatBusy) { notify('正在创建新对话，请稍候'); return; }
@@ -8954,8 +9050,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     var originalText = originalUserText;
+    var draftFileVersion = null;
     function restoreInputText() {
       if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || String(input.value || '').trim()) return;
+      if (draftFileVersion !== null && S._aiChatFileSelectionVersion && S._aiChatFileSelectionVersion() !== draftFileVersion) return;
       input.value = originalText;
       input.style.height = 'auto';
       try {
@@ -9088,6 +9186,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     input.value = '';
     input.style.height = 'auto';
     updateInputMetrics();
+    // Consume only an accepted draft, before any asynchronous failure can
+    // restore it. Rejected duplicate/oversized/busy sends retain their files.
+    if (typeof onAccepted === 'function') onAccepted();
+    if (S._aiChatFileSelectionVersion) draftFileVersion = S._aiChatFileSelectionVersion();
     if (_isTouchMobile) {
       try { input.blur(); } catch (e2) {}
     } else {
@@ -13246,7 +13348,7 @@ function showChatMessages() {
       style: 'display:none'
     });
     fileBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>';
-    var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', style: 'display:none' });
+    var fileInput = el('input', { type: 'file', id: 'aiChatFileInp', multiple: '', style: 'display:none' });
     var filePreview = el('div', { class: 'ai-chat-file-preview', id: 'aiChatFilePreview', style: 'display:none' });
     var input = el('textarea', {
       class: 'ai-chat-input',
@@ -13375,8 +13477,7 @@ function showChatMessages() {
       if (!text && !fileList.length) return;
       // ★ 多文件：附件已在 handleSendMessage 同步复制进请求体，
       //   发送后立即清理预览（保证不阻塞连续发送）
-      handleSendMessage(input, sendBtn, messagesEl, fileList);
-      clearAiChatFilePreview();
+      handleSendMessage(input, sendBtn, messagesEl, fileList, clearAiChatFilePreview);
     }
     // ★ 重新生成：把指定文本（及可选附件）填入输入框并发起发送。
     //   供 assistant 消息上的「重新生成」按钮调用，复用现有发送与附件预览机制。
@@ -13429,6 +13530,7 @@ function showChatMessages() {
     // 文件上传逻辑（按钮多选 / 粘贴 / 拖拽）—— 支持任意格式与多文件
     var _aiChatFileSelectionSeq = 0;
     var _aiChatFiles = []; // [{ name, type, dataUrl, size }]
+    S._aiChatFileSelectionVersion = function() { return _aiChatFileSelectionSeq; };
     // ★ 加固：_aiChatFiles 是 renderAiRoot 的闭包变量，closeAiChat 在外部作用域无法直接访问，
     //   此前关闭聊天/登出后附件数组不会被清理（会话残留）。此处把清理函数挂到 S 上，
     //   由 closeAiChat 统一调用；函数每次 renderAiRoot 重建，指向当前闭包，无泄漏。
@@ -13464,7 +13566,7 @@ function showChatMessages() {
       for (var fi = 0; fi < files.length; fi++) totalKB += Math.round(((files[fi].dataUrl || '').length * 3 / 4) / 1024);
       var label = files.length === 1
         ? (first.name + ' (' + Math.max(1, Math.round((first.size || totalKB) / 1024)) + 'KB)')
-        : (first.name + ' 等 ' + files.length + ' 个文件（约 ' + Math.round(totalKB / 1024) + 'KB）');
+        : (first.name + ' 等 ' + files.length + ' 个文件（约 ' + totalKB + 'KB）');
       var info = el('span', { class: 'ai-file-info', text: label });
       var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
       removeBtn.addEventListener('click', clearAiChatFilePreview);
@@ -13515,7 +13617,7 @@ function showChatMessages() {
             totalBytes += Math.ceil((fileData.dataUrl.length * 3) / 4);
           } else { skipped++; }
           next(i + 1);
-        }, { sizeMsg: '文件不能超过 50MB' });
+        }, { sizeMsg: '文件不能超过 50MB', isCurrent: currentFiles, onError: function() { skipped++; next(i + 1); } });
         if (!okRead) { skipped++; next(i + 1); }
       }
       next(0);
@@ -13919,6 +14021,7 @@ function showChatMessages() {
     S.dtConversationId = null;
     S.dtDomIdentity = null;
     S.dtDomConversationId = null;
+    S.dtResearchModel = 'pro'; S.dtHistoryPageData = null;
     saveDtConvId();
     S.quota = null; S.quotaFetchedAt = 0;
     S._quotaInflight = null; S._quotaInflightStartedAt = 0;

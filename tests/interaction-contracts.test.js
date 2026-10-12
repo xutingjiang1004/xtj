@@ -73,7 +73,11 @@ test('AI history keeps each conversation pair in one mode', () => {
   const historyRoute = between(server, "app.get('/api/agent/chat/history'", '// =====================');
   assert.match(server, /function getConversationStorageMode\(rows\)/);
   assert.match(historyRoute, /Filter only deleted rows\. Mode is resolved once/);
-  assert.match(server, /buildMsgMeta\('user', convId, null, null, 1, null, 0, \{ chat_mode: chatMode \}\)/);
+  assert.match(server, /await saveDeepThinkChatTurn\(/);
+  const saver = fs.readFileSync(path.join(root, 'render-api', 'ai-chat-save.js'), 'utf8');
+  assert.match(saver, /identity = \{ chat_mode: 'deep_think'/);
+  assert.match(saver, /\.\.\.userExtra, \.\.\.identity/);
+  assert.match(saver, /\.\.\.assistantExtra, \.\.\.identity/);
 });
 
 test('DM APIs authenticate and delegate visibility to the service transaction',()=>{

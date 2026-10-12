@@ -34,7 +34,8 @@ test('AI attachments are sent as structured payloads and consumed only after suc
   assert.match(source, /attachments:\s*attachmentPayload/);
   assert.match(source, /data_url:\s*fileData\.dataUrl/);
   assert.match(source, /consumeAiAttachment\(fileData\)/);
-  assert.match(source, /onSuccess:\s*function\(\)/);
+  assert.match(source, /onSuccess:\s*function\(evt\)/);
+  assert.match(source, /if \(!evt \|\| evt\.saved !== false\) consumeAiAttachment\(fileData\)/);
   assert.doesNotMatch(source, /attachments:\s*attachmentPayload \|\| \[\]/);
 });
 

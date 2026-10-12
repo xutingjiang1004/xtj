@@ -78,7 +78,7 @@ test('concurrent and quota errors must not fall back to deep think', function ()
   assert.ok(aiAgent.indexOf('isConcurrent') >= 0, 'isConcurrent 判定缺失');
   assert.ok(aiAgent.indexOf('isQuota') >= 0, 'isQuota 判定缺失');
   // 必须是"先判定 terminal 再 fallback"的顺序
-  var terminalIdx = aiAgent.indexOf('if (isConcurrent || isQuota)');
+  var terminalIdx = aiAgent.indexOf('if (isConcurrent || isQuota ||');
   var fallbackIdx = aiAgent.indexOf("console.warn('[AI] Tavily research 失败，回退到深入研究流程:'");
   assert.ok(terminalIdx > 0, '缺少 concurrent/quota 终结分支');
   assert.ok(fallbackIdx > terminalIdx,
