@@ -61,8 +61,9 @@ test('AI history prioritizes a small first payload, cache paint, and indexed que
   const historyRoute = between(server, "app.get('/api/agent/chat/history'", '// =====================');
   assert.match(aiAgent, /var HISTORY_PAGE_SIZE = 10/);
   assert.match(aiAgent, /var latestKey = getAiHistoryCacheKey\(null(?:, mode)?\)/);
-  assert.match(historyRoute, /\.limit\(AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT\)/);
-  assert.match(historyRoute, /\.limit\(Math\.min\(limit \+ AI_CHAT_HISTORY_FETCH_BUFFER, 100\)\)/);
+  assert.match(historyRoute, /supabase\.rpc\('list_ai_conversations'/);
+  assert.match(historyRoute, /queryAiHistoryPage\(supabase/);
+  assert.match(fs.readFileSync(path.join(root, 'render-api/ai-history.js'), 'utf8'), /Math\.min\(limit \+ 24, 100\)/);
   assert.match(aiHistoryIndexes, /posts_ai_agent_history_user_created_idx/);
   assert.match(aiHistoryIndexes, /posts_ai_agent_history_user_actor_prefix_idx/);
   assert.match(aiHistoryIndexes, /actor_key text_pattern_ops/);

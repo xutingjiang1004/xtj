@@ -98,8 +98,11 @@ test('normal chat and deep research keep complete conversations in separate hist
   assert.match(historyRoute, /var mode = String\(req\.query\.mode \|\| ''\)\.trim\(\)/);
   assert.match(historyRoute, /mode !== 'normal' && mode !== 'deep_think'/);
   assert.match(server, /function getConversationStorageMode\(rows\)/);
-  assert.match(historyRoute, /getConversationStorageMode\(recentConversations\[candidateId\]\)/);
-  assert.match(historyRoute, /var conversationMode = getConversationStorageMode\(rows \|\| \[\]\)/);
+  assert.match(historyRoute, /supabase\.rpc\('list_ai_conversations'/);
+  assert.match(historyRoute, /p_mode: mode \|\| null/);
+  const migration = fs.readFileSync('supabase/migrations/20261012095854_chat_ai_history_boundary.sql', 'utf8');
+  assert.match(migration, /bool_or\(coalesce\(deep, false\)\)/);
+  assert.match(migration, /chat_mode = p_mode/);
   assert.doesNotMatch(historyRoute, /matchesMode\(r2\)/);
   assert.match(client, /&mode=deep_think/);
   assert.match(client, /qs \+= '&mode=normal'/);
@@ -219,8 +222,9 @@ test('site search results remain navigable to posts, photos, chat and AI history
 test('history query no longer performs client-side fallback to avoid wiping new conversations', () => {
   const loadHistoryStr = client.slice(client.indexOf('async function loadHistory'), client.indexOf('async function fetchConversations'));
   assert.doesNotMatch(loadHistoryStr, /\/chat\/conversations.*mode=normal/);
-  // Ensure we just return if no messages and no fallback
-  assert.match(loadHistoryStr, /S\.messages = \[\];\s*messagesEl\.innerHTML = '';\s*appendEmptyState/);
+  // A successful empty response clears completed cache while live turns remain.
+  assert.match(loadHistoryStr, /S\.messages = msgs\.concat\(_localPending\)/);
+  assert.match(loadHistoryStr, /if \(!S\.messages\.length && !_localNodes\.length\) appendEmptyState/);
 });
 
 test('openAiChat initiates with no conversationId to allow backend to find the latest', () => {
@@ -230,7 +234,8 @@ test('openAiChat initiates with no conversationId to allow backend to find the l
 
 test('server history uses a bounded filter buffer instead of transferring 200 full messages', () => {
   const historyRoute = server.slice(server.indexOf("app.get('/api/agent/chat/history'"), server.indexOf('// =====================', server.indexOf("app.get('/api/agent/chat/history'")));
-  assert.match(historyRoute, /\.limit\(Math\.min\(limit \+ AI_CHAT_HISTORY_FETCH_BUFFER, 100\)\)/);
+  assert.match(historyRoute, /queryAiHistoryPage\(supabase/);
+  assert.match(fs.readFileSync('render-api/ai-history.js', 'utf8'), /Math\.min\(limit \+ 24, 100\)/);
   assert.match(historyRoute, /filteredRows\.push\(r2\);\s*if \(filteredRows\.length > limit\) break;/);
 });
 

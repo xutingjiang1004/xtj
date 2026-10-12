@@ -80,16 +80,21 @@ test('photo with thumbnail paints instantly then upgrades to full image', async 
   page.on('pageerror', error => errors.push(error.message));
   const thumbUrl = 'http://127.0.0.1:4173/thumb.png';
   const fullUrl = 'http://127.0.0.1:4173/full-slow.png';
+  let releaseFullImage;
+  const fullImageGate=new Promise(resolve=>releaseFullImage=resolve);
   await page.route('**/thumb.png**', route => route.fulfill({ status: 200, contentType: 'image/png', body: okPng }));
   await page.route('**/full-slow.png**', async route => {
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await fullImageGate;
     await route.fulfill({ status: 200, contentType: 'image/png', body: okPng });
   });
   await page.setContent('<!doctype html><head><base href="http://127.0.0.1:4173/"></head><body><div id="photoGrid"></div></body>');
   await page.addScriptTag({ content: 'window.updateAmbientBackground=function(){}; window.showToast=function(){}; window.currentUser="tester";' + script });
   await page.evaluate(({ thumbUrl, fullUrl }) => window.openPhotoPreview(0, [{ imageUrl: fullUrl, thumbUrl: thumbUrl, username: 'u', timestamp: Date.now() }]), { thumbUrl, fullUrl });
   // 原图尚未返回前，主槽应已秒显缩略图
-  await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /thumb\.png/);
+  try {
+    await expect(page.locator('#photoPreviewImage')).toHaveAttribute('src', /thumb\.png/);
+    await expect(page.locator('#photoPreviewImage')).toHaveJSProperty('naturalWidth',1);
+  } finally { releaseFullImage(); }
   // 原图后台拉取完成后无缝替换（src 为对象 URL），主图已解码显示
   await expect(page.locator('#photoPreviewImage')).toHaveJSProperty('_ppUrl', fullUrl, { timeout: 5000 });
   await expect(page.locator('#photoPreviewImage')).toHaveJSProperty('naturalWidth', 1);
@@ -205,12 +210,15 @@ test('photo grid warm loading uses the bounded queue and recovers broken images'
   const errors = [];
   let active = 0;
   let maxActive = 0, requests = 0, brokenAttempts = 0;
+  let releaseFirstWave;
+  const firstWaveGate=new Promise(resolve=>releaseFirstWave=resolve);
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/queued-*.png', async route => {
     requests += 1;
     active += 1;
     maxActive = Math.max(maxActive, active);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    if(requests<=4) await firstWaveGate;
+    else await new Promise(resolve => setTimeout(resolve, 40));
     active -= 1;
     if (route.request().url().includes('queued-3.png') && ++brokenAttempts === 1) {
       await route.fulfill({ status: 404, contentType: 'text/plain', body: 'broken' });
@@ -232,6 +240,10 @@ test('photo grid warm loading uses the bounded queue and recovers broken images'
   });
   // Placeholder SVG quotes must stay inside src, never become HTML attributes.
   expect(await page.locator('#photoGrid img').first().evaluate(img => img.hasAttribute('xmlns') || img.hasAttribute('viewbox') || img.hasAttribute('fill'))).toBe(false);
+  try {
+    await expect.poll(()=>requests).toBe(4);
+    expect(active).toBe(4);expect(maxActive).toBe(4);
+  } finally { releaseFirstWave(); }
   await expect(page.locator('#photoGrid img:not([data-src])')).toHaveCount(7, { timeout: 5000 });
   await expect(page.locator('#photoGrid img[data-src]')).toHaveCount(1);
   expect(maxActive).toBe(4);

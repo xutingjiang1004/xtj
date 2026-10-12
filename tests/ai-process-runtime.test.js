@@ -2,6 +2,7 @@
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs');
 const { chromium } = require('playwright');
 const { appendProcessEvent, getProcessEvents } = require('../render-api/ai-process-events');
+const { saveCustomChatTurn, saveInterruptedChatTurn } = require('../render-api/ai-chat-save');
 const read = path => fs.readFileSync(path, 'utf8');
 async function fixture(t, effort='max', model='deepseek-flash', researchPipeline=false) {
   const browser = await chromium.launch({executablePath:process.env.CHROMIUM_PATH || (require('node:fs').existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined), args:['--no-sandbox']}); t.after(() => browser.close());
@@ -11,6 +12,23 @@ async function fixture(t, effort='max', model='deepseek-flash', researchPipeline
   await page.goto('https://process.test/');
   await page.addStyleTag({content:'.hidden {display:none!important}'});
   for (const file of ['css/ai-agent.css','css/ui-enhance.css']) await page.addStyleTag({content:read(file)});
+  // A saved stream must be returned by the history API. Use the real server
+  // persistence helpers rather than an always-empty endpoint or the UI cache.
+  const rows=[];
+  await page.exposeFunction('readFixtureAiHistory',cid=>rows.map(row=>({...JSON.parse(row.media_url),id:row.id,content:row.content,created_at:row.created_at})).filter(row=>row.convId===cid));
+  await page.exposeFunction('saveFixtureAiTurn',async({body,events,startedAt,interrupted})=>{
+    const res={};events.forEach(event=>appendProcessEvent(res,event));
+    const done=events.findLast(event=>event.type==='done')||{};
+    const content=done.sanitized_content||done.content||events.filter(e=>e.type==='content').map(e=>e.text||'').join('');
+    const reasoning=done.reasoning||events.filter(e=>e.type==='reasoning').map(e=>e.text||'').join('');
+    const buildMeta=(role,convId,usage,thinking,seq,_search,elapsed,extra)=>JSON.stringify({role,convId,usage,reasoning:thinking,seq,thinking_mode:usage?.thinking_mode,thinking_elapsed_ms:elapsed,...extra});
+    const db={from:()=>({insert:async entries=>{entries.forEach((row,i)=>rows.push({...row,id:'fixture-'+rows.length,created_at:row.created_at||new Date(startedAt+i).toISOString()}));return{error:null};}})};
+    const options={db,userName:'tester',convId:body.conversation_id||'test-cid',message:body.message,content,reasoning,
+      model:body.model,thinkingMode:body.thinking_mode,processEvents:getProcessEvents(res),
+      cards:events.filter(e=>e.type==='card').map(e=>e.card),buildMeta,marker:'__ai_agent_msg__',
+      thinkingElapsedMs:done.thinking_elapsed_ms||0,requestId:body.client_request_id,startedAt};
+    return interrupted?saveInterruptedChatTurn(options):saveCustomChatTurn(options);
+  });
   await page.evaluate(({effort,model,researchPipeline}) => {
     window.testEffort=effort;window.testResearchPipeline=researchPipeline;localStorage.setItem('xtj_ai_thinking_mode',effort);
     localStorage.setItem('xtj_ai_work_mode','false');localStorage.setItem('xtj_ai_think_max','false');
@@ -21,7 +39,7 @@ async function fixture(t, effort='max', model='deepseek-flash', researchPipeline
     window.ensureProtectedOperationAuth = async () => ({ok:true,token:'test-token'});
     window.ensureUserToken = async () => 'test-token';
     window.showToast = message => (window.notices || (window.notices=[])).push(message);
-    window.frames = []; window.failHistoryList = false; window.failDeepHistory = false;
+    window.frames = []; window.fixtureSaves=[];window.failHistoryList = false; window.failDeepHistory = false;
     window.fetch = async (url, options={}) => {
       const path = new URL(url,location.href).pathname;
       let body={ok:true};
@@ -29,18 +47,20 @@ async function fixture(t, effort='max', model='deepseek-flash', researchPipeline
       if (path.endsWith('/quota')) body={ok:true,quota:{can_chat:true,tokens_remaining:100000,search_remaining:100}};
       if (path.endsWith('/custom-models')) body={ok:true,models:mockModels};
       if (path.endsWith('/chat/conversations')) body=failHistoryList?{ok:false,error:'offline'}:{ok:true,conversations:[]};
-      if (path.endsWith('/chat/history')) body=failDeepHistory&&String(url).includes('deep_think')?{ok:false,error:'offline'}:{ok:true,conversation_id:'test-cid',messages:window.mockHistory||[],has_more:false};
+      if (path.endsWith('/chat/history')) {await Promise.all(fixtureSaves);const cid=new URL(url,location.href).searchParams.get('conversation_id')||'test-cid';body=failDeepHistory&&String(url).includes('deep_think')?{ok:false,error:'offline'}:{ok:true,conversation_id:cid,messages:window.mockHistory||await readFixtureAiHistory(cid),has_more:false};}
       if (path.endsWith('/chat/new')) {window.newCalls=(window.newCalls||0)+1;body={ok:true,conversation_id:'new-cid'};}
       if (path.endsWith('/chat/stream') || path.endsWith('/custom-chat/stream')) {
         window.sentURL=path;
         window.sent = JSON.parse(options.body);
-        const turn={body:window.sent,signal:options.signal,cancelled:false};
+        const turn={body:window.sent,signal:options.signal,cancelled:false,events:[],startedAt:Date.now(),saved:false};
         (window.turns||(window.turns=[])).push(turn);
+        turn.save=interrupted=>{if(turn.saved)return;turn.saved=true;fixtureSaves.push(saveFixtureAiTurn({body:turn.body,events:turn.events,startedAt:turn.startedAt,interrupted}));};
+        options.signal.addEventListener('abort',()=>turn.save(true),{once:true});
         return new Response(new ReadableStream({start(controller){window.stream=turn.stream=controller;},cancel(){turn.cancelled=true;}}),{headers:{'Content-Type':'text/event-stream'}});
       }
       return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}});
     };
-    window.emit = event => {frames.push(event);stream.enqueue(new TextEncoder().encode('data: '+JSON.stringify(event)+'\n\n'));};
+    window.emit = event => {frames.push(event);const turn=turns.at(-1);turn.events.push(event);if(event.type==='done'&&event.saved===true)turn.save(false);stream.enqueue(new TextEncoder().encode('data: '+JSON.stringify(event)+'\n\n'));};
   },{effort,model,researchPipeline});
   await page.addScriptTag({content:read('js/ai-agent.js')});
   await page.evaluate(() => __xtjAiAgent.open());
@@ -285,7 +305,9 @@ test('leaving chat during a completion-only drain cancels the old answer and rel
  await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('旧回答'));
  assert.equal(await page.locator('.ai-msg.generating').count(),1);
  await page.getByRole('button',{name:'新对话',exact:true}).click();assert.equal(await page.evaluate(()=>window.newCalls||0),0);
- await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-chat-empty'));
+ await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());
+ await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant:not(.generating)'));
+ await page.getByRole('button',{name:'新对话',exact:true}).click();await page.waitForFunction(()=>window.newCalls===1&&document.querySelector('.ai-chat-empty'));
  await page.locator('#aiChatMsgInput').fill('新会话');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>stream!==oldStream);
  await page.evaluate(()=>{emit({type:'content',text:'新会话的回答。'});emit({type:'done',content:'新会话的回答。',thinking_mode:'off',complete:true,saved:true});stream.close();});
  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await page.waitForTimeout(300);

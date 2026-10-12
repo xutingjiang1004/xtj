@@ -152,11 +152,14 @@ test('GET /api/agent/research/history is authenticated, rate-limited and filters
   const source = routeSource('get', '/api/agent/research/history', "app.post('/api/agent/chat/delete'");
   assert.match(source, /authenticateUser/);
   assert.match(source, /rateLimit\(60000,\s*30\)/);
-  assert.match(source, /\.filter\('actor_key',\s*'like',\s*'ai_msg_conv_%'\)/);
-  assert.match(source, /hParsed\.type !== 'tavily_research'/);
+  assert.match(source, /supabase\.rpc\('list_ai_research_records'/);
+  const migration = fs.readFileSync('supabase/migrations/20261012095854_chat_ai_history_boundary.sql', 'utf8');
+  assert.match(migration, /p\.user_name = p_user_name/);
+  assert.match(migration, /safe_jsonb\(p\.content\)->>'type' = 'tavily_research'/);
+  assert.match(migration, /safe_jsonb\(p\.media_url\)->>'deleted'/);
   // ★ 2026-08-05: 历史详情返回完整 answer（此前截断 200 字导致历史报告看不全）
   assert.doesNotMatch(source, /String\(hParsed\.answer[^)]*\)\.slice\(0,\s*200\)/);
   assert.match(source, /research_history_failed/);
-  assert.match(source, /created_at/);
-  assert.match(source, /ascending:\s*false/);
+  assert.match(migration, /'created_at', created_at/);
+  assert.match(migration, /ORDER BY p\.created_at DESC, p\.id DESC/);
 });

@@ -57,8 +57,9 @@ function createChatFeatures(options) {
       if (!message || message.message_type !== 'audio') return res.status(404).json({ ok: false });
       const media = message.payload && message.payload.media;
       if (!media || !options.privateStorage) return res.status(404).json({ ok: false });
-      const url = media.bucket === 'dm-private'
-        ? await options.privateStorage.sign(media.storage_path, true) : media.url;
+      const path = options.privateStorage.mediaPath ? options.privateStorage.mediaPath(message, media) :
+        (media.bucket === 'dm-private' ? media.storage_path : '');
+      const url = path ? await options.privateStorage.sign(path, true) : '';
       if (!url || !/^https:\/\//i.test(url)) return res.status(404).json({ ok: false });
       res.json({ ok: true, url });
     } catch (error) { fail(res, error); }

@@ -33,7 +33,7 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
  await page.route('**/*',async route=>{
   const url=new URL(route.request().url());if(holdImages&&url.pathname.startsWith('/test-image/'))await imageWait;if(url.origin!==origin){await route.abort();return;}
   if(!url.pathname.startsWith('/api/')&&!url.pathname.startsWith('/test-supabase/')){await route.continue();return;}
-  const body=route.request().postData()?(()=>{try{return route.request().postDataJSON()}catch(_){return null}})():null;calls.push({path:url.pathname,body});
+  const body=route.request().postData()?(()=>{try{return route.request().postDataJSON()}catch(_){return null}})():null;calls.push({path:url.pathname,query:Object.fromEntries(url.searchParams),body});
   let data={ok:true,data:[],users:[],items:[],totals:{posts:posts.length,views:4,likes:0,comments:comments.length}},status=200;
   if(url.pathname==='/api/config/public')data={supabase_url:origin+'/test-supabase',supabase_anon_key:'sb_publishable_test_only_never_production'};
   if(url.pathname==='/api/user/refresh')data={token:'test-only-token',user_name:user};
@@ -65,7 +65,7 @@ async function wireAiChat(page){
    let data={ok:true};if(path.endsWith('/config'))data={enabled:true,name:'小猫',thinking_mode:'max'};
    if(path.endsWith('/quota'))data={ok:true,quota:{can_chat:true,tokens_remaining:100000,search_remaining:100}};
    if(path.endsWith('/custom-models'))data={ok:true,models:[]};
-   if(path.endsWith('/chat/history'))data={ok:true,conversation_id:'test',messages:[],has_more:false};
+   if(path.endsWith('/chat/history'))data={ok:true,conversation_id:'test',messages:window.mockAiHistory||[],has_more:false};
    if(path.endsWith('/chat/stream'))return new Response(new ReadableStream({start(c){window.testStream=c;}}),{headers:{'Content-Type':'text/event-stream'}});
    return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
   };
