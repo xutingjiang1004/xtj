@@ -115,6 +115,9 @@ for(const mode of ['login','register'])test(`${mode} from the locked wall resume
   try{
     const {page}=f;let photoReads=0;
     await page.route('**/api/user/'+mode,route=>route.fulfill({json:{ok:true,token:'test-only-token',user_name:'alice'}}));
+    // After login, refresh must retain the same authenticated account. The
+    // generic guest fixture would otherwise answer with user_name=''.
+    await page.route('**/api/user/refresh',route=>route.fulfill({json:{ok:true,token:'test-only-token',user_name:'alice'}}));
     await page.route('**/api/photos/public?*',route=>{photoReads++;return route.fulfill({json:{ok:true,data:[{id:A,user_name:'alice',media_type:'__photo_wall__',media_url:f.origin+'/test-image/0-0.png',content:'{}',visibility:'public',created_at:'2026-10-08T12:00:00Z'}]}});});
     await page.evaluate(mode=>{window.confirmedOwners=[];window.confirmingLogin=false;document.getElementById(mode==='login'?'loginSubmitBtn':'registerSubmitBtn').addEventListener('click',()=>window.confirmingLogin=true,{capture:true,once:true});window.addEventListener('auth-ready',e=>{if(window.confirmingLogin)confirmedOwners.push({owner:window.currentUser,canonical:window._xtjCanonicalUser,eventOwner:e.detail.user_name});});},mode);
     await page.locator('[data-tab="ai"]').filter({visible:true}).first().click();
