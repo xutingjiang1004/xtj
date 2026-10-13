@@ -262,6 +262,35 @@ test('an unsaved research answer is explicit and retains the original file for r
   assert.match(await f.page.locator('#dtFilePreview').textContent(), /unsaved.pdf/); assert.deepEqual(f.errors, []);
 });
 
+test('file research carries the selected builtin model and research intensity through its fallback request', { timeout: 45000 }, async t => {
+  const f=await deepFixture(t);
+  await f.page.locator('.dt-research-model-select').selectOption('pro');await f.page.locator('.dt-research-mode-opt').getByText('快速',{exact:true}).click();
+  await attach(f.page,'#dtFileInp','selected.pdf',Buffer.from('%PDF-1.4\nfixture'),'application/pdf');
+  await f.page.locator('#dtInput').fill('USE SELECTED MODEL');await f.page.locator('#dtSendBtn').click();await f.page.waitForFunction(()=>deepBodies.length===1);
+  assert.equal(await f.page.evaluate(()=>deepBodies[0].model),'deepseek-v4-pro');assert.equal(await f.page.evaluate(()=>deepBodies[0].thinking_mode),'low');assert.deepEqual(f.errors,[]);
+});
+
+test('third-party research files use the selected account configuration without falling back to a builtin provider', { timeout: 45000 }, async t => {
+  const f=await fixture(t);
+  await f.page.evaluate(async()=>{
+    const base=fetch;window.selectedResearchCalls=[];
+    const model={uid:'research-custom',provider:'custom',model:'synthetic-selected-model',base_url:'https://provider.test/v1',api_key:'test-only-private-key',label:'Selected research model'};
+    window.fetch=(url,options={})=>{const p=new URL(url,location.href);
+      if(p.pathname==='/api/agent/custom-models')return Promise.resolve(new Response(JSON.stringify({ok:true,models:[model]}),{headers:{'Content-Type':'application/json'}}));
+      if(p.pathname==='/api/agent/custom-chat/deep-stream'||p.pathname==='/api/agent/chat') {selectedResearchCalls.push({path:p.pathname,body:JSON.parse(options.body)});return Promise.resolve(new Response(new ReadableStream({start(c){window.selectedResearchStream=c;}}),{headers:{'Content-Type':'text/event-stream'}}));}
+      return base(url,options);
+    };
+    await __xtjAiAgent.close();await __xtjAiAgent.open();
+  });
+  await f.page.waitForFunction(()=>localStorage.getItem('xtj_ai_custom_models__alice')?.includes('research-custom'));
+  await f.page.evaluate(()=>__xtjAiAgent.openConversation('CUSTOM111','deep_think'));
+  await f.page.locator('.dt-research-model-select').selectOption('custom:research-custom');
+  await attach(f.page,'#dtFileInp','private-research.txt',Buffer.from('ORIGINAL DOCUMENT BYTES'),'text/plain');
+  await f.page.locator('#dtInput').fill('RESEARCH WITH MY MODEL');await f.page.locator('#dtSendBtn').click();await f.page.waitForFunction(()=>selectedResearchCalls.length===1);
+  const call=await f.page.evaluate(()=>selectedResearchCalls[0]);assert.equal(call.path,'/api/agent/custom-chat/deep-stream');assert.equal(call.body.model,'synthetic-selected-model');
+  assert.equal(call.body.attachments[0].data_url,'data:text/plain;base64,'+Buffer.from('ORIGINAL DOCUMENT BYTES').toString('base64'));assert.deepEqual(f.errors,[]);
+});
+
 test('research holds a draft while its initial history is loading and then sends in that conversation', { timeout: 45000 }, async t => {
   const f = await fixture(t);
   await f.page.evaluate(() => {
@@ -285,5 +314,41 @@ test('research holds a draft while its initial history is loading and then sends
   await f.page.locator('#dtSendBtn').click();
   await f.page.waitForFunction(() => deepBodies.length === 1);
   assert.equal(await f.page.evaluate(() => deepBodies[0].conversation_id), 'LOADING1');
+  assert.deepEqual(f.errors, []);
+});
+
+test('research keeps its focused composer visible when delayed history and header layout arrive in a compressed viewport', { timeout: 45000 }, async t => {
+  const f = await postBrowserFixture({ counts: [1], ios: true, theme: 'dark' });
+  t.after(() => f.close()); await wireAiChat(f.page);
+  await f.page.evaluate(() => {
+    const base = fetch;
+    window.fetch = (url, options = {}) => {
+      const p = new URL(url, location.href);
+      if (p.pathname === '/api/agent/chat/history' && p.searchParams.get('mode') === 'deep_think') return new Promise(resolve => { window.finishKeyboardHistory = resolve; });
+      return base(url, options);
+    };
+    void __xtjAiAgent.openConversation('KEYBOARD1', 'deep_think');
+  });
+  await f.page.waitForFunction(() => typeof finishKeyboardHistory === 'function');
+  await attach(f.page, '#dtFileInp', 'keyboard.txt', Buffer.from('ORIGINAL DOCUMENT'), 'text/plain');
+  await f.page.locator('#dtInput').fill('KEEP THIS DRAFT'); await f.page.locator('#dtInput').focus();
+  await f.page.setViewportSize({ width: 390, height: 300 });
+  await f.page.evaluate(() => { testKeyboardViewport.height = 300; testKeyboardViewport.dispatchEvent(new Event('resize')); });
+  await f.page.evaluate(() => finishKeyboardHistory(new Response(JSON.stringify({ ok: true, conversation_id: 'KEYBOARD1', has_more: false,
+    messages: [{ id: 'loaded', role: 'assistant', content: 'AUTHORIZED DELAYED HISTORY', created_at: '2026-10-12T10:00:00Z' }] }), { headers: { 'Content-Type': 'application/json' } })));
+  await f.page.waitForFunction(() => document.getElementById('dtMessages').textContent.includes('AUTHORIZED DELAYED HISTORY'));
+  // Simulate a wrapped model control arriving after async model synchronization.
+  await f.page.locator('#panelDeepThink .dt-header').evaluate(e => { e.style.paddingBottom = '52px'; });
+  await f.page.waitForFunction(() => document.activeElement.id === 'dtInput' && Array.from(document.querySelectorAll('#dtInput,#dtSendBtn')).every(e => {
+    const r = e.getBoundingClientRect(); return r.top >= 0 && r.bottom <= 300;
+  })).catch(async error => {
+    const geometry = await f.page.evaluate(() => ({ focused: document.activeElement?.id, height: testKeyboardViewport.height, scrollY,
+      nodes: Array.from(document.querySelectorAll('.app-container,#panelDeepThink,.dt-page,.dt-header,.dt-input-bar,#dtInput,#dtSendBtn')).map(e => ({
+        name: e.id || e.className, rect: e.getBoundingClientRect().toJSON(), scrollTop: e.scrollTop, scrollHeight: e.scrollHeight
+      })) }));
+    error.message += '\nResearch viewport: ' + JSON.stringify(geometry);
+    throw error;
+  });
+  assert.equal(await f.page.locator('#dtInput').inputValue(), 'KEEP THIS DRAFT'); assert.match(await f.page.locator('#dtFilePreview').textContent(), /keyboard.txt/);
   assert.deepEqual(f.errors, []);
 });

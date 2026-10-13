@@ -126,6 +126,129 @@ test('a reopened research conversation retains parsed file context while its use
   assert.equal(ctx.history[0].content,'ORIGINAL QUESTION\nFILE CONTENT FOR FOLLOWUP');
 });
 
+test('the fallback research agent uses its selected model and flushes all genuine reasoning before completion', async () => {
+  const events = [], calls = [];
+  const agent = extract(server,'async function runDeepThinkAgent(', 'async function runDeepThinkWorker(', 'runDeepThinkAgent', {
+    AbortController, setTimeout, clearTimeout, DEEP_THINK_CONFIG:{MAX_DURATION_MS:10000}, DEEPSEEK_MODEL_REASONER:'deepseek-v4-pro',
+    getPreferredDeepSeekModel:m=>m, normalizeDeepSeekUsageModel:m=>m, buildHistoryContext:()=>'',buildAiCorePrompt:()=> 'safe prompt',
+    console:{log(){},warn(){},error(){}}, writeSse:(_res,event)=>events.push(event),
+    callDeepSeek:async(_messages,options)=>{calls.push(options);options.onThinkingChunk('FIRST REAL THOUGHT');options.onThinkingChunk('LAST REAL THOUGHT');return{content:'answer',model:options.model};}
+  });
+  const result=await agent({res:{},userName:'alice',message:'question',convId:'MODELS1',config:{},ctx:{},disableSearch:true,model:'deepseek-flash'});
+  assert.equal(calls[0].model,'deepseek-flash');assert.equal(result.model,'deepseek-flash');
+  assert.match(events.filter(e=>e.type==='thinking_chunk').map(e=>e.chunk).join(''),/LAST REAL THOUGHT/);
+});
+
+for (const [thinkingMode, model, expectedModel, cached = false] of [['low', 'deepseek-flash', 'deepseek-flash'], ['max', 'deepseek-v4-pro', 'deepseek-v4-pro'], ['low', 'unsupported-model', 'deepseek-v4-pro'], ['low', 'deepseek-flash', 'deepseek-v4-pro', true]]) {
+  test('the real builtin research handler validates and forwards its selected model: ' + thinkingMode + '/' + model + '/cached=' + cached, async () => {
+    const calls = [], events = [], rows = [], jobs = new Map();
+    const req = new EventEmitter(); req.userName = 'alice'; req.body = { message: 'QUESTION', conversation_id: 'BUILTIN1',
+      client_request_id: 'builtin-original-request', model, thinking_mode: thinkingMode, chat_mode: 'deep_think', attachments: [{ name: 'original.txt' }] };
+    if (cached) delete req.body.attachments;
+    const res = new EventEmitter(); Object.assign(res, { writableEnded: false, setHeader() {}, flushHeaders() {}, end() { this.writableEnded = true; } });
+    const runFlow = async opts => { calls.push(opts); return { finalContent: 'REAL BUILTIN ANSWER', model: opts.model, planner: { agent_count: 1 }, sources: [], thinking_log: [] }; };
+    const handler = extract(server, 'async function handleDeepThinkChat(', '// POST /api/agent/chat/cancel', 'handleDeepThinkChat', {
+      setInterval, clearInterval, AI_CHAT_MESSAGE_MAX_LEN: 50000, validateString: value => value, genConvId: () => 'GENERATED1',
+      tryAcquireDeepResearch: () => () => {}, activeDeepThinkJobs: jobs, trackActiveDeepThinkJob: (id, token) => jobs.set(id, token),
+      enforceAiChatAccess: async () => ({ allowed: true }), writeSse: (_res, event) => events.push(event),
+      extractVisionImageUrls: () => [], extractChatAttachments: async text => ({ text: text + (cached ? '' : '\nORIGINAL DOCUMENT') }), unwrapAttachmentExtract: value => value,
+      getAiConfig: async () => ({}), loadAiContext: async () => ({ history: [] }), canUseAiCache: () => cached,
+      buildAiCacheKey: () => 'account-and-model-scoped-key', aiResponseCache: new Map([['account-and-model-scoped-key', {
+        content: 'REAL CACHED ANSWER', model: expectedModel, usage: { total_tokens: 100 }, expiresAt: Date.now() + 100000 }]]),
+      normalizeDeepSeekModelName: value => value, normalizeDeepSeekUsageModel: value => value,
+      DEEPSEEK_MODEL_FLASH: 'deepseek-flash', DEEPSEEK_MODEL_PRO: 'deepseek-v4-pro', DEEPSEEK_MODEL_REASONER: 'deepseek-v4-pro',
+      runDeepThinkAgent: runFlow, runMultiAgentFlow: runFlow, sanitizeAssistantVisibleText: value => value,
+      saveDeepThinkChatTurn, AI_AGENT_MESSAGE_MARKER: '__ai_agent_msg__', recordAiTurnUsage: async () => ({}),
+      supabase: { from: () => ({ insert: async value => { rows.push(value); return { error: null }; } }) },
+      buildMsgMeta: (role, convId, usage, _reasoning, seq, _search, _elapsed, extra) => JSON.stringify({ role, convId, usage, seq, ...extra }),
+      console: { log() {}, warn() {}, error() {} }
+    });
+    await handler(req, res);
+    assert.equal(calls.length, cached ? 0 : 1, JSON.stringify(events));
+    if (!cached) { assert.equal(calls[0].model, expectedModel); assert.equal(calls[0].thinking_mode, thinkingMode); assert.equal(calls[0].message, 'QUESTION\nORIGINAL DOCUMENT'); }
+    assert.equal(events.find(e => e.type === 'done').saved, true); assert.equal(events.find(e => e.type === 'done').model, expectedModel);
+    assert.equal(JSON.parse(rows[0][1].media_url).usage.model, expectedModel); assert.equal(jobs.size, 0);
+  });
+}
+
+test('multi-agent research forwards the same selected model to its planner, all workers and synthesizer', async () => {
+  const calls = [], workers = [];
+  const run = extract(server, 'async function runMultiAgentFlow(', '// ===================== R:', 'runMultiAgentFlow', {
+    AbortController, setTimeout, clearTimeout, DEEPSEEK_MODEL_REASONER: 'deepseek-v4-pro',
+    DEEP_THINK_CONFIG: { MAX_DURATION_MS: 10000, MAX_WORKERS: 3, MIN_WORKERS: 1, WORKER_MAX_TOOL_ROUNDS: 1, FORCE_SPLIT_MIN_LENGTH: 24, PLANNER_TIMEOUT_MS: 1000, SYNTHESIZER_TIMEOUT_MS: 1000 },
+    DEEP_THINK_PLANNER_PROMPT: '{maxWorkers}', DEEP_THINK_SYNTHESIZER_PROMPT: 'synthesize',
+    getPreferredDeepSeekModel: value => value, normalizeDeepSeekUsageModel: value => value, buildHistoryContext: () => '', buildAiCorePrompt: () => 'safe prompt',
+    writeSse() {}, cleanSearchResults: value => value, console: { log() {}, warn() {}, error() {} },
+    runDeepThinkWorker: async opts => { workers.push(opts); return { content: 'REAL WORKER ANSWER', sources: [] }; },
+    callDeepSeek: async (_messages, options) => { calls.push(options); return { model: options.model, content: calls.length === 1
+      ? JSON.stringify({ agents: [{ role: 'Researcher', task_description: 'analyze', need_search: false }] }) : 'REAL SYNTH ANSWER' }; }
+  });
+  const result = await run({ res: {}, userName: 'alice', message: 'question', convId: 'MULTI123', config: {}, ctx: {}, model: 'deepseek-flash' });
+  assert.equal(calls.length, 2); assert.equal(workers.length, 1); assert.ok([...calls, ...workers].every(c => c.model === 'deepseek-flash'));
+  assert.equal(result.finalContent, 'REAL SYNTH ANSWER'); assert.equal(result.model, 'deepseek-flash');
+});
+
+function customResearchRoute({ saveError = null, incomplete = false, cancelled = false } = {}) {
+  const events = [], calls = [], rows = [];
+  let handler, upstreamAborts = 0;
+  const req = new EventEmitter();
+  req.userName = 'alice';
+  req.body = { provider: 'custom', api_key: 'test-only-key', model: 'selected-custom-model', base_url: 'https://provider.test/v1',
+    message: 'ORIGINAL QUESTION', conversation_id: 'CUSTOM123', client_request_id: 'original-request',
+    attachments: [{ name: 'original.txt', type: 'text/plain', data_url: 'data:text/plain;base64,' + Buffer.from('ORIGINAL DOCUMENT').toString('base64') }] };
+  const res = new EventEmitter();
+  Object.assign(res, { writableEnded: false, setHeader() {}, flushHeaders() {}, end() { this.writableEnded = true; } });
+  const c = { app: { post(_path, ...handlers) { handler = handlers.at(-1); } }, authenticateUser() {}, aiChatConcurrencyGate() {},
+    rateLimit() {}, AI_CHAT_HOURLY_IP_LIMIT: 10, AI_CHAT_MESSAGE_MAX_LEN: 50000, ADMIN_USERNAME: 'admin',
+    express: { json() {} }, AbortController, URL, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval,
+    validateString: value => value, genConvId: () => 'GENERATED1', extractVisionImageUrls: () => [],
+    assertSafeWebUrl: async url => ({ parsed: new URL(url), addresses: [{ address: '203.0.113.20', family: 4 }] }),
+    enforceAiChatAccess: async () => ({ allowed: true }), recordAiTurnUsage: async () => {},
+    getAiQuotaErrorMessage: () => 'quota', AI_AGENT_MESSAGE_MARKER: '__ai_agent_msg__',
+    extractChatAttachments: async (message, attachments) => ({ text: message + '\n' + Buffer.from(attachments[0].data_url.split(',')[1], 'base64').toString() }),
+    unwrapAttachmentExtract: value => value, saveDeepThinkChatTurn, saveInterruptedChatTurn,
+    supabase: { from: () => ({ insert: async value => { rows.push(value); return { error: saveError }; } }) },
+    buildMsgMeta: (role, convId, usage, _reasoning, seq, _search, _elapsed, extra) => JSON.stringify({ role, convId, usage, seq, ...extra }),
+    console: { log() {}, warn() {}, error() {} },
+    writeSse: (_res, event) => { events.push(event); if (cancelled && event.type === 'content') req.emit('aborted'); },
+    requestPinnedStream: async (_url, _addresses, options) => {
+      const payload = JSON.parse(options.body); calls.push(payload);
+      if (!payload.stream) return new Response(JSON.stringify({ choices: [{ message: { content: calls.length === 1
+        ? JSON.stringify({ agents: [{ role: 'Researcher', task_description: 'Read document', need_search: false }] }) : 'REAL WORKER RESULT' } }] }));
+      options.signal.addEventListener('abort', () => upstreamAborts++, { once: true });
+      const chunks = [{ choices: [{ delta: { reasoning_content: 'ACTUAL MODEL THOUGHT', content: 'REAL CUSTOM REPORT' } }] }];
+      return new Response(chunks.map(e => 'data: ' + JSON.stringify(e) + '\n\n').join('') + (incomplete || cancelled ? '' : 'data: [DONE]\n\n'));
+    } };
+  const a = server.indexOf("app.post('/api/agent/custom-chat/deep-stream'"), b = server.indexOf('// ── 自定义第三方 AI 模型', a);
+  assert.ok(a >= 0 && b > a); vm.runInNewContext(server.slice(a, b), c);
+  return { events, calls, rows, get upstreamAborts() { return upstreamAborts; }, run: () => handler(req, res) };
+}
+
+test('the real third-party research route uses original files and saves the selected model, genuine thoughts and request identity', async () => {
+  const f = customResearchRoute(); await f.run();
+  assert.equal(f.calls.length, 3);
+  assert.ok(f.calls.every(c => c.model === 'selected-custom-model' && JSON.stringify(c.messages).includes('ORIGINAL DOCUMENT')));
+  const done = f.events.find(e => e.type === 'done'); assert.equal(done.saved, true); assert.equal(done.conversation_id, 'CUSTOM123');
+  assert.equal(f.events.filter(e => e.type === 'content').map(e => e.text).join(''), 'REAL CUSTOM REPORT', 'the completed answer is not streamed twice');
+  assert.equal(f.rows.length, 1); assert.equal(f.rows[0][0].content, 'ORIGINAL QUESTION');
+  const meta = JSON.parse(f.rows[0][1].media_url);
+  assert.equal(meta.chat_mode, 'deep_think'); assert.equal(meta.client_request_id, 'original-request'); assert.equal(meta.usage.model, 'selected-custom-model');
+  assert.equal(meta.thinking_log.find(t => t.agent_role === '模型思考').chunk, 'ACTUAL MODEL THOUGHT');
+  assert.ok(meta.thinking_log.some(t => t.agent_role === '研究流程'));
+  assert.match(JSON.parse(f.rows[0][0].media_url).attachment_context, /ORIGINAL DOCUMENT/);
+});
+test('a third-party research save failure remains explicit without duplicating the completed turn', async () => {
+  const f = customResearchRoute({ saveError: { message: 'write refused' } }); await f.run();
+  assert.equal(f.events.find(e => e.type === 'done').saved, false); assert.equal(f.rows.length, 1);
+});
+for (const cancelled of [false, true]) test('third-party research retains its partial answer without reporting completion: cancelled=' + cancelled, async () => {
+  const f = customResearchRoute({ cancelled, incomplete: !cancelled }); await f.run();
+  assert.equal(f.events.some(e => e.type === 'done'), false); assert.equal(f.rows[0][1].content, 'REAL CUSTOM REPORT');
+  const meta = JSON.parse(f.rows[0][1].media_url); assert.equal(meta.interrupted, true); assert.equal(meta.chat_mode, 'deep_think');
+  assert.equal(meta.finish_reason, cancelled ? 'cancelled' : 'failed'); assert.equal(meta.client_request_id, 'original-request');
+  if (cancelled) assert.equal(f.upstreamAborts, 1); else assert.ok(f.events.some(e => e.type === 'error'));
+});
+
 for (const interrupted of [false,true]) test('deep research turn persistence keeps its original question, picture, request and actual save status: interrupted=' + interrupted, async () => {
   const rows = []; let error = null;
   const options = { db: { from: () => ({ insert: async value => { rows.push(value); return { error }; } }) }, userName: 'alice', convId: 'RECORD11',

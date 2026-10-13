@@ -45,7 +45,15 @@ test('research upload accepts images and documents without overflowing the mobil
         await f.page.evaluate(height => { testKeyboardViewport.height = height; testKeyboardViewport.dispatchEvent(new Event('resize')); }, height);
         await f.page.waitForFunction(height => Array.from(document.querySelectorAll('#dtInput,#dtSendBtn')).every(e => {
           const r = e.getBoundingClientRect(); return r.top >= 0 && r.bottom <= height;
-        }), height);
+        }), height).catch(async error => {
+          const geometry = await f.page.evaluate(height => ({ height, focused: document.activeElement?.id,
+            viewport: testKeyboardViewport.height, scrollY,
+            nodes: Array.from(document.querySelectorAll('.app-container,#panelDeepThink,.dt-page,.dt-header,.dt-input-bar,#dtInput,#dtSendBtn')).map(e => ({
+              name: e.id || e.className, rect: e.getBoundingClientRect().toJSON(), scrollTop: e.scrollTop, scrollHeight: e.scrollHeight
+            })) }), height);
+          error.message += '\nResearch viewport: ' + JSON.stringify(geometry);
+          throw error;
+        });
       }
       await f.page.locator('#dtFilePreview .ai-file-remove').click();
       await f.page.locator('#dtInput').blur();

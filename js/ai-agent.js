@@ -4613,6 +4613,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!scroller) return;
       var visibleTop = vv ? vv.offsetTop : 0, visibleBottom = visibleTop + (vv ? vv.height : window.innerHeight);
       var bounds = input.getBoundingClientRect(), parentBounds = scroller.getBoundingClientRect();
+      var sendButton = inputBar.querySelector('#dtSendBtn');
+      if (sendButton) {
+        var sendBounds = sendButton.getBoundingClientRect();
+        bounds = { top: Math.min(bounds.top, sendBounds.top), bottom: Math.max(bounds.bottom, sendBounds.bottom) };
+      }
       var bottom = Math.min(parentBounds.bottom, visibleBottom) - 12, top = Math.max(parentBounds.top, visibleTop) + 12;
       if (bounds.bottom > bottom) scroller.scrollTop += bounds.bottom - bottom;
       else if (bounds.top < top) scroller.scrollTop -= top - bounds.top;
@@ -4722,7 +4727,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     input.addEventListener('blur', onBlur);
     input.addEventListener('focus', onFocus);
     var composerObserver = researchViewport && typeof ResizeObserver === 'function' ? new ResizeObserver(viewportHandler) : null;
-    if (composerObserver) composerObserver.observe(inputBar);
+    if (composerObserver) {
+      // Padding and borders can move the composer while the content box stays
+      // unchanged, especially when keyboard styles or model controls arrive.
+      composerObserver.observe(inputBar, { box: 'border-box' });
+      composerObserver.observe(root, { box: 'border-box' });
+      composerObserver.observe(messagesEl);
+      var researchHeader = root.querySelector('.dt-header');
+      if (researchHeader) composerObserver.observe(researchHeader, { box: 'border-box' });
+    }
     applyViewport();
 
     return function() {
@@ -6615,7 +6628,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) sources = prog.sources;
-      }, { model: researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId });
+      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId });
       var result = await researchPromise;
       if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
       answer = (result && result.answer) || '';
@@ -7402,7 +7415,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var input = document.getElementById('dtInput');
       if (input) {
         setTimeout(function() {
-          if (currentPage()) { try { input.focus(); } catch (e) {} }
+          if (currentPage() && document.activeElement !== input) {
+            try { input.focus({ preventScroll: true }); } catch (e) {}
+          }
         }, 80);
       }
     } finally { if (currentPage()) S._dtOpening = false; }
@@ -7527,7 +7542,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var dtSendToken = (S._dtSendSeq = (S._dtSendSeq || 0) + 1);
     var dtLifecycle = S.dtLifecycleId;
     var dtOwner = window.currentUser || '', dtAuthEpoch = readAiAuthEpoch();
-    var dtSettings = { effort: S.deepThinkEffort || 'max', webSearch: S.webSearchEnabled === true, model: S.selectedModel };
+    var dtResearchModel = S.dtResearchModel || 'pro';
+    var dtCustomConfig = isCustomModelId(dtResearchModel) ? resolveCustomModelConfig(dtResearchModel) : null;
+    var dtSettings = { effort: S.dtResearchMode === 'mini' ? 'low' : S.deepThinkEffort || 'max', webSearch: S.webSearchEnabled === true,
+      model: dtResearchModel === 'flash' ? DEFAULT_AI_MODEL : 'deepseek-v4-pro', mode: S.dtResearchMode || 'pro', researchModel: dtResearchModel,
+      custom: dtCustomConfig && Object.assign({},dtCustomConfig) };
+    if (isCustomModelId(dtResearchModel) && !dtSettings.custom) { notify('研究模型配置已失效，请重新选择'); releaseDeepPreflightLock(); return; }
     var dtPanel = document.getElementById('panelDeepThink');
     S._dtClientRequestId = (S._dtClientRequestId || 0) + 1;
     var reqId = 'dt_cr_' + S._dtClientRequestId + '_' + Date.now();
@@ -7635,7 +7655,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             originalUserText: originalUserText,
             fileData: fileData,
             reqId: reqId,
-            model: S.dtResearchMode || 'pro',
+            model: dtSettings.mode,
+            researchModel: dtSettings.researchModel,
             mode: 'hybrid',
             rewrite: true,
             refresh: sendOptions.refresh === true
@@ -7687,7 +7708,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S._dtFetchTimeoutTimer = dtFetchTimeoutTimer;
     if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
-    var url = API_BASE + '/chat';
+    var url = API_BASE + (dtSettings.custom ? '/custom-chat/deep-stream' : '/chat');
     var auth;
     try {
       auth = await getUserAuthPayload({ forceNoToken: false });
@@ -7704,7 +7725,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return;
     }
     var headers = auth.headers || {};
-    var fetchBody = JSON.stringify({
+    var fetchBody = JSON.stringify(Object.assign({
       message: text,
       conversation_id: S.dtConversationId,
       client_request_id: reqId,
@@ -7716,7 +7737,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       attachments: attachmentPayload || undefined,
       web_search: dtSettings.webSearch,
       model: dtSettings.model
-    });
+    }, dtSettings.custom || {}));
 
     var aborted = false;
     var aiContent = '';
