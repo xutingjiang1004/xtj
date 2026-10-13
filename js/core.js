@@ -21660,9 +21660,10 @@ function renderProfileActivityList(kind) {
  */
         (function installFocusSurfaceLifecycle() {
             if (typeof MutationObserver !== 'function') return;
-            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay';
+            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay, [data-xtj-ai-modal]';
             var surfaces = new Map(), background = new Map(), sequence = 0, top = null, syncing = false;
             function visible(root) {
+                if (root.hasAttribute('data-xtj-ai-modal')) return !root.hidden && root.classList.contains('is-ready');
                 if (root.id === 'ppInfoModal') return root.getAttribute('aria-hidden') === 'false' && root.style.display !== 'none';
                 return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
             }

@@ -82,6 +82,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   未登录或同步失败时静默降级为仅本地，不影响离线使用。
   var CUSTOM_MODELS_KEY = 'xtj_ai_custom_models';
   var CUSTOM_MODEL_PREFIX = 'custom:';
+  var CUSTOM_MODEL_LIMIT = 20;
   // ★ 账号级隔离：自定义模型（含 API Key）按当前登录账号存 localStorage，
   //   换账号互不可见；旧版全局键仅作回退，首次写入后自动迁移并清除。
   function aiStorageScopeName() {
@@ -151,7 +152,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   function saveCustomModelsLocal(list) {
     try {
-      var stored = (list || []).map(toStoredModel).slice(0, 12);
+      var stored = (list || []).map(toStoredModel).slice(0, CUSTOM_MODEL_LIMIT);
       scopedStorageSet(CUSTOM_MODELS_KEY, JSON.stringify(stored));
     } catch (e) {}
   }
@@ -209,8 +210,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // These dialogs live outside the chat root. Closing the page or changing
   // identity must dispose their fields and callbacks just as it does the root.
   function bindAiModalIdentity(modal, onDispose) {
+    if (S._voiceConversation) S._voiceConversation.setEnabled(false);
     var identity = customModelIdentity();
     var lifecycle = S.lifecycleId;
+    var origin = document.activeElement;
+    var originPopup = origin && origin.closest('.ai-select-pop');
+    if (originPopup) origin = originPopup.__focusReturnTarget || origin;
     var disposed = false;
     modal.setAttribute('data-xtj-ai-modal', '1');
     function identityCurrent() {
@@ -230,6 +235,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         modal.classList.add('is-leaving');
         setTimeout(function() { modal.remove(); }, 180);
       } else modal.remove();
+      if (typeof window.__xtjSyncFocusSurfaces === 'function') window.__xtjSyncFocusSurfaces();
+      if (identityCurrent()) {
+        var target = origin && origin.isConnected && !origin.closest('[inert]') ? origin : document.querySelector('#aiChatRoot .ai-plus-btn');
+        if (target && !target.closest('[inert]')) target.focus({ preventScroll: true });
+      }
     }
     modal.__xtjAiDispose = close;
     return { current: current, identityCurrent: identityCurrent, close: close };
@@ -389,6 +399,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function isCustomModelId(mid) {
     return typeof mid === 'string' && mid.indexOf(CUSTOM_MODEL_PREFIX) === 0;
   }
+  function addReadAloudAction(row, content) {
+    if (!row || row.querySelector('.ai-msg-act-read')) return;
+    var button = el('button',{type:'button',class:'ai-msg-act ai-msg-act-read','aria-label':'朗读回复',text:'朗读'});
+    button.addEventListener('click',function(event) {
+      event.preventDefault(); event.stopPropagation();
+      if (!S._voiceConversation) { notify('语音模块未加载，请重开小猫 AI 后重试'); return; }
+      if (S._voiceConversation.isSpeaking()) S._voiceConversation.stopSpeech();
+      else S._voiceConversation.speak(typeof content === 'function' ? content() : content,false);
+    });
+    row.appendChild(button);
+  }
   function customModelDisplayName(mid) {
     if (!isCustomModelId(mid)) return '';
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
@@ -397,6 +418,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '');
   }
   // 解析自定义模型的选项值 → 配置对象（含 provider/base/api_key/model）
+  var modelCapabilityCache = new Map();
+  function capabilityKey(config) { return JSON.stringify([config.provider,config.base_url,config.model,config.api_key]); }
   function resolveCustomModelConfig(mid) {
     if (!isCustomModelId(mid)) return null;
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
@@ -409,7 +432,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       providerLabel: m.providerLabel || (p && p.label) || '自定义',
       api_key: String(m.api_key || ''),
       model: String(m.model || (p && p.defaultModel) || ''),
-      base_url: String(m.base_url || (p && p.base) || '')
+      base_url: String(m.base_url || (p && p.base) || ''),
+      reasoning_effort_supported: !!(modelCapabilityCache.get(capabilityKey({provider:m.provider,base_url:String(m.base_url || (p && p.base) || ''),model:String(m.model || (p && p.defaultModel) || ''),api_key:String(m.api_key || '')})) || {}).reasoning
     };
   }
 
@@ -4109,6 +4133,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         triggerRegenerate(messagesEl, msg);
       });
       actionRow.appendChild(regenBtn);
+      addReadAloudAction(actionRow,msg.content || bubble.textContent);
       footer.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
     }
     if (footer.children.length > 0) node.appendChild(footer);
@@ -4334,8 +4359,49 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } catch (_) { targetEl.innerHTML = html; }
   }
 
+  // Closed ordinary paragraphs cannot change when a later chunk arrives.
+  // Keep their markup per renderer; lists, tables, fences and unfinished inline
+  // syntax stay in the full parser. A first-use equivalence check also keeps
+  // alternate Markdown implementations on their original rendering path.
+  function createStreamingMarkdownCache(render) {
+    var prefix = '', markup = '', verified = false, disabled = false;
+    var blocks = new Map();
+    function safeBlock(text) {
+      if (/```|\||<|>|^[ \t]*(?:[-*+] |\d+\. )/m.test(text)) return false;
+      var rest = text.replace(/`[^`\n]*`/g, '')
+        .replace(/!?\[[^\]\n]*\]\([^\)\n]*\)/g, '')
+        .replace(/\*\*[^*]+\*\*/g, '').replace(/\*[^*]+\*/g, '');
+      return !/[`*\[\]]/.test(rest);
+    }
+    return function(text) {
+      if (disabled) return render(text, true);
+      if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; verified = false; blocks.clear(); }
+      var tail = text.slice(prefix.length), breaks = /\n[ \t]*\n+/g, match, committed = 0;
+      while ((match = breaks.exec(tail))) {
+        var block = tail.slice(committed, match.index);
+        if (!safeBlock(block)) break;
+        var html = blocks.get(block);
+        if (html === undefined) {
+          html = render(block, true);
+          if (blocks.size < 64 && block.length <= 8192) blocks.set(block, html);
+        }
+        markup += html;
+        committed = breaks.lastIndex;
+      }
+      if (committed) prefix += tail.slice(0, committed);
+      var result = markup + render(tail.slice(committed), true);
+      if (!verified && prefix) {
+        var full = render(text, true);
+        if (result !== full) { disabled = true; prefix = ''; markup = ''; blocks.clear(); return full; }
+        verified = true;
+      }
+      return result;
+    };
+  }
+
   function createSmoothTextRenderer(targetEl, options) {
     options = options || {};
+    var renderStreamMarkdown = createStreamingMarkdownCache(renderMarkdown);
     var reducedMotion = prefersReducedMotion();
     var pending = '';
     var rendered = '';
@@ -4451,7 +4517,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // The display scheduler already bounds patches to a frame. Wall-clock
         // precision or clock corrections must not suppress an accepted frame.
         if (!isSelectionInTarget(targetEl)) {
-          patchInnerHTML(targetEl, renderMarkdown(rendered, true));
+          patchInnerHTML(targetEl, renderStreamMarkdown(rendered));
         }
       }
       ensureCursor();
@@ -6072,7 +6138,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     wrap.appendChild(head);
     var body = el('div', { class: 'dt-research-history-body', text: '加载中...', style: 'padding:12px 8px;font-size:12px;color:' + (isDark ? 'rgba(180,206,198,.85)' : '#7a8f89') + ';text-align:center;' });
     wrap.appendChild(body);
-    panel.appendChild(wrap);
+    wrap.setAttribute('role', 'dialog');
+    wrap.setAttribute('aria-modal', 'false');
+    wrap.setAttribute('aria-label', '历史研究');
+    wrap.__focusReturnTarget = panel.querySelector('.dt-research-history-btn');
+    wrap.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') { event.preventDefault(); closeResearchHistoryPanel(); }
+    });
+    (panel.querySelector('.dt-page') || panel).appendChild(wrap);
+    closeBtn.focus({ preventScroll: true });
     loadResearchHistoryList(body);
   }
 
@@ -6084,13 +6158,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       owner === (window.currentUser || '') && epoch === readAiAuthEpoch(); }
     bodyEl.textContent = '加载中…'; bodyEl.setAttribute('aria-busy', 'true');
     try {
-      var result = await apiRequest('GET', '/research/history?limit=10', null, { timeoutMs: 15000 });
+      var historyRequests = await Promise.allSettled([
+        apiRequest('GET', '/research/history?limit=10', null, {timeoutMs:15000}),
+        apiRequest('GET', '/research/checkpoints', null, {timeoutMs:15000})
+      ]);
+      var result = historyRequests[0].status === 'fulfilled' ? historyRequests[0].value : null;
+      var checkpointResult = historyRequests[1].status === 'fulfilled' ? historyRequests[1].value : null;
       if (!current()) return;
       var data = result && result.data;
       var items = Array.isArray(data) ? data : (data && Array.isArray(data.items) ? data.items :
         (data && Array.isArray(data.data) ? data.data : null));
       if (!result || !result.ok || !items) throw new Error('研究记录暂不可用');
       renderResearchHistoryList(bodyEl, items);
+      var checkpoints = checkpointResult && checkpointResult.ok && checkpointResult.data && checkpointResult.data.records;
+      if (Array.isArray(checkpoints)) renderResearchCheckpoints(bodyEl, checkpoints);
+      else if (!checkpointResult || !checkpointResult.ok) bodyEl.prepend(el('div',{class:'ai-checkpoint-note',text:'研究断点暂时无法读取，可关闭后重试。'}));
     } catch (error) {
       if (!current()) return;
       bodyEl.textContent = '研究记录加载失败，原有记录仍保留';
@@ -6098,6 +6180,42 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       retry.addEventListener('click', function() { loadResearchHistoryList(bodyEl); });
       bodyEl.appendChild(retry);
     } finally { if (current()) bodyEl.removeAttribute('aria-busy'); }
+  }
+
+  function renderResearchCheckpoints(bodyEl, records) {
+    if (!records.length) return;
+    var section = el('section', {class:'ai-checkpoints', 'aria-label':'未完成的研究'});
+    section.appendChild(el('h4', {text:'继续未完成的研究'}));
+    section.appendChild(el('p', {class:'ai-checkpoint-note', text:'断点保留 7 天，复用已完成方向及资料；最多保留 8 项。网页研究支持恢复。'}));
+    records.forEach(function(record) {
+      var row = el('div', {class:'ai-checkpoint-row'});
+      row.appendChild(el('div', {text:String(record.query || '未命名研究')}));
+      row.appendChild(el('small', {text:'已完成 ' + record.completed + '/' + record.total + ' 个方向 · ' + (record.resumable ? '可继续' : '正在研究')}));
+      var resume = el('button',{type:'button',class:'ai-history-retry',text:'继续研究'}); resume.disabled = !record.resumable;
+      resume.addEventListener('click', async function() {
+        resume.disabled = true;
+        var resumeOwner = customModelIdentity(), resumeDraftNode = document.getElementById('dtInput'), resumeDraft = resumeDraftNode && resumeDraftNode.value;
+        try {
+          if (record.conversation_id && record.conversation_id !== S.dtConversationId) await window.__xtjAiAgent.openConversation(record.conversation_id,'deep_think');
+          if (!customModelIdentityCurrent(resumeOwner)) return;
+          if (record.conversation_id) { S.dtConversationId = record.conversation_id; S.dtDomConversationId = record.conversation_id; saveDtConvId(); }
+          var resumedInput = document.getElementById('dtInput');
+          if (resumeDraft && resumedInput && !resumedInput.value) resumedInput.value = resumeDraft;
+          closeResearchHistoryPanel();
+          await handleDeepThinkPageSend(record.query, null, {checkpointId:record.id, preserveDraft:true});
+        } catch (_) { if (resume.isConnected) { resume.disabled = false; notify('恢复失败，请重试'); } }
+      });
+      var discard = el('button',{type:'button',class:'ai-history-retry',text:'删除断点'}); discard.disabled = !record.resumable;
+      discard.addEventListener('click', async function() {
+        discard.disabled = true;
+        var result = await apiRequest('DELETE','/research/checkpoints/' + encodeURIComponent(record.id),null,{timeoutMs:15000});
+        if (!bodyEl.isConnected) return;
+        if (result && result.ok) { row.remove(); if (!section.querySelector('.ai-checkpoint-row')) section.remove(); }
+        else { discard.disabled = false; notify('断点删除失败，请重试'); }
+      });
+      row.appendChild(resume); row.appendChild(discard); section.appendChild(row);
+    });
+    bodyEl.prepend(section);
   }
 
   function renderResearchHistoryList(bodyEl, items) {
@@ -6152,7 +6270,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var panel = document.getElementById('panelDeepThink');
     if (!panel) return;
     var hp = panel.querySelector('.dt-research-history-panel');
-    if (hp) { try { hp.remove(); } catch (e) {} }
+    if (hp) {
+      var target = hp.__focusReturnTarget;
+      try { hp.remove(); } catch (e) {}
+      if (target && target.isConnected) target.focus({ preventScroll: true });
+    }
   }
 
   // ★ 2026-09-11 修复（深入研究"连接中断"根因之二）：
@@ -6270,8 +6392,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (onProgress) { try { onProgress({ sources: sources }); } catch (e) {} }
       } else if (evt.type === 'research_stage') {
         if (onProgress) { try { onProgress({ stage: String(evt.stage || ''), message: evt.message != null ? String(evt.message) : '' }); } catch (e) {} }
+      } else if (evt.type === 'research_checkpoint') {
+        if (onProgress) onProgress({checkpoint:evt.checkpoint_id, resumed:evt.resumed === true});
       } else if (evt.type === 'research_done') {
-        var finalAnswer = (content && String(content).trim()) ? content : (evt.answer || '');
+        var finalAnswer = typeof evt.answer === 'string' && evt.answer.trim() ? evt.answer : content;
+        finalAnswer = String(finalAnswer || '').slice(0, AI_CONTENT_MAX_LEN);
         succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id || null,
           conversation_id: evt.conversation_id || requestConversationId,
           saved: evt.saved === true || (evt.saved !== false && !!evt.message_id), quota: evt.quota || null });
@@ -6315,6 +6440,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             credentials: 'include',
             body: JSON.stringify({
               query: String(query || ''),
+              checkpoint: true, checkpoint_id: opts && opts.checkpointId || undefined,
               client_request_id: opts && opts.requestId || undefined,
               model: (opts && opts.model) || 'pro',
               // ★ 2026-09-24 新增（课题④）：把用户在「模型」下拉里选定的模型传给后端。
@@ -6463,6 +6589,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var sources = [];
     var responding = false;
     var researchModel = opts.model || 'pro';
+    var renderFrame = 0;
+    var renderStreamMarkdown = createStreamingMarkdownCache(renderMarkdown);
 
     function setStep(stepIdx) {
       if (!isResearchCard(progressCard)) return;
@@ -6555,13 +6683,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       );
     }
 
-    // 流式渲染: research_content 小块实时追加到报告区 (纯文本; done 后整体 markdown 替换)
+    // Network packets may arrive together. Format their combined content once
+    // per display frame, preserving the completed prefix and live node identity.
     function appendStreamChunk(chunk) {
-      if (!chunk || !isResearchCard(progressCard)) return;
-      var answerEl = progressCard.querySelector('.ai-think-answer');
-      if (!answerEl) return;
-      patchInnerHTML(answerEl, renderMarkdown(answer, true));
-      scrollToBottom(dtMessagesEl, false);
+      if (!chunk || renderFrame || !isResearchCard(progressCard)) return;
+      renderFrame = requestAnimationFrame(function() {
+        renderFrame = 0;
+        if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || !progressCard.isConnected) return;
+        var answerEl = progressCard.querySelector('.ai-think-answer');
+        if (!answerEl) return;
+        patchInnerHTML(answerEl, renderStreamMarkdown(answer));
+        scrollToBottom(dtMessagesEl, false);
+      });
     }
 
     function removeTavilyCard() {
@@ -6609,6 +6742,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           return;
         }
         if (!prog) return;
+        if (prog.checkpoint) { progressCard.dataset.checkpointId = prog.checkpoint; }
         if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true});
         if (prog.stage) handleResearchStage(prog.stage, prog.message);
         if (typeof prog.step === 'number') {
@@ -6628,7 +6762,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) sources = prog.sources;
-      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId });
+      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId });
       var result = await researchPromise;
       if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
       answer = (result && result.answer) || '';
@@ -6669,7 +6803,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var isConcurrent = errCode === 'concurrent' || /上一个(研究)?请求|请等待上一个/.test(errMsg);
       var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/.test(errCode)
         || /次数已达上限|额度|开通 Pro|访问过于频繁/.test(errMsg);
-      if (isConcurrent || isQuota || (err && err.retryable === false) || answer) {
+      if (isConcurrent || isQuota || /^checkpoint_/.test(errCode) || errCode === 'research_incomplete' || (progressCard && progressCard.dataset && progressCard.dataset.checkpointId) || (err && err.retryable === false) || answer) {
         console.warn('[AI] Tavily research 终结于不可回退错误:', errCode || errMsg);
         var terminalMsg = isConcurrent
           ? '上一个请求仍在进行中，请等它结束后重试'
@@ -6684,6 +6818,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       console.warn('[AI] Tavily research 失败，回退到深入研究流程:', errMsg, (err && err.status) ? ('HTTP ' + err.status) : '');
       removeTavilyCard();
       return 'fallback';
+    } finally {
+      if (renderFrame) cancelAnimationFrame(renderFrame);
+      renderFrame = 0;
     }
   }
 
@@ -7292,6 +7429,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function openDeepThinkPage() {
+    if (S._voiceConversation) S._voiceConversation.setEnabled(false);
     ensureAiAccountState();
     if (!window.currentUser) {
       notify('请先登录后再使用深入研究');
@@ -7564,7 +7702,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     // ★ 深页发送同样受每日第三方搜索次数限制；校验在 await 后重新确认请求仍有效。
-    if (S.webSearchEnabled) {
+    if (S.webSearchEnabled && !sendOptions.checkpointId) {
       try {
         if (!S.quota || (Date.now() - S.quotaFetchedAt) > 120000) {
           await fetchAiQuota(true);
@@ -7637,14 +7775,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 优先走 /api/agent/research/stream SSE 研究流程; 失败时回退到下方原有 deep think 流程。
     // 注: S.deepThink 在独立二级页面架构下恒为 false (深入研究已迁至独立页面, 见 toggleDeepThink),
     //     此处位于深入研究页发送函数内, 即代表深入研究模式。
-    if (S.tavilyResearchEnabled && !fileData && originalUserText.length >= 6) {
+    if (sendOptions.checkpointId || (S.tavilyResearchEnabled && !fileData && originalUserText.length >= 6)) {
       // 3a. 清空输入框 (Tavily 流程先行; 回退时下方 step 3 会再清一次, 无副作用)
       clearSubmittedInput();
 
       var tavilyOutcome;
       // ★ 修复: Tavily 深入研究同样消耗每日第三方搜索次数。超限时不发起研究请求，
       //   直接回退到下方深入研究流程（与 Tavily 流程失败时的行为一致）。
-      if (S.quota && searchQuotaExhausted(S.quota)) {
+      if (!sendOptions.checkpointId && S.quota && searchQuotaExhausted(S.quota)) {
         notify('今日网页搜索次数已达上限，开通 Pro 可无限搜索');
         tavilyOutcome = 'fallback';
       } else {
@@ -7659,7 +7797,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             researchModel: dtSettings.researchModel,
             mode: 'hybrid',
             rewrite: true,
-            refresh: sendOptions.refresh === true
+            refresh: sendOptions.refresh === true, checkpointId: sendOptions.checkpointId
           });
         } catch (eTavily) {
           console.warn('[AI] Tavily research flow error, fallback to deep think:', eTavily && eTavily.message);
@@ -7667,6 +7805,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       }
       if (!isCurrentDeepSend()) return;
+      if (sendOptions.checkpointId && tavilyOutcome === 'fallback') { notify('断点恢复失败，请从研究历史重试'); tavilyOutcome = 'done'; }
       if (tavilyOutcome !== 'fallback') {
         // 成功 / 取消 / 超时: Tavily 流程已收尾, 结束本次发送
         resetSendingIfCurrent();
@@ -9316,6 +9455,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         api_key: customCfg.api_key,
         model: customCfg.model,
         base_url: customCfg.base_url,
+        reasoning_effort_supported: customCfg.reasoning_effort_supported === true,
         message: text,
         messages: hl,
         messages_include_current: false,
@@ -9808,6 +9948,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           })
         };
         S.messages.push(aiMsg);
+        if (hasContent && !(evt && evt.interrupted) && S._voiceConversation) S._voiceConversation.reply(content);
         // ★ 2026-09-29（审计 S1）：登记本轮的本地 assistant 消息，并把节点与消息
         //   互相关联，供首屏历史到达时按"是否本地未同步"保留气泡。
         if (S._pendingLocalMsgs.indexOf(aiMsg) === -1) S._pendingLocalMsgs.push(aiMsg);
@@ -9863,6 +10004,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             setTimeout(function() { copyBtn.textContent = '复制'; }, 2000);
           });
           actionRow.appendChild(copyBtn);
+          addReadAloudAction(actionRow,content);
           if (typeof navigator !== 'undefined' && navigator.share) {
             var shareBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-share', 'aria-label': '分享回复', text: '分享' });
             shareBtn.addEventListener('click', function(ev) {
@@ -11617,18 +11759,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var section = el('section', { class: 'ai-conv-group' });
       section.appendChild(el('div', { class: 'ai-conv-group-title', text: groupLabel }));
       (groups[groupLabel] || []).forEach(function(conv) {
-        var item = el('button', {
-          type: 'button',
+        var item = el('div', {
           class: 'ai-conv-item' + (conv.conversation_id === S.conversationId ? ' active' : ''),
           'data-conv-id': conv.conversation_id
         });
+        var openBtn = el('button', {
+          type: 'button', class: 'ai-conv-open',
+          'aria-label': '打开对话：' + (getConversationTitleOverride(conv.conversation_id) || conv.title || '新对话')
+        });
+        item.appendChild(openBtn);
         item.appendChild(el('div', { class: 'ai-conv-title', text: (getConversationTitleOverride(conv.conversation_id) || conv.title || '新对话') }));
         item.appendChild(el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
         item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
         var meta = el('div', { class: 'ai-conv-meta' });
         meta.appendChild(el('span', { class: 'ai-conv-count', text: getConversationCountText(conv) }));
         // ★ 新增：重命名按钮
-        var renameBtn = el('span', { class: 'ai-conv-rename', title: '重命名此对话', 'aria-label': '重命名对话' }, '✎');
+        var renameBtn = el('button', { type: 'button', class: 'ai-conv-rename', title: '重命名此对话', 'aria-label': '重命名对话' }, '✎');
         (function(cid) {
           renameBtn.addEventListener('click', function(ev) {
             ev.stopPropagation();
@@ -11637,7 +11783,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         })(conv.conversation_id);
         meta.appendChild(renameBtn);
         // 删除按钮
-        var delBtn = el('span', { class: 'ai-conv-del', title: '删除此对话', 'aria-label': '删除对话' }, '×');
+        var delBtn = el('button', { type: 'button', class: 'ai-conv-del', title: '删除此对话', 'aria-label': '删除对话' }, '×');
         (function(cid, elRef) {
           delBtn.addEventListener('click', function(ev) {
             ev.stopPropagation();
@@ -11647,9 +11793,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         })(conv.conversation_id, item);
         meta.appendChild(delBtn);
         item.appendChild(meta);
-        item.addEventListener('click', function() {
+        openBtn.addEventListener('click', function() {
           if (S.sending) return;
-          var cid = this.getAttribute('data-conv-id');
+          var cid = item.getAttribute('data-conv-id');
           switchConversation(cid);
         });
         section.appendChild(item);
@@ -11704,6 +11850,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   async function switchConversation(cid) {
     if (!cid) return;
+    if (S._voiceConversation) S._voiceConversation.setEnabled(false);
     // ★ 2026-09-24（课题③）：从历史二级页选中会话后，立即收起浮层回到聊天区，
     //   并给出"正在打开"反馈，避免用户以为点击无效。
     var _histBtn = document.querySelector('.ai-chat-hist-btn');
@@ -11785,6 +11932,13 @@ function showChatMessages() {
       hideConversationListPage();
       if (histBtnNow) syncAiHeaderButtons(histBtnNow, newBtnNow);
     });
+    shell.addEventListener('keydown', function(event) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      hideConversationListPage();
+      var historyButton = root.querySelector('.ai-chat-hist-btn');
+      if (historyButton) syncAiHeaderButtons(historyButton, root.querySelector('.ai-chat-new-btn'));
+    });
     head.appendChild(closeBtn);
     card.appendChild(head);
     // 把会话列表与提示栏移入浮层卡片（保留原引用，逻辑不变）
@@ -11807,13 +11961,20 @@ function showChatMessages() {
       renderConversationListStyled(S.conversationsEl);
     }
     var shell = ensureConversationPageShell();
+    if (shell && shell.__closeTimer) { clearTimeout(shell.__closeTimer); shell.__closeTimer = null; }
+    if (shell) { shell.classList.remove('is-leaving'); shell.inert = false; shell.removeAttribute('aria-hidden'); }
     S.showingHistory = true;
     var root = getAiRoot();
     if (root) root.classList.add('showing-history');
     // 下一帧加 is-open 触发滑入动画（保证 transition 生效）
     if (shell) {
       requestAnimationFrame(function() {
-        requestAnimationFrame(function() { shell.classList.add('is-open'); });
+        requestAnimationFrame(function() {
+          if (!shell.isConnected || !S.showingHistory || shell.classList.contains('is-leaving')) return;
+          shell.classList.add('is-open');
+          var focus = shell.querySelector('.ai-conv-page-close');
+          if (focus) focus.focus({ preventScroll: true });
+        });
       });
     }
   }
@@ -11823,9 +11984,14 @@ function showChatMessages() {
     var root = getAiRoot();
     var shell = root ? root.querySelector('.ai-conv-page-shell') : null;
     if (!shell) return;
+    if (shell.__closeTimer) clearTimeout(shell.__closeTimer);
+    shell.inert = true; shell.setAttribute('aria-hidden', 'true');
+    var focus = root.querySelector('.ai-chat-hist-btn');
+    if (shell.contains(document.activeElement) && focus) focus.focus({ preventScroll: true });
     shell.classList.remove('is-open');
     shell.classList.add('is-leaving');
-    setTimeout(function() {
+    shell.__closeTimer = setTimeout(function() {
+      shell.__closeTimer = null;
       // 动画结束后把会话列表与提示栏移回 root（保持 DOM 引用稳定，避免后续逻辑找不到节点）
       try {
         if (S.conversationsEl && shell.contains(S.conversationsEl)) {
@@ -11836,7 +12002,7 @@ function showChatMessages() {
         if (infoBar) { infoBar.style.display = 'none'; root.appendChild(infoBar); }
         if (shell.parentNode) shell.parentNode.removeChild(shell);
       } catch (eShell) {}
-    }, 260);
+    }, prefersReducedMotion() ? 0 : 260);
   }
 
   // 返回聊天区（供页面内"返回"入口调用）
@@ -12016,6 +12182,7 @@ function showChatMessages() {
       title: '开始新对话（不删除历史）'
     }, '新对话');
     newBtn.addEventListener('click', async function(ev) {
+      if (S._voiceConversation) S._voiceConversation.setEnabled(false);
       ev.preventDefault();
       ev.stopPropagation();
       if (S.sending) { notify('正在回复中，请稍候再新建对话'); return; }
@@ -12149,7 +12316,6 @@ function showChatMessages() {
       class: 'ai-plus-btn',
       id: 'aiPlusBtn',
       'aria-label': '更多选项',
-      'aria-haspopup': 'menu',
       'aria-expanded': 'false',
       'aria-controls': 'aiPlusPanelShell',
       title: '额度、模型、思考、搜索与 Pro'
@@ -12169,9 +12335,10 @@ function showChatMessages() {
     var panelShell = el('div', {
       class: 'ai-plus-panel-shell',
       id: 'aiPlusPanelShell',
-      role: 'menu',
+      role: 'region',
       'aria-label': '更多选项'
     });
+    var panelAbortController = new AbortController();
     // 简洁可辨识图标（星 / 云上传 / 立方体 / 大脑 / 地球）
     var ICO = {
       pro: '<svg class="ai-panel-svg ai-panel-svg--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.1l2.2 5.1 5.5.5-4.2 3.6 1.3 5.4L12 14.9 7.2 17.7l1.3-5.4-4.2-3.6 5.5-.5L12 3.1z"/></svg>',
@@ -12219,28 +12386,28 @@ function showChatMessages() {
               '</button>' +
             '</div>' +
             '<div class="ai-panel-group">' +
-              '<button type="button" class="ai-panel-row" role="menuitem" data-action="upload">' +
+              '<button type="button" class="ai-panel-row" data-action="upload">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--upload" aria-hidden="true">' + ICO.upload + '</span>' +
                 '<span class="ai-panel-row-title">上传文件</span>' +
                 rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
               '</button>' +
-              '<div class="ai-panel-row ai-panel-row--select" data-action="open-model" role="button" tabindex="0" aria-haspopup="listbox">' +
+              '<button type="button" class="ai-panel-row ai-panel-row--select" data-action="open-model" aria-haspopup="dialog" aria-expanded="false">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
                 rowEnd(
                   '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">V4.1 Flash</span>',
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
-              '</div>' +
-              '<div class="ai-panel-row ai-panel-row--select" data-action="open-think" role="button" tabindex="0" aria-haspopup="listbox">' +
+              '</button>' +
+              '<button type="button" class="ai-panel-row ai-panel-row--select" data-action="open-think" aria-haspopup="dialog" aria-expanded="false">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--think" aria-hidden="true">' + ICO.think + '</span>' +
                 '<span class="ai-panel-row-title">思考</span>' +
                 rowEnd(
                   '<span class="ai-panel-row-value ai-panel-row-value--think" id="aiThinkSummary">轻度</span>',
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
-              '</div>' +
-              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="menuitemcheckbox" data-action="search" aria-checked="false" title="开启后，本轮必须实际执行网页检索；关闭时由 AI 自主判断">' +
+              '</button>' +
+              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="switch" data-action="search" aria-checked="false" title="开启后，本轮必须实际执行网页检索；关闭时由 AI 自主判断">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
                 rowEnd(
@@ -12581,6 +12748,11 @@ function showChatMessages() {
       if (!plusBtn || !panelShell || !panelShell.parentNode) return;
       var btnRect = plusBtn.getBoundingClientRect();
       var bar = panelShell.parentNode.getBoundingClientRect();
+      var viewport = window.visualViewport;
+      var header = root.querySelector('.ai-chat-header');
+      var top = Math.max((viewport ? viewport.offsetTop : 0) + 8, header ? header.getBoundingClientRect().bottom + 8 : 0);
+      panelShell.style.maxHeight = Math.max(80, bar.top - top - 10) + 'px';
+      panelShell.style.overflowY = 'auto';
       var panelW = Math.min(308, Math.max(268, bar.width - 16));
       panelShell.style.width = panelW + 'px';
       // 菜单左缘尽量贴 + 按钮
@@ -12602,30 +12774,64 @@ function showChatMessages() {
     //    渲染不全/错位；改用站点自绘选项列表，跨设备一致）──
     var _selectPopEl = null;
     var _selectPopCloseTimer = null;
+    var _selectPopClosingEl = null;
+    var _selectPopAnchor = null;
     // ★ 2026-09-22：关闭改为「先播退场动画再移除节点」。
     //   旧实现直接 removeChild，弹层是"啪"地消失——和面板的柔和开合完全不搭。
     //   instant=true 用于"立刻换一个弹层"的场景（避免两个层叠在一起）。
-    function closeSelectPopup(instant) {
+    function closeSelectPopup(instant, restoreFocus) {
       if (_selectPopCloseTimer) {
         clearTimeout(_selectPopCloseTimer);
         _selectPopCloseTimer = null;
       }
+      if (_selectPopClosingEl) { _selectPopClosingEl.remove(); _selectPopClosingEl = null; }
       if (!_selectPopEl) return;
       var node = _selectPopEl;
       _selectPopEl = null;
-      if (instant === true || !node.parentNode) {
+      if (_selectPopAnchor) {
+        _selectPopAnchor.setAttribute('aria-expanded', 'false');
+        if (restoreFocus && _selectPopAnchor.isConnected) _selectPopAnchor.focus({ preventScroll: true });
+      }
+      node.inert = true;
+      node.setAttribute('aria-hidden', 'true');
+      if (instant === true || prefersReducedMotion() || !node.parentNode) {
         if (node.parentNode) node.parentNode.removeChild(node);
         return;
       }
+      _selectPopClosingEl = node;
       try { node.classList.add('is-closing'); } catch (eCls) {}
       // 与 CSS aiSelectPopOut（260ms）对齐，多留 20ms 余量再摘除节点。
       _selectPopCloseTimer = setTimeout(function() {
         _selectPopCloseTimer = null;
         if (node && node.parentNode) node.parentNode.removeChild(node);
+        if (_selectPopClosingEl === node) _selectPopClosingEl = null;
       }, 280);
+    }
+    function positionSelectPopup() {
+      if (!_selectPopEl) return;
+      var rect = _selectPopAnchor && _selectPopAnchor.getBoundingClientRect();
+      var viewport = window.visualViewport;
+      var visibleTop = viewport ? viewport.offsetTop : 0;
+      var visibleLeft = viewport ? viewport.offsetLeft : 0;
+      var visibleHeight = viewport ? viewport.height : window.innerHeight;
+      var visibleWidth = viewport ? viewport.width : window.innerWidth;
+      var width = Math.max(48, Math.min(visibleWidth - 24, Math.max(rect ? rect.width : 260, 260)));
+      var left = rect ? Math.max(visibleLeft + 12, Math.min(rect.left, visibleLeft + visibleWidth - width - 12)) : visibleLeft + 12;
+      var maxHeight = Math.max(48, Math.min(visibleHeight - 24, visibleHeight * 0.8));
+      _selectPopEl.style.width = width + 'px';
+      _selectPopEl.style.minWidth = width + 'px';
+      _selectPopEl.style.maxHeight = maxHeight + 'px';
+      var height = _selectPopEl.offsetHeight;
+      var top = rect ? rect.bottom + 6 : visibleTop + 12;
+      if (rect && top + height > visibleTop + visibleHeight - 12) top = rect.top - height - 6;
+      top = Math.max(visibleTop + 12, Math.min(top, visibleTop + visibleHeight - height - 12));
+      _selectPopEl.style.left = left + 'px';
+      _selectPopEl.style.top = top + 'px';
+      if (rect) _selectPopEl.style.setProperty('--pop-ox', Math.max(8, Math.min(rect.left + rect.width / 2 - left, width - 8)) + 'px');
     }
     function openSelectPopup(kind, anchor) {
       closeSelectPopup(true);
+      _selectPopAnchor = anchor;
       var options = kind === 'model'
         ? buildModelOptions()
         : [
@@ -12638,17 +12844,18 @@ function showChatMessages() {
       var current = kind === 'model'
         ? (S.selectedModel || 'deepseek-flash')
         : (S.thinkingMode || 'medium');
-      var listEl = el('div', { class: 'ai-select-pop-list', role: 'listbox' });
+      var listEl = el('div', { class: 'ai-select-pop-list', role: 'listbox', 'aria-label': kind === 'model' ? '选择模型' : '选择思考程度' });
       options.forEach(function(opt) {
         var isOn = String(opt.value) === String(current);
         var item = el('button', {
           type: 'button',
           class: 'ai-select-pop-item' + (isOn ? ' on' : ''),
           role: 'option',
+          tabindex: isOn ? '0' : '-1',
           'aria-selected': isOn ? 'true' : 'false'
         });
         item.appendChild(el('span', { text: opt.label }));
-        item.appendChild(el('span', { class: 'ai-select-pop-check', text: isOn ? '✓' : '' }));
+        item.appendChild(el('span', { class: 'ai-select-pop-check', text: isOn ? '✓' : '', 'aria-hidden': 'true' }));
         item.addEventListener('click', function(ev) {
           ev.preventDefault();
           ev.stopPropagation();
@@ -12656,39 +12863,38 @@ function showChatMessages() {
         });
         listEl.appendChild(item);
       });
-      _selectPopEl = el('div', { class: 'ai-select-pop', role: 'menu', 'aria-label': kind === 'model' ? '选择模型' : '选择思考程度' });
+      _selectPopEl = el('div', { class: 'ai-select-pop', id: 'aiSelectPopup', role: 'dialog', 'aria-modal': 'false', 'aria-label': kind === 'model' ? '选择模型' : '选择思考程度' });
+      _selectPopEl.__focusReturnTarget = anchor;
+      if (anchor) { anchor.setAttribute('aria-expanded', 'true'); anchor.setAttribute('aria-controls', 'aiSelectPopup'); }
       var heading = el('div', { class: 'ai-select-pop-heading' });
       heading.appendChild(el('span', { text: kind === 'model' ? '选择模型' : '选择思考程度' }));
       var closeButton = el('button', { type: 'button', class: 'ai-select-pop-close', 'aria-label': '关闭' });
       closeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
       closeButton.addEventListener('click', function(event) {
-        event.preventDefault(); event.stopPropagation(); closeSelectPopup();
-        if (anchor && typeof anchor.focus === 'function') anchor.focus({ preventScroll: true });
+        event.preventDefault(); event.stopPropagation(); closeSelectPopup(false, true);
       });
       heading.appendChild(closeButton);
       _selectPopEl.appendChild(heading);
       _selectPopEl.appendChild(listEl);
       document.body.appendChild(_selectPopEl);
-      var rect = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
-      var viewport = window.visualViewport;
-      var visibleTop = viewport ? viewport.offsetTop : 0;
-      var visibleHeight = viewport ? viewport.height : window.innerHeight;
-      var width = Math.min(window.innerWidth - 24, Math.max(rect ? rect.width : 260, 260));
-      var left = rect ? Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)) : 12;
-      var maxHeight = Math.max(100, visibleHeight - 24);
-      _selectPopEl.style.maxHeight = Math.min(maxHeight, visibleHeight * 0.8) + 'px';
-      var top = Math.max(visibleTop + 12, rect ? Math.min(rect.bottom + 6, visibleTop + visibleHeight - Math.min(360, maxHeight) - 12) : visibleTop + 12);
-      _selectPopEl.style.left = left + 'px';
-      _selectPopEl.style.top = top + 'px';
-      _selectPopEl.style.minWidth = width + 'px';
-      // ★ 展开原点对齐到锚点行的水平位置，弹层是"从那一行长出来"的
-      if (rect) {
-        var ox = Math.max(8, Math.min(rect.left + rect.width / 2 - left, width - 8));
-        _selectPopEl.style.setProperty('--pop-ox', ox + 'px');
-      }
+      positionSelectPopup();
+      var selected = listEl.querySelector('[aria-selected="true"]') || listEl.firstChild;
+      if (selected) { selected.tabIndex = 0; selected.focus({ preventScroll: true }); selected.scrollIntoView({ block: 'nearest' }); }
+      listEl.addEventListener('keydown', function(event) {
+        var items = Array.from(listEl.querySelectorAll('[role="option"]'));
+        var index = items.indexOf(document.activeElement), next;
+        if (event.key === 'ArrowDown') next = (index + 1) % items.length;
+        else if (event.key === 'ArrowUp') next = (index - 1 + items.length) % items.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = items.length - 1;
+        else return;
+        event.preventDefault();
+        items.forEach(function(item, i) { item.tabIndex = i === next ? 0 : -1; });
+        items[next].focus({ preventScroll: true }); items[next].scrollIntoView({ block: 'nearest' });
+      });
     }
     function applySelectChoice(kind, value) {
-      closeSelectPopup();
+      closeSelectPopup(false, value !== '__add_custom__');
       if (kind === 'model') {
         if (value === '__add_custom__') { showCustomModelModal(); return; }
         if (value && value !== S.selectedModel) {
@@ -12712,11 +12918,11 @@ function showChatMessages() {
       if (!_selectPopEl) return;
       if (_selectPopEl.contains(ev.target)) return;
       closeSelectPopup();
-    }, true);
+    }, { capture: true, signal: panelAbortController.signal });
     document.addEventListener('keydown', function(ev) {
       if (!_selectPopEl) return;
-      if (ev.key === 'Escape') { ev.preventDefault(); closeSelectPopup(); }
-    }, true);
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); closeSelectPopup(false, true); }
+    }, { capture: true, signal: panelAbortController.signal });
 
     function openPanel() {
       if (panelOpen || panelClosing) return;
@@ -12770,7 +12976,7 @@ function showChatMessages() {
       plusWrap.classList.remove('is-open');
       plusBtn.setAttribute('aria-expanded', 'false');
       showPanelPage('primary');
-      if (animate === false) {
+      if (animate === false || prefersReducedMotion()) {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         if (closeTimer) {
@@ -12971,6 +13177,9 @@ function showChatMessages() {
             '<datalist id="aiCmModelList"></datalist>' +
             '<label class="ai-invite-code-label" for="aiCmBase">接口地址（OpenAI 兼容，一般无需修改）</label>' +
             '<input type="text" id="aiCmBase" class="ai-invite-code-input ai-cm-input" placeholder="https://…/v1" autocomplete="off" spellcheck="false" />' +
+            '<button type="button" class="ai-invite-modal-btn ai-cm-check" id="aiCmCheckBtn">检测模型能力</button>' +
+            '<p class="ai-checkpoint-note">手动检测会向当前服务商发送最多 5 个短请求，可能消耗少量模型额度。</p>' +
+            '<div id="aiCmCapabilities" class="ai-cm-capabilities" role="status" aria-live="polite"></div>' +
             '<div class="ai-cm-list" id="aiCmList"></div>' +
             '<div class="ai-invite-code-feedback ai-cm-feedback" id="aiCmFeedback" aria-live="polite"></div>' +
           '</div>' +
@@ -12995,7 +13204,32 @@ function showChatMessages() {
       var saveBtn = modal.querySelector('#aiCmSaveBtn');
       var editCancelBtn = modal.querySelector('#aiCmEditCancel');
       var titleEl = modal.querySelector('#aiCustomModelTitle');
-      var modalOwner = bindAiModalIdentity(modal);
+      var capabilityAbort = null, capabilitySeq = 0;
+      var modalOwner = bindAiModalIdentity(modal,function() { capabilitySeq++; if (capabilityAbort) capabilityAbort.abort(); });
+      var checkBtn = modal.querySelector('#aiCmCheckBtn'), capabilityBox = modal.querySelector('#aiCmCapabilities');
+      function testConfig() { return {provider:providerSelect.value,model:modelInput.value.trim(),api_key:apiKeyInput.value.trim(),base_url:baseInput.value.trim()}; }
+      [providerSelect,modelInput,apiKeyInput,baseInput].forEach(function(field) { field.addEventListener('input', invalidateCapability); field.addEventListener('change', invalidateCapability); });
+      function invalidateCapability() { capabilitySeq++; if (capabilityAbort) capabilityAbort.abort(); checkBtn.disabled = false; checkBtn.textContent = '检测模型能力'; capabilityBox.replaceChildren(); }
+      checkBtn.addEventListener('click', async function() {
+        var config = testConfig();
+        if (!config.model || !config.api_key || !config.base_url) { capabilityBox.textContent = '请先填入模型名称、Key 和接口地址。'; return; }
+        if (capabilityAbort) capabilityAbort.abort(); capabilityAbort = new AbortController();
+        var seq = ++capabilitySeq, key = capabilityKey(config);
+        checkBtn.disabled = true; checkBtn.textContent = '正在检测…'; capabilityBox.textContent = '正在检查对话、工具、图片、思考与流式输出…';
+        var result = await apiRequest('POST','/models/check',config,{timeoutMs:70000,signal:capabilityAbort.signal});
+        if (!modalOwner.current() || seq !== capabilitySeq || key !== capabilityKey(testConfig())) return;
+        checkBtn.disabled = false; checkBtn.textContent = '重新检测'; capabilityBox.replaceChildren();
+        var results = result && result.ok && result.data && result.data.results;
+        if (!Array.isArray(results)) { capabilityBox.textContent = describeError(result,'能力检测失败，请检查配置后重试'); return; }
+        var names = {chat:'基础对话',tools:'工具调用',vision:'图片理解',reasoning:'思考能力',streaming:'流式输出'};
+        var statuses = {passed:'实测通过',failed:'实测失败',unconfirmed:'未确认'};
+        var list = el('ul');
+        results.forEach(function(item) { var row = el('li',{text:(names[item.name] || item.name) + '：' + (statuses[item.status] || '未确认') + ' · ' + String(item.detail || ''),'data-status':item.status}); list.appendChild(row); });
+        capabilityBox.appendChild(list); capabilityBox.appendChild(el('p',{class:'ai-checkpoint-note',text:'结果仅代表本次配置与测试样本；未确认的能力不会标为支持。修改配置后请重新检测。'}));
+        capabilityBox.scrollIntoView({block:'nearest',inline:'nearest',behavior:prefersReducedMotion() ? 'auto' : 'smooth'});
+        modelCapabilityCache.set(key,{reasoning:results.some(function(item) { return item.name === 'reasoning' && item.status === 'passed'; })});
+        if (modelCapabilityCache.size > 40) modelCapabilityCache.delete(modelCapabilityCache.keys().next().value);
+      });
 
       function currentProvider() {
         var key = providerSelect.value;
@@ -13188,7 +13422,7 @@ function showChatMessages() {
       modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
       modal.addEventListener('keydown', function(e) { if (e.key === 'Escape') close(); });
 
-      saveBtn.addEventListener('click', function() {
+      saveBtn.addEventListener('click', async function() {
         if (!modalOwner.current()) return;
         var p = currentProvider();
         var apiKey = String(apiKeyInput.value || '').trim();
@@ -13219,6 +13453,11 @@ function showChatMessages() {
           base_url: baseValue
         };
         var targetUid = editingUid;
+        if (!targetUid && customs.length >= CUSTOM_MODEL_LIMIT) {
+          feedback.className = 'ai-invite-code-feedback is-bad';
+          feedback.textContent = '最多保存 ' + CUSTOM_MODEL_LIMIT + ' 个自定义模型，请先删除一个再添加';
+          return;
+        }
         var existIdx = -1;
         if (targetUid) {
           for (var ei = 0; ei < customs.length; ei++) { if (customs[ei].uid === targetUid) { existIdx = ei; break; } }
@@ -13228,26 +13467,34 @@ function showChatMessages() {
           record.uid = targetUid;
           customs[existIdx] = record;
           unmarkModelUidsDeleted([targetUid]); // ★ 重新启用该 uid，清除墓碑
-          saveCustomModels(customs);
+          var editSync = saveCustomModels(customs), editSeq = customModelMutationSeq;
           S.selectedModel = CUSTOM_MODEL_PREFIX + targetUid;
           S._userPickedModel = true;
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
           updateModelUI(true);
           renderList();
           resetForm();
-          notify('已保存修改：' + label + (keepExistingKey ? '（API Key 未变更）' : ''));
+          notify('修改已保存在本机，正在同步到账号…');
+          var editSynced = await editSync;
+          if (modalOwner.identityCurrent() && editSeq === customModelMutationSeq) {
+            notify(editSynced ? '修改已同步到账号：' + label + (keepExistingKey ? '（API Key 未变更）' : '') : '修改已保存在本机，联网后同步到账号');
+          }
         } else {
           record.uid = genCustomModelUid();
           customs.push(record);
           unmarkModelUidsDeleted([record.uid]); // ★ 新 uid 若曾入墓碑，先清除
-          saveCustomModels(customs);
+          var addSync = saveCustomModels(customs), addSeq = customModelMutationSeq;
           var newUid = record.uid;
           S.selectedModel = CUSTOM_MODEL_PREFIX + newUid;
           S._userPickedModel = true;
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
           updateModelUI(true);
           close();
-          notify('已添加并切换到：' + label + '（' + p.label + '）');
+          notify('已添加并切换到：' + label + '，正在同步到账号…');
+          var addSynced = await addSync;
+          if (modalOwner.identityCurrent() && addSeq === customModelMutationSeq) {
+            notify(addSynced ? '模型已同步到账号：' + label : '模型已保存在本机，联网后同步到账号');
+          }
         }
       });
 
@@ -13324,21 +13571,26 @@ function showChatMessages() {
       }
     });
 
-    var panelAbortController = new AbortController();
     document.addEventListener('click', function(e) {
       if (!panelOpen) return;
       if (panelShell.contains(e.target) || plusWrap.contains(e.target) || plusBtn.contains(e.target) || e.target === plusBtn) return;
       closePanel();
     }, { signal: panelAbortController.signal });
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && panelOpen) closePanel();
+      if (e.key === 'Escape' && panelOpen) { closePanel(); plusBtn.focus({ preventScroll: true }); }
     }, { signal: panelAbortController.signal });
     window.addEventListener('resize', function() {
       if (panelOpen) positionPanel();
+      positionSelectPopup();
     }, { signal: panelAbortController.signal, passive: true });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', function() { if (panelOpen) positionPanel(); positionSelectPopup(); }, { signal: panelAbortController.signal, passive: true });
+      window.visualViewport.addEventListener('scroll', positionSelectPopup, { signal: panelAbortController.signal, passive: true });
+    }
 
     S._panelAbortController = panelAbortController;
     S._panelCleanup = function() {
+      closeSelectPopup(true);
       try { panelAbortController.abort(); } catch (e) {}
       if (closeTimer) clearTimeout(closeTimer);
       panelOpen = false;
@@ -13406,80 +13658,39 @@ function showChatMessages() {
       title: '语音输入'
     });
     voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
-    var _voiceRecognition = null;
-    var _voiceListening = false;
-    // ★ 修复：interimResults=true 时 onresult 每次携带「累计完整转写」，
-    //   旧逻辑每次把现有值再拼一遍 interim → 输入框出现重复堆叠文字。
-    //   现改为：开始聆听前记住输入框已有内容 _voiceBaseText，
-    //   onresult 一律用 _voiceBaseText + 当前完整转写覆盖输入框，消除重复。
-    var _voiceBaseText = '';
-    function cleanupVoiceInput() {
-      var rec = _voiceRecognition;
-      _voiceRecognition = null;
-      _voiceListening = false;
-      _voiceBaseText = '';
-      voiceBtn.classList.remove('listening');
-      if (rec) {
-        rec.onresult = rec.onend = rec.onerror = null;
-        try { rec.abort(); } catch (e) { try { rec.stop(); } catch (_) {} }
-      }
-    }
-    S._voiceInputCleanup = cleanupVoiceInput;
-    voiceBtn.addEventListener('click', function() {
-      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SR) {
-        // iOS/iPadOS 全系 WebKit 均不支持 SpeechRecognition（含 iPhone/iPad 上的 Chrome/Edge）
-        notify('当前设备不支持语音输入（iOS/iPadOS 均不支持），请使用桌面版 Chrome 或 Edge');
-        return;
-      }
-      if (_voiceListening) {
-        try { if (_voiceRecognition) _voiceRecognition.stop(); } catch (e) {}
-        return;
-      }
-      try {
-        var rec = new SR();
-        _voiceRecognition = rec;
-        var voiceOwner = customModelIdentity(), voiceLifecycle = S.lifecycleId;
-        function currentVoice() { return _voiceRecognition === rec && S.active && input.isConnected && voiceLifecycle === S.lifecycleId && customModelIdentityCurrent(voiceOwner); }
-        rec.lang = 'zh-CN';
-        rec.interimResults = true;
-        rec.continuous = false;
-        _voiceListening = true;
-        // 记录点击时的输入框内容，作为转写前缀；再次 onresult 不会重复叠加
-        _voiceBaseText = String(input.value || '').replace(/\s+$/, '');
-        voiceBtn.classList.add('listening');
-        notify('正在聆听…');
-        rec.onresult = function(ev) {
-          if (!currentVoice()) return;
-          var interim = '';
-          for (var i = 0; i < ev.results.length; i++) {
-            if (ev.results[i] && ev.results[i][0]) interim += ev.results[i][0].transcript;
-          }
-          if (!interim) return;
-          // 以「点击时的内容 + 当前完整转写」整体覆盖，避免重复
-          input.value = _voiceBaseText ? (_voiceBaseText + ' ' + interim) : interim;
-          autoresize();
-        };
-        rec.onend = function() {
-          if (_voiceRecognition !== rec) return;
-          _voiceListening = false;
-          voiceBtn.classList.remove('listening');
-          _voiceRecognition = null;
-          rec.onresult = rec.onend = rec.onerror = null;
-        };
-        rec.onerror = function(ev) {
-          if (!currentVoice()) return;
-          cleanupVoiceInput();
-          if (ev && ev.error && ev.error !== 'aborted' && ev.error !== 'no-speech') {
-            notify('语音识别失败：' + ev.error);
-          }
-        };
-        rec.start();
-      } catch (e) {
-        cleanupVoiceInput();
-        notify('语音输入不可用');
+    var voiceStatus = el('div',{class:'ai-voice-status',id:'aiVoiceStatus',role:'status','aria-live':'polite'});
+    voiceStatus.hidden = true;
+    var voiceLabel = el('span'), stopVoiceBtn = el('button',{type:'button',class:'ai-msg-act',text:'停止朗读'});
+    stopVoiceBtn.hidden = true; voiceStatus.appendChild(voiceLabel); voiceStatus.appendChild(stopVoiceBtn);
+    var voiceModeBtn = el('button',{type:'button',class:'ai-panel-row ai-voice-mode',role:'switch','aria-checked':'false','aria-label':'语音对话'});
+    voiceModeBtn.innerHTML = '<span class="ai-panel-row-icon" aria-hidden="true">' + voiceBtn.innerHTML + '</span><span class="ai-panel-row-title">语音对话</span><span class="ai-panel-row-end"><span class="ai-panel-row-value">关闭</span></span>';
+    panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child').appendChild(voiceModeBtn);
+    var voiceLifecycle = S.lifecycleId, voiceController = null;
+    if (window.XtjAiCore && window.XtjAiCore.VoiceConversation) voiceController = window.XtjAiCore.VoiceConversation.create({
+      owner:function() { return Object.assign({user:readUserName()},customModelIdentity()); },
+      current:function(owner) { return S.active && input.isConnected && voiceLifecycle === S.lifecycleId && customModelIdentityCurrent(owner); },
+      draft:function() { return input.value || ''; },
+      onTranscript:function(text) { input.value = text; autoresize(); },
+      onSend:function() { doSend(); },
+      onInterrupt:function() { if (S.sending) interruptCurrentChat(); },
+      notify:notify,
+      onState:function(state) {
+        voiceBtn.classList.toggle('listening',state.listening);
+        voiceBtn.setAttribute('aria-label',state.listening ? '结束语音输入' : state.speaking ? '打断朗读并提问' : '语音输入');
+        voiceModeBtn.setAttribute('aria-checked',String(state.enabled));
+        voiceModeBtn.querySelector('.ai-panel-row-value').textContent = state.enabled ? '开启' : '关闭';
+        voiceLabel.textContent = state.label || (state.enabled ? '语音对话已开启，点击麦克风继续提问' : '');
+        voiceStatus.hidden = !voiceLabel.textContent; stopVoiceBtn.hidden = !state.speaking;
+        updateInputMetrics();
       }
     });
+    S._voiceConversation = voiceController;
+    function cleanupVoiceInput() { if (voiceController) voiceController.cancelInput(); }
+    input.addEventListener('input',function(event) { if (event.isTrusted) cleanupVoiceInput(); });
+    S._voiceInputCleanup = function() { if (voiceController) voiceController.dispose(); S._voiceConversation = null; };
+    voiceBtn.addEventListener('click',function() { if (voiceController) voiceController.listen(); else notify('语音模块未加载，请刷新后重试'); });
+    voiceModeBtn.addEventListener('click',function() { if (!voiceController) return; voiceController.setEnabled(!voiceController.isEnabled()); closePanel(true); });
+    stopVoiceBtn.addEventListener('click',function() { if (voiceController) voiceController.stopSpeech(); });
 
     function autoresize() {
       try {
@@ -13496,6 +13707,8 @@ function showChatMessages() {
       var text = String(input.value || '').trim();
       var fileList = (_aiChatFiles && _aiChatFiles.length) ? _aiChatFiles.slice(0, 10) : [];
       if (!text && !fileList.length) return;
+      cleanupVoiceInput();
+      if (voiceController) voiceController.stopSpeech();
       // ★ 多文件：附件已在 handleSendMessage 同步复制进请求体，
       //   发送后立即清理预览（保证不阻塞连续发送）
       handleSendMessage(input, sendBtn, messagesEl, fileList, clearAiChatFilePreview);
@@ -13661,6 +13874,7 @@ function showChatMessages() {
     inputBar.appendChild(voiceBtn);
     inputBar.appendChild(sendBtn);
     inputBar.appendChild(pauseBtn);
+    root.appendChild(voiceStatus);
     root.appendChild(inputBar);
 
     S.resizeTimer = setTimeout(autoresize, 0);
@@ -14034,6 +14248,7 @@ function showChatMessages() {
   // Auth cleanup is independent of panel visibility: closed research/search
   // surfaces can still hold private DOM and a pending auth/history request.
   function resetAiAccountState() {
+    modelCapabilityCache.clear();
     closeAiChat(true);
     closeDeepThinkPage();
     closeSiteSearch();

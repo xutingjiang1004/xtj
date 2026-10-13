@@ -31,12 +31,12 @@ test('正文流式渲染必须走增量补丁（不得每帧整段替换 innerHT
   assert.match(body, /patchInnerHTML\(targetEl, renderMarkdown\(rendered/,
     '正文渲染必须通过 patchInnerHTML 落地，而不是整段 innerHTML 替换');
 
-  // stream-renderer.js：Code 工作区路径同样要走补丁
+  // stream-renderer.js：共享渲染器的缓存解析路径同样要走补丁
   assert.match(coreSrc, /function patchInnerHTML\s*\(/, 'stream-renderer.js 必须提供 patchInnerHTML');
   const j = coreSrc.indexOf('function createStreamRenderer');
   const coreBody = coreSrc.slice(j, j + 8000);
-  assert.match(coreBody, /patchInnerHTML\(targetEl, renderRich\(rendered\)\)/,
-    'Code 工作区渲染同样必须走增量补丁');
+  assert.match(coreBody, /patchInnerHTML\(targetEl, renderStreamMarkdown\(rendered\)\)/,
+    '共享渲染器同样必须走增量补丁');
 });
 
 test('增量补丁必须保留未变化节点（这是性能保证的核心）', () => {

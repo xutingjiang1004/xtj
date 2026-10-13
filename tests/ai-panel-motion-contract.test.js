@@ -372,8 +372,9 @@ test('思考程度弹层：进出场必须是 clip-path 揭示（不得用 scale
 
 test('思考程度弹层：JS 移除节点的等待时间必须 ≥ 退场动画时长', () => {
   const start = agentSrc.indexOf('function closeSelectPopup(');
-  const body = agentSrc.slice(start, start + 1200);
-  const wait = parseInt((body.match(/removeChild\(node\);?\s*\},?\s*(\d+)\)/) || [])[1], 10);
+  const end = agentSrc.indexOf('function positionSelectPopup', start);
+  const body = agentSrc.slice(start, end > start ? end : start + 2200);
+  const wait = parseInt((body.match(/setTimeout\(function\(\)\s*\{[\s\S]*?removeChild\(node\)[\s\S]*?\},\s*(\d+)\)/) || [])[1], 10);
   assert.ok(wait >= 260, `等待时间必须 ≥ 260ms 动画时长，当前 ${wait}ms`);
 });
 

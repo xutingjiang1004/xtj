@@ -144,6 +144,7 @@ const JS_FILES = [
   'js/ai-core/markdown-renderer.js',
   'js/ai-core/scroll-controller.js',
   'js/ai-core/stream-renderer.js',
+  'js/ai-core/voice-conversation.js',
   'js/ai-core/telemetry.js'
 ];
 

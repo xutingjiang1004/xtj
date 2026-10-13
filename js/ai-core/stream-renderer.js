@@ -53,6 +53,39 @@
 
   function createStreamRenderer(targetEl, options) {
     options = options || {};
+    var prefix = '', markup = '', cacheVerified = false, cacheDisabled = false, blockCache = new Map();
+    var cachedMarkdown = getMarkdown() && getMarkdown().render;
+    function renderStreamMarkdown(text) {
+      var currentMarkdown = getMarkdown() && getMarkdown().render;
+      if (currentMarkdown !== cachedMarkdown) {
+        cachedMarkdown = currentMarkdown; prefix = ''; markup = ''; cacheVerified = false; cacheDisabled = false; blockCache.clear();
+      }
+      if (cacheDisabled) return renderRich(text);
+      if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; cacheVerified = false; blockCache.clear(); }
+      var tail = text.slice(prefix.length), breaks = /\n[ \t]*\n+/g, match, committed = 0;
+      while ((match = breaks.exec(tail))) {
+        var block = tail.slice(committed, match.index);
+        if (/```|\||<|>|^[ \t]*(?:[-*+] |\d+\. )/m.test(block)) break;
+        var rest = block.replace(/`[^`\n]*`/g, '').replace(/!?\[[^\]\n]*\]\([^\)\n]*\)/g, '')
+          .replace(/\*\*[^*]+\*\*/g, '').replace(/\*[^*]+\*/g, '');
+        if (/[`*\[\]]/.test(rest)) break;
+        var html = blockCache.get(block);
+        if (html === undefined) {
+          html = renderRich(block);
+          if (blockCache.size < 64 && block.length <= 8192) blockCache.set(block, html);
+        }
+        markup += html;
+        committed = breaks.lastIndex;
+      }
+      if (committed) prefix += tail.slice(0, committed);
+      var result = markup + renderRich(tail.slice(committed));
+      if (!cacheVerified && prefix) {
+        var full = renderRich(text);
+        if (result !== full) { cacheDisabled = true; prefix = ''; markup = ''; blockCache.clear(); return full; }
+        cacheVerified = true;
+      }
+      return result;
+    }
     var reducedMotion = (function () {
       try { return document.documentElement.getAttribute('data-xtj-motion') === 'off' || window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
     })();
@@ -166,7 +199,7 @@
       } else {
         // The display scheduler already bounds patches to a frame. Wall-clock
         // precision or clock corrections must not suppress an accepted frame.
-        patchInnerHTML(targetEl, renderRich(rendered));
+        patchInnerHTML(targetEl, renderStreamMarkdown(rendered));
       }
       ensureCursor();
       if (typeof options.onRender === 'function') {

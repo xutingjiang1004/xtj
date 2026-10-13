@@ -19890,6 +19890,7 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
     if (extra.client_request_id) obj.client_request_id = String(extra.client_request_id).slice(0, 80);
     if (extra.deep_think) obj.deep_think = true;
     if (extra.chat_mode) obj.chat_mode = extra.chat_mode;
+    if (typeof extra.attachment_context === 'string' && extra.attachment_context) obj.attachment_context = extra.attachment_context.slice(0,60000);
     if (typeof extra.agent_count === 'number') obj.agent_count = extra.agent_count;
     if (extra.planner) obj.planner = extra.planner;
     if (Array.isArray(extra.worker_results)) obj.worker_results = extra.worker_results;
@@ -19902,7 +19903,7 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
     // ★ 多模态连续追问：记录本条用户消息内联的图片 data URL，
     //   后续轮次从历史中把图重新以 image_url 内容块发回模型，实现「图片连续追问」。
     if (Array.isArray(extra.vision_urls) && extra.vision_urls.length) {
-      obj.vision_urls = extra.vision_urls.slice(0, 3);
+      obj.vision_urls = extra.vision_urls.slice(0, 10);
     }
   }
   return JSON.stringify(obj);
@@ -20954,7 +20955,7 @@ async function prepareAiHistoryMessage(message, budget, maxChars, allowVision) {
   var visionUrls = canForwardVision ? extractVisionImageUrls(accepted) : [];
   var seenAttachmentUrls = new Set(accepted.map(function(item) { return item.data_url; }));
   var priorVisionUrls = role === 'user' && Array.isArray(message && message.vision_urls)
-    ? message.vision_urls.slice(0, 3)
+    ? message.vision_urls.slice(0, 10)
     : [];
   for (var vu = 0; vu < priorVisionUrls.length; vu++) {
     var priorVisionUrl = typeof priorVisionUrls[vu] === 'string' ? priorVisionUrls[vu].trim() : '';
@@ -20984,7 +20985,7 @@ async function prepareAiHistoryMessage(message, budget, maxChars, allowVision) {
     historyText = historyText.slice(0, maxChars);
   }
   var entry = { role: role, content: historyText };
-  if (role === 'user' && canForwardVision && visionUrls.length) entry.vision_urls = visionUrls.slice(0, 3);
+  if (role === 'user' && canForwardVision && visionUrls.length) entry.vision_urls = visionUrls.slice(0, 10);
   return entry;
 }
 
@@ -21103,7 +21104,7 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
         // ★ 多模态连续追问：把历史里保存的图片 data URL 一并带回，
         //   后续轮次组装消息时可重新以 image_url 内容块发给视觉模型。
         if (entry.role === 'user' && Array.isArray(meta.vision_urls) && meta.vision_urls.length) {
-          entry.vision_urls = meta.vision_urls.slice(0, 3);
+          entry.vision_urls = meta.vision_urls.slice(0, 10);
         }
         return entry;
       });
@@ -22195,6 +22196,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   var _customGatePassed = false;
   var _customUpstreamUsed = false;
   var finalAssistantContent = '';
+  var customUsage = {prompt_tokens:0,completion_tokens:0,total_tokens:0};
   if (req.userName && req.userName !== ADMIN_USERNAME) {
     var customGate = await enforceAiChatAccess(req.userName, { needSearch: false });
     if (!customGate.allowed) {
@@ -22215,7 +22217,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     custom:  { base: '' }
   };
   var ep = CUSTOM_ENDPOINTS[provider];
-  var baseUrl = (ep && ep.base) ? ep.base : (String(body.base_url || '').trim());
+  var baseUrl = String(body.base_url || '').trim() || (ep && ep.base) || '';
   if (!baseUrl) { writeSse(res, { type: 'error', error: '该服务商未配置接口地址' }); return safeEnd(); }
   baseUrl = baseUrl.replace(/\/+$/, '');
   var chosenModel = model || (ep && ep.defaultModel) || '';
@@ -22258,20 +22260,11 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   if (!_THINK_MODES[_thinkMode]) _thinkMode = 'off';
   var _webSearch = body.web_search === true;
   function buildCustomExtras() {
-    var extra = {};
-    if (_thinkMode !== 'off') {
-      var _effort = (_thinkMode === 'max' || _thinkMode === 'high') ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low');
-      if (provider === 'qwen') {
-        // 千问(DashScope兼容模式)：enable_thinking + thinking_budget 控制思考档位
-        extra.enable_thinking = true;
-        extra.thinking_budget = _thinkMode === 'max' ? 8192 : (_thinkMode === 'high' ? 4096 : (_thinkMode === 'medium' ? 2048 : 1024));
-      } else {
-        // 其余 OpenAI 兼容：reasoning_effort（低/中/高）
-        extra.reasoning_effort = _effort;
-      }
-    } else if (provider === 'qwen') {
-      extra.enable_thinking = false; // 千问支持显式关闭思考
-    }
+    if (customThinkingOptionDisabled) return {};
+    if (_thinkMode === 'off') return provider === 'qwen' ? {enable_thinking:false} : {};
+    var effort = (_thinkMode === 'max' || _thinkMode === 'high') ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low');
+    var extra = require('./ai-model-capabilities').thinkingParameters(provider, chosenModel, effort, body.reasoning_effort_supported === true);
+    if (provider === 'qwen') extra.thinking_budget = _thinkMode === 'max' ? 8192 : (_thinkMode === 'high' ? 4096 : (_thinkMode === 'medium' ? 2048 : 1024));
     return extra;
   }
   // ★ 附件（自定义模型通道）：图片转 image_url 内容块（OpenAI 兼容多模态），
@@ -22355,7 +22348,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   }
   var conversation = [{ role: 'system', content: buildAiCorePrompt(customConfig) }].concat(fwdMessages);
   var reasoningText = '';
-  var reasoningSentStart = false;
+  var reasoningSentStart = false, customUsageOptionDisabled = false, customThinkingOptionDisabled = false;
   var reasoningEffortFinal = _thinkMode === 'off' ? 'off' : (_thinkMode === 'max' || _thinkMode === 'high' ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low'));
 
   // 单轮转发：返回 { stop } 表示整体结束；{ continueRound } 表示执行了工具需下一轮；
@@ -22364,7 +22357,8 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     // ★ S6 审计修复：标记「上游调用已发生」，使 finally 的记账覆盖
     //   正常完成 / 中断 / 失败全部路径（与 deep-stream 的 _customDeepUpstreamUsed 同构）。
     _customUpstreamUsed = true;
-    var payload = { model: chosenModel, messages: conversation, stream: true };
+    var payload = { model: chosenModel, messages: conversation, stream: true, stream_options:{include_usage:true} };
+    if (customUsageOptionDisabled) delete payload.stream_options;
     Object.assign(payload, buildCustomExtras());
     if (useTools && customTools) {
       payload.tools = customTools;
@@ -22391,6 +22385,11 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       return { stop: true };
     }
     if (!upstream.ok) {
+      if ((!customUsageOptionDisabled || !customThinkingOptionDisabled) && (upstream.status === 400 || upstream.status === 422)) {
+        var optionError = ''; try { optionError = (await upstream.text()).slice(0,4096); } catch (_) {}
+        if (!customThinkingOptionDisabled && /reasoning_effort|enable_thinking|thinking_budget/i.test(optionError)) { customThinkingOptionDisabled = true; _thinkMode = 'off'; reasoningEffortFinal = 'off'; writeSse(res,{type:'stage',stage:'model_compatibility',message:'服务商不支持本次思考设置，已按普通对话继续。'}); return {retryWithoutThinking:true}; }
+        if (!customUsageOptionDisabled && /stream_options|include_usage/i.test(optionError)) { customUsageOptionDisabled = true; return {retryWithoutUsage:true}; }
+      }
       // 不回显上游响应体（防止 SSRF 探测结果外带），只返回状态码
       // 带工具被拒绝 → 回退不带工具重试一次
       if (useTools && customTools && (upstream.status === 400 || upstream.status === 404 || upstream.status === 422)) {
@@ -22425,24 +22424,26 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     var reader = upstream.body.getReader();
     var decoder = new TextDecoder('utf-8');
     var buf = '';
-    var doneFlag = false;
+    var doneFlag = false, terminalSeen = false, roundUsage = null;
     var assistantContent = '';
     var toolCallsAcc = [];
     var toolCallsSeen = false;
     try {
       while (!aborted && !doneFlag) {
         var chunk = await reader.read();
-        if (chunk.done) break;
-        buf += decoder.decode(chunk.value, { stream: true });
+        if (chunk.done) { buf += decoder.decode(); if (!buf.trim()) break; buf += '\n'; }
+        else buf += decoder.decode(chunk.value, { stream: true });
         var lines = buf.split('\n');
         buf = lines.pop();
         for (var li = 0; li < lines.length; li++) {
           var line = lines[li].trim();
           if (!line || line.indexOf('data:') !== 0) continue;
           var data = line.slice(5).trim();
-          if (data === '[DONE]') { doneFlag = true; break; }
+          if (data === '[DONE]') { doneFlag = true; terminalSeen = true; break; }
           var json;
           try { json = JSON.parse(data); } catch (e) { continue; }
+          if (json && json.usage) roundUsage = json.usage;
+          if (json && json.choices && json.choices[0] && json.choices[0].finish_reason) terminalSeen = true;
           var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
           if (!delta) continue;
           // ★ 思考过程透传：DeepSeek/Qwen-qwq 等用 reasoning_content，部分厂商用 reasoning/thinking
@@ -22478,9 +22479,16 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
             }
           }
         }
+        if (chunk.done) break;
       }
     } finally {
+      if (roundUsage) { customUsage.prompt_tokens += Math.max(0,Number(roundUsage.prompt_tokens || roundUsage.input_tokens)||0); customUsage.completion_tokens += Math.max(0,Number(roundUsage.completion_tokens || roundUsage.output_tokens)||0); customUsage.total_tokens += Math.max(0,Number(roundUsage.total_tokens)||0); }
       try { if (reader.cancel) reader.cancel().catch(function() {}); } catch (e) {}
+    }
+
+    if (!terminalSeen && !aborted && !res.writableEnded) {
+      if (assistantContent && !finalReplyContainsInternalProtocolGlobal(assistantContent) && !looksLikeToolArgsFragment(assistantContent)) { finalAssistantContent = assistantContent; writeSse(res,{type:'content',text:assistantContent}); }
+      throw new Error('custom_upstream_incomplete');
     }
 
     // 需要执行工具：组装 assistant 工具调用消息 + 各工具结果，追加进会话后继续下一轮
@@ -22652,6 +22660,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     while (rounds <= TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) {
       var rr = await runCustomRound(toolsInUse);
       if (rr.stop) break;
+      if (rr.retryWithoutUsage || rr.retryWithoutThinking) continue;
       if (rr.retryWithoutTools) { toolsInUse = false; continue; }
       if (rr.continueRound) { rounds++; continue; }
       break;
@@ -22659,7 +22668,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     if (rounds > TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) writeSse(res, { type: 'error', error: '本轮工具调用已达上限，请缩小任务后重试', code: 'CUSTOM_TOOL_ROUND_LIMIT' });
   } catch (eUp) {
     if (!aborted && !res.writableEnded) {
-      var reason = (eUp && eUp.name === 'AbortError') ? '第三方模型响应超时，请重试' : '第三方模型连接失败，请检查 API Key 或网络';
+      var reason = (eUp && eUp.message === 'custom_upstream_incomplete') ? '第三方回复提前中断，已保留收到的内容，可继续提问或重试' : (eUp && eUp.name === 'AbortError') ? '第三方模型响应超时，请重试' : '第三方模型连接失败，请检查 API Key 或网络';
       writeSse(res, { type: 'error', error: reason, code: 'CUSTOM_STREAM_ERROR' });
     }
   } finally {
@@ -22679,12 +22688,12 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     //   同一计数源，因此落账后 search_used 才会真正增长，第三方搜索额度才有效。
     if ((_customGatePassed || _customUpstreamUsed) && req.userName) {
       try {
-        await recordAiTurnUsage(req.userName, { model: chosenModel }, {
+        await recordAiTurnUsage(req.userName, Object.assign({model:chosenModel},customUsage), {
           model: chosenModel,
           source: 'custom_chat_stream',
           message: text,
-          content: String(finalAssistantContent || '').slice(0, 20000),
-          reasoning: reasoningText ? String(reasoningText).slice(0, 50000) : '',
+          content: String(finalAssistantContent || '').slice(0, 500000),
+          reasoning: reasoningText ? String(reasoningText).slice(0, 400000) : '',
           search_count: toolContext.searchConsumed || 0,
           did_search: (toolContext.searchConsumed || 0) > 0
         });
@@ -22767,7 +22776,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     custom:  { base: '' }
   };
   var ep = CUSTOM_DP_ENDPOINTS[provider];
-  var baseUrl = (ep && ep.base) ? ep.base : (String(body.base_url || '').trim());
+  var baseUrl = String(body.base_url || '').trim() || (ep && ep.base) || '';
   if (!baseUrl) { sseSend({ type: 'error', error: '该服务商未配置接口地址' }); return safeEnd(); }
   baseUrl = baseUrl.replace(/\/+$/, '');
   var chosenModel = model || (ep && ep.defaultModel) || '';
@@ -24092,7 +24101,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       //   后续轮次可把图重新发回视觉模型，实现「图片连续追问」。
       var _userSaveExtra = { chat_mode: 'normal', web_search: webSearchEnabled, client_request_id: res._aiClientRequestId };
       if (_visionImageUrls.length) {
-        _userSaveExtra.vision_urls = _visionImageUrls.slice(0, 3);
+        _userSaveExtra.vision_urls = _visionImageUrls.slice(0, 10);
       }
       try {
         var _responsesSaveResult = await supabase.from('posts').insert([
@@ -25537,6 +25546,29 @@ async function runResearchSubAgent(opts) {
     }
   }
 
+  if (opts.customModel) {
+    var customSources = [], customQueries = [], customSearch = {userName:opts.userName,searchConsumed:0}, customUsage = null;
+    try {
+      var context = '';
+      var terms = [agent.search_angle, originalMessage, agent.task_description].filter(Boolean).map(function(q) { return String(q).slice(0,100); });
+      if (agent.need_search !== false) for (var ti=0; ti<Math.min(terms.length,3); ti++) {
+        if (subAbortCtrl.signal.aborted || cancelToken.cancelled) break;
+        var beforeSearch = customSearch.searchConsumed;
+        var search = await searchWebForUser(opts.userName,terms[ti],5,customSearch);
+        if (search && (search.search_quota_exceeded || search.quota_service_unavailable)) break;
+        if (customSearch.searchConsumed > beforeSearch) onSearch();
+        customQueries.push(terms[ti]);
+        (search && search.results || []).slice(0,5).forEach(function(item) { if (item && item.url) customSources.push({title:item.title || '',url:item.url,snippet:item.snippet || ''}); });
+      }
+      if (subAbortCtrl.signal.aborted || cancelToken.cancelled) return {content:'',sources:customSources,queries:customQueries,usage:null};
+      context = customSources.map(function(item) { return item.title + '\n' + item.url + '\n' + item.snippet; }).join('\n\n');
+      var answer = await callCustomModelOnce(opts.customModel,[{role:'system',content:sharedPrefix + '\n你是研究员。结合已检索资料形成独立分析，指出来源、矛盾与不确定性，不能编造事实。'},{role:'user',content:'研究主题：' + originalMessage + '\n任务：' + agent.task_description + '\n检索资料：\n' + context}],{maxTokens:deep ? 4000 : 1200,signal:subAbortCtrl.signal,onThinkingChunk:opts.onThinkingChunk});
+      customUsage = answer.usage;
+      return {content:answer.content,sources:customSources,queries:customQueries,usage:customUsage};
+    } finally { subAbortCleanup(); }
+  }
+  var subModel = getPreferredDeepSeekModel(opts.model || DEEPSEEK_MODEL_REASONER);
+
   var sources = [];
   var queries = [];
   var subUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0, reasoning_included_in_completion: true };
@@ -25565,7 +25597,7 @@ async function runResearchSubAgent(opts) {
   var searchCount = 0;
   try {
     var r1 = await callDeepSeekViaResponses(searchMessages, {
-      thinking_mode: 'off',
+      thinking_mode: 'off', model:subModel,
       max_tokens: 6000,
       max_tool_rounds: 8,
       total_timeout_ms: 420000, // 海量多轮检索阶段放宽到 7 分钟
@@ -25586,7 +25618,7 @@ async function runResearchSubAgent(opts) {
       var rq = await callDeepSeekViaResponses([
         { role: 'system', content: sharedPrefix + '\n\n你是 [' + agent.role + '] 调研员，基于已收集资料给出简要结论（200-400 字，结构：【结论】→【依据】→【不确定点】）。' },
         { role: 'user', content: '已收集资料要点:\n' + (rawMaterial || '(无)').slice(0, 4000) + '\n\n请给出简要分析。' }
-      ], { thinking_mode: 'off', max_tokens: 1200, signal: subAbortCtrl.signal, onContentChunk: function (c) { quick += c; } });
+      ], { thinking_mode: 'off', model:subModel, max_tokens: 1200, signal: subAbortCtrl.signal, onContentChunk: function (c) { quick += c; } });
       if (!quick && rq && rq.content) quick = rq.content;
       if (rq && rq.usage) addSubUsage(rq.usage);
     } catch (e) { console.error('[SELF-RESEARCH] sub-agent quick failed:', agent.role, e && e.message); }
@@ -25616,7 +25648,7 @@ async function runResearchSubAgent(opts) {
       { role: 'user', content: '研究主题: ' + originalMessage + '\n子方向: ' + agent.task_description + '\n\n你收集到的资料要点:\n' + (rawMaterial || '(无资料)').slice(0, 6000) + '\n\n请深度分析并形成独立研判。' }
     ];
     var r2 = await callDeepSeekViaResponses(analysisMessages, {
-      thinking_mode: 'high',
+      thinking_mode: 'high', model:subModel,
       max_tokens: 4000,
       signal: subAbortCtrl.signal,
       onThinkingChunk: opts.onThinkingChunk,
@@ -25659,7 +25691,7 @@ async function callCustomModelOnce(cm, messages, options) {
   options = options || {};
   if (!cm || !cm.api_key || !cm.model) throw new Error('自定义模型配置不完整');
   var ep = CUSTOM_RESEARCH_ENDPOINTS[cm.provider];
-  var baseUrl = (ep && ep.base) ? ep.base : String(cm.base_url || '').trim();
+  var baseUrl = String(cm.base_url || '').trim() || (ep && ep.base) || '';
   if (!baseUrl) throw new Error('该服务商未配置接口地址');
   baseUrl = baseUrl.replace(/\/+$/, '');
   var chosenModel = cm.model || (ep && ep.defaultModel) || '';
@@ -25669,10 +25701,11 @@ async function callCustomModelOnce(cm, messages, options) {
   var timeoutMs = Math.max(30000, Math.min(Number(options.timeoutMs) || 180000, 300000));
   var controller = new AbortController();
   var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
+  var signalAbort = function() { controller.abort(); };
   if (options.signal) {
     try {
       if (options.signal.aborted) controller.abort();
-      else options.signal.addEventListener('abort', function() { try { controller.abort(); } catch (e) {} }, { once: true });
+      else options.signal.addEventListener('abort', signalAbort, { once: true });
     } catch (_eSig) {}
   }
   var wantStream = !!options.stream;
@@ -25697,24 +25730,27 @@ async function callCustomModelOnce(cm, messages, options) {
     if (!upstream.ok) throw new Error('HTTP ' + upstream.status);
     // 流式：按 OpenAI 兼容 SSE 逐块解析 delta.content，通过 onContentChunk 实时回传
     if (wantStream && upstream.body) {
-      var full = '';
+      var full = '', terminalSeen = false, streamUsage = null;
       var buf = '';
       var decoder = new TextDecoder('utf-8');
       var reader = upstream.body.getReader();
       try {
         while (true) {
           var step = await reader.read();
-          if (step.done) break;
-          buf += decoder.decode(step.value, { stream: true });
+          if (step.done) { buf += decoder.decode(); if (!buf.trim()) break; buf += '\n'; }
+          else buf += decoder.decode(step.value, { stream: true });
           var lines = buf.split('\n');
           buf = lines.pop() || '';
           for (var li = 0; li < lines.length; li++) {
             var line = String(lines[li] || '').trim();
             if (!line || line.indexOf('data:') !== 0) continue;
             var raw = line.slice(5).trim();
-            if (!raw || raw === '[DONE]') continue;
+            if (!raw) continue;
+            if (raw === '[DONE]') { terminalSeen = true; continue; }
             try {
               var j = JSON.parse(raw);
+              if (j && j.usage) streamUsage = j.usage;
+              if (j && j.choices && j.choices[0] && j.choices[0].finish_reason) terminalSeen = true;
               var thought = j && j.choices && j.choices[0] && j.choices[0].delta && (j.choices[0].delta.reasoning_content || j.choices[0].delta.reasoning);
               if (thought && typeof options.onThinkingChunk === 'function') options.onThinkingChunk(String(thought));
               var delta = j && j.choices && j.choices[0] && ((j.choices[0].delta && j.choices[0].delta.content) || j.choices[0].text);
@@ -25726,13 +25762,15 @@ async function callCustomModelOnce(cm, messages, options) {
               }
             } catch (_eJson) { /* 忽略无法解析的分片 */ }
           }
+          if (step.done) break;
         }
       } finally {
         // ★ 流泄漏修复：cancel 放在 releaseLock 之前，异常/断开时真正断开上游连接
         try { if (reader && reader.cancel) reader.cancel().catch(function() {}); } catch (_eCxl) {}
         try { if (reader && typeof reader.releaseLock === 'function') reader.releaseLock(); } catch (_eRl) {}
       }
-      return { content: full, usage: null, model_used: chosenModel };
+      if (!terminalSeen) throw Object.assign(new Error('第三方报告提前中断'),{usage:streamUsage});
+      return { content: full, usage: streamUsage, model_used: chosenModel };
     }
     var data = await upstream.json();
     var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
@@ -25742,6 +25780,7 @@ async function callCustomModelOnce(cm, messages, options) {
     return { content: String(content || '').trim(), usage: usage, model_used: chosenModel };
   } finally {
     clearTimeout(timer);
+    if (options.signal) options.signal.removeEventListener('abort',signalAbort);
   }
 }
 async function runSelfResearchFlow(opts) {
@@ -25754,6 +25793,10 @@ async function runSelfResearchFlow(opts) {
   var cancelToken = opts.cancelToken || { cancelled: false };
   var rewrite = opts.rewrite !== false;
   var sharedPrefix = buildAiCorePrompt(config);
+  var frontier = opts.checkpointState || { version: 1, request: {}, workers: [] };
+  var previousSearchCount = Number(frontier.search_count) || 0;
+  var checkpointWrite = opts.onCheckpoint || async function() {};
+  async function saveFrontier(stage) { frontier.stage = stage; frontier.thinking_log = processLog.snapshot(); frontier.search_count = previousSearchCount + searchCountTotal; try { await checkpointWrite(frontier); } catch (error) { if (error && /checkpoint_(?:not_found|lease_lost|identity_changed)/.test(error.code || '')) { cancelToken.cancelled = true; cancelToken.discarded = true; flowAbortCtrl.abort(); } sseSend({type:'research_stage',stage:'checkpoint_failed',message:cancelToken.discarded ? '研究已删除或已被其他设备接续，本次已停止。' : '这一步的断点尚未保存，可继续研究；离开前请复制结果，恢复时可能需重做此步。'}); } }
 
   // ★ 2026-09-24 新增（课题④「研究报告可选模型」）：
   //   research_model 取值：
@@ -25792,6 +25835,7 @@ async function runSelfResearchFlow(opts) {
         researchCustomModel = null;
       }
     }
+    if (!researchCustomModel && opts.resumed) throw new Error('原研究模型已删除或不可用，请选择模型开始新的研究');
     if (!researchCustomModel) {
       try { writeSse(res, { type: 'research_stage', stage: 'model_fallback', message: '所选第三方模型不可用，已自动回落内置推理模型。' }); } catch (_eSse) {}
     }
@@ -25864,6 +25908,11 @@ async function runSelfResearchFlow(opts) {
   }
 
   var processLog = require('./research-process').createResearchProcess();
+  (frontier.thinking_log || []).forEach(function(entry) { processLog.record({ type:'research_thinking', agent_role:entry.agent_role, chunk:entry.chunk }); });
+  var searchCountTotal = 0, checkpointHeartbeatBusy = false;
+  var checkpointHeartbeat = opts.onCheckpoint ? setInterval(async function() { if (checkpointHeartbeatBusy) return; checkpointHeartbeatBusy = true; try { await saveFrontier(frontier.stage || 'planning'); } finally { checkpointHeartbeatBusy = false; } },30000) : null;
+  if (checkpointHeartbeat && checkpointHeartbeat.unref) checkpointHeartbeat.unref();
+  if (opts.resumed) sseSend({ type:'research_stage', stage:'resume', message:'已恢复断点，复用 ' + (frontier.workers || []).filter(function(w) { return w && w.status === 'success'; }).length + ' 个已完成的研究方向，仅继续未完成阶段。' });
   function emitThinking(role, chunk) { if (!isCancelled() && chunk) sseSend({type:'research_thinking',agent_role:role,chunk:String(chunk)}); }
   function sseSend(obj) {
     if (res.writableEnded) return;
@@ -25889,6 +25938,7 @@ async function runSelfResearchFlow(opts) {
     researchUsageAgg.reasoning_tokens += Math.max(0, Number(u.reasoning_tokens) || Number(u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || Number(u.output_tokens_details && u.output_tokens_details.reasoning_tokens) || 0);
   }
 
+  try {
   if (isCancelled()) return { answer: '', sources: [], agents: [], usage: researchUsageAgg, search_count: 0 };
 
   // 1. 主智能体理解 + 改写问题
@@ -25897,8 +25947,8 @@ async function runSelfResearchFlow(opts) {
   //   推进步骤条与思考日志，缺失导致实时研究"进度条永远停在 0 步"。
   sseSend({ type: 'research_step', tool: 'Planning', phase: 0 });
   sseSend({ type: 'research_stage', stage: 'rewrite', message: '总指挥正在理解并拆解研究任务…' });
-  var researchQuery = query;
-  if (rewrite) {
+  var researchQuery = frontier.researchQuery || query;
+  if (rewrite && !frontier.rewriteDone) {
     try {
       var rq = await rewriteResearchQuery(query);
       if (rq && rq !== query) {
@@ -25914,11 +25964,14 @@ async function runSelfResearchFlow(opts) {
   }
   if (isCancelled()) return { answer: '', sources: [], agents: [], usage: researchUsageAgg, search_count: 0 };
 
+  frontier.rewriteDone = true; frontier.researchQuery = researchQuery;
+  await saveFrontier('planning');
+
   // 2. 主智能体 (Planner) 拆分 1-5 个子任务
   sseSend({ type: 'research_step', tool: 'WebSearch', phase: 1 });
   sseSend({ type: 'research_stage', stage: 'collect', message: '总指挥派出 ' + range.min + '-' + range.max + ' 个研究子智能体并行调研中…' });
   var plannerContent = '';
-  try {
+  if (!Array.isArray(frontier.agents) || !frontier.agents.length) try {
     var plannerRes = await researchComplete(
       [
         { role: 'system', content: sharedPrefix + '\n\n---\n\n' + SELF_RESEARCH_PLANNER_PROMPT },
@@ -25947,7 +26000,7 @@ async function runSelfResearchFlow(opts) {
     try { var _m = plannerContent.match(/\{[\s\S]*\}/); if (_m) plan = JSON.parse(_m[0]); } catch (e2) {}
   }
   if (!plan || typeof plan !== 'object') plan = { agents: [] };
-  var agents = Array.isArray(plan.agents) ? plan.agents : [];
+  var agents = Array.isArray(frontier.agents) && frontier.agents.length ? frontier.agents : (Array.isArray(plan.agents) ? plan.agents : []);
   // ★ 修复：Planner 输出净化（角色/任务/搜索角度长度上限 + 控制字符剥离），
   // 防止 LLM 非结构化输出注入 worker 系统提示（19445/19508 行）。
   agents = agents.filter(function (a) { return a && a.role; }).map(function (a) {
@@ -25969,24 +26022,36 @@ async function runSelfResearchFlow(opts) {
   if (agents.length === 0) agents = [{ role: '综合研究员', task_description: '从多维度全面研究：' + researchQuery, need_search: true, search_angle: '' }];
   agents = agents.slice(0, 5);
   var agentCount = agents.length;
+  frontier.agents = agents;
+  if (!Array.isArray(frontier.workers)) frontier.workers = [];
+  await saveFrontier('workers');
 
   // 3. 子智能体并行调研 (Promise.all 真·并行, DeepSeek 内置 web_search)
   var allSources = [];
   var allQueries = [];
-  var searchCountTotal = 0;
   var workerResults = [];
   var deepMode = (model !== 'mini'); // pro/auto：子智能体走"海量检索 → 自主批判性分析"双阶段
-  var workerPromises = agents.map(function (agent) {
+  var workerPromises = agents.map(function (agent, index) {
+    var saved = frontier.workers[index];
+    if (saved && saved.status === 'success' && saved.content) {
+      (saved.sources || []).forEach(function(source) { allSources.push(source); });
+      (saved.queries || []).forEach(function(q) { if (allQueries.indexOf(q) < 0) allQueries.push(q); });
+      return Promise.resolve(saved);
+    }
     return runResearchSubAgent({
       agent: agent, originalMessage: researchQuery, sharedPrefix: sharedPrefix,
+      model:activeResearchModel, customModel:researchCustomModel, userName:userName,
       cancelToken: cancelToken, deep: deepMode, signal: flowAbortCtrl.signal,
       onThinkingChunk: function(chunk) { emitThinking(agent.role+' · 分析',chunk); },
       onSearch: function () { searchCountTotal++; }
-    }).then(function (wr) {
+    }).then(async function (wr) {
       if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
       if (wr && wr.queries) wr.queries.forEach(function (q) { if (allQueries.indexOf(q) < 0) allQueries.push(q); });
       if (wr && wr.usage) accumulateResearchUsage(wr.usage);
-      return { role: agent.role, status: 'success', content: wr ? wr.content : '', sources: wr ? wr.sources : [] };
+      var result = { role: agent.role, status: wr && wr.content && !flowAbortCtrl.signal.aborted ? 'success' : 'failed', content: wr ? wr.content : '', sources: wr ? wr.sources : [], queries: wr ? wr.queries : [] };
+      frontier.workers[index] = result;
+      await saveFrontier('workers');
+      return result;
     }).catch(function (e) {
       console.error('[SELF-RESEARCH] sub-agent failed:', agent.role, e && e.message);
       return { role: agent.role, status: 'failed', content: '', sources: [] };
@@ -25996,13 +26061,13 @@ async function runSelfResearchFlow(opts) {
   if (isCancelled()) return { answer: '', sources: allSources, agents: agents, usage: researchUsageAgg, search_count: searchCountTotal };
 
   // 3.5 查漏补缺（仅深度档）：总指挥先审视一手材料，识别影响结论可靠性的关键缺口，至多再派 2 个补充调研
-  if (deepMode) {
+  if (deepMode && !frontier.gapCheckDone) {
     try {
       var gapDigest = workerResults.map(function (wr, i) {
         var _gc = String(wr.content || '').slice(0, 1200);
         return '方向' + (i + 1) + '「' + (wr.role || '') + '」:\n' + (_gc || '(无材料)');
       }).join('\n\n');
-      var gapRes = await callDeepSeek(
+      var gapRes = await researchComplete(
         [
           { role: 'system', content: '你是研究总指挥。审视下方已收集的材料，判断"要写出一份结论可靠、经得起推敲的研究报告"还缺什么关键信息。\n' +
             '重点关注三类缺口：(a) 支撑核心结论的关键数据缺失；(b) 关键事实只有单一来源、未经交叉验证；(c) 材料之间存在矛盾、需要再查证定论。\n' +
@@ -26012,7 +26077,7 @@ async function runSelfResearchFlow(opts) {
           { role: 'user', content: '研究主题: ' + researchQuery + '\n\n已有材料摘要:\n' + gapDigest.slice(0, 6000) + '\n\n请输出缺口 JSON。' }
         ],
         // ★ M38 审计修复：传入流程级 abort signal
-        { onThinkingChunk:function(chunk){emitThinking('总指挥 · 查漏补缺',chunk);}, thinking_mode: 'high', max_tokens: 1500, response_format: { type: 'json_object' }, model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER), signal: flowAbortCtrl.signal }
+        { onThinkingChunk:function(chunk){emitThinking('总指挥 · 查漏补缺',chunk);}, thinking_mode: 'high', max_tokens: 1500, response_format: { type: 'json_object' }, model: activeResearchModel, signal: flowAbortCtrl.signal }
       );
       if (gapRes && gapRes.usage) accumulateResearchUsage(gapRes.usage);
       var gapPlan = null;
@@ -26022,21 +26087,36 @@ async function runSelfResearchFlow(opts) {
       var gaps = (gapPlan && Array.isArray(gapPlan.gaps))
         ? gapPlan.gaps.filter(function (g) { return g && g.task_description; }).slice(0, 2)
         : [];
+      if (!isCancelled()) { frontier.gaps = gaps; frontier.gapCheckDone = true; await saveFrontier('gapfill'); }
+
+    } catch (e) {
+      console.error('[SELF-RESEARCH] gap-check failed:', e && e.message);
+    }
+  }
+  if (isCancelled()) return { answer: '', sources: allSources, agents: agents, usage: researchUsageAgg, search_count: searchCountTotal };
+  var gaps = frontier.gaps || [];
       if (gaps.length && !isCancelled()) {
         sseSend({ type: 'research_stage', stage: 'gapfill', message: '总指挥发现 ' + gaps.length + ' 处信息缺口，正在补充查证…' });
-        var gapResults = await Promise.all(gaps.map(function (g) {
+        var gapResults = await Promise.all(gaps.map(function (g, index) {
+          if (frontier.gapWorkers && frontier.gapWorkers[index] && frontier.gapWorkers[index].status === 'success') {
+            var savedGap = frontier.gapWorkers[index];
+            (savedGap.sources || []).forEach(function(source) { allSources.push(source); });
+            return Promise.resolve(savedGap);
+          }
           return runResearchSubAgent({
             agent: { role: String(g.role || '补充查证'), task_description: String(g.task_description), need_search: true, search_angle: g.search_angle || '' },
-            originalMessage: researchQuery,
+            originalMessage: researchQuery, model:activeResearchModel, customModel:researchCustomModel, userName:userName,
             sharedPrefix: sharedPrefix,
             cancelToken: cancelToken,
             signal: flowAbortCtrl.signal,
             deep: false, // 补充轮只补事实，不再做二次长思考（控制时延）
             onSearch: function () { searchCountTotal++; }
-          }).then(function (wr) {
+          }).then(async function (wr) {
             if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
             if (wr && wr.usage) accumulateResearchUsage(wr.usage);
-            return { role: '补充查证·' + String(g.role || ''), status: 'success', content: wr ? wr.content : '' };
+            var result = { role:'补充查证·' + String(g.role || ''), status: wr && wr.content && !flowAbortCtrl.signal.aborted ? 'success' : 'failed', content:wr ? wr.content : '', sources:wr ? wr.sources : [] };
+            if (!frontier.gapWorkers) frontier.gapWorkers = [];
+            frontier.gapWorkers[index] = result; await saveFrontier('gapfill'); return result;
           }).catch(function (e) {
             console.error('[SELF-RESEARCH] gap agent failed:', g.role, e && e.message);
             return null;
@@ -26044,11 +26124,7 @@ async function runSelfResearchFlow(opts) {
         }));
         gapResults.forEach(function (gr) { if (gr && gr.content) workerResults.push(gr); });
       }
-    } catch (e) {
-      console.error('[SELF-RESEARCH] gap-check failed:', e && e.message);
-    }
-  }
-  if (isCancelled()) return { answer: '', sources: allSources, agents: agents, usage: researchUsageAgg, search_count: searchCountTotal };
+  await saveFrontier('synthesize');
   allSources = cleanSearchResults(allSources, 50);
   allQueries = allQueries.slice(0, 20);
   // 内置 web_search 不暴露来源 URL，用检索次数构造占位来源以呈现"网页搜索 N"
@@ -26088,13 +26164,13 @@ async function runSelfResearchFlow(opts) {
       synthMessages.push({ role: 'user', content: srcList });
     }
   }
-  var synthTask = '本次共完成约 ' + searchCountTotal + ' 次联网检索，' + okCount + '/' + materialCount + ' 个研究方向取得有效材料。\n' +
+  var synthTask = '本次共完成约 ' + (previousSearchCount + searchCountTotal) + ' 次联网检索，' + okCount + '/' + materialCount + ' 个研究方向取得有效材料。\n' +
     '现在请你以首席研究员身份，对上述材料做交叉验证、因果推演与批判性评估，形成有独立判断的完整研究报告。\n' +
     '再次强调：不要按材料顺序复述，要重新组织；冲突之处必须表态并说明理由；不确定之处必须坦诚标注。';
   if (okCount === 0) synthTask += '\n注意：本次未取得有效检索材料，请如实说明信息不足，仅基于可靠常识做有限判断，禁止编造数据。';
   synthMessages.push({ role: 'user', content: synthTask });
 
-  var finalAnswer = '';
+  var finalAnswer = '', synthesisCompleted = false;
   try {
     var synthAbort = new AbortController();
     if (isCancelled()) synthAbort.abort();
@@ -26136,11 +26212,13 @@ async function runSelfResearchFlow(opts) {
       });
     }
     if (!finalAnswer && synthRes && synthRes.content) finalAnswer = synthRes.content;
+    synthesisCompleted = !!(finalAnswer && finalAnswer.trim());
     if (synthRes && synthRes.usage) accumulateResearchUsage(synthRes.usage);
     if (synthRes && typeof synthRes.reasoning_tokens === 'number') {
       researchUsageAgg.reasoning_tokens += Math.max(0, synthRes.reasoning_tokens);
     }
   } catch (e) {
+    if (e && e.usage) accumulateResearchUsage(e.usage);
     console.error('[SELF-RESEARCH] synthesizer failed:', e && e.message);
     // 兜底：直接拼接各子智能体结果
     if (!finalAnswer && !isCancelled()) finalAnswer = workerResults.map(function (wr, idx) {
@@ -26165,6 +26243,7 @@ async function runSelfResearchFlow(opts) {
   if (!finalAnswer || !finalAnswer.trim()) finalAnswer = '（研究未完成，请重试）';
   return {
     answer: finalAnswer,
+    complete: synthesisCompleted,
     sources: allSources,
     queries: allQueries,
     agents: agents,
@@ -26172,7 +26251,11 @@ async function runSelfResearchFlow(opts) {
     search_count: searchCountTotal,
     thinking_log: processLog.snapshot()
   };
+  } finally { clearFlowWallTimer(); if (checkpointHeartbeat) clearInterval(checkpointHeartbeat); if (cancelToken._onSubCancel === flowCancelHandler) delete cancelToken._onSubCancel; }
 }
+
+require('./ai-model-capabilities').installModelCapabilities(app, {authenticateUser:authenticateUser,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
+var researchCheckpoints = require('./research-checkpoints').installResearchCheckpoints(app, { db: supabase, authenticateUser: authenticateUser, rateLimit: rateLimit });
 
 // POST /api/agent/research/stream - 自托管多智能体深度研究（SSE 流式，事件契约兼容旧 Tavily 代理）
 // 架构（2026-08 重构，完全去 Tavily 编排依赖）：
@@ -26187,6 +26270,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };
+  var checkpointJob = null, checkpointFinished = false;
   var researchRelease = null; // 并发名额释放函数（safeEnd 统一释放）
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -26245,8 +26329,15 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       writeSse(res, { type: 'error', error: 'concurrent', code: 'concurrent', message: '请等待上一个研究请求完成' });
       return safeEnd();
     }
+    var resumeId = String(req.body && req.body.checkpoint_id || '');
+    if (resumeId && !/^[a-f\d-]{36}$/i.test(resumeId)) throw new Error('断点无效');
+    if (resumeId) {
+      checkpointJob = await researchCheckpoints.begin({ userName:userName, accountId:req.accountId }, null, resumeId);
+      req.body = Object.assign({}, checkpointJob.state.request, { checkpoint_id:resumeId });
+    }
+    var remainingSearch = !checkpointJob || checkpointJob.state.stage !== 'synthesize' || (checkpointJob.state.workers || []).some(function(w) { return !w || w.status !== 'success'; }) || (checkpointJob.state.gapWorkers || []).some(function(w) { return !w || w.status !== 'success'; });
     // 深入研究与小猫/Code 共用日额度；研究默认会联网搜索，免费用户需有搜索余量
-    var researchGate = await enforceAiChatAccess(userName, { needSearch: true });
+    var researchGate = await enforceAiChatAccess(userName, { needSearch: remainingSearch });
     if (!researchGate.allowed) {
       writeSse(res, {
         type: 'error',
@@ -26259,7 +26350,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     }
     // ★ 配额绕过修复：深入研究前强制过第三方搜索配额 gate（空 userName 也拒绝，不再默认放行）
     var researchSearchGate = await measureSearchQuota(userName);
-    if (!researchSearchGate.allowed) {
+    if (remainingSearch && !researchSearchGate.allowed) {
       var researchSearchMsg = researchSearchGate.reason === 'search_limit' ? '今日搜索次数已达上限' : getAiQuotaErrorMessage(researchSearchGate.reason || 'search_limit');
       writeSse(res, {
         type: 'error',
@@ -26305,7 +26396,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     }
 
     // A. 缓存命中 → 按原事件序列回放（research_step 0/1/2 → content 300 字切块 → sources → done）
-    var cached = researchCacheGet(cacheKey);
+    var cached = resumeId ? null : researchCacheGet(cacheKey);
     if (cached) {
       var cachedAnswer = String(cached.answer || '');
       if (!aborted) writeSse(res, { type: 'research_step', tool: 'Planning', phase: 0 });
@@ -26364,6 +26455,10 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
 
     // ★ 自托管多智能体深度研究：主agent(大哥) 收任务 → 派 1-5 子agent 并行调研 → 主agent 汇总
     //   完全不依赖 Tavily 编排/搜索；子agent 使用 DeepSeek 内置 web_search。事件契约与旧代理一致。
+    if (!checkpointJob && req.body && req.body.checkpoint === true) {
+      checkpointJob = await researchCheckpoints.begin({userName:userName,accountId:req.accountId}, {query:query, model:model, research_model:researchModel, mode:mode, rewrite:rewrite, refresh:true, conversation_id:convId});
+    }
+    if (checkpointJob) writeSse(res, {type:'research_checkpoint', checkpoint_id:checkpointJob.id, conversation_id:convId, resumed:checkpointJob.resumed});
     var config = await getAiConfig();
     var selfResult;
     try {
@@ -26371,7 +26466,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
         res: res, query: query, model: model, userName: userName, convId: convId,
         config: config, cancelToken: cancelToken, rewrite: rewrite,
         // ★ 2026-09-24（课题④）：把用户选定的研究模型一路传进流程
-        researchModel: researchModel
+        researchModel: researchModel,
+        resumed: !!resumeId, checkpointState: checkpointJob && checkpointJob.state, onCheckpoint: checkpointJob && checkpointJob.save
       });
     } catch (e) {
       if (!aborted) {
@@ -26384,9 +26480,10 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     //   内置 web_search），是本仓库【单次成本最高】的路径。客户端在此时断开，
     //   此前直接 return safeEnd() 不扣任何费用 → 可零成本刷爆研究配额。
     if (aborted || (cancelToken && cancelToken.cancelled)) {
-      if (selfResult && (selfResult.answer || (selfResult.thinking_log || []).length)) await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log,
+      if (checkpointJob) { try { await checkpointJob.finish('interrupted'); checkpointFinished = true; } catch (_) {} }
+      if (!cancelToken.discarded && selfResult && (selfResult.answer || (selfResult.thinking_log || []).length)) await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log,
         { interrupted: true, complete: false, finish_reason: 'cancelled' });
-      else await saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId, message: query,
+      else if (!cancelToken.discarded) await saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId, message: query,
         chatMode: 'deep_think', requestId: req.body && req.body.client_request_id, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta });
       await recordAbortedStreamUsage(userName, {
         convId: convId, usedModel: model, source: 'research_stream_aborted',
@@ -26403,7 +26500,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     }
 
     // D. 持久化 + 缓存写入 + 结束事件
-    var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log);
+    var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log, selfResult.complete === false ? {interrupted:true,complete:false,finish_reason:'upstream_error'} : undefined);
     // ★ 修复 S4（簇 A，续）：持久化已完成 → 本次研究的所有上游费用均已实际发生，
     //   此处断开同样必须补记账（此前直接 return 会漏掉整笔研究用量）。
     if (aborted) {
@@ -26416,7 +26513,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       });
       return safeEnd();
     }
-    researchCacheSet(cacheKey, selfResult.answer, selfResult.sources, selfResult.thinking_log);
+    if (checkpointJob) { try { await checkpointJob.finish(selfResult.complete === false || !msgId ? 'failed' : 'complete'); checkpointFinished = true; } catch (_) { writeSse(res,{type:'research_stage',stage:'checkpoint_failed',message:'断点状态未同步，请复制保留本次报告。'}); } }
+    if (selfResult.complete !== false) researchCacheSet(cacheKey, selfResult.answer, selfResult.sources, selfResult.thinking_log);
 
     // 扣减深入研究全链路 token（输入/思考/输出）与实际搜索次数
     var researchQuota = null;
@@ -26426,7 +26524,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
         0,
         Math.floor(Number(selfResult && selfResult.search_count) || 0)
       );
-      if (!researchSearchHits && selfResult && Array.isArray(selfResult.sources) && selfResult.sources.length) {
+      if (!resumeId && !researchSearchHits && selfResult && Array.isArray(selfResult.sources) && selfResult.sources.length) {
         researchSearchHits = 1;
       }
       researchQuota = await recordAiTurnUsage(userName, researchUsage, {
@@ -26443,6 +26541,10 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       console.error('[AI-QUOTA] research record failed:', eResearchQ && eResearchQ.message);
     }
 
+    if (selfResult.complete === false) {
+      writeSse(res,{type:'error',code:'research_incomplete',error:'research_incomplete',message:'报告汇总未完成，已保存调研断点，可从历史中继续研究。'});
+      return safeEnd();
+    }
     writeSse(res, { type: 'research_sources', sources: selfResult.sources });
     writeSse(res, {
       type: 'research_done',
@@ -26457,8 +26559,13 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     return safeEnd();
   } catch (e) {
     if (!aborted) {
-      try { writeSse(res, { type: 'error', error: 'tavily_research_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
+      var checkpointCode = e && (e.code || e.message) || '';
+      var checkpointMessages = {checkpoint_running:'上一个研究仍在保存或执行，请稍后从历史重试。',checkpoint_not_found:'断点已删除或已过期，请开始新的研究。',checkpoint_identity_changed:'账号状态已改变，请重新登录。',checkpoint_storage_unavailable:'研究断点暂时无法保存，请稍后重试。',checkpoint_lease_lost:'该断点已被其他设备接续，请重开研究历史。'};
+      try { writeSse(res, { type:'error', error:'tavily_research_failed', code:checkpointMessages[checkpointCode] ? checkpointCode : 'tavily_research_failed', message:checkpointMessages[checkpointCode] || String(e && e.message || '研究失败') }); } catch (_) {}
     }
+  }
+  finally {
+    if (checkpointJob && !checkpointFinished) try { await checkpointJob.finish(aborted || cancelToken.cancelled ? 'interrupted' : 'failed'); } catch (_) { if (!aborted && !res.writableEnded) writeSse(res,{type:'research_stage',stage:'checkpoint_failed',message:'断点保存失败，本次结果请复制保留；已保存的旧断点仍可从历史恢复。'}); }
   }
   safeEnd();
 });
