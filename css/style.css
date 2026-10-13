@@ -16688,7 +16688,7 @@ html.perf-lite .ai-chat-bubble {
     --chat-surface: #f8fcfa;
     --chat-line: rgba(50, 103, 80, .12);
     --chat-ink: #244b3b;
-    --chat-muted: #718c80;
+    --chat-muted: #4f6659;
     --chat-accent: #219d72;
     --chat-control: rgba(48, 125, 88, .07);
 }
@@ -16722,6 +16722,11 @@ html.perf-lite .ai-chat-bubble {
 }
 #panelChat #dockChatContainer .cli-right { justify-content: center; gap: 7px; }
 #panelChat #dockChatContainer .cli-preview { line-height: 1.5; color: var(--chat-muted); }
+#panelChat #dockChatContainer .chat-empty { color:var(--chat-muted); }
+#panelChat #dockChatContainer .chat-empty > div:not(.ce-icon) { color:var(--chat-muted)!important; }
+#panelChat #dockChatMessages .chat-history-more { display:block;min-height:44px;margin:8px auto;padding:8px 14px;border:0;background:transparent;box-shadow:none;color:var(--chat-ink);font-size:13px; }
+#panelChat #dockChatMessages .chat-history-more:disabled { opacity:.6; }
+.photo-wall-item:focus-visible { outline:3px solid var(--primary,#287b55);outline-offset:3px; }
 #panelChat #dockChatContainer .chat-messages { padding-bottom: 18px; scroll-behavior: auto; }
 #panelChat #dockChatContainer .chat-msg { box-shadow: 0 2px 6px rgba(30, 70, 50, .035); }
 #panelChat #dockChatContainer .chat-msg.sent { background: #d9f3e7; color: var(--chat-ink); border-radius: 17px 17px 6px 17px; }
@@ -16831,7 +16836,7 @@ html[data-xtj-motion="off"] #panelChat .chat-typing-dots i { animation: none; }
 
 /* Photo uploads: a quiet surface, one progress bar and consistent typography. */
 #pwUploadSheet, #pwUploadProgressOverlay, #pwUploadResult {
-  --pw-surface: #fff; --pw-ink: #243b31; --pw-muted: #687c71;
+  --pw-surface: #fff; --pw-ink: #243b31; --pw-muted: #586c60;
   --pw-line: rgba(35, 80, 55, .14); --pw-accent: #287b55;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--pw-ink); letter-spacing: normal;

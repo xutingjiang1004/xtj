@@ -35,14 +35,14 @@ test('anonymous likes and comments cannot impersonate a username', () => {
 test('comment writes derive identity from the authenticated server session', () => {
   const create = routeBlock("app.post('/api/post/comment'", "app.delete('/api/post/comment/:commentId'");
   assert.match(create, /authenticateUser/);
-  assert.match(create, /user_name: req\.userName/);
+  assert.match(create, /createComment\(supabase, postId, req.userName/);
   assert.doesNotMatch(create, /req\.body\.user_name/);
 
   const remove = routeBlock("app.delete('/api/post/comment/:commentId'", '// Set the authenticated user');
   assert.match(remove, /existing\.data\.user_name !== req\.userName/);
   assert.match(remove, /req\.userName !== ADMIN_USERNAME/);
-  assert.match(remove, /delete\(\)\.eq\('id', commentId\)[\s\S]*\.select\('id'\)/);
-  assert.match(remove, /Comment delete was not confirmed/);
+  assert.match(remove, /rpc\('xtj_delete_comment', \{ p_comment_id: commentId, p_owner: req.userName \}/);
+  assert.match(remove, /deleted.error \|\| !deleted.data/);
   assert.match(core, /xtjProtectedFetch\('\/api\/post\/comment'/);
   assert.doesNotMatch(core, /sb\.from\(["']comments["']\)\.insert/);
 });

@@ -195,6 +195,8 @@
                 try { reduceDockMotion = reduceDockMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
                 document.querySelectorAll('.dock-panel').forEach(function(candidate) {
                     if (candidate !== previousPanel && candidate !== panel) candidate.classList.remove('active', 'is-entering', 'is-leaving');
+                    candidate.inert = candidate !== panel;
+                    candidate.setAttribute('aria-hidden', candidate === panel ? 'false' : 'true');
                 });
                 if (panel) {
                     if (!previousPanel || previousPanel === panel || reduceDockMotion) {
@@ -409,6 +411,9 @@
                 _chatPushOwner='';_chatPushEnabled=false;
                 setTimeout(function(){window.__xtjSyncChatPush?.();},0);
                 if (_chatDomSnapshots) _chatDomSnapshots.clear();
+                _chatCache = {}; _chatCommittedRevision = 0;
+                Object.keys(_chatPagination || {}).forEach(function(key) { if (_chatPagination[key].controller) _chatPagination[key].controller.abort(); });
+                _chatPagination = {};
                 if(_flashViewer)_flashViewer.close();
                 cancelDockChatSendFlights(); resetDockChatTyping(); closeDockChatConversationMenu(true);
                 closeAuthorSupport(); _supportOwner='';
@@ -706,6 +711,9 @@
             function forgetDockChatConversationMessages(peer) {
                 _chatDomSnapshots.delete(getDockChatCacheKey(peer));
                 _chatCache[getDockChatCacheKey(peer)] = [];
+                var state = _chatPagination[getDockChatCacheKey(peer)];
+                if (state && state.controller) state.controller.abort();
+                delete _chatPagination[getDockChatCacheKey(peer)];
                 _chatRenderSignature[peer] = undefined;
             }
 
@@ -1201,6 +1209,7 @@
 
             // 聊天消息缓存
             var _chatCache = {};
+            var _chatPagination = {};
             var _chatCommittedRevision = 0;
             var _chatRenderSignature = {};
             var _dockChatLoadSeq = 0;
@@ -1210,7 +1219,7 @@
             var _dockChatListRenderSignature = '';
 
             function getDockChatCacheKey(userName) {
-                return (currentUser || '') + '_' + (userName || '');
+                return JSON.stringify([currentUser || '', userName || '']);
             }
 
             function mergeDockChatRowsById(rows, ascending, limit) {
@@ -1431,8 +1440,58 @@
 
             function sortDockChatMessages(msgs) {
                 return (Array.isArray(msgs) ? msgs.slice() : []).sort(function(a, b) {
-                    return new Date(a && a.created_at ? a.created_at : 0).getTime() - new Date(b && b.created_at ? b.created_at : 0).getTime();
+                    return compareDockChatOrder(a, b);
                 });
+            }
+            function compareDockChatOrder(a,b) {
+                // Keep PostgreSQL microseconds: Date.parse alone collapses ties.
+                function stamp(row) { var s=String(row && row.created_at || '');var m=s.match(/^(.*:\d{2})(?:\.(\d+))?(?:Z|\+00:00)$/);return m ? m[1]+'.'+String(m[2]||'').padEnd(6,'0') : s; }
+                return stamp(a).localeCompare(stamp(b)) || String(a && a.id || '').localeCompare(String(b && b.id || ''));
+            }
+            function syncDockChatHistoryButton(peer) {
+                var el=document.getElementById('dockChatMessages');if(!el||dockChatActiveUser!==peer)return;
+                var state=_chatPagination[getDockChatCacheKey(peer)],button=el.querySelector('.chat-history-more');
+                if(!state||!state.has_more||_chatHistoryFocus&&!state.historical){if(button)button.remove();return;}
+                if(!button){button=document.createElement('button');button.type='button';button.className='chat-history-more';button.onclick=function(){loadOlderDockChatMessages(peer);};el.prepend(button);}
+                button.disabled=!!state.loading;button.textContent=state.loading?'加载历史消息…':state.error?'加载失败，点击重试':'加载更早的消息';
+            }
+            async function loadOlderDockChatMessages(peer) {
+                var key=getDockChatCacheKey(peer),state=_chatPagination[key],owner=window.currentUser,epoch=window._authStateEpoch||0;
+                if(!state||!state.has_more||!state.cursor||state.loading||!owner||dockChatActiveUser!==peer)return;
+                _chatHistoryFocus=peer;state.historical=true;
+                _dockChatLoadSeq++;if(_dockChatMessageLoad&&_dockChatMessageLoad.controller)_dockChatMessageLoad.controller.abort();
+                state.loading=true;state.error='';state.controller=new AbortController();syncDockChatHistoryButton(peer);
+                function current(){return owner===window.currentUser&&epoch===(window._authStateEpoch||0)&&dockChatActiveUser===peer&&_chatPagination[key]===state;}
+                var el=document.getElementById('dockChatMessages'),anchor=el.querySelector('.chat-msg-row'),top=anchor&&anchor.getBoundingClientRect().top;
+                try{
+                    var response=await window.xtjProtectedFetch('/api/dm/messages?target='+encodeURIComponent(peer)+'&limit=180&cursor='+encodeURIComponent(state.cursor),{authOwner:owner,authEpoch:epoch,signal:state.controller.signal,timeoutMs:15000});
+                    var body=await response.json();if(!current())return;
+                    if(!response.ok||!body.ok)throw new Error(body.error||'历史消息加载失败');
+                    var prior=_chatCache[key]||[],byId=new Map(prior.map(function(row){return [String(row.id),row];}));
+                    (body.data||[]).forEach(function(row){byId.set(String(row.id),reconcileDockChatMessage(byId.get(String(row.id)),row));});
+                    var rows=sortDockChatMessages(Array.from(byId.values())).filter(function(row){return !isDmMessageLocallyDeleted(row);});
+                    // Keep at most two pages in the historical DOM. Continuing
+                    // upwards still reaches the entire conversation via cursor.
+                    _chatCache[key]=rows.slice(0,360);state.has_more=!!body.has_more;state.cursor=body.next_cursor||null;state.historical=true;
+                    _chatHistoryFocus=peer;_chatRenderSignature[peer]=undefined;renderDockMessages(peer,_chatCache[key],false);
+                    if(anchor&&anchor.isConnected)el.scrollTop+=anchor.getBoundingClientRect().top-top;
+                    setDockChatJumpLatestVisible(true);
+                }catch(error){if(current()&&error.name!=='AbortError')state.error=error.message;}
+                finally{if(current()){state.loading=false;state.controller=null;syncDockChatHistoryButton(peer);}}
+            }
+            async function refreshDockChatHistoryWindow(peer) {
+                var key=getDockChatCacheKey(peer),state=_chatPagination[key],owner=window.currentUser,epoch=window._authStateEpoch||0;
+                if(!state||!state.historical||state.syncing||state.loading)return;
+                state.syncing=true;
+                var rows=_chatCache[key]||[],ids=rows.filter(function(row){return row.id&&!isDockChatLocalPendingMessage(row);}).map(function(row){return row.id;});
+                function current(){return owner===window.currentUser&&epoch===(window._authStateEpoch||0)&&dockChatActiveUser===peer&&_chatPagination[key]===state&&state.historical;}
+                try{
+                    var response=await window.xtjProtectedFetch('/api/dm/messages/loaded',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:peer,ids:ids}),authOwner:owner,authEpoch:epoch,timeoutMs:12000,background:true});
+                    var body=await response.json();if(!current()||!response.ok||!body.ok)return;
+                    var prior=new Map(rows.map(function(row){return [String(row.id),row];}));
+                    _chatCache[key]=sortDockChatMessages((body.data||[]).map(function(row){return reconcileDockChatMessage(prior.get(String(row.id)),row);}).concat(rows.filter(isDockChatLocalPendingMessage)));
+                    _chatRenderSignature[peer]=undefined;renderDockMessages(peer,_chatCache[key],false);syncDockChatHistoryButton(peer);
+                }catch(_){}finally{state.syncing=false;}
             }
 
             // ★ 2026-09-25 修复（切换会话卡顿 + 已读未读/气泡闪白）：
@@ -2084,7 +2143,7 @@
             // ★ 2026-09-25：muteLoadingSkeleton=true 表示「轮询/后台刷新」，不允许动 loading 骨架
             //   与空状态，避免后台回包把用户正在看的界面顶掉重画。
             async function loadDockChatMessages(userName, forceScroll, muteLoadingSkeleton, userRetry) {
-                if (_chatHistoryFocus === userName && !forceScroll && !userRetry) return;
+                if (_chatHistoryFocus === userName && !forceScroll && !userRetry) { refreshDockChatHistoryWindow(userName); return; }
                 if (userRetry) { _chatHistoryFocus = ''; _chatRenderSignature[userName] = undefined; }
                 var el0 = document.getElementById('dockChatMessages');
                 if (!window.currentUser) {
@@ -2118,6 +2177,11 @@
                 // 获取聊天缓存键
                 var cacheKey = getDockChatCacheKey(userName);
                 var hadCachedMessages = Array.isArray(_chatCache[cacheKey]);
+                var previousHistory = _chatPagination[cacheKey];
+                if (previousHistory && previousHistory.historical && (forceScroll || userRetry || _chatHistoryFocus !== userName)) {
+                    if (previousHistory.controller) previousHistory.controller.abort();
+                    _chatPagination[cacheKey] = { has_more: previousHistory.has_more, cursor: previousHistory.cursor, loading: false, historical: false };
+                }
                 if (hadCachedMessages) {
                     // ★ 2026-09-25 修复（切换会话骨架闪烁）：缓存命中时必须在任何骨架/空状态
                     //   绘制之前就把内容渲染出来，否则 openChat 里那次 loading 骨架会先画上去
@@ -2151,6 +2215,9 @@
                     }
                     if (!messagesResp.ok || !messagesResult.ok) throw new Error(messagesResult.error || 'DM messages failed');
                     if (!currentLoad()) return;
+                    var historyState = _chatPagination[cacheKey];
+                    if (historyState && historyState.controller) historyState.controller.abort();
+                    _chatPagination[cacheKey] = { has_more: !!messagesResult.has_more, cursor: messagesResult.next_cursor || null, loading: false, historical: false };
                     var mergedMessages = mergeDockChatMessages(userName, mergeDockChatRowsById(messagesResult.data || [], true, 180), readRevision).filter(function(m) {
                         // 本地已删除的消息不再进入缓存（否则未读统计/会话预览还会带上它）
                         return !isDmMessageLocallyDeleted(m);
@@ -2165,6 +2232,7 @@
                     _chatCache[cacheKey] = mergedMessages;
                     var oldRetry = el.querySelector('.chat-load-retry'); if (oldRetry) oldRetry.remove();
                     renderDockMessages(userName, mergedMessages, forceScroll);
+                    syncDockChatHistoryButton(userName);
                     if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
                             scheduleDockChatListRefresh(120);
@@ -2252,6 +2320,7 @@
                 var signatureKey = userName || '__empty__';
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
+                    syncDockChatHistoryButton(userName);
                     queueDockVoiceTranscription(userName, msgs);
                     if (forceScroll) scrollDockChatToLatest();
                     return;
@@ -2314,6 +2383,7 @@
                 var wanted=new Set(orderedNodes); Array.from(el.children).forEach(function(node) { if (!wanted.has(node)) node.remove(); });
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
+                syncDockChatHistoryButton(userName);
                 patchDockChatMessageAvatars(userName);
                 bindChatAudioPlayers();
                 queueDockVoiceTranscription(userName, msgs);
@@ -2345,6 +2415,15 @@
 
             window.withdrawDMMessage = async function(id, btnEl) {
                 if (!id) return false;
+                var withdrawOwner = window.currentUser || '', withdrawEpoch = window._authStateEpoch || 0;
+                var withdrawPeer = dockChatActiveUser;
+                if (!withdrawOwner || !withdrawPeer) return false;
+                var withdrawCacheKey = getDockChatCacheKey(withdrawPeer);
+                var originalMessage = (_chatCache[withdrawCacheKey] || []).find(function(row) { return String(row.id) === String(id); });
+                function sameIdentity() {
+                    return window.currentUser === withdrawOwner && (window._authStateEpoch || 0) === withdrawEpoch;
+                }
+                function sameView() { return sameIdentity() && dockChatActiveUser === withdrawPeer; }
                 // ★ 2026-09-25：撤回入口从"气泡内常驻按钮"改为长按菜单后，这里不再有
                 //   按钮可用来显示"撤回中…"，因此 btnEl 变成可选，并返回是否成功，
                 //   交给调用方决定提示。
@@ -2357,23 +2436,38 @@
                     var resp = await window.xtjProtectedFetch('/api/dm/withdraw', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id: id })
+                        body: JSON.stringify({ id: id }),
+                        authOwner: withdrawOwner, authEpoch: withdrawEpoch, timeoutMs: 15000
                     });
                     var result = await resp.json().catch(function() { return {}; });
-                    if (!resp.ok || !result.ok) {
+                    if (!sameIdentity()) return false;
+                    // Media cleanup can fail after the message has already been withdrawn.
+                    // That response confirms the withdrawal and must remove the old body.
+                    var cleanupPending = result.withdrawn === true && (!resp.ok || !result.ok);
+                    if ((!resp.ok || !result.ok) && !cleanupPending) {
                         throw new Error(result.error || '撤回失败');
                     }
-                    if (result.message && dockChatActiveUser) {
-                        upsertDockChatCacheMessage(dockChatActiveUser, result.message);
-                        // 撤回后本地签名要失效，否则签名未变会被提前 return 掉、界面不更新
-                        _chatRenderSignature[dockChatActiveUser] = undefined;
-                        loadDockChatMessages(dockChatActiveUser, false);
+                    var withdrawnMessage = result.message;
+                    if (!withdrawnMessage && cleanupPending && originalMessage) {
+                        withdrawnMessage = Object.assign({}, originalMessage, {
+                            content: JSON.stringify({ type: 'text', text: '[消息已撤回]', withdrawn: true, read_at: null }),
+                            __localPreviewUrl: '', __pendingFile: false
+                        });
                     }
-                    window.showToast('已撤回');
+                    if (withdrawnMessage) {
+                        upsertDockChatCacheMessage(withdrawPeer, withdrawnMessage);
+                        // 撤回后本地签名要失效，否则签名未变会被提前 return 掉、界面不更新
+                        _chatRenderSignature[withdrawPeer] = undefined;
+                    }
+                    if (sameView()) {
+                        renderDockMessages(withdrawPeer, _chatCache[withdrawCacheKey] || [], false);
+                        loadDockChatMessages(withdrawPeer, false, true);
+                        window.showToast(cleanupPending ? '消息已撤回，附件清理暂未完成，可稍后重试撤回' : '已撤回');
+                    }
                     return true;
                 } catch (e) {
-                    window.showToast(e.message || '撤回请求失败');
-                    if (btnEl) {
+                    if (sameView()) window.showToast(e.message || '撤回请求失败');
+                    if (sameView() && btnEl) {
                         btnEl.textContent = oldText;
                         btnEl.style.pointerEvents = 'auto';
                     }
@@ -3882,6 +3976,8 @@
                     if (payload.kind === 'delete') dockChatGoBack(); else loadDockChatMessages(peer,false);
                     return;
                 }
+                var pagedHistory=_chatPagination[getDockChatCacheKey(peer)];
+                if(pagedHistory&&pagedHistory.historical){setDockChatJumpLatestVisible(true);refreshDockChatHistoryWindow(peer);return;}
                 if (_chatHistoryFocus !== peer || ['edit','transcript','withdraw','delete_message','read','mark_read','refresh','reconnect','sent'].indexOf(payload.kind) < 0) return;
                 var key = getDockChatCacheKey(peer), cached = _chatCache[key] || [];
                 var anchors = [_chatHistoryAnchor,cached[0] && cached[0].id,cached[cached.length-1] && cached[cached.length-1].id].filter(Boolean);
@@ -4743,7 +4839,7 @@
                 var _dib = document.getElementById('dockChatImgBtn'); if (_dib) _dib.addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
                 var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { _chatRecordedFile = null; if (this.files.length) selectChatAttachments(this.files); });
                 var _dcjl = document.getElementById('dockChatJumpLatest'); if (_dcjl) _dcjl.addEventListener('click', function() { if (_chatHistoryFocus) { _chatHistoryFocus = ''; loadDockChatMessages(dockChatActiveUser, true, true); } else scrollDockChatToLatest({ smooth: true }); });
-                var _dcm = document.getElementById('dockChatMessages'); if (_dcm) _dcm.addEventListener('scroll', function() { if (isDockChatNearBottom(_dcm, 96)) setDockChatJumpLatestVisible(false); }, { passive: true });
+                var _dcm = document.getElementById('dockChatMessages'); if (_dcm) _dcm.addEventListener('scroll', function() { if (isDockChatNearBottom(_dcm, 96) && !_chatHistoryFocus) setDockChatJumpLatestVisible(false); }, { passive: true });
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
                 bindDockChatPasteAndDrop();
                 bindDockChatMessageActions();
@@ -8474,15 +8570,11 @@
                     '    <div class="post-stats-text post-detail-stats">' + buildPostStatsLine(normalizedPost, likeCount, commentCount) + '</div>',
                     detailActions.length ? '<div class="actions post-detail-actions">' + detailActions.join("") + '</div>' : '',
                     '  </section>',
-                    '  <section class="post-detail-panel post-detail-panel--stack">',
-                    '    <div class="post-detail-panel-title">点赞用户 <span>' + likeCount + '</span></div>',
-                    likes.length ? likes.map(function(l) {
-                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + window.safeParseDate(l.created_at).toLocaleString() + '</span></article>';
-                    }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>',
+                    '  <section class="post-detail-panel post-detail-panel--stack post-detail-likes-panel">',
+                    detailRelationsMarkup(normalizedPost, 'likes', likes),
                     '  </section>',
                     '  <section class="post-detail-panel post-detail-panel--stack post-detail-comments-panel">',
-                    '    <div class="post-detail-panel-title">评论记录 <span>' + commentCount + '</span></div>',
-                    comments.length ? buildPostCommentsHtml(normalizedPost, comments, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>',
+                    detailRelationsMarkup(normalizedPost, 'comments', comments),
                     '  </section>',
                     '</article>'
                 ].join('');
@@ -8499,7 +8591,89 @@
                 });
                 if (post.liked_by_me && !(feedAllLikes || []).some(function(l) { return String(l.post_id) === String(post.id) && l.user_name === currentUser; })) feedAllLikes.push({ post_id: post.id, user_name: currentUser });
                 window.__xtjPostDetailComments = comments || [];
+                window.__xtjPostDetailRecentComments = [];
+                var pageMeta = post.__relationPages || {};
+                window.__xtjPostDetailPaging = {};
+                ['likes','comments'].forEach(function(kind) {
+                    var meta = pageMeta[kind] || {};
+                    window.__xtjPostDetailPaging[kind] = { offset: 0, size: kind === 'likes' ? 50 : 30, has_more: !!meta.has_more, cursor: meta.next_cursor || null, loading: false };
+                });
                 body.innerHTML = statPostDetailMarkup(post, likes || [], comments || []);
+            };
+
+            function detailRelationsMarkup(post, kind, relationRows) {
+                var rows = relationRows || (kind === 'likes' ? window.__xtjPostDetailLikes || [] : window.__xtjPostDetailComments || []);
+                var state = (window.__xtjPostDetailPaging || {})[kind] || { offset: 0, size: kind === 'likes' ? 50 : 30 };
+                state.offset = Math.max(0, Math.min(state.offset, Math.max(0, rows.length - 1)));
+                var shown = rows.slice(state.offset, state.offset + state.size);
+                var total = Number(post[kind === 'likes' ? 'like_count' : 'comment_count']);
+                if (!Number.isFinite(total)) total = rows.length;
+                var html = '<div class="post-detail-panel-title">' + (kind === 'likes' ? '点赞用户' : '评论记录') + ' <span>' + total + '</span></div>';
+                if (kind === 'comments') {
+                    var shownIds = new Set(shown.map(function(row) { return String(row.id); }));
+                    var recent = (window.__xtjPostDetailRecentComments || []).filter(function(row) { return !shownIds.has(String(row.id)); }).slice(-5);
+                    if (recent.length) html += '<section class="post-detail-recent-comments" aria-label="新评论"><div class="post-detail-mini-copy">新评论</div>' + buildPostCommentsHtml(post, recent, { detail: true }) + '</section>';
+                    html += shown.length ? buildPostCommentsHtml(post, shown, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>';
+                }
+                else html += shown.length ? shown.map(function(l) {
+                    return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + window.safeParseDate(l.created_at).toLocaleString() + '</span></article>';
+                }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>';
+                if (rows.length || state.has_more) {
+                    html += '<nav class="post-detail-pagination" aria-label="' + (kind === 'likes' ? '点赞名单分页' : '评论分页') + '">' +
+                        '<span role="status">' + (shown.length ? (state.offset + 1) + '–' + (state.offset + shown.length) : '0') + ' / ' + total + '</span>' +
+                        '<button type="button" ' + (state.offset <= 0 || state.loading ? 'disabled ' : '') + 'onclick="__xtjPagePostDetail(\'' + kind + '\', -1)">上一页</button>' +
+                        '<button type="button" ' + (state.loading || !state.has_more && state.offset + state.size >= rows.length ? 'disabled ' : '') + 'onclick="__xtjPagePostDetail(\'' + kind + '\', 1)">' + (state.loading ? '加载中…' : '下一页') + '</button>' +
+                        (state.error ? '<span role="status">' + escapeHtml(state.error) + '</span>' : '') + '</nav>';
+                }
+                return html;
+            }
+            function comparePostDetailComments(a,b) {
+                function stamp(row) {
+                    var value=String(row.created_at||''),parsed=Date.parse(value);
+                    if(!Number.isFinite(parsed))return value;
+                    var fraction=(value.match(/\.(\d+)/)||[])[1]||'';
+                    return new Date(parsed).toISOString().slice(0,23)+fraction.padEnd(6,'0').slice(3,6)+'Z';
+                }
+                var order=stamp(a).localeCompare(stamp(b));if(order)return order;
+                var x=String(a.id),y=String(b.id);
+                return /^\d+$/.test(x)&&/^\d+$/.test(y)?x.length-y.length||x.localeCompare(y):x.localeCompare(y);
+            }
+            window.__xtjGotoPostComment = function(commentId) {
+                var post=window.__xtjPostDetailSnapshot,state=(window.__xtjPostDetailPaging||{}).comments;
+                if(!post||!state)return;
+                var index=(window.__xtjPostDetailComments||[]).findIndex(function(row){return String(row.id)===String(commentId);});
+                if(index<0)return;
+                state.offset=Math.floor(index/state.size)*state.size;window.__xtjPatchPostDetailInteractions(post.id);
+                requestAnimationFrame(function(){if(window.__xtjPostDetailSnapshot!==post)return;var nodes=document.querySelectorAll('#postDetailBody .comment-item[data-comment-id]');
+                    Array.from(nodes).some(function(node){if(node.getAttribute('data-comment-id')!==String(commentId))return false;node.scrollIntoView({block:'center'});node.tabIndex=-1;node.focus({preventScroll:true});return true;});});
+            };
+            window.__xtjPagePostDetail = async function(kind, direction) {
+                var post = window.__xtjPostDetailSnapshot, state = (window.__xtjPostDetailPaging || {})[kind];
+                if (!post || !state || state.loading) return;
+                var rows = kind === 'likes' ? window.__xtjPostDetailLikes : window.__xtjPostDetailComments;
+                var next = Math.max(0, state.offset + direction * state.size);
+                if (direction < 0 || next + state.size <= rows.length || !state.has_more && next < rows.length) { state.offset = next; state.error = ''; window.__xtjPatchPostDetailInteractions(post.id); return; }
+                if (!state.has_more || !state.cursor) return;
+                var owner = currentUser, epoch = _authStateEpoch, seq = _postDetailReqSeq;
+                var version = typeof feedInteractionMutationVersion === 'number' ? feedInteractionMutationVersion : 0;
+                state.loading = true; state.error = ''; window.__xtjPatchPostDetailInteractions(post.id);
+                function current() { return owner === currentUser && epoch === _authStateEpoch && seq === _postDetailReqSeq && window.__xtjPostDetailSnapshot === post; }
+                try {
+                    var response = await window.xtjOptionalAuthFetch('/api/post/detail/' + encodeURIComponent(post.id) + '/relations/' + kind + '?limit=' + state.size + '&cursor=' + encodeURIComponent(state.cursor), { timeoutMs: 15000, authOwner: owner, authEpoch: epoch });
+                    var body = await response.json();
+                    if (!current()) return;
+                    if (!response.ok || !body.ok) throw new Error(body.error || '加载失败，请重试');
+                    if (version !== feedInteractionMutationVersion) throw new Error('互动已更新，请再次加载');
+                    var seen = new Set(rows.map(function(row) { return String(row.id); }));
+                    (body.data || []).forEach(function(row) { if (!seen.has(String(row.id)) && !(kind === 'comments' && deletedPostCommentIds.has(String(row.id)))) { rows.push(row); seen.add(String(row.id)); } });
+                    if (kind === 'comments') {
+                        rows.sort(comparePostDetailComments);
+                        window.__xtjPostDetailRecentComments = (window.__xtjPostDetailRecentComments || []).filter(function(row) { return !seen.has(String(row.id)); });
+                    }
+                    state.has_more = !!body.has_more; state.cursor = body.next_cursor || null;
+                    state.offset = Math.min(next, Math.max(0, rows.length - 1));
+                } catch(error) { if (current()) state.error = error.message || '加载失败，请重试'; }
+                finally { if (current()) { state.loading = false; window.__xtjPatchPostDetailInteractions(post.id); } }
             };
 
             window.__xtjPatchPostDetailInteractions = function(postId) {
@@ -8509,10 +8683,11 @@
                 if (!body) return;
                 var comments = window.__xtjPostDetailComments || [], likes = window.__xtjPostDetailLikes || [];
                 var panel = body.querySelector('.post-detail-comments-panel');
-                if (panel) panel.innerHTML = '<div class="post-detail-panel-title">评论记录 <span>' + comments.length + '</span></div>' +
-                    (comments.length ? buildPostCommentsHtml(post, comments, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>');
+                if (panel) panel.innerHTML = detailRelationsMarkup(post, 'comments');
+                var likesPanel = body.querySelector('.post-detail-likes-panel');
+                if (likesPanel) likesPanel.innerHTML = detailRelationsMarkup(post, 'likes');
                 var stats = body.querySelector('.post-detail-stats');
-                if (stats) stats.innerHTML = buildPostStatsLine(post, Number.isFinite(Number(post.like_count)) ? Number(post.like_count) : likes.length, comments.length);
+                if (stats) stats.innerHTML = buildPostStatsLine(post, Number.isFinite(Number(post.like_count)) ? Number(post.like_count) : likes.length, Number.isFinite(Number(post.comment_count)) ? Number(post.comment_count) : comments.length);
             };
             window.__xtjMergePostDetailComments = function(postId, incoming) {
                 var post = window.__xtjPostDetailSnapshot;
@@ -8520,11 +8695,24 @@
                 var list = window.__xtjPostDetailComments || [], map = new Map(list.map(function(c) { return [String(c.id), c]; })), changed = false;
                 (incoming || []).forEach(function(row) {
                     if (String(row.post_id) !== String(postId)) return;
+                    if (deletedPostCommentIds.has(String(row.id)) || deletedPostCommentIds.has(String(row.parent_comment_id))) return;
+                    if (!map.has(String(row.id)) && window.__xtjPostDetailPaging && window.__xtjPostDetailPaging.comments && window.__xtjPostDetailPaging.comments.has_more) {
+                        var recent=window.__xtjPostDetailRecentComments||(window.__xtjPostDetailRecentComments=[]);
+                        var index=recent.findIndex(function(item){return String(item.id)===String(row.id);});
+                        // A profile snapshot contains historical comments too;
+                        // the paginated endpoint owns those unloaded records.
+                        if(index<0 && !row.generated_by_ai)return;
+                        if(index<0)recent.push(row);else recent[index]=row;
+                        recent.sort(comparePostDetailComments);
+                        changed=true;return;
+                    }
                     var old = map.get(String(row.id));
                     if (!old || old.content !== row.content || old.parent_comment_id !== row.parent_comment_id || old.generated_by_ai !== row.generated_by_ai) { map.set(String(row.id), row); changed = true; }
                 });
                 if (!changed) return;
-                window.__xtjPostDetailComments = Array.from(map.values()).sort(function(a,b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id).localeCompare(String(b.id)); });
+                window.__xtjPostDetailComments = Array.from(map.values()).sort(comparePostDetailComments);
+                if (!(window.__xtjPostDetailPaging && window.__xtjPostDetailPaging.comments && window.__xtjPostDetailPaging.comments.has_more) && Number.isFinite(post.comment_count)) post.comment_count = window.__xtjPostDetailComments.length;
+                if (window.__xtjScheduleEngagementRefresh) window.__xtjScheduleEngagementRefresh(postId);
                 window.__xtjPatchPostDetailInteractions(postId);
             };
             window.__xtjApplyPostDetailComment = function(eventType, row) {
@@ -8532,13 +8720,27 @@
                 if (!post || !row || row.id == null || (row.post_id != null && String(row.post_id) !== String(post.id))) return;
                 var list = window.__xtjPostDetailComments || [];
                 if (eventType !== 'DELETE' && row.post_id == null) return;
-                if (eventType === 'DELETE') list = list.filter(function(c) { return String(c.id) !== String(row.id); });
-                else {
-                    var index = list.findIndex(function(c) { return String(c.id) === String(row.id); });
-                    if (index < 0) list.push(row); else list[index] = row;
-                    list.sort(function(a,b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id).localeCompare(String(b.id)); });
+                var beforeCount = list.length;
+                if (eventType === 'DELETE') {
+                    var removed = new Set((row.deleted_comment_ids || [row.id]).map(String));
+                    var more = true;
+                    while (more) { more = false; list.forEach(function(c) { if (removed.has(String(c.parent_comment_id)) && !removed.has(String(c.id))) { removed.add(String(c.id)); more = true; } }); }
+                    list = list.filter(function(c) { return !removed.has(String(c.id)); });
+                    window.__xtjPostDetailRecentComments = (window.__xtjPostDetailRecentComments || []).filter(function(c) { return !removed.has(String(c.id)); });
                 }
+                else {
+                    if (deletedPostCommentIds.has(String(row.id)) || deletedPostCommentIds.has(String(row.parent_comment_id))) return;
+                    var index = list.findIndex(function(c) { return String(c.id) === String(row.id); });
+                    if (index < 0 && window.__xtjPostDetailPaging && window.__xtjPostDetailPaging.comments && window.__xtjPostDetailPaging.comments.has_more) {
+                        var recent=window.__xtjPostDetailRecentComments||(window.__xtjPostDetailRecentComments=[]);
+                        var recentIndex=recent.findIndex(function(c){return String(c.id)===String(row.id);});if(recentIndex<0)recent.push(row);else recent[recentIndex]=row;recent.sort(comparePostDetailComments);
+                    } else if (index < 0) list.push(row); else list[index] = row;
+                    list.sort(comparePostDetailComments);
+                }
+                if (Number.isFinite(Number(row.comment_count))) post.comment_count = Number(row.comment_count);
+                else if (Number.isFinite(post.comment_count)) post.comment_count = Math.max(0, post.comment_count + list.length - beforeCount);
                 window.__xtjPostDetailComments = list;
+                if (window.__xtjScheduleEngagementRefresh) window.__xtjScheduleEngagementRefresh(post.id);
                 window.__xtjPatchPostDetailInteractions(post.id);
             };
 
@@ -8625,16 +8827,19 @@
                 window.__xtjPostDetailSnapshot = null;
                 window.__xtjPostDetailLikes = [];
                 window.__xtjPostDetailComments = [];
+                window.__xtjPostDetailRecentComments = [];
+                window.__xtjPostDetailPaging = {};
                 var modal = document.getElementById('postDetailModal');
                 var body = document.getElementById('postDetailBody');
                 if (modal) modal.classList.remove('active');
                 if (body) body.textContent = '';
             };
 
-            window.openPostDetail = async function(postId) {
+            window.openPostDetail = async function(postId, retriedInteractions) {
                 var _seq = ++_postDetailReqSeq;
                 var owner = currentUser;
                 var epoch = _authStateEpoch;
+                var relationVersion = typeof feedInteractionMutationVersion === 'number' ? feedInteractionMutationVersion : 0;
                 window.__xtjPostDetailCurrentId = String(postId || '');
                 var title = document.getElementById('postDetailTitle');
                 var body = document.getElementById('postDetailBody');
@@ -8687,6 +8892,13 @@
                     }
                     // S7 修复：响应落地前校验是否已被新请求替代
                     if (!isCurrentDetail()) return;
+                    if (relationVersion !== (typeof feedInteractionMutationVersion === 'number' ? feedInteractionMutationVersion : 0)) {
+                        var pendingLike = typeof likeOperations === 'object' && likeOperations[String(postId)];
+                        if (pendingLike && pendingLike.promise) await pendingLike.promise;
+                        if (!isCurrentDetail()) return;
+                        if (!retriedInteractions) return window.openPostDetail(postId, true);
+                        throw new Error('互动已更新，请重新加载');
+                    }
                     var post = apiData.post;
                     if (!post || typeof post !== 'object') {
                         if (body) body.innerHTML = '<div class="stat-empty">该帖子不存在、已删除或不可查看。</div>';
@@ -8694,6 +8906,7 @@
                     }
                     var likes = apiData.likes || [];
                     var comments = apiData.comments || [];
+                    post.__relationPages = { comments: apiData.comments_page, likes: apiData.likes_page };
                     // normalize to match renderPostDetail expectations；避免真实 views 被清零
                     post.views = (post.view_count != null ? post.view_count : (post.views != null ? post.views : 0));
                     if (!post.user_name || !post.created_at) {

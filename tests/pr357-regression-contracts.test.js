@@ -104,8 +104,8 @@ test('Private DM history handles loading with AbortController and sequence guard
 test('public photo wall requires protected auth and projects away storage originals', () => {
   const photosEndpoint = routeSource('get', '/api/photos/public', "app.get('/api/avatar/:userName'");
   assert.match(photosEndpoint, /authenticateUser/);
-  assert.match(photosEndpoint, /media_type.*__photo_wall__/);
-  assert.match(photosEndpoint, /data: \(data \|\| \[\]\)\.map/);
+  assert.match(photosEndpoint, /readPhotoWallPage\(supabase, req.query\)/);
+  assert.match(photosEndpoint, /data: page\.data\.map/);
   assert.match(photosEndpoint, /photoPayload\(row\)/);
   assert.match(photoData, /\/api\/photos\/public\?page=/);
   assert.match(photoData, /getUserAuthHeaders/);

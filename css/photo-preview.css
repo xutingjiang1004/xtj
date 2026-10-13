@@ -507,7 +507,7 @@ html[data-theme="dark"] #photoPreviewOverlay .pp-comments-panel { background:rgb
 #photoPreviewOverlay .pp-comment-row button { font-size:11px;padding:8px;background:none;border:0;box-shadow:none;color:inherit; }
 #photoPreviewOverlay #ppCommentForm { display:flex;gap:10px;align-items:center;flex-shrink:0; }
 #photoPreviewOverlay #ppCommentInput { flex:1;min-width:0;max-height:100px;margin:0;padding:10px 12px;border:1px solid rgba(128,155,143,.25);border-radius:12px;resize:none;background:rgba(20,32,27,.5);color:inherit;font-size:14px; }
-#photoPreviewOverlay #ppCommentSend { flex-shrink:0;min-height:44px;padding:8px 14px;background:#219b70;color:#fff;border:0;border-radius:12px;box-shadow:none; }
+#photoPreviewOverlay #ppCommentSend { flex-shrink:0;min-height:44px;padding:8px 14px;background:#16734f;color:#fff;border:0;border-radius:12px;box-shadow:none; }
 #photoPreviewOverlay #ppCommentError { font-size:12px;color:#c46464;line-height:1.5; }
 @media (prefers-reduced-transparency:reduce) { #photoPreviewOverlay .photo-preview-close { background:rgba(25,35,30,.85)!important;backdrop-filter:none!important; } }
 html.xtj-ios-viewport #photoPreviewOverlay { top:var(--xtj-visual-top,0px);height:var(--xtj-app-height,100dvh);bottom:auto; }

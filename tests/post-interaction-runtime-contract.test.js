@@ -24,7 +24,7 @@ test('publish and comment handlers reject duplicate in-flight submissions', () =
 
 test('comment keeps its target id and patches only the affected card after success', () => {
   assert.match(core, /var targetPostId = String\(postId \|\| ''\)\.trim\(\)\.toLowerCase\(\)/);
-  assert.match(core, /JSON\.stringify\(\{ post_id: targetPostId, content: content \}\)/);
+  assert.match(core, /JSON\.stringify\(\{ post_id: targetPostId, content: content, client_request_id: commentAttempt.id \}\)/);
   assert.match(core, /result\.data && String\(result\.data\.post_id\) === targetPostId/);
   assert.match(core, /feedAllComments[\s\S]*window\.__xtjSchedulePostCardPatch\(targetPostId\)/);
   const commentSubmit = between('var insertedComment = result.data', 'requestAnimationFrame(function() {');
@@ -165,7 +165,9 @@ test('feed page requests use an authenticated keyset cursor after the first page
 test('private detail requests use optional auth and detail data carries complete counts/IP fields', () => {
   const detail = fs.readFileSync(path.join(__dirname, '..', 'js', 'core-parts', '06-chat-and-nav.js'), 'utf8');
   assert.match(detail, /xtjOptionalAuthFetch\(detailPath/);
-  assert.match(server, /select\('id,user_name,created_at', \{ count: 'exact' \}\)/);
+  assert.match(server, /readRelationPage\(supabase, postId, 'likes'/);
+  const relations = fs.readFileSync(path.join(__dirname,'..','render-api','post-interactions.js'),'utf8');
+  assert.match(relations, /select\(columns, \{ count: 'exact' \}\)/);
   assert.match(server, /ip_province: post\.ip_province/);
   assert.match(server, /ip_lookup_started_at: post\.ip_lookup_started_at/);
 });

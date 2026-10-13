@@ -91,8 +91,8 @@ test('atomic like endpoint validates exact types and returns canonical state', (
   assert.match(endpoint, /authenticateUser/);
   assert.match(endpoint, /normalizePostId\(rawPostId\)/);
   assert.match(endpoint, /typeof liked !== 'boolean'/);
-  assert.match(endpoint, /post_id:\s*postId,\s*liked:\s*liked,\s*like_count:/);
-  assert.match(endpoint, /\.eq\('post_id',\s*postId\)\.eq\('user_name',\s*req\.userName\)/);
+  assert.match(endpoint, /rpc\('xtj_set_post_like', \{ p_post_id: postId, p_owner: req.userName, p_liked: liked \}/);
+  assert.match(endpoint, /res.json\(likeWrite.data\)/);
 });
 
 test('like UI is optimistic, coalesces rapid toggles, and keeps the control interactive', () => {

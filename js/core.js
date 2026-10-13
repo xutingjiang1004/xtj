@@ -4739,11 +4739,11 @@ function renderProfileActivityList(kind) {
                     if (!sameAccount()) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
                     
-                    if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('DELETE', { id: commentId, post_id: targetPostId });
-                    markFeedInteractionChanged();
-                    feedAllComments = (feedAllComments || []).filter(function(item) {
-                        return String(item.id) !== String(commentId);
-                    });
+                    if (!targetPostId && window.__xtjPostDetailComments) {
+                        var detailComment = window.__xtjPostDetailComments.find(function(row) { return String(row.id) === String(commentId); });
+                        if (detailComment) targetPostId = detailComment.post_id;
+                    }
+                    window.__xtjApplyCommentDeletion(commentId, result, targetPostId);
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (targetPostId && typeof window.__xtjSchedulePostCardPatch === 'function') {
                         window.__xtjSchedulePostCardPatch(targetPostId);
@@ -4788,16 +4788,7 @@ function renderProfileActivityList(kind) {
                     if (!sameAccount()) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
 
-                    profileActivityState.comments = (profileActivityState.comments || []).filter(function(item) {
-                        return String(item.id) !== String(commentId);
-                    });
-                    if (profileActivityState.totals && profileActivityState.totals.comments > 0) {
-                        profileActivityState.totals.comments -= 1;
-                    }
-                    markFeedInteractionChanged();
-                    feedAllComments = (feedAllComments || []).filter(function(item) {
-                        return !(item && item.id != null && String(item.id) === String(commentId));
-                    });
+                    window.__xtjApplyCommentDeletion(commentId, result, targetPostId);
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (typeof updateFeedStats === 'function') updateFeedStats();
                     if (typeof refreshStatModal === 'function') refreshStatModal();
@@ -5550,6 +5541,11 @@ function renderProfileActivityList(kind) {
                     if (!parsed || typeof parsed !== 'object') return;
                     if (!parsed.data || typeof parsed.data !== 'object') parsed.data = {};
                     parsed.data.likes = Array.isArray(feedAllLikes) ? feedAllLikes : [];
+                    var currentPosts = new Map((feedAllPosts || []).map(function(post) { return [String(post.id), post]; }));
+                    if (Array.isArray(parsed.data.posts)) parsed.data.posts = parsed.data.posts.map(function(post) {
+                        var latest = currentPosts.get(String(post.id));
+                        return latest ? Object.assign({}, post, { like_count: latest.like_count, comment_count: latest.comment_count, liked_by_me: latest.liked_by_me }) : post;
+                    });
                     parsed.timestamp = Date.now();
                     window.safeStorage.set(CACHE_KEY, JSON.stringify(parsed));
                 } catch (e) {}
@@ -5594,6 +5590,8 @@ function renderProfileActivityList(kind) {
                 if (window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === String(postId) && Number.isFinite(count)) window.__xtjPostDetailSnapshot.like_count = count;
                 if (!Number.isFinite(count) || count < 0) return;
                 var pid = String(postId || '');
+                (feedAllPosts || []).forEach(function(post) { if (String(post.id) === pid) post.like_count = count; });
+                persistFeedLikesCache();
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
                     if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
                     var statsEl = postEl.querySelector('.post-stats-text');
@@ -5626,6 +5624,20 @@ function renderProfileActivityList(kind) {
 
             function updatePostLikeUi(postId, liked, likeRecord) {
                 var pid = String(postId || '');
+                (feedAllPosts || []).forEach(function(post) {
+                    if (String(post.id) !== pid) return;
+                    if (typeof post.liked_by_me === 'boolean' && post.liked_by_me !== !!liked && Number.isFinite(post.like_count)) post.like_count = Math.max(0, post.like_count + (liked ? 1 : -1));
+                    post.liked_by_me = !!liked;
+                });
+                var detailPost = window.__xtjPostDetailSnapshot;
+                if (detailPost && String(detailPost.id) === pid) {
+                    detailPost.liked_by_me = !!liked;
+                    var priorOwn = (window.__xtjPostDetailLikes || []).find(function(row) { return row.user_name === currentUser; });
+                    if (priorOwn) detailPost.__ownLikeRecord = priorOwn;
+                    window.__xtjPostDetailLikes = (window.__xtjPostDetailLikes || []).filter(function(row) { return row.user_name !== currentUser; });
+                    if (liked) window.__xtjPostDetailLikes.unshift(likeRecord && likeRecord.id ? likeRecord : detailPost.__ownLikeRecord || { id: 'local_' + currentUser, post_id: pid, user_name: currentUser, created_at: new Date().toISOString() });
+                    if (window.__xtjPatchPostDetailInteractions) window.__xtjPatchPostDetailInteractions(pid);
+                }
                 if (!Array.isArray(feedAllLikes)) feedAllLikes = [];
                 feedAllLikes = feedAllLikes.filter(function(item) {
                     return !isLikeOwnedByCurrentUser(item, pid);
@@ -5652,6 +5664,7 @@ function renderProfileActivityList(kind) {
             window.__xtjApplyRealtimeLike = function(eventType, row) {
                 if (!row || row.id == null || row.post_id == null) return;
                 var postId = String(row.post_id);
+                if (window.__xtjScheduleEngagementRefresh) window.__xtjScheduleEngagementRefresh(postId);
                 var detail = window.__xtjPostDetailSnapshot;
                 if (!(feedAllPosts || []).some(function(post) { return String(post && post.id) === postId; }) && !(detail && String(detail.id) === postId)) return;
                 // The API response owns the in-flight optimistic update on this device.
@@ -5684,6 +5697,11 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 feedAllLikes = likes;
+                (feedAllPosts || []).forEach(function(post) {
+                    if (String(post.id) !== postId) return;
+                    if (Number.isFinite(post.like_count) && (eventType === 'DELETE' || shouldIncrement)) post.like_count = Math.max(0, post.like_count + (eventType === 'INSERT' ? 1 : -1));
+                    if (isLikeOwnedByCurrentUser(row, postId)) post.liked_by_me = eventType === 'INSERT';
+                });
                 markFeedInteractionChanged();
                 if (detail && String(detail.id) === postId && Number.isFinite(Number(detail.like_count)) && (eventType === 'DELETE' || shouldIncrement)) detail.like_count = Math.max(0, Number(detail.like_count) + (eventType === 'INSERT' ? 1 : -1));
                 document.querySelectorAll('.post[data-post-id]').forEach(function(card) {
@@ -5749,6 +5767,9 @@ function renderProfileActivityList(kind) {
                             throw new Error(likeResult.error || 'like_state_sync_failed');
                         }
                         operation.confirmed = requestedLiked;
+                        if (likeResult.my_like && operation.desired) updatePostLikeUi(postId, true, likeResult.my_like);
+                        var detail = window.__xtjPostDetailSnapshot;
+                        if (!requestedLiked && detail && String(detail.id) === String(postId)) delete detail.__ownLikeRecord;
                         markFeedInteractionChanged();
                         // The response describes the sent intent, while the user may already
                         // have reversed it. Keep the count aligned with the visible intent.
@@ -6217,6 +6238,16 @@ function renderProfileActivityList(kind) {
                 btn.textContent = '发送';
                 btn.style.borderRadius = '20px';
                 btn.style.padding = '6px 14px';
+                // The key belongs to a logical submit, including retries after an
+                // uncertain response. Keep it with the preserved comment draft.
+                var commentAttempt = null;
+                function newCommentRequestId() {
+                    if (typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+                    var bytes = window.crypto.getRandomValues(new Uint8Array(16));
+                    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+                    var hex = Array.from(bytes, function(value) { return value.toString(16).padStart(2, '0'); }).join('');
+                    return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+                }
                 
                 btn.onclick = async function() {
                     if (btn.disabled) return;
@@ -6234,6 +6265,9 @@ function renderProfileActivityList(kind) {
                         showToast("帖子参数无效");
                         return;
                     }
+                    if (!commentAttempt || commentAttempt.content !== content || commentAttempt.owner !== identity.owner || commentAttempt.epoch !== identity.epoch) {
+                        commentAttempt = { content: content, owner: identity.owner, epoch: identity.epoch, id: newCommentRequestId() };
+                    }
                     
                     btn.disabled = true;
                     btn.textContent = "发送中..";
@@ -6246,7 +6280,7 @@ function renderProfileActivityList(kind) {
                             signal: controller.signal,
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ post_id: targetPostId, content: content })
+                            body: JSON.stringify({ post_id: targetPostId, content: content, client_request_id: commentAttempt.id })
                         });
                         const result = await response.json().catch(function() { return {}; });
                         if (!postActionIdentityCurrent(identity)) return;
@@ -6265,11 +6299,18 @@ function renderProfileActivityList(kind) {
                         var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
                         
                         if (insertedComment) {
+                            var alreadyKnown = (feedAllComments || []).some(function(item) { return String(item.id) === String(insertedComment.id); });
                             markFeedInteractionChanged();
                             feedAllComments = (feedAllComments || []).filter(function(item) {
                                 return !(item && item.id != null && String(item.id) === String(insertedComment.id));
                             }).concat([insertedComment]);
-                            if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('INSERT', insertedComment);
+                            (feedAllPosts || []).forEach(function(post) {
+                                if (String(post.id) !== targetPostId) return;
+                                if (Number.isFinite(result.comment_count)) post.comment_count = result.comment_count;
+                                else if (!alreadyKnown && Number.isFinite(post.comment_count)) post.comment_count++;
+                            });
+                            commentAttempt = null;
+                            if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('INSERT', Object.assign({}, insertedComment, { comment_count: result.comment_count }));
                             writeFeedCacheSnapshot();
                             if (typeof window.__xtjSchedulePostCardPatch === 'function') {
                                 window.__xtjSchedulePostCardPatch(targetPostId);
@@ -6693,7 +6734,9 @@ function renderProfileActivityList(kind) {
                     closeOtherPostActionModals(id);
                 }
                 el.style.display = '';
+                el.inert = false; el.setAttribute('aria-hidden', 'false');
                 el.classList.add("active");
+                if (window.__xtjSyncFocusSurfaces) window.__xtjSyncFocusSurfaces();
             };
 
             window.closeModal = function (id) {
@@ -7365,6 +7408,8 @@ function renderProfileActivityList(kind) {
             let feedLoadRequestId = 0;
             let feedStateVersion = 0;
             let feedInteractionMutationVersion = 0;
+            var deletedPostCommentIds = new Set();
+            var engagementRefreshTimers = new Map();
             let feedNextOffset = 0;
             let feedNextCursor = null;
             let feedLoadedPages = [];
@@ -7386,6 +7431,8 @@ function renderProfileActivityList(kind) {
                 feedAllPosts = [];
                 feedAllComments = [];
                 feedAllLikes = [];
+                deletedPostCommentIds.clear();
+                engagementRefreshTimers.forEach(function(timer) { clearTimeout(timer); }); engagementRefreshTimers.clear();
                 likeOperations = Object.create(null);
                 window.isPinningPost = false;
                 postPinFlight = null;
@@ -7430,6 +7477,49 @@ function renderProfileActivityList(kind) {
                 feedInteractionMutationVersion++;
                 markFeedStateChanged();
             }
+
+            window.__xtjApplyCommentDeletion = function(commentId, result, postId) {
+                var rows = (feedAllComments || []).concat(window.__xtjPostDetailComments || [], window.__xtjPostDetailRecentComments || [], profileActivityState.comments || []);
+                var removed = new Set((result.deleted_comment_ids || [commentId]).map(String));
+                // Also cover older backends and replies already loaded locally.
+                var changed = true;
+                while (changed) { changed = false; rows.forEach(function(row) {
+                    if (removed.has(String(row.parent_comment_id)) && !removed.has(String(row.id))) { removed.add(String(row.id)); changed = true; }
+                }); }
+                var pid = String(result.post_id || postId || '');
+                var newlyRemoved = Array.from(removed).filter(function(id) { return !deletedPostCommentIds.has(id); }).length;
+                removed.forEach(function(id) { deletedPostCommentIds.add(id); });
+                feedAllComments = (feedAllComments || []).filter(function(row) { return !removed.has(String(row.id)); });
+                var ownRemoved = (profileActivityState.comments || []).filter(function(row) { return removed.has(String(row.id)); }).length;
+                profileActivityState.comments = (profileActivityState.comments || []).filter(function(row) { return !removed.has(String(row.id)); });
+                if (profileActivityState.totals) profileActivityState.totals.comments = Math.max(0, Number(profileActivityState.totals.comments || 0) - ownRemoved);
+                (feedAllPosts || []).forEach(function(post) {
+                    if (String(post.id) !== pid) return;
+                    if (Number.isFinite(Number(result.comment_count))) post.comment_count = Number(result.comment_count);
+                    else if (Number.isFinite(post.comment_count)) post.comment_count = Math.max(0, post.comment_count - newlyRemoved);
+                });
+                if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('DELETE', { id: commentId, post_id: pid || null, deleted_comment_ids: Array.from(removed), comment_count: result.comment_count });
+                markFeedInteractionChanged();
+                return removed;
+            };
+            window.__xtjScheduleEngagementRefresh = function(postId) {
+                var key=String(postId),owner=currentUser,epoch=_authStateEpoch;
+                if(engagementRefreshTimers.has(key))clearTimeout(engagementRefreshTimers.get(key));
+                engagementRefreshTimers.set(key,setTimeout(async function(){
+                    engagementRefreshTimers.delete(key);
+                    var version=feedInteractionMutationVersion;
+                    try{
+                        var response=await window.xtjOptionalAuthFetch('/api/post/detail/'+encodeURIComponent(key)+'/relations/engagement',{authOwner:owner,authEpoch:epoch,timeoutMs:12000,background:true});
+                        var body=await response.json();
+                        if(owner!==currentUser||epoch!==_authStateEpoch||version!==feedInteractionMutationVersion||!response.ok||!body.ok||!body.stats||likeOperations[key]&&likeOperations[key].running)return;
+                        var stats=body.stats;
+                        (feedAllPosts||[]).forEach(function(post){if(String(post.id)===key)Object.assign(post,stats);});
+                        var detail=window.__xtjPostDetailSnapshot;if(detail&&String(detail.id)===key)Object.assign(detail,stats);
+                        markFeedStateChanged();schedulePostCardPatch(key);
+                        if(window.__xtjPatchPostDetailInteractions)window.__xtjPatchPostDetailInteractions(key);
+                    }catch(_){}
+                },250));
+            };
 
             function syncPostInfoCache(post) {
                 var normalized = normalizePost(post || {});
@@ -8593,14 +8683,12 @@ function renderProfileActivityList(kind) {
                 return !!post && getPostMediaItems(post).filter(function(item) { return item.media_type === 'image'; }).length > 9;
             }
             window.showFeedPostComments = function(postId) {
-                var post = (feedAllPosts || []).find(function(p) { return String(p.id) === String(postId); });
-                if (canOpenFeedPostDetail(post)) { window.openPostDetail(postId); return; }
-                expandedPostComments.add(String(postId)); schedulePostCardPatch(postId);
+                window.openPostDetail(postId);
             };
             if (typeof window.addEventListener === 'function') window.addEventListener('auth-ready', function() { if (expandedCommentsOwner !== currentUser) { expandedPostComments.clear(); expandedCommentsOwner = currentUser; } });
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
-                var limit = (options && options.detail) || expandedPostComments.has(String(post.id)) ? Infinity : 3;
+                var limit = options && options.detail ? 30 : 3;
                 function commentDeleteButton(comment) {
                     if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
                     return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
@@ -8622,11 +8710,17 @@ function renderProfileActivityList(kind) {
                         if (_seen[String(c.id)] || _count >= limit) return '';
                         _seen[String(c.id)] = true; _count++;
                         var _node;
+                        var replyContext='';
+                        if(options&&options.detail&&c.parent_comment_id!=null&&!_byId[String(c.parent_comment_id)]){
+                            var parentLoaded=(window.__xtjPostDetailComments||[]).some(function(row){return String(row.id)===String(c.parent_comment_id);});
+                            replyContext=parentLoaded?'<button type="button" class="comment-reply-context" onclick="__xtjGotoPostComment(\''+safeJsStr(String(c.parent_comment_id))+'\')">查看原评论 #'+escapeHtml(c.parent_comment_id)+'</button>':'<span class="comment-reply-context">回复评论 #'+escapeHtml(c.parent_comment_id)+'</span>';
+                        }
                         if (c.user_name === 'cat_ai' && c.generated_by_ai) {
                           _node = '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
                         } else {
                           _node = '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
                         }
+                        _node=replyContext+_node;
                         var _kids = _childrenOf[String(c.id)] || [];
                         if (_kids.length && depth < 8 && _count < limit) {
                           _node += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + _kids.map(function(child) { return _renderCommentNode(child, depth + 1); }).join('') + '</div>';
@@ -8636,7 +8730,8 @@ function renderProfileActivityList(kind) {
                 var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
                 pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
-                if (pComms.length > _count) html += '<button type="button" class="post-all-comments" onclick="showFeedPostComments(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + pComms.length + ' 条评论</button>';
+                var totalComments = Number.isFinite(post.comment_count) ? post.comment_count : pComms.length;
+                if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" onclick="showFeedPostComments(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + totalComments + ' 条评论</button>';
                 return '<div class="comments">' + html + '</div>';
             }
             window.buildPostCommentsHtml = buildPostCommentsHtml;
@@ -8649,7 +8744,7 @@ function renderProfileActivityList(kind) {
                 }
                 var pLikes = likeMap[normalized.id] || [];
                 var pComms = commentMap[normalized.id] || [];
-                var isLiked = isPostLikedByCurrentUser(likeUserMap, normalized.id);
+                var isLiked = typeof normalized.liked_by_me === 'boolean' ? normalized.liked_by_me : isPostLikedByCurrentUser(likeUserMap, normalized.id);
                 var canDelete = canDeletePost(normalized);
                 var mediaMarkup = renderPostMediaGrid(normalized);
                 return `
@@ -8667,7 +8762,7 @@ function renderProfileActivityList(kind) {
                   <div class="content">${buildPostContentHtml(normalized.content)}</div>
                   ${mediaMarkup}
                   ${buildPostLocationHtml(normalized)}
-                  <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
+                  <div class="post-stats-text">${buildPostStatsLine(normalized, Number.isFinite(normalized.like_count) ? normalized.like_count : pLikes.length, Number.isFinite(normalized.comment_count) ? normalized.comment_count : pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${buildPostCommentsHtml(normalized, pComms)}
                 </div>`;
@@ -9233,6 +9328,28 @@ function renderProfileActivityList(kind) {
                 ).order("created_at", { ascending: false });
             }
 
+            async function readDirectFeedEngagement(posts) {
+                var comments = [], likes = [], enriched = [], next = 0;
+                async function worker() {
+                    while (next < posts.length) {
+                        var post = posts[next++];
+                        var result = await Promise.all([
+                            sb.from('comments').select('id,post_id,user_name,content,parent_comment_id,generated_by_ai,created_at').eq('post_id', post.id).order('created_at').order('id').limit(3),
+                            sb.from('comments').select('id', { count: 'exact', head: true }).eq('post_id', post.id),
+                            sb.from('likes').select('id', { count: 'exact', head: true }).eq('post_id', post.id),
+                            currentUser ? sb.from('likes').select('id,post_id,user_name,created_at').eq('post_id', post.id).eq('user_name', currentUser).limit(1) : Promise.resolve({ data: [] })
+                        ]);
+                        var failed = result.find(function(row) { return row.error; });
+                        if (failed) throw failed.error;
+                        comments = comments.concat(result[0].data || []); likes = likes.concat(result[3].data || []);
+                        enriched.push(Object.assign({}, post, { comment_count: Number(result[1].count) || 0, like_count: Number(result[2].count) || 0, liked_by_me: !!(result[3].data || []).length }));
+                    }
+                }
+                var task = Promise.all([worker(), worker(), worker()]);
+                if (window.xtjWithTimeout) await window.xtjWithTimeout(task, 18000, 'feed-engagement'); else await task;
+                return [{ data: comments }, { data: likes }, { data: enriched }];
+            }
+
             async function fetchFeedPageChunk(offset, requestId, deferRelated) {
                 var relationVersion = feedInteractionMutationVersion;
                 var start = Math.max(0, Number(offset) || 0);
@@ -9415,10 +9532,7 @@ function renderProfileActivityList(kind) {
                     if (!sb) {
                         relatedPromise = Promise.resolve([ { data: [], error: null }, { data: [], error: null } ]);
                     } else {
-                        relatedPromise = Promise.all([
-                            sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
-                            sb.from("likes").select("*").in("post_id", postIds)
-                        ]);
+                        relatedPromise = readDirectFeedEngagement(posts);
                     }
                     if (deferRelated) {
                         return {
@@ -9441,6 +9555,7 @@ function renderProfileActivityList(kind) {
                     }
                     comments = related[0].data || [];
                     likes = related[1].data || [];
+                    if (related[2]) posts = related[2].data || posts;
                 }
 
                 return {
@@ -9465,7 +9580,7 @@ function renderProfileActivityList(kind) {
                     }
                     mergeFeedPageIntoState({
                         offset: chunk.offset,
-                        posts: [],
+                        posts: related[2] ? related[2].data || [] : [],
                         comments: related[0].data || [],
                         likes: related[1].data || [],
                         nextOffset: chunk.nextOffset,
@@ -9483,11 +9598,17 @@ function renderProfileActivityList(kind) {
 
             function mergeFeedPageIntoState(chunk) {
                 if (!chunk) return;
-                feedAllPosts = mergeFeedRecords(feedAllPosts, chunk.posts, function(post) {
+                var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
+                var incomingPosts = (chunk.posts || []).map(function(post) {
+                    if (relationsCurrent) return post;
+                    var old = (feedAllPosts || []).find(function(row) { return String(row.id) === String(post.id); });
+                    if (!old) return post;
+                    return Object.assign({}, post, { like_count: old.like_count, comment_count: old.comment_count, liked_by_me: old.liked_by_me });
+                });
+                feedAllPosts = mergeFeedRecords(feedAllPosts, incomingPosts, function(post) {
                     return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
                 }, true);
-                var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
-                feedAllComments = mergeFeedRecords(feedAllComments, relationsCurrent ? chunk.comments : [], function(comment) {
+                feedAllComments = mergeFeedRecords(feedAllComments, relationsCurrent ? (chunk.comments || []).filter(function(row) { return !deletedPostCommentIds.has(String(row.id)) && !deletedPostCommentIds.has(String(row.parent_comment_id)); }) : [], function(comment) {
                     return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
                 });
                 feedAllLikes = mergeFeedRecords(feedAllLikes, relationsCurrent ? chunk.likes : [], function(like) {
@@ -11852,17 +11973,15 @@ function renderProfileActivityList(kind) {
                     if (mySubEpoch !== window.__commentSubEpoch) return; // 已被更新的订阅取代
                     commentRealtime = sb.channel('feed-comments')
                         .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, function(payload) {
-                            var row = payload.new || payload.old;
+                            var row = payload.eventType === 'DELETE' ? payload.old : payload.new;
                             if (!row || row.id == null) return;
-                            if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment(payload.eventType, row);
+                            if (payload.eventType !== 'DELETE' && (deletedPostCommentIds.has(String(row.id)) || deletedPostCommentIds.has(String(row.parent_comment_id)))) return;
+                            if (payload.eventType !== 'DELETE' && window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment(payload.eventType, row);
                             var commentId = String(row.id);
                             if (payload.eventType === 'DELETE') {
-                                feedAllComments = (feedAllComments || []).filter(function(comment) {
-                                    return String(comment && comment.id) !== commentId;
-                                });
-                                profileActivityState.comments = (profileActivityState.comments || []).filter(function(comment) {
-                                    return String(comment && comment.id) !== commentId;
-                                });
+                                var priorComment=(feedAllComments||[]).concat(window.__xtjPostDetailComments||[],window.__xtjPostDetailRecentComments||[]).find(function(comment){return String(comment.id)===commentId;});
+                                if(row.post_id==null&&priorComment)row=Object.assign({},row,{post_id:priorComment.post_id});
+                                window.__xtjApplyCommentDeletion(commentId,{},row.post_id);
                                 // 删除对应的 DOM 元素
                                 var domEl = document.querySelector('.comment-item[data-comment-id="' + commentId + '"]');
                                 if (domEl && domEl.parentNode) domEl.parentNode.removeChild(domEl);
@@ -11885,6 +12004,8 @@ function renderProfileActivityList(kind) {
                                     return String(post && post.id) === String(row.post_id);
                                 });
                                 if (!postIsVisible) return;
+                                var alreadyKnown=(feedAllComments||[]).some(function(comment){return String(comment.id)===commentId;});
+                                if(!alreadyKnown)(feedAllPosts||[]).forEach(function(post){if(String(post.id)===String(row.post_id)&&Number.isFinite(post.comment_count))post.comment_count++;});
                                 // 去重
                                 feedAllComments = (feedAllComments || []).filter(function(comment) {
                                     return String(comment && comment.id) !== commentId;
@@ -11939,6 +12060,7 @@ function renderProfileActivityList(kind) {
                                 ? (feedAllPosts || []).some(function(p) { return String(p && p.id) === String(row.post_id); })
                                 : true;
                             if (affectsLocalFeed) markFeedInteractionChanged();
+                            if (affectsLocalFeed && row.post_id != null && window.__xtjScheduleEngagementRefresh) window.__xtjScheduleEngagementRefresh(row.post_id);
                             if (affectsLocalFeed && typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                             if (affectsLocalFeed && typeof renderProfileActivity === 'function') renderProfileActivity();
                         })
@@ -12793,6 +12915,8 @@ function renderProfileActivityList(kind) {
                 try { reduceDockMotion = reduceDockMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
                 document.querySelectorAll('.dock-panel').forEach(function(candidate) {
                     if (candidate !== previousPanel && candidate !== panel) candidate.classList.remove('active', 'is-entering', 'is-leaving');
+                    candidate.inert = candidate !== panel;
+                    candidate.setAttribute('aria-hidden', candidate === panel ? 'false' : 'true');
                 });
                 if (panel) {
                     if (!previousPanel || previousPanel === panel || reduceDockMotion) {
@@ -13007,6 +13131,9 @@ function renderProfileActivityList(kind) {
                 _chatPushOwner='';_chatPushEnabled=false;
                 setTimeout(function(){window.__xtjSyncChatPush?.();},0);
                 if (_chatDomSnapshots) _chatDomSnapshots.clear();
+                _chatCache = {}; _chatCommittedRevision = 0;
+                Object.keys(_chatPagination || {}).forEach(function(key) { if (_chatPagination[key].controller) _chatPagination[key].controller.abort(); });
+                _chatPagination = {};
                 if(_flashViewer)_flashViewer.close();
                 cancelDockChatSendFlights(); resetDockChatTyping(); closeDockChatConversationMenu(true);
                 closeAuthorSupport(); _supportOwner='';
@@ -13304,6 +13431,9 @@ function renderProfileActivityList(kind) {
             function forgetDockChatConversationMessages(peer) {
                 _chatDomSnapshots.delete(getDockChatCacheKey(peer));
                 _chatCache[getDockChatCacheKey(peer)] = [];
+                var state = _chatPagination[getDockChatCacheKey(peer)];
+                if (state && state.controller) state.controller.abort();
+                delete _chatPagination[getDockChatCacheKey(peer)];
                 _chatRenderSignature[peer] = undefined;
             }
 
@@ -13799,6 +13929,7 @@ function renderProfileActivityList(kind) {
 
             // 聊天消息缓存
             var _chatCache = {};
+            var _chatPagination = {};
             var _chatCommittedRevision = 0;
             var _chatRenderSignature = {};
             var _dockChatLoadSeq = 0;
@@ -13808,7 +13939,7 @@ function renderProfileActivityList(kind) {
             var _dockChatListRenderSignature = '';
 
             function getDockChatCacheKey(userName) {
-                return (currentUser || '') + '_' + (userName || '');
+                return JSON.stringify([currentUser || '', userName || '']);
             }
 
             function mergeDockChatRowsById(rows, ascending, limit) {
@@ -14029,8 +14160,58 @@ function renderProfileActivityList(kind) {
 
             function sortDockChatMessages(msgs) {
                 return (Array.isArray(msgs) ? msgs.slice() : []).sort(function(a, b) {
-                    return new Date(a && a.created_at ? a.created_at : 0).getTime() - new Date(b && b.created_at ? b.created_at : 0).getTime();
+                    return compareDockChatOrder(a, b);
                 });
+            }
+            function compareDockChatOrder(a,b) {
+                // Keep PostgreSQL microseconds: Date.parse alone collapses ties.
+                function stamp(row) { var s=String(row && row.created_at || '');var m=s.match(/^(.*:\d{2})(?:\.(\d+))?(?:Z|\+00:00)$/);return m ? m[1]+'.'+String(m[2]||'').padEnd(6,'0') : s; }
+                return stamp(a).localeCompare(stamp(b)) || String(a && a.id || '').localeCompare(String(b && b.id || ''));
+            }
+            function syncDockChatHistoryButton(peer) {
+                var el=document.getElementById('dockChatMessages');if(!el||dockChatActiveUser!==peer)return;
+                var state=_chatPagination[getDockChatCacheKey(peer)],button=el.querySelector('.chat-history-more');
+                if(!state||!state.has_more||_chatHistoryFocus&&!state.historical){if(button)button.remove();return;}
+                if(!button){button=document.createElement('button');button.type='button';button.className='chat-history-more';button.onclick=function(){loadOlderDockChatMessages(peer);};el.prepend(button);}
+                button.disabled=!!state.loading;button.textContent=state.loading?'加载历史消息…':state.error?'加载失败，点击重试':'加载更早的消息';
+            }
+            async function loadOlderDockChatMessages(peer) {
+                var key=getDockChatCacheKey(peer),state=_chatPagination[key],owner=window.currentUser,epoch=window._authStateEpoch||0;
+                if(!state||!state.has_more||!state.cursor||state.loading||!owner||dockChatActiveUser!==peer)return;
+                _chatHistoryFocus=peer;state.historical=true;
+                _dockChatLoadSeq++;if(_dockChatMessageLoad&&_dockChatMessageLoad.controller)_dockChatMessageLoad.controller.abort();
+                state.loading=true;state.error='';state.controller=new AbortController();syncDockChatHistoryButton(peer);
+                function current(){return owner===window.currentUser&&epoch===(window._authStateEpoch||0)&&dockChatActiveUser===peer&&_chatPagination[key]===state;}
+                var el=document.getElementById('dockChatMessages'),anchor=el.querySelector('.chat-msg-row'),top=anchor&&anchor.getBoundingClientRect().top;
+                try{
+                    var response=await window.xtjProtectedFetch('/api/dm/messages?target='+encodeURIComponent(peer)+'&limit=180&cursor='+encodeURIComponent(state.cursor),{authOwner:owner,authEpoch:epoch,signal:state.controller.signal,timeoutMs:15000});
+                    var body=await response.json();if(!current())return;
+                    if(!response.ok||!body.ok)throw new Error(body.error||'历史消息加载失败');
+                    var prior=_chatCache[key]||[],byId=new Map(prior.map(function(row){return [String(row.id),row];}));
+                    (body.data||[]).forEach(function(row){byId.set(String(row.id),reconcileDockChatMessage(byId.get(String(row.id)),row));});
+                    var rows=sortDockChatMessages(Array.from(byId.values())).filter(function(row){return !isDmMessageLocallyDeleted(row);});
+                    // Keep at most two pages in the historical DOM. Continuing
+                    // upwards still reaches the entire conversation via cursor.
+                    _chatCache[key]=rows.slice(0,360);state.has_more=!!body.has_more;state.cursor=body.next_cursor||null;state.historical=true;
+                    _chatHistoryFocus=peer;_chatRenderSignature[peer]=undefined;renderDockMessages(peer,_chatCache[key],false);
+                    if(anchor&&anchor.isConnected)el.scrollTop+=anchor.getBoundingClientRect().top-top;
+                    setDockChatJumpLatestVisible(true);
+                }catch(error){if(current()&&error.name!=='AbortError')state.error=error.message;}
+                finally{if(current()){state.loading=false;state.controller=null;syncDockChatHistoryButton(peer);}}
+            }
+            async function refreshDockChatHistoryWindow(peer) {
+                var key=getDockChatCacheKey(peer),state=_chatPagination[key],owner=window.currentUser,epoch=window._authStateEpoch||0;
+                if(!state||!state.historical||state.syncing||state.loading)return;
+                state.syncing=true;
+                var rows=_chatCache[key]||[],ids=rows.filter(function(row){return row.id&&!isDockChatLocalPendingMessage(row);}).map(function(row){return row.id;});
+                function current(){return owner===window.currentUser&&epoch===(window._authStateEpoch||0)&&dockChatActiveUser===peer&&_chatPagination[key]===state&&state.historical;}
+                try{
+                    var response=await window.xtjProtectedFetch('/api/dm/messages/loaded',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:peer,ids:ids}),authOwner:owner,authEpoch:epoch,timeoutMs:12000,background:true});
+                    var body=await response.json();if(!current()||!response.ok||!body.ok)return;
+                    var prior=new Map(rows.map(function(row){return [String(row.id),row];}));
+                    _chatCache[key]=sortDockChatMessages((body.data||[]).map(function(row){return reconcileDockChatMessage(prior.get(String(row.id)),row);}).concat(rows.filter(isDockChatLocalPendingMessage)));
+                    _chatRenderSignature[peer]=undefined;renderDockMessages(peer,_chatCache[key],false);syncDockChatHistoryButton(peer);
+                }catch(_){}finally{state.syncing=false;}
             }
 
             // ★ 2026-09-25 修复（切换会话卡顿 + 已读未读/气泡闪白）：
@@ -14682,7 +14863,7 @@ function renderProfileActivityList(kind) {
             // ★ 2026-09-25：muteLoadingSkeleton=true 表示「轮询/后台刷新」，不允许动 loading 骨架
             //   与空状态，避免后台回包把用户正在看的界面顶掉重画。
             async function loadDockChatMessages(userName, forceScroll, muteLoadingSkeleton, userRetry) {
-                if (_chatHistoryFocus === userName && !forceScroll && !userRetry) return;
+                if (_chatHistoryFocus === userName && !forceScroll && !userRetry) { refreshDockChatHistoryWindow(userName); return; }
                 if (userRetry) { _chatHistoryFocus = ''; _chatRenderSignature[userName] = undefined; }
                 var el0 = document.getElementById('dockChatMessages');
                 if (!window.currentUser) {
@@ -14716,6 +14897,11 @@ function renderProfileActivityList(kind) {
                 // 获取聊天缓存键
                 var cacheKey = getDockChatCacheKey(userName);
                 var hadCachedMessages = Array.isArray(_chatCache[cacheKey]);
+                var previousHistory = _chatPagination[cacheKey];
+                if (previousHistory && previousHistory.historical && (forceScroll || userRetry || _chatHistoryFocus !== userName)) {
+                    if (previousHistory.controller) previousHistory.controller.abort();
+                    _chatPagination[cacheKey] = { has_more: previousHistory.has_more, cursor: previousHistory.cursor, loading: false, historical: false };
+                }
                 if (hadCachedMessages) {
                     // ★ 2026-09-25 修复（切换会话骨架闪烁）：缓存命中时必须在任何骨架/空状态
                     //   绘制之前就把内容渲染出来，否则 openChat 里那次 loading 骨架会先画上去
@@ -14749,6 +14935,9 @@ function renderProfileActivityList(kind) {
                     }
                     if (!messagesResp.ok || !messagesResult.ok) throw new Error(messagesResult.error || 'DM messages failed');
                     if (!currentLoad()) return;
+                    var historyState = _chatPagination[cacheKey];
+                    if (historyState && historyState.controller) historyState.controller.abort();
+                    _chatPagination[cacheKey] = { has_more: !!messagesResult.has_more, cursor: messagesResult.next_cursor || null, loading: false, historical: false };
                     var mergedMessages = mergeDockChatMessages(userName, mergeDockChatRowsById(messagesResult.data || [], true, 180), readRevision).filter(function(m) {
                         // 本地已删除的消息不再进入缓存（否则未读统计/会话预览还会带上它）
                         return !isDmMessageLocallyDeleted(m);
@@ -14763,6 +14952,7 @@ function renderProfileActivityList(kind) {
                     _chatCache[cacheKey] = mergedMessages;
                     var oldRetry = el.querySelector('.chat-load-retry'); if (oldRetry) oldRetry.remove();
                     renderDockMessages(userName, mergedMessages, forceScroll);
+                    syncDockChatHistoryButton(userName);
                     if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
                             scheduleDockChatListRefresh(120);
@@ -14850,6 +15040,7 @@ function renderProfileActivityList(kind) {
                 var signatureKey = userName || '__empty__';
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
+                    syncDockChatHistoryButton(userName);
                     queueDockVoiceTranscription(userName, msgs);
                     if (forceScroll) scrollDockChatToLatest();
                     return;
@@ -14912,6 +15103,7 @@ function renderProfileActivityList(kind) {
                 var wanted=new Set(orderedNodes); Array.from(el.children).forEach(function(node) { if (!wanted.has(node)) node.remove(); });
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
+                syncDockChatHistoryButton(userName);
                 patchDockChatMessageAvatars(userName);
                 bindChatAudioPlayers();
                 queueDockVoiceTranscription(userName, msgs);
@@ -14943,6 +15135,15 @@ function renderProfileActivityList(kind) {
 
             window.withdrawDMMessage = async function(id, btnEl) {
                 if (!id) return false;
+                var withdrawOwner = window.currentUser || '', withdrawEpoch = window._authStateEpoch || 0;
+                var withdrawPeer = dockChatActiveUser;
+                if (!withdrawOwner || !withdrawPeer) return false;
+                var withdrawCacheKey = getDockChatCacheKey(withdrawPeer);
+                var originalMessage = (_chatCache[withdrawCacheKey] || []).find(function(row) { return String(row.id) === String(id); });
+                function sameIdentity() {
+                    return window.currentUser === withdrawOwner && (window._authStateEpoch || 0) === withdrawEpoch;
+                }
+                function sameView() { return sameIdentity() && dockChatActiveUser === withdrawPeer; }
                 // ★ 2026-09-25：撤回入口从"气泡内常驻按钮"改为长按菜单后，这里不再有
                 //   按钮可用来显示"撤回中…"，因此 btnEl 变成可选，并返回是否成功，
                 //   交给调用方决定提示。
@@ -14955,23 +15156,38 @@ function renderProfileActivityList(kind) {
                     var resp = await window.xtjProtectedFetch('/api/dm/withdraw', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id: id })
+                        body: JSON.stringify({ id: id }),
+                        authOwner: withdrawOwner, authEpoch: withdrawEpoch, timeoutMs: 15000
                     });
                     var result = await resp.json().catch(function() { return {}; });
-                    if (!resp.ok || !result.ok) {
+                    if (!sameIdentity()) return false;
+                    // Media cleanup can fail after the message has already been withdrawn.
+                    // That response confirms the withdrawal and must remove the old body.
+                    var cleanupPending = result.withdrawn === true && (!resp.ok || !result.ok);
+                    if ((!resp.ok || !result.ok) && !cleanupPending) {
                         throw new Error(result.error || '撤回失败');
                     }
-                    if (result.message && dockChatActiveUser) {
-                        upsertDockChatCacheMessage(dockChatActiveUser, result.message);
-                        // 撤回后本地签名要失效，否则签名未变会被提前 return 掉、界面不更新
-                        _chatRenderSignature[dockChatActiveUser] = undefined;
-                        loadDockChatMessages(dockChatActiveUser, false);
+                    var withdrawnMessage = result.message;
+                    if (!withdrawnMessage && cleanupPending && originalMessage) {
+                        withdrawnMessage = Object.assign({}, originalMessage, {
+                            content: JSON.stringify({ type: 'text', text: '[消息已撤回]', withdrawn: true, read_at: null }),
+                            __localPreviewUrl: '', __pendingFile: false
+                        });
                     }
-                    window.showToast('已撤回');
+                    if (withdrawnMessage) {
+                        upsertDockChatCacheMessage(withdrawPeer, withdrawnMessage);
+                        // 撤回后本地签名要失效，否则签名未变会被提前 return 掉、界面不更新
+                        _chatRenderSignature[withdrawPeer] = undefined;
+                    }
+                    if (sameView()) {
+                        renderDockMessages(withdrawPeer, _chatCache[withdrawCacheKey] || [], false);
+                        loadDockChatMessages(withdrawPeer, false, true);
+                        window.showToast(cleanupPending ? '消息已撤回，附件清理暂未完成，可稍后重试撤回' : '已撤回');
+                    }
                     return true;
                 } catch (e) {
-                    window.showToast(e.message || '撤回请求失败');
-                    if (btnEl) {
+                    if (sameView()) window.showToast(e.message || '撤回请求失败');
+                    if (sameView() && btnEl) {
                         btnEl.textContent = oldText;
                         btnEl.style.pointerEvents = 'auto';
                     }
@@ -16480,6 +16696,8 @@ function renderProfileActivityList(kind) {
                     if (payload.kind === 'delete') dockChatGoBack(); else loadDockChatMessages(peer,false);
                     return;
                 }
+                var pagedHistory=_chatPagination[getDockChatCacheKey(peer)];
+                if(pagedHistory&&pagedHistory.historical){setDockChatJumpLatestVisible(true);refreshDockChatHistoryWindow(peer);return;}
                 if (_chatHistoryFocus !== peer || ['edit','transcript','withdraw','delete_message','read','mark_read','refresh','reconnect','sent'].indexOf(payload.kind) < 0) return;
                 var key = getDockChatCacheKey(peer), cached = _chatCache[key] || [];
                 var anchors = [_chatHistoryAnchor,cached[0] && cached[0].id,cached[cached.length-1] && cached[cached.length-1].id].filter(Boolean);
@@ -17341,7 +17559,7 @@ function renderProfileActivityList(kind) {
                 var _dib = document.getElementById('dockChatImgBtn'); if (_dib) _dib.addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
                 var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { _chatRecordedFile = null; if (this.files.length) selectChatAttachments(this.files); });
                 var _dcjl = document.getElementById('dockChatJumpLatest'); if (_dcjl) _dcjl.addEventListener('click', function() { if (_chatHistoryFocus) { _chatHistoryFocus = ''; loadDockChatMessages(dockChatActiveUser, true, true); } else scrollDockChatToLatest({ smooth: true }); });
-                var _dcm = document.getElementById('dockChatMessages'); if (_dcm) _dcm.addEventListener('scroll', function() { if (isDockChatNearBottom(_dcm, 96)) setDockChatJumpLatestVisible(false); }, { passive: true });
+                var _dcm = document.getElementById('dockChatMessages'); if (_dcm) _dcm.addEventListener('scroll', function() { if (isDockChatNearBottom(_dcm, 96) && !_chatHistoryFocus) setDockChatJumpLatestVisible(false); }, { passive: true });
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
                 bindDockChatPasteAndDrop();
                 bindDockChatMessageActions();
@@ -21072,15 +21290,11 @@ function renderProfileActivityList(kind) {
                     '    <div class="post-stats-text post-detail-stats">' + buildPostStatsLine(normalizedPost, likeCount, commentCount) + '</div>',
                     detailActions.length ? '<div class="actions post-detail-actions">' + detailActions.join("") + '</div>' : '',
                     '  </section>',
-                    '  <section class="post-detail-panel post-detail-panel--stack">',
-                    '    <div class="post-detail-panel-title">点赞用户 <span>' + likeCount + '</span></div>',
-                    likes.length ? likes.map(function(l) {
-                        return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + window.safeParseDate(l.created_at).toLocaleString() + '</span></article>';
-                    }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>',
+                    '  <section class="post-detail-panel post-detail-panel--stack post-detail-likes-panel">',
+                    detailRelationsMarkup(normalizedPost, 'likes', likes),
                     '  </section>',
                     '  <section class="post-detail-panel post-detail-panel--stack post-detail-comments-panel">',
-                    '    <div class="post-detail-panel-title">评论记录 <span>' + commentCount + '</span></div>',
-                    comments.length ? buildPostCommentsHtml(normalizedPost, comments, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>',
+                    detailRelationsMarkup(normalizedPost, 'comments', comments),
                     '  </section>',
                     '</article>'
                 ].join('');
@@ -21097,7 +21311,89 @@ function renderProfileActivityList(kind) {
                 });
                 if (post.liked_by_me && !(feedAllLikes || []).some(function(l) { return String(l.post_id) === String(post.id) && l.user_name === currentUser; })) feedAllLikes.push({ post_id: post.id, user_name: currentUser });
                 window.__xtjPostDetailComments = comments || [];
+                window.__xtjPostDetailRecentComments = [];
+                var pageMeta = post.__relationPages || {};
+                window.__xtjPostDetailPaging = {};
+                ['likes','comments'].forEach(function(kind) {
+                    var meta = pageMeta[kind] || {};
+                    window.__xtjPostDetailPaging[kind] = { offset: 0, size: kind === 'likes' ? 50 : 30, has_more: !!meta.has_more, cursor: meta.next_cursor || null, loading: false };
+                });
                 body.innerHTML = statPostDetailMarkup(post, likes || [], comments || []);
+            };
+
+            function detailRelationsMarkup(post, kind, relationRows) {
+                var rows = relationRows || (kind === 'likes' ? window.__xtjPostDetailLikes || [] : window.__xtjPostDetailComments || []);
+                var state = (window.__xtjPostDetailPaging || {})[kind] || { offset: 0, size: kind === 'likes' ? 50 : 30 };
+                state.offset = Math.max(0, Math.min(state.offset, Math.max(0, rows.length - 1)));
+                var shown = rows.slice(state.offset, state.offset + state.size);
+                var total = Number(post[kind === 'likes' ? 'like_count' : 'comment_count']);
+                if (!Number.isFinite(total)) total = rows.length;
+                var html = '<div class="post-detail-panel-title">' + (kind === 'likes' ? '点赞用户' : '评论记录') + ' <span>' + total + '</span></div>';
+                if (kind === 'comments') {
+                    var shownIds = new Set(shown.map(function(row) { return String(row.id); }));
+                    var recent = (window.__xtjPostDetailRecentComments || []).filter(function(row) { return !shownIds.has(String(row.id)); }).slice(-5);
+                    if (recent.length) html += '<section class="post-detail-recent-comments" aria-label="新评论"><div class="post-detail-mini-copy">新评论</div>' + buildPostCommentsHtml(post, recent, { detail: true }) + '</section>';
+                    html += shown.length ? buildPostCommentsHtml(post, shown, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>';
+                }
+                else html += shown.length ? shown.map(function(l) {
+                    return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + window.safeParseDate(l.created_at).toLocaleString() + '</span></article>';
+                }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>';
+                if (rows.length || state.has_more) {
+                    html += '<nav class="post-detail-pagination" aria-label="' + (kind === 'likes' ? '点赞名单分页' : '评论分页') + '">' +
+                        '<span role="status">' + (shown.length ? (state.offset + 1) + '–' + (state.offset + shown.length) : '0') + ' / ' + total + '</span>' +
+                        '<button type="button" ' + (state.offset <= 0 || state.loading ? 'disabled ' : '') + 'onclick="__xtjPagePostDetail(\'' + kind + '\', -1)">上一页</button>' +
+                        '<button type="button" ' + (state.loading || !state.has_more && state.offset + state.size >= rows.length ? 'disabled ' : '') + 'onclick="__xtjPagePostDetail(\'' + kind + '\', 1)">' + (state.loading ? '加载中…' : '下一页') + '</button>' +
+                        (state.error ? '<span role="status">' + escapeHtml(state.error) + '</span>' : '') + '</nav>';
+                }
+                return html;
+            }
+            function comparePostDetailComments(a,b) {
+                function stamp(row) {
+                    var value=String(row.created_at||''),parsed=Date.parse(value);
+                    if(!Number.isFinite(parsed))return value;
+                    var fraction=(value.match(/\.(\d+)/)||[])[1]||'';
+                    return new Date(parsed).toISOString().slice(0,23)+fraction.padEnd(6,'0').slice(3,6)+'Z';
+                }
+                var order=stamp(a).localeCompare(stamp(b));if(order)return order;
+                var x=String(a.id),y=String(b.id);
+                return /^\d+$/.test(x)&&/^\d+$/.test(y)?x.length-y.length||x.localeCompare(y):x.localeCompare(y);
+            }
+            window.__xtjGotoPostComment = function(commentId) {
+                var post=window.__xtjPostDetailSnapshot,state=(window.__xtjPostDetailPaging||{}).comments;
+                if(!post||!state)return;
+                var index=(window.__xtjPostDetailComments||[]).findIndex(function(row){return String(row.id)===String(commentId);});
+                if(index<0)return;
+                state.offset=Math.floor(index/state.size)*state.size;window.__xtjPatchPostDetailInteractions(post.id);
+                requestAnimationFrame(function(){if(window.__xtjPostDetailSnapshot!==post)return;var nodes=document.querySelectorAll('#postDetailBody .comment-item[data-comment-id]');
+                    Array.from(nodes).some(function(node){if(node.getAttribute('data-comment-id')!==String(commentId))return false;node.scrollIntoView({block:'center'});node.tabIndex=-1;node.focus({preventScroll:true});return true;});});
+            };
+            window.__xtjPagePostDetail = async function(kind, direction) {
+                var post = window.__xtjPostDetailSnapshot, state = (window.__xtjPostDetailPaging || {})[kind];
+                if (!post || !state || state.loading) return;
+                var rows = kind === 'likes' ? window.__xtjPostDetailLikes : window.__xtjPostDetailComments;
+                var next = Math.max(0, state.offset + direction * state.size);
+                if (direction < 0 || next + state.size <= rows.length || !state.has_more && next < rows.length) { state.offset = next; state.error = ''; window.__xtjPatchPostDetailInteractions(post.id); return; }
+                if (!state.has_more || !state.cursor) return;
+                var owner = currentUser, epoch = _authStateEpoch, seq = _postDetailReqSeq;
+                var version = typeof feedInteractionMutationVersion === 'number' ? feedInteractionMutationVersion : 0;
+                state.loading = true; state.error = ''; window.__xtjPatchPostDetailInteractions(post.id);
+                function current() { return owner === currentUser && epoch === _authStateEpoch && seq === _postDetailReqSeq && window.__xtjPostDetailSnapshot === post; }
+                try {
+                    var response = await window.xtjOptionalAuthFetch('/api/post/detail/' + encodeURIComponent(post.id) + '/relations/' + kind + '?limit=' + state.size + '&cursor=' + encodeURIComponent(state.cursor), { timeoutMs: 15000, authOwner: owner, authEpoch: epoch });
+                    var body = await response.json();
+                    if (!current()) return;
+                    if (!response.ok || !body.ok) throw new Error(body.error || '加载失败，请重试');
+                    if (version !== feedInteractionMutationVersion) throw new Error('互动已更新，请再次加载');
+                    var seen = new Set(rows.map(function(row) { return String(row.id); }));
+                    (body.data || []).forEach(function(row) { if (!seen.has(String(row.id)) && !(kind === 'comments' && deletedPostCommentIds.has(String(row.id)))) { rows.push(row); seen.add(String(row.id)); } });
+                    if (kind === 'comments') {
+                        rows.sort(comparePostDetailComments);
+                        window.__xtjPostDetailRecentComments = (window.__xtjPostDetailRecentComments || []).filter(function(row) { return !seen.has(String(row.id)); });
+                    }
+                    state.has_more = !!body.has_more; state.cursor = body.next_cursor || null;
+                    state.offset = Math.min(next, Math.max(0, rows.length - 1));
+                } catch(error) { if (current()) state.error = error.message || '加载失败，请重试'; }
+                finally { if (current()) { state.loading = false; window.__xtjPatchPostDetailInteractions(post.id); } }
             };
 
             window.__xtjPatchPostDetailInteractions = function(postId) {
@@ -21107,10 +21403,11 @@ function renderProfileActivityList(kind) {
                 if (!body) return;
                 var comments = window.__xtjPostDetailComments || [], likes = window.__xtjPostDetailLikes || [];
                 var panel = body.querySelector('.post-detail-comments-panel');
-                if (panel) panel.innerHTML = '<div class="post-detail-panel-title">评论记录 <span>' + comments.length + '</span></div>' +
-                    (comments.length ? buildPostCommentsHtml(post, comments, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>');
+                if (panel) panel.innerHTML = detailRelationsMarkup(post, 'comments');
+                var likesPanel = body.querySelector('.post-detail-likes-panel');
+                if (likesPanel) likesPanel.innerHTML = detailRelationsMarkup(post, 'likes');
                 var stats = body.querySelector('.post-detail-stats');
-                if (stats) stats.innerHTML = buildPostStatsLine(post, Number.isFinite(Number(post.like_count)) ? Number(post.like_count) : likes.length, comments.length);
+                if (stats) stats.innerHTML = buildPostStatsLine(post, Number.isFinite(Number(post.like_count)) ? Number(post.like_count) : likes.length, Number.isFinite(Number(post.comment_count)) ? Number(post.comment_count) : comments.length);
             };
             window.__xtjMergePostDetailComments = function(postId, incoming) {
                 var post = window.__xtjPostDetailSnapshot;
@@ -21118,11 +21415,24 @@ function renderProfileActivityList(kind) {
                 var list = window.__xtjPostDetailComments || [], map = new Map(list.map(function(c) { return [String(c.id), c]; })), changed = false;
                 (incoming || []).forEach(function(row) {
                     if (String(row.post_id) !== String(postId)) return;
+                    if (deletedPostCommentIds.has(String(row.id)) || deletedPostCommentIds.has(String(row.parent_comment_id))) return;
+                    if (!map.has(String(row.id)) && window.__xtjPostDetailPaging && window.__xtjPostDetailPaging.comments && window.__xtjPostDetailPaging.comments.has_more) {
+                        var recent=window.__xtjPostDetailRecentComments||(window.__xtjPostDetailRecentComments=[]);
+                        var index=recent.findIndex(function(item){return String(item.id)===String(row.id);});
+                        // A profile snapshot contains historical comments too;
+                        // the paginated endpoint owns those unloaded records.
+                        if(index<0 && !row.generated_by_ai)return;
+                        if(index<0)recent.push(row);else recent[index]=row;
+                        recent.sort(comparePostDetailComments);
+                        changed=true;return;
+                    }
                     var old = map.get(String(row.id));
                     if (!old || old.content !== row.content || old.parent_comment_id !== row.parent_comment_id || old.generated_by_ai !== row.generated_by_ai) { map.set(String(row.id), row); changed = true; }
                 });
                 if (!changed) return;
-                window.__xtjPostDetailComments = Array.from(map.values()).sort(function(a,b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id).localeCompare(String(b.id)); });
+                window.__xtjPostDetailComments = Array.from(map.values()).sort(comparePostDetailComments);
+                if (!(window.__xtjPostDetailPaging && window.__xtjPostDetailPaging.comments && window.__xtjPostDetailPaging.comments.has_more) && Number.isFinite(post.comment_count)) post.comment_count = window.__xtjPostDetailComments.length;
+                if (window.__xtjScheduleEngagementRefresh) window.__xtjScheduleEngagementRefresh(postId);
                 window.__xtjPatchPostDetailInteractions(postId);
             };
             window.__xtjApplyPostDetailComment = function(eventType, row) {
@@ -21130,13 +21440,27 @@ function renderProfileActivityList(kind) {
                 if (!post || !row || row.id == null || (row.post_id != null && String(row.post_id) !== String(post.id))) return;
                 var list = window.__xtjPostDetailComments || [];
                 if (eventType !== 'DELETE' && row.post_id == null) return;
-                if (eventType === 'DELETE') list = list.filter(function(c) { return String(c.id) !== String(row.id); });
-                else {
-                    var index = list.findIndex(function(c) { return String(c.id) === String(row.id); });
-                    if (index < 0) list.push(row); else list[index] = row;
-                    list.sort(function(a,b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id).localeCompare(String(b.id)); });
+                var beforeCount = list.length;
+                if (eventType === 'DELETE') {
+                    var removed = new Set((row.deleted_comment_ids || [row.id]).map(String));
+                    var more = true;
+                    while (more) { more = false; list.forEach(function(c) { if (removed.has(String(c.parent_comment_id)) && !removed.has(String(c.id))) { removed.add(String(c.id)); more = true; } }); }
+                    list = list.filter(function(c) { return !removed.has(String(c.id)); });
+                    window.__xtjPostDetailRecentComments = (window.__xtjPostDetailRecentComments || []).filter(function(c) { return !removed.has(String(c.id)); });
                 }
+                else {
+                    if (deletedPostCommentIds.has(String(row.id)) || deletedPostCommentIds.has(String(row.parent_comment_id))) return;
+                    var index = list.findIndex(function(c) { return String(c.id) === String(row.id); });
+                    if (index < 0 && window.__xtjPostDetailPaging && window.__xtjPostDetailPaging.comments && window.__xtjPostDetailPaging.comments.has_more) {
+                        var recent=window.__xtjPostDetailRecentComments||(window.__xtjPostDetailRecentComments=[]);
+                        var recentIndex=recent.findIndex(function(c){return String(c.id)===String(row.id);});if(recentIndex<0)recent.push(row);else recent[recentIndex]=row;recent.sort(comparePostDetailComments);
+                    } else if (index < 0) list.push(row); else list[index] = row;
+                    list.sort(comparePostDetailComments);
+                }
+                if (Number.isFinite(Number(row.comment_count))) post.comment_count = Number(row.comment_count);
+                else if (Number.isFinite(post.comment_count)) post.comment_count = Math.max(0, post.comment_count + list.length - beforeCount);
                 window.__xtjPostDetailComments = list;
+                if (window.__xtjScheduleEngagementRefresh) window.__xtjScheduleEngagementRefresh(post.id);
                 window.__xtjPatchPostDetailInteractions(post.id);
             };
 
@@ -21223,16 +21547,19 @@ function renderProfileActivityList(kind) {
                 window.__xtjPostDetailSnapshot = null;
                 window.__xtjPostDetailLikes = [];
                 window.__xtjPostDetailComments = [];
+                window.__xtjPostDetailRecentComments = [];
+                window.__xtjPostDetailPaging = {};
                 var modal = document.getElementById('postDetailModal');
                 var body = document.getElementById('postDetailBody');
                 if (modal) modal.classList.remove('active');
                 if (body) body.textContent = '';
             };
 
-            window.openPostDetail = async function(postId) {
+            window.openPostDetail = async function(postId, retriedInteractions) {
                 var _seq = ++_postDetailReqSeq;
                 var owner = currentUser;
                 var epoch = _authStateEpoch;
+                var relationVersion = typeof feedInteractionMutationVersion === 'number' ? feedInteractionMutationVersion : 0;
                 window.__xtjPostDetailCurrentId = String(postId || '');
                 var title = document.getElementById('postDetailTitle');
                 var body = document.getElementById('postDetailBody');
@@ -21285,6 +21612,13 @@ function renderProfileActivityList(kind) {
                     }
                     // S7 修复：响应落地前校验是否已被新请求替代
                     if (!isCurrentDetail()) return;
+                    if (relationVersion !== (typeof feedInteractionMutationVersion === 'number' ? feedInteractionMutationVersion : 0)) {
+                        var pendingLike = typeof likeOperations === 'object' && likeOperations[String(postId)];
+                        if (pendingLike && pendingLike.promise) await pendingLike.promise;
+                        if (!isCurrentDetail()) return;
+                        if (!retriedInteractions) return window.openPostDetail(postId, true);
+                        throw new Error('互动已更新，请重新加载');
+                    }
                     var post = apiData.post;
                     if (!post || typeof post !== 'object') {
                         if (body) body.innerHTML = '<div class="stat-empty">该帖子不存在、已删除或不可查看。</div>';
@@ -21292,6 +21626,7 @@ function renderProfileActivityList(kind) {
                     }
                     var likes = apiData.likes || [];
                     var comments = apiData.comments || [];
+                    post.__relationPages = { comments: apiData.comments_page, likes: apiData.likes_page };
                     // normalize to match renderPostDetail expectations；避免真实 views 被清零
                     post.views = (post.view_count != null ? post.view_count : (post.views != null ? post.views : 0));
                     if (!post.user_name || !post.created_at) {
@@ -21323,6 +21658,88 @@ function renderProfileActivityList(kind) {
  * Lines from original core.js: 13871-14624
  * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
  */
+        (function installFocusSurfaceLifecycle() {
+            if (typeof MutationObserver !== 'function') return;
+            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay';
+            var surfaces = new Map(), background = new Map(), sequence = 0, top = null, syncing = false;
+            function visible(root) {
+                if (root.id === 'ppInfoModal') return root.getAttribute('aria-hidden') === 'false' && root.style.display !== 'none';
+                return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
+            }
+            function controls(root) {
+                return Array.from(root.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(function(node) {
+                    return !node.disabled && node.tabIndex >= 0 && !node.closest('[inert], [hidden], [aria-hidden="true"]') && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden';
+                });
+            }
+            function focusFirst(root) {
+                var first = controls(root)[0];
+                if (!first) { root.tabIndex = -1; first = root; }
+                first.focus({ preventScroll: true });
+            }
+            function register() {
+                document.querySelectorAll(selector).forEach(function(root) {
+                    if (surfaces.has(root)) return;
+                    surfaces.set(root, { open: false, order: 0, origin: null });
+                    new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: root.id === 'ppInfoModal' ? ['class','hidden','aria-hidden'] : ['class','hidden'] });
+                });
+            }
+            function sync() {
+                if (syncing) return; syncing = true;
+                try {
+                    background.forEach(function(wasInert,node) { node.inert = wasInert; }); background.clear();
+                    var research = document.body.classList.contains('xtj-research-open'), ai = document.body.classList.contains('xtj-ai-page-open');
+                    document.querySelectorAll('.dock-panel').forEach(function(panel) {
+                        var open = panel.classList.contains('active') && !panel.classList.contains('hidden') && (panel.id === 'panelDeepThink' || !research && !ai);
+                        panel.inert = !open; panel.setAttribute('aria-hidden', String(!open));
+                    });
+                    var oldTop = top, active = [];
+                    surfaces.forEach(function(state,root) {
+                        if (!root.isConnected) { surfaces.delete(root); return; }
+                        var open = visible(root);
+                        if (open && !state.open) { state.order = ++sequence; state.origin = document.activeElement; }
+                        state.open = open; root.inert = !open;
+                        if (root.getAttribute('aria-hidden') !== String(!open)) root.setAttribute('aria-hidden', String(!open));
+                        if (open) active.push({ root: root, state: state });
+                    });
+                    active.sort(function(a,b) { return a.state.order - b.state.order; });
+                    top = active.length ? active[active.length - 1].root : null;
+                    if (top) {
+                        var branch = top;
+                        while (branch && branch !== document.body) {
+                            var parent = branch.parentElement; if (!parent) break;
+                            Array.from(parent.children).forEach(function(sibling) {
+                                if (sibling === branch) return;
+                                if (sibling.matches('.toast,[role="status"],[role="alert"]')) return;
+                                if (!background.has(sibling)) background.set(sibling, sibling.inert);
+                                sibling.inert = true;
+                            });
+                            branch = parent;
+                        }
+                        if (oldTop !== top && !top.contains(document.activeElement)) focusFirst(top);
+                    } else if (oldTop && oldTop.contains(document.activeElement)) {
+                        var origin = surfaces.get(oldTop) && surfaces.get(oldTop).origin;
+                        if (origin && origin.isConnected && !origin.closest('[inert]')) origin.focus({ preventScroll: true });
+                    }
+                } finally { syncing = false; }
+            }
+            register();
+            document.querySelectorAll('.dock-panel').forEach(function(panel) { new MutationObserver(sync).observe(panel,{ attributes: true, attributeFilter: ['class'] }); });
+            new MutationObserver(sync).observe(document.body,{ attributes: true, attributeFilter: ['class'] });
+            new MutationObserver(function() { register(); sync(); }).observe(document.body,{ childList: true });
+            window.__xtjSyncFocusSurfaces = sync;
+            window.__xtjGetFocusSurface = function() { return top; };
+            document.addEventListener('keydown',function(event) {
+                if (event.key !== 'Tab' || !top) return;
+                var nodes = controls(top), first = nodes[0], last = nodes[nodes.length - 1], focused = document.activeElement;
+                if (!nodes.length || !top.contains(focused) || event.shiftKey && focused === first || !event.shiftKey && focused === last) {
+                    event.preventDefault(); event.stopImmediatePropagation();
+                    if (!nodes.length) focusFirst(top); else (event.shiftKey ? last : first).focus({ preventScroll: true });
+                }
+            },true);
+            document.addEventListener('focusin',function(event) { if (top && !top.contains(event.target) && !syncing) focusFirst(top); });
+            sync();
+        })();
+
         (function installEmergencyActionRescue() {
             if (window.__xtjEmergencyActionRescueV1) return;
             window.__xtjEmergencyActionRescueV1 = true;

@@ -42,7 +42,7 @@ for(const [name,viewport] of [['390px',{width:390,height:844}],['desktop',{width
    await page.waitForTimeout(500);assert.equal(await page.locator('#ppDeleteBtn').getAttribute('aria-label'),'删除帖子');
    await page.evaluate(()=>closePhotoPreview());await page.waitForFunction(()=>!document.getElementById('photoPreviewOverlay').classList.contains('active'));
    const first=f.posts[0],firstCard=page.locator(`#feed .post[data-post-id="${first.id}"]`);await firstCard.scrollIntoViewIfNeeded();
-   assert.equal(await firstCard.locator('[data-comment-id]').count(),3);await firstCard.getByRole('button',{name:'查看全部 6 条评论'}).click();await page.waitForFunction(()=>document.querySelectorAll('#feed .post:first-child [data-comment-id]').length===6);assert.equal(await page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);await page.evaluate(id=>openPostDetail(id),first.id);await page.waitForFunction(()=>document.querySelectorAll('#postDetailBody [data-comment-id]').length===6);
+   assert.equal(await firstCard.locator('[data-comment-id]').count(),3);await firstCard.getByRole('button',{name:'查看全部 6 条评论'}).click();await page.waitForFunction(()=>document.querySelectorAll('#postDetailBody [data-comment-id]').length===6);assert.equal(await page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),true);assert.equal(await firstCard.locator('[data-comment-id]').count(),3);await page.waitForFunction(()=>document.querySelectorAll('#postDetailBody [data-comment-id]').length===6);
    await page.locator('#postDetailBody .like-btn').click();await page.waitForFunction(()=>document.querySelector('#postDetailBody .like-btn').getAttribute('aria-busy')!=='true');assert.equal(await page.locator('#postDetailBody .like-btn').getAttribute('aria-pressed'),'true');
    await page.locator('#postDetailBody').getByRole('button',{name:'评论',exact:true}).click();await page.locator('#postDetailBody .inline-comment-inp').fill('详情发表评论');await page.locator('#postDetailBody .inline-comment-inp').press('Enter');await page.waitForFunction(()=>document.querySelector('#postDetailBody .comments')?.textContent.includes('详情发表评论'));
    assert.equal(await page.locator('#postDetailBody [data-comment-id]').count(),7);
@@ -153,7 +153,7 @@ test('tablet keyboard preserves desktop media rules until the keyboard closes; p
   assert.equal(await page.locator('#dockBar').isVisible(),false);
   await page.setViewportSize({width:1024,height:768});assert.equal(await page.locator('html').evaluate(n=>n.classList.contains('xtj-tablet-layout')),true);
   assert.equal(await page.locator('link[href*="desktop.min.css"]').getAttribute('media'),'(min-width:768px)');
-  const gestures=await page.evaluate(()=>{function probe(el){const event=new Event('gesturestart',{bubbles:true,cancelable:true});el.dispatchEvent(event);return event.defaultPrevented;}const blocked=probe(document.body);const viewer=document.getElementById('photoPreviewOverlay');viewer.classList.add('active');const own=probe(viewer);viewer.classList.remove('active');return{blocked,own};});assert.deepEqual(gestures,{blocked:true,own:false});
+  const gestures=await page.evaluate(()=>{function probe(el){const event=new Event('gesturestart',{bubbles:true,cancelable:true});el.dispatchEvent(event);return event.defaultPrevented;}const blocked=probe(document.body);const viewer=document.getElementById('photoPreviewOverlay');viewer.classList.add('active');const own=probe(viewer);viewer.classList.remove('active');return{blocked,own};});assert.deepEqual(gestures,{blocked:false,own:false});
  }finally{await f.close();}
 });
 
@@ -229,11 +229,11 @@ test('iOS keyboard uses one viewport owner, hides rather than lifts the Dock and
  }finally{await f.close();}
 });
 
-for(const theme of ['light','dark'])test(theme+': Feed comments use compact transparent rows and retain inline expansion',{timeout:30000},async()=>{
+for(const theme of ['light','dark'])test(theme+': Feed comments stay compact and open the paginated detail',{timeout:30000},async()=>{
  const f=await postBrowserFixture({counts:[3],theme});try{
   const row=f.page.locator('#feed .comment-item').first();const style=await row.evaluate(el=>{const s=getComputedStyle(el);return{background:s.backgroundColor,shadow:s.boxShadow,blur:s.backdropFilter,height:el.offsetHeight,padding:s.paddingTop};});
   assert.equal(style.background,'rgba(0, 0, 0, 0)');assert.equal(style.shadow,'none');assert.equal(style.blur,'none');assert.ok(style.height<=40,JSON.stringify(style));
-  await f.page.locator('#feed .post-all-comments').click();await f.page.waitForFunction(()=>document.querySelectorAll('#feed [data-comment-id]').length===6);assert.equal(await f.page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);
+  await f.page.locator('#feed .post-all-comments').click();await f.page.waitForFunction(()=>document.querySelectorAll('#postDetailBody [data-comment-id]').length===6);assert.equal(await f.page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),true);assert.equal(await f.page.locator('#feed [data-comment-id]').count(),3);
  }finally{await f.close();}
 });
 

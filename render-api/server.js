@@ -5,6 +5,8 @@ const express = require('express');
 const { toolFeedback, runRequiredSearch } = require('./ai-tool-feedback');
 const { saveCustomChatTurn, saveInterruptedChatTurn, saveDeepThinkChatTurn } = require('./ai-chat-save');
 const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
+const { createComment, readRelationPage, readFeedEngagement } = require('./post-interactions');
+const { readPhotoWallPage } = require('./photo-wall-page');
 
 const cors = require('cors');
 const crypto = require('crypto');
@@ -4977,14 +4979,26 @@ function validateSearchResult(item) {
 
 // ===================== 帖子详情 API =====================
 async function readPostDetailComments(db, postId) {
-  var data = [], count = null;
-  for (var offset = 0;; offset += 500) {
-    var result = await db.from('comments').select('id,post_id,user_name,content,parent_comment_id,generated_by_ai,created_at', { count: 'exact' }).eq('post_id', postId).order('created_at', { ascending: true }).order('id').range(offset, offset + 499);
-    if (result.error) return result;
-    count = result.count; data = data.concat(result.data || []);
-    if ((result.data || []).length < 500) return { data: data, count: count };
-  }
+  return readRelationPage(db, postId, 'comments');
 }
+
+app.get('/api/post/detail/:id/relations/:kind', optionalAuth, rateLimit(60000,120), async (req,res) => {
+  try {
+    var id=normalizePostId(req.params.id),kind=req.params.kind;
+    if(!id || !['likes','comments','engagement'].includes(kind))return res.status(400).json({ok:false,error:'分页参数无效'});
+    var lookup=await supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').eq('id',id).maybeSingle();
+    if(lookup.error)return res.status(503).json({ok:false,error:'互动暂不可用，请重试',retryable:true});
+    if(!isNormalPost(lookup.data)||(lookup.data.visibility==='private'&&lookup.data.user_name!==(req.userName||'')))return res.status(404).json({ok:false,error:'帖子不存在或不可查看'});
+    if(kind==='engagement'){
+      var engagement=await readFeedEngagement(supabase,[lookup.data],req.userName);
+      var stats=engagement.posts[0];
+      return res.json({ok:true,stats:{id:stats.id,like_count:stats.like_count,comment_count:stats.comment_count,liked_by_me:stats.liked_by_me}});
+    }
+    var page=await readRelationPage(supabase,id,kind,{cursor:req.query.cursor,limit:req.query.limit});
+    if(page.error)return res.status(503).json({ok:false,error:'互动暂不可用，请重试',retryable:true});
+    return res.json({ok:true,data:page.data,has_more:page.has_more,next_cursor:page.next_cursor});
+  } catch(error) { return res.status(error.message==='invalid_cursor'?400:503).json({ok:false,error:error.message==='invalid_cursor'?'分页参数无效':'互动暂不可用，请重试',retryable:error.message!=='invalid_cursor'}); }
+});
 
 app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
   try {
@@ -5006,7 +5020,7 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
     }
     try { post = (await loadPostAttachments(supabase, [post]))[0]; }
     catch (error) { return res.status(503).json({ ok: false, error: error.code || 'attachments_unavailable', message: '帖子图片加载失败，请重试。', retryable: true }); }
-    var likesRes = await supabase.from('likes').select('id,user_name,created_at', { count: 'exact' }).eq('post_id', postId).order('created_at', { ascending: false }).limit(50);
+    var likesRes = await readRelationPage(supabase, postId, 'likes', { limit: 50 });
     var commentsRes = await readPostDetailComments(supabase, postId);
     var myLikeRes = req.userName ? await supabase.from('likes').select('id').eq('post_id', postId).eq('user_name', req.userName).limit(1) : { data: [] };
     if (likesRes.error || commentsRes.error || myLikeRes.error) {
@@ -5037,7 +5051,9 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
         ip_lookup_started_at: post.ip_lookup_started_at || null
       },
       likes: (likesRes.data || []).map(function(l) { return { id: l.id, user_name: l.user_name, created_at: l.created_at }; }),
-      comments: (commentsRes.data || []).map(function(c) { return { id: c.id, post_id: post.id, user_name: c.user_name, content: c.content, parent_comment_id: c.parent_comment_id, generated_by_ai: c.generated_by_ai, created_at: c.created_at }; })
+      comments: (commentsRes.data || []).map(function(c) { return { id: c.id, post_id: post.id, user_name: c.user_name, content: c.content, parent_comment_id: c.parent_comment_id, generated_by_ai: c.generated_by_ai, created_at: c.created_at }; }),
+      comments_page: { has_more: commentsRes.has_more, next_cursor: commentsRes.next_cursor },
+      likes_page: { has_more: likesRes.has_more, next_cursor: likesRes.next_cursor }
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: 'internal_error', message: '服务器内部错误' });
@@ -14322,7 +14338,7 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
     if (!content) return res.status(400).json({ error: 'Comment cannot be empty', code: 'empty_comment' });
     if (content.length > 5000) return res.status(400).json({ error: 'Comment is too long', code: 'comment_too_long' });
 
-    var postResult = await supabase.from('posts').select('id, user_name, visibility, media_type').eq('id', postId).maybeSingle();
+    var postResult = await supabase.from('posts').select('id, user_name, visibility, media_type, is_deleted').eq('id', postId).maybeSingle();
     if (postResult.error) return res.status(500).json({ error: sanitizeError(postResult.error), code: 'post_lookup_failed' });
     if (!postResult.data) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
     // 只允许对普通可见帖子评论：私密帖仅作者本人可评论，系统内部 marker（DM/登录事件等）不可评论
@@ -14332,13 +14348,10 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
       return res.status(403).json({ error: '无法评论私密帖子', code: 'forbidden' });
     }
 
-    var inserted = await supabase.from('comments').insert([{
-      post_id: postId,
-      user_name: req.userName,
-      content: content,
-      actor_key: 'comment_' + crypto.randomUUID()
-    }]).select('id, post_id, user_name, content, actor_key, created_at').single();
-    if (inserted.error) return res.status(500).json({ error: sanitizeError(inserted.error), code: 'comment_failed' });
+    var inserted = await createComment(supabase, postId, req.userName, content, req.body && req.body.client_request_id);
+    // Replaying an acknowledged/uncertain submit returns the same comment and
+    // never reserves another AI quota or schedules a duplicate reply.
+    if (!inserted.created) return res.json({ ok: true, data: inserted.data, comment_count: inserted.comment_count, replayed: true });
 
     // 小猫 AI 自动回复触发
     // Use the same complete trigger validator as worker/reconciliation paths;
@@ -14354,6 +14367,7 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
         return res.status(201).json({
           ok: true,
           data: inserted.data,
+          comment_count: inserted.comment_count,
           cat_ai: { triggered: false, skipped: 'author_restricted', source_comment_id: String(inserted.data.id) }
         });
       }
@@ -14375,6 +14389,7 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
         return res.status(201).json({
           ok: true,
           data: inserted.data,
+          comment_count: inserted.comment_count,
           cat_ai: { triggered: true, job_created: !!job, source_comment_id: String(inserted.data.id) }
         });
       } else {
@@ -14397,16 +14412,17 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
         return res.status(201).json({
           ok: true,
           data: inserted.data,
+          comment_count: inserted.comment_count,
           cat_ai: { triggered: true, job_created: false, rate_limited: true, reason: rateLimit.reason, source_comment_id: String(inserted.data.id) }
         });
       }
       // 限流时评论仍正常发布，不报错
     }
 
-    return res.status(201).json({ ok: true, data: inserted.data });
+    return res.status(201).json({ ok: true, data: inserted.data, comment_count: inserted.comment_count });
   } catch (e) {
     console.error('[API] comment create:', e && e.message ? e.message : e);
-    return res.status(500).json({ error: 'Failed to publish comment', code: 'comment_failed' });
+    return res.status(e.status || 500).json({ error: e.status ? e.message : 'Failed to publish comment', code: e.code || 'comment_failed' });
   }
 });
 
@@ -14420,11 +14436,10 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
     if (existing.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
       return res.status(403).json({ error: 'Not allowed to delete this comment', code: 'forbidden' });
     }
-    var deleted = await supabase.from('comments').delete().eq('id', commentId).eq('user_name', existing.data.user_name).select('id');
-    if (deleted.error) return res.status(500).json({ error: sanitizeError(deleted.error), code: 'comment_delete_failed' });
-    if (!(deleted.data || []).some(function(row) { return String(row && row.id) === String(commentId); })) {
-      return res.status(500).json({ error: 'Comment delete was not confirmed', code: 'comment_delete_not_confirmed' });
-    }
+    if (!/^\d{1,19}$/.test(commentId)) return res.status(400).json({ error: 'Invalid comment id', code: 'invalid_comment_id' });
+    var deleted = await supabase.rpc('xtj_delete_comment', { p_comment_id: commentId, p_owner: req.userName });
+    if (deleted.error || !deleted.data) return res.status(503).json({ error: '评论删除暂未确认，请重试', code: 'comment_delete_failed' });
+    if (!deleted.data.ok) return res.status(403).json({ error: 'Not allowed to delete this comment', code: 'forbidden' });
     // Phase 3-P0-7: AI 回复被删除后 job 不得保持假 completed。
     // 同时处理两种情况：
     //   1. 删除的是 AI 回复本身 → 标记对应 job 为 blocked (reply deleted by user)
@@ -14448,7 +14463,7 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
       // Job cleanup is best-effort — comment delete already succeeded.
       console.warn('[CAT_AI] job cleanup after comment delete failed:', jobCleanupErr && jobCleanupErr.message);
     }
-    return res.json({ ok: true, deleted_comment_id: commentId });
+    return res.json(Object.assign({ ok: true, deleted_comment_id: commentId }, deleted.data));
   } catch (e) {
     console.error('[API] comment delete:', e && e.message ? e.message : e);
     return res.status(500).json({ error: 'Failed to delete comment', code: 'comment_delete_failed' });
@@ -14471,7 +14486,7 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
 
     // 与 comment 对齐：校验可见性 + 普通帖；私密帖/系统 marker 统一 404，避免存在性侧信道
     var { data: post, error: postError } = await supabase.from('posts')
-      .select('id, user_name, visibility, media_type')
+      .select('id, user_name, visibility, media_type, is_deleted')
       .eq('id', postId)
       .maybeSingle();
     if (postError) return res.status(500).json({ error: sanitizeError(postError), code: 'post_lookup_failed' });
@@ -14481,31 +14496,10 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
       return res.status(404).json({ error: 'Post not found', code: 'not_found' });
     }
 
-    if (liked) {
-      var existingLike = await supabase.from('likes').select('id')
-        .eq('post_id', postId).eq('user_name', req.userName).limit(1).maybeSingle();
-      if (existingLike.error) return res.status(500).json({ error: sanitizeError(existingLike.error), code: 'like_failed' });
-      if (!existingLike.data) {
-        var { error: likeError } = await supabase.from('likes').insert([{
-          post_id: postId,
-          user_name: req.userName,
-          actor_key: 'like_' + postId + '_' + req.userName
-        }]);
-        // A concurrent request may win the unique constraint. That already is
-        // the requested final state and is therefore a successful operation.
-        if (likeError && String(likeError.code || '') !== '23505') {
-          return res.status(500).json({ error: sanitizeError(likeError), code: 'like_failed' });
-        }
-      }
-    } else {
-      var { error: unlikeError } = await supabase.from('likes').delete().eq('post_id', postId).eq('user_name', req.userName);
-      if (unlikeError) return res.status(500).json({ error: sanitizeError(unlikeError), code: 'unlike_failed' });
-    }
-
-    var { count: likeCount, error: countError } = await supabase.from('likes')
-      .select('id', { count: 'exact', head: true }).eq('post_id', postId);
-    if (countError) return res.status(500).json({ error: sanitizeError(countError), code: 'like_count_failed' });
-    return res.json({ ok: true, post_id: postId, liked: liked, like_count: Number(likeCount) || 0 });
+    var likeWrite = await supabase.rpc('xtj_set_post_like', { p_post_id: postId, p_owner: req.userName, p_liked: liked });
+    if (likeWrite.error || !likeWrite.data) return res.status(503).json({ error: '点赞暂未确认，请重试', code: 'like_failed' });
+    if (!likeWrite.data.ok) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
+    return res.json(likeWrite.data);
   } catch (e) {
     console.error('[API] post like:', e && e.message ? e.message : e);
     return res.status(500).json({ error: 'Like operation failed', code: 'like_failed' });
@@ -14774,27 +14768,14 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
 
     try { posts = await loadPostAttachments(supabase, posts); }
     catch (error) { return res.status(503).json({ error: '帖子图片加载失败，请重试', code: error.code || 'attachments_unavailable', retryable: true }); }
-    // 获取相关评论和点赞
-    var postIds = posts.map(function(p) { return p.id; });
-    var comments = [];
-    var likes = [];
-    if (postIds.length) {
-      var [commRes, likeRes] = await Promise.all([
-        // ★ 2026-09-26（审计 P2-6）：显式列白名单，替代 select('*')。
-        //   /api/feed 是 optionalAuth，匿名也会拿到全列（含 actor_key 与未来新增列）。
-        supabase.from('comments').select('id, post_id, user_name, content, parent_comment_id, generated_by_ai, created_at').in('post_id', postIds).order('created_at'),
-        supabase.from('likes').select('id, post_id, user_name, created_at').in('post_id', postIds)
-      ]);
-      // ★ 2026-09-26（审计 P3-9）：子查询失败不再静默吞掉（那会让页面显示
-      //   "0 评论 0 赞"的假象且用户无法重试），改为 503 + retryable，与本文件
-      //   其它位置的 fail-closed 口径一致。
-      if (commRes.error || likeRes.error) {
-        console.error('[API] feed relations failed:',
-          (commRes.error && commRes.error.message) || '-', '/', (likeRes.error && likeRes.error.message) || '-');
-        return res.status(503).json({ error: '互动数据加载失败，请重试', code: 'feed_relations_failed', retryable: true });
-      }
-      comments = commRes.data || [];
-      likes = likeRes.data || [];
+    // Counts and the user's like are independent of a bounded comment preview.
+    var comments = [], likes = [];
+    try {
+      var engagement = await readFeedEngagement(supabase, posts, req.userName);
+      posts = engagement.posts; comments = engagement.comments; likes = engagement.likes;
+    } catch (error) {
+      console.error('[API] feed relations failed:', error.message);
+      return res.status(503).json({ error: '互动数据加载失败，请重试', code: 'feed_relations_failed', retryable: true });
     }
 
     return res.json({
@@ -14854,25 +14835,13 @@ app.get('/api/photos/wall/:userName', authenticateUser, rateLimit(60000, 120), a
 // 可见性：仅返回公开照片，私密照片一律不出现。
 app.get('/api/photos/public', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
-    const pageRaw = parseInt(req.query.page, 10);
-    const limitRaw = parseInt(req.query.limit, 10);
-    const page = (!isNaN(pageRaw) && pageRaw >= 0) ? pageRaw : 0;
-    const limit = (!isNaN(limitRaw) && limitRaw > 0) ? Math.min(limitRaw, 100) : 20;
-    const from = Math.max(page, 0) * limit;
-    const to = from + limit - 1;
-    const { data, error } = await supabase.from('posts')
-      .select('id, user_name, media_url, content, created_at, views')
-      .eq('media_type', '__photo_wall__')
-      .eq('visibility', 'public')
-      .or('is_deleted.is.null,is_deleted.eq.false')
-      // ★ 2026-09-27（后端补完 · 照片墙稳定排序）：page/limit offset 分页补 id 兜底排序，
-      //   保证同一时间戳的照片在多页之间顺序恒定，不产生重复/丢失。
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .range(from, to);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
-    return res.json({ ok: true, data: (data || []).map(function(row) { return photoPayload(row); }) });
-  } catch (e) { console.error('[API] public photos:', e.message); return res.status(500).json({ error: '查询失败' }); }
+    const page = await readPhotoWallPage(supabase, req.query);
+    return res.json({ ok: true, data: page.data.map(row => photoPayload(row)), sort: page.sort,
+      has_more: page.has_more, next_cursor: page.next_cursor });
+  } catch (error) {
+    console.error('[API] public photos:', error.message);
+    return res.status(error.status || 503).json({ ok: false, error: error.message || '照片墙暂不可用，请重试', retryable: error.status !== 400 });
+  }
 });
 
 // ===================== 头像接口（修复 RLS 权限问题） ======================
@@ -15305,6 +15274,16 @@ app.get('/api/dm/list', authenticateUser, rateLimit(60000, 120), async (req, res
 });
 
 // GET /api/dm/messages - 获取与某个用户的完整对话（分页）
+app.post('/api/dm/messages/loaded', authenticateUser, rateLimit(60000,120), async(req,res)=>{
+  try {
+    const peer=String(req.body&&req.body.target||'').trim(),ids=req.body&&req.body.ids;
+    if(!peer||peer.length>MAX_USERNAME_LEN||!Array.isArray(ids)||ids.length>500||ids.some(id=>!normalizePostId(id)))return res.status(400).json({ok:false,error:'消息同步参数无效'});
+    const result=await supabase.rpc('xtj_sync_dm_window',{p_actor:req.userName,p_peer:peer,p_ids:ids});
+    if(result.error||!Array.isArray(result.data))return res.status(503).json({ok:false,error:'历史记录暂不可用，请重试',retryable:true});
+    await chatFeatures.transcription.restore(result.data);
+    return res.json({ok:true,data:result.data});
+  }catch(_){return res.status(503).json({ok:false,error:'历史记录暂不可用，请重试',retryable:true});}
+});
 app.get('/api/dm/messages', authenticateUser, rateLimit(60000, 120), async (req, res) => {
   try {
     // ★ 2026-09-26（审计 P3-7）：target 无长度上限，可传超长串进 .eq('media_url', ...)。
@@ -17035,6 +17014,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
 
     // 清除账号私有 AI 工具数据和媒体注册行；不碰审计/邀请/会员/额度表。
     var accountCleanupQueries = [
+      { key: 'comment_requests', query: supabase.rpc('xtj_forget_comment_requests', { p_owner: userName }) },
       { key: 'post_media_uploads', query: deleteQueuedAccountPostMediaUploads(supabase, userName, registeredPostPaths) },
       { key: 'ai_search_credit_claims', query: supabase.from('ai_search_credit_claims').delete().eq('user_name', String(userName).trim().toLowerCase()) },
       { key: 'ai_search_results', query: supabase.from('ai_search_results').delete().eq('owner_name', userName) },
@@ -17047,7 +17027,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       if (!accountCleanupResult || accountCleanupResult.error) {
         return res.status(500).json({ error: '删除部分完成：清理 ' + accountCleanupItem.key + ' 失败', code: 'delete_user_partial', partial: partialDeleted });
       }
-      partialDeleted[accountCleanupItem.key] = accountCleanupResult.count || 0;
+      partialDeleted[accountCleanupItem.key] = accountCleanupResult.count || (accountCleanupItem.key === 'comment_requests' ? Number(accountCleanupResult.data) || 0 : 0);
     }
 
     // 清理所有已发现的 DM 媒体注册记录，包括对方发送到该用户 DM 的媒体。

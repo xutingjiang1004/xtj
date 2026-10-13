@@ -1089,7 +1089,10 @@
         root.style.removeProperty('--pp-scale');
         root.style.removeProperty('--pp-rotate');
         root.setAttribute('aria-hidden', 'true');
+        root.inert = true;
       }
+
+      if (window.__xtjSyncFocusSurfaces) window.__xtjSyncFocusSurfaces();
 
       if (state.previewReturnFocus && document.contains(state.previewReturnFocus)) state.previewReturnFocus.focus();
       state.previewReturnFocus = null;
@@ -1424,6 +1427,8 @@
     var keydownHandler = function (event) {
       var root = overlay();
       if (!root || !root.classList.contains('active')) return;
+      var focusedSurface = window.__xtjGetFocusSurface && window.__xtjGetFocusSurface();
+      if (focusedSurface && !root.contains(focusedSurface)) return;
       // 输入框/文本域内不劫持方向键
       var tag = event.target && event.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (event.target && event.target.isContentEditable)) return;
@@ -1601,7 +1606,8 @@
     syncTrackTransform(0, false);
     clearDismissVisual(false);
     var root = overlay();
-    if (root) root.setAttribute('aria-hidden', 'false');
+    if (root) { root.inert = false; root.setAttribute('aria-hidden', 'false'); }
+    if (window.__xtjSyncFocusSurfaces) window.__xtjSyncFocusSurfaces();
     var closeBtn = root && root.querySelector('.photo-preview-close');
     if (closeBtn) closeBtn.focus();
   }

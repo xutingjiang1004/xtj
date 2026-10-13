@@ -215,3 +215,10 @@ html[data-xtj-motion="off"] #pubBtn .post-publish-progress-copy { animation:none
   background: var(--bg-secondary); pointer-events: none;
 }
 .post-media-cell.post-image-failed { cursor: pointer; }
+.post-detail-pagination { display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:12px;font-size:13px;color:var(--text-secondary); }
+.post-detail-pagination button { min-height:44px;padding:8px 10px;border:0;background:transparent;box-shadow:none;color:var(--text-primary);font:inherit; }
+.post-detail-pagination button:disabled { opacity:.5;cursor:default; }
+.comment-reply-context { display:block;color:var(--text-secondary);font-size:12px;margin:6px 0; }
+button.comment-reply-context { min-height:44px;border:0;padding:4px 0;background:transparent;box-shadow:none; }
+[data-theme="dark"] .post-visibility-badge.public { color:#d0f5df;background:rgba(28,53,40,.95);border-color:rgba(164,217,187,.35); }
+[data-theme="dark"] .post-stats-visibility-public { color:#bce9d0; }

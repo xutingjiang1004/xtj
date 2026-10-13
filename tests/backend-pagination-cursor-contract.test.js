@@ -61,10 +61,10 @@ test('DM cursor remains optional and fetches one extra visible message',()=>{
 
 test('照片墙（公开列表）：必须有 id 兜底排序', () => {
   const route = between(server, "app.get('/api/photos/public'", "app.get('/api/avatar/:userName'");
-  const createdIdx = route.indexOf(".order('created_at', { ascending: false })");
-  const idIdx = route.indexOf(".order('id', { ascending: false })");
-  assert.ok(createdIdx > 0, '必须按 created_at 倒序');
-  assert.ok(idIdx > createdIdx, 'offset 分页必须有 id 兜底，否则同秒照片跨页重复/丢失');
+  assert.match(route, /readPhotoWallPage\(supabase, req.query\)/);
+  const sql = fs.readFileSync('supabase/migrations/' + fs.readdirSync('supabase/migrations').find(name => name.endsWith('_photo_wall_global_sort.sql')), 'utf8');
+  assert.match(sql, /\(p\.created_at,p\.id\)<\(at_time,row_id\)/);
+  assert.match(sql, /p_sort NOT IN \('name','date_asc'\) THEN p\.id END DESC/);
 });
 
 test('照片墙（个人）：必须有 id 兜底排序', () => {

@@ -18,6 +18,7 @@ function renderer() {
     buildPostActionHtml: () => '<button>评论</button><button>点赞</button>' };
   vm.runInNewContext(between(source, '            function getPostMediaItems(', '            // A malformed legacy record'), ctx);
   vm.runInNewContext(between(detail, '            function statPostDetailMarkup(', '            renderPostDetail ='), ctx);
+  vm.runInNewContext(between(detail, '            function detailRelationsMarkup(', '            window.__xtjPagePostDetail'), ctx);
   return ctx;
 }
 for (const count of [1,2,3,4,6,9,15,18]) {

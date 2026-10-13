@@ -101,7 +101,7 @@ jobs:
       - name: Verify media, account boundaries, admin permissions and atomic writes
         env:
           XTJ_TEST_DATABASE_URL: postgresql://postgres:local-ci-only@127.0.0.1:5432/postgres
-        run: node --test tests/post-attachments-db.test.js tests/maintenance-boundaries-db.test.js tests/post-views-db.test.js tests/admin-audit-fixes-db.test.js tests/chat-ai-history-db.test.js
+        run: node --test tests/post-attachments-db.test.js tests/maintenance-boundaries-db.test.js tests/post-views-db.test.js tests/admin-audit-fixes-db.test.js tests/chat-ai-history-db.test.js tests/frontend-interaction-consistency-db.test.js
 
   ui:
     name: UI Tests

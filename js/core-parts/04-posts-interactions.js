@@ -61,6 +61,11 @@
                     if (!parsed || typeof parsed !== 'object') return;
                     if (!parsed.data || typeof parsed.data !== 'object') parsed.data = {};
                     parsed.data.likes = Array.isArray(feedAllLikes) ? feedAllLikes : [];
+                    var currentPosts = new Map((feedAllPosts || []).map(function(post) { return [String(post.id), post]; }));
+                    if (Array.isArray(parsed.data.posts)) parsed.data.posts = parsed.data.posts.map(function(post) {
+                        var latest = currentPosts.get(String(post.id));
+                        return latest ? Object.assign({}, post, { like_count: latest.like_count, comment_count: latest.comment_count, liked_by_me: latest.liked_by_me }) : post;
+                    });
                     parsed.timestamp = Date.now();
                     window.safeStorage.set(CACHE_KEY, JSON.stringify(parsed));
                 } catch (e) {}
@@ -105,6 +110,8 @@
                 if (window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === String(postId) && Number.isFinite(count)) window.__xtjPostDetailSnapshot.like_count = count;
                 if (!Number.isFinite(count) || count < 0) return;
                 var pid = String(postId || '');
+                (feedAllPosts || []).forEach(function(post) { if (String(post.id) === pid) post.like_count = count; });
+                persistFeedLikesCache();
                 document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
                     if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
                     var statsEl = postEl.querySelector('.post-stats-text');
@@ -137,6 +144,20 @@
 
             function updatePostLikeUi(postId, liked, likeRecord) {
                 var pid = String(postId || '');
+                (feedAllPosts || []).forEach(function(post) {
+                    if (String(post.id) !== pid) return;
+                    if (typeof post.liked_by_me === 'boolean' && post.liked_by_me !== !!liked && Number.isFinite(post.like_count)) post.like_count = Math.max(0, post.like_count + (liked ? 1 : -1));
+                    post.liked_by_me = !!liked;
+                });
+                var detailPost = window.__xtjPostDetailSnapshot;
+                if (detailPost && String(detailPost.id) === pid) {
+                    detailPost.liked_by_me = !!liked;
+                    var priorOwn = (window.__xtjPostDetailLikes || []).find(function(row) { return row.user_name === currentUser; });
+                    if (priorOwn) detailPost.__ownLikeRecord = priorOwn;
+                    window.__xtjPostDetailLikes = (window.__xtjPostDetailLikes || []).filter(function(row) { return row.user_name !== currentUser; });
+                    if (liked) window.__xtjPostDetailLikes.unshift(likeRecord && likeRecord.id ? likeRecord : detailPost.__ownLikeRecord || { id: 'local_' + currentUser, post_id: pid, user_name: currentUser, created_at: new Date().toISOString() });
+                    if (window.__xtjPatchPostDetailInteractions) window.__xtjPatchPostDetailInteractions(pid);
+                }
                 if (!Array.isArray(feedAllLikes)) feedAllLikes = [];
                 feedAllLikes = feedAllLikes.filter(function(item) {
                     return !isLikeOwnedByCurrentUser(item, pid);
@@ -163,6 +184,7 @@
             window.__xtjApplyRealtimeLike = function(eventType, row) {
                 if (!row || row.id == null || row.post_id == null) return;
                 var postId = String(row.post_id);
+                if (window.__xtjScheduleEngagementRefresh) window.__xtjScheduleEngagementRefresh(postId);
                 var detail = window.__xtjPostDetailSnapshot;
                 if (!(feedAllPosts || []).some(function(post) { return String(post && post.id) === postId; }) && !(detail && String(detail.id) === postId)) return;
                 // The API response owns the in-flight optimistic update on this device.
@@ -195,6 +217,11 @@
                     return;
                 }
                 feedAllLikes = likes;
+                (feedAllPosts || []).forEach(function(post) {
+                    if (String(post.id) !== postId) return;
+                    if (Number.isFinite(post.like_count) && (eventType === 'DELETE' || shouldIncrement)) post.like_count = Math.max(0, post.like_count + (eventType === 'INSERT' ? 1 : -1));
+                    if (isLikeOwnedByCurrentUser(row, postId)) post.liked_by_me = eventType === 'INSERT';
+                });
                 markFeedInteractionChanged();
                 if (detail && String(detail.id) === postId && Number.isFinite(Number(detail.like_count)) && (eventType === 'DELETE' || shouldIncrement)) detail.like_count = Math.max(0, Number(detail.like_count) + (eventType === 'INSERT' ? 1 : -1));
                 document.querySelectorAll('.post[data-post-id]').forEach(function(card) {
@@ -260,6 +287,9 @@
                             throw new Error(likeResult.error || 'like_state_sync_failed');
                         }
                         operation.confirmed = requestedLiked;
+                        if (likeResult.my_like && operation.desired) updatePostLikeUi(postId, true, likeResult.my_like);
+                        var detail = window.__xtjPostDetailSnapshot;
+                        if (!requestedLiked && detail && String(detail.id) === String(postId)) delete detail.__ownLikeRecord;
                         markFeedInteractionChanged();
                         // The response describes the sent intent, while the user may already
                         // have reversed it. Keep the count aligned with the visible intent.
@@ -728,6 +758,16 @@
                 btn.textContent = '发送';
                 btn.style.borderRadius = '20px';
                 btn.style.padding = '6px 14px';
+                // The key belongs to a logical submit, including retries after an
+                // uncertain response. Keep it with the preserved comment draft.
+                var commentAttempt = null;
+                function newCommentRequestId() {
+                    if (typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+                    var bytes = window.crypto.getRandomValues(new Uint8Array(16));
+                    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+                    var hex = Array.from(bytes, function(value) { return value.toString(16).padStart(2, '0'); }).join('');
+                    return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+                }
                 
                 btn.onclick = async function() {
                     if (btn.disabled) return;
@@ -745,6 +785,9 @@
                         showToast("帖子参数无效");
                         return;
                     }
+                    if (!commentAttempt || commentAttempt.content !== content || commentAttempt.owner !== identity.owner || commentAttempt.epoch !== identity.epoch) {
+                        commentAttempt = { content: content, owner: identity.owner, epoch: identity.epoch, id: newCommentRequestId() };
+                    }
                     
                     btn.disabled = true;
                     btn.textContent = "发送中..";
@@ -757,7 +800,7 @@
                             signal: controller.signal,
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ post_id: targetPostId, content: content })
+                            body: JSON.stringify({ post_id: targetPostId, content: content, client_request_id: commentAttempt.id })
                         });
                         const result = await response.json().catch(function() { return {}; });
                         if (!postActionIdentityCurrent(identity)) return;
@@ -776,11 +819,18 @@
                         var insertedComment = result.data && String(result.data.post_id) === targetPostId ? result.data : null;
                         
                         if (insertedComment) {
+                            var alreadyKnown = (feedAllComments || []).some(function(item) { return String(item.id) === String(insertedComment.id); });
                             markFeedInteractionChanged();
                             feedAllComments = (feedAllComments || []).filter(function(item) {
                                 return !(item && item.id != null && String(item.id) === String(insertedComment.id));
                             }).concat([insertedComment]);
-                            if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('INSERT', insertedComment);
+                            (feedAllPosts || []).forEach(function(post) {
+                                if (String(post.id) !== targetPostId) return;
+                                if (Number.isFinite(result.comment_count)) post.comment_count = result.comment_count;
+                                else if (!alreadyKnown && Number.isFinite(post.comment_count)) post.comment_count++;
+                            });
+                            commentAttempt = null;
+                            if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('INSERT', Object.assign({}, insertedComment, { comment_count: result.comment_count }));
                             writeFeedCacheSnapshot();
                             if (typeof window.__xtjSchedulePostCardPatch === 'function') {
                                 window.__xtjSchedulePostCardPatch(targetPostId);
@@ -1204,7 +1254,9 @@
                     closeOtherPostActionModals(id);
                 }
                 el.style.display = '';
+                el.inert = false; el.setAttribute('aria-hidden', 'false');
                 el.classList.add("active");
+                if (window.__xtjSyncFocusSurfaces) window.__xtjSyncFocusSurfaces();
             };
 
             window.closeModal = function (id) {
@@ -1876,6 +1928,8 @@
             let feedLoadRequestId = 0;
             let feedStateVersion = 0;
             let feedInteractionMutationVersion = 0;
+            var deletedPostCommentIds = new Set();
+            var engagementRefreshTimers = new Map();
             let feedNextOffset = 0;
             let feedNextCursor = null;
             let feedLoadedPages = [];
@@ -1897,6 +1951,8 @@
                 feedAllPosts = [];
                 feedAllComments = [];
                 feedAllLikes = [];
+                deletedPostCommentIds.clear();
+                engagementRefreshTimers.forEach(function(timer) { clearTimeout(timer); }); engagementRefreshTimers.clear();
                 likeOperations = Object.create(null);
                 window.isPinningPost = false;
                 postPinFlight = null;
@@ -1941,6 +1997,49 @@
                 feedInteractionMutationVersion++;
                 markFeedStateChanged();
             }
+
+            window.__xtjApplyCommentDeletion = function(commentId, result, postId) {
+                var rows = (feedAllComments || []).concat(window.__xtjPostDetailComments || [], window.__xtjPostDetailRecentComments || [], profileActivityState.comments || []);
+                var removed = new Set((result.deleted_comment_ids || [commentId]).map(String));
+                // Also cover older backends and replies already loaded locally.
+                var changed = true;
+                while (changed) { changed = false; rows.forEach(function(row) {
+                    if (removed.has(String(row.parent_comment_id)) && !removed.has(String(row.id))) { removed.add(String(row.id)); changed = true; }
+                }); }
+                var pid = String(result.post_id || postId || '');
+                var newlyRemoved = Array.from(removed).filter(function(id) { return !deletedPostCommentIds.has(id); }).length;
+                removed.forEach(function(id) { deletedPostCommentIds.add(id); });
+                feedAllComments = (feedAllComments || []).filter(function(row) { return !removed.has(String(row.id)); });
+                var ownRemoved = (profileActivityState.comments || []).filter(function(row) { return removed.has(String(row.id)); }).length;
+                profileActivityState.comments = (profileActivityState.comments || []).filter(function(row) { return !removed.has(String(row.id)); });
+                if (profileActivityState.totals) profileActivityState.totals.comments = Math.max(0, Number(profileActivityState.totals.comments || 0) - ownRemoved);
+                (feedAllPosts || []).forEach(function(post) {
+                    if (String(post.id) !== pid) return;
+                    if (Number.isFinite(Number(result.comment_count))) post.comment_count = Number(result.comment_count);
+                    else if (Number.isFinite(post.comment_count)) post.comment_count = Math.max(0, post.comment_count - newlyRemoved);
+                });
+                if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('DELETE', { id: commentId, post_id: pid || null, deleted_comment_ids: Array.from(removed), comment_count: result.comment_count });
+                markFeedInteractionChanged();
+                return removed;
+            };
+            window.__xtjScheduleEngagementRefresh = function(postId) {
+                var key=String(postId),owner=currentUser,epoch=_authStateEpoch;
+                if(engagementRefreshTimers.has(key))clearTimeout(engagementRefreshTimers.get(key));
+                engagementRefreshTimers.set(key,setTimeout(async function(){
+                    engagementRefreshTimers.delete(key);
+                    var version=feedInteractionMutationVersion;
+                    try{
+                        var response=await window.xtjOptionalAuthFetch('/api/post/detail/'+encodeURIComponent(key)+'/relations/engagement',{authOwner:owner,authEpoch:epoch,timeoutMs:12000,background:true});
+                        var body=await response.json();
+                        if(owner!==currentUser||epoch!==_authStateEpoch||version!==feedInteractionMutationVersion||!response.ok||!body.ok||!body.stats||likeOperations[key]&&likeOperations[key].running)return;
+                        var stats=body.stats;
+                        (feedAllPosts||[]).forEach(function(post){if(String(post.id)===key)Object.assign(post,stats);});
+                        var detail=window.__xtjPostDetailSnapshot;if(detail&&String(detail.id)===key)Object.assign(detail,stats);
+                        markFeedStateChanged();schedulePostCardPatch(key);
+                        if(window.__xtjPatchPostDetailInteractions)window.__xtjPatchPostDetailInteractions(key);
+                    }catch(_){}
+                },250));
+            };
 
             function syncPostInfoCache(post) {
                 var normalized = normalizePost(post || {});
@@ -3104,14 +3203,12 @@
                 return !!post && getPostMediaItems(post).filter(function(item) { return item.media_type === 'image'; }).length > 9;
             }
             window.showFeedPostComments = function(postId) {
-                var post = (feedAllPosts || []).find(function(p) { return String(p.id) === String(postId); });
-                if (canOpenFeedPostDetail(post)) { window.openPostDetail(postId); return; }
-                expandedPostComments.add(String(postId)); schedulePostCardPatch(postId);
+                window.openPostDetail(postId);
             };
             if (typeof window.addEventListener === 'function') window.addEventListener('auth-ready', function() { if (expandedCommentsOwner !== currentUser) { expandedPostComments.clear(); expandedCommentsOwner = currentUser; } });
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
-                var limit = (options && options.detail) || expandedPostComments.has(String(post.id)) ? Infinity : 3;
+                var limit = options && options.detail ? 30 : 3;
                 function commentDeleteButton(comment) {
                     if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
                     return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
@@ -3133,11 +3230,17 @@
                         if (_seen[String(c.id)] || _count >= limit) return '';
                         _seen[String(c.id)] = true; _count++;
                         var _node;
+                        var replyContext='';
+                        if(options&&options.detail&&c.parent_comment_id!=null&&!_byId[String(c.parent_comment_id)]){
+                            var parentLoaded=(window.__xtjPostDetailComments||[]).some(function(row){return String(row.id)===String(c.parent_comment_id);});
+                            replyContext=parentLoaded?'<button type="button" class="comment-reply-context" onclick="__xtjGotoPostComment(\''+safeJsStr(String(c.parent_comment_id))+'\')">查看原评论 #'+escapeHtml(c.parent_comment_id)+'</button>':'<span class="comment-reply-context">回复评论 #'+escapeHtml(c.parent_comment_id)+'</span>';
+                        }
                         if (c.user_name === 'cat_ai' && c.generated_by_ai) {
                           _node = '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
                         } else {
                           _node = '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
                         }
+                        _node=replyContext+_node;
                         var _kids = _childrenOf[String(c.id)] || [];
                         if (_kids.length && depth < 8 && _count < limit) {
                           _node += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + _kids.map(function(child) { return _renderCommentNode(child, depth + 1); }).join('') + '</div>';
@@ -3147,7 +3250,8 @@
                 var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
                 pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
-                if (pComms.length > _count) html += '<button type="button" class="post-all-comments" onclick="showFeedPostComments(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + pComms.length + ' 条评论</button>';
+                var totalComments = Number.isFinite(post.comment_count) ? post.comment_count : pComms.length;
+                if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" onclick="showFeedPostComments(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + totalComments + ' 条评论</button>';
                 return '<div class="comments">' + html + '</div>';
             }
             window.buildPostCommentsHtml = buildPostCommentsHtml;
@@ -3160,7 +3264,7 @@
                 }
                 var pLikes = likeMap[normalized.id] || [];
                 var pComms = commentMap[normalized.id] || [];
-                var isLiked = isPostLikedByCurrentUser(likeUserMap, normalized.id);
+                var isLiked = typeof normalized.liked_by_me === 'boolean' ? normalized.liked_by_me : isPostLikedByCurrentUser(likeUserMap, normalized.id);
                 var canDelete = canDeletePost(normalized);
                 var mediaMarkup = renderPostMediaGrid(normalized);
                 return `
@@ -3178,7 +3282,7 @@
                   <div class="content">${buildPostContentHtml(normalized.content)}</div>
                   ${mediaMarkup}
                   ${buildPostLocationHtml(normalized)}
-                  <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
+                  <div class="post-stats-text">${buildPostStatsLine(normalized, Number.isFinite(normalized.like_count) ? normalized.like_count : pLikes.length, Number.isFinite(normalized.comment_count) ? normalized.comment_count : pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${buildPostCommentsHtml(normalized, pComms)}
                 </div>`;
@@ -3744,6 +3848,28 @@
                 ).order("created_at", { ascending: false });
             }
 
+            async function readDirectFeedEngagement(posts) {
+                var comments = [], likes = [], enriched = [], next = 0;
+                async function worker() {
+                    while (next < posts.length) {
+                        var post = posts[next++];
+                        var result = await Promise.all([
+                            sb.from('comments').select('id,post_id,user_name,content,parent_comment_id,generated_by_ai,created_at').eq('post_id', post.id).order('created_at').order('id').limit(3),
+                            sb.from('comments').select('id', { count: 'exact', head: true }).eq('post_id', post.id),
+                            sb.from('likes').select('id', { count: 'exact', head: true }).eq('post_id', post.id),
+                            currentUser ? sb.from('likes').select('id,post_id,user_name,created_at').eq('post_id', post.id).eq('user_name', currentUser).limit(1) : Promise.resolve({ data: [] })
+                        ]);
+                        var failed = result.find(function(row) { return row.error; });
+                        if (failed) throw failed.error;
+                        comments = comments.concat(result[0].data || []); likes = likes.concat(result[3].data || []);
+                        enriched.push(Object.assign({}, post, { comment_count: Number(result[1].count) || 0, like_count: Number(result[2].count) || 0, liked_by_me: !!(result[3].data || []).length }));
+                    }
+                }
+                var task = Promise.all([worker(), worker(), worker()]);
+                if (window.xtjWithTimeout) await window.xtjWithTimeout(task, 18000, 'feed-engagement'); else await task;
+                return [{ data: comments }, { data: likes }, { data: enriched }];
+            }
+
             async function fetchFeedPageChunk(offset, requestId, deferRelated) {
                 var relationVersion = feedInteractionMutationVersion;
                 var start = Math.max(0, Number(offset) || 0);
@@ -3926,10 +4052,7 @@
                     if (!sb) {
                         relatedPromise = Promise.resolve([ { data: [], error: null }, { data: [], error: null } ]);
                     } else {
-                        relatedPromise = Promise.all([
-                            sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
-                            sb.from("likes").select("*").in("post_id", postIds)
-                        ]);
+                        relatedPromise = readDirectFeedEngagement(posts);
                     }
                     if (deferRelated) {
                         return {
@@ -3952,6 +4075,7 @@
                     }
                     comments = related[0].data || [];
                     likes = related[1].data || [];
+                    if (related[2]) posts = related[2].data || posts;
                 }
 
                 return {
@@ -3976,7 +4100,7 @@
                     }
                     mergeFeedPageIntoState({
                         offset: chunk.offset,
-                        posts: [],
+                        posts: related[2] ? related[2].data || [] : [],
                         comments: related[0].data || [],
                         likes: related[1].data || [],
                         nextOffset: chunk.nextOffset,
@@ -3994,11 +4118,17 @@
 
             function mergeFeedPageIntoState(chunk) {
                 if (!chunk) return;
-                feedAllPosts = mergeFeedRecords(feedAllPosts, chunk.posts, function(post) {
+                var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
+                var incomingPosts = (chunk.posts || []).map(function(post) {
+                    if (relationsCurrent) return post;
+                    var old = (feedAllPosts || []).find(function(row) { return String(row.id) === String(post.id); });
+                    if (!old) return post;
+                    return Object.assign({}, post, { like_count: old.like_count, comment_count: old.comment_count, liked_by_me: old.liked_by_me });
+                });
+                feedAllPosts = mergeFeedRecords(feedAllPosts, incomingPosts, function(post) {
                     return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
                 }, true);
-                var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
-                feedAllComments = mergeFeedRecords(feedAllComments, relationsCurrent ? chunk.comments : [], function(comment) {
+                feedAllComments = mergeFeedRecords(feedAllComments, relationsCurrent ? (chunk.comments || []).filter(function(row) { return !deletedPostCommentIds.has(String(row.id)) && !deletedPostCommentIds.has(String(row.parent_comment_id)); }) : [], function(comment) {
                     return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
                 });
                 feedAllLikes = mergeFeedRecords(feedAllLikes, relationsCurrent ? chunk.likes : [], function(like) {

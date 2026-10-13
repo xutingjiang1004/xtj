@@ -930,17 +930,15 @@
                     if (mySubEpoch !== window.__commentSubEpoch) return; // 已被更新的订阅取代
                     commentRealtime = sb.channel('feed-comments')
                         .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, function(payload) {
-                            var row = payload.new || payload.old;
+                            var row = payload.eventType === 'DELETE' ? payload.old : payload.new;
                             if (!row || row.id == null) return;
-                            if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment(payload.eventType, row);
+                            if (payload.eventType !== 'DELETE' && (deletedPostCommentIds.has(String(row.id)) || deletedPostCommentIds.has(String(row.parent_comment_id)))) return;
+                            if (payload.eventType !== 'DELETE' && window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment(payload.eventType, row);
                             var commentId = String(row.id);
                             if (payload.eventType === 'DELETE') {
-                                feedAllComments = (feedAllComments || []).filter(function(comment) {
-                                    return String(comment && comment.id) !== commentId;
-                                });
-                                profileActivityState.comments = (profileActivityState.comments || []).filter(function(comment) {
-                                    return String(comment && comment.id) !== commentId;
-                                });
+                                var priorComment=(feedAllComments||[]).concat(window.__xtjPostDetailComments||[],window.__xtjPostDetailRecentComments||[]).find(function(comment){return String(comment.id)===commentId;});
+                                if(row.post_id==null&&priorComment)row=Object.assign({},row,{post_id:priorComment.post_id});
+                                window.__xtjApplyCommentDeletion(commentId,{},row.post_id);
                                 // 删除对应的 DOM 元素
                                 var domEl = document.querySelector('.comment-item[data-comment-id="' + commentId + '"]');
                                 if (domEl && domEl.parentNode) domEl.parentNode.removeChild(domEl);
@@ -963,6 +961,8 @@
                                     return String(post && post.id) === String(row.post_id);
                                 });
                                 if (!postIsVisible) return;
+                                var alreadyKnown=(feedAllComments||[]).some(function(comment){return String(comment.id)===commentId;});
+                                if(!alreadyKnown)(feedAllPosts||[]).forEach(function(post){if(String(post.id)===String(row.post_id)&&Number.isFinite(post.comment_count))post.comment_count++;});
                                 // 去重
                                 feedAllComments = (feedAllComments || []).filter(function(comment) {
                                     return String(comment && comment.id) !== commentId;
@@ -1017,6 +1017,7 @@
                                 ? (feedAllPosts || []).some(function(p) { return String(p && p.id) === String(row.post_id); })
                                 : true;
                             if (affectsLocalFeed) markFeedInteractionChanged();
+                            if (affectsLocalFeed && row.post_id != null && window.__xtjScheduleEngagementRefresh) window.__xtjScheduleEngagementRefresh(row.post_id);
                             if (affectsLocalFeed && typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                             if (affectsLocalFeed && typeof renderProfileActivity === 'function') renderProfileActivity();
                         })

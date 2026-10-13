@@ -2,7 +2,7 @@
   'use strict';
   var current = null, epoch = 0, controller = null, social = null, expanded = false, mutationVersion = 0, storyAuthEpoch = 0, commentVersion = 0;
   var likeStates = new Map(), avatars = new Map(), commentAnimation = null, commentSequence = 0;
-  var socialCache = new Map(), refreshTimer = 0;
+  var socialCache = new Map(), refreshTimer = 0, commentAttempt = null;
   function socialKey(owner,id){return authEpoch()+':'+owner+':'+id;}
   function invalidateSocial(){if(current)socialCache.delete(socialKey(window.currentUser||'',current.cloudId));}
   function stopRefresh(){clearTimeout(refreshTimer);refreshTimer=0;}
@@ -12,14 +12,15 @@
       if(valid(token,owner,id)&&!document.hidden)loadSocial(token,owner,id,true);
     },15000);
   }
-  function fetchSocial(owner,id,force){
-    var key=socialKey(owner,id),saved=socialCache.get(key);
+  function fetchSocial(owner,id,force,known){
+    known=known||[];
+    var key=socialKey(owner,id)+(known.length?':'+known.join(','):''),saved=socialCache.get(key);
     if(saved&&saved.promise)return saved.promise;
     if(!force&&saved&&saved.body&&Date.now()-saved.at<15000)return Promise.resolve(saved.body);
     var entry={body:saved&&saved.body,at:saved&&saved.at||0},abort=new AbortController();
     var timer=setTimeout(function(){abort.abort();},10000);
     var identity=authEpoch();
-    entry.promise=json('/api/photo/'+encodeURIComponent(id)+'/social',{background:true,signal:abort.signal,authOwner:owner,authEpoch:identity}).then(function(body){
+    entry.promise=json('/api/photo/'+encodeURIComponent(id)+'/social'+(known.length?'?known='+encodeURIComponent(known.join(',')):''),{background:true,signal:abort.signal,authOwner:owner,authEpoch:identity}).then(function(body){
       if(identity===authEpoch()&&owner===(window.currentUser||'')&&socialCache.get(key)===entry){entry.body=body;entry.at=Date.now();}
       return body;
     }).finally(function(){clearTimeout(timer);entry.promise=null;});
@@ -103,8 +104,21 @@
   async function loadSocial(token,owner,id,force){
     var version=mutationVersion, commentsAtStart=commentVersion;
     try {
-      var body=await fetchSocial(owner,id,force!==false);
+      var previous=social,known=previous?(previous.comments||[]).slice(0,500).map(function(row){return String(row.id);}):[];
+      var body=await fetchSocial(owner,id,force!==false,known);
       if(!valid(token,owner,id)||commentsAtStart!==commentVersion)return;
+      body=Object.assign({},body,{comments:(body.comments||[]).slice()});
+      previous=social;
+      if(previous&&previous.comments&&previous.comments.length){
+        var refreshed=new Map((body.comments||[]).map(function(row){return [String(row.id),row];}));
+        var authoritative=new Set((body.known_ids||[]).map(String));
+        (body.retained_comments||[]).forEach(function(row){refreshed.set(String(row.id),row);});
+        previous.comments.forEach(function(row){if(!authoritative.has(String(row.id))&&!refreshed.has(String(row.id)))refreshed.set(String(row.id),row);});
+        body.comments=Array.from(refreshed.values()).sort(function(a,b){return String(b.created_at).localeCompare(String(a.created_at))||compareCommentIds(b.id,a.id);});
+        // The continuation cursor belongs to the loaded history, not to this
+        // independent first-page statistics refresh.
+        body.has_more=previous.has_more;body.next_cursor=previous.next_cursor;
+      }
       social=body;var saved=likeStates.get(owner+':'+id);if(saved&&saved.authEpoch===storyAuthEpoch&&(saved.pending||version!==mutationVersion)){social.liked=saved.desired;social.like_count=Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed));}else{likeStates.set(owner+':'+id,{confirmed:!!body.liked,desired:!!body.liked,count:body.like_count||0,pending:false,authEpoch:storyAuthEpoch});}current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
     }catch(error){if(!valid(token,owner,id))return;el('ppSocialStatus').textContent='互动暂未加载，点击重试';el('ppSocialStatus').onclick=function(){loadSocial(epoch,window.currentUser||'',current.cloudId);};el('ppLikeBtn').disabled=!likeStates.has(owner+':'+id);}
     finally{if(valid(token,owner,id))scheduleRefresh(token,owner,id);}
@@ -172,8 +186,9 @@
     el('ppStoryCaption').textContent=caption;el('ppStoryCaption').hidden=!caption;
     el('ppCaptionMore').hidden=true;el('ppCaptionMore').setAttribute('aria-expanded','false');
     showAvatar(photo);
-    epoch++;stopRefresh();if(controller)controller.abort();controller=new AbortController();social=null;expanded=false;mutationVersion=0;commentVersion=0;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
+    epoch++;stopRefresh();if(controller)controller.abort();controller=new AbortController();social=null;expanded=false;mutationVersion=0;commentVersion=0;commentAttempt=null;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
     commentsVisible(false,true);el('ppCommentInput').value='';el('ppCommentInput').disabled=false;el('ppCommentSend').disabled=false;el('ppCommentError').textContent='';el('ppCommentsList').replaceChildren();
+    el('ppCommentsMore').disabled=false;el('ppCommentsMore').hidden=true;
     el('ppLikeCount').textContent='';el('ppCommentCount').textContent='';el('ppLikeBtn').setAttribute('aria-pressed','mixed');el('ppLikeBtn').disabled=true;el('ppSocialStatus').textContent='';
     el('ppLikeBtn').hidden=el('ppCommentBtn').hidden=!isWall(photo);
     var token=epoch,owner=window.currentUser||'',id=photo.cloudId;
@@ -224,9 +239,16 @@
       list.appendChild(item);
     });el('ppCommentsMore').hidden=!social.has_more;
   }
+  function compareCommentIds(a,b){var x=String(a),y=String(b);if(/^\d+$/.test(x)&&/^\d+$/.test(y))return x.length-y.length||x.localeCompare(y);return x.localeCompare(y);}
+  function newCommentRequestId(){
+    if(typeof window.crypto.randomUUID==='function')return window.crypto.randomUUID();
+    var bytes=window.crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+    var hex=Array.from(bytes,function(value){return value.toString(16).padStart(2,'0');}).join('');
+    return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+  }
   function openComments(){if(!current||!isWall(current))return;commentsVisible(true);renderComments();if(!social)loadSocial(epoch,window.currentUser||'',current.cloudId);}
   async function moreComments(){
-    if(!social||!social.next_cursor)return;var token=epoch,owner=window.currentUser||'',id=current.cloudId,version=commentVersion;var button=el('ppCommentsMore');button.disabled=true;
+    if(!social||!social.next_cursor||el('ppCommentsMore').disabled)return;var token=epoch,owner=window.currentUser||'',id=current.cloudId,version=commentVersion;var button=el('ppCommentsMore');button.disabled=true;
     try{var body=await json('/api/photo/'+id+'/social?before='+encodeURIComponent(social.next_cursor),{background:true,signal:controller.signal});if(!valid(token,owner,id)||version!==commentVersion)return;var rows=social.comments.concat(body.comments),seen=new Set();social.comments=rows.filter(function(r){if(seen.has(r.id))return false;seen.add(r.id);return true;});social.has_more=body.has_more;social.next_cursor=body.next_cursor;renderComments();}
     catch(error){if(valid(token,owner,id))el('ppCommentError').textContent=error.message;}finally{if(token===epoch)button.disabled=false;}
   }
@@ -234,16 +256,17 @@
     event.preventDefault();if(!current||!isWall(current)||el('ppCommentSend').disabled)return;
     var input=el('ppCommentInput'),content=input.value.trim();if(!content)return;
     var token=epoch,owner=window.currentUser||'',id=current.cloudId;if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
+    if(!commentAttempt||commentAttempt.content!==content||commentAttempt.owner!==owner||commentAttempt.id!==id)commentAttempt={content:content,owner:owner,id:id,key:newCommentRequestId()};
     invalidateSocial();mutationVersion++;commentVersion++;input.disabled=true;el('ppCommentSend').disabled=true;
-    try{var body=await json('/api/photo/'+id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content})});if(!valid(token,owner,id))return;
+    try{var body=await json('/api/photo/'+id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content,client_request_id:commentAttempt.key})});if(!valid(token,owner,id))return;
       invalidateSocial();commentVersion++;
-      social=social||{comments:[]};social.comments.unshift(body.comment);if(Number.isFinite(social.comment_count))social.comment_count++;input.value='';el('ppCommentError').textContent='';updateCounts();renderComments();loadSocial(token,owner,id);}
+      social=social||{comments:[]};var exists=social.comments.some(function(row){return String(row.id)===String(body.comment.id);});if(!exists){social.comments.unshift(body.comment);if(Number.isFinite(social.comment_count))social.comment_count++;}if(Number.isFinite(body.comment_count))social.comment_count=body.comment_count;commentAttempt=null;input.value='';el('ppCommentError').textContent='';updateCounts();renderComments();loadSocial(token,owner,id);}
     catch(error){if(valid(token,owner,id)){el('ppCommentError').textContent=error.message;loadSocial(token,owner,id);}}
     finally{if(valid(token,owner,id)){input.disabled=false;el('ppCommentSend').disabled=false;}}
   }
   async function deleteComment(row,button){
     if(button.disabled)return;invalidateSocial();commentVersion++;var token=epoch,owner=window.currentUser||'',id=current.cloudId;button.disabled=true;
-    try{await json('/api/post/comment/'+encodeURIComponent(row.id),{method:'DELETE'});if(!valid(token,owner,id))return;invalidateSocial();commentVersion++;social.comments=social.comments.filter(function(r){return r.id!==row.id;});if(Number.isFinite(social.comment_count))social.comment_count=Math.max(0,social.comment_count-1);updateCounts();renderComments();loadSocial(token,owner,id);}
+    try{var result=await json('/api/post/comment/'+encodeURIComponent(row.id),{method:'DELETE'});if(!valid(token,owner,id))return;invalidateSocial();commentVersion++;var removed=new Set((result.deleted_comment_ids||[row.id]).map(String)),before=social.comments.length;social.comments=social.comments.filter(function(r){return !removed.has(String(r.id));});if(Number.isFinite(result.comment_count))social.comment_count=result.comment_count;else if(Number.isFinite(social.comment_count))social.comment_count=Math.max(0,social.comment_count-(before-social.comments.length));updateCounts();renderComments();loadSocial(token,owner,id);}
     catch(error){if(valid(token,owner,id)){el('ppCommentError').textContent=error.message;button.disabled=false;loadSocial(token,owner,id);}}
   }
   window.preloadPhotoStoryAvatars(window.photoWallData||[]);
