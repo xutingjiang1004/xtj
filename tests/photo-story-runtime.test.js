@@ -5,8 +5,11 @@ const {validatePhotoCreatePayload}=require('../render-api/photo-create');
 const photoId='123e4567-e89b-42d3-a456-000000000081';
 function db(){
  const rows={posts:[{id:photoId,media_type:'__photo_wall__',media_url:'https://example/photo.jpg',content:'{}',visibility:'public'}],likes:[],comments:[],photo_viewers:[]};let fail=false;
- return {rows,setFail(){fail=true;},from(table){let filters=[],head=false,limit=100,operation=null;const q={
-  select(fields,opts){head=!!(opts&&opts.head);return q;},eq(k,v){filters.push(r=>r[k]===v);return q;},order(){return q;},limit(n){limit=n;return q;},or(){return q;},
+ return {rows,setFail(){fail=true;},async rpc(name,args){if(fail)return {error:{code:'DB_OFFLINE'}};
+   if(name==='xtj_set_post_like'){const {p_post_id:post,p_owner:owner,p_liked:liked}=args;if(liked){if(!rows.likes.some(row=>row.post_id===post&&row.user_name===owner))rows.likes.push({id:rows.likes.length+1,post_id:post,user_name:owner});}else rows.likes=rows.likes.filter(row=>row.post_id!==post||row.user_name!==owner);return {data:{ok:true,liked,like_count:rows.likes.filter(row=>row.post_id===post).length}};}
+   if(name==='xtj_create_comment'){const existing=rows.comments.find(row=>row.client_request_id===args.p_request_id&&row.user_name===args.p_owner);if(existing)return {data:{ok:true,created:false,comment:existing}};const row={id:rows.comments.length+1,post_id:args.p_post_id,user_name:args.p_owner,content:args.p_content,client_request_id:args.p_request_id,created_at:new Date().toISOString()};rows.comments.push(row);return {data:{ok:true,created:true,comment:row}};}
+   return {error:{code:'UNKNOWN_RPC'}};},from(table){let filters=[],head=false,limit=100,operation=null;const q={
+  select(fields,opts){head=!!(opts&&opts.head);return q;},in(k,values){filters.push(r=>values.map(String).includes(String(r[k])));return q;},eq(k,v){filters.push(r=>r[k]===v);return q;},order(){return q;},limit(n){limit=n;return q;},or(){return q;},
   upsert(row){operation=()=>{if(!rows[table].some(r=>r.post_id===row.post_id&&r.user_name===row.user_name))rows[table].push({...row,id:crypto.randomUUID()});};return q;},
   insert(row){operation=()=>{rows[table].push({...row,id:crypto.randomUUID(),created_at:new Date().toISOString()});};return q;},
   delete(){operation=()=>{rows[table]=rows[table].filter(r=>!filters.every(f=>f(r)));};return q;},

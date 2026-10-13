@@ -131,13 +131,14 @@ test('a stale refresh cannot remove a confirmed post comment', { timeout: 40000 
 test('a stale refresh cannot resurrect a deleted comment', { timeout: 40000 }, async () => fixture(async f => {
   const id = f.comments[0].id, pending = await heldFeed(f);
   await f.page.route('**/api/post/comment/' + id, route => {
-    f.comments.splice(f.comments.findIndex(c => c.id === id), 1);
-    return route.fulfill({ json: { ok: true, deleted: true } });
+    const deleted=f.comments.filter(c=>c.id===id||c.parent_comment_id===id).map(c=>c.id);
+    f.comments.splice(0,f.comments.length,...f.comments.filter(c=>!deleted.includes(c.id)));
+    return route.fulfill({ json: { ok: true, deleted: true, deleted_comment_ids:deleted,comment_count:f.comments.length,post_id:f.posts[0].id } });
   });
   f.page.once('dialog', dialog => dialog.accept());
   await f.page.evaluate(id => window.deleteFeedComment(id, document.createElement('button')), id);
   await pending.finish();
-  assert.match(await f.page.locator('#feed .post-stats-text').textContent(), /评论 5/);
+  assert.match(await f.page.locator('#feed .post-stats-text').textContent(), /评论 4/);
   assert.equal(await f.page.locator('[data-comment-id="' + id + '"]').count(), 0);
 }));
 

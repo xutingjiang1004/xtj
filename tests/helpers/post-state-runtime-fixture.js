@@ -12,6 +12,10 @@ function installFeedMutationRuntime(context) {
     feedStateVersion: 0, feedInteractionMutationVersion: 0,
     feedVisiblePostsCache: ['cached'], feedMapsCache: { cached: true }
   });
+  if (!context.feedAllPosts) context.feedAllPosts = [];
+  if (!context.profileActivityState) context.profileActivityState = { comments: [], totals: {} };
+  if (!context.deletedPostCommentIds) context.deletedPostCommentIds = new Set();
+  if (!context.engagementRefreshTimers) context.engagementRefreshTimers = new Map();
   vm.runInNewContext(source.slice(start, end), context);
 }
 module.exports = { installFeedMutationRuntime };

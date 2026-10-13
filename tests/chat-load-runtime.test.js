@@ -9,6 +9,7 @@ async function fixture(t){
  await page.evaluate(()=>{
   window.currentUser='A';window._authStateEpoch=1;window.dockChatActiveUser='peer';window.currentDockTab='chat';
   window._chatHistoryFocus='';window._chatRenderSignature={};window._dockChatMessageLoad=null;window._dockChatLoadSeq=0;window._chatCommittedRevision=0;window._chatCache={};window.avatarCache={};window.calls=[];
+  window._chatPagination={};window.syncDockChatHistoryButton=()=>{};window.refreshDockChatHistoryWindow=()=>{};
   window.getDockChatCacheKey=peer=>currentUser+':'+peer;window.readAvatarCacheFromStorage=()=>({});window.hydrateDockChatAvatars=()=>{};window.patchDockChatMessageAvatars=()=>{};
   window.renderDockMessages=(peer,rows)=>{if(peer===dockChatActiveUser)document.getElementById('dockChatMessages').textContent=rows.map(r=>r.content).join('|');};
   window.mergeDockChatMessages=(peer,rows)=>rows;window.mergeDockChatRowsById=rows=>rows;window.isDmMessageLocallyDeleted=()=>false;window.getDMMessageReadAt=()=>true;

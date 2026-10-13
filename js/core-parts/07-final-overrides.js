@@ -4,6 +4,88 @@
  * Lines from original core.js: 13871-14624
  * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
  */
+        (function installFocusSurfaceLifecycle() {
+            if (typeof MutationObserver !== 'function') return;
+            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay';
+            var surfaces = new Map(), background = new Map(), sequence = 0, top = null, syncing = false;
+            function visible(root) {
+                if (root.id === 'ppInfoModal') return root.getAttribute('aria-hidden') === 'false' && root.style.display !== 'none';
+                return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
+            }
+            function controls(root) {
+                return Array.from(root.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(function(node) {
+                    return !node.disabled && node.tabIndex >= 0 && !node.closest('[inert], [hidden], [aria-hidden="true"]') && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden';
+                });
+            }
+            function focusFirst(root) {
+                var first = controls(root)[0];
+                if (!first) { root.tabIndex = -1; first = root; }
+                first.focus({ preventScroll: true });
+            }
+            function register() {
+                document.querySelectorAll(selector).forEach(function(root) {
+                    if (surfaces.has(root)) return;
+                    surfaces.set(root, { open: false, order: 0, origin: null });
+                    new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: root.id === 'ppInfoModal' ? ['class','hidden','aria-hidden'] : ['class','hidden'] });
+                });
+            }
+            function sync() {
+                if (syncing) return; syncing = true;
+                try {
+                    background.forEach(function(wasInert,node) { node.inert = wasInert; }); background.clear();
+                    var research = document.body.classList.contains('xtj-research-open'), ai = document.body.classList.contains('xtj-ai-page-open');
+                    document.querySelectorAll('.dock-panel').forEach(function(panel) {
+                        var open = panel.classList.contains('active') && !panel.classList.contains('hidden') && (panel.id === 'panelDeepThink' || !research && !ai);
+                        panel.inert = !open; panel.setAttribute('aria-hidden', String(!open));
+                    });
+                    var oldTop = top, active = [];
+                    surfaces.forEach(function(state,root) {
+                        if (!root.isConnected) { surfaces.delete(root); return; }
+                        var open = visible(root);
+                        if (open && !state.open) { state.order = ++sequence; state.origin = document.activeElement; }
+                        state.open = open; root.inert = !open;
+                        if (root.getAttribute('aria-hidden') !== String(!open)) root.setAttribute('aria-hidden', String(!open));
+                        if (open) active.push({ root: root, state: state });
+                    });
+                    active.sort(function(a,b) { return a.state.order - b.state.order; });
+                    top = active.length ? active[active.length - 1].root : null;
+                    if (top) {
+                        var branch = top;
+                        while (branch && branch !== document.body) {
+                            var parent = branch.parentElement; if (!parent) break;
+                            Array.from(parent.children).forEach(function(sibling) {
+                                if (sibling === branch) return;
+                                if (sibling.matches('.toast,[role="status"],[role="alert"]')) return;
+                                if (!background.has(sibling)) background.set(sibling, sibling.inert);
+                                sibling.inert = true;
+                            });
+                            branch = parent;
+                        }
+                        if (oldTop !== top && !top.contains(document.activeElement)) focusFirst(top);
+                    } else if (oldTop && oldTop.contains(document.activeElement)) {
+                        var origin = surfaces.get(oldTop) && surfaces.get(oldTop).origin;
+                        if (origin && origin.isConnected && !origin.closest('[inert]')) origin.focus({ preventScroll: true });
+                    }
+                } finally { syncing = false; }
+            }
+            register();
+            document.querySelectorAll('.dock-panel').forEach(function(panel) { new MutationObserver(sync).observe(panel,{ attributes: true, attributeFilter: ['class'] }); });
+            new MutationObserver(sync).observe(document.body,{ attributes: true, attributeFilter: ['class'] });
+            new MutationObserver(function() { register(); sync(); }).observe(document.body,{ childList: true });
+            window.__xtjSyncFocusSurfaces = sync;
+            window.__xtjGetFocusSurface = function() { return top; };
+            document.addEventListener('keydown',function(event) {
+                if (event.key !== 'Tab' || !top) return;
+                var nodes = controls(top), first = nodes[0], last = nodes[nodes.length - 1], focused = document.activeElement;
+                if (!nodes.length || !top.contains(focused) || event.shiftKey && focused === first || !event.shiftKey && focused === last) {
+                    event.preventDefault(); event.stopImmediatePropagation();
+                    if (!nodes.length) focusFirst(top); else (event.shiftKey ? last : first).focus({ preventScroll: true });
+                }
+            },true);
+            document.addEventListener('focusin',function(event) { if (top && !top.contains(event.target) && !syncing) focusFirst(top); });
+            sync();
+        })();
+
         (function installEmergencyActionRescue() {
             if (window.__xtjEmergencyActionRescueV1) return;
             window.__xtjEmergencyActionRescueV1 = true;

@@ -432,7 +432,7 @@ function createPhotoWallRenderRuntime(photos, options = {}) {
 
   function photoCards() {
     const cards = [];
-    const pattern = /<div class="photo-wall-item pw-stagger-enter" data-photo-id="([^"]*)" style="[^"]*" onclick="openPhotoWallPreviewAt\((\d+), this\)">/g;
+    const pattern = /<div class="photo-wall-item pw-stagger-enter"[^>]*data-photo-id="([^"]*)"[^>]*onclick="openPhotoWallPreviewAt\((\d+), this\)"[^>]*>/g;
     let match;
     while ((match = pattern.exec(markup))) {
       const id = match[1];

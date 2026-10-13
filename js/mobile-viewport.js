@@ -37,8 +37,6 @@
   window.addEventListener('resize',syncTabletLayout);
   window.addEventListener('pageshow',syncTabletLayout);
   syncTabletLayout();
-  function ownPhotoGesture(target) { return target && target.closest && target.closest('#photoPreviewOverlay.active,#imgViewer.active'); }
-  document.addEventListener('gesturestart', function(event){ if (!ownPhotoGesture(event.target)) event.preventDefault(); }, {passive:false});
-  document.addEventListener('gesturechange', function(event){ if (!ownPhotoGesture(event.target)) event.preventDefault(); }, {passive:false});
-  document.addEventListener('touchmove', function(event){ if (event.touches && event.touches.length>1 && !ownPhotoGesture(event.target)) event.preventDefault(); }, {passive:false});
+  // Page magnification remains a browser accessibility gesture. Photo viewers
+  // own their image gestures through their existing scoped handlers.
 })();

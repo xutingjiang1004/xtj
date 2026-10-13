@@ -85,11 +85,11 @@ test('atomic like endpoint validates types and returns authoritative final count
   assert.match(source, /authenticateUser/);
   assert.match(source, /normalizePostId\(rawPostId\)/);
   assert.match(source, /typeof liked !== 'boolean'/);
-  assert.match(source, /existingLike[\s\S]*\.eq\('post_id', postId\)[\s\S]*\.eq\('user_name', req\.userName\)/);
-  assert.match(source, /if \(!existingLike\.data\)[\s\S]*\.insert\(/);
-  assert.match(source, /String\(likeError\.code \|\| ''\) !== '23505'/);
-  assert.match(source, /select\('id', \{ count: 'exact', head: true \}\)/);
-  assert.match(source, /post_id: postId, liked: liked, like_count:/);
+  assert.match(source, /visibility, media_type, is_deleted/);
+  assert.match(source, /rpc\('xtj_set_post_like', \{ p_post_id: postId, p_owner: req.userName, p_liked: liked \}/);
+  assert.match(source, /if \(likeWrite.error \|\| !likeWrite.data\)/);
+  assert.match(source, /res.json\(likeWrite.data\)/);
+  assert.doesNotMatch(source, /\.insert\(|\.delete\(/, 'the API must not bypass the database visibility lock');
 });
 
 test('atomic like migration cleans legacy duplicates and enforces one user like per post', () => {
@@ -175,7 +175,9 @@ test('public photo queries exclude historical soft-deleted rows', () => {
   const wall = routeSource('get', '/api/photos/wall/:userName', "app.get('/api/photos/public'");
   const publicWall = routeSource('get', '/api/photos/public', "app.get('/api/avatar/");
   assert.match(wall, /\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/);
-  assert.match(publicWall, /\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/);
+  assert.match(publicWall, /readPhotoWallPage\(supabase, req.query\)/);
+  const migration = fs.readFileSync('supabase/migrations/' + fs.readdirSync('supabase/migrations').find(name => name.endsWith('_photo_wall_global_sort.sql')), 'utf8');
+  assert.match(migration, /p\.is_deleted IS NOT TRUE/);
 });
 
 test('hard-delete migration exposes no privileged cleanup surface to clients', () => {

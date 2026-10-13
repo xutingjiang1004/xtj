@@ -31,6 +31,7 @@
   var photoPaginationRevision = 0;
   var photoPaginationDirty = false;
   var photoPageBoundary = null;
+  var photoOrderBoundary = null, photoNextCursor = null, photoLoadedSort = 'date_desc', photoSortNeedsReset = false;
   var photoPageSeenIds = new Set();
   var photoSnapshotKnownIds = new Set();
   // P5: 分页绑定状态 — 按 page 跟踪 requestId、AbortController、generation
@@ -48,6 +49,7 @@
     unsubscribePhotoWallRealtime();
     pendingDeletedPhotoIds.clear();
     photoPageBoundary = null;
+    photoOrderBoundary = null; photoNextCursor = null; photoLoadedSort = window.pwSortKey || 'date_desc'; photoSortNeedsReset = false;
     photoPageSeenIds.clear();
     photoSnapshotKnownIds.clear();
     photoPaginationRevision++;
@@ -160,10 +162,12 @@
       .slice(0, 180);
     writeJson(CACHE_KEY, list);
     writeJson(CACHE_OWNER_KEY, String(window.currentUser));
+    writeJson('xtj_photos_sort', window.pwSortKey || 'date_desc');
   }
 
   function loadLocalPhotoWallData(){
     if (!window.currentUser || readJson(CACHE_OWNER_KEY, '') !== String(window.currentUser)) return [];
+    if ((window.pwSortKey || 'date_desc') !== readJson('xtj_photos_sort', 'date_desc')) return [];
     var list = readJson(CACHE_KEY, []);
     return Array.isArray(list) ? list.filter(function(item){
       return item && item.id && item.imageUrl && item.mediaKind !== 'video' && !/^video\//i.test(item.mimeType || '');
@@ -242,6 +246,7 @@
       id: row.id || meta.id || ('local_' + Date.now() + '_' + Math.random().toString(36).slice(2)),
       cloudId: row.id || meta.cloudId || null,
       username: row.user_name || meta.username || '未知用户',
+      sort_name: row.user_name || '',
       caption: typeof meta.caption === 'string' ? meta.caption : '',
       width: meta.width || null, height: meta.height || null,
       imageUrl: url,
@@ -276,8 +281,26 @@
     }
     (Array.isArray(primary) ? primary : []).forEach(add);
     (Array.isArray(fallback) ? fallback : []).forEach(add);
-    return Array.from(map.values()).sort(function(a, b){ return (b.timestamp || 0) - (a.timestamp || 0); });
+    return Array.from(map.values()).sort(function(a, b){ return comparePhotoOrder(a,b,window.pwSortKey || 'date_desc'); });
   }
+  function comparePhotoOrder(a,b,key){
+    function stamp(photo){var s=String(photo.created_at||'');var m=s.match(/^(.*:\d{2})(?:\.(\d+))?(?:Z|\+00:00)$/);var ts=Number(photo.timestamp);return m?m[1]+'.'+String(m[2]||'').padEnd(6,'0'):new Date(Number.isFinite(ts)?ts:0).toISOString();}
+    var ascending=key==='date_asc'||key==='name',direction=ascending?1:-1,primary=0;
+    if(key==='name'){
+      var x=Array.from(String(a.sort_name!=null?a.sort_name:a.username||'')),y=Array.from(String(b.sort_name!=null?b.sort_name:b.username||''));
+      for(var i=0;i<Math.min(x.length,y.length);i++){primary=x[i].codePointAt(0)-y[i].codePointAt(0);if(primary)break;}if(!primary)primary=x.length-y.length;
+    }else if(key==='size')primary=(Number(a.fileSize)||0)-(Number(b.fileSize)||0);
+    else if(key==='views')primary=(Number(a.views)||0)-(Number(b.views)||0);
+    if(!primary)primary=stamp(a).localeCompare(stamp(b));
+    if(!primary)primary=String(a.cloudId||a.id).localeCompare(String(b.cloudId||b.id));
+    return primary*direction;
+  }
+  window.__xtjComparePhotoWallOrder=comparePhotoOrder;
+  window.setPhotoWallSort=function(key){
+    if(['date_desc','date_asc','name','size','views'].indexOf(key)<0)return Promise.resolve(window.photoWallData);
+    window.pwSortKey=key;photoSortNeedsReset=photoLoadedSort!==key;photoNextCursor=null;photoOrderBoundary=null;
+    lastSuccessfulLoadedAt=0;return loadPhotoWallData(true);
+  };
 
   function createPhotoAbortError(){
     var error = new Error('photo page request aborted');
@@ -305,6 +328,7 @@
     if (!owner) return [];
     var page = pageIndex;
     var limit = PAGE_SIZE;
+    var sortKey = window.pwSortKey || 'date_desc', cursor = page > 0 ? photoNextCursor : null;
     // P5: 分页绑定 — 管理每个 page 的请求
     var stateKey = 'page_' + page;
     var prevState = _fetchPhotoPageState[stateKey];
@@ -331,7 +355,7 @@
     function isCurrentRequest(){
       var stateIsCurrent = !requestState || (_fetchPhotoPageState[stateKey] === requestState && requestState.generation === currentGen);
       var loadIsCurrent = requestGeneration == null || requestGeneration === photoLoadGeneration;
-      return stateIsCurrent && loadIsCurrent && !controller.signal.aborted && owner === String(window.currentUser || '') && epoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0);
+      return stateIsCurrent && loadIsCurrent && sortKey === (window.pwSortKey || 'date_desc') && !controller.signal.aborted && owner === String(window.currentUser || '') && epoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0);
     }
     try {
       if (externalSignal) {
@@ -340,7 +364,7 @@
       }
       var headers = window.getUserAuthHeaders ? await window.getUserAuthHeaders() : {};
       if (!isCurrentRequest()) throw createPhotoAbortError();
-      var resp = await fetch(apiUrl('/api/photos/public?page=' + page + '&limit=' + limit), { credentials: 'include', headers:headers, signal: controller.signal });
+      var resp = await fetch(apiUrl('/api/photos/public?page=' + page + '&limit=' + limit + '&sort=' + encodeURIComponent(sortKey) + (cursor ? '&cursor=' + encodeURIComponent(JSON.stringify(cursor)) : '')), { credentials: 'include', headers:headers, signal: controller.signal });
       // P5: 如果 generation 已变化（被新请求替代），丢弃结果
       if (!isCurrentRequest()) throw createPhotoAbortError();
       var result = await resp.json();
@@ -353,7 +377,9 @@
         error.retryable = result.retryable !== false; error.data = result;
         throw error;
       }
-      return result.data || [];
+      var rows=result.data||[];
+      Object.defineProperty(rows,'__page',{value:{sort:result.sort,has_more:result.has_more,next_cursor:result.next_cursor||null}});
+      return rows;
     } finally {
       clearTimeout(timer);
       if (externalSignal) externalSignal.removeEventListener('abort', onAbort);
@@ -413,13 +439,16 @@
         return String(item.cloudId || item.id);
       }));
       var paginationRevisionAtRequest = photoPaginationRevision;
+      var resetSortedPages = photoSortNeedsReset;
       var requestId = 'load_' + photoLoadGeneration + '_' + Date.now();
       var rows = await fetchPhotoPage(0, hasCache ? 10000 : 25000, signal, requestId, currentGen);
       if (currentGen !== photoLoadGeneration) return window.photoWallData; // Aborted by newer request
       
       firstPageLoaded = true;
       page = 0;
-      more = rows.length >= PAGE_SIZE;
+      more = rows.__page && typeof rows.__page.has_more === 'boolean' ? rows.__page.has_more : rows.length >= PAGE_SIZE;
+      photoNextCursor = rows.__page && rows.__page.next_cursor || null;
+      photoLoadedSort = window.pwSortKey || 'date_desc'; photoSortNeedsReset = false;
       photoPaginationDirty = paginationRevisionAtRequest !== photoPaginationRevision;
       // 用 normalizePhotoWallRow 同口径采集"已删除"墓碑（is_deleted / __deleted__ / __pw_del__），
       // 否则 is_deleted 软删行的 id 不会进入墓碑集合，导致它从本地缓存被合并"复活"。
@@ -443,13 +472,16 @@
       var dates = rows.map(function(row){ return Date.parse(row && row.created_at || ''); });
       var boundary = more && dates.every(Number.isFinite) ? Math.min.apply(Math, dates) : null;
       photoPageBoundary = boundary;
+      photoOrderBoundary = rows.__page && rows.__page.sort && rows.length ? normalizePhotoWallRow(rows[rows.length-1]) : null;
       photoPageSeenIds = new Set(visibleCloudIds);
       photoSnapshotKnownIds = knownIdsAtRequest;
       var retained = currentPhotos.filter(function(item){
         var key = String(item.cloudId || item.id);
         if (!knownIdsAtRequest.has(key)) return true;
+        if (resetSortedPages) return false;
         if (!more) return false;
         if (cloudIds.has(key)) return visibleCloudIds.has(key);
+        if (photoOrderBoundary) return comparePhotoOrder(item,photoOrderBoundary,photoLoadedSort)>0;
         return boundary == null || !Number.isFinite(item.timestamp) || item.timestamp <= boundary;
       });
       window.photoWallData = mergePhotoLists(cloud, retained);
@@ -535,6 +567,7 @@
     var requestGeneration = photoLoadGeneration;
     var paginationRevision = photoPaginationRevision;
     var upperBoundary = photoPageBoundary;
+    var upperOrderBoundary = photoOrderBoundary;
     var knownIdsAtRequest = new Set((window.photoWallData || []).filter(Boolean).map(function(item){ return String(item.cloudId || item.id); }));
     var nextPage = page + 1;
     var controller = new AbortController();
@@ -553,7 +586,8 @@
         if (requestGeneration !== photoLoadGeneration || controller.signal.aborted) {
           throw createPhotoAbortError();
         }
-        var nextMore = rows.length >= PAGE_SIZE;
+        var nextMore = rows.__page && typeof rows.__page.has_more === 'boolean' ? rows.__page.has_more : rows.length >= PAGE_SIZE;
+        var lowerOrderBoundary = rows.__page && rows.__page.sort && rows.length ? normalizePhotoWallRow(rows[rows.length-1]) : null;
         var rawIds = new Set(rows.filter(Boolean).map(function(row){ return String(row.id); }));
         var visibleIds = new Set(items.map(function(item){ return String(item.cloudId || item.id); }));
         var dates = rows.map(function(row){ return Date.parse(row && row.created_at || ''); });
@@ -566,12 +600,17 @@
           if (!knownIdsAtRequest.has(key)) return true;
           if (rawIds.has(key)) return visibleIds.has(key);
           if (photoPageSeenIds.has(key) || !photoSnapshotKnownIds.has(key)) return true;
+          if (upperOrderBoundary && lowerOrderBoundary) {
+            if (comparePhotoOrder(item,upperOrderBoundary,photoLoadedSort)<=0) return true;
+            return nextMore && comparePhotoOrder(item,lowerOrderBoundary,photoLoadedSort)>0;
+          }
           if (upperBoundary == null || !Number.isFinite(item.timestamp) || item.timestamp > upperBoundary) return true;
           return nextMore && (lowerBoundary == null || item.timestamp <= lowerBoundary);
         });
         var pruned = retained.length < currentPhotos.length;
         window.photoWallData = mergePhotoLists(items, retained);
         photoPageBoundary = lowerBoundary;
+        photoOrderBoundary = lowerOrderBoundary; photoNextCursor = rows.__page && rows.__page.next_cursor || null;
         closeRemovedPhotoPreview(knownIdsAtRequest);
         page = nextPage;
         more = nextMore;

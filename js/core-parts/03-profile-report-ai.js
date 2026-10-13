@@ -1380,11 +1380,11 @@ function renderProfileActivityList(kind) {
                     if (!sameAccount()) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
                     
-                    if (window.__xtjApplyPostDetailComment) window.__xtjApplyPostDetailComment('DELETE', { id: commentId, post_id: targetPostId });
-                    markFeedInteractionChanged();
-                    feedAllComments = (feedAllComments || []).filter(function(item) {
-                        return String(item.id) !== String(commentId);
-                    });
+                    if (!targetPostId && window.__xtjPostDetailComments) {
+                        var detailComment = window.__xtjPostDetailComments.find(function(row) { return String(row.id) === String(commentId); });
+                        if (detailComment) targetPostId = detailComment.post_id;
+                    }
+                    window.__xtjApplyCommentDeletion(commentId, result, targetPostId);
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (targetPostId && typeof window.__xtjSchedulePostCardPatch === 'function') {
                         window.__xtjSchedulePostCardPatch(targetPostId);
@@ -1429,16 +1429,7 @@ function renderProfileActivityList(kind) {
                     if (!sameAccount()) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
 
-                    profileActivityState.comments = (profileActivityState.comments || []).filter(function(item) {
-                        return String(item.id) !== String(commentId);
-                    });
-                    if (profileActivityState.totals && profileActivityState.totals.comments > 0) {
-                        profileActivityState.totals.comments -= 1;
-                    }
-                    markFeedInteractionChanged();
-                    feedAllComments = (feedAllComments || []).filter(function(item) {
-                        return !(item && item.id != null && String(item.id) === String(commentId));
-                    });
+                    window.__xtjApplyCommentDeletion(commentId, result, targetPostId);
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (typeof updateFeedStats === 'function') updateFeedStats();
                     if (typeof refreshStatModal === 'function') refreshStatModal();

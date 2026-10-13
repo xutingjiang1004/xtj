@@ -54,12 +54,12 @@ test('all post mutations preserve production UUID identifiers', () => {
   assert.match(core, /post_id: normalizedPostId, is_pinned: Boolean\(nextPinned\)/);
 });
 
-test('like reaches the requested state even before the optional unique migration', () => {
+test('like uses an atomic visibility-checked RPC and fails closed if it is unavailable', () => {
   const route = between(server, "app.post('/api/post/like'", "app.get('/api/stats/snapshot'");
-  assert.match(route, /existingLike[\s\S]*maybeSingle/);
-  assert.match(route, /if \(!existingLike\.data\)[\s\S]*insert/);
-  assert.match(route, /delete\(\)\.eq\('post_id', postId\)\.eq\('user_name', req\.userName\)/);
-  assert.doesNotMatch(route, /like_constraint_required/);
+  assert.match(route, /rpc\('xtj_set_post_like'/);
+  assert.match(route, /likeWrite.error \|\| !likeWrite.data/);
+  assert.match(route, /status\(503\)/);
+  assert.doesNotMatch(route, /\.insert\(|\.delete\(/);
 });
 
 test('pin has an authenticated service-role compatibility path when RPC is absent', () => {

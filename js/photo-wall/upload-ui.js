@@ -686,6 +686,7 @@
     if (!sheet) return;
     if (state.uploading && !options.force) return;
     sheet.classList.remove('active');
+    sheet.inert = true;
     sheet.setAttribute('aria-hidden', 'true');
     
     if (!options.force) {
@@ -879,7 +880,9 @@
       } else { skipMeta.hidden = true; skipMeta.textContent = ''; }
     }
     sheet.classList.add('active');
+    sheet.inert = false;
     sheet.setAttribute('aria-hidden', 'false');
+    if (window.__xtjSyncFocusSurfaces) window.__xtjSyncFocusSurfaces();
     setUploadResult('');
     var firstControl = byId('pwUploadReselectBtn') || byId('pwStartUploadBtn') || byId('pwUploadSheetClose');
     if (firstControl && typeof firstControl.focus === 'function') firstControl.focus();

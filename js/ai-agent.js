@@ -1373,13 +1373,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!filePreview || !fileData) return;
     filePreview.innerHTML = '';
     var thumb = String(fileData.type || '').indexOf('image/') === 0
-      ? el('img', { src: fileData.dataUrl, class: 'ai-file-thumb' })
+      ? el('img', { src: fileData.dataUrl, alt: '', class: 'ai-file-thumb' })
       : el('div', { class: 'ai-file-icon' }, '📄');
     var sizeLabel = fileData.size
       ? Math.round(fileData.size / 1024)
       : Math.round(((fileData.dataUrl || '').length * 3 / 4) / 1024);
     var info = el('span', { class: 'ai-file-info', text: fileData.name + ' (' + sizeLabel + 'KB)' });
-    var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
+    var removeBtn = el('button', { type: 'button', class: 'ai-file-remove', 'aria-label': '移除附件 ' + fileData.name }, '×');
     removeBtn.addEventListener('click', function() {
       if (typeof onRemove === 'function') onRemove();
     });

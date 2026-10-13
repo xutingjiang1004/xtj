@@ -332,7 +332,12 @@ test('Dock changes stay inside the approved selection-feedback scope', function(
   var changedLines = diff.split(/\r?\n/).filter(function(line) {
     return /^[+-](?!\+\+\+|---)/.test(line);
   });
+  // This audit authorizes the missing accessible name. Require the exact
+  // replacement pair; removing a button or changing its selector still fails.
+  var oldPhotoTab = changedLines.find(function(line) { return /^-\s*<button class="dock-tab" data-tab="ai">$/.test(line); });
+  var namedPhotoTab = changedLines.find(function(line) { return /^\+\s*<button class="dock-tab" data-tab="ai" aria-label="照片墙">$/.test(line); });
   var forbidden = changedLines.filter(function(line) {
+    if (oldPhotoTab && namedPhotoTab && (line === oldPhotoTab || line === namedPhotoTab)) return false;
     if (/\.dock-tab\.is-switch-feedback\s+\.dt-icon/.test(line)) return false;
     if (/^-.*html\.xtj-pro-active\s+\.dock-tab\.active/.test(line)) return false;
     // 桌面端 Dock 间距优化（用户明确要求）
