@@ -11,6 +11,15 @@ function extract(source, start, end, name, c) {
   return vm.runInNewContext('(function(){' + source.slice(a,b) + ';return ' + name + ';})()', c);
 }
 function deferred() { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; }
+test('an empty composer reset during account initialization does not depend on the media helper finishing loading', () => {
+  const source = fs.readFileSync('js/post-composer-media.js', 'utf8'), a = source.indexOf('function render()'), b = source.indexOf('function clear()', a);
+  const nodes = { postMediaPreview: { style: {}, classList: { toggle() {} } }, postMediaPreviewGrid: { replaceChildren() {}, style: { setProperty() {} } }, postMediaPreviewCount: {} };
+  const render = vm.runInNewContext('(' + source.slice(a, b).trim() + ')', {
+    document: { getElementById: id => nodes[id] }, window: {}, entries: [], finishDrag() {}
+  });
+  assert.doesNotThrow(() => render()); assert.equal(nodes.postMediaPreview.style.display, 'none');
+  assert.equal(nodes.postMediaPreviewCount.textContent, '已选择 0 个文件');
+});
 function researchClient(response, extra = {}) {
   const timers = [], identity = { scope: 'alice', epoch: 1 }, S = { dtConversationId: 'ORIGINAL1', dtResearchModel: 'pro' };
   const c = { S, API_BASE: 'https://isolated.test/api/agent', AbortController, TextDecoder, Promise,
@@ -188,13 +197,14 @@ test('multi-agent research forwards the same selected model to its planner, all 
   assert.equal(result.finalContent, 'REAL SYNTH ANSWER'); assert.equal(result.model, 'deepseek-flash');
 });
 
-function customResearchRoute({ saveError = null, incomplete = false, cancelled = false } = {}) {
+function customResearchRoute({ saveError = null, incomplete = false, cancelled = false, thinkingMode, agentCount = 1, webSearch } = {}) {
   const events = [], calls = [], rows = [];
   let handler, upstreamAborts = 0;
   const req = new EventEmitter();
   req.userName = 'alice';
   req.body = { provider: 'custom', api_key: 'test-only-key', model: 'selected-custom-model', base_url: 'https://provider.test/v1',
     message: 'ORIGINAL QUESTION', conversation_id: 'CUSTOM123', client_request_id: 'original-request',
+    thinking_mode: thinkingMode, web_search: webSearch,
     attachments: [{ name: 'original.txt', type: 'text/plain', data_url: 'data:text/plain;base64,' + Buffer.from('ORIGINAL DOCUMENT').toString('base64') }] };
   const res = new EventEmitter();
   Object.assign(res, { writableEnded: false, setHeader() {}, flushHeaders() {}, end() { this.writableEnded = true; } });
@@ -214,7 +224,7 @@ function customResearchRoute({ saveError = null, incomplete = false, cancelled =
     requestPinnedStream: async (_url, _addresses, options) => {
       const payload = JSON.parse(options.body); calls.push(payload);
       if (!payload.stream) return new Response(JSON.stringify({ choices: [{ message: { content: calls.length === 1
-        ? JSON.stringify({ agents: [{ role: 'Researcher', task_description: 'Read document', need_search: false }] }) : 'REAL WORKER RESULT' } }] }));
+        ? JSON.stringify({ agents: Array.from({ length: agentCount }, (_, i) => ({ role: 'Researcher ' + i, task_description: 'Read document', need_search: webSearch === false, search_queries: ['fixture query'] })) }) : 'REAL WORKER RESULT' } }] }));
       options.signal.addEventListener('abort', () => upstreamAborts++, { once: true });
       const chunks = [{ choices: [{ delta: { reasoning_content: 'ACTUAL MODEL THOUGHT', content: 'REAL CUSTOM REPORT' } }] }];
       return new Response(chunks.map(e => 'data: ' + JSON.stringify(e) + '\n\n').join('') + (incomplete || cancelled ? '' : 'data: [DONE]\n\n'));
@@ -240,6 +250,13 @@ test('the real third-party research route uses original files and saves the sele
 test('a third-party research save failure remains explicit without duplicating the completed turn', async () => {
   const f = customResearchRoute({ saveError: { message: 'write refused' } }); await f.run();
   assert.equal(f.events.find(e => e.type === 'done').saved, false); assert.equal(f.rows.length, 1);
+});
+test('third-party quick research honors its intensity, limits its workers and does not execute disabled searches', async () => {
+  const f = customResearchRoute({ thinkingMode: 'low', agentCount: 3, webSearch: false }); await f.run();
+  const done = f.events.find(e => e.type === 'done'); assert.equal(done.thinking_mode, 'low'); assert.equal(done.agent_count, 1);
+  assert.equal(f.calls.length, 3); assert.ok(f.calls.every(c => c.max_tokens <= 2048));
+  assert.equal(f.events.some(e => e.type === 'tool_calls'), false);
+  assert.equal(JSON.parse(f.rows[0][1].media_url).usage.thinking_mode, 'low');
 });
 for (const cancelled of [false, true]) test('third-party research retains its partial answer without reporting completion: cancelled=' + cancelled, async () => {
   const f = customResearchRoute({ cancelled, incomplete: !cancelled }); await f.run();

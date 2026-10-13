@@ -285,9 +285,11 @@ test('third-party research files use the selected account configuration without 
   await f.page.waitForFunction(()=>localStorage.getItem('xtj_ai_custom_models__alice')?.includes('research-custom'));
   await f.page.evaluate(()=>__xtjAiAgent.openConversation('CUSTOM111','deep_think'));
   await f.page.locator('.dt-research-model-select').selectOption('custom:research-custom');
+  await f.page.locator('.dt-research-mode-opt').getByText('快速', { exact: true }).click();
   await attach(f.page,'#dtFileInp','private-research.txt',Buffer.from('ORIGINAL DOCUMENT BYTES'),'text/plain');
   await f.page.locator('#dtInput').fill('RESEARCH WITH MY MODEL');await f.page.locator('#dtSendBtn').click();await f.page.waitForFunction(()=>selectedResearchCalls.length===1);
   const call=await f.page.evaluate(()=>selectedResearchCalls[0]);assert.equal(call.path,'/api/agent/custom-chat/deep-stream');assert.equal(call.body.model,'synthetic-selected-model');
+  assert.equal(call.body.thinking_mode, 'low');
   assert.equal(call.body.attachments[0].data_url,'data:text/plain;base64,'+Buffer.from('ORIGINAL DOCUMENT BYTES').toString('base64'));assert.deepEqual(f.errors,[]);
 });
 

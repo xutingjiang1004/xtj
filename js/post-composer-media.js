@@ -86,8 +86,12 @@
     finishDrag();
     var wrap = document.getElementById('postMediaPreview'), grid = document.getElementById('postMediaPreviewGrid'), count = document.getElementById('postMediaPreviewCount');
     if (!wrap || !grid) return;
+    var mediaApi = window.XtjPostMedia;
+    // Auth cleanup may reset an empty draft before the media module is ready.
+    // Keep an existing preview intact until its helper is available.
+    if (!mediaApi && entries.length) return;
     grid.replaceChildren();
-    grid.style.setProperty('--post-grid-columns', window.XtjPostMedia.gridColumns(entries.length));
+    grid.style.setProperty('--post-grid-columns', mediaApi ? mediaApi.gridColumns(entries.length) : 1);
     entries.forEach(function(entry, index) {
       var node = document.createElement('div'); node.className = 'post-media-preview-thumb';
       entry.node = node;
@@ -104,7 +108,7 @@
       if (!isVideo && !isAudio) { media.draggable = false; node.classList.add('is-sortable'); bindReorder(node, entry); }
     });
     if (count) count.textContent = entries.length && entries[0].file.type.startsWith('image/')
-      ? '已选择 ' + entries.length + ' / ' + window.XtjPostMedia.MAX_POST_IMAGES + ' 张图片' : '已选择 ' + entries.length + ' 个文件';
+      ? '已选择 ' + entries.length + ' / ' + mediaApi.MAX_POST_IMAGES + ' 张图片' : '已选择 ' + entries.length + ' 个文件';
     wrap.style.display = entries.length ? '' : 'none'; wrap.classList.toggle('is-active', !!entries.length);
   }
   function clear() { entries.forEach(discard); entries = []; selectionVersion++; render(); }
