@@ -291,7 +291,9 @@ test.beforeEach(async ({ page }) => {
       })
     }));
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    // Background polling can keep the page busy after the avatar is ready.
+    // Wait for the actual image below, retaining the same geometry assertions.
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => { if (typeof window.switchDockTab === 'function') window.switchDockTab('posts', true); });
     await page.waitForTimeout(300);
 

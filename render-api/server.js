@@ -22769,6 +22769,10 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     return safeEnd();
   }
   var originalCustomDeepMessage = text;
+  var customDeepThinkingMode = String(body.thinking_mode || 'max');
+  if (['low', 'medium', 'high', 'max'].indexOf(customDeepThinkingMode) < 0) customDeepThinkingMode = 'max';
+  var customDeepWorkerLimit = customDeepThinkingMode === 'low' ? 1 : customDeepThinkingMode === 'medium' ? 2 : customDeepThinkingMode === 'high' ? 4 : 6;
+  var customDeepSearchEnabled = customDeepThinkingMode !== 'low' && body.web_search !== false;
   var customDeepConvId = String(body.conversation_id || '');
   if (!/^[A-Za-z0-9-]{6,128}$/.test(customDeepConvId)) customDeepConvId = genConvId();
   var customDeepSaved = false, customDeepCompleted = false;
@@ -22941,12 +22945,12 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     if (text !== originalCustomDeepMessage) customDeepUserExtra.attachment_context = String(text).slice(0,60000);
     if (aborted || controller.signal.aborted) return safeEnd();
     startHeartbeat();
-    sseSend({ type: 'meta', deep_think: true, conversation_id: customDeepConvId, model: chosenModel, provider: provider });
+    sseSend({ type: 'meta', deep_think: true, conversation_id: customDeepConvId, model: chosenModel, provider: provider, thinking_mode: customDeepThinkingMode });
     emitReasoning('\n【总指挥 · Planner】正在拆解问题、规划多智能体并行研究方案...\n');
 
     // 1) Planner
     var plannerRaw = '';
-    try { plannerRaw = await callCustomChat([{ role: 'user', content: CUSTOM_PLANNER_PROMPT + text }], { maxTokens: 2000, temperature: 0.4 }); } catch (eP) { plannerRaw = ''; }
+    try { plannerRaw = await callCustomChat([{ role: 'user', content: CUSTOM_PLANNER_PROMPT + text }], { maxTokens: customDeepThinkingMode === 'low' ? 512 : 2000, temperature: 0.4 }); } catch (eP) { plannerRaw = ''; }
     _customDeepUpstreamUsed = true; // ★ S12：首次上游调用已发生，此后无论成败都必须记账
     if (aborted || controller.signal.aborted) return safeEnd();
     var plan = parsePlannerJson(plannerRaw);
@@ -22959,6 +22963,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
         search_queries: Array.isArray(ca && ca.search_queries) ? ca.search_queries.slice(0, 5).map(function(q) { return String(q).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 100); }) : []
       };
     }) : buildDefaultAgents();
+    agents = agents.slice(0, customDeepWorkerLimit);
     emitReasoning('已规划 ' + agents.length + ' 个研究方向：' + agents.map(function(a) { return a.role; }).join('、') + '\n');
 
     // 2) 并行 Workers（每个带联网搜索）
@@ -22966,7 +22971,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     async function runCustomWorker(agent, idx) {
       var role = String(agent.role || ('方向 ' + (idx + 1)));
       var contextParts = [];
-      if (agent.need_search && Array.isArray(agent.search_queries) && agent.search_queries.length) {
+      if (customDeepSearchEnabled && agent.need_search && Array.isArray(agent.search_queries) && agent.search_queries.length) {
         var queries = agent.search_queries.slice(0, 3);
         for (var qi = 0; qi < queries.length; qi++) {
           var q = String(queries[qi] || '').trim().slice(0, 100);
@@ -22993,7 +22998,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       var userMsg = (contextParts.length ? ('以下是相关检索资料（可能不完整，可结合自身知识补全）：\n\n' + contextParts.join('\n\n') + '\n\n') : '') + '分配的任务：' + (taskDesc || '围绕原始问题展开研究') + '\n原始问题：' + text;
       var answer = '';
       try {
-        answer = await callCustomChat([{ role: 'system', content: CUSTOM_WORKER_PROMPT }, { role: 'user', content: userMsg }], { maxTokens: 1600, temperature: 0.5 });
+        answer = await callCustomChat([{ role: 'system', content: CUSTOM_WORKER_PROMPT }, { role: 'user', content: userMsg }], { maxTokens: customDeepThinkingMode === 'low' ? 1024 : 1600, temperature: 0.5 });
       } catch (eW) {
         // ★ 修复：不再把上游/网络异常原文拼进用户可见文案（防 SSRF 响应外带与内部信息泄漏）
         answer = '（该方向分析失败：第三方服务暂不可用）';
@@ -23024,7 +23029,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
             sseSend({ type: 'content', text: piece });
           }
         },
-        { maxTokens: 4000, temperature: 0.5 }
+        { maxTokens: customDeepThinkingMode === 'low' ? 2048 : 4000, temperature: 0.5 }
       );
     } catch (eS) {
       sseSend({ type: 'error', error: '研究报告生成失败，请稍后重试', code: 'CUSTOM_DEEP_SYNTH_ERROR' });
@@ -23035,7 +23040,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     customDeepCompleted = true;
     customDeepSaved = await saveDeepThinkChatTurn({db:supabase,userName:req.userName,convId:customDeepConvId,message:originalCustomDeepMessage,content:finalContent,
       marker:AI_AGENT_MESSAGE_MARKER,buildMeta:buildMsgMeta,requestId:body.client_request_id,userExtra:customDeepUserExtra,
-      assistantExtra:{deep_think:true,thinking_log:customDeepThinkingLog,agent_count:agents.length},usage:{model:chosenModel,thinking_mode:'max'}});
+      assistantExtra:{deep_think:true,thinking_log:customDeepThinkingLog,agent_count:agents.length},usage:{model:chosenModel,thinking_mode:customDeepThinkingMode}});
     sseSend({
       type: 'done',
       complete: true,
@@ -23044,7 +23049,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       custom: true,
       model: chosenModel,
       provider: provider,
-      thinking_mode: 'max',
+      thinking_mode: customDeepThinkingMode,
       agent_count: agents.length,
       search_count: searchCtx.searchConsumed,
       sources: sources.slice(0, 30),
@@ -23060,6 +23065,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     try { clearTimeout(timer); } catch (e) {}
     if (!customDeepCompleted && !customDeepSaved && _customDeepUpstreamUsed) await saveInterruptedChatTurn({db:supabase,userName:req.userName,convId:customDeepConvId,
       message:originalCustomDeepMessage,content:finalContent||'',reasoning:thinkingAcc||'',chatMode:'deep_think',model:chosenModel,
+      thinkingMode:customDeepThinkingMode,
       thinkingLog:customDeepThinkingLog,finishReason:aborted||controller.signal.aborted?'cancelled':'failed',
       marker:AI_AGENT_MESSAGE_MARKER,buildMeta:buildMsgMeta,requestId:body.client_request_id,visionUrls:customDeepUserExtra.vision_urls,attachmentContext:customDeepUserExtra.attachment_context});
     // ★ S6 审计修复：结束时统一记账（正常完成/中断/失败路径都覆盖），
