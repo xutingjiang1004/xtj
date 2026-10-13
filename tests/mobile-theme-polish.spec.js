@@ -48,6 +48,9 @@ async function setup(page, width = 390, height = 844) {
 
 for (const [width, height] of [[320, 700], [390, 844], [430, 932], [844, 390]]) {
   test(`header and flat actions fit ${width}x${height}, and the header settles fully in/out`, async ({ page }, info) => {
+    // Two screenshot captures share this scenario's deadline. State and
+    // geometry assertions retain their own existing time limits.
+    test.setTimeout(60000);
     await setup(page, width, height);
     const header = page.locator('.posts-nav');
     const box = await header.boundingBox();
@@ -272,9 +275,21 @@ test('like feedback keeps one blossom and one SVG, without moving sibling button
   const like = page.locator('#feed .like-btn').first();
   const actions = page.locator('#feed .actions').first();
   const before = await actions.locator('.action-btn').evaluateAll(nodes => nodes.map(n => [n.getBoundingClientRect().x, n.getBoundingClientRect().width]));
-  await like.click();
+  // Observe the short feedback in the click turn so a slow test runner cannot
+  // miss a blossom that has already completed and cleaned itself up.
+  const feedback = await like.evaluate(button => {
+    button.click();
+    const actions = button.closest('.actions');
+    return {
+      blossoms: actions.querySelectorAll('.like-blossom').length,
+      icons: button.querySelectorAll('.post-like-icon').length,
+      positions: Array.from(actions.querySelectorAll('.action-btn'), node => [node.getBoundingClientRect().x, node.getBoundingClientRect().width])
+    };
+  });
   await expect(like).toHaveAttribute('aria-pressed', 'true');
-  await expect(actions.locator('.like-blossom')).toHaveCount(1);
+  expect(feedback.blossoms).toBe(1);
+  expect(feedback.icons).toBe(1);
+  expect(feedback.positions).toEqual(before);
   await expect(page.locator('.xtj-heart-burst-layer')).toHaveCount(0);
   const after = await actions.locator('.action-btn').evaluateAll(nodes => nodes.map(n => [n.getBoundingClientRect().x, n.getBoundingClientRect().width]));
   expect(after).toEqual(before);

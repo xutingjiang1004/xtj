@@ -321,15 +321,12 @@ test.beforeEach(async ({ page }) => {
       })
     }));
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => { if (typeof window.switchDockTab === 'function') window.switchDockTab('posts', true); });
-    await page.waitForTimeout(500);
-
-    const hasImageClass = await page.evaluate(() => {
-      const avatar = document.querySelector('.post[data-post-id="avatar-test-post"] .avatar');
-      return avatar ? avatar.classList.contains('has-image') : 'avatar_not_found';
-    });
-    expect(hasImageClass).toBe(true);
+    await expect(page.locator('.post[data-post-id="avatar-test-post"] .avatar')).toBeVisible();
+    const avatar = page.locator('.post[data-post-id="avatar-test-post"] .avatar');
+    await expect(avatar.locator('.avatar-image')).toBeVisible();
+    await expect(avatar).toHaveClass(/has-image/);
   });
 
   test('B3: Avatar fallback visible when image URL is broken', async ({ page }) => {
@@ -348,8 +345,9 @@ test.beforeEach(async ({ page }) => {
       })
     }));
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => { if (typeof window.switchDockTab === 'function') window.switchDockTab('posts', true); });
+    await expect(page.locator('.post[data-post-id="avatar-test-post"] .avatar')).toBeVisible();
     await page.waitForTimeout(1500);
 
     const fallbackCheck = await page.evaluate(() => {
@@ -380,8 +378,9 @@ test.beforeEach(async ({ page }) => {
       })
     }));
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => { if (typeof window.switchDockTab === 'function') window.switchDockTab('posts', true); });
+    await expect(page.locator('.post[data-post-id="avatar-test-post"] .avatar')).toBeVisible();
     await page.waitForTimeout(500);
 
     // Trigger feed re-render 10 times
@@ -418,8 +417,9 @@ test.beforeEach(async ({ page }) => {
       })
     }));
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => { if (typeof window.switchDockTab === 'function') window.switchDockTab('posts', true); });
+    await expect(page.locator('.post[data-post-id="avatar-test-post"] .avatar')).toBeVisible();
     await page.waitForTimeout(500);
 
     const computed = await page.evaluate(() => {
@@ -455,8 +455,9 @@ test.beforeEach(async ({ page }) => {
       body: JSON.stringify({ ok: true, avatars: { 'WideUser': widePng } })
     }));
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => { if (typeof window.switchDockTab === 'function') window.switchDockTab('posts', true); });
+    await expect(page.locator('.post[data-post-id="avatar-test-post"] .avatar')).toBeVisible();
     await page.waitForTimeout(500);
 
     const img = page.locator('.post[data-post-id="avatar-test-post"] .avatar .avatar-image');
@@ -481,8 +482,9 @@ test.beforeEach(async ({ page }) => {
       body: JSON.stringify({ ok: true, avatars: { 'TallUser': tallPng } })
     }));
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => { if (typeof window.switchDockTab === 'function') window.switchDockTab('posts', true); });
+    await expect(page.locator('.post[data-post-id="avatar-test-post"] .avatar')).toBeVisible();
     await page.waitForTimeout(500);
 
     const img = page.locator('.post[data-post-id="avatar-test-post"] .avatar .avatar-image');
