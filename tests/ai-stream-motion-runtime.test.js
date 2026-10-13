@@ -9,6 +9,21 @@ function section(start, end) {
   assert.ok(offset >= 0);
   return agent.slice(offset, agent.indexOf(end, offset));
 }
+test('shared: loading Markdown after a plain prefix reparses the whole accepted reply', async () => {
+  const { browser, page } = await fixture();
+  try {
+    const result = await page.evaluate(() => {
+      const output = document.getElementById('output');
+      delete XtjAiCore.Markdown;
+      const renderer = XtjAiCore.StreamRenderer.create(output);
+      renderer.append('plain prefix\n\n'); renderer.flush();
+      XtjAiCore.Markdown = { render: text => '<p>' + text.toUpperCase().split('\n\n').filter(Boolean).join('</p><p>') + '</p>' };
+      renderer.append('new tail'); renderer.flush();
+      const text = output.textContent; renderer.finish(); return text;
+    });
+    assert.equal(result, 'PLAIN PREFIXNEW TAIL');
+  } finally { await browser.close(); }
+});
 async function fixture() {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
   const page = await browser.newPage();

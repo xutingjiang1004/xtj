@@ -12,7 +12,7 @@
     }
     function reset() {
         generation++;
-        jobs.forEach(function (job) { if (job.downloadAbort) job.downloadAbort.abort(); });
+        jobs.forEach(function (job) { if (job.downloadAbort) job.downloadAbort.abort(); if (job.reject) job.reject(new Error('识别已取消')); });
         if (worker) worker.terminate();
         worker = null;
         if (active && active.cancel) active.cancel();
@@ -154,8 +154,36 @@
         if (!job || !sameUser(job) || job.state !== 'error') return;
         notify(job, 'queued', '等待重新转写…'); queue.push(job); void run();
     }
+    // AI composer recordings use the existing local worker without writing a
+    // DM transcript. Each promise owns only its own queued/active job.
+    function transcribeBlob(file, options) {
+        options = options || {};
+        return new Promise(function (resolve, reject) {
+            var user = String(options.owner || '');
+            if (!user || user !== String(window.currentUser || '') || !file || !file.size || file.size > MAX_BYTES) return reject(new Error('录音或登录状态不可用'));
+            if (options.signal && options.signal.aborted) return reject(new Error('识别已取消'));
+            var id = 'ai_' + (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : Date.now() + '_' + Math.random());
+            var key = user + '\n__ai_local__\n' + id, settled = false;
+            function settle(error, text) {
+                if (settled) return; settled = true;
+                if (options.signal) options.signal.removeEventListener('abort', cancel);
+                jobs.delete(key); if (error) reject(error); else resolve(text);
+            }
+            function cancel() {
+                var job = jobs.get(key);
+                queue = queue.filter(function (item) { return item !== job; });
+                if (job) { if (job.downloadAbort) job.downloadAbort.abort(); if (job.cancel) job.cancel(); job.generation = -1; }
+                settle(new Error('识别已取消'));
+            }
+            if (options.signal) options.signal.addEventListener('abort', cancel, {once:true});
+            enqueue({owner:user,peer:'__ai_local__',id:id,file:file,sent:false,
+                onState:function (job) { if (options.onState) options.onState(job); if (job.state === 'error') settle(new Error(job.label)); },
+                onResult:function (text) { settle(null,text); },reject:function (error) { settle(error); }});
+            if (!jobs.has(key) && !settled) settle(new Error('语音转写繁忙，请稍后重试'));
+        });
+    }
     // Logout must release the model and discard private in-memory jobs.
     window.addEventListener('xtj:auth-changed', reset);
     window.addEventListener('pagehide', reset);
-    window.XTJVoiceTranscription = { enqueue: enqueue, retry: retry, reset: reset };
+    window.XTJVoiceTranscription = { enqueue: enqueue, retry: retry, reset: reset, transcribeBlob: transcribeBlob };
 }());

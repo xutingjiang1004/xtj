@@ -188,7 +188,7 @@ function customModelFixture({localModels=[],deleted=[],pending=null,fetchImpl}={
   localStorage.setItem('xtj_ai_models_deleted_uids__A',JSON.stringify(deleted));
   if(pending)localStorage.setItem('xtj_ai_models_pending__A',JSON.stringify(pending));
   const context=vm.createContext({window:{currentUser:'A',_authStateEpoch:1},localStorage,AbortController,setTimeout,clearTimeout,
-    CUSTOM_MODELS_KEY:'xtj_ai_custom_models',CUSTOM_MODEL_PREFIX:'custom:',DEFAULT_AI_MODEL:'deepseek-flash',API_BASE:'/api/agent',S:{selectedModel:'deepseek-flash'},
+    CUSTOM_MODEL_LIMIT:20,CUSTOM_MODELS_KEY:'xtj_ai_custom_models',CUSTOM_MODEL_PREFIX:'custom:',DEFAULT_AI_MODEL:'deepseek-flash',API_BASE:'/api/agent',S:{selectedModel:'deepseek-flash'},
     isCustomModelId:value=>value.startsWith('custom:'),getUserAuthPayload:async()=>({token:'token',headers:{Authorization:'Bearer token'}}),
     fetch:async(url,options={})=>{const call={url,method:options.method,body:options.body?JSON.parse(options.body):null};calls.push(call);return fetchImpl?fetchImpl(call):{ok:true,json:async()=>({ok:true,models:[],deleted_uids:[]})};}});
   const start=aiSource.indexOf('  function aiStorageScopeName()');const end=aiSource.indexOf('  function genCustomModelUid()',start);

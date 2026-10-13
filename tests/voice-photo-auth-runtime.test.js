@@ -48,3 +48,13 @@ test('a damaged model cache restarts once with the original local audio and save
 test('base model initialization failure falls back once to tiny and keeps original audio',async()=>{
  const f=transcriptionFixture();f.enqueue();await until(()=>f.workers[0]?.data);const first=f.workers[0];assert.equal(first.data.model,'base');first.onmessage({data:{id:first.data.id,type:'error',error:'初始化失败',fallbackModel:'tiny'}});await until(()=>f.workers[1]?.data);assert.equal(first.terminated,true);assert.equal(f.workers[1].data.model,'tiny');assert.equal(f.workers[1].data.audio.length,16000);f.result();await until(()=>f.results.length===1);assert.equal(f.calls.length,1);f.window.XTJVoiceTranscription.reset();
 });
+test('AI recordings use the real local worker promise without writing a DM transcript',async()=>{
+ const f=transcriptionFixture(false),pending=f.window.XTJVoiceTranscription.transcribeBlob(f.options.file,{owner:'A'});
+ await until(()=>f.workers[0]?.data);f.result();assert.equal(await pending,'你好，照片很好看');assert.equal(f.calls.length,0);f.window.XTJVoiceTranscription.reset();
+});
+test('cancelling an AI recording releases its active worker while the queued DM transcription still completes',async()=>{
+ const f=transcriptionFixture(false),controller=new AbortController();
+ const pending=f.window.XTJVoiceTranscription.transcribeBlob(f.options.file,{owner:'A',signal:controller.signal}),rejected=assert.rejects(pending,/取消/);
+ await until(()=>f.workers[0]?.data);f.enqueue();controller.abort();await rejected;
+ await until(()=>f.workers[1]?.data);assert.equal(f.workers[0].terminated,true);f.result();await until(()=>f.results.length===1);assert.equal(f.calls.length,0);f.window.XTJVoiceTranscription.reset();
+});

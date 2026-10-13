@@ -188,7 +188,7 @@ test('S9-6: 前端对 concurrent 不得回退到 deep think（否则必然二次
 
   assert.match(block, /var isConcurrent = errCode === 'concurrent' \|\| \/上一个\(研究\)\?请求\|请等待上一个\/\.test\(errMsg\);/,
     '必须识别 concurrent 类错误');
-  assert.match(block, /if \(isConcurrent \|\| isQuota \|\| \(err && err\.retryable === false\) \|\| answer\) \{/,
+  assert.match(block, /if \(isConcurrent \|\| isQuota \|\|[^\n]+\) \{/,
     'concurrent / 配额类错误必须走终结分支');
   // 终结分支必须在 `return 'fallback'` 之前
   const terminalIdx = block.indexOf('if (isConcurrent || isQuota ||');

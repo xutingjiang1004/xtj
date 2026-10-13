@@ -30,9 +30,9 @@ async function saveCustomChatTurn(options) {
     { user_name: userName, content: String(message).slice(0, 60000), media_type: marker,
       media_url: buildMeta('user', convId, null, null, 1, null, 0, userExtra),
       actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + now },
-    { user_name: userName, content: String(content).slice(0, 24000), media_type: marker,
+    { user_name: userName, content: String(content).slice(0, 500000), media_type: marker,
       media_url: buildMeta('assistant', convId, {model, thinking_mode: thinkingMode},
-        thinkingMode === 'off' ? '' : String(reasoning || '').slice(0, 64000), 2, null, thinkingElapsedMs, assistantExtra),
+        thinkingMode === 'off' ? '' : String(reasoning || '').slice(0, 400000), 2, null, thinkingElapsedMs, assistantExtra),
       actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (now + 1) }
   ];
   try {
@@ -55,8 +55,8 @@ async function saveInterruptedChatTurn(options) {
         ...(typeof options.attachmentContext === 'string' && options.attachmentContext ? { attachment_context: options.attachmentContext.slice(0,60000) } : {}) })),
     actor_key: 'ai_msg_conv_' + convId + '_interrupted_' + userName + '_' + turnId + '_user',
     created_at: new Date(stamp).toISOString() }];
-  const content = String(options.content || '').slice(0, 24000);
-  const reasoning = String(options.reasoning || '').slice(0, 64000);
+  const content = String(options.content || '').slice(0, 500000);
+  const reasoning = String(options.reasoning || '').slice(0, 400000);
   if (content || reasoning || (options.processEvents || []).length) rows.push({
     user_name: userName, content, media_type: marker,
     media_url: buildMeta('assistant', convId, { model: options.model, thinking_mode: options.thinkingMode },
