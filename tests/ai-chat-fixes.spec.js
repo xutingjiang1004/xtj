@@ -120,16 +120,16 @@ test.describe('AI Agent Chat Fixes Validation', () => {
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: { conversation_id: 'new-c-id' } }) });
     });
 
-    // 假设界面有 .ai-chat-new-btn
-    await page.evaluate(() => { if (window.__xtjOpenAiChat) window.__xtjOpenAiChat(); });
-    await page.waitForTimeout(300);
+    await page.evaluate(async () => {
+      await window.__xtjEnsureAiAgentLoaded();
+      await window.__xtjAiAgent.open();
+    });
     historyCount = 0; // 重置
 
-    await page.evaluate(() => {
-      const btn = document.querySelector('.ai-chat-new-btn');
-      if (btn) btn.click();
-    });
-    await page.waitForTimeout(300);
+    const newConversationResponse = page.waitForResponse(response => response.url().includes('/api/agent/chat/new'));
+    await page.locator('.ai-chat-new-btn').click();
+    await newConversationResponse;
+    await expect(page.locator('.ai-chat-empty-title')).toBeVisible();
     
     // 新对话不应该请求 history
     expect(historyCount).toBe(0);
@@ -140,19 +140,18 @@ test.describe('AI Agent Chat Fixes Validation', () => {
       route.abort('timedout');
     });
 
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      await window.__xtjEnsureAiAgentLoaded();
       window.currentUser = 'test_user_demo';
       var uk = encodeURIComponent(window.currentUser);
       window.sessionStorage.setItem('xtj_ai_history:' + uk + ':default', JSON.stringify({
         conversation_id: 'default',
         messages: [{ role: 'user', content: 'CACHE_MSG_123' }, { role: 'assistant', content: 'REPLY_123' }]
       }));
-      if (window.__xtjOpenAiChat) window.__xtjOpenAiChat();
+      await window.__xtjAiAgent.open();
     });
 
-    await page.waitForTimeout(800);
-    const bodyText = await page.evaluate(() => document.body.innerText);
-    expect(bodyText).toContain('CACHE_MSG_123'); // 缓存内容必须存活
+    await expect(page.locator('.ai-chat-messages')).toContainText('CACHE_MSG_123'); // 已授权账号的缓存内容必须存活
   });
 
   test('用户数据严密隔离', async ({ page }) => {

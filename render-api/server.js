@@ -4380,6 +4380,7 @@ var LARGE_JSON_POST_PATHS = {
   '/api/agent/chat': true,
   '/api/agent/chat/stream': true,
   '/api/agent/custom-chat/stream': true,
+  '/api/agent/custom-chat/deep-stream': true,
   '/api/admin/ai-agent/avatar': true,
   '/admin/ai-agent/avatar': true
 };
@@ -10020,6 +10021,7 @@ async function runMultiAgentFlow(opts) {
   var message = opts.message;
   var convId = opts.convId;
   var config = opts.config;
+  var flowModel = getPreferredDeepSeekModel(opts.model || DEEPSEEK_MODEL_REASONER);
   var ctx = opts.ctx;
   var startTime = opts.startTime || Date.now();
   var cancelToken = opts.cancelToken || { cancelled: false };
@@ -10088,7 +10090,7 @@ async function runMultiAgentFlow(opts) {
       ],
       {
         thinking_mode: deepThinkThinkingMode,
-        model: getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER),
+        model: getPreferredDeepSeekModel(flowModel),
         // ★ P3 修复 bug 2: max_tokens 2048→4096, 防止 max 思考消耗完 token 导致 Planner 输出空 agents:[] 触发退路
         max_tokens: 4096,
         response_format: { type: 'json_object' },
@@ -10202,7 +10204,7 @@ async function runMultiAgentFlow(opts) {
       var directPromise = callDeepSeek(
         [{ role: 'system', content: directPrompt + (historyContext || '') }],
         {
-          thinking_mode: deepThinkThinkingMode, max_tokens: 8192,
+          model: flowModel, thinking_mode: deepThinkThinkingMode, max_tokens: 8192,
           signal: directAbortController.signal,
           onThinkingChunk: function(chunk) { if (_directGuard()) return; sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: chunk }); },
           onContentChunk: function(chunk) { if (_directGuard()) return; sseSend({ type: 'answer_chunk', chunk: chunk }); }
@@ -10229,7 +10231,7 @@ async function runMultiAgentFlow(opts) {
       var fakePlanner = { complexity: 'medium', reasoning: '深度模式直接分析', agent_count: 1, agents: [{ role: 'AI 研究员', need_search: false }] };
       return {
         cancelled: false, finalContent: directResult.content || '', planner: fakePlanner, worker_results: [],
-        thinking_log: thinkingLog, usage: directResult.usage, model: normalizeDeepSeekUsageModel(directResult.model || DEEPSEEK_MODEL_REASONER, directResult.model || DEEPSEEK_MODEL_REASONER),
+        thinking_log: thinkingLog, usage: directResult.usage, model: normalizeDeepSeekUsageModel(directResult.model || flowModel, directResult.model || flowModel),
         search_count: 0, search_results: [], search_query: '', sources: [], queries: []
       };
     } catch (e) {
@@ -10239,12 +10241,12 @@ async function runMultiAgentFlow(opts) {
       var isDirectTimeout = e && e.code === 'DIRECT_TIMEOUT';
       var isDirectAborted = !isDirectTimeout && ((directAbortController && directAbortController.signal.aborted) || (e && (e.name === 'AbortError' || e.code === 'ABORT_ERR')));
       if (isCancelled() || isDirectAborted) {
-        return { cancelled: true, partial: true, finalContent: '', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER), search_count: 0, search_results: [], sources: [], queries: [] };
+        return { cancelled: true, partial: true, finalContent: '', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(flowModel, flowModel), search_count: 0, search_results: [], sources: [], queries: [] };
       }
       // ★ 错误信息脱敏：不再把内部异常 message 直接透传给用户
       var directFriendlyMsg = isDirectTimeout ? '深度分析超时，请简化问题后重试' : 'AI 暂时无法回答，请稍后重试';
       console.error('[MULTI-AGENT] direct analysis failed:', e && e.message);
-      return { cancelled: false, finalContent: '（' + directFriendlyMsg + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER), search_count: 0, search_results: [], sources: [], queries: [] };
+      return { cancelled: false, finalContent: '（' + directFriendlyMsg + '）', planner: { agent_count: 0 }, worker_results: [], thinking_log: thinkingLog, usage: null, model: normalizeDeepSeekUsageModel(flowModel, flowModel), search_count: 0, search_results: [], sources: [], queries: [] };
     } finally {
       if (directTimeoutId) { clearTimeout(directTimeoutId); directTimeoutId = null; }
       if (cancelToken && cancelToken._onDirectCancel === _directOnCancel) { delete cancelToken._onDirectCancel; }
@@ -10281,6 +10283,7 @@ async function runMultiAgentFlow(opts) {
       onRound: function(round) {
         sseSend({ type: 'deep_think_stage', stage: 'agent', message: '[' + agent.role + '] 第 ' + round + ' 轮分析...' });
       },
+      model: flowModel,
       thinkingMode: deepThinkThinkingMode,
       needSearch: agent.need_search !== false,
       historyContext: historyContext,
@@ -10344,7 +10347,7 @@ async function runMultiAgentFlow(opts) {
 
   var synthContent = '';
   var synthUsage = null;
-  var synthModel = normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER);
+  var synthModel = normalizeDeepSeekUsageModel(flowModel, flowModel);
   var synthAbortController = null;
   var synthTimeoutId = null;
   var synthFinished = false;
@@ -10357,6 +10360,7 @@ async function runMultiAgentFlow(opts) {
     var _synthAborted = false;
     var _synthTimedOut = false;
     var synthPromise = callDeepSeek(synthMessages, {
+      model: flowModel,
       thinking_mode: deepThinkThinkingMode, max_tokens: 16384,
       signal: synthAbortController.signal,
       onThinkingChunk: function(chunk) { if (_synthGuard()) return; sseSend({ type: 'thinking_chunk', agent_role: 'Synthesizer', chunk: chunk }); },
@@ -10385,7 +10389,7 @@ async function runMultiAgentFlow(opts) {
     synthContent = synthResult.content || '';
     synthUsage = synthResult.usage;
     if (synthResult && synthResult.usage) addFlowUsage(synthResult.usage);
-    synthModel = normalizeDeepSeekUsageModel(synthResult.model || DEEPSEEK_MODEL_REASONER, synthResult.model || DEEPSEEK_MODEL_REASONER);
+    synthModel = normalizeDeepSeekUsageModel(synthResult.model || flowModel, synthResult.model || flowModel);
   } catch (e) {
     synthFinished = true;
     var synthErrCode = e && e.code;
@@ -10456,6 +10460,7 @@ async function runDeepThinkAgent(opts) {
   var message = opts.message;
   var convId = opts.convId;
   var config = opts.config;
+  var flowModel = getPreferredDeepSeekModel(opts.model || DEEPSEEK_MODEL_REASONER);
   var ctx = opts.ctx;
   var startTime = opts.startTime || Date.now();
   var cancelToken = opts.cancelToken || { cancelled: false };
@@ -10533,7 +10538,7 @@ async function runDeepThinkAgent(opts) {
   var finalContent = '';
   var finalReasoning = '';
   var usage = null;
-  var finalModel = normalizeDeepSeekUsageModel(DEEPSEEK_MODEL_REASONER, DEEPSEEK_MODEL_REASONER);
+  var finalModel = normalizeDeepSeekUsageModel(flowModel, flowModel);
   var toolCallsInfo = [];
   var agentAbortController = null;
   var agentTimeoutId = null;
@@ -10570,6 +10575,7 @@ async function runDeepThinkAgent(opts) {
     cancelToken._onAgentCancel = _agentOnCancel;
     // ★ R: 1 个 callDeepSeek, 根据思考程度差异化传参
     var deepSeekOpts = {
+      model: flowModel,
       thinking_mode: deepThinkThinkingMode,
       max_tool_rounds: maxToolRounds,
       max_tokens: maxTokensLimit,
@@ -10634,16 +10640,16 @@ async function runDeepThinkAgent(opts) {
     } finally {
       if (agentTimeoutId) { clearTimeout(agentTimeoutId); agentTimeoutId = null; }
     }
-    agentFinished = true;
     searchCount = searchCountAccum.count || 0;
 
     finalContent = result.content || '';
     usage = result.usage;
-    finalModel = normalizeDeepSeekUsageModel(result.model || DEEPSEEK_MODEL_REASONER, result.model || DEEPSEEK_MODEL_REASONER);
+    finalModel = normalizeDeepSeekUsageModel(result.model || flowModel, result.model || flowModel);
     toolCallsInfo = result.tool_calls_info || [];
     // ★ V2: 推送最后残留的 thinking + answer chunk buffer
     _flushThinkingChunk();
     _flushAnswerChunk();
+    agentFinished = true;
     // thinking_chunk 已通过 onThinkingChunk 流式推送, thinkingLog 已由 sseSend 记录
   } catch (e) {
     agentFinished = true;
@@ -10816,6 +10822,7 @@ async function runDeepThinkWorker(opts) {
     var workerTimeoutId = null;
     try {
       var callOpts = {
+        model: opts.model || getPreferredDeepSeekModel(DEEPSEEK_MODEL_REASONER),
         thinking_mode: thinkingMode,
         max_tokens: 8192,
         max_tool_rounds: 1
@@ -21353,6 +21360,9 @@ async function handleDeepThinkChat(req, res) {
     // 4. 读取配置和上下文
     var config = await getAiConfig();
     var ctx = await loadAiContext(userName, convId);
+    var requestedDeepModel = normalizeDeepSeekModelName(req.body && req.body.model);
+    var selectedDeepModel = [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO, DEEPSEEK_MODEL_REASONER].indexOf(requestedDeepModel) >= 0
+      ? requestedDeepModel : DEEPSEEK_MODEL_REASONER;
     if (aborted) { releaseDeepResearch(); return safeEnd(); }
 
     // ★ P 改: 提前计算思考程度 (后面 usage 和 done 事件也要用)
@@ -21373,7 +21383,10 @@ async function handleDeepThinkChat(req, res) {
       console.log('[AI-CACHE] 缓存命中, 直接返回');
       var nowTs = Date.now();
       var cachedContent = cachedHit.content;
-      var cachedUsage = cachedHit.usage || null;
+      var cachedUsage = Object.assign({}, cachedHit.usage || {}, {
+        model: normalizeDeepSeekUsageModel(cachedHit.model || selectedDeepModel, selectedDeepModel),
+        thinking_mode: finalThinkingMode
+      });
       var cachedAgentCount = cachedHit.agent_count || 1;
       var cacheChatMode = (req.body && req.body.chat_mode) || 'normal';
       // ★ 缓存命中也要把消息保存到 DB (否则用户重进看不到), 用原始 thinking_log
@@ -21399,7 +21412,7 @@ async function handleDeepThinkChat(req, res) {
         conversation_id: convId,
         deep_think: true,
         thinking_mode: finalThinkingMode,
-        model: DEEPSEEK_MODEL_REASONER,
+        model: normalizeDeepSeekUsageModel(cachedHit.model || selectedDeepModel, selectedDeepModel),
         usage: cachedUsage,
         agent_count: cachedAgentCount,
         search_count: 0,
@@ -21426,6 +21439,7 @@ async function handleDeepThinkChat(req, res) {
           flowResult = await runMultiAgentFlow({
             res: res, userName: userName, message: message, convId: convId,
             config: config, ctx: ctx, startTime: startTime,
+            model: selectedDeepModel,
             cancelToken: cancelToken, thinking_mode: finalThinkingMode
           });
         } else {
@@ -21433,6 +21447,7 @@ async function handleDeepThinkChat(req, res) {
           var agentOpts = {
             res: res, userName: userName, message: message, convId: convId,
             config: config, ctx: ctx, startTime: startTime,
+            model: selectedDeepModel,
             cancelToken: cancelToken, thinking_mode: finalThinkingMode
           };
           if (finalThinkingMode === 'low') {
@@ -21469,7 +21484,7 @@ async function handleDeepThinkChat(req, res) {
           });
         }
         fallbackMessages.push({ role: 'user', content: message || '' });
-        var fallbackResult = await callDeepSeek(fallbackMessages, { thinking_mode: 'low', max_tokens: 4096 });
+        var fallbackResult = await callDeepSeek(fallbackMessages, { model: selectedDeepModel, thinking_mode: 'low', max_tokens: 4096 });
         flowResult = {
           cancelled: false,
           finalContent: (fallbackResult.content || '') + '\n\n（深度研究模式暂时不可用, 以上为降级回复）',
@@ -21477,7 +21492,7 @@ async function handleDeepThinkChat(req, res) {
           worker_results: [{ role: 'AI 智能体', status: 'success', elapsed_ms: 0, content: fallbackResult.content || '' }],
           thinking_log: [],
           usage: fallbackResult.usage,
-          model: normalizeDeepSeekUsageModel(fallbackResult.model || DEEPSEEK_MODEL_REASONER, fallbackResult.model || DEEPSEEK_MODEL_REASONER),
+          model: normalizeDeepSeekUsageModel(fallbackResult.model || selectedDeepModel, selectedDeepModel),
           search_count: 0, search_results: [], search_query: '',
           sources: [], queries: [], synth_usage: fallbackResult.usage
         };
@@ -21495,7 +21510,7 @@ async function handleDeepThinkChat(req, res) {
     if (aborted) {
       await saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId,
         message: originalDeepMessage || message, content: (flowResult && (flowResult.finalContent || flowResult.synth_content)) || '',
-        model: (flowResult && flowResult.model) || DEEPSEEK_MODEL_REASONER, thinkingMode: finalThinkingMode,
+        model: (flowResult && flowResult.model) || selectedDeepModel, thinkingMode: finalThinkingMode,
         thinkingLog: flowResult && flowResult.thinking_log, visionUrls: deepUserExtra.vision_urls, attachmentContext: deepUserExtra.attachment_context,
         chatMode: 'deep_think', requestId: clientReqId, startedAt: startTime, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta });
       // ★ S7 审计修复：此处整个研究流程已跑完（Planner + 并行 Workers + Synthesizer，
@@ -21551,7 +21566,7 @@ async function handleDeepThinkChat(req, res) {
     var synthUsage = flowResult.synth_usage || flowResult.usage || null;
     var usageToStore = Object.assign({}, synthUsage || {}, {
       thinking_mode: finalThinkingMode,
-        model: normalizeDeepSeekUsageModel(flowResult.model || DEEPSEEK_MODEL_REASONER, flowResult.model || DEEPSEEK_MODEL_REASONER),
+      model: normalizeDeepSeekUsageModel(flowResult.model || selectedDeepModel, selectedDeepModel),
       deep_think: true,
       agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1
     });
@@ -21602,6 +21617,7 @@ async function handleDeepThinkChat(req, res) {
         aiResponseCache.set(cacheKey2, {
           content: finalContent,
           usage: synthUsage,
+          model: usageToStore.model,
           agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
           planner: flowResult.planner || null,
           worker_results: Array.isArray(flowResult.worker_results) ? flowResult.worker_results.map(function(w){ return { role: w.role, status: w.status, elapsed_ms: w.elapsed_ms || 0 }; }) : [],
@@ -21619,7 +21635,7 @@ async function handleDeepThinkChat(req, res) {
       try {
         deepQuota = await recordAiTurnUsage(userName, synthUsage, {
           conversation_id: convId,
-          model: normalizeDeepSeekUsageModel(flowResult.model || DEEPSEEK_MODEL_REASONER, flowResult.model || DEEPSEEK_MODEL_REASONER),
+          model: normalizeDeepSeekUsageModel(flowResult.model || selectedDeepModel, selectedDeepModel),
           source: 'deep_think',
           message: message,
           content: finalContent,
@@ -21638,7 +21654,7 @@ async function handleDeepThinkChat(req, res) {
         conversation_id: convId,
         deep_think: true,
         thinking_mode: finalThinkingMode,
-        model: normalizeDeepSeekUsageModel(flowResult.model || DEEPSEEK_MODEL_REASONER, flowResult.model || DEEPSEEK_MODEL_REASONER),
+        model: normalizeDeepSeekUsageModel(flowResult.model || selectedDeepModel, selectedDeepModel),
         usage: synthUsage,
         agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
         planner: flowResult.planner || null,
@@ -22711,7 +22727,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
 //   meta / deep_think_init / deep_think_stage / deep_think_planned / deep_think_tool /
 //   thinking_chunk{agent_role} / answer_chunk / content / done{agent_count,sources,search_count} / error
 // ─────────────────────────────────────────────────────────────
-app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), async (req, res) => {
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -22732,8 +22748,13 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
-  req.on('aborted', function() { aborted = true; clearHeartbeat(); });
-  res.on('close', function() { if (!res.writableEnded) aborted = true; });
+  function abortCustomResearch() {
+    aborted = true;
+    clearHeartbeat();
+    if (controller) controller.abort();
+  }
+  req.on('aborted', abortCustomResearch);
+  res.on('close', function() { if (!res.writableEnded) abortCustomResearch(); });
 
   var body = (req && req.body) || {};
   var provider = String(body.provider || '').trim();
@@ -22747,6 +22768,11 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     sseSend({ type: 'error', error: '缺少自定义模型参数，请重新配置' });
     return safeEnd();
   }
+  var originalCustomDeepMessage = text;
+  var customDeepConvId = String(body.conversation_id || '');
+  if (!/^[A-Za-z0-9-]{6,128}$/.test(customDeepConvId)) customDeepConvId = genConvId();
+  var customDeepSaved = false, customDeepCompleted = false;
+  var customDeepUserExtra = { vision_urls: extractVisionImageUrls(body.attachments) };
   var CUSTOM_DP_ENDPOINTS = {
     qwen:    { base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',        defaultModel: 'qwen-plus' },
     doubao:  { base: 'https://ark.cn-beijing.volces.com/api/v3',                   defaultModel: 'doubao-1-5-pro-32k' },
@@ -22809,6 +22835,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     }
     var data = await upstream.json();
     var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (typeof content !== 'string' || !content.trim()) throw new Error('invalid provider response');
     return String(content || '').trim();
   }
   async function callCustomChatStream(msgs, onChunk, options) {
@@ -22819,7 +22846,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     if (!upstream.body) throw new Error('empty stream');
     var reader = upstream.body.getReader();
     var decoder = new TextDecoder('utf-8');
-    var buf = '';
+    var buf = '', providerCompleted = false;
     try {
       while (!aborted) {
         var chunk = await reader.read();
@@ -22834,13 +22861,16 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
           if (data === '[DONE]') return;
           var json;
           try { json = JSON.parse(data); } catch (e) { continue; }
-          var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
+          var choice = json && json.choices && json.choices[0];
+          if (choice && choice.finish_reason != null) providerCompleted = true;
+          var delta = choice && choice.delta;
           if (!delta) continue;
           var piece = delta.content || '';
           var rPiece = delta.reasoning_content || delta.reasoning || delta.thinking || '';
           onChunk(piece, rPiece);
         }
       }
+      if (!providerCompleted && !aborted && !controller.signal.aborted) throw new Error('incomplete provider stream');
     } finally {
       // ★ 流泄漏修复：异常/断开退出时取消上游读取，避免第三方 SSE 连接挂到超时
       try { if (reader && reader.cancel) reader.cancel().catch(function() {}); } catch (e) {}
@@ -22876,14 +22906,15 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
   //   乐观预占后，并发调用各自抢占到递增的序号，额度判定即时生效。
   var searchCtx = { userName: req.userName || '', searchConsumed: 0, signal: controller.signal };
   var sources = [];
-  var thinkingAcc = '';
+  var thinkingAcc = '', customDeepThinkingLog = [];
   var reasoningStartedFlag = false;
-  function emitReasoning(textChunk) {
+  function emitReasoning(textChunk, role) {
     var s = String(textChunk || '');
     if (!s) return;
     if (!reasoningStartedFlag) { reasoningStartedFlag = true; sseSend({ type: 'reasoning_start' }); }
     thinkingAcc = (thinkingAcc + s).slice(-400000);
-    sseSend({ type: 'reasoning', text: s });
+    customDeepThinkingLog.push({ agent_role: role || '研究流程', chunk: s });
+    sseSend({ type: 'thinking_chunk', agent_role: role || '研究流程', chunk: s });
   }
   try {
     // ★ S6 审计修复：本路由此前无 enforceAiChatAccess 门禁，单请求可 18 次第三方搜索
@@ -22904,13 +22935,20 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       }
     }
     _customDeepGatePassed = true;
-    sseSend({ type: 'meta', deep_think: true, model: chosenModel, provider: provider });
+    if (aborted || controller.signal.aborted) return safeEnd();
+    var customDeepFiles = unwrapAttachmentExtract(await extractChatAttachments(text, body.attachments));
+    text = customDeepFiles.text;
+    if (text !== originalCustomDeepMessage) customDeepUserExtra.attachment_context = String(text).slice(0,60000);
+    if (aborted || controller.signal.aborted) return safeEnd();
+    startHeartbeat();
+    sseSend({ type: 'meta', deep_think: true, conversation_id: customDeepConvId, model: chosenModel, provider: provider });
     emitReasoning('\n【总指挥 · Planner】正在拆解问题、规划多智能体并行研究方案...\n');
 
     // 1) Planner
     var plannerRaw = '';
     try { plannerRaw = await callCustomChat([{ role: 'user', content: CUSTOM_PLANNER_PROMPT + text }], { maxTokens: 2000, temperature: 0.4 }); } catch (eP) { plannerRaw = ''; }
     _customDeepUpstreamUsed = true; // ★ S12：首次上游调用已发生，此后无论成败都必须记账
+    if (aborted || controller.signal.aborted) return safeEnd();
     var plan = parsePlannerJson(plannerRaw);
     // ★ 修复：Planner 输出直接拼入 worker 提示（17263/17273），做净化与长度上限
     var agents = (plan && Array.isArray(plan.agents) && plan.agents.length) ? plan.agents.slice(0, 6).map(function(ca) {
@@ -22964,6 +23002,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       return { role: role, content: answer || '' };
     }
     var workerResults = await Promise.all(agents.map(function(a, i) { return runCustomWorker(a, i); }));
+    if (aborted || controller.signal.aborted) return safeEnd();
 
     // 3) Synthesizer（流式输出最终报告）
     emitReasoning('\n【总指挥 · Synthesizer】正在整合各方向结果、撰写最终报告...\n');
@@ -22979,7 +23018,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       await callCustomChatStream(
         [{ role: 'system', content: CUSTOM_SYNTH_PROMPT }, { role: 'user', content: synthInput }],
         function(piece, rPiece) {
-          if (rPiece) emitReasoning(rPiece);
+          if (rPiece) emitReasoning(rPiece, '模型思考');
           if (piece) {
             finalContent = (finalContent + piece).slice(-32000);
             sseSend({ type: 'content', text: piece });
@@ -22991,11 +23030,17 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       sseSend({ type: 'error', error: '研究报告生成失败，请稍后重试', code: 'CUSTOM_DEEP_SYNTH_ERROR' });
       return safeEnd();
     }
-    sseSend({ type: 'content', text: finalContent });
+    if (aborted || controller.signal.aborted) return safeEnd();
+    if (!finalContent.trim()) { sseSend({type:'error',error:'研究未生成正文，请重试',code:'CUSTOM_DEEP_EMPTY'}); return safeEnd(); }
+    customDeepCompleted = true;
+    customDeepSaved = await saveDeepThinkChatTurn({db:supabase,userName:req.userName,convId:customDeepConvId,message:originalCustomDeepMessage,content:finalContent,
+      marker:AI_AGENT_MESSAGE_MARKER,buildMeta:buildMsgMeta,requestId:body.client_request_id,userExtra:customDeepUserExtra,
+      assistantExtra:{deep_think:true,thinking_log:customDeepThinkingLog,agent_count:agents.length},usage:{model:chosenModel,thinking_mode:'max'}});
     sseSend({
       type: 'done',
       complete: true,
-      saved: false,
+      saved: customDeepSaved,
+      conversation_id: customDeepConvId,
       custom: true,
       model: chosenModel,
       provider: provider,
@@ -23003,6 +23048,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       agent_count: agents.length,
       search_count: searchCtx.searchConsumed,
       sources: sources.slice(0, 30),
+      thinking_log: customDeepThinkingLog,
       reasoning: thinkingAcc.slice(0, 200000),
       content: finalContent
     });
@@ -23012,6 +23058,10 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     }
   } finally {
     try { clearTimeout(timer); } catch (e) {}
+    if (!customDeepCompleted && !customDeepSaved && _customDeepUpstreamUsed) await saveInterruptedChatTurn({db:supabase,userName:req.userName,convId:customDeepConvId,
+      message:originalCustomDeepMessage,content:finalContent||'',reasoning:thinkingAcc||'',chatMode:'deep_think',model:chosenModel,
+      thinkingLog:customDeepThinkingLog,finishReason:aborted||controller.signal.aborted?'cancelled':'failed',
+      marker:AI_AGENT_MESSAGE_MARKER,buildMeta:buildMsgMeta,requestId:body.client_request_id,visionUrls:customDeepUserExtra.vision_urls,attachmentContext:customDeepUserExtra.attachment_context});
     // ★ S6 审计修复：结束时统一记账（正常完成/中断/失败路径都覆盖），
     //   把本请求实际发起的搜索次数与估算 token 落入 ai 配额，杜绝"断开免单/永不落账"
     if ((_customDeepGatePassed || _customDeepUpstreamUsed) && req.userName) {
