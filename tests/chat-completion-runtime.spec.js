@@ -38,20 +38,21 @@ async function setup(page) {
     window.switchDockTab('chat',true); window.openChat('peer');
   }, {id,stamp});
 }
-async function captureSendFlights(page) {
-  await page.evaluate(()=>{
+async function captureSendFlights(page, pause = false) {
+  await page.evaluate((pause)=>{
     window.__observedSendFlights=[];
     const animate=Element.prototype.animate;
     Element.prototype.animate=function(...args){
       const animation=animate.apply(this,args);
       if(this.classList.contains('chat-send-flight')){
+        if(pause){animation.pause();window.__heldSendAnimation=animation;}
         const box=this.getBoundingClientRect(),image=this.querySelector('img');
         const visible=node=>{const rect=node.getBoundingClientRect(),style=getComputedStyle(node);return rect.width>0&&rect.height>0&&style.display!=='none'&&!['hidden','collapse'].includes(style.visibility);};
         window.__observedSendFlights.push({frames:animation.effect.getKeyframes(),src:image&&image.src,connected:this.isConnected,width:box.width,height:box.height,visible:visible(this),imageVisible:image&&visible(image)});
       }
       return animation;
     };
-  });
+  },pause);
 }
 test('search pages on the server and locates a result', async ({page}) => {
   await setup(page); await page.locator('#chatSearchButton').click(); await page.locator('[data-chat-search-mode="messages"]').click();
@@ -207,12 +208,17 @@ test('incoming typing expires promptly and restores last-online status', async (
 
 test('switching peers clears typing and cancels an in-flight send', async ({page}) => {
   await setup(page); await expect(page.locator('#dockChatInput')).toBeEnabled();
+  // Keep the real animation in progress until the peer switch, rather than
+  // racing the browser's 290ms playback with a later locator assertion.
+  await captureSendFlights(page,true);
   await page.evaluate(()=>window.__xtjApplyChatTyping({peer:'peer',active:true,at:Date.now()}));
   await page.locator('#dockChatInput').fill('sending before switch');
   await page.locator('#dockChatSendBtn').click();
   await expect(page.locator('.chat-send-flight')).toHaveCount(1);
+  expect(await page.evaluate(()=>window.__heldSendAnimation.playState)).toBe('paused');
   await page.evaluate(()=>window.openChat('other-peer'));
   await expect(page.locator('.chat-send-flight')).toHaveCount(0);
+  expect(await page.evaluate(()=>window.__heldSendAnimation.playState)).toBe('idle');
   await expect(page.locator('#dockChatPresence')).not.toContainText('正在输入');
   const stopped=await page.evaluate(()=>window.__chatTestCalls.some(c=>c.url.includes('/typing/peer') && JSON.parse(c.body).active===false));
   expect(stopped).toBe(true);
