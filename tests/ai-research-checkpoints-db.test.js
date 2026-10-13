@@ -11,7 +11,7 @@ test('research frontiers enforce account identity, privacy, bounded storage and 
       DO $$ BEGIN CREATE ROLE authenticated; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
       DO $$ BEGIN CREATE ROLE service_role BYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
       CREATE SCHEMA xtj_private; CREATE FUNCTION xtj_private.safe_jsonb(text) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $$ BEGIN RETURN $1::jsonb; EXCEPTION WHEN OTHERS THEN RETURN '{}'::jsonb; END $$; CREATE TABLE posts(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_name text,media_type text,media_url text); GRANT SELECT, UPDATE ON posts TO service_role;`);
-    await db.query(fs.readFileSync('supabase/migrations/20261013121100_ai_research_checkpoints.sql','utf8'));
+    await db.query(fs.readFileSync('supabase/migrations/20261013232320_ai_research_checkpoints.sql','utf8'));
     const alice=(await db.query("INSERT INTO posts(user_name,media_type) VALUES('alice','__auth__') RETURNING id")).rows[0].id;
     const bob=(await db.query("INSERT INTO posts(user_name,media_type) VALUES('bob','__auth__') RETURNING id")).rows[0].id;
     const sql='SELECT manage_ai_research_checkpoint($1,$2,$3,$4,$5,$6::jsonb,$7) AS value';
