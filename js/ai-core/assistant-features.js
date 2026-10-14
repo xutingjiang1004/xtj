@@ -1,0 +1,75 @@
+(function(global){
+  'use strict';
+  var core=global.XtjAiCore=global.XtjAiCore||{};
+  function node(tag,cls,text){var element=global.document.createElement(tag);if(cls)element.className=cls;if(text!==undefined)element.textContent=text;return element;}
+  function questions(value){var out=[];(Array.isArray(value)?value:[]).forEach(function(item){if(typeof item==='string'){var text=item.replace(/[\x00-\x1f]/g,' ').trim();if(text&&text.length<=100&&!/https?:\/\/|<\/?script/i.test(text)&&!out.includes(text)&&out.length<3)out.push(text);}});return out;}
+  function attachFollowups(host,value,onAsk){
+    var previous=host.querySelector('.ai-followups');if(previous)previous.remove();
+    var items=questions(value);if(items.length!==3)return null;
+    var group=node('div','ai-followups');group.setAttribute('role','group');group.setAttribute('aria-label','猜你想问');group.append(node('span','ai-followups-label','猜你想问'));
+    items.forEach(function(text){var button=node('button','ai-followup',text);button.type='button';var icon=global.document.createElementNS('http://www.w3.org/2000/svg','svg'),path=global.document.createElementNS('http://www.w3.org/2000/svg','path');icon.setAttribute('class','ai-followup-icon');icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');icon.setAttribute('focusable','false');path.setAttribute('d','M4 4v5a4 4 0 0 0 4 4h11m-5-5 5 5-5 5');icon.append(path);button.prepend(icon);button.addEventListener('click',async function(){if(button.disabled)return;button.disabled=true;try{await onAsk(text);}finally{if(button.isConnected)button.disabled=false;}});group.append(button);});host.append(group);return group;
+  }
+  function estimate(messages,draft,custom){
+    var valid=(Array.isArray(messages)?messages:[]).filter(function(m){return m&&(m.role==='user'||m.role==='assistant');});
+    var kept=valid.slice(custom?-19:-24),max=custom?8000:4000,text=kept.map(function(m){return String(m.content||'').slice(0,max);}).join('\n')+'\n'+String(draft||'');
+    var cjk=(text.match(/[\u3400-\u9fff]/g)||[]).length;
+    return {estimated_tokens:Math.ceil(cjk*1.5+(text.length-cjk)/4),history_retained:kept.length,history_omitted:valid.length-kept.length,exact_window:null,preview:true};
+  }
+  function capacityText(value){
+    if(!value)return '上下文用量待估算';
+    return (value.preview?'发送前估算':'本轮已发送')+'约 '+Number(value.estimated_tokens||0).toLocaleString()+' tokens · 保留 '+Number(value.history_retained||0)+' 条历史'+(value.history_omitted?' · 较早 '+value.history_omitted+' 条未发送':'');
+  }
+  function actualUsageTokens(usage){
+    if(!usage||usage._reported===false)return null;
+    function value(number){return typeof number==='number'&&Number.isFinite(number)&&number>=0?number:null;}
+    var total=value(usage.total_tokens);if(total!==null)return total;
+    var prompt=value(usage.prompt_tokens===undefined?usage.input_tokens:usage.prompt_tokens),completion=value(usage.completion_tokens===undefined?usage.output_tokens:usage.completion_tokens);
+    if(prompt===null&&completion===null)return null;
+    return (prompt||0)+(completion||0)+(usage.reasoning_included_in_completion===true?0:(value(usage.reasoning_tokens)||0));
+  }
+  function renderBoard(host,data){
+    if(!host||!data)return;
+    var panel=host.querySelector('.ai-research-board');if(!panel){panel=node('details','ai-research-board');panel.open=true;host.append(panel);}
+    panel.replaceChildren();var summary=node('summary','',data.cached?'使用已有报告 · 本次未重新研究':'研究看板 · 已完成 '+Number(data.completed||0)+' / '+Number(data.total||0)+' 个方向');panel.append(summary);
+    var list=node('ul','ai-board-directions'),labels={waiting:'待开始',running:'进行中',success:'已完成',failed:'未完成'};
+    (data.directions||[]).forEach(function(item){var li=node('li','');li.dataset.status=item.status;li.append(node('span','',item.role),node('span','',labels[item.status]||'待确认'));if(item.restored)li.append(node('small','','沿用断点'));list.append(li);});panel.append(list);
+    var usage=data.usage||{},text='本次搜索 '+Number(data.search_calls||0)+' 次'+(data.previous_search_calls?' · 断点已搜索 '+data.previous_search_calls+' 次':'')+' · 独立链接/正文 '+Number(data.unique_sources||0)+' 份'+(data.merged_sources?' · 合并 '+data.merged_sources+' 条转载或相同链接':'');
+    panel.append(node('p','ai-board-meta',text));panel.append(node('p','ai-board-meta','返回用量：'+(usage.actual_tokens===null||usage.actual_tokens===undefined?'尚未返回':Number(usage.actual_tokens).toLocaleString()+' tokens')+(usage.estimated_tokens?' · 另有估算 '+usage.estimated_tokens+' tokens':'')+(usage.missing_requests?' · 部分环节未返回用量':'')));
+    var saves=data.save||{},saveLabels={pending:'待保存',saved:'已保存',failed:'保存失败',complete:'已完成',unavailable:'未启用'};
+    panel.append(node('p','ai-board-meta','研究断点 '+(saveLabels[saves.checkpoint]||'待确认')+' · 报告 '+(saveLabels[saves.report]||'待保存')));
+    if(data.source_notice)panel.append(node('p','ai-board-note',data.source_notice));
+    (data.documents||[]).forEach(function(d){panel.append(node('p','ai-board-document','['+d.id+'] '+d.name+' · '+(d.status==='read'?'已读出 '+(d.used_paragraphs||0)+' 段':'未读出')+(d.truncated?' · 已截断':'')+(d.limitation?' · '+d.limitation:'')));});
+  }
+  function openCompare(options){
+    var models=options.models||[],disposed=false,abort=null,results=[null,null],lastFocus=global.document.activeElement;
+    if(models.length<2){options.notify('请先添加另一模型再进行对比');return null;}
+    var root=node('div','ai-compare-modal is-ready');root.setAttribute('data-xtj-ai-modal','compare');root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label','双模型对比');
+    var dialog=node('section','ai-compare-dialog'),heading=node('div','ai-compare-head');heading.append(node('h3','','双模型对比'));var close=node('button','','关闭');close.type='button';heading.append(close);dialog.append(heading);
+    dialog.append(node('p','ai-compare-note','同一问题分别请求两个模型，会增加模型消耗；结果独立显示。原聊天和草稿保留。'));
+    var input=node('textarea','ai-compare-question');input.value=options.question||'';input.rows=3;input.maxLength=12000;input.setAttribute('aria-label','用于对比的问题');dialog.append(input);
+    var picks=node('div','ai-compare-picks'),selects=[];
+    ['模型一','模型二'].forEach(function(label,index){var wrap=node('label','',label),select=node('select','');select.setAttribute('aria-label',label);models.forEach(function(model){var option=node('option','',model.label);option.value=model.id;select.append(option);});select.value=models[index].id;selects.push(select);wrap.append(select);picks.append(wrap);});dialog.append(picks);
+    var controls=node('div','ai-compare-controls'),start=node('button','','开始对比'),stop=node('button','','暂停');start.type=stop.type='button';stop.disabled=true;controls.append(start,stop);dialog.append(controls);
+    var columns=node('div','ai-compare-results'),cards=[],statuses=[],outputs=[],usages=[];
+    for(var i=0;i<2;i++){var card=node('article','ai-compare-result'),status=node('p','ai-compare-status','等待开始'),output=node('div','ai-compare-answer'),usage=node('p','ai-compare-usage');card.append(status,output,usage);cards.push(card);statuses.push(status);outputs.push(output);usages.push(usage);columns.append(card);}dialog.append(columns);root.append(dialog);global.document.body.append(root);
+    function current(){return !disposed&&root.isConnected&&options.current();}
+    function disable(value){start.disabled=value;input.disabled=value;selects.forEach(function(s){s.disabled=value;});stop.disabled=!value;}
+    async function run(index,model,text,context,signal){
+      statuses[index].textContent=model.label+' · 正在连接';outputs[index].textContent='';usages[index].textContent='';var content='',finished=false;
+      try{var result=await options.run(model,text,context,signal,function(event){if(!current())return;if(event.type==='content'){content+=String(event.text||event.chunk||'');outputs[index].textContent=content;statuses[index].textContent=model.label+' · 正在回复';}else if(event.type==='done'){finished=event.complete!==false;content=event.content||content;var tokens=actualUsageTokens(event.usage);if(tokens!==null)usages[index].textContent='实际返回 '+tokens.toLocaleString()+' tokens';}else if(event.type==='error')throw Error(event.message||event.error||'模型请求失败');});if(!current())return;content=result&&result.content||content;results[index]={model:model.label,text:content};if(options.renderMarkdown&&content)outputs[index].innerHTML=options.renderMarkdown(content);else outputs[index].textContent=content;statuses[index].textContent=model.label+' · '+(finished?'已完成':'回复中断');if(!usages[index].textContent)usages[index].textContent='接口未返回实际用量';}
+      catch(error){if(current())statuses[index].textContent=model.label+' · '+(signal.aborted?'已暂停':String(error.message||'请求失败'));}
+    }
+    start.addEventListener('click',async function(){
+      var text=input.value.trim(),chosen=selects.map(function(s){return models.find(function(m){return m.id===s.value;});});
+      if(!text){options.notify('先输入对比问题');return;}if(chosen[0].id===chosen[1].id){options.notify('请选择两个不同模型');return;}if(!current()||start.disabled)return;
+      // Freeze both configurations and context before any auth/network awaits.
+      var selected=chosen.map(function(m){return Object.assign(JSON.parse(JSON.stringify(m)),{thinkingMode:options.thinkingMode});}),context=options.context?options.context():[];
+      abort=new AbortController();var controller=abort;disable(true);statuses[1].textContent=selected[1].label+' · 等待前一请求完成';
+      try{await run(0,selected[0],text,context,controller.signal);if(current()&&!controller.signal.aborted)await run(1,selected[1],text,context,controller.signal);}finally{if(current()){if(controller.signal.aborted&&statuses[1].textContent.includes('等待'))statuses[1].textContent='第二模型未开始';disable(false);}}
+    });
+    stop.addEventListener('click',function(){if(abort)abort.abort();});
+    function dispose(){if(disposed)return;disposed=true;if(abort)abort.abort();global.removeEventListener('xtj:auth-changed',dispose);root.remove();if(lastFocus&&lastFocus.isConnected)lastFocus.focus({preventScroll:true});}
+    close.addEventListener('click',dispose);root.addEventListener('click',function(event){if(event.target===root)dispose();});root.addEventListener('keydown',function(event){if(event.key==='Escape'){event.stopPropagation();dispose();}if(event.key==='Tab'){var focusable=Array.from(dialog.querySelectorAll('button,select,textarea')).filter(function(n){return !n.disabled;});var first=focusable[0],last=focusable[focusable.length-1];if(event.shiftKey&&global.document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&global.document.activeElement===last){event.preventDefault();first.focus();}}});global.addEventListener('xtj:auth-changed',dispose);close.focus({preventScroll:true});return {root:root,dispose:dispose};
+  }
+  core.AssistantFeatures={attachFollowups:attachFollowups,questions:questions,estimate:estimate,capacityText:capacityText,renderBoard:renderBoard,openCompare:openCompare};
+}(window));

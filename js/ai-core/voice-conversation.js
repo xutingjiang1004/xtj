@@ -10,7 +10,7 @@
     var decodeAbort = null, recordTimer = null, listening = false, speaking = false, utterance = null;
     var owner = options.owner(), lastTranscript = '', finalTranscript = '', baseText = '';
     function current(token) { return !disposed && seq === token && options.current(owner); }
-    function state(label) { options.onState({enabled:enabled,listening:listening,speaking:speaking,label:label || ''}); }
+    function state(label,stage,progress) { options.onState({enabled:enabled,listening:listening,speaking:speaking,stage:stage||(speaking?'speaking':listening?'listening':'idle'),progress:progress===undefined?null:progress,label:label || ''}); }
     function releaseMedia() {
       clearTimeout(recordTimer); recordTimer = null;
       if (media) media.getTracks().forEach(function(track) { track.stop(); }); media = null;
@@ -18,7 +18,7 @@
     function stopSpeech() {
       speechSeq++;
       speaking = false;
-      if (utterance) utterance.onend = utterance.onerror = null;
+      if (utterance) utterance.onstart = utterance.onend = utterance.onerror = null;
       utterance = null;
       try { if (global.speechSynthesis) global.speechSynthesis.cancel(); } catch (_) {}
       state();
@@ -26,7 +26,7 @@
     function cancelInput() {
       seq++; listening = false;
       var rec = recognition; recognition = null;
-      if (rec) { rec.onresult = rec.onerror = rec.onend = null; try { rec.abort(); } catch (_) {} }
+      if (rec) { rec.onstart = rec.onresult = rec.onerror = rec.onend = null; try { rec.abort(); } catch (_) {} }
       if (recorder) { recorder.ondataavailable = recorder.onstop = recorder.onerror = null; try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {} recorder = null; }
       if (decodeAbort) decodeAbort.abort(); decodeAbort = null;
       releaseMedia(); state();
@@ -37,7 +37,9 @@
       listening = false; state();
       if (!text.trim()) { options.notify('没有识别到语音，点击麦克风可重试'); return; }
       options.onTranscript(baseText ? baseText + ' ' + text : text);
-      if (enabled && final) options.onSend();
+      var confirm=typeof options.confirmBeforeSend==='function'&&options.confirmBeforeSend();
+      if (enabled && final && !confirm) options.onSend();
+      else if (final && confirm) state('文字已识别，请确认或编辑后点击发送','draft');
       else if (enabled) options.notify('语句未识别完整，文字已保留，可手动发送或重新说');
     }
     async function listen() {
@@ -62,7 +64,7 @@
           };
           rec.onend = function() {
             if (!current(token) || recognition !== rec) return;
-            recognition = null; rec.onresult = rec.onerror = rec.onend = null;
+            recognition = null; rec.onstart = rec.onresult = rec.onerror = rec.onend = null;
             completeInput(token, finalTranscript || lastTranscript, !!finalTranscript);
           };
           rec.onerror = function(event) {
@@ -70,14 +72,15 @@
             cancelInput();
             options.notify(event.error === 'not-allowed' ? '请允许麦克风权限后重试' : '语音识别未完成，输入文字仍保留，可重试');
           };
-          rec.start(); listening = true; state('正在聆听…');
+          rec.onstart=function(){if(current(token)&&recognition===rec)state('正在聆听…','listening');};
+          rec.start(); listening = true; state('正在等待麦克风权限…','permission');
         } catch (_) { cancelInput(); options.notify('系统语音识别无法启动，请重试或使用文字'); }
         return;
       }
       if (!global.navigator.mediaDevices || !global.navigator.mediaDevices.getUserMedia || !global.MediaRecorder || !global.XTJVoiceTranscription?.transcribeBlob) {
         options.notify('当前浏览器无法录音转写，请使用文字输入'); return;
       }
-      listening = true; state('正在申请麦克风权限…');
+      listening = true; state('正在申请麦克风权限…','permission');
       try {
         var stream = await global.navigator.mediaDevices.getUserMedia({audio:true});
         if (!current(token)) { stream.getTracks().forEach(function(track) { track.stop(); }); return; }
@@ -99,14 +102,14 @@
           recorder = null; listening = false;
           var blob = new Blob(chunks,{type:capture.mimeType || mime || 'audio/webm'}); chunks = [];
           if (!blob.size) { state(); options.notify('未录到声音，请重试'); return; }
-          decodeAbort = new AbortController(); state('准备本地语音识别…');
+          decodeAbort = new AbortController(); state('准备本地语音识别…','initializing');
           try {
-            var text = await global.XTJVoiceTranscription.transcribeBlob(blob,{owner:owner.user,signal:decodeAbort.signal,onState:function(job) { if (current(token)) state(job.label); }});
+            var text = await global.XTJVoiceTranscription.transcribeBlob(blob,{owner:owner.user,signal:decodeAbort.signal,onState:function(job) { if (current(token)) state(job.label,job.phase||'recognition',job.progress); }});
             if (!current(token)) return;
             decodeAbort = null; completeInput(token,text,true);
           } catch (_) { if (current(token)) { decodeAbort = null; state(); options.notify('本地转写失败，可重新录音；文字草稿仍保留'); } }
         };
-        capture.start(250); state('正在录音，点击麦克风结束（最长 90 秒）');
+        capture.start(250); state('正在录音，点击麦克风结束（最长 90 秒）','recording');
         recordTimer = setTimeout(function() { if (current(token) && capture.state === 'recording') capture.stop(); },90000);
       } catch (_) { if (current(token)) { cancelInput(); options.notify('无法使用麦克风，请检查权限后重试'); } }
     }
@@ -135,7 +138,8 @@
         if (voice) speech.voice = voice;
         speech.onend = next;
         speech.onerror = function() { if (current(token) && speechToken === speechSeq) { stopSpeech(); options.notify('浏览器暂停了朗读，点击回复下的“朗读”可重试'); } };
-        speaking = true; state('正在朗读，点击麦克风可打断并提问');
+        speech.onstart=function(){if(current(token)&&speechToken===speechSeq){speaking=true;state('正在朗读，点击麦克风可打断并提问','speaking');}};
+        speaking = false; state('正在准备朗读，点击麦克风可打断','speech_wait');
         try { global.speechSynthesis.speak(speech); }
         catch (_) { stopSpeech(); options.notify('朗读暂时无法启动，点击回复下的“朗读”可重试'); }
       }

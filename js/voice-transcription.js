@@ -78,7 +78,8 @@
                 var data = event.data;
                 if (!data || data.id !== job.key) return;
                 if (data.type === 'progress') {
-                    var label = data.phase === 'initializing' ? '正在准备语音模型…' : data.downloading ? '首次下载语音模型' + (data.progress === null ? '…' : ' ' + data.progress + '%') : '正在识别语音…';
+                    job.phase=data.phase||(data.downloading?'download':'recognition');job.progress=Number.isFinite(data.progress)?data.progress:null;job.loadedBytes=data.loaded||null;job.totalBytes=data.total||null;job.cachedFiles=data.cachedFiles||0;
+                    var label = data.phase==='cache_check' ? '正在检查本机语音模型缓存…' : data.phase==='cache_found' ? '发现 '+data.cachedFiles+' 个缓存文件，正在校验与载入…' : data.phase === 'initializing' ? '模型文件已就绪，正在初始化…' : data.downloading ? '正在准备语音模型文件' + (data.progress === null || data.progress===undefined ? '…' : ' · 已知文件 ' + data.progress + '%') : '正在识别语音…';
                     notify(job, 'working', label);
                 } else if (data.type === 'result') { cleanup(); resolve(String(data.text || '').trim()); }
                 else if (data.type === 'error') { var error=new Error(data.error);error.cacheReset=data.cacheReset===true;error.fallbackModel=data.fallbackModel;fail(error); }

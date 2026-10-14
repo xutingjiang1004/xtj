@@ -32,7 +32,7 @@ test('AI close clears recurring status and configuration timers', () => {
 
 test('AI attachments are sent as structured payloads and consumed only after success', () => {
   assert.match(source, /attachments:\s*attachmentPayload/);
-  assert.match(source, /data_url:\s*fileData\.dataUrl/);
+  assert.match(source, /attachmentPayload\.push\(\{name:name,type:file\.type\|\|[^,]+,data_url:file\.dataUrl\}\)/);
   assert.match(source, /consumeAiAttachment\(fileData\)/);
   assert.match(source, /onSuccess:\s*function\(evt\)/);
   assert.match(source, /if \(!evt \|\| evt\.saved !== false\) consumeAiAttachment\(fileData\)/);

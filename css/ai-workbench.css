@@ -1,0 +1,143 @@
+.aw-overlay {
+  --aw-bg: #fbfefc;
+  --aw-card: #f0f8f3;
+  --aw-text: #17382c;
+  --aw-muted: #526b60;
+  --aw-line: #cee3d6;
+  --aw-accent: #176743;
+  --aw-hover: #dcefe3;
+  position: fixed;
+  inset: 0;
+  top: var(--aw-top, 0px);
+  bottom: auto;
+  height: var(--aw-vh, 100dvh);
+  box-sizing: border-box;
+  z-index: 11000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(28, 54, 42, .23);
+  color: var(--aw-text);
+  font-family: inherit;
+  animation: aw-reveal 180ms ease-out;
+}
+[data-theme="dark"] .aw-overlay {
+  --aw-bg: #17251e;
+  --aw-card: #21342a;
+  --aw-text: #e3f3e9;
+  --aw-muted: #adc7b7;
+  --aw-line: #3d5b48;
+  --aw-accent: #a8e3bd;
+  --aw-hover: #304b3a;
+}
+.aw-panel {
+  box-sizing: border-box;
+  width: min(1120px, 100%);
+  height: min(920px, calc(var(--aw-vh, 100dvh) - 32px));
+  display: flex;
+  flex-direction: column;
+  background: var(--aw-bg);
+  border: 1px solid var(--aw-line);
+  border-radius: 24px;
+  box-shadow: 0 16px 55px rgba(17, 41, 28, .16);
+  overflow: hidden;
+  animation: aw-rise 180ms ease-out;
+}
+.aw-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 17px 22px 9px; }
+.aw-header h2 { margin: 0; font-size: 19px; font-weight: 650; color: var(--aw-text); }
+.aw-tabs { display: flex; flex: 0 0 auto; gap: 6px; overflow-x: auto; padding: 6px 18px 12px; scrollbar-width: thin; }
+.aw-overlay button, .aw-overlay input, .aw-overlay select, .aw-overlay textarea { font: inherit; color: var(--aw-text); -webkit-text-fill-color: currentColor; }
+.aw-overlay button { border: 1px solid var(--aw-line); border-radius: 12px; padding: 9px 13px; min-height: 40px; background: var(--aw-card); cursor: pointer; line-height: 1.4; transition: background-color 150ms, border-color 150ms, transform 150ms; }
+.aw-overlay button:hover { background: var(--aw-hover); border-color: var(--aw-accent); }
+.aw-overlay button:active { transform: translateY(1px); }
+.aw-overlay button:disabled { cursor: default; opacity: .56; }
+.aw-overlay :focus-visible { outline: 2px solid var(--aw-accent); outline-offset: 3px; }
+.aw-overlay .aw-tab { flex: 0 0 auto; border: 0; white-space: nowrap; background: transparent; color: var(--aw-muted); }
+.aw-overlay .aw-tab[aria-selected="true"] { color: var(--aw-accent); background: var(--aw-hover); font-weight: 600; }
+.aw-close { flex: 0 0 auto; }
+.aw-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 22px 28px; scrollbar-width: thin; scroll-behavior: smooth; }
+.aw-body h3 { margin: 0 0 8px; font-size: 18px; }
+.aw-body h4 { margin: 6px 0 12px; font-size: 15px; overflow-wrap: anywhere; }
+.aw-note { color: var(--aw-muted); font-size: 13px; line-height: 1.75; margin: 8px 0 12px; overflow-wrap: anywhere; }
+.aw-row { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.aw-field { display: flex; flex: 1 1 140px; min-width: 0; flex-direction: column; gap: 6px; margin: 9px 0; font-size: 13px; }
+.aw-field > span { color: var(--aw-muted); }
+.aw-field input, .aw-field select, .aw-field textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  padding: 10px 12px;
+  min-height: 42px;
+  border: 1px solid var(--aw-line);
+  border-radius: 11px;
+  background: var(--aw-bg);
+  font-size: 15px;
+  line-height: 1.5;
+  caret-color: var(--aw-accent);
+}
+.aw-field textarea { min-height: 110px; max-height: 420px; resize: vertical; }
+.aw-field .aw-web-text { min-height: 300px; }
+.aw-file-picker { display: inline-flex; position: relative; overflow: hidden; align-items: center; justify-content: center; background: var(--aw-hover); color: var(--aw-accent); border: 1px dashed var(--aw-line); border-radius: 12px; min-height: 42px; padding: 8px 16px; margin: 8px 0; font-size: 14px; cursor: pointer; }
+.aw-file-picker input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.aw-file-picker:focus-within { outline: 2px solid var(--aw-accent); outline-offset: 3px; }
+.aw-card { border: 1px solid var(--aw-line); border-radius: 16px; padding: 14px; margin: 14px 0; background: var(--aw-card); overflow-wrap: anywhere; }
+.aw-card p, .aw-card blockquote { white-space: pre-wrap; }
+.aw-card > button, .aw-body > button, .aw-download > button { margin: 6px 6px 6px 0; }
+.aw-table-wrap { overflow-x: auto; border: 1px solid var(--aw-line); border-radius: 12px; margin: 12px 0; background: var(--aw-bg); }
+.aw-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.aw-table th, .aw-table td { min-width: 85px; max-width: 450px; padding: 10px 12px; border-bottom: 1px solid var(--aw-line); text-align: left; overflow-wrap: anywhere; vertical-align: top; white-space: pre-wrap; }
+.aw-table th { background: var(--aw-card); color: var(--aw-accent); font-weight: 600; }
+.aw-table tr:last-child td { border-bottom: 0; }
+.aw-table-wrap > .aw-row { padding: 0 12px; }
+.aw-chart { margin: 12px 0 0; }
+.aw-chart img { display: block; max-width: 100%; height: auto; border-radius: 10px; }
+.aw-chart button { margin-top: 10px; }
+.aw-link { color: var(--aw-accent); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.aw-image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 14px; }
+.aw-image-grid > .aw-card { min-width: 0; }
+.aw-image-stage { position: relative; width: 100%; }
+.aw-image-stage canvas { display: block; width: 100%; height: auto; border-radius: 8px; touch-action: none; cursor: crosshair; }
+.aw-selection { position: absolute; box-sizing: border-box; pointer-events: none; border: 2px solid #176743; background: rgba(108, 204, 146, .2); box-shadow: 0 0 0 1px rgba(255,255,255,.9); }
+.aw-selection[hidden] { display: none; }
+.aw-timeline .aw-card { border-left: 3px solid var(--aw-accent); }
+.aw-timeline details { margin: 12px 0; }
+.aw-overlay details summary { cursor: pointer; color: var(--aw-accent); min-height: 36px; line-height: 36px; }
+.aw-overlay blockquote { margin: 10px 0; padding: 8px 14px; border-left: 3px solid var(--aw-line); color: var(--aw-muted); line-height: 1.7; white-space: pre-wrap; }
+.aw-overlay audio { width: 100%; margin: 10px 0; }
+.aw-step-list { padding: 0; list-style: none; }
+.aw-step-state { color: var(--aw-accent); font-size: 13px; }
+.aw-step-list [data-step-status="failed"] { border-color: #b96a52; }
+.aw-step-list [data-step-status="done"] { border-color: var(--aw-accent); }
+.aw-output { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; }
+.aw-download { border: 1px solid var(--aw-line); border-radius: 14px; background: var(--aw-card); padding: 14px; margin: 12px 0; }
+.aw-download strong { display: block; overflow-wrap: anywhere; }
+.aw-status { flex: 0 0 auto; color: var(--aw-accent); min-height: 20px; font-size: 13px; line-height: 1.6; margin: 0; padding: 8px 22px 12px; overflow-wrap: anywhere; }
+.aw-status-error { color: #a04231; }
+[data-theme="dark"] .aw-status-error { color: #f1b2a5; }
+@keyframes aw-reveal { from { opacity: 0; } to { opacity: 1; } }
+@keyframes aw-rise { from { opacity: .6; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 650px) {
+  .aw-overlay { padding: 7px; }
+  .aw-panel { height: calc(var(--aw-vh, 100dvh) - 14px); border-radius: 18px; }
+  .aw-header { padding: 12px 13px 5px; }
+  .aw-header h2 { font-size: 17px; }
+  .aw-tabs { padding: 5px 9px 9px; gap: 3px; }
+  .aw-body { padding: 10px 13px 24px; }
+  .aw-overlay button { min-height: 44px; }
+  .aw-field { flex-basis: 130px; }
+  .aw-card { padding: 11px; }
+  .aw-status { padding: 8px 13px 10px; }
+  .aw-field input, .aw-field select, .aw-field textarea { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aw-overlay, .aw-panel { animation: none; }
+  .aw-overlay button { transition: none; }
+  .aw-body { scroll-behavior: auto; }
+}
+html[data-reduce-motion="true"] .aw-overlay, html[data-reduce-motion="true"] .aw-panel { animation: none; }
+html[data-reduce-motion="true"] .aw-overlay button { transition: none; }
+html[data-reduce-motion="true"] .aw-body { scroll-behavior: auto; }
+html[data-xtj-motion="off"] .aw-overlay, html[data-xtj-motion="off"] .aw-panel { animation: none; }
+html[data-xtj-motion="off"] .aw-overlay button { transition: none; }
+html[data-xtj-motion="off"] .aw-body { scroll-behavior: auto; }

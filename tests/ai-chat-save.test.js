@@ -2,10 +2,11 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {EventEmitter}=require('node:events');
 const {saveCustomChatTurn,saveInterruptedChatTurn}=require('../render-api/ai-chat-save');
+const assistantOutput=require('../render-api/ai-assistant-output');
 test('builtin completion preserves original images and text in durable history',async()=>{
  const stored=[],frames=[],c={supabase:{from(){return{async insert(rows){stored.push(...rows);return{error:null};}};}},
   sanitizeAssistantVisibleText:s=>s,normalizeDeepSeekUsageModel:s=>s,DEEPSEEK_MODEL_REASONER:'reasoner',
-  AI_AGENT_MESSAGE_MARKER:'__ai_agent_msg__',getProcessEvents:()=>[],saveInterruptedChatTurn,
+  AI_AGENT_MESSAGE_MARKER:'__ai_agent_msg__',getProcessEvents:()=>[],saveInterruptedChatTurn,assistantOutput,
   buildMsgMeta:(role,convId,usage,reasoning,seq,search,elapsed,extra)=>JSON.stringify({role,convId,...extra}),
   recordAiTurnUsage:async()=>null,maybeUpdateConversationSummary:async()=>{},writeSse:(res,event)=>frames.push(event),console:{error(){},log(){}},Date};
  const a=source.indexOf('async function finishStream('),b=source.indexOf('\n// ★ 2026-09-13',a);assert.ok(a>=0&&b>a);
@@ -21,11 +22,15 @@ test('custom completion persists request identity for exact pending-turn reconci
   buildMeta:(role,convId,usage,reasoning,seq,search,elapsed,extra)=>JSON.stringify({role,convId,...extra}),marker:'__ai_agent_msg__'});
  assert.equal(stored.length,2);for(const row of stored)assert.equal(JSON.parse(row.media_url).client_request_id,'custom-request');
 });
+test('custom actual usage and three generated followups survive durable history without footer text in the answer',async()=>{
+ let rows;await saveCustomChatTurn({db:{from:()=>({insert:async value=>{rows=value;return{error:null};}})},userName:'alice',convId:'CURRENT01',message:'问题',content:'实际回答',model:'chosen',usage:{prompt_tokens:100,completion_tokens:50,total_tokens:150},followups:['问题一？','问题二？','问题三？'],buildMeta:(role,conv,usage,reasoning,seq,search,time,extra)=>JSON.stringify({role,usage,...extra}),marker:'__ai_agent_msg__'});
+ const meta=JSON.parse(rows[1].media_url);assert.equal(meta.usage.total_tokens,150);assert.equal(meta.followups.length,3);assert.equal(rows[1].content,'实际回答');
+});
 const {toolFeedback,runRequiredSearch}=require('../render-api/ai-tool-feedback');
 const {appendProcessEvent,getProcessEvents}=require('../render-api/ai-process-events');
 const source=fs.readFileSync('render-api/server.js','utf8');
 const startMeta=source.indexOf('function buildMsgMeta(');
-const buildMeta=new Function(source.slice(startMeta,source.indexOf("app.get('/api/agent/profile'",startMeta))+'return buildMsgMeta;')();
+const buildMeta=new Function('assistantOutput',source.slice(startMeta,source.indexOf("app.get('/api/agent/profile'",startMeta))+'return buildMsgMeta;')(assistantOutput);
 const normalize=new Function(source.slice(source.indexOf('function normalizeToolResultItems('),source.indexOf("const { getMailTransporter"))+'return normalizeToolResultItems;')();
 const args={userName:'A',convId:'ABCDEF-1234',message:'查天气',content:'福州晴',reasoning:'先查证',model:'third-party',thinkingMode:'high',webSearch:false,processEvents:[{type:'reasoning',text:'先查证'}],cards:[{id:'weather',type:'weather'}],buildMeta,marker:'ai-message'};
 for(const status of ['ok','error','throw'])test('third-party chat reports actual cloud persistence: '+status,async()=>{
@@ -36,7 +41,7 @@ for(const status of ['ok','error','throw'])test('third-party chat reports actual
 async function routeFixture({failSave=false,disconnect=false,incomplete=false,usage=null}={}){
  const frames=[],stored=[],payloads=[],usageRecords=[];let handler,calls=0,signal;
  const c={app:{post(...args){handler=args.at(-1);}},authenticateUser(){},aiChatConcurrencyGate(){},rateLimit:()=>null,express:{json:()=>null},AI_CHAT_HOURLY_IP_LIMIT:100,AI_CHAT_MESSAGE_MAX_LEN:12000,ADMIN_USERNAME:'admin',validateString:value=>value,genConvId:()=>'ABCDEF-NEW',AI_AGENT_MESSAGE_MARKER:'ai-message',URL,AbortController,TextDecoder,setTimeout,clearTimeout,setInterval,clearInterval,console,
-  require:name=>require('../render-api/'+name.replace('./','')),aiTaskPolicy:require('../render-api/ai-task-policy'),enforceAiChatAccess:async()=>({allowed:true}),getAiQuotaErrorMessage:()=>'',assertSafeWebUrl:async url=>({parsed:new URL(url),addresses:['93.184.216.34']}),extractVisionImageUrls:()=>[],getAiConfig:async()=>({name:'configured'}),buildAiCorePrompt:config=>'Configured '+config.name,aiToolsForWorkMode:()=>[{type:'function',function:{name:'get_weather'}}],toolFeedback,runRequiredSearch,normalizeToolResultItems:normalize,saveCustomChatTurn,saveInterruptedChatTurn,buildMsgMeta:buildMeta,getProcessEvents,
+  require:name=>require('../render-api/'+name.replace('./','')),assistantOutput,aiTaskPolicy:require('../render-api/ai-task-policy'),enforceAiChatAccess:async()=>({allowed:true}),getAiQuotaErrorMessage:()=>'',assertSafeWebUrl:async url=>({parsed:new URL(url),addresses:['93.184.216.34']}),extractVisionImageUrls:()=>[],getAiConfig:async()=>({name:'configured'}),buildAiCorePrompt:config=>'Configured '+config.name,aiToolsForWorkMode:()=>[{type:'function',function:{name:'get_weather'}}],toolFeedback,runRequiredSearch,normalizeToolResultItems:normalize,saveCustomChatTurn,saveInterruptedChatTurn,buildMsgMeta:buildMeta,getProcessEvents,
   executeToolCall:async()=>({tool_name:'get_weather',location:'福州',content:'福州晴',cards:[{protocol:'xtj.ai.ui.v1',id:'weather',type:'weather',data:{city:'福州',condition:'晴',temperature_c:26.7}}]}),parseDsmlToolCallsGlobal:()=>({calls:[]}),finalReplyContainsInternalProtocolGlobal:()=>false,looksLikeToolArgsFragment:()=>false,recordAiTurnUsage:async(_user,actual)=>{usageRecords.push(actual);},
   supabase:{from(){return {async insert(rows){stored.push(...rows);return failSave?{error:{}}:{error:null};}};}},writeSse(res,event){if(res.writableEnded)return false;frames.push(event);appendProcessEvent(res,event);return true;},
   requestPinnedStream:async(url,addresses,options)=>{payloads.push(JSON.parse(options.body));signal=options.signal;if(disconnect){res.emit('close');throw Object.assign(Error('closed'),{name:'AbortError'});}const delta=calls++===0?{reasoning_content:'先查证',tool_calls:[{index:0,id:'weather',function:{name:'get_weather',arguments:'{"location":"福州"}'}}]}:{content:'福州晴。'};return new Response('data: '+JSON.stringify({choices:[{delta}]})+'\n\n'+(usage&&calls===2?'data: '+JSON.stringify({choices:[],usage})+'\n\n':'')+(incomplete&&calls===2?'':'data: [DONE]\n\n'));}};

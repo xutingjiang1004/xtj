@@ -39,7 +39,6 @@ function cleanSearchResults(results, maxCount) {
   if (!Array.isArray(results)) return [];
   var out = [];
   var seenUrl = {};
-  var seenTitle = {};
   // ★ U3: URL 协议白名单, 防止 javascript:/data:text/html 等危险协议
   var ALLOWED_URL_PROTOCOLS = ['http:', 'https:'];
   function isUrlSafe(url) {
@@ -67,10 +66,8 @@ function cleanSearchResults(results, maxCount) {
     // URL 去重
     if (u && seenUrl[u]) return;
     if (u) seenUrl[u] = true;
-    // 标题模糊去重：取标题前 10 个字作为指纹
-    var titleKey = t.replace(/[\s\-—·•·,，。！？、；：""''（）()\[\]【】《》<>]/g, '').slice(0, 10);
-    if (titleKey && seenTitle[titleKey]) return;
-    if (titleKey) seenTitle[titleKey] = true;
+    // Same-topic headlines are independent evidence. Only identical URLs are
+    // collapsed here; research performs bounded body checks for reposts.
     // 标题兜底
     if (!t) t = (s || u || '').slice(0, 40);
     // 评分：有摘要的优先，有来源的优先，标题更完整的优先

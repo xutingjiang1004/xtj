@@ -73,12 +73,12 @@ for (const result of [{ data: null, error: { message: 'database unavailable' } }
   assert.equal(await persist('alice', 'ABCDEF', 'question', 'answer', []), null);
 });
 
-function cachedResearchRoute(rows, cache = true, persistId = 'saved-current-id', cancelFlow = false) {
+function cachedResearchRoute(rows, cache = true, persistId = 'saved-current-id', cancelFlow = false, attachments = []) {
   let handler, persisted = 0, persistedArgs; const queries = [];
   const db = { from() { const filters = []; let q = { select() { return q; }, eq(k,v) { filters.push(r => r[k] === v); queries.push([k,v]); return q; },
     filter(k,_op,p) { const literal = p.replace(/\\_/g, '_').replace(/%$/, ''); filters.push(r => r[k].startsWith(literal)); return q; },
     order() { return q; }, limit() { return q; }, then(resolve, reject) { return Promise.resolve({ data: rows.filter(r => filters.every(f => f(r))), error: null }).then(resolve, reject); } }; return q; } };
-  const c = { ...history, AbortController, Date, supabase: db, app: { post(...args) { handler = args.at(-1); } }, authenticateUser() {}, aiChatConcurrencyGate() {}, rateLimit() {},
+  const c = { ...history, AbortController, Date, require: name => require('../render-api/' + name.slice(2)), parseDocumentBuffer: async () => ({}), ocrImageBuffer: async () => ({}), sharp: {}, supabase: db, app: { post(...args) { handler = args.at(-1); } }, express:{json:()=>null},fetchSafeWebPage:async()=>null, authenticateUser() {}, aiChatConcurrencyGate() {}, rateLimit() {},
     AI_AGENT_MESSAGE_MARKER: '__ai_agent_msg__', tryAcquireDeepResearch: () => () => {}, enforceAiChatAccess: async () => ({ allowed: true }), measureSearchQuota: async () => ({ allowed: true }),
     validateString: s => s, genConvId: () => 'GENERATED1', researchCacheKey: () => 'fixture', researchCache: new Map(), researchCacheGet: () => cache ? { answer: 'REPORT', sources: [] } : null,
     researchCacheSet() {}, getAiConfig: async () => ({}), runSelfResearchFlow: async opts => { if (cancelFlow) opts.cancelToken.cancelled = true; return { answer: 'REPORT', sources: [] }; },
@@ -87,7 +87,7 @@ function cachedResearchRoute(rows, cache = true, persistId = 'saved-current-id',
     writeSse(res,e) { res.events.push(e); return true; }, console: { warn() {}, error() {} } };
   extract(server, "app.post('/api/agent/research/stream'", '// GET /api/agent/research/history', 'undefined', c);
   return { queries, get persisted() { return persisted; }, get persistedArgs() { return persistedArgs; }, async run() {
-    const req = new EventEmitter(); Object.assign(req, { userName: 'alice', accountId: '11111111-1111-4111-8111-111111111111', body: { query: 'QUESTION', conversation_id: 'CURRENT1' } });
+    const req = new EventEmitter(); Object.assign(req, { userName: 'alice', accountId: '11111111-1111-4111-8111-111111111111', body: { query: 'QUESTION', conversation_id: 'CURRENT1', attachments } });
     const res = new EventEmitter(); Object.assign(res, { events: [], setHeader() {}, flushHeaders() {}, end() { res.writableEnded = true; } });
     await handler(req, res); return res.events;
   } };
@@ -97,6 +97,15 @@ test('cached research cannot reuse a record from a different conversation or a d
   const deleted = { ...other, id: 'deleted-id', actor_key: 'ai_msg_conv_CURRENT1_1', media_url: JSON.stringify({ convId: 'CURRENT1', deleted: true }) };
   const f = cachedResearchRoute([other,deleted]); const events = await f.run();
   assert.equal(f.persisted, 1); assert.equal(events.find(e => e.type === 'research_done').message_id, 'saved-current-id');
+});
+test('a cached file report retains actual prepared text for later questions and reports no new model requests', async () => {
+  const original='这份实际附件用于后续对照，预算为十万元。';
+  const f=cachedResearchRoute([],true,'saved-file-report',false,[{name:'对照资料.txt',dataUrl:'data:text/plain;base64,'+Buffer.from(original).toString('base64')}]);
+  const events=await f.run(),done=events.find(e=>e.type==='research_done');
+  assert.ok(done,JSON.stringify(events));assert.equal(done.documents[0].name,'对照资料.txt');
+  assert.equal(f.persistedArgs[6].prepared_documents[0].paragraphs[0].text,original);
+  assert.equal(done.board.usage.actual_tokens,0);assert.equal(done.board.usage.returned_requests,0);
+  assert.equal(done.board.search_calls,0);assert.equal(done.board.save.report,'saved');
 });
 test('failed native research persistence is explicit after generating a valid answer', async () => {
   const f = cachedResearchRoute([], false, null); const events = await f.run(), done = events.find(e => e.type === 'research_done');

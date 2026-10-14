@@ -1822,7 +1822,7 @@ function isAdmin() {
 
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
-            'ai-agent': { styles: ['xtj-module-ai-style'], scripts: ['xtj-module-ai-script'] },
+            'ai-agent': { styles: ['xtj-module-ai-style','xtj-module-ai-workbench-style','xtj-module-ai-reading-style','xtj-module-ai-features-style'], scripts: ['xtj-module-ai-script'] },
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
