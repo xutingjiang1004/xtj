@@ -2,6 +2,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),path=require('node:path');
 const {postBrowserFixture}=require('./helpers/post-browser-fixture');
 const UUID='11111111-1111-4111-8111-111111111111';
+async function editableTable(page){await tab(page,'表格');await pasteCsv(page,'编号,金额\nA,3');await page.getByRole('button',{name:'编辑与导出成果',exact:true}).click();await page.getByLabel('成果标题',{exact:true}).waitFor();}
+async function settleUi(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
 async function fixture(options={}) {
   const f=await postBrowserFixture({counts:[1],publicPosts:true,...options});
   await f.page.addStyleTag({path:path.resolve('css/ai-workbench.css')});
@@ -29,7 +31,7 @@ async function fixture(options={}) {
       if(path.includes('/assets/')&&opts.method==='DELETE'){wbRecords=wbRecords.filter(r=>r.id!==path.split('/').at(-1));return {ok:true,removed:true};}
       return {ok:true};
     };
-    window.wbOpen=()=>window.wb=XtjAiCore.ToolWorkbench.open({owner:'alice',current:()=>wbCurrent,api:wbApi,onAsk:async payload=>{wbAsk.push(payload);}});
+    window.wbOpen=()=>window.wb=XtjAiCore.ToolWorkbench.open({owner:'alice',current:()=>wbCurrent,api:(path,opts)=>window.wbApi(path,opts),onAsk:async payload=>{wbAsk.push(payload);}});
     wbOpen();
   },{png:'data:image/png;base64,'+f.png.toString('base64'),uuid:UUID});
   await f.page.getByRole('dialog',{name:'小猫工具工作台'}).waitFor();
@@ -127,5 +129,54 @@ test('decision changes invalidate displayed scores and exports immediately witho
   await tab(f.page,'决策对比');await f.page.getByLabel('维度 1',{exact:true}).first().fill('成本');await f.page.getByLabel('维度 2',{exact:true}).first().fill('体验');await f.page.getByLabel('方案 1',{exact:true}).fill('甲');await f.page.getByLabel('方案 2',{exact:true}).fill('乙');
   await f.page.getByLabel('维度 1',{exact:true}).nth(1).fill('8');await f.page.getByLabel('维度 2',{exact:true}).nth(1).fill('4');await f.page.getByLabel('维度 1',{exact:true}).nth(2).fill('5');await f.page.getByLabel('维度 2',{exact:true}).nth(2).fill('9');await f.page.getByRole('button',{name:'计算综合分',exact:true}).click();await f.page.locator('.aw-decision-results').waitFor();
   const score=f.page.getByLabel('成本',{exact:true}).first();await score.fill('9');assert.equal(await f.page.locator('.aw-decision-results').count(),0);assert.equal(await score.evaluate(node=>node===document.activeElement),true);await f.page.getByText('评分或权重已更改，请重新计算综合分。',{exact:true}).waitFor();await f.page.getByRole('button',{name:'计算综合分',exact:true}).click();assert.match(await f.page.locator('.aw-table tbody').textContent(),/甲6.5/);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('a delayed saved-assets list cannot remove a newly saved result',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await editableTable(p);await p.evaluate(()=>{const base=wbApi;window.wbApi=async(path,opts={})=>{const result=await base(path,opts);if(path.endsWith('/assets')&&opts.method==='GET'){await new Promise(resolve=>window.oldListRelease=resolve);window.oldListDelivered=true;}return result;};});
+  await p.getByRole('button',{name:'读取已保存成果',exact:true}).click();await p.waitForFunction(()=>typeof oldListRelease==='function');
+  await p.getByRole('button',{name:'保存到我的账号',exact:true}).click();await p.getByText('成果已保存到当前账号',{exact:true}).waitFor();assert.equal(await p.getByRole('button',{name:'打开已保存成果',exact:true}).count(),1);
+  await p.evaluate(()=>oldListRelease());await p.waitForFunction(()=>oldListDelivered);await settleUi(p);assert.equal(await p.getByRole('button',{name:'打开已保存成果',exact:true}).count(),1);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('a delayed save preserves the focused editor, unsaved title and selection',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await editableTable(p);await p.getByLabel('成果标题',{exact:true}).fill('点击时的标题');
+  await p.evaluate(()=>{const base=wbApi;window.wbApi=async(path,opts={})=>{const result=await base(path,opts);if(path.endsWith('/assets')&&opts.method==='POST')await new Promise(resolve=>window.saveAckRelease=resolve);return result;};});
+  await p.getByRole('button',{name:'保存到我的账号',exact:true}).click();await p.waitForFunction(()=>typeof saveAckRelease==='function');
+  await p.getByLabel('成果标题',{exact:true}).fill('还在编辑的新标题');await p.getByLabel('成果标题',{exact:true}).evaluate(el=>el.setSelectionRange(2,6,'backward'));
+  await p.evaluate(()=>saveAckRelease());await p.getByText('已保存点击时的成果，当前编辑尚未保存',{exact:true}).waitFor();
+  const editor=await p.evaluate(()=>{const el=document.activeElement;return{label:el.closest('.aw-field')?.querySelector('span')?.textContent,value:el.value,start:el.selectionStart,end:el.selectionEnd,direction:el.selectionDirection};});
+  assert.deepEqual(editor,{label:'成果标题',value:'还在编辑的新标题',start:2,end:6,direction:'backward'});assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('a saved read started during deletion cannot restore the deleted asset identifier',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await editableTable(p);await p.getByRole('button',{name:'保存到我的账号',exact:true}).click();await p.getByText('成果已保存到当前账号',{exact:true}).waitFor();
+  await p.evaluate(()=>{const base=wbApi;window.wbApi=async(path,opts={})=>{if(path.includes('/assets/')&&opts.method==='DELETE')await new Promise(resolve=>window.deleteRelease=resolve);const result=await base(path,opts);if(path.includes('/assets/')&&opts.method==='GET'){await new Promise(resolve=>window.savedReadRelease=resolve);window.savedReadDelivered=true;}return result;};});
+  await p.getByRole('button',{name:'删除保存成果',exact:true}).click();await p.waitForFunction(()=>typeof deleteRelease==='function');
+  await p.getByRole('button',{name:'打开已保存成果',exact:true}).click();await p.waitForFunction(()=>typeof savedReadRelease==='function');
+  await p.evaluate(()=>deleteRelease());await p.getByText('已删除账号中的成果',{exact:true}).waitFor();await p.evaluate(()=>savedReadRelease());await p.waitForFunction(()=>savedReadDelivered);await settleUi(p);
+  await p.getByRole('button',{name:'保存到我的账号',exact:true}).click();await p.waitForFunction(()=>wbCalls.filter(c=>c.path.endsWith('/assets')&&c.method==='POST').length===2);
+  assert.equal((await p.evaluate(()=>wbCalls.filter(c=>c.path.endsWith('/assets')&&c.method==='POST').at(-1))).body.id,undefined);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('manual transcription edits cancel old recognition and keep the corrected text',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await tab(p,'音频');await p.evaluate(()=>{XTJVoiceTranscription.transcribeBlob=async(_file,options)=>{options.onState({label:'本地识别处理中'});await new Promise(resolve=>window.audioRelease=resolve);if(options.signal.aborted)throw new DOMException('cancelled','AbortError');return '迟到的机器转写';};});
+  await p.locator('.aw-file-picker input').setInputFiles({name:'会议.wav',mimeType:'audio/wav',buffer:Buffer.from('isolated-audio')});
+  await p.getByRole('button',{name:'本地转写',exact:true}).click();await p.waitForFunction(()=>typeof audioRelease==='function');
+  await p.getByLabel('转写文字（可校正）',{exact:true}).fill('人工确认后的真实会议内容');await p.evaluate(()=>audioRelease());
+  await p.waitForFunction(()=>!Array.from(document.querySelectorAll('.aw-body button')).some(b=>b.disabled&&b.textContent==='正在转写…'));await settleUi(p);
+  assert.equal(await p.getByLabel('转写文字（可校正）',{exact:true}).inputValue(),'人工确认后的真实会议内容');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('switching tabs during a pending save cannot create a duplicate record',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await editableTable(p);await p.evaluate(()=>{const base=wbApi;window.pendingSaves=0;window.wbApi=async(path,opts={})=>{if(path.endsWith('/assets')&&opts.method==='POST'){pendingSaves++;await new Promise(resolve=>window.pendingSaveRelease=resolve);}return base(path,opts);};});
+  await p.getByRole('button',{name:'保存到我的账号',exact:true}).click();await p.waitForFunction(()=>pendingSaves===1);
+  await tab(p,'表格');await tab(p,'成果预览');await p.getByRole('button',{name:'保存到我的账号',exact:true}).evaluate(el=>el.click());await settleUi(p);assert.equal(await p.evaluate(()=>pendingSaves),1);
+  await p.evaluate(()=>pendingSaveRelease());await p.getByText('成果已保存到当前账号',{exact:true}).waitFor();assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
