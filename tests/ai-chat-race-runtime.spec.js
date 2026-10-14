@@ -45,8 +45,8 @@ test('AI rapid conversation switching ignores a late response from the old conve
   await expect(page.locator('#aiChatRoot')).toBeVisible();
   await page.locator('.ai-chat-hist-btn').click();
   await expect(page.locator('.ai-conv-item')).toHaveCount(2);
-  await page.locator('.ai-conv-item[data-conv-id="old-conversation"]').click();
-  await page.locator('.ai-conv-item[data-conv-id="new-conversation"]').dispatchEvent('click');
+  await page.locator('.ai-conv-item[data-conv-id="old-conversation"] .ai-conv-open').click();
+  await page.locator('.ai-conv-item[data-conv-id="new-conversation"] .ai-conv-open').dispatchEvent('click');
 
   await expect(page.locator('#aiChatMessagesArea')).toContainText('NEW_RESPONSE');
   await page.waitForTimeout(850);
