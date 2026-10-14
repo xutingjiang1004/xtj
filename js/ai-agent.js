@@ -3632,6 +3632,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var root = getAiRoot();
     var bar = S.inputBarEl;
     if (!root || !bar) return;
+    var input=S.inputEl,html=document.documentElement,keyboard=root.classList.contains('ai-keyboard-open')||html.classList.contains('xtj-keyboard-open'),viewport=window.visualViewport,visibleHeight=root.getBoundingClientRect().height;
+    if(!html.classList.contains('xtj-ios-viewport')&&viewport)visibleHeight=Math.min(visibleHeight,viewport.height);
+    root.classList.toggle('ai-composer-compact',keyboard&&visibleHeight>0&&visibleHeight<400);
+    if(input&&root.contains(input)){
+      var maxHeight='';
+      if(keyboard&&visibleHeight>0){var header=root.querySelector('.ai-chat-header'),available=visibleHeight-(header?header.offsetHeight:0),fixedHeight=bar.offsetHeight-input.offsetHeight,minHeight=Math.max(38,parseFloat(getComputedStyle(input).minHeight)||0);maxHeight=Math.max(minHeight,Math.min(120,available-fixedHeight-24))+'px';}
+      if(input.style.maxHeight!==maxHeight)input.style.maxHeight=maxHeight;
+    }
     root.style.setProperty('--ai-input-height', Math.max(64, bar.offsetHeight || 0) + 'px');
     var rootBounds=root.getBoundingClientRect(),barBounds=bar.getBoundingClientRect();
     if(rootBounds.height>0 && barBounds.height>0)root.style.setProperty('--ai-new-content-bottom',Math.max(12,rootBounds.bottom-barBounds.top+12)+'px');
@@ -7595,7 +7603,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var input = document.getElementById('dtInput');
       if (input) {
         setTimeout(function() {
-          if (currentPage() && document.activeElement !== input && !document.querySelector('.dt-research-history-panel, [data-xtj-ai-modal]')) {
+          if (currentPage() && !panel.contains(document.activeElement) && !document.querySelector('.dt-research-history-panel, [data-xtj-ai-modal]')) {
             try { input.focus({ preventScroll: true }); } catch (e) {}
           }
         }, 80);
@@ -13736,8 +13744,8 @@ function showChatMessages() {
         voiceBtn.setAttribute('aria-label',state.listening ? '结束语音输入' : state.speaking ? '打断朗读并提问' : '语音输入');
         voiceModeBtn.setAttribute('aria-checked',String(state.enabled));
         voiceModeBtn.querySelector('.ai-panel-row-value').textContent = state.enabled ? '开启' : '关闭';
-        voiceLabel.textContent = state.label || (state.enabled ? '语音对话已开启，点击麦克风继续提问' : '');
-        voiceStatus.hidden = !voiceLabel.textContent; stopVoiceBtn.hidden = !state.speaking;
+        voiceLabel.textContent = state.label || (state.enabled ? '语音对话已开启，点击麦克风继续提问' : '');voiceLabel.title=voiceLabel.textContent;
+        voiceStatus.hidden = !voiceLabel.textContent; stopVoiceBtn.hidden = !(state.speaking || state.stage === 'speech_wait');
         updateInputMetrics();
       }
     });
@@ -13807,7 +13815,7 @@ function showChatMessages() {
     addFeatureEntry('工具工作台',function(){var workbench=window.XtjAiCore&&window.XtjAiCore.ToolWorkbench;if(!workbench){notify('工具工作台尚未加载，请刷新后重试');return;}if(S._toolWorkbench)S._toolWorkbench.dispose();S._toolWorkbench=workbench.open({owner:readUserName(),current:featureCurrent,api:featureApi,notify:notify,onAsk:function(payload){return S._askPreservingDraft(payload.text,payload.attachments);}});});
     addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'V4.1 Flash'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if(config.api_key&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
     var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
-    function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId)return memory;}return null;}
+    function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId&&typeof memory.summary==='string'&&memory.summary.trim()&&memory.summary.length<=8000)return memory;}return null;}
     function contextWindowTokens(){var value=Number(scopedStorageGet('xtj_ai_context_window_'+S.selectedModel));return [32768,65536,131072].indexOf(value)>=0?value:65536;}
     function updateCapacity(value){var features=assistantFeatures();if(!features)return;if(capacityModel!==S.selectedModel||capacityConversation!==S.conversationId){lastContextBudget=null;capacityModel=S.selectedModel;capacityConversation=S.conversationId;}if(value)lastContextBudget=value;var memory=contextMemory(),preview=features.estimate(S.messages,input.value,isCustomModelId(S.selectedModel),{managed:true,memory:memory,windowTokens:contextWindowTokens(),overhead:lastContextBudget&&lastContextBudget.tool_schema_tokens||0});if(capacityWidget)capacityWidget.update(value||preview,memory);else capacity.textContent=features.capacityText(value||preview);}
     var capacityFeatures=assistantFeatures();if(capacityFeatures&&capacityFeatures.createCapacity)capacityWidget=capacityFeatures.createCapacity(capacity,{current:featureCurrent,configuredWindowTokens:contextWindowTokens,onOpen:function(){updateCapacity(capacityModel===S.selectedModel&&capacityConversation===S.conversationId&&!input.value?lastContextBudget:null);},onWindowChange:function(value){try{localStorage.setItem('xtj_ai_context_window_'+S.selectedModel+'__'+aiStorageScopeName(),String(value));}catch(_){}lastContextBudget=null;updateCapacity();}});

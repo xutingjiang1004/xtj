@@ -80,10 +80,11 @@ test('delayed image decoding reserves grid heights and does not move the next po
  const f=await postBrowserFixture({holdImages:true,counts:[2,4,15]});try{
   const page=f.page;await page.waitForFunction(()=>getComputedStyle(document.querySelector('#feed .post-media-grid')).display==='grid');
   await page.evaluate(()=>document.fonts.ready);await page.waitForTimeout(300);
+  await page.waitForFunction(()=>document.getElementById('feed').getAnimations({subtree:true}).every(animation=>animation.effect?.getComputedTiming().iterations===Infinity||!['running','pending'].includes(animation.playState)));
   const before=await page.locator('#feed .post-media-grid').evaluateAll(nodes=>nodes.map(el=>({top:el.getBoundingClientRect().top,height:el.getBoundingClientRect().height})));
   assert.ok(before.every(box=>box.height>0));f.releaseImages();await page.waitForFunction(()=>Array.from(document.querySelectorAll('#feed .post-media-grid img')).filter(el=>el.loading!=='lazy'||el.getBoundingClientRect().top<innerHeight).every(el=>el.complete&&el.naturalWidth>0));
   const after=await page.locator('#feed .post-media-grid').evaluateAll(nodes=>nodes.map(el=>({top:el.getBoundingClientRect().top,height:el.getBoundingClientRect().height})));
-  before.forEach((box,index)=>{assert.ok(Math.abs(box.height-after[index].height)<.5);assert.ok(Math.abs(box.top-after[index].top)<.5);});
+  before.forEach((box,index)=>{assert.ok(Math.abs(box.height-after[index].height)<.5,JSON.stringify({index,before:box,after:after[index]}));assert.ok(Math.abs(box.top-after[index].top)<.5,JSON.stringify({index,before:box,after:after[index]}));});
  }finally{f.releaseImages();await f.close();}
 });
 for(const kind of ['video','audio'])test(`real composer keeps ${kind} to one file and publishes through the existing single-media path`,{timeout:30000},async()=>{
