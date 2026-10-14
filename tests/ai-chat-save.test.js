@@ -30,7 +30,7 @@ const {toolFeedback,runRequiredSearch}=require('../render-api/ai-tool-feedback')
 const {appendProcessEvent,getProcessEvents}=require('../render-api/ai-process-events');
 const source=fs.readFileSync('render-api/server.js','utf8');
 const startMeta=source.indexOf('function buildMsgMeta(');
-const buildMeta=new Function('assistantOutput',source.slice(startMeta,source.indexOf("app.get('/api/agent/profile'",startMeta))+'return buildMsgMeta;')(assistantOutput);
+const buildMeta=new Function('assistantOutput','require',source.slice(startMeta,source.indexOf("app.get('/api/agent/profile'",startMeta))+'return buildMsgMeta;')(assistantOutput,name=>require('../render-api/'+name.replace('./','')));
 const normalize=new Function(source.slice(source.indexOf('function normalizeToolResultItems('),source.indexOf("const { getMailTransporter"))+'return normalizeToolResultItems;')();
 const args={userName:'A',convId:'ABCDEF-1234',message:'查天气',content:'福州晴',reasoning:'先查证',model:'third-party',thinkingMode:'high',webSearch:false,processEvents:[{type:'reasoning',text:'先查证'}],cards:[{id:'weather',type:'weather'}],buildMeta,marker:'ai-message'};
 for(const status of ['ok','error','throw'])test('third-party chat reports actual cloud persistence: '+status,async()=>{
@@ -38,21 +38,31 @@ for(const status of ['ok','error','throw'])test('third-party chat reports actual
  assert.equal(await saveCustomChatTurn({...args,db}),status==='ok');assert.equal(inserted.length,2);assert.ok(inserted.every(row=>row.user_name==='A'));
  const saved=JSON.parse(inserted[1].media_url);assert.equal(saved.convId,args.convId);assert.equal(saved.usage.model,'third-party');assert.equal(saved.usage.thinking_mode,'high');assert.equal(saved.site_cards[0].id,'weather');assert.equal(saved.process_events[0].text,'先查证');assert.doesNotMatch(JSON.stringify(inserted),/api_key|Authorization/);
 });
-async function routeFixture({failSave=false,disconnect=false,incomplete=false,usage=null}={}){
+async function routeFixture({failSave=false,disconnect=false,incomplete=false,usage=null,contextManaged=false,history=[]}={}){
  const frames=[],stored=[],payloads=[],usageRecords=[];let handler,calls=0,signal;
  const c={app:{post(...args){handler=args.at(-1);}},authenticateUser(){},aiChatConcurrencyGate(){},rateLimit:()=>null,express:{json:()=>null},AI_CHAT_HOURLY_IP_LIMIT:100,AI_CHAT_MESSAGE_MAX_LEN:12000,ADMIN_USERNAME:'admin',validateString:value=>value,genConvId:()=>'ABCDEF-NEW',AI_AGENT_MESSAGE_MARKER:'ai-message',URL,AbortController,TextDecoder,setTimeout,clearTimeout,setInterval,clearInterval,console,
   require:name=>require('../render-api/'+name.replace('./','')),assistantOutput,aiTaskPolicy:require('../render-api/ai-task-policy'),enforceAiChatAccess:async()=>({allowed:true}),getAiQuotaErrorMessage:()=>'',assertSafeWebUrl:async url=>({parsed:new URL(url),addresses:['93.184.216.34']}),extractVisionImageUrls:()=>[],getAiConfig:async()=>({name:'configured'}),buildAiCorePrompt:config=>'Configured '+config.name,aiToolsForWorkMode:()=>[{type:'function',function:{name:'get_weather'}}],toolFeedback,runRequiredSearch,normalizeToolResultItems:normalize,saveCustomChatTurn,saveInterruptedChatTurn,buildMsgMeta:buildMeta,getProcessEvents,
   executeToolCall:async()=>({tool_name:'get_weather',location:'福州',content:'福州晴',cards:[{protocol:'xtj.ai.ui.v1',id:'weather',type:'weather',data:{city:'福州',condition:'晴',temperature_c:26.7}}]}),parseDsmlToolCallsGlobal:()=>({calls:[]}),finalReplyContainsInternalProtocolGlobal:()=>false,looksLikeToolArgsFragment:()=>false,recordAiTurnUsage:async(_user,actual)=>{usageRecords.push(actual);},
   supabase:{from(){return {async insert(rows){stored.push(...rows);return failSave?{error:{}}:{error:null};}};}},writeSse(res,event){if(res.writableEnded)return false;frames.push(event);appendProcessEvent(res,event);return true;},
+  createAiHistoryAttachmentBudget:()=>({}),prepareAiHistoryMessage:async(message,_budget,max)=>({...message,content:message.content.slice(0,max)}),
   requestPinnedStream:async(url,addresses,options)=>{payloads.push(JSON.parse(options.body));signal=options.signal;if(disconnect){res.emit('close');throw Object.assign(Error('closed'),{name:'AbortError'});}const delta=calls++===0?{reasoning_content:'先查证',tool_calls:[{index:0,id:'weather',function:{name:'get_weather',arguments:'{"location":"福州"}'}}]}:{content:'福州晴。'};return new Response('data: '+JSON.stringify({choices:[{delta}]})+'\n\n'+(usage&&calls===2?'data: '+JSON.stringify({choices:[],usage})+'\n\n':'')+(incomplete&&calls===2?'':'data: [DONE]\n\n'));}};
  const req=new EventEmitter();req.userName='A';req.body={provider:'openai',api_key:'private-key',model:'chosen-model',message:'福州天气',conversation_id:'ABCDEF-SHARED',work_mode:false,tools_enabled:false,thinking_mode:'high'};
+ if(contextManaged)Object.assign(req.body,{context_management:true,context_window_tokens:65536,messages:history,messages_include_current:false});
  const res=new EventEmitter();res.writableEnded=false;res.setHeader=()=>{};res.flushHeaders=()=>{};res.end=()=>{res.writableEnded=true;};
  const a=source.indexOf("app.post('/api/agent/custom-chat/stream'");const b=source.indexOf("app.post('/api/agent/custom-chat/deep-stream'",a);const code=source.slice(a,b);vm.runInNewContext(code.slice(0,code.lastIndexOf('\n});')+4),c);
+ const m=source.indexOf('function manageAiContextWindow('),n=source.indexOf('\nasync function loadAiContext',m);c.manageAiContextWindow=vm.runInNewContext('('+source.slice(m,n).trim()+')',c);
  await handler(req,res);return {frames,stored,payloads,signal,req,res,usageRecords};
 }
 test('a third-party EOF retains partial text and cannot report a completed answer',async()=>{
  const f=await routeFixture({incomplete:true});assert.equal(f.frames.some(e=>e.type==='done'),false);
  assert.equal(f.stored[1].content,'福州晴。');assert.equal(JSON.parse(f.stored[1].media_url).interrupted,true);assert.ok(f.frames.some(e=>e.type==='error'));
+});
+test('actual third-party route automatically compacts a long history, saves its private memory and makes no extra model request',async()=>{
+ const history=Array.from({length:100},(_,i)=>({role:i%2?'assistant':'user',context_id:'real-'+i,content:'真实对话内容，保持已有要求。'.repeat(240)}));
+ const result=await routeFixture({contextManaged:true,history});assert.equal(result.payloads.length,2);
+ const meta=result.frames.find(frame=>frame.context_budget);assert.equal(meta.context_budget.compaction_status,'compressed');assert.ok(meta.context_budget.history_compressed>0);
+ assert.ok(result.payloads[0].messages.length<history.length);assert.match(result.payloads[0].messages[1].content,/较早对话的提取摘要/);assert.equal(result.payloads[0].messages.at(-1).content,'福州天气');
+ const stored=JSON.parse(result.stored[1].media_url);assert.equal(stored.context_memory.summary,meta.context_memory.summary);assert.equal(stored.context_memory.conversation_id,'ABCDEF-SHARED');assert.doesNotMatch(JSON.stringify(stored),/private-key/);
 });
 test('third-party usage-only SSE packets reach quota accounting without character estimates replacing them',async()=>{
  const f=await routeFixture({usage:{prompt_tokens:1000,completion_tokens:25000,total_tokens:26000}});

@@ -56,6 +56,27 @@ test('compressed visual viewport constrains only AI host without changing Dock o
     const after=await f.page.evaluate(()=>({dock:document.querySelector('.dock')?.getAttribute('style')||'',focus:document.activeElement.id,rect:readingTestHost.getBoundingClientRect().toJSON(),height:getComputedStyle(readingTestHost).maxHeight}));assert.equal(after.dock,before.dock);assert.equal(after.focus,before.focus);assert.ok(after.rect.height<=342);assert.equal(after.height,'340px');assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
+test('redecorated reports keep unique heading IDs and disposed directory buttons cannot move focus',async()=>{
+ const f=await fixture();try{
+  const result=await f.page.evaluate(()=>{
+   reading.dispose();readingTestList.replaceChildren();openReading('report-updates');
+   function report(label){const node=document.createElement('article'),content=document.createElement('div');content.innerHTML='<h2>'+label+'一</h2><p>正文</p><h2>'+label+'二</h2>';node.append(content);readingTestList.append(node);return {node,contentEl:content,text:label+'完整正文'};}
+   const a=report('甲'),b=report('乙');reading.decorateReport(a);reading.decorateReport(b);reading.decorateReport(a);
+   const headings=[...readingTestList.querySelectorAll('h2')],ids=headings.map(h=>h.id);const handle=reading.decorateReport(a),oldButton=handle.toc.querySelector('button');handle.dispose();readingTestInput.focus();oldButton.click();
+   return {ids,focus:document.activeElement.id,tocs:readingTestList.querySelectorAll('.ai-reading-toc').length,full:reading.getFullText(b.node)};
+  });
+  assert.equal(new Set(result.ids).size,result.ids.length);assert.equal(result.focus,'readingTestInput');assert.equal(result.tocs,1);assert.equal(result.full,'乙完整正文');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('selecting all text inside an editable history control does not mount the entire history',async()=>{
+ const f=await fixture();try{
+  await f.page.evaluate(()=>{const first=readingTestList.querySelector('.readingActualMessage'),input=document.createElement('textarea');input.id='historyEditable';input.value='仅选择这个输入框';first.append(input);});
+  await f.page.locator('#historyEditable').focus();const before=await f.page.evaluate(()=>readingRenders.length);await f.page.keyboard.press('Control+A');
+  assert.ok(await f.page.evaluate(()=>readingRenders.length)-before<5,'input selection must not parse all 120 historical messages');
+  assert.ok(await f.page.locator('.readingActualMessage').count()<20);
+  assert.equal(await f.page.locator('#historyEditable').evaluate(node=>node.value.slice(node.selectionStart,node.selectionEnd)),'仅选择这个输入框');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
 test('account disposal invalidates queued restore/observers and removes the private reading anchor',async()=>{
   const f=await fixture();try{
     const result=await f.page.evaluate(async()=>{reading.remember();const key=XtjAiCore.ReadingTools.positionKey('alice-account','local-session');const pending=reading.restore();readingCurrent=false;window.dispatchEvent(new Event('xtj:auth-changed'));return {restored:await pending,anchor:localStorage.getItem(key),text:reading.getFullText(readingTestList.firstElementChild)};});assert.deepEqual(result,{restored:false,anchor:null,text:''});assert.deepEqual(f.errors,[]);

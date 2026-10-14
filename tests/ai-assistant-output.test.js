@@ -2,6 +2,16 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const {createSafeAssistantStream,splitFollowups,contextualFollowups} = require('../render-api/ai-assistant-output');
 const forbidden = text => /<\s*[|｜\s/]*(?:DSML|tool_calls?|function_calls?|invoke|parameter|plugin_info)/i.test(text);
+test('followup examples inside tilde and wider backtick code fences stay literal across incremental splits',()=>{
+ const {createFollowupStream}=require('../render-api/ai-assistant-output');
+ for(const fence of ['~~~xml','````markdown']){
+  const end=fence.startsWith('~')?'~~~':'````';
+  const example=fence+'\n'+(fence.startsWith('`')?'```xml\n':'')+'<xtj-followups>["问题一？","问题二？","问题三？"]</xtj-followups>\n'+(fence.startsWith('`')?'```\n':'')+end;
+  for(const make of [emit=>createFollowupStream(emit),emit=>createSafeAssistantStream({emit})])for(let split=1;split<example.length;split++){
+   const chunks=[],stream=make(text=>chunks.push(text));stream.push(example.slice(0,split));stream.push(example.slice(split));const result=stream.finish();assert.equal(result.text,example);assert.equal(chunks.join(''),example);assert.deepEqual(result.followups,[]);
+  }
+ }
+});
 test('real SSE writer streams only prose and retains generated questions when the completed body was already cleaned',()=>{
  const {writeSse}=require('../render-api/sse-write'),frames=[],res={headersSent:true,writableEnded:false,_aiFollowupEnabled:true,_aiFollowupQuestion:'分析材料',write(value){frames.push(JSON.parse(value.split('data: ')[1]));return true;}};
  writeSse(res,{type:'content',text:'实际正文。\n<xtj-foll'});writeSse(res,{type:'content',text:'owups>["这是问题一吗？","这是问题二吗？","这是问题三吗？"]</xtj-followups>'});

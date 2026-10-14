@@ -7626,6 +7626,10 @@ html.xtj-ios-viewport #panelAiChat.ai-secondary-panel,
 html.xtj-ios-viewport .ai-site-search-panel,
 html.xtj-ios-viewport #panelDeepThink { height:var(--xtj-app-height)!important; max-height:var(--xtj-app-height)!important; top:var(--xtj-visual-top,0px)!important; bottom:auto!important; }
 html.xtj-ios-viewport.xtj-keyboard-open #panelAiChat.ai-secondary-panel .ai-chat-root { padding-bottom:0!important; }
+/* The composer stays in the shell's flex/grid flow on iOS. Reserving its
+   height again inside the scroll area can push the controls below a short
+   keyboard viewport when context or voice feedback adds another row. */
+html.xtj-ios-viewport.xtj-keyboard-open #panelAiChat .ai-chat-messages { padding-bottom:14px; scroll-padding-bottom:16px; }
 html.xtj-ios-viewport.xtj-keyboard-open .ai-chat-input-bar { padding-bottom:8px!important; }
 @media (min-width:768px) {
   html.xtj-ios-viewport #panelAiChat.ai-secondary-panel {

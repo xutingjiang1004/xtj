@@ -178,6 +178,12 @@ for(const implementation of ['main','shared'])test(implementation+': a long stre
   assert.deepEqual(result,{nodes:1,text:'正文继续'.repeat(110),runs:0});
  }finally{await browser.close();}
 });
+for(const implementation of ['main','shared'])test(implementation+': a large complete suffix finishes promptly while retaining the existing paragraph and respecting prior cancellation',async()=>{
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(async kind=>{renderMarkdown=text=>text.split('\n\n').map(part=>'<p>'+part+'</p>').join('');XtjAiCore.Markdown.render=renderMarkdown;const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);renderer.append('已有段落');renderer.flush();const first=output.firstChild,final='已有段落\n\n'+('终稿原文'.repeat(10000));const done=await renderer.drain(final);const stable=output.firstChild===first,complete=output.textContent.endsWith('终稿原文'.repeat(10000));output.replaceChildren();const next=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);next.append('保留原文');next.flush();const cancelled=await next.drain('不应显示的迟到正文'.repeat(2000),AbortSignal.abort());return {done,stable,complete,cancelled,text:output.textContent};},implementation);
+  assert.deepEqual(result,{done:true,stable:true,complete:true,cancelled:false,text:'保留原文'});
+ }finally{await browser.close();}
+});
 for(const implementation of ['main','shared'])test(implementation+': abort settles the drain once and sanitized replacements are immediately authoritative',async()=>{
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(async kind=>{const output=document.getElementById('output'),create=()=>kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output),renderer=create(),controller=new AbortController();renderer.append('前缀');renderer.flush();const drain=renderer.drain('前缀'+('尚未显示'.repeat(80)),controller.signal);controller.abort();const aborted=await drain;output.replaceChildren();const revised=create();revised.append('旧的内容');revised.flush();const completed=await revised.drain('修正后的安全正文');return{aborted,completed,text:output.textContent,cursors:output.querySelectorAll('.ai-stream-cursor').length};},implementation);

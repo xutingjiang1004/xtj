@@ -14,6 +14,11 @@ test('structured table conversion never silently drops columns or rows',()=>{
   const headers=Array.from({length:15},(_,i)=>'列'+i),rows=Array.from({length:350},(_,i)=>headers.map((_,j)=>i+':'+j));
   const text=blocksText([{type:'table',headers,rows}]);assert.match(text,/349:14/);assert.match(text,/第 350 行/);
 });
+test('PDF code blocks preserve literal formatting and nested shorter fences for both Markdown fence types',async()=>{
+ const answer='## 示例\n\n````markdown\n```js\n**literal-backtick-text**\n```\n````\n\n~~~text\n**literal-tilde-text**\n| --- | --- |\n~~~\n\n## 结论\n真实结论';
+ const pdf=await buildReportPdf({title:'代码原文核对',answer});const parsed=await require('../render-api/file-parsers').parsePdfBuffer(pdf);
+ assert.match(parsed.text,/\*\*literal-backtick-text\*\*/);assert.match(parsed.text,/\*\*literal-tilde-text\*\*/);assert.match(parsed.text,/```js/);assert.match(parsed.text,/\| --- \| --- \|/);assert.match(parsed.text,/真实结论/);
+});
 test('empty, oversized and cancelled report exports are explicit failures',async()=>{
   assert.throws(()=>reportMarkdown({answer:''}),/为空/);assert.throws(()=>reportMarkdown({answer:'x'.repeat(500001)}),/50 万/);
   await assert.rejects(buildReportPdf({answer:'正文',signal:AbortSignal.abort()}),/取消/);

@@ -3775,7 +3775,7 @@ async function finishStream(res, opt) {
           user_name: opt.userName,
           content: content,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs, { client_request_id: res._aiClientRequestId, followups: assistantParts.followups, interrupted: !isComplete, site_cards: Array.isArray(opt.siteCards) ? opt.siteCards.slice(0, 8) : [], process_events: getProcessEvents(res) }),
+          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs, { client_request_id: res._aiClientRequestId, followups: assistantParts.followups,context_memory:res._aiContextMemory,context_budget:res._aiContextBudget, interrupted: !isComplete, site_cards: Array.isArray(opt.siteCards) ? opt.siteCards.slice(0, 8) : [], process_events: getProcessEvents(res) }),
           actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
           created_at: assistantCreatedAt
         }
@@ -3797,6 +3797,7 @@ async function finishStream(res, opt) {
       message: opt.message, reasoning, model: usedModel, thinkingMode,
       processEvents: getProcessEvents(res), cards: opt.siteCards, buildMeta: buildMsgMeta,
       marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs, visionUrls: res._aiVisionUrls || opt.visionUrls,
+      contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget,
       startedAt: res._aiStartedAt || opt.startTime, requestId: res._aiClientRequestId,
       finishReason });
   }
@@ -3838,6 +3839,7 @@ async function finishStream(res, opt) {
   writeSse(res, {
     type: 'done',
     complete: isComplete,
+    context_memory:res._aiContextMemory,context_budget:res._aiContextBudget,
     interrupted: !isComplete,
     saved: saved,
     finish_reason: finishReason,
@@ -19907,6 +19909,8 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
     if (extra.finish_reason) obj.finish_reason = String(extra.finish_reason).slice(0, 40);
     if (extra.client_request_id) obj.client_request_id = String(extra.client_request_id).slice(0, 80);
     if (Array.isArray(extra.followups) && extra.followups.length) obj.followups = assistantOutput.normalizeFollowups(extra.followups);
+    if (extra.context_memory) obj.context_memory = require('./ai-context-window').validMemory(extra.context_memory,convId);
+    if (extra.context_budget && typeof extra.context_budget==='object') obj.context_budget=extra.context_budget;
     if (extra.deep_think) obj.deep_think = true;
     if (extra.chat_mode) obj.chat_mode = extra.chat_mode;
     if (typeof extra.attachment_context === 'string' && extra.attachment_context) obj.attachment_context = extra.attachment_context.slice(0,60000);
@@ -21009,6 +21013,18 @@ async function prepareAiHistoryMessage(message, budget, maxChars, allowVision) {
 }
 
 
+function manageAiContextWindow(messages,historyCount,req,res,convId,signal){
+  var contextWindow=require('./ai-context-window');
+  var history=messages.slice(1,historyCount+1),fixed=[messages[0]].concat(messages.slice(historyCount+1));
+  var result=contextWindow.prepareContext({history:history,fixed:fixed,tools:aiToolsForWorkMode(),
+    conversationId:convId,memory:req.body&&req.body.context_memory,windowTokens:req.body&&req.body.context_window_tokens,signal:signal,
+    onCompacting:function(){writeSse(res,{type:'context_status',stage:'compacting',message:'正在提取较早对话的关键内容，完整原文保留。'});}});
+  messages.splice(1,historyCount,...result.messages);
+  res._aiContextMemory=result.memory;res._aiContextBudget=result.budget;
+  writeSse(res,{type:'meta',conversation_id:convId,context_budget:result.budget,context_memory:result.memory});
+  return result;
+}
+
 async function loadAiContext(userName, convId, clientHistory, historyOptions) {
   var ctx = { history: [] };
 
@@ -21039,7 +21055,7 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
           }
         }
       }
-      clientRows = clientRows.slice(-AI_CHAT_HISTORY_FETCH_BUFFER);
+      clientRows = clientRows.slice(historyOptions && historyOptions.contextManagement ? -256 : -AI_CHAT_HISTORY_FETCH_BUFFER);
       var attachmentBudget = createAiHistoryAttachmentBudget(historyOptions && historyOptions.currentAttachments);
       var preparedHistory = [];
       for (var chi = clientRows.length - 1; chi >= 0; chi--) {
@@ -21052,9 +21068,10 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
         var prepared = await prepareAiHistoryMessage(
           { role: chRole, content: chContent, attachments: ch.attachments, vision_urls: ch.vision_urls },
           attachmentBudget,
-          AI_CHAT_HISTORY_MSG_MAX_CHARS,
+          historyOptions && historyOptions.contextManagement ? 32000 : AI_CHAT_HISTORY_MSG_MAX_CHARS,
           historyOptions ? historyOptions.allowVision : true
         );
+        if(historyOptions&&historyOptions.contextManagement){prepared.context_id=String(ch.context_id||ch.client_request_id||ch.id||'');prepared.context_truncated=ch.context_truncated===true||chContent.length>32000;}
         if (prepared.content.trim() || prepared.vision_urls) preparedHistory.push(prepared);
       }
       ctx.history = preparedHistory.reverse();
@@ -21118,8 +21135,9 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
         }
         // ★ 缓存优化：标准化空白字符，确保历史消息在重新加载时字符串完全一致
         // 否则 unicode 空白/换行差异会导致缓存前缀不匹配
-        var normalized = content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
+        var normalized = historyOptions&&historyOptions.contextManagement?content.slice(0,32000):content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
         var entry = { role: meta.role || 'user', content: normalized };
+        if(historyOptions&&historyOptions.contextManagement){entry.context_id=String(meta.client_request_id||r.id||'');entry.context_truncated=content.length>32000;}
         // ★ 多模态连续追问：把历史里保存的图片 data URL 一并带回，
         //   后续轮次组装消息时可重新以 image_url 内容块发给视觉模型。
         if (entry.role === 'user' && Array.isArray(meta.vision_urls) && meta.vision_urls.length) {
@@ -21127,6 +21145,7 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
         }
         return entry;
       });
+      if(historyOptions&&historyOptions.contextManagement){ctx.history=parsedRows;return ctx;}
       // ★ 优化：固定 20 条在长对话下截断严重（20×4000 字符≈120k 字符，
       // 但 DeepSeek 上下文窗口有限，实际能容纳的轮次远少于 20 条完整消息）。
       // 改为按 token 预算从"最新"往前累积：优先保留最近的完整对话，
@@ -22313,7 +22332,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   var fwdMessages = [{ role: 'user', content: customFinalContent }];
   if (Array.isArray(body.messages) && body.messages.length) {
     var messagesIncludeCurrent = body.messages_include_current !== false;
-    var srcMsgs = body.messages.slice(messagesIncludeCurrent ? -20 : -19);
+    var srcMsgs = body.messages.slice(body.context_management===true ? -256 : messagesIncludeCurrent ? -20 : -19);
     var currentUserIdx = -1;
     if (messagesIncludeCurrent) {
       for (var _ci = srcMsgs.length - 1; _ci >= 0; _ci--) {
@@ -22329,7 +22348,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       if (_role !== 'user' && _role !== 'assistant') continue;
       var _c = _m.content.trim();
       if (!_c && !(_role === 'user' && Array.isArray(_m.attachments) && _m.attachments.length)) continue;
-      var _historyEntry = await prepareAiHistoryMessage({ role: _role, content: _c, attachments: _m.attachments, vision_urls: _m.vision_urls }, historyAttachmentBudget, 8000, true);
+      var _historyEntry = await prepareAiHistoryMessage({ role: _role, content: _c, attachments: _m.attachments, vision_urls: _m.vision_urls }, historyAttachmentBudget, body.context_management===true?32000:8000, true);
       var _historyContent = _historyEntry.content;
       if (_role === 'user' && Array.isArray(_historyEntry.vision_urls) && _historyEntry.vision_urls.length) {
         var _historyParts = [{ type: 'text', text: String(_historyContent || '').slice(0, 60000) }];
@@ -22339,6 +22358,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         _historyContent = _historyParts;
       }
       preparedCustomHistory[_mi] = { role: _role, content: _historyContent };
+      if(body.context_management===true){preparedCustomHistory[_mi].context_id=String(_m.context_id||_m.client_request_id||_m.id||'');preparedCustomHistory[_mi].context_truncated=_m.context_truncated===true||_c.length>32000;}
     }
     var built = [];
     for (var _oi = 0; _oi < srcMsgs.length; _oi++) {
@@ -22369,7 +22389,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     return safeEnd();
   }
   var conversation = [{ role: 'system', content: buildAiCorePrompt(customConfig) + (res._aiFollowupEnabled ? assistantOutput.FOLLOWUP_INSTRUCTION : '') }].concat(fwdMessages);
-  if(body.context_estimate===true)writeSse(res,{type:'meta',conversation_id:customConvId,context_budget:assistantOutput.contextEstimate(conversation,{supplied:Array.isArray(body.messages)?body.messages.length:0,retained:Math.max(0,fwdMessages.length-1)})});
+  if(body.context_estimate===true&&body.context_management!==true)writeSse(res,{type:'meta',conversation_id:customConvId,context_budget:assistantOutput.contextEstimate(conversation,{supplied:Array.isArray(body.messages)?body.messages.length:0,retained:Math.max(0,fwdMessages.length-1)})});
   var reasoningText = '';
   var reasoningSentStart = false, customUsageOptionDisabled = false, customThinkingOptionDisabled = false;
   var reasoningEffortFinal = _thinkMode === 'off' ? 'off' : (_thinkMode === 'max' || _thinkMode === 'high' ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low'));
@@ -22659,11 +22679,12 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       var customSaved = await saveCustomChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
         message: customFinalText, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
         thinkingMode: _thinkMode, webSearch: _webSearch, processEvents: getProcessEvents(res), cards: customSiteCards,
-        visionUrls: customVisionUrls, requestId: reqId, usage:customUsageReported?Object.assign({},customUsage):null,followups: _customParts.followups, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0 });
+        visionUrls: customVisionUrls, requestId: reqId, usage:customUsageReported?Object.assign({},customUsage):null,followups: _customParts.followups,contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0 });
       writeSse(res, {
         type: 'done',
         conversation_id: customConvId,
         content: finalAssistantContent,
+        context_memory:res._aiContextMemory,context_budget:res._aiContextBudget,
         followups: _customParts.followups,usage:customUsageReported?Object.assign({},customUsage):null,
         model: chosenModel,
         provider: provider,
@@ -22684,6 +22705,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   var rounds = 0;
   try {
     await runRequiredSearch({ enabled: _webSearch, text: text, messages: conversation, execute: executeToolCall, context: toolContext, write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
+    if(body.context_management===true)manageAiContextWindow(conversation,Math.max(0,fwdMessages.length-1),req,res,customConvId,controller.signal);
     while (rounds <= TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) {
       var rr = await runCustomRound(toolsInUse);
       if (rr.stop) break;
@@ -22695,8 +22717,8 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     if (rounds > TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) writeSse(res, { type: 'error', error: '本轮工具调用已达上限，请缩小任务后重试', code: 'CUSTOM_TOOL_ROUND_LIMIT' });
   } catch (eUp) {
     if (!aborted && !res.writableEnded) {
-      var reason = (eUp && eUp.message === 'custom_upstream_incomplete') ? '第三方回复提前中断，已保留收到的内容，可继续提问或重试' : (eUp && eUp.name === 'AbortError') ? '第三方模型响应超时，请重试' : '第三方模型连接失败，请检查 API Key 或网络';
-      writeSse(res, { type: 'error', error: reason, code: 'CUSTOM_STREAM_ERROR' });
+      var reason = eUp&&eUp.code==='context_window_exceeded'?eUp.message:(eUp && eUp.message === 'custom_upstream_incomplete') ? '第三方回复提前中断，已保留收到的内容，可继续提问或重试' : (eUp && eUp.name === 'AbortError') ? '第三方模型响应超时，请重试' : '第三方模型连接失败，请检查 API Key 或网络';
+      writeSse(res, { type: 'error', error: reason, code: eUp&&eUp.code==='context_window_exceeded'?eUp.code:'CUSTOM_STREAM_ERROR' });
     }
   } finally {
     try { clearTimeout(timer); } catch (e) {}
@@ -22707,6 +22729,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         message: text, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
         thinkingMode: _thinkMode, processEvents: getProcessEvents(res), cards: customSiteCards,
         visionUrls: customVisionUrls, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER,
+        contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget,
         thinkingElapsedMs: res._aiThinkingElapsedMs || 0, startedAt: customStartedAt, requestId: reqId,
         finishReason: aborted ? 'cancelled' : 'upstream_error' });
     }
@@ -23433,6 +23456,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       reasoning: persistentReasoning || reasoningBuffer || responsesReasoning || '',
       model: usedModel, thinkingMode: thinkingMode, processEvents: getProcessEvents(res),
       cards: siteToolCards, visionUrls: _visionImageUrls, buildMeta: buildMsgMeta,
+      contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget,
       marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0,
       startedAt: T0, requestId: clientReqId || ('server_' + T0),
       finishReason: aborted ? 'cancelled' : 'upstream_error' });
@@ -23584,6 +23608,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     var ctxPromise = loadAiContext(userName, convId, req.body && req.body.messages, {
       messagesIncludeCurrent: !(req.body && req.body.messages_include_current === false),
       currentAttachments: req.body && req.body.attachments,
+      contextManagement:req.body&&req.body.context_management===true,
       allowVision: _visionEligibleEarly
     });
     var _parallelPrep = await Promise.all([attachPromise, configPromise, ctxPromise]);
@@ -23636,7 +23661,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     var _historyVisionEligible = validatedModel === DEEPSEEK_MODEL_VISION || validatedModel === DEEPSEEK_MODEL_FLASH;
 
     var _ctxMaxSite2 = !!(req.body && req.body.thinking_max === true) || !!(req.body && req.body.work_mode === true);
-    var histSlice = aiChatHistoryBudget(ctx, _ctxMaxSite2);
+    var histSlice = req.body.context_management===true ? ctx.history.slice(-256) : aiChatHistoryBudget(ctx, _ctxMaxSite2);
     for (var h = 0; h < histSlice.length; h++) {
       var hrow = histSlice[h];
       // ★ 多模态连续追问：历史里带图（vision_urls）且当前模型视觉可用时，
@@ -23817,7 +23842,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       });
     }
 
-    if(req.body.context_estimate===true)writeSse(res,{type:'meta',conversation_id:convId,context_budget:require('./ai-assistant-output').contextEstimate(messages,{supplied:Array.isArray(req.body.messages)?req.body.messages.length:ctx.history.length,retained:histSlice.length})});
+    if(req.body.context_estimate===true&&req.body.context_management!==true)writeSse(res,{type:'meta',conversation_id:convId,context_budget:require('./ai-assistant-output').contextEstimate(messages,{supplied:Array.isArray(req.body.messages)?req.body.messages.length:ctx.history.length,retained:histSlice.length})});
 
     // ★ 搜索策略（用户确认）：
     //   优先模型内置 web_search；第三方 API 可作补充，不禁止。
@@ -23830,6 +23855,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     var useTavilyCluster = thirdPartySearchOk && ((webSearchPref === true) || (webSearchPref === false && proactiveSearch));
     var webSearchEnabled = (webSearchPref === true);
     await runRequiredSearch({ enabled: webSearchEnabled, text: searchCleanMessage || message, messages: messages, execute: executeToolCall, context: Object.assign(requestSearchCtx(req, userName), { signal: requestAbortCtrl.signal }), write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
+    if(req.body.context_management===true){for(var managedIndex=0;managedIndex<histSlice.length;managedIndex++){messages[managedIndex+1].context_id=histSlice[managedIndex].context_id;messages[managedIndex+1].context_truncated=histSlice[managedIndex].context_truncated;}manageAiContextWindow(messages,histSlice.length,req,res,convId,requestAbortCtrl.signal);}
     if (aborted || res.writableEnded) return safeEnd();
     var useBuiltInSearch = !_visionEngaged && validatedModel === DEEPSEEK_RESPONSES_MODEL;
     try {
@@ -24153,7 +24179,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
             user_name: userName,
             content: responsesContent,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, res._aiThinkingElapsedMs || 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res), site_cards: responsesSiteCards,client_request_id:res._aiClientRequestId,followups:responsesParts.followups }),
+            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, res._aiThinkingElapsedMs || 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res), site_cards: responsesSiteCards,client_request_id:res._aiClientRequestId,followups:responsesParts.followups,context_memory:res._aiContextMemory,context_budget:res._aiContextBudget }),
             actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
           }
         ]);
@@ -24196,6 +24222,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
         reasoning: thinkingMode !== 'off' ? responsesReasoning : '',
         thinking_elapsed_ms: res._aiThinkingElapsedMs || 0,
         content: responsesContent,followups:responsesParts.followups,
+        context_memory:res._aiContextMemory,context_budget:res._aiContextBudget,
         content_length: responsesContent.length,
         reasoning_length: responsesReasoning.length,
         search_count: searchResultsCollected.length,
@@ -25393,6 +25420,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       return safeEnd();
     }
     var serrText = streamErr && streamErr.message ? String(streamErr.message) : 'unknown';
+    if(streamErr&&streamErr.code==='context_window_exceeded')return terminateWithError({type:'error',code:streamErr.code,error:serrText});
     console.error('[AGENT-STREAM] stream read error:', serrText, 'reqId:', clientReqId || '?');
     // 已有部分内容时先保存，避免已生成的回复丢失（finishStream 发送 interrupted done）
     if (!aborted && contentBuffer && contentBuffer.length > 0) {
@@ -27136,6 +27164,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           client_request_id: m.client_request_id || '',
           process_events: Array.isArray(m.process_events) ? m.process_events : [],
           followups:Array.isArray(m.followups)?m.followups:[],research_board:m.research_board?Object.assign({},m.research_board,{stage:m.interrupted?'interrupted':m.research_board.cached?'cached':'done',save:Object.assign({},m.research_board.save,{report:'saved'})}):null,documents:Array.isArray(m.documents)?m.documents:[],
+          context_memory:m.context_memory?require('./ai-context-window').validMemory(m.context_memory,convId):null,context_budget:m.context_budget||null,
           created_at: r.created_at,
           conversation_id: m.convId || convId,
           usage: m.usage || null,

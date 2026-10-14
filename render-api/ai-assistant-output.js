@@ -1,4 +1,5 @@
 'use strict';
+const {insideFence} = require('./markdown-fences');
 
 const FOLLOWUP_OPEN = '<xtj-followups>';
 const FOLLOWUP_CLOSE = '</xtj-followups>';
@@ -19,7 +20,7 @@ function normalizeFollowups(value) {
 function splitFollowups(value) {
   const text = String(value || '');
   const match = /(?:^|\n)[ \t]*<xtj-followups>([\s\S]{0,8192}?)<\/xtj-followups>[ \t\r\n]*$/.exec(text);
-  if (!match || (text.slice(0, match.index).match(/^\s*```/gm) || []).length % 2) return { text, followups: [] };
+  if (!match || insideFence(text.slice(0, match.index))) return { text, followups: [] };
   let followups = [];
   try { followups = normalizeFollowups(JSON.parse(match[1])); } catch (_) {}
   return { text: text.slice(0, match.index).trimEnd(), followups };
@@ -29,7 +30,7 @@ function withoutIncompleteFooter(value) {
   const text = String(value || '');
   const marker = /(?:^|\n)[ \t]*(<xtj-followups>[\s\S]*|<[^\n]*)$/.exec(text);
   if(marker && !marker[1].startsWith(FOLLOWUP_OPEN) && !FOLLOWUP_OPEN.startsWith(marker[1]))return text;
-  if (!marker || (text.slice(0, marker.index).match(/^\s*```/gm) || []).length % 2) return text;
+  if (!marker || insideFence(text.slice(0, marker.index))) return text;
   return text.slice(0, marker.index).trimEnd();
 }
 
@@ -68,7 +69,7 @@ function createFollowupStream(emit) {
       const index=pending.indexOf(FOLLOWUP_OPEN);
       if(index>=0){
         const before=published+pending.slice(0,index);
-        if((!before||/\n[ \t]*$/.test(before))&&(before.match(/^\s*```/gm)||[]).length%2===0){output(pending.slice(0,index));pending='';collecting=true;return;}
+        if((!before||/\n[ \t]*$/.test(before))&&!insideFence(before)){output(pending.slice(0,index));pending='';collecting=true;return;}
       }
       let keep=0;
       for(let length=1;length<FOLLOWUP_OPEN.length;length++)if(pending.endsWith(FOLLOWUP_OPEN.slice(0,length)))keep=length;
@@ -96,7 +97,7 @@ function createSafeAssistantStream(options = {}) {
     for (let index = text.indexOf('<'); index >= 0; index = text.indexOf('<', index + 1)) {
       const suffix = text.slice(index).toLowerCase().replace(/[\s|｜]/g, '');
       const before = published + text.slice(0, index);
-      const inCode = (before.match(/^\s*```/gm) || []).length % 2;
+      const inCode = insideFence(before);
       if (inCode && (FOLLOWUP_OPEN.startsWith(suffix) || FOLLOWUP_CLOSE.startsWith(suffix) || suffix.startsWith('<xtj-followups') || suffix.startsWith('</xtj-followups'))) continue;
       if (suffix === '<' || suffix === '</' || heads.some(head => head.startsWith(suffix) || suffix.startsWith(head))) return index;
     }
