@@ -2,7 +2,14 @@
   'use strict';
   var core = global.XtjAiCore = global.XtjAiCore || {};
   function speechText(value) {
-    return String(value || '').replace(/```[\s\S]*?```/g, '（代码片段）').replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    var fence=null,lines=[];
+    String(value||'').split(/\r?\n/).forEach(function(line){
+      var marker=/^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if(fence){if(marker&&marker[1][0]===fence.marker&&marker[1].length>=fence.length&&!marker[2].trim())fence=null;return;}
+      if(marker&&(marker[1][0]==='~'||marker[2].indexOf('`')<0)){fence={marker:marker[1][0],length:marker[1].length};lines.push('（代码片段）');return;}
+      lines.push(line);
+    });
+    return lines.join('\n').replace(/!\[[^\]]*\]\([^)]*\)/g, '')
       .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '链接').replace(/[*_#`>|]/g, '').trim();
   }
   function create(options) {
@@ -10,7 +17,7 @@
     var decodeAbort = null, recordTimer = null, listening = false, speaking = false, utterance = null;
     var owner = options.owner(), lastTranscript = '', finalTranscript = '', baseText = '';
     function current(token) { return !disposed && seq === token && options.current(owner); }
-    function state(label,stage,progress) { options.onState({enabled:enabled,listening:listening,speaking:speaking,stage:stage||(speaking?'speaking':listening?'listening':'idle'),progress:progress===undefined?null:progress,label:label || ''}); }
+    function state(label,stage,progress) { options.onState({enabled:enabled,listening:listening,speaking:speaking,stage:stage||(speaking?'speaking':utterance?'speech_wait':listening?'listening':'idle'),progress:progress===undefined?null:progress,label:label || (speaking?'正在朗读，点击麦克风可打断并提问':utterance?'正在准备朗读，点击麦克风可打断':'')}); }
     function releaseMedia() {
       clearTimeout(recordTimer); recordTimer = null;
       if (media) media.getTracks().forEach(function(track) { track.stop(); }); media = null;
@@ -97,8 +104,8 @@
         };
         capture.onerror = function() { if (current(token)) { cancelInput(); options.notify('录音失败，请检查麦克风后重试'); } };
         capture.onstop = async function() {
-          releaseMedia();
           if (!current(token)) return;
+          releaseMedia();
           recorder = null; listening = false;
           var blob = new Blob(chunks,{type:capture.mimeType || mime || 'audio/webm'}); chunks = [];
           if (!blob.size) { state(); options.notify('未录到声音，请重试'); return; }
@@ -114,8 +121,13 @@
       } catch (_) { if (current(token)) { cancelInput(); options.notify('无法使用麦克风，请检查权限后重试'); } }
     }
     function toggleListening() {
-      if (listening && recognition) { recognition.stop(); return; }
-      if (listening && recorder) { if (recorder.state === 'recording') recorder.stop(); return; }
+      if (disposed || !options.current(owner)) return;
+      if (listening) {
+        if (recognition) { try { recognition.stop(); } catch (_) { cancelInput(); } }
+        else if (recorder) { try { if (recorder.state === 'recording') recorder.stop(); } catch (_) { cancelInput(); } }
+        else cancelInput(); // A second click cancels pending permission, not a new request.
+        return;
+      }
       if (decodeAbort) { cancelInput(); return; }
       void listen();
     }
@@ -127,9 +139,10 @@
       if (!text) return;
       if (text.length > 50000) { text = text.slice(0,50000); options.notify('回复较长，本次朗读前 5 万字'); }
       var parts = text.match(/[\s\S]{1,220}(?:[。！？\n]|$)|[\s\S]{1,220}/g) || [text];
-      var token = seq, speechToken = speechSeq, index = 0;
+      var speechToken = speechSeq, index = 0;
+      function speechCurrent(){return !disposed&&speechToken===speechSeq&&options.current(owner);}
       function next() {
-        if (!current(token) || speechToken !== speechSeq) return;
+        if (!speechCurrent()) return;
         if (index >= parts.length) { speaking = false; utterance = null; state(); if (enabled && autoContinue) void listen(); return; }
         var speech = new global.SpeechSynthesisUtterance(parts[index++]); utterance = speech;
         speech.lang = 'zh-CN'; speech.rate = 1;
@@ -137,8 +150,8 @@
         var voice = voices.find(function(item) { return /^zh/i.test(item.lang) && item.localService; }) || voices.find(function(item) { return /^zh/i.test(item.lang); });
         if (voice) speech.voice = voice;
         speech.onend = next;
-        speech.onerror = function() { if (current(token) && speechToken === speechSeq) { stopSpeech(); options.notify('浏览器暂停了朗读，点击回复下的“朗读”可重试'); } };
-        speech.onstart=function(){if(current(token)&&speechToken===speechSeq){speaking=true;state('正在朗读，点击麦克风可打断并提问','speaking');}};
+        speech.onerror = function() { if (speechCurrent()) { stopSpeech(); options.notify('浏览器暂停了朗读，点击回复下的“朗读”可重试'); } };
+        speech.onstart=function(){if(speechCurrent()){speaking=true;state('正在朗读，点击麦克风可打断并提问','speaking');}};
         speaking = false; state('正在准备朗读，点击麦克风可打断','speech_wait');
         try { global.speechSynthesis.speak(speech); }
         catch (_) { stopSpeech(); options.notify('朗读暂时无法启动，点击回复下的“朗读”可重试'); }
@@ -157,7 +170,7 @@
     global.addEventListener('xtj:auth-changed',identityChanged);
     return {listen:toggleListening,cancelInput:cancelInput,speak:speak,stopSpeech:stopSpeech,setEnabled:setEnabled,
       reply:function(text) { if (enabled) speak(text,true); },
-      isEnabled:function() { return enabled; }, isSpeaking:function() { return speaking; },
+      isEnabled:function() { return enabled; }, isSpeaking:function() { return speaking || !!utterance; },
       dispose:function() { suspend(); disposed = true; global.document.removeEventListener('visibilitychange',visibility); global.removeEventListener('pagehide',suspend); global.removeEventListener('xtj:auth-changed',identityChanged); }};
   }
   core.VoiceConversation = {create:create,speechText:speechText};
