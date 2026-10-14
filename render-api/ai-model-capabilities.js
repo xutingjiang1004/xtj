@@ -20,6 +20,14 @@ function errorLabel(status, data) {
   if (status >= 300 && status < 400) return {category:'redirect', detail:'接口要求跳转，请填写最终 HTTPS 接口地址'};
   return {category:'upstream', detail:'服务商暂时无法完成测试'};
 }
+function returnedUsage(value, previous) {
+  if (!value || typeof value !== 'object') return previous || null;
+  function number(raw) { if (raw == null || raw === '' || typeof raw !== 'number' && typeof raw !== 'string') return null; const n=Number(raw);return Number.isFinite(n)&&n>=0?n:null; }
+  const prompt=number(value.prompt_tokens==null?value.input_tokens:value.prompt_tokens),completion=number(value.completion_tokens==null?value.output_tokens:value.completion_tokens),total=number(value.total_tokens);
+  if(prompt===null&&completion===null&&total===null)return previous||null;
+  const p=prompt===null?previous&&previous.prompt_tokens||0:prompt,c=completion===null?previous&&previous.completion_tokens||0:completion;
+  return {prompt_tokens:p,completion_tokens:c,total_tokens:total===null?p+c:total};
+}
 async function probeCapabilities(config, deps = {}) {
   const safeUrl = deps.safeUrl || assertSafeWebUrl, transport = deps.transport || requestPinnedJson;
   const safe = await safeUrl(String(config.base_url || '').trim() || ENDPOINTS[config.provider]);
@@ -35,19 +43,16 @@ async function probeCapabilities(config, deps = {}) {
       const response = await transport(endpoint, safe.addresses, {method:'POST', headers:{'Content-Type':'application/json',Authorization:'Bearer ' + config.api_key},
         body:JSON.stringify(payload), maxBytes:128*1024, timeoutMs:15000, signal:deps.signal});
       let data; try { data = JSON.parse(response.text); } catch (_) {}
-      if (data && data.usage) {
-        usage.prompt_tokens += Math.max(0,Number(data.usage.prompt_tokens || data.usage.input_tokens)||0);
-        usage.completion_tokens += Math.max(0,Number(data.usage.completion_tokens || data.usage.output_tokens)||0);
-        usage.total_tokens += Math.max(0,Number(data.usage.total_tokens)||0);
-      }
+      let reported=returnedUsage(data&&data.usage);
+      if(extra.stream)for(const line of response.text.split(/\r?\n/)){if(!line.startsWith('data:'))continue;try{reported=returnedUsage(JSON.parse(line.slice(5)).usage,reported);}catch(_) {}}
+      if(reported)for(const key of ['prompt_tokens','completion_tokens','total_tokens'])usage[key]+=reported[key];
       if (response.status < 200 || response.status >= 300) {
         results.push({name,status:'failed',...errorLabel(response.status,data),http_status:response.status}); return false;
       }
-      const usageBeforeVerify = usage.total_tokens;
       const status = verify(data, response.text) ? 'passed' : 'unconfirmed';
       results.push({name,status,detail:status === 'passed' ? '本次实测通过' : '接口接受了请求，但未返回足以确认该能力的结果'});
       // Providers without usage still incurred a short request, accounted for conservatively.
-      if ((!data || !data.usage) && usage.total_tokens === usageBeforeVerify) { usage.prompt_tokens += 100; usage.completion_tokens += Number(extra.max_tokens || base.max_tokens); usage.total_tokens += 100 + Number(extra.max_tokens || base.max_tokens); }
+      if (!reported) { const outputReserve=Number(payload.max_completion_tokens||payload.max_tokens)||64;usage.prompt_tokens += 100; usage.completion_tokens += outputReserve; usage.total_tokens += 100 + outputReserve; }
       return true;
     } catch (_) { results.push({name,status:'failed',category:'network',detail:'连接失败、超时或测试已取消'}); return false; }
   }
@@ -63,7 +68,6 @@ async function probeCapabilities(config, deps = {}) {
     await probe('reasoning', {...reasonParams,max_tokens:512}, data => !!(data?.choices?.[0]?.message?.reasoning_content || data?.choices?.[0]?.message?.reasoning || Number(data?.usage?.completion_tokens_details?.reasoning_tokens) > 0));
     await probe('streaming', {stream:true,stream_options:{include_usage:true}}, (_, body) => {
       const packets = body.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => { try { return JSON.parse(line.slice(5)); } catch (_) { return null; } });
-      packets.forEach(packet => { if (packet?.usage) { usage.prompt_tokens += Number(packet.usage.prompt_tokens)||0; usage.completion_tokens += Number(packet.usage.completion_tokens)||0; usage.total_tokens += Number(packet.usage.total_tokens)||0; } });
       return packets.some(packet => packet?.choices?.[0]?.delta?.content) && (body.includes('data: [DONE]') || packets.some(packet => packet?.choices?.[0]?.finish_reason));
     });
   } else ['tools','vision','reasoning','streaming'].forEach(name => results.push({name,status:'unconfirmed',detail:'基础对话未通过，未继续发送能力测试'}));
@@ -77,7 +81,7 @@ function installModelCapabilities(app, deps) {
     const controller = new AbortController();
     const cancel = () => { if (!res.writableEnded) controller.abort(); };
     req.on('aborted',cancel); res.on('close',cancel);
-    const timer = setTimeout(() => controller.abort(),65000);
+    const timer = setTimeout(() => {controller.abort();if(!res.headersSent&&!res.destroyed&&!res.writableEnded)res.status(504).json({ok:false,error:'模型能力检测超时，请稍后重试'});},65000);
     let report;
     try {
       const gate = await deps.gate(req.userName,{needSearch:false});
