@@ -194,6 +194,13 @@ test.describe('release validation', () => {
       expect(entry.width, entry.selector).toBeGreaterThanOrEqual(44);
       expect(entry.height, entry.selector).toBeGreaterThanOrEqual(44);
     });
+    // Measure controls on their actual visible surface, after closing preview.
+    // Hidden ancestors produce zero rectangles even when the button itself
+    // has an inline display override; a timing delay cannot make that valid.
+    await page.locator('.photo-preview-close').click();
+    await expect(page.locator('.photo-preview-close')).toBeHidden();
+    await switchTab(page, 'chat');
+    await expect(page.locator('#dockChatContainer')).toBeVisible();
     await page.evaluate(() => {
       const detail = document.getElementById('dockChatDetailView');
       const list = document.getElementById('dockChatListView');
@@ -202,6 +209,9 @@ test.describe('release validation', () => {
       if (list) list.classList.add('hidden');
       if (back) back.style.display = 'flex';
     });
+    for (const selector of ['#dockChatBackBtn', '#dockChatImgBtn', '#dockChatSendBtn']) {
+      await expect(page.locator(selector)).toBeVisible();
+    }
     const chatButtons = await page.evaluate(() => {
       const selectors = ['#dockChatBackBtn', '#dockChatImgBtn', '#dockChatSendBtn'];
       return selectors.map((selector) => {
