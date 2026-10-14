@@ -148,7 +148,7 @@ test('P-12: 三处 SSE 读取循环都有残留 buffer 上限', () => {
   const guardCount = (aiAgent.match(/buffer\.length > /g) || []).length;
   assert.ok(guardCount >= 3, 'SSE buffer 上限守卫少于 3 处，实际 ' + guardCount);
   // 单行上限仍在（不能为了加 buffer 上限把单行上限删掉）
-  assert.match(aiAgent, /MAX_EVENT_SIZE = 512 \* 1024/);
+  assert.match(aiAgent, /MAX_EVENT_SIZE = 2 \* 1024 \* 1024/);
 });
 
 // ----------------------------------------------------------------- P-18

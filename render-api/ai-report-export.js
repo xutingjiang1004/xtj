@@ -2,6 +2,7 @@
 const PDFDocument = require('pdfkit');
 const path = require('node:path');
 const {setImmediate: yieldTurn} = require('node:timers/promises');
+const {nextFence} = require('./markdown-fences');
 const FONT = path.join(__dirname, 'assets/fonts/wqy-microhei.ttc');
 const MAX_CHARS = 500000, MAX_PDF_BYTES = 16 * 1024 * 1024;
 let active = 0;
@@ -53,7 +54,12 @@ function blocksText(blocks) {
       }
     } else if (['list','ul','ol'].includes(block.type)) {
       for (const [index,item] of (Array.isArray(block.items) ? block.items : []).entries()) output.push((block.type==='ol'?(index+1)+'. ':'- ') + String(item));
-    } else if (block.type === 'code') output.push('```\n'+String(block.text||block.content||'')+'\n```');
+    } else if (block.type === 'code') {
+      const text = String(block.text || block.content || '');
+      const longest = (text.match(/`+/g) || []).reduce((max, markers) => Math.max(max, markers.length), 2);
+      const fence = '`'.repeat(longest + 1);
+      output.push(fence + '\n' + text + '\n' + fence);
+    }
     else if (block.type === 'hr') output.push('---');
     else {
       const level=/^h[1-6]$/.test(block.type)?Number(block.type.slice(1)):block.type==='heading'?Math.min(6,Math.max(1,Number(block.level)||2)):0;
@@ -64,10 +70,15 @@ function blocksText(blocks) {
 }
 function parseBlocks(markdown) {
   const result = [];
-  let fenced = false, code = [];
+  let fence = null, code = [];
   for (const line of String(markdown).split('\n')) {
-    if (/^\s*```/.test(line)) { if (fenced) {result.push({type:'code',text:code.join('\n')});code=[];} fenced=!fenced;continue; }
-    if (fenced) {code.push(line);continue;}
+    const next = nextFence(line, fence);
+    if (fence) {
+      if (!next) {result.push({type:'code',text:code.join('\n')});code=[];fence=null;}
+      else code.push(line);
+      continue;
+    }
+    if (next) {fence=next;continue;}
     if (/^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(line) && /-/.test(line)) continue;
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     result.push(heading ? {type:'heading',level:heading[1].length,text:heading[2]} : {type:'paragraph',text:line});

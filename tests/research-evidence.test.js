@@ -25,3 +25,20 @@ test('search cleaning no longer silently discards distinct articles sharing a he
  const {cleanSearchResults}=require('../render-api/search-providers');
  assert.equal(cleanSearchResults([{url:'https://a.test/',title:'最新政策调整对企业的影响一'},{url:'https://b.test/',title:'最新政策调整对企业的影响二'}],10).length,2);
 });
+test('hash-routed articles remain distinct while ordinary section anchors share their article',()=>{
+ const result=evidence.dedupeSources([{url:'https://source.test/#/articles/1'},{url:'https://source.test/#/articles/2'},{url:'https://source.test/article#section-one'},{url:'https://source.test/article#section-two'}]);
+ assert.equal(result.unique_count,3);assert.equal(result.merged_count,1);
+ assert.match(result.sources[0].url,/#\/articles\/1$/);
+});
+test('unreadable or client-routed pages do not supply duplicate shell evidence and zero-page budget fetches nothing',async()=>{
+ const calls=[];
+ const rows=await evidence.enrichSources([{url:'https://source.test/#/articles/1'},{url:'https://source.test/#/articles/2'},{url:'https://source.test/empty'}],{fetchPage:async url=>{calls.push(url);return null;}});
+ assert.deepEqual(calls,['https://source.test/empty']);assert.ok(rows.every(row=>row.content_unavailable));
+ assert.equal(evidence.dedupeSources(rows).unique_count,3);
+ await evidence.enrichSources([{url:'https://source.test/another'}],{maxPages:0,fetchPage:async()=>{throw Error('zero budget must not fetch');},onProgress:()=>{throw Error('zero budget must not progress');}});
+});
+test('body deduplication preserves significant spaces and compatibility characters in conflicting conclusions',()=>{
+ const base=original+'\n程序里的字符串是：';
+ const rows=[{url:'https://a.test/space',content:base+'"a b"'},{url:'https://b.test/space',content:base+'"ab"'},{url:'https://c.test/unit',content:original+'面积单位：m²'},{url:'https://d.test/unit',content:original+'面积单位：m2'},{url:'https://e.test/space',content:base+'"a  b"'}];
+ assert.equal(evidence.dedupeSources(rows).unique_count,5);
+});

@@ -37,6 +37,10 @@ test('an incomplete native research stream preserves partial output but does not
   const f = researchClient(stream([{ type: 'research_content', content: 'PARTIAL REPORT' }]));
   await assert.rejects(f.run('question'), e => e.code === 'research_incomplete' && e.partialAnswer === 'PARTIAL REPORT');
 });
+test('a valid long research terminal event fits the answer and source metadata together without dropping completion',async()=>{
+ const answer='实际长报告。'.repeat(80000),sources=Array.from({length:40},(_,i)=>({url:'https://source.test/'+i,title:'来源'+i,snippet:'真实资料摘要'.repeat(220)}));
+ const f=researchClient(stream([{type:'research_done',answer,sources,conversation_id:'ORIGINAL1',saved:true}]));const result=await f.run('question');assert.equal(result.answer,answer);assert.equal(result.sources.length,40);
+});
 test('native research retains structured non-retryable service errors', async () => {
   const f = researchClient(new Response(JSON.stringify({ code: 'service_limited', retryable: false, error: '等待服务恢复' }), { status: 402 }));
   await assert.rejects(f.run('question'), e => e.code === 'service_limited' && e.retryable === false && e.status === 402);

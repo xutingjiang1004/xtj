@@ -25,7 +25,7 @@ async function saveCustomChatTurn(options) {
   const identity = options.requestId ? { client_request_id: options.requestId } : {};
   const userExtra = { ...identity, chat_mode: 'normal', web_search: webSearch === true, vision_urls: visionUrls };
   const assistantExtra = { chat_mode: 'normal', web_search: webSearch === true,
-    ...identity, followups: options.followups || [], process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
+    ...identity, followups: options.followups || [],context_memory:options.contextMemory,context_budget:options.contextBudget, process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
   const rows = [
     { user_name: userName, content: String(message).slice(0, 60000), media_type: marker,
       media_url: buildMeta('user', convId, null, null, 1, null, 0, userExtra),
@@ -47,7 +47,7 @@ async function saveInterruptedChatTurn(options) {
   const stamp = Number.isFinite(options.startedAt) ? options.startedAt : Date.now();
   const turnId = String(options.requestId || stamp).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
   const extra = { chat_mode: options.chatMode === 'deep_think' ? 'deep_think' : 'normal', interrupted: true, complete: false,
-    finish_reason: options.finishReason || 'cancelled', client_request_id: turnId };
+    finish_reason: options.finishReason || 'cancelled', client_request_id: turnId,context_memory:options.contextMemory,context_budget:options.contextBudget };
   if (options.chatMode === 'deep_think') Object.assign(extra, { deep_think: true, thinking_log: options.thinkingLog || [], agent_count: options.agentCount || 0 });
   const rows = [{ user_name: userName, content: message.slice(0, 60000), media_type: marker,
     media_url: buildMeta('user', convId, null, null, 1, null, 0,

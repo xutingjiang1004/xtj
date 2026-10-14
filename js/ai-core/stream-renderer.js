@@ -259,13 +259,13 @@
       isPaused: function () { return paused; },
       getRendered: function () { return rendered; },
       drain: function(finalText, signal) {
-        if (cancelled || !targetEl) return Promise.resolve(false);
+        if (cancelled || !targetEl || signal&&signal.aborted) return Promise.resolve(false);
         if (drainState) return drainState.promise;
         if (finished) return Promise.resolve(true);
         var final = typeof finalText === 'string' && finalText.length ? finalText : rendered + pending;
         // A sanitized replacement must take effect immediately. Only an unseen
         // suffix can follow the existing stream without replaying old text.
-        if (final.indexOf(rendered) !== 0 || reducedMotion || !final) {
+        if (final.indexOf(rendered) !== 0 || reducedMotion || !final || final.length-rendered.length>8192) {
           api.finish(final); return Promise.resolve(true);
         }
         pending = final.slice(rendered.length); paused = false;

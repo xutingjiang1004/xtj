@@ -97,6 +97,62 @@ test('comparison pause and close abort the owned streams and never begin the wai
   const f=await fixture(t),p=f.page;await p.locator('#aiChatMsgInput').fill('暂停前后保留的草稿');await openMenu(p,'双模型对比');await p.getByRole('button',{name:'开始对比',exact:true}).click();await p.waitForFunction(()=>aiPolish.streams.length===1);await p.getByRole('button',{name:'暂停',exact:true}).click();await p.waitForFunction(()=>aiPolish.streams[0].signal.aborted);await p.getByRole('button',{name:'开始对比',exact:true}).waitFor({state:'visible'});await p.waitForFunction(()=>!document.querySelector('.ai-compare-controls button').disabled);assert.equal(await p.evaluate(()=>aiPolish.streams.length),1);
   await p.getByRole('button',{name:'开始对比',exact:true}).click();await p.waitForFunction(()=>aiPolish.streams.length===2);await p.getByRole('button',{name:'关闭',exact:true}).click();await p.waitForFunction(()=>aiPolish.streams[1].signal.aborted);assert.equal(await p.evaluate(()=>aiPolish.streams.length),2);assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'暂停前后保留的草稿');assert.deepEqual(f.errors,[]);
 });
+test('restarting comparison clears both previous answers and usage before either new answer arrives',{timeout:60000},async t=>{
+ const f=await fixture(t),p=f.page;await p.locator('#aiChatMsgInput').fill('同一个比较问题');await openMenu(p,'双模型对比');
+ await p.getByRole('button',{name:'开始对比',exact:true}).click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+ await emit(p,0,{type:'done',content:'第一轮模型一',complete:true,usage:{total_tokens:11}});await p.waitForFunction(()=>aiPolish.streams.length===2);
+ await emit(p,1,{type:'done',content:'第一轮模型二',complete:true,usage:{total_tokens:22}});await p.waitForFunction(()=>!document.querySelector('.ai-compare-controls button').disabled);
+ await p.getByRole('button',{name:'开始对比',exact:true}).click();await p.waitForFunction(()=>aiPolish.streams.length===3);
+ assert.deepEqual(await p.locator('.ai-compare-answer').allTextContents(),['','']);assert.deepEqual(await p.locator('.ai-compare-usage').allTextContents(),['','']);
+ await p.getByRole('button',{name:'暂停',exact:true}).click();await p.waitForFunction(()=>!document.querySelector('.ai-compare-controls button').disabled);
+ assert.equal(await p.evaluate(()=>aiPolish.streams.length),3);assert.match(await p.locator('.ai-compare-status').nth(1).textContent(),/未开始/);assert.deepEqual(f.errors,[]);
+});
+test('research board updates preserve a focused collapsed summary',{timeout:60000},async t=>{
+ const f=await fixture(t),p=f.page;
+ await p.evaluate(()=>{const host=document.createElement('div');host.id='boardFocusHost';host.style.cssText='position:fixed;top:12px;left:12px;width:320px;z-index:99999;background:white';document.body.append(host);XtjAiCore.AssistantFeatures.renderBoard(host,{directions:[],completed:0,total:2,save:{},usage:{}});});
+ const summary=p.locator('#boardFocusHost summary');await summary.click();await summary.focus();
+ await p.evaluate(()=>XtjAiCore.AssistantFeatures.renderBoard(document.querySelector('#boardFocusHost'),{directions:[{role:'核对',status:'success'}],completed:1,total:2,save:{},usage:{}}));
+ assert.equal(await p.evaluate(()=>document.activeElement===document.querySelector('#boardFocusHost summary')),true);
+ assert.equal(await p.locator('#boardFocusHost details').evaluate(node=>node.open),false);assert.match(await summary.textContent(),/1 \/ 2/);assert.deepEqual(f.errors,[]);
+});
+test('context window shows the real supplied budget and summary, then sends the selected budget and saved memory',{timeout:60000},async t=>{
+ const f=await fixture(t,{theme:'dark',viewport:{width:390,height:844}}),p=f.page;
+ const context=require('../render-api/ai-context-window'),history=Array.from({length:100},(_,i)=>({role:i%2?'assistant':'user',context_id:'earlier-'+i,content:'真实历史材料。'.repeat(300)}));
+ const prepared=context.prepareContext({history,fixed:[{role:'system',content:'真实规则'},{role:'user',content:'继续研究'}],conversationId:'POLISH01'});
+ await send(p,'继续研究');assert.equal((await p.evaluate(()=>aiPolish.streams[0].body)).context_management,true);
+ await emit(p,0,{type:'meta',conversation_id:'POLISH01',context_budget:prepared.budget,context_memory:prepared.memory});await finish(p,0,'近期回复原文保留。',{context_budget:prepared.budget,context_memory:prepared.memory});
+ await p.getByRole('button',{name:/上下文窗口，剩余/}).click();const popup=p.getByRole('region',{name:'上下文窗口详情'});await popup.waitFor();assert.match(await popup.textContent(),/网站工作预算/);assert.match(await popup.textContent(),/厂商模型上限未确认/);assert.match(await popup.textContent(),/不额外请求模型/);
+ await popup.getByText('查看历史提取摘要',{exact:true}).click();assert.equal(await popup.locator('pre').textContent(),prepared.memory.summary);const geometry=await popup.boundingBox();assert.ok(geometry.x>=0&&geometry.x+geometry.width<=391&&geometry.y>=0&&geometry.y+geometry.height<=845,JSON.stringify(geometry));
+ const evidence=await capture(p,'dark-phone-context-window','#panelAiChat');assert.deepEqual(evidence.axe||[],[]);
+ await popup.getByLabel('网站工作窗口',{exact:true}).selectOption('131072');await p.keyboard.press('Escape');assert.equal(await popup.isVisible(),false);assert.match(await p.evaluate(()=>document.activeElement.getAttribute('aria-label')),/上下文窗口/);
+ await send(p,'下一轮继续引用此前的要求',1);const request=await p.evaluate(()=>aiPolish.streams[1].body);assert.equal(request.context_window_tokens,131072);assert.equal(request.context_memory.summary,prepared.memory.summary);assert.equal(request.context_memory.conversation_id,'POLISH01');assert.ok(request.messages.every(message=>message.context_id));assert.equal(await p.evaluate(()=>aiPolish.streams.length),2);assert.deepEqual(f.errors,[]);
+});
+test('pausing a context-compaction stage clears its active indicator and keeps the ordinary composer usable',{timeout:60000},async t=>{
+ const f=await fixture(t),p=f.page;await send(p,'准备整理上下文');await emit(p,0,{type:'context_status',stage:'compacting'});await p.waitForFunction(()=>document.querySelector('#aiContextCapacity').dataset.status==='compacting');
+ await p.locator('#aiChatPauseBtn').click();await p.waitForFunction(()=>aiPolish.streams[0].signal.aborted);await p.waitForFunction(()=>document.querySelector('#aiContextCapacity').dataset.status!=='compacting');
+ await p.locator('#aiChatMsgInput').fill('暂停后保留的新草稿');assert.equal(await p.locator('#aiChatSendBtn').isEnabled(),true);assert.deepEqual(f.errors,[]);
+});
+test('changing the next context budget during a reply survives late metadata from its original request',{timeout:60000},async t=>{
+ const f=await fixture(t),p=f.page;await send(p,'这次请求仍使用原工作窗口');assert.equal((await p.evaluate(()=>aiPolish.streams[0].body)).context_window_tokens,65536);
+ await p.getByRole('button',{name:/上下文窗口，剩余/}).click();const popup=p.getByRole('region',{name:'上下文窗口详情'}),select=popup.getByLabel('网站工作窗口',{exact:true});await select.selectOption('131072');
+ const budget={estimated_tokens:12000,window_tokens:65536,capacity_source:'site_budget',history_retained:1,compaction_status:'ready',preview:false};await emit(p,0,{type:'meta',conversation_id:'POLISH01',context_budget:budget});
+ assert.equal(await select.inputValue(),'131072');assert.match(await popup.locator('.ai-context-usage').textContent(),/65,536/);await p.keyboard.press('Escape');await finish(p,0,'原请求已完成',{context_budget:budget});
+ await send(p,'新请求使用更改后的工作窗口',1);assert.equal((await p.evaluate(()=>aiPolish.streams[1].body)).context_window_tokens,131072);assert.deepEqual(f.errors,[]);
+});
+test('refreshing a saved conversation reuses its compressed memory in the next real browser request',{timeout:60000},async t=>{
+ const f=await fixture(t),p=f.page,context=require('../render-api/ai-context-window');
+ const history=Array.from({length:100},(_,i)=>({id:'saved-'+i,role:i%2?'assistant':'user',content:(i===0?'必须保留原图，不要回复版本。\n':'')+'真实历史。'.repeat(500)}));
+ const prepared=context.prepareContext({history,fixed:[{role:'system',content:'规则'},{role:'user',content:'继续'}],conversationId:'POLISH01'});
+ await p.evaluate(({history,memory,budget})=>{__xtjCloseAiChat();const previous=fetch;window.fetch=async(url,options)=>new URL(url,location.href).pathname==='/api/agent/chat/history'?new Response(JSON.stringify({ok:true,conversation_id:'POLISH01',messages:history.concat({id:'saved-final',role:'assistant',content:'已保存的最近原文',context_memory:memory,context_budget:budget}),has_more:false}),{headers:{'Content-Type':'application/json'}}):previous(url,options);__xtjOpenAiChat();},{history,memory:prepared.memory,budget:prepared.budget});
+ await p.waitForFunction(()=>document.activeElement.id==='aiChatMsgInput');await send(p,'刷新后继续沿用我的要求');const request=await p.evaluate(()=>aiPolish.streams[0].body);assert.equal(request.context_memory.summary,prepared.memory.summary);assert.equal(request.context_memory.conversation_id,'POLISH01');
+ const next=context.prepareContext({history:request.messages,fixed:[{role:'system',content:'规则'},{role:'user',content:request.message}],conversationId:request.conversation_id,memory:request.context_memory,windowTokens:request.context_window_tokens});
+ assert.equal(next.budget.compaction_status,'summary_reused');assert.equal(next.memory.covered_count,prepared.memory.covered_count);assert.match(next.messages[0].content,/必须保留原图/);assert.match(next.messages[0].content,/不要回复版本/);assert.equal(next.messages.at(-1).content,'已保存的最近原文');assert.deepEqual(f.errors,[]);
+});
+test('a valid large ordinary terminal answer and reasoning finish together instead of silently losing the done event',{timeout:60000},async t=>{
+ const f=await fixture(t),p=f.page;await send(p,'长回复与思考一并收尾');const content='完整正文。'.repeat(40000)+'最终正文结束标识',reasoning='实际思考。'.repeat(66000);
+ await emit(p,0,{type:'done',complete:true,saved:true,conversation_id:'POLISH01',content,reasoning,thinking_mode:'high'});await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.endsWith('最终正文结束标识'));
+ await p.waitForFunction(()=>document.querySelector('#aiChatPauseBtn').style.display==='none');assert.equal(await p.locator('.ai-msg.assistant .ai-msg-bubble').textContent(),content);assert.deepEqual(f.errors,[]);
+});
 test('two original TXT files use file-only research, real board states, heading directory, and PDF/Markdown export without another model call',{timeout:60000},async t=>{
   const f=await fixture(t,{viewport:{width:1440,height:960}}),p=f.page;
   const answer='# 对照研究\n\n## 一、真实预算差异\n\n第一份资料预算10万元，第二份资料预算12万元。\n\n### 原文核对\n\n结论引用[F1:P1]与[F2:P1]。\n\n## 二、下一步\n\n请核对预算口径。';
@@ -131,6 +187,7 @@ test('reading older content shows a new-content prompt without moving the viewpo
   await p.waitForFunction(()=>document.querySelector('#aiChatMessagesArea .generating .ai-msg-bubble')?.textContent.includes('持续收到的新内容。'));
   const after=await messages.evaluate(node=>node.scrollTop);assert.ok(Math.abs(after-before)<6,'reading position changed from '+before+' to '+after);
   await assertPromptGeometry(prompt);
+  await p.locator('#aiChatFileInp').setInputFiles({name:'后续附件.txt',mimeType:'text/plain',buffer:Buffer.from('这份附件给下一轮使用')});await p.locator('#aiChatFilePreview .ai-file-info').waitFor();await assertPromptGeometry(prompt);await p.locator('#aiChatFilePreview .ai-file-remove').click();await p.locator('#aiChatFilePreview').waitFor({state:'hidden'});await assertPromptGeometry(prompt);
   const evidence=await capture(p,'phone-reading-new-content','#aiChatRoot');assert.deepEqual(evidence.axe||[],[]);assert.deepEqual(f.errors,[]);
 });
 test('a done-only compatible reply keeps the old reading position and offers a working jump to the latest message',{timeout:60000},async t=>{

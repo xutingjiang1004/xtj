@@ -2210,7 +2210,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       .trim();
   }
 
-  function buildAiConversationHistory(maxMessages, maxChars, currentUserMsg, currentAttachments) {
+  function buildAiConversationHistory(maxMessages, maxChars, currentUserMsg, currentAttachments, managed) {
     var source = Array.isArray(S.messages) ? S.messages : [];
     var candidates = [];
     for (var i = 0; i < source.length; i++) {
@@ -2271,6 +2271,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         itemContent += ' [历史附件数据未随本次请求发送: ' + omittedNames.join('、') + ']';
       }
       var entry = { role: itemRole, content: itemContent.slice(0, charCap) };
+      if(managed){entry.context_id=String(item.client_request_id||item.id||'local-'+hi);if(itemContent.length>charCap)entry.context_truncated=true;}
       if (forwarded.length) entry.attachments = forwarded;
       if (Array.isArray(item.vision_urls) && item.vision_urls.length && !forwarded.length) {
         entry.vision_urls = [];
@@ -2466,6 +2467,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.sendSeq = (S.sendSeq || 0) + 1;
     S._currentReqId = null;
     abortCurrentRequest('chat');
+    if(S._contextCapacity)S._contextCapacity.settle();
     setAiSendBtnDisabled(false);
     setAiRootState('ai-idle');
   }
@@ -4624,13 +4626,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       },
       isPaused: function() { return paused; },
       drain: function(finalText, signal) {
-        if (cancelled || !targetEl) return Promise.resolve(false);
+        if (cancelled || !targetEl || signal&&signal.aborted) return Promise.resolve(false);
         if (drainState) return drainState.promise;
         if (finished) return Promise.resolve(true);
         var final = typeof finalText === 'string' && finalText.length ? finalText : rendered + pending;
         // A sanitized replacement must take effect immediately. Only an unseen
         // suffix can follow the existing stream without replaying old text.
-        if (final.indexOf(rendered) !== 0 || reducedMotion || !final) {
+        // A complete very large terminal packet must not spend minutes in the
+        // small live-stream frame budget after the model has already finished.
+        if (final.indexOf(rendered) !== 0 || reducedMotion || !final || final.length-rendered.length>8192) {
           api.finish(final); return Promise.resolve(true);
         }
         pending = final.slice(rendered.length); paused = false;
@@ -6325,7 +6329,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // ★ 2026-08-05: 支持外部传入 controller（flow 的 S.deepThinkJob），
     //   否则 cancelDeepThink 的 abort 无法中断内部 fetch（取消链断裂）
     var controller = (opts && opts.controller) || new AbortController();
-    var MAX_EVENT_SIZE = 512 * 1024;
+    var MAX_EVENT_SIZE = 2 * 1024 * 1024; // Complete answer + reasoning + bounded metadata.
     var settled = false;
     var idleTimer = null;
     var totalTimer = null;
@@ -6426,6 +6430,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } else if (evt.type === 'research_checkpoint') {
         if (onProgress) onProgress({checkpoint:evt.checkpoint_id, resumed:evt.resumed === true});
       } else if (evt.type === 'research_done') {
+        if(Array.isArray(evt.sources))sources=evt.sources;
         var finalAnswer = typeof evt.answer === 'string' && evt.answer.trim() ? evt.answer : content;
         finalAnswer = String(finalAnswer || '').slice(0, AI_CONTENT_MAX_LEN);
         succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id || null,
@@ -6888,7 +6893,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var buffer = '';
     var timedOut = false;
     var contentTruncated = false;
-    var MAX_EVENT_SIZE = 512 * 1024; // 512KB
+    var MAX_EVENT_SIZE = 2 * 1024 * 1024;
 
     function safeRemoveProgressCard(removeNode) {
       if (!progressCard) return;
@@ -9164,7 +9169,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var _sendThinkingMode = (ALLOWED_THINKING_MODES.indexOf(S.thinkingMode) >= 0)
       ? S.thinkingMode
       : DEFAULT_THINKING_MODE;
-    var sendSettings = { model: S.selectedModel, thinkMax: S.thinkMax === true, workMode: S.workMode === true, webSearch: S.webSearchEnabled === true, responseProfile: S.responseProfile };
+    var sendSettings = { model: S.selectedModel, thinkMax: S.thinkMax === true, workMode: S.workMode === true, webSearch: S.webSearchEnabled === true, responseProfile: S.responseProfile,contextManaged:S._contextManaged===true,contextWindowTokens:S._contextWindowTokens?S._contextWindowTokens():65536,contextMemory:S._contextMemoryResolver?S._contextMemoryResolver():null };
     var sendCustomCfg = isCustomModelId(sendSettings.model) ? Object.assign({}, resolveCustomModelConfig(sendSettings.model)) : null;
     // Lock synchronously before the first await (auth/token acquisition), so
     // two clicks in the same event loop cannot create two streams.
@@ -9236,6 +9241,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (S._interruptChat && S._interruptChat.reqId === reqId) S._interruptChat = null;
         S.paused = false;
         resetActiveRenderersByChannel('chat');
+        if(S._contextCapacity)S._contextCapacity.settle();
         if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
       }
     }
@@ -9477,9 +9483,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
       //   关闭时限制在 CONTEXT_LIMIT_NORMAL 条（256），超过即自动压缩丢弃更早内容，
       //   每条再按字符上限截断防止超长，兼顾便宜与稳定。
-      var _ctxCap = sendSettings.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
-      var _ctxChars = sendSettings.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
-      var hl = buildAiConversationHistory(_ctxCap, _ctxChars, userMsg, attachmentPayload);
+      var _ctxCap = sendSettings.contextManaged?256:sendSettings.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
+      var _ctxChars = sendSettings.contextManaged?32000:sendSettings.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
+      var hl = buildAiConversationHistory(_ctxCap, _ctxChars, userMsg, attachmentPayload,sendSettings.contextManaged);
       fetchBody = JSON.stringify({
         provider: customCfg.provider,
         conversation_id: S.conversationId,
@@ -9490,6 +9496,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         message: text,
         messages: hl,
         messages_include_current: false,followup_suggestions:true,context_estimate:true,
+        context_management:sendSettings.contextManaged||undefined,context_window_tokens:sendSettings.contextManaged?sendSettings.contextWindowTokens:undefined,context_memory:sendSettings.contextManaged?sendSettings.contextMemory:undefined,
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
         work_mode: sendSettings.workMode === true,
@@ -9510,15 +9517,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   服务端优先使用它，前端未传时才回退查库。
       //   复用与自定义模型相同的裁剪策略（条数 + 每条字符上限），
       //   避免超长历史撑爆 prompt。
-      var _bCtxCap = sendSettings.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
-      var _bCtxChars = sendSettings.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
-      var _builtinHist = buildAiConversationHistory(_bCtxCap, _bCtxChars, userMsg, attachmentPayload);
+      var _bCtxCap = sendSettings.contextManaged?256:sendSettings.thinkMax ? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;
+      var _bCtxChars = sendSettings.contextManaged?32000:sendSettings.thinkMax ? MSG_MAX_CHARS_MAX : MSG_MAX_CHARS_NORMAL;
+      var _builtinHist = buildAiConversationHistory(_bCtxCap, _bCtxChars, userMsg, attachmentPayload,sendSettings.contextManaged);
       fetchBody = JSON.stringify({
         message: text,
         conversation_id: S.conversationId,
         // ★ 关键修复：携带历史，服务端优先使用（不再强依赖 convId 查库）
         messages: _builtinHist,
         messages_include_current: false,followup_suggestions:true,context_estimate:true,
+        context_management:sendSettings.contextManaged||undefined,context_window_tokens:sendSettings.contextManaged?sendSettings.contextWindowTokens:undefined,context_memory:sendSettings.contextManaged?sendSettings.contextMemory:undefined,
         client_request_id: reqId,
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
@@ -9656,6 +9664,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var usageResult = null;
       var finalModel = sendSettings.model;
       var finalThinkingMode = _sendThinkingMode;
+      var streamContextMemory=null,streamContextBudget=null;
       // ★ 工作模式追踪：记录本次请求是否处于工作模式、实际调用了多少次工具。
       //   用于回复完成后在底部显示「工作模式」徽标与工具调用次数，
       //   让用户能直观确认工作模式确实生效（而不是「感觉跟没打开一样」）。
@@ -9961,6 +9970,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           content: content,
           client_request_id: reqId,
           followups:evt&&Array.isArray(evt.followups)?evt.followups:[],
+          context_memory:evt&&evt.context_memory||streamContextMemory,context_budget:evt&&evt.context_budget||streamContextBudget,
           _pendingSync: userMsg._pendingSync,
           _historyRequestAtCommit: S.historyRequestId,
           interrupted: !!(evt && evt.interrupted === true),
@@ -10277,7 +10287,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         buffer = lines.pop() || '';
         // ★ 2026-09-13 修复（P-12）：第三处缓冲同样补上限（前两处已加）。
         //   单行 512KB 上限只拦"已闭合的行"，残留在 buffer 的尾部才是无界增长点。
-        if (buffer.length > 1024 * 1024) {
+        if (buffer.length > 4 * 1024 * 1024) {
           console.warn('[AI] SSE buffer overflow, aborting stream, length=' + buffer.length);
           aborted = true;
           reader.cancel().catch(function(){});
@@ -10294,7 +10304,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (line === 'data: [DONE]' || line === 'done') { doneReceived = true; break; }
           var eventStr = line.slice(6);
           // ★ 修复：单行事件大小上限（深页循环有 512KB 上限，主循环此前没有）
-          if (eventStr.length > 512 * 1024) { console.warn('[AI] oversized SSE line dropped, length=' + eventStr.length); continue; }
+          if (eventStr.length > 2 * 1024 * 1024) { console.warn('[AI] oversized SSE line dropped, length=' + eventStr.length); continue; }
           var evt;
           try { evt = JSON.parse(eventStr); } catch (e) { continue; }
           if (!evt) continue;
@@ -10303,14 +10313,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) { aborted = true; break; }
           
           if (evt.type === 'meta') {
-            if(evt.context_budget&&S._updateContextCapacity)S._updateContextCapacity(evt.context_budget);
             streamConvId = evt.conversation_id;
             if (streamConvId) {
               S.conversationId = streamConvId;
               writeConvId(streamConvId);
             }
+            if(evt.context_memory){streamContextMemory=evt.context_memory;userMsg.context_memory=evt.context_memory;}
+            if(evt.context_budget){streamContextBudget=evt.context_budget;if(S._updateContextCapacity)S._updateContextCapacity(evt.context_budget);}
             continue;
           }
+          if(evt.type==='context_status'){if(S._contextCapacity)S._contextCapacity.stage();continue;}
           
           // 服务端心跳保活事件：仅用于保持连接与重置 idle 看门狗，无 UI 副作用
           if (evt.type === 'heartbeat') {
@@ -13794,17 +13806,21 @@ function showChatMessages() {
     function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});button.appendChild(el('span',{class:'ai-panel-row-icon','aria-hidden':'true',text:'✧'}));button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
     addFeatureEntry('工具工作台',function(){var workbench=window.XtjAiCore&&window.XtjAiCore.ToolWorkbench;if(!workbench){notify('工具工作台尚未加载，请刷新后重试');return;}if(S._toolWorkbench)S._toolWorkbench.dispose();S._toolWorkbench=workbench.open({owner:readUserName(),current:featureCurrent,api:featureApi,notify:notify,onAsk:function(payload){return S._askPreservingDraft(payload.text,payload.attachments);}});});
     addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'V4.1 Flash'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if(config.api_key&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
-    var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'});capacity.title='文字 tokens 按字符估算，图片、附件解析和工具内容可能增加用量。厂商精确上下文窗口尚未确认。';
-    function updateCapacity(value){var features=assistantFeatures();if(features)capacity.textContent=features.capacityText(value||features.estimate(S.messages,input.value,isCustomModelId(S.selectedModel)));}
+    var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
+    function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId)return memory;}return null;}
+    function contextWindowTokens(){var value=Number(scopedStorageGet('xtj_ai_context_window_'+S.selectedModel));return [32768,65536,131072].indexOf(value)>=0?value:65536;}
+    function updateCapacity(value){var features=assistantFeatures();if(!features)return;if(capacityModel!==S.selectedModel||capacityConversation!==S.conversationId){lastContextBudget=null;capacityModel=S.selectedModel;capacityConversation=S.conversationId;}if(value)lastContextBudget=value;var memory=contextMemory(),preview=features.estimate(S.messages,input.value,isCustomModelId(S.selectedModel),{managed:true,memory:memory,windowTokens:contextWindowTokens(),overhead:lastContextBudget&&lastContextBudget.tool_schema_tokens||0});if(capacityWidget)capacityWidget.update(value||preview,memory);else capacity.textContent=features.capacityText(value||preview);}
+    var capacityFeatures=assistantFeatures();if(capacityFeatures&&capacityFeatures.createCapacity)capacityWidget=capacityFeatures.createCapacity(capacity,{current:featureCurrent,configuredWindowTokens:contextWindowTokens,onOpen:function(){updateCapacity(capacityModel===S.selectedModel&&capacityConversation===S.conversationId&&!input.value?lastContextBudget:null);},onWindowChange:function(value){try{localStorage.setItem('xtj_ai_context_window_'+S.selectedModel+'__'+aiStorageScopeName(),String(value));}catch(_){}lastContextBudget=null;updateCapacity();}});
+    S._contextCapacity=capacityWidget;S._contextManaged=!!capacityWidget;S._contextWindowTokens=contextWindowTokens;S._contextMemoryResolver=contextMemory;
     input.addEventListener('input',function(){updateCapacity();});S._updateContextCapacity=updateCapacity;updateCapacity();
     inputBar.appendChild(capacity);
     async function runModelComparison(model,text,history,signal,onEvent){
-      var config=model.config,body={message:text,messages:history,messages_include_current:false,model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,followup_suggestions:false};
+      var config=model.config,body={message:text,messages:history,messages_include_current:false,context_management:true,context_window_tokens:contextWindowTokens(),model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,followup_suggestions:false};
       if(config)Object.assign(body,{provider:config.provider,api_key:config.api_key,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
       var auth=await getUserAuthPayload({forceNoToken:false});if(!featureCurrent()||signal.aborted)throw Error('对比已取消');
       var timeout=setTimeout(function(){if(S._modelCompare)S._modelCompare.dispose();},300000),reader=null,content='',done=false,usage=null;
       try {var response=await fetch(API_BASE+(config?'/custom-chat/stream':'/chat/stream'),{method:'POST',headers:auth.headers||{},credentials:'include',body:JSON.stringify(body),signal:signal});if(!response.ok||!response.body)throw Error('模型请求失败（'+response.status+'）');reader=response.body.getReader();var decoder=new TextDecoder(),pending='';
-        while(!signal.aborted&&featureCurrent()){var packet=await reader.read();pending+=packet.done?decoder.decode():decoder.decode(packet.value,{stream:true});if(packet.done)pending+='\n';if(pending.length>512*1024)throw Error('模型数据包过大');var lines=pending.split('\n');pending=lines.pop();for(var i=0;i<lines.length;i++){if(!lines[i].startsWith('data:'))continue;var event;try{event=JSON.parse(lines[i].slice(5).trim());}catch(_){continue;}if(event.type==='content')content+=String(event.text||event.chunk||'');if(content.length>500000)throw Error('模型回复超过长度上限');if(event.type==='done'){done=true;content=event.content||content;usage=event.usage||null;}onEvent(event);}if(packet.done||done)break;}
+        while(!signal.aborted&&featureCurrent()){var packet=await reader.read();pending+=packet.done?decoder.decode():decoder.decode(packet.value,{stream:true});if(packet.done)pending+='\n';if(pending.length>4*1024*1024)throw Error('模型数据包过大');var lines=pending.split('\n');pending=lines.pop();for(var i=0;i<lines.length;i++){if(!lines[i].startsWith('data:'))continue;if(lines[i].length>2*1024*1024)throw Error('模型单条数据超过上限');var event;try{event=JSON.parse(lines[i].slice(5).trim());}catch(_){continue;}if(event.type==='content')content+=String(event.text||event.chunk||'');if(content.length>500000)throw Error('模型回复超过长度上限');if(event.type==='done'){done=true;content=event.content||content;usage=event.usage||null;if(content.length>500000)throw Error('模型回复超过长度上限');}onEvent(event);}if(packet.done||done)break;}
         if(!done&&!signal.aborted)throw Error('模型回复提前中断');return {content:content,usage:usage};
       } finally {clearTimeout(timeout);if(reader)try{await reader.cancel();}catch(_){} }
     }
@@ -13861,10 +13877,11 @@ function showChatMessages() {
       filePreview.style.display = 'none';
       filePreview.innerHTML = '';
       fileInput.value = '';
+      updateInputMetrics();
     }
     function renderAiMultiFilePreview(files) {
       filePreview.innerHTML = '';
-      if (!files.length) { filePreview.style.display = 'none'; return; }
+      if (!files.length) { filePreview.style.display = 'none'; updateInputMetrics(); return; }
       var first = files[0];
       var thumb = String(first.type || '').indexOf('image/') === 0
         ? el('img', { src: first.dataUrl, class: 'ai-file-thumb' })
@@ -13881,6 +13898,7 @@ function showChatMessages() {
       filePreview.appendChild(info);
       filePreview.appendChild(removeBtn);
       filePreview.style.display = 'flex';
+      updateInputMetrics();
     }
     function acceptAiChatFiles(rawFiles) {
       var fileSeq = ++_aiChatFileSelectionSeq, fileLifecycle = S.lifecycleId;
@@ -14123,7 +14141,7 @@ function showChatMessages() {
     if (S._voiceInputCleanup) { S._voiceInputCleanup(); S._voiceInputCleanup = null; }
     ['_toolWorkbench','_modelCompare'].forEach(function(key){if(S[key])S[key].dispose();S[key]=null;});
     ['_chatReading','_dtReading'].forEach(function(key){if(S[key])S[key].reader.dispose();S[key]=null;});
-    S._askPreservingDraft=null;S._updateContextCapacity=null;S._newContentPrompt=null;
+    S._askPreservingDraft=null;S._updateContextCapacity=null;S._newContentPrompt=null;if(S._contextCapacity)S._contextCapacity.dispose();S._contextCapacity=null;S._contextManaged=false;S._contextWindowTokens=null;S._contextMemoryResolver=null;
     var activePanel = document.getElementById('panelAiChat');
     var panelIsVisible = !!(activePanel && activePanel.classList.contains('active') && !activePanel.classList.contains('hidden'));
     if (!S.active && !panelIsVisible && force !== true) return;

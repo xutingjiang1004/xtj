@@ -93,3 +93,39 @@ test('workbench fits compressed visible viewport and keeps focused form reachabl
     const before=await f.page.evaluate(()=>document.querySelector('.dock')?.getAttribute('style')||'');await f.page.getByLabel('或粘贴 CSV 数据',{exact:true}).focus();await f.page.evaluate(()=>{const viewport=new EventTarget();Object.assign(viewport,{height:320,width:390,offsetTop:8});Object.defineProperty(window,'visualViewport',{configurable:true,value:viewport});wb.dispose();wbOpen();viewport.dispatchEvent(new Event('resize'));});await f.page.waitForTimeout(30);const after=await f.page.evaluate(()=>({dock:document.querySelector('.dock')?.getAttribute('style')||'',rect:document.querySelector('.aw-panel').getBoundingClientRect().toJSON()}));assert.equal(after.dock,before);assert.ok(after.rect.height<=320);assert.ok(after.rect.bottom<=328);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
+test('tool export entries select and refresh their own current results even after a workflow preview',async()=>{
+ const f=await fixture();try{
+  await pasteCsv(f.page);await tab(f.page,'工具流程');await f.page.getByRole('button',{name:'网页 → 时间线 → 文档',exact:true}).click();await tab(f.page,'成果预览');assert.equal(await f.page.getByLabel('成果来源',{exact:true}).inputValue(),'workflow');
+  await tab(f.page,'表格');await f.page.getByRole('button',{name:'编辑与导出成果',exact:true}).click();assert.equal(await f.page.getByLabel('成果来源',{exact:true}).inputValue(),'table');assert.equal(await f.page.locator('.aw-table tbody tr').count(),3);
+  await tab(f.page,'表格');await f.page.getByLabel('筛选列',{exact:true}).selectOption('1');await f.page.getByLabel('条件',{exact:true}).selectOption('gt');await f.page.getByLabel('筛选值',{exact:true}).fill('10');await f.page.getByRole('button',{name:'筛选',exact:true}).click();await f.page.getByRole('button',{name:'编辑与导出成果',exact:true}).click();assert.equal(await f.page.locator('.aw-table tbody tr').count(),2);
+  await tab(f.page,'网页摘录');await f.page.getByLabel('网页地址',{exact:true}).fill('https://example.com/source');await f.page.getByRole('button',{name:'读取网页',exact:true}).click();await f.page.getByLabel('选中要保留的正文段落',{exact:true}).waitFor();await f.page.getByLabel('选中要保留的正文段落',{exact:true}).evaluate(node=>node.setSelectionRange(0,20));await f.page.getByRole('button',{name:'保存选中段落',exact:true}).click();await f.page.getByRole('button',{name:'编辑与导出',exact:true}).click();assert.equal(await f.page.getByLabel('成果来源',{exact:true}).inputValue(),'clip');assert.match(await f.page.locator('.aw-body blockquote').textContent(),/项目开始/);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('opening an old saved asset cannot overwrite a newly selected tool result after its delayed read',async()=>{
+ const f=await fixture();try{
+  await pasteCsv(f.page);await f.page.getByRole('button',{name:'编辑与导出成果',exact:true}).click();await f.page.getByLabel('成果标题',{exact:true}).fill('旧的保存成果');await f.page.getByRole('button',{name:'保存到我的账号',exact:true}).click();await f.page.getByText('成果已保存到当前账号',{exact:true}).waitFor();
+  await f.page.evaluate(()=>window.wbDelay='/assets/11111111-1111-4111-8111-111111111111');await f.page.getByRole('button',{name:'打开已保存成果',exact:true}).click();await f.page.waitForFunction(()=>typeof wbRelease==='function');
+  await f.page.getByRole('button',{name:'从工具重新读取',exact:true}).click();await f.page.getByLabel('成果标题',{exact:true}).fill('新文字成果');await f.page.getByLabel('摘要 / 正文（可编辑）',{exact:true}).fill('新的草稿不能被旧读取覆盖');await f.page.evaluate(()=>wbRelease());await f.page.waitForTimeout(80);
+  assert.equal(await f.page.getByLabel('成果标题',{exact:true}).inputValue(),'新文字成果');assert.equal(await f.page.getByLabel('摘要 / 正文（可编辑）',{exact:true}).inputValue(),'新的草稿不能被旧读取覆盖');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('deleting the currently saved asset keeps its editable draft and the next save creates a new record',async()=>{
+ const f=await fixture();try{
+  await pasteCsv(f.page);await f.page.getByRole('button',{name:'编辑与导出成果',exact:true}).click();await f.page.getByRole('button',{name:'保存到我的账号',exact:true}).click();await f.page.getByText('成果已保存到当前账号',{exact:true}).waitFor();await f.page.getByRole('button',{name:'删除保存成果',exact:true}).click();await f.page.getByText('已删除账号中的成果',{exact:true}).waitFor();
+  assert.equal(await f.page.locator('.aw-table tbody tr').count(),3);await f.page.getByRole('button',{name:'保存到我的账号',exact:true}).click();await f.page.waitForFunction(()=>wbCalls.filter(c=>c.path.endsWith('/assets')&&c.method==='POST').length===2);
+  assert.equal((await f.page.evaluate(()=>wbCalls.filter(c=>c.path.endsWith('/assets')&&c.method==='POST').at(-1))).body.id,undefined);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('a damaged image in a batch reports its failure while immediately showing the successfully loaded original',async()=>{
+ const f=await fixture();try{
+  await tab(f.page,'图片');await f.page.locator('.aw-file-picker input').setInputFiles([{name:'可读取原图.png',mimeType:'image/png',buffer:f.png},{name:'损坏图.png',mimeType:'image/png',buffer:Buffer.from('not-an-image')}]);
+  await f.page.getByText(/部分文件失败：损坏图.png/).waitFor();assert.equal(await f.page.locator('.aw-image-grid canvas').count(),1);assert.equal(await f.page.locator('.aw-image-grid h4').textContent(),'可读取原图.png');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('decision changes invalidate displayed scores and exports immediately without replacing the focused input',async()=>{
+ const f=await fixture();try{
+  await tab(f.page,'决策对比');await f.page.getByLabel('维度 1',{exact:true}).first().fill('成本');await f.page.getByLabel('维度 2',{exact:true}).first().fill('体验');await f.page.getByLabel('方案 1',{exact:true}).fill('甲');await f.page.getByLabel('方案 2',{exact:true}).fill('乙');
+  await f.page.getByLabel('维度 1',{exact:true}).nth(1).fill('8');await f.page.getByLabel('维度 2',{exact:true}).nth(1).fill('4');await f.page.getByLabel('维度 1',{exact:true}).nth(2).fill('5');await f.page.getByLabel('维度 2',{exact:true}).nth(2).fill('9');await f.page.getByRole('button',{name:'计算综合分',exact:true}).click();await f.page.locator('.aw-decision-results').waitFor();
+  const score=f.page.getByLabel('成本',{exact:true}).first();await score.fill('9');assert.equal(await f.page.locator('.aw-decision-results').count(),0);assert.equal(await score.evaluate(node=>node===document.activeElement),true);await f.page.getByText('评分或权重已更改，请重新计算综合分。',{exact:true}).waitFor();await f.page.getByRole('button',{name:'计算综合分',exact:true}).click();assert.match(await f.page.locator('.aw-table tbody').textContent(),/甲6.5/);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

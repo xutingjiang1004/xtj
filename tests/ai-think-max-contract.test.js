@@ -51,11 +51,11 @@ test('前端：工具融合普通聊天，加号菜单保留思考和强制搜�
   assert.match(agentSource, /data-action="search"/);
 });
 
-test('前端：请求体携带 thinking_max / work_mode，关闭时上下文限制 256 并压缩，开启时放大', () => {
+test('前端：请求体保留思考标记，新工作窗口管理优先，旧客户端沿用思考档位历史上限', () => {
   assert.equal((agentSource.match(/thinking_max: sendSettings\.thinkMax === true/g) || []).length, 2);
   assert.equal((agentSource.match(/work_mode: sendSettings\.workMode === true/g) || []).length, 2);
-  assert.match(agentSource, /var _ctxCap = sendSettings\.thinkMax \? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;/);
-  assert.match(agentSource, /buildAiConversationHistory\(_ctxCap, _ctxChars, userMsg, attachmentPayload\)/);
+  assert.match(agentSource, /var _ctxCap = sendSettings\.contextManaged\?256:sendSettings\.thinkMax \? CONTEXT_LIMIT_MAX : CONTEXT_LIMIT_NORMAL;/);
+  assert.match(agentSource, /buildAiConversationHistory\(_ctxCap, _ctxChars, userMsg, attachmentPayload,sendSettings\.contextManaged\)/);
 });
 
 test('前端：旧工作模式开关不会关闭普通聊天工具能力', () => {

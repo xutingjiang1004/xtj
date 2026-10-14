@@ -176,8 +176,8 @@ test('deep research sends use an independent lock and invalidate pending auth on
 
 test('normal and custom chat send prior history only, then append the current message server-side', () => {
   assert.equal((aiSource.match(/messages_include_current: false/g) || []).length, 2);
-  assert.match(aiSource, /buildAiConversationHistory\(_ctxCap, _ctxChars, userMsg, attachmentPayload\)/);
-  assert.match(aiSource, /buildAiConversationHistory\(_bCtxCap, _bCtxChars, userMsg, attachmentPayload\)/);
+  assert.match(aiSource, /buildAiConversationHistory\(_ctxCap, _ctxChars, userMsg, attachmentPayload,sendSettings\.contextManaged\)/);
+  assert.match(aiSource, /buildAiConversationHistory\(_bCtxCap, _bCtxChars, userMsg, attachmentPayload,sendSettings\.contextManaged\)/);
   assert.match(aiSource, /reconcileAiHistoryPending\(S\._pendingLocalMsgs, msgs, S\.messages\)/);
 });
 
