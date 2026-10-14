@@ -83,7 +83,10 @@
     <link rel="stylesheet" href="css/profile-settings.min.css?v=49f1fd0516">
     <link rel="stylesheet" href="css/author-posts.min.css?v=970234e2e0">
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=5a68f409c7">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=f5d3347586">
+    <meta name="xtj-module-ai-workbench-style" content="css/ai-workbench.min.css?v=6f62e38a54">
+    <meta name="xtj-module-ai-reading-style" content="css/ai-reading.min.css?v=69f38f78de">
+    <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=47740ec302">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=8229b93be8">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=85f646c603">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=cc74606362">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=0f2e968901">
@@ -1217,7 +1220,10 @@
     <script defer src="js/ai-core/scroll-controller.min.js?v=34059556ba"></script>
     <script defer src="js/ai-core/stream-renderer.min.js?v=28b6afd806"></script>
     <script defer src="js/ai-core/telemetry.min.js?v=6b7b8750d6"></script>
-    <script defer src="js/ai-core/voice-conversation.min.js?v=a89129fb0d"></script>
+    <script defer src="js/ai-core/tool-workbench.min.js?v=3e58bd24f3"></script>
+    <script defer src="js/ai-core/reading-tools.min.js?v=304a778c38"></script>
+    <script defer src="js/ai-core/assistant-features.min.js?v=8e5d5932c8"></script>
+    <script defer src="js/ai-core/voice-conversation.min.js?v=0338c0e4c8"></script>
     <!-- Keep the database SDK on the same origin. The former public-CDN request
          was a single point of failure on restricted/mobile networks and could
          leave the feed permanently unavailable. `defer` preserves script order
@@ -1238,8 +1244,8 @@
     <script defer src="js/author-posts.min.js?v=452c9363d2"></script>
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
     <script defer src="js/photo-wall/story.min.js?v=27dc08b64a"></script>
-    <script defer src="js/voice-transcription.min.js?v=2d4df93b19"></script>
-    <script defer src="js/core.min.js?v=8f85dace20"></script>
+    <script defer src="js/voice-transcription.min.js?v=6247e4303f"></script>
+    <script defer src="js/core.min.js?v=127aca0515"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=dd3746237f"></script>
     <script defer src="js/desktop-shell.min.js?v=086938c9c6"></script>
@@ -1267,7 +1273,7 @@
             <button type="button" class="dt-file-btn" id="dtFileBtn" aria-label="上传图片或文件" title="上传图片或文件">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 12 7-7a3.5 3.5 0 0 1 5 5L10 20a5 5 0 0 1-7-7L13 3"/><path d="m7 14 8-8a1.5 1.5 0 0 1 2 2l-8 8"/></svg>
             </button>
-            <input type="file" id="dtFileInp" accept="image/*,.pdf,.docx,.txt,.csv,.xlsx" style="display:none" />
+            <input type="file" id="dtFileInp" multiple accept="image/*,.pdf,.docx,.txt,.md,.csv,.tsv,.xlsx,.xls" style="display:none" />
             <div class="dt-file-preview" id="dtFilePreview" style="display:none"></div>
             <textarea class="dt-input" id="dtInput" placeholder="输入问题，AI 将深入研究..." rows="1"></textarea>
             <button type="button" class="dt-pause" id="dtPauseBtn" style="display:none" aria-label="暂停">暂停</button>

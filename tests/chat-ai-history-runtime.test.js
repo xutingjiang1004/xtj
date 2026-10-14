@@ -101,3 +101,14 @@ test('AI deletion checks its atomic database result and ignores a body-supplied 
   assert.equal(result.status,503); assert.equal(result.body.ok,false);
   assert.equal(mutations[0].args.p_user_name,'alice'); assert.equal(mutations[0].name,'soft_delete_ai_conversation');
 });
+test('saved report history preserves unavailable or failed checkpoint status instead of inventing completion',async()=>{
+  const cached={...row(21,'CACHED1',{role:'assistant',chat_mode:'deep_think',research_board:{cached:true,usage:{actual_tokens:0},save:{checkpoint:'unavailable',report:'pending'}}}),content:JSON.stringify({type:'tavily_research',query:'资料对照',answer:'真实缓存报告',sources:[]})};
+  const failed={...row(22,'CACHED1',{role:'assistant',chat_mode:'deep_think',research_board:{cached:false,usage:{actual_tokens:50},save:{checkpoint:'failed',report:'pending'}}}),content:JSON.stringify({type:'tavily_research',query:'资料对照',answer:'报告已生成但断点失败',sources:[]})};
+  const read=route("app.get('/api/agent/chat/history'",'// =====================',database([cached,failed]));
+  const result=await read({query:{conversation_id:'CACHED1',mode:'deep_think'}});assert.equal(result.status,200);
+  const messages=result.body.messages;
+  assert.equal(messages.find(m=>m.id===cached.id).research_board.save.checkpoint,'unavailable');
+  assert.equal(messages.find(m=>m.id===cached.id).research_board.stage,'cached');
+  assert.equal(messages.find(m=>m.id===failed.id).research_board.save.checkpoint,'failed');
+  assert.ok(messages.every(m=>m.research_board.save.report==='saved'));
+});

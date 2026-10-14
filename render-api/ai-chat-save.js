@@ -25,13 +25,13 @@ async function saveCustomChatTurn(options) {
   const identity = options.requestId ? { client_request_id: options.requestId } : {};
   const userExtra = { ...identity, chat_mode: 'normal', web_search: webSearch === true, vision_urls: visionUrls };
   const assistantExtra = { chat_mode: 'normal', web_search: webSearch === true,
-    ...identity, process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
+    ...identity, followups: options.followups || [], process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
   const rows = [
     { user_name: userName, content: String(message).slice(0, 60000), media_type: marker,
       media_url: buildMeta('user', convId, null, null, 1, null, 0, userExtra),
       actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + now },
     { user_name: userName, content: String(content).slice(0, 500000), media_type: marker,
-      media_url: buildMeta('assistant', convId, {model, thinking_mode: thinkingMode},
+      media_url: buildMeta('assistant', convId, {...options.usage,model, thinking_mode: thinkingMode},
         thinkingMode === 'off' ? '' : String(reasoning || '').slice(0, 400000), 2, null, thinkingElapsedMs, assistantExtra),
       actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (now + 1) }
   ];

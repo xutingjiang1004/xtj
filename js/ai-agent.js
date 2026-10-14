@@ -1702,6 +1702,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       menu.appendChild(btn);
       document.body.appendChild(menu);
       _copyMenuActive = menu;
+      menu._aiCopyOwner = bubbleEl;
       // ★★★ 2026-09-15 修复（P1-8「复制按钮飘到上面/位置错乱」）：
       //   症状（用户截图实证）：AI 回复完成后，那个"复制"浮层出现在消息气泡
       //   **上方的顶部区域**，而不是手指长按的位置附近。
@@ -1787,8 +1788,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 暴露 cleanup 钩子供软删除时调用
     bubbleEl._aiCleanupBubble = function() {
       try { _bubbleAbort.abort(); } catch (e) {}
-      if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
+      if (_copyMenuActive && _copyMenuActive._aiCopyOwner === bubbleEl) closeCopyMenu();
       if (_longPressTimer) { try { clearTimeout(_longPressTimer); } catch (e) {} }
+    };
+    bubbleEl._aiRestoreBubble = function() {
+      if (_bubbleAbort.signal.aborted) setupBubbleCopy(bubbleEl, containerEl);
     };
   }
 
@@ -3018,6 +3022,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     card.hidden = !event.error && !items.length;
     if (event.error) {
       card.appendChild(el('div', {class:'ai-tool-result-error',text:String(event.error).slice(0,240)}));
+      if(event.retry_token){var retry=el('button',{type:'button',class:'ai-msg-act',text:'重试这一步'}),identity=customModelIdentity(),life=S.lifecycleId;retry.addEventListener('click',async function(){if(retry.disabled||!customModelIdentityCurrent(identity)||life!==S.lifecycleId)return;retry.disabled=true;retry.textContent='正在重试…';try{var response=await apiRequest('POST','/tools/retry',{retry_token:event.retry_token},{timeoutMs:50000});if(!card.isConnected||!customModelIdentityCurrent(identity)||life!==S.lifecycleId)return;if(!response.ok||!response.data||!response.data.result)throw Error(describeError(response,'工具重试失败'));if(response.data.result.error)throw Error(response.data.result.error);populateToolResultDisclosure(card,response.data.feedback||{});var host=card.closest('.ai-msg')||card.parentNode;(response.data.result.cards||[]).forEach(function(result){renderAiToolCard(host,result,host.querySelector('.ai-msg-bubble'));});card.appendChild(el('small',{text:'这一步已更新，原回答保留；需要重新分析时可继续提问。'}));}catch(error){if(card.isConnected&&customModelIdentityCurrent(identity))notify(error.message||'工具重试失败');}finally{if(retry.isConnected){retry.disabled=false;retry.textContent='重试这一步';}}});card.appendChild(retry);}
       return card;
     }
     var button=el('button',{type:'button',class:'ai-tool-result-card-title','aria-expanded':String(!!expanded)});
@@ -3589,7 +3594,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function scrollToBottom(container, force) {
     if (!container) return;
-    if (!force && !S.autoScrollPinned) return;
+    var follows=container.id==='dtMessages'?container._aiFollow!==false:S.autoScrollPinned;
+    if (!force && !follows) return;
     var now = Date.now();
     if (!force && container._dtLastScrollTs && (now - container._dtLastScrollTs) < 80) return;
     if (container._dtScrollRaf) return;
@@ -3598,6 +3604,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       requestAnimationFrame(function() {
         container._dtScrollRaf = false;
         container._dtLastScrollTs = Date.now();
+        if(!force && (container.id==='dtMessages'?container._aiFollow===false:!S.autoScrollPinned))return;
         try { container.scrollTop = container.scrollHeight; } catch (e) {}
       });
     } catch (e2) {
@@ -3624,6 +3631,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var bar = S.inputBarEl;
     if (!root || !bar) return;
     root.style.setProperty('--ai-input-height', Math.max(64, bar.offsetHeight || 0) + 'px');
+    var rootBounds=root.getBoundingClientRect(),barBounds=bar.getBoundingClientRect();
+    if(rootBounds.height>0 && barBounds.height>0)root.style.setProperty('--ai-new-content-bottom',Math.max(12,rootBounds.bottom-barBounds.top+12)+'px');
+  }
+
+  function updateResearchPromptPosition(messagesEl) {
+    var panel=document.getElementById('panelDeepThink');
+    if(!panel || !messagesEl || panel.classList.contains('hidden'))return;
+    var bounds=panel.getBoundingClientRect(),area=messagesEl.getBoundingClientRect();
+    if(bounds.height>0 && area.height>0)panel.style.setProperty('--dt-new-content-bottom',Math.max(12,bounds.bottom-area.bottom+12)+'px');
   }
 
   function maybeRestoreEmptyState(messagesEl) {
@@ -4042,6 +4058,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return node;
   }
 
+  function assistantFeatures() { return window.XtjAiCore && window.XtjAiCore.AssistantFeatures; }
+  function attachAiFollowups(node,msg) {
+    var features=assistantFeatures();
+    if(features && msg && msg.role==='assistant' && !msg.interrupted && !msg.deep_think) features.attachFollowups(node,msg.followups,function(text){return S._askPreservingDraft ? S._askPreservingDraft(text,[]).catch(function(error){notify(error.message||'推荐问题未发送，请重试');}) : Promise.resolve();});
+  }
+  function aiReading(messagesEl,deep) {
+    var tools=window.XtjAiCore && window.XtjAiCore.ReadingTools,owner=readUserName();
+    if(!tools||!owner||!messagesEl)return null;
+    var name=deep?'_dtReading':'_chatReading',key=(deep?'research:':'chat:')+(deep?S.dtConversationId:S.conversationId||'draft');
+    var old=S[name];
+    if(old && old.key===key && old.container===messagesEl)return old.reader;
+    if(old)old.reader.dispose();
+    var identity=customModelIdentity(),life=deep?S.dtLifecycleId:S.lifecycleId;
+    var reader=tools.create({container:messagesEl,owner:owner,key:key,current:function(){return customModelIdentityCurrent(identity)&&life===(deep?S.dtLifecycleId:S.lifecycleId);},input:document.getElementById(deep?'dtInput':'aiChatMsgInput'),viewportHost:document.getElementById(deep?'panelDeepThink':'panelAiChat'),notify:notify,renderMessage:function(message){var turn=buildMessageNode(message,messagesEl);renderAiHistoryCards(messagesEl,[message],[turn],[]);return turn;}});
+    S[name]={key:key,container:messagesEl,reader:reader};return reader;
+  }
+  function historyTurn(message,messagesEl,index,total) {
+    var reader=aiReading(messagesEl,false),node;
+    if(reader && total>40){node=reader.makeMessage(message,index,total);node._msgRef=message;node._lazyAiCards=true;}
+    else {node=buildMessageNode(message,messagesEl);if(reader)reader.track(node,message,{pin:false,index:index});}
+    return node;
+  }
+
   function buildMessageNode(msg, messagesEl) {
     var role = msg.role === 'assistant' ? 'assistant' : 'user';
     // ★ O 修复 Bug 4: deep_think 消息渲染成 ai-think-card (从 history 恢复)
@@ -4064,8 +4103,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       contentForRender = hasReasoning ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复。';
     }
     bubble.innerHTML = renderMarkdown(contentForRender);
-    setupBubbleCopy(bubble, messagesEl);
     node.appendChild(bubble);
+    setupBubbleCopy(bubble, messagesEl);
     // 底部信息栏：时间 · 思考程度 · 用量（仅 assistant 有思考标签和用量）
     var footer = el('div', { class: 'ai-msg-footer' });
     if (msg.created_at) {
@@ -4137,6 +4176,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       footer.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
     }
     if (footer.children.length > 0) node.appendChild(footer);
+    attachAiFollowups(node,msg);
     return node;
   }
 
@@ -4269,6 +4309,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         try { renderAiToolCard(node, card, node.querySelector('.ai-msg-bubble')); } catch (e) {}
       });
     }
+    var reader=aiReading(messagesEl,false);if(reader)reader.track(node,msg,{pin:node.classList.contains('generating')});
     return node;
   }
 
@@ -4282,7 +4323,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var nodes = Array.isArray(messageNodes) ? messageNodes : [];
     var nextNodes = Array.isArray(nextMessageNodes) ? nextMessageNodes : [];
     rows.forEach(function(msg, index) {
-      if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.site_cards)) return;
+      if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.site_cards) || (nodes[index] && nodes[index]._lazyAiCards)) return;
       var insertBeforeNode = nodes[index + 1] || nextNodes[index] || null;
       msg.site_cards.forEach(function(card) {
         try { renderAiToolCard(nodes[index] || messagesEl, card, nodes[index] ? nodes[index].querySelector('.ai-msg-bubble') : insertBeforeNode); } catch (e) {}
@@ -4674,6 +4715,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!root) return function() {};
 
     function fitResearchComposer() {
+      if(researchViewport)updateResearchPromptPosition(messagesEl);
       if (!researchViewport || root.classList.contains('hidden') || document.activeElement !== input) return;
       var scroller = input.closest('.dt-page'), vv = window.visualViewport;
       if (!scroller) return;
@@ -4687,6 +4729,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var bottom = Math.min(parentBounds.bottom, visibleBottom) - 12, top = Math.max(parentBounds.top, visibleTop) + 12;
       if (bounds.bottom > bottom) scroller.scrollTop += bounds.bottom - bottom;
       else if (bounds.top < top) scroller.scrollTop -= top - bounds.top;
+      updateResearchPromptPosition(messagesEl);
     }
 
     function applyViewport() {
@@ -4802,10 +4845,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var researchHeader = root.querySelector('.dt-header');
       if (researchHeader) composerObserver.observe(researchHeader, { box: 'border-box' });
     }
+    var researchPage=researchViewport?input.closest('.dt-page'):null;
+    var researchPromptHandler=window.throttleRAF(function(){if(!disposed)updateResearchPromptPosition(messagesEl);});
+    if(researchPage)researchPage.addEventListener('scroll',researchPromptHandler,{passive:true});
     applyViewport();
 
     return function() {
       disposed = true;
+      if(researchPage)researchPage.removeEventListener('scroll',researchPromptHandler);
       if (composerObserver) composerObserver.disconnect();
       if (S.keyboardResetTimer) {
         try { clearTimeout(S.keyboardResetTimer); } catch (e2) {}
@@ -5010,6 +5057,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function updateResearchProgress(card, ratio) {
     if (!isResearchCard(card)) return;
+    var researchState=card._researchState&&card._researchState.state;var live=card._usesRealProgress&&!['done','timeout','interrupted','cancelled','error'].includes(researchState);card.classList.toggle('ai-research-indeterminate',!!live);if(live)return;
     var safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
     card.style.setProperty('--ai-research-progress', (safeRatio * 100).toFixed(2) + '%');
     if (card._researchState) card._researchState.progress = safeRatio;
@@ -5150,7 +5198,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       else setResearchSteps(card, 2, 2);
       updateResearchProgress(card, typeof state.progress === 'number' ? state.progress : Math.min(0.9, 0.68 + Math.max(state.searchCount || 0, state.researchTick) * 0.04));
     } else if (state.state === 'responding') {
-      refs.title.textContent = '已思考 ' + formatThinkDuration(state.durationMs || state.elapsedMs || 0) + ' · 深入研究完成';
+      refs.title.textContent = card._usesRealProgress ? '正在生成报告 · 已用时 '+formatThinkDuration(state.durationMs||state.elapsedMs||0) : '已思考 ' + formatThinkDuration(state.durationMs || state.elapsedMs || 0) + ' · 深入研究完成';
       refs.status.textContent = '正在生成回答...';
       refs.meta.textContent = '';
       setResearchSteps(card, 3, 3);
@@ -5788,35 +5836,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   // Tavily 来源列表: 渲染为引用链接列表 (escapeHtml 转义 + safeSearchUrl 白名单)
   function buildTavilySourcesBox(sources) {
-    var list = Array.isArray(sources) ? sources : [];
-    if (!list.length) return null;
-    var box = document.createElement('div');
-    box.className = 'ai-search-supplement ai-tavily-sources';
-    var html = '📚 研究来源 (' + list.length + ' 条)<br>';
-    var shown = list.slice(0, 10);
-    for (var si = 0; si < shown.length; si++) {
-      var item = shown[si];
-      var url = '';
-      var title = '';
-      if (item && typeof item === 'object') {
-        url = String(item.url || item.link || '');
-        title = String(item.title || item.name || url);
-      } else {
-        url = String(item || '');
-        title = url;
-      }
-      var safeUrl = safeSearchUrl(url);
-      if (safeUrl) {
-        html += '<a class="ai-search-detail-title" href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(title) + '</a><br>';
-      } else {
-        html += '<span class="ai-search-detail-title">[' + (si + 1) + '] ' + escapeHtml(title) + '</span><br>';
-      }
-    }
-    if (list.length > 10) {
-      html += '<span style="font-size:10px;color:#999">... 还有 ' + (list.length - 10) + ' 条来源</span>';
-    }
-    box.innerHTML = html;
-    return box;
+    var list=Array.isArray(sources)?sources:[];if(!list.length)return null;
+    var box=el('div',{class:'ai-search-supplement ai-tavily-sources'});box.appendChild(el('strong',{text:'参考资料 · '+list.length+' 份'}));var entries=el('div',{class:'ai-source-entries'});box.appendChild(entries);
+    function addSource(item,index){var row=el('div',{class:'ai-source-entry'}),url=safeSearchUrl(item.url||'');if(url){var link=el('a',{href:url,target:'_blank',rel:'noopener',text:'['+(index+1)+'] '+String(item.title||url)});row.appendChild(link);}else row.appendChild(el('span',{text:'['+(index+1)+'] '+String(item.title||'来源未提供链接')}));
+      if(item.possible_repost)row.appendChild(el('small',{text:' · 正文相似，仍保留为独立资料'}));if(item.content_unavailable)row.appendChild(el('small',{text:' · 正文未取得，按链接计数'}));if(item.content_truncated)row.appendChild(el('small',{text:' · 正文仅取得部分'}));
+      if(Array.isArray(item.aliases)&&item.aliases.length>1){var details=el('details'),summary=el('summary',{text:'合并出处 '+item.aliases.length+' 条'});details.appendChild(summary);item.aliases.forEach(function(alias){var linkUrl=safeSearchUrl(alias.url);if(linkUrl)details.appendChild(el('a',{href:linkUrl,target:'_blank',rel:'noopener',text:String(alias.title||linkUrl),style:'display:block;overflow-wrap:anywhere;margin:5px 0'}));});row.appendChild(details);}entries.appendChild(row);}
+    list.slice(0,10).forEach(addSource);if(list.length>10){var more=el('button',{type:'button',class:'ai-msg-act',text:'展开其余 '+(list.length-10)+' 份资料'});more.addEventListener('click',function(){list.slice(10).forEach(function(item,index){addSource(item,index+10);});more.remove();});box.appendChild(more);}return box;
   }
 
   // ===== 深入研究二级页增强: 研究强度选择器 + 三阶段状态 + 流式渲染 + 历史回看 =====
@@ -5834,7 +5859,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       : ((card._researchState && card._researchState.durationMs) || 0);
     if (durationMs < 0) durationMs = 0;
     card._researchState.durationMs = durationMs;
-    card._researchState.searchCount = srcs.length;
+    card._researchState.searchCount = card._researchBoard?Number(card._researchBoard.search_calls)||0:0;
+    card._reportText=String(answerText||'');
 
     var answerEl = card.querySelector('.ai-think-answer');
     if (answerEl && answerText) {
@@ -5851,6 +5877,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     }
 
+    card.querySelectorAll('.ai-tavily-sources').forEach(function(old){old.remove();});
     var sourcesBox = buildTavilySourcesBox(srcs);
     if (sourcesBox) {
       var thinkBody = card.querySelector('.ai-think-body');
@@ -5864,10 +5891,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var footer = card.querySelector('.ai-msg-footer');
     if (footer) {
       footer.innerHTML = '';
-      footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(new Date().toISOString()) }));
+      footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(card._researchCreatedAt||new Date(startedAtMs||Date.now()).toISOString()) }));
       footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '深入研究' }));
       // 搜索数量：网页搜索 N（如 网页搜索 100）
-      footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '网页搜索 ' + srcs.length }));
+      footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '参考来源 ' + srcs.length }));
       // ★ 优化：结果不满意时可"重新研究"（后端 refresh=true 跳过 24h 缓存重新跑）
       if (card._researchRefreshFn) {
         var refreshBtn = el('button', {
@@ -5938,9 +5965,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       });
       footer.appendChild(exportBtn);
+      ['pdf','markdown'].forEach(function(format){var button=el('button',{type:'button',class:'ai-msg-act',text:format==='pdf'?'导出 PDF':'导出 Markdown'});var identity=customModelIdentity();button.addEventListener('click',async function(){if(button.disabled||!customModelIdentityCurrent(identity))return;button.disabled=true;var controller=new AbortController();card._exportAbort=controller;try{var references=srcs.slice();(card._researchDocuments||[]).forEach(function(doc){references.push({source_id:doc.id,title:doc.name,location:'提取段落标识 '+doc.id+':P…'+(doc.limitation?' · '+doc.limitation:'')});});var result=await apiRequest('POST','/research/export',{format:format,title:card._researchQuery||'深入研究报告',answer:card._reportText,sources:references},{signal:controller.signal,timeoutMs:50000});if(!card.isConnected||!customModelIdentityCurrent(identity))return;if(!result.ok||!result.data||!result.data.file)throw Error(describeError(result,'报告导出失败'));var link=document.createElement('a');link.href=result.data.file.data_url;link.download=result.data.file.filename;document.body.appendChild(link);link.click();link.remove();}catch(error){if(customModelIdentityCurrent(identity))notify(error.message||'报告导出失败');}finally{if(button.isConnected)button.disabled=false;card._exportAbort=null;}});footer.appendChild(button);});
     }
+    var reportReader=aiReading(card.closest('#dtMessages')||document.getElementById('dtMessages'),true);if(reportReader&&answerEl){reportReader.track(card,{id:card.dataset.aiHistoryId||card.dataset.checkpointId||card._researchMessageId,role:'assistant',content:answerText},{heavyNode:answerEl,pin:false});reportReader.decorateReport({node:card,contentEl:answerEl,text:answerText});}
 
-    setResearchCardState(card, 'done', { durationMs: durationMs, searchCount: srcs.length, expanded: false, progress: 1 });
+    setResearchCardState(card, 'done', { durationMs: durationMs, searchCount: card._researchState.searchCount, expanded: false, progress: 1 });
     setResearchSteps(card, -1, 4);
   }
 
@@ -6392,6 +6421,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (onProgress) { try { onProgress({ sources: sources }); } catch (e) {} }
       } else if (evt.type === 'research_stage') {
         if (onProgress) { try { onProgress({ stage: String(evt.stage || ''), message: evt.message != null ? String(evt.message) : '' }); } catch (e) {} }
+      } else if(evt.type==='research_board'){if(onProgress)onProgress({board:evt});
+      } else if(evt.type==='research_document'){if(onProgress)onProgress({document:evt.document});
       } else if (evt.type === 'research_checkpoint') {
         if (onProgress) onProgress({checkpoint:evt.checkpoint_id, resumed:evt.resumed === true});
       } else if (evt.type === 'research_done') {
@@ -6399,7 +6430,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         finalAnswer = String(finalAnswer || '').slice(0, AI_CONTENT_MAX_LEN);
         succeed({ answer: finalAnswer, sources: sources, message_id: evt.message_id || null,
           conversation_id: evt.conversation_id || requestConversationId,
-          saved: evt.saved === true || (evt.saved !== false && !!evt.message_id), quota: evt.quota || null });
+          saved: evt.saved === true || (evt.saved !== false && !!evt.message_id),board:evt.board||null,documents:evt.documents||[],usage:evt.usage||null,quota:evt.quota||null });
       } else if (evt.type === 'error') {
         // ★ 2026-09-11：错误文案优先级修正。后端并发分支发的是
         //   { error: 'concurrent', code: 'concurrent', message: '请等待上一个研究请求完成' }，
@@ -6439,7 +6470,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             headers: authHeaders,
             credentials: 'include',
             body: JSON.stringify({
-              query: String(query || ''),
+              query: String(query || ''),attachments:opts&&opts.attachments,web_search:opts&&opts.webSearch,reuse_documents:true,
               checkpoint: true, checkpoint_id: opts && opts.checkpointId || undefined,
               client_request_id: opts && opts.requestId || undefined,
               model: (opts && opts.model) || 'pro',
@@ -6686,6 +6717,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Network packets may arrive together. Format their combined content once
     // per display frame, preserving the completed prefix and live node identity.
     function appendStreamChunk(chunk) {
+      if(dtMessagesEl._newContentButton&&dtMessagesEl._aiFollow===false)dtMessagesEl._newContentButton.hidden=false;
       if (!chunk || renderFrame || !isResearchCard(progressCard)) return;
       renderFrame = requestAnimationFrame(function() {
         renderFrame = 0;
@@ -6713,7 +6745,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         cancelFn: function() { cancelDeepThink(S.dtConversationId); },
         retryFn: function() { handleDeepThinkPageSend(originalUserText, fileData); }
       });
-      progressCard.classList.add('dt-animate-in');
+      progressCard._usesRealProgress=true;progressCard.classList.add('dt-animate-in');updateResearchProgress(progressCard,0);progressCard._researchQuery=originalUserText;
       // 研究一开始就允许展开思考过程（不再锁死 0 步）
       if (progressCard._researchState) {
         progressCard._researchState.canToggle = true;
@@ -6736,12 +6768,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S.deepThinkJob = controller;
       S.currentStreamAborted = false;
 
-      var researchPromise = runTavilyResearch(text, function(prog) {
+      var researchPromise = runTavilyResearch(opts.attachments&&opts.attachments.length?(originalUserText||'请对照所有文件，逐项比较事实、数据、相同点、差异与矛盾，并给出带文件段落引用的结论。'):text, function(prog) {
         if (S._dtCurrentReqId !== reqId) {
           try { if (researchPromise && researchPromise.cancel) researchPromise.cancel(); } catch (e) {}
           return;
         }
         if (!prog) return;
+        if(prog.board){progressCard._researchBoard=prog.board;var features=assistantFeatures();if(features)features.renderBoard(progressCard,prog.board);if(progressCard._researchState)progressCard._researchState.searchCount=Number(prog.board.search_calls)||0;}
+        if(prog.document)appendResearchThinkingEntry(progressCard,'资料提取','['+prog.document.id+'] '+prog.document.name+' · '+(prog.document.status==='read'?'已读取':'未读出')+(prog.document.limitation?'：'+prog.document.limitation:''),{forceNew:true});
         if (prog.checkpoint) { progressCard.dataset.checkpointId = prog.checkpoint; }
         if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true});
         if (prog.stage) handleResearchStage(prog.stage, prog.message);
@@ -6762,11 +6796,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) sources = prog.sources;
-      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId });
+      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId,attachments:opts.attachments,webSearch:opts.webSearch });
       var result = await researchPromise;
       if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
       answer = (result && result.answer) || '';
       sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
+      if(result&&result.board){progressCard._researchBoard=result.board;var finalFeatures=assistantFeatures();if(finalFeatures)finalFeatures.renderBoard(progressCard,result.board);}
+      progressCard._researchMessageId=result&&result.message_id;progressCard._researchDocuments=result&&result.documents||[];consumeAiAttachment(fileData);
       renderResearchResult();
       if (result && result.quota) applyQuota(result.quota);
       if (result && result.conversation_id && !S.dtConversationId) { S.dtConversationId = result.conversation_id; saveDtConvId(); }
@@ -7392,6 +7428,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         node.appendChild(content);
       } else if (msg.role === 'assistant') node = buildThinkCardFromHistory(msg, msgs, true);
       if (node) {
+        if(msg.is_research){node._researchBoard=msg.research_board;node._researchDocuments=msg.documents||[];node._researchQuery=msg.research_query;node._researchCreatedAt=msg.created_at;if(msg.id)node.dataset.aiHistoryId=String(msg.id);renderTavilyResearchReport(node,msg.content,msg.research_sources,null,'历史研究记录');if(assistantFeatures()&&msg.research_board)assistantFeatures().renderBoard(node,msg.research_board);}
         if (msg.id) node.dataset.aiHistoryId = String(msg.id);
         fragment.appendChild(node);
       }
@@ -7553,7 +7590,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var input = document.getElementById('dtInput');
       if (input) {
         setTimeout(function() {
-          if (currentPage() && document.activeElement !== input) {
+          if (currentPage() && document.activeElement !== input && !document.querySelector('.dt-research-history-panel, [data-xtj-ai-modal]')) {
             try { input.focus({ preventScroll: true }); } catch (e) {}
           }
         }, 80);
@@ -7563,6 +7600,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function closeDeepThinkPage() {
     var panel = document.getElementById('panelDeepThink');
+    if(S._dtReading){S._dtReading.reader.dispose();S._dtReading=null;}
+    if(panel)panel.querySelectorAll('.ai-research-card').forEach(function(card){if(card._exportAbort)card._exportAbort.abort();});
     try {
       if (S.dtViewportCleanup) { S.dtViewportCleanup(); S.dtViewportCleanup = null; }
       // Invalidate every callback first, then abort the actual network
@@ -7647,23 +7686,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var displayText = text;
     var attachmentPayload = null;
 
-    // 如果有文件: 区分: UI 显示用完整 data URL 或文件占位，发送给服务器用简短标记
-    if (fileData) {
-      var safeName = String(fileData.name).replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5\u3040-\u30ff]/g, '_').slice(0, 80);
-      var isImage2 = fileData.type.startsWith('image/');
-      var sizeKB2 = Math.round((fileData.dataUrl.length * 3 / 4) / 1024);
-      // UI 显示
-      if (isImage2) {
-        displayText = (text ? text + '\n' : '') + '![' + safeName + '](' + fileData.dataUrl + ')';
-      } else {
-        displayText = (text ? text + '\n' : '') + '[📄 ' + safeName + ' · ' + sizeKB2 + 'KB]';
-      }
-      // 发送给服务器: 简短标记
-      var serverTag2 = isImage2
-        ? '[图片: ' + safeName + ' · ' + sizeKB2 + 'KB]'
-        : '[文件: ' + safeName + ' · ' + sizeKB2 + 'KB]';
-      text = text ? text + '\n' + serverTag2 : serverTag2;
-      attachmentPayload = [{ name: safeName, type: fileData.type || 'application/octet-stream', data_url: fileData.dataUrl }];
+    var researchFileList=Array.isArray(fileData)?fileData.slice(0,10):(fileData?[fileData]:[]);
+    if(researchFileList.length){
+      attachmentPayload=[];var displayFiles=[],serverTags=[];
+      researchFileList.forEach(function(file){var name=String(file.name||'文件').replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5\u3040-\u30ff]/g,'_').slice(0,80),image=String(file.type||'').startsWith('image/'),size=Math.round((file.size||file.dataUrl.length*3/4)/1024);displayFiles.push(image?'!['+name+']('+file.dataUrl+')':'[📄 '+name+' · '+size+'KB]');serverTags.push('['+(image?'图片':'文件')+': '+name+' · '+size+'KB]');attachmentPayload.push({name:name,type:file.type||'application/octet-stream',data_url:file.dataUrl});});
+      displayText=(text?text+'\n':'')+displayFiles.join('\n');text=(text?text+'\n':'')+serverTags.join(' ');
     }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
 
@@ -7775,14 +7802,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 优先走 /api/agent/research/stream SSE 研究流程; 失败时回退到下方原有 deep think 流程。
     // 注: S.deepThink 在独立二级页面架构下恒为 false (深入研究已迁至独立页面, 见 toggleDeepThink),
     //     此处位于深入研究页发送函数内, 即代表深入研究模式。
-    if (sendOptions.checkpointId || (S.tavilyResearchEnabled && !fileData && originalUserText.length >= 6)) {
+    if (sendOptions.checkpointId || (S.tavilyResearchEnabled && ((!researchFileList.length && originalUserText.length>=6) || (researchFileList.length>=2 && researchFileList.some(function(file){return !String(file.type||'').startsWith('image/');}) && originalUserText.length<=500)))) {
       // 3a. 清空输入框 (Tavily 流程先行; 回退时下方 step 3 会再清一次, 无副作用)
       clearSubmittedInput();
 
       var tavilyOutcome;
       // ★ 修复: Tavily 深入研究同样消耗每日第三方搜索次数。超限时不发起研究请求，
       //   直接回退到下方深入研究流程（与 Tavily 流程失败时的行为一致）。
-      if (!sendOptions.checkpointId && S.quota && searchQuotaExhausted(S.quota)) {
+      if (!sendOptions.checkpointId && (!researchFileList.length || dtSettings.webSearch) && S.quota && searchQuotaExhausted(S.quota)) {
         notify('今日网页搜索次数已达上限，开通 Pro 可无限搜索');
         tavilyOutcome = 'fallback';
       } else {
@@ -7791,7 +7818,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             messagesEl: dtMessagesEl,
             text: text,
             originalUserText: originalUserText,
-            fileData: fileData,
+            fileData: fileData,attachments:attachmentPayload,webSearch:researchFileList.length?dtSettings.webSearch:undefined,
             reqId: reqId,
             model: dtSettings.mode,
             researchModel: dtSettings.researchModel,
@@ -7940,7 +7967,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         '</div>';
       dtMessagesEl.appendChild(node);
       if (r) r.value = node;
-      scrollToBottom(dtMessagesEl, true);
+      scrollToBottom(dtMessagesEl, false);
       return node;
     }
 
@@ -8243,26 +8270,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
       if (fileInput) fileInput.value = '';
     }
-    function acceptDtFile(rawFile) {
-      var fileSeq = ++_dtFileSelectionSeq, fileLife = S.dtLifecycleId, fileOwner = window.currentUser || '', fileAuthEpoch = readAiAuthEpoch();
-      function currentFile() { return fileSeq === _dtFileSelectionSeq && fileLife === S.dtLifecycleId && fileOwner === (window.currentUser || '') && fileAuthEpoch === readAiAuthEpoch() && document.getElementById('panelDeepThink') && !document.getElementById('panelDeepThink')._dtClosed; }
-      readAiAttachmentFile(rawFile, function(fileData) {
-        if (!currentFile()) return;
-        _dtFileData = { name: fileData.name, type: fileData.type, dataUrl: fileData.dataUrl };
-        if (filePreview) renderAiFilePreview(filePreview, fileData, clearDtFilePreview);
-      }, { sizeMsg: '文件不能超过 50MB', isCurrent: currentFile });
+    function renderDtFiles(){
+      if(!filePreview)return;filePreview.replaceChildren();var files=Array.isArray(_dtFileData)?_dtFileData:(_dtFileData?[_dtFileData]:[]);
+      filePreview.style.display=files.length?'flex':'none';filePreview.style.flexWrap='wrap';
+      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.round((file.size||file.dataUrl.length*3/4)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});
     }
+    function acceptDtFiles(rawFiles){
+      var fileSeq=++_dtFileSelectionSeq,fileLife=S.dtLifecycleId,fileOwner=window.currentUser||'',fileAuthEpoch=readAiAuthEpoch();
+      var files=Array.isArray(_dtFileData)?_dtFileData.slice():(_dtFileData?[_dtFileData]:[]),pending=Array.prototype.slice.call(rawFiles||[]),skipped=0;
+      function currentFile(){return fileSeq===_dtFileSelectionSeq&&fileLife===S.dtLifecycleId&&fileOwner===(window.currentUser||'')&&fileAuthEpoch===readAiAuthEpoch()&&document.getElementById('panelDeepThink')&&!document.getElementById('panelDeepThink')._dtClosed;}
+      function next(index){if(!currentFile())return;if(index>=pending.length){_dtFileData=files.length?files:null;renderDtFiles();if(skipped)notify('部分文件无法读取或超过研究大小/10个文件限制，其余文件已保留');return;}var file=pending[index],bytes=files.reduce(function(n,f){return n+(f.size||f.dataUrl.length*3/4);},0),ext=String(file.name||'').split('.').pop().toLowerCase();
+        if(files.length>=10||bytes+file.size>54*1024*1024||ext==='pdf'&&file.size>8*1024*1024||['docx','xlsx','xls'].includes(ext)&&file.size>20*1024*1024){skipped++;next(index+1);return;}
+        var accepted=readAiAttachmentFile(file,function(data){if(!currentFile())return;files.push(data);_dtFileData=files.slice();renderDtFiles();next(index+1);},{isCurrent:currentFile,onError:function(){skipped++;next(index+1);}});if(!accepted){skipped++;next(index+1);}
+      }next(0);
+    }
+    function acceptDtFile(rawFile){acceptDtFiles([rawFile]);}
     if (fileBtn && fileInput) {
       addDtListener(fileBtn, 'click', function() { fileInput.click(); });
       addDtListener(fileInput, 'change', function() {
-        var f = this.files && this.files[0];
-        if (!f) return;
-        if (!isSupportedAiFile(f)) { notify('不支持该文件'); this.value = ''; return; }
-        acceptDtFile(f);
+        if(!this.files||!this.files.length)return;acceptDtFiles(this.files);this.value='';
       });
     }
     // Deep-think input area: paste image + drag-drop onto the composer row.
     var dtInputArea = document.querySelector('#panelDeepThink .dt-input-bar') || (input && input.parentElement);
+    var researchMessages=document.getElementById('dtMessages');if(researchMessages){researchMessages._aiFollow=true;var researchNew=el('button',{type:'button',class:'ai-new-content dt-new-content',text:'有新内容 ↓','aria-label':'查看最新报告内容'});researchNew.hidden=true;var oldNew=document.querySelector('#panelDeepThink .dt-new-content');if(oldNew)oldNew.remove();document.getElementById('panelDeepThink').appendChild(researchNew);researchMessages._newContentButton=researchNew;updateResearchPromptPosition(researchMessages);addDtListener(researchMessages,'scroll',function(){updateResearchPromptPosition(researchMessages);researchMessages._aiFollow=isNearBottom(researchMessages,100);if(researchMessages._aiFollow)researchNew.hidden=true;});addDtListener(researchNew,'click',function(){researchMessages._aiFollow=true;researchNew.hidden=true;scrollToBottom(researchMessages,true);});}
     if (dtInputArea || input) {
       var unbindPasteDrop = bindAiComposerPasteDrop([dtInputArea, input].filter(Boolean), acceptDtFile);
       if (typeof unbindPasteDrop === 'function') _dtListeners.push(unbindPasteDrop);
@@ -9458,7 +9489,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         reasoning_effort_supported: customCfg.reasoning_effort_supported === true,
         message: text,
         messages: hl,
-        messages_include_current: false,
+        messages_include_current: false,followup_suggestions:true,context_estimate:true,
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
         work_mode: sendSettings.workMode === true,
@@ -9487,7 +9518,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         conversation_id: S.conversationId,
         // ★ 关键修复：携带历史，服务端优先使用（不再强依赖 convId 查库）
         messages: _builtinHist,
-        messages_include_current: false,
+        messages_include_current: false,followup_suggestions:true,context_estimate:true,
         client_request_id: reqId,
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
@@ -9929,6 +9960,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           role: 'assistant',
           content: content,
           client_request_id: reqId,
+          followups:evt&&Array.isArray(evt.followups)?evt.followups:[],
           _pendingSync: userMsg._pendingSync,
           _historyRequestAtCommit: S.historyRequestId,
           interrupted: !!(evt && evt.interrupted === true),
@@ -9952,7 +9984,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 2026-09-29（审计 S1）：登记本轮的本地 assistant 消息，并把节点与消息
         //   互相关联，供首屏历史到达时按"是否本地未同步"保留气泡。
         if (S._pendingLocalMsgs.indexOf(aiMsg) === -1) S._pendingLocalMsgs.push(aiMsg);
-        if (node) node._msgRef = aiMsg;
+        if (node){node._msgRef=aiMsg;attachAiFollowups(node,aiMsg);var completedReader=aiReading(messagesEl,false);if(completedReader){completedReader.track(node,aiMsg,{pin:false});if(content.length>4000)completedReader.decorateReport({node:node,contentEl:assistantBubble,text:content});}}
         // 流式完成后立刻写本地缓存，避免关面板/重进时服务端尚未落库导致「上一条不见了」
         try { setAiHistoryCache(S.conversationId, S.messages); } catch (eCache) {}
         // ★ 2026-09-29（审计 S1 收尾）：本轮已成功落定，清空"本地待同步"引用。
@@ -10271,6 +10303,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) { aborted = true; break; }
           
           if (evt.type === 'meta') {
+            if(evt.context_budget&&S._updateContextCapacity)S._updateContextCapacity(evt.context_budget);
             streamConvId = evt.conversation_id;
             if (streamConvId) {
               S.conversationId = streamConvId;
@@ -11146,6 +11179,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'content') {
+            if(S._newContentPrompt)S._newContentPrompt();
             if (S.responseProfile === 'enhanced') {
               var answerStage = assistantNode.querySelector('.ai-enhanced-status');
               if (answerStage) { answerStage.textContent = '正在组织回答…'; answerStage.setAttribute('data-stage', 'answer'); }
@@ -11197,6 +11231,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'done') {
+            if(evt.content && S._newContentPrompt)S._newContentPrompt();
             hideAssistantTyping();
             S.paused = false;
             // ★★ 2026-09-29（审计 M11「done 先取消渲染器致气泡清空，长回复收尾闪一下」）：
@@ -11462,7 +11497,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) return;
     if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
     updateInputMetrics();
-    scrollToBottom(messagesEl, true);
+    scrollToBottom(messagesEl, false);
   }
 
   async function loadHistory(messagesEl, before) {
@@ -11492,8 +11527,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messagesEl.__xtjAiCardIds = {};
         var frag = document.createDocumentFragment();
         var cachedNodes = [];
-        cachedMsgs.forEach(function(m) {
-          var cachedNode = buildMessageNode(m, messagesEl);
+        cachedMsgs.forEach(function(m,index) {
+          var cachedNode = historyTurn(m,messagesEl,index,cachedMsgs.length);
           cachedNodes.push(cachedNode);
           frag.appendChild(cachedNode);
         });
@@ -11632,8 +11667,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messagesEl.__xtjAiCardIds = {};
         var frag = document.createDocumentFragment();
         var _historyNodes = [];
-        msgs.forEach(function(m) {
-          var _historyNode = buildMessageNode(m, messagesEl);
+        msgs.forEach(function(m,index) {
+          var _historyNode = historyTurn(m,messagesEl,index,S.messages.length);
           _historyNodes.push(_historyNode);
           frag.appendChild(_historyNode);
         });
@@ -11646,6 +11681,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!S.messages.length && !_localNodes.length) appendEmptyState(messagesEl);
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
+        var restoredReader=aiReading(messagesEl,false);if(restoredReader&&!_localNodes.length)restoredReader.restore().then(function(restored){if(restored)S.autoScrollPinned=false;});
+        if(S._updateContextCapacity)S._updateContextCapacity();
         try {
           setAiHistoryCache(S.conversationId, S.messages);
         } catch (e) {}
@@ -11666,7 +11703,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var frag = document.createDocumentFragment();
         var _historyNodes = [];
         for (var mi = 0; mi < msgs.length; mi++) {
-          var node = buildMessageNode(msgs[mi], messagesEl);
+          var node = historyTurn(msgs[mi],messagesEl,mi,S.messages.length);
           _historyNodes.push(node);
           frag.appendChild(node);
         }
@@ -12268,6 +12305,9 @@ function showChatMessages() {
       }
     }));
     root.appendChild(messagesEl);
+    var newContent=el('button',{type:'button',class:'ai-new-content',text:'有新内容 ↓','aria-label':'查看最新回复'});newContent.hidden=true;root.appendChild(newContent);
+    S._newContentPrompt=function(){if(messagesEl.isConnected&&!isNearBottom(messagesEl,100)&&!S.autoScrollPinned)newContent.hidden=false;};
+    newContent.addEventListener('click',function(){S.autoScrollPinned=true;newContent.hidden=true;scrollToBottom(messagesEl,true);});messagesEl.addEventListener('scroll',function(){if(isNearBottom(messagesEl,100))newContent.hidden=true;},{passive:true});
 
     // 历史会话提示栏
     var histInfo = el('div', { id: 'aiChatHistoryInfo', style: 'display:none;padding:8px 12px;font-size:12px;color:#666;text-align:center;border-bottom:1px solid var(--border,rgba(140,196,158,0.30))' });
@@ -12626,6 +12666,7 @@ function showChatMessages() {
       }, 520);
     }
     function updateModelUI(flash) {
+      if(S._updateContextCapacity)S._updateContextCapacity();
       var sum = panelShell.querySelector('#aiModelSummary');
       if (sum) {
         if (isCustomModelId(S.selectedModel)) sum.textContent = customModelDisplayName(S.selectedModel) || '自定义模型';
@@ -13660,6 +13701,8 @@ function showChatMessages() {
     voiceBtn.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
     var voiceStatus = el('div',{class:'ai-voice-status',id:'aiVoiceStatus',role:'status','aria-live':'polite'});
     voiceStatus.hidden = true;
+    var voiceIcon=el('span',{class:'ai-voice-state-icon','aria-hidden':'true'}),voiceProgress=el('progress',{class:'ai-voice-progress',max:'100','aria-label':'语音模型文件准备进度'});voiceProgress.hidden=true;voiceStatus.appendChild(voiceIcon);voiceStatus.appendChild(voiceProgress);
+    var voiceConfirm=el('input',{type:'checkbox','aria-label':'语音发送前确认'});voiceConfirm.checked=scopedStorageGet('xtj_ai_voice_confirm')==='true';var confirmLabel=el('label',{class:'ai-voice-confirm'});confirmLabel.appendChild(voiceConfirm);confirmLabel.appendChild(document.createTextNode('发送前确认'));voiceStatus.appendChild(confirmLabel);voiceConfirm.addEventListener('change',function(){try{localStorage.setItem('xtj_ai_voice_confirm__'+aiStorageScopeName(),String(voiceConfirm.checked));}catch(_){}});
     var voiceLabel = el('span'), stopVoiceBtn = el('button',{type:'button',class:'ai-msg-act',text:'停止朗读'});
     stopVoiceBtn.hidden = true; voiceStatus.appendChild(voiceLabel); voiceStatus.appendChild(stopVoiceBtn);
     var voiceModeBtn = el('button',{type:'button',class:'ai-panel-row ai-voice-mode',role:'switch','aria-checked':'false','aria-label':'语音对话'});
@@ -13670,11 +13713,13 @@ function showChatMessages() {
       owner:function() { return Object.assign({user:readUserName()},customModelIdentity()); },
       current:function(owner) { return S.active && input.isConnected && voiceLifecycle === S.lifecycleId && customModelIdentityCurrent(owner); },
       draft:function() { return input.value || ''; },
+      confirmBeforeSend:function(){return voiceConfirm.checked;},
       onTranscript:function(text) { input.value = text; autoresize(); },
       onSend:function() { doSend(); },
       onInterrupt:function() { if (S.sending) interruptCurrentChat(); },
       notify:notify,
       onState:function(state) {
+        voiceStatus.dataset.stage=state.stage||'idle';voiceProgress.hidden=!(state.stage==='download'||state.stage==='initializing');if(state.progress!==null&&state.progress!==undefined)voiceProgress.value=state.progress;else voiceProgress.removeAttribute('value');
         voiceBtn.classList.toggle('listening',state.listening);
         voiceBtn.setAttribute('aria-label',state.listening ? '结束语音输入' : state.speaking ? '打断朗读并提问' : '语音输入');
         voiceModeBtn.setAttribute('aria-checked',String(state.enabled));
@@ -13735,6 +13780,34 @@ function showChatMessages() {
         try { notify('重新生成失败，请手动重发'); } catch (eR2) {}
       }
     };
+    S._askPreservingDraft = function(text,attachments) {
+      if(!S.active || !input.isConnected || voiceLifecycle!==S.lifecycleId)return Promise.reject(Error('当前聊天已关闭，请重新打开'));
+      if(S.sending)return Promise.reject(Error('请先暂停当前回复，再发送推荐问题或分析资料'));
+      var draft=nodeForAuxiliarySend(text),accepted=false;
+      return handleSendMessage(draft,sendBtn,messagesEl,attachments||[],function(){accepted=true;}).then(function(){if(!accepted)throw Error('消息未开始发送，资料与草稿已保留');});
+    };
+    function nodeForAuxiliarySend(text){var field=document.createElement('textarea');field.value=String(text||'');return field;}
+    function featureApi(path,options){options=options||{};return apiRequest(options.method||'GET','/workbench'+path.replace(/^\/api\/agent\/workbench/,''),options.body,{signal:options.signal,timeoutMs:50000}).then(function(result){if(!result||!result.ok||!result.data||result.data.ok===false)throw Error(describeError(result,'工具请求失败，请重试'));return result.data;});}
+    var featureIdentity=customModelIdentity();
+    function featureCurrent(){return S.active && input.isConnected && voiceLifecycle===S.lifecycleId && customModelIdentityCurrent(featureIdentity);}
+    var menuGroup=panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child');
+    function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});button.appendChild(el('span',{class:'ai-panel-row-icon','aria-hidden':'true',text:'✧'}));button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
+    addFeatureEntry('工具工作台',function(){var workbench=window.XtjAiCore&&window.XtjAiCore.ToolWorkbench;if(!workbench){notify('工具工作台尚未加载，请刷新后重试');return;}if(S._toolWorkbench)S._toolWorkbench.dispose();S._toolWorkbench=workbench.open({owner:readUserName(),current:featureCurrent,api:featureApi,notify:notify,onAsk:function(payload){return S._askPreservingDraft(payload.text,payload.attachments);}});});
+    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'V4.1 Flash'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if(config.api_key&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
+    var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'});capacity.title='文字 tokens 按字符估算，图片、附件解析和工具内容可能增加用量。厂商精确上下文窗口尚未确认。';
+    function updateCapacity(value){var features=assistantFeatures();if(features)capacity.textContent=features.capacityText(value||features.estimate(S.messages,input.value,isCustomModelId(S.selectedModel)));}
+    input.addEventListener('input',function(){updateCapacity();});S._updateContextCapacity=updateCapacity;updateCapacity();
+    inputBar.appendChild(capacity);
+    async function runModelComparison(model,text,history,signal,onEvent){
+      var config=model.config,body={message:text,messages:history,messages_include_current:false,model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,followup_suggestions:false};
+      if(config)Object.assign(body,{provider:config.provider,api_key:config.api_key,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
+      var auth=await getUserAuthPayload({forceNoToken:false});if(!featureCurrent()||signal.aborted)throw Error('对比已取消');
+      var timeout=setTimeout(function(){if(S._modelCompare)S._modelCompare.dispose();},300000),reader=null,content='',done=false,usage=null;
+      try {var response=await fetch(API_BASE+(config?'/custom-chat/stream':'/chat/stream'),{method:'POST',headers:auth.headers||{},credentials:'include',body:JSON.stringify(body),signal:signal});if(!response.ok||!response.body)throw Error('模型请求失败（'+response.status+'）');reader=response.body.getReader();var decoder=new TextDecoder(),pending='';
+        while(!signal.aborted&&featureCurrent()){var packet=await reader.read();pending+=packet.done?decoder.decode():decoder.decode(packet.value,{stream:true});if(packet.done)pending+='\n';if(pending.length>512*1024)throw Error('模型数据包过大');var lines=pending.split('\n');pending=lines.pop();for(var i=0;i<lines.length;i++){if(!lines[i].startsWith('data:'))continue;var event;try{event=JSON.parse(lines[i].slice(5).trim());}catch(_){continue;}if(event.type==='content')content+=String(event.text||event.chunk||'');if(content.length>500000)throw Error('模型回复超过长度上限');if(event.type==='done'){done=true;content=event.content||content;usage=event.usage||null;}onEvent(event);}if(packet.done||done)break;}
+        if(!done&&!signal.aborted)throw Error('模型回复提前中断');return {content:content,usage:usage};
+      } finally {clearTimeout(timeout);if(reader)try{await reader.cancel();}catch(_){} }
+    }
     sendBtn.addEventListener('click', doSend);
     pauseBtn.addEventListener('click', function() {
       if (!S.sending && !S.paused) return;
@@ -13874,7 +13947,7 @@ function showChatMessages() {
     inputBar.appendChild(voiceBtn);
     inputBar.appendChild(sendBtn);
     inputBar.appendChild(pauseBtn);
-    root.appendChild(voiceStatus);
+    inputBar.appendChild(voiceStatus);
     root.appendChild(inputBar);
 
     S.resizeTimer = setTimeout(autoresize, 0);
@@ -14044,9 +14117,13 @@ function showChatMessages() {
 
   function closeAiChat(force) {
     closeAiOwnedModals();
+    document.querySelectorAll('.ai-research-card').forEach(function(card){if(card._exportAbort)card._exportAbort.abort();});
     closeCopyMenu();
     if (typeof window.__xtjCancelDmAiAsk === 'function') window.__xtjCancelDmAiAsk();
     if (S._voiceInputCleanup) { S._voiceInputCleanup(); S._voiceInputCleanup = null; }
+    ['_toolWorkbench','_modelCompare'].forEach(function(key){if(S[key])S[key].dispose();S[key]=null;});
+    ['_chatReading','_dtReading'].forEach(function(key){if(S[key])S[key].reader.dispose();S[key]=null;});
+    S._askPreservingDraft=null;S._updateContextCapacity=null;S._newContentPrompt=null;
     var activePanel = document.getElementById('panelAiChat');
     var panelIsVisible = !!(activePanel && activePanel.classList.contains('active') && !activePanel.classList.contains('hidden'));
     if (!S.active && !panelIsVisible && force !== true) return;

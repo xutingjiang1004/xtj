@@ -9,13 +9,15 @@
 // 下同步抛 TypeError，导致二次背压时监听器未注册、缓冲永不复排）。
 
 const { appendProcessEvent } = require('./ai-process-events');
+const assistantOutput = require('./ai-assistant-output');
 
 const MAX_SSE_BUFFER_BYTES = 256 * 1024;
 // ★ 2026 修复：支持可选 event 名（此前只写 'data: ' 帧，带事件名的路由只能裸 res.write
 // 绕过背压上限）。向后兼容：未传 eventName 时行为与旧版完全一致。
-function writeSse(res, payload, eventName) {
+function writeSseRaw(res, payload, eventName) {
   try {
     if (res && !res.writableEnded && res.headersSent) {
+      require('./ai-tool-retry').observe(res,payload);
       // 记录最近一次 SSE 写入时间，供路由级心跳定时器判断"沉默期"
       try { res._sseLastWriteAt = Date.now(); } catch (_) {}
       var data = eventName
@@ -90,6 +92,25 @@ function writeSse(res, payload, eventName) {
     console.error('[SSE] write error:', e && e.message);
   }
   return false;
+}
+
+function writeSse(res,payload,eventName){
+  if(!res||!res._aiFollowupEnabled||!payload||eventName)return writeSseRaw(res,payload,eventName);
+  if(payload.type==='content'||payload.type==='answer_chunk'){
+    const key=typeof payload.text==='string'?'text':typeof payload.chunk==='string'?'chunk':typeof payload.content==='string'?'content':null;
+    if(key){
+      if(!res._aiFollowupStream)res._aiFollowupStream=assistantOutput.createFollowupStream(text=>writeSseRaw(res,{...payload,[key]:text}));
+      res._aiFollowupStream.push(payload[key]);return true;
+    }
+  }
+  if(payload.type==='done'){
+    const parsed=res._aiFollowupStream?res._aiFollowupStream.finish(typeof payload.content==='string'?payload.content:undefined):assistantOutput.splitFollowups(payload.content||'');
+    payload={...payload,content:parsed.text};
+    if(typeof payload.sanitized_content==='string')payload.sanitized_content=assistantOutput.splitFollowups(payload.sanitized_content).text;
+    if(payload.complete!==false&&parsed.text.trim())payload.followups=assistantOutput.normalizeFollowups([payload.followups,parsed.followups,res._aiFollowups].find(value=>Array.isArray(value)&&value.length));
+    if(payload.complete!==false&&parsed.text.trim()&&(!payload.followups||payload.followups.length!==3))payload.followups=assistantOutput.contextualFollowups(res._aiFollowupQuestion,parsed.text);
+  }
+  return writeSseRaw(res,payload,eventName);
 }
 
 module.exports = {

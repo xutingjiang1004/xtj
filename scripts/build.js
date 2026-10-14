@@ -145,6 +145,9 @@ const JS_FILES = [
   'js/ai-core/scroll-controller.js',
   'js/ai-core/stream-renderer.js',
   'js/ai-core/voice-conversation.js',
+  'js/ai-core/tool-workbench.js',
+  'js/ai-core/reading-tools.js',
+  'js/ai-core/assistant-features.js',
   'js/ai-core/telemetry.js'
 ];
 
@@ -195,6 +198,9 @@ const CSS_FILES = [
   'css/visual-refinements.css',
   'css/admin.css',
   'css/ai-agent.css',
+  'css/ai-workbench.css',
+  'css/ai-reading.css',
+  'css/ai-assistant-features.css',
   'css/ui-shell.css',
   'css/photo-preview.css'
 ];
