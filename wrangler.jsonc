@@ -1,0 +1,6 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xtj-preview",
+  "pages_build_output_dir": "./output/cloudflare-pages",
+  "compatibility_date": "2026-10-16"
+}

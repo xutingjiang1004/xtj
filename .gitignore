@@ -122,3 +122,6 @@ miniprogram_npm/
 /docs/**/*-report.json
 /docs/chat-*-20??-??-??/
 /docs/social-ui-20??-??-??/
+
+# Cloudflare local runtime state
+.wrangler/

@@ -442,3 +442,37 @@ Render 免费服务连续 15 分钟无请求就会休眠，定时访问可减少
 3. `js/core.js` 中站内 changelog 数据
 
 这样可以避免“仓库版本、站内版本、关于页版本”再次分裂。
+
+### Cloudflare Pages 独立预览（迁移中）
+
+此阶段只发布前端静态文件，不是可替代正式站的完整部署。预览的
+`/api`、`/health` 和 `/share/*` 返回 HTTP 503 JSON；不代理已暂停的 Render，
+不连接生产写入凭据。登录、上传、私密媒体、分享及 AI 等功能须等后端迁移后验收。
+未知路径返回 404，不回退成成功的首页。预览设置 noindex，但这不代替访问控制。
+
+构建与校验：
+
+```sh
+npm ci
+npm run build:pages
+npm run test:pages
+```
+
+Pages 构建命令为 `npm run build:pages`，发布目录只能选择
+`output/cloudflare-pages`，不能选择仓库根目录。使用 Node 22 或以上版本。
+构建复用现有资源生成和一致性校验；导出仅包含受版本控制的前端
+JS/CSS、两个 HTML 入口、图标及两个 Service Worker，不复制用户上传内容。
+产物继承服务器 CSP 等安全头，保留原图与私密访问机制。
+
+先创建独立的免费 Pages 项目 `xtj-preview`，不要附加正式域名或启用付费功能。
+使用 Git 集成时选择迁移分支，避免生产 main 的自动部署；也可以在授权后的
+Wrangler CLI 中向该独立项目上传预览分支。`wrangler.jsonc` 仅声明预览项目，
+不包含账号 ID、密钥、存储绑定或生产资源。
+
+部署前必须完成 Cloudflare 账号授权，并确认执行环境可访问 Cloudflare API。
+浏览器里已登录 Cloudflare 不代表远端命令行已授权。不要把 service-role 或
+AI 提供商密钥填入静态构建变量。后端绑定、访问控制和真实在线验证尚未完成，
+不要将这个阶段的前端预览切换为正式站。
+
+回退此阶段：停止使用独立预览链接即可，现有 Render、Supabase 和正式域名
+不受影响；构建修改未改动产品前端或后端运行逻辑。
