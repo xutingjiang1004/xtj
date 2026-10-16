@@ -42,10 +42,11 @@ function toolFeedback(result, callId, normalizeItems, fallbackName) {
     if (name === 'calculate' || name === 'run_code' || name === 'convert_units') fact = data.result != null ? String(data.result) : fact;
     if (name === 'get_current_time') fact = data.local_time || data.datetime || data.time || '';
     if (name === 'read_web_page' || name === 'read_document') fact = data.title || data.filename || '';
+    if (name === 'make_chart') fact = data.title || '';
     if (name === 'task_plan' && Array.isArray(data.steps)) fact = data.steps.length + ' 个步骤';
     event.summary = cleanText((OUTCOMES[name] || '工具执行完成') + (fact ? ' · ' + cleanText(fact, 100) : ''));
     // Short plain outputs are useful feedback; never expose serialized arguments/objects.
-    if (!fact && typeof result.content === 'string' && !/^\s*[\[{<]/.test(result.content)) {
+    if (!fact && name !== 'make_chart' && typeof result.content === 'string' && !/^\s*[\[{<]/.test(result.content)) {
       const firstLine = cleanText(result.content.split('\n')[0], 120);
       if (firstLine && firstLine.length <= 100) event.summary = firstLine;
     }

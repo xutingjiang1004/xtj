@@ -34,7 +34,9 @@ test('tool progress events trigger follow-scroll', function () {
   // 通过定位各事件分支起点，截取到下一个 evt.type 分界或固定长窗口后查找调用。
   // 注意：tool_result 分支可达 5K+ 字符（含结果列表构建），窗口不能取太小。
   ['tool_calls', 'tool_pending', 'tool_result', 'tool_error'].forEach(function (evt) {
-    var idx = aiAgent.indexOf("evt.type === '" + evt + "'");
+    // Match the complete dispatch branch, rather than a preceding event-type
+    // normalization condition that continues into another dispatch branch.
+    var idx = aiAgent.indexOf("if (evt.type === '" + evt + "') {");
     assert.ok(idx > 0, '未找到事件分支: ' + evt);
     // 优先用下一个分支起点界定边界；找不到时退回 8000 字符窗口
     var next = aiAgent.indexOf("if (evt.type === '", idx + 10);

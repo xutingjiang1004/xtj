@@ -26,10 +26,14 @@ function clampText(v, max) {
 }
 
 function toNum(v) {
-  if (typeof v === 'number') return isFinite(v) ? v : 0;
-  var s = String(v === null || v === undefined ? '' : v).replace(/[,\s￥$¥%]/g, '');
-  var n = parseFloat(s);
-  return isFinite(n) ? n : 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
+  if (typeof v !== 'string') return NaN;
+  var s = v.trim().replace(/^[￥$¥]\s*/, '').replace(/%$/, '').trim();
+  if (s.includes(',') && !/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?(?:[eE][+-]?\d+)?$/.test(s)) return NaN;
+  s = s.replace(/,/g, '');
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(s)) return NaN;
+  var n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
 }
 
 function escapeXml(s) {
@@ -1083,7 +1087,6 @@ function evaluateFormula(expr, scope) {
       if (ch === '*') { pos++; v *= parseUnary(); }
       else if (ch === '/') { pos++; var d = parseUnary(); v = d === 0 ? NaN : v / d; }
       else if (ch === '%') { pos++; var m = parseUnary(); v = m === 0 ? NaN : v % m; }
-      else if (ch === '^') { pos++; v = Math.pow(v, parseUnary()); }
       else return v;
     }
   }
@@ -1091,7 +1094,13 @@ function evaluateFormula(expr, scope) {
     skipWs();
     if (src[pos] === '-') { pos++; return -parseUnary(); }
     if (src[pos] === '+') { pos++; return parseUnary(); }
-    return parsePrimary();
+    return parsePower();
+  }
+  function parsePower() {
+    var v = parsePrimary();
+    skipWs();
+    if (src[pos] === '^') { pos++; v = Math.pow(v, parseUnary()); }
+    return v;
   }
   function parsePrimary() {
     skipWs();
@@ -1109,10 +1118,10 @@ function evaluateFormula(expr, scope) {
     throw new Error('表达式包含不支持的字符: ' + ch);
   }
   function parseNumber() {
-    var start = pos;
-    while (pos < src.length && /[0-9.]/.test(src[pos])) pos++;
-    var raw = src.slice(start, pos);
-    var n = parseFloat(raw);
+    var match = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(src.slice(pos));
+    if (!match) throw new Error('无效数字');
+    var raw = match[0]; pos += raw.length;
+    var n = Number(raw);
     if (!isFinite(n)) throw new Error('无效数字: ' + raw);
     return n;
   }
@@ -1122,7 +1131,7 @@ function evaluateFormula(expr, scope) {
     var word = src.slice(start, pos);
     skipWs();
     if (src[pos] === '(') {
-      var fn = MATH_FNS[word];
+      var fn = Object.prototype.hasOwnProperty.call(MATH_FNS, word) && MATH_FNS[word];
       if (!fn) throw new Error('不支持的函数: ' + word);
       pos++;
       var args = [];
@@ -1140,17 +1149,20 @@ function evaluateFormula(expr, scope) {
       pos++;
       return fn.apply(null, args);
     }
-    if (word === 'column') return toNum(vars.column);
-    if (word === 'row') return toNum(vars.row);
     if (word === 'pi' || word === 'PI') return Math.PI;
     if (word === 'e' || word === 'E') return Math.E;
-    if (Object.prototype.hasOwnProperty.call(vars, word)) return toNum(vars[word]);
+    if (Object.prototype.hasOwnProperty.call(vars, word)) {
+      var number = toNum(vars[word]);
+      if (!Number.isFinite(number)) throw new Error('字段「' + word + '」不是有效数字，不能把未知值当作零');
+      return number;
+    }
     throw new Error('未知字段: ' + word);
   }
 
   var result = parseExpression();
   skipWs();
   if (pos < src.length) throw new Error('表达式存在多余内容: ' + src.slice(pos, pos + 20));
+  if (!Number.isFinite(result)) throw new Error('计算结果不是有效数字（可能除以零或超出范围）');
   return result;
 }
 

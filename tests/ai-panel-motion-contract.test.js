@@ -326,8 +326,17 @@ test('Items 契约：后端必须统一 items 出口（不得把整段正文当�
 });
 
 test('Items 契约：前端必须校验 Array.isArray 才渲染结果列表', () => {
-  assert.match(agentSrc, /if \(Array\.isArray\(tool\.items\) && tool\.items\.length\)/,
+  const replayStart = agentSrc.indexOf('function buildOrderedProcessNode(');
+  assert.ok(replayStart >= 0, '历史进展渲染入口必须存在');
+  const replay = agentSrc.slice(replayStart, agentSrc.indexOf('\n  function ', replayStart + 1));
+  // 失败重试也需要一个卡片入口；它不代表允许把非数组 items 当结果列表。
+  assert.match(replay, /Array\.isArray\(tool\.items\) && tool\.items\.length/,
     '前端必须拒绝非数组的 items（字符串也有 .length，旧判断会被穿透）');
+  const disclosureStart = agentSrc.indexOf('function populateToolResultDisclosure(');
+  assert.ok(disclosureStart >= 0, '工具结果卡片入口必须存在');
+  const disclosure = agentSrc.slice(disclosureStart, agentSrc.indexOf('\n  function ', disclosureStart + 1));
+  assert.match(disclosure, /var items = Array\.isArray\(event\.items\) \? event\.items : \[\]/,
+    '包括失败重试入口在内的所有卡片，渲染列表前必须将非数组 items 规范化为空数组');
 });
 
 /* ── 7) 思考面板 / 思考程度弹层：开合必须流动，不得硬切 ──────────────────

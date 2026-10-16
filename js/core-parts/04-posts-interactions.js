@@ -3499,7 +3499,7 @@
                 });
             }
 
-            window.toggleFilterPanel = function() {
+            window.toggleFilterPanel = function(event) {
                 var panel = document.getElementById("postFilterPanel");
                 var btn = document.getElementById("filterToggleBtn");
                 if (!panel) return;
@@ -3515,6 +3515,14 @@
                     var _pfNeedForce = !window.__xtjPostFilterUsersLoadedAt || _pfAge > 3 * 60 * 1000;
                     loadPostFilterUsers(_pfNeedForce);
                     renderPostFilterUsers();
+                    // Desktop posts scroll inside .wrap; panelPosts.scrollTop
+                    // does not move that viewport. Let the revealed panel find
+                    // its actual scrolling ancestors without touching the Dock.
+                    panel.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+                    if (event && event.detail === 0) {
+                        var search = document.getElementById('postSearchInput');
+                        if (search) search.focus({ preventScroll: true });
+                    }
                 } else {
                     panel.style.display = "none";
                     if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }

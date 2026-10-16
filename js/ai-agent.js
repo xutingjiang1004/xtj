@@ -2715,7 +2715,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         rawText: rawText ? String(rawText).slice(0, 300) : ''
       };
     } catch (e) {
-      var isAbort = e && e.name === 'AbortError';
+      // fetch may reject with the raw abort reason (including a string).
+      // The request signal is authoritative even when there is no Error.name.
+      var isAbort = (e && e.name === 'AbortError') || (requestController && requestController.signal.aborted) || (externalSignal && externalSignal.aborted);
       var reason = (requestController && requestController._abortReason) || (opts && opts.signal && opts.signal.reason);
       var errCode = 'network_error';
       var errMsg = (e && e.message) || '网络异常';
@@ -3015,7 +3017,50 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   var toolResultListSeq = 0;
+  function reconcileAiToolRetryMetadata(incoming,existing) {
+    (incoming||[]).forEach(function(message){
+      if(!message||message.role!=='assistant')return;
+      var local=(existing||[]).find(function(previous){return previous&&previous.role==='assistant'&&(message.id&&previous.id?previous.id===message.id:message.client_request_id&&previous.client_request_id===message.client_request_id);});
+      if(local&&Number.isSafeInteger(local.tool_retry_revision)&&local.tool_retry_revision>(Number(message.tool_retry_revision)||0)){
+        message.process_events=local.process_events;message.site_cards=local.site_cards;message.tool_retry_updated_at=local.tool_retry_updated_at;message.tool_retry_revision=local.tool_retry_revision;
+      }
+    });
+    return incoming;
+  }
+  async function retryAiToolStep(card,event,retry) {
+    var identity=customModelIdentity(),life=S.lifecycleId,conversation=S.conversationId,host=card.closest('.ai-msg'),message=host&&host._msgRef;
+    if(retry.disabled||!host)return;
+    if(!message){notify('请等待本轮回复结束后重试这一步');return;}
+    var abort=new AbortController();
+    if(!S._toolRetryFlights)S._toolRetryFlights=new Set();S._toolRetryFlights.add(abort);
+    function currentScope(){return S.active&&customModelIdentityCurrent(identity)&&life===S.lifecycleId&&conversation===S.conversationId;}
+    function current(){return card.isConnected&&currentScope();}
+    retry.disabled=true;retry.textContent='正在重试…';
+    try {
+      var response=await apiRequest('POST','/tools/retry',{retry_token:event.retry_token},{timeoutMs:50000,signal:abort.signal});
+      if(!currentScope())return;
+      var data=response.data,record=data&&data.record;
+      if(!response.ok||!data||!data.result)throw Error(data&&typeof data.error==='string'?data.error:describeError(response,'工具重试失败'));
+      if(data.result.error)throw Error(data.result.error);
+      if(data.persisted!==true||!record||record.conversation_id!==conversation||record.client_request_id!==message.client_request_id||!Number.isSafeInteger(record.tool_retry_revision)||record.tool_retry_revision<1||!Number.isFinite(Date.parse(record.tool_retry_updated_at))||!Array.isArray(record.process_events)||!Array.isArray(record.site_cards))throw Error('工具结果尚未同步，请刷新历史后重试');
+      if(!host.isConnected){host=Array.from(S.messagesEl.querySelectorAll('.ai-msg.assistant')).find(function(node){return node._msgRef&&(node._msgRef.id===record.id||node._msgRef.client_request_id===record.client_request_id);});if(!host)return;message=host._msgRef;card=Array.from(host.querySelectorAll('.ai-tool-result-card')).find(function(node){return node._aiToolResultEvent&&node._aiToolResultEvent.call_id===event.call_id;});if(!card){card=el('div',{class:'ai-tool-result-card'});host.insertBefore(card,host.querySelector('.ai-msg-bubble'));}}
+      // Sibling retries can commit in order but reach the browser in reverse.
+      // Keep the newest acknowledged metadata while finishing this step's UI.
+      record=Object.assign({role:'assistant'},record);
+      reconcileAiToolRetryMetadata([record],[message]);
+      message.id=record.id;message.process_events=record.process_events;message.site_cards=record.site_cards;message.tool_retry_updated_at=record.tool_retry_updated_at;message.tool_retry_revision=record.tool_retry_revision;message._pendingSync=false;
+      var feedback=data.feedback||{},callId=String(event.call_id||'');
+      host.querySelectorAll('.ai-tool-step').forEach(function(step){if(step.getAttribute('data-tool-call-id')!==callId)return;step.classList.remove('is-error','is-running');step.classList.add('is-done');var icon=step.querySelector('.ai-tool-step-icon');if(icon)icon.textContent='';step._aiToolFeedback=Object.assign({},feedback,{retry_completed_at:record.tool_retry_updated_at});step.setAttribute('data-tool-summary',toolResultFeedback(feedback));step.querySelectorAll('.ai-tool-result-error').forEach(function(error){error.remove();});var status=step.querySelector('.ai-tool-step-status');if(status)status.textContent=toolResultFeedback(feedback)+' · 重试已保存';var round=step.closest('.ai-tool-round');if(round)updateToolRoundState(round);});
+      host.querySelectorAll('.ai-tool-card[data-tool-call-id]').forEach(function(old){if(old.getAttribute('data-tool-call-id')===callId){var id=old.getAttribute('data-ai-card-id');if(host.__xtjAiCardIds)delete host.__xtjAiCardIds[id];old.remove();}});
+      populateToolResultDisclosure(card,feedback);
+      record.site_cards.filter(function(result){return result.tool_call_id===callId;}).forEach(function(result){renderAiToolCard(host,result,host.querySelector('.ai-msg-bubble'));});
+      try{setAiHistoryCache(conversation,S.messages);}catch(_){}
+      notify('这一步已更新并保存，原回答保留；可继续提问');
+    } catch(error) {if(current()&&!abort.signal.aborted)notify(error.message||'工具重试失败');}
+    finally {S._toolRetryFlights.delete(abort);if(retry.isConnected){retry.disabled=false;retry.textContent='重试这一步';}}
+  }
   function populateToolResultDisclosure(card, event) {
+    card._aiToolResultEvent=Object.assign({},event);
     var expanded = card.querySelector('button[aria-expanded="true"]');
     var previousPanel = card.querySelector('.ai-search-detail');
     var scrollTop = previousPanel ? previousPanel.scrollTop : 0;
@@ -3024,7 +3069,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     card.hidden = !event.error && !items.length;
     if (event.error) {
       card.appendChild(el('div', {class:'ai-tool-result-error',text:String(event.error).slice(0,240)}));
-      if(event.retry_token){var retry=el('button',{type:'button',class:'ai-msg-act',text:'重试这一步'}),identity=customModelIdentity(),life=S.lifecycleId;retry.addEventListener('click',async function(){if(retry.disabled||!customModelIdentityCurrent(identity)||life!==S.lifecycleId)return;retry.disabled=true;retry.textContent='正在重试…';try{var response=await apiRequest('POST','/tools/retry',{retry_token:event.retry_token},{timeoutMs:50000});if(!card.isConnected||!customModelIdentityCurrent(identity)||life!==S.lifecycleId)return;if(!response.ok||!response.data||!response.data.result)throw Error(describeError(response,'工具重试失败'));if(response.data.result.error)throw Error(response.data.result.error);populateToolResultDisclosure(card,response.data.feedback||{});var host=card.closest('.ai-msg')||card.parentNode;(response.data.result.cards||[]).forEach(function(result){renderAiToolCard(host,result,host.querySelector('.ai-msg-bubble'));});card.appendChild(el('small',{text:'这一步已更新，原回答保留；需要重新分析时可继续提问。'}));}catch(error){if(card.isConnected&&customModelIdentityCurrent(identity))notify(error.message||'工具重试失败');}finally{if(retry.isConnected){retry.disabled=false;retry.textContent='重试这一步';}}});card.appendChild(retry);}
+      if(event.retry_token){var retry=el('button',{type:'button',class:'ai-msg-act',text:'重试这一步'});retry.addEventListener('click',function(){retryAiToolStep(card,event,retry);});card.appendChild(retry);}
       return card;
     }
     var button=el('button',{type:'button',class:'ai-tool-result-card-title','aria-expanded':String(!!expanded)});
@@ -4023,7 +4068,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var link = item.querySelector('a'), snippet = item.querySelector('.ai-search-detail-snippet');
             return { title: link ? link.textContent : '', url: link ? link.getAttribute('href') : '', snippet: snippet ? snippet.textContent : '' };
           });
-          return { call_id: step.getAttribute('data-tool-call-id') || '', tool_name: step.getAttribute('data-tool-name') || '', detail: detail ? detail.textContent.slice(0, 240) : '', summary: step.getAttribute('data-tool-summary') || '', status: step.classList.contains('is-done') ? 'done' : step.classList.contains('is-error') ? 'error' : 'interrupted', error: error ? error.textContent.slice(0, 240) : '', items: items };
+          var feedback=step._aiToolFeedback||{};
+          return { call_id: step.getAttribute('data-tool-call-id') || '', tool_name: step.getAttribute('data-tool-name') || '', detail: detail ? detail.textContent.slice(0, 240) : '', summary: feedback.summary||step.getAttribute('data-tool-summary') || '', status: step.classList.contains('is-done') ? 'done' : step.classList.contains('is-error') ? 'error' : 'interrupted', error: feedback.error||(error ? error.textContent.slice(0, 240) : ''), items: feedback.items||items,retry_token:feedback.retry_token,retry_completed_at:feedback.retry_completed_at };
         });
         toolRoom -= tools.length;
         if (tools.length) events.push({ type: 'tools', tools: tools });
@@ -4048,13 +4094,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         event.tools.slice(0, 32).forEach(function(tool) {
           var done = tool.status === 'done';
           var step = el('div', { class: 'ai-tool-step ' + (done ? 'is-done' : 'is-error'), 'data-tool-name': String(tool.tool_name || ''), 'data-tool-call-id': String(tool.call_id || '') });
+          step._aiToolFeedback=Object.assign({},tool);
           step.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
           var detail = el('div', { class: 'ai-tool-step-body' });
           detail.appendChild(el('div', { class: 'ai-tool-step-title', text: toolLabel(tool.tool_name) }));
           if (tool.detail) detail.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(tool.detail).slice(0, 240) }));
-          detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? toolResultFeedback(tool) : tool.status === 'interrupted' ? '已中断' : '失败' }));
+          detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? toolResultFeedback(tool)+(tool.retry_completed_at?' · 重试已保存':'') : tool.status === 'interrupted' ? '已中断' : '失败' }));
           if (tool.error) detail.appendChild(el('div', { class: 'ai-tool-result-error', text: String(tool.error).slice(0, 240) }));
-          if (Array.isArray(tool.items) && tool.items.length) {
+          if (tool.error&&tool.retry_token || Array.isArray(tool.items) && tool.items.length) {
             var results = populateToolResultDisclosure(el('div', {class:'ai-tool-result-card'}), tool);
             detail.appendChild(results);
           }
@@ -8524,6 +8571,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var type = String(card.type || 'tool_result').replace(/[^a-z_]/g, '');
     var shell = el('section', { class: 'ai-tool-card ai-tool-card--' + type });
     if (cardId) shell.setAttribute('data-ai-card-id', cardId);
+    if (card.tool_call_id) shell.setAttribute('data-tool-call-id',String(card.tool_call_id));
     shell.appendChild(el('div', { class: 'ai-tool-card-title', text: String(card.title || 'AI 工具结果') }));
     var data = card.data || {};
 
@@ -10764,6 +10812,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             continue;
           }
 
+          if (evt.type === 'tool_error'&&evt.retry_token)evt=Object.assign({},evt,{type:'tool_result',success:false});
           if (evt.type === 'tool_error') {
             // A tool error is a terminal result for this call, not a terminal
             // event for the whole assistant turn: keep independent parallel calls
@@ -10963,6 +11012,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (stEl) stEl.textContent = toolSucceeded ? toolResultFeedback(evt) : '失败';
             }
             if (matchStep && toolSucceeded) matchStep.setAttribute('data-tool-summary', toolResultFeedback(evt));
+            if (matchStep) matchStep._aiToolFeedback=Object.assign({},evt);
             // ★★★ 2026-09-28 修复（同上一处报障的另一半：结果卡片挂错父节点）：
             //   旧代码是 `toolBar2.appendChild(resultCard)`，而 toolBar2 是**外层
             //   .ai-tool-timeline** —— 于是结果卡片被追加到 `.ai-tool-activity`
@@ -11613,6 +11663,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S.oldestCursor = r.data.oldest_id && r.data.oldest
         ? JSON.stringify({ at: r.data.oldest, id: r.data.oldest_id }) : (r.data.oldest || null);
       var msgs = r.data.messages || [];
+      // A history read started before a retry acknowledgement may be stale.
+      // Overlay only matching live rows; an authoritative deletion stays deleted.
+      reconcileAiToolRetryMetadata(msgs,S.messages);
       // ★ 历史图片消息：把后端带回来的 vision_urls 转成 attachments，
       //   供「重新生成」时复用原图（历史/刷新后加载的图片消息同样可重新生成）。
       //   ★ 修 bug：图片消息在历史里应渲染为真实图片，而不是内部占位标签 + 服务端注入说明。
@@ -13807,12 +13860,10 @@ function showChatMessages() {
       return handleSendMessage(draft,sendBtn,messagesEl,attachments||[],function(){accepted=true;}).then(function(){if(!accepted)throw Error('消息未开始发送，资料与草稿已保留');});
     };
     function nodeForAuxiliarySend(text){var field=document.createElement('textarea');field.value=String(text||'');return field;}
-    function featureApi(path,options){options=options||{};return apiRequest(options.method||'GET','/workbench'+path.replace(/^\/api\/agent\/workbench/,''),options.body,{signal:options.signal,timeoutMs:50000}).then(function(result){if(!result||!result.ok||!result.data||result.data.ok===false)throw Error(describeError(result,'工具请求失败，请重试'));return result.data;});}
     var featureIdentity=customModelIdentity();
     function featureCurrent(){return S.active && input.isConnected && voiceLifecycle===S.lifecycleId && customModelIdentityCurrent(featureIdentity);}
     var menuGroup=panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child');
     function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});button.appendChild(el('span',{class:'ai-panel-row-icon','aria-hidden':'true',text:'✧'}));button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
-    addFeatureEntry('工具工作台',function(){var workbench=window.XtjAiCore&&window.XtjAiCore.ToolWorkbench;if(!workbench){notify('工具工作台尚未加载，请刷新后重试');return;}if(S._toolWorkbench)S._toolWorkbench.dispose();S._toolWorkbench=workbench.open({owner:readUserName(),current:featureCurrent,api:featureApi,notify:notify,onAsk:function(payload){return S._askPreservingDraft(payload.text,payload.attachments);}});});
     addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'V4.1 Flash'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if(config.api_key&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
     var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
     function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId&&typeof memory.summary==='string'&&memory.summary.trim()&&memory.summary.length<=8000)return memory;}return null;}
@@ -14142,12 +14193,13 @@ function showChatMessages() {
   }
 
   function closeAiChat(force) {
+    if(S._toolRetryFlights){S._toolRetryFlights.forEach(function(abort){abort.abort();});S._toolRetryFlights.clear();}
     closeAiOwnedModals();
     document.querySelectorAll('.ai-research-card').forEach(function(card){if(card._exportAbort)card._exportAbort.abort();});
     closeCopyMenu();
     if (typeof window.__xtjCancelDmAiAsk === 'function') window.__xtjCancelDmAiAsk();
     if (S._voiceInputCleanup) { S._voiceInputCleanup(); S._voiceInputCleanup = null; }
-    ['_toolWorkbench','_modelCompare'].forEach(function(key){if(S[key])S[key].dispose();S[key]=null;});
+    if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=null;
     ['_chatReading','_dtReading'].forEach(function(key){if(S[key])S[key].reader.dispose();S[key]=null;});
     S._askPreservingDraft=null;S._updateContextCapacity=null;S._newContentPrompt=null;if(S._contextCapacity)S._contextCapacity.dispose();S._contextCapacity=null;S._contextManaged=false;S._contextWindowTokens=null;S._contextMemoryResolver=null;
     var activePanel = document.getElementById('panelAiChat');
