@@ -6,7 +6,7 @@ const path = require('node:path');
 const { buildPages, allowed } = require('../scripts/build-pages');
 
 test('Pages artifact excludes backend, credentials, metadata and preserves frontend bytes', async () => {
-  for (const file of ['.env', 'render-api/server.js', 'supabase/key.json', 'package.json', 'js/.env.js', 'docs/secret.js', 'js/source.js.map']) assert.equal(allowed(file), false, file);
+  for (const file of ['.env', 'render-api/server.js', 'supabase/key.json', 'package.json', 'js/.env.js', 'docs/secret.js', 'js/source.js.map', 'css/ai-workbench.min.css', 'js/ai-core/tool-workbench.min.js']) assert.equal(allowed(file), false, file);
   const { out, files } = buildPages();
   for (const file of files) assert.deepEqual(fs.readFileSync(path.join(out, file)), fs.readFileSync(path.resolve(__dirname, '..', file)), file);
   for (const file of ['render-api', 'supabase', '.env', 'package.json', '.git']) assert.equal(fs.existsSync(path.join(out, file)), false);
