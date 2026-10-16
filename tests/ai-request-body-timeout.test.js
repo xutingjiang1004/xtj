@@ -15,7 +15,7 @@ function extractFunction(startMarker, endMarker, name, context) {
   return vm.runInNewContext('(function(){' + source.slice(start, end) + '; return ' + name + ';})()', context);
 }
 
-function requestHarness() {
+function requestHarness({ rawAbortReason = false } = {}) {
   let timer = null;
   let bodyStarted;
   const bodyReady = new Promise(resolve => { bodyStarted = resolve; });
@@ -36,7 +36,7 @@ function requestHarness() {
       text() {
         bodyStarted();
         return new Promise((_resolve, reject) => {
-          const fail = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+          const fail = () => reject(rawAbortReason ? options.signal.reason : Object.assign(new Error('aborted'), { name: 'AbortError' }));
           if (options.signal.aborted) fail();
           else options.signal.addEventListener('abort', fail, { once: true });
         });
@@ -128,6 +128,16 @@ test('external cancellation still aborts while reading an AI response body', asy
   ]);
   assert.equal(result.ok, false);
   assert.equal(result.error_code, 'aborted');
+});
+
+for (const reason of ['aborted', 'timeout']) test('AI request classifies a raw '+reason+' rejection from its actual signal', async () => {
+  const harness = requestHarness({ rawAbortReason: true }), external = new AbortController();
+  const pending = harness.sendOnce('GET', '/history', null, { signal: external.signal });
+  await harness.bodyReady;
+  if (reason === 'timeout') harness.timer().callback(); else external.abort();
+  const result = await pending;
+  assert.equal(result.error_code, reason);
+  assert.equal(harness.timer().active, false);
 });
 
 test('history cache strips attachment data URLs without losing file metadata', () => {

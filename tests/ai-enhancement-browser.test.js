@@ -82,10 +82,19 @@ test('three followups send one selected question while retaining the next draft 
   await finish(p,1,'下面给出对照表。',{followups:['还需要补充哪些条件？','能结合预算选择吗？','怎样验证这个结论？']});await p.waitForFunction(()=>document.querySelectorAll('.ai-followup').length===6);
   const evidence=await capture(p,'phone-followups-draft','#aiChatRoot');assert.deepEqual(evidence.axe||[],[]);assert.deepEqual(f.errors,[]);
 });
-test('actual menu opens tool workbench, authenticates calculation, and preserves the normal composer',{timeout:60000},async t=>{
-  const f=await fixture(t,{viewport:{width:1440,height:960}}),p=f.page;await p.locator('#aiChatMsgInput').fill('工具执行期间保留的草稿');await openMenu(p,'工具工作台');await p.getByRole('dialog',{name:'小猫工具工作台',exact:true}).waitFor();await p.getByRole('tab',{name:'计算',exact:true}).click();await p.getByLabel('数学表达式',{exact:true}).fill('2+2');await p.getByLabel('输入数值与来源说明',{exact:true}).fill('两个已确认数值：2和2');await p.getByLabel('结果单位',{exact:true}).fill('份');await p.getByRole('button',{name:'计算并保留过程',exact:true}).click();await p.getByText('2+2 = 4 份',{exact:true}).waitFor();
-  const calls=await p.evaluate(()=>enhancementCalls);assert.equal(calls.length,1);assert.equal(calls[0].body.name,'calculate');assert.equal(calls[0].body.args.expression,'2+2');assert.equal(await p.evaluate(()=>aiPolish.streams.length),0);
-  const evidence=await capture(p,'desktop-workbench-calculation','.aw-overlay');assert.deepEqual(evidence.axe||[],[]);await p.getByRole('button',{name:'关闭',exact:true}).click();assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'工具执行期间保留的草稿');assert.deepEqual(f.errors,[]);
+test('normal chat keeps tool invocation with the model and exposes no manual workbench',{timeout:60000},async t=>{
+  const f=await fixture(t,{viewport:{width:1440,height:960}}),p=f.page;
+  await p.locator('#aiChatMsgInput').fill('计算 2+2');await p.locator('.ai-plus-btn').click();
+  await p.getByRole('button',{name:'双模型对比',exact:true}).waitFor();
+  assert.equal(await p.getByRole('button',{name:'工具工作台',exact:true}).count(),0);
+  assert.equal(await p.evaluate(()=>!!(window.XtjAiCore&&XtjAiCore.ToolWorkbench)),false);
+  assert.equal(await p.locator('script[src*="tool-workbench"],link[href*="ai-workbench"],meta[name="xtj-module-ai-workbench-style"]').count(),0);
+  await p.keyboard.press('Escape');assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'计算 2+2');
+  await send(p,'计算 2+2');await emit(p,0,{type:'tool_calls',tools:[{id:'auto-calculate',name:'calculate',args:{expression:'2+2'}}]});
+  await emit(p,0,{type:'tool_result',call_id:'auto-calculate',tool_name:'calculate',success:true,summary:'已完成计算 · 4'});
+  await finish(p,0,'计算结果是 4。');await p.locator('.ai-msg.assistant .ai-msg-bubble').getByText('计算结果是 4。',{exact:true}).waitFor();
+  const calls=await p.evaluate(()=>enhancementCalls);assert.equal(calls.length,0);
+  const evidence=await capture(p,'desktop-model-owned-tools','#aiChatRoot');assert.deepEqual(evidence.axe||[],[]);assert.deepEqual(f.errors,[]);
 });
 test('two-model comparison runs sequentially and shows distinct real output without altering the ordinary draft',{timeout:60000},async t=>{
   const f=await fixture(t,{theme:'dark',viewport:{width:390,height:844}}),p=f.page;await p.locator('#aiChatMsgInput').fill('保留的普通聊天草稿');await openMenu(p,'双模型对比');await p.getByRole('dialog',{name:'双模型对比',exact:true}).waitFor();await p.getByLabel('用于对比的问题',{exact:true}).fill('这两个模型如何解释同一问题？');await p.getByRole('button',{name:'开始对比',exact:true}).click();await p.waitForFunction(()=>aiPolish.streams.length===1);

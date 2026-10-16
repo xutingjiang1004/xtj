@@ -6524,7 +6524,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   font-size: 10px;
   padding: 1px 5px;
   border-radius: 3px;
-  background: var(--accent);
+  background: #11735f;
   color: #fff;
   margin-left: 6px;
   font-weight: 500;

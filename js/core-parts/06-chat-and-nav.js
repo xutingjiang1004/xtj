@@ -402,6 +402,10 @@
             //   叠加 renderDockChatDesktopEmptyState 的归属判断，导致桌面分屏在登出后
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
+                if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
+                _dockChatDraftTimer=null;_dockChatDraftLoadSeq++;
+                _dockChatLocalDrafts={};_dockChatDraftWrites={};_dockChatDraftConflicts={};
+                _dockChatConversationStates={};_dockChatConversationOwner='';
                 cancelChatFlashSend();
                 cancelDmAiAsk();
                 if(_chatSendFlight){_chatSendFlight.controller.abort();_chatSendFlight=null;}
@@ -539,6 +543,7 @@
             var _dockChatDraftLoadSeq = 0;
             var _dockChatDraftWrites = {};
             var _dockChatDraftConflicts = {};
+            var _dockChatLocalDrafts = {};
 
             function dockChatConversationRows(states) {
                 return states.filter(function(s) { return s && !s.deleted && s.peer_name; }).map(function(s) {
@@ -2729,6 +2734,7 @@
                 var sendOrigin = captureDockChatSendOrigin(file);
                 var flight={controller:new AbortController(),owner:sendOwner,epoch:sendEpoch};_chatSendFlight=flight;
                 dockChatSending = true; if (!retrying && (!queuedFile || inp.value.trim()===content)) inp.value = '';
+                if (!retrying) rememberDockChatDraft(targetUser,inp.value);
                 sendDockChatTyping(false);
                 if (_dockChatDraftTimer && !retrying) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
@@ -5072,6 +5078,10 @@
                     });
                     if (window.currentUser !== owner) return;
                     _dockChatConversationStates[peer] = data.state;
+                    if(action==='delete'){
+                        delete _dockChatLocalDrafts[owner+'\u0000'+peer];
+                        delete _dockChatDraftConflicts[owner+'\u0000'+peer];
+                    }
                     if (window.__xtjMutedChatPeers) {
                         if (data.state.muted_until || data.state.deleted) window.__xtjMutedChatPeers[peer] = true;
                         else delete window.__xtjMutedChatPeers[peer];
@@ -5094,31 +5104,40 @@
                 } catch (error) { showToast(error.message || '会话操作失败'); }
             }
 
+            function rememberDockChatDraft(peer,value) {
+                if(!peer||!window.currentUser)return null;
+                var key=window.currentUser+'\u0000'+peer,epoch=window._authStateEpoch||0,existing=_dockChatLocalDrafts[key];
+                if(existing&&existing.epoch===epoch&&existing.value===value)return existing;
+                return _dockChatLocalDrafts[key]={value:value,epoch:epoch};
+            }
             function persistDockChatDraft(peer, value) {
-                var owner = window.currentUser;
+                var owner = window.currentUser,epoch=window._authStateEpoch||0;
                 if (!peer || !owner) return;
                 var key = owner + '\u0000' + peer;
+                var draft=rememberDockChatDraft(peer,value);
+                function current(){return window.currentUser===owner&&(window._authStateEpoch||0)===epoch;}
                 var previous = _dockChatDraftWrites[key] || Promise.resolve();
                 var write = previous.catch(function() {}).then(function() {
-                    if (window.currentUser !== owner) return;
+                    if (!current()) return;
                     var state = _dockChatConversationStates[peer] || { draft_revision:0 };
                     var revision = Number(state.draft_revision) || 0;
                     return requestDockChatSocial('/conversations/' + encodeURIComponent(peer), {
-                        method:'PATCH',body:JSON.stringify({action:'draft',draft_text:value,draft_revision:revision}),background:false
+                        method:'PATCH',body:JSON.stringify({action:'draft',draft_text:value,draft_revision:revision}),background:false,authOwner:owner,authEpoch:epoch
                     }).then(function(data) {
-                        if (window.currentUser !== owner) return;
+                        if (!current()) return;
                         if (_dockChatConversationStates[peer] && _dockChatConversationStates[peer].deleted) return;
                         _dockChatConversationStates[peer] = Object.assign({},state,data.state);
+                        if(_dockChatLocalDrafts[key]===draft)delete _dockChatLocalDrafts[key];
                         delete _dockChatDraftConflicts[key];
                         if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
                         if (dockChatActiveUser !== peer) scheduleDockChatListRefresh(0);
                     }).catch(function(error) {
-                        if (window.currentUser !== owner) return;
+                        if (!current()) return;
                         if (error.code === 'revision_conflict') {
                             _dockChatConversationStates[peer] = Object.assign({},state,{ draft_revision:error.draft_revision });
                             _dockChatDraftConflicts[key] = value;
                             showToast('草稿在其他设备已更新，本机输入已保留；请编辑后重试');
-                        } else if (error.code !== 'not_found' && error.code !== 'deleted') showToast('草稿保存失败，请稍后重试');
+                        } else if (error.code !== 'not_found' && error.code !== 'deleted') showToast('草稿保存失败，本机输入已保留；请编辑后重试');
                     });
                 });
                 _dockChatDraftWrites[key] = write;
@@ -5128,20 +5147,22 @@
             function restoreDockChatDraft(peer) {
                 if (_dockChatDraftTimer) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 var input = document.getElementById('dockChatInput');
-                if (input) input.value = '';
-                var owner = window.currentUser;
+                var owner = window.currentUser,epoch=window._authStateEpoch||0,key=owner+'\u0000'+peer,localDraft=_dockChatLocalDrafts[key],cached=_dockChatConversationStates[peer];
+                var initial=localDraft&&localDraft.epoch===epoch?localDraft.value:Object.prototype.hasOwnProperty.call(_dockChatDraftConflicts,key)?_dockChatDraftConflicts[key]:cached&&cached.draft_text||'';
+                if (input) input.value = initial;
                 var seq = ++_dockChatDraftLoadSeq;
-                requestDockChatSocial('/conversations/' + encodeURIComponent(peer)).then(function(data) {
-                    if (owner !== window.currentUser || dockChatActiveUser !== peer || seq !== _dockChatDraftLoadSeq) return;
+                requestDockChatSocial('/conversations/' + encodeURIComponent(peer),{authOwner:owner,authEpoch:epoch}).then(function(data) {
+                    if (owner !== window.currentUser || epoch!==(window._authStateEpoch||0) || dockChatActiveUser !== peer || seq !== _dockChatDraftLoadSeq) return;
                     var local = _dockChatConversationStates[peer] || {};
                     if ((Number(local.draft_revision) || 0) > (Number(data.state.draft_revision) || 0)) return;
                     _dockChatConversationStates[peer] = Object.assign({},local,data.state);
-                    if (input && !input.value) {
+                    if(_dockChatLocalDrafts[key]&&_dockChatLocalDrafts[key].epoch===epoch)return;
+                    if (input && input.value===initial) {
                         var conflictKey = owner + '\u0000' + peer;
                         input.value = Object.prototype.hasOwnProperty.call(_dockChatDraftConflicts,conflictKey)
                             ? _dockChatDraftConflicts[conflictKey] : (data.state.draft_text || '');
                     }
-                }).catch(function(error) { if (error.code !== 'not_found') console.warn('[chat] draft load failed',error); });
+                }).catch(function(error) { if (owner===window.currentUser&&epoch===(window._authStateEpoch||0)&&error.code !== 'not_found') console.warn('[chat] draft load failed',error); });
             }
 
             var _conversationOpen = document.getElementById('dockChatConversationBtn');
@@ -5176,6 +5197,7 @@
             if (_conversationInput) _conversationInput.addEventListener('input',function() {
                 var peer = dockChatActiveUser;
                 var value = _conversationInput.value;
+                rememberDockChatDraft(peer,value);
                 if (_chatTypingStopTimer) clearTimeout(_chatTypingStopTimer);
                 if (value.trim() && !_chatEditDraft) {
                     sendDockChatTyping(true);
@@ -5184,7 +5206,8 @@
                     },4200);
                 } else sendDockChatTyping(false);
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
-                _dockChatDraftTimer = setTimeout(function() { persistDockChatDraft(peer,value); },650);
+                var draftOwner=window.currentUser,draftEpoch=window._authStateEpoch||0;
+                _dockChatDraftTimer = setTimeout(function() { _dockChatDraftTimer=null;if(draftOwner===window.currentUser&&draftEpoch===(window._authStateEpoch||0))persistDockChatDraft(peer,value); },650);
             });
 
             function refreshChatSocialBadge(force) {

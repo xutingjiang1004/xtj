@@ -1628,8 +1628,6 @@ function safeEvalMath(expression) {
     return n;
   }
   function parseFactor() {
-    if (peek() === '+') { consume(); return parseFactor(); }
-    if (peek() === '-') { consume(); return -parseFactor(); }
     if (peek() === '(') {
       consume();
       var inner = parseExpr();
@@ -1639,11 +1637,16 @@ function safeEvalMath(expression) {
     }
     return parseNumber();
   }
+  function parseUnary() {
+    if (peek() === '+') { consume(); return parseUnary(); }
+    if (peek() === '-') { consume(); return -parseUnary(); }
+    return parsePower();
+  }
   function parsePower() {
     var base = parseFactor();
     if (peek() === '^') {
       consume();
-      var exp = parsePower();
+      var exp = parseUnary();
       if (Math.abs(exp) > 100) throw new Error('指数过大');
       if (Math.abs(base) > 1e6 && Math.abs(exp) > 12) throw new Error('指数过大');
       var powered = Math.pow(base, exp);
@@ -1653,10 +1656,10 @@ function safeEvalMath(expression) {
     return base;
   }
   function parseTerm() {
-    var v = parsePower();
+    var v = parseUnary();
     while (peek() === '*' || peek() === '/') {
       var op = consume();
-      var rhs = parsePower();
+      var rhs = parseUnary();
       if (op === '/') {
         if (rhs === 0) throw new Error('除以零');
         v = v / rhs;
@@ -2040,12 +2043,21 @@ async function executeToolCall(toolCall, context) {
       function parseDateSafe(s) {
         if (!s) return null;
         var str = String(s).trim();
-        // 兼容 "2026-09-14" / "2026-09-14 21:30:00" / "2026/09/14"
-        var norm = str.replace(/\//g, '-').replace(' ', 'T');
-        var d = new Date(norm);
-        if (isNaN(d.getTime())) d = new Date(str);
-        if (isNaN(d.getTime())) return null;
-        return d;
+        var parts = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})?)?$/i.exec(str);
+        if (!parts) return null;
+        var year=Number(parts[1]),month=Number(parts[2]),day=Number(parts[3]);
+        var days=[31,year%4===0&&(year%100!==0||year%400===0)?29:28,31,30,31,30,31,31,30,31,30,31];
+        if (month<1||month>12||day<1||day>days[month-1]||Number(parts[4]||0)>23||Number(parts[5]||0)>59||Number(parts[6]||0)>59) return null;
+        var zone=parts[8]||'';
+        if (zone && zone.toUpperCase()!=='Z') {
+          var offset=zone.replace(':','');
+          if(Number(offset.slice(1,3))>23||Number(offset.slice(3))>59)return null;
+          zone=offset.slice(0,3)+':'+offset.slice(3);
+        }
+        var norm=parts[1]+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+        if(parts[4]!==undefined)norm+='T'+parts[4].padStart(2,'0')+':'+parts[5]+':'+(parts[6]||'00')+(parts[7]||'')+zone;
+        var date=new Date(norm);
+        return Number.isFinite(date.getTime())?date:null;
       }
       try {
         if (dAction === 'now') {
@@ -2071,8 +2083,9 @@ async function executeToolCall(toolCall, context) {
           };
         }
         if (dAction === 'add') {
-          var baseD = parseDateSafe(args.date1) || new Date();
-          var addDays = Number(args.days);
+          var baseD = args.date1 ? parseDateSafe(args.date1) : new Date();
+          if (!baseD) return { tool_name: name, error: 'date1 格式或日期无效，请用 YYYY-MM-DD' };
+          var addDays = toolHelpers.toNum(args.days);
           if (!isFinite(addDays)) return { tool_name: name, error: '请提供有效的 days 数值' };
           var resD = new Date(baseD.getTime() + addDays * 86400000);
           var resStr = resD.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
@@ -3052,11 +3065,11 @@ async function executeToolCall(toolCall, context) {
       // 1) 去重
       if (args.distinct_by) {
         var sfKey = String(args.distinct_by);
-        var sfSeen = {};
+        var sfSeen = new Set();
         var sfDedup = [];
         sfList.forEach(function(r) {
           var v = String(r[sfKey] === undefined ? '' : r[sfKey]);
-          if (!sfSeen[v]) { sfSeen[v] = true; sfDedup.push(r); }
+          if (!sfSeen.has(v)) { sfSeen.add(v); sfDedup.push(r); }
         });
         sfSteps.push('按字段「' + sfKey + '」去重：' + sfList.length + ' → ' + sfDedup.length + ' 行');
         sfList = sfDedup;
@@ -3065,19 +3078,22 @@ async function executeToolCall(toolCall, context) {
       if (args.filter_field) {
         var sfFF = String(args.filter_field);
         var sfOp = ['>', '>=', '<', '<=', '==', '!=', 'contains'].indexOf(String(args.filter_op || '>')) >= 0
-          ? String(args.filter_op) : '>';
+          ? String(args.filter_op || '>') : '>';
         var sfFV = args.filter_value === undefined ? '' : String(args.filter_value);
         var sfFVNum = toolHelpers.toNum(sfFV);
+        if (['>', '>=', '<', '<='].includes(sfOp) && !Number.isFinite(sfFVNum)) return { tool_name: name, error: '数值筛选条件不是有效数字' };
         var sfFiltered = sfList.filter(function(r) {
           var cell = r[sfFF];
           if (sfOp === 'contains') return String(cell === undefined ? '' : cell).indexOf(sfFV) >= 0;
           var num = toolHelpers.toNum(cell);
+          if (['>', '>=', '<', '<='].includes(sfOp) && !Number.isFinite(num)) return false;
           if (sfOp === '>') return num > sfFVNum;
           if (sfOp === '>=') return num >= sfFVNum;
           if (sfOp === '<') return num < sfFVNum;
           if (sfOp === '<=') return num <= sfFVNum;
-          if (sfOp === '==') return String(cell) === sfFV || num === sfFVNum;
-          if (sfOp === '!=') return String(cell) !== sfFV && num !== sfFVNum;
+          var equal = String(cell == null ? '' : cell) === sfFV || Number.isFinite(num) && Number.isFinite(sfFVNum) && num === sfFVNum;
+          if (sfOp === '==') return equal;
+          if (sfOp === '!=') return !equal;
           return true;
         });
         sfSteps.push('筛选「' + sfFF + ' ' + sfOp + ' ' + sfFV + '」：' + sfList.length + ' → ' + sfFiltered.length + ' 行');
@@ -3091,7 +3107,7 @@ async function executeToolCall(toolCall, context) {
           var av = a[sfSB], bv = b[sfSB];
           var an = toolHelpers.toNum(av), bn = toolHelpers.toNum(bv);
           var cmp;
-          if (av !== '' && bv !== '' && !isNaN(an) && !isNaN(bn) && String(parseFloat(String(av))) === String(av).trim() && String(parseFloat(String(bv))) === String(bv).trim()) {
+          if (Number.isFinite(an) && Number.isFinite(bn)) {
             cmp = an - bn;
           } else {
             cmp = String(av === undefined ? '' : av).localeCompare(String(bv === undefined ? '' : bv), 'zh-CN');
@@ -3198,28 +3214,12 @@ async function executeToolCall(toolCall, context) {
       };
     }
     case 'regex_test': {
-      var rgPattern = String(args.pattern || '').slice(0, 1000);
-      if (!rgPattern) return { tool_name: name, error: '正则表达式为空' };
-      var rgFlags = String(args.flags || 'g').replace(/[^gimsuy]/g, '').slice(0, 6);
-      if (rgFlags.indexOf('g') < 0) rgFlags += 'g';
       var rgText = toolHelpers.clampText(args.text, 100000);
-      var rgRe;
+      var rgMatches;
       try {
-        rgRe = new RegExp(rgPattern, rgFlags);
+        rgMatches = await require('./regex-tool').runRegex(args,{signal:context.signal});
       } catch (eRg) {
-        return { tool_name: name, error: '正则表达式语法错误：' + ((eRg && eRg.message) || '无法编译') };
-      }
-      var rgMatches = [];
-      var rgGuard = 0;
-      var rgM;
-      while ((rgM = rgRe.exec(rgText)) !== null && rgMatches.length < 200) {
-        rgMatches.push({
-          match: String(rgM[0]).slice(0, 200),
-          index: rgM.index,
-          groups: rgM.slice(1, 11).map(function(g) { return g === undefined ? null : String(g).slice(0, 200); })
-        });
-        if (rgM[0] === '') rgRe.lastIndex++;   // 防零宽匹配死循环
-        if (++rgGuard > 10000) break;
+        return { tool_name: name, error: (eRg && eRg.message) || '正则测试无法完成' };
       }
       var rgLines = rgMatches.slice(0, 100).map(function(m2, mi) {
         return (mi + 1) + '. 位置 ' + m2.index + '：' + JSON.stringify(m2.match) +
@@ -3314,7 +3314,7 @@ async function executeToolCall(toolCall, context) {
         cvRows = toolHelpers.parseDelimited(cvData, cvDelim);
         if (!cvRows.length) return { tool_name: name, error: '未能从源数据中解析出任何行' };
         cvObjs = toolHelpers.rowsToObjects(cvRows);
-        cvHeaders = cvRows[0] || [];
+        cvHeaders = cvRows.shift() || [];
       }
       var cvOut;
       if (cvTo === 'json') {
@@ -22290,7 +22290,8 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   req.on('aborted', abortCustomUpstream);
   res.on('close', abortCustomUpstream);
   var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
-  var reqId = String(body.client_request_id || '').slice(0, 64);
+  var reqId = String(body.client_request_id || '').slice(0, 64) || 'server_'+genConvId();
+  res._aiClientRequestId=reqId;
 
   // ★ 自定义第三方模型的「深度思考」档位 + 「网页搜索」开关：
   //   把前端面板的 thinking_mode(off/low/medium/high/max) 与 web_search 映射成
@@ -23398,7 +23399,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
   // 导致开启网页搜索的流式请求在 15235 行引用未定义变量，抛出 ReferenceError，
   // 被外层 catch 包装成 "AI 连接中断，请稍后重试"。
   var requestAbortCtrl = new AbortController();
-  var clientReqId = String((req.body && req.body.client_request_id) || '').trim();
+  var clientReqId = String((req.body && req.body.client_request_id) || '').trim() || 'server_'+genConvId();
   res._aiClientRequestId = clientReqId;
   res._aiStartedAt = T0;
   req._searchApiCalls.signal = requestAbortCtrl.signal;
@@ -26354,7 +26355,7 @@ async function runSelfResearchFlow(opts) {
 require('./ai-model-capabilities').installModelCapabilities(app, {authenticateUser:authenticateUser,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
 var researchCheckpoints = require('./research-checkpoints').installResearchCheckpoints(app, { db: supabase, authenticateUser: authenticateUser, rateLimit: rateLimit });
 require('./ai-report-export').installReportExport(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,jsonMiddleware:express.json({limit:'6mb'})});
-require('./ai-tool-retry').installToolRetry(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,execute:executeToolCall,gate:enforceAiChatAccess,record:recordAiTurnUsage,feedback:toolFeedback,normalize:normalizeToolResultItems});
+require('./ai-tool-retry').installToolRetry(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,execute:executeToolCall,gate:enforceAiChatAccess,record:recordAiTurnUsage,feedback:toolFeedback,normalize:normalizeToolResultItems,store:require('./ai-tool-retry-store').createToolRetryStore(supabase)});
 require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,executeToolCall:executeToolCall,parseDocumentBuffer:parseDocumentBuffer,ocrImageBuffer:ocrImageBuffer,sharp:sharp,jsonMiddleware:express.json({limit:'12mb'}),assets:require('./ai-workbench-assets').createWorkbenchAssets(supabase),requestContext:function(req){return {userName:req.userName};},exportDocument:async function(args,owner,signal){var pdf=await require('./ai-report-export').buildReportPdf(Object.assign({},args,{signal:signal}));return {tool_name:'generate_pdf',content:'PDF 已生成',cards:[{type:'file',id:'workbench-pdf',protocol:'xtj.ai.ui.v1',data:{filename:require('./ai-report-export').filename(args.filename||args.title,'pdf'),mime_type:'application/pdf',data_url:'data:application/pdf;base64,'+pdf.toString('base64')}}]};}});
 
 // POST /api/agent/research/stream - 自托管多智能体深度研究（SSE 流式，事件契约兼容旧 Tavily 代理）
@@ -27176,6 +27177,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           search_results: Array.isArray(m.search_results) ? m.search_results : [],
           search_expires_at: typeof m.search_expires_at === 'number' ? m.search_expires_at : 0,
           site_cards: Array.isArray(m.site_cards) ? m.site_cards : [],
+          tool_retry_updated_at: m.tool_retry_updated_at || null,
+          tool_retry_revision: Number.isSafeInteger(m.tool_retry_revision) ? m.tool_retry_revision : 0,
           thinking_elapsed_ms: m.thinking_elapsed_ms || 0,
           // ★ 多模态：把用户消息里保存的图片 data URL 带回，前端用于
           //   历史图片消息的「重新生成」时复用原图。

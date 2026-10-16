@@ -4,6 +4,12 @@ const {toolFeedback,runRequiredSearch}=require('../render-api/ai-tool-feedback')
 const {appendProcessEvent,getProcessEvents}=require('../render-api/ai-process-events');
 const source=fs.readFileSync('render-api/server.js','utf8');
 const normalize=new Function(source.slice(source.indexOf('function normalizeToolResultItems('),source.indexOf("const { getMailTransporter"))+'return normalizeToolResultItems;')();
+test('chart status uses its title and completion outcome without displaying instructions intended for the model',()=>{
+ const content='【图表已生成】请用一两句话向用户说明，不要复述数据，也不要再调用工具。';
+ const result=toolFeedback({tool_name:'make_chart',content,cards:[{data:{title:'销售额'}}]},'chart',()=>null);
+ assert.equal(result.summary,'已生成图表 · 销售额');
+ assert.equal(toolFeedback({tool_name:'make_chart',content},'chart',()=>null).summary,'已生成图表');
+});
 test('all model tool results use bounded sources, exact zero/unknown counts and human outcomes',()=>{
  const rows=Array.from({length:18},(_,i)=>({title:'网页 '+i,url:'https://example.com/'+i,snippet:'说明'}));
  const result=toolFeedback({tool_name:'search_web',results_count:18,content:JSON.stringify(rows)},'search',normalize);

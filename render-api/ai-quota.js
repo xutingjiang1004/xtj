@@ -10,7 +10,8 @@
 
 var FREE_TOKEN_LIMIT = Math.max(1000, parseInt(process.env.AI_FREE_TOKEN_DAILY || '100000', 10) || 100000);
 var PRO_TOKEN_LIMIT = Math.max(FREE_TOKEN_LIMIT, parseInt(process.env.AI_PRO_TOKEN_DAILY || '1000000', 10) || 1000000);
-var FREE_SEARCH_LIMIT = Math.max(0, parseInt(process.env.AI_FREE_SEARCH_DAILY || '10', 10) || 10);
+var configuredSearchLimit = parseInt(process.env.AI_FREE_SEARCH_DAILY, 10);
+var FREE_SEARCH_LIMIT = Number.isFinite(configuredSearchLimit) ? Math.max(0, configuredSearchLimit) : 10;
 
 function limits() {
   return {
